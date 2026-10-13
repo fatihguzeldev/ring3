@@ -131,6 +131,8 @@ impl EngineInstance {
                 && !crate::cpu::x86::capabilities::AVX2_ENABLED)
             || (matches!(instruction.semantic(), AvxSemantic::CrossLane(value) if value.requires_avx2())
                 && !crate::cpu::x86::capabilities::AVX2_ENABLED)
+            || (matches!(instruction.semantic(), AvxSemantic::Multiply(value) if value.width() == VectorWidth::Ymm)
+                && !crate::cpu::x86::capabilities::AVX2_ENABLED)
         {
             return Err(HostError::InvalidRequest);
         }

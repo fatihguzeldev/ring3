@@ -84,3 +84,6 @@ mod broadcast_capability;
 
 #[path = "avx/rearrange/lanes/capability/native.rs"]
 mod lane_capability;
+
+#[path = "avx/multiply/capability/native.rs"]
+mod multiply_capability;

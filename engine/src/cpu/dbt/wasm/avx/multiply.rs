@@ -1,5 +1,5 @@
 use super::VectorLayout;
-use crate::cpu::x86::avx::{MoveSource, MultiplyInstruction, VectorRegister};
+use crate::cpu::x86::avx::{MoveSource, MultiplyInstruction, VectorRegister, VectorWidth};
 use wasm_encoder::{InstructionSink, MemArg};
 #[derive(Clone, Copy)]
 pub(super) struct MultiplyLocals {
@@ -26,31 +26,44 @@ pub(super) fn emit(
     locals: MultiplyLocals,
 ) {
     let [first, second] = locals.sources;
-    if let Some(r) = instruction.first() {
-        code.local_get(locals.state)
-            .v128_load(vector(layout, r, false))
-            .local_set(first);
-    }
-    match instruction.second() {
-        MoveSource::Register(r) => {
+    for upper in [false, true]
+        .into_iter()
+        .take(instruction.width().bytes() / 16)
+    {
+        if let Some(r) = instruction.first() {
             code.local_get(locals.state)
-                .v128_load(vector(layout, r, false));
+                .v128_load(vector(layout, r, upper))
+                .local_set(first);
         }
-        MoveSource::Memory => {
-            code.local_get(locals.operand).v128_load(arg(0));
+        match instruction.second() {
+            MoveSource::Register(r) => {
+                code.local_get(locals.state)
+                    .v128_load(vector(layout, r, upper));
+            }
+            MoveSource::Memory => {
+                code.local_get(locals.operand)
+                    .v128_load(arg(if upper { 16 } else { 0 }));
+            }
+        }
+        code.local_set(second).local_get(locals.state);
+        super::super::simd::multiply_value(
+            code,
+            instruction.operation(),
+            locals.sources,
+            locals.scratch,
+        );
+        // capture the upper inputs/result before either pending result is stored.
+        if upper {
+            code.v128_store(vector(layout, instruction.destination(), true));
+            code.v128_store(vector(layout, instruction.destination(), false));
         }
     }
-    code.local_set(second).local_get(locals.state);
-    super::super::simd::multiply_value(
-        code,
-        instruction.operation(),
-        locals.sources,
-        locals.scratch,
-    );
-    code.v128_store(vector(layout, instruction.destination(), false));
-    code.local_get(locals.state)
-        .v128_const(0)
-        .v128_store(vector(layout, instruction.destination(), true));
+    if instruction.width() == VectorWidth::Xmm {
+        code.v128_store(vector(layout, instruction.destination(), false));
+        code.local_get(locals.state)
+            .v128_const(0)
+            .v128_store(vector(layout, instruction.destination(), true));
+    }
 }
 #[cfg(test)]
 #[path = "multiply/wasm.rs"]

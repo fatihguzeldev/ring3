@@ -1,7 +1,11 @@
-use super::{MemoryRequirement, MoveSource, VectorRegister, VectorState};
-use crate::{cpu::x86::simd::MultiplyOperation, memory::Access};
+use super::{MemoryRequirement, MoveSource, VectorRegister, VectorState, VectorWidth};
+use crate::{
+    cpu::x86::simd::{MultiplyOperation, PackedKind},
+    memory::Access,
+};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct MultiplyInstruction {
+    width: VectorWidth,
     operation: MultiplyOperation,
     destination: VectorRegister,
     first: Option<VectorRegister>,
@@ -13,18 +17,39 @@ pub(crate) enum MultiplyError {
     InvalidState,
 }
 impl MultiplyInstruction {
+    #[cfg(test)]
     pub(crate) fn new(
         operation: MultiplyOperation,
         destination: VectorRegister,
         first: Option<VectorRegister>,
         second: MoveSource,
     ) -> Option<Self> {
-        (operation.unary() == first.is_none()).then_some(Self {
+        Self::with_width(VectorWidth::Xmm, operation, destination, first, second)
+    }
+    pub(crate) fn with_width(
+        width: VectorWidth,
+        operation: MultiplyOperation,
+        destination: VectorRegister,
+        first: Option<VectorRegister>,
+        second: MoveSource,
+    ) -> Option<Self> {
+        (operation.unary() == first.is_none()
+            && (width == VectorWidth::Xmm
+                || !matches!(
+                    operation.kind(),
+                    PackedKind::MinimumPositionUnsignedWord
+                        | PackedKind::MultipleSumAbsoluteByteDifferences
+                )))
+        .then_some(Self {
+            width,
             operation,
             destination,
             first,
             second,
         })
+    }
+    pub(crate) fn width(self) -> VectorWidth {
+        self.width
     }
     pub(crate) fn operation(self) -> MultiplyOperation {
         self.operation
@@ -41,7 +66,7 @@ impl MultiplyInstruction {
     pub(crate) fn memory(self) -> Option<MemoryRequirement> {
         (self.second == MoveSource::Memory).then_some(MemoryRequirement {
             access: Access::Read,
-            bytes: 16,
+            bytes: self.width.bytes() as u8,
             alignment: 1,
         })
     }
@@ -58,15 +83,15 @@ impl VectorState {
         if self.simd.mxcsr & !0xffff != 0 {
             return Err(MultiplyError::InvalidState);
         }
-        let a = instruction
-            .first
-            .map_or([0; 16], |r| self.simd.xmm[r.index()]);
-        let b = match instruction.second {
-            MoveSource::Register(r) => self.simd.xmm[r.index()],
-            MoveSource::Memory => operand.try_into().unwrap(),
-        };
+        let a = instruction.first.map_or([0; 32], |r| self.read(r));
+        let b = self.capture_source(instruction.second, operand);
         let mut value = [0; 32];
-        value[..16].copy_from_slice(&instruction.operation.evaluate(a, b));
+        for offset in (0..instruction.width.bytes()).step_by(16) {
+            value[offset..offset + 16].copy_from_slice(&instruction.operation.evaluate(
+                a[offset..offset + 16].try_into().unwrap(),
+                b[offset..offset + 16].try_into().unwrap(),
+            ));
+        }
         self.publish(instruction.destination, value);
         Ok(())
     }
@@ -74,3 +99,7 @@ impl VectorState {
 #[cfg(test)]
 #[path = "multiply/native.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "multiply/width/native.rs"]
+mod width;

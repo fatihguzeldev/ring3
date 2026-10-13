@@ -1,353 +1,58 @@
 use super::*;
-pub(super) fn decode(kind: u8, s: Slots, immediate: u8) -> Result<AvxSemantic, AvxDecodeError> {
-    let semantic = match kind {
-        1 => {
-            s.validate(
-                D | A | B,
-                MemoryPolicy::Optional,
-                MemoryPolicy::Forbidden,
-                false,
-                immediate,
-            )?;
-            AvxSemantic::Multiply(
-                MultiplyInstruction::new(
-                    MultiplyOperation::new(PackedKind::MultiplyLow, 2, 0)
-                        .ok_or(AvxDecodeError::Operands)?,
-                    s.vector(0),
-                    Some(s.vector(1)),
-                    s.source(),
-                )
-                .ok_or(AvxDecodeError::Operands)?,
-            )
-        }
-        2 => {
-            s.validate(
-                D | A | B,
-                MemoryPolicy::Optional,
-                MemoryPolicy::Forbidden,
-                false,
-                immediate,
-            )?;
-            AvxSemantic::Multiply(
-                MultiplyInstruction::new(
-                    MultiplyOperation::new(PackedKind::MultiplyHighUnsigned, 2, 0)
-                        .ok_or(AvxDecodeError::Operands)?,
-                    s.vector(0),
-                    Some(s.vector(1)),
-                    s.source(),
-                )
-                .ok_or(AvxDecodeError::Operands)?,
-            )
-        }
-        3 => {
-            s.validate(
-                D | A | B,
-                MemoryPolicy::Optional,
-                MemoryPolicy::Forbidden,
-                false,
-                immediate,
-            )?;
-            AvxSemantic::Multiply(
-                MultiplyInstruction::new(
-                    MultiplyOperation::new(PackedKind::MultiplyHighSigned, 2, 0)
-                        .ok_or(AvxDecodeError::Operands)?,
-                    s.vector(0),
-                    Some(s.vector(1)),
-                    s.source(),
-                )
-                .ok_or(AvxDecodeError::Operands)?,
-            )
-        }
-        4 => {
-            s.validate(
-                D | A | B,
-                MemoryPolicy::Optional,
-                MemoryPolicy::Forbidden,
-                false,
-                immediate,
-            )?;
-            AvxSemantic::Multiply(
-                MultiplyInstruction::new(
-                    MultiplyOperation::new(PackedKind::MultiplyUnsignedDword, 4, 0)
-                        .ok_or(AvxDecodeError::Operands)?,
-                    s.vector(0),
-                    Some(s.vector(1)),
-                    s.source(),
-                )
-                .ok_or(AvxDecodeError::Operands)?,
-            )
-        }
-        5 => {
-            s.validate(
-                D | A | B,
-                MemoryPolicy::Optional,
-                MemoryPolicy::Forbidden,
-                false,
-                immediate,
-            )?;
-            AvxSemantic::Multiply(
-                MultiplyInstruction::new(
-                    MultiplyOperation::new(PackedKind::MultiplyAddWords, 2, 0)
-                        .ok_or(AvxDecodeError::Operands)?,
-                    s.vector(0),
-                    Some(s.vector(1)),
-                    s.source(),
-                )
-                .ok_or(AvxDecodeError::Operands)?,
-            )
-        }
-        6 => {
-            s.validate(
-                D | A | B,
-                MemoryPolicy::Optional,
-                MemoryPolicy::Forbidden,
-                false,
-                immediate,
-            )?;
-            AvxSemantic::Multiply(
-                MultiplyInstruction::new(
-                    MultiplyOperation::new(PackedKind::SumAbsoluteByteDifferences, 1, 0)
-                        .ok_or(AvxDecodeError::Operands)?,
-                    s.vector(0),
-                    Some(s.vector(1)),
-                    s.source(),
-                )
-                .ok_or(AvxDecodeError::Operands)?,
-            )
-        }
-        7 => {
-            s.validate(
-                D | A | B,
-                MemoryPolicy::Optional,
-                MemoryPolicy::Forbidden,
-                false,
-                immediate,
-            )?;
-            AvxSemantic::Multiply(
-                MultiplyInstruction::new(
-                    MultiplyOperation::new(PackedKind::HorizontalAdd, 2, 0)
-                        .ok_or(AvxDecodeError::Operands)?,
-                    s.vector(0),
-                    Some(s.vector(1)),
-                    s.source(),
-                )
-                .ok_or(AvxDecodeError::Operands)?,
-            )
-        }
-        8 => {
-            s.validate(
-                D | A | B,
-                MemoryPolicy::Optional,
-                MemoryPolicy::Forbidden,
-                false,
-                immediate,
-            )?;
-            AvxSemantic::Multiply(
-                MultiplyInstruction::new(
-                    MultiplyOperation::new(PackedKind::HorizontalAdd, 4, 0)
-                        .ok_or(AvxDecodeError::Operands)?,
-                    s.vector(0),
-                    Some(s.vector(1)),
-                    s.source(),
-                )
-                .ok_or(AvxDecodeError::Operands)?,
-            )
-        }
-        9 => {
-            s.validate(
-                D | A | B,
-                MemoryPolicy::Optional,
-                MemoryPolicy::Forbidden,
-                false,
-                immediate,
-            )?;
-            AvxSemantic::Multiply(
-                MultiplyInstruction::new(
-                    MultiplyOperation::new(PackedKind::HorizontalAddSignedSaturate, 2, 0)
-                        .ok_or(AvxDecodeError::Operands)?,
-                    s.vector(0),
-                    Some(s.vector(1)),
-                    s.source(),
-                )
-                .ok_or(AvxDecodeError::Operands)?,
-            )
-        }
-        10 => {
-            s.validate(
-                D | A | B,
-                MemoryPolicy::Optional,
-                MemoryPolicy::Forbidden,
-                false,
-                immediate,
-            )?;
-            AvxSemantic::Multiply(
-                MultiplyInstruction::new(
-                    MultiplyOperation::new(PackedKind::MultiplyAddUnsignedSignedBytes, 1, 0)
-                        .ok_or(AvxDecodeError::Operands)?,
-                    s.vector(0),
-                    Some(s.vector(1)),
-                    s.source(),
-                )
-                .ok_or(AvxDecodeError::Operands)?,
-            )
-        }
-        11 => {
-            s.validate(
-                D | A | B,
-                MemoryPolicy::Optional,
-                MemoryPolicy::Forbidden,
-                false,
-                immediate,
-            )?;
-            AvxSemantic::Multiply(
-                MultiplyInstruction::new(
-                    MultiplyOperation::new(PackedKind::HorizontalSubtract, 2, 0)
-                        .ok_or(AvxDecodeError::Operands)?,
-                    s.vector(0),
-                    Some(s.vector(1)),
-                    s.source(),
-                )
-                .ok_or(AvxDecodeError::Operands)?,
-            )
-        }
-        12 => {
-            s.validate(
-                D | A | B,
-                MemoryPolicy::Optional,
-                MemoryPolicy::Forbidden,
-                false,
-                immediate,
-            )?;
-            AvxSemantic::Multiply(
-                MultiplyInstruction::new(
-                    MultiplyOperation::new(PackedKind::HorizontalSubtract, 4, 0)
-                        .ok_or(AvxDecodeError::Operands)?,
-                    s.vector(0),
-                    Some(s.vector(1)),
-                    s.source(),
-                )
-                .ok_or(AvxDecodeError::Operands)?,
-            )
-        }
-        13 => {
-            s.validate(
-                D | A | B,
-                MemoryPolicy::Optional,
-                MemoryPolicy::Forbidden,
-                false,
-                immediate,
-            )?;
-            AvxSemantic::Multiply(
-                MultiplyInstruction::new(
-                    MultiplyOperation::new(PackedKind::HorizontalSubtractSignedSaturate, 2, 0)
-                        .ok_or(AvxDecodeError::Operands)?,
-                    s.vector(0),
-                    Some(s.vector(1)),
-                    s.source(),
-                )
-                .ok_or(AvxDecodeError::Operands)?,
-            )
-        }
-        14 => {
-            s.validate(
-                D | A | B,
-                MemoryPolicy::Optional,
-                MemoryPolicy::Forbidden,
-                false,
-                immediate,
-            )?;
-            AvxSemantic::Multiply(
-                MultiplyInstruction::new(
-                    MultiplyOperation::new(PackedKind::MultiplyHighRoundSigned, 2, 0)
-                        .ok_or(AvxDecodeError::Operands)?,
-                    s.vector(0),
-                    Some(s.vector(1)),
-                    s.source(),
-                )
-                .ok_or(AvxDecodeError::Operands)?,
-            )
-        }
-        15 => {
-            s.validate(
-                D | A | B,
-                MemoryPolicy::Optional,
-                MemoryPolicy::Forbidden,
-                false,
-                immediate,
-            )?;
-            AvxSemantic::Multiply(
-                MultiplyInstruction::new(
-                    MultiplyOperation::new(PackedKind::MultiplySignedDword, 4, 0)
-                        .ok_or(AvxDecodeError::Operands)?,
-                    s.vector(0),
-                    Some(s.vector(1)),
-                    s.source(),
-                )
-                .ok_or(AvxDecodeError::Operands)?,
-            )
-        }
-        16 => {
-            s.validate(
-                D | A | B,
-                MemoryPolicy::Optional,
-                MemoryPolicy::Forbidden,
-                false,
-                immediate,
-            )?;
-            AvxSemantic::Multiply(
-                MultiplyInstruction::new(
-                    MultiplyOperation::new(PackedKind::MultiplyLow, 4, 0)
-                        .ok_or(AvxDecodeError::Operands)?,
-                    s.vector(0),
-                    Some(s.vector(1)),
-                    s.source(),
-                )
-                .ok_or(AvxDecodeError::Operands)?,
-            )
-        }
-        17 => {
-            s.validate(
-                D | B,
-                MemoryPolicy::Optional,
-                MemoryPolicy::Forbidden,
-                false,
-                immediate,
-            )?;
-            AvxSemantic::Multiply(
-                MultiplyInstruction::new(
-                    MultiplyOperation::new(PackedKind::MinimumPositionUnsignedWord, 2, 0)
-                        .ok_or(AvxDecodeError::Operands)?,
-                    s.vector(0),
-                    None,
-                    s.source(),
-                )
-                .ok_or(AvxDecodeError::Operands)?,
-            )
-        }
-        18 => {
-            s.validate(
-                D | A | B,
-                MemoryPolicy::Optional,
-                MemoryPolicy::Forbidden,
-                true,
-                immediate,
-            )?;
-            AvxSemantic::Multiply(
-                MultiplyInstruction::new(
-                    MultiplyOperation::new(
-                        PackedKind::MultipleSumAbsoluteByteDifferences,
-                        1,
-                        immediate,
-                    )
-                    .ok_or(AvxDecodeError::Operands)?,
-                    s.vector(0),
-                    Some(s.vector(1)),
-                    s.source(),
-                )
-                .ok_or(AvxDecodeError::Operands)?,
-            )
-        }
+
+pub(super) fn decode(kind: u8, slots: Slots, immediate: u8) -> Result<AvxSemantic, AvxDecodeError> {
+    let width = if kind & 0x80 == 0 {
+        VectorWidth::Xmm
+    } else {
+        VectorWidth::Ymm
+    };
+    let kind = kind & 0x7f;
+    if width == VectorWidth::Ymm && !matches!(kind, 1..=16) {
+        return Err(AvxDecodeError::Family);
+    }
+    let (operation, bytes) = match kind {
+        1 => (PackedKind::MultiplyLow, 2),
+        2 => (PackedKind::MultiplyHighUnsigned, 2),
+        3 => (PackedKind::MultiplyHighSigned, 2),
+        4 => (PackedKind::MultiplyUnsignedDword, 4),
+        5 => (PackedKind::MultiplyAddWords, 2),
+        6 => (PackedKind::SumAbsoluteByteDifferences, 1),
+        7 => (PackedKind::HorizontalAdd, 2),
+        8 => (PackedKind::HorizontalAdd, 4),
+        9 => (PackedKind::HorizontalAddSignedSaturate, 2),
+        10 => (PackedKind::MultiplyAddUnsignedSignedBytes, 1),
+        11 => (PackedKind::HorizontalSubtract, 2),
+        12 => (PackedKind::HorizontalSubtract, 4),
+        13 => (PackedKind::HorizontalSubtractSignedSaturate, 2),
+        14 => (PackedKind::MultiplyHighRoundSigned, 2),
+        15 => (PackedKind::MultiplySignedDword, 4),
+        16 => (PackedKind::MultiplyLow, 4),
+        17 => (PackedKind::MinimumPositionUnsignedWord, 2),
+        18 => (PackedKind::MultipleSumAbsoluteByteDifferences, 1),
         _ => return Err(AvxDecodeError::Family),
     };
-    Ok(semantic)
+    let unary = kind == 17;
+    slots.validate(
+        if unary { D | B } else { D | A | B },
+        MemoryPolicy::Optional,
+        MemoryPolicy::Forbidden,
+        kind == 18,
+        immediate,
+    )?;
+    let operation =
+        MultiplyOperation::new(operation, bytes, if kind == 18 { immediate } else { 0 })
+            .ok_or(AvxDecodeError::Operands)?;
+    let instruction = MultiplyInstruction::with_width(
+        width,
+        operation,
+        slots.vector(0),
+        (!unary).then_some(slots.vector(1)),
+        slots.source(),
+    )
+    .ok_or(AvxDecodeError::Operands)?;
+    Ok(AvxSemantic::Multiply(instruction))
 }
+
+#[cfg(test)]
+#[path = "multiply/width/native.rs"]
+mod width;
