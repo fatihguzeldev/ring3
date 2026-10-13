@@ -356,19 +356,12 @@ pub(super) fn prepare_block_snapshot(
     length: usize,
     cs: Option<CodeFetchContext>,
 ) -> Result<CodeSnapshot, CompileError> {
-    let linear = if let Some(cs) = cs {
-        cs.linear_span(entry, length).ok_or_else(|| {
-            instruction_error(
-                entry,
-                InstructionError::Decode(DecodeError::Unsupported(
-                    crate::cpu::UnsupportedFeature::Segment,
-                )),
-            )
-        })?
+    let snapshot = if let Some(cs) = cs {
+        cs.snapshot(memory, entry, length)
     } else {
-        entry
+        memory.snapshot_code(entry, length)
     };
-    memory.snapshot_code(linear, length).map_err(|error| {
+    snapshot.map_err(|error| {
         let error = match error {
             MemoryError::Allocation => return CompileError::Allocation,
             MemoryError::Fault(fault) => DecodeError::MemoryFault {

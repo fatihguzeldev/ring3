@@ -156,10 +156,12 @@ for (const resident of [false, true]) for (const entries of [false, true]) {
     h.host(c, 'close');
   }
   {
-    const c = h.open(resident, entries, 'split linear instruction is an unsupported compile boundary', [[0], [0xfffff000]]);
-    h.upload(c, 0xffffffff, Buffer.from([0x0f])); h.upload(c, 0, Buffer.from([0x77]));
-    h.put(c, 0, state(h.initial, {pc: 0x1fff, bases: [0, 0xffffe000, 0, 0, 0, 0]}));
-    h.compile(c, 'linear ffffffff-to-zero instruction is CompileError not guest GP', [[0x1fff, 2]], [], {expectedStatus: 10});
+    const c = h.open(resident, entries, 'split linear instruction follows current code-only wrap policy', [[0], [0xfffff000]]);
+    h.upload(c, 0xffffffff, Buffer.from([0x66])); h.upload(c, 0, Buffer.from([0x90, 0xeb, 0xfe]));
+    const input = state(h.initial, {pc: 0x1fff, bases: [0, 0xffffe000, 0, 0, 0, 0]}); h.put(c, 0, input);
+    const material = h.compile(c, 'linear ffffffff-to-zero prefixed NOP captures both source pages', [[0x1fff, 4]]);
+    if (material) h.observe(c, 'wrapped prefixed NOP retains logical EIP and retires once', {input, want: success(input, 0x2001)});
+    else h.skip(c, 'wrapped prefixed NOP execution', 'split linear source capture');
     h.host(c, 'close');
   }
   for (const kind of ['read', 'store']) {

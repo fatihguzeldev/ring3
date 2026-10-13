@@ -225,3 +225,108 @@ fn runtime_entry_keeps_limits_fetch_and_valid_unsupported_errors_as_preparation_
         CompileError::InstructionLimit
     );
 }
+
+#[test]
+fn wrapped_translated_prefix_capture_preserves_consumed_and_source_free_currentness() {
+    use crate::cpu::x86::{SegmentCache, SegmentContext};
+    for (limit, consumed, stale_page) in [
+        (0x2000, 3, Some(0_u32)),
+        (0x1fff, 2, Some(0xfffff000)),
+        (0x1ffd, 0, None),
+    ] {
+        let mut memory = AddressSpace::new(3).unwrap();
+        for page in [0, 0x3000, 0xfffff000] {
+            memory
+                .map_zeroed(
+                    PageRange::new(GuestAddress(page), 1).unwrap(),
+                    Permissions::ALL,
+                )
+                .unwrap();
+        }
+        memory
+            .write(GuestAddress(0xfffffffe), &[0x66, 0x66])
+            .unwrap();
+        memory.write(GuestAddress(0), &[0x66]).unwrap();
+        let mut segments = SegmentContext::default();
+        segments.state.bases[1] = 0xffffe000;
+        segments.caches[1] = SegmentCache::from_bits(0xf2b00000 | limit).unwrap();
+        let cs = CodeFetchContext::from_segments(&segments).unwrap();
+        let prepared = prepare_runtime_entry(
+            &memory,
+            GuestAddress(0x1ffe),
+            CompileLimits::default(),
+            Some(cs),
+        )
+        .unwrap();
+        let fault = prepared.blocks[0].context_fault().unwrap();
+        assert_eq!(
+            (fault.attempted_length, fault.consumed_prefix_length),
+            (consumed + 1, consumed)
+        );
+        assert_eq!(prepared.instruction_count(), 1);
+        assert!(prepared.is_current(&memory));
+        memory.write(GuestAddress(0x3000), &[0x90]).unwrap();
+        assert!(prepared.is_current(&memory));
+        if consumed < 3 {
+            memory.write(GuestAddress(0), &[0x66]).unwrap();
+            assert!(
+                prepared.is_current(&memory),
+                "unfetched low linear page is not captured"
+            );
+        }
+        if let Some(page) = stale_page {
+            memory
+                .write(
+                    GuestAddress(if page == 0 { 0 } else { 0xfffffffe }),
+                    &[0x66],
+                )
+                .unwrap();
+            assert!(!prepared.is_current(&memory));
+        } else {
+            memory.write(GuestAddress(0xfffffffe), &[0x66]).unwrap();
+            assert!(
+                prepared.is_current(&memory),
+                "source-free CS fault has no physical snapshot"
+            );
+        }
+    }
+}
+
+#[test]
+fn wrapped_block_snapshot_counts_instructions_and_rejects_insufficient_quota() {
+    use crate::cpu::x86::SegmentContext;
+    let mut memory = AddressSpace::new(2).unwrap();
+    for page in [0, 0xfffff000] {
+        memory
+            .map_zeroed(
+                PageRange::new(GuestAddress(page), 1).unwrap(),
+                Permissions::ALL,
+            )
+            .unwrap();
+    }
+    memory
+        .write(GuestAddress(0xfffffffd), &[0xb8, 0x78, 0x56])
+        .unwrap();
+    memory
+        .write(GuestAddress(0), &[0x34, 0x12, 0xeb, 0xfe])
+        .unwrap();
+    let mut context = SegmentContext::default();
+    context.state.bases[1] = 0xffffe000;
+    let cs = CodeFetchContext::from_segments(&context).unwrap();
+    let mut limits = CompileLimits {
+        instructions: 1,
+        ..CompileLimits::default()
+    };
+    assert!(matches!(
+        prepare_embedded_entry_region(&memory, &[GuestAddress(0x1ffd)], limits, &[], Some(cs)),
+        Err(CompileError::InstructionLimit)
+    ));
+    limits.instructions = 2;
+    let prepared =
+        prepare_embedded_entry_region(&memory, &[GuestAddress(0x1ffd)], limits, &[], Some(cs))
+            .unwrap();
+    assert_eq!(prepared.instruction_count(), 2);
+    assert!(prepared.is_current(&memory));
+    memory.write(GuestAddress(0), &[0x34]).unwrap();
+    assert!(!prepared.is_current(&memory));
+}

@@ -1,3 +1,5 @@
+mod code_fetch;
+
 use super::address::{ADDRESS_LIMIT, GUEST_PAGES};
 use super::code::{PageVersion, new_identity};
 use super::*;
@@ -54,7 +56,7 @@ impl AddressSpace {
                 .iter()
                 .enumerate()
                 .all(|(index, version)| {
-                    let mapping = self.mappings[snapshot.first + index];
+                    let mapping = self.mappings[(snapshot.first + index) % GUEST_PAGES];
                     mapping != 0 && self.versions[mapping as usize - 1] == *version
                 })
     }

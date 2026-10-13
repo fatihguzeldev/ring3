@@ -21,6 +21,7 @@ pub(crate) struct PageVersion {
 #[derive(Debug)]
 pub struct CodeSnapshot {
     pub(crate) identity: u64,
+    // versions follow linear pages from first, wrapping at the 32-bit boundary when needed.
     pub(crate) first: usize,
     pub(crate) versions: Box<[PageVersion]>,
 }

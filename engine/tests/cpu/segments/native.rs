@@ -19,3 +19,6 @@ mod cpu_ss_base;
 
 #[path = "stack/b16/native.rs"]
 mod cpu_ss_b16;
+
+#[path = "code/wrap/native.rs"]
+mod cpu_code_linear_wrap;

@@ -59,20 +59,12 @@ pub(super) fn prepare(
                 }),
             });
         }
-        let linear = if let Some(cs) = cs {
-            cs.linear_span(gate.entry, length)
-                .ok_or(CompileError::Instruction {
-                    pc: gate.entry,
-                    cause: InstructionError::Decode(DecodeError::Unsupported(
-                        crate::cpu::UnsupportedFeature::Segment,
-                    )),
-                })?
+        if let Some(cs) = cs {
+            cs.fetch(memory, gate.entry, &mut bytes[..length])
         } else {
-            gate.entry
-        };
-        memory
-            .fetch(linear, &mut bytes[..length])
-            .map_err(|error| memory_error(gate.entry, error))?;
+            memory.fetch(gate.entry, &mut bytes[..length])
+        }
+        .map_err(|error| memory_error(gate.entry, error))?;
     }
     if bytes != [0x0f, 0x0b] {
         return Err(CompileError::Instruction {
@@ -80,12 +72,12 @@ pub(super) fn prepare(
             cause: InstructionError::InvalidGate,
         });
     }
-    let snapshot = memory
-        .snapshot_code(
-            cs.map_or(gate.entry, |cs| cs.linear_address(gate.entry)),
-            bytes.len(),
-        )
-        .map_err(|error| memory_error(gate.entry, error))?;
+    let snapshot = if let Some(cs) = cs {
+        cs.snapshot(memory, gate.entry, bytes.len())
+    } else {
+        memory.snapshot_code(gate.entry, bytes.len())
+    }
+    .map_err(|error| memory_error(gate.entry, error))?;
     Ok(PreparedGate {
         entry: gate.entry,
         id: gate.id,
@@ -107,3 +99,7 @@ fn memory_error(pc: GuestAddress, error: MemoryError) -> CompileError {
         cause: InstructionError::Decode(error),
     }
 }
+
+#[cfg(test)]
+#[path = "gate/tests.rs"]
+mod tests;

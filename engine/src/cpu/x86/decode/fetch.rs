@@ -1,6 +1,6 @@
 use crate::{
     cpu::x86::{SegmentAccess, SegmentCache, SegmentContext, SegmentRegister},
-    memory::{CodeSnapshot, GuestAddress},
+    memory::{AddressSpace, CodeSnapshot, GuestAddress, MemoryError},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -45,9 +45,22 @@ impl CodeFetchContext {
         GuestAddress(self.base.wrapping_add(logical.0))
     }
 
-    pub(crate) fn linear_span(self, logical: GuestAddress, length: usize) -> Option<GuestAddress> {
-        let linear = self.linear_address(logical);
-        (u64::from(linear.0) + length as u64 <= 1 << 32).then_some(linear)
+    pub(crate) fn fetch(
+        self,
+        memory: &AddressSpace,
+        logical: GuestAddress,
+        output: &mut [u8],
+    ) -> Result<(), MemoryError> {
+        memory.fetch_code_wrapping(self.linear_address(logical), output)
+    }
+
+    pub(crate) fn snapshot(
+        self,
+        memory: &AddressSpace,
+        logical: GuestAddress,
+        length: usize,
+    ) -> Result<CodeSnapshot, MemoryError> {
+        memory.snapshot_code_wrapping(self.linear_address(logical), length)
     }
 
     pub(crate) fn permits(self, pc: GuestAddress, length: u8) -> bool {
@@ -94,10 +107,9 @@ mod tests {
             GuestAddress(0x1010)
         );
         assert_eq!(
-            based.linear_span(GuestAddress(0x2010), 5),
-            Some(GuestAddress(0x1010))
+            based.linear_address(GuestAddress(0xfff)),
+            GuestAddress(u32::MAX)
         );
-        assert_eq!(based.linear_span(GuestAddress(0xfff), 2), None);
         let word = CodeFetchContext {
             cs: SegmentCache::from_bits(0xf0b0_1234).unwrap(),
             base: based.base,
