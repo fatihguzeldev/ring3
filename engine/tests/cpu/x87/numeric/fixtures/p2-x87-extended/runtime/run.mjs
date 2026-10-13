@@ -8,6 +8,8 @@ const [enginePath,output,root]=process.argv.slice(2),engine=readEngine(enginePat
 const initial=readFileSync(join(output,'initial-arena.bin')),SIZE=initial.length,FP=4236;
 const hash=b=>createHash('sha256').update(b).digest('hex'),contexts=[],modules=[],observations=[],helpers=[];
 const sourcePaths=['engine/src/cpu/x86/x87.rs','engine/src/cpu/x86/x87/value.rs', 'engine/src/math/mod.rs', 'engine/src/math/extended/mod.rs', 'engine/src/math/extended/value.rs', 'engine/src/math/integer.rs', 'engine/src/lib.rs','engine/src/cpu/x86/x87/execute.rs','engine/src/cpu/x86/x87/transcendental.rs', 'engine/src/math/extended/transcendental.rs', 'engine/src/cpu/x86/decode/x87.rs','engine/src/process/cpu/x87.rs', 'engine/src/process/cpu/mod.rs', 'engine/src/process/mod.rs','engine/src/cpu/dbt/wasm/x87.rs','engine/src/cpu/dbt/wasm/cpu_result.rs','engine/src/cpu/x86/ir.rs','engine/src/cpu/x86/decode/profile.rs','engine/src/cpu/x86/decode/lower.rs','engine/src/cpu/dbt/wasm/emitter.rs','engine/src/cpu/dbt/wasm/memory.rs','engine/src/cpu/dbt/wasm/integer/arithmetic.rs', 'engine/src/cpu/dbt/wasm/integer/bits.rs', 'engine/src/cpu/dbt/wasm/integer/carry_rotates.rs', 'engine/src/cpu/dbt/wasm/integer/decimal.rs', 'engine/src/cpu/dbt/wasm/integer/dispatch.rs', 'engine/src/cpu/dbt/wasm/integer/flags.rs', 'engine/src/cpu/dbt/wasm/integer/mod.rs', 'engine/src/cpu/dbt/wasm/integer/multiply_divide.rs', 'engine/src/cpu/dbt/wasm/integer/operands.rs', 'engine/src/cpu/dbt/wasm/integer/rotates.rs', 'engine/src/cpu/dbt/wasm/integer/shifts.rs','engine/src/abi/cpu_helper.rs','engine/src/abi/arena.rs','engine/tests/cpu/x87/numeric/wasm/extended.rs', 'engine/tests/cpu/x87/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/x87/numeric/fixtures/p2-x87-extended/runtime/run.mjs'];
+sourcePaths.push('engine/tests/cpu/x87/stack/compatibility/native.rs');
+assert.equal(new Set(sourcePaths).size,sourcePaths.length);
 const pins=()=>Object.fromEntries(sourcePaths.map(p=>[p,hash(readFileSync(join(root,p)))])),beforePins=pins();
 function record(magic,size,fields,version=1){const b=Buffer.alloc(size);b.write(magic);b.writeUInt16LE(version,4);b.writeUInt16LE(1,6);b.writeUInt32LE(size,8);fields.forEach((v,i)=>b.writeUInt32LE(v>>>0,16+i*4));return b;}
 function ext(exponent,significand,negative=false){const b=Buffer.alloc(10);b.writeBigUInt64LE(BigInt(significand));b.writeUInt16LE(exponent|(negative?0x8000:0),8);return b;}
@@ -54,12 +56,32 @@ function open(owner,entries,captured,segmented=false){
  c.run=new WebAssembly.Instance(module,{env:{memory:c.memory},ring3}).exports.run;
  const file=`module-${c.id}.wasm`;writeFileSync(join(output,file),bytes);modules.push({context:c.id,file,bytes:bytes.length,sha256:hash(bytes),imports:WebAssembly.Module.imports(module)});contexts.push({id:c.id,owner,entries});return c;
 }
-function run(c,label,s,f,{reason=1,retired=1,fault=[0,0,0,0],packet=[0,s.flags,0,0,0,0],helperReturn=0,helperCount=1,transfer}={}){
+function run(c,label,s,f,{reason=1,retired=1,fault=[0,0,0,0],packet=[0,s.flags,0,0,0,0],helperReturn=0,helperCount=1,transfer,emptyStore=false}={}){
  const before=arena(c),at=helpers.length,status=c.run(c.base,c.base+56,1,c.base+96),after=arena(c);
  assert.equal(status,0,label+' run status');
  const expected=Buffer.from(before);expected.set(state(s));expected.set(record('R3EX',40,[reason,retired,...fault],6),56);expected.set(fp(f),FP);expected.set(record('R3MH',40,packet,7),100);if(transfer)expected.set(transfer,140);
- assert.deepEqual(after,expected,label+' full arena');assert.equal(helpers.length-at,helperCount,label+' helper count');if(helperCount!==0)assert.equal(helpers.at(-1).status,helperReturn);
+ if(emptyStore){
+  // only the empty source raw value and destination raw value/tag lack a literal oracle.
+  // compare every other defined field directly; never copy observed bytes into expected.
+  const {source,destination}=emptyStore;
+  assert.ok(Number.isInteger(source)&&source>=0&&source<8,label+' source physical index');
+  assert.ok(Number.isInteger(destination)&&destination>=0&&destination<8,label+' destination physical index');
+  assert.deepEqual(after.subarray(0,FP),expected.subarray(0,FP),label+' non-FP prefix');
+  assert.deepEqual(after.subarray(FP+128),expected.subarray(FP+128),label+' non-FP tail');
+  for(const [start,end]of [[0,18],[22,40],[120,128]]){
+   assert.deepEqual(after.subarray(FP+start,FP+end),expected.subarray(FP+start,FP+end),label+' defined FP fields');
+  }
+  assert.equal(after.readUInt16LE(FP+18)&0xb8ff,f.sw&0xb8ff,label+' TOP and defined exception status');
+  const tagMask=0xffff^(3<<(destination*2));
+  assert.equal(after.readUInt16LE(FP+20)&tagMask,f.tag&tagMask,label+' unaffected physical tags');
+  for(let physical=0;physical<8;physical++)if(physical!==source&&physical!==destination){
+   const start=FP+40+physical*10;
+   assert.deepEqual(after.subarray(start,start+10),expected.subarray(start,start+10),label+' unaffected physical raw80 '+physical);
+  }
+ }else assert.deepEqual(after,expected,label+' full arena');
+ assert.equal(helpers.length-at,helperCount,label+' helper count');if(helperCount!==0)assert.equal(helpers.at(-1).status,helperReturn);
  const file=`arena-${observations.length+1}.bin`;writeFileSync(join(output,file),after);observations.push({context:c.id,label,status,reason,retired,cpu:s,fp:after.subarray(FP,FP+128).toString('hex'),arena:{file,bytes:after.length,sha256:hash(after)}});
+ if(emptyStore)observations.at(-1).fp_oracle={defined_status_mask:0xb8ff,source:emptyStore.source,destination:emptyStore.destination,defined_tag_mask:0xffff^(3<<(emptyStore.destination*2)),unchecked:['source raw80','destination raw80/tag','condition bits C0/C1/C2/C3']};
 }
 function pointer(f,pc,opcode,address,selector=0x23,base=0){const n=clone(f);n.ip=pc;n.opcode=opcode;n.cs=0x1b;if(address!==undefined){n.dp=(address-base)>>>0;n.ds=selector;}return n;}
 function read(c,address,length){const b=Buffer.alloc(length);for(let i=0;i<length;i++){host(c,'read8',[address+i]);b[i]=arena(c).readUInt32LE(120);}return b;}
@@ -126,6 +148,100 @@ for(const owner of ['replacement','resident'])for(const entries of [false,true])
  }
  host(c,'close');
 }
+
+// register-only compatibility cases reuse this runner's existing transport and finite captures.
+const registerStoreBlocks = [
+  ...Array.from({ length: 8 }, (_, index) => ({
+    pc: 0x1c00 + index * 8,
+    index,
+    ordinary: false,
+    bytes: Buffer.from([0xd9, 0xd8 + index, 0xeb, 0xfe]),
+  })),
+  { pc: 0x1c40, index: 1, ordinary: true, bytes: Buffer.from([0xdd, 0xd9, 0xeb, 0xfe]) },
+];
+function registerStoreInput() {
+  const f = stack(
+    Array.from({ length: 8 }, (_, index) => ext(0x3fff, 0x8000000000000100n + BigInt(index))),
+  );
+  f.sw = 0x3800;
+  f.ip = 0xf1234567;
+  f.opcode = 0x7ff;
+  f.dp = 0xfedcba98;
+  f.cs = 0xf135;
+  f.ds = 0xe246;
+  return f;
+}
+for (const owner of ['replacement', 'resident'])
+  for (const entries of [false, true]) {
+    for (const captured of [registerStoreBlocks.slice(0, 8), registerStoreBlocks.slice(8)]) {
+      const c = open(owner, entries, captured);
+      assert.equal(SIZE, 4756, 'current complete arena includes YMM upper state');
+      for (const offset of [4396, 4628])
+        input(
+          c,
+          offset,
+          Buffer.from(Array.from({ length: 128 }, (_, index) => (index * 29 + offset) & 255)),
+        );
+      for (const block of captured) {
+        const name = block.ordinary ? 'FSTP' : 'FSTPNCE',
+          opcode = (block.ordinary ? 0x500 : 0x100) | (0xd8 + block.index);
+        let s = cpu(block.pc),
+          f = registerStoreInput();
+        seed(c, s, f);
+        const expected = pointer(f, s.pc, opcode),
+          destination = (7 + block.index) & 7;
+        expected.regs[destination] = Buffer.from(f.regs[7]);
+        expected.tag = 0xc000;
+        expected.sw = 0;
+        s = { ...s, pc: s.pc + 2 };
+        run(c, `${name} ST(${block.index}) physical rawcopy and TOP7 wrap`, s, expected);
+        if (!block.ordinary && block.index === 3) {
+          for (const cw of [0x037f, 0x037e]) {
+            s = cpu(block.pc);
+            f = registerStoreInput();
+            f.tag = 0xc000;
+            f.cw = cw;
+            seed(c, s, f);
+            const next = pointer(f, s.pc, opcode);
+            next.sw = 0;
+            s = { ...s, pc: s.pc + 2 };
+            run(c, `FSTPNCE empty CW${cw.toString(16)} no new IE/SF/MF and one pop`, s, next, {
+              emptyStore: { destination, source: 7 },
+            });
+          }
+        }
+        if (!block.ordinary && block.index === 7) {
+          s = cpu(block.pc);
+          f = registerStoreInput();
+          f.cw = 0x037e;
+          f.sw |= 1;
+          seed(c, s, f);
+          const next = clone(f);
+          next.sw |= 0x8080;
+          run(c, 'FSTPNCE pending MF precedes register copy and pop', s, next, {
+            reason: 12,
+            retired: 0,
+            fault: [0xb881, 0, 0, 0],
+            packet: [4, 0, 0xb881, 0, 0, 0],
+          });
+        }
+        if (block.ordinary) {
+          s = cpu(block.pc);
+          f = registerStoreInput();
+          f.tag = 0xc000;
+          f.cw = 0x037f;
+          seed(c, s, f);
+          const next = pointer(f, s.pc, opcode);
+          next.sw = 0x41;
+          s = { ...s, pc: s.pc + 2 };
+          run(c, 'ordinary FSTP empty masked source still raises IE/SF and pops', s, next, {
+            emptyStore: { destination, source: 7 },
+          });
+        }
+      }
+      host(c, 'close');
+    }
+  }
 assert.deepEqual(pins(),beforePins);
 writeFileSync(join(output,'result.json'),JSON.stringify({engine:{path:enginePath,sha256:engine.sha256,bytes:engine.bytes.length},source_pins:beforePins,arena_bytes:SIZE,contexts,modules,observations,helper_trace:helpers,claim:'Actual generated Wasm x87 genuine extended80 live arithmetic/load/store, all8 transcendental families under declared mathematical80 policy, selected conversions/control/comparison/environment with current CS and FS/GS offset/selector FSTENV+FXSAVE, transactional fullspan fault repair, deferred x87 exception delivery/pending priority and consumed-code writes. No Intel-specific transcendental approximation bitidentity claim; selected RAM only.'},null,2)+'\n');
 console.log(JSON.stringify({output,contexts:contexts.length,modules:modules.length,runs:observations.length,helpers:helpers.length}));
