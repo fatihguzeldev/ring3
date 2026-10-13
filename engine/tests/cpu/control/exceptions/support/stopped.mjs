@@ -254,6 +254,8 @@ export function runStoppedFaults({ sourcePaths, positive, continuations, negativ
     row,
     {
       flags = 2,
+      expectedFlags = flags,
+      stateVersion,
       shadow = 0,
       budget = 8,
       cancel = 0,
@@ -266,7 +268,7 @@ export function runStoppedFaults({ sourcePaths, positive, continuations, negativ
     } = {},
   ) {
     const before = c.arena();
-    before.writeUInt16LE(flags & ~0xcd7 || shadow ? 2 : 1, 4);
+    before.writeUInt16LE(stateVersion ?? (flags & ~0xcd7 || shadow ? 2 : 1), 4);
     before.writeUInt32LE(shadow, 12);
     before.writeUInt32LE(c.target, 48);
     before.writeUInt32LE(flags, 52);
@@ -282,6 +284,7 @@ export function runStoppedFaults({ sourcePaths, positive, continuations, negativ
       beforeRam = ram(c);
     expected.writeUInt32LE(retired === 0 && [1, 2].includes(reason) ? shadow : 0, 12);
     expected.writeUInt32LE(pc, 48);
+    expected.writeUInt32LE(expectedFlags, 52);
     expected.set(exit(reason, retired, version), 56);
     if (work !== undefined) expected.writeUInt32LE(work, 4604);
     const calls = c.helpers();
@@ -298,6 +301,8 @@ export function runStoppedFaults({ sourcePaths, positive, continuations, negativ
     observations.push({
       label: c.label,
       flags,
+      expectedFlags,
+      stateVersion,
       shadow,
       budget,
       cancel,
