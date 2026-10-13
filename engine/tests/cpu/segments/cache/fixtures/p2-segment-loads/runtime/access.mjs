@@ -67,10 +67,13 @@ function run(c, fn, row, state) {
   if (row.after) row.after(next);
   if (row.work !== undefined) expected.writeUInt32LE(row.work, 4604);
   expected.set(record('R3ST', [...next.r, next.pc, next.flags], next.flags & ~0xcd7 ? 2 : 1, 56));
-  expected.set(record('R3EX', [reason, retired, 0, 0, 0, 0], reason === 16 ? 7 : reason === 11 || reason === 15 || fn.cpu ? 6 : row.exitVersion ?? (fn.memory ? 2 : 1)), 56);
+  expected.set(record('R3EX', [reason, retired, ...(row.faultInfo ?? [0, 0, 0, 0])], reason === 16 ? 7 : reason === 11 || reason === 15 || fn.cpu ? 6 : row.exitVersion ?? (fn.memory ? 2 : 1)), 56);
   assert.equal(fn.run(c.base, c.base + 56, row.budget ?? 1, c.base + 96), 0, row.name);
   const after = arena(c), observed = c.calls.slice(at);
-  if (row.fault || retired === 0 || !fn.memory) assert.equal(observed.length, 0, `${row.name}: authority precedes page helpers`);
+  if (row.helperFault) {
+    assert.deepEqual(observed, ['read32'], `${row.name}: source page access precedes stack authority`);
+    expected.set(record('R3MH', [1, 0, 1, 0x7000, 1, 4]), 100);
+  } else if (row.fault || retired === 0 || !fn.memory) assert.equal(observed.length, 0, `${row.name}: authority precedes page helpers`);
   else {
     expected.set(after.subarray(100, 4236), 100);
     if (row.xmm0) expected.set(row.xmm0, 4364 + 32);
@@ -125,7 +128,7 @@ const rows = [
   {name: 'RET-SS-limit', terminal: true, code: [0xc3], registers: {4: 0x8000}, cache: {2: 0xf2308002}, fault: true, ss: true},
   {name: 'PUSH-memory-checks-SS-before-source-page', code: [0xff, 0x37], registers: {7: 0x7000}, cache: {2: 0xf2307fff}, fault: true, ss: true},
   {name: 'POP-memory-checks-destination-before-stack-page', code: [0x8f, 0x07], registers: {4: 0x7000}, cache: {3: 0xf31fffff}, fault: true},
-  {name: 'CALL-memory-checks-SS-before-target-page', terminal: true, code: [0xff, 0x17], registers: {7: 0x7000}, cache: {2: 0xf2307fff}, fault: true, ss: true},
+  {name: 'CALL-source-page-fault-precedes-SS-check', terminal: true, code: [0xff, 0x17], registers: {7: 0x7000}, cache: {2: 0xf2307fff}, fault: true, reason: 5, faultInfo: [1, 0x7000, 1, 4], helperFault: true},
   {name: 'MOVSD-checks-ES-before-source-page', code: [0xa5], registers: {6: 0x7000}, cache: {0: 0xf31fffff}, fault: true},
   {name: 'MOVSD-readonly-ES', code: [0xa5], cache: {0: 0xf31fffff}, fault: true},
   {name: 'expand-down-lower-end-exclusive', code: [0x8a, 0x07], registers: {7: 0xfff}, cache: {3: 0xf0700fff}, fault: true},
