@@ -306,6 +306,29 @@ impl AddressSpace {
         Ok(old[0])
     }
 
+    /// preflights selected bytes before changing the caller's output; disabled bytes are preserved.
+    #[cfg(test)]
+    pub(crate) fn read_masked(
+        &self,
+        address: GuestAddress,
+        output: &mut [u8],
+        mask: u32,
+    ) -> Result<(), MemoryError> {
+        self.check_masked(address, output.len(), mask, Access::Read)?;
+        if mask == 0 {
+            return Ok(());
+        }
+        for (index, byte) in output.iter_mut().enumerate() {
+            if mask & (1 << index) != 0 {
+                let current = address.0 as usize + index;
+                let page = current / PAGE_SIZE as usize;
+                let slot = self.mappings[page] as usize - 1;
+                *byte = self.backing[slot * PAGE_SIZE as usize + current % PAGE_SIZE as usize];
+            }
+        }
+        Ok(())
+    }
+
     /// preflights selected bytes only and commits them with one version; an empty mask has no effects.
     pub fn write_masked(
         &mut self,
@@ -313,26 +336,40 @@ impl AddressSpace {
         input: &[u8],
         mask: u32,
     ) -> Result<(), MemoryError> {
-        if input.is_empty() || input.len() > 16 || mask >> input.len() != 0 {
-            return Err(MemoryError::InvalidRange);
-        }
+        self.check_masked(address, input.len(), mask, Access::Write)?;
         if mask == 0 {
             return Ok(());
-        }
-        for index in 0..input.len() {
-            if mask & (1 << index) != 0 && address.0.checked_add(index as u32).is_none() {
-                return Err(fault(address, Access::Write, FaultReason::AddressOverflow));
-            }
-        }
-        for index in 0..input.len() {
-            if mask & (1 << index) != 0 {
-                self.check_access(GuestAddress(address.0 + index as u32), 1, Access::Write)?;
-            }
         }
         let version = self.advance_version()?;
         for (index, byte) in input.iter().enumerate() {
             if mask & (1 << index) != 0 {
                 self.copy_in_validated(GuestAddress(address.0 + index as u32), &[*byte], version);
+            }
+        }
+        Ok(())
+    }
+
+    fn check_masked(
+        &self,
+        address: GuestAddress,
+        length: usize,
+        mask: u32,
+        access: Access,
+    ) -> Result<(), MemoryError> {
+        if length == 0 || length > 32 || (length < 32 && mask >> length != 0) {
+            return Err(MemoryError::InvalidRange);
+        }
+        if mask == 0 {
+            return Ok(());
+        }
+        for index in 0..length {
+            if mask & (1 << index) != 0 && address.0.checked_add(index as u32).is_none() {
+                return Err(fault(address, access, FaultReason::AddressOverflow));
+            }
+        }
+        for index in 0..length {
+            if mask & (1 << index) != 0 {
+                self.check_access(GuestAddress(address.0 + index as u32), 1, access)?;
             }
         }
         Ok(())
@@ -3709,3 +3746,7 @@ mod stack_commit_tests {
         assert_eq!(memory.write_spans(&[]), Ok(()));
     }
 }
+
+#[cfg(test)]
+#[path = "space/masked/native.rs"]
+mod masked_access_tests;

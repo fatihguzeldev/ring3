@@ -5,6 +5,7 @@ mod convert;
 mod cross_lane;
 mod f16c;
 mod integer;
+mod masked;
 mod moves;
 mod multiply;
 mod permute;
@@ -18,6 +19,7 @@ pub(crate) use convert::{ConvertInstruction, PackedConversion};
 pub(crate) use cross_lane::{BlockTarget, CrossLaneInstruction};
 pub(crate) use f16c::{F16cError, F16cInstruction, F16cTarget};
 pub(crate) use integer::IntegerInstruction;
+pub(crate) use masked::{MaskedError, MaskedInstruction};
 pub(crate) use moves::{
     DuplicateKind, Half, HalfMerge, MoveInstruction, MoveSource, WordSource, WordTarget,
 };

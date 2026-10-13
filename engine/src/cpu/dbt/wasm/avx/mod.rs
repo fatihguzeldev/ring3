@@ -1,6 +1,7 @@
 mod cross_lane;
 mod integer;
 mod logical;
+mod masked;
 mod moves;
 mod multiply;
 mod permute;
