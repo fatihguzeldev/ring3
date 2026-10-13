@@ -142,7 +142,7 @@ fn descriptor_versions_reserved_bits_and_unused_shapes_fail_closed() {
                 Err(AvxDecodeError::ReservedBits)
             );
         }
-        for family in [0, 18, 255] {
+        for family in [0, 21, 255] {
             assert_eq!(
                 AvxInstruction::decode_descriptor(
                     (descriptor & !0xff00) | family << 8,
@@ -181,7 +181,21 @@ fn descriptor_versions_reserved_bits_and_unused_shapes_fail_closed() {
             .is_err()
         );
     }
-    // vzeroupper has no operands or immediate, and VMOVD memory sources do not
+    for (descriptor, operands) in [
+        (0x01001201, 1 | (2 << 6)),
+        (0x01001301, 1 | (2 << 3) | (3 << 6)),
+        (0x01001401, 1 | (2 << 3) | (3 << 9) | (1 << 12)),
+    ] {
+        let instruction = AvxInstruction::decode_descriptor(descriptor, operands, 0).unwrap();
+        assert_eq!(instruction.encode(), (descriptor, operands, 0));
+        assert!(matches!(
+            (descriptor & 0xff00, instruction.semantic()),
+            (0x1200, AvxSemantic::F16c(_))
+                | (0x1300, AvxSemantic::Fma(_))
+                | (0x1400, AvxSemantic::Gather(_))
+        ));
+    }
+    // vzeroupper has no operands or immediate, and vmovd memory sources do not
     // carry a simultaneously encoded GPR source.
     let zero = operation(&[0xc5, 0xf8, 0x77]).instruction();
     for slots in 1..0x1000 {
