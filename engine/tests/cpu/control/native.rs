@@ -51,3 +51,6 @@ mod cpu_undefined;
 
 #[path = "exceptions/privileged/msr/native.rs"]
 mod cpu_msr;
+
+#[path = "exceptions/support/stopped.rs"]
+mod stopped_support;
