@@ -1,5 +1,5 @@
 import {assertEngineExports} from '../../../../../../support/wasm/exports.mjs';
-import {createArena} from '../../../../../../support/wasm/arena.mjs';
+import {ARENA_SIZE, createArena} from '../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, readdirSync, writeFileSync} from 'node:fs';
@@ -11,7 +11,7 @@ const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const engineBytes = readFileSync(enginePath), engineModule = new WebAssembly.Module(engineBytes);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
 const {sourcePaths: engineExportPins} = assertEngineExports(engineModule, root);
-const SIZE = 4612, TRANSFER = 140, PC = 0x1000, PROGRAM = Buffer.from('0fc80fc80fc90fc90fca0fca0fcb0fcb0fcc0fcc0fcd0fcd0fce0fce0fcf0fcfeb000f0b', 'hex');
+const SIZE = ARENA_SIZE, TRANSFER = 140, PC = 0x1000, PROGRAM = Buffer.from('0fc80fc80fc90fc90fca0fca0fcb0fcb0fcc0fcc0fcd0fcd0fce0fce0fcf0fcfeb000f0b', 'hex');
 const VECTORS = [
   [0x12345678, 0x23457f80, 0x34560f10, 0x4567ff00, 0x56789abc, 0x6789abcd, 0x789abcde, 0x89abcdef],
   [0x80ff0100, 0x7f00fe81, 0x010000ff, 0xff80007f, 0x00ff817e, 0xfedcba98, 0xa5c33c5a, 0x005580aa],
@@ -25,6 +25,7 @@ function engineSources(directory) {return readdirSync(join(root, directory), {wi
 const sourcePaths = ['Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml', 'rust-toolchain.toml', ...engineSources('engine/src').sort(), 'engine/tests/cpu/bits_flags/byte_order/wasm/dword.rs', 'engine/tests/cpu/bits_flags/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/bits_flags/byte_order/fixtures/p2-bswap32/runtime/run.mjs'];
 sourcePaths.push(...engineExportPins.filter(path => !sourcePaths.includes(path)));
 assert.equal(sourcePaths.length, engineSources('engine/src').sort().length + 9); assert.equal(new Set(sourcePaths).size, sourcePaths.length);
+sourcePaths.push('engine/tests/support/wasm/arena.mjs');
 const sourceHashes = Object.fromEntries(sourcePaths.map(path => [path, hash(readFileSync(join(root, path)))]));
 const contexts = [], modules = [], generatedRuns = [], cases = [], continuations = [], controls = [], arenas = [], pages = [], rawFiles = [];
 function original(path, bytes) {const row = {path, length: bytes.length, sha256: hash(bytes)}; assert.ok(!rawFiles.some(old => old.path === path)); rawFiles.push(row); return row;}
@@ -66,12 +67,13 @@ function childShape(ctx, bytes, binding) {
     if (section === 1) for (let count = unsigned(); count > 0; count--) {assert.equal(bytes[at++], 0x60); types.push({parameters: Array.from({length: unsigned()}, () => bytes[at++]), results: Array.from({length: unsigned()}, () => bytes[at++])});}
     else if (section === 2) for (let count = unsigned(); count > 0; count--) {const module = name(), field = name(), kind = bytes[at++]; if (kind === 0) imports.push({module, name: field, kind: 'function', type: unsigned()}); else {assert.equal(kind, 2); assert.equal(unsigned(), 0); assert.equal(unsigned(), 1); imports.push({module, name: field, kind: 'memory'});}}
     else if (section === 3) for (let count = unsigned(); count > 0; count--) functions.push(unsigned());
+    else if (section === 6) {assert.equal(unsigned(), 3); for (const value of [Number(ctx.owner !== 'standalone'), 0, 1]) {assert.equal(bytes[at++], 0x7f); assert.equal(bytes[at++], 0); assert.equal(bytes[at++], 0x41); assert.equal(signed(), value); assert.equal(bytes[at++], 0x0b);}}
     else if (section === 7) for (let count = unsigned(); count > 0; count--) exports.push({name: name(), kind: bytes[at++], index: unsigned()});
-    else if (section === 10) {assert.equal(unsigned(), 1); const bodyLength = unsigned(); assert.equal(at + bodyLength, end); locals = Array.from({length: unsigned()}, () => [unsigned(), bytes[at++]]); assert.deepEqual(locals, [[16, 0x7f], [1, 0x7e], [10, 0x7f]]); if (ctx.owner !== 'standalone') {const constants = [ctx.low, ctx.high, ...(ctx.owner === 'replacement' ? [binding.generation] : [binding.low, binding.high])]; for (const value of constants) {assert.equal(bytes[at++], 0x41); assert.equal(signed(), value);} for (const index of [0, 1, 3]) {assert.equal(bytes[at++], 0x20); assert.equal(unsigned(), index);} assert.equal(bytes[at++], 0x10); assert.equal(unsigned(), 0); assert.deepEqual([...bytes.subarray(at, at + 8)], [0x22, 16, 4, 0x40, 0x20, 16, 0x0f, 0x0b]); guardPrefix = {constants, parameters: [0, 1, 3]};} at = end;}
+    else if (section === 10) {assert.equal(unsigned(), 1); const bodyLength = unsigned(); assert.equal(at + bodyLength, end); locals = Array.from({length: unsigned()}, () => [unsigned(), bytes[at++]]); assert.deepEqual(locals, [[16, 0x7f], [1, 0x7e], [10, 0x7f], ...(ctx.owner === 'standalone' ? [] : [[1, 0x7f]])]); if (ctx.owner !== 'standalone') {const constants = [ctx.low, ctx.high, ...(ctx.owner === 'replacement' ? [binding.generation] : [binding.low, binding.high])]; for (const value of constants) {assert.equal(bytes[at++], 0x41); assert.equal(signed(), value);} for (const index of [0, 1, 3]) {assert.equal(bytes[at++], 0x20); assert.equal(unsigned(), index);} assert.equal(bytes[at++], 0x10); assert.equal(unsigned(), 0); assert.deepEqual([...bytes.subarray(at, at + 8)], [0x22, 16, 4, 0x40, 0x20, 16, 0x0f, 0x0b]); guardPrefix = {constants, parameters: [0, 1, 3]};} at = end;}
     else assert.fail(`unexpected child section${section}`); assert.equal(at, end);
   }
   const names = ctx.owner === 'standalone' ? [] : [ctx.owner === 'replacement' ? 'guard' : 'guard_resident'];
-  assert.deepEqual(sections, [1, 2, 3, 7, 10]); assert.deepEqual(functions, [0]); assert.equal(types.length, names.length + 1); assert.deepEqual(types[0], {parameters: Array(4).fill(0x7f), results: [0x7f]}); assert.deepEqual(imports[0], {module: 'env', name: 'memory', kind: 'memory'}); assert.deepEqual(imports.slice(1), names.map(name => ({module: 'ring3', name, kind: 'function', type: 1}))); if (names.length) assert.deepEqual(types[1], {parameters: Array(ctx.owner === 'replacement' ? 6 : 7).fill(0x7f), results: [0x7f]}); assert.deepEqual(exports, [{name: 'run', kind: 0, index: names.length}]); return {types, imports, locals, guard: guardPrefix, run_signature: types[0]};
+  assert.deepEqual(sections, [1, 2, 3, 6, 7, 10]); assert.deepEqual(functions, [0]); assert.equal(types.length, names.length + 1); assert.deepEqual(types[0], {parameters: Array(4).fill(0x7f), results: [0x7f]}); assert.deepEqual(imports[0], {module: 'env', name: 'memory', kind: 'memory'}); assert.deepEqual(imports.slice(1), names.map(name => ({module: 'ring3', name, kind: 'function', type: 1}))); if (names.length) assert.deepEqual(types[1], {parameters: Array(ctx.owner === 'replacement' ? 6 : 7).fill(0x7f), results: [0x7f]}); assert.deepEqual(exports, [{name: 'run', kind: 0, index: names.length}]); return {types, imports, locals, guard: guardPrefix, run_signature: types[0]};
 }
 function compile(ctx) {
   const mode = ctx.owner === 'replacement' ? 'entry' : 'extent', entries = [PC], specs = [[PC, 34]], label = ctx.owner; let binding = {}, bytes, saved, before;

@@ -1,3 +1,4 @@
+import {ARENA_SIZE} from '../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
@@ -5,7 +6,7 @@ import {join} from 'node:path';
 import {readEngine} from '../../../../../../support/wasm/engine.mjs';
 
 const [enginePath, output, root] = process.argv.slice(2);
-const engine = readEngine(enginePath), PC = 0x1000, DATA = 0x5000, SIZE = 4612;
+const engine = readEngine(enginePath), PC = 0x1000, DATA = 0x5000, SIZE = ARENA_SIZE;
 const sourcePaths = [
   'engine/src/cpu/x86/bits.rs', 'engine/src/cpu/x86/ir.rs', 'engine/src/cpu/x86/decode/bit_manipulation.rs',
   'engine/src/cpu/x86/decode/profile.rs', 'engine/src/cpu/x86/decode/lower.rs', 'engine/src/cpu/x86/decode/mod.rs',
@@ -13,6 +14,7 @@ const sourcePaths = [
   'engine/src/cpu/dbt/wasm/memory.rs', 'engine/src/cpu/dbt/wasm/memory/narrow.rs', 'engine/src/cpu/dbt/wasm/memory/word_store.rs', 'engine/src/cpu/dbt/region.rs',
   'engine/tests/cpu/bits_flags/manipulation/fixtures/p2-bmi2/runtime/run.mjs', 'engine/tests/cpu/bits_flags/manipulation/wasm/bmi2.rs',
 ];
+sourcePaths.push(...["engine/src/abi/memory_helper/cpu.rs", "engine/src/cpu/dbt/wasm/memory/cpu_scalar.rs", "engine/src/cpu/dbt/wasm/emitter.rs", "engine/src/cpu/dbt/wasm/code_fetch.rs", "engine/src/process/memory/cpu_scalar.rs", "engine/src/process/memory/scalar/cpu_write.rs", "engine/src/process/wasm/memory/cpu_write.rs", "engine/src/abi/wasm/exports/memory/cpu_write.rs", "engine/tests/support/wasm/arena.mjs"].filter(path=>!sourcePaths.includes(path)));
 const sources = () => Object.fromEntries(sourcePaths.map(path => [path, createHash('sha256').update(readFileSync(join(root, path))).digest('hex')]));
 const sourcePins = sources();
 const counts = {contexts: 0, modules: 0, runs: 0, register: 0, memory: 0, faults: 0, repairs: 0, permissions: 0, controls: 0};
@@ -35,7 +37,8 @@ function open(owner, entries) {
   const instance = new WebAssembly.Instance(engine.module, {}), c = {owner, entries, api: {}, memory: instance.exports.memory};
   for (const name of ['open', 'close', 'arena_ptr', 'map', 'unmap', 'protect', 'upload', 'read8', 'compile', 'compile_entries', 'compile_resident', 'compile_resident_entries', 'discard_unacknowledged_resident', 'generation', 'module_ptr', 'module_len', 'guard', 'guard_resident', 'read16', 'read32', 'store16', 'store32', 'store_resident16', 'store_resident32']) c.api[name] = instance.exports['ring3_abi_v1_' + name];
   c.keyLow = ++counts.contexts;
-  assert.equal(c.api.open(8, c.keyLow, 0x424d4932), 0); c.base = c.api.arena_ptr() >>> 0;
+  for(const name of ["read16", "read32", "read8", "store16", "store32", "store_resident16", "store_resident32"]) {c.api["cpu_"+name]=instance.exports["ring3_abi_v1_cpu_"+name];assert.equal(c.api["cpu_"+name]?.length,name.startsWith("read")?1:name.includes("resident")?6:2,"cpu_"+name);}
+ assert.equal(c.api.open(8, c.keyLow, 0x424d4932), 0); c.base = c.api.arena_ptr() >>> 0;
   for (const args of [[PC, 1, 7], [DATA, 2, 3], [0xfffff000, 1, 3]]) assert.equal(c.api.map(...args), 0);
   return c;
 }
@@ -57,7 +60,7 @@ function compile(c, instruction, memoryName) {
   assert.deepEqual(WebAssembly.Module.imports(module), expected, 'register forms have no memory helper import; each memory form has its one required helper');
   writeFileSync(join(output, `module-${++counts.modules}.wasm`), bytes, {flag: 'wx'});
   const run = new WebAssembly.Instance(module, {env: {memory: c.memory}, ring3: c.api}).exports.run;
-  run.exitVersion = memoryName ? 2 : 1;
+  run.exitVersion = memoryName ? 6 : 1;
   return run;
 }
 function run(c, fn, state, {budget = 1, reason = 1, retired = 1, helper, fault} = {}) {
@@ -142,7 +145,7 @@ function stopped(c, fn) {
   const before = seed(c, 0, 0x8000); run(c, fn, before, {budget: 0, retired: 0}); input(c, 96, words([1])); run(c, fn, before, {reason: 2, retired: 0}); counts.controls += 2;
 }
 function memoryFault(c, fn, before, address, reason, faultAddress) {
-  run(c, fn, before, {reason: 5, retired: 0, fault: {detail: reason, address: faultAddress, access: 1, length: 4}, helper: {version: 1, fields: [1, 0, reason, faultAddress, 1, 4]}}); counts.faults++;
+  run(c, fn, before, {reason: 5, retired: 0, fault: {detail: reason, address: faultAddress, access: 1, length: 4}, helper: {version: 10, fields: [1, 0, reason, faultAddress, 1, 4]}}); counts.faults++;
 }
 for (const owner of ['replacement', 'resident']) for (const entries of [false, true]) {
   const c = open(owner, entries);
@@ -167,23 +170,23 @@ for (const owner of ['replacement', 'resident']) for (const entries of [false, t
       stopped(c, fn);
     }
     for (const [destination, control, w] of [[0, form === 'rorx' ? 31 : 1, false], [7, form === 'rorx' ? 255 : 7, false], [0, form === 'rorx' ? 32 : form === 'mulx' ? 0 : 1, true]]) {
-      const source = 7, instruction = encoded(form, destination, source, control, true, w), fn = compile(c, instruction, 'read32');
+      const source = 7, instruction = encoded(form, destination, source, control, true, w), fn = compile(c, instruction, 'cpu_read32');
       for (let i = 0; i < VALUES.length; i++) {
         const address = i % 2 ? DATA + 4095 : DATA + 7, value = VALUES[i]; upload(c, address, words([value]));
         const before = initial(c, form, source, control, 0, CONTROLS[i], true, address);
-        run(c, fn, expected(before, form, destination, source, control, value, instruction.length), {helper: {version: 1, fields: [0, value, 0, 0, 0, 0]}}); counts.memory++;
+        run(c, fn, expected(before, form, destination, source, control, value, instruction.length), {helper: {version: 10, fields: [0, value, 0, 0, 0, 4]}}); counts.memory++;
       }
       const address = 0x6fff, before = initial(c, form, source, control, 0, 33, true, address);
       upload(c, address, Buffer.from([0xaa])); memoryFault(c, fn, before, address, 1, 0x7000);
       assert.equal(c.api.map(0x7000, 1, 3), 0); upload(c, address, words([0x80018001]));
-      run(c, fn, expected(before, form, destination, source, control, 0x80018001, instruction.length), {helper: {version: 1, fields: [0, 0x80018001, 0, 0, 0, 0]}}); counts.repairs++;
+      run(c, fn, expected(before, form, destination, source, control, 0x80018001, instruction.length), {helper: {version: 10, fields: [0, 0x80018001, 0, 0, 0, 4]}}); counts.repairs++;
       assert.equal(c.api.unmap(0x7000, 1), 0);
       if (!w && destination === 0) {
         const protectedAddress = DATA + 7, protectedBefore = initial(c, form, source, control, 0, 31, true, protectedAddress);
         upload(c, protectedAddress, words([0xffffffff])); assert.equal(c.api.protect(DATA, 1, 2), 0);
         memoryFault(c, fn, protectedBefore, protectedAddress, 2, protectedAddress); counts.permissions++;
         assert.equal(c.api.protect(DATA, 1, 3), 0);
-        run(c, fn, expected(protectedBefore, form, destination, source, control, 0xffffffff, instruction.length), {helper: {version: 1, fields: [0, 0xffffffff, 0, 0, 0, 0]}}); counts.repairs++;
+        run(c, fn, expected(protectedBefore, form, destination, source, control, 0xffffffff, instruction.length), {helper: {version: 10, fields: [0, 0xffffffff, 0, 0, 0, 4]}}); counts.repairs++;
       }
       stopped(c, fn);
     }

@@ -1,3 +1,4 @@
+import {ARENA_SIZE} from '../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
@@ -5,7 +6,7 @@ import {join} from 'node:path';
 import {readEngine} from '../../../../../../support/wasm/engine.mjs';
 
 const [enginePath, output, root] = process.argv.slice(2);
-const engine = readEngine(enginePath), PC = 0x1000, DATA = 0x5000, SIZE = 4612;
+const engine = readEngine(enginePath), PC = 0x1000, DATA = 0x5000, SIZE = ARENA_SIZE;
 const sourcePaths = [
   'engine/src/cpu/x86/bits.rs', 'engine/src/cpu/x86/ir.rs', 'engine/src/cpu/x86/decode/scalar_bits.rs',
   'engine/src/cpu/x86/decode/profile.rs', 'engine/src/cpu/x86/decode/lower.rs', 'engine/src/cpu/x86/decode/mod.rs',
@@ -13,6 +14,7 @@ const sourcePaths = [
   'engine/src/cpu/dbt/wasm/memory.rs', 'engine/src/cpu/dbt/wasm/memory/narrow.rs', 'engine/src/cpu/dbt/wasm/memory/word_store.rs', 'engine/src/cpu/dbt/region.rs',
   'engine/tests/cpu/bits_flags/integration/fixtures/p2-scalar-bits/runtime/run.mjs', 'engine/tests/cpu/bits_flags/integration/wasm/scalar.rs',
 ];
+sourcePaths.push(...["engine/src/abi/memory_helper/cpu.rs", "engine/src/cpu/dbt/wasm/memory/cpu_scalar.rs", "engine/src/cpu/dbt/wasm/emitter.rs", "engine/src/cpu/dbt/wasm/code_fetch.rs", "engine/src/process/memory/cpu_scalar.rs", "engine/src/process/memory/scalar/cpu_write.rs", "engine/src/process/wasm/memory/cpu_write.rs", "engine/src/abi/wasm/exports/memory/cpu_write.rs", "engine/tests/support/wasm/arena.mjs"].filter(path=>!sourcePaths.includes(path)));
 const sources = () => Object.fromEntries(sourcePaths.map(path => [path, createHash('sha256').update(readFileSync(join(root, path))).digest('hex')]));
 const sourcePins = sources();
 const counts = {contexts: 0, modules: 0, runs: 0, counts: 0, swaps: 0, faults: 0, repairs: 0, controls: 0};
@@ -35,7 +37,8 @@ function open(owner, entries) {
   const instance = new WebAssembly.Instance(engine.module, {}), c = {owner, entries, api: {}, memory: instance.exports.memory};
   for (const name of ['open', 'close', 'arena_ptr', 'map', 'unmap', 'protect', 'upload', 'read8', 'compile', 'compile_entries', 'compile_resident', 'compile_resident_entries', 'discard_unacknowledged_resident', 'generation', 'module_ptr', 'module_len', 'guard', 'guard_resident', 'read16', 'read32', 'store16', 'store32', 'store_resident16', 'store_resident32']) c.api[name] = instance.exports['ring3_abi_v1_' + name];
   c.keyLow = ++counts.contexts;
-  assert.equal(c.api.open(8, c.keyLow, 0x53424954), 0); c.base = c.api.arena_ptr() >>> 0;
+  for(const name of ["read16", "read32", "read8", "store16", "store32", "store_resident16", "store_resident32"]) {c.api["cpu_"+name]=instance.exports["ring3_abi_v1_cpu_"+name];assert.equal(c.api["cpu_"+name]?.length,name.startsWith("read")?1:name.includes("resident")?6:2,"cpu_"+name);}
+ assert.equal(c.api.open(8, c.keyLow, 0x53424954), 0); c.base = c.api.arena_ptr() >>> 0;
   for (const args of [[PC, 1, 7], [DATA, 2, 3], [0xfffff000, 1, 3]]) assert.equal(c.api.map(...args), 0);
   return c;
 }
@@ -57,7 +60,7 @@ function compile(c, instruction, memoryName, store = false) {
   assert.deepEqual(WebAssembly.Module.imports(module), expected, 'register forms have no memory helper import; each memory form has its one required helper');
   writeFileSync(join(output, `module-${++counts.modules}.wasm`), bytes, {flag: 'wx'});
   const run = new WebAssembly.Instance(module, {env: {memory: c.memory}, ring3: c.api}).exports.run;
-  run.exitVersion = memoryName ? 2 : 1;
+  run.exitVersion = memoryName ? 6 : 1;
   return run;
 }
 function run(c, fn, state, {budget = 1, reason = 1, retired = 1, helper, fault} = {}) {
@@ -87,44 +90,44 @@ for (const owner of ['replacement', 'resident']) for (const entries of [false, t
   const c = open(owner, entries);
   for (const [kind, opcode] of [['trailing', 0xbc], ['leading', 0xbd], ['population', 0xb8]]) for (const width of [16, 32]) for (const operand of ['register', 'alias', 'memory']) {
     const instruction = [...(width === 16 ? [0x66] : []), 0xf3, 0x0f, opcode, operand === 'memory' ? 0x07 : operand === 'alias' ? 0xc0 : 0xc2];
-    const fn = compile(c, instruction, operand === 'memory' ? `read${width}` : null);
+    const fn = compile(c, instruction, operand === 'memory' ? `cpu_read${width}` : null);
     for (const source of [0, 1, 2, 0x100, 0x8000, 0x80000000, 0xffff0000, 0x80018001, 0xffffffff]) {
       const address = source === 0x100 ? DATA + 4095 : DATA + 7;
       if (operand === 'memory') upload(c, address, encoded(source, width));
       const before = seed(c, source, address); if (operand === 'alias') {before.registers[0] = source >>> 0; input(c, 16, words([source]));}
       const oracle = counted(kind, source, width), next = {...before, registers: [...before.registers], pc: PC + instruction.length, flags: oracle.flags};
       next.registers[0] = merged(before.registers[0], oracle.count, width);
-      run(c, fn, next, {helper: operand === 'memory' ? {version: width === 16 ? 2 : 1, fields: [0, width === 16 ? source & 0xffff : source, 0, 0, 0, width === 16 ? 2 : 0]} : undefined}); counts.counts++;
+      run(c, fn, next, {helper: operand === 'memory' ? {version: 10, fields: [0, width === 16 ? source & 0xffff : source, 0, 0, 0, width / 8]} : undefined}); counts.counts++;
       if (operand === 'memory') assert.deepEqual(readBytes(c, address, width / 8), encoded(source, width));
     }
     if (operand === 'memory') {
       const address = 0x6fff, before = seed(c, 0, address), fault = {detail: 1, address: 0x7000, access: 1, length: width / 8};
       upload(c, address, Buffer.from([0]));
-      run(c, fn, before, {reason: 5, retired: 0, fault, helper: {version: width === 16 ? 2 : 1, fields: [1, 0, 1, 0x7000, 1, width / 8]}}); counts.faults++;
+      run(c, fn, before, {reason: 5, retired: 0, fault, helper: {version: 10, fields: [1, 0, 1, 0x7000, 1, width / 8]}}); counts.faults++;
       assert.equal(c.api.map(0x7000, 1, 3), 0); upload(c, address, encoded(0x8001, width));
       const oracle = counted(kind, 0x8001, width), next = {...before, registers: [...before.registers], pc: PC + instruction.length, flags: oracle.flags}; next.registers[0] = merged(before.registers[0], oracle.count, width);
-      run(c, fn, next, {helper: {version: width === 16 ? 2 : 1, fields: [0, 0x8001, 0, 0, 0, width === 16 ? 2 : 0]}}); counts.repairs++;
+      run(c, fn, next, {helper: {version: 10, fields: [0, 0x8001, 0, 0, 0, width / 8]}}); counts.repairs++;
       assert.equal(c.api.unmap(0x7000, 1), 0);
     }
     const stopped = seed(c, 0, 0x8000); run(c, fn, stopped, {budget: 0, retired: 0}); input(c, 96, words([1])); run(c, fn, stopped, {reason: 2, retired: 0}); counts.controls += 2;
   }
   for (const width of [16, 32]) for (const store of [false, true]) {
     const instruction = [...(width === 16 ? [0x66] : []), 0x0f, 0x38, store ? 0xf1 : 0xf0, 0x07];
-    const fn = compile(c, instruction, `${store ? 'store' : 'read'}${width}`, store);
+    const fn = compile(c, instruction, `${store ? 'cpu_store' : 'cpu_read'}${width}`, store);
     for (const source of [0, 0x12345678, 0x80018001, 0xffffffff]) {
       const address = DATA + 4095; upload(c, address - 1, Buffer.from([0xaa, ...encoded(store ? 0 : source, width), 0x55]));
       const before = seed(c, 0, address); if (store) {before.registers[0] = source >>> 0; input(c, 16, words([source]));}
       const value = swapped(source, width), next = {...before, registers: [...before.registers], pc: PC + instruction.length};
       if (!store) next.registers[0] = merged(before.registers[0], value, width);
-      run(c, fn, next, {helper: {version: store ? width === 16 ? 4 : 1 : width === 16 ? 2 : 1, fields: [0, store ? 0 : width === 16 ? source & 0xffff : source, 0, 0, 0, width === 16 ? 2 : 0]}});
+      run(c, fn, next, {helper: {version: 10, fields: [0, store ? 0 : width === 16 ? source & 0xffff : source, 0, 0, 0, width / 8]}});
       assert.deepEqual(readBytes(c, address - 1, width / 8 + 2), Buffer.from([0xaa, ...encoded(store ? value : source, width), 0x55])); counts.swaps++;
     }
     const address = 0x6fff, before = seed(c, 0, address), fault = {detail: 1, address: 0x7000, access: store ? 2 : 1, length: width / 8}; upload(c, address, Buffer.from([0xaa]));
-    run(c, fn, before, {reason: 5, retired: 0, fault, helper: {version: store ? width === 16 ? 4 : 1 : width === 16 ? 2 : 1, fields: [1, 0, 1, 0x7000, fault.access, width / 8]}}); counts.faults++;
+    run(c, fn, before, {reason: 5, retired: 0, fault, helper: {version: 10, fields: [1, 0, 1, 0x7000, fault.access, width / 8]}}); counts.faults++;
     assert.deepEqual(readBytes(c, address, 1), Buffer.from([0xaa]), 'failed MOVBE store leaves first page unchanged');
     assert.equal(c.api.map(0x7000, 1, 3), 0); upload(c, address, encoded(0x1234, width));
     const next = {...before, registers: [...before.registers], pc: PC + instruction.length}; if (!store) next.registers[0] = merged(before.registers[0], swapped(0x1234, width), width);
-    run(c, fn, next, {helper: {version: store ? width === 16 ? 4 : 1 : width === 16 ? 2 : 1, fields: [0, store ? 0 : 0x1234, 0, 0, 0, width === 16 ? 2 : 0]}}); counts.repairs++;
+    run(c, fn, next, {helper: {version: 10, fields: [0, store ? 0 : 0x1234, 0, 0, 0, width / 8]}}); counts.repairs++;
     assert.equal(c.api.unmap(0x7000, 1), 0);
   }
   assert.equal(c.api.close(), 0);

@@ -22,6 +22,7 @@ const paths = [
   'engine/tests/cpu/bits_flags/scan/register/wasm/word.rs', 'engine/tests/cpu/bits_flags/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/bits_flags/wasm.rs', 'engine/tests/support/wasm.rs',
   'engine/tests/cpu/bits_flags/scan/register/fixtures/p2-word-bit-scan/runtime/run.mjs',
 ];
+paths.push(...["engine/src/abi/memory_helper/cpu.rs", "engine/src/cpu/dbt/wasm/memory/cpu_scalar.rs", "engine/src/cpu/dbt/wasm/emitter.rs", "engine/src/cpu/dbt/wasm/code_fetch.rs", "engine/src/process/memory/cpu_scalar.rs", "engine/src/process/memory/scalar/cpu_write.rs", "engine/src/process/wasm/memory/cpu_write.rs", "engine/src/abi/wasm/exports/memory/cpu_write.rs"].filter(path=>!paths.includes(path)));
 const sources = () => Object.fromEntries(paths.map(path => [path, hash(readFileSync(join(root, path)))]));
 const sourcePins = sources(), modules = [];
 const counts = {contexts: 0, runs: 0, retired: 0, matrix: 0, anchors: 0, addresses: 0, boundaries: 0, faults: 0, retries: 0, current_inputs: 0, consumers: 0, controls: 0, code_reads: 0};
@@ -60,7 +61,7 @@ function seed(c, pc, r = registers(), flags = 0xcd7) {
   const b = Buffer.alloc(140); b.set(state({registers: r, pc, flags})); b.set(exit(3, 0), 56);
   b.set(record('R3MH', 40, [0, 0xdecafbad, 0, 0, 0, 0]), 100); input(c, 0, b); return cpu(c);
 }
-function run(c, module, budget, next, {label, reason = 1, retired = 1, fault, helperVersion = null, helperValue = 0, status = 0, exitVersion = 2} = {}) {
+function run(c, module, budget, next, {label, reason = 1, retired = 1, fault, helperVersion = null, helperValue = 0, status = 0, exitVersion = 6} = {}) {
   const expected = arena(c);
   if (status === 0) {
     expected.set(state(next)); expected.set(exit(reason, retired, fault, exitVersion), 56);
@@ -90,8 +91,8 @@ function compile(c, blocks, codePermissions) {
   const bytes = Buffer.from(new Uint8Array(c.memory.buffer, binding.pointer, binding.length));
   const module = new WebAssembly.Module(bytes), imports = WebAssembly.Module.imports(module);
   const memoryOps = blocks.some(b => b.memory !== false);
-  const names = [c.owner === 'resident' ? 'guard_resident' : 'guard', ...(memoryOps ? ['read16'] : []),
-    ...(blocks.some(b => b.store) ? [c.owner === 'resident' ? 'store_resident16' : 'store16'] : [])];
+  const names = [c.owner === 'resident' ? 'guard_resident' : 'guard', ...(memoryOps ? ['cpu_read16'] : []),
+    ...(blocks.some(b => b.store) ? [c.owner === 'resident' ? 'cpu_store_resident16' : 'cpu_store16'] : [])];
   assert.deepEqual(imports, [{module: 'env', name: 'memory', kind: 'memory'}, ...names.map(name => ({module: 'ring3', name, kind: 'function'}))]);
   assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
   const file = `module-${modules.length + 1}.wasm`; writeFileSync(join(output, file), bytes, {flag: 'wx'});
@@ -105,7 +106,8 @@ function open(owner, entries) {
   for (const name of ['open', 'close', 'arena_ptr', 'map', 'unmap', 'protect', 'upload', 'read8', 'read16', 'store16', 'store_resident16',
     'compile', 'compile_entries', 'compile_resident', 'compile_resident_entries', 'generation', 'module_ptr', 'module_len', 'guard', 'guard_resident'])
     c.api[name] = instance.exports['ring3_abi_v1_' + name];
-  assert.equal(c.api.open(8, c.id, 0x57425343), 0); c.base = c.api.arena_ptr() >>> 0; input(c, 0, initial);
+  for(const name of ["read16", "read8", "store16", "store_resident16"]) {c.api["cpu_"+name]=instance.exports["ring3_abi_v1_cpu_"+name];assert.equal(c.api["cpu_"+name]?.length,name.startsWith("read")?1:name.includes("resident")?6:2,"cpu_"+name);}
+ assert.equal(c.api.open(8, c.id, 0x57425343), 0); c.base = c.api.arena_ptr() >>> 0; input(c, 0, initial);
   for (const args of [[PC, 1, 7], [DATA, 2, 3], [0xa53c5000, 1, 3], [0xfffff000, 1, 3]]) host(c, 'map', args);
   return c;
 }
@@ -138,7 +140,7 @@ function registerSpec(kind, destination, source) {return {kind, destination, sou
 function scan(c, module, row, value, label) {
   const before = cpu(c), expected = scanned(row.kind, value, before.flags), next = {...before, registers: [...before.registers], pc: before.pc + row.bytes.length, flags: expected.flags};
   if (expected.index !== null) next.registers[row.destination] = lowWord(before.registers[row.destination], expected.index);
-  run(c, module, 1, next, {label, helperVersion: row.memory ? 2 : null, helperValue: value, exitVersion: module.memoryOps ? 2 : 1});
+  run(c, module, 1, next, {label, helperVersion: row.memory ? 10 : null, helperValue: value, exitVersion: module.memoryOps ? 6 : 1});
   return expected;
 }
 
@@ -244,8 +246,8 @@ for (const owner of ['replacement', 'resident']) for (const entries of [false, t
     const before = seed(c, blocks[index].pc, r), stopped = {...before, registers: [...before.registers], pc: before.pc + 5}; stopped.registers[3] = 0x11223344;
     // Ring3 rejects the overflowing logical WORD span before RAM access.
     const fault = overflow ? undefined : {detail: missing ? 1 : 2, address: crossing ? 0x8000 : address, access: 1};
-    run(c, module, 2, stopped, {label: kind + ' after MOV retains destination/FLAGS', reason: overflow ? 11 : 5, retired: 1, fault, helperVersion: overflow ? null : 2});
-    run(c, module, 1, stopped, {label: kind + ' unchanged read retry', reason: overflow ? 11 : 5, retired: 0, fault, helperVersion: overflow ? null : 2}); counts.faults += 2;
+    run(c, module, 2, stopped, {label: kind + ' after MOV retains destination/FLAGS', reason: overflow ? 11 : 5, retired: 1, fault, helperVersion: overflow ? null : 10});
+    run(c, module, 1, stopped, {label: kind + ' unchanged read retry', reason: overflow ? 11 : 5, retired: 0, fault, helperVersion: overflow ? null : 10}); counts.faults += 2;
     if (crossing && missing) checkRam(c, 0x7ffe, unchanged);
     if (overflow) checkRam(c, 0xfffffffe, Buffer.from([0x55, 1]));
     if (!overflow) {
@@ -262,8 +264,8 @@ for (const owner of ['replacement', 'resident']) for (const entries of [false, t
     upload(c, address - 1, Buffer.from([0x55, 0, 0, 0xaa])); host(c, 'protect', [DATA, 1, 2]);
     const before = seed(c, blocks[index].pc, r), stopped = {...before, registers: [...before.registers], pc: before.pc + 5}; stopped.registers[3] = 0x11223344;
     const fault = {detail: 2, address, access: 1};
-    run(c, module, 2, stopped, {label: 'zero source still faults on write-only RAM', reason: 5, retired: 1, fault, helperVersion: 2});
-    run(c, module, 1, stopped, {label: 'unchanged zero-source retry', reason: 5, retired: 0, fault, helperVersion: 2}); counts.faults += 2;
+    run(c, module, 2, stopped, {label: 'zero source still faults on write-only RAM', reason: 5, retired: 1, fault, helperVersion: 10});
+    run(c, module, 1, stopped, {label: 'unchanged zero-source retry', reason: 5, retired: 0, fault, helperVersion: 10}); counts.faults += 2;
     host(c, 'protect', [DATA, 1, 1]); assert.deepEqual(cpu(c), stopped);
     assert.deepEqual(scan(c, module, {...row, address}, 0, 'permission-only zero-source repair retains entire destination'), {index: null, flags: 0x446});
     checkRam(c, address - 1, Buffer.from([0x55, 0, 0, 0xaa])); host(c, 'protect', [DATA, 1, 3]); counts.retries++;
@@ -273,8 +275,8 @@ for (const owner of ['replacement', 'resident']) for (const entries of [false, t
     upload(c, address - 1, Buffer.from([0x55, 0, 0, 0, 0, 0xaa])); host(c, 'protect', [DATA, 1, 2]);
     const before = seed(c, blocks[2 + index].pc, r), stopped = {...before, registers: [...before.registers], pc: before.pc + 5}; stopped.registers[3] = 0x11223344;
     const fault = {detail: 2, address, access: 1};
-    run(c, module, 2, stopped, {label: 'current-input witness initially faults on zero source', reason: 5, retired: 1, fault, helperVersion: 2});
-    run(c, module, 1, stopped, {label: 'current-input witness unchanged retry', reason: 5, retired: 0, fault, helperVersion: 2}); counts.faults += 2;
+    run(c, module, 2, stopped, {label: 'current-input witness initially faults on zero source', reason: 5, retired: 1, fault, helperVersion: 10});
+    run(c, module, 1, stopped, {label: 'current-input witness unchanged retry', reason: 5, retired: 0, fault, helperVersion: 10}); counts.faults += 2;
     host(c, 'protect', [DATA, 1, 3]); upload(c, nextAddress, word(0x8001)); host(c, 'protect', [DATA, 1, 1]);
     const current = {...stopped, registers: [...stopped.registers]}; current.registers[0] = 0xbaffdead; current.registers[7] = nextAddress;
     input(c, 16, words([current.registers[0]])); input(c, 44, words([current.registers[7]])); assert.deepEqual(cpu(c), current, 'declared current source/EA/destination edits preserve the remaining stopped CPU');
@@ -294,7 +296,7 @@ for (const owner of ['replacement', 'resident']) for (const entries of [false, t
   run(c, liveModule, 1, next, {label: 'MOV AX1 retains scan FLAGS'});
   old = cpu(c); next = {...old, registers: [...old.registers], pc: old.pc + 3, flags: 0x406}; next.registers[0] = lowWord(old.registers[0], 0x0100);
   run(c, liveModule, 1, next, {label: 'SHL AX,CL consumes returned scan index8 as bit mask'});
-  old = cpu(c); run(c, liveModule, 1, {...old, pc: old.pc + xorMemory.length, flags: 0x486}, {label: 'XOR bitmap clears selected bit8 with current AX mask', helperVersion: 4});
+  old = cpu(c); run(c, liveModule, 1, {...old, pc: old.pc + xorMemory.length, flags: 0x486}, {label: 'XOR bitmap clears selected bit8 with current AX mask', helperVersion: 10});
   assert.deepEqual(scan(c, liveModule, bsr, 0x8000, 'BSR sees updated bitmap and returns index15 in DX'), {index: 15, flags: 0x402});
   old = cpu(c); next = {...old, registers: [...old.registers], pc: old.pc + 3, flags: 0x446}; next.registers[0] = lowWord(old.registers[0], 0);
   run(c, liveModule, 1, next, {label: 'XOR AX,AX produces low16 zero despite dirty high16'});
