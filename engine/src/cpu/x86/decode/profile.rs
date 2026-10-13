@@ -75,7 +75,15 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
         .map(|index| instruction.op_register(index));
     let x87_control = matches!(
         instruction.code(),
-        Code::Fninit | Code::Fnclex | Code::Fnstsw_AX | Code::Fnstsw_m2byte | Code::Fnstcw_m2byte
+        Code::Fninit
+            | Code::Fnclex
+            | Code::Fnstsw_AX
+            | Code::Fnstsw_m2byte
+            | Code::Fnstcw_m2byte
+            // obsolete compatibility opcodes are integer nops in modern x87 processors.
+            | Code::Fneni
+            | Code::Fndisi
+            | Code::Fnsetpm
     );
     if !x87_control
         && (features.contains(&CpuidFeature::FPU)

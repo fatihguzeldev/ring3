@@ -18,3 +18,6 @@ mod cpu_x87_memory_status;
 
 #[path = "numeric/native/boundaries.rs"]
 mod x87_numeric_boundaries;
+
+#[path = "control/compatibility/native.rs"]
+mod cpu_x87_compatibility;

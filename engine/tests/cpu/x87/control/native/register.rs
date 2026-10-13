@@ -265,14 +265,20 @@ fn waiting_stack_memory_arithmetic_and_ignored_prefixes_admit_with_exact_operati
             GuestAddress(0x2001)
         );
     }
-    for bytes in [
-        vec![0xdb, 0xe0],
-        vec![0xdb, 0xe1],
-        vec![0xdb, 0xe4],
-        vec![0xd9, 0xd1],
-        vec![0x0f, 0x20, 0xc0],
-        vec![0xf0, 0x90],
-    ] {
+    for opcode in [0xe0, 0xe1, 0xe4] {
+        let engine = code(0x1000, &[0xdb, opcode]);
+        let instruction = decode_one(engine.memory().unwrap(), GuestAddress(0x1000)).unwrap();
+        assert_eq!(instruction.operation(), &Operation::Nop);
+        assert_eq!(instruction.length(), 2);
+        assert_eq!(instruction.next_pc(), GuestAddress(0x1002));
+        assert!(
+            engine
+                .memory()
+                .unwrap()
+                .is_code_current(instruction.code_snapshot())
+        );
+    }
+    for bytes in [vec![0xd9, 0xd1], vec![0x0f, 0x20, 0xc0], vec![0xf0, 0x90]] {
         let engine = code(0x1000, &bytes);
         assert!(
             decode_one(engine.memory().unwrap(), GuestAddress(0x1000)).is_err(),
