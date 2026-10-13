@@ -1,3 +1,4 @@
+mod multiply;
 mod rearrange;
 mod shift;
 
@@ -373,70 +374,37 @@ fn arithmetic(code: &mut InstructionSink<'_>, kind: P, width: u8) {
 }
 
 fn multiply_dword(code: &mut InstructionSink<'_>, op: SimdOperation) {
-    for operand in [op.destination, op.source] {
-        load(code, operand, op.vector_bytes);
-        code.v128_const(0)
-            .i8x16_shuffle([0, 1, 2, 3, 8, 9, 10, 11, 16, 17, 18, 19, 20, 21, 22, 23]);
-    }
-    if op.kind == SimdKind::Packed(P::MultiplySignedDword) {
-        code.i64x2_extmul_low_i32x4_s();
-    } else {
-        code.i64x2_extmul_low_i32x4_u();
-    }
+    multiply::multiply_dword(
+        code,
+        op.kind == SimdKind::Packed(P::MultiplySignedDword),
+        |code, second| {
+            load(
+                code,
+                if second { op.source } else { op.destination },
+                op.vector_bytes,
+            )
+        },
+    );
 }
 
 fn sum_absolute_byte_differences(code: &mut InstructionSink<'_>, op: SimdOperation) {
-    load(code, op.destination, op.vector_bytes);
-    load(code, op.source, op.vector_bytes);
-    code.i8x16_max_u();
-    load(code, op.destination, op.vector_bytes);
-    load(code, op.source, op.vector_bytes);
-    code.i8x16_min_u()
-        .i8x16_sub()
-        .i16x8_extadd_pairwise_i8x16_u()
-        .i32x4_extadd_pairwise_i16x8_u();
-    // four-byte sums are at most 1020, so narrowing preserves them.
-    code.v128_const(0)
-        .i16x8_narrow_i32x4_u()
-        .i32x4_extadd_pairwise_i16x8_u()
-        .i64x2_extend_low_i32x4_u();
+    multiply::sum_absolute_byte_differences(code, |code, second| {
+        load(
+            code,
+            if second { op.source } else { op.destination },
+            op.vector_bytes,
+        )
+    });
 }
 
 fn multiply_high(code: &mut InstructionSink<'_>, op: SimdOperation, kind: P) {
-    let signed = kind == P::MultiplyHighSigned;
-    for high in [false, true] {
-        if high && op.vector_bytes == 8 {
-            code.v128_const(0);
-            continue;
-        }
-        load(code, op.destination, op.vector_bytes);
-        load(code, op.source, op.vector_bytes);
-        match (signed, high) {
-            (true, false) => {
-                code.i32x4_extmul_low_i16x8_s();
-            }
-            (true, true) => {
-                code.i32x4_extmul_high_i16x8_s();
-            }
-            (false, false) => {
-                code.i32x4_extmul_low_i16x8_u();
-            }
-            (false, true) => {
-                code.i32x4_extmul_high_i16x8_u();
-            }
-        }
-        code.i32_const(16);
-        if signed {
-            code.i32x4_shr_s();
-        } else {
-            code.i32x4_shr_u();
-        }
-    }
-    if signed {
-        code.i16x8_narrow_i32x4_s();
-    } else {
-        code.i16x8_narrow_i32x4_u();
-    }
+    multiply::multiply_high(code, kind, op.vector_bytes, |code, second| {
+        load(
+            code,
+            if second { op.source } else { op.destination },
+            op.vector_bytes,
+        )
+    });
 }
 
 fn absolute(code: &mut InstructionSink<'_>, width: u8) {
@@ -536,71 +504,39 @@ fn sign(code: &mut InstructionSink<'_>, op: SimdOperation) {
 }
 
 fn horizontal(code: &mut InstructionSink<'_>, op: SimdOperation, kind: P) {
-    let size = usize::from(op.vector_bytes);
-    let width = usize::from(op.lane_bytes);
-    for odd in [false, true] {
-        load(code, op.destination, op.vector_bytes);
-        load(code, op.source, op.vector_bytes);
-        let lanes = std::array::from_fn(|byte| {
-            if byte >= size {
-                return 15;
-            }
-            let lane = byte / width;
-            let source = if lane < size / width / 2 { 0 } else { 16 };
-            (source + (lane % (size / width / 2) * 2 + usize::from(odd)) * width + byte % width)
-                as u8
-        });
-        code.i8x16_shuffle(lanes);
-    }
-    arithmetic(
+    multiply::horizontal(
         code,
-        match kind {
-            P::HorizontalAdd => P::Add,
-            P::HorizontalSubtract => P::Subtract,
-            P::HorizontalAddSignedSaturate => P::AddSignedSaturate,
-            P::HorizontalSubtractSignedSaturate => P::SubtractSignedSaturate,
-            _ => unreachable!(),
-        },
+        kind,
+        op.vector_bytes,
         op.lane_bytes,
+        |code, second| {
+            load(
+                code,
+                if second { op.source } else { op.destination },
+                op.vector_bytes,
+            )
+        },
     );
 }
 
 fn multiply_add_unsigned_signed_bytes(code: &mut InstructionSink<'_>, op: SimdOperation) {
-    for high in [false, true] {
-        load(code, op.destination, op.vector_bytes);
-        if high {
-            code.i16x8_extend_high_i8x16_u();
-        } else {
-            code.i16x8_extend_low_i8x16_u();
-        }
-        load(code, op.source, op.vector_bytes);
-        if high {
-            code.i16x8_extend_high_i8x16_s();
-        } else {
-            code.i16x8_extend_low_i8x16_s();
-        }
-        code.i16x8_mul().i32x4_extadd_pairwise_i16x8_s();
-    }
-    code.i16x8_narrow_i32x4_s();
+    multiply::multiply_add_unsigned_signed_bytes(code, |code, second| {
+        load(
+            code,
+            if second { op.source } else { op.destination },
+            op.vector_bytes,
+        )
+    });
 }
 
 fn multiply_high_round_signed(code: &mut InstructionSink<'_>, op: SimdOperation) {
-    for high in [false, true] {
-        load(code, op.destination, op.vector_bytes);
-        load(code, op.source, op.vector_bytes);
-        if high {
-            code.i32x4_extmul_high_i16x8_s();
-        } else {
-            code.i32x4_extmul_low_i16x8_s();
-        }
-        code.i32_const(0x4000)
-            .i32x4_splat()
-            .i32x4_add()
-            .i32_const(15)
-            .i32x4_shr_s();
-    }
-    // x86 wraps +32768; wasm's saturating q15 multiply would return +32767.
-    code.i8x16_shuffle([0, 1, 4, 5, 8, 9, 12, 13, 16, 17, 20, 21, 24, 25, 28, 29]);
+    multiply::multiply_high_round_signed(code, |code, second| {
+        load(
+            code,
+            if second { op.source } else { op.destination },
+            op.vector_bytes,
+        )
+    });
 }
 
 fn shuffle_bytes(code: &mut InstructionSink<'_>, op: SimdOperation) {
@@ -659,56 +595,17 @@ fn byte_shift(code: &mut InstructionSink<'_>, op: SimdOperation, kind: S) {
 }
 
 fn multiple_sum_absolute_byte_differences(code: &mut InstructionSink<'_>, op: SimdOperation) {
-    let immediate = op.immediate.unwrap();
-    let source = immediate & 3;
-    let destination = immediate >> 2 & 1;
-    for byte in 0..4 {
-        for (operand, start, sliding) in [
-            (op.destination, destination * 4, true),
-            (op.source, source * 4, false),
-        ] {
-            load(code, operand, 16);
-            code.v128_const(0)
-                .i8x16_shuffle(std::array::from_fn(|lane| {
-                    if lane < 8 {
-                        start + byte + if sliding { lane as u8 } else { 0 }
-                    } else {
-                        16
-                    }
-                }))
-                .i16x8_extend_low_i8x16_u();
-        }
-        code.i16x8_sub().i16x8_abs();
-        if byte != 0 {
-            code.i16x8_add();
-        }
-    }
+    multiply::multiple_sum_absolute_byte_differences(
+        code,
+        op.immediate.unwrap(),
+        |code, second| load(code, if second { op.source } else { op.destination }, 16),
+    );
 }
 
 fn minimum_position_unsigned_word(code: &mut InstructionSink<'_>, op: SimdOperation) {
-    load(code, op.source, 16);
-    code.i16x8_extract_lane_u(0)
-        .local_set(RESULT)
-        .i32_const(0)
-        .local_set(RHS);
-    for lane in 1..8 {
-        load(code, op.source, 16);
-        code.i16x8_extract_lane_u(lane)
-            .local_tee(LHS)
-            .local_get(RESULT)
-            .i32_lt_u()
-            .if_(BlockType::Empty)
-            .local_get(LHS)
-            .local_set(RESULT)
-            .i32_const(i32::from(lane))
-            .local_set(RHS)
-            .end();
-    }
-    code.v128_const(0)
-        .local_get(RESULT)
-        .i16x8_replace_lane(0)
-        .local_get(RHS)
-        .i16x8_replace_lane(1);
+    multiply::minimum_position_unsigned_word(code, [RESULT, RHS, LHS], |code| {
+        load(code, op.source, 16)
+    });
 }
 
 fn packed_test(code: &mut InstructionSink<'_>, op: SimdOperation) {
@@ -1123,5 +1020,54 @@ pub(super) fn shift_value(
                 }
             },
         );
+    }
+}
+
+#[cfg(test)]
+pub(super) fn multiply_value(
+    code: &mut InstructionSink<'_>,
+    operation: crate::cpu::x86::simd::MultiplyOperation,
+    sources: [u32; 2],
+    scratch: [u32; 3],
+) {
+    let [first, second] = sources;
+    let load_source = |code: &mut InstructionSink<'_>, b: bool| {
+        code.local_get(if b { second } else { first });
+    };
+    let kind = operation.kind();
+    match kind {
+        P::MultiplyLow | P::MultiplyAddWords => {
+            load_source(code, false);
+            load_source(code, true);
+            arithmetic(code, kind, operation.lane_bytes());
+        }
+        P::MultiplyUnsignedDword | P::MultiplySignedDword => {
+            multiply::multiply_dword(code, kind == P::MultiplySignedDword, load_source)
+        }
+        P::MultiplyHighSigned | P::MultiplyHighUnsigned => {
+            multiply::multiply_high(code, kind, 16, load_source)
+        }
+        P::SumAbsoluteByteDifferences => multiply::sum_absolute_byte_differences(code, load_source),
+        P::HorizontalAdd
+        | P::HorizontalSubtract
+        | P::HorizontalAddSignedSaturate
+        | P::HorizontalSubtractSignedSaturate => {
+            multiply::horizontal(code, kind, 16, operation.lane_bytes(), load_source)
+        }
+        P::MultiplyAddUnsignedSignedBytes => {
+            multiply::multiply_add_unsigned_signed_bytes(code, load_source)
+        }
+        P::MultiplyHighRoundSigned => multiply::multiply_high_round_signed(code, load_source),
+        P::MultipleSumAbsoluteByteDifferences => multiply::multiple_sum_absolute_byte_differences(
+            code,
+            operation.immediate(),
+            load_source,
+        ),
+        P::MinimumPositionUnsignedWord => {
+            multiply::minimum_position_unsigned_word(code, scratch, |code| {
+                code.local_get(second);
+            })
+        }
+        _ => unreachable!("validated multiply operation"),
     }
 }

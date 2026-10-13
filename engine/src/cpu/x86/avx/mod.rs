@@ -6,6 +6,7 @@ mod cross_lane;
 mod f16c;
 mod integer;
 mod moves;
+mod multiply;
 mod permute;
 mod rearrange;
 mod shift;
@@ -19,6 +20,7 @@ pub(crate) use integer::IntegerInstruction;
 pub(crate) use moves::{
     DuplicateKind, Half, HalfMerge, MoveInstruction, MoveSource, WordSource, WordTarget,
 };
+pub(crate) use multiply::MultiplyInstruction;
 pub(crate) use permute::PermuteInstruction;
 pub(crate) use rearrange::RearrangeInstruction;
 pub(crate) use shift::{ShiftCount, ShiftInstruction};

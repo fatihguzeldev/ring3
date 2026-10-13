@@ -275,6 +275,11 @@ mod shift;
 #[cfg(test)]
 pub(crate) use shift::ShiftOperation;
 
+#[cfg(test)]
+mod multiply;
+#[cfg(test)]
+pub(crate) use multiply::MultiplyOperation;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SimdError {
     InvalidDescriptor,

@@ -42,6 +42,16 @@ pub(super) fn shift_value(
     direct::shift_value(code, operation, immediate, sources);
 }
 
+#[cfg(test)]
+pub(super) fn multiply_value(
+    code: &mut InstructionSink<'_>,
+    operation: crate::cpu::x86::simd::MultiplyOperation,
+    sources: [u32; 2],
+    scratch: [u32; 3],
+) {
+    direct::multiply_value(code, operation, sources, scratch);
+}
+
 pub(super) fn direct_hotpath(operation: SimdOperation) -> bool {
     direct::accepts(operation)
 }

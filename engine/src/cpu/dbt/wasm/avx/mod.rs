@@ -2,6 +2,7 @@ mod cross_lane;
 mod integer;
 mod logical;
 mod moves;
+mod multiply;
 mod permute;
 mod rearrange;
 mod shift;
