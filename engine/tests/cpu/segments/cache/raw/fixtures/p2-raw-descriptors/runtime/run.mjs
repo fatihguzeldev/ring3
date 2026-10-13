@@ -90,7 +90,7 @@ for (const owner of ['replacement', 'resident']) for (const entries of [false, t
   fn = compile(c, [0x8e, 0xd0], 'segment_load'); configure(c, 0xffff, 0x00407200);
   const s = seed(c, 0x43), expected = arena(c); expected.set(record('R3EX', 40, [15, 0, 0x40, 0, 0, 0], 6), 56); expected.set(packet([7, 0, 0x40, 0, 0, 0]), 100);
   assert.equal(fn.run(c.base, c.base + 56, 1, c.base + 96), 0); assert.deepEqual(arena(c), expected); counts.runs++; counts.loads++;
-  for (const [target, low, high] of [[2, 0xffff, 0x0000f200], [4, 0xffff, 0x0060f200], [2, 0x0010ffff, 0x0040f200]]) {
+  for (const [target, low, high] of [[2, 0xffff, 0x0000f200], [4, 0xffff, 0x0060f200]]) {
     configure(c, low, high); const before = arena(c);
     assert.notEqual(c.api[c.id ? 'segment_load_resident' : 'segment_load'](...c.binding, target, 0x43), 0);
     assert.deepEqual(arena(c), before, 'unsupported execution profiles are neutral host refusals'); counts.controls++;
@@ -105,7 +105,7 @@ for (const owner of ['replacement', 'resident']) for (const entries of [false, t
   }
   host(c, 'close');
 }
-assert.equal(counts.contexts, 4); assert.equal(counts.modules, 16); assert.equal(counts.loads, 28); assert.equal(counts.queries, 16); assert.equal(counts.controls, 36);
+assert.equal(counts.contexts, 4); assert.equal(counts.modules, 16); assert.equal(counts.loads, 28); assert.equal(counts.queries, 16); assert.equal(counts.controls, 32);
 assert.deepEqual(pins(), sourcePins);
 writeFileSync(join(output, 'result.json'), JSON.stringify({status: 'ok', engine_sha256: engine.sha256, source_pins: sourcePins, counts,
   limits: ['raw table transport with actual emitted loads and VERR/VERW; native tests own A-bit table readback; no guest descriptor-memory or raw gates execution; LAR/LSL remains separate']}, null, 2) + '\n');

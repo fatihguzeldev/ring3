@@ -307,8 +307,9 @@ fn candidate(
     use memory::helper_field;
     code.local_get(super::locals::register(register))
         .i32_const(delta as i32)
-        .i32_add()
-        .local_set(ADDRESS);
+        .i32_add();
+    super::segments::base(code, crate::cpu::x86::SegmentRegister::Ss);
+    code.i32_add().local_set(ADDRESS);
     code.local_get(RESUME);
     helper_field(code, 24);
     code.i32_const(3)

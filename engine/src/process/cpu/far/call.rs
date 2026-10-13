@@ -53,10 +53,10 @@ impl EngineInstance {
             }
         };
         let slot = width.slot_bytes();
-        let addresses = [esp.wrapping_sub(slot), esp.wrapping_sub(2 * slot)];
+        let offsets = [esp.wrapping_sub(slot), esp.wrapping_sub(2 * slot)];
         // Intel places stack capacity before the target-offset limit for direct far CALL.
         // our batch profile checks both cached spans before any page permission probe.
-        for offset in addresses {
+        for offset in offsets {
             if let Err(error) = super::super::segments::check_cached_span(
                 &context,
                 SegmentRegister::Ss,
@@ -80,6 +80,8 @@ impl EngineInstance {
             u32::from(context.state.selectors[SegmentRegister::Cs.index()]),
             width.offset(return_eip),
         ];
+        let ss_base = context.state.bases[SegmentRegister::Ss.index()];
+        let addresses = offsets.map(|offset| ss_base.wrapping_add(offset));
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
         let version = memory.code_validation_version();
         if let Err(error) = memory.write_stack(&addresses, &values, slot as usize) {

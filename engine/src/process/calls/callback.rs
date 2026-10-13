@@ -307,6 +307,7 @@ impl EngineInstance {
         if count > MAX_STACK_WORDS {
             return Err(call_error(CallError::InvalidRequest));
         }
+        self.require_flat_windows_segments()?;
         Ok(())
     }
 }

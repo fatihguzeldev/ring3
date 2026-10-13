@@ -1,12 +1,12 @@
 use super::super::{atomic, integer_system, segments, simd, stack, strings};
 use super::{
-    ADDRESS, BUDGET, BinaryKind, BitIndex, BitTestKind, BlockType, BranchTarget,
-    ByteArithmeticKind, ByteLogicalKind, BytePredicateKind, ByteReadArithmeticKind, ByteRegister,
-    ByteValue, CarryFlag, CarryKind, Condition, CountBranchKind, DecodedInstruction, EIP,
-    EffectiveAddress, ExtensionKind, FLAGS, InstructionSink, LHS, Location32, Operation, RESULT,
-    RETIRED, RHS, Register32, ShiftCount, SmallSource, SmallWidth, ValType, Value32,
-    WordArithmeticKind, WordLogicalKind, WordMemoryArithmeticKind, WordReadArithmeticKind,
-    WordValue, accumulator_divide, accumulator_multiply, arithmetic_flags, arithmetic_memory_byte,
+    BUDGET, BinaryKind, BitIndex, BitTestKind, BlockType, BranchTarget, ByteArithmeticKind,
+    ByteLogicalKind, BytePredicateKind, ByteReadArithmeticKind, ByteRegister, ByteValue, CarryFlag,
+    CarryKind, Condition, CountBranchKind, DecodedInstruction, EIP, EffectiveAddress,
+    ExtensionKind, FLAGS, InstructionSink, LHS, Location32, Operation, RESULT, RETIRED, RHS,
+    Register32, ShiftCount, SmallSource, SmallWidth, ValType, Value32, WordArithmeticKind,
+    WordLogicalKind, WordMemoryArithmeticKind, WordReadArithmeticKind, WordValue,
+    accumulator_divide, accumulator_multiply, arithmetic_flags, arithmetic_memory_byte,
     ascii_adjust, ascii_adjust_after_multiplication, ascii_adjust_before_division,
     binary_memory_store, bit_scan, bit_scan_word, bit_test, bit_test_word, byte_accumulator_divide,
     byte_accumulator_divide_value, byte_accumulator_multiply, byte_accumulator_multiply_value,
@@ -2304,7 +2304,9 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
                 imports,
                 exit_depth,
             );
-            code.local_get(ADDRESS)
+            code.local_get(register(Register32::Esp))
+                .i32_const(4)
+                .i32_sub()
                 .local_set(register(Register32::Esp))
                 .i32_const(target.0 as i32)
                 .local_set(EIP);
@@ -2328,7 +2330,9 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
                 imports,
                 exit_depth,
             );
-            code.local_get(ADDRESS)
+            code.local_get(register(Register32::Esp))
+                .i32_const(4)
+                .i32_sub()
                 .local_set(register(Register32::Esp))
                 .local_get(RESULT)
                 .local_set(EIP);
@@ -2354,7 +2358,10 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
                 imports,
                 exit_depth,
             );
-            code.local_get(ADDRESS).local_set(register(Register32::Esp));
+            code.local_get(register(Register32::Esp))
+                .i32_const(4)
+                .i32_sub()
+                .local_set(register(Register32::Esp));
             store = true;
         }
         Operation::PushWord { source } => {
@@ -2406,7 +2413,10 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
                 imports,
                 exit_depth,
             );
-            code.local_get(ADDRESS).local_set(register(Register32::Esp));
+            code.local_get(register(Register32::Esp))
+                .i32_const(4)
+                .i32_sub()
+                .local_set(register(Register32::Esp));
             store = true;
         }
         Operation::PushFlagsWord => {
@@ -2448,7 +2458,7 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
                 imports,
                 exit_depth,
             );
-            code.local_get(ADDRESS)
+            code.local_get(register(Register32::Ebp))
                 .i32_const(4)
                 .i32_add()
                 .local_set(register(Register32::Esp))
@@ -2469,7 +2479,7 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
                 imports,
                 exit_depth,
             );
-            code.local_get(ADDRESS)
+            code.local_get(register(Register32::Ebp))
                 .i32_const(2)
                 .i32_add()
                 .local_set(register(Register32::Esp))

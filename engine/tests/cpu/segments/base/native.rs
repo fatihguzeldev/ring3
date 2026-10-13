@@ -56,16 +56,14 @@ fn legacy_segment_codec_remains_strict_for_nonflat_data() {
 }
 
 #[test]
-fn nonflat_code_and_stack_remain_neutral_profile_refusals() {
-    for segment in [SegmentRegister::Cs, SegmentRegister::Ss] {
-        let mut engine = EngineInstance::new(1, 0x5342).unwrap();
-        let before = engine.arena().to_vec();
-        assert_eq!(
-            engine.set_segment_base(segment, 1),
-            Err(HostError::InvalidRequest)
-        );
-        assert_eq!(engine.arena(), before);
-    }
+fn nonflat_code_remains_a_neutral_profile_refusal() {
+    let mut engine = EngineInstance::new(1, 0x5342).unwrap();
+    let before = engine.arena().to_vec();
+    assert_eq!(
+        engine.set_segment_base(SegmentRegister::Cs, 1),
+        Err(HostError::InvalidRequest)
+    );
+    assert_eq!(engine.arena(), before);
     for segment in [SegmentRegister::Fs, SegmentRegister::Gs] {
         let mut engine = EngineInstance::new(1, 0x5342).unwrap();
         engine.set_segment_base(segment, 0x5000).unwrap();

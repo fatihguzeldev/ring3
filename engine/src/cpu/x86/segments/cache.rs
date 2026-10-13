@@ -307,10 +307,11 @@ mod tests {
         assert!(conforming.is_valid() && !conforming.is_legacy());
     }
     #[test]
-    fn current_context_accepts_data_bases_but_keeps_code_and_stack_profile() {
+    fn current_context_accepts_data_and_stack_bases_but_keeps_d32_b32_profile() {
         let mut context = SegmentContext::default();
         for segment in [
             SegmentRegister::Es,
+            SegmentRegister::Ss,
             SegmentRegister::Ds,
             SegmentRegister::Fs,
             SegmentRegister::Gs,
@@ -319,12 +320,12 @@ mod tests {
         }
         assert!(context.is_valid());
         assert!(!context.is_legacy());
+        assert!(!context.state.set_base(SegmentRegister::Cs, 1));
+        let mut nonflat_code = context;
+        nonflat_code.state.bases[SegmentRegister::Cs.index()] = 1;
+        assert!(!nonflat_code.is_valid());
         for segment in [SegmentRegister::Cs, SegmentRegister::Ss] {
-            assert!(!context.state.set_base(segment, 1));
             let mut invalid = context;
-            invalid.state.bases[segment.index()] = 1;
-            assert!(!invalid.is_valid());
-            invalid = context;
             invalid.caches[segment.index()] = cache(
                 if segment == SegmentRegister::Cs {
                     0xb

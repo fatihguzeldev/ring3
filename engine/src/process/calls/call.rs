@@ -50,6 +50,20 @@ pub(in crate::process) struct PreparedCall32 {
 }
 
 impl EngineInstance {
+    pub(in crate::process::calls) fn require_flat_windows_segments(&self) -> Result<(), HostError> {
+        let context = self.segment_context()?;
+        if [
+            crate::cpu::x86::SegmentRegister::Cs,
+            crate::cpu::x86::SegmentRegister::Ss,
+        ]
+        .into_iter()
+        .any(|segment| context.state.bases[segment.index()] != 0)
+        {
+            return Err(HostError::Call(CallError::InvalidRequest));
+        }
+        Ok(())
+    }
+
     pub fn capture_active_resident_callback_call(
         &mut self,
         key: u64,
@@ -287,6 +301,7 @@ impl EngineInstance {
             .try_into()
             .unwrap();
         let extended = ExtendedCpuState::capture(self.arena())?;
+        self.require_flat_windows_segments()?;
         let state =
             decode_state(&state_bytes).map_err(|_| HostError::Call(CallError::InvalidStop))?;
         let exit = decode_exit(&exit_bytes).map_err(|_| HostError::Call(CallError::InvalidStop))?;

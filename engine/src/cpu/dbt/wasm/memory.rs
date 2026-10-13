@@ -833,7 +833,9 @@ pub(super) fn push_memory(
         imports,
         exit_depth,
     );
-    code.local_get(ADDRESS)
+    code.local_get(register(crate::cpu::x86::Register32::Esp))
+        .i32_const(4)
+        .i32_sub()
         .local_set(register(crate::cpu::x86::Register32::Esp));
 }
 
@@ -899,7 +901,10 @@ pub(super) fn push_word_result(code: &mut InstructionSink<'_>, imports: Imports,
         imports,
         exit_depth,
     );
-    code.local_get(ADDRESS).local_set(register(esp));
+    code.local_get(register(esp))
+        .i32_const(2)
+        .i32_sub()
+        .local_set(register(esp));
 }
 
 pub(super) fn pop_word_register(

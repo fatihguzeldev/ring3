@@ -51,9 +51,9 @@ pub(in crate::cpu::dbt::wasm) fn interrupt_return(
         (slot, saved.selector),
         (2 * slot, saved.flags),
     ] {
-        code.local_get(esp)
-            .i32_const(offset as i32)
-            .i32_add()
+        code.local_get(esp).i32_const(offset as i32).i32_add();
+        super::super::segments::base(code, SegmentRegister::Ss);
+        code.i32_add()
             .local_tee(ADDRESS)
             .i32_const(slot as i32)
             .i32_const(1)

@@ -5,7 +5,7 @@ import {createHash} from 'node:crypto';
 import {readEngine} from '../../../../../../support/wasm/engine.mjs';
 
 const [enginePath,output,root]=process.argv.slice(2),engine=readEngine(enginePath),initial=readFileSync(join(output,'initial-arena.bin'));
-const SIZE=initial.length,SEGMENTS=4524,WORK=4588,hash=b=>createHash('sha256').update(b).digest('hex');
+const SIZE=initial.length,SEGMENTS=4524,WORK=4588,BASES=4756,hash=b=>createHash('sha256').update(b).digest('hex');
 assert.ok(SIZE>=4612);assert.equal(engine.sha256,hash(engine.bytes));
 const modules=[],observations=[],helpers=[],cases=[],refusals=[];
 const sourcePaths=['engine/src/cpu/x86/decode/segments.rs','engine/src/cpu/dbt/wasm/segments.rs', 'engine/src/cpu/dbt/wasm/segments/context.rs',
@@ -38,7 +38,7 @@ function open(bytes,owner='replacement'){
  for(const imp of WebAssembly.Module.imports(module).filter(i=>i.module==='ring3'&&!i.name.startsWith('guard'))){
   ring3[imp.name]=(...args)=>{const before=arena(c),status=c.api[imp.name](...args),after=arena(c),allowed=Buffer.from(before);
    allowed.set(after.subarray(100,140),100);
-   if(imp.name.startsWith('segment_load'))allowed.set(after.subarray(SEGMENTS,SEGMENTS+64),SEGMENTS);
+   if(imp.name.startsWith('segment_load')) {allowed.set(after.subarray(SEGMENTS,SEGMENTS+64),SEGMENTS); allowed.set(after.subarray(BASES,BASES+40),BASES);}
    assert.deepEqual(after,allowed,'helper restricted publication');
    const packet=after.subarray(100,140);if(imp.name.startsWith('segment_load')){
     assert.equal(packet.toString('ascii',0,4),'R3MH');assert.equal(packet.readUInt32LE(4),0x10007);assert.equal(packet.readUInt32LE(8),40);
@@ -50,13 +50,15 @@ function open(bytes,owner='replacement'){
  const file=`module-${modules.length+1}.wasm`;writeFileSync(join(output,file),wasm);modules.push({context:c.id,owner,file,bytes:length,sha256:hash(wasm),imports:WebAssembly.Module.imports(module)});
  cases.push({id:c.id,owner,code:Buffer.from(bytes).toString('hex')});return c;
 }
-function run(c,budget,expected,{retired=budget,reason=1,segments={},segmentRecord,fault,label='segments'}={}){
+function run(c,budget,expected,{retired=budget,reason=1,segments={},segmentRecord,segmentBases,ssShadow=false,fault,label='segments'}={}){
  const before=arena(c),at=helpers.length,status=c.run(c.base,c.base+56,budget,c.base+96),after=arena(c);
  assert.equal(status,0,label);assert.deepEqual(cpu(c),expected,label+' CPU');assert.equal(after.readUInt32LE(72),reason,label+' reason');assert.equal(after.readUInt32LE(76),retired,label+' retire');
  if(fault)assert.deepEqual(Array.from({length:4},(_,i)=>after.readUInt32LE(80+i*4)),fault,label+' fault');
  const full=Buffer.from(before);full.set(state(expected));full.set(after.subarray(56,96),56);full.set(after.subarray(100,140),100);
  for(const[i,{selector,base}]of Object.entries(segments)){if(selector!==undefined)full.writeUInt16LE(selector,SEGMENTS+16+2*i);if(base!==undefined)full.writeUInt32LE(base>>>0,SEGMENTS+32+4*i);}
  if(segmentRecord)full.set(segmentRecord,SEGMENTS);
+ if(segmentBases)full.set(segmentBases,BASES);
+ if(ssShadow) {full.writeUInt16LE(2,4); full.writeUInt32LE(1,12);}
  assert.equal(after.readUInt32LE(WORK+16),0,label+' ordinary work fallback');assert.deepEqual(after,full,label+' whole arena');
  const file=`arena-${observations.length+1}.bin`;writeFileSync(join(output,file),after);observations.push({context:c.id,label,budget,reason,retired,cpu:cpu(c),helpers:helpers.length-at,exit:after.subarray(56,96).toString('hex'),arena:{file,sha256:hash(after)}});
 }
@@ -87,8 +89,8 @@ for(const owner of ['replacement','resident']){
 }
 for(const [target,selector,dpl,present,kind,reason,description]of[
  [4,0x43,3,1,null,11,'unknown'],[4,0x43,3,0,1,14,'not present FS'],[2,0x43,3,0,1,15,'not present SS'],
- [4,0x43,0,1,1,11,'privilege'],[5,0x43,3,1,2,11,'execute only code'],[2,0x43,3,1,1,11,'nonflat legacy']]){
- const c=open([0x8e,0xc0+(target<<3)]);if(kind!==null)host(c,'configure_segment_descriptor',[selector,description==='nonflat legacy'?0x5000:0,dpl,present,kind]);const s=seed(c,{0:selector});
+ [4,0x43,0,1,1,11,'privilege'],[5,0x43,3,1,2,11,'execute only code']]){
+ const c=open([0x8e,0xc0+(target<<3)]);if(kind!==null)host(c,'configure_segment_descriptor',[selector,0,dpl,present,kind]);const s=seed(c,{0:selector});
  run(c,1,s,{retired:0,reason,fault:[selector&~3,0,0,0],label:'descriptor refusal '+description});host(c,'close');
 }
 {
@@ -97,6 +99,14 @@ for(const [target,selector,dpl,present,kind,reason,description]of[
  run(c,1,next(s,0x1003,{0:0x12345678}),{segments:{4:{selector:0x43,base:0x7000}},label:'LFS protect-only retry with destination EA alias'});host(c,'close');
  const w=open([0x66,0x0f,0xb5,0x03]);host(w,'configure_segment_descriptor',[0x43,0x6000,3,1,1]);upload(w,0x5010,Buffer.from([0xbc,0x9a,0x43,0]));const ws=seed(w,{3:0x5010});
  run(w,1,next(ws,0x1004,{0:0xabcd9abc}),{segments:{5:{selector:0x43,base:0x6000}},label:'LGS WORD offset preserves parent'});host(w,'close');
+}
+{
+ const c=open([0x8e,0xd0]);host(c,'configure_segment_descriptor',[0x43,0x5000,3,1,1]);const s=seed(c,{0:0x43});
+ const segmentRecord=Buffer.from(initial.subarray(SEGMENTS,SEGMENTS+64));segmentRecord.writeUInt16LE(3,4);segmentRecord.writeUInt16LE(0x43,20);
+ [0xf33fffff,0xf3bfffff,0xf33fffff,0xf33fffff,0xf33fffff,0].forEach((bits,i)=>segmentRecord.writeUInt32LE(bits>>>0,[28,32,36,40,44,56][i]));
+ for(const offset of [48,52,60])segmentRecord.writeUInt32LE(0,offset);
+ const segmentBases=Buffer.alloc(40);segmentBases.write('R3SB');segmentBases.writeUInt16LE(1,4);segmentBases.writeUInt16LE(1,6);segmentBases.writeUInt32LE(40,8);segmentBases.writeUInt32LE(0x5000,24);
+ run(c,1,next(s,0x1002),{segmentRecord,segmentBases,ssShadow:true,label:'nonflat legacy SS load publishes current bases and debug shadow'});host(c,'close');
 }
 for(const [word,selector]of[[false,0x43],[false,0x3b],[true,0x3b]]){
  const c=open(word?[0x66,0x0f,0xa9]:[0x0f,0xa1]);host(c,'set_segment_base',[4,0x5000]);put(c,0x6030,selector,word?2:4);const s=seed(c,{4:0x6030});

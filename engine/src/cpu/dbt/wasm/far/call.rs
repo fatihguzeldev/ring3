@@ -75,43 +75,20 @@ fn call_result(code: &mut InstructionSink<'_>, slot: u32, exit_depth: u32) {
         .if_(BlockType::Empty);
     memory::expect_field(code, 24, 0);
     code.end();
-    code.local_get(RHS)
-        .i32_const(1)
-        .i32_eq()
-        .if_(BlockType::Empty);
-    // page overflow cannot follow a successful cached SS preflight in this profile.
-    memory::helper_field(code, 24);
-    code.i32_const(1).i32_sub().i32_const(1).i32_gt_u();
-    memory::add_check(code);
-    memory::helper_field(code, 28);
-    code.local_get(register(Register32::Esp))
-        .i32_const(slot as i32)
-        .i32_sub()
-        .i32_sub()
-        .i32_const(slot as i32 - 1)
-        .i32_gt_u();
-    memory::helper_field(code, 28);
-    code.local_get(register(Register32::Esp))
-        .i32_const((2 * slot) as i32)
-        .i32_sub()
-        .i32_sub()
-        .i32_const(slot as i32 - 1)
-        .i32_gt_u()
-        .i32_and();
-    memory::add_check(code);
-    code.end();
     memory::protocol_if_bad(code);
     code.end();
     memory::exit_if_failed(code, exit_depth);
 
+    // the common validator checks the selected linear slot, including base-addition overflow.
     memory::helper_field(code, 16);
     code.i32_const(1).i32_eq();
     memory::helper_field(code, 16);
     code.i32_const(7).i32_eq().i32_or().if_(BlockType::Empty);
     code.local_get(register(Register32::Esp))
         .i32_const(slot as i32)
-        .i32_sub()
-        .local_set(ADDRESS);
+        .i32_sub();
+    super::super::segments::base(code, crate::cpu::x86::SegmentRegister::Ss);
+    code.i32_add().local_set(ADDRESS);
     memory::helper_field(code, 28);
     code.local_get(ADDRESS)
         .i32_sub()
@@ -120,9 +97,9 @@ fn call_result(code: &mut InstructionSink<'_>, slot: u32, exit_depth: u32) {
         .if_(BlockType::Empty)
         .local_get(register(Register32::Esp))
         .i32_const((2 * slot) as i32)
-        .i32_sub()
-        .local_set(ADDRESS)
-        .end();
+        .i32_sub();
+    super::super::segments::base(code, crate::cpu::x86::SegmentRegister::Ss);
+    code.i32_add().local_set(ADDRESS).end();
     cpu_result::validate(code, slot, 2, true, exit_depth + 1);
     code.else_();
     cpu_result::validate(code, 0, 0, true, exit_depth + 1);

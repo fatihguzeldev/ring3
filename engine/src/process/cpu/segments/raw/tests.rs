@@ -204,11 +204,7 @@ fn architectural_load_failures_publish_only_the_exact_packet_without_setting_acc
 #[test]
 fn unsupported_raw_profiles_are_neutral_host_refusals_before_any_publication() {
     let mut engine = engine();
-    for (target, low, high) in [
-        (2, 0xffff, 0x0000_f200),
-        (4, 0xffff, 0x0060_f200),
-        (2, 0x0010_ffff, 0x0040_f200),
-    ] {
+    for (target, low, high) in [(2, 0xffff, 0x0000_f200), (4, 0xffff, 0x0060_f200)] {
         engine
             .configure_segment_descriptor_raw(0x43, raw(low, high))
             .unwrap();
@@ -391,4 +387,47 @@ fn failed_far_pointer_read_preserves_raw_accessed_and_the_prior_loaded_context()
     word(&mut expected, HELPER_OFFSET + 32, 1);
     word(&mut expected, HELPER_OFFSET + 36, 6);
     assert_eq!(engine.arena(), expected);
+}
+
+#[test]
+fn nonflat_ss_load_and_b16_refusal_publish_atomically_with_the_table_accessed_bit() {
+    let mut engine = engine();
+    engine
+        .configure_segment_descriptor_raw(0x43, raw(0x5000_003f, 0x0040_f200))
+        .unwrap();
+    engine.segment_load(2, 0x43).unwrap();
+    let loaded = engine.segment_context().unwrap();
+    assert_eq!(
+        (
+            loaded.state.selectors[2],
+            loaded.state.bases[2],
+            loaded.caches[2].bits()
+        ),
+        (0x43, 0x5000, 0xf230_003f)
+    );
+    assert_eq!(
+        engine
+            .segment_descriptors
+            .raw_descriptor(0x43)
+            .unwrap()
+            .descriptor_type(),
+        3
+    );
+    engine
+        .configure_segment_descriptor_raw(0x43, raw(0x6000_003f, 0x0000_f200))
+        .unwrap();
+    let before = engine.arena().to_vec();
+    let table = engine.segment_descriptors.clone();
+    assert_eq!(engine.segment_load(2, 0x43), Err(HostError::InvalidRequest));
+    assert_eq!(engine.arena(), before);
+    assert_eq!(engine.segment_context().unwrap(), loaded);
+    assert_eq!(engine.segment_descriptors, table);
+    assert_eq!(
+        engine
+            .segment_descriptors
+            .raw_descriptor(0x43)
+            .unwrap()
+            .descriptor_type(),
+        2
+    );
 }

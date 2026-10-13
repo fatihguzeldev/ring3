@@ -142,7 +142,7 @@ pub fn encode_current_segment_context(
     let mut staged_segments = [0; SEGMENTS_SIZE];
     let mut staged_bases = [0; SEGMENT_BASES_RECORD_SIZE];
     header::write(&mut staged_bases, *b"R3SB");
-    if context.state.bases[0] != 0 || context.state.bases[3] != 0 {
+    if context.state.bases[..4].iter().any(|base| *base != 0) {
         encode_cached_context(context, SEGMENTS_VERSION_3, &mut staged_segments);
         for (index, base) in context.state.bases.into_iter().enumerate() {
             write_u32(&mut staged_bases, 16 + index * 4, base);
@@ -195,7 +195,9 @@ mod tests {
         let mut record = [0; SEGMENTS_SIZE];
         encode_segments(&state, &mut record).unwrap();
         assert_eq!(decode_segments(&record), Ok(state));
-        assert!(!state.set_base(SegmentRegister::Ss, 1));
+        let mut nonflat_ss = state;
+        assert!(nonflat_ss.set_base(SegmentRegister::Ss, 1));
+        assert!(encode_segments(&nonflat_ss, &mut record).is_err());
     }
 
     #[test]
@@ -302,7 +304,14 @@ mod tests {
     #[test]
     fn current_nonflat_context_roundtrips_all_bases_without_reusing_cache_words() {
         let mut context = SegmentContext::default();
-        context.state.bases = [0x1234_0000, 0, 0, 0xffff_fff0, 0x7654_0000, 0x8765_0000];
+        context.state.bases = [
+            0x1234_0000,
+            0,
+            0x5000,
+            0xffff_fff0,
+            0x7654_0000,
+            0x8765_0000,
+        ];
         context.caches[3] = SegmentCache::from_bits(0xf310_1234).unwrap();
         let mut segments = [0; SEGMENTS_SIZE];
         let mut bases = [0; SEGMENT_BASES_RECORD_SIZE];
@@ -383,7 +392,6 @@ mod tests {
             (8, AbiError::Length),
             (12, AbiError::Reserved),
             (20, AbiError::Reserved),
-            (24, AbiError::Reserved),
         ] {
             let mut malformed = bases;
             malformed[offset] ^= 0x80;
@@ -415,7 +423,8 @@ mod tests {
             assert_eq!(untouched_segments, [0xa5; SEGMENTS_SIZE]);
             assert_eq!(untouched_bases, vec![0x5a; invalid_length]);
         }
-        context.state.bases[2] = 1;
+        context.caches[2] =
+            SegmentCache::from_bits(context.caches[2].bits() & !0x0200_0000).unwrap();
         let mut untouched_segments = [0xa5; SEGMENTS_SIZE];
         let mut untouched_bases = [0x5a; SEGMENT_BASES_RECORD_SIZE];
         assert_eq!(

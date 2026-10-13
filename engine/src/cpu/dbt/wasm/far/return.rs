@@ -28,9 +28,9 @@ pub(in crate::cpu::dbt::wasm) fn return_(
         );
     }
     for offset in [0, slot] {
-        code.local_get(esp)
-            .i32_const(offset as i32)
-            .i32_add()
+        code.local_get(esp).i32_const(offset as i32).i32_add();
+        segments::base(code, SegmentRegister::Ss);
+        code.i32_add()
             .local_tee(ADDRESS)
             .i32_const(slot as i32)
             .i32_const(1)

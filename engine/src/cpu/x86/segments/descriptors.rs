@@ -299,13 +299,6 @@ impl SegmentDescriptorTable {
             return Err(fail(SegmentLoadFailure::NotPresent));
         }
         let base = record.code_data_base().expect("code/data checked above");
-        if target == SegmentRegister::Ss && base != 0 {
-            return Err(fail(if entry.legacy_constructed {
-                SegmentLoadFailure::NonFlatLegacy
-            } else {
-                SegmentLoadFailure::UnsupportedProfile
-            }));
-        }
         if record.long_mode() || (target == SegmentRegister::Ss && !record.default32()) {
             return Err(fail(SegmentLoadFailure::UnsupportedProfile));
         }
@@ -532,7 +525,7 @@ mod tests {
     }
 
     #[test]
-    fn table_indicator_rpl_and_flat_legacy_constraints_are_distinct() {
+    fn table_indicator_rpl_and_nonflat_stack_loading_are_distinct() {
         let mut table = SegmentDescriptorTable::empty();
         table
             .configure(SegmentDescriptor {
@@ -554,9 +547,9 @@ mod tests {
         assert_eq!(
             table
                 .resolve_load(SegmentRegister::Ss, 7, 3, &state)
-                .unwrap_err()
-                .failure,
-            SegmentLoadFailure::NonFlatLegacy
+                .unwrap()
+                .base,
+            0x5000
         );
         assert_eq!(
             table
