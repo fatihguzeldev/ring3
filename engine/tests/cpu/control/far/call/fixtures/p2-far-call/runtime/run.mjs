@@ -2,12 +2,16 @@ import assert from 'node:assert/strict';
 import {join} from 'node:path';
 import {readFileSync} from 'node:fs';
 import {readEngine,PC,TARGET,POINTER,SEG,STACK,counts,observations,words,packet,arena,put,host,upload,configure,map,readRAM,snapshotRAM,writeExpected,open,descriptor,cache,decodeSegments,encodeSegments,compile,seed,run,exit,publishCode,pins,finish} from '../../../../support/transport.mjs';
+assert.ok(process.env.RING3_ENGINE_SHA256, 'select an explicit engine SHA-256');
 const [enginePath,output,root]=process.argv.slice(2),engine=readEngine(enginePath);
 const sources=[
   "engine/src/cpu/x86/mod.rs",
   "engine/src/cpu/x86/segments.rs",
   "engine/src/process/memory/address_space.rs",
   "engine/src/cpu/x86/segments/transfers.rs",
+  "engine/src/cpu/x86/decode/fetch.rs",
+  "engine/src/cpu/x86/decode/decoder.rs",
+  "engine/src/cpu/dbt/wasm/code_fetch.rs",
   "engine/src/cpu/x86/segments/descriptors.rs",
   "engine/src/cpu/x86/segments/descriptor_record.rs",
   "engine/src/cpu/x86/segments/cache.rs",
@@ -101,7 +105,7 @@ for(const resident of [false,true])for(const entries of [false,true])for(const w
   ['privilege-before-presence',descriptor({dpl:2,present:false}),{status:3,detail:0x40}],
   ['absent-code-is-NP',descriptor({present:false}),{status:6,detail:0x40}],
   ['target-limit-is-GP',descriptor({limit:0x1fff,pages:false}),{status:3,detail:0}],
-  ['bounded-valid-target-refuses',descriptor({limit:0x2000,pages:false}),{host:true}],
+  ['bounded-valid-target-commits',descriptor({limit:0x2000,pages:false}),{status:0}],
   ['nonflat-refuses',descriptor({base:0x1000}),{host:true}],
   ['D16-refuses',descriptor({d32:false}),{host:true}],
   ['L1-refuses',descriptor({long:true}),{host:true}],
@@ -197,5 +201,20 @@ for(const resident of [false,true])for(const word of [false,true]){
  proof(c,'protocol-header',{reply:{packet:bad,transport:0}});proof(c,'transport-error-before-header',{reply:{packet:bad,transport:7,detail:3}});
  host(c,'close');
 }
+// Capture both NOPs under the original CS, then commit a narrower loaded CS.
+// The first target NOP is legal; the second must fault in this same invocation.
+for(const resident of [false,true])for(const entries of [false,true]){
+ const c=open(engine,resident,entries);Object.assign(c,{word:false,source:'immediate'});
+ const raw=descriptor({limit:TARGET,pages:false});configure(c,0x43,raw);
+ compile(c,bytes(false,'immediate'),{kind:'far_call',guard:true,targetBytes:Buffer.from([0x90,0x90,0xeb,0xfe])},root,output);
+ const context=decodeSegments(seed().subarray(SEG));context.caches[1]=0xf2b0ffff;
+ const input=seed({context}),want=Buffer.from(input),ram=snapshotRAM(c),next=PC+c.bytes.length;
+ publishCode(want,raw,0x43,TARGET+1);want.writeUInt32LE(STACK-8,32);
+ want.set(packet('R3MH',40,[0,TARGET,0,0,0,0],7),100);exit(want,11,2);
+ writeExpected(ram,STACK-4,words([0x1b]));writeExpected(ram,STACK-8,words([next]));
+ run(c,'bounded-CALL-refresh-NOP-at-limit-then-GP',input,want,ram,{budget:3,helpers:[c.helper],argumentsList:[[...c.binding,TARGET,0x43,0,next,STACK]]});
+ host(c,'close');
+}
+
 assert.deepEqual(pins(root,sources),sourcePins,'source bytes frozen');
-finish(output,engine,sourcePins,['IA32 protected32 CPL3, same-CPL direct CALL four forms, flat full4GiB D32 CS and B32 SS','batch cached SS spans precede page probes as deterministic Ring3 policy; no universal multioperand fault priority claimed','zero high16 padding in CALL32 CS slot is a deterministic padding choice','native tests separately read raw descriptor A bit and exercise version exhaustion; actual proof validates whole arena/RAM, helper width/order, TF/SMC and malformed phase replies','gate/task payloads, nonflat/bounded/D16 CS, privilege switches, INT/IRET remain outside this slice']);
+finish(output,engine,sourcePins,['IA32 protected32 CPL3, same-CPL direct CALL four forms, base-zero bounded D32 CS and B32 SS','batch cached SS spans precede page probes as deterministic Ring3 policy; no universal multioperand fault priority claimed','zero high16 padding in CALL32 CS slot is a deterministic padding choice','native tests separately read raw descriptor A bit and exercise version exhaustion; actual proof validates whole arena/RAM, helper width/order, TF/SMC and malformed phase replies','gate/task payloads, nonflat/D16 CS, privilege switches, INT/IRET remain outside this slice']);

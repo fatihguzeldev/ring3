@@ -1,11 +1,15 @@
 import assert from 'node:assert/strict';
 import {readEngine,PC,TARGET,POINTER,SEG,STACK,counts,observations,words,packet,arena,put,host,upload,configure,map,snapshotRAM,open,descriptor,cache,decodeSegments,compile,seed,run,exit,publishCode,pins,finish} from '../../../../support/transport.mjs';
+assert.ok(process.env.RING3_ENGINE_SHA256, 'select an explicit engine SHA-256');
 const [enginePath,output,root]=process.argv.slice(2),engine=readEngine(enginePath);
 const sources=[
   "engine/src/cpu/x86/mod.rs",
   "engine/src/cpu/x86/segments.rs",
   "engine/src/process/memory/address_space.rs",
   "engine/src/cpu/x86/segments/transfers.rs",
+  "engine/src/cpu/x86/decode/fetch.rs",
+  "engine/src/cpu/x86/decode/decoder.rs",
+  "engine/src/cpu/dbt/wasm/code_fetch.rs",
   "engine/src/cpu/x86/segments/descriptors.rs",
   "engine/src/cpu/x86/segments/descriptor_record.rs",
   "engine/src/cpu/x86/segments/cache.rs",
@@ -91,7 +95,7 @@ for(const resident of [false,true])for(const entries of [false,true])for(const w
   ['readable-code',descriptor(),{status:0}],['execute-only-code',descriptor({type:8}),{status:0}],['conforming-ring0',descriptor({type:12,dpl:0}),{status:0}],
   ['data-is-GP',descriptor({type:2}),{status:3,detail:0x40}],['privilege-before-P',descriptor({dpl:2,present:false}),{status:3,detail:0x40}],
   ['absent-code-is-NP',descriptor({present:false}),{status:6,detail:0x40}],['target-limit-is-GP',descriptor({limit:0x2344,pages:false}),{status:3,detail:0}],
-  ['bounded-valid-target-refuses',descriptor({limit:0x2345,pages:false}),{host:true}],['nonflat-refuses',descriptor({base:0x1000}),{host:true}],
+  ['bounded-valid-target-commits',descriptor({limit:0x2345,pages:false}),{status:0}],['nonflat-refuses',descriptor({base:0x1000}),{host:true}],
   ['D16-refuses',descriptor({d32:false}),{host:true}],['L1-refuses',descriptor({long:true}),{host:true}],['call-gate-is-GP',descriptor({type:12,codeData:false}),{status:3,detail:0x40}],
  ];
  for(const [label,raw,expect]of rows){configure(c,0x43,raw);proof(c,label,{raw,expect,target:0x2345});}
@@ -108,7 +112,7 @@ for(const resident of [false,true])for(const entries of [false,true])for(const w
  proof(c,'second-stack-page-fault-retains-first-transfer-only',{esp:0x8000-(word?2:4),readFault:{index:1,detail:1,address:0x8000}});
  host(c,'protect',[0x7000,1,2]);proof(c,'first-stack-read-permission-no-descriptor',{readFault:{index:0,detail:2,address:STACK}});host(c,'protect',[0x7000,1,3]);
  const boundedSource=decodeSegments(seed().subarray(SEG));boundedSource.caches[1]=0xf2b0ffff;
- proof(c,'bounded-current-CS-refuses-after-two-stack-reads',{context:boundedSource,expect:{host:true}});
+ proof(c,'bounded-current-CS-transfers-after-two-stack-reads',{raw,context:boundedSource});
  // Fixed B32 permits the stack pointer to wrap between two individually valid slots.
  map(c,0xfffff000);map(c,0);proof(c,'slot-boundary-wrap-and-unsigned-adjustment',{raw,esp:word?0xfffffffe:0xfffffffc});
  host(c,'close');
@@ -126,5 +130,20 @@ for(const resident of [false,true])for(const word of [false,true]){
  proof(c,'protocol-header',{target:0x2345,reply:{packet:bad,transport:0}});proof(c,'transport-before-header',{target:0x2345,reply:{packet:bad,transport:7,detail:3}});
  host(c,'close');
 }
+// RETF consumes its two slots once, then its committed CS limit governs the
+// retained target NOP and denies the next captured NOP before retirement.
+for(const resident of [false,true])for(const entries of [false,true]){
+ const c=open(engine,resident,entries);Object.assign(c,{word:false,adjust:0});
+ const raw=descriptor({limit:TARGET,pages:false});configure(c,0x43,raw);
+ compile(c,bytes(false,0),{kind:'far_return',read:true,guard:true,targetBytes:Buffer.from([0x90,0x90,0xeb,0xfe])},root,output);
+ upload(c,STACK,words([TARGET,0xa5a50043]));
+ const context=decodeSegments(seed().subarray(SEG));context.caches[1]=0xf2b0ffff;
+ const input=seed({context}),want=Buffer.from(input),ram=snapshotRAM(c);
+ publishCode(want,raw,0x43,TARGET+1);want.writeUInt32LE(STACK+8,32);
+ want.set(words([0xa5a50043]),140);want.set(packet('R3MH',40,[0,TARGET,0,0,0,0],7),100);exit(want,11,2);
+ run(c,'bounded-RETF-refresh-NOP-at-limit-then-GP',input,want,ram,{budget:3,helpers:['cpu_read','cpu_read',c.helper],argumentsList:[[STACK,4,1],[STACK+4,4,1],[...c.binding,TARGET,0x43,0]]});
+ host(c,'close');
+}
+
 assert.deepEqual(pins(root,sources),sourcePins,'source bytes frozen');
-finish(output,engine,sourcePins,['IA32 protected32 CPL3, RETF16/32 with optional unsigned imm16; direct flat full4GiB D32 code, B32 SS','RPL>=CPL is checked even for conforming code; high16 of popped 32-bit CS slot discarded','two cached SS spans precede RAM probes as deterministic Ring3 batch policy; argument-release bytes are not probed','no gate/task return, CPL change, nonflat/bounded/D16 code, CET/FRED or INT/IRET completion claim']);
+finish(output,engine,sourcePins,['IA32 protected32 CPL3, RETF16/32 with optional unsigned imm16; direct base-zero bounded D32 code, B32 SS','RPL>=CPL is checked even for conforming code; high16 of popped 32-bit CS slot discarded','two cached SS spans precede RAM probes as deterministic Ring3 batch policy; argument-release bytes are not probed','no gate/task return, CPL change, nonflat/D16 code, CET/FRED or INT/IRET completion claim']);

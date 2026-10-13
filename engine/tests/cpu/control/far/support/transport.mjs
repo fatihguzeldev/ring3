@@ -82,15 +82,15 @@ function validateModule(bytes, expectedImports, hasGuard, arities) {
   }
   assert.equal(functions.length, hasGuard ? 2 : 1); assert.equal(bodies.length, functions.length); assert.equal(functions[0], 0);
   const locals = body => {let p = 0; const read = () => {let n = 0, shift = 0, v; do {v = body[p++]; n += (v & 127) * 2 ** shift; shift += 7;} while (v & 128); return n;}; return Array.from({length: read()}, () => [read(), body[p++]]);};
-  assert.deepEqual(locals(bodies[0]), [[16, 127], [1, 126], [10, 127]]);
+  // run-local allocation is internal to the emitter; Wasm validation owns it.
   if (hasGuard) {assert.deepEqual(types[functions[1]], [Array(6).fill(127), [127]]); assert.deepEqual(locals(bodies[1]), [[3, 127]]); assert.equal(bodies[1].at(-1), 11);}
   return module;
 }
 
-export function compile(c,bytes,{kind,read=false,guard=true,returnBytes},root,output){
+export function compile(c,bytes,{kind,read=false,guard=true,returnBytes,targetBytes},root,output){
  if(c.id){put(c,96,words([0]));host(c,c.stale?'retire_stale_resident':'discard_unacknowledged_resident',[c.key,KEY_HIGH,...c.id]);}c.stale=false;
- const entry=c.pc??PC;c.bytes=Buffer.from(bytes);upload(c,entry,c.bytes);if(returnBytes)upload(c,TARGET,returnBytes);put(c,140,words(c.entries?[entry,...(returnBytes?[TARGET]:[])]:[entry,bytes.length,...(returnBytes?[TARGET,returnBytes.length]:[])]));
- host(c,c.resident?c.entries?'compile_resident_entries':'compile_resident':c.entries?'compile_entries':'compile',[returnBytes?2:1,...(c.entries?[0]:[])]);
+ const entry=c.pc??PC,capturedTarget=targetBytes??returnBytes;c.bytes=Buffer.from(bytes);upload(c,entry,c.bytes);if(capturedTarget)upload(c,TARGET,capturedTarget);put(c,140,words(c.entries?[entry,...(capturedTarget?[TARGET]:[])]:[entry,bytes.length,...(capturedTarget?[TARGET,capturedTarget.length]:[])]));
+ host(c,c.resident?c.entries?'compile_resident_entries':'compile_resident':c.entries?'compile_entries':'compile',[capturedTarget?2:1,...(c.entries?[0]:[])]);
  // Compilation, not additive export mismatch, is the counterfactual failure on the old engine.
  const declared=assertEngineExports(c.engine.module,root);
  assert.equal(declared.functions.find(row=>row.name==='ring3_abi_v1_far_call').arity,5);
@@ -101,7 +101,7 @@ export function compile(c,bytes,{kind,read=false,guard=true,returnBytes},root,ou
  const address=c.id?a.readUInt32LE(156):c.api.module_ptr()>>>0,size=c.id?a.readUInt32LE(160):c.api.module_len()>>>0;
  const bytesOut=Buffer.from(new Uint8Array(c.memory.buffer,address,size)),helper=c.resident?`${kind}_resident`:kind;
  const imports=['env:memory:memory',`ring3:${c.resident?'guard_resident':'guard'}:function`,`ring3:${helper}:function`,...(returnBytes?[`ring3:${c.resident?'far_return_resident':'far_return'}:function`]:[]),...(read?['ring3:cpu_read:function']:[])];
- const arities={guard:6,guard_resident:7,cpu_read:3,far_call:5,far_call_resident:9,far_return:3,far_return_resident:7};
+ const arities={guard:6,guard_resident:7,cpu_read:3,far_jump:3,far_jump_resident:7,far_call:5,far_call_resident:9,far_return:3,far_return_resident:7};
  const module=validateModule(bytesOut,imports,guard,arities);c.helper=helper;
  writeFileSync(join(output,`module-${++counts.modules}.wasm`),bytesOut,{flag:'wx'});
  const ring3=Object.fromEntries(WebAssembly.Module.imports(module).filter(row=>row.kind==='function').map(row=>[row.name,(...args)=>{

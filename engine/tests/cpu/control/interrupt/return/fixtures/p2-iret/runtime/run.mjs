@@ -26,10 +26,11 @@ const sources = [
 const pins = () => Object.fromEntries(sources.map(path => [path, hash(readFileSync(join(root, path)))]));
 const sourcePins = pins(), OLD_FLAGS = 0x250ed7;
 
-function compile(c, bytes) {
+function compile(c, bytes, targetBytes) {
   upload(c, PC, bytes);
-  put(c, 140, words(c.entries ? [PC] : [PC, bytes.length]));
-  host(c, c.resident ? c.entries ? 'compile_resident_entries' : 'compile_resident' : c.entries ? 'compile_entries' : 'compile', [1, ...(c.entries ? [0] : [])]);
+  if (targetBytes) upload(c, TARGET, targetBytes);
+  put(c, 140, words(c.entries ? [PC, ...(targetBytes ? [TARGET] : [])] : [PC, bytes.length, ...(targetBytes ? [TARGET, targetBytes.length] : [])]));
+  host(c, c.resident ? c.entries ? 'compile_resident_entries' : 'compile_resident' : c.entries ? 'compile_entries' : 'compile', [targetBytes ? 2 : 1, ...(c.entries ? [0] : [])]);
   const a = arena(c), binding = c.resident ? [c.key, 0x464152, a.readUInt32LE(148), a.readUInt32LE(152)] : [];
   c.binding = binding;
   const at = c.resident ? a.readUInt32LE(156) : c.api.module_ptr() >>> 0;
@@ -68,7 +69,7 @@ function check(c, name, before, expected, expectedCalls, {budget = 1} = {}) {
     helpers: c.calls, arena: {file, sha256: hash(after)}, mapped_ram: [...ram].map(([address, bytes]) => ({address, bytes: bytes.length, sha256: hash(bytes)}))});
 }
 function frame(c, name, {word, popped = 0x003f7fd7, selector = 0x43, target = word ? 0xabcd2000 : TARGET, esp = STACK,
-  flags = OLD_FLAGS, shadow = 0, budget = 1, cancel = 0, raw = descriptor(), faultSlot, context, nt = false, csDenied = false, cachedDenied = false} = {}) {
+  flags = OLD_FLAGS, shadow = 0, budget = 1, cancel = 0, raw = descriptor(), faultSlot, context, nt = false, csDenied = false, cachedDenied = false, refresh = false} = {}) {
   const slot = word ? 2 : 4, values = [target, (0xa5a50000 | selector) >>> 0, popped], chunks = values.map(value => words([value]).subarray(0, slot));
   configure(c, 0x43, raw);
   for (let i = 0; i < (faultSlot ?? 3); i++) upload(c, (esp + i * slot) >>> 0, chunks[i]);
@@ -97,6 +98,7 @@ function frame(c, name, {word, popped = 0x003f7fd7, selector = 0x43, target = wo
         // independent literal flag outcomes; no product mask or transition helper is imported.
         const result = popped === 0 ? word ? 0x240202 : 0x202 : word ? 0x244fd7 : 0x254fd7;
         want.writeUInt32LE(result, 52); exit(want, flags & 0x100 ? 16 : budget > 1 ? 3 : 1, 1, 0, 0, 0, 0, flags & 0x100 ? 7 : 6);
+        if (refresh) {want.writeUInt32LE(TARGET + 1, 48); want.writeUInt32LE(result & ~0x10000, 52); exit(want, 11, 2);}
       }
     }
   }
@@ -124,6 +126,16 @@ for (const resident of [false, true]) for (const entries of [false, true]) for (
   frame(c, 'loaded-RF-survives-cold-target-NeedCode', {word, budget: 2});
   host(c, 'close');
 }
+// capture both target instructions before narrowing live source and destination limits.
+for (const resident of [false, true]) for (const entries of [false, true]) for (const word of [false, true]) {
+  const c = open(engine, resident, entries), code = Buffer.from(word ? '66cf' : 'cf', 'hex');
+  compile(c, code, Buffer.from('9090ebfe', 'hex'));
+  const context = decodeSegments(seed().subarray(SEG));
+  context.caches[1] = cache(descriptor({limit: PC + code.length - 1, pages: false}));
+  frame(c, 'bounded-return-refreshes-CS-before-captured-target-fetch', {word, popped: 0, context,
+    raw: descriptor({limit: TARGET, pages: false}), budget: 4, refresh: true});
+  host(c, 'close');
+}
 // ordinary start and pre-execution faults must disagree about consuming RF.
 for (const resident of [false, true]) {
   const c = open(engine, resident, false); compile(c, Buffer.from('90ebfe', 'hex'));
@@ -149,7 +161,7 @@ assert.deepEqual(pins(), sourcePins, 'source and independent oracles stayed fixe
 const failed = observations.filter(row => !row.passed);
 writeFileSync(join(output, 'result.json'), JSON.stringify({status: failed.length ? 'FAIL' : 'PASS', engine: {path: enginePath, sha256: engine.sha256}, source_pins: sourcePins,
   counts: {contexts: counts.contexts, modules: modules.length, runs: observations.length, passed: observations.length - failed.length, failed: failed.length}, modules, observations,
-  limits: ['same-CPL NT0 IRET16/32, flat CS.D32/SS.B32; currentNT1 retains explicit missing task-return authority',
+  limits: ['same-CPL NT0 IRET16/32, base-zero CS.D32/SS.B32 including bounded live-CS refresh; currentNT1 retains explicit missing task-return authority',
     'live RF lifetime and pre-handler state, no IDT/NMI/DR-handler frame or hardware-debug delivery claim',
     'finite four-profile return/frame/fault/TF coverage and focused ordinary/FP RF checks; no exhaustive ISA, browser, game or throughput claim'],
 }, null, 2) + '\n');
