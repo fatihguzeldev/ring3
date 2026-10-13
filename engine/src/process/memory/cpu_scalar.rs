@@ -9,19 +9,20 @@ use crate::{
 
 impl EngineInstance {
     pub fn cpu_read8(&mut self, address: u32) -> Result<(), HostError> {
-        self.cpu_scalar_read(address, 1)
+        self.cpu_scalar_read::<1>(address)
     }
 
     pub fn cpu_read16(&mut self, address: u32) -> Result<(), HostError> {
-        self.cpu_scalar_read(address, 2)
+        self.cpu_scalar_read::<2>(address)
     }
 
     pub fn cpu_read32(&mut self, address: u32) -> Result<(), HostError> {
-        self.cpu_scalar_read(address, 4)
+        self.cpu_scalar_read::<4>(address)
     }
 
-    fn cpu_scalar_read(&mut self, address: u32, width: u32) -> Result<(), HostError> {
-        // CPU helper lifetime admission is separate from diagnostic reads; DBT checks segments.
+    fn cpu_scalar_read<const WIDTH: u32>(&mut self, address: u32) -> Result<(), HostError> {
+        let width = WIDTH;
+        // cpu helper lifetime admission is separate from diagnostic reads; DBT checks segments.
         let memory = self.memory()?;
         let mut bytes = [0; 4];
         let result = memory
