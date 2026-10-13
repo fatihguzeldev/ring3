@@ -4,7 +4,7 @@ pub(crate) const XCR0: u64 = 7;
 pub(crate) const AVX_ENABLED: bool = XCR0 & 7 == 7;
 
 // activation follows complete guest-path verification independently of baseline avx.
-pub(crate) const F16C_ENABLED: bool = false;
+pub(crate) const F16C_ENABLED: bool = AVX_ENABLED;
 
 pub(crate) struct CpuIdLeaf {
     pub function: u32,
@@ -38,7 +38,8 @@ pub(crate) const CPU_ID_LEAVES: [CpuIdLeaf; 8] = [
                 | 1 << 25
                 | 1 << 26
                 | 1 << 27
-                | ((AVX_ENABLED as u32) << 28),
+                | ((AVX_ENABLED as u32) << 28)
+                | ((F16C_ENABLED as u32) << 29),
             1 | 1 << 4 | 1 << 8 | 1 << 15 | 1 << 19 | 1 << 23 | 1 << 24 | 1 << 25 | 1 << 26,
         ],
     },

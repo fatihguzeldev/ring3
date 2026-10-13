@@ -145,8 +145,8 @@ fn stopped_entry_keeps_strict_admission_and_failed_preparation_atomic() {
     assert_eq!(engine.generation(), 1);
     assert_eq!(engine.arena(), before);
 
-    // f16c remains a valid unsupported extension after baseline avx activation.
-    upload(&mut engine, ENTRY, &[0xc4, 0xe2, 0x79, 0x13, 0xcb]);
+    // avx2 remains a valid unsupported extension after f16c activation.
+    upload(&mut engine, ENTRY, &[0xc4, 0xe1, 0x6d, 0xfe, 0xcb]);
     let before = engine.arena().to_vec();
     let old = engine.artifact_bytes().unwrap().to_vec();
     assert!(matches!(

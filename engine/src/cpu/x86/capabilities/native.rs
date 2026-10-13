@@ -1,4 +1,4 @@
-use super::{AVX_ENABLED, CPU_ID_LEAVES, XCR0};
+use super::{AVX_ENABLED, CPU_ID_LEAVES, F16C_ENABLED, XCR0};
 
 fn leaf(function: u32, subfunction: Option<u32>) -> [u32; 4] {
     CPU_ID_LEAVES
@@ -20,7 +20,8 @@ fn avx_capability_matches_enabled_components_and_standard_image_extent() {
 
 #[test]
 fn extensions_without_complete_execution_support_remain_unadvertised() {
-    assert_eq!(leaf(1, None)[2] & (1 << 12 | 1 << 29), 0); // fma and f16c.
+    assert_eq!(leaf(1, None)[2] & (1 << 12), 0); // fma.
+    assert_eq!(leaf(1, None)[2] & (1 << 29) != 0, F16C_ENABLED);
     let structured = leaf(7, Some(0));
     assert_eq!(structured, [0, 1 << 3 | 1 << 8, 0, 0]); // bmi1/2 only; no avx2/avx512.
     assert_eq!(leaf(0, None)[0], 13);

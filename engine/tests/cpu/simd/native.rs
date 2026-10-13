@@ -45,3 +45,6 @@ mod xstate_upper;
 
 #[path = "avx/helper/native.rs"]
 mod avx_helper;
+
+#[path = "avx/f16c/native.rs"]
+mod f16c;

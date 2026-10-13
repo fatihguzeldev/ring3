@@ -86,7 +86,7 @@ fn forbidden_prefixes_and_reserved_vvvv_keep_strict_and_execution_distinct() {
 fn valid_modern_extensions_and_unpredictable_l_remain_profile_refusals() {
     for bytes in [
         &[0xc4, 0xe1, 0x6d, 0xfe, 0xcb][..], // avx2 vpaddd ymm
-        &[0xc4, 0xe2, 0x79, 0x13, 0xcb],     // f16c vcvtph2ps
+        &[0xc4, 0xe2, 0x6d, 0x40, 0xcb],     // avx2 vpmulld ymm
         &[0xc4, 0xe1, 0x6e, 0x58, 0xcb],     // vaddss with unpredictable L=1
     ] {
         let mut decoder = Decoder::new(32, bytes, DecoderOptions::NONE);
