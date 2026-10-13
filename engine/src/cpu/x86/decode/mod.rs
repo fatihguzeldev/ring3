@@ -1,4 +1,6 @@
 mod atomic;
+#[cfg(test)]
+pub(crate) mod avx;
 mod bit_manipulation;
 mod cache_timestamp;
 mod control;

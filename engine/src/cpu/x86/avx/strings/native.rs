@@ -50,7 +50,7 @@ fn check(
     left_length: usize,
     right_length: usize,
 ) {
-    let control = instruction.0.control;
+    let control = instruction.control();
     let count = if control & 1 == 0 { 16 } else { 8 };
     let mut expected_vector = vector;
     let mut expected_state = state;
@@ -59,7 +59,7 @@ fn check(
         | (u32::from(right_length < count) << 6)
         | (u32::from(left_length < count) << 7)
         | (u32::from(bits & 1 != 0) << 11);
-    match instruction.0.output {
+    match instruction.output() {
         PackedStringOutput::Index => {
             expected_state.registers[Register32::Ecx.index()] = if bits == 0 {
                 count as u32
@@ -116,7 +116,7 @@ fn closed_register_shapes_keep_exact_unaligned_read_sixteen_contract() {
             PackedStringOutput::Mask,
             0xff,
         );
-        assert_eq!(instruction.0.right, PackedStringSource::Memory(address));
+        assert_eq!(instruction.right(), MoveSource::Memory);
         assert_eq!(
             instruction.memory(),
             Some(MemoryRequirement {

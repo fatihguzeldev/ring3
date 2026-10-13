@@ -88,6 +88,12 @@ impl VectorState {
         }
         let mask = self.read(instruction.mask());
         let selected = instruction.selected_bytes(mask);
+        if selected == 0 {
+            if let MaskedInstruction::Load { destination, .. } = instruction {
+                self.publish(destination, [0; 32]);
+            }
+            return Ok(());
+        }
         let data = match instruction {
             MaskedInstruction::Store { source, .. }
             | MaskedInstruction::StoreBytes { source, .. } => self.read(source),
