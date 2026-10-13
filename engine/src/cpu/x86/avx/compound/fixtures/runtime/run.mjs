@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const binaryPath = resolve(process.argv[2] ?? process.env.RING3_AVX_NUMERIC_WASM ?? "");
@@ -11,6 +11,50 @@ const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 if (process.env.RING3_AVX_PROOF_SHA256) {
   assert.equal(sha256(binary), process.env.RING3_AVX_PROOF_SHA256);
 }
+const backendSourceArgument = process.argv[4] ?? process.env.RING3_AVX_NUMERIC_SOURCE_ROOT;
+assert.equal(typeof backendSourceArgument, "string", "supply the matching backend source root");
+assert(backendSourceArgument.length > 0, "supply the matching backend source root");
+const backendSourceRoot = resolve(backendSourceArgument);
+const backendReceiptArgument = process.argv[5] ?? process.env.RING3_AVX_NUMERIC_RECEIPT;
+assert.equal(typeof backendReceiptArgument, "string", "supply the matching backend receipt");
+assert(backendReceiptArgument.length > 0, "supply the matching backend receipt");
+const backendReceiptPath = resolve(backendReceiptArgument);
+const backendReceiptBytes = readFileSync(backendReceiptPath);
+const backendReceipt = JSON.parse(backendReceiptBytes);
+assert.match(backendReceipt.backendSha256, /^[a-f0-9]{64}$/);
+assert.equal(sha256(binary), backendReceipt.backendSha256, "backend differs from its receipt");
+assert(Array.isArray(backendReceipt.sourcePaths) && backendReceipt.sourcePaths.length > 0);
+const requiredBackendSources = [
+  "src/abi/wasm/avx_proof.rs",
+  "src/cpu/x86/avx/mod.rs",
+  "src/cpu/x86/avx/compound/mod.rs",
+  "src/cpu/x86/avx/compound/fixtures/runtime/run.mjs",
+  "src/cpu/x86/simd.rs",
+  "src/cpu/x86/simd/float.rs",
+  "src/cpu/x86/simd/packed.rs",
+  "src/math/ieee.rs",
+];
+const backendSources = backendReceipt.sourcePaths.map((entry) => {
+  assert(Array.isArray(entry) && entry.length === 2, "expected a source path and SHA-256");
+  const [path, expected] = entry;
+  assert.equal(typeof path, "string");
+  assert(path.length > 0 && !isAbsolute(path), "backend source path must be relative");
+  assert.match(expected, /^[a-f0-9]{64}$/);
+  const sourcePath = resolve(backendSourceRoot, path);
+  const fromRoot = relative(backendSourceRoot, sourcePath);
+  assert(
+    fromRoot !== ".." && !fromRoot.startsWith(`..${sep}`) && !isAbsolute(fromRoot),
+    "backend source path escapes its root",
+  );
+  assert.equal(sha256(readFileSync(sourcePath)), expected, `backend source differs: ${path}`);
+  return [path, expected];
+});
+assert.equal(new Set(backendSources.map(([path]) => path)).size, backendSources.length);
+assert.deepEqual(
+  backendSources.map(([path]) => path).sort(),
+  requiredBackendSources.toSorted(),
+  "backend receipt must retain every required source owner",
+);
 const module = new WebAssembly.Module(binary);
 const declarations = WebAssembly.Module.exports(module);
 const probeNames = ["ring3_avx_probe_read", "ring3_avx_probe_run", "ring3_avx_probe_write"];
@@ -667,15 +711,9 @@ for (const [op, regs, imm, len] of [
   run("invalid-request", `${op}/${regs}/${imm}/${len}`, op, regs, imm, len, before, before, 1);
 }
 const sourceRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../../../../..");
-const sourcePaths = [
-  "src/abi/wasm/avx_proof.rs",
-  "src/cpu/x86/avx/mod.rs",
-  "src/cpu/x86/avx/compound/mod.rs",
+const runnerSources = [
   "src/cpu/x86/avx/compound/fixtures/runtime/run.mjs",
-  "src/cpu/x86/simd.rs",
-  "src/cpu/x86/simd/float.rs",
-  "src/cpu/x86/simd/packed.rs",
-  "src/math/ieee.rs",
+  "src/cpu/x86/avx/compound/wasm.rs",
 ].map((path) => [path, sha256(readFileSync(resolve(sourceRoot, path)))]);
 const receipt = {
   backend: binaryPath,
@@ -683,10 +721,16 @@ const receipt = {
   runs,
   generatedModules: calls.size,
   groups,
-  sourcePaths,
+  backendSourceRoot,
+  backendReceipt: backendReceiptPath,
+  backendReceiptSha256: sha256(backendReceiptBytes),
+  backendSources,
+  runnerSources,
+  sourceScope:
+    "the pinned external backend snapshot is separate from current runner sources; this is not a current production build claim",
   numericExecution:
     "real Rust-compiled Wasm shared CPU/math semantics through direct generated Wasm import; JavaScript literal oracles",
-  publicAVX: false,
+  backendPublicAVX: backendReceipt.publicAVX,
   node: process.version,
 };
 if (process.argv[3]) {
