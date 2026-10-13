@@ -77,3 +77,6 @@ mod cpu_call_gates_wasm;
 
 #[path = "exceptions/availability/optional/wasm.rs"]
 mod cpu_optional_availability;
+
+#[path = "system_registers/wasm.rs"]
+mod cpu_system_registers;
