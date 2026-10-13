@@ -143,8 +143,21 @@ fn typed_rel8_targets_prefixes_and_fetch_boundaries_are_exact() {
                 assert!(memory.is_code_current(instruction.code_snapshot()));
             }
         }
+        let memory = code(&[0x66, opcode, 0], PC);
+        let instruction = decode_one(&memory, GuestAddress(PC)).unwrap();
+        assert_eq!(
+            instruction.operation(),
+            &Operation::CountBranch {
+                kind,
+                target: GuestAddress(PC + 3)
+            }
+        );
+        assert_eq!(
+            (instruction.length(), instruction.next_pc()),
+            (3, GuestAddress(PC + 3))
+        );
+        assert!(memory.is_code_current(instruction.code_snapshot()));
         for (prefix, feature) in [
-            (0x66, UnsupportedFeature::Opcode),
             (0x67, UnsupportedFeature::Opcode),
             (0xf2, UnsupportedFeature::Opcode),
             (0xf3, UnsupportedFeature::Opcode),

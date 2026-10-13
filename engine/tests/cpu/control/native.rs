@@ -13,6 +13,9 @@ mod cpu_carry_control;
 #[path = "branch/count/native/dword.rs"]
 mod cpu_count_branches;
 
+#[path = "branch/short/native/word.rs"]
+mod cpu_word_short_control;
+
 #[path = "exceptions/native/flags.rs"]
 mod cpu_flags_exceptions;
 

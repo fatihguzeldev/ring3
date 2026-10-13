@@ -10,7 +10,7 @@ use ring3_engine::{
         x86::{
             Register32,
             decode::{DecodeError, decode_one},
-            ir::{BranchTarget, Condition, Location32, Operation, Value32},
+            ir::{BranchTarget, Condition, CountBranchKind, Location32, Operation, Value32},
         },
     },
     memory::{
@@ -276,10 +276,32 @@ fn word_jump_prefix_aliases_and_other_word_jump_families_remain_closed() {
             );
         }
     }
+    for (bytes, expected) in [
+        (
+            [0x66, 0xeb, 0],
+            Operation::Jump {
+                target: BranchTarget::Direct(GuestAddress(CODE + 3)),
+            },
+        ),
+        (
+            [0x66, 0x74, 0],
+            Operation::ConditionalJump {
+                condition: Condition::Equal,
+                target: GuestAddress(CODE + 3),
+            },
+        ),
+    ] {
+        let memory = code_space(CODE, &bytes);
+        let instruction = decode_one(&memory, GuestAddress(CODE)).unwrap();
+        assert_eq!(instruction.operation(), &expected, "{bytes:02x?}");
+        assert_eq!(
+            (instruction.length(), instruction.next_pc()),
+            (3, GuestAddress(CODE + 3))
+        );
+        assert!(memory.is_code_current(instruction.code_snapshot()));
+    }
     for bytes in [
-        &[0x66, 0xeb, 0][..],
-        &[0x66, 0x74, 0],
-        &[0x66, 0x66, 0x0f, 0x84, 0, 0],
+        &[0x66, 0x66, 0x0f, 0x84, 0, 0][..],
         &[0x66, 0x66, 0xff, 0xe0],
         &[0x66, 0x66, 0xff, 0x23],
     ] {
@@ -712,8 +734,13 @@ fn word_jcc_strict_prefixes_short_count_neighbors_and_payloads_stay_distinct() {
         }
         let short = 0x70 + index as u8;
         assert_eq!(
-            decode_one(&code_space(CODE, &[0x66, short, 0]), GuestAddress(CODE)).err(),
-            Some(opcode)
+            decode_one(&code_space(CODE, &[0x66, short, 0]), GuestAddress(CODE))
+                .unwrap()
+                .operation(),
+            &Operation::ConditionalJump {
+                condition,
+                target: GuestAddress(CODE + 3)
+            }
         );
         for (bytes, target) in [
             (&[short, 0][..], CODE + 2),
@@ -730,10 +757,20 @@ fn word_jcc_strict_prefixes_short_count_neighbors_and_payloads_stay_distinct() {
             );
         }
     }
-    for count in 0xe0..=0xe3 {
+    for (count, kind) in [
+        (0xe0, CountBranchKind::LoopNotEqual),
+        (0xe1, CountBranchKind::LoopEqual),
+        (0xe2, CountBranchKind::Loop),
+        (0xe3, CountBranchKind::EcxZero),
+    ] {
         assert_eq!(
-            decode_one(&code_space(CODE, &[0x66, count, 0]), GuestAddress(CODE)).err(),
-            Some(opcode)
+            decode_one(&code_space(CODE, &[0x66, count, 0]), GuestAddress(CODE))
+                .unwrap()
+                .operation(),
+            &Operation::CountBranch {
+                kind,
+                target: GuestAddress(CODE + 3)
+            }
         );
     }
 }
