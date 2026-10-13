@@ -444,6 +444,14 @@ pub(super) fn lower(
             }
             _ => {
                 let descriptor = match instruction.code() {
+                    Code::VEX_Vpcmpgtb_ymm_ymm_ymmm256 => 0x01000581,
+                    Code::VEX_Vpcmpgtw_ymm_ymm_ymmm256 => 0x01000582,
+                    Code::VEX_Vpcmpgtd_ymm_ymm_ymmm256 => 0x01000583,
+                    Code::VEX_Vpcmpeqb_ymm_ymm_ymmm256 => 0x01000584,
+                    Code::VEX_Vpcmpeqw_ymm_ymm_ymmm256 => 0x01000585,
+                    Code::VEX_Vpcmpeqd_ymm_ymm_ymmm256 => 0x01000586,
+                    Code::VEX_Vpcmpeqq_ymm_ymm_ymmm256 => 0x010005a3,
+                    Code::VEX_Vpcmpgtq_ymm_ymm_ymmm256 => 0x010005a4,
                     Code::VEX_Vpaddq_ymm_ymm_ymmm256 => 0x01000587,
                     Code::VEX_Vpsubb_ymm_ymm_ymmm256 => 0x01000596,
                     Code::VEX_Vpsubw_ymm_ymm_ymmm256 => 0x01000597,

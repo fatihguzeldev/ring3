@@ -2,7 +2,7 @@ use super::*;
 
 pub(super) fn decode(kind: u8, slots: Slots, immediate: u8) -> Result<AvxSemantic, AvxDecodeError> {
     let width = if kind & 0x80 != 0 {
-        if !matches!(kind & 0x7f, 7 | 22..=28) {
+        if !matches!(kind & 0x7f, 1..=7 | 22..=28 | 35 | 36) {
             return Err(AvxDecodeError::Family);
         }
         VectorWidth::Ymm
@@ -75,3 +75,7 @@ pub(super) fn decode(kind: u8, slots: Slots, immediate: u8) -> Result<AvxSemanti
 #[cfg(test)]
 #[path = "integer/native.rs"]
 mod native;
+
+#[cfg(test)]
+#[path = "integer/compare/native.rs"]
+mod compare;

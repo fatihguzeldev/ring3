@@ -59,3 +59,6 @@ mod wrapping_capability;
 
 #[path = "avx/blocks/capability/native.rs"]
 mod blocks_capability;
+
+#[path = "avx/integer/compare/capability/native.rs"]
+mod comparison_capability;

@@ -148,9 +148,9 @@ fn every_immediate_preserves_operand_error_priority_for_all_legacy_kinds() {
 
 #[test]
 fn unknown_integer_kinds_preserve_family_error_priority() {
-    for kind in
-        (0..=255).filter(|kind| !(1..=44).contains(kind) && !matches!(kind, 0x87 | 0x96..=0x9c))
-    {
+    for kind in (0..=255).filter(|kind| {
+        !(1..=44).contains(kind) && !matches!(kind, 0x81..=0x87 | 0x96..=0x9c | 0xa3 | 0xa4)
+    }) {
         for operands in [0, 1 << 9, 1 << 12, 1 << 13, 0x3fff] {
             for immediate in [0, 1, 255] {
                 assert_eq!(
