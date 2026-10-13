@@ -27,7 +27,7 @@ save('producer-run.mjs', readFileSync(join(root, 'engine/tests/windows/provider/
 save('producer-wrapper.rs', readFileSync(join(root, 'engine/tests/windows/provider/callbacks/wasm/exit.rs')));
 const engineBytes = new Uint8Array(fixtureEngine.bytes); save('engine.wasm', engineBytes);
 const engineModule = fixtureEngine.module, exports = WebAssembly.Module.exports(engineModule);
-const apiArities = {open: 3, close: 0, arena_ptr: 0, begin_image_input: 1, append_image_input: 2, load_pe32_linked_v4_input_at: 2, start_loaded_image: 2, read32: 1, compile_resident_entries: 2, acknowledge_resident_installation: 5, dispatcher_module: 2, guard_dispatch_entry: 5, find_installed_resident: 3, guard_resident: 7, capture_resident_call: 6, complete_resident_windows_call: 5, begin_resident_callback: 11, authorize_resident_callback: 5, select_resident_callback_unit: 7, capture_active_resident_callback_call: 7, complete_active_resident_callback_windows_call: 6, complete_active_resident_callback_call: 7, finish_resident_callback: 5, abort_callback: 3, complete_resident_call: 6, generation: 0, module_ptr: 0, module_len: 0, resident_module: 2, store_resident32: 6};
+const apiArities = {cpu_read32: 1, cpu_store_resident32: 6, open: 3, close: 0, arena_ptr: 0, begin_image_input: 1, append_image_input: 2, load_pe32_linked_v4_input_at: 2, start_loaded_image: 2, read32: 1, compile_resident_entries: 2, acknowledge_resident_installation: 5, dispatcher_module: 2, guard_dispatch_entry: 5, find_installed_resident: 3, guard_resident: 7, capture_resident_call: 6, complete_resident_windows_call: 5, begin_resident_callback: 11, authorize_resident_callback: 5, select_resident_callback_unit: 7, capture_active_resident_callback_call: 7, complete_active_resident_callback_windows_call: 6, complete_active_resident_callback_call: 7, finish_resident_callback: 5, abort_callback: 3, complete_resident_call: 6, generation: 0, module_ptr: 0, module_len: 0, resident_module: 2, store_resident32: 6};
 const SIZE = 4612, TRANSFER = 140, OUTER = 0x80000011, RETURN = 0x80000012, ERROR = 0xf1234567, CODE = 0xffffffff;
 const outerHex = '68674523f1ff1564314000e8f0000000c7050030400011111111ebfe';
 const bodyHex = 'ff15603140003598badc0e50ff1568314000c7050430400022222222c3';
@@ -69,8 +69,8 @@ function compile(ctx, entries, gates, suffix, slot, memory) {
   assert.deepEqual(fields.slice(0, 2), [1, 24]); const [, , low, high, pointer, length] = fields;
   assert.ok((low !== 0 || high !== 0) && pointer > 0 && length > 8 && length <= 65536 && pointer + length <= ctx.bytes.length);
   before.set(words(fields), TRANSFER); assert.deepEqual(arena(ctx), before);
-  const bytes = ctx.bytes.slice(pointer, pointer + length), run = child(ctx, bytes, `${ctx.label}-${suffix}`, memory ? ['guard_resident', 'read32', 'store_resident32'] : ['guard_resident']);
-  const unit = {low, high, pointer, length, bytes, run, slot, suffix}; ctx.units.push(unit); assert.ok(ctx.units.length <= 8);
+  const bytes = ctx.bytes.slice(pointer, pointer + length), run = child(ctx, bytes, `${ctx.label}-${suffix}`, memory ? ['guard_resident', 'cpu_read32', 'cpu_store_resident32'] : ['guard_resident']);
+  const unit = {low, high, pointer, length, bytes, run, slot, suffix, cpuScalar: memory}; ctx.units.push(unit); assert.ok(ctx.units.length <= 8);
   ctx.table.set(slot, run); const ack = arena(ctx); assert.equal(ctx.api.acknowledge_resident_installation(ctx.low, ctx.high, low, high, slot), 0);
   ack.set(record('R3IN', 32, [low, high, slot, 0]), TRANSFER); assert.deepEqual(arena(ctx), ack); return unit;
 }
@@ -106,7 +106,7 @@ function load(base, mode, ordinal) {
   return {ctx, base, mode, label, entry, homeEntry, returnGate, body, caller, outer, home, active, dispatcher};
 }
 function execute(path, unit, stage, expectedState, reason, retired, detail = 0, helper = false, version = 3) {
-  const {ctx} = path, expected = arena(ctx); expected.set(stateRecord(expectedState), 0); expected.set(exitRecord(reason, retired, detail, version), 56); if (helper) expected.set(helperRecord(0), 100);
+  const {ctx} = path, expected = arena(ctx); expected.set(stateRecord(expectedState), 0); expected.set(exitRecord(reason, retired, detail, unit.cpuScalar ? 6 : version), 56); if (helper) expected.set(record('R3MH', 40, [0, 0, 0, 0, 0, 4], 10), 100);
   assert.equal(unit.run(ctx.base, ctx.base + 56, 64, ctx.base + 96), 0, stage); assert.deepEqual(arena(ctx), expected, `${stage}: whole literal arena`);
   save(`${path.label}-${stage}.arena.bin`, arena(ctx)); trace.push({path: path.label, stage, retired, observed_state: state(ctx), observed_exit_hex: hex(arena(ctx).subarray(56, 96))});
 }

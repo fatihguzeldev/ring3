@@ -41,6 +41,7 @@ function record(magic, length, fields, version = 1) {
 }
 function state(registers, pc) { return record('R3ST', 56, [...registers, pc, 2]); }
 function helper(value) { return record('R3MH', 40, [0, value, 0, 0, 0, 0]); }
+function cpuHelper(value) { return record('R3MH', 40, [0, value, 0, 0, 0, 4], 10); }
 function authoredPe() {
   const bytes = Buffer.alloc(2048), view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const put16 = (at, value) => view.setUint16(at, value, true), put32 = (at, value) => view.setUint32(at, value, true);
@@ -91,7 +92,7 @@ new DataView(dataPage.buffer).setUint32(0x158, GATE + 32, true);
 const fixupPage = new Uint8Array(4096); fixupPage.set(image.subarray(0x600, 0x800));
 const gatePage = new Uint8Array(4096); gates.forEach(([pc]) => gatePage.set([0x0f, 0x0b], pc - GATE));
 const receipt = record('R3LI', 96, [BASE, 0x6000, ENTRY, 5, GATE, 3, 0, 0, ...gates.flat(), 0, 0, 0, 0, 0, 0], 5);
-const names = ['open', 'close', 'arena_ptr', 'begin_image_input', 'append_image_input', 'load_pe32_linked_v5_input_at', 'start_loaded_image', 'read32', 'compile_entries', 'compile_resident_entries', 'generation', 'module_ptr', 'module_len', 'guard', 'guard_resident', 'store32', 'store_resident32', 'capture_call', 'capture_resident_call', 'complete_windows_call', 'complete_resident_windows_call'];
+const names = ['open', 'close', 'arena_ptr', 'begin_image_input', 'append_image_input', 'load_pe32_linked_v5_input_at', 'start_loaded_image', 'read32', 'compile_entries', 'compile_resident_entries', 'generation', 'module_ptr', 'module_len', 'guard', 'guard_resident', 'store32', 'store_resident32', 'capture_call', 'capture_resident_call', 'complete_windows_call', 'complete_resident_windows_call', 'cpu_read32', 'cpu_store32', 'cpu_store_resident32'];
 const observations = [], pages = [], modules = [], rows = [], controls = [];
 let generatedCalls = 0, guestRetired = 0, captures = 0, completions = 0, hostReads = 0;
 function snapshot(ctx) { return new Uint8Array(ctx.memory.buffer).slice(ctx.base, ctx.base + ARENA); }
@@ -139,8 +140,8 @@ function compile(ctx, entries, gateSpecs, name) {
   assert.ok(unit.pointer > 0 && unit.length > 8 && unit.pointer + unit.length <= ctx.memory.buffer.byteLength);
   observe(ctx, `compile-${name}`);
   const bytes = new Uint8Array(ctx.memory.buffer).slice(unit.pointer, unit.pointer + unit.length), module = new WebAssembly.Module(bytes);
-  const guard = ctx.owner === 'replacement' ? 'guard' : 'guard_resident', store = ctx.owner === 'replacement' ? 'store32' : 'store_resident32';
-  const helpers = name === 'gates' ? [] : ['read32', store];
+  const guard = ctx.owner === 'replacement' ? 'guard' : 'guard_resident', store = ctx.owner === 'replacement' ? 'cpu_store32' : 'cpu_store_resident32';
+  const helpers = name === 'gates' ? [] : ['cpu_read32', store];
   assert.deepEqual(WebAssembly.Module.imports(module), [{module: 'env', name: 'memory', kind: 'memory'}, ...[guard, ...helpers].map(name => ({module: 'ring3', name, kind: 'function'}))]);
   assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
   unit.run = new WebAssembly.Instance(module, {env: {memory: ctx.memory}, ring3: ctx.api}).exports.run; assert.equal(unit.run.length, 4);
@@ -151,8 +152,8 @@ function compile(ctx, entries, gateSpecs, name) {
 function generatedRun(ctx, unit, stage, gateOnly) {
   const [pc, id] = gates[stage.gate], retired = gateOnly ? 0 : stage.retired;
   ctx.expected.set(state(stage.registers, pc));
-  ctx.expected.set(record('R3EX', 40, [ctx.owner === 'resident' && !gateOnly ? 3 : 8, retired, ctx.owner === 'resident' && !gateOnly ? 0 : id, 0, 0, 0], ctx.owner === 'resident' && !gateOnly ? 2 : 3), 56);
-  ctx.expected.set(helper(0), 100);
+  ctx.expected.set(record('R3EX', 40, [ctx.owner === 'resident' && !gateOnly ? 3 : 8, retired, ctx.owner === 'resident' && !gateOnly ? 0 : id, 0, 0, 0], gateOnly ? 3 : 6), 56);
+  ctx.expected.set(cpuHelper(0), 100);
   assert.equal(unit.run(ctx.base, ctx.base + 56, 64, ctx.base + 96), 0);
   observe(ctx, `${gateOnly ? 'gate' : 'caller'}-run-${stage.start}`); generatedCalls++; guestRetired += retired;
 }

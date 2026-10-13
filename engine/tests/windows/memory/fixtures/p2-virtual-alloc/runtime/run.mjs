@@ -9,7 +9,7 @@ const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const engineBytes = readFileSync(enginePath), engineModule = new WebAssembly.Module(engineBytes);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
 const arenaSize = 4612, transfer = 140, controls = [], peRows = [], modules = [];
-const apiNames = ['open', 'close', 'arena_ptr', 'map', 'protect', 'upload', 'read32', 'write8', 'compile_entries', 'compile_resident_entries', 'generation', 'module_ptr', 'module_len', 'guard', 'guard_resident', 'store32', 'store_resident32', 'begin_image_input', 'append_image_input', 'load_pe32_linked_v4_input_at', 'start_loaded_image', 'capture_call', 'capture_resident_call', 'complete_windows_call', 'complete_resident_windows_call'];
+const apiNames = ['open', 'close', 'arena_ptr', 'map', 'protect', 'upload', 'read32', 'write8', 'compile_entries', 'compile_resident_entries', 'generation', 'module_ptr', 'module_len', 'guard', 'guard_resident', 'store32', 'store_resident32', 'begin_image_input', 'append_image_input', 'load_pe32_linked_v4_input_at', 'start_loaded_image', 'capture_call', 'capture_resident_call', 'complete_windows_call', 'complete_resident_windows_call', 'cpu_read32', 'cpu_store32', 'cpu_store_resident32'];
 let ordinal = 0;
 let guestRetired = 0, callCaptures = 0, callCompletions = 0;
 
@@ -183,7 +183,7 @@ function runToGate(path, index, scheduling = false) {
     for (const cancel of [0, 1]) {
       refresh(ctx).view.setUint32(ctx.base + 96, cancel, true);
       const before = snapshot(ctx), expected = before.slice();
-      expected.set(record('R3EX', 40, [cancel ? 2 : 1, 0, 0, 0, 0, 0], ctx.owner === 'replacement' ? 3 : 2), 56);
+      expected.set(record('R3EX', 40, [cancel ? 2 : 1, 0, 0, 0, 0, 0], 6), 56);
       assert.equal(caller.run(ctx.base, ctx.base + 56, 0, ctx.base + 96), 0);
       assert.deepEqual(snapshot(ctx), expected); controls.push({owner: ctx.owner, name: cancel ? 'cancel_before_retirement' : 'zero_budget', status: 0});
     }
@@ -196,10 +196,10 @@ function runToGate(path, index, scheduling = false) {
   guestRetired += ctx.view.getUint32(ctx.base + 76, true);
   let unit = caller;
   if (ctx.owner === 'resident') {
-    assert.deepEqual(snapshot(ctx).subarray(56, 96), record('R3EX', 40, [3, stage.retired, 0, 0, 0, 0], 2));
+    assert.deepEqual(snapshot(ctx).subarray(56, 96), record('R3EX', 40, [3, stage.retired, 0, 0, 0, 0], 6));
     unit = path.gateUnit; assert.equal(unit.run(ctx.base, ctx.base + 56, 1, ctx.base + 96), 0);
   }
-  assert.deepEqual(snapshot(ctx).subarray(56, 96), record('R3EX', 40, [8, ctx.owner === 'resident' ? 0 : stage.retired, stage.id, 0, 0, 0], 3));
+  assert.deepEqual(snapshot(ctx).subarray(56, 96), record('R3EX', 40, [8, ctx.owner === 'resident' ? 0 : stage.retired, stage.id, 0, 0, 0], 6));
   const returnOffset = index === 6 ? 254 : stages[index + 1].offset;
   assert.equal(read(ctx, expected.registers[4]), path.entry + returnOffset, 'guest CALL wrote the genuine return address');
   stage.arguments.forEach((argument, slot) => assert.equal(read(ctx, expected.registers[4] + 4 + slot * 4), argument, 'guest PUSH argument order'));

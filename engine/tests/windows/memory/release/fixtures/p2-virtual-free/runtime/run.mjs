@@ -37,7 +37,7 @@ const stages = [
   {start: 65, next: 84, retired: 5, gate: 1, arguments: [0, 4097, 0x3000, 4], result: ALLOCATION},
   {start: 84, next: 99, retired: 4, gate: 3, arguments: [], result: 0x5a},
 ];
-const apiNames = ['open', 'close', 'arena_ptr', 'map', 'protect', 'upload', 'read32', 'compile_entries', 'compile_resident_entries', 'generation', 'module_ptr', 'module_len', 'store32', 'store_resident32', 'guard', 'guard_resident', 'capture_call', 'capture_resident_call', 'complete_windows_call', 'complete_resident_windows_call'];
+const apiNames = ['open', 'close', 'arena_ptr', 'map', 'protect', 'upload', 'read32', 'compile_entries', 'compile_resident_entries', 'generation', 'module_ptr', 'module_len', 'store32', 'store_resident32', 'guard', 'guard_resident', 'capture_call', 'capture_resident_call', 'complete_windows_call', 'complete_resident_windows_call', 'cpu_read32', 'cpu_store32', 'cpu_store_resident32'];
 const modules = [], rows = [], controls = [], observations = [], pages = [];
 let generatedCalls = 0, guestRetired = 0, captures = 0, completions = 0, hostReads = 0;
 
@@ -130,7 +130,7 @@ function compile(ctx, entries, gates, name, helpers) {
   assert.deepEqual(WebAssembly.Module.imports(module), [{module: 'env', name: 'memory', kind: 'memory'}, ...[guard, ...helpers].map(name => ({module: 'ring3', name, kind: 'function'}))]);
   assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
   const generated = new WebAssembly.Instance(module, {env: {memory: ctx.memory}, ring3: ctx.api});
-  assert.equal(generated.exports.run.length, 4); unit.run = generated.exports.run;
+  assert.equal(generated.exports.run.length, 4); unit.run = generated.exports.run; unit.cpuScalar = helpers.length > 0;
   const filename = `${ctx.owner}-${name}.wasm`; save(filename, bytes);
   modules.push({owner: ctx.owner, name, filename, sha256: hash(bytes), helpers, generation: unit.generation ?? 0, id: unit.low ?? 0, key_low: ctx.low, key_high: ctx.high, pointer: unit.pointer, length: unit.length});
   return unit;
@@ -148,8 +148,8 @@ function gateRegisters(index) {
 }
 function generatedRun(ctx, unit, registers, pc, reason, retired, detail, helper, version, name) {
   const expected = snapshot(ctx); expected.set(record('R3ST', 56, [...registers, pc, FLAG]));
-  expected.set(record('R3EX', 40, [reason, retired, detail, 0, 0, 0], version), 56);
-  expected.set(record('R3MH', 40, [0, helper, 0, 0, 0, 0]), 100);
+  expected.set(record('R3EX', 40, [reason, retired, detail, 0, 0, 0], unit.cpuScalar ? 6 : version), 56);
+  expected.set(record('R3MH', 40, [0, helper, 0, 0, 0, 4], 10), 100);
   assert.equal(unit.run(ctx.base, ctx.base + 56, 64, ctx.base + 96), 0);
   observe(ctx, expected, name); generatedCalls++; guestRetired += retired;
 }
@@ -199,8 +199,8 @@ function finish(ctx, unit, token, index) {
 }
 
 for (const [ordinal, owner] of [[1, 'replacement'], [2, 'resident']]) {
-  const ctx = fresh(owner, ordinal), store = owner === 'replacement' ? 'store32' : 'store_resident32';
-  const callerHelpers = [[store], [store], ['read32', store], [store], ['read32', store], [store]];
+  const ctx = fresh(owner, ordinal), store = owner === 'replacement' ? 'cpu_store32' : 'cpu_store_resident32';
+  const callerHelpers = [[store], [store], ['cpu_read32', store], [store], ['cpu_read32', store], [store]];
   let gateUnit, callers = [];
   if (owner === 'resident') {
     gateUnit = compile(ctx, gateSpecs.map(row => row[0]), gateSpecs, 'gates', []);

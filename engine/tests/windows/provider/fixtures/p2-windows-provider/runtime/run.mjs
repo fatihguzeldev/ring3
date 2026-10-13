@@ -65,7 +65,7 @@ writeFileSync(join(outputDir, 'engine.wasm'), engineBytes);
 assert.ok(WebAssembly.validate(engineBytes));
 const engineModule = new WebAssembly.Module(engineBytes);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), [], 'engine-owned provider needs no JS imports');
-const names = ['open', 'close', 'arena_ptr', 'map', 'protect', 'upload', 'compile_with_gates', 'compile_resident_with_gates', 'generation', 'module_ptr', 'module_len', 'guard', 'guard_resident', 'read32', 'write32', 'store32', 'store_resident32', 'capture_call', 'capture_resident_call', 'complete_call', 'complete_resident_call', 'complete_windows_call', 'complete_resident_windows_call', 'begin_callback', 'abort_callback'];
+const names = ['open', 'close', 'arena_ptr', 'map', 'protect', 'upload', 'compile_with_gates', 'compile_resident_with_gates', 'generation', 'module_ptr', 'module_len', 'guard', 'guard_resident', 'read32', 'write32', 'store32', 'store_resident32', 'capture_call', 'capture_resident_call', 'complete_call', 'complete_resident_call', 'complete_windows_call', 'complete_resident_windows_call', 'begin_callback', 'abort_callback', 'cpu_read32', 'cpu_store32', 'cpu_store_resident32'];
 let nextInstance = 0;
 
 function refresh(engine) {
@@ -90,6 +90,7 @@ function words(fields) {
 function cpu(registers, eip) { return record('R3ST', 56, [...registers, eip, oracle.eflags]); }
 function exit(reason, retired, detail = 0, version = 3) { return record('R3EX', 40, [reason, retired, detail, 0, 0, 0], version); }
 function helper(value = 0) { return record('R3MH', 40, [0, value, 0, 0, 0, 0]); }
+function cpuHelper(value = 0) { return record('R3MH', 40, [0, value, 0, 0, 0, 4], 10); }
 function operation(engine, label, action, status = 0, patches = []) {
   const expected = arena(engine);
   for (const [offset, bytes] of patches) expected.set(bytes, offset);
@@ -148,7 +149,7 @@ function child(engine, label, blocks, gates, residentId) {
   }
   assert.ok(WebAssembly.validate(bytes));
   const module = new WebAssembly.Module(bytes), guard = residentId === undefined ? 'guard' : 'guard_resident';
-  const stores = blocks.some(([pc]) => pc < 0x2000) ? [residentId === undefined ? 'store32' : 'store_resident32'] : [];
+  const stores = blocks.some(([pc]) => pc < 0x2000) ? [residentId === undefined ? 'cpu_store32' : 'cpu_store_resident32'] : [];
   const sort = imports => imports.sort((a, b) => `${a.module}.${a.name}`.localeCompare(`${b.module}.${b.name}`));
   assert.deepEqual(sort(WebAssembly.Module.imports(module)), sort([{module: 'env', name: 'memory', kind: 'memory'}, ...[guard, ...stores].map(name => ({module: 'ring3', name, kind: 'function'}))]), `${label}: only actual guard/store imports`);
   const run = new WebAssembly.Instance(module, {env: {memory: engine.memory}, ring3: Object.fromEntries([guard, ...stores].map(name => [name, engine.api[name]]))}).exports.run;
@@ -187,8 +188,8 @@ function dispatch(ctx, stage, extra = '') {
   const {engine, caller, gateOwner} = ctx, resident = engine.owner === 'resident';
   operation(engine, `${engine.owner} ${extra} caller dispatch`, () => caller.run(engine.base, engine.base + 56, budget, engine.base + 96), 0, [
     [0, cpu(stage.stop_registers, stage.gate_pc)],
-    [56, exit(resident ? 3 : 8, stage.retired, resident ? 0 : stage.id, resident ? 2 : 3)],
-    [100, helper()],
+    [56, exit(resident ? 3 : 8, stage.retired, resident ? 0 : stage.id, 6)],
+    [100, cpuHelper()],
   ]);
   if (resident) operation(engine, 'actual Gate B dispatch retires0', () => gateOwner.run(engine.base, engine.base + 56, budget, engine.base + 96), 0, [[56, exit(8, 0, stage.id)]]);
   stack(engine, stage.stack_values, `${engine.owner} ${extra} real PUSH/CALL words`);
@@ -272,7 +273,7 @@ for (const owner of ['replacement', 'resident']) {
     }
   }
   const final = oracle.final;
-  operation(engine, `${owner}: actual final caller LEA/JMP`, () => caller.run(engine.base, engine.base + 56, budget, engine.base + 96), 0, [[0, cpu(final.registers, final.eip)], [56, exit(final.reason, final.retired, 0, owner === 'resident' ? 2 : 3)]]);
+  operation(engine, `${owner}: actual final caller LEA/JMP`, () => caller.run(engine.base, engine.base + 56, budget, engine.base + 96), 0, [[0, cpu(final.registers, final.eip)], [56, exit(final.reason, final.retired, 0, 6)]]);
   retired += final.retired; assert.equal(retired, oracle.total_retired);
   stack(engine, final.stack_values, `${owner}: final stack words and neighbors`);
   observations.push({owner, final_registers: final.registers, final_eip: final.eip, total_retired: retired});
@@ -314,14 +315,14 @@ for (const [label, gateId, tag] of [['unknown gate', 0xabcdef01, 2], ['wrong con
   operation(engine, 'existing engine begins callback frame', () => engine.api.begin_callback(engine.low, engine.high, 1, 1, 0x1000, 0x2100, 0x10002, 0), 0, [[0, cpu(callbackRegisters, 0x1000)], [56, exit(3, 0)], [transfer, record('R3CB', 64, [2, 1, 1, 0, 0x1000, 0x8ff8, 0x2100, 0x10002, 0, 0, 1, 0])]]);
   operation(engine, 'suspended outer provider remains Busy', () => provider(ctx, 1), 12);
   const innerRegisters = [0x13579bdf, 0x2468ace0, 0x89abcdef, 0x10203040, 0x8ff4, 0x55667788, 0x99aabbcc, 0xddeeff00];
-  operation(engine, 'real callback inner CALL reaches Get Gate', () => caller.run(engine.base, engine.base + 56, budget, engine.base + 96), 0, [[0, cpu(innerRegisters, 0x2000)], [56, exit(8, 1, 0x10001)], [100, helper()]]);
+  operation(engine, 'real callback inner CALL reaches Get Gate', () => caller.run(engine.base, engine.base + 56, budget, engine.base + 96), 0, [[0, cpu(innerRegisters, 0x2000)], [56, exit(8, 1, 0x10001, 6)], [100, cpuHelper()]]);
   const inner = {...first, stop_registers: innerRegisters};
   capture(ctx, inner, 3);
   operation(engine, 'matching inner owner is still outside provider scope', () => provider(ctx, 3), 12);
   stack(engine, [0x1005, 0x2100, 0x1005, 0xddeeff00], 'callback provider refusal preserves nested RAM');
   const innerReturned = [0, 0x2468ace0, 0x89abcdef, 0x10203040, 0x8ff8, 0x55667788, 0x99aabbcc, 0xddeeff00];
   generic(ctx, inner, 3, 0, innerReturned);
-  operation(engine, 'old callback abort restores exact outer stop', () => engine.api.abort_callback(engine.low, engine.high, 2), 0, [[0, cpu(first.stop_registers, first.gate_pc)], [56, exit(8, 1, first.id)]]);
+  operation(engine, 'old callback abort restores exact outer stop', () => engine.api.abort_callback(engine.low, engine.high, 2), 0, [[0, cpu(first.stop_registers, first.gate_pc)], [56, exit(8, 1, first.id, 6)]]);
   complete(ctx, first, 1); close(ctx);
   observations.push({callback_outer_status: 12, callback_inner_status: 12, provider_after_abort: 'Get0'});
 }

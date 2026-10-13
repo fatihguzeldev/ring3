@@ -9,7 +9,7 @@ const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const engineBytes = readFileSync(enginePath), engineModule = new WebAssembly.Module(engineBytes);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
 const arenaSize = 4612, transfer = 140, controls = [], paths = [], modules = [];
-const apiNames = ['open', 'close', 'arena_ptr', 'protect', 'upload', 'read32', 'store_resident32', 'compile_resident_entries', 'generation', 'guard_resident', 'acknowledge_resident_installation', 'begin_image_input', 'append_image_input', 'load_pe32_linked_v4_input_at', 'start_loaded_image', 'capture_resident_call', 'complete_resident_call', 'complete_resident_windows_call', 'begin_resident_callback', 'authorize_resident_callback', 'select_resident_callback_unit', 'finish_resident_callback', 'capture_active_resident_callback_call', 'complete_active_resident_callback_windows_call'];
+const apiNames = ['open', 'close', 'arena_ptr', 'protect', 'upload', 'read32', 'store_resident32', 'compile_resident_entries', 'generation', 'guard_resident', 'acknowledge_resident_installation', 'begin_image_input', 'append_image_input', 'load_pe32_linked_v4_input_at', 'start_loaded_image', 'capture_resident_call', 'complete_resident_call', 'complete_resident_windows_call', 'begin_resident_callback', 'authorize_resident_callback', 'select_resident_callback_unit', 'finish_resident_callback', 'capture_active_resident_callback_call', 'complete_active_resident_callback_windows_call', 'cpu_read32', 'cpu_store_resident32'];
 let ordinal = 0;
 let guestRetired = 0, captures = 0, providerCompletions = 0, finishes = 0;
 
@@ -63,7 +63,7 @@ function instantiate(ctx, bytes, label, binding = {}) {
   modules.push({label, owner: ctx.owner, sha256: hash(bytes), imports});
   return {...binding, run: instance.exports.run, helpers};
 }
-function compile(ctx, entries, gates, label, slot) {
+function compile(ctx, entries, gates, label, slot, cpuScalar = false) {
   assert.ok(entries.length <= 8); request(ctx, words([...entries, ...gates.flat()]));
   const before = snapshot(ctx);
   assert.equal(ctx.api.compile_resident_entries(entries.length, gates.length), 0); refresh(ctx);
@@ -74,7 +74,7 @@ function compile(ctx, entries, gates, label, slot) {
   assert.ok(low !== 0 || high !== 0); assert.ok(pointer > 0 && length > 8 && pointer + length <= ctx.bytes.length);
   const expected = before.slice(); expected.set(words(fields), transfer);
   assert.deepEqual(snapshot(ctx), expected, 'resident receipt only');
-  const unit = instantiate(ctx, ctx.bytes.slice(pointer, pointer + length), label, {low, high, pointer, length, entries, gates});
+  const unit = instantiate(ctx, ctx.bytes.slice(pointer, pointer + length), label, {low, high, pointer, length, entries, gates, cpuScalar});
   ctx.table.set(slot, unit.run); const ackBefore = snapshot(ctx);
   assert.equal(ctx.api.acknowledge_resident_installation(ctx.low, ctx.high, low, high, slot), 0);
   const ackExpected = ackBefore.slice(); ackExpected.set(record('R3IN', 32, [low, high, slot, 0]), transfer);
@@ -132,26 +132,26 @@ function load(base, mode, label) {
   const entry = base + 0x1000, homeEntry = base + 0x1200, returnGate = base + 0x1300, body = mode === 'home' ? homeEntry : base + 0x1400;
   for (const [offset, target] of [[7, base + 0x3164], [20, base + 0x3000], [27, base + 0x3168], [33, base + 0x3004]]) assert.equal(read(ctx, entry + offset), target);
   assert.equal(read(ctx, body + 16), base + 0x316c); assert.equal(read(ctx, body + 66), base + 0x3160);
-  const caller = compile(ctx, [entry, entry + 11, entry + 16], [], `${label}-caller`, 0);
+  const caller = compile(ctx, [entry, entry + 11, entry + 16], [], `${label}-caller`, 0, true);
   const outer = compile(ctx, [base + 0x1100, 0x8010, 0x8020], [[base + 0x1100, OUTER], gates[1], gates[2]], `${label}-outer-gates`, 1);
   const callbackGates = [gates[0], gates[3]], callbackEntries = bodySeeds.map(offset => body + offset);
   let home, active;
   if (mode === 'home') {
-    home = compile(ctx, [...callbackEntries, returnGate, 0x8000, 0x8040], [[returnGate, RETURN], ...callbackGates], `${label}-home-active`, 2); active = home;
+    home = compile(ctx, [...callbackEntries, returnGate, 0x8000, 0x8040], [[returnGate, RETURN], ...callbackGates], `${label}-home-active`, 2, true); active = home;
   } else {
     home = compile(ctx, [homeEntry, returnGate], [[returnGate, RETURN]], `${label}-home`, 2);
-    active = compile(ctx, [...callbackEntries, 0x8000, 0x8040], callbackGates, `${label}-selected`, 3);
+    active = compile(ctx, [...callbackEntries, 0x8000, 0x8040], callbackGates, `${label}-selected`, 3, true);
   }
   assert.equal(ctx.api.start_loaded_image(0x70000, 1), 0); assert.deepEqual(state(ctx), cpu(entry, 0x71000));
   return {ctx, base, entry, homeEntry, returnGate, body, caller, outer, home, active, label, receipt};
 }
 function execute(path, unit, budget, expected, reason, retired, detail = 0, version = 3, helperValue) {
   const ctx = path.ctx, expectedArena = snapshot(ctx);
-  expectedArena.set(stateRecord(expected), 0); expectedArena.set(exitRecord(reason, retired, detail, version), 56);
-  if (helperValue !== undefined) expectedArena.set(record('R3MH', 40, [0, helperValue, 0, 0, 0, 0]), 100);
+  expectedArena.set(stateRecord(expected), 0); expectedArena.set(exitRecord(reason, retired, detail, unit.cpuScalar ? 6 : version), 56);
+  if (helperValue !== undefined) expectedArena.set(record('R3MH', 40, [0, helperValue, 0, 0, 0, 4], 10), 100);
   assert.equal(unit.run(ctx.base, ctx.base + 56, budget, ctx.base + 96), 0);
   assert.deepEqual(state(ctx), expected, `${path.label}: literal execution state`);
-  assert.deepEqual(snapshot(ctx).subarray(56, 96), exitRecord(reason, retired, detail, version));
+  assert.deepEqual(snapshot(ctx).subarray(56, 96), exitRecord(reason, retired, detail, unit.cpuScalar ? 6 : version));
   assert.deepEqual(snapshot(ctx), expectedArena, `${path.label}: all arena bytes obey the literal execution contract`);
   guestRetired += refresh(ctx).view.getUint32(ctx.base + 76, true);
 }

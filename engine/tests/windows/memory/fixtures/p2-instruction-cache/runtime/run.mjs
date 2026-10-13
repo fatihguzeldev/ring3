@@ -64,6 +64,7 @@ function record(magic, length, fields, version = 1) { const bytes = Buffer.alloc
 const stateBytes = state => record('R3ST', 56, [...state.registers, state.pc, state.flags]);
 const exitBytes = stop => record('R3EX', 40, [stop.reason, stop.retired, stop.detail ?? 0, 0, 0, 0], stop.version);
 const helperBytes = (value = 0, faultAddress = null) => record('R3MH', 40, faultAddress === null ? [0, value, 0, 0, 0, 0] : [1, 0, 2, faultAddress, 1, 4]);
+const cpuHelperBytes = (value = 0, faultAddress = null) => record('R3MH', 40, faultAddress === null ? [0, value, 0, 0, 0, 4] : [1, 0, 2, faultAddress, 1, 4], 10);;
 const installBytes = unit => record('R3IN', 32, [unit.low, unit.high, unit.slot, 0]);
 const R = (eax = 0, ecx = 0, edx = 0, ebx = 0, esp = TOP, ebp = 0, esi = 0, edi = 0) => [eax, ecx, edx, ebx, esp, ebp, esi, edi];
 function arena(e) { return Buffer.from(new Uint8Array(e.memory.buffer, e.base, SIZE)); }
@@ -72,7 +73,7 @@ function exit(e) { const bytes = arena(e); return {version: bytes.readUInt16LE(6
 function unchanged(before, after, spans, label) { for (let i = 0; i < SIZE; i++) if (!spans.some(([start, end]) => i >= start && i < end)) assert.equal(after[i], before[i], `${label}: arena byte ${i}`); }
 function apiCall(e, name, args, spans = [], expected = 0) { const before = arena(e), status = e.api[name](...args); assert.equal(status, expected, name); unchanged(before, arena(e), spans, name); return status; }
 function transfer(e, bytes) { assert.ok(bytes.length <= 4096); new Uint8Array(e.memory.buffer).set(bytes, e.base + TRANSFER); }
-const arities = {open: 3, close: 0, arena_ptr: 0, begin_image_input: 1, append_image_input: 2, load_pe32_linked_v7_input_at: 2, start_loaded_image: 2, compile_entries: 2, compile_resident_entries: 2, generation: 0, module_ptr: 0, module_len: 0, guard: 6, guard_resident: 7, read32: 1, store32: 2, store_resident32: 6, capture_call: 5, capture_resident_call: 6, complete_windows_call: 4, complete_resident_windows_call: 5, acknowledge_resident_installation: 5, dispatcher_module: 2, guard_dispatch_entry: 5, find_installed_resident: 3, discard_installed_resident: 5, retire_stale_resident: 4};
+const arities = {open: 3, close: 0, arena_ptr: 0, begin_image_input: 1, append_image_input: 2, load_pe32_linked_v7_input_at: 2, start_loaded_image: 2, compile_entries: 2, compile_resident_entries: 2, generation: 0, module_ptr: 0, module_len: 0, guard: 6, guard_resident: 7, read32: 1, store32: 2, store_resident32: 6, capture_call: 5, capture_resident_call: 6, complete_windows_call: 4, complete_resident_windows_call: 5, acknowledge_resident_installation: 5, dispatcher_module: 2, guard_dispatch_entry: 5, find_installed_resident: 3, discard_installed_resident: 5, retire_stale_resident: 4, cpu_read32: 1, cpu_store32: 2, cpu_store_resident32: 6};
 function fresh(owner) {
   const instance = new WebAssembly.Instance(engine.module, {}), api = Object.fromEntries(Object.entries(arities).map(([name, arity]) => { const fn = instance.exports[`ring3_abi_v1_${name}`]; assert.equal(typeof fn, 'function', name); assert.equal(fn.length, arity, name); return [name, fn]; }));
   const e = {owner, label: owner, api, memory: instance.exports.memory, low: 0x53800001 + contexts.length, high: 0xa5380000, units: [], compilations: 0, tokens: 0, calls: 0, retired: 0, diagnostics: 0, table: owner === 'resident' ? new WebAssembly.Table({element: 'anyfunc', initial: 8, maximum: 8}) : null};
@@ -100,18 +101,18 @@ function compile(e, name, pcs, gateSpecs = [], instructions = 1, slot = 0) {
   else { unit.generation = e.api.generation(); unit.pointer = e.api.module_ptr() >>> 0; unit.length = e.api.module_len() >>> 0; assert.equal(unit.generation, e.compilations); }
   assert.ok(unit.pointer > 0 && unit.length > 8 && unit.length <= 65536 && unit.pointer + unit.length <= e.memory.buffer.byteLength);
   const bytes = Buffer.from(new Uint8Array(e.memory.buffer, unit.pointer, unit.length)), module = new WebAssembly.Module(bytes), imports = WebAssembly.Module.imports(module), ring3 = {};
-  const guard = e.table ? 'guard_resident' : 'guard', store = e.table ? 'store_resident32' : 'store32';
-  const helperNames = name.startsWith('dynamic-leaf') ? [guard, 'read32'] : [guard, 'read32', store];
+  const guard = e.table ? 'guard_resident' : 'guard', store = e.table ? 'cpu_store_resident32' : 'cpu_store32';
+  const helperNames = name.startsWith('dynamic-leaf') ? [guard, 'cpu_read32'] : [guard, 'cpu_read32', store];
   assert.deepEqual(imports, [{module: 'env', name: 'memory', kind: 'memory'}, ...helperNames.map(name => ({module: 'ring3', name, kind: 'function'}))]);
   assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
   ring3[guard] = e.api[guard];
-  for (const name of ['read32', store]) ring3[name] = (...args) => {
-    const step = e.pendingSteps.shift(); assert.ok(step, `unexpected ${name}`); assert.equal(name === 'read32' ? 'read' : 'store', step[0]);
-    const address = args[name === 'store_resident32' ? 4 : 0] >>> 0; assert.equal(address, step[1]);
-    if (name !== 'read32') assert.equal(args[name === 'store_resident32' ? 5 : 1] >>> 0, step[2]);
-    if (name === 'store_resident32') assert.deepEqual(args.slice(0, 4).map(x => x >>> 0), [e.low, e.high, unit.low, unit.high]);
+  for (const name of ['cpu_read32', store]) ring3[name] = (...args) => {
+    const step = e.pendingSteps.shift(); assert.ok(step, `unexpected ${name}`); assert.equal(name === 'cpu_read32' ? 'read' : 'store', step[0]);
+    const address = args[name === 'cpu_store_resident32' ? 4 : 0] >>> 0; assert.equal(address, step[1]);
+    if (name !== 'cpu_read32') assert.equal(args[name === 'cpu_store_resident32' ? 5 : 1] >>> 0, step[2]);
+    if (name === 'cpu_store_resident32') assert.deepEqual(args.slice(0, 4).map(x => x >>> 0), [e.low, e.high, unit.low, unit.high]);
     const before = arena(e), status = e.api[name](...args), after = arena(e); assert.equal(status, step[3] ?? 0); unchanged(before, after, [[100, 140]], `forwarded ${name}`);
-    assert.deepEqual(after.subarray(100, 140), helperBytes(name === 'read32' ? step[2] : 0));
+    assert.deepEqual(after.subarray(100, 140), cpuHelperBytes(name === 'cpu_read32' ? step[2] : 0));
     helperTrace.push({context: e.label, call: e.calls + 1, unit: unit.name, name, args: args.map(x => x >>> 0), status, helper_hex: after.subarray(100, 140).toString('hex')}); return status;
   };
   unit.run = new WebAssembly.Instance(module, {env: {memory: e.memory}, ring3}).exports.run; assert.equal(unit.run.length, 4);
@@ -120,7 +121,7 @@ function compile(e, name, pcs, gateSpecs = [], instructions = 1, slot = 0) {
 }
 function run(e, unit, label, budget, state, stop, steps = [], selected = unit) {
   const before = arena(e), expected = Buffer.from(before); expected.set(stateBytes(state), 0); expected.set(exitBytes(stop), 56);
-  if (steps.length) expected.set(helperBytes(steps.at(-1)[0] === 'read' ? steps.at(-1)[2] : 0), 100);
+  if (steps.length) expected.set(cpuHelperBytes(steps.at(-1)[0] === 'read' ? steps.at(-1)[2] : 0), 100);
   if (e.table && budget && before.readUInt32LE(96) === 0) expected.set(installBytes(selected), TRANSFER);
   e.pendingSteps = [...steps]; const status = (e.table ? e.dispatcher : unit.run)(e.base, e.base + 56, budget, e.base + 96); assert.equal(status, 0, label); assert.equal(e.pendingSteps.length, 0, label); e.calls++; e.retired += stop.retired;
   const actual = arena(e); assert.deepEqual(actual, expected, `${e.label}/${label}: full arena`); assert.deepEqual(cpu(e), state); assert.deepEqual(exit(e), {...stop, detail: stop.detail ?? 0});
@@ -182,39 +183,39 @@ function identity(e, unit, label) {
   lifecycle.push({context: e.label, action: label, unit: unit.name, binding, arena_sha256: hash(arena(e))}); return binding;
 }
 function flush(e, caller, returnOffset, label, ebx = 42, esi = 42, eax = 1, whole = false) {
-  run(e, caller, label, 64, S(GATE + 112, eax, ebx, esi, TOP - 16), {version: 3, reason: 8, retired: 4, detail: 0x10008}, flushSteps(returnOffset, whole));
+  run(e, caller, label, 64, S(GATE + 112, eax, ebx, esi, TOP - 16), {version: 6, reason: 8, retired: 4, detail: 0x10008}, flushSteps(returnOffset, whole));
   complete(e, caller, 0x10008, [0xffffffff, whole ? 0 : ALLOC, whole ? 0xffffffff : 6], ENTRY + returnOffset, 1);
 }
 function exercise(e) {
   let caller = compile(e, 'allocate-write-protect-flush', [...at([0, 19, 50]), GATE + 64, GATE + 96, GATE + 112], [gates[1], gates[3], gates[4]], 22);
   const start = cpu(e);
-  run(e, caller, 'zero-budget', 0, start, {version: 3, reason: 1, retired: 0});
+  run(e, caller, 'zero-budget', 0, start, {version: e.table ? 3 : 6, reason: 1, retired: 0});
   new DataView(e.memory.buffer).setUint32(e.base + 96, 1, true);
-  run(e, caller, 'cancel-before-zero', 0, start, {version: 3, reason: 2, retired: 0});
+  run(e, caller, 'cancel-before-zero', 0, start, {version: e.table ? 3 : 6, reason: 2, retired: 0});
   new DataView(e.memory.buffer).setUint32(e.base + 96, 0, true);
-  run(e, caller, 'allocate-rw', 64, {registers: R(0, 0, 0, 0, TOP - 20), pc: GATE + 64, flags: 0x403}, {version: 3, reason: 8, retired: 7, detail: 0x10005}, allocSteps);
+  run(e, caller, 'allocate-rw', 64, {registers: R(0, 0, 0, 0, TOP - 20), pc: GATE + 64, flags: 0x403}, {version: 6, reason: 8, retired: 7, detail: 0x10005}, allocSteps);
   complete(e, caller, 0x10005, [0, 64, 0x3000, 4], ENTRY + 19, ALLOC);
   for (const offset of [0, 4, 60, 4092]) read(e, ALLOC + offset, 0);
-  run(e, caller, 'guest-code-then-protect-rx', 64, S(GATE + 96, ALLOC, 0, 0, TOP - 20), {version: 3, reason: 8, retired: 8, detail: 0x10007}, [['store', ALLOC, functionBytes.readUInt32LE(0)], ['store', ALLOC + 4, functionBytes.readUInt32LE(4)], ...protectSteps(0x20, 50)]);
+  run(e, caller, 'guest-code-then-protect-rx', 64, S(GATE + 96, ALLOC, 0, 0, TOP - 20), {version: 6, reason: 8, retired: 8, detail: 0x10007}, [['store', ALLOC, functionBytes.readUInt32LE(0)], ['store', ALLOC + 4, functionBytes.readUInt32LE(4)], ...protectSteps(0x20, 50)]);
   checkCode(e, 'before-rx'); complete(e, caller, 0x10007, [ALLOC, 6, 0x20, BASE + 0x3000], ENTRY + 50, 1, false, 4);
   flush(e, caller, 61, 'named-flush-before-first-execution', 0, 0); checkCode(e, 'flushed-rx');
   if (e.table) discard(e, caller);
   caller = compile(e, 'two-calls-repeat-flush-protect', [...at([61, 63, 76, 78]), ...(e.table ? [] : [ALLOC]), GATE + 112, GATE + 96], [gates[4], gates[3]], e.table ? 15 : 17);
   let dynamic;
   if (e.table) {
-    run(e, caller, 'cold-first-dynamic-call', 64, S(ALLOC, 1, 0, 0, TOP - 4), {version: 3, reason: 3, retired: 1}, [['store', TOP - 4, ENTRY + 63]]);
+    run(e, caller, 'cold-first-dynamic-call', 64, S(ALLOC, 1, 0, 0, TOP - 4), {version: e.table ? 3 : 6, reason: 3, retired: 1}, [['store', TOP - 4, ENTRY + 63]]);
     dynamic = compile(e, 'dynamic-leaf-rx', [ALLOC], [], 2, 1);
-    run(e, dynamic, 'first-natural-ret42', 2, S(ENTRY + 63, 42, 0, 0), {version: 2, reason: 1, retired: 2}, [['read', TOP - 4, ENTRY + 63]]);
+    run(e, dynamic, 'first-natural-ret42', 2, S(ENTRY + 63, 42, 0, 0), {version: 6, reason: 1, retired: 2}, [['read', TOP - 4, ENTRY + 63]]);
   } else {
     dynamic = caller;
-    run(e, caller, 'first-natural-call-ret42', 3, S(ENTRY + 63, 42, 0, 0), {version: 3, reason: 1, retired: 3}, [['store', TOP - 4, ENTRY + 63], ['read', TOP - 4, ENTRY + 63]]);
+    run(e, caller, 'first-natural-call-ret42', 3, S(ENTRY + 63, 42, 0, 0), {version: 6, reason: 1, retired: 3}, [['store', TOP - 4, ENTRY + 63], ['read', TOP - 4, ENTRY + 63]]);
   }
   const retained = identity(e, dynamic, 'before-repeated-flush'); checkCode(e, 'before-repeat');
-  run(e, caller, 'save-first-answer-and-repeat-flush', 64, S(GATE + 112, 42, 42, 0, TOP - 16), {version: 3, reason: 8, retired: 5, detail: 0x10008}, flushSteps(76));
+  run(e, caller, 'save-first-answer-and-repeat-flush', 64, S(GATE + 112, 42, 42, 0, TOP - 16), {version: 6, reason: 8, retired: 5, detail: 0x10008}, flushSteps(76));
   complete(e, caller, 0x10008, [0xffffffff, ALLOC, 6], ENTRY + 76, 1);
   assert.deepEqual(identity(e, dynamic, 'after-repeated-flush'), retained); checkCode(e, 'after-repeat');
-  run(e, caller, 'second-natural-call-ret42', 3, S(ENTRY + 78, 42, 42, 0), {version: e.table ? 2 : 3, reason: 1, retired: 3}, [['store', TOP - 4, ENTRY + 78], ['read', TOP - 4, ENTRY + 78]], dynamic);
-  run(e, caller, 'save-second-answer-and-protect-rwx', 64, S(GATE + 96, 42, 42, 42, TOP - 20), {version: 3, reason: 8, retired: 6, detail: 0x10007}, protectSteps(0x40, 96));
+  run(e, caller, 'second-natural-call-ret42', 3, S(ENTRY + 78, 42, 42, 0), {version: 6, reason: 1, retired: 3}, [['store', TOP - 4, ENTRY + 78], ['read', TOP - 4, ENTRY + 78]], dynamic);
+  run(e, caller, 'save-second-answer-and-protect-rwx', 64, S(GATE + 96, 42, 42, 42, TOP - 20), {version: 6, reason: 8, retired: 6, detail: 0x10007}, protectSteps(0x40, 96));
   complete(e, caller, 0x10007, [ALLOC, 6, 0x40, BASE + 0x3000], ENTRY + 96, 1, false, 0x20);
   reject(e, dynamic, 'protect-caused-source-stale-before-any-new-capture', 4);
   if (e.table) discard(e, caller);
@@ -224,7 +225,7 @@ function exercise(e) {
   reject(e, protectVictim, e.table ? 'post-flush-protect-victim-stays-source-stale' : 'old-protect-victim-generation-after-capture', e.table ? 4 : 3);
   if (e.table) { retire(e, protectVictim); dynamic = compile(e, 'dynamic-leaf-before-write', [ALLOC], [], 2, 1); } else dynamic = caller;
   identity(e, dynamic, 'current-owner-before-identity-write');
-  run(e, caller, 'guest-identity-executable-write', 1, S(ENTRY + 113), {version: 3, reason: e.table ? 1 : 6, retired: 1}, [['store', ALLOC, functionBytes.readUInt32LE(0), e.table ? 0 : 11]]);
+  run(e, caller, 'guest-identity-executable-write', 1, S(ENTRY + 113), {version: 6, reason: e.table ? 1 : 6, retired: 1}, [['store', ALLOC, functionBytes.readUInt32LE(0), e.table ? 0 : 11]]);
   reject(e, dynamic, 'identity-write-caused-source-stale-before-capture', 4); checkCode(e, 'identity-written');
   const writeVictim = dynamic;
   if (!e.table) caller = compile(e, 'post-write-flush-free', [...at([113, 124, 138]), ALLOC, GATE + 112, GATE + 80], [gates[4], gates[2]], 16);
@@ -232,7 +233,7 @@ function exercise(e) {
   reject(e, writeVictim, e.table ? 'post-flush-write-victim-stays-source-stale' : 'old-write-victim-generation-after-capture', e.table ? 4 : 3);
   if (e.table) { retire(e, writeVictim); dynamic = compile(e, 'dynamic-leaf-before-free', [ALLOC], [], 2, 1); } else dynamic = caller;
   identity(e, dynamic, 'current-owner-before-free');
-  run(e, caller, 'free-generated-allocation', 64, S(GATE + 80, 1, 42, 42, TOP - 16), {version: 3, reason: 8, retired: 4, detail: 0x10006}, freeSteps);
+  run(e, caller, 'free-generated-allocation', 64, S(GATE + 80, 1, 42, 42, TOP - 16), {version: 6, reason: 8, retired: 4, detail: 0x10006}, freeSteps);
   complete(e, caller, 0x10006, [ALLOC, 0, 0x8000], ENTRY + 138, 1);
   reject(e, dynamic, 'free-caused-source-stale-before-capture', 4); read(e, ALLOC, 0, 1); read(e, ALLOC + 4092, 0, 1);
   const freeVictim = dynamic;
@@ -242,7 +243,7 @@ function exercise(e) {
   reject(e, freeVictim, e.table ? 'post-flush-free-victim-stays-source-stale' : 'old-free-victim-generation-after-capture', e.table ? 4 : 3);
   read(e, ALLOC, 0, 1); if (e.table) retire(e, freeVictim);
   flush(e, caller, 164, 'flush-null-base-ignores-ffffffff-size', 42, 42, 1, true);
-  run(e, caller, 'exit-with-first-natural-answer', 64, S(GATE + 32, 1, 42, 42, TOP - 8), {version: 3, reason: 8, retired: 2, detail: 0x10003}, exitSteps);
+  run(e, caller, 'exit-with-first-natural-answer', 64, S(GATE + 32, 1, 42, 42, TOP - 8), {version: 6, reason: 8, retired: 2, detail: 0x10003}, exitSteps);
   complete(e, caller, 0x10003, [42], ENTRY + 171, 42, true); read(e, BASE + 0x300c, 0xfacecafe);
   assert.equal(e.calls, e.table ? 23 : 22); assert.equal(e.retired, 59); assert.equal(e.tokens, 11); assert.equal(e.compilations, e.table ? 7 : 5);
   assert.deepEqual(arena(e).subarray(4236), initial.subarray(4236)); e.final = {cpu: cpu(e), exit: exit(e), sha256: hash(arena(e))};
@@ -254,7 +255,7 @@ process.on('uncaughtException', error => {
   console.error(error); process.exitCode = 1;
 });
 exercise(fresh('replacement')); exercise(fresh('resident'));
-const counts = {contexts: contexts.length, modules: modules.length, generated_runs: contexts.reduce((n, e) => n + e.calls, 0), retired: contexts.reduce((n, e) => n + e.retired, 0), provider_completions: contexts.reduce((n, e) => n + e.tokens, 0), provider_old_protect_writes: providerWrites.length, guest_helper_calls: helperTrace.length, guest_reads: helperTrace.filter(row => row.name === 'read32').length, guest_stores: helperTrace.filter(row => row.name !== 'read32').length};
+const counts = {contexts: contexts.length, modules: modules.length, generated_runs: contexts.reduce((n, e) => n + e.calls, 0), retired: contexts.reduce((n, e) => n + e.retired, 0), provider_completions: contexts.reduce((n, e) => n + e.tokens, 0), provider_old_protect_writes: providerWrites.length, guest_helper_calls: helperTrace.length, guest_reads: helperTrace.filter(row => row.name === 'cpu_read32').length, guest_stores: helperTrace.filter(row => row.name !== 'cpu_read32').length};
 assert.deepEqual(counts, {contexts: 2, modules: 13, generated_runs: 45, retired: 118, provider_completions: 22, provider_old_protect_writes: 4, guest_helper_calls: 126, guest_reads: 26, guest_stores: 100});
 const sourcesAfter = sourceMap(); assert.deepEqual(sourcesAfter, sourcesBefore);
 const result = {status: 'PASS', engine_sha256: engine.sha256, engine_bytes: engine.bytes.length, image_sha256: hash(image), function_hex: functionBytes.toString('hex'), command: process.argv, tools: {node: process.version, v8: process.versions.v8, platform: process.platform, arch: process.arch}, counts, contexts: contexts.map(e => ({owner: e.owner, captures: e.compilations, peak_resident_units: e.table ? e.peakUnits : null, generated_runs: e.calls, retired: e.retired, provider_completions: e.tokens, diagnostic_reads: e.diagnostics, final: e.final})), modules, observations, helper_trace: helperTrace, provider_memory_writes: providerWrites, lifecycle, public_diagnostics: diagnostics, sources_before: sourcesBefore, sources_after: sourcesAfter, artifacts, claim_ceiling: 'two authored relocated PE32 owner contexts; exact112-byte linkedV7/eight compact gate slots and following transfer canary; named current-process Flush acknowledges existing private flat32 coherence, preserves full4612 dirtyFP and retained code identity, real CALL/RET42 twice without CPU reseed. Separate Protect, guest identity EXEC write and Free cause source4 before new replacement capture; later replacement3 is generation-only. Resident callers are discarded only after consumed completion to avoid duplicate live gates, while the leaf survives repeated Flush. Allocated code is written only by guest instructions; no host mappedness/permission changes. LastError preservation and invalid handle/span breadth remain native-only evidence. Selected RAM/code/stack/output/canary evidence, not whole RAM, hardware cache, concurrency, general Windows or performance evidence.'};

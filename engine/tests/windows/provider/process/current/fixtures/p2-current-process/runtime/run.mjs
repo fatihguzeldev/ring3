@@ -57,6 +57,7 @@ function record(magic,length,values,version = 1) { const bytes = Buffer.alloc(le
 const stateBytes = state => record('R3ST',56,[...state.registers,state.pc,state.flags]);
 const exitBytes = stop => record('R3EX',40,[stop.reason,stop.retired,stop.detail ?? 0,0,0,0],stop.version ?? 3);
 const helperBytes = value => record('R3MH',40,[0,value,0,0,0,0]);
+const cpuHelperBytes = value => record('R3MH',40,[0,value,0,0,0,4], 10);;
 const installBytes = unit => record('R3IN',32,[unit.low,unit.high,unit.slot,0]);
 const R = (eax = 0,ecx = 0,esi = 0,edi = 0,esp = TOP) => [eax,ecx,0,0,esp,0,esi,edi];
 const S = (pc,eax = 0,esi = 0,edi = 0,esp = TOP,flags = 0x403) => ({registers:R(eax,0,esi,edi,esp),pc,flags});
@@ -66,7 +67,7 @@ function exit(e) { const bytes = arena(e); return {version:bytes.readUInt16LE(60
 function unchanged(before,after,spans,label) { for (let i=0;i<SIZE;i++) if (!spans.some(([a,b]) => i>=a && i<b)) assert.equal(after[i],before[i],`${label}: arena byte ${i}`); }
 function apiCall(e,name,args,spans = []) { const before = arena(e); assert.equal(e.api[name](...args),0,name); unchanged(before,arena(e),spans,name); }
 function transfer(e,bytes) { assert.ok(bytes.length<=4096); new Uint8Array(e.memory.buffer).set(bytes,e.base + TRANSFER); }
-const arities = {open:3,close:0,arena_ptr:0,begin_image_input:1,append_image_input:2,load_pe32_linked_v8_input_at:2,start_loaded_image:2,compile_entries:2,compile_resident_entries:2,generation:0,module_ptr:0,module_len:0,guard:6,guard_resident:7,read32:1,store32:2,store_resident32:6,capture_call:5,capture_resident_call:6,complete_windows_call:4,complete_resident_windows_call:5,acknowledge_resident_installation:5,dispatcher_module:2,guard_dispatch_entry:5,find_installed_resident:3,discard_installed_resident:5};
+const arities = {open:3,close:0,arena_ptr:0,begin_image_input:1,append_image_input:2,load_pe32_linked_v8_input_at:2,start_loaded_image:2,compile_entries:2,compile_resident_entries:2,generation:0,module_ptr:0,module_len:0,guard:6,guard_resident:7,read32:1,store32:2,store_resident32:6,capture_call:5,capture_resident_call:6,complete_windows_call:4,complete_resident_windows_call:5,acknowledge_resident_installation:5,dispatcher_module:2,guard_dispatch_entry:5,find_installed_resident:3,discard_installed_resident:5, cpu_read32: 1, cpu_store32: 2, cpu_store_resident32: 6};
 function fresh(owner) {
   const instance = new WebAssembly.Instance(engine.module,{}), api = Object.fromEntries(Object.entries(arities).map(([name,arity]) => { const fn=instance.exports[`ring3_abi_v1_${name}`]; assert.equal(typeof fn,'function',name); assert.equal(fn.length,arity,name); return [name,fn]; }));
   const e={owner,label:owner,api,memory:instance.exports.memory,low:0x53900001 + contexts.length,high:0xa5390000,units:[],compilations:0,tokens:0,calls:0,retired:0,table:owner==='resident'?new WebAssembly.Table({element:'anyfunc',initial:8,maximum:8}):null};
@@ -94,14 +95,14 @@ function compile(e,name,pcs,gate,instructions) {
   if(e.table) { assert.equal(receipt.readUInt32LE(0),1); assert.equal(receipt.readUInt32LE(4),24); [unit.low,unit.high,unit.pointer,unit.length]=Array.from({length:4},(_,i)=>receipt.readUInt32LE(8+i*4)); }
   else { unit.generation=e.api.generation(); unit.pointer=e.api.module_ptr()>>>0; unit.length=e.api.module_len()>>>0; assert.equal(unit.generation,e.compilations); }
   assert.ok(unit.pointer>0 && unit.length>8 && unit.length<=65536 && unit.pointer+unit.length<=e.memory.buffer.byteLength);
-  const bytes=Buffer.from(new Uint8Array(e.memory.buffer,unit.pointer,unit.length)),module=new WebAssembly.Module(bytes),guard=e.table?'guard_resident':'guard',store=e.table?'store_resident32':'store32';
-  const imports=WebAssembly.Module.imports(module); assert.deepEqual(imports,[{module:'env',name:'memory',kind:'memory'},...[guard,'read32',store].map(name=>({module:'ring3',name,kind:'function'}))]); assert.deepEqual(WebAssembly.Module.exports(module),[{name:'run',kind:'function'}]);
+  const bytes=Buffer.from(new Uint8Array(e.memory.buffer,unit.pointer,unit.length)),module=new WebAssembly.Module(bytes),guard=e.table?'guard_resident':'guard',store=e.table?'cpu_store_resident32':'cpu_store32';
+  const imports=WebAssembly.Module.imports(module); assert.deepEqual(imports,[{module:'env',name:'memory',kind:'memory'},...[guard,'cpu_read32',store].map(name=>({module:'ring3',name,kind:'function'}))]); assert.deepEqual(WebAssembly.Module.exports(module),[{name:'run',kind:'function'}]);
   const ring3={[guard]:e.api[guard]};
-  for(const helper of ['read32',store]) ring3[helper]=(...args)=>{
-    const step=e.steps.shift(); assert.ok(step,`unexpected ${helper}`); assert.equal(step[0],helper==='read32'?'read':'store'); assert.equal(args[helper==='store_resident32'?4:0]>>>0,step[1]);
-    if(helper!=='read32') assert.equal(args[helper==='store_resident32'?5:1]>>>0,step[2]);
-    if(helper==='store_resident32') assert.deepEqual(args.slice(0,4).map(x=>x>>>0),[e.low,e.high,unit.low,unit.high]);
-    const before=arena(e); assert.equal(e.api[helper](...args),0); const after=arena(e); unchanged(before,after,[[100,140]],helper); assert.deepEqual(after.subarray(100,140),helperBytes(helper==='read32'?step[2]:0));
+  for(const helper of ['cpu_read32',store]) ring3[helper]=(...args)=>{
+    const step=e.steps.shift(); assert.ok(step,`unexpected ${helper}`); assert.equal(step[0],helper==='cpu_read32'?'read':'store'); assert.equal(args[helper==='cpu_store_resident32'?4:0]>>>0,step[1]);
+    if(helper!=='cpu_read32') assert.equal(args[helper==='cpu_store_resident32'?5:1]>>>0,step[2]);
+    if(helper==='cpu_store_resident32') assert.deepEqual(args.slice(0,4).map(x=>x>>>0),[e.low,e.high,unit.low,unit.high]);
+    const before=arena(e); assert.equal(e.api[helper](...args),0); const after=arena(e); unchanged(before,after,[[100,140]],helper); assert.deepEqual(after.subarray(100,140),cpuHelperBytes(helper==='cpu_read32'?step[2]:0));
     helperTrace.push({context:e.label,call:e.calls+1,unit:name,name:helper,args:args.map(x=>x>>>0),status:0,helper_hex:after.subarray(100,140).toString('hex')}); return 0;
   };
   unit.run=new WebAssembly.Instance(module,{env:{memory:e.memory},ring3}).exports.run; assert.equal(unit.run.length,4);
@@ -110,7 +111,7 @@ function compile(e,name,pcs,gate,instructions) {
 }
 function run(e,unit,label,budget,state,stop,steps=[]) {
   const before=arena(e),expected=Buffer.from(before); expected.set(stateBytes(state),0); expected.set(exitBytes(stop),56);
-  if(steps.length) expected.set(helperBytes(steps.at(-1)[0]==='read'?steps.at(-1)[2]:0),100);
+  if(steps.length) expected.set(cpuHelperBytes(steps.at(-1)[0]==='read'?steps.at(-1)[2]:0),100);
   if(e.table && budget && before.readUInt32LE(96)===0) expected.set(installBytes(unit),TRANSFER);
   e.steps=[...steps]; const status=(e.table?e.dispatcher:unit.run)(e.base,e.base+56,budget,e.base+96); assert.equal(status,0,label); assert.equal(e.steps.length,0,label); e.calls++; e.retired+=stop.retired;
   const actual=arena(e); assert.deepEqual(actual,expected,`${e.label}/${label}: full4612`); assert.deepEqual(cpu(e),state); assert.deepEqual(exit(e),{version:3,...stop,detail:stop.detail??0});
@@ -132,22 +133,22 @@ function discard(e,unit) { if(!e.table)return; e.table.set(0,null); apiCall(e,'d
 function read(e,address,value) { const before=arena(e); assert.equal(e.api.read32(address),0); const after=arena(e); unchanged(before,after,[[100,140]],'diagnostic read'); assert.deepEqual(after.subarray(100,140),helperBytes(value)); diagnostics.push({context:e.label,address,value}); }
 function exercise(e) {
   let unit=compile(e,'get-current-process',[ENTRY,KERNEL,GATE+128],[GATE+128,0x10009],6);
-  const start=cpu(e); run(e,unit,'zero-budget',0,start,{reason:1,retired:0});
-  new DataView(e.memory.buffer).setUint32(e.base+96,1,true); run(e,unit,'cancel-before-zero',0,start,{reason:2,retired:0}); new DataView(e.memory.buffer).setUint32(e.base+96,0,true);
-  run(e,unit,'compiled-get-current-process',64,S(GATE+128,0,0,0,TOP-16),{reason:8,retired:6,detail:0x10009},[['store',TOP-4,ENTRY+7],['store',TOP-8,0],['store',TOP-12,0],['read',BASE+0x3180,GATE+128],['store',TOP-16,KERNEL+8]]);
+  const start=cpu(e); run(e,unit,'zero-budget',0,start,{version:e.table ? 3 : 6,reason:1,retired:0});
+  new DataView(e.memory.buffer).setUint32(e.base+96,1,true); run(e,unit,'cancel-before-zero',0,start,{version:e.table ? 3 : 6,reason:2,retired:0}); new DataView(e.memory.buffer).setUint32(e.base+96,0,true);
+  run(e,unit,'compiled-get-current-process',64,S(GATE+128,0,0,0,TOP-16),{version:6,reason:8,retired:6,detail:0x10009},[['store',TOP-4,ENTRY+7],['store',TOP-8,0],['store',TOP-12,0],['read',BASE+0x3180,GATE+128],['store',TOP-16,KERNEL+8]]);
   complete(e,unit,0x10009,[],KERNEL+8,0xffffffff); discard(e,unit);
   unit=compile(e,'set-nonzero-last-error',[KERNEL+8,GATE+16],[GATE+16,0x10002],3);
-  run(e,unit,'set-last-error',64,S(GATE+16,0xffffffff,0xffffffff,0,TOP-20),{reason:8,retired:3,detail:0x10002},[['store',TOP-16,0x89abcdef],['read',BASE+0x3184,GATE+16],['store',TOP-20,KERNEL+21]]);
+  run(e,unit,'set-last-error',64,S(GATE+16,0xffffffff,0xffffffff,0,TOP-20),{version:6,reason:8,retired:3,detail:0x10002},[['store',TOP-16,0x89abcdef],['read',BASE+0x3184,GATE+16],['store',TOP-20,KERNEL+21]]);
   complete(e,unit,0x10002,[0x89abcdef],KERNEL+21,0xffffffff); discard(e,unit);
   unit=compile(e,'flush-returned-current-handle',[KERNEL+21,GATE+112],[GATE+112,0x10008],4);
-  run(e,unit,'flush-uses-saved-returned-handle',64,S(GATE+112,0xffffffff,0xffffffff,0,TOP-28),{reason:8,retired:4,detail:0x10008},[['store',TOP-16,0xffffffff],['store',TOP-20,0],['store',TOP-24,0xffffffff],['read',BASE+0x3188,GATE+112],['store',TOP-28,KERNEL+32]]);
+  run(e,unit,'flush-uses-saved-returned-handle',64,S(GATE+112,0xffffffff,0xffffffff,0,TOP-28),{version:6,reason:8,retired:4,detail:0x10008},[['store',TOP-16,0xffffffff],['store',TOP-20,0],['store',TOP-24,0xffffffff],['read',BASE+0x3188,GATE+112],['store',TOP-28,KERNEL+32]]);
   complete(e,unit,0x10008,[0xffffffff,0,0xffffffff],KERNEL+32,1); discard(e,unit);
   unit=compile(e,'observe-preserved-last-error',[KERNEL+32,GATE],[GATE,0x10001],2);
-  run(e,unit,'get-last-error',64,S(GATE,1,0xffffffff,1,TOP-16),{reason:8,retired:2,detail:0x10001},[['read',BASE+0x318c,GATE],['store',TOP-16,KERNEL+40]]);
+  run(e,unit,'get-last-error',64,S(GATE,1,0xffffffff,1,TOP-16),{version:6,reason:8,retired:2,detail:0x10001},[['read',BASE+0x318c,GATE],['store',TOP-16,KERNEL+40]]);
   complete(e,unit,0x10001,[],KERNEL+40,0x89abcdef); discard(e,unit);
   unit=compile(e,'compiled-check-and-natural-return',[KERNEL+40,ENTRY+7,GATE+32],[GATE+32,0x10003],13);
-  run(e,unit,'natural-cdecl-return42',11,S(ENTRY+7,42,0,0,TOP,0x446),{reason:1,retired:11},[['read',TOP-12,0],['read',TOP-8,0],['read',TOP-4,ENTRY+7]]);
-  run(e,unit,'caller-passes-return42-to-exit',64,S(GATE+32,42,0,0,TOP-8,0x446),{reason:8,retired:2,detail:0x10003},[['store',TOP-4,42],['read',BASE+0x3190,GATE+32],['store',TOP-8,ENTRY+14]]);
+  run(e,unit,'natural-cdecl-return42',11,S(ENTRY+7,42,0,0,TOP,0x446),{version:6,reason:1,retired:11},[['read',TOP-12,0],['read',TOP-8,0],['read',TOP-4,ENTRY+7]]);
+  run(e,unit,'caller-passes-return42-to-exit',64,S(GATE+32,42,0,0,TOP-8,0x446),{version:6,reason:8,retired:2,detail:0x10003},[['store',TOP-4,42],['read',BASE+0x3190,GATE+32],['store',TOP-8,ENTRY+14]]);
   complete(e,unit,0x10003,[42],ENTRY+14,42,true);
   for(const [address,value] of [[TOP-28,KERNEL+32],[TOP-24,0xffffffff],[TOP-20,0],[TOP-16,KERNEL+40],[TOP-12,0],[TOP-8,ENTRY+14],[TOP-4,42],
     [BASE+0x3180,GATE+128],[BASE+0x3184,GATE+16],[BASE+0x3188,GATE+112],[BASE+0x318c,GATE],[BASE+0x3190,GATE+32],[BASE+0x3000,0xfacecafe],[BASE+0x3004,0x13579bdf]]) read(e,address,value);
@@ -155,7 +156,7 @@ function exercise(e) {
 }
 process.on('uncaughtException',error=>{ for(const e of contexts) save(`failure-${e.label}-arena.bin`,arena(e)); save('failure-first.json',JSON.stringify({message:error.message,stack:error.stack,actual:error.actual,expected:error.expected},null,2)); console.error(error); process.exitCode=1; });
 exercise(fresh('replacement')); exercise(fresh('resident'));
-const counts={contexts:contexts.length,modules:modules.length,generated_runs:contexts.reduce((n,e)=>n+e.calls,0),retired:contexts.reduce((n,e)=>n+e.retired,0),provider_completions:providers.length,guest_helpers:helperTrace.length,guest_reads:helperTrace.filter(row=>row.name==='read32').length,guest_stores:helperTrace.filter(row=>row.name!=='read32').length,diagnostic_reads:diagnostics.length};
+const counts={contexts:contexts.length,modules:modules.length,generated_runs:contexts.reduce((n,e)=>n+e.calls,0),retired:contexts.reduce((n,e)=>n+e.retired,0),provider_completions:providers.length,guest_helpers:helperTrace.length,guest_reads:helperTrace.filter(row=>row.name==='cpu_read32').length,guest_stores:helperTrace.filter(row=>row.name!=='cpu_read32').length,diagnostic_reads:diagnostics.length};
 assert.deepEqual(counts,{contexts:2,modules:11,generated_runs:16,retired:56,provider_completions:10,guest_helpers:42,guest_reads:16,guest_stores:26,diagnostic_reads:28});
 const sourcesAfter=sourceMap(); assert.deepEqual(sourcesAfter,sourcesBefore);
 save('result.json',JSON.stringify({status:'PASS',engine_sha256:engine.sha256,engine_bytes:engine.bytes.length,image_sha256:hash(image),command:process.argv,tools:{node:process.version,v8:process.versions.v8,platform:process.platform,arch:process.arch},counts,contexts:contexts.map(e=>({owner:e.owner,captures:e.compilations,peak_resident_units:e.table?1:null,generated_runs:e.calls,retired:e.retired,final:e.final})),modules,observations,providers,helper_trace:helperTrace,lifecycle,diagnostics,sources_before:sourcesBefore,sources_after:sourcesAfter,artifacts,claim_ceiling:'one original fixed-profile67-byte C caller, four exact external IAT DIR32 fields and authored relocated PE32; two private flat32 owner paths. Actual returned GetCurrentProcess handle is saved in ESI and consumed by named Flush(NULL,MAX); nonzero LastError survives, compiler checks naturally return42, caller exits42. Full4612 dirtyFP comparisons and saved chronological provider frames/arenas; selected stack/IAT/canaries only, no host guest-RAM mutation after startup, no CPU reseed. Five captures per owner, at most3 blocks/14instructions including gate per child, eight-slot resident table, default65536 module limit. No real OS/process handle, hardware cache, concurrency, general compiler/Windows or performance claim.'},null,2));

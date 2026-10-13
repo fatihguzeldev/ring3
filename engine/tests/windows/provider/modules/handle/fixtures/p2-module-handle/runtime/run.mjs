@@ -29,6 +29,7 @@ function record(magic, length, fields, version = 1) {
   fields.forEach((value, index) => view.setUint32(16 + index * 4, value, true)); return bytes;
 }
 function helper(value = 0) { return record('R3MH', 40, [0, value, 0, 0, 0, 0]); }
+function cpuHelper(value = 0) { return record('R3MH', 40, [0, value, 0, 0, 0, 4], 10); }
 function residentRecord(unit) { return words([1, 24, unit.low, unit.high, unit.pointer, unit.length]); }
 function installation(unit, slot) { return record('R3IN', 32, [unit.low, unit.high, slot, 0]); }
 function authoredText(object) {
@@ -84,7 +85,7 @@ sourcePaths.push(...[...exportContract.sourcePaths, 'engine/tests/support/wasm/e
 assert.equal(new Set(sourcePaths).size, sourcePaths.length); const sources=Object.fromEntries(sourcePaths.map(file=>[file,hash(readFileSync(join(root,file)))]));save('source-sha256.json',JSON.stringify(sources,null,2));
 const engineBytes=fixtureEngine.bytes;save('engine.wasm',engineBytes);assert.ok(WebAssembly.validate(engineBytes));
 const engineModule=fixtureEngine.module;assert.deepEqual(WebAssembly.Module.imports(engineModule),[]);
-const arities={open:3,close:0,arena_ptr:0,generation:0,module_ptr:0,module_len:0,begin_image_input:1,append_image_input:2,abort_image_input:0,load_pe32_linked_v2_input_at:2,load_pe32_linked_v3_input_at:2,start_loaded_image:2,compile_entries:2,compile_resident_entries:2,find_resident:1,acknowledge_resident_installation:5,find_installed_resident:3,dispatcher_module:2,guard:6,guard_resident:7,guard_dispatch_entry:5,read32:1,read16:1,write32:2,store32:2,store_resident32:6,capture_call:5,capture_resident_call:6,complete_call:5,complete_resident_call:6,complete_windows_call:4,complete_resident_windows_call:5};
+const arities={open:3,close:0,arena_ptr:0,generation:0,module_ptr:0,module_len:0,begin_image_input:1,append_image_input:2,abort_image_input:0,load_pe32_linked_v2_input_at:2,load_pe32_linked_v3_input_at:2,start_loaded_image:2,compile_entries:2,compile_resident_entries:2,find_resident:1,acknowledge_resident_installation:5,find_installed_resident:3,dispatcher_module:2,guard:6,guard_resident:7,guard_dispatch_entry:5,read32:1,read16:1,write32:2,store32:2,store_resident32:6,capture_call:5,capture_resident_call:6,complete_call:5,complete_resident_call:6,complete_windows_call:4,complete_resident_windows_call:5, cpu_read16: 1, cpu_read32: 1, cpu_store32: 2, cpu_store_resident32: 6};
 let engine, nextInstance=0, guestRetirements=0;
 function refresh() { if (engine.buffer !== engine.memory.buffer) { engine.buffer = engine.memory.buffer; engine.bytes = new Uint8Array(engine.buffer); engine.view = new DataView(engine.buffer); } return engine; }
 function arena() { return refresh().bytes.slice(engine.base, engine.base + size); }
@@ -129,20 +130,21 @@ function childShape(bytes, unit, helpers, dispatch = false) {
   const signed = () => { let value=0n,shift=0n,byte; do{assert.ok(at<bytes.length && shift<35n);byte=bytes[at++];value|=BigInt(byte&127)<<shift;shift+=7n;}while(byte&128);if(byte&64)value-=1n<<shift;return Number(BigInt.asUintN(32,value)); };
   const name = () => {const length=unsigned(),end=at+length;assert.ok(end<=bytes.length);const value=Buffer.from(bytes.subarray(at,end)).toString('utf8');at=end;return value;};
   const limits = () => {const flags=unsigned(),minimum=unsigned();assert.ok(flags===0||flags===1);return {minimum,maximum:flags?unsigned():null};};
-  const types=[], imports=[], functions=[], exports=[]; let locals, guard;
+  const types=[], imports=[], functions=[], exports=[]; let locals, guard, globals;
   assert.deepEqual([...bytes.subarray(0,8)],[0,97,115,109,1,0,0,0]);
   while(at<bytes.length) {
     const section=bytes[at++],length=unsigned(),end=at+length;assert.ok(end<=bytes.length);
     if(section===1) {for(let count=unsigned();count>0;count--){assert.equal(bytes[at++],0x60);const parameters=Array.from({length:unsigned()},()=>bytes[at++]),results=Array.from({length:unsigned()},()=>bytes[at++]);types.push({parameters,results});}}
     else if(section===2) {for(let count=unsigned();count>0;count--){const module=name(),field=name(),kind=bytes[at++];if(kind===0)imports.push({module,name:field,kind:'function',type:unsigned()});else if(kind===2){assert.deepEqual(limits(),{minimum:1,maximum:null});imports.push({module,name:field,kind:'memory'});}else if(kind===1){assert.equal(bytes[at++],0x70);assert.deepEqual(limits(),{minimum:8,maximum:8});imports.push({module,name:field,kind:'table'});}else assert.fail('unexpected child import kind');}}
     else if(section===3) {for(let count=unsigned();count>0;count--)functions.push(unsigned());}
+    else if(section===6) {assert.equal(dispatch,false);assert.equal(unsigned(),3);globals=[];for(let i=0;i<3;i++){assert.equal(bytes[at++],0x7f);assert.equal(bytes[at++],0);assert.equal(bytes[at++],0x41);globals.push(signed());assert.equal(bytes[at++],0x0b);}assert.deepEqual(globals,[1,0,1]);}
     else if(section===7) {for(let count=unsigned();count>0;count--)exports.push({name:name(),kind:bytes[at++],index:unsigned()});}
     else if(section===10) {
       const bodyCount=unsigned();assert.equal(bodyCount,functions.length);assert.ok(dispatch?bodyCount===1:bodyCount===1||bodyCount===2);
       const bodyLength=unsigned(),bodyEnd=at+bodyLength;assert.ok(bodyEnd<=end);
       if(validatedRun)assert.deepEqual(bytes.subarray(at,bodyEnd),validatedRun);
       locals=Array.from({length:unsigned()},()=>[unsigned(),bytes[at++]]);
-      assert.deepEqual(locals,dispatch?[[6,0x7f]]:[[16,0x7f],[1,0x7e],[10,0x7f]]);
+      assert.deepEqual(locals,dispatch?[[7,0x7f]]:[[16,0x7f],[1,0x7e],[10,0x7f],[1,0x7f]]);
       const expected=[engine.low,engine.high,...(dispatch?[]:engine.owner==='resident'?[unit.low,unit.high]:[unit.generation])];
       guard={name:dispatch?'guard_dispatch_entry':engine.owner==='resident'?'guard_resident':'guard',constants:expected};
       for(const value of expected){assert.equal(bytes[at++],0x41);assert.equal(signed(),value);}
@@ -159,6 +161,7 @@ function childShape(bytes, unit, helpers, dispatch = false) {
   return {locals,guard,import_arities:importArities,run_arity:4};
 }
 function instantiate(unit, helpers) {
+  helpers = helpers.map(name => ({read16: 'cpu_read16', read32: 'cpu_read32', store32: 'cpu_store32', store_resident32: 'cpu_store_resident32'}[name] ?? name));
   refresh(); assert.ok(unit.pointer>0 && unit.length>8 && unit.pointer+unit.length<=engine.bytes.length); unit.bytes=engine.bytes.slice(unit.pointer,unit.pointer+unit.length);
   assert.ok(WebAssembly.validate(unit.bytes)); const shape=childShape(unit.bytes,unit,helpers),module=new WebAssembly.Module(unit.bytes);
   const imports=WebAssembly.Module.imports(module);assert.deepEqual(imports,[{module:'env',name:'memory',kind:'memory'},...helpers.map(name=>({module:'ring3',name,kind:'function'}))]);
@@ -272,12 +275,14 @@ function retainedBytes() {
 for(const example of oracle.cases){
   setup(example);let retired=0;
   for(const [index,stage] of oracle.stages.entries()){
+    assert.deepEqual(fromHex(stage.gate_exit_hex),record('R3EX',40,[8,stage.retired,stage.id,0,0,0],3), 'historical gate semantic fields remain exact');
+    const stageExitHex=Buffer.from(record('R3EX',40,[8,stage.retired,stage.id,0,0,0],engine.owner==='replacement'?6:3)).toString('hex'), helperHex=Buffer.from(cpuHelper()).toString('hex');
     const expected=example.stages[index],target=engine.owner==='resident'?engine.dispatcher:index===0?engine.phase1:engine.caller;
-    const patches=[[0,fromHex(expected.stop_state_hex)],[56,fromHex(stage.gate_exit_hex)],[100,fromHex(oracle.records.helper_zero_hex)]];
+    const patches=[[0,fromHex(expected.stop_state_hex)],[56,fromHex(stageExitHex)],[100,fromHex(helperHex)]];
     if(engine.owner==='resident')patches.push([transfer,installation(engine.gate,0)]);
     run(target,oracle.runtime.budget,`real ${stage.api} IAT guest slice`,patches);retired+=refresh().view.getUint32(engine.base+76,true);
-    observe(`${stage.api}-gate`,{state_hex:expected.stop_state_hex,exit_hex:stage.gate_exit_hex,helper_hex:oracle.records.helper_zero_hex});
-    capture(stage,expected);observe(`${stage.api}-captured`,{state_hex:expected.stop_state_hex,exit_hex:stage.gate_exit_hex,helper_hex:oracle.records.helper_zero_hex,frame_hex:expected.frame_hex});
+    observe(`${stage.api}-gate`,{state_hex:expected.stop_state_hex,exit_hex:stageExitHex,helper_hex:helperHex});
+    capture(stage,expected);observe(`${stage.api}-captured`,{state_hex:expected.stop_state_hex,exit_hex:stageExitHex,helper_hex:helperHex,frame_hex:expected.frame_hex});
     if(stage.api==='GetModuleHandleA'){
       operation('wrong full key precedes wrong provider token',()=>provider(0,engine.low^1),3);
       operation('wrong current private provider token',()=>provider(0),14);
@@ -289,10 +294,10 @@ for(const example of oracle.cases){
       operation('nonreturning ExitProcess scalar bypass refused',()=>scalar(stage.token),7);
       operation('private terminal checksum without return',()=>provider(stage.token),0,[[56,fromHex(example.terminal_exit_hex)]]);
       const frame=fromHex(expected.frame_hex),view=new DataView(frame.buffer);view.setUint32(48,oracle.negative_controls.diagnostic_argument,true);
-      observe('terminal',{state_hex:expected.stop_state_hex,exit_hex:example.terminal_exit_hex,helper_hex:oracle.records.helper_zero_hex,frame_hex:Buffer.from(frame).toString('hex')});
+      observe('terminal',{state_hex:expected.stop_state_hex,exit_hex:example.terminal_exit_hex,helper_hex:helperHex,frame_hex:Buffer.from(frame).toString('hex')});
     }else{
       operation(`private ${stage.api} stdcall return`,()=>provider(stage.token),0,[[0,fromHex(expected.returned_state_hex)],[56,fromHex(oracle.records.returned_exit_hex)]]);
-      observe(`${stage.api}-returned`,{state_hex:expected.returned_state_hex,exit_hex:oracle.records.returned_exit_hex,helper_hex:oracle.records.helper_zero_hex});
+      observe(`${stage.api}-returned`,{state_hex:expected.returned_state_hex,exit_hex:oracle.records.returned_exit_hex,helper_hex:helperHex});
       operation('consumed private token cannot replay',()=>provider(stage.token),14);
     }
     readData(expected.data_hex,`${stage.api} guest data`);stack(expected.stack_values,`${stage.api} guest return and argument bytes`);
