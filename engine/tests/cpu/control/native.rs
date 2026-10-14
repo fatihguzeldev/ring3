@@ -108,3 +108,6 @@ mod interrupt_configuration;
 
 #[path = "interrupt/dispatch/native.rs"]
 mod cpu_interrupt_dispatch;
+
+#[path = "interrupt/exception/native.rs"]
+mod cpu_exception_entry;

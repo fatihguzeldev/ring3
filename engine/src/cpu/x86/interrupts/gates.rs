@@ -95,5 +95,59 @@ impl InterruptGate {
     }
 }
 
+impl InterruptDescriptorTable32 {
+    pub(crate) fn resolve_event_gate(
+        &self,
+        origin: super::EventOrigin32,
+        cpl: u8,
+    ) -> Result<InterruptGate, CodeTransferError> {
+        if cpl > 3 {
+            return Err(CodeTransferError::GeneralProtection(
+                super::SelectorErrorCode32::idt(origin.vector(), origin.external()).get(),
+            ));
+        }
+        // the existing software wrapper retains its checks; processor events bypass only gate DPL.
+        self.resolve_gate(
+            origin.vector(),
+            if origin.checks_gate_dpl() { cpl } else { 0 },
+        )
+        .map_err(|error| secondary_error(origin, error))
+    }
+}
+
+impl InterruptGate {
+    pub(crate) const fn selector(self) -> u16 {
+        self.selector
+    }
+    pub(crate) fn event_destination(
+        self,
+        table: &SegmentDescriptorTable,
+        cpl: u8,
+        origin: super::EventOrigin32,
+    ) -> Result<CodeDestination, CodeTransferError> {
+        self.destination(table, cpl)
+            .map_err(|error| secondary_error(origin, error))
+    }
+}
+
+pub(crate) fn secondary_error(
+    origin: super::EventOrigin32,
+    error: CodeTransferError,
+) -> CodeTransferError {
+    let external = u32::from(origin.external());
+    match error {
+        CodeTransferError::GeneralProtection(code) => {
+            CodeTransferError::GeneralProtection((code & !1) | external)
+        }
+        CodeTransferError::NotPresent(code) => {
+            CodeTransferError::NotPresent((code & !1) | external)
+        }
+        CodeTransferError::UnsupportedProfile => CodeTransferError::UnsupportedProfile,
+    }
+}
+
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod events;

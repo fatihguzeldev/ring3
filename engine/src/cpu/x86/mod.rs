@@ -23,7 +23,14 @@ pub use control::{
     USER_POP_FLAGS_WORD_MASK, interrupt_return_flags, pop_flags,
 };
 pub(crate) use environment::USER_MODE_ENVIRONMENT;
-pub use interrupts::InterruptDescriptorTable32;
+pub use interrupts::{
+    DebugCause32, EnteredEvent32, EscalationClass32, EscalationDecision32, EventAuthorityKind32,
+    EventDeliveryResult32, EventOrigin32, ExceptionCause32, ExceptionClass32, FrameInput32,
+    InterruptDescriptorTable32, InvalidPageFault32, LegacyPageViolation32, PageFaultProfile32,
+    PagingAccess32, PagingDomain32, SecondaryClass32, SelectorErrorCode32, TrapPoint32,
+    VerifiedPageFault32, escalate_exception,
+};
+pub(crate) use interrupts::{EventFrame32, event_secondary_error};
 pub use segments::{
     CodeDestination, CodeTransfer, CodeTransferError, FarWidth, SegmentAccess, SegmentAccessError,
     SegmentCache, SegmentContext, SegmentDescriptor, SegmentDescriptorKind,
