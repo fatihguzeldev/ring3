@@ -8,13 +8,22 @@ use std::{
 
 #[test]
 fn actual_optional_absence_preserves_exact_ud_nop_fetch_prefix_and_feature_boundaries() {
+    run("run.mjs", "p2-optional-availability");
+}
+
+#[test]
+fn actual_disabled_mpx_forms_preserve_default_address_fetch_and_no_operand_contract() {
+    run("disabled-mpx.mjs", "p2-disabled-mpx");
+}
+
+fn run(script: &str, output_name: &str) {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
     let engine = std::env::var_os("RING3_ENGINE_WASM")
         .map(PathBuf::from)
         .expect("select the integrated engine Wasm");
     let expected = std::env::var("RING3_ENGINE_SHA256").expect("pin the selected engine SHA256");
     assert!(engine.is_file());
-    let output = root.join("target/p2-optional-availability").join(format!(
+    let output = root.join("target").join(output_name).join(format!(
         "{}-{}",
         std::process::id(),
         SystemTime::now()
@@ -28,7 +37,7 @@ fn actual_optional_absence_preserves_exact_ud_nop_fetch_prefix_and_feature_bound
     fs::write(output.join("initial-arena.bin"), initial).unwrap();
     let result = support_wasm::run_node(
         root,
-        "engine/tests/cpu/control/exceptions/availability/optional/fixtures/p2-optional-availability/runtime/run.mjs",
+        &format!("engine/tests/cpu/control/exceptions/availability/optional/fixtures/p2-optional-availability/runtime/{script}"),
         &engine,
         &output,
         Some(&expected),

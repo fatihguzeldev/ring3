@@ -52,14 +52,17 @@ export const boundedRefusals = [
   {label: 'duplicate mandatory F2 XRESLDTRK retains host refusal', hex: 'f2f20f01e9'},
   {label: 'duplicate 66 BNDMOV 1A retains host refusal', hex: '66660f1ac1'},
   {label: 'duplicate 66 BNDMOV 1B retains host refusal', hex: '66660f1bc1'},
-  {label: 'extra 67 BNDMOV 1A stays outside finite register cut', hex: '67660f1ac1'},
-  {label: 'extra 67 BNDMOV 1B stays outside finite register cut', hex: '67660f1bc1'},
-  {label: 'memory BNDMOV 1A stays outside finite register cut', hex: '660f1a00'},
-  {label: 'memory BNDMOV 1B stays outside finite register cut', hex: '660f1b00'},
 ];
 export const boundedInvalidLocks = [
   {label: 'LOCK XSUSLDTRK is invalid', hex: 'f0f20f01e8'},
   {label: 'LOCK XRESLDTRK is invalid', hex: 'f0f20f01e9'},
   {label: 'LOCK canonical register BNDMOV 1A is invalid', hex: 'f0660f1ac1'},
   {label: 'LOCK canonical register BNDMOV 1B is invalid', hex: 'f0660f1bc1'},
+];
+
+export const boundedCompatibilityNops = [
+  {label: 'extra 67 BNDMOV 1A is a disabled-MPX NOP', hex: '67660f1ac1'},
+  {label: 'extra 67 BNDMOV 1B is a disabled-MPX NOP', hex: '67660f1bc1'},
+  {label: 'memory BNDMOV 1A is a disabled-MPX NOP', hex: '660f1a00'},
+  {label: 'memory BNDMOV 1B is a disabled-MPX NOP', hex: '660f1b00'},
 ];

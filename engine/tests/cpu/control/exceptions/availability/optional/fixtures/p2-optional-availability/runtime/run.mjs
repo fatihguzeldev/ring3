@@ -3,7 +3,7 @@ import {readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {unavailable, memoryForms, nops, repairs, refusals, invalidLocks, cpuidQueries} from './vectors.mjs';
-import {tsxUnavailable, mpxNops, boundedRepairs, boundedRefusals, boundedInvalidLocks} from './tsxldtrk-mpx.mjs';
+import {tsxUnavailable, mpxNops, boundedRepairs, boundedRefusals, boundedInvalidLocks, boundedCompatibilityNops} from './tsxldtrk-mpx.mjs';
 
 const [enginePath, output, root] = process.argv.slice(2);
 assert.ok(enginePath && output && root, 'explicit selected engine, output and source root');
@@ -259,6 +259,17 @@ for (const resident of [false, true]) for (const entries of [false, true]) {
       input, expected(input, row.reason, retired, target + retired * code.length), {budget: 2});
     h.host(c, 'close');
   }
+  for (const row of boundedCompatibilityNops) {
+    const code = bytes(row.hex), target = 0x1100, c = open(resident, entries, row.label);
+    h.upload(c, target, Buffer.concat([code, bytes('ebfe')])); h.put(c, 0, seed(target));
+    const material = strict(c, row.label + ': complete source strictly captures NOP', target, code.length + 2, 0);
+    for (const flags of [FLAGS, FLAGS | RF, FLAGS | RF | TF]) {
+      const input = seed(target, {flags, shadow: 1}), reason = flags & TF ? 16 : 1;
+      invoke(c, row.label + ': no operand helper, state or RAM effect', material, input,
+        expected(input, reason, 1, target + code.length), {budget: flags & TF ? 2 : 1});
+    }
+    h.host(c, 'close');
+  }
   for (const row of [...boundedRefusals, ...boundedInvalidLocks]) {
     const code = bytes(row.hex), target = 0x1100, c = open(resident, entries, row.label);
     h.upload(c, target, code); bootstrap(c, target);
@@ -296,11 +307,11 @@ for (const resident of [false, true]) for (const entries of [false, true]) {
   }
 }
 assert.equal(originalPlanned, 432, 'all original optional module invocations remain');
-assert.equal(planned - originalPlanned, 596, 'finite four-profile TSXLDTRK/MPX extension');
+assert.equal(planned - originalPlanned, 628, 'finite four-profile TSXLDTRK/MPX extension with four selected compatibility migrations');
 assert.deepEqual(pins(), sourcePins, 'optional primary-backed oracles and all current execution sources stay pinned');
 writeFileSync(join(output, 'optional-counts.json'), JSON.stringify({planned_module_invocations: planned,
   admitted_module_invocations: invoked, exact_unavailable_codes: [...codeSet], compatible_nop_codes: [...new Set(nops.map(row => row.code))],
-  bounded_tsxldtrk_codes: tsxUnavailable.map(row => row.code), canonical_mpx_register_forms: mpxNops.length,
+  bounded_tsxldtrk_codes: tsxUnavailable.map(row => row.code), canonical_mpx_register_forms: mpxNops.length, migrated_mpx_compatibility_forms: boundedCompatibilityNops.length,
   canonical_mpx_decoder_codes: [...new Set(mpxNops.map(row => row.code))], source_pins: sourcePins}, null, 2) + '\n');
 h.finish([
   'finite exact IA32 group: 31 absence-UD Codes and two absent-feature NOP Codes; no optional facility enabled',
@@ -310,5 +321,5 @@ h.finish([
   'UD/NOP modules import only the real currentness guard; poisoned nullDS/limitedSS/unmapped operands and all numeric/register payloads remain untouched',
   'exact CPUID leaf7.0, Dh.1 and14h.0 values agree before and after real NOP/UD in the same instance; no hidden activation',
   'additive exact TSXLDTRK2 absence-UD and canonical D32 BNDMOV32 register-NOP group; MPX stays absent and no bounds or transaction state is synthesized',
-  'PKRU/CET stateful faults, other MPX forms, prefetch/vendor/newer vector families remain outside the frozen group; no general optional-ISA completion claim',
+  'PKRU/CET stateful faults, enabled MPX, prefetch/vendor/newer vector families remain outside the frozen group; no general optional-ISA completion claim',
 ]);
