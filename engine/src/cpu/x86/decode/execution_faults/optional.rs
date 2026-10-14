@@ -2,6 +2,8 @@ use iced_x86::{Code, Instruction};
 
 use crate::cpu::x86::capabilities::CPU_ID_LEAVES;
 
+mod modern;
+
 pub(super) fn unavailable(instruction: &Instruction) -> bool {
     let (function, subfunction, register, bit) = match instruction.code() {
         Code::Adcx_r32_rm32 | Code::Adox_r32_rm32 => (7, 0, 1, 19),
@@ -50,7 +52,12 @@ pub(super) fn unavailable(instruction: &Instruction) -> bool {
         Code::Xsavec_mem => (13, 1, 0, 1),
         Code::Xrstors_mem | Code::Xsaves_mem => (13, 1, 0, 3),
         Code::Ptwrite_rm32 => (20, 0, 1, 4),
-        _ => return false,
+        _ => {
+            return instruction.cpuid_features().iter().any(|&feature| {
+                modern::required(feature)
+                    .is_some_and(|required| !available(required))
+            });
+        }
     };
     !available((function, subfunction, register, bit))
 }

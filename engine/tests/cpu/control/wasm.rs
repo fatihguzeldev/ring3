@@ -101,3 +101,6 @@ mod cpu_carryless_absence;
 
 #[path = "near/bnd/wasm.rs"]
 mod cpu_bnd_prefix;
+
+#[path = "exceptions/availability/optional/modern/wasm.rs"]
+mod cpu_modern_absence;
