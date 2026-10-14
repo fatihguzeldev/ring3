@@ -243,10 +243,24 @@ impl AddressSpace {
     }
 
     pub fn write(&mut self, address: GuestAddress, input: &[u8]) -> Result<(), MemoryError> {
-        self.check_access(address, input.len(), Access::Write)?;
         if input.is_empty() {
             return Ok(());
         }
+        let within = address.0 as usize % PAGE_SIZE as usize;
+        if input.len() <= PAGE_SIZE as usize - within {
+            // retain the permission-checked slot through one-page publication.
+            let page = address.0 as usize / PAGE_SIZE as usize;
+            let slot = self.access_slot(page, address, Access::Write)?;
+            let version = self.advance_version()?;
+            let offset = slot * PAGE_SIZE as usize + within;
+            self.backing[offset..offset + input.len()].copy_from_slice(input);
+            self.versions[slot].content = version;
+            if self.permissions[slot].allows(Access::Execute) {
+                self.code_validation_version = version;
+            }
+            return Ok(());
+        }
+        self.check_access(address, input.len(), Access::Write)?;
         let version = self.advance_version()?;
         self.copy_in_validated(address, input, version);
         Ok(())
