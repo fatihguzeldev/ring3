@@ -293,6 +293,11 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
             byte_value(code, ByteValue::Register(ByteRegister::Ah));
             code.i32_const(0xd5).i32_and().i32_or().local_set(FLAGS);
         }
+        Operation::SetAlFromCarry => {
+            control::condition(code, Condition::Below);
+            code.i32_const(0xff).i32_mul();
+            insert_byte(code, ByteRegister::Al);
+        }
         Operation::Carry { kind } => {
             code.local_get(FLAGS);
             match kind {

@@ -494,6 +494,7 @@ pub enum Operation {
     Carry {
         kind: CarryKind,
     },
+    SetAlFromCarry,
     AsciiAdjust {
         kind: AsciiAdjustKind,
     },

@@ -44,3 +44,6 @@ mod cpu_bmi2;
 
 #[path = "checksum/native/crc32.rs"]
 mod cpu_crc32;
+
+#[path = "flags/carry/native.rs"]
+mod cpu_carry_to_al;

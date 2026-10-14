@@ -147,6 +147,8 @@ pub(super) fn lower(
         Code::Fnstcw_m2byte => Ok(Operation::X87ControlToMemory {
             address: effective_address(instruction)?,
         }),
+        // only bare salc has a selected defined contract; reserved prefixes stay refused.
+        Code::Salc if bytes == [0xd6] => Ok(Operation::SetAlFromCarry),
         Code::Clc => Ok(Operation::Carry {
             kind: CarryKind::Clear,
         }),
@@ -725,3 +727,7 @@ pub(super) fn lower(
         _ => super::integer::lower(instruction).unwrap_or_else(|| super::flow::lower(instruction)),
     }
 }
+
+#[cfg(test)]
+#[path = "lower/tests/salc.rs"]
+mod salc;

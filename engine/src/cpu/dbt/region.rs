@@ -749,6 +749,7 @@ pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool
                 | Operation::ClearX87Exceptions
                 | Operation::X87StatusToAx
                 | Operation::Carry { .. }
+                | Operation::SetAlFromCarry
                 | Operation::DecimalAdjust { .. }
                 | Operation::AsciiAdjust { .. }
                 | Operation::AsciiAdjustBeforeDivision { .. }

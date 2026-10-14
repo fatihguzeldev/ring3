@@ -36,3 +36,6 @@ mod cpu_bmi1_wasm;
 
 #[path = "manipulation/wasm/bmi2.rs"]
 mod cpu_bmi2_wasm;
+
+#[path = "flags/carry/wasm.rs"]
+mod cpu_carry_to_al_wasm;
