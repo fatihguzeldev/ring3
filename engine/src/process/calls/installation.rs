@@ -9,8 +9,8 @@ use crate::{
         arena::{EXIT_OFFSET, STATE_OFFSET},
         x86::{
             EXIT_SIZE, EXIT_VERSION_3, EXIT_VERSION_5, EXIT_VERSION_6, EXIT_VERSION_7,
-            EXIT_VERSION_8, EXIT_VERSION_9, EXIT_VERSION_10, EXIT_VERSION_11, STATE_SIZE,
-            decode_exit, decode_state,
+            EXIT_VERSION_8, EXIT_VERSION_9, EXIT_VERSION_10, EXIT_VERSION_11, EXIT_VERSION_12,
+            STATE_SIZE, decode_exit, decode_state,
         },
     },
     cpu::{ExitReason, dbt::UnitId},
@@ -96,6 +96,7 @@ impl EngineInstance {
                 | EXIT_VERSION_9
                 | EXIT_VERSION_10
                 | EXIT_VERSION_11
+                | EXIT_VERSION_12
         ) || exit.reason != ExitReason::NeedCode
         {
             return Err(HostError::Call(CallError::InvalidStop));
