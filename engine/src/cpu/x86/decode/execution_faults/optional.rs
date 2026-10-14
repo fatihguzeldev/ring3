@@ -5,6 +5,10 @@ use crate::cpu::x86::capabilities::CPU_ID_LEAVES;
 pub(super) fn unavailable(instruction: &Instruction) -> bool {
     let (function, subfunction, register, bit) = match instruction.code() {
         Code::Adcx_r32_rm32 | Code::Adox_r32_rm32 => (7, 0, 1, 19),
+        Code::VEX_Vaesenc_ymm_ymm_ymmm256
+        | Code::VEX_Vaesenclast_ymm_ymm_ymmm256
+        | Code::VEX_Vaesdec_ymm_ymm_ymmm256
+        | Code::VEX_Vaesdeclast_ymm_ymm_ymmm256 => (7, 0, 2, 9),
         Code::Clflushopt_m8 => (7, 0, 1, 23),
         Code::Clwb_m8 => (7, 0, 1, 24),
         Code::Sha1nexte_xmm_xmmm128
@@ -32,6 +36,7 @@ pub(super) fn unavailable(instruction: &Instruction) -> bool {
         Code::Xsusldtrk | Code::Xresldtrk => (7, 0, 3, 16),
         Code::Xsaveopt_mem => (13, 1, 0, 0),
         Code::Xsavec_mem => (13, 1, 0, 1),
+        Code::Xrstors_mem | Code::Xsaves_mem => (13, 1, 0, 3),
         Code::Ptwrite_rm32 => (20, 0, 1, 4),
         _ => return false,
     };
@@ -49,3 +54,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/tsxldtrk.rs"]
 mod tsxldtrk;
+
+#[cfg(test)]
+#[path = "tests/extended.rs"]
+mod extended;

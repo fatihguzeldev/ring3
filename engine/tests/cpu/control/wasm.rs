@@ -86,3 +86,6 @@ mod cpu_disabled_state;
 
 #[path = "hints/prefetch/wasm.rs"]
 mod cpu_data_prefetch_wasm;
+
+#[path = "exceptions/availability/extended/wasm.rs"]
+mod cpu_extended_absence;

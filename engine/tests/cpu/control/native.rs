@@ -78,3 +78,6 @@ mod far_gates;
 
 #[path = "hints/prefetch/native.rs"]
 mod cpu_data_prefetch;
+
+#[path = "exceptions/availability/extended/native.rs"]
+mod cpu_extended_absence;
