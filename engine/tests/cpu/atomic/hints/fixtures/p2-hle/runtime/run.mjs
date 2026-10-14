@@ -72,6 +72,14 @@ const ordinary = [
   {label: 'release immediate dword store', code: 'f3c700df9b5713', kind: 32, value: 0x13579bdf, after: 'df9b5713'},
   {label: 'release ordinary address16 store', code: 'f3678908', kind: 32, value: VALUE, after: 'd4c3b2a1',
     set: {0: 0x6000, 3: 0xdead5000, 6: 0xbeef0010}, decoy: true},
+  {label: 'mixed hints select release locked OR', code: 'f2f3f0830801', kind: 'or', value: 1, after: '79563412', flags: 0x402},
+  {label: 'mixed hints select acquire locked OR', code: 'f3f2f0830801', kind: 'or', value: 1, after: '79563412', flags: 0x402},
+  {label: 'repeated mixed hints select release locked OR', code: 'f2f2f3f0830801', kind: 'or', value: 1, after: '79563412', flags: 0x402},
+  {label: 'repeated mixed hints select acquire locked OR', code: 'f3f3f2f0830801', kind: 'or', value: 1, after: '79563412', flags: 0x402},
+  {label: 'mixed hints select release implicit XCHG', code: 'f2f38708', kind: 'exchange', value: VALUE, after: 'd4c3b2a1', ecx: 0x12345678},
+  {label: 'mixed hints select acquire implicit XCHG', code: 'f3f28708', kind: 'exchange', value: VALUE, after: 'd4c3b2a1', ecx: 0x12345678},
+  {label: 'mixed hints select release dword store', code: 'f2f38908', kind: 32, value: VALUE, after: 'd4c3b2a1'},
+  {label: 'mixed hints select release word store', code: 'f2f3668908', kind: 16, value: 0xc3d4, after: 'd4c33412'},
 ];
 const faults = [
   {label: 'acquire OR split write permission', code: 'f2f0830801', kind: 'or', address: 0x5fff, value: 1, pageFault: true},
@@ -81,7 +89,7 @@ const faults = [
     segments: 'limited SS', reason: 15, set: {4: 0xffe}},
 ];
 const controls = [
-  {label: 'double hint remains profile refusal', code: 'f2f3f0830801'},
+  {label: 'closest acquire does not qualify an unlocked store', code: 'f3f28908'},
   {label: 'duplicate release remains profile refusal', code: 'f3f38908'},
   {label: 'duplicate operand prefix remains profile refusal', code: '6666f38908'},
   {label: 'LOCK store stays invalid', code: 'f3f08908'},
@@ -168,22 +176,22 @@ for (const resident of [false, true]) for (const entries of [false, true]) {
     h.host(c, 'close');
   }
 }
-assert.equal(plannedInvocations, 64, 'frozen 16-vector plan across four profiles');
+assert.equal(plannedInvocations, 96, '24 semantic vectors across four profiles');
 assert.equal(compileControls, 24, 'duplicate and invalid-LOCK strict host controls');
 assert.deepEqual(pins(), sourcePins, 'HLE source and literal consumer stayed unchanged');
 writeFileSync(join(output, 'hle-contract.json'), JSON.stringify({
   source_pins: sourcePins, planned_module_invocations: plannedInvocations,
   admitted_module_invocations: admittedInvocations, strict_compile_controls: compileControls,
   profiles: ['replacement-extents', 'replacement-entries', 'resident-extents', 'resident-entries'],
-  expected_when_all_admitted: {contexts: 88, modules: 64, module_invocations: 64, observations: 152,
-    guest_instructions_retired: 44, real_operand_helper_calls: 52},
+  expected_when_all_admitted: {contexts: 120, modules: 96, module_invocations: 96, observations: 216,
+    guest_instructions_retired: 76, real_operand_helper_calls: 84},
 }, null, 2) + '\n');
 h.finish([
   'Finite absent-HLE ordinary-operation contract: no HLE enablement, transaction state or performance claim.',
-  'Sixteen literal semantic/authority vectors run once in each of four existing bound profiles; whole 4796-byte arena and every mapped RAM page are compared.',
+  'Twenty-four literal semantic/authority vectors run once in each of four existing bound profiles; whole 4796-byte arena and every mapped RAM page are compared.',
   'All guards and operand helpers are real engine exports; no fabricated helper result or mutation hook is used.',
   'The retained changed physical hint byte causes guard status4 before instruction begin, preserving state and RAM; it does not claim a retired CodeInvalidated exit.',
-  'Duplicate profile prefixes remain host refusals, including qualifying double hints; invalid LOCK controls use strict refusal and do not relabel duplicates as guest UD.',
+  'Mixed F2/F3 hints follow the closest qualifying prefix. Same-only repeats and duplicate operand prefixes remain host refusals; invalid LOCK controls use strict refusal and do not relabel duplicates as guest UD.',
   'Old-engine compilation failures remain admission failures and dependent module invocations are explicitly unreached.',
   'D16/B16 combinations and successful transaction semantics are outside this finite consumer; ordinary helper regression fixtures remain independent plain-operation controls.',
 ]);

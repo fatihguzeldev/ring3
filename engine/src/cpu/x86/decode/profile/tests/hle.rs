@@ -111,6 +111,45 @@ fn eligible_hints_keep_the_exact_underlying_operation_with_hle_absent() {
 }
 
 #[test]
+fn mixed_hints_select_the_closest_prefix_without_changing_the_ordinary_operation() {
+    for plain in [&[0xf0, 0x83, 0x08, 0x01][..], &[0x87, 0x08], &[0x89, 0x08]] {
+        for hints in [
+            &[0xf2, 0xf3][..],
+            &[0xf3, 0xf2],
+            &[0xf2, 0xf2, 0xf3],
+            &[0xf3, 0xf3, 0xf2],
+        ] {
+            let bytes = [hints, plain].concat();
+            let raw = Decoder::new(32, &bytes, DecoderOptions::NONE).decode();
+            let acquire = hints.last() == Some(&0xf2);
+            let qualifies = plain[0] != 0x89 || !acquire;
+            assert_eq!(raw.has_xacquire_prefix(), qualifies && acquire);
+            assert_eq!(raw.has_xrelease_prefix(), qualifies && !acquire);
+            let memory = executable(&bytes, 0x1000);
+            if qualifies {
+                let expected = underlying_operation(plain);
+                for decoded in [
+                    decode_one(&memory, GuestAddress(0x1000)).unwrap(),
+                    decode_for_execution(&memory, GuestAddress(0x1000)).unwrap(),
+                ] {
+                    assert_eq!(decoded.operation(), &expected);
+                    assert_eq!(usize::from(decoded.length()), bytes.len());
+                    assert!(decoded.uses_segments());
+                    assert!(memory.is_code_current(decoded.code_snapshot()));
+                }
+            } else {
+                let strict = decode_one(&memory, GuestAddress(0x1000)).unwrap_err();
+                assert!(matches!(strict, DecodeError::Unsupported(_)));
+                assert_eq!(
+                    decode_for_execution(&memory, GuestAddress(0x1000)).unwrap_err(),
+                    strict
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn hint_admission_preserves_undefined_repeat_and_duplicate_profile_refusals() {
     for bytes in [
         &[0xf2, 0x89, 0x08][..],
@@ -118,7 +157,7 @@ fn hint_admission_preserves_undefined_repeat_and_duplicate_profile_refusals() {
         &[0xf2, 0x83, 0x08, 0x01],
         &[0xf3, 0x03, 0x08],
         &[0xf3, 0xa3, 0x00, 0x50, 0x00, 0x00],
-        &[0xf2, 0xf3, 0xf0, 0x83, 0x08, 0x01],
+        &[0xf2, 0xf2, 0xf0, 0x83, 0x08, 0x01],
         &[0xf3, 0xf3, 0x89, 0x08],
         &[0x66, 0x66, 0xf3, 0x89, 0x08],
     ] {

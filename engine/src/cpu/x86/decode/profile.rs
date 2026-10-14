@@ -8,16 +8,22 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
         return Err(DecodeError::Unsupported(UnsupportedFeature::Privileged));
     }
     let mut groups = [0_u8; 3];
+    let mut repeat_kinds = 0;
     for &byte in bytes.iter().take_while(|byte| is_prefix(**byte)) {
         match byte {
             0x66 => groups[0] += 1,
             0xf0 => groups[1] += 1,
-            0xf2 | 0xf3 => groups[2] += 1,
+            0xf2 | 0xf3 => {
+                groups[2] += 1;
+                repeat_kinds |= if byte == 0xf2 { 1 } else { 2 };
+            }
             _ => {}
         }
     }
-    // duplicate prefixes in one group have unspecified behavior; keep refusal explicit.
-    if groups.iter().any(|count| *count > 1) {
+    let hle_hint = instruction.has_xacquire_prefix() || instruction.has_xrelease_prefix();
+    // mixed hle hints select the closest repeat prefix; other duplicates stay explicit.
+    let mixed_hle = !crate::cpu::x86::capabilities::HLE_ENABLED && repeat_kinds == 3 && hle_hint;
+    if groups[0] > 1 || groups[1] > 1 || groups[2] > 1 && !mixed_hle {
         return Err(unsupported());
     }
     if super::mpx::disabled_nop(instruction) {
@@ -160,7 +166,6 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
     }
     let mandatory_repeat = matches!(instruction.code(), Code::Tzcnt_r32_rm32 | Code::Pause);
     // hle is absent, so eligible hints retain the ordinary locked or store operation.
-    let hle_hint = instruction.has_xacquire_prefix() || instruction.has_xrelease_prefix();
     if !hle_hint
         && !super::mpx::disabled_branch_prefix(instruction)
         && (instruction.has_repne_prefix() || instruction.has_rep_prefix() && !mandatory_repeat)
