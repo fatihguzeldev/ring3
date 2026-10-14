@@ -13,6 +13,7 @@ pub mod simd;
 mod stack;
 mod state;
 mod system_registers;
+pub mod tasks;
 mod x87;
 pub mod xstate;
 
