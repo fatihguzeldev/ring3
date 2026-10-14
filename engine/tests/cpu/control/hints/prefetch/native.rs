@@ -118,6 +118,36 @@ fn supported_prefetchw_memory_hint_is_ignored_without_losing_prefix_length() {
 }
 
 #[test]
+fn absent_wt1_memory_alias_preserves_the_ignored_hint_contract() {
+    admitted(0x10);
+}
+
+#[test]
+fn reserved_type_3_memory_alias_preserves_the_ignored_hint_contract() {
+    admitted(0x18);
+}
+
+#[test]
+fn reserved_type_4_memory_alias_preserves_the_ignored_hint_contract() {
+    admitted(0x20);
+}
+
+#[test]
+fn reserved_type_5_memory_alias_preserves_the_ignored_hint_contract() {
+    admitted(0x28);
+}
+
+#[test]
+fn reserved_type_6_memory_alias_preserves_the_ignored_hint_contract() {
+    admitted(0x30);
+}
+
+#[test]
+fn reserved_type_7_memory_alias_preserves_the_ignored_hint_contract() {
+    admitted(0x38);
+}
+
+#[test]
 fn both_supported_hints_compile_in_all_public_bound_and_standalone_profiles() {
     let bytes = [0x0f, 0x0d, 0x00, 0x66, 0x67, 0x0f, 0x0d, 0x08, 0xeb, 0xfe];
     let engine = stopped(&bytes, 0x3000);
@@ -168,9 +198,64 @@ fn both_supported_hints_compile_in_all_public_bound_and_standalone_profiles() {
 }
 
 #[test]
+fn all_six_memory_aliases_compile_in_bound_and_standalone_profiles() {
+    for selector in 2..8_u8 {
+        let bytes = [0x0f, 0x0d, selector << 3, 0xeb, 0xfe];
+        let engine = stopped(&bytes, 0x3000);
+        for entries in [false, true] {
+            let compiled = if entries {
+                compile_entry_region(
+                    engine.memory().unwrap(),
+                    &[GuestAddress(0x3000)],
+                    CompileLimits::default(),
+                )
+            } else {
+                compile_region(
+                    engine.memory().unwrap(),
+                    &[BlockSpec {
+                        entry: GuestAddress(0x3000),
+                        byte_length: bytes.len() as u32,
+                    }],
+                    CompileLimits::default(),
+                )
+            }
+            .expect("reserved memory alias is a complete ordinary instruction");
+            assert_eq!(compiled.metadata().instructions, 2);
+        }
+        for resident in [false, true] {
+            for entries in [false, true] {
+                let mut engine = stopped(&bytes, 0x3000);
+                let descriptor = if entries {
+                    vec![0x3000_u32]
+                } else {
+                    vec![0x3000, bytes.len() as u32]
+                };
+                let encoded: Vec<u8> = descriptor
+                    .iter()
+                    .flat_map(|value| value.to_le_bytes())
+                    .collect();
+                engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + encoded.len()]
+                    .copy_from_slice(&encoded);
+                let before = engine.arena().to_vec();
+                let before_ram = ram(&engine);
+                match (resident, entries) {
+                    (false, false) => engine.compile(1).map(|_| ()),
+                    (false, true) => engine.compile_entries(1, 0).map(|_| ()),
+                    (true, false) => engine.compile_resident(1).map(|_| ()),
+                    (true, true) => engine.compile_resident_entries(1, 0).map(|_| ()),
+                }
+                .expect("bound replacement/resident and extent/entry preserve alias admission");
+                assert_eq!(engine.arena(), before);
+                assert_eq!(ram(&engine), before_ram);
+            }
+        }
+    }
+}
+
+#[test]
 fn unsupported_neighbors_invalid_lock_prefix_refusals_and_full_fetch_stay_separate() {
     for bytes in [
-        &[0x0f, 0x0d, 0x10][..],
+        &[0x0f, 0x0d, 0xd0][..],
         &[0x0f, 0x0d, 0xc0],
         &[0x0f, 0x0d, 0xc8],
         &[0xf2, 0x0f, 0x0d, 0x08],
@@ -191,7 +276,23 @@ fn unsupported_neighbors_invalid_lock_prefix_refusals_and_full_fetch_stay_separa
         assert_eq!(engine.arena(), before);
         assert_eq!(ram(&engine), before_ram);
     }
-    for selector in [0x00, 0x08] {
+    for selector in 2..8_u8 {
+        for bytes in [
+            vec![0x0f, 0x0d, 0xc0 | selector << 3],
+            vec![0xf2, 0x0f, 0x0d, selector << 3],
+            vec![0xf3, 0x0f, 0x0d, selector << 3],
+            vec![0x66, 0x66, 0x0f, 0x0d, selector << 3],
+        ] {
+            let mut engine = stopped(&bytes, 0x3000);
+            let before = engine.arena().to_vec();
+            let before_ram = ram(&engine);
+            assert!(decode_one(engine.memory().unwrap(), GuestAddress(0x3000)).is_err());
+            assert!(engine.compile_stopped_entry(KEY, 1).is_err());
+            assert_eq!(engine.arena(), before);
+            assert_eq!(ram(&engine), before_ram);
+        }
+    }
+    for selector in [0x00, 0x08, 0x10, 0x18, 0x20, 0x28, 0x30, 0x38] {
         let mut engine = stopped(&[0xf0, 0x0f, 0x0d, selector], 0x3000);
         assert_eq!(
             decode_one(engine.memory().unwrap(), GuestAddress(0x3000)).err(),

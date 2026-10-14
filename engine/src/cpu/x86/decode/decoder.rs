@@ -280,6 +280,9 @@ fn memory_error(error: MemoryError, pc: GuestAddress, length: usize) -> DecodeEr
 
 fn segment_accesses(instruction: &iced_x86::Instruction) -> u8 {
     use iced_x86::{Code, InstructionInfoFactory, Mnemonic, Register};
+    if super::profile::ignored_prefetch_alias(instruction) {
+        return 0;
+    }
     if crate::cpu::x86::capabilities::PREFETCHW_ENABLED
         && matches!(instruction.code(), Code::Prefetch_m8 | Code::Prefetchw_m8)
     {
@@ -347,6 +350,26 @@ mod tests {
             .unwrap();
         memory.write(GuestAddress(pc), bytes).unwrap();
         memory
+    }
+
+    #[test]
+    fn ignored_data_prefetch_memory_types_have_no_operand_segment_accesses() {
+        for selector in 0..8_u8 {
+            for prefix in [
+                &[][..],
+                &[0x66],
+                &[0x67],
+                &[0x64],
+                &[0x36],
+                &[0x2e],
+                &[0x66, 0x67],
+            ] {
+                let bytes = [prefix, &[0x0f, 0x0d, selector << 3]].concat();
+                let memory = executable(&bytes, 0x1000);
+                let instruction = decode_one(&memory, GuestAddress(0x1000)).unwrap();
+                assert_eq!(instruction.segment_accesses(), 0, "{bytes:02x?}");
+            }
+        }
     }
 
     #[test]

@@ -38,14 +38,25 @@ const forms = families.flatMap(family => [
   {name: `${family.name}/absolute-unmapped`, hex: `0f0d${family.absolute}ffffffff`},
   {name: `${family.name}/independent-66-67`, hex: `66670f0d${family.modrm}`},
 ]);
+const aliases = [
+  {name: 'absent-WT1 /2', hex: '0f0d10', trap: true},
+  {name: 'reserved /3 null FS', hex: '640f0d18'},
+  {name: 'reserved /4 limited SS', hex: '360f0d20'},
+  {name: 'reserved /5 absolute unmapped', hex: '0f0d2dffffffff'},
+  {name: 'reserved /6 independent operand/address prefixes', hex: '66670f0d30'},
+  {name: 'reserved /7 D16 nonflat CS override', hex: '2e0f0d38', d16: true, csBase: 0x4000},
+];
 const refusals = [
-  ['WT1 remains unresolved', '0f0d10'],
+  ['register /2 remains outside memory aliases', '0f0dd0'],
   ['register /0 remains reserved', '0f0dc0'],
   ['register /1 remains reserved', '0f0dc8'],
   ['repeat-ne W remains profile refusal', 'f20f0d08'],
   ['repeat /0 remains profile refusal', 'f30f0d00'],
   ['duplicate operand prefix remains profile refusal', '66660f0d08'],
-  ['unselected /3 remains reserved', '0f0d18'],
+  ['register /3 remains outside memory aliases', '0f0dd8'],
+  ['absent-WT1 repeat-ne remains profile refusal', 'f20f0d10'],
+  ['alias /3 repeat remains profile refusal', 'f30f0d18'],
+  ['alias /4 duplicate operand prefix remains profile refusal', '66660f0d20'],
 ];
 let planned = 0, invoked = 0;
 function seed(pc, {flags = FLAGS | RF, cancel = 0, shadow = 0, regs = poison, csBase = 0, d16 = false, csLimit} = {}) {
@@ -116,6 +127,44 @@ for (const resident of [false, true]) for (const entries of [false, true]) {
     }
     h.host(c, 'close');
   }
+  for (const row of aliases) {
+    const code = bytes(row.hex), c = open(resident, entries, row.name);
+    if (row.csBase) {
+      h.host(c, 'protect', [0x5000, 1, 7]);
+      h.upload(c, TARGET, bytes('b8efbeaddeebfe'));
+    }
+    h.upload(c, (row.csBase || 0) + TARGET, Buffer.concat([code, bytes('ebfe')]));
+    const input = seed(TARGET, {flags: FLAGS | RF | (row.trap ? TF : 0),
+      csBase: row.csBase || 0, d16: row.d16 || false});
+    h.put(c, 0, input);
+    const material = strict(c, 'exact memory compatibility alias strictly compiles', TARGET, code.length + 2);
+    invoke(c, 'alias retires once with full flags and no operand or numeric effects', material, input,
+      expected(input, row.trap ? 16 : 1, 1, TARGET + code.length), {budget: row.trap ? 2 : 1});
+    h.host(c, 'close');
+  }
+  for (const modrm of ['10', '18']) {
+    const c = open(resident, entries, `memory alias ${modrm}/illegal LOCK`), invalid = bytes(`f00f0d${modrm}`);
+    h.upload(c, TARGET, invalid); bootstrap(c, TARGET);
+    strict(c, 'invalid alias LOCK remains a strict refusal', TARGET, invalid.length, 10);
+    const material = stopped(c, 'execution captures existing invalid-LOCK UD');
+    const input = seed(TARGET, {flags: FLAGS | RF | TF});
+    invoke(c, 'alias LOCK UD precedes poisoned operands and TF; RF consumed, retired zero', material,
+      input, expected(input, 20, 0), {budget: 2}); h.host(c, 'close');
+  }
+  {
+    const code = bytes('0f0d15ffffffff'), target = 0x2000 - code.length + 1;
+    const c = open(resident, entries, 'absent-WT1 alias/final-byte fetch repair');
+    h.upload(c, target, code.subarray(0, -1)); bootstrap(c, target);
+    strict(c, 'missing final byte prevents alias strict classification', target, code.length, 10);
+    stopped(c, 'missing final byte prevents alias execution preparation', 10);
+    h.host(c, 'map', [0x2000, 1, 7]); c.pages.push(0x2000); c.pages.sort((a, b) => a - b);
+    h.upload(c, 0x2000, Buffer.concat([code.subarray(-1), bytes('ebfe')]));
+    h.host(c, 'protect', [0x2000, 1, 1]); stopped(c, 'READ without EXECUTE cannot classify alias', 10);
+    h.host(c, 'protect', [0x2000, 1, 7]); const material = stopped(c, 'full executable repair admits exact alias');
+    const input = seed(target, {flags: FLAGS | RF | TF});
+    invoke(c, 'repaired alias retires without access to absolute unmapped operand', material,
+      input, expected(input, 16, 1, target + code.length), {budget: 2}); h.host(c, 'close');
+  }
   for (const family of families) {
     const code = bytes(`0f0d${family.modrm}`);
     {
@@ -177,7 +226,7 @@ for (const resident of [false, true]) for (const entries of [false, true]) {
   {
     const c = open(resident, entries, 'explicit PREFETCH capability before and after ignored hint'), queryPC = 0x1300;
     h.upload(c, queryPC, bytes('0fa2ebfe')); h.upload(c, queryPC + 16, bytes('0fa2ebfe'));
-    h.upload(c, TARGET, bytes('0f0d08ebfe'));
+    h.upload(c, TARGET, bytes('0f0d08ebfe')); h.upload(c, 0x1400, bytes('0f0d10ebfe'));
     const queries = [
       {leaf: 0, subleaf: 0, output: [13, 0x676e6952, 0x20656e69, 0x676e4533]},
       {leaf: 7, subleaf: 0, output: [0, 0x128, 0x400000, 0]},
@@ -197,18 +246,25 @@ for (const resident of [false, true]) for (const entries of [false, true]) {
     query('before'); h.put(c, 0, seed(TARGET));
     const material = strict(c, 'ignored supported W between capability observations', TARGET, 5), input = seed(TARGET);
     invoke(c, 'ignored hint cannot mutate fixed capabilities', material, input, expected(input, 1, 1, TARGET + 3));
+    h.put(c, 0, seed(0x1400));
+    const alias = strict(c, 'absent-WT1 alias between unchanged capability observations', 0x1400, 5);
+    const aliasInput = seed(0x1400);
+    invoke(c, 'alias cannot enable WT1 or change virtual identity', alias, aliasInput,
+      expected(aliasInput, 1, 1, 0x1403));
     query('after'); h.host(c, 'close');
   }
 }
-assert.equal(planned, 344, 'finite four-profile invocation plan');
+assert.equal(planned, 408, 'finite four-profile invocation plan');
 assert.deepEqual(pins(), sourcePins, 'product, source, wrapper and independent literal oracles stay pinned');
 writeFileSync(join(output, 'prefetch-counts.json'), JSON.stringify({planned_module_invocations: planned,
-  admitted_module_invocations: invoked, selected_codes: ['Prefetch_m8', 'Prefetchw_m8'], source_pins: sourcePins}, null, 2) + '\n');
+  admitted_module_invocations: invoked, selected_codes: ['Prefetch_m8', 'Prefetchw_m8', 'Prefetchwt1_m8', 'Prefetchreserved3_m8',
+    'Prefetchreserved4_m8', 'Prefetchreserved5_m8', 'Prefetchreserved6_m8', 'Prefetchreserved7_m8'],
+  compatibility_alias_types: [2, 3, 4, 5, 6, 7], wt1_enabled: false, source_pins: sourcePins}, null, 2) + '\n');
 h.finish([
-  'exact supported/ignored PREFETCH and PREFETCHW memory Codes; ECX8 explicitly advertised, vendor and other facilities unchanged',
+  'existing supported/ignored /0 and /1 plus AMD-defined /2..7 memory compatibility aliases; ECX8=1 and WT1 bit0 stay unchanged',
   'four real replacement/resident by extent/entry profiles; complete literal 4796-byte arena and every mapped RAM page',
   'real currentness guard is the only module helper; null DS/FS, short SS, unmapped/high operand, address/operand prefixes, D16 and nonflat CS cannot cause operand effects',
   'fullfetch and dynamic CS-limit checks precede hint retirement and RF clearing; executable-page repair is required for final-byte classification',
-  'illegal LOCK keeps execution UD; repeat and duplicate-prefix refusals plus register/reserved neighbors remain distinct',
-  'WT1 flags contradiction remains unresolved; no WT1, generic 0F0D, physical cache, browser, game or throughput claim',
+  'illegal LOCK keeps execution UD; repeat and duplicate-prefix refusals plus reserved register controls remain distinct',
+  'Intel enabled-WT1 flags inconsistency remains unresolved; absent-WT1 alias does not enable WT1, generic 0F0D, physical cache, browser, game or throughput',
 ]);

@@ -170,6 +170,26 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
     Ok(())
 }
 
+// amd-compatible reserved memory types alias /0 while the wt1 facility is absent.
+// this does not define the flags or cache behavior of an enabled wt1 instruction.
+pub(super) fn ignored_prefetch_alias(instruction: &Instruction) -> bool {
+    use crate::cpu::x86::capabilities::{CPU_ID_LEAVES, PREFETCHW_ENABLED};
+    if !PREFETCHW_ENABLED {
+        return false;
+    }
+    match instruction.code() {
+        Code::Prefetchwt1_m8 => !CPU_ID_LEAVES.iter().any(|leaf| {
+            leaf.function == 7 && leaf.subfunction == Some(0) && leaf.registers[2] & 1 != 0
+        }),
+        Code::Prefetchreserved3_m8
+        | Code::Prefetchreserved4_m8
+        | Code::Prefetchreserved5_m8
+        | Code::Prefetchreserved6_m8
+        | Code::Prefetchreserved7_m8 => true,
+        _ => false,
+    }
+}
+
 fn is_prefix(byte: u8) -> bool {
     matches!(
         byte,
