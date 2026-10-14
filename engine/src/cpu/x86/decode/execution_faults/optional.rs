@@ -31,6 +31,8 @@ pub(super) fn unavailable(instruction: &Instruction) -> bool {
         | Code::Enqcmds_r16_m512
         | Code::Enqcmds_r32_m512 => (7, 0, 2, 29),
         Code::Hreset_imm8 => (7, 1, 0, 22),
+        // revision-qualified unavailable-opcode priority; no enabled msr bank.
+        Code::Wrmsrns => (7, 1, 0, 19),
         Code::Clflushopt_m8 => (7, 0, 1, 23),
         Code::Clwb_m8 => (7, 0, 1, 24),
         Code::Sha1nexte_xmm_xmmm128
@@ -110,3 +112,7 @@ mod enqueue;
 #[cfg(test)]
 #[path = "tests/history.rs"]
 mod history;
+
+#[cfg(test)]
+#[path = "tests/msr.rs"]
+mod msr;

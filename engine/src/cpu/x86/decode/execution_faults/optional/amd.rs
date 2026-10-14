@@ -12,6 +12,8 @@ pub(super) fn required(feature: CpuidFeature) -> Option<(u32, u32, usize, u32)> 
         CpuidFeature::MONITORX => (2, 29),
         CpuidFeature::CLZERO => return Some((0x8000_0008, 0, 1, 0)),
         CpuidFeature::RDPRU => return Some((0x8000_0008, 0, 1, 4)),
+        // unsupported features cannot set their efer enable bit.
+        CpuidFeature::MCOMMIT => return Some((0x8000_0008, 0, 1, 8)),
         CpuidFeature::LWP => (2, 15),
         // the broadcast and synchronization forms share this extended prerequisite.
         CpuidFeature::INVLPGB => return Some((0x8000_0008, 0, 1, 3)),
@@ -26,3 +28,7 @@ mod tests;
 #[cfg(test)]
 #[path = "amd/tests/scalar.rs"]
 mod scalar;
+
+#[cfg(test)]
+#[path = "amd/tests/commit.rs"]
+mod commit;

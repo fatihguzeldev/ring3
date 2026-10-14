@@ -163,3 +163,30 @@ fn absent_enqueue_and_history_forms_prepare_ud_without_platform_authority() {
         prepares(bytes);
     }
 }
+
+#[test]
+fn absent_memory_commit_and_nonserializing_msr_prepare_without_platform_defaults() {
+    use iced_x86::{Code, CpuidFeature, Decoder, DecoderOptions};
+    for (code, feature, bytes) in [
+        (
+            Code::Mcommit,
+            CpuidFeature::MCOMMIT,
+            &[0xf3, 0x0f, 0x01, 0xfa][..],
+        ),
+        (
+            Code::Wrmsrns,
+            CpuidFeature::WRMSRNS,
+            &[0x0f, 0x01, 0xc6][..],
+        ),
+    ] {
+        for bitness in [16, 32] {
+            let raw = Decoder::new(bitness, bytes, DecoderOptions::NONE).decode();
+            assert_eq!(raw.code(), code);
+            assert_eq!(raw.cpuid_features(), &[feature]);
+            assert_eq!(raw.len(), bytes.len());
+            assert_eq!(raw.op_count(), 0);
+            assert!(!raw.has_rep_prefix() && !raw.has_repne_prefix());
+        }
+        prepares(bytes);
+    }
+}

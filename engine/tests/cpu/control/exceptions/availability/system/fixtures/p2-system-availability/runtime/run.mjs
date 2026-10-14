@@ -14,6 +14,8 @@ const paths = [own + 'wasm.rs', own + 'native.rs', own + 'fixtures/p2-system-ava
   'engine/src/cpu/x86/decode/execution_faults/tests/invpcid.rs',
   'engine/src/cpu/x86/decode/execution_faults/tests/enqueue.rs',
   'engine/src/cpu/x86/decode/execution_faults/tests/history.rs',
+  'engine/src/cpu/x86/decode/execution_faults/tests/msr.rs',
+  'engine/src/cpu/x86/decode/execution_faults/optional/amd/tests/commit.rs',
   'engine/src/cpu/x86/decode/execution_faults/optional.rs', 'engine/src/cpu/x86/decode/execution_faults/optional/amd.rs',
   'engine/src/cpu/x86/decode/execution_faults/optional/amd/tests.rs', 'engine/src/cpu/x86/decode/decoder.rs',
   'engine/src/cpu/x86/decode/profile.rs', 'engine/src/cpu/dbt/wasm/control_instructions.rs',
@@ -38,12 +40,16 @@ const selected = [
     why: 'selected unavailable-opcode policy precedes competing CPL3 GP and nullFS address16 source'},
   {code: 'Hreset_imm8', hex: 'f30f3af0c000', reason: 20, eax: 0,
     why: 'absent opcode precedes CPL3 and enabled EAX0 NOP; no history state or HRESET_ENABLE value is invented'},
+  {code: 'Mcommit', hex: 'f30f01fa', reason: 20, flags: (FLAGS & ~1) | RF | TF,
+    why: 'absent feature forces architectural MCOMMIT enable clear; CF0 must not become guessed platform success CF1'},
+  {code: 'Wrmsrns', hex: '0f01c6', reason: 20,
+    why: 'revision-qualified unavailable-opcode policy precedes CPL3 and poison ECX/EDX:EAX without an MSR bank'},
   {code: 'Invlpgbd', hex: '0f01fe', reason: 20, why: 'absent feature precedes CPL3/reserved-input GP'},
   {code: 'Invlpgbw', hex: '670f01fe', reason: 20, why: 'address16 broadcast form has the same absent-feature UD'},
   {code: 'Tlbsync', hex: '0f01ff', reason: 20, why: 'absent feature needs no guessed EFER/VMCB or synchronization effect'},
   {code: 'Wbnoinvd', hex: 'f30f09', reason: 11, why: 'feature absence falls back to privileged WBINVD and must produce GP0'},
 ];
-assert.equal(new Set(selected.map(row => row.code)).size, 13);
+assert.equal(new Set(selected.map(row => row.code)).size, 15);
 let contexts = 0, plannedInvocations = 0, invoked = 0, plannedCompiles = 0, plannedRefusals = 0;
 function seed(pc, {d16 = false, flags = FLAGS | RF | TF, shadow = 1, nullES = false, eax} = {}) {
   const input = state(h.initial, {pc, flags, regs: eax === undefined ? regs : [eax, ...regs.slice(1)]}); input.writeUInt32LE(shadow, 12);
@@ -131,14 +137,15 @@ for (const resident of [false, true]) for (const entries of [false, true]) {
     h.host(c, 'close');
   }
 }
-assert.equal(contexts, 76); assert.equal(plannedCompiles, 244); assert.equal(plannedRefusals, 100);
-assert.equal(plannedInvocations, 144); assert.deepEqual(pins(), sourcePins);
+assert.equal(contexts, 84); assert.equal(plannedCompiles, 268); assert.equal(plannedRefusals, 108);
+assert.equal(plannedInvocations, 160); assert.deepEqual(pins(), sourcePins);
 writeFileSync(join(output, 'system-availability-counts.json'), JSON.stringify({contexts, plannedCompiles, plannedRefusals,
   plannedInvocations, invoked, totalRowsPlanned: plannedCompiles + plannedInvocations,
   selectedCodes: selected.map(row => row.code), sourcePins}, null, 2) + '\n');
 h.finish([
-  'nine original qualified protected16/32 Codes plus prior INVPCID and three literal ENQCMD/S/HRESET discriminators; WBNOINVD remains fallback GP0',
+  'nine original qualified protected16/32 Codes plus prior INVPCID/ENQCMD/S/HRESET and two MCOMMIT/WRMSRNS discriminators; WBNOINVD remains fallback GP0',
   'INVPCID retains its separate adopted AMD-compatible policy; exact five ENQCMD/S and HRESET Codes now use explicitly selected Ring3Engine unavailable-opcode priority, without claiming mandatory Intel order or AMD semantics for these Intel-only instructions',
+  'MCOMMIT derives enable0 from architectural reset plus unsupported-enable prohibition, not an OS EFER default; WRMSRNS uses explicitly selected revision-qualified policy from historical ISE052 plus current093 CPL table, without claiming current Intel mandatory order',
   'four real replacement/resident by extent/entry routes; literal full4796 arena/allmappedRAM, allGPR/flags/numeric/segment state, guard-only helper traces and retirement',
   'nullDS implicit pointer, preserved EAX and CF, D16/address32 nullFS operand, poison platform/TLB inputs and mandatoryF3 fallback distinguish accidental success or operand checks',
   'LWP last-immediate and WBNOINVD last-opcode missing/nonEXEC/EXEC repair retain fullfetch software policy; AMD permits model-dependent earlierUD at later-byte boundaries',
