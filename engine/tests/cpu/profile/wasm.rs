@@ -13,5 +13,8 @@ mod cpu_cpuid_wasm;
 #[path = "environment/ordering/wasm.rs"]
 mod cpu_cache_timestamp_wasm;
 
+#[path = "environment/clock/wasm.rs"]
+mod cpu_clock_wasm;
+
 #[path = "environment/identity/wasm.rs"]
 mod cpu_identity_wasm;

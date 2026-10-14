@@ -15,6 +15,7 @@ macro_rules! export_process_calls {
 
 mod avx;
 mod calls;
+mod clock;
 mod cpu;
 mod detection;
 mod events;

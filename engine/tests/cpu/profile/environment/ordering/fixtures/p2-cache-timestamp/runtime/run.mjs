@@ -35,6 +35,7 @@ function open(owner, entries) {
   for (const [name, value] of Object.entries(instance.exports)) if (name.startsWith('ring3_abi_v1_') && typeof value === 'function') c.api[name.slice(13)] = value;
   c.keyLow = ++counts.contexts;
   assert.equal(c.api.open(8, c.keyLow, 0x43545343), 0); c.base = c.api.arena_ptr() >>> 0;
+  assert.equal(c.api.configure_cpu_clock(1_000_000_000, 0, 0, 0), 0);
   for (const args of [[PC, 1, 7], [DATA, 2, 3], [0xfffff000, 1, 3]]) assert.equal(c.api.map(...args), 0);
   return c;
 }
@@ -86,7 +87,8 @@ function stopped(c, fn) {
   const before = seed(c, 0, 0x8000); run(c, fn, before, {budget: 0, retired: 0}); input(c, 96, words([1])); run(c, fn, before, {reason: 2, retired: 0}); counts.controls += 2;
 }
 function timestamp(c, fn, before, pc, auxiliary, {budget = 1, retired = 1, prefixCalls = [], payloadBefore = before} = {}) {
-  const state = {...before, registers: [...before.registers], pc}; state.registers[0] = ++c.tsc; state.registers[2] = 0; if (auxiliary) state.registers[1] = 0;
+  assert.equal(c.api.observe_cpu_clock(c.tsc, 0), 0);
+  const state = {...before, registers: [...before.registers], pc}; state.registers[0] = c.tsc; state.registers[2] = 0; if (auxiliary) state.registers[1] = 0;
   const payload = [arena(c).readUInt32LE(140), payloadBefore.flags, state.registers[0], state.registers[2], payloadBefore.registers[3], auxiliary ? 0 : payloadBefore.registers[1]];
   run(c, fn, state, {budget, retired, helper: timestampPacket, payload, calls: [...prefixCalls, 'cpu_integer']});
   assert.equal(c.calls.at(-1).args.at(-2), auxiliary ? 0x20001 : 0x20000); counts.timestamps++; return state;

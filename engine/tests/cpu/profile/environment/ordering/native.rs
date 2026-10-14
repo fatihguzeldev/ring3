@@ -191,6 +191,8 @@ fn rdtscp_helper_shares_virtual_counter_clears_aux_and_refuses_unknown_descripto
     engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + 8]
         .copy_from_slice(&[0, 0x10, 0, 0, 4, 0, 0, 0]);
     engine.compile(1).unwrap();
+    engine.configure_cpu_clock(1_000_000_000, 100).unwrap();
+    engine.observe_cpu_clock(117).unwrap();
     let payload = [
         0xfeedface_u32,
         0x244cd7,
@@ -204,11 +206,11 @@ fn rdtscp_helper_shares_virtual_counter_clears_aux_and_refuses_unknown_descripto
             .copy_from_slice(&value.to_le_bytes());
     }
     engine.cpu_integer(0x20000, 0).unwrap();
-    assert_eq!((word(&engine, 2), word(&engine, 3)), (1, 0));
+    assert_eq!((word(&engine, 2), word(&engine, 3)), (17, 0));
     engine.cpu_integer(0x20001, 0).unwrap();
     assert_eq!(
         (word(&engine, 2), word(&engine, 3), word(&engine, 5)),
-        (2, 0, 0)
+        (17, 0, 0)
     );
     assert_eq!(
         (word(&engine, 0), word(&engine, 1), word(&engine, 4)),
@@ -220,9 +222,10 @@ fn rdtscp_helper_shares_virtual_counter_clears_aux_and_refuses_unknown_descripto
         Err(HostError::InvalidRequest)
     );
     assert_eq!(engine.arena(), before);
+    engine.advance_cpu_clock(5).unwrap();
     engine.cpu_integer(0x20000, 0).unwrap();
     assert_eq!(
         (word(&engine, 2), word(&engine, 3), word(&engine, 5)),
-        (3, 0, 0)
+        (22, 0, 0)
     );
 }

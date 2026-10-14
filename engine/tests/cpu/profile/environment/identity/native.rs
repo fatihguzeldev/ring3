@@ -6,13 +6,12 @@ use ring3_engine::{
     cpu::{
         UnsupportedFeature,
         x86::{
+            CpuPagingError32, PagingAccess32, PagingDomain32,
             decode::{DecodeError, decode_one},
             ir::Operation,
         },
     },
-    memory::{
-        Access, AddressSpace, FaultReason, GuestAddress, MemoryFault, PageRange, Permissions,
-    },
+    memory::{AddressSpace, GuestAddress, PageRange, Permissions},
     process::EngineInstance,
 };
 
@@ -89,7 +88,7 @@ fn word(engine: &EngineInstance, index: usize) -> u32 {
 }
 
 #[test]
-fn timestamp_control_keeps_aux_zero_and_one_event_per_sample() {
+fn timestamp_control_keeps_aux_zero_and_observed_time() {
     assert_eq!(
         operation(&[0x0f, 0x31], PC),
         Ok(Operation::VirtualTimestamp)
@@ -99,12 +98,24 @@ fn timestamp_control_keeps_aux_zero_and_one_event_per_sample() {
         Ok(Operation::VirtualTimestampAux)
     );
     let mut engine = capture(&[0x0f, 0x01, 0xf9], false, false);
-    for (sample, descriptor) in [0x20000, 0x20001, 0x20000].into_iter().enumerate() {
+    engine.configure_cpu_clock(1_000_000_000, 100).unwrap();
+    for (descriptor, sample) in [(0x20000, 117), (0x20001, 117), (0x20000, 123)] {
+        let mut expected = engine.arena().to_vec();
+        engine.observe_cpu_clock(sample).unwrap();
+        assert_eq!(engine.arena(), expected);
         engine.cpu_integer(descriptor, 0).unwrap();
-        assert_eq!((word(&engine, 2), word(&engine, 3)), (sample as u32 + 1, 0));
+        expected[100..140].fill(0);
+        expected[100..104].copy_from_slice(b"R3MH");
+        expected[104..108].copy_from_slice(&0x10007_u32.to_le_bytes());
+        expected[108..112].copy_from_slice(&40_u32.to_le_bytes());
+        expected[TRANSFER_OFFSET + 8..TRANSFER_OFFSET + 12]
+            .copy_from_slice(&((sample - 100) as u32).to_le_bytes());
+        expected[TRANSFER_OFFSET + 12..TRANSFER_OFFSET + 16].fill(0);
         if descriptor == 0x20001 {
-            assert_eq!(word(&engine, 5), 0);
+            expected[TRANSFER_OFFSET + 20..TRANSFER_OFFSET + 24].fill(0);
         }
+        assert_eq!(engine.arena(), expected);
+        assert_eq!((word(&engine, 2), word(&engine, 3)), ((sample - 100) as u32, 0));
     }
 }
 
@@ -161,13 +172,14 @@ fn identity_capture_has_no_operand_access_or_timestamp_event() {
         for entries in [false, true] {
             for register in 0..8 {
                 let mut engine = capture(&form(register, &[0x66, 0x65]), resident, entries);
-                // capture cannot read data or consume a virtual timestamp event.
-                // only the execute-only code page exists.
+                // capture cannot read data or advance the host-observed clock.
                 if !resident {
+                    engine.configure_cpu_clock(1_000_000_000, 100).unwrap();
+                    engine.observe_cpu_clock(117).unwrap();
                     engine.cpu_integer(0x20001, 0).unwrap();
                     assert_eq!(
                         (word(&engine, 2), word(&engine, 3), word(&engine, 5)),
-                        (1, 0, 0)
+                        (17, 0, 0)
                     );
                 }
             }
@@ -194,18 +206,20 @@ fn truncated_identity_keeps_the_exact_execute_fetch_fault() {
         &[0x66, 0xf3, 0x0f, 0xc7],
     ] {
         let pc = 0x2000 - bytes.len() as u32;
-        assert_eq!(
-            operation(bytes, pc),
-            Err(DecodeError::MemoryFault {
-                pc: GuestAddress(pc),
-                fault: MemoryFault {
-                    address: GuestAddress(0x2000),
-                    access: Access::Execute,
-                    reason: FaultReason::Unmapped
-                },
-                length: bytes.len() as u32 + 1,
-            })
-        );
+        let Err(DecodeError::Paging {
+            pc: actual_pc,
+            error: CpuPagingError32::PageFault(fault),
+            attempted_length,
+        }) = operation(bytes, pc)
+        else {
+            panic!("truncated identity must detect an actual execute page fault");
+        };
+        assert_eq!(actual_pc, GuestAddress(pc));
+        assert_eq!(fault.linear(), GuestAddress(0x2000));
+        assert_eq!(fault.access(), PagingAccess32::Execute);
+        assert_eq!(fault.domain(), PagingDomain32::User);
+        assert_eq!(fault.error_code(), 20);
+        assert_eq!(usize::from(attempted_length), bytes.len() + 1);
     }
 }
 

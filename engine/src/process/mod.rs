@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod calls;
+mod clock;
 mod cpu;
 mod execution;
 mod instance;

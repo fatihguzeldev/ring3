@@ -80,7 +80,7 @@ function open(owner,entries,blocks){
  assert.ok(blocks.length<=8,'capture remains within the existing eight-block limit');
  const instance=new WebAssembly.Instance(engine.module,{}),c={id:contexts.length+1,owner,entries,memory:instance.exports.memory,api:{},tsc:0};
  for(const[name,fn]of Object.entries(instance.exports))if(name.startsWith('ring3_abi_v1_')&&typeof fn==='function')c.api[name.slice(13)]=fn;
- host(c,'open',[6,c.id,0x494e5447]);c.base=c.api.arena_ptr()>>>0;input(c,0,initial);
+ host(c,'open',[6,c.id,0x494e5447]);host(c,'configure_cpu_clock',[1000000000,0,0,0]);c.base=c.api.arena_ptr()>>>0;input(c,0,initial);
  for(const page of[0x1000,0x5000,0x7000])host(c,'map',[page,1,7]);
  host(c,'set_segment_base',[4,0x5000]);host(c,'set_segment_base',[5,0x7000]);
  host(c,'configure_segment_descriptor',[0x43,0x7000,3,1,1]);
@@ -155,9 +155,10 @@ function caseRun(c,block,row){
  }else if(row.timestamp){
   execute(c,'RDTSC budget-zero has no event',s,{next:s,width:0,helperCount:0,retired:0,budget:0});
   execute(c,'RDTSC cancelled has no event',s,{next:s,width:0,helperCount:0,retired:0,reason:2,cancel:1});
-  next.r=[...s.r];next.r[0]=++c.tsc;next.r[2]=0;next.pc=block.pc+2;
+  c.tsc=17;host(c,'observe_cpu_clock',[c.tsc,0]);
+  next.r=[...s.r];next.r[0]=c.tsc;next.r[2]=0;next.pc=block.pc+2;
   execute(c,'RDTSC first live event',s,{next,width:0,descriptor:0x20000,timestamp:true});
-  const second={...next,r:[...next.r],pc:block.pc+4};second.r[0]=++c.tsc;
+  const second={...next,r:[...next.r],pc:block.pc+4};second.r[0]=c.tsc;
   execute(c,'RDTSC second live event',next,{next:second,width:0,descriptor:0x20000,timestamp:true});
  }else if(row.xlat){
   s.r[0]=(s.r[0]&0xffffff00)|row.oldAl;s.r[3]=row.oldEbx;next.r=[...s.r];next.r[0]=((s.r[0]&0xffffff00)|0xa7)>>>0;

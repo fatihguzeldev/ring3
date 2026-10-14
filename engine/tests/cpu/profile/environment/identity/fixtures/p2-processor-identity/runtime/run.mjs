@@ -117,6 +117,7 @@ function open(resident, entries) {
     );
   }
   call(context, 'open', [4, context.key, KEY_HIGH]);
+  call(context, 'configure_cpu_clock', [1_000_000_000, 0, 0, 0]);
   context.base = context.api.arena_ptr() >>> 0;
   assert.equal(context.api.arena_len(), ARENA_SIZE);
   call(context, 'map', [PC, 1, 7]);
@@ -270,7 +271,7 @@ function execute(context, compiled, action, options = {}, initialize = true) {
       expected.writeUInt32LE(0, 16 + action.register * 4);
       counts.identities++;
     } else {
-      const tick = ++context.tsc;
+      const tick = context.tsc;
       expected.writeUInt32LE(tick, 16);
       expected.writeUInt32LE(0, 24);
       if (action.kind === 'aux') expected.writeUInt32LE(0, 20);

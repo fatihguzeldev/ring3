@@ -5,6 +5,9 @@ use std::cell::RefCell;
 use super::{CallError, EngineInstance, HostError, StoreCompletion};
 use crate::cpu::dbt::RegistryError;
 
+mod clock;
+pub(crate) use clock::{advance_cpu_clock, configure_cpu_clock, observe_cpu_clock};
+
 struct Registry {
     opened: bool,
     instance: Option<EngineInstance>,

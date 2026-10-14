@@ -61,9 +61,9 @@ impl EngineInstance {
         }
         let mut output = input;
         if matches!(descriptor, 0x20000 | 0x20001) {
-            self.virtual_tsc = self.virtual_tsc.wrapping_add(1);
-            output[2] = self.virtual_tsc as u32;
-            output[3] = (self.virtual_tsc >> 32) as u32;
+            let timestamp = self.cpu_clock.timestamp()?;
+            output[2] = timestamp as u32;
+            output[3] = (timestamp >> 32) as u32;
             if descriptor == 0x20001 {
                 // all guest threads share the current single virtual processor.
                 output[5] = crate::cpu::x86::USER_MODE_ENVIRONMENT.tsc_aux();
@@ -169,13 +169,26 @@ mod tests {
     }
 
     #[test]
-    fn timestamp_high_word_rollover_and_aux_share_one_counter() {
+    fn timestamp_reads_do_not_advance_virtual_time() {
         let mut engine = engine();
-        engine.virtual_tsc = u64::from(u32::MAX);
+        engine.configure_cpu_clock(1_000_000_000, 100).unwrap();
+        engine.observe_cpu_clock(117).unwrap();
+        for descriptor in [0x20000, 0x20001, 0x20000] {
+            engine.cpu_integer(descriptor, 0).unwrap();
+            assert_eq!((transfer(&engine, 2), transfer(&engine, 3)), (17, 0));
+        }
+    }
+
+    #[test]
+    fn observed_timestamp_high_word_rollover_and_aux_share_one_clock() {
+        let mut engine = engine();
+        engine.configure_cpu_clock(1_000_000_000, 0).unwrap();
+        engine.observe_cpu_clock(u64::from(u32::MAX)).unwrap();
+        engine.advance_cpu_clock(1).unwrap();
         engine.arena_mut().unwrap()[TRANSFER_OFFSET + 20..TRANSFER_OFFSET + 24]
             .copy_from_slice(&u32::MAX.to_le_bytes());
         engine.cpu_integer(0x20001, 0).unwrap();
-        assert_eq!(engine.virtual_tsc, 1 << 32);
+        assert_eq!(engine.cpu_clock.timestamp(), Ok(1 << 32));
         assert_eq!(
             (
                 transfer(&engine, 2),
@@ -184,30 +197,47 @@ mod tests {
             ),
             (0, 1, 0)
         );
-        engine.virtual_tsc = u64::MAX;
+        engine.observe_cpu_clock(u64::MAX).unwrap();
         engine.cpu_integer(0x20000, 0).unwrap();
-        assert_eq!(engine.virtual_tsc, 0);
-        assert_eq!((transfer(&engine, 2), transfer(&engine, 3)), (0, 0));
+        assert_eq!(engine.cpu_clock.timestamp(), Ok(u64::MAX));
+        assert_eq!(
+            (transfer(&engine, 2), transfer(&engine, 3)),
+            (u32::MAX, u32::MAX)
+        );
     }
 
     #[test]
     fn rejected_timestamp_requests_do_not_publish_or_consume_events() {
         let mut engine = engine();
-        engine.virtual_tsc = 17;
+        engine.configure_cpu_clock(1_000_000_000, 0).unwrap();
+        engine.observe_cpu_clock(17).unwrap();
         for descriptor in [0x20002, 0x20003, 0x40020001, u32::MAX] {
             let before = engine.arena().to_vec();
             assert_eq!(
                 engine.cpu_integer(descriptor, 0),
                 Err(HostError::InvalidRequest)
             );
-            assert_eq!(engine.virtual_tsc, 17);
+            assert_eq!(engine.cpu_clock.timestamp(), Ok(17));
             assert_eq!(engine.arena(), before);
         }
         engine.close();
         let before = engine.arena().to_vec();
         assert_eq!(engine.cpu_integer(0x20001, 0), Err(HostError::Closed));
-        assert_eq!(engine.virtual_tsc, 17);
+        assert_eq!(engine.cpu_clock.timestamp(), Err(HostError::Infrastructure));
         assert_eq!(engine.arena(), before);
+    }
+
+    #[test]
+    fn missing_host_clock_rejects_timestamp_without_guest_fault_or_publication() {
+        let mut engine = engine();
+        for descriptor in [0x20000, 0x20001] {
+            let before = engine.arena().to_vec();
+            assert_eq!(
+                engine.cpu_integer(descriptor, 0),
+                Err(HostError::Infrastructure)
+            );
+            assert_eq!(engine.arena(), before);
+        }
     }
 }
 
