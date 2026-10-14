@@ -111,3 +111,6 @@ mod cpu_interrupt_dispatch;
 
 #[path = "near/repeat/native.rs"]
 mod cpu_repeat_return;
+
+#[path = "hints/alignment/native.rs"]
+mod cpu_compiler_alignment;

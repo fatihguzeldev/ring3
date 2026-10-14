@@ -122,3 +122,6 @@ mod cpu_certified_paging;
 
 #[path = "near/repeat/wasm.rs"]
 mod cpu_repeat_near_return;
+
+#[path = "hints/alignment/wasm.rs"]
+mod cpu_compiler_alignment_wasm;

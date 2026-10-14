@@ -23,7 +23,11 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
     let hle_hint = instruction.has_xacquire_prefix() || instruction.has_xrelease_prefix();
     // mixed hle hints select the closest repeat prefix; other duplicates stay explicit.
     let mixed_hle = !crate::cpu::x86::capabilities::HLE_ENABLED && repeat_kinds == 3 && hle_hint;
-    if groups[0] > 1 || groups[1] > 1 || groups[2] > 1 && !mixed_hle {
+    // compiler alignment extends real multi-byte nops with repeated operand-size prefixes.
+    let alignment_nop = matches!(instruction.code(), Code::Nop_rm16 | Code::Nop_rm32)
+        && groups[1] == 0
+        && groups[2] == 0;
+    if groups[0] > 1 && !alignment_nop || groups[1] > 1 || groups[2] > 1 && !mixed_hle {
         return Err(unsupported());
     }
     if legacy_nop_alias(instruction) {
