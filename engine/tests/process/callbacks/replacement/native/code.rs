@@ -1,6 +1,7 @@
 use ring3_engine::abi::arena::{TRANSFER_OFFSET, TRANSFER_SIZE};
 use ring3_engine::abi::x86::{
-    decode_exit, decode_state, encode_exit_v3, encode_exit_v9, encode_exit_v12, encode_state,
+    decode_exit, decode_state, encode_exit_v3, encode_exit_v9, encode_exit_v12, encode_exit_v13,
+    encode_state,
 };
 use ring3_engine::cpu::dbt::{CompileError, InstructionError};
 use ring3_engine::cpu::x86::{State32, decode::DecodeError};
@@ -41,11 +42,13 @@ fn version_five_need_code_resumes_but_divide_error_cannot_publish_callback_code(
 
 #[test]
 fn versioned_need_code_resumes_without_admitting_faults_or_unknown_versions() {
-    for version in [9_u16, 12] {
+    for version in [9_u16, 12, 13] {
         let encode: fn(&ExecutionExit, &mut [u8]) -> _ = if version == 9 {
             encode_exit_v9
-        } else {
+        } else if version == 12 {
             encode_exit_v12
+        } else {
+            encode_exit_v13
         };
         let mut engine = active();
         replacement(&mut engine, TARGET, 6);

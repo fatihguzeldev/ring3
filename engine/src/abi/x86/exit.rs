@@ -15,6 +15,7 @@ pub const EXIT_VERSION_9: u16 = 9;
 pub const EXIT_VERSION_10: u16 = 10;
 pub const EXIT_VERSION_11: u16 = 11;
 pub const EXIT_VERSION_12: u16 = 12;
+pub const EXIT_VERSION_13: u16 = 13;
 pub const REASON_OFFSET: usize = 16;
 pub const RETIRED_OFFSET: usize = 20;
 pub const DETAIL_OFFSET: usize = 24;
@@ -70,6 +71,10 @@ pub fn encode_exit_v12(exit: &ExecutionExit, output: &mut [u8]) -> Result<(), Ab
     encode(exit, output, EXIT_VERSION_12)
 }
 
+pub fn encode_exit_v13(exit: &ExecutionExit, output: &mut [u8]) -> Result<(), AbiError> {
+    encode(exit, output, EXIT_VERSION_13)
+}
+
 fn encode(exit: &ExecutionExit, output: &mut [u8], version: u16) -> Result<(), AbiError> {
     if output.len() != EXIT_SIZE {
         return Err(AbiError::Length);
@@ -110,7 +115,7 @@ fn encode(exit: &ExecutionExit, output: &mut [u8], version: u16) -> Result<(), A
             if version < EXIT_VERSION_12 {
                 return Err(AbiError::Exit);
             }
-            paging::validate(error_code, access, length)?;
+            paging::validate(error_code, access, length, version)?;
             fields[2] = error_code;
             fields[3] = linear.0;
             fields[4] = match access {
@@ -240,6 +245,7 @@ pub fn decode_exit(input: &[u8]) -> Result<ExecutionExit, AbiError> {
             EXIT_VERSION_10,
             EXIT_VERSION_11,
             EXIT_VERSION_12,
+            EXIT_VERSION_13,
         ],
     )?;
     let detail = read_u32(input, DETAIL_OFFSET);
@@ -272,7 +278,7 @@ pub fn decode_exit(input: &[u8]) -> Result<ExecutionExit, AbiError> {
             3 => Access::Execute,
             _ => return Err(AbiError::Exit),
         };
-        paging::validate(detail, access, length)?;
+        paging::validate(detail, access, length, version)?;
         ExitReason::PageFault {
             error_code: detail,
             linear: GuestAddress(address),
