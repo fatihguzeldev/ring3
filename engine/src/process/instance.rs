@@ -49,6 +49,8 @@ pub struct EngineInstance {
     pub(in crate::process) call_token: u32,
     pub(in crate::process) virtual_tsc: u64,
     pub(in crate::process) system_register_bank: Option<crate::cpu::x86::UserSystemRegisterBank32>,
+    pub(in crate::process) interrupt_descriptors:
+        Option<crate::cpu::x86::InterruptDescriptorTable32>,
     pub(in crate::process) image: Option<crate::loader::ImageMetadata32>,
     pub(in crate::process) image_input: Option<crate::process::loading::input::ImageInput>,
     pub(in crate::process) image_started: bool,
@@ -84,6 +86,7 @@ impl EngineInstance {
             call_token: 0,
             virtual_tsc: 0,
             system_register_bank: None,
+            interrupt_descriptors: None,
             image: None,
             image_input: None,
             image_started: false,
@@ -118,6 +121,7 @@ impl EngineInstance {
     pub fn close(&mut self) {
         self.image_input = None;
         self.system_register_bank = None;
+        self.interrupt_descriptors = None;
         self.pending_call = None;
         self.callback = None;
         self.artifact = None;

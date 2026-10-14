@@ -5,6 +5,7 @@ pub(crate) mod capabilities;
 mod control;
 pub mod decode;
 mod environment;
+mod interrupts;
 pub mod ir;
 pub mod packed_strings;
 mod segments;
@@ -21,6 +22,7 @@ pub use control::{
     USER_POP_FLAGS_WORD_MASK, interrupt_return_flags, pop_flags,
 };
 pub(crate) use environment::USER_MODE_ENVIRONMENT;
+pub use interrupts::InterruptDescriptorTable32;
 pub use segments::{
     CodeDestination, CodeTransfer, CodeTransferError, FarWidth, SegmentAccess, SegmentAccessError,
     SegmentCache, SegmentContext, SegmentDescriptor, SegmentDescriptorKind,

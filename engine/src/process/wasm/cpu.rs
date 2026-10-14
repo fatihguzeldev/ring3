@@ -400,3 +400,7 @@ pub(crate) fn stack_execute_resident(
 pub(crate) fn configure_system_register_bank() -> u32 {
     mutate(|instance| instance.configure_system_register_bank_request())
 }
+
+pub(crate) fn configure_interrupt_descriptor_table() -> u32 {
+    mutate(|instance| instance.configure_interrupt_descriptor_table_request())
+}

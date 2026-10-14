@@ -1,5 +1,6 @@
 mod avx;
 mod exit;
+mod interrupts;
 mod segments;
 mod simd;
 mod state;
@@ -55,4 +56,9 @@ pub(crate) use avx::{
 
 pub use system_registers::{
     SYSTEM_REGISTER_BANK_SIZE, decode_system_register_bank, encode_system_register_bank,
+};
+
+pub use interrupts::{
+    INTERRUPT_DESCRIPTOR_TABLE_SIZE, decode_interrupt_descriptor_table,
+    encode_interrupt_descriptor_table,
 };

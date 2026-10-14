@@ -213,8 +213,9 @@ pub(crate) use xstate::{
 
 mod cpu;
 pub(crate) use cpu::{
-    configure_segment_descriptor, configure_segment_descriptor_raw, configure_system_register_bank,
-    cpu_fxsave, cpu_fxsave_resident, cpu_integer, cpu_integer_resident, cpu_mask_write,
+    configure_interrupt_descriptor_table, configure_segment_descriptor,
+    configure_segment_descriptor_raw, configure_system_register_bank, cpu_fxsave,
+    cpu_fxsave_resident, cpu_integer, cpu_integer_resident, cpu_mask_write,
     cpu_mask_write_resident, cpu_read, cpu_read8, cpu_read16, cpu_read32, cpu_write,
     cpu_write_resident, far_call, far_call_resident, far_jump, far_jump_resident, far_return,
     far_return_resident, segment_load, segment_load_far, segment_load_far_resident,

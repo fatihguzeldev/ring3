@@ -102,3 +102,6 @@ mod cpu_system_availability;
 
 #[path = "exceptions/availability/scalar/native.rs"]
 mod cpu_scalar_availability;
+
+#[path = "interrupt/configuration/native.rs"]
+mod interrupt_configuration;

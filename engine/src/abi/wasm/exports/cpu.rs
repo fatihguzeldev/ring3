@@ -1,5 +1,6 @@
 export_process_calls! {
     configure_system_register_bank();
+    configure_interrupt_descriptor_table();
     cpu_read8(address: u32);
     cpu_read16(address: u32);
     cpu_read32(address: u32);
