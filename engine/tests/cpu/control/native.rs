@@ -87,3 +87,6 @@ mod cpu_key_locker_absence;
 
 #[path = "exceptions/availability/cet/native.rs"]
 mod cpu_cet_disabled;
+
+#[path = "exceptions/availability/optional/carryless/native.rs"]
+mod cpu_carryless_absence;

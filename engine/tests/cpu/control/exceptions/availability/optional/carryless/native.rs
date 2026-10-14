@@ -1,0 +1,67 @@
+use super::stopped_support::{KEY, stopped};
+use ring3_engine::{
+    cpu::x86::{decode::decode_one, ir::Operation},
+    memory::GuestAddress,
+};
+
+fn ram(engine: &ring3_engine::process::EngineInstance) -> Vec<u8> {
+    let mut bytes = vec![0; 8192];
+    for (index, page) in [0x1000, 0x3000].into_iter().enumerate() {
+        engine
+            .memory()
+            .unwrap()
+            .read(
+                GuestAddress(page),
+                &mut bytes[index * 4096..(index + 1) * 4096],
+            )
+            .unwrap();
+    }
+    bytes
+}
+
+fn capture_absent_fault(bytes: &[u8]) {
+    for resident in [false, true] {
+        for pc in [0x3000, 0x4000 - bytes.len() as u32] {
+            let mut engine = stopped(bytes, pc);
+            assert!(decode_one(engine.memory().unwrap(), GuestAddress(pc)).is_err());
+            let keep = engine.compile_resident(1).unwrap();
+            let prior = engine.artifact_bytes().unwrap().to_vec();
+            let prior_resident = engine.resident_bytes(keep.get()).unwrap().to_vec();
+            let arena = engine.arena().to_vec();
+            let memory = ram(&engine);
+            if resident {
+                let result = engine.compile_stopped_resident_entry(KEY);
+                assert!(result.is_ok(), "{bytes:02x?}: {result:?}");
+                assert_eq!(
+                    &engine.resident_bytes(result.unwrap().get()).unwrap()[..8],
+                    b"\0asm\x01\0\0\0"
+                );
+                assert_eq!(engine.generation(), 1);
+                assert_eq!(engine.artifact_bytes().unwrap(), prior);
+            } else {
+                assert_eq!(engine.compile_stopped_entry(KEY, 1), Ok(2), "{bytes:02x?}");
+                assert_eq!(engine.generation(), 2);
+                assert_eq!(&engine.artifact_bytes().unwrap()[..8], b"\0asm\x01\0\0\0");
+            }
+            assert_eq!(engine.resident_bytes(keep.get()).unwrap(), prior_resident);
+            assert_eq!(engine.arena(), arena);
+            assert_eq!(ram(&engine), memory);
+        }
+    }
+}
+
+#[test]
+fn absent_vpclmul256_prepares_ud() {
+    capture_absent_fault(&[0xc4, 0xe3, 0x7d, 0x44, 0xc1, 0]);
+}
+#[test]
+fn vex128_pclmul_success_and_unselected_int_are_preserved() {
+    let engine = stopped(&[0xc4, 0xe3, 0x79, 0x44, 0xc1, 0], 0x3000);
+    let decoded = decode_one(engine.memory().unwrap(), GuestAddress(0x3000)).unwrap();
+    assert!(matches!(decoded.operation(), Operation::Avx(_)));
+    assert_eq!(decoded.length(), 6);
+    let mut engine = stopped(&[0xcd, 0x80], 0x3000);
+    let before = engine.arena().to_vec();
+    assert!(engine.compile_stopped_entry(KEY, 1).is_err());
+    assert_eq!(engine.arena(), before);
+}

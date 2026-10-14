@@ -20,6 +20,7 @@ pub(super) fn unavailable(instruction: &Instruction) -> bool {
         | Code::Encodekey128_r32_r32
         | Code::Encodekey256_r32_r32
         | Code::Loadiwkey_xmm_xmm => (7, 0, 2, 23),
+        Code::VEX_Vpclmulqdq_ymm_ymm_ymmm256_imm8 => (7, 0, 2, 10),
         Code::Clflushopt_m8 => (7, 0, 1, 23),
         Code::Clwb_m8 => (7, 0, 1, 24),
         Code::Sha1nexte_xmm_xmmm128
@@ -73,3 +74,7 @@ mod extended;
 #[cfg(test)]
 #[path = "tests/keys.rs"]
 mod keys;
+
+#[cfg(test)]
+#[path = "tests/pclmul.rs"]
+mod pclmul;

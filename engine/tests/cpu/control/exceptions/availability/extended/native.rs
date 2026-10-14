@@ -75,7 +75,7 @@ fn absent_vaesdeclast256_prepares_architectural_ud() {
     capture_absent_fault(&[0xc4, 0xe2, 0x7d, 0xdf, 0xc1]);
 }
 #[test]
-fn vex128_aes_stays_successful_and_unselected_neighbors_keep_public_refusal() {
+fn vex128_aes_selected_absence_and_neutral_neighbor_remain_distinct() {
     for opcode in [0xdc, 0xdd, 0xde, 0xdf] {
         let bytes = [0xc4, 0xe2, 0x79, opcode, 0xc1];
         let engine = stopped(&bytes, 0x3000);
@@ -86,8 +86,15 @@ fn vex128_aes_stays_successful_and_unselected_neighbors_keep_public_refusal() {
     for bytes in [&[0xcd, 0x80][..], &[0xc4, 0xe3, 0x7d, 0x44, 0xc1, 0]] {
         let mut engine = stopped(bytes, 0x3000);
         let arena = engine.arena().to_vec();
-        assert!(engine.compile_stopped_entry(KEY, 1).is_err());
-        assert_eq!(engine.generation(), 1);
+        assert!(decode_one(engine.memory().unwrap(), GuestAddress(0x3000)).is_err());
+        let result = engine.compile_stopped_entry(KEY, 1);
+        if bytes == [0xc4, 0xe3, 0x7d, 0x44, 0xc1, 0] {
+            assert_eq!(result, Ok(2));
+            assert_eq!(engine.generation(), 2);
+        } else {
+            assert!(result.is_err());
+            assert_eq!(engine.generation(), 1);
+        }
         assert_eq!(engine.arena(), arena);
     }
 }

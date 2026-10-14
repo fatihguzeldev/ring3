@@ -95,3 +95,6 @@ mod cpu_key_locker_absence;
 
 #[path = "exceptions/availability/cet/wasm.rs"]
 mod cpu_cet_disabled;
+
+#[path = "exceptions/availability/optional/carryless/wasm.rs"]
+mod cpu_carryless_absence;

@@ -106,14 +106,15 @@ for (const resident of [false, true]) for (const entries of [false, true]) {
       input, expected(input, 20, 0), {budget: 2}); h.host(c, 'close');
   }
   for (const row of [
-    {hex: 'c4e37d44c100', label: 'unselected VPCLMUL256 neutral refusal', invalid: false},
+    {hex: 'c4e37d44c100', label: 'selected absent VPCLMUL256 UD', invalid: false, absent: true},
     {hex: 'f00fc728', label: 'illegal LOCK XSAVES decoder UD', invalid: true},
   ]) {
     const code = bytes(row.hex), target = 0x1100, c = open(resident, entries, row.label);
     h.upload(c, target, code); bootstrap(c, target);
     strict(c, 'strict prefix/neighbor refusal retained', target, code.length, 10);
-    const material = stopped(c, row.label, row.invalid ? 0 : 10);
-    if (row.invalid) {const input = seed(target); invoke(c, 'existing decoder-invalid outcome stays UD', material,
+    const fault = row.invalid || row.absent;
+    const material = stopped(c, row.label, fault ? 0 : 10);
+    if (fault) {const input = seed(target); invoke(c, row.invalid ? 'existing decoder-invalid outcome stays UD' : 'selected absent VPCLMUL256 reaches UD', material,
       input, expected(input, 20, 0), {budget: 2});}
     h.host(c, 'close');
   }
@@ -136,10 +137,10 @@ for (const resident of [false, true]) for (const entries of [false, true]) {
   }
 
 }
-assert.equal(planned, 124, 'finite planned module invocations across four profiles');
+assert.equal(planned, 128, 'finite planned module invocations across four profiles');
 assert.deepEqual(pins(), sourcePins);
 writeFileSync(join(output, 'extended-counts.json'), JSON.stringify({planned, invoked, exactCodes: exact.map(row => row.code),
-  contextsPlanned: 64, compileObservationsPlanned: 176, totalRowsPlanned: 300, sourcePins}, null, 2) + '\n');
+  contextsPlanned: 64, compileObservationsPlanned: 176, totalRowsPlanned: 304, sourcePins}, null, 2) + '\n');
 h.finish([
   'exact six-Code absence cut only: two supervisor XSAVE forms and four VEX256 VAES forms; no facility activated',
   'four replacement/resident by extent/entry profiles use real guard/helper exports and independent full4796 arena/every mapped RAM page oracles',

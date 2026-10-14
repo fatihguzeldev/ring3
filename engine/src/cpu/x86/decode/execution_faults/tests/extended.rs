@@ -115,7 +115,7 @@ fn final_execute_byte_is_required_before_supervisor_xsave_or_wide_aes_classifica
     }
 }
 #[test]
-fn vex128_aes_and_unselected_instruction_prefix_boundaries_stay_unchanged() {
+fn vex128_aes_selected_absence_and_neutral_prefix_refusals_remain_distinct() {
     for opcode in [0xdc, 0xdd, 0xde, 0xdf] {
         let memory = executable(&[0xc4, 0xe2, 0x79, opcode, 0xc1], 0x1000);
         let strict = decode_one(&memory, GuestAddress(0x1000)).unwrap();
@@ -135,9 +135,18 @@ fn vex128_aes_and_unselected_instruction_prefix_boundaries_stay_unchanged() {
         let memory = executable(bytes, 0x1000);
         let strict = decode_one(&memory, GuestAddress(0x1000)).unwrap_err();
         assert!(matches!(strict, DecodeError::Unsupported(_)));
-        assert_eq!(
-            decode_for_execution(&memory, GuestAddress(0x1000)).unwrap_err(),
-            strict
-        );
+        if bytes == [0xc4, 0xe3, 0x7d, 0x44, 0xc1, 0] {
+            assert_eq!(
+                decode_for_execution(&memory, GuestAddress(0x1000))
+                    .unwrap()
+                    .operation(),
+                &Operation::Control(ControlOperation::InvalidOpcode)
+            );
+        } else {
+            assert_eq!(
+                decode_for_execution(&memory, GuestAddress(0x1000)).unwrap_err(),
+                strict
+            );
+        }
     }
 }
