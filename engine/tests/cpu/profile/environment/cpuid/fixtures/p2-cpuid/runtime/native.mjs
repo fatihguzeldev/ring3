@@ -10,8 +10,19 @@ while (offset < bytes.length) {
   checkImports(module, resident);
   const memory = new WebAssembly.Memory({initial: 1}), context = {memory, base: 0, label: `${resident ? 'resident' : 'replacement'}-${entries ? 'entry' : 'extent'}-${instructionLength}`};
   seedFlatCodeContext(context); let guards = 0;
-  const guard = () => {guards++; return 0;};
-  context.run = new WebAssembly.Instance(module, {env: {memory}, ring3: {guard, guard_resident: guard}}).exports.run;
+  context.calls = [];
+  const logged = value => typeof value === 'bigint' ? value.toString(10) : value >>> 0;
+  const guard = (...args) => {
+    const status = BigInt(++guards);
+    context.calls.push({name: resident ? 'guard_detect_resident' : 'guard_detect', args: args.map(logged), status: logged(status)});
+    return status;
+  };
+  const finish = (...args) => {
+    context.calls.push({name: 'finish_exception_detection', args: args.map(logged), status: 0}); return 0;
+  };
+  context.run = new WebAssembly.Instance(module, {env: {memory}, ring3: {
+    guard_detect: guard, guard_detect_resident: guard, finish_exception_detection: finish,
+  }}).exports.run;
   const count = checkContext(context, instructionLength);
   assert.equal(guards, count, 'each native codegen run checks its bound identity once');
   assert.equal(arena(context).length, SIZE); runs += count; contexts++;

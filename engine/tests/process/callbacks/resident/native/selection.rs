@@ -581,7 +581,7 @@ fn selector_priorities_canonical_versions_acknowledgement_and_idempotence() {
     }
     for (offset, value) in [
         (0, 0),
-        (4, 0x10003),
+        (4, 0x10004),
         (8, 55),
         (12, 1),
         (52, u32::MAX),

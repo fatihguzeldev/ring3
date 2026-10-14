@@ -50,7 +50,7 @@ const negatives = [[0xf2], [0xf3], [0x66, 0x66]].map((prefix) => ({
   bytes: Buffer.from([...prefix, 0x0f, 0x33]),
 }));
 negatives.push(
-  { name: 'valid-unsupported-int80', bytes: Buffer.from([0xcd, 0x80]) },
+  { name: 'duplicate-operand-prefix-int80-keeps-profile-refusal', bytes: Buffer.from([0x66, 0x66, 0xcd, 0x80]) },
   {
     name: 'incomplete-rdpmc-fetch-remains-typed-preparation-error',
     bytes: Buffer.from([0x0f]),

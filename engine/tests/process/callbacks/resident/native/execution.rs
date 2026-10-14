@@ -310,6 +310,19 @@ fn reject(f: &mut Fixture, key: u64, id: u64, token: u32, error: HostError) {
 }
 fn abort_restores(f: &mut Fixture, token: u32) {
     let before = storage(f);
+    // restored private segments select the saved flat interpretation even if the
+    // host poisoned the public segment records before abort.
+    let logical = [
+        (OUTER, f.outer, 2),
+        (ENTRY, f.callback, 3),
+        (RETURN, f.callback, 3),
+        (CALLER, f.foreign, 4),
+    ]
+    .map(|(pc, id, index)| match &before.modules[index] {
+        Ok(_) => Ok(id),
+        Err(error) if *error == stale() => Err(stale()),
+        error => panic!("unexpected retained unit at {pc:#x}: {error:?}"),
+    });
     f.engine.abort_callback(KEY, token).unwrap();
     let mut expected = before.arena.clone();
     expected[..56].copy_from_slice(&state_literal(&frozen(f.esp)));
@@ -322,7 +335,7 @@ fn abort_restores(f: &mut Fixture, token: u32) {
     assert_eq!(after.arena_address, before.arena_address);
     assert_eq!(after.generation, before.generation);
     assert_eq!(after.modules, before.modules);
-    assert_eq!(after.logical, before.logical);
+    assert_eq!(after.logical, logical);
     assert_eq!(after.ram, before.ram);
     assert_eq!(after.snapshots, before.snapshots);
 }

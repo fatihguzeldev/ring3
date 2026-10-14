@@ -27,7 +27,14 @@ for (const resident of [false, true]) for (const entries of [false, true]) {
   const before = arena(context), pointer = resident ? before.readUInt32LE(156) : api.module_ptr() >>> 0;
   const length = resident ? before.readUInt32LE(160) : api.module_len() >>> 0;
   const bytes = Buffer.from(new Uint8Array(context.memory.buffer, pointer, length)), module = new WebAssembly.Module(bytes);
-  checkImports(module, resident); context.run = new WebAssembly.Instance(module, {env: {memory: context.memory}, ring3: api}).exports.run;
+  checkImports(module, resident); context.calls = [];
+  const logged = value => typeof value === 'bigint' ? value.toString(10) : value >>> 0;
+  const ring3 = Object.fromEntries(WebAssembly.Module.imports(module).filter(item => item.kind === 'function').map(item =>
+    [item.name, (...args) => {
+      const status = api[item.name](...args);
+      context.calls.push({name: item.name, args: args.map(logged), status: logged(status)}); return status;
+    }]));
+  context.run = new WebAssembly.Instance(module, {env: {memory: context.memory}, ring3}).exports.run;
   const file = `module-${id}.wasm`; writeFileSync(join(output, file), bytes, {flag: 'wx'});
   modules.push({context: context.label, file, sha256: hash(bytes), bytes: length});
   runs += checkContext(context, 2, row => observations.push(row));

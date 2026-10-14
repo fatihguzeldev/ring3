@@ -520,7 +520,7 @@ fn finish_priorities_preserve_full_identity_family_stop_currency_and_authority()
     let canonical = f.engine.arena()[..96].to_vec();
     for (offset, value) in [
         (0, 0_u32),
-        (4, 0x10003),
+        (4, 0x10004),
         (4, 0x20001),
         (8, 55),
         (12, 1),

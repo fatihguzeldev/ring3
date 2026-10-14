@@ -28,8 +28,9 @@ export function seedFlatCodeContext(context) {
 export function checkImports(module, resident) {
   assert.deepEqual(WebAssembly.Module.imports(module), [
     {module: 'env', name: 'memory', kind: 'memory'},
-    {module: 'ring3', name: resident ? 'guard_resident' : 'guard', kind: 'function'},
-  ], 'CPUID uses no numerical, memory, or platform helper');
+    {module: 'ring3', name: resident ? 'guard_detect_resident' : 'guard_detect', kind: 'function'},
+    {module: 'ring3', name: 'finish_exception_detection', kind: 'function'},
+  ], 'CPUID uses only its bound guard and application event finalizer');
 }
 export function checkContext(context, instructionLength, observe = () => {}) {
   let runs = 0;
@@ -42,12 +43,20 @@ export function checkContext(context, instructionLength, observe = () => {}) {
     const expected = arena(context); expected.set(cpuRecord(next));
     expected.set(record('R3EX', 40, [reason, retired, 0, 0, 0, 0], reason === 16 ? 7 : 1), 56);
     const label = `${context.label}/leaf-${query.leaf.toString(16)}/subleaf-${query.subleaf.toString(16)}/flags-${flags.toString(16)}/budget-${budget}/cancel-${cancel}`;
+    const callStart = context.calls.length;
     const status = context.run(context.base, context.base + 56, budget, context.base + 96);
     const actual = arena(context);
     assert.equal(status, 0, label + ' run status');
     assert.deepEqual(Array.from({length: 4}, (_, i) => actual.readUInt32LE(16 + i * 4)), next.registers.slice(0, 4), label + ' CPUID outputs');
     assert.deepEqual(actual, expected, label + ' full CPU, flags, numeric state and unrelated arena preservation');
-    observe({label, status, reason, retired, registers: next.registers, flags, pc: next.pc}); runs++;
+    const calls = context.calls.slice(callStart), [guard] = calls;
+    assert.ok(['guard_detect', 'guard_detect_resident'].includes(guard.name));
+    assert.ok(BigInt(guard.status) > 0n, 'bound CPUID entry has one valid epoch');
+    assert.deepEqual(calls.slice(1), reason === 16 ? [{
+      name: 'finish_exception_detection',
+      args: [guard.status, 16, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0], status: 0,
+    }] : [], 'only a completed single-step publishes exact application event metadata');
+    observe({label, status, reason, retired, registers: next.registers, flags, pc: next.pc, calls}); runs++;
   }
   for (const query of queries) for (const flags of [0xcd7, 0x244cd7]) execute(query, flags);
   const query = queries.find(row => row.leaf === 7 && row.subleaf === 0);

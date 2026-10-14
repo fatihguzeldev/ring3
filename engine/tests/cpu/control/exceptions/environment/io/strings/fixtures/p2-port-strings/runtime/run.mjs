@@ -153,7 +153,7 @@ for (const [name, form] of forms) {
   negatives.push({ name: `${name}/duplicate66`, bytes: Buffer.from([0x66, 0x66, ...opcode]) });
   negatives.push({ name: `${name}/duplicate67`, bytes: Buffer.from([0x67, 0x67, ...form]) });
 }
-negatives.push({ name: 'valid-unsupported-int80', bytes: Buffer.from([0xcd, 0x80]) });
+negatives.push({ name: 'duplicate-operand-prefix-int80-keeps-profile-refusal', bytes: Buffer.from([0x66, 0x66, 0xcd, 0x80]) });
 for (const [prefix, opcode, count] of [
   [[0xf3], 0x6c, 0],
   [[0x66], 0x6d, 0],

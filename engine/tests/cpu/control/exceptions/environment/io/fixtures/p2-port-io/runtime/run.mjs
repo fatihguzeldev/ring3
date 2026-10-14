@@ -85,7 +85,7 @@ for (const [name, bytes] of forms) {
   const opcode = bytes[0] === 0x66 ? bytes.slice(1) : bytes;
   negatives.push({ name: name + '-duplicate66', bytes: Buffer.from([0x66, 0x66, ...opcode]) });
 }
-negatives.push({ name: 'valid-unsupported-int80', bytes: Buffer.from([0xcd, 0x80]) });
+negatives.push({ name: 'duplicate-operand-prefix-int80-keeps-profile-refusal', bytes: Buffer.from([0x66, 0x66, 0xcd, 0x80]) });
 for (const opcode of [0xe4, 0xe5, 0xe6, 0xe7]) {
   for (const prefix of [[], [0x66]]) {
     const bytes = [...prefix, opcode];

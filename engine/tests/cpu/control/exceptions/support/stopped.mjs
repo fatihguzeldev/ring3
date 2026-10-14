@@ -19,6 +19,7 @@ export function runStoppedFaults({ sourcePaths, positive, continuations, negativ
     modules = [];
   let contexts = 0,
     runs = 0,
+    fetchRuns = 0,
     refusals = 0,
     fullRamPairs = 0;
   const hash = (bytes) => createHash('sha256').update(bytes).digest('hex');
@@ -90,7 +91,10 @@ export function runStoppedFaults({ sourcePaths, positive, continuations, negativ
       module_ptr: 0,
       module_len: 0,
       guard: 6,
+      guard_detect: 6,
+      finish_exception_detection: 12,
       cpu_read: 3,
+      cpu_fetch_fault: 2,
       close: 0,
     })) {
       assert.equal(api[name].length, arity, name);
@@ -122,18 +126,21 @@ export function runStoppedFaults({ sourcePaths, positive, continuations, negativ
     const moduleBytes = () =>
       Buffer.from(new Uint8Array(memory.buffer, api.module_ptr() >>> 0, api.module_len() >>> 0));
     let helpers = 0;
-    function load() {
+    const calls = [];
+    function load(expectedHelpers = []) {
       const bytes = moduleBytes();
       const file = `module-${modules.length + 1}.wasm`;
       writeFileSync(join(output, file), bytes, { flag: 'wx' });
       const module = new WebAssembly.Module(bytes);
       assert.deepEqual(
-        WebAssembly.Module.imports(module),
+        WebAssembly.Module.imports(module).map(item => `${item.module}:${item.name}:${item.kind}`).sort(),
         [
-          { module: 'env', name: 'memory', kind: 'memory' },
-          { module: 'ring3', name: 'guard', kind: 'function' },
-        ],
-        'synthetic faults never call a memory, platform, or numerical helper',
+          'env:memory:memory',
+          'ring3:guard_detect:function',
+          'ring3:finish_exception_detection:function',
+          ...expectedHelpers.map(name => `ring3:${name}:function`),
+        ].sort(),
+        'only the exact bound guard, application finalizer and declared fetch helper',
       );
       modules.push({ label: row.name, entries, file, bytes: bytes.length, sha256: hash(bytes) });
       const ring3 = Object.fromEntries(
@@ -142,8 +149,11 @@ export function runStoppedFaults({ sourcePaths, positive, continuations, negativ
           .map((item) => [
             item.name,
             (...args) => {
-              if (item.name !== 'guard') helpers++;
-              return api[item.name](...args);
+              if (!['guard_detect', 'finish_exception_detection'].includes(item.name)) helpers++;
+              const status = api[item.name](...args);
+              const logged = value => typeof value === 'bigint' ? value.toString(10) : value >>> 0;
+              calls.push({name: item.name, args: args.map(logged), status: logged(status)});
+              return status;
             },
           ]),
       );
@@ -184,6 +194,7 @@ export function runStoppedFaults({ sourcePaths, positive, continuations, negativ
       load,
       moduleBytes,
       helpers: () => helpers,
+      calls,
       pages: [PC, 0x5000],
       label: `${row.name}/${entries ? 'entry' : 'extent'}`,
     };
@@ -288,6 +299,7 @@ export function runStoppedFaults({ sourcePaths, positive, continuations, negativ
     expected.set(exit(reason, retired, version), 56);
     if (work !== undefined) expected.writeUInt32LE(work, 4604);
     const calls = c.helpers();
+    const callStart = c.calls.length;
     assert.equal(fn(c.base, c.base + 56, budget, c.base + 96), 0, c.label + ' run status');
     assert.deepEqual(
       c.arena(),
@@ -295,6 +307,20 @@ export function runStoppedFaults({ sourcePaths, positive, continuations, negativ
       c.label + ' precise fault/stop, full CPU, FLAGS, shadow and unrelated arena preservation',
     );
     assert.equal(c.helpers(), calls, 'no guest operand/helper effect before synthetic fault');
+    const actualCalls = c.calls.slice(callStart);
+    const guards = actualCalls.filter(call => call.name === 'guard_detect');
+    assert.equal(guards.length, 1, 'one real bound entry lease');
+    assert.ok(BigInt(guards[0].status) > 0n, 'valid bound entry epoch');
+    const finalized = actualCalls.filter(call => call.name === 'finish_exception_detection');
+    const event = reason === 3 || reason >= 10 && reason <= 24;
+    assert.equal(finalized.length, Number(event), 'exact application stop finalization count');
+    if (event) {
+      assert.deepEqual(finalized[0], {
+        name: 'finish_exception_detection',
+        args: [guards[0].status, reason, 0, 0, 0, 0, reason === 16 ? 2 : 0, 0, 0, 0, 0, 0],
+        status: 0,
+      }, 'exact synthetic fault or completed-step metadata shares the accepted entry epoch');
+    }
     assert.deepEqual(ram(c), beforeRam, c.label + ' complete mapped RAM remains unchanged');
     assert.deepEqual(c.arena(), expected, c.label + ' diagnostics preserve complete arena');
     fullRamPairs++;
@@ -311,8 +337,38 @@ export function runStoppedFaults({ sourcePaths, positive, continuations, negativ
       pc,
       version,
       work,
+      calls: actualCalls,
     });
     runs++;
+  }
+  function executeFetch(c, fn, row, repaired = false) {
+    const before = c.arena(), expected = Buffer.from(before), beforeRam = ram(c);
+    const length = row.bytes.length + 1;
+    const reason = repaired ? 3 : 23;
+    const reply = exit(repaired ? 0 : 9, 0, repaired ? 7 : 15);
+    reply.write('R3MH');
+    reply.set(words(repaired ? [0, 0, 0, 0, 0, length] : [9, 0, 20, 0x2000, 3, length]), 16);
+    expected.set(reply, 100);
+    expected.set(exit(reason, 0, repaired ? 6 : 13), 56);
+    if (!repaired) expected.set(words([20, 0x2000, 3, length]), 80);
+    const callStart = c.calls.length;
+    assert.equal(fn(c.base, c.base + 56, 8, c.base + 96), 0, c.label + ' captured fetch status');
+    assert.deepEqual(c.arena(), expected, c.label + ' exact captured fetch stop and complete arena');
+    const calls = c.calls.slice(callStart), [guard] = calls;
+    assert.equal(guard.name, 'guard_detect');
+    assert.ok(BigInt(guard.status) > 0n);
+    assert.deepEqual(calls.slice(1), [
+      {name: 'cpu_fetch_fault', args: [c.target, length], status: repaired ? 0 : 23},
+      {name: 'finish_exception_detection',
+        args: [guard.status, reason, ...(repaired ? [0, 0, 0, 0] : [20, 0x2000, 3, length]), 0, 0, 0, 0, 0, 0],
+        status: 0},
+    ], 'fetch fault and repaired need-code use the exact helper packet and entry epoch');
+    assert.deepEqual(ram(c), beforeRam, c.label + ' captured fetch preserves complete mapped RAM');
+    assert.deepEqual(c.arena(), expected, c.label + ' fetch diagnostics preserve complete arena');
+    observations.push({label: c.label, kind: repaired ? 'repaired-fetch-need-code' : 'captured-fetch-page-fault',
+      reason, retired: 0, pc: c.target, length, calls});
+    fetchRuns++;
+    fullRamPairs++;
   }
   for (const entries of [false, true])
     for (const row of positive) {
@@ -377,15 +433,26 @@ export function runStoppedFaults({ sourcePaths, positive, continuations, negativ
       seedRegisters(before, row);
       c.put(0, before);
       c.put(140, words([0xdeadbeef, 0xffffffff]));
-      assertRefusal(
-        c,
-        () => c.api.compile_stopped_entry(c.id, KEY_HIGH, c.api.generation()),
-        'runtime-nonarchitectural-error',
-      );
+      let captured;
+      if (row.repair || row.fetch) {
+        const before = c.arena(), generation = c.api.generation();
+        assert.equal(c.api.compile_stopped_entry(c.id, KEY_HIGH, generation), 0);
+        assert.equal(c.api.generation(), generation + 1);
+        assert.deepEqual(c.arena(), before, 'captured incomplete fetch preparation is neutral');
+        captured = c.load(['cpu_fetch_fault']);
+        executeFetch(c, captured, row);
+      } else {
+        assertRefusal(
+          c,
+          () => c.api.compile_stopped_entry(c.id, KEY_HIGH, c.api.generation()),
+          'runtime-nonarchitectural-error',
+        );
+      }
       if (row.repair) {
         assert.equal(c.api.map(0x2000, 1, 7), 0);
         c.pages.push(0x2000);
         c.upload(0x2000, row.repair);
+        executeFetch(c, captured, row, true);
         const before = c.arena();
         assert.equal(c.api.compile_stopped_entry(c.id, KEY_HIGH, c.api.generation()), 0);
         assert.deepEqual(c.arena(), before);
@@ -399,7 +466,7 @@ export function runStoppedFaults({ sourcePaths, positive, continuations, negativ
       continuations.reduce((sum, row) => sum + 2 * (row.schedules?.length ?? 2), 0) +
       negatives.filter((row) => row.repair).length * 2,
   );
-  assert.equal(fullRamPairs, runs);
+  assert.equal(fullRamPairs, runs + fetchRuns);
   assert.deepEqual(pins(), sourcePins, 'execution fault proof sources remain frozen');
   const result = {
     schema: 1,
@@ -407,6 +474,7 @@ export function runStoppedFaults({ sourcePaths, positive, continuations, negativ
     sourcePins,
     contexts,
     runs,
+    fetchRuns,
     refusals,
     fullRamPairs,
     modules,
@@ -415,6 +483,6 @@ export function runStoppedFaults({ sourcePaths, positive, continuations, negativ
   };
   writeFileSync(join(output, 'result.json'), JSON.stringify(result, null, 2), { flag: 'wx' });
   console.log(
-    JSON.stringify({ contexts, runs, refusals, fullRamPairs, engineSha256: engine.sha256 }),
+    JSON.stringify({ contexts, runs, fetchRuns, refusals, fullRamPairs, engineSha256: engine.sha256 }),
   );
 }
