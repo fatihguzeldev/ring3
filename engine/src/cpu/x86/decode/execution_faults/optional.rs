@@ -25,6 +25,12 @@ pub(super) fn unavailable(instruction: &Instruction) -> bool {
         | Code::Loadiwkey_xmm_xmm => (7, 0, 2, 23),
         Code::VEX_Vpclmulqdq_ymm_ymm_ymmm256_imm8 => (7, 0, 2, 10),
         Code::Invpcid_r32_m128 => (7, 0, 1, 10),
+        // explicit software-profile priority: absent opcode before enabled-state work.
+        Code::Enqcmd_r16_m512
+        | Code::Enqcmd_r32_m512
+        | Code::Enqcmds_r16_m512
+        | Code::Enqcmds_r32_m512 => (7, 0, 2, 29),
+        Code::Hreset_imm8 => (7, 1, 0, 22),
         Code::Clflushopt_m8 => (7, 0, 1, 23),
         Code::Clwb_m8 => (7, 0, 1, 24),
         Code::Sha1nexte_xmm_xmmm128
@@ -96,3 +102,11 @@ mod pclmul;
 #[cfg(test)]
 #[path = "tests/invpcid.rs"]
 mod invpcid;
+
+#[cfg(test)]
+#[path = "tests/enqueue.rs"]
+mod enqueue;
+
+#[cfg(test)]
+#[path = "tests/history.rs"]
+mod history;

@@ -8,10 +8,12 @@ const support = 'engine/tests/cpu/segments/code/base/fixtures/p2-cs-base/runtime
 const {harness, PC, SEG, BASES, state, exit, record, words, hash} = await import(pathToFileURL(join(root, support)));
 const h = await harness(enginePath, output, root);
 const own = 'engine/tests/cpu/control/exceptions/availability/system/';
-const paths = [own + 'wasm.rs', own + 'fixtures/p2-system-availability/runtime/run.mjs',
+const paths = [own + 'wasm.rs', own + 'native.rs', own + 'fixtures/p2-system-availability/runtime/run.mjs',
   'engine/tests/cpu/control/wasm.rs', 'engine/src/cpu/x86/capabilities.rs', 'engine/src/cpu/x86/environment.rs',
   'engine/src/cpu/x86/decode/execution_faults.rs', 'engine/src/cpu/x86/decode/execution_faults/tests/system.rs',
   'engine/src/cpu/x86/decode/execution_faults/tests/invpcid.rs',
+  'engine/src/cpu/x86/decode/execution_faults/tests/enqueue.rs',
+  'engine/src/cpu/x86/decode/execution_faults/tests/history.rs',
   'engine/src/cpu/x86/decode/execution_faults/optional.rs', 'engine/src/cpu/x86/decode/execution_faults/optional/amd.rs',
   'engine/src/cpu/x86/decode/execution_faults/optional/amd/tests.rs', 'engine/src/cpu/x86/decode/decoder.rs',
   'engine/src/cpu/x86/decode/profile.rs', 'engine/src/cpu/dbt/wasm/control_instructions.rs',
@@ -30,18 +32,24 @@ const selected = [
   {code: 'Pconfig', hex: '0f01c5', reason: 20, why: 'invalid leaf and unaligned/unmapped EBX cannot precede absent-feature/CPL UD'},
   {code: 'Invpcid_r32_m128', hex: '36660f38820c24', reason: 20,
     why: 'explicit AMD-compatible policy: absent feature precedes CPL3/invalid ECX type/shortSS descriptor access'},
+  {code: 'Enqcmd_r32_m512', hex: '64f20f38f808', reason: 20, nullES: true,
+    why: 'selected unavailable-opcode policy precedes nullFS source/nullES destination, poison addresses and unowned PASID state'},
+  {code: 'Enqcmds_r16_m512', hex: '64f30f38f808', reason: 20, d16: true,
+    why: 'selected unavailable-opcode policy precedes competing CPL3 GP and nullFS address16 source'},
+  {code: 'Hreset_imm8', hex: 'f30f3af0c000', reason: 20, eax: 0,
+    why: 'absent opcode precedes CPL3 and enabled EAX0 NOP; no history state or HRESET_ENABLE value is invented'},
   {code: 'Invlpgbd', hex: '0f01fe', reason: 20, why: 'absent feature precedes CPL3/reserved-input GP'},
   {code: 'Invlpgbw', hex: '670f01fe', reason: 20, why: 'address16 broadcast form has the same absent-feature UD'},
   {code: 'Tlbsync', hex: '0f01ff', reason: 20, why: 'absent feature needs no guessed EFER/VMCB or synchronization effect'},
   {code: 'Wbnoinvd', hex: 'f30f09', reason: 11, why: 'feature absence falls back to privileged WBINVD and must produce GP0'},
 ];
-assert.equal(new Set(selected.map(row => row.code)).size, 10);
+assert.equal(new Set(selected.map(row => row.code)).size, 13);
 let contexts = 0, plannedInvocations = 0, invoked = 0, plannedCompiles = 0, plannedRefusals = 0;
-function seed(pc, {d16 = false, flags = FLAGS | RF | TF, shadow = 1} = {}) {
-  const input = state(h.initial, {pc, flags, regs}); input.writeUInt32LE(shadow, 12);
+function seed(pc, {d16 = false, flags = FLAGS | RF | TF, shadow = 1, nullES = false, eax} = {}) {
+  const input = state(h.initial, {pc, flags, regs: eax === undefined ? regs : [eax, ...regs.slice(1)]}); input.writeUInt32LE(shadow, 12);
   const sg = record('R3SG', 64, [], d16 ? 3 : 2);
-  [0x23, 0x1b, 0x23, 0, 0, 0].forEach((value, i) => sg.writeUInt16LE(value, 16 + i * 2));
-  [0xf33fffff, d16 ? 0xf1bfffff : 0xf3bfffff, 0xf2300fff, 0, 0, 0]
+  [nullES ? 0 : 0x23, 0x1b, 0x23, 0, 0, 0].forEach((value, i) => sg.writeUInt16LE(value, 16 + i * 2));
+  [nullES ? 0 : 0xf33fffff, d16 ? 0xf1bfffff : 0xf3bfffff, 0xf2300fff, 0, 0, 0]
     .forEach((value, i) => sg.writeUInt32LE(value >>> 0, [28, 32, 36, 40, 44, 56][i]));
   input.set(sg, SEG); input.set(d16 ? record('R3SB', 40, [0, 0, 0, 0, 0, 0]) : Buffer.alloc(40), BASES);
   for (let i = 0; i < 80; i++) input[4276 + i] = (i * 29 + 17) & 255;
@@ -123,14 +131,14 @@ for (const resident of [false, true]) for (const entries of [false, true]) {
     h.host(c, 'close');
   }
 }
-assert.equal(contexts, 64); assert.equal(plannedCompiles, 208); assert.equal(plannedRefusals, 88);
-assert.equal(plannedInvocations, 120); assert.deepEqual(pins(), sourcePins);
+assert.equal(contexts, 76); assert.equal(plannedCompiles, 244); assert.equal(plannedRefusals, 100);
+assert.equal(plannedInvocations, 144); assert.deepEqual(pins(), sourcePins);
 writeFileSync(join(output, 'system-availability-counts.json'), JSON.stringify({contexts, plannedCompiles, plannedRefusals,
   plannedInvocations, invoked, totalRowsPlanned: plannedCompiles + plannedInvocations,
   selectedCodes: selected.map(row => row.code), sourcePins}, null, 2) + '\n');
 h.finish([
-  'nine original qualified protected16/32 Codes plus one explicitly selected AMD-compatible INVPCID absence rule; WBNOINVD remains fallback GP0',
-  'INVPCID priority is the adopted Ring3Engine policy under AMD Table8-9; this does not resolve competing Intel exception ordering or admit the other five held forms',
+  'nine original qualified protected16/32 Codes plus prior INVPCID and three literal ENQCMD/S/HRESET discriminators; WBNOINVD remains fallback GP0',
+  'INVPCID retains its separate adopted AMD-compatible policy; exact five ENQCMD/S and HRESET Codes now use explicitly selected Ring3Engine unavailable-opcode priority, without claiming mandatory Intel order or AMD semantics for these Intel-only instructions',
   'four real replacement/resident by extent/entry routes; literal full4796 arena/allmappedRAM, allGPR/flags/numeric/segment state, guard-only helper traces and retirement',
   'nullDS implicit pointer, preserved EAX and CF, D16/address32 nullFS operand, poison platform/TLB inputs and mandatoryF3 fallback distinguish accidental success or operand checks',
   'LWP last-immediate and WBNOINVD last-opcode missing/nonEXEC/EXEC repair retain fullfetch software policy; AMD permits model-dependent earlierUD at later-byte boundaries',

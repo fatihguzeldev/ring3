@@ -120,3 +120,46 @@ fn duplicate_prefix_refusal_and_separately_qualified_tbm_preparation_stay_distin
         }
     }
 }
+
+#[test]
+fn absent_enqueue_and_history_forms_prepare_ud_without_platform_authority() {
+    use iced_x86::{Code, CpuidFeature, Decoder, DecoderOptions};
+    let rows = [
+        (
+            Code::Enqcmd_r32_m512,
+            CpuidFeature::ENQCMD,
+            &[0xf2, 0x0f, 0x38, 0xf8, 0x08][..],
+        ),
+        (
+            Code::Enqcmd_r16_m512,
+            CpuidFeature::ENQCMD,
+            &[0x67, 0xf2, 0x0f, 0x38, 0xf8, 0x08][..],
+        ),
+        (
+            Code::Enqcmds_r32_m512,
+            CpuidFeature::ENQCMD,
+            &[0xf3, 0x0f, 0x38, 0xf8, 0x08][..],
+        ),
+        (
+            Code::Enqcmds_r16_m512,
+            CpuidFeature::ENQCMD,
+            &[0x67, 0xf3, 0x0f, 0x38, 0xf8, 0x08][..],
+        ),
+        (
+            Code::Hreset_imm8,
+            CpuidFeature::HRESET,
+            &[0xf3, 0x0f, 0x3a, 0xf0, 0xc0, 0][..],
+        ),
+    ];
+    // retain the exact five bytesets from the original public refusal witness.
+    for (code, feature, bytes) in rows {
+        let raw = Decoder::new(32, bytes, DecoderOptions::NONE).decode();
+        assert_eq!(raw.code(), code);
+        assert_eq!(raw.len(), bytes.len());
+        assert_eq!(raw.cpuid_features(), &[feature]);
+        assert!(!raw.has_rep_prefix() && !raw.has_repne_prefix());
+    }
+    for (_, _, bytes) in rows {
+        prepares(bytes);
+    }
+}
