@@ -30,6 +30,12 @@ pub(super) fn instruction(
             exit(code, 11, exit_depth);
             return;
         }
+        ControlOperation::Sysenter => {
+            // the observed fallthrough is not the os provider's promised resume address.
+            retire(code, instruction.next_pc().0);
+            exit_detail(code, 24, 0x100, exit_depth);
+            return;
+        }
         ControlOperation::DeniedPortString { repeat_count } => {
             if let Some(address_size) = repeat_count {
                 code.local_get(register(Register32::Ecx));
@@ -171,8 +177,13 @@ fn retire(code: &mut InstructionSink<'_>, next_pc: u32) {
 }
 
 fn exit(code: &mut InstructionSink<'_>, reason: i32, exit_depth: u32) {
+    exit_detail(code, reason, 0, exit_depth);
+}
+
+fn exit_detail(code: &mut InstructionSink<'_>, reason: i32, detail: i32, exit_depth: u32) {
     code.i32_const(reason).local_set(REASON);
-    for local in [DETAIL, FAULT_ADDRESS, FAULT_ACCESS, FAULT_LENGTH] {
+    code.i32_const(detail).local_set(DETAIL);
+    for local in [FAULT_ADDRESS, FAULT_ACCESS, FAULT_LENGTH] {
         code.i32_const(0).local_set(local);
     }
     code.br(exit_depth);

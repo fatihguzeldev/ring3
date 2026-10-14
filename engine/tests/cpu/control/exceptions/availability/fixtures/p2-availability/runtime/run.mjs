@@ -51,7 +51,7 @@ continuations.push({
   schedules: [{}, { budget: 1, reason: 1 }, { flags: 0x102, reason: 16, version: 7 }],
 });
 const negatives = [
-  { name: 'unrelated-int80-remains-unsupported', bytes: Buffer.from([0xcd, 0x80]), x87 },
+  { name: 'duplicate-operand-prefix-int80-keeps-profile-refusal', bytes: Buffer.from([0x66, 0x66, 0xcd, 0x80]), x87 },
   {
     name: 'truncated-evex-fetch-before-availability-classification',
     bytes: Buffer.from(evex.slice(0, 3)),
@@ -163,11 +163,12 @@ for (const [name, bytes] of systemCallForms) {
 }
 negatives.push({name: 'duplicate-operand-prefix-syscall-keeps-profile-refusal',
   bytes: Buffer.from([0x66, 0x66, 0x0f, 0x05]), x87});
-// SEP0, independently of MSR instruction presence, makes both entry opcodes UD.
-const systemEntryForms = [['sysenter', [0x0f, 0x34]], ['sysexit', [0x0f, 0x35]]];
-for (const [name, bytes] of systemEntryForms) for (const finalByte of [false, true]) {
-  positive.push(fault(`sep0-${name}${finalByte ? '-last-executable-byte' : ''}`, bytes, {
-    ...(finalByte ? {target: 0x2000 - bytes.length} : {}),
+// successful user entry has its own precise handoff fixture; privileged return stays gp0.
+const sysexit = [0x0f, 0x35];
+for (const finalByte of [false, true]) {
+  positive.push(fault(`cpl3-sysexit${finalByte ? '-last-executable-byte' : ''}`, sysexit, {
+    reason: 11, baseVersion: 6,
+    ...(finalByte ? {target: 0x2000 - sysexit.length} : {}),
     schedules: [
       {}, {flags: 0x202}, {flags: 0x102},
       {flags: 0x10002, stateVersion: 3, expectedFlags: 2},
@@ -177,14 +178,15 @@ for (const [name, bytes] of systemEntryForms) for (const finalByte of [false, tr
     ],
   }));
 }
-for (const [name, bytes] of systemEntryForms) {
-  continuations.push({...fault(`completed-nop-before-sep0-${name}`, [0x90, ...bytes]), retired: 1, offset: 1,
+continuations.push({...fault('completed-nop-before-cpl3-sysexit', [0x90, ...sysexit]),
+    reason: 11, baseVersion: 6, retired: 1, offset: 1,
     schedules: [{}, {budget: 1, reason: 1}, {flags: 0x102, reason: 16, version: 7},
       {flags: 0x10002, stateVersion: 3, expectedFlags: 2}],
-  });
-  negatives.push({name: `truncated-${name}-opcode-before-sep-availability`, bytes: Buffer.from([0x0f]),
-    target: 0x1fff, repair: Buffer.from([bytes[1]]), repaired: {reason: 20, baseVersion: 1}, x87});
-}
+});
+negatives.push({name: 'truncated-sysexit-opcode-before-cpl3-rule', bytes: Buffer.from([0x0f]),
+  target: 0x1fff, repair: Buffer.from([0x35]), repaired: {reason: 11, baseVersion: 6}, x87});
+negatives.push({name: 'truncated-sysenter-keeps-entry-preparation-neutral', bytes: Buffer.from([0x0f]),
+  target: 0x1fff, fetch: true, x87});
 negatives.push({name: 'duplicate-operand-prefix-sysenter-keeps-profile-refusal',
   bytes: Buffer.from([0x66, 0x66, 0x0f, 0x34]), x87});
 runStoppedFaults({
@@ -203,5 +205,5 @@ runStoppedFaults({
   continuations,
   negatives,
   claim:
-    'virtual CPUID1.EDX.SEP11 absence requires SYSENTER/SYSEXIT UD independently of MSR presence, without entry-MSR values, IF-success effects or a return CPL GP; virtual CPUID80000001.EDX11 absence requires SYSCALL/SYSRET UD without EFER or OS-state assumptions; absent RTM XABORT/XBEGIN16/32/XEND and absent RTM+HLE XTEST require their exact CPUID-defined UD before transaction or fallback behavior; nonzero-CPL MONITOR address16/32 and MWAIT require UD without monitor-address or wait effects; unadvertised RDRAND16/32 and RDSEED16/32 require exact CPUID-defined UD with no entropy helper, RF consumed only on attempted instructions, plus fixed non-SMM RSM, defined EVEX vectors requiring XCR0&0xe7==0xe7, and VEX opmask instructions requiring XCR0&0xe3==0xe3 retire zero at the canonical current EIP as UD with current XCR0=7, without operand access; strict compilation remains a host refusal. Actual truncated-fetch preparation stays neutral until executable-page repair; companion native tests establish the precise Execute MemoryFault rather than claiming a guest PF packet from compile_stopped_entry.',
+    'advertised SEP permits a distinct user SYSENTER handoff covered by system/entry; SYSEXIT requires CPL0 and faults GP0 here without kernel state or operand effects; virtual CPUID80000001.EDX11 absence requires SYSCALL/SYSRET UD without EFER or OS-state assumptions; absent RTM XABORT/XBEGIN16/32/XEND and absent RTM+HLE XTEST require their exact CPUID-defined UD before transaction or fallback behavior; nonzero-CPL MONITOR address16/32 and MWAIT require UD without monitor-address or wait effects; unadvertised RDRAND16/32 and RDSEED16/32 require exact CPUID-defined UD with no entropy helper, RF consumed only on attempted instructions, plus fixed non-SMM RSM, defined EVEX vectors requiring XCR0&0xe7==0xe7, and VEX opmask instructions requiring XCR0&0xe3==0xe3 retire zero at the canonical current EIP as UD with current XCR0=7, without operand access; strict compilation remains a host refusal. Actual incomplete-fetch preparation captures a neutral artifact, execution publishes the precise execute page fault before instruction classification, and executable-page repair produces NeedCode before fresh preparation.',
 });

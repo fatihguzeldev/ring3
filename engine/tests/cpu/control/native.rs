@@ -114,3 +114,6 @@ mod cpu_repeat_return;
 
 #[path = "hints/alignment/native.rs"]
 mod cpu_compiler_alignment;
+
+#[path = "system/entry/native.rs"]
+mod cpu_system_entry;

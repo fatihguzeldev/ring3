@@ -1,6 +1,7 @@
 use super::DetectedEvent32;
 use crate::{
     abi::x86::USER_FLAGS_MASK_V3,
+    cpu::SystemEntryKind32,
     cpu::x86::{DebugCause32, EventOrigin32, ExceptionCause32, FrameInput32},
 };
 
@@ -25,9 +26,9 @@ pub(super) fn valid_provenance(
 ) -> bool {
     let instruction_trap = matches!(
         event,
-        DetectedEvent32::Exception(EventOrigin32::SoftwareInt {
-            vector: 0x29 | 0x2e
-        }) | DetectedEvent32::Exception(EventOrigin32::Exception(
+        DetectedEvent32::Exception(EventOrigin32::SystemEntry(
+            SystemEntryKind32::Interrupt(0x29 | 0x2e) | SystemEntryKind32::Sysenter
+        )) | DetectedEvent32::Exception(EventOrigin32::Exception(
             ExceptionCause32::BreakpointInt3
                 | ExceptionCause32::OverflowInto
                 | ExceptionCause32::Debug(DebugCause32::Int1)

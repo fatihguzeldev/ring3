@@ -429,6 +429,7 @@ pub(super) fn terminates(instruction: &DecodedInstruction, embedded: bool) -> bo
                 | crate::cpu::x86::ControlOperation::Breakpoint
                 | crate::cpu::x86::ControlOperation::DebugTrap
                 | crate::cpu::x86::ControlOperation::DeniedPortString { .. }
+                | crate::cpu::x86::ControlOperation::Sysenter
         )
     ) {
         return true;
@@ -468,6 +469,7 @@ fn supports_cpu_state(operation: &Operation) -> bool {
         | Operation::FarReturn { .. }
         | Operation::InterruptReturn { .. }
         | Operation::SoftwareInterrupt { .. }
+        | Operation::Control(crate::cpu::x86::ControlOperation::Sysenter)
         | Operation::XState(_)
         | Operation::Avx(_)
         | Operation::VerifySegment { .. }
@@ -727,6 +729,7 @@ pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool
         Operation::BitManipulation { source, .. } | Operation::MultiplyExtended { source, .. } => {
             return embedded || !matches!(source, Value32::Memory(_));
         }
+        Operation::Control(crate::cpu::x86::ControlOperation::Sysenter) => return embedded,
         Operation::Control(operation) => return embedded || !operation.reads_memory(),
         Operation::BitCount { source, .. } => {
             return embedded || !matches!(source, Value32::Memory(_));

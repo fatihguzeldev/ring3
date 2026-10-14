@@ -151,9 +151,9 @@ impl DetectedEvent32 {
                 },
             ) => fault == actual && length == actual_length,
             (
-                Self::Exception(EventOrigin32::SoftwareInt { vector }),
-                ExitReason::SystemEntry { vector: actual },
-            ) => vector == actual,
+                Self::Exception(EventOrigin32::SystemEntry(kind)),
+                ExitReason::SystemEntry { kind: actual },
+            ) => kind == actual,
             (Self::Exception(EventOrigin32::Exception(cause)), reason) => match (cause, reason) {
                 (ExceptionCause32::DivideError, ExitReason::DivideError)
                 | (ExceptionCause32::BoundRange, ExitReason::BoundRange)

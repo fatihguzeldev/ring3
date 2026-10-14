@@ -9,8 +9,8 @@ pub(crate) const RTM_ENABLED: bool = false;
 // no successful syscall/sysret facility or operating-system MSR bank is exposed.
 pub(crate) const SYSCALL_ENABLED: bool = false;
 
-// SEP remains absent independently of MSR instruction presence; no entry MSRs are exposed.
-pub(crate) const SEP_ENABLED: bool = false;
+// sysenter is an application os-entry boundary; no guest kernel MSR state is executed.
+pub(crate) const SEP_ENABLED: bool = true;
 
 // prefetch/prefetchw are supported hints that this software CPU ignores.
 // their architectural support does not promise a physical cache operation.
@@ -61,7 +61,8 @@ pub(crate) const CPU_ID_LEAVES: [CpuIdLeaf; 8] = [
         function: 1,
         subfunction: None,
         registers: [
-            0x600,
+            // family6/model3/stepping3 passes the architectural sep qualification.
+            0x633,
             8 << 8,
             1 | 1 << 1
                 | 1 << 9

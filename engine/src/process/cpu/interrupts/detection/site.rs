@@ -1,5 +1,6 @@
 use super::{DetectedEvent32, InstructionTrapRestart32};
 use crate::{
+    cpu::SystemEntryKind32,
     cpu::x86::{DebugCause32, EventOrigin32, ExceptionCause32, SelectorErrorCode32, TrapPoint32},
     memory::{Access, FaultReason, GuestAddress, MemoryFault},
     process::{EngineInstance, HostError},
@@ -47,12 +48,14 @@ pub(in crate::process) fn generated_site(
         return Err(invalid);
     }
     let event = if reason == 24 {
-        if !matches!(detail, 0x29 | 0x2e) || address != 0 || access != 0 || length != 0 {
+        if !matches!(detail, 0x29 | 0x2e | 0x100) || address != 0 || access != 0 || length != 0 {
             return Err(invalid);
         }
-        DetectedEvent32::Exception(EventOrigin32::SoftwareInt {
-            vector: detail as u8,
-        })
+        DetectedEvent32::Exception(EventOrigin32::SystemEntry(if detail == 0x100 {
+            SystemEntryKind32::Sysenter
+        } else {
+            SystemEntryKind32::Interrupt(detail as u8)
+        }))
     } else if reason == 5 {
         DetectedEvent32::MemoryFailure {
             fault: MemoryFault {
@@ -224,15 +227,17 @@ mod tests {
 mod system_entry_tests {
     use super::*;
     #[test]
-    fn os_entry_requires_known_vector_empty_fault_geometry_and_trusted_restart_shape() {
-        for vector in [0x29, 0x2e] {
-            let fields = [24, vector, 0, 0, 0, 0, 0x1000, 7, 0x10002, 3, 11];
+    fn os_entry_requires_known_kind_empty_fault_geometry_and_trusted_restart_shape() {
+        for (detail, kind) in [
+            (0x29, SystemEntryKind32::Interrupt(0x29)),
+            (0x2e, SystemEntryKind32::Interrupt(0x2e)),
+            (0x100, SystemEntryKind32::Sysenter),
+        ] {
+            let fields = [24, detail, 0, 0, 0, 0, 0x1000, 7, 0x10002, 3, 11];
             let (event, restart) = generated_site(fields).unwrap();
             assert_eq!(
                 event,
-                DetectedEvent32::Exception(EventOrigin32::SoftwareInt {
-                    vector: vector as u8
-                })
+                DetectedEvent32::Exception(EventOrigin32::SystemEntry(kind))
             );
             assert_eq!(restart.unwrap().eip, 0x1000);
             assert_eq!(restart.unwrap().work_consumed, Some(11));

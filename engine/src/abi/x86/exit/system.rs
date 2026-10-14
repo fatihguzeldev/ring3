@@ -5,7 +5,9 @@ fn system_entry_has_a_versioned_exact_vector_record() {
     for vector in [0x29, 0x2e] {
         let exit = ExecutionExit {
             retired: 3,
-            reason: ExitReason::SystemEntry { vector },
+            reason: ExitReason::SystemEntry {
+                kind: crate::cpu::SystemEntryKind32::Interrupt(vector),
+            },
         };
         let mut packet = [0xa5; EXIT_SIZE];
         encode_exit_v14(&exit, &mut packet).unwrap();
@@ -32,7 +34,9 @@ fn system_entry_has_a_versioned_exact_vector_record() {
 fn system_entry_rejects_non_vector_and_memory_metadata() {
     let exit = ExecutionExit {
         retired: 1,
-        reason: ExitReason::SystemEntry { vector: 0x2e },
+        reason: ExitReason::SystemEntry {
+            kind: crate::cpu::SystemEntryKind32::Interrupt(0x2e),
+        },
     };
     let mut valid = [0; EXIT_SIZE];
     encode_exit_v14(&exit, &mut valid).unwrap();
@@ -52,11 +56,13 @@ fn system_entry_rejects_non_vector_and_memory_metadata() {
         assert_eq!(decode_exit(&malformed), Err(AbiError::Exit));
     }
     let mut unknown = valid;
-    unknown[4..6].copy_from_slice(&15_u16.to_le_bytes());
+    unknown[4..6].copy_from_slice(&16_u16.to_le_bytes());
     assert_eq!(decode_exit(&unknown), Err(AbiError::Version));
     for vector in [0, 4, 0x80, u8::MAX] {
         let unsupported = ExecutionExit {
-            reason: ExitReason::SystemEntry { vector },
+            reason: ExitReason::SystemEntry {
+                kind: crate::cpu::SystemEntryKind32::Interrupt(vector),
+            },
             ..exit
         };
         let mut untouched = [0xa5; EXIT_SIZE];
@@ -85,5 +91,62 @@ fn version_fourteen_preserves_existing_stop_contracts() {
         let mut packet = [0; EXIT_SIZE];
         encode_exit_v14(&exit, &mut packet).unwrap();
         assert_eq!(decode_exit(&packet), Ok(exit));
+    }
+}
+
+#[test]
+fn sysenter_has_a_distinct_version_fifteen_entry_without_a_vector() {
+    let exit = ExecutionExit {
+        retired: 7,
+        reason: ExitReason::SystemEntry {
+            kind: SystemEntryKind32::Sysenter,
+        },
+    };
+    let mut packet = [0xa5; EXIT_SIZE];
+    encode_exit_v15(&exit, &mut packet).unwrap();
+    let mut expected = [0; EXIT_SIZE];
+    expected[..16].copy_from_slice(&[82, 51, 69, 88, 15, 0, 1, 0, 40, 0, 0, 0, 0, 0, 0, 0]);
+    write_u32(&mut expected, REASON_OFFSET, 24);
+    write_u32(&mut expected, RETIRED_OFFSET, 7);
+    write_u32(&mut expected, DETAIL_OFFSET, 0x100);
+    assert_eq!(packet, expected);
+    assert_eq!(decode_exit(&packet), Ok(exit));
+    for version in ABI_VERSION..EXIT_VERSION_15 {
+        let mut untouched = [0xa5; EXIT_SIZE];
+        assert_eq!(encode(&exit, &mut untouched, version), Err(AbiError::Exit));
+        assert_eq!(untouched, [0xa5; EXIT_SIZE]);
+        let mut downgraded = packet;
+        downgraded[4..6].copy_from_slice(&version.to_le_bytes());
+        assert_eq!(decode_exit(&downgraded), Err(AbiError::Exit));
+    }
+    for (offset, value) in [
+        (DETAIL_OFFSET, 0x101),
+        (DETAIL_OFFSET, u32::MAX),
+        (FAULT_ADDRESS_OFFSET, 1),
+        (ACCESS_OFFSET, 1),
+        (ACCESS_LENGTH_OFFSET, 1),
+    ] {
+        let mut malformed = packet;
+        write_u32(&mut malformed, offset, value);
+        assert_eq!(decode_exit(&malformed), Err(AbiError::Exit));
+    }
+}
+
+#[test]
+fn version_fifteen_keeps_interrupt_entry_payloads_unchanged() {
+    for vector in [0x29, 0x2e] {
+        let exit = ExecutionExit {
+            retired: 1,
+            reason: ExitReason::SystemEntry {
+                kind: SystemEntryKind32::Interrupt(vector),
+            },
+        };
+        let mut old = [0; EXIT_SIZE];
+        let mut current = [0; EXIT_SIZE];
+        encode_exit_v14(&exit, &mut old).unwrap();
+        encode_exit_v15(&exit, &mut current).unwrap();
+        old[4..6].copy_from_slice(&EXIT_VERSION_15.to_le_bytes());
+        assert_eq!(current, old);
+        assert_eq!(decode_exit(&current), Ok(exit));
     }
 }

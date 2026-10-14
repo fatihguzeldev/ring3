@@ -160,6 +160,7 @@ fn general_protection(instruction: &Instruction, environment: UserModeEnvironmen
         | Code::Wbnoinvd
         | Code::Xsetbv => true,
         Code::Rdmsr | Code::Wrmsr => MSR_ENABLED && environment.current_privilege() != 0,
+        Code::Sysexitd => SEP_ENABLED && environment.current_privilege() != 0,
         Code::Rdpmc => {
             RDPMC_ENABLED
                 && environment.current_privilege() != 0

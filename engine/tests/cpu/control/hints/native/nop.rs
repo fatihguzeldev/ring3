@@ -199,6 +199,13 @@ fn alignment_nop_exact_grammar_keeps_prefix_segment_and_payload_neighbors_closed
             0x66, 0x67, 0xf0, 0xf2, 0xf3, 0x26, 0x2e, 0x36, 0x3e, 0x64, 0x65,
         ] {
             let prefixed = [vec![prefix], bytes.to_vec()].concat();
+            if prefix == 0x66 {
+                assert_eq!(
+                    prefix_admission::admitted(&prefixed),
+                    (Operation::Nop, prefixed.len())
+                );
+                continue;
+            }
             let expected = if prefix == 0xf0 {
                 DecodeError::InvalidEncoding
             } else {

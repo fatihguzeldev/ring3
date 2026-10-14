@@ -14,7 +14,8 @@ pub fn encode_cpu_event_site32(event: &CpuEvent32, output: &mut [u8]) -> Result<
     let fields = [
         event
             .origin
-            .map_or(u32::MAX, |origin| u32::from(origin.vector())),
+            .and_then(|origin| origin.vector())
+            .map_or(u32::MAX, u32::from),
         site.map_or(event.state.eip, |site| site.eip),
         event.state.eip,
         site.map_or(event.exit.retired, |site| site.retired),

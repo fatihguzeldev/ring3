@@ -4,6 +4,9 @@ mod support_wasm;
 #[path = "hints/wasm/nop.rs"]
 mod cpu_alignment_nop_wasm;
 
+#[path = "system/entry/wasm.rs"]
+mod cpu_system_entry_wasm;
+
 #[path = "flags/wasm/carry.rs"]
 mod cpu_carry_control_wasm;
 
@@ -124,4 +127,4 @@ mod cpu_application_memory;
 mod cpu_repeat_near_return;
 
 #[path = "hints/alignment/wasm.rs"]
-mod cpu_compiler_alignment_wasm;
+mod cpu_compiler_alignment;

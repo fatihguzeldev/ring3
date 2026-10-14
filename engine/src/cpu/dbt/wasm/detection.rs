@@ -41,7 +41,10 @@ pub(super) fn snapshot(
     if !matches!(
         instruction.operation(),
         Operation::Control(
-            ControlOperation::Breakpoint | ControlOperation::Overflow | ControlOperation::DebugTrap
+            ControlOperation::Breakpoint
+                | ControlOperation::Overflow
+                | ControlOperation::DebugTrap
+                | ControlOperation::Sysenter
         ) | Operation::SoftwareInterrupt {
             vector: 4 | 0x29 | 0x2e
         }

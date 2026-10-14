@@ -53,7 +53,7 @@ fn executable(bytes: &[u8], pc: u32) -> AddressSpace {
 #[test]
 fn exact_selected_cells_are_separate_from_reserved_and_concrete_instruction_owners() {
     let leaf = CPU_ID_LEAVES.iter().find(|l| l.function == 1).unwrap();
-    assert_eq!(leaf.registers[0], 0x600);
+    assert_eq!(leaf.registers[0], 0x633);
     assert_eq!((leaf.registers[0] >> 8) & 15, 6);
     for (opcode, word, dword) in groups() {
         for (prefix, expected) in [(&[][..], dword), (&[0x66][..], word)] {

@@ -149,7 +149,7 @@ function caseRun(c,block,row){
  }else if(row.cpuid!==undefined){
   s.r[0]=row.cpuid;next.r=[...s.r];for(const i of[0,1,2,3])next.r[i]=0;
   if(row.cpuid===0){next.r[0]=0x0d;next.r[3]=0x676e6952;next.r[2]=0x676e4533;next.r[1]=0x20656e69;}
-  if(row.cpuid===1){next.r[0]=0x600;next.r[1]=0x3ed81203;next.r[2]=0x07888131;next.r[3]=0x800;}
+  if(row.cpuid===1){next.r[0]=0x633;next.r[1]=0x3ed81203;next.r[2]=0x07888931;next.r[3]=0x800;}
   if(row.cpuid===0x80000001){next.r[1]=0x120;next.r[2]=0x08100000;}
   execute(c,row.name,s,{next});
  }else if(row.timestamp){

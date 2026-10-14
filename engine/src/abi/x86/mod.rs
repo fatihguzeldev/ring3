@@ -11,10 +11,10 @@ pub use exit::{
     ACCESS_LENGTH_OFFSET, ACCESS_OFFSET, DETAIL_OFFSET, EXIT_SIZE, EXIT_VERSION_2, EXIT_VERSION_3,
     EXIT_VERSION_4, EXIT_VERSION_5, EXIT_VERSION_6, EXIT_VERSION_7, EXIT_VERSION_8, EXIT_VERSION_9,
     EXIT_VERSION_10, EXIT_VERSION_11, EXIT_VERSION_12, EXIT_VERSION_13, EXIT_VERSION_14,
-    FAULT_ADDRESS_OFFSET, REASON_OFFSET, RETIRED_OFFSET, decode_exit, encode_exit, encode_exit_v2,
-    encode_exit_v3, encode_exit_v4, encode_exit_v5, encode_exit_v6, encode_exit_v7, encode_exit_v8,
-    encode_exit_v9, encode_exit_v10, encode_exit_v11, encode_exit_v12, encode_exit_v13,
-    encode_exit_v14,
+    EXIT_VERSION_15, FAULT_ADDRESS_OFFSET, REASON_OFFSET, RETIRED_OFFSET, decode_exit, encode_exit,
+    encode_exit_v2, encode_exit_v3, encode_exit_v4, encode_exit_v5, encode_exit_v6, encode_exit_v7,
+    encode_exit_v8, encode_exit_v9, encode_exit_v10, encode_exit_v11, encode_exit_v12,
+    encode_exit_v13, encode_exit_v14, encode_exit_v15,
 };
 
 pub use segments::{

@@ -112,6 +112,7 @@ pub(in crate::cpu::dbt) fn emit(
                     Operation::Control(
                         crate::cpu::x86::ControlOperation::GeneralProtectionZero
                             | crate::cpu::x86::ControlOperation::DeniedPortString { .. }
+                            | crate::cpu::x86::ControlOperation::Sysenter
                     ) | Operation::SoftwareInterrupt { .. }
                         | Operation::XState(_)
                 )

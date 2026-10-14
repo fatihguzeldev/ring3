@@ -340,7 +340,7 @@ fn nt_return_fault_keeps_null_selector_without_system_task_state() {
     let epoch = engine.begin_exception_detection(owner).unwrap();
     let code = SelectorErrorCode32::from_bits(0).unwrap();
     let origin = EventOrigin32::Exception(ExceptionCause32::InvalidTss(code));
-    assert_eq!((origin.vector(), origin.error_code()), (10, Some(0)));
+    assert_eq!((origin.vector(), origin.error_code()), (Some(10), Some(0)));
     let mut state = State32 {
         eip: 0x1000,
         eflags: 2,

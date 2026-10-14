@@ -18,6 +18,12 @@ pub enum InfrastructureFailure {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SystemEntryKind32 {
+    Interrupt(u8),
+    Sysenter,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ExitReason {
     DeviceNotAvailable,
     Budget,
@@ -39,10 +45,10 @@ pub enum ExitReason {
     Gate {
         id: u32,
     },
-    /// a completed software interrupt at the windows application boundary.
-    /// the os provider must handle the request; no service result is implied.
+    /// a completed user instruction at the windows application boundary.
+    /// the os provider owns service handling and the eventual user return context.
     SystemEntry {
-        vector: u8,
+        kind: SystemEntryKind32,
     },
     ProcessExited {
         code: u32,

@@ -22,6 +22,8 @@ pub enum ControlOperation {
     Breakpoint,
     DebugTrap,
     Overflow,
+    /// accepted user os-entry request; the provider owns its eventual return convention.
+    Sysenter,
     Bound {
         index: Register32,
         address: EffectiveAddress,

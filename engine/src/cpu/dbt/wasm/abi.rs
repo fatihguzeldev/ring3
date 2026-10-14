@@ -258,7 +258,16 @@ pub(super) fn flush(
         .i32_eq()
         .if_(BlockType::Empty)
         .local_get(EXIT_PTR)
-        .i32_const(14 | (i32::from(X86_INTEGER_PROFILE) << 16))
+        .local_get(DETAIL)
+        .i32_const(0x100)
+        .i32_eq()
+        .if_(BlockType::Result(wasm_encoder::ValType::I32))
+        .i32_const(15)
+        .else_()
+        .i32_const(14)
+        .end()
+        .i32_const(i32::from(X86_INTEGER_PROFILE) << 16)
+        .i32_or()
         .i32_store(memarg(4))
         .end();
     if paging {

@@ -18,6 +18,8 @@ pub(super) fn lower(instruction: &Instruction) -> Option<Result<Operation, Decod
         Code::Int3 => ControlOperation::Breakpoint,
         Code::Int1 => ControlOperation::DebugTrap,
         Code::Into => ControlOperation::Overflow,
+        // reserved single address and segment overrides are admitted as compatibility encodings.
+        Code::Sysenter if crate::cpu::x86::capabilities::SEP_ENABLED => ControlOperation::Sysenter,
         Code::Bound_r16_m1616 | Code::Bound_r32_m3232 => {
             if instruction.has_lock_prefix() {
                 return Some(Err(DecodeError::InvalidEncoding));
@@ -42,6 +44,11 @@ pub(super) fn lower(instruction: &Instruction) -> Option<Result<Operation, Decod
     };
     if instruction.has_lock_prefix() {
         return Some(Err(DecodeError::InvalidEncoding));
+    }
+    if operation == ControlOperation::Sysenter
+        && (instruction.has_rep_prefix() || instruction.has_repne_prefix())
+    {
+        return Some(Err(super::operands::unsupported()));
     }
     Some(Ok(Operation::Control(operation)))
 }

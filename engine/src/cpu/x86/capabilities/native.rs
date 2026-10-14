@@ -1,6 +1,6 @@
 use super::{
     AVX_ENABLED, AVX2_ENABLED, CPU_ID_LEAVES, F16C_ENABLED, FMA_ENABLED, NX_ENABLED,
-    PREFETCHW_ENABLED, RDPID_ENABLED, XCR0,
+    PREFETCHW_ENABLED, RDPID_ENABLED, SEP_ENABLED, XCR0,
 };
 
 fn leaf(function: u32, subfunction: Option<u32>) -> [u32; 4] {
@@ -67,4 +67,16 @@ fn ignored_data_prefetch_capability_is_explicit_without_changing_vendor_or_wt1()
     assert_eq!(leaf(0x8000_0001, None), [0, 0, 0x120, 0x0810_0000]);
     assert_eq!(leaf(7, Some(0))[2] & 1, 0);
     assert_eq!(leaf(0, None), [13, 0x676e_6952, 0x2065_6e69, 0x676e_4533]);
+}
+
+#[test]
+fn sysenter_is_advertised_with_a_qualified_virtual_family_model_and_stepping() {
+    let values = leaf(1, None);
+    const { assert!(SEP_ENABLED) };
+    assert_eq!(values[3] & (1 << 11), 1 << 11);
+    assert_eq!(values[0], 0x633);
+    let family = (values[0] >> 8) & 15;
+    let model = (values[0] >> 4) & 15;
+    let stepping = values[0] & 15;
+    assert!(!(family == 6 && model < 3 && stepping < 3));
 }

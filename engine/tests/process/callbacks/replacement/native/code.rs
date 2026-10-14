@@ -1,12 +1,12 @@
 use ring3_engine::abi::arena::{TRANSFER_OFFSET, TRANSFER_SIZE};
 use ring3_engine::abi::x86::{
     decode_exit, decode_state, encode_exit_v3, encode_exit_v9, encode_exit_v12, encode_exit_v13,
-    encode_exit_v14, encode_state,
+    encode_exit_v14, encode_exit_v15, encode_state,
 };
 use ring3_engine::cpu::dbt::{CompileError, InstructionError};
-use ring3_engine::cpu::x86::{State32, decode::DecodeError};
+use ring3_engine::cpu::x86::{CpuPagingError32, PagingAccess32, State32, decode::DecodeError};
 use ring3_engine::cpu::{ExecutionExit, ExitReason, UnsupportedFeature};
-use ring3_engine::memory::{Access, FaultReason, GuestAddress, MemoryFault};
+use ring3_engine::memory::GuestAddress;
 use ring3_engine::process::{CallError, EngineInstance, HostError};
 use ring3_engine::windows::CallingConvention32;
 
@@ -42,15 +42,17 @@ fn version_five_need_code_resumes_but_divide_error_cannot_publish_callback_code(
 
 #[test]
 fn versioned_need_code_resumes_without_admitting_faults_or_unknown_versions() {
-    for version in [9_u16, 12, 13, 14] {
+    for version in [9_u16, 12, 13, 14, 15] {
         let encode: fn(&ExecutionExit, &mut [u8]) -> _ = if version == 9 {
             encode_exit_v9
         } else if version == 12 {
             encode_exit_v12
         } else if version == 13 {
             encode_exit_v13
-        } else {
+        } else if version == 14 {
             encode_exit_v14
+        } else {
+            encode_exit_v15
         };
         let mut engine = active();
         replacement(&mut engine, TARGET, 6);
@@ -65,11 +67,28 @@ fn versioned_need_code_resumes_without_admitting_faults_or_unknown_versions() {
         unchanged(&mut engine, error(CallError::InvalidStop), |engine| {
             engine.resume_callback_code(KEY, 1, 2, 4, 2)
         });
-        if version == 14 {
+        if version >= 14 {
             encode(
                 &ExecutionExit {
                     retired: 7,
-                    reason: ExitReason::SystemEntry { vector: 0x2e },
+                    reason: ExitReason::SystemEntry {
+                        kind: ring3_engine::cpu::SystemEntryKind32::Interrupt(0x2e),
+                    },
+                },
+                &mut engine.arena_mut().unwrap()[56..96],
+            )
+            .unwrap();
+            unchanged(&mut engine, error(CallError::InvalidStop), |engine| {
+                engine.resume_callback_code(KEY, 1, 2, 4, 2)
+            });
+        }
+        if version == 15 {
+            encode_exit_v15(
+                &ExecutionExit {
+                    retired: 7,
+                    reason: ExitReason::SystemEntry {
+                        kind: ring3_engine::cpu::SystemEntryKind32::Sysenter,
+                    },
                 },
                 &mut engine.arena_mut().unwrap()[56..96],
             )
@@ -243,6 +262,13 @@ fn unchanged<T>(
     expected: HostError,
     operation: impl FnOnce(&mut EngineInstance) -> Result<T, HostError>,
 ) {
+    assert_eq!(unchanged_error(engine, operation), expected);
+}
+
+fn unchanged_error<T>(
+    engine: &mut EngineInstance,
+    operation: impl FnOnce(&mut EngineInstance) -> Result<T, HostError>,
+) -> HostError {
     let arena = engine.arena().to_vec();
     let artifact = engine.artifact_bytes().map(|value| value.to_vec());
     let generation = engine.generation();
@@ -257,7 +283,7 @@ fn unchanged<T>(
                 .ok()
         })
         .collect();
-    assert_eq!(operation(engine).err(), Some(expected));
+    let error = operation(engine).err().expect("operation must fail");
     assert_eq!(engine.arena(), arena);
     assert_eq!(
         engine.artifact_bytes().map(|value| value.to_vec()),
@@ -268,6 +294,7 @@ fn unchanged<T>(
     for snapshot in snapshots {
         assert!(engine.memory().unwrap().is_code_current(&snapshot));
     }
+    error
 }
 
 #[test]
@@ -540,7 +567,7 @@ fn installation_requires_canonical_state_and_literal_v3_need_code() {
         });
         engine.arena_mut().unwrap()[..96].copy_from_slice(&stopped);
     }
-    for (offset, value) in [(0, 0), (4, 3), (52, 0), (56, 0), (64, 39), (68, 1), (80, 1)] {
+    for (offset, value) in [(0, 0), (4, 4), (52, 0), (56, 0), (64, 39), (68, 1), (80, 1)] {
         engine.arena_mut().unwrap()[offset] = value;
         unchanged(&mut engine, error(CallError::InvalidStop), |engine| {
             engine.resume_callback_code(KEY, 1, 2, 4, 2)
@@ -598,21 +625,38 @@ fn structural_decode_and_fetch_compile_errors_are_typed_atomic_and_retryable() {
     upload(&mut engine, TARGET, &[0xb8, 0x78, 0x56, 0x34, 0x12, 0xc3]);
     engine.protect(TARGET, 1, 1).unwrap();
     replacement(&mut engine, TARGET, 6);
-    unchanged(
-        &mut engine,
-        HostError::Compile(CompileError::Instruction {
-            pc: GuestAddress(TARGET),
-            cause: InstructionError::Decode(DecodeError::MemoryFault {
-                pc: GuestAddress(TARGET),
-                fault: MemoryFault {
-                    address: GuestAddress(TARGET),
-                    access: Access::Execute,
-                    reason: FaultReason::Permission,
-                },
-                length: 1,
+    let error = unchanged_error(&mut engine, |engine| {
+        engine.resume_callback_code(KEY, 1, 2, 4, 2)
+    });
+    let HostError::Compile(CompileError::Instruction {
+        pc,
+        cause:
+            InstructionError::Decode(DecodeError::Paging {
+                pc: fault_pc,
+                error: CpuPagingError32::PageFault(fault),
+                attempted_length,
             }),
-        }),
-        |engine| engine.resume_callback_code(KEY, 1, 2, 4, 2),
+    }) = error
+    else {
+        panic!("expected typed application fetch page fault, got {error:?}");
+    };
+    assert_eq!(
+        (
+            pc,
+            fault_pc,
+            fault.linear(),
+            fault.access(),
+            fault.error_code(),
+            attempted_length,
+        ),
+        (
+            GuestAddress(TARGET),
+            GuestAddress(TARGET),
+            GuestAddress(TARGET),
+            PagingAccess32::Execute,
+            21,
+            1,
+        )
     );
     engine.protect(TARGET, 1, 7).unwrap();
     replacement(&mut engine, TARGET, 6);

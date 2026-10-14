@@ -1,4 +1,5 @@
 mod paging;
+use crate::cpu::SystemEntryKind32;
 pub use paging::{PagingAccess32, PagingDomain32, VerifiedPageFault32};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -49,7 +50,7 @@ pub enum ExceptionCause32 {
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EventOrigin32 {
-    SoftwareInt { vector: u8 },
+    SystemEntry(SystemEntryKind32),
     Exception(ExceptionCause32),
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -100,15 +101,16 @@ impl ExceptionCause32 {
     }
 }
 impl EventOrigin32 {
-    pub const fn vector(self) -> u8 {
+    pub const fn vector(self) -> Option<u8> {
         match self {
-            Self::SoftwareInt { vector } => vector,
-            Self::Exception(cause) => cause.vector(),
+            Self::SystemEntry(SystemEntryKind32::Interrupt(vector)) => Some(vector),
+            Self::SystemEntry(SystemEntryKind32::Sysenter) => None,
+            Self::Exception(cause) => Some(cause.vector()),
         }
     }
     pub const fn error_code(self) -> Option<u32> {
         match self {
-            Self::SoftwareInt { .. } => None,
+            Self::SystemEntry(_) => None,
             Self::Exception(cause) => cause.error_code(),
         }
     }

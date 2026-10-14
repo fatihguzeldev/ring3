@@ -3,8 +3,16 @@ use super::*;
 #[test]
 fn application_origins_keep_vector_and_exact_error_code_presence_distinct() {
     for (origin, vector, code) in [
-        (EventOrigin32::SoftwareInt { vector: 0x2e }, 0x2e, None),
-        (EventOrigin32::SoftwareInt { vector: 0x29 }, 0x29, None),
+        (
+            EventOrigin32::SystemEntry(SystemEntryKind32::Interrupt(0x2e)),
+            0x2e,
+            None,
+        ),
+        (
+            EventOrigin32::SystemEntry(SystemEntryKind32::Interrupt(0x29)),
+            0x29,
+            None,
+        ),
         (
             EventOrigin32::Exception(ExceptionCause32::BreakpointInt3),
             3,
@@ -40,7 +48,7 @@ fn application_origins_keep_vector_and_exact_error_code_presence_distinct() {
             Some(0x402),
         ),
     ] {
-        assert_eq!((origin.vector(), origin.error_code()), (vector, code));
+        assert_eq!((origin.vector(), origin.error_code()), (Some(vector), code));
     }
     for bits in [0, 3, 0x4d, 0x402, 0xffff] {
         assert_eq!(SelectorErrorCode32::from_bits(bits).unwrap().get(), bits);
@@ -68,4 +76,11 @@ fn exception_class_preserves_fault_and_trap_distinctions() {
     ] {
         assert_eq!(cause.class(), ExceptionClass32::Trap);
     }
+}
+
+#[test]
+fn sysenter_origin_has_no_invented_interrupt_vector_or_error_code() {
+    let origin = EventOrigin32::SystemEntry(SystemEntryKind32::Sysenter);
+    assert_eq!(origin.vector(), None);
+    assert_eq!(origin.error_code(), None);
 }
