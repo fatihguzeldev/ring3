@@ -16,6 +16,7 @@ pub const EXIT_VERSION_10: u16 = 10;
 pub const EXIT_VERSION_11: u16 = 11;
 pub const EXIT_VERSION_12: u16 = 12;
 pub const EXIT_VERSION_13: u16 = 13;
+pub const EXIT_VERSION_14: u16 = 14;
 pub const REASON_OFFSET: usize = 16;
 pub const RETIRED_OFFSET: usize = 20;
 pub const DETAIL_OFFSET: usize = 24;
@@ -73,6 +74,10 @@ pub fn encode_exit_v12(exit: &ExecutionExit, output: &mut [u8]) -> Result<(), Ab
 
 pub fn encode_exit_v13(exit: &ExecutionExit, output: &mut [u8]) -> Result<(), AbiError> {
     encode(exit, output, EXIT_VERSION_13)
+}
+
+pub fn encode_exit_v14(exit: &ExecutionExit, output: &mut [u8]) -> Result<(), AbiError> {
+    encode(exit, output, EXIT_VERSION_14)
 }
 
 fn encode(exit: &ExecutionExit, output: &mut [u8], version: u16) -> Result<(), AbiError> {
@@ -143,6 +148,13 @@ fn encode(exit: &ExecutionExit, output: &mut [u8], version: u16) -> Result<(), A
             }
             fields[2] = id;
             8
+        }
+        ExitReason::SystemEntry { vector } => {
+            if version < EXIT_VERSION_14 || !matches!(vector, 0x29 | 0x2e) {
+                return Err(AbiError::Exit);
+            }
+            fields[2] = u32::from(vector);
+            24
         }
         ExitReason::ProcessExited { code } => {
             if version < EXIT_VERSION_4 {
@@ -246,6 +258,7 @@ pub fn decode_exit(input: &[u8]) -> Result<ExecutionExit, AbiError> {
             EXIT_VERSION_11,
             EXIT_VERSION_12,
             EXIT_VERSION_13,
+            EXIT_VERSION_14,
         ],
     )?;
     let detail = read_u32(input, DETAIL_OFFSET);
@@ -289,7 +302,7 @@ pub fn decode_exit(input: &[u8]) -> Result<ExecutionExit, AbiError> {
         if address != 0
             || access != 0
             || length != 0
-            || (!matches!(tag, 4 | 7 | 8 | 9 | 11 | 12 | 13 | 14 | 15 | 21) && detail != 0)
+            || (!matches!(tag, 4 | 7 | 8 | 9 | 11 | 12 | 13 | 14 | 15 | 21 | 24) && detail != 0)
         {
             return Err(AbiError::Exit);
         }
@@ -307,6 +320,11 @@ pub fn decode_exit(input: &[u8]) -> Result<ExecutionExit, AbiError> {
             }),
             8 if version >= EXIT_VERSION_3 && detail != 0 => ExitReason::Gate { id: detail },
             9 if version >= EXIT_VERSION_4 => ExitReason::ProcessExited { code: detail },
+            24 if version >= EXIT_VERSION_14 && matches!(detail, 0x29 | 0x2e) => {
+                ExitReason::SystemEntry {
+                    vector: detail as u8,
+                }
+            }
             10 if version >= EXIT_VERSION_5 => ExitReason::DivideError,
             11 if version >= EXIT_VERSION_6 => ExitReason::GeneralProtection { error_code: detail },
             12 if version >= EXIT_VERSION_6 && detail <= 0xffff => ExitReason::FloatingPoint {
@@ -494,3 +512,6 @@ mod tests {
 mod task_tests;
 
 mod paging;
+
+#[cfg(test)]
+mod system;

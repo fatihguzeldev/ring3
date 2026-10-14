@@ -3,7 +3,7 @@ use ring3_engine::{
         arena::{CANCEL_OFFSET, EXIT_OFFSET, STATE_OFFSET, TRANSFER_OFFSET},
         x86::{
             EXIT_SIZE, STATE_SIZE, decode_state, encode_exit, encode_exit_v3, encode_exit_v9,
-            encode_exit_v12, encode_exit_v13, encode_state,
+            encode_exit_v12, encode_exit_v13, encode_exit_v14, encode_state,
         },
     },
     cpu::{ExecutionExit, ExitReason, dbt::RegistryError, x86::State32},
@@ -44,13 +44,15 @@ fn version_five_need_code_allows_cold_callback_installation_and_fault_does_not()
 
 #[test]
 fn versioned_need_code_installs_without_admitting_faults_or_unknown_versions() {
-    for version in [9_u16, 12, 13] {
+    for version in [9_u16, 12, 13, 14] {
         let encode: fn(&ExecutionExit, &mut [u8]) -> _ = if version == 9 {
             encode_exit_v9
         } else if version == 12 {
             encode_exit_v12
-        } else {
+        } else if version == 13 {
             encode_exit_v13
+        } else {
+            encode_exit_v14
         };
         let mut f = fixture(true);
         encode(
@@ -62,6 +64,17 @@ fn versioned_need_code_installs_without_admitting_faults_or_unknown_versions() {
         )
         .unwrap();
         reject_both(&mut f, invalid_stop());
+        if version == 14 {
+            encode(
+                &ExecutionExit {
+                    retired: 2,
+                    reason: ExitReason::SystemEntry { vector: 0x29 },
+                },
+                &mut f.engine.arena_mut().unwrap()[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE],
+            )
+            .unwrap();
+            reject_both(&mut f, invalid_stop());
+        }
         encode(
             &ExecutionExit {
                 retired: 2,

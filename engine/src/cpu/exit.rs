@@ -39,6 +39,11 @@ pub enum ExitReason {
     Gate {
         id: u32,
     },
+    /// A completed software interrupt at the Windows application boundary.
+    /// The OS provider must handle the request; no service result is implied.
+    SystemEntry {
+        vector: u8,
+    },
     ProcessExited {
         code: u32,
     },
