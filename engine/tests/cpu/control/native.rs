@@ -93,3 +93,6 @@ mod cpu_carryless_absence;
 
 #[path = "near/bnd/native.rs"]
 mod cpu_bnd_prefix;
+
+#[path = "exceptions/availability/amd/native.rs"]
+mod cpu_amd_absence;

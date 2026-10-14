@@ -2,6 +2,7 @@ use iced_x86::{Code, Instruction};
 
 use crate::cpu::x86::capabilities::CPU_ID_LEAVES;
 
+mod amd;
 mod modern;
 
 pub(super) fn unavailable(instruction: &Instruction) -> bool {
@@ -54,7 +55,8 @@ pub(super) fn unavailable(instruction: &Instruction) -> bool {
         Code::Ptwrite_rm32 => (20, 0, 1, 4),
         _ => {
             return instruction.cpuid_features().iter().any(|&feature| {
-                modern::required(feature)
+                amd::required(feature)
+                    .or_else(|| modern::required(feature))
                     .is_some_and(|required| !available(required))
             });
         }

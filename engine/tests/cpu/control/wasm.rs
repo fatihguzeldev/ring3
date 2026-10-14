@@ -104,3 +104,6 @@ mod cpu_bnd_prefix;
 
 #[path = "exceptions/availability/optional/modern/wasm.rs"]
 mod cpu_modern_absence;
+
+#[path = "exceptions/availability/amd/wasm.rs"]
+mod cpu_amd_absence;
