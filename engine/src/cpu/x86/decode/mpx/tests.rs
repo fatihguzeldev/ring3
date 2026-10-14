@@ -125,3 +125,76 @@ fn neighboring_reserved_opcodes_and_duplicate_or_lock_prefixes_stay_outside_the_
         assert!(super::super::profile::check_profile(&instruction, bytes).is_err());
     }
 }
+
+#[test]
+fn disabled_bnd_prefix_preserves_exact_near_lowering_and_consumed_length() {
+    for default32 in [false, true] {
+        let displacement = if default32 { vec![0; 4] } else { vec![0; 2] };
+        let other_displacement = if default32 { vec![0; 2] } else { vec![0; 4] };
+        for raw in [
+            [vec![0xe8], displacement.clone()].concat(),
+            vec![0xff, 0xd0],
+            vec![0xff, 0x10],
+            vec![0xc3],
+            vec![0xc2, 8, 0],
+            [vec![0xe9], displacement.clone()].concat(),
+            vec![0xff, 0xe0],
+            vec![0xff, 0x20],
+            vec![0x74, 0],
+            [vec![0x0f, 0x84], displacement].concat(),
+            [vec![0x66, 0xe8], other_displacement].concat(),
+            vec![0x67, 0xff, 0x10],
+        ] {
+            let bytes = [vec![0xf2], raw].concat();
+            let mut memory = AddressSpace::new(1).unwrap();
+            memory
+                .map_zeroed(
+                    PageRange::new(GuestAddress(0x1000), 1).unwrap(),
+                    Permissions::ALL,
+                )
+                .unwrap();
+            memory.write(GuestAddress(0x1000), &bytes).unwrap();
+            let mut segments = SegmentContext::default();
+            if !default32 {
+                segments.caches[1] = SegmentCache::from_bits(0xf1bf_ffff).unwrap();
+            }
+            let context = CodeFetchContext::from_segments(&segments).unwrap();
+            for policy in [DecodePolicy::Strict, DecodePolicy::Execution] {
+                let BoundDecode::Instruction(prefixed) =
+                    decode_bound(&memory, GuestAddress(0x1000), context, policy).unwrap()
+                else {
+                    panic!("complete prefixed near transfer");
+                };
+                let BoundDecode::Instruction(ordinary) =
+                    decode_bound(&memory, GuestAddress(0x1001), context, policy).unwrap()
+                else {
+                    panic!("same lowerer without bounds prefix");
+                };
+                assert_eq!(prefixed.operation(), ordinary.operation(), "{bytes:02x?}");
+                assert_eq!(prefixed.next_pc(), ordinary.next_pc());
+                assert_eq!(prefixed.length(), ordinary.length() + 1);
+                assert_eq!(prefixed.segment_accesses(), ordinary.segment_accesses());
+            }
+        }
+    }
+}
+
+#[test]
+fn bounds_prefix_gate_keeps_duplicate_groups_and_other_repeat_families_refused() {
+    for default32 in [false, true] {
+        let displacement = if default32 { vec![0; 4] } else { vec![0; 2] };
+        for bytes in [
+            vec![0xf2, 0xeb, 0],
+            vec![0xf2, 0xe2, 0],
+            vec![0xf2, 0xe3, 0],
+            vec![0xf2, 0xcb],
+            vec![0xf2, 0xcf],
+            [vec![0xf3, 0xe9], displacement.clone()].concat(),
+            [vec![0xf2, 0xf2, 0xe9], displacement.clone()].concat(),
+        ] {
+            let bitness = if default32 { 32 } else { 16 };
+            let instruction = Decoder::new(bitness, &bytes, DecoderOptions::NONE).decode();
+            assert!(super::super::profile::check_profile(&instruction, &bytes).is_err());
+        }
+    }
+}

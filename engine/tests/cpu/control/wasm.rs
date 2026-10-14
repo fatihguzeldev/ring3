@@ -98,3 +98,6 @@ mod cpu_cet_disabled;
 
 #[path = "exceptions/availability/optional/carryless/wasm.rs"]
 mod cpu_carryless_absence;
+
+#[path = "near/bnd/wasm.rs"]
+mod cpu_bnd_prefix;

@@ -162,6 +162,7 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
     // hle is absent, so eligible hints retain the ordinary locked or store operation.
     let hle_hint = instruction.has_xacquire_prefix() || instruction.has_xrelease_prefix();
     if !hle_hint
+        && !super::mpx::disabled_branch_prefix(instruction)
         && (instruction.has_repne_prefix() || instruction.has_rep_prefix() && !mandatory_repeat)
     {
         return Err(unsupported());

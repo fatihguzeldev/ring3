@@ -90,3 +90,6 @@ mod cpu_cet_disabled;
 
 #[path = "exceptions/availability/optional/carryless/native.rs"]
 mod cpu_carryless_absence;
+
+#[path = "near/bnd/native.rs"]
+mod cpu_bnd_prefix;

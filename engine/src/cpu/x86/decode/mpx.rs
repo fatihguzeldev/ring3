@@ -14,6 +14,34 @@ pub(super) fn disabled_nop(instruction: &Instruction) -> bool {
     {
         return false;
     }
+    mpx_absent()
+}
+
+// the disabled bounds prefix retains ordinary near-transfer semantics.
+pub(super) fn disabled_branch_prefix(instruction: &Instruction) -> bool {
+    instruction.has_repne_prefix()
+        && matches!(instruction.code_size(), CodeSize::Code16 | CodeSize::Code32)
+        && crate::cpu::x86::capabilities::XCR0 & 0x18 == 0
+        && mpx_absent()
+        && (instruction.is_jcc_short_or_near()
+            || matches!(
+                instruction.code(),
+                Code::Call_rel16
+                    | Code::Call_rel32_32
+                    | Code::Call_rm16
+                    | Code::Call_rm32
+                    | Code::Retnw
+                    | Code::Retnd
+                    | Code::Retnw_imm16
+                    | Code::Retnd_imm16
+                    | Code::Jmp_rel16
+                    | Code::Jmp_rel32_32
+                    | Code::Jmp_rm16
+                    | Code::Jmp_rm32
+            ))
+}
+
+fn mpx_absent() -> bool {
     !CPU_ID_LEAVES.iter().any(|leaf| {
         leaf.function == 7 && leaf.subfunction == Some(0) && leaf.registers[1] & (1 << 14) != 0
     })
