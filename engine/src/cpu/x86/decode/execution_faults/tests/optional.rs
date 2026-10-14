@@ -1,5 +1,7 @@
 use iced_x86::{Code, Decoder, DecoderOptions};
 
+use super::available;
+
 use crate::{
     cpu::x86::{
         ControlOperation,
@@ -286,4 +288,18 @@ fn optional_table_keeps_other_features_hints_and_prefix_boundaries_unchanged() {
             &Operation::Control(ControlOperation::InvalidOpcode)
         );
     }
+}
+
+#[test]
+fn availability_lookup_matches_unstructured_and_structured_cpuid_queries() {
+    for subfunction in [0, 1, u32::MAX] {
+        assert!(available((0x8000_0001, subfunction, 2, 8)));
+        assert!(!available((0x8000_0001, subfunction, 2, 6)));
+        assert!(!available((0x8000_0001, subfunction, 3, 31)));
+    }
+    assert!(available((7, 0, 1, 5)));
+    for subfunction in [1, u32::MAX] {
+        assert!(!available((7, subfunction, 1, 5)));
+    }
+    assert!(!available((u32::MAX, 0, 0, 0)));
 }

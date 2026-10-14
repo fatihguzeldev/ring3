@@ -52,9 +52,13 @@ pub(super) fn unavailable(instruction: &Instruction) -> bool {
         Code::Ptwrite_rm32 => (20, 0, 1, 4),
         _ => return false,
     };
-    !CPU_ID_LEAVES.iter().any(|leaf| {
+    !available((function, subfunction, register, bit))
+}
+
+fn available((function, subfunction, register, bit): (u32, u32, usize, u32)) -> bool {
+    CPU_ID_LEAVES.iter().any(|leaf| {
         leaf.function == function
-            && leaf.subfunction == Some(subfunction)
+            && leaf.subfunction.is_none_or(|value| value == subfunction)
             && leaf.registers[register] & (1 << bit) != 0
     })
 }
