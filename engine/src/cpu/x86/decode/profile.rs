@@ -30,7 +30,9 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
         return Ok(());
     }
     // these compatibility encodings are nops in the fixed absent-feature profile.
-    if matches!(instruction.code(), Code::Cldemote_m8 | Code::Rdsspd_r32) {
+    if matches!(instruction.code(), Code::Cldemote_m8 | Code::Rdsspd_r32)
+        || ignored_instruction_prefetch(instruction)
+    {
         if instruction.has_lock_prefix()
             || instruction.has_rep_prefix()
             || instruction.has_repne_prefix()
@@ -206,3 +208,19 @@ fn is_prefix(byte: u8) -> bool {
 #[cfg(test)]
 #[path = "profile/tests/hle.rs"]
 mod hle;
+
+// only the two exact absent instruction-prefetch encodings are ignored.
+// no operand address is needed and prefetchi remains unadvertised.
+pub(super) fn ignored_instruction_prefetch(instruction: &Instruction) -> bool {
+    use crate::cpu::x86::capabilities::CPU_ID_LEAVES;
+    matches!(
+        instruction.code(),
+        Code::Prefetchit0_m8 | Code::Prefetchit1_m8
+    ) && !CPU_ID_LEAVES.iter().any(|leaf| {
+        leaf.function == 7 && leaf.subfunction == Some(1) && leaf.registers[3] & (1 << 14) != 0
+    })
+}
+
+#[cfg(test)]
+#[path = "profile/tests/prefetch/instruction.rs"]
+mod instruction_prefetch;

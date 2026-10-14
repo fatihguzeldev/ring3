@@ -42,7 +42,9 @@ pub(super) fn lower(
         };
     }
     check_profile(instruction, bytes)?;
-    if super::profile::ignored_prefetch_alias(instruction) {
+    if super::profile::ignored_prefetch_alias(instruction)
+        || super::profile::ignored_instruction_prefetch(instruction)
+    {
         return Ok(Operation::Nop);
     }
     if super::mpx::disabled_nop(instruction) {

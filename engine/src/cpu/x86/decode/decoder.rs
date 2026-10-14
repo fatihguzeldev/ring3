@@ -280,7 +280,9 @@ fn memory_error(error: MemoryError, pc: GuestAddress, length: usize) -> DecodeEr
 
 fn segment_accesses(instruction: &iced_x86::Instruction) -> u8 {
     use iced_x86::{Code, InstructionInfoFactory, Mnemonic, Register};
-    if super::profile::ignored_prefetch_alias(instruction) {
+    if super::profile::ignored_prefetch_alias(instruction)
+        || super::profile::ignored_instruction_prefetch(instruction)
+    {
         return 0;
     }
     if crate::cpu::x86::capabilities::PREFETCHW_ENABLED
