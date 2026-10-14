@@ -19,7 +19,7 @@ const sources = [
   'engine/src/cpu/dbt/wasm/integer/dispatch.rs', 'engine/src/cpu/dbt/wasm/simd.rs',
   'engine/src/cpu/dbt/wasm/software_interrupts.rs', 'engine/src/cpu/dbt/wasm/detection.rs',
   'engine/src/abi/x86/event.rs', 'engine/src/abi/wasm/exports/events.rs',
-  'engine/src/process/cpu/event.rs', 'engine/src/process/wasm/detection.rs',
+  'engine/src/process/cpu/events/snapshot.rs', 'engine/src/process/wasm/detection.rs',
   'engine/src/cpu/dbt/wasm/x87.rs', 'engine/src/process/cpu/x87.rs', 'engine/src/process/cpu/avx.rs',
   'engine/src/process/cpu/far/return.rs', 'engine/src/process/calls/context.rs',
   'engine/src/cpu/x86/system_registers.rs', 'engine/src/process/cpu/system_registers.rs',

@@ -110,8 +110,8 @@ export async function harness(enginePath, output, root) {
     'engine/src/cpu/dbt/wasm/detection.rs', 'engine/src/cpu/dbt/wasm/cpu_result/paging.rs',
     'engine/src/cpu/dbt/wasm/code_fetch/paging.rs', 'engine/src/cpu/x86/decode/fetch.rs',
     'engine/src/cpu/x86/interrupts/cause/paging.rs', 'engine/src/cpu/x86/paging/inspect.rs',
-    'engine/src/process/cpu/interrupts/detection.rs', 'engine/src/process/cpu/interrupts/detection/site.rs',
-    'engine/src/process/cpu/interrupts/detection/restart.rs', 'engine/src/process/cpu/interrupts/detection/paging.rs',
+    'engine/src/process/cpu/events/detection.rs', 'engine/src/process/cpu/events/detection/site.rs',
+    'engine/src/process/cpu/events/detection/restart.rs', 'engine/src/process/cpu/events/detection/paging.rs',
     'engine/src/process/memory/paging.rs', 'engine/src/memory/space/paging.rs',
     'engine/src/process/wasm/detection.rs', 'engine/src/process/wasm/paging/transport.rs',
   ].filter(path => !paths.includes(path)));

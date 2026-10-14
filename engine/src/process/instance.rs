@@ -55,7 +55,7 @@ pub struct EngineInstance {
     pub(in crate::process) detection_epoch: u64,
     #[cfg(any(target_arch = "wasm32", test))]
     pub(in crate::process) exception_detection:
-        Option<Box<[crate::process::cpu::interrupts::detection::DetectionSlot32; 1]>>,
+        Option<Box<[crate::process::cpu::events::detection::DetectionSlot32; 1]>>,
     pub(in crate::process) system_register_bank: Option<crate::cpu::x86::UserSystemRegisterBank32>,
     pub(in crate::process) image: Option<crate::loader::ImageMetadata32>,
     pub(in crate::process) image_input: Option<crate::process::loading::input::ImageInput>,

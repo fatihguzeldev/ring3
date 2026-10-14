@@ -66,7 +66,7 @@ fn stage_pf_exit(engine: &mut EngineInstance, fault: VerifiedPageFault32) {
 fn actual_certified_pf_is_required_to_seal_and_consumes_once() {
     use crate::{
         cpu::x86::{EventOrigin32, ExceptionCause32},
-        process::{CallError, cpu::interrupts::detection::DetectedEvent32},
+        process::{CallError, cpu::events::detection::DetectedEvent32},
     };
     let mut engine = fixture();
 
@@ -104,7 +104,7 @@ fn actual_certified_pf_is_required_to_seal_and_consumes_once() {
 fn changed_cr2_or_a_later_valid_access_cannot_replay_an_old_pf() {
     use crate::{
         cpu::x86::{EventOrigin32, ExceptionCause32},
-        process::{CallError, cpu::interrupts::detection::DetectedEvent32},
+        process::{CallError, cpu::events::detection::DetectedEvent32},
     };
     for seal in [false, true] {
         let mut engine = fixture();
@@ -370,7 +370,7 @@ fn old_pf_does_not_turn_successful_zero_mask_gather_into_a_new_pf_occurrence() {
 fn material_replacement_preserves_active_and_ready_certified_pf_until_single_consume() {
     use crate::{
         cpu::x86::{EventOrigin32, ExceptionCause32},
-        process::{CallError, cpu::interrupts::detection::DetectedEvent32},
+        process::{CallError, cpu::events::detection::DetectedEvent32},
     };
     for ready in [false, true] {
         let mut engine = fixture();

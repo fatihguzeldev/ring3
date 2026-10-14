@@ -16,7 +16,7 @@ const paths=['engine/src/cpu/dbt/wasm/avx/gather.rs','engine/src/cpu/dbt/wasm/co
   'engine/src/cpu/x86/avx/gather/mod.rs','engine/src/cpu/x86/avx/gather/geometry.rs',
   'engine/src/cpu/x86/decode/avx/gather.rs','engine/src/abi/x86/avx/gather.rs',
   'engine/src/process/execution/authority.rs','engine/src/process/cpu/segments.rs',
-  'engine/src/process/wasm/detection.rs','engine/src/process/cpu/interrupts/detection.rs',
+  'engine/src/process/wasm/detection.rs','engine/src/process/cpu/events/detection.rs',
   'engine/src/cpu/dbt/wasm/detection.rs','engine/src/abi/x86/avx/gather/paging.rs',
   'engine/src/process/wasm/paging.rs','engine/src/process/memory/paging/request.rs',
   'engine/src/abi/x86/segments.rs','engine/tests/support/wasm/engine.mjs'];

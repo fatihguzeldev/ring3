@@ -12,6 +12,6 @@ pub(crate) mod wasm;
 mod windows;
 
 pub use calls::call::CallError;
-pub use cpu::event::{CpuEvent32, CpuInstructionSite32};
+pub use cpu::events::{CpuEvent32, CpuInstructionSite32};
 pub use execution::installation::ResidentInstallation;
 pub use instance::{EngineInstance, HostError, StoreCompletion};

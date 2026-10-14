@@ -20,7 +20,7 @@ const sourcePaths = [...new Set([...receipt.sourcePaths, 'engine/tests/support/w
   'engine/src/cpu/x86/simd.rs', 'engine/src/cpu/dbt/wasm/cpu_result.rs', 'engine/src/cpu/dbt/wasm/emitter.rs',
   'engine/src/cpu/dbt/wasm/integer/dispatch.rs', 'engine/src/cpu/dbt/wasm/memory.rs', 'engine/src/process/cpu/avx.rs',
   'engine/src/cpu/dbt/wasm/detection.rs', 'engine/src/process/wasm/detection.rs',
-  'engine/src/process/cpu/interrupts/detection.rs', 'engine/src/process/execution/authority.rs',
+  'engine/src/process/cpu/events/detection.rs', 'engine/src/process/execution/authority.rs',
   'engine/src/abi/arena.rs', 'engine/src/abi/x86/avx.rs', 'engine/src/abi/x86/ymm.rs', 'engine/src/cpu/x86/capabilities.rs'])].sort();
 const pins = () => Object.fromEntries(sourcePaths.map(path => [path, hash(readFileSync(join(root, path)))]));
 const sourcePins = pins(), cases = JSON.parse(readFileSync(join(output, 'cases.json'), 'utf8'));

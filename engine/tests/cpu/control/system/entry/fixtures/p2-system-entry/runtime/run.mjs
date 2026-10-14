@@ -13,8 +13,8 @@ const sourcePaths = ['engine/src/cpu/exit.rs', 'engine/src/cpu/x86/control.rs',
   'engine/src/cpu/dbt/wasm/detection.rs', 'engine/src/cpu/dbt/wasm/emitter.rs',
   'engine/src/cpu/dbt/wasm/abi.rs', 'engine/src/cpu/dbt/region.rs',
   'engine/src/abi/x86/exit.rs', 'engine/src/abi/x86/event.rs',
-  'engine/src/process/cpu/event.rs', 'engine/src/process/wasm/detection.rs',
-  'engine/src/process/cpu/interrupts/detection/site.rs', 'engine/src/process/cpu/interrupts/detection/restart.rs',
+  'engine/src/process/cpu/events/snapshot.rs', 'engine/src/process/wasm/detection.rs',
+  'engine/src/process/cpu/events/detection/site.rs', 'engine/src/process/cpu/events/detection/restart.rs',
   'engine/tests/cpu/control/system/entry/native.rs', 'engine/tests/cpu/control/system/entry/wasm.rs',
   'engine/tests/cpu/control/system/entry/fixtures/p2-system-entry/runtime/run.mjs'];
 const pins = () => Object.fromEntries(sourcePaths.map(path => [path, hash(readFileSync(join(root, path)))]));
