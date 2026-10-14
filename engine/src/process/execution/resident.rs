@@ -179,7 +179,8 @@ impl EngineInstance {
                     crate::cpu::x86::decode::DecodeAuthority::new(
                         self.system_register_bank,
                         self.interrupt_descriptors.is_some(),
-                    ),
+                    )
+                    .with_task_return(self.task_return_sources.is_some()),
                 )
                 .map_err(HostError::Resident)
         } else {
@@ -196,7 +197,8 @@ impl EngineInstance {
                     crate::cpu::x86::decode::DecodeAuthority::new(
                         self.system_register_bank,
                         self.interrupt_descriptors.is_some(),
-                    ),
+                    )
+                    .with_task_return(self.task_return_sources.is_some()),
                 )
                 .map_err(HostError::Resident)?;
             self.resident = Some(registry);
@@ -261,7 +263,8 @@ impl EngineInstance {
                     crate::cpu::x86::decode::DecodeAuthority::new(
                         self.system_register_bank,
                         self.interrupt_descriptors.is_some(),
-                    ),
+                    )
+                    .with_task_return(self.task_return_sources.is_some()),
                 )
                 .map_err(HostError::Resident)
         } else {
@@ -278,7 +281,8 @@ impl EngineInstance {
                     crate::cpu::x86::decode::DecodeAuthority::new(
                         self.system_register_bank,
                         self.interrupt_descriptors.is_some(),
-                    ),
+                    )
+                    .with_task_return(self.task_return_sources.is_some()),
                 )
                 .map_err(HostError::Resident)?;
             self.resident = Some(registry);

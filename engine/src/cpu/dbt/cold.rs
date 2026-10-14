@@ -210,7 +210,8 @@ fn prepare(
         });
     }
 
-    Ok(PreparedRegion::new(memory, blocks, cs))
+    Ok(PreparedRegion::new(memory, blocks, cs)
+        .with_task_return_authority(authority.task_return_configured))
 }
 
 // automatic emission can shorten a candidate without dropping a requested entry.

@@ -165,3 +165,5 @@ mod interrupt;
 pub(super) use interrupt::{InterruptReturnLocals, interrupt_return};
 
 mod gate;
+
+pub(super) mod task;

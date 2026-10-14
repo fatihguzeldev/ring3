@@ -137,6 +137,7 @@ pub(super) fn flush(
     arithmetic: bool,
     cpu: bool,
     xstate: bool,
+    task_return: bool,
 ) {
     for index in 0..8 {
         store_local(
@@ -233,13 +234,24 @@ pub(super) fn flush(
             store_local(sink, EXIT_PTR, offset, local);
         }
     }
+    if task_return {
+        sink.local_get(REASON)
+            .i32_const(21)
+            .i32_eq()
+            .if_(BlockType::Empty)
+            .local_get(EXIT_PTR)
+            .i32_const(10 | (i32::from(X86_INTEGER_PROFILE) << 16))
+            .i32_store(memarg(4))
+            .end();
+    }
     if xstate {
         return;
     }
-    sink.local_get(REASON)
-        .i32_const(16)
-        .i32_ge_u()
-        .if_(BlockType::Empty)
+    sink.local_get(REASON).i32_const(16).i32_ge_u();
+    if task_return {
+        sink.local_get(REASON).i32_const(20).i32_le_u().i32_and();
+    }
+    sink.if_(BlockType::Empty)
         .local_get(EXIT_PTR)
         .i32_const(7 | (i32::from(X86_INTEGER_PROFILE) << 16))
         .i32_store(memarg(4));

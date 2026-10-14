@@ -39,6 +39,7 @@ pub enum ExitReason {
     SimdFloatingPoint { mxcsr: u32 },
     SegmentNotPresent { error_code: u32 },
     StackSegment { error_code: u32 },
+    InvalidTss { error_code: u32 },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

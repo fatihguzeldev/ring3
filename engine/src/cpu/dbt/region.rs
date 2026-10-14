@@ -68,6 +68,7 @@ pub struct PreparedRegion {
     pub(super) blocks: Vec<CompiledBlock>,
     memory_identity: u64,
     pub(super) decode_key: Option<CodeDecodeKey>,
+    pub(super) task_return_configured: bool,
     validated_version: AtomicU64,
 }
 
@@ -121,8 +122,14 @@ impl PreparedRegion {
             blocks,
             memory_identity: memory.identity(),
             decode_key: cs.map(CodeFetchContext::decode_key),
+            task_return_configured: false,
             validated_version: AtomicU64::new(0),
         }
+    }
+
+    pub(super) fn with_task_return_authority(mut self, configured: bool) -> Self {
+        self.task_return_configured = configured;
+        self
     }
 
     pub fn is_current(&self, memory: &AddressSpace) -> bool {
@@ -300,7 +307,8 @@ fn prepare(
         });
     }
 
-    Ok(PreparedRegion::new(memory, blocks, cs))
+    Ok(PreparedRegion::new(memory, blocks, cs)
+        .with_task_return_authority(authority.task_return_configured))
 }
 
 pub(super) fn strict_instruction(

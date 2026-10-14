@@ -5,6 +5,7 @@ use crate::cpu::x86::UserSystemRegisterBank32;
 pub(crate) struct DecodeAuthority {
     pub(crate) system_registers: Option<UserSystemRegisterBank32>,
     pub(crate) interrupts_configured: bool,
+    pub(crate) task_return_configured: bool,
 }
 
 impl DecodeAuthority {
@@ -15,6 +16,12 @@ impl DecodeAuthority {
         Self {
             system_registers,
             interrupts_configured,
+            task_return_configured: false,
         }
+    }
+
+    pub(crate) const fn with_task_return(mut self, configured: bool) -> Self {
+        self.task_return_configured = configured;
+        self
     }
 }

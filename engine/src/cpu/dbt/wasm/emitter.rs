@@ -8,11 +8,26 @@ use super::{EmbeddedBinding, abi, code_fetch, integer, locals::*, memory, segmen
 use crate::cpu::dbt::region::CompiledBlock;
 use crate::cpu::x86::ir::Operation;
 
+#[cfg(test)]
 pub(in crate::cpu::dbt) fn emit(
     blocks: &[CompiledBlock],
     binding: Option<EmbeddedBinding>,
     decode_key: Option<crate::cpu::x86::decode::CodeDecodeKey>,
 ) -> Vec<u8> {
+    emit_with_task_return(blocks, binding, decode_key, false)
+}
+
+pub(in crate::cpu::dbt) fn emit_with_task_return(
+    blocks: &[CompiledBlock],
+    binding: Option<EmbeddedBinding>,
+    decode_key: Option<crate::cpu::x86::decode::CodeDecodeKey>,
+    task_return_configured: bool,
+) -> Vec<u8> {
+    let needs_task_return = task_return_configured
+        && blocks
+            .iter()
+            .flat_map(|b| &b.instructions)
+            .any(|i| matches!(i.operation(), Operation::InterruptReturn { .. }));
     let mut module = Module::new();
     let memory::ImportNeeds {
         stack_execute: needs_stack_execute,
@@ -298,9 +313,24 @@ pub(in crate::cpu::dbt) fn emit(
             [ValType::I32],
         );
     }
+    let task_type_offset = 10 + u32::from(needs_far_call) + u32::from(needs_software_interrupt);
+    if needs_task_return {
+        let parameters = if matches!(binding, Some(EmbeddedBinding::Resident { .. })) {
+            4
+        } else {
+            0
+        };
+        types.ty().function(
+            std::iter::repeat_n(ValType::I32, parameters),
+            [ValType::I32],
+        );
+    }
     let upper_xstate =
         crate::cpu::x86::capabilities::AVX_ENABLED && (needs_cpu_xsave || needs_cpu_xrstor);
-    let xstate_type_offset = 10 + u32::from(needs_far_call) + u32::from(needs_software_interrupt);
+    let xstate_type_offset = 10
+        + u32::from(needs_far_call)
+        + u32::from(needs_software_interrupt)
+        + u32::from(needs_task_return);
     if upper_xstate {
         let parameters = if matches!(binding, Some(EmbeddedBinding::Resident { .. })) {
             8
@@ -316,7 +346,8 @@ pub(in crate::cpu::dbt) fn emit(
         + if has_cpu { 10 } else { 0 }
         + u32::from(needs_far_call)
         + u32::from(upper_xstate)
-        + u32::from(needs_software_interrupt);
+        + u32::from(needs_software_interrupt)
+        + u32::from(needs_task_return);
     if has_segment_check {
         types.ty().function([ValType::I32; 6], [ValType::I32]);
     }
@@ -818,6 +849,13 @@ pub(in crate::cpu::dbt) fn emit(
             &mut helper_imports.software_interrupt,
         ),
         (
+            needs_task_return,
+            "task_return",
+            "task_return_resident",
+            task_type_offset,
+            &mut helper_imports.task_return,
+        ),
+        (
             needs_far_return,
             "far_return",
             "far_return_resident",
@@ -907,6 +945,11 @@ pub(in crate::cpu::dbt) fn emit(
         helper_imports.interrupt_return_locals =
             Some(super::far::InterruptReturnLocals::new(first));
         declarations.push((3, ValType::I32));
+    }
+    if needs_task_return {
+        let first = 4 + declarations.iter().map(|(count, _)| count).sum::<u32>();
+        helper_imports.task_return_flags = Some(first);
+        declarations.push((1, ValType::I32));
     }
     if needs_software_interrupt {
         let first = 4 + declarations.iter().map(|(count, _)| count).sum::<u32>();
@@ -1005,6 +1048,7 @@ pub(in crate::cpu::dbt) fn emit(
             || needs_compare_exchange8
             || needs_compare_exchange16,
         has_xstate,
+        needs_task_return,
     );
     code.i32_const(0).end();
     let mut bodies = CodeSection::new();
@@ -1074,7 +1118,11 @@ fn emit_block(code: &mut InstructionSink<'_>, block: &CompiledBlock, imports: me
                 code_fetch::check_instruction(code, instruction, limit, remaining + 2);
             }
             if matches!(instruction.operation(), Operation::InterruptReturn { .. }) {
-                abi::interrupt_return_precheck(code, remaining + 2);
+                if let Some(original) = imports.task_return_flags {
+                    code.local_get(FLAGS).local_set(original);
+                } else {
+                    abi::interrupt_return_precheck(code, remaining + 2);
+                }
             }
             x87::precheck_instruction(code, instruction, imports, remaining + 2);
             if matches!(instruction.operation(), Operation::SoftwareInterrupt { .. }) {
@@ -1085,6 +1133,11 @@ fn emit_block(code: &mut InstructionSink<'_>, block: &CompiledBlock, imports: me
                 );
             }
             abi::begin_instruction(code);
+            if matches!(instruction.operation(), Operation::InterruptReturn { .. })
+                && imports.task_return.is_some()
+            {
+                super::far::task::return_if_nested(code, imports, remaining + 2);
+            }
             integer::instruction(code, instruction, imports, remaining + 2);
             if matches!(
                 instruction.operation(),
