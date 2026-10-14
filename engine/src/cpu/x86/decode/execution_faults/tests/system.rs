@@ -148,7 +148,7 @@ fn complete_instruction_fetch_still_precedes_system_fault_classification() {
     }
 }
 #[test]
-fn duplicate_repeat_lock_and_unselected_neighbor_policies_stay_distinct() {
+fn prefix_refusals_and_separately_qualified_tbm_fault_stay_distinct() {
     for bytes in [
         &[0xf3, 0xf3, 0x0f, 0x09][..],
         &[0xf2, 0x0f, 0x09],
@@ -156,10 +156,19 @@ fn duplicate_repeat_lock_and_unselected_neighbor_policies_stay_distinct() {
     ] {
         let memory = executable(bytes, 0x1000);
         let strict = decode_one(&memory, GuestAddress(0x1000)).unwrap_err();
-        assert_eq!(
-            decode_for_execution(&memory, GuestAddress(0x1000)).unwrap_err(),
-            strict
-        );
+        if bytes == [0x8f, 0xea, 0x78, 0x10, 0xc1, 0, 0, 0, 0] {
+            assert_eq!(
+                decode_for_execution(&memory, GuestAddress(0x1000))
+                    .unwrap()
+                    .operation(),
+                &Operation::Control(ControlOperation::InvalidOpcode)
+            );
+        } else {
+            assert_eq!(
+                decode_for_execution(&memory, GuestAddress(0x1000)).unwrap_err(),
+                strict
+            );
+        }
     }
     for bytes in [&[0xf0, 0xf3, 0x0f, 0x09][..], &[0x66, 0x0f, 0x01, 0xc5]] {
         let memory = executable(bytes, 0x1000);

@@ -30,13 +30,14 @@ fn qualified_amd_prerequisites_match_the_immutable_extended_leaf() {
         );
         assert_eq!(leaf.registers[register] & (1 << bit), 0);
     }
-    for feature in [F::TBM, F::FMA, F::PREFETCHW, F::MMX] {
+    assert_eq!(required(F::TBM), Some((0x8000_0001, 0, 2, 21)));
+    for feature in [F::FMA, F::PREFETCHW, F::MMX] {
         assert_eq!(required(feature), None);
     }
 }
 
 #[test]
-fn pinned_decoder_metadata_has_only_the_five_qualified_single_requirements() {
+fn pinned_decoder_metadata_preserves_the_original_five_tag_census() {
     let tags = [F::SSE4A, F::D3NOW, F::D3NOWEXT, F::XOP, F::FMA4];
     let mut counts = [0; 5];
     for code in Code::values() {
@@ -114,10 +115,23 @@ fn prefix_and_neighbor_codes_do_not_become_generic_amd_faults() {
             strict.operation()
         );
     }
-    for bytes in [
-        &[0x8f, 0xea, 0x78, 0x10, 0xc1, 0, 0, 0, 0][..],
-        &[0x66, 0x66, 0x0f, 0x78, 0xc0, 4, 8],
-    ] {
+    let bytes = [0x8f, 0xea, 0x78, 0x10, 0xc1, 0, 0, 0, 0];
+    let raw = Decoder::new(32, &bytes, DecoderOptions::NONE).decode();
+    assert_eq!(raw.cpuid_features(), &[F::TBM]);
+    assert!(!raw.cpuid_features().contains(&F::XOP));
+    let memory = executable(&bytes, 0x1000);
+    assert!(matches!(
+        decode_one(&memory, GuestAddress(0x1000)),
+        Err(DecodeError::Unsupported(_))
+    ));
+    assert_eq!(
+        decode_for_execution(&memory, GuestAddress(0x1000))
+            .unwrap()
+            .operation(),
+        &Operation::Control(ControlOperation::InvalidOpcode)
+    );
+    {
+        let bytes = &[0x66, 0x66, 0x0f, 0x78, 0xc0, 4, 8][..];
         let memory = executable(bytes, 0x1000);
         let strict = decode_one(&memory, GuestAddress(0x1000)).unwrap_err();
         assert!(matches!(strict, DecodeError::Unsupported(_)));

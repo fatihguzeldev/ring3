@@ -150,7 +150,11 @@ fn ordinary_mmx_fma3_and_prefetch_remain_successful_without_the_amd_subsets() {
     let mut engine = stopped(&bytes, 0x3000, [u32::MAX; 8]);
     let before = engine.arena().to_vec();
     let before_ram = ram(&engine);
-    assert!(engine.compile_stopped_entry(KEY, 1).is_err());
+    assert!(matches!(
+        decode_one(engine.memory().unwrap(), GuestAddress(0x3000)),
+        Err(DecodeError::Unsupported(_))
+    ));
+    assert_eq!(engine.compile_stopped_entry(KEY, 1), Ok(2));
     assert_eq!(engine.arena(), before);
     assert_eq!(ram(&engine), before_ram);
 }

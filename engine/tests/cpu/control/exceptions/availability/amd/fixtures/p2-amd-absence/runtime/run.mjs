@@ -98,12 +98,12 @@ for (const resident of [false, true]) for (const entries of [false, true]) {
       input, expected(input, 20, 0), {budget: 2}); h.host(c, 'close');
   }
   for (const hex of ['66660f78c00408', '8fea7810c100000000', 'f08fe97890c1']) {
-    const invalid = hex.startsWith('f0'), code = bytes(hex), target = 0x1200, c = open(resident, entries, hex);
+    const invalid = hex.startsWith('f0'), tbm = hex.startsWith('8f'), code = bytes(hex), target = 0x1200, c = open(resident, entries, hex);
     h.upload(c, target, code); bootstrap(c, target);
     strict(c, 'prefix boundary remains a strict refusal', target, code.length, 10);
-    const material = stopped(c, invalid ? 'existing INVALID LOCK UD' : 'duplicate66 or excluded TBM neutral refusal', invalid ? 0 : 10);
-    if (invalid) {
-      const input = seed(target); invoke(c, 'invalid LOCK remains UD rather than feature or operand execution', material,
+    const material = stopped(c, invalid ? 'existing INVALID LOCK UD' : tbm ? 'separately selected absent TBM UD' : 'duplicate66 neutral refusal', invalid || tbm ? 0 : 10);
+    if (invalid || tbm) {
+      const input = seed(target); invoke(c, invalid ? 'invalid LOCK remains UD rather than feature or operand execution' : 'same TBM bytes now select their separate qualified absence prerequisite', material,
         input, expected(input, 20, 0), {budget: 2});
     }
     h.host(c, 'close');
@@ -116,12 +116,12 @@ for (const resident of [false, true]) for (const entries of [false, true]) {
       expected(input, 16, 1, target + 3), {budget: 2}); h.host(c, 'close');
   }
 }
-assert.equal(contexts, 56); assert.equal(planned, 100); assert.deepEqual(pins(), sourcePins);
+assert.equal(contexts, 56); assert.equal(planned, 104); assert.deepEqual(pins(), sourcePins);
 writeFileSync(join(output, 'amd-absence-counts.json'), JSON.stringify({contexts, planned_module_invocations: planned,
   admitted_module_invocations: invoked, selected_codes: rows.map(row => row.code), source_pins: sourcePins}, null, 2) + '\n');
-h.finish(['five qualified AMD absent prerequisite tags only; no CPU profile or success state change',
+h.finish(['five original AMD absent prerequisite tags plus separately qualified TBM control; no CPU profile or success state change',
   'real guard-only execution of all five tags, plus FEMMS/PFADD state-vs-memory, XOP-tagged VEX and FMA4 width/W distinctions',
   'literal full4796 arena/allRAM, UD0retirement before nullDS/FS, shortSS, unmapped operands, MMX/FMA/numeric state or TF',
   'D16 explicit current segment transport; trailing3DNow opcode andFMA4is4 executable repair before classification',
-  'invalidLOCK and duplicate66 remain separate; XOP-encodedTBM stays outside the selected tags and supported PREFETCH remains NOP',
+  'invalidLOCK and duplicate66 remain separate; XOP-encodedTBM stays outside AMD5 tags but selects separate TBM absence UD; supported PREFETCH remains NOP',
   'source/native MMX EMMS andFMA3 positives plus generic disabled-state lifecycle/CPUID/currentness/budget proof are retained and reused']);

@@ -89,11 +89,15 @@ fn existing_wbinvd_and_invd_privilege_controls_prepare() {
     }
 }
 #[test]
-fn duplicate_mandatory_prefix_and_unselected_tbm_remain_neutral_refusals() {
+fn duplicate_prefix_refusal_and_separately_qualified_tbm_preparation_stay_distinct() {
     for bytes in [
         &[0xf3, 0xf3, 0x0f, 0x09][..],
         &[0x8f, 0xea, 0x78, 0x10, 0xc1, 0, 0, 0, 0],
     ] {
+        if bytes == [0x8f, 0xea, 0x78, 0x10, 0xc1, 0, 0, 0, 0] {
+            prepares(bytes);
+            continue;
+        }
         for resident in [false, true] {
             let mut engine = stopped_support::stopped(bytes, 0x3000);
             let before = engine.arena().to_vec();
