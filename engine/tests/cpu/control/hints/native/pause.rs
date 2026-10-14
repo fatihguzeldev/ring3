@@ -182,7 +182,7 @@ fn pause_exact_grammar_keeps_prefix_and_instruction_neighbors_closed() {
         &[0xf3, 0x67, 0x90],
         &[0xf3, 0xf2, 0x90],
         &[0xf2, 0x90],
-        &[0xf3, 0xc3],
+        &[0xf3, 0xcb],
     ] {
         let (bytes, expected) = prefix_admission::refusal_after_prefix_admission(
             bytes.to_vec(),

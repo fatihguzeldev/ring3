@@ -108,3 +108,6 @@ mod cpu_scalar_availability;
 
 #[path = "interrupt/dispatch/native.rs"]
 mod cpu_interrupt_dispatch;
+
+#[path = "near/repeat/native.rs"]
+mod cpu_repeat_return;

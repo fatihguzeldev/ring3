@@ -379,7 +379,7 @@ fn word_near_control_keeps_prefix_refusals_and_typed_far_boundaries() {
                 if matches!(
                     prefix,
                     0xf2 | 0x67 | 0x26 | 0x2e | 0x36 | 0x3e | 0x64 | 0x65
-                )
+                ) || prefix == 0xf3 && matches!(form[1], 0xc2 | 0xc3)
                 {
                     word_prefix::admitted(&bytes);
                     continue;

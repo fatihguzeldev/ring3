@@ -173,10 +173,16 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
         return Err(unsupported());
     }
     let mandatory_repeat = matches!(instruction.code(), Code::Tzcnt_r32_rm32 | Code::Pause);
+    // gcc emits rep ret as a predictor workaround; it keeps ordinary near-return semantics.
+    let repeat_near_return = matches!(
+        instruction.code(),
+        Code::Retnw | Code::Retnd | Code::Retnw_imm16 | Code::Retnd_imm16
+    );
     // hle is absent, so eligible hints retain the ordinary locked or store operation.
     if !hle_hint
         && !super::mpx::disabled_branch_prefix(instruction)
-        && (instruction.has_repne_prefix() || instruction.has_rep_prefix() && !mandatory_repeat)
+        && (instruction.has_repne_prefix()
+            || instruction.has_rep_prefix() && !mandatory_repeat && !repeat_near_return)
     {
         return Err(unsupported());
     }
