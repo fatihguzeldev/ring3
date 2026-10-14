@@ -85,7 +85,7 @@ pub(super) fn finish(code: &mut InstructionSink<'_>, imports: Imports) {
         .i32_const(10)
         .i32_ge_u()
         .local_get(REASON)
-        .i32_const(21)
+        .i32_const(22)
         .i32_le_u()
         .i32_and()
         .i32_or()

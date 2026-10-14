@@ -5,6 +5,7 @@ pub(crate) mod avx;
 mod bit_manipulation;
 mod cache_timestamp;
 mod control;
+mod coprocessor;
 mod decoder;
 mod execution_faults;
 mod far;

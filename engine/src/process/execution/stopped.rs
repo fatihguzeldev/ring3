@@ -28,6 +28,7 @@ impl EngineInstance {
         let cs = self.code_fetch_context()?;
         let system_registers = self.task_system_register_bank();
         let task_revision = self.task_execution_revision();
+        let coprocessor_cr0 = self.task_coprocessor_cr0();
         let exit = decode_exit(&arena[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE])
             .map_err(|_| HostError::Call(CallError::InvalidStop))?;
         let artifact = self.artifact.as_ref().unwrap();
@@ -59,7 +60,8 @@ impl EngineInstance {
                 self.interrupt_descriptors.is_some(),
             )
             .with_task_return(self.task_return_sources.is_some())
-            .with_task_revision(task_revision),
+            .with_task_revision(task_revision)
+            .with_coprocessor_control(coprocessor_cr0),
         )
         .map_err(HostError::Compile)?;
         self.artifact = Some(artifact);
@@ -87,6 +89,7 @@ impl EngineInstance {
         let cs = self.code_fetch_context()?;
         let system_registers = self.task_system_register_bank();
         let task_revision = self.task_execution_revision();
+        let coprocessor_cr0 = self.task_coprocessor_cr0();
         let pc = GuestAddress(state.eip);
         let memory = self.memory.as_ref().ok_or(HostError::Closed)?;
         if let Some(registry) = &self.resident {
@@ -112,7 +115,8 @@ impl EngineInstance {
                         self.interrupt_descriptors.is_some(),
                     )
                     .with_task_return(self.task_return_sources.is_some())
-                    .with_task_revision(task_revision),
+                    .with_task_revision(task_revision)
+                    .with_coprocessor_control(coprocessor_cr0),
                 )
                 .map_err(HostError::Resident)
         } else {
@@ -130,7 +134,8 @@ impl EngineInstance {
                         self.interrupt_descriptors.is_some(),
                     )
                     .with_task_return(self.task_return_sources.is_some())
-                    .with_task_revision(task_revision),
+                    .with_task_revision(task_revision)
+                    .with_coprocessor_control(coprocessor_cr0),
                 )
                 .map_err(HostError::Resident)?;
             self.resident = Some(registry);

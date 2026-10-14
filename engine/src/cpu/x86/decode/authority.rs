@@ -7,6 +7,7 @@ pub(crate) struct DecodeAuthority {
     pub(crate) interrupts_configured: bool,
     pub(crate) task_return_configured: bool,
     pub(crate) task_execution_revision: Option<u64>,
+    pub(crate) coprocessor_cr0: Option<u32>,
 }
 
 impl DecodeAuthority {
@@ -19,7 +20,13 @@ impl DecodeAuthority {
             interrupts_configured,
             task_return_configured: false,
             task_execution_revision: None,
+            coprocessor_cr0: None,
         }
+    }
+
+    pub(crate) const fn with_coprocessor_control(mut self, cr0: Option<u32>) -> Self {
+        self.coprocessor_cr0 = cr0;
+        self
     }
 
     pub(crate) const fn with_task_revision(mut self, revision: Option<u64>) -> Self {

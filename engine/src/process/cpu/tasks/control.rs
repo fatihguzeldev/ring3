@@ -74,6 +74,10 @@ impl EngineInstance {
         self.task_context_snapshot()
     }
 
+    pub(in crate::process) fn task_coprocessor_cr0(&self) -> Option<u32> {
+        self.task_controls.map(|controls| controls.state.cr0())
+    }
+
     pub(in crate::process) fn task_execution_revision(&self) -> Option<u64> {
         self.task_controls.map(|_| self.task_execution_revision)
     }

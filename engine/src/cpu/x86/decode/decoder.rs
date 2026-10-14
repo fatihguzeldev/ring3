@@ -219,6 +219,14 @@ fn decode(
                         Err(error) => return Err(error),
                     }
                 };
+                let (operation, segments) = match super::coprocessor::fault(
+                    &instruction,
+                    &operation,
+                    authority.coprocessor_cr0,
+                ) {
+                    Some(fault) => (Operation::Control(fault), 0),
+                    None => (operation, segments),
+                };
                 return finish(
                     memory,
                     pc,

@@ -13,6 +13,7 @@ pub const EXIT_VERSION_7: u16 = 7;
 pub const EXIT_VERSION_8: u16 = 8;
 pub const EXIT_VERSION_9: u16 = 9;
 pub const EXIT_VERSION_10: u16 = 10;
+pub const EXIT_VERSION_11: u16 = 11;
 pub const REASON_OFFSET: usize = 16;
 pub const RETIRED_OFFSET: usize = 20;
 pub const DETAIL_OFFSET: usize = 24;
@@ -58,6 +59,10 @@ pub fn encode_exit_v9(exit: &ExecutionExit, output: &mut [u8]) -> Result<(), Abi
 
 pub fn encode_exit_v10(exit: &ExecutionExit, output: &mut [u8]) -> Result<(), AbiError> {
     encode(exit, output, EXIT_VERSION_10)
+}
+
+pub fn encode_exit_v11(exit: &ExecutionExit, output: &mut [u8]) -> Result<(), AbiError> {
+    encode(exit, output, EXIT_VERSION_11)
 }
 
 fn encode(exit: &ExecutionExit, output: &mut [u8], version: u16) -> Result<(), AbiError> {
@@ -121,6 +126,12 @@ fn encode(exit: &ExecutionExit, output: &mut [u8], version: u16) -> Result<(), A
                 return Err(AbiError::Exit);
             }
             10
+        }
+        ExitReason::DeviceNotAvailable => {
+            if version < EXIT_VERSION_11 {
+                return Err(AbiError::Exit);
+            }
+            22
         }
         ExitReason::GeneralProtection { error_code } => {
             if version < EXIT_VERSION_6 {
@@ -202,6 +213,7 @@ pub fn decode_exit(input: &[u8]) -> Result<ExecutionExit, AbiError> {
             EXIT_VERSION_8,
             EXIT_VERSION_9,
             EXIT_VERSION_10,
+            EXIT_VERSION_11,
         ],
     )?;
     let detail = read_u32(input, DETAIL_OFFSET);
@@ -264,6 +276,7 @@ pub fn decode_exit(input: &[u8]) -> Result<ExecutionExit, AbiError> {
             18 if version >= EXIT_VERSION_7 => ExitReason::Overflow,
             19 if version >= EXIT_VERSION_7 => ExitReason::BoundRange,
             20 if version >= EXIT_VERSION_7 => ExitReason::InvalidOpcode,
+            22 if version >= EXIT_VERSION_11 => ExitReason::DeviceNotAvailable,
             21 if version >= EXIT_VERSION_10 && detail <= 0xfffd && detail & 2 == 0 => {
                 ExitReason::InvalidTss { error_code: detail }
             }

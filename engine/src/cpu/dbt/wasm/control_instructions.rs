@@ -25,6 +25,10 @@ pub(super) fn instruction(
             exit(code, 20, exit_depth);
             return;
         }
+        ControlOperation::DeviceNotAvailable => {
+            exit(code, 22, exit_depth);
+            return;
+        }
         ControlOperation::GeneralProtectionZero => {
             exit(code, 11, exit_depth);
             return;

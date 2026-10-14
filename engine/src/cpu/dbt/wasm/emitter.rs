@@ -25,6 +25,16 @@ pub(in crate::cpu::dbt) fn emit_with_authority(
     exception_detection_configured: bool,
 ) -> Vec<u8> {
     let detects_exceptions = exception_detection_configured && binding.is_some();
+    let device_not_available =
+        blocks
+            .iter()
+            .flat_map(|block| &block.instructions)
+            .any(|instruction| {
+                matches!(
+                    instruction.operation(),
+                    Operation::Control(crate::cpu::x86::ControlOperation::DeviceNotAvailable)
+                )
+            });
     let needs_task_return = task_return_configured
         && blocks
             .iter()
@@ -1102,6 +1112,7 @@ pub(in crate::cpu::dbt) fn emit_with_authority(
             || needs_compare_exchange16,
         has_xstate,
         needs_task_return,
+        device_not_available,
     );
     super::detection::finish(&mut code, helper_imports);
     code.i32_const(0).end();
@@ -1177,6 +1188,13 @@ fn emit_block(code: &mut InstructionSink<'_>, block: &CompiledBlock, imports: me
                 } else {
                     abi::interrupt_return_precheck(code, remaining + 2);
                 }
+            }
+            if matches!(
+                instruction.operation(),
+                Operation::Control(crate::cpu::x86::ControlOperation::DeviceNotAvailable)
+            ) {
+                super::control_instructions::instruction(code, instruction, imports, remaining + 2);
+                continue;
             }
             x87::precheck_instruction(code, instruction, imports, remaining + 2);
             if matches!(instruction.operation(), Operation::SoftwareInterrupt { .. }) {

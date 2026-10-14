@@ -106,6 +106,7 @@ impl DetectedEvent32 {
                 (ExceptionCause32::DivideError, ExitReason::DivideError)
                 | (ExceptionCause32::BoundRange, ExitReason::BoundRange)
                 | (ExceptionCause32::InvalidOpcode, ExitReason::InvalidOpcode)
+                | (ExceptionCause32::DeviceNotAvailable, ExitReason::DeviceNotAvailable)
                 | (ExceptionCause32::BreakpointInt3, ExitReason::Breakpoint)
                 | (ExceptionCause32::OverflowInto, ExitReason::Overflow)
                 | (ExceptionCause32::Debug(_), ExitReason::DebugTrap) => true,

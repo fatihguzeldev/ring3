@@ -72,6 +72,7 @@ pub(in crate::process) fn generated_site(
             19 if detail == 0 => ExceptionCause32::BoundRange,
             20 if detail == 0 => ExceptionCause32::InvalidOpcode,
             21 if detail <= 0xfffd && detail & 2 == 0 => ExceptionCause32::InvalidTss(selector()?),
+            22 if detail == 0 => ExceptionCause32::DeviceNotAvailable,
             _ => return Err(invalid),
         };
         DetectedEvent32::Exception(EventOrigin32::Exception(cause))

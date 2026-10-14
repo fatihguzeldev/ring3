@@ -19,6 +19,7 @@ pub enum InfrastructureFailure {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ExitReason {
+    DeviceNotAvailable,
     Budget,
     Cancelled,
     NeedCode,

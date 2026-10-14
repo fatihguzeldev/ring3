@@ -128,7 +128,8 @@ impl EngineInstance {
                     self.interrupt_descriptors.is_some(),
                 )
                 .with_task_return(self.task_return_sources.is_some())
-                .with_task_revision(self.task_execution_revision()),
+                .with_task_revision(self.task_execution_revision())
+                .with_coprocessor_control(self.task_coprocessor_cr0()),
             ),
             DescriptorFormat::Entries => compile_embedded_entry_region(
                 memory,
@@ -143,7 +144,8 @@ impl EngineInstance {
                     self.interrupt_descriptors.is_some(),
                 )
                 .with_task_return(self.task_return_sources.is_some())
-                .with_task_revision(self.task_execution_revision()),
+                .with_task_revision(self.task_execution_revision())
+                .with_coprocessor_control(self.task_coprocessor_cr0()),
             ),
         }
         .map_err(HostError::Compile)

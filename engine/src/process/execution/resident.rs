@@ -166,6 +166,7 @@ impl EngineInstance {
         let cs = self.code_fetch_context()?;
         let system_registers = self.task_system_register_bank();
         let task_revision = self.task_execution_revision();
+        let coprocessor_cr0 = self.task_coprocessor_cr0();
         let memory = self.memory.as_ref().ok_or(HostError::Closed)?;
         let entries = &entries[..count as usize];
         let gates = &gates[..gate_count as usize];
@@ -183,7 +184,8 @@ impl EngineInstance {
                         self.interrupt_descriptors.is_some(),
                     )
                     .with_task_return(self.task_return_sources.is_some())
-                    .with_task_revision(task_revision),
+                    .with_task_revision(task_revision)
+                    .with_coprocessor_control(coprocessor_cr0),
                 )
                 .map_err(HostError::Resident)
         } else {
@@ -202,7 +204,8 @@ impl EngineInstance {
                         self.interrupt_descriptors.is_some(),
                     )
                     .with_task_return(self.task_return_sources.is_some())
-                    .with_task_revision(task_revision),
+                    .with_task_revision(task_revision)
+                    .with_coprocessor_control(coprocessor_cr0),
                 )
                 .map_err(HostError::Resident)?;
             self.resident = Some(registry);
@@ -249,6 +252,7 @@ impl EngineInstance {
         let cs = self.code_fetch_context()?;
         let system_registers = self.task_system_register_bank();
         let task_revision = self.task_execution_revision();
+        let coprocessor_cr0 = self.task_coprocessor_cr0();
         let memory = self.memory.as_ref().ok_or(HostError::Closed)?;
         let specs = &specs[..count as usize];
         let gates = &gates[..gate_count as usize];
@@ -271,7 +275,8 @@ impl EngineInstance {
                         self.interrupt_descriptors.is_some(),
                     )
                     .with_task_return(self.task_return_sources.is_some())
-                    .with_task_revision(task_revision),
+                    .with_task_revision(task_revision)
+                    .with_coprocessor_control(coprocessor_cr0),
                 )
                 .map_err(HostError::Resident)
         } else {
@@ -290,7 +295,8 @@ impl EngineInstance {
                         self.interrupt_descriptors.is_some(),
                     )
                     .with_task_return(self.task_return_sources.is_some())
-                    .with_task_revision(task_revision),
+                    .with_task_revision(task_revision)
+                    .with_coprocessor_control(coprocessor_cr0),
                 )
                 .map_err(HostError::Resident)?;
             self.resident = Some(registry);

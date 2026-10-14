@@ -130,6 +130,7 @@ pub(super) fn work_preflight(sink: &mut InstructionSink<'_>) {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn flush(
     sink: &mut InstructionSink<'_>,
     memory: bool,
@@ -138,6 +139,7 @@ pub(super) fn flush(
     cpu: bool,
     xstate: bool,
     task_return: bool,
+    device_not_available: bool,
 ) {
     for index in 0..8 {
         store_local(
@@ -244,11 +246,21 @@ pub(super) fn flush(
             .i32_store(memarg(4))
             .end();
     }
+    if device_not_available {
+        sink.local_get(REASON)
+            .i32_const(22)
+            .i32_eq()
+            .if_(BlockType::Empty)
+            .local_get(EXIT_PTR)
+            .i32_const(11 | (i32::from(X86_INTEGER_PROFILE) << 16))
+            .i32_store(memarg(4))
+            .end();
+    }
     if xstate {
         return;
     }
     sink.local_get(REASON).i32_const(16).i32_ge_u();
-    if task_return {
+    if task_return || device_not_available {
         sink.local_get(REASON).i32_const(20).i32_le_u().i32_and();
     }
     sink.if_(BlockType::Empty)
