@@ -52,6 +52,8 @@ pub(in crate::process) struct ConsumedDetection32 {
     extended: ExtendedCpuState,
     work: [u8; WORK_SIZE],
     retired: u32,
+    task_context: Option<crate::cpu::x86::tasks::TaskIncomingContext32>,
+    task_revision: Option<u64>,
 }
 
 impl ConsumedDetection32 {
@@ -221,7 +223,10 @@ impl EngineInstance {
         if header::read_u32(&work, 20) != 0 {
             return Err(HostError::Call(CallError::InvalidStop));
         }
-        let context = self.segment_context()?;
+        let context = match self.task_context_snapshot()? {
+            Some(context) => context.segment_image(),
+            None => self.segment_context()?,
+        };
         let input = FrameInput32 {
             eip: state.eip,
             esp: state.registers[Register32::Esp.index()],
@@ -252,6 +257,8 @@ impl EngineInstance {
             extended,
             work,
             retired: exit.retired,
+            task_context: self.task_incoming,
+            task_revision: self.task_execution_revision(),
         };
         self.exception_detection.as_mut().unwrap()[0] = DetectionSlot32::Ready(record);
         Ok(())
@@ -267,7 +274,10 @@ impl EngineInstance {
             _ => return Err(HostError::Call(CallError::InvalidToken)),
         };
         self.check_detection_owner(record.owner, record.callback_token)?;
-        if !record.matches(self.arena()) {
+        if !record.matches(self.arena())
+            || record.task_context != self.task_incoming
+            || record.task_revision != self.task_execution_revision()
+        {
             return Err(HostError::Call(CallError::StateChanged));
         }
         let DetectionSlot32::Ready(record) = std::mem::replace(

@@ -6,6 +6,7 @@ pub(crate) struct DecodeAuthority {
     pub(crate) system_registers: Option<UserSystemRegisterBank32>,
     pub(crate) interrupts_configured: bool,
     pub(crate) task_return_configured: bool,
+    pub(crate) task_execution_revision: Option<u64>,
 }
 
 impl DecodeAuthority {
@@ -17,7 +18,13 @@ impl DecodeAuthority {
             system_registers,
             interrupts_configured,
             task_return_configured: false,
+            task_execution_revision: None,
         }
+    }
+
+    pub(crate) const fn with_task_revision(mut self, revision: Option<u64>) -> Self {
+        self.task_execution_revision = revision;
+        self
     }
 
     pub(crate) const fn with_task_return(mut self, configured: bool) -> Self {

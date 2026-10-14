@@ -26,20 +26,17 @@ impl EngineInstance {
             .map_err(|_| HostError::Call(CallError::InvalidStop))?;
         ExtendedCpuState::capture(arena)?;
         let cs = self.code_fetch_context()?;
+        let system_registers = self.task_system_register_bank();
+        let task_revision = self.task_execution_revision();
         let exit = decode_exit(&arena[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE])
             .map_err(|_| HostError::Call(CallError::InvalidStop))?;
+        let artifact = self.artifact.as_ref().unwrap();
         if exit.reason != ExitReason::NeedCode
-            || self
-                .artifact
-                .as_ref()
-                .unwrap()
-                .contains_material_in(state.eip, cs.decode_key())
-            || self
-                .artifact
-                .as_ref()
-                .unwrap()
-                .context_fault_in(state.eip, cs.decode_key())
-                .is_some_and(|fault| !cs.permits(fault.pc, fault.attempted_length))
+            || (artifact.matches_task_revision(self.task_execution_revision())
+                && (artifact.contains_material_in(state.eip, cs.decode_key())
+                    || artifact
+                        .context_fault_in(state.eip, cs.decode_key())
+                        .is_some_and(|fault| !cs.permits(fault.pc, fault.attempted_length))))
         {
             return Err(HostError::Call(CallError::InvalidStop));
         }
@@ -58,10 +55,11 @@ impl EngineInstance {
             next_generation,
             cs,
             crate::cpu::x86::decode::DecodeAuthority::new(
-                self.system_register_bank,
+                system_registers,
                 self.interrupt_descriptors.is_some(),
             )
-            .with_task_return(self.task_return_sources.is_some()),
+            .with_task_return(self.task_return_sources.is_some())
+            .with_task_revision(task_revision),
         )
         .map_err(HostError::Compile)?;
         self.artifact = Some(artifact);
@@ -87,10 +85,12 @@ impl EngineInstance {
             return Err(HostError::Call(CallError::InvalidStop));
         }
         let cs = self.code_fetch_context()?;
+        let system_registers = self.task_system_register_bank();
+        let task_revision = self.task_execution_revision();
         let pc = GuestAddress(state.eip);
         let memory = self.memory.as_ref().ok_or(HostError::Closed)?;
         if let Some(registry) = &self.resident {
-            match registry.lookup_bound(memory, pc, cs) {
+            match registry.lookup_task_bound(memory, pc, cs, self.task_execution_revision()) {
                 Ok(_) => return Err(HostError::Call(CallError::InvalidStop)),
                 Err(RegistryError::NotFound { .. }) => {}
                 Err(error) => return Err(HostError::Resident(error)),
@@ -108,10 +108,11 @@ impl EngineInstance {
                     key,
                     cs,
                     crate::cpu::x86::decode::DecodeAuthority::new(
-                        self.system_register_bank,
+                        system_registers,
                         self.interrupt_descriptors.is_some(),
                     )
-                    .with_task_return(self.task_return_sources.is_some()),
+                    .with_task_return(self.task_return_sources.is_some())
+                    .with_task_revision(task_revision),
                 )
                 .map_err(HostError::Resident)
         } else {
@@ -125,10 +126,11 @@ impl EngineInstance {
                     key,
                     cs,
                     crate::cpu::x86::decode::DecodeAuthority::new(
-                        self.system_register_bank,
+                        system_registers,
                         self.interrupt_descriptors.is_some(),
                     )
-                    .with_task_return(self.task_return_sources.is_some()),
+                    .with_task_return(self.task_return_sources.is_some())
+                    .with_task_revision(task_revision),
                 )
                 .map_err(HostError::Resident)?;
             self.resident = Some(registry);

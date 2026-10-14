@@ -74,7 +74,7 @@ impl EngineInstance {
             );
         }
         // waiting x87 exceptions precede operand authority, including null selectors.
-        let context = self.segment_context()?;
+        let context = self.operand_segment_context()?;
         let segments = context.state;
         let segment = if segment == 0 {
             SegmentRegister::Ds

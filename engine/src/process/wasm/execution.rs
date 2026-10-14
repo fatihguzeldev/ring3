@@ -265,7 +265,7 @@ pub(crate) fn guard_dispatch_entry(
             return 1;
         }
         if decode_state(&instance.arena()[STATE_OFFSET..STATE_OFFSET + STATE_SIZE]).is_err()
-            || instance.segment_context().is_err()
+            || instance.code_fetch_context().is_err()
         {
             return 2;
         }

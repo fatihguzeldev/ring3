@@ -33,18 +33,26 @@ impl EngineInstance {
         let segments = if selected == 0 {
             None
         } else {
-            Some(self.segment_context()?)
+            Some(self.operand_segment_context()?)
         };
         let memory = self.memory.as_ref().ok_or(HostError::Closed)?;
-        let outcome = instruction
-            .evaluate(
+        let outcome = match self.task_incoming {
+            Some(incoming) if incoming.validated_segments().is_none() => instruction.evaluate_task(
+                inputs,
+                request.segment,
+                request.base_offset,
+                &incoming,
+                memory,
+            ),
+            _ => instruction.evaluate(
                 inputs,
                 request.segment,
                 request.base_offset,
                 segments.as_ref(),
                 memory,
-            )
-            .map_err(|_| HostError::Infrastructure)?;
+            ),
+        }
+        .map_err(|_| HostError::Infrastructure)?;
         let result = GatherResult {
             completed_lanes: outcome.completed_lanes,
             fault: outcome.fault.map(|fault| GatherFaultResult {

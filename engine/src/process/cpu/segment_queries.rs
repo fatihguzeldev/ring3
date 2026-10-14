@@ -64,7 +64,7 @@ impl EngineInstance {
             5 => SegmentRegister::Gs,
             _ => return Err(HostError::InvalidRequest),
         };
-        let context = self.segment_context()?;
+        let context = self.operand_segment_context()?;
         if context.state.bases[segment.index()].wrapping_add(input[2]) != address {
             return Err(HostError::InvalidRequest);
         }

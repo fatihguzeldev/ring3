@@ -285,7 +285,9 @@ impl ResidentRegistry {
             .ok_or(RegistryError::ByteCapacity)?;
         for pc in region.executable_addresses() {
             if self.entries.iter().any(|unit| {
-                unit.region.matches_decode_key(region.decode_key())
+                unit.region
+                    .matches_task_revision(region.task_execution_revision())
+                    && unit.region.matches_decode_key(region.decode_key())
                     && unit.region.contains_executable(pc.0)
                     && unit.region.wasm_bytes(memory).is_ok()
                     && (unit.region.contains_material(pc.0)
@@ -346,9 +348,10 @@ impl ResidentRegistry {
         self.check_memory(memory)?;
         let mut stale = false;
         for unit in &self.entries {
-            if unit
-                .region
-                .matches_decode_key(crate::cpu::x86::decode::CodeDecodeKey::FLAT)
+            if unit.region.matches_task_revision(None)
+                && unit
+                    .region
+                    .matches_decode_key(crate::cpu::x86::decode::CodeDecodeKey::FLAT)
                 && unit.region.contains_executable(pc.0)
             {
                 match unit.region.wasm_bytes(memory) {
@@ -364,17 +367,30 @@ impl ResidentRegistry {
         })
     }
 
+    #[cfg(test)]
     pub(crate) fn lookup_bound(
         &self,
         memory: &AddressSpace,
         pc: GuestAddress,
         cs: CodeFetchContext,
     ) -> Result<UnitId, RegistryError> {
+        self.lookup_task_bound(memory, pc, cs, None)
+    }
+
+    pub(crate) fn lookup_task_bound(
+        &self,
+        memory: &AddressSpace,
+        pc: GuestAddress,
+        cs: CodeFetchContext,
+        revision: Option<u64>,
+    ) -> Result<UnitId, RegistryError> {
         self.check_memory(memory)?;
         let mut stale = false;
         for material in [true, false] {
             for unit in &self.entries {
-                if !unit.region.matches_decode_key(cs.decode_key()) {
+                if !unit.region.matches_task_revision(revision)
+                    || !unit.region.matches_decode_key(cs.decode_key())
+                {
                     continue;
                 }
                 let matches = if material {

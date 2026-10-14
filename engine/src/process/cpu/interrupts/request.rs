@@ -54,7 +54,7 @@ impl EngineInstance {
             .map_err(|_| HostError::InvalidRequest)?;
         let exit = decode_exit(&arena[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE])
             .map_err(|_| HostError::InvalidRequest)?;
-        let context = self.segment_context()?;
+        let context = self.operand_segment_context()?;
         if state.eip != event.input.eip
             || state.registers[Register32::Esp.index()] != event.input.esp
             || state.eflags != event.input.flags

@@ -103,7 +103,10 @@ impl EngineInstance {
             .interrupt_descriptors
             .as_ref()
             .ok_or(HostError::InvalidRequest)?;
-        let cpl = USER_MODE_ENVIRONMENT.current_privilege();
+        let task_context = self.task_context_snapshot()?;
+        let cpl = task_context.map_or(USER_MODE_ENVIRONMENT.current_privilege(), |context| {
+            context.current_privilege()
+        });
         let gate = match table.resolve_event_gate(origin, cpl) {
             Ok(gate) => gate,
             Err(CodeTransferError::UnsupportedProfile) => {
@@ -123,6 +126,21 @@ impl EngineInstance {
             }
             Err(error) => return Self::prepare_event_transfer_error(origin, 0, error),
         };
+        if cpl != USER_MODE_ENVIRONMENT.current_privilege() {
+            return Self::prepare_event_result(
+                origin,
+                gate.frame_info()
+                    | if origin.error_code().is_some() {
+                        0x200
+                    } else {
+                        0
+                    },
+                EventDeliveryResult32::NeedsTaskOrPrivilegeAuthority {
+                    kind: EventAuthorityKind32::Privilege,
+                    selector: task_context.unwrap().selectors()[SegmentRegister::Cs.index()],
+                },
+            );
+        }
         let info = gate.frame_info()
             | if origin.error_code().is_some() {
                 0x200
@@ -151,7 +169,10 @@ impl EngineInstance {
             }
             Err(error) => return Self::prepare_event_transfer_error(origin, info, error),
         };
-        let mut context = self.segment_context()?;
+        let mut context = match task_context {
+            Some(context) => context.segment_image(),
+            None => self.segment_context()?,
+        };
         if input.cs != context.state.selectors[SegmentRegister::Cs.index()] {
             return Err(HostError::InvalidRequest);
         }
@@ -201,8 +222,11 @@ impl EngineInstance {
         transfer.apply(&mut context);
         let mut segments = [0; SEGMENTS_SIZE];
         let mut bases = [0; SEGMENT_BASES_RECORD_SIZE];
-        encode_current_segment_context(&context, &mut segments, &mut bases)
-            .map_err(|_| HostError::Infrastructure)?;
+        let normal_segments = context.is_valid();
+        if normal_segments {
+            encode_current_segment_context(&context, &mut segments, &mut bases)
+                .map_err(|_| HostError::Infrastructure)?;
+        }
         let mut entered = EnteredEvent32 {
             target: transfer.offset,
             esp: frame.esp(),
@@ -258,7 +282,12 @@ impl EngineInstance {
         entered.code_invalidated = already_invalidated
             || (version != memory.code_validation_version() && region.wasm_bytes(memory).is_err());
         // no fallible encoding or host reentry separates frame, code-cache and packet publication.
-        self.publish_segment_context(&segments, &bases);
+        if normal_segments {
+            self.publish_segment_context(&segments, &bases);
+        }
+        if let Some(context) = task_context {
+            self.task_incoming = Some(context.after_event(transfer, entered));
+        }
         self.segment_descriptors
             .commit_accessed(transfer.selector());
         prepared.result = EventDeliveryResult32::Entered(entered);

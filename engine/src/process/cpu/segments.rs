@@ -40,6 +40,13 @@ impl EngineInstance {
         &self,
     ) -> Result<crate::cpu::x86::decode::CodeDecodeKey, HostError> {
         self.memory()?;
+        if let Some(context) = self.task_incoming
+            && context.validated_segments().is_none()
+        {
+            return crate::cpu::x86::decode::CodeFetchContext::from_task_context(&context)
+                .map(crate::cpu::x86::decode::CodeFetchContext::decode_key)
+                .ok_or(HostError::InvalidRequest);
+        }
         crate::abi::x86::decode_current_code_key(
             &self.arena()[SEGMENTS_OFFSET..SEGMENTS_OFFSET + SEGMENTS_SIZE],
             Some(
@@ -53,6 +60,12 @@ impl EngineInstance {
     pub(in crate::process) fn code_fetch_context(
         &self,
     ) -> Result<crate::cpu::x86::decode::CodeFetchContext, HostError> {
+        if let Some(context) = self.task_incoming
+            && context.validated_segments().is_none()
+        {
+            return crate::cpu::x86::decode::CodeFetchContext::from_task_context(&context)
+                .ok_or(HostError::InvalidRequest);
+        }
         crate::cpu::x86::decode::CodeFetchContext::from_segments(&self.segment_context()?)
             .ok_or(HostError::Infrastructure)
     }
@@ -63,6 +76,12 @@ impl EngineInstance {
 
     pub fn segment_context(&self) -> Result<SegmentContext, HostError> {
         self.memory()?;
+        if self
+            .task_incoming
+            .is_some_and(|context| context.validated_segments().is_none())
+        {
+            return Err(HostError::InvalidRequest);
+        }
         decode_current_segment_context(
             &self.arena[SEGMENTS_OFFSET..SEGMENTS_OFFSET + SEGMENTS_SIZE],
             self.arena.get(
@@ -71,6 +90,18 @@ impl EngineInstance {
             ),
         )
         .map_err(|_| HostError::Infrastructure)
+    }
+
+    // raw task caches are authority only for individually qualified operand spans.
+    // the public getter and R3SG decoder continue to require a complete context.
+    pub(in crate::process) fn operand_segment_context(&self) -> Result<SegmentContext, HostError> {
+        if let Some(context) = self.task_incoming
+            && context.validated_segments().is_none()
+        {
+            self.memory()?;
+            return Ok(context.segment_image());
+        }
+        self.segment_context()
     }
 
     pub(super) fn publish_segment_context(
@@ -226,7 +257,7 @@ impl EngineInstance {
         value: u32,
     ) -> Result<(), HostError> {
         let target = register(target)?;
-        let mut context = self.segment_context()?;
+        let mut context = self.operand_segment_context()?;
         let cpl = (context.state.selectors[SegmentRegister::Cs.index()] & 3) as u8;
         match self
             .segment_descriptors
@@ -234,15 +265,40 @@ impl EngineInstance {
         {
             Ok(load) => {
                 load.apply_context(&mut context, target);
+                if self.task_incoming.is_some() && load.selector & !3 == 0 {
+                    // task wire images have canonical unusable null caches, with no usable base.
+                    context.state.bases[target.index()] = 0;
+                }
                 let mut bytes = [0; SEGMENTS_SIZE];
                 let mut bases = [0; SEGMENT_BASES_RECORD_SIZE];
-                encode_current_segment_context(&context, &mut bytes, &mut bases)
-                    .map_err(|_| HostError::Infrastructure)?;
-                let result_value = if length == 0 { load.base } else { value };
+                let incoming = self.task_incoming.map(|incoming| {
+                    incoming.with_loaded_segment(
+                        target,
+                        load.selector,
+                        context.state.bases[target.index()],
+                        load.cache,
+                    )
+                });
+                let complete =
+                    incoming.is_none_or(|incoming| incoming.validated_segments().is_some());
+                if complete {
+                    encode_current_segment_context(&context, &mut bytes, &mut bases)
+                        .map_err(|_| HostError::Infrastructure)?;
+                }
+                let result_value = if length == 0 {
+                    context.state.bases[target.index()]
+                } else {
+                    value
+                };
                 let mut packet = [0; HELPER_SIZE];
                 encode_cpu_result(length, result_value, Ok(()), &mut packet)
                     .map_err(|_| HostError::Infrastructure)?;
-                self.publish_segment_context(&bytes, &bases);
+                if complete {
+                    self.publish_segment_context(&bytes, &bases);
+                }
+                if let Some(incoming) = incoming {
+                    self.task_incoming = Some(incoming);
+                }
                 self.segment_descriptors.commit_accessed(load.selector);
                 self.arena.as_mut().get_mut()[HELPER_OFFSET..HELPER_OFFSET + HELPER_SIZE]
                     .copy_from_slice(&packet);
@@ -434,3 +490,7 @@ mod tests {
 #[cfg(test)]
 #[path = "segments/raw/tests.rs"]
 mod raw_tests;
+
+#[cfg(test)]
+#[path = "segments/task.rs"]
+mod task_tests;

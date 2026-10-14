@@ -18,6 +18,7 @@ struct PreparedTransfer {
     bases: [u8; SEGMENT_BASES_RECORD_SIZE],
     packet: [u8; HELPER_SIZE],
     selector: u16,
+    incoming: Option<crate::cpu::x86::tasks::TaskIncomingContext32>,
 }
 
 fn width(word: u32) -> Result<FarWidth, HostError> {
@@ -49,7 +50,7 @@ impl EngineInstance {
     fn far_jump_bound(&mut self, offset: u32, selector: u32, word: u32) -> Result<(), HostError> {
         let width = width(word)?;
         let selector = u16::try_from(selector).map_err(|_| HostError::InvalidRequest)?;
-        let context = self.segment_context()?;
+        let context = self.operand_segment_context()?;
         let gate = self
             .segment_descriptors
             .admitted_gate_width(selector, USER_MODE_ENVIRONMENT.current_privilege())
@@ -80,8 +81,13 @@ impl EngineInstance {
         transfer.apply(&mut context);
         let mut segments = [0; SEGMENTS_SIZE];
         let mut bases = [0; SEGMENT_BASES_RECORD_SIZE];
-        encode_current_segment_context(&context, &mut segments, &mut bases)
-            .map_err(|_| HostError::Infrastructure)?;
+        let incoming = self
+            .task_incoming
+            .map(|incoming| incoming.after_code_transfer(transfer));
+        if incoming.is_none_or(|incoming| incoming.validated_segments().is_some()) {
+            encode_current_segment_context(&context, &mut segments, &mut bases)
+                .map_err(|_| HostError::Infrastructure)?;
+        }
         let mut packet = [0; HELPER_SIZE];
         if transfer.gate_width().is_some() {
             encode_gate_result(gate_slot, transfer.offset, Ok(()), &mut packet)
@@ -94,12 +100,21 @@ impl EngineInstance {
             bases,
             packet,
             selector: transfer.selector(),
+            incoming,
         })
     }
 
     // no host call or fallible operation may separate a successful stack batch from this commit.
     fn commit_code_transfer(&mut self, prepared: PreparedTransfer) {
-        self.publish_segment_context(&prepared.segments, &prepared.bases);
+        if prepared
+            .incoming
+            .is_none_or(|incoming| incoming.validated_segments().is_some())
+        {
+            self.publish_segment_context(&prepared.segments, &prepared.bases);
+        }
+        if let Some(incoming) = prepared.incoming {
+            self.task_incoming = Some(incoming);
+        }
         self.segment_descriptors.commit_accessed(prepared.selector);
         self.arena.as_mut().get_mut()[HELPER_OFFSET..HELPER_OFFSET + HELPER_SIZE]
             .copy_from_slice(&prepared.packet);

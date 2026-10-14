@@ -45,7 +45,7 @@ impl EngineInstance {
     ) -> Result<StoreCompletion, HostError> {
         let width = width(word)?;
         let selector = u16::try_from(selector).map_err(|_| HostError::InvalidRequest)?;
-        let context = self.segment_context()?;
+        let context = self.operand_segment_context()?;
         let gate_width = self
             .segment_descriptors
             .admitted_gate_width(selector, USER_MODE_ENVIRONMENT.current_privilege());

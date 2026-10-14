@@ -124,10 +124,11 @@ impl EngineInstance {
                 &gates[..gate_count as usize],
                 cs,
                 crate::cpu::x86::decode::DecodeAuthority::new(
-                    self.system_register_bank,
+                    self.task_system_register_bank(),
                     self.interrupt_descriptors.is_some(),
                 )
-                .with_task_return(self.task_return_sources.is_some()),
+                .with_task_return(self.task_return_sources.is_some())
+                .with_task_revision(self.task_execution_revision()),
             ),
             DescriptorFormat::Entries => compile_embedded_entry_region(
                 memory,
@@ -138,10 +139,11 @@ impl EngineInstance {
                 &gates[..gate_count as usize],
                 cs,
                 crate::cpu::x86::decode::DecodeAuthority::new(
-                    self.system_register_bank,
+                    self.task_system_register_bank(),
                     self.interrupt_descriptors.is_some(),
                 )
-                .with_task_return(self.task_return_sources.is_some()),
+                .with_task_return(self.task_return_sources.is_some())
+                .with_task_revision(self.task_execution_revision()),
             ),
         }
         .map_err(HostError::Compile)

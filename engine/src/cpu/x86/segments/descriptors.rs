@@ -215,6 +215,17 @@ impl SegmentDescriptorTable {
         }
     }
 
+    /// the transition stages this exact live entry before its infallible commit barrier.
+    pub(crate) fn commit_task_busy_clear(&mut self, selector: u16) {
+        if let Some(entry) = self
+            .entries
+            .iter_mut()
+            .find(|entry| entry.selector == selector & !3)
+        {
+            entry.record = entry.record.with_task_busy_cleared();
+        }
+    }
+
     /// query raw type and visibility without loading a segment or testing its present bit.
     pub fn verify(&self, selector: u16, cpl: u8, write: bool) -> bool {
         if selector & !3 == 0 || cpl > 3 {

@@ -204,7 +204,7 @@ impl EngineInstance {
         let original = std::array::from_fn(|index| {
             u32::from_le_bytes(input[index * 4..index * 4 + 4].try_into().unwrap())
         });
-        let context = self.segment_context()?;
+        let context = self.operand_segment_context()?;
         let pointer =
             StackPointerSize::new(context.caches[SegmentRegister::Ss.index()].default32());
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;

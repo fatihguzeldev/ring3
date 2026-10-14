@@ -110,6 +110,12 @@ impl SegmentDescriptorRecord {
         Some(self)
     }
 
+    /// task return clears only the old live descriptor's busy bit, without rebuilding it.
+    pub(crate) fn with_task_busy_cleared(mut self) -> Self {
+        self.0[5] &= !2;
+        self
+    }
+
     pub fn with_accessed(mut self) -> Option<Self> {
         if !self.code_data() {
             return None;
@@ -140,7 +146,7 @@ impl SegmentDescriptorRecord {
     }
 
     /// successful loads cache the raw code/data attributes and set accessed in that snapshot.
-    pub(super) fn loaded_cache(self) -> Option<SegmentCache> {
+    pub(in crate::cpu::x86) fn loaded_cache(self) -> Option<SegmentCache> {
         if !self.code_data() || !self.present() || self.long_mode() {
             return None;
         }

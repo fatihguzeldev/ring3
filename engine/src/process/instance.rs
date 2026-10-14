@@ -59,6 +59,9 @@ pub struct EngineInstance {
         Option<crate::cpu::x86::InterruptDescriptorTable32>,
     pub(in crate::process) task_return_sources:
         Option<crate::process::cpu::tasks::TaskReturnSources>,
+    pub(in crate::process) task_controls: Option<crate::process::cpu::tasks::TaskControlAuthority>,
+    pub(in crate::process) task_execution_revision: u64,
+    pub(in crate::process) task_incoming: Option<crate::cpu::x86::tasks::TaskIncomingContext32>,
     pub(in crate::process) image: Option<crate::loader::ImageMetadata32>,
     pub(in crate::process) image_input: Option<crate::process::loading::input::ImageInput>,
     pub(in crate::process) image_started: bool,
@@ -100,6 +103,9 @@ impl EngineInstance {
             system_register_bank: None,
             interrupt_descriptors: None,
             task_return_sources: None,
+            task_controls: None,
+            task_execution_revision: 0,
+            task_incoming: None,
             image: None,
             image_input: None,
             image_started: false,
@@ -136,6 +142,9 @@ impl EngineInstance {
         self.system_register_bank = None;
         self.interrupt_descriptors = None;
         self.task_return_sources = None;
+        self.task_controls = None;
+        self.task_execution_revision = 0;
+        self.task_incoming = None;
         #[cfg(any(target_arch = "wasm32", test))]
         {
             self.exception_detection = None;

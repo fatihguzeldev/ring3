@@ -30,6 +30,22 @@ impl CodeFetchContext {
         })
     }
 
+    /// only a qualified incoming CS can authorize handler fetch; other raw selectors stay separate.
+    pub(crate) fn from_task_context(
+        context: &crate::cpu::x86::tasks::TaskIncomingContext32,
+    ) -> Option<Self> {
+        let segments = context.segment_image();
+        let cs = segments.caches[SegmentRegister::Cs.index()];
+        (context.loaded_mask() & (1 << SegmentRegister::Cs.index()) != 0
+            && context.current_privilege() == 3
+            && cs.usable()
+            && cs.code())
+        .then_some(Self {
+            cs,
+            base: segments.state.bases[SegmentRegister::Cs.index()],
+        })
+    }
+
     pub(crate) fn decode_key(self) -> CodeDecodeKey {
         CodeDecodeKey {
             cs_base: self.base,

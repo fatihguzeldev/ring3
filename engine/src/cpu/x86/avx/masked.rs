@@ -83,7 +83,44 @@ impl VectorState {
         offset: u32,
         memory: &mut AddressSpace,
     ) -> Result<(), MaskedError> {
-        if self.simd.mxcsr & !0xffff != 0 || !segments.is_valid() {
+        self.execute_masked_context(
+            instruction,
+            segments,
+            segment,
+            offset,
+            memory,
+            segments.is_valid(),
+        )
+    }
+
+    pub(crate) fn execute_masked_task(
+        &mut self,
+        instruction: MaskedInstruction,
+        context: &crate::cpu::x86::tasks::TaskIncomingContext32,
+        segment: SegmentRegister,
+        offset: u32,
+        memory: &mut AddressSpace,
+    ) -> Result<(), MaskedError> {
+        self.execute_masked_context(
+            instruction,
+            &context.segment_image(),
+            segment,
+            offset,
+            memory,
+            crate::cpu::x86::tasks::TaskIncomingContext32::from_image(context.image()).is_some(),
+        )
+    }
+
+    fn execute_masked_context(
+        &mut self,
+        instruction: MaskedInstruction,
+        segments: &SegmentContext,
+        segment: SegmentRegister,
+        offset: u32,
+        memory: &mut AddressSpace,
+        context_valid: bool,
+    ) -> Result<(), MaskedError> {
+        if self.simd.mxcsr & !0xffff != 0 || !context_valid {
             return Err(MaskedError::InvalidState);
         }
         let mask = self.read(instruction.mask());

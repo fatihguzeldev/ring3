@@ -1,4 +1,10 @@
 mod config;
+mod context;
+mod control;
+mod save;
+mod transition;
+pub(in crate::process) use control::TaskControlAuthority;
+pub use transition::{CommittedTaskReturn32, TaskReturnTransition32};
 mod request;
 mod returning;
 

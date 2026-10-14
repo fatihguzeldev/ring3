@@ -22,7 +22,7 @@ impl EngineInstance {
     fn far_return_bound(&mut self, offset: u32, selector: u32, word: u32) -> Result<(), HostError> {
         let width = width(word)?;
         let selector = u16::try_from(selector).map_err(|_| HostError::InvalidRequest)?;
-        let context = self.segment_context()?;
+        let context = self.operand_segment_context()?;
         match self.segment_descriptors.resolve_far_return(
             selector,
             offset,

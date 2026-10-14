@@ -212,6 +212,7 @@ fn prepare(
 
     Ok(PreparedRegion::new(memory, blocks, cs)
         .with_task_return_authority(authority.task_return_configured)
+        .with_task_revision(authority.task_execution_revision)
         .with_exception_detection(authority.interrupts_configured))
 }
 

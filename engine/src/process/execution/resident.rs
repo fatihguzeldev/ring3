@@ -164,6 +164,8 @@ impl EngineInstance {
             };
         }
         let cs = self.code_fetch_context()?;
+        let system_registers = self.task_system_register_bank();
+        let task_revision = self.task_execution_revision();
         let memory = self.memory.as_ref().ok_or(HostError::Closed)?;
         let entries = &entries[..count as usize];
         let gates = &gates[..gate_count as usize];
@@ -177,10 +179,11 @@ impl EngineInstance {
                     self.key,
                     Some(cs),
                     crate::cpu::x86::decode::DecodeAuthority::new(
-                        self.system_register_bank,
+                        system_registers,
                         self.interrupt_descriptors.is_some(),
                     )
-                    .with_task_return(self.task_return_sources.is_some()),
+                    .with_task_return(self.task_return_sources.is_some())
+                    .with_task_revision(task_revision),
                 )
                 .map_err(HostError::Resident)
         } else {
@@ -195,10 +198,11 @@ impl EngineInstance {
                     self.key,
                     Some(cs),
                     crate::cpu::x86::decode::DecodeAuthority::new(
-                        self.system_register_bank,
+                        system_registers,
                         self.interrupt_descriptors.is_some(),
                     )
-                    .with_task_return(self.task_return_sources.is_some()),
+                    .with_task_return(self.task_return_sources.is_some())
+                    .with_task_revision(task_revision),
                 )
                 .map_err(HostError::Resident)?;
             self.resident = Some(registry);
@@ -243,6 +247,8 @@ impl EngineInstance {
             };
         }
         let cs = self.code_fetch_context()?;
+        let system_registers = self.task_system_register_bank();
+        let task_revision = self.task_execution_revision();
         let memory = self.memory.as_ref().ok_or(HostError::Closed)?;
         let specs = &specs[..count as usize];
         let gates = &gates[..gate_count as usize];
@@ -261,10 +267,11 @@ impl EngineInstance {
                     self.key,
                     Some(cs),
                     crate::cpu::x86::decode::DecodeAuthority::new(
-                        self.system_register_bank,
+                        system_registers,
                         self.interrupt_descriptors.is_some(),
                     )
-                    .with_task_return(self.task_return_sources.is_some()),
+                    .with_task_return(self.task_return_sources.is_some())
+                    .with_task_revision(task_revision),
                 )
                 .map_err(HostError::Resident)
         } else {
@@ -279,10 +286,11 @@ impl EngineInstance {
                     self.key,
                     Some(cs),
                     crate::cpu::x86::decode::DecodeAuthority::new(
-                        self.system_register_bank,
+                        system_registers,
                         self.interrupt_descriptors.is_some(),
                     )
-                    .with_task_return(self.task_return_sources.is_some()),
+                    .with_task_return(self.task_return_sources.is_some())
+                    .with_task_revision(task_revision),
                 )
                 .map_err(HostError::Resident)?;
             self.resident = Some(registry);
@@ -297,7 +305,7 @@ impl EngineInstance {
         self.resident
             .as_ref()
             .ok_or(HostError::Resident(RegistryError::NotFound { pc }))?
-            .lookup_bound(memory, pc, cs)
+            .lookup_task_bound(memory, pc, cs, self.task_execution_revision())
             .map_err(HostError::Resident)
     }
 

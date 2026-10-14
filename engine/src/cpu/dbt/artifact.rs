@@ -39,6 +39,14 @@ impl CompiledRegion {
         self.prepared.decode_key.unwrap_or(CodeDecodeKey::FLAT)
     }
 
+    pub(crate) fn task_execution_revision(&self) -> Option<u64> {
+        self.prepared.task_execution_revision
+    }
+
+    pub(crate) fn matches_task_revision(&self, revision: Option<u64>) -> bool {
+        self.task_execution_revision() == revision
+    }
+
     pub(crate) fn matches_decode_key(&self, key: CodeDecodeKey) -> bool {
         self.decode_key() == key
     }

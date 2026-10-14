@@ -202,7 +202,7 @@ impl EngineInstance {
             let context = if selected == 0 {
                 SegmentContext::default()
             } else {
-                self.segment_context()?
+                self.operand_segment_context()?
             };
             // masked stores change no CPU state; finish all encodes before the RAM transaction.
             let prepared = if masked.access() == Access::Write {
@@ -217,13 +217,23 @@ impl EngineInstance {
             };
             let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
             let version = memory.code_validation_version();
-            let result = vectors.execute_masked(
-                masked,
-                &context,
-                address.segment,
-                if selected == 0 { 0 } else { address.offset },
-                memory,
-            );
+            let result = match self.task_incoming {
+                Some(incoming) if incoming.validated_segments().is_none() => vectors
+                    .execute_masked_task(
+                        masked,
+                        &incoming,
+                        address.segment,
+                        if selected == 0 { 0 } else { address.offset },
+                        memory,
+                    ),
+                _ => vectors.execute_masked(
+                    masked,
+                    &context,
+                    address.segment,
+                    if selected == 0 { 0 } else { address.offset },
+                    memory,
+                ),
+            };
             let changed = result.is_ok() && version != memory.code_validation_version();
             if let Err(error) = result {
                 let error = match error {
@@ -250,7 +260,7 @@ impl EngineInstance {
                 return Err(HostError::Infrastructure);
             }
             let address = address.ok_or(HostError::Infrastructure)?;
-            let context = self.segment_context()?;
+            let context = self.operand_segment_context()?;
             let access = if requirement.access == Access::Read {
                 SegmentAccess::Read
             } else {

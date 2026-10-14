@@ -1,5 +1,15 @@
 use super::{cpu_store, mutate};
 
+pub(crate) fn configure_task_controls() -> u32 {
+    mutate(|instance| instance.configure_task_controls_request())
+}
+pub(crate) fn read_task_controls() -> u32 {
+    mutate(|instance| instance.read_task_controls())
+}
+pub(crate) fn read_task_context() -> u32 {
+    mutate(|instance| instance.read_task_context())
+}
+
 pub(crate) fn configure_task_return_sources() -> u32 {
     mutate(|instance| instance.configure_task_return_sources_request())
 }

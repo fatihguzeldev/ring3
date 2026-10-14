@@ -313,15 +313,21 @@ impl EngineInstance {
         let decode_key = self.code_fetch_context()?.decode_key();
         let matches_gate = match owner {
             PendingOwner::Replacement(_) => self.artifact.as_ref().is_some_and(|artifact| {
-                artifact.matches_decode_key(decode_key) && artifact.matches_gate(state.eip, id)
+                artifact.matches_task_revision(self.task_execution_revision())
+                    && artifact.matches_decode_key(decode_key)
+                    && artifact.matches_gate(state.eip, id)
             }),
             PendingOwner::Resident(unit) => {
                 let artifact = self.guard_resident_unit(self.key, unit)?;
-                artifact.matches_decode_key(decode_key) && artifact.matches_gate(state.eip, id)
+                artifact.matches_task_revision(self.task_execution_revision())
+                    && artifact.matches_decode_key(decode_key)
+                    && artifact.matches_gate(state.eip, id)
             }
             PendingOwner::ResidentCallback { unit_id, .. } => {
                 let artifact = self.guard_resident_unit(self.key, unit_id)?;
-                artifact.matches_decode_key(decode_key) && artifact.matches_gate(state.eip, id)
+                artifact.matches_task_revision(self.task_execution_revision())
+                    && artifact.matches_decode_key(decode_key)
+                    && artifact.matches_gate(state.eip, id)
             }
         };
         if !matches_gate {

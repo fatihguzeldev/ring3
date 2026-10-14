@@ -30,6 +30,8 @@ pub enum AbiError {
     CallFrame,
     CallbackFrame,
     TaskSources,
+    TaskContext,
+    TaskControls,
 }
 
 pub mod interrupt;

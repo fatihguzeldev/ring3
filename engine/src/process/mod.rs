@@ -11,6 +11,6 @@ pub(crate) mod wasm;
 mod windows;
 
 pub use calls::call::CallError;
-pub use cpu::tasks::TaskReturnAdmission;
+pub use cpu::tasks::{CommittedTaskReturn32, TaskReturnAdmission, TaskReturnTransition32};
 pub use execution::installation::ResidentInstallation;
 pub use instance::{EngineInstance, HostError, StoreCompletion};

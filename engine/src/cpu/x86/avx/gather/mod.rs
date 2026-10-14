@@ -114,6 +114,43 @@ impl GatherInstruction {
         segments: Option<&SegmentContext>,
         memory: &AddressSpace,
     ) -> Result<GatherOutcome, GatherError> {
+        self.evaluate_context(
+            inputs,
+            segment,
+            base_offset,
+            segments,
+            memory,
+            segments.is_some_and(SegmentContext::is_valid),
+        )
+    }
+
+    pub(crate) fn evaluate_task(
+        self,
+        inputs: GatherInputs,
+        segment: SegmentRegister,
+        base_offset: u32,
+        context: &crate::cpu::x86::tasks::TaskIncomingContext32,
+        memory: &AddressSpace,
+    ) -> Result<GatherOutcome, GatherError> {
+        self.evaluate_context(
+            inputs,
+            segment,
+            base_offset,
+            Some(&context.segment_image()),
+            memory,
+            crate::cpu::x86::tasks::TaskIncomingContext32::from_image(context.image()).is_some(),
+        )
+    }
+
+    fn evaluate_context(
+        self,
+        inputs: GatherInputs,
+        segment: SegmentRegister,
+        base_offset: u32,
+        segments: Option<&SegmentContext>,
+        memory: &AddressSpace,
+        context_valid: bool,
+    ) -> Result<GatherOutcome, GatherError> {
         let geometry = self.geometry;
         let bytes = geometry.data_bytes();
         let selected = self.selected(&inputs.mask);
@@ -136,7 +173,7 @@ impl GatherInstruction {
             return Ok(outcome);
         }
         let segments = segments
-            .filter(|context| context.is_valid())
+            .filter(|_| context_valid)
             .ok_or(GatherError::InvalidContext)?;
         // ascending order is the software implementation's repeatable completion policy.
         // segment and page checks belong to each lane, never a whole-gather preflight.

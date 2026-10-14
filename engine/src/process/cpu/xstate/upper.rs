@@ -110,7 +110,7 @@ impl EngineInstance {
     ) -> Result<StoreCompletion, HostError> {
         let segment = segment(raw_segment)?;
         let (x87, simd, upper_state) = self.upper_current()?;
-        let context = self.segment_context()?;
+        let context = self.operand_segment_context()?;
         let request = upper::requested(low, high);
         let address = match Self::upper_address(&context, segment, offset, request, true) {
             Ok(address) if address & 63 == 0 => address,
@@ -147,7 +147,7 @@ impl EngineInstance {
     ) -> Result<(), HostError> {
         let segment = segment(raw_segment)?;
         let (current_x87, current_simd, current_upper) = self.upper_current()?;
-        let context = self.segment_context()?;
+        let context = self.operand_segment_context()?;
         let request = upper::requested(low, high);
         let address = match Self::upper_address(&context, segment, offset, request, false) {
             Ok(address) if address & 63 == 0 => address,
