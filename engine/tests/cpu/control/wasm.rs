@@ -92,3 +92,6 @@ mod cpu_extended_absence;
 
 #[path = "exceptions/availability/keys/wasm.rs"]
 mod cpu_key_locker_absence;
+
+#[path = "exceptions/availability/cet/wasm.rs"]
+mod cpu_cet_disabled;

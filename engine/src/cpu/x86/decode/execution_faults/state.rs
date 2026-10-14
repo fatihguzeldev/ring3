@@ -7,7 +7,13 @@ pub(super) fn disabled(instruction: &Instruction, environment: UserModeEnvironme
         // cr4.pke=0 makes these instructions unavailable before their ECX/EDX checks.
         Code::Rdpkru | Code::Wrpkru => !environment.protection_keys_enabled(),
         // cr4.cet=0 is sufficient; no shadow-stack enable MSR or SSP value is needed.
-        Code::Incsspd_r32 => !environment.control_flow_enforcement_enabled(),
+        Code::Incsspd_r32
+        | Code::Rstorssp_m64
+        | Code::Saveprevssp
+        | Code::Setssbsy
+        | Code::Clrssbsy_m64
+        | Code::Wrssd_m32_r32
+        | Code::Wrussd_m32_r32 => !environment.control_flow_enforcement_enabled(),
         _ => false,
     }
 }

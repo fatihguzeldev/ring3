@@ -18,7 +18,19 @@ fn rows() -> Vec<(Code, Vec<u8>)> {
     result.extend(
         (0..8).map(|register| (Code::Incsspd_r32, vec![0xf3, 0x0f, 0xae, 0xe8 | register])),
     );
+    result.extend(shadow_stack_rows());
     result
+}
+
+fn shadow_stack_rows() -> [(Code, Vec<u8>); 6] {
+    [
+        (Code::Rstorssp_m64, vec![0xf3, 0x0f, 0x01, 0x28]),
+        (Code::Saveprevssp, vec![0xf3, 0x0f, 0x01, 0xea]),
+        (Code::Setssbsy, vec![0xf3, 0x0f, 0x01, 0xe8]),
+        (Code::Clrssbsy_m64, vec![0xf3, 0x0f, 0xae, 0x30]),
+        (Code::Wrssd_m32_r32, vec![0x0f, 0x38, 0xf6, 0x00]),
+        (Code::Wrussd_m32_r32, vec![0x66, 0x0f, 0x38, 0xf5, 0x00]),
+    ]
 }
 
 fn executable(bytes: &[u8], pc: u32) -> AddressSpace {
@@ -148,6 +160,50 @@ fn rdssp_compatibility_nop_stays_distinct_from_disabled_incssp() {
         ] {
             assert_eq!(decoded.operation(), &Operation::Nop);
             assert_eq!(decoded.segment_accesses(), 0);
+        }
+    }
+}
+
+#[test]
+fn six_disabled_shadow_stack_forms_keep_mode_and_operand_authority_separate() {
+    use crate::cpu::x86::{
+        SegmentCache, SegmentContext,
+        decode::{BoundDecode, CodeFetchContext, DecodePolicy, decode_bound},
+    };
+    for default32 in [false, true] {
+        for (code, bytes) in shadow_stack_rows() {
+            let encoded = [&[0x64, 0x67][..], &bytes].concat();
+            let raw = Decoder::new(
+                if default32 { 32 } else { 16 },
+                &encoded,
+                DecoderOptions::NONE,
+            )
+            .decode();
+            assert_eq!(raw.code(), code);
+            let memory = executable(&encoded, 0x1000);
+            let mut segments = SegmentContext::default();
+            segments.state.selectors[4] = 0;
+            segments.caches[4] = SegmentCache::from_bits(0).unwrap();
+            if !default32 {
+                segments.caches[1] = SegmentCache::from_bits(0xf1bf_ffff).unwrap();
+            }
+            let cs = CodeFetchContext::from_segments(&segments).unwrap();
+            let BoundDecode::Instruction(decoded) =
+                decode_bound(&memory, GuestAddress(0x1000), cs, DecodePolicy::Execution).unwrap()
+            else {
+                panic!("complete code span is valid");
+            };
+            assert_eq!(
+                decoded.operation(),
+                &Operation::Control(ControlOperation::InvalidOpcode)
+            );
+            assert_eq!(decoded.segment_accesses(), 0);
+            assert_eq!(usize::from(decoded.length()), encoded.len());
+            assert_eq!(
+                decoded.next_pc(),
+                GuestAddress(0x1000 + encoded.len() as u32)
+            );
+            assert!(memory.is_code_current(decoded.code_snapshot()));
         }
     }
 }

@@ -84,3 +84,6 @@ mod cpu_extended_absence;
 
 #[path = "exceptions/availability/keys/native.rs"]
 mod cpu_key_locker_absence;
+
+#[path = "exceptions/availability/cet/native.rs"]
+mod cpu_cet_disabled;
