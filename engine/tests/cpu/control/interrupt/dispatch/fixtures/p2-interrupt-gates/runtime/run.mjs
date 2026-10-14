@@ -9,6 +9,14 @@ const {harness, PC, SEG, BASES, KEY_HIGH, registers, record, words, exit, writeR
   await import(pathToFileURL(join(root, support)));
 const h = await harness(enginePath, output, root);
 const paths = [
+  "engine/src/cpu/dbt/wasm/detection.rs",
+  "engine/src/process/wasm/detection.rs",
+  "engine/src/abi/wasm/exports/detection.rs",
+  "engine/src/process/cpu/interrupts/detection.rs",
+  "engine/src/process/cpu/interrupts/entry.rs",
+  "engine/src/process/cpu/interrupts/entry/state.rs",
+  "engine/src/cpu/x86/interrupts/cause.rs",
+  "engine/src/cpu/x86/interrupts/escalation.rs",
   "engine/src/abi/interrupt.rs",
   "engine/src/abi/interrupt/tests.rs",
   "engine/src/abi/wasm/exports/cpu.rs",
@@ -80,9 +88,12 @@ const paths = [
 const pins = () => Object.fromEntries(paths.map(path => [path, hash(readFileSync(join(root, path)))]));
 const sourcePins = pins(), FLAGS = 0x254fd7, ATTEMPT_FLAGS = 0x244fd7;
 const observed = {contexts: 0, compileCalls: 0, guestCalls: 0};
+const finishName = 'finish_exception_detection', checkpoints = [];
 const helper = c => `interrupt_gate${c.resident ? '_resident' : ''}`;
 const returnedHelper = c => `far_return${c.resident ? '_resident' : ''}`;
-const call = (name, args, status = 0) => ({name, args: args.map(value => value >>> 0), status});
+const call = (name, args, status = 0) => ({name,
+  args: args.map(value => typeof value === 'bigint' ? value.toString(10) : value >>> 0),
+  status: typeof status === 'bigint' ? status.toString(10) : status});
 const bound = (c, material, args) => [...(c.resident ? material.binding : []), ...args];
 const packet = fields => record('R3MH', 40, fields, 11);
 function rawGate(kind, selector = 0x49, target = 0x2300, {dpl = 3, present = true, reserved = 0} = {}) {
@@ -127,11 +138,16 @@ function result(want, reason, retired = 0, {detail = 0, address = 0, access = 0,
   want.writeUInt32LE(address >>> 0, 84); want.writeUInt32LE(access, 88); want.writeUInt32LE(length, 92); return want;
 }
 function compile(c, label, spans, helpers = [], options = {}) {
-  observed.compileCalls++; return h.compile(c, label, spans, helpers, options);
+  observed.compileCalls++;
+  const expected = c.interruptsConfigured ? [...helpers, finishName] : helpers;
+  return h.compile(c, label, spans, expected, options);
 }
 function run(c, label, material, input, want, options = {}) {
   if (!material) {h.skip(c, label, 'required earlier material admission'); return null;}
-  observed.guestCalls++; return h.observe(c, label, {material, input, want, ...options});
+  observed.guestCalls++;
+  const row = h.observe(c, label, {material, input, want, ...options});
+  if (material.stopCheck?.errors.length) {row.errors.push(...material.stopCheck.errors); row.passed = false;}
+  return row;
 }
 function open(resident, entries, label, pages) {
   observed.contexts++; return h.open(resident, entries, label, pages);
@@ -147,12 +163,43 @@ function altered(c, original, selected, mutate, returnedStatus, wrongKey = false
   const ring3 = Object.fromEntries(WebAssembly.Module.imports(module).filter(imp => imp.kind === 'function').map(imp =>
     [imp.name, (...args) => {
       if (wrongKey && imp.name.startsWith('guard')) args[0] ^= 1;
-      const status = c.api[imp.name](...args); c.calls.push({name: imp.name, args: args.map(value => value >>> 0), status});
+      const status = c.api[imp.name](...args); c.calls.push(call(imp.name, args, status));
       if (imp.name === selected) {const bytes = h.arena(c); mutate(bytes); h.put(c, 0, bytes);}
       return imp.name === selected ? returnedStatus ?? status : status;
     }]));
   return {...original, run: new WebAssembly.Instance(module, {env: {memory: c.memory}, ring3}).exports.run};
 }
+function checkedStop(c, original, expected, expectedRAM) {
+  if (!original) return null;
+  // preserve each original v11 fault/precise-stop oracle before automatic routing can replace its packet.
+  const stopCheck = {errors: []};
+  const module = new WebAssembly.Module(new Uint8Array(c.memory.buffer, original.pointer, original.length));
+  const ring3 = Object.fromEntries(WebAssembly.Module.imports(module).filter(i => i.kind === 'function').map(i =>
+    [i.name, (...args) => {
+      if (i.name === finishName) {
+        const actual = h.arena(c), actualRAM = h.ram(c), index = checkpoints.length + 1;
+        const prefix = `pre-automatic-${index}`;
+        if (!actual.equals(expected)) stopCheck.errors.push('original full-arena stop before automatic routing');
+        const memory = [];
+        for (const [page, want] of expectedRAM) {
+          const got = actualRAM.get(page);
+          if (!got.equals(want)) stopCheck.errors.push(`original pre-automatic RAM ${page.toString(16)}`);
+          for (const [name, bytes] of [['actual', got], ['want', want]])
+            writeFileSync(join(output, `${prefix}-ram-${page.toString(16)}-${name}.bin`), bytes, {flag: 'wx'});
+          memory.push({page, actual_sha256: hash(got), want_sha256: hash(want)});
+        }
+        writeFileSync(join(output, `${prefix}-actual.bin`), actual, {flag: 'wx'});
+        writeFileSync(join(output, `${prefix}-want.bin`), expected, {flag: 'wx'});
+        checkpoints.push({context: c.key, label: c.label, prefix, errors: [...stopCheck.errors],
+          actual_sha256: hash(actual), want_sha256: hash(expected), memory});
+      }
+      const status = c.api[i.name](...args); c.calls.push(call(i.name, args, status)); return status;
+    }]));
+  return {...original, stopCheck,
+    run: new WebAssembly.Instance(module, {env: {memory: c.memory}, ring3}).exports.run};
+}
+const terminal = (reason, {detail = 0, address = 0, access = 0, length = 0, debug = 0} = {}, epoch = 1n) =>
+  call(finishName, [epoch, reason, detail, address, access, length, debug, 0, 0, 0, 0, 0]);
 const successes = [
   {label: 'trap16 from D32/B32 to based D16', kind: 7, info: 2, sourceD: true, ssB: true,
     esp: 0x7801, newESP: 0x77fb, ssBase: 0x8000, cache: 0xf1bfffff, targetD: false,
@@ -233,21 +280,38 @@ for (const resident of [false, true]) for (const entries of [false, true]) {
         if (back?.passed && !resident && !entries && row === successes[0]) {
           h.put(c, 0, returned); const resumed = compile(c, 'returned TF source continuation', [[PC + 2, 3]]);
           const stepped = Buffer.from(returned); stepped.writeUInt32LE(PC + 3, 48); result(stepped, 16, 1, {version: 7});
-          run(c, 'restored TF traps after next NOP rather than INT delivery or IRET', resumed, returned, stepped);
+          c.diagnosticRAM = true;
+          const final = Buffer.from(stepped); final.set(record('R3MH', 40, [3, 0, 0x43, 0, 0, 0], 12), 100);
+          run(c, 'restored TF detects the next NOP; absent DB GP and DF handlers latch shutdown',
+            checkedStop(c, resumed, stepped, h.ram(c)), returned, final,
+            {helpers: [terminal(16, {debug: 2}, 6n)]});
         }
       } else h.skip(c, row.label + ' IRET', 'actual handler MOV');
     } else h.skip(c, row.label + ' handler/IRET', 'actual frame retirement and cold target');
     h.host(c, 'close');
   }
   for (const row of faults) {
-    const c = open(resident, entries, row.label, [[PC], [0x7000, 3]]); fill(c, [0x7000]);
+    const c = open(resident, entries, row.label, [[PC], [0x7000, 3]]);
+    if (!row.unsupported && row.reason !== 5) c.diagnosticRAM = true;
+    fill(c, [0x7000]);
     configure(c, row.vector ?? 0x80, row.gate, row);
     h.host(c, 'configure_segment_descriptor_raw', [0x48, ...(row.descriptor ?? rawCode())]);
     h.upload(c, PC, Buffer.from([0xcd, row.vector ?? 0x80])); const input = seed(row); h.put(c, 0, input);
     const material = compile(c, row.label + ' capture', [[PC, 2]], [helper(c)]);
     const want = Buffer.from(input); if (!row.unsupported) {want.writeUInt32LE(ATTEMPT_FLAGS, 52); want.writeUInt32LE(0, 12);}
     want.set(packet(row.fields), 100); result(want, row.reason, 0, row);
-    run(c, row.label, material, input, want, {helpers: material ? [expectedINT(c, material, input, row)] : []});
+    const originalStop = Buffer.from(want), calls = material ? [expectedINT(c, material, input, row)] : [];
+    let checked = material;
+    if (!row.unsupported) {
+      calls.push(terminal(row.reason, row));
+      if (row.reason !== 5) {
+        checked = checkedStop(c, material, originalStop, h.ram(c));
+        // the original GP/NP/SS is contributory; its absent handler and absent DF gate end in GP43 shutdown.
+        want.set(record('R3MH', 40, [3, 0, 0x43, 0, 0, 0], 12), 100);
+      }
+    }
+    run(c, row.label + (row.unsupported ? '' : row.reason === 5 ? ': raw paging boundary' : ': original stop then DF/shutdown'),
+      checked, input, want, {helpers: calls});
     h.host(c, 'close');
   }
 }
@@ -395,18 +459,19 @@ for (const resident of [false, true]) for (const entries of [false, true]) for (
 }
 assert.equal(successes.length, 3); assert.equal(faults.length, 13); assert.equal(operandPrefixRows.length, 2);
 assert.deepEqual(pins(), sourcePins, 'INT owners and literal oracles stayed fixed');
+writeFileSync(join(output, 'interrupt-pre-automatic-checkpoints.json'), JSON.stringify(checkpoints, null, 2) + '\n');
 writeFileSync(join(output, 'interrupt-source-pins.json'), JSON.stringify(sourcePins, null, 2) + '\n');
 writeFileSync(join(output, 'interrupt-counts.json'), JSON.stringify({observed,
   semanticRows: {coreSuccessPaths: 2, targetWidthFocusedPath: 1, orderedFaultsAndNeutral: faults.length, singleOperandPrefixFamilies: operandPrefixRows.length},
   expectedFullAdmission: {contexts: 83, compileCalls: 113, compileRefusals: 16, modules: 97, guestCalls: 126, observations: 239},
-  profiles: 'replacement/resident x extents/entries; extra lifecycle/protocol/SMC paths are risk-selected explicitly', sourcePins}, null, 2) + '\n');
+  profiles: 'replacement/resident x extents/entries; extra lifecycle/protocol/SMC paths are risk-selected explicitly', preAutomaticCheckpoints: checkpoints.length, sourcePins}, null, 2) + '\n');
 h.finish([
   'Explicitly configured immutable complete IDT before bootstrap/material; SIDT readback alone keeps INT neutral Unsupported.',
   'Literal16trap and32interrupt frames, opposite source/target CS.D and SS.B, based handler MOV and matching IRET; one focused targetD32/66IRET16 path proves frame width independent of targetD; AC1 unaligned under explicit AM0.',
   'RF0 saved frame, TF/NT clear live, interrupt IFclear versus trap IFpreserve, CPL3 IOPL0 IRET IF mask, highESP preserved forB16 and zero-padding selected for32bit CS frame.',
-  'Ordered IDT/target/cachedSS/targetlimit/page failures, vector-zero IDTerror2 and CD03 distinct from CC, conforming sameCPL versus task/interprivilege neutral.',
+  'Original ordered IDT/target/cachedSS/targetlimit/page failures are checked at the complete pre-automatic stop, retaining exact v11 source packets. Final contributory faults with absent exception/DF handlers latch shutdown and retain the original diagnostic; raw MemoryFault stays a paging authority boundary. Vector-zero IDTerror2/CD03 and conforming/task/interprivilege distinctions remain.',
   'Every observation compares full4796 arena/allmappedRAM and exact real helper trace; v11-negative controls invoke real inner-null helper before declared packet/transport mutation.',
   'Wrong-key guard precedes poisoned packet; cancel/zero budget precede attempt; physical SMC commits full frame/transfer before one retirement and invalidates held material.',
   'Complete two-page immediate fetch/EXEC repair and new CSbase/D handler capture use current NeedCode lifecycle; single66 preserves configured gate width in both code defaults with literal three-byte return EIP; REP stays neutral; existing generic flags/fault/currentness evidence reused.',
-  'No RAM-backed IDT, TSS/CPL transition, IRQ/NMI/exception recursion, AM1/AC-delivery, x64/FRED/CET, browser/game/performance or wholeCPU claim.',
+  'No RAM-backed IDT, complete TSS/CPL transition, IRQ/NMI, certified PF/CR2, AM1/AC-delivery, x64/FRED/CET, Windows exception provider, browser/game/performance or wholeCPU claim; configured finite secondary/DF/shutdown routing is now explicit.',
 ]);

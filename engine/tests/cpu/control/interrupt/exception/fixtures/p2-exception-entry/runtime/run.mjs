@@ -10,6 +10,12 @@ const {harness, PC, SEG, BASES, registers, record, words, exit, writeRAM, hash} 
   await import(pathToFileURL(join(root, support)));
 const h = await harness(enginePath, output, root);
 const paths = [
+  'engine/src/cpu/dbt/wasm/detection.rs',
+  'engine/src/process/wasm/detection.rs',
+  'engine/src/abi/wasm/exports/detection.rs',
+  'engine/src/process/cpu/interrupts/detection.rs',
+  'engine/src/process/cpu/interrupts/entry.rs',
+  'engine/src/process/cpu/interrupts/entry/state.rs',
   'engine/src/abi/mod.rs',
   'engine/src/abi/exception.rs',
   'engine/src/abi/exception/request.rs',
@@ -49,7 +55,6 @@ const call = (name, args, status = 0) => ({name, args: args.map(v => v >>> 0), s
 const bound = (c, material, args) => [...(c.resident ? material.binding : []), ...args];
 const eventName = c => `deliver_exception${c.resident ? '_resident' : ''}`;
 const returnName = c => `far_return${c.resident ? '_resident' : ''}`;
-const storeName = c => c.resident ? 'cpu_store_resident8' : 'cpu_store8';
 const packet = fields => record('R3MH', 40, fields, 12);
 
 function context(bytes, {cs = 0x1b, base = 0, default32 = true, stack32 = true,
@@ -94,7 +99,7 @@ function request(bytes, row) {
     row.stopPC ?? PC, row.esp ?? 0x8000, row.flags ?? FLAGS, 0x1b]);
   bytes.set(req, 140); return bytes;
 }
-function sourceStop(input, row) {
+function suppliedStop(input, row) {
   const want = Buffer.from(input); want.writeUInt32LE(0, 12);
   want.writeUInt32LE(row.flags ?? FLAGS, 52); want.writeUInt32LE(row.stopPC ?? PC, 48);
   exit(want, row.reason, row.retired ?? 0, row.exitVersion ?? 7);
@@ -183,18 +188,18 @@ for (const resident of [false, true]) for (const entries of [false, true]) for (
   const c = h.open(resident, entries, row.label, [[PC], ...dataPages.map(page => [page])]);
   for (const page of dataPages) h.upload(c, page, Buffer.alloc(4096, 0x6b));
   configure(c, row);
-  h.upload(c, PC, Buffer.from(row.code, 'hex'));
+  // this api accepts explicit trusted stops; real instruction provenance is tested by p2-exception-auto.
+  h.upload(c, PC, Buffer.from('90ebfe', 'hex'));
   if (row.handler) h.upload(c, TARGET_BASE + TARGET, Buffer.from(row.handler, 'hex'));
-  if (row.rep) h.upload(c, 0x5000, Buffer.from([0x7a, 0x8b]));
+  if (row.rep) {
+    h.upload(c, 0x5000, Buffer.from([0x7a, 0x8b]));
+    h.upload(c, 0x5100, Buffer.from([0x7a]));
+  }
   const input = seed(row); h.put(c, 0, input);
-  const sourceHelpers = row.rep ? ['cpu_read8', storeName(c)] : [];
-  const material = compile(c, row.label + ': source capture', [[PC, row.code.length / 2]], sourceHelpers);
-  const stopped = sourceStop(input, row);
-  const sourceTrace = row.rep && material ? [call('cpu_read8', [0x5000]),
-    call(storeName(c), bound(c, material, [0x5100, 0x7a]))] : [];
-  const stop = observe(c, row.label + ': real precise stop', material, input, stopped,
-    {budget: 2, helpers: sourceTrace, wantRAM: desiredRAM(c, row.rep ? [[0x5100, '7a']] : [])});
-  if (stop?.passed) {
+  const material = compile(c, row.label + ': current bound NOP owner', [[PC, 3]], ['finish_exception_detection']);
+  const stopped = suppliedStop(input, row);
+  // no generated run or detected-provenance claim is made for these supplied R3ST/R3EX inputs.
+  if (material) {
     const requested = request(Buffer.from(stopped), row);
     if (row.entryVersion !== undefined) requested.writeUInt16LE(row.entryVersion, 60);
     if (!resident && !entries && row === rows[0]) {
@@ -212,7 +217,7 @@ for (const resident of [false, true]) for (const entries of [false, true]) for (
     if (row.handler && entry?.passed) {
       h.put(c, 0, want);
       const target = compile(c, row.label + ': actual handler capture', [[TARGET, row.handler.length / 2]],
-        ['cpu_read', returnName(c)]);
+        ['cpu_read', returnName(c), 'finish_exception_detection']);
       const handlerInput = Buffer.from(want);
       handlerInput.set(words([TARGET, row.handler.length / 2]), 140);
       // the resident allocator's declared 24-byte publication is the only dynamic input.
@@ -230,11 +235,11 @@ for (const resident of [false, true]) for (const entries of [false, true]) for (
       observe(c, row.label + ': real error removal and IRET return', target, handlerInput, returned,
         {budget: slot === 4 ? 1 : 2, helpers: trace});
     } else if (row.handler) h.skip(c, row.label + ': handler/IRET', 'successful event entry');
-  } else h.skip(c, row.label + ': event entry', 'precise real source stop');
+  } else h.skip(c, row.label + ': event entry', 'current bound owner admission');
   h.host(c, 'close');
 }
 assert.deepEqual(pins(), sourcePins, 'consumer and source owners stayed fixed');
 writeFileSync(join(output, 'event-input-source-pins.json'), JSON.stringify(sourcePins, null, 2) + '\n');
-h.finish({planned: {contexts: 44, compiles: 52, generatedModules: 52, guestInvocations: 52,
-  explicitEventInvocations: 46, totalInvocations: 98, observations: 150}, observed,
-  scope: 'Explicit supplied-event foundation through real engine Wasm exports, real source stops and two handler/IRET families; no automatic R3EX provenance, CR2 or escalation claim.'});
+h.finish({planned: {contexts: 44, compiles: 52, generatedModules: 52, guestInvocations: 8,
+  explicitEventInvocations: 46, totalInvocations: 54, observations: 106}, observed,
+  scope: 'Explicit supplied-event API through real engine Wasm exports and current bound NOP owners; all supplied-state/frame/fault/handler oracles retained. Historical real-stop proof is preserved in the pre-auto freeze; p2-exception-auto separately owns current generated provenance and routing. No PF/CR2 or task-transition claim.'});

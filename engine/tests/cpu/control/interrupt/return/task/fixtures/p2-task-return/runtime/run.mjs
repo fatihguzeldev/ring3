@@ -9,6 +9,12 @@ const {harness, PC, SEG, BASES, registers, record, words, exit, hash} =
   await import(pathToFileURL(join(root, support)));
 const h = await harness(enginePath, output, root);
 const paths = [
+  'engine/src/cpu/dbt/wasm/detection.rs',
+  'engine/src/process/wasm/detection.rs',
+  'engine/src/abi/wasm/exports/detection.rs',
+  'engine/src/process/cpu/interrupts/detection.rs',
+  'engine/src/process/cpu/interrupts/entry.rs',
+  'engine/src/process/cpu/interrupts/entry/state.rs',
   'engine/src/cpu/x86/tasks/outcome.rs', 'engine/src/cpu/x86/tasks/authority.rs',
   'engine/src/cpu/x86/tasks/register.rs', 'engine/src/cpu/x86/tasks/returning.rs',
   'engine/src/cpu/x86/tasks/record.rs', 'engine/src/cpu/x86/tasks/mod.rs',
@@ -225,20 +231,31 @@ for (const resident of [false, true]) for (const entries of [false, true]) for (
 {
   // one module exercises task/INT/far-call type offsets and the XState flush capability together.
   observed.contexts++;
-  const c = h.open(false, false, 'NT1 TS0 with unreachable INT far CALL and XGETBV', [[PC], [0x5000]]);
+  const c = h.open(false, false, 'NT1 TS0 automatically enters a valid handler with mixed helper types', [[PC], [0x2000], [0x5000, 3], [0x7000, 3]]);
   configure(c, {backlink: 0}, false);
   const idt = record('R3ID', 2068); idt.writeUInt16LE(0x7ff, 16);
   idt.set(words([0x001b2000, 0xee00]), 20 + 8 * 0x80);
+  idt.set(words([0x001b2000, 0xee00]), 20 + 8 * 10);
   h.put(c, 140, idt); h.host(c, 'configure_interrupt_descriptor_table');
   h.upload(c, 0x5000, Buffer.from([0, 0]));
+  h.upload(c, 0x2000, Buffer.from('90ebfe', 'hex'));
+  h.upload(c, 0x7000, Buffer.alloc(4096, 0x6b));
   const blocks = [[PC, 'cf'], [0x1100, 'cd80'], [0x1200, '9a002000001b00'], [0x1300, '0f01d0ebfe']];
   for (const [pc, hex] of blocks) h.upload(c, pc, Buffer.from(hex, 'hex'));
-  const input = seed({}); h.put(c, 0, input); observed.compiles++;
+  const input = seed({}); input.writeUInt32LE(0x8000, 32);
+  input.writeUInt32LE(0xf33fffff, SEG + 36); h.put(c, 0, input); observed.compiles++;
   const material = h.compile(c, 'mixed helper types and XState capability with live IRET',
     blocks.map(([pc, hex]) => [pc, hex.length / 2]),
-    ['cpu_read', 'far_return', 'far_call', 'interrupt_gate', 'task_return']);
-  observe(c, 'live NT1 TS0 remains exit10 before unreachable helper bodies', material, input,
-    result(input, {}, [3, 0, 0, 0, 0, 0]), {helpers: [call('task_return', [])]});
+    ['cpu_read', 'far_return', 'far_call', 'interrupt_gate', 'task_return', 'finish_exception_detection']);
+  const want = Buffer.from(input), sg = record('R3SG', 64);
+  [0x23, 0x1b, 0x23, 0x23, 0x3b, 0].forEach((v, i) => sg.writeUInt16LE(v, 16 + 2 * i));
+  want.set(sg, SEG); want.writeUInt32LE(0x2000, 48); want.writeUInt32LE(0x7ff0, 32);
+  want.writeUInt32LE(0x240cd7, 52); want.writeUInt32LE(0, 12);
+  want.set(record('R3MH', 40, [0, 0x2000, 0, 0, 0, 0x304], 12), 100); exit(want, 3, 0, 10);
+  const ram = h.ram(c); ram.get(0x7000).set(Buffer.from('00000000001000001b000000d74f2500', 'hex'), 0xff0);
+  observe(c, 'live NT1 TS0 automatically enters the configured handler with sticky exit10', material, input, want,
+    {wantRAM: ram, helpers: [call('task_return', []),
+      {name: 'finish_exception_detection', args: ['1', 21, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], status: 0}]});
   h.host(c, 'close');
 }
 for (const resident of [false, true]) for (const entries of [false, true]) for (const code of ['cf', '66cf']) {
