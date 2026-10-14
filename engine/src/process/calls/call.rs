@@ -36,6 +36,7 @@ pub(in crate::process) enum PendingOwner {
 }
 
 pub(in crate::process) struct PendingCall {
+    pub(in crate::process) task_revision: Option<u64>,
     pub(in crate::process) token: u32,
     pub(in crate::process) owner: PendingOwner,
     pub(in crate::process) frame: CallFrame32,
@@ -371,6 +372,7 @@ impl EngineInstance {
         let mut output = [0; CALL_FRAME_SIZE];
         encode_call_frame(&record, &mut output).map_err(|_| HostError::Infrastructure)?;
         self.pending_call = Some(PendingCall {
+            task_revision: self.task_execution_revision(),
             token,
             owner,
             frame,
@@ -440,7 +442,8 @@ impl EngineInstance {
         if token == 0 || pending.token != token || pending.owner != owner {
             return Err(HostError::Call(CallError::InvalidToken));
         }
-        if self.arena()[STATE_OFFSET..STATE_OFFSET + STATE_SIZE] != pending.state
+        if pending.task_revision != self.task_execution_revision()
+            || self.arena()[STATE_OFFSET..STATE_OFFSET + STATE_SIZE] != pending.state
             || self.arena()[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE] != pending.exit
             || !pending.extended.matches(self.arena())
         {

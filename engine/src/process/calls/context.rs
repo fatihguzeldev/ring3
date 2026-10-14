@@ -181,6 +181,7 @@ mod tests {
         )
         .unwrap();
         let outer = PendingCall {
+            task_revision: engine.task_execution_revision(),
             token: 1,
             owner: PendingOwner::Replacement(1),
             frame,
@@ -333,3 +334,7 @@ mod tests {
 #[cfg(test)]
 #[path = "context/upper.rs"]
 mod upper;
+
+#[cfg(test)]
+#[path = "context/tasks.rs"]
+mod tasks;

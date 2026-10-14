@@ -294,6 +294,7 @@ fn raw_configuration_respects_pending_call_callback_and_closed_authority() {
     )
     .unwrap();
     engine.pending_call = Some(PendingCall {
+        task_revision: engine.task_execution_revision(),
         token: 1,
         owner: PendingOwner::Replacement(engine.generation()),
         frame,

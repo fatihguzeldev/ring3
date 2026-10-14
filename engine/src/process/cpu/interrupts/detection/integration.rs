@@ -379,6 +379,7 @@ fn pending_call_and_callback_token_drift_preserve_the_same_ready_event() {
     )
     .unwrap();
     engine.pending_call = Some(PendingCall {
+        task_revision: engine.task_execution_revision(),
         token: 1,
         owner,
         frame,

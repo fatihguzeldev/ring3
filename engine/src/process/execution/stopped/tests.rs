@@ -200,6 +200,7 @@ fn stopped_entry_cannot_replace_code_owned_by_a_pending_call() {
     )
     .unwrap();
     engine.pending_call = Some(PendingCall {
+        task_revision: engine.task_execution_revision(),
         token: 1,
         owner: PendingOwner::Replacement(1),
         frame,

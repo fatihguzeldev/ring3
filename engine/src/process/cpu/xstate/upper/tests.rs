@@ -244,6 +244,7 @@ fn pending_and_unauthorized_callback_authority_precede_all_new_guest_checks() {
     let frame =
         CallFrame32::capture(e.memory().unwrap(), state, CallingConvention32::Cdecl, 0).unwrap();
     e.pending_call = Some(PendingCall {
+        task_revision: e.task_execution_revision(),
         token: 1,
         owner: PendingOwner::Resident(id),
         frame,

@@ -378,6 +378,7 @@ fn pending_stale_closed_and_smc_authority_keep_existing_lifecycle() {
     )
     .unwrap();
     engine.pending_call = Some(PendingCall {
+        task_revision: engine.task_execution_revision(),
         token: 1,
         owner: PendingOwner::Resident(id),
         frame,

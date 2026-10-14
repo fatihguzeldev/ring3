@@ -119,6 +119,9 @@ impl EngineInstance {
         if self.pending_call.is_some() || !authorized || active_unit_id != callback_id {
             return Err(HostError::Call(CallError::Busy));
         }
+        if callback.outer.task_revision != self.task_execution_revision() {
+            return Err(HostError::Call(CallError::StateChanged));
+        }
         ExtendedCpuState::capture(self.arena())?;
         let state = decode_state(&self.arena()[STATE_OFFSET..STATE_OFFSET + STATE_SIZE])
             .map_err(|_| HostError::Call(CallError::InvalidStop))?;
@@ -201,6 +204,7 @@ impl EngineInstance {
         .map_err(|_| HostError::Infrastructure)?;
         if self.arena()[STATE_OFFSET..STATE_OFFSET + STATE_SIZE] != state
             || self.arena()[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE] != exit
+            || callback.outer.task_revision != self.task_execution_revision()
             || !callback.outer.extended.matches(self.arena())
         {
             return Err(HostError::Call(CallError::StateChanged));
@@ -284,7 +288,8 @@ impl EngineInstance {
         {
             return Err(HostError::Call(CallError::InvalidToken));
         }
-        if self.arena()[STATE_OFFSET..STATE_OFFSET + STATE_SIZE] != outer.state
+        if outer.task_revision != self.task_execution_revision()
+            || self.arena()[STATE_OFFSET..STATE_OFFSET + STATE_SIZE] != outer.state
             || self.arena()[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE] != outer.exit
             || !outer.extended.matches(self.arena())
         {

@@ -933,6 +933,7 @@ fn module_callback_busy_cancel_state_and_terminal_priority_preserve_saved_author
         let pending = f.engine.pending_call.as_ref().unwrap();
         let outer_token = token + 100;
         let outer = PendingCall {
+            task_revision: pending.task_revision,
             token: outer_token,
             owner: pending.owner,
             frame: pending.frame,

@@ -109,6 +109,7 @@ fn call(call: &PendingCall) -> String {
 fn pending() -> PendingCall {
     // typed native ownership model; it does not claim an executed guest call.
     PendingCall {
+        task_revision: None,
         token: 41,
         owner: PendingOwner::Replacement(17),
         frame: frame(1),
