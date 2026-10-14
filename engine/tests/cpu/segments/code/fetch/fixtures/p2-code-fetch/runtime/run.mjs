@@ -85,11 +85,11 @@ function compile(c, bytes) {
   host(c, c.owner === 'resident' ? c.entries ? 'compile_resident_entries' : 'compile_resident' : c.entries ? 'compile_entries' : 'compile', [1, ...(c.entries ? [0] : [])]);
   captureModule(c, 'initial material'); seed(c);
 }
-function run(c, label, {budget = 1, reason = 1, retired = budget, pc, version = reason === 11 ? 6 : 1, fn = c.run} = {}) {
+function run(c, label, {budget = 1, reason = 1, retired = budget, pc, version = reason === 11 ? 6 : 1, fn = c.run, expectedHelpers = []} = {}) {
   const before = arena(c), beforeRam = ram(c), expected = Buffer.from(before), at = c.calls.length;
   expected.set(record('R3ST', 56, [...c.registers, pc, 2])); expected.set(record('R3EX', 40, [reason, retired, 0, 0, 0, 0], version), 56);
   assert.equal(fn(c.base, c.base + 56, budget, c.base + 96), 0, label);
-  const after = arena(c); assert.deepEqual(after, expected, label + ' complete arena'); assert.equal(c.calls.length, at, label + ' no helper');
+  const after = arena(c); assert.deepEqual(after, expected, label + ' complete arena'); assert.deepEqual(c.calls.slice(at), expectedHelpers, label + ' exact helpers');
   const afterRam = ram(c); assert.deepEqual(afterRam, beforeRam, label + ' every mapped RAM byte');
   const n = observations.length + 1, arenaFile = `arena-${n}.bin`, ramFile = `ram-${n}.bin`;
   writeFileSync(join(output, arenaFile), after, {flag: 'wx'}); writeFileSync(join(output, ramFile), afterRam, {flag: 'wx'});
@@ -133,11 +133,15 @@ function lookup(c, label, expectedBinding) {
 function dispatcherDenied(c) {
   host(c, 'dispatcher_module', [c.id, keyHigh]); const a = arena(c), pointer = a.readUInt32LE(164), length = a.readUInt32LE(168);
   const bytes = Buffer.from(new Uint8Array(c.memory.buffer, pointer, length)), module = new WebAssembly.Module(bytes), ring3 = {...c.api};
-  ring3.find_installed_resident = (...args) => {c.calls.push('find_installed_resident'); return c.api.find_installed_resident(...args);};
-  const fn = new WebAssembly.Instance(module, {env: {memory: c.memory, table: new WebAssembly.Table({element: 'anyfunc', initial: 8, maximum: 8})}, ring3}).exports.run;
+  ring3.find_installed_resident = (...args) => {c.calls.push('find_installed_resident'); helpers.push({context: c.id, name: 'find_installed_resident', args}); return c.api.find_installed_resident(...args);};
+  const table = new WebAssembly.Table({element: 'anyfunc', initial: 8, maximum: 8});
+  const fn = new WebAssembly.Instance(module, {env: {memory: c.memory, table}, ring3}).exports.run;
   const file = `module-${modules.length + 1}.wasm`; writeFileSync(join(output, file), bytes, {flag: 'wx'});
   modules.push({context: c.id, label: 'resident dispatcher', owner: 'dispatcher', file, bytes: length, sha256: hash(bytes), imports: WebAssembly.Module.imports(module)});
-  run(c, 'dispatcher rejects source-free CS byte before lookup', {reason: 11, retired: 0, pc: 0x2000, fn});
+  run(c, 'dispatcher discovers an uninstalled source-free fault unit', {reason: 3, version: 3, retired: 0, pc: 0x2000, fn, expectedHelpers: ['find_installed_resident']});
+  table.set(0, c.run);
+  host(c, 'acknowledge_resident_installation', [...c.binding, 0]);
+  run(c, 'installed source-free child owns precise CS fault through dispatcher', {reason: 11, retired: 0, pc: 0x2000, fn, expectedHelpers: ['find_installed_resident']});
 }
 
 for (const owner of ['replacement', 'resident']) for (const entries of [false, true]) {
@@ -186,14 +190,14 @@ for (const [owner, nonexec, preceding] of [['replacement', false, false], ['resi
   }
   host(c, 'close');
 }
-assert.equal(contexts.length, 9); assert.equal(modules.length, 18); assert.equal(observations.length, 43); assert.equal(refusals.length, 3);
+assert.equal(contexts.length, 9); assert.equal(modules.length, 18); assert.equal(observations.length, 44); assert.equal(refusals.length, 3);
 assert.deepEqual(pins(), sourcePins, 'CS authority source and literal oracles stayed fixed');
 writeFileSync(join(output, 'result.json'), JSON.stringify({status: 'ok', engine: {path: enginePath, sha256: engine.sha256, bytes: engine.bytes.length},
   source_pins: sourcePins, arena_bytes: SIZE, contexts, modules, observations, refusals, helper_trace: helpers,
   limits: ['finite CS base-zero/D32 fetch authority, actual runtime capture and same-PC repair; no D16/nonflat CS or full control-transfer claim',
     'real prefix currentness remains page-granular; source-free fault owns memory identity but no denied bytes',
     'ordinary resident API/routing exercised; existing unchanged owner/busy/callback controls remain separate evidence',
-    'pure module budget/cancel/NeedCode retain v1 headers; GP uses v6; resident dispatcher GP is checked before lookup',
+    'pure module budget/cancel/NeedCode retain v1 headers; GP uses v6; dispatcher lookup reaches the installed source-free fault child',
     'no browser, performance, or game compatibility claim'],
 }, null, 2) + '\n');
 console.log(JSON.stringify({status: 'ok', contexts: contexts.length, modules: modules.length, runs: observations.length, refusals: refusals.length, output}));

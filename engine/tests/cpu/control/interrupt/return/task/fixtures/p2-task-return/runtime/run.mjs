@@ -2,13 +2,76 @@ import assert from 'node:assert/strict';
 import {readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {pathToFileURL} from 'node:url';
+import {transitions} from './transition/run.mjs';
 const [enginePath, output, root] = process.argv.slice(2);
 assert.ok(enginePath && output && root);
 const support = 'engine/tests/cpu/segments/code/base/fixtures/p2-cs-base/runtime/support.mjs';
-const {harness, PC, SEG, BASES, registers, record, words, exit, hash} =
+const {harness, PC, SEG, BASES, registers, record, words, exit, hash, cloneRAM, writeRAM} =
   await import(pathToFileURL(join(root, support)));
 const h = await harness(enginePath, output, root);
 const paths = [
+  'engine/src/cpu/dbt/wasm/memory/byte_store.rs',
+  'engine/src/cpu/dbt/wasm/memory/narrow.rs',
+  'engine/src/abi/exception.rs',
+  'engine/src/cpu/x86/interrupts/escalation.rs',
+  'engine/src/cpu/x86/interrupts/gates/events.rs',
+  'engine/src/cpu/x86/interrupts/frame.rs',
+  'engine/src/cpu/x86/interrupts/cause.rs',
+  'engine/src/process/cpu/interrupts/detection/restart.rs',
+  'engine/src/process/cpu/interrupts/detection/site.rs',
+  'engine/tests/cpu/control/interrupt/return/task/fixtures/p2-task-return/runtime/transition/formats.mjs',
+  'engine/tests/cpu/control/interrupt/return/task/fixtures/p2-task-return/runtime/transition/work.mjs',
+  'engine/src/process/cpu/interrupts/delivery.rs',
+  'engine/src/process/cpu/far/return.rs',
+  'engine/src/process/cpu/far.rs',
+  'engine/src/process/cpu/segments.rs',
+  'engine/src/process/cpu/tasks/transition/tests/word.rs',
+  'engine/src/cpu/x86/tasks/record/tests.rs',
+  'engine/src/cpu/x86/tasks/save/tests.rs',
+  'engine/src/cpu/x86/tasks/load/tests.rs',
+  'engine/src/cpu/x86/tasks/load.rs',
+  'engine/src/cpu/x86/decode/coprocessor/tests.rs',
+  'engine/src/cpu/dbt/wasm/strings.rs',
+  'engine/src/cpu/dbt/wasm/control_instructions.rs',
+  'engine/src/cpu/dbt/wasm/far/interrupt.rs',
+  'engine/src/cpu/dbt/wasm/stack/pointer.rs',
+  'engine/src/cpu/dbt/wasm/segments/access.rs',
+  'engine/src/cpu/dbt/wasm/tasks/context/tests.rs',
+  'engine/src/cpu/dbt/wasm/tasks/context.rs',
+  'engine/src/cpu/dbt/wasm/tasks/mod.rs',
+  'engine/src/cpu/dbt/wasm/far/task/transition.rs',
+  'engine/tests/cpu/control/interrupt/return/task/fixtures/p2-task-return/runtime/transition/events.mjs',
+  'engine/src/cpu/x86/decode/coprocessor.rs',
+  'engine/src/process/cpu/segments/task.rs',
+  'engine/src/abi/tasks/controls.rs',
+  'engine/src/abi/tasks/controls/tests.rs',
+  'engine/src/abi/tasks/transition.rs',
+  'engine/src/abi/tasks/transition/tests.rs',
+  'engine/src/abi/tasks/context.rs',
+  'engine/src/abi/tasks/context/tests.rs',
+  'engine/src/process/cpu/tasks/control.rs',
+  'engine/src/process/cpu/tasks/control/tests.rs',
+  'engine/src/process/cpu/tasks/execution.rs',
+  'engine/src/process/cpu/tasks/save.rs',
+  'engine/src/process/cpu/tasks/transition.rs',
+  'engine/src/process/cpu/tasks/transition/tests.rs',
+  'engine/src/process/cpu/tasks/context.rs',
+  'engine/src/process/cpu/tasks/context/tests.rs',
+  'engine/src/cpu/x86/tasks/control.rs',
+  'engine/src/cpu/x86/tasks/save.rs',
+  'engine/src/cpu/x86/tasks/transition.rs',
+  'engine/src/cpu/x86/tasks/segments.rs',
+  'engine/src/cpu/x86/tasks/context.rs',
+  'engine/src/process/execution/authority.rs',
+  'engine/src/cpu/x86/decode/system_registers.rs',
+  'engine/src/cpu/dbt/wasm/segment_queries.rs',
+  'engine/src/cpu/dbt/wasm/atomic.rs',
+  'engine/src/cpu/x86/segments/queries.rs',
+  'engine/tests/cpu/control/interrupt/return/task/fixtures/p2-task-return/runtime/transition/images.mjs',
+  'engine/tests/cpu/control/interrupt/return/task/fixtures/p2-task-return/runtime/transition/ordinary.mjs',
+  'engine/tests/cpu/control/interrupt/return/task/fixtures/p2-task-return/runtime/transition/run.mjs',
+  'engine/tests/cpu/control/interrupt/return/task/fixtures/p2-task-return/runtime/transition/protocol.mjs',
+
   'engine/src/cpu/dbt/wasm/detection.rs',
   'engine/src/process/wasm/detection.rs',
   'engine/src/abi/wasm/exports/detection.rs',
@@ -277,9 +340,15 @@ for (const resident of [false, true]) for (const entries of [false, true]) for (
   if (material) trace.push(call(returnName(c), bound(c, material, [0x1100, 0x1b, Number(slot === 2)])));
   observe(c, 'NT0 uses ordinary stack and no task helper', material, input, want, {helpers: trace}); h.host(c, 'close');
 }
+observed.generatedInvocations = observed.invocations; observed.hostQueryAndRefusalInvocations = 0;
+const transition = transitions({h, record, words, exit, PC, SEG, BASES, registers, observed, call, bound, cloneRAM, writeRAM});
+writeFileSync(join(output, 'task-transition-configuration.json'), JSON.stringify(transition.configureTrace, null, 2) + '\n');
 assert.deepEqual(pins(), sourcePins);
 writeFileSync(join(output, 'task-source-pins.json'), JSON.stringify(sourcePins, null, 2) + '\n');
 writeFileSync(join(output, 'task-configuration.json'), JSON.stringify(configuration, null, 2) + '\n');
-h.finish({planned: {contexts: 93, compiles: 93, generatedModules: 93, invocations: 105, observations: 198,
-  configurationRefusals: 3}, observed,
-  scope: 'NT1 current/backlink/descriptor admission only. Admitted tasks remain neutral Unsupported pending complete transition authority; no incoming task success, PF metadata or CR2 claims.'});
+h.finish({planned: {contexts: 126, compiles: 145, generatedModules: 145, invocations: 187,
+  generatedInvocations: 170, hostQueryAndRefusalInvocations: 17, observations: 332, configurationRefusals: 6}, observed,
+  transition: transition.selected, events: transition.routed, work: transition.repeated, formats: transition.mixed,
+  protocol: transition.checked,
+  historicalAdmission: {contexts: 93, compiles: 93, generatedInvocations: 105, observations: 198},
+  scope: 'Original198 admission/NT0 observations remain unchanged without supplied task controls. Added PG0 dword same-CPL3 T0 transition, exact dynamic save/incoming state, live queries, retained revision and committed source-SMC. Adds committed CS/SS postload handling, partial POP/MOV, real segment repair/IRET/resumed NOP, and x87/WAIT/SSE/AVX TS/NM before pendingMF with raw/automatic routes. Adds sparse Word/mixed task formats and completed REP work/save progress. Word upper GPR/FLAGS zeroing and null FS/GS are explicit Ring3 profile choices. PG1, privilege task, incoming T-bit debug delivery and PF remain separate.'});

@@ -7,11 +7,11 @@ use std::{
 };
 
 #[test]
-fn actual_nt1_iret_admission_preserves_authority_faults_and_ordinary_returns() {
+fn actual_nt1_iret_admission_and_task32_transitions_preserve_precise_state() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
     let engine = std::env::var_os("RING3_ENGINE_WASM")
         .map(PathBuf::from)
-        .expect("select the integrated NT1 admission engine");
+        .expect("select the integrated task32 transition engine");
     let expected = std::env::var("RING3_ENGINE_SHA256").expect("select its explicit SHA-256");
     assert!(engine.is_file());
     let output = root.join("target/p2-task-return").join(format!(
@@ -37,7 +37,7 @@ fn actual_nt1_iret_admission_preserves_authority_faults_and_ordinary_returns() {
     fs::write(output.join("node.stderr.log"), &result.stderr).unwrap();
     assert!(
         result.status.success(),
-        "NT1 admission failed:\n{}\n{}",
+        "task return failed:\n{}\n{}",
         String::from_utf8_lossy(&result.stdout),
         String::from_utf8_lossy(&result.stderr)
     );
