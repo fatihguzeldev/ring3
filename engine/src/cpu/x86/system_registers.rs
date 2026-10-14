@@ -15,8 +15,8 @@ pub enum SystemRegisterQuery {
     MachineStatusWord,
 }
 
-/// Explicit readback images, separate from descriptor lookup and hidden system caches.
-/// None means unknown; Some(0) is a caller-supplied zero, never an OS default.
+/// explicit readback images, separate from descriptor lookup and hidden system caches.
+/// standalone banks may omit observations; process startup supplies complete defaults.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct UserSystemRegisterBank32 {
     pub gdtr: Option<DescriptorTableRegister32>,
@@ -27,6 +27,36 @@ pub struct UserSystemRegisterBank32 {
 }
 
 impl UserSystemRegisterBank32 {
+    /// deterministic protected32 application observations. these opaque kernel
+    /// addresses are readback values, not guest-memory tables or task authority.
+    pub const fn application() -> Self {
+        Self {
+            gdtr: Some(DescriptorTableRegister32 {
+                base: 0xffff_0000,
+                limit: 0x7ff,
+            }),
+            idtr: Some(DescriptorTableRegister32 {
+                base: 0xffff_1000,
+                limit: 0x7ff,
+            }),
+            ldtr: Some(0),
+            tr: Some(0x28),
+            // pe/mp/et/ne set, em/ts clear: numeric state is available eagerly.
+            cr0_low16: Some(0x33),
+        }
+    }
+
+    pub(crate) fn with_application_defaults(self) -> Self {
+        let application = Self::application();
+        Self {
+            gdtr: self.gdtr.or(application.gdtr),
+            idtr: self.idtr.or(application.idtr),
+            ldtr: self.ldtr.or(application.ldtr),
+            tr: self.tr.or(application.tr),
+            cr0_low16: self.cr0_low16.or(application.cr0_low16),
+        }
+    }
+
     pub(crate) fn is_valid(self) -> bool {
         !USER_MODE_ENVIRONMENT.user_mode_instruction_prevention()
             && self != Self::default()

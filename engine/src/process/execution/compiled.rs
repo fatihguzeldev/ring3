@@ -45,6 +45,7 @@ impl EngineInstance {
         if self.pending_call.is_some() || self.callback.is_some() {
             return Err(HostError::Call(CallError::Busy));
         }
+        self.guard_detection_material_change()?;
         Self::check_region_counts(count, gate_count)?;
         let generation = self
             .generation
@@ -123,13 +124,7 @@ impl EngineInstance {
                 generation,
                 &gates[..gate_count as usize],
                 cs,
-                crate::cpu::x86::decode::DecodeAuthority::new(
-                    self.task_system_register_bank(),
-                    self.interrupt_descriptors.is_some(),
-                )
-                .with_task_return(self.task_return_sources.is_some())
-                .with_task_revision(self.task_execution_revision())
-                .with_coprocessor_control(self.task_coprocessor_cr0()),
+                crate::cpu::x86::decode::DecodeAuthority::new(self.system_register_bank),
             ),
             DescriptorFormat::Entries => compile_embedded_entry_region(
                 memory,
@@ -139,13 +134,7 @@ impl EngineInstance {
                 generation,
                 &gates[..gate_count as usize],
                 cs,
-                crate::cpu::x86::decode::DecodeAuthority::new(
-                    self.task_system_register_bank(),
-                    self.interrupt_descriptors.is_some(),
-                )
-                .with_task_return(self.task_return_sources.is_some())
-                .with_task_revision(self.task_execution_revision())
-                .with_coprocessor_control(self.task_coprocessor_cr0()),
+                crate::cpu::x86::decode::DecodeAuthority::new(self.system_register_bank),
             ),
         }
         .map_err(HostError::Compile)

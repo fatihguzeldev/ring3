@@ -212,7 +212,11 @@ fn complete_fetch_is_required_before_hint_admission() {
     let missing = decode_one(&memory, GuestAddress(0x1ffc)).unwrap_err();
     assert!(matches!(
         missing,
-        DecodeError::MemoryFault { length: 5, .. }
+        DecodeError::Paging {
+            attempted_length: 5,
+            error: crate::cpu::x86::CpuPagingError32::PageFault(_),
+            ..
+        }
     ));
     assert_eq!(
         decode_for_execution(&memory, GuestAddress(0x1ffc)).unwrap_err(),
@@ -223,7 +227,14 @@ fn complete_fetch_is_required_before_hint_admission() {
     memory.write(GuestAddress(0x2000), &bytes[4..]).unwrap();
     memory.protect(second, Permissions::READ).unwrap();
     let denied = decode_one(&memory, GuestAddress(0x1ffc)).unwrap_err();
-    assert!(matches!(denied, DecodeError::MemoryFault { length: 5, .. }));
+    assert!(matches!(
+        denied,
+        DecodeError::Paging {
+            attempted_length: 5,
+            error: crate::cpu::x86::CpuPagingError32::PageFault(_),
+            ..
+        }
+    ));
     assert_eq!(
         decode_for_execution(&memory, GuestAddress(0x1ffc)).unwrap_err(),
         denied

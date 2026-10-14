@@ -21,23 +21,21 @@ impl EngineInstance {
         if self.pending_call.is_some() || self.callback.is_some() {
             return Err(HostError::Call(CallError::Busy));
         }
+        self.guard_detection_material_change()?;
         let arena = self.arena();
         let state = decode_state(&arena[STATE_OFFSET..STATE_OFFSET + STATE_SIZE])
             .map_err(|_| HostError::Call(CallError::InvalidStop))?;
         ExtendedCpuState::capture(arena)?;
         let cs = self.code_fetch_context()?;
-        let system_registers = self.task_system_register_bank();
-        let task_revision = self.task_execution_revision();
-        let coprocessor_cr0 = self.task_coprocessor_cr0();
+        let system_registers = self.system_register_bank;
         let exit = decode_exit(&arena[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE])
             .map_err(|_| HostError::Call(CallError::InvalidStop))?;
         let artifact = self.artifact.as_ref().unwrap();
         if exit.reason != ExitReason::NeedCode
-            || (artifact.matches_task_revision(self.task_execution_revision())
-                && (artifact.contains_material_in(state.eip, cs.decode_key())
-                    || artifact
-                        .context_fault_in(state.eip, cs.decode_key())
-                        .is_some_and(|fault| !cs.permits(fault.pc, fault.attempted_length))))
+            || artifact.contains_material_in(state.eip, cs.decode_key())
+            || artifact
+                .context_fault_in(state.eip, cs.decode_key())
+                .is_some_and(|fault| fault.remains_denied(self.memory.as_ref().unwrap(), cs))
         {
             return Err(HostError::Call(CallError::InvalidStop));
         }
@@ -55,13 +53,7 @@ impl EngineInstance {
             key,
             next_generation,
             cs,
-            crate::cpu::x86::decode::DecodeAuthority::new(
-                system_registers,
-                self.interrupt_descriptors.is_some(),
-            )
-            .with_task_return(self.task_return_sources.is_some())
-            .with_task_revision(task_revision)
-            .with_coprocessor_control(coprocessor_cr0),
+            crate::cpu::x86::decode::DecodeAuthority::new(system_registers),
         )
         .map_err(HostError::Compile)?;
         self.artifact = Some(artifact);
@@ -77,6 +69,7 @@ impl EngineInstance {
         if self.pending_call.is_some() || self.callback.is_some() {
             return Err(HostError::Call(CallError::Busy));
         }
+        self.guard_detection_material_change()?;
         let arena = self.arena();
         let state = decode_state(&arena[STATE_OFFSET..STATE_OFFSET + STATE_SIZE])
             .map_err(|_| HostError::Call(CallError::InvalidStop))?;
@@ -87,13 +80,11 @@ impl EngineInstance {
             return Err(HostError::Call(CallError::InvalidStop));
         }
         let cs = self.code_fetch_context()?;
-        let system_registers = self.task_system_register_bank();
-        let task_revision = self.task_execution_revision();
-        let coprocessor_cr0 = self.task_coprocessor_cr0();
+        let system_registers = self.system_register_bank;
         let pc = GuestAddress(state.eip);
         let memory = self.memory.as_ref().ok_or(HostError::Closed)?;
         if let Some(registry) = &self.resident {
-            match registry.lookup_task_bound(memory, pc, cs, self.task_execution_revision()) {
+            match registry.lookup_bound(memory, pc, cs) {
                 Ok(_) => return Err(HostError::Call(CallError::InvalidStop)),
                 Err(RegistryError::NotFound { .. }) => {}
                 Err(error) => return Err(HostError::Resident(error)),
@@ -110,13 +101,7 @@ impl EngineInstance {
                     CompileLimits::default(),
                     key,
                     cs,
-                    crate::cpu::x86::decode::DecodeAuthority::new(
-                        system_registers,
-                        self.interrupt_descriptors.is_some(),
-                    )
-                    .with_task_return(self.task_return_sources.is_some())
-                    .with_task_revision(task_revision)
-                    .with_coprocessor_control(coprocessor_cr0),
+                    crate::cpu::x86::decode::DecodeAuthority::new(system_registers),
                 )
                 .map_err(HostError::Resident)
         } else {
@@ -129,13 +114,7 @@ impl EngineInstance {
                     CompileLimits::default(),
                     key,
                     cs,
-                    crate::cpu::x86::decode::DecodeAuthority::new(
-                        system_registers,
-                        self.interrupt_descriptors.is_some(),
-                    )
-                    .with_task_return(self.task_return_sources.is_some())
-                    .with_task_revision(task_revision)
-                    .with_coprocessor_control(coprocessor_cr0),
+                    crate::cpu::x86::decode::DecodeAuthority::new(system_registers),
                 )
                 .map_err(HostError::Resident)?;
             self.resident = Some(registry);

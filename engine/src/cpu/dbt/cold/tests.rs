@@ -199,7 +199,7 @@ fn runtime_entry_fault_preparation_keeps_strict_public_refusals_and_terminal_bou
 }
 
 #[test]
-fn runtime_entry_keeps_limits_fetch_and_valid_unsupported_errors_as_preparation_errors() {
+fn runtime_entry_keeps_limits_fetch_and_missing_environment_as_preparation_errors() {
     let mut memory = AddressSpace::new(1).unwrap();
     memory
         .map_zeroed(
@@ -207,7 +207,9 @@ fn runtime_entry_keeps_limits_fetch_and_valid_unsupported_errors_as_preparation_
             Permissions::ALL,
         )
         .unwrap();
-    memory.write(GuestAddress(0x1000), &[0xcd, 0x80]).unwrap();
+    memory
+        .write(GuestAddress(0x1000), &[0x0f, 0x00, 0xc0])
+        .unwrap();
     let limits = CompileLimits::default();
     assert_eq!(
         prepare_runtime_entry(

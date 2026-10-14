@@ -18,9 +18,9 @@ fn cs() -> CodeFetchContext {
     CodeFetchContext::from_segments(&SegmentContext::default()).unwrap()
 }
 #[test]
-fn configured_interrupt_is_one_terminator_and_strict_extents_keep_their_end_contract() {
+fn software_interrupt_is_one_terminator_and_strict_extents_keep_their_end_contract() {
     let memory = memory(&[0xcd, 0x80, 0xf0, 0x90]);
-    let authority = DecodeAuthority::new(None, true);
+    let authority = DecodeAuthority::new(None);
     let limits = CompileLimits::default();
     let prepared = prepare_embedded_entry_region(
         &memory,
@@ -66,7 +66,7 @@ fn configured_interrupt_is_one_terminator_and_strict_extents_keep_their_end_cont
     assert!(prepare_entry_region(&memory, &[GuestAddress(0x1000)], limits).is_err());
 }
 #[test]
-fn both_immutable_authorities_propagate_without_query_idtr_becoming_delivery_authority() {
+fn system_register_queries_and_software_interrupts_have_independent_admission() {
     let memory = memory(&[0x0f, 0x00, 0xc0, 0xcd, 0x80]);
     let limits = CompileLimits::default();
     let bank = UserSystemRegisterBank32 {
@@ -78,7 +78,7 @@ fn both_immutable_authorities_propagate_without_query_idtr_becoming_delivery_aut
         GuestAddress(0x1000),
         limits,
         Some(cs()),
-        DecodeAuthority::new(Some(bank), true),
+        DecodeAuthority::new(Some(bank)),
     )
     .unwrap();
     assert_eq!(prepared.instruction_count(), 2);
@@ -99,26 +99,25 @@ fn both_immutable_authorities_propagate_without_query_idtr_becoming_delivery_aut
             GuestAddress(0x1000),
             limits,
             Some(cs()),
-            DecodeAuthority::new(None, true)
+            DecodeAuthority::new(None)
         ),
         Err(CompileError::Instruction {
             cause: InstructionError::Decode(DecodeError::MissingSystemRegisterAuthority(_)),
             ..
         })
     ));
-    let without_idt = prepare_embedded_entry_region(
+    let explicit_entry = prepare_embedded_entry_region(
         &memory,
         &[GuestAddress(0x1000)],
         limits,
         &[],
         Some(cs()),
-        DecodeAuthority::new(Some(bank), false),
+        DecodeAuthority::new(Some(bank)),
+    )
+    .unwrap();
+    assert_eq!(explicit_entry.instruction_count(), 2);
+    assert_eq!(
+        explicit_entry.blocks[0].instructions[1].operation(),
+        &Operation::SoftwareInterrupt { vector: 0x80 }
     );
-    assert!(matches!(
-        without_idt,
-        Err(CompileError::Instruction {
-            pc: GuestAddress(0x1003),
-            cause: InstructionError::Decode(DecodeError::Unsupported(_))
-        })
-    ));
 }

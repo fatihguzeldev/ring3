@@ -1,3 +1,4 @@
+use super::support_fetch as fetch;
 use ring3_engine::{
     cpu::{
         dbt::{BlockSpec, CompileLimits, compile_entry_region, compile_region},
@@ -7,9 +8,7 @@ use ring3_engine::{
             ir::Operation,
         },
     },
-    memory::{
-        Access, AddressSpace, FaultReason, GuestAddress, MemoryFault, PageRange, Permissions,
-    },
+    memory::{AddressSpace, FaultReason, GuestAddress, PageRange, Permissions},
 };
 
 fn executable(pc: u32, bytes: &[u8]) -> AddressSpace {
@@ -139,17 +138,12 @@ fn fetch_requires_complete_modrm_and_displacement_but_no_following_byte() {
             vec![0x0f, opcode, 0x05, 0xff, 0xff, 0xff],
         ] {
             let pc = GuestAddress(0x2000 - bytes.len() as u32);
-            assert_eq!(
+            fetch::assert_error(
                 decode_one(&executable(pc.0, &bytes), pc).unwrap_err(),
-                DecodeError::MemoryFault {
-                    pc,
-                    fault: MemoryFault {
-                        address: GuestAddress(0x2000),
-                        access: Access::Execute,
-                        reason: FaultReason::Unmapped
-                    },
-                    length: bytes.len() as u32 + 1,
-                }
+                pc.0,
+                0x2000,
+                FaultReason::Unmapped,
+                bytes.len() as u32 + 1,
             );
         }
     }

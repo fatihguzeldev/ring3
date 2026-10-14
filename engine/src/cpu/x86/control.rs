@@ -14,7 +14,6 @@ pub enum ControlOperation {
         word: bool,
     },
     InvalidOpcode,
-    DeviceNotAvailable,
     GeneralProtectionZero,
     /// denied port strings skip the attempt only for a zero selected repeat count.
     DeniedPortString {

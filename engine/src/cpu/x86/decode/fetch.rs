@@ -1,6 +1,9 @@
 use crate::{
-    cpu::x86::{SegmentAccess, SegmentCache, SegmentContext, SegmentRegister},
-    memory::{AddressSpace, CodeSnapshot, GuestAddress, MemoryError},
+    cpu::x86::{
+        CpuPagingError32, PagingAccess32, SegmentAccess, SegmentCache, SegmentContext,
+        SegmentRegister, inspect_cpu_paging_access32,
+    },
+    memory::{Access, AddressSpace, CodeSnapshot, GuestAddress, MemoryError, PagingBacking32},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -20,7 +23,6 @@ impl CodeDecodeKey {
 pub(crate) struct CodeFetchContext {
     cs: SegmentCache,
     base: u32,
-    raw_task_context: bool,
 }
 
 impl CodeFetchContext {
@@ -28,29 +30,7 @@ impl CodeFetchContext {
         context.is_valid().then_some(Self {
             cs: context.caches[SegmentRegister::Cs.index()],
             base: context.state.bases[SegmentRegister::Cs.index()],
-            raw_task_context: false,
         })
-    }
-
-    /// only a qualified incoming CS can authorize handler fetch; other raw selectors stay separate.
-    pub(crate) fn from_task_context(
-        context: &crate::cpu::x86::tasks::TaskIncomingContext32,
-    ) -> Option<Self> {
-        let segments = context.segment_image();
-        let cs = segments.caches[SegmentRegister::Cs.index()];
-        (context.loaded_mask() & (1 << SegmentRegister::Cs.index()) != 0
-            && context.current_privilege() == 3
-            && cs.usable()
-            && cs.code())
-        .then_some(Self {
-            cs,
-            base: segments.state.bases[SegmentRegister::Cs.index()],
-            raw_task_context: context.validated_segments().is_none(),
-        })
-    }
-
-    pub(crate) fn raw_task_context(self) -> bool {
-        self.raw_task_context
     }
 
     pub(crate) fn decode_key(self) -> CodeDecodeKey {
@@ -73,8 +53,19 @@ impl CodeFetchContext {
         memory: &AddressSpace,
         logical: GuestAddress,
         output: &mut [u8],
-    ) -> Result<(), MemoryError> {
-        memory.fetch_code_wrapping(self.linear_address(logical), output)
+    ) -> Result<(), CpuPagingError32> {
+        let linear = self.linear_address(logical);
+        inspect_cpu_paging_access32(
+            memory,
+            linear,
+            u32::try_from(output.len())
+                .map_err(|_| CpuPagingError32::Memory(MemoryError::InvalidRange))?,
+            PagingAccess32::Execute,
+            PagingBacking32::Execute,
+        )?;
+        memory
+            .fetch_code_wrapping(linear, output)
+            .map_err(CpuPagingError32::Memory)
     }
 
     pub(crate) fn snapshot(
@@ -93,12 +84,61 @@ impl CodeFetchContext {
     }
 }
 
+pub(crate) fn fetch_unbound(
+    memory: &AddressSpace,
+    pc: GuestAddress,
+    output: &mut [u8],
+) -> Result<(), CpuPagingError32> {
+    // the standalone API retains its non-wrapping range priority before paging checks.
+    if u64::from(pc.0) + output.len() as u64 > 1_u64 << 32 {
+        memory
+            .check_span(pc, output.len(), Access::Execute)
+            .map_err(CpuPagingError32::Memory)?;
+    }
+    inspect_cpu_paging_access32(
+        memory,
+        pc,
+        u32::try_from(output.len())
+            .map_err(|_| CpuPagingError32::Memory(MemoryError::InvalidRange))?,
+        PagingAccess32::Execute,
+        PagingBacking32::Execute,
+    )?;
+    memory.fetch(pc, output).map_err(CpuPagingError32::Memory)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CapturedFetchFaultKind32 {
+    Segment,
+    Paging,
+}
+
 #[derive(Debug)]
 pub(crate) struct CapturedCodeFault {
+    pub(crate) kind: CapturedFetchFaultKind32,
     pub(crate) pc: GuestAddress,
     pub(crate) attempted_length: u8,
     pub(crate) consumed_prefix_length: u8,
     pub(crate) prefix: Option<CodeSnapshot>,
+}
+
+impl CapturedCodeFault {
+    pub(crate) fn remains_denied(&self, memory: &AddressSpace, cs: CodeFetchContext) -> bool {
+        if !cs.permits(self.pc, self.attempted_length) {
+            return true;
+        }
+        match self.kind {
+            CapturedFetchFaultKind32::Segment => false,
+            CapturedFetchFaultKind32::Paging => {
+                let mut bytes = [0; 15];
+                cs.fetch(
+                    memory,
+                    self.pc,
+                    &mut bytes[..usize::from(self.attempted_length)],
+                )
+                .is_err()
+            }
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -136,7 +176,6 @@ mod tests {
         let word = CodeFetchContext {
             cs: SegmentCache::from_bits(0xf0b0_1234).unwrap(),
             base: based.base,
-            raw_task_context: based.raw_task_context,
         };
         assert_ne!(word.decode_key(), based.decode_key());
         assert_eq!(word.decoder_bitness(), 16);
@@ -146,3 +185,7 @@ mod tests {
         assert_eq!(current_word.decoder_bitness(), 16);
     }
 }
+
+#[cfg(test)]
+#[path = "fetch/paging.rs"]
+mod paging_tests;

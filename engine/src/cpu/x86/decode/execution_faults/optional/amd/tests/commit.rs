@@ -82,7 +82,9 @@ fn memory_commit_last_byte_fetch_and_duplicate_or_lock_priority_stay_explicit() 
     let pc = 0x2001 - bytes.len() as u32;
     let mut memory = executable(&bytes[..bytes.len() - 1], pc);
     let missing = decode_one(&memory, GuestAddress(pc)).unwrap_err();
-    assert!(matches!(missing,DecodeError::MemoryFault{length,..} if length==bytes.len() as u32));
+    assert!(
+        matches!(missing,DecodeError::Paging { attempted_length: length, error: crate::cpu::x86::CpuPagingError32::PageFault(_), .. } if usize::from(length) == bytes.len())
+    );
     assert_eq!(
         decode_for_execution(&memory, GuestAddress(pc)).unwrap_err(),
         missing
@@ -94,7 +96,13 @@ fn memory_commit_last_byte_fetch_and_duplicate_or_lock_priority_stay_explicit() 
         .unwrap();
     memory.protect(page, Permissions::READ).unwrap();
     let denied = decode_one(&memory, GuestAddress(pc)).unwrap_err();
-    assert!(matches!(denied, DecodeError::MemoryFault { .. }));
+    assert!(matches!(
+        denied,
+        DecodeError::Paging {
+            error: crate::cpu::x86::CpuPagingError32::PageFault(_),
+            ..
+        }
+    ));
     assert_eq!(
         decode_for_execution(&memory, GuestAddress(pc)).unwrap_err(),
         denied

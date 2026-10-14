@@ -143,8 +143,7 @@ impl EngineInstance {
         {
             return Err(call_error(CallError::InvalidToken));
         }
-        if outer.task_revision != self.task_execution_revision()
-            || self.arena()[STATE_OFFSET..STATE_OFFSET + STATE_SIZE] != outer.state
+        if self.arena()[STATE_OFFSET..STATE_OFFSET + STATE_SIZE] != outer.state
             || self.arena()[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE] != outer.exit
             || !outer.extended.matches(self.arena())
         {
@@ -243,9 +242,6 @@ impl EngineInstance {
         if self.pending_call.is_some() {
             return Err(call_error(CallError::Busy));
         }
-        if callback.outer.task_revision != self.task_execution_revision() {
-            return Err(call_error(CallError::StateChanged));
-        }
         ExtendedCpuState::capture(self.arena())?;
         let state = decode_state(&self.arena()[STATE_OFFSET..STATE_OFFSET + STATE_SIZE])
             .map_err(|_| call_error(CallError::InvalidStop))?;
@@ -293,9 +289,6 @@ impl EngineInstance {
                 .is_none_or(|callback| callback.token() != token)
         {
             return Err(call_error(CallError::InvalidToken));
-        }
-        if self.callback.as_ref().unwrap().outer.task_revision != self.task_execution_revision() {
-            return Err(call_error(CallError::StateChanged));
         }
         let callback = self.callback.take().unwrap();
         let arena = self.arena.as_mut().get_mut();

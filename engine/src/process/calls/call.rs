@@ -36,7 +36,6 @@ pub(in crate::process) enum PendingOwner {
 }
 
 pub(in crate::process) struct PendingCall {
-    pub(in crate::process) task_revision: Option<u64>,
     pub(in crate::process) token: u32,
     pub(in crate::process) owner: PendingOwner,
     pub(in crate::process) frame: CallFrame32,
@@ -314,21 +313,15 @@ impl EngineInstance {
         let decode_key = self.code_fetch_context()?.decode_key();
         let matches_gate = match owner {
             PendingOwner::Replacement(_) => self.artifact.as_ref().is_some_and(|artifact| {
-                artifact.matches_task_revision(self.task_execution_revision())
-                    && artifact.matches_decode_key(decode_key)
-                    && artifact.matches_gate(state.eip, id)
+                artifact.matches_decode_key(decode_key) && artifact.matches_gate(state.eip, id)
             }),
             PendingOwner::Resident(unit) => {
                 let artifact = self.guard_resident_unit(self.key, unit)?;
-                artifact.matches_task_revision(self.task_execution_revision())
-                    && artifact.matches_decode_key(decode_key)
-                    && artifact.matches_gate(state.eip, id)
+                artifact.matches_decode_key(decode_key) && artifact.matches_gate(state.eip, id)
             }
             PendingOwner::ResidentCallback { unit_id, .. } => {
                 let artifact = self.guard_resident_unit(self.key, unit_id)?;
-                artifact.matches_task_revision(self.task_execution_revision())
-                    && artifact.matches_decode_key(decode_key)
-                    && artifact.matches_gate(state.eip, id)
+                artifact.matches_decode_key(decode_key) && artifact.matches_gate(state.eip, id)
             }
         };
         if !matches_gate {
@@ -372,7 +365,6 @@ impl EngineInstance {
         let mut output = [0; CALL_FRAME_SIZE];
         encode_call_frame(&record, &mut output).map_err(|_| HostError::Infrastructure)?;
         self.pending_call = Some(PendingCall {
-            task_revision: self.task_execution_revision(),
             token,
             owner,
             frame,
@@ -442,8 +434,7 @@ impl EngineInstance {
         if token == 0 || pending.token != token || pending.owner != owner {
             return Err(HostError::Call(CallError::InvalidToken));
         }
-        if pending.task_revision != self.task_execution_revision()
-            || self.arena()[STATE_OFFSET..STATE_OFFSET + STATE_SIZE] != pending.state
+        if self.arena()[STATE_OFFSET..STATE_OFFSET + STATE_SIZE] != pending.state
             || self.arena()[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE] != pending.exit
             || !pending.extended.matches(self.arena())
         {

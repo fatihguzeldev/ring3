@@ -45,9 +45,11 @@ fn ram(engine: &EngineInstance) -> Vec<u8> {
         .unwrap();
     bytes
 }
-fn packet(engine: &EngineInstance) -> [u32; 6] {
+fn packet(engine: &EngineInstance, version: u16) -> [u32; 6] {
     let bytes = &engine.arena()[HELPER_OFFSET..HELPER_OFFSET + HELPER_SIZE];
-    assert_eq!(&bytes[..8], b"R3MH\x08\0\x01\0");
+    assert_eq!(&bytes[..4], b"R3MH");
+    assert_eq!(&bytes[4..6], &version.to_le_bytes());
+    assert_eq!(&bytes[6..16], b"\x01\0\x28\0\0\0\0\0\0\0");
     std::array::from_fn(|i| u32::from_le_bytes(bytes[16 + i * 4..20 + i * 4].try_into().unwrap()))
 }
 fn neutral(engine: &EngineInstance, before: &[u8], memory: &[u8], fields: [u32; 6]) {
@@ -62,7 +64,7 @@ fn neutral(engine: &EngineInstance, before: &[u8], memory: &[u8], fields: [u32; 
     expected[HELPER_OFFSET..HELPER_OFFSET + HELPER_SIZE].copy_from_slice(&helper);
     assert_eq!(engine.arena(), expected);
     assert_eq!(ram(engine), memory);
-    assert_eq!(packet(engine), fields);
+    assert_eq!(packet(engine, 8), fields);
 }
 #[test]
 fn selected_cached_authority_precedes_alignment_and_paging_with_exact_ia32_endpoint() {
@@ -97,7 +99,7 @@ fn selected_cached_authority_precedes_alignment_and_paging_with_exact_ia32_endpo
     let (mut e, _) = engine();
     context(&mut e, SegmentRegister::Ds, 0x52bf, 3);
     e.cpu_xsave_avx(3, 0x5000, 4, 0).unwrap();
-    assert_eq!(packet(&e), [0, 0, 0, 0, 0, 832]);
+    assert_eq!(packet(&e, 8), [0, 0, 0, 0, 0, 832]);
     let image = ram(&e);
     assert_eq!(&image[576..704], &[0x79; 128]);
     assert_eq!(&image[704..832], &[0; 128]);
@@ -144,7 +146,18 @@ fn late_payload_faults_and_exhaustion_do_not_publish_ram_or_any_cpu_record() {
         } else {
             e.cpu_xrstor_avx(3, address, 7, 0).unwrap();
         }
-        assert_eq!(packet(&e), [1, 0, 2, 0x6000, if save { 2 } else { 1 }, 832]);
+        assert_eq!(
+            packet(&e, 15),
+            [
+                9,
+                0,
+                if save { 7 } else { 5 },
+                0x6000,
+                if save { 2 } else { 1 },
+                832
+            ]
+        );
+        assert_eq!(e.cr2(), Some(GuestAddress(0x6000)));
         let mut expected = before;
         expected[HELPER_OFFSET..HELPER_OFFSET + 40]
             .copy_from_slice(&e.arena()[HELPER_OFFSET..HELPER_OFFSET + 40]);
@@ -164,7 +177,8 @@ fn late_payload_faults_and_exhaustion_do_not_publish_ram_or_any_cpu_record() {
     let version = e.memory().unwrap().code_validation_version();
     e.memory.as_mut().unwrap().exhaust_versions_for_test();
     e.cpu_xsave_avx(3, 0x5000, 7, 0).unwrap();
-    assert_eq!(packet(&e), [2, 0, 1, 0, 0, 832]);
+    assert_eq!(packet(&e, 8), [2, 0, 1, 0, 0, 832]);
+    assert_eq!(e.cr2(), None);
     let mut expected = before;
     expected[HELPER_OFFSET..HELPER_OFFSET + 40]
         .copy_from_slice(&e.arena()[HELPER_OFFSET..HELPER_OFFSET + 40]);
@@ -184,7 +198,7 @@ fn upper_save_uses_one_version_and_currentness_transaction_for_selected_code_spa
         };
         assert_eq!(result, Ok(StoreCompletion::CodeInvalidated));
         assert_eq!(e.memory().unwrap().code_validation_version(), version + 1);
-        assert_eq!(packet(&e), [0, 0, 0, 0, 0, 832]);
+        assert_eq!(packet(&e, 8), [0, 0, 0, 0, 0, 832]);
         let before = e.arena().to_vec();
         let rejected = if resident {
             e.cpu_xsave_avx_resident(7, id, 3, 0x1000, 4, 0)
@@ -244,7 +258,6 @@ fn pending_and_unauthorized_callback_authority_precede_all_new_guest_checks() {
     let frame =
         CallFrame32::capture(e.memory().unwrap(), state, CallingConvention32::Cdecl, 0).unwrap();
     e.pending_call = Some(PendingCall {
-        task_revision: e.task_execution_revision(),
         token: 1,
         owner: PendingOwner::Resident(id),
         frame,

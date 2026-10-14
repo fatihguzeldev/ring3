@@ -5,7 +5,6 @@ pub(crate) mod avx;
 mod bit_manipulation;
 mod cache_timestamp;
 mod control;
-mod coprocessor;
 mod decoder;
 mod execution_faults;
 mod far;
@@ -30,11 +29,14 @@ mod xstate;
 
 pub(crate) use authority::DecodeAuthority;
 pub use decoder::{DecodeError, DecodedInstruction, decode_one};
-pub(crate) use decoder::{DecodePolicy, decode_with_authority};
+pub(crate) use decoder::{DecodePolicy, decode_with_authority, paging_error};
 
 #[cfg(test)]
 pub(crate) use decoder::{decode_bound, decode_for_execution};
-pub(crate) use fetch::{BoundDecode, CapturedCodeFault, CodeDecodeKey, CodeFetchContext};
+pub(crate) use fetch::{
+    BoundDecode, CapturedCodeFault, CapturedFetchFaultKind32, CodeDecodeKey, CodeFetchContext,
+    fetch_unbound,
+};
 
 #[cfg(test)]
 mod modes;

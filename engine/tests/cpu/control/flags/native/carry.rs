@@ -1,3 +1,4 @@
+use super::support_fetch as fetch;
 use super::support_prefix_admission as prefix_admission;
 
 use ring3_engine::{abi::arena::TRANSFER_OFFSET, process::EngineInstance};
@@ -131,8 +132,12 @@ fn prefixes_refuse_and_single_byte_fetch_preserves_boundaries() {
         }
     }
     let engine = code(0x1fff, &[0x66]);
-    assert!(
-        matches!(decode_one(engine.memory().unwrap(), GuestAddress(0x1fff)), Err(DecodeError::MemoryFault { fault, length: 2, .. }) if fault.reason == FaultReason::Unmapped && fault.address == GuestAddress(0x2000))
+    fetch::assert_error(
+        decode_one(engine.memory().unwrap(), GuestAddress(0x1fff)).unwrap_err(),
+        0x1fff,
+        0x2000,
+        FaultReason::Unmapped,
+        2,
     );
 }
 

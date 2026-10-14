@@ -1,3 +1,4 @@
+use super::support_fetch as fetch;
 use super::support_prefix_admission as prefix_admission;
 
 use ring3_engine::{
@@ -14,9 +15,7 @@ use ring3_engine::{
             ir::{Location32, Operation, Value32},
         },
     },
-    memory::{
-        Access, AddressSpace, FaultReason, GuestAddress, MemoryFault, PageRange, Permissions,
-    },
+    memory::{Access, AddressSpace, FaultReason, GuestAddress, PageRange, Permissions},
     process::{EngineInstance, HostError},
 };
 
@@ -206,16 +205,8 @@ fn pause_exact_grammar_keeps_prefix_and_instruction_neighbors_closed() {
     }
 }
 
-fn fetch_error(pc: u32, address: u32, length: u32, reason: FaultReason) -> DecodeError {
-    DecodeError::MemoryFault {
-        pc: GuestAddress(pc),
-        fault: MemoryFault {
-            address: GuestAddress(address),
-            access: Access::Execute,
-            reason,
-        },
-        length,
-    }
+fn fetch_error(pc: u32, address: u32, length: u32, reason: FaultReason) -> fetch::FetchFault {
+    fetch::expected(pc, address, reason, length)
 }
 
 #[test]
@@ -233,7 +224,9 @@ fn pause_fetches_both_bytes_without_overreading_or_wrapping() {
     }
     let mut memory = code_space(0x1fff, &PAUSE[..1]);
     assert_eq!(
-        decode_one(&memory, GuestAddress(0x1fff)).err(),
+        decode_one(&memory, GuestAddress(0x1fff))
+            .err()
+            .map(fetch::observed),
         Some(fetch_error(0x1fff, 0x2000, 2, FaultReason::Unmapped))
     );
     let next = PageRange::new(GuestAddress(0x2000), 1).unwrap();
@@ -241,7 +234,9 @@ fn pause_fetches_both_bytes_without_overreading_or_wrapping() {
     memory.write(GuestAddress(0x2000), &PAUSE[1..]).unwrap();
     memory.protect(next, Permissions::READ).unwrap();
     assert_eq!(
-        decode_one(&memory, GuestAddress(0x1fff)).err(),
+        decode_one(&memory, GuestAddress(0x1fff))
+            .err()
+            .map(fetch::observed),
         Some(fetch_error(0x1fff, 0x2000, 2, FaultReason::Permission))
     );
 
@@ -251,7 +246,9 @@ fn pause_fetches_both_bytes_without_overreading_or_wrapping() {
     memory.write(GuestAddress(0), &PAUSE[1..]).unwrap();
     memory.protect(zero, Permissions::EXECUTE).unwrap();
     assert_eq!(
-        decode_one(&memory, GuestAddress(u32::MAX)).err(),
+        decode_one(&memory, GuestAddress(u32::MAX))
+            .err()
+            .map(fetch::observed),
         Some(fetch_error(
             u32::MAX,
             u32::MAX,
@@ -267,7 +264,9 @@ fn pause_fetches_both_bytes_without_overreading_or_wrapping() {
         )
         .unwrap();
     assert_eq!(
-        decode_one(&memory, GuestAddress(CODE)).err(),
+        decode_one(&memory, GuestAddress(CODE))
+            .err()
+            .map(fetch::observed),
         Some(fetch_error(CODE, CODE, 1, FaultReason::Permission))
     );
 }

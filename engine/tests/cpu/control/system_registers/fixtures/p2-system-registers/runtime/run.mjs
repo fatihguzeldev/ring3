@@ -48,7 +48,13 @@ const CASES = [
   {id:'sgdt-preinstruction-cancel-RF', hex:'0f0100', address:0x5000, bytes:GDT, flags:0x10002, version:3, shadow:1, cancel:1, preinstruction:true},
 ];
 assert.equal(CASES.length, 31, 'frozen finite family inventory');
-const FAMILIES = [['gdtr','0f0100'], ['idtr','0f0108'], ['ldtr','0f00c0'], ['tr','0f00c8'], ['msw','0f01e0']];
+const DEFAULTS = [
+  {id:'gdtr',hex:'0f0100',address:0x5000,bytes:'ff070000ffff'},
+  {id:'idtr',hex:'0f0108',address:0x5000,bytes:'ff070010ffff'},
+  {id:'ldtr',hex:'0f00c0',eax:0},
+  {id:'tr',hex:'0f00c8',eax:0x28},
+  {id:'msw',hex:'0f01e0',eax:0xa1b20033},
+];
 const suffix = (c, name) => c.resident ? ({cpu_write:'cpu_write_resident',cpu_store16:'cpu_store_resident16'}[name]) : name;
 const binding = (c, material) => c.resident ? material.binding : [];
 function helper(c, material, address, bytes, status = 0) {
@@ -56,7 +62,7 @@ function helper(c, material, address, bytes, status = 0) {
   return {name, args:[...binding(c, material), address, ...(six ? [6,1] : [bytes.readUInt16LE(0)])], status};
 }
 function packet(want, width, fault = false) {
-  want.set(record('R3MH', 40, fault ? [1,0,2,0x6000,2,width] : [0,0,0,0,0,width], width === 6 ? 7 : 10), 100);
+  want.set(record('R3MH', 40, fault ? [9,0,7,0x6000,2,width] : [0,0,0,0,0,width], fault ? 15 : width === 6 ? 7 : 10), 100);
 }
 function result(input, spec, instructionLength, {pc = PC, fault = spec.fault, gates = false} = {}) {
   const want = Buffer.from(input), six = spec.bytes?.length === 12;
@@ -67,7 +73,7 @@ function result(input, spec, instructionLength, {pc = PC, fault = spec.fault, ga
   }
   const version = six || spec.segmentFault ? 6 : spec.bytes ? 6 : gates ? 3 : 1;
   if (spec.segmentFault) exit(want,spec.segmentFault,0,6);
-  else if (fault) exit(want,5,0,version,[2,0x6000,2,spec.bytes.length/2]);
+  else if (fault) exit(want,23,0,12,[7,0x6000,2,spec.bytes.length/2]);
   else if (spec.debug) exit(want,16,1,7);
   else if (spec.preinstruction) exit(want,spec.cancel ? 2 : 1,0,version);
   else exit(want,spec.smc ? 6 : 1,1,version);
@@ -132,7 +138,7 @@ for (const resident of [false,true]) for (const entries of [false,true]) {
     }
     const want = result(input,spec,length-2), wantRAM = h.literalRAM(c);
     if (spec.bytes && !spec.fault && !spec.preinstruction) writeRAM(wantRAM,spec.address,Buffer.from(spec.bytes,'hex'));
-    const helpers = spec.bytes && !spec.preinstruction ? [helper(c,material,spec.address,Buffer.from(spec.bytes,'hex'),spec.smc ? 11 : 0)] : [];
+    const helpers = spec.bytes && !spec.preinstruction ? [helper(c,material,spec.address,Buffer.from(spec.bytes,'hex'),spec.fault ? 23 : spec.smc ? 11 : 0)] : [];
     queryInvocations++;
     h.observe(c,spec.id+': literal query semantics',{input,want,wantRAM,budget:spec.budget ?? 1,helpers});
     if (spec.capturedPages) {
@@ -152,40 +158,41 @@ for (const resident of [false,true]) for (const entries of [false,true]) {
     if (spec.smc) {const after = h.arena(c); h.observe(c,spec.id+': stale held material stays neutral',{input:after,want:after,status:4});}
     h.host(c,'close');
   }
-  // Default absent bank and a partial bank have intentionally different admission contracts.
-  for (const [name,hex] of FAMILIES) {
-    const c = setup(resident,entries,'default missing '+name,[[0x1000]],null), length = uploadCode(c,PC,hex);
-    h.put(c,0,state(h.arena(c),{regs:[0xffffffff,...registers.slice(1)]}));
-    strict(c,'old-default missing '+name+' neutral compile refusal',PC,length,[],10); h.host(c,'close');
-  }
-  {
-    const c = setup(resident,entries,'partial null LDTR only',[[0x1000]],bank(4));
-    const length = uploadCode(c,PC,'0f00c0'); h.put(c,0,state(h.arena(c)));
-    const material = strict(c,'partial-bank explicit zero is available',PC,length);
-    if (material) {
-      const input=state(h.arena(c)),want=result(input,{eax:0},3);
-      h.observe(c,'partial-bank SLDT zero readback',{input,want});
-    }
-    // Same artifact exists, but each missing field still refuses without replacing material.
-    for (const [name,hex] of FAMILIES.filter(([name])=>name!=='ldtr')) {
-      const pc=0x1100, length=uploadCode(c,pc,hex); strict(c,'partial bank missing '+name,pc,length,[],10);
+  for (const partial of [false,true]) {
+    const c=setup(resident,entries,partial?'partial bank defaults':'application defaults',[[0x1000],[0x5000]],partial?bank(4):null);
+    for (const spec of DEFAULTS) {
+      const length=uploadCode(c,PC,spec.hex);h.put(c,0,seed(c,spec));
+      const helpers=spec.bytes?[suffix(c,'cpu_write')]:[];
+      const material=strict(c,spec.id+': complete default query bank',PC,length,helpers);
+      if (material) {
+        const input=seed(c,spec),want=result(input,spec,length-2),wantRAM=h.literalRAM(c);
+        if(spec.bytes)writeRAM(wantRAM,spec.address,Buffer.from(spec.bytes,'hex'));
+        h.observe(c,spec.id+': exact application default observation',{input,want,wantRAM,
+          helpers:spec.bytes?[helper(c,material,spec.address,Buffer.from(spec.bytes,'hex'))]:[]});
+      } else h.skip(c,spec.id+': default query execution','default query compile');
     }
     h.host(c,'close');
   }
   {
-    const c=setup(resident,entries,'stopped missing authority',[[0x1000],[0x2000]],null); uploadCode(c,0x2000,'0f0100');
-    if (bootstrap(c,0x2000,'missing-bank stopped')) h.compile(c,'old-default stopped full query missing authority',[],[],{stopped:true,expectedStatus:10});
+    const c=setup(resident,entries,'stopped default query',[[0x1000],[0x2000],[0x5000]],null);uploadCode(c,0x2000,'0f0100');
+    if(bootstrap(c,0x2000,'default-bank stopped')) {
+      const material=h.compile(c,'stopped full query uses application defaults',[],[suffix(c,'cpu_write')],{stopped:true});
+      if(material) {
+        const spec=DEFAULTS[0],input=seed(c,spec,0x2000),want=result(input,spec,3,{pc:0x2000}),wantRAM=h.literalRAM(c);
+        writeRAM(wantRAM,0x5000,Buffer.from(spec.bytes,'hex'));
+        h.observe(c,'stopped default SGDT exact store',{input,want,wantRAM,helpers:[helper(c,material,0x5000,Buffer.from(spec.bytes,'hex'))]});
+      }else h.skip(c,'stopped default query execution','stopped query compile');
+    }
     h.host(c,'close');
   }
-  // Fetch must complete before either missing authority or lowering. Failed prepares do not freeze startup.
+  // fetch must complete before lowering; failed prepares do not freeze startup configuration.
   for (const [name,prefix,modrm,bytes] of [['sgdt','0f01','00',GDT],['sldt','0f00','c0',null]]) {
     const c=setup(resident,entries,'truncated '+name,[[0x1000],[0x5000]],null);
     h.upload(c,0x1ffe,Buffer.from(prefix,'hex')); h.put(c,0,state(h.arena(c),{pc:0x1ffe,regs:[0x5000,...registers.slice(1)]}));
-    strict(c,'old-default '+name+' full-fetch refusal before absent bank',0x1ffe,5,[],10);
+    strict(c,'default '+name+' full-fetch refusal before lowering',0x1ffe,5,[],10);
     h.host(c,'map',[0x2000,1,7]); c.pages.push(0x2000); c.pages.sort((a,b)=>a-b); c.permissions.set(0x2000,7);c.expectedRAM.set(0x2000,Buffer.alloc(4096,0xa5));
     for (let at=0;at<4096;at+=512) h.upload(c,0x2000+at,Buffer.alloc(512,0xa5));
     h.upload(c,0x2000,Buffer.from(modrm+'ebfe','hex'));
-    strict(c,'repaired full query now missing '+name+' authority',0x1ffe,5,[],10);
     h.configure(c,'failed compile permits explicit bank configuration',FULL);
     const material=strict(c,'full-fetch repair admits supplied '+name,0x1ffe,5,bytes?[suffix(c,'cpu_write')]:[]);
     if (material) {
@@ -201,20 +208,25 @@ for (const resident of [false,true]) for (const entries of [false,true]) {
     strict(c,'unchanged unsupported prefix policy '+hex,PC,length,[],10); h.host(c,'close');
   }
   for (const consumed of [0,2]) {
-    const target=consumed ? 0x1ffe : 0x2000, c=setup(resident,entries,'current CS before missing bank prefix '+consumed,[[0x1000]],null);
+    const target=consumed ? 0x1ffe : 0x2000, c=setup(resident,entries,'current CS before default query prefix '+consumed,[[0x1000],[0x5000]],null);
     if(consumed) h.upload(c,target,Buffer.from('0f01','hex'));
-    if(bootstrap(c,target,'CS-before-bank prefix '+consumed)) {
+    if(bootstrap(c,target,'CS-before-query prefix '+consumed)) {
       const input=Buffer.from(h.arena(c)); setSegments(input,{csLimit:0x1fff}); h.put(c,0,input);
       const m=h.compile(c,'stopped captures real denied prefix '+consumed,[],[],{stopped:true});
       if(m) {
         const gpInput=h.arena(c), gp=exit(Buffer.from(gpInput),11,0,6);
-        h.observe(c,'CS denial precedes missing bank '+consumed,{input:gpInput,want:gp});
+        h.observe(c,'CS denial precedes default query '+consumed,{input:gpInput,want:gp});
         h.host(c,'map',[0x2000,1,7]);c.pages.push(0x2000);c.pages.sort((a,b)=>a-b);c.permissions.set(0x2000,7);c.expectedRAM.set(0x2000,Buffer.alloc(4096,0xa5));
         for(let at=0;at<4096;at+=512)h.upload(c,0x2000+at,Buffer.alloc(512,0xa5));
         h.upload(c,0x2000,Buffer.from(consumed?'00ebfe':'0f0100ebfe','hex'));
         const repaired=Buffer.from(h.arena(c));setSegments(repaired,{csLimit:0x2fff});
         const miss=exit(Buffer.from(repaired),3,0,1);h.observe(c,'repaired synthetic block requests real code '+consumed,{input:repaired,want:miss});
-        h.compile(c,'repaired full query reports missing authority '+consumed,[],[],{stopped:true,expectedStatus:10});
+        const material=h.compile(c,'repaired full query uses default readback '+consumed,[],[suffix(c,'cpu_write')],{stopped:true});
+        if(material) {
+          const spec=DEFAULTS[0],input=Buffer.from(h.arena(c));input.writeUInt32LE(0x5000,16);
+          const want=result(input,spec,3,{pc:target}),wantRAM=h.literalRAM(c);writeRAM(wantRAM,0x5000,Buffer.from(spec.bytes,'hex'));
+          h.observe(c,'repaired CS admits default query '+consumed,{input,want,wantRAM,helpers:[helper(c,material,0x5000,Buffer.from(spec.bytes,'hex'))]});
+        }else h.skip(c,'repaired default query '+consumed,'repaired stopped compile');
       } else h.skip(c,'CS-before-bank execution','stopped synthetic capture');
     }
     h.host(c,'close');
@@ -229,7 +241,7 @@ for (const resident of [false,true]) for (const entries of [false,true]) {
     }
     h.host(c,'close');
   }
-  // The strict request codec rejects malformed/noncanonical records without consuming the once-only bank slot.
+  // invalid request records leave the prepublication readback configuration reusable.
   {
     const c=setup(resident,entries,'configuration codec',[[0x1000]],null);
     const invalid=[['magic',b=>b[0]^=1],['version',b=>b.writeUInt16LE(2,4)],['profile',b=>b.writeUInt16LE(2,6)],['size',b=>b.writeUInt32LE(40,8)],
@@ -238,7 +250,8 @@ for (const resident of [false,true]) for (const entries of [false,true]) {
       ...[0,0x30,0x35,0x39,0x21,0x11,0x71,0xffff].map(value=>['CR0-'+value.toString(16),b=>b.writeUInt16LE(value,32)])];
     for(const [label,mutate]of invalid){const b=Buffer.from(FULL);mutate(b);h.configure(c,'strict codec rejects '+label,b,7);}
     h.configure(c,'valid request after every neutral codec refusal',FULL);
-    h.configure(c,'configured bank rejects a second explicit image',bank(4),7);
+    h.configure(c,'partial image can replace readback before executable publication',bank(4));
+    h.configure(c,'complete image can replace the partial readback before publication',FULL);
     const length=uploadCode(c,PC,'0f00c0');h.put(c,0,state(h.arena(c)));const material=strict(c,'codec refusals did not replace LDTR43',PC,length);
     if(material){const input=state(h.arena(c));h.observe(c,'configured bank retained after rejected requests',{input,want:result(input,{eax:0x43},3)});}
     h.configure(c,'configuration frozen after executable material',FULL,7);
@@ -248,9 +261,9 @@ for (const resident of [false,true]) for (const entries of [false,true]) {
     h.host(c,'close');
   }
   {
-    const c=setup(resident,entries,'material freezes an absent bank',[[0x1000]],null),length=uploadCode(c,PC,'90');h.put(c,0,state(h.arena(c)));
-    const material=strict(c,'unconfigured NOP publishes executable material',PC,length);
-    h.configure(c,'missing bank cannot be filled after material',FULL,7);
+    const c=setup(resident,entries,'material freezes application defaults',[[0x1000]],null),length=uploadCode(c,PC,'90');h.put(c,0,state(h.arena(c)));
+    const material=strict(c,'default-bank NOP publishes executable material',PC,length);
+    h.configure(c,'application defaults cannot change after material',FULL,7);
     if(resident && material){h.request(c,'discard all unacknowledged resident material','discard_unacknowledged_resident',material.binding);h.configure(c,'discard does not reopen configuration lifetime',FULL,7);}
     h.host(c,'close');c.pages=[];c.permissions.clear();c.expectedRAM.clear();
     h.configure(c,'closed export refuses before request parsing',Buffer.alloc(36),5);
@@ -294,10 +307,9 @@ for (const resident of [false,true]) for (const entries of [false,true]) {
 assert.equal(queryInvocations,124,'31 literal queries across exactly four endpoint profiles');
 } catch(error) {h.failure('fixture setup or admission exception',error);}
 h.finish([
-  'Caller-supplied readback images only; no OS defaults, IDT/TSS/table walking, UMIP1, or hardware-family claim.',
-  'Default absent-bank neutral refusals and full-fetch refusals are host admission controls, never successful-bank semantic RED.',
-  'All module imports call real engine exports; every guard/helper argument and transport is compared literally.',
-  'Late six-byte failures compare every mapped RAM byte and re-enter material capturing both Execute destination pages before any repair; native source-local tests compare version counters directly.',
-  'Write-only destination diagnostics temporarily add READ and restore the original permission after execution; they make no unchanged-mapping-version claim.',
-  'Frozen original31-case specification stays immutable. Runnable uses canonical null-GS cache0 and ABI StackSegment reason15; both isolated literal clarifications are recorded in the delivery manifest.',
-], {contexts:192, modules:186, rows:756, moduleRuns:212});
+  'Complete application defaults and partial overrides are readback observations, without IDT/TSS table walking.',
+  'All original query widths, addressing forms, store effects and complete CPU/numeric context checks remain exercised.',
+  'Application page faults preserve exact denied address, write intent, packet and exit metadata; failed stores preserve every mapped RAM byte.',
+  'Real generated helpers, entry epochs and detector events are checked independently, including RF/TF, budget, cancellation and callback lifetime.',
+  'Write-only diagnostics temporarily add READ and restore the permission; no unchanged-mapping-version claim is made.',
+]);

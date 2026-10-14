@@ -6,11 +6,11 @@ use crate::{
         x86::{SIMD_SIZE, X87_SIZE, decode_simd, decode_x87, encode_simd, encode_x87},
     },
     cpu::x86::{
-        X87State,
+        CpuMemoryPort32, CpuReadPort32, X87State,
         simd::SimdState,
         xstate::{self, IMAGE_SIZE},
     },
-    memory::{AddressSpace, GuestAddress},
+    memory::GuestAddress,
     process::{EngineInstance, HostError, StoreCompletion},
 };
 
@@ -77,10 +77,10 @@ impl EngineInstance {
             return Ok(StoreCompletion::Complete);
         }
         let request = xstate::requested(low, high);
-        let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
-        let version = memory.code_validation_version();
-        let result = save(memory, address, request, &x87, &simd);
-        let changed = result.is_ok() && version != memory.code_validation_version();
+        let version = self.memory.as_ref().unwrap().code_validation_version();
+        let result = save(&mut self.cpu_memory_port32(), address, request, &x87, &simd);
+        let changed =
+            result.is_ok() && version != self.memory.as_ref().unwrap().code_validation_version();
         self.xstate_packet(result)?;
         self.cpu_store_currentness(changed, resident)
     }
@@ -91,8 +91,13 @@ impl EngineInstance {
             return self.xstate_packet(Err(CpuMemoryError::GeneralProtection(0)));
         }
         let request = xstate::requested(low, high);
-        let memory = self.memory.as_ref().ok_or(HostError::Closed)?;
-        let restored = restore(memory, address, request, &current_x87, &current_simd);
+        let restored = restore(
+            &mut self.cpu_memory_port32(),
+            address,
+            request,
+            &current_x87,
+            &current_simd,
+        );
         match restored {
             Ok((x87, simd)) => {
                 let mut x87_record = [0; X87_SIZE];
@@ -127,18 +132,18 @@ fn part_address(base: u32, offset: u32) -> GuestAddress {
 }
 
 fn read_part(
-    memory: &AddressSpace,
+    memory: &mut impl CpuReadPort32,
     base: u32,
     offset: u32,
     bytes: &mut [u8],
 ) -> Result<(), CpuMemoryError> {
     memory
-        .cpu_read(part_address(base, offset), bytes)
-        .map_err(CpuMemoryError::Memory)
+        .read(part_address(base, offset), bytes)
+        .map_err(CpuMemoryError::from)
 }
 
 fn save(
-    memory: &mut AddressSpace,
+    memory: &mut impl CpuMemoryPort32,
     address: u32,
     request: u64,
     x87: &X87State,
@@ -146,7 +151,9 @@ fn save(
 ) -> Result<(), CpuMemoryError> {
     let mut image = [0; IMAGE_SIZE];
     // even an empty request performs the header read/modify/write.
-    read_part(memory, address, 512, &mut image[512..520])?;
+    memory
+        .read_modify(part_address(address, 512), &mut image[512..520])
+        .map_err(CpuMemoryError::from)?;
     xstate::save(request, x87, simd, &mut image);
     let mut spans = [(GuestAddress(0), &[][..]); 5];
     let mut count = 0;
@@ -163,12 +170,12 @@ fn save(
         }
     }
     memory
-        .cpu_write_spans(&spans[..count])
-        .map_err(CpuMemoryError::Memory)
+        .write_spans(&spans[..count])
+        .map_err(CpuMemoryError::from)
 }
 
 fn restore(
-    memory: &AddressSpace,
+    memory: &mut impl CpuReadPort32,
     address: u32,
     request: u64,
     x87: &X87State,
@@ -258,7 +265,6 @@ mod tests {
         )
         .unwrap();
         engine.pending_call = Some(PendingCall {
-            task_revision: engine.task_execution_revision(),
             token: 1,
             owner: PendingOwner::Resident(id),
             frame,
@@ -330,3 +336,7 @@ mod tests {
         blocked(&mut engine, id, HostError::Closed);
     }
 }
+
+#[cfg(test)]
+#[path = "xstate/paging.rs"]
+mod paging_tests;

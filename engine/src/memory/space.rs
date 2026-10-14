@@ -15,7 +15,6 @@ pub struct AddressSpace {
     version: u64,
     code_validation_version: u64,
     versions: Box<[PageVersion]>,
-    paging_certificates: Option<Box<[u8]>>,
 }
 
 impl AddressSpace {
@@ -86,7 +85,6 @@ impl AddressSpace {
             version: 0,
             code_validation_version: 0,
             versions,
-            paging_certificates: None,
         })
     }
 
@@ -145,7 +143,6 @@ impl AddressSpace {
         let version = self.advance_version()?;
         self.code_validation_version = version;
         for page in range.indices() {
-            self.invalidate_paging_certificate32(page);
             let slot = self.free.pop().unwrap();
             let offset = slot as usize * PAGE_SIZE as usize;
             self.backing[offset..offset + PAGE_SIZE as usize].fill(0);
@@ -168,7 +165,6 @@ impl AddressSpace {
         let version = self.advance_version()?;
         self.code_validation_version = version;
         for page in range.indices() {
-            self.invalidate_paging_certificate32(page);
             let slot = self.mappings[page] as usize - 1;
             self.permissions[slot] = permissions;
             self.versions[slot].mapping = version;
@@ -199,7 +195,6 @@ impl AddressSpace {
         self.copy_in_validated(word.address, &word.value.to_le_bytes(), version);
         self.code_validation_version = version;
         for page in range.indices() {
-            self.invalidate_paging_certificate32(page);
             let slot = self.mappings[page] as usize - 1;
             self.permissions[slot] = permissions;
             self.versions[slot].mapping = version;
@@ -211,7 +206,6 @@ impl AddressSpace {
         self.require_mapped(range)?;
         self.code_validation_version = self.advance_version()?;
         for page in range.indices() {
-            self.invalidate_paging_certificate32(page);
             let slot = self.mappings[page] - 1;
             self.mappings[page] = 0;
             self.permissions[slot as usize] = Permissions::NONE;

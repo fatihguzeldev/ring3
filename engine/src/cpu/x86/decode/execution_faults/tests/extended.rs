@@ -85,7 +85,7 @@ fn final_execute_byte_is_required_before_supervisor_xsave_or_wide_aes_classifica
         let mut memory = executable(&bytes[..bytes.len() - 1], pc);
         let missing = decode_one(&memory, GuestAddress(pc)).unwrap_err();
         assert!(
-            matches!(missing, DecodeError::MemoryFault { fault, length, .. } if fault.address == GuestAddress(0x2000) && length == bytes.len() as u32)
+            matches!(missing, DecodeError::Paging { error: crate::cpu::x86::CpuPagingError32::PageFault(fault), attempted_length: length, .. } if fault.linear() == GuestAddress(0x2000) && usize::from(length) == bytes.len())
         );
         assert_eq!(
             decode_for_execution(&memory, GuestAddress(pc)).unwrap_err(),
@@ -99,7 +99,7 @@ fn final_execute_byte_is_required_before_supervisor_xsave_or_wide_aes_classifica
         memory.protect(page, Permissions::READ).unwrap();
         let denied = decode_one(&memory, GuestAddress(pc)).unwrap_err();
         assert!(
-            matches!(denied, DecodeError::MemoryFault { fault, .. } if fault.address == GuestAddress(0x2000))
+            matches!(denied, DecodeError::Paging { error: crate::cpu::x86::CpuPagingError32::PageFault(fault), .. } if fault.linear() == GuestAddress(0x2000))
         );
         assert_eq!(
             decode_for_execution(&memory, GuestAddress(pc)).unwrap_err(),
@@ -129,7 +129,6 @@ fn vex128_aes_selected_absence_and_neutral_prefix_refusals_remain_distinct() {
     }
     for bytes in [
         &[0xf2, 0xf2, 0x0f, 0x01, 0xe8][..],
-        &[0xcd, 0x80],
         &[0xc4, 0xe3, 0x7d, 0x44, 0xc1, 0],
     ] {
         let memory = executable(bytes, 0x1000);

@@ -55,13 +55,20 @@ fn absent_vpclmul256_prepares_ud() {
     capture_absent_fault(&[0xc4, 0xe3, 0x7d, 0x44, 0xc1, 0]);
 }
 #[test]
-fn vex128_pclmul_success_and_unselected_int_are_preserved() {
+fn vex128_pclmul_and_software_int_admission_are_preserved() {
     let engine = stopped(&[0xc4, 0xe3, 0x79, 0x44, 0xc1, 0], 0x3000);
     let decoded = decode_one(engine.memory().unwrap(), GuestAddress(0x3000)).unwrap();
     assert!(matches!(decoded.operation(), Operation::Avx(_)));
     assert_eq!(decoded.length(), 6);
     let mut engine = stopped(&[0xcd, 0x80], 0x3000);
     let before = engine.arena().to_vec();
-    assert!(engine.compile_stopped_entry(KEY, 1).is_err());
+    assert_eq!(
+        decode_one(engine.memory().unwrap(), GuestAddress(0x3000))
+            .unwrap()
+            .operation(),
+        &Operation::SoftwareInterrupt { vector: 0x80 }
+    );
+    assert_eq!(engine.compile_stopped_entry(KEY, 1), Ok(2));
+    assert_eq!(engine.generation(), 2);
     assert_eq!(engine.arena(), before);
 }

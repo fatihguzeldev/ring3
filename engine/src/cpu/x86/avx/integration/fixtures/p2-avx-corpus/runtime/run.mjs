@@ -19,6 +19,8 @@ const sourcePaths = [...new Set([...receipt.sourcePaths, 'engine/tests/support/w
   ...ownerFiles('engine/src/cpu/x86/avx'), ...ownerFiles('engine/src/cpu/x86/decode/avx'), ...ownerFiles('engine/src/cpu/dbt/wasm/avx'),
   'engine/src/cpu/x86/simd.rs', 'engine/src/cpu/dbt/wasm/cpu_result.rs', 'engine/src/cpu/dbt/wasm/emitter.rs',
   'engine/src/cpu/dbt/wasm/integer/dispatch.rs', 'engine/src/cpu/dbt/wasm/memory.rs', 'engine/src/process/cpu/avx.rs',
+  'engine/src/cpu/dbt/wasm/detection.rs', 'engine/src/process/wasm/detection.rs',
+  'engine/src/process/cpu/interrupts/detection.rs', 'engine/src/process/execution/authority.rs',
   'engine/src/abi/arena.rs', 'engine/src/abi/x86/avx.rs', 'engine/src/abi/x86/ymm.rs', 'engine/src/cpu/x86/capabilities.rs'])].sort();
 const pins = () => Object.fromEntries(sourcePaths.map(path => [path, hash(readFileSync(join(root, path)))]));
 const sourcePins = pins(), cases = JSON.parse(readFileSync(join(output, 'cases.json'), 'utf8'));
@@ -34,7 +36,7 @@ const arena = c => Buffer.from(new Uint8Array(c.memory.buffer, c.base, SIZE));
 function input(c, offset, value) {new Uint8Array(c.memory.buffer).set(value, c.base + offset);}
 function host(c, name, args = []) {assert.equal(c.api[name](...args), 0, name);}
 function open(owner, entries) {
-  const instance = new WebAssembly.Instance(engine.module, {}), c = {owner, entries, memory: instance.exports.memory, api: {}, calls: []};
+  const instance = new WebAssembly.Instance(engine.module, {}), c = {owner, entries, memory: instance.exports.memory, api: {}, calls: [], guards: [], events: []};
   for (const [name, value] of Object.entries(instance.exports)) if (name.startsWith('ring3_abi_v1_') && typeof value === 'function') c.api[name.slice(13)] = value;
   for (const [name, arity] of Object.entries({open: 3, map: 3, upload: 2, compile: 1, compile_entries: 2,
     compile_resident: 1, compile_resident_entries: 2, cpu_read: 3, cpu_write: 3, cpu_write_resident: 7,
@@ -51,6 +53,7 @@ function compile(c, row) {
   input(c, T, words(c.entries ? [PC] : [PC, code.length + 2]));
   host(c, c.owner === 'resident' ? c.entries ? 'compile_resident_entries' : 'compile_resident' : c.entries ? 'compile_entries' : 'compile', [1, ...(c.entries ? [0] : [])]);
   const a = arena(c);
+  c.generation = c.api.generation() >>> 0;
   if (c.owner === 'resident') c.resident = [a.readUInt32LE(T + 8), a.readUInt32LE(T + 12)];
   const pointer = c.owner === 'resident' ? a.readUInt32LE(T + 16) : c.api.module_ptr() >>> 0;
   const length = c.owner === 'resident' ? a.readUInt32LE(T + 20) : c.api.module_len() >>> 0;
@@ -63,12 +66,23 @@ function compile(c, row) {
   } catch (error) {
     throw new Error(`${row.index}/${row.name}: generated module validation failed (${modulePath})`, {cause: error});
   }
-  const names = ['env:memory:memory', `ring3:${c.owner === 'resident' ? 'guard_resident' : 'guard'}:function`];
+  const guard = c.owner === 'resident' ? 'guard_detect_resident' : 'guard_detect';
+  const names = ['env:memory:memory', `ring3:${guard}:function`, 'ring3:finish_exception_detection:function'];
   if (row.helper) names.push(`ring3:${c.owner === 'resident' ? 'avx_execute_resident' : 'avx_execute'}:function`);
   else if (row.length) names.push(`ring3:${row.access === 1 ? 'cpu_read' : c.owner === 'resident' ? 'cpu_write_resident' : 'cpu_write'}:function`);
   assert.deepEqual(WebAssembly.Module.imports(module).map(item => `${item.module}:${item.name}:${item.kind}`).sort(), names.sort(), `${row.name}: exact instruction authority imports`);
   assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
   const ring3 = {...c.api};
+  ring3[guard] = (...args) => {
+    const epoch = c.api[guard](...args);
+    c.guards.push({args: args.map(value => value >>> 0), epoch});
+    return epoch;
+  };
+  ring3.finish_exception_detection = (...args) => {
+    const status = c.api.finish_exception_detection(...args);
+    c.events.push({args, status});
+    return status;
+  };
   for (const name of ['cpu_read', 'cpu_write', 'cpu_write_resident', 'avx_execute', 'avx_execute_resident']) ring3[name] = (...args) => {
     const status = c.api[name](...args); c.calls.push({name, status, args: args.map(value => value >>> 0)}); return status;
   };
@@ -94,11 +108,16 @@ for (const owner of ['replacement', 'resident']) for (const entries of [false, t
       const expected = Buffer.from(original); expected.writeUInt32LE(ADDRESS, index); assert.deepEqual(code, expected, 'only canonical absolute displacement relocated');
     }
     for (let start = 0; start < 4096; start += 512) upload(c, PAGE + start, frame('ram', row).subarray(start, start + 512));
-    input(c, 0, frame('input', row)); c.calls = [];
+    input(c, 0, frame('input', row)); c.calls = []; c.guards = []; c.events = [];
     assert.equal(run(c.base, c.base + 56, 1, c.base + 96), 0, `${row.name}: generated run`);
     assert.deepEqual(arena(c), frame('expected', row), `${owner}/${entries ? 'entries' : 'explicit'}/${row.index}/${row.name}: full canonical arena`);
     assert.equal(arena(c).readUInt32LE(76), 1, 'exactly one retired instruction');
     assert.equal(arena(c).readUInt32LE(48), PC + code.length, 'next guest EIP');
+    assert.equal(c.guards.length, 1, 'exactly one real application entry guard');
+    assert.deepEqual(c.guards[0].args, [c.key, keyHigh,
+      ...(owner === 'resident' ? c.resident : [c.generation]), c.base, c.base + 56, c.base + 96], 'exact material identity and arena pointers');
+    assert.ok(typeof c.guards[0].epoch === 'bigint' && c.guards[0].epoch > 0n, 'real entry detection epoch');
+    assert.equal(c.events.length, 0, 'successful budget stop creates no architectural event');
     assert.equal(c.calls.length, Number(row.helper || row.length !== 0), 'exact helper count');
     for (const call of c.calls) {
       assert.equal(call.status, 0, 'helper transport success');

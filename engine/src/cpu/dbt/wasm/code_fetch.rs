@@ -4,30 +4,7 @@ use super::locals::{
 use crate::{abi::arena::SEGMENTS_OFFSET, cpu::x86::decode::DecodedInstruction};
 use wasm_encoder::{BlockType, InstructionSink, MemArg, ValType};
 
-pub(super) fn refresh(code: &mut InstructionSink<'_>, limit: u32, raw_task_context: bool) {
-    if raw_task_context {
-        super::tasks::cache(code, crate::cpu::x86::SegmentRegister::Cs);
-        code.local_set(limit);
-        code.local_get(limit)
-            .i32_const(1 << 24)
-            .i32_and()
-            .if_(BlockType::Result(ValType::I32))
-            .local_get(limit)
-            .i32_const(0xfffff)
-            .i32_and()
-            .i32_const(12)
-            .i32_shl()
-            .i32_const(0xfff)
-            .i32_or()
-            .else_()
-            .local_get(limit)
-            .i32_const(0xfffff)
-            .i32_and()
-            .end()
-            .local_set(limit);
-        return;
-    }
-
+pub(super) fn refresh(code: &mut InstructionSink<'_>, limit: u32) {
     code.local_get(STATE_PTR)
         .i32_load16_u(arg(SEGMENTS_OFFSET + 4, 1))
         .i32_const(1)
@@ -107,35 +84,7 @@ fn arg(offset: usize, align: u32) -> MemArg {
 }
 
 // module-private immutable globals hold the retained interpretation, never live authority.
-pub(super) fn check_context(code: &mut InstructionSink<'_>, depth: u32, raw_task_context: bool) {
-    if raw_task_context {
-        super::tasks::base(code, crate::cpu::x86::SegmentRegister::Cs);
-        code.global_get(1).i32_ne();
-        super::tasks::cache(code, crate::cpu::x86::SegmentRegister::Cs);
-        code.i32_const(1 << 25)
-            .i32_and()
-            .i32_eqz()
-            .i32_eqz()
-            .global_get(2)
-            .i32_ne()
-            .i32_or()
-            .if_(BlockType::Empty);
-        code.local_get(EIP);
-        live_limit(code, true);
-        code.i32_gt_u()
-            .if_(BlockType::Result(ValType::I32))
-            .i32_const(11)
-            .else_()
-            .i32_const(3)
-            .end()
-            .local_set(REASON);
-        for local in [DETAIL, FAULT_ADDRESS, FAULT_ACCESS, FAULT_LENGTH] {
-            code.i32_const(0).local_set(local);
-        }
-        code.br(depth + 1).end();
-        return;
-    }
-
+pub(super) fn check_context(code: &mut InstructionSink<'_>, depth: u32) {
     code.global_get(0).if_(BlockType::Empty);
     code.local_get(STATE_PTR)
         .i32_load16_u(arg(SEGMENTS_OFFSET + 4, 1))
@@ -168,7 +117,7 @@ pub(super) fn check_context(code: &mut InstructionSink<'_>, depth: u32, raw_task
         .i32_or()
         .if_(BlockType::Empty);
     code.local_get(EIP);
-    live_limit(code, raw_task_context);
+    live_limit(code);
     code.i32_gt_u()
         .if_(BlockType::Result(ValType::I32))
         .i32_const(11)
@@ -182,7 +131,7 @@ pub(super) fn check_context(code: &mut InstructionSink<'_>, depth: u32, raw_task
     code.br(depth + 2).end().end();
 }
 
-pub(super) fn check_rejected(code: &mut InstructionSink<'_>, depth: u32, raw_task_context: bool) {
+pub(super) fn check_rejected(code: &mut InstructionSink<'_>, depth: u32) {
     code.local_get(HELPER_STATUS)
         .i32_eqz()
         .i32_eqz()
@@ -191,29 +140,11 @@ pub(super) fn check_rejected(code: &mut InstructionSink<'_>, depth: u32, raw_tas
         .i32_ne()
         .i32_and()
         .if_(BlockType::Empty);
-    check_context(code, depth + 1, raw_task_context);
+    check_context(code, depth + 1);
     code.end();
 }
 
-fn live_limit(code: &mut InstructionSink<'_>, raw_task_context: bool) {
-    if raw_task_context {
-        super::tasks::cache(code, crate::cpu::x86::SegmentRegister::Cs);
-        code.i32_const(1 << 24)
-            .i32_and()
-            .if_(BlockType::Result(ValType::I32));
-        super::tasks::cache(code, crate::cpu::x86::SegmentRegister::Cs);
-        code.i32_const(0xfffff)
-            .i32_and()
-            .i32_const(12)
-            .i32_shl()
-            .i32_const(0xfff)
-            .i32_or()
-            .else_();
-        super::tasks::cache(code, crate::cpu::x86::SegmentRegister::Cs);
-        code.i32_const(0xfffff).i32_and().end();
-        return;
-    }
-
+fn live_limit(code: &mut InstructionSink<'_>) {
     code.local_get(STATE_PTR)
         .i32_load16_u(arg(SEGMENTS_OFFSET + 4, 1))
         .i32_const(1)
@@ -245,3 +176,6 @@ fn live_limit(code: &mut InstructionSink<'_>, raw_task_context: bool) {
 
 mod hoist;
 pub(super) use hoist::helper_free_block;
+
+mod paging;
+pub(super) use paging::fault as paging_fault;

@@ -75,7 +75,7 @@ fn ordinary_narrow_aes_and_unselected_neutral_refusal_are_preserved() {
             );
         }
     }
-    let memory = executable(&[0xcd, 0x80]);
+    let memory = executable(&[0x66, 0x66, 0xcd, 0x80]);
     let strict = decode_one(&memory, GuestAddress(0x1000)).unwrap_err();
     assert!(matches!(strict, DecodeError::Unsupported(_)));
     assert_eq!(

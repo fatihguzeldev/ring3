@@ -50,7 +50,7 @@ pub(super) fn call(
         .call(index)
         .local_set(HELPER_STATUS);
     if matches!(descriptor, 0x30001..=0x30004) {
-        super::code_fetch::check_context(code, exit_depth, imports.raw_task_context.is_some());
+        super::code_fetch::check_context(code, exit_depth);
     }
     super::cpu_result::validate(
         code,
@@ -58,12 +58,16 @@ pub(super) fn call(
         if width == 0 { 0 } else { 3 },
         width != 0,
         exit_depth,
-        imports.raw_task_context.is_some(),
+        if matches!(descriptor, 0x30001..=0x30004) {
+            super::cpu_result::ResultContext::from(imports).read_intent()
+        } else {
+            super::cpu_result::ResultContext::from(imports).write_intent()
+        },
     );
     memory::reset_checks(code);
     memory::expect_field(code, 20, 0);
     memory::protocol_if_bad(code);
-    memory::exit_if_failed(code, exit_depth, imports.raw_task_context.is_some());
+    memory::exit_if_failed(code, exit_depth);
 }
 pub(super) fn operation(
     code: &mut InstructionSink<'_>,
@@ -147,7 +151,6 @@ pub(super) fn operation(
             _ => 0x8d5,
         },
         exit_depth,
-        imports.raw_task_context.is_some(),
     );
 }
 pub(super) fn compare8(
@@ -166,7 +169,7 @@ pub(super) fn compare8(
     );
     payload(code);
     call(code, 0x10000, 8, imports, exit_depth);
-    flags(code, 0x40, exit_depth, imports.raw_task_context.is_some());
+    flags(code, 0x40, exit_depth);
     for (offset, r) in [(8, Register32::Eax), (12, Register32::Edx)] {
         code.local_get(STATE_PTR)
             .i32_load(transfer(offset))
@@ -174,7 +177,7 @@ pub(super) fn compare8(
     }
 }
 
-fn flags(code: &mut InstructionSink<'_>, mutable: u32, exit_depth: u32, raw_task_context: bool) {
+fn flags(code: &mut InstructionSink<'_>, mutable: u32, exit_depth: u32) {
     code.local_get(STATE_PTR).i32_load(transfer(4));
-    super::cpu_result::flags(code, mutable, exit_depth, raw_task_context);
+    super::cpu_result::flags(code, mutable, exit_depth);
 }

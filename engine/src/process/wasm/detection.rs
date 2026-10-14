@@ -1,11 +1,7 @@
 use super::{REGISTRY, status};
-use crate::cpu::x86::DetectedEntryResult32;
 use crate::{
     abi::arena::{CANCEL_OFFSET, EXIT_OFFSET, STATE_OFFSET},
-    process::{
-        CallError, HostError, calls::call::PendingOwner,
-        cpu::interrupts::detection::site::generated_site,
-    },
+    process::{CallError, HostError, calls::call::PendingOwner},
 };
 
 fn guard_detection(key: u64, material: u64, resident: bool, pointers: [u32; 3]) -> i64 {
@@ -18,13 +14,11 @@ fn guard_detection(key: u64, material: u64, resident: bool, pointers: [u32; 3]) 
         };
         let result = (|| {
             if resident {
-                instance
-                    .guard_material_resident(key, material)
-                    .map_err(status)?;
+                instance.guard_resident(key, material).map_err(status)?;
             } else {
                 let generation =
                     u32::try_from(material).map_err(|_| status(HostError::InvalidArtifact))?;
-                instance.guard_material(key, generation).map_err(status)?;
+                instance.guard(key, generation).map_err(status)?;
             }
             let base = instance.arena_address() as u32;
             if pointers
@@ -90,6 +84,25 @@ pub(crate) fn guard_detect_resident(
     )
 }
 
+pub(crate) fn take_cpu_event() -> u32 {
+    super::mutate(|instance| {
+        let event = instance
+            .cpu_event
+            .as_ref()
+            .ok_or(HostError::InvalidRequest)?;
+        if !event.matches_context(instance.arena()) {
+            return Err(HostError::Call(CallError::StateChanged));
+        }
+        let mut bytes = [0; crate::abi::x86::CPU_EVENT_SITE_SIZE];
+        crate::abi::x86::encode_cpu_event_site32(event, &mut bytes)
+            .map_err(|_| HostError::Infrastructure)?;
+        let output = crate::abi::arena::TRANSFER_OFFSET;
+        instance.arena_mut()?[output..output + bytes.len()].copy_from_slice(&bytes);
+        instance.take_cpu_event32()?;
+        Ok(())
+    })
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn finish_exception_detection(
     epoch: i64,
@@ -117,25 +130,26 @@ pub(crate) fn finish_exception_detection(
                 .ok()
                 .filter(|epoch| *epoch != 0)
                 .ok_or(HostError::InvalidRequest)?;
-            let (event, restart) = generated_site([
-                reason,
-                detail,
-                address,
-                access,
-                length,
-                debug_origin,
-                restart_pc,
-                restart_retired,
-                restart_flags,
-                restart_shadow,
-                restart_work,
-            ])?;
-            instance.finish_exception_detection(epoch, event, restart)?;
-            instance.deliver_detected_exception(epoch)
+            instance.finish_generated_detection(
+                epoch,
+                [
+                    reason,
+                    detail,
+                    address,
+                    access,
+                    length,
+                    debug_origin,
+                    restart_pc,
+                    restart_retired,
+                    restart_flags,
+                    restart_shadow,
+                    restart_work,
+                ],
+            )?;
+            Ok(())
         })();
         match result {
-            Ok(DetectedEntryResult32::Entered { entered, .. }) if entered.code_invalidated => 11,
-            Ok(_) => 0,
+            Ok(()) => 0,
             Err(error) => status(error),
         }
     })

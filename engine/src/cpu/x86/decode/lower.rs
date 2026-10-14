@@ -62,9 +62,7 @@ pub(super) fn lower(
     if super::mpx::disabled_nop(instruction) {
         return Ok(Operation::Nop);
     }
-    if let Some(operation) =
-        super::interrupts::lower(instruction, bytes, authority.interrupts_configured)
-    {
+    if let Some(operation) = super::interrupts::lower(instruction, bytes) {
         return operation;
     }
     if let Some(operation) = super::system_registers::lower(instruction, authority.system_registers)

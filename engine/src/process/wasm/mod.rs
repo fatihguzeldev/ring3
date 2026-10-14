@@ -94,7 +94,6 @@ pub(super) fn status(error: HostError) -> u32 {
     match error {
         HostError::Closed => 5,
         HostError::ProcessExited => 21,
-        HostError::CpuShutdown => 22,
         HostError::InvalidRequest => 7,
         HostError::InvalidArtifact => 3,
         HostError::CodeInvalidated => 4,
@@ -214,28 +213,25 @@ pub(crate) use xstate::{
 
 mod cpu;
 pub(crate) use cpu::{
-    configure_interrupt_descriptor_table, configure_segment_descriptor,
+    configure_segment_descriptor,
     configure_segment_descriptor_raw, configure_system_register_bank, cpu_fxsave,
     cpu_fxsave_resident, cpu_integer, cpu_integer_resident, cpu_mask_write,
     cpu_mask_write_resident, cpu_read, cpu_read8, cpu_read16, cpu_read32, cpu_write,
     cpu_write_resident, far_call, far_call_resident, far_jump, far_jump_resident, far_return,
-    far_return_resident, interrupt_gate, interrupt_gate_resident, segment_load, segment_load_far,
+    far_return_resident, segment_load, segment_load_far,
     segment_load_far_resident, segment_load_resident, set_segment_base, simd_execute,
     simd_execute_resident, stack_execute, stack_execute_resident, x87_op, x87_resident_op,
 };
 
-mod detection;
-pub(crate) use detection::{finish_exception_detection, guard_detect, guard_detect_resident};
-
-mod exceptions;
-pub(crate) use exceptions::{deliver_exception, deliver_exception_resident};
-
-mod tasks;
-pub(crate) use tasks::{
-    configure_task_controls, configure_task_return_sources, read_task_context, read_task_controls,
-    task_return, task_return_resident,
+mod paging;
+pub(crate) use paging::{
+    cpu_fetch_fault,
+    cpu_fetch_fault_resident, cpu_read_modify, cpu_read_modify8, cpu_read_modify16,
+    cpu_read_modify32, read_cr2,
 };
-pub(crate) use tasks::{cpu_task_return, cpu_task_return_resident};
+
+mod detection;
+pub(crate) use detection::{finish_exception_detection, guard_detect, guard_detect_resident, take_cpu_event};
 
 mod avx;
 pub(crate) use avx::{avx_execute, avx_execute_resident};

@@ -8,7 +8,7 @@ use crate::{
         },
         ir::{Operation, Value32, WordValue},
     },
-    memory::{Access, AddressSpace, FaultReason, GuestAddress, PageRange, Permissions},
+    memory::{AddressSpace, GuestAddress, PageRange, Permissions},
 };
 
 fn bank() -> UserSystemRegisterBank32 {
@@ -50,6 +50,63 @@ fn code(bytes: &[u8]) -> AddressSpace {
 }
 
 #[test]
+fn application_defaults_lower_to_literal_user_readback_values() {
+    for (bytes, value) in [
+        (&[0x0f, 0x00, 0xc0][..], 0),
+        (&[0x0f, 0x00, 0xc8], 0x28),
+        (&[0x0f, 0x01, 0xe0], 0x33),
+    ] {
+        let memory = code(bytes);
+        let BoundDecode::Instruction(decoded) = decode_with_authority(
+            &memory,
+            GuestAddress(0x2000 - bytes.len() as u32),
+            DecodePolicy::Strict,
+            Some(context(true)),
+            crate::cpu::x86::decode::DecodeAuthority::new(Some(
+                UserSystemRegisterBank32::application(),
+            )),
+        )
+        .unwrap() else {
+            panic!("default register query");
+        };
+        assert!(match decoded.operation() {
+            Operation::Move {
+                source: Value32::Immediate(actual),
+                ..
+            } => *actual == value,
+            Operation::MoveWord {
+                source: WordValue::Immediate(actual),
+                ..
+            } => u32::from(*actual) == value,
+            _ => false,
+        });
+        assert_eq!(memory.mapped_pages(), 1);
+    }
+    for (modrm, base) in [(0x00, 0xffff0000), (0x08, 0xffff1000)] {
+        let bytes = [0x0f, 0x01, modrm];
+        let memory = code(&bytes);
+        let BoundDecode::Instruction(decoded) = decode_with_authority(
+            &memory,
+            GuestAddress(0x1ffd),
+            DecodePolicy::Strict,
+            Some(context(true)),
+            crate::cpu::x86::decode::DecodeAuthority::new(Some(
+                UserSystemRegisterBank32::application(),
+            )),
+        )
+        .unwrap() else {
+            panic!("default descriptor query");
+        };
+        assert!(
+            matches!(decoded.operation(), Operation::StoreSystemDescriptor {
+            base: actual_base, limit: 0x7ff, ..
+        } if *actual_base == base)
+        );
+        assert_eq!(memory.mapped_pages(), 1);
+    }
+}
+
+#[test]
 fn complete_queries_bind_exact_widths_without_reading_source_tables() {
     for default32 in [false, true] {
         for prefix in [false, true] {
@@ -67,7 +124,7 @@ fn complete_queries_bind_exact_widths_without_reading_source_tables() {
                     pc,
                     DecodePolicy::Strict,
                     Some(context(default32)),
-                    crate::cpu::x86::decode::DecodeAuthority::new(Some(bank()), false),
+                    crate::cpu::x86::decode::DecodeAuthority::new(Some(bank())),
                 )
                 .unwrap();
                 let BoundDecode::Instruction(decoded) = decoded else {
@@ -97,7 +154,7 @@ fn complete_queries_bind_exact_widths_without_reading_source_tables() {
                     pc,
                     DecodePolicy::Strict,
                     Some(context(default32)),
-                    crate::cpu::x86::decode::DecodeAuthority::new(Some(bank()), false),
+                    crate::cpu::x86::decode::DecodeAuthority::new(Some(bank())),
                 )
                 .unwrap() else {
                     panic!("complete query")
@@ -130,15 +187,11 @@ fn missing_authority_follows_complete_fetch_and_preserves_prefix_policy() {
     let memory = code(&[0x0f, 0x01]);
     assert!(matches!(
         decode_one(&memory, GuestAddress(0x1ffe)),
-        Err(DecodeError::MemoryFault {
-            fault: crate::memory::MemoryFault {
-                address: GuestAddress(0x2000),
-                access: Access::Execute,
-                reason: FaultReason::Unmapped
-            },
-            length: 3,
+        Err(DecodeError::Paging {
+            error: crate::cpu::x86::CpuPagingError32::PageFault(fault),
+            attempted_length: 3,
             ..
-        })
+        }) if fault.linear() == GuestAddress(0x2000) && fault.error_code() == 20
     ));
     let memory = code(&[0x66, 0x66, 0x0f, 0x00, 0xc0]);
     assert!(matches!(
@@ -156,7 +209,7 @@ fn missing_authority_follows_complete_fetch_and_preserves_prefix_policy() {
             GuestAddress(0x1ffd),
             DecodePolicy::Strict,
             Some(context(true)),
-            crate::cpu::x86::decode::DecodeAuthority::new(Some(partial), false)
+            crate::cpu::x86::decode::DecodeAuthority::new(Some(partial))
         ),
         Err(DecodeError::MissingSystemRegisterAuthority(
             SystemRegisterQuery::Tr

@@ -141,7 +141,7 @@ fn every_original_sib_displacement_byte_is_fetched_and_snapshot_tracked() {
     let pc = 0x2001 - bytes.len() as u32;
     let mut m = executable(&bytes[..bytes.len() - 1], pc);
     assert!(
-        matches!(decode_one(&m,GuestAddress(pc)),Err(DecodeError::MemoryFault{length,..}) if length==bytes.len() as u32)
+        matches!(decode_one(&m,GuestAddress(pc)),Err(DecodeError::Paging { attempted_length: length, error: crate::cpu::x86::CpuPagingError32::PageFault(_), .. }) if usize::from(length) == bytes.len())
     );
     let page = PageRange::new(GuestAddress(0x2000), 1).unwrap();
     m.map_zeroed(page, Permissions::ALL).unwrap();
@@ -150,7 +150,10 @@ fn every_original_sib_displacement_byte_is_fetched_and_snapshot_tracked() {
     m.protect(page, Permissions::READ).unwrap();
     assert!(matches!(
         decode_for_execution(&m, GuestAddress(pc)),
-        Err(DecodeError::MemoryFault { .. })
+        Err(DecodeError::Paging {
+            error: crate::cpu::x86::CpuPagingError32::PageFault(_),
+            ..
+        })
     ));
     m.protect(page, Permissions::ALL).unwrap();
     let decoded = decode_one(&m, GuestAddress(pc)).unwrap();

@@ -42,7 +42,9 @@ pub(super) fn snapshot(
         instruction.operation(),
         Operation::Control(
             ControlOperation::Breakpoint | ControlOperation::Overflow | ControlOperation::DebugTrap
-        )
+        ) | Operation::SoftwareInterrupt {
+            vector: 4 | 0x29 | 0x2e
+        }
     ) {
         return;
     }
@@ -77,15 +79,19 @@ pub(super) fn finish(code: &mut InstructionSink<'_>, imports: Imports) {
     let Some(locals) = imports.detection else {
         return;
     };
-    // only architectural terminal sites and raw paging-authority stops seal a lease.
+    // need-code releases an unpublished helper witness; events seal the entry lease.
     code.local_get(REASON)
+        .i32_const(3)
+        .i32_eq()
+        .local_get(REASON)
         .i32_const(5)
         .i32_eq()
+        .i32_or()
         .local_get(REASON)
         .i32_const(10)
         .i32_ge_u()
         .local_get(REASON)
-        .i32_const(22)
+        .i32_const(24)
         .i32_le_u()
         .i32_and()
         .i32_or()
@@ -108,6 +114,10 @@ pub(super) fn finish(code: &mut InstructionSink<'_>, imports: Imports) {
         .i32_eq()
         .local_get(REASON)
         .i32_const(18)
+        .i32_eq()
+        .i32_or()
+        .local_get(REASON)
+        .i32_const(24)
         .i32_eq()
         .i32_or()
         .local_get(REASON)

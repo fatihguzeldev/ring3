@@ -33,8 +33,11 @@ pub(crate) use cross_lane::{BlockTarget, BroadcastElement, CrossLaneInstruction}
 pub(crate) use crypto::CryptoInstruction;
 pub(crate) use f16c::{F16cInstruction, F16cTarget};
 pub(crate) use fma::{FmaInstruction, FmaKind, FmaOrder, FmaShape};
+#[cfg(test)]
+pub(crate) use gather::GatherFault;
 pub(crate) use gather::{
-    GatherAddress, GatherFaultCause, GatherGeometry, GatherInstruction, GatherScale,
+    GatherAddress, GatherFaultCause, GatherGeometry, GatherInputs, GatherInstruction,
+    GatherOutcome, GatherScale,
 };
 pub(crate) use integer::IntegerInstruction;
 pub(crate) use masked::{MaskedError, MaskedInstruction};

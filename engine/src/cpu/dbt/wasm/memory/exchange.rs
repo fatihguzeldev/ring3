@@ -44,8 +44,13 @@ pub(super) fn bit_test_set_result(
         .local_get(RESULT)
         .call(index)
         .local_set(HELPER_STATUS);
-    super::cpu_scalar::validate(code, 4, CpuScalarOperation::Modify);
-    exit_if_failed(code, exit_depth, imports.raw_task_context.is_some());
+    super::cpu_scalar::validate(
+        code,
+        4,
+        CpuScalarOperation::Modify,
+        imports.paging_configured,
+    );
+    exit_if_failed(code, exit_depth);
     helper_field(code, 20);
     code.local_set(RESULT);
 }
@@ -88,8 +93,13 @@ pub(super) fn bit_test_reset_result(
         .local_get(RESULT)
         .call(index)
         .local_set(HELPER_STATUS);
-    super::cpu_scalar::validate(code, 4, CpuScalarOperation::Modify);
-    exit_if_failed(code, exit_depth, imports.raw_task_context.is_some());
+    super::cpu_scalar::validate(
+        code,
+        4,
+        CpuScalarOperation::Modify,
+        imports.paging_configured,
+    );
+    exit_if_failed(code, exit_depth);
     helper_field(code, 20);
     code.local_set(RESULT);
 }
@@ -117,8 +127,13 @@ pub(super) fn atomic_or_result(
         .i32_const(mask as i32)
         .call(index)
         .local_set(HELPER_STATUS);
-    super::cpu_scalar::validate(code, 4, CpuScalarOperation::Modify);
-    exit_if_failed(code, exit_depth, imports.raw_task_context.is_some());
+    super::cpu_scalar::validate(
+        code,
+        4,
+        CpuScalarOperation::Modify,
+        imports.paging_configured,
+    );
+    exit_if_failed(code, exit_depth);
     helper_field(code, 20);
     code.local_set(RESULT);
 }
@@ -146,8 +161,13 @@ pub(super) fn atomic_and_result(
         .i32_const(mask as i32)
         .call(index)
         .local_set(HELPER_STATUS);
-    super::cpu_scalar::validate(code, 4, CpuScalarOperation::Modify);
-    exit_if_failed(code, exit_depth, imports.raw_task_context.is_some());
+    super::cpu_scalar::validate(
+        code,
+        4,
+        CpuScalarOperation::Modify,
+        imports.paging_configured,
+    );
+    exit_if_failed(code, exit_depth);
     helper_field(code, 20);
     code.local_set(RESULT);
 }
@@ -175,8 +195,13 @@ pub(super) fn atomic_xor_result(
         .i32_const(mask as i32)
         .call(index)
         .local_set(HELPER_STATUS);
-    super::cpu_scalar::validate(code, 4, CpuScalarOperation::Modify);
-    exit_if_failed(code, exit_depth, imports.raw_task_context.is_some());
+    super::cpu_scalar::validate(
+        code,
+        4,
+        CpuScalarOperation::Modify,
+        imports.paging_configured,
+    );
+    exit_if_failed(code, exit_depth);
     helper_field(code, 20);
     code.local_set(RESULT);
 }
@@ -204,8 +229,13 @@ pub(super) fn atomic_or_register_result(
         .local_get(register(source))
         .call(index)
         .local_set(HELPER_STATUS);
-    super::cpu_scalar::validate(code, 4, CpuScalarOperation::Modify);
-    exit_if_failed(code, exit_depth, imports.raw_task_context.is_some());
+    super::cpu_scalar::validate(
+        code,
+        4,
+        CpuScalarOperation::Modify,
+        imports.paging_configured,
+    );
+    exit_if_failed(code, exit_depth);
     helper_field(code, 20);
     code.local_set(RESULT);
 }
@@ -233,8 +263,13 @@ pub(super) fn atomic_and_register_result(
         .local_get(register(source))
         .call(index)
         .local_set(HELPER_STATUS);
-    super::cpu_scalar::validate(code, 4, CpuScalarOperation::Modify);
-    exit_if_failed(code, exit_depth, imports.raw_task_context.is_some());
+    super::cpu_scalar::validate(
+        code,
+        4,
+        CpuScalarOperation::Modify,
+        imports.paging_configured,
+    );
+    exit_if_failed(code, exit_depth);
     helper_field(code, 20);
     code.local_set(RESULT);
 }
@@ -262,8 +297,13 @@ pub(super) fn atomic_xor_register_result(
         .local_get(register(source))
         .call(index)
         .local_set(HELPER_STATUS);
-    super::cpu_scalar::validate(code, 4, CpuScalarOperation::Modify);
-    exit_if_failed(code, exit_depth, imports.raw_task_context.is_some());
+    super::cpu_scalar::validate(
+        code,
+        4,
+        CpuScalarOperation::Modify,
+        imports.paging_configured,
+    );
+    exit_if_failed(code, exit_depth);
     helper_field(code, 20);
     code.local_set(RESULT);
 }
@@ -291,8 +331,13 @@ pub(super) fn exchange_add_result(
         .local_get(register(source))
         .call(index)
         .local_set(HELPER_STATUS);
-    super::cpu_scalar::validate(code, 4, CpuScalarOperation::Modify);
-    exit_if_failed(code, exit_depth, imports.raw_task_context.is_some());
+    super::cpu_scalar::validate(
+        code,
+        4,
+        CpuScalarOperation::Modify,
+        imports.paging_configured,
+    );
+    exit_if_failed(code, exit_depth);
     helper_field(code, 20);
     code.local_set(RESULT);
 }
@@ -320,8 +365,13 @@ pub(super) fn exchange_result(
         .local_get(register(source))
         .call(index)
         .local_set(HELPER_STATUS);
-    super::cpu_scalar::validate(code, 4, CpuScalarOperation::Modify);
-    exit_if_failed(code, exit_depth, imports.raw_task_context.is_some());
+    super::cpu_scalar::validate(
+        code,
+        4,
+        CpuScalarOperation::Modify,
+        imports.paging_configured,
+    );
+    exit_if_failed(code, exit_depth);
     helper_field(code, 20);
     code.local_set(RESULT);
 }
@@ -350,8 +400,13 @@ pub(super) fn compare_exchange_result(
         .local_get(register(source))
         .call(index)
         .local_set(HELPER_STATUS);
-    super::cpu_scalar::validate(code, 4, CpuScalarOperation::Modify);
-    exit_if_failed(code, exit_depth, imports.raw_task_context.is_some());
+    super::cpu_scalar::validate(
+        code,
+        4,
+        CpuScalarOperation::Modify,
+        imports.paging_configured,
+    );
+    exit_if_failed(code, exit_depth);
     helper_field(code, 20);
     code.local_set(RESULT);
 }

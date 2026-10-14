@@ -144,7 +144,7 @@ fn final_tbm_immediate_or_scalar_opcode_byte_must_be_executable_before_classific
         let mut memory = executable(&bytes[..bytes.len() - 1], pc);
         let missing = decode_one(&memory, GuestAddress(pc)).unwrap_err();
         assert!(
-            matches!(missing,DecodeError::MemoryFault {length,..} if length==bytes.len() as u32)
+            matches!(missing,DecodeError::Paging { attempted_length: length, error: crate::cpu::x86::CpuPagingError32::PageFault(_), .. } if usize::from(length) == bytes.len())
         );
         assert_eq!(
             decode_for_execution(&memory, GuestAddress(pc)).unwrap_err(),
@@ -158,7 +158,10 @@ fn final_tbm_immediate_or_scalar_opcode_byte_must_be_executable_before_classific
         memory.protect(page, Permissions::READ).unwrap();
         assert!(matches!(
             decode_for_execution(&memory, GuestAddress(pc)),
-            Err(DecodeError::MemoryFault { .. })
+            Err(DecodeError::Paging {
+                error: crate::cpu::x86::CpuPagingError32::PageFault(_),
+                ..
+            })
         ));
         memory.protect(page, Permissions::EXECUTE).unwrap();
         assert_eq!(

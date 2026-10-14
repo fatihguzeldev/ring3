@@ -1,10 +1,10 @@
-use super::{cpu_store, mutate};
+use super::paging::{cpu_mutate, cpu_paging_store};
 
 pub(crate) fn cpu_xsave_avx(segment: u32, offset: u32, low: u32, high: u32) -> u32 {
-    cpu_store(|instance| instance.cpu_xsave_avx(segment, offset, low, high))
+    cpu_paging_store(|instance| instance.cpu_xsave_avx(segment, offset, low, high))
 }
 pub(crate) fn cpu_xrstor_avx(segment: u32, offset: u32, low: u32, high: u32) -> u32 {
-    mutate(|instance| instance.cpu_xrstor_avx(segment, offset, low, high))
+    cpu_mutate(|instance| instance.cpu_xrstor_avx(segment, offset, low, high))
 }
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn cpu_xsave_avx_resident(
@@ -17,7 +17,7 @@ pub(crate) fn cpu_xsave_avx_resident(
     low: u32,
     high: u32,
 ) -> u32 {
-    cpu_store(|instance| {
+    cpu_paging_store(|instance| {
         instance.cpu_xsave_avx_resident(
             u64::from(key_low) | (u64::from(key_high) << 32),
             u64::from(id_low) | (u64::from(id_high) << 32),
@@ -39,7 +39,7 @@ pub(crate) fn cpu_xrstor_avx_resident(
     low: u32,
     high: u32,
 ) -> u32 {
-    mutate(|instance| {
+    cpu_mutate(|instance| {
         instance.cpu_xrstor_avx_resident(
             u64::from(key_low) | (u64::from(key_high) << 32),
             u64::from(id_low) | (u64::from(id_high) << 32),
@@ -52,11 +52,11 @@ pub(crate) fn cpu_xrstor_avx_resident(
 }
 
 pub(crate) fn cpu_xsave(address: u32, low: u32, high: u32) -> u32 {
-    cpu_store(|instance| instance.cpu_xsave(address, low, high))
+    cpu_paging_store(|instance| instance.cpu_xsave(address, low, high))
 }
 
 pub(crate) fn cpu_xrstor(address: u32, low: u32, high: u32) -> u32 {
-    mutate(|instance| instance.cpu_xrstor(address, low, high))
+    cpu_mutate(|instance| instance.cpu_xrstor(address, low, high))
 }
 
 pub(crate) fn cpu_xsave_resident(
@@ -68,7 +68,7 @@ pub(crate) fn cpu_xsave_resident(
     low: u32,
     high: u32,
 ) -> u32 {
-    cpu_store(|instance| {
+    cpu_paging_store(|instance| {
         instance.cpu_xsave_resident(
             u64::from(key_low) | (u64::from(key_high) << 32),
             u64::from(id_low) | (u64::from(id_high) << 32),
@@ -88,7 +88,7 @@ pub(crate) fn cpu_xrstor_resident(
     low: u32,
     high: u32,
 ) -> u32 {
-    mutate(|instance| {
+    cpu_mutate(|instance| {
         instance.cpu_xrstor_resident(
             u64::from(key_low) | (u64::from(key_high) << 32),
             u64::from(id_low) | (u64::from(id_high) << 32),

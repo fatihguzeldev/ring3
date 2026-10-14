@@ -6,7 +6,10 @@ use crate::{
     },
     cpu::{
         ExecutionExit, ExitReason,
-        x86::{EventOrigin32, ExceptionCause32, FrameInput32, Register32, SegmentRegister},
+        x86::{
+            EventOrigin32, ExceptionCause32, FrameInput32, Register32, SegmentRegister,
+            VerifiedPageFault32,
+        },
     },
     memory::MemoryFault,
     process::{
@@ -15,26 +18,27 @@ use crate::{
     },
 };
 
+mod paging;
 mod restart;
 pub(in crate::process) mod site;
 pub(in crate::process) use restart::InstructionTrapRestart32;
 
-/// detector-supplied provenance; software page permissions do not certify an architectural #PF.
+/// detector-supplied cause and precise application access-fault provenance.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::process) enum DetectedEvent32 {
     Exception(EventOrigin32),
-    NeedsPagingAuthority { fault: MemoryFault, length: u32 },
+    MemoryFailure { fault: MemoryFault, length: u32 },
 }
 
 // the owner boxes this slot once; keeping ready inline avoids an allocation at every fault.
 #[allow(clippy::large_enum_variant)]
 pub(in crate::process) enum DetectionSlot32 {
     Idle,
-    Shutdown,
     Active {
         epoch: u64,
         owner: PendingOwner,
         callback_token: Option<u32>,
+        page_fault: Option<VerifiedPageFault32>,
     },
     Ready(ConsumedDetection32),
 }
@@ -52,33 +56,77 @@ pub(in crate::process) struct ConsumedDetection32 {
     extended: ExtendedCpuState,
     work: [u8; WORK_SIZE],
     retired: u32,
-    task_context: Option<crate::cpu::x86::tasks::TaskIncomingContext32>,
-    task_revision: Option<u64>,
 }
 
 impl ConsumedDetection32 {
+    pub(in crate::process) fn into_event(self) -> crate::process::CpuEvent32 {
+        use crate::abi::x86::{
+            decode_current_segment_context, decode_simd, decode_x87, decode_ymm,
+        };
+        crate::process::CpuEvent32 {
+            epoch: self.epoch,
+            origin: match self.event {
+                DetectedEvent32::Exception(origin) => Some(origin),
+                DetectedEvent32::MemoryFailure { .. } => None,
+            },
+            instruction: self
+                .restart
+                .map(|site| crate::process::CpuInstructionSite32 {
+                    eip: site.eip,
+                    retired: site.retired,
+                    flags: site.flags,
+                    ss_debug_shadow: site.ss_debug_shadow,
+                    work_consumed: site.work_consumed,
+                }),
+            state: crate::cpu::x86::State32 {
+                eip: self.input.eip,
+                ..decode_state(&self.state).unwrap()
+            },
+            exit: ExecutionExit {
+                retired: self.retired,
+                ..decode_exit(&self.exit).unwrap()
+            },
+            ss_debug_shadow: self.extended.metadata.ss_debug_shadow,
+            x87: decode_x87(&self.extended.x87).unwrap(),
+            simd: decode_simd(&self.extended.simd).unwrap(),
+            segments: decode_current_segment_context(
+                &self.extended.segments,
+                self.extended.segment_bases.as_ref().map(|v| v.as_slice()),
+            )
+            .unwrap(),
+            ymm: decode_ymm(&self.extended.upper).unwrap(),
+            work_consumed: header::read_u32(&self.work, 16),
+        }
+    }
     #[cfg(test)]
     pub(in crate::process) const fn epoch(&self) -> u64 {
         self.epoch
     }
+    #[cfg(test)]
     pub(in crate::process) const fn owner(&self) -> PendingOwner {
         self.owner
     }
+    #[cfg(test)]
     pub(in crate::process) const fn event(&self) -> DetectedEvent32 {
         self.event
     }
+    #[cfg(test)]
     pub(in crate::process) const fn input(&self) -> FrameInput32 {
         self.input
     }
+    #[cfg(test)]
     pub(in crate::process) const fn instruction_restart(&self) -> Option<InstructionTrapRestart32> {
         self.restart
     }
+    #[cfg(test)]
     pub(in crate::process) const fn retired(&self) -> u32 {
         self.retired
     }
+    #[cfg(test)]
     pub(in crate::process) fn state(&self) -> &[u8; STATE_SIZE] {
         &self.state
     }
+    #[cfg(test)]
     pub(in crate::process) fn exit(&self) -> &[u8; EXIT_SIZE] {
         &self.exit
     }
@@ -96,12 +144,16 @@ impl DetectedEvent32 {
     fn matches_exit(self, exit: ExecutionExit) -> bool {
         match (self, exit.reason) {
             (
-                Self::NeedsPagingAuthority { fault, length },
+                Self::MemoryFailure { fault, length },
                 ExitReason::MemoryFault {
                     fault: actual,
                     length: actual_length,
                 },
             ) => fault == actual && length == actual_length,
+            (
+                Self::Exception(EventOrigin32::SoftwareInt { vector }),
+                ExitReason::SystemEntry { vector: actual },
+            ) => vector == actual,
             (Self::Exception(EventOrigin32::Exception(cause)), reason) => match (cause, reason) {
                 (ExceptionCause32::DivideError, ExitReason::DivideError)
                 | (ExceptionCause32::BoundRange, ExitReason::BoundRange)
@@ -130,7 +182,19 @@ impl DetectedEvent32 {
                     ExceptionCause32::SimdFloatingPoint { mxcsr },
                     ExitReason::SimdFloatingPoint { mxcsr: actual },
                 ) => mxcsr == actual,
-                // verified PF still requires a separate detection/CR2 owner; no R3EX PF inference.
+                (
+                    ExceptionCause32::PageFault(fault),
+                    ExitReason::PageFault {
+                        error_code,
+                        linear,
+                        access,
+                        ..
+                    },
+                ) => {
+                    fault.error_code() == error_code
+                        && fault.linear() == linear
+                        && paging::access(fault.access()) == access
+                }
                 _ => false,
             },
             _ => false,
@@ -139,20 +203,14 @@ impl DetectedEvent32 {
 }
 
 impl EngineInstance {
-    /// root's bound entry guard has already validated current material and decode interpretation.
+    /// the bound entry guard has already validated material identity and lifetime.
     /// an unfinished lease is the explicit non-event-return cleanup on the next valid entry.
     pub(in crate::process) fn begin_exception_detection(
         &mut self,
         owner: PendingOwner,
     ) -> Result<u64, HostError> {
         self.memory()?;
-        if self.is_exception_shutdown() {
-            return Err(HostError::CpuShutdown);
-        }
-        if self.interrupt_descriptors.is_none() {
-            return Err(HostError::InvalidRequest);
-        }
-        if self.has_ready_exception_detection() {
+        if self.has_retained_detection() {
             return Err(HostError::Call(CallError::Busy));
         }
         let callback_token = self.callback.as_ref().map(|callback| callback.token());
@@ -166,6 +224,7 @@ impl EngineInstance {
             epoch,
             owner,
             callback_token,
+            page_fault: None,
         };
         if let Some(slot) = self.exception_detection.as_mut() {
             slot[0] = active;
@@ -181,6 +240,7 @@ impl EngineInstance {
             self.exception_detection = Some(slot);
         }
         self.detection_epoch = epoch;
+        self.cpu_event = None;
         Ok(epoch)
     }
 
@@ -198,10 +258,12 @@ impl EngineInstance {
                 epoch: active,
                 owner,
                 callback_token,
+                ..
             }) if *active == epoch => (*owner, *callback_token),
             _ => return Err(HostError::Call(CallError::InvalidToken)),
         };
         self.check_detection_owner(owner, callback_token)?;
+        self.check_page_fault_detection32(epoch, event)?;
         let arena = self.arena();
         let state_bytes: [u8; STATE_SIZE] = arena[STATE_OFFSET..STATE_OFFSET + STATE_SIZE]
             .try_into()
@@ -224,10 +286,7 @@ impl EngineInstance {
         if header::read_u32(&work, 20) != 0 {
             return Err(HostError::Call(CallError::InvalidStop));
         }
-        let context = match self.task_context_snapshot()? {
-            Some(context) => context.segment_image(),
-            None => self.segment_context()?,
-        };
+        let context = self.segment_context()?;
         let input = FrameInput32 {
             eip: state.eip,
             esp: state.registers[Register32::Esp.index()],
@@ -258,10 +317,41 @@ impl EngineInstance {
             extended,
             work,
             retired: exit.retired,
-            task_context: self.task_incoming,
-            task_revision: self.task_execution_revision(),
         };
         self.exception_detection.as_mut().unwrap()[0] = DetectionSlot32::Ready(record);
+        Ok(())
+    }
+
+    /// retires a flushed non-event stop without publishing a pending access-fault witness.
+    pub(super) fn finish_need_code_detection(&mut self, epoch: u64) -> Result<(), HostError> {
+        self.memory()?;
+        let (owner, callback_token) = match self.exception_detection.as_ref().map(|slot| &slot[0]) {
+            Some(DetectionSlot32::Active {
+                epoch: active,
+                owner,
+                callback_token,
+                ..
+            }) if *active == epoch => (*owner, *callback_token),
+            _ => return Err(HostError::Call(CallError::InvalidToken)),
+        };
+        self.check_detection_owner(owner, callback_token)?;
+        let arena = self.arena();
+        decode_state(&arena[STATE_OFFSET..STATE_OFFSET + STATE_SIZE])
+            .map_err(|_| HostError::Call(CallError::InvalidStop))?;
+        let exit = decode_exit(&arena[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE])
+            .map_err(|_| HostError::Call(CallError::InvalidStop))?;
+        if exit.reason != ExitReason::NeedCode {
+            return Err(HostError::Call(CallError::InvalidStop));
+        }
+        ExtendedCpuState::capture(arena)?;
+        let work = &arena[WORK_OFFSET..WORK_OFFSET + WORK_SIZE];
+        header::validate(work, *b"R3WK", WORK_SIZE)
+            .map_err(|_| HostError::Call(CallError::InvalidStop))?;
+        if header::read_u32(work, 20) != 0 {
+            return Err(HostError::Call(CallError::InvalidStop));
+        }
+        // cr2 and its occurrence sequence describe the real native access observation.
+        self.exception_detection.as_mut().unwrap()[0] = DetectionSlot32::Idle;
         Ok(())
     }
 
@@ -275,9 +365,13 @@ impl EngineInstance {
             _ => return Err(HostError::Call(CallError::InvalidToken)),
         };
         self.check_detection_owner(record.owner, record.callback_token)?;
-        if !record.matches(self.arena())
-            || record.task_context != self.task_incoming
-            || record.task_revision != self.task_execution_revision()
+        if !record.matches(self.arena()) {
+            return Err(HostError::Call(CallError::StateChanged));
+        }
+        if let DetectedEvent32::Exception(EventOrigin32::Exception(ExceptionCause32::PageFault(
+            fault,
+        ))) = record.event
+            && self.cr2() != Some(fault.linear())
         {
             return Err(HostError::Call(CallError::StateChanged));
         }
@@ -297,9 +391,6 @@ impl EngineInstance {
         epoch: u64,
     ) -> Result<(), HostError> {
         self.memory()?;
-        if self.is_exception_shutdown() {
-            return Err(HostError::CpuShutdown);
-        }
         let matches = match self.exception_detection.as_ref().map(|slot| &slot[0]) {
             Some(DetectionSlot32::Active { epoch: active, .. }) => *active == epoch,
             Some(DetectionSlot32::Ready(record)) => record.epoch == epoch,
@@ -312,18 +403,37 @@ impl EngineInstance {
         Ok(())
     }
 
-    pub fn is_exception_shutdown(&self) -> bool {
-        matches!(
-            self.exception_detection.as_ref().map(|slot| &slot[0]),
-            Some(DetectionSlot32::Shutdown)
-        )
+    pub(in crate::process) fn clear_certified_page_fault32(&mut self) {
+        if let Some(DetectionSlot32::Active { page_fault, .. }) =
+            self.exception_detection.as_mut().map(|slot| &mut slot[0])
+        {
+            *page_fault = None;
+        }
     }
 
-    pub(super) fn latch_exception_shutdown(&mut self) {
-        // a consumed record always leaves its already allocated slot; shutdown cannot allocate or fail.
-        self.exception_detection
-            .as_mut()
-            .expect("consumed detection slot")[0] = DetectionSlot32::Shutdown;
+    pub(in crate::process) fn observe_certified_page_fault32(
+        &mut self,
+        fault: VerifiedPageFault32,
+    ) {
+        if let Some(DetectionSlot32::Active { page_fault, .. }) =
+            self.exception_detection.as_mut().map(|slot| &mut slot[0])
+        {
+            *page_fault = Some(fault);
+        }
+    }
+
+    pub(in crate::process) fn certified_page_fault32(
+        &self,
+        epoch: u64,
+    ) -> Option<VerifiedPageFault32> {
+        match self.exception_detection.as_ref().map(|slot| &slot[0]) {
+            Some(DetectionSlot32::Active {
+                epoch: active,
+                page_fault,
+                ..
+            }) if *active == epoch => *page_fault,
+            _ => None,
+        }
     }
 
     pub(in crate::process) fn has_ready_exception_detection(&self) -> bool {
@@ -331,6 +441,10 @@ impl EngineInstance {
             self.exception_detection.as_ref().map(|slot| &slot[0]),
             Some(DetectionSlot32::Ready(_))
         )
+    }
+
+    pub(in crate::process) fn has_retained_detection(&self) -> bool {
+        self.has_certified_page_fault32() || self.has_ready_exception_detection()
     }
 
     fn check_detection_owner(
@@ -397,6 +511,3 @@ impl EngineInstance {
 
 #[cfg(test)]
 mod tests;
-
-#[cfg(test)]
-mod integration;

@@ -60,7 +60,11 @@ fn salc_keeps_full_fetch_invalid_lock_and_repeat_profile_boundaries() {
     let missing = decode_one(&memory, GuestAddress(0x2000)).unwrap_err();
     assert!(matches!(
         missing,
-        DecodeError::MemoryFault { length: 1, .. }
+        DecodeError::Paging {
+            attempted_length: 1,
+            error: crate::cpu::x86::CpuPagingError32::PageFault(_),
+            ..
+        }
     ));
     assert_eq!(
         decode_for_execution(&memory, GuestAddress(0x2000)).unwrap_err(),
@@ -71,7 +75,14 @@ fn salc_keeps_full_fetch_invalid_lock_and_repeat_profile_boundaries() {
     memory.write(GuestAddress(0x2000), &bytes).unwrap();
     memory.protect(page, Permissions::READ).unwrap();
     let denied = decode_one(&memory, GuestAddress(0x2000)).unwrap_err();
-    assert!(matches!(denied, DecodeError::MemoryFault { length: 1, .. }));
+    assert!(matches!(
+        denied,
+        DecodeError::Paging {
+            attempted_length: 1,
+            error: crate::cpu::x86::CpuPagingError32::PageFault(_),
+            ..
+        }
+    ));
     assert_eq!(
         decode_for_execution(&memory, GuestAddress(0x2000)).unwrap_err(),
         denied

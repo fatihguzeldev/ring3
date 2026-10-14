@@ -294,7 +294,6 @@ fn raw_configuration_respects_pending_call_callback_and_closed_authority() {
     )
     .unwrap();
     engine.pending_call = Some(PendingCall {
-        task_revision: engine.task_execution_revision(),
         token: 1,
         owner: PendingOwner::Replacement(engine.generation()),
         frame,
@@ -384,11 +383,13 @@ fn failed_far_pointer_read_preserves_raw_accessed_and_the_prior_loaded_context()
     assert_eq!(engine.segment_context().unwrap(), loaded);
     assert_eq!(engine.segment_descriptors, table);
     let mut expected = before;
-    packet(&mut expected, 1, 0, 1);
+    packet(&mut expected, 9, 0, 4);
+    word(&mut expected, HELPER_OFFSET + 4, 0x1000f);
     word(&mut expected, HELPER_OFFSET + 28, 0x3000);
     word(&mut expected, HELPER_OFFSET + 32, 1);
     word(&mut expected, HELPER_OFFSET + 36, 6);
     assert_eq!(engine.arena(), expected);
+    assert_eq!(engine.cr2(), Some(GuestAddress(0x3000)));
 }
 
 #[test]

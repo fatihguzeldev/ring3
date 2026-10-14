@@ -1,4 +1,4 @@
-use super::stopped_support::{KEY, expect_admitted, stopped};
+use super::stopped_support::{KEY, expect_admitted, expect_captured_fetch, stopped};
 use ring3_engine::{
     abi::{
         arena::TRANSFER_OFFSET,
@@ -11,7 +11,6 @@ use ring3_engine::{
         dbt::{CompileError, InstructionError},
         x86::{SegmentCache, SegmentContext, SegmentRegister, State32, decode::DecodeError},
     },
-    memory::{Access, FaultReason, GuestAddress, MemoryFault},
     process::HostError,
 };
 
@@ -88,7 +87,7 @@ fn strict_port_strings_and_reserved_repetition_keep_atomic_refusals() {
         assert_refused(&[&[0x66, 0x66][..], opcode].concat(), false);
         assert_refused(&[&[0x67, 0x67][..], form].concat(), false);
     }
-    assert_refused(&[0xcd, 0x80], false);
+    assert_refused(&[0x66, 0x66, 0xcd, 0x80], false);
 }
 
 #[test]
@@ -107,26 +106,7 @@ fn zero_count_cannot_replace_missing_instruction_fetch_with_completion() {
         let entry = 0x4000 - bytes.len() as u32;
         let mut engine = stopped(bytes, entry);
         engine.arena_mut().unwrap()[20..24].copy_from_slice(&0_u32.to_le_bytes());
-        let before = engine.arena().to_vec();
-        let artifact = engine.artifact_bytes().unwrap().to_vec();
-        assert_eq!(
-            engine.compile_stopped_entry(KEY, 1),
-            Err(HostError::Compile(CompileError::Instruction {
-                pc: GuestAddress(entry),
-                cause: InstructionError::Decode(DecodeError::MemoryFault {
-                    pc: GuestAddress(entry),
-                    fault: MemoryFault {
-                        address: GuestAddress(0x4000),
-                        access: Access::Execute,
-                        reason: FaultReason::Unmapped,
-                    },
-                    length: bytes.len() as u32 + 1,
-                }),
-            }))
-        );
-        assert_eq!(engine.arena(), before);
-        assert_eq!(engine.artifact_bytes().unwrap(), artifact);
-        assert_eq!(engine.generation(), 1);
+        expect_captured_fetch(&mut engine, entry, 0x4000, false, bytes.len() as u32 + 1);
     }
 }
 

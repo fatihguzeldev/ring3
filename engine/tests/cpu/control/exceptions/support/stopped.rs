@@ -57,3 +57,58 @@ pub(super) fn expect_admitted(bytes: &[u8], entry: u32) {
     assert_eq!(engine.arena(), before);
     assert_eq!(&engine.artifact_bytes().unwrap()[..8], b"\0asm\x01\0\0\0");
 }
+
+pub(super) fn expect_captured_fetch(
+    engine: &mut EngineInstance,
+    entry: u32,
+    address: u32,
+    present: bool,
+    length: u32,
+) {
+    use ring3_engine::{
+        cpu::x86::decode::decode_one,
+        memory::{FaultReason, GuestAddress},
+    };
+    super::support_fetch::assert_error(
+        decode_one(engine.memory().unwrap(), GuestAddress(entry)).unwrap_err(),
+        entry,
+        address,
+        if present {
+            FaultReason::Permission
+        } else {
+            FaultReason::Unmapped
+        },
+        length,
+    );
+    let before = engine.arena().to_vec();
+    let prior = engine.artifact_bytes().unwrap().to_vec();
+    let ram: Vec<_> = [0x1000, 0x3000, 0x4000]
+        .into_iter()
+        .filter_map(|page| {
+            let mut bytes = vec![0; 4096];
+            engine
+                .memory()
+                .unwrap()
+                .read(GuestAddress(page), &mut bytes)
+                .ok()
+                .map(|_| (page, bytes))
+        })
+        .collect();
+    let id = engine.compile_stopped_resident_entry(KEY).unwrap();
+    assert_eq!(engine.arena(), before);
+    assert_eq!(engine.generation(), 1);
+    assert_eq!(engine.artifact_bytes().unwrap(), prior);
+    assert_eq!(
+        &engine.resident_bytes(id.get()).unwrap()[..8],
+        b"\0asm\x01\0\0\0"
+    );
+    for (page, bytes) in ram {
+        let mut after = vec![0; 4096];
+        engine
+            .memory()
+            .unwrap()
+            .read(GuestAddress(page), &mut after)
+            .unwrap();
+        assert_eq!(after, bytes);
+    }
+}

@@ -1,3 +1,6 @@
+#[path = "../../support/cpu/fetch/native.rs"]
+mod support_fetch;
+
 #[path = "../../support/cpu/prefix/admission.rs"]
 mod support_prefix_admission;
 
@@ -103,14 +106,5 @@ mod cpu_system_availability;
 #[path = "exceptions/availability/scalar/native.rs"]
 mod cpu_scalar_availability;
 
-#[path = "interrupt/configuration/native.rs"]
-mod interrupt_configuration;
-
 #[path = "interrupt/dispatch/native.rs"]
 mod cpu_interrupt_dispatch;
-
-#[path = "interrupt/exception/native.rs"]
-mod cpu_exception_entry;
-
-#[path = "interrupt/return/task/native.rs"]
-mod cpu_task_return;

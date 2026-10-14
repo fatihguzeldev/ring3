@@ -7,14 +7,13 @@ use crate::{
         x86::{SIMD_SIZE, X87_SIZE, YMM_SIZE, decode_ymm, encode_simd, encode_x87, encode_ymm},
     },
     cpu::x86::{
-        SegmentAccess, SegmentRegister, X87State,
+        CpuMemoryPort32, CpuReadPort32, SegmentAccess, SegmentRegister, X87State,
         simd::{SimdState, ymm::YmmUpperState},
         xstate::{
             self,
             upper::{self, IMAGE_SIZE},
         },
     },
-    memory::AddressSpace,
     process::{EngineInstance, HostError, StoreCompletion, cpu::segments::check_cached_span},
 };
 
@@ -126,10 +125,17 @@ impl EngineInstance {
         let mut success = [0; HELPER_SIZE];
         encode_cpu_result_v8(IMAGE_SIZE as u32, 0, Ok(()), &mut success)
             .map_err(|_| HostError::Infrastructure)?;
-        let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
-        let version = memory.code_validation_version();
-        let result = save(memory, address, request, &x87, &simd, &upper_state);
-        let changed = result.is_ok() && version != memory.code_validation_version();
+        let version = self.memory.as_ref().unwrap().code_validation_version();
+        let result = save(
+            &mut self.cpu_memory_port32(),
+            address,
+            request,
+            &x87,
+            &simd,
+            &upper_state,
+        );
+        let changed =
+            result.is_ok() && version != self.memory.as_ref().unwrap().code_validation_version();
         match result {
             Ok(()) => {
                 self.arena[HELPER_OFFSET..HELPER_OFFSET + HELPER_SIZE].copy_from_slice(&success)
@@ -154,9 +160,8 @@ impl EngineInstance {
             Ok(_) => return self.upper_packet(Err(CpuMemoryError::GeneralProtection(0))),
             Err(error) => return self.upper_packet(Err(error)),
         };
-        let memory = self.memory.as_ref().ok_or(HostError::Closed)?;
         let (x87, simd, upper_state) = match restore(
-            memory,
+            &mut self.cpu_memory_port32(),
             address,
             request,
             &current_x87,
@@ -211,7 +216,7 @@ fn segment(raw: u32) -> Result<SegmentRegister, HostError> {
     .ok_or(HostError::InvalidRequest)
 }
 fn save(
-    memory: &mut AddressSpace,
+    memory: &mut impl CpuMemoryPort32,
     address: u32,
     request: u64,
     x87: &X87State,
@@ -219,7 +224,9 @@ fn save(
     upper_state: &YmmUpperState,
 ) -> Result<(), CpuMemoryError> {
     let mut image = [0; IMAGE_SIZE];
-    read_part(memory, address, 512, &mut image[512..520])?;
+    memory
+        .read_modify(part_address(address, 512), &mut image[512..520])
+        .map_err(CpuMemoryError::from)?;
     upper::save(request, x87, simd, upper_state, &mut image);
     let (ranges, count) = upper::access::save_ranges(request);
     let mut spans = [(crate::memory::GuestAddress(0), &[][..]); 4];
@@ -227,11 +234,11 @@ fn save(
         spans[index] = (part_address(address, start as u32), &image[start..end]);
     }
     memory
-        .cpu_write_spans(&spans[..count])
-        .map_err(CpuMemoryError::Memory)
+        .write_spans(&spans[..count])
+        .map_err(CpuMemoryError::from)
 }
 fn restore(
-    memory: &AddressSpace,
+    memory: &mut impl CpuReadPort32,
     address: u32,
     request: u64,
     x87: &X87State,

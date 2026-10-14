@@ -162,7 +162,6 @@ mod tests {
         )
         .unwrap();
         engine.pending_call = Some(PendingCall {
-            task_revision: engine.task_execution_revision(),
             token: 1,
             owner: PendingOwner::Resident(id),
             frame,

@@ -56,6 +56,6 @@ fn incomplete_mandatory_form_faults_fetch_before_availability() {
         .unwrap();
     assert!(
         matches!(decode_for_execution(&memory, GuestAddress(0x3ffd)),
-        Err(DecodeError::MemoryFault { fault, .. }) if fault.address == GuestAddress(0x4000))
+        Err(DecodeError::Paging { error: crate::cpu::x86::CpuPagingError32::PageFault(fault), .. }) if fault.linear() == GuestAddress(0x4000))
     );
 }

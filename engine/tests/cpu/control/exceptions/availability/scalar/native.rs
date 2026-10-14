@@ -1,3 +1,4 @@
+use super::support_fetch as fetch;
 use ring3_engine::{
     abi::{
         arena::{EXIT_OFFSET, TRANSFER_OFFSET},
@@ -10,7 +11,7 @@ use ring3_engine::{
             decode::{DecodeError, decode_one},
         },
     },
-    memory::GuestAddress,
+    memory::{FaultReason, GuestAddress},
     process::EngineInstance,
 };
 
@@ -180,8 +181,28 @@ fn complete_executable_source_precedes_qualified_ud_and_nop_capture() {
             }
             let before = engine.arena().to_vec();
             let before_ram = ram(&engine);
-            assert!(engine.compile_stopped_entry(KEY, 1).is_err());
+            fetch::assert_error(
+                decode_one(engine.memory().unwrap(), GuestAddress(pc)).unwrap_err(),
+                pc,
+                0x4000,
+                if readonly {
+                    FaultReason::Permission
+                } else {
+                    FaultReason::Unmapped
+                },
+                bytes.len() as u32,
+            );
+            let id = engine.compile_stopped_resident_entry(KEY).unwrap();
+            assert_eq!(
+                &engine.resident_bytes(id.get()).unwrap()[..8],
+                b"\0asm\x01\0\0\0"
+            );
             assert_eq!(engine.generation(), 1);
+            assert_eq!(engine.arena(), before);
+            assert_eq!(ram(&engine), before_ram);
+            engine
+                .discard_unacknowledged_resident(KEY, id.get())
+                .unwrap();
             assert_eq!(engine.arena(), before);
             assert_eq!(ram(&engine), before_ram);
         }

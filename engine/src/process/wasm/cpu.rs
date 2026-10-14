@@ -1,24 +1,25 @@
-use super::{cpu_store, mutate};
+use super::mutate;
+use super::paging::{cpu_mutate, cpu_paging_store};
 use crate::process::HostError;
 
 pub(crate) fn cpu_read8(address: u32) -> u32 {
-    mutate(|instance| instance.cpu_read8(address))
+    cpu_mutate(|instance| instance.cpu_read8(address))
 }
 
 pub(crate) fn cpu_read16(address: u32) -> u32 {
-    mutate(|instance| instance.cpu_read16(address))
+    cpu_mutate(|instance| instance.cpu_read16(address))
 }
 
 pub(crate) fn cpu_read32(address: u32) -> u32 {
-    mutate(|instance| instance.cpu_read32(address))
+    cpu_mutate(|instance| instance.cpu_read32(address))
 }
 
 pub(crate) fn cpu_read(address: u32, length: u32, alignment: u32) -> u32 {
-    mutate(|instance| instance.cpu_read(address, length, alignment))
+    cpu_mutate(|instance| instance.cpu_read(address, length, alignment))
 }
 
 pub(crate) fn cpu_write(address: u32, length: u32, alignment: u32) -> u32 {
-    cpu_store(|instance| instance.cpu_write(address, length, alignment))
+    cpu_paging_store(|instance| instance.cpu_write(address, length, alignment))
 }
 
 pub(crate) fn cpu_write_resident(
@@ -30,7 +31,7 @@ pub(crate) fn cpu_write_resident(
     length: u32,
     alignment: u32,
 ) -> u32 {
-    cpu_store(|instance| {
+    cpu_paging_store(|instance| {
         instance.cpu_write_resident(
             u64::from(key_low) | (u64::from(key_high) << 32),
             u64::from(id_low) | (u64::from(id_high) << 32),
@@ -42,7 +43,7 @@ pub(crate) fn cpu_write_resident(
 }
 
 pub(crate) fn cpu_fxsave(address: u32) -> u32 {
-    cpu_store(|instance| instance.cpu_fxsave(address))
+    cpu_paging_store(|instance| instance.cpu_fxsave(address))
 }
 
 pub(crate) fn cpu_fxsave_resident(
@@ -52,7 +53,7 @@ pub(crate) fn cpu_fxsave_resident(
     id_high: u32,
     address: u32,
 ) -> u32 {
-    cpu_store(|instance| {
+    cpu_paging_store(|instance| {
         instance.cpu_fxsave_resident(
             u64::from(key_low) | (u64::from(key_high) << 32),
             u64::from(id_low) | (u64::from(id_high) << 32),
@@ -62,7 +63,7 @@ pub(crate) fn cpu_fxsave_resident(
 }
 
 pub(crate) fn cpu_mask_write(address: u32, length: u32, mask: u32) -> u32 {
-    cpu_store(|instance| instance.cpu_mask_write(address, length, mask))
+    cpu_paging_store(|instance| instance.cpu_mask_write(address, length, mask))
 }
 
 pub(crate) fn cpu_mask_write_resident(
@@ -74,7 +75,7 @@ pub(crate) fn cpu_mask_write_resident(
     length: u32,
     mask: u32,
 ) -> u32 {
-    cpu_store(|instance| {
+    cpu_paging_store(|instance| {
         instance.cpu_mask_write_resident(
             u64::from(key_low) | (u64::from(key_high) << 32),
             u64::from(id_low) | (u64::from(id_high) << 32),
@@ -93,7 +94,7 @@ pub(crate) fn x87_op(
     opcode: u32,
     waiting: u32,
 ) -> u32 {
-    cpu_store(|instance| instance.x87_op(operation, address, flags, pc, opcode, waiting))
+    cpu_paging_store(|instance| instance.x87_op(operation, address, flags, pc, opcode, waiting))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -109,7 +110,7 @@ pub(crate) fn x87_resident_op(
     opcode: u32,
     waiting: u32,
 ) -> u32 {
-    cpu_store(|instance| {
+    cpu_paging_store(|instance| {
         instance.x87_resident_op(
             u64::from(key_low) | (u64::from(key_high) << 32),
             u64::from(id_low) | (u64::from(id_high) << 32),
@@ -131,7 +132,7 @@ pub(crate) fn simd_execute(
     destination_gpr: u32,
     flags: u32,
 ) -> u32 {
-    mutate(|instance| {
+    cpu_mutate(|instance| {
         instance.simd_execute(
             descriptor,
             operands,
@@ -144,7 +145,7 @@ pub(crate) fn simd_execute(
 }
 
 pub(crate) fn far_call(offset: u32, selector: u32, word: u32, return_eip: u32, esp: u32) -> u32 {
-    cpu_store(|instance| instance.far_call(offset, selector, word, return_eip, esp))
+    cpu_paging_store(|instance| instance.far_call(offset, selector, word, return_eip, esp))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -159,7 +160,7 @@ pub(crate) fn far_call_resident(
     return_eip: u32,
     esp: u32,
 ) -> u32 {
-    cpu_store(|instance| {
+    cpu_paging_store(|instance| {
         instance.far_call_resident(
             u64::from(key_low) | (u64::from(key_high) << 32),
             u64::from(id_low) | (u64::from(id_high) << 32),
@@ -245,7 +246,7 @@ pub(crate) fn segment_load_resident(
 }
 
 pub(crate) fn segment_load_far(target: u32, address: u32, word: u32) -> u32 {
-    mutate(|instance| instance.segment_load_far(target, address, word))
+    cpu_mutate(|instance| instance.segment_load_far(target, address, word))
 }
 
 pub(crate) fn segment_load_far_resident(
@@ -257,7 +258,7 @@ pub(crate) fn segment_load_far_resident(
     address: u32,
     word: u32,
 ) -> u32 {
-    mutate(|instance| {
+    cpu_mutate(|instance| {
         instance.segment_load_far_resident(
             u64::from(key_low) | (u64::from(key_high) << 32),
             u64::from(id_low) | (u64::from(id_high) << 32),
@@ -341,7 +342,7 @@ pub(crate) fn simd_execute_resident(
     destination_gpr: u32,
     flags: u32,
 ) -> u32 {
-    mutate(|instance| {
+    cpu_mutate(|instance| {
         instance.simd_execute_resident(
             u64::from(key_low) | (u64::from(key_high) << 32),
             u64::from(id_low) | (u64::from(id_high) << 32),
@@ -356,7 +357,7 @@ pub(crate) fn simd_execute_resident(
 }
 
 pub(crate) fn cpu_integer(descriptor: u32, address: u32) -> u32 {
-    cpu_store(|instance| instance.cpu_integer(descriptor, address))
+    cpu_paging_store(|instance| instance.cpu_integer(descriptor, address))
 }
 
 pub(crate) fn cpu_integer_resident(
@@ -367,7 +368,7 @@ pub(crate) fn cpu_integer_resident(
     descriptor: u32,
     address: u32,
 ) -> u32 {
-    cpu_store(|instance| {
+    cpu_paging_store(|instance| {
         instance.cpu_integer_resident(
             u64::from(key_low) | (u64::from(key_high) << 32),
             u64::from(id_low) | (u64::from(id_high) << 32),
@@ -378,7 +379,7 @@ pub(crate) fn cpu_integer_resident(
 }
 
 pub(crate) fn stack_execute(control: u32) -> u32 {
-    cpu_store(|instance| instance.stack_execute(control))
+    cpu_paging_store(|instance| instance.stack_execute(control))
 }
 
 pub(crate) fn stack_execute_resident(
@@ -388,7 +389,7 @@ pub(crate) fn stack_execute_resident(
     id_high: u32,
     control: u32,
 ) -> u32 {
-    cpu_store(|instance| {
+    cpu_paging_store(|instance| {
         instance.stack_execute_resident(
             u64::from(key_low) | (u64::from(key_high) << 32),
             u64::from(id_low) | (u64::from(id_high) << 32),
@@ -399,34 +400,4 @@ pub(crate) fn stack_execute_resident(
 
 pub(crate) fn configure_system_register_bank() -> u32 {
     mutate(|instance| instance.configure_system_register_bank_request())
-}
-
-pub(crate) fn configure_interrupt_descriptor_table() -> u32 {
-    mutate(|instance| instance.configure_interrupt_descriptor_table_request())
-}
-
-pub(crate) fn interrupt_gate(vector: u32, return_eip: u32, esp: u32, flags: u32) -> u32 {
-    cpu_store(|instance| instance.interrupt_gate(vector, return_eip, esp, flags))
-}
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn interrupt_gate_resident(
-    key_low: u32,
-    key_high: u32,
-    id_low: u32,
-    id_high: u32,
-    vector: u32,
-    return_eip: u32,
-    esp: u32,
-    flags: u32,
-) -> u32 {
-    cpu_store(|instance| {
-        instance.interrupt_gate_resident(
-            u64::from(key_low) | (u64::from(key_high) << 32),
-            u64::from(id_low) | (u64::from(id_high) << 32),
-            vector,
-            return_eip,
-            esp,
-            flags,
-        )
-    })
 }

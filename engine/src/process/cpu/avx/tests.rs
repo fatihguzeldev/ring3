@@ -94,6 +94,28 @@ fn fault_neutral(engine: &EngineInstance, before: &[u8], length: u32, status: u3
     assert_eq!(engine.arena(), expected);
 }
 
+fn page_fault_neutral(
+    engine: &EngineInstance,
+    before: &[u8],
+    length: u32,
+    error_code: u32,
+    linear: u32,
+    access: u32,
+) {
+    let mut expected = before.to_vec();
+    let packet = &mut expected[HELPER_OFFSET..HELPER_OFFSET + HELPER_SIZE];
+    packet.fill(0);
+    packet[..12].copy_from_slice(b"R3MH\x0f\0\x01\0\x28\0\0\0");
+    for (i, value) in [9, 0, error_code, linear, access, length]
+        .into_iter()
+        .enumerate()
+    {
+        packet[16 + 4 * i..20 + 4 * i].copy_from_slice(&value.to_le_bytes());
+    }
+    assert_eq!(engine.arena(), expected);
+    assert_eq!(engine.cr2(), Some(GuestAddress(linear)));
+}
+
 #[test]
 fn register_copy_ignores_stale_metadata_and_live_general_input_is_explicit() {
     let (mut engine, id) = engine();
@@ -205,10 +227,7 @@ fn full_span_segment_alignment_and_late_page_faults_precede_publication() {
     engine
         .avx_execute(descriptor(3, 2), 1 << 12, 0, 0, 0, 2)
         .unwrap();
-    assert_eq!(packet(&engine, 16), 1);
-    assert_eq!(packet(&engine, 28), 0x6000);
-    assert_eq!(packet(&engine, 32), 1);
-    assert_eq!(packet(&engine, 36), 32);
+    page_fault_neutral(&engine, &before, 32, 4, 0x6000, 1);
     assert_eq!(
         &engine.arena()[SIMD_OFFSET..SIMD_OFFSET + SIMD_SIZE],
         &before[SIMD_OFFSET..SIMD_OFFSET + SIMD_SIZE]
@@ -226,6 +245,7 @@ fn full_span_segment_alignment_and_late_page_faults_precede_publication() {
     engine
         .avx_execute(descriptor(3, 8), 1 << 13 | 2 << 6, 0, 0, 0, 2)
         .unwrap();
+    page_fault_neutral(&engine, &before, 32, 6, 0x6000, 2);
     let mut after = [0; 16];
     engine
         .memory
@@ -319,8 +339,7 @@ fn masked_selected_accesses_skip_disabled_segments_and_commit_once() {
     engine
         .avx_execute(descriptor(13, 7), 2 << 6 | 3 << 9 | 1 << 13, 0, 0, 0, 2)
         .unwrap();
-    assert_eq!(packet(&engine, 16), 1);
-    assert_eq!(packet(&engine, 28), 0x6000);
+    page_fault_neutral(&engine, &before, 32, 6, 0x6000, 2);
     let mut after_ram = [0; 4];
     engine
         .memory
@@ -378,7 +397,6 @@ fn pending_stale_closed_and_smc_authority_keep_existing_lifecycle() {
     )
     .unwrap();
     engine.pending_call = Some(PendingCall {
-        task_revision: engine.task_execution_revision(),
         token: 1,
         owner: PendingOwner::Resident(id),
         frame,

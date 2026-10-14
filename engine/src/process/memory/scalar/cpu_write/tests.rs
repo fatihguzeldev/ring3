@@ -111,7 +111,10 @@ fn low_write_permission_fault_is_canonical_and_preserves_every_ram_byte() {
         engine.cpu_store32(0xffff_fffe, 0x89ab_cdef),
         Ok(StoreCompletion::Complete)
     );
-    assert_eq!(engine.arena(), expected(&before, [1, 0, 2, 0, 2, 4]));
+    let mut reply = expected(&before, [9, 0, 7, 0, 2, 4]);
+    reply[HELPER_OFFSET + 4..HELPER_OFFSET + 6].copy_from_slice(&15_u16.to_le_bytes());
+    assert_eq!(engine.arena(), reply);
+    assert_eq!(engine.cr2(), Some(GuestAddress(0)));
     assert_eq!(ram(&engine), before_ram);
     assert_eq!(
         engine.memory.as_ref().unwrap().code_validation_version(),

@@ -746,18 +746,14 @@ pub(super) fn instruction(
             .i32_const(alignment)
             .call(imports.cpu_read.expect("direct SIMD read"))
             .local_set(HELPER_STATUS);
-        crate::cpu::dbt::wasm::code_fetch::check_context(
-            code,
-            exit_depth,
-            imports.raw_task_context.is_some(),
-        );
+        crate::cpu::dbt::wasm::code_fetch::check_context(code, exit_depth);
         cpu_result::validate(
             code,
             u32::from(op.memory_bytes),
             1,
             false,
             exit_depth,
-            imports.raw_task_context.is_some(),
+            cpu_result::ResultContext::from(imports),
         );
     }
     if op.kind == SimdKind::Packed(P::Test) {
@@ -932,7 +928,7 @@ pub(super) fn instruction(
                 2,
                 true,
                 exit_depth,
-                imports.raw_task_context.is_some(),
+                cpu_result::ResultContext::from(imports),
             );
         }
         _ => unreachable!(),

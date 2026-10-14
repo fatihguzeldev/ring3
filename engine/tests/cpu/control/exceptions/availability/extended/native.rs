@@ -83,7 +83,10 @@ fn vex128_aes_selected_absence_and_neutral_neighbor_remain_distinct() {
         assert!(matches!(decoded.operation(), Operation::Avx(_)));
         assert_eq!(decoded.length(), 5);
     }
-    for bytes in [&[0xcd, 0x80][..], &[0xc4, 0xe3, 0x7d, 0x44, 0xc1, 0]] {
+    for bytes in [
+        &[0x66, 0x66, 0xcd, 0x80][..],
+        &[0xc4, 0xe3, 0x7d, 0x44, 0xc1, 0],
+    ] {
         let mut engine = stopped(bytes, 0x3000);
         let arena = engine.arena().to_vec();
         assert!(decode_one(engine.memory().unwrap(), GuestAddress(0x3000)).is_err());

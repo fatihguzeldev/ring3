@@ -1,5 +1,15 @@
 use super::{AbiError, header, memory_helper::HELPER_SIZE};
-use crate::memory::{Access, FaultReason, MemoryError};
+use crate::{
+    cpu::x86::CpuPagingError32,
+    memory::{Access, FaultReason, MemoryError},
+};
+
+mod fetch;
+pub(super) mod paging;
+pub(crate) use fetch::encode_cpu_fetch_result;
+pub use paging::{
+    CPU_PAGE_FAULT_TRANSPORT, CPU_PAGING_HELPER_VERSION, encode_cpu_paging_scalar_result,
+};
 
 pub const CPU_HELPER_VERSION: u16 = 7;
 pub const CPU_HELPER_VERSION_8: u16 = 8;
@@ -10,11 +20,21 @@ pub const MAX_CPU_SPAN: usize = 576;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CpuMemoryError {
     Memory(MemoryError),
+    Paging(CpuPagingError32),
     GeneralProtection(u32),
     FloatingPoint(u16),
     SimdFloatingPoint(u32),
     SegmentNotPresent(u32),
     StackSegment(u32),
+}
+
+impl From<CpuPagingError32> for CpuMemoryError {
+    fn from(error: CpuPagingError32) -> Self {
+        match error {
+            CpuPagingError32::Memory(error) => Self::Memory(error),
+            error => Self::Paging(error),
+        }
+    }
 }
 
 pub fn encode_cpu_result(
@@ -67,7 +87,8 @@ fn encode(
         Err(CpuMemoryError::SimdFloatingPoint(mxcsr)) => [5, 0, mxcsr, 0, 0, length],
         Err(CpuMemoryError::SegmentNotPresent(code)) => [6, 0, code, 0, 0, length],
         Err(CpuMemoryError::StackSegment(code)) => [7, 0, code, 0, 0, length],
-        Err(CpuMemoryError::Memory(MemoryError::Fault(fault))) => [
+        Err(CpuMemoryError::Memory(MemoryError::Fault(fault)))
+        | Err(CpuMemoryError::Paging(CpuPagingError32::Memory(MemoryError::Fault(fault)))) => [
             1,
             0,
             match fault.reason {
@@ -83,7 +104,8 @@ fn encode(
             },
             length,
         ],
-        Err(CpuMemoryError::Memory(error)) => [
+        Err(CpuMemoryError::Memory(error))
+        | Err(CpuMemoryError::Paging(CpuPagingError32::Memory(error))) => [
             2,
             0,
             if error == MemoryError::VersionExhausted {
@@ -95,6 +117,7 @@ fn encode(
             0,
             length,
         ],
+        Err(CpuMemoryError::Paging(error)) => return paging::encode(length, error, output),
     };
     header::write_version(output, *b"R3MH", version);
     for (index, value) in fields.into_iter().enumerate() {

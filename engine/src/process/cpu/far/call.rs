@@ -1,6 +1,6 @@
 use super::*;
 use crate::{
-    cpu::x86::{SegmentAccess, StackPointerSize},
+    cpu::x86::{CpuMemoryPort32, SegmentAccess, StackPointerSize},
     memory::MemoryError,
     process::StoreCompletion,
 };
@@ -108,22 +108,28 @@ impl EngineInstance {
         ];
         let ss_base = context.state.bases[SegmentRegister::Ss.index()];
         let addresses = offsets.map(|offset| ss_base.wrapping_add(offset));
-        let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
-        let version = memory.code_validation_version();
-        if let Err(error) = memory.cpu_write_stack(&addresses, &values, slot as usize) {
-            let length = if matches!(error, MemoryError::Fault(_)) {
+        let version = self.memory()?.code_validation_version();
+        let result = self
+            .cpu_memory_port32()
+            .write_stack(&addresses, &values, slot as usize);
+        if let Err(error) = result {
+            let error = CpuMemoryError::from(error);
+            let length = if matches!(
+                error,
+                CpuMemoryError::Memory(MemoryError::Fault(_)) | CpuMemoryError::Paging(_)
+            ) {
                 slot
             } else {
                 0
             };
             if gate {
-                self.gate_memory_fault(slot, CpuMemoryError::Memory(error))?;
+                self.gate_memory_fault(slot, error)?;
             } else {
-                self.code_memory_fault(length, CpuMemoryError::Memory(error))?;
+                self.code_memory_fault(length, error)?;
             }
             return Ok(StoreCompletion::Complete);
         }
-        let changed = version != memory.code_validation_version();
+        let changed = version != self.memory()?.code_validation_version();
         // all encoding and memory preflights completed. This commit cannot fail or reenter.
         self.commit_code_transfer(prepared);
         self.cpu_store_currentness(changed, resident)

@@ -22,30 +22,34 @@ pub(in crate::cpu::dbt::wasm) fn call(
         .local_get(esp)
         .call(index)
         .local_set(HELPER_STATUS);
-    crate::cpu::dbt::wasm::tasks::refresh(code, imports);
-    gate::is_packet(code);
+    gate::is_packet(code, cpu_result::ResultContext::from(imports));
     code.if_(BlockType::Empty);
-    gate::call_result(code, exit_depth + 1, imports.raw_task_context.is_some());
+    gate::call_result(
+        code,
+        exit_depth + 1,
+        cpu_result::ResultContext::from(imports),
+    );
     code.else_();
     call_result(
         code,
         width.slot_bytes(),
         exit_depth + 1,
-        imports.raw_task_context.is_some(),
+        cpu_result::ResultContext::from(imports),
     );
-    target_echo(code, exit_depth + 1, imports.raw_task_context.is_some());
-    super::super::stack::pointer::advance(
-        code,
-        -((2 * width.slot_bytes()) as i32),
-        imports.raw_task_context.is_some(),
-    );
+    target_echo(code, exit_depth + 1);
+    super::super::stack::pointer::advance(code, -((2 * width.slot_bytes()) as i32));
     code.end();
     code.local_get(RESULT).local_set(EIP);
 }
 
 // the descriptor and stack phases have distinct status/length contracts. The common
 // validator still owns envelope, canonical detail fields and transport-status handling.
-fn call_result(code: &mut InstructionSink<'_>, slot: u32, exit_depth: u32, raw_task_context: bool) {
+fn call_result(
+    code: &mut InstructionSink<'_>,
+    slot: u32,
+    exit_depth: u32,
+    context: cpu_result::ResultContext,
+) {
     code.local_get(HELPER_STATUS)
         .i32_eqz()
         .local_get(HELPER_STATUS)
@@ -88,20 +92,15 @@ fn call_result(code: &mut InstructionSink<'_>, slot: u32, exit_depth: u32, raw_t
     code.end();
     memory::protocol_if_bad(code);
     code.end();
-    memory::exit_if_failed(code, exit_depth, raw_task_context);
+    memory::exit_if_failed(code, exit_depth);
 
     // the common validator checks the selected linear slot, including base-addition overflow.
     memory::helper_field(code, 16);
     code.i32_const(1).i32_eq();
     memory::helper_field(code, 16);
     code.i32_const(7).i32_eq().i32_or().if_(BlockType::Empty);
-    super::super::stack::pointer::offset(
-        code,
-        register(Register32::Esp),
-        -(slot as i32),
-        raw_task_context,
-    );
-    super::super::segments::base(code, crate::cpu::x86::SegmentRegister::Ss, raw_task_context);
+    super::super::stack::pointer::offset(code, register(Register32::Esp), -(slot as i32));
+    super::super::segments::base(code, crate::cpu::x86::SegmentRegister::Ss);
     code.i32_add().local_set(ADDRESS);
     memory::helper_field(code, 28);
     code.local_get(ADDRESS)
@@ -109,16 +108,11 @@ fn call_result(code: &mut InstructionSink<'_>, slot: u32, exit_depth: u32, raw_t
         .i32_const(slot as i32 - 1)
         .i32_gt_u()
         .if_(BlockType::Empty);
-    super::super::stack::pointer::offset(
-        code,
-        register(Register32::Esp),
-        -((2 * slot) as i32),
-        raw_task_context,
-    );
-    super::super::segments::base(code, crate::cpu::x86::SegmentRegister::Ss, raw_task_context);
+    super::super::stack::pointer::offset(code, register(Register32::Esp), -((2 * slot) as i32));
+    super::super::segments::base(code, crate::cpu::x86::SegmentRegister::Ss);
     code.i32_add().local_set(ADDRESS).end();
-    cpu_result::validate(code, slot, 2, true, exit_depth + 1, raw_task_context);
+    cpu_result::validate(code, slot, 2, true, exit_depth + 1, context);
     code.else_();
-    cpu_result::validate(code, 0, 0, true, exit_depth + 1, raw_task_context);
+    cpu_result::validate(code, 0, 0, true, exit_depth + 1, context);
     code.end();
 }

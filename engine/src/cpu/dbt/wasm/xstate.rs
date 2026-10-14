@@ -43,7 +43,7 @@ pub(super) fn instruction(
         return save;
     }
     check_selected_spans(code, *address, save, imports, exit_depth);
-    memory::effective_address(code, *address, imports.raw_task_context.is_some());
+    memory::effective_address(code, *address);
     let helper = if save {
         imports.cpu_xsave
     } else {
@@ -56,14 +56,19 @@ pub(super) fn instruction(
         .local_get(register(Register32::Edx))
         .call(index)
         .local_set(HELPER_STATUS);
-    validate_context(code, save, exit_depth, imports.raw_task_context.is_some());
+    validate_context(
+        code,
+        save,
+        exit_depth,
+        cpu_result::ResultContext::from(imports),
+    );
     cpu_result::validate(
         code,
         576,
         if save { 3 } else { 1 },
         save,
         exit_depth,
-        imports.raw_task_context.is_some(),
+        cpu_result::ResultContext::from(imports),
     );
     save
 }
@@ -156,8 +161,28 @@ fn validate_context(
     code: &mut InstructionSink<'_>,
     save: bool,
     exit_depth: u32,
-    raw_task_context: bool,
+    context: super::cpu_result::ResultContext,
 ) {
+    if context.paging_configured {
+        super::cpu_result::paging::is_packet(code);
+        code.if_(BlockType::Empty);
+        super::cpu_result::paging::transport(code, save);
+        memory::exit_if_failed(code, exit_depth + 1);
+        memory::reset_checks(code);
+        code.local_get(ADDRESS).i32_const(63).i32_and();
+        memory::add_check(code);
+        fault_geometry(code, save, true);
+        memory::protocol_if_bad(code);
+        memory::exit_if_failed(code, exit_depth + 1);
+        code.else_();
+        validate_legacy_context(code, save, exit_depth + 1);
+        code.end();
+    } else {
+        validate_legacy_context(code, save, exit_depth);
+    }
+}
+
+fn validate_legacy_context(code: &mut InstructionSink<'_>, save: bool, exit_depth: u32) {
     memory::reset_checks(code);
     memory::expect_field(code, 20, 0);
     memory::helper_field(code, 16);
@@ -174,29 +199,10 @@ fn validate_context(
     code.end();
     memory::helper_field(code, 16);
     code.i32_const(1).i32_eq().if_(BlockType::Empty);
-    memory::helper_field(code, 28);
-    code.local_get(ADDRESS).i32_sub().local_set(RHS);
-    range(code, 512, if save { 520 } else { 536 });
-    if save {
-        memory::helper_field(code, 32);
-        code.i32_const(2).i32_eq();
-    }
-    selected(code, 1);
-    range(code, 0, 24);
-    range(code, 32, 160);
-    code.i32_or().i32_and();
-    selected(code, 2);
-    range(code, 24, if save { 32 } else { 28 });
-    range(code, 160, 288);
-    code.i32_or().i32_and().i32_or();
-    if save {
-        code.i32_and();
-    }
-    code.i32_or().i32_eqz();
-    memory::add_check(code);
+    fault_geometry(code, save, false);
     code.end();
     memory::protocol_if_bad(code);
-    memory::exit_if_failed(code, exit_depth, raw_task_context);
+    memory::exit_if_failed(code, exit_depth);
 }
 
 /// the extended helper owns selected cached spans and page transactions as one operation.
@@ -221,15 +227,47 @@ fn upper_instruction(
         .call(index)
         .local_set(HELPER_STATUS);
     // reconstruct the linear base only for response validation, after the helper's authority checks.
-    memory::effective_address(code, address, imports.raw_task_context.is_some());
+    memory::effective_address(code, address);
     upper::validate_context(
         code,
         save,
         address.resolved_segment(),
         exit_depth,
-        imports.raw_task_context.is_some(),
+        cpu_result::ResultContext::from(imports),
     );
-    cpu_result::validate_xstate(code, save, exit_depth, imports.raw_task_context.is_some());
+    cpu_result::validate_xstate(
+        code,
+        save,
+        exit_depth,
+        cpu_result::ResultContext::from(imports),
+    );
 }
 
 mod upper;
+
+fn fault_geometry(code: &mut InstructionSink<'_>, save: bool, typed: bool) {
+    memory::helper_field(code, 28);
+    code.local_get(ADDRESS).i32_sub().local_set(RHS);
+    range(code, 512, if save { 520 } else { 536 });
+    if save {
+        if typed {
+            super::cpu_result::paging::intent(code);
+        } else {
+            memory::helper_field(code, 32);
+        }
+        code.i32_const(2).i32_eq();
+    }
+    selected(code, 1);
+    range(code, 0, 24);
+    range(code, 32, 160);
+    code.i32_or().i32_and();
+    selected(code, 2);
+    range(code, 24, if save { 32 } else { 28 });
+    range(code, 160, 288);
+    code.i32_or().i32_and().i32_or();
+    if save {
+        code.i32_and();
+    }
+    code.i32_or().i32_eqz();
+    memory::add_check(code);
+}

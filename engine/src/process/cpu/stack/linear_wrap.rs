@@ -1,5 +1,8 @@
 use super::*;
-use crate::memory::{PageRange, Permissions};
+use crate::{
+    cpu::x86::DefaultCpuReadPort32,
+    memory::{AddressSpace, PageRange, Permissions},
+};
 
 fn ram(memory: &AddressSpace) -> [Vec<u8>; 2] {
     std::array::from_fn(|index| {
@@ -43,7 +46,7 @@ fn pushall_and_popall_keep_logical_b16_b32_pointers_while_one_slot_wraps_linear_
             8,
         ];
         let pushed = prepare(
-            &memory,
+            &mut DefaultCpuReadPort32::new(&memory),
             0xffff_fff0,
             pointer,
             StackFrameKind::PushAll32,
@@ -67,7 +70,7 @@ fn pushall_and_popall_keep_logical_b16_b32_pointers_while_one_slot_wraps_linear_
             .unwrap();
         assert_eq!(memory.code_validation_version(), version + 1);
         let popped = prepare(
-            &memory,
+            &mut DefaultCpuReadPort32::new(&memory),
             0xffff_fff0,
             pointer,
             StackFrameKind::PopAll32,
@@ -86,7 +89,7 @@ fn nested_enter_alias_read_observes_earlier_wrapped_push_without_publishing_befo
     let original = [1, 2, 3, 4, 0x12, 0x12, 7, 8];
     let before = ram(&memory);
     let prepared = prepare(
-        &memory,
+        &mut DefaultCpuReadPort32::new(&memory),
         0xffff_fff0,
         StackPointerSize::new(true),
         StackFrameKind::Enter32,

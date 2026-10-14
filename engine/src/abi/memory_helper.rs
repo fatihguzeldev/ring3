@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+pub use super::cpu_helper::{CPU_PAGE_FAULT_TRANSPORT, encode_cpu_paging_scalar_result};
+
 mod cpu;
 pub use cpu::{CPU_SCALAR_HELPER_VERSION, CpuScalarOperation, encode_cpu_scalar_result};
 

@@ -1,3 +1,4 @@
+use super::support_fetch as fetch;
 use ring3_engine::{
     cpu::{
         UnsupportedFeature,
@@ -7,7 +8,7 @@ use ring3_engine::{
             ir::{BranchTarget, Condition, CountBranchKind, Operation},
         },
     },
-    memory::{Access, AddressSpace, GuestAddress, PageRange, Permissions},
+    memory::{Access, AddressSpace, FaultReason, GuestAddress, PageRange, Permissions},
 };
 
 const CONDITIONS: [(u8, Condition); 16] = [
@@ -65,7 +66,11 @@ fn conditions_keep_truncated_taken_target_and_full_fallthrough() {
             // only the taken target is truncated; the false path retains the full next pc.
             assert_eq!(instruction.next_pc(), GuestAddress(0x1235_0000));
             assert!(memory.is_code_current(instruction.code_snapshot()));
-            assert!(memory.resolve(GuestAddress(target), Access::Execute).is_err());
+            assert!(
+                memory
+                    .resolve(GuestAddress(target), Access::Execute)
+                    .is_err()
+            );
         }
     }
 }
@@ -87,7 +92,11 @@ fn jump_truncates_signed_target_without_truncating_source_snapshot() {
             assert_eq!(instruction.length(), 3);
             assert_eq!(instruction.next_pc(), GuestAddress(pc.wrapping_add(3)));
             assert!(memory.is_code_current(instruction.code_snapshot()));
-            assert!(memory.resolve(GuestAddress(target), Access::Execute).is_err());
+            assert!(
+                memory
+                    .resolve(GuestAddress(target), Access::Execute)
+                    .is_err()
+            );
         }
     }
 }
@@ -160,12 +169,9 @@ fn all_short_word_forms_end_explicit_and_discovered_blocks_at_source() {
             CompileLimits::default(),
         )
         .expect("explicit operand16 short branch extent must compile");
-        let discovered = compile_entry_region(
-            &memory,
-            &[GuestAddress(pc)],
-            CompileLimits::default(),
-        )
-        .expect("entry discovery must stop at the operand16 short branch");
+        let discovered =
+            compile_entry_region(&memory, &[GuestAddress(pc)], CompileLimits::default())
+                .expect("entry discovery must stop at the operand16 short branch");
         assert_eq!(explicit.metadata().blocks, 1);
         assert_eq!(explicit.metadata().instructions, 1);
         assert_eq!(explicit.metadata(), discovered.metadata());
@@ -180,10 +186,13 @@ fn all_short_word_forms_end_explicit_and_discovered_blocks_at_source() {
 fn incomplete_displacement_faults_before_decode_and_repairs_exactly() {
     let pc = 0x1ffe;
     let mut memory = code(pc, &[0x66, 0x74]);
-    assert!(matches!(
-        decode_one(&memory, GuestAddress(pc)),
-        Err(DecodeError::MemoryFault { length: 3, .. })
-    ));
+    fetch::assert_error(
+        decode_one(&memory, GuestAddress(pc)).unwrap_err(),
+        pc,
+        0x2000,
+        FaultReason::Unmapped,
+        3,
+    );
     let second = PageRange::new(GuestAddress(0x2000), 1).unwrap();
     // create capacity independently because the first mapping deliberately held one page.
     let mut repaired = AddressSpace::new(2).unwrap();
@@ -192,10 +201,13 @@ fn incomplete_displacement_faults_before_decode_and_repairs_exactly() {
     repaired.write(GuestAddress(pc), &[0x66, 0x74]).unwrap();
     repaired.protect(first, Permissions::EXECUTE).unwrap();
     repaired.map_zeroed(second, Permissions::READ).unwrap();
-    assert!(matches!(
-        decode_one(&repaired, GuestAddress(pc)),
-        Err(DecodeError::MemoryFault { length: 3, .. })
-    ));
+    fetch::assert_error(
+        decode_one(&repaired, GuestAddress(pc)).unwrap_err(),
+        pc,
+        0x2000,
+        FaultReason::Permission,
+        3,
+    );
     repaired.protect(second, Permissions::EXECUTE).unwrap();
     let instruction = decode_one(&repaired, GuestAddress(pc))
         .expect("fetch repair must admit exactly the complete operand16 short branch");
@@ -210,10 +222,13 @@ fn incomplete_displacement_faults_before_decode_and_repairs_exactly() {
     );
     assert!(repaired.is_code_current(instruction.code_snapshot()));
     memory.protect(first, Permissions::READ).unwrap();
-    assert!(matches!(
-        decode_one(&memory, GuestAddress(pc)),
-        Err(DecodeError::MemoryFault { length: 1, .. })
-    ));
+    fetch::assert_error(
+        decode_one(&memory, GuestAddress(pc)).unwrap_err(),
+        pc,
+        0x1ffe,
+        FaultReason::Permission,
+        1,
+    );
 }
 
 #[test]
@@ -221,7 +236,9 @@ fn existing_short_dword_and_invalid_prefix_controls_remain_exact() {
     for (opcode, condition) in CONDITIONS {
         let memory = code(0x1234_fffe, &[opcode, 0]);
         assert_eq!(
-            decode_one(&memory, GuestAddress(0x1234_fffe)).unwrap().operation(),
+            decode_one(&memory, GuestAddress(0x1234_fffe))
+                .unwrap()
+                .operation(),
             &Operation::ConditionalJump {
                 condition,
                 target: GuestAddress(0x1235_0000),
@@ -234,14 +251,21 @@ fn existing_short_dword_and_invalid_prefix_controls_remain_exact() {
             vec![0xf2, 0x66, opcode, 0],
             vec![0xf3, 0x66, opcode, 0],
         ] {
+            if bytes[0] == 0xf2 && opcode == 0x74 {
+                super::support_word_prefix::admitted(&bytes);
+                continue;
+            }
             assert_eq!(
                 decode_one(&code(0x1000, &bytes), GuestAddress(0x1000)).unwrap_err(),
                 DecodeError::Unsupported(UnsupportedFeature::Opcode)
             );
         }
         assert_eq!(
-            decode_one(&code(0x1000, &[0xf0, 0x66, opcode, 0]), GuestAddress(0x1000))
-                .unwrap_err(),
+            decode_one(
+                &code(0x1000, &[0xf0, 0x66, opcode, 0]),
+                GuestAddress(0x1000)
+            )
+            .unwrap_err(),
             DecodeError::InvalidEncoding
         );
     }

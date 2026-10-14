@@ -1,7 +1,10 @@
 use crate::{
     abi::cpu_helper::CpuMemoryError,
-    cpu::x86::{SegmentAccess, SegmentQuery, SegmentRegister, USER_MODE_ENVIRONMENT},
-    memory::{Access, GuestAddress},
+    cpu::x86::{
+        CpuMemoryPort32, CpuReadPort32, PagingAccess32, SegmentAccess, SegmentQuery,
+        SegmentRegister, USER_MODE_ENVIRONMENT,
+    },
+    memory::GuestAddress,
     process::{EngineInstance, HostError, StoreCompletion},
 };
 
@@ -81,19 +84,19 @@ impl EngineInstance {
             self.integer_publish(2, output, Err(fault))?;
             return Ok(StoreCompletion::Complete);
         }
-        let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
-        let version = memory.code_validation_version();
+        let version = self.memory()?.code_validation_version();
+        let mut memory = self.cpu_memory_port32();
         let mut bytes = [0; 2];
         let result = memory
-            .cpu_check_span(GuestAddress(address), 2, Access::Write)
-            .and_then(|()| memory.cpu_read(GuestAddress(address), &mut bytes))
+            .check(GuestAddress(address), 2, PagingAccess32::Write)
+            .and_then(|()| memory.read_modify(GuestAddress(address), &mut bytes))
             .and_then(|()| {
                 let old = u16::from_le_bytes(bytes);
                 let source_rpl = (input[0] & 3) as u16;
                 let adjusted = old & 3 < source_rpl;
                 output[1] = (input[1] & !0x40) | if adjusted { 0x40 } else { 0 };
                 if adjusted {
-                    memory.cpu_write(
+                    memory.write(
                         GuestAddress(address),
                         &((old & !3) | source_rpl).to_le_bytes(),
                     )
@@ -101,8 +104,8 @@ impl EngineInstance {
                     Ok(())
                 }
             })
-            .map_err(CpuMemoryError::Memory);
-        let changed = result.is_ok() && version != memory.code_validation_version();
+            .map_err(CpuMemoryError::from);
+        let changed = result.is_ok() && version != self.memory()?.code_validation_version();
         self.integer_publish(2, output, result)?;
         self.cpu_store_currentness(changed, resident)
     }
@@ -212,17 +215,37 @@ mod tests {
         engine.write32(0x5010, 0xaabb_1123).unwrap();
         engine.protect(0x5000, 1, 1).unwrap();
         input(&mut engine, 0, 0x5010, 3);
-        let before = engine.arena()[TRANSFER_OFFSET..TRANSFER_OFFSET + 24].to_vec();
+        let before = engine.arena().to_vec();
+        let mut ram = [0; 4];
+        engine
+            .memory()
+            .unwrap()
+            .read(GuestAddress(0x5010), &mut ram)
+            .unwrap();
+        let version = engine.memory().unwrap().code_validation_version();
         assert_eq!(
             engine.cpu_integer(0x30000, 0x5010),
             Ok(StoreCompletion::Complete)
         );
-        assert_eq!(
-            &engine.arena()[TRANSFER_OFFSET..TRANSFER_OFFSET + 24],
-            before
-        );
-        assert_eq!(field(&engine, HELPER_OFFSET + 16), 1);
-        assert_eq!(field(&engine, HELPER_OFFSET + 24), 2);
+        let mut expected = before;
+        let packet = &mut expected[HELPER_OFFSET..HELPER_OFFSET + 40];
+        packet.fill(0);
+        packet[..16].copy_from_slice(&[82, 51, 77, 72, 15, 0, 1, 0, 40, 0, 0, 0, 0, 0, 0, 0]);
+        for (index, value) in [9_u32, 0, 7, 0x5010, 2, 2].into_iter().enumerate() {
+            packet[16 + index * 4..20 + index * 4].copy_from_slice(&value.to_le_bytes());
+        }
+        assert_eq!(engine.arena(), expected);
+        let mut after = [0; 4];
+        engine
+            .memory()
+            .unwrap()
+            .read(GuestAddress(0x5010), &mut after)
+            .unwrap();
+        assert_eq!(after, ram);
+        assert_eq!(engine.memory().unwrap().code_validation_version(), version);
+        assert_eq!(engine.cr2(), Some(GuestAddress(0x5010)));
+        assert_eq!(field(&engine, HELPER_OFFSET + 16), 9);
+        assert_eq!(field(&engine, HELPER_OFFSET + 24), 7);
         assert_eq!(field(&engine, HELPER_OFFSET + 28), 0x5010);
         assert_eq!(field(&engine, HELPER_OFFSET + 32), 2);
         assert_eq!(field(&engine, HELPER_OFFSET + 36), 2);

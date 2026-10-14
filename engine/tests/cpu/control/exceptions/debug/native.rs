@@ -1,6 +1,5 @@
 use ring3_engine::{
     cpu::{
-        UnsupportedFeature,
         dbt::{BlockSpec, CompileLimits, compile_entry_region, compile_region},
         x86::{
             ControlOperation,
@@ -75,10 +74,12 @@ fn int1_ends_an_explicit_block_before_trailing_instructions() {
 }
 
 #[test]
-fn int1_does_not_admit_ordinary_interrupts_or_illegal_lock() {
+fn int1_remains_distinct_from_software_int1_and_illegal_lock() {
     assert_eq!(
-        decode_one(&code(&[0xcd, 0x01]), GuestAddress(0x1000)).unwrap_err(),
-        DecodeError::Unsupported(UnsupportedFeature::Opcode)
+        decode_one(&code(&[0xcd, 0x01]), GuestAddress(0x1000))
+            .unwrap()
+            .operation(),
+        &Operation::SoftwareInterrupt { vector: 1 }
     );
     assert_eq!(
         decode_one(&code(&[0xf0, 0xf1]), GuestAddress(0x1000)).unwrap_err(),

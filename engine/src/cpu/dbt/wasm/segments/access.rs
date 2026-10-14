@@ -26,17 +26,15 @@ const END: u32 = 8;
 
 /// one pure Wasm function per module avoids duplicating the cache rules at every memory operand.
 /// parameters are context pointer, selector/cache offsets, logical offset, width, access; 1 means fault.
-pub(in crate::cpu::dbt::wasm) fn build_function(raw_task_context: bool) -> Function {
+pub(in crate::cpu::dbt::wasm) fn build_function() -> Function {
     let mut function = Function::new([(3, ValType::I32)]);
     let mut code = function.instructions();
-    if raw_task_context {
-        super::super::tasks::selected_cache(&mut code, SELECTOR_OFFSET, false);
-    } else {
-        code.local_get(CONTEXT)
-            .local_get(SELECTOR_OFFSET)
-            .i32_add()
-            .i32_load16_u(arg(0, 1));
-    }
+
+    code.local_get(CONTEXT)
+        .local_get(SELECTOR_OFFSET)
+        .i32_add()
+        .i32_load16_u(arg(0, 1));
+
     code.i32_const(0xfffc).i32_and().i32_eqz();
     return_fault_if(&mut code);
     code.local_get(WIDTH).i32_eqz();
@@ -51,22 +49,18 @@ pub(in crate::cpu::dbt::wasm) fn build_function(raw_task_context: bool) -> Funct
         .i32_lt_u();
     // the full-4GiB overflow choice is deterministic; Intel permits implementation-specific behavior.
     return_fault_if(&mut code);
-    if raw_task_context {
-        code.i32_const(3);
-    } else {
-        code.local_get(CONTEXT).i32_load16_u(arg(4, 1));
-    }
+
+    code.local_get(CONTEXT).i32_load16_u(arg(4, 1));
+
     code.i32_const(i32::from(SEGMENTS_VERSION_2))
         .i32_ge_u()
         .if_(BlockType::Result(ValType::I32));
-    if raw_task_context {
-        super::super::tasks::selected_cache(&mut code, SELECTOR_OFFSET, true);
-    } else {
-        code.local_get(CONTEXT)
-            .local_get(CACHE_OFFSET)
-            .i32_add()
-            .i32_load(arg(0, 2));
-    }
+
+    code.local_get(CONTEXT)
+        .local_get(CACHE_OFFSET)
+        .i32_add()
+        .i32_load(arg(0, 2));
+
     code.local_set(CACHE)
         .local_get(CACHE)
         .i32_const(1 << 28)

@@ -72,18 +72,14 @@ pub(super) fn instruction(
                 .i32_const(i32::from(transport_alignment(requirement.alignment)))
                 .call(imports.cpu_read.expect("avx read import"))
                 .local_set(HELPER_STATUS);
-            crate::cpu::dbt::wasm::code_fetch::check_context(
-                code,
-                exit_depth,
-                imports.raw_task_context.is_some(),
-            );
+            crate::cpu::dbt::wasm::code_fetch::check_context(code, exit_depth);
             cpu_result::validate(
                 code,
                 u32::from(requirement.bytes),
                 1,
                 false,
                 exit_depth,
-                imports.raw_task_context.is_some(),
+                cpu_result::ResultContext::from(imports),
             );
         }
     }
@@ -233,7 +229,7 @@ pub(super) fn instruction(
         2,
         true,
         exit_depth,
-        imports.raw_task_context.is_some(),
+        cpu_result::ResultContext::from(imports),
     );
     true
 }

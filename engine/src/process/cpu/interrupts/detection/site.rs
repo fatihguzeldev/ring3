@@ -2,8 +2,28 @@ use super::{DetectedEvent32, InstructionTrapRestart32};
 use crate::{
     cpu::x86::{DebugCause32, EventOrigin32, ExceptionCause32, SelectorErrorCode32, TrapPoint32},
     memory::{Access, FaultReason, GuestAddress, MemoryFault},
-    process::HostError,
+    process::{EngineInstance, HostError},
 };
+
+impl EngineInstance {
+    pub(in crate::process) fn finish_generated_detection(
+        &mut self,
+        epoch: u64,
+        fields: [u32; 11],
+    ) -> Result<(), HostError> {
+        if fields[0] == 3 {
+            if fields[1..] != [0; 10] {
+                return Err(HostError::InvalidRequest);
+            }
+            return self.finish_need_code_detection(epoch);
+        }
+        let (event, restart) =
+            generated_site_with_paging(fields, self.certified_page_fault32(epoch))?;
+        self.finish_exception_detection(epoch, event, restart)?;
+        self.cpu_event = Some(self.consume_exception_detection(epoch)?.into_event());
+        Ok(())
+    }
+}
 
 /// inputs are the terminal generated locals, independently checked against the flushed snapshot.
 pub(in crate::process) fn generated_site(
@@ -26,8 +46,15 @@ pub(in crate::process) fn generated_site(
     if reason != 16 && debug != 0 {
         return Err(invalid);
     }
-    let event = if reason == 5 {
-        DetectedEvent32::NeedsPagingAuthority {
+    let event = if reason == 24 {
+        if !matches!(detail, 0x29 | 0x2e) || address != 0 || access != 0 || length != 0 {
+            return Err(invalid);
+        }
+        DetectedEvent32::Exception(EventOrigin32::SoftwareInt {
+            vector: detail as u8,
+        })
+    } else if reason == 5 {
+        DetectedEvent32::MemoryFailure {
             fault: MemoryFault {
                 address: GuestAddress(address),
                 access: match access {
@@ -77,7 +104,7 @@ pub(in crate::process) fn generated_site(
         };
         DetectedEvent32::Exception(EventOrigin32::Exception(cause))
     };
-    let restart = if matches!(reason, 17 | 18) || reason == 16 && debug == 1 {
+    let restart = if matches!(reason, 17 | 18 | 24) || reason == 16 && debug == 1 {
         if shadow & !3 != 0 || shadow & 2 == 0 && work != 0 {
             return Err(invalid);
         }
@@ -95,6 +122,34 @@ pub(in crate::process) fn generated_site(
         None
     };
     Ok((event, restart))
+}
+
+pub(in crate::process) fn generated_site_with_paging(
+    fields: [u32; 11],
+    witness: Option<crate::cpu::x86::VerifiedPageFault32>,
+) -> Result<(DetectedEvent32, Option<InstructionTrapRestart32>), HostError> {
+    if fields[0] != 23 {
+        return generated_site(fields);
+    }
+    let fault = witness.ok_or(HostError::InvalidRequest)?;
+    let access = match fault.access() {
+        crate::cpu::x86::PagingAccess32::Read => 1,
+        crate::cpu::x86::PagingAccess32::Write => 2,
+        crate::cpu::x86::PagingAccess32::Execute => 3,
+    };
+    let max_length = if access == 3 { 15 } else { 832 };
+    if fields[1] != fault.error_code()
+        || fields[2] != fault.linear().0
+        || fields[3] != access
+        || !(1..=max_length).contains(&fields[4])
+        || fields[5..] != [0; 6]
+    {
+        return Err(HostError::InvalidRequest);
+    }
+    Ok((
+        DetectedEvent32::Exception(EventOrigin32::Exception(ExceptionCause32::PageFault(fault))),
+        None,
+    ))
 }
 
 #[cfg(test)]
@@ -119,15 +174,79 @@ mod tests {
     }
 
     #[test]
-    fn raw_memory_and_tss_sites_keep_their_authority_and_selector_rules() {
+    fn raw_memory_and_null_task_return_sites_keep_precise_fault_fields() {
         let (event, restart) = generated_site([5, 2, 0x5000, 2, 4, 0, 0, 0, 0, 0, 0]).unwrap();
         assert!(matches!(
             event,
-            DetectedEvent32::NeedsPagingAuthority { length: 4, .. }
+            DetectedEvent32::MemoryFailure { length: 4, .. }
         ));
         assert!(restart.is_none());
-        assert!(generated_site([21, 0x4d, 0, 0, 0, 0, 0, 0, 0, 0, 0]).is_ok());
+        assert!(generated_site([21, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]).is_ok());
         assert!(generated_site([21, 0x4e, 0, 0, 0, 0, 0, 0, 0, 0, 0]).is_err());
         assert!(generated_site([20, 0, 0x5000, 0, 0, 0, 0, 0, 0, 0, 0]).is_err());
+    }
+
+    #[test]
+    fn paging_site_requires_the_actual_epoch_witness_and_exact_metadata() {
+        use crate::cpu::x86::{PagingAccess32, VerifiedPageFault32};
+        let fault =
+            VerifiedPageFault32::application(GuestAddress(0x3005), PagingAccess32::Read, false);
+        let fields = [23, 4, 0x3005, 1, 4, 0, 0, 0, 0, 0, 0];
+        assert!(generated_site_with_paging(fields, None).is_err());
+        assert_eq!(
+            generated_site_with_paging(fields, Some(fault)),
+            Ok((
+                DetectedEvent32::Exception(EventOrigin32::Exception(ExceptionCause32::PageFault(
+                    fault
+                ))),
+                None
+            ))
+        );
+        for (index, value) in [
+            (1, 5),
+            (2, 0x3004),
+            (3, 2),
+            (4, 0),
+            (4, 833),
+            (5, 1),
+            (6, 0x1000),
+            (10, 1),
+        ] {
+            let mut changed = fields;
+            changed[index] = value;
+            assert!(generated_site_with_paging(changed, Some(fault)).is_err());
+        }
+        assert!(generated_site(fields).is_err());
+    }
+}
+
+#[cfg(test)]
+mod system_entry_tests {
+    use super::*;
+    #[test]
+    fn os_entry_requires_known_vector_empty_fault_geometry_and_trusted_restart_shape() {
+        for vector in [0x29, 0x2e] {
+            let fields = [24, vector, 0, 0, 0, 0, 0x1000, 7, 0x10002, 3, 11];
+            let (event, restart) = generated_site(fields).unwrap();
+            assert_eq!(
+                event,
+                DetectedEvent32::Exception(EventOrigin32::SoftwareInt {
+                    vector: vector as u8
+                })
+            );
+            assert_eq!(restart.unwrap().eip, 0x1000);
+            assert_eq!(restart.unwrap().work_consumed, Some(11));
+            for index in [2, 3, 4, 5] {
+                let mut invalid = fields;
+                invalid[index] = 1;
+                assert!(generated_site(invalid).is_err());
+            }
+            let mut invalid = fields;
+            invalid[9] = 4;
+            assert!(generated_site(invalid).is_err());
+        }
+        for vector in [0, 3, 4, 0x80, 0x129, u32::MAX] {
+            assert!(generated_site([24, vector, 0, 0, 0, 0, 0x1000, 0, 2, 0, 0]).is_err());
+        }
     }
 }

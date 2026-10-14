@@ -1,5 +1,5 @@
 use super::*;
-use crate::memory::{Access, FaultReason, PageRange, Permissions};
+use crate::memory::{PageRange, Permissions};
 
 fn instruction(id: u8, scale: u8) -> GatherInstruction {
     GatherInstruction::new(
@@ -142,11 +142,13 @@ fn partial_loads_normalize_pending_masks_and_preserve_same_size_l0_upper_destina
             outcome.fault,
             Some(GatherFault {
                 lane: 1,
-                cause: GatherFaultCause::Memory(MemoryFault {
-                    address: GuestAddress(0x7000),
-                    access: Access::Read,
-                    reason: FaultReason::Unmapped
-                })
+                cause: GatherFaultCause::Paging(CpuPagingError32::PageFault(
+                    crate::cpu::x86::VerifiedPageFault32::application(
+                        GuestAddress(0x7000),
+                        crate::cpu::x86::PagingAccess32::Read,
+                        false
+                    )
+                ))
             })
         );
         let mut literal = [0; 8];
@@ -250,11 +252,13 @@ fn each_lane_checks_segment_then_paging_before_considering_any_higher_lane() {
     assert_eq!(outcome.completed_lanes, 0);
     assert_eq!(
         outcome.fault.unwrap().cause,
-        GatherFaultCause::Memory(MemoryFault {
-            address: GuestAddress(0x6000),
-            access: Access::Read,
-            reason: FaultReason::Unmapped
-        })
+        GatherFaultCause::Paging(CpuPagingError32::PageFault(
+            crate::cpu::x86::VerifiedPageFault32::application(
+                GuestAddress(0x6000),
+                crate::cpu::x86::PagingAccess32::Read,
+                false
+            )
+        ))
     );
     context.caches[SegmentRegister::Ds.index()] =
         crate::cpu::x86::SegmentCache::from_bits(0xf2305fff).unwrap();

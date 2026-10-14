@@ -10,10 +10,6 @@ impl EngineInstance {
         if self.exit_code.is_some() {
             return Err(HostError::ProcessExited);
         }
-        #[cfg(any(target_arch = "wasm32", test))]
-        if self.is_exception_shutdown() {
-            return Err(HostError::CpuShutdown);
-        }
         Ok(memory)
     }
 

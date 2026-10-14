@@ -2,7 +2,10 @@ use super::{
     AbiError,
     cpu_helper::{CpuMemoryError, encode_cpu_result},
 };
-use crate::memory::{Access, MemoryError};
+use crate::{
+    cpu::x86::CpuPagingError32,
+    memory::{Access, MemoryError},
+};
 
 pub const GATE_HELPER_VERSION: u16 = 9;
 
@@ -16,6 +19,12 @@ pub(crate) fn encode_gate_result(
         return Err(AbiError::MemoryHelper);
     }
     match result {
+        Err(CpuMemoryError::Paging(CpuPagingError32::Memory(error))) => {
+            return encode_gate_result(slot, target, Err(CpuMemoryError::Memory(error)), output);
+        }
+        Err(CpuMemoryError::Paging(error)) => {
+            return super::cpu_helper::paging::encode_stack(slot, error, output);
+        }
         Err(CpuMemoryError::GeneralProtection(code)) if code > 0xfffc || code & 3 != 0 => {
             return Err(AbiError::MemoryHelper);
         }
@@ -120,3 +129,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "far/paging.rs"]
+mod paging_tests;

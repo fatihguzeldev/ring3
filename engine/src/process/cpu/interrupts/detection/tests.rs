@@ -2,26 +2,22 @@ use super::*;
 use crate::{
     abi::{
         arena::{
-            HELPER_OFFSET, SEGMENTS_OFFSET, TRANSFER_OFFSET, WORK_CONSUMED_OFFSET, X87_OFFSET,
+            HELPER_OFFSET, SEGMENT_BASES_RECORD_OFFSET, SEGMENTS_OFFSET, SIMD_OFFSET,
+            TRANSFER_OFFSET, WORK_CONSUMED_OFFSET, X87_OFFSET, YMM_OFFSET,
         },
         x86::{encode_exit_v7, encode_exit_v10, encode_state_v3},
     },
-    cpu::x86::{
-        DebugCause32, EscalationClass32, InterruptDescriptorTable32, SegmentDescriptorRecord,
-        SelectorErrorCode32, State32, TrapPoint32,
-    },
+    cpu::x86::{DebugCause32, SelectorErrorCode32, State32, TrapPoint32},
     memory::{Access, FaultReason, GuestAddress},
 };
 
 const KEY: u64 = 0x44455445;
+
+#[path = "tests/need_code.rs"]
+mod need_code;
+
 fn fixture(resident: bool) -> (EngineInstance, PendingOwner) {
     let mut engine = EngineInstance::new(3, KEY).unwrap();
-    engine
-        .configure_interrupt_descriptor_table(InterruptDescriptorTable32::new(
-            0xffff,
-            Box::new([SegmentDescriptorRecord::from_words(0, 0); 256]),
-        ))
-        .unwrap();
     engine.map(0x1000, 1, 7).unwrap();
     engine.map(0x7000, 1, 3).unwrap();
     engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + 2]
@@ -69,12 +65,11 @@ fn ud() -> DetectedEvent32 {
 #[test]
 fn detector_origin_keeps_actual_continuation_partial_rep_and_f1_distinct() {
     for resident in [false, true] {
-        for (cause, pc, retired, work, saved_rf) in [
+        for (cause, pc, retired, work) in [
             (
                 DebugCause32::SingleStep(TrapPoint32::CompletedInstruction),
                 0x1200,
                 1,
-                0,
                 0,
             ),
             (
@@ -82,9 +77,8 @@ fn detector_origin_keeps_actual_continuation_partial_rep_and_f1_distinct() {
                 0x1000,
                 0,
                 1,
-                0x10000,
             ),
-            (DebugCause32::Int1, 0x1001, 1, 0, 0),
+            (DebugCause32::Int1, 0x1001, 1, 0),
         ] {
             let (mut engine, owner) = fixture(resident);
             let epoch = engine.begin_exception_detection(owner).unwrap();
@@ -133,10 +127,6 @@ fn detector_origin_keeps_actual_continuation_partial_rep_and_f1_distinct() {
             );
             assert_eq!(record.state(), &before[..STATE_SIZE]);
             assert_eq!(record.exit(), &before[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE]);
-            let DetectedEvent32::Exception(origin) = record.event() else {
-                unreachable!()
-            };
-            assert_eq!(origin.saved_flags(record.input().flags) & 0x10000, saved_rf);
             assert_eq!(engine.arena(), before);
         }
     }
@@ -248,7 +238,7 @@ fn raw_memory_fault_and_inconsistent_detector_never_acquire_verified_pf_authorit
         engine.finish_exception_detection(epoch, ud(), None),
         Err(HostError::Call(CallError::InvalidStop))
     );
-    let event = DetectedEvent32::NeedsPagingAuthority { fault, length: 4 };
+    let event = DetectedEvent32::MemoryFailure { fault, length: 4 };
     engine
         .finish_exception_detection(epoch, event, None)
         .unwrap();
@@ -262,11 +252,18 @@ fn full_architectural_snapshot_and_work_are_bound_but_helper_scratch_is_not_cont
     for offset in [
         16,
         EXIT_OFFSET + 20,
+        STATE_OFFSET + 12,
         X87_OFFSET + 16,
+        SIMD_OFFSET + 16,
+        YMM_OFFSET + 16,
         SEGMENTS_OFFSET + 16,
+        SEGMENT_BASES_RECORD_OFFSET + 28,
         WORK_CONSUMED_OFFSET,
     ] {
         let (mut engine, owner) = fixture(false);
+        engine
+            .set_segment_base(SegmentRegister::Ds, 0x4000)
+            .unwrap();
         let epoch = engine.begin_exception_detection(owner).unwrap();
         stop(&mut engine, ExitReason::InvalidOpcode, 0x1000, 0, 0);
         engine
@@ -338,19 +335,12 @@ fn retained_owner_identity_is_required_after_smc_and_epochs_exhaust_before_mutat
 }
 
 #[test]
-fn new_ts_detection_is_contributory_and_retains_original_selector_error() {
+fn nt_return_fault_keeps_null_selector_without_system_task_state() {
     let (mut engine, owner) = fixture(false);
     let epoch = engine.begin_exception_detection(owner).unwrap();
-    let code = SelectorErrorCode32::descriptor(0x4f, false);
+    let code = SelectorErrorCode32::from_bits(0).unwrap();
     let origin = EventOrigin32::Exception(ExceptionCause32::InvalidTss(code));
-    assert_eq!(
-        (
-            origin.vector(),
-            origin.error_code(),
-            origin.escalation_class()
-        ),
-        (10, Some(0x4c), EscalationClass32::Contributory)
-    );
+    assert_eq!((origin.vector(), origin.error_code()), (10, Some(0)));
     let mut state = State32 {
         eip: 0x1000,
         eflags: 2,
@@ -361,7 +351,7 @@ fn new_ts_detection_is_contributory_and_retains_original_selector_error() {
     encode_state_v3(&state, &mut arena[..STATE_SIZE]).unwrap();
     encode_exit_v10(
         &ExecutionExit {
-            reason: ExitReason::InvalidTss { error_code: 0x4c },
+            reason: ExitReason::InvalidTss { error_code: 0 },
             retired: 0,
         },
         &mut arena[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE],
@@ -377,7 +367,7 @@ fn new_ts_detection_is_contributory_and_retains_original_selector_error() {
 }
 
 #[test]
-fn instruction_trap_snapshot_keeps_success_continuation_and_failed_delivery_restart_separate() {
+fn instruction_trap_snapshot_keeps_continuation_and_precise_pre_instruction_restart() {
     for (cause, reason) in [
         (ExceptionCause32::BreakpointInt3, ExitReason::Breakpoint),
         (ExceptionCause32::OverflowInto, ExitReason::Overflow),
@@ -412,24 +402,6 @@ fn instruction_trap_snapshot_keeps_success_continuation_and_failed_delivery_rest
         assert_eq!(record.retired(), 8);
         assert_eq!(record.instruction_restart(), Some(restart));
         assert_eq!(
-            restart.attempted_input(record.input()),
-            FrameInput32 {
-                eip: 0x1000,
-                esp: 0x7800,
-                flags: 0x240ed7,
-                cs: 0x1b
-            }
-        );
-        assert_eq!(
-            restart.unattempted_input(record.input()),
-            FrameInput32 {
-                eip: 0x1000,
-                esp: 0x7800,
-                flags: 0x250ed7,
-                cs: 0x1b
-            }
-        );
-        assert_eq!(
             (
                 restart.retired,
                 restart.work_consumed,
@@ -443,4 +415,266 @@ fn instruction_trap_snapshot_keeps_success_continuation_and_failed_delivery_rest
             "record capture/consume does not publish rollback or frame effects"
         );
     }
+}
+
+#[test]
+fn pending_call_and_callback_token_drift_do_not_consume_the_ready_application_event() {
+    use crate::{
+        abi::callback::CallbackRecord32,
+        process::calls::{
+            call::PendingCall,
+            callback::{SuspendedCallback, SuspendedRecord},
+        },
+        windows::{CallFrame32, CallingConvention32},
+    };
+
+    let (mut engine, owner) = fixture(false);
+    engine.write32(0x7800, 0x1100).unwrap();
+    let epoch = engine.begin_exception_detection(owner).unwrap();
+    stop(&mut engine, ExitReason::InvalidOpcode, 0x1000, 0, 0);
+    engine
+        .finish_exception_detection(epoch, ud(), None)
+        .unwrap();
+    let before = engine.arena().to_vec();
+    let version = engine.memory().unwrap().code_validation_version();
+    let frame = CallFrame32::capture(
+        engine.memory().unwrap(),
+        decode_state(&before[..STATE_SIZE]).unwrap(),
+        CallingConvention32::Cdecl,
+        0,
+    )
+    .unwrap();
+    engine.pending_call = Some(PendingCall {
+        token: 1,
+        owner,
+        frame,
+        state: before[..STATE_SIZE].try_into().unwrap(),
+        exit: before[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE]
+            .try_into()
+            .unwrap(),
+        extended: ExtendedCpuState::capture(&before).unwrap(),
+    });
+    assert!(matches!(
+        engine.consume_exception_detection(epoch),
+        Err(HostError::Call(CallError::Busy))
+    ));
+    let outer = engine.pending_call.take().unwrap();
+    engine.callback = Some(SuspendedCallback {
+        record: SuspendedRecord::Replacement(CallbackRecord32 {
+            token: 2,
+            outer_token: 1,
+            phase: 1,
+            outcome: 0,
+            entry_pc: 0x1200,
+            entry_esp: 0x7800,
+            return_pc: 0x1300,
+            return_id: 18,
+            stack_words: 0,
+            result: 0,
+            generation: engine.generation(),
+        }),
+        outer,
+    });
+    assert!(matches!(
+        engine.consume_exception_detection(epoch),
+        Err(HostError::Call(CallError::InvalidToken))
+    ));
+    assert!(engine.has_ready_exception_detection());
+    assert_eq!(engine.arena(), before);
+    assert_eq!(engine.memory().unwrap().code_validation_version(), version);
+    engine.callback = None;
+    assert_eq!(
+        engine.consume_exception_detection(epoch).unwrap().event(),
+        ud()
+    );
+    assert_eq!(engine.arena(), before);
+    assert_eq!(engine.memory().unwrap().code_validation_version(), version);
+}
+
+#[test]
+fn application_page_fault_requires_the_actual_helper_occurrence_and_unchanged_cr2() {
+    use crate::{abi::x86::encode_exit_v12, cpu::x86::PagingAccess32};
+
+    for resident in [false, true] {
+        let (mut engine, owner) = fixture(resident);
+        let epoch = engine.begin_exception_detection(owner).unwrap();
+        let fault =
+            VerifiedPageFault32::application(GuestAddress(0x9005), PagingAccess32::Read, false);
+        let event = DetectedEvent32::Exception(EventOrigin32::Exception(
+            ExceptionCause32::PageFault(fault),
+        ));
+        stop(&mut engine, ExitReason::InvalidOpcode, 0x1000, 0, 0);
+        let exit = ExecutionExit {
+            retired: 0,
+            reason: ExitReason::PageFault {
+                error_code: 4,
+                linear: fault.linear(),
+                access: Access::Read,
+                length: 4,
+            },
+        };
+        encode_exit_v12(
+            &exit,
+            &mut engine.arena_mut().unwrap()[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE],
+        )
+        .unwrap();
+        assert_eq!(
+            engine.finish_exception_detection(epoch, event, None),
+            Err(HostError::Call(CallError::InvalidStop))
+        );
+        assert!(!engine.has_ready_exception_detection());
+        engine.cpu_read32(0x9005).unwrap();
+        assert_eq!(engine.cr2(), Some(fault.linear()));
+        assert_eq!(
+            engine.begin_exception_detection(owner),
+            Err(HostError::Call(CallError::Busy))
+        );
+        engine
+            .finish_exception_detection(epoch, event, None)
+            .unwrap();
+        let before = engine.arena().to_vec();
+        engine.cr2 = Some(GuestAddress(0x9006));
+        assert!(matches!(
+            engine.consume_exception_detection(epoch),
+            Err(HostError::Call(CallError::StateChanged))
+        ));
+        assert!(engine.has_ready_exception_detection());
+        engine.cr2 = Some(fault.linear());
+        assert_eq!(
+            engine.consume_exception_detection(epoch).unwrap().event(),
+            event
+        );
+        assert!(matches!(
+            engine.consume_exception_detection(epoch),
+            Err(HostError::Call(CallError::InvalidToken))
+        ));
+        assert_eq!(engine.arena(), before);
+    }
+}
+
+#[test]
+fn public_cpu_event_preserves_trap_origin_full_context_and_single_take() {
+    let (mut engine, owner) = fixture(false);
+    assert!(engine.take_cpu_event32().unwrap().is_none());
+    let epoch = engine.begin_exception_detection(owner).unwrap();
+    stop(&mut engine, ExitReason::Breakpoint, 0x1003, 8, 12);
+    let before = engine.arena().to_vec();
+    let restart = InstructionTrapRestart32 {
+        eip: 0x1000,
+        retired: 7,
+        flags: 0x250ed7,
+        ss_debug_shadow: true,
+        work_consumed: Some(11),
+    };
+    engine
+        .finish_exception_detection(
+            epoch,
+            DetectedEvent32::Exception(EventOrigin32::Exception(ExceptionCause32::BreakpointInt3)),
+            Some(restart),
+        )
+        .unwrap();
+    engine.cpu_event = Some(
+        engine
+            .consume_exception_detection(epoch)
+            .unwrap()
+            .into_event(),
+    );
+    assert!(
+        engine
+            .cpu_event
+            .as_ref()
+            .unwrap()
+            .matches_context(engine.arena())
+    );
+    engine.arena_mut().unwrap()[crate::abi::x86::EIP_OFFSET] ^= 1;
+    assert!(
+        !engine
+            .cpu_event
+            .as_ref()
+            .unwrap()
+            .matches_context(engine.arena())
+    );
+    engine.arena_mut().unwrap().copy_from_slice(&before);
+    let event = engine.take_cpu_event32().unwrap().unwrap();
+    assert!(engine.take_cpu_event32().unwrap().is_none());
+    assert_eq!(event.epoch, epoch);
+    assert_eq!(event.state.eip, 0x1003);
+    assert_eq!(
+        event.exit,
+        ExecutionExit {
+            reason: ExitReason::Breakpoint,
+            retired: 8
+        }
+    );
+    assert_eq!(event.instruction.unwrap().eip, 0x1000);
+    assert_eq!(event.instruction.unwrap().flags, 0x250ed7);
+    assert_eq!(event.instruction.unwrap().work_consumed, Some(11));
+    assert_eq!(event.work_consumed, 12);
+    assert_eq!(
+        event.x87,
+        crate::abi::x86::decode_x87(&before[X87_OFFSET..X87_OFFSET + crate::abi::x86::X87_SIZE])
+            .unwrap()
+    );
+    assert_eq!(
+        event.simd,
+        crate::abi::x86::decode_simd(
+            &before[SIMD_OFFSET..SIMD_OFFSET + crate::abi::x86::SIMD_SIZE]
+        )
+        .unwrap()
+    );
+    assert_eq!(
+        event.ymm,
+        crate::abi::x86::decode_ymm(&before[YMM_OFFSET..YMM_OFFSET + crate::abi::x86::YMM_SIZE])
+            .unwrap()
+    );
+    assert_eq!(event.segments, engine.segment_context().unwrap());
+    let mut packet = [0; crate::abi::x86::CPU_EVENT_SITE_SIZE];
+    crate::abi::x86::encode_cpu_event_site32(&event, &mut packet).unwrap();
+    assert_eq!(&packet[..4], b"R3CE");
+    assert_eq!(
+        (0..8)
+            .map(|i| header::read_u32(&packet, 16 + i * 4))
+            .collect::<Vec<_>>(),
+        [3, 0x1000, 0x1003, 7, 0x250ed7, 1, 11, 8]
+    );
+    let mut short = [0xa5; 47];
+    assert_eq!(
+        crate::abi::x86::encode_cpu_event_site32(&event, &mut short),
+        Err(crate::abi::AbiError::Length)
+    );
+    assert_eq!(short, [0xa5; 47]);
+    assert_eq!(engine.arena(), before);
+    engine.close();
+    assert!(matches!(engine.take_cpu_event32(), Err(HostError::Closed)));
+}
+
+#[test]
+fn event_lifetime_survives_failed_entry_and_expires_on_valid_entry() {
+    let (mut engine, owner) = fixture(false);
+    let epoch = engine.begin_exception_detection(owner).unwrap();
+    stop(&mut engine, ExitReason::InvalidOpcode, 0x1000, 0, 0);
+    engine
+        .finish_exception_detection(epoch, ud(), None)
+        .unwrap();
+    engine.cpu_event = Some(
+        engine
+            .consume_exception_detection(epoch)
+            .unwrap()
+            .into_event(),
+    );
+    assert!(
+        engine
+            .begin_exception_detection(PendingOwner::Replacement(engine.generation() + 1))
+            .is_err()
+    );
+    assert_eq!(engine.cpu_event.as_ref().unwrap().epoch, epoch);
+    engine.detection_epoch = i64::MAX as u64;
+    assert!(matches!(
+        engine.begin_exception_detection(owner),
+        Err(HostError::GenerationExhausted)
+    ));
+    assert_eq!(engine.cpu_event.as_ref().unwrap().epoch, epoch);
+    engine.detection_epoch = epoch;
+    engine.begin_exception_detection(owner).unwrap();
+    assert!(engine.take_cpu_event32().unwrap().is_none());
 }

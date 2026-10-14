@@ -110,12 +110,6 @@ impl SegmentDescriptorRecord {
         Some(self)
     }
 
-    /// task return clears only the old live descriptor's busy bit, without rebuilding it.
-    pub(crate) fn with_task_busy_cleared(mut self) -> Self {
-        self.0[5] &= !2;
-        self
-    }
-
     pub fn with_accessed(mut self) -> Option<Self> {
         if !self.code_data() {
             return None;

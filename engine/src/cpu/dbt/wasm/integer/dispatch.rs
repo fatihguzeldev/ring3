@@ -55,26 +55,15 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
         use crate::cpu::x86::SegmentRegister::*;
         for segment in [Es, Cs, Ss, Ds, Fs, Gs] {
             if instruction.segment_accesses() & (1 << segment.index()) != 0 {
-                segments::access(
-                    code,
-                    segment,
-                    exit_depth,
-                    imports.raw_task_context.is_some(),
-                );
+                segments::access(code, segment, exit_depth);
             }
         }
     }
     let mut store = false;
     match *instruction.operation() {
         Operation::SoftwareInterrupt { vector } => {
-            super::super::interrupts::dispatch(
-                code,
-                vector,
-                instruction.next_pc().0,
-                imports,
-                exit_depth,
-            );
-            store = true;
+            super::super::software_interrupts::instruction(code, instruction, vector, exit_depth);
+            return;
         }
         Operation::FarCall { width, target } => {
             super::super::far::call(
@@ -236,7 +225,7 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
                 opcode,
                 imports.x87_op.expect("x87 execution import"),
                 exit_depth,
-                imports.raw_task_context.is_some(),
+                super::super::cpu_result::ResultContext::from(imports),
             );
             store = operation.write_size() != 0;
         }
@@ -2427,24 +2416,14 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
         Operation::Leave => {
             stack::pointer::load(code, Register32::Ebp, 0, 4, imports, exit_depth);
             code.local_set(RESULT);
-            stack::pointer::assigned(
-                code,
-                register(Register32::Ebp),
-                4,
-                imports.raw_task_context.is_some(),
-            );
+            stack::pointer::assigned(code, register(Register32::Ebp), 4);
             code.local_set(register(Register32::Esp))
                 .local_get(RESULT)
                 .local_set(register(Register32::Ebp));
         }
         Operation::LeaveWord => {
             stack::pointer::load(code, Register32::Ebp, 0, 2, imports, exit_depth);
-            stack::pointer::assigned(
-                code,
-                register(Register32::Ebp),
-                2,
-                imports.raw_task_context.is_some(),
-            );
+            stack::pointer::assigned(code, register(Register32::Ebp), 2);
             code.local_set(register(Register32::Esp))
                 .local_get(register(Register32::Ebp))
                 .i32_const(!0xffff)
@@ -2460,11 +2439,7 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
             code.local_set(RESULT);
             check_near_value(code, RESULT, imports, exit_depth);
             code.local_get(RESULT).local_set(EIP);
-            stack::pointer::advance(
-                code,
-                2 + i32::from(stack_adjust),
-                imports.raw_task_context.is_some(),
-            );
+            stack::pointer::advance(code, 2 + i32::from(stack_adjust));
         }
     }
     if !matches!(

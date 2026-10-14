@@ -117,14 +117,5 @@ mod cpu_scalar_availability;
 #[path = "hints/reserved/wasm.rs"]
 mod cpu_legacy_nop_wasm;
 
-#[path = "interrupt/dispatch/wasm.rs"]
-mod interrupt_dispatch;
-
-#[path = "interrupt/exception/wasm.rs"]
-mod cpu_exception_entry;
-
-#[path = "interrupt/return/task/wasm.rs"]
-mod cpu_task_return;
-
-#[path = "interrupt/exception/automatic/wasm.rs"]
-mod cpu_exception_automatic;
+#[path = "interrupt/exception/paging/wasm.rs"]
+mod cpu_certified_paging;

@@ -22,21 +22,24 @@ pub(super) fn jump(
         .i32_const(i32::from(width == FarWidth::Word))
         .call(index)
         .local_set(HELPER_STATUS);
-    crate::cpu::dbt::wasm::tasks::refresh(code, imports);
-    gate::is_packet(code);
+    gate::is_packet(code, cpu_result::ResultContext::from(imports));
     code.if_(BlockType::Empty);
-    gate::jump_result(code, exit_depth + 1, imports.raw_task_context.is_some());
+    gate::jump_result(
+        code,
+        exit_depth + 1,
+        cpu_result::ResultContext::from(imports),
+    );
     code.else_();
-    descriptor_result(code, exit_depth + 1, imports.raw_task_context.is_some());
+    descriptor_result(code, exit_depth + 1);
     cpu_result::validate(
         code,
         0,
         0,
         false,
         exit_depth + 1,
-        imports.raw_task_context.is_some(),
+        cpu_result::ResultContext::from(imports),
     );
-    target_echo(code, exit_depth + 1, imports.raw_task_context.is_some());
+    target_echo(code, exit_depth + 1);
     code.end();
     code.local_get(RESULT).local_set(EIP);
 }
@@ -70,18 +73,14 @@ fn capture_target(
                 .i32_const(1)
                 .call(imports.cpu_read.expect("far pointer read import"))
                 .local_set(HELPER_STATUS);
-            crate::cpu::dbt::wasm::code_fetch::check_context(
-                code,
-                exit_depth,
-                imports.raw_task_context.is_some(),
-            );
+            crate::cpu::dbt::wasm::code_fetch::check_context(code, exit_depth);
             cpu_result::validate(
                 code,
                 length,
                 1,
                 false,
                 exit_depth,
-                imports.raw_task_context.is_some(),
+                cpu_result::ResultContext::from(imports),
             );
             code.local_get(STATE_PTR);
             match width {
@@ -100,7 +99,7 @@ fn capture_target(
     }
 }
 
-fn target_echo(code: &mut InstructionSink<'_>, exit_depth: u32, raw_task_context: bool) {
+fn target_echo(code: &mut InstructionSink<'_>, exit_depth: u32) {
     // length-zero successful validation preserves the captured offset in RESULT.
     // enforce an exact target echo before publishing architectural EIP.
     memory::reset_checks(code);
@@ -108,7 +107,7 @@ fn target_echo(code: &mut InstructionSink<'_>, exit_depth: u32, raw_task_context
     code.local_get(RESULT).i32_ne();
     memory::add_check(code);
     memory::protocol_if_bad(code);
-    memory::exit_if_failed(code, exit_depth, raw_task_context);
+    memory::exit_if_failed(code, exit_depth);
 }
 
 fn transfer(offset: u32) -> MemArg {
@@ -121,7 +120,7 @@ fn transfer(offset: u32) -> MemArg {
 
 // source memory faults belong to the earlier pointer-read helper. A descriptor
 // result can report only success, #GP, or #NP, with a matching selector detail.
-fn descriptor_result(code: &mut InstructionSink<'_>, exit_depth: u32, raw_task_context: bool) {
+fn descriptor_result(code: &mut InstructionSink<'_>, exit_depth: u32) {
     // preserve the common validator's nonzero transport-status failure path.
     code.local_get(HELPER_STATUS)
         .i32_eqz()
@@ -171,7 +170,7 @@ fn descriptor_result(code: &mut InstructionSink<'_>, exit_depth: u32, raw_task_c
     code.end();
     memory::protocol_if_bad(code);
     code.end();
-    memory::exit_if_failed(code, exit_depth, raw_task_context);
+    memory::exit_if_failed(code, exit_depth);
 }
 
 mod call;
@@ -184,5 +183,3 @@ mod interrupt;
 pub(super) use interrupt::{InterruptReturnLocals, interrupt_return};
 
 mod gate;
-
-pub(super) mod task;

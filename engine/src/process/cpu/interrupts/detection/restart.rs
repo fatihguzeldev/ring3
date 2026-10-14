@@ -15,25 +15,6 @@ pub(in crate::process) struct InstructionTrapRestart32 {
     pub(in crate::process) work_consumed: Option<u32>,
 }
 
-impl InstructionTrapRestart32 {
-    /// delivery fault: instruction does not retire, but the attempt already consumed RF/shadow.
-    pub(in crate::process) fn attempted_input(self, completed: FrameInput32) -> FrameInput32 {
-        FrameInput32 {
-            eip: self.eip,
-            ..completed
-        }
-    }
-    /// typed neutral authority refusal can restore the pre-attempt RF image under the INT policy.
-    /// the caller also restores ss_debug_shadow, retired and optional work; no state is published here.
-    pub(in crate::process) fn unattempted_input(self, completed: FrameInput32) -> FrameInput32 {
-        FrameInput32 {
-            eip: self.eip,
-            flags: self.flags,
-            ..completed
-        }
-    }
-}
-
 pub(super) fn valid_provenance(
     event: DetectedEvent32,
     restart: Option<InstructionTrapRestart32>,
@@ -44,7 +25,9 @@ pub(super) fn valid_provenance(
 ) -> bool {
     let instruction_trap = matches!(
         event,
-        DetectedEvent32::Exception(EventOrigin32::Exception(
+        DetectedEvent32::Exception(EventOrigin32::SoftwareInt {
+            vector: 0x29 | 0x2e
+        }) | DetectedEvent32::Exception(EventOrigin32::Exception(
             ExceptionCause32::BreakpointInt3
                 | ExceptionCause32::OverflowInto
                 | ExceptionCause32::Debug(DebugCause32::Int1)

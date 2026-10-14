@@ -8,41 +8,18 @@ use super::{EmbeddedBinding, abi, code_fetch, integer, locals::*, memory, segmen
 use crate::cpu::dbt::region::CompiledBlock;
 use crate::cpu::x86::ir::Operation;
 
-#[cfg(test)]
 pub(in crate::cpu::dbt) fn emit(
     blocks: &[CompiledBlock],
     binding: Option<EmbeddedBinding>,
     decode_key: Option<crate::cpu::x86::decode::CodeDecodeKey>,
 ) -> Vec<u8> {
-    emit_with_authority(blocks, binding, decode_key, false, false, false, None)
-}
-
-pub(in crate::cpu::dbt) fn emit_with_authority(
-    blocks: &[CompiledBlock],
-    binding: Option<EmbeddedBinding>,
-    decode_key: Option<crate::cpu::x86::decode::CodeDecodeKey>,
-    task_return_configured: bool,
-    exception_detection_configured: bool,
-    task_controls_configured: bool,
-    raw_task_context: Option<u64>,
-) -> Vec<u8> {
-    debug_assert!(raw_task_context.is_none() || binding.is_some());
-    let detects_exceptions = exception_detection_configured && binding.is_some();
-    let device_not_available =
-        blocks
-            .iter()
-            .flat_map(|block| &block.instructions)
-            .any(|instruction| {
-                matches!(
-                    instruction.operation(),
-                    Operation::Control(crate::cpu::x86::ControlOperation::DeviceNotAvailable)
-                )
-            });
-    let needs_task_return = task_return_configured
-        && blocks
-            .iter()
-            .flat_map(|b| &b.instructions)
-            .any(|i| matches!(i.operation(), Operation::InterruptReturn { .. }));
+    let paging_configured = binding.is_some();
+    let detects_exceptions = binding.is_some();
+    let needs_fetch_paging = blocks.iter().any(|block| {
+        block.context_fault().is_some_and(|fault| {
+            fault.kind == crate::cpu::x86::decode::CapturedFetchFaultKind32::Paging
+        })
+    });
     let mut module = Module::new();
     let memory::ImportNeeds {
         stack_execute: needs_stack_execute,
@@ -61,7 +38,6 @@ pub(in crate::cpu::dbt) fn emit_with_authority(
         far_jump: needs_far_jump,
         far_call: needs_far_call,
         far_return: needs_far_return,
-        software_interrupt: needs_software_interrupt,
         read: needs_read,
         store: needs_store,
         read8: needs_read8,
@@ -83,6 +59,11 @@ pub(in crate::cpu::dbt) fn emit_with_authority(
         atomic_and_u32: needs_atomic_and_u32,
         atomic_xor_u32: needs_atomic_xor_u32,
     } = memory::Imports::needed(blocks);
+    let [needs_modify8, needs_modify16, needs_modify32] = if paging_configured {
+        memory::read_modify_needs(blocks)
+    } else {
+        [false; 3]
+    };
     let has_stores = needs_store
         || needs_store8
         || needs_store16
@@ -131,7 +112,8 @@ pub(in crate::cpu::dbt) fn emit_with_authority(
                     Operation::Control(
                         crate::cpu::x86::ControlOperation::GeneralProtectionZero
                             | crate::cpu::x86::ControlOperation::DeniedPortString { .. }
-                    ) | Operation::XState(_)
+                    ) | Operation::SoftwareInterrupt { .. }
+                        | Operation::XState(_)
                 )
             });
     let has_cpu = has_simd
@@ -151,8 +133,7 @@ pub(in crate::cpu::dbt) fn emit_with_authority(
         || needs_segment_load_far
         || needs_far_jump
         || needs_far_call
-        || needs_far_return
-        || needs_software_interrupt;
+        || needs_far_return;
     let has_memory = has_cpu
         || has_reads
         || has_stores
@@ -320,36 +301,9 @@ pub(in crate::cpu::dbt) fn emit_with_authority(
             [ValType::I32],
         );
     }
-    let interrupt_type_offset = 10 + u32::from(needs_far_call);
-    if needs_software_interrupt {
-        let parameters = if matches!(binding, Some(EmbeddedBinding::Resident { .. })) {
-            8
-        } else {
-            4
-        };
-        types.ty().function(
-            std::iter::repeat_n(ValType::I32, parameters),
-            [ValType::I32],
-        );
-    }
-    let task_type_offset = 10 + u32::from(needs_far_call) + u32::from(needs_software_interrupt);
-    if needs_task_return {
-        let parameters = if matches!(binding, Some(EmbeddedBinding::Resident { .. })) {
-            4
-        } else {
-            0
-        } + usize::from(task_controls_configured);
-        types.ty().function(
-            std::iter::repeat_n(ValType::I32, parameters),
-            [ValType::I32],
-        );
-    }
     let upper_xstate =
         crate::cpu::x86::capabilities::AVX_ENABLED && (needs_cpu_xsave || needs_cpu_xrstor);
-    let xstate_type_offset = 10
-        + u32::from(needs_far_call)
-        + u32::from(needs_software_interrupt)
-        + u32::from(needs_task_return);
+    let xstate_type_offset = 10 + u32::from(needs_far_call);
     if upper_xstate {
         let parameters = if matches!(binding, Some(EmbeddedBinding::Resident { .. })) {
             8
@@ -364,9 +318,7 @@ pub(in crate::cpu::dbt) fn emit_with_authority(
     let segment_check_type = cpu_type_base
         + if has_cpu { 10 } else { 0 }
         + u32::from(needs_far_call)
-        + u32::from(upper_xstate)
-        + u32::from(needs_software_interrupt)
-        + u32::from(needs_task_return);
+        + u32::from(upper_xstate);
     if has_segment_check {
         types.ty().function([ValType::I32; 6], [ValType::I32]);
     }
@@ -376,9 +328,18 @@ pub(in crate::cpu::dbt) fn emit_with_authority(
         parameters[0] = ValType::I64;
         types.ty().function(parameters, [ValType::I32]);
     }
-    let raw_context_type = finish_detection_type + u32::from(detects_exceptions);
-    if raw_task_context.is_some() {
-        types.ty().function([], [ValType::I32]);
+    let fetch_fault_type = finish_detection_type + u32::from(detects_exceptions);
+
+    if needs_fetch_paging {
+        let parameters = if matches!(binding, Some(EmbeddedBinding::Resident { .. })) {
+            6
+        } else {
+            2
+        };
+        types.ty().function(
+            std::iter::repeat_n(ValType::I32, parameters),
+            [ValType::I32],
+        );
     }
     module.section(&types);
     let mut imports = ImportSection::new();
@@ -442,6 +403,29 @@ pub(in crate::cpu::dbt) fn emit_with_authority(
         imports.import("ring3", "cpu_read16", EntityType::Function(read_type_index));
         helper_imports.read16 = Some(function_index);
         function_index += 1;
+    }
+    for (needed, name, slot) in [
+        (
+            needs_modify8,
+            "cpu_read_modify8",
+            &mut helper_imports.read_modify8,
+        ),
+        (
+            needs_modify16,
+            "cpu_read_modify16",
+            &mut helper_imports.read_modify16,
+        ),
+        (
+            needs_modify32,
+            "cpu_read_modify32",
+            &mut helper_imports.read_modify,
+        ),
+    ] {
+        if needed {
+            imports.import("ring3", name, EntityType::Function(read_type_index));
+            *slot = Some(function_index);
+            function_index += 1;
+        }
     }
     if needs_store8 {
         let (name, store) = match binding {
@@ -873,28 +857,6 @@ pub(in crate::cpu::dbt) fn emit_with_authority(
             &mut helper_imports.far_call,
         ),
         (
-            needs_software_interrupt,
-            "interrupt_gate",
-            "interrupt_gate_resident",
-            interrupt_type_offset,
-            &mut helper_imports.software_interrupt,
-        ),
-        (
-            needs_task_return,
-            if task_controls_configured {
-                "cpu_task_return"
-            } else {
-                "task_return"
-            },
-            if task_controls_configured {
-                "cpu_task_return_resident"
-            } else {
-                "task_return_resident"
-            },
-            task_type_offset,
-            &mut helper_imports.task_return,
-        ),
-        (
             needs_far_return,
             "far_return",
             "far_return_resident",
@@ -939,19 +901,27 @@ pub(in crate::cpu::dbt) fn emit_with_authority(
         helper_imports.finish_detection = Some(function_index);
         function_index += 1;
     }
-    if raw_task_context.is_some() {
-        imports.import(
-            "ring3",
-            "read_task_context",
-            EntityType::Function(raw_context_type),
-        );
-        helper_imports.raw_task_context = Some(super::tasks::RawTaskContextImports {
-            read: function_index,
-            status: 0,
-            scratch: 0,
-        });
+
+    if needs_fetch_paging {
+        let (name, import) = match binding {
+            Some(EmbeddedBinding::Resident { key, id }) => (
+                "cpu_fetch_fault_resident",
+                memory::StoreImport::Resident {
+                    index: function_index,
+                    key,
+                    id,
+                },
+            ),
+            _ => (
+                "cpu_fetch_fault",
+                memory::StoreImport::Replacement(function_index),
+            ),
+        };
+        imports.import("ring3", name, EntityType::Function(fetch_fault_type));
+        helper_imports.fetch_fault = Some(import);
         function_index += 1;
     }
+
     module.section(&imports);
     let mut functions = FunctionSection::new();
     functions.function(0);
@@ -976,9 +946,7 @@ pub(in crate::cpu::dbt) fn emit_with_authority(
             &ConstExpr::i32_const(value),
         );
     }
-    if let Some(revision) = raw_task_context {
-        super::tasks::globals(&mut globals, revision);
-    }
+
     module.section(&globals);
     let mut exports = ExportSection::new();
     exports.export("run", ExportKind::Func, function_index);
@@ -1010,21 +978,7 @@ pub(in crate::cpu::dbt) fn emit_with_authority(
             Some(super::far::InterruptReturnLocals::new(first));
         declarations.push((3, ValType::I32));
     }
-    if needs_task_return {
-        let first = 4 + declarations.iter().map(|(count, _)| count).sum::<u32>();
-        helper_imports.task_return_flags = Some(first);
-        declarations.push((1, ValType::I32));
-        helper_imports.task_transition_configured = task_controls_configured;
-        if task_controls_configured {
-            helper_imports.task_return_transport = Some(first + 1);
-            declarations.push((1, ValType::I32));
-        }
-    }
-    if needs_software_interrupt {
-        let first = 4 + declarations.iter().map(|(count, _)| count).sum::<u32>();
-        helper_imports.software_interrupt_flags = Some(first);
-        declarations.push((1, ValType::I32));
-    }
+
     if has_avx {
         let first = 4 + declarations.iter().map(|(count, _)| count).sum::<u32>();
         helper_imports.avx_locals = Some(super::avx::AvxLocals::new(first));
@@ -1037,12 +991,8 @@ pub(in crate::cpu::dbt) fn emit_with_authority(
         declarations.push((1, ValType::I64));
         declarations.push((6, ValType::I32));
     }
-    if let Some(raw) = helper_imports.raw_task_context.as_mut() {
-        let first = 4 + declarations.iter().map(|(count, _)| count).sum::<u32>();
-        raw.status = first;
-        raw.scratch = first + 1;
-        declarations.push((2, ValType::I32));
-    }
+
+    helper_imports.paging_configured = paging_configured;
     let mut function = Function::new(declarations);
     let mut code = function.instructions();
     if let Some(binding) = binding {
@@ -1094,10 +1044,8 @@ pub(in crate::cpu::dbt) fn emit_with_authority(
         }
     }
     abi::preflight(&mut code);
-    if raw_task_context.is_some() {
-        super::tasks::refresh(&mut code, helper_imports);
-    } else if has_segments {
-        super::segments::preflight(&mut code, false);
+    if has_segments {
+        super::segments::preflight(&mut code);
     }
     if has_repeat {
         abi::work_preflight(&mut code);
@@ -1114,15 +1062,17 @@ pub(in crate::cpu::dbt) fn emit_with_authority(
     }
     abi::load_state(&mut code);
     if let Some(limit) = helper_imports.code_fetch_limit {
-        code_fetch::refresh(&mut code, limit, raw_task_context.is_some());
+        code_fetch::refresh(&mut code, limit);
     }
     if let Some(locals) = helper_imports.avx_locals {
         super::avx::initialize(&mut code, locals);
     }
-    code.block(BlockType::Empty).loop_(BlockType::Empty);
+    code.block(BlockType::Empty);
+
+    code.loop_(BlockType::Empty);
     abi::safepoint(&mut code, 1);
     if binding.is_some() {
-        code_fetch::check_context(&mut code, 1, raw_task_context.is_some());
+        code_fetch::check_context(&mut code, 1);
     }
     for block in blocks {
         emit_block(&mut code, block, helper_imports);
@@ -1148,6 +1098,7 @@ pub(in crate::cpu::dbt) fn emit_with_authority(
         has_gates,
         has_arithmetic,
         has_cpu
+            || needs_fetch_paging
             || has_simd
             || has_reads
             || has_stores
@@ -1155,20 +1106,15 @@ pub(in crate::cpu::dbt) fn emit_with_authority(
             || needs_compare_exchange8
             || needs_compare_exchange16,
         has_xstate,
-        needs_task_return,
-        device_not_available,
+        paging_configured,
     );
     super::detection::finish(&mut code, helper_imports);
-    if let Some(transport) = helper_imports.task_return_transport {
-        code.local_get(transport);
-    } else {
-        code.i32_const(0);
-    }
+    code.i32_const(0);
     code.end();
     let mut bodies = CodeSection::new();
     bodies.function(&function);
     if has_segment_check {
-        bodies.function(&segments::build_function(raw_task_context.is_some()));
+        bodies.function(&segments::build_function());
     }
     module.section(&bodies);
     module.finish()
@@ -1181,8 +1127,8 @@ fn emit_block(code: &mut InstructionSink<'_>, block: &CompiledBlock, imports: me
             .i32_eq()
             .if_(BlockType::Empty);
         if let Some(limit) = imports.code_fetch_limit {
-            code_fetch::check_context(code, 2, imports.raw_task_context.is_some());
-            code_fetch::refresh(code, limit, imports.raw_task_context.is_some());
+            code_fetch::check_context(code, 2);
+            code_fetch::refresh(code, limit);
             code_fetch::check_span(code, gate.entry.0, 2, limit, 2);
         }
         code.i32_const(gate.id as i32)
@@ -1213,7 +1159,7 @@ fn emit_block(code: &mut InstructionSink<'_>, block: &CompiledBlock, imports: me
         let helper_free = code_fetch::helper_free_block(block);
         if helper_free && let Some(limit) = imports.code_fetch_limit {
             // the loop's safepoint and key check already precede this selected block.
-            code_fetch::refresh(code, limit, imports.raw_task_context.is_some());
+            code_fetch::refresh(code, limit);
         }
         let count = block.instructions.len() as u32;
         for _ in 0..count {
@@ -1226,48 +1172,16 @@ fn emit_block(code: &mut InstructionSink<'_>, block: &CompiledBlock, imports: me
             abi::safepoint(code, remaining + 2);
             if let Some(limit) = imports.code_fetch_limit {
                 if !helper_free {
-                    code_fetch::check_context(
-                        code,
-                        remaining + 2,
-                        imports.raw_task_context.is_some(),
-                    );
-                    code_fetch::refresh(code, limit, imports.raw_task_context.is_some());
+                    code_fetch::check_context(code, remaining + 2);
+                    code_fetch::refresh(code, limit);
                 }
                 code_fetch::check_instruction(code, instruction, limit, remaining + 2);
             }
-            if matches!(instruction.operation(), Operation::InterruptReturn { .. }) {
-                if let Some(original) = imports.task_return_flags {
-                    code.local_get(FLAGS).local_set(original);
-                } else {
-                    abi::interrupt_return_precheck(code, remaining + 2);
-                }
-            }
-            if matches!(
-                instruction.operation(),
-                Operation::Control(crate::cpu::x86::ControlOperation::DeviceNotAvailable)
-            ) {
-                super::control_instructions::instruction(code, instruction, imports, remaining + 2);
-                continue;
-            }
             x87::precheck_instruction(code, instruction, imports, remaining + 2);
-            if matches!(instruction.operation(), Operation::SoftwareInterrupt { .. }) {
-                code.local_get(FLAGS).local_set(
-                    imports
-                        .software_interrupt_flags
-                        .expect("interrupt flag snapshot"),
-                );
-            }
             super::detection::snapshot(code, instruction, imports);
             abi::begin_instruction(code);
-            if matches!(instruction.operation(), Operation::InterruptReturn { .. })
-                && imports.task_return.is_some()
-            {
-                super::far::task::return_if_nested(
-                    code,
-                    instruction.next_pc().0,
-                    imports,
-                    remaining + 2,
-                );
+            if matches!(instruction.operation(), Operation::InterruptReturn { .. }) {
+                abi::interrupt_return_precheck(code, remaining + 2);
             }
             integer::instruction(code, instruction, imports, remaining + 2);
             if matches!(
@@ -1278,7 +1192,7 @@ fn emit_block(code: &mut InstructionSink<'_>, block: &CompiledBlock, imports: me
                     | Operation::SoftwareInterrupt { .. }
             ) && let Some(limit) = imports.code_fetch_limit
             {
-                code_fetch::refresh(code, limit, imports.raw_task_context.is_some());
+                code_fetch::refresh(code, limit);
             }
             abi::debug_after_retirement(code, remaining + 2, imports.detection, false);
         }
@@ -1290,13 +1204,12 @@ fn emit_block(code: &mut InstructionSink<'_>, block: &CompiledBlock, imports: me
             .i32_eq()
             .if_(BlockType::Empty);
         abi::safepoint(code, 2);
-        code_fetch::check_context(code, 2, imports.raw_task_context.is_some());
+        code_fetch::check_context(code, 2);
         code_fetch::refresh(
             code,
             imports
                 .code_fetch_limit
                 .expect("context fault requires a bound module"),
-            imports.raw_task_context.is_some(),
         );
         code_fetch::check_span(
             code,
@@ -1307,6 +1220,11 @@ fn emit_block(code: &mut InstructionSink<'_>, block: &CompiledBlock, imports: me
                 .expect("context fault requires a bound module"),
             2,
         );
-        code.i32_const(3).local_set(REASON).br(2).end();
+        if fault.kind == crate::cpu::x86::decode::CapturedFetchFaultKind32::Paging {
+            code_fetch::paging_fault(code, fault, imports);
+        } else {
+            code.i32_const(3).local_set(REASON);
+        }
+        code.br(2).end();
     }
 }

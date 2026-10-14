@@ -153,7 +153,7 @@ fn instruction_fetch_fault_precedes_unavailability_until_final_byte_is_repaired(
         let missing = decode_one(&memory, GuestAddress(pc)).unwrap_err();
         assert!(matches!(
             missing,
-            DecodeError::MemoryFault { length, .. } if length == bytes.len() as u32
+            DecodeError::Paging { attempted_length: length, error: crate::cpu::x86::CpuPagingError32::PageFault(_), .. } if usize::from(length) == bytes.len()
         ));
         assert_eq!(
             decode_for_execution(&memory, GuestAddress(pc)).unwrap_err(),
@@ -168,7 +168,7 @@ fn instruction_fetch_fault_precedes_unavailability_until_final_byte_is_repaired(
         let denied = decode_one(&memory, GuestAddress(pc)).unwrap_err();
         assert!(matches!(
             denied,
-            DecodeError::MemoryFault { length, .. } if length == bytes.len() as u32
+            DecodeError::Paging { attempted_length: length, error: crate::cpu::x86::CpuPagingError32::PageFault(_), .. } if usize::from(length) == bytes.len()
         ));
         assert_eq!(
             decode_for_execution(&memory, GuestAddress(pc)).unwrap_err(),
@@ -201,7 +201,6 @@ fn availability_does_not_replace_present_paths_unknown_features_or_profile_refus
         &[0xf2, 0x0f, 0xaa][..],
         &[0xf3, 0x0f, 0xaa],
         &[0x66, 0x66, 0x0f, 0xaa],
-        &[0xcd, 0x80],
     ] {
         let memory = executable(bytes, 0x1000);
         let strict = decode_one(&memory, GuestAddress(0x1000)).unwrap_err();

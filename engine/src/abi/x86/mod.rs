@@ -1,6 +1,5 @@
 mod avx;
 mod exit;
-mod interrupts;
 mod segments;
 mod simd;
 mod state;
@@ -11,10 +10,11 @@ mod ymm;
 pub use exit::{
     ACCESS_LENGTH_OFFSET, ACCESS_OFFSET, DETAIL_OFFSET, EXIT_SIZE, EXIT_VERSION_2, EXIT_VERSION_3,
     EXIT_VERSION_4, EXIT_VERSION_5, EXIT_VERSION_6, EXIT_VERSION_7, EXIT_VERSION_8, EXIT_VERSION_9,
-    EXIT_VERSION_10, EXIT_VERSION_11, EXIT_VERSION_12, EXIT_VERSION_13, EXIT_VERSION_14, FAULT_ADDRESS_OFFSET,
-    REASON_OFFSET, RETIRED_OFFSET, decode_exit, encode_exit, encode_exit_v2, encode_exit_v3,
-    encode_exit_v4, encode_exit_v5, encode_exit_v6, encode_exit_v7, encode_exit_v8, encode_exit_v9,
-    encode_exit_v10, encode_exit_v11, encode_exit_v12, encode_exit_v13, encode_exit_v14,
+    EXIT_VERSION_10, EXIT_VERSION_11, EXIT_VERSION_12, EXIT_VERSION_13, EXIT_VERSION_14,
+    FAULT_ADDRESS_OFFSET, REASON_OFFSET, RETIRED_OFFSET, decode_exit, encode_exit, encode_exit_v2,
+    encode_exit_v3, encode_exit_v4, encode_exit_v5, encode_exit_v6, encode_exit_v7, encode_exit_v8,
+    encode_exit_v9, encode_exit_v10, encode_exit_v11, encode_exit_v12, encode_exit_v13,
+    encode_exit_v14,
 };
 
 pub use segments::{
@@ -50,16 +50,14 @@ pub(crate) use avx::{
     GATHER_ADDRESS_VERSION, GATHER_COMPLETED_OFFSET, GATHER_DESTINATION_OFFSET,
     GATHER_DETAIL_OFFSET, GATHER_FAULT_ADDRESS_OFFSET, GATHER_FAULT_LANE_OFFSET,
     GATHER_MASK_OFFSET, GATHER_NO_FAULT, GATHER_OUTPUT_SIZE, GATHER_OUTPUT_TRANSFER,
-    GATHER_RESULT_MAGIC, GATHER_RESULT_SIZE, GATHER_RESULT_VERSION, GATHER_STATUS_OFFSET,
-    GatherFaultKind, GatherFaultResult, GatherResult, decode_avx_address, decode_gather_address,
-    encode_gather_result,
+    GATHER_PAGING_RESULT_VERSION, GATHER_RESULT_MAGIC, GATHER_RESULT_SIZE, GATHER_RESULT_VERSION,
+    GATHER_STATUS_OFFSET, GatherFaultKind, GatherFaultResult, GatherPagingGeometry, GatherResult,
+    decode_avx_address, decode_gather_address, decode_gather_paging_result,
+    encode_gather_paging_result, encode_gather_result,
 };
 
 pub use system_registers::{
     SYSTEM_REGISTER_BANK_SIZE, decode_system_register_bank, encode_system_register_bank,
 };
-
-pub use interrupts::{
-    INTERRUPT_DESCRIPTOR_TABLE_SIZE, decode_interrupt_descriptor_table,
-    encode_interrupt_descriptor_table,
-};
+mod event;
+pub use event::{CPU_EVENT_SITE_SIZE, encode_cpu_event_site32};

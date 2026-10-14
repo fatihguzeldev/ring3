@@ -52,8 +52,13 @@ pub(super) fn store(
         }
     }
     code.call(index).local_set(HELPER_STATUS);
-    super::cpu_scalar::validate(code, 1, CpuScalarOperation::Store);
-    exit_if_failed(code, exit_depth, imports.raw_task_context.is_some());
+    super::cpu_scalar::validate(
+        code,
+        1,
+        CpuScalarOperation::Store,
+        imports.paging_configured,
+    );
+    exit_if_failed(code, exit_depth);
 }
 
 pub(super) fn store_result(
@@ -86,6 +91,11 @@ pub(super) fn store_result_at_address(
         .local_get(RESULT)
         .call(index)
         .local_set(HELPER_STATUS);
-    super::cpu_scalar::validate(code, 1, CpuScalarOperation::Store);
-    exit_if_failed(code, exit_depth, imports.raw_task_context.is_some());
+    super::cpu_scalar::validate(
+        code,
+        1,
+        CpuScalarOperation::Store,
+        imports.paging_configured,
+    );
+    exit_if_failed(code, exit_depth);
 }

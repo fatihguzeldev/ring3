@@ -5,23 +5,55 @@ use crate::{
         cpu_helper::{CpuMemoryError, MAX_CPU_TRANSFER, encode_cpu_result},
         memory_helper::HELPER_SIZE,
     },
-    cpu::dbt::RegistryError,
+    cpu::{
+        dbt::RegistryError,
+        x86::{CpuPagingError32, PagingAccess32},
+    },
     memory::{Access, GuestAddress},
 };
 
 impl EngineInstance {
     pub fn cpu_read(&mut self, address: u32, length: u32, alignment: u32) -> Result<(), HostError> {
+        self.cpu_read_intent(address, length, alignment, false)
+    }
+
+    pub fn cpu_read_modify(
+        &mut self,
+        address: u32,
+        length: u32,
+        alignment: u32,
+    ) -> Result<(), HostError> {
+        self.cpu_read_intent(address, length, alignment, true)
+    }
+
+    fn cpu_read_intent(
+        &mut self,
+        address: u32,
+        length: u32,
+        alignment: u32,
+        modify: bool,
+    ) -> Result<(), HostError> {
         check_request(length, alignment)?;
         self.memory()?;
         let result = if address & (alignment - 1) != 0 {
             Err(CpuMemoryError::GeneralProtection(0))
         } else {
+            let at = GuestAddress(address);
+            let preflight = if modify {
+                self.preflight_cpu_read_modify32(at, length)
+            } else {
+                self.preflight_cpu_paging32(at, length, PagingAccess32::Read)
+            };
             let memory = self.memory.as_ref().ok_or(HostError::Closed)?;
             let output = &mut self.arena.as_mut().get_mut()
                 [TRANSFER_OFFSET..TRANSFER_OFFSET + length as usize];
-            memory
-                .cpu_read(GuestAddress(address), output)
-                .map_err(CpuMemoryError::Memory)
+            preflight
+                .and_then(|()| {
+                    memory
+                        .cpu_read(at, output)
+                        .map_err(CpuPagingError32::Memory)
+                })
+                .map_err(CpuMemoryError::from)
         };
         self.cpu_memory_result(length, result)
     }
@@ -72,6 +104,11 @@ impl EngineInstance {
         written: u32,
     ) -> Result<StoreCompletion, HostError> {
         check_request(length, alignment)?;
+        let paging = if address & (alignment - 1) == 0 {
+            self.preflight_cpu_paging32(GuestAddress(address), length, PagingAccess32::Write)
+        } else {
+            Ok(())
+        };
         let input =
             &self.arena.as_ref().get_ref()[TRANSFER_OFFSET..TRANSFER_OFFSET + written as usize];
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
@@ -84,9 +121,13 @@ impl EngineInstance {
             } else {
                 memory.cpu_check_span(GuestAddress(address), length as usize, Access::Write)
             };
-            preflight
-                .and_then(|()| memory.cpu_write(GuestAddress(address), input))
-                .map_err(CpuMemoryError::Memory)
+            paging
+                .and_then(|()| {
+                    preflight
+                        .and_then(|()| memory.cpu_write(GuestAddress(address), input))
+                        .map_err(CpuPagingError32::Memory)
+                })
+                .map_err(CpuMemoryError::from)
         };
         let changed = result.is_ok() && version != memory.code_validation_version();
         self.cpu_memory_result(length, result)?;
@@ -125,13 +166,23 @@ impl EngineInstance {
         if !matches!(length, 8 | 16) || mask >> length != 0 {
             return Err(HostError::InvalidRequest);
         }
+        let paging = self.preflight_cpu_paging_masked32(
+            GuestAddress(address),
+            length,
+            mask,
+            PagingAccess32::Write,
+        );
         let input =
             &self.arena.as_ref().get_ref()[TRANSFER_OFFSET..TRANSFER_OFFSET + length as usize];
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
         let version = memory.code_validation_version();
-        let result = memory
-            .cpu_write_masked(GuestAddress(address), input, mask)
-            .map_err(CpuMemoryError::Memory);
+        let result = paging
+            .and_then(|()| {
+                memory
+                    .cpu_write_masked(GuestAddress(address), input, mask)
+                    .map_err(CpuPagingError32::Memory)
+            })
+            .map_err(CpuMemoryError::from);
         let changed = result.is_ok() && version != memory.code_validation_version();
         self.cpu_memory_result(length, result)?;
         self.cpu_store_currentness(changed, resident)
@@ -207,14 +258,25 @@ mod tests {
         )
     }
 
+    fn application_fault(engine: &EngineInstance, before: &[u8], fields: [u32; 6]) {
+        let mut expected = before.to_vec();
+        let packet = &mut expected[HELPER_OFFSET..HELPER_OFFSET + HELPER_SIZE];
+        packet.fill(0);
+        packet[..12].copy_from_slice(b"R3MH\x0f\0\x01\0\x28\0\0\0");
+        for (i, value) in fields.into_iter().enumerate() {
+            packet[16 + i * 4..20 + i * 4].copy_from_slice(&value.to_le_bytes());
+        }
+        assert_eq!(engine.arena(), expected);
+        assert_eq!(engine.cr2(), Some(GuestAddress(fields[3])));
+    }
+
     #[test]
     fn whole_span_read_fault_preserves_staged_input() {
         let mut engine = engine();
         engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + 16].fill(0xa5);
+        let before = engine.arena().to_vec();
         engine.cpu_read(0x2ff8, 16, 1).unwrap();
-        assert_eq!(field(&engine, 16), 1);
-        assert_eq!(field(&engine, 28), 0x3000);
-        assert_eq!(field(&engine, 36), 16);
+        application_fault(&engine, &before, [9, 0, 4, 0x3000, 1, 16]);
         assert_eq!(
             &engine.arena()[TRANSFER_OFFSET..TRANSFER_OFFSET + 16],
             &[0xa5; 16]
@@ -225,13 +287,13 @@ mod tests {
     fn whole_span_write_fault_does_not_publish_first_page_or_version() {
         let mut engine = engine();
         engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + 16].fill(0xa5);
+        let before = engine.arena().to_vec();
         let version = engine.memory().unwrap().code_validation_version();
         assert_eq!(
             engine.cpu_write(0x2ff8, 16, 1),
             Ok(StoreCompletion::Complete)
         );
-        assert_eq!(field(&engine, 16), 1);
-        assert_eq!(field(&engine, 28), 0x3000);
+        application_fault(&engine, &before, [9, 0, 6, 0x3000, 2, 16]);
         let mut bytes = [1; 8];
         engine
             .memory()
@@ -257,11 +319,11 @@ mod tests {
     fn fxsave_checks_all_512_bytes_before_writing_464() {
         let mut engine = engine();
         engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + 512].fill(0xa5);
+        let before = engine.arena().to_vec();
+        let version = engine.memory().unwrap().code_validation_version();
         engine.cpu_fxsave(0x2e10).unwrap();
-        assert_eq!(
-            (field(&engine, 16), field(&engine, 28), field(&engine, 36)),
-            (1, 0x3000, 512)
-        );
+        application_fault(&engine, &before, [9, 0, 6, 0x3000, 2, 512]);
+        assert_eq!(engine.memory().unwrap().code_validation_version(), version);
         let mut prefix = [1; 464];
         engine
             .memory()

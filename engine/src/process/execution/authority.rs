@@ -2,6 +2,14 @@ use crate::cpu::dbt::{CompiledRegion, RegistryError};
 use crate::process::{CallError, EngineInstance, HostError, calls::callback::SuspendedCallback};
 
 impl EngineInstance {
+    pub(in crate::process) fn guard_detection_material_change(&self) -> Result<(), HostError> {
+        #[cfg(any(target_arch = "wasm32", test))]
+        if self.has_retained_detection() {
+            return Err(HostError::Call(CallError::Busy));
+        }
+        Ok(())
+    }
+
     pub fn guard_dispatch_entry(&self, key: u64) -> Result<(), HostError> {
         self.memory()?;
         if key != self.key {
@@ -30,14 +38,6 @@ impl EngineInstance {
                 .is_some_and(SuspendedCallback::is_resident)
         {
             return Err(HostError::Call(CallError::Busy));
-        }
-        if !self
-            .artifact
-            .as_ref()
-            .unwrap()
-            .matches_task_revision(self.task_execution_revision())
-        {
-            return Err(HostError::InvalidArtifact);
         }
         Ok(())
     }
@@ -69,12 +69,6 @@ impl EngineInstance {
             self.guard_resident_unit(key, record.callback_unit_id)?;
             self.guard_resident_unit(key, record.outer_unit_id)?;
         }
-        if !self
-            .guard_resident_unit(key, id)?
-            .matches_task_revision(self.task_execution_revision())
-        {
-            return Err(HostError::InvalidArtifact);
-        }
         Ok(())
     }
 
@@ -82,9 +76,7 @@ impl EngineInstance {
         &self,
         artifact: &CompiledRegion,
     ) -> Result<(), HostError> {
-        if !artifact.matches_task_revision(self.task_execution_revision())
-            || !artifact.matches_decode_key(self.code_decode_key()?)
-        {
+        if !artifact.matches_decode_key(self.code_decode_key()?) {
             return Err(HostError::InvalidArtifact);
         }
         Ok(())

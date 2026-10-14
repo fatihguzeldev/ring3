@@ -1,10 +1,12 @@
-use super::{BoundDecode, CapturedCodeFault, CodeFetchContext, DecodeAuthority};
+use super::{
+    BoundDecode, CapturedCodeFault, CapturedFetchFaultKind32, CodeFetchContext, DecodeAuthority,
+};
 use iced_x86::{Decoder, DecoderError, DecoderOptions};
 
 use crate::{
     cpu::{
         UnsupportedFeature,
-        x86::{environment::USER_MODE_ENVIRONMENT, ir::Operation},
+        x86::{CpuPagingError32, environment::USER_MODE_ENVIRONMENT, ir::Operation},
     },
     memory::{AddressSpace, CodeSnapshot, GuestAddress, MemoryError, MemoryFault},
 };
@@ -18,6 +20,11 @@ pub enum DecodeError {
     },
     CodeSegment {
         pc: GuestAddress,
+        attempted_length: u8,
+    },
+    Paging {
+        pc: GuestAddress,
+        error: CpuPagingError32,
         attempted_length: u8,
     },
     MissingSystemRegisterAuthority(crate::cpu::x86::SystemRegisterQuery),
@@ -151,18 +158,42 @@ fn decode(
                 )
             };
             return Ok(BoundDecode::CodeFault(CapturedCodeFault {
+                kind: CapturedFetchFaultKind32::Segment,
                 pc,
                 attempted_length: length as u8,
                 consumed_prefix_length: consumed as u8,
                 prefix,
             }));
         }
-        if let Some(cs) = cs {
+        let fetched = if let Some(cs) = cs {
             cs.fetch(memory, pc, &mut bytes[..length])
         } else {
-            memory.fetch(pc, &mut bytes[..length])
+            super::fetch_unbound(memory, pc, &mut bytes[..length])
+        };
+        if let Err(error) = fetched {
+            if policy == DecodePolicy::Execution
+                && cs.is_some()
+                && matches!(&error, CpuPagingError32::PageFault(_))
+            {
+                let consumed = length - 1;
+                let prefix = if consumed == 0 {
+                    None
+                } else {
+                    Some(
+                        code_snapshot(memory, pc, consumed, cs)
+                            .map_err(|error| memory_error(error, pc, consumed))?,
+                    )
+                };
+                return Ok(BoundDecode::CodeFault(CapturedCodeFault {
+                    kind: CapturedFetchFaultKind32::Paging,
+                    pc,
+                    attempted_length: length as u8,
+                    consumed_prefix_length: consumed as u8,
+                    prefix,
+                }));
+            }
+            return Err(paging_error(error, pc, length));
         }
-        .map_err(|error| memory_error(error, pc, length))?;
         let mut decoder = Decoder::with_ip(
             bitness,
             &bytes[..length],
@@ -219,14 +250,6 @@ fn decode(
                         Err(error) => return Err(error),
                     }
                 };
-                let (operation, segments) = match super::coprocessor::fault(
-                    &instruction,
-                    &operation,
-                    authority.coprocessor_cr0,
-                ) {
-                    Some(fault) => (Operation::Control(fault), 0),
-                    None => (operation, segments),
-                };
                 return finish(
                     memory,
                     pc,
@@ -278,6 +301,21 @@ fn code_snapshot(
     }
 }
 
+pub(crate) fn paging_error(
+    error: CpuPagingError32,
+    pc: GuestAddress,
+    length: usize,
+) -> DecodeError {
+    match error {
+        CpuPagingError32::Memory(error) => memory_error(error, pc, length),
+        error => DecodeError::Paging {
+            pc,
+            error,
+            attempted_length: length as u8,
+        },
+    }
+}
+
 fn memory_error(error: MemoryError, pc: GuestAddress, length: usize) -> DecodeError {
     match error {
         MemoryError::Fault(fault) => DecodeError::MemoryFault {
@@ -291,7 +329,7 @@ fn memory_error(error: MemoryError, pc: GuestAddress, length: usize) -> DecodeEr
 
 fn segment_accesses(instruction: &iced_x86::Instruction) -> u8 {
     use iced_x86::{Code, InstructionInfoFactory, Mnemonic, Register};
-    // INT owns its ordered implicit SS checks inside the stateful gate helper.
+    // software interrupts stop at the application os boundary without stack accesses.
     if instruction.code() == Code::Int_imm8 {
         return 0;
     }
@@ -449,7 +487,6 @@ mod tests {
     #[test]
     fn execution_decode_keeps_valid_unsupported_and_duplicate_profile_refusals() {
         for bytes in [
-            &[0xcd, 0x80][..],
             &[0xf2, 0xfa][..],
             &[0xf3, 0xfb][..],
             &[0xf3, 0x0f, 0xa2][..],
@@ -513,10 +550,41 @@ mod tests {
         ] {
             let memory = executable(bytes, pc);
             let strict = decode_one(&memory, GuestAddress(pc)).unwrap_err();
-            assert!(
-                matches!(strict, DecodeError::MemoryFault { length, .. } if length == expected_length),
-                "{strict:?}"
-            );
+            if pc == u32::MAX {
+                assert_eq!(
+                    strict,
+                    DecodeError::MemoryFault {
+                        pc: GuestAddress(pc),
+                        fault: MemoryFault {
+                            address: GuestAddress(pc),
+                            access: crate::memory::Access::Execute,
+                            reason: crate::memory::FaultReason::AddressOverflow
+                        },
+                        length: u32::from(expected_length),
+                    }
+                );
+            } else {
+                let DecodeError::Paging {
+                    pc: fault_pc,
+                    attempted_length,
+                    error: crate::cpu::x86::CpuPagingError32::PageFault(fault),
+                } = strict
+                else {
+                    panic!("expected exact page fault, got {strict:?}")
+                };
+                assert_eq!(
+                    (fault_pc, attempted_length),
+                    (GuestAddress(pc), expected_length)
+                );
+                assert_eq!(
+                    (fault.linear(), fault.access(), fault.error_code()),
+                    (
+                        GuestAddress(0x2000),
+                        crate::cpu::x86::PagingAccess32::Execute,
+                        20
+                    )
+                );
+            }
             assert_eq!(
                 decode_for_execution(&memory, GuestAddress(pc)).unwrap_err(),
                 strict
@@ -622,14 +690,11 @@ mod based_tests {
         let cs = CodeFetchContext::from_segments(&segments).unwrap();
         assert!(matches!(
             decode_bound(&memory, GuestAddress(0x1000), cs, DecodePolicy::Strict),
-            Err(DecodeError::MemoryFault {
+            Err(DecodeError::Paging {
                 pc: GuestAddress(0x1000),
-                fault: MemoryFault {
-                    address: GuestAddress(0x5000),
-                    ..
-                },
-                length: 1
-            })
+                error: CpuPagingError32::PageFault(fault),
+                attempted_length: 1
+            }) if fault.linear() == GuestAddress(0x5000) && fault.error_code() == 20
         ));
     }
     #[test]
@@ -645,20 +710,26 @@ mod based_tests {
         let mut segments = SegmentContext::default();
         segments.state.bases[1] = 0xfffff000;
         let cs = CodeFetchContext::from_segments(&segments).unwrap();
-        for policy in [DecodePolicy::Strict, DecodePolicy::Execution] {
-            assert!(matches!(
-                decode_bound(&memory, GuestAddress(0xfff), cs, policy),
-                Err(DecodeError::MemoryFault {
-                    pc: GuestAddress(0xfff),
-                    length: 2,
-                    fault: crate::memory::MemoryFault {
-                        address: GuestAddress(0),
-                        access: crate::memory::Access::Execute,
-                        reason: crate::memory::FaultReason::Unmapped
-                    },
-                })
-            ));
-        }
+        assert!(matches!(
+            decode_bound(&memory, GuestAddress(0xfff), cs, DecodePolicy::Strict),
+            Err(DecodeError::Paging {
+                pc: GuestAddress(0xfff),
+                attempted_length: 2,
+                error: CpuPagingError32::PageFault(fault),
+            }) if fault.linear() == GuestAddress(0) && fault.error_code() == 20
+        ));
+        let BoundDecode::CodeFault(fault) =
+            decode_bound(&memory, GuestAddress(0xfff), cs, DecodePolicy::Execution).unwrap()
+        else {
+            panic!("bound execution retains the precise wrapped-fetch stop")
+        };
+        assert_eq!(fault.pc, GuestAddress(0xfff));
+        assert_eq!(
+            (fault.attempted_length, fault.consumed_prefix_length),
+            (2, 1)
+        );
+        assert!(fault.remains_denied(&memory, cs));
+        assert!(memory.is_code_current(fault.prefix.as_ref().unwrap()));
     }
 }
 

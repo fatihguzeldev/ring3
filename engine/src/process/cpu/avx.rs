@@ -10,7 +10,8 @@ use crate::{
         },
     },
     cpu::x86::{
-        SegmentAccess, SegmentContext, SegmentRegister, State32,
+        CpuMemoryPort32, CpuReadPort32, PagingAccess32, SegmentAccess, SegmentContext,
+        SegmentRegister, State32,
         avx::{
             AvxInstruction, AvxSemantic, MaskedError, MemoryEffect, ScalarInstruction, VectorState,
             VectorWidth,
@@ -215,30 +216,21 @@ impl EngineInstance {
             } else {
                 None
             };
-            let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
-            let version = memory.code_validation_version();
-            let result = match self.task_incoming {
-                Some(incoming) if incoming.validated_segments().is_none() => vectors
-                    .execute_masked_task(
-                        masked,
-                        &incoming,
-                        address.segment,
-                        if selected == 0 { 0 } else { address.offset },
-                        memory,
-                    ),
-                _ => vectors.execute_masked(
-                    masked,
-                    &context,
-                    address.segment,
-                    if selected == 0 { 0 } else { address.offset },
-                    memory,
-                ),
-            };
-            let changed = result.is_ok() && version != memory.code_validation_version();
+            let version = self.memory.as_ref().unwrap().code_validation_version();
+            let result = vectors.execute_masked_with_port(
+                masked,
+                &context,
+                address.segment,
+                if selected == 0 { 0 } else { address.offset },
+                &mut self.cpu_memory_port32(),
+            );
+            let changed = result.is_ok()
+                && version != self.memory.as_ref().unwrap().code_validation_version();
             if let Err(error) = result {
                 let error = match error {
                     MaskedError::InvalidState => return Err(HostError::Infrastructure),
                     MaskedError::Memory(error) => CpuMemoryError::Memory(error),
+                    MaskedError::Paging(error) => CpuMemoryError::from(error),
                     MaskedError::Segment { segment, .. } => segment_fault(segment),
                 };
                 return self.avx_fault(length, error);
@@ -283,21 +275,20 @@ impl EngineInstance {
             // this probe changes neither ram nor its version; the atomic write remains below.
             if requirement.access == Access::Write
                 && matches!(instruction.semantic(), AvxSemantic::F16c(_))
+                && let Err(error) = self.cpu_memory_port32().check(
+                    GuestAddress(linear),
+                    length as usize,
+                    PagingAccess32::Write,
+                )
             {
-                let memory = self.memory.as_ref().ok_or(HostError::Closed)?;
-                if let Err(error) =
-                    memory.cpu_check_span(GuestAddress(linear), length as usize, Access::Write)
-                {
-                    return self.avx_fault(length, CpuMemoryError::Memory(error));
-                }
+                return self.avx_fault(length, CpuMemoryError::from(error));
             }
-            if requirement.access == Access::Read {
-                let memory = self.memory.as_ref().ok_or(HostError::Closed)?;
-                if let Err(error) =
-                    memory.cpu_read(GuestAddress(linear), &mut payload[..length as usize])
-                {
-                    return self.avx_fault(length, CpuMemoryError::Memory(error));
-                }
+            if requirement.access == Access::Read
+                && let Err(error) = self
+                    .cpu_memory_port32()
+                    .read(GuestAddress(linear), &mut payload[..length as usize])
+            {
+                return self.avx_fault(length, CpuMemoryError::from(error));
             }
         }
         if let Err(error) = dispatch::execute(
@@ -333,13 +324,14 @@ impl EngineInstance {
         let mut changed = false;
         if matches!(effect, MemoryEffect::Full(requirement) if requirement.access == Access::Write)
         {
-            let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
-            let version = memory.code_validation_version();
-            if let Err(error) = memory.cpu_write(GuestAddress(linear), &payload[..length as usize])
+            let version = self.memory.as_ref().unwrap().code_validation_version();
+            if let Err(error) = self
+                .cpu_memory_port32()
+                .write(GuestAddress(linear), &payload[..length as usize])
             {
-                return self.avx_fault(length, CpuMemoryError::Memory(error));
+                return self.avx_fault(length, CpuMemoryError::from(error));
             }
-            changed = version != memory.code_validation_version();
+            changed = version != self.memory.as_ref().unwrap().code_validation_version();
         }
         prepared.publish(self.arena.as_mut().get_mut());
         self.cpu_store_currentness(changed, resident)
@@ -374,3 +366,7 @@ mod tests;
 #[cfg(test)]
 #[path = "avx/fma/native.rs"]
 mod fma_tests;
+
+#[cfg(test)]
+#[path = "avx/paging.rs"]
+mod paging_tests;

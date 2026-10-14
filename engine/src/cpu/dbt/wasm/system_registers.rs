@@ -35,7 +35,7 @@ pub(super) fn store_descriptor(
         2,
         true,
         exit_depth,
-        imports.raw_task_context.is_some(),
+        cpu_result::ResultContext::from(imports),
     );
 }
 

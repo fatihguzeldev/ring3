@@ -1,8 +1,9 @@
 use crate::{
     abi::{
         arena::HELPER_OFFSET,
-        memory_helper::{CpuScalarOperation, HELPER_SIZE, encode_cpu_scalar_result},
+        memory_helper::{CpuScalarOperation, HELPER_SIZE, encode_cpu_paging_scalar_result},
     },
+    cpu::x86::{CpuPagingError32, PagingAccess32},
     memory::GuestAddress,
     process::{EngineInstance, HostError, StoreCompletion},
 };
@@ -343,48 +344,58 @@ impl EngineInstance {
             Some((key, id)) => self.guard_material_resident(key, id)?,
             None => self.guard_material(self.key, self.generation())?,
         }
-        let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
-        let version = memory.code_validation_version();
         let at = GuestAddress(address);
         let operation = if matches!(&mutation, Mutation::Store(_)) {
             CpuScalarOperation::Store
         } else {
             CpuScalarOperation::Modify
         };
-        let result = match (mutation, width) {
-            (Mutation::Store(value), 1 | 2 | 4) => memory
-                .cpu_write(at, &value.to_le_bytes()[..width as usize])
-                .map(|()| 0),
-            (Mutation::Exchange(value), 1) => memory.exchange8(at, value as u8).map(u32::from),
-            (Mutation::Exchange(value), 2) => {
-                memory.cpu_exchange16(at, value as u16).map(u32::from)
-            }
-            (Mutation::Exchange(value), 4) => memory.cpu_exchange32(at, value),
-            (Mutation::CompareExchange(expected, desired), 1) => memory
-                .compare_exchange8(at, expected as u8, desired as u8)
-                .map(u32::from),
-            (Mutation::CompareExchange(expected, desired), 2) => memory
-                .cpu_compare_exchange16(at, expected as u16, desired as u16)
-                .map(u32::from),
-            (Mutation::CompareExchange(expected, desired), 4) => {
-                memory.cpu_compare_exchange32(at, expected, desired)
-            }
-            (Mutation::ExchangeAdd(source), 1) => {
-                memory.exchange_add8(at, source as u8).map(u32::from)
-            }
-            (Mutation::ExchangeAdd(source), 2) => {
-                memory.cpu_exchange_add16(at, source as u16).map(u32::from)
-            }
-            (Mutation::ExchangeAdd(source), 4) => memory.cpu_exchange_add32(at, source),
-            (Mutation::BitSet(bit), 4) => memory.cpu_bit_test_set32(at, bit),
-            (Mutation::BitReset(bit), 4) => memory.cpu_bit_test_reset32(at, bit),
-            (Mutation::Or(mask), 4) => memory.cpu_atomic_or_u32(at, mask),
-            (Mutation::And(mask), 4) => memory.cpu_atomic_and_u32(at, mask),
-            (Mutation::Xor(mask), 4) => memory.cpu_atomic_xor_u32(at, mask),
-            _ => return Err(HostError::InvalidRequest),
+        let preflight = if operation == CpuScalarOperation::Store {
+            self.preflight_cpu_paging32(at, width, PagingAccess32::Write)
+        } else {
+            self.preflight_cpu_modify32(at, width)
         };
+        let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
+        let version = memory.code_validation_version();
+        let result = preflight.and_then(|()| {
+            (match (mutation, width) {
+                (Mutation::Store(value), 1 | 2 | 4) => memory
+                    .cpu_write(at, &value.to_le_bytes()[..width as usize])
+                    .map(|()| 0),
+                (Mutation::Exchange(value), 1) => memory.exchange8(at, value as u8).map(u32::from),
+                (Mutation::Exchange(value), 2) => {
+                    memory.cpu_exchange16(at, value as u16).map(u32::from)
+                }
+                (Mutation::Exchange(value), 4) => memory.cpu_exchange32(at, value),
+                (Mutation::CompareExchange(expected, desired), 1) => memory
+                    .compare_exchange8(at, expected as u8, desired as u8)
+                    .map(u32::from),
+                (Mutation::CompareExchange(expected, desired), 2) => memory
+                    .cpu_compare_exchange16(at, expected as u16, desired as u16)
+                    .map(u32::from),
+                (Mutation::CompareExchange(expected, desired), 4) => {
+                    memory.cpu_compare_exchange32(at, expected, desired)
+                }
+                (Mutation::ExchangeAdd(source), 1) => {
+                    memory.exchange_add8(at, source as u8).map(u32::from)
+                }
+                (Mutation::ExchangeAdd(source), 2) => {
+                    memory.cpu_exchange_add16(at, source as u16).map(u32::from)
+                }
+                (Mutation::ExchangeAdd(source), 4) => memory.cpu_exchange_add32(at, source),
+                (Mutation::BitSet(bit), 4) => memory.cpu_bit_test_set32(at, bit),
+                (Mutation::BitReset(bit), 4) => memory.cpu_bit_test_reset32(at, bit),
+                (Mutation::Or(mask), 4) => memory.cpu_atomic_or_u32(at, mask),
+                (Mutation::And(mask), 4) => memory.cpu_atomic_and_u32(at, mask),
+                (Mutation::Xor(mask), 4) => memory.cpu_atomic_xor_u32(at, mask),
+                _ => unreachable!(
+                    "scalar mutation and const width selected by typed public wrappers"
+                ),
+            })
+            .map_err(CpuPagingError32::Memory)
+        });
         let changed = result.is_ok() && version != memory.code_validation_version();
-        encode_cpu_scalar_result(
+        encode_cpu_paging_scalar_result(
             at,
             width,
             operation,

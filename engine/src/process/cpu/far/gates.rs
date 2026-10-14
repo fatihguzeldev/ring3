@@ -36,7 +36,7 @@ fn gate_stack_limit_target_limit_and_second_page_fault_preserve_table_before_fin
         .unwrap()
         .read(GuestAddress(0x7000), &mut ram)
         .unwrap();
-    for (esp, expected) in [(0x7808, (7, 0)), (0x7800, (3, 0)), (0x7004, (1, 1))] {
+    for (esp, expected) in [(0x7808, (7, 0)), (0x7800, (3, 0)), (0x7004, (9, 6))] {
         if esp == 0x7800 {
             encode_segment_context(&original, &mut record).unwrap();
             engine.arena_mut().unwrap()[SEGMENTS_OFFSET..SEGMENTS_OFFSET + SEGMENTS_SIZE]
@@ -54,7 +54,12 @@ fn gate_stack_limit_target_limit_and_second_page_fault_preserve_table_before_fin
             Ok(StoreCompletion::Complete)
         );
         assert_eq!((field(&engine, 16), field(&engine, 24)), expected);
-        assert_eq!((field(&engine, 4), field(&engine, 36)), (0x10009, 4));
+        if esp == 0x7004 {
+            super::support::page_fault_packet(&engine, [9, 0, 6, 0x6ffc, 2, 4]);
+        } else {
+            assert_eq!((field(&engine, 4), field(&engine, 36)), (0x10009, 4));
+            assert_eq!(engine.cr2(), None);
+        }
         only_packet_changed(&before, &engine);
         assert_eq!(engine.segment_descriptors, table);
         let mut after = [0; 4096];

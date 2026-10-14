@@ -50,7 +50,7 @@ fn cc_into_and_f1_require_trusted_restart_while_completed_tf_and_partial_rep_for
         event(ExceptionCause32::Debug(DebugCause32::SingleStep(
             TrapPoint32::RepetitionInProgress,
         ))),
-        DetectedEvent32::NeedsPagingAuthority {
+        DetectedEvent32::MemoryFailure {
             fault: MemoryFault {
                 address: GuestAddress(3),
                 access: Access::Read,
@@ -69,22 +69,6 @@ fn cc_into_and_f1_require_trusted_restart_while_completed_tf_and_partial_rep_for
             12
         ));
     }
-    // success frame remains at the detector's continuation; only failed instruction delivery restarts.
-    assert_eq!(
-        restart().attempted_input(input()),
-        FrameInput32 {
-            eip: 0x1000,
-            ..input()
-        }
-    );
-    assert_eq!(
-        restart().unattempted_input(input()),
-        FrameInput32 {
-            eip: 0x1000,
-            flags: 0x250fd7,
-            ..input()
-        }
-    );
 }
 
 #[test]

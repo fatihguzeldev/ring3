@@ -117,7 +117,7 @@ fn complete_instruction_fetch_still_precedes_system_fault_classification() {
         let mut memory = executable(&bytes[..bytes.len() - 1], pc);
         let missing = decode_one(&memory, GuestAddress(pc)).unwrap_err();
         assert!(
-            matches!(missing, DecodeError::MemoryFault {length, ..} if length == bytes.len() as u32)
+            matches!(missing, DecodeError::Paging { attempted_length: length, error: crate::cpu::x86::CpuPagingError32::PageFault(_), .. } if usize::from(length) == bytes.len())
         );
         assert_eq!(
             decode_for_execution(&memory, GuestAddress(pc)).unwrap_err(),
@@ -130,7 +130,13 @@ fn complete_instruction_fetch_still_precedes_system_fault_classification() {
             .unwrap();
         memory.protect(page, Permissions::READ).unwrap();
         let denied = decode_one(&memory, GuestAddress(pc)).unwrap_err();
-        assert!(matches!(denied, DecodeError::MemoryFault { .. }));
+        assert!(matches!(
+            denied,
+            DecodeError::Paging {
+                error: crate::cpu::x86::CpuPagingError32::PageFault(_),
+                ..
+            }
+        ));
         assert_eq!(
             decode_for_execution(&memory, GuestAddress(pc)).unwrap_err(),
             denied

@@ -16,7 +16,6 @@ use crate::{
 pub enum HostError {
     Closed,
     ProcessExited,
-    CpuShutdown,
     InvalidRequest,
     InvalidArtifact,
     CodeInvalidated,
@@ -48,20 +47,16 @@ pub struct EngineInstance {
     pub(in crate::process) pending_call: Option<PendingCall>,
     pub(in crate::process) callback: Option<SuspendedCallback>,
     pub(in crate::process) call_token: u32,
+    pub(in crate::process) cpu_event: Option<crate::process::CpuEvent32>,
     pub(in crate::process) virtual_tsc: u64,
+    pub(in crate::process) cr2: Option<crate::memory::GuestAddress>,
+    pub(in crate::process) cpu_page_fault_sequence: u64,
     #[cfg(any(target_arch = "wasm32", test))]
     pub(in crate::process) detection_epoch: u64,
     #[cfg(any(target_arch = "wasm32", test))]
     pub(in crate::process) exception_detection:
         Option<Box<[crate::process::cpu::interrupts::detection::DetectionSlot32; 1]>>,
     pub(in crate::process) system_register_bank: Option<crate::cpu::x86::UserSystemRegisterBank32>,
-    pub(in crate::process) interrupt_descriptors:
-        Option<crate::cpu::x86::InterruptDescriptorTable32>,
-    pub(in crate::process) task_return_sources:
-        Option<crate::process::cpu::tasks::TaskReturnSources>,
-    pub(in crate::process) task_controls: Option<crate::process::cpu::tasks::TaskControlAuthority>,
-    pub(in crate::process) task_execution_revision: u64,
-    pub(in crate::process) task_incoming: Option<crate::cpu::x86::tasks::TaskIncomingContext32>,
     pub(in crate::process) image: Option<crate::loader::ImageMetadata32>,
     pub(in crate::process) image_input: Option<crate::process::loading::input::ImageInput>,
     pub(in crate::process) image_started: bool,
@@ -95,17 +90,15 @@ impl EngineInstance {
             pending_call: None,
             callback: None,
             call_token: 0,
+            cpu_event: None,
             virtual_tsc: 0,
+            cr2: None,
+            cpu_page_fault_sequence: 0,
             #[cfg(any(target_arch = "wasm32", test))]
             detection_epoch: 0,
             #[cfg(any(target_arch = "wasm32", test))]
             exception_detection: None,
-            system_register_bank: None,
-            interrupt_descriptors: None,
-            task_return_sources: None,
-            task_controls: None,
-            task_execution_revision: 0,
-            task_incoming: None,
+            system_register_bank: Some(crate::cpu::x86::UserSystemRegisterBank32::application()),
             image: None,
             image_input: None,
             image_started: false,
@@ -140,16 +133,14 @@ impl EngineInstance {
     pub fn close(&mut self) {
         self.image_input = None;
         self.system_register_bank = None;
-        self.interrupt_descriptors = None;
-        self.task_return_sources = None;
-        self.task_controls = None;
-        self.task_execution_revision = 0;
-        self.task_incoming = None;
+        self.cr2 = None;
+        self.cpu_page_fault_sequence = 0;
         #[cfg(any(target_arch = "wasm32", test))]
         {
             self.exception_detection = None;
         }
         self.pending_call = None;
+        self.cpu_event = None;
         self.callback = None;
         self.artifact = None;
         self.dispatcher = None;

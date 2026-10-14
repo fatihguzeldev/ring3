@@ -18,6 +18,9 @@ pub(crate) const PREFETCHW_ENABLED: bool = true;
 
 pub(crate) const MSR_ENABLED: bool = true;
 
+// application mappings enforce execute-disable independently of guest page tables.
+pub(crate) const NX_ENABLED: bool = true;
+
 // user-mode counter reads remain subject to the immutable cr4.pce policy.
 pub(crate) const RDPMC_ENABLED: bool = true;
 
@@ -128,7 +131,7 @@ pub(crate) const CPU_ID_LEAVES: [CpuIdLeaf; 8] = [
             0,
             0,
             1 << 5 | ((PREFETCHW_ENABLED as u32) << 8),
-            1 << 27 | ((SYSCALL_ENABLED as u32) << 11),
+            1 << 27 | ((NX_ENABLED as u32) << 20) | ((SYSCALL_ENABLED as u32) << 11),
         ],
     },
 ];

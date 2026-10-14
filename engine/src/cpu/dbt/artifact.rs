@@ -35,30 +35,8 @@ pub struct CompiledRegion {
 }
 
 impl CompiledRegion {
-    pub(crate) fn task_return_next_pc(&self, pc: u32) -> Option<u32> {
-        self.prepared
-            .blocks
-            .iter()
-            .flat_map(|block| &block.instructions)
-            .find(|instruction| {
-                instruction.pc().0 == pc
-                    && matches!(
-                        instruction.operation(),
-                        crate::cpu::x86::ir::Operation::InterruptReturn { .. }
-                    )
-            })
-            .map(|instruction| instruction.next_pc().0)
-    }
     pub(crate) fn decode_key(&self) -> CodeDecodeKey {
         self.prepared.decode_key.unwrap_or(CodeDecodeKey::FLAT)
-    }
-
-    pub(crate) fn task_execution_revision(&self) -> Option<u64> {
-        self.prepared.task_execution_revision
-    }
-
-    pub(crate) fn matches_task_revision(&self, revision: Option<u64>) -> bool {
-        self.task_execution_revision() == revision
     }
 
     pub(crate) fn matches_decode_key(&self, key: CodeDecodeKey) -> bool {
@@ -266,17 +244,7 @@ pub(super) fn emit_prepared(
     limits: CompileLimits,
     binding: Option<wasm::EmbeddedBinding>,
 ) -> Result<CompiledRegion, CompileError> {
-    let bytes = wasm::emit_with_authority(
-        &prepared.blocks,
-        binding,
-        prepared.decode_key,
-        prepared.task_return_configured,
-        prepared.exception_detection_configured,
-        prepared.task_execution_revision.is_some(),
-        prepared
-            .raw_task_context
-            .then_some(prepared.task_execution_revision.unwrap_or(0)),
-    );
+    let bytes = wasm::emit(&prepared.blocks, binding, prepared.decode_key);
     if bytes.len() > limits.wasm_bytes {
         return Err(CompileError::WasmLimit);
     }
@@ -291,17 +259,7 @@ pub(super) fn emit_entry_prepared(
     cs: Option<CodeFetchContext>,
 ) -> Result<CompiledRegion, CompileError> {
     loop {
-        let bytes = wasm::emit_with_authority(
-            &prepared.blocks,
-            binding,
-            prepared.decode_key,
-            prepared.task_return_configured,
-            prepared.exception_detection_configured,
-            prepared.task_execution_revision.is_some(),
-            prepared
-                .raw_task_context
-                .then_some(prepared.task_execution_revision.unwrap_or(0)),
-        );
+        let bytes = wasm::emit(&prepared.blocks, binding, prepared.decode_key);
         if bytes.len() <= limits.wasm_bytes {
             return Ok(CompiledRegion { prepared, bytes });
         }

@@ -110,7 +110,7 @@ fn original_extra_opcode_byte_and_modrm_must_be_fetched_and_tracked() {
         let pc = 0x2001 - bytes.len() as u32;
         let mut memory = executable(&bytes[..bytes.len() - 1], pc);
         assert!(
-            matches!(decode_one(&memory,GuestAddress(pc)),Err(DecodeError::MemoryFault{length,..}) if length==bytes.len() as u32)
+            matches!(decode_one(&memory,GuestAddress(pc)),Err(DecodeError::Paging { attempted_length: length, error: crate::cpu::x86::CpuPagingError32::PageFault(_), .. }) if usize::from(length) == bytes.len())
         );
         let page = PageRange::new(GuestAddress(0x2000), 1).unwrap();
         memory.map_zeroed(page, Permissions::ALL).unwrap();
@@ -120,7 +120,10 @@ fn original_extra_opcode_byte_and_modrm_must_be_fetched_and_tracked() {
         memory.protect(page, Permissions::READ).unwrap();
         assert!(matches!(
             decode_for_execution(&memory, GuestAddress(pc)),
-            Err(DecodeError::MemoryFault { .. })
+            Err(DecodeError::Paging {
+                error: crate::cpu::x86::CpuPagingError32::PageFault(_),
+                ..
+            })
         ));
         memory.protect(page, Permissions::ALL).unwrap();
         let decoded = decode_one(&memory, GuestAddress(pc)).unwrap();

@@ -228,7 +228,7 @@ fn fetch_and_invalid_lock_or_duplicate_refusals_precede_alias_lowering() {
         let pc = 0x2001 - bytes.len() as u32;
         let mut m = executable(&bytes[..bytes.len() - 1], pc);
         assert!(
-            matches!(decode_one(&m,GuestAddress(pc)),Err(DecodeError::MemoryFault{length,..}) if length==bytes.len() as u32)
+            matches!(decode_one(&m,GuestAddress(pc)),Err(DecodeError::Paging { attempted_length: length, error: crate::cpu::x86::CpuPagingError32::PageFault(_), .. }) if usize::from(length) == bytes.len())
         );
         let page = PageRange::new(GuestAddress(0x2000), 1).unwrap();
         m.map_zeroed(page, Permissions::ALL).unwrap();
@@ -237,7 +237,10 @@ fn fetch_and_invalid_lock_or_duplicate_refusals_precede_alias_lowering() {
         m.protect(page, Permissions::READ).unwrap();
         assert!(matches!(
             decode_for_execution(&m, GuestAddress(pc)),
-            Err(DecodeError::MemoryFault { .. })
+            Err(DecodeError::Paging {
+                error: crate::cpu::x86::CpuPagingError32::PageFault(_),
+                ..
+            })
         ));
         m.protect(page, Permissions::EXECUTE).unwrap();
         assert!(decode_for_execution(&m, GuestAddress(pc)).is_ok());

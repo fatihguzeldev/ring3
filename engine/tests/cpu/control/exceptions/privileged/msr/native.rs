@@ -1,4 +1,4 @@
-use super::stopped_support::{KEY, expect_admitted, stopped};
+use super::stopped_support::{KEY, expect_admitted, expect_captured_fetch, stopped};
 use ring3_engine::{
     abi::arena::TRANSFER_OFFSET,
     cpu::{
@@ -6,7 +6,6 @@ use ring3_engine::{
         dbt::{CompileError, InstructionError},
         x86::decode::DecodeError,
     },
-    memory::{Access, FaultReason, GuestAddress, MemoryFault},
     process::HostError,
 };
 
@@ -91,26 +90,7 @@ fn invalid_lock_msr_attempts_reuse_the_invalid_opcode_execution_path() {
 }
 
 #[test]
-fn incomplete_msr_fetch_remains_an_atomic_execute_memory_error() {
+fn incomplete_msr_fetch_remains_an_atomic_execution_page_fault() {
     let mut engine = stopped(&[0x0f], 0x3fff);
-    let before = engine.arena().to_vec();
-    let artifact = engine.artifact_bytes().unwrap().to_vec();
-    assert_eq!(
-        engine.compile_stopped_entry(KEY, 1),
-        Err(HostError::Compile(CompileError::Instruction {
-            pc: GuestAddress(0x3fff),
-            cause: InstructionError::Decode(DecodeError::MemoryFault {
-                pc: GuestAddress(0x3fff),
-                fault: MemoryFault {
-                    address: GuestAddress(0x4000),
-                    access: Access::Execute,
-                    reason: FaultReason::Unmapped,
-                },
-                length: 2,
-            }),
-        }))
-    );
-    assert_eq!(engine.arena(), before);
-    assert_eq!(engine.artifact_bytes().unwrap(), artifact);
-    assert_eq!(engine.generation(), 1);
+    expect_captured_fetch(&mut engine, 0x3fff, 0x4000, false, 2);
 }

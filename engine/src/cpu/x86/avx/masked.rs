@@ -1,8 +1,14 @@
 use super::{Element, VectorRegister, VectorState, VectorWidth};
 use crate::{
-    cpu::x86::{SegmentAccess, SegmentAccessError, SegmentContext, SegmentRegister},
-    memory::{Access, AddressSpace, GuestAddress, MemoryError},
+    cpu::x86::{
+        CpuMemoryPort32, CpuPagingError32, SegmentAccess, SegmentAccessError, SegmentContext,
+        SegmentRegister,
+    },
+    memory::{Access, GuestAddress, MemoryError},
 };
+
+#[cfg(test)]
+use crate::{cpu::x86::DefaultCpuMemoryPort32, memory::AddressSpace};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum MaskedInstruction {
@@ -32,6 +38,7 @@ pub(crate) enum MaskedError {
         cause: SegmentAccessError,
     },
     Memory(MemoryError),
+    Paging(CpuPagingError32),
 }
 
 impl MaskedInstruction {
@@ -75,6 +82,7 @@ impl MaskedInstruction {
 }
 
 impl VectorState {
+    #[cfg(test)]
     pub(crate) fn execute_masked(
         &mut self,
         instruction: MaskedInstruction,
@@ -83,44 +91,24 @@ impl VectorState {
         offset: u32,
         memory: &mut AddressSpace,
     ) -> Result<(), MaskedError> {
-        self.execute_masked_context(
+        self.execute_masked_with_port(
             instruction,
             segments,
             segment,
             offset,
-            memory,
-            segments.is_valid(),
+            &mut DefaultCpuMemoryPort32::new(memory),
         )
     }
 
-    pub(crate) fn execute_masked_task(
-        &mut self,
-        instruction: MaskedInstruction,
-        context: &crate::cpu::x86::tasks::TaskIncomingContext32,
-        segment: SegmentRegister,
-        offset: u32,
-        memory: &mut AddressSpace,
-    ) -> Result<(), MaskedError> {
-        self.execute_masked_context(
-            instruction,
-            &context.segment_image(),
-            segment,
-            offset,
-            memory,
-            crate::cpu::x86::tasks::TaskIncomingContext32::from_image(context.image()).is_some(),
-        )
-    }
-
-    fn execute_masked_context(
+    pub(crate) fn execute_masked_with_port(
         &mut self,
         instruction: MaskedInstruction,
         segments: &SegmentContext,
         segment: SegmentRegister,
         offset: u32,
-        memory: &mut AddressSpace,
-        context_valid: bool,
+        memory: &mut impl CpuMemoryPort32,
     ) -> Result<(), MaskedError> {
-        if self.simd.mxcsr & !0xffff != 0 || !context_valid {
+        if self.simd.mxcsr & !0xffff != 0 || !segments.is_valid() {
             return Err(MaskedError::InvalidState);
         }
         let mask = self.read(instruction.mask());
@@ -159,13 +147,13 @@ impl VectorState {
             MaskedInstruction::Load { destination, .. } => {
                 let mut value = [0; 32];
                 memory
-                    .cpu_read_masked(address, &mut value[..instruction.width().bytes()], selected)
-                    .map_err(MaskedError::Memory)?;
+                    .read_masked(address, &mut value[..instruction.width().bytes()], selected)
+                    .map_err(paging_error)?;
                 self.publish(destination, value);
             }
             _ => memory
-                .cpu_write_masked(address, &data[..instruction.width().bytes()], selected)
-                .map_err(MaskedError::Memory)?,
+                .write_masked(address, &data[..instruction.width().bytes()], selected)
+                .map_err(paging_error)?,
         }
         Ok(())
     }
@@ -173,3 +161,14 @@ impl VectorState {
 #[cfg(test)]
 #[path = "masked/native.rs"]
 mod tests;
+
+fn paging_error(error: CpuPagingError32) -> MaskedError {
+    match error {
+        CpuPagingError32::Memory(error) => MaskedError::Memory(error),
+        error => MaskedError::Paging(error),
+    }
+}
+
+#[cfg(test)]
+#[path = "masked/paging.rs"]
+mod paging_tests;

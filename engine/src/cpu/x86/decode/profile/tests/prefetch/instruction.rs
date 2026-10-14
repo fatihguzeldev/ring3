@@ -70,7 +70,11 @@ fn instruction_prefetch_retains_prefix_neighbor_and_complete_fetch_boundaries() 
         let missing = decode_one(&memory, GuestAddress(pc)).unwrap_err();
         assert!(matches!(
             missing,
-            DecodeError::MemoryFault { length: 3, .. }
+            DecodeError::Paging {
+                attempted_length: 3,
+                error: crate::cpu::x86::CpuPagingError32::PageFault(_),
+                ..
+            }
         ));
         assert_eq!(
             decode_for_execution(&memory, GuestAddress(pc)).unwrap_err(),
@@ -104,11 +108,15 @@ fn instruction_prefetch_retains_prefix_neighbor_and_complete_fetch_boundaries() 
     assert!(!super::ignored_instruction_prefetch(&raw));
     let memory = executable(&neighbor, 0x1000);
     assert_eq!(
-        decode_one(&memory, GuestAddress(0x1000)).unwrap().operation(),
+        decode_one(&memory, GuestAddress(0x1000))
+            .unwrap()
+            .operation(),
         &Operation::Nop
     );
     assert_eq!(
-        decode_for_execution(&memory, GuestAddress(0x1000)).unwrap().operation(),
+        decode_for_execution(&memory, GuestAddress(0x1000))
+            .unwrap()
+            .operation(),
         &Operation::Nop
     );
 }

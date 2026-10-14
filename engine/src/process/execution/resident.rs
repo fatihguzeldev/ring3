@@ -20,6 +20,7 @@ impl EngineInstance {
         if self.pending_call.is_some() || self.callback.is_some() {
             return Err(HostError::Call(CallError::Busy));
         }
+        self.guard_detection_material_change()?;
         let memory = self.memory.as_ref().ok_or(HostError::Closed)?;
         self.resident
             .as_ref()
@@ -59,6 +60,7 @@ impl EngineInstance {
         if self.pending_call.is_some() || self.callback.is_some() {
             return Err(HostError::Call(CallError::Busy));
         }
+        self.guard_detection_material_change()?;
         let memory = self.memory.as_ref().ok_or(HostError::Closed)?;
         self.resident
             .as_ref()
@@ -94,6 +96,7 @@ impl EngineInstance {
         if self.pending_call.is_some() || self.callback.is_some() {
             return Err(HostError::Call(CallError::Busy));
         }
+        self.guard_detection_material_change()?;
         let memory = self.memory.as_ref().ok_or(HostError::Closed)?;
         self.resident
             .as_ref()
@@ -129,6 +132,7 @@ impl EngineInstance {
         if self.pending_call.is_some() || self.callback.is_some() {
             return Err(HostError::Call(CallError::Busy));
         }
+        self.guard_detection_material_change()?;
         self.compile_resident_descriptors(count, gate_count, None)
     }
 
@@ -141,6 +145,7 @@ impl EngineInstance {
         if self.pending_call.is_some() || self.callback.is_some() {
             return Err(HostError::Call(CallError::Busy));
         }
+        self.guard_detection_material_change()?;
         Self::check_region_counts(count, gate_count)?;
         let mut entries = [GuestAddress(0); 8];
         let mut gates = [GateSpec {
@@ -164,9 +169,7 @@ impl EngineInstance {
             };
         }
         let cs = self.code_fetch_context()?;
-        let system_registers = self.task_system_register_bank();
-        let task_revision = self.task_execution_revision();
-        let coprocessor_cr0 = self.task_coprocessor_cr0();
+        let system_registers = self.system_register_bank;
         let memory = self.memory.as_ref().ok_or(HostError::Closed)?;
         let entries = &entries[..count as usize];
         let gates = &gates[..gate_count as usize];
@@ -179,13 +182,7 @@ impl EngineInstance {
                     CompileLimits::default(),
                     self.key,
                     Some(cs),
-                    crate::cpu::x86::decode::DecodeAuthority::new(
-                        system_registers,
-                        self.interrupt_descriptors.is_some(),
-                    )
-                    .with_task_return(self.task_return_sources.is_some())
-                    .with_task_revision(task_revision)
-                    .with_coprocessor_control(coprocessor_cr0),
+                    crate::cpu::x86::decode::DecodeAuthority::new(system_registers),
                 )
                 .map_err(HostError::Resident)
         } else {
@@ -199,13 +196,7 @@ impl EngineInstance {
                     CompileLimits::default(),
                     self.key,
                     Some(cs),
-                    crate::cpu::x86::decode::DecodeAuthority::new(
-                        system_registers,
-                        self.interrupt_descriptors.is_some(),
-                    )
-                    .with_task_return(self.task_return_sources.is_some())
-                    .with_task_revision(task_revision)
-                    .with_coprocessor_control(coprocessor_cr0),
+                    crate::cpu::x86::decode::DecodeAuthority::new(system_registers),
                 )
                 .map_err(HostError::Resident)?;
             self.resident = Some(registry);
@@ -250,9 +241,7 @@ impl EngineInstance {
             };
         }
         let cs = self.code_fetch_context()?;
-        let system_registers = self.task_system_register_bank();
-        let task_revision = self.task_execution_revision();
-        let coprocessor_cr0 = self.task_coprocessor_cr0();
+        let system_registers = self.system_register_bank;
         let memory = self.memory.as_ref().ok_or(HostError::Closed)?;
         let specs = &specs[..count as usize];
         let gates = &gates[..gate_count as usize];
@@ -270,13 +259,7 @@ impl EngineInstance {
                     CompileLimits::default(),
                     self.key,
                     Some(cs),
-                    crate::cpu::x86::decode::DecodeAuthority::new(
-                        system_registers,
-                        self.interrupt_descriptors.is_some(),
-                    )
-                    .with_task_return(self.task_return_sources.is_some())
-                    .with_task_revision(task_revision)
-                    .with_coprocessor_control(coprocessor_cr0),
+                    crate::cpu::x86::decode::DecodeAuthority::new(system_registers),
                 )
                 .map_err(HostError::Resident)
         } else {
@@ -290,13 +273,7 @@ impl EngineInstance {
                     CompileLimits::default(),
                     self.key,
                     Some(cs),
-                    crate::cpu::x86::decode::DecodeAuthority::new(
-                        system_registers,
-                        self.interrupt_descriptors.is_some(),
-                    )
-                    .with_task_return(self.task_return_sources.is_some())
-                    .with_task_revision(task_revision)
-                    .with_coprocessor_control(coprocessor_cr0),
+                    crate::cpu::x86::decode::DecodeAuthority::new(system_registers),
                 )
                 .map_err(HostError::Resident)?;
             self.resident = Some(registry);
@@ -311,7 +288,7 @@ impl EngineInstance {
         self.resident
             .as_ref()
             .ok_or(HostError::Resident(RegistryError::NotFound { pc }))?
-            .lookup_task_bound(memory, pc, cs, self.task_execution_revision())
+            .lookup_bound(memory, pc, cs)
             .map_err(HostError::Resident)
     }
 

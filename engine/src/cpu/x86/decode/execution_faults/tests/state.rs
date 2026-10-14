@@ -82,7 +82,7 @@ fn full_fetch_precedes_disabled_state_fault_until_the_last_byte_is_executable() 
         let mut memory = executable(&bytes[..bytes.len() - 1], pc);
         let missing = decode_one(&memory, GuestAddress(pc)).unwrap_err();
         assert!(
-            matches!(missing, DecodeError::MemoryFault { length, .. } if length == bytes.len() as u32)
+            matches!(missing, DecodeError::Paging { attempted_length: length, error: crate::cpu::x86::CpuPagingError32::PageFault(_), .. } if usize::from(length) == bytes.len())
         );
         assert_eq!(
             decode_for_execution(&memory, GuestAddress(pc)).unwrap_err(),
@@ -96,7 +96,7 @@ fn full_fetch_precedes_disabled_state_fault_until_the_last_byte_is_executable() 
         memory.protect(page, Permissions::READ).unwrap();
         let denied = decode_one(&memory, GuestAddress(pc)).unwrap_err();
         assert!(
-            matches!(denied, DecodeError::MemoryFault { length, .. } if length == bytes.len() as u32)
+            matches!(denied, DecodeError::Paging { attempted_length: length, error: crate::cpu::x86::CpuPagingError32::PageFault(_), .. } if usize::from(length) == bytes.len())
         );
         assert_eq!(
             decode_for_execution(&memory, GuestAddress(pc)).unwrap_err(),

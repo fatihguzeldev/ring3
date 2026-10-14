@@ -1,4 +1,5 @@
 use super::*;
+use crate::cpu::x86::SegmentRegister;
 use crate::{
     abi::{
         arena::{SEGMENTS_OFFSET, SIMD_OFFSET, YMM_OFFSET},
@@ -78,7 +79,20 @@ fn expected(
     arena[TRANSFER_OFFSET + 32..TRANSFER_OFFSET + 64].copy_from_slice(&mask);
     let packet = &mut arena[HELPER_OFFSET..HELPER_OFFSET + 40];
     packet.fill(0);
-    packet[..12].copy_from_slice(&[b'R', b'3', b'G', b'H', 1, 0, 1, 0, 40, 0, 0, 0]);
+    packet[..12].copy_from_slice(&[
+        b'R',
+        b'3',
+        b'G',
+        b'H',
+        if fields[0] == 9 { 2 } else { 1 },
+        0,
+        1,
+        0,
+        40,
+        0,
+        0,
+        0,
+    ]);
     for (index, value) in fields.into_iter().enumerate() {
         packet[16 + index * 4..20 + index * 4].copy_from_slice(&value.to_le_bytes());
     }
@@ -107,7 +121,7 @@ fn success_and_later_page_fault_stage_two_images_without_architectural_publicati
         let mut mask = [0; 32];
         let fields = if fault {
             mask[4..8].fill(0xff);
-            [1, 1, 0x6000, 1, 1, 1]
+            [9, 4, 0x6000, 1, 1, 1]
         } else {
             destination[4..8].copy_from_slice(&[0x55, 0x66, 0x77, 0x88]);
             [0, 0, 0, 0, 3, u32::MAX]
@@ -118,6 +132,7 @@ fn success_and_later_page_fault_stage_two_images_without_architectural_publicati
             Ok(StoreCompletion::Complete)
         );
         assert_eq!(engine.arena(), expected);
+        assert_eq!(engine.cr2(), fault.then_some(GuestAddress(0x6000)));
         assert_eq!(ram(&engine), before_ram);
         assert_eq!(engine.arena(), expected);
     }

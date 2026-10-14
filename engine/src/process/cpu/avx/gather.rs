@@ -4,16 +4,14 @@ use crate::{
         x86::{
             GATHER_ADDRESS_SIZE, GATHER_ADDRESS_TRANSFER, GATHER_DESTINATION_OFFSET,
             GATHER_MASK_OFFSET, GATHER_OUTPUT_SIZE, GATHER_OUTPUT_TRANSFER, GATHER_RESULT_SIZE,
-            GatherFaultKind, GatherFaultResult, GatherResult, decode_gather_address,
-            encode_gather_result,
+            decode_gather_address,
         },
     },
-    cpu::x86::{
-        SegmentRegister,
-        avx::{GatherFaultCause, GatherInstruction, VectorState},
-    },
+    cpu::x86::avx::{GatherInstruction, VectorState},
     process::{EngineInstance, HostError, StoreCompletion},
 };
+
+mod projection;
 
 impl EngineInstance {
     // the parent validates captured authority, the descriptor and canonical
@@ -35,43 +33,26 @@ impl EngineInstance {
         } else {
             Some(self.operand_segment_context()?)
         };
-        let memory = self.memory.as_ref().ok_or(HostError::Closed)?;
-        let outcome = match self.task_incoming {
-            Some(incoming) if incoming.validated_segments().is_none() => instruction.evaluate_task(
-                inputs,
-                request.segment,
-                request.base_offset,
-                &incoming,
-                memory,
-            ),
-            _ => instruction.evaluate(
+        let outcome = instruction
+            .evaluate_with_port(
                 inputs,
                 request.segment,
                 request.base_offset,
                 segments.as_ref(),
-                memory,
-            ),
-        }
-        .map_err(|_| HostError::Infrastructure)?;
-        let result = GatherResult {
-            completed_lanes: outcome.completed_lanes,
-            fault: outcome.fault.map(|fault| GatherFaultResult {
-                lane: fault.lane,
-                kind: match fault.cause {
-                    GatherFaultCause::Segment {
-                        segment: SegmentRegister::Ss,
-                        ..
-                    } => GatherFaultKind::StackSegment,
-                    GatherFaultCause::Segment { .. } => GatherFaultKind::GeneralProtection,
-                    GatherFaultCause::Memory(fault) => GatherFaultKind::Memory(fault),
-                },
-            }),
-        };
+                &mut self.cpu_memory_port32(),
+            )
+            .map_err(|_| HostError::Infrastructure)?;
+        let packet = projection::packet(
+            instruction,
+            inputs,
+            request.segment,
+            request.base_offset,
+            segments.as_ref(),
+            &outcome,
+        )?;
         let mut output = [0; GATHER_OUTPUT_SIZE];
         output[GATHER_DESTINATION_OFFSET..GATHER_MASK_OFFSET].copy_from_slice(&outcome.destination);
         output[GATHER_MASK_OFFSET..].copy_from_slice(&outcome.mask);
-        let mut packet = [0; GATHER_RESULT_SIZE];
-        encode_gather_result(result, &mut packet).map_err(|_| HostError::Infrastructure)?;
 
         // finish every fallible step before publishing either scratch record.
         let arena = self.arena.as_mut().get_mut();

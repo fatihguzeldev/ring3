@@ -11,6 +11,8 @@ use super::locals::*;
 mod byte_exchange;
 mod byte_store;
 mod cpu_scalar;
+mod intent;
+pub(super) use intent::read_modify_needs;
 mod exchange;
 mod narrow;
 mod word_exchange;
@@ -39,7 +41,8 @@ impl StoreImport {
 
 #[derive(Clone, Copy, Default)]
 pub(super) struct Imports {
-    pub(super) raw_task_context: Option<super::tasks::RawTaskContextImports>,
+    pub(super) paging_configured: bool,
+    pub(super) fetch_fault: Option<StoreImport>,
     pub(super) detection: Option<super::detection::DetectionLocals>,
     pub(super) finish_detection: Option<u32>,
     pub(super) segment_check: Option<u32>,
@@ -61,17 +64,14 @@ pub(super) struct Imports {
     pub(super) far_jump: Option<StoreImport>,
     pub(super) far_call: Option<StoreImport>,
     pub(super) far_return: Option<StoreImport>,
-    pub(super) task_return: Option<StoreImport>,
-    pub(super) task_return_flags: Option<u32>,
-    pub(super) task_transition_configured: bool,
-    pub(super) task_return_transport: Option<u32>,
-    pub(super) software_interrupt: Option<StoreImport>,
-    pub(super) software_interrupt_flags: Option<u32>,
     pub(super) interrupt_return_locals: Option<super::far::InterruptReturnLocals>,
     pub(super) read: Option<u32>,
     pub(super) store: Option<StoreImport>,
     pub(super) read8: Option<u32>,
     pub(super) read16: Option<u32>,
+    pub(super) read_modify: Option<u32>,
+    pub(super) read_modify8: Option<u32>,
+    pub(super) read_modify16: Option<u32>,
     pub(super) store8: Option<StoreImport>,
     pub(super) store16: Option<StoreImport>,
     pub(super) exchange: Option<StoreImport>,
@@ -107,7 +107,6 @@ pub(super) struct ImportNeeds {
     pub(super) far_jump: bool,
     pub(super) far_call: bool,
     pub(super) far_return: bool,
-    pub(super) software_interrupt: bool,
     pub(super) read: bool,
     pub(super) store: bool,
     pub(super) read8: bool,
@@ -148,7 +147,6 @@ impl Imports {
         let mut far_jump = false;
         let mut far_call = false;
         let mut far_return = false;
-        let mut software_interrupt = false;
         let mut read = false;
         let mut store = false;
         let mut read8 = false;
@@ -183,7 +181,6 @@ impl Imports {
                         avx_execute = true;
                     }
                 }
-                Operation::SoftwareInterrupt { .. } => software_interrupt = true,
                 Operation::FarJump { target, .. } => {
                     far_jump = true;
                     cpu_read |= matches!(target, crate::cpu::x86::ir::FarPointer::Memory(_));
@@ -520,7 +517,6 @@ impl Imports {
             far_jump,
             far_call,
             far_return,
-            software_interrupt,
             read,
             store,
             read8,
@@ -783,9 +779,14 @@ pub(super) fn load(
     code.local_get(ADDRESS)
         .call(imports.read.expect("prepared memory load has an import"))
         .local_set(HELPER_STATUS);
-    super::code_fetch::check_context(code, exit_depth, imports.raw_task_context.is_some());
-    cpu_scalar::validate(code, 4, crate::abi::memory_helper::CpuScalarOperation::Read);
-    exit_if_failed(code, exit_depth, imports.raw_task_context.is_some());
+    super::code_fetch::check_context(code, exit_depth);
+    cpu_scalar::validate(
+        code,
+        4,
+        crate::abi::memory_helper::CpuScalarOperation::Read,
+        imports.paging_configured,
+    );
+    exit_if_failed(code, exit_depth);
     helper_field(code, 20);
     code.local_set(register(destination));
 }
@@ -817,8 +818,9 @@ pub(super) fn store(
         code,
         4,
         crate::abi::memory_helper::CpuScalarOperation::Store,
+        imports.paging_configured,
     );
-    exit_if_failed(code, exit_depth, imports.raw_task_context.is_some());
+    exit_if_failed(code, exit_depth);
 }
 
 pub(super) fn push_memory(
@@ -864,7 +866,6 @@ fn checked_pop_destination(
             code,
             register(crate::cpu::x86::Register32::Esp),
             width as i32,
-            imports.raw_task_context.is_some(),
         );
         code.i32_add();
         if let Some(index) = destination.index {
@@ -920,7 +921,7 @@ fn pop_memory_width(
     } else {
         store_result_at_address(code, imports, exit_depth);
     }
-    super::stack::pointer::advance(code, width as i32, imports.raw_task_context.is_some());
+    super::stack::pointer::advance(code, width as i32);
 }
 
 pub(super) fn push_word_result(code: &mut InstructionSink<'_>, imports: Imports, exit_depth: u32) {
@@ -936,7 +937,7 @@ pub(super) fn pop_word_register(
     let esp = crate::cpu::x86::Register32::Esp;
     super::stack::pointer::load(code, esp, 0, 2, imports, exit_depth);
     if destination == esp {
-        super::stack::pointer::assigned(code, register(esp), 2, imports.raw_task_context.is_some());
+        super::stack::pointer::assigned(code, register(esp), 2);
     } else {
         code.local_get(register(destination));
     }
@@ -945,7 +946,7 @@ pub(super) fn pop_word_register(
         .i32_or()
         .local_set(register(destination));
     if destination != esp {
-        super::stack::pointer::advance(code, 2, imports.raw_task_context.is_some());
+        super::stack::pointer::advance(code, 2);
     }
 }
 
@@ -975,7 +976,7 @@ pub(super) fn load_modify_result(
     exit_depth: u32,
 ) {
     checked_address(code, source, 4, SegmentAccess::Write, imports, exit_depth);
-    load_result_at_address(code, imports, exit_depth);
+    load_modify_at_address(code, imports, exit_depth);
 }
 
 pub(super) fn load_narrow_for_modify(
@@ -997,7 +998,24 @@ pub(super) fn load_narrow_for_modify(
         imports,
         exit_depth,
     );
-    load_narrow_at_address(code, width, imports, exit_depth);
+    load_narrow_modify_at_address(code, width, imports, exit_depth);
+}
+
+pub(super) fn load_narrow_modify_at_address(
+    code: &mut InstructionSink<'_>,
+    width: SmallWidth,
+    imports: Imports,
+    exit_depth: u32,
+) {
+    narrow::load_at_address_with_intent(code, width, imports, exit_depth, true);
+}
+
+pub(super) fn load_modify_at_address(
+    code: &mut InstructionSink<'_>,
+    imports: Imports,
+    exit_depth: u32,
+) {
+    load_at_address_with_intent(code, imports, exit_depth, true);
 }
 
 pub(super) fn load_result_at_address(
@@ -1005,16 +1023,38 @@ pub(super) fn load_result_at_address(
     imports: Imports,
     exit_depth: u32,
 ) {
+    load_at_address_with_intent(code, imports, exit_depth, false);
+}
+
+fn load_at_address_with_intent(
+    code: &mut InstructionSink<'_>,
+    imports: Imports,
+    exit_depth: u32,
+    modify: bool,
+) {
+    let paging_modify = modify && imports.paging_configured;
     code.local_get(ADDRESS)
         .call(
-            imports
-                .read
-                .expect("prepared memory operand has a read import"),
+            (if paging_modify {
+                imports.read_modify
+            } else {
+                imports.read
+            })
+            .expect("prepared memory operand has a read import"),
         )
         .local_set(HELPER_STATUS);
-    super::code_fetch::check_context(code, exit_depth, imports.raw_task_context.is_some());
-    cpu_scalar::validate(code, 4, crate::abi::memory_helper::CpuScalarOperation::Read);
-    exit_if_failed(code, exit_depth, imports.raw_task_context.is_some());
+    super::code_fetch::check_context(code, exit_depth);
+    cpu_scalar::validate(
+        code,
+        4,
+        if paging_modify {
+            crate::abi::memory_helper::CpuScalarOperation::Modify
+        } else {
+            crate::abi::memory_helper::CpuScalarOperation::Read
+        },
+        imports.paging_configured,
+    );
+    exit_if_failed(code, exit_depth);
     helper_field(code, 20);
     code.local_set(RESULT);
 }
@@ -1053,8 +1093,9 @@ pub(super) fn store_result_at_address(
         code,
         4,
         crate::abi::memory_helper::CpuScalarOperation::Store,
+        imports.paging_configured,
     );
-    exit_if_failed(code, exit_depth, imports.raw_task_context.is_some());
+    exit_if_failed(code, exit_depth);
 }
 
 pub(super) fn pop_register(
@@ -1066,7 +1107,7 @@ pub(super) fn pop_register(
     super::stack::pointer::load_result(code, 4, imports, exit_depth);
     code.local_get(RESULT).local_set(register(destination));
     if destination != crate::cpu::x86::Register32::Esp {
-        super::stack::pointer::advance(code, 4, imports.raw_task_context.is_some());
+        super::stack::pointer::advance(code, 4);
     }
 }
 
@@ -1081,11 +1122,7 @@ pub(super) fn pop_return(
         super::code_fetch::check_value(code, RESULT, limit, exit_depth);
     }
     code.local_get(RESULT).local_set(EIP);
-    super::stack::pointer::advance(
-        code,
-        4 + i32::from(stack_adjust),
-        imports.raw_task_context.is_some(),
-    );
+    super::stack::pointer::advance(code, 4 + i32::from(stack_adjust));
 }
 
 pub(super) fn exit_if_invalidated(
@@ -1104,12 +1141,8 @@ pub(super) fn exit_if_invalidated(
         .end();
 }
 
-pub(super) fn effective_address(
-    code: &mut InstructionSink<'_>,
-    address: EffectiveAddress,
-    raw_task_context: bool,
-) {
-    address_value(code, address, raw_task_context);
+pub(super) fn effective_address(code: &mut InstructionSink<'_>, address: EffectiveAddress) {
+    address_value(code, address);
     code.local_set(ADDRESS);
 }
 
@@ -1144,17 +1177,13 @@ pub(super) fn checked_offset(
     code.local_set(ADDRESS);
     super::segments::check_span(code, segment, width, access, imports, exit_depth);
     code.local_get(ADDRESS);
-    super::segments::base(code, segment, imports.raw_task_context.is_some());
+    super::segments::base(code, segment);
     code.i32_add().local_set(ADDRESS);
 }
 
-pub(super) fn address_value(
-    code: &mut InstructionSink<'_>,
-    address: EffectiveAddress,
-    raw_task_context: bool,
-) {
+pub(super) fn address_value(code: &mut InstructionSink<'_>, address: EffectiveAddress) {
     offset_value(code, address);
-    super::segments::base(code, address.resolved_segment(), raw_task_context);
+    super::segments::base(code, address.resolved_segment());
     code.i32_add();
 }
 
@@ -1187,12 +1216,8 @@ pub(super) fn protocol_if_bad(code: &mut InstructionSink<'_>) {
     code.end();
 }
 
-pub(super) fn exit_if_failed(
-    code: &mut InstructionSink<'_>,
-    exit_depth: u32,
-    raw_task_context: bool,
-) {
-    super::code_fetch::check_rejected(code, exit_depth, raw_task_context);
+pub(super) fn exit_if_failed(code: &mut InstructionSink<'_>, exit_depth: u32) {
+    super::code_fetch::check_rejected(code, exit_depth);
     code.local_get(REASON)
         .if_(BlockType::Empty)
         .br(exit_depth + 1)

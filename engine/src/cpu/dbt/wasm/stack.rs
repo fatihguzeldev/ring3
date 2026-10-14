@@ -35,12 +35,7 @@ pub(super) fn instruction(
         Operation::EnterZeroWord => (StackFrameKind::Enter16, 0, 0),
         _ => unreachable!("stack emitter requires stack operation"),
     };
-    super::segments::access(
-        code,
-        crate::cpu::x86::SegmentRegister::Ss,
-        exit_depth,
-        imports.raw_task_context.is_some(),
-    );
+    super::segments::access(code, crate::cpu::x86::SegmentRegister::Ss, exit_depth);
     for register in REGISTERS {
         code.local_get(STATE_PTR)
             .local_get(super::locals::register(register))
@@ -54,7 +49,7 @@ pub(super) fn instruction(
         .call(index)
         .local_set(HELPER_STATUS);
     if matches!(kind, StackFrameKind::PopAll32 | StackFrameKind::PopAll16) {
-        super::code_fetch::check_context(code, exit_depth, imports.raw_task_context.is_some());
+        super::code_fetch::check_context(code, exit_depth);
     }
     validate(
         code,
@@ -62,16 +57,12 @@ pub(super) fn instruction(
         allocation,
         nesting,
         exit_depth,
-        imports.raw_task_context.is_some(),
+        super::cpu_result::ResultContext::from(imports),
     );
     let width = kind.width();
     match kind {
         StackFrameKind::PushAll32 | StackFrameKind::PushAll16 => {
-            pointer::advance(
-                code,
-                -((8 * width) as i32),
-                imports.raw_task_context.is_some(),
-            );
+            pointer::advance(code, -((8 * width) as i32));
         }
         StackFrameKind::PopAll32 | StackFrameKind::PopAll16 => {
             for destination in REGISTERS.into_iter().filter(|r| *r != Register32::Esp) {
@@ -87,7 +78,7 @@ pub(super) fn instruction(
                 }
                 code.local_set(register(destination));
             }
-            pointer::advance(code, (8 * width) as i32, imports.raw_task_context.is_some());
+            pointer::advance(code, (8 * width) as i32);
         }
         StackFrameKind::Enter32 | StackFrameKind::Enter16 => {
             if width == 2 {
@@ -95,12 +86,7 @@ pub(super) fn instruction(
                     .i32_const(!0xffff)
                     .i32_and();
             }
-            pointer::assigned(
-                code,
-                register(Register32::Esp),
-                -(width as i32),
-                imports.raw_task_context.is_some(),
-            );
+            pointer::assigned(code, register(Register32::Esp), -(width as i32));
             if width == 2 {
                 code.i32_const(0xffff).i32_and().i32_or();
             }
@@ -110,11 +96,7 @@ pub(super) fn instruction(
             } else {
                 u32::from(nesting) + 1
             };
-            pointer::advance(
-                code,
-                -((count * width + u32::from(allocation)) as i32),
-                imports.raw_task_context.is_some(),
-            );
+            pointer::advance(code, -((count * width + u32::from(allocation)) as i32));
         }
     }
     code.i32_const(instruction.next_pc().0 as i32)
@@ -146,8 +128,48 @@ fn validate(
     allocation: u16,
     nesting: u8,
     exit_depth: u32,
+    context: super::cpu_result::ResultContext,
+) {
+    let writes = !matches!(kind, StackFrameKind::PopAll32 | StackFrameKind::PopAll16);
+    if context.paging_configured {
+        super::cpu_result::paging::is_packet(code);
+        code.if_(BlockType::Empty);
+        super::cpu_result::paging::transport(code, writes);
+        memory::exit_if_failed(code, exit_depth + 1);
+        memory::reset_checks(code);
+        membership(code, kind, allocation, nesting, context);
+        code.local_get(RESUME).i32_eqz();
+        memory::add_check(code);
+        memory::protocol_if_bad(code);
+        memory::exit_if_failed(code, exit_depth + 1);
+        super::cpu_result::paging::validate(
+            code,
+            super::cpu_result::paging::Validation {
+                length: kind.width(),
+                access_mask: if matches!(kind, StackFrameKind::PopAll32 | StackFrameKind::PopAll16)
+                {
+                    1
+                } else if matches!(kind, StackFrameKind::PushAll32 | StackFrameKind::PushAll16) {
+                    2
+                } else {
+                    3
+                },
+                allow_smc: writes,
+                geometry: super::cpu_result::paging::Geometry::OwnerChecked,
+            },
+        );
+        memory::exit_if_failed(code, exit_depth + 1);
+        code.end();
+    }
+    validate_legacy(code, kind, allocation, nesting, exit_depth);
+}
 
-    raw_task_context: bool,
+fn validate_legacy(
+    code: &mut InstructionSink<'_>,
+    kind: StackFrameKind,
+    allocation: u16,
+    nesting: u8,
+    exit_depth: u32,
 ) {
     use memory::{
         add_check, expect_field, helper_field, infrastructure, protocol_if_bad, reset_checks,
@@ -219,7 +241,13 @@ fn validate(
     helper_field(code, 24);
     code.i32_const(1).i32_sub().i32_const(1).i32_gt_u();
     add_check(code);
-    membership(code, kind, allocation, nesting, raw_task_context);
+    membership(
+        code,
+        kind,
+        allocation,
+        nesting,
+        super::cpu_result::ResultContext::legacy(),
+    );
     code.local_get(RESUME).i32_eqz();
     add_check(code);
     code.local_get(LHS).if_(BlockType::Empty);
@@ -260,7 +288,7 @@ fn validate(
     code.else_();
     infrastructure(code, 2);
     code.end().end().end().end().end().end().end();
-    memory::exit_if_failed(code, exit_depth, raw_task_context);
+    memory::exit_if_failed(code, exit_depth);
 }
 
 fn membership(
@@ -268,7 +296,7 @@ fn membership(
     kind: StackFrameKind,
     allocation: u16,
     nesting: u8,
-    raw_task_context: bool,
+    context: super::cpu_result::ResultContext,
 ) {
     let width = kind.width();
     code.i32_const(0).local_set(RESUME);
@@ -281,20 +309,13 @@ fn membership(
                     0u32.wrapping_sub(index * width),
                     width,
                     2,
-                    raw_task_context,
+                    context,
                 );
             }
         }
         StackFrameKind::PopAll32 | StackFrameKind::PopAll16 => {
             for index in [0, 1, 2, 4, 5, 6, 7] {
-                candidate(
-                    code,
-                    Register32::Esp,
-                    index * width,
-                    width,
-                    1,
-                    raw_task_context,
-                );
+                candidate(code, Register32::Esp, index * width, width, 1, context);
             }
         }
         StackFrameKind::Enter32 | StackFrameKind::Enter16 => {
@@ -310,7 +331,7 @@ fn membership(
                     0u32.wrapping_sub(index * width),
                     width,
                     2,
-                    raw_task_context,
+                    context,
                 );
             }
             for index in 1..u32::from(nesting) {
@@ -320,7 +341,7 @@ fn membership(
                     0u32.wrapping_sub(index * width),
                     width,
                     1,
-                    raw_task_context,
+                    context,
                 );
             }
             candidate(
@@ -329,7 +350,7 @@ fn membership(
                 0u32.wrapping_sub(count * width + u32::from(allocation)),
                 width,
                 2,
-                raw_task_context,
+                context,
             );
         }
     }
@@ -342,16 +363,11 @@ fn candidate(
     width: u32,
     access: u32,
 
-    raw_task_context: bool,
+    context: super::cpu_result::ResultContext,
 ) {
     use memory::helper_field;
-    pointer::offset(
-        code,
-        super::locals::register(register),
-        delta as i32,
-        raw_task_context,
-    );
-    super::segments::base(code, crate::cpu::x86::SegmentRegister::Ss, raw_task_context);
+    pointer::offset(code, super::locals::register(register), delta as i32);
+    super::segments::base(code, crate::cpu::x86::SegmentRegister::Ss);
     code.i32_add().local_set(ADDRESS);
     code.local_get(RESUME);
     helper_field(code, 28);
@@ -359,7 +375,11 @@ fn candidate(
         .i32_sub()
         .i32_const(width as i32)
         .i32_lt_u();
-    helper_field(code, 32);
+    if context.paging_configured {
+        super::cpu_result::paging::intent(code);
+    } else {
+        helper_field(code, 32);
+    }
     code.i32_const(access as i32)
         .i32_eq()
         .i32_and()

@@ -1,3 +1,4 @@
+use super::support_fetch as fetch;
 use ring3_engine::{
     abi::{
         arena::{EXIT_OFFSET, TRANSFER_OFFSET},
@@ -12,7 +13,7 @@ use ring3_engine::{
             ir::Operation,
         },
     },
-    memory::{Access, FaultReason, GuestAddress},
+    memory::{FaultReason, GuestAddress},
     process::EngineInstance,
 };
 
@@ -304,10 +305,15 @@ fn unsupported_neighbors_invalid_lock_prefix_refusals_and_full_fetch_stay_separa
         let mut engine = stopped(&bytes, pc);
         let before = engine.arena().to_vec();
         let before_ram = ram(&engine);
-        assert!(
-            matches!(decode_one(engine.memory().unwrap(),GuestAddress(pc)),Err(DecodeError::MemoryFault{fault,..}) if fault.address==GuestAddress(0x4000)&&fault.access==Access::Execute&&fault.reason==FaultReason::Unmapped)
+        fetch::assert_error(
+            decode_one(engine.memory().unwrap(), GuestAddress(pc)).unwrap_err(),
+            pc,
+            0x4000,
+            FaultReason::Unmapped,
+            bytes.len() as u32 + 1,
         );
-        assert!(engine.compile_stopped_entry(KEY, 1).is_err());
+        assert_eq!(engine.compile_stopped_entry(KEY, 1), Ok(2));
+        assert_eq!(engine.generation(), 2);
         assert_eq!(engine.arena(), before);
         assert_eq!(ram(&engine), before_ram);
     }

@@ -5,8 +5,11 @@ use crate::{
         memory_helper::HELPER_SIZE,
         x86::{X87_SIZE, decode_x87, encode_x87},
     },
-    cpu::x86::{SegmentAccess, SegmentRegister, X87Error, X87Operation},
-    memory::{Access, GuestAddress},
+    cpu::x86::{
+        CpuMemoryPort32, CpuReadPort32, PagingAccess32, SegmentAccess, SegmentRegister, X87Error,
+        X87Operation,
+    },
+    memory::GuestAddress,
 };
 
 use crate::process::instance::{EngineInstance, HostError, StoreCompletion};
@@ -106,30 +109,21 @@ impl EngineInstance {
             }
         }
         let mut input = [0; 108];
-        let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
         if operation.read_size() != 0
-            && let Err(error) =
-                memory.cpu_read(GuestAddress(address), &mut input[..operation.read_size()])
+            && let Err(error) = self
+                .cpu_memory_port32()
+                .read(GuestAddress(address), &mut input[..operation.read_size()])
         {
-            return self.x87_packet(
-                length,
-                0,
-                Err(CpuMemoryError::Memory(error)),
-                false,
-                resident,
-            );
+            return self.x87_packet(length, 0, Err(CpuMemoryError::from(error)), false, resident);
         }
         if operation.write_size() != 0
-            && let Err(error) =
-                memory.cpu_check_span(GuestAddress(address), operation.write_size(), Access::Write)
+            && let Err(error) = self.cpu_memory_port32().check(
+                GuestAddress(address),
+                operation.write_size(),
+                PagingAccess32::Write,
+            )
         {
-            return self.x87_packet(
-                length,
-                0,
-                Err(CpuMemoryError::Memory(error)),
-                false,
-                resident,
-            );
+            return self.x87_packet(length, 0, Err(CpuMemoryError::from(error)), false, resident);
         }
         if operation.is_computation() {
             state.instruction_pointer = pc;
@@ -151,20 +145,15 @@ impl EngineInstance {
             })?;
         let mut record = [0; X87_SIZE];
         encode_x87(&outcome.state, &mut record).map_err(|_| HostError::Infrastructure)?;
-        let version = memory.code_validation_version();
+        let version = self.memory.as_ref().unwrap().code_validation_version();
         if outcome.memory_len != 0
-            && let Err(error) =
-                memory.cpu_write(GuestAddress(address), &outcome.memory[..outcome.memory_len])
+            && let Err(error) = self
+                .cpu_memory_port32()
+                .write(GuestAddress(address), &outcome.memory[..outcome.memory_len])
         {
-            return self.x87_packet(
-                length,
-                0,
-                Err(CpuMemoryError::Memory(error)),
-                false,
-                resident,
-            );
+            return self.x87_packet(length, 0, Err(CpuMemoryError::from(error)), false, resident);
         }
-        let changed = version != memory.code_validation_version();
+        let changed = version != self.memory.as_ref().unwrap().code_validation_version();
         self.arena[X87_OFFSET..X87_OFFSET + X87_SIZE].copy_from_slice(&record);
         self.x87_packet(
             length,
@@ -349,3 +338,7 @@ mod tests {
         assert_eq!(engine.arena(), expected_packet(&before, 7, 0, 94));
     }
 }
+
+#[cfg(test)]
+#[path = "x87/paging.rs"]
+mod paging_tests;

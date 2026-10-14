@@ -105,6 +105,16 @@ export async function harness(enginePath, output, root) {
     "engine/tests/support/wasm/exports.mjs"
 ];
   paths.push(...["engine/src/abi/cpu_helper.rs", "engine/src/abi/call_frame.rs", "engine/src/abi/callback.rs", "engine/src/abi/resident_callback.rs", "engine/src/abi/x86/x87.rs", "engine/src/abi/x86/simd.rs", "engine/src/abi/x86/ymm.rs", "engine/src/process/calls/call.rs", "engine/src/process/execution/authority.rs", "engine/src/process/wasm/execution.rs", "engine/src/cpu/dbt/wasm/abi.rs", "engine/src/cpu/dbt/wasm/emitter.rs", "engine/src/cpu/dbt/wasm/cpu_result.rs", "engine/src/cpu/dbt/wasm/segments/context.rs", "engine/src/cpu/dbt/wasm/segments/access.rs", "engine/src/cpu/x86/decode/operands.rs", "engine/src/cpu/x86/decode/execution_faults.rs", "engine/src/cpu/x86/segments/cache.rs", "engine/src/windows/callback_frame.rs"].filter(path => !paths.includes(path)));
+  paths.push(...[
+    'engine/src/abi/cpu_helper/paging.rs', 'engine/src/abi/x86/exit/paging.rs',
+    'engine/src/cpu/dbt/wasm/detection.rs', 'engine/src/cpu/dbt/wasm/cpu_result/paging.rs',
+    'engine/src/cpu/dbt/wasm/code_fetch/paging.rs', 'engine/src/cpu/x86/decode/fetch.rs',
+    'engine/src/cpu/x86/interrupts/cause/paging.rs', 'engine/src/cpu/x86/paging/inspect.rs',
+    'engine/src/process/cpu/interrupts/detection.rs', 'engine/src/process/cpu/interrupts/detection/site.rs',
+    'engine/src/process/cpu/interrupts/detection/restart.rs', 'engine/src/process/cpu/interrupts/detection/paging.rs',
+    'engine/src/process/memory/paging.rs', 'engine/src/memory/space/paging.rs',
+    'engine/src/process/wasm/detection.rs', 'engine/src/process/wasm/paging/transport.rs',
+  ].filter(path => !paths.includes(path)));
   paths.push(...declarations.sourcePaths.filter(path => !paths.includes(path)));
   const missingSources = paths.filter(path => !existsSync(join(root,path)));
   const pins = () => ({...Object.fromEntries(paths.filter(path => existsSync(join(root,path))).map(path => [path, hash(readFileSync(join(root,path)))])), executed_support:hash(readFileSync(new URL(import.meta.url)))});
@@ -164,7 +174,7 @@ export async function harness(enginePath, output, root) {
       memory.push(record);
     }
     const row = {context: c.key, profile: `${c.resident ? 'resident' : 'replacement'}-${c.entries ? 'entries' : 'extents'}`,
-      label, authority_mode: c.bankConfigured ? 'supplied-explicit' : 'default-unknown', passed: errors.length === 0, errors, arena: files, memory, ...extra}; rows.push(row); return row;
+      label, authority_mode: c.bankConfigured ? 'supplied-explicit' : 'application-defaults', passed: errors.length === 0, errors, arena: files, memory, ...extra}; rows.push(row); return row;
   }
   function checkRAM(actual, want, errors) {for (const [page, bytes] of want) if (!actual.get(page).equals(bytes)) errors.push(`RAM ${page.toString(16)}`);}
   function capture(c, label, expectedHelpers = []) {
@@ -172,11 +182,13 @@ export async function harness(enginePath, output, root) {
     const pointer = c.resident ? a.readUInt32LE(156) : c.api.module_ptr() >>> 0;
     const length = c.resident ? a.readUInt32LE(160) : c.api.module_len() >>> 0;
     const bytes = Buffer.from(new Uint8Array(c.memory.buffer, pointer, length)), module = new WebAssembly.Module(bytes);
-    const imports = WebAssembly.Module.imports(module), guard = c.resident ? 'guard_resident' : 'guard';
+    const imports = WebAssembly.Module.imports(module), guard = c.resident ? 'guard_detect_resident' : 'guard_detect';
+    expectedHelpers = [...new Set([...expectedHelpers, 'finish_exception_detection'])];
     assert.deepEqual(imports.map(imp => `${imp.module}:${imp.name}:${imp.kind}`).sort(),
       ['env:memory:memory', `ring3:${guard}:function`, ...expectedHelpers.map(name => `ring3:${name}:function`)].sort(), 'only the real declared helpers and guard');
     const ring3 = Object.fromEntries(imports.filter(imp => imp.kind === 'function').map(imp => [imp.name, (...args) => {
-      const status = c.api[imp.name](...args); c.calls.push({name: imp.name, args: args.map(v => v >>> 0), status}); return status;
+      const status = c.api[imp.name](...args), logged = v => typeof v === 'bigint' ? v.toString(10) : v >>> 0;
+      c.calls.push({name: imp.name, args: args.map(logged), status: logged(status)}); return status;
     }]));
     const material = {run: new WebAssembly.Instance(module, {env: {memory: c.memory}, ring3}).exports.run,
       binding, pointer, length, generation: c.api.generation() >>> 0, helpers: expectedHelpers};
@@ -212,13 +224,34 @@ export async function harness(enginePath, output, root) {
     checkRAM(beforeRAM, c.expectedRAM, errors);
     if (actualStatus !== status) errors.push(`run transport ${actualStatus}, expected ${status}`);
     if (!after.equals(want)) errors.push('literal complete arena');
-    const guard = {name: c.resident ? 'guard_resident' : 'guard',
-      args: [...(c.resident ? material.binding : [c.key, KEY_HIGH, material.generation]), c.base, c.base + 56, c.base + 96],
-      status: status === 4 ? 4 : 0};
-    if (JSON.stringify(calls) !== JSON.stringify([guard, ...helpers])) errors.push('exact real guard/helper names/arguments/status');
+    const guard = {name: c.resident ? 'guard_detect_resident' : 'guard_detect',
+      args: [...(c.resident ? material.binding : [c.key, KEY_HIGH, material.generation]), c.base, c.base + 56, c.base + 96]};
+    try {
+      const guards = calls.filter(call => call.name.startsWith('guard'));
+      assert.equal(guards.length, 1, 'one real bound-entry guard');
+      assert.equal(guards[0].name, guard.name);
+      assert.deepEqual(guards[0].args, guard.args);
+      if (status === 4) assert.equal(BigInt(guards[0].status), -4n, 'stale material rejected before entry');
+      else assert.ok(BigInt(guards[0].status) > 0n, 'positive detection entry epoch');
+      const detector = calls.filter(call => call.name === 'finish_exception_detection');
+      const data = calls.filter(call => !call.name.startsWith('guard') && call.name !== 'finish_exception_detection');
+      assert.deepEqual(data, helpers, 'exact data-helper arguments, order and status');
+      const reason = want.readUInt32LE(72), event = status === 0 && (reason === 5 || reason >= 10 && reason <= 24);
+      const needCodeCleanup = status === 0 && reason === 3;
+      assert.equal(detector.length, Number(event || needCodeCleanup), 'exact event seal or ordinary code-miss cleanup count');
+      if (event || needCodeCleanup) {
+        assert.equal(BigInt(detector[0].args[0]), BigInt(guards[0].status), 'same entry epoch');
+        assert.equal(detector[0].status, 0, 'trusted completion accepted');
+        assert.equal(calls.at(-1), detector[0], 'completion follows all data helpers before host reentry or recompilation');
+        assert.deepEqual(detector[0].args.slice(1),
+          needCodeCleanup ? [3,0,0,0,0,0,0,0,0,0,0] :
+            [72,80,84,88,92].map(at => want.readUInt32LE(at)).concat([reason === 16 ? 2 : 0,0,0,0,0,0]),
+          'exact code-miss cleanup fields or fault fields and completed-instruction TF origin');
+      }
+    } catch (error) {errors.push(error.message);}
     const afterRAM = ram(c); checkRAM(afterRAM, desiredRAM, errors); c.expectedRAM = cloneRAM(desiredRAM);
     return receipt(c, label, before, after, want, beforeRAM, afterRAM, desiredRAM, errors,
-      {kind, status: actualStatus, expected_status: status, classification: actualStatus === 2 ? 'runtime-record-admission' : 'executed-module', expected_calls: [guard, ...helpers],
+      {kind, status: actualStatus, expected_status: status, classification: actualStatus === 2 ? 'runtime-record-admission' : 'executed-module', expected_guard: guard, expected_data_calls: helpers,
         expected_exit: {reason: want.readUInt32LE(72), retired: want.readUInt32LE(76), eip: want.readUInt32LE(48), flags: want.readUInt32LE(52)},
         actual_exit: {reason: after.readUInt32LE(72), retired: after.readUInt32LE(76), eip: after.readUInt32LE(48), flags: after.readUInt32LE(52)}, calls});
   }

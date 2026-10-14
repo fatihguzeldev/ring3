@@ -46,11 +46,6 @@ pub(super) fn preflight(sink: &mut InstructionSink<'_>) {
     validate_state(sink, |sink| fail_if(sink, 2));
 }
 
-pub(super) fn validate_loaded_state(sink: &mut InstructionSink<'_>) {
-    super::memory::reset_checks(sink);
-    validate_state(sink, super::memory::add_check);
-}
-
 fn validate_state(
     sink: &mut InstructionSink<'_>,
     mut reject: impl FnMut(&mut InstructionSink<'_>),
@@ -179,7 +174,6 @@ pub(super) fn work_preflight(sink: &mut InstructionSink<'_>) {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(super) fn flush(
     sink: &mut InstructionSink<'_>,
     memory: bool,
@@ -187,8 +181,7 @@ pub(super) fn flush(
     arithmetic: bool,
     cpu: bool,
     xstate: bool,
-    task_return: bool,
-    device_not_available: bool,
+    paging: bool,
 ) {
     flush_state(sink);
 
@@ -252,23 +245,38 @@ pub(super) fn flush(
             store_local(sink, EXIT_PTR, offset, local);
         }
     }
-    if task_return {
+    sink.local_get(REASON)
+        .i32_const(21)
+        .i32_eq()
+        .if_(BlockType::Empty)
+        .local_get(EXIT_PTR)
+        .i32_const(10 | (i32::from(X86_INTEGER_PROFILE) << 16))
+        .i32_store(memarg(4))
+        .end();
+    sink.local_get(REASON)
+        .i32_const(24)
+        .i32_eq()
+        .if_(BlockType::Empty)
+        .local_get(EXIT_PTR)
+        .i32_const(14 | (i32::from(X86_INTEGER_PROFILE) << 16))
+        .i32_store(memarg(4))
+        .end();
+    if paging {
         sink.local_get(REASON)
-            .i32_const(21)
+            .i32_const(23)
             .i32_eq()
             .if_(BlockType::Empty)
             .local_get(EXIT_PTR)
-            .i32_const(10 | (i32::from(X86_INTEGER_PROFILE) << 16))
-            .i32_store(memarg(4))
-            .end();
-    }
-    if device_not_available {
-        sink.local_get(REASON)
-            .i32_const(22)
+            .local_get(FAULT_ACCESS)
+            .i32_const(3)
             .i32_eq()
-            .if_(BlockType::Empty)
-            .local_get(EXIT_PTR)
-            .i32_const(11 | (i32::from(X86_INTEGER_PROFILE) << 16))
+            .if_(BlockType::Result(wasm_encoder::ValType::I32))
+            .i32_const(13)
+            .else_()
+            .i32_const(12)
+            .end()
+            .i32_const(i32::from(X86_INTEGER_PROFILE) << 16)
+            .i32_or()
             .i32_store(memarg(4))
             .end();
     }
@@ -276,9 +284,7 @@ pub(super) fn flush(
         return;
     }
     sink.local_get(REASON).i32_const(16).i32_ge_u();
-    if task_return || device_not_available {
-        sink.local_get(REASON).i32_const(20).i32_le_u().i32_and();
-    }
+    sink.local_get(REASON).i32_const(20).i32_le_u().i32_and();
     sink.if_(BlockType::Empty)
         .local_get(EXIT_PTR)
         .i32_const(7 | (i32::from(X86_INTEGER_PROFILE) << 16))
@@ -292,14 +298,14 @@ pub(super) fn flush(
 }
 
 pub(super) fn interrupt_return_precheck(sink: &mut InstructionSink<'_>, exit_depth: u32) {
-    // task return requires trusted tss linkage, outside the same-CPL return owner.
+    // the application environment has no task return chain; its backlink is null.
     sink.local_get(FLAGS)
         .i32_const(0x4000)
         .i32_and()
         .if_(BlockType::Empty)
-        .i32_const(4)
+        .i32_const(21)
         .local_set(REASON)
-        .i32_const(4)
+        .i32_const(0)
         .local_set(DETAIL);
     for local in [FAULT_ADDRESS, FAULT_ACCESS, FAULT_LENGTH] {
         sink.i32_const(0).local_set(local);

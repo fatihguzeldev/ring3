@@ -131,7 +131,11 @@ pub(super) fn memory_bit_test_word(
         }
     }
     code.i32_const(15).i32_and();
-    memory::load_narrow_at_address(code, SmallWidth::Word, imports, exit_depth);
+    if kind == BitTestKind::Test {
+        memory::load_narrow_at_address(code, SmallWidth::Word, imports, exit_depth);
+    } else {
+        memory::load_narrow_modify_at_address(code, SmallWidth::Word, imports, exit_depth);
+    }
     code.local_set(RESULT)
         .local_set(RHS)
         .local_get(FLAGS)
@@ -200,7 +204,7 @@ pub(super) fn memory_bit_mutation(
         }
     }
     code.i32_const(31).i32_and();
-    memory::load_result_at_address(code, imports, exit_depth);
+    memory::load_modify_at_address(code, imports, exit_depth);
     code.local_set(RHS)
         .local_get(FLAGS)
         .i32_const(!0x895)

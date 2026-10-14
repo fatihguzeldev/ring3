@@ -285,15 +285,13 @@ impl ResidentRegistry {
             .ok_or(RegistryError::ByteCapacity)?;
         for pc in region.executable_addresses() {
             if self.entries.iter().any(|unit| {
-                unit.region
-                    .matches_task_revision(region.task_execution_revision())
-                    && unit.region.matches_decode_key(region.decode_key())
+                unit.region.matches_decode_key(region.decode_key())
                     && unit.region.contains_executable(pc.0)
                     && unit.region.wasm_bytes(memory).is_ok()
                     && (unit.region.contains_material(pc.0)
                         || !region.contains_material(pc.0)
                         || unit.region.context_fault(pc.0).is_none_or(|fault| {
-                            cs.is_none_or(|cs| !cs.permits(fault.pc, fault.attempted_length))
+                            cs.is_none_or(|cs| fault.remains_denied(memory, cs))
                         }))
             }) {
                 return Err(RegistryError::InstructionOverlap { pc });
@@ -348,10 +346,9 @@ impl ResidentRegistry {
         self.check_memory(memory)?;
         let mut stale = false;
         for unit in &self.entries {
-            if unit.region.matches_task_revision(None)
-                && unit
-                    .region
-                    .matches_decode_key(crate::cpu::x86::decode::CodeDecodeKey::FLAT)
+            if unit
+                .region
+                .matches_decode_key(crate::cpu::x86::decode::CodeDecodeKey::FLAT)
                 && unit.region.contains_executable(pc.0)
             {
                 match unit.region.wasm_bytes(memory) {
@@ -367,30 +364,17 @@ impl ResidentRegistry {
         })
     }
 
-    #[cfg(test)]
     pub(crate) fn lookup_bound(
         &self,
         memory: &AddressSpace,
         pc: GuestAddress,
         cs: CodeFetchContext,
     ) -> Result<UnitId, RegistryError> {
-        self.lookup_task_bound(memory, pc, cs, None)
-    }
-
-    pub(crate) fn lookup_task_bound(
-        &self,
-        memory: &AddressSpace,
-        pc: GuestAddress,
-        cs: CodeFetchContext,
-        revision: Option<u64>,
-    ) -> Result<UnitId, RegistryError> {
         self.check_memory(memory)?;
         let mut stale = false;
         for material in [true, false] {
             for unit in &self.entries {
-                if !unit.region.matches_task_revision(revision)
-                    || !unit.region.matches_decode_key(cs.decode_key())
-                {
+                if !unit.region.matches_decode_key(cs.decode_key()) {
                     continue;
                 }
                 let matches = if material {
@@ -402,9 +386,10 @@ impl ResidentRegistry {
                     match unit.region.wasm_bytes(memory) {
                         Ok(_)
                             if material
-                                || unit.region.context_fault(pc.0).is_some_and(|fault| {
-                                    !cs.permits(fault.pc, fault.attempted_length)
-                                }) =>
+                                || unit
+                                    .region
+                                    .context_fault(pc.0)
+                                    .is_some_and(|fault| fault.remains_denied(memory, cs)) =>
                         {
                             return Ok(unit.id);
                         }
@@ -900,3 +885,7 @@ mod synthetic_key_tests {
         assert_eq!(registry.lookup_bound(&memory, pc, context(0x4000)), Ok(new));
     }
 }
+
+#[cfg(test)]
+#[path = "resident/tests/paging.rs"]
+mod paging_tests;

@@ -16,8 +16,32 @@ pub(super) fn validate_context(
     save: bool,
     segment: SegmentRegister,
     exit_depth: u32,
+    context: super::super::cpu_result::ResultContext,
+) {
+    if context.paging_configured {
+        super::super::cpu_result::paging::is_packet(code);
+        code.if_(BlockType::Empty);
+        super::super::cpu_result::paging::transport(code, save);
+        memory::exit_if_failed(code, exit_depth + 1);
+        memory::reset_checks(code);
+        code.local_get(ADDRESS).i32_const(63).i32_and();
+        memory::add_check(code);
+        fault(code, save, true);
+        memory::protocol_if_bad(code);
+        memory::exit_if_failed(code, exit_depth + 1);
+        code.else_();
+        validate_legacy_context(code, save, segment, exit_depth + 1);
+        code.end();
+    } else {
+        validate_legacy_context(code, save, segment, exit_depth);
+    }
+}
 
-    raw_task_context: bool,
+fn validate_legacy_context(
+    code: &mut InstructionSink<'_>,
+    save: bool,
+    segment: SegmentRegister,
+    exit_depth: u32,
 ) {
     memory::reset_checks(code);
     memory::expect_field(code, 20, 0);
@@ -44,10 +68,10 @@ pub(super) fn validate_context(
     code.end();
     memory::helper_field(code, 16);
     code.i32_const(1).i32_eq().if_(BlockType::Empty);
-    fault(code, save);
+    fault(code, save, false);
     code.end();
     memory::protocol_if_bad(code);
-    memory::exit_if_failed(code, exit_depth, raw_task_context);
+    memory::exit_if_failed(code, exit_depth);
 }
 
 fn selected(code: &mut InstructionSink<'_>, selection: u32) {
@@ -62,7 +86,7 @@ fn selected(code: &mut InstructionSink<'_>, selection: u32) {
     }
 }
 
-fn fault(code: &mut InstructionSink<'_>, save: bool) {
+fn fault(code: &mut InstructionSink<'_>, save: bool, typed: bool) {
     memory::helper_field(code, 28);
     code.local_get(ADDRESS).i32_sub().local_set(RHS);
     let header = MemorySpan {
@@ -71,10 +95,10 @@ fn fault(code: &mut InstructionSink<'_>, save: bool) {
         width: if save { 8 } else { 24 },
     };
     code.i32_const(0);
-    span_fault(code, header, 1);
+    span_fault(code, header, 1, typed);
     code.i32_or();
     for span in if save { SAVE_SPANS } else { RESTORE_SPANS } {
-        span_fault(code, span, if save { 2 } else { 1 });
+        span_fault(code, span, if save { 2 } else { 1 }, typed);
         code.i32_or();
     }
     code.i32_eqz();
@@ -82,9 +106,13 @@ fn fault(code: &mut InstructionSink<'_>, save: bool) {
 }
 
 /// the modulo difference identifies a byte in an actually selected xstate span.
-fn span_fault(code: &mut InstructionSink<'_>, span: MemorySpan, access: i32) {
+fn span_fault(code: &mut InstructionSink<'_>, span: MemorySpan, access: i32, typed: bool) {
     selected(code, span.selection);
-    memory::helper_field(code, 32);
+    if typed {
+        super::super::cpu_result::paging::intent(code);
+    } else {
+        memory::helper_field(code, 32);
+    }
     code.i32_const(access).i32_eq().i32_and();
     code.local_get(RHS)
         .i32_const(span.offset as i32)

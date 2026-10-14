@@ -5,7 +5,10 @@ use crate::{
         cpu_helper::{CpuMemoryError, encode_cpu_result},
         memory_helper::HELPER_SIZE,
     },
-    cpu::x86::atomic::{AtomicKind, evaluate},
+    cpu::x86::{
+        CpuMemoryPort32, CpuReadPort32,
+        atomic::{AtomicKind, evaluate},
+    },
     memory::GuestAddress,
 };
 
@@ -78,11 +81,11 @@ impl EngineInstance {
         if !compare && (kind.is_none() || !matches!(width, 1 | 2 | 4) || descriptor & !0xfff != 0) {
             return Err(HostError::InvalidRequest);
         }
-        let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
-        let version = memory.code_validation_version();
+        let version = self.memory()?.code_validation_version();
+        let mut memory = self.cpu_memory_port32();
         let mut old = [0u8; 8];
         let result = memory
-            .cpu_read(GuestAddress(address), &mut old[..width as usize])
+            .read_modify(GuestAddress(address), &mut old[..width as usize])
             .and_then(|()| {
                 let value = if compare {
                     let old = u64::from_le_bytes(old);
@@ -107,13 +110,13 @@ impl EngineInstance {
                     output[1] = result.flags;
                     u64::from(result.value)
                 };
-                memory.cpu_write(
+                memory.write(
                     GuestAddress(address),
                     &value.to_le_bytes()[..width as usize],
                 )
             })
-            .map_err(CpuMemoryError::Memory);
-        let changed = result.is_ok() && version != memory.code_validation_version();
+            .map_err(CpuMemoryError::from);
+        let changed = result.is_ok() && version != self.memory()?.code_validation_version();
         self.integer_publish(width, output, result)?;
         self.cpu_store_currentness(changed, resident)
     }
@@ -207,3 +210,7 @@ mod tests {
         assert_eq!(engine.arena(), before);
     }
 }
+
+#[cfg(test)]
+#[path = "paging/direct.rs"]
+mod paging_tests;

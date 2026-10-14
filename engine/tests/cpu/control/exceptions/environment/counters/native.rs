@@ -1,11 +1,10 @@
-use super::stopped_support::{KEY, expect_admitted, stopped};
+use super::stopped_support::{KEY, expect_admitted, expect_captured_fetch, stopped};
 use ring3_engine::{
     abi::arena::TRANSFER_OFFSET,
     cpu::{
         dbt::{CompileError, InstructionError},
         x86::decode::DecodeError,
     },
-    memory::{Access, FaultReason, GuestAddress, MemoryFault},
     process::HostError,
 };
 
@@ -38,26 +37,7 @@ fn assert_refused(bytes: &[u8], strict: bool) {
 fn assert_incomplete(bytes: &[u8], length: u32) {
     let entry = 0x4000 - bytes.len() as u32;
     let mut engine = stopped(bytes, entry);
-    let before = engine.arena().to_vec();
-    let artifact = engine.artifact_bytes().unwrap().to_vec();
-    assert_eq!(
-        engine.compile_stopped_entry(KEY, 1),
-        Err(HostError::Compile(CompileError::Instruction {
-            pc: GuestAddress(entry),
-            cause: InstructionError::Decode(DecodeError::MemoryFault {
-                pc: GuestAddress(entry),
-                fault: MemoryFault {
-                    address: GuestAddress(0x4000),
-                    access: Access::Execute,
-                    reason: FaultReason::Unmapped,
-                },
-                length,
-            }),
-        }))
-    );
-    assert_eq!(engine.arena(), before);
-    assert_eq!(engine.artifact_bytes().unwrap(), artifact);
-    assert_eq!(engine.generation(), 1);
+    expect_captured_fetch(&mut engine, entry, 0x4000, false, length);
 }
 
 #[test]
@@ -97,6 +77,6 @@ fn rdpmc_invalid_lock_and_existing_hlt_are_independent_controls() {
 }
 
 #[test]
-fn incomplete_rdpmc_fetch_stays_an_atomic_execute_memory_error() {
+fn incomplete_rdpmc_fetch_stays_an_atomic_execution_page_fault() {
     assert_incomplete(&[0x0f], 2);
 }

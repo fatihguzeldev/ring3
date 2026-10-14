@@ -68,10 +68,6 @@ pub struct PreparedRegion {
     pub(super) blocks: Vec<CompiledBlock>,
     memory_identity: u64,
     pub(super) decode_key: Option<CodeDecodeKey>,
-    pub(super) raw_task_context: bool,
-    pub(super) task_return_configured: bool,
-    pub(super) task_execution_revision: Option<u64>,
-    pub(super) exception_detection_configured: bool,
     validated_version: AtomicU64,
 }
 
@@ -125,27 +121,8 @@ impl PreparedRegion {
             blocks,
             memory_identity: memory.identity(),
             decode_key: cs.map(CodeFetchContext::decode_key),
-            raw_task_context: cs.is_some_and(CodeFetchContext::raw_task_context),
-            task_return_configured: false,
-            task_execution_revision: None,
-            exception_detection_configured: false,
             validated_version: AtomicU64::new(0),
         }
-    }
-
-    pub(super) fn with_task_revision(mut self, revision: Option<u64>) -> Self {
-        self.task_execution_revision = revision;
-        self
-    }
-
-    pub(super) fn with_task_return_authority(mut self, configured: bool) -> Self {
-        self.task_return_configured = configured;
-        self
-    }
-
-    pub(super) fn with_exception_detection(mut self, configured: bool) -> Self {
-        self.exception_detection_configured = configured;
-        self
     }
 
     pub fn is_current(&self, memory: &AddressSpace) -> bool {
@@ -323,10 +300,7 @@ fn prepare(
         });
     }
 
-    Ok(PreparedRegion::new(memory, blocks, cs)
-        .with_task_return_authority(authority.task_return_configured)
-        .with_task_revision(authority.task_execution_revision)
-        .with_exception_detection(authority.interrupts_configured))
+    Ok(PreparedRegion::new(memory, blocks, cs))
 }
 
 pub(super) fn strict_instruction(
@@ -451,7 +425,6 @@ pub(super) fn terminates(instruction: &DecodedInstruction, embedded: bool) -> bo
         instruction.operation(),
         Operation::Control(
             crate::cpu::x86::ControlOperation::InvalidOpcode
-                | crate::cpu::x86::ControlOperation::DeviceNotAvailable
                 | crate::cpu::x86::ControlOperation::GeneralProtectionZero
                 | crate::cpu::x86::ControlOperation::Breakpoint
                 | crate::cpu::x86::ControlOperation::DebugTrap

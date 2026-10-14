@@ -247,10 +247,10 @@ pub(crate) fn guard_dispatch_entry(
     cancel: u32,
 ) -> u32 {
     REGISTRY.with(|registry| {
-        let Ok(registry) = registry.try_borrow() else {
+        let Ok(snapshot) = registry.try_borrow() else {
             return 9;
         };
-        let Some(instance) = registry.instance.as_ref() else {
+        let Some(instance) = snapshot.instance.as_ref() else {
             return 5;
         };
         let key = u64::from(key_low) | (u64::from(key_high) << 32);
@@ -283,10 +283,10 @@ pub(crate) fn guard_resident(
     cancel: u32,
 ) -> u32 {
     REGISTRY.with(|registry| {
-        let Ok(registry) = registry.try_borrow() else {
+        let Ok(snapshot) = registry.try_borrow() else {
             return 9;
         };
-        let Some(instance) = registry.instance.as_ref() else {
+        let Some(instance) = snapshot.instance.as_ref() else {
             return 5;
         };
         let key = u64::from(key_low) | (u64::from(key_high) << 32);
@@ -334,10 +334,10 @@ pub(crate) fn guard(
     cancel: u32,
 ) -> u32 {
     REGISTRY.with(|registry| {
-        let Ok(registry) = registry.try_borrow() else {
+        let Ok(snapshot) = registry.try_borrow() else {
             return 9;
         };
-        let Some(instance) = registry.instance.as_ref() else {
+        let Some(instance) = snapshot.instance.as_ref() else {
             return 5;
         };
         let key = u64::from(low) | (u64::from(high) << 32);

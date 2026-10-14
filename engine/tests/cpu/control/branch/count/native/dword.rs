@@ -1,3 +1,4 @@
+use super::support_fetch as fetch;
 use super::support_prefix_admission as prefix_admission;
 
 use ring3_engine::process::EngineInstance;
@@ -48,7 +49,7 @@ use ring3_engine::{
             ir::{CountBranchKind, Operation},
         },
     },
-    memory::{AddressSpace, GuestAddress, PageRange, Permissions},
+    memory::{AddressSpace, FaultReason, GuestAddress, PageRange, Permissions},
 };
 use std::{
     io::Write,
@@ -177,16 +178,22 @@ fn typed_rel8_targets_prefixes_and_fetch_boundaries_are_exact() {
             DecodeError::InvalidEncoding
         );
         let mut memory = code(&[opcode], 0x1fff);
-        assert!(matches!(
-            decode_one(&memory, GuestAddress(0x1fff)),
-            Err(DecodeError::MemoryFault { length: 2, .. })
-        ));
+        fetch::assert_error(
+            decode_one(&memory, GuestAddress(0x1fff)).unwrap_err(),
+            0x1fff,
+            0x2000,
+            FaultReason::Unmapped,
+            2,
+        );
         let second = PageRange::new(GuestAddress(0x2000), 1).unwrap();
         memory.map_zeroed(second, Permissions::READ).unwrap();
-        assert!(matches!(
-            decode_one(&memory, GuestAddress(0x1fff)),
-            Err(DecodeError::MemoryFault { length: 2, .. })
-        ));
+        fetch::assert_error(
+            decode_one(&memory, GuestAddress(0x1fff)).unwrap_err(),
+            0x1fff,
+            0x2000,
+            FaultReason::Permission,
+            2,
+        );
         memory.protect(second, Permissions::EXECUTE).unwrap();
         assert_eq!(
             decode_one(&memory, GuestAddress(0x1fff)).unwrap().length(),
@@ -198,14 +205,20 @@ fn typed_rel8_targets_prefixes_and_fetch_boundaries_are_exact() {
                 Permissions::READ,
             )
             .unwrap();
-        assert!(matches!(
-            decode_one(&memory, GuestAddress(0x1fff)),
-            Err(DecodeError::MemoryFault { length: 1, .. })
-        ));
-        assert!(matches!(
-            decode_one(&code(&[opcode], u32::MAX), GuestAddress(u32::MAX)),
-            Err(DecodeError::MemoryFault { length: 2, .. })
-        ));
+        fetch::assert_error(
+            decode_one(&memory, GuestAddress(0x1fff)).unwrap_err(),
+            0x1fff,
+            0x1fff,
+            FaultReason::Permission,
+            1,
+        );
+        fetch::assert_error(
+            decode_one(&code(&[opcode], u32::MAX), GuestAddress(u32::MAX)).unwrap_err(),
+            u32::MAX,
+            u32::MAX,
+            FaultReason::AddressOverflow,
+            2,
+        );
     }
 }
 
@@ -268,7 +281,7 @@ fn six_profiles_validate_modules_and_entry_scan_stops_at_branch() {
     let mut child = Command::new("node").args(["-e", r#"
 const assert=require('node:assert/strict'),b=require('node:fs').readFileSync(0);let at=0,n=0;
 while(at<b.length){const mode=b[at++],size=b.readUInt32LE(at);at+=4;const m=new WebAssembly.Module(b.subarray(at,at+size));at+=size;
-assert.deepEqual(WebAssembly.Module.imports(m),[{module:'env',name:'memory',kind:'memory'},...(mode?[{module:'ring3',name:mode===2?'guard_resident':'guard',kind:'function'}]:[])]);
+assert.deepEqual(WebAssembly.Module.imports(m),[{module:'env',name:'memory',kind:'memory'},...(mode?[{module:'ring3',name:mode===2?'guard_detect_resident':'guard_detect',kind:'function'},{module:'ring3',name:'finish_exception_detection',kind:'function'}]:[])]);
 assert.deepEqual(WebAssembly.Module.exports(m),[{name:'run',kind:'function'}]);n++;}assert.equal(n,24);
 "#]).stdin(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
     child.stdin.take().unwrap().write_all(&input).unwrap();
@@ -329,10 +342,10 @@ fn default_instruction_and_block_caps_remain_bounded() {
             compile_region(&memory, &[spec], CompileLimits::default()).is_ok(),
             nops == 63
         );
-        assert_eq!(
-            compile_entry_region(&memory, &[GuestAddress(PC)], CompileLimits::default()).is_ok(),
-            nops == 63
-        );
+        let discovered =
+            compile_entry_region(&memory, &[GuestAddress(PC)], CompileLimits::default()).unwrap();
+        assert_eq!(discovered.metadata().instructions, 64);
+        assert_eq!(discovered.metadata().blocks, 1);
     }
     let memory = code(&[0xe2, 0].repeat(9), PC);
     let specs: Vec<_> = (0..9)

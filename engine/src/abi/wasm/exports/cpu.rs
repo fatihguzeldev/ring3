@@ -1,8 +1,5 @@
 export_process_calls! {
     configure_system_register_bank();
-    deliver_exception();
-    deliver_exception_resident(key_low: u32, key_high: u32, id_low: u32, id_high: u32);
-    configure_interrupt_descriptor_table();
     cpu_read8(address: u32);
     cpu_read16(address: u32);
     cpu_read32(address: u32);
@@ -16,8 +13,6 @@ export_process_calls! {
     x87_op(operation: u32, address: u32, flags: u32, pc: u32, opcode: u32, waiting: u32);
     x87_resident_op(key_low: u32, key_high: u32, id_low: u32, id_high: u32, operation: u32, address: u32, flags: u32, pc: u32, opcode: u32, waiting: u32);
     simd_execute(descriptor: u32, operands: u32, immediate: u32, source_gpr: u32, destination_gpr: u32, flags: u32);
-    interrupt_gate(vector: u32, return_eip: u32, esp: u32, flags: u32);
-    interrupt_gate_resident(key_low: u32, key_high: u32, id_low: u32, id_high: u32, vector: u32, return_eip: u32, esp: u32, flags: u32);
     far_call(offset: u32, selector: u32, word: u32, return_eip: u32, esp: u32);
     far_call_resident(key_low: u32, key_high: u32, id_low: u32, id_high: u32, offset: u32, selector: u32, word: u32, return_eip: u32, esp: u32);
     far_return(offset: u32, selector: u32, word: u32);

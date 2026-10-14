@@ -8,17 +8,51 @@ use super::{
     },
 };
 
+#[derive(Clone, Copy)]
+pub(super) struct ResultContext {
+    pub(super) paging_configured: bool,
+    paging_access_mask: Option<u32>,
+}
+
+impl From<super::memory::Imports> for ResultContext {
+    fn from(imports: super::memory::Imports) -> Self {
+        Self {
+            paging_configured: imports.paging_configured,
+            paging_access_mask: None,
+        }
+    }
+}
+
+impl ResultContext {
+    pub(super) const fn legacy() -> Self {
+        Self {
+            paging_configured: false,
+            paging_access_mask: None,
+        }
+    }
+
+    pub(super) fn write_intent(self) -> Self {
+        Self {
+            paging_access_mask: Some(2),
+            ..self
+        }
+    }
+    pub(super) fn read_intent(self) -> Self {
+        Self {
+            paging_access_mask: Some(1),
+            ..self
+        }
+    }
+}
+
+pub(super) mod paging;
+
 pub(super) fn value(code: &mut InstructionSink<'_>) {
     helper_field(code, 20);
 }
 
 /// consume returned flags only after validating the instruction's preservation contract.
-pub(super) fn flags(
-    code: &mut InstructionSink<'_>,
-    mutable: u32,
-    exit_depth: u32,
-    raw_task_context: bool,
-) {
+pub(super) fn flags(code: &mut InstructionSink<'_>, mutable: u32, exit_depth: u32) {
     code.local_set(RESULT);
     reset_checks(code);
     code.local_get(RESULT)
@@ -28,7 +62,7 @@ pub(super) fn flags(
         .i32_and();
     add_check(code);
     protocol_if_bad(code);
-    exit_if_failed(code, exit_depth, raw_task_context);
+    exit_if_failed(code, exit_depth);
     code.local_get(RESULT).local_set(FLAGS);
 }
 
@@ -38,7 +72,7 @@ pub(super) fn validate(
     access_mask: u32,
     allow_smc: bool,
     exit_depth: u32,
-    raw_task_context: bool,
+    context: ResultContext,
 ) {
     validate_span(
         code,
@@ -47,7 +81,7 @@ pub(super) fn validate(
         allow_smc,
         Validation::Ordinary { mask: None },
         exit_depth,
-        raw_task_context,
+        context,
     );
 }
 
@@ -58,7 +92,7 @@ pub(super) fn validate_gate(
     slot: u32,
     allow_smc: bool,
     exit_depth: u32,
-    raw_task_context: bool,
+    context: ResultContext,
 ) {
     assert!(matches!(slot, 0 | 2 | 4));
     validate_span(
@@ -68,30 +102,7 @@ pub(super) fn validate_gate(
         allow_smc,
         Validation::Gate,
         exit_depth,
-        raw_task_context,
-    );
-}
-
-pub(super) fn validate_interrupt(
-    code: &mut InstructionSink<'_>,
-    slot: u32,
-    vector: u8,
-    original_flags: u32,
-    exit_depth: u32,
-    raw_task_context: bool,
-) {
-    assert!(matches!(slot, 0 | 2 | 4));
-    validate_span(
-        code,
-        slot,
-        if slot == 0 { 0 } else { 2 },
-        true,
-        Validation::Interrupt {
-            vector,
-            original_flags,
-        },
-        exit_depth,
-        raw_task_context,
+        context,
     );
 }
 
@@ -100,7 +111,7 @@ pub(super) fn validate_masked(
     length: u32,
     mask_local: u32,
     exit_depth: u32,
-    raw_task_context: bool,
+    context: ResultContext,
 ) {
     assert!((1..=16).contains(&length));
     validate_span(
@@ -112,7 +123,7 @@ pub(super) fn validate_masked(
             mask: Some(mask_local),
         },
         exit_depth,
-        raw_task_context,
+        context,
     );
 }
 
@@ -131,7 +142,7 @@ pub(super) fn validate_avx(
     allow_smc: bool,
     validation: AvxValidation,
     exit_depth: u32,
-    raw_task_context: bool,
+    context: ResultContext,
 ) {
     assert!(length <= 32);
     if validation.selected_mask.is_some() {
@@ -144,7 +155,7 @@ pub(super) fn validate_avx(
         allow_smc,
         Validation::Avx(validation),
         exit_depth,
-        raw_task_context,
+        context,
     );
 }
 
@@ -153,7 +164,7 @@ pub(super) fn validate_xstate(
     code: &mut InstructionSink<'_>,
     save: bool,
     exit_depth: u32,
-    raw_task_context: bool,
+    context: ResultContext,
 ) {
     validate_span(
         code,
@@ -162,7 +173,7 @@ pub(super) fn validate_xstate(
         save,
         Validation::XState,
         exit_depth,
-        raw_task_context,
+        context,
     );
 }
 
@@ -172,7 +183,6 @@ enum Validation {
     Avx(AvxValidation),
     XState,
     Gate,
-    Interrupt { vector: u8, original_flags: u32 },
 }
 
 fn validate_span(
@@ -182,7 +192,42 @@ fn validate_span(
     allow_smc: bool,
     validation: Validation,
     exit_depth: u32,
-    raw_task_context: bool,
+    context: ResultContext,
+) {
+    if context.paging_configured {
+        paging::is_packet(code);
+        code.if_(BlockType::Empty);
+        paging::validate(
+            code,
+            paging::Validation {
+                length,
+                access_mask: context.paging_access_mask.unwrap_or(access_mask),
+                allow_smc,
+                geometry: match validation {
+                    Validation::Ordinary { mask } => paging::Geometry::Span { length, mask },
+                    Validation::Avx(value) => paging::Geometry::Span {
+                        length,
+                        mask: value.selected_mask,
+                    },
+                    Validation::XState => paging::Geometry::OwnerChecked,
+                    Validation::Gate => paging::Geometry::Span { length, mask: None },
+                },
+            },
+        );
+
+        exit_if_failed(code, exit_depth + 1);
+        code.end();
+    }
+    validate_legacy_span(code, length, access_mask, allow_smc, validation, exit_depth);
+}
+
+fn validate_legacy_span(
+    code: &mut InstructionSink<'_>,
+    length: u32,
+    access_mask: u32,
+    allow_smc: bool,
+    validation: Validation,
+    exit_depth: u32,
 ) {
     let mask = match validation {
         Validation::Ordinary { mask } => mask,
@@ -191,16 +236,6 @@ fn validate_span(
     };
     let xstate = matches!(validation, Validation::XState);
     let gate = matches!(validation, Validation::Gate);
-    let interrupt = if let Validation::Interrupt {
-        vector,
-        original_flags,
-    } = validation
-    {
-        Some((vector, original_flags))
-    } else {
-        None
-    };
-    let control = gate || interrupt.is_some();
     let avx = if let Validation::Avx(value) = validation {
         Some(value)
     } else {
@@ -229,9 +264,7 @@ fn validate_span(
         (0, u32::from_le_bytes(*b"R3MH")),
         (
             4,
-            if interrupt.is_some() {
-                0x1000b
-            } else if gate {
+            if gate {
                 0x10009
             } else if xstate {
                 0x10008
@@ -244,27 +277,16 @@ fn validate_span(
     ] {
         expect_field(code, offset, expected);
     }
-    if interrupt.is_some() && length != 0 {
-        helper_field(code, 36);
-        code.i32_const(!0x100)
-            .i32_and()
-            .i32_const(length as i32)
-            .i32_ne();
-        add_check(code);
-    } else {
-        expect_field(code, 36, length);
-    }
+    expect_field(code, 36, length);
     code.local_get(LHS).if_(BlockType::Empty);
     infrastructure(code, 2);
     code.else_();
     helper_field(code, 16);
     code.local_set(RHS);
     code.local_get(RHS).i32_eqz().if_(BlockType::Empty);
-    success(code, if xstate || control { 0 } else { length }, mask);
-    if interrupt.is_some() && length == 0 {
-        infrastructure(code, 2);
-    }
-    if control && length == 2 {
+    success(code, if xstate || gate { 0 } else { length }, mask);
+
+    if gate && length == 2 {
         reset_checks(code);
         helper_field(code, 20);
         code.i32_const(0xffff).i32_gt_u();
@@ -282,13 +304,13 @@ fn validate_span(
         .i32_const(1)
         .i32_eq()
         .if_(BlockType::Empty);
-    fault(code, length, access_mask, mask, xstate, interrupt.is_some());
+    fault(code, length, access_mask, mask, xstate);
     code.else_()
         .local_get(RHS)
         .i32_const(2)
         .i32_eq()
         .if_(BlockType::Empty);
-    if control && length == 0 {
+    if gate && length == 0 {
         infrastructure(code, 2);
     } else {
         rejected(code);
@@ -302,43 +324,12 @@ fn validate_span(
         .i32_le_u()
         .i32_and()
         .if_(BlockType::Empty);
-    exception(
-        code,
-        length,
-        avx,
-        control,
-        interrupt.map(|(vector, _)| vector),
-    );
+    exception(code, length, avx, gate);
     code.else_();
-    if interrupt.is_some() && length == 0 {
-        code.local_get(RHS)
-            .i32_const(8)
-            .i32_eq()
-            .if_(BlockType::Empty);
-        interrupt_unsupported(code);
-        code.else_();
-        infrastructure(code, 2);
-        code.end();
-    } else {
-        infrastructure(code, 2);
-    }
+    infrastructure(code, 2);
     code.end().end().end().end().end().end().end();
-    if let Some((_, original_flags)) = interrupt {
-        code.local_get(REASON)
-            .i32_const(4)
-            .i32_eq()
-            .local_get(DETAIL)
-            .i32_const(4)
-            .i32_eq()
-            .i32_and()
-            .if_(BlockType::Empty)
-            .local_get(original_flags)
-            .local_set(FLAGS)
-            .local_get(SNAPSHOT_SHADOW)
-            .local_set(DEBUG_SHADOW)
-            .end();
-    }
-    exit_if_failed(code, exit_depth, raw_task_context);
+
+    exit_if_failed(code, exit_depth);
 }
 
 fn success(code: &mut InstructionSink<'_>, length: u32, mask: Option<u32>) {
@@ -370,7 +361,6 @@ fn fault(
     access_mask: u32,
     mask: Option<u32>,
     xstate: bool,
-    interrupt: bool,
 ) {
     if length == 0 || access_mask == 0 {
         infrastructure(code, 2);
@@ -423,29 +413,9 @@ fn fault(
         helper_field(code, offset);
         code.local_set(local);
     }
-    if interrupt {
-        code.i32_const(length as i32);
-    } else {
-        helper_field(code, 36);
-    }
+    helper_field(code, 36);
     code.local_set(FAULT_LENGTH);
     code.end();
-}
-
-fn interrupt_unsupported(code: &mut InstructionSink<'_>) {
-    reset_checks(code);
-    for offset in [20, 28, 32] {
-        expect_field(code, offset, 0);
-    }
-    expect_field(code, 24, 4);
-    code.local_get(LHS).if_(BlockType::Empty);
-    infrastructure(code, 2);
-    code.else_()
-        .i32_const(4)
-        .local_set(REASON)
-        .i32_const(4)
-        .local_set(DETAIL)
-        .end();
 }
 
 fn rejected(code: &mut InstructionSink<'_>) {
@@ -467,28 +437,12 @@ fn rejected(code: &mut InstructionSink<'_>) {
     code.end().end();
 }
 
-fn exception(
-    code: &mut InstructionSink<'_>,
-    length: u32,
-    avx: Option<AvxValidation>,
-    gate: bool,
-    interrupt: Option<u8>,
-) {
+fn exception(code: &mut InstructionSink<'_>, length: u32, avx: Option<AvxValidation>, gate: bool) {
     reset_checks(code);
     for offset in [20, 28, 32] {
         expect_field(code, offset, 0);
     }
-    if let Some(vector) = interrupt.filter(|_| length == 0) {
-        code.local_get(RHS)
-            .i32_const(3)
-            .i32_ne()
-            .local_get(RHS)
-            .i32_const(6)
-            .i32_ne()
-            .i32_and();
-        add_check(code);
-        expect_field(code, 24, (u32::from(vector) << 3) | 2);
-    } else if gate {
+    if gate {
         code.local_get(RHS)
             .i32_const(4)
             .i32_eq()

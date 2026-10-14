@@ -157,7 +157,7 @@ fn optional_instruction_fetch_precedes_ud_until_the_final_byte_is_executable() {
         let mut memory = executable(&bytes[..bytes.len() - 1], pc);
         let missing = decode_one(&memory, GuestAddress(pc)).unwrap_err();
         assert!(
-            matches!(missing, DecodeError::MemoryFault { length, .. } if length == bytes.len() as u32)
+            matches!(missing, DecodeError::Paging { attempted_length: length, error: crate::cpu::x86::CpuPagingError32::PageFault(_), .. } if usize::from(length) == bytes.len())
         );
         assert_eq!(
             decode_for_execution(&memory, GuestAddress(pc)).unwrap_err(),
@@ -171,7 +171,7 @@ fn optional_instruction_fetch_precedes_ud_until_the_final_byte_is_executable() {
         memory.protect(page, Permissions::READ).unwrap();
         let denied = decode_one(&memory, GuestAddress(pc)).unwrap_err();
         assert!(
-            matches!(denied, DecodeError::MemoryFault { length, .. } if length == bytes.len() as u32)
+            matches!(denied, DecodeError::Paging { attempted_length: length, error: crate::cpu::x86::CpuPagingError32::PageFault(_), .. } if usize::from(length) == bytes.len())
         );
         assert_eq!(
             decode_for_execution(&memory, GuestAddress(pc)).unwrap_err(),
@@ -224,7 +224,6 @@ fn optional_table_keeps_other_features_hints_and_prefix_boundaries_unchanged() {
         &[0xf2, 0x0f, 0xaa],
         &[0xf3, 0x0f, 0xaa],
         &[0x0f, 0x0d, 0xd0], // register form stays outside the selected memory aliases.
-        &[0xcd, 0x80],
     ] {
         let memory = executable(bytes, 0x1000);
         let strict = decode_one(&memory, GuestAddress(0x1000)).unwrap_err();

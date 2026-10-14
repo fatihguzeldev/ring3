@@ -11,9 +11,7 @@ use crate::{
             ir::{EffectiveAddress, Operation, Value32},
         },
     },
-    memory::{
-        Access, AddressSpace, FaultReason, GuestAddress, MemoryFault, PageRange, Permissions,
-    },
+    memory::{AddressSpace, GuestAddress, PageRange, Permissions},
 };
 
 fn code(bytes: &[u8], pc: u32) -> AddressSpace {
@@ -242,14 +240,16 @@ fn incomplete_vex_keeps_progressive_execute_fault_before_semantic_invalidity() {
     ] {
         let pc = GuestAddress(0x2000 - bytes.len() as u32);
         let memory = code(bytes, pc.0);
-        let expected = DecodeError::MemoryFault {
+        let expected = DecodeError::Paging {
             pc,
-            fault: MemoryFault {
-                address: GuestAddress(0x2000),
-                access: Access::Execute,
-                reason: FaultReason::Unmapped,
-            },
-            length: bytes.len() as u32 + 1,
+            error: crate::cpu::x86::CpuPagingError32::PageFault(
+                crate::cpu::x86::VerifiedPageFault32::application(
+                    GuestAddress(0x2000),
+                    crate::cpu::x86::PagingAccess32::Execute,
+                    false,
+                ),
+            ),
+            attempted_length: bytes.len() as u8 + 1,
         };
         assert_eq!(decode_one(&memory, pc).unwrap_err(), expected);
         assert_eq!(decode_for_execution(&memory, pc).unwrap_err(), expected);

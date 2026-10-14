@@ -1,4 +1,4 @@
-use super::cpu_store;
+use super::paging::cpu_paging_store;
 
 pub(crate) fn avx_execute(
     descriptor: u32,
@@ -8,7 +8,9 @@ pub(crate) fn avx_execute(
     live1: u32,
     flags: u32,
 ) -> u32 {
-    cpu_store(|instance| instance.avx_execute(descriptor, operands, immediate, live0, live1, flags))
+    cpu_paging_store(|instance| {
+        instance.avx_execute(descriptor, operands, immediate, live0, live1, flags)
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -24,7 +26,7 @@ pub(crate) fn avx_execute_resident(
     live1: u32,
     flags: u32,
 ) -> u32 {
-    cpu_store(|instance| {
+    cpu_paging_store(|instance| {
         instance.avx_execute_resident(
             u64::from(key_low) | (u64::from(key_high) << 32),
             u64::from(id_low) | (u64::from(id_high) << 32),

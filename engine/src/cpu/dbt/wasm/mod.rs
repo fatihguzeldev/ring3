@@ -12,13 +12,13 @@ mod emitter;
 mod far;
 mod integer;
 mod integer_system;
-mod interrupts;
 mod locals;
 mod memory;
 mod packed_strings;
 mod segment_queries;
 mod segments;
 mod simd;
+mod software_interrupts;
 mod stack;
 mod strings;
 mod system_registers;
@@ -31,10 +31,6 @@ pub(super) enum EmbeddedBinding {
     Resident { key: u64, id: u64 },
 }
 
-#[cfg(test)]
 pub(super) use emitter::emit;
-pub(super) use emitter::emit_with_authority;
 
 pub(crate) use dispatcher::emit_dispatcher;
-
-mod tasks;

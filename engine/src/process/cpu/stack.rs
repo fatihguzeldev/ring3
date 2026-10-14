@@ -5,8 +5,11 @@ use crate::{
         cpu_helper::{CpuMemoryError, encode_cpu_result},
         memory_helper::HELPER_SIZE,
     },
-    cpu::x86::{SegmentAccess, SegmentContext, SegmentRegister, StackFrameKind, StackPointerSize},
-    memory::{Access, AddressSpace, GuestAddress, MemoryError},
+    cpu::x86::{
+        CpuMemoryPort32, CpuPagingError32, CpuReadPort32, PagingAccess32, SegmentAccess,
+        SegmentContext, SegmentRegister, StackFrameKind, StackPointerSize,
+    },
+    memory::{GuestAddress, MemoryError},
 };
 
 struct Prepared {
@@ -19,10 +22,15 @@ struct Prepared {
 }
 
 impl Prepared {
-    fn push(&mut self, memory: &AddressSpace, width: u32, value: u32) -> Result<(), MemoryError> {
+    fn push(
+        &mut self,
+        memory: &mut impl CpuReadPort32,
+        width: u32,
+        value: u32,
+    ) -> Result<(), CpuPagingError32> {
         let advanced = self.pointer.advance(self.registers[4], -(width as i32));
         let address = self.ss_base.wrapping_add(self.pointer.offset(advanced));
-        memory.cpu_check_span(GuestAddress(address), width as usize, Access::Write)?;
+        memory.check(GuestAddress(address), width as usize, PagingAccess32::Write)?;
         self.addresses[self.count] = address;
         self.values[self.count] = value;
         self.count += 1;
@@ -30,10 +38,15 @@ impl Prepared {
         Ok(())
     }
 
-    fn read(&self, memory: &AddressSpace, offset: u32, width: u32) -> Result<u32, MemoryError> {
+    fn read(
+        &self,
+        memory: &mut impl CpuReadPort32,
+        offset: u32,
+        width: u32,
+    ) -> Result<u32, CpuPagingError32> {
         let address = self.ss_base.wrapping_add(self.pointer.offset(offset));
         let mut bytes = [0; 4];
-        memory.cpu_read(GuestAddress(address), &mut bytes[..width as usize])?;
+        memory.read(GuestAddress(address), &mut bytes[..width as usize])?;
         // ENTER's ordered reads must observe a preceding push when frames overlap.
         for index in 0..self.count {
             let stored = self.values[index].to_le_bytes();
@@ -114,14 +127,14 @@ fn check_segments(
 }
 
 fn prepare(
-    memory: &AddressSpace,
+    memory: &mut impl CpuReadPort32,
     ss_base: u32,
     pointer: StackPointerSize,
     kind: StackFrameKind,
     allocation: u16,
     nesting: u8,
     original: [u32; 8],
-) -> Result<Prepared, MemoryError> {
+) -> Result<Prepared, CpuPagingError32> {
     let width = kind.width();
     let mut result = Prepared {
         ss_base,
@@ -167,10 +180,10 @@ fn prepare(
             result.registers[4] = pointer.advance(result.registers[4], -i32::from(allocation));
             // intel ENTER requires a writeability check at the final stack pointer,
             // including local storage which is allocated without being initialized.
-            memory.cpu_check_span(
+            memory.check(
                 GuestAddress(ss_base.wrapping_add(pointer.offset(result.registers[4]))),
                 width as usize,
-                Access::Write,
+                PagingAccess32::Write,
             )?;
         }
     }
@@ -207,12 +220,12 @@ impl EngineInstance {
         let context = self.operand_segment_context()?;
         let pointer =
             StackPointerSize::new(context.caches[SegmentRegister::Ss.index()].default32());
-        let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
-        let version = memory.code_validation_version();
+        let version = self.memory()?.code_validation_version();
+        let mut memory = self.cpu_memory_port32();
         let result = check_segments(&context, kind, allocation, nesting, original)
             .and_then(|()| {
                 prepare(
-                    memory,
+                    &mut memory,
                     context.state.bases[SegmentRegister::Ss.index()],
                     pointer,
                     kind,
@@ -220,19 +233,19 @@ impl EngineInstance {
                     nesting,
                     original,
                 )
-                .map_err(CpuMemoryError::Memory)
+                .map_err(CpuMemoryError::from)
             })
             .and_then(|prepared| {
                 memory
-                    .cpu_write_stack(
+                    .write_stack(
                         &prepared.addresses[..prepared.count],
                         &prepared.values[..prepared.count],
                         kind.width() as usize,
                     )
-                    .map_err(CpuMemoryError::Memory)?;
+                    .map_err(CpuMemoryError::from)?;
                 Ok(prepared.registers)
             });
-        let changed = result.is_ok() && version != memory.code_validation_version();
+        let changed = result.is_ok() && version != self.memory()?.code_validation_version();
         let (length, packet) = match result {
             Ok(registers) => {
                 for (index, value) in registers.into_iter().enumerate() {
@@ -245,7 +258,9 @@ impl EngineInstance {
             Err(error) => (
                 if matches!(
                     error,
-                    CpuMemoryError::Memory(MemoryError::Fault(_)) | CpuMemoryError::StackSegment(_)
+                    CpuMemoryError::Memory(MemoryError::Fault(_))
+                        | CpuMemoryError::Paging(_)
+                        | CpuMemoryError::StackSegment(_)
                 ) {
                     kind.width()
                 } else {
@@ -268,7 +283,10 @@ impl EngineInstance {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::memory::{PageRange, Permissions};
+    use crate::{
+        cpu::x86::DefaultCpuReadPort32,
+        memory::{AddressSpace, PageRange, Permissions},
+    };
 
     fn memory() -> AddressSpace {
         let mut memory = AddressSpace::new(3).unwrap();
@@ -290,7 +308,7 @@ mod tests {
                 0x77778888,
             ];
             let pushed = prepare(
-                &memory,
+                &mut DefaultCpuReadPort32::new(&memory),
                 0,
                 StackPointerSize::new(true),
                 kind,
@@ -308,7 +326,7 @@ mod tests {
                 .unwrap();
             assert_eq!(pushed.values[4], registers[4]);
             let popped = prepare(
-                &memory,
+                &mut DefaultCpuReadPort32::new(&memory),
                 0,
                 StackPointerSize::new(true),
                 if kind.width() == 2 {
@@ -331,7 +349,7 @@ mod tests {
         memory.write(GuestAddress(0x8000), &[0xa5; 128]).unwrap();
         let registers = [0, 0, 0, 0, 0x8080, 0x8080, 0, 0];
         let prepared = prepare(
-            &memory,
+            &mut DefaultCpuReadPort32::new(&memory),
             0,
             StackPointerSize::new(true),
             StackFrameKind::Enter32,
@@ -359,7 +377,7 @@ mod tests {
         let registers = [0, 0, 0, 0, 0x8004, 0x9004, 0, 0];
         assert!(
             prepare(
-                &memory,
+                &mut DefaultCpuReadPort32::new(&memory),
                 0,
                 StackPointerSize::new(true),
                 StackFrameKind::Enter32,
@@ -373,7 +391,7 @@ mod tests {
         registers[5] = 0x8000;
         assert!(
             prepare(
-                &memory,
+                &mut DefaultCpuReadPort32::new(&memory),
                 0,
                 StackPointerSize::new(true),
                 StackFrameKind::Enter32,
@@ -394,7 +412,7 @@ mod tests {
         memory.write(GuestAddress(0x8000), &[0xa5; 128]).unwrap();
         let registers = [0, 0, 0, 0, 0x3080, 0x3080, 0, 0];
         let prepared = prepare(
-            &memory,
+            &mut DefaultCpuReadPort32::new(&memory),
             0x5000,
             StackPointerSize::new(true),
             StackFrameKind::Enter32,
@@ -448,12 +466,14 @@ mod tests {
                 Ok(StoreCompletion::Complete)
             );
             let mut packet = [0; HELPER_SIZE];
-            let error = CpuMemoryError::Memory(MemoryError::Fault(crate::memory::MemoryFault {
-                address: GuestAddress(0x8000 - width),
-                access: Access::Write,
-                reason: crate::memory::FaultReason::Unmapped,
-            }));
-            encode_cpu_result(width, 0, Err(error), &mut packet).unwrap();
+            packet[..16].copy_from_slice(&[82, 51, 77, 72, 15, 0, 1, 0, 40, 0, 0, 0, 0, 0, 0, 0]);
+            for (index, value) in [9_u32, 0, 6, 0x8000 - width, 2, width]
+                .into_iter()
+                .enumerate()
+            {
+                packet[16 + index * 4..20 + index * 4].copy_from_slice(&value.to_le_bytes());
+            }
+            assert_eq!(engine.cr2(), Some(GuestAddress(0x8000 - width)));
             let mut expected = before;
             expected[HELPER_OFFSET..HELPER_OFFSET + HELPER_SIZE].copy_from_slice(&packet);
             assert_eq!(engine.arena(), expected);
@@ -472,7 +492,7 @@ mod tests {
         let memory = memory();
         let original = [1, 2, 3, 4, 0xabcd3080, 0x76543080, 7, 8];
         let prepared = prepare(
-            &memory,
+            &mut DefaultCpuReadPort32::new(&memory),
             0x5000,
             StackPointerSize::new(false),
             StackFrameKind::Enter32,
@@ -541,19 +561,11 @@ mod tests {
             Ok(StoreCompletion::Complete)
         );
         let mut packet = [0; HELPER_SIZE];
-        encode_cpu_result(
-            4,
-            0,
-            Err(CpuMemoryError::Memory(MemoryError::Fault(
-                crate::memory::MemoryFault {
-                    address: GuestAddress(0x5ff8),
-                    access: Access::Write,
-                    reason: crate::memory::FaultReason::Unmapped,
-                },
-            ))),
-            &mut packet,
-        )
-        .unwrap();
+        packet[..16].copy_from_slice(&[82, 51, 77, 72, 15, 0, 1, 0, 40, 0, 0, 0, 0, 0, 0, 0]);
+        for (index, value) in [9_u32, 0, 6, 0x5ff8, 2, 4].into_iter().enumerate() {
+            packet[16 + index * 4..20 + index * 4].copy_from_slice(&value.to_le_bytes());
+        }
+        assert_eq!(engine.cr2(), Some(GuestAddress(0x5ff8)));
         let mut expected = before;
         expected[HELPER_OFFSET..HELPER_OFFSET + HELPER_SIZE].copy_from_slice(&packet);
         assert_eq!(engine.arena(), expected);

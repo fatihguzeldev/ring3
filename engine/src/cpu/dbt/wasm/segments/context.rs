@@ -14,7 +14,7 @@ use crate::{
 };
 use wasm_encoder::{BlockType, InstructionSink, MemArg, ValType};
 
-pub(in crate::cpu::dbt::wasm) fn preflight(code: &mut InstructionSink<'_>, raw_task_context: bool) {
+pub(in crate::cpu::dbt::wasm) fn preflight(code: &mut InstructionSink<'_>) {
     range(code, SEGMENTS_OFFSET, SEGMENTS_SIZE);
     for (offset, expected) in [
         (0, u32::from_le_bytes(*b"R3SG")),
@@ -61,25 +61,16 @@ pub(in crate::cpu::dbt::wasm) fn preflight(code: &mut InstructionSink<'_>, raw_t
     }
     code.end();
     for segment in [SegmentRegister::Cs, SegmentRegister::Ss] {
-        selector(code, segment, raw_task_context);
+        selector(code, segment);
         code.i32_const(0xfffc).i32_and().i32_eqz();
         fail_if(code, 2);
-        selector(code, segment, raw_task_context);
+        selector(code, segment);
         code.i32_const(3).i32_and().i32_const(3).i32_ne();
         fail_if(code, 2);
     }
 }
 
-pub(in crate::cpu::dbt::wasm) fn base(
-    code: &mut InstructionSink<'_>,
-    segment: SegmentRegister,
-    raw_task_context: bool,
-) {
-    if raw_task_context {
-        super::super::tasks::base(code, segment);
-        return;
-    }
-
+pub(in crate::cpu::dbt::wasm) fn base(code: &mut InstructionSink<'_>, segment: SegmentRegister) {
     code.local_get(STATE_PTR)
         .i32_load16_u(memarg(4, 1))
         .i32_const(i32::from(SEGMENTS_VERSION_3))

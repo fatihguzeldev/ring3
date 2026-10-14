@@ -113,7 +113,7 @@ pub(super) fn instruction(
         1
     };
     if let Some(address) = operation.implicit_address {
-        memory::address_value(code, address, imports.raw_task_context.is_some());
+        memory::address_value(code, address);
         code.local_set(ADDRESS);
     }
     if let SimdOperand::Memory(address) = if operation.reads_memory() {
@@ -140,18 +140,14 @@ pub(super) fn instruction(
             .i32_const(alignment)
             .call(imports.cpu_read.expect("SIMD memory read import"))
             .local_set(HELPER_STATUS);
-        crate::cpu::dbt::wasm::code_fetch::check_context(
-            code,
-            exit_depth,
-            imports.raw_task_context.is_some(),
-        );
+        crate::cpu::dbt::wasm::code_fetch::check_context(code, exit_depth);
         cpu_result::validate(
             code,
             u32::from(operation.memory_bytes),
             1,
             false,
             exit_depth,
-            imports.raw_task_context.is_some(),
+            cpu_result::ResultContext::from(imports),
         );
     }
     let (descriptor, operands, immediate) = operation.descriptor();
@@ -172,12 +168,12 @@ pub(super) fn instruction(
         0,
         false,
         exit_depth,
-        imports.raw_task_context.is_some(),
+        cpu_result::ResultContext::from(imports),
     );
     memory::reset_checks(code);
     memory::expect_field(code, 20, 0);
     memory::protocol_if_bad(code);
-    memory::exit_if_failed(code, exit_depth, imports.raw_task_context.is_some());
+    memory::exit_if_failed(code, exit_depth);
     let compare_flags = matches!(
         operation.kind,
         SimdKind::Float(FloatKind::CompareFlags | FloatKind::CompareFlagsQuiet)
@@ -202,15 +198,10 @@ pub(super) fn instruction(
         }
         memory::add_check(code);
         memory::protocol_if_bad(code);
-        memory::exit_if_failed(code, exit_depth, imports.raw_task_context.is_some());
+        memory::exit_if_failed(code, exit_depth);
         code.local_get(RESULT);
     }
-    cpu_result::flags(
-        code,
-        if compare_flags { 0x8d5 } else { 0 },
-        exit_depth,
-        imports.raw_task_context.is_some(),
-    );
+    cpu_result::flags(code, if compare_flags { 0x8d5 } else { 0 }, exit_depth);
     if operation.writes_memory() {
         let import = if operation.kind == SimdKind::SaveExtended {
             imports.cpu_fxsave
@@ -261,7 +252,7 @@ pub(super) fn instruction(
                 u32::from(operation.memory_bytes),
                 RESUME,
                 exit_depth,
-                imports.raw_task_context.is_some(),
+                cpu_result::ResultContext::from(imports),
             );
         } else {
             cpu_result::validate(
@@ -270,7 +261,7 @@ pub(super) fn instruction(
                 2,
                 true,
                 exit_depth,
-                imports.raw_task_context.is_some(),
+                cpu_result::ResultContext::from(imports),
             );
         }
         if operation.uses_mmx() {

@@ -449,7 +449,7 @@ fn final_immediate_or_operand_byte_and_prefix_validity_still_precede_availabilit
         let memory = executable(&bytes[..bytes.len() - 1], pc);
         let missing = decode_one(&memory, GuestAddress(pc)).unwrap_err();
         assert!(
-            matches!(missing,DecodeError::MemoryFault {length,..} if length == bytes.len() as u32)
+            matches!(missing,DecodeError::Paging { attempted_length: length, error: crate::cpu::x86::CpuPagingError32::PageFault(_), .. } if usize::from(length) == bytes.len())
         );
         assert_eq!(
             decode_for_execution(&memory, GuestAddress(pc)).unwrap_err(),
@@ -480,7 +480,7 @@ fn final_immediate_or_operand_byte_and_prefix_validity_still_precede_availabilit
             &Operation::Control(ControlOperation::InvalidOpcode)
         );
     }
-    let memory = executable(&[0xcd, 0x80], 0x1000);
+    let memory = executable(&[0x66, 0x66, 0xcd, 0x80], 0x1000);
     let strict = decode_one(&memory, GuestAddress(0x1000)).unwrap_err();
     assert_eq!(
         decode_for_execution(&memory, GuestAddress(0x1000)).unwrap_err(),

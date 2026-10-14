@@ -33,19 +33,49 @@ pub(super) fn load_at_address(
     imports: Imports,
     exit_depth: u32,
 ) {
+    load_at_address_with_intent(code, width, imports, exit_depth, false);
+}
+
+pub(super) fn load_at_address_with_intent(
+    code: &mut InstructionSink<'_>,
+    width: SmallWidth,
+    imports: Imports,
+    exit_depth: u32,
+    modify: bool,
+) {
+    let paging_modify = modify && imports.paging_configured;
     let (length, import) = match width {
-        SmallWidth::Byte => (1, imports.read8),
-        SmallWidth::Word => (2, imports.read16),
+        SmallWidth::Byte => (
+            1,
+            if paging_modify {
+                imports.read_modify8
+            } else {
+                imports.read8
+            },
+        ),
+        SmallWidth::Word => (
+            2,
+            if paging_modify {
+                imports.read_modify16
+            } else {
+                imports.read16
+            },
+        ),
     };
     code.local_get(ADDRESS)
         .call(import.expect("prepared narrow read has an import"))
         .local_set(HELPER_STATUS);
-    crate::cpu::dbt::wasm::code_fetch::check_context(
+    crate::cpu::dbt::wasm::code_fetch::check_context(code, exit_depth);
+    super::cpu_scalar::validate(
         code,
-        exit_depth,
-        imports.raw_task_context.is_some(),
+        length,
+        if paging_modify {
+            CpuScalarOperation::Modify
+        } else {
+            CpuScalarOperation::Read
+        },
+        imports.paging_configured,
     );
-    super::cpu_scalar::validate(code, length, CpuScalarOperation::Read);
-    exit_if_failed(code, exit_depth, imports.raw_task_context.is_some());
+    exit_if_failed(code, exit_depth);
     helper_field(code, 20);
 }

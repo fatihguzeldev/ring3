@@ -8,12 +8,12 @@ mod environment;
 mod interrupts;
 pub mod ir;
 pub mod packed_strings;
+mod paging;
 mod segments;
 pub mod simd;
 mod stack;
 mod state;
 mod system_registers;
-pub mod tasks;
 mod x87;
 pub mod xstate;
 
@@ -24,13 +24,11 @@ pub use control::{
 };
 pub(crate) use environment::USER_MODE_ENVIRONMENT;
 pub use interrupts::{
-    DebugCause32, DetectedEntryResult32, EnteredEvent32, EscalationClass32, EscalationDecision32,
-    EventAuthorityKind32, EventDeliveryResult32, EventOrigin32, ExceptionCause32, ExceptionClass32,
-    FrameInput32, InterruptDescriptorTable32, InvalidPageFault32, LegacyPageViolation32,
-    PageFaultProfile32, PagingAccess32, PagingDomain32, SecondaryClass32, SelectorErrorCode32,
-    TrapPoint32, VerifiedPageFault32, escalate_exception,
+    DebugCause32, EventOrigin32, ExceptionCause32, ExceptionClass32, FrameInput32, PagingAccess32,
+    PagingDomain32, SelectorErrorCode32, TrapPoint32, VerifiedPageFault32,
 };
-pub(crate) use interrupts::{EventFrame32, event_secondary_error};
+pub use paging::CpuPagingError32;
+pub(crate) use paging::{CpuMemoryPort32, CpuReadPort32};
 pub use segments::{
     CodeDestination, CodeTransfer, CodeTransferError, FarWidth, SegmentAccess, SegmentAccessError,
     SegmentCache, SegmentContext, SegmentDescriptor, SegmentDescriptorKind,
@@ -47,3 +45,8 @@ pub use x87::{
     Ext80, X87Binary, X87Condition, X87Error, X87Format, X87Operation, X87Outcome, X87Rounding,
     X87State,
 };
+
+pub(crate) use paging::inspect_cpu_paging_access32;
+
+#[cfg(test)]
+pub(crate) use paging::{DefaultCpuMemoryPort32, DefaultCpuReadPort32};

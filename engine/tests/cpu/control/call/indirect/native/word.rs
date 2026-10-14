@@ -1,3 +1,4 @@
+use super::support_fetch as fetch;
 use super::support_word_prefix as word_prefix;
 use ring3_engine::{
     abi::arena::TRANSFER_OFFSET,
@@ -13,9 +14,7 @@ use ring3_engine::{
             ir::{EffectiveAddress, Operation},
         },
     },
-    memory::{
-        Access, AddressSpace, FaultReason, GuestAddress, MemoryFault, PageRange, Permissions,
-    },
+    memory::{Access, AddressSpace, FaultReason, GuestAddress, PageRange, Permissions},
     process::{EngineInstance, HostError},
 };
 
@@ -389,7 +388,10 @@ fn word_indirect_call_prefixes_lock_and_adjacent_ff_groups_remain_precise() {
         for prefix in [
             0x66, 0x67, 0xf0, 0xf2, 0xf3, 0x26, 0x2e, 0x36, 0x3e, 0x64, 0x65,
         ] {
-            if matches!(prefix, 0x67 | 0x26 | 0x2e | 0x36 | 0x3e | 0x64 | 0x65) {
+            if matches!(
+                prefix,
+                0xf2 | 0x67 | 0x26 | 0x2e | 0x36 | 0x3e | 0x64 | 0x65
+            ) {
                 word_prefix::admitted(&[vec![prefix], form.to_vec()].concat());
                 continue;
             }
@@ -552,16 +554,8 @@ fn word_indirect_call_bound_entries_stop_before_trailing_invalid_code_and_spans_
     }
 }
 
-fn fetch_error(pc: u32, address: u32, reason: FaultReason, length: u32) -> DecodeError {
-    DecodeError::MemoryFault {
-        pc: GuestAddress(pc),
-        fault: MemoryFault {
-            address: GuestAddress(address),
-            access: Access::Execute,
-            reason,
-        },
-        length,
-    }
+fn fetch_error(pc: u32, address: u32, reason: FaultReason, length: u32) -> fetch::FetchFault {
+    fetch::expected(pc, address, reason, length)
 }
 
 #[test]
@@ -583,7 +577,9 @@ fn word_indirect_call_fetches_exact_three_or_eight_bytes_with_original_overflow_
         for cut in 1..form.len() {
             let pc = 0x2000 - cut as u32;
             assert_eq!(
-                decode_one(&code_space(pc, &form[..cut]), GuestAddress(pc)).err(),
+                decode_one(&code_space(pc, &form[..cut]), GuestAddress(pc))
+                    .err()
+                    .map(fetch::observed),
                 Some(fetch_error(
                     pc,
                     0x2000,
@@ -604,7 +600,9 @@ fn word_indirect_call_fetches_exact_three_or_eight_bytes_with_original_overflow_
                 .unwrap();
             memory.protect(range(0, 1), Permissions::EXECUTE).unwrap();
             assert_eq!(
-                decode_one(&memory, GuestAddress(top)).err(),
+                decode_one(&memory, GuestAddress(top))
+                    .err()
+                    .map(fetch::observed),
                 Some(fetch_error(
                     top,
                     top,
@@ -617,7 +615,9 @@ fn word_indirect_call_fetches_exact_three_or_eight_bytes_with_original_overflow_
             let mut memory = code_space(pc, form);
             memory.protect(range(denied, 1), Permissions::READ).unwrap();
             assert_eq!(
-                decode_one(&memory, GuestAddress(pc)).err(),
+                decode_one(&memory, GuestAddress(pc))
+                    .err()
+                    .map(fetch::observed),
                 Some(fetch_error(pc, denied, FaultReason::Permission, attempted))
             );
         }

@@ -1,10 +1,36 @@
 use super::{add_check, expect_field, helper_field, infrastructure, protocol_if_bad, reset_checks};
-use crate::abi::memory_helper::{CPU_SCALAR_HELPER_VERSION, CpuScalarOperation};
+use crate::abi::memory_helper::{
+    CPU_PAGE_FAULT_TRANSPORT, CPU_SCALAR_HELPER_VERSION, CpuScalarOperation,
+};
 use crate::cpu::dbt::wasm::locals::*;
 use wasm_encoder::{BlockType, InstructionSink};
 
 /// current CPU scalar bus replies; no legacy packet version is accepted here.
-pub(super) fn validate(code: &mut InstructionSink<'_>, width: u32, operation: CpuScalarOperation) {
+pub(super) fn validate(
+    code: &mut InstructionSink<'_>,
+    width: u32,
+    operation: CpuScalarOperation,
+    paging: bool,
+) {
+    if paging {
+        helper_field(code, 4);
+        code.i32_const(0x1000f)
+            .i32_eq()
+            .local_get(HELPER_STATUS)
+            .i32_const(CPU_PAGE_FAULT_TRANSPORT as i32)
+            .i32_eq()
+            .i32_or()
+            .if_(BlockType::Empty);
+        paging::validate(code, width, operation);
+        code.else_();
+        legacy_validate(code, width, operation);
+        code.end();
+    } else {
+        legacy_validate(code, width, operation);
+    }
+}
+
+fn legacy_validate(code: &mut InstructionSink<'_>, width: u32, operation: CpuScalarOperation) {
     assert!(matches!(width, 1 | 2 | 4));
     code.local_get(HELPER_STATUS).i32_eqz();
     if operation != CpuScalarOperation::Read {
@@ -51,6 +77,8 @@ pub(super) fn validate(code: &mut InstructionSink<'_>, width: u32, operation: Cp
     infrastructure(code, 2);
     code.end().end().end().end().end();
 }
+
+mod paging;
 
 fn success(code: &mut InstructionSink<'_>, width: u32, operation: CpuScalarOperation) {
     reset_checks(code);

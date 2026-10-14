@@ -6,11 +6,7 @@ use crate::{
     },
     cpu::{
         ExecutionExit, ExitReason,
-        dbt::{CompileError, InstructionError},
-        x86::{
-            DescriptorTableRegister32, SegmentDescriptorRecord, State32, SystemRegisterQuery,
-            decode::DecodeError,
-        },
+        x86::{DescriptorTableRegister32, SegmentDescriptorRecord, State32},
     },
     memory::GuestAddress,
     process::StoreCompletion,
@@ -49,24 +45,49 @@ fn engine() -> EngineInstance {
 }
 
 #[test]
-fn missing_field_is_neutral_and_explicit_images_do_not_revalidate_sparse_descriptors() {
+fn default_application_bank_admits_all_queries_without_system_memory_tables() {
+    for bytes in [
+        &[0x0f, 0x01, 0x00][..],
+        &[0x0f, 0x01, 0x08],
+        &[0x0f, 0x00, 0xc0],
+        &[0x0f, 0x00, 0xc8],
+        &[0x0f, 0x01, 0xe0],
+    ] {
+        for resident in [false, true] {
+            let mut e = engine();
+            assert_eq!(
+                e.system_register_bank,
+                Some(UserSystemRegisterBank32::application())
+            );
+            upload(&mut e, 0x1000, bytes);
+            specs(&mut e, &[0x1000, bytes.len() as u32]);
+            let before = e.arena().to_vec();
+            if resident {
+                e.compile_resident(1).unwrap();
+            } else {
+                e.compile(1).unwrap();
+            }
+            assert_eq!(&e.arena()[..TRANSFER_OFFSET], &before[..TRANSFER_OFFSET]);
+            assert_eq!(e.memory().unwrap().mapped_pages(), 4);
+            assert!(
+                e.memory()
+                    .unwrap()
+                    .permissions_at(GuestAddress(0xffff0000))
+                    .is_err()
+            );
+            assert!(
+                e.memory()
+                    .unwrap()
+                    .permissions_at(GuestAddress(0xffff1000))
+                    .is_err()
+            );
+        }
+    }
+}
+
+#[test]
+fn partial_readback_overrides_fill_defaults_and_can_change_before_publication() {
     let mut e = engine();
-    upload(&mut e, 0x1000, &[0x0f, 0x01, 0x08]);
-    specs(&mut e, &[0x1000, 3]);
-    let before = e.arena().to_vec();
-    assert_eq!(
-        e.compile(1),
-        Err(HostError::Compile(CompileError::Instruction {
-            pc: GuestAddress(0x1000),
-            cause: InstructionError::Decode(DecodeError::MissingSystemRegisterAuthority(
-                SystemRegisterQuery::Idtr
-            ))
-        }))
-    );
-    assert_eq!(e.arena(), before);
-    assert_eq!(e.generation(), 0);
-    assert!(e.artifact.is_none());
-    // Existing abstract table entries and cached state do not give GDTR/LDTR readback values.
     e.configure_segment_descriptor_raw(7, SegmentDescriptorRecord::from_words(0xffff, 0x0040_f200))
         .unwrap();
     let images = UserSystemRegisterBank32 {
@@ -83,11 +104,15 @@ fn missing_field_is_neutral_and_explicit_images_do_not_revalidate_sparse_descrip
         SegmentDescriptorRecord::from_words(0xffff, 0x0040_f200),
     )
     .unwrap();
-    assert_eq!(e.system_register_bank, Some(images));
-    let before = e.arena().to_vec();
     assert_eq!(
-        e.configure_system_register_bank(bank()),
-        Err(HostError::InvalidRequest)
+        e.system_register_bank,
+        Some(images.with_application_defaults())
+    );
+    let before = e.arena().to_vec();
+    e.configure_system_register_bank(bank()).unwrap();
+    assert_eq!(
+        e.system_register_bank,
+        Some(bank().with_application_defaults())
     );
     assert_eq!(e.arena(), before);
     e.close();
@@ -110,7 +135,10 @@ fn startup_configuration_freezes_for_both_material_owners_and_request_is_atomic(
             e.configure_system_register_bank(bank()),
             Err(HostError::InvalidRequest)
         );
-        assert_eq!(e.system_register_bank, None);
+        assert_eq!(
+            e.system_register_bank,
+            Some(UserSystemRegisterBank32::application())
+        );
         assert_eq!(e.arena(), before);
     }
     let mut e = engine();
@@ -124,12 +152,18 @@ fn startup_configuration_freezes_for_both_material_owners_and_request_is_atomic(
         Err(HostError::InvalidRequest)
     );
     assert_eq!(e.arena(), before);
-    assert_eq!(e.system_register_bank, None);
+    assert_eq!(
+        e.system_register_bank,
+        Some(UserSystemRegisterBank32::application())
+    );
     bytes[34] = 0;
     e.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + bytes.len()].copy_from_slice(&bytes);
     let before = e.arena().to_vec();
     e.configure_system_register_bank_request().unwrap();
-    assert_eq!(e.system_register_bank, Some(bank()));
+    assert_eq!(
+        e.system_register_bank,
+        Some(bank().with_application_defaults())
+    );
     assert_eq!(e.arena(), before);
 }
 
@@ -157,9 +191,11 @@ fn six_byte_store_preflights_late_page_before_bytes_and_versions_publish() {
     let packet = &e.arena()[HELPER_OFFSET..HELPER_OFFSET + 40];
     let field = |at| u32::from_le_bytes(packet[at..at + 4].try_into().unwrap());
     assert_eq!(
-        (field(16), field(28), field(32), field(36)),
-        (1, 0x3000, 2, 6)
+        (field(16), field(24), field(28), field(32), field(36)),
+        (9, 7, 0x3000, 2, 6)
     );
+    assert_eq!(&packet[4..6], &15_u16.to_le_bytes());
+    assert_eq!(e.cr2(), Some(GuestAddress(0x3000)));
     e.protect(0x3000, 1, 7).unwrap();
     assert_eq!(e.cpu_write(0x2ffd, 6, 1), Ok(StoreCompletion::Complete));
     e.memory()
@@ -220,6 +256,9 @@ fn pending_call_and_callback_busy_precede_frozen_or_invalid_configuration() {
             Err(HostError::Call(CallError::Busy))
         );
         assert_eq!(e.arena(), before);
-        assert_eq!(e.system_register_bank, Some(bank()));
+        assert_eq!(
+            e.system_register_bank,
+            Some(bank().with_application_defaults())
+        );
     }
 }

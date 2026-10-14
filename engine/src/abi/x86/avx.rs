@@ -10,8 +10,10 @@ pub(crate) use gather::{
     GATHER_ADDRESS_VERSION, GATHER_COMPLETED_OFFSET, GATHER_DESTINATION_OFFSET,
     GATHER_DETAIL_OFFSET, GATHER_FAULT_ADDRESS_OFFSET, GATHER_FAULT_LANE_OFFSET,
     GATHER_MASK_OFFSET, GATHER_NO_FAULT, GATHER_OUTPUT_SIZE, GATHER_OUTPUT_TRANSFER,
-    GATHER_RESULT_MAGIC, GATHER_RESULT_SIZE, GATHER_RESULT_VERSION, GATHER_STATUS_OFFSET,
-    GatherFaultKind, GatherFaultResult, GatherResult, decode_gather_address, encode_gather_result,
+    GATHER_PAGING_RESULT_VERSION, GATHER_RESULT_MAGIC, GATHER_RESULT_SIZE, GATHER_RESULT_VERSION,
+    GATHER_STATUS_OFFSET, GatherFaultKind, GatherFaultResult, GatherPagingGeometry, GatherResult,
+    decode_gather_address, decode_gather_paging_result, encode_gather_paging_result,
+    encode_gather_result,
 };
 
 pub(crate) const AVX_ADDRESS_MAGIC: [u8; 4] = *b"R3AM";

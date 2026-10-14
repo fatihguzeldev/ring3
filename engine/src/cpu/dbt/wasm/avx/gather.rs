@@ -26,6 +26,8 @@ use crate::{
     },
 };
 
+mod paging;
+
 pub(super) fn instruction(
     code: &mut InstructionSink<'_>,
     operation: AvxOperation,
@@ -53,28 +55,33 @@ pub(super) fn instruction(
         .local_get(FLAGS)
         .call(execute)
         .local_set(HELPER_STATUS);
-    super::super::code_fetch::check_context(code, exit_depth, imports.raw_task_context.is_some());
+    super::super::code_fetch::check_context(code, exit_depth);
 
     // host failures never authorize staged vector publication.
-    code.local_get(HELPER_STATUS).if_(BlockType::Empty);
+    if imports.paging_configured {
+        code.local_get(HELPER_STATUS)
+            .i32_eqz()
+            .local_get(HELPER_STATUS)
+            .i32_const(crate::abi::memory_helper::CPU_PAGE_FAULT_TRANSPORT as i32)
+            .i32_eq()
+            .i32_or()
+            .i32_eqz();
+    } else {
+        code.local_get(HELPER_STATUS);
+    }
+    code.if_(BlockType::Empty);
     memory::infrastructure(code, 3);
     code.end();
-    memory::exit_if_failed(code, exit_depth, imports.raw_task_context.is_some());
+    memory::exit_if_failed(code, exit_depth);
     validate_result(
         code,
         gather,
         address,
         locals,
         exit_depth,
-        imports.raw_task_context.is_some(),
+        imports.paging_configured,
     );
-    validate_outputs(
-        code,
-        gather,
-        locals,
-        exit_depth,
-        imports.raw_task_context.is_some(),
-    );
+    validate_outputs(code, gather, locals, exit_depth);
     // the ordinary avx paths reuse this local as their transfer payload pointer.
     code.local_get(STATE_PTR)
         .i32_const(TRANSFER_OFFSET as i32)
@@ -87,7 +94,7 @@ pub(super) fn instruction(
         address.resolved_segment(),
         gather.geometry().data_bytes(),
         exit_depth,
-        imports.raw_task_context.is_some(),
+        imports.paging_configured,
     );
 }
 
@@ -161,8 +168,7 @@ fn validate_result(
     address: GatherAddress,
     locals: AvxLocals,
     exit_depth: u32,
-
-    raw_task_context: bool,
+    paging_configured: bool,
 ) {
     memory::reset_checks(code);
     for (offset, value) in [
@@ -174,7 +180,9 @@ fn validate_result(
         (8, GATHER_RESULT_SIZE as u32),
         (12, 0),
     ] {
-        memory::expect_field(code, offset as u64, value);
+        if !paging_configured || offset != 4 {
+            memory::expect_field(code, offset as u64, value);
+        }
     }
     field(code, GATHER_STATUS_OFFSET);
     code.local_set(RHS);
@@ -187,18 +195,22 @@ fn validate_result(
     } else {
         3
     };
-    code.local_get(RHS)
-        .i32_eqz()
-        .i32_eqz()
-        .local_get(RHS)
-        .i32_const(1)
-        .i32_ne()
-        .i32_and()
-        .local_get(RHS)
-        .i32_const(segment_status)
-        .i32_ne()
-        .i32_and();
-    memory::add_check(code);
+    if paging_configured {
+        paging::validate_kind(code, segment_status);
+    } else {
+        code.local_get(RHS)
+            .i32_eqz()
+            .i32_eqz()
+            .local_get(RHS)
+            .i32_const(1)
+            .i32_ne()
+            .i32_and()
+            .local_get(RHS)
+            .i32_const(segment_status)
+            .i32_ne()
+            .i32_and();
+        memory::add_check(code);
+    }
     code.local_get(RHS).i32_eqz().if_(BlockType::Empty);
     code.local_get(locals.control)
         .local_get(locals.saved)
@@ -237,17 +249,23 @@ fn validate_result(
         .i32_and()
         .i32_ne();
     memory::add_check(code);
-    code.local_get(RHS)
-        .i32_const(1)
-        .i32_eq()
-        .if_(BlockType::Empty);
-    memory::expect_field(code, GATHER_ACCESS_OFFSET as u64, 1);
+    if paging_configured {
+        paging::is_memory(code);
+    } else {
+        code.local_get(RHS).i32_const(1).i32_eq();
+    }
+    code.if_(BlockType::Empty);
+    if paging_configured {
+        paging::validate_memory_fields(code);
+    } else {
+        memory::expect_field(code, GATHER_ACCESS_OFFSET as u64, 1);
+    }
     for lane in 0..gather.geometry().lanes() {
         code.local_get(locals.operand)
             .i32_const(lane as i32)
             .i32_eq()
             .if_(BlockType::Empty);
-        validate_fault_span(code, gather, address, locals, lane, raw_task_context);
+        validate_fault_span(code, gather, address, locals, lane, paging_configured);
         code.end();
     }
     code.else_();
@@ -260,7 +278,7 @@ fn validate_result(
     }
     code.end().end();
     memory::protocol_if_bad(code);
-    memory::exit_if_failed(code, exit_depth, raw_task_context);
+    memory::exit_if_failed(code, exit_depth);
 }
 
 fn validate_fault_span(
@@ -269,8 +287,7 @@ fn validate_fault_span(
     address: GatherAddress,
     locals: AvxLocals,
     lane: usize,
-
-    raw_task_context: bool,
+    paging_configured: bool,
 ) {
     let geometry = gather.geometry();
     let byte = lane * geometry.index_bytes();
@@ -281,12 +298,14 @@ fn validate_fault_span(
         .i32_mul()
         .local_get(ADDRESS)
         .i32_add();
-    segments::base(code, address.resolved_segment(), raw_task_context);
+    segments::base(code, address.resolved_segment());
     code.i32_add().local_set(RESULT);
     let width = geometry.data_bytes() as u32;
-    field(code, GATHER_DETAIL_OFFSET);
-    code.i32_const(1).i32_sub().i32_const(1).i32_gt_u();
-    memory::add_check(code);
+    if !paging_configured {
+        field(code, GATHER_DETAIL_OFFSET);
+        code.i32_const(1).i32_sub().i32_const(1).i32_gt_u();
+        memory::add_check(code);
+    }
     field(code, GATHER_FAULT_ADDRESS_OFFSET);
     code.local_get(RESULT)
         .i32_sub()
@@ -300,8 +319,6 @@ fn validate_outputs(
     gather: GatherInstruction,
     locals: AvxLocals,
     exit_depth: u32,
-
-    raw_task_context: bool,
 ) {
     memory::reset_checks(code);
     let geometry = gather.geometry();
@@ -353,7 +370,7 @@ fn validate_outputs(
         }
     }
     memory::protocol_if_bad(code);
-    memory::exit_if_failed(code, exit_depth, raw_task_context);
+    memory::exit_if_failed(code, exit_depth);
 }
 
 fn operand_exit(
@@ -361,35 +378,38 @@ fn operand_exit(
     segment: SegmentRegister,
     width: usize,
     exit_depth: u32,
-
-    raw_task_context: bool,
+    paging_configured: bool,
 ) {
-    code.local_get(RHS).if_(BlockType::Empty);
-    code.local_get(RHS)
-        .i32_const(1)
-        .i32_eq()
-        .if_(BlockType::Empty);
-    code.i32_const(5).local_set(REASON);
-    field(code, GATHER_DETAIL_OFFSET);
-    code.local_set(DETAIL);
-    field(code, GATHER_FAULT_ADDRESS_OFFSET);
-    code.local_set(FAULT_ADDRESS);
-    code.i32_const(1)
-        .local_set(FAULT_ACCESS)
-        .i32_const(width as i32)
-        .local_set(FAULT_LENGTH);
-    code.else_()
-        .i32_const(if segment == SegmentRegister::Ss {
-            15
-        } else {
-            11
-        })
-        .local_set(REASON);
-    for local in [DETAIL, FAULT_ADDRESS, FAULT_ACCESS, FAULT_LENGTH] {
-        code.i32_const(0).local_set(local);
+    if paging_configured {
+        paging::operand_exit(code, segment, width);
+    } else {
+        code.local_get(RHS).if_(BlockType::Empty);
+        code.local_get(RHS)
+            .i32_const(1)
+            .i32_eq()
+            .if_(BlockType::Empty);
+        code.i32_const(5).local_set(REASON);
+        field(code, GATHER_DETAIL_OFFSET);
+        code.local_set(DETAIL);
+        field(code, GATHER_FAULT_ADDRESS_OFFSET);
+        code.local_set(FAULT_ADDRESS);
+        code.i32_const(1)
+            .local_set(FAULT_ACCESS)
+            .i32_const(width as i32)
+            .local_set(FAULT_LENGTH);
+        code.else_()
+            .i32_const(if segment == SegmentRegister::Ss {
+                15
+            } else {
+                11
+            })
+            .local_set(REASON);
+        for local in [DETAIL, FAULT_ADDRESS, FAULT_ACCESS, FAULT_LENGTH] {
+            code.i32_const(0).local_set(local);
+        }
+        code.end().end();
     }
-    code.end().end();
-    memory::exit_if_failed(code, exit_depth, raw_task_context);
+    memory::exit_if_failed(code, exit_depth);
 }
 
 fn publish(code: &mut InstructionSink<'_>, register: VectorRegister, offset: usize) {

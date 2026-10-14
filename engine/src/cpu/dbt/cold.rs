@@ -210,10 +210,7 @@ fn prepare(
         });
     }
 
-    Ok(PreparedRegion::new(memory, blocks, cs)
-        .with_task_return_authority(authority.task_return_configured)
-        .with_task_revision(authority.task_execution_revision)
-        .with_exception_detection(authority.interrupts_configured))
+    Ok(PreparedRegion::new(memory, blocks, cs))
 }
 
 // automatic emission can shorten a candidate without dropping a requested entry.
@@ -250,3 +247,7 @@ mod tests;
 #[cfg(test)]
 #[path = "cold/tests/capacity.rs"]
 mod capacity;
+
+#[cfg(test)]
+#[path = "cold/tests/paging.rs"]
+mod paging_tests;

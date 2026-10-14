@@ -1,7 +1,7 @@
 use super::*;
 use crate::{
     cpu::x86::{SegmentCache, simd::SimdState},
-    memory::{FaultReason, MemoryFault, PageRange, Permissions},
+    memory::{PageRange, Permissions},
 };
 fn r(i: u8) -> VectorRegister {
     VectorRegister::new(i).unwrap()
@@ -165,6 +165,11 @@ fn disabled_lanes_do_not_extend_segment_or_page_authority() {
         .unwrap();
         set_mask(&mut s, i, 2);
         let before = s;
+        let (access, error_code) = if i.access() == Access::Write {
+            (crate::cpu::x86::PagingAccess32::Write, 6)
+        } else {
+            (crate::cpu::x86::PagingAccess32::Read, 4)
+        };
         assert!(matches!(
             s.execute_masked(
                 i,
@@ -173,10 +178,10 @@ fn disabled_lanes_do_not_extend_segment_or_page_authority() {
                 0x2000 - i.lane_bytes() as u32,
                 &mut m
             ),
-            Err(MaskedError::Memory(MemoryError::Fault(MemoryFault {
-                reason: FaultReason::Unmapped,
-                ..
-            })))
+            Err(MaskedError::Paging(CpuPagingError32::PageFault(fault)))
+                if fault.linear() == GuestAddress(0x2000)
+                    && fault.error_code() == error_code
+                    && fault.access() == access
         ));
         assert_eq!(s, before);
     }

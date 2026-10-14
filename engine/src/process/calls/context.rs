@@ -23,11 +23,11 @@ use crate::{
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::process) struct ExtendedCpuState {
     pub(in crate::process) x87: [u8; X87_SIZE],
-    simd: [u8; SIMD_SIZE],
-    segments: [u8; SEGMENTS_SIZE],
-    segment_bases: Option<[u8; SEGMENT_BASES_RECORD_SIZE]>,
-    upper: [u8; YMM_SIZE],
-    metadata: StateMetadata,
+    pub(in crate::process) simd: [u8; SIMD_SIZE],
+    pub(in crate::process) segments: [u8; SEGMENTS_SIZE],
+    pub(in crate::process) segment_bases: Option<[u8; SEGMENT_BASES_RECORD_SIZE]>,
+    pub(in crate::process) upper: [u8; YMM_SIZE],
+    pub(in crate::process) metadata: StateMetadata,
 }
 
 impl ExtendedCpuState {
@@ -181,7 +181,6 @@ mod tests {
         )
         .unwrap();
         let outer = PendingCall {
-            task_revision: engine.task_execution_revision(),
             token: 1,
             owner: PendingOwner::Replacement(1),
             frame,
@@ -334,7 +333,3 @@ mod tests {
 #[cfg(test)]
 #[path = "context/upper.rs"]
 mod upper;
-
-#[cfg(test)]
-#[path = "context/tasks.rs"]
-mod tasks;

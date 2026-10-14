@@ -1,3 +1,4 @@
+use super::support_fetch as fetch;
 use super::support_prefix_admission as prefix_admission;
 
 use ring3_engine::{
@@ -14,9 +15,7 @@ use ring3_engine::{
             ir::{Location32, Operation, Value32},
         },
     },
-    memory::{
-        Access, AddressSpace, FaultReason, GuestAddress, MemoryFault, PageRange, Permissions,
-    },
+    memory::{Access, AddressSpace, FaultReason, GuestAddress, PageRange, Permissions},
     process::{EngineInstance, HostError},
 };
 
@@ -262,16 +261,8 @@ fn alignment_nop_exact_grammar_keeps_prefix_segment_and_payload_neighbors_closed
     }
 }
 
-fn fetch_error(pc: u32, address: u32, length: usize, reason: FaultReason) -> DecodeError {
-    DecodeError::MemoryFault {
-        pc: GuestAddress(pc),
-        fault: MemoryFault {
-            address: GuestAddress(address),
-            access: Access::Execute,
-            reason,
-        },
-        length: length as u32,
-    }
+fn fetch_error(pc: u32, address: u32, length: usize, reason: FaultReason) -> fetch::FetchFault {
+    fetch::expected(pc, address, reason, length as u32)
 }
 
 #[test]
@@ -299,7 +290,9 @@ fn alignment_nop_fetches_every_byte_without_overreading_page_or_wrapping_top() {
             let pc = 0x2000 - cut as u32;
             let mut memory = code_space(pc, &bytes[..cut]);
             assert_eq!(
-                decode_one(&memory, GuestAddress(pc)).err(),
+                decode_one(&memory, GuestAddress(pc))
+                    .err()
+                    .map(fetch::observed),
                 Some(fetch_error(pc, 0x2000, cut + 1, FaultReason::Unmapped))
             );
             memory
@@ -309,7 +302,9 @@ fn alignment_nop_fetches_every_byte_without_overreading_page_or_wrapping_top() {
                 )
                 .unwrap();
             assert_eq!(
-                decode_one(&memory, GuestAddress(pc)).err(),
+                decode_one(&memory, GuestAddress(pc))
+                    .err()
+                    .map(fetch::observed),
                 Some(fetch_error(pc, 0x2000, cut + 1, FaultReason::Permission))
             );
             let top = u32::MAX - cut as u32 + 1;
@@ -319,7 +314,9 @@ fn alignment_nop_fetches_every_byte_without_overreading_page_or_wrapping_top() {
             memory.write(GuestAddress(0), &bytes[cut..]).unwrap();
             memory.protect(zero, Permissions::EXECUTE).unwrap();
             assert_eq!(
-                decode_one(&memory, GuestAddress(top)).err(),
+                decode_one(&memory, GuestAddress(top))
+                    .err()
+                    .map(fetch::observed),
                 Some(fetch_error(top, top, cut + 1, FaultReason::AddressOverflow))
             );
         }
@@ -331,7 +328,9 @@ fn alignment_nop_fetches_every_byte_without_overreading_page_or_wrapping_top() {
             )
             .unwrap();
         assert_eq!(
-            decode_one(&memory, GuestAddress(CODE)).err(),
+            decode_one(&memory, GuestAddress(CODE))
+                .err()
+                .map(fetch::observed),
             Some(fetch_error(CODE, CODE, 1, FaultReason::Permission))
         );
     }
@@ -570,7 +569,9 @@ fn endbranch_fetch_requires_the_final_opcode_byte_before_nop_admission() {
         let pc = 0x1ffd;
         let mut memory = code_space(pc, &bytes[..3]);
         assert_eq!(
-            decode_one(&memory, GuestAddress(pc)).err(),
+            decode_one(&memory, GuestAddress(pc))
+                .err()
+                .map(fetch::observed),
             Some(fetch_error(pc, 0x2000, 4, FaultReason::Unmapped))
         );
         let second = PageRange::new(GuestAddress(0x2000), 1).unwrap();
@@ -578,7 +579,9 @@ fn endbranch_fetch_requires_the_final_opcode_byte_before_nop_admission() {
         memory.write(GuestAddress(0x2000), &bytes[3..]).unwrap();
         memory.protect(second, Permissions::READ).unwrap();
         assert_eq!(
-            decode_one(&memory, GuestAddress(pc)).err(),
+            decode_one(&memory, GuestAddress(pc))
+                .err()
+                .map(fetch::observed),
             Some(fetch_error(pc, 0x2000, 4, FaultReason::Permission))
         );
         memory.protect(second, Permissions::EXECUTE).unwrap();
@@ -634,7 +637,7 @@ fn legacy_modrm_nop_alias_keeps_full_displacement_fetch_and_source_identity() {
     let pc = 0x2000 - bytes.len() as u32 + 1;
     let mut memory = code_space(pc, &bytes[..bytes.len() - 1]);
     assert_eq!(
-        decode_one(&memory, GuestAddress(pc)).unwrap_err(),
+        fetch::observed(decode_one(&memory, GuestAddress(pc)).unwrap_err()),
         fetch_error(pc, 0x2000, bytes.len(), FaultReason::Unmapped)
     );
     let last = PageRange::new(GuestAddress(0x2000), 1).unwrap();
@@ -644,7 +647,7 @@ fn legacy_modrm_nop_alias_keeps_full_displacement_fetch_and_source_identity() {
         .unwrap();
     memory.protect(last, Permissions::READ).unwrap();
     assert_eq!(
-        decode_one(&memory, GuestAddress(pc)).unwrap_err(),
+        fetch::observed(decode_one(&memory, GuestAddress(pc)).unwrap_err()),
         fetch_error(pc, 0x2000, bytes.len(), FaultReason::Permission)
     );
     memory.protect(last, Permissions::EXECUTE).unwrap();

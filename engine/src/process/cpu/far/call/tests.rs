@@ -104,8 +104,13 @@ fn second_stack_page_and_version_failure_leave_ram_cs_and_descriptor_unchanged()
         engine.far_call(0x2000, 0x43, 0, 0x1007, esp).unwrap();
         assert_eq!(
             (field(&engine, 16), field(&engine, 24)),
-            if exhausted { (2, 1) } else { (1, 1) }
+            if exhausted { (2, 1) } else { (9, 6) }
         );
+        if exhausted {
+            assert_eq!(engine.cr2(), None);
+        } else {
+            super::super::support::page_fault_packet(&engine, [9, 0, 6, 0x6ffc, 2, 4]);
+        }
         only_packet_changed(&before, &engine);
         assert_eq!(engine.segment_descriptors, table);
         let mut after = [0; 8];

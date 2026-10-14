@@ -2,13 +2,11 @@ pub mod arena;
 pub mod call_frame;
 pub mod callback;
 pub mod cpu_helper;
-pub mod exception;
 pub mod far;
 #[forbid(unsafe_code)]
 pub(crate) mod header;
 pub mod memory_helper;
 pub mod resident_callback;
-pub mod tasks;
 #[cfg(target_arch = "wasm32")]
 mod wasm;
 #[forbid(unsafe_code)]
@@ -29,9 +27,4 @@ pub enum AbiError {
     MemoryHelper,
     CallFrame,
     CallbackFrame,
-    TaskSources,
-    TaskContext,
-    TaskControls,
 }
-
-pub mod interrupt;

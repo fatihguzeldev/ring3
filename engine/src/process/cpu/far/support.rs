@@ -31,3 +31,16 @@ pub(super) fn field(engine: &EngineInstance, offset: usize) -> u32 {
             .unwrap(),
     )
 }
+
+pub(super) fn page_fault_packet(engine: &EngineInstance, fields: [u32; 6]) {
+    let mut expected = [0; HELPER_SIZE];
+    expected[..16].copy_from_slice(&[82, 51, 77, 72, 15, 0, 1, 0, 40, 0, 0, 0, 0, 0, 0, 0]);
+    for (index, value) in fields.into_iter().enumerate() {
+        expected[16 + index * 4..20 + index * 4].copy_from_slice(&value.to_le_bytes());
+    }
+    assert_eq!(
+        &engine.arena()[HELPER_OFFSET..HELPER_OFFSET + HELPER_SIZE],
+        expected
+    );
+    assert_eq!(engine.cr2(), Some(crate::memory::GuestAddress(fields[3])));
+}

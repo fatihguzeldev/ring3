@@ -62,9 +62,14 @@ pub(super) fn prepare(
         if let Some(cs) = cs {
             cs.fetch(memory, gate.entry, &mut bytes[..length])
         } else {
-            memory.fetch(gate.entry, &mut bytes[..length])
+            crate::cpu::x86::decode::fetch_unbound(memory, gate.entry, &mut bytes[..length])
         }
-        .map_err(|error| memory_error(gate.entry, error))?;
+        .map_err(|error| CompileError::Instruction {
+            pc: gate.entry,
+            cause: InstructionError::Decode(crate::cpu::x86::decode::paging_error(
+                error, gate.entry, length,
+            )),
+        })?;
     }
     if bytes != [0x0f, 0x0b] {
         return Err(CompileError::Instruction {

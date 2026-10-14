@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {mkdtempSync, mkdirSync, rmSync, writeFileSync} from 'node:fs';
+import {mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'node:test';
@@ -56,5 +56,64 @@ test('duplicate child declarations and exported names remain errors', () => {
   });
   workspace(parent, 'export_process_calls! { read32(address: u32); }\n', root => {
     assert.throws(() => assertEngineExports(module, root), /unique declared engine exports/);
+  });
+});
+
+const detectionSource = readFileSync(new URL('../../../src/abi/wasm/exports/detection.rs', import.meta.url), 'utf8');
+const detectionNames = ['ring3_abi_v1_guard_detect', 'ring3_abi_v1_guard_detect_resident', 'ring3_abi_v1_finish_exception_detection'];
+
+function detectionWorkspace(source, check) {
+  const root = mkdtempSync(join(tmpdir(), 'ring3-detection-exports-'));
+  const dir = join(root, 'engine/src/abi/wasm/exports');
+  mkdirSync(dir, {recursive: true});
+  writeFileSync(join(dir, 'mod.rs'), 'macro_rules! export_process_calls {\n}\nmod detection;\n');
+  writeFileSync(join(dir, 'detection.rs'), source);
+  try { check(root); } finally { rmSync(root, {recursive: true, force: true}); }
+}
+
+test('real detection owner retains parsed exact exports, i64 epoch position, arities and source pin', () => {
+  detectionWorkspace(detectionSource, root => {
+    const result = assertEngineExports(moduleWith(detectionNames), root);
+    assert.deepEqual(result.functions.map(row => [row.name, row.arity]), [
+      [detectionNames[0], 6], [detectionNames[1], 7], [detectionNames[2], 12],
+    ]);
+    assert.ok(result.sourcePaths.includes('engine/src/abi/wasm/exports/detection.rs'));
+    assert.throws(() => assertEngineExports(moduleWith(detectionNames.slice(0, 2)), root), /exact declared engine exports/);
+  });
+});
+
+test('detection macro body, names, duplicate declarations and extra tokens stay closed', () => {
+  for (const source of [
+    detectionSource.replace('-> i64', '-> u32'),
+    detectionSource.replace('"ring3_abi_v1_"', '"ring3_abi_ v1_"'),
+    detectionSource.replace('pub extern', 'pubex tern'),
+    detectionSource.replace('export_detection_guards! {', 'export_unknown_guards! {'),
+    detectionSource.replace('guard_detect(low:', 'guard_other(low:'),
+    detectionSource.replace('guard_detect_resident(low:', 'guard_detect(low:'),
+    detectionSource.replace('generation: u32, state:', 'generation: u32,, state:'),
+    detectionSource.replace('export_detection_guards! {', 'export_detection_guards! {\n    guard_detect(low: u32, high: u32, generation: u32, state: u32, exit: u32, cancel: u32);'),
+    detectionSource.replace('finish_exception_detection(epoch:', 'finish_other(epoch:'),
+    detectionSource + '\nfn hidden() {}\n',
+  ]) {
+    detectionWorkspace(source, root => {
+      assert.throws(() => assertEngineExports(moduleWith(detectionNames), root), /detection|guard/);
+    });
+  }
+});
+
+test('detection i64 parameter position and all three source arities remain exact', () => {
+  for (const source of [
+    detectionSource.replace('epoch: i64, reason: u32', 'epoch: u32, reason: i64'),
+    detectionSource.replace('epoch: i64', 'epoch: u32'),
+    detectionSource.replace('generation: u32, ', ''),
+    detectionSource.replace('id_high: u32, ', ''),
+    detectionSource.replace(', restart_work: u32', ''),
+  ]) {
+    detectionWorkspace(source, root => {
+      assert.throws(() => assertEngineExports(moduleWith(detectionNames), root), /detection parameters/);
+    });
+  }
+  workspace(parent, 'export_process_calls! { cpu_store32(address: i64, value: u32); }\n', root => {
+    assert.throws(() => assertEngineExports(module, root), /ABI parameter/);
   });
 });

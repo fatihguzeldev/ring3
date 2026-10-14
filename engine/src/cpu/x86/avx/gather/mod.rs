@@ -1,8 +1,14 @@
 use super::{VectorRegister, VectorState};
 use crate::{
-    cpu::x86::{SegmentAccess, SegmentAccessError, SegmentContext, SegmentRegister},
-    memory::{AddressSpace, GuestAddress, MemoryError, MemoryFault},
+    cpu::x86::{
+        CpuPagingError32, CpuReadPort32, SegmentAccess, SegmentAccessError, SegmentContext,
+        SegmentRegister,
+    },
+    memory::{GuestAddress, MemoryError, MemoryFault},
 };
+
+#[cfg(test)]
+use crate::{cpu::x86::DefaultCpuReadPort32, memory::AddressSpace};
 
 mod address;
 mod geometry;
@@ -46,6 +52,7 @@ pub(crate) enum GatherFaultCause {
         cause: SegmentAccessError,
     },
     Memory(MemoryFault),
+    Paging(CpuPagingError32),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -106,6 +113,7 @@ impl GatherInstruction {
     }
 
     /// produce a staged result even for an ordinary operand fault; never publish vector state.
+    #[cfg(test)]
     pub(crate) fn evaluate(
         self,
         inputs: GatherInputs,
@@ -114,42 +122,22 @@ impl GatherInstruction {
         segments: Option<&SegmentContext>,
         memory: &AddressSpace,
     ) -> Result<GatherOutcome, GatherError> {
-        self.evaluate_context(
+        self.evaluate_with_port(
             inputs,
             segment,
             base_offset,
             segments,
-            memory,
-            segments.is_some_and(SegmentContext::is_valid),
+            &mut DefaultCpuReadPort32::new(memory),
         )
     }
 
-    pub(crate) fn evaluate_task(
-        self,
-        inputs: GatherInputs,
-        segment: SegmentRegister,
-        base_offset: u32,
-        context: &crate::cpu::x86::tasks::TaskIncomingContext32,
-        memory: &AddressSpace,
-    ) -> Result<GatherOutcome, GatherError> {
-        self.evaluate_context(
-            inputs,
-            segment,
-            base_offset,
-            Some(&context.segment_image()),
-            memory,
-            crate::cpu::x86::tasks::TaskIncomingContext32::from_image(context.image()).is_some(),
-        )
-    }
-
-    fn evaluate_context(
+    pub(crate) fn evaluate_with_port(
         self,
         inputs: GatherInputs,
         segment: SegmentRegister,
         base_offset: u32,
         segments: Option<&SegmentContext>,
-        memory: &AddressSpace,
-        context_valid: bool,
+        memory: &mut impl CpuReadPort32,
     ) -> Result<GatherOutcome, GatherError> {
         let geometry = self.geometry;
         let bytes = geometry.data_bytes();
@@ -173,7 +161,7 @@ impl GatherInstruction {
             return Ok(outcome);
         }
         let segments = segments
-            .filter(|_| context_valid)
+            .filter(|context| context.is_valid())
             .ok_or(GatherError::InvalidContext)?;
         // ascending order is the software implementation's repeatable completion policy.
         // segment and page checks belong to each lane, never a whole-gather preflight.
@@ -195,16 +183,25 @@ impl GatherInstruction {
             }
             let address = GuestAddress(segments.state.bases[segment.index()].wrapping_add(offset));
             let mut value = [0; 8];
-            match memory.cpu_read(address, &mut value[..bytes]) {
+            match memory.read(address, &mut value[..bytes]) {
                 Ok(()) => {}
-                Err(MemoryError::Fault(fault)) => {
+                Err(CpuPagingError32::Memory(MemoryError::Fault(fault))) => {
                     outcome.fault = Some(GatherFault {
                         lane: lane as u8,
                         cause: GatherFaultCause::Memory(fault),
                     });
                     return Ok(outcome);
                 }
-                Err(error) => return Err(GatherError::Infrastructure(error)),
+                Err(CpuPagingError32::Memory(error)) => {
+                    return Err(GatherError::Infrastructure(error));
+                }
+                Err(error) => {
+                    outcome.fault = Some(GatherFault {
+                        lane: lane as u8,
+                        cause: GatherFaultCause::Paging(error),
+                    });
+                    return Ok(outcome);
+                }
             }
             outcome.destination[lane * bytes..(lane + 1) * bytes].copy_from_slice(&value[..bytes]);
             outcome.mask[lane * bytes..(lane + 1) * bytes].fill(0);
@@ -214,7 +211,7 @@ impl GatherInstruction {
         Ok(outcome)
     }
 
-    fn lane_offset(self, index: &[u8; 32], lane: usize, base: u32) -> u32 {
+    pub(crate) fn lane_offset(self, index: &[u8; 32], lane: usize, base: u32) -> u32 {
         let at = lane * self.geometry.index_bytes();
         let signed = if self.geometry.index_bytes() == 4 {
             i64::from(i32::from_le_bytes(index[at..at + 4].try_into().unwrap()))
@@ -229,3 +226,7 @@ impl GatherInstruction {
 #[cfg(test)]
 #[path = "native.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "paging.rs"]
+mod paging_tests;
