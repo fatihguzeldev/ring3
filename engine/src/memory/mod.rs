@@ -1,5 +1,6 @@
 mod address;
 mod code;
+mod paging;
 mod space;
 
 pub use address::{
@@ -8,3 +9,7 @@ pub use address::{
 };
 pub use code::CodeSnapshot;
 pub use space::AddressSpace;
+
+pub use paging::PagingCertificate32;
+
+pub(crate) use paging::{PagingBacking32, PagingCheckError32};
