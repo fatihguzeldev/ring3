@@ -117,8 +117,8 @@ mod cpu_scalar_availability;
 #[path = "hints/reserved/wasm.rs"]
 mod cpu_legacy_nop_wasm;
 
-#[path = "interrupt/exception/paging/wasm.rs"]
-mod cpu_certified_paging;
+#[path = "exceptions/memory/wasm.rs"]
+mod cpu_application_memory;
 
 #[path = "near/repeat/wasm.rs"]
 mod cpu_repeat_near_return;

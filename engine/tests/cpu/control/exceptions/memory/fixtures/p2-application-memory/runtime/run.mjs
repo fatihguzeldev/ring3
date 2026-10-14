@@ -12,8 +12,8 @@ assert.ok(enginePath && output && root);
 const support = 'engine/tests/cpu/segments/code/base/fixtures/p2-cs-base/runtime/support.mjs';
 const {harness, writeRAM, hash} = await import(pathToFileURL(join(root, support)));
 const h = await harness(enginePath, output, root);
-const prefix = 'engine/tests/cpu/control/interrupt/exception/paging/';
-const sourcePaths = [support, prefix + 'wasm.rs', ...['run.mjs', 'cases.mjs', 'oracle.mjs', 'generic.mjs', 'images.mjs', 'fetch.mjs'].map(p => prefix + 'fixtures/p2-certified-paging/runtime/' + p),
+const prefix = 'engine/tests/cpu/control/exceptions/memory/';
+const sourcePaths = [support, prefix + 'wasm.rs', ...['run.mjs', 'cases.mjs', 'oracle.mjs', 'generic.mjs', 'images.mjs', 'fetch.mjs'].map(p => prefix + 'fixtures/p2-application-memory/runtime/' + p),
   'engine/src/memory/space/paging.rs', 'engine/src/cpu/x86/paging/inspect.rs',
   'engine/src/process/memory/paging.rs', 'engine/src/process/memory/paging/port.rs',
   'engine/src/process/memory/cpu_scalar.rs', 'engine/src/process/memory/scalar/cpu_write.rs',

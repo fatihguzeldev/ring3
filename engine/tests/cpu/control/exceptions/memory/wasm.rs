@@ -14,7 +14,7 @@ fn actual_application_memory_binds_access_faults_cr2_partial_gather_and_nx_fetch
         .expect("select the integrated application-memory engine");
     assert!(engine.is_file());
     let expected = std::env::var("RING3_ENGINE_SHA256").expect("select its explicit SHA-256");
-    let output = root.join("target/p2-certified-paging").join(format!(
+    let output = root.join("target/p2-application-memory").join(format!(
         "paging-{}-{}",
         std::process::id(),
         SystemTime::now()
@@ -28,7 +28,7 @@ fn actual_application_memory_binds_access_faults_cr2_partial_gather_and_nx_fetch
     fs::write(output.join("initial-arena.bin"), initial).unwrap();
     let result = wasm_support::run_node(
         root,
-        "engine/tests/cpu/control/interrupt/exception/paging/fixtures/p2-certified-paging/runtime/run.mjs",
+        "engine/tests/cpu/control/exceptions/memory/fixtures/p2-application-memory/runtime/run.mjs",
         &engine,
         &output,
         Some(&expected),
