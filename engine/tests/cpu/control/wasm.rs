@@ -110,3 +110,6 @@ mod cpu_amd_absence;
 
 #[path = "exceptions/availability/system/wasm.rs"]
 mod cpu_system_availability;
+
+#[path = "exceptions/availability/scalar/wasm.rs"]
+mod cpu_scalar_availability;

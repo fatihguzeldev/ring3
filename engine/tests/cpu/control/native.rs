@@ -99,3 +99,6 @@ mod cpu_amd_absence;
 
 #[path = "exceptions/availability/system/native.rs"]
 mod cpu_system_availability;
+
+#[path = "exceptions/availability/scalar/native.rs"]
+mod cpu_scalar_availability;
