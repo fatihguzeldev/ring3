@@ -11,6 +11,7 @@ const own = 'engine/tests/cpu/control/exceptions/availability/system/';
 const paths = [own + 'wasm.rs', own + 'fixtures/p2-system-availability/runtime/run.mjs',
   'engine/tests/cpu/control/wasm.rs', 'engine/src/cpu/x86/capabilities.rs', 'engine/src/cpu/x86/environment.rs',
   'engine/src/cpu/x86/decode/execution_faults.rs', 'engine/src/cpu/x86/decode/execution_faults/tests/system.rs',
+  'engine/src/cpu/x86/decode/execution_faults/tests/invpcid.rs',
   'engine/src/cpu/x86/decode/execution_faults/optional.rs', 'engine/src/cpu/x86/decode/execution_faults/optional/amd.rs',
   'engine/src/cpu/x86/decode/execution_faults/optional/amd/tests.rs', 'engine/src/cpu/x86/decode/decoder.rs',
   'engine/src/cpu/x86/decode/profile.rs', 'engine/src/cpu/dbt/wasm/control_instructions.rs',
@@ -27,12 +28,14 @@ const selected = [
   {code: 'XOP_Lwpval_r32_rm32_imm32', hex: '64678fea78120800000000', reason: 20, d16: true,
     why: 'D16/address32 nullFS memory never reaches an operand read'},
   {code: 'Pconfig', hex: '0f01c5', reason: 20, why: 'invalid leaf and unaligned/unmapped EBX cannot precede absent-feature/CPL UD'},
+  {code: 'Invpcid_r32_m128', hex: '36660f38820c24', reason: 20,
+    why: 'explicit AMD-compatible policy: absent feature precedes CPL3/invalid ECX type/shortSS descriptor access'},
   {code: 'Invlpgbd', hex: '0f01fe', reason: 20, why: 'absent feature precedes CPL3/reserved-input GP'},
   {code: 'Invlpgbw', hex: '670f01fe', reason: 20, why: 'address16 broadcast form has the same absent-feature UD'},
   {code: 'Tlbsync', hex: '0f01ff', reason: 20, why: 'absent feature needs no guessed EFER/VMCB or synchronization effect'},
   {code: 'Wbnoinvd', hex: 'f30f09', reason: 11, why: 'feature absence falls back to privileged WBINVD and must produce GP0'},
 ];
-assert.equal(new Set(selected.map(row => row.code)).size, 9);
+assert.equal(new Set(selected.map(row => row.code)).size, 10);
 let contexts = 0, plannedInvocations = 0, invoked = 0, plannedCompiles = 0, plannedRefusals = 0;
 function seed(pc, {d16 = false, flags = FLAGS | RF | TF, shadow = 1} = {}) {
   const input = state(h.initial, {pc, flags, regs}); input.writeUInt32LE(shadow, 12);
@@ -120,13 +123,14 @@ for (const resident of [false, true]) for (const entries of [false, true]) {
     h.host(c, 'close');
   }
 }
-assert.equal(contexts, 60); assert.equal(plannedCompiles, 196); assert.equal(plannedRefusals, 84);
-assert.equal(plannedInvocations, 112); assert.deepEqual(pins(), sourcePins);
+assert.equal(contexts, 64); assert.equal(plannedCompiles, 208); assert.equal(plannedRefusals, 88);
+assert.equal(plannedInvocations, 120); assert.deepEqual(pins(), sourcePins);
 writeFileSync(join(output, 'system-availability-counts.json'), JSON.stringify({contexts, plannedCompiles, plannedRefusals,
   plannedInvocations, invoked, totalRowsPlanned: plannedCompiles + plannedInvocations,
   selectedCodes: selected.map(row => row.code), sourcePins}, null, 2) + '\n');
 h.finish([
-  'nine qualified protected16/32 Codes only: LWP4 and PCONFIG/INVLPGB/TLBSYNC UD versus absent-WBNOINVD fallback GP0',
+  'nine original qualified protected16/32 Codes plus one explicitly selected AMD-compatible INVPCID absence rule; WBNOINVD remains fallback GP0',
+  'INVPCID priority is the adopted Ring3Engine policy under AMD Table8-9; this does not resolve competing Intel exception ordering or admit the other five held forms',
   'four real replacement/resident by extent/entry routes; literal full4796 arena/allmappedRAM, allGPR/flags/numeric/segment state, guard-only helper traces and retirement',
   'nullDS implicit pointer, preserved EAX and CF, D16/address32 nullFS operand, poison platform/TLB inputs and mandatoryF3 fallback distinguish accidental success or operand checks',
   'LWP last-immediate and WBNOINVD last-opcode missing/nonEXEC/EXEC repair retain fullfetch software policy; AMD permits model-dependent earlierUD at later-byte boundaries',
