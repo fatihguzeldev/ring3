@@ -3,13 +3,15 @@ import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
+import {pathToFileURL} from 'node:url';
 
 const [enginePath, outputDir, root] = process.argv.slice(2);
 assert.ok(root);
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
-const engineBytes = readFileSync(enginePath), engineModule = new WebAssembly.Module(engineBytes);
+const {readEngine} = await import(pathToFileURL(join(root, 'engine/tests/support/wasm/engine.mjs')));
+const {bytes: engineBytes, module: engineModule} = readEngine(enginePath);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
-const SIZE = 4612, TRANSFER = 140, KEY = 0xb2345678d0000000n;
+const SIZE = 4796, TRANSFER = 140, KEY = 0xb2345678d0000000n;
 const names = ['open', 'close', 'arena_ptr', 'map', 'upload', 'compile_resident_with_gates', 'guard_dispatch_entry', 'dispatcher_module', 'guard_resident', 'read32', 'write32', 'store_resident32', 'capture_resident_call', 'complete_resident_call', 'acknowledge_resident_installation', 'find_installed_resident', 'cpu_read32', 'cpu_store_resident32'];
 const stats = {engine_instances: 0, compiled_units: 0, dispatcher_metadata32: 0, resident_metadata24: 0, getter_rejections: 0, preopen_getter_calls: 0, ack_success: 0, dispatcher_calls: 0, dispatcher_canonical: 0, dispatcher_rejections: 0, dispatcher_child_entries: 0, dispatcher_lookup_calls: 0, dispatcher_lookup_success: 0, dispatcher_lookup_failure: 0, platform_traps: 0, zero_progress_stops: 0, full_arena_checks: 0, host_reads: 0, host_writes: 0, guest_store32: 0, resident_captures: 0, resident_completions: 0, closed_engines: 0};
 const artifacts = {'wrong.wasm': hash(readFileSync(join(outputDir, 'wrong.wasm')))}, authored = {}, units = [], metadata = [], dispatcherMetadata = [], bindings = [], sections = [], algorithm = [], mismatch = [];
@@ -24,7 +26,7 @@ function state(eax = 0xfffffffd, ecx = 5, flags = 0x403, pc = 0x1000) { return {
 function stateBytes(s) { const b = new Uint8Array(56), v = new DataView(b.buffer); header(b, v, 0, 'R3ST', 56); s.registers.forEach((x, i) => v.setUint32(16 + i * 4, x, true)); v.setUint32(48, s.eip, true); v.setUint32(52, s.eflags, true); return b; }
 function reset(e, s, cancelValue = 0) { refresh(e).bytes.set(stateBytes(s), e.base); e.bytes.fill(0xa5, e.base + 56, e.base + 96); e.view.setUint32(e.base + 96, cancelValue, true); e.bytes.fill(0x5a, e.base + 100, e.base + 140); }
 function cancel(e, value) { refresh(e).view.setUint32(e.base + 96, value, true); }
-function check(e, wanted, label) { assert.deepEqual(arena(e), wanted, `${label}: full4236 arena`); stats.full_arena_checks++; }
+function check(e, wanted, label) { assert.deepEqual(arena(e), wanted, `${label}: complete arena`); stats.full_arena_checks++; }
 function unchanged(e, action, status, label) { const before = arena(e); assert.equal(action(), status, label); check(e, before, label); }
 function installation(u, slot) { const b = new Uint8Array(32), v = new DataView(b.buffer); header(b, v, 0, 'R3IN', 32); v.setUint32(16, u.low, true); v.setUint32(20, u.high, true); v.setUint32(24, slot, true); return b; }
 function binding(e, u, slot, label, relation = true) { assert.equal(e.table.get(slot) === u.run, relation, label); (relation ? bindings : mismatch).push({label, key: e.key.toString(), id: u.id.toString(), slot, pointer: u.pointer, length: u.length, sha256: hash(u.bytes), table_reference_equals_run: relation}); }

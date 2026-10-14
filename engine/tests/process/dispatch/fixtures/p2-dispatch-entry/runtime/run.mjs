@@ -3,13 +3,15 @@ import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
+import {pathToFileURL} from 'node:url';
 
 const [enginePath, outputDir, root] = process.argv.slice(2);
 assert.ok(root);
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
-const engineBytes = readFileSync(enginePath), engineModule = new WebAssembly.Module(engineBytes);
+const {readEngine} = await import(pathToFileURL(join(root, 'engine/tests/support/wasm/engine.mjs')));
+const {bytes: engineBytes, module: engineModule} = readEngine(enginePath);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
-const KEY = 0xa1345678c0000001n, SIZE = 4612, TRANSFER = 140;
+const KEY = 0xa1345678c0000001n, SIZE = 4796, TRANSFER = 140;
 const names = ['open', 'close', 'arena_ptr', 'map', 'upload', 'compile_with_gates', 'generation', 'module_ptr', 'module_len', 'guard', 'guard_dispatch_entry', 'compile_resident_with_gates', 'resident_module', 'guard_resident', 'acknowledge_resident_installation', 'read32', 'write32', 'capture_resident_call', 'capture_call', 'abandon_call', 'begin_callback', 'abort_callback', 'cpu_read32'];
 const stats = {engine_instances: 0, preopen_guard_calls: 0, direct_guard_calls: 0, direct_guard_success: 0, direct_guard_rejections: 0, probe_calls: 0, probe_guard_success: 0, probe_guard_rejections: 0, probe_child_calls: 0, probe_child_canonical: 0, probe_child_rejections: 0, direct_resident_runs: 0, direct_legacy_runs: 0, resident_compiles: 0, resident_getters: 0, metadata24_checks: 0, installation32_checks: 0, resident_captures: 0, legacy_captures: 0, pending_abandons: 0, callback_begins: 0, callback_aborts: 0, host_reads: 0, host_writes: 0, callback_word_writes: 0, full_arena_checks: 0, ram_snapshots: 0, header_cases: 0, pointer_cases: 0, closed_engines: 0};
 const artifacts = {}, authored = {}, units = [], metadata = [], controls = [], sections = [];
@@ -21,7 +23,7 @@ function exit(reason, retired, version = 1, detail = 0) { const b = new Uint8Arr
 function helper(value = 0) { const b = new Uint8Array(40), v = new DataView(b.buffer); header(b, v, 'R3MH', 40); v.setUint32(20, value, true); return b; }
 function refresh(e) { if (e.buffer !== e.memory.buffer) { e.buffer = e.memory.buffer; e.bytes = new Uint8Array(e.buffer); e.view = new DataView(e.buffer); } return e; }
 function arena(e) { return refresh(e).bytes.slice(e.base, e.base + SIZE); }
-function check(e, wanted, label) { assert.deepEqual(arena(e), wanted, `${label}: exact4236 arena`); stats.full_arena_checks++; }
+function check(e, wanted, label) { assert.deepEqual(arena(e), wanted, `${label}: complete arena`); stats.full_arena_checks++; }
 function reset(e, s, cancel = 0) { refresh(e).bytes.set(stateBytes(s), e.base); e.bytes.fill(0xa5, e.base + 56, e.base + 96); e.view.setUint32(e.base + 96, cancel, true); e.bytes.fill(0x5a, e.base + 100, e.base + 140); }
 function cancel(e, value) { refresh(e).view.setUint32(e.base + 96, value, true); }
 function guard(e, status, label, options = {}) {
