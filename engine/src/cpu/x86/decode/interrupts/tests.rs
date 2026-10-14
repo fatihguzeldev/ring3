@@ -29,43 +29,48 @@ fn context(d32: bool) -> CodeFetchContext {
     CodeFetchContext::from_segments(&context).unwrap()
 }
 #[test]
-fn bare_software_vectors_are_payload_and_preserve_both_default_modes_and_zero_operand_access() {
+fn software_vectors_keep_bare_and_66_length_payload_modes_and_no_data_access() {
     for d32 in [false, true] {
-        for vector in [0, 1, 3, 4, 0x26, 0x66, 0x67, 0xf0, 0xf2, 0xf3, 0xff] {
-            let bytes = [0xcd, vector];
-            let memory = memory(0x1000, &bytes);
-            for policy in [DecodePolicy::Strict, DecodePolicy::Execution] {
-                let BoundDecode::Instruction(decoded) = decode_with_authority(
-                    &memory,
-                    GuestAddress(0x1000),
-                    policy,
-                    Some(context(d32)),
-                    DecodeAuthority::new(None, true),
-                )
-                .unwrap() else {
-                    panic!("complete INT");
-                };
-                assert_eq!(
-                    decoded.operation(),
-                    &Operation::SoftwareInterrupt { vector }
-                );
-                assert_eq!(
-                    (decoded.pc(), decoded.next_pc(), decoded.length()),
-                    (GuestAddress(0x1000), GuestAddress(0x1002), 2)
-                );
-                assert_eq!(
-                    decoded.segment_accesses(),
-                    0,
-                    "cached SS capacity is owned by the ordered gate helper"
-                );
-                assert!(memory.is_code_current(decoded.code_snapshot()));
+        for (prefix, length) in [(&[][..], 2_u8), (&[0x66][..], 3)] {
+            for vector in [0, 1, 3, 4, 0x26, 0x66, 0x67, 0xf0, 0xf2, 0xf3, 0xff] {
+                let bytes = [prefix, &[0xcd, vector]].concat();
+                let memory = memory(0x1000, &bytes);
+                for policy in [DecodePolicy::Strict, DecodePolicy::Execution] {
+                    let BoundDecode::Instruction(decoded) = decode_with_authority(
+                        &memory,
+                        GuestAddress(0x1000),
+                        policy,
+                        Some(context(d32)),
+                        DecodeAuthority::new(None, true),
+                    )
+                    .unwrap() else {
+                        panic!("complete INT");
+                    };
+                    assert_eq!(
+                        decoded.operation(),
+                        &Operation::SoftwareInterrupt { vector }
+                    );
+                    assert_eq!(
+                        (decoded.pc(), decoded.next_pc(), decoded.length()),
+                        (
+                            GuestAddress(0x1000),
+                            GuestAddress(0x1000 + u32::from(length)),
+                            length
+                        )
+                    );
+                    assert_eq!(
+                        decoded.segment_accesses(),
+                        0,
+                        "cached SS capacity is owned by the ordered gate helper"
+                    );
+                    assert!(memory.is_code_current(decoded.code_snapshot()));
+                }
             }
         }
     }
 }
 #[test]
 fn query_readback_never_supplies_interrupt_authority_and_public_decode_stays_unconfigured() {
-    let memory = memory(0x1000, &[0xcd, 0x80]);
     let bank = UserSystemRegisterBank32 {
         idtr: Some(DescriptorTableRegister32 {
             base: 0,
@@ -73,121 +78,146 @@ fn query_readback_never_supplies_interrupt_authority_and_public_decode_stays_unc
         }),
         ..Default::default()
     };
-    for authority in [
-        DecodeAuthority::default(),
-        DecodeAuthority::new(Some(bank), false),
-    ] {
-        for policy in [DecodePolicy::Strict, DecodePolicy::Execution] {
-            assert_eq!(
-                decode_with_authority(
-                    &memory,
-                    GuestAddress(0x1000),
-                    policy,
-                    Some(context(true)),
-                    authority
-                )
-                .unwrap_err(),
-                unsupported()
-            );
+    for bytes in [&[0xcd, 0x80][..], &[0x66, 0xcd, 0x80]] {
+        let memory = memory(0x1000, bytes);
+        for d32 in [false, true] {
+            for authority in [
+                DecodeAuthority::default(),
+                DecodeAuthority::new(Some(bank), false),
+            ] {
+                for policy in [DecodePolicy::Strict, DecodePolicy::Execution] {
+                    assert_eq!(
+                        decode_with_authority(
+                            &memory,
+                            GuestAddress(0x1000),
+                            policy,
+                            Some(context(d32)),
+                            authority
+                        )
+                        .unwrap_err(),
+                        unsupported()
+                    );
+                }
+            }
         }
+        assert_eq!(
+            decode_one(&memory, GuestAddress(0x1000)).unwrap_err(),
+            unsupported()
+        );
+        assert_eq!(
+            decode_for_execution(&memory, GuestAddress(0x1000)).unwrap_err(),
+            unsupported()
+        );
     }
-    assert_eq!(
-        decode_one(&memory, GuestAddress(0x1000)).unwrap_err(),
-        unsupported()
-    );
-    assert_eq!(
-        decode_for_execution(&memory, GuestAddress(0x1000)).unwrap_err(),
-        unsupported()
-    );
 }
 #[test]
 fn complete_immediate_fetch_and_cs_limit_precede_authority_and_invalid_lock_keeps_its_owner() {
-    let mut memory = memory(0x1fff, &[0xcd]);
-    for configured in [false, true] {
-        let error = decode_with_authority(
+    for (partial, pc, length) in [(&[0xcd][..], 0x1fff, 2_u8), (&[0x66, 0xcd][..], 0x1ffe, 3)] {
+        let mut memory = memory(pc, partial);
+        for configured in [false, true] {
+            let error = decode_with_authority(
+                &memory,
+                GuestAddress(pc),
+                DecodePolicy::Execution,
+                Some(context(true)),
+                DecodeAuthority::new(None, configured),
+            )
+            .unwrap_err();
+            assert!(
+                matches!(error, DecodeError::MemoryFault { length: observed, .. } if observed == u32::from(length))
+            );
+        }
+        let page = PageRange::new(GuestAddress(0x2000), 1).unwrap();
+        memory.map_zeroed(page, Permissions::ALL).unwrap();
+        memory.write(GuestAddress(0x2000), &[0x80]).unwrap();
+        memory.protect(page, Permissions::READ).unwrap();
+        assert!(matches!(
+            decode_with_authority(
+                &memory,
+                GuestAddress(pc),
+                DecodePolicy::Strict,
+                Some(context(true)),
+                DecodeAuthority::new(None, true)
+            ),
+            Err(DecodeError::MemoryFault { length: observed, .. }) if observed == u32::from(length)
+        ));
+        memory.protect(page, Permissions::EXECUTE).unwrap();
+        let BoundDecode::Instruction(decoded) = decode_with_authority(
             &memory,
-            GuestAddress(0x1fff),
-            DecodePolicy::Execution,
+            GuestAddress(pc),
+            DecodePolicy::Strict,
             Some(context(true)),
-            DecodeAuthority::new(None, configured),
+            DecodeAuthority::new(None, true),
         )
-        .unwrap_err();
-        assert!(matches!(error, DecodeError::MemoryFault { length: 2, .. }));
-    }
-    let page = PageRange::new(GuestAddress(0x2000), 1).unwrap();
-    memory.map_zeroed(page, Permissions::ALL).unwrap();
-    memory.write(GuestAddress(0x2000), &[0x80]).unwrap();
-    memory.protect(page, Permissions::READ).unwrap();
-    assert!(matches!(
-        decode_with_authority(
+        .unwrap() else {
+            panic!("repaired INT");
+        };
+        assert_eq!(
+            decoded.operation(),
+            &Operation::SoftwareInterrupt { vector: 0x80 }
+        );
+        assert_eq!(
+            (decoded.length(), decoded.next_pc()),
+            (length, GuestAddress(0x2001))
+        );
+        assert_eq!(decoded.code_snapshot().versions.len(), 2);
+        memory.protect(page, Permissions::ALL).unwrap();
+        let BoundDecode::Instruction(fresh) = decode_with_authority(
             &memory,
-            GuestAddress(0x1fff),
+            GuestAddress(pc),
             DecodePolicy::Strict,
             Some(context(true)),
-            DecodeAuthority::new(None, true)
-        ),
-        Err(DecodeError::MemoryFault { length: 2, .. })
-    ));
-    memory.protect(page, Permissions::EXECUTE).unwrap();
-    let BoundDecode::Instruction(decoded) = decode_with_authority(
-        &memory,
-        GuestAddress(0x1fff),
-        DecodePolicy::Strict,
-        Some(context(true)),
-        DecodeAuthority::new(None, true),
-    )
-    .unwrap() else {
-        panic!("repaired INT");
-    };
-    assert_eq!(
-        decoded.operation(),
-        &Operation::SoftwareInterrupt { vector: 0x80 }
-    );
-    assert_eq!(decoded.code_snapshot().versions.len(), 2);
-    memory.protect(page, Permissions::ALL).unwrap();
-    let BoundDecode::Instruction(fresh) = decode_with_authority(
-        &memory,
-        GuestAddress(0x1fff),
-        DecodePolicy::Strict,
-        Some(context(true)),
-        DecodeAuthority::new(None, true),
-    )
-    .unwrap() else {
-        panic!("fresh INT");
-    };
-    assert!(memory.is_code_current(fresh.code_snapshot()));
-    memory.write(GuestAddress(0x2000), &[0x80]).unwrap();
-    assert!(!memory.is_code_current(fresh.code_snapshot()));
-    let mut segments = SegmentContext::default();
-    segments.caches[1] = SegmentCache::from_bits(0xf2b01fff).unwrap();
-    let cs = CodeFetchContext::from_segments(&segments).unwrap();
-    assert!(matches!(
-        decode_with_authority(
+            DecodeAuthority::new(None, true),
+        )
+        .unwrap() else {
+            panic!("fresh INT");
+        };
+        assert!(memory.is_code_current(fresh.code_snapshot()));
+        memory.write(GuestAddress(0x2000), &[0x80]).unwrap();
+        assert!(!memory.is_code_current(fresh.code_snapshot()));
+        // Retain the prefix/opcode page as well as the immediate page in the snapshot.
+        let prefix_page = PageRange::new(GuestAddress(0x1000), 1).unwrap();
+        memory.protect(prefix_page, Permissions::ALL).unwrap();
+        let BoundDecode::Instruction(fresh) = decode_with_authority(
             &memory,
-            GuestAddress(0x1fff),
+            GuestAddress(pc),
             DecodePolicy::Strict,
+            Some(context(true)),
+            DecodeAuthority::new(None, true),
+        )
+        .unwrap() else {
+            panic!("fresh original prefix");
+        };
+        memory.write(GuestAddress(pc), &partial[..1]).unwrap();
+        assert!(!memory.is_code_current(fresh.code_snapshot()));
+        let mut segments = SegmentContext::default();
+        segments.caches[1] = SegmentCache::from_bits(0xf2b01fff).unwrap();
+        let cs = CodeFetchContext::from_segments(&segments).unwrap();
+        assert!(matches!(
+            decode_with_authority(
+                &memory,
+                GuestAddress(pc),
+                DecodePolicy::Strict,
+                Some(cs),
+                DecodeAuthority::new(None, true)
+            ),
+            Err(DecodeError::CodeSegment { attempted_length, .. }) if attempted_length == length
+        ));
+        let BoundDecode::CodeFault(fault) = decode_with_authority(
+            &memory,
+            GuestAddress(pc),
+            DecodePolicy::Execution,
             Some(cs),
-            DecodeAuthority::new(None, true)
-        ),
-        Err(DecodeError::CodeSegment {
-            attempted_length: 2,
-            ..
-        })
-    ));
-    let BoundDecode::CodeFault(fault) = decode_with_authority(
-        &memory,
-        GuestAddress(0x1fff),
-        DecodePolicy::Execution,
-        Some(cs),
-        DecodeAuthority::new(None, true),
-    )
-    .unwrap() else {
-        panic!("CS span precedes INT");
-    };
-    assert_eq!(
-        (fault.attempted_length, fault.consumed_prefix_length),
-        (2, 1)
-    );
+            DecodeAuthority::new(None, true),
+        )
+        .unwrap() else {
+            panic!("CS span precedes INT");
+        };
+        assert_eq!(
+            (fault.attempted_length, fault.consumed_prefix_length),
+            (length, length - 1)
+        );
+    }
     let locked = memory_for_lock();
     assert_eq!(
         decode_with_authority(
@@ -220,14 +250,7 @@ fn memory_for_lock() -> AddressSpace {
 }
 #[test]
 fn unselected_prefixes_remain_neutral_and_existing_event_opcodes_stay_distinct() {
-    for prefix in [
-        &[0x66][..],
-        &[0x67],
-        &[0x2e],
-        &[0xf2],
-        &[0xf3],
-        &[0x66, 0x66],
-    ] {
+    for prefix in [&[0x67][..], &[0x2e], &[0xf2], &[0xf3], &[0x66, 0x66]] {
         let bytes = [prefix, &[0xcd, 0x80]].concat();
         let memory = memory(0x1000, &bytes);
         for policy in [DecodePolicy::Strict, DecodePolicy::Execution] {

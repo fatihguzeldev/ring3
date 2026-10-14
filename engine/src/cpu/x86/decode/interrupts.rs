@@ -10,15 +10,16 @@ pub(super) fn lower(
     if instruction.code() != Code::Int_imm8 {
         return None;
     }
-    // gate width comes from the configured payload. Additional raw prefixes have no
-    // selected contract; immediate payload bytes never enter prefix classification.
-    Some(if configured && bytes == [0xcd, instruction.immediate8()] {
-        Ok(Operation::SoftwareInterrupt {
-            vector: instruction.immediate8(),
-        })
-    } else {
-        Err(unsupported())
-    })
+    // the interrupt gate owns operand size, including a single 66 prefix.
+    // immediate payload bytes never enter prefix classification.
+    let vector = instruction.immediate8();
+    Some(
+        if configured && (bytes == [0xcd, vector] || bytes == [0x66, 0xcd, vector]) {
+            Ok(Operation::SoftwareInterrupt { vector })
+        } else {
+            Err(unsupported())
+        },
+    )
 }
 
 #[cfg(test)]

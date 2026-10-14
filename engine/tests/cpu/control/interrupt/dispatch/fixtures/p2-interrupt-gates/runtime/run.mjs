@@ -355,27 +355,50 @@ for (const [resident, entries] of [[false, false], [true, true]]) {
   } else h.skip(c, 'query-only INT refusals', 'canonical branch NeedCode');
   h.host(c, 'close');
 }
+// a single 66 cannot select the gate width; each source default makes it select the opposite operand size.
+const operandPrefixRows = [
+  {label: 'single66 gate16 from D16 keeps word frame', kind: 7, info: 2, sourceD: false, ssB: true,
+    esp: 0x7801, newESP: 0x77fb, ssBase: 0x8000, cache: 0xf3bfffff, targetD: true, live: 0x240ed7,
+    frame: [[0xf7ff, 'd74f'], [0xf7fd, '1b00'], [0xf7fb, '0310']], pages: [0xf000]},
+  {label: 'single66 gate32 from D32 keeps dword frame', kind: 14, info: 0x104, sourceD: true, ssB: false,
+    esp: 0xa5a50003, newESP: 0xa5a5fff7, ssBase: 0x8000, cache: 0xf1bfffff, targetD: false, live: 0x240cd7,
+    frame: [[0x17fff, 'd74f2400'], [0x17ffb, '1b000000'], [0x17ff7, '03100000']], pages: [0x17000, 0x18000]},
+];
+for (const resident of [false, true]) for (const entries of [false, true]) for (const row of operandPrefixRows) {
+  const c = open(resident, entries, row.label, [[PC], ...row.pages.map(page => [page, 3])]);
+  fill(c, row.pages); configure(c, 0x80, rawGate(row.kind));
+  h.host(c, 'configure_segment_descriptor_raw', [0x18, ...rawCode({default32: row.sourceD})]);
+  h.host(c, 'configure_segment_descriptor_raw', [0x48, ...rawCode({base: 0x4000, default32: row.targetD})]);
+  h.upload(c, PC, Buffer.from('66cd80', 'hex')); const input = seed(row); h.put(c, 0, input);
+  const material = compile(c, row.label + ' exact three-byte capture', [[PC, 3]], [helper(c)]);
+  const want = loaded(Buffer.from(input), {base: 0x4000, cache: row.cache, esp: row.newESP, flags: row.live});
+  want.set(packet([0, 0x2300, 0, 0, 0, row.info]), 100); result(want, 3, 1);
+  run(c, row.label + ': literal return EIP1003 and gate-selected flags/slots', material, input, want,
+    {budget: 2, wantRAM: frameRAM(c, row.frame),
+      helpers: material ? [call(helper(c), bound(c, material, [0x80, 0x1003, row.esp, ATTEMPT_FLAGS]))] : []});
+  h.host(c, 'close');
+}
 {
-  const c = open(false, false, 'selected bare-INT prefix boundary', [[PC]]);
+  const c = open(false, false, 'selected INT repeat-prefix boundary', [[PC]]);
   configure(c, 0x80, rawGate(7)); const target = 0x1200;
-  h.upload(c, PC, Buffer.from('e9fb010000', 'hex')); h.upload(c, target, Buffer.from('66cd80', 'hex'));
+  h.upload(c, PC, Buffer.from('e9fb010000', 'hex')); h.upload(c, target, Buffer.from('f3cd80', 'hex'));
   const input = seed({flags: 0x254ed7}); h.put(c, 0, input);
   const material = compile(c, 'prefix-control real branch', [[PC, 5]]);
   const want = Buffer.from(input); want.writeUInt32LE(target, 48); want.writeUInt32LE(0x244ed7, 52); want.writeUInt32LE(0, 12);
   result(want, 3, 1, {version: 1});
-  const row = run(c, 'branch reaches the unselected fixed-width prefix form', material, input, want, {budget: 2});
+  const row = run(c, 'branch reaches the unselected repeat-prefix form', material, input, want, {budget: 2});
   if (row?.passed) {
-    compile(c, 'single66 INT stays neutral under the selected bare contract', [[target, 3]], [], {expectedStatus: 10});
-    compile(c, 'stopped single66 INT stays neutral', [], [], {expectedStatus: 10, stopped: true});
-  } else h.skip(c, 'single66 INT refusals', 'canonical branch NeedCode');
+    compile(c, 'REP INT stays neutral under the selected bare-or-single66 contract', [[target, 3]], [], {expectedStatus: 10});
+    compile(c, 'stopped REP INT stays neutral', [], [], {expectedStatus: 10, stopped: true});
+  } else h.skip(c, 'REP INT refusals', 'canonical branch NeedCode');
   h.host(c, 'close');
 }
-assert.equal(successes.length, 3); assert.equal(faults.length, 13);
+assert.equal(successes.length, 3); assert.equal(faults.length, 13); assert.equal(operandPrefixRows.length, 2);
 assert.deepEqual(pins(), sourcePins, 'INT owners and literal oracles stayed fixed');
 writeFileSync(join(output, 'interrupt-source-pins.json'), JSON.stringify(sourcePins, null, 2) + '\n');
 writeFileSync(join(output, 'interrupt-counts.json'), JSON.stringify({observed,
-  semanticRows: {coreSuccessPaths: 2, targetWidthFocusedPath: 1, orderedFaultsAndNeutral: faults.length},
-  expectedFullAdmission: {contexts: 75, compileCalls: 105, compileRefusals: 16, modules: 89, guestCalls: 118, observations: 223},
+  semanticRows: {coreSuccessPaths: 2, targetWidthFocusedPath: 1, orderedFaultsAndNeutral: faults.length, singleOperandPrefixFamilies: operandPrefixRows.length},
+  expectedFullAdmission: {contexts: 83, compileCalls: 113, compileRefusals: 16, modules: 97, guestCalls: 126, observations: 239},
   profiles: 'replacement/resident x extents/entries; extra lifecycle/protocol/SMC paths are risk-selected explicitly', sourcePins}, null, 2) + '\n');
 h.finish([
   'Explicitly configured immutable complete IDT before bootstrap/material; SIDT readback alone keeps INT neutral Unsupported.',
@@ -384,6 +407,6 @@ h.finish([
   'Ordered IDT/target/cachedSS/targetlimit/page failures, vector-zero IDTerror2 and CD03 distinct from CC, conforming sameCPL versus task/interprivilege neutral.',
   'Every observation compares full4796 arena/allmappedRAM and exact real helper trace; v11-negative controls invoke real inner-null helper before declared packet/transport mutation.',
   'Wrong-key guard precedes poisoned packet; cancel/zero budget precede attempt; physical SMC commits full frame/transfer before one retirement and invalidates held material.',
-  'Complete two-page immediate fetch/EXEC repair and new CSbase/D handler capture use current NeedCode lifecycle; single66 stays neutral under the selected bare-only contract; existing generic flags/fault/currentness evidence reused.',
+  'Complete two-page immediate fetch/EXEC repair and new CSbase/D handler capture use current NeedCode lifecycle; single66 preserves configured gate width in both code defaults with literal three-byte return EIP; REP stays neutral; existing generic flags/fault/currentness evidence reused.',
   'No RAM-backed IDT, TSS/CPL transition, IRQ/NMI/exception recursion, AM1/AC-delivery, x64/FRED/CET, browser/game/performance or wholeCPU claim.',
 ]);
