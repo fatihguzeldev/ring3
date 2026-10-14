@@ -103,9 +103,12 @@ fn instruction_prefetch_retains_prefix_neighbor_and_complete_fetch_boundaries() 
     let raw = Decoder::new(32, &neighbor, DecoderOptions::NONE).decode();
     assert!(!super::ignored_instruction_prefetch(&raw));
     let memory = executable(&neighbor, 0x1000);
-    let strict = decode_one(&memory, GuestAddress(0x1000)).unwrap_err();
     assert_eq!(
-        decode_for_execution(&memory, GuestAddress(0x1000)).unwrap_err(),
-        strict
+        decode_one(&memory, GuestAddress(0x1000)).unwrap().operation(),
+        &Operation::Nop
+    );
+    assert_eq!(
+        decode_for_execution(&memory, GuestAddress(0x1000)).unwrap().operation(),
+        &Operation::Nop
     );
 }
