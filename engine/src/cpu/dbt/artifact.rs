@@ -139,7 +139,15 @@ pub fn compile_region(
     specs: &[BlockSpec],
     limits: CompileLimits,
 ) -> Result<CompiledRegion, CompileError> {
-    compile(memory, specs, limits, None, &[], None, None)
+    compile(
+        memory,
+        specs,
+        limits,
+        None,
+        &[],
+        None,
+        crate::cpu::x86::decode::DecodeAuthority::default(),
+    )
 }
 
 pub fn compile_entry_region(
@@ -160,9 +168,10 @@ pub(crate) fn compile_embedded_entry_region(
     generation: u32,
     gates: &[GateSpec],
     cs: CodeFetchContext,
-    bank: Option<crate::cpu::x86::UserSystemRegisterBank32>,
+    authority: crate::cpu::x86::decode::DecodeAuthority,
 ) -> Result<CompiledRegion, CompileError> {
-    let prepared = prepare_embedded_entry_region(memory, entries, limits, gates, Some(cs), bank)?;
+    let prepared =
+        prepare_embedded_entry_region(memory, entries, limits, gates, Some(cs), authority)?;
     emit_entry_prepared(
         memory,
         prepared,
@@ -179,9 +188,9 @@ pub(crate) fn compile_runtime_entry(
     key: u64,
     generation: u32,
     cs: CodeFetchContext,
-    bank: Option<crate::cpu::x86::UserSystemRegisterBank32>,
+    authority: crate::cpu::x86::decode::DecodeAuthority,
 ) -> Result<CompiledRegion, CompileError> {
-    let prepared = prepare_runtime_entry(memory, entry, limits, Some(cs), bank)?;
+    let prepared = prepare_runtime_entry(memory, entry, limits, Some(cs), authority)?;
     emit_entry_prepared(
         memory,
         prepared,
@@ -200,7 +209,7 @@ pub(crate) fn compile_embedded_region(
     generation: u32,
     gates: &[GateSpec],
     cs: CodeFetchContext,
-    bank: Option<crate::cpu::x86::UserSystemRegisterBank32>,
+    authority: crate::cpu::x86::decode::DecodeAuthority,
 ) -> Result<CompiledRegion, CompileError> {
     compile(
         memory,
@@ -209,7 +218,7 @@ pub(crate) fn compile_embedded_region(
         Some(wasm::EmbeddedBinding::Replacement { key, generation }),
         gates,
         Some(cs),
-        bank,
+        authority,
     )
 }
 
@@ -220,10 +229,10 @@ fn compile(
     binding: Option<wasm::EmbeddedBinding>,
     gates: &[GateSpec],
     cs: Option<CodeFetchContext>,
-    bank: Option<crate::cpu::x86::UserSystemRegisterBank32>,
+    authority: crate::cpu::x86::decode::DecodeAuthority,
 ) -> Result<CompiledRegion, CompileError> {
     let prepared = if binding.is_some() {
-        prepare_embedded_region(memory, specs, limits, gates, cs, bank)?
+        prepare_embedded_region(memory, specs, limits, gates, cs, authority)?
     } else {
         prepare_region(memory, specs, limits)?
     };

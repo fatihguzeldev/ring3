@@ -58,6 +58,8 @@ pub(super) struct Imports {
     pub(super) far_jump: Option<StoreImport>,
     pub(super) far_call: Option<StoreImport>,
     pub(super) far_return: Option<StoreImport>,
+    pub(super) software_interrupt: Option<StoreImport>,
+    pub(super) software_interrupt_flags: Option<u32>,
     pub(super) interrupt_return_locals: Option<super::far::InterruptReturnLocals>,
     pub(super) read: Option<u32>,
     pub(super) store: Option<StoreImport>,
@@ -98,6 +100,7 @@ pub(super) struct ImportNeeds {
     pub(super) far_jump: bool,
     pub(super) far_call: bool,
     pub(super) far_return: bool,
+    pub(super) software_interrupt: bool,
     pub(super) read: bool,
     pub(super) store: bool,
     pub(super) read8: bool,
@@ -138,6 +141,7 @@ impl Imports {
         let mut far_jump = false;
         let mut far_call = false;
         let mut far_return = false;
+        let mut software_interrupt = false;
         let mut read = false;
         let mut store = false;
         let mut read8 = false;
@@ -172,6 +176,7 @@ impl Imports {
                         avx_execute = true;
                     }
                 }
+                Operation::SoftwareInterrupt { .. } => software_interrupt = true,
                 Operation::FarJump { target, .. } => {
                     far_jump = true;
                     cpu_read |= matches!(target, crate::cpu::x86::ir::FarPointer::Memory(_));
@@ -508,6 +513,7 @@ impl Imports {
             far_jump,
             far_call,
             far_return,
+            software_interrupt,
             read,
             store,
             read8,

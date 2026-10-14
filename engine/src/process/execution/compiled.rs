@@ -123,7 +123,10 @@ impl EngineInstance {
                 generation,
                 &gates[..gate_count as usize],
                 cs,
-                self.system_register_bank,
+                crate::cpu::x86::decode::DecodeAuthority::new(
+                    self.system_register_bank,
+                    self.interrupt_descriptors.is_some(),
+                ),
             ),
             DescriptorFormat::Entries => compile_embedded_entry_region(
                 memory,
@@ -133,7 +136,10 @@ impl EngineInstance {
                 generation,
                 &gates[..gate_count as usize],
                 cs,
-                self.system_register_bank,
+                crate::cpu::x86::decode::DecodeAuthority::new(
+                    self.system_register_bank,
+                    self.interrupt_descriptors.is_some(),
+                ),
             ),
         }
         .map_err(HostError::Compile)

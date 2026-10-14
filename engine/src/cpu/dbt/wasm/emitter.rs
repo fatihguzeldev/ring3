@@ -31,6 +31,7 @@ pub(in crate::cpu::dbt) fn emit(
         far_jump: needs_far_jump,
         far_call: needs_far_call,
         far_return: needs_far_return,
+        software_interrupt: needs_software_interrupt,
         read: needs_read,
         store: needs_store,
         read8: needs_read8,
@@ -120,7 +121,8 @@ pub(in crate::cpu::dbt) fn emit(
         || needs_segment_load_far
         || needs_far_jump
         || needs_far_call
-        || needs_far_return;
+        || needs_far_return
+        || needs_software_interrupt;
     let has_memory = has_cpu
         || has_reads
         || has_stores
@@ -194,6 +196,7 @@ pub(in crate::cpu::dbt) fn emit(
                             | Operation::FarCall { .. }
                             | Operation::FarReturn { .. }
                             | Operation::InterruptReturn { .. }
+                            | Operation::SoftwareInterrupt { .. }
                     )
             });
     let has_segment_check =
@@ -283,9 +286,21 @@ pub(in crate::cpu::dbt) fn emit(
             [ValType::I32],
         );
     }
+    let interrupt_type_offset = 10 + u32::from(needs_far_call);
+    if needs_software_interrupt {
+        let parameters = if matches!(binding, Some(EmbeddedBinding::Resident { .. })) {
+            8
+        } else {
+            4
+        };
+        types.ty().function(
+            std::iter::repeat_n(ValType::I32, parameters),
+            [ValType::I32],
+        );
+    }
     let upper_xstate =
         crate::cpu::x86::capabilities::AVX_ENABLED && (needs_cpu_xsave || needs_cpu_xrstor);
-    let xstate_type_offset = 10 + u32::from(needs_far_call);
+    let xstate_type_offset = 10 + u32::from(needs_far_call) + u32::from(needs_software_interrupt);
     if upper_xstate {
         let parameters = if matches!(binding, Some(EmbeddedBinding::Resident { .. })) {
             8
@@ -300,7 +315,8 @@ pub(in crate::cpu::dbt) fn emit(
     let segment_check_type = cpu_type_base
         + if has_cpu { 10 } else { 0 }
         + u32::from(needs_far_call)
-        + u32::from(upper_xstate);
+        + u32::from(upper_xstate)
+        + u32::from(needs_software_interrupt);
     if has_segment_check {
         types.ty().function([ValType::I32; 6], [ValType::I32]);
     }
@@ -795,6 +811,13 @@ pub(in crate::cpu::dbt) fn emit(
             &mut helper_imports.far_call,
         ),
         (
+            needs_software_interrupt,
+            "interrupt_gate",
+            "interrupt_gate_resident",
+            interrupt_type_offset,
+            &mut helper_imports.software_interrupt,
+        ),
+        (
             needs_far_return,
             "far_return",
             "far_return_resident",
@@ -884,6 +907,11 @@ pub(in crate::cpu::dbt) fn emit(
         helper_imports.interrupt_return_locals =
             Some(super::far::InterruptReturnLocals::new(first));
         declarations.push((3, ValType::I32));
+    }
+    if needs_software_interrupt {
+        let first = 4 + declarations.iter().map(|(count, _)| count).sum::<u32>();
+        helper_imports.software_interrupt_flags = Some(first);
+        declarations.push((1, ValType::I32));
     }
     if has_avx {
         let first = 4 + declarations.iter().map(|(count, _)| count).sum::<u32>();
@@ -1049,11 +1077,21 @@ fn emit_block(code: &mut InstructionSink<'_>, block: &CompiledBlock, imports: me
                 abi::interrupt_return_precheck(code, remaining + 2);
             }
             x87::precheck_instruction(code, instruction, imports, remaining + 2);
+            if matches!(instruction.operation(), Operation::SoftwareInterrupt { .. }) {
+                code.local_get(FLAGS).local_set(
+                    imports
+                        .software_interrupt_flags
+                        .expect("interrupt flag snapshot"),
+                );
+            }
             abi::begin_instruction(code);
             integer::instruction(code, instruction, imports, remaining + 2);
             if matches!(
                 instruction.operation(),
-                Operation::FarJump { .. } | Operation::FarCall { .. } | Operation::FarReturn { .. }
+                Operation::FarJump { .. }
+                    | Operation::FarCall { .. }
+                    | Operation::FarReturn { .. }
+                    | Operation::SoftwareInterrupt { .. }
             ) && let Some(limit) = imports.code_fetch_limit
             {
                 code_fetch::refresh(code, limit);

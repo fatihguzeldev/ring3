@@ -65,6 +65,28 @@ pub(super) fn validate_gate(
     );
 }
 
+pub(super) fn validate_interrupt(
+    code: &mut InstructionSink<'_>,
+    slot: u32,
+    vector: u8,
+    original_flags: u32,
+    exit_depth: u32,
+) {
+    assert!(matches!(slot, 0 | 2 | 4));
+    validate_span(
+        code,
+        slot,
+        if slot == 0 { 0 } else { 2 },
+        true,
+        None,
+        Validation::Interrupt {
+            vector,
+            original_flags,
+        },
+        exit_depth,
+    );
+}
+
 pub(super) fn validate_masked(
     code: &mut InstructionSink<'_>,
     length: u32,
@@ -133,6 +155,7 @@ enum Validation {
     Avx(AvxValidation),
     XState,
     Gate,
+    Interrupt { vector: u8, original_flags: u32 },
 }
 
 fn validate_span(
@@ -146,6 +169,16 @@ fn validate_span(
 ) {
     let xstate = matches!(validation, Validation::XState);
     let gate = matches!(validation, Validation::Gate);
+    let interrupt = if let Validation::Interrupt {
+        vector,
+        original_flags,
+    } = validation
+    {
+        Some((vector, original_flags))
+    } else {
+        None
+    };
+    let control = gate || interrupt.is_some();
     let avx = if let Validation::Avx(value) = validation {
         Some(value)
     } else {
@@ -174,7 +207,9 @@ fn validate_span(
         (0, u32::from_le_bytes(*b"R3MH")),
         (
             4,
-            if gate {
+            if interrupt.is_some() {
+                0x1000b
+            } else if gate {
                 0x10009
             } else if xstate {
                 0x10008
@@ -184,9 +219,18 @@ fn validate_span(
         ),
         (8, 40),
         (12, 0),
-        (36, length),
     ] {
         expect_field(code, offset, expected);
+    }
+    if interrupt.is_some() && length != 0 {
+        helper_field(code, 36);
+        code.i32_const(!0x100)
+            .i32_and()
+            .i32_const(length as i32)
+            .i32_ne();
+        add_check(code);
+    } else {
+        expect_field(code, 36, length);
     }
     code.local_get(LHS).if_(BlockType::Empty);
     infrastructure(code, 2);
@@ -194,8 +238,11 @@ fn validate_span(
     helper_field(code, 16);
     code.local_set(RHS);
     code.local_get(RHS).i32_eqz().if_(BlockType::Empty);
-    success(code, if xstate || gate { 0 } else { length }, mask);
-    if gate && length == 2 {
+    success(code, if xstate || control { 0 } else { length }, mask);
+    if interrupt.is_some() && length == 0 {
+        infrastructure(code, 2);
+    }
+    if control && length == 2 {
         reset_checks(code);
         helper_field(code, 20);
         code.i32_const(0xffff).i32_gt_u();
@@ -213,13 +260,13 @@ fn validate_span(
         .i32_const(1)
         .i32_eq()
         .if_(BlockType::Empty);
-    fault(code, length, access_mask, mask, xstate);
+    fault(code, length, access_mask, mask, xstate, interrupt.is_some());
     code.else_()
         .local_get(RHS)
         .i32_const(2)
         .i32_eq()
         .if_(BlockType::Empty);
-    if gate && length == 0 {
+    if control && length == 0 {
         infrastructure(code, 2);
     } else {
         rejected(code);
@@ -233,10 +280,42 @@ fn validate_span(
         .i32_le_u()
         .i32_and()
         .if_(BlockType::Empty);
-    exception(code, length, avx, gate);
+    exception(
+        code,
+        length,
+        avx,
+        control,
+        interrupt.map(|(vector, _)| vector),
+    );
     code.else_();
-    infrastructure(code, 2);
+    if interrupt.is_some() && length == 0 {
+        code.local_get(RHS)
+            .i32_const(8)
+            .i32_eq()
+            .if_(BlockType::Empty);
+        interrupt_unsupported(code);
+        code.else_();
+        infrastructure(code, 2);
+        code.end();
+    } else {
+        infrastructure(code, 2);
+    }
     code.end().end().end().end().end().end().end();
+    if let Some((_, original_flags)) = interrupt {
+        code.local_get(REASON)
+            .i32_const(4)
+            .i32_eq()
+            .local_get(DETAIL)
+            .i32_const(4)
+            .i32_eq()
+            .i32_and()
+            .if_(BlockType::Empty)
+            .local_get(original_flags)
+            .local_set(FLAGS)
+            .local_get(SNAPSHOT_SHADOW)
+            .local_set(DEBUG_SHADOW)
+            .end();
+    }
     exit_if_failed(code, exit_depth);
 }
 
@@ -269,6 +348,7 @@ fn fault(
     access_mask: u32,
     mask: Option<u32>,
     xstate: bool,
+    interrupt: bool,
 ) {
     if length == 0 || access_mask == 0 {
         infrastructure(code, 2);
@@ -317,16 +397,33 @@ fn fault(
     infrastructure(code, 2);
     code.else_();
     code.i32_const(5).local_set(REASON);
-    for (offset, local) in [
-        (24, DETAIL),
-        (28, FAULT_ADDRESS),
-        (32, FAULT_ACCESS),
-        (36, FAULT_LENGTH),
-    ] {
+    for (offset, local) in [(24, DETAIL), (28, FAULT_ADDRESS), (32, FAULT_ACCESS)] {
         helper_field(code, offset);
         code.local_set(local);
     }
+    if interrupt {
+        code.i32_const(length as i32);
+    } else {
+        helper_field(code, 36);
+    }
+    code.local_set(FAULT_LENGTH);
     code.end();
+}
+
+fn interrupt_unsupported(code: &mut InstructionSink<'_>) {
+    reset_checks(code);
+    for offset in [20, 28, 32] {
+        expect_field(code, offset, 0);
+    }
+    expect_field(code, 24, 4);
+    code.local_get(LHS).if_(BlockType::Empty);
+    infrastructure(code, 2);
+    code.else_()
+        .i32_const(4)
+        .local_set(REASON)
+        .i32_const(4)
+        .local_set(DETAIL)
+        .end();
 }
 
 fn rejected(code: &mut InstructionSink<'_>) {
@@ -348,12 +445,28 @@ fn rejected(code: &mut InstructionSink<'_>) {
     code.end().end();
 }
 
-fn exception(code: &mut InstructionSink<'_>, length: u32, avx: Option<AvxValidation>, gate: bool) {
+fn exception(
+    code: &mut InstructionSink<'_>,
+    length: u32,
+    avx: Option<AvxValidation>,
+    gate: bool,
+    interrupt: Option<u8>,
+) {
     reset_checks(code);
     for offset in [20, 28, 32] {
         expect_field(code, offset, 0);
     }
-    if gate {
+    if let Some(vector) = interrupt.filter(|_| length == 0) {
+        code.local_get(RHS)
+            .i32_const(3)
+            .i32_ne()
+            .local_get(RHS)
+            .i32_const(6)
+            .i32_ne()
+            .i32_and();
+        add_check(code);
+        expect_field(code, 24, (u32::from(vector) << 3) | 2);
+    } else if gate {
         code.local_get(RHS)
             .i32_const(4)
             .i32_eq()

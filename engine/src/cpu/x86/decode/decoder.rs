@@ -1,4 +1,4 @@
-use super::{BoundDecode, CapturedCodeFault, CodeFetchContext};
+use super::{BoundDecode, CapturedCodeFault, CodeFetchContext, DecodeAuthority};
 use iced_x86::{Decoder, DecoderError, DecoderOptions};
 
 use crate::{
@@ -74,14 +74,27 @@ pub fn decode_one(
     memory: &AddressSpace,
     pc: GuestAddress,
 ) -> Result<DecodedInstruction, DecodeError> {
-    unbound(decode(memory, pc, DecodePolicy::Strict, None, None)?)
+    unbound(decode(
+        memory,
+        pc,
+        DecodePolicy::Strict,
+        None,
+        DecodeAuthority::default(),
+    )?)
 }
 
+#[cfg(test)]
 pub(crate) fn decode_for_execution(
     memory: &AddressSpace,
     pc: GuestAddress,
 ) -> Result<DecodedInstruction, DecodeError> {
-    unbound(decode(memory, pc, DecodePolicy::Execution, None, None)?)
+    unbound(decode(
+        memory,
+        pc,
+        DecodePolicy::Execution,
+        None,
+        DecodeAuthority::default(),
+    )?)
 }
 
 fn unbound(decoded: BoundDecode) -> Result<DecodedInstruction, DecodeError> {
@@ -91,34 +104,24 @@ fn unbound(decoded: BoundDecode) -> Result<DecodedInstruction, DecodeError> {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn decode_bound(
     memory: &AddressSpace,
     pc: GuestAddress,
     cs: CodeFetchContext,
     policy: DecodePolicy,
 ) -> Result<BoundDecode, DecodeError> {
-    decode(memory, pc, policy, Some(cs), None)
+    decode(memory, pc, policy, Some(cs), DecodeAuthority::default())
 }
 
-pub(crate) fn decode_with_system_registers(
+pub(crate) fn decode_with_authority(
     memory: &AddressSpace,
     pc: GuestAddress,
     policy: DecodePolicy,
     cs: Option<CodeFetchContext>,
-    bank: Option<crate::cpu::x86::UserSystemRegisterBank32>,
+    authority: DecodeAuthority,
 ) -> Result<BoundDecode, DecodeError> {
-    if bank.is_some() {
-        return decode(memory, pc, policy, cs, bank);
-    }
-    if let Some(cs) = cs {
-        decode_bound(memory, pc, cs, policy)
-    } else {
-        match policy {
-            DecodePolicy::Strict => decode_one(memory, pc),
-            DecodePolicy::Execution => decode_for_execution(memory, pc),
-        }
-        .map(BoundDecode::Instruction)
-    }
+    decode(memory, pc, policy, cs, authority)
 }
 
 fn decode(
@@ -126,7 +129,7 @@ fn decode(
     pc: GuestAddress,
     policy: DecodePolicy,
     cs: Option<CodeFetchContext>,
-    bank: Option<crate::cpu::x86::UserSystemRegisterBank32>,
+    authority: DecodeAuthority,
 ) -> Result<BoundDecode, DecodeError> {
     let bitness = cs.map_or(32, CodeFetchContext::decoder_bitness);
     let mut bytes = [0; 15];
@@ -200,7 +203,7 @@ fn decode(
                 let (operation, segments) = if let Some(operation) = fault {
                     (Operation::Control(operation), 0)
                 } else {
-                    match super::lower::lower(&instruction, &bytes[..consumed], bank) {
+                    match super::lower::lower(&instruction, &bytes[..consumed], authority) {
                         Ok(operation) => (operation, segment_accesses(&instruction)),
                         Err(DecodeError::InvalidEncoding)
                             if policy == DecodePolicy::Execution
@@ -280,6 +283,10 @@ fn memory_error(error: MemoryError, pc: GuestAddress, length: usize) -> DecodeEr
 
 fn segment_accesses(instruction: &iced_x86::Instruction) -> u8 {
     use iced_x86::{Code, InstructionInfoFactory, Mnemonic, Register};
+    // INT owns its ordered implicit SS checks inside the stateful gate helper.
+    if instruction.code() == Code::Int_imm8 {
+        return 0;
+    }
     if super::profile::ignored_prefetch_alias(instruction)
         || super::profile::ignored_instruction_prefetch(instruction)
         || super::profile::legacy_nop_alias(instruction)

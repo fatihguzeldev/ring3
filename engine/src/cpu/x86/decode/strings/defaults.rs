@@ -106,7 +106,12 @@ fn default16_scalar_address_and_stack_forms_reach_existing_lowerers() {
     for bytes in forms {
         let instruction = decoded(16, bytes, 0x1000);
         assert!(
-            super::super::lower::lower(&instruction, bytes, None).is_ok(),
+            super::super::lower::lower(
+                &instruction,
+                bytes,
+                crate::cpu::x86::decode::DecodeAuthority::default()
+            )
+            .is_ok(),
             "bytes={bytes:02x?}"
         );
     }
@@ -117,9 +122,12 @@ fn default16_scalar_address_and_stack_forms_reach_existing_lowerers() {
         (&[0x67, 0xa1, 0x00, 0x50, 0, 0][..], AddressSize::Bits32),
     ] {
         let instruction = decoded(16, bytes, 0x1000);
-        let Operation::LoadWord { address, .. } =
-            super::super::lower::lower(&instruction, bytes, None).unwrap()
-        else {
+        let Operation::LoadWord { address, .. } = super::super::lower::lower(
+            &instruction,
+            bytes,
+            crate::cpu::x86::decode::DecodeAuthority::default(),
+        )
+        .unwrap() else {
             panic!("expected word load: {bytes:02x?}");
         };
         assert_eq!(address.address_size, expected);
@@ -151,7 +159,12 @@ fn default16_branch_target_width_is_distinct_from_full_next_ip() {
     ] {
         let instruction = decoded(16, bytes, pc);
         assert_eq!(instruction.next_ip32(), expected_next);
-        let operation = super::super::lower::lower(&instruction, bytes, None).unwrap();
+        let operation = super::super::lower::lower(
+            &instruction,
+            bytes,
+            crate::cpu::x86::decode::DecodeAuthority::default(),
+        )
+        .unwrap();
         let target = match operation {
             Operation::Jump {
                 target: crate::cpu::x86::ir::BranchTarget::Direct(target),

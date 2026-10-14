@@ -1,7 +1,7 @@
 use iced_x86::{Code, Instruction, OpKind};
 
 use super::{
-    DecodeError,
+    DecodeAuthority, DecodeError,
     operands::{
         byte_register, byte_value, effective_address, location, register, small_source,
         unsupported, value, word_register, word_value,
@@ -20,7 +20,7 @@ use crate::cpu::x86::{
 pub(super) fn lower(
     instruction: &Instruction,
     bytes: &[u8],
-    bank: Option<crate::cpu::x86::UserSystemRegisterBank32>,
+    authority: DecodeAuthority,
 ) -> Result<Operation, DecodeError> {
     let canonical;
     let instruction = if let Some(code) = super::aliases::canonical_code(instruction.code()) {
@@ -62,7 +62,13 @@ pub(super) fn lower(
     if super::mpx::disabled_nop(instruction) {
         return Ok(Operation::Nop);
     }
-    if let Some(operation) = super::system_registers::lower(instruction, bank) {
+    if let Some(operation) =
+        super::interrupts::lower(instruction, bytes, authority.interrupts_configured)
+    {
+        return operation;
+    }
+    if let Some(operation) = super::system_registers::lower(instruction, authority.system_registers)
+    {
         return operation;
     }
     if let Some(operation) = super::far::lower(instruction) {

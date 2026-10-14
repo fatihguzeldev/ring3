@@ -175,7 +175,7 @@ pub fn prepare_region(
         PreparationProfile::Standalone,
         &[],
         None,
-        None,
+        crate::cpu::x86::decode::DecodeAuthority::default(),
     )
 }
 
@@ -185,7 +185,7 @@ pub(super) fn prepare_resident_region(
     limits: CompileLimits,
     gates: &[GateSpec],
     cs: Option<CodeFetchContext>,
-    bank: Option<crate::cpu::x86::UserSystemRegisterBank32>,
+    authority: crate::cpu::x86::decode::DecodeAuthority,
 ) -> Result<PreparedRegion, CompileError> {
     prepare(
         memory,
@@ -194,7 +194,7 @@ pub(super) fn prepare_resident_region(
         PreparationProfile::Resident,
         gates,
         cs,
-        bank,
+        authority,
     )
 }
 
@@ -204,7 +204,7 @@ pub(super) fn prepare_embedded_region(
     limits: CompileLimits,
     gates: &[GateSpec],
     cs: Option<CodeFetchContext>,
-    bank: Option<crate::cpu::x86::UserSystemRegisterBank32>,
+    authority: crate::cpu::x86::decode::DecodeAuthority,
 ) -> Result<PreparedRegion, CompileError> {
     prepare(
         memory,
@@ -213,7 +213,7 @@ pub(super) fn prepare_embedded_region(
         PreparationProfile::Embedded,
         gates,
         cs,
-        bank,
+        authority,
     )
 }
 
@@ -224,7 +224,7 @@ fn prepare(
     profile: PreparationProfile,
     gates: &[GateSpec],
     cs: Option<CodeFetchContext>,
-    bank: Option<crate::cpu::x86::UserSystemRegisterBank32>,
+    authority: crate::cpu::x86::decode::DecodeAuthority,
 ) -> Result<PreparedRegion, CompileError> {
     validate_limits(limits)?;
     validate_blocks(specs, limits.blocks)?;
@@ -259,7 +259,7 @@ fn prepare(
                 return Err(CompileError::InstructionLimit);
             }
             let pc = GuestAddress(cursor as u32);
-            let instruction = strict_instruction(memory, pc, cs, bank)
+            let instruction = strict_instruction(memory, pc, cs, authority)
                 .map_err(|error| instruction_error(pc, InstructionError::Decode(error)))?;
             let next = cursor + u64::from(instruction.length());
             let terminates = terminates(&instruction, embedded)
@@ -307,14 +307,14 @@ pub(super) fn strict_instruction(
     memory: &AddressSpace,
     pc: GuestAddress,
     cs: Option<CodeFetchContext>,
-    bank: Option<crate::cpu::x86::UserSystemRegisterBank32>,
+    authority: crate::cpu::x86::decode::DecodeAuthority,
 ) -> Result<DecodedInstruction, DecodeError> {
-    match crate::cpu::x86::decode::decode_with_system_registers(
+    match crate::cpu::x86::decode::decode_with_authority(
         memory,
         pc,
         DecodePolicy::Strict,
         cs,
-        bank,
+        authority,
     )? {
         BoundDecode::Instruction(instruction) => Ok(instruction),
         BoundDecode::CodeFault(_) => unreachable!("strict decoding returns a typed error"),
@@ -439,6 +439,7 @@ pub(super) fn terminates(instruction: &DecodedInstruction, embedded: bool) -> bo
             | Operation::FarCall { .. }
             | Operation::FarReturn { .. }
             | Operation::InterruptReturn { .. }
+            | Operation::SoftwareInterrupt { .. }
             | Operation::Jump { .. }
             | Operation::JumpWord { .. }
             | Operation::ReadJumpWord { .. }
@@ -466,6 +467,7 @@ fn supports_cpu_state(operation: &Operation) -> bool {
         | Operation::FarCall { .. }
         | Operation::FarReturn { .. }
         | Operation::InterruptReturn { .. }
+        | Operation::SoftwareInterrupt { .. }
         | Operation::XState(_)
         | Operation::Avx(_)
         | Operation::VerifySegment { .. }
@@ -702,6 +704,7 @@ pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool
         | Operation::FarCall { .. }
         | Operation::FarReturn { .. }
         | Operation::InterruptReturn { .. }
+        | Operation::SoftwareInterrupt { .. }
         | Operation::XState(_)
         | Operation::Avx(_)
         | Operation::VerifySegment { .. }

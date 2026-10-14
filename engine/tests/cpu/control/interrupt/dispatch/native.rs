@@ -183,3 +183,145 @@ fn late_frame_fault_and_outer_admitted_task_or_privilege_boundaries_are_packet_o
         }
     }
 }
+
+#[test]
+fn only_configured_idt_presence_admits_bare_int_in_both_code_defaults_and_bound_profiles() {
+    use ring3_engine::{
+        abi::x86::encode_current_segment_context,
+        cpu::x86::decode::{DecodeError, decode_one},
+        cpu::x86::{DescriptorTableRegister32, SegmentCache, UserSystemRegisterBank32},
+    };
+    for configured in [false, true] {
+        for d16 in [false, true] {
+            for resident in [false, true] {
+                for entries in [false, true] {
+                    let mut engine = EngineInstance::new(2, KEY).unwrap();
+                    engine
+                        .configure_system_register_bank(UserSystemRegisterBank32 {
+                            idtr: Some(DescriptorTableRegister32 {
+                                base: 0,
+                                limit: u16::MAX,
+                            }),
+                            ..Default::default()
+                        })
+                        .unwrap();
+                    if configured {
+                        // even an explicitly allzero image is authority; no gate validity is baked into IR.
+                        engine
+                            .configure_interrupt_descriptor_table(InterruptDescriptorTable32::new(
+                                0,
+                                Box::new([SegmentDescriptorRecord::from_words(0, 0); 256]),
+                            ))
+                            .unwrap();
+                    }
+                    engine.map(0x1000, 1, 7).unwrap();
+                    engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + 2]
+                        .copy_from_slice(&[0xcd, 0x66]);
+                    engine.upload(0x1000, 2).unwrap();
+                    if d16 {
+                        let mut context = engine.segment_context().unwrap();
+                        context.caches[1] = SegmentCache::from_bits(0xf1bfffff).unwrap();
+                        let mut segments = [0; 64];
+                        let mut bases = [0; 40];
+                        encode_current_segment_context(&context, &mut segments, &mut bases)
+                            .unwrap();
+                        engine.arena_mut().unwrap()[SEGMENTS_OFFSET..SEGMENTS_OFFSET + 64]
+                            .copy_from_slice(&segments);
+                        engine.arena_mut().unwrap()
+                            [SEGMENT_BASES_RECORD_OFFSET..SEGMENT_BASES_RECORD_OFFSET + 40]
+                            .copy_from_slice(&bases);
+                    }
+                    assert!(
+                        matches!(
+                            decode_one(engine.memory().unwrap(), GuestAddress(0x1000)),
+                            Err(DecodeError::Unsupported(_))
+                        ),
+                        "public unbound decode never acquires engine configuration"
+                    );
+                    engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + 8]
+                        .copy_from_slice(&[0, 0x10, 0, 0, if entries { 0 } else { 2 }, 0, 0, 0]);
+                    let before = engine.arena().to_vec();
+                    let mut memory = vec![0; 4096];
+                    engine
+                        .memory()
+                        .unwrap()
+                        .read(GuestAddress(0x1000), &mut memory)
+                        .unwrap();
+                    let result: Result<Option<u64>, HostError> = match (resident, entries) {
+                        (false, false) => engine.compile(1).map(|_| None),
+                        (false, true) => engine.compile_entries(1, 0).map(|_| None),
+                        (true, false) => engine.compile_resident(1).map(|id| Some(id.get())),
+                        (true, true) => engine
+                            .compile_resident_entries(1, 0)
+                            .map(|id| Some(id.get())),
+                    };
+                    let expected = before;
+                    if configured {
+                        let id = result.expect("configured bare INT must prepare bound material");
+                        let module = id.map_or_else(
+                            || engine.artifact_bytes().unwrap(),
+                            |id| engine.resident_bytes(id).unwrap(),
+                        );
+                        assert_eq!(&module[..8], b"\0asm\x01\0\0\0");
+                        let helper = if resident {
+                            b"interrupt_gate_resident".as_slice()
+                        } else {
+                            b"interrupt_gate".as_slice()
+                        };
+                        assert!(module.windows(helper.len()).any(|bytes| bytes == helper));
+                    } else {
+                        assert!(
+                            result.is_err(),
+                            "SIDT readback cannot authorize an interrupt handler"
+                        );
+                    }
+                    assert_eq!(
+                        engine.arena(),
+                        expected,
+                        "preparation changes no CPU/segment/helper state"
+                    );
+                    let mut after = vec![0; 4096];
+                    engine
+                        .memory()
+                        .unwrap()
+                        .read(GuestAddress(0x1000), &mut after)
+                        .unwrap();
+                    assert_eq!(after, memory);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn interrupt_entry_capture_stops_at_original_two_byte_terminator_without_decoding_invalid_tail() {
+    for resident in [false, true] {
+        let (mut engine, _) = engine(14, 0x00cffa00, resident, true);
+        engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + 4]
+            .copy_from_slice(&[0xcd, 0x80, 0xf0, 0x90]);
+        engine.upload(0x1100, 4).unwrap();
+        engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + 4]
+            .copy_from_slice(&0x1100_u32.to_le_bytes());
+        let before = engine.arena().to_vec();
+        let id = if resident {
+            Some(
+                engine
+                    .compile_resident_entries(1, 0)
+                    .expect("INT terminates before invalid tail")
+                    .get(),
+            )
+        } else {
+            engine
+                .compile_entries(1, 0)
+                .expect("INT terminates before invalid tail");
+            None
+        };
+        let module = id.map_or_else(
+            || engine.artifact_bytes().unwrap(),
+            |id| engine.resident_bytes(id).unwrap(),
+        );
+        assert_eq!(&module[..8], b"\0asm\x01\0\0\0");
+        let expected = before;
+        assert_eq!(engine.arena(), expected);
+    }
+}

@@ -404,3 +404,29 @@ pub(crate) fn configure_system_register_bank() -> u32 {
 pub(crate) fn configure_interrupt_descriptor_table() -> u32 {
     mutate(|instance| instance.configure_interrupt_descriptor_table_request())
 }
+
+pub(crate) fn interrupt_gate(vector: u32, return_eip: u32, esp: u32, flags: u32) -> u32 {
+    cpu_store(|instance| instance.interrupt_gate(vector, return_eip, esp, flags))
+}
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn interrupt_gate_resident(
+    key_low: u32,
+    key_high: u32,
+    id_low: u32,
+    id_high: u32,
+    vector: u32,
+    return_eip: u32,
+    esp: u32,
+    flags: u32,
+) -> u32 {
+    cpu_store(|instance| {
+        instance.interrupt_gate_resident(
+            u64::from(key_low) | (u64::from(key_high) << 32),
+            u64::from(id_low) | (u64::from(id_high) << 32),
+            vector,
+            return_eip,
+            esp,
+            flags,
+        )
+    })
+}

@@ -1,5 +1,6 @@
 mod aliases;
 mod atomic;
+mod authority;
 pub(crate) mod avx;
 mod bit_manipulation;
 mod cache_timestamp;
@@ -10,6 +11,7 @@ mod far;
 mod fetch;
 mod flow;
 mod integer;
+mod interrupts;
 mod lower;
 mod mpx;
 mod operands;
@@ -25,8 +27,9 @@ mod system_registers;
 mod x87;
 mod xstate;
 
+pub(crate) use authority::DecodeAuthority;
 pub use decoder::{DecodeError, DecodedInstruction, decode_one};
-pub(crate) use decoder::{DecodePolicy, decode_with_system_registers};
+pub(crate) use decoder::{DecodePolicy, decode_with_authority};
 
 #[cfg(test)]
 pub(crate) use decoder::{decode_bound, decode_for_execution};

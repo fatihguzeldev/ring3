@@ -57,7 +57,10 @@ impl EngineInstance {
             key,
             next_generation,
             cs,
-            self.system_register_bank,
+            crate::cpu::x86::decode::DecodeAuthority::new(
+                self.system_register_bank,
+                self.interrupt_descriptors.is_some(),
+            ),
         )
         .map_err(HostError::Compile)?;
         self.artifact = Some(artifact);
@@ -103,7 +106,10 @@ impl EngineInstance {
                     CompileLimits::default(),
                     key,
                     cs,
-                    self.system_register_bank,
+                    crate::cpu::x86::decode::DecodeAuthority::new(
+                        self.system_register_bank,
+                        self.interrupt_descriptors.is_some(),
+                    ),
                 )
                 .map_err(HostError::Resident)
         } else {
@@ -116,7 +122,10 @@ impl EngineInstance {
                     CompileLimits::default(),
                     key,
                     cs,
-                    self.system_register_bank,
+                    crate::cpu::x86::decode::DecodeAuthority::new(
+                        self.system_register_bank,
+                        self.interrupt_descriptors.is_some(),
+                    ),
                 )
                 .map_err(HostError::Resident)?;
             self.resident = Some(registry);

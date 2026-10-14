@@ -391,6 +391,9 @@ pub enum Operation {
     InterruptReturn {
         width: FarWidth,
     },
+    SoftwareInterrupt {
+        vector: u8,
+    },
     QuerySegment {
         kind: super::SegmentQuery,
         source: Value32,

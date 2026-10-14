@@ -125,9 +125,18 @@ impl ResidentRegistry {
         limits: CompileLimits,
         key: u64,
         cs: Option<CodeFetchContext>,
-        bank: Option<crate::cpu::x86::UserSystemRegisterBank32>,
+        authority: crate::cpu::x86::decode::DecodeAuthority,
     ) -> Result<UnitId, RegistryError> {
-        self.compile_bound_with_counter(memory, specs, gates, limits, key, cs, bank, &NEXT_UNIT_ID)
+        self.compile_bound_with_counter(
+            memory,
+            specs,
+            gates,
+            limits,
+            key,
+            cs,
+            authority,
+            &NEXT_UNIT_ID,
+        )
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -139,7 +148,7 @@ impl ResidentRegistry {
         limits: CompileLimits,
         key: u64,
         cs: Option<CodeFetchContext>,
-        bank: Option<crate::cpu::x86::UserSystemRegisterBank32>,
+        authority: crate::cpu::x86::decode::DecodeAuthority,
     ) -> Result<UnitId, RegistryError> {
         self.compile_entries_bound_with_counter(
             memory,
@@ -148,7 +157,7 @@ impl ResidentRegistry {
             limits,
             key,
             cs,
-            bank,
+            authority,
             &NEXT_UNIT_ID,
         )
     }
@@ -162,14 +171,14 @@ impl ResidentRegistry {
         limits: CompileLimits,
         key: u64,
         cs: Option<CodeFetchContext>,
-        bank: Option<crate::cpu::x86::UserSystemRegisterBank32>,
+        authority: crate::cpu::x86::decode::DecodeAuthority,
         counter: &AtomicU64,
     ) -> Result<UnitId, RegistryError> {
         self.check_memory(memory)?;
         if self.entries.len() == self.limits.units {
             return Err(RegistryError::UnitCapacity);
         }
-        let prepared = prepare_resident_region(memory, specs, limits, gates, cs, bank)
+        let prepared = prepare_resident_region(memory, specs, limits, gates, cs, authority)
             .map_err(RegistryError::Compile)?;
         self.compile_prepared_bound(
             memory,
@@ -190,14 +199,14 @@ impl ResidentRegistry {
         limits: CompileLimits,
         key: u64,
         cs: Option<CodeFetchContext>,
-        bank: Option<crate::cpu::x86::UserSystemRegisterBank32>,
+        authority: crate::cpu::x86::decode::DecodeAuthority,
         counter: &AtomicU64,
     ) -> Result<UnitId, RegistryError> {
         self.check_memory(memory)?;
         if self.entries.len() == self.limits.units {
             return Err(RegistryError::UnitCapacity);
         }
-        let prepared = prepare_resident_entry_region(memory, entries, limits, gates, cs, bank)
+        let prepared = prepare_resident_entry_region(memory, entries, limits, gates, cs, authority)
             .map_err(RegistryError::Compile)?;
         self.compile_prepared_bound(
             memory,
@@ -216,14 +225,15 @@ impl ResidentRegistry {
         limits: CompileLimits,
         key: u64,
         cs: CodeFetchContext,
-        bank: Option<crate::cpu::x86::UserSystemRegisterBank32>,
+        authority: crate::cpu::x86::decode::DecodeAuthority,
     ) -> Result<UnitId, RegistryError> {
         self.check_memory(memory)?;
         if self.entries.len() == self.limits.units {
             return Err(RegistryError::UnitCapacity);
         }
-        let prepared = super::cold::prepare_runtime_entry(memory, entry, limits, Some(cs), bank)
-            .map_err(RegistryError::Compile)?;
+        let prepared =
+            super::cold::prepare_runtime_entry(memory, entry, limits, Some(cs), authority)
+                .map_err(RegistryError::Compile)?;
         self.compile_prepared_bound(
             memory,
             prepared,
@@ -512,7 +522,7 @@ mod tests {
                 CompileLimits::default(),
                 7,
                 None,
-                None,
+                crate::cpu::x86::decode::DecodeAuthority::default(),
                 &counter,
             )
             .unwrap();
@@ -541,7 +551,7 @@ mod tests {
                 },
                 7,
                 None,
-                None,
+                crate::cpu::x86::decode::DecodeAuthority::default(),
                 &counter
             ),
             Err(RegistryError::Compile(CompileError::WasmLimit))
@@ -555,7 +565,7 @@ mod tests {
                 CompileLimits::default(),
                 7,
                 None,
-                None,
+                crate::cpu::x86::decode::DecodeAuthority::default(),
                 &counter
             ),
             Err(RegistryError::InstructionOverlap {
@@ -595,7 +605,7 @@ mod tests {
                 CompileLimits::default(),
                 7,
                 None,
-                None,
+                crate::cpu::x86::decode::DecodeAuthority::default(),
                 &counter,
             )
             .unwrap();
@@ -618,7 +628,7 @@ mod tests {
                 CompileLimits::default(),
                 7,
                 None,
-                None,
+                crate::cpu::x86::decode::DecodeAuthority::default(),
                 &counter,
             )
             .unwrap();
@@ -631,7 +641,7 @@ mod tests {
                 CompileLimits::default(),
                 7,
                 None,
-                None,
+                crate::cpu::x86::decode::DecodeAuthority::default(),
                 &counter
             ),
             Err(RegistryError::ByteCapacity)
@@ -661,7 +671,7 @@ mod tests {
                 },
                 7,
                 None,
-                None,
+                crate::cpu::x86::decode::DecodeAuthority::default(),
                 &counter
             ),
             Err(RegistryError::Compile(CompileError::InvalidLimits))
@@ -739,7 +749,7 @@ mod decode_key_tests {
                 CompileLimits::default(),
                 7,
                 Some(context(0)),
-                None,
+                crate::cpu::x86::decode::DecodeAuthority::default(),
             )
             .unwrap();
         let based = registry
@@ -750,7 +760,7 @@ mod decode_key_tests {
                 CompileLimits::default(),
                 7,
                 Some(context(0x4000)),
-                None,
+                crate::cpu::x86::decode::DecodeAuthority::default(),
             )
             .unwrap();
         assert_ne!(flat, based);
@@ -780,7 +790,7 @@ mod decode_key_tests {
                 CompileLimits::default(),
                 7,
                 Some(context(0x8000)),
-                None
+                crate::cpu::x86::decode::DecodeAuthority::default()
             ),
             Err(RegistryError::UnitCapacity)
         );
@@ -819,7 +829,14 @@ mod synthetic_key_tests {
         let pc = GuestAddress(0x1000);
         let mut registry = ResidentRegistry::new(&memory, RegistryLimits::default()).unwrap();
         let old = registry
-            .compile_runtime_bound(&memory, pc, CompileLimits::default(), 7, context(0), None)
+            .compile_runtime_bound(
+                &memory,
+                pc,
+                CompileLimits::default(),
+                7,
+                context(0),
+                crate::cpu::x86::decode::DecodeAuthority::default(),
+            )
             .unwrap();
         let fault = registry
             .get(&memory, old)
@@ -842,7 +859,7 @@ mod synthetic_key_tests {
                 CompileLimits::default(),
                 7,
                 context(0x4000),
-                None,
+                crate::cpu::x86::decode::DecodeAuthority::default(),
             )
             .unwrap();
         assert_ne!(old, new);

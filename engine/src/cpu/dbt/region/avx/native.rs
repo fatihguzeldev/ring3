@@ -63,7 +63,14 @@ fn embedded_admits_typed_avx_without_relaxing_explicit_block_ends() {
             byte_length: length as u32 + 2,
         };
         prepared(
-            prepare_embedded_region(&memory, &[spec], limits, &[], None, None),
+            prepare_embedded_region(
+                &memory,
+                &[spec],
+                limits,
+                &[],
+                None,
+                crate::cpu::x86::decode::DecodeAuthority::default(),
+            ),
             &memory,
         );
         assert_eq!(
@@ -76,7 +83,7 @@ fn embedded_admits_typed_avx_without_relaxing_explicit_block_ends() {
                 limits,
                 &[],
                 None,
-                None,
+                crate::cpu::x86::decode::DecodeAuthority::default(),
             )
             .unwrap_err(),
             instruction_error(InstructionError::InvalidBlockEnd)
@@ -91,7 +98,7 @@ fn embedded_admits_typed_avx_without_relaxing_explicit_block_ends() {
                 limits,
                 &[],
                 None,
-                None,
+                crate::cpu::x86::decode::DecodeAuthority::default(),
             )
             .unwrap_err(),
             CompileError::Instruction {
@@ -119,7 +126,14 @@ fn resident_admits_typed_avx_and_preserves_instruction_limits() {
             byte_length: length as u32 + 2,
         };
         prepared(
-            prepare_resident_region(&memory, &[spec], CompileLimits::default(), &[], None, None),
+            prepare_resident_region(
+                &memory,
+                &[spec],
+                CompileLimits::default(),
+                &[],
+                None,
+                crate::cpu::x86::decode::DecodeAuthority::default(),
+            ),
             &memory,
         );
         assert_eq!(
@@ -132,7 +146,7 @@ fn resident_admits_typed_avx_and_preserves_instruction_limits() {
                 },
                 &[],
                 None,
-                None,
+                crate::cpu::x86::decode::DecodeAuthority::default(),
             )
             .unwrap_err(),
             CompileError::InstructionLimit
@@ -147,7 +161,7 @@ fn resident_admits_typed_avx_and_preserves_instruction_limits() {
                 CompileLimits::default(),
                 &[],
                 None,
-                None,
+                crate::cpu::x86::decode::DecodeAuthority::default(),
             )
             .unwrap_err(),
             instruction_error(InstructionError::InvalidBlockEnd)
@@ -165,15 +179,35 @@ fn entry_paths_admit_typed_avx_only_with_cpu_state_authority() {
         }
         let limits = CompileLimits::default();
         prepared(
-            cold::prepare_embedded_entry_region(&memory, &[PC], limits, &[], None, None),
+            cold::prepare_embedded_entry_region(
+                &memory,
+                &[PC],
+                limits,
+                &[],
+                None,
+                crate::cpu::x86::decode::DecodeAuthority::default(),
+            ),
             &memory,
         );
         prepared(
-            cold::prepare_resident_entry_region(&memory, &[PC], limits, &[], None, None),
+            cold::prepare_resident_entry_region(
+                &memory,
+                &[PC],
+                limits,
+                &[],
+                None,
+                crate::cpu::x86::decode::DecodeAuthority::default(),
+            ),
             &memory,
         );
         prepared(
-            cold::prepare_runtime_entry(&memory, PC, limits, None, None),
+            cold::prepare_runtime_entry(
+                &memory,
+                PC,
+                limits,
+                None,
+                crate::cpu::x86::decode::DecodeAuthority::default(),
+            ),
             &memory,
         );
         assert_eq!(
@@ -187,7 +221,7 @@ fn entry_paths_admit_typed_avx_only_with_cpu_state_authority() {
                 limits,
                 &[],
                 None,
-                None,
+                crate::cpu::x86::decode::DecodeAuthority::default(),
             )
             .unwrap_err(),
             CompileError::InvalidBlocks

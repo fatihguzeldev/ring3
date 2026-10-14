@@ -11,6 +11,7 @@ mod emitter;
 mod far;
 mod integer;
 mod integer_system;
+mod interrupts;
 mod locals;
 mod memory;
 mod packed_strings;

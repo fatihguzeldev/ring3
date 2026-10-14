@@ -116,3 +116,6 @@ mod cpu_scalar_availability;
 
 #[path = "hints/reserved/wasm.rs"]
 mod cpu_legacy_nop_wasm;
+
+#[path = "interrupt/dispatch/wasm.rs"]
+mod interrupt_dispatch;

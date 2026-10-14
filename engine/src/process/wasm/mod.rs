@@ -218,9 +218,9 @@ pub(crate) use cpu::{
     cpu_fxsave_resident, cpu_integer, cpu_integer_resident, cpu_mask_write,
     cpu_mask_write_resident, cpu_read, cpu_read8, cpu_read16, cpu_read32, cpu_write,
     cpu_write_resident, far_call, far_call_resident, far_jump, far_jump_resident, far_return,
-    far_return_resident, segment_load, segment_load_far, segment_load_far_resident,
-    segment_load_resident, set_segment_base, simd_execute, simd_execute_resident, stack_execute,
-    stack_execute_resident, x87_op, x87_resident_op,
+    far_return_resident, interrupt_gate, interrupt_gate_resident, segment_load, segment_load_far,
+    segment_load_far_resident, segment_load_resident, set_segment_base, simd_execute,
+    simd_execute_resident, stack_execute, stack_execute_resident, x87_op, x87_resident_op,
 };
 
 mod avx;

@@ -31,7 +31,14 @@ fn compile(
     counter: &AtomicU64,
 ) -> Result<UnitId, RegistryError> {
     registry.compile_entries_bound_with_counter(
-        memory, entries, gates, limits, KEY, None, None, counter,
+        memory,
+        entries,
+        gates,
+        limits,
+        KEY,
+        None,
+        crate::cpu::x86::decode::DecodeAuthority::default(),
+        counter,
     )
 }
 
@@ -122,7 +129,7 @@ fn resident_cold_families_match_literal_extents_and_existing_full_u64_bound_emis
                 CompileLimits::default(),
                 KEY,
                 None,
-                None,
+                crate::cpu::x86::decode::DecodeAuthority::default(),
                 &explicit_counter,
             )
             .unwrap();
@@ -201,7 +208,7 @@ fn unordered_cold_gates_match_existing_snapshot_and_executable_address_ownership
             CompileLimits::default(),
             KEY,
             None,
-            None,
+            crate::cpu::x86::decode::DecodeAuthority::default(),
             &AtomicU64::new(0x1_0000_0001),
         )
         .unwrap();
@@ -280,7 +287,7 @@ fn gate_only_units_lookup_unsigned_zero_and_top_entries_in_both_preparation_path
                 CompileLimits::default(),
                 KEY,
                 None,
-                None,
+                crate::cpu::x86::decode::DecodeAuthority::default(),
                 &counter,
             )
         }
@@ -745,7 +752,7 @@ fn entry_prefix_retries_allocate_one_identity_and_keep_every_requested_entry() {
         },
         &[],
         None,
-        None,
+        crate::cpu::x86::decode::DecodeAuthority::default(),
     )
     .unwrap();
     let minimum_bytes = crate::cpu::dbt::wasm::emit(&minimum.blocks, binding, minimum.decode_key);

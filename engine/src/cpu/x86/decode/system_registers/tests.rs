@@ -4,7 +4,7 @@ use crate::{
         UserSystemRegisterBank32,
         decode::{
             BoundDecode, CodeFetchContext, DecodeError, DecodePolicy, decode_one,
-            decode_with_system_registers,
+            decode_with_authority,
         },
         ir::{Operation, Value32, WordValue},
     },
@@ -62,12 +62,12 @@ fn complete_queries_bind_exact_widths_without_reading_source_tables() {
                 });
                 let memory = code(&bytes);
                 let pc = GuestAddress(0x2000 - bytes.len() as u32);
-                let decoded = decode_with_system_registers(
+                let decoded = decode_with_authority(
                     &memory,
                     pc,
                     DecodePolicy::Strict,
                     Some(context(default32)),
-                    Some(bank()),
+                    crate::cpu::x86::decode::DecodeAuthority::new(Some(bank()), false),
                 )
                 .unwrap();
                 let BoundDecode::Instruction(decoded) = decoded else {
@@ -92,12 +92,12 @@ fn complete_queries_bind_exact_widths_without_reading_source_tables() {
                 bytes.extend([0x0f, 0x01, modrm]);
                 let memory = code(&bytes);
                 let pc = GuestAddress(0x2000 - bytes.len() as u32);
-                let BoundDecode::Instruction(decoded) = decode_with_system_registers(
+                let BoundDecode::Instruction(decoded) = decode_with_authority(
                     &memory,
                     pc,
                     DecodePolicy::Strict,
                     Some(context(default32)),
-                    Some(bank()),
+                    crate::cpu::x86::decode::DecodeAuthority::new(Some(bank()), false),
                 )
                 .unwrap() else {
                     panic!("complete query")
@@ -151,12 +151,12 @@ fn missing_authority_follows_complete_fetch_and_preserves_prefix_policy() {
         ..Default::default()
     };
     assert!(matches!(
-        decode_with_system_registers(
+        decode_with_authority(
             &memory,
             GuestAddress(0x1ffd),
             DecodePolicy::Strict,
             Some(context(true)),
-            Some(partial)
+            crate::cpu::x86::decode::DecodeAuthority::new(Some(partial), false)
         ),
         Err(DecodeError::MissingSystemRegisterAuthority(
             SystemRegisterQuery::Tr
@@ -171,24 +171,24 @@ fn current_cs_authority_precedes_missing_bank_for_real_and_source_free_prefixes(
     segments.caches[1] = SegmentCache::from_bits(0xf2b0_1ffe).unwrap();
     let cs = CodeFetchContext::from_segments(&segments).unwrap();
     assert!(matches!(
-        decode_with_system_registers(
+        decode_with_authority(
             &memory,
             GuestAddress(0x1ffc),
             DecodePolicy::Strict,
             Some(cs),
-            None
+            crate::cpu::x86::decode::DecodeAuthority::default()
         ),
         Err(DecodeError::CodeSegment {
             pc: GuestAddress(0x1ffc),
             attempted_length: 4
         })
     ));
-    let BoundDecode::CodeFault(fault) = decode_with_system_registers(
+    let BoundDecode::CodeFault(fault) = decode_with_authority(
         &memory,
         GuestAddress(0x1ffc),
         DecodePolicy::Execution,
         Some(cs),
-        None,
+        crate::cpu::x86::decode::DecodeAuthority::default(),
     )
     .unwrap() else {
         panic!("real prefix")
@@ -201,12 +201,12 @@ fn current_cs_authority_precedes_missing_bank_for_real_and_source_free_prefixes(
     let unmapped = AddressSpace::new(1).unwrap();
     segments.caches[1] = SegmentCache::from_bits(0xf2b0_0fff).unwrap();
     let cs = CodeFetchContext::from_segments(&segments).unwrap();
-    let BoundDecode::CodeFault(fault) = decode_with_system_registers(
+    let BoundDecode::CodeFault(fault) = decode_with_authority(
         &unmapped,
         GuestAddress(0x1000),
         DecodePolicy::Execution,
         Some(cs),
-        None,
+        crate::cpu::x86::decode::DecodeAuthority::default(),
     )
     .unwrap() else {
         panic!("source free")

@@ -37,7 +37,7 @@ fn instruction_quota_never_fetches_the_next_instruction_and_guards_only_retained
         GuestAddress(0x1fc0),
         CompileLimits::default(),
         Some(cs()),
-        None,
+        crate::cpu::x86::decode::DecodeAuthority::default(),
     )
     .unwrap();
     assert_eq!(prepared.instruction_count(), 64);
@@ -79,7 +79,7 @@ fn discovery_preserves_every_requested_entry_under_the_instruction_budget() {
             },
             &[],
             Some(cs()),
-            None
+            crate::cpu::x86::decode::DecodeAuthority::default()
         ),
         Err(CompileError::InstructionLimit)
     ));
@@ -89,7 +89,15 @@ fn prepare_runtime_entries_for_test(
     entries: &[GuestAddress],
     limits: CompileLimits,
 ) -> PreparedRegion {
-    prepare_embedded_entry_region(memory, entries, limits, &[], Some(cs()), None).unwrap()
+    prepare_embedded_entry_region(
+        memory,
+        entries,
+        limits,
+        &[],
+        Some(cs()),
+        crate::cpu::x86::decode::DecodeAuthority::default(),
+    )
+    .unwrap()
 }
 #[test]
 fn byte_retry_rebuilds_the_snapshot_and_keeps_all_entries() {
@@ -146,7 +154,7 @@ fn shrinking_a_context_fault_removes_its_consumed_prefix_pages() {
         GuestAddress(0x1fff),
         CompileLimits::default(),
         Some(cs),
-        None,
+        crate::cpu::x86::decode::DecodeAuthority::default(),
     )
     .unwrap();
     assert_eq!(prepared.instruction_count(), 2);

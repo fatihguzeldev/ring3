@@ -42,6 +42,7 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
             | Operation::X87 { .. }
             | Operation::FarCall { .. }
             | Operation::InterruptReturn { .. }
+            | Operation::SoftwareInterrupt { .. }
             | Operation::Call { .. }
             | Operation::CallWord { .. }
             | Operation::CallRegisterWord { .. }
@@ -60,6 +61,16 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
     }
     let mut store = false;
     match *instruction.operation() {
+        Operation::SoftwareInterrupt { vector } => {
+            super::super::interrupts::dispatch(
+                code,
+                vector,
+                instruction.next_pc().0,
+                imports,
+                exit_depth,
+            );
+            store = true;
+        }
         Operation::FarCall { width, target } => {
             super::super::far::call(
                 code,
@@ -2442,6 +2453,7 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
             | Operation::FarCall { .. }
             | Operation::FarReturn { .. }
             | Operation::InterruptReturn { .. }
+            | Operation::SoftwareInterrupt { .. }
             | Operation::Jump { .. }
             | Operation::JumpWord { .. }
             | Operation::ReadJumpWord { .. }
