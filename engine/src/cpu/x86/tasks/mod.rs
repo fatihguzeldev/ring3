@@ -5,6 +5,7 @@ mod outcome;
 mod record;
 mod register;
 mod returning;
+mod save;
 
 pub use authority::{TaskAuthority, TaskDescriptorTable};
 pub use outcome::TaskReturnAdmission;
@@ -13,6 +14,9 @@ pub use record::{
 };
 pub use register::TaskRegister;
 pub use returning::{PreparedTaskReturn, prepare_return};
+pub use save::{
+    MAX_TASK_SAVE_WORDS, TaskSaveOverlayAuthority, TaskSaveOverlayError, TaskSavePlan, TaskSaveWord,
+};
 
 /// missing trusted source bytes are distinct from an explicitly invalid guest image.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
