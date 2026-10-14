@@ -59,13 +59,13 @@ pub(super) fn for_instruction(
     None
 }
 
-// monitor, mwait and pconfig explicitly raise ud at nonzero cpl.
+// monitor, mwait, pconfig, clac and stac explicitly raise ud at nonzero cpl.
 // no implicit operand, monitor or platform backend is reached.
 fn user_privilege_invalid(instruction: &Instruction, environment: UserModeEnvironment) -> bool {
     environment.current_privilege() != 0
         && matches!(
             instruction.code(),
-            Code::Monitorw | Code::Monitord | Code::Mwait | Code::Pconfig
+            Code::Monitorw | Code::Monitord | Code::Mwait | Code::Pconfig | Code::Clac | Code::Stac
         )
 }
 
