@@ -4,7 +4,10 @@ use crate::{
         arena::TRANSFER_OFFSET,
         x86::{decode_state, encode_state_current},
     },
-    cpu::x86::{SegmentContext, SegmentDescriptorRecord, State32, tasks::TaskRegister},
+    cpu::x86::{
+        SegmentContext, SegmentDescriptorRecord, State32,
+        tasks::{TaskFormat, TaskRegister},
+    },
     memory::{Access, FaultReason},
 };
 
@@ -30,6 +33,39 @@ fn tss(base: u32) -> SegmentDescriptorRecord {
         (base << 16) | 0x67,
         (base & 0xff000000) | ((base >> 16) & 0xff) | 0x8b00,
     )
+}
+fn tss_format(base: u32, format: TaskFormat) -> SegmentDescriptorRecord {
+    match format {
+        TaskFormat::Dword => tss(base),
+        TaskFormat::Word => SegmentDescriptorRecord::from_words(
+            (base << 16) | 0x2c,
+            (base & 0xff000000) | ((base >> 16) & 0xff) | 0x8300,
+        ),
+    }
+}
+fn incoming_word_bytes() -> [u8; 44] {
+    let mut bytes = [0xa5; 44];
+    let words: [(usize, u16); 15] = [
+        (14, 0x2000),
+        (16, 0x4fd7),
+        (18, 0x3344),
+        (20, 0x7788),
+        (22, 0xbbcc),
+        (24, 0xff00),
+        (26, 0x9bdf),
+        (28, 0xace0),
+        (30, 0xbeef),
+        (32, 0xbabe),
+        (34, 0x23),
+        (36, 0x1b),
+        (38, 0x23),
+        (40, 0x23),
+        (42, 0),
+    ];
+    for (offset, value) in words {
+        bytes[offset..offset + 2].copy_from_slice(&value.to_le_bytes());
+    }
+    bytes
 }
 fn incoming_bytes() -> [u8; 104] {
     let mut bytes = [0xa5; 104];
@@ -86,6 +122,15 @@ fn instance(
     current: u32,
     target: u32,
 ) -> (EngineInstance, Option<u64>) {
+    instance_formats(resident, entries, current, target, [TaskFormat::Dword; 2])
+}
+fn instance_formats(
+    resident: bool,
+    entries: bool,
+    current: u32,
+    target: u32,
+    formats: [TaskFormat; 2],
+) -> (EngineInstance, Option<u64>) {
     let mut engine = EngineInstance::new(7, KEY).unwrap();
     for page in PAGES {
         engine.map(page, 1, 7).unwrap();
@@ -96,11 +141,17 @@ fn instance(
             .cpu_write(GuestAddress(page), &[0xa5; 4096])
             .unwrap();
     }
+    let dword = incoming_bytes();
+    let word = incoming_word_bytes();
+    let incoming: &[u8] = match formats[1] {
+        TaskFormat::Word => &word,
+        TaskFormat::Dword => &dword,
+    };
     engine
         .memory
         .as_mut()
         .unwrap()
-        .cpu_write(GuestAddress(target), &incoming_bytes())
+        .cpu_write(GuestAddress(target), incoming)
         .unwrap();
     engine
         .memory
@@ -114,13 +165,13 @@ fn instance(
         .unwrap()
         .cpu_write(GuestAddress(0x2000), &[0xeb, 0xfe])
         .unwrap();
-    let current = TaskRegister::from_cached(0x43, tss(current)).unwrap();
+    let current = TaskRegister::from_cached(0x43, tss_format(current, formats[0])).unwrap();
     engine.configure_task_return_sources(current, 0x57).unwrap();
     engine
         .configure_segment_descriptor_raw(0x40, current.descriptor())
         .unwrap();
     engine
-        .configure_segment_descriptor_raw(0x48, tss(target))
+        .configure_segment_descriptor_raw(0x48, tss_format(target, formats[1]))
         .unwrap();
     engine
         .configure_task_controls(
@@ -528,3 +579,6 @@ fn outgoing_save_smc_is_reported_after_ram_and_task_state_commit_without_rollbac
         assert_eq!(engine.task_execution_revision(), Some(2));
     }
 }
+
+#[path = "tests/word.rs"]
+mod word;

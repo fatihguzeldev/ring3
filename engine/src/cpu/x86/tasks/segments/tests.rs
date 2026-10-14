@@ -1,4 +1,5 @@
 use super::*;
+use crate::cpu::x86::tasks::{TaskState, TaskState32};
 
 fn incoming() -> TaskState32 {
     TaskState32 {
@@ -20,7 +21,7 @@ fn record(kind: u8, dpl: u8, present: bool) -> SegmentDescriptorRecord {
 }
 fn qualify(state: TaskState32, table: &SegmentDescriptorTable) -> TaskIncomingContext32 {
     incoming_segments(
-        state,
+        TaskLoadState32::from_record(TaskState::Dword(state)),
         table,
         0x57,
         (0x40, SegmentDescriptorRecord::from_words(0x67, 0x8900)),
@@ -111,7 +112,12 @@ fn missing_descriptors_and_ldt_contents_do_not_become_fabricated_ts() {
     state.selectors[3] = 0x53;
     let table = SegmentDescriptorTable::default();
     assert_eq!(
-        incoming_segments(state, &table, 0x57, (0x40, record(9, 0, true))),
+        incoming_segments(
+            TaskLoadState32::from_record(TaskState::Dword(state)),
+            &table,
+            0x57,
+            (0x40, record(9, 0, true))
+        ),
         Err(TaskAuthorityRequirement32::Descriptor(0x53))
     );
     let mut table = table;
@@ -119,7 +125,12 @@ fn missing_descriptors_and_ldt_contents_do_not_become_fabricated_ts() {
     table.configure_raw(0x50, record(2, 0, true)).unwrap();
     state.selectors[3] = 0xf;
     assert_eq!(
-        incoming_segments(state, &table, 0x57, (0x40, record(9, 0, true))),
+        incoming_segments(
+            TaskLoadState32::from_record(TaskState::Dword(state)),
+            &table,
+            0x57,
+            (0x40, record(9, 0, true))
+        ),
         Err(TaskAuthorityRequirement32::Ldt(0x50))
     );
     state.ldtr = 0;

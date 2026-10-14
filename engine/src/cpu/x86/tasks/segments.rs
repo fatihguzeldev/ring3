@@ -1,5 +1,5 @@
 use super::{
-    TaskAuthorityRequirement32, TaskIncomingContext32, TaskState32, TaskTransitionFault32,
+    TaskAuthorityRequirement32, TaskIncomingContext32, TaskLoadState32, TaskTransitionFault32,
 };
 use crate::cpu::x86::{
     SegmentCache, SegmentDescriptorRecord, SegmentDescriptorTable, SegmentRegister,
@@ -73,7 +73,7 @@ fn load(
 /// the selected p6 table 10-1 qualification order applies after raw incoming state is loaded.
 /// missing supplied records are capability boundaries, never fabricated task-switch faults.
 pub(crate) fn incoming_segments(
-    incoming: TaskState32,
+    incoming: TaskLoadState32,
     table: &SegmentDescriptorTable,
     gdt_limit: u16,
     cleared: (u16, SegmentDescriptorRecord),

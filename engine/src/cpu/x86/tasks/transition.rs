@@ -1,4 +1,4 @@
-use super::TaskState32;
+use super::TaskLoadState32;
 use crate::cpu::x86::{
     SegmentCache, SegmentContext, SegmentDescriptorRecord, SegmentRegister, SegmentState, State32,
 };
@@ -38,7 +38,7 @@ pub struct TaskIncomingContext32 {
 }
 
 impl TaskIncomingContext32 {
-    pub(crate) fn new(incoming: TaskState32) -> Self {
+    pub(crate) fn new(incoming: TaskLoadState32) -> Self {
         Self {
             state: State32 {
                 registers: incoming.general,

@@ -10,9 +10,9 @@ use crate::{
     cpu::x86::{
         SegmentRegister,
         tasks::{
-            TaskAuthorityRequirement32, TaskControlState32, TaskFormat, TaskIncomingContext32,
+            TaskAuthorityRequirement32, TaskControlState32, TaskIncomingContext32, TaskLoadState32,
             TaskRecord, TaskReturnAdmission, TaskSave, TaskSaveOverlayAuthority, TaskSavePlan,
-            TaskState, TaskTransitionFault32,
+            TaskTransitionFault32,
         },
     },
     memory::{GuestAddress, MemoryError, MemoryFault},
@@ -104,13 +104,6 @@ impl EngineInstance {
                 TaskAuthorityRequirement32::AddressSpace,
             ));
         }
-        if prepared.current().format() != TaskFormat::Dword
-            || prepared.target().format() != TaskFormat::Dword
-        {
-            return Ok(TaskReturnTransition32::NeedsAuthority(
-                TaskAuthorityRequirement32::TaskFormat,
-            ));
-        }
         outgoing.flags &= !0x10000;
         let plan = TaskSavePlan::new(prepared.current().format(), &outgoing);
         if prepared.current().limit() < plan.required_limit() {
@@ -129,15 +122,19 @@ impl EngineInstance {
                 TaskAuthorityRequirement32::Descriptor(prepared.current().selector()),
             ));
         };
-        let mut bytes = [0; 104];
+        let format = prepared.target().format();
+        let length = format.record_bytes();
+        let mut storage = [0; 104];
+        let bytes = &mut storage[..length];
         if let Err(error) = self
             .memory()?
-            .cpu_read(GuestAddress(prepared.target().base()), &mut bytes)
+            .cpu_read(GuestAddress(prepared.target().base()), bytes)
         {
             return Ok(match error {
-                MemoryError::Fault(fault) => {
-                    TaskReturnTransition32::NeedsPagingAuthority { fault, length: 104 }
-                }
+                MemoryError::Fault(fault) => TaskReturnTransition32::NeedsPagingAuthority {
+                    fault,
+                    length: length as u32,
+                },
                 error => TaskReturnTransition32::Infrastructure(error),
             });
         }
@@ -145,16 +142,15 @@ impl EngineInstance {
         plan.overlay(
             prepared.current().base(),
             prepared.target().base(),
-            &mut bytes,
+            bytes,
             TaskSaveOverlayAuthority::SameLinearAddressSpace,
         )
         .expect("bounded known-linear task image");
-        let TaskState::Dword(incoming) = TaskRecord::new(TaskFormat::Dword, &bytes)
-            .expect("complete task32 image")
-            .decode()
-        else {
-            unreachable!("dword record");
-        };
+        let incoming = TaskLoadState32::from_record(
+            TaskRecord::new(format, bytes)
+                .expect("complete task image")
+                .decode(),
+        );
         let sources = self.task_return_sources.expect("admitted task sources");
         let context = match crate::cpu::x86::tasks::incoming_segments(
             incoming,

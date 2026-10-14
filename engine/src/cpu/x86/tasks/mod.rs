@@ -3,6 +3,7 @@
 mod authority;
 mod context;
 mod control;
+mod load;
 mod outcome;
 mod record;
 mod register;
@@ -14,6 +15,7 @@ mod transition;
 pub use authority::{TaskAuthority, TaskDescriptorTable};
 pub use context::TaskContextImage32;
 pub use control::{TaskControlError32, TaskControlState32};
+pub(crate) use load::TaskLoadState32;
 pub use outcome::TaskReturnAdmission;
 pub use record::{
     TaskFormat, TaskRecord, TaskSave, TaskState, TaskState16, TaskState32, encode_return,
