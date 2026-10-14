@@ -8,6 +8,9 @@ pub(super) fn required(feature: CpuidFeature) -> Option<(u32, u32, usize, u32)> 
         CpuidFeature::D3NOWEXT => (3, 30),
         CpuidFeature::XOP => (2, 11),
         CpuidFeature::FMA4 => (2, 16),
+        CpuidFeature::LWP => (2, 15),
+        // the broadcast and synchronization forms share this extended prerequisite.
+        CpuidFeature::INVLPGB => return Some((0x8000_0008, 0, 1, 3)),
         _ => return None,
     };
     Some((0x8000_0001, 0, register, bit))

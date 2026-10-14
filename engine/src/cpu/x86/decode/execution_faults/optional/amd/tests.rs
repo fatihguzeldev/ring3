@@ -30,7 +30,7 @@ fn qualified_amd_prerequisites_match_the_immutable_extended_leaf() {
         );
         assert_eq!(leaf.registers[register] & (1 << bit), 0);
     }
-    for feature in [F::TBM, F::FMA, F::PREFETCHW, F::MMX, F::LWP] {
+    for feature in [F::TBM, F::FMA, F::PREFETCHW, F::MMX] {
         assert_eq!(required(feature), None);
     }
 }
@@ -137,4 +137,38 @@ fn prefix_and_neighbor_codes_do_not_become_generic_amd_faults() {
             .operation(),
         &Operation::Control(ControlOperation::InvalidOpcode)
     );
+}
+
+#[test]
+fn additional_lwp_and_broadcast_tlb_prerequisites_are_exact() {
+    assert_eq!(required(F::LWP), Some((0x8000_0001, 0, 2, 15)));
+    assert_eq!(required(F::INVLPGB), Some((0x8000_0008, 0, 1, 3)));
+    assert_eq!(required(F::WBNOINVD), None);
+    assert_eq!(required(F::PCONFIG), None);
+    assert!(
+        !CPU_ID_LEAVES
+            .iter()
+            .any(|leaf| leaf.function == 0x8000_0001 && leaf.registers[2] & (1 << 15) != 0)
+    );
+    assert!(
+        !CPU_ID_LEAVES
+            .iter()
+            .any(|leaf| leaf.function == 0x8000_0008 && leaf.registers[1] & (1 << 3) != 0)
+    );
+    assert!(!CPU_ID_LEAVES.iter().any(|leaf| leaf.function == 7
+        && leaf.subfunction == Some(0)
+        && leaf.registers[3] & (1 << 18) != 0));
+    let mut counts = [0; 2];
+    for code in Code::values() {
+        let mut instruction = Instruction::default();
+        instruction.set_code(code);
+        for (index, feature) in [F::LWP, F::INVLPGB].iter().enumerate() {
+            if instruction.cpuid_features().contains(feature) {
+                assert_eq!(instruction.cpuid_features(), &[*feature]);
+                counts[index] += 1;
+            }
+        }
+    }
+    // includes unreachable r64/q metadata companions; protected16/32 yields only seven selected codes.
+    assert_eq!(counts, [8, 4]);
 }

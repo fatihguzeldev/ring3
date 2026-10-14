@@ -59,13 +59,13 @@ pub(super) fn for_instruction(
     None
 }
 
-// MONITOR and MWAIT explicitly raise UD at nonzero CPL, independently of
-// their optional availability bits; no monitor-address or scheduler backend is reached.
+// monitor, mwait and pconfig explicitly raise ud at nonzero cpl.
+// no implicit operand, monitor or platform backend is reached.
 fn user_privilege_invalid(instruction: &Instruction, environment: UserModeEnvironment) -> bool {
     environment.current_privilege() != 0
         && matches!(
             instruction.code(),
-            Code::Monitorw | Code::Monitord | Code::Mwait
+            Code::Monitorw | Code::Monitord | Code::Mwait | Code::Pconfig
         )
 }
 
@@ -156,6 +156,8 @@ fn general_protection(instruction: &Instruction, environment: UserModeEnvironmen
         | Code::Lmsw_r32m16
         | Code::Invd
         | Code::Wbinvd
+        // absent wbnoinvd falls back to wbinvd, retaining its cpl0 requirement.
+        | Code::Wbnoinvd
         | Code::Xsetbv => true,
         Code::Rdmsr | Code::Wrmsr => MSR_ENABLED && environment.current_privilege() != 0,
         Code::Rdpmc => {
@@ -289,3 +291,7 @@ mod sep;
 mod optional;
 
 mod state;
+
+#[cfg(test)]
+#[path = "execution_faults/tests/system.rs"]
+mod system;

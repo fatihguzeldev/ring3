@@ -103,7 +103,7 @@ fn privileged_lock_invalidity_precedes_cpl3_general_protection() {
 }
 
 #[test]
-fn privileged_repeat_and_duplicate_prefixes_keep_strict_refusals() {
+fn privileged_prefix_refusals_distinguish_the_disabled_writeback_alias() {
     for row in privileged_rows() {
         for prefix in [&[0xf2][..], &[0xf3], &[0x66, 0x66]] {
             let mut bytes = prefix.to_vec();
@@ -111,26 +111,44 @@ fn privileged_repeat_and_duplicate_prefixes_keep_strict_refusals() {
             let memory = executable(&bytes);
             let strict = decode_one(&memory, GuestAddress(0x1000)).unwrap_err();
             assert!(matches!(strict, DecodeError::Unsupported(_)));
+            if bytes == [0xf3, 0x0f, 0x09] {
+                let decoded = decode_for_execution(&memory, GuestAddress(0x1000)).unwrap();
+                assert_eq!(
+                    decoded.operation(),
+                    &Operation::Control(ControlOperation::GeneralProtectionZero)
+                );
+                assert_eq!(decoded.segment_accesses(), 0);
+            } else {
+                assert_eq!(
+                    decode_for_execution(&memory, GuestAddress(0x1000)).unwrap_err(),
+                    strict,
+                    "{bytes:02x?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn disabled_writeback_fault_and_unsupplied_interrupt_authority_remain_distinct() {
+    for bytes in [&[0xf3, 0x0f, 0x09][..], &[0xcd, 0x80]] {
+        let memory = executable(bytes);
+        let strict = decode_one(&memory, GuestAddress(0x1000)).unwrap_err();
+        assert!(matches!(strict, DecodeError::Unsupported(_)));
+        if bytes == [0xf3, 0x0f, 0x09] {
+            let decoded = decode_for_execution(&memory, GuestAddress(0x1000)).unwrap();
+            assert_eq!(
+                decoded.operation(),
+                &Operation::Control(ControlOperation::GeneralProtectionZero)
+            );
+            assert_eq!(decoded.segment_accesses(), 0);
+        } else {
             assert_eq!(
                 decode_for_execution(&memory, GuestAddress(0x1000)).unwrap_err(),
                 strict,
                 "{bytes:02x?}"
             );
         }
-    }
-}
-
-#[test]
-fn environment_dependent_or_unadvertised_families_keep_strict_refusals() {
-    for bytes in [&[0xf3, 0x0f, 0x09][..], &[0xcd, 0x80]] {
-        let memory = executable(bytes);
-        let strict = decode_one(&memory, GuestAddress(0x1000)).unwrap_err();
-        assert!(matches!(strict, DecodeError::Unsupported(_)));
-        assert_eq!(
-            decode_for_execution(&memory, GuestAddress(0x1000)).unwrap_err(),
-            strict,
-            "{bytes:02x?}"
-        );
     }
 }
 

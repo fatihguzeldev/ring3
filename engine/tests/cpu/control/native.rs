@@ -96,3 +96,6 @@ mod cpu_bnd_prefix;
 
 #[path = "exceptions/availability/amd/native.rs"]
 mod cpu_amd_absence;
+
+#[path = "exceptions/availability/system/native.rs"]
+mod cpu_system_availability;
