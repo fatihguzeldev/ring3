@@ -20,9 +20,14 @@ pub(super) fn canonical_code(code: Code) -> Option<Code> {
         Code::Sal_rm32_1 => Code::Shl_rm32_1,
         Code::Sal_rm32_CL => Code::Shl_rm32_CL,
         Code::Sal_rm32_imm8 => Code::Shl_rm32_imm8,
+        Code::Movzx_r16_rm16 | Code::Movsx_r16_rm16 => Code::Mov_r16_rm16,
         _ => return None,
     })
 }
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+#[path = "aliases/tests/word.rs"]
+mod word;

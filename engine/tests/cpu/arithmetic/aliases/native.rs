@@ -74,3 +74,24 @@ fn already_supported_locked_group1_and_explicit_refusal_boundaries_remain() {
         ));
     }
 }
+
+#[test]
+fn equal_width_word_moves_use_word_ir_and_original_continuations() {
+    for (alias, canonical) in [
+        (&[0x66, 0x0f, 0xb7, 0xc1][..], &[0x66, 0x8b, 0xc1][..]),
+        (&[0x66, 0x0f, 0xbf, 0xc1][..], &[0x66, 0x8b, 0xc1][..]),
+        (&[0x66, 0x0f, 0xb7, 0x03][..], &[0x66, 0x8b, 0x03][..]),
+        (&[0x66, 0x0f, 0xbf, 0x03][..], &[0x66, 0x8b, 0x03][..]),
+    ] {
+        let a = stopped::stopped(alias, 0x3000);
+        let c = stopped::stopped(canonical, 0x3000);
+        let actual = decode_one(a.memory().unwrap(), GuestAddress(0x3000)).unwrap();
+        let want = decode_one(c.memory().unwrap(), GuestAddress(0x3000)).unwrap();
+        assert_eq!(actual.operation(), want.operation());
+        assert_eq!(usize::from(actual.length()), alias.len());
+        assert_eq!(usize::from(want.length()) + 1, usize::from(actual.length()));
+        assert_eq!(actual.next_pc(), GuestAddress(0x3000 + alias.len() as u32));
+        assert!(a.memory().unwrap().is_code_current(actual.code_snapshot()));
+        stopped::expect_admitted(alias, 0x3000);
+    }
+}

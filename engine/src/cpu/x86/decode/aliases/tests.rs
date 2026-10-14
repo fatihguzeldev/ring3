@@ -90,7 +90,7 @@ fn mode_bytes(bytes: &[u8], word_or_dword: bool, default32: bool) -> Vec<u8> {
     bytes
 }
 #[test]
-fn exact_seventeen_aliases_exclude_held_and_canonical_codes() {
+fn legacy_aliases_exclude_unqualified_and_canonical_codes() {
     for (alias, canonical, _) in pairs() {
         assert_eq!(super::canonical_code(alias), Some(canonical));
         assert_eq!(super::canonical_code(canonical), None);
@@ -100,8 +100,8 @@ fn exact_seventeen_aliases_exclude_held_and_canonical_codes() {
         Code::Test_rm8_imm8_F6r1,
         Code::Test_rm16_imm16_F7r1,
         Code::Test_rm32_imm32_F7r1,
-        Code::Movzx_r16_rm16,
-        Code::Movsx_r16_rm16,
+        Code::Movzx_r32_rm16,
+        Code::Movsx_r32_rm16,
         Code::Bswap_r16,
         Code::Reservednop_rm32_r32_0F1A,
     ] {
