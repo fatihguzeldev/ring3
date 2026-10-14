@@ -67,7 +67,7 @@ pub(super) fn instruction(
         charge(code);
         complete(code, instruction);
         if stores {
-            memory::exit_if_invalidated(code, exit_depth);
+            memory::exit_if_invalidated(code, exit_depth, imports);
         }
         return;
     };
@@ -77,7 +77,7 @@ pub(super) fn instruction(
     // the zero-count instruction completes without touching either guest address.
     charge(code);
     complete(code, instruction);
-    abi::debug_after_retirement(code, exit_depth + 3);
+    abi::debug_after_retirement(code, exit_depth + 3, imports.detection, false);
     code.br(2).end();
     abi::safepoint(code, exit_depth + 2);
     element(
@@ -114,17 +114,17 @@ pub(super) fn instruction(
     }
     code.if_(BlockType::Empty);
     complete(code, instruction);
-    abi::debug_after_retirement(code, exit_depth + 3);
+    abi::debug_after_retirement(code, exit_depth + 3, imports.detection, false);
     code.br(2).end();
     // single-step an unfinished repetition with EIP still at the string instruction.
-    abi::debug_after_retirement(code, exit_depth + 2);
+    abi::debug_after_retirement(code, exit_depth + 2, imports.detection, true);
     if stores {
         // a committed executable write stops repetition at the following element.
-        memory::exit_if_invalidated(code, exit_depth + 2);
+        memory::exit_if_invalidated(code, exit_depth + 2, imports);
     }
     code.br(0).end().end();
     if stores {
-        memory::exit_if_invalidated(code, exit_depth);
+        memory::exit_if_invalidated(code, exit_depth, imports);
     }
     // re-enter the ordinary dispatcher even on completion; it owns the next PC.
     code.br(exit_depth - 1);

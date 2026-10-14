@@ -103,7 +103,7 @@ pub(super) fn instruction(
         .i32_add()
         .local_set(RETIRED);
     if !matches!(kind, StackFrameKind::PopAll32 | StackFrameKind::PopAll16) {
-        memory::exit_if_invalidated(code, exit_depth);
+        memory::exit_if_invalidated(code, exit_depth, imports);
     }
 }
 

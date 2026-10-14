@@ -39,6 +39,8 @@ impl StoreImport {
 
 #[derive(Clone, Copy, Default)]
 pub(super) struct Imports {
+    pub(super) detection: Option<super::detection::DetectionLocals>,
+    pub(super) finish_detection: Option<u32>,
     pub(super) segment_check: Option<u32>,
     pub(super) code_fetch_limit: Option<u32>,
     pub(super) stack_execute: Option<StoreImport>,
@@ -1078,8 +1080,12 @@ pub(super) fn pop_return(
     super::stack::pointer::advance(code, 4 + i32::from(stack_adjust));
 }
 
-pub(super) fn exit_if_invalidated(code: &mut InstructionSink<'_>, exit_depth: u32) {
-    super::abi::debug_after_retirement(code, exit_depth);
+pub(super) fn exit_if_invalidated(
+    code: &mut InstructionSink<'_>,
+    exit_depth: u32,
+    imports: Imports,
+) {
+    super::abi::debug_after_retirement(code, exit_depth, imports.detection, false);
     code.local_get(HELPER_STATUS)
         .i32_const(11)
         .i32_eq()

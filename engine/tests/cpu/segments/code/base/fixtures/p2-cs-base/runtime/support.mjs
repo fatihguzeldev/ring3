@@ -66,10 +66,13 @@ export async function harness(enginePath, output, root) {
   let nextKey = 0;
   const put = (c, offset, bytes) => new Uint8Array(c.memory.buffer).set(bytes, c.base + offset);
   const arena = c => Buffer.from(new Uint8Array(c.memory.buffer, c.base, SIZE));
-  const host = (c, name, args = []) => assert.equal(c.api[name](...args), 0, `${c.label}: ${name}`);
+  const host = (c, name, args = []) => {
+    assert.equal(c.api[name](...args), 0, `${c.label}: ${name}`);
+    if (name === 'configure_interrupt_descriptor_table') c.interruptsConfigured = true;
+  };
   function open(resident, entries, label, pages) {
     const instance = new WebAssembly.Instance(engine.module, {});
-    const c = {resident, entries, label, key: ++nextKey, memory: instance.exports.memory, calls: [], pages: [], hook: null};
+    const c = {resident, entries, label, key: ++nextKey, memory: instance.exports.memory, calls: [], pages: [], hook: null, interruptsConfigured: false};
     c.api = Object.fromEntries(Object.entries(instance.exports).filter(([name, fn]) => name.startsWith('ring3_abi_v1_') && typeof fn === 'function').map(([name, fn]) => [name.slice(13), fn]));
     host(c, 'open', [16, c.key, KEY_HIGH]); c.base = c.api.arena_ptr() >>> 0; put(c, 0, initial);
     for (const [page, permission = 7] of pages) {host(c, 'map', [page, 1, permission]); c.pages.push(page >>> 0);}
@@ -80,12 +83,16 @@ export async function harness(enginePath, output, root) {
     const saved = arena(c), result = new Map();
     for (const page of c.pages) {
       const bytes = Buffer.alloc(4096);
-      for (let offset = 0; offset < 4096; offset += 512) {
-        host(c, 'cpu_read', [(page + offset) >>> 0, 512, 1]); const observed = arena(c);
+      const diagnostic = c.diagnosticRAM === true, stride = diagnostic ? 4 : 512;
+      for (let offset = 0; offset < 4096; offset += stride) {
+        host(c, diagnostic ? 'read32' : 'cpu_read', diagnostic
+          ? [(page + offset) >>> 0] : [(page + offset) >>> 0, 512, 1]);
+        const observed = arena(c);
         assert.equal(observed.readUInt32LE(116), 0, 'diagnostic read packet succeeds');
-        const allowed = Buffer.from(saved); allowed.set(observed.subarray(100, 652), 100);
-        assert.deepEqual(observed, allowed, 'diagnostic read changes only packet and transfer');
-        bytes.set(observed.subarray(140, 652), offset);
+        const allowed = Buffer.from(saved); allowed.set(observed.subarray(100, diagnostic ? 140 : 652), 100);
+        assert.deepEqual(observed, allowed, 'diagnostic read changes only its declared scratch');
+        if (diagnostic) bytes.writeUInt32LE(observed.readUInt32LE(120), offset);
+        else bytes.set(observed.subarray(140, 652), offset);
       }
       result.set(page, bytes);
     }
@@ -112,16 +119,22 @@ export async function harness(enginePath, output, root) {
   }
   function checkRAM(actual, want, errors) {for (const [page, bytes] of want) if (!actual.get(page).equals(bytes)) errors.push(`RAM ${page.toString(16)}`);}
   function capture(c, label, expectedHelpers = []) {
+    const detect = c.interruptsConfigured;
     const a = arena(c), binding = c.resident ? [c.key, KEY_HIGH, a.readUInt32LE(148), a.readUInt32LE(152)] : [];
     const pointer = c.resident ? a.readUInt32LE(156) : c.api.module_ptr() >>> 0;
     const length = c.resident ? a.readUInt32LE(160) : c.api.module_len() >>> 0;
     const bytes = Buffer.from(new Uint8Array(c.memory.buffer, pointer, length)), module = new WebAssembly.Module(bytes);
-    const imports = WebAssembly.Module.imports(module), guard = c.resident ? 'guard_resident' : 'guard';
+    const imports = WebAssembly.Module.imports(module), guard = detect
+      ? c.resident ? 'guard_detect_resident' : 'guard_detect'
+      : c.resident ? 'guard_resident' : 'guard';
     assert.deepEqual(imports.map(imp => `${imp.module}:${imp.name}:${imp.kind}`).sort(),
       ['env:memory:memory', `ring3:${guard}:function`, ...expectedHelpers.map(name => `ring3:${name}:function`)].sort(), 'only the real declared helpers and guard');
     const ring3 = Object.fromEntries(imports.filter(imp => imp.kind === 'function').map(imp => [imp.name, (...args) => {
       if (c.hook?.name === imp.name) {const hook = c.hook; c.hook = null; hook.run();}
-      const status = c.api[imp.name](...args); c.calls.push({name: imp.name, args: args.map(v => v >>> 0), status}); return status;
+      const status = c.api[imp.name](...args);
+      const logged = value => detect && typeof value === 'bigint' ? value.toString(10) : value;
+      c.calls.push({name: imp.name, args: args.map(v => typeof v === 'bigint' ? logged(v) : v >>> 0),
+        status: logged(status)}); return status;
     }]));
     const material = {run: new WebAssembly.Instance(module, {env: {memory: c.memory}, ring3}).exports.run,
       binding, pointer, length, generation: c.api.generation() >>> 0, helpers: expectedHelpers};

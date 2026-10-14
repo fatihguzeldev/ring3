@@ -306,11 +306,17 @@ pub(super) fn inhibit_debug_after_ss_load(sink: &mut InstructionSink<'_>) {
         .end();
 }
 
-pub(super) fn debug_after_retirement(sink: &mut InstructionSink<'_>, exit_depth: u32) {
+pub(super) fn debug_after_retirement(
+    sink: &mut InstructionSink<'_>,
+    exit_depth: u32,
+    detection: Option<super::detection::DetectionLocals>,
+    partial_rep: bool,
+) {
     sink.local_get(SNAPSHOT_TF)
         .if_(BlockType::Empty)
         .i32_const(16)
         .local_set(REASON);
+    super::detection::mark_debug(sink, detection, if partial_rep { 3 } else { 2 });
     for local in [DETAIL, FAULT_ADDRESS, FAULT_ACCESS, FAULT_LENGTH] {
         sink.i32_const(0).local_set(local);
     }

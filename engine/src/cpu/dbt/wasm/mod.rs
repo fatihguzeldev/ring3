@@ -6,6 +6,7 @@ mod code_fetch;
 mod control;
 mod control_instructions;
 mod cpu_result;
+mod detection;
 mod dispatcher;
 mod emitter;
 mod far;
@@ -32,6 +33,6 @@ pub(super) enum EmbeddedBinding {
 
 #[cfg(test)]
 pub(super) use emitter::emit;
-pub(super) use emitter::emit_with_task_return;
+pub(super) use emitter::emit_with_authority;
 
 pub(crate) use dispatcher::emit_dispatcher;

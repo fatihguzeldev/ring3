@@ -49,6 +49,7 @@ pub(super) fn instruction(
             return;
         }
         ControlOperation::DebugTrap => {
+            super::detection::mark_debug(code, imports.detection, 1);
             retire(code, instruction.next_pc().0);
             exit(code, 16, exit_depth);
             return;

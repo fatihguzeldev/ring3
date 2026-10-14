@@ -224,6 +224,9 @@ pub(crate) use cpu::{
     simd_execute_resident, stack_execute, stack_execute_resident, x87_op, x87_resident_op,
 };
 
+mod detection;
+pub(crate) use detection::{finish_exception_detection, guard_detect, guard_detect_resident};
+
 mod exceptions;
 pub(crate) use exceptions::{deliver_exception, deliver_exception_resident};
 

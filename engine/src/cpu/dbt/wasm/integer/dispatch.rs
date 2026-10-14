@@ -2479,7 +2479,7 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
         .i32_add()
         .local_set(RETIRED);
     if store {
-        memory::exit_if_invalidated(code, exit_depth);
+        memory::exit_if_invalidated(code, exit_depth, imports);
     }
 }
 

@@ -244,11 +244,12 @@ pub(super) fn emit_prepared(
     limits: CompileLimits,
     binding: Option<wasm::EmbeddedBinding>,
 ) -> Result<CompiledRegion, CompileError> {
-    let bytes = wasm::emit_with_task_return(
+    let bytes = wasm::emit_with_authority(
         &prepared.blocks,
         binding,
         prepared.decode_key,
         prepared.task_return_configured,
+        prepared.exception_detection_configured,
     );
     if bytes.len() > limits.wasm_bytes {
         return Err(CompileError::WasmLimit);
@@ -264,11 +265,12 @@ pub(super) fn emit_entry_prepared(
     cs: Option<CodeFetchContext>,
 ) -> Result<CompiledRegion, CompileError> {
     loop {
-        let bytes = wasm::emit_with_task_return(
+        let bytes = wasm::emit_with_authority(
             &prepared.blocks,
             binding,
             prepared.decode_key,
             prepared.task_return_configured,
+            prepared.exception_detection_configured,
         );
         if bytes.len() <= limits.wasm_bytes {
             return Ok(CompiledRegion { prepared, bytes });

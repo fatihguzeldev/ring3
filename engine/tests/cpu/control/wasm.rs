@@ -125,3 +125,6 @@ mod cpu_exception_entry;
 
 #[path = "interrupt/return/task/wasm.rs"]
 mod cpu_task_return;
+
+#[path = "interrupt/exception/automatic/wasm.rs"]
+mod cpu_exception_automatic;

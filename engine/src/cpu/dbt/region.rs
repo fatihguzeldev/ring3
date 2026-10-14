@@ -69,6 +69,7 @@ pub struct PreparedRegion {
     memory_identity: u64,
     pub(super) decode_key: Option<CodeDecodeKey>,
     pub(super) task_return_configured: bool,
+    pub(super) exception_detection_configured: bool,
     validated_version: AtomicU64,
 }
 
@@ -123,12 +124,18 @@ impl PreparedRegion {
             memory_identity: memory.identity(),
             decode_key: cs.map(CodeFetchContext::decode_key),
             task_return_configured: false,
+            exception_detection_configured: false,
             validated_version: AtomicU64::new(0),
         }
     }
 
     pub(super) fn with_task_return_authority(mut self, configured: bool) -> Self {
         self.task_return_configured = configured;
+        self
+    }
+
+    pub(super) fn with_exception_detection(mut self, configured: bool) -> Self {
+        self.exception_detection_configured = configured;
         self
     }
 
@@ -308,7 +315,8 @@ fn prepare(
     }
 
     Ok(PreparedRegion::new(memory, blocks, cs)
-        .with_task_return_authority(authority.task_return_configured))
+        .with_task_return_authority(authority.task_return_configured)
+        .with_exception_detection(authority.interrupts_configured))
 }
 
 pub(super) fn strict_instruction(

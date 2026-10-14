@@ -14,15 +14,17 @@ pub(in crate::cpu::dbt) fn emit(
     binding: Option<EmbeddedBinding>,
     decode_key: Option<crate::cpu::x86::decode::CodeDecodeKey>,
 ) -> Vec<u8> {
-    emit_with_task_return(blocks, binding, decode_key, false)
+    emit_with_authority(blocks, binding, decode_key, false, false)
 }
 
-pub(in crate::cpu::dbt) fn emit_with_task_return(
+pub(in crate::cpu::dbt) fn emit_with_authority(
     blocks: &[CompiledBlock],
     binding: Option<EmbeddedBinding>,
     decode_key: Option<crate::cpu::x86::decode::CodeDecodeKey>,
     task_return_configured: bool,
+    exception_detection_configured: bool,
 ) -> Vec<u8> {
+    let detects_exceptions = exception_detection_configured && binding.is_some();
     let needs_task_return = task_return_configured
         && blocks
             .iter()
@@ -231,7 +233,11 @@ pub(in crate::cpu::dbt) fn emit_with_task_return(
         };
         types.ty().function(
             std::iter::repeat_n(ValType::I32, parameters),
-            [ValType::I32],
+            [if detects_exceptions {
+                ValType::I64
+            } else {
+                ValType::I32
+            }],
         );
     }
     if has_reads {
@@ -351,6 +357,12 @@ pub(in crate::cpu::dbt) fn emit_with_task_return(
     if has_segment_check {
         types.ty().function([ValType::I32; 6], [ValType::I32]);
     }
+    let finish_detection_type = segment_check_type + u32::from(has_segment_check);
+    if detects_exceptions {
+        let mut parameters = [ValType::I32; 12];
+        parameters[0] = ValType::I64;
+        types.ty().function(parameters, [ValType::I32]);
+    }
     module.section(&types);
     let mut imports = ImportSection::new();
     imports.import(
@@ -366,6 +378,8 @@ pub(in crate::cpu::dbt) fn emit_with_task_return(
     );
     if let Some(binding) = binding {
         let name = match binding {
+            EmbeddedBinding::Replacement { .. } if detects_exceptions => "guard_detect",
+            EmbeddedBinding::Resident { .. } if detects_exceptions => "guard_detect_resident",
             EmbeddedBinding::Replacement { .. } => "guard",
             EmbeddedBinding::Resident { .. } => "guard_resident",
         };
@@ -891,6 +905,15 @@ pub(in crate::cpu::dbt) fn emit_with_task_return(
             function_index += 1;
         }
     }
+    if detects_exceptions {
+        imports.import(
+            "ring3",
+            "finish_exception_detection",
+            EntityType::Function(finish_detection_type),
+        );
+        helper_imports.finish_detection = Some(function_index);
+        function_index += 1;
+    }
     module.section(&imports);
     let mut functions = FunctionSection::new();
     functions.function(0);
@@ -962,6 +985,12 @@ pub(in crate::cpu::dbt) fn emit_with_task_return(
         declarations.push((super::avx::INTEGER_LOCALS, ValType::I32));
         declarations.push((super::avx::VECTOR_LOCALS, ValType::V128));
     }
+    if detects_exceptions {
+        let first = 4 + declarations.iter().map(|(count, _)| count).sum::<u32>();
+        helper_imports.detection = Some(super::detection::DetectionLocals::new(first, has_repeat));
+        declarations.push((1, ValType::I64));
+        declarations.push((6, ValType::I32));
+    }
     let mut function = Function::new(declarations);
     let mut code = function.instructions();
     if let Some(binding) = binding {
@@ -981,12 +1010,36 @@ pub(in crate::cpu::dbt) fn emit_with_task_return(
         code.local_get(STATE_PTR)
             .local_get(EXIT_PTR)
             .local_get(CANCEL_PTR)
-            .call(0)
-            .local_tee(LHS)
-            .if_(BlockType::Empty)
-            .local_get(LHS)
-            .return_()
-            .end();
+            .call(0);
+        if let Some(detection) = helper_imports.detection {
+            code.local_tee(detection.epoch)
+                .i64_const(0)
+                .i64_le_s()
+                .if_(BlockType::Empty)
+                .local_get(detection.epoch)
+                .i64_const(-22)
+                .i64_ge_s()
+                .local_get(detection.epoch)
+                .i64_const(0)
+                .i64_lt_s()
+                .i32_and()
+                .if_(BlockType::Result(ValType::I32))
+                .local_get(detection.epoch)
+                .i64_const(-1)
+                .i64_mul()
+                .i32_wrap_i64()
+                .else_()
+                .i32_const(9)
+                .end()
+                .return_()
+                .end();
+        } else {
+            code.local_tee(LHS)
+                .if_(BlockType::Empty)
+                .local_get(LHS)
+                .return_()
+                .end();
+        }
     }
     abi::preflight(&mut code);
     if has_segments {
@@ -1050,6 +1103,7 @@ pub(in crate::cpu::dbt) fn emit_with_task_return(
         has_xstate,
         needs_task_return,
     );
+    super::detection::finish(&mut code, helper_imports);
     code.i32_const(0).end();
     let mut bodies = CodeSection::new();
     bodies.function(&function);
@@ -1132,6 +1186,7 @@ fn emit_block(code: &mut InstructionSink<'_>, block: &CompiledBlock, imports: me
                         .expect("interrupt flag snapshot"),
                 );
             }
+            super::detection::snapshot(code, instruction, imports);
             abi::begin_instruction(code);
             if matches!(instruction.operation(), Operation::InterruptReturn { .. })
                 && imports.task_return.is_some()
@@ -1149,7 +1204,7 @@ fn emit_block(code: &mut InstructionSink<'_>, block: &CompiledBlock, imports: me
             {
                 code_fetch::refresh(code, limit);
             }
-            abi::debug_after_retirement(code, remaining + 2);
+            abi::debug_after_retirement(code, remaining + 2, imports.detection, false);
         }
         code.br(1).end();
     }
