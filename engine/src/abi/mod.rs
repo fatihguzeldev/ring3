@@ -8,6 +8,7 @@ pub mod far;
 mod header;
 pub mod memory_helper;
 pub mod resident_callback;
+pub mod tasks;
 #[cfg(target_arch = "wasm32")]
 mod wasm;
 #[forbid(unsafe_code)]
@@ -28,6 +29,7 @@ pub enum AbiError {
     MemoryHelper,
     CallFrame,
     CallbackFrame,
+    TaskSources,
 }
 
 pub mod interrupt;

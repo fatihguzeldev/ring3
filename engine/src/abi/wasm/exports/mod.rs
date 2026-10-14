@@ -20,4 +20,5 @@ mod execution;
 mod image;
 mod instance;
 mod memory;
+mod tasks;
 mod xstate;

@@ -111,3 +111,6 @@ mod cpu_interrupt_dispatch;
 
 #[path = "interrupt/exception/native.rs"]
 mod cpu_exception_entry;
+
+#[path = "interrupt/return/task/native.rs"]
+mod cpu_task_return;

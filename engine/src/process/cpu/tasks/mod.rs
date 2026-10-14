@@ -1,4 +1,5 @@
 mod config;
+mod request;
 mod returning;
 
 use crate::cpu::x86::tasks::TaskRegister;

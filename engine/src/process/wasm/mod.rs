@@ -226,5 +226,8 @@ pub(crate) use cpu::{
 mod exceptions;
 pub(crate) use exceptions::{deliver_exception, deliver_exception_resident};
 
+mod tasks;
+pub(crate) use tasks::{configure_task_return_sources, task_return, task_return_resident};
+
 mod avx;
 pub(crate) use avx::{avx_execute, avx_execute_resident};
