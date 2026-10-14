@@ -18,6 +18,11 @@ use crate::{
     process::{EngineInstance, HostError},
 };
 
+pub(super) struct PreparedEventResult32 {
+    pub(super) result: EventDeliveryResult32,
+    pub(super) packet: [u8; HELPER_SIZE],
+}
+
 impl EngineInstance {
     /// one trusted detection-time event attempt; no automatic host-exit conversion, retirement or cr2 update.
     pub fn deliver_exception(
@@ -46,6 +51,16 @@ impl EngineInstance {
         origin: EventOrigin32,
         input: FrameInput32,
     ) -> Result<EventDeliveryResult32, HostError> {
+        let prepared = self.attempt_exception_entry(resident, origin, input)?;
+        Ok(self.publish_prepared_exception(prepared))
+    }
+
+    fn attempt_exception_entry(
+        &mut self,
+        resident: Option<u64>,
+        origin: EventOrigin32,
+        input: FrameInput32,
+    ) -> Result<PreparedEventResult32, HostError> {
         if input.flags & 2 == 0
             || input.flags & !USER_FLAGS_MASK_V3 != 0
             || USER_MODE_ENVIRONMENT.alignment_mask_enabled()
@@ -65,7 +80,7 @@ impl EngineInstance {
                     return Err(HostError::InvalidRequest);
                 }
                 let selector = (record.to_words().0 >> 16) as u16;
-                return self.publish_event_result(
+                return Self::prepare_event_result(
                     origin,
                     0,
                     EventDeliveryResult32::NeedsTaskOrPrivilegeAuthority {
@@ -74,7 +89,7 @@ impl EngineInstance {
                     },
                 );
             }
-            Err(error) => return self.publish_event_transfer_error(origin, 0, error),
+            Err(error) => return Self::prepare_event_transfer_error(origin, 0, error),
         };
         let info = gate.frame_info()
             | if origin.error_code().is_some() {
@@ -93,7 +108,7 @@ impl EngineInstance {
                 {
                     return Err(HostError::InvalidRequest);
                 }
-                return self.publish_event_result(
+                return Self::prepare_event_result(
                     origin,
                     info,
                     EventDeliveryResult32::NeedsTaskOrPrivilegeAuthority {
@@ -102,7 +117,7 @@ impl EngineInstance {
                     },
                 );
             }
-            Err(error) => return self.publish_event_transfer_error(origin, info, error),
+            Err(error) => return Self::prepare_event_transfer_error(origin, info, error),
         };
         let mut context = self.segment_context()?;
         if input.cs != context.state.selectors[SegmentRegister::Cs.index()] {
@@ -126,7 +141,7 @@ impl EngineInstance {
                 let CpuMemoryError::StackSegment(_) = error else {
                     return Err(HostError::Infrastructure);
                 };
-                return self.publish_event_result(
+                return Self::prepare_event_result(
                     origin,
                     info,
                     EventDeliveryResult32::ArchitecturalSecondary(ExceptionCause32::StackSegment(
@@ -139,7 +154,7 @@ impl EngineInstance {
             Ok(transfer) => transfer,
             Err(CodeTransferError::UnsupportedProfile) => return Err(HostError::InvalidRequest),
             Err(error) => {
-                return self.publish_event_transfer_error(
+                return Self::prepare_event_transfer_error(
                     origin,
                     info,
                     event_secondary_error(origin, error),
@@ -163,21 +178,16 @@ impl EngineInstance {
             frame_info: frame.info(),
             code_invalidated: false,
         };
-        let mut packet = [0; HELPER_SIZE];
-        encode_exception_result(
-            origin,
-            info,
-            &EventDeliveryResult32::Entered(entered),
-            &mut packet,
-        )
-        .map_err(|_| HostError::Infrastructure)?;
+        let mut prepared =
+            Self::prepare_event_result(origin, info, EventDeliveryResult32::Entered(entered))?;
         // retain physical material identity without consulting the new cs interpretation after commit.
+        let memory = self.memory.as_ref().ok_or(HostError::Closed)?;
         let region = match resident {
             Some(id) => self
                 .resident
                 .as_ref()
                 .ok_or(HostError::InvalidArtifact)?
-                .get_raw(self.memory.as_ref().ok_or(HostError::Closed)?, id)
+                .get_raw(memory, id)
                 .map_err(HostError::Resident)?,
             None => self.artifact.as_ref().ok_or(HostError::InvalidArtifact)?,
         };
@@ -195,7 +205,7 @@ impl EngineInstance {
                 },
                 other => EventDeliveryResult32::Infrastructure(other),
             };
-            return self.publish_event_result(origin, info, result);
+            return Self::prepare_event_result(origin, info, result);
         }
         entered.code_invalidated =
             version != memory.code_validation_version() && region.wasm_bytes(memory).is_err();
@@ -203,17 +213,15 @@ impl EngineInstance {
         self.publish_segment_context(&segments, &bases);
         self.segment_descriptors
             .commit_accessed(transfer.selector());
-        self.arena.as_mut().get_mut()[HELPER_OFFSET..HELPER_OFFSET + HELPER_SIZE]
-            .copy_from_slice(&packet);
-        Ok(EventDeliveryResult32::Entered(entered))
+        prepared.result = EventDeliveryResult32::Entered(entered);
+        Ok(prepared)
     }
 
-    fn publish_event_transfer_error(
-        &mut self,
+    fn prepare_event_transfer_error(
         origin: EventOrigin32,
         info: u32,
         error: CodeTransferError,
-    ) -> Result<EventDeliveryResult32, HostError> {
+    ) -> Result<PreparedEventResult32, HostError> {
         let cause = match error {
             CodeTransferError::GeneralProtection(code) => ExceptionCause32::GeneralProtection(
                 SelectorErrorCode32::from_bits(code).ok_or(HostError::Infrastructure)?,
@@ -223,25 +231,30 @@ impl EngineInstance {
             ),
             CodeTransferError::UnsupportedProfile => return Err(HostError::InvalidRequest),
         };
-        self.publish_event_result(
+        Self::prepare_event_result(
             origin,
             info,
             EventDeliveryResult32::ArchitecturalSecondary(cause),
         )
     }
 
-    fn publish_event_result(
-        &mut self,
+    fn prepare_event_result(
         origin: EventOrigin32,
         info: u32,
         result: EventDeliveryResult32,
-    ) -> Result<EventDeliveryResult32, HostError> {
+    ) -> Result<PreparedEventResult32, HostError> {
         let mut packet = [0; HELPER_SIZE];
         encode_exception_result(origin, info, &result, &mut packet)
             .map_err(|_| HostError::Infrastructure)?;
+        Ok(PreparedEventResult32 { result, packet })
+    }
+    pub(super) fn publish_prepared_exception(
+        &mut self,
+        prepared: PreparedEventResult32,
+    ) -> EventDeliveryResult32 {
         self.arena.as_mut().get_mut()[HELPER_OFFSET..HELPER_OFFSET + HELPER_SIZE]
-            .copy_from_slice(&packet);
-        Ok(result)
+            .copy_from_slice(&prepared.packet);
+        prepared.result
     }
 }
 
