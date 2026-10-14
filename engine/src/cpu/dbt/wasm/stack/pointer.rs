@@ -8,7 +8,13 @@ use crate::{
 };
 use wasm_encoder::{BlockType, InstructionSink, MemArg, ValType};
 
-pub(in crate::cpu::dbt::wasm) fn default32(code: &mut InstructionSink<'_>) {
+pub(in crate::cpu::dbt::wasm) fn default32(code: &mut InstructionSink<'_>, raw_task_context: bool) {
+    if raw_task_context {
+        super::super::tasks::cache(code, SegmentRegister::Ss);
+        code.i32_const(0x02000000).i32_and().i32_eqz().i32_eqz();
+        return;
+    }
+
     code.local_get(STATE_PTR)
         .i32_load16_u(MemArg {
             offset: (SEGMENTS_OFFSET + 4) as u64,
@@ -33,8 +39,13 @@ pub(in crate::cpu::dbt::wasm) fn default32(code: &mut InstructionSink<'_>) {
         .end();
 }
 
-pub(in crate::cpu::dbt::wasm) fn offset(code: &mut InstructionSink<'_>, source: u32, delta: i32) {
-    default32(code);
+pub(in crate::cpu::dbt::wasm) fn offset(
+    code: &mut InstructionSink<'_>,
+    source: u32,
+    delta: i32,
+    raw_task_context: bool,
+) {
+    default32(code, raw_task_context);
     code.if_(BlockType::Result(ValType::I32));
     code.local_get(source).i32_const(delta).i32_add();
     code.else_()
@@ -46,8 +57,13 @@ pub(in crate::cpu::dbt::wasm) fn offset(code: &mut InstructionSink<'_>, source: 
         .end();
 }
 
-pub(in crate::cpu::dbt::wasm) fn assigned(code: &mut InstructionSink<'_>, source: u32, delta: i32) {
-    default32(code);
+pub(in crate::cpu::dbt::wasm) fn assigned(
+    code: &mut InstructionSink<'_>,
+    source: u32,
+    delta: i32,
+    raw_task_context: bool,
+) {
+    default32(code, raw_task_context);
     code.if_(BlockType::Result(ValType::I32));
     code.local_get(source).i32_const(delta).i32_add();
     code.else_()
@@ -63,8 +79,12 @@ pub(in crate::cpu::dbt::wasm) fn assigned(code: &mut InstructionSink<'_>, source
         .end();
 }
 
-pub(in crate::cpu::dbt::wasm) fn advance(code: &mut InstructionSink<'_>, delta: i32) {
-    assigned(code, register(Register32::Esp), delta);
+pub(in crate::cpu::dbt::wasm) fn advance(
+    code: &mut InstructionSink<'_>,
+    delta: i32,
+    raw_task_context: bool,
+) {
+    assigned(code, register(Register32::Esp), delta, raw_task_context);
     code.local_set(register(Register32::Esp));
 }
 
@@ -77,7 +97,12 @@ pub(in crate::cpu::dbt::wasm) fn check(
     imports: memory::Imports,
     exit_depth: u32,
 ) {
-    offset(code, register(source), delta);
+    offset(
+        code,
+        register(source),
+        delta,
+        imports.raw_task_context.is_some(),
+    );
     memory::checked_offset(
         code,
         SegmentRegister::Ss,
@@ -153,5 +178,5 @@ pub(in crate::cpu::dbt::wasm) fn push_result(
     exit_depth: u32,
 ) {
     store_result(code, -(width as i32), width, imports, exit_depth);
-    advance(code, -(width as i32));
+    advance(code, -(width as i32), imports.raw_task_context.is_some());
 }

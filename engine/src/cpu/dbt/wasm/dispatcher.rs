@@ -13,7 +13,6 @@ const SLOT: u32 = 6;
 const CHILD_RETIRED: u32 = 7;
 const REASON: u32 = 8;
 const CHILD_WORK: u32 = 9;
-const CS_LIMIT: u32 = 10;
 
 fn memarg(offset: u64) -> MemArg {
     MemArg {
@@ -98,7 +97,7 @@ pub(crate) fn emit_dispatcher(key: u64) -> Vec<u8> {
     let mut exports = ExportSection::new();
     exports.export("run", ExportKind::Func, 2);
     module.section(&exports);
-    let mut run = Function::new([(7, ValType::I32)]);
+    let mut run = Function::new([(6, ValType::I32)]);
     let mut code = run.instructions();
     code.i32_const(key as u32 as i32)
         .i32_const((key >> 32) as u32 as i32)
@@ -120,12 +119,7 @@ pub(crate) fn emit_dispatcher(key: u64) -> Vec<u8> {
     code.end().local_get(2).i32_eqz().if_(BlockType::Empty);
     synthetic(&mut code, 1);
     code.end();
-    super::code_fetch::refresh(&mut code, CS_LIMIT);
-    load(&mut code, 0, 48);
-    code.local_get(CS_LIMIT).i32_gt_u().if_(BlockType::Empty);
-    synthetic(&mut code, 11);
-    code.end()
-        .i32_const(key as u32 as i32)
+    code.i32_const(key as u32 as i32)
         .i32_const((key >> 32) as u32 as i32);
     load(&mut code, 0, 48);
     code.call(1)

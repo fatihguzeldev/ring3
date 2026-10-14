@@ -305,7 +305,7 @@ fn read(
     exit_depth: u32,
 ) {
     // element() already checked both segment spans before the first page access.
-    memory::effective_address(code, address);
+    memory::effective_address(code, address, imports.raw_task_context.is_some());
     match width {
         StringWidth::Byte => {
             memory::load_narrow_at_address(code, SmallWidth::Byte, imports, exit_depth)
@@ -327,7 +327,7 @@ fn write(
     imports: memory::Imports,
     exit_depth: u32,
 ) {
-    memory::effective_address(code, address);
+    memory::effective_address(code, address, imports.raw_task_context.is_some());
     match width {
         StringWidth::Byte => memory::store_byte_result_at_address(code, imports, exit_depth),
         StringWidth::Word => memory::store_word_result_at_address(code, imports, exit_depth),

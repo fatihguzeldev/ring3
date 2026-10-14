@@ -20,6 +20,7 @@ pub(in crate::cpu::dbt::wasm) fn dispatch(
         .local_get(FLAGS)
         .call(helper)
         .local_set(HELPER_STATUS);
+    crate::cpu::dbt::wasm::tasks::refresh(code, imports);
     super::packet::validate(
         code,
         vector,
@@ -27,6 +28,7 @@ pub(in crate::cpu::dbt::wasm) fn dispatch(
             .software_interrupt_flags
             .expect("interrupt flags capture"),
         exit_depth,
+        imports.raw_task_context.is_some(),
     );
     super::super::cpu_result::value(code);
     code.local_set(EIP)

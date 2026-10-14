@@ -8,6 +8,8 @@ pub(super) fn validate(
     vector: u8,
     original_flags: u32,
     exit_depth: u32,
+
+    raw_task_context: bool,
 ) {
     code.local_get(HELPER_STATUS)
         .i32_eqz()
@@ -18,14 +20,21 @@ pub(super) fn validate(
         .i32_and()
         .if_(BlockType::Empty);
     memory::infrastructure(code, 3);
-    memory::exit_if_failed(code, exit_depth + 1);
+    memory::exit_if_failed(code, exit_depth + 1, raw_task_context);
     code.end();
     memory::helper_field(code, 36);
     code.i32_const(0xff)
         .i32_and()
         .i32_eqz()
         .if_(BlockType::Empty);
-    cpu_result::validate_interrupt(code, 0, vector, original_flags, exit_depth + 1);
+    cpu_result::validate_interrupt(
+        code,
+        0,
+        vector,
+        original_flags,
+        exit_depth + 1,
+        raw_task_context,
+    );
     code.else_();
     memory::helper_field(code, 36);
     code.i32_const(0xff)
@@ -33,7 +42,14 @@ pub(super) fn validate(
         .i32_const(2)
         .i32_eq()
         .if_(BlockType::Empty);
-    frame(code, 2, vector, original_flags, exit_depth + 2);
+    frame(
+        code,
+        2,
+        vector,
+        original_flags,
+        exit_depth + 2,
+        raw_task_context,
+    );
     code.else_();
     memory::helper_field(code, 36);
     code.i32_const(0xff)
@@ -41,10 +57,17 @@ pub(super) fn validate(
         .i32_const(4)
         .i32_eq()
         .if_(BlockType::Empty);
-    frame(code, 4, vector, original_flags, exit_depth + 3);
+    frame(
+        code,
+        4,
+        vector,
+        original_flags,
+        exit_depth + 3,
+        raw_task_context,
+    );
     code.else_();
     memory::infrastructure(code, 2);
-    memory::exit_if_failed(code, exit_depth + 3);
+    memory::exit_if_failed(code, exit_depth + 3, raw_task_context);
     code.end().end().end();
 }
 
@@ -54,9 +77,11 @@ fn frame(
     vector: u8,
     original_flags: u32,
     exit_depth: u32,
+
+    raw_task_context: bool,
 ) {
     // the fault can name any of the three modular linear slots; SS.B owns pointer wrapping.
-    address(code, slot, 1);
+    address(code, slot, 1, raw_task_context);
     for index in [2, 3] {
         memory::helper_field(code, 28);
         code.local_get(ADDRESS)
@@ -64,15 +89,27 @@ fn frame(
             .i32_const(slot as i32 - 1)
             .i32_gt_u()
             .if_(BlockType::Empty);
-        address(code, slot, index);
+        address(code, slot, index, raw_task_context);
         code.end();
     }
-    cpu_result::validate_interrupt(code, slot, vector, original_flags, exit_depth);
-    stack::pointer::advance(code, -((3 * slot) as i32));
+    cpu_result::validate_interrupt(
+        code,
+        slot,
+        vector,
+        original_flags,
+        exit_depth,
+        raw_task_context,
+    );
+    stack::pointer::advance(code, -((3 * slot) as i32), raw_task_context);
 }
 
-fn address(code: &mut InstructionSink<'_>, slot: u32, index: u32) {
-    stack::pointer::offset(code, register(Register32::Esp), -((index * slot) as i32));
-    segments::base(code, SegmentRegister::Ss);
+fn address(code: &mut InstructionSink<'_>, slot: u32, index: u32, raw_task_context: bool) {
+    stack::pointer::offset(
+        code,
+        register(Register32::Esp),
+        -((index * slot) as i32),
+        raw_task_context,
+    );
+    segments::base(code, SegmentRegister::Ss, raw_task_context);
     code.i32_add().local_set(ADDRESS);
 }

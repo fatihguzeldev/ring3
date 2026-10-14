@@ -35,7 +35,12 @@ pub(super) fn instruction(
         Operation::EnterZeroWord => (StackFrameKind::Enter16, 0, 0),
         _ => unreachable!("stack emitter requires stack operation"),
     };
-    super::segments::access(code, crate::cpu::x86::SegmentRegister::Ss, exit_depth);
+    super::segments::access(
+        code,
+        crate::cpu::x86::SegmentRegister::Ss,
+        exit_depth,
+        imports.raw_task_context.is_some(),
+    );
     for register in REGISTERS {
         code.local_get(STATE_PTR)
             .local_get(super::locals::register(register))
@@ -49,13 +54,24 @@ pub(super) fn instruction(
         .call(index)
         .local_set(HELPER_STATUS);
     if matches!(kind, StackFrameKind::PopAll32 | StackFrameKind::PopAll16) {
-        super::code_fetch::check_context(code, exit_depth);
+        super::code_fetch::check_context(code, exit_depth, imports.raw_task_context.is_some());
     }
-    validate(code, kind, allocation, nesting, exit_depth);
+    validate(
+        code,
+        kind,
+        allocation,
+        nesting,
+        exit_depth,
+        imports.raw_task_context.is_some(),
+    );
     let width = kind.width();
     match kind {
         StackFrameKind::PushAll32 | StackFrameKind::PushAll16 => {
-            pointer::advance(code, -((8 * width) as i32));
+            pointer::advance(
+                code,
+                -((8 * width) as i32),
+                imports.raw_task_context.is_some(),
+            );
         }
         StackFrameKind::PopAll32 | StackFrameKind::PopAll16 => {
             for destination in REGISTERS.into_iter().filter(|r| *r != Register32::Esp) {
@@ -71,7 +87,7 @@ pub(super) fn instruction(
                 }
                 code.local_set(register(destination));
             }
-            pointer::advance(code, (8 * width) as i32);
+            pointer::advance(code, (8 * width) as i32, imports.raw_task_context.is_some());
         }
         StackFrameKind::Enter32 | StackFrameKind::Enter16 => {
             if width == 2 {
@@ -79,7 +95,12 @@ pub(super) fn instruction(
                     .i32_const(!0xffff)
                     .i32_and();
             }
-            pointer::assigned(code, register(Register32::Esp), -(width as i32));
+            pointer::assigned(
+                code,
+                register(Register32::Esp),
+                -(width as i32),
+                imports.raw_task_context.is_some(),
+            );
             if width == 2 {
                 code.i32_const(0xffff).i32_and().i32_or();
             }
@@ -89,7 +110,11 @@ pub(super) fn instruction(
             } else {
                 u32::from(nesting) + 1
             };
-            pointer::advance(code, -((count * width + u32::from(allocation)) as i32));
+            pointer::advance(
+                code,
+                -((count * width + u32::from(allocation)) as i32),
+                imports.raw_task_context.is_some(),
+            );
         }
     }
     code.i32_const(instruction.next_pc().0 as i32)
@@ -121,6 +146,8 @@ fn validate(
     allocation: u16,
     nesting: u8,
     exit_depth: u32,
+
+    raw_task_context: bool,
 ) {
     use memory::{
         add_check, expect_field, helper_field, infrastructure, protocol_if_bad, reset_checks,
@@ -192,7 +219,7 @@ fn validate(
     helper_field(code, 24);
     code.i32_const(1).i32_sub().i32_const(1).i32_gt_u();
     add_check(code);
-    membership(code, kind, allocation, nesting);
+    membership(code, kind, allocation, nesting, raw_task_context);
     code.local_get(RESUME).i32_eqz();
     add_check(code);
     code.local_get(LHS).if_(BlockType::Empty);
@@ -233,10 +260,16 @@ fn validate(
     code.else_();
     infrastructure(code, 2);
     code.end().end().end().end().end().end().end();
-    memory::exit_if_failed(code, exit_depth);
+    memory::exit_if_failed(code, exit_depth, raw_task_context);
 }
 
-fn membership(code: &mut InstructionSink<'_>, kind: StackFrameKind, allocation: u16, nesting: u8) {
+fn membership(
+    code: &mut InstructionSink<'_>,
+    kind: StackFrameKind,
+    allocation: u16,
+    nesting: u8,
+    raw_task_context: bool,
+) {
     let width = kind.width();
     code.i32_const(0).local_set(RESUME);
     match kind {
@@ -248,12 +281,20 @@ fn membership(code: &mut InstructionSink<'_>, kind: StackFrameKind, allocation: 
                     0u32.wrapping_sub(index * width),
                     width,
                     2,
+                    raw_task_context,
                 );
             }
         }
         StackFrameKind::PopAll32 | StackFrameKind::PopAll16 => {
             for index in [0, 1, 2, 4, 5, 6, 7] {
-                candidate(code, Register32::Esp, index * width, width, 1);
+                candidate(
+                    code,
+                    Register32::Esp,
+                    index * width,
+                    width,
+                    1,
+                    raw_task_context,
+                );
             }
         }
         StackFrameKind::Enter32 | StackFrameKind::Enter16 => {
@@ -269,6 +310,7 @@ fn membership(code: &mut InstructionSink<'_>, kind: StackFrameKind, allocation: 
                     0u32.wrapping_sub(index * width),
                     width,
                     2,
+                    raw_task_context,
                 );
             }
             for index in 1..u32::from(nesting) {
@@ -278,6 +320,7 @@ fn membership(code: &mut InstructionSink<'_>, kind: StackFrameKind, allocation: 
                     0u32.wrapping_sub(index * width),
                     width,
                     1,
+                    raw_task_context,
                 );
             }
             candidate(
@@ -286,6 +329,7 @@ fn membership(code: &mut InstructionSink<'_>, kind: StackFrameKind, allocation: 
                 0u32.wrapping_sub(count * width + u32::from(allocation)),
                 width,
                 2,
+                raw_task_context,
             );
         }
     }
@@ -297,10 +341,17 @@ fn candidate(
     delta: u32,
     width: u32,
     access: u32,
+
+    raw_task_context: bool,
 ) {
     use memory::helper_field;
-    pointer::offset(code, super::locals::register(register), delta as i32);
-    super::segments::base(code, crate::cpu::x86::SegmentRegister::Ss);
+    pointer::offset(
+        code,
+        super::locals::register(register),
+        delta as i32,
+        raw_task_context,
+    );
+    super::segments::base(code, crate::cpu::x86::SegmentRegister::Ss, raw_task_context);
     code.i32_add().local_set(ADDRESS);
     code.local_get(RESUME);
     helper_field(code, 28);

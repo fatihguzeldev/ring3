@@ -34,7 +34,7 @@ pub(super) fn verify(
     code.i32_const(0).local_set(ADDRESS);
     atomic::call(code, 0x30001 + u32::from(write), 0, imports, exit_depth);
     code.local_get(STATE_PTR).i32_load(atomic::transfer(4));
-    super::cpu_result::flags(code, 0x40, exit_depth);
+    super::cpu_result::flags(code, 0x40, exit_depth, imports.raw_task_context.is_some());
 }
 
 pub(super) fn query(
@@ -67,7 +67,7 @@ pub(super) fn query(
     };
     atomic::call(code, descriptor, 0, imports, exit_depth);
     code.local_get(STATE_PTR).i32_load(atomic::transfer(4));
-    super::cpu_result::flags(code, 0x40, exit_depth);
+    super::cpu_result::flags(code, 0x40, exit_depth, imports.raw_task_context.is_some());
     // source and helper validation precede either architectural destination publication.
     code.local_get(FLAGS)
         .i32_const(0x40)
@@ -140,11 +140,11 @@ pub(super) fn adjust_privilege(
                 .i32_const(segment.index() as i32)
                 .i32_store(atomic::transfer(12));
             code.local_get(ADDRESS);
-            super::segments::base(code, segment);
+            super::segments::base(code, segment, imports.raw_task_context.is_some());
             code.i32_add().local_set(ADDRESS);
             atomic::call(code, 0x30000, 2, imports, exit_depth);
             code.local_get(STATE_PTR).i32_load(atomic::transfer(4));
-            super::cpu_result::flags(code, 0x40, exit_depth);
+            super::cpu_result::flags(code, 0x40, exit_depth, imports.raw_task_context.is_some());
             true
         }
     }

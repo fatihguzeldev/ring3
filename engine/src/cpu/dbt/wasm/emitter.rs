@@ -14,7 +14,7 @@ pub(in crate::cpu::dbt) fn emit(
     binding: Option<EmbeddedBinding>,
     decode_key: Option<crate::cpu::x86::decode::CodeDecodeKey>,
 ) -> Vec<u8> {
-    emit_with_authority(blocks, binding, decode_key, false, false, false)
+    emit_with_authority(blocks, binding, decode_key, false, false, false, None)
 }
 
 pub(in crate::cpu::dbt) fn emit_with_authority(
@@ -24,7 +24,9 @@ pub(in crate::cpu::dbt) fn emit_with_authority(
     task_return_configured: bool,
     exception_detection_configured: bool,
     task_controls_configured: bool,
+    raw_task_context: Option<u64>,
 ) -> Vec<u8> {
+    debug_assert!(raw_task_context.is_none() || binding.is_some());
     let detects_exceptions = exception_detection_configured && binding.is_some();
     let device_not_available =
         blocks
@@ -373,6 +375,10 @@ pub(in crate::cpu::dbt) fn emit_with_authority(
         let mut parameters = [ValType::I32; 12];
         parameters[0] = ValType::I64;
         types.ty().function(parameters, [ValType::I32]);
+    }
+    let raw_context_type = finish_detection_type + u32::from(detects_exceptions);
+    if raw_task_context.is_some() {
+        types.ty().function([], [ValType::I32]);
     }
     module.section(&types);
     let mut imports = ImportSection::new();
@@ -933,6 +939,19 @@ pub(in crate::cpu::dbt) fn emit_with_authority(
         helper_imports.finish_detection = Some(function_index);
         function_index += 1;
     }
+    if raw_task_context.is_some() {
+        imports.import(
+            "ring3",
+            "read_task_context",
+            EntityType::Function(raw_context_type),
+        );
+        helper_imports.raw_task_context = Some(super::tasks::RawTaskContextImports {
+            read: function_index,
+            status: 0,
+            scratch: 0,
+        });
+        function_index += 1;
+    }
     module.section(&imports);
     let mut functions = FunctionSection::new();
     functions.function(0);
@@ -956,6 +975,9 @@ pub(in crate::cpu::dbt) fn emit_with_authority(
             },
             &ConstExpr::i32_const(value),
         );
+    }
+    if let Some(revision) = raw_task_context {
+        super::tasks::globals(&mut globals, revision);
     }
     module.section(&globals);
     let mut exports = ExportSection::new();
@@ -1015,6 +1037,12 @@ pub(in crate::cpu::dbt) fn emit_with_authority(
         declarations.push((1, ValType::I64));
         declarations.push((6, ValType::I32));
     }
+    if let Some(raw) = helper_imports.raw_task_context.as_mut() {
+        let first = 4 + declarations.iter().map(|(count, _)| count).sum::<u32>();
+        raw.status = first;
+        raw.scratch = first + 1;
+        declarations.push((2, ValType::I32));
+    }
     let mut function = Function::new(declarations);
     let mut code = function.instructions();
     if let Some(binding) = binding {
@@ -1066,8 +1094,10 @@ pub(in crate::cpu::dbt) fn emit_with_authority(
         }
     }
     abi::preflight(&mut code);
-    if has_segments {
-        super::segments::preflight(&mut code);
+    if raw_task_context.is_some() {
+        super::tasks::refresh(&mut code, helper_imports);
+    } else if has_segments {
+        super::segments::preflight(&mut code, false);
     }
     if has_repeat {
         abi::work_preflight(&mut code);
@@ -1084,7 +1114,7 @@ pub(in crate::cpu::dbt) fn emit_with_authority(
     }
     abi::load_state(&mut code);
     if let Some(limit) = helper_imports.code_fetch_limit {
-        code_fetch::refresh(&mut code, limit);
+        code_fetch::refresh(&mut code, limit, raw_task_context.is_some());
     }
     if let Some(locals) = helper_imports.avx_locals {
         super::avx::initialize(&mut code, locals);
@@ -1092,7 +1122,7 @@ pub(in crate::cpu::dbt) fn emit_with_authority(
     code.block(BlockType::Empty).loop_(BlockType::Empty);
     abi::safepoint(&mut code, 1);
     if binding.is_some() {
-        code_fetch::check_context(&mut code, 1);
+        code_fetch::check_context(&mut code, 1, raw_task_context.is_some());
     }
     for block in blocks {
         emit_block(&mut code, block, helper_imports);
@@ -1138,7 +1168,7 @@ pub(in crate::cpu::dbt) fn emit_with_authority(
     let mut bodies = CodeSection::new();
     bodies.function(&function);
     if has_segment_check {
-        bodies.function(&segments::build_function());
+        bodies.function(&segments::build_function(raw_task_context.is_some()));
     }
     module.section(&bodies);
     module.finish()
@@ -1151,8 +1181,8 @@ fn emit_block(code: &mut InstructionSink<'_>, block: &CompiledBlock, imports: me
             .i32_eq()
             .if_(BlockType::Empty);
         if let Some(limit) = imports.code_fetch_limit {
-            code_fetch::check_context(code, 2);
-            code_fetch::refresh(code, limit);
+            code_fetch::check_context(code, 2, imports.raw_task_context.is_some());
+            code_fetch::refresh(code, limit, imports.raw_task_context.is_some());
             code_fetch::check_span(code, gate.entry.0, 2, limit, 2);
         }
         code.i32_const(gate.id as i32)
@@ -1183,7 +1213,7 @@ fn emit_block(code: &mut InstructionSink<'_>, block: &CompiledBlock, imports: me
         let helper_free = code_fetch::helper_free_block(block);
         if helper_free && let Some(limit) = imports.code_fetch_limit {
             // the loop's safepoint and key check already precede this selected block.
-            code_fetch::refresh(code, limit);
+            code_fetch::refresh(code, limit, imports.raw_task_context.is_some());
         }
         let count = block.instructions.len() as u32;
         for _ in 0..count {
@@ -1196,8 +1226,12 @@ fn emit_block(code: &mut InstructionSink<'_>, block: &CompiledBlock, imports: me
             abi::safepoint(code, remaining + 2);
             if let Some(limit) = imports.code_fetch_limit {
                 if !helper_free {
-                    code_fetch::check_context(code, remaining + 2);
-                    code_fetch::refresh(code, limit);
+                    code_fetch::check_context(
+                        code,
+                        remaining + 2,
+                        imports.raw_task_context.is_some(),
+                    );
+                    code_fetch::refresh(code, limit, imports.raw_task_context.is_some());
                 }
                 code_fetch::check_instruction(code, instruction, limit, remaining + 2);
             }
@@ -1244,7 +1278,7 @@ fn emit_block(code: &mut InstructionSink<'_>, block: &CompiledBlock, imports: me
                     | Operation::SoftwareInterrupt { .. }
             ) && let Some(limit) = imports.code_fetch_limit
             {
-                code_fetch::refresh(code, limit);
+                code_fetch::refresh(code, limit, imports.raw_task_context.is_some());
             }
             abi::debug_after_retirement(code, remaining + 2, imports.detection, false);
         }
@@ -1256,12 +1290,13 @@ fn emit_block(code: &mut InstructionSink<'_>, block: &CompiledBlock, imports: me
             .i32_eq()
             .if_(BlockType::Empty);
         abi::safepoint(code, 2);
-        code_fetch::check_context(code, 2);
+        code_fetch::check_context(code, 2, imports.raw_task_context.is_some());
         code_fetch::refresh(
             code,
             imports
                 .code_fetch_limit
                 .expect("context fault requires a bound module"),
+            imports.raw_task_context.is_some(),
         );
         code_fetch::check_span(
             code,

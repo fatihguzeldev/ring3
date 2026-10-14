@@ -33,7 +33,7 @@ pub(super) fn instruction(
             destination,
             word,
         } => {
-            selector(code, segment);
+            selector(code, segment, imports.raw_task_context.is_some());
             code.local_set(RESULT);
             match destination {
                 Location32::Register(destination) => {
@@ -56,7 +56,7 @@ pub(super) fn instruction(
             }
         }
         Operation::PushSegment { segment, word } => {
-            selector(code, segment);
+            selector(code, segment, imports.raw_task_context.is_some());
             code.local_set(RESULT);
             let width = if word { 2 } else { 4 };
             super::stack::pointer::push_result(code, width, imports, exit_depth);
@@ -86,6 +86,7 @@ pub(super) fn instruction(
                 code,
                 register(Register32::Esp),
                 if word { 2 } else { 4 },
+                imports.raw_task_context.is_some(),
             );
             load_selector(code, segment, imports, exit_depth);
             code.local_set(register(Register32::Esp));
@@ -117,7 +118,15 @@ pub(super) fn instruction(
                 .i32_const(i32::from(word))
                 .call(index)
                 .local_set(HELPER_STATUS);
-            super::cpu_result::validate(code, if word { 4 } else { 6 }, 1, false, exit_depth);
+            super::tasks::refresh(code, imports);
+            super::cpu_result::validate(
+                code,
+                if word { 4 } else { 6 },
+                1,
+                false,
+                exit_depth,
+                imports.raw_task_context.is_some(),
+            );
             super::cpu_result::value(code);
             code.local_set(RESULT);
             if word {
@@ -167,17 +176,39 @@ fn load_selector(
         .i32_and()
         .call(index)
         .local_set(HELPER_STATUS);
-    super::cpu_result::validate(code, 0, 0, false, exit_depth);
+    crate::cpu::dbt::wasm::tasks::refresh(code, imports);
+    super::cpu_result::validate(
+        code,
+        0,
+        0,
+        false,
+        exit_depth,
+        imports.raw_task_context.is_some(),
+    );
 }
 
-pub(super) fn selector(code: &mut InstructionSink<'_>, segment: SegmentRegister) {
+pub(super) fn selector(
+    code: &mut InstructionSink<'_>,
+    segment: SegmentRegister,
+    raw_task_context: bool,
+) {
+    if raw_task_context {
+        super::tasks::selector(code, segment);
+        return;
+    }
+
     code.local_get(STATE_PTR)
         .i32_load16_u(memarg(SEGMENTS_SELECTORS_OFFSET + segment.index() * 2, 1));
 }
 
 /// a null data selector may be loaded, but cannot be used for a 32-bit protected-mode memory reference.
-pub(super) fn access(code: &mut InstructionSink<'_>, segment: SegmentRegister, exit_depth: u32) {
-    selector(code, segment);
+pub(super) fn access(
+    code: &mut InstructionSink<'_>,
+    segment: SegmentRegister,
+    exit_depth: u32,
+    raw_task_context: bool,
+) {
+    selector(code, segment, raw_task_context);
     code.i32_const(0xfffc)
         .i32_and()
         .i32_eqz()

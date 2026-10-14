@@ -21,13 +21,13 @@ pub(in crate::cpu::dbt::wasm) fn return_if_nested(
         .expect("task admission helper")
         .emit_binding(code);
     code.call(helper).local_set(HELPER_STATUS);
-    code_fetch::check_context(code, exit_depth + 1);
+    code_fetch::check_context(code, exit_depth + 1, imports.raw_task_context.is_some());
     code.local_get(HELPER_STATUS)
         .i32_eqz()
         .i32_eqz()
         .if_(BlockType::Empty);
     memory::infrastructure(code, 3);
-    memory::exit_if_failed(code, exit_depth + 2);
+    memory::exit_if_failed(code, exit_depth + 2, imports.raw_task_context.is_some());
     code.end();
     memory::reset_checks(code);
     for (offset, value) in [
@@ -40,7 +40,7 @@ pub(in crate::cpu::dbt::wasm) fn return_if_nested(
         memory::expect_field(code, offset, value);
     }
     memory::protocol_if_bad(code);
-    memory::exit_if_failed(code, exit_depth + 1);
+    memory::exit_if_failed(code, exit_depth + 1, imports.raw_task_context.is_some());
     validate(
         code,
         imports.task_return_flags.expect("original task flags"),

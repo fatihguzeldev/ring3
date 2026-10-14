@@ -53,7 +53,7 @@ pub(super) fn store(
     }
     code.call(index).local_set(HELPER_STATUS);
     super::cpu_scalar::validate(code, 1, CpuScalarOperation::Store);
-    exit_if_failed(code, exit_depth);
+    exit_if_failed(code, exit_depth, imports.raw_task_context.is_some());
 }
 
 pub(super) fn store_result(
@@ -87,5 +87,5 @@ pub(super) fn store_result_at_address(
         .call(index)
         .local_set(HELPER_STATUS);
     super::cpu_scalar::validate(code, 1, CpuScalarOperation::Store);
-    exit_if_failed(code, exit_depth);
+    exit_if_failed(code, exit_depth, imports.raw_task_context.is_some());
 }

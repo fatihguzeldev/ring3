@@ -40,8 +40,12 @@ pub(super) fn load_at_address(
     code.local_get(ADDRESS)
         .call(import.expect("prepared narrow read has an import"))
         .local_set(HELPER_STATUS);
-    crate::cpu::dbt::wasm::code_fetch::check_context(code, exit_depth);
+    crate::cpu::dbt::wasm::code_fetch::check_context(
+        code,
+        exit_depth,
+        imports.raw_task_context.is_some(),
+    );
     super::cpu_scalar::validate(code, length, CpuScalarOperation::Read);
-    exit_if_failed(code, exit_depth);
+    exit_if_failed(code, exit_depth, imports.raw_task_context.is_some());
     helper_field(code, 20);
 }

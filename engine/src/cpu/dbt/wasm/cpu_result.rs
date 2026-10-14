@@ -13,7 +13,12 @@ pub(super) fn value(code: &mut InstructionSink<'_>) {
 }
 
 /// consume returned flags only after validating the instruction's preservation contract.
-pub(super) fn flags(code: &mut InstructionSink<'_>, mutable: u32, exit_depth: u32) {
+pub(super) fn flags(
+    code: &mut InstructionSink<'_>,
+    mutable: u32,
+    exit_depth: u32,
+    raw_task_context: bool,
+) {
     code.local_set(RESULT);
     reset_checks(code);
     code.local_get(RESULT)
@@ -23,7 +28,7 @@ pub(super) fn flags(code: &mut InstructionSink<'_>, mutable: u32, exit_depth: u3
         .i32_and();
     add_check(code);
     protocol_if_bad(code);
-    exit_if_failed(code, exit_depth);
+    exit_if_failed(code, exit_depth, raw_task_context);
     code.local_get(RESULT).local_set(FLAGS);
 }
 
@@ -33,15 +38,16 @@ pub(super) fn validate(
     access_mask: u32,
     allow_smc: bool,
     exit_depth: u32,
+    raw_task_context: bool,
 ) {
     validate_span(
         code,
         length,
         access_mask,
         allow_smc,
-        None,
-        Validation::Ordinary,
+        Validation::Ordinary { mask: None },
         exit_depth,
+        raw_task_context,
     );
 }
 
@@ -52,6 +58,7 @@ pub(super) fn validate_gate(
     slot: u32,
     allow_smc: bool,
     exit_depth: u32,
+    raw_task_context: bool,
 ) {
     assert!(matches!(slot, 0 | 2 | 4));
     validate_span(
@@ -59,9 +66,9 @@ pub(super) fn validate_gate(
         slot,
         if slot == 0 { 0 } else { 2 },
         allow_smc,
-        None,
         Validation::Gate,
         exit_depth,
+        raw_task_context,
     );
 }
 
@@ -71,6 +78,7 @@ pub(super) fn validate_interrupt(
     vector: u8,
     original_flags: u32,
     exit_depth: u32,
+    raw_task_context: bool,
 ) {
     assert!(matches!(slot, 0 | 2 | 4));
     validate_span(
@@ -78,12 +86,12 @@ pub(super) fn validate_interrupt(
         slot,
         if slot == 0 { 0 } else { 2 },
         true,
-        None,
         Validation::Interrupt {
             vector,
             original_flags,
         },
         exit_depth,
+        raw_task_context,
     );
 }
 
@@ -92,6 +100,7 @@ pub(super) fn validate_masked(
     length: u32,
     mask_local: u32,
     exit_depth: u32,
+    raw_task_context: bool,
 ) {
     assert!((1..=16).contains(&length));
     validate_span(
@@ -99,9 +108,11 @@ pub(super) fn validate_masked(
         length,
         2,
         true,
-        Some(mask_local),
-        Validation::Ordinary,
+        Validation::Ordinary {
+            mask: Some(mask_local),
+        },
         exit_depth,
+        raw_task_context,
     );
 }
 
@@ -120,6 +131,7 @@ pub(super) fn validate_avx(
     allow_smc: bool,
     validation: AvxValidation,
     exit_depth: u32,
+    raw_task_context: bool,
 ) {
     assert!(length <= 32);
     if validation.selected_mask.is_some() {
@@ -130,28 +142,33 @@ pub(super) fn validate_avx(
         length,
         access_mask,
         allow_smc,
-        validation.selected_mask,
         Validation::Avx(validation),
         exit_depth,
+        raw_task_context,
     );
 }
 
 /// selected xstate spans are checked by their owner before this common status/publication path.
-pub(super) fn validate_xstate(code: &mut InstructionSink<'_>, save: bool, exit_depth: u32) {
+pub(super) fn validate_xstate(
+    code: &mut InstructionSink<'_>,
+    save: bool,
+    exit_depth: u32,
+    raw_task_context: bool,
+) {
     validate_span(
         code,
         832,
         if save { 3 } else { 1 },
         save,
-        None,
         Validation::XState,
         exit_depth,
+        raw_task_context,
     );
 }
 
 #[derive(Clone, Copy)]
 enum Validation {
-    Ordinary,
+    Ordinary { mask: Option<u32> },
     Avx(AvxValidation),
     XState,
     Gate,
@@ -163,10 +180,15 @@ fn validate_span(
     length: u32,
     access_mask: u32,
     allow_smc: bool,
-    mask: Option<u32>,
     validation: Validation,
     exit_depth: u32,
+    raw_task_context: bool,
 ) {
+    let mask = match validation {
+        Validation::Ordinary { mask } => mask,
+        Validation::Avx(validation) => validation.selected_mask,
+        _ => None,
+    };
     let xstate = matches!(validation, Validation::XState);
     let gate = matches!(validation, Validation::Gate);
     let interrupt = if let Validation::Interrupt {
@@ -316,7 +338,7 @@ fn validate_span(
             .local_set(DEBUG_SHADOW)
             .end();
     }
-    exit_if_failed(code, exit_depth);
+    exit_if_failed(code, exit_depth, raw_task_context);
 }
 
 fn success(code: &mut InstructionSink<'_>, length: u32, mask: Option<u32>) {

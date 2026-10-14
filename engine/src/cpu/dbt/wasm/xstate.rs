@@ -43,7 +43,7 @@ pub(super) fn instruction(
         return save;
     }
     check_selected_spans(code, *address, save, imports, exit_depth);
-    memory::effective_address(code, *address);
+    memory::effective_address(code, *address, imports.raw_task_context.is_some());
     let helper = if save {
         imports.cpu_xsave
     } else {
@@ -56,8 +56,15 @@ pub(super) fn instruction(
         .local_get(register(Register32::Edx))
         .call(index)
         .local_set(HELPER_STATUS);
-    validate_context(code, save, exit_depth);
-    cpu_result::validate(code, 576, if save { 3 } else { 1 }, save, exit_depth);
+    validate_context(code, save, exit_depth, imports.raw_task_context.is_some());
+    cpu_result::validate(
+        code,
+        576,
+        if save { 3 } else { 1 },
+        save,
+        exit_depth,
+        imports.raw_task_context.is_some(),
+    );
     save
 }
 
@@ -145,7 +152,12 @@ fn selected(code: &mut InstructionSink<'_>, bit: i32) {
 }
 
 /// the generic packet envelope cannot authorize holes or unrequested components.
-fn validate_context(code: &mut InstructionSink<'_>, save: bool, exit_depth: u32) {
+fn validate_context(
+    code: &mut InstructionSink<'_>,
+    save: bool,
+    exit_depth: u32,
+    raw_task_context: bool,
+) {
     memory::reset_checks(code);
     memory::expect_field(code, 20, 0);
     memory::helper_field(code, 16);
@@ -184,7 +196,7 @@ fn validate_context(code: &mut InstructionSink<'_>, save: bool, exit_depth: u32)
     memory::add_check(code);
     code.end();
     memory::protocol_if_bad(code);
-    memory::exit_if_failed(code, exit_depth);
+    memory::exit_if_failed(code, exit_depth, raw_task_context);
 }
 
 /// the extended helper owns selected cached spans and page transactions as one operation.
@@ -209,9 +221,15 @@ fn upper_instruction(
         .call(index)
         .local_set(HELPER_STATUS);
     // reconstruct the linear base only for response validation, after the helper's authority checks.
-    memory::effective_address(code, address);
-    upper::validate_context(code, save, address.resolved_segment(), exit_depth);
-    cpu_result::validate_xstate(code, save, exit_depth);
+    memory::effective_address(code, address, imports.raw_task_context.is_some());
+    upper::validate_context(
+        code,
+        save,
+        address.resolved_segment(),
+        exit_depth,
+        imports.raw_task_context.is_some(),
+    );
+    cpu_result::validate_xstate(code, save, exit_depth, imports.raw_task_context.is_some());
 }
 
 mod upper;

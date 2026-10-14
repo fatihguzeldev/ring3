@@ -53,15 +53,28 @@ pub(super) fn instruction(
         .local_get(FLAGS)
         .call(execute)
         .local_set(HELPER_STATUS);
-    super::super::code_fetch::check_context(code, exit_depth);
+    super::super::code_fetch::check_context(code, exit_depth, imports.raw_task_context.is_some());
 
     // host failures never authorize staged vector publication.
     code.local_get(HELPER_STATUS).if_(BlockType::Empty);
     memory::infrastructure(code, 3);
     code.end();
-    memory::exit_if_failed(code, exit_depth);
-    validate_result(code, gather, address, locals, exit_depth);
-    validate_outputs(code, gather, locals, exit_depth);
+    memory::exit_if_failed(code, exit_depth, imports.raw_task_context.is_some());
+    validate_result(
+        code,
+        gather,
+        address,
+        locals,
+        exit_depth,
+        imports.raw_task_context.is_some(),
+    );
+    validate_outputs(
+        code,
+        gather,
+        locals,
+        exit_depth,
+        imports.raw_task_context.is_some(),
+    );
     // the ordinary avx paths reuse this local as their transfer payload pointer.
     code.local_get(STATE_PTR)
         .i32_const(TRANSFER_OFFSET as i32)
@@ -74,6 +87,7 @@ pub(super) fn instruction(
         address.resolved_segment(),
         gather.geometry().data_bytes(),
         exit_depth,
+        imports.raw_task_context.is_some(),
     );
 }
 
@@ -147,6 +161,8 @@ fn validate_result(
     address: GatherAddress,
     locals: AvxLocals,
     exit_depth: u32,
+
+    raw_task_context: bool,
 ) {
     memory::reset_checks(code);
     for (offset, value) in [
@@ -231,7 +247,7 @@ fn validate_result(
             .i32_const(lane as i32)
             .i32_eq()
             .if_(BlockType::Empty);
-        validate_fault_span(code, gather, address, locals, lane);
+        validate_fault_span(code, gather, address, locals, lane, raw_task_context);
         code.end();
     }
     code.else_();
@@ -244,7 +260,7 @@ fn validate_result(
     }
     code.end().end();
     memory::protocol_if_bad(code);
-    memory::exit_if_failed(code, exit_depth);
+    memory::exit_if_failed(code, exit_depth, raw_task_context);
 }
 
 fn validate_fault_span(
@@ -253,6 +269,8 @@ fn validate_fault_span(
     address: GatherAddress,
     locals: AvxLocals,
     lane: usize,
+
+    raw_task_context: bool,
 ) {
     let geometry = gather.geometry();
     let byte = lane * geometry.index_bytes();
@@ -263,7 +281,7 @@ fn validate_fault_span(
         .i32_mul()
         .local_get(ADDRESS)
         .i32_add();
-    segments::base(code, address.resolved_segment());
+    segments::base(code, address.resolved_segment(), raw_task_context);
     code.i32_add().local_set(RESULT);
     let width = geometry.data_bytes() as u32;
     field(code, GATHER_DETAIL_OFFSET);
@@ -282,6 +300,8 @@ fn validate_outputs(
     gather: GatherInstruction,
     locals: AvxLocals,
     exit_depth: u32,
+
+    raw_task_context: bool,
 ) {
     memory::reset_checks(code);
     let geometry = gather.geometry();
@@ -333,7 +353,7 @@ fn validate_outputs(
         }
     }
     memory::protocol_if_bad(code);
-    memory::exit_if_failed(code, exit_depth);
+    memory::exit_if_failed(code, exit_depth, raw_task_context);
 }
 
 fn operand_exit(
@@ -341,6 +361,8 @@ fn operand_exit(
     segment: SegmentRegister,
     width: usize,
     exit_depth: u32,
+
+    raw_task_context: bool,
 ) {
     code.local_get(RHS).if_(BlockType::Empty);
     code.local_get(RHS)
@@ -367,7 +389,7 @@ fn operand_exit(
         code.i32_const(0).local_set(local);
     }
     code.end().end();
-    memory::exit_if_failed(code, exit_depth);
+    memory::exit_if_failed(code, exit_depth, raw_task_context);
 }
 
 fn publish(code: &mut InstructionSink<'_>, register: VectorRegister, offset: usize) {

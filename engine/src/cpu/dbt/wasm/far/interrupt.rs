@@ -33,7 +33,12 @@ pub(in crate::cpu::dbt::wasm) fn interrupt_return(
     let esp = register(Register32::Esp);
     // the active pointer wraps between slots; each whole slot keeps its cached authority.
     for offset in [0, slot, 2 * slot] {
-        super::super::stack::pointer::offset(code, esp, offset as i32);
+        super::super::stack::pointer::offset(
+            code,
+            esp,
+            offset as i32,
+            imports.raw_task_context.is_some(),
+        );
         code.local_set(ADDRESS);
         super::super::segments::check_span(
             code,
@@ -49,16 +54,36 @@ pub(in crate::cpu::dbt::wasm) fn interrupt_return(
         (slot, saved.selector),
         (2 * slot, saved.flags),
     ] {
-        super::super::stack::pointer::offset(code, esp, offset as i32);
-        super::super::segments::base(code, SegmentRegister::Ss);
+        super::super::stack::pointer::offset(
+            code,
+            esp,
+            offset as i32,
+            imports.raw_task_context.is_some(),
+        );
+        super::super::segments::base(
+            code,
+            SegmentRegister::Ss,
+            imports.raw_task_context.is_some(),
+        );
         code.i32_add()
             .local_tee(ADDRESS)
             .i32_const(slot as i32)
             .i32_const(1)
             .call(imports.cpu_read.expect("iret stack read"))
             .local_set(HELPER_STATUS);
-        crate::cpu::dbt::wasm::code_fetch::check_context(code, exit_depth);
-        cpu_result::validate(code, slot, 1, false, exit_depth);
+        crate::cpu::dbt::wasm::code_fetch::check_context(
+            code,
+            exit_depth,
+            imports.raw_task_context.is_some(),
+        );
+        cpu_result::validate(
+            code,
+            slot,
+            1,
+            false,
+            exit_depth,
+            imports.raw_task_context.is_some(),
+        );
         code.local_get(STATE_PTR);
         if destination == saved.selector || width == FarWidth::Word {
             code.i32_load16_u(transfer(0));
@@ -80,11 +105,19 @@ pub(in crate::cpu::dbt::wasm) fn interrupt_return(
         .i32_const(i32::from(width == FarWidth::Word))
         .call(helper)
         .local_set(HELPER_STATUS);
-    descriptor_result(code, exit_depth);
-    cpu_result::validate(code, 0, 0, false, exit_depth);
-    target_echo(code, exit_depth);
+    crate::cpu::dbt::wasm::tasks::refresh(code, imports);
+    descriptor_result(code, exit_depth, imports.raw_task_context.is_some());
+    cpu_result::validate(
+        code,
+        0,
+        0,
+        false,
+        exit_depth,
+        imports.raw_task_context.is_some(),
+    );
+    target_echo(code, exit_depth, imports.raw_task_context.is_some());
     if let Some(limit) = imports.code_fetch_limit {
-        super::super::code_fetch::refresh(code, limit);
+        super::super::code_fetch::refresh(code, limit, imports.raw_task_context.is_some());
     }
     let mutable = if width == FarWidth::Word {
         USER_IRET_FLAGS_WORD_MASK
@@ -99,6 +132,10 @@ pub(in crate::cpu::dbt::wasm) fn interrupt_return(
         .i32_and()
         .i32_or()
         .local_set(FLAGS);
-    super::super::stack::pointer::advance(code, (3 * slot) as i32);
+    super::super::stack::pointer::advance(
+        code,
+        (3 * slot) as i32,
+        imports.raw_task_context.is_some(),
+    );
     code.local_get(saved.target).local_set(EIP);
 }

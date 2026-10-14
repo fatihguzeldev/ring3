@@ -29,7 +29,7 @@ pub(super) fn exchange_result(
         .call(index)
         .local_set(HELPER_STATUS);
     super::cpu_scalar::validate(code, 2, CpuScalarOperation::Modify);
-    exit_if_failed(code, exit_depth);
+    exit_if_failed(code, exit_depth, imports.raw_task_context.is_some());
     helper_field(code, 20);
     code.local_set(RESULT);
 }
@@ -60,7 +60,7 @@ pub(super) fn compare_exchange_result(
         .call(index)
         .local_set(HELPER_STATUS);
     super::cpu_scalar::validate(code, 2, CpuScalarOperation::Modify);
-    exit_if_failed(code, exit_depth);
+    exit_if_failed(code, exit_depth, imports.raw_task_context.is_some());
     helper_field(code, 20);
     code.local_set(RESULT);
 }
@@ -88,7 +88,7 @@ pub(super) fn exchange_add_result(
         .call(index)
         .local_set(HELPER_STATUS);
     super::cpu_scalar::validate(code, 2, CpuScalarOperation::Modify);
-    exit_if_failed(code, exit_depth);
+    exit_if_failed(code, exit_depth, imports.raw_task_context.is_some());
     helper_field(code, 20);
     code.local_set(RESULT);
 }

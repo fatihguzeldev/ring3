@@ -39,6 +39,7 @@ impl StoreImport {
 
 #[derive(Clone, Copy, Default)]
 pub(super) struct Imports {
+    pub(super) raw_task_context: Option<super::tasks::RawTaskContextImports>,
     pub(super) detection: Option<super::detection::DetectionLocals>,
     pub(super) finish_detection: Option<u32>,
     pub(super) segment_check: Option<u32>,
@@ -782,9 +783,9 @@ pub(super) fn load(
     code.local_get(ADDRESS)
         .call(imports.read.expect("prepared memory load has an import"))
         .local_set(HELPER_STATUS);
-    super::code_fetch::check_context(code, exit_depth);
+    super::code_fetch::check_context(code, exit_depth, imports.raw_task_context.is_some());
     cpu_scalar::validate(code, 4, crate::abi::memory_helper::CpuScalarOperation::Read);
-    exit_if_failed(code, exit_depth);
+    exit_if_failed(code, exit_depth, imports.raw_task_context.is_some());
     helper_field(code, 20);
     code.local_set(register(destination));
 }
@@ -817,7 +818,7 @@ pub(super) fn store(
         4,
         crate::abi::memory_helper::CpuScalarOperation::Store,
     );
-    exit_if_failed(code, exit_depth);
+    exit_if_failed(code, exit_depth, imports.raw_task_context.is_some());
 }
 
 pub(super) fn push_memory(
@@ -863,6 +864,7 @@ fn checked_pop_destination(
             code,
             register(crate::cpu::x86::Register32::Esp),
             width as i32,
+            imports.raw_task_context.is_some(),
         );
         code.i32_add();
         if let Some(index) = destination.index {
@@ -918,7 +920,7 @@ fn pop_memory_width(
     } else {
         store_result_at_address(code, imports, exit_depth);
     }
-    super::stack::pointer::advance(code, width as i32);
+    super::stack::pointer::advance(code, width as i32, imports.raw_task_context.is_some());
 }
 
 pub(super) fn push_word_result(code: &mut InstructionSink<'_>, imports: Imports, exit_depth: u32) {
@@ -934,7 +936,7 @@ pub(super) fn pop_word_register(
     let esp = crate::cpu::x86::Register32::Esp;
     super::stack::pointer::load(code, esp, 0, 2, imports, exit_depth);
     if destination == esp {
-        super::stack::pointer::assigned(code, register(esp), 2);
+        super::stack::pointer::assigned(code, register(esp), 2, imports.raw_task_context.is_some());
     } else {
         code.local_get(register(destination));
     }
@@ -943,7 +945,7 @@ pub(super) fn pop_word_register(
         .i32_or()
         .local_set(register(destination));
     if destination != esp {
-        super::stack::pointer::advance(code, 2);
+        super::stack::pointer::advance(code, 2, imports.raw_task_context.is_some());
     }
 }
 
@@ -1010,9 +1012,9 @@ pub(super) fn load_result_at_address(
                 .expect("prepared memory operand has a read import"),
         )
         .local_set(HELPER_STATUS);
-    super::code_fetch::check_context(code, exit_depth);
+    super::code_fetch::check_context(code, exit_depth, imports.raw_task_context.is_some());
     cpu_scalar::validate(code, 4, crate::abi::memory_helper::CpuScalarOperation::Read);
-    exit_if_failed(code, exit_depth);
+    exit_if_failed(code, exit_depth, imports.raw_task_context.is_some());
     helper_field(code, 20);
     code.local_set(RESULT);
 }
@@ -1052,7 +1054,7 @@ pub(super) fn store_result_at_address(
         4,
         crate::abi::memory_helper::CpuScalarOperation::Store,
     );
-    exit_if_failed(code, exit_depth);
+    exit_if_failed(code, exit_depth, imports.raw_task_context.is_some());
 }
 
 pub(super) fn pop_register(
@@ -1064,7 +1066,7 @@ pub(super) fn pop_register(
     super::stack::pointer::load_result(code, 4, imports, exit_depth);
     code.local_get(RESULT).local_set(register(destination));
     if destination != crate::cpu::x86::Register32::Esp {
-        super::stack::pointer::advance(code, 4);
+        super::stack::pointer::advance(code, 4, imports.raw_task_context.is_some());
     }
 }
 
@@ -1079,7 +1081,11 @@ pub(super) fn pop_return(
         super::code_fetch::check_value(code, RESULT, limit, exit_depth);
     }
     code.local_get(RESULT).local_set(EIP);
-    super::stack::pointer::advance(code, 4 + i32::from(stack_adjust));
+    super::stack::pointer::advance(
+        code,
+        4 + i32::from(stack_adjust),
+        imports.raw_task_context.is_some(),
+    );
 }
 
 pub(super) fn exit_if_invalidated(
@@ -1098,8 +1104,12 @@ pub(super) fn exit_if_invalidated(
         .end();
 }
 
-pub(super) fn effective_address(code: &mut InstructionSink<'_>, address: EffectiveAddress) {
-    address_value(code, address);
+pub(super) fn effective_address(
+    code: &mut InstructionSink<'_>,
+    address: EffectiveAddress,
+    raw_task_context: bool,
+) {
+    address_value(code, address, raw_task_context);
     code.local_set(ADDRESS);
 }
 
@@ -1134,13 +1144,17 @@ pub(super) fn checked_offset(
     code.local_set(ADDRESS);
     super::segments::check_span(code, segment, width, access, imports, exit_depth);
     code.local_get(ADDRESS);
-    super::segments::base(code, segment);
+    super::segments::base(code, segment, imports.raw_task_context.is_some());
     code.i32_add().local_set(ADDRESS);
 }
 
-pub(super) fn address_value(code: &mut InstructionSink<'_>, address: EffectiveAddress) {
+pub(super) fn address_value(
+    code: &mut InstructionSink<'_>,
+    address: EffectiveAddress,
+    raw_task_context: bool,
+) {
     offset_value(code, address);
-    super::segments::base(code, address.resolved_segment());
+    super::segments::base(code, address.resolved_segment(), raw_task_context);
     code.i32_add();
 }
 
@@ -1173,8 +1187,12 @@ pub(super) fn protocol_if_bad(code: &mut InstructionSink<'_>) {
     code.end();
 }
 
-pub(super) fn exit_if_failed(code: &mut InstructionSink<'_>, exit_depth: u32) {
-    super::code_fetch::check_rejected(code, exit_depth);
+pub(super) fn exit_if_failed(
+    code: &mut InstructionSink<'_>,
+    exit_depth: u32,
+    raw_task_context: bool,
+) {
+    super::code_fetch::check_rejected(code, exit_depth, raw_task_context);
     code.local_get(REASON)
         .if_(BlockType::Empty)
         .br(exit_depth + 1)

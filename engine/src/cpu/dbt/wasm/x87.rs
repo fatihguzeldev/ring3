@@ -50,10 +50,11 @@ pub(super) fn precheck_instruction(
                 opcode,
                 imports.x87_op.expect("waiting x87 helper"),
                 exit_depth + 1,
+                imports.raw_task_context.is_some(),
             );
             // a pending check cannot complete an ordinary x87 operation successfully.
             super::memory::infrastructure(code, 2);
-            super::memory::exit_if_failed(code, exit_depth + 1);
+            super::memory::exit_if_failed(code, exit_depth + 1, imports.raw_task_context.is_some());
             code.end();
         }
         Operation::Simd(value) if value.uses_mmx() || value.kind == SimdKind::EmptyMmx => {
@@ -73,9 +74,11 @@ pub(super) fn operation(
     opcode: u16,
     import: super::memory::StoreImport,
     exit_depth: u32,
+
+    raw_task_context: bool,
 ) {
     if let Some(address) = address {
-        super::memory::address_value(code, address);
+        super::memory::address_value(code, address, raw_task_context);
     } else {
         code.i32_const(0);
     }
@@ -96,7 +99,7 @@ pub(super) fn operation(
         code.local_get(HELPER_STATUS).i32_eqz();
         super::memory::helper_field(code, 16);
         code.i32_eqz().i32_and().if_(BlockType::Empty);
-        super::code_fetch::check_context(code, exit_depth + 1);
+        super::code_fetch::check_context(code, exit_depth + 1, raw_task_context);
         code.end();
     }
     let length = operation.read_size().max(operation.write_size()) as u32;
@@ -108,6 +111,7 @@ pub(super) fn operation(
         access,
         operation.write_size() != 0,
         exit_depth,
+        raw_task_context,
     );
     super::cpu_result::value(code);
     let integer_flags = matches!(
@@ -132,10 +136,15 @@ pub(super) fn operation(
         }
         super::memory::add_check(code);
         super::memory::protocol_if_bad(code);
-        super::memory::exit_if_failed(code, exit_depth);
+        super::memory::exit_if_failed(code, exit_depth, raw_task_context);
         code.local_get(RESULT);
     }
-    super::cpu_result::flags(code, if integer_flags { 0x8d5 } else { 0 }, exit_depth);
+    super::cpu_result::flags(
+        code,
+        if integer_flags { 0x8d5 } else { 0 },
+        exit_depth,
+        raw_task_context,
+    );
     if operation == crate::cpu::x86::X87Operation::StatusToAx {
         status_to_ax(code);
     }

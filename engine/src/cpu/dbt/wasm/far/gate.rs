@@ -6,13 +6,13 @@ pub(super) fn is_packet(code: &mut InstructionSink<'_>) {
     code.i32_const(0x10009).i32_eq();
 }
 
-pub(super) fn jump_result(code: &mut InstructionSink<'_>, exit_depth: u32) {
-    cpu_result::validate_gate(code, 0, false, exit_depth);
+pub(super) fn jump_result(code: &mut InstructionSink<'_>, exit_depth: u32, raw_task_context: bool) {
+    cpu_result::validate_gate(code, 0, false, exit_depth, raw_task_context);
     cpu_result::value(code);
     code.local_set(RESULT);
 }
 
-pub(super) fn call_result(code: &mut InstructionSink<'_>, exit_depth: u32) {
+pub(super) fn call_result(code: &mut InstructionSink<'_>, exit_depth: u32, raw_task_context: bool) {
     code.local_get(HELPER_STATUS)
         .i32_eqz()
         .i32_eqz()
@@ -22,26 +22,31 @@ pub(super) fn call_result(code: &mut InstructionSink<'_>, exit_depth: u32) {
         .i32_and()
         .if_(BlockType::Empty);
     memory::infrastructure(code, 3);
-    memory::exit_if_failed(code, exit_depth + 1);
+    memory::exit_if_failed(code, exit_depth + 1, raw_task_context);
     code.end();
     memory::helper_field(code, 36);
     code.i32_const(2).i32_eq().if_(BlockType::Empty);
-    call_slot(code, 2, exit_depth + 1);
+    call_slot(code, 2, exit_depth + 1, raw_task_context);
     code.else_();
     memory::helper_field(code, 36);
     code.i32_const(4).i32_eq().if_(BlockType::Empty);
-    call_slot(code, 4, exit_depth + 2);
+    call_slot(code, 4, exit_depth + 2, raw_task_context);
     code.else_();
     memory::infrastructure(code, 2);
-    memory::exit_if_failed(code, exit_depth + 2);
+    memory::exit_if_failed(code, exit_depth + 2, raw_task_context);
     code.end().end();
 }
 
-fn call_slot(code: &mut InstructionSink<'_>, slot: u32, exit_depth: u32) {
+fn call_slot(code: &mut InstructionSink<'_>, slot: u32, exit_depth: u32, raw_task_context: bool) {
     // a page fault may refer to either selected slot. SS-limit exceptions carry no address.
     // use the loaded SS.B pointer independently of both gate width and target CS.D.
-    super::super::stack::pointer::offset(code, register(Register32::Esp), -(slot as i32));
-    super::super::segments::base(code, SegmentRegister::Ss);
+    super::super::stack::pointer::offset(
+        code,
+        register(Register32::Esp),
+        -(slot as i32),
+        raw_task_context,
+    );
+    super::super::segments::base(code, SegmentRegister::Ss, raw_task_context);
     code.i32_add().local_set(ADDRESS);
     memory::helper_field(code, 28);
     code.local_get(ADDRESS)
@@ -49,11 +54,16 @@ fn call_slot(code: &mut InstructionSink<'_>, slot: u32, exit_depth: u32) {
         .i32_const(slot as i32 - 1)
         .i32_gt_u()
         .if_(BlockType::Empty);
-    super::super::stack::pointer::offset(code, register(Register32::Esp), -((2 * slot) as i32));
-    super::super::segments::base(code, SegmentRegister::Ss);
+    super::super::stack::pointer::offset(
+        code,
+        register(Register32::Esp),
+        -((2 * slot) as i32),
+        raw_task_context,
+    );
+    super::super::segments::base(code, SegmentRegister::Ss, raw_task_context);
     code.i32_add().local_set(ADDRESS).end();
-    cpu_result::validate_gate(code, slot, true, exit_depth);
+    cpu_result::validate_gate(code, slot, true, exit_depth, raw_task_context);
     cpu_result::value(code);
     code.local_set(RESULT);
-    super::super::stack::pointer::advance(code, -((2 * slot) as i32));
+    super::super::stack::pointer::advance(code, -((2 * slot) as i32), raw_task_context);
 }

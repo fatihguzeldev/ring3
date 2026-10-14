@@ -20,6 +20,7 @@ impl CodeDecodeKey {
 pub(crate) struct CodeFetchContext {
     cs: SegmentCache,
     base: u32,
+    raw_task_context: bool,
 }
 
 impl CodeFetchContext {
@@ -27,6 +28,7 @@ impl CodeFetchContext {
         context.is_valid().then_some(Self {
             cs: context.caches[SegmentRegister::Cs.index()],
             base: context.state.bases[SegmentRegister::Cs.index()],
+            raw_task_context: false,
         })
     }
 
@@ -43,7 +45,12 @@ impl CodeFetchContext {
         .then_some(Self {
             cs,
             base: segments.state.bases[SegmentRegister::Cs.index()],
+            raw_task_context: context.validated_segments().is_none(),
         })
+    }
+
+    pub(crate) fn raw_task_context(self) -> bool {
+        self.raw_task_context
     }
 
     pub(crate) fn decode_key(self) -> CodeDecodeKey {
@@ -129,6 +136,7 @@ mod tests {
         let word = CodeFetchContext {
             cs: SegmentCache::from_bits(0xf0b0_1234).unwrap(),
             base: based.base,
+            raw_task_context: based.raw_task_context,
         };
         assert_ne!(word.decode_key(), based.decode_key());
         assert_eq!(word.decoder_bitness(), 16);

@@ -29,7 +29,14 @@ pub(super) fn store_descriptor(
         .i32_const(1)
         .call(index)
         .local_set(HELPER_STATUS);
-    cpu_result::validate(code, 6, 2, true, exit_depth);
+    cpu_result::validate(
+        code,
+        6,
+        2,
+        true,
+        exit_depth,
+        imports.raw_task_context.is_some(),
+    );
 }
 
 fn transfer(offset: usize) -> MemArg {

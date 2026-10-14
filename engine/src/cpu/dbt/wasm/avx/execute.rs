@@ -51,7 +51,7 @@ pub(super) fn instruction(
         }
     };
     if let Some(address) = operation.address() {
-        address_metadata(code, address, selected);
+        address_metadata(code, address, selected, imports.raw_task_context.is_some());
     }
     code.local_get(STATE_PTR)
         .i32_load(arg(SIMD_OFFSET + SIMD_MXCSR_OFFSET))
@@ -76,7 +76,11 @@ pub(super) fn instruction(
         || matches!(instruction.semantic(), AvxSemantic::String(value)
             if value.output() == crate::cpu::x86::packed_strings::PackedStringOutput::Index)
     {
-        super::super::code_fetch::check_context(code, exit_depth);
+        super::super::code_fetch::check_context(
+            code,
+            exit_depth,
+            imports.raw_task_context.is_some(),
+        );
     }
     let floating = matches!(
         instruction.semantic(),
@@ -105,7 +109,7 @@ pub(super) fn instruction(
             }),
         },
         exit_depth,
-    );
+     imports.raw_task_context.is_some());
     memory::reset_checks(code);
     memory::expect_field(code, 20, 0);
     for offset in (8..AVX_OUTPUT_SIZE).step_by(4) {
@@ -118,12 +122,13 @@ pub(super) fn instruction(
     }
     flags_shape(code, instruction.semantic());
     memory::protocol_if_bad(code);
-    memory::exit_if_failed(code, exit_depth);
+    memory::exit_if_failed(code, exit_depth, imports.raw_task_context.is_some());
     payload(code, 4);
     cpu_result::flags(
         code,
         if instruction.writes_flags() { 0x8d5 } else { 0 },
         exit_depth,
+        imports.raw_task_context.is_some(),
     );
     if let Some(output) = instruction.output() {
         payload(code, 0);
@@ -136,6 +141,8 @@ fn address_metadata(
     code: &mut InstructionSink<'_>,
     address: EffectiveAddress,
     selected: Option<u32>,
+
+    raw_task_context: bool,
 ) {
     for (offset, value) in [
         (0, u32::from_le_bytes(AVX_ADDRESS_MAGIC)),
@@ -165,7 +172,7 @@ fn address_metadata(
         + AVX_ADDRESS_TRANSFER
         + AVX_ADDRESS_LOGICAL_OFFSET));
     code.local_get(ADDRESS);
-    segments::base(code, address.resolved_segment());
+    segments::base(code, address.resolved_segment(), raw_task_context);
     code.i32_add().local_set(ADDRESS);
     if selected.is_some() {
         code.end();

@@ -273,6 +273,9 @@ pub(super) fn emit_prepared(
         prepared.task_return_configured,
         prepared.exception_detection_configured,
         prepared.task_execution_revision.is_some(),
+        prepared
+            .raw_task_context
+            .then_some(prepared.task_execution_revision.unwrap_or(0)),
     );
     if bytes.len() > limits.wasm_bytes {
         return Err(CompileError::WasmLimit);
@@ -295,6 +298,9 @@ pub(super) fn emit_entry_prepared(
             prepared.task_return_configured,
             prepared.exception_detection_configured,
             prepared.task_execution_revision.is_some(),
+            prepared
+                .raw_task_context
+                .then_some(prepared.task_execution_revision.unwrap_or(0)),
         );
         if bytes.len() <= limits.wasm_bytes {
             return Ok(CompiledRegion { prepared, bytes });

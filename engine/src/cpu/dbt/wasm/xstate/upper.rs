@@ -16,6 +16,8 @@ pub(super) fn validate_context(
     save: bool,
     segment: SegmentRegister,
     exit_depth: u32,
+
+    raw_task_context: bool,
 ) {
     memory::reset_checks(code);
     memory::expect_field(code, 20, 0);
@@ -45,7 +47,7 @@ pub(super) fn validate_context(
     fault(code, save);
     code.end();
     memory::protocol_if_bad(code);
-    memory::exit_if_failed(code, exit_depth);
+    memory::exit_if_failed(code, exit_depth, raw_task_context);
 }
 
 fn selected(code: &mut InstructionSink<'_>, selection: u32) {

@@ -98,7 +98,11 @@ fn pop_flags(
         .i32_and()
         .i32_or()
         .local_set(FLAGS);
-    super::stack::pointer::advance(code, if word { 2 } else { 4 });
+    super::stack::pointer::advance(
+        code,
+        if word { 2 } else { 4 },
+        imports.raw_task_context.is_some(),
+    );
 }
 
 fn bound(
@@ -123,8 +127,19 @@ fn bound(
         .i32_const(1)
         .call(imports.cpu_read.expect("BOUND memory read import"))
         .local_set(HELPER_STATUS);
-    crate::cpu::dbt::wasm::code_fetch::check_context(code, exit_depth);
-    cpu_result::validate(code, (width * 2) as u32, 1, false, exit_depth);
+    crate::cpu::dbt::wasm::code_fetch::check_context(
+        code,
+        exit_depth,
+        imports.raw_task_context.is_some(),
+    );
+    cpu_result::validate(
+        code,
+        (width * 2) as u32,
+        1,
+        false,
+        exit_depth,
+        imports.raw_task_context.is_some(),
+    );
     code.local_get(register(index));
     if word {
         code.i32_extend16_s();
