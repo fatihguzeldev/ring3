@@ -89,3 +89,6 @@ mod cpu_data_prefetch_wasm;
 
 #[path = "exceptions/availability/extended/wasm.rs"]
 mod cpu_extended_absence;
+
+#[path = "exceptions/availability/keys/wasm.rs"]
+mod cpu_key_locker_absence;

@@ -9,6 +9,17 @@ pub(super) fn unavailable(instruction: &Instruction) -> bool {
         | Code::VEX_Vaesenclast_ymm_ymm_ymmm256
         | Code::VEX_Vaesdec_ymm_ymm_ymmm256
         | Code::VEX_Vaesdeclast_ymm_ymm_ymmm256 => (7, 0, 2, 9),
+        Code::Aesencwide128kl_m384
+        | Code::Aesdecwide128kl_m384
+        | Code::Aesencwide256kl_m512
+        | Code::Aesdecwide256kl_m512
+        | Code::Aesenc128kl_xmm_m384
+        | Code::Aesdec128kl_xmm_m384
+        | Code::Aesenc256kl_xmm_m512
+        | Code::Aesdec256kl_xmm_m512
+        | Code::Encodekey128_r32_r32
+        | Code::Encodekey256_r32_r32
+        | Code::Loadiwkey_xmm_xmm => (7, 0, 2, 23),
         Code::Clflushopt_m8 => (7, 0, 1, 23),
         Code::Clwb_m8 => (7, 0, 1, 24),
         Code::Sha1nexte_xmm_xmmm128
@@ -58,3 +69,7 @@ mod tsxldtrk;
 #[cfg(test)]
 #[path = "tests/extended.rs"]
 mod extended;
+
+#[cfg(test)]
+#[path = "tests/keys.rs"]
+mod keys;

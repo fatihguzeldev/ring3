@@ -81,3 +81,6 @@ mod cpu_data_prefetch;
 
 #[path = "exceptions/availability/extended/native.rs"]
 mod cpu_extended_absence;
+
+#[path = "exceptions/availability/keys/native.rs"]
+mod cpu_key_locker_absence;
