@@ -43,10 +43,22 @@ pub(super) fn preflight(sink: &mut InstructionSink<'_>) {
         }
     }
 
+    validate_state(sink, |sink| fail_if(sink, 2));
+}
+
+pub(super) fn validate_loaded_state(sink: &mut InstructionSink<'_>) {
+    super::memory::reset_checks(sink);
+    validate_state(sink, super::memory::add_check);
+}
+
+fn validate_state(
+    sink: &mut InstructionSink<'_>,
+    mut reject: impl FnMut(&mut InstructionSink<'_>),
+) {
     for (offset, expected) in [(0, u32::from_le_bytes(*b"R3ST")), (8, STATE_SIZE as u32)] {
         load(sink, STATE_PTR, offset);
         sink.i32_const(expected as i32).i32_ne();
-        fail_if(sink, 2);
+        reject(sink);
     }
     load(sink, STATE_PTR, 4);
     sink.i32_const(header_version() as i32).i32_ne();
@@ -58,11 +70,11 @@ pub(super) fn preflight(sink: &mut InstructionSink<'_>) {
     sink.i32_const(3 | (i32::from(X86_INTEGER_PROFILE) << 16))
         .i32_ne()
         .i32_and();
-    fail_if(sink, 2);
+    reject(sink);
     load(sink, STATE_PTR, STATE_METADATA_OFFSET);
     load(sink, STATE_PTR, 4);
     sink.i32_const(header_version() as i32).i32_ne().i32_gt_u();
-    fail_if(sink, 2);
+    reject(sink);
     load(sink, STATE_PTR, EFLAGS_OFFSET);
     sink.local_set(FLAGS)
         .local_get(FLAGS)
@@ -87,7 +99,7 @@ pub(super) fn preflight(sink: &mut InstructionSink<'_>) {
         .end()
         .i32_and()
         .i32_or();
-    fail_if(sink, 2);
+    reject(sink);
 }
 
 pub(super) fn load_state(sink: &mut InstructionSink<'_>) {
@@ -101,6 +113,43 @@ pub(super) fn load_state(sink: &mut InstructionSink<'_>) {
     sink.local_set(FLAGS);
     load(sink, STATE_PTR, STATE_METADATA_OFFSET);
     sink.local_set(DEBUG_SHADOW);
+}
+
+pub(super) fn flush_state(sink: &mut InstructionSink<'_>) {
+    for index in 0..8 {
+        store_local(
+            sink,
+            STATE_PTR,
+            REGISTERS_OFFSET + index * 4,
+            4 + index as u32,
+        );
+    }
+    store_local(sink, STATE_PTR, EIP_OFFSET, EIP);
+    store_local(sink, STATE_PTR, EFLAGS_OFFSET, FLAGS);
+    store_local(sink, STATE_PTR, STATE_METADATA_OFFSET, DEBUG_SHADOW);
+    load(sink, STATE_PTR, 4);
+    sink.i32_const(3 | (i32::from(X86_INTEGER_PROFILE) << 16))
+        .i32_eq()
+        .local_get(FLAGS)
+        .i32_const(0x10000)
+        .i32_and()
+        .i32_or()
+        .if_(BlockType::Empty)
+        .local_get(STATE_PTR)
+        .i32_const(3 | (i32::from(X86_INTEGER_PROFILE) << 16))
+        .i32_store(memarg(4))
+        .else_();
+    sink.local_get(FLAGS)
+        .i32_const(!crate::abi::x86::LEGACY_FLAGS_MASK as i32)
+        .i32_and()
+        .local_get(DEBUG_SHADOW)
+        .i32_or()
+        .if_(BlockType::Empty)
+        .local_get(STATE_PTR)
+        .i32_const(2 | (i32::from(X86_INTEGER_PROFILE) << 16))
+        .i32_store(memarg(4))
+        .end()
+        .end();
 }
 
 pub(super) fn work_preflight(sink: &mut InstructionSink<'_>) {
@@ -141,40 +190,7 @@ pub(super) fn flush(
     task_return: bool,
     device_not_available: bool,
 ) {
-    for index in 0..8 {
-        store_local(
-            sink,
-            STATE_PTR,
-            REGISTERS_OFFSET + index * 4,
-            4 + index as u32,
-        );
-    }
-    store_local(sink, STATE_PTR, EIP_OFFSET, EIP);
-    store_local(sink, STATE_PTR, EFLAGS_OFFSET, FLAGS);
-    store_local(sink, STATE_PTR, STATE_METADATA_OFFSET, DEBUG_SHADOW);
-    load(sink, STATE_PTR, 4);
-    sink.i32_const(3 | (i32::from(X86_INTEGER_PROFILE) << 16))
-        .i32_eq()
-        .local_get(FLAGS)
-        .i32_const(0x10000)
-        .i32_and()
-        .i32_or()
-        .if_(BlockType::Empty)
-        .local_get(STATE_PTR)
-        .i32_const(3 | (i32::from(X86_INTEGER_PROFILE) << 16))
-        .i32_store(memarg(4))
-        .else_();
-    sink.local_get(FLAGS)
-        .i32_const(!crate::abi::x86::LEGACY_FLAGS_MASK as i32)
-        .i32_and()
-        .local_get(DEBUG_SHADOW)
-        .i32_or()
-        .if_(BlockType::Empty)
-        .local_get(STATE_PTR)
-        .i32_const(2 | (i32::from(X86_INTEGER_PROFILE) << 16))
-        .i32_store(memarg(4))
-        .end()
-        .end();
+    flush_state(sink);
 
     let detail_fields = [
         (DETAIL_OFFSET, DETAIL),

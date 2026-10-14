@@ -3,6 +3,7 @@ use wasm_encoder::{BlockType, InstructionSink};
 
 pub(in crate::cpu::dbt::wasm) fn return_if_nested(
     code: &mut InstructionSink<'_>,
+    next_pc: u32,
     imports: memory::Imports,
     exit_depth: u32,
 ) {
@@ -10,6 +11,11 @@ pub(in crate::cpu::dbt::wasm) fn return_if_nested(
         .i32_const(0x4000)
         .i32_and()
         .if_(BlockType::Empty);
+    if imports.task_transition_configured {
+        transition::emit(code, next_pc, imports, exit_depth + 1);
+        code.br(exit_depth + 1).end();
+        return;
+    }
     let helper = imports
         .task_return
         .expect("task admission helper")
@@ -41,6 +47,8 @@ pub(in crate::cpu::dbt::wasm) fn return_if_nested(
     );
     code.br(exit_depth + 1).end();
 }
+
+mod transition;
 
 fn validate(code: &mut InstructionSink<'_>, original_flags: u32) {
     memory::helper_field(code, 16);

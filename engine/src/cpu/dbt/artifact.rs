@@ -35,6 +35,20 @@ pub struct CompiledRegion {
 }
 
 impl CompiledRegion {
+    pub(crate) fn task_return_next_pc(&self, pc: u32) -> Option<u32> {
+        self.prepared
+            .blocks
+            .iter()
+            .flat_map(|block| &block.instructions)
+            .find(|instruction| {
+                instruction.pc().0 == pc
+                    && matches!(
+                        instruction.operation(),
+                        crate::cpu::x86::ir::Operation::InterruptReturn { .. }
+                    )
+            })
+            .map(|instruction| instruction.next_pc().0)
+    }
     pub(crate) fn decode_key(&self) -> CodeDecodeKey {
         self.prepared.decode_key.unwrap_or(CodeDecodeKey::FLAT)
     }
@@ -258,6 +272,7 @@ pub(super) fn emit_prepared(
         prepared.decode_key,
         prepared.task_return_configured,
         prepared.exception_detection_configured,
+        prepared.task_execution_revision.is_some(),
     );
     if bytes.len() > limits.wasm_bytes {
         return Err(CompileError::WasmLimit);
@@ -279,6 +294,7 @@ pub(super) fn emit_entry_prepared(
             prepared.decode_key,
             prepared.task_return_configured,
             prepared.exception_detection_configured,
+            prepared.task_execution_revision.is_some(),
         );
         if bytes.len() <= limits.wasm_bytes {
             return Ok(CompiledRegion { prepared, bytes });

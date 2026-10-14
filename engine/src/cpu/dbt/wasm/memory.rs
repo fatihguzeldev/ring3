@@ -62,6 +62,8 @@ pub(super) struct Imports {
     pub(super) far_return: Option<StoreImport>,
     pub(super) task_return: Option<StoreImport>,
     pub(super) task_return_flags: Option<u32>,
+    pub(super) task_transition_configured: bool,
+    pub(super) task_return_transport: Option<u32>,
     pub(super) software_interrupt: Option<StoreImport>,
     pub(super) software_interrupt_flags: Option<u32>,
     pub(super) interrupt_return_locals: Option<super::far::InterruptReturnLocals>,

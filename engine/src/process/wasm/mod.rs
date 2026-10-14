@@ -235,6 +235,7 @@ pub(crate) use tasks::{
     configure_task_controls, configure_task_return_sources, read_task_context, read_task_controls,
     task_return, task_return_resident,
 };
+pub(crate) use tasks::{cpu_task_return, cpu_task_return_resident};
 
 mod avx;
 pub(crate) use avx::{avx_execute, avx_execute_resident};

@@ -13,3 +13,8 @@ pub use context::{
 
 mod controls;
 pub use controls::{TASK_CONTROLS_SIZE, decode_task_controls, encode_task_controls};
+
+mod transition;
+pub use transition::{
+    TASK_TRANSITION_HELPER_VERSION, TaskTransitionReply32, encode_task_transition_result,
+};

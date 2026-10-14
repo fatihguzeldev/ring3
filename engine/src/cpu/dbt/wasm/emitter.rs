@@ -14,7 +14,7 @@ pub(in crate::cpu::dbt) fn emit(
     binding: Option<EmbeddedBinding>,
     decode_key: Option<crate::cpu::x86::decode::CodeDecodeKey>,
 ) -> Vec<u8> {
-    emit_with_authority(blocks, binding, decode_key, false, false)
+    emit_with_authority(blocks, binding, decode_key, false, false, false)
 }
 
 pub(in crate::cpu::dbt) fn emit_with_authority(
@@ -23,6 +23,7 @@ pub(in crate::cpu::dbt) fn emit_with_authority(
     decode_key: Option<crate::cpu::x86::decode::CodeDecodeKey>,
     task_return_configured: bool,
     exception_detection_configured: bool,
+    task_controls_configured: bool,
 ) -> Vec<u8> {
     let detects_exceptions = exception_detection_configured && binding.is_some();
     let device_not_available =
@@ -335,7 +336,7 @@ pub(in crate::cpu::dbt) fn emit_with_authority(
             4
         } else {
             0
-        };
+        } + usize::from(task_controls_configured);
         types.ty().function(
             std::iter::repeat_n(ValType::I32, parameters),
             [ValType::I32],
@@ -874,8 +875,16 @@ pub(in crate::cpu::dbt) fn emit_with_authority(
         ),
         (
             needs_task_return,
-            "task_return",
-            "task_return_resident",
+            if task_controls_configured {
+                "cpu_task_return"
+            } else {
+                "task_return"
+            },
+            if task_controls_configured {
+                "cpu_task_return_resident"
+            } else {
+                "task_return_resident"
+            },
             task_type_offset,
             &mut helper_imports.task_return,
         ),
@@ -983,6 +992,11 @@ pub(in crate::cpu::dbt) fn emit_with_authority(
         let first = 4 + declarations.iter().map(|(count, _)| count).sum::<u32>();
         helper_imports.task_return_flags = Some(first);
         declarations.push((1, ValType::I32));
+        helper_imports.task_transition_configured = task_controls_configured;
+        if task_controls_configured {
+            helper_imports.task_return_transport = Some(first + 1);
+            declarations.push((1, ValType::I32));
+        }
     }
     if needs_software_interrupt {
         let first = 4 + declarations.iter().map(|(count, _)| count).sum::<u32>();
@@ -1115,7 +1129,12 @@ pub(in crate::cpu::dbt) fn emit_with_authority(
         device_not_available,
     );
     super::detection::finish(&mut code, helper_imports);
-    code.i32_const(0).end();
+    if let Some(transport) = helper_imports.task_return_transport {
+        code.local_get(transport);
+    } else {
+        code.i32_const(0);
+    }
+    code.end();
     let mut bodies = CodeSection::new();
     bodies.function(&function);
     if has_segment_check {
@@ -1209,7 +1228,12 @@ fn emit_block(code: &mut InstructionSink<'_>, block: &CompiledBlock, imports: me
             if matches!(instruction.operation(), Operation::InterruptReturn { .. })
                 && imports.task_return.is_some()
             {
-                super::far::task::return_if_nested(code, imports, remaining + 2);
+                super::far::task::return_if_nested(
+                    code,
+                    instruction.next_pc().0,
+                    imports,
+                    remaining + 2,
+                );
             }
             integer::instruction(code, instruction, imports, remaining + 2);
             if matches!(
