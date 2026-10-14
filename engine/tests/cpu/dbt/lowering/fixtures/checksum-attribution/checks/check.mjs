@@ -5,7 +5,7 @@ import {existsSync, lstatSync, readFileSync, readdirSync, realpathSync} from 'no
 import {dirname, join, relative, resolve, sep} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
-const SIZE = 4612;
+const SIZE = 4796;
 const TRANSFER = 140;
 const FP = 4236;
 const u32 = value => value >>> 0;
@@ -106,15 +106,15 @@ function initialBytes() {
   const seed = seedBytes();
   const oldRegisters = [0xfffff001, 0x12342222, 0x23453333, 0x34564444, 0x45675555, 0x56786666, 0x67897777, 0x789a8888];
   oldRegisters.forEach((value, index) => put(seed, 16 + index * 4, value)); put(seed, 52, 0xcd7); seed.copy(bytes);
-  bytes.fill(0, FP); header(bytes, FP, 'R3FP', 128);
+  bytes.fill(0, FP, FP + 128); header(bytes, FP, 'R3FP', 128);
   for (const [offset, value] of [[16, 0x27f], [18, 0x2840], [20, 0xaaaa], [22, 0x345], [32, 0x33], [34, 0x2b]]) bytes.writeUInt16LE(value, FP + offset);
   put(bytes, FP + 24, 0x12345678); put(bytes, FP + 28, 0x9abcdef0);
   for (let index = 40; index < 120; index++) bytes[FP + index] = (index * 29 + 7) & 255;
   return bytes;
 }
 
-function helper(bytes, fields) {
-  bytes.fill(0, 100, 140); header(bytes, 100, 'R3MH', 40);
+function helper(bytes, fields, version = 1) {
+  bytes.fill(0, 100, 140); header(bytes, 100, 'R3MH', 40, version);
   fields.forEach((value, index) => put(bytes, 116 + index * 4, value));
 }
 
@@ -150,11 +150,11 @@ function execute(before, budget, context) {
     } else if (offset === 12) {
       const page = context.pages.get(registers[6] & 0xfffff000), at = registers[6] & 4095;
       if (!page || !(page.permissions & 1)) {
-        reason = 5; detail = page ? 2 : 1; address = registers[6]; access = 1; length = 4;
-        helper(after, [1, 0, detail, address, access, length]); break;
+        reason = 23; detail = page ? 5 : 4; address = registers[6]; access = 1; length = 4;
+        helper(after, [9, 0, detail, address, access, length], 15); break;
       }
       assert(at <= 4092, 'authored read remains within data page');
-      const value = word(page.bytes, at); helper(after, [0, value, 0, 0, 0, 0]);
+      const value = word(page.bytes, at); helper(after, [0, value, 0, 0, 0, 4], 10);
       registers[0] = u32(registers[0] ^ value); flags = (flags & 0x400) | commonFlags(registers[0]); pc += 2;
     } else if (offset === 14) {
       const left = registers[6]; registers[6] = u32(left + 4); flags = arithmeticFlags(left, 4, registers[6], flags, false, false); pc += 3;
@@ -164,7 +164,7 @@ function execute(before, budget, context) {
     retired++;
   }
   registers.forEach((value, index) => put(after, 16 + index * 4, value)); put(after, 48, pc); put(after, 52, flags);
-  exitPacket(after, reason, retired, 2);
+  exitPacket(after, reason, retired, reason === 23 ? 12 : 6);
   [detail, address, access, length].forEach((value, index) => put(after, 80 + index * 4, value));
   return {after, retired, status_or: 0};
 }
@@ -293,10 +293,10 @@ function moduleInterface(bytes, target, key, unit) {
     if (id === 0) continue;
     assert(id > previous, 'Wasm section order/duplicate');
     previous = id;
-    assert([1, 2, 3, 7, 10].includes(id), 'unexpected generated Wasm section');
+    assert([1, 2, 3, 6, 7, 10].includes(id), 'unexpected generated Wasm section');
     sections.set(id, body);
   }
-  assert.deepEqual([...sections.keys()], [1, 2, 3, 7, 10], 'complete module sections');
+  assert.deepEqual([...sections.keys()], target === 'dispatcher' ? [1, 2, 3, 7, 10] : [1, 2, 3, 6, 7, 10], 'complete module sections');
   const typesReader = new Reader(sections.get(1));
   const types = typesReader.vector(r => { assert.equal(r.byte(), 0x60); return [r.vector(q => q.byte()), r.vector(q => q.byte())]; });
   typesReader.end();
@@ -313,18 +313,26 @@ function moduleInterface(bytes, target, key, unit) {
   const dispatcher = target === 'dispatcher';
   assert(dispatcher || target === 'child', 'module target');
   const i32 = count => [Array(count).fill(0x7f), [0x7f]];
-  assert.deepEqual(types, dispatcher ? [i32(4), i32(5), i32(3)] : [i32(4), i32(7), i32(1)], 'exact generated types');
+  assert.deepEqual(types, dispatcher ? [i32(4), i32(5), i32(3)] : [i32(4), [Array(7).fill(0x7f), [0x7e]], i32(1), i32(6), [[0x7e, ...Array(11).fill(0x7f)], [0x7f]]], 'exact generated types');
   const memory = {module: 'env', name: 'memory', kind: 2, flags: 0, minimum: 1};
-  assert.deepEqual(imports, dispatcher ? [memory, {module: 'env', name: 'table', kind: 1, element: 0x70, flags: 1, minimum: 8, maximum: 8}, {module: 'ring3', name: 'guard_dispatch_entry', kind: 0, type: 1}, {module: 'ring3', name: 'find_installed_resident', kind: 0, type: 2}] : [memory, {module: 'ring3', name: 'guard_resident', kind: 0, type: 1}, {module: 'ring3', name: 'read32', kind: 0, type: 2}], 'real guard/finder-only imports');
+  assert.deepEqual(imports, dispatcher ? [memory, {module: 'env', name: 'table', kind: 1, element: 0x70, flags: 1, minimum: 8, maximum: 8}, {module: 'ring3', name: 'guard_dispatch_entry', kind: 0, type: 1}, {module: 'ring3', name: 'find_installed_resident', kind: 0, type: 2}] : [memory, {module: 'ring3', name: 'guard_detect_resident', kind: 0, type: 1}, {module: 'ring3', name: 'cpu_read32', kind: 0, type: 2}, {module: 'ring3', name: 'finish_exception_detection', kind: 0, type: 4}], 'closed real guard/helper imports');
   const functionsReader = new Reader(sections.get(3));
-  assert.deepEqual(functionsReader.vector(r => r.uint()), [0]); functionsReader.end();
+  assert.deepEqual(functionsReader.vector(r => r.uint()), dispatcher ? [0] : [0, 3]); functionsReader.end();
+  if (!dispatcher) {
+    const globals = new Reader(sections.get(6));
+    assert.equal(globals.uint(), 3);
+    for (const value of [1, 0, 1]) assert.deepEqual(Array.from(globals.take(5)), [0x7f, 0, 0x41, value, 0x0b], 'bound flat CS interpretation');
+    globals.end();
+  }
   const exportsReader = new Reader(sections.get(7));
   const exports = exportsReader.vector(r => ({name: r.name(), kind: r.byte(), index: r.uint()}));
-  assert.deepEqual(exports, [{name: 'run', kind: 0, index: 2}]); exportsReader.end();
+  assert.deepEqual(exports, [{name: 'run', kind: 0, index: dispatcher ? 2 : 3}]); exportsReader.end();
   const bodiesReader = new Reader(sections.get(10));
-  assert.equal(bodiesReader.uint(), 1);
-  const body = new Reader(bodiesReader.take(bodiesReader.uint())); bodiesReader.end();
-  assert.deepEqual(body.vector(r => [r.uint(), r.byte()]), dispatcher ? [[5, 0x7f]] : [[16, 0x7f], [1, 0x7e], [6, 0x7f]], 'fixed generated locals');
+  assert.equal(bodiesReader.uint(), dispatcher ? 1 : 2);
+  const body = new Reader(bodiesReader.take(bodiesReader.uint()));
+  if (!dispatcher) assert(bodiesReader.take(bodiesReader.uint()).length > 0, 'internal segment checker');
+  bodiesReader.end();
+  assert.deepEqual(body.vector(r => [r.uint(), r.byte()]), dispatcher ? [[6, 0x7f]] : [[16, 0x7f], [1, 0x7e], [10, 0x7f], [1, 0x7f], [1, 0x7e], [6, 0x7f]], 'fixed generated locals');
   const bound = dispatcher ? key : [...key, unit.low, unit.high];
   const prefix = Buffer.from(bound.flatMap(value => [0x41, ...lebSigned(value)]).concat([0x20, 0, 0x20, 1, 0x20, 3, 0x10, 0]));
   assert(body.take(prefix.length).equals(prefix), 'module authority/identity guard prefix');
@@ -453,17 +461,21 @@ function references(snapshot, context, memoryBytes) {
 
 function sourcePins(result, campaign) {
   const expected = Object.keys(campaign.source_pins).sort().map(path => ({path, ...campaign.source_pins[path]}));
-  assert.equal(expected.length, 98, 'fixed product, fixture and provenance source census');
+  if (!result.authority) assert.equal(expected.length, 98, 'fixed historical source census');
   assert.deepEqual(result.source_pins_before, expected); assert.deepEqual(result.source_pins_after, expected);
   const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../../../../../../..');
   for (const row of expected) {
-    const bytes = readFileSync(safeFile(root, row.path)); assert.equal(bytes.length, row.bytes); assert.equal(hash(bytes), row.sha256, `frozen source ${row.path}`);
+    const product = row.path.startsWith('engine/src/') || ['Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml'].includes(row.path);
+    const base = product && result.authority ? result.authority.source_root : root;
+    const bytes = readFileSync(safeFile(base, row.path)); assert.equal(bytes.length, row.bytes); assert.equal(hash(bytes), row.sha256, `frozen source ${row.path}`);
   }
   for (const name of ['checks/plan.mjs', 'runtime/run.mjs', 'checks/check.mjs', 'benchmarks/statistics.mjs', 'measure.py']) {
     assert(expected.some(row => row.path === `engine/tests/cpu/dbt/lowering/fixtures/checksum-attribution/${name}`), 'complete fixture source authority');
   }
-  for (const path of ['Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml', 'engine/tests/programs/sort/support/pe32.rs',
-    'engine/tests/programs/sort/fixtures/p2-pe32-sort/runtime/oracle.mjs', ...['checks/plan.mjs', 'runtime/run.mjs', 'checks/check.mjs', 'benchmarks/statistics.mjs', 'measure.py'].map(name => `engine/tests/process/resident/fixtures/resident-phases/${name}`)]) {
+  for (const path of ['Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml',
+    'engine/tests/support/wasm/arena.mjs', 'engine/tests/programs/sort/fixtures/p2-pe32-sort/runtime/oracle.mjs',
+    ...(result.authority ? ['engine/src/cpu/dbt/wasm/emitter.rs', 'engine/src/process/memory/paging/port.rs']
+      : ['engine/tests/programs/sort/support/pe32.rs', ...['checks/plan.mjs', 'runtime/run.mjs', 'checks/check.mjs', 'benchmarks/statistics.mjs', 'measure.py'].map(name => `engine/tests/process/resident/fixtures/resident-phases/${name}`)])]) {
     assert(expected.some(row => row.path === path), 'product/build/dependency source authority');
   }
 }
@@ -503,11 +515,23 @@ function timingRecords(result, selected) {
 
 export function checkCapsule(directory, campaign) {
   directory = resolve(directory);
-  campaign ??= jsonFile(dirname(directory), 'campaign.json');
   const result = jsonFile(directory, 'result.json');
+  if (result.authority) {
+    assert.equal(campaign, undefined, 'selected artifact does not use a historical campaign');
+    assert.deepEqual(Object.keys(result.authority).sort(), ['engine_path', 'kind', 'source_root']);
+    assert.equal(result.authority.kind, 'selected-artifact');
+    assert.match(process.env.RING3_ENGINE_SHA256 ?? '', /^[a-f0-9]{64}$/, 'independently supplied selected artifact SHA');
+    const engine = readFileSync(result.authority.engine_path);
+    assert.deepEqual(result.engine, {bytes: engine.length, sha256: hash(engine)}, 'selected artifact bytes');
+    assert.equal(result.engine.sha256, process.env.RING3_ENGINE_SHA256, 'selected artifact authority');
+    campaign = {engine: result.engine, source_pins: Object.fromEntries(result.source_pins_before.map(({path, ...pin}) => [path, pin]))};
+  } else {
+    campaign ??= jsonFile(dirname(directory), 'campaign.json');
+    assert.deepEqual(result.engine, ENGINE);
+    assert.deepEqual({bytes: campaign.engine.bytes, sha256: campaign.engine.sha256}, ENGINE);
+  }
   assert.equal(result.schema_version, 1); assert.equal(result.status, 'complete'); assert.equal(result.failure, null);
   integer(result.process_index, 'process index', 2); assert.equal(result.plan_process, result.process_index);
-  assert.deepEqual(result.engine, ENGINE); assert.deepEqual({bytes: campaign.engine.bytes, sha256: campaign.engine.sha256}, ENGINE);
   sourcePins(result, campaign);
   assert.equal(result.plan.file, 'plan.json');
   const planBytes = readFileSync(safeFile(directory, result.plan.file)); assert.equal(hash(planBytes), result.plan.sha256);
@@ -521,8 +545,8 @@ export function checkCapsule(directory, campaign) {
   const exportNames = result.first_use.exports.map(row => row.name);
   assert.equal(new Set(exportNames).size, exportNames.length, 'unique engine exports');
   for (const name of ['open', 'close', 'arena_ptr', 'map', 'upload', 'protect', 'compile_resident',
-    'dispatcher_module', 'acknowledge_resident_installation', 'guard_resident', 'guard_dispatch_entry',
-    'find_installed_resident', 'read32', 'write8', 'retire_stale_resident']) {
+    'dispatcher_module', 'acknowledge_resident_installation', 'guard_detect_resident', 'guard_dispatch_entry',
+    'find_installed_resident', 'cpu_read32', 'finish_exception_detection', 'read32', 'write8', 'retire_stale_resident']) {
     assert(result.first_use.exports.some(row => row.name === `ring3_abi_v1_${name}` && row.kind === 'function'), `real engine export ${name}`);
   }
   assert(result.first_use.exports.some(row => row.name === 'memory' && row.kind === 'memory'));
@@ -635,7 +659,7 @@ export function checkCapsule(directory, campaign) {
           assert.equal(event.data_file, action.file); assert.equal(event.data_sha256, row.sha256);
           helper(wanted, [0, word(page.bytes, 4092), 0, 0, 0, 0]); counts.diagnostic_read32_calls += 1024; counts.data_events++;
         } else assert.fail(`unmodelled action ${action.kind}`);
-        sameBytes(after, wanted, `full 4612-byte arena ${context.id}/${action.id}`); validateState(after); validateFp(after); context.last = after;
+        sameBytes(after, wanted, `full ${SIZE}-byte arena ${context.id}/${action.id}`); validateState(after); validateFp(after); context.last = after;
         if (['call', 'guard', 'data', 'module', 'table'].includes(action.kind)
             || action.kind === 'host' && action.name === 'retire_stale_resident') references(event.reference_snapshot, context, event.memory_bytes_after);
       }
@@ -768,7 +792,7 @@ export function selfTest() {
   const expected = Buffer.from(initial);
   [0x7770f1a0, 0, 0x33445566, 0x44556677, 0x55667788, 0x66778899, 0x3400, DATA, 0x1014, 0x46]
     .forEach((value, index) => put(expected, 16 + index * 4, value));
-  exitPacket(expected, 1, 1283, 2); helper(expected, [0, 0xffde566a, 0, 0, 0, 0]);
+  exitPacket(expected, 1, 1283, 6); helper(expected, [0, 0xffde566a, 0, 0, 0, 4], 10);
   sameBytes(direct.after, expected, 'literal full-budget output'); assert.equal(direct.retired, 1283);
   const dispatch = callModel(initial, {channel: 'dispatch', budget: BUDGET}, context), installed = Buffer.from(expected);
   installation(installed, context.unit); sameBytes(dispatch.after, installed, 'literal dispatch publication');
@@ -780,15 +804,15 @@ export function selfTest() {
   for (const [index, budget] of [3, 1, 1, 3].entries()) {
     const result = callModel(state, {channel: 'direct', budget}, context), wanted = partialStates[index];
     assert.deepEqual([16, 20, 40, 48, 52, 120].map(at => word(result.after, at)), wanted);
-    assert.equal(word(result.after, 60), 0x10002); assert.equal(word(result.after, 76), budget);
+    assert.equal(word(result.after, 60), 0x10006); assert.equal(word(result.after, 76), budget);
     sameBytes(result.after.subarray(FP), initial.subarray(FP), 'partial FP preservation'); state = result.after;
   }
   context.pages.get(DATA).permissions = 0;
   const fault = callModel(initial, {channel: 'dispatch', budget: BUDGET}, context), faultExpected = Buffer.from(initial);
   [0, 256, 0x33445566, 0x44556677, 0x55667788, 0x66778899, DATA, DATA, 0x100c, 0x46]
     .forEach((value, index) => put(faultExpected, 16 + index * 4, value));
-  installation(faultExpected, context.unit); exitPacket(faultExpected, 5, 4, 2);
-  [2, DATA, 1, 4].forEach((value, index) => put(faultExpected, 80 + index * 4, value)); helper(faultExpected, [1, 0, 2, DATA, 1, 4]);
+  installation(faultExpected, context.unit); exitPacket(faultExpected, 23, 4, 12);
+  [5, DATA, 1, 4].forEach((value, index) => put(faultExpected, 80 + index * 4, value)); helper(faultExpected, [9, 0, 5, DATA, 1, 4], 15);
   sameBytes(fault.after, faultExpected, 'literal first-read permission fault'); assert.equal(fault.retired, 4);
   const retry = callModel(fault.after, {channel: 'dispatch', budget: BUDGET}, context), retryExpected = Buffer.from(faultExpected);
   put(retryExpected, 76, 0); sameBytes(retry.after, retryExpected, 'unchanged-state retry retires zero'); assert.equal(retry.retired, 0);

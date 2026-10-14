@@ -1,6 +1,6 @@
 import {createHash} from 'node:crypto';
 import {
-  closeSync, fsyncSync, mkdirSync, openSync, readFileSync, writeFileSync, writeSync,
+  closeSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, writeFileSync, writeSync,
 } from 'node:fs';
 import {loadavg} from 'node:os';
 import {dirname, join, resolve} from 'node:path';
@@ -16,13 +16,37 @@ const expectedHash = process.env.RING3_ENGINE_SHA256;
 const campaignPath = process.env.RING3_CHECKSUM_CAMPAIGN;
 if (process.argv.length !== 5 || !engineArgument || !outputArgument
     || !/^[0-2]$/.test(indexArgument ?? '') || typeof globalThis.gc !== 'function'
-    || !/^[a-f0-9]{64}$/.test(expectedHash ?? '') || !campaignPath) {
+    || !/^[a-f0-9]{64}$/.test(expectedHash ?? '')) {
   throw new Error('usage: RING3_ENGINE_SHA256=<sha256> node --expose-gc run.mjs ENGINE_PATH OUTPUT_DIR PROCESS_INDEX');
 }
 
 const processIndex = Number(indexArgument), enginePath = resolve(engineArgument);
 const outputDir = resolve(outputArgument);
-const campaign = JSON.parse(readFileSync(campaignPath, 'utf8'));
+const sourceRoot = resolve(process.env.RING3_ENGINE_SOURCE_ROOT ?? root);
+const sourcePath = path => join(path.startsWith('engine/src/')
+  || ['Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml'].includes(path) ? sourceRoot : root, path);
+function currentAuthority() {
+  const paths = ['Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml',
+    'engine/tests/support/wasm/arena.mjs',
+    'engine/tests/programs/sort/fixtures/p2-pe32-sort/runtime/oracle.mjs',
+    ...['checks/plan.mjs', 'runtime/run.mjs', 'checks/check.mjs', 'benchmarks/statistics.mjs', 'measure.py']
+      .map(name => `engine/tests/cpu/dbt/lowering/fixtures/checksum-attribution/${name}`)];
+  function sources(directory) {
+    for (const entry of readdirSync(join(sourceRoot, directory), {withFileTypes: true})) {
+      const path = `${directory}/${entry.name}`;
+      if (entry.isDirectory()) sources(path);
+      else if (entry.isFile() && entry.name.endsWith('.rs')) paths.push(path);
+    }
+  }
+  sources('engine/src');
+  const engine = readFileSync(enginePath);
+  return {engine: {bytes: engine.length, sha256: expectedHash},
+    source_pins: Object.fromEntries(paths.sort().map(path => {
+      const bytes = readFileSync(sourcePath(path));
+      return [path, {bytes: bytes.length, sha256: hash(bytes)}];
+    }))};
+}
+const campaign = campaignPath ? JSON.parse(readFileSync(campaignPath, 'utf8')) : currentAuthority();
 const expectedPins = Object.keys(campaign.source_pins).sort()
   .map(path => ({path, ...campaign.source_pins[path]}));
 if (!expectedPins.length || campaign.engine.sha256 !== expectedHash) {
@@ -49,7 +73,7 @@ let manifest = null, engineModule = null, failure = null;
 
 function sourcePins() {
   return expectedPins.map(({path}) => {
-    const bytes = readFileSync(join(root, path));
+    const bytes = readFileSync(sourcePath(path));
     return {path, bytes: bytes.length, sha256: hash(bytes)};
   });
 }
@@ -166,7 +190,8 @@ function copyModule(context, action, event) {
   const module = new WebAssembly.Module(bytes);
   const imports = action.target === 'child'
     ? {env: {memory: context.memory}, ring3: {
-      guard_resident: context.api.guard_resident, read32: context.api.read32,
+      guard_detect_resident: context.api.guard_detect_resident, cpu_read32: context.api.cpu_read32,
+      finish_exception_detection: context.api.finish_exception_detection,
     }}
     : {env: {memory: context.memory, table: context.table}, ring3: {
       guard_dispatch_entry: context.api.guard_dispatch_entry,
@@ -205,14 +230,17 @@ function generatedCall(context, action, event) {
 }
 
 function guardBatch(context, action, event) {
-  const guard = context.api.guard_resident;
+  const guard = context.api.guard_detect_resident;
   const [low, high] = context.spec.key, idLow = context.child.id_low, idHigh = context.child.id_high;
   const state = context.base, exit = state + 56, cancel = state + 96, count = action.count;
   event.channel = 'guard'; event.args = [low, high, idLow, idHigh, state, exit, cancel];
   let index = 0, statusOr = 0;
   const start = now();
   try {
-    for (; index < count; index++) statusOr |= guard(low, high, idLow, idHigh, state, exit, cancel);
+    for (; index < count; index++) {
+      const epoch = guard(low, high, idLow, idHigh, state, exit, cancel);
+      statusOr |= epoch > 0n ? 0 : Number(-epoch) || 9;
+    }
   } finally {
     event.ns = elapsed(start); event.status_or = statusOr >>> 0;
     event.completed_calls = index;
@@ -380,6 +408,7 @@ try {
     schema_version: 1, process_index: processIndex, status: 'recording',
     plan: {file: 'plan.json', sha256: hash(planBytes)}, plan_process: processIndex,
     engine: {bytes: engineBytes.length, sha256: actualHash},
+    ...(!campaignPath ? {authority: {kind: 'selected-artifact', engine_path: enginePath, source_root: sourceRoot}} : {}),
     first_use: {engine_read_ns: readNs, engine_module_ns: moduleNs,
       imports: WebAssembly.Module.imports(engineModule), exports: WebAssembly.Module.exports(engineModule)},
     environment: {executable: process.execPath, exec_argv: process.execArgv, versions: process.versions,

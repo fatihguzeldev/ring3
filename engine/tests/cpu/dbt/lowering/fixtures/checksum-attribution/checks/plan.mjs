@@ -2,10 +2,10 @@ import assert from 'node:assert/strict';
 import {mkdirSync, writeFileSync} from 'node:fs';
 import {resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {initialHex} from '../../../../../../process/resident/fixtures/resident-phases/checks/plan.mjs';
+import {createArena, ARENA_SIZE} from '../../../../../../support/wasm/arena.mjs';
 import {sorted} from '../../../../../../programs/sort/fixtures/p2-pe32-sort/runtime/oracle.mjs';
 
-export const SIZE = 4612;
+export const SIZE = ARENA_SIZE;
 export const CODE = 0x1000;
 export const DATA = 0x3000;
 export const BUDGET = 1283;
@@ -18,6 +18,21 @@ function record(magic, length, fields, version = 1) {
   bytes.writeUInt16LE(1, 6); bytes.writeUInt32LE(length, 8);
   fields.forEach((value, index) => bytes.writeUInt32LE(value >>> 0, 16 + index * 4));
   return bytes;
+}
+
+function initialHex() {
+  const bytes = Buffer.from(Array.from({length: SIZE}, (_, index) => (index * 37 + 19) & 255));
+  bytes.set(createArena().subarray(4364), 4364);
+  const fp = record('R3FP', 128, []);
+  for (const [offset, value] of [[16, 0x27f], [18, 0x2840], [20, 0xaaaa], [22, 0x345], [32, 0x33], [34, 0x2b]]) fp.writeUInt16LE(value, offset);
+  fp.writeUInt32LE(0x12345678, 24); fp.writeUInt32LE(0x9abcdef0, 28);
+  for (let index = 40; index < 120; index++) fp[index] = (index * 29 + 7) & 255;
+  bytes.set(fp, 4236);
+  bytes.set(Buffer.from(seedHex(), 'hex'));
+  [0xfffff001, 0x12342222, 0x23453333, 0x34564444, 0x45675555, 0x56786666, 0x67897777, 0x789a8888]
+    .forEach((value, index) => bytes.writeUInt32LE(value, 16 + index * 4));
+  bytes.writeUInt32LE(0xcd7, 52);
+  return bytes.toString('hex');
 }
 
 export function seedHex() {

@@ -3,6 +3,7 @@ import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
 import {dirname, isAbsolute, join, relative, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {checkCapsule} from '../checks/check.mjs';
 
 const KINDS = ['direct', 'dispatch', 'guard'];
 const BLOCKS = [1, 8];
@@ -217,6 +218,24 @@ export function readCampaign(directory) {
         'no regression, optimization or representative game performance claim']}};
 }
 
+export function readProcess(directory) {
+  directory = resolve(directory);
+  const semantic = checkCapsule(directory);
+  const resultBytes = readFileSync(join(directory, 'result.json')), result = json(resultBytes);
+  const journalBytes = physical(directory, result.journal);
+  const lines = journalBytes.toString('utf8').split('\n');
+  assert.equal(lines.pop(), '', 'journal retains its final complete line');
+  const process = summarizeProcess(result, lines.map(line => JSON.parse(line)));
+  return {schema_version: 1, status: 'complete', engine: result.engine, process,
+    provenance: {result: pin(resultBytes), semantic_check: semantic},
+    policy: {rounds: ROUNDS, quantile: 'linear interpolation at (n-1)*p', pooling: false,
+      subtraction: false, comparisons: false,
+      limits: ['one selected artifact and one process only', 'authored checksum kernel only',
+        'GC/JIT/host scheduling/frequency and per-call clock overhead',
+        'guard export includes JS BigInt status handling; not pure Wasm cost',
+        'no regression, optimization or representative game performance claim']}};
+}
+
 export function markdown(summary) {
   const lines = ['# Checksum block attribution', '',
     'All three processes are complete and bound to the independent semantic receipt. Each execution sample contains one individually observed 1,283-instruction checksum call.', '',
@@ -284,10 +303,14 @@ function selfTest() {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  assert.equal(process.argv.length, 3, 'usage: statistics.mjs OUTPUT_CAMPAIGN_DIR or --self-test');
-  if (process.argv[2] === '--self-test') {
+  if (process.argv[2] === '--process') {
+    assert.equal(process.argv.length, 4, 'usage: statistics.mjs --process OUTPUT_PROCESS_DIR');
+    console.log(JSON.stringify(readProcess(process.argv[3]), null, 2));
+  } else if (process.argv[2] === '--self-test') {
+    assert.equal(process.argv.length, 3);
     selfTest(); console.log('checksum statistics self-test: PASS');
   } else {
+    assert.equal(process.argv.length, 3, 'usage: statistics.mjs OUTPUT_CAMPAIGN_DIR or --self-test');
     const output = resolve(process.argv[2]), summary = readCampaign(output);
     writeFileSync(join(output, 'statistics.json'), JSON.stringify(summary, null, 2) + '\n', {flag: 'wx'});
     writeFileSync(join(output, 'statistics.md'), markdown(summary), {flag: 'wx'});
