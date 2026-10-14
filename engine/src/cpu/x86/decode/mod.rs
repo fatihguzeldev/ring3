@@ -1,3 +1,4 @@
+mod aliases;
 mod atomic;
 pub(crate) mod avx;
 mod bit_manipulation;

@@ -22,6 +22,17 @@ pub(super) fn lower(
     bytes: &[u8],
     bank: Option<crate::cpu::x86::UserSystemRegisterBank32>,
 ) -> Result<Operation, DecodeError> {
+    let canonical;
+    let instruction = if let Some(code) = super::aliases::canonical_code(instruction.code()) {
+        canonical = {
+            let mut value = *instruction;
+            value.set_code(code);
+            value
+        };
+        &canonical
+    } else {
+        instruction
+    };
     if let Some(operation) = super::avx::lower(instruction, bytes) {
         let operation = operation?;
         return if crate::cpu::x86::capabilities::AVX_ENABLED

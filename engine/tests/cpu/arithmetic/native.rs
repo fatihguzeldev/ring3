@@ -63,3 +63,6 @@ mod cpu_word_sbb;
 
 #[path = "binary/register/subtract/word/native.rs"]
 mod cpu_word_sub;
+
+#[path = "aliases/native.rs"]
+mod cpu_legacy_aliases;

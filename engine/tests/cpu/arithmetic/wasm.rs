@@ -55,3 +55,6 @@ mod cpu_word_sbb_wasm;
 
 #[path = "binary/register/subtract/word/wasm.rs"]
 mod cpu_word_sub_wasm;
+
+#[path = "aliases/wasm.rs"]
+mod cpu_legacy_aliases;
