@@ -51,6 +51,8 @@ pub struct EngineInstance {
     pub(in crate::process) system_register_bank: Option<crate::cpu::x86::UserSystemRegisterBank32>,
     pub(in crate::process) interrupt_descriptors:
         Option<crate::cpu::x86::InterruptDescriptorTable32>,
+    pub(in crate::process) task_return_sources:
+        Option<crate::process::cpu::tasks::TaskReturnSources>,
     pub(in crate::process) image: Option<crate::loader::ImageMetadata32>,
     pub(in crate::process) image_input: Option<crate::process::loading::input::ImageInput>,
     pub(in crate::process) image_started: bool,
@@ -87,6 +89,7 @@ impl EngineInstance {
             virtual_tsc: 0,
             system_register_bank: None,
             interrupt_descriptors: None,
+            task_return_sources: None,
             image: None,
             image_input: None,
             image_started: false,
@@ -122,6 +125,7 @@ impl EngineInstance {
         self.image_input = None;
         self.system_register_bank = None;
         self.interrupt_descriptors = None;
+        self.task_return_sources = None;
         self.pending_call = None;
         self.callback = None;
         self.artifact = None;

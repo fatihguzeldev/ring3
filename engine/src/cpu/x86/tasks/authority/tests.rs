@@ -105,3 +105,21 @@ fn cached_current_limit_precedes_backlink_bytes_and_target_geometry_precedes_mis
         );
     }
 }
+
+#[test]
+fn configured_gdt_view_preserves_lossless_records_and_missing_versus_explicit_zero() {
+    let mut records = SegmentDescriptorTable::empty();
+    let explicit_zero = SegmentDescriptorRecord::from_words(0, 0);
+    records.configure_raw(0x48, explicit_zero).unwrap();
+    {
+        let table = TaskDescriptorTable::configured(0x57, &records);
+        assert_eq!(table.record(0x4b), Ok(explicit_zero));
+        assert_eq!(table.record(0x53), Err(TaskReturnError::MissingAuthority));
+    }
+    let busy = SegmentDescriptorRecord::from_words(0x60000067, 0x8b00);
+    records.configure_raw(0x48, busy).unwrap();
+    assert_eq!(
+        TaskDescriptorTable::configured(0x4f, &records).record(0x49),
+        Ok(busy)
+    );
+}

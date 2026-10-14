@@ -1,11 +1,13 @@
 //! protected-mode task-return foundation. admission is not a task-switch commit.
 
 mod authority;
+mod outcome;
 mod record;
 mod register;
 mod returning;
 
 pub use authority::{TaskAuthority, TaskDescriptorTable};
+pub use outcome::TaskReturnAdmission;
 pub use record::{
     TaskFormat, TaskRecord, TaskSave, TaskState, TaskState16, TaskState32, encode_return,
 };

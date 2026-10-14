@@ -1,16 +1,32 @@
 use super::{TaskRegister, TaskReturnError};
-use crate::cpu::x86::SegmentDescriptorRecord;
+use crate::cpu::x86::{SegmentDescriptorRecord, SegmentDescriptorTable};
 
 /// sparse supplied gdt bytes: none is unknown, some(zero) is an explicit invalid descriptor.
 #[derive(Debug)]
 pub struct TaskDescriptorTable<'a> {
     limit: u16,
-    records: &'a [Option<SegmentDescriptorRecord>],
+    records: DescriptorSource<'a>,
+}
+
+#[derive(Debug)]
+enum DescriptorSource<'a> {
+    Supplied(&'a [Option<SegmentDescriptorRecord>]),
+    Configured(&'a SegmentDescriptorTable),
 }
 
 impl<'a> TaskDescriptorTable<'a> {
     pub const fn new(limit: u16, records: &'a [Option<SegmentDescriptorRecord>]) -> Self {
-        Self { limit, records }
+        Self {
+            limit,
+            records: DescriptorSource::Supplied(records),
+        }
+    }
+
+    pub(crate) const fn configured(limit: u16, records: &'a SegmentDescriptorTable) -> Self {
+        Self {
+            limit,
+            records: DescriptorSource::Configured(records),
+        }
     }
 
     pub const fn limit(&self) -> u16 {
@@ -18,11 +34,13 @@ impl<'a> TaskDescriptorTable<'a> {
     }
 
     pub(super) fn record(&self, selector: u16) -> Result<SegmentDescriptorRecord, TaskReturnError> {
-        self.records
-            .get(usize::from(selector >> 3))
-            .copied()
-            .flatten()
-            .ok_or(TaskReturnError::MissingAuthority)
+        match &self.records {
+            DescriptorSource::Supplied(records) => {
+                records.get(usize::from(selector >> 3)).copied().flatten()
+            }
+            DescriptorSource::Configured(records) => records.raw_descriptor(selector).copied(),
+        }
+        .ok_or(TaskReturnError::MissingAuthority)
     }
 }
 
