@@ -28,3 +28,5 @@ pub enum AbiError {
     CallFrame,
     CallbackFrame,
 }
+
+pub mod interrupt;

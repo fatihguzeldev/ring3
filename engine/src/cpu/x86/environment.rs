@@ -20,6 +20,7 @@ pub(crate) struct UserModeEnvironment {
     debug_extensions_enabled: bool,
     protection_keys_enabled: bool,
     control_flow_enforcement_enabled: bool,
+    alignment_mask_enabled: bool,
 }
 
 pub(crate) const USER_MODE_ENVIRONMENT: UserModeEnvironment = UserModeEnvironment {
@@ -34,9 +35,14 @@ pub(crate) const USER_MODE_ENVIRONMENT: UserModeEnvironment = UserModeEnvironmen
     debug_extensions_enabled: false,
     protection_keys_enabled: false,
     control_flow_enforcement_enabled: false,
+    alignment_mask_enabled: false,
 };
 
 impl UserModeEnvironment {
+    pub(crate) const fn alignment_mask_enabled(self) -> bool {
+        self.alignment_mask_enabled
+    }
+
     pub(crate) const fn user_mode_instruction_prevention(self) -> bool {
         self.user_mode_instruction_prevention
     }
@@ -104,6 +110,7 @@ mod tests {
         assert!(!USER_MODE_ENVIRONMENT.protected_virtual_interrupts());
         assert!(!USER_MODE_ENVIRONMENT.debug_general_detect());
         assert!(!USER_MODE_ENVIRONMENT.debug_extensions_enabled());
+        assert!(!USER_MODE_ENVIRONMENT.alignment_mask_enabled());
     }
 
     #[test]

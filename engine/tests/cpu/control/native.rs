@@ -105,3 +105,6 @@ mod cpu_scalar_availability;
 
 #[path = "interrupt/configuration/native.rs"]
 mod interrupt_configuration;
+
+#[path = "interrupt/dispatch/native.rs"]
+mod cpu_interrupt_dispatch;
