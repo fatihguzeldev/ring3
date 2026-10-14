@@ -94,6 +94,7 @@ pub(super) fn status(error: HostError) -> u32 {
     match error {
         HostError::Closed => 5,
         HostError::ProcessExited => 21,
+        HostError::CpuShutdown => 22,
         HostError::InvalidRequest => 7,
         HostError::InvalidArtifact => 3,
         HostError::CodeInvalidated => 4,

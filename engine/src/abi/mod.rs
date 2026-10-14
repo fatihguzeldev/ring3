@@ -5,7 +5,7 @@ pub mod cpu_helper;
 pub mod exception;
 pub mod far;
 #[forbid(unsafe_code)]
-mod header;
+pub(crate) mod header;
 pub mod memory_helper;
 pub mod resident_callback;
 pub mod tasks;

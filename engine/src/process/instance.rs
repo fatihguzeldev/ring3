@@ -16,6 +16,7 @@ use crate::{
 pub enum HostError {
     Closed,
     ProcessExited,
+    CpuShutdown,
     InvalidRequest,
     InvalidArtifact,
     CodeInvalidated,
@@ -48,6 +49,11 @@ pub struct EngineInstance {
     pub(in crate::process) callback: Option<SuspendedCallback>,
     pub(in crate::process) call_token: u32,
     pub(in crate::process) virtual_tsc: u64,
+    #[cfg(any(target_arch = "wasm32", test))]
+    pub(in crate::process) detection_epoch: u64,
+    #[cfg(any(target_arch = "wasm32", test))]
+    pub(in crate::process) exception_detection:
+        Option<Box<[crate::process::cpu::interrupts::detection::DetectionSlot32; 1]>>,
     pub(in crate::process) system_register_bank: Option<crate::cpu::x86::UserSystemRegisterBank32>,
     pub(in crate::process) interrupt_descriptors:
         Option<crate::cpu::x86::InterruptDescriptorTable32>,
@@ -87,6 +93,10 @@ impl EngineInstance {
             callback: None,
             call_token: 0,
             virtual_tsc: 0,
+            #[cfg(any(target_arch = "wasm32", test))]
+            detection_epoch: 0,
+            #[cfg(any(target_arch = "wasm32", test))]
+            exception_detection: None,
             system_register_bank: None,
             interrupt_descriptors: None,
             task_return_sources: None,
@@ -126,6 +136,10 @@ impl EngineInstance {
         self.system_register_bank = None;
         self.interrupt_descriptors = None;
         self.task_return_sources = None;
+        #[cfg(any(target_arch = "wasm32", test))]
+        {
+            self.exception_detection = None;
+        }
         self.pending_call = None;
         self.callback = None;
         self.artifact = None;

@@ -314,6 +314,21 @@ impl ResidentRegistry {
         self.get(memory, UnitId(id))
     }
 
+    /// identity-only view for a consumed execution lease; this is not an execution guard.
+    #[cfg(any(target_arch = "wasm32", test))]
+    pub(crate) fn get_retained_raw(
+        &self,
+        memory: &AddressSpace,
+        id: u64,
+    ) -> Result<&CompiledRegion, RegistryError> {
+        self.check_memory(memory)?;
+        self.entries
+            .iter()
+            .find(|unit| unit.id.get() == id)
+            .map(|unit| &unit.region)
+            .ok_or(RegistryError::InvalidUnit)
+    }
+
     pub fn get(&self, memory: &AddressSpace, id: UnitId) -> Result<&CompiledRegion, RegistryError> {
         self.check_memory(memory)?;
         let unit = self

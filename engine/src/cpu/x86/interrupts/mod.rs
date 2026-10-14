@@ -19,6 +19,8 @@ pub use escalation::{
 };
 pub(crate) use frame::EventFrame32;
 pub use frame::FrameInput32;
-pub use outcome::{EnteredEvent32, EventAuthorityKind32, EventDeliveryResult32};
+pub use outcome::{
+    DetectedEntryResult32, EnteredEvent32, EventAuthorityKind32, EventDeliveryResult32,
+};
 
 pub(crate) use gates::secondary_error as event_secondary_error;

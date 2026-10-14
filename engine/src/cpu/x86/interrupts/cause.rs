@@ -47,11 +47,13 @@ pub enum DebugCause32 {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ExceptionCause32 {
     DivideError,
+    DoubleFault,
     Debug(DebugCause32),
     BreakpointInt3,
     OverflowInto,
     BoundRange,
     InvalidOpcode,
+    InvalidTss(SelectorErrorCode32),
     SegmentNotPresent(SelectorErrorCode32),
     StackSegment(SelectorErrorCode32),
     GeneralProtection(SelectorErrorCode32),
@@ -68,17 +70,20 @@ pub enum EventOrigin32 {
 pub enum ExceptionClass32 {
     Fault,
     Trap,
+    Abort,
 }
 
 impl ExceptionCause32 {
     pub const fn vector(self) -> u8 {
         match self {
             Self::DivideError => 0,
+            Self::DoubleFault => 8,
             Self::Debug(_) => 1,
             Self::BreakpointInt3 => 3,
             Self::OverflowInto => 4,
             Self::BoundRange => 5,
             Self::InvalidOpcode => 6,
+            Self::InvalidTss(_) => 10,
             Self::SegmentNotPresent(_) => 11,
             Self::StackSegment(_) => 12,
             Self::GeneralProtection(_) => 13,
@@ -89,6 +94,7 @@ impl ExceptionCause32 {
     }
     pub const fn class(self) -> ExceptionClass32 {
         match self {
+            Self::DoubleFault => ExceptionClass32::Abort,
             Self::BreakpointInt3 | Self::OverflowInto => ExceptionClass32::Trap,
             Self::Debug(
                 DebugCause32::InstructionBreakpointFault | DebugCause32::GeneralDetectFault,
@@ -99,7 +105,9 @@ impl ExceptionCause32 {
     }
     pub const fn error_code(self) -> Option<u32> {
         match self {
-            Self::SegmentNotPresent(code)
+            Self::DoubleFault => Some(0),
+            Self::InvalidTss(code)
+            | Self::SegmentNotPresent(code)
             | Self::StackSegment(code)
             | Self::GeneralProtection(code) => Some(code.get()),
             Self::PageFault(fault) => Some(fault.error_code()),
@@ -108,7 +116,9 @@ impl ExceptionCause32 {
     }
     pub const fn escalation_class(self) -> EscalationClass32 {
         match self {
+            Self::DoubleFault => EscalationClass32::DoubleFault,
             Self::DivideError
+            | Self::InvalidTss(_)
             | Self::SegmentNotPresent(_)
             | Self::StackSegment(_)
             | Self::GeneralProtection(_) => EscalationClass32::Contributory,
@@ -150,6 +160,8 @@ impl EventOrigin32 {
     }
     pub const fn saved_flags(self, flags: u32) -> u32 {
         match self {
+            // selected diagnostic abort image; df does not inherit ordinary fault rf forcing.
+            Self::Exception(ExceptionCause32::DoubleFault) => flags,
             Self::SoftwareInt { .. }
             | Self::Exception(
                 ExceptionCause32::BreakpointInt3

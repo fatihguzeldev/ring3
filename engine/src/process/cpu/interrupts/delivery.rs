@@ -18,6 +18,27 @@ use crate::{
     process::{EngineInstance, HostError},
 };
 
+#[cfg(any(target_arch = "wasm32", test))]
+use super::detection::ConsumedDetection32;
+#[cfg(any(target_arch = "wasm32", test))]
+use crate::process::calls::call::PendingOwner;
+
+#[derive(Clone, Copy)]
+enum SourceMaterial32 {
+    Current(Option<u64>),
+    #[cfg(any(target_arch = "wasm32", test))]
+    Detected(PendingOwner),
+}
+impl SourceMaterial32 {
+    fn is_detected(self) -> bool {
+        match self {
+            Self::Current(_) => false,
+            #[cfg(any(target_arch = "wasm32", test))]
+            Self::Detected(_) => true,
+        }
+    }
+}
+
 pub(super) struct PreparedEventResult32 {
     pub(super) result: EventDeliveryResult32,
     pub(super) packet: [u8; HELPER_SIZE],
@@ -51,13 +72,24 @@ impl EngineInstance {
         origin: EventOrigin32,
         input: FrameInput32,
     ) -> Result<EventDeliveryResult32, HostError> {
-        let prepared = self.attempt_exception_entry(resident, origin, input)?;
+        let prepared =
+            self.attempt_exception_entry(SourceMaterial32::Current(resident), origin, input)?;
         Ok(self.publish_prepared_exception(prepared))
+    }
+
+    #[cfg(any(target_arch = "wasm32", test))]
+    pub(super) fn attempt_detected_exception(
+        &mut self,
+        record: &ConsumedDetection32,
+        origin: EventOrigin32,
+        input: FrameInput32,
+    ) -> Result<PreparedEventResult32, HostError> {
+        self.attempt_exception_entry(SourceMaterial32::Detected(record.owner()), origin, input)
     }
 
     fn attempt_exception_entry(
         &mut self,
-        resident: Option<u64>,
+        source: SourceMaterial32,
         origin: EventOrigin32,
         input: FrameInput32,
     ) -> Result<PreparedEventResult32, HostError> {
@@ -182,15 +214,31 @@ impl EngineInstance {
             Self::prepare_event_result(origin, info, EventDeliveryResult32::Entered(entered))?;
         // retain physical material identity without consulting the new cs interpretation after commit.
         let memory = self.memory.as_ref().ok_or(HostError::Closed)?;
-        let region = match resident {
-            Some(id) => self
+        let region = match source {
+            SourceMaterial32::Current(Some(id)) => self
                 .resident
                 .as_ref()
                 .ok_or(HostError::InvalidArtifact)?
                 .get_raw(memory, id)
                 .map_err(HostError::Resident)?,
-            None => self.artifact.as_ref().ok_or(HostError::InvalidArtifact)?,
+            #[cfg(any(target_arch = "wasm32", test))]
+            SourceMaterial32::Detected(PendingOwner::Resident(id))
+            | SourceMaterial32::Detected(PendingOwner::ResidentCallback { unit_id: id, .. }) => {
+                self.resident
+                    .as_ref()
+                    .ok_or(HostError::InvalidArtifact)?
+                    .get_retained_raw(memory, id)
+                    .map_err(HostError::Resident)?
+            }
+            SourceMaterial32::Current(None) => {
+                self.artifact.as_ref().ok_or(HostError::InvalidArtifact)?
+            }
+            #[cfg(any(target_arch = "wasm32", test))]
+            SourceMaterial32::Detected(PendingOwner::Replacement(_)) => {
+                self.artifact.as_ref().ok_or(HostError::InvalidArtifact)?
+            }
         };
+        let already_invalidated = source.is_detected() && region.wasm_bytes(memory).is_err();
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
         let version = memory.code_validation_version();
         if let Err(error) = memory.cpu_write_stack(
@@ -207,8 +255,8 @@ impl EngineInstance {
             };
             return Self::prepare_event_result(origin, info, result);
         }
-        entered.code_invalidated =
-            version != memory.code_validation_version() && region.wasm_bytes(memory).is_err();
+        entered.code_invalidated = already_invalidated
+            || (version != memory.code_validation_version() && region.wasm_bytes(memory).is_err());
         // no fallible encoding or host reentry separates frame, code-cache and packet publication.
         self.publish_segment_context(&segments, &bases);
         self.segment_descriptors

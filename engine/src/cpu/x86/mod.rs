@@ -24,11 +24,11 @@ pub use control::{
 };
 pub(crate) use environment::USER_MODE_ENVIRONMENT;
 pub use interrupts::{
-    DebugCause32, EnteredEvent32, EscalationClass32, EscalationDecision32, EventAuthorityKind32,
-    EventDeliveryResult32, EventOrigin32, ExceptionCause32, ExceptionClass32, FrameInput32,
-    InterruptDescriptorTable32, InvalidPageFault32, LegacyPageViolation32, PageFaultProfile32,
-    PagingAccess32, PagingDomain32, SecondaryClass32, SelectorErrorCode32, TrapPoint32,
-    VerifiedPageFault32, escalate_exception,
+    DebugCause32, DetectedEntryResult32, EnteredEvent32, EscalationClass32, EscalationDecision32,
+    EventAuthorityKind32, EventDeliveryResult32, EventOrigin32, ExceptionCause32, ExceptionClass32,
+    FrameInput32, InterruptDescriptorTable32, InvalidPageFault32, LegacyPageViolation32,
+    PageFaultProfile32, PagingAccess32, PagingDomain32, SecondaryClass32, SelectorErrorCode32,
+    TrapPoint32, VerifiedPageFault32, escalate_exception,
 };
 pub(crate) use interrupts::{EventFrame32, event_secondary_error};
 pub use segments::{
