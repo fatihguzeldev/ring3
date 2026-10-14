@@ -9,6 +9,9 @@ use crate::{
     memory::{Access, FaultReason},
 };
 
+mod request;
+pub use request::{EVENT_REQUEST_SIZE, EventRequest32, decode_event_request};
+
 pub const EXCEPTION_HELPER_VERSION: u16 = 12;
 
 pub fn encode_exception_result(

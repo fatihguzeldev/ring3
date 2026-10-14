@@ -1,5 +1,7 @@
 export_process_calls! {
     configure_system_register_bank();
+    deliver_exception();
+    deliver_exception_resident(key_low: u32, key_high: u32, id_low: u32, id_high: u32);
     configure_interrupt_descriptor_table();
     cpu_read8(address: u32);
     cpu_read16(address: u32);

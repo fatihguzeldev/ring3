@@ -119,3 +119,6 @@ mod cpu_legacy_nop_wasm;
 
 #[path = "interrupt/dispatch/wasm.rs"]
 mod interrupt_dispatch;
+
+#[path = "interrupt/exception/wasm.rs"]
+mod cpu_exception_entry;

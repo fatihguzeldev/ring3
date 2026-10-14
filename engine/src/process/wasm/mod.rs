@@ -223,5 +223,8 @@ pub(crate) use cpu::{
     simd_execute_resident, stack_execute, stack_execute_resident, x87_op, x87_resident_op,
 };
 
+mod exceptions;
+pub(crate) use exceptions::{deliver_exception, deliver_exception_resident};
+
 mod avx;
 pub(crate) use avx::{avx_execute, avx_execute_resident};
