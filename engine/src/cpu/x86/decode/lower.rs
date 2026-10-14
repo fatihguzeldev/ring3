@@ -55,6 +55,7 @@ pub(super) fn lower(
     check_profile(instruction, bytes)?;
     if super::profile::ignored_prefetch_alias(instruction)
         || super::profile::ignored_instruction_prefetch(instruction)
+        || super::profile::legacy_nop_alias(instruction)
     {
         return Ok(Operation::Nop);
     }

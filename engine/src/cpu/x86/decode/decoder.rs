@@ -282,6 +282,7 @@ fn segment_accesses(instruction: &iced_x86::Instruction) -> u8 {
     use iced_x86::{Code, InstructionInfoFactory, Mnemonic, Register};
     if super::profile::ignored_prefetch_alias(instruction)
         || super::profile::ignored_instruction_prefetch(instruction)
+        || super::profile::legacy_nop_alias(instruction)
     {
         return 0;
     }

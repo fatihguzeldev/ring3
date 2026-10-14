@@ -26,6 +26,12 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
     if groups[0] > 1 || groups[1] > 1 || groups[2] > 1 && !mixed_hle {
         return Err(unsupported());
     }
+    if legacy_nop_alias(instruction) {
+        if groups[1] != 0 || groups[2] != 0 {
+            return Err(unsupported());
+        }
+        return Ok(());
+    }
     if super::mpx::disabled_nop(instruction) {
         return Ok(());
     }
@@ -224,3 +230,24 @@ pub(super) fn ignored_instruction_prefetch(instruction: &Instruction) -> bool {
 #[cfg(test)]
 #[path = "profile/tests/prefetch/instruction.rs"]
 mod instruction_prefetch;
+
+// the fixed software profile selects these amd-documented modrm nops.
+pub(super) fn legacy_nop_alias(instruction: &Instruction) -> bool {
+    matches!(
+        instruction.code(),
+        Code::Reservednop_rm16_r16_0F19
+            | Code::Reservednop_rm32_r32_0F19
+            | Code::Reservednop_rm16_r16_0F1C
+            | Code::Reservednop_rm32_r32_0F1C
+            | Code::Reservednop_rm16_r16_0F1D
+            | Code::Reservednop_rm32_r32_0F1D
+            | Code::Reservednop_rm16_r16_0F1E
+            | Code::Reservednop_rm32_r32_0F1E
+            | Code::Reservednop_rm16_r16_0F1F
+            | Code::Reservednop_rm32_r32_0F1F
+    )
+}
+
+#[cfg(test)]
+#[path = "profile/tests/nop.rs"]
+mod legacy_nop;

@@ -113,3 +113,6 @@ mod cpu_system_availability;
 
 #[path = "exceptions/availability/scalar/wasm.rs"]
 mod cpu_scalar_availability;
+
+#[path = "hints/reserved/wasm.rs"]
+mod cpu_legacy_nop_wasm;

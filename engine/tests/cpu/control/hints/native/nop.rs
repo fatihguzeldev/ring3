@@ -591,3 +591,73 @@ fn endbranch_fetch_requires_the_final_opcode_byte_before_nop_admission() {
         assert!(memory.is_code_current(decoded.code_snapshot()));
     }
 }
+
+#[test]
+fn documented_legacy_modrm_nop_aliases_prepare_without_operand_helpers() {
+    use iced_x86::{Code, Decoder, DecoderOptions};
+    let rows: [(Code, &[u8]); 10] = [
+        (Code::Reservednop_rm32_r32_0F19, &[0x0f, 0x19, 0xc0]),
+        (Code::Reservednop_rm16_r16_0F19, &[0x66, 0x0f, 0x19, 0xc0]),
+        (
+            Code::Reservednop_rm32_r32_0F1C,
+            &[0x64, 0x0f, 0x1c, 0x8c, 0x88, 0xf0, 0xff, 0xff, 0xff],
+        ),
+        (
+            Code::Reservednop_rm16_r16_0F1C,
+            &[0x64, 0x66, 0x0f, 0x1c, 0x8c, 0x88, 0xf0, 0xff, 0xff, 0xff],
+        ),
+        (Code::Reservednop_rm32_r32_0F1D, &[0x0f, 0x1d, 0xc0]),
+        (Code::Reservednop_rm16_r16_0F1D, &[0x66, 0x0f, 0x1d, 0xc0]),
+        (Code::Reservednop_rm32_r32_0F1E, &[0x0f, 0x1e, 0xc0]),
+        (Code::Reservednop_rm16_r16_0F1E, &[0x66, 0x0f, 0x1e, 0xc0]),
+        (Code::Reservednop_rm32_r32_0F1F, &[0x0f, 0x1f, 0xc8]),
+        (Code::Reservednop_rm16_r16_0F1F, &[0x66, 0x0f, 0x1f, 0xc8]),
+    ];
+    for (expected, bytes) in rows {
+        let raw = Decoder::new(32, bytes, DecoderOptions::NONE).decode();
+        assert_eq!(raw.code(), expected);
+        assert_eq!(raw.len(), bytes.len());
+        decode_admission(bytes);
+        let body = [bytes, &[0xeb, 0xfe]].concat();
+        for entries in [false, true] {
+            assert_standalone(&body, 2, entries);
+            for resident in [false, true] {
+                assert_bound(&body, resident, entries);
+            }
+        }
+    }
+}
+
+#[test]
+fn legacy_modrm_nop_alias_keeps_full_displacement_fetch_and_source_identity() {
+    let bytes = [0x64, 0x0f, 0x1c, 0x8c, 0x88, 0xf0, 0xff, 0xff, 0xff];
+    let pc = 0x2000 - bytes.len() as u32 + 1;
+    let mut memory = code_space(pc, &bytes[..bytes.len() - 1]);
+    assert_eq!(
+        decode_one(&memory, GuestAddress(pc)).unwrap_err(),
+        fetch_error(pc, 0x2000, bytes.len(), FaultReason::Unmapped)
+    );
+    let last = PageRange::new(GuestAddress(0x2000), 1).unwrap();
+    memory.map_zeroed(last, Permissions::ALL).unwrap();
+    memory
+        .write(GuestAddress(0x2000), &bytes[bytes.len() - 1..])
+        .unwrap();
+    memory.protect(last, Permissions::READ).unwrap();
+    assert_eq!(
+        decode_one(&memory, GuestAddress(pc)).unwrap_err(),
+        fetch_error(pc, 0x2000, bytes.len(), FaultReason::Permission)
+    );
+    memory.protect(last, Permissions::EXECUTE).unwrap();
+    let decoded = decode_one(&memory, GuestAddress(pc)).unwrap();
+    assert_eq!(decoded.operation(), &Operation::Nop);
+    assert_eq!(decoded.length() as usize, bytes.len());
+    assert_eq!(decoded.next_pc(), GuestAddress(0x2001));
+    assert!(memory.is_code_current(decoded.code_snapshot()));
+    memory.protect(last, Permissions::ALL).unwrap();
+    let decoded = decode_one(&memory, GuestAddress(pc)).unwrap();
+    assert!(memory.is_code_current(decoded.code_snapshot()));
+    memory
+        .write(GuestAddress(0x2000), &bytes[bytes.len() - 1..])
+        .unwrap();
+    assert!(!memory.is_code_current(decoded.code_snapshot()));
+}
