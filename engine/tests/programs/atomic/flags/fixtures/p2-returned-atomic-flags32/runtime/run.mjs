@@ -1,3 +1,4 @@
+import {attachDetectionApi, generatedImports} from '../../../../../../support/wasm/binding.mjs';
 import {ARENA_SIZE} from '../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
@@ -10,7 +11,7 @@ assert.ok(enginePath&&output&&root);
 const engine=readEngine(enginePath),initial=readFileSync(join(output,'initial-arena.bin'));
 const hash=b=>createHash('sha256').update(b).digest('hex');
 assert.equal(initial.length,SIZE);assert.equal(engine.sha256,hash(engine.bytes));
-const sourcePaths=['engine/src/cpu/x86/decode/profile.rs','engine/src/cpu/x86/decode/lower.rs','engine/src/cpu/x86/decode/integer.rs','engine/src/cpu/x86/decode/flow.rs','engine/src/cpu/x86/ir.rs',
+const sourcePaths=['engine/tests/support/wasm/binding.mjs', 'engine/src/cpu/x86/decode/profile.rs','engine/src/cpu/x86/decode/lower.rs','engine/src/cpu/x86/decode/integer.rs','engine/src/cpu/x86/decode/flow.rs','engine/src/cpu/x86/ir.rs',
   'engine/src/cpu/dbt/region.rs','engine/src/cpu/dbt/cold.rs','engine/src/cpu/dbt/resident.rs','engine/src/cpu/dbt/wasm/emitter.rs','engine/src/cpu/dbt/wasm/integer/arithmetic.rs', 'engine/src/cpu/dbt/wasm/integer/bits.rs', 'engine/src/cpu/dbt/wasm/integer/carry_rotates.rs', 'engine/src/cpu/dbt/wasm/integer/decimal.rs', 'engine/src/cpu/dbt/wasm/integer/dispatch.rs', 'engine/src/cpu/dbt/wasm/integer/flags.rs', 'engine/src/cpu/dbt/wasm/integer/mod.rs', 'engine/src/cpu/dbt/wasm/integer/multiply_divide.rs', 'engine/src/cpu/dbt/wasm/integer/operands.rs', 'engine/src/cpu/dbt/wasm/integer/rotates.rs', 'engine/src/cpu/dbt/wasm/integer/shifts.rs',
   'engine/src/cpu/dbt/wasm/memory.rs','engine/src/cpu/dbt/wasm/memory/exchange.rs','engine/src/cpu/dbt/wasm/locals.rs',
   'engine/src/memory/space.rs', 'engine/src/memory/space/atomic.rs','engine/src/process/instance.rs', 'engine/src/process/execution/compiled.rs', 'engine/src/process/execution/authority.rs', 'engine/src/process/memory/address_space.rs', 'engine/src/process/memory/scalar.rs', 'engine/src/process/memory/scalar/tests.rs', 'engine/src/process/execution/mod.rs', 'engine/src/process/memory/mod.rs', 'engine/src/process/mod.rs','engine/src/process/wasm/mod.rs', 'engine/src/process/wasm/loading.rs', 'engine/src/abi/image.rs', 'engine/src/process/wasm/execution.rs', 'engine/src/process/wasm/calls.rs', 'engine/src/process/wasm/memory.rs', 'engine/src/process/wasm/cpu.rs','engine/src/process/execution/resident.rs',
@@ -44,7 +45,7 @@ const caller=[
   {pc:0x3033,bytes:Buffer.from('83c41001e8a330500000ebfe','hex'),instructions:4},
 ];
 assert.deepEqual(caller.map(b=>b.pc+b.bytes.length),[0x3019,0x3033,0x303f]);
-const arities={open:3,close:0,arena_ptr:0,map:3,protect:3,upload:2,read32:1,store32:2,store_resident32:6,compare_exchange32:3,compare_exchange_resident32:7,
+const arities={guard_detect: 6, guard_detect_resident: 7, finish_exception_detection: 12, open:3,close:0,arena_ptr:0,map:3,protect:3,upload:2,read32:1,store32:2,store_resident32:6,compare_exchange32:3,compare_exchange_resident32:7,
   compile:1,compile_entries:2,compile_resident:1,compile_resident_entries:2,generation:0,module_ptr:0,module_len:0,guard:6,guard_resident:7,discard_unacknowledged_resident:4, cpu_compare_exchange32: 3, cpu_compare_exchange_resident32: 7, cpu_read32: 1, cpu_store32: 2, cpu_store_resident32: 6};
 const arena=c=>Buffer.from(new Uint8Array(c.memory.buffer,c.base,SIZE));
 const cpu=c=>{const a=arena(c);return{registers:Array.from({length:8},(_,i)=>a.readUInt32LE(16+4*i)),pc:a.readUInt32LE(48),flags:a.readUInt32LE(52)};};
@@ -54,7 +55,7 @@ function upload(c,address,bytes){input(c,140,bytes);host(c,'upload',[address,byt
 function seed(c,pc,registers){assert.equal(c.seeded,false);c.seeded=true;const s={registers:[...registers],pc,flags:0xcd7};input(c,0,Buffer.concat([state(s),exit(1,0),word(0),helper(0xad)]));return s;}
 function name(c,kind){if(kind==='cpu_read32')return kind;if(kind==='cpu_store32')return c.owner==='resident'?'cpu_store_resident32':'cpu_store32';assert.equal(kind,'cpu_compare_exchange32');return c.owner==='resident'?'cpu_compare_exchange_resident32':'cpu_compare_exchange32';}
 function open(owner,entries){
-  const instance=new WebAssembly.Instance(engine.module,{}),c={id:++counts.contexts,owner,entries,memory:instance.exports.memory,api:{},high:0x4f4c4446,captures:0,seeded:false};
+  const instance=new WebAssembly.Instance(engine.module,{}),c={id:++counts.contexts,owner,entries,memory:instance.exports.memory,api: attachDetectionApi({}, instance.exports),high:0x4f4c4446,captures:0,seeded:false};
   for(const[n,arity]of Object.entries(arities)){c.api[n]=instance.exports['ring3_abi_v1_'+n];assert.equal(c.api[n]?.length,arity,n);}
   assert.equal(c.api.open(12,c.id,c.high),0);c.base=c.api.arena_ptr()>>>0;input(c,0,initial);
   for(const[page,permission]of[[0x2000,7],[0x3000,7],[0x5000,3],[0x7000,3]])host(c,'map',[page,1,permission]);
@@ -69,13 +70,13 @@ function compile(c,title,blocks,kinds){
   const a=arena(c),binding=c.owner==='resident'?{low:a.readUInt32LE(148),high:a.readUInt32LE(152),pointer:a.readUInt32LE(156),length:a.readUInt32LE(160)}:{generation:c.api.generation(),pointer:c.api.module_ptr()>>>0,length:c.api.module_len()>>>0};
   if(c.owner==='resident'){assert.equal(a.readUInt32LE(140),1);assert.equal(a.readUInt32LE(144),24);assert.ok(binding.low||binding.high);}
   lifecycle.push({context:c.id,kind:'capture',name:title,method,before_sha256:hash(beforeInput),after_sha256:hash(a),cpu:cpu(c),transfer_hex:a.subarray(140,204).toString('hex'),...binding});
-  const bytes=Buffer.from(new Uint8Array(c.memory.buffer,binding.pointer,binding.length)),module=new WebAssembly.Module(bytes),names=[c.owner==='resident'?'guard_resident':'guard',...kinds.map(k=>name(c,k))];
-  const imports=[{module:'env',name:'memory',kind:'memory'},...names.map(n=>({module:'ring3',name:n,kind:'function'}))];
+  const bytes=Buffer.from(new Uint8Array(c.memory.buffer,binding.pointer,binding.length)),module=new WebAssembly.Module(bytes),names=[c.owner==='resident'?'guard_detect_resident':'guard_detect',...kinds.map(k=>name(c,k))];
+  const imports=generatedImports({resident: names[0] === 'guard_detect_resident', helpers: names.slice(1)});
   assert.ok(bytes.length<=65536);assert.deepEqual(WebAssembly.Module.imports(module),imports);assert.deepEqual(WebAssembly.Module.exports(module),[{name:'run',kind:'function'}]);
   const ring3={...c.api};for(const kind of kinds){const n=name(c,kind);ring3[n]=(...args)=>{const before=arena(c),status=c.api[n](...args),after=arena(c);before.set(after.subarray(100,140),100);assert.deepEqual(after,before,'canonical helper40B only');
     const payload=args.slice(n.includes('resident')?4:0).map(v=>v>>>0);assert.equal(payload.length,kind==='cpu_read32'?1:kind==='cpu_store32'?2:3);
     helperTrace.push({context:c.id,call:counts.runs+1,module:title,name:n,args:payload,status,helper_hex:after.subarray(100,140).toString('hex')});counts.helper_calls++;counts[{cpu_read32:'read32',cpu_store32:'store32',cpu_compare_exchange32:'compare_exchange32'}[kind]]++;return status;};}
-  const run=new WebAssembly.Instance(module,{env:{memory:c.memory},ring3}).exports.run;assert.equal(run.length,4);
+  const run=new WebAssembly.Instance(module, {env: {memory: c.memory}, ring3: {...(ring3), finish_exception_detection: c.api.finish_exception_detection}}).exports.run;assert.equal(run.length,4);
   const file=`module-${++counts.modules}.wasm`;writeFileSync(join(output,file),bytes,{flag:'wx'});modules.push({context:c.id,owner:c.owner,entries:c.entries,name:title,file,bytes:bytes.length,sha256:hash(bytes),blocks:blocks.length,instructions,imports,...binding});return{...binding,name:title,run,active:true};
 }
 function discard(c,unit){

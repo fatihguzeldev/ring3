@@ -1,3 +1,4 @@
+import {attachDetectionApi} from '../../../../../support/wasm/binding.mjs';
 import {ARENA_SIZE} from '../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
@@ -15,7 +16,7 @@ const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const artifacts = {}, contexts = [], observations = [], helperTrace = [];
 function save(name, bytes) { writeFileSync(join(output, name), bytes, {flag: 'wx'}); artifacts[name] = {bytes: Buffer.byteLength(bytes), sha256: hash(bytes)}; }
 const fixtureDir = 'engine/tests/programs/records/fixtures/p2-mutable-records';
-const sourcePaths = [...execFileSync('rg', ['--files', 'engine/src'], {cwd: root, encoding: 'utf8'}).trim().split('\n'), 'Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml', 'engine/tests/support/loader/pe32/image.rs', 'engine/tests/programs/sort/support/pe32.rs', 'engine/tests/programs/records/support/compiled.rs', 'engine/tests/programs/records/support/mutable.rs', 'engine/tests/programs/records/native/mutable.rs', 'engine/tests/programs/native.rs', 'engine/tests/programs/records/wasm/mutable.rs', 'engine/tests/programs/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/support/wasm/engine.mjs', 'engine/tests/programs/records/fixtures/p2-compiled-records/build.py', ...readdirSync(join(root, fixtureDir), {withFileTypes: true}).filter(entry => entry.isFile()).map(entry => `${fixtureDir}/${entry.name}`)].sort();
+const sourcePaths = ['engine/tests/support/wasm/binding.mjs', ...execFileSync('rg', ['--files', 'engine/src'], {cwd: root, encoding: 'utf8'}).trim().split('\n'), 'Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml', 'engine/tests/support/loader/pe32/image.rs', 'engine/tests/programs/sort/support/pe32.rs', 'engine/tests/programs/records/support/compiled.rs', 'engine/tests/programs/records/support/mutable.rs', 'engine/tests/programs/records/native/mutable.rs', 'engine/tests/programs/native.rs', 'engine/tests/programs/records/wasm/mutable.rs', 'engine/tests/programs/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/support/wasm/engine.mjs', 'engine/tests/programs/records/fixtures/p2-compiled-records/build.py', ...readdirSync(join(root, fixtureDir), {withFileTypes: true}).filter(entry => entry.isFile()).map(entry => `${fixtureDir}/${entry.name}`)].sort();
 assert.equal(new Set(sourcePaths).size, sourcePaths.length);
 const sourceMap = () => Object.fromEntries(sourcePaths.map(path => { const bytes = readFileSync(join(root, path)); return [path, {bytes: bytes.length, sha256: hash(bytes)}]; }));
 const sourcesBefore = sourceMap();
@@ -70,7 +71,7 @@ const fixtures = new Map([0, 1, 2, 15, 16].map(count => {
   return [count, {spec, image, bytes, passes}];
 }));
 
-const names = ['open', 'close', 'arena_ptr', 'begin_image_input', 'append_image_input', 'load_pe32_linked_v5_input_at', 'start_loaded_image', 'dispatcher_module', 'guard_dispatch_entry', 'find_installed_resident', 'compile_resident_entries', 'acknowledge_resident_installation', 'guard_resident', 'read8', 'read16', 'read32', 'store_resident8', 'store_resident16', 'store_resident32', 'capture_resident_call', 'complete_resident_windows_call', 'protect', 'cpu_read16', 'cpu_read32', 'cpu_read8', 'cpu_store_resident16', 'cpu_store_resident32', 'cpu_store_resident8'];
+const names = ['guard', 'guard_resident', 'guard_detect', 'guard_detect_resident', 'finish_exception_detection', 'open', 'close', 'arena_ptr', 'begin_image_input', 'append_image_input', 'load_pe32_linked_v5_input_at', 'start_loaded_image', 'dispatcher_module', 'guard_dispatch_entry', 'find_installed_resident', 'compile_resident_entries', 'acknowledge_resident_installation',  'read8', 'read16', 'read32', 'store_resident8', 'store_resident16', 'store_resident32', 'capture_resident_call', 'complete_resident_windows_call', 'protect', 'cpu_read16', 'cpu_read32', 'cpu_read8', 'cpu_store_resident16', 'cpu_store_resident32', 'cpu_store_resident8'];
 const helperKinds = {cpu_read8: [10, 1], cpu_read16: [10, 2], cpu_read32: [10, 4], cpu_store_resident8: [10, 1], cpu_store_resident16: [10, 2], cpu_store_resident32: [10, 4]};
 function arena(e) { return Buffer.from(e.memory.buffer, e.base, SIZE).map(x => x); }
 function view(e) { return new DataView(e.memory.buffer); }
@@ -94,7 +95,7 @@ function checkRecords(e, expected) {
 }
 function fresh(label, count, mode = 'normal') {
   const fixture = fixtures.get(count), {spec, image} = fixture, instance = new WebAssembly.Instance(engine.module, {}), memory = instance.exports.memory;
-  const api = Object.fromEntries(names.map(name => [name, instance.exports[`ring3_abi_v1_${name}`]]));
+  const api = attachDetectionApi(Object.fromEntries(names.map(name => [name, instance.exports[`ring3_abi_v1_${name}`]])), instance.exports);
   for (const [name, fn] of Object.entries(api)) assert.equal(typeof fn, 'function', name);
   assert.equal(api.guard_resident.length, 7);
   const e = {label, mode, fixture, spec, api, memory, low: 0xc5290000 + contexts.length + 1, high: 0xa5290000, baseAddress: spec.actual_base, units: [], groups: new Map(), table: new WebAssembly.Table({element: 'anyfunc', initial: 8, maximum: 8}), retired: 0, runs: 0, captures: 0, completions: 0, diagnosticReads: 0, controls: [], entries: [], returns: [], splitIndex: 0};
@@ -132,8 +133,9 @@ function compile(e, group, pc) {
   const bytes = Buffer.from(e.memory.buffer, unit.pointer, unit.length).map(x => x), module = new WebAssembly.Module(bytes), imports = WebAssembly.Module.imports(module), ring3 = {};
   for (const imported of imports) {
     if (imported.module === 'env') { assert.deepEqual(imported, {module: 'env', name: 'memory', kind: 'memory'}); continue; }
-    assert.equal(imported.module, 'ring3'); assert.equal(imported.kind, 'function'); assert.ok(imported.name === 'guard_resident' || imported.name in helperKinds, imported.name);
-    ring3[imported.name] = imported.name === 'guard_resident' ? e.api.guard_resident : (...args) => {
+    if (imported.name === 'finish_exception_detection') { assert.equal(imported.module, 'ring3'); assert.equal(imported.kind, 'function'); continue; }
+    assert.equal(imported.module, 'ring3'); assert.equal(imported.kind, 'function'); assert.ok(imported.name === 'guard_detect_resident' || imported.name in helperKinds, imported.name);
+    ring3[imported.name] = imported.name === 'guard_detect_resident' ? e.api.guard_detect_resident : (...args) => {
       const before = arena(e), state = cpu(e), result = e.api[imported.name](...args), after = arena(e); assert.equal(result, 0);
       unchanged(before, after, [[100, 140]], `forwarded ${imported.name}`);
       const [version, width] = helperKinds[imported.name], fields = Array.from({length: 6}, (_, i) => after.readUInt32LE(116 + 4 * i));
@@ -146,7 +148,7 @@ function compile(e, group, pc) {
     };
   }
   if (group.name === 'kernel') for (const name of ['cpu_read8', 'cpu_read16', 'cpu_read32', 'cpu_store_resident8', 'cpu_store_resident16', 'cpu_store_resident32']) assert.ok(imports.some(imported => imported.name === name), `actual compiler leaf imports ${name}`);
-  unit.run = new WebAssembly.Instance(module, {env: {memory: e.memory}, ring3}).exports.run; assert.equal(unit.run.length, 4); e.table.set(unit.slot, unit.run);
+  unit.run = new WebAssembly.Instance(module, {env: {memory: e.memory}, ring3: {...(ring3), finish_exception_detection: e.api.finish_exception_detection}}).exports.run; assert.equal(unit.run.length, 4); e.table.set(unit.slot, unit.run);
   status(e, 'acknowledge installed group', () => e.api.acknowledge_resident_installation(e.low, e.high, unit.low, unit.high, unit.slot), [[TRANSFER, TRANSFER + 32]]);
   const receipt = arena(e).subarray(TRANSFER, TRANSFER + 32);
   assert.equal(receipt.subarray(0, 4).toString(), 'R3IN'); assert.equal(receipt.readUInt32LE(4), 0x10001); assert.equal(receipt.readUInt32LE(8), 32);

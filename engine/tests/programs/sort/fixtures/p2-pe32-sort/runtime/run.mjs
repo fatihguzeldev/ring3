@@ -1,3 +1,4 @@
+import {attachDetectionApi} from '../../../../../support/wasm/binding.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
@@ -20,17 +21,17 @@ const recordMinima = expected.input.slice(1).filter((value, i) => value < Math.m
 const census = {inversions, record_minima: recordMinima, fill: 3332, checksum: 1284, sort: 2807 + 8 * inversions - 3 * recordMinima, main_cycle: 17};
 census.cycle = census.fill + census.checksum + census.sort + census.main_cycle;
 census.program = 10 * census.cycle + 2;
-const SIZE = 4612, TRANSFER = 140, BASE = spec.actual_base, TEXT = BASE + spec.text_rva;
+const SIZE = 4796, TRANSFER = 140, BASE = spec.actual_base, TEXT = BASE + spec.text_rva;
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const artifacts = {}, contexts = [];
 const save = (name, bytes) => { writeFileSync(join(output, name), bytes, {flag: 'wx'}); artifacts[name] = {bytes: Buffer.byteLength(bytes), sha256: hash(bytes)}; };
-const sourcePaths = [...execFileSync('rg', ['--files', 'engine/src'], {cwd: root, encoding: 'utf8'}).trim().split('\n'), 'Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml', 'engine/tests/support/loader/pe32/image.rs', 'engine/tests/programs/sort/support/pe32.rs', 'engine/tests/programs/sort/native.rs', 'engine/tests/programs/native.rs', 'engine/tests/programs/sort/wasm.rs', 'engine/tests/programs/wasm.rs', 'engine/tests/support/wasm/engine.mjs', ...['runtime/oracle.mjs', 'runtime/oracle.test.mjs', 'runtime/run.mjs'].map(p => `engine/tests/programs/sort/fixtures/p2-pe32-sort/${p}`)].sort();
+const sourcePaths = ['engine/tests/support/wasm/binding.mjs', ...execFileSync('rg', ['--files', 'engine/src'], {cwd: root, encoding: 'utf8'}).trim().split('\n'), 'Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml', 'engine/tests/support/loader/pe32/image.rs', 'engine/tests/programs/sort/support/pe32.rs', 'engine/tests/programs/sort/native.rs', 'engine/tests/programs/native.rs', 'engine/tests/programs/sort/wasm.rs', 'engine/tests/programs/wasm.rs', 'engine/tests/support/wasm/engine.mjs', ...['runtime/oracle.mjs', 'runtime/oracle.test.mjs', 'runtime/run.mjs'].map(p => `engine/tests/programs/sort/fixtures/p2-pe32-sort/${p}`)].sort();
 const sourceMap = () => Object.fromEntries(sourcePaths.map(p => { const b = readFileSync(join(root, p)); return [p, {bytes: b.length, sha256: hash(b)}]; }));
 const sourcesBefore = sourceMap();
 save('sources-before.json', JSON.stringify(sourcesBefore, null, 2));
 assert.deepEqual(image.subarray(spec.text_raw, spec.text_raw + spec.program_hex.length / 2), Buffer.from(spec.program_hex, 'hex'));
 assert.equal(image.length, 2560);
-const names = ['open', 'close', 'arena_ptr', 'begin_image_input', 'append_image_input', 'load_pe32_linked_v5_input_at', 'start_loaded_image', 'dispatcher_module', 'guard_dispatch_entry', 'find_installed_resident', 'compile_resident_entries', 'acknowledge_resident_installation', 'guard_resident', 'read32', 'store_resident32', 'capture_resident_call', 'complete_resident_windows_call', 'upload', 'protect', 'retire_stale_resident', 'cpu_read32', 'cpu_store_resident32'];
+const names = ['guard', 'guard_resident', 'guard_detect', 'guard_detect_resident', 'finish_exception_detection', 'open', 'close', 'arena_ptr', 'begin_image_input', 'append_image_input', 'load_pe32_linked_v5_input_at', 'start_loaded_image', 'dispatcher_module', 'guard_dispatch_entry', 'find_installed_resident', 'compile_resident_entries', 'acknowledge_resident_installation',  'read32', 'store_resident32', 'capture_resident_call', 'complete_resident_windows_call', 'upload', 'protect', 'retire_stale_resident', 'cpu_read32', 'cpu_store_resident32'];
 function refresh(e) { e.view = new DataView(e.memory.buffer); return e.view; }
 function arena(e) { return Buffer.from(e.memory.buffer, e.base, SIZE).subarray().map(x => x); }
 function cpu(e) { return arena(e).subarray(0, 56); }
@@ -50,7 +51,7 @@ function readPage(e, address) { const page = Buffer.alloc(4096); for (let i = 0;
 function snapshot(e, label) { const b = arena(e); const name = `${e.label}-${label}-arena.bin`; save(name, b); return {file: name, cpu: readCpu(e), exit: exit(e), sha256: hash(b)}; }
 function fresh(label, program = image) {
   const started = performance.now(), instance = new WebAssembly.Instance(engine.module, {}), instanceMs = performance.now() - started;
-  const api = Object.fromEntries(names.map(name => [name, instance.exports[`ring3_abi_v1_${name}`]]));
+  const api = attachDetectionApi(Object.fromEntries(names.map(name => [name, instance.exports[`ring3_abi_v1_${name}`]])), instance.exports);
   for (const [name, fn] of Object.entries(api)) assert.equal(typeof fn, 'function', name);
   const e = {label, instance, instanceMs, api, memory: instance.exports.memory, low: 0xc4350000 + contexts.length + 1, high: 0xa4350000, work: {}, units: [], groups: new Map(), reads: 0, retired: 0, allocations: 0, frees: 0, captures: 0, completions: 0, batches: [], cold: [], controls: [], table: new WebAssembly.Table({element: 'anyfunc', initial: 8, maximum: 8})};
   assert.equal(api.open(8, e.low, e.high), 0); e.base = api.arena_ptr() >>> 0;
@@ -86,11 +87,11 @@ function compile(e, group, observedPc) {
   unit.bytes = work(e, 'resident_module_copy', () => Buffer.from(e.memory.buffer, unit.pointer, unit.length).map(x => x));
   const module = work(e, 'resident_module', () => new WebAssembly.Module(unit.bytes)); unit.imports = WebAssembly.Module.imports(module);
   const imports = Object.fromEntries(unit.imports.filter(x => x.module === 'ring3').map(x => [x.name, e.api[x.name]]));
-  unit.run = work(e, 'resident_instance', () => new WebAssembly.Instance(module, {env: {memory: e.memory}, ring3: imports})).exports.run;
+  unit.run = work(e, 'resident_instance', () => new WebAssembly.Instance(module, {env: {memory: e.memory}, ring3: {...(imports), finish_exception_detection: e.api.finish_exception_detection}})).exports.run;
   work(e, 'resident_table_set', () => e.table.set(unit.slot, unit.run));
   status(e, 'resident_ack', () => e.api.acknowledge_resident_installation(e.low, e.high, unit.low, unit.high, unit.slot), 0, [[TRANSFER, TRANSFER + 32]]);
   assert.ok(unit.slot < 8); assert.equal(e.table.get(unit.slot), unit.run); assert.equal(unit.run.length, 4);
-  const allowedImports = ['guard_resident', 'cpu_read32', 'cpu_store_resident32'];
+  const allowedImports = ['guard_detect_resident', 'cpu_read32', 'cpu_store_resident32'];
   assert.ok(unit.imports.every(x => (x.module === 'env' && x.name === 'memory' && x.kind === 'memory') || (x.module === 'ring3' && allowedImports.includes(x.name) && x.kind === 'function')));
   save(`${e.label}-unit-${unit.low}-${unit.name}.wasm`, unit.bytes);
   e.units.push(unit); e.groups.set(group.name, unit); e.cold.push({pc: observedPc, name: group.name, entries: group.entries, id: [unit.low, unit.high], slot: unit.slot, bytes: unit.length, sha256: hash(unit.bytes)});
