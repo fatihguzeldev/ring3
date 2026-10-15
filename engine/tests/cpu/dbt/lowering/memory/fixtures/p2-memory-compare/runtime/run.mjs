@@ -11,7 +11,7 @@ const engineBytes = readFileSync(enginePath);
 assert.ok(WebAssembly.validate(engineBytes), 'actual engine validates');
 const engineModule = new WebAssembly.Module(engineBytes);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), [], 'engine has no JS imports');
-const names = ['open', 'close', 'arena_ptr', 'map', 'protect', 'unmap', 'upload', 'compile', 'generation', 'module_ptr', 'module_len', 'guard', 'read32', 'cpu_read32', 'cpu_store32', 'write32', 'compile_with_gates', 'compile_entries'];
+const names = ['open', 'close', 'arena_ptr', 'map', 'protect', 'unmap', 'upload', 'compile', 'generation', 'module_ptr', 'module_len', 'guard', 'guard_detect', 'finish_exception_detection', 'read32', 'cpu_read32', 'cpu_store32', 'write32', 'compile_with_gates', 'compile_entries'];
 let keys = 0n, modules = 0, actualRuns = 0, ramWords = 0, snapshotGuards = 0;
 const counts = {flags: 0, aliases: 0, addresses: 0, entry: 0, read_faults: 0, continuation_initial_calls: 0, continuation_resume_calls: 0, canonical_exits: 0, guard_rejections: 0, scans: 0};
 const generatedHashes = [];
@@ -79,7 +79,8 @@ function helperRecord(tag, value = 0, detail = 0, address = 0, access = 0, lengt
 }
 function cpuHelperRecord(tag, value = 0, detail = 0, address = 0, access = 0, length = 4) {
   const bytes = new Uint8Array(40), view = new DataView(bytes.buffer);
-  header(bytes, view, 0, 'R3MH', 40, 10);
+  header(bytes, view, 0, 'R3MH', 40, tag === 1 ? 15 : 10);
+  if (tag === 1) {tag = 9; detail = 4 | (access === 2 ? 2 : 0) | (detail === 2 ? 1 : 0);}
   [tag, value, detail, address, access, length].forEach((field, index) => view.setUint32(16 + index * 4, field, true));
   return bytes;
 }
@@ -117,13 +118,13 @@ function compile(engine, bytes, blocks = [[0x1000, bytes.length]], entry = false
   const module = new WebAssembly.Module(encoded);
   const expected = [
     {module: 'env', name: 'memory', kind: 'memory'},
-    {module: 'ring3', name: 'guard', kind: 'function'},
+    {module: 'ring3', name: 'guard_detect', kind: 'function'}, {module: 'ring3', name: 'finish_exception_detection', kind: 'function'},
     {module: 'ring3', name: 'cpu_read32', kind: 'function'},
   ].sort((a, b) => `${a.module}.${a.name}`.localeCompare(`${b.module}.${b.name}`));
   assert.deepEqual(sortedImports(module), expected, 'module imports exactly needed actual Wasm helpers');
   const instance = new WebAssembly.Instance(module, {
     env: {memory: engine.memory},
-    ring3: {guard: engine.api.guard, cpu_read32: engine.api.cpu_read32},
+    ring3: {guard_detect: engine.api.guard_detect, finish_exception_detection: engine.api.finish_exception_detection, cpu_read32: engine.api.cpu_read32},
   });
   modules++;
   generatedHashes.push(hash(encoded));
@@ -161,8 +162,10 @@ function readState(engine) {
 }
 
 function exit(reason, retired, detail = 0, address = 0, access = 0, length = reason === 5 ? 4 : 0) {
+  const pageFault = reason === 5;
+  if (pageFault) {reason = 23; detail = 4 | (access === 2 ? 2 : 0) | (detail === 2 ? 1 : 0);}
   const bytes = new Uint8Array(40), view = new DataView(bytes.buffer);
-  header(bytes, view, 0, 'R3EX', 40, 6);
+  header(bytes, view, 0, 'R3EX', 40, pageFault ? 12 : 6);
   [reason, retired, detail, address, access, length].forEach((field, index) => view.setUint32(16 + index * 4, field, true));
   return bytes;
 }
@@ -177,7 +180,7 @@ function run(engine, child, budget, expected, expectedExit, label, expectedHelpe
   view.setUint32(48, expected.eip, true); view.setUint32(52, expected.eflags, true);
   wanted.set(expectedExit, 56);
   if (expectedHelper !== undefined) wanted.set(expectedHelper, 100);
-  assert.deepEqual(arena(engine), wanted, `${label}: complete 4236-byte arena, including state/exit/helper/cancel/transfer`);
+  assert.deepEqual(arena(engine), wanted, `${label}: complete ${ARENA_SIZE}-byte arena, including state/exit/helper/cancel/transfer`);
 }
 
 
@@ -480,7 +483,7 @@ for (const args of invalidOracleInputs) {
 }
 assert.equal(actualRuns, counts.canonical_exits + counts.guard_rejections, 'actual generated run calls equal canonical exits plus guard rejections');
 assert.equal(counts.continuation_initial_calls, forms.length); assert.equal(counts.continuation_resume_calls, forms.length * 11);
-const cpuSourcePins = Object.fromEntries(["engine/src/abi/memory_helper/cpu.rs", "engine/src/cpu/dbt/wasm/memory/cpu_scalar.rs", "engine/src/cpu/dbt/wasm/emitter.rs", "engine/src/cpu/dbt/wasm/code_fetch.rs", "engine/src/process/memory/cpu_scalar.rs", "engine/src/process/memory/scalar/cpu_write.rs", "engine/src/process/wasm/memory/cpu_write.rs", "engine/src/abi/wasm/exports/memory/cpu_write.rs", "engine/tests/support/wasm/arena.mjs"].map(path=>[path,hash(readFileSync(join(root,path)))]));
+const cpuSourcePins = Object.fromEntries(["engine/src/abi/memory_helper/cpu.rs", "engine/src/abi/cpu_helper/paging.rs", "engine/src/process/memory/paging.rs", "engine/src/memory/space/paging.rs", "engine/src/cpu/dbt/wasm/memory/cpu_scalar.rs", "engine/src/cpu/dbt/wasm/emitter.rs", "engine/src/cpu/dbt/wasm/code_fetch.rs", "engine/src/process/memory/cpu_scalar.rs", "engine/src/process/memory/scalar/cpu_write.rs", "engine/src/process/wasm/memory/cpu_write.rs", "engine/src/abi/wasm/exports/memory/cpu_write.rs", "engine/tests/support/wasm/arena.mjs"].map(path=>[path,hash(readFileSync(join(root,path)))]));
 const provenance = {cpu_source_sha256: cpuSourcePins,
   counts, generated_modules: modules, actual_generated_run_calls: actualRuns, snapshot_guard_calls: snapshotGuards, ram_words_observed: ramWords,
   native_algorithm_cases: scanInputs.length, native_invalid_inputs: invalidOracleInputs.length,
@@ -491,7 +494,7 @@ const provenance = {cpu_source_sha256: cpuSourcePins,
   tools: {node: process.version, clang: execFileSync('clang', ['--version'], {encoding: 'utf8'}).trim(), llvm_objdump: execFileSync('xcrun', ['llvm-objdump', '--version'], {encoding: 'utf8'}).trim()},
   commands: {run: [process.execPath, process.argv[1], enginePath, outputDir, root], assemble: ['clang', ...assemble], disassemble: ['xcrun', ...disassemble], native_compile: ['clang', ...oracleCompile]},
   llvm_fixtures: [...assembled].map(([name, {offset, bytes}]) => ({name, offset, hex: bytes.toString('hex')})),
-  claim: 'actual engine embedded flat32 CMP 39/r, 81/7 imm32, 83/7 sign-imm8 and TEST 85/r, F7/0 imm32; memory LHS/source RHS flags with literal and mathematical anchors; preserved GPRs and full 4236-byte arena; no store import; read-only pages and sampled RAM/code purity; precise Read4 and continuation/lifecycle proof; independent unsigned C/BigInt resident predicate consuming both CMP/JB and TEST/JZ. TEST AF is deterministically zero by existing policy. No hardware, writing memory ISA, browser, title compatibility or performance claim.',
+  claim: 'actual engine embedded flat32 CMP 39/r, 81/7 imm32, 83/7 sign-imm8 and TEST 85/r, F7/0 imm32; memory LHS/source RHS flags with literal and mathematical anchors; preserved GPRs and full 4796-byte arena; no store import; read-only pages and sampled RAM/code purity; precise Read4 and continuation/lifecycle proof; independent unsigned C/BigInt resident predicate consuming both CMP/JB and TEST/JZ. TEST AF is deterministically zero by existing policy. No hardware, writing memory ISA, browser, title compatibility or performance claim.',
 };
 writeFileSync(join(outputDir, 'provenance.json'), JSON.stringify(provenance, null, 2));
 console.log(JSON.stringify({...provenance, generated_module_sha256: generatedHashes.length, llvm_fixtures: provenance.llvm_fixtures.length, artifacts: outputDir}));
