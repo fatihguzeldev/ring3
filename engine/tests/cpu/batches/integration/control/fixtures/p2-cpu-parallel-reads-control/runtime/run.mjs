@@ -1,3 +1,4 @@
+import {generatedImports, attachDetectionApi} from '../../../../../../../support/wasm/binding.mjs';
 import {ARENA_SIZE, createArena} from '../../../../../../../support/wasm/arena.mjs';
 import assert from "node:assert/strict";
 import {createHash} from "node:crypto";
@@ -56,6 +57,7 @@ for (const [index, owner] of ["replacement", "resident"].entries()) {
   const instance = new WebAssembly.Instance(engine.module, {}), ctx = {owner, memory: instance.exports.memory, api: {}};
   for (const name of ["open", "close", "arena_ptr", "map", "upload", "read32", "read8", "compile", "compile_resident", "generation", "module_ptr", "module_len", "guard", "guard_resident", "store8", "store_resident8", "store16", "store_resident16"])
     ctx.api[name] = instance.exports["ring3_abi_v1_" + name];
+ attachDetectionApi(ctx.api, instance.exports);
   for(const name of ["read32", "read8", "store16", "store8", "store_resident16", "store_resident8"]) {ctx.api["cpu_"+name]=instance.exports["ring3_abi_v1_cpu_"+name];assert.equal(ctx.api["cpu_"+name]?.length,name.startsWith("read")?1:name.includes("resident")?6:2,"cpu_"+name);}
  assert.equal(ctx.api.open(3, index + 1, 0x51525354), 0); ctx.base = ctx.api.arena_ptr() >>> 0;
   ctx.expected = createArena(SIZE); ctx.expected.set(state(Array(8).fill(0), 0, 2));
@@ -72,7 +74,7 @@ for (const [index, owner] of ["replacement", "resident"].entries()) {
     ctx.expected.set(words([1, 24, binding.low, binding.high, binding.pointer, binding.length]), 140); check(ctx, "resident receipt only");
   }
   const bytes = Buffer.from(new Uint8Array(ctx.memory.buffer, binding.pointer, binding.length)), module = new WebAssembly.Module(bytes);
-  const names = owner === "replacement" ? ["guard", "cpu_read8", "cpu_store8", "cpu_store16"] : ["guard_resident", "cpu_read8", "cpu_store_resident8", "cpu_store_resident16"];
+  const names = owner === "replacement" ? generatedImports({resident: false, helpers: ["cpu_read8", "cpu_store8", "cpu_store16"]}).slice(1).map(item => item.name) : generatedImports({resident: true, helpers: ["cpu_read8", "cpu_store_resident8", "cpu_store_resident16"]}).slice(1).map(item => item.name);
   assert.deepEqual(WebAssembly.Module.imports(module), [{module: "env", name: "memory", kind: "memory"}, ...names.map(name => ({module: "ring3", name, kind: "function"}))]);
   ctx.run = new WebAssembly.Instance(module, {env: {memory: ctx.memory}, ring3: ctx.api}).exports.run;
   writeFileSync(join(output, `${owner}.wasm`), bytes, {flag: "wx"}); modules.push({owner, ...binding, bytes: bytes.length, sha256: hash(bytes)});
@@ -97,7 +99,7 @@ const raw = Buffer.concat(frames); writeFileSync(join(output, "arenas.bin"), raw
 const cpuSourcePins = Object.fromEntries(["engine/src/abi/memory_helper/cpu.rs", "engine/src/cpu/dbt/wasm/memory/cpu_scalar.rs", "engine/src/cpu/dbt/wasm/emitter.rs", "engine/src/cpu/dbt/wasm/code_fetch.rs", "engine/src/process/memory/cpu_scalar.rs", "engine/src/process/memory/scalar/cpu_write.rs", "engine/src/process/wasm/memory/cpu_write.rs", "engine/src/abi/wasm/exports/memory/cpu_write.rs", "engine/tests/support/wasm/arena.mjs"].map(path=>[path,hash(readFileSync(join(root,path)))]));
 const result = {cpu_source_sha256: cpuSourcePins, status: "ok", engine: {bytes: engine.bytes.length, sha256: engine.sha256}, modules, phases,
   raw: {file: "arenas.bin", frames: frames.length, bytes: raw.length, sha256: hash(raw)},
-  source_sha256: Object.fromEntries(["engine/tests/cpu/batches/integration/control/wasm/reads.rs", "engine/tests/cpu/batches/wasm.rs", "engine/tests/support/wasm.rs", "engine/tests/cpu/batches/wasm.rs", "engine/tests/support/wasm.rs", "engine/tests/cpu/batches/integration/control/fixtures/p2-cpu-parallel-reads-control/runtime/run.mjs", "engine/tests/support/wasm/engine.mjs"].map(path => [path, hash(readFileSync(join(root, path)))])),
+  source_sha256: Object.fromEntries(["engine/tests/cpu/batches/integration/control/wasm/reads.rs", "engine/tests/cpu/batches/wasm.rs", "engine/tests/support/wasm.rs", "engine/tests/cpu/batches/wasm.rs", "engine/tests/support/wasm.rs", "engine/tests/cpu/batches/integration/control/fixtures/p2-cpu-parallel-reads-control/runtime/run.mjs", "engine/tests/support/wasm/engine.mjs", 'engine/tests/support/wasm/binding.mjs'].map(path => [path, hash(readFileSync(join(root, path)))])),
   counts: {owners: 2, modules: 2, generated_calls: 10, retired: 22, byte_divisions: 4, word_control_stores: 4, cmpsb: 2, scasb: 2, byte_stores: 4, fninit: 2, status_ax: 2},
-  claim: "retained CPU across memory BYTE DIV, live FNSTCW m2byte, FNINIT and CMPSB/SCASB/STOSB; Read8/Store8/Store16 imports, full4612-byte arena, literal defined comparison flags/control/destination bytes and sentinels; finite integration, no performance claim"};
+  claim: "retained CPU across memory BYTE DIV, live FNSTCW m2byte, FNINIT and CMPSB/SCASB/STOSB; Read8/Store8/Store16 imports, complete arena-byte arena, literal defined comparison flags/control/destination bytes and sentinels; finite integration, no performance claim"};
 writeFileSync(join(output, "result.json"), JSON.stringify(result, null, 2), {flag: "wx"}); console.log(JSON.stringify({status: result.status, counts: result.counts, output}));

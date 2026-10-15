@@ -1,3 +1,4 @@
+import {detectionGuardName, generatedImports, attachDetectionApi} from '../../../../../../support/wasm/binding.mjs';
 import {createArena} from '../../../../../../support/wasm/arena.mjs';
 import assert from "node:assert/strict";
 import {createHash} from "node:crypto";
@@ -23,7 +24,7 @@ const frames = [], phases = [], modules = [], inputs = [], hosts = [], initialFr
 const paths = [
   "engine/tests/cpu/batches/word/wasm/shift.rs", "engine/tests/cpu/batches/wasm.rs", "engine/tests/support/wasm.rs", "engine/tests/cpu/batches/wasm.rs", "engine/tests/support/wasm.rs",
   "engine/tests/cpu/batches/word/fixtures/p2-cpu-parallel-word-shift/runtime/run.mjs",
-  "engine/tests/support/wasm/engine.mjs",
+  "engine/tests/support/wasm/engine.mjs", 'engine/tests/support/wasm/binding.mjs',
 ];
 const sourcePins = () => Object.fromEntries(paths.map(path => [path, hash(readFileSync(join(root, path)))]));
 const beforeSources = sourcePins();
@@ -105,6 +106,7 @@ for (const owner of ["replacement", "resident"]) {
       "module_ptr", "module_len", "guard", "guard_resident"]) {
       ctx.api[name] = instance.exports["ring3_abi_v1_" + name];
     }
+ attachDetectionApi(ctx.api, instance.exports);
     const openArgs = [1, ...key];
     const openStatus = ctx.api.open(...openArgs);
     assert.equal(openStatus, 0);
@@ -144,11 +146,8 @@ for (const owner of ["replacement", "resident"]) {
     }
     const bytes = Buffer.from(new Uint8Array(ctx.memory.buffer, binding.pointer, binding.length));
     const module = new WebAssembly.Module(bytes);
-    const guard = owner === "replacement" ? "guard" : "guard_resident";
-    assert.deepEqual(WebAssembly.Module.imports(module), [
-      {module: "env", name: "memory", kind: "memory"},
-      {module: "ring3", name: guard, kind: "function"},
-    ]);
+    const guard = detectionGuardName(!(owner === "replacement"));
+    assert.deepEqual(WebAssembly.Module.imports(module), generatedImports({bound: true, resident: !(owner === "replacement"), helpers: []}));
     assert.deepEqual(WebAssembly.Module.exports(module), [{name: "run", kind: "function"}]);
     ctx.run = new WebAssembly.Instance(module, {env: {memory: ctx.memory}, ring3: ctx.api}).exports.run;
     const file = `${owner}-${entries ? "entry" : "explicit"}.wasm`;

@@ -1,3 +1,4 @@
+import {generatedImports, attachDetectionApi} from '../../../../../../support/wasm/binding.mjs';
 import {ARENA_SIZE, createArena} from '../../../../../../support/wasm/arena.mjs';
 import assert from "node:assert/strict";
 import {createHash} from "node:crypto";
@@ -46,6 +47,7 @@ for (const [index, owner] of ["replacement", "resident"].entries()) {
   const instance = new WebAssembly.Instance(engine.module, {}), ctx = {owner, memory: instance.exports.memory, api: {}};
   for (const name of ["open", "close", "arena_ptr", "map", "upload", "read8", "compile", "compile_resident", "generation", "module_ptr", "module_len", "guard", "guard_resident", "store8", "store_resident8"])
     ctx.api[name] = instance.exports["ring3_abi_v1_" + name];
+ attachDetectionApi(ctx.api, instance.exports);
   for(const name of ["read8", "store8", "store_resident8"]) {ctx.api["cpu_"+name]=instance.exports["ring3_abi_v1_cpu_"+name];assert.equal(ctx.api["cpu_"+name]?.length,name.startsWith("read")?1:name.includes("resident")?6:2,"cpu_"+name);}
  assert.equal(ctx.api.open(3, index + 1, 0x51525354), 0); ctx.base = ctx.api.arena_ptr() >>> 0;
   ctx.expected = createArena(SIZE); ctx.expected.set(state(Array(8).fill(0), 0, 2));
@@ -62,7 +64,7 @@ for (const [index, owner] of ["replacement", "resident"].entries()) {
     ctx.expected.set(words([1, 24, binding.low, binding.high, binding.pointer, binding.length]), 140); check(ctx, "resident receipt only");
   }
   const bytes = Buffer.from(new Uint8Array(ctx.memory.buffer, binding.pointer, binding.length)), module = new WebAssembly.Module(bytes);
-  const names = owner === "replacement" ? ["guard", "cpu_read8", "cpu_store8"] : ["guard_resident", "cpu_read8", "cpu_store_resident8"];
+  const names = owner === "replacement" ? generatedImports({resident: false, helpers: ["cpu_read8", "cpu_store8"]}).slice(1).map(item => item.name) : generatedImports({resident: true, helpers: ["cpu_read8", "cpu_store_resident8"]}).slice(1).map(item => item.name);
   assert.deepEqual(WebAssembly.Module.imports(module), [{module: "env", name: "memory", kind: "memory"}, ...names.map(name => ({module: "ring3", name, kind: "function"}))]);
   ctx.run = new WebAssembly.Instance(module, {env: {memory: ctx.memory}, ring3: ctx.api}).exports.run;
   writeFileSync(join(output, `${owner}.wasm`), bytes, {flag: "wx"}); modules.push({owner, ...binding, bytes: bytes.length, sha256: hash(bytes)});
@@ -81,7 +83,7 @@ const raw = Buffer.concat(frames); writeFileSync(join(output, "arenas.bin"), raw
 const cpuSourcePins = Object.fromEntries(["engine/src/abi/memory_helper/cpu.rs", "engine/src/cpu/dbt/wasm/memory/cpu_scalar.rs", "engine/src/cpu/dbt/wasm/emitter.rs", "engine/src/cpu/dbt/wasm/code_fetch.rs", "engine/src/process/memory/cpu_scalar.rs", "engine/src/process/memory/scalar/cpu_write.rs", "engine/src/process/wasm/memory/cpu_write.rs", "engine/src/abi/wasm/exports/memory/cpu_write.rs", "engine/tests/support/wasm/arena.mjs"].map(path=>[path,hash(readFileSync(join(root,path)))]));
 const result = {cpu_source_sha256: cpuSourcePins, status: "ok", engine: {bytes: engine.bytes.length, sha256: engine.sha256}, modules, phases,
   raw: {file: "arenas.bin", frames: frames.length, bytes: raw.length, sha256: hash(raw)},
-  source_sha256: Object.fromEntries(["engine/tests/cpu/batches/integration/wasm/core.rs", "engine/tests/cpu/batches/wasm.rs", "engine/tests/support/wasm.rs", "engine/tests/cpu/batches/wasm.rs", "engine/tests/support/wasm.rs", "engine/tests/cpu/batches/integration/fixtures/p2-cpu-parallel/runtime/run.mjs", "engine/tests/support/wasm/engine.mjs"].map(path => [path, hash(readFileSync(join(root, path)))])),
+  source_sha256: Object.fromEntries(["engine/tests/cpu/batches/integration/wasm/core.rs", "engine/tests/cpu/batches/wasm.rs", "engine/tests/support/wasm.rs", "engine/tests/cpu/batches/wasm.rs", "engine/tests/support/wasm.rs", "engine/tests/cpu/batches/integration/fixtures/p2-cpu-parallel/runtime/run.mjs", "engine/tests/support/wasm/engine.mjs", 'engine/tests/support/wasm/binding.mjs'].map(path => [path, hash(readFileSync(join(root, path)))])),
   counts: {owners: 2, modules: 2, generated_calls: 6, retired: 20, copies: 2},
   claim: "retained CPU across DIV, DF-controlled MOVSB and x87 control; full 4612-byte arena and literal destination byte; finite mixed-lane test, no performance or generic Wasm-body claim"};
 writeFileSync(join(output, "result.json"), JSON.stringify(result, null, 2), {flag: "wx"}); console.log(JSON.stringify({status: result.status, counts: result.counts, output}));

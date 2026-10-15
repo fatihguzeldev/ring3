@@ -1,3 +1,4 @@
+import {detectionGuardName, generatedImports, attachDetectionApi} from '../../../../../../../support/wasm/binding.mjs';
 import {ARENA_SIZE, createArena} from '../../../../../../../support/wasm/arena.mjs';
 import assert from "node:assert/strict";
 import {createHash} from "node:crypto";
@@ -14,7 +15,7 @@ const program = Buffer.from("0fab0b9c580f92c20fbb0b9c5f0f92c20fba33209c5e0f92c2e
 assert.equal(program.length, 27);
 assert.deepEqual(program, readFileSync(join(output, "parallel.x86")), "independent Rust/JS literal program");
 const hash = bytes => createHash("sha256").update(bytes).digest("hex"), frames = [], phases = [], modules = [], ram = [], inputs = [];
-const sourcePaths = ["engine/tests/cpu/batches/flags/stack/wasm/dword.rs", "engine/tests/cpu/batches/wasm.rs", "engine/tests/support/wasm.rs", "engine/tests/cpu/batches/wasm.rs", "engine/tests/support/wasm.rs", "engine/tests/cpu/batches/flags/stack/fixtures/p2-cpu-parallel-bit-flags/runtime/run.mjs", "engine/tests/support/wasm/engine.mjs"];
+const sourcePaths = ["engine/tests/cpu/batches/flags/stack/wasm/dword.rs", "engine/tests/cpu/batches/wasm.rs", "engine/tests/support/wasm.rs", "engine/tests/cpu/batches/wasm.rs", "engine/tests/support/wasm.rs", "engine/tests/cpu/batches/flags/stack/fixtures/p2-cpu-parallel-bit-flags/runtime/run.mjs", "engine/tests/support/wasm/engine.mjs", 'engine/tests/support/wasm/binding.mjs'];
 sourcePaths.push(...["engine/src/abi/memory_helper/cpu.rs", "engine/src/cpu/dbt/wasm/memory/cpu_scalar.rs", "engine/src/cpu/dbt/wasm/emitter.rs", "engine/src/cpu/dbt/wasm/code_fetch.rs", "engine/src/process/memory/cpu_scalar.rs", "engine/src/process/memory/scalar/cpu_write.rs", "engine/src/process/wasm/memory/cpu_write.rs", "engine/src/abi/wasm/exports/memory/cpu_write.rs", "engine/tests/support/wasm/arena.mjs"].filter(path=>!sourcePaths.includes(path)));
 const sourcePins = () => Object.fromEntries(sourcePaths.map(path => [path, hash(readFileSync(join(root, path)))])), beforeSources = sourcePins();
 function record(magic, size, fields = [], version = 1) {
@@ -62,7 +63,8 @@ for (const [index, owner] of ["replacement", "resident"].entries()) {
   const instance = new WebAssembly.Instance(engine.module, {}), ctx = {owner, memory: instance.exports.memory, api: {}};
   for (const name of ["open", "close", "arena_ptr", "map", "upload", "compile", "compile_resident", "generation", "module_ptr", "module_len", "guard", "guard_resident", "read8", "read32", "store32", "store_resident32"])
     ctx.api[name] = instance.exports["ring3_abi_v1_" + name];
-  for(const name of ["read32", "read8", "store32", "store_resident32"]) {ctx.api["cpu_"+name]=instance.exports["ring3_abi_v1_cpu_"+name];assert.equal(ctx.api["cpu_"+name]?.length,name.startsWith("read")?1:name.includes("resident")?6:2,"cpu_"+name);}
+ attachDetectionApi(ctx.api, instance.exports);
+  for(const name of ["read_modify32", "read32", "read8", "store32", "store_resident32"]) {ctx.api["cpu_"+name]=instance.exports["ring3_abi_v1_cpu_"+name];assert.equal(ctx.api["cpu_"+name]?.length,name.startsWith("read")?1:name.includes("resident")?6:2,"cpu_"+name);}
  assert.equal(ctx.api.open(3, index + 1, 0x42464c47), 0); ctx.base = ctx.api.arena_ptr() >>> 0;
   ctx.expected = createArena(SIZE); ctx.expected.set(state(Array(8).fill(0), 0, 2));
   ctx.expected.set(exit(1, 0, 1), 56); ctx.expected.set(helper(0), 100); ctx.expected.set(fpu(), FP); check(ctx, "initialized full arena");
@@ -79,8 +81,8 @@ for (const [index, owner] of ["replacement", "resident"].entries()) {
     ctx.expected.set(words([1, 24, binding.low, binding.high, binding.pointer, binding.length]), 140); check(ctx, "resident receipt only");
   }
   const bytes = Buffer.from(new Uint8Array(ctx.memory.buffer, binding.pointer, binding.length)), module = new WebAssembly.Module(bytes);
-  const guard = owner === "replacement" ? "guard" : "guard_resident", store = owner === "replacement" ? "cpu_store32" : "cpu_store_resident32";
-  assert.deepEqual(WebAssembly.Module.imports(module), [{module: "env", name: "memory", kind: "memory"}, ...[guard, "cpu_read32", store].map(name => ({module: "ring3", name, kind: "function"}))]);
+  const guard = detectionGuardName(!(owner === "replacement")), store = owner === "replacement" ? "cpu_store32" : "cpu_store_resident32";
+  assert.deepEqual(WebAssembly.Module.imports(module), [{module: "env", name: "memory", kind: "memory"}, ...generatedImports({resident: !(owner === "replacement"), helpers: ["cpu_read32", store, "cpu_read_modify32"]}).slice(1).map(item => item.name).map(name => ({module: "ring3", name, kind: "function"}))]);
   ctx.run = new WebAssembly.Instance(module, {env: {memory: ctx.memory}, ring3: ctx.api}).exports.run;
   const file = `${owner}.wasm`; writeFileSync(join(output, file), bytes, {flag: "wx"}); modules.push({owner, file, ...binding, bytes: bytes.length, sha256: hash(bytes)});
   const registers = [0xa53c0011, 31, 0xa53cabcd, DATA, STACK + 4, 0x56789abc, 0xe9876543, 0xf1234567];
@@ -113,5 +115,5 @@ assert.equal(phases.reduce((sum, p) => sum + p.retired, 0), 26); assert.deepEqua
 const result = {status: "ok", engine: {file: "engine.wasm", bytes: engine.bytes.length, sha256: engine.sha256}, modules, phases, ram, inputs,
   raw: {file: "arenas.bin", frames: frames.length, bytes: raw.length, sha256: hash(raw)}, source_sha256: beforeSources,
   counts: {owners: 2, modules: 2, generated_calls: 20, retired: 26, bts: 2, btc: 2, btr: 2, pushfd: 6, pop: 6, setb: 6, jumps: 2, raw_frames: 40, live_ram_bytes: 96, physical_files: 6},
-  claim: "same CPU BTS/BTC/BTR→PUSHFD→POP three distinct full registers→SETB old/currentCF0 and1 witnesses, immediate high bits ignored; ten retained phases/owner without CPU reseeding; all40 physical full4612 arenas and opaqueFP unchanged; 96 selected target/stack/sentinel Read8 diagnostics remain live RAM evidence, not saved RAM pages or performance proof"};
+  claim: "same CPU BTS/BTC/BTR→PUSHFD→POP three distinct full registers→SETB old/currentCF0 and1 witnesses, immediate high bits ignored; ten retained phases/owner without CPU reseeding; all40 physical complete arena arenas and opaqueFP unchanged; 96 selected target/stack/sentinel Read8 diagnostics remain live RAM evidence, not saved RAM pages or performance proof"};
 writeFileSync(join(output, "result.json"), JSON.stringify(result, null, 2), {flag: "wx"}); console.log(JSON.stringify({status: result.status, counts: result.counts, output}));

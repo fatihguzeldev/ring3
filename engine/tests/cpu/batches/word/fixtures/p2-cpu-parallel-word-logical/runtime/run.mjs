@@ -1,3 +1,4 @@
+import {detectionGuardName, generatedImports, attachDetectionApi} from '../../../../../../support/wasm/binding.mjs';
 import {createArena} from '../../../../../../support/wasm/arena.mjs';
 import assert from "node:assert/strict";
 import {createHash} from "node:crypto";
@@ -15,7 +16,7 @@ assert.equal(program.length, 38);
 assert.deepEqual(program, readFileSync(join(output, "word-logical.x86")), "independent Rust/JS literal bank");
 writeFileSync(join(output, "engine.wasm"), engine.bytes, {flag: "wx"});
 const hash = bytes => createHash("sha256").update(bytes).digest("hex"), frames = [], phases = [], modules = [], inputs = [], hosts = [], initialFrames = [];
-const paths = ["engine/tests/cpu/batches/word/wasm/logical.rs", "engine/tests/cpu/batches/wasm.rs", "engine/tests/support/wasm.rs", "engine/tests/cpu/batches/wasm.rs", "engine/tests/support/wasm.rs", "engine/tests/cpu/batches/word/fixtures/p2-cpu-parallel-word-logical/runtime/run.mjs", "engine/tests/support/wasm/engine.mjs"];
+const paths = ["engine/tests/cpu/batches/word/wasm/logical.rs", "engine/tests/cpu/batches/wasm.rs", "engine/tests/support/wasm.rs", "engine/tests/cpu/batches/wasm.rs", "engine/tests/support/wasm.rs", "engine/tests/cpu/batches/word/fixtures/p2-cpu-parallel-word-logical/runtime/run.mjs", "engine/tests/support/wasm/engine.mjs", 'engine/tests/support/wasm/binding.mjs'];
 const sourcePins = () => Object.fromEntries(paths.map(path => [path, hash(readFileSync(join(root, path)))])), beforeSources = sourcePins();
 function record(magic, size, fields = [], version = 1) {
   const bytes = Buffer.alloc(size); bytes.write(magic); bytes.writeUInt16LE(version, 4);
@@ -56,6 +57,7 @@ for (const owner of ["replacement", "resident"]) for (const entries of [false, t
   const instance = new WebAssembly.Instance(engine.module, {}), ctx = {owner, entries, context, memory: instance.exports.memory, api: {}, started: false};
   for (const name of ["open", "close", "arena_ptr", "map", "protect", "upload", "compile", "compile_entries", "compile_resident", "compile_resident_entries", "generation", "module_ptr", "module_len", "guard", "guard_resident"])
     ctx.api[name] = instance.exports["ring3_abi_v1_" + name];
+ attachDetectionApi(ctx.api, instance.exports);
   const openArgs = [1, ...key], openStatus = ctx.api.open(...openArgs); assert.equal(openStatus, 0);
   hosts.push({context, name: "open", args: openArgs, status: openStatus}); ctx.base = ctx.api.arena_ptr() >>> 0;
   ctx.expected = createArena(SIZE); ctx.expected.set(state(Array(8).fill(0), 0, 2));
@@ -77,8 +79,8 @@ for (const owner of ["replacement", "resident"]) for (const entries of [false, t
     ctx.expected.set(words32([1, 24, binding.low, binding.high, binding.pointer, binding.length]), 140); check(ctx, "resident receipt only");
   }
   const bytes = Buffer.from(new Uint8Array(ctx.memory.buffer, binding.pointer, binding.length)), module = new WebAssembly.Module(bytes);
-  const guard = owner === "replacement" ? "guard" : "guard_resident";
-  assert.deepEqual(WebAssembly.Module.imports(module), [{module: "env", name: "memory", kind: "memory"}, {module: "ring3", name: guard, kind: "function"}]);
+  const guard = detectionGuardName(!(owner === "replacement"));
+  assert.deepEqual(WebAssembly.Module.imports(module), generatedImports({bound: true, resident: !(owner === "replacement"), helpers: []}));
   assert.deepEqual(WebAssembly.Module.exports(module), [{name: "run", kind: "function"}]);
   ctx.run = new WebAssembly.Instance(module, {env: {memory: ctx.memory}, ring3: ctx.api}).exports.run;
   const file = `${owner}-${entries ? "entry" : "explicit"}.wasm`; writeFileSync(join(output, file), bytes, {flag: "wx"});
