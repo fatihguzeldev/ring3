@@ -95,6 +95,31 @@ impl AsyncRuntime32 {
 }
 
 impl AsyncRuntime32 {
+    pub(in crate::process::windows::files) fn process_exit_bindings(
+        &self,
+    ) -> Result<Vec<EventBinding32>, FileError32> {
+        let count = self
+            .operations
+            .iter()
+            .try_fold(0usize, |count, operation| {
+                count
+                    .checked_add(operation.events.len())
+                    .ok_or(FileError32::Capacity)
+            })?;
+        let mut bindings = Vec::new();
+        bindings
+            .try_reserve_exact(count)
+            .map_err(|_| FileError32::Allocation)?;
+        for operation in &self.operations {
+            bindings.extend_from_slice(&operation.events);
+        }
+        Ok(bindings)
+    }
+    pub(in crate::process::windows::files) fn commit_process_exit(&mut self) {
+        self.operations.clear();
+        self.retained_bytes = 0;
+        self.wait = None;
+    }
     pub(in crate::process::windows::files) fn cancel_wait(&mut self) {
         self.wait = None;
     }

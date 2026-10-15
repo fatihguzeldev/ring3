@@ -2,6 +2,7 @@ mod cancellation;
 mod cleanup;
 mod handles;
 mod memory;
+mod termination;
 
 use crate::{
     abi::{

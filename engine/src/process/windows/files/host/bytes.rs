@@ -2,13 +2,7 @@ use super::*;
 
 impl EngineInstance {
     pub fn pending_file_request(&self) -> Result<Option<FileReadRequest32>, HostError> {
-        self.memory()?;
-        Ok(self
-            .files
-            .as_ref()
-            .ok_or(HostError::File(FileError32::Unsupported))?
-            .vfs
-            .pending_request())
+        Ok(self.files_storage()?.vfs.pending_request())
     }
     pub fn supply_file_bytes(
         &mut self,
@@ -16,7 +10,7 @@ impl EngineInstance {
         offset: u32,
         bytes: &[u8],
     ) -> Result<(), HostError> {
-        self.files_mut()?
+        self.files_storage_mut()?
             .vfs
             .supply_bytes(request, offset, bytes)
             .map_err(HostError::File)
@@ -66,7 +60,7 @@ impl EngineInstance {
 
 impl EngineInstance {
     pub fn cancel_file_request(&mut self, request: FileReadRequest32) -> Result<(), HostError> {
-        self.files_mut()?
+        self.files_storage_mut()?
             .vfs
             .cancel_request(request)
             .map_err(HostError::File)

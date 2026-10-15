@@ -22,6 +22,13 @@ pub(in crate::process::windows::files) struct OrdinaryRuntime32 {
 }
 
 impl OrdinaryRuntime32 {
+    pub(in crate::process::windows::files) fn terminate(&mut self) {
+        self.finds.clear();
+        self.locks.clear();
+        self.copies.clear();
+        self.directories.clear();
+    }
+
     pub(in crate::process::windows::files) fn new(
         max_finds: usize,
         max_locks: usize,

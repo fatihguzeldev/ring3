@@ -38,6 +38,9 @@ impl PreparedKernelHandle32 {
     }
 }
 impl KernelFileHandles32 {
+    pub(super) fn commit_process_exit(&mut self) {
+        self.entries.clear();
+    }
     pub(super) fn new(max_handles: u32) -> Result<Self, FileError32> {
         if max_handles == 0 || max_handles > 65_536 {
             return Err(FileError32::InvalidLimits);

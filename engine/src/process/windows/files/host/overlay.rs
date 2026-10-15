@@ -6,18 +6,14 @@ impl EngineInstance {
         epoch: u64,
         index: usize,
     ) -> Result<Option<OverlayEntry32>, HostError> {
-        self.memory()?;
-        let files = self
-            .files
-            .as_ref()
-            .ok_or(HostError::File(FileError32::Unsupported))?;
+        let files = self.files_storage()?;
         if files.vfs.epoch() != epoch {
             return Err(HostError::File(FileError32::Stale));
         }
         files.vfs.overlay_entry(index).map_err(HostError::File)
     }
     pub fn acknowledge_file_overlay(&mut self, epoch: u64, revision: u64) -> Result<(), HostError> {
-        self.files_mut()?
+        self.files_storage_mut()?
             .vfs
             .acknowledge_overlay(epoch, revision)
             .map_err(HostError::File)
@@ -30,7 +26,7 @@ impl EngineInstance {
         offset: u64,
         output: &mut [u8],
     ) -> Result<Option<usize>, HostError> {
-        let files = self.files_mut()?;
+        let files = self.files_storage_mut()?;
         if files.vfs.epoch() != epoch {
             return Err(HostError::File(FileError32::Stale));
         }
@@ -58,11 +54,7 @@ impl EngineInstance {
         offset: u32,
         output: &mut [u16],
     ) -> Result<usize, HostError> {
-        self.memory()?;
-        let files = self
-            .files
-            .as_ref()
-            .ok_or(HostError::File(FileError32::Unsupported))?;
+        let files = self.files_storage()?;
         if files.vfs.epoch() != epoch || files.vfs.revision() != revision {
             return Err(HostError::File(FileError32::Stale));
         }

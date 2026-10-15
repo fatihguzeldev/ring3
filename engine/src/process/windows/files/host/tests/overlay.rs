@@ -118,7 +118,6 @@ fn cancelling_host_export_request_reclaims_stage_and_rejects_late_supply() {
 #[test]
 fn cancelling_export_fetch_does_not_cancel_identical_guest_read_stage() {
     let mut engine = engine();
-    let epoch = engine.files_epoch().unwrap();
     let path = utf16("C:\\independent");
     let file = engine
         .mount_file(

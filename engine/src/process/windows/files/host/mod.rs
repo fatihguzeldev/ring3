@@ -3,6 +3,7 @@ mod environment;
 mod input;
 mod mounting;
 mod overlay;
+mod storage;
 
 use super::*;
 use crate::{

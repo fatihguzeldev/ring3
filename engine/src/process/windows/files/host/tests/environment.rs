@@ -29,10 +29,12 @@ fn large_environment_is_staged_atomically_with_stale_and_busy_guards() {
                 .is_ok()
         );
     }
-    let mut environment = FileEnvironment32::default();
-    environment.search_path = (0..100)
-        .map(|index| utf16(&format!("C:\\search{index:03}{}", "x".repeat(50))))
-        .collect();
+    let environment = FileEnvironment32 {
+        search_path: (0..100)
+            .map(|index| utf16(&format!("C:\\search{index:03}{}", "x".repeat(50))))
+            .collect(),
+        ..Default::default()
+    };
     let paths = [
         &environment.application_directory,
         &environment.windows_directory,
@@ -66,8 +68,10 @@ fn large_environment_is_staged_atomically_with_stale_and_busy_guards() {
         engine.finish_file_environment(epoch, pending.token),
         Err(HostError::File(FileError32::Stale))
     );
-    let mut invalid = FileEnvironment32::default();
-    invalid.temp_directory = utf16("relative");
+    let invalid = FileEnvironment32 {
+        temp_directory: utf16("relative"),
+        ..Default::default()
+    };
     assert_eq!(
         engine.set_files_environment(epoch, invalid),
         Err(HostError::File(FileError32::InvalidName))

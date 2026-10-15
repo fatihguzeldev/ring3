@@ -15,7 +15,7 @@ pub(crate) fn file_overlay_entry(epoch_low: u32, epoch_high: u32, index: u32) ->
             encode_file_overlay(entry.as_ref(), &mut bytes)
         }
         .map_err(|_| HostError::Infrastructure)?;
-        output(instance, &bytes)
+        storage_output(instance, &bytes)
     })
 }
 #[allow(clippy::too_many_arguments)]
@@ -31,6 +31,7 @@ pub(crate) fn read_file_overlay(
     length: u32,
 ) -> u32 {
     mutate(|instance| {
+        storage_guard(instance)?;
         if length > 4064 {
             return Err(HostError::InvalidRequest);
         }
@@ -49,7 +50,7 @@ pub(crate) fn read_file_overlay(
         bytes[8..12].copy_from_slice(&(size as u32).to_le_bytes());
         bytes[16..20].copy_from_slice(&(count.unwrap_or(0) as u32).to_le_bytes());
         bytes[20..24].copy_from_slice(&u32::from(count.is_none()).to_le_bytes());
-        output(instance, &bytes[..size])
+        storage_output(instance, &bytes[..size])
     })
 }
 pub(crate) fn acknowledge_file_overlay(
@@ -77,6 +78,7 @@ pub(crate) fn read_file_overlay_path(
     length: u32,
 ) -> u32 {
     mutate(|instance| {
+        storage_guard(instance)?;
         if length > 2032 {
             return Err(HostError::InvalidRequest);
         }
@@ -99,6 +101,6 @@ pub(crate) fn read_file_overlay_path(
         for (index, &unit) in units[..count].iter().enumerate() {
             bytes[32 + index * 2..34 + index * 2].copy_from_slice(&unit.to_le_bytes());
         }
-        output(instance, &bytes[..size])
+        storage_output(instance, &bytes[..size])
     })
 }

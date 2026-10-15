@@ -225,6 +225,9 @@ impl EngineInstance {
     }
 
     pub(super) fn publish_process_exit(&mut self, code: u32) -> Result<(), HostError> {
+        if !self.finalize_file_process_exit()? {
+            return Ok(());
+        }
         let mut bytes = [0; EXIT_SIZE];
         encode_exit_v4(
             &ExecutionExit {
@@ -239,6 +242,7 @@ impl EngineInstance {
         self.pending_call = None;
         self.module_windows_reply = None;
         self.callback = None;
+        self.windows_replies.clear();
         Ok(())
     }
 }

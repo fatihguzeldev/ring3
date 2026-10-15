@@ -11,7 +11,7 @@ pub(crate) fn configure_files(length: u32) -> u32 {
     })
 }
 pub(crate) fn files_info() -> u32 {
-    mutate(|instance| status(instance, instance.files_epoch()?, [0; 5]))
+    mutate(|instance| storage_status(instance, instance.files_epoch()?, [0; 5]))
 }
 pub(crate) fn set_files_time(
     epoch_low: u32,
