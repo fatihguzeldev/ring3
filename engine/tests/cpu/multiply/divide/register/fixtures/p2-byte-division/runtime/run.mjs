@@ -1,3 +1,4 @@
+import {generatedImports, attachDetectionApi} from '../../../../../../../support/wasm/binding.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
@@ -24,7 +25,8 @@ function fresh(owner,entries){
   stats.contexts++;
   if(owner==='standalone'){const c={owner,entries,memory:new WebAssembly.Memory({initial:1}),base:128};refresh(c).bytes.set(initial,c.base);return c;}
   const instance=new WebAssembly.Instance(engineModule,{}),names=['open','close','arena_ptr','map','upload','compile','compile_entries','compile_resident','compile_resident_entries','generation','module_ptr','module_len','guard','guard_resident'];
-  const api=Object.fromEntries(names.map(n=>[n,instance.exports[`ring3_abi_v1_${n}`]]));for(const fn of Object.values(api))assert.equal(typeof fn,'function');
+  const api=Object.fromEntries(names.map(n=>[n,instance.exports[`ring3_abi_v1_${n}`]]));
+ attachDetectionApi(api, instance.exports);for(const fn of Object.values(api))assert.equal(typeof fn,'function');
   const c={owner,entries,api,memory:instance.exports.memory,low:stats.contexts,high:0xc9476000};
   assert.equal(api.open(1,c.low,c.high),0);c.base=api.arena_ptr()>>>0;assert.deepEqual(arena(c),initial);const before=arena(c);assert.equal(api.map(PC,1,7),0);assert.deepEqual(arena(c),before);return c;
 }
@@ -44,7 +46,7 @@ function compile(c,name,pc,specs){
     }
     generated=Buffer.from(refresh(c).bytes.subarray(binding.pointer,binding.pointer+binding.length));
   }
-  const module=new WebAssembly.Module(generated);assert.deepEqual(WebAssembly.Module.imports(module),[{module:'env',name:'memory',kind:'memory'},...(c.owner==='standalone'?[]:[{module:'ring3',name:c.owner==='replacement'?'guard':'guard_resident',kind:'function'}])]);
+  const module=new WebAssembly.Module(generated);assert.deepEqual(WebAssembly.Module.imports(module),generatedImports({bound: !(c.owner==='standalone'), resident: !(c.owner==='replacement'), helpers: []}));
   const label=`${c.owner}-${c.entries?'entries':'extent'}-${name}`;writeFileSync(join(output,`actual-${label}.wasm`),generated,{flag:'wx'});modules.push({label,bytes:generated.length,sha256:hash(generated)});
   return {...binding,run:new WebAssembly.Instance(module,{env:{memory:c.memory},...(c.api?{ring3:c.api}:{})}).exports.run};
 }
@@ -80,5 +82,5 @@ for(const owner of ['standalone','replacement','resident'])for(const entries of 
 }
 assert.equal(stats.contexts,18);assert.equal(stats.numeric_cases,6*2*8*16*2);assert.equal(stats.success+stats.faults,stats.numeric_cases);assert.equal(stats.unsigned_ah_success,0);assert.ok(stats.signed_ah_success>0);assert.equal(stats.preflight,24);assert.equal(stats.prefix_faults,6);assert.equal(stats.source_repairs,6);assert.equal(stats.controls,16);
 const raw=Buffer.concat(frames);writeFileSync(join(output,'arenas.bin'),raw,{flag:'wx'});
-const result={status:'ok',stats,modules,observations,raw:{file:'arenas.bin',frames:frames.length,bytes:raw.length,sha256:hash(raw)},engine_sha256:hash(engineBytes),arena_bytes:SIZE,tools:{node:process.version,v8:process.versions.v8},sources:Object.fromEntries(['engine/tests/cpu/multiply/divide/register/native/byte.rs', 'engine/tests/cpu/multiply/native.rs', 'engine/tests/support/cpu/prefix/byte.rs', 'engine/tests/support/cpu/prefix/admission.rs', 'engine/tests/cpu/multiply/native.rs','engine/tests/cpu/multiply/divide/register/wasm/byte.rs', 'engine/tests/cpu/multiply/wasm.rs', 'engine/tests/cpu/multiply/wasm.rs','engine/tests/cpu/multiply/divide/register/fixtures/p2-byte-division/runtime/run.mjs'].map(p=>[p,hash(readFileSync(join(root,p)))])),scope:'prefix-free register BYTE DIV/IDIV; six extent/entry standalone/replacement/resident profiles, all8 byte aliases, sixteen authored numeric rows/two FLAGS seeds, literal quotient/remainder and AL/AH anchors. Current CPU split DIV AL→MOV AH/AL→IDIV AH→DIV AL→zero fault and separate CL-only repaired retry; full arena default opaque x87 tail preserved. V5 precise zero/range faults, no Wasm trap, preflight/budget/cancel/NeedCode/stale/closed. No memory/word/x64 division, arbitrary raw80 seed, hardware undefined FLAGS, browser/performance/fullCI claim.'};
+const result={status:'ok',stats,modules,observations,raw:{file:'arenas.bin',frames:frames.length,bytes:raw.length,sha256:hash(raw)},engine_sha256:hash(engineBytes),arena_bytes:SIZE,tools:{node:process.version,v8:process.versions.v8},sources:Object.fromEntries(['engine/tests/cpu/multiply/divide/register/native/byte.rs', 'engine/tests/cpu/multiply/native.rs', 'engine/tests/support/cpu/prefix/byte.rs', 'engine/tests/support/cpu/prefix/admission.rs', 'engine/tests/cpu/multiply/native.rs','engine/tests/cpu/multiply/divide/register/wasm/byte.rs', 'engine/tests/cpu/multiply/wasm.rs', 'engine/tests/cpu/multiply/wasm.rs','engine/tests/cpu/multiply/divide/register/fixtures/p2-byte-division/runtime/run.mjs', 'engine/tests/support/wasm/binding.mjs'].map(p=>[p,hash(readFileSync(join(root,p)))])),scope:'prefix-free register BYTE DIV/IDIV; six extent/entry standalone/replacement/resident profiles, all8 byte aliases, sixteen authored numeric rows/two FLAGS seeds, literal quotient/remainder and AL/AH anchors. Current CPU split DIV AL→MOV AH/AL→IDIV AH→DIV AL→zero fault and separate CL-only repaired retry; full arena default opaque x87 tail preserved. V5 precise zero/range faults, no Wasm trap, preflight/budget/cancel/NeedCode/stale/closed. No memory/word/x64 division, arbitrary raw80 seed, hardware undefined FLAGS, browser/performance/fullCI claim.'};
 writeFileSync(join(output,'result.json'),JSON.stringify(result,null,2),{flag:'wx'});console.log(JSON.stringify({status:result.status,stats,engine_sha256:result.engine_sha256,output}));
