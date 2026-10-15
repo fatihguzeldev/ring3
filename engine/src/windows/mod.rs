@@ -6,6 +6,8 @@ mod calling_convention;
 mod modules;
 mod provider;
 
+pub mod com;
+
 pub(crate) use api::ProviderProfile;
 pub use api::WindowsApi32;
 pub use callback_frame::CallbackFrame32;
