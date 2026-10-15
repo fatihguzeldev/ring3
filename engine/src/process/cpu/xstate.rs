@@ -275,6 +275,7 @@ mod tests {
         blocked(&mut engine, id, HostError::Call(CallError::Busy));
         let outer = engine.pending_call.take().unwrap();
         engine.callback = Some(SuspendedCallback {
+            parent: None,
             outer,
             record: SuspendedRecord::Resident {
                 record: crate::abi::resident_callback::ResidentCallbackRecord32 {

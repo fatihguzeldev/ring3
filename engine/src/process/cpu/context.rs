@@ -192,6 +192,7 @@ mod tests {
         };
         let expected = outer.state;
         engine.callback = Some(SuspendedCallback {
+            parent: None,
             record: SuspendedRecord::Replacement(CallbackRecord32 {
                 token: 2,
                 outer_token: 1,

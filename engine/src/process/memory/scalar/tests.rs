@@ -333,6 +333,7 @@ fn byte_store_resident_callback_uses_only_authorized_active_current_owner() {
     let token = outer.token + 1;
     // private native activity model; this is not callback execution or installation evidence.
     engine.callback = Some(SuspendedCallback {
+        parent: None,
         outer,
         record: SuspendedRecord::Resident {
             record: crate::abi::resident_callback::ResidentCallbackRecord32 {
@@ -409,6 +410,7 @@ fn byte_store_resident_callback_uses_only_authorized_active_current_owner() {
     let outer = engine.pending_call.take().unwrap();
     let token = outer.token + 1;
     engine.callback = Some(SuspendedCallback {
+        parent: None,
         outer,
         record: SuspendedRecord::Replacement(crate::abi::callback::CallbackRecord32 {
             token,
@@ -694,6 +696,7 @@ fn word_store_callback_requires_active_resident_and_current_outer_authority() {
     let outer = engine.pending_call.take().unwrap();
     let token = outer.token + 1;
     engine.callback = Some(SuspendedCallback {
+        parent: None,
         outer,
         record: SuspendedRecord::Resident {
             record: crate::abi::resident_callback::ResidentCallbackRecord32 {
@@ -842,6 +845,7 @@ fn byte_exchange_callback_requires_the_active_resident_and_current_outer_owner()
     let outer = engine.pending_call.take().unwrap();
     let token = outer.token + 1;
     engine.callback = Some(SuspendedCallback {
+        parent: None,
         outer,
         record: SuspendedRecord::Resident {
             record: crate::abi::resident_callback::ResidentCallbackRecord32 {
@@ -990,6 +994,7 @@ fn word_exchange_callback_requires_the_active_resident_and_current_outer_owner()
     let outer = engine.pending_call.take().unwrap();
     let token = outer.token + 1;
     engine.callback = Some(SuspendedCallback {
+        parent: None,
         outer,
         record: SuspendedRecord::Resident {
             record: crate::abi::resident_callback::ResidentCallbackRecord32 {
@@ -1215,6 +1220,7 @@ fn compare_exchange_callback_authority_and_lifecycle_precede_all_effects() {
     let outer = engine.pending_call.take().unwrap();
     let token = outer.token + 1;
     engine.callback = Some(SuspendedCallback {
+        parent: None,
         outer,
         record: SuspendedRecord::Resident {
             record: crate::abi::resident_callback::ResidentCallbackRecord32 {
@@ -1400,6 +1406,7 @@ fn exchange_add_callback_authority_and_lifecycle_precede_all_effects() {
     let outer = engine.pending_call.take().unwrap();
     let token = outer.token + 1;
     engine.callback = Some(SuspendedCallback {
+        parent: None,
         outer,
         record: SuspendedRecord::Resident {
             record: crate::abi::resident_callback::ResidentCallbackRecord32 {
@@ -1585,6 +1592,7 @@ fn byte_compare_exchange_callback_authority_and_lifecycle_precede_all_effects() 
     let outer = engine.pending_call.take().unwrap();
     let token = outer.token + 1;
     engine.callback = Some(SuspendedCallback {
+        parent: None,
         outer,
         record: SuspendedRecord::Resident {
             record: crate::abi::resident_callback::ResidentCallbackRecord32 {
@@ -1772,6 +1780,7 @@ fn byte_exchange_add_callback_authority_and_lifecycle_precede_all_effects() {
     let outer = engine.pending_call.take().unwrap();
     let token = outer.token + 1;
     engine.callback = Some(SuspendedCallback {
+        parent: None,
         outer,
         record: SuspendedRecord::Resident {
             record: crate::abi::resident_callback::ResidentCallbackRecord32 {
@@ -1961,6 +1970,7 @@ fn word_compare_exchange_callback_authority_and_lifecycle_precede_all_effects() 
     let outer = engine.pending_call.take().unwrap();
     let token = outer.token + 1;
     engine.callback = Some(SuspendedCallback {
+        parent: None,
         outer,
         record: SuspendedRecord::Resident {
             record: crate::abi::resident_callback::ResidentCallbackRecord32 {
@@ -2153,6 +2163,7 @@ fn word_exchange_add_callback_authority_and_lifecycle_precede_all_effects() {
     let outer = engine.pending_call.take().unwrap();
     let token = outer.token + 1;
     engine.callback = Some(SuspendedCallback {
+        parent: None,
         outer,
         record: SuspendedRecord::Resident {
             record: crate::abi::resident_callback::ResidentCallbackRecord32 {
@@ -2343,6 +2354,7 @@ fn bit_test_set_callback_authority_and_lifecycle_precede_all_effects() {
     let outer = engine.pending_call.take().unwrap();
     let token = outer.token + 1;
     engine.callback = Some(SuspendedCallback {
+        parent: None,
         outer,
         record: SuspendedRecord::Resident {
             record: crate::abi::resident_callback::ResidentCallbackRecord32 {
@@ -2526,6 +2538,7 @@ fn bit_test_reset_callback_authority_and_lifecycle_precede_all_effects() {
     let outer = engine.pending_call.take().unwrap();
     let token = outer.token + 1;
     engine.callback = Some(SuspendedCallback {
+        parent: None,
         outer,
         record: SuspendedRecord::Resident {
             record: crate::abi::resident_callback::ResidentCallbackRecord32 {
@@ -2709,6 +2722,7 @@ fn atomic_or_callback_authority_and_lifecycle_precede_all_effects() {
     let outer = engine.pending_call.take().unwrap();
     let token = outer.token + 1;
     engine.callback = Some(SuspendedCallback {
+        parent: None,
         outer,
         record: SuspendedRecord::Resident {
             record: crate::abi::resident_callback::ResidentCallbackRecord32 {
@@ -2892,6 +2906,7 @@ fn atomic_and_callback_authority_and_lifecycle_precede_all_effects() {
     let outer = engine.pending_call.take().unwrap();
     let token = outer.token + 1;
     engine.callback = Some(SuspendedCallback {
+        parent: None,
         outer,
         record: SuspendedRecord::Resident {
             record: crate::abi::resident_callback::ResidentCallbackRecord32 {
@@ -3077,6 +3092,7 @@ fn atomic_xor_callback_authority_and_lifecycle_precede_all_effects() {
     let outer = engine.pending_call.take().unwrap();
     let token = outer.token + 1;
     engine.callback = Some(SuspendedCallback {
+        parent: None,
         outer,
         record: SuspendedRecord::Resident {
             record: crate::abi::resident_callback::ResidentCallbackRecord32 {

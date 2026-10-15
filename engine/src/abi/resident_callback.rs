@@ -155,7 +155,6 @@ fn validate_result(record: &ResidentCallbackResult32) -> Result<(), AbiError> {
         || record.token <= record.outer_token
         || record.outer_unit_id == 0
         || record.callback_unit_id == 0
-        || record.outer_unit_id == record.callback_unit_id
     {
         return Err(AbiError::CallbackFrame);
     }

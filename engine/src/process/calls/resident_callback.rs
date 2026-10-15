@@ -3,7 +3,7 @@
 use crate::process::{
     CallError, EngineInstance, HostError,
     calls::call::PendingOwner,
-    calls::callback::{SuspendedCallback, SuspendedRecord},
+    calls::callback::{MAX_CALLBACK_DEPTH, SuspendedCallback, SuspendedRecord},
     cpu::context::ExtendedCpuState,
 };
 use crate::{
@@ -56,7 +56,7 @@ impl EngineInstance {
         }
         self.guard_resident_unit(key, active_unit_id)?;
         let target = self.guard_resident_unit(key, target_id)?;
-        if target_id == record.outer_unit_id {
+        if target_id == record.outer_unit_id && callback.parent.is_none() {
             return Err(HostError::InvalidRequest);
         }
         ExtendedCpuState::capture(self.arena())?;
@@ -95,6 +95,15 @@ impl EngineInstance {
     }
 
     pub fn finish_resident_callback(
+        &mut self,
+        key: u64,
+        callback_id: u64,
+        token: u32,
+    ) -> Result<ResidentCallbackResult32, HostError> {
+        self.finish_provider_resident_callback(key, callback_id, token)
+    }
+
+    pub(in crate::process) fn finish_provider_resident_callback(
         &mut self,
         key: u64,
         callback_id: u64,
@@ -147,7 +156,11 @@ impl EngineInstance {
         let mut output = [0; RESIDENT_CALLBACK_RESULT_SIZE];
         encode_resident_callback_result(&result, &mut output)
             .map_err(|_| HostError::Infrastructure)?;
-        let callback = self.callback.take().unwrap();
+        let mut callback = self.callback.take().unwrap();
+        self.callback = callback.parent.take().map(|parent| {
+            let [parent] = *parent;
+            parent
+        });
         let arena = self.arena.as_mut().get_mut();
         arena[STATE_OFFSET..STATE_OFFSET + STATE_SIZE].copy_from_slice(&callback.outer.state);
         arena[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE].copy_from_slice(&callback.outer.exit);
@@ -182,7 +195,7 @@ impl EngineInstance {
         if authorized || self.pending_call.is_some() {
             return Err(HostError::Call(CallError::Busy));
         }
-        if record.outer_unit_id == callback_id {
+        if record.outer_unit_id == callback_id && callback.parent.is_none() {
             return Err(HostError::Call(CallError::InvalidRequest));
         }
         let mut initial = *callback.outer.frame.state();
@@ -274,15 +287,45 @@ impl EngineInstance {
         return_id: u32,
         arguments: &[u32],
     ) -> Result<ResidentCallbackRecord32, HostError> {
+        self.begin_provider_resident_callback(
+            key,
+            outer_id,
+            callback_id,
+            outer_token,
+            entry_pc,
+            return_pc,
+            return_id,
+            arguments,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(in crate::process) fn begin_provider_resident_callback(
+        &mut self,
+        key: u64,
+        outer_id: u64,
+        callback_id: u64,
+        outer_token: u32,
+        entry_pc: u32,
+        return_pc: u32,
+        return_id: u32,
+        arguments: &[u32],
+    ) -> Result<ResidentCallbackRecord32, HostError> {
         self.resident_callback_request(key, outer_id, callback_id, arguments.len())?;
         let outer = self
             .pending_call
             .as_ref()
             .ok_or(HostError::Call(CallError::InvalidToken))?;
-        if outer_token == 0
-            || outer.token != outer_token
-            || outer.owner != PendingOwner::Resident(outer_id)
-        {
+        let expected_owner =
+            self.callback
+                .as_ref()
+                .map_or(PendingOwner::Resident(outer_id), |callback| {
+                    PendingOwner::ResidentCallback {
+                        unit_id: outer_id,
+                        callback_token: callback.token(),
+                    }
+                });
+        if outer_token == 0 || outer.token != outer_token || outer.owner != expected_owner {
             return Err(HostError::Call(CallError::InvalidToken));
         }
         if self.arena()[STATE_OFFSET..STATE_OFFSET + STATE_SIZE] != outer.state
@@ -349,6 +392,12 @@ impl EngineInstance {
         )
         .map_err(|_| HostError::Infrastructure)?;
         encode_resident_callback(&record, &mut output).map_err(|_| HostError::Infrastructure)?;
+        let mut parent_storage = Vec::new();
+        if self.callback.is_some() {
+            parent_storage
+                .try_reserve_exact(1)
+                .map_err(|_| HostError::Infrastructure)?;
+        }
         self.memory
             .as_mut()
             .unwrap()
@@ -360,6 +409,13 @@ impl EngineInstance {
             | (u32::from(self.resident_bytes(outer_id).is_err()) << 1);
         output[28..32].copy_from_slice(&record.outcome.to_le_bytes());
         let outer = self.pending_call.take().unwrap();
+        let parent = self.callback.take().map(|callback| {
+            parent_storage.push(callback);
+            parent_storage
+                .into_boxed_slice()
+                .try_into()
+                .unwrap_or_else(|_| unreachable!("one parent callback slot was reserved"))
+        });
         self.callback = Some(SuspendedCallback {
             record: SuspendedRecord::Resident {
                 record,
@@ -367,6 +423,7 @@ impl EngineInstance {
                 active_unit_id: callback_id,
             },
             outer,
+            parent,
         });
         self.call_token = token;
         let arena = self.arena.as_mut().get_mut();
@@ -386,7 +443,17 @@ impl EngineInstance {
     ) -> Result<(), HostError> {
         self.guard_resident_unit(key, outer_id)?;
         self.guard_resident_unit(key, callback_id)?;
-        if self.callback.is_some() {
+        if let Some(callback) = &self.callback
+            && (callback.depth() >= MAX_CALLBACK_DEPTH
+                || callback.authorized_resident_active_id() != Some(outer_id)
+                || self.pending_call.as_ref().is_none_or(|pending| {
+                    pending.owner
+                        != PendingOwner::ResidentCallback {
+                            unit_id: outer_id,
+                            callback_token: callback.token(),
+                        }
+                }))
+        {
             return Err(HostError::Call(CallError::Busy));
         }
         if count > MAX_STACK_WORDS {
@@ -396,6 +463,10 @@ impl EngineInstance {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "callback/nesting.rs"]
+mod nesting;
 
 #[cfg(test)]
 mod tests {

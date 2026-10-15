@@ -279,6 +279,7 @@ fn pending_and_unauthorized_callback_authority_precede_all_new_guest_checks() {
     blocked(&mut e, id);
     let outer = e.pending_call.take().unwrap();
     e.callback = Some(SuspendedCallback {
+        parent: None,
         outer,
         record: SuspendedRecord::Resident {
             record: crate::abi::resident_callback::ResidentCallbackRecord32 {

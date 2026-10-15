@@ -220,10 +220,6 @@ fn resident_result_rejects_malformed_headers_reserved_fields_and_identity_withou
             callback_unit_id: 0,
             ..good
         },
-        ResidentCallbackResult32 {
-            callback_unit_id: good.outer_unit_id,
-            ..good
-        },
     ];
     for record in invalid_records {
         let mut output = [0x5a; 48];
@@ -262,4 +258,18 @@ fn resident_result_rejects_malformed_headers_reserved_fields_and_identity_withou
         );
         assert_eq!(output, vec![0x5a; length]);
     }
+}
+
+#[test]
+fn nested_resident_result_accepts_same_unit_identity_without_weakening_tokens() {
+    let mut record = result_record(42);
+    record.callback_unit_id = record.outer_unit_id;
+    let mut bytes = [0; 48];
+    encode_resident_callback_result(&record, &mut bytes).unwrap();
+    assert_eq!(decode_resident_callback_result(&bytes), Ok(record));
+    record.token = record.outer_token;
+    assert_eq!(
+        encode_resident_callback_result(&record, &mut bytes),
+        Err(AbiError::CallbackFrame)
+    );
 }

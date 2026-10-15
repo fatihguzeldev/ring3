@@ -315,6 +315,7 @@ fn raw_configuration_respects_pending_call_callback_and_closed_authority() {
     assert_eq!(engine.segment_descriptors, table);
     let outer = engine.pending_call.take().unwrap();
     engine.callback = Some(SuspendedCallback {
+        parent: None,
         outer,
         record: SuspendedRecord::Replacement(crate::abi::callback::CallbackRecord32 {
             token: 2,

@@ -118,6 +118,7 @@ fn pending() -> PendingCall {
 
 fn callback() -> SuspendedCallback {
     SuspendedCallback {
+        parent: None,
         outer: pending(),
         record: SuspendedRecord::Replacement(CallbackRecord32 {
             token: 42,

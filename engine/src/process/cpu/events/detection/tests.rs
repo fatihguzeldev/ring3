@@ -460,6 +460,7 @@ fn pending_call_and_callback_token_drift_do_not_consume_the_ready_application_ev
     ));
     let outer = engine.pending_call.take().unwrap();
     engine.callback = Some(SuspendedCallback {
+        parent: None,
         record: SuspendedRecord::Replacement(CallbackRecord32 {
             token: 2,
             outer_token: 1,

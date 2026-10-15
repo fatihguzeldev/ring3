@@ -22,7 +22,10 @@ use crate::{
 pub(in crate::process) struct SuspendedCallback {
     pub(in crate::process) record: SuspendedRecord,
     pub(in crate::process) outer: PendingCall,
+    pub(in crate::process) parent: Option<Box<[SuspendedCallback; 1]>>,
 }
+
+pub(in crate::process) const MAX_CALLBACK_DEPTH: usize = 32;
 
 #[derive(Clone, Copy)]
 pub(in crate::process) enum SuspendedRecord {
@@ -35,6 +38,26 @@ pub(in crate::process) enum SuspendedRecord {
 }
 
 impl SuspendedCallback {
+    pub(in crate::process) fn depth(&self) -> usize {
+        1 + self.parent.as_ref().map_or(0, |parent| parent[0].depth())
+    }
+
+    pub(in crate::process) fn contains_outer_token(&self, token: u32) -> bool {
+        self.outer.token == token
+            || self
+                .parent
+                .as_ref()
+                .is_some_and(|parent| parent[0].contains_outer_token(token))
+    }
+
+    pub(in crate::process) fn matches_any_return(&self, pc: u32, id: u32) -> bool {
+        self.matches_return(pc, id)
+            || self
+                .parent
+                .as_ref()
+                .is_some_and(|parent| parent[0].matches_any_return(pc, id))
+    }
+
     pub(in crate::process) fn token(&self) -> u32 {
         match self.record {
             SuspendedRecord::Replacement(record) => record.token,
@@ -77,10 +100,6 @@ impl SuspendedCallback {
         }
     }
 
-    pub(in crate::process) fn outer_token(&self) -> u32 {
-        self.outer.token
-    }
-
     pub(in crate::process) fn matches_return(&self, pc: u32, id: u32) -> bool {
         let (return_pc, return_id) = match self.record {
             SuspendedRecord::Replacement(record) => (record.return_pc, record.return_id),
@@ -121,6 +140,28 @@ impl EngineInstance {
 
     #[allow(clippy::too_many_arguments)]
     pub fn begin_callback(
+        &mut self,
+        key: u64,
+        generation: u32,
+        outer_token: u32,
+        entry_pc: u32,
+        return_pc: u32,
+        return_id: u32,
+        arguments: &[u32],
+    ) -> Result<CallbackRecord32, HostError> {
+        self.begin_provider_callback(
+            key,
+            generation,
+            outer_token,
+            entry_pc,
+            return_pc,
+            return_id,
+            arguments,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(in crate::process) fn begin_provider_callback(
         &mut self,
         key: u64,
         generation: u32,
@@ -199,6 +240,13 @@ impl EngineInstance {
         .map_err(|_| HostError::Infrastructure)?;
         encode_callback(&record, &mut output).map_err(|_| HostError::Infrastructure)?;
 
+        let mut parent_storage = Vec::new();
+        if self.callback.is_some() {
+            parent_storage
+                .try_reserve_exact(1)
+                .map_err(|_| HostError::Infrastructure)?;
+        }
+
         self.memory
             .as_mut()
             .unwrap()
@@ -210,9 +258,17 @@ impl EngineInstance {
             output[28..32].copy_from_slice(&1_u32.to_le_bytes());
         }
         let outer = self.pending_call.take().unwrap();
+        let parent = self.callback.take().map(|callback| {
+            parent_storage.push(callback);
+            parent_storage
+                .into_boxed_slice()
+                .try_into()
+                .unwrap_or_else(|_| unreachable!("one parent callback slot was reserved"))
+        });
         self.callback = Some(SuspendedCallback {
             record: SuspendedRecord::Replacement(record),
             outer,
+            parent,
         });
         self.call_token = token;
         let arena = self.arena.as_mut().get_mut();
@@ -223,6 +279,15 @@ impl EngineInstance {
     }
 
     pub fn finish_callback(
+        &mut self,
+        key: u64,
+        generation: u32,
+        token: u32,
+    ) -> Result<CallbackRecord32, HostError> {
+        self.finish_provider_callback(key, generation, token)
+    }
+
+    pub(in crate::process) fn finish_provider_callback(
         &mut self,
         key: u64,
         generation: u32,
@@ -265,7 +330,11 @@ impl EngineInstance {
         };
         let mut output = [0; CALLBACK_RECORD_SIZE];
         encode_callback(&record, &mut output).map_err(|_| HostError::Infrastructure)?;
-        let callback = self.callback.take().unwrap();
+        let mut callback = self.callback.take().unwrap();
+        self.callback = callback.parent.take().map(|parent| {
+            let [parent] = *parent;
+            parent
+        });
         let arena = self.arena.as_mut().get_mut();
         arena[STATE_OFFSET..STATE_OFFSET + STATE_SIZE].copy_from_slice(&callback.outer.state);
         arena[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE].copy_from_slice(&callback.outer.exit);
@@ -288,7 +357,11 @@ impl EngineInstance {
         {
             return Err(call_error(CallError::InvalidToken));
         }
-        let callback = self.callback.take().unwrap();
+        let mut callback = self.callback.take().unwrap();
+        self.callback = callback.parent.take().map(|parent| {
+            let [parent] = *parent;
+            parent
+        });
         let arena = self.arena.as_mut().get_mut();
         arena[STATE_OFFSET..STATE_OFFSET + STATE_SIZE].copy_from_slice(&callback.outer.state);
         arena[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE].copy_from_slice(&callback.outer.exit);
@@ -299,7 +372,14 @@ impl EngineInstance {
 
     fn callback_request(&self, key: u64, generation: u32, count: usize) -> Result<(), HostError> {
         self.guard_artifact(key, generation)?;
-        if self.callback.is_some() {
+        if let Some(callback) = &self.callback
+            && (callback.depth() >= MAX_CALLBACK_DEPTH
+                || !matches!(callback.record, SuspendedRecord::Replacement(record) if record.generation == generation)
+                || self.pending_call.as_ref().is_none_or(|pending| {
+                    pending.owner != PendingOwner::Replacement(generation)
+                        || callback.contains_outer_token(pending.token)
+                }))
+        {
             return Err(call_error(CallError::Busy));
         }
         if count > MAX_STACK_WORDS {

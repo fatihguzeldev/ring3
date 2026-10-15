@@ -940,8 +940,9 @@ fn module_callback_busy_cancel_state_and_terminal_priority_preserve_saved_author
             exit: pending.exit,
             extended: pending.extended,
         };
-        // typed suspended ownership control; no callback guest execution is claimed.
+        // a different generation cannot authorize this pending owner.
         f.engine.callback = Some(SuspendedCallback {
+            parent: None,
             outer,
             record: SuspendedRecord::Replacement(crate::abi::callback::CallbackRecord32 {
                 token: token + 1,
@@ -954,7 +955,7 @@ fn module_callback_busy_cancel_state_and_terminal_priority_preserve_saved_author
                 return_id: 0x1357,
                 stack_words: 0,
                 result: 0,
-                generation: f.engine.generation,
+                generation: f.engine.generation.checked_add(1).unwrap(),
             }),
         });
         let before = owners(&f);

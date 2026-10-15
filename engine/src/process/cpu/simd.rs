@@ -183,6 +183,7 @@ mod tests {
         assert_eq!(engine.arena(), before);
         let outer = engine.pending_call.take().unwrap();
         engine.callback = Some(SuspendedCallback {
+            parent: None,
             outer,
             record: SuspendedRecord::Resident {
                 record: crate::abi::resident_callback::ResidentCallbackRecord32 {

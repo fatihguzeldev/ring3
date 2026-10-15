@@ -320,7 +320,7 @@ impl EngineInstance {
         if self
             .callback
             .as_ref()
-            .is_some_and(|callback| callback.matches_return(state.eip, id))
+            .is_some_and(|callback| callback.matches_any_return(state.eip, id))
         {
             return Err(HostError::Call(CallError::InvalidStop));
         }
@@ -413,7 +413,7 @@ impl EngineInstance {
         if self
             .callback
             .as_ref()
-            .is_some_and(|callback| callback.outer_token() == token)
+            .is_some_and(|callback| callback.contains_outer_token(token))
         {
             return Err(HostError::Call(CallError::Busy));
         }
@@ -484,7 +484,7 @@ impl EngineInstance {
         if self
             .callback
             .as_ref()
-            .is_some_and(|callback| callback.outer_token() == token)
+            .is_some_and(|callback| callback.contains_outer_token(token))
         {
             return Err(HostError::Call(CallError::Busy));
         }
