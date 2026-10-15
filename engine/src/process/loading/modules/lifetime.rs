@@ -266,6 +266,47 @@ impl EngineInstance {
         })
     }
 
+    pub(in crate::process) fn file_mapping_reservations(
+        &self,
+    ) -> Result<Vec<PageRange>, HostError> {
+        let mut ranges = Vec::new();
+        ranges
+            .try_reserve_exact(
+                self.virtual_allocations.len() + self.modules.loaded.iter().count() + 3,
+            )
+            .map_err(|_| HostError::Memory(crate::memory::MemoryError::Allocation))?;
+        ranges.extend_from_slice(&self.virtual_allocations);
+        for module in self.modules.loaded.iter() {
+            ranges.push(
+                PageRange::new(
+                    crate::memory::GuestAddress(module.base()),
+                    module.image_size().div_ceil(crate::memory::PAGE_SIZE),
+                )
+                .map_err(HostError::Memory)?,
+            );
+        }
+        if let Some(image) = self.image {
+            ranges.push(
+                PageRange::new(
+                    crate::memory::GuestAddress(image.image_base),
+                    image.image_size.div_ceil(crate::memory::PAGE_SIZE),
+                )
+                .map_err(HostError::Memory)?,
+            );
+        }
+        if let Some(thread) = &self.modules.thread {
+            for (start, end) in thread.reservations() {
+                ranges.push(
+                    PageRange::new(
+                        crate::memory::GuestAddress(start as u32),
+                        ((end - start) / u64::from(crate::memory::PAGE_SIZE)) as u32,
+                    )
+                    .map_err(HostError::Memory)?,
+                );
+            }
+        }
+        Ok(ranges)
+    }
     pub(in crate::process) fn module_reservation_end(&self, range: PageRange) -> Option<u64> {
         let start = range.first as u64 * u64::from(crate::memory::PAGE_SIZE);
         let end = start + range.count as u64 * u64::from(crate::memory::PAGE_SIZE);

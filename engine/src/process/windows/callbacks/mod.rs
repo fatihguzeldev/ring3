@@ -17,6 +17,7 @@ pub enum WindowsCallbackProvider32 {
     D3D8,
     DirectSound,
     DirectInput,
+    Files,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

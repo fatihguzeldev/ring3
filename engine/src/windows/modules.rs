@@ -11,6 +11,16 @@ pub fn kernel32_module(preferred_base: u32) -> SystemModule32 {
                 ordinal: None,
                 target: SystemExportTarget32::Gate(api.id()),
             })
+            .chain(
+                super::files::FileApi32::ALL
+                    .iter()
+                    .copied()
+                    .map(|api| SystemExport32 {
+                        name: Some(api.name().into()),
+                        ordinal: None,
+                        target: SystemExportTarget32::Gate(api.id()),
+                    }),
+            )
             .collect(),
     }
 }

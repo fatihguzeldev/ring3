@@ -33,6 +33,7 @@ pub enum HostError {
     Synchronization(crate::windows::synchronization::SynchronizationError32),
     DSound(crate::process::windows::dsound::DSoundError32),
     DirectInput(crate::process::windows::dinput::DirectInputError32),
+    File(crate::files::FileError32),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -42,6 +43,7 @@ pub enum StoreCompletion {
 }
 
 pub struct EngineInstance {
+    pub(in crate::process) files: Option<crate::process::windows::files::FileRuntime32>,
     pub(in crate::process) memory: Option<AddressSpace>,
     pub(in crate::process) arena: Pin<Box<[u8]>>,
     pub(in crate::process) artifact: Option<CompiledRegion>,
@@ -101,6 +103,7 @@ impl EngineInstance {
         arena.resize(ARENA_SIZE, 0);
         arena::initialize(&mut arena).map_err(|_| HostError::Infrastructure)?;
         Ok(Self {
+            files: None,
             memory: Some(memory),
             arena: Box::into_pin(arena.into_boxed_slice()),
             artifact: None,
@@ -166,6 +169,7 @@ impl EngineInstance {
     }
 
     pub fn close(&mut self) {
+        self.files = None;
         self.d3d8 = None;
         self.d3d8_reply = None;
         self.synchronization = None;

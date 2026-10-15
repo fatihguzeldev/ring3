@@ -76,6 +76,41 @@ impl EngineInstance {
                 self.accept_user32_outcome(outcome, error)?;
                 let _ = self.sync_windows_input();
             }
+            WindowsCallbackProvider32::Files => {
+                self.memory()?
+                    .ensure_transaction_versions(1)
+                    .map_err(HostError::Memory)?;
+                use crate::process::windows::files::FileCallOutcome32;
+                let cleanup = self.prepare_file_callback_cleanup(reply.continuation)?;
+                let outcome = self
+                    .files
+                    .as_mut()
+                    .ok_or(HostError::InvalidRequest)?
+                    .complete_file_callback(
+                        self.memory.as_mut().ok_or(HostError::Closed)?,
+                        reply.continuation,
+                        result,
+                    );
+                let outcome = outcome.map_err(HostError::File)?;
+                match outcome {
+                    FileCallOutcome32::Return { value, last_error } => {
+                        self.commit_file_callback_cleanup(cleanup);
+                        let last = self.windows_replies.last_mut().unwrap();
+                        last.last_error = last_error;
+                        last.stage = ReplyStage32::Complete(value);
+                    }
+                    FileCallOutcome32::Callback(request) => {
+                        validate_request(request)?;
+                        if request.provider != WindowsCallbackProvider32::Files {
+                            return Err(HostError::Infrastructure);
+                        }
+                        let last = self.windows_replies.last_mut().unwrap();
+                        last.continuation = request.continuation;
+                        last.stage = ReplyStage32::Ready(request);
+                    }
+                    _ => return Err(HostError::Infrastructure),
+                }
+            }
             WindowsCallbackProvider32::D3D8
             | WindowsCallbackProvider32::DirectSound
             | WindowsCallbackProvider32::DirectInput => {
@@ -89,7 +124,9 @@ impl EngineInstance {
                     WindowsCallbackProvider32::DirectInput => {
                         self.resume_dinput_callback(reply.continuation, result)?
                     }
-                    WindowsCallbackProvider32::User32 => unreachable!(),
+                    WindowsCallbackProvider32::User32 | WindowsCallbackProvider32::Files => {
+                        unreachable!()
+                    }
                 };
                 let last = self.windows_replies.last_mut().unwrap();
                 match outcome {

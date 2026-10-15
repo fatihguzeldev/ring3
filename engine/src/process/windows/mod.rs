@@ -7,6 +7,7 @@ pub(super) mod callbacks;
 pub(super) mod d3d8;
 pub(super) mod dinput;
 pub(super) mod dsound;
+pub(super) mod files;
 pub(super) mod modules;
 pub(super) mod objects;
 mod strings;

@@ -18,6 +18,12 @@ pub fn windows_gate_info(id: u32) -> Option<WindowsGateInfo32> {
             stack_words: api.stack_words(),
         });
     }
+    if let Some(api) = crate::windows::files::FileApi32::from_id(id) {
+        return Some(WindowsGateInfo32 {
+            convention: api.convention(),
+            stack_words: api.stack_words(),
+        });
+    }
     if let Some(api) = crate::windows::user32::User32Api32::from_id(id) {
         return Some(WindowsGateInfo32 {
             convention: crate::windows::CallingConvention32::Stdcall,
@@ -156,7 +162,8 @@ impl EngineInstance {
         let ExitReason::Gate { id } = exit.reason else {
             return Err(HostError::Infrastructure);
         };
-        if self.try_complete_synchronization_call(owner, token, id, frame)?
+        if self.try_complete_file_call(owner, token, id, frame)?
+            || self.try_complete_synchronization_call(owner, token, id, frame)?
             || self.try_complete_user32_call(owner, token, id, frame)?
             || self.try_complete_d3d8_call(owner, token, id, frame)?
             || self.try_complete_dsound_call(owner, token, id, frame)?

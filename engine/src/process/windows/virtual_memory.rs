@@ -110,7 +110,22 @@ impl EngineInstance {
     ) -> Result<(), HostError> {
         let success = Self::prepare_completed_call(frame.complete(1))?;
         let failure = Self::prepare_completed_call(frame.complete(0))?;
-        if !self.module_image_contains_range(range)
+        let mapped = match self.validate_file_mapping_protection(range, permissions) {
+            Ok(mapped) => mapped,
+            Err(error) => {
+                self.publish_windows_thread(thread.protection_failed(
+                    if error == crate::files::FileError32::AccessDenied {
+                        87
+                    } else {
+                        error.win32()
+                    },
+                ))?;
+                self.publish_prepared_call(failure);
+                return Ok(());
+            }
+        };
+        if !mapped
+            && !self.module_image_contains_range(range)
             && !self.virtual_allocations.iter().any(|allocation| {
                 range.first >= allocation.first
                     && range.first + range.count <= allocation.first + allocation.count

@@ -157,6 +157,13 @@ impl EngineInstance {
                         api == CreateEventW,
                     )?)
                 };
+                if let Some(name) = name.as_deref()
+                    && self
+                        .file_mapping_name_conflict(name)
+                        .map_err(HostError::Synchronization)?
+                {
+                    return Err(HostError::Synchronization(Error::InvalidHandle));
+                }
                 let (handle, existed) = self
                     .synchronization_mut()?
                     .create_event(args[1] != 0, args[2] != 0, inherit, name.as_deref())
@@ -168,6 +175,12 @@ impl EngineInstance {
                     return Err(HostError::Synchronization(Error::InvalidName));
                 }
                 let name = decoding::name(self.memory()?, args[2], api == OpenEventW)?;
+                if self
+                    .file_mapping_name_conflict(&name)
+                    .map_err(HostError::Synchronization)?
+                {
+                    return Err(HostError::Synchronization(Error::InvalidHandle));
+                }
                 let handle = self
                     .synchronization_mut()?
                     .open_event(args[0], args[1] != 0, &name)
@@ -187,31 +200,43 @@ impl EngineInstance {
                 success(1, None)
             }
             DuplicateHandle => self.duplicate_event_call(args),
-            WaitForSingleObject | WaitForSingleObjectEx => self
-                .synchronization_mut()?
-                .wait(
-                    &[args[0]],
-                    WaitMode32::Any,
-                    args[1],
-                    api == WaitForSingleObjectEx && args[2] != 0,
-                    None,
-                )
-                .map_err(HostError::Synchronization),
+            WaitForSingleObject | WaitForSingleObjectEx => {
+                let mut handles = [args[0]];
+                self.with_kernel_wait_handles(&mut handles, |engine, handles| {
+                    engine
+                        .synchronization_mut()?
+                        .wait(
+                            handles,
+                            WaitMode32::Any,
+                            args[1],
+                            api == WaitForSingleObjectEx && args[2] != 0,
+                            None,
+                        )
+                        .map_err(HostError::Synchronization)
+                })
+            }
             WaitForMultipleObjects | WaitForMultipleObjectsEx => {
-                let (handles, count) = decoding::handles(self.memory()?, args[1], args[0])?;
-                self.synchronization_mut()?
-                    .wait(
-                        &handles[..count],
-                        if args[2] != 0 {
-                            WaitMode32::All
-                        } else {
-                            WaitMode32::Any
-                        },
-                        args[3],
-                        api == WaitForMultipleObjectsEx && args[4] != 0,
-                        None,
-                    )
-                    .map_err(HostError::Synchronization)
+                let (mut handles, count) = decoding::handles(self.memory()?, args[1], args[0])?;
+                let original = handles;
+                self.with_kernel_wait_handles(&mut handles[..count], |engine, handles| {
+                    engine
+                        .synchronization_mut()?
+                        .wait_projected(
+                            crate::windows::synchronization::WaitHandles32 {
+                                original: &original[..count],
+                                projected: handles,
+                            },
+                            if args[2] != 0 {
+                                WaitMode32::All
+                            } else {
+                                WaitMode32::Any
+                            },
+                            args[3],
+                            api == WaitForMultipleObjectsEx && args[4] != 0,
+                            None,
+                        )
+                        .map_err(HostError::Synchronization)
+                })
             }
             Sleep | SleepEx => self
                 .synchronization_mut()?
@@ -223,10 +248,18 @@ impl EngineInstance {
                     None,
                 )
                 .map_err(HostError::Synchronization),
-            SignalObjectAndWait => self
-                .synchronization_mut()?
-                .signal_and_wait(args[0], args[1], args[2], args[3] != 0)
-                .map_err(HostError::Synchronization),
+            SignalObjectAndWait => {
+                self.synchronization()?
+                    .prepare_signal_handles(&[args[0]])
+                    .map_err(HostError::Synchronization)?;
+                let mut handles = [args[1]];
+                self.with_kernel_wait_handles(&mut handles, |engine, handles| {
+                    engine
+                        .synchronization_mut()?
+                        .signal_and_wait(args[0], handles[0], args[2], args[3] != 0)
+                        .map_err(HostError::Synchronization)
+                })
+            }
             _ => Err(HostError::InvalidRequest),
         }
     }
@@ -286,30 +319,36 @@ impl EngineInstance {
         if flags & !7 != 0 || mask & !0x7fff != 0 || count > 63 {
             return Err(HostError::Synchronization(Error::InvalidWait));
         }
-        let (handles, count) = decoding::handles(self.memory()?, address, count)?;
-        let queue = self
-            .user32
-            .as_ref()
-            .ok_or(HostError::Synchronization(Error::Unsupported))?
-            .wait_queue_status();
-        let result = self
-            .synchronization_mut()?
-            .wait_with_messages(
-                &handles[..count],
-                if flags & 1 != 0 {
-                    WaitMode32::All
-                } else {
-                    WaitMode32::Any
-                },
-                timeout,
-                flags & 2 != 0,
-                MessageWait32 {
-                    mask,
-                    input_available: flags & 4 != 0,
-                },
-                queue,
-            )
-            .map_err(HostError::Synchronization)?;
+        let (mut handles, count) = decoding::handles(self.memory()?, address, count)?;
+        let original = handles;
+        let result = self.with_kernel_wait_handles(&mut handles[..count], |engine, handles| {
+            let queue = engine
+                .user32
+                .as_ref()
+                .ok_or(HostError::Synchronization(Error::Unsupported))?
+                .wait_queue_status();
+            engine
+                .synchronization_mut()?
+                .wait_with_messages_projected(
+                    crate::windows::synchronization::WaitHandles32 {
+                        original: &original[..count],
+                        projected: handles,
+                    },
+                    if flags & 1 != 0 {
+                        WaitMode32::All
+                    } else {
+                        WaitMode32::Any
+                    },
+                    timeout,
+                    flags & 2 != 0,
+                    MessageWait32 {
+                        mask,
+                        input_available: flags & 4 != 0,
+                    },
+                    queue,
+                )
+                .map_err(HostError::Synchronization)
+        })?;
         self.user32.as_mut().unwrap().observe_wait_queue(mask);
         Ok(result)
     }
