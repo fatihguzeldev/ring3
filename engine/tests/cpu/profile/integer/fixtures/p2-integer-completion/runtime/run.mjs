@@ -17,8 +17,8 @@ const sourcePaths=['engine/src/cpu/x86/atomic.rs','engine/src/cpu/x86/decode/ato
 const pins=()=>Object.fromEntries(sourcePaths.map(p=>[p,hash(readFileSync(join(root,p)))])),beforePins=pins();
 function record(magic,size,fields,version=1){const b=Buffer.alloc(size);b.write(magic);b.writeUInt16LE(version,4);b.writeUInt16LE(1,6);b.writeUInt32LE(size,8);fields.forEach((v,i)=>b.writeUInt32LE(v>>>0,16+i*4));return b;}
 const state=s=>record('R3ST',56,[...s.r,s.pc,s.flags]);
-const exit=(reason,retired,detail=0,address=0,access=0,length=0)=>record('R3EX',40,[reason,retired,detail,address,access,length],6);
-const packet=(width,status=0,detail=0,address=0,access=0)=>record('R3MH',40,[status,0,detail,address,access,width],7);
+const exit=(reason,retired,detail=0,address=0,access=0,length=0)=>reason===5?record('R3EX',40,[23,retired,4|(access===2?2:0)|(detail===2?1:0),address,access,length],12):record('R3EX',40,[reason,retired,detail,address,access,length],6);
+const packet=(width,status=0,detail=0,address=0,access=0)=>status===1?record('R3MH',40,[9,0,4|(access===2?2:0)|(detail===2?1:0),address,access,width],15):record('R3MH',40,[status,0,detail,address,access,width],7);
 const dwords=values=>{const b=Buffer.alloc(values.length*4);values.forEach((v,i)=>b.writeUInt32LE(v>>>0,4*i));return b;};
 const bytes=(value,width)=>{const b=Buffer.alloc(width);let n=BigInt(value);for(let i=0;i<width;i++){b[i]=Number(n&255n);n>>=8n;}return b;};
 const arena=c=>Buffer.from(new Uint8Array(c.memory.buffer,c.base,SIZE));
@@ -91,7 +91,7 @@ function open(owner,entries,blocks){
  c.binding=owner==='resident'?[c.id,0x494e5447,a.readUInt32LE(148),a.readUInt32LE(152)]:[];
  host(c,owner==='resident'?'segment_load_resident':'segment_load',[...c.binding,5,0x43]);
  const bytes=Buffer.from(new Uint8Array(c.memory.buffer,pointer,length)),module=new WebAssembly.Module(bytes),ring3={...c.api};
- for(const im of WebAssembly.Module.imports(module).filter(x=>x.module==='ring3'&&!x.name.startsWith('guard'))){ring3[im.name]=(...args)=>{
+ for(const im of WebAssembly.Module.imports(module).filter(x=>x.module==='ring3'&&!x.name.startsWith('guard') && x.name !== 'finish_exception_detection')){ring3[im.name]=(...args)=>{
   const before=arena(c),status=c.api[im.name](...args),after=arena(c);
   if(im.name.startsWith('cpu_integer')){const allowed=Buffer.from(before);allowed.set(after.subarray(100,140),100);allowed.set(after.subarray(T,T+24),T);assert.deepEqual(after,allowed,'integer helper writes only packet and 24-byte payload');}
   helpers.push({context:c.id,name:im.name,args:args.map(v=>v>>>0),status,input:before.subarray(T,T+24).toString('hex'),packet:after.subarray(100,140).toString('hex')});return status;
@@ -99,7 +99,7 @@ function open(owner,entries,blocks){
  c.run=new WebAssembly.Instance(module,{env:{memory:c.memory},ring3}).exports.run;
  const file=`module-${c.id}.wasm`;writeFileSync(join(output,file),bytes);modules.push({context:c.id,file,sha256:hash(bytes),bytes:length,imports:WebAssembly.Module.imports(module)});contexts.push({context:c.id,owner,entries});return c;
 }
-function execute(c,label,s,{next=s,reason=1,retired=1,width,source,descriptor,cas=false,timestamp=false,fault,helperReturn=0,helperCount=width===undefined?0:1,budget=1,cancel=0,readByte,legacyPacket,seed=true}={}){
+function execute(c,label,s,{next=s,reason=1,retired=1,width,source,descriptor,cas=false,timestamp=false,fault,helperReturn=fault&&reason===5?23:0,helperCount=width===undefined?0:1,budget=1,cancel=0,readByte,legacyPacket,seed=true}={}){
  if(seed)input(c,0,state(s));else assert.deepEqual(arena(c).subarray(0,56),state(s),label+' resumes the observed CPU without upload');input(c,96,dwords([cancel]));const before=arena(c),start=helpers.length;
  const expected=Buffer.from(before);expected.set(state(next));expected.set(exit(reason,retired,...(fault??[0,0,0,0])),56);
  if(width!==undefined&&helperCount!==0){
@@ -227,11 +227,13 @@ for(const owner of['replacement','resident'])for(const entries of[false,true]){
   blocks.push({pc:0x1f00,bytes:hex('0f31ebfe')});const c=open(owner,entries,blocks);
   for(let i=0;i<batch.length;i++)caseRun(c,blocks[i],batch[i]);host(c,'close');
  }
- // split read precedes any write check; protect/map-only repairs reuse live source and CPU.
+ // RMW preflight uses write intent; map/protect-only repairs reuse live source and CPU.
  const c=open(owner,entries,[{pc:0x1000,bytes:hex('f00101ebfe')}]);let s=cpu(0x1000);s.r[0]=1;s.r[1]=0x5ffe;
  upload(c,0x5ffe,Buffer.from([0xff,0xff]));host(c,'protect',[0x5000,1,1]);
- execute(c,'split ADD read fault precedes earlier read-only byte',s,{width:4,source:1,descriptor:0x400,reason:5,retired:0,fault:[1,0x6000,1,4]});
- host(c,'map',[0x6000,1,3]);execute(c,'split ADD mapping repair exposes write permission',s,{width:4,source:1,descriptor:0x400,reason:5,retired:0,fault:[2,0x5ffe,2,4]});
+ execute(c,'split ADD earlier readonly bytes precede missing tail',s,{width:4,source:1,descriptor:0x400,reason:5,retired:0,fault:[2,0x5ffe,2,4]});
+ host(c,'protect',[0x5000,1,3]);
+ execute(c,'split ADD missing tail faults with write intent',s,{width:4,source:1,descriptor:0x400,reason:5,retired:0,fault:[1,0x6000,2,4]});
+ host(c,'map',[0x6000,1,3]);host(c,'protect',[0x5000,1,1]);execute(c,'split ADD mapped tail retains exact write permission fault',s,{width:4,source:1,descriptor:0x400,reason:5,retired:0,fault:[2,0x5ffe,2,4]});
  host(c,'protect',[0x5000,1,3]);let result=arithmetic('add',4,0xffffn,1,s.flags),next={...s,r:[...s.r],pc:0x1003,flags:result.flags};
  execute(c,'split ADD permission-only retry commits once',s,{next,width:4,source:1,descriptor:0x400});assert.deepEqual(read(c,0x5ffe,4),bytes(0x10000n,4));host(c,'close');
  // all control targets are captured, so a one-instruction budget observes the selected PC.

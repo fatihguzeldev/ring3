@@ -22,9 +22,11 @@ if (scenario) paths.push('engine/src/cpu/x86/decode/execution_faults/tests/fault
 const pins = () => Object.fromEntries(paths.map(path => [path, hash(readFileSync(join(root, path)))]));
 const sourcePins = pins();
 const words = values => {const bytes = Buffer.alloc(values.length * 4); values.forEach((value, i) => bytes.writeUInt32LE(value >>> 0, i * 4)); return bytes;};
-function exit(reason, retired, version = 1) {
+function exit(reason, retired, version = 1, detail = 0) {
+  const pageFault = reason === 5;
+  if (pageFault) {reason = 23; detail = 4 | (access === 2 ? 2 : 0) | (detail === 2 ? 1 : 0);}
   const bytes = Buffer.alloc(40); bytes.write('R3EX'); bytes.writeUInt16LE(version, 4);
-  bytes.writeUInt16LE(1, 6); bytes.writeUInt32LE(40, 8); bytes.set(words([reason, retired, 0, 0, 0, 0]), 16); return bytes;
+  bytes.writeUInt16LE(1, 6); bytes.writeUInt32LE(40, 8); bytes.set(words([reason, retired, detail, 0, 0, 0]), 16); return bytes;
 }
 function open(row, entries) {
   const instance = new WebAssembly.Instance(engine.module, {}), api = {};
@@ -45,10 +47,10 @@ function open(row, entries) {
   let helpers = 0;
   function load() {
     const bytes = moduleBytes(), module = new WebAssembly.Module(bytes);
-    assert.deepEqual(WebAssembly.Module.imports(module), [{module: 'env', name: 'memory', kind: 'memory'}, {module: 'ring3', name: 'guard', kind: 'function'}], 'synthetic faults never call a memory, platform, or numerical helper');
+    assert.deepEqual(WebAssembly.Module.imports(module), [{module: 'env', name: 'memory', kind: 'memory'}, {module: 'ring3', name: 'guard_detect', kind: 'function'}, {module: 'ring3', name: 'finish_exception_detection', kind: 'function'}], 'synthetic faults never call a memory, platform, or numerical helper');
     const file = `module-${modules.length + 1}.wasm`; writeFileSync(join(output, file), bytes, {flag: 'wx'});
     modules.push({label: row.name, entries, file, bytes: bytes.length, sha256: hash(bytes)});
-    const ring3 = Object.fromEntries(WebAssembly.Module.imports(module).filter(item => item.kind === 'function').map(item => [item.name, (...args) => {if (item.name !== 'guard') helpers++; return api[item.name](...args);} ]));
+    const ring3 = Object.fromEntries(WebAssembly.Module.imports(module).filter(item => item.kind === 'function').map(item => [item.name, (...args) => {if (!item.name.startsWith('guard') && item.name !== 'finish_exception_detection') helpers++; return api[item.name](...args);} ]));
     return new WebAssembly.Instance(module, {env: {memory}, ring3}).exports.run;
   }
   const initial = createArena();
@@ -66,7 +68,7 @@ function assertRefusal(c, invoke, label) {
   assert.equal(c.api.generation(), generation); assert.deepEqual(c.moduleBytes(), bytes); refusals++;
 }
 function prepare(c, row) {
-  for (const entries of [false, true]) {
+  for (const entries of row.publicInstruction ? [] : [false, true]) {
     c.put(140, words(entries ? [c.target] : [c.target, row.bytes.length]));
     assertRefusal(c, () => c.api[entries ? 'compile_entries' : 'compile'](1, ...(entries ? [0] : [])), 'public-strict-' + entries);
   }
@@ -84,20 +86,21 @@ function execute(c, fn, row, {flags = 2, shadow = 0, budget = 8, cancel = 0, rea
   c.put(0, before); const expected = Buffer.from(before);
   expected.writeUInt32LE(retired === 0 && [1, 2].includes(reason) ? shadow : 0, 12);
   expected.writeUInt32LE(pc, 48);
-  expected.set(exit(reason, retired, reason === 20 ? 7 : row.baseVersion), 56);
+  expected.set(exit(reason, retired, reason === 20 ? 7 : row.baseVersion, reason === row.reason ? row.detail ?? 0 : 0), 56);
   const calls = c.helpers(); assert.equal(fn(c.base, c.base + 56, budget, c.base + 96), 0, c.label + ' run status');
   assert.deepEqual(c.arena(), expected, c.label + ' precise fault/stop, full CPU, FLAGS, shadow and unrelated arena preservation');
   assert.equal(c.helpers(), calls, 'no guest operand/helper effect before synthetic fault');
   observations.push({label: c.label, flags, shadow, budget, cancel, reason, retired, pc}); runs++;
 }
-const positive = scenario?.positive ?? [
+const positive = (scenario?.positive ?? [
   {name: 'lock-nop-invalid-opcode', bytes: Buffer.from([0xf0, 0x90]), reason: 20, baseVersion: 1},
   {name: 'lock-hlt-invalid-before-privilege', bytes: Buffer.from([0xf0, 0xf4]), reason: 20, baseVersion: 1},
   {name: 'reserved-opcode', bytes: Buffer.from([0x0f, 0x0a]), reason: 20, baseVersion: 1},
   {name: 'cpl3-hlt-general-protection-zero', bytes: Buffer.from([0xf4]), reason: 11, baseVersion: 6},
   {name: 'ignored66-hlt-general-protection-zero', bytes: Buffer.from([0x66, 0xf4]), reason: 11, baseVersion: 6},
   {name: '15-prefixes-general-protection-before-unmapped-successor', bytes: Buffer.alloc(15, 0x2e), target: 0x1ff1, reason: 11, baseVersion: 6},
-];
+]).concat([{name: 'int80-denied-application-vector', bytes: Buffer.from([0xcd, 0x80]), reason: 11, detail: 0x402, baseVersion: 6, publicInstruction: true}],
+  suite === 'privileged' ? [{name: 'absent-wbnoinvd-falls-back-to-privileged-wbinvd', bytes: Buffer.from([0xf3, 0x0f, 0x09]), reason: 11, baseVersion: 6}] : []);
 for (const entries of [false, true]) for (const row of positive) {
   const c = open(row, entries), fn = prepare(c, row);
   execute(c, fn, row);
@@ -119,7 +122,7 @@ for (const entries of [false, true]) {
   const row = {name: 'completed-nop-before-invalid-fault', bytes: Buffer.from([0x90, 0xf0, 0x90]), reason: 20, baseVersion: 1, retired: 1, offset: 1};
   const c = open(row, entries), fn = prepare(c, row); execute(c, fn, row);
 }
-const negatives = scenario?.negatives ?? [
+const negatives = (scenario?.negatives ?? [
   {name: 'valid-unsupported-int80', bytes: Buffer.from([0xcd, 0x80])},
   {name: 'reserved-repne-cli', bytes: Buffer.from([0xf2, 0xfa])},
   {name: 'reserved-rep-sti', bytes: Buffer.from([0xf3, 0xfb])},
@@ -129,15 +132,24 @@ const negatives = scenario?.negatives ?? [
   {name: 'ambiguous15-reserved-opcode', bytes: Buffer.from([...Array(13).fill(0x2e), 0x0f, 0x0a]), target: 0x1ff1},
   {name: 'ambiguous15-needs16th-immediate-byte', bytes: Buffer.from([...Array(11).fill(0x2e), 0xb8, 1, 2, 3]), target: 0x1ff1},
   {name: 'incomplete-fetch-remains-typed-preparation-error', bytes: Buffer.from([0x0f]), target: 0x1fff},
-];
+]).filter(row => !['valid-unsupported-int80', 'distinct-wbnoinvd'].includes(row.name));
 for (const entries of [false, true]) for (const row of negatives) {
   const c = open(row, entries); c.put(140, words([0xdeadbeef, 0xffffffff]));
-  assertRefusal(c, () => c.api.compile_stopped_entry(c.id, KEY_HIGH, c.api.generation()), 'runtime-nonarchitectural-error');
   if (row.name.startsWith('incomplete-fetch')) {
+    const beforeFaultPreparation = c.arena(), generation = c.api.generation();
+    assert.equal(c.api.compile_stopped_entry(c.id, KEY_HIGH, generation), 0, 'unmapped fetch prepares a typed runtime fault');
+    assert.deepEqual(c.arena(), beforeFaultPreparation, 'fetch fault preparation publishes no CPU or helper state');
+    assert.equal(c.api.generation(), generation + 1);
+    assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(c.moduleBytes())), [
+      {module: 'env', name: 'memory', kind: 'memory'},
+      {module: 'ring3', name: 'guard_detect', kind: 'function'},
+      {module: 'ring3', name: 'finish_exception_detection', kind: 'function'},
+      {module: 'ring3', name: 'cpu_fetch_fault', kind: 'function'},
+    ], 'typed runtime fetch uses only the owning fault observation helper');
     assert.equal(c.api.map(0x2000, 1, 7), 0); c.upload(0x2000, Buffer.from([0x0a]));
     const before = c.arena(); assert.equal(c.api.compile_stopped_entry(c.id, KEY_HIGH, c.api.generation()), 0);
     assert.deepEqual(c.arena(), before); execute(c, c.load(), {reason: 20, baseVersion: 1});
-  }
+  } else assertRefusal(c, () => c.api.compile_stopped_entry(c.id, KEY_HIGH, c.api.generation()), 'runtime-nonarchitectural-error');
 }
 assert.deepEqual(pins(), sourcePins, 'execution fault proof sources remain frozen');
 const result = {schema: 1, suite, engineSha256: engine.sha256, sourcePins, contexts, runs, refusals, modules, observations,
