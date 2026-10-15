@@ -491,9 +491,6 @@ fn draw_bindings(
     for stream in bindings.streams {
         output.u32(u32::from(stream.is_some()))?;
         if let Some(stream) = stream {
-            if stream.stride == 0 {
-                return Err(CodecError::InvalidCommand);
-            }
             output.version(stream.resource)?;
             output.u32(stream.stride)?;
         }

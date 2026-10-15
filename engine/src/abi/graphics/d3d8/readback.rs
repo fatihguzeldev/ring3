@@ -119,47 +119,16 @@ pub fn encode_readback_receipt(
 }
 
 pub fn readback_receipt(bytes: &[u8]) -> Result<ReadbackReceipt<'_>, CodecError> {
-    if bytes.len() < HEADER_SIZE {
+    let header = readback_header(bytes.get(..HEADER_SIZE).ok_or(CodecError::Length)?)?;
+    if header.payload_bytes as usize != bytes.len() - HEADER_SIZE {
         return Err(CodecError::Length);
     }
-    if &bytes[..4] != b"R3R8" {
-        return Err(CodecError::Magic);
-    }
-    if u16_at(bytes, 4) != VERSION || u16_at(bytes, 6) != PROFILE {
-        return Err(CodecError::Version);
-    }
-    if u32_at(bytes, 8) as usize != bytes.len()
-        || u32_at(bytes, 12) as usize != bytes.len() - HEADER_SIZE
-    {
-        return Err(CodecError::Length);
-    }
-    let receipt = ReadbackReceipt {
-        id: ReadbackId {
-            epoch: u64_at(bytes, 16),
-            sequence: u64_at(bytes, 24),
-        },
-        source: SurfaceVersion {
-            surface: SurfaceRef {
-                resource: ResourceId {
-                    epoch: u64_at(bytes, 32),
-                    slot: u32_at(bytes, 40),
-                    generation: u32_at(bytes, 44),
-                },
-                subresource: u32_at(bytes, 56),
-            },
-            version: u64_at(bytes, 48),
-        },
-        status: match u32_at(bytes, 60) {
-            0 => ReadbackStatus::Complete,
-            1 => ReadbackStatus::DeviceLost,
-            2 => ReadbackStatus::DeviceRemoved,
-            3 => ReadbackStatus::Allocation,
-            _ => return Err(CodecError::InvalidCommand),
-        },
+    Ok(ReadbackReceipt {
+        id: header.id,
+        source: header.source,
+        status: header.status,
         bytes: &bytes[HEADER_SIZE..],
-    };
-    validate(receipt)?;
-    Ok(receipt)
+    })
 }
 
 fn validate(receipt: ReadbackReceipt<'_>) -> Result<(), CodecError> {

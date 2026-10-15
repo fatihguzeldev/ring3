@@ -5,6 +5,32 @@ use crate::graphics::d3d8::{
 };
 
 #[test]
+fn bound_zero_stride_is_preserved_but_user_zero_stride_is_invalid() {
+    use crate::graphics::d3d8::commands::{
+        Draw, DrawBindings, DrawData, PipelineId, Primitive, StreamResource, Targets,
+    };
+    let mut bindings = DrawBindings::default();
+    bindings.streams[0] = Some(StreamResource {
+        resource: ResourceVersion { id: source().surface.resource, version: 2 },
+        stride: 0,
+    });
+    let mut draw = Draw {
+        pipeline: PipelineId(1), primitive: Primitive::TriangleList, primitive_count: 1,
+        bindings, targets: Targets { color: source(), depth: None },
+        data: DrawData::Vertices { first_vertex: 0 },
+    };
+    let mut bytes = Vec::new();
+    append_payload(&Command::Draw(draw), &mut bytes).unwrap();
+    assert_eq!(u32::from_le_bytes(bytes[112..116].try_into().unwrap()), 0);
+    draw = Draw {
+        pipeline: PipelineId(1), primitive: Primitive::TriangleList, primitive_count: 1,
+        bindings: DrawBindings::default(), targets: Targets { color: source(), depth: None },
+        data: DrawData::UserVertices { stride: 0, vertices: &[] },
+    };
+    assert_eq!(payload_size(&Command::Draw(draw)), Err(CodecError::Length));
+}
+
+#[test]
 fn texture_lod_is_an_immutable_resolved_binding_in_each_job() {
     use crate::graphics::d3d8::commands::{DrawBindings, PipelineId, TextureBinding};
     let mut bindings = DrawBindings::default();
