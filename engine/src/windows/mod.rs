@@ -30,3 +30,5 @@ pub mod ole32;
 pub mod winmm;
 
 pub mod memory;
+
+pub mod exceptions;
