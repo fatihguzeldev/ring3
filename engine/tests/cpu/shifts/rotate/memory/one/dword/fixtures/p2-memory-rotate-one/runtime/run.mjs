@@ -1,3 +1,5 @@
+import {pageFaultExit,pageFaultPacket} from '../../../../../../../../../support/wasm/page-fault.mjs';
+import {generatedImports, attachDetectionApi} from '../../../../../../../../../support/wasm/binding.mjs';
 import {ARENA_SIZE, createArena} from '../../../../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
@@ -88,6 +90,9 @@ function fresh(owner, kind) {
   const arities = {open: 3, close: 0, arena_ptr: 0, map: 3, unmap: 2, protect: 3, upload: 2, read32: 1,
     compile_entries: 2, compile_resident: 1, generation: 0, module_ptr: 0, module_len: 0, guard: 6, guard_resident: 7, store32: 2, store_resident32: 6};
   for (const [name, arity] of Object.entries(arities)) {api[name] = instance.exports[`ring3_abi_v1_${name}`]; assert.equal(typeof api[name], 'function', name); assert.equal(api[name].length, arity, name);}
+ attachDetectionApi(api, instance.exports);
+  api.cpu_read_modify32=instance.exports.ring3_abi_v1_cpu_read_modify32;
+  assert.equal(api.cpu_read_modify32.length,1);
   const ctx = {owner, kind, api, memory: instance.exports.memory, low: ordinal, high: 0xc8401000, expected, pages: new Map(), permissions: new Map()};
   for (const [name,arity] of [["cpu_read32",1],["cpu_store32",2],["cpu_store_resident32",6]]) {api[name]=instance.exports["ring3_abi_v1_"+name];assert.equal(api[name]?.length,arity,name);}
   assert.equal(api.open(7, ctx.low, ctx.high), 0); ctx.base = api.arena_ptr() >>> 0;
@@ -107,7 +112,7 @@ function compile(ctx) {
   }
   refresh(ctx); assert.ok(binding.pointer > 0 && binding.length > 8 && binding.pointer + binding.length <= ctx.bytes.length);
   const bytes = Buffer.from(ctx.bytes.subarray(binding.pointer, binding.pointer + binding.length)), module = new WebAssembly.Module(bytes);
-  const imports = ['guard', 'cpu_read32', 'cpu_store32'].map(name => ctx.owner === 'replacement' ? name : name === 'guard' ? 'guard_resident' : name === 'cpu_store32' ? 'cpu_store_resident32' : name);
+  const imports = generatedImports({resident: ctx.owner !== 'replacement', helpers: ['cpu_read32','cpu_store32','cpu_read_modify32']}).slice(1).map(item => item.name).map(name => ctx.owner === 'replacement' ? name : name === 'cpu_store32' ? 'cpu_store_resident32' : name);
   assert.deepEqual(WebAssembly.Module.imports(module), [{module: 'env', name: 'memory', kind: 'memory'}, ...imports.map(name => ({module: 'ring3', name, kind: 'function'}))]);
   assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]); const child = new WebAssembly.Instance(module, {env: {memory: ctx.memory}, ring3: ctx.api}); assert.equal(child.exports.run.length, 4);
   writeFileSync(join(output, `${ctx.owner}-${ctx.kind}-${counts.contexts}.wasm`), bytes, {flag: 'wx'}); counts.modules++;
@@ -119,8 +124,20 @@ function seed(ctx, registers, pc, flags) {
 }
 function cancel(ctx, value) {ctx.expected.writeUInt32LE(value, 96); refresh(ctx).view.setUint32(ctx.base + 96, value, true);}
 function run(ctx, unit, budget, label, registers, pc, flags, reason = 1, retired = 1, helperBytes, detail = 0, fault = 0, access = 0) {
+  const pageFault = reason === 5 && detail !== 3 ? {
+    errorCode: 6 + Number(detail === 2),
+    address: fault,
+    access: 2,
+    length: 4,
+  } : null;
+  if (pageFault) {
+    assert.ok(detail === 1 || detail === 2, 'declared backing fault');
+    reason = 23;
+    helperBytes = pageFaultPacket(pageFault);
+  }
+
   if (detail === 3 && access && fault > 0xfffffffc) {reason = 11; helperBytes = undefined; detail = 0; fault = 0; access = 0;}
-  check(ctx, `before ${label}`); ctx.expected.set(state(registers, pc, flags)); ctx.expected.set(cpuExit(reason, retired, detail, fault, access), 56);
+  check(ctx, `before ${label}`); ctx.expected.set(state(registers, pc, flags)); ctx.expected.set(pageFault?pageFaultExit({retired,...pageFault}):cpuExit(reason, retired, detail, fault, access), 56);
   if (helperBytes !== undefined) ctx.expected.set(helperBytes, 100);
   assert.equal(unit.run(ctx.base, ctx.base + 56, budget, ctx.base + 96), 0, label); check(ctx, label); counts.generated_calls++;
 }
@@ -261,7 +278,7 @@ const result = {status: 'ok', cpu_source_sha256: cpuSourcePins, engine_sha256: h
     repair_modes: ['permission-only', 'map+value', 'permission+value'], arena_bytes: SIZE, untouched_page: 0x3000, pattern_sha256: hash(pattern),
     banks: Object.fromEntries(Object.entries(banks).map(([kind, bank]) => [kind, {specs: bank.specs, scans: bank.scans, hex: bank.bytes.toString('hex'), sha256: hash(bank.bytes), instructions: 33}])),
     flag_policy: 'CF and OF from count-one rotation after validated Store4; SF, ZF, AF, PF, DF and fixed bit 1 preserved'},
-  test_sha256: Object.fromEntries(['engine/tests/cpu/shifts/rotate/memory/one/dword/wasm.rs', 'engine/tests/cpu/shifts/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/shifts/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/shifts/rotate/memory/one/dword/fixtures/p2-memory-rotate-one/runtime/run.mjs'].map(path => [path, hash(readFileSync(join(root, path)))])),
+  test_sha256: Object.fromEntries(['engine/tests/cpu/shifts/rotate/memory/one/dword/wasm.rs', 'engine/tests/cpu/shifts/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/shifts/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/shifts/rotate/memory/one/dword/fixtures/p2-memory-rotate-one/runtime/run.mjs', 'engine/tests/support/wasm/binding.mjs','engine/tests/support/wasm/page-fault.mjs'].map(path => [path, hash(readFileSync(join(root, path)))])),
   claim: 'flat32 count-one memory ROL/ROR through actual engine-Wasm-generated replacement/resident modules and exact existing Read4/Store4 imports; declared 12 source values at one address with all 128 valid FLAGS, focused old EAX/EDX/ESP base and scaled EAX/EDX index forms, cross-page and final valid word; independent binary-string/literal rotation and widened/literal ADD oracle, first complete rotate state before live SETB AL/SETO DL/JMP without CPU repair; precise Read4/Write4 faults, retired LEA, unrepaired retry zero, eight permission-only repairs and declared map/permission/value repairs at same CPU/module with changed data re-read, overflow separately unrepairable, failed cross-page stores leave full pages unchanged; same-value and changing code-page stores publish successful Store4, new FLAGS/EIP and one retirement with reason 6 before canary, then stale 4 and closed 5; complete 4236-byte arena and current declared pages with explicit host input counters/page hashes; no standalone memory binding, exhaustive operands/EA forms, other counts, carry-through rotate, wider ISA, ABI, PE/provider, SDK/browser, performance or game claim'};
 const resultBytes = Buffer.from(JSON.stringify(result, null, 2)); writeFileSync(join(output, 'result.json'), resultBytes, {flag: 'wx'});
 console.log(JSON.stringify({status: result.status, engine_sha256: result.engine_sha256, result_sha256: hash(resultBytes), counts, output}));

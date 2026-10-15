@@ -1,3 +1,5 @@
+import {pageFaultExit,pageFaultPacket} from '../../../../../../../../../support/wasm/page-fault.mjs';
+import {generatedImports, attachDetectionApi} from '../../../../../../../../../support/wasm/binding.mjs';
 import {ARENA_SIZE, createArena} from '../../../../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
@@ -116,6 +118,9 @@ function fresh(owner, bank) {
     const arities = {cpu_read32: 1, cpu_store32: 2, cpu_store_resident32: 6, open: 3, close: 0, arena_ptr: 0, map: 3, unmap: 2, protect: 3, upload: 2, read32: 1,
       compile_entries: 2, compile_resident: 1, generation: 0, module_ptr: 0, module_len: 0, guard: 6, guard_resident: 7, store32: 2, store_resident32: 6};
     for (const [name, arity] of Object.entries(arities)) {api[name] = instance.exports[`ring3_abi_v1_${name}`]; assert.equal(typeof api[name], 'function', name); assert.equal(api[name].length, arity, name);}
+ attachDetectionApi(api, instance.exports);
+  api.cpu_read_modify32=instance.exports.ring3_abi_v1_cpu_read_modify32;
+  assert.equal(api.cpu_read_modify32.length,1);
     ctx.api = api; ctx.memory = instance.exports.memory; assert.equal(api.open(bank.location === 'memory' ? 7 : 3, ctx.low, ctx.high), 0);
     ctx.base = api.arena_ptr() >>> 0; check(ctx, 'independently initialized arena'); pure(ctx, () => api.map(PC, 1, 7), 'code map');
     ctx.pages.set(PC, Buffer.alloc(4096)); ctx.permissions.set(PC, 7); counts.maps++; dataInput(ctx, PC, bank.bytes); map(ctx, KEEP);
@@ -138,7 +143,7 @@ function compile(ctx, specs = ctx.bank.specs, continuation = false, role = 'c1')
     }
     refresh(ctx); assert.ok(binding.pointer > 0 && binding.length > 8 && binding.length <= 65536 && binding.pointer + binding.length <= ctx.bytes.length);
     bytes = Buffer.from(ctx.bytes.subarray(binding.pointer, binding.pointer + binding.length));
-    imports = (pureModule ? ['guard'] : ['guard', 'cpu_read32', 'cpu_store32']).map(name => ctx.owner === 'replacement' ? name : name === 'guard' ? 'guard_resident' : name === 'cpu_store32' ? 'cpu_store_resident32' : name);
+    imports = (pureModule ? generatedImports({resident: ctx.owner !== 'replacement', helpers: []}).slice(1).map(item => item.name) : generatedImports({resident: ctx.owner !== 'replacement', helpers: ['cpu_read32','cpu_store32','cpu_read_modify32']}).slice(1).map(item => item.name)).map(name => ctx.owner === 'replacement' ? name : name === 'cpu_store32' ? 'cpu_store_resident32' : name);
     writeFileSync(join(output, `${ctx.owner}-${ctx.bank.id}-${ctx.low}-${counts.modules + 1}.wasm`), bytes, {flag: 'wx'});
   }
   assert.ok(bytes.length <= 65536, 'default emitted byte cap'); const module = new WebAssembly.Module(bytes);
@@ -154,10 +159,22 @@ function seed(ctx, registers, pc, flags) {
 }
 function cancel(ctx, value) {ctx.expected.writeUInt32LE(value, 96); refresh(ctx).view.setUint32(ctx.base + 96, value, true);}
 function run(ctx, unit, budget, label, registers, pc, flags, reason = 1, retired = 1, helperBytes, detail = 0, fault = 0, access = 0) {
+  const pageFault = reason === 5 && detail !== 3 ? {
+    errorCode: 6 + Number(detail === 2),
+    address: fault,
+    access: 2,
+    length: 4,
+  } : null;
+  if (pageFault) {
+    assert.ok(detail === 1 || detail === 2, 'declared backing fault');
+    reason = 23;
+    helperBytes = pageFaultPacket(pageFault);
+  }
+
   if (detail === 3 && access && fault > 0xfffffffc) {reason = 11; helperBytes = undefined; detail = 0; fault = 0; access = 0;}
-  check(ctx, `before ${label}`); ctx.expected.set(state(registers, pc, flags)); ctx.expected.set(exit(reason, retired, detail, fault, access, unit.exitVersion), 56);
+  check(ctx, `before ${label}`); ctx.expected.set(state(registers, pc, flags)); ctx.expected.set(pageFault?pageFaultExit({retired,...pageFault}):exit(reason, retired, detail, fault, access, unit.exitVersion), 56);
   if (helperBytes !== undefined) {
-    if (unit.exitVersion === 6) {
+    if (unit.exitVersion === 6 && !pageFault) {
       // generated scalar output only; host seeds and diagnostic replies retain their original codecs.
       helperBytes = Buffer.from(helperBytes); assert.equal(helperBytes.length, 40);
       assert.equal(helperBytes.subarray(0, 4).toString(), 'R3MH');
@@ -394,7 +411,7 @@ const result = {cpu_source_sha256: Object.fromEntries(cpuSourcePaths.map(path =>
     fault_shapes: faultShapes, repair_modes: ['map-only', 'permission-only', 'map+value', 'permission+value'], arena_bytes: SIZE, patterned_page: KEEP, pattern_sha256: hash(pattern),
     banks: banks.map(bank => ({id: bank.id, specs: bank.specs, scans: bank.scans, d1: bank.d1, instructions: bank.instructions, sha256: hash(bank.bytes), hex: bank.bytes.toString('hex')})),
     flag_policy: 'RCL CF from old destination MSB, OF from result MSB xor outgoing CF; RCR CF from old destination LSB, OF from old destination MSB xor incoming CF; preserve SF/ZF/AF/PF/DF/fixed bit 1; memory flags publish only after successful Store4'},
-  test_sha256: Object.fromEntries(['engine/tests/cpu/shifts/carry_rotate/immediate/one/dword/wasm.rs', 'engine/tests/cpu/shifts/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/shifts/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/shifts/carry_rotate/immediate/one/dword/fixtures/p2-carry-rotate-immediate-one/runtime/run.mjs'].map(path => [path, hash(readFileSync(join(root, path)))])),
+  test_sha256: Object.fromEntries(['engine/tests/cpu/shifts/carry_rotate/immediate/one/dword/wasm.rs', 'engine/tests/cpu/shifts/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/shifts/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/shifts/carry_rotate/immediate/one/dword/fixtures/p2-carry-rotate-immediate-one/runtime/run.mjs', 'engine/tests/support/wasm/binding.mjs','engine/tests/support/wasm/page-fault.mjs'].map(path => [path, hash(readFileSync(join(root, path)))])),
   claim: 'finite flat32 C1 RCL/RCR for masked-one immediate bytes 1/33/65/97/129/161/193/225: all eight register destinations through actual standalone/replacement/resident modules and eight declared memory EA/immediate forms through actual replacement/resident modules; initial matrix sources 0/0x80000001/0xffffffff and FLAGS 2/0xcd7, with both incoming CF values asserted for every alias, plus declared producer/repair sources and evolved intermediates; independent 33-bit string oracle and 24 literal anchors; real CLC/STC/CMC each begin with CF 0 and 1, complete producer and rotate CPU observed before partial consumers, then secondary carry rotations use current destinations and outgoing CF without CPU repair; secondary memory access is absolute in forms 0-6, form 7 performs one checked code store followed by a fresh pure flag-consumer/canary/JMP tail; compact D1 controls, exact existing imports, default caps, complete 4796-byte arena/current declared pages; precise Read4/Write4 faults and atomic failure, retired LEA, zero-retirement retry, permission-only/map-only/changed-value repairs without CPU/module reset, overflow remains unrepaired; zero/CF 0 and full/CF 1 unchanged code stores plus zero/CF 1 changing stores commit reason 6 then reject stale 4, current pure tail performs no CPU writes or RMW replay, retained owners reject closed 5; one-byte consumed immediate 1 to 33 upload invalidates despite equal semantics and current compiled banks resume the same CPU/EIP; compiler refusals with raw0/2/32/255 use strict66 register and memory probes, preserve publication; prior unchanged R402/R403 full FLAGS evidence retained without repetition'};
 const resultBytes = Buffer.from(JSON.stringify(result, null, 2)); writeFileSync(join(output, 'result.json'), resultBytes, {flag: 'wx'});
 console.log(JSON.stringify({status: result.status, engine_sha256: result.engine_sha256, result_sha256: hash(resultBytes), counts, output}));

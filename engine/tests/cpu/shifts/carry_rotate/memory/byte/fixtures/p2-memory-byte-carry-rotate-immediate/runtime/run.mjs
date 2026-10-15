@@ -1,3 +1,5 @@
+import {pageFaultExit,pageFaultPacket} from '../../../../../../../../support/wasm/page-fault.mjs';
+import {detectionGuardName, generatedImports, attachDetectionApi} from '../../../../../../../../support/wasm/binding.mjs';
 import {ARENA_SIZE, createArena} from '../../../../../../../../support/wasm/arena.mjs';
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
@@ -121,7 +123,7 @@ const sourcePaths = [
   "engine/tests/cpu/shifts/carry_rotate/memory/byte/fixtures/p2-memory-byte-carry-rotate-immediate/runtime/run.mjs",
   "engine/tests/cpu/shifts/carry_rotate/memory/byte/fixtures/p2-memory-byte-carry-rotate-immediate/runtime/oracle.mjs",
   "engine/tests/cpu/shifts/carry_rotate/memory/byte/fixtures/p2-memory-byte-carry-rotate-immediate/runtime/oracle.test.mjs",
-  "engine/tests/support/wasm/engine.mjs",
+  "engine/tests/support/wasm/engine.mjs", 'engine/tests/support/wasm/binding.mjs','engine/tests/support/wasm/page-fault.mjs',
 ];
 assert.equal(new Set(sourcePaths).size, sourcePaths.length);
 const pinSources = () =>
@@ -434,6 +436,9 @@ function fresh(owner, selected, role) {
     assert.equal(typeof ctx.api[name], "function", name);
     assert.equal(ctx.api[name].length, arity, name);
   }
+ attachDetectionApi(ctx.api, instance.exports);
+  ctx.api.cpu_read_modify8=instance.exports.ring3_abi_v1_cpu_read_modify8;
+  assert.equal(ctx.api.cpu_read_modify8.length,1);
   for (const [name,arity] of [["cpu_read8",1],["cpu_store8",2],["cpu_store_resident8",6]]) {ctx.api[name]=instance.exports["ring3_abi_v1_"+name];assert.equal(ctx.api[name]?.length,arity,name);}
   assert.equal(ctx.api.open(7, ctx.low, ctx.high), 0);
   ctx.base = ctx.api.arena_ptr() >>> 0;
@@ -458,12 +463,10 @@ function fresh(owner, selected, role) {
 }
 function instantiate(ctx, bytes, file, binding, scans, pureTail = false, origin = "actual-engine") {
   const module = new WebAssembly.Module(bytes),
-    imports = (pureTail ? ["guard"] : ["guard", "cpu_read8", "cpu_store8"]).map((name) =>
+    imports = (pureTail ? generatedImports({resident: ctx.owner !== 'replacement', helpers: []}).slice(1).map(item => item.name) : generatedImports({resident: ctx.owner !== 'replacement', helpers: ["cpu_read8","cpu_read_modify8","cpu_store8"]}).slice(1).map(item => item.name)).map((name) =>
       ctx.owner === "replacement"
         ? name
-        : name === "guard"
-          ? "guard_resident"
-          : name === "cpu_store8"
+        : name === "cpu_store8"
             ? "cpu_store_resident8"
             : name,
     );
@@ -664,6 +667,18 @@ function run(
   fault = 0,
   access = 0,
 ) {
+  const pageFault = reason === 5 && detail !== 3 ? {
+    errorCode: 6 + Number(detail === 2),
+    address: fault,
+    access: 2,
+    length: 1,
+  } : null;
+  if (pageFault) {
+    assert.ok(detail === 1 || detail === 2, 'declared backing fault');
+    reason = 23;
+    helperBytes = pageFaultPacket(pageFault);
+  }
+
   const frames = generated(
     ctx,
     unit,
@@ -672,7 +687,7 @@ function run(
     0,
     () => {
       ctx.expected.set(state(registers, pc, flags));
-      ctx.expected.set(exit(reason, retired, detail, fault, access, unit.exitVersion), 56);
+      ctx.expected.set(pageFault?pageFaultExit({retired,...pageFault}):exit(reason, retired, detail, fault, access, unit.exitVersion), 56);
       if (helperBytes !== undefined) ctx.expected.set(helperBytes, 100);
     },
   );
