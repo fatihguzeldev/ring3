@@ -1,5 +1,6 @@
 use super::{
     BoundDecode, CapturedCodeFault, CapturedFetchFaultKind32, CodeFetchContext, DecodeAuthority,
+    DecodedInstruction, DecodedOperation,
 };
 use iced_x86::{Decoder, DecoderError, DecoderOptions};
 
@@ -33,44 +34,6 @@ pub enum DecodeError {
     Infrastructure(MemoryError),
 }
 
-#[derive(Debug)]
-pub struct DecodedInstruction {
-    pc: GuestAddress,
-    length: u8,
-    next_pc: GuestAddress,
-    operation: Operation,
-    code_snapshot: CodeSnapshot,
-    segment_accesses: u8,
-}
-
-impl DecodedInstruction {
-    pub(crate) fn uses_segments(&self) -> bool {
-        self.segment_accesses != 0
-    }
-    pub(crate) fn segment_accesses(&self) -> u8 {
-        self.segment_accesses
-    }
-    pub fn pc(&self) -> GuestAddress {
-        self.pc
-    }
-
-    pub fn length(&self) -> u8 {
-        self.length
-    }
-
-    pub fn next_pc(&self) -> GuestAddress {
-        self.next_pc
-    }
-
-    pub fn operation(&self) -> &Operation {
-        &self.operation
-    }
-
-    pub fn code_snapshot(&self) -> &CodeSnapshot {
-        &self.code_snapshot
-    }
-}
-
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DecodePolicy {
     Strict,
@@ -81,12 +44,10 @@ pub fn decode_one(
     memory: &AddressSpace,
     pc: GuestAddress,
 ) -> Result<DecodedInstruction, DecodeError> {
-    unbound(decode(
+    unbound(snapshot_decode(
         memory,
-        pc,
-        DecodePolicy::Strict,
+        decode_core(memory, pc, DecodePolicy::Strict, None, DecodeAuthority::default())?,
         None,
-        DecodeAuthority::default(),
     )?)
 }
 
@@ -95,16 +56,10 @@ pub(crate) fn decode_for_execution(
     memory: &AddressSpace,
     pc: GuestAddress,
 ) -> Result<DecodedInstruction, DecodeError> {
-    unbound(decode(
-        memory,
-        pc,
-        DecodePolicy::Execution,
-        None,
-        DecodeAuthority::default(),
-    )?)
+    unbound(decode(memory, pc, DecodePolicy::Execution, None, DecodeAuthority::default())?)
 }
 
-fn unbound(decoded: BoundDecode) -> Result<DecodedInstruction, DecodeError> {
+fn unbound<I>(decoded: BoundDecode<I>) -> Result<I, DecodeError> {
     match decoded {
         BoundDecode::Instruction(instruction) => Ok(instruction),
         BoundDecode::CodeFault(_) => unreachable!("unbound decoding has no CS authority"),
@@ -117,21 +72,60 @@ pub(crate) fn decode_bound(
     pc: GuestAddress,
     cs: CodeFetchContext,
     policy: DecodePolicy,
-) -> Result<BoundDecode, DecodeError> {
+) -> Result<BoundDecode<DecodedInstruction>, DecodeError> {
     decode(memory, pc, policy, Some(cs), DecodeAuthority::default())
 }
 
+#[cfg(test)]
 pub(crate) fn decode_with_authority(
     memory: &AddressSpace,
     pc: GuestAddress,
     policy: DecodePolicy,
     cs: Option<CodeFetchContext>,
     authority: DecodeAuthority,
-) -> Result<BoundDecode, DecodeError> {
+) -> Result<BoundDecode<DecodedInstruction>, DecodeError> {
     decode(memory, pc, policy, cs, authority)
 }
 
+pub(crate) fn decode_for_compilation(
+    memory: &AddressSpace,
+    pc: GuestAddress,
+    policy: DecodePolicy,
+    cs: Option<CodeFetchContext>,
+    authority: DecodeAuthority,
+) -> Result<BoundDecode, DecodeError> {
+    decode_core(memory, pc, policy, cs, authority)
+}
+
+#[cfg(test)]
 fn decode(
+    memory: &AddressSpace,
+    pc: GuestAddress,
+    policy: DecodePolicy,
+    cs: Option<CodeFetchContext>,
+    authority: DecodeAuthority,
+) -> Result<BoundDecode<DecodedInstruction>, DecodeError> {
+    snapshot_decode(memory, decode_core(memory, pc, policy, cs, authority)?, cs)
+}
+
+fn snapshot_decode(
+    memory: &AddressSpace,
+    decoded: BoundDecode,
+    cs: Option<CodeFetchContext>,
+) -> Result<BoundDecode<DecodedInstruction>, DecodeError> {
+    Ok(match decoded {
+        BoundDecode::Instruction(instruction) => {
+            let pc = instruction.pc();
+            let length = usize::from(instruction.length());
+            let code_snapshot = code_snapshot(memory, pc, length, cs)
+                .map_err(|error| memory_error(error, pc, length))?;
+            BoundDecode::Instruction(DecodedInstruction::new(instruction, code_snapshot))
+        }
+        BoundDecode::CodeFault(fault) => BoundDecode::CodeFault(fault),
+    })
+}
+
+fn decode_core(
     memory: &AddressSpace,
     pc: GuestAddress,
     policy: DecodePolicy,
@@ -207,16 +201,13 @@ fn decode(
                 if policy == DecodePolicy::Execution
                     && let Some(operation) = super::execution_faults::invalid(&bytes[..length])
                 {
-                    return finish(
-                        memory,
+                    return Ok(BoundDecode::Instruction(finish(
                         pc,
-                        cs,
                         length,
                         GuestAddress(pc.0.wrapping_add(length as u32)),
                         Operation::Control(operation),
                         0,
-                    )
-                    .map(BoundDecode::Instruction);
+                    )));
                 }
                 return Err(DecodeError::InvalidEncoding);
             }
@@ -250,16 +241,13 @@ fn decode(
                         Err(error) => return Err(error),
                     }
                 };
-                return finish(
-                    memory,
+                return Ok(BoundDecode::Instruction(finish(
                     pc,
-                    cs,
                     consumed,
                     GuestAddress(instruction.next_ip32()),
                     operation,
                     segments,
-                )
-                .map(BoundDecode::Instruction);
+                )));
             }
             _ => return Err(DecodeError::InvalidEncoding),
         }
@@ -268,24 +256,13 @@ fn decode(
 }
 
 fn finish(
-    memory: &AddressSpace,
     pc: GuestAddress,
-    cs: Option<CodeFetchContext>,
     length: usize,
     next_pc: GuestAddress,
     operation: Operation,
     segment_accesses: u8,
-) -> Result<DecodedInstruction, DecodeError> {
-    let code_snapshot =
-        code_snapshot(memory, pc, length, cs).map_err(|error| memory_error(error, pc, length))?;
-    Ok(DecodedInstruction {
-        pc,
-        length: length as u8,
-        next_pc,
-        operation,
-        code_snapshot,
-        segment_accesses,
-    })
+) -> DecodedOperation {
+    DecodedOperation::new(pc, length as u8, next_pc, operation, segment_accesses)
 }
 
 fn code_snapshot(
@@ -326,6 +303,10 @@ fn memory_error(error: MemoryError, pc: GuestAddress, length: usize) -> DecodeEr
         other => DecodeError::Infrastructure(other),
     }
 }
+
+#[cfg(test)]
+#[path = "decoder/compilation.rs"]
+mod compilation_tests;
 
 fn segment_accesses(instruction: &iced_x86::Instruction) -> u8 {
     use iced_x86::{Code, InstructionInfoFactory, Mnemonic, Register};

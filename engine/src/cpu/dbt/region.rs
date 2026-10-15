@@ -4,7 +4,7 @@ use crate::{
     cpu::x86::{
         decode::{
             BoundDecode, CapturedCodeFault, CodeDecodeKey, CodeFetchContext, DecodeError,
-            DecodePolicy, DecodedInstruction,
+            DecodePolicy, DecodedOperation,
         },
         ir::{BinaryKind, BranchTarget, Location32, Operation, SmallSource, UnaryKind, Value32},
     },
@@ -80,7 +80,7 @@ enum PreparationProfile {
 
 #[derive(Debug)]
 pub(super) struct CompiledBlock {
-    pub(super) instructions: Vec<DecodedInstruction>,
+    pub(super) instructions: Vec<DecodedOperation>,
     pub(super) source: BlockSource,
 }
 
@@ -308,8 +308,8 @@ pub(super) fn strict_instruction(
     pc: GuestAddress,
     cs: Option<CodeFetchContext>,
     authority: crate::cpu::x86::decode::DecodeAuthority,
-) -> Result<DecodedInstruction, DecodeError> {
-    match crate::cpu::x86::decode::decode_with_authority(
+) -> Result<DecodedOperation, DecodeError> {
+    match crate::cpu::x86::decode::decode_for_compilation(
         memory,
         pc,
         DecodePolicy::Strict,
@@ -404,7 +404,7 @@ fn supports_stack_values(operation: &Operation) -> bool {
     )
 }
 
-fn supports_near_control(instruction: &DecodedInstruction) -> bool {
+fn supports_near_control(instruction: &DecodedOperation) -> bool {
     matches!(
         instruction.operation(),
         Operation::Call { .. }
@@ -416,11 +416,11 @@ fn supports_near_control(instruction: &DecodedInstruction) -> bool {
     )
 }
 
-fn supports_stack(instruction: &DecodedInstruction) -> bool {
+fn supports_stack(instruction: &DecodedOperation) -> bool {
     supports_near_control(instruction) || supports_stack_values(instruction.operation())
 }
 
-pub(super) fn terminates(instruction: &DecodedInstruction, embedded: bool) -> bool {
+pub(super) fn terminates(instruction: &DecodedOperation, embedded: bool) -> bool {
     if matches!(
         instruction.operation(),
         Operation::Control(
@@ -699,7 +699,7 @@ fn supports_memory_shift_or_rotate(operation: &Operation) -> bool {
     )
 }
 
-pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool {
+pub(super) fn supports(instruction: &DecodedOperation, embedded: bool) -> bool {
     let operation = instruction.operation();
     match operation {
         Operation::FarJump { .. }

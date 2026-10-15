@@ -6,14 +6,14 @@ use crate::{
     abi::arena::TRANSFER_OFFSET,
     cpu::x86::{
         ControlOperation, Register32, USER_POP_FLAGS_MASK, USER_POP_FLAGS_WORD_MASK,
-        decode::DecodedInstruction,
+        decode::DecodedOperation,
         ir::{AddressSize, EffectiveAddress, Operation},
     },
 };
 
 pub(super) fn instruction(
     code: &mut InstructionSink<'_>,
-    instruction: &DecodedInstruction,
+    instruction: &DecodedOperation,
     imports: Imports,
     exit_depth: u32,
 ) {

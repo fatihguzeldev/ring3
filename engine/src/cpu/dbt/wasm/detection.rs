@@ -2,7 +2,7 @@ use crate::cpu::dbt::wasm::imports::Imports;
 use wasm_encoder::{BlockType, InstructionSink};
 
 use super::locals::*;
-use crate::cpu::x86::{ControlOperation, decode::DecodedInstruction, ir::Operation};
+use crate::cpu::x86::{ControlOperation, decode::DecodedOperation, ir::Operation};
 
 #[derive(Clone, Copy)]
 pub(super) struct DetectionLocals {
@@ -33,7 +33,7 @@ impl DetectionLocals {
 
 pub(super) fn snapshot(
     code: &mut InstructionSink<'_>,
-    instruction: &DecodedInstruction,
+    instruction: &DecodedOperation,
     imports: Imports,
 ) {
     let Some(locals) = imports.detection else {

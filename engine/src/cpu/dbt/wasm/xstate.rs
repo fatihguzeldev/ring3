@@ -5,7 +5,7 @@ use wasm_encoder::{BlockType, InstructionSink};
 use super::{cpu_result, locals::*, memory, segments};
 use crate::cpu::x86::{
     Register32, SegmentAccess, SegmentRegister,
-    decode::DecodedInstruction,
+    decode::DecodedOperation,
     ir::{EffectiveAddress, Operation},
     xstate::{
         XStateOperation,
@@ -15,7 +15,7 @@ use crate::cpu::x86::{
 
 pub(super) fn instruction(
     code: &mut InstructionSink<'_>,
-    instruction: &DecodedInstruction,
+    instruction: &DecodedOperation,
     imports: Imports,
     exit_depth: u32,
 ) -> bool {

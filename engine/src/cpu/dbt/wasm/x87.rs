@@ -22,7 +22,7 @@ use super::locals::{
 
 pub(super) fn precheck_instruction(
     code: &mut InstructionSink<'_>,
-    instruction: &crate::cpu::x86::decode::DecodedInstruction,
+    instruction: &crate::cpu::x86::decode::DecodedOperation,
     imports: Imports,
     exit_depth: u32,
 ) {

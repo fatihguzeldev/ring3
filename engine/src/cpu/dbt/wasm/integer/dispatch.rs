@@ -2,7 +2,7 @@ use super::super::{atomic, integer_system, segments, simd, stack, strings};
 use super::{
     BUDGET, BinaryKind, BitIndex, BitTestKind, BlockType, BranchTarget, ByteArithmeticKind,
     ByteLogicalKind, BytePredicateKind, ByteReadArithmeticKind, ByteRegister, ByteValue, CarryFlag,
-    CarryKind, Condition, CountBranchKind, DecodedInstruction, EIP, ExtensionKind, FLAGS,
+    CarryKind, Condition, CountBranchKind, DecodedOperation, EIP, ExtensionKind, FLAGS,
     InstructionSink, LHS, Location32, Operation, RESULT, RETIRED, RHS, Register32, ShiftCount,
     SmallSource, SmallWidth, ValType, Value32, WordArithmeticKind, WordLogicalKind,
     WordMemoryArithmeticKind, WordReadArithmeticKind, WordValue, accumulator_divide,
@@ -32,7 +32,7 @@ use crate::cpu::dbt::wasm::imports::Imports;
 
 pub(in crate::cpu::dbt::wasm) fn instruction(
     code: &mut InstructionSink<'_>,
-    instruction: &DecodedInstruction,
+    instruction: &DecodedOperation,
     imports: Imports,
     exit_depth: u32,
 ) {

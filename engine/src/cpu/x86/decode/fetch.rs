@@ -142,8 +142,8 @@ impl CapturedCodeFault {
 }
 
 #[derive(Debug)]
-pub(crate) enum BoundDecode {
-    Instruction(super::DecodedInstruction),
+pub(crate) enum BoundDecode<I = super::DecodedOperation> {
+    Instruction(I),
     CodeFault(CapturedCodeFault),
 }
 

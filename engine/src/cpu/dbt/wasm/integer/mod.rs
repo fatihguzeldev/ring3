@@ -3,7 +3,7 @@ use wasm_encoder::{BlockType, InstructionSink, ValType};
 use super::{control, locals::*, memory, x87};
 use crate::cpu::x86::{
     Register32,
-    decode::DecodedInstruction,
+    decode::DecodedOperation,
     ir::{
         AsciiAdjustKind, BinaryKind, BitIndex, BitScanKind, BitTestKind, BranchTarget,
         ByteArithmeticKind, ByteLogicalKind, BytePredicateKind, ByteReadArithmeticKind,

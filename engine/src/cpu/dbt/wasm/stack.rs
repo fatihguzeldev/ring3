@@ -5,7 +5,7 @@ pub(super) mod pointer;
 use super::{locals::*, memory};
 use crate::{
     abi::arena::TRANSFER_OFFSET,
-    cpu::x86::{Register32, StackFrameKind, decode::DecodedInstruction, ir::Operation},
+    cpu::x86::{Register32, StackFrameKind, decode::DecodedOperation, ir::Operation},
 };
 use wasm_encoder::{BlockType, InstructionSink, MemArg};
 const REGISTERS: [Register32; 8] = [
@@ -21,7 +21,7 @@ const REGISTERS: [Register32; 8] = [
 
 pub(super) fn instruction(
     code: &mut InstructionSink<'_>,
-    instruction: &DecodedInstruction,
+    instruction: &DecodedOperation,
     imports: Imports,
     exit_depth: u32,
 ) {

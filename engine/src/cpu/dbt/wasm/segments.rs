@@ -17,14 +17,14 @@ use crate::{
     abi::{arena::SEGMENTS_OFFSET, x86::SEGMENTS_SELECTORS_OFFSET},
     cpu::x86::{
         Register32, SegmentRegister,
-        decode::DecodedInstruction,
+        decode::DecodedOperation,
         ir::{Location32, Operation, SmallWidth, Value32},
     },
 };
 
 pub(super) fn instruction(
     code: &mut InstructionSink<'_>,
-    instruction: &DecodedInstruction,
+    instruction: &DecodedOperation,
     imports: Imports,
     exit_depth: u32,
 ) {

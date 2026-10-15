@@ -142,7 +142,7 @@ fn prepare(
                 break;
             }
             let pc = GuestAddress(cursor as u32);
-            let decoded = crate::cpu::x86::decode::decode_with_authority(
+            let decoded = crate::cpu::x86::decode::decode_for_compilation(
                 memory,
                 pc,
                 decode_policy,

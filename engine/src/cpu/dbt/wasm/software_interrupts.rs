@@ -1,11 +1,11 @@
 use wasm_encoder::InstructionSink;
 
 use super::locals::*;
-use crate::cpu::x86::decode::DecodedInstruction;
+use crate::cpu::x86::decode::DecodedOperation;
 
 pub(super) fn instruction(
     code: &mut InstructionSink<'_>,
-    instruction: &DecodedInstruction,
+    instruction: &DecodedOperation,
     vector: u8,
     exit_depth: u32,
 ) {

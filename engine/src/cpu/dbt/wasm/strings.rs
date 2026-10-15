@@ -4,7 +4,7 @@ use wasm_encoder::{BlockType, InstructionSink};
 use super::{abi, locals::*, memory};
 use crate::cpu::x86::{
     Register32, SegmentRegister,
-    decode::DecodedInstruction,
+    decode::DecodedOperation,
     ir::{
         AddressSize, EffectiveAddress, Operation, RepeatCondition, SmallWidth, StringKind,
         StringWidth,
@@ -13,7 +13,7 @@ use crate::cpu::x86::{
 
 pub(super) fn instruction(
     code: &mut InstructionSink<'_>,
-    instruction: &DecodedInstruction,
+    instruction: &DecodedOperation,
     imports: Imports,
     exit_depth: u32,
 ) {
@@ -231,7 +231,7 @@ fn element(
     }
 }
 
-fn complete(code: &mut InstructionSink<'_>, instruction: &DecodedInstruction) {
+fn complete(code: &mut InstructionSink<'_>, instruction: &DecodedOperation) {
     code.i32_const(instruction.next_pc().0 as i32)
         .local_set(EIP)
         .local_get(RETIRED)
