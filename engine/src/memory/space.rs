@@ -1,7 +1,10 @@
 mod atomic;
 mod code_fetch;
 mod cpu;
+mod mapping;
 mod paging;
+
+pub(crate) use mapping::PageInitialization;
 
 use super::address::{ADDRESS_LIMIT, GUEST_PAGES};
 use super::code::{PageVersion, new_identity};
