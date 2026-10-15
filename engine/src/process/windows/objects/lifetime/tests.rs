@@ -212,3 +212,75 @@ fn any_replaced_mapping_rejects_the_whole_reference_batch_without_touching_other
     assert_eq!(objects.references(second.identity_pointer), Ok(1));
     assert_eq!(memory.mapped_pages(), 3);
 }
+
+#[test]
+fn output_words_and_reference_edges_publish_together_or_remain_neutral() {
+    let mut memory = AddressSpace::new(6).unwrap();
+    memory
+        .map_zeroed(
+            PageRange::new(GuestAddress(0x8000), 1).unwrap(),
+            Permissions::READ_WRITE,
+        )
+        .unwrap();
+    let mut objects = owner();
+    let identity = objects.create(&mut memory, 4, &[layout(IA)]).unwrap();
+    let before = memory.transaction_version();
+    let bad = [crate::memory::WordWrite32 {
+        address: GuestAddress(0x9000),
+        value: identity.identity_pointer.0,
+    }];
+    assert!(
+        objects
+            .apply_lifetime_changes_with_writes(
+                &mut memory,
+                &[identity.identity_pointer],
+                &[],
+                &[],
+                &[],
+                &bad
+            )
+            .is_err()
+    );
+    assert_eq!(objects.references(identity.identity_pointer), Ok(1));
+    assert_eq!(memory.transaction_version(), before);
+    let good = [crate::memory::WordWrite32 {
+        address: GuestAddress(0x8000),
+        value: identity.identity_pointer.0,
+    }];
+    assert!(
+        objects
+            .apply_lifetime_changes_with_writes(
+                &mut memory,
+                &[identity.identity_pointer],
+                &[],
+                &[],
+                &[],
+                &good
+            )
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(objects.references(identity.identity_pointer), Ok(2));
+    assert_eq!(memory.transaction_version(), before + 1);
+    let mut output = [0; 4];
+    memory.read(GuestAddress(0x8000), &mut output).unwrap();
+    assert_eq!(u32::from_le_bytes(output), identity.identity_pointer.0);
+    let dispose = [crate::memory::WordWrite32 {
+        address: GuestAddress(0x8000),
+        value: 0,
+    }];
+    let destroyed = objects
+        .apply_lifetime_changes_with_writes(
+            &mut memory,
+            &[],
+            &[identity.identity_pointer, identity.identity_pointer],
+            &[],
+            &[],
+            &dispose,
+        )
+        .unwrap();
+    assert_eq!(destroyed, vec![identity]);
+    assert_eq!(memory.transaction_version(), before + 2);
+    memory.read(GuestAddress(0x8000), &mut output).unwrap();
+    assert_eq!(output, [0; 4]);
+}
