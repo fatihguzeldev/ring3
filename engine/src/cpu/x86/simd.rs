@@ -328,7 +328,8 @@ fn operand_from_code(code: u32) -> Result<SimdOperand, SimdError> {
 }
 
 impl SimdOperation {
-    pub fn descriptor(self) -> (u32, u32, u32) {
+    pub fn descriptor(self) -> Result<(u32, u32, u32), SimdError> {
+        validate_operation(self)?;
         let (kind, sub, truncate) = match self.kind {
             SimdKind::Move => (0, 0, false),
             SimdKind::MoveScalar => (1, 0, false),
@@ -351,27 +352,27 @@ impl SimdOperation {
         let lane = [0, 1, 2, 4, 8, 16]
             .iter()
             .position(|width| *width == self.lane_bytes)
-            .unwrap() as u32;
+            .ok_or(SimdError::InvalidDescriptor)? as u32;
+        let memory = [0, 1, 2, 4, 8, 16, 512]
+            .iter()
+            .position(|width| *width == self.memory_bytes)
+            .ok_or(SimdError::InvalidDescriptor)? as u32;
         let descriptor = (kind & 15)
             | ((kind & 16) << 20)
             | (sub << 4)
             | (lane << 10)
             | (u32::from(self.vector_bytes == 16) << 13)
             | (u32::from(self.vector_bytes == 4) << 14)
-            | (([0, 1, 2, 4, 8, 16, 512]
-                .iter()
-                .position(|width| *width == self.memory_bytes)
-                .unwrap() as u32)
-                << 15)
+            | (memory << 15)
             | (u32::from(self.aligned) << 20)
             | (u32::from(self.scalar) << 21)
             | (u32::from(self.immediate.is_some()) << 22)
             | (u32::from(truncate) << 23);
-        (
+        Ok((
             descriptor,
             operand_code(self.destination) | (operand_code(self.source) << 8),
             u32::from(self.immediate.unwrap_or(0)),
-        )
+        ))
     }
 }
 

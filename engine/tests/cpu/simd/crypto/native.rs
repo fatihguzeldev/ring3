@@ -27,7 +27,7 @@ fn decode(bytes: &[u8]) -> SimdOperation {
     let Operation::Simd(op) = instruction.operation() else {
         panic!("typed SIMD expected")
     };
-    let (descriptor, operands, immediate) = op.descriptor();
+    let (descriptor, operands, immediate) = op.descriptor().unwrap();
     let restored = simd::decode_descriptor(descriptor, operands, immediate).unwrap();
     assert_eq!(restored.kind, op.kind);
     assert_eq!(restored.vector_bytes, op.vector_bytes);
@@ -288,7 +288,7 @@ fn crypto_invalid_shapes_are_rejected_before_any_operand_state_changes() {
 #[test]
 fn crypto_extended_descriptors_are_canonical_and_leave_legacy_bytes_unchanged() {
     assert_eq!(
-        decode(&[0x66, 0x0f, 0xfc, 0xc1]).descriptor(),
+        decode(&[0x66, 0x0f, 0xfc, 0xc1]).descriptor().unwrap(),
         (0x2404, 0x0908, 0)
     );
     for (map, opcode, immediate, subcode, lane) in [
@@ -301,7 +301,7 @@ fn crypto_extended_descriptors_are_canonical_and_leave_legacy_bytes_unchanged() 
         (0x3a, 0x44, Some(0xff), 6, 4),
     ] {
         let op = decode(&bytes(map, opcode, 0xc1, immediate));
-        let (descriptor, operands, value) = op.descriptor();
+        let (descriptor, operands, value) = op.descriptor().unwrap();
         assert_eq!(
             descriptor,
             0x0100_2000 | subcode << 4 | lane << 10 | u32::from(immediate.is_some()) << 22

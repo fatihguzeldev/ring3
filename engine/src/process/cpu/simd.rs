@@ -143,7 +143,7 @@ mod tests {
             scalar: false,
             implicit_address: None,
         }
-        .descriptor()
+        .descriptor().unwrap()
     }
 
     #[test]

@@ -363,7 +363,7 @@ fn fxsave_preserves_software_tail_and_restores_physical_tags() {
 #[test]
 fn descriptors_reject_bad_width_and_operands_before_state_mutation() {
     let op = operation(K::Packed(P::Add), 1);
-    let (d, o, i) = op.descriptor();
+    let (d, o, i) = op.descriptor().unwrap();
     assert_eq!(simd::decode_descriptor(d, o, i), Ok(op));
     assert_eq!(
         simd::decode_descriptor(d | 0x8000_0000, o, i),
@@ -382,7 +382,7 @@ fn descriptors_reject_bad_width_and_operands_before_state_mutation() {
         Err(SimdError::InvalidDescriptor)
     );
     let qword_equal = operation(K::Packed(P::Equal), 8);
-    let (d, o, i) = qword_equal.descriptor();
+    let (d, o, i) = qword_equal.descriptor().unwrap();
     assert_eq!(simd::decode_descriptor(d, o, i), Ok(qword_equal));
     let mut state = SimdState::default();
     state.xmm[0] = dwords([1, 2, 3, 4]);
@@ -454,7 +454,7 @@ fn descriptor_errors_precede_invalid_mxcsr_without_arena_mutation() {
     arena[mxcsr..mxcsr + 4].copy_from_slice(&0x0001_1f80u32.to_le_bytes());
     let before = arena.clone();
     assert_eq!(
-        operation(K::Packed(P::Add), 1).descriptor(),
+        operation(K::Packed(P::Add), 1).descriptor().unwrap(),
         (0x2404, 0x0908, 0)
     );
     for (descriptor, operands, immediate) in [
@@ -547,7 +547,7 @@ fn descriptor_mmx_reads_physical_slots_and_publishes_only_its_destination() {
         vector_bytes: 8,
         ..operation(K::Packed(P::Add), 1)
     }
-    .descriptor();
+    .descriptor().unwrap();
     assert_eq!(
         simd::execute_descriptor(
             &mut arena,
@@ -588,7 +588,7 @@ fn pending_x87_fault_precedes_mmx_but_not_sse_publication() {
         vector_bytes: 8,
         ..operation(K::Packed(P::Add), 1)
     };
-    let (d, o, i) = op.descriptor();
+    let (d, o, i) = op.descriptor().unwrap();
     let mut expected = arena.clone();
     expected[X87_OFFSET + X87_STATUS_OFFSET..X87_OFFSET + X87_STATUS_OFFSET + 2]
         .copy_from_slice(&0x8081u16.to_le_bytes());
@@ -597,7 +597,7 @@ fn pending_x87_fault_precedes_mmx_but_not_sse_publication() {
         Err(SimdError::X87FloatingPoint(0x8081))
     );
     assert_eq!(arena, expected);
-    let (d, o, i) = operation(K::Packed(P::Add), 1).descriptor();
+    let (d, o, i) = operation(K::Packed(P::Add), 1).descriptor().unwrap();
     assert!(simd::execute_descriptor(&mut arena, d, o, i, 0, 0, 0xcd7).is_ok());
 }
 

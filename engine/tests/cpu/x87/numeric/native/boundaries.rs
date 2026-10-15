@@ -372,7 +372,7 @@ fn selected_fs_gs_offsets_and_current_code_selector_survive_environment_and_fxsa
         assert_eq!(&environment[18..20], &0x503_u16.to_le_bytes());
         assert_eq!(&environment[20..24], &expected_offset.to_le_bytes());
         assert_eq!(&environment[24..26], &expected_selector.to_le_bytes());
-        let (descriptor, operands, immediate) = save.descriptor();
+        let (descriptor, operands, immediate) = save.descriptor().unwrap();
         engine
             .simd_execute(descriptor, operands, immediate, 0, 0, 0x402)
             .unwrap();

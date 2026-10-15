@@ -21,7 +21,7 @@ fn decode(bytes: &[u8]) -> SimdOperation {
     let Operation::Simd(op) = instruction.operation() else {
         panic!("typed SIMD expected")
     };
-    let (descriptor, operands, immediate) = op.descriptor();
+    let (descriptor, operands, immediate) = op.descriptor().unwrap();
     let decoded = simd::decode_descriptor(descriptor, operands, immediate).unwrap();
     assert_eq!(decoded.kind, op.kind);
     assert_eq!(decoded.destination, op.destination);

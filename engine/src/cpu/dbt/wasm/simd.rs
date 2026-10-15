@@ -150,7 +150,7 @@ pub(super) fn instruction(
             cpu_result::ResultContext::from(imports),
         );
     }
-    let (descriptor, operands, immediate) = operation.descriptor();
+    let (descriptor, operands, immediate) = operation.descriptor().expect("decoded SIMD operation is valid");
     let execute = imports
         .simd_execute
         .expect("SIMD execution import")

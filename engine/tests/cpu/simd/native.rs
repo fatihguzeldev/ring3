@@ -7,6 +7,9 @@ mod simd_direct_integer;
 #[path = "integration/native/families.rs"]
 mod simd_semantics;
 
+#[path = "descriptor/native.rs"]
+mod simd_descriptor;
+
 #[path = "integer/native/ssse3.rs"]
 mod simd_extensions;
 

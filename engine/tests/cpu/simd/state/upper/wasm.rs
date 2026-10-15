@@ -49,7 +49,7 @@ fn actual_upper_state_transport_preserves_legacy_effects_and_callback_identity()
             panic!("legacy extended state instruction")
         };
         assert_eq!(operation.kind, kind);
-        let (descriptor, operands, immediate) = operation.descriptor();
+        let (descriptor, operands, immediate) = operation.descriptor().unwrap();
         for value in [descriptor, operands, immediate] {
             descriptors.extend_from_slice(&value.to_le_bytes());
         }
