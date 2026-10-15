@@ -1,6 +1,7 @@
 use super::{Buffer3D, BufferDescription, Device, HResult, WaveFormat, spatial::attenuation};
 use crate::audio::{AudioBufferId32, AudioContext, AudioVoiceControls32, AudioVoiceId32};
 
+#[derive(Clone, Copy)]
 pub struct Buffer {
     pub description: BufferDescription,
     pub format: WaveFormat,
@@ -101,7 +102,10 @@ impl Buffer {
         let master = attenuation(device.volume);
         for gain in &mut controls.gains {
             *gain *= master;
-            if device.cooperative_level == 0 {
+            if device.cooperative_level == 0
+                || !device.window_alive
+                || !device.focused && self.description.flags & 0xc000 == 0
+            {
                 *gain = 0.0;
             }
         }
@@ -139,6 +143,9 @@ impl Buffer {
     ) -> Result<LockSpan, HResult> {
         if self.lost {
             return Err(HResult::BUFFER_LOST);
+        }
+        if self.primary {
+            return Err(HResult::INVALID_CALL);
         }
         if flags & !3 != 0 {
             return Err(HResult::INVALID_PARAM);

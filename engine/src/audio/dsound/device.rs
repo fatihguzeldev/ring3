@@ -1,7 +1,10 @@
 use super::{HResult, Listener3D, WaveFormat};
 use crate::audio::{PcmFormat32, SampleEncoding32};
 
+#[derive(Clone, Copy)]
 pub struct Device {
+    pub focused: bool,
+    pub window_alive: bool,
     pub version8: bool,
     pub cooperative_level: u32,
     pub window: u32,
@@ -14,6 +17,8 @@ pub struct Device {
 impl Device {
     pub fn new(version8: bool, sample_rate: u32) -> Self {
         Self {
+            focused: true,
+            window_alive: true,
             version8,
             cooperative_level: 0,
             window: 0,
@@ -36,6 +41,9 @@ impl Device {
     pub fn set_cooperative_level(&mut self, window: u32, level: u32) -> Result<(), HResult> {
         if window == 0 || !(1..=4).contains(&level) {
             return Err(HResult::INVALID_PARAM);
+        }
+        if level == 4 {
+            return Err(HResult::UNSUPPORTED);
         }
         self.window = window;
         self.cooperative_level = level;

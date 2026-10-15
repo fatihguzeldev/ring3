@@ -74,3 +74,63 @@ fn literal_wave_format_and_invalid_capabilities_are_not_silent_success() {
         8
     );
 }
+
+#[test]
+fn emulated_primary_cannot_claim_write_primary_or_lock_hardware_memory() {
+    let mut audio = audio();
+    let mut device = Device::new(true, 48_000);
+    assert_eq!(
+        device.set_cooperative_level(1, 4),
+        Err(HResult::UNSUPPORTED)
+    );
+    device.set_cooperative_level(1, 2).unwrap();
+    let primary = Buffer::create(
+        &mut audio,
+        &device,
+        BufferDescription {
+            flags: BufferDescription::PRIMARY,
+            bytes: 0,
+            format: None,
+            algorithm: [0; 16],
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        primary.lock_span(&audio, 0, 4, 0, false),
+        Err(HResult::INVALID_CALL)
+    );
+}
+
+#[test]
+fn default_and_global_focus_controls_respect_foreground_and_window_lifetime() {
+    let mut audio = audio();
+    let mut device = Device::new(true, 48_000);
+    device.set_cooperative_level(1, 1).unwrap();
+    device.focused = false;
+    let default = Buffer::create(
+        &mut audio,
+        &device,
+        BufferDescription {
+            flags: 0,
+            bytes: 4,
+            format: Some(format()),
+            algorithm: [0; 16],
+        },
+    )
+    .unwrap();
+    let global = Buffer::create(
+        &mut audio,
+        &device,
+        BufferDescription {
+            flags: 0x8000,
+            ..default.description
+        },
+    )
+    .unwrap();
+    assert_eq!(default.controls(&device).gains, [0.0; 2]);
+    assert_eq!(global.controls(&device).gains, [1.0; 2]);
+    device.focused = true;
+    assert_eq!(default.controls(&device).gains, [1.0; 2]);
+    device.window_alive = false;
+    assert_eq!(global.controls(&device).gains, [0.0; 2]);
+}
