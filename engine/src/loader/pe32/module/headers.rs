@@ -87,9 +87,10 @@ pub(super) fn parse(bytes: &[u8], budget: &mut ParseBudget) -> Result<PreparedPe
     }
     let mut directories = [None; 16];
     let mut certificate = None;
-    for index in 0..directory_count {
-        let rva = u32(bytes, optional + 96 + index * 8)?;
-        let size = u32(bytes, optional + 100 + index * 8)?;
+    let directory_bytes = &bytes[optional + 96..optional + 96 + directory_count * 8];
+    for (index, record) in directory_bytes.chunks_exact(8).enumerate() {
+        let rva = u32(record, 0)?;
+        let size = u32(record, 4)?;
         if rva == 0 && size == 0 {
             continue;
         }

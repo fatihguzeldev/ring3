@@ -52,3 +52,20 @@ fn delay_import_descriptor_stays_guest_owned_and_unsupported_runtime_kinds_fail_
     pe::directory(&mut bytes, 14, 0x2080, 16);
     assert_eq!(parse_module(&bytes).err(), Some(LoadError::Unsupported));
 }
+
+#[test]
+fn extra_directory_slots_accept_only_zero_and_keep_declared_header_bounds() {
+    let mut bytes = pe::empty_data();
+    let old = pe::OPTIONAL + 224;
+    bytes.copy_within(old..old + 80, old + 8);
+    bytes[old..old + 8].fill(0);
+    pe::put16(&mut bytes, pe::COFF + 16, 232);
+    pe::put32(&mut bytes, pe::OPTIONAL + 92, 17);
+    assert!(parse_module(&bytes).is_ok());
+    pe::put32(&mut bytes, old, 0x2000);
+    pe::put32(&mut bytes, old + 4, 4);
+    assert_eq!(parse_module(&bytes).err(), Some(LoadError::Unsupported));
+    bytes[old..old + 8].fill(0);
+    pe::put32(&mut bytes, pe::OPTIONAL + 92, 18);
+    assert_eq!(parse_module(&bytes).err(), Some(LoadError::Malformed));
+}

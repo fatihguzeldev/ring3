@@ -30,6 +30,10 @@ impl AddressSpace {
         self.code_validation_version
     }
 
+    pub(crate) fn transaction_version(&self) -> u64 {
+        self.version
+    }
+
     pub fn snapshot_code(
         &self,
         address: GuestAddress,

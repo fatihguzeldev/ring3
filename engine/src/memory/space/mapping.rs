@@ -7,6 +7,7 @@ pub(crate) struct PageInitialization<'a> {
 }
 
 impl AddressSpace {
+    #[cfg(test)]
     pub(crate) fn install_pages(
         &mut self,
         pages: &[PageInitialization<'_>],
@@ -62,6 +63,7 @@ impl AddressSpace {
         Ok(())
     }
 
+    #[cfg(test)]
     pub(crate) fn unmap_ranges(&mut self, ranges: &[PageRange]) -> Result<(), MemoryError> {
         self.unmap_ranges_with_word_writes(ranges, &[])
     }
