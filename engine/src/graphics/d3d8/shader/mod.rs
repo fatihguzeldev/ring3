@@ -3,6 +3,7 @@ mod fvf;
 mod instruction;
 mod parser;
 mod registers;
+pub mod registry;
 mod validation;
 
 pub use declaration::{Declaration, Element, ElementType, Tessellation};
