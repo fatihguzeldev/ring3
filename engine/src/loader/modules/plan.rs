@@ -126,6 +126,21 @@ impl LoadPlan32 {
         {
             return Err(ModuleError32::StalePlan);
         }
+        if self.additions.is_empty()
+            && self.pages.is_empty()
+            && writes.is_empty()
+            && self.dependency_updates.is_empty()
+            && self.next_id == set.next_id
+            && self.forwarder_limit == set.forwarder_limit
+            && set.root.is_some()
+        {
+            return Ok(ModuleLoad32 {
+                root: self.root,
+                new_ids: Vec::new(),
+                initialization_order: self.initialization_order,
+                introduced_edges: Vec::new(),
+            });
+        }
         let revision = set.revision.checked_add(1).ok_or(ModuleError32::Capacity)?;
         set.modules
             .try_reserve(self.additions.len())

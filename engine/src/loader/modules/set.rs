@@ -239,6 +239,15 @@ impl ModuleSet32 {
         super::linking::resolve_loaded_live(self, memory, id, symbol)
     }
 
+    pub(crate) fn direct_export_live(
+        &self,
+        memory: &AddressSpace,
+        id: ModuleId32,
+        symbol: &ImportSymbol32,
+    ) -> Result<Option<ResolvedExport32>, ModuleError32> {
+        super::linking::direct_loaded_live(self, memory, id, symbol)
+    }
+
     pub(super) fn find_normalized(&self, name: &str) -> Option<&LoadedModule32> {
         self.modules.iter().find(|module| module.identity() == name)
     }

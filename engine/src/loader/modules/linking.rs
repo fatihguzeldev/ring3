@@ -106,6 +106,19 @@ pub(super) fn resolve_loaded_live(
     })
 }
 
+pub(super) fn direct_loaded_live(
+    set: &ModuleSet32,
+    memory: &AddressSpace,
+    id: ModuleId32,
+    symbol: &ImportSymbol32,
+) -> Result<Option<ResolvedExport32>, ModuleError32> {
+    let module = set.get(id).ok_or(ModuleError32::NotFound)?;
+    match export_value_live(memory, module, symbol)? {
+        ExportValue32::Resolved(value) => Ok(Some(value)),
+        ExportValue32::Forwarder(_) => Ok(None),
+    }
+}
+
 pub(super) fn export_value_live(
     memory: &AddressSpace,
     module: &LoadedModule32,

@@ -100,6 +100,16 @@ impl EngineInstance {
             .find(|module| module.base() == handle)
             .ok_or(HostError::Module(ModuleError32::InvalidHandle))?
             .id();
+        if let Some(resolved) = self
+            .modules
+            .loaded
+            .direct_export_live(self.memory()?, id, symbol)
+            .map_err(HostError::Module)?
+        {
+            return Ok(ModuleOperation32::ExportResolved {
+                address: resolved.address().0,
+            });
+        }
         let (plan, resolved) = self
             .modules
             .catalog
