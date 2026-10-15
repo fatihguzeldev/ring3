@@ -281,3 +281,7 @@ path = "tests/graphics/native.rs"
 [[test]]
 name = "audio"
 path = "tests/audio/native.rs"
+
+[[test]]
+name = "input"
+path = "tests/input/native.rs"
