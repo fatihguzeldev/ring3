@@ -52,6 +52,7 @@ pub struct EngineInstance {
     pub(in crate::process) callback: Option<SuspendedCallback>,
     pub(in crate::process) call_token: u32,
     pub(in crate::process) cpu_event: Option<crate::process::CpuEvent32>,
+    pub(in crate::process) numerical_workspace: crate::math::NumericalWorkspace,
     pub(in crate::process) cpu_clock: crate::process::clock::CpuClock,
     pub(in crate::process) cr2: Option<crate::memory::GuestAddress>,
     pub(in crate::process) cpu_page_fault_sequence: u64,
@@ -99,6 +100,7 @@ impl EngineInstance {
             callback: None,
             call_token: 0,
             cpu_event: None,
+            numerical_workspace: Default::default(),
             cpu_clock: crate::process::clock::CpuClock::default(),
             cr2: None,
             cpu_page_fault_sequence: 0,
@@ -142,6 +144,7 @@ impl EngineInstance {
     }
 
     pub fn close(&mut self) {
+        self.numerical_workspace = Default::default();
         self.media = None;
         self.cpu_clock = crate::process::clock::CpuClock::default();
         self.image_input = None;

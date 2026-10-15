@@ -135,7 +135,12 @@ impl EngineInstance {
             }
         }
         let outcome = state
-            .evaluate(operation, &input[..operation.read_size()], flags)
+            .evaluate_with_workspace(
+                operation,
+                &input[..operation.read_size()],
+                flags,
+                &mut self.numerical_workspace,
+            )
             .map_err(|error| {
                 if error == X87Error::NumericalFailure {
                     HostError::Infrastructure

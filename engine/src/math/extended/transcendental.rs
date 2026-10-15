@@ -230,6 +230,7 @@ pub(crate) fn evaluate(
     x: Ext80,
     y: Ext80,
     control: u16,
+    workspace: &mut crate::math::NumericalWorkspace,
 ) -> Result<Rounded, NumericalError> {
     let operand_exceptions = x.operand_exceptions()
         | if matches!(
@@ -377,23 +378,23 @@ pub(crate) fn evaluate(
     } else {
         0
     };
-    let mut constants = Consts::new().map_err(|_| NumericalError::NumericalFailure)?;
+    let constants = workspace.constants()?;
     for extra in [256, 512, 1024, 2048, 4096] {
         let p = cancellation + extra;
         let input = to_big(x, p);
         let one = Interval::exact(BigFloat::from_u64(1, p));
         let result = match function {
             Function::Sin => Interval {
-                low: input.sin(p, R::Down, &mut constants),
-                high: input.sin(p, R::Up, &mut constants),
+                low: input.sin(p, R::Down, constants),
+                high: input.sin(p, R::Up, constants),
             },
             Function::Cos => Interval {
-                low: input.cos(p, R::Down, &mut constants),
-                high: input.cos(p, R::Up, &mut constants),
+                low: input.cos(p, R::Down, constants),
+                high: input.cos(p, R::Up, constants),
             },
             Function::Tan => Interval {
-                low: input.tan(p, R::Down, &mut constants),
-                high: input.tan(p, R::Up, &mut constants),
+                low: input.tan(p, R::Down, constants),
+                high: input.tan(p, R::Up, constants),
             },
             Function::Exp2MinusOne => {
                 let ln2 = Interval {
@@ -402,7 +403,7 @@ pub(crate) fn evaluate(
                 };
                 Interval::exact(input)
                     .combine(&ln2, p, false)?
-                    .unary(p, &mut constants, function)
+                    .unary(p, constants, function)
                     .sub(&one, p)
             }
             Function::Log2Multiply | Function::Log2PlusOneMultiply => {
@@ -412,13 +413,13 @@ pub(crate) fn evaluate(
                 } else {
                     input
                 };
-                input.unary(p, &mut constants, function).combine(
+                input.unary(p, constants, function).combine(
                     &Interval::exact(to_big(y, p)),
                     p,
                     false,
                 )?
             }
-            Function::Atan2 => atan2(x, y, p, &mut constants)?,
+            Function::Atan2 => atan2(x, y, p, constants)?,
         };
         let low = to_extended(&result.low, control, operand_exceptions)?;
         let high = to_extended(&result.high, control, operand_exceptions)?;
@@ -461,9 +462,43 @@ pub(crate) fn evaluate(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reused_constants_preserve_rounding_exceptions_and_numerical_failures() {
+        let mut workspace = crate::math::NumericalWorkspace::default();
+        for control in [0x37f, 0x77f, 0xb7f, 0xf7f] {
+            for function in [
+                Function::Sin,
+                Function::Cos,
+                Function::Tan,
+                Function::Atan2,
+                Function::Exp2MinusOne,
+                Function::Log2Multiply,
+                Function::Log2PlusOneMultiply,
+            ] {
+                for x in [Ext80::ONE, Ext80::ONE.negated()] {
+                    let fresh = evaluate(function, x, Ext80::ONE, control, &mut Default::default());
+                    let reused = evaluate(function, x, Ext80::ONE, control, &mut workspace);
+                    if function == Function::Sin && x == Ext80::ONE && control == 0x37f {
+                        assert!(fresh.is_ok());
+                    }
+                    assert_eq!(
+                        reused.map(|result| (result.value, result.exceptions, result.incremented)),
+                        fresh.map(|result| (result.value, result.exceptions, result.incremented)),
+                        "{function:?}, control={control:#x}"
+                    );
+                }
+            }
+        }
+    }
+
     #[test]
     fn exact_values_signed_zero_and_quadrants() {
-        let eval = |f, x, y| evaluate(f, x, y, 0x37f).unwrap().value;
+        let eval = |f, x, y| {
+            evaluate(f, x, y, 0x37f, &mut Default::default())
+                .unwrap()
+                .value
+        };
         assert_eq!(
             eval(Function::Exp2MinusOne, Ext80::ONE, Ext80::ZERO),
             Ext80::ONE
@@ -493,9 +528,23 @@ mod tests {
     #[test]
     fn tiny_cancellation_retains_extended_range() {
         let tiny = Ext80::from_parts(false, 1, 1 << 63);
-        let result = evaluate(Function::Exp2MinusOne, tiny, Ext80::ZERO, 0x37f).unwrap();
+        let result = evaluate(
+            Function::Exp2MinusOne,
+            tiny,
+            Ext80::ZERO,
+            0x37f,
+            &mut Default::default(),
+        )
+        .unwrap();
         assert_ne!(result.value, Ext80::ZERO);
-        let log = evaluate(Function::Log2PlusOneMultiply, tiny, Ext80::ONE, 0x37f).unwrap();
+        let log = evaluate(
+            Function::Log2PlusOneMultiply,
+            tiny,
+            Ext80::ONE,
+            0x37f,
+            &mut Default::default(),
+        )
+        .unwrap();
         assert_ne!(log.value, Ext80::ZERO);
     }
 }

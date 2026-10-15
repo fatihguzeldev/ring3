@@ -2,6 +2,9 @@ pub(crate) mod aes;
 pub(crate) mod extended;
 pub(crate) mod ieee;
 mod integer;
+mod workspace;
+
+pub(crate) use workspace::NumericalWorkspace;
 
 pub(crate) use integer::{carryless_product, sqrt_rem};
 

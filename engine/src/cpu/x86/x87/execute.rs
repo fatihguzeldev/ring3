@@ -471,6 +471,16 @@ impl X87State {
         input: &[u8],
         eflags: u32,
     ) -> Result<X87Outcome, X87Error> {
+        self.evaluate_with_workspace(operation, input, eflags, &mut Default::default())
+    }
+
+    pub(crate) fn evaluate_with_workspace(
+        &self,
+        operation: X87Operation,
+        input: &[u8],
+        eflags: u32,
+        workspace: &mut crate::math::NumericalWorkspace,
+    ) -> Result<X87Outcome, X87Error> {
         if input.len() != operation.read_size() {
             return Err(X87Error::InvalidInputLength);
         }
@@ -490,7 +500,7 @@ impl X87State {
         if computation {
             outcome.state.status &= !0x3f;
         }
-        outcome.run(operation, input, eflags)?;
+        outcome.run(operation, input, eflags, workspace)?;
         if computation {
             let mut raised = outcome.state.status & 0x3f;
             if raised & INVALID != 0 {
@@ -582,7 +592,13 @@ impl X87Outcome {
         result.value
     }
 
-    fn run(&mut self, operation: X87Operation, input: &[u8], eflags: u32) -> Result<(), X87Error> {
+    fn run(
+        &mut self,
+        operation: X87Operation,
+        input: &[u8],
+        eflags: u32,
+        workspace: &mut crate::math::NumericalWorkspace,
+    ) -> Result<(), X87Error> {
         match operation {
             X87Operation::Initialize => {
                 let registers = self.state.registers;
@@ -812,6 +828,7 @@ impl X87Outcome {
                     x,
                     Ext80::ZERO,
                     self.state.control,
+                    workspace,
                 )?;
                 let value = self.rounded(result);
                 self.write(0, value)?;
@@ -826,7 +843,8 @@ impl X87Outcome {
                     }
                     _ => super::transcendental::Function::Log2Multiply,
                 };
-                let result = super::transcendental::evaluate(function, x, y, self.state.control)?;
+                let result =
+                    super::transcendental::evaluate(function, x, y, self.state.control, workspace)?;
                 let value = self.rounded(result);
                 self.write(1, value)?;
                 self.pop();
@@ -844,8 +862,13 @@ impl X87Outcome {
                     2 => super::transcendental::Function::Tan,
                     _ => return Err(X87Error::InvalidOperand),
                 };
-                let result =
-                    super::transcendental::evaluate(kind, x, Ext80::ZERO, self.state.control)?;
+                let result = super::transcendental::evaluate(
+                    kind,
+                    x,
+                    Ext80::ZERO,
+                    self.state.control,
+                    workspace,
+                )?;
                 let value = self.rounded(result);
                 self.write(0, value)?;
                 if function == 2 {
@@ -857,6 +880,7 @@ impl X87Outcome {
                         x,
                         Ext80::ZERO,
                         self.state.control,
+                        workspace,
                     )?;
                     let value = self.rounded(cosine);
                     self.push(value);

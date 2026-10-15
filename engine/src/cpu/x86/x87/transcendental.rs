@@ -10,7 +10,8 @@ pub(super) fn evaluate(
     x: Ext80,
     y: Ext80,
     control: u16,
+    workspace: &mut crate::math::NumericalWorkspace,
 ) -> Result<Rounded, X87Error> {
-    crate::math::extended::transcendental::evaluate(function, x, y, control)
+    crate::math::extended::transcendental::evaluate(function, x, y, control, workspace)
         .map_err(|_| X87Error::NumericalFailure)
 }
