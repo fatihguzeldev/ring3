@@ -2,7 +2,6 @@ use super::{
     GuestComCreation32, GuestComError32, GuestComObjects32, InterfaceLayout32, ObjectAllocation32,
     Vtable32, allocation::validate_layouts,
 };
-#[cfg(test)]
 use crate::windows::com::InterfaceId;
 use crate::{
     memory::{
@@ -241,7 +240,6 @@ impl GuestComObjects32 {
         Ok(identity)
     }
 
-    #[cfg(test)]
     pub(crate) fn query_target(
         &self,
         memory: &AddressSpace,

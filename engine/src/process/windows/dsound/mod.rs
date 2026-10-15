@@ -1,0 +1,21 @@
+mod buffers;
+mod capture;
+mod context;
+mod device;
+mod dispatch;
+mod duplex;
+mod enumeration;
+mod lifetime;
+mod locks;
+mod memory;
+mod notifications;
+mod objects;
+mod runtime;
+mod spatial;
+mod types;
+
+pub(in crate::process) use context::DSoundRuntime32;
+pub use types::{DSoundConfig32, DSoundError32};
+
+#[cfg(test)]
+mod tests;
