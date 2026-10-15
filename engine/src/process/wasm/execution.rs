@@ -1,5 +1,9 @@
 use super::{REGISTRY, inspect, mutate, status};
 use crate::abi::arena::{CANCEL_OFFSET, EXIT_OFFSET, STATE_OFFSET, TRANSFER_OFFSET};
+use crate::abi::execution::{
+    DISPATCHER_RECORD_SIZE, INSTALLATION_RECORD_SIZE, RESIDENT_MODULE_RECORD_SIZE,
+    encode_dispatcher, encode_installation, encode_resident_module,
+};
 use crate::abi::x86::{STATE_SIZE, decode_state};
 use crate::cpu::dbt::RegistryError;
 use crate::process::{EngineInstance, HostError, ResidentInstallation};
@@ -179,40 +183,20 @@ pub(crate) fn find_installed_resident(key_low: u32, key_high: u32, pc: u32) -> u
 }
 
 fn installation_record(instance: &mut EngineInstance, installed: ResidentInstallation) {
-    let fields = [
-        u32::from_le_bytes(*b"R3IN"),
-        0x10001,
-        32,
-        0,
-        installed.unit_id as u32,
-        (installed.unit_id >> 32) as u32,
-        installed.slot,
-        0,
-    ];
-    let output = &mut instance.arena.as_mut().get_mut()[TRANSFER_OFFSET..TRANSFER_OFFSET + 32];
-    for (word, value) in output.chunks_exact_mut(4).zip(fields) {
-        word.copy_from_slice(&value.to_le_bytes());
-    }
+    let output = &mut instance.arena.as_mut().get_mut()
+        [TRANSFER_OFFSET..TRANSFER_OFFSET + INSTALLATION_RECORD_SIZE];
+    encode_installation(installed.unit_id, installed.slot, output.try_into().unwrap());
 }
 
 pub(crate) fn dispatcher_module(low: u32, high: u32) -> u32 {
     let key = u64::from(low) | (u64::from(high) << 32);
     mutate(|instance| {
         let bytes = instance.dispatcher_bytes(key)?;
-        let fields = [
-            u32::from_le_bytes(*b"R3DP"),
-            0x10001,
-            32,
-            0,
-            low,
-            high,
-            bytes.as_ptr() as u32,
-            bytes.len() as u32,
-        ];
-        let output = &mut instance.arena.as_mut().get_mut()[TRANSFER_OFFSET..TRANSFER_OFFSET + 32];
-        for (word, value) in output.chunks_exact_mut(4).zip(fields) {
-            word.copy_from_slice(&value.to_le_bytes());
-        }
+        let pointer = bytes.as_ptr() as u32;
+        let length = bytes.len() as u32;
+        let output = &mut instance.arena.as_mut().get_mut()
+            [TRANSFER_OFFSET..TRANSFER_OFFSET + DISPATCHER_RECORD_SIZE];
+        encode_dispatcher(key, pointer, length, output.try_into().unwrap());
         Ok(())
     })
 }
@@ -224,18 +208,11 @@ pub(crate) fn resident_module(low: u32, high: u32) -> u32 {
 
 fn resident_record(instance: &mut EngineInstance, id: u64) -> Result<(), HostError> {
     let bytes = instance.resident_bytes(id)?;
-    let fields = [
-        1,
-        24,
-        id as u32,
-        (id >> 32) as u32,
-        bytes.as_ptr() as u32,
-        bytes.len() as u32,
-    ];
-    let transfer = &mut instance.arena.as_mut().get_mut()[TRANSFER_OFFSET..TRANSFER_OFFSET + 24];
-    for (output, value) in transfer.chunks_exact_mut(4).zip(fields) {
-        output.copy_from_slice(&value.to_le_bytes());
-    }
+    let pointer = bytes.as_ptr() as u32;
+    let length = bytes.len() as u32;
+    let output = &mut instance.arena.as_mut().get_mut()
+        [TRANSFER_OFFSET..TRANSFER_OFFSET + RESIDENT_MODULE_RECORD_SIZE];
+    encode_resident_module(id, pointer, length, output.try_into().unwrap());
     Ok(())
 }
 
