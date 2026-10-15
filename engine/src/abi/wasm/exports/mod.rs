@@ -22,6 +22,7 @@ mod events;
 mod execution;
 mod image;
 mod instance;
+mod media;
 mod memory;
 mod modules;
 mod paging;

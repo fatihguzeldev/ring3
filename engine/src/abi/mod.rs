@@ -6,6 +6,7 @@ pub mod far;
 #[forbid(unsafe_code)]
 pub(crate) mod header;
 pub mod image;
+pub mod media;
 pub mod memory_helper;
 pub mod modules;
 pub mod resident_callback;

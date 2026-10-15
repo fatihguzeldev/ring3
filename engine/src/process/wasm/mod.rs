@@ -8,6 +8,9 @@ use crate::cpu::dbt::RegistryError;
 mod clock;
 pub(crate) use clock::{advance_cpu_clock, configure_cpu_clock, observe_cpu_clock};
 
+mod media;
+pub(crate) use media::*;
+
 struct Registry {
     opened: bool,
     instance: Option<EngineInstance>,
@@ -146,7 +149,6 @@ pub(super) fn status(error: HostError) -> u32 {
             RegistryError::CodeInvalidated => 4,
         },
         HostError::GenerationExhausted | HostError::Infrastructure => 9,
-        HostError::Media(_) => 7,
         HostError::Call(error) => match error {
             CallError::Busy => 12,
             CallError::InvalidStop => 13,
@@ -157,6 +159,7 @@ pub(super) fn status(error: HostError) -> u32 {
             CallError::TokenExhausted => 9,
             CallError::Memory(_) => 8,
         },
+        HostError::Media(error) => media::status(error),
     }
 }
 
