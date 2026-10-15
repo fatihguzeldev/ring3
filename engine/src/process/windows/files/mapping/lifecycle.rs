@@ -1,7 +1,7 @@
 use super::context::*;
 use super::views::memory_error;
 use crate::{
-    files::{FileError32, FileId, FileIo32},
+    files::{FileError32, FileId},
     memory::{Access, AddressSpace, PAGE_SIZE, PageRange, Permissions},
     process::windows::files::{FileRuntime32, ordinary::FileCallOutcome32},
 };
@@ -31,23 +31,27 @@ impl FileRuntime32 {
     ) -> Result<FileCallOutcome32, FileError32> {
         let index = self.mappings.index(id)?;
         if self.mappings.objects[index].references == 1 {
-            if let Some(open) = self.mappings.objects[index].source {
-                let key = self.mappings.objects[index].key;
-                self.vfs.check_close_open_after_mutations(
-                    open,
-                    u64::from(self.mapping_backing_dirty(memory, key)?),
-                )?;
-            }
             let key = self.mappings.objects[index].key;
-            if self
+            let final_backing = self
                 .mappings
                 .objects
                 .iter()
                 .filter(|object| object.key == key)
                 .count()
-                == 1
-            {
-                if let Some(request) = self.flush_mapping_pages(memory, key, None)? {
+                == 1;
+            let writeback = if final_backing {
+                Some(self.prepare_mapping_writeback(memory, key, None)?)
+            } else {
+                None
+            };
+            if let Some(open) = self.mappings.objects[index].source {
+                self.vfs.check_close_open_after_mutations(
+                    open,
+                    writeback.as_ref().map_or(0, |plan| plan.mutations()),
+                )?;
+            }
+            if let Some(writeback) = writeback {
+                if let Some(request) = self.flush_mapping_writeback(memory, writeback)? {
                     return Ok(FileCallOutcome32::PendingBytes(request));
                 }
                 self.drop_mapping_pages(memory, key)?;
@@ -85,10 +89,15 @@ impl FileRuntime32 {
                 .filter(|object| object.key == key)
                 .count()
                 == 1;
+        let writeback = if final_backing {
+            Some(self.prepare_mapping_writeback(memory, key, None)?)
+        } else {
+            None
+        };
         if final_object && let Some(open) = self.mappings.objects[object_index].source {
             self.vfs.check_close_open_after_mutations(
                 open,
-                u64::from(final_backing && self.mapping_backing_dirty(memory, key)?),
+                writeback.as_ref().map_or(0, |plan| plan.mutations()),
             )?;
         }
         for page in view_range.indices() {
@@ -99,7 +108,9 @@ impl FileRuntime32 {
         memory
             .ensure_transaction_versions(1)
             .map_err(memory_error)?;
-        if final_backing && let Some(request) = self.flush_mapping_pages(memory, key, None)? {
+        if let Some(writeback) = writeback
+            && let Some(request) = self.flush_mapping_writeback(memory, writeback)?
+        {
             return Ok(FileCallOutcome32::PendingBytes(request));
         }
         for page in view_range.indices() {
@@ -145,98 +156,6 @@ impl FileRuntime32 {
             Ok(FileCallOutcome32::PendingBytes(request))
         } else {
             Ok(FileCallOutcome32::success(1))
-        }
-    }
-    fn mapping_backing_dirty(
-        &self,
-        memory: &AddressSpace,
-        key: MappingBacking32,
-    ) -> Result<bool, FileError32> {
-        if !matches!(key, MappingBacking32::File(_)) {
-            return Ok(false);
-        }
-        for pages in self.mappings.pages.iter().filter(|pages| pages.key == key) {
-            for (index, &flushed) in pages.flushed.iter().enumerate() {
-                if memory
-                    .shared_content_version(&pages.backing, index)
-                    .map_err(memory_error)?
-                    != flushed
-                {
-                    return Ok(true);
-                }
-            }
-        }
-        Ok(false)
-    }
-    fn flush_mapping_pages(
-        &mut self,
-        memory: &AddressSpace,
-        key: MappingBacking32,
-        range: Option<(u64, u64)>,
-    ) -> Result<Option<crate::files::FileReadRequest32>, FileError32> {
-        let MappingBacking32::File(file) = key else {
-            return Ok(None);
-        };
-        let file_size = self.vfs.info(file)?.size;
-        let mut selected = Vec::new();
-        let mut data = Vec::new();
-        for (group, pages) in self
-            .mappings
-            .pages
-            .iter()
-            .enumerate()
-            .filter(|(_, pages)| pages.key == key)
-        {
-            for (page, &offset) in pages.offsets.iter().enumerate() {
-                if range.is_some_and(|(start, end)| {
-                    offset + u64::from(PAGE_SIZE) <= start || offset >= end
-                }) {
-                    continue;
-                }
-                let version = memory
-                    .shared_content_version(&pages.backing, page)
-                    .map_err(memory_error)?;
-                if version == pages.flushed[page] || offset >= file_size {
-                    continue;
-                }
-                let length = (file_size - offset).min(u64::from(PAGE_SIZE)) as usize;
-                selected
-                    .try_reserve(1)
-                    .map_err(|_| FileError32::Allocation)?;
-                data.try_reserve(length)
-                    .map_err(|_| FileError32::Allocation)?;
-                let at = data.len();
-                data.resize(at + length, 0);
-                memory
-                    .read_shared_pages(
-                        &pages.backing,
-                        page * PAGE_SIZE as usize,
-                        &mut data[at..at + length],
-                    )
-                    .map_err(memory_error)?;
-                selected.push((group, page, offset, at, length, version));
-            }
-        }
-        if selected.is_empty() {
-            return Ok(None);
-        }
-        let mut spans = Vec::new();
-        spans
-            .try_reserve_exact(selected.len())
-            .map_err(|_| FileError32::Allocation)?;
-        for &(_, _, offset, at, length, _) in &selected {
-            spans.push((offset, &data[at..at + length]));
-        }
-        match self.vfs.prepare_writes_at(file, &spans)? {
-            FileIo32::NeedBytes(request) => Ok(Some(request)),
-            FileIo32::Ready(write) => {
-                write.validate(&self.vfs)?;
-                self.vfs.commit_write(write);
-                for (group, page, _, _, _, version) in selected {
-                    self.mappings.pages[group].flushed[page] = version;
-                }
-                Ok(None)
-            }
         }
     }
     fn drop_mapping_pages(
