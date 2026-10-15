@@ -293,3 +293,7 @@ path = "tests/process/media/native.rs"
 [[test]]
 name = "process_media_wasm"
 path = "tests/process/media/wasm.rs"
+
+[[test]]
+name = "windows_graphics_d3d8_wasm"
+path = "tests/windows/graphics/d3d8/wasm.rs"
