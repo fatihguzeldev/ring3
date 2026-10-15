@@ -1,3 +1,6 @@
+import {pageFaultExit, pageFaultPacket} from '../../../../../../../support/wasm/page-fault.mjs';
+import {ARENA_SIZE} from '../../../../../../../support/wasm/arena.mjs';
+import {generatedImports} from '../../../../../../../support/wasm/binding.mjs';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -13,7 +16,7 @@ const PC = 0x1000,
   SV = 4364,
   YU = 4612,
   SG = 4524,
-  SIZE = 4756,
+  SIZE = ARENA_SIZE,
   KEY_HIGH = 0x46313643;
 const counts = {
   contexts: 0,
@@ -24,7 +27,7 @@ const counts = {
   neutral: 0,
   fullRamPairs: 0,
 };
-const sourcePaths = [
+const sourcePaths = ['engine/tests/support/wasm/page-fault.mjs', 'engine/tests/support/wasm/arena.mjs', 'engine/tests/support/wasm/binding.mjs',
   ...exportsReceipt.sourcePaths,
   'engine/tests/support/wasm/engine.mjs',
   'engine/tests/cpu/simd/avx/f16c/native.rs',
@@ -66,6 +69,11 @@ function words(values, size = 4) {
   return b;
 }
 function record(magic, size, values, version = 1) {
+  if (magic === 'R3EX' && values[0] === 5) return pageFaultExit({retired: values[1],
+    errorCode: 4 | (values[4] === 2 ? 2 : 0) | (values[2] === 2 ? 1 : 0), address: values[3], access: values[4], length: values[5]});
+  if (magic === 'R3MH' && values[0] === 1) return pageFaultPacket({
+    errorCode: 4 | (values[4] === 2 ? 2 : 0) | (values[2] === 2 ? 1 : 0), address: values[3], access: values[4], length: values[5]});
+
   const b = Buffer.alloc(size);
   b.write(magic);
   b.writeUInt16LE(version, 4);
@@ -176,11 +184,7 @@ function compile(c, row) {
     WebAssembly.Module.imports(module)
       .map((i) => `${i.module}:${i.name}:${i.kind}`)
       .sort(),
-    [
-      'env:memory:memory',
-      `ring3:${c.owner === 'resident' ? 'guard_resident' : 'guard'}:function`,
-      `ring3:${helper}:function`,
-    ].sort(),
+    generatedImports({resident: c.owner === 'resident', helpers: [helper]}).map(i => `${i.module}:${i.name}:${i.kind}`).sort(),
     row.name,
   );
   assert.deepEqual(WebAssembly.Module.exports(module), [{ name: 'run', kind: 'function' }]);
@@ -294,12 +298,12 @@ function execute(c, fn, row, budget = 1, cancel = false) {
   assert.deepEqual(
     after,
     expected,
-    `${row.name}: full4756B arena budget=${budget} cancel=${cancel}`,
+    `${row.name}: full4796B arena budget=${budget} cancel=${cancel}`,
   );
   const observed = c.calls.slice(first);
   assert.equal(observed.length, active ? 1 : 0, row.name);
   if (active) {
-    assert.equal(observed[0].status, reason === 6 ? 11 : 0);
+    assert.equal(observed[0].status, reason === 5 ? 23 : reason === 6 ? 11 : 0, 'native helper transport');
     const args = observed[0].args.slice(-6);
     const descriptor =
       0x01001200 + (row.narrow ? (row.width === 16 ? 3 : 4) : row.width === 16 ? 1 : 2);

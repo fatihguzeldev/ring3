@@ -1,3 +1,6 @@
+import {pageFaultExit, pageFaultPacket} from '../../../../../../../support/wasm/page-fault.mjs';
+import {ARENA_SIZE} from '../../../../../../../support/wasm/arena.mjs';
+import {generatedImports} from '../../../../../../../support/wasm/binding.mjs';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -14,7 +17,7 @@ const T = 140;
 const SV = 4364;
 const YU = 4612;
 const SG = 4524;
-const SIZE = 4756;
+const SIZE = ARENA_SIZE;
 const KEY_HIGH = 0x464d4133;
 const counts = {
   contexts: 0,
@@ -28,7 +31,7 @@ const counts = {
 };
 const observations = [];
 const frames = [];
-const sourcePaths = [
+const sourcePaths = ['engine/tests/support/wasm/page-fault.mjs', 'engine/tests/support/wasm/arena.mjs', 'engine/tests/support/wasm/binding.mjs',
   ...exportsReceipt.sourcePaths,
   'engine/tests/support/wasm/engine.mjs',
   'engine/tests/cpu/simd/avx/fma/native.rs',
@@ -74,6 +77,11 @@ function words(values) {
 }
 
 function record(magic, size, values, version = 1) {
+  if (magic === 'R3EX' && values[0] === 5) return pageFaultExit({retired: values[1],
+    errorCode: 4 | (values[4] === 2 ? 2 : 0) | (values[2] === 2 ? 1 : 0), address: values[3], access: values[4], length: values[5]});
+  if (magic === 'R3MH' && values[0] === 1) return pageFaultPacket({
+    errorCode: 4 | (values[4] === 2 ? 2 : 0) | (values[2] === 2 ? 1 : 0), address: values[3], access: values[4], length: values[5]});
+
   const bytes = Buffer.alloc(size);
   bytes.write(magic);
   bytes.writeUInt16LE(version, 4);
@@ -170,11 +178,7 @@ function compile(c, row) {
     WebAssembly.Module.imports(module)
       .map((item) => `${item.module}:${item.name}:${item.kind}`)
       .sort(),
-    [
-      'env:memory:memory',
-      `ring3:${c.owner === 'resident' ? 'guard_resident' : 'guard'}:function`,
-      `ring3:${helperName}:function`,
-    ].sort(),
+    generatedImports({resident: c.owner === 'resident', helpers: [helperName]}).map(i => `${i.module}:${i.name}:${i.kind}`).sort(),
     row.name,
   );
   assert.deepEqual(WebAssembly.Module.exports(module), [{ name: 'run', kind: 'function' }]);
@@ -306,12 +310,12 @@ function execute(c, compiled, row, budget = 1, cancel = false) {
   assert.deepEqual(
     after,
     expected,
-    `${row.name}: full4756B arena budget=${budget} cancel=${cancel}`,
+    `${row.name}: full4796B arena budget=${budget} cancel=${cancel}`,
   );
   const observed = c.calls.slice(first);
   assert.equal(observed.length, Number(active), row.name);
   if (active) {
-    assert.equal(observed[0].status, 0, row.name);
+    assert.equal(observed[0].status, reason === 5 ? 23 : 0, row.name);
     const operands = row.destination | (row.second << 3) | (row.memory ? 1 << 12 : row.third << 6);
     assert.deepEqual(
       observed[0].args.slice(-6),
@@ -448,7 +452,7 @@ writeFileSync(
       sourcePins,
       observations,
       scope:
-        'all96 canonical FMA forms in four capture contexts; integer/literal independent numeric oracles; full4756B arena and all8192 mapped RAM; deterministic Ring3 cached-span then page then numeric authority policy',
+        'all96 canonical FMA forms in four capture contexts; integer/literal independent numeric oracles; full4796B arena and all8192 mapped RAM; deterministic Ring3 cached-span then page then numeric authority policy',
     },
     null,
     2,

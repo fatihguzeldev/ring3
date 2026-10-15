@@ -1,3 +1,6 @@
+import {pageFaultExit, pageFaultPacket} from '../../../../../../../../support/wasm/page-fault.mjs';
+import {ARENA_SIZE} from '../../../../../../../../support/wasm/arena.mjs';
+import {generatedImports} from '../../../../../../../../support/wasm/binding.mjs';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -12,10 +15,10 @@ const PC = 0x1000,
   T = 140,
   SV = 4364,
   YU = 4612,
-  SIZE = 4756,
+  SIZE = ARENA_SIZE,
   keyHigh = 0x415658;
 const counts = { contexts: 0, modules: 0, runs: 0, controls: 0, faults: 0, fullRamPairs: 0 };
-const sourcePaths = [
+const sourcePaths = ['engine/tests/support/wasm/page-fault.mjs', 'engine/tests/support/wasm/arena.mjs', 'engine/tests/support/wasm/binding.mjs',
   ...exportsSources,
   'engine/tests/support/wasm/engine.mjs',
   'engine/src/cpu/x86/capabilities.rs',
@@ -60,6 +63,11 @@ const qwords = (values) => {
   return b;
 };
 function record(magic, size, values, version = 1) {
+  if (magic === 'R3EX' && values[0] === 5) return pageFaultExit({retired: values[1],
+    errorCode: 4 | (values[4] === 2 ? 2 : 0) | (values[2] === 2 ? 1 : 0), address: values[3], access: values[4], length: values[5]});
+  if (magic === 'R3MH' && values[0] === 1) return pageFaultPacket({
+    errorCode: 4 | (values[4] === 2 ? 2 : 0) | (values[2] === 2 ? 1 : 0), address: values[3], access: values[4], length: values[5]});
+
   const b = Buffer.alloc(size);
   b.write(magic);
   b.writeUInt16LE(version, 4);
@@ -139,14 +147,10 @@ function compile(c, row) {
   const actual = WebAssembly.Module.imports(module)
     .map((i) => `${i.module}:${i.name}:${i.kind}`)
     .sort();
-  const expected = [
-    'env:memory:memory',
-    `ring3:${c.owner === 'resident' ? 'guard_resident' : 'guard'}:function`,
-    ...(row.read ? ['ring3:cpu_read:function'] : []),
-    ...(row.write
-      ? [`ring3:${c.owner === 'resident' ? 'cpu_write_resident' : 'cpu_write'}:function`]
-      : []),
-  ].sort();
+  const expected = generatedImports({resident: c.owner === 'resident', helpers: [
+    ...(row.read ? ['cpu_read'] : []),
+    ...(row.write ? [c.owner === 'resident' ? 'cpu_write_resident' : 'cpu_write'] : [])
+  ]}).map(i => `${i.module}:${i.name}:${i.kind}`).sort();
   assert.deepEqual(actual, expected, `${row.name}: exact direct-path imports`);
   assert.deepEqual(WebAssembly.Module.exports(module), [{ name: 'run', kind: 'function' }]);
   writeFileSync(join(output, `module-${++counts.modules}.wasm`), binary, { flag: 'wx' });
@@ -267,7 +271,7 @@ function execute(c, fn, row, { budget = row.retired ?? 1, cancel = false } = {})
   );
   assert.equal(c.calls.length - first, helpers, `${row.name}: exact helper count`);
   for (const call of c.calls.slice(first)) {
-    assert.equal(call.status, 0, `${row.name}: helper transport`);
+    assert.equal(call.status, reason === 5 ? 23 : 0, `${row.name}: helper transport`);
     assert.deepEqual(call.args.slice(-3), [
       row.address ?? s.r[0],
       row.read ?? row.write,

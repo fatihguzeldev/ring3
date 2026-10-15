@@ -1,3 +1,6 @@
+import {pageFaultExit} from '../../../../../../../support/wasm/page-fault.mjs';
+import {ARENA_SIZE} from '../../../../../../../support/wasm/arena.mjs';
+import {generatedImports} from '../../../../../../../support/wasm/binding.mjs';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -15,6 +18,7 @@ import {
 } from './cases.mjs';
 
 const [enginePath, output, root] = process.argv.slice(2);
+const workPreflightOnly = process.argv.includes('--work-preflight-only');
 const engine = readEngine(enginePath),
   exportsReceipt = assertEngineExports(engine.module, root);
 const PC = 0x3000,
@@ -24,8 +28,8 @@ const PC = 0x3000,
   YU = 4612,
   SG = 4524,
   WK = 4588,
-  SIZE = 4756;
-const sourcePaths = [
+  SIZE = ARENA_SIZE;
+const sourcePaths = ['engine/tests/support/wasm/page-fault.mjs', 'engine/tests/support/wasm/arena.mjs', 'engine/tests/support/wasm/binding.mjs',
   ...exportsReceipt.sourcePaths,
   ...gatherSourcePaths,
   'engine/tests/support/wasm/engine.mjs',
@@ -130,10 +134,9 @@ function upload(c, address, bytes) {
     c.pages.get((address + at) & 0xfffff000).bytes[(address + at) & 4095] = bytes[at];
 }
 function modelRead(c, address, width) {
-  if (BigInt(address) + BigInt(width) > 0x100000000n) return { fault: true, detail: 3, address };
   const bytes = Buffer.alloc(width);
   for (let at = 0; at < width; at++) {
-    const current = address + at,
+    const current = (address + at) >>> 0,
       page = c.pages.get((current & 0xfffff000) >>> 0);
     if (!page) return { fault: true, detail: 1, address: current };
     if (!(page.permissions & 1)) return { fault: true, detail: 2, address: current };
@@ -178,15 +181,15 @@ function segmentRecord(row) {
   if (segment.id === 4) bytes.writeUInt32LE(segment.base, 48);
   return bytes;
 }
+function legacyPacket(value) {
+  return record('R3GH', 1, 40, [value.status, value.detail, value.address,
+    value.access, value.completed, value.lane]);
+}
 function packet(value) {
-  return record('R3GH', 1, 40, [
-    value.status,
-    value.detail,
-    value.address,
-    value.access,
-    value.completed,
-    value.lane,
-  ]);
+  if (value.status !== 1) return legacyPacket(value);
+  assert.ok([1, 2].includes(value.detail), 'declared native read fault');
+  return record('R3GH', 2, 40, [9, 4 | Number(value.detail === 2), value.address,
+    value.access, value.completed, value.lane]);
 }
 function request(row, value) {
   return record('R3GA', 1, 24, [row.segment.id, value.base]);
@@ -290,13 +293,9 @@ function compile(c, row) {
   const binary = Buffer.from(new Uint8Array(c.memory.buffer, pointer, length)),
     module = new WebAssembly.Module(binary);
   const helper = c.owner === 'resident' ? 'avx_execute_resident' : 'avx_execute';
-  const imports = [
-    'env:memory:memory',
-    `ring3:${c.owner === 'resident' ? 'guard_resident' : 'guard'}:function`,
-    `ring3:${helper}:function`,
-    ...(row.mixed ? ['ring3:read8:function'] : []),
-    ...(row.continuation ? ['ring3:cpu_read:function'] : []),
-  ].sort();
+  const imports = generatedImports({resident: c.owner === 'resident', helpers: [
+    ...(row.mixed ? ['cpu_read8'] : []), ...(row.continuation ? ['cpu_read'] : []), helper
+  ]}).map(i => `${i.module}:${i.name}:${i.kind}`).sort();
   assert.deepEqual(
     WebAssembly.Module.imports(module)
       .map((item) => `${item.module}:${item.name}:${item.kind}`)
@@ -344,11 +343,11 @@ function compile(c, row) {
       input(c, H, result);
       status = c.synthetic.hostStatus ?? 0;
     } else status = c.api[helper](...args);
-    assert.equal(status, c.synthetic?.hostStatus ?? 0, 'normal helper host transport');
+    assert.equal(status, c.synthetic ? c.synthetic.hostStatus ?? 0 : value.status === 1 ? 23 : 0, 'normal helper host transport');
     assert.deepEqual(
       arena(c),
       expected,
-      'helper stages outputs only; complete4756B image has no early vector/GPR/flags/RAM publication',
+      'helper stages outputs only; complete4796B image has no early vector/GPR/flags/RAM publication',
     );
     c.calls.push({ args: args.map((value) => value >>> 0), status });
     return status;
@@ -374,7 +373,7 @@ function compile(c, row) {
       return status;
     };
   if (row.mixed)
-    ring3.read8 = () => {
+    ring3.cpu_read8 = () => {
       assert.fail('budget must stop before REP after gather');
     };
   return {
@@ -400,8 +399,8 @@ function seed(c, row) {
   publish(frame, row.destination, row.destinationBytes);
   publish(frame, row.indexRegister, row.indexes);
   publish(frame, row.mask, row.masks);
-  // standalone gather never validates/updates REP work; poison proves the absent dependency.
-  frame.set(row.mixed ? record('R3WK', 1, 24, [27, 0]) : Buffer.alloc(24, 0xa5), WK);
+  // bound application stops retain a valid work record; the gather helper never changes it.
+  frame.set(record('R3WK', 1, 24, [row.mixed ? 27 : 0, 0]), WK);
   frame.fill(0xa5, T + 512, T + 544);
   frame.fill(0x5a, T + 544, T + 568);
   input(c, 0, frame);
@@ -471,10 +470,10 @@ function execute(
       : compiled.gatherPC;
   expected.set(state(registers, pc, flags, active ? false : before.readUInt32LE(12) === 1));
   expected.set(
-    record('R3EX', reason === 16 ? 7 : 6, 40, [
-      reason,
-      retired,
-      active ? detail : 0,
+    reason === 5 && !synthetic ? pageFaultExit({retired, errorCode: 4 | Number(value.detail === 2),
+      address: value.address, access: 1, length: row.geometry.data})
+    : record('R3EX', reason === 16 ? 7 : 6, 40, [
+      reason, retired, active ? detail : 0,
       active && !synthetic?.invalid && value.status === 1 ? value.address : 0,
       active && !synthetic?.invalid && value.status === 1 ? 1 : 0,
       active && !synthetic?.invalid && value.status === 1 ? row.geometry.data : 0,
@@ -502,7 +501,7 @@ function execute(
   const first = c.calls.length,
     firstRead = c.reads.length;
   assert.equal(compiled.run(c.base, c.base + 56, budget, c.base + 96), 0, row.name);
-  assert.deepEqual(arena(c), expected, `${row.name}: full4756B arena`);
+  assert.deepEqual(arena(c), expected, `${row.name}: full4796B arena`);
   assert.equal(
     c.calls.length - first,
     +active,
@@ -530,7 +529,7 @@ function execute(
     cancel,
     resume,
     synthetic: synthetic?.name,
-    reason,
+    reason: reason === 5 && !synthetic ? 23 : reason,
     retired,
     completed: active ? value.completed : 0,
     faultLane: active ? value.lane : null,
@@ -572,8 +571,25 @@ function repair(c, row, value) {
   }
   return fixed;
 }
+function rejectInvalidWork(c, compiled, row) {
+  seed(c, row);
+  input(c, WK, Buffer.alloc(24, 0xa5));
+  const before = arena(c), beforeRam = ram(c), calls = c.calls.length, reads = c.reads.length;
+  assert.equal(compiled.run(c.base, c.base + 56, 1, c.base + 96), 2, 'invalid shared work record fails ABI preflight');
+  assert.deepEqual(arena(c), before, 'invalid work preserves the entire arena before retirement');
+  assert.equal(c.calls.length, calls, 'invalid work invokes no gather helper');
+  assert.equal(c.reads.length, reads, 'invalid work invokes no following operand helper');
+  assert.deepEqual(ram(c), beforeRam, 'invalid work preserves all mapped RAM');
+  assert.deepEqual(arena(c), before, 'RAM inspection preserves the invalid input arena');
+  frames.push(before, arena(c)); ramFrames.push(beforeRam, ram(c));
+  rows.push({context: c.key, name: 'invalid-work-precedes-gather-and-retirement', status: 2,
+    retired: 0, completed: 0, frameBefore: frames.length - 2, frameAfter: frames.length - 1,
+    ramBefore: ramFrames.length - 2, ramAfter: ramFrames.length - 1, ramBytes: beforeRam.length});
+  counts.runs++; counts.controls++; counts.fullArena++; counts.fullRam++;
+}
+// injected legacy replies remain lowerer protocol controls, separate from native typed faults.
 function corruptions(row, value) {
-  const good = packet(value),
+  const good = legacyPacket(value),
     stage = Buffer.concat([value.value, value.mask]),
     result = [];
   const field = (name, offset, number) => {
@@ -621,7 +637,7 @@ function corruptions(row, value) {
     ['success-fault-lane', 36, 0],
     ['success-nonzero-address', 24, 0x6000],
   ]) {
-    const bytes = packet(success);
+    const bytes = legacyPacket(success);
     bytes.writeUInt32LE(number >>> 0, offset);
     result.push({
       name,
@@ -642,7 +658,7 @@ function corruptions(row, value) {
 for (const owner of ['replacement', 'resident'])
   for (const entries of [false, true]) {
     const c = open(owner, entries);
-    for (const row of gatherRows) {
+    for (const row of workPreflightOnly ? [] : gatherRows) {
       reset(c, row);
       const compiled = compile(c, row);
       execute(c, compiled, row, { budget: 0 });
@@ -654,72 +670,79 @@ for (const owner of ['replacement', 'resident'])
         execute(c, compiled, fixed, { resume: true });
       }
     }
-    const row = {
-      ...gatherRows.find((row) => row.name === 'tf-partial-fault-before-retirement'),
-      flags: 0x244cd7,
-      shadow: false,
-    };
-    reset(c, row);
-    const compiled = compile(c, row);
-    seed(c, row);
-    const registers = Array.from({ length: 8 }, (_, index) =>
-      arena(c).readUInt32LE(16 + index * 4),
-    );
-    const value = outcome(
-      row,
-      vector(arena(c), row.destination),
-      vector(arena(c), row.mask),
-      vector(arena(c), row.indexRegister),
-      registers,
-      (address, width) => modelRead(c, address, width),
-    );
-    assert.equal(value.completed, 1);
-    assert.equal(value.lane, 1);
-    execute(c, compiled, row, {
-      synthetic: {
-        name: 'truthful-staged-positive-control',
-        packet: packet(value),
-        stage: Buffer.concat([value.value, value.mask]),
-      },
-    });
-    for (const synthetic of corruptions(row, value)) execute(c, compiled, row, { synthetic });
-    const mixedRow = gatherRows.find((row) => row.name === 'geometry-5-partial-page-repair-resume');
-    reset(c, mixedRow);
-    const mixedCompiled = compile(c, mixedRow);
-    seed(c, mixedRow);
-    const mixedRegisters = Array.from({ length: 8 }, (_, index) =>
-      arena(c).readUInt32LE(16 + index * 4),
-    );
-    const mixedValue = outcome(
-      mixedRow,
-      vector(arena(c), mixedRow.destination),
-      vector(arena(c), mixedRow.mask),
-      vector(arena(c), mixedRow.indexRegister),
-      mixedRegisters,
-      (address, width) => modelRead(c, address, width),
-    );
-    const mixedStage = Buffer.concat([mixedValue.value, mixedValue.mask]);
-    mixedStage[8] = 1;
-    execute(c, mixedCompiled, mixedRow, {
-      synthetic: {
-        name: 'mixed-unused-destination-must-be-zero-on-fault',
-        packet: packet(mixedValue),
-        stage: mixedStage,
-        invalid: true,
-      },
-    });
+    if (!workPreflightOnly) {
+      const row = {
+        ...gatherRows.find((row) => row.name === 'tf-partial-fault-before-retirement'),
+        flags: 0x244cd7,
+        shadow: false,
+      };
+      reset(c, row);
+      const compiled = compile(c, row);
+      seed(c, row);
+      const registers = Array.from({ length: 8 }, (_, index) =>
+        arena(c).readUInt32LE(16 + index * 4),
+      );
+      const value = outcome(
+        row,
+        vector(arena(c), row.destination),
+        vector(arena(c), row.mask),
+        vector(arena(c), row.indexRegister),
+        registers,
+        (address, width) => modelRead(c, address, width),
+      );
+      assert.equal(value.completed, 1);
+      assert.equal(value.lane, 1);
+      execute(c, compiled, row, {
+        synthetic: {
+          name: 'truthful-staged-positive-control',
+          packet: legacyPacket(value),
+          stage: Buffer.concat([value.value, value.mask]),
+        },
+      });
+      for (const synthetic of corruptions(row, value)) execute(c, compiled, row, { synthetic });
+      const mixedRow = gatherRows.find((row) => row.name === 'geometry-5-partial-page-repair-resume');
+      reset(c, mixedRow);
+      const mixedCompiled = compile(c, mixedRow);
+      seed(c, mixedRow);
+      const mixedRegisters = Array.from({ length: 8 }, (_, index) =>
+        arena(c).readUInt32LE(16 + index * 4),
+      );
+      const mixedValue = outcome(
+        mixedRow,
+        vector(arena(c), mixedRow.destination),
+        vector(arena(c), mixedRow.mask),
+        vector(arena(c), mixedRow.indexRegister),
+        mixedRegisters,
+        (address, width) => modelRead(c, address, width),
+      );
+      const mixedStage = Buffer.concat([mixedValue.value, mixedValue.mask]);
+      mixedStage[8] = 1;
+      execute(c, mixedCompiled, mixedRow, {
+        synthetic: {
+          name: 'mixed-unused-destination-must-be-zero-on-fault',
+          packet: legacyPacket(mixedValue),
+          stage: mixedStage,
+          invalid: true,
+        },
+      });
+    }
+    const workRow = gatherRows.find(row => row.name === 'mixed-rep-success-charges-one-work-unit');
+    reset(c, workRow);
+    rejectInvalidWork(c, compile(c, workRow), workRow);
     host(c, 'close');
   }
-assert.deepEqual(counts, {
+assert.deepEqual(counts, workPreflightOnly ? {
+  contexts: 4, modules: 4, runs: 4, controls: 4, partial: 0, resumed: 0, protocol: 0, fullArena: 4, fullRam: 4,
+} : {
   contexts: 4,
-  modules: 236,
-  runs: 836,
-  controls: 456,
+  modules: 240,
+  runs: 840,
+  controls: 460,
   partial: 68,
   resumed: 48,
   protocol: 100,
-  fullArena: 836,
-  fullRam: 836,
+  fullArena: 840,
+  fullRam: 840,
 });
 assert.deepEqual(pins(), sourcePins, 'all proof sources remain current');
 writeFileSync(join(output, 'frames.bin'), Buffer.concat(frames));

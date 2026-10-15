@@ -1,3 +1,5 @@
+import {ARENA_SIZE} from '../../../../../../../support/wasm/arena.mjs';
+import {generatedImports} from '../../../../../../../support/wasm/binding.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
@@ -7,7 +9,7 @@ import {assertEngineExports} from '../../../../../../../support/wasm/exports.mjs
 
 const [enginePath, output, root] = process.argv.slice(2), engine = readEngine(enginePath);
 const {sourcePaths: exportSources} = assertEngineExports(engine.module, root);
-const sourcePaths = [...exportSources, 'engine/tests/support/wasm/engine.mjs',
+const sourcePaths = ['engine/tests/support/wasm/arena.mjs', 'engine/tests/support/wasm/binding.mjs', ...exportSources, 'engine/tests/support/wasm/engine.mjs',
   'engine/src/cpu/x86/decode/avx/mod.rs', 'engine/src/cpu/x86/avx/operation.rs',
   'engine/src/cpu/dbt/wasm/avx/execute.rs', 'engine/src/cpu/dbt/wasm/cpu_result.rs',
   'engine/src/process/cpu/avx.rs', 'engine/src/cpu/x86/avx/dispatch.rs',
@@ -16,7 +18,7 @@ const sourcePaths = [...exportSources, 'engine/tests/support/wasm/engine.mjs',
 assert.equal(new Set(sourcePaths).size, sourcePaths.length);
 const hash = b => createHash('sha256').update(b).digest('hex');
 const pins = () => Object.fromEntries(sourcePaths.map(path => [path, hash(readFileSync(join(root, path)))]));
-const sourcePins = pins(), PC = 0x1000, T = 140, SV = 4364, YU = 4612, SIZE = 4756, keyHigh = 0x50524f;
+const sourcePins = pins(), PC = 0x1000, T = 140, SV = 4364, YU = 4612, SIZE = ARENA_SIZE, keyHigh = 0x50524f;
 const counts = {contexts: 0, modules: 0, runs: 0, rejected: 0, accepted: 0, controls: 0};
 const words = values => {const b = Buffer.alloc(values.length * 4); values.forEach((value, i) => b.writeUInt32LE(value >>> 0, i * 4)); return b;};
 function record(magic, size, values, version = 1) {
@@ -48,7 +50,7 @@ function compile(c, row) {
   const binary = Buffer.from(new Uint8Array(c.memory.buffer, pointer, length)), module = new WebAssembly.Module(binary);
   const helper = c.owner === 'resident' ? 'avx_execute_resident' : 'avx_execute';
   assert.deepEqual(WebAssembly.Module.imports(module).map(i => `${i.module}:${i.name}:${i.kind}`).sort(),
-    ['env:memory:memory', `ring3:${c.owner === 'resident' ? 'guard_resident' : 'guard'}:function`, `ring3:${helper}:function`].sort());
+    generatedImports({resident: c.owner === 'resident', helpers: [helper]}).map(i => `${i.module}:${i.name}:${i.kind}`).sort());
   assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
   writeFileSync(join(output, `module-${++counts.modules}.wasm`), binary, {flag: 'wx'});
   const ring3 = {...c.api};
