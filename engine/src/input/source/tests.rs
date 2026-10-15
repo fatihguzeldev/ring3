@@ -132,3 +132,52 @@ fn legacy_destructive_reads_and_full_queue_do_not_change_canonical_consumers() {
     );
     assert_eq!(input.source().read(first, &mut records).unwrap(), read);
 }
+
+#[test]
+fn cursor_clip_policy_preserves_raw_relative_motion_and_packet_grouping() {
+    let mut source = InputSource32::new(1, 0, 512).unwrap();
+    source
+        .publish_physical(
+            [TimedInputEvent {
+                timestamp_ns: 1,
+                kind: InputKind::Focus { focused: true },
+            }]
+            .into_iter(),
+        )
+        .unwrap();
+    let prepared = source.prepare_window(2).unwrap();
+    source.commit_cursor_policy(prepared, 0, 0, Some((0, 0, 10, 10)));
+    source
+        .publish_physical(
+            [TimedInputEvent {
+                timestamp_ns: 3,
+                kind: InputKind::Relative {
+                    dx: 100,
+                    dy: -100,
+                    wheel: 0,
+                },
+            }]
+            .into_iter(),
+        )
+        .unwrap();
+    assert_eq!(source.snapshot().cursor, (9, 0));
+    assert_eq!(source.snapshot().relative.dx, 100);
+    assert_eq!(source.snapshot().relative.dy, -100);
+    let before = source.tail();
+    let mut controller = ControllerState32 {
+        connected: true,
+        ..Default::default()
+    };
+    controller.axes[0] = 100;
+    controller.axes[1] = 200;
+    source.publish_controller(1, 0, 4, controller).unwrap();
+    let mut events = [SourceEvent32::default(); 4];
+    let read = source.read(before, &mut events).unwrap();
+    assert_eq!(read.count, 3);
+    assert!(
+        events[..read.count]
+            .iter()
+            .all(|event| event.input_sequence == events[0].input_sequence)
+    );
+    assert_ne!(events[0].sequence, events[1].sequence);
+}

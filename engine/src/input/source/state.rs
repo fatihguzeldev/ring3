@@ -27,10 +27,14 @@ pub struct SourceSnapshot32 {
     pub keys: [bool; KEY_COUNT],
     pub presses: [u64; KEY_COUNT],
     pub buttons: [bool; BUTTON_COUNT],
+    pub button_presses: [u64; BUTTON_COUNT],
     pub relative: RelativeTotals,
     pub cursor: (i32, i32),
+    pub cursor_bounds: Option<(i32, i32, i32, i32)>,
     pub focused: bool,
     pub captured: bool,
+    pub mouse_exclusive: bool,
+    pub no_windows_key: bool,
     pub focus_generation: u64,
     pub capture_generation: u64,
     pub controllers: [ControllerState32; MAX_CONTROLLERS],
@@ -41,10 +45,14 @@ impl Default for SourceSnapshot32 {
             keys: [false; KEY_COUNT],
             presses: [0; KEY_COUNT],
             buttons: [false; BUTTON_COUNT],
+            button_presses: [0; BUTTON_COUNT],
             relative: RelativeTotals::default(),
             cursor: (0, 0),
+            cursor_bounds: None,
             focused: false,
             captured: false,
+            mouse_exclusive: false,
+            no_windows_key: false,
             focus_generation: 0,
             capture_generation: 0,
             controllers: [ControllerState32::default(); MAX_CONTROLLERS],
@@ -54,17 +62,40 @@ impl Default for SourceSnapshot32 {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SourceKind32 {
+    CursorPolicy {
+        x: i32,
+        y: i32,
+        bounds: Option<(i32, i32, i32, i32)>,
+    },
     Physical(InputKind),
-    Cursor { x: i32, y: i32 },
-    Controller { slot: u8, object: u16, value: u32 },
-    Connection { slot: u8, connected: bool },
-    Window { focus: u32, capture: u32 },
+    Cursor {
+        x: i32,
+        y: i32,
+    },
+    Controller {
+        slot: u8,
+        object: u16,
+        value: u32,
+    },
+    Connection {
+        slot: u8,
+        connected: bool,
+    },
+    Window {
+        focus: u32,
+        capture: u32,
+    },
+    Policy {
+        mouse_exclusive: bool,
+        no_windows_key: bool,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SourceEvent32 {
     pub sequence: u64,
     pub timestamp_ns: u64,
+    pub input_sequence: u32,
     pub kind: SourceKind32,
 }
 impl Default for SourceEvent32 {
@@ -72,6 +103,7 @@ impl Default for SourceEvent32 {
         Self {
             sequence: 0,
             timestamp_ns: 0,
+            input_sequence: 0,
             kind: SourceKind32::Physical(InputKind::Focus { focused: false }),
         }
     }
@@ -106,6 +138,11 @@ pub(super) fn physical(
             if pressed && !state.focused {
                 return Err(InputError::NotFocused);
             }
+            if pressed && !*value {
+                state.button_presses[button as usize] = state.button_presses[button as usize]
+                    .checked_add(1)
+                    .ok_or(InputError::Exhausted)?;
+            }
             *value = pressed;
         }
         InputKind::Relative { dx, dy, wheel } => {
@@ -127,6 +164,9 @@ pub(super) fn physical(
                 .wheel
                 .checked_add(i64::from(wheel))
                 .ok_or(InputError::Exhausted)?;
+            state.cursor.0 = state.cursor.0.saturating_add(dx);
+            state.cursor.1 = state.cursor.1.saturating_add(dy);
+            state.cursor = clamp_cursor(state.cursor, state.cursor_bounds);
         }
         InputKind::Focus { focused } => {
             if !focused {
@@ -179,4 +219,15 @@ pub(super) fn physical(
     }
     emit(SourceKind32::Physical(event.kind));
     Ok(())
+}
+
+pub(super) fn clamp_cursor(point: (i32, i32), bounds: Option<(i32, i32, i32, i32)>) -> (i32, i32) {
+    if let Some((left, top, right, bottom)) = bounds {
+        (
+            point.0.clamp(left, right.saturating_sub(1).max(left)),
+            point.1.clamp(top, bottom.saturating_sub(1).max(top)),
+        )
+    } else {
+        point
+    }
 }

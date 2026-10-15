@@ -33,7 +33,7 @@ impl EncodedBatch<'_> {
         self.latest_timestamp_ns
     }
 
-    pub(super) fn events(&self) -> impl ExactSizeIterator<Item = TimedInputEvent> + Clone {
+    pub(crate) fn events(&self) -> impl ExactSizeIterator<Item = TimedInputEvent> + Clone {
         self.records.chunks_exact(EVENT_SIZE).map(decode_validated)
     }
 }

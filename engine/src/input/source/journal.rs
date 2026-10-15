@@ -13,11 +13,19 @@ pub struct SourceRead32 {
     pub overflow: bool,
 }
 
-pub struct InputSource32 {
+#[derive(Clone, Copy, Debug)]
+pub struct PreparedSourceWindow32 {
     epoch: u64,
     sequence: u64,
-    timestamp_ns: u64,
-    state: SourceSnapshot32,
+    previous_timestamp: u64,
+    timestamp: u64,
+}
+
+pub struct InputSource32 {
+    pub(super) epoch: u64,
+    sequence: u64,
+    pub(super) timestamp_ns: u64,
+    pub(super) state: SourceSnapshot32,
     records: Box<[SourceEvent32]>,
     length: usize,
 }
@@ -113,9 +121,104 @@ impl InputSource32 {
     }
     pub fn publish_cursor(&mut self, timestamp_ns: u64, x: i32, y: i32) -> Result<(), InputError> {
         self.check_one(timestamp_ns)?;
+        let (x, y) = super::state::clamp_cursor((x, y), self.state.cursor_bounds);
         self.state.cursor = (x, y);
         self.push(timestamp_ns, SourceKind32::Cursor { x, y });
         Ok(())
+    }
+    pub fn can_retain_from(&self, cursor: InputCursor32, additional: usize) -> bool {
+        cursor.epoch == self.epoch
+            && cursor.sequence <= self.sequence
+            && (self.sequence - cursor.sequence)
+                .checked_add(additional as u64)
+                .is_some_and(|count| count <= self.records.len() as u64)
+    }
+    pub fn commit_cursor_policy(
+        &mut self,
+        prepared: PreparedSourceWindow32,
+        x: i32,
+        y: i32,
+        bounds: Option<(i32, i32, i32, i32)>,
+    ) {
+        assert!(
+            self.epoch == prepared.epoch
+                && self.sequence == prepared.sequence
+                && self.timestamp_ns == prepared.previous_timestamp,
+            "prepared source owner changed"
+        );
+        let (x, y) = super::state::clamp_cursor((x, y), bounds);
+        self.state.cursor_bounds = bounds;
+        self.state.cursor = (x, y);
+        self.push(
+            prepared.timestamp,
+            SourceKind32::CursorPolicy { x, y, bounds },
+        );
+    }
+    pub fn commit_cursor(&mut self, prepared: PreparedSourceWindow32, x: i32, y: i32) {
+        assert!(
+            self.epoch == prepared.epoch
+                && self.sequence == prepared.sequence
+                && self.timestamp_ns == prepared.previous_timestamp,
+            "prepared source owner changed"
+        );
+        let (x, y) = super::state::clamp_cursor((x, y), self.state.cursor_bounds);
+        self.state.cursor = (x, y);
+        self.push(prepared.timestamp, SourceKind32::Cursor { x, y });
+    }
+    pub fn commit_policy(
+        &mut self,
+        prepared: PreparedSourceWindow32,
+        mouse_exclusive: bool,
+        no_windows_key: bool,
+    ) {
+        assert!(
+            self.epoch == prepared.epoch
+                && self.sequence == prepared.sequence
+                && self.timestamp_ns == prepared.previous_timestamp,
+            "prepared source owner changed"
+        );
+        self.state.mouse_exclusive = mouse_exclusive;
+        self.state.no_windows_key = no_windows_key;
+        self.push(
+            prepared.timestamp,
+            SourceKind32::Policy {
+                mouse_exclusive,
+                no_windows_key,
+            },
+        );
+    }
+    pub fn prepare_window(&self, timestamp_ns: u64) -> Result<PreparedSourceWindow32, InputError> {
+        self.check_one(timestamp_ns)?;
+        Ok(PreparedSourceWindow32 {
+            epoch: self.epoch,
+            sequence: self.sequence,
+            previous_timestamp: self.timestamp_ns,
+            timestamp: timestamp_ns,
+        })
+    }
+    pub fn commit_window(&mut self, prepared: PreparedSourceWindow32, focus: u32, capture: u32) {
+        assert!(
+            self.epoch == prepared.epoch
+                && self.sequence == prepared.sequence
+                && self.timestamp_ns == prepared.previous_timestamp,
+            "prepared source owner changed"
+        );
+        self.push(prepared.timestamp, SourceKind32::Window { focus, capture });
+    }
+    pub fn check_delivery_capacity(
+        &self,
+        events: impl ExactSizeIterator<Item = TimedInputEvent> + Clone,
+    ) -> Result<(), InputError> {
+        let mut state = self.state;
+        let mut count = 0usize;
+        for event in events {
+            physical(&mut state, event, |_| count += 1)?;
+        }
+        if count > self.records.len() {
+            Err(InputError::QueueFull)
+        } else {
+            Ok(())
+        }
     }
     pub fn publish_window(
         &mut self,
@@ -141,20 +244,31 @@ impl InputSource32 {
         self.length = 0;
         Ok(())
     }
-    fn check_one(&self, time: u64) -> Result<(), InputError> {
+    pub(super) fn check_one(&self, time: u64) -> Result<(), InputError> {
+        self.check_count(time, 1)
+    }
+    pub(super) fn check_count(&self, time: u64, count: u64) -> Result<(), InputError> {
         if time < self.timestamp_ns {
             return Err(InputError::TimeOrder);
         }
-        self.sequence.checked_add(1).ok_or(InputError::Exhausted)?;
+        self.sequence
+            .checked_add(count)
+            .ok_or(InputError::Exhausted)?;
         Ok(())
     }
-    fn push(&mut self, timestamp_ns: u64, kind: SourceKind32) {
+    pub(super) fn push_group(&mut self, timestamp_ns: u64, kind: SourceKind32, sequence: u32) {
+        self.push(timestamp_ns, kind);
+        let index = ((self.sequence - 1) % self.records.len() as u64) as usize;
+        self.records[index].input_sequence = sequence;
+    }
+    pub(super) fn push(&mut self, timestamp_ns: u64, kind: SourceKind32) {
         self.sequence += 1;
         self.timestamp_ns = timestamp_ns;
         let index = ((self.sequence - 1) % self.records.len() as u64) as usize;
         self.records[index] = SourceEvent32 {
             sequence: self.sequence,
             timestamp_ns,
+            input_sequence: self.sequence as u32,
             kind,
         };
         self.length = (self.length + 1).min(self.records.len());

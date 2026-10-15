@@ -79,6 +79,13 @@ impl InputContext {
         &self.source
     }
 
+    pub fn clock_origin_ns(&self) -> u64 {
+        self.clock_epoch_ns
+    }
+    pub(crate) fn source_mut(&mut self) -> &mut super::source::InputSource32 {
+        &mut self.source
+    }
+
     pub fn queued_events(&self) -> usize {
         self.length
     }
