@@ -28,3 +28,5 @@ pub mod process;
 
 pub mod ole32;
 pub mod winmm;
+
+pub mod memory;
