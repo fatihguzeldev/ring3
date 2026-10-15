@@ -1,3 +1,5 @@
+import {pageFaultExit, pageFaultPacket} from '../../../../../../support/wasm/page-fault.mjs';
+import {attachDetectionApi} from '../../../../../../support/wasm/binding.mjs';
 import assert from 'node:assert/strict';
 import {readFileSync,writeFileSync} from 'node:fs';
 import {join} from 'node:path';
@@ -30,6 +32,7 @@ function seed(c,{count=3,source=0x5010,destination=0x6010,eax=0xabcd1234,df=fals
 function open(owner,bytes,entries=false,tail=[0xeb,0xfe]){
  const instance=new WebAssembly.Instance(engine.module,{}),c={id:cases.length+1,owner,entries,memory:instance.exports.memory,api:{},cancelAfter:0,stores:0};
  for(const n of ['open','close','arena_ptr','map','protect','upload','read8','read16','read32','cpu_read8','cpu_read16','cpu_read32','cpu_store8','cpu_store16','cpu_store32','cpu_store_resident8','cpu_store_resident16','cpu_store_resident32','compile','compile_entries','compile_resident','compile_resident_entries','generation','module_ptr','module_len','guard','guard_resident','store8','store16','store32','store_resident8','store_resident16','store_resident32','acknowledge_resident_installation','dispatcher_module','guard_dispatch_entry','find_installed_resident'])c.api[n]=instance.exports['ring3_abi_v1_'+n];
+ attachDetectionApi(c.api, instance.exports);
  host(c,'open',[8,c.id,0x5250]);c.base=c.api.arena_ptr()>>>0;input(c,0,initial);
  for(const [p,permission] of [[0x1000,7],[0x5000,3],[0x6000,3]])host(c,'map',[p,1,permission]);
  const code=Buffer.from([...bytes,...tail]);upload(c,0x1000,code);host(c,'protect',[0x1000,1,5]);
@@ -38,7 +41,7 @@ function open(owner,bytes,entries=false,tail=[0xeb,0xfe]){
  host(c,method,entries?[1,0]:[1]);const a=arena(c),pointer=owner==='resident'?a.readUInt32LE(156):c.api.module_ptr()>>>0,length=owner==='resident'?a.readUInt32LE(160):c.api.module_len()>>>0;
  c.residentLow=a.readUInt32LE(148);c.residentHigh=a.readUInt32LE(152);
  const wasm=Buffer.from(new Uint8Array(c.memory.buffer,pointer,length)),module=new WebAssembly.Module(wasm),ring3={...c.api};
- for(const imp of WebAssembly.Module.imports(module).filter(x=>x.module==='ring3'&&x.name!=='guard'&&x.name!=='guard_resident')){
+ for(const imp of WebAssembly.Module.imports(module).filter(x=>x.module==='ring3'&&!x.name.startsWith('guard')&&x.name!=='finish_exception_detection')){
   ring3[imp.name]=(...args)=>{const before=arena(c),status=c.api[imp.name](...args),after=arena(c);before.set(after.subarray(100,140),100);
    assert.deepEqual(after,before,'canonical helper only changes40B');
    helpers.push({context:c.id,name:imp.name,args:args.map(x=>x>>>0),status,packet:after.subarray(100,140).toString('hex')});
@@ -55,6 +58,7 @@ function run(c,budget,expected,{reason=1,retired=0,work=budget,label='REP',fault
  assert.equal(status,0,label);assert.deepEqual(cpu(c),expected,label+' CPU');
  assert.equal(after.readUInt32LE(72),reason,label+' reason');assert.equal(after.readUInt32LE(76),retired,label+' architectural retirement');
  if(fault)assert.deepEqual(Array.from({length:4},(_,i)=>after.readUInt32LE(80+i*4)),fault,label+' exact fault');
+ if(reason===23){const [errorCode,address,access,length]=fault;assert.deepEqual(after.subarray(56,96),pageFaultExit({retired,errorCode,address,access,length}),label+' full native PF exit');assert.deepEqual(after.subarray(100,140),pageFaultPacket({errorCode,address,access,length}),label+' full native PF helper');}
  assert.equal(after.readUInt32LE(WORK+16),work,label+' consumed work');
  const full=Buffer.from(before);full.set(state(expected));full.set(after.subarray(56,96),56);full.set(after.subarray(100,140),100);full.set(record('R3WK',24,[work,0]),WORK);
  // Dispatcher lookup publishes exactly its typed 32-byte installation receipt.
@@ -110,7 +114,7 @@ for(const [prefix,kind,values,expectedCount]of [[0xf3,'Compare',[1,9,3],2],[0xf2
 }
 {
  const c=open('replacement',[0xf3,0xa4]);putValues(c,0x5010,1,[0x11,0x22,0x33]);let s=seed(c,{destination:0x6fff});
- const stopped=moved(s,{count:2,source:0x5011,destination:0x7000});run(c,3,stopped,{reason:5,work:1,fault:[1,0x7000,2,1],label:'second element write fault'});
+ const stopped=moved(s,{count:2,source:0x5011,destination:0x7000});run(c,3,stopped,{reason:23,work:1,fault:[6,0x7000,2,1],label:'second element write fault'});
  assert.equal(get(c,0x6fff,1),0x11);host(c,'map',[0x7000,1,3]);
  run(c,2,moved(stopped,{count:0,source:0x5013,destination:0x7002,pc:0x1002}),{retired:1,label:'mapping-only retry'});assert.equal(get(c,0x7000,1),0x22);assert.equal(get(c,0x7001,1),0x33);host(c,'close');
 }
@@ -131,20 +135,20 @@ for(const segment of [4,5]){
 {
  const c=open('resident',[0xf3,0xa6]);putValues(c,0x5010,1,[1,2,3]);putValues(c,0x6010,1,[1,2,3]);
  host(c,'protect',[0x5000,1,0]);host(c,'protect',[0x6000,1,0]);const s=seed(c);
- run(c,3,s,{reason:5,work:0,fault:[2,0x5010,1,1],label:'CMPS source read priority'});
- host(c,'protect',[0x5000,1,3]);run(c,3,s,{reason:5,work:0,fault:[2,0x6010,1,1],label:'CMPS second read publication neutral'});
+ run(c,3,s,{reason:23,work:0,fault:[5,0x5010,1,1],label:'CMPS source read priority'});
+ host(c,'protect',[0x5000,1,3]);run(c,3,s,{reason:23,work:0,fault:[5,0x6010,1,1],label:'CMPS second read publication neutral'});
  host(c,'protect',[0x6000,1,3]);run(c,3,moved(s,{count:0,source:0x5013,destination:0x6013,pc:0x1002,flags:0x46}),{retired:1,label:'CMPS protect-only retry'});host(c,'close');
 }
 {
  const c=open('replacement',[0xf3,0x66,0xa5]);putValues(c,0x5010,2,[0xabcd]);const s=seed(c,{count:1,destination:0x6fff});
- run(c,1,s,{reason:5,work:0,fault:[1,0x7000,2,2],label:'MOVSW cross-page store is element neutral'});assert.equal(get(c,0x6fff,1),0);
+ run(c,1,s,{reason:23,work:0,fault:[6,0x7000,2,2],label:'MOVSW cross-page store is element neutral'});assert.equal(get(c,0x6fff,1),0);
  host(c,'map',[0x7000,1,3]);run(c,1,moved(s,{count:0,source:0x5012,destination:0x7001,pc:0x1003}),{retired:1,label:'MOVSW cross-page repair'});assert.equal(get(c,0x6fff,2),0xabcd);host(c,'close');
 }
 {
  const c=open('replacement',[0x64,0xf3,0xad]);
  const a=arena(c);a.writeUInt32LE(0x1000,SEGMENTS+48);input(c,SEGMENTS,a.subarray(SEGMENTS,SEGMENTS+64));
  const s=seed(c,{count:1,source:0xffffefff});
- run(c,1,s,{reason:5,work:0,fault:[1,0xffffffff,1,4],label:'LODSD translated high linear leg unmapped before publication'});host(c,'close');
+ run(c,1,s,{reason:23,work:0,fault:[4,0xffffffff,1,4],label:'LODSD translated high linear leg unmapped before publication'});host(c,'close');
 }
 // ordinary explicit memory uses FS/GS; LEA and implicit SS stack addresses stay offsets/flat.
 for(const segment of [4,5]){

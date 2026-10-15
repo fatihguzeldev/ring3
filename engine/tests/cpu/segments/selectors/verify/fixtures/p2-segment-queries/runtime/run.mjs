@@ -1,3 +1,4 @@
+import {generatedImports, attachDetectionApi} from '../../../../../../../support/wasm/binding.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
@@ -12,7 +13,7 @@ const paths = [
   'engine/src/cpu/x86/ir.rs', 'engine/src/cpu/dbt/region.rs', 'engine/src/cpu/dbt/wasm/memory.rs', 'engine/src/cpu/dbt/wasm/memory/narrow.rs',
   'engine/src/cpu/dbt/wasm/segments.rs', 'engine/src/cpu/dbt/wasm/segment_queries.rs', 'engine/src/cpu/dbt/wasm/integer/dispatch.rs',
   'engine/src/process/cpu/integer.rs', 'engine/src/process/cpu/segment_queries.rs',
-  'engine/tests/cpu/segments/selectors/verify/native.rs', 'engine/tests/cpu/segments/selectors/verify/wasm.rs', 'engine/tests/cpu/segments/selectors/verify/fixtures/p2-segment-queries/runtime/run.mjs',
+  'engine/tests/cpu/segments/selectors/verify/native.rs', 'engine/tests/cpu/segments/selectors/verify/wasm.rs', 'engine/tests/cpu/segments/selectors/verify/fixtures/p2-segment-queries/runtime/run.mjs', 'engine/tests/support/wasm/binding.mjs',
 ];
 const pins = () => Object.fromEntries(paths.map(path => [path, createHash('sha256').update(readFileSync(join(root, path))).digest('hex')]));
 const sourcePins = pins(), words = values => {const b = Buffer.alloc(values.length * 4); values.forEach((v, i) => b.writeUInt32LE(v >>> 0, i * 4)); return b;};
@@ -34,6 +35,7 @@ function seed(c, updates = {}, flags = 0x244cd7) {
 function open(owner, entries) {
   const instance = new WebAssembly.Instance(engine.module, {}), c = {owner, entries, memory: instance.exports.memory, api: {}, calls: []};
   for (const [name, value] of Object.entries(instance.exports)) if (name.startsWith('ring3_abi_v1_') && typeof value === 'function') c.api[name.slice(13)] = value;
+ attachDetectionApi(c.api, instance.exports);
   c.key = ++counts.contexts; host(c, 'open', [8, c.key, keyHigh]); c.base = c.api.arena_ptr() >>> 0;
   for (const args of [[PC, 1, 7], [0x5000, 1, 3], [0xf000, 1, 3]]) host(c, 'map', args);
   c.initialSegments = arena(c).subarray(SEG, SEG + 64); return c;
@@ -50,7 +52,7 @@ function compile(c, instruction, write, memory = false) {
   const bytes = Buffer.from(new Uint8Array(c.memory.buffer, pointer, length)), module = new WebAssembly.Module(bytes);
   const name = c.owner === 'resident' ? 'cpu_integer_resident' : 'cpu_integer';
   assert.deepEqual(WebAssembly.Module.imports(module).map(i => `${i.module}:${i.name}:${i.kind}`).sort(),
-    ['env:memory:memory', `ring3:${c.owner === 'resident' ? 'guard_resident' : 'guard'}:function`, `ring3:${name}:function`, ...(memory ? ['ring3:cpu_read16:function'] : [])].sort());
+    generatedImports({resident: c.owner === 'resident', helpers: [name, ...(memory ? ["cpu_read16"] : [])]}).map(item => `${item.module}:${item.name}:${item.kind}`).sort());
   writeFileSync(join(output, `module-${++counts.modules}.wasm`), bytes, {flag: 'wx'});
   const ring3 = {...c.api};
   for (const helper of [name, ...(memory ? ['cpu_read16'] : [])]) ring3[helper] = (...args) => {

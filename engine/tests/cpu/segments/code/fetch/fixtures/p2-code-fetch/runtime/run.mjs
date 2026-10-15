@@ -72,8 +72,8 @@ function captureModule(c, label) {
   const bytes = Buffer.from(new Uint8Array(c.memory.buffer, pointer, length)), module = new WebAssembly.Module(bytes), ring3 = {...c.api};
   const imports = WebAssembly.Module.imports(module);
   assert.deepEqual(imports.map(row => `${row.module}:${row.name}:${row.kind}`).sort(),
-    ['env:memory:memory', `ring3:${resident ? 'guard_resident' : 'guard'}:function`].sort(), 'CS fetch adds no per-instruction host helper');
-  for (const imp of imports.filter(row => row.module === 'ring3' && !row.name.startsWith('guard')))
+    ['env:memory:memory', `ring3:${resident ? 'guard_detect_resident' : 'guard_detect'}:function`, 'ring3:finish_exception_detection:function'].sort(), 'CS fetch adds no per-instruction host helper');
+  for (const imp of imports.filter(row => row.module === 'ring3' && !row.name.startsWith('guard') && row.name !== 'finish_exception_detection'))
     ring3[imp.name] = (...args) => {c.calls.push(imp.name); helpers.push({context: c.id, name: imp.name, args}); return c.api[imp.name](...args);};
   c.run = new WebAssembly.Instance(module, {env: {memory: c.memory}, ring3}).exports.run;
   c.moduleInfo = {pointer, length, binding: [...c.binding]};

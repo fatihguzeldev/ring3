@@ -81,7 +81,7 @@ function open(row, owner) {
   const length = resident ? compiled.readUInt32LE(160) : c.api.module_len() >>> 0;
   const bytes = Buffer.from(new Uint8Array(c.memory.buffer, pointer, length));
   const module = new WebAssembly.Module(bytes), imports = WebAssembly.Module.imports(module), ring3 = {...c.api};
-  for (const imp of imports.filter(imp => imp.module === 'ring3' && !imp.name.startsWith('guard'))) {
+  for (const imp of imports.filter(imp => imp.module === 'ring3' && !imp.name.startsWith('guard') && imp.name !== 'finish_exception_detection')) {
     ring3[imp.name] = (...args) => {
       c.trace.push({name: imp.name, args: args.map(value => value >>> 0)});
       const status = c.api[imp.name](...args);
@@ -182,7 +182,8 @@ for (const owner of ['replacement-range', 'resident-entries']) {
     assert.equal(state.readUInt32LE(48), row.pc ?? PC + row.code.length / 2, row.label + ' EIP');
     assert.equal(state.readUInt32LE(52), row.flags ?? 2, row.label + ' FLAGS');
     assert.equal(state.readUInt32LE(12), row.endMetadata ?? 0, row.label + ' no retained SS debug shadow');
-    const [reason, detail, address, access, length] = row.fault ?? [1,0,0,0,0];
+    let [reason, detail, address, access, length] = row.fault ?? [1,0,0,0,0];
+    if (reason === 5) {reason = 23; detail = 4 | (access === 2 ? 2 : 0) | (detail === 2 ? 1 : 0);}
     assert.deepEqual(Array.from({length:6}, (_, i) => exit.readUInt32LE(16 + i * 4)),
       [reason, row.retired ?? row.budget ?? 1, detail,address,access,length], row.label + ' exit packet');
     const expected = Buffer.from(before);

@@ -25,7 +25,7 @@ function seed(c,updates={},flags=0xcd7){const s={r:[0xabcd1234,0x12345678,0x2345
 function next(s,pc,updates={},flags=s.flags){const n={r:[...s.r],pc,flags};for(const[i,v]of Object.entries(updates))n.r[+i]=v>>>0;return n;}
 function open(bytes,owner='replacement'){
  const instance=new WebAssembly.Instance(engine.module,{}),c={id:cases.length+1,owner,memory:instance.exports.memory,api:{}};
- for(const n of ['open','close','arena_ptr','map','protect','upload','read8','read16','read32','cpu_read8','cpu_read16','cpu_read32','cpu_store8','cpu_store16','cpu_store32','cpu_store_resident8','cpu_store_resident16','cpu_store_resident32','store8','store16','store32','store_resident8','store_resident16','store_resident32','compile','compile_resident','module_ptr','module_len','guard','guard_resident','segment_load','segment_load_resident','segment_load_far','segment_load_far_resident','set_segment_base','configure_segment_descriptor']){
+ for(const n of ['open','close','arena_ptr','map','protect','upload','read8','read16','read32','cpu_read8','cpu_read16','cpu_read32','cpu_store8','cpu_store16','cpu_store32','cpu_store_resident8','cpu_store_resident16','cpu_store_resident32','store8','store16','store32','store_resident8','store_resident16','store_resident32','compile','compile_resident','module_ptr','module_len','guard','guard_resident','guard_detect','guard_detect_resident','finish_exception_detection','segment_load','segment_load_resident','segment_load_far','segment_load_far_resident','set_segment_base','configure_segment_descriptor']){
   c.api[n]=instance.exports['ring3_abi_v1_'+n];assert.equal(typeof c.api[n],'function',n);
  }
  host(c,'open',[8,c.id,0x5347]);c.base=c.api.arena_ptr()>>>0;input(c,0,initial);
@@ -35,13 +35,13 @@ function open(bytes,owner='replacement'){
  const a=arena(c),pointer=owner==='resident'?a.readUInt32LE(156):c.api.module_ptr()>>>0,length=owner==='resident'?a.readUInt32LE(160):c.api.module_len()>>>0;
  c.residentBinding=[c.id,0x5347,a.readUInt32LE(148),a.readUInt32LE(152)];
  const wasm=Buffer.from(new Uint8Array(c.memory.buffer,pointer,length)),module=new WebAssembly.Module(wasm),ring3={...c.api};
- for(const imp of WebAssembly.Module.imports(module).filter(i=>i.module==='ring3'&&!i.name.startsWith('guard'))){
+ for(const imp of WebAssembly.Module.imports(module).filter(i=>i.module==='ring3'&&!i.name.startsWith('guard') && i.name !== 'finish_exception_detection')){
   ring3[imp.name]=(...args)=>{const before=arena(c),status=c.api[imp.name](...args),after=arena(c),allowed=Buffer.from(before);
    allowed.set(after.subarray(100,140),100);
    if(imp.name.startsWith('segment_load')) {allowed.set(after.subarray(SEGMENTS,SEGMENTS+64),SEGMENTS); allowed.set(after.subarray(BASES,BASES+40),BASES);}
    assert.deepEqual(after,allowed,'helper restricted publication');
    const packet=after.subarray(100,140);if(imp.name.startsWith('segment_load')){
-    assert.equal(packet.toString('ascii',0,4),'R3MH');assert.equal(packet.readUInt32LE(4),0x10007);assert.equal(packet.readUInt32LE(8),40);
+    assert.equal(packet.toString('ascii',0,4),'R3MH');assert.equal(packet.readUInt32LE(4),status===23?0x1000f:0x10007);assert.equal(packet.readUInt32LE(8),40);
    }
    helpers.push({context:c.id,name:imp.name,args:args.map(v=>v>>>0),status,packet:packet.toString('hex')});return status;
   };
@@ -51,6 +51,7 @@ function open(bytes,owner='replacement'){
  cases.push({id:c.id,owner,code:Buffer.from(bytes).toString('hex')});return c;
 }
 function run(c,budget,expected,{retired=budget,reason=1,segments={},segmentRecord,segmentBases,ssShadow=false,fault,label='segments'}={}){
+ if(reason===5){reason=23;fault=[4|(fault[2]===2?2:0)|(fault[0]===2?1:0),...fault.slice(1)];}
  const before=arena(c),at=helpers.length,status=c.run(c.base,c.base+56,budget,c.base+96),after=arena(c);
  assert.equal(status,0,label);assert.deepEqual(cpu(c),expected,label+' CPU');assert.equal(after.readUInt32LE(72),reason,label+' reason');assert.equal(after.readUInt32LE(76),retired,label+' retire');
  if(fault)assert.deepEqual(Array.from({length:4},(_,i)=>after.readUInt32LE(80+i*4)),fault,label+' fault');

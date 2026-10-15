@@ -1,3 +1,4 @@
+import {generatedImports, attachDetectionApi} from '../../../../../../../support/wasm/binding.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
@@ -10,7 +11,7 @@ const {functions, sourcePaths: exportSources} = assertEngineExports(engine.modul
 assert.equal(functions.find(row => row.name === 'ring3_abi_v1_configure_segment_descriptor_raw').arity, 3);
 const SIZE = 4612, SEG = 4524, PC = 0x1000, keyHigh = 0x524157;
 const counts = {contexts: 0, modules: 0, runs: 0, loads: 0, queries: 0, controls: 0};
-const sourcePaths = [...new Set([...exportSources, 'engine/tests/support/wasm/engine.mjs',
+const sourcePaths = [...new Set([...exportSources, 'engine/tests/support/wasm/engine.mjs', 'engine/tests/support/wasm/binding.mjs',
   'engine/src/cpu/x86/segments/descriptor_record.rs', 'engine/src/cpu/x86/segments/descriptors.rs',
   'engine/src/cpu/x86/segments/cache.rs', 'engine/src/abi/x86/segments.rs', 'engine/src/process/cpu/segments.rs',
   'engine/src/process/wasm/cpu.rs', 'engine/src/process/wasm/mod.rs', 'engine/src/cpu/dbt/wasm/segments.rs', 'engine/src/cpu/dbt/wasm/segments/context.rs',
@@ -37,6 +38,7 @@ function seed(c, selector) {
 function open(owner, entries) {
   const instance = new WebAssembly.Instance(engine.module, {}), c = {owner, entries, memory: instance.exports.memory, api: {}};
   for (const [name, value] of Object.entries(instance.exports)) if (name.startsWith('ring3_abi_v1_') && typeof value === 'function') c.api[name.slice(13)] = value;
+ attachDetectionApi(c.api, instance.exports);
   c.key = ++counts.contexts; host(c, 'open', [8, c.key, keyHigh]); c.base = c.api.arena_ptr() >>> 0;
   host(c, 'map', [PC, 1, 7]); return c;
 }
@@ -53,7 +55,7 @@ function compile(c, bytes, helper) {
   const moduleBytes = Buffer.from(new Uint8Array(c.memory.buffer, pointer, length)), module = new WebAssembly.Module(moduleBytes);
   const name = helper + (c.id ? '_resident' : '');
   assert.deepEqual(WebAssembly.Module.imports(module).map(row => `${row.module}:${row.name}:${row.kind}`).sort(),
-    ['env:memory:memory', `ring3:${c.id ? 'guard_resident' : 'guard'}:function`, `ring3:${name}:function`].sort());
+    generatedImports({resident: c.id !== null, helpers: [name]}).map(item => `${item.module}:${item.name}:${item.kind}`).sort());
   writeFileSync(join(output, `module-${++counts.modules}.wasm`), moduleBytes, {flag: 'wx'});
   return {run: new WebAssembly.Instance(module, {env: {memory: c.memory}, ring3: c.api}).exports.run, length: bytes.length};
 }

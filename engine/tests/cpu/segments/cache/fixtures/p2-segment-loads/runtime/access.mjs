@@ -5,7 +5,7 @@ import {join} from 'node:path';
 import {readEngine} from '../../../../../../support/wasm/engine.mjs';
 
 const [enginePath, output, root] = process.argv.slice(2), engine = readEngine(enginePath);
-const PC = 0x1000, SEG = 4524, SIZE = 4612, keyHigh = 0x5350414e;
+const PC = 0x1000, SEG = 4524, SIZE = 4796, keyHigh = 0x5350414e;
 const defaults = [0xf33fffff, 0xf3bfffff, 0xf33fffff, 0xf33fffff, 0xf33fffff, 0];
 const offsets = [28, 32, 36, 40, 44, 56], data = Buffer.from([0, 0, 0, 0, 3, 0, 0, 0, ...Array(24).fill(0x5a)]);
 const counts = {contexts: 0, modules: 0, runs: 0, faults: 0, successes: 0, controls: 0};
@@ -43,10 +43,10 @@ function compile(c, instruction, name, terminal = false) {
   if (c.owner === 'resident') c.previous = [b.readUInt32LE(148), b.readUInt32LE(152)];
   const length = c.owner === 'resident' ? b.readUInt32LE(160) : c.api.module_len() >>> 0;
   const bytes = Buffer.from(new Uint8Array(c.memory.buffer, pointer, length)), module = new WebAssembly.Module(bytes), imports = WebAssembly.Module.imports(module), ring3 = {...c.api};
-  for (const i of imports.filter(i => i.module === 'ring3' && !i.name.startsWith('guard'))) ring3[i.name] = (...args) => {c.calls.push(i.name); return c.api[i.name](...args);};
+  for (const i of imports.filter(i => i.module === 'ring3' && !i.name.startsWith('guard') && i.name !== 'finish_exception_detection')) ring3[i.name] = (...args) => {c.calls.push(i.name); return c.api[i.name](...args);};
   writeFileSync(join(output, `module-${++counts.modules}.wasm`), bytes, {flag: 'wx'});
   return {run: new WebAssembly.Instance(module, {env: {memory: c.memory}, ring3}).exports.run,
-    memory: imports.some(i => i.module === 'ring3' && !i.name.startsWith('guard')),
+    memory: imports.some(i => i.module === 'ring3' && !i.name.startsWith('guard') && i.name !== 'finish_exception_detection'),
     cpu: imports.some(i => /^(cpu_|segment_load|stack_execute|simd_execute|x87_op)/.test(i.name)), instructionLength: instruction.length};
 }
 function setup(c, row) {
@@ -62,17 +62,20 @@ function setup(c, row) {
 }
 function run(c, fn, row, state) {
   const before = arena(c), expected = Buffer.from(before), at = c.calls.length;
-  const reason = row.reason ?? (row.fault ? row.ss ? 15 : 11 : 1), retired = row.retired ?? (row.fault ? 0 : 1);
+  let reason = row.reason ?? (row.fault ? row.ss ? 15 : 11 : 1);
+  const retired = row.retired ?? (row.fault ? 0 : 1);
   const next = {...state, r: [...state.r], pc: row.fault || retired === 0 ? PC : PC + fn.instructionLength};
   if (row.after) row.after(next);
   if (row.work !== undefined) expected.writeUInt32LE(row.work, 4604);
   expected.set(record('R3ST', [...next.r, next.pc, next.flags], next.flags & ~0xcd7 ? 2 : 1, 56));
-  expected.set(record('R3EX', [reason, retired, ...(row.faultInfo ?? [0, 0, 0, 0])], reason === 16 ? 7 : reason === 11 || reason === 15 || fn.cpu ? 6 : row.exitVersion ?? (fn.memory ? 2 : 1)), 56);
+  let faultInfo = row.faultInfo ?? [0, 0, 0, 0];
+  if (reason === 5) {reason = 23; faultInfo = [4 | (faultInfo[2] === 2 ? 2 : 0) | (faultInfo[0] === 2 ? 1 : 0), ...faultInfo.slice(1)];}
+  expected.set(record('R3EX', [reason, retired, ...faultInfo], reason === 23 ? 12 : reason === 16 ? 7 : reason === 11 || reason === 15 || fn.cpu ? 6 : row.exitVersion ?? (fn.memory ? 2 : 1)), 56);
   assert.equal(fn.run(c.base, c.base + 56, row.budget ?? 1, c.base + 96), 0, row.name);
   const after = arena(c), observed = c.calls.slice(at);
   if (row.helperFault) {
     assert.deepEqual(observed, ['cpu_read32'], `${row.name}: source page access precedes stack authority`);
-    expected.set(record('R3MH', [1, 0, 1, 0x7000, 1, 4], 10), 100);
+    expected.set(record('R3MH', [9, 0, 4, 0x7000, 1, 4], 15), 100);
   } else if (row.fault || retired === 0 || !fn.memory) assert.equal(observed.length, 0, `${row.name}: authority precedes page helpers`);
   else {
     expected.set(after.subarray(100, 4236), 100);

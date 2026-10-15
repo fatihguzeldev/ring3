@@ -1,3 +1,4 @@
+import {generatedImports, attachDetectionApi} from '../../../../../../../support/wasm/binding.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
@@ -12,7 +13,7 @@ const paths = [
   'engine/src/cpu/x86/segments.rs', 'engine/src/cpu/x86/segments/cache.rs', 'engine/src/cpu/x86/segments/descriptors.rs', 'engine/src/abi/x86/segments.rs',
   'engine/src/cpu/dbt/region.rs', 'engine/src/cpu/dbt/wasm/segment_queries.rs', 'engine/src/cpu/dbt/wasm/integer/dispatch.rs', 'engine/src/cpu/dbt/wasm/atomic.rs', 'engine/src/cpu/dbt/wasm/cpu_result.rs',
   'engine/src/cpu/dbt/wasm/memory.rs', 'engine/src/cpu/dbt/wasm/segments.rs', 'engine/src/process/cpu/integer.rs', 'engine/src/process/cpu/segment_queries.rs', 'engine/src/memory/space.rs', 'engine/src/memory/space/atomic.rs', 'engine/src/abi/cpu_helper.rs',
-  'engine/tests/cpu/segments/selectors/privilege/native.rs', 'engine/tests/cpu/segments/selectors/privilege/wasm.rs', 'engine/tests/cpu/segments/selectors/privilege/fixtures/p2-arpl/runtime/run.mjs',
+  'engine/tests/cpu/segments/selectors/privilege/native.rs', 'engine/tests/cpu/segments/selectors/privilege/wasm.rs', 'engine/tests/cpu/segments/selectors/privilege/fixtures/p2-arpl/runtime/run.mjs', 'engine/tests/support/wasm/binding.mjs',
 ];
 const pins = () => Object.fromEntries(paths.map(path => [path, createHash('sha256').update(readFileSync(join(root, path))).digest('hex')])), sourcePins = pins();
 const words = values => {const b = Buffer.alloc(values.length * 4); values.forEach((v, i) => b.writeUInt32LE(v >>> 0, i * 4)); return b;};
@@ -39,6 +40,7 @@ function next(s, length, destination, value, adjusted) {
 function open(owner, entries) {
   const instance = new WebAssembly.Instance(engine.module, {}), c = {owner, entries, memory: instance.exports.memory, api: {}, calls: []};
   for (const [name, value] of Object.entries(instance.exports)) if (name.startsWith('ring3_abi_v1_') && typeof value === 'function') c.api[name.slice(13)] = value;
+ attachDetectionApi(c.api, instance.exports);
   c.key = ++counts.contexts; host(c, 'open', [8, c.key, keyHigh]); c.base = c.api.arena_ptr() >>> 0;
   for (const args of [[PC, 1, 7], [0x5000, 1, 3], [0xf000, 1, 3]]) host(c, 'map', args);
   c.initialSegments = arena(c).subarray(SEG, SEG + 64); return c;
@@ -54,7 +56,7 @@ function compile(c, instruction, memory = false) {
   const length = c.owner === 'resident' ? b.readUInt32LE(160) : c.api.module_len() >>> 0;
   const bytes = Buffer.from(new Uint8Array(c.memory.buffer, pointer, length)), module = new WebAssembly.Module(bytes);
   const name = c.owner === 'resident' ? 'cpu_integer_resident' : 'cpu_integer';
-  assert.deepEqual(WebAssembly.Module.imports(module).map(i => `${i.module}:${i.name}:${i.kind}`).sort(), ['env:memory:memory', `ring3:${c.owner === 'resident' ? 'guard_resident' : 'guard'}:function`, ...(memory ? [`ring3:${name}:function`] : [])].sort());
+  assert.deepEqual(WebAssembly.Module.imports(module).map(i => `${i.module}:${i.name}:${i.kind}`).sort(), generatedImports({resident: c.owner === 'resident', helpers: [...(memory ? [name] : [])]}).map(item => `${item.module}:${item.name}:${item.kind}`).sort());
   writeFileSync(join(output, `module-${++counts.modules}.wasm`), bytes, {flag: 'wx'});
   const ring3 = {...c.api};
   ring3[name] = (...args) => {
