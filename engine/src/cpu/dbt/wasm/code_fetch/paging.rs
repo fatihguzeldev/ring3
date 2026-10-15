@@ -1,8 +1,8 @@
-use super::super::{imports::Imports, locals::*};
-use crate::cpu::dbt::wasm::helpers::protocol;
-use crate::cpu::x86::{SegmentRegister, decode::CapturedCodeFault};
+use crate::cpu::{
+    dbt::wasm::{helpers::protocol, imports::Imports, locals::*},
+    x86::{SegmentRegister, decode::CapturedCodeFault},
+};
 use wasm_encoder::{BlockType, InstructionSink};
-
 pub(in crate::cpu::dbt::wasm) fn fault(
     code: &mut InstructionSink<'_>,
     fault: &CapturedCodeFault,
@@ -74,7 +74,7 @@ pub(in crate::cpu::dbt::wasm) fn fault(
     protocol::protocol_if_bad(code);
     code.else_();
     protocol::expect_field(code, 4, 0x1000f);
-    super::super::segments::base(code, SegmentRegister::Cs);
+    crate::cpu::dbt::wasm::instructions::segments::base(code, SegmentRegister::Cs);
     code.i32_const(fault.pc.0 as i32)
         .i32_add()
         .local_set(ADDRESS);

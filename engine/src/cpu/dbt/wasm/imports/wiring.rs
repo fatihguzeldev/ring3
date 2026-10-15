@@ -1,7 +1,9 @@
-use super::{HelperBinding, Imports};
-use crate::cpu::dbt::wasm::{EmbeddedBinding, requirements::ModuleRequirements};
+use crate::cpu::dbt::wasm::{
+    EmbeddedBinding,
+    imports::{HelperBinding, Imports},
+    requirements::ModuleRequirements,
+};
 use wasm_encoder::{EntityType, ImportSection, MemoryType, TypeSection, ValType};
-
 pub(in crate::cpu::dbt::wasm) struct ImportSections {
     pub(in crate::cpu::dbt::wasm) types: TypeSection,
     pub(in crate::cpu::dbt::wasm) imports: ImportSection,

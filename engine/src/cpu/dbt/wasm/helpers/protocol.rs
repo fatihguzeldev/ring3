@@ -1,6 +1,6 @@
-use wasm_encoder::{BlockType, InstructionSink, MemArg};
-
+use crate::cpu::dbt::wasm::imports::Imports;
 use crate::cpu::dbt::wasm::locals::*;
+use wasm_encoder::{BlockType, InstructionSink, MemArg};
 
 pub(in crate::cpu::dbt::wasm) fn infrastructure(code: &mut InstructionSink<'_>, detail: i32) {
     code.i32_const(7)
@@ -47,4 +47,20 @@ pub(in crate::cpu::dbt::wasm) fn helper_field(code: &mut InstructionSink<'_>, of
         align: 2,
         memory_index: 0,
     });
+}
+
+pub(in crate::cpu::dbt::wasm) fn exit_if_invalidated(
+    code: &mut InstructionSink<'_>,
+    exit_depth: u32,
+    imports: Imports,
+) {
+    crate::cpu::dbt::wasm::abi::debug_after_retirement(code, exit_depth, imports.detection, false);
+    code.local_get(HELPER_STATUS)
+        .i32_const(11)
+        .i32_eq()
+        .if_(BlockType::Empty)
+        .i32_const(6)
+        .local_set(REASON)
+        .br(exit_depth + 1)
+        .end();
 }

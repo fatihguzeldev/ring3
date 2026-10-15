@@ -1,11 +1,50 @@
-use super::{ImportNeeds, Imports};
+use super::Imports;
 use crate::cpu::{
-    dbt::wasm::{avx, simd},
+    dbt::wasm::instructions::{avx, simd},
     x86::ir::{
         BinaryKind, BranchTarget, Location32, Operation, SmallSource, SmallWidth, UnaryKind,
         Value32,
     },
 };
+#[derive(Clone, Copy)]
+pub(in crate::cpu::dbt::wasm) struct ImportNeeds {
+    pub(in crate::cpu::dbt::wasm) stack_execute: bool,
+    pub(in crate::cpu::dbt::wasm) cpu_integer: bool,
+    pub(in crate::cpu::dbt::wasm) cpu_read: bool,
+    pub(in crate::cpu::dbt::wasm) cpu_write: bool,
+    pub(in crate::cpu::dbt::wasm) x87_op: bool,
+    pub(in crate::cpu::dbt::wasm) simd_execute: bool,
+    pub(in crate::cpu::dbt::wasm) avx_execute: bool,
+    pub(in crate::cpu::dbt::wasm) cpu_fxsave: bool,
+    pub(in crate::cpu::dbt::wasm) cpu_xsave: bool,
+    pub(in crate::cpu::dbt::wasm) cpu_xrstor: bool,
+    pub(in crate::cpu::dbt::wasm) cpu_mask_write: bool,
+    pub(in crate::cpu::dbt::wasm) segment_load: bool,
+    pub(in crate::cpu::dbt::wasm) segment_load_far: bool,
+    pub(in crate::cpu::dbt::wasm) far_jump: bool,
+    pub(in crate::cpu::dbt::wasm) far_call: bool,
+    pub(in crate::cpu::dbt::wasm) far_return: bool,
+    pub(in crate::cpu::dbt::wasm) read: bool,
+    pub(in crate::cpu::dbt::wasm) store: bool,
+    pub(in crate::cpu::dbt::wasm) read8: bool,
+    pub(in crate::cpu::dbt::wasm) read16: bool,
+    pub(in crate::cpu::dbt::wasm) store8: bool,
+    pub(in crate::cpu::dbt::wasm) store16: bool,
+    pub(in crate::cpu::dbt::wasm) exchange: bool,
+    pub(in crate::cpu::dbt::wasm) exchange8: bool,
+    pub(in crate::cpu::dbt::wasm) exchange16: bool,
+    pub(in crate::cpu::dbt::wasm) compare_exchange32: bool,
+    pub(in crate::cpu::dbt::wasm) exchange_add32: bool,
+    pub(in crate::cpu::dbt::wasm) compare_exchange8: bool,
+    pub(in crate::cpu::dbt::wasm) exchange_add8: bool,
+    pub(in crate::cpu::dbt::wasm) compare_exchange16: bool,
+    pub(in crate::cpu::dbt::wasm) exchange_add16: bool,
+    pub(in crate::cpu::dbt::wasm) bit_test_set32: bool,
+    pub(in crate::cpu::dbt::wasm) bit_test_reset32: bool,
+    pub(in crate::cpu::dbt::wasm) atomic_or_u32: bool,
+    pub(in crate::cpu::dbt::wasm) atomic_and_u32: bool,
+    pub(in crate::cpu::dbt::wasm) atomic_xor_u32: bool,
+}
 
 impl Imports {
     pub(in crate::cpu::dbt::wasm) fn needed(

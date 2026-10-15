@@ -1,9 +1,14 @@
-use super::locals::{
-    DETAIL, EIP, FAULT_ACCESS, FAULT_ADDRESS, FAULT_LENGTH, HELPER_STATUS, REASON, STATE_PTR,
+use crate::{
+    abi::arena::SEGMENTS_OFFSET,
+    cpu::{
+        dbt::wasm::locals::{
+            DETAIL, EIP, FAULT_ACCESS, FAULT_ADDRESS, FAULT_LENGTH, HELPER_STATUS, REASON,
+            STATE_PTR,
+        },
+        x86::decode::DecodedOperation,
+    },
 };
-use crate::{abi::arena::SEGMENTS_OFFSET, cpu::x86::decode::DecodedOperation};
 use wasm_encoder::{BlockType, InstructionSink, MemArg, ValType};
-
 pub(super) fn refresh(code: &mut InstructionSink<'_>, limit: u32) {
     code.local_get(STATE_PTR)
         .i32_load16_u(arg(SEGMENTS_OFFSET + 4, 1))

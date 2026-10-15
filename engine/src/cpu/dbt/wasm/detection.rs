@@ -1,9 +1,9 @@
 use crate::cpu::dbt::wasm::imports::Imports;
+use crate::cpu::{
+    dbt::wasm::locals::*,
+    x86::{ControlOperation, decode::DecodedOperation, ir::Operation},
+};
 use wasm_encoder::{BlockType, InstructionSink};
-
-use super::locals::*;
-use crate::cpu::x86::{ControlOperation, decode::DecodedOperation, ir::Operation};
-
 #[derive(Clone, Copy)]
 pub(super) struct DetectionLocals {
     pub(super) epoch: u32,

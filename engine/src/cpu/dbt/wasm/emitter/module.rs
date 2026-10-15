@@ -1,9 +1,10 @@
-use super::body;
-use crate::cpu::dbt::wasm::requirements::ModuleRequirements;
 use crate::cpu::{
     dbt::{
         region::CompiledBlock,
-        wasm::{EmbeddedBinding, imports, segments},
+        wasm::{
+            EmbeddedBinding, emitter::body, imports, instructions::segments,
+            requirements::ModuleRequirements,
+        },
     },
     x86::decode::CodeDecodeKey,
 };
@@ -11,7 +12,6 @@ use wasm_encoder::{
     CodeSection, ConstExpr, ExportKind, ExportSection, FunctionSection, GlobalSection, GlobalType,
     Module, ValType,
 };
-
 pub(in crate::cpu::dbt) fn emit(
     blocks: &[CompiledBlock],
     binding: Option<EmbeddedBinding>,

@@ -1,4 +1,4 @@
-use super::*;
+use crate::cpu::dbt::wasm::helpers::result::*;
 
 #[derive(Clone, Copy)]
 pub(in crate::cpu::dbt::wasm) enum Geometry {

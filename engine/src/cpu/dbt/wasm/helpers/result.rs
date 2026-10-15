@@ -1,6 +1,4 @@
 use crate::cpu::dbt::wasm::imports::Imports;
-use wasm_encoder::{BlockType, InstructionSink};
-
 use crate::cpu::dbt::wasm::{
     helpers::protocol::{
         add_check, exit_if_failed, expect_field, helper_field, infrastructure, protocol_if_bad,
@@ -8,7 +6,7 @@ use crate::cpu::dbt::wasm::{
     },
     locals::*,
 };
-
+use wasm_encoder::{BlockType, InstructionSink};
 #[derive(Clone, Copy)]
 pub(in crate::cpu::dbt::wasm) struct ResultContext {
     pub(in crate::cpu::dbt::wasm) paging_configured: bool,

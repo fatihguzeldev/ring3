@@ -1,4 +1,4 @@
-use super::super::{Validation as LegacyValidation, *};
+use crate::cpu::dbt::wasm::helpers::result::{Validation as LegacyValidation, *};
 use std::{
     io::Write,
     process::{Command, Stdio},
@@ -8,7 +8,6 @@ use wasm_encoder::{
     FunctionSection, GlobalSection, GlobalType, ImportSection, MemArg, MemoryType, Module,
     TypeSection, ValType,
 };
-
 #[test]
 fn standalone_helper_validation_preserves_legacy_packet_contract() {
     for (length, access, smc, validation) in [

@@ -1,12 +1,10 @@
 #![forbid(unsafe_code)]
 
 use crate::abi::arena::{STATE_OFFSET, TRANSFER_OFFSET};
-
 use wasm_encoder::{
     BlockType, CodeSection, EntityType, ExportKind, ExportSection, Function, FunctionSection,
     InstructionSink, MemArg, MemoryType, Module, RefType, TableType, TypeSection, ValType,
 };
-
 const TOTAL: u32 = 4;
 const STATUS: u32 = 5;
 const SLOT: u32 = 6;

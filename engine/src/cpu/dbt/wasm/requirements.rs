@@ -8,7 +8,6 @@ use crate::cpu::{
     },
     x86::ir::Operation,
 };
-
 pub(in crate::cpu::dbt::wasm) struct ModuleRequirements {
     pub(in crate::cpu::dbt::wasm) imports: ImportNeeds,
     pub(in crate::cpu::dbt::wasm) modify: [bool; 3],

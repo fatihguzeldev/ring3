@@ -2,7 +2,6 @@ use crate::cpu::{
     dbt::region::CompiledBlock,
     x86::ir::{BranchTarget, Location32, Operation, Value32},
 };
-
 pub(in crate::cpu::dbt::wasm) fn helper_free_block(block: &CompiledBlock) -> bool {
     !block.instructions.is_empty()
         && block

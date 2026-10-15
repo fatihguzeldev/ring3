@@ -1,5 +1,3 @@
-use wasm_encoder::{BlockType, InstructionSink, MemArg};
-
 use crate::abi::{
     ABI_VERSION, X86_INTEGER_PROFILE,
     x86::{
@@ -8,12 +6,11 @@ use crate::abi::{
         STATE_METADATA_OFFSET, STATE_SIZE,
     },
 };
-
-use super::locals::{
+use crate::cpu::dbt::wasm::locals::{
     BUDGET, CANCEL_PTR, DEBUG_SHADOW, DETAIL, EIP, EXIT_PTR, FAULT_ACCESS, FAULT_ADDRESS,
     FAULT_LENGTH, FLAGS, MEMORY_BYTES, REASON, RETIRED, SNAPSHOT_SHADOW, SNAPSHOT_TF, STATE_PTR,
 };
-
+use wasm_encoder::{BlockType, InstructionSink, MemArg};
 pub(super) fn preflight(sink: &mut InstructionSink<'_>) {
     sink.memory_size(0)
         .i64_extend_i32_u()
@@ -352,14 +349,14 @@ pub(super) fn inhibit_debug_after_ss_load(sink: &mut InstructionSink<'_>) {
 pub(super) fn debug_after_retirement(
     sink: &mut InstructionSink<'_>,
     exit_depth: u32,
-    detection: Option<super::detection::DetectionLocals>,
+    detection: Option<crate::cpu::dbt::wasm::detection::DetectionLocals>,
     partial_rep: bool,
 ) {
     sink.local_get(SNAPSHOT_TF)
         .if_(BlockType::Empty)
         .i32_const(16)
         .local_set(REASON);
-    super::detection::mark_debug(sink, detection, if partial_rep { 3 } else { 2 });
+    crate::cpu::dbt::wasm::detection::mark_debug(sink, detection, if partial_rep { 3 } else { 2 });
     for local in [DETAIL, FAULT_ADDRESS, FAULT_ACCESS, FAULT_LENGTH] {
         sink.i32_const(0).local_set(local);
     }

@@ -1,13 +1,17 @@
-use crate::cpu::dbt::wasm::requirements::ModuleRequirements;
 use crate::cpu::{
     dbt::{
         region::CompiledBlock,
-        wasm::{EmbeddedBinding, abi, code_fetch, imports::Imports, integer, locals::*, x87},
+        wasm::{
+            EmbeddedBinding, abi, code_fetch,
+            imports::Imports,
+            instructions::{integer, x87},
+            locals::*,
+            requirements::ModuleRequirements,
+        },
     },
     x86::ir::Operation,
 };
 use wasm_encoder::{BlockType, Function, InstructionSink, ValType};
-
 pub(super) fn emit(
     blocks: &[CompiledBlock],
     binding: Option<EmbeddedBinding>,
@@ -37,17 +41,24 @@ pub(super) fn emit(
         .any(|instruction| matches!(instruction.operation(), Operation::InterruptReturn { .. }))
     {
         let first = 4 + declarations.iter().map(|(count, _)| count).sum::<u32>();
-        helper_imports.interrupt_return_locals = Some(
-            crate::cpu::dbt::wasm::far::InterruptReturnLocals::new(first),
-        );
+        helper_imports.interrupt_return_locals =
+            Some(crate::cpu::dbt::wasm::instructions::far::InterruptReturnLocals::new(first));
         declarations.push((3, ValType::I32));
     }
 
     if plan.has_avx {
         let first = 4 + declarations.iter().map(|(count, _)| count).sum::<u32>();
-        helper_imports.avx_locals = Some(crate::cpu::dbt::wasm::avx::AvxLocals::new(first));
-        declarations.push((crate::cpu::dbt::wasm::avx::INTEGER_LOCALS, ValType::I32));
-        declarations.push((crate::cpu::dbt::wasm::avx::VECTOR_LOCALS, ValType::V128));
+        helper_imports.avx_locals = Some(crate::cpu::dbt::wasm::instructions::avx::AvxLocals::new(
+            first,
+        ));
+        declarations.push((
+            crate::cpu::dbt::wasm::instructions::avx::INTEGER_LOCALS,
+            ValType::I32,
+        ));
+        declarations.push((
+            crate::cpu::dbt::wasm::instructions::avx::VECTOR_LOCALS,
+            ValType::V128,
+        ));
     }
     if plan.detects_exceptions {
         let first = 4 + declarations.iter().map(|(count, _)| count).sum::<u32>();
@@ -108,7 +119,7 @@ pub(super) fn emit(
     }
     abi::preflight(&mut code);
     if plan.has_segments {
-        crate::cpu::dbt::wasm::segments::preflight(&mut code);
+        crate::cpu::dbt::wasm::instructions::segments::preflight(&mut code);
     }
     if plan.has_repeat {
         abi::work_preflight(&mut code);
@@ -118,17 +129,17 @@ pub(super) fn emit(
         x87::preflight(&mut code);
     }
     if plan.has_simd {
-        crate::cpu::dbt::wasm::simd::preflight(&mut code);
+        crate::cpu::dbt::wasm::instructions::simd::preflight(&mut code);
     }
     if plan.has_avx || plan.upper_xstate {
-        crate::cpu::dbt::wasm::avx::preflight(&mut code);
+        crate::cpu::dbt::wasm::instructions::avx::preflight(&mut code);
     }
     abi::load_state(&mut code);
     if let Some(limit) = helper_imports.code_fetch_limit {
         code_fetch::refresh(&mut code, limit);
     }
     if let Some(locals) = helper_imports.avx_locals {
-        crate::cpu::dbt::wasm::avx::initialize(&mut code, locals);
+        crate::cpu::dbt::wasm::instructions::avx::initialize(&mut code, locals);
     }
     code.block(BlockType::Empty);
 
