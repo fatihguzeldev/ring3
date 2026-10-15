@@ -1,6 +1,33 @@
 use super::*;
 
 #[test]
+fn event_shutdown_preflights_binding_release_and_hidden_handle_close_together() {
+    let mut context = context();
+    let external = context.create_event(true, false, false, None).unwrap().0;
+    let binding = context.retain_event(external).unwrap();
+    context.close_handle(external).unwrap();
+    let hidden = context.create_event(true, false, false, None).unwrap().0;
+    let revision = context.revision();
+    context.set_revision_for_test(u64::MAX - 1);
+    assert!(matches!(
+        context.prepare_event_shutdown(&[binding], &[hidden]),
+        Err(SynchronizationError32::Exhausted)
+    ));
+    assert!(context.validate_event_binding(binding).is_ok());
+    assert!(context.event_is_signaled(hidden).is_ok());
+    context.set_revision_for_test(revision);
+    let prepared = context
+        .prepare_event_shutdown(&[binding], &[hidden])
+        .unwrap();
+    context.commit_event_shutdown(prepared);
+    assert!(context.validate_event_binding(binding).is_err());
+    assert!(context.event_is_signaled(hidden).is_err());
+    for _ in 0..8 {
+        context.create_event(true, false, false, None).unwrap();
+    }
+}
+
+#[test]
 fn named_event_reopen_ignores_creation_flags_and_preserves_case_sensitive_identity() {
     let mut context = context();
     let name: Vec<u16> = "Ready".encode_utf16().collect();

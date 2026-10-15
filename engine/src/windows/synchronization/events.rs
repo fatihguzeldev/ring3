@@ -16,6 +16,10 @@ pub struct PreparedDuplicate32 {
 pub struct PreparedCloseHandles32 {
     closes: Vec<PreparedDuplicate32>,
 }
+pub struct PreparedEventShutdown32 {
+    bindings: super::PreparedEventBindings32,
+    handles: PreparedCloseHandles32,
+}
 
 impl PreparedDuplicate32 {
     pub fn handle(&self) -> Option<u32> {
@@ -23,6 +27,26 @@ impl PreparedDuplicate32 {
     }
 }
 impl SynchronizationContext32 {
+    pub fn prepare_event_shutdown(
+        &self,
+        bindings: &[super::EventBinding32],
+        handles: &[u32],
+    ) -> Result<PreparedEventShutdown32, Error> {
+        self.revision
+            .checked_add(handles.len() as u64 + 1)
+            .ok_or(Error::Exhausted)?;
+        let bindings = self.prepare_event_bindings(&[], bindings)?;
+        let mut handles = self.prepare_close_handles(handles)?;
+        for close in &mut handles.closes {
+            close.revision += 1;
+            close.next_revision += 1;
+        }
+        Ok(PreparedEventShutdown32 { bindings, handles })
+    }
+    pub fn commit_event_shutdown(&mut self, prepared: PreparedEventShutdown32) {
+        self.commit_event_bindings(prepared.bindings);
+        self.commit_close_handles(prepared.handles);
+    }
     pub fn validate_wait_handle(&self, handle: u32) -> Result<(), Error> {
         self.handle_index(handle, super::SYNCHRONIZE).map(|_| ())
     }
