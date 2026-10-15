@@ -33,13 +33,12 @@ impl Vfs32 {
                     self.node_mut(file).unwrap().linked = false;
                     self.collect(file);
                 }
-                let renamed_key = updates
-                    .iter()
-                    .find(|e| e.file == old.file)
-                    .map(|e| e.key.as_slice());
-                let needs_delete = renamed_key != Some(old.key.as_slice());
+                self.deleted.retain(|entry| {
+                    updates
+                        .binary_search_by(|update| update.key.cmp(&entry.key))
+                        .is_err()
+                });
                 for update in updates {
-                    self.deleted.retain(|e| e.key != update.key);
                     let index = self
                         .entries
                         .iter()
@@ -52,9 +51,7 @@ impl Vfs32 {
                     node.changed = now;
                 }
                 self.entries.sort_unstable_by(|a, b| a.key.cmp(&b.key));
-                if needs_delete {
-                    self.deleted.push(old);
-                }
+                self.deleted.extend(old);
             }
             Operation32::Copy { node, entry } => {
                 let file = node.id;

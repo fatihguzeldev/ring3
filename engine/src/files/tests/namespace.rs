@@ -400,3 +400,123 @@ fn host_mount_rejects_pending_parent_and_conflicting_live_asset_identity() {
         Err(FileError32::NotFound)
     );
 }
+#[test]
+fn copy_overwrites_system_only_destination_and_preserves_documented_denials() {
+    let mut vfs = vfs();
+    vfs.mount_asset(
+        &utf16("C:\\source"),
+        AssetRef32 { id: 106, length: 4 },
+        ATTR_NORMAL,
+        FileTimes32::default(),
+    )
+    .unwrap();
+    vfs.mount_asset(
+        &utf16("C:\\destination"),
+        AssetRef32 { id: 107, length: 0 },
+        ATTR_SYSTEM,
+        FileTimes32::default(),
+    )
+    .unwrap();
+    let FileIo32::Ready(copy) = vfs
+        .prepare_copy(&utf16("C:\\source"), &utf16("C:\\destination"), false)
+        .unwrap()
+    else {
+        panic!()
+    };
+    vfs.commit_namespace(copy);
+    assert_eq!(vfs.path_info(&utf16("C:\\destination")).unwrap().size, 4);
+    for attributes in [ATTR_HIDDEN, ATTR_READONLY] {
+        let change = vfs
+            .prepare_set_attributes(&utf16("C:\\destination"), attributes)
+            .unwrap();
+        vfs.commit_namespace(change);
+        assert!(matches!(
+            vfs.prepare_copy(&utf16("C:\\source"), &utf16("C:\\destination"), false),
+            Err(FileError32::AccessDenied)
+        ));
+    }
+}
+#[test]
+fn moved_directory_export_keeps_old_child_deletions_after_root_recreation() {
+    let mut vfs = vfs();
+    vfs.mount_asset(
+        &utf16("C:\\source\\nested\\asset"),
+        AssetRef32 { id: 108, length: 1 },
+        ATTR_NORMAL,
+        FileTimes32::default(),
+    )
+    .unwrap();
+    let moved = vfs
+        .prepare_move(&utf16("C:\\source"), &utf16("C:\\target"), false)
+        .unwrap();
+    vfs.commit_namespace(moved);
+    let recreated = vfs
+        .prepare_create_directory(&utf16("C:\\source"), ATTR_DIRECTORY)
+        .unwrap();
+    vfs.commit_namespace(recreated);
+    let entries: Vec<_> = (0..16)
+        .filter_map(|index| vfs.overlay_entry(index).unwrap())
+        .collect();
+    assert!(
+        entries
+            .iter()
+            .any(|e| e.kind == OverlayKind32::Directory && e.path == utf16("C:\\source"))
+    );
+    assert!(
+        !entries
+            .iter()
+            .any(|e| e.kind == OverlayKind32::Deleted && e.path == utf16("C:\\source"))
+    );
+    for old in ["C:\\source\\nested", "C:\\source\\nested\\asset"] {
+        assert!(
+            entries
+                .iter()
+                .any(|e| e.kind == OverlayKind32::Deleted && e.path == utf16(old))
+        );
+    }
+    assert!(
+        entries
+            .iter()
+            .any(|e| e.kind == OverlayKind32::File && e.path == utf16("C:\\target\\nested\\asset"))
+    );
+}
+#[test]
+fn directory_move_preflights_all_descendant_tombstone_capacity() {
+    let mut vfs = Vfs32::new(
+        1,
+        FileLimits32 {
+            nodes: 5,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    for index in 0..3 {
+        let path = format!("C:\\old{index}");
+        let file = open(
+            &mut vfs,
+            &path,
+            FileOpenOptions32 {
+                disposition: FileDisposition32::CreateNew,
+                ..Default::default()
+            },
+        );
+        vfs.close_open(file.open).unwrap();
+        let delete = vfs.prepare_delete(&utf16(&path)).unwrap();
+        vfs.commit_namespace(delete);
+    }
+    vfs.mount_asset(
+        &utf16("C:\\source\\nested\\asset"),
+        AssetRef32 { id: 109, length: 1 },
+        ATTR_NORMAL,
+        FileTimes32::default(),
+    )
+    .unwrap();
+    let revision = vfs.revision();
+    assert!(matches!(
+        vfs.prepare_move(&utf16("C:\\source"), &utf16("C:\\target"), false),
+        Err(FileError32::Capacity)
+    ));
+    assert_eq!(vfs.revision(), revision);
+    assert!(vfs.path_info(&utf16("C:\\source\\nested\\asset")).is_ok());
+    assert!(vfs.path_info(&utf16("C:\\target")).is_err());
+}

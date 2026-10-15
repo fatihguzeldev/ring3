@@ -2,8 +2,8 @@ pub mod abi;
 pub mod audio;
 #[forbid(unsafe_code)]
 pub mod cpu;
-pub mod graphics;
 mod files;
+pub mod graphics;
 pub mod input;
 #[forbid(unsafe_code)]
 pub mod loader;

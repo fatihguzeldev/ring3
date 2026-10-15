@@ -79,7 +79,7 @@ pub(crate) fn normalize(
         if raw.get(2) == Some(&SEP) {
             raw
         } else {
-            let mut base = if cwd.get(0).copied() == Some(raw[0]) {
+            let mut base = if cwd.first().copied() == Some(raw[0]) {
                 cwd.to_vec()
             } else {
                 vec![raw[0], b':' as u16, SEP]
@@ -190,7 +190,7 @@ fn reserved(part: &[u16]) -> bool {
         return true;
     }
     stem.len() == 4
-        && (&stem[..3] == [67, 79, 77] || &stem[..3] == [76, 80, 84])
+        && (stem[..3] == [67, 79, 77] || stem[..3] == [76, 80, 84])
         && ([49, 50, 51, 52, 53, 54, 55, 56, 57, 185, 178, 179].contains(&stem[3]))
 }
 

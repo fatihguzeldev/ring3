@@ -310,3 +310,60 @@ fn grouped_close_preflight_counts_combined_deletions_and_final_references() {
     assert_eq!(vfs.info(first.file), Err(FileError32::InvalidHandle));
     assert_eq!(vfs.info(second.file), Err(FileError32::InvalidHandle));
 }
+#[test]
+fn current_directory_keeps_implicit_delete_sharing_authority() {
+    let mut vfs = vfs();
+    vfs.mount_directory(
+        &utf16("C:\\working"),
+        ATTR_DIRECTORY,
+        FileTimes32::default(),
+    )
+    .unwrap();
+    vfs.mount_directory(&utf16("C:\\other"), ATTR_DIRECTORY, FileTimes32::default())
+        .unwrap();
+    let current = vfs
+        .prepare_current_directory(&utf16("C:\\working"))
+        .unwrap();
+    vfs.commit_namespace(current);
+    let revision = vfs.revision();
+    assert!(matches!(
+        vfs.prepare_move(&utf16("C:\\working"), &utf16("C:\\renamed"), false),
+        Err(FileError32::SharingViolation)
+    ));
+    assert!(matches!(
+        vfs.prepare_open(
+            &utf16("C:\\working"),
+            FileOpenOptions32 {
+                access: FileAccess32::DELETE,
+                directory: true,
+                delete_on_close: true,
+                ..Default::default()
+            }
+        ),
+        Err(FileError32::SharingViolation)
+    ));
+    assert_eq!(vfs.revision(), revision);
+    assert_eq!(vfs.current_directory(), utf16("C:\\working"));
+    let deleting = open(
+        &mut vfs,
+        "C:\\other",
+        FileOpenOptions32 {
+            access: FileAccess32::DELETE,
+            directory: true,
+            ..Default::default()
+        },
+    );
+    assert!(matches!(
+        vfs.prepare_current_directory(&utf16("C:\\other")),
+        Err(FileError32::SharingViolation)
+    ));
+    assert_eq!(vfs.current_directory(), utf16("C:\\working"));
+    vfs.close_open(deleting.open).unwrap();
+    let change = vfs.prepare_current_directory(&utf16("C:\\other")).unwrap();
+    vfs.commit_namespace(change);
+    let renamed = vfs
+        .prepare_move(&utf16("C:\\working"), &utf16("C:\\renamed"), false)
+        .unwrap();
+    vfs.commit_namespace(renamed);
+    assert!(vfs.path_info(&utf16("C:\\renamed")).is_ok());
+}

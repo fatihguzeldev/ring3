@@ -42,6 +42,9 @@ impl Vfs32 {
         access: FileAccess32,
         share: FileShare32,
     ) -> Result<(), FileError32> {
+        if access.contains(FileAccess32::DELETE) && self.lookup(&self.cwd) == Ok(file) {
+            return Err(FileError32::SharingViolation);
+        }
         for open in self.opens.iter().flatten().filter(|o| o.file == file) {
             if access_mask(access) & !open.options.share.0 != 0
                 || access_mask(open.options.access) & !share.0 != 0

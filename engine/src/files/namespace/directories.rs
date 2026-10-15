@@ -50,12 +50,13 @@ impl Vfs32 {
         if !node.directory() {
             return Err(FileError32::NotDirectory);
         }
-        if path::root_len(&absolute)? == absolute.len() || {
-            let cwd = path::fold(&self.cwd);
-            let key = path::fold(&absolute);
-            cwd == key || (cwd.starts_with(&key) && cwd.get(key.len()) == Some(&92))
-        } {
+        if path::root_len(&absolute)? == absolute.len() {
             return Err(FileError32::AccessDenied);
+        }
+        let cwd = path::fold(&self.cwd);
+        let key = path::fold(&absolute);
+        if cwd == key || (cwd.starts_with(&key) && cwd.get(key.len()) == Some(&92)) {
+            return Err(FileError32::SharingViolation);
         }
         if self.entries.iter().any(|e| {
             path::parent(&e.path)
@@ -75,6 +76,11 @@ impl Vfs32 {
         if !node.directory() || node.delete_pending {
             return Err(FileError32::PathNotFound);
         }
+        self.check_sharing(
+            node.id,
+            FileAccess32(0),
+            FileShare32(FileShare32::READ.0 | FileShare32::WRITE.0),
+        )?;
         let drive_copy = if absolute.get(1) == Some(&58) {
             Some(absolute.clone())
         } else {

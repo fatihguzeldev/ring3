@@ -27,7 +27,7 @@ enum Operation32 {
     },
     Move {
         updates: Vec<NamespaceEntry32>,
-        old: NamespaceEntry32,
+        old: Vec<NamespaceEntry32>,
         replaced: Option<FileId>,
     },
     Copy {

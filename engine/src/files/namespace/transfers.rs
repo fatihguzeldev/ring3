@@ -45,10 +45,8 @@ impl Vfs32 {
             }
             Err(_) => None,
         };
-        if self.deleted.len() >= self.limits.nodes {
-            return Err(FileError32::Capacity);
-        }
         let mut updates = Vec::new();
+        let mut old = Vec::new();
         for entry in &self.entries {
             if entry.key == source_key
                 || (entry.key.starts_with(&source_key)
@@ -58,6 +56,10 @@ impl Vfs32 {
                 path.extend_from_slice(&entry.path[source.len()..]);
                 if path.len() > 32767 {
                     return Err(FileError32::InvalidName);
+                }
+                if source_key != target_key {
+                    old.try_reserve(1).map_err(|_| FileError32::Allocation)?;
+                    old.push(entry.clone());
                 }
                 updates
                     .try_reserve(1)
@@ -69,12 +71,22 @@ impl Vfs32 {
                 });
             }
         }
-        let old = self
-            .entries
+        let remaining = self
+            .deleted
             .iter()
-            .find(|e| e.file == file)
-            .unwrap()
-            .clone();
+            .filter(|entry| {
+                updates
+                    .binary_search_by(|update| update.key.cmp(&entry.key))
+                    .is_err()
+            })
+            .count();
+        if remaining
+            .checked_add(old.len())
+            .ok_or(FileError32::Capacity)?
+            > self.limits.nodes
+        {
+            return Err(FileError32::Capacity);
+        }
         self.namespace_receipt(Operation32::Move {
             updates,
             old,
@@ -106,7 +118,7 @@ impl Vfs32 {
             }
             let node = self.node(id)?;
             if node.directory()
-                || node.attributes & (ATTR_READONLY | ATTR_HIDDEN | ATTR_SYSTEM) != 0
+                || node.attributes & (ATTR_READONLY | ATTR_HIDDEN) != 0
                 || node.delete_pending
             {
                 return Err(FileError32::AccessDenied);

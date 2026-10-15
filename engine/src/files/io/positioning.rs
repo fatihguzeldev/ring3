@@ -31,10 +31,11 @@ impl Vfs32 {
         let node = self.node_mut(prepared.file).unwrap();
         let old = node.content.pages.len();
         node.content.pages.retain(|p| p.offset < prepared.size);
-        if let Some(page) = node.content.pages.last_mut() {
-            if page.offset < prepared.size && prepared.size - page.offset < FILE_PAGE_BYTES as u64 {
-                page.bytes[(prepared.size - page.offset) as usize..].fill(0);
-            }
+        if let Some(page) = node.content.pages.last_mut()
+            && page.offset < prepared.size
+            && prepared.size - page.offset < FILE_PAGE_BYTES as u64
+        {
+            page.bytes[(prepared.size - page.offset) as usize..].fill(0);
         }
         let removed = old - node.content.pages.len();
         node.size = prepared.size;

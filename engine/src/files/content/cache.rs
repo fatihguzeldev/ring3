@@ -61,10 +61,10 @@ impl ContentCache32 {
         capacity: usize,
         requests: usize,
     ) -> Result<FileReadRequest32, FileError32> {
-        if let Some(previous) = previous {
-            if self.pages.iter().any(|p| p.request == previous) {
-                return Ok(previous);
-            }
+        if let Some(previous) = previous
+            && self.pages.iter().any(|p| p.request == previous)
+        {
+            return Ok(previous);
         }
         let length = request.length;
         if self
