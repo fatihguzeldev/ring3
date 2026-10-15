@@ -5,6 +5,7 @@ pub struct HResult(pub u32);
 
 impl HResult {
     pub const OK: Self = Self(0);
+    pub const NO_VIRTUALIZATION: Self = Self(0x0878_000a);
     pub const INVALID_PARAM: Self = Self(0x8007_0057);
     pub const NO_INTERFACE: Self = Self(0x8000_4002);
     pub const NO_AGGREGATION: Self = Self(0x8004_0110);
@@ -157,6 +158,40 @@ pub struct BufferDescription {
     pub algorithm: [u8; 16],
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SpatialAlgorithm {
+    Default,
+    NoVirtualization,
+    HrtfFull,
+    HrtfLight,
+}
+impl SpatialAlgorithm {
+    pub fn from_guid(guid: [u8; 16]) -> Result<Self, HResult> {
+        if guid == [0; 16] {
+            return Ok(Self::Default);
+        }
+        if guid[4..]
+            != [
+                0x1b, 0x1c, 0xd2, 0x11, 0x94, 0xf5, 0, 0xc0, 0x4f, 0xc2, 0x8a, 0xca,
+            ]
+        {
+            return Err(HResult::INVALID_PARAM);
+        }
+        match u32::from_le_bytes(guid[..4].try_into().unwrap()) {
+            0xc241_333f => Ok(Self::NoVirtualization),
+            0xc241_3340 => Ok(Self::HrtfFull),
+            0xc241_3342 => Ok(Self::HrtfLight),
+            _ => Err(HResult::INVALID_PARAM),
+        }
+    }
+    pub fn creation_result(self) -> HResult {
+        match self {
+            Self::Default | Self::NoVirtualization => HResult::OK,
+            Self::HrtfFull | Self::HrtfLight => HResult::NO_VIRTUALIZATION,
+        }
+    }
+}
+
 impl BufferDescription {
     pub const PRIMARY: u32 = 1;
     pub const HARDWARE: u32 = 4;
@@ -170,9 +205,17 @@ impl BufferDescription {
     pub const DEFERRED_LOCATION: u32 = 0x40000;
     pub const MUTE_AT_MAX_DISTANCE: u32 = 0x20000;
 
+    pub fn spatial_algorithm(self) -> Result<SpatialAlgorithm, HResult> {
+        SpatialAlgorithm::from_guid(self.algorithm)
+    }
+
     pub fn validate(self, version8: bool) -> Result<Self, HResult> {
         const VALID: u32 = 0xfc3ff;
         if self.flags & !VALID != 0 || self.flags & 12 == 12 {
+            return Err(HResult::INVALID_PARAM);
+        }
+        let algorithm = self.spatial_algorithm()?;
+        if self.flags & Self::CONTROL_3D == 0 && algorithm != SpatialAlgorithm::Default {
             return Err(HResult::INVALID_PARAM);
         }
         if self.flags & Self::HARDWARE != 0 {

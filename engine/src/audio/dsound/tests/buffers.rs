@@ -134,3 +134,69 @@ fn default_and_global_focus_controls_respect_foreground_and_window_lifetime() {
     device.window_alive = false;
     assert_eq!(global.controls(&device).gains, [0.0; 2]);
 }
+
+#[test]
+fn stopped_looping_buffer_does_not_report_looping_status() {
+    let mut audio = audio();
+    let device = Device::new(true, 48_000);
+    let buffer = Buffer::create(
+        &mut audio,
+        &device,
+        BufferDescription {
+            flags: 0,
+            bytes: 4,
+            format: Some(format()),
+            algorithm: [0; 16],
+        },
+    )
+    .unwrap();
+    buffer.play(&mut audio, 0, 0, 1).unwrap();
+    assert_eq!(buffer.status(&audio), Ok(5));
+    audio.stop_stream(buffer.voice).unwrap();
+    assert_eq!(buffer.status(&audio), Ok(0));
+}
+
+#[test]
+fn software_spatial_algorithm_profile_reports_literal_fallback_success() {
+    for (algorithm, expected) in [
+        (0xc241_333fu32, 0),
+        (0xc241_3340, 0x0878_000a),
+        (0xc241_3342, 0x0878_000a),
+    ] {
+        let mut guid = [
+            0x3f, 0x33, 0x41, 0xc2, 0x1b, 0x1c, 0xd2, 0x11, 0x94, 0xf5, 0, 0xc0, 0x4f, 0xc2, 0x8a,
+            0xca,
+        ];
+        guid[..4].copy_from_slice(&algorithm.to_le_bytes());
+        let description = BufferDescription {
+            flags: BufferDescription::CONTROL_3D,
+            bytes: 4,
+            format: Some(format()),
+            algorithm: guid,
+        };
+        let validated = description.validate(true).unwrap();
+        assert_eq!(
+            validated.spatial_algorithm().unwrap().creation_result().0,
+            expected
+        );
+        assert_eq!(
+            BufferDescription {
+                flags: 0,
+                ..description
+            }
+            .validate(true),
+            Err(HResult::INVALID_PARAM)
+        );
+    }
+    assert_eq!(
+        SpatialAlgorithm::from_guid([1; 16]),
+        Err(HResult::INVALID_PARAM)
+    );
+    assert_eq!(
+        SpatialAlgorithm::from_guid([0; 16])
+            .unwrap()
+            .creation_result()
+            .0,
+        0
+    );
+}
