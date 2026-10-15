@@ -177,6 +177,15 @@ pub(super) fn cpu_store(
     })
 }
 
+mod modules;
+pub(crate) use modules::{
+    abort_module_input, abort_module_operation, append_module_input, begin_module_input,
+    commit_module_input, configure_module_limits, detach_modules_for_exit,
+    finish_module_initializer, free_library_module, load_library_module, module_gates,
+    module_handle, module_initializer, module_teb, register_kernel32_module, resolve_module_export,
+    start_module_process,
+};
+
 mod loading;
 pub(crate) use loading::{
     abort_image_input, append_image_input, begin_image_input, load_pe32, load_pe32_at,

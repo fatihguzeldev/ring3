@@ -183,6 +183,14 @@ name = "loader_pe32"
 path = "tests/loader/pe32/native.rs"
 
 [[test]]
+name = "loader_modules"
+path = "tests/loader/modules/linking/native.rs"
+
+[[test]]
+name = "process_modules"
+path = "tests/process/modules/native.rs"
+
+[[test]]
 name = "memory"
 path = "tests/memory/native.rs"
 
@@ -263,9 +271,5 @@ name = "windows_provider_wasm"
 path = "tests/windows/provider/wasm.rs"
 
 [[test]]
-name = "loader_modules"
-path = "tests/loader/modules/linking/native.rs"
-
-[[test]]
-name = "process_modules"
-path = "tests/process/modules/native.rs"
+name = "loader_modules_wasm"
+path = "tests/loader/modules/wasm.rs"

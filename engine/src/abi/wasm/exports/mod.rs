@@ -23,5 +23,6 @@ mod execution;
 mod image;
 mod instance;
 mod memory;
+mod modules;
 mod paging;
 mod xstate;
