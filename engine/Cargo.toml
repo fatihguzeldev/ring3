@@ -273,3 +273,7 @@ path = "tests/windows/provider/wasm.rs"
 [[test]]
 name = "loader_modules_wasm"
 path = "tests/loader/modules/wasm.rs"
+
+[[test]]
+name = "graphics"
+path = "tests/graphics/native.rs"

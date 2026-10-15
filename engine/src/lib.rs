@@ -1,6 +1,7 @@
 pub mod abi;
 #[forbid(unsafe_code)]
 pub mod cpu;
+pub mod graphics;
 #[forbid(unsafe_code)]
 pub mod loader;
 #[forbid(unsafe_code)]
