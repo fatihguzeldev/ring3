@@ -54,6 +54,7 @@ fn deleted_shader_remains_available_to_captured_state_until_ordered_retirement()
     assert_eq!(device.state().snapshot().vertex_shader, 0);
     assert!(device.shaders().vertex(shader).is_err());
     assert_eq!(device.retired_shaders.len(), 1);
+    assert_eq!(device.seal_batch().unwrap(), None);
     device.flush_retired_shaders().unwrap();
     assert_eq!(device.retired_shaders.len(), 1);
     device.apply_state_block(block).unwrap();
@@ -62,6 +63,50 @@ fn deleted_shader_remains_available_to_captured_state_until_ordered_retirement()
     device.bind_vertex_shader(2).unwrap();
     device.flush_retired_shaders().unwrap();
     assert!(device.retired_shaders.is_empty());
+}
+
+#[test]
+fn host_sealing_retires_deleted_shaders_without_draw_or_present() {
+    use crate::graphics::d3d8::shader::registry::{RegistryError, ShaderLimits};
+    let limits = DeviceLimits {
+        shaders: ShaderLimits {
+            objects: 1,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let mut device = Device::new(1, description(), limits).unwrap();
+    drain(&mut device);
+    for _ in 0..3 {
+        let prepared = device
+            .prepare_vertex_shader(&DECLARATION, Some(&VERTEX), 0)
+            .unwrap();
+        let shader = prepared.handle();
+        device.commit_shader(prepared).unwrap();
+        drain(&mut device);
+        device.delete_vertex_shader(shader).unwrap();
+        assert!(matches!(
+            device.prepare_vertex_shader(&DECLARATION, Some(&VERTEX), 0),
+            Err(DeviceError::Shader(RegistryError::ObjectCapacity))
+        ));
+        let batch = device.seal_batch().unwrap().unwrap();
+        let (_, bytes) = device.queue().peek().unwrap();
+        let (_, fragments) = crate::abi::graphics::d3d8::packet(bytes).unwrap();
+        let fragments: Vec<_> = fragments.collect();
+        assert_eq!(fragments.len(), 1);
+        assert_eq!(fragments[0].opcode, 5);
+        assert_eq!(fragments[0].bytes, shader.to_le_bytes());
+        device.acknowledge_batch(batch).unwrap();
+        assert!(device.retired_shaders.is_empty());
+    }
+    let pixel = [0xffff_0101, 1, 0x800f_0000, 0x90e4_0000, 0xffff];
+    let prepared = device.prepare_pixel_shader(&pixel).unwrap();
+    let shader = prepared.handle();
+    device.commit_shader(prepared).unwrap();
+    drain(&mut device);
+    device.delete_pixel_shader(shader).unwrap();
+    drain(&mut device);
+    assert!(device.prepare_pixel_shader(&pixel).is_ok());
 }
 
 #[test]

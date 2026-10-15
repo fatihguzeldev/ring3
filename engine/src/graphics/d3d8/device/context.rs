@@ -257,6 +257,12 @@ impl Device {
         self.depth_target
     }
     pub fn seal_batch(&mut self) -> Result<Option<BatchId>, DeviceError> {
+        if self.status != DeviceStatus::Removed
+            && !self.queue.is_sealed()
+            && !self.queue.is_draining()
+        {
+            self.flush_retired_shaders()?;
+        }
         Ok(self.queue.seal()?)
     }
     pub fn acknowledge_batch(&mut self, id: BatchId) -> Result<Progress, DeviceError> {
