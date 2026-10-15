@@ -5,6 +5,7 @@ use super::{
 use crate::memory::GuestAddress;
 
 mod references;
+pub(crate) use references::OwnedReferenceChanges32;
 
 struct Object {
     identity: ComIdentity32,

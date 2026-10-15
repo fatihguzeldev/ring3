@@ -6,3 +6,4 @@ pub use identity::{
     ReferenceState32, ReferenceTransition32, ReleaseOutcome32,
 };
 pub use registry::ComRegistry32;
+pub(crate) use registry::OwnedReferenceChanges32;

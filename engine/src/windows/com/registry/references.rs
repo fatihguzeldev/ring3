@@ -2,11 +2,15 @@ use super::{
     ComError32, ComIdentity32, ComRegistry32, GuestAddress, ReferenceState32, ReferenceTransition32,
 };
 
+#[derive(Clone, Copy)]
 struct ReferenceChange32 {
     slot: usize,
     references: i64,
     holds: i64,
 }
+
+#[cfg(test)]
+mod tests;
 
 pub(crate) struct PreparedReferenceChanges32<'a> {
     registry: &'a mut ComRegistry32,
@@ -18,6 +22,37 @@ struct ReferencePlan32 {
     changes: Vec<ReferenceChange32>,
     destroyed: Vec<ComIdentity32>,
     transitions: Vec<ReferenceTransition32>,
+}
+
+pub(crate) struct OwnedReferenceChanges32 {
+    plan: OwnedReferencePlan32,
+}
+
+enum OwnedReferencePlan32 {
+    Inline {
+        changes: [ReferenceChange32; 2],
+        transitions: [ReferenceTransition32; 2],
+        count: usize,
+        destroyed: Vec<ComIdentity32>,
+    },
+    Heap(ReferencePlan32),
+}
+
+impl OwnedReferenceChanges32 {
+    pub(crate) fn destroyed(&self) -> &[ComIdentity32] {
+        match &self.plan {
+            OwnedReferencePlan32::Inline { destroyed, .. } => destroyed,
+            OwnedReferencePlan32::Heap(plan) => &plan.destroyed,
+        }
+    }
+    pub(crate) fn transitions(&self) -> &[ReferenceTransition32] {
+        match &self.plan {
+            OwnedReferencePlan32::Inline {
+                transitions, count, ..
+            } => &transitions[..*count],
+            OwnedReferencePlan32::Heap(plan) => &plan.transitions,
+        }
+    }
 }
 
 impl PreparedReferenceChanges32<'_> {
@@ -53,6 +88,163 @@ impl PreparedReferenceChanges32<'_> {
 }
 
 impl ComRegistry32 {
+    pub(crate) fn prepare_owned_reference_changes(
+        &self,
+        retain: &[GuestAddress],
+        release: &[GuestAddress],
+        hold: &[GuestAddress],
+        unhold: &[GuestAddress],
+    ) -> Result<OwnedReferenceChanges32, ComError32> {
+        let count = retain
+            .len()
+            .checked_add(release.len())
+            .and_then(|n| n.checked_add(hold.len()))
+            .and_then(|n| n.checked_add(unhold.len()))
+            .ok_or(ComError32::Capacity)?;
+        if count > 2 {
+            return Ok(OwnedReferenceChanges32 {
+                plan: OwnedReferencePlan32::Heap(
+                    self.reference_plan(retain, release, hold, unhold, true)?,
+                ),
+            });
+        }
+        let mut changes = [ReferenceChange32 {
+            slot: 0,
+            references: 0,
+            holds: 0,
+        }; 2];
+        let mut used = 0;
+        for (pointers, references, holds) in [
+            (retain, 1, 0),
+            (release, -1, 0),
+            (hold, 0, 1),
+            (unhold, 0, -1),
+        ] {
+            for pointer in pointers {
+                let slot = self.slot(*pointer)?;
+                let index = changes[..used]
+                    .iter()
+                    .position(|change| change.slot == slot)
+                    .unwrap_or_else(|| {
+                        used += 1;
+                        used - 1
+                    });
+                changes[index].slot = slot;
+                changes[index].references += references;
+                changes[index].holds += holds;
+            }
+        }
+        let placeholder = ReferenceTransition32 {
+            identity: ComIdentity32 {
+                id: super::ComObjectId32::new(0),
+                identity_pointer: GuestAddress(0),
+                payload: 0,
+            },
+            before: ReferenceState32 {
+                references: 0,
+                holds: 0,
+            },
+            after: ReferenceState32 {
+                references: 0,
+                holds: 0,
+            },
+        };
+        let mut transitions = [placeholder; 2];
+        let mut destroyed = Vec::new();
+        for (index, change) in changes[..used].iter_mut().enumerate() {
+            let object = self.objects[change.slot].as_ref().unwrap();
+            change.references += i64::from(object.references);
+            change.holds += i64::from(object.holds);
+            if change.references < 0 || change.holds < 0 {
+                return Err(ComError32::ReferenceUnderflow);
+            }
+            if change.references > i64::from(u32::MAX) || change.holds > i64::from(u32::MAX) {
+                return Err(ComError32::Exhausted);
+            }
+            transitions[index] = ReferenceTransition32 {
+                identity: object.identity,
+                before: ReferenceState32 {
+                    references: object.references,
+                    holds: object.holds,
+                },
+                after: ReferenceState32 {
+                    references: change.references as u32,
+                    holds: change.holds as u32,
+                },
+            };
+            if change.references == 0 && change.holds == 0 {
+                destroyed
+                    .try_reserve(1)
+                    .map_err(|_| ComError32::Allocation)?;
+                destroyed.push(object.identity);
+            }
+        }
+        transitions[..used].sort_unstable_by_key(|transition| transition.identity.id);
+        destroyed.sort_unstable_by_key(|identity| identity.id);
+        Ok(OwnedReferenceChanges32 {
+            plan: OwnedReferencePlan32::Inline {
+                changes,
+                transitions,
+                count: used,
+                destroyed,
+            },
+        })
+    }
+
+    pub(crate) fn can_commit_owned_reference_changes(
+        &self,
+        prepared: &OwnedReferenceChanges32,
+    ) -> Result<(), ComError32> {
+        for transition in prepared.transitions() {
+            let object = self.object(transition.identity.identity_pointer)?;
+            if object.identity != transition.identity
+                || object.references != transition.before.references
+                || object.holds != transition.before.holds
+            {
+                return Err(ComError32::InvalidPointer);
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn commit_owned_reference_changes(
+        &mut self,
+        prepared: OwnedReferenceChanges32,
+    ) -> Vec<ComIdentity32> {
+        match prepared.plan {
+            OwnedReferencePlan32::Heap(plan) => PreparedReferenceChanges32 {
+                registry: self,
+                changes: plan.changes,
+                destroyed: plan.destroyed,
+            }
+            .publish(),
+            OwnedReferencePlan32::Inline {
+                changes,
+                count,
+                destroyed,
+                ..
+            } => {
+                for change in &changes[..count] {
+                    if change.references == 0 && change.holds == 0 {
+                        let object = self.objects[change.slot].take().unwrap();
+                        self.interfaces -= object.interfaces.len();
+                        self.live -= 1;
+                    } else {
+                        let object = self.objects[change.slot].as_mut().unwrap();
+                        object.references = change.references as u32;
+                        object.holds = change.holds as u32;
+                    }
+                }
+                if !destroyed.is_empty() {
+                    let objects = &self.objects;
+                    self.pointers
+                        .retain(|pointer| objects[pointer.slot].is_some());
+                }
+                destroyed
+            }
+        }
+    }
+
     pub(super) fn creation_retains(
         &self,
         retain: &[GuestAddress],

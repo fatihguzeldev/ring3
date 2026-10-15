@@ -1,6 +1,8 @@
 mod allocation;
 mod lifetime;
 mod publication;
+mod prepared;
+pub(crate) use prepared::PreparedGuestLifetime32;
 
 use crate::{
     memory::{GuestAddress, MemoryError, PageRange},
