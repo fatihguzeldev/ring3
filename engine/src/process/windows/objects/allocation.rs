@@ -32,14 +32,17 @@ impl GuestComObjects32 {
         })
     }
 
+    #[cfg(test)]
     pub(crate) fn live_objects(&self) -> usize {
         self.registry.live_objects()
     }
 
+    #[cfg(test)]
     pub(crate) fn retained_pages(&self) -> usize {
         self.vtables.len() + self.allocations.len()
     }
 
+    #[cfg(test)]
     pub(crate) fn high_water_address(&self) -> u64 {
         self.next_page as u64 * u64::from(PAGE_SIZE)
     }

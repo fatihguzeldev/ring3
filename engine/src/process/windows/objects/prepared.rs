@@ -1,7 +1,7 @@
 use super::{GuestComError32, GuestComObjects32};
 use crate::{
     memory::{AddressSpace, GuestAddress, MAX_WORD_WRITES32, MemoryError, PageRange, WordWrite32},
-    windows::com::{ComIdentity32, OwnedReferenceChanges32, ReferenceTransition32},
+    windows::com::{ComIdentity32, OwnedReferenceChanges32},
 };
 
 pub(crate) struct PreparedGuestLifetime32 {
@@ -43,6 +43,7 @@ impl GuestComObjects32 {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn prepare_lifetime_changes_with_unmaps(
         &self,
         memory: &AddressSpace,

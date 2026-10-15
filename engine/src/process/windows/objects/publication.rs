@@ -2,14 +2,14 @@ use super::{
     GuestComCreation32, GuestComError32, GuestComObjects32, InterfaceLayout32, ObjectAllocation32,
     Vtable32, allocation::validate_layouts,
 };
+#[cfg(test)]
+use crate::windows::com::InterfaceId;
 use crate::{
     memory::{
         AddressSpace, GuestAddress, MAX_WORD_WRITES32, MemoryError, PAGE_SIZE, PageInitialization,
         PageRange, Permissions, WordWrite32,
     },
-    windows::com::{
-        ComError32, ComIdentity32, IID_IUNKNOWN, InterfaceBinding32, InterfaceId, ReleaseOutcome32,
-    },
+    windows::com::{ComError32, ComIdentity32, IID_IUNKNOWN, InterfaceBinding32, ReleaseOutcome32},
 };
 
 struct PageBytes {
@@ -27,6 +27,7 @@ impl GuestComObjects32 {
         self.create_with_lifetime(memory, payload, layouts, GuestComCreation32::default())
     }
 
+    #[cfg(test)]
     pub(crate) fn create_with_output(
         &mut self,
         memory: &mut AddressSpace,
@@ -38,6 +39,7 @@ impl GuestComObjects32 {
         self.create_with_writes(memory, payload, layouts, output, iid, &[])
     }
 
+    #[cfg(test)]
     pub(crate) fn create_with_writes(
         &mut self,
         memory: &mut AddressSpace,
@@ -210,6 +212,7 @@ impl GuestComObjects32 {
         Ok(self.registry.lookup(pointer)?)
     }
 
+    #[cfg(test)]
     pub(crate) fn canonical_pointer(
         &self,
         pointer: GuestAddress,
@@ -238,6 +241,7 @@ impl GuestComObjects32 {
         Ok(identity)
     }
 
+    #[cfg(test)]
     pub(crate) fn query_target(
         &self,
         memory: &AddressSpace,
@@ -260,6 +264,7 @@ impl GuestComObjects32 {
         Ok(())
     }
 
+    #[cfg(test)]
     pub(crate) fn query_interface(
         &mut self,
         memory: &mut AddressSpace,

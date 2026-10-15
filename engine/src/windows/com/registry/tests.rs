@@ -199,13 +199,13 @@ fn aggregate_alias_deltas_check_final_counts_without_intermediate_overflow() {
         .unwrap()
         .references = u32::MAX;
     let prepared = registry
-        .prepare_reference_changes(&[GuestAddress(0x1000)], &[GuestAddress(0x1004)], &[], &[])
+        .prepare_owned_reference_changes(&[GuestAddress(0x1000)], &[GuestAddress(0x1004)], &[], &[])
         .unwrap();
-    assert!(prepared.publish().is_empty());
+    assert!(registry.commit_owned_reference_changes(prepared).is_empty());
     assert_eq!(registry.references(GuestAddress(0x1000)), Ok(u32::MAX));
     assert_eq!(registry.lookup(GuestAddress(0x1004)).unwrap().id, id);
     assert!(matches!(
-        registry.prepare_reference_changes(&[GuestAddress(0x1000)], &[], &[], &[]),
+        registry.prepare_owned_reference_changes(&[GuestAddress(0x1000)], &[], &[], &[]),
         Err(ComError32::Exhausted)
     ));
     assert_eq!(registry.references(GuestAddress(0x1004)), Ok(u32::MAX));

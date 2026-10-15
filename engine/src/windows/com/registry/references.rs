@@ -12,12 +12,6 @@ struct ReferenceChange32 {
 #[cfg(test)]
 mod tests;
 
-pub(crate) struct PreparedReferenceChanges32<'a> {
-    registry: &'a mut ComRegistry32,
-    changes: Vec<ReferenceChange32>,
-    destroyed: Vec<ComIdentity32>,
-}
-
 struct ReferencePlan32 {
     changes: Vec<ReferenceChange32>,
     destroyed: Vec<ComIdentity32>,
@@ -52,38 +46,6 @@ impl OwnedReferenceChanges32 {
             } => &transitions[..*count],
             OwnedReferencePlan32::Heap(plan) => &plan.transitions,
         }
-    }
-}
-
-impl PreparedReferenceChanges32<'_> {
-    pub(crate) fn destroyed(&self) -> &[ComIdentity32] {
-        &self.destroyed
-    }
-
-    pub(crate) fn publish(self) -> Vec<ComIdentity32> {
-        let Self {
-            registry,
-            changes,
-            destroyed,
-        } = self;
-        for change in changes {
-            if change.references == 0 && change.holds == 0 {
-                let object = registry.objects[change.slot].take().unwrap();
-                registry.interfaces -= object.interfaces.len();
-                registry.live -= 1;
-            } else {
-                let object = registry.objects[change.slot].as_mut().unwrap();
-                object.references = change.references as u32;
-                object.holds = change.holds as u32;
-            }
-        }
-        if !destroyed.is_empty() {
-            let objects = &registry.objects;
-            registry
-                .pointers
-                .retain(|pointer| objects[pointer.slot].is_some());
-        }
-        destroyed
     }
 }
 
@@ -212,37 +174,40 @@ impl ComRegistry32 {
         prepared: OwnedReferenceChanges32,
     ) -> Vec<ComIdentity32> {
         match prepared.plan {
-            OwnedReferencePlan32::Heap(plan) => PreparedReferenceChanges32 {
-                registry: self,
-                changes: plan.changes,
-                destroyed: plan.destroyed,
+            OwnedReferencePlan32::Heap(plan) => {
+                self.publish_reference_changes(&plan.changes, plan.destroyed)
             }
-            .publish(),
             OwnedReferencePlan32::Inline {
                 changes,
                 count,
                 destroyed,
                 ..
-            } => {
-                for change in &changes[..count] {
-                    if change.references == 0 && change.holds == 0 {
-                        let object = self.objects[change.slot].take().unwrap();
-                        self.interfaces -= object.interfaces.len();
-                        self.live -= 1;
-                    } else {
-                        let object = self.objects[change.slot].as_mut().unwrap();
-                        object.references = change.references as u32;
-                        object.holds = change.holds as u32;
-                    }
-                }
-                if !destroyed.is_empty() {
-                    let objects = &self.objects;
-                    self.pointers
-                        .retain(|pointer| objects[pointer.slot].is_some());
-                }
-                destroyed
+            } => self.publish_reference_changes(&changes[..count], destroyed),
+        }
+    }
+
+    fn publish_reference_changes(
+        &mut self,
+        changes: &[ReferenceChange32],
+        destroyed: Vec<ComIdentity32>,
+    ) -> Vec<ComIdentity32> {
+        for change in changes {
+            if change.references == 0 && change.holds == 0 {
+                let object = self.objects[change.slot].take().unwrap();
+                self.interfaces -= object.interfaces.len();
+                self.live -= 1;
+            } else {
+                let object = self.objects[change.slot].as_mut().unwrap();
+                object.references = change.references as u32;
+                object.holds = change.holds as u32;
             }
         }
+        if !destroyed.is_empty() {
+            let objects = &self.objects;
+            self.pointers
+                .retain(|pointer| objects[pointer.slot].is_some());
+        }
+        destroyed
     }
 
     pub(super) fn creation_retains(
@@ -260,21 +225,6 @@ impl ComRegistry32 {
                 .map(|change| (change.slot, change.references as u32)),
         );
         Ok(retained)
-    }
-
-    pub(crate) fn prepare_reference_changes(
-        &mut self,
-        retain: &[GuestAddress],
-        release: &[GuestAddress],
-        hold: &[GuestAddress],
-        unhold: &[GuestAddress],
-    ) -> Result<PreparedReferenceChanges32<'_>, ComError32> {
-        let plan = self.reference_plan(retain, release, hold, unhold, false)?;
-        Ok(PreparedReferenceChanges32 {
-            registry: self,
-            changes: plan.changes,
-            destroyed: plan.destroyed,
-        })
     }
 
     pub(crate) fn preview_reference_changes(
