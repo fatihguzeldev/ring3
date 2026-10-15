@@ -5,6 +5,7 @@ pub(super) fn validate(version: Version, instructions: &[Instruction]) -> Result
     let mut initialized = [0u8; 12];
     let mut previous_phase_initialized = [0u8; 12];
     let mut texture_initialized = [0u8; 6];
+    let mut previous_texture_initialized = texture_initialized;
     let mut bump_consumed = 0u8;
     let mut coordinate_order = [None; 6];
     let mut divides = 0;
@@ -105,6 +106,11 @@ pub(super) fn validate(version: Version, instructions: &[Instruction]) -> Result
         } else {
             initialized
         };
+        let read_texture_initialized = if instruction.coissue {
+            previous_texture_initialized
+        } else {
+            texture_initialized
+        };
         if operation == Bump14 {
             if phase != 1 || bem_used || instruction.destination.unwrap().write_mask != 3 {
                 return Err(ShaderError::InvalidInstruction);
@@ -178,7 +184,11 @@ pub(super) fn validate(version: Version, instructions: &[Instruction]) -> Result
                 && version.minor < 4
                 && source.register.file == RegisterFile::Texture
             {
-                if texture_initialized[source.register.index as usize] != 15 {
+                let needed = swizzled_mask(*source, read_mask(
+                    operation, source_index,
+                    instruction.destination.map_or(15, |destination| destination.write_mask),
+                ));
+                if read_texture_initialized[source.register.index as usize] & needed != needed {
                     return Err(ShaderError::UninitializedRegister);
                 }
                 if bump_consumed & (1 << source.register.index) != 0
@@ -252,6 +262,7 @@ pub(super) fn validate(version: Version, instructions: &[Instruction]) -> Result
             }
         }
         previous_initialized = initialized;
+        previous_texture_initialized = texture_initialized;
         if let Some(destination) = instruction.destination {
             if operation == Kill {
                 if version.minor == 4
@@ -275,7 +286,7 @@ pub(super) fn validate(version: Version, instructions: &[Instruction]) -> Result
                     initialized[destination.register.index as usize] |= destination.write_mask;
                 }
             } else if destination.register.file == RegisterFile::Texture {
-                texture_initialized[destination.register.index as usize] = 15;
+                texture_initialized[destination.register.index as usize] |= destination.write_mask;
             } else if destination.register.file == RegisterFile::Address {
                 address_initialized = true;
             } else if destination.register.file == RegisterFile::RasterOutput

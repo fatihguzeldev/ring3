@@ -76,13 +76,16 @@ pub(super) fn destination(
         return Err(ShaderError::InvalidModifier);
     }
     if version.stage == Stage::Pixel {
-        if !(-3..=3).contains(&shift) || (version.minor < 4 && !matches!(shift, -1 | 0 | 1 | 2)) {
+        if !(-3..=3).contains(&shift) || (version.minor < 4 && !matches!(shift, -1..=2)) {
             return Err(ShaderError::InvalidModifier);
         }
         if operation.is_texture() && (modifier != 0 || shift != 0) {
             return Err(ShaderError::InvalidModifier);
         }
         if version.minor < 4 && !matches!(write_mask, 7 | 8 | 15) {
+            return Err(ShaderError::InvalidModifier);
+        }
+        if version.minor < 4 && operation.is_texture() && write_mask != 15 {
             return Err(ShaderError::InvalidModifier);
         }
     }

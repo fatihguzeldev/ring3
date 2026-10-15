@@ -153,7 +153,7 @@ impl ShaderRegistry {
 
     pub fn can_commit(&self, prepared: &PreparedShader) -> Result<(), RegistryError> {
         if self.next_sequence > 0x3fff_ffff
-            || prepared.entry.handle != 0x8000_0001 | self.next_sequence << 1
+            || prepared.entry.handle != (0x8000_0001 | self.next_sequence << 1)
         {
             return Err(RegistryError::InvalidHandle);
         }

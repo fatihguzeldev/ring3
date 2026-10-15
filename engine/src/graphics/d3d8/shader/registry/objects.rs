@@ -16,7 +16,7 @@ impl VertexShader {
             .chain(
                 self.function
                     .iter()
-                    .flat_map(|program| definitions(program)),
+                    .flat_map(definitions),
             )
     }
 
