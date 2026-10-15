@@ -1,6 +1,6 @@
 use super::{
-    CLIP_PLANES, MAX_ACTIVE_LIGHTS, MAX_LIGHTS, PIXEL_CONSTANTS, PipelineState, StateError,
-    TEXTURE_STAGES, VERTEX_CONSTANTS, VERTEX_STREAMS,
+    CLIP_PLANES, MAX_LIGHTS, PIXEL_CONSTANTS, PipelineState, StateError, TEXTURE_STAGES,
+    VERTEX_CONSTANTS, VERTEX_STREAMS,
     render::{self, RENDER_COUNT, STAGE_COUNT, TRANSFORM_COUNT},
     types::LightState,
 };
@@ -18,7 +18,12 @@ pub struct StateBlock {
 }
 
 impl StateBlock {
-    pub(crate) fn try_clone(&self) -> Result<Self, StateError> { Ok(Self { values: self.values.try_clone()?, mask: self.mask.clone() }) }
+    pub(crate) fn try_clone(&self) -> Result<Self, StateError> {
+        Ok(Self {
+            values: self.values.try_clone()?,
+            mask: self.mask.clone(),
+        })
+    }
     pub(super) fn create(state: &PipelineState, kind: StateBlockKind) -> Result<Self, StateError> {
         let all = kind == StateBlockKind::All;
         let vertex = kind != StateBlockKind::Pixel;
@@ -184,9 +189,6 @@ impl StateBlock {
             if selected.enabled {
                 target.lights[position].enabled = source.enabled;
             }
-        }
-        if target.lights.iter().filter(|entry| entry.enabled).count() > MAX_ACTIVE_LIGHTS {
-            return Err(StateError::LightCapacity);
         }
         Ok(())
     }

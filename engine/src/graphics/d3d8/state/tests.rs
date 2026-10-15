@@ -61,7 +61,7 @@ fn predefined_blocks_preserve_other_pipeline_groups() {
 }
 
 #[test]
-fn state_ranges_and_active_lights_fail_without_mutation() {
+fn state_ranges_fail_without_mutation_and_enabled_lights_can_exceed_draw_caps() {
     let mut device = DeviceState::new(320, 200, true).unwrap();
     let revision = device.revision();
     assert_eq!(
@@ -86,12 +86,9 @@ fn state_ranges_and_active_lights_fail_without_mutation() {
     }
     assert_eq!(device.light(u32::MAX), Ok(Light::default()));
     let revision = device.revision();
-    assert_eq!(
-        device.enable_light(99, true),
-        Err(StateError::LightCapacity)
-    );
-    assert_eq!(device.light(99), Err(StateError::InvalidLight));
-    assert_eq!(device.revision(), revision);
+    device.enable_light(99, true).unwrap();
+    assert_eq!(device.light(99), Ok(Light::default()));
+    assert!(device.revision() > revision);
 }
 
 #[test]

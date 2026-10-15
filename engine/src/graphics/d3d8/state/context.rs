@@ -1,7 +1,6 @@
 use super::{
-    CLIP_PLANES, Light, MAX_ACTIVE_LIGHTS, MAX_LIGHTS, Material, Matrix, PIXEL_CONSTANTS,
-    StateBlock, StateBlockKind, StateError, StreamBinding, TEXTURE_STAGES, VERTEX_CONSTANTS,
-    VERTEX_STREAMS, Viewport,
+    CLIP_PLANES, Light, MAX_LIGHTS, Material, Matrix, PIXEL_CONSTANTS, StateBlock, StateBlockKind,
+    StateError, StreamBinding, TEXTURE_STAGES, VERTEX_CONSTANTS, VERTEX_STREAMS, Viewport,
     blocks::StateMask,
     render::{self, RENDER_COUNT, STAGE_COUNT, TRANSFORM_COUNT},
     types::LightState,
@@ -76,35 +75,114 @@ pub struct DeviceState {
 }
 
 impl DeviceState {
-    pub fn bind_vertex_shader(&mut self, handle: u32, constants: impl IntoIterator<Item = (u32, [u32; 4])>) -> Result<(), StateError> {
+    pub(crate) fn try_clone(&self) -> Result<Self, StateError> {
+        Ok(Self {
+            live: self.live.try_clone()?,
+            recording: self
+                .recording
+                .as_ref()
+                .map(StateBlock::try_clone)
+                .transpose()?,
+            revision: self.revision,
+            recording_revision: self.recording_revision,
+            target_width: self.target_width,
+            target_height: self.target_height,
+        })
+    }
+    pub(crate) fn recorded_resources(&self) -> impl Iterator<Item = u32> + '_ {
+        self.recording
+            .iter()
+            .flat_map(StateBlock::resource_bindings)
+    }
+    pub(crate) fn retained_binding(&self, kind: u8, index: usize) -> Option<u32> {
+        let (values, selected) = if let Some(block) = &self.recording {
+            (
+                &block.values,
+                match kind {
+                    0 => block.mask.textures[index],
+                    1 => block.mask.streams[index],
+                    _ => block.mask.indices,
+                },
+            )
+        } else {
+            (&self.live, true)
+        };
+        let value = match kind {
+            0 => values.textures[index],
+            1 => values.streams[index].resource,
+            _ => values.indices,
+        };
+        (selected && value != 0).then_some(value)
+    }
+    pub fn bind_vertex_shader(
+        &mut self,
+        handle: u32,
+        constants: impl IntoIterator<Item = (u32, [u32; 4])>,
+    ) -> Result<(), StateError> {
         let mut values = [None; VERTEX_CONSTANTS];
-        for (index, value) in constants { *values.get_mut(index as usize).ok_or(StateError::InvalidRange)? = Some(value); }
+        for (index, value) in constants {
+            *values
+                .get_mut(index as usize)
+                .ok_or(StateError::InvalidRange)? = Some(value);
+        }
         let state = self.edit(|mask| {
             mask.vertex_shader = true;
-            for (index, value) in values.iter().enumerate() { mask.vertex_constants[index] |= value.is_some(); }
+            for (index, value) in values.iter().enumerate() {
+                mask.vertex_constants[index] |= value.is_some();
+            }
         })?;
         state.vertex_shader = handle;
-        for (index, value) in values.into_iter().enumerate() { if let Some(value) = value { state.vertex_constants[index] = value; } }
+        for (index, value) in values.into_iter().enumerate() {
+            if let Some(value) = value {
+                state.vertex_constants[index] = value;
+            }
+        }
         Ok(())
     }
 
-    pub fn bind_pixel_shader(&mut self, handle: u32, constants: impl IntoIterator<Item = (u32, [u32; 4])>) -> Result<(), StateError> {
+    pub fn bind_pixel_shader(
+        &mut self,
+        handle: u32,
+        constants: impl IntoIterator<Item = (u32, [u32; 4])>,
+    ) -> Result<(), StateError> {
         let mut values = [None; PIXEL_CONSTANTS];
-        for (index, value) in constants { *values.get_mut(index as usize).ok_or(StateError::InvalidRange)? = Some(value); }
+        for (index, value) in constants {
+            *values
+                .get_mut(index as usize)
+                .ok_or(StateError::InvalidRange)? = Some(value);
+        }
         let state = self.edit(|mask| {
             mask.pixel_shader = true;
-            for (index, value) in values.iter().enumerate() { mask.pixel_constants[index] |= value.is_some(); }
+            for (index, value) in values.iter().enumerate() {
+                mask.pixel_constants[index] |= value.is_some();
+            }
         })?;
         state.pixel_shader = handle;
-        for (index, value) in values.into_iter().enumerate() { if let Some(value) = value { state.pixel_constants[index] = value; } }
+        for (index, value) in values.into_iter().enumerate() {
+            if let Some(value) = value {
+                state.pixel_constants[index] = value;
+            }
+        }
         Ok(())
     }
 
-    pub(crate) fn unbind_deleted_shader(&mut self, handle: u32, vertex: bool) -> Result<(), StateError> {
-        let current = if vertex { &mut self.live.vertex_shader } else { &mut self.live.pixel_shader };
+    pub(crate) fn unbind_deleted_shader(
+        &mut self,
+        handle: u32,
+        vertex: bool,
+    ) -> Result<(), StateError> {
+        let current = if vertex {
+            &mut self.live.vertex_shader
+        } else {
+            &mut self.live.pixel_shader
+        };
         if *current == handle {
-            let revision = self.revision.checked_add(1).ok_or(StateError::IdentityExhausted)?;
-            *current = 0; self.revision = revision;
+            let revision = self
+                .revision
+                .checked_add(1)
+                .ok_or(StateError::IdentityExhausted)?;
+            *current = 0;
+            self.revision = revision;
         }
         Ok(())
     }
@@ -157,16 +235,34 @@ impl DeviceState {
     pub fn revision(&self) -> u64 {
         self.revision
     }
-    pub(crate) fn recording_revision(&self) -> u64 { self.recording_revision }
+    pub(crate) fn recording_revision(&self) -> u64 {
+        self.recording_revision
+    }
     pub(crate) fn prepare_end_state_block(&self) -> Result<StateBlock, StateError> {
-        self.recording.as_ref().ok_or(StateError::NotRecording)?.try_clone()
+        self.recording
+            .as_ref()
+            .ok_or(StateError::NotRecording)?
+            .try_clone()
     }
     pub(crate) fn finish_user_draw(&mut self, indexed: bool) -> Result<(), StateError> {
-        let revision = self.revision.checked_add(1).ok_or(StateError::IdentityExhausted)?;
+        if !self.user_draw_changes_bindings(indexed) {
+            return Ok(());
+        }
+        let revision = self
+            .revision
+            .checked_add(1)
+            .ok_or(StateError::IdentityExhausted)?;
         self.live.streams[0] = Default::default();
-        if indexed { self.live.indices = 0; self.live.base_vertex = 0; }
+        if indexed {
+            self.live.indices = 0;
+            self.live.base_vertex = 0;
+        }
         self.revision = revision;
         Ok(())
+    }
+    pub(crate) fn user_draw_changes_bindings(&self, indexed: bool) -> bool {
+        self.live.streams[0] != StreamBinding::default()
+            || (indexed && (self.live.indices != 0 || self.live.base_vertex != 0))
     }
     pub fn is_recording(&self) -> bool {
         self.recording.is_some()
@@ -183,7 +279,10 @@ impl DeviceState {
         mark: impl FnOnce(&mut StateMask),
     ) -> Result<&mut PipelineState, StateError> {
         if let Some(block) = &mut self.recording {
-            self.recording_revision = self.recording_revision.checked_add(1).ok_or(StateError::IdentityExhausted)?;
+            self.recording_revision = self
+                .recording_revision
+                .checked_add(1)
+                .ok_or(StateError::IdentityExhausted)?;
             mark(&mut block.mask);
             Ok(&mut block.values)
         } else {
@@ -309,18 +408,6 @@ impl DeviceState {
         if existing.is_none() && self.pending().lights.len() == MAX_LIGHTS {
             return Err(StateError::LightCapacity);
         }
-        if enabled
-            && !existing.is_some_and(|position| self.pending().lights[position].enabled)
-            && self
-                .pending()
-                .lights
-                .iter()
-                .filter(|entry| entry.enabled)
-                .count()
-                == MAX_ACTIVE_LIGHTS
-        {
-            return Err(StateError::LightCapacity);
-        }
         let state = self.edit(|mask| mask.mark_light(index, existing.is_none(), true))?;
         if let Some(position) = existing {
             state.lights[position].enabled = enabled;
@@ -389,10 +476,17 @@ impl DeviceState {
         Ok(())
     }
 
-    pub fn set_stream(&mut self, stream: u32, binding: StreamBinding) -> Result<(), StateError> {
+    pub fn set_stream(
+        &mut self,
+        stream: u32,
+        mut binding: StreamBinding,
+    ) -> Result<(), StateError> {
         let stream = stream as usize;
         if stream >= VERTEX_STREAMS {
             return Err(StateError::InvalidRange);
+        }
+        if binding.resource == 0 {
+            binding.stride = self.pending().streams[stream].stride;
         }
         self.edit(|mask| mask.streams[stream] = true)?.streams[stream] = binding;
         Ok(())
@@ -452,7 +546,10 @@ impl DeviceState {
         if self.is_recording() {
             return Err(StateError::Recording);
         }
-        let revision = self.recording_revision.checked_add(1).ok_or(StateError::IdentityExhausted)?;
+        let revision = self
+            .recording_revision
+            .checked_add(1)
+            .ok_or(StateError::IdentityExhausted)?;
         self.recording = Some(StateBlock {
             values: self.live.try_clone()?,
             mask: StateMask::default(),
