@@ -25,3 +25,6 @@ pub mod files;
 pub mod text;
 
 pub mod process;
+
+pub mod ole32;
+pub mod winmm;
