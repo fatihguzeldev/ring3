@@ -1,3 +1,4 @@
+use crate::cpu::dbt::wasm::imports::Imports;
 mod cross_lane;
 mod direct;
 mod execute;
@@ -32,7 +33,7 @@ pub(super) fn direct_hotpath(instruction: crate::cpu::x86::avx::AvxInstruction) 
 pub(super) fn instruction(
     code: &mut wasm_encoder::InstructionSink<'_>,
     operation: crate::cpu::x86::avx::AvxOperation,
-    imports: super::memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) -> bool {
     let locals = imports.avx_locals.expect("avx block local allocation");

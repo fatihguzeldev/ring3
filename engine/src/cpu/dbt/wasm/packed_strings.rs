@@ -1,4 +1,5 @@
 use super::{cpu_result, locals::*, memory};
+use crate::cpu::dbt::wasm::imports::Imports;
 use crate::{
     abi::{
         arena::{SIMD_OFFSET, TRANSFER_OFFSET},
@@ -300,7 +301,7 @@ fn publish(code: &mut InstructionSink<'_>, op: PackedStringCompare, words: bool,
 pub(super) fn instruction(
     code: &mut InstructionSink<'_>,
     op: PackedStringCompare,
-    imports: memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) -> bool {
     if let PackedStringSource::Memory(address) = op.right {

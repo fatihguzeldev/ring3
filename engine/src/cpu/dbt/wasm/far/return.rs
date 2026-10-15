@@ -1,12 +1,13 @@
 use super::super::segments;
 use super::*;
+use crate::cpu::dbt::wasm::imports::Imports;
 use crate::cpu::x86::{Register32, SegmentAccess, SegmentRegister};
 
 pub(in crate::cpu::dbt::wasm) fn return_(
     code: &mut InstructionSink<'_>,
     width: FarWidth,
     stack_adjust: u16,
-    imports: memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) {
     let slot = width.slot_bytes();

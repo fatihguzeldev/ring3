@@ -1,8 +1,10 @@
 use super::{
     cpu_result,
+    imports::{HelperBinding, Imports},
     locals::*,
-    memory::{self, Imports, StoreImport},
+    memory,
 };
+use crate::cpu::dbt::wasm::helpers::protocol;
 use crate::{
     abi::{
         arena::{TRANSFER_OFFSET, X87_OFFSET},
@@ -150,7 +152,9 @@ pub(super) fn instruction(
             cpu_result::ResultContext::from(imports),
         );
     }
-    let (descriptor, operands, immediate) = operation.descriptor().expect("decoded SIMD operation is valid");
+    let (descriptor, operands, immediate) = operation
+        .descriptor()
+        .expect("decoded SIMD operation is valid");
     let execute = imports
         .simd_execute
         .expect("SIMD execution import")
@@ -170,10 +174,10 @@ pub(super) fn instruction(
         exit_depth,
         cpu_result::ResultContext::from(imports),
     );
-    memory::reset_checks(code);
-    memory::expect_field(code, 20, 0);
-    memory::protocol_if_bad(code);
-    memory::exit_if_failed(code, exit_depth);
+    protocol::reset_checks(code);
+    protocol::expect_field(code, 20, 0);
+    protocol::protocol_if_bad(code);
+    protocol::exit_if_failed(code, exit_depth);
     let compare_flags = matches!(
         operation.kind,
         SimdKind::Float(FloatKind::CompareFlags | FloatKind::CompareFlagsQuiet)
@@ -181,7 +185,7 @@ pub(super) fn instruction(
     payload(code, 4);
     if compare_flags {
         code.local_set(RESULT);
-        memory::reset_checks(code);
+        protocol::reset_checks(code);
         // a completed simd comparison has one of four relations; exceptions exit above.
         code.local_get(RESULT)
             .i32_const(0x8d5)
@@ -196,9 +200,9 @@ pub(super) fn instruction(
                 .i32_ne()
                 .i32_and();
         }
-        memory::add_check(code);
-        memory::protocol_if_bad(code);
-        memory::exit_if_failed(code, exit_depth);
+        protocol::add_check(code);
+        protocol::protocol_if_bad(code);
+        protocol::exit_if_failed(code, exit_depth);
         code.local_get(RESULT);
     }
     cpu_result::flags(code, if compare_flags { 0x8d5 } else { 0 }, exit_depth);
@@ -212,8 +216,8 @@ pub(super) fn instruction(
         }
         .expect("SIMD memory write import");
         let index = match import {
-            StoreImport::Replacement(index) => index,
-            StoreImport::Resident { index, key, id } => {
+            HelperBinding::Replacement(index) => index,
+            HelperBinding::Resident { index, key, id } => {
                 code.i32_const(key as u32 as i32)
                     .i32_const((key >> 32) as u32 as i32)
                     .i32_const(id as u32 as i32)

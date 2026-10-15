@@ -1,3 +1,4 @@
+use crate::cpu::dbt::wasm::imports::Imports;
 use wasm_encoder::InstructionSink;
 
 use super::{ByteValue, FLAGS, LHS, RESULT, Register32, SmallWidth, byte_value, memory, register};
@@ -10,7 +11,7 @@ pub(super) fn crc32(
     code: &mut InstructionSink<'_>,
     destination: Register32,
     source: Crc32Source,
-    imports: memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) {
     let bits = match source {
@@ -66,7 +67,7 @@ pub(super) fn bit_count(
     width: ScalarWidth,
     destination: Register32,
     source: Value32,
-    imports: memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) {
     load_source(code, width, source, imports, exit_depth);
@@ -113,7 +114,7 @@ pub(super) fn move_byte_swap(
     width: ScalarWidth,
     destination: Location32,
     source: Value32,
-    imports: memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) -> bool {
     load_source(code, width, source, imports, exit_depth);
@@ -166,7 +167,7 @@ fn load_source(
     code: &mut InstructionSink<'_>,
     width: ScalarWidth,
     source: Value32,
-    imports: memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) {
     match source {

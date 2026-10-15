@@ -1,10 +1,6 @@
 use wasm_encoder::{BlockType, InstructionSink, MemArg};
 
-use super::super::{
-    cpu_result,
-    locals::*,
-    memory::{self, Imports},
-};
+use super::super::{cpu_result, imports::Imports, locals::*, memory};
 use super::{VectorLayout, locals::AvxLocals};
 use crate::{
     abi::{

@@ -1,10 +1,7 @@
+use crate::cpu::dbt::wasm::helpers::protocol;
 use wasm_encoder::{BlockType, InstructionSink, MemArg, ValType};
 
-use super::super::{
-    locals::*,
-    memory::{self, Imports},
-    segments,
-};
+use super::super::{imports::Imports, locals::*, segments};
 use super::locals::AvxLocals;
 use crate::{
     abi::{
@@ -70,9 +67,9 @@ pub(super) fn instruction(
         code.local_get(HELPER_STATUS);
     }
     code.if_(BlockType::Empty);
-    memory::infrastructure(code, 3);
+    protocol::infrastructure(code, 3);
     code.end();
-    memory::exit_if_failed(code, exit_depth);
+    protocol::exit_if_failed(code, exit_depth);
     validate_result(
         code,
         gather,
@@ -170,7 +167,7 @@ fn validate_result(
     exit_depth: u32,
     paging_configured: bool,
 ) {
-    memory::reset_checks(code);
+    protocol::reset_checks(code);
     for (offset, value) in [
         (0, u32::from_le_bytes(GATHER_RESULT_MAGIC)),
         (
@@ -181,7 +178,7 @@ fn validate_result(
         (12, 0),
     ] {
         if !paging_configured || offset != 4 {
-            memory::expect_field(code, offset as u64, value);
+            protocol::expect_field(code, offset as u64, value);
         }
     }
     field(code, GATHER_STATUS_OFFSET);
@@ -209,35 +206,35 @@ fn validate_result(
             .i32_const(segment_status)
             .i32_ne()
             .i32_and();
-        memory::add_check(code);
+        protocol::add_check(code);
     }
     code.local_get(RHS).i32_eqz().if_(BlockType::Empty);
     code.local_get(locals.control)
         .local_get(locals.saved)
         .i32_ne();
-    memory::add_check(code);
+    protocol::add_check(code);
     expect_local(code, locals.operand, GATHER_NO_FAULT);
     for offset in [
         GATHER_DETAIL_OFFSET,
         GATHER_FAULT_ADDRESS_OFFSET,
         GATHER_ACCESS_OFFSET,
     ] {
-        memory::expect_field(code, offset as u64, 0);
+        protocol::expect_field(code, offset as u64, 0);
     }
     code.else_();
     code.local_get(locals.saved).i32_eqz();
-    memory::add_check(code);
+    protocol::add_check(code);
     code.local_get(locals.operand)
         .i32_const(gather.geometry().lanes() as i32)
         .i32_ge_u();
-    memory::add_check(code);
+    protocol::add_check(code);
     code.local_get(locals.saved)
         .i32_const(1)
         .local_get(locals.operand)
         .i32_shl()
         .i32_and()
         .i32_eqz();
-    memory::add_check(code);
+    protocol::add_check(code);
     // exact ascending selected-prefix: no skipped lower lane or completed higher lane.
     code.local_get(locals.control)
         .local_get(locals.saved)
@@ -248,7 +245,7 @@ fn validate_result(
         .i32_sub()
         .i32_and()
         .i32_ne();
-    memory::add_check(code);
+    protocol::add_check(code);
     if paging_configured {
         paging::is_memory(code);
     } else {
@@ -258,7 +255,7 @@ fn validate_result(
     if paging_configured {
         paging::validate_memory_fields(code);
     } else {
-        memory::expect_field(code, GATHER_ACCESS_OFFSET as u64, 1);
+        protocol::expect_field(code, GATHER_ACCESS_OFFSET as u64, 1);
     }
     for lane in 0..gather.geometry().lanes() {
         code.local_get(locals.operand)
@@ -274,11 +271,11 @@ fn validate_result(
         GATHER_FAULT_ADDRESS_OFFSET,
         GATHER_ACCESS_OFFSET,
     ] {
-        memory::expect_field(code, offset as u64, 0);
+        protocol::expect_field(code, offset as u64, 0);
     }
     code.end().end();
-    memory::protocol_if_bad(code);
-    memory::exit_if_failed(code, exit_depth);
+    protocol::protocol_if_bad(code);
+    protocol::exit_if_failed(code, exit_depth);
 }
 
 fn validate_fault_span(
@@ -304,14 +301,14 @@ fn validate_fault_span(
     if !paging_configured {
         field(code, GATHER_DETAIL_OFFSET);
         code.i32_const(1).i32_sub().i32_const(1).i32_gt_u();
-        memory::add_check(code);
+        protocol::add_check(code);
     }
     field(code, GATHER_FAULT_ADDRESS_OFFSET);
     code.local_get(RESULT)
         .i32_sub()
         .i32_const(width as i32)
         .i32_ge_u();
-    memory::add_check(code);
+    protocol::add_check(code);
 }
 
 fn validate_outputs(
@@ -320,7 +317,7 @@ fn validate_outputs(
     locals: AvxLocals,
     exit_depth: u32,
 ) {
-    memory::reset_checks(code);
+    protocol::reset_checks(code);
     let geometry = gather.geometry();
     for byte in (0..GATHER_OUTPUT_SIZE / 2).step_by(4) {
         if byte < geometry.active_bytes() {
@@ -333,7 +330,7 @@ fn validate_outputs(
             output_word(code, GATHER_DESTINATION_OFFSET + byte);
             old_destination_word(code, locals, byte);
             code.i32_ne();
-            memory::add_check(code);
+            protocol::add_check(code);
             code.end();
             output_word(code, GATHER_MASK_OFFSET + byte);
             code.local_get(locals.saved)
@@ -349,7 +346,7 @@ fn validate_outputs(
                 .i32_const(0)
                 .end()
                 .i32_ne();
-            memory::add_check(code);
+            protocol::add_check(code);
         } else {
             output_word(code, GATHER_DESTINATION_OFFSET + byte);
             if geometry.early_zero_unused_destination() {
@@ -364,13 +361,13 @@ fn validate_outputs(
                 code.end();
             }
             code.i32_ne();
-            memory::add_check(code);
+            protocol::add_check(code);
             output_word(code, GATHER_MASK_OFFSET + byte);
-            memory::add_check(code);
+            protocol::add_check(code);
         }
     }
-    memory::protocol_if_bad(code);
-    memory::exit_if_failed(code, exit_depth);
+    protocol::protocol_if_bad(code);
+    protocol::exit_if_failed(code, exit_depth);
 }
 
 fn operand_exit(
@@ -409,7 +406,7 @@ fn operand_exit(
         }
         code.end().end();
     }
-    memory::exit_if_failed(code, exit_depth);
+    protocol::exit_if_failed(code, exit_depth);
 }
 
 fn publish(code: &mut InstructionSink<'_>, register: VectorRegister, offset: usize) {
@@ -429,10 +426,10 @@ fn old_destination_word(code: &mut InstructionSink<'_>, locals: AvxLocals, byte:
 }
 fn expect_local(code: &mut InstructionSink<'_>, local: u32, expected: u32) {
     code.local_get(local).i32_const(expected as i32).i32_ne();
-    memory::add_check(code);
+    protocol::add_check(code);
 }
 fn field(code: &mut InstructionSink<'_>, offset: usize) {
-    memory::helper_field(code, offset as u64);
+    protocol::helper_field(code, offset as u64);
 }
 fn output_word(code: &mut InstructionSink<'_>, offset: usize) {
     code.local_get(STATE_PTR)

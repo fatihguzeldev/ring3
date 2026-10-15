@@ -1,3 +1,4 @@
+use crate::cpu::dbt::wasm::imports::Imports;
 use wasm_encoder::{BlockType, InstructionSink, MemArg};
 
 use super::{cpu_result, locals::*, memory};
@@ -13,7 +14,7 @@ use crate::{
 pub(super) fn instruction(
     code: &mut InstructionSink<'_>,
     instruction: &DecodedInstruction,
-    imports: memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) {
     let Operation::Control(operation) = *instruction.operation() else {
@@ -81,12 +82,7 @@ pub(super) fn instruction(
     retire(code, instruction.next_pc().0);
 }
 
-fn pop_flags(
-    code: &mut InstructionSink<'_>,
-    word: bool,
-    imports: memory::Imports,
-    exit_depth: u32,
-) {
+fn pop_flags(code: &mut InstructionSink<'_>, word: bool, imports: Imports, exit_depth: u32) {
     super::stack::pointer::load_result(code, if word { 2 } else { 4 }, imports, exit_depth);
     let mutable = if word {
         USER_POP_FLAGS_WORD_MASK
@@ -109,7 +105,7 @@ fn bound(
     index: Register32,
     address: EffectiveAddress,
     word: bool,
-    imports: memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) {
     let width = if word { 2 } else { 4 };

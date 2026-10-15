@@ -1,3 +1,4 @@
+use crate::cpu::dbt::wasm::imports::Imports;
 use wasm_encoder::{BlockType, InstructionSink};
 
 use super::{abi, locals::*, memory};
@@ -13,7 +14,7 @@ use crate::cpu::x86::{
 pub(super) fn instruction(
     code: &mut InstructionSink<'_>,
     instruction: &DecodedInstruction,
-    imports: memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) {
     let (kind, width, repeat, address_size, source_segment) = match *instruction.operation() {
@@ -138,7 +139,7 @@ fn element(
     address_size: AddressSize,
     source: EffectiveAddress,
     destination: EffectiveAddress,
-    imports: memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) {
     let bytes = match width {
@@ -301,7 +302,7 @@ fn read(
     code: &mut InstructionSink<'_>,
     address: EffectiveAddress,
     width: StringWidth,
-    imports: memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) {
     // element() already checked both segment spans before the first page access.
@@ -324,7 +325,7 @@ fn write(
     code: &mut InstructionSink<'_>,
     address: EffectiveAddress,
     width: StringWidth,
-    imports: memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) {
     memory::effective_address(code, address);

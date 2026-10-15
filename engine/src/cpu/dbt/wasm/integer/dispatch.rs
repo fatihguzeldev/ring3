@@ -28,11 +28,12 @@ use super::{
     unary_memory_byte, unary_memory_word, unary_word, value, word_accumulator_divide,
     word_accumulator_multiply, word_value, x87,
 };
+use crate::cpu::dbt::wasm::imports::Imports;
 
 pub(in crate::cpu::dbt::wasm) fn instruction(
     code: &mut InstructionSink<'_>,
     instruction: &DecodedInstruction,
-    imports: memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) {
     if !matches!(
@@ -2481,7 +2482,7 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
 fn check_near_target(
     code: &mut InstructionSink<'_>,
     target: u32,
-    imports: memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) {
     if let Some(limit) = imports.code_fetch_limit {
@@ -2492,7 +2493,7 @@ fn check_near_target(
 fn check_near_value(
     code: &mut InstructionSink<'_>,
     target: u32,
-    imports: memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) {
     if let Some(limit) = imports.code_fetch_limit {

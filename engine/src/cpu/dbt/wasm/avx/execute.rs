@@ -1,10 +1,11 @@
+use crate::cpu::dbt::wasm::helpers::protocol;
 use wasm_encoder::{BlockType, InstructionSink, MemArg, ValType};
 
 use super::super::{
     cpu_result::{self, AvxValidation},
+    imports::Imports,
     locals::*,
-    memory::{self, Imports},
-    segments,
+    memory, segments,
 };
 use super::locals::AvxLocals;
 use crate::{
@@ -106,19 +107,19 @@ pub(super) fn instruction(
         },
         exit_depth,
      cpu_result::ResultContext::from(imports));
-    memory::reset_checks(code);
-    memory::expect_field(code, 20, 0);
+    protocol::reset_checks(code);
+    protocol::expect_field(code, 20, 0);
     for offset in (8..AVX_OUTPUT_SIZE).step_by(4) {
         payload(code, offset);
-        memory::add_check(code);
+        protocol::add_check(code);
     }
     if instruction.output().is_none() {
         payload(code, 0);
-        memory::add_check(code);
+        protocol::add_check(code);
     }
     flags_shape(code, instruction.semantic());
-    memory::protocol_if_bad(code);
-    memory::exit_if_failed(code, exit_depth);
+    protocol::protocol_if_bad(code);
+    protocol::exit_if_failed(code, exit_depth);
     payload(code, 4);
     cpu_result::flags(
         code,
@@ -217,22 +218,22 @@ fn flags_shape(code: &mut InstructionSink<'_>, semantic: AvxSemantic) {
                     .i32_ne()
                     .i32_and();
             }
-            memory::add_check(code);
+            protocol::add_check(code);
         }
         AvxSemantic::Test(_) => {
             payload(code, 4);
             code.i32_const(0x894).i32_and();
-            memory::add_check(code);
+            protocol::add_check(code);
         }
         AvxSemantic::String(_) => {
             payload(code, 4);
             code.i32_const(0x14).i32_and();
-            memory::add_check(code);
+            protocol::add_check(code);
             payload(code, 4);
             code.i32_const(0x800).i32_and().i32_eqz().i32_eqz();
             payload(code, 4);
             code.i32_const(1).i32_and().i32_eqz().i32_and();
-            memory::add_check(code);
+            protocol::add_check(code);
         }
         _ => {}
     }

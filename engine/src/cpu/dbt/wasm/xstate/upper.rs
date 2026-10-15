@@ -1,6 +1,7 @@
+use crate::cpu::dbt::wasm::helpers::protocol;
 use wasm_encoder::{BlockType, InstructionSink};
 
-use super::super::{locals::*, memory};
+use super::super::locals::*;
 use crate::cpu::x86::{
     SegmentRegister,
     xstate::{
@@ -22,13 +23,13 @@ pub(super) fn validate_context(
         super::super::cpu_result::paging::is_packet(code);
         code.if_(BlockType::Empty);
         super::super::cpu_result::paging::transport(code, save);
-        memory::exit_if_failed(code, exit_depth + 1);
-        memory::reset_checks(code);
+        protocol::exit_if_failed(code, exit_depth + 1);
+        protocol::reset_checks(code);
         code.local_get(ADDRESS).i32_const(63).i32_and();
-        memory::add_check(code);
+        protocol::add_check(code);
         fault(code, save, true);
-        memory::protocol_if_bad(code);
-        memory::exit_if_failed(code, exit_depth + 1);
+        protocol::protocol_if_bad(code);
+        protocol::exit_if_failed(code, exit_depth + 1);
         code.else_();
         validate_legacy_context(code, save, segment, exit_depth + 1);
         code.end();
@@ -43,35 +44,35 @@ fn validate_legacy_context(
     segment: SegmentRegister,
     exit_depth: u32,
 ) {
-    memory::reset_checks(code);
-    memory::expect_field(code, 20, 0);
-    memory::helper_field(code, 16);
+    protocol::reset_checks(code);
+    protocol::expect_field(code, 20, 0);
+    protocol::helper_field(code, 16);
     code.i32_const(3).i32_gt_u();
     if segment == SegmentRegister::Ss {
-        memory::helper_field(code, 16);
+        protocol::helper_field(code, 16);
         code.i32_const(7).i32_ne().i32_and();
     }
-    memory::add_check(code);
-    memory::helper_field(code, 16);
+    protocol::add_check(code);
+    protocol::helper_field(code, 16);
     code.i32_const(1).i32_le_u().if_(BlockType::Empty);
     code.local_get(ADDRESS).i32_const(63).i32_and();
-    memory::add_check(code);
+    protocol::add_check(code);
     code.end();
-    memory::helper_field(code, 16);
+    protocol::helper_field(code, 16);
     code.i32_const(3).i32_eq();
     if segment == SegmentRegister::Ss {
-        memory::helper_field(code, 16);
+        protocol::helper_field(code, 16);
         code.i32_const(7).i32_eq().i32_or();
     }
     code.if_(BlockType::Empty);
-    memory::expect_field(code, 24, 0);
+    protocol::expect_field(code, 24, 0);
     code.end();
-    memory::helper_field(code, 16);
+    protocol::helper_field(code, 16);
     code.i32_const(1).i32_eq().if_(BlockType::Empty);
     fault(code, save, false);
     code.end();
-    memory::protocol_if_bad(code);
-    memory::exit_if_failed(code, exit_depth);
+    protocol::protocol_if_bad(code);
+    protocol::exit_if_failed(code, exit_depth);
 }
 
 fn selected(code: &mut InstructionSink<'_>, selection: u32) {
@@ -87,7 +88,7 @@ fn selected(code: &mut InstructionSink<'_>, selection: u32) {
 }
 
 fn fault(code: &mut InstructionSink<'_>, save: bool, typed: bool) {
-    memory::helper_field(code, 28);
+    protocol::helper_field(code, 28);
     code.local_get(ADDRESS).i32_sub().local_set(RHS);
     let header = MemorySpan {
         selection: 0,
@@ -102,7 +103,7 @@ fn fault(code: &mut InstructionSink<'_>, save: bool, typed: bool) {
         code.i32_or();
     }
     code.i32_eqz();
-    memory::add_check(code);
+    protocol::add_check(code);
 }
 
 /// the modulo difference identifies a byte in an actually selected xstate span.
@@ -111,7 +112,7 @@ fn span_fault(code: &mut InstructionSink<'_>, span: MemorySpan, access: i32, typ
     if typed {
         super::super::cpu_result::paging::intent(code);
     } else {
-        memory::helper_field(code, 32);
+        protocol::helper_field(code, 32);
     }
     code.i32_const(access).i32_eq().i32_and();
     code.local_get(RHS)

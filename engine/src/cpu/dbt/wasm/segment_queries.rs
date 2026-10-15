@@ -1,3 +1,4 @@
+use crate::cpu::dbt::wasm::imports::Imports;
 use wasm_encoder::{BlockType, InstructionSink};
 
 use super::{
@@ -14,7 +15,7 @@ pub(super) fn verify(
     code: &mut InstructionSink<'_>,
     source: Value32,
     write: bool,
-    imports: memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) {
     match source {
@@ -43,7 +44,7 @@ pub(super) fn query(
     source: Value32,
     destination: Register32,
     word: bool,
-    imports: memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) {
     match source {
@@ -89,7 +90,7 @@ pub(super) fn adjust_privilege(
     code: &mut InstructionSink<'_>,
     destination: Location32,
     source: Register32,
-    imports: memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) -> bool {
     match destination {

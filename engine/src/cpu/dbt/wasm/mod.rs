@@ -5,7 +5,9 @@ mod cache_flush;
 mod code_fetch;
 mod control;
 mod control_instructions;
-mod cpu_result;
+mod helpers;
+mod imports;
+
 mod detection;
 mod dispatcher;
 mod emitter;
@@ -24,6 +26,8 @@ mod strings;
 mod system_registers;
 mod x87;
 mod xstate;
+
+use helpers::result as cpu_result;
 
 #[derive(Clone, Copy)]
 pub(super) enum EmbeddedBinding {

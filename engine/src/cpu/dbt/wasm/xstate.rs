@@ -1,3 +1,5 @@
+use crate::cpu::dbt::wasm::helpers::protocol;
+use crate::cpu::dbt::wasm::imports::Imports;
 use wasm_encoder::{BlockType, InstructionSink};
 
 use super::{cpu_result, locals::*, memory, segments};
@@ -14,7 +16,7 @@ use crate::cpu::x86::{
 pub(super) fn instruction(
     code: &mut InstructionSink<'_>,
     instruction: &DecodedInstruction,
-    imports: memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) -> bool {
     let Operation::XState(operation) = instruction.operation() else {
@@ -79,7 +81,7 @@ fn check_selected_spans(
     code: &mut InstructionSink<'_>,
     address: EffectiveAddress,
     save: bool,
-    imports: memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) {
     let spans = if save { &SAVE_SPANS } else { &RESTORE_SPANS };
@@ -167,13 +169,13 @@ fn validate_context(
         super::cpu_result::paging::is_packet(code);
         code.if_(BlockType::Empty);
         super::cpu_result::paging::transport(code, save);
-        memory::exit_if_failed(code, exit_depth + 1);
-        memory::reset_checks(code);
+        protocol::exit_if_failed(code, exit_depth + 1);
+        protocol::reset_checks(code);
         code.local_get(ADDRESS).i32_const(63).i32_and();
-        memory::add_check(code);
+        protocol::add_check(code);
         fault_geometry(code, save, true);
-        memory::protocol_if_bad(code);
-        memory::exit_if_failed(code, exit_depth + 1);
+        protocol::protocol_if_bad(code);
+        protocol::exit_if_failed(code, exit_depth + 1);
         code.else_();
         validate_legacy_context(code, save, exit_depth + 1);
         code.end();
@@ -183,26 +185,26 @@ fn validate_context(
 }
 
 fn validate_legacy_context(code: &mut InstructionSink<'_>, save: bool, exit_depth: u32) {
-    memory::reset_checks(code);
-    memory::expect_field(code, 20, 0);
-    memory::helper_field(code, 16);
+    protocol::reset_checks(code);
+    protocol::expect_field(code, 20, 0);
+    protocol::helper_field(code, 16);
     code.i32_const(3).i32_gt_u();
-    memory::add_check(code);
-    memory::helper_field(code, 16);
+    protocol::add_check(code);
+    protocol::helper_field(code, 16);
     code.i32_const(1).i32_le_u().if_(BlockType::Empty);
     code.local_get(ADDRESS).i32_const(63).i32_and();
-    memory::add_check(code);
+    protocol::add_check(code);
     code.end();
-    memory::helper_field(code, 16);
+    protocol::helper_field(code, 16);
     code.i32_const(3).i32_eq().if_(BlockType::Empty);
-    memory::expect_field(code, 24, 0);
+    protocol::expect_field(code, 24, 0);
     code.end();
-    memory::helper_field(code, 16);
+    protocol::helper_field(code, 16);
     code.i32_const(1).i32_eq().if_(BlockType::Empty);
     fault_geometry(code, save, false);
     code.end();
-    memory::protocol_if_bad(code);
-    memory::exit_if_failed(code, exit_depth);
+    protocol::protocol_if_bad(code);
+    protocol::exit_if_failed(code, exit_depth);
 }
 
 /// the extended helper owns selected cached spans and page transactions as one operation.
@@ -210,7 +212,7 @@ fn upper_instruction(
     code: &mut InstructionSink<'_>,
     address: EffectiveAddress,
     save: bool,
-    imports: memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) {
     let helper = if save {
@@ -246,14 +248,14 @@ fn upper_instruction(
 mod upper;
 
 fn fault_geometry(code: &mut InstructionSink<'_>, save: bool, typed: bool) {
-    memory::helper_field(code, 28);
+    protocol::helper_field(code, 28);
     code.local_get(ADDRESS).i32_sub().local_set(RHS);
     range(code, 512, if save { 520 } else { 536 });
     if save {
         if typed {
             super::cpu_result::paging::intent(code);
         } else {
-            memory::helper_field(code, 32);
+            protocol::helper_field(code, 32);
         }
         code.i32_const(2).i32_eq();
     }
@@ -269,5 +271,5 @@ fn fault_geometry(code: &mut InstructionSink<'_>, save: bool, typed: bool) {
         code.i32_and();
     }
     code.i32_or().i32_eqz();
-    memory::add_check(code);
+    protocol::add_check(code);
 }

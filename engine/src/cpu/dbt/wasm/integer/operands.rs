@@ -2,11 +2,12 @@ use super::{
     ByteRegister, ByteValue, ExtensionKind, InstructionSink, Location32, RESULT, Register32,
     SmallWidth, Value32, WordValue, memory, register,
 };
+use crate::cpu::dbt::wasm::imports::Imports;
 
 pub(super) fn indirect_target(
     code: &mut InstructionSink<'_>,
     target: Location32,
-    imports: memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) {
     match target {

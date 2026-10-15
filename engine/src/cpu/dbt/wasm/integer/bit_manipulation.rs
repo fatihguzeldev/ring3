@@ -1,3 +1,4 @@
+use crate::cpu::dbt::wasm::imports::Imports;
 use wasm_encoder::{BlockType, InstructionSink};
 
 use super::{ADDRESS, FLAGS, LHS, MEMORY_BYTES, RESULT, RHS, Register32, memory, register};
@@ -8,7 +9,7 @@ pub(super) fn bit_manipulation(
     kind: BitManipulationKind,
     destination: Register32,
     source: Value32,
-    imports: memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) {
     // check the complete memory source before changing any guest register or flag.
@@ -83,7 +84,7 @@ pub(super) fn multiply_extended(
     high: Register32,
     low: Register32,
     source: Value32,
-    imports: memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) {
     load_source(code, source, imports, exit_depth);
@@ -104,12 +105,7 @@ pub(super) fn multiply_extended(
         .local_set(register(high));
 }
 
-fn load_source(
-    code: &mut InstructionSink<'_>,
-    source: Value32,
-    imports: memory::Imports,
-    exit_depth: u32,
-) {
+fn load_source(code: &mut InstructionSink<'_>, source: Value32, imports: Imports, exit_depth: u32) {
     match source {
         Value32::Register(source) => {
             code.local_get(register(source)).local_set(RESULT);

@@ -2,6 +2,7 @@ use super::{
     BitIndex, BitScanKind, BitTestKind, BlockType, EffectiveAddress, ExtensionKind, FLAGS,
     InstructionSink, LHS, RESULT, RHS, Register32, SmallWidth, extend_value, memory, register,
 };
+use crate::cpu::dbt::wasm::imports::Imports;
 
 pub(super) fn trailing_zero_count32(
     code: &mut InstructionSink<'_>,
@@ -94,7 +95,7 @@ pub(super) fn memory_bit_test_word(
     kind: BitTestKind,
     address: EffectiveAddress,
     index: BitIndex,
-    imports: memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) {
     memory::offset_value(code, address);
@@ -172,7 +173,7 @@ pub(super) fn memory_bit_mutation(
     kind: BitTestKind,
     address: EffectiveAddress,
     index: BitIndex,
-    imports: memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) {
     memory::offset_value(code, address);

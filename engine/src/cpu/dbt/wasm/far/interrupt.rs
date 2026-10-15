@@ -1,4 +1,5 @@
 use super::*;
+use crate::cpu::dbt::wasm::imports::Imports;
 use crate::cpu::x86::{
     Register32, SegmentAccess, SegmentRegister, USER_IRET_FLAGS_MASK, USER_IRET_FLAGS_WORD_MASK,
 };
@@ -23,7 +24,7 @@ impl InterruptReturnLocals {
 pub(in crate::cpu::dbt::wasm) fn interrupt_return(
     code: &mut InstructionSink<'_>,
     width: FarWidth,
-    imports: memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) {
     let saved = imports

@@ -1,4 +1,6 @@
 use super::*;
+use crate::cpu::dbt::wasm::helpers::protocol;
+use crate::cpu::dbt::wasm::imports::Imports;
 use crate::cpu::x86::Register32;
 
 pub(in crate::cpu::dbt::wasm) fn call(
@@ -6,7 +8,7 @@ pub(in crate::cpu::dbt::wasm) fn call(
     width: FarWidth,
     target: FarPointer,
     return_eip: u32,
-    imports: memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) {
     capture_target(code, width, target, imports, exit_depth);
@@ -57,52 +59,52 @@ fn call_result(
         .i32_eq()
         .i32_or()
         .if_(BlockType::Empty);
-    memory::reset_checks(code);
-    memory::helper_field(code, 16);
+    protocol::reset_checks(code);
+    protocol::helper_field(code, 16);
     code.local_set(RHS).i32_const(1);
     for status in [0, 1, 2, 3, 6, 7] {
         code.local_get(RHS).i32_const(status).i32_ne().i32_and();
     }
-    memory::add_check(code);
+    protocol::add_check(code);
     for status in [3, 6] {
         code.local_get(RHS)
             .i32_const(status)
             .i32_eq()
             .if_(BlockType::Empty);
-        memory::helper_field(code, 24);
+        protocol::helper_field(code, 24);
         code.i32_eqz();
         if status == 3 {
             code.i32_eqz();
         }
-        memory::helper_field(code, 24);
+        protocol::helper_field(code, 24);
         code.local_get(ADDRESS).i32_const(!3).i32_and().i32_ne();
         if status == 3 {
             code.i32_and();
         } else {
             code.i32_or();
         }
-        memory::add_check(code);
+        protocol::add_check(code);
         code.end();
     }
     code.local_get(RHS)
         .i32_const(7)
         .i32_eq()
         .if_(BlockType::Empty);
-    memory::expect_field(code, 24, 0);
+    protocol::expect_field(code, 24, 0);
     code.end();
-    memory::protocol_if_bad(code);
+    protocol::protocol_if_bad(code);
     code.end();
-    memory::exit_if_failed(code, exit_depth);
+    protocol::exit_if_failed(code, exit_depth);
 
     // the common validator checks the selected linear slot, including base-addition overflow.
-    memory::helper_field(code, 16);
+    protocol::helper_field(code, 16);
     code.i32_const(1).i32_eq();
-    memory::helper_field(code, 16);
+    protocol::helper_field(code, 16);
     code.i32_const(7).i32_eq().i32_or().if_(BlockType::Empty);
     super::super::stack::pointer::offset(code, register(Register32::Esp), -(slot as i32));
     super::super::segments::base(code, crate::cpu::x86::SegmentRegister::Ss);
     code.i32_add().local_set(ADDRESS);
-    memory::helper_field(code, 28);
+    protocol::helper_field(code, 28);
     code.local_get(ADDRESS)
         .i32_sub()
         .i32_const(slot as i32 - 1)

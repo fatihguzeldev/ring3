@@ -1,4 +1,5 @@
 use super::{cpu_result, locals::*, memory};
+use crate::cpu::dbt::wasm::imports::Imports;
 use crate::{
     abi::arena::TRANSFER_OFFSET,
     cpu::x86::{SegmentAccess, ir::EffectiveAddress},
@@ -10,7 +11,7 @@ pub(super) fn store_descriptor(
     address: EffectiveAddress,
     limit: u16,
     base: u32,
-    imports: memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) {
     memory::checked_address(code, address, 6, SegmentAccess::Write, imports, exit_depth);

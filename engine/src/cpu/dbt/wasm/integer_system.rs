@@ -1,4 +1,5 @@
-use super::{atomic, locals::*, memory};
+use super::{atomic, locals::*};
+use crate::cpu::dbt::wasm::imports::Imports;
 use crate::cpu::x86::{
     Register32, Register32::*, USER_MODE_ENVIRONMENT, capabilities::CPU_ID_LEAVES,
 };
@@ -43,7 +44,7 @@ pub(super) fn processor_id(code: &mut InstructionSink<'_>, destination: Register
 pub(super) fn timestamp(
     code: &mut InstructionSink<'_>,
     auxiliary: bool,
-    imports: memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) {
     atomic::payload(code);

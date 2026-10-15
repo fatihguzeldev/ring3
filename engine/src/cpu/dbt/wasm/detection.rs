@@ -1,6 +1,7 @@
+use crate::cpu::dbt::wasm::imports::Imports;
 use wasm_encoder::{BlockType, InstructionSink};
 
-use super::{locals::*, memory::Imports};
+use super::locals::*;
 use crate::cpu::x86::{ControlOperation, decode::DecodedInstruction, ir::Operation};
 
 #[derive(Clone, Copy)]

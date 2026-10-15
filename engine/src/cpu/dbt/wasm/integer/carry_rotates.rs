@@ -3,6 +3,7 @@ use super::{
     Register32, RotateKind, ShiftCount, SmallWidth, ValType, WordValue, byte_value, insert_byte,
     memory, register, shift_count, word_value,
 };
+use crate::cpu::dbt::wasm::imports::Imports;
 
 pub(super) fn rotate_through_carry_word(
     code: &mut InstructionSink<'_>,
@@ -37,7 +38,7 @@ pub(super) fn rotate_through_carry_memory_word(
     kind: RotateKind,
     address: EffectiveAddress,
     count: ShiftCount,
-    imports: memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) {
     memory::load_narrow_for_modify(code, address, SmallWidth::Word, imports, exit_depth);
@@ -210,7 +211,7 @@ pub(super) fn byte_rotate_through_carry_memory_immediate(
     kind: RotateKind,
     address: EffectiveAddress,
     count: u8,
-    imports: memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) {
     // masked-one instructions use the existing One path with its defined OF.
@@ -269,7 +270,7 @@ pub(super) fn byte_rotate_through_carry_memory_cl(
     code: &mut InstructionSink<'_>,
     kind: RotateKind,
     address: EffectiveAddress,
-    imports: memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) {
     memory::load_narrow_for_modify(code, address, SmallWidth::Byte, imports, exit_depth);
@@ -483,7 +484,7 @@ pub(super) fn memory_rotate_through_carry_immediate(
     kind: RotateKind,
     address: EffectiveAddress,
     raw: u8,
-    imports: memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) {
     let count = i32::from(raw & 31);
@@ -552,7 +553,7 @@ pub(super) fn memory_rotate_through_carry_cl(
     code: &mut InstructionSink<'_>,
     kind: RotateKind,
     address: EffectiveAddress,
-    imports: memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) {
     memory::load_modify_result(code, address, imports, exit_depth);

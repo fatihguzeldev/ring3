@@ -3,6 +3,7 @@ use super::{
     Location32, MEMORY_BYTES, MultiplyKind, REASON, RESULT, RHS, Register32, SmallWidth,
     byte_value, extend_value, memory, register,
 };
+use crate::cpu::dbt::wasm::imports::Imports;
 
 pub(super) fn word_accumulator_multiply(
     code: &mut InstructionSink<'_>,
@@ -477,7 +478,7 @@ pub(super) fn signed_multiply(
     destination: Register32,
     source: Location32,
     immediate: Option<u32>,
-    imports: memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) {
     let source = match source {

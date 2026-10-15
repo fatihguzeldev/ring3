@@ -3,6 +3,7 @@ use super::{
     Register32, RotateKind, ShiftCount, SmallWidth, WordValue, byte_value, insert_byte, memory,
     register, shift_count, word_value,
 };
+use crate::cpu::dbt::wasm::imports::Imports;
 
 pub(super) fn rotate_word(
     code: &mut InstructionSink<'_>,
@@ -30,7 +31,7 @@ pub(super) fn rotate_memory_word(
     kind: RotateKind,
     address: EffectiveAddress,
     count: ShiftCount,
-    imports: memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) {
     memory::load_narrow_for_modify(code, address, SmallWidth::Word, imports, exit_depth);
@@ -270,7 +271,7 @@ pub(super) fn byte_rotate_memory(
     kind: RotateKind,
     address: EffectiveAddress,
     count: ShiftCount,
-    imports: memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) {
     memory::load_narrow_for_modify(code, address, SmallWidth::Byte, imports, exit_depth);
@@ -343,7 +344,7 @@ pub(super) fn rotate_memory(
     kind: RotateKind,
     address: EffectiveAddress,
     count: ShiftCount,
-    imports: memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) {
     memory::load_modify_result(code, address, imports, exit_depth);

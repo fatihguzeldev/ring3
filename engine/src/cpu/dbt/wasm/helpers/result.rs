@@ -1,21 +1,22 @@
+use crate::cpu::dbt::wasm::imports::Imports;
 use wasm_encoder::{BlockType, InstructionSink};
 
-use super::{
-    locals::*,
-    memory::{
+use crate::cpu::dbt::wasm::{
+    helpers::protocol::{
         add_check, exit_if_failed, expect_field, helper_field, infrastructure, protocol_if_bad,
         reset_checks,
     },
+    locals::*,
 };
 
 #[derive(Clone, Copy)]
-pub(super) struct ResultContext {
-    pub(super) paging_configured: bool,
+pub(in crate::cpu::dbt::wasm) struct ResultContext {
+    pub(in crate::cpu::dbt::wasm) paging_configured: bool,
     paging_access_mask: Option<u32>,
 }
 
-impl From<super::memory::Imports> for ResultContext {
-    fn from(imports: super::memory::Imports) -> Self {
+impl From<Imports> for ResultContext {
+    fn from(imports: Imports) -> Self {
         Self {
             paging_configured: imports.paging_configured,
             paging_access_mask: None,
@@ -24,20 +25,20 @@ impl From<super::memory::Imports> for ResultContext {
 }
 
 impl ResultContext {
-    pub(super) const fn legacy() -> Self {
+    pub(in crate::cpu::dbt::wasm) const fn legacy() -> Self {
         Self {
             paging_configured: false,
             paging_access_mask: None,
         }
     }
 
-    pub(super) fn write_intent(self) -> Self {
+    pub(in crate::cpu::dbt::wasm) fn write_intent(self) -> Self {
         Self {
             paging_access_mask: Some(2),
             ..self
         }
     }
-    pub(super) fn read_intent(self) -> Self {
+    pub(in crate::cpu::dbt::wasm) fn read_intent(self) -> Self {
         Self {
             paging_access_mask: Some(1),
             ..self
@@ -45,14 +46,18 @@ impl ResultContext {
     }
 }
 
-pub(super) mod paging;
+pub(in crate::cpu::dbt::wasm) mod paging;
 
-pub(super) fn value(code: &mut InstructionSink<'_>) {
+pub(in crate::cpu::dbt::wasm) fn value(code: &mut InstructionSink<'_>) {
     helper_field(code, 20);
 }
 
 /// consume returned flags only after validating the instruction's preservation contract.
-pub(super) fn flags(code: &mut InstructionSink<'_>, mutable: u32, exit_depth: u32) {
+pub(in crate::cpu::dbt::wasm) fn flags(
+    code: &mut InstructionSink<'_>,
+    mutable: u32,
+    exit_depth: u32,
+) {
     code.local_set(RESULT);
     reset_checks(code);
     code.local_get(RESULT)
@@ -66,7 +71,7 @@ pub(super) fn flags(code: &mut InstructionSink<'_>, mutable: u32, exit_depth: u3
     code.local_get(RESULT).local_set(FLAGS);
 }
 
-pub(super) fn validate(
+pub(in crate::cpu::dbt::wasm) fn validate(
     code: &mut InstructionSink<'_>,
     length: u32,
     access_mask: u32,
@@ -87,7 +92,7 @@ pub(super) fn validate(
 
 // gate packets report an effective frame slot, not an ordinary scalar-memory span.
 // direct transfers and every other CPU helper continue to require their existing version.
-pub(super) fn validate_gate(
+pub(in crate::cpu::dbt::wasm) fn validate_gate(
     code: &mut InstructionSink<'_>,
     slot: u32,
     allow_smc: bool,
@@ -106,7 +111,7 @@ pub(super) fn validate_gate(
     );
 }
 
-pub(super) fn validate_masked(
+pub(in crate::cpu::dbt::wasm) fn validate_masked(
     code: &mut InstructionSink<'_>,
     length: u32,
     mask_local: u32,
@@ -128,14 +133,14 @@ pub(super) fn validate_masked(
 }
 
 #[derive(Clone, Copy)]
-pub(super) struct AvxValidation {
-    pub(super) selected_mask: Option<u32>,
-    pub(super) old_mxcsr: Option<u32>,
-    pub(super) general_protection: bool,
-    pub(super) stack_segment: bool,
+pub(in crate::cpu::dbt::wasm) struct AvxValidation {
+    pub(in crate::cpu::dbt::wasm) selected_mask: Option<u32>,
+    pub(in crate::cpu::dbt::wasm) old_mxcsr: Option<u32>,
+    pub(in crate::cpu::dbt::wasm) general_protection: bool,
+    pub(in crate::cpu::dbt::wasm) stack_segment: bool,
 }
 
-pub(super) fn validate_avx(
+pub(in crate::cpu::dbt::wasm) fn validate_avx(
     code: &mut InstructionSink<'_>,
     length: u32,
     access_mask: u32,
@@ -160,7 +165,7 @@ pub(super) fn validate_avx(
 }
 
 /// selected xstate spans are checked by their owner before this common status/publication path.
-pub(super) fn validate_xstate(
+pub(in crate::cpu::dbt::wasm) fn validate_xstate(
     code: &mut InstructionSink<'_>,
     save: bool,
     exit_depth: u32,

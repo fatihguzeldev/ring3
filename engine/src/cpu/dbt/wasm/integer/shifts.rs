@@ -3,6 +3,7 @@ use super::{
     LHS, RESULT, RHS, Register32, ShiftCount, ShiftKind, SmallWidth, WordValue, byte_value,
     insert_byte, logical_flags, memory, register, word_value,
 };
+use crate::cpu::dbt::wasm::imports::Imports;
 
 pub(super) fn shift_word(
     code: &mut InstructionSink<'_>,
@@ -30,7 +31,7 @@ pub(super) fn shift_memory_word(
     kind: ShiftKind,
     address: EffectiveAddress,
     count: ShiftCount,
-    imports: memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) {
     memory::load_narrow_for_modify(code, address, SmallWidth::Word, imports, exit_depth);
@@ -140,7 +141,7 @@ pub(super) fn shift_memory_byte(
     code: &mut InstructionSink<'_>,
     kind: ShiftKind,
     address: EffectiveAddress,
-    imports: memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) {
     memory::load_narrow_for_modify(code, address, SmallWidth::Byte, imports, exit_depth);
@@ -158,7 +159,7 @@ pub(super) fn shift_memory_byte_immediate(
     kind: ShiftKind,
     address: EffectiveAddress,
     count: u8,
-    imports: memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) {
     let count = i32::from(count & 31);
@@ -183,7 +184,7 @@ pub(super) fn shift_memory_byte_cl(
     code: &mut InstructionSink<'_>,
     kind: ShiftKind,
     address: EffectiveAddress,
-    imports: memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) {
     memory::load_narrow_for_modify(code, address, SmallWidth::Byte, imports, exit_depth);
@@ -469,7 +470,7 @@ pub(super) fn double_shift_memory_word(
     address: EffectiveAddress,
     source: Register32,
     count: ShiftCount,
-    imports: memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) {
     memory::load_narrow_for_modify(code, address, SmallWidth::Word, imports, exit_depth);
@@ -516,7 +517,7 @@ pub(super) fn double_shift_memory(
     address: EffectiveAddress,
     source: Register32,
     count: ShiftCount,
-    imports: memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) {
     memory::load_modify_result(code, address, imports, exit_depth);
@@ -544,7 +545,7 @@ pub(super) fn shift_memory(
     kind: ShiftKind,
     address: EffectiveAddress,
     count: ShiftCount,
-    imports: memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) {
     memory::load_modify_result(code, address, imports, exit_depth);

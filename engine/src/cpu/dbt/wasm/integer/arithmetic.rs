@@ -4,12 +4,13 @@ use super::{
     Value32, WordValue, arithmetic_flags, byte_value, insert_byte, logical_flags, memory, register,
     value, word_value,
 };
+use crate::cpu::dbt::wasm::imports::Imports;
 
 pub(super) fn unary_memory_byte(
     code: &mut InstructionSink<'_>,
     kind: UnaryKind,
     address: EffectiveAddress,
-    imports: memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) {
     memory::load_narrow_for_modify(code, address, SmallWidth::Byte, imports, exit_depth);
@@ -74,7 +75,7 @@ pub(super) fn unary_memory_word(
     code: &mut InstructionSink<'_>,
     kind: UnaryKind,
     address: EffectiveAddress,
-    imports: memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) {
     memory::load_narrow_for_modify(code, address, SmallWidth::Word, imports, exit_depth);
@@ -134,7 +135,7 @@ pub(super) fn logical_memory_byte(
     kind: ByteLogicalKind,
     address: EffectiveAddress,
     source: ByteValue,
-    imports: memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) {
     memory::load_narrow_for_modify(code, address, SmallWidth::Byte, imports, exit_depth);
@@ -160,7 +161,7 @@ pub(super) fn arithmetic_memory_byte(
     kind: MemoryByteArithmeticKind,
     address: EffectiveAddress,
     source: ByteValue,
-    imports: memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) {
     memory::load_narrow_for_modify(code, address, SmallWidth::Byte, imports, exit_depth);
@@ -221,7 +222,7 @@ pub(super) fn binary_memory_store(
     kind: BinaryKind,
     address: EffectiveAddress,
     source: Value32,
-    imports: memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) {
     memory::store_result(code, address, imports, exit_depth);
@@ -253,7 +254,7 @@ pub(super) fn unary_memory(
     code: &mut InstructionSink<'_>,
     kind: UnaryKind,
     address: EffectiveAddress,
-    imports: memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) {
     memory::load_modify_result(code, address, imports, exit_depth);

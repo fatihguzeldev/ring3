@@ -1,3 +1,4 @@
+use crate::cpu::dbt::wasm::imports::Imports;
 use wasm_encoder::{BlockType, Function, InstructionSink, MemArg, ValType};
 
 use crate::{
@@ -8,9 +9,8 @@ use crate::{
     cpu::x86::{SegmentAccess, SegmentRegister},
 };
 
-use super::super::{
-    locals::{ADDRESS, DETAIL, FAULT_ACCESS, FAULT_ADDRESS, FAULT_LENGTH, REASON, STATE_PTR},
-    memory::Imports,
+use super::super::locals::{
+    ADDRESS, DETAIL, FAULT_ACCESS, FAULT_ADDRESS, FAULT_LENGTH, REASON, STATE_PTR,
 };
 
 // the internal function receives only validated context metadata and constant access descriptors.

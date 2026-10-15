@@ -1,3 +1,4 @@
+use crate::cpu::dbt::wasm::imports::Imports;
 use wasm_encoder::InstructionSink;
 
 use super::memory;
@@ -9,7 +10,7 @@ use crate::cpu::x86::{
 pub(super) fn instruction(
     code: &mut InstructionSink<'_>,
     address: EffectiveAddress,
-    imports: memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) {
     // coherent RAM and synchronous executable-write invalidation need only the checked byte access.

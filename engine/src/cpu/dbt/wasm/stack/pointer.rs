@@ -2,6 +2,7 @@ use super::super::{
     locals::{RESULT, STATE_PTR, register},
     memory,
 };
+use crate::cpu::dbt::wasm::imports::Imports;
 use crate::{
     abi::{arena::SEGMENTS_OFFSET, x86::SEGMENTS_CACHE_OFFSETS},
     cpu::x86::{Register32, SegmentAccess, SegmentRegister, ir::SmallWidth},
@@ -74,7 +75,7 @@ pub(in crate::cpu::dbt::wasm) fn check(
     delta: i32,
     width: u32,
     access: SegmentAccess,
-    imports: memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) {
     offset(code, register(source), delta);
@@ -93,7 +94,7 @@ pub(in crate::cpu::dbt::wasm) fn load(
     source: Register32,
     delta: i32,
     width: u32,
-    imports: memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) {
     check(
@@ -116,7 +117,7 @@ pub(in crate::cpu::dbt::wasm) fn load(
 pub(in crate::cpu::dbt::wasm) fn load_result(
     code: &mut InstructionSink<'_>,
     width: u32,
-    imports: memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) {
     load(code, Register32::Esp, 0, width, imports, exit_depth);
@@ -127,7 +128,7 @@ pub(in crate::cpu::dbt::wasm) fn store_result(
     code: &mut InstructionSink<'_>,
     delta: i32,
     width: u32,
-    imports: memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) {
     check(
@@ -149,7 +150,7 @@ pub(in crate::cpu::dbt::wasm) fn store_result(
 pub(in crate::cpu::dbt::wasm) fn push_result(
     code: &mut InstructionSink<'_>,
     width: u32,
-    imports: memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) {
     store_result(code, -(width as i32), width, imports, exit_depth);

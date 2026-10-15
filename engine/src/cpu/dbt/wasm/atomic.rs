@@ -1,4 +1,6 @@
 use super::{locals::*, memory};
+use crate::cpu::dbt::wasm::helpers::protocol;
+use crate::cpu::dbt::wasm::imports::Imports;
 use crate::{
     abi::arena::TRANSFER_OFFSET,
     cpu::x86::{
@@ -38,7 +40,7 @@ pub(super) fn call(
     code: &mut InstructionSink<'_>,
     descriptor: u32,
     width: u32,
-    imports: memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) {
     let index = imports
@@ -64,10 +66,10 @@ pub(super) fn call(
             super::cpu_result::ResultContext::from(imports).write_intent()
         },
     );
-    memory::reset_checks(code);
-    memory::expect_field(code, 20, 0);
-    memory::protocol_if_bad(code);
-    memory::exit_if_failed(code, exit_depth);
+    protocol::reset_checks(code);
+    protocol::expect_field(code, 20, 0);
+    protocol::protocol_if_bad(code);
+    protocol::exit_if_failed(code, exit_depth);
 }
 pub(super) fn operation(
     code: &mut InstructionSink<'_>,
@@ -75,7 +77,7 @@ pub(super) fn operation(
     width: u8,
     address: EffectiveAddress,
     source: AtomicSource,
-    imports: memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) {
     match source {
@@ -156,7 +158,7 @@ pub(super) fn operation(
 pub(super) fn compare8(
     code: &mut InstructionSink<'_>,
     address: EffectiveAddress,
-    imports: memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) {
     memory::checked_address(

@@ -1,10 +1,12 @@
+use crate::cpu::dbt::wasm::imports::HelperBinding;
+use crate::cpu::dbt::wasm::imports::Imports;
 use wasm_encoder::{
     BlockType, CodeSection, ConstExpr, EntityType, ExportKind, ExportSection, Function,
     FunctionSection, GlobalSection, GlobalType, ImportSection, InstructionSink, MemoryType, Module,
     TypeSection, ValType,
 };
 
-use super::{EmbeddedBinding, abi, code_fetch, integer, locals::*, memory, segments, x87};
+use super::{EmbeddedBinding, abi, code_fetch, integer, locals::*, segments, x87};
 use crate::cpu::dbt::region::CompiledBlock;
 use crate::cpu::x86::ir::Operation;
 
@@ -21,7 +23,7 @@ pub(in crate::cpu::dbt) fn emit(
         })
     });
     let mut module = Module::new();
-    let memory::ImportNeeds {
+    let crate::cpu::dbt::wasm::imports::ImportNeeds {
         stack_execute: needs_stack_execute,
         cpu_integer: needs_cpu_integer,
         cpu_read: needs_cpu_read,
@@ -58,9 +60,9 @@ pub(in crate::cpu::dbt) fn emit(
         atomic_or_u32: needs_atomic_or_u32,
         atomic_and_u32: needs_atomic_and_u32,
         atomic_xor_u32: needs_atomic_xor_u32,
-    } = memory::Imports::needed(blocks);
+    } = Imports::needed(blocks);
     let [needs_modify8, needs_modify16, needs_modify32] = if paging_configured {
-        memory::read_modify_needs(blocks)
+        crate::cpu::dbt::wasm::imports::read_modify_needs(blocks)
     } else {
         [false; 3]
     };
@@ -364,7 +366,7 @@ pub(in crate::cpu::dbt) fn emit(
         };
         imports.import("ring3", name, EntityType::Function(1));
     }
-    let mut helper_imports = memory::Imports::default();
+    let mut helper_imports = Imports::default();
     let mut function_index = u32::from(binding.is_some());
     let mut type_index = 1 + u32::from(binding.is_some());
     let read_type_index = type_index;
@@ -380,16 +382,13 @@ pub(in crate::cpu::dbt) fn emit(
         let (name, store) = match binding {
             Some(EmbeddedBinding::Resident { key, id }) => (
                 "cpu_store_resident32",
-                memory::StoreImport::Resident {
+                HelperBinding::Resident {
                     index: function_index,
                     key,
                     id,
                 },
             ),
-            _ => (
-                "cpu_store32",
-                memory::StoreImport::Replacement(function_index),
-            ),
+            _ => ("cpu_store32", HelperBinding::Replacement(function_index)),
         };
         imports.import("ring3", name, EntityType::Function(type_index));
         helper_imports.store = Some(store);
@@ -432,16 +431,13 @@ pub(in crate::cpu::dbt) fn emit(
         let (name, store) = match binding {
             Some(EmbeddedBinding::Resident { key, id }) => (
                 "cpu_store_resident8",
-                memory::StoreImport::Resident {
+                HelperBinding::Resident {
                     index: function_index,
                     key,
                     id,
                 },
             ),
-            _ => (
-                "cpu_store8",
-                memory::StoreImport::Replacement(function_index),
-            ),
+            _ => ("cpu_store8", HelperBinding::Replacement(function_index)),
         };
         imports.import("ring3", name, EntityType::Function(type_index));
         helper_imports.store8 = Some(store);
@@ -451,16 +447,13 @@ pub(in crate::cpu::dbt) fn emit(
         let (name, store) = match binding {
             Some(EmbeddedBinding::Resident { key, id }) => (
                 "cpu_store_resident16",
-                memory::StoreImport::Resident {
+                HelperBinding::Resident {
                     index: function_index,
                     key,
                     id,
                 },
             ),
-            _ => (
-                "cpu_store16",
-                memory::StoreImport::Replacement(function_index),
-            ),
+            _ => ("cpu_store16", HelperBinding::Replacement(function_index)),
         };
         imports.import("ring3", name, EntityType::Function(type_index));
         helper_imports.store16 = Some(store);
@@ -470,16 +463,13 @@ pub(in crate::cpu::dbt) fn emit(
         let (name, exchange) = match binding {
             Some(EmbeddedBinding::Resident { key, id }) => (
                 "cpu_exchange_resident32",
-                memory::StoreImport::Resident {
+                HelperBinding::Resident {
                     index: function_index,
                     key,
                     id,
                 },
             ),
-            _ => (
-                "cpu_exchange32",
-                memory::StoreImport::Replacement(function_index),
-            ),
+            _ => ("cpu_exchange32", HelperBinding::Replacement(function_index)),
         };
         imports.import("ring3", name, EntityType::Function(type_index));
         helper_imports.exchange = Some(exchange);
@@ -489,16 +479,13 @@ pub(in crate::cpu::dbt) fn emit(
         let (name, exchange) = match binding {
             Some(EmbeddedBinding::Resident { key, id }) => (
                 "cpu_exchange_resident8",
-                memory::StoreImport::Resident {
+                HelperBinding::Resident {
                     index: function_index,
                     key,
                     id,
                 },
             ),
-            _ => (
-                "cpu_exchange8",
-                memory::StoreImport::Replacement(function_index),
-            ),
+            _ => ("cpu_exchange8", HelperBinding::Replacement(function_index)),
         };
         imports.import("ring3", name, EntityType::Function(type_index));
         helper_imports.exchange8 = Some(exchange);
@@ -508,16 +495,13 @@ pub(in crate::cpu::dbt) fn emit(
         let (name, exchange) = match binding {
             Some(EmbeddedBinding::Resident { key, id }) => (
                 "cpu_exchange_resident16",
-                memory::StoreImport::Resident {
+                HelperBinding::Resident {
                     index: function_index,
                     key,
                     id,
                 },
             ),
-            _ => (
-                "cpu_exchange16",
-                memory::StoreImport::Replacement(function_index),
-            ),
+            _ => ("cpu_exchange16", HelperBinding::Replacement(function_index)),
         };
         imports.import("ring3", name, EntityType::Function(type_index));
         helper_imports.exchange16 = Some(exchange);
@@ -527,7 +511,7 @@ pub(in crate::cpu::dbt) fn emit(
         let (name, exchange) = match binding {
             Some(EmbeddedBinding::Resident { key, id }) => (
                 "cpu_compare_exchange_resident32",
-                memory::StoreImport::Resident {
+                HelperBinding::Resident {
                     index: function_index,
                     key,
                     id,
@@ -535,7 +519,7 @@ pub(in crate::cpu::dbt) fn emit(
             ),
             _ => (
                 "cpu_compare_exchange32",
-                memory::StoreImport::Replacement(function_index),
+                HelperBinding::Replacement(function_index),
             ),
         };
         imports.import(
@@ -550,7 +534,7 @@ pub(in crate::cpu::dbt) fn emit(
         let (name, exchange) = match binding {
             Some(EmbeddedBinding::Resident { key, id }) => (
                 "cpu_exchange_add_resident32",
-                memory::StoreImport::Resident {
+                HelperBinding::Resident {
                     index: function_index,
                     key,
                     id,
@@ -558,7 +542,7 @@ pub(in crate::cpu::dbt) fn emit(
             ),
             _ => (
                 "cpu_exchange_add32",
-                memory::StoreImport::Replacement(function_index),
+                HelperBinding::Replacement(function_index),
             ),
         };
         imports.import("ring3", name, EntityType::Function(type_index));
@@ -569,7 +553,7 @@ pub(in crate::cpu::dbt) fn emit(
         let (name, exchange) = match binding {
             Some(EmbeddedBinding::Resident { key, id }) => (
                 "cpu_compare_exchange_resident8",
-                memory::StoreImport::Resident {
+                HelperBinding::Resident {
                     index: function_index,
                     key,
                     id,
@@ -577,7 +561,7 @@ pub(in crate::cpu::dbt) fn emit(
             ),
             _ => (
                 "cpu_compare_exchange8",
-                memory::StoreImport::Replacement(function_index),
+                HelperBinding::Replacement(function_index),
             ),
         };
         imports.import(
@@ -592,7 +576,7 @@ pub(in crate::cpu::dbt) fn emit(
         let (name, exchange) = match binding {
             Some(EmbeddedBinding::Resident { key, id }) => (
                 "cpu_exchange_add_resident8",
-                memory::StoreImport::Resident {
+                HelperBinding::Resident {
                     index: function_index,
                     key,
                     id,
@@ -600,7 +584,7 @@ pub(in crate::cpu::dbt) fn emit(
             ),
             _ => (
                 "cpu_exchange_add8",
-                memory::StoreImport::Replacement(function_index),
+                HelperBinding::Replacement(function_index),
             ),
         };
         imports.import("ring3", name, EntityType::Function(type_index));
@@ -611,7 +595,7 @@ pub(in crate::cpu::dbt) fn emit(
         let (name, exchange) = match binding {
             Some(EmbeddedBinding::Resident { key, id }) => (
                 "cpu_compare_exchange_resident16",
-                memory::StoreImport::Resident {
+                HelperBinding::Resident {
                     index: function_index,
                     key,
                     id,
@@ -619,7 +603,7 @@ pub(in crate::cpu::dbt) fn emit(
             ),
             _ => (
                 "cpu_compare_exchange16",
-                memory::StoreImport::Replacement(function_index),
+                HelperBinding::Replacement(function_index),
             ),
         };
         imports.import(
@@ -634,7 +618,7 @@ pub(in crate::cpu::dbt) fn emit(
         let (name, exchange) = match binding {
             Some(EmbeddedBinding::Resident { key, id }) => (
                 "cpu_exchange_add_resident16",
-                memory::StoreImport::Resident {
+                HelperBinding::Resident {
                     index: function_index,
                     key,
                     id,
@@ -642,7 +626,7 @@ pub(in crate::cpu::dbt) fn emit(
             ),
             _ => (
                 "cpu_exchange_add16",
-                memory::StoreImport::Replacement(function_index),
+                HelperBinding::Replacement(function_index),
             ),
         };
         imports.import("ring3", name, EntityType::Function(type_index));
@@ -653,7 +637,7 @@ pub(in crate::cpu::dbt) fn emit(
         let (name, bit_set) = match binding {
             Some(EmbeddedBinding::Resident { key, id }) => (
                 "cpu_bit_test_set_resident32",
-                memory::StoreImport::Resident {
+                HelperBinding::Resident {
                     index: function_index,
                     key,
                     id,
@@ -661,7 +645,7 @@ pub(in crate::cpu::dbt) fn emit(
             ),
             _ => (
                 "cpu_bit_test_set32",
-                memory::StoreImport::Replacement(function_index),
+                HelperBinding::Replacement(function_index),
             ),
         };
         imports.import("ring3", name, EntityType::Function(type_index));
@@ -672,7 +656,7 @@ pub(in crate::cpu::dbt) fn emit(
         let (name, bit_reset) = match binding {
             Some(EmbeddedBinding::Resident { key, id }) => (
                 "cpu_bit_test_reset_resident32",
-                memory::StoreImport::Resident {
+                HelperBinding::Resident {
                     index: function_index,
                     key,
                     id,
@@ -680,7 +664,7 @@ pub(in crate::cpu::dbt) fn emit(
             ),
             _ => (
                 "cpu_bit_test_reset32",
-                memory::StoreImport::Replacement(function_index),
+                HelperBinding::Replacement(function_index),
             ),
         };
         imports.import("ring3", name, EntityType::Function(type_index));
@@ -691,7 +675,7 @@ pub(in crate::cpu::dbt) fn emit(
         let (name, atomic_or) = match binding {
             Some(EmbeddedBinding::Resident { key, id }) => (
                 "cpu_atomic_or_resident_u32",
-                memory::StoreImport::Resident {
+                HelperBinding::Resident {
                     index: function_index,
                     key,
                     id,
@@ -699,7 +683,7 @@ pub(in crate::cpu::dbt) fn emit(
             ),
             _ => (
                 "cpu_atomic_or_u32",
-                memory::StoreImport::Replacement(function_index),
+                HelperBinding::Replacement(function_index),
             ),
         };
         imports.import("ring3", name, EntityType::Function(type_index));
@@ -710,7 +694,7 @@ pub(in crate::cpu::dbt) fn emit(
         let (name, atomic_and) = match binding {
             Some(EmbeddedBinding::Resident { key, id }) => (
                 "cpu_atomic_and_resident_u32",
-                memory::StoreImport::Resident {
+                HelperBinding::Resident {
                     index: function_index,
                     key,
                     id,
@@ -718,7 +702,7 @@ pub(in crate::cpu::dbt) fn emit(
             ),
             _ => (
                 "cpu_atomic_and_u32",
-                memory::StoreImport::Replacement(function_index),
+                HelperBinding::Replacement(function_index),
             ),
         };
         imports.import("ring3", name, EntityType::Function(type_index));
@@ -729,7 +713,7 @@ pub(in crate::cpu::dbt) fn emit(
         let (name, atomic_xor) = match binding {
             Some(EmbeddedBinding::Resident { key, id }) => (
                 "cpu_atomic_xor_resident_u32",
-                memory::StoreImport::Resident {
+                HelperBinding::Resident {
                     index: function_index,
                     key,
                     id,
@@ -737,7 +721,7 @@ pub(in crate::cpu::dbt) fn emit(
             ),
             _ => (
                 "cpu_atomic_xor_u32",
-                memory::StoreImport::Replacement(function_index),
+                HelperBinding::Replacement(function_index),
             ),
         };
         imports.import("ring3", name, EntityType::Function(type_index));
@@ -876,13 +860,13 @@ pub(in crate::cpu::dbt) fn emit(
             let (name, import) = match binding {
                 Some(EmbeddedBinding::Resident { key, id }) => (
                     resident_name,
-                    memory::StoreImport::Resident {
+                    HelperBinding::Resident {
                         index: function_index,
                         key,
                         id,
                     },
                 ),
-                _ => (name, memory::StoreImport::Replacement(function_index)),
+                _ => (name, HelperBinding::Replacement(function_index)),
             };
             imports.import(
                 "ring3",
@@ -907,7 +891,7 @@ pub(in crate::cpu::dbt) fn emit(
         let (name, import) = match binding {
             Some(EmbeddedBinding::Resident { key, id }) => (
                 "cpu_fetch_fault_resident",
-                memory::StoreImport::Resident {
+                HelperBinding::Resident {
                     index: function_index,
                     key,
                     id,
@@ -915,7 +899,7 @@ pub(in crate::cpu::dbt) fn emit(
             ),
             _ => (
                 "cpu_fetch_fault",
-                memory::StoreImport::Replacement(function_index),
+                HelperBinding::Replacement(function_index),
             ),
         };
         imports.import("ring3", name, EntityType::Function(fetch_fault_type));
@@ -1121,7 +1105,7 @@ pub(in crate::cpu::dbt) fn emit(
     module.finish()
 }
 
-fn emit_block(code: &mut InstructionSink<'_>, block: &CompiledBlock, imports: memory::Imports) {
+fn emit_block(code: &mut InstructionSink<'_>, block: &CompiledBlock, imports: Imports) {
     if let Some(gate) = block.gate() {
         code.local_get(EIP)
             .i32_const(gate.entry.0 as i32)

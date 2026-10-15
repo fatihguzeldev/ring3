@@ -1,3 +1,5 @@
+use crate::cpu::dbt::wasm::helpers::protocol;
+use crate::cpu::dbt::wasm::imports::Imports;
 pub(super) mod pointer;
 
 use super::{locals::*, memory};
@@ -20,7 +22,7 @@ const REGISTERS: [Register32; 8] = [
 pub(super) fn instruction(
     code: &mut InstructionSink<'_>,
     instruction: &DecodedInstruction,
-    imports: memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) {
     let (kind, allocation, nesting) = match *instruction.operation() {
@@ -135,13 +137,13 @@ fn validate(
         super::cpu_result::paging::is_packet(code);
         code.if_(BlockType::Empty);
         super::cpu_result::paging::transport(code, writes);
-        memory::exit_if_failed(code, exit_depth + 1);
-        memory::reset_checks(code);
+        protocol::exit_if_failed(code, exit_depth + 1);
+        protocol::reset_checks(code);
         membership(code, kind, allocation, nesting, context);
         code.local_get(RESUME).i32_eqz();
-        memory::add_check(code);
-        memory::protocol_if_bad(code);
-        memory::exit_if_failed(code, exit_depth + 1);
+        protocol::add_check(code);
+        protocol::protocol_if_bad(code);
+        protocol::exit_if_failed(code, exit_depth + 1);
         super::cpu_result::paging::validate(
             code,
             super::cpu_result::paging::Validation {
@@ -158,7 +160,7 @@ fn validate(
                 geometry: super::cpu_result::paging::Geometry::OwnerChecked,
             },
         );
-        memory::exit_if_failed(code, exit_depth + 1);
+        protocol::exit_if_failed(code, exit_depth + 1);
         code.end();
     }
     validate_legacy(code, kind, allocation, nesting, exit_depth);
@@ -171,7 +173,7 @@ fn validate_legacy(
     nesting: u8,
     exit_depth: u32,
 ) {
-    use memory::{
+    use crate::cpu::dbt::wasm::helpers::protocol::{
         add_check, expect_field, helper_field, infrastructure, protocol_if_bad, reset_checks,
     };
     let writes = !matches!(kind, StackFrameKind::PopAll32 | StackFrameKind::PopAll16);
@@ -288,7 +290,7 @@ fn validate_legacy(
     code.else_();
     infrastructure(code, 2);
     code.end().end().end().end().end().end().end();
-    memory::exit_if_failed(code, exit_depth);
+    protocol::exit_if_failed(code, exit_depth);
 }
 
 fn membership(
@@ -365,7 +367,7 @@ fn candidate(
 
     context: super::cpu_result::ResultContext,
 ) {
-    use memory::helper_field;
+    use protocol::helper_field;
     pointer::offset(code, super::locals::register(register), delta as i32);
     super::segments::base(code, crate::cpu::x86::SegmentRegister::Ss);
     code.i32_add().local_set(ADDRESS);

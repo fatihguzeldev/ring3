@@ -1,3 +1,6 @@
+use crate::cpu::dbt::wasm::helpers::protocol;
+use crate::cpu::dbt::wasm::imports::HelperBinding;
+use crate::cpu::dbt::wasm::imports::Imports;
 use wasm_encoder::{BlockType, InstructionSink, MemArg};
 
 use crate::{
@@ -20,7 +23,7 @@ use super::locals::{
 pub(super) fn precheck_instruction(
     code: &mut InstructionSink<'_>,
     instruction: &crate::cpu::x86::decode::DecodedInstruction,
-    imports: super::memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) {
     use crate::cpu::x86::{ir::Operation, simd::SimdKind};
@@ -53,8 +56,8 @@ pub(super) fn precheck_instruction(
                 super::cpu_result::ResultContext::from(imports),
             );
             // a pending check cannot complete an ordinary x87 operation successfully.
-            super::memory::infrastructure(code, 2);
-            super::memory::exit_if_failed(code, exit_depth + 1);
+            protocol::infrastructure(code, 2);
+            protocol::exit_if_failed(code, exit_depth + 1);
             code.end();
         }
         Operation::Simd(value) if value.uses_mmx() || value.kind == SimdKind::EmptyMmx => {
@@ -72,7 +75,7 @@ pub(super) fn operation(
     waiting: bool,
     pc: u32,
     opcode: u16,
-    import: super::memory::StoreImport,
+    import: HelperBinding,
     exit_depth: u32,
 
     context: super::cpu_result::ResultContext,
@@ -97,7 +100,7 @@ pub(super) fn operation(
         crate::cpu::x86::X87Operation::Wait | crate::cpu::x86::X87Operation::NoOperation
     ) {
         code.local_get(HELPER_STATUS).i32_eqz();
-        super::memory::helper_field(code, 16);
+        protocol::helper_field(code, 16);
         code.i32_eqz().i32_and().if_(BlockType::Empty);
         super::code_fetch::check_context(code, exit_depth + 1);
         code.end();
@@ -123,7 +126,7 @@ pub(super) fn operation(
     );
     if integer_flags {
         code.local_set(RESULT);
-        super::memory::reset_checks(code);
+        protocol::reset_checks(code);
         // a deferred unmasked comparison preserves flags; a completed one has one of four relations.
         code.local_get(RESULT).local_get(FLAGS).i32_ne();
         for relation in [0, 1, 0x40, 0x45] {
@@ -134,9 +137,9 @@ pub(super) fn operation(
                 .i32_ne()
                 .i32_and();
         }
-        super::memory::add_check(code);
-        super::memory::protocol_if_bad(code);
-        super::memory::exit_if_failed(code, exit_depth);
+        protocol::add_check(code);
+        protocol::protocol_if_bad(code);
+        protocol::exit_if_failed(code, exit_depth);
         code.local_get(RESULT);
     }
     super::cpu_result::flags(code, if integer_flags { 0x8d5 } else { 0 }, exit_depth);

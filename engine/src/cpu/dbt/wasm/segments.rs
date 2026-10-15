@@ -1,3 +1,4 @@
+use crate::cpu::dbt::wasm::imports::Imports;
 use wasm_encoder::{BlockType, InstructionSink, MemArg};
 
 mod access;
@@ -24,7 +25,7 @@ use crate::{
 pub(super) fn instruction(
     code: &mut InstructionSink<'_>,
     instruction: &DecodedInstruction,
-    imports: memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) {
     let store = match *instruction.operation() {
@@ -161,7 +162,7 @@ pub(super) fn instruction(
 fn load_selector(
     code: &mut InstructionSink<'_>,
     segment: SegmentRegister,
-    imports: memory::Imports,
+    imports: Imports,
     exit_depth: u32,
 ) {
     let index = imports

@@ -1,8 +1,9 @@
 use super::*;
+use crate::cpu::dbt::wasm::helpers::protocol;
 use crate::cpu::x86::{Register32, SegmentRegister};
 
 pub(super) fn is_packet(code: &mut InstructionSink<'_>, context: cpu_result::ResultContext) {
-    memory::helper_field(code, 4);
+    protocol::helper_field(code, 4);
     code.i32_const(0x10009).i32_eq();
     if context.paging_configured {
         cpu_result::paging::is_packet(code);
@@ -39,19 +40,19 @@ pub(super) fn call_result(
             .i32_and();
     }
     code.if_(BlockType::Empty);
-    memory::infrastructure(code, 3);
-    memory::exit_if_failed(code, exit_depth + 1);
+    protocol::infrastructure(code, 3);
+    protocol::exit_if_failed(code, exit_depth + 1);
     code.end();
-    memory::helper_field(code, 36);
+    protocol::helper_field(code, 36);
     code.i32_const(2).i32_eq().if_(BlockType::Empty);
     call_slot(code, 2, exit_depth + 1, context);
     code.else_();
-    memory::helper_field(code, 36);
+    protocol::helper_field(code, 36);
     code.i32_const(4).i32_eq().if_(BlockType::Empty);
     call_slot(code, 4, exit_depth + 2, context);
     code.else_();
-    memory::infrastructure(code, 2);
-    memory::exit_if_failed(code, exit_depth + 2);
+    protocol::infrastructure(code, 2);
+    protocol::exit_if_failed(code, exit_depth + 2);
     code.end().end();
 }
 
@@ -66,7 +67,7 @@ fn call_slot(
     super::super::stack::pointer::offset(code, register(Register32::Esp), -(slot as i32));
     super::super::segments::base(code, SegmentRegister::Ss);
     code.i32_add().local_set(ADDRESS);
-    memory::helper_field(code, 28);
+    protocol::helper_field(code, 28);
     code.local_get(ADDRESS)
         .i32_sub()
         .i32_const(slot as i32 - 1)
