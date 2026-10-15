@@ -1,3 +1,4 @@
+import {generatedImports, attachDetectionApi} from '../../../support/wasm/binding.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
@@ -17,7 +18,7 @@ function record(magic, fields, version = 1, size = 40) {
 const packet = fields => record('R3MH', fields, 7);
 export function harness(family, sourcePaths) {
   const [enginePath, output, root] = process.argv.slice(2), engine = readEngine(enginePath);
-  const paths = ['engine/src/process/cpu/stack.rs', 'engine/src/process/cpu/segments.rs', 'engine/src/cpu/x86/stack.rs', 'engine/src/memory/space.rs', 'engine/src/memory/space/atomic.rs', 'engine/src/cpu/x86/segments/cache.rs', 'engine/src/cpu/dbt/wasm/stack.rs', 'engine/src/abi/cpu_helper.rs', 'engine/src/abi/x86/segments.rs', 'engine/tests/support/wasm/engine.mjs', 'engine/tests/cpu/stack/support/segments.mjs', ...sourcePaths];
+  const paths = ['engine/src/process/cpu/stack.rs', 'engine/src/process/cpu/segments.rs', 'engine/src/cpu/x86/stack.rs', 'engine/src/memory/space.rs', 'engine/src/memory/space/atomic.rs', 'engine/src/cpu/x86/segments/cache.rs', 'engine/src/cpu/dbt/wasm/stack.rs', 'engine/src/abi/cpu_helper.rs', 'engine/src/abi/x86/segments.rs', 'engine/tests/support/wasm/engine.mjs', 'engine/tests/support/wasm/binding.mjs', 'engine/tests/cpu/stack/support/segments.mjs', ...sourcePaths];
   assert.equal(new Set(paths).size, paths.length);
   const pins = () => Object.fromEntries(paths.map(p => [p, hash(readFileSync(join(root, p)))])), sourcePins = pins();
   const observations = [], modules = [], frames = [], ramFrames = [], exits = [], helperCalls = [];
@@ -38,6 +39,7 @@ export function harness(family, sourcePaths) {
   function invoke(row, oracle, owner, entries) {
     const instance = new WebAssembly.Instance(engine.module, {}), c = {id: ++counts.contexts, owner, entries, memory: instance.exports.memory, api: {}};
     for (const [name, fn] of Object.entries(instance.exports)) if (name.startsWith('ring3_abi_v1_') && typeof fn === 'function') c.api[name.slice(13)] = fn;
+ attachDetectionApi(c.api, instance.exports);
     host(c, 'open', [12, c.id, HIGH]); c.base = c.api.arena_ptr() >>> 0; const initial = arena(c);
     for (const page of pages) {host(c, 'map', [page, 1, page === PC ? 7 : 3]); if (page !== PC) upload(c, page, Buffer.alloc(4096, 0xa5));}
     for (const [address, b] of row.data ?? []) upload(c, address, b);
@@ -48,7 +50,7 @@ export function harness(family, sourcePaths) {
     const a = arena(c); c.unit = owner === 'resident' ? [a.readUInt32LE(148), a.readUInt32LE(152)] : [];
     const pointer = owner === 'resident' ? a.readUInt32LE(156) : c.api.module_ptr() >>> 0, length = owner === 'resident' ? a.readUInt32LE(160) : c.api.module_len() >>> 0;
     const bytes = Buffer.from(new Uint8Array(c.memory.buffer, pointer, length)), module = new WebAssembly.Module(bytes), name = owner === 'resident' ? 'stack_execute_resident' : 'stack_execute';
-    assert.deepEqual(WebAssembly.Module.imports(module), [{module: 'env', name: 'memory', kind: 'memory'}, ...[owner === 'resident' ? 'guard_resident' : 'guard', name].map(name => ({module: 'ring3', name, kind: 'function'}))]);
+    assert.deepEqual(WebAssembly.Module.imports(module), [{module: 'env', name: 'memory', kind: 'memory'}, ...generatedImports({resident: owner === 'resident', helpers: [name]}).slice(1).map(item => item.name).map(name => ({module: 'ring3', name, kind: 'function'}))]);
     assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
     let calls = 0; const ring3 = {...c.api};
     ring3[name] = (...args) => {
