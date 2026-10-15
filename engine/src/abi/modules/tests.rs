@@ -84,3 +84,28 @@ fn completion_variants_and_gates_keep_exact_bytes_and_reject_ambiguous_entries()
     );
     assert_eq!(output.as_slice(), expected);
 }
+
+#[test]
+fn paged_gate_inventory_carries_total_and_offset_without_truncation() {
+    let gates = [GateSpec {
+        entry: GuestAddress(0x71001234),
+        id: 0x90209,
+    }];
+    let mut output = [0xa5; 40];
+    encode_module_gate_page(&gates, 700, 699, &mut output).unwrap();
+    let expected = [
+        0x50473352, 0x10001, 40, 0, 700, 699, 1, 0, 0x71001234, 0x90209,
+    ]
+    .into_iter()
+    .flat_map(u32::to_le_bytes)
+    .collect::<Vec<_>>();
+    assert_eq!(output.as_slice(), expected);
+    assert_eq!(
+        encode_module_gate_page(&gates, 700, 700, &mut output),
+        Err(AbiError::Module)
+    );
+    assert_eq!(output.as_slice(), expected);
+    let mut terminal = [0xa5; 32];
+    encode_module_gate_page(&[], 700, 700, &mut terminal).unwrap();
+    assert_eq!(&terminal[16..28], &[188, 2, 0, 0, 188, 2, 0, 0, 0, 0, 0, 0]);
+}

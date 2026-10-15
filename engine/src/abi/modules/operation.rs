@@ -1,10 +1,6 @@
-#![forbid(unsafe_code)]
-
 use super::{AbiError, header};
-use crate::cpu::dbt::GateSpec;
 
 pub const MODULE_RECORD_SIZE: usize = 72;
-pub const MODULE_GATES_HEADER_SIZE: usize = 24;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ModuleRecord32 {
@@ -98,34 +94,3 @@ fn validate(record: &ModuleRecord32) -> Result<(), AbiError> {
     }
     Ok(())
 }
-
-pub fn module_gates_size(count: usize) -> Result<usize, AbiError> {
-    count
-        .checked_mul(8)
-        .and_then(|size| size.checked_add(MODULE_GATES_HEADER_SIZE))
-        .filter(|size| *size <= u32::MAX as usize)
-        .ok_or(AbiError::Length)
-}
-
-pub fn encode_module_gates(gates: &[GateSpec], output: &mut [u8]) -> Result<(), AbiError> {
-    if output.len() != module_gates_size(gates.len())? {
-        return Err(AbiError::Length);
-    }
-    if gates.iter().any(|gate| gate.id == 0)
-        || gates
-            .windows(2)
-            .any(|pair| pair[0].entry.0 >= pair[1].entry.0)
-    {
-        return Err(AbiError::Module);
-    }
-    header::write(output, *b"R3MG");
-    header::write_u32(output, 16, gates.len() as u32);
-    for (index, gate) in gates.iter().enumerate() {
-        header::write_u32(output, 24 + index * 8, gate.entry.0);
-        header::write_u32(output, 28 + index * 8, gate.id);
-    }
-    Ok(())
-}
-
-#[cfg(test)]
-mod tests;
