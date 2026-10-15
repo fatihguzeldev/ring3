@@ -26,4 +26,5 @@ mod media;
 mod memory;
 mod modules;
 mod paging;
+mod windows;
 mod xstate;

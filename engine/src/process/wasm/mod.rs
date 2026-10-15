@@ -10,6 +10,8 @@ pub(crate) use clock::{advance_cpu_clock, configure_cpu_clock, observe_cpu_clock
 
 mod media;
 pub(crate) use media::*;
+mod windows;
+pub(crate) use windows::*;
 
 struct Registry {
     opened: bool,
