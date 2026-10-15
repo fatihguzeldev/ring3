@@ -14,8 +14,8 @@ const qwords=v=>{const b=Buffer.alloc(v.length*8);v.forEach((n,i)=>b.writeBigUIn
 const fill=n=>Buffer.alloc(16,n),zero=fill(0),parents=()=>[0x10203040,0x21314151,0x32425262,0x43536373,0x7080,0x65758595,0x768696a6,0x8797a7b7];
 const record=(magic,version,size,values)=>{const b=Buffer.alloc(size);b.write(magic);b.writeUInt16LE(version,4);b.writeUInt16LE(1,6);b.writeUInt32LE(size,8);values.forEach((n,i)=>b.writeUInt32LE(n>>>0,16+i*4));return b;};
 const state=(r,pc,flags)=>record('R3ST',1,56,[...r,pc,flags]);
-const exit=(reason,retired,detail=0,address=0,access=0,length=0)=>record('R3EX',6,40,[reason,retired,detail,address,access,length]);
-const packet=(length,status=0,detail=0,address=0,access=0)=>record('R3MH',7,40,[status,0,detail,address,access,length]);
+const exit=(reason,retired,detail=0,address=0,access=0,length=0)=>reason===5?record('R3EX',12,40,[23,retired,4|(access===2?2:0)|(detail===2?1:0),address,access,length]):record('R3EX',6,40,[reason,retired,detail,address,access,length]);
+const packet=(length,status=0,detail=0,address=0,access=0)=>record('R3MH',status===9?15:7,40,[status,0,detail,address,access,length]);
 const savedImage=Buffer.alloc(512);savedImage.writeUInt16LE(0x37f);savedImage.writeUInt32LE(0x1f80,24);savedImage.writeUInt32LE(0xffff,28);savedImage.fill(0x31,160,176);savedImage.fill(0x42,176,192);savedImage.fill(0x66,464);
 const restoredImage=Buffer.alloc(512);restoredImage.writeUInt16LE(0x37f);restoredImage.writeUInt16LE(0x1800,2);restoredImage[4]=0x18;restoredImage.writeUInt32LE(0x5f80,24);restoredImage.writeUInt32LE(0xffff,28);
 const restoredX87=record('R3FP',1,128,[]);restoredX87.writeUInt16LE(0x37f,16);restoredX87.writeUInt16LE(0x1800,18);restoredX87.writeUInt16LE(0xfd3f,20);
@@ -351,12 +351,12 @@ function open(owner,entries,batch){
  const a=arena(c),binding=owner==='resident'?{lo:a.readUInt32LE(T+8),hi:a.readUInt32LE(T+12),pointer:a.readUInt32LE(T+16),length:a.readUInt32LE(T+20)}:{pointer:c.api.module_ptr()>>>0,length:c.api.module_len()>>>0};
  const bytes=Buffer.from(new Uint8Array(c.memory.buffer,binding.pointer,binding.length)),module=new WebAssembly.Module(bytes),ring3={};
  for(const im of WebAssembly.Module.imports(module)){if(im.kind!=='function')continue;ring3[im.name]=(...args)=>{
-  if(c.raw&&im.name.startsWith('guard'))return 0;
   let result;
   if(c.raw&&(im.name==='simd_execute'||im.name==='simd_execute_resident')){
    const p=packet(0);p.writeUInt32LE(c.raw.value??0,20);input(c,100,p);input(c,T+512,dwords([c.raw.gpr??0xdeadbeef,c.raw.flags]));result=0;
   }else result=c.api[im.name](...args);
-  if(!im.name.startsWith('guard'))helpers.push({context:c.id,name:im.name,args:args.map(v=>v>>>0),status:result,packet:arena(c).subarray(100,140).toString('hex'),...(c.raw?{nonforwarded:im.name==='simd_execute'||im.name==='simd_execute_resident'}:{})});return result;
+  if(c.raw&&im.name.startsWith('guard')){assert.equal(typeof result,'bigint');assert.ok(result>0n,'raw helper keeps a real native detection epoch');c.rawEpoch=result;}
+  if(!im.name.startsWith('guard')&&im.name!=='finish_exception_detection')helpers.push({context:c.id,name:im.name,args:args.map(v=>v>>>0),status:result,packet:arena(c).subarray(100,140).toString('hex'),...(c.raw?{nonforwarded:im.name==='simd_execute'||im.name==='simd_execute_resident'}:{})});return result;
  };}
  c.run=new WebAssembly.Instance(module,{env:{memory:c.memory},ring3}).exports.run;
  writeFileSync(join(output,`module-${c.id}.wasm`),bytes);modules.push({context:c.id,owner,entries,sha256:hash(bytes),bytes:bytes.length,imports:WebAssembly.Module.imports(module)});contexts.push({context:c.id,owner,entries});return[c,blocks];
@@ -394,13 +394,13 @@ function test(c,block,row){
   assert.equal(events.length,1,row.name+' only the failed read crosses the host');
   assert.equal(events[0].name,'cpu_read');
   assert.deepEqual(events[0].args,[row.address,row.stagedTransfer.length,row.readAlignment??16]);
-  assert.equal(events[0].packet,packet(row.stagedTransfer.length,reason===11?3:1,row.detail,row.fault,row.access).toString('hex'));
+  assert.equal(events[0].packet,packet(row.stagedTransfer.length,reason===11?3:9,reason===5?(4|(row.access===2?2:0)|(row.detail===2?1:0)):row.detail,row.fault,row.access).toString('hex'));
   assert.deepEqual(actual.subarray(T,T+row.stagedTransfer.length),row.stagedTransfer,row.name+' failed read preserves every staged transfer byte');
  }
  expected.set(actual.subarray(100,140),100);expected.set(actual.subarray(T,T+512),T);expected.set(actual.subarray(T+512,T+520),T+512);
  assert.deepEqual(actual,expected,row.name+' complete arena');
  if(reason===1&&last){assert.equal(last.packet,packet(row.write?row.writeLength??16:row.masked!==undefined?16:row.direct&&row.memory?row.memory.length:0).toString('hex'));if(!row.direct)assert.equal(actual.readUInt32LE(T+516),row.flags??0xcd7);}
- else if(last){const p=hex(last.packet);assert.equal(p.readUInt32LE(16),row.compiledGp?0:reason===13?5:reason===11?3:1);assert.equal(p.readUInt32LE(24),row.detail??0);}
+ else if(last){const p=hex(last.packet);assert.equal(p.readUInt32LE(16),row.compiledGp?0:reason===13?5:reason===11?3:reason===5?9:1);assert.equal(p.readUInt32LE(24),reason===5?(4|(row.access===2?2:0)|(row.detail===2?1:0)):(row.detail??0));}
  if(row.masked!==undefined){assert.equal(events.at(-1).args.at(-1),row.masked);assert.equal(actual.readUInt32LE(T+512),row.masked);}
  if(row.memory&&reason!==11){assert.equal(events[0].name,'cpu_read');if(row.readAlignment!==undefined)assert.deepEqual(events[0].args,[row.address,row.memory.length,row.readAlignment]);assert.deepEqual(actual.subarray(T,T+row.memory.length),row.memory);}
  if(row.writeOnly)host(c,'protect',[0x5000,1,3]);
@@ -409,7 +409,7 @@ function test(c,block,row){
  observations.push({context:c.id,name:row.name,status,retired,reason,cpu:actual.subarray(0,56).toString('hex'),exit:actual.subarray(56,96).toString('hex'),simd:actual.subarray(SV,SV+160).toString('hex'),x87:actual.subarray(FP,FP+128).toString('hex'),helper_calls:events.length});
 }
 for(const owner of['replacement','resident'])for(const entries of[false,true])for(let start=0;start<cases.length;start+=8){const batch=cases.slice(start,start+8),[c,blocks]=open(owner,entries,batch);for(let i=0;i<batch.length;i++)test(c,blocks[i],batch[i]);writeFileSync(join(output,`arena-${c.id}.bin`),arena(c));host(c,'close',[]);}
-// Raw execution payloads are nonforwarded, with a permissive owner guard. They
+// Raw execution payloads are nonforwarded, with the real native owner guard. They
 // independently challenge publication after a well-formed V7 success packet.
 const rawCases=[
  {name:'raw-reserved-bit-before-gpr',code:'f30f2cc1',flags:0xcd5},
@@ -428,11 +428,12 @@ for(const owner of['replacement','resident'])for(const entries of[false,true]){
   upload(c,DATA,fill(0x66));const expected=arena(c),retired=row.valid?1:0,reason=row.valid?1:7;
   expected.set(state(r,block.pc+(row.valid?hex(row.code).length:0),row.valid?row.flags:0xcd7));expected.set(exit(reason,retired,row.valid?0:2),56);
   const raw=packet(0);raw.writeUInt32LE(row.value??0,20);expected.set(raw,100);expected.set(dwords([0xdeadbeef,row.flags]),T+512);
-  const h=helpers.length;c.raw=row;const status=c.run(c.base,c.base+56,1,c.base+96);delete c.raw;
+  const h=helpers.length;c.raw=row;delete c.rawEpoch;const status=c.run(c.base,c.base+56,1,c.base+96);delete c.raw;
+  assert.ok(c.rawEpoch>0n,row.name+' native guard ran before the synthetic helper');
   assert.equal(status,0,row.name);const events=helpers.slice(h);assert.equal(events.length,1,row.name+' no read/write or extra helper');assert.equal(events[0].nonforwarded,true);
   assert.deepEqual(arena(c),expected,row.name+' complete neutral publication');
   const actual=arena(c);for(let offset=0;offset<16;offset++){host(c,'read8',[DATA+offset]);assert.equal(arena(c).readUInt32LE(120),0x66,row.name+' preserved RAM');}
-  raw_protocol.push({context:c.id,owner,entries,name:row.name,status,reason,retired,cpu:actual.subarray(0,56).toString('hex'),exit:actual.subarray(56,96).toString('hex'),arena_hex:actual.toString('hex'),helper_calls:events.length});
+  raw_protocol.push({context:c.id,owner,entries,name:row.name,status,reason,retired,guard_epoch:c.rawEpoch.toString(),cpu:actual.subarray(0,56).toString('hex'),exit:actual.subarray(56,96).toString('hex'),arena_hex:actual.toString('hex'),helper_calls:events.length});
  }
  writeFileSync(join(output,`arena-${c.id}.bin`),arena(c));host(c,'close',[]);
 }
