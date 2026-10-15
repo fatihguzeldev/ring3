@@ -8,3 +8,4 @@ mod strings;
 mod thread;
 pub(super) mod objects;
 pub(super) mod d3d8;
+pub(super) mod user32;

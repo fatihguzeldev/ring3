@@ -11,6 +11,7 @@ pub struct WindowContext32 {
     window_limit: usize,
     message_limit: usize,
     next_handle: u32,
+    active: Option<WindowHandle32>,
     focus: Option<WindowHandle32>,
     capture: Option<WindowHandle32>,
 }
@@ -34,6 +35,7 @@ impl WindowContext32 {
             window_limit: max_windows,
             message_limit: max_messages,
             next_handle: 0,
+            active: None,
             focus: None,
             capture: None,
         })
@@ -94,6 +96,9 @@ impl WindowContext32 {
             return Err(WindowError32::InvalidHandle);
         }
         self.windows.remove(self.index(handle)?);
+        if self.active == Some(handle) {
+            self.active = None;
+        }
         Ok(())
     }
 
@@ -107,6 +112,26 @@ impl WindowContext32 {
 
     pub fn focus(&self) -> Option<WindowHandle32> {
         self.focus
+    }
+
+    pub fn active(&self) -> Option<WindowHandle32> {
+        self.active
+    }
+
+    pub(crate) fn update_active(
+        &mut self,
+        thread_id: u32,
+        handle: Option<WindowHandle32>,
+    ) -> Result<(), WindowError32> {
+        self.check_thread(thread_id, self.active)?;
+        if let Some(handle) = handle {
+            let window = self.owned(thread_id, handle)?;
+            if !window.description.enabled {
+                return Err(WindowError32::Disabled);
+            }
+        }
+        self.active = handle;
+        Ok(())
     }
 
     pub fn capture(&self) -> Option<WindowHandle32> {
@@ -235,6 +260,9 @@ impl WindowContext32 {
         self.push(window, 0x0002, 0, 0);
         self.push(window, 0x0082, 0, 0);
         self.windows.remove(self.index(handle)?);
+        if self.active == Some(handle) {
+            self.active = None;
+        }
         Ok(window)
     }
 

@@ -324,16 +324,16 @@ impl User32State32 {
         min: u32,
         max: u32,
     ) -> Result<Option<(usize, Message32)>, User32Error32> {
-        if window != 0 && window != u32::MAX {
-            if self
+        if window != 0
+            && window != u32::MAX
+            && self
                 .windows
                 .get(WindowHandle32::try_from(window)?)?
                 .description
                 .thread_id
                 != thread_id
-            {
-                return Err(User32Error32::Win32(1400));
-            }
+        {
+            return Err(User32Error32::Win32(1400));
         }
         Ok(self
             .posted
