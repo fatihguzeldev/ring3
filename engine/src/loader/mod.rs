@@ -1,41 +1,24 @@
+mod image;
 mod imports;
+mod linking;
 mod pe32;
 mod relocation;
 
+use crate::memory::MemoryError;
+
 pub(crate) use crate::windows::ProviderProfile;
-
-use crate::cpu::dbt::GateSpec;
-use crate::memory::{AddressSpace, MemoryError};
-
-pub use pe32::{
-    load_pe32, load_pe32_at, load_pe32_linked_at, load_pe32_linked_v2_at, load_pe32_linked_v3_at,
-    load_pe32_linked_v4_at, load_pe32_linked_v5_at, load_pe32_linked_v6_at, load_pe32_linked_v7_at,
-    load_pe32_linked_v8_at,
+pub use image::{ImageMetadata32, LoadedPe32};
+pub use linking::{
+    LinkedImageMetadata32, LinkedImageMetadata32V2, LinkedImageMetadata32V3,
+    LinkedImageMetadata32V4, LinkedImageMetadata32V5, LinkedImageMetadata32V6,
+    LinkedImageMetadata32V7, LinkedImageMetadata32V8, LoadedLinkedPe32, LoadedLinkedPe32V2,
+    LoadedLinkedPe32V3, LoadedLinkedPe32V4, LoadedLinkedPe32V5, LoadedLinkedPe32V6,
+    LoadedLinkedPe32V7, LoadedLinkedPe32V8, load_pe32_linked_at, load_pe32_linked_v2_at,
+    load_pe32_linked_v3_at, load_pe32_linked_v4_at, load_pe32_linked_v5_at, load_pe32_linked_v6_at,
+    load_pe32_linked_v7_at, load_pe32_linked_v8_at,
 };
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ImageMetadata32 {
-    pub image_base: u32,
-    pub image_size: u32,
-    pub entry_point: u32,
-    pub mapped_pages: u32,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct LinkedImageMetadata32 {
-    pub image: ImageMetadata32,
-    pub gate_base: u32,
-    pub gate_count: u32,
-    pub gates: [GateSpec; 2],
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct LinkedImageMetadata32V2 {
-    pub image: ImageMetadata32,
-    pub gate_base: u32,
-    pub gate_count: u32,
-    pub gates: [GateSpec; 3],
-}
+pub(crate) use linking::{LinkedMetadata32, LoadedLinkedImage32, load_linked_profile};
+pub use pe32::{load_pe32, load_pe32_at};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LoadError {
@@ -43,232 +26,4 @@ pub enum LoadError {
     Unsupported,
     Capacity,
     Memory(MemoryError),
-}
-
-pub struct LoadedPe32 {
-    memory: AddressSpace,
-    metadata: ImageMetadata32,
-}
-
-impl LoadedPe32 {
-    pub fn into_parts(self) -> (AddressSpace, ImageMetadata32) {
-        (self.memory, self.metadata)
-    }
-}
-
-impl std::fmt::Debug for LoadedPe32 {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("LoadedPe32")
-            .field("metadata", &self.metadata)
-            .finish_non_exhaustive()
-    }
-}
-
-pub struct LoadedLinkedPe32 {
-    memory: AddressSpace,
-    metadata: LinkedImageMetadata32,
-}
-
-impl LoadedLinkedPe32 {
-    pub fn into_parts(self) -> (AddressSpace, LinkedImageMetadata32) {
-        (self.memory, self.metadata)
-    }
-}
-
-impl std::fmt::Debug for LoadedLinkedPe32 {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("LoadedLinkedPe32")
-            .field("metadata", &self.metadata)
-            .finish_non_exhaustive()
-    }
-}
-
-pub struct LoadedLinkedPe32V2 {
-    memory: AddressSpace,
-    metadata: LinkedImageMetadata32V2,
-}
-
-impl LoadedLinkedPe32V2 {
-    pub fn into_parts(self) -> (AddressSpace, LinkedImageMetadata32V2) {
-        (self.memory, self.metadata)
-    }
-}
-
-impl std::fmt::Debug for LoadedLinkedPe32V2 {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("LoadedLinkedPe32V2")
-            .field("metadata", &self.metadata)
-            .finish_non_exhaustive()
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct LinkedImageMetadata32V3 {
-    pub image: ImageMetadata32,
-    pub gate_base: u32,
-    pub gate_count: u32,
-    pub gates: [GateSpec; 4],
-}
-
-pub struct LoadedLinkedPe32V3 {
-    memory: AddressSpace,
-    metadata: LinkedImageMetadata32V3,
-}
-
-impl LoadedLinkedPe32V3 {
-    pub fn into_parts(self) -> (AddressSpace, LinkedImageMetadata32V3) {
-        (self.memory, self.metadata)
-    }
-}
-
-impl std::fmt::Debug for LoadedLinkedPe32V3 {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("LoadedLinkedPe32V3")
-            .field("metadata", &self.metadata)
-            .finish_non_exhaustive()
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct LinkedImageMetadata32V4 {
-    pub image: ImageMetadata32,
-    pub gate_base: u32,
-    pub gate_count: u32,
-    pub gates: [GateSpec; 5],
-}
-
-pub struct LoadedLinkedPe32V4 {
-    memory: AddressSpace,
-    metadata: LinkedImageMetadata32V4,
-}
-
-impl LoadedLinkedPe32V4 {
-    pub fn into_parts(self) -> (AddressSpace, LinkedImageMetadata32V4) {
-        (self.memory, self.metadata)
-    }
-}
-
-impl std::fmt::Debug for LoadedLinkedPe32V4 {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("LoadedLinkedPe32V4")
-            .field("metadata", &self.metadata)
-            .finish_non_exhaustive()
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct LinkedImageMetadata32V5 {
-    pub image: ImageMetadata32,
-    pub gate_base: u32,
-    pub gate_count: u32,
-    pub gates: [GateSpec; 6],
-}
-
-pub struct LoadedLinkedPe32V5 {
-    memory: AddressSpace,
-    metadata: LinkedImageMetadata32V5,
-}
-
-impl LoadedLinkedPe32V5 {
-    pub fn into_parts(self) -> (AddressSpace, LinkedImageMetadata32V5) {
-        (self.memory, self.metadata)
-    }
-}
-
-impl std::fmt::Debug for LoadedLinkedPe32V5 {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("LoadedLinkedPe32V5")
-            .field("metadata", &self.metadata)
-            .finish_non_exhaustive()
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct LinkedImageMetadata32V6 {
-    pub image: ImageMetadata32,
-    pub gate_base: u32,
-    pub gate_count: u32,
-    pub gates: [GateSpec; 7],
-}
-
-pub struct LoadedLinkedPe32V6 {
-    memory: AddressSpace,
-    metadata: LinkedImageMetadata32V6,
-}
-
-impl LoadedLinkedPe32V6 {
-    pub fn into_parts(self) -> (AddressSpace, LinkedImageMetadata32V6) {
-        (self.memory, self.metadata)
-    }
-}
-
-impl std::fmt::Debug for LoadedLinkedPe32V6 {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("LoadedLinkedPe32V6")
-            .field("metadata", &self.metadata)
-            .finish_non_exhaustive()
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct LinkedImageMetadata32V7 {
-    pub image: ImageMetadata32,
-    pub gate_base: u32,
-    pub gate_count: u32,
-    pub gates: [GateSpec; 8],
-}
-
-pub struct LoadedLinkedPe32V7 {
-    memory: AddressSpace,
-    metadata: LinkedImageMetadata32V7,
-}
-
-impl LoadedLinkedPe32V7 {
-    pub fn into_parts(self) -> (AddressSpace, LinkedImageMetadata32V7) {
-        (self.memory, self.metadata)
-    }
-}
-
-impl std::fmt::Debug for LoadedLinkedPe32V7 {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("LoadedLinkedPe32V7")
-            .field("metadata", &self.metadata)
-            .finish_non_exhaustive()
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct LinkedImageMetadata32V8 {
-    pub image: ImageMetadata32,
-    pub gate_base: u32,
-    pub gate_count: u32,
-    pub gates: [GateSpec; 8],
-}
-
-pub struct LoadedLinkedPe32V8 {
-    memory: AddressSpace,
-    metadata: LinkedImageMetadata32V8,
-}
-
-impl LoadedLinkedPe32V8 {
-    pub fn into_parts(self) -> (AddressSpace, LinkedImageMetadata32V8) {
-        (self.memory, self.metadata)
-    }
-}
-
-impl std::fmt::Debug for LoadedLinkedPe32V8 {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("LoadedLinkedPe32V8")
-            .field("metadata", &self.metadata)
-            .finish_non_exhaustive()
-    }
 }

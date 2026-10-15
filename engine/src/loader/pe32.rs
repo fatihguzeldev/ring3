@@ -1,17 +1,9 @@
-use super::ProviderProfile;
-use super::imports::{ImportDirectory, prepare_imports};
+use super::imports::ImportDirectory;
 use super::relocation::{RelocationDirectory, prepare_fixups};
-use super::{
-    ImageMetadata32, LinkedImageMetadata32, LinkedImageMetadata32V2, LinkedImageMetadata32V3,
-    LinkedImageMetadata32V4, LinkedImageMetadata32V5, LinkedImageMetadata32V6,
-    LinkedImageMetadata32V7, LinkedImageMetadata32V8, LoadError, LoadedLinkedPe32,
-    LoadedLinkedPe32V2, LoadedLinkedPe32V3, LoadedLinkedPe32V4, LoadedLinkedPe32V5,
-    LoadedLinkedPe32V6, LoadedLinkedPe32V7, LoadedLinkedPe32V8, LoadedPe32,
-};
-use crate::cpu::dbt::GateSpec;
+use super::{ImageMetadata32, LoadError, LoadedPe32};
 use crate::memory::{AddressSpace, GuestAddress, PAGE_SIZE, PageRange, Permissions};
 
-const MAX_IMAGE_BYTES: u32 = 16 * 1024 * 1024;
+pub(super) const MAX_IMAGE_BYTES: u32 = 16 * 1024 * 1024;
 const FILE_ALIGNMENT: u32 = 512;
 const SECTION_LIMIT: usize = 8;
 
@@ -22,26 +14,14 @@ enum Profile {
     Linked,
 }
 
-struct LinkedMetadata {
-    image: ImageMetadata32,
-    gate_base: u32,
-    gate_count: u32,
-    gates: [GateSpec; 8],
-}
-
-struct LoadedLinkedImage {
-    memory: AddressSpace,
-    metadata: LinkedMetadata,
-}
-
 #[derive(Clone, Copy)]
-struct Section {
-    rva: u32,
-    pages: u32,
-    raw_pointer: usize,
-    raw_size: usize,
-    virtual_size: u32,
-    permissions: Permissions,
+pub(super) struct Section {
+    pub(super) rva: u32,
+    pub(super) pages: u32,
+    pub(super) raw_pointer: usize,
+    pub(super) raw_size: usize,
+    pub(super) virtual_size: u32,
+    pub(super) permissions: Permissions,
 }
 
 impl Section {
@@ -56,14 +36,14 @@ impl Section {
 }
 
 pub(super) struct ImagePlan {
-    metadata: ImageMetadata32,
-    header_size: usize,
-    header_pages: u32,
-    sections: [Section; SECTION_LIMIT],
-    section_count: usize,
-    relocation_directory: Option<RelocationDirectory>,
-    import_directory: Option<ImportDirectory>,
-    iat_directory: Option<ImportDirectory>,
+    pub(super) metadata: ImageMetadata32,
+    pub(super) header_size: usize,
+    pub(super) header_pages: u32,
+    pub(super) sections: [Section; SECTION_LIMIT],
+    pub(super) section_count: usize,
+    pub(super) relocation_directory: Option<RelocationDirectory>,
+    pub(super) import_directory: Option<ImportDirectory>,
+    pub(super) iat_directory: Option<ImportDirectory>,
 }
 
 impl ImagePlan {
@@ -189,321 +169,6 @@ pub fn load_pe32_at(
     })
 }
 
-pub fn load_pe32_linked_at(
-    bytes: &[u8],
-    actual_base: u32,
-    gate_base: u32,
-    resident_pages: u32,
-) -> Result<LoadedLinkedPe32, LoadError> {
-    let linked = load_linked_profile(
-        bytes,
-        actual_base,
-        gate_base,
-        resident_pages,
-        ProviderProfile::LastErrorOnly,
-    )?;
-    Ok(LoadedLinkedPe32 {
-        memory: linked.memory,
-        metadata: LinkedImageMetadata32 {
-            image: linked.metadata.image,
-            gate_base: linked.metadata.gate_base,
-            gate_count: linked.metadata.gate_count,
-            gates: [linked.metadata.gates[0], linked.metadata.gates[1]],
-        },
-    })
-}
-
-pub fn load_pe32_linked_v2_at(
-    bytes: &[u8],
-    actual_base: u32,
-    gate_base: u32,
-    resident_pages: u32,
-) -> Result<LoadedLinkedPe32V2, LoadError> {
-    let linked = load_linked_profile(
-        bytes,
-        actual_base,
-        gate_base,
-        resident_pages,
-        ProviderProfile::LastErrorAndExit,
-    )?;
-    Ok(LoadedLinkedPe32V2 {
-        memory: linked.memory,
-        metadata: LinkedImageMetadata32V2 {
-            image: linked.metadata.image,
-            gate_base: linked.metadata.gate_base,
-            gate_count: linked.metadata.gate_count,
-            gates: [
-                linked.metadata.gates[0],
-                linked.metadata.gates[1],
-                linked.metadata.gates[2],
-            ],
-        },
-    })
-}
-
-pub fn load_pe32_linked_v3_at(
-    bytes: &[u8],
-    actual_base: u32,
-    gate_base: u32,
-    resident_pages: u32,
-) -> Result<LoadedLinkedPe32V3, LoadError> {
-    let linked = load_linked_profile(
-        bytes,
-        actual_base,
-        gate_base,
-        resident_pages,
-        ProviderProfile::MainImageHandle,
-    )?;
-    Ok(LoadedLinkedPe32V3 {
-        memory: linked.memory,
-        metadata: LinkedImageMetadata32V3 {
-            image: linked.metadata.image,
-            gate_base: linked.metadata.gate_base,
-            gate_count: linked.metadata.gate_count,
-            gates: [
-                linked.metadata.gates[0],
-                linked.metadata.gates[1],
-                linked.metadata.gates[2],
-                linked.metadata.gates[3],
-            ],
-        },
-    })
-}
-
-pub fn load_pe32_linked_v4_at(
-    bytes: &[u8],
-    actual_base: u32,
-    gate_base: u32,
-    resident_pages: u32,
-) -> Result<LoadedLinkedPe32V4, LoadError> {
-    let linked = load_linked_profile(
-        bytes,
-        actual_base,
-        gate_base,
-        resident_pages,
-        ProviderProfile::VirtualAllocation,
-    )?;
-    Ok(LoadedLinkedPe32V4 {
-        memory: linked.memory,
-        metadata: LinkedImageMetadata32V4 {
-            image: linked.metadata.image,
-            gate_base: linked.metadata.gate_base,
-            gate_count: linked.metadata.gate_count,
-            gates: [
-                linked.metadata.gates[0],
-                linked.metadata.gates[1],
-                linked.metadata.gates[2],
-                linked.metadata.gates[3],
-                linked.metadata.gates[4],
-            ],
-        },
-    })
-}
-
-pub fn load_pe32_linked_v5_at(
-    bytes: &[u8],
-    actual_base: u32,
-    gate_base: u32,
-    resident_pages: u32,
-) -> Result<LoadedLinkedPe32V5, LoadError> {
-    let linked = load_linked_profile(
-        bytes,
-        actual_base,
-        gate_base,
-        resident_pages,
-        ProviderProfile::VirtualMemory,
-    )?;
-    Ok(LoadedLinkedPe32V5 {
-        memory: linked.memory,
-        metadata: LinkedImageMetadata32V5 {
-            image: linked.metadata.image,
-            gate_base: linked.metadata.gate_base,
-            gate_count: linked.metadata.gate_count,
-            gates: std::array::from_fn(|index| linked.metadata.gates[index]),
-        },
-    })
-}
-
-pub fn load_pe32_linked_v6_at(
-    bytes: &[u8],
-    actual_base: u32,
-    gate_base: u32,
-    resident_pages: u32,
-) -> Result<LoadedLinkedPe32V6, LoadError> {
-    let linked = load_linked_profile(
-        bytes,
-        actual_base,
-        gate_base,
-        resident_pages,
-        ProviderProfile::VirtualProtection,
-    )?;
-    Ok(LoadedLinkedPe32V6 {
-        memory: linked.memory,
-        metadata: LinkedImageMetadata32V6 {
-            image: linked.metadata.image,
-            gate_base: linked.metadata.gate_base,
-            gate_count: linked.metadata.gate_count,
-            gates: std::array::from_fn(|index| linked.metadata.gates[index]),
-        },
-    })
-}
-
-pub fn load_pe32_linked_v7_at(
-    bytes: &[u8],
-    actual_base: u32,
-    gate_base: u32,
-    resident_pages: u32,
-) -> Result<LoadedLinkedPe32V7, LoadError> {
-    let linked = load_linked_profile(
-        bytes,
-        actual_base,
-        gate_base,
-        resident_pages,
-        ProviderProfile::InstructionCache,
-    )?;
-    Ok(LoadedLinkedPe32V7 {
-        memory: linked.memory,
-        metadata: LinkedImageMetadata32V7 {
-            image: linked.metadata.image,
-            gate_base: linked.metadata.gate_base,
-            gate_count: linked.metadata.gate_count,
-            gates: linked.metadata.gates,
-        },
-    })
-}
-
-pub fn load_pe32_linked_v8_at(
-    bytes: &[u8],
-    actual_base: u32,
-    gate_base: u32,
-    resident_pages: u32,
-) -> Result<LoadedLinkedPe32V8, LoadError> {
-    let linked = load_linked_profile(
-        bytes,
-        actual_base,
-        gate_base,
-        resident_pages,
-        ProviderProfile::CurrentProcess,
-    )?;
-    Ok(LoadedLinkedPe32V8 {
-        memory: linked.memory,
-        metadata: LinkedImageMetadata32V8 {
-            image: linked.metadata.image,
-            gate_base: linked.metadata.gate_base,
-            gate_count: linked.metadata.gate_count,
-            gates: linked.metadata.gates,
-        },
-    })
-}
-
-fn load_linked_profile(
-    bytes: &[u8],
-    actual_base: u32,
-    gate_base: u32,
-    resident_pages: u32,
-    profile: ProviderProfile,
-) -> Result<LoadedLinkedImage, LoadError> {
-    if !(1..=4096).contains(&resident_pages) || bytes.len() > MAX_IMAGE_BYTES as usize {
-        return Err(LoadError::Capacity);
-    }
-    if actual_base == 0 || !actual_base.is_multiple_of(65536) {
-        return Err(LoadError::Malformed);
-    }
-    let mut plan = parse(bytes, Profile::Linked)?;
-    let image_end = u64::from(actual_base) + u64::from(plan.metadata.image_size);
-    let gate_end = u64::from(gate_base) + u64::from(PAGE_SIZE);
-    if image_end > 1 << 32
-        || gate_base == 0
-        || !gate_base.is_multiple_of(PAGE_SIZE)
-        || gate_end > 1 << 32
-        || (u64::from(gate_base) < image_end && u64::from(actual_base) < gate_end)
-    {
-        return Err(LoadError::Malformed);
-    }
-    let mapped_pages = plan
-        .metadata
-        .mapped_pages
-        .checked_add(1)
-        .ok_or(LoadError::Capacity)?;
-    if mapped_pages > resident_pages {
-        return Err(LoadError::Capacity);
-    }
-    let preferred_base = plan.metadata.image_base;
-    let delta = actual_base.wrapping_sub(preferred_base);
-    if delta != 0 && plan.relocation_directory.is_none() {
-        return Err(LoadError::Unsupported);
-    }
-    let imports = prepare_imports(bytes, &plan, plan.import_directory, plan.iat_directory)?;
-    let fixups = prepare_fixups(bytes, &plan, plan.relocation_directory, delta)?;
-    imports.validate_aliases(plan.relocation_directory, &fixups)?;
-    let imports = imports.resolve(gate_base, profile)?;
-
-    let mut memory = AddressSpace::new(resident_pages).map_err(LoadError::Memory)?;
-    initialize(
-        &mut memory,
-        actual_base,
-        plan.header_pages,
-        &bytes[..plan.header_size],
-    )?;
-    for section in &plan.sections[..plan.section_count] {
-        initialize(
-            &mut memory,
-            actual_base + section.rva,
-            section.pages,
-            &bytes[section.raw_pointer..section.raw_pointer + section.raw_size],
-        )?;
-    }
-    initialize(&mut memory, gate_base, 1, &[])?;
-    for fixup in fixups {
-        memory
-            .write(
-                GuestAddress(actual_base + fixup.rva),
-                &fixup.value.to_le_bytes(),
-            )
-            .map_err(LoadError::Memory)?;
-    }
-    for (index, address) in imports.slots[..imports.slot_count].iter().enumerate() {
-        memory
-            .write(
-                GuestAddress(actual_base + imports.iat_rva + index as u32 * 4),
-                &address.to_le_bytes(),
-            )
-            .map_err(LoadError::Memory)?;
-    }
-    for gate in &imports.gates[..imports.gate_count as usize] {
-        memory
-            .write(gate.entry, &[0x0f, 0x0b])
-            .map_err(LoadError::Memory)?;
-    }
-    protect(
-        &mut memory,
-        actual_base,
-        plan.header_pages,
-        Permissions::READ,
-    )?;
-    for section in &plan.sections[..plan.section_count] {
-        protect(
-            &mut memory,
-            actual_base + section.rva,
-            section.pages,
-            section.permissions,
-        )?;
-    }
-    protect(&mut memory, gate_base, 1, Permissions::READ_EXECUTE)?;
-    plan.metadata.entry_point = actual_base + (plan.metadata.entry_point - preferred_base);
-    plan.metadata.image_base = actual_base;
-    plan.metadata.mapped_pages = mapped_pages;
-    Ok(LoadedLinkedImage {
-        memory,
-        metadata: LinkedMetadata {
-            image: plan.metadata,
-            gate_base,
-            gate_count: imports.gate_count,
-            gates: imports.gates,
-        },
-    })
-}
-
 fn stage(
     memory: &mut AddressSpace,
     address: u32,
@@ -515,7 +180,7 @@ fn stage(
     protect(memory, address, pages, permissions)
 }
 
-fn initialize(
+pub(super) fn initialize(
     memory: &mut AddressSpace,
     address: u32,
     pages: u32,
@@ -529,7 +194,7 @@ fn initialize(
     memory.write(address, bytes).map_err(LoadError::Memory)
 }
 
-fn protect(
+pub(super) fn protect(
     memory: &mut AddressSpace,
     address: u32,
     pages: u32,
@@ -539,6 +204,10 @@ fn protect(
     memory
         .protect(range, permissions)
         .map_err(LoadError::Memory)
+}
+
+pub(super) fn parse_linked(bytes: &[u8]) -> Result<ImagePlan, LoadError> {
+    parse(bytes, Profile::Linked)
 }
 
 fn parse(bytes: &[u8], profile: Profile) -> Result<ImagePlan, LoadError> {

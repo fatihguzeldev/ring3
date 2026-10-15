@@ -1,13 +1,13 @@
-use crate::loader::{
-    ImageMetadata32, LinkedImageMetadata32, LinkedImageMetadata32V2, LinkedImageMetadata32V3,
-    LinkedImageMetadata32V4, LinkedImageMetadata32V5, LinkedImageMetadata32V6,
-    LinkedImageMetadata32V7, LinkedImageMetadata32V8, LoadedLinkedPe32, LoadedLinkedPe32V2,
-    LoadedLinkedPe32V3, LoadedLinkedPe32V4, LoadedLinkedPe32V5, LoadedLinkedPe32V6,
-    LoadedLinkedPe32V7, LoadedLinkedPe32V8, LoadedPe32, load_pe32, load_pe32_at,
-    load_pe32_linked_at, load_pe32_linked_v2_at, load_pe32_linked_v3_at, load_pe32_linked_v4_at,
-    load_pe32_linked_v5_at, load_pe32_linked_v6_at, load_pe32_linked_v7_at, load_pe32_linked_v8_at,
+use crate::{
+    loader::{
+        ImageMetadata32, LinkedImageMetadata32, LinkedImageMetadata32V2, LinkedImageMetadata32V3,
+        LinkedImageMetadata32V4, LinkedImageMetadata32V5, LinkedImageMetadata32V6,
+        LinkedImageMetadata32V7, LinkedImageMetadata32V8, LinkedMetadata32, LoadedLinkedImage32,
+        LoadedPe32, ProviderProfile, load_linked_profile, load_pe32, load_pe32_at,
+    },
+    memory::AddressSpace,
+    process::{EngineInstance, HostError},
 };
-use crate::process::{EngineInstance, HostError};
 
 impl EngineInstance {
     pub fn load_pe32(&mut self, bytes: &[u8]) -> Result<ImageMetadata32, HostError> {
@@ -32,10 +32,12 @@ impl EngineInstance {
         actual_base: u32,
         gate_base: u32,
     ) -> Result<LinkedImageMetadata32, HostError> {
-        let pages = self.image_capacity()?;
-        let image =
-            load_pe32_linked_at(bytes, actual_base, gate_base, pages).map_err(HostError::Loader)?;
-        Ok(self.publish_linked_image(image))
+        self.load_linked_image(
+            bytes,
+            actual_base,
+            gate_base,
+            ProviderProfile::LastErrorOnly,
+        )
     }
 
     pub fn load_pe32_linked_v2_at(
@@ -44,10 +46,12 @@ impl EngineInstance {
         actual_base: u32,
         gate_base: u32,
     ) -> Result<LinkedImageMetadata32V2, HostError> {
-        let pages = self.image_capacity()?;
-        let image = load_pe32_linked_v2_at(bytes, actual_base, gate_base, pages)
-            .map_err(HostError::Loader)?;
-        Ok(self.publish_linked_image_v2(image))
+        self.load_linked_image(
+            bytes,
+            actual_base,
+            gate_base,
+            ProviderProfile::LastErrorAndExit,
+        )
     }
 
     pub fn load_pe32_linked_v3_at(
@@ -56,20 +60,12 @@ impl EngineInstance {
         actual_base: u32,
         gate_base: u32,
     ) -> Result<LinkedImageMetadata32V3, HostError> {
-        let pages = self.image_capacity()?;
-        let loaded = load_pe32_linked_v3_at(bytes, actual_base, gate_base, pages)
-            .map_err(HostError::Loader)?;
-        Ok(self.publish_linked_image_v3(loaded))
-    }
-
-    pub(in crate::process) fn publish_linked_image_v3(
-        &mut self,
-        loaded: LoadedLinkedPe32V3,
-    ) -> LinkedImageMetadata32V3 {
-        let (memory, linked) = loaded.into_parts();
-        self.memory = Some(memory);
-        self.image = Some(linked.image);
-        linked
+        self.load_linked_image(
+            bytes,
+            actual_base,
+            gate_base,
+            ProviderProfile::MainImageHandle,
+        )
     }
 
     pub fn load_pe32_linked_v4_at(
@@ -78,20 +74,12 @@ impl EngineInstance {
         actual_base: u32,
         gate_base: u32,
     ) -> Result<LinkedImageMetadata32V4, HostError> {
-        let pages = self.image_capacity()?;
-        let loaded = load_pe32_linked_v4_at(bytes, actual_base, gate_base, pages)
-            .map_err(HostError::Loader)?;
-        Ok(self.publish_linked_image_v4(loaded))
-    }
-
-    pub(in crate::process) fn publish_linked_image_v4(
-        &mut self,
-        loaded: LoadedLinkedPe32V4,
-    ) -> LinkedImageMetadata32V4 {
-        let (memory, linked) = loaded.into_parts();
-        self.memory = Some(memory);
-        self.image = Some(linked.image);
-        linked
+        self.load_linked_image(
+            bytes,
+            actual_base,
+            gate_base,
+            ProviderProfile::VirtualAllocation,
+        )
     }
 
     pub fn load_pe32_linked_v5_at(
@@ -100,20 +88,12 @@ impl EngineInstance {
         actual_base: u32,
         gate_base: u32,
     ) -> Result<LinkedImageMetadata32V5, HostError> {
-        let pages = self.image_capacity()?;
-        let loaded = load_pe32_linked_v5_at(bytes, actual_base, gate_base, pages)
-            .map_err(HostError::Loader)?;
-        Ok(self.publish_linked_image_v5(loaded))
-    }
-
-    pub(in crate::process) fn publish_linked_image_v5(
-        &mut self,
-        loaded: LoadedLinkedPe32V5,
-    ) -> LinkedImageMetadata32V5 {
-        let (memory, linked) = loaded.into_parts();
-        self.memory = Some(memory);
-        self.image = Some(linked.image);
-        linked
+        self.load_linked_image(
+            bytes,
+            actual_base,
+            gate_base,
+            ProviderProfile::VirtualMemory,
+        )
     }
 
     pub fn load_pe32_linked_v6_at(
@@ -122,20 +102,12 @@ impl EngineInstance {
         actual_base: u32,
         gate_base: u32,
     ) -> Result<LinkedImageMetadata32V6, HostError> {
-        let pages = self.image_capacity()?;
-        let loaded = load_pe32_linked_v6_at(bytes, actual_base, gate_base, pages)
-            .map_err(HostError::Loader)?;
-        Ok(self.publish_linked_image_v6(loaded))
-    }
-
-    pub(in crate::process) fn publish_linked_image_v6(
-        &mut self,
-        loaded: LoadedLinkedPe32V6,
-    ) -> LinkedImageMetadata32V6 {
-        let (memory, linked) = loaded.into_parts();
-        self.memory = Some(memory);
-        self.image = Some(linked.image);
-        linked
+        self.load_linked_image(
+            bytes,
+            actual_base,
+            gate_base,
+            ProviderProfile::VirtualProtection,
+        )
     }
 
     pub fn load_pe32_linked_v7_at(
@@ -144,20 +116,12 @@ impl EngineInstance {
         actual_base: u32,
         gate_base: u32,
     ) -> Result<LinkedImageMetadata32V7, HostError> {
-        let pages = self.image_capacity()?;
-        let loaded = load_pe32_linked_v7_at(bytes, actual_base, gate_base, pages)
-            .map_err(HostError::Loader)?;
-        Ok(self.publish_linked_image_v7(loaded))
-    }
-
-    pub(in crate::process) fn publish_linked_image_v7(
-        &mut self,
-        loaded: LoadedLinkedPe32V7,
-    ) -> LinkedImageMetadata32V7 {
-        let (memory, linked) = loaded.into_parts();
-        self.memory = Some(memory);
-        self.image = Some(linked.image);
-        linked
+        self.load_linked_image(
+            bytes,
+            actual_base,
+            gate_base,
+            ProviderProfile::InstructionCache,
+        )
     }
 
     pub fn load_pe32_linked_v8_at(
@@ -166,20 +130,34 @@ impl EngineInstance {
         actual_base: u32,
         gate_base: u32,
     ) -> Result<LinkedImageMetadata32V8, HostError> {
-        let pages = self.image_capacity()?;
-        let loaded = load_pe32_linked_v8_at(bytes, actual_base, gate_base, pages)
-            .map_err(HostError::Loader)?;
-        Ok(self.publish_linked_image_v8(loaded))
+        self.load_linked_image(
+            bytes,
+            actual_base,
+            gate_base,
+            ProviderProfile::CurrentProcess,
+        )
     }
 
-    pub(in crate::process) fn publish_linked_image_v8(
+    fn load_linked_image<M: From<LinkedMetadata32>>(
         &mut self,
-        loaded: LoadedLinkedPe32V8,
-    ) -> LinkedImageMetadata32V8 {
+        bytes: &[u8],
+        actual_base: u32,
+        gate_base: u32,
+        profile: ProviderProfile,
+    ) -> Result<M, HostError> {
+        let pages = self.image_capacity()?;
+        let loaded = load_linked_profile(bytes, actual_base, gate_base, pages, profile)
+            .map_err(HostError::Loader)?;
+        Ok(self.publish_linked_image(loaded))
+    }
+
+    pub(in crate::process) fn publish_linked_image<M: From<LinkedMetadata32>>(
+        &mut self,
+        loaded: LoadedLinkedImage32,
+    ) -> M {
         let (memory, linked) = loaded.into_parts();
-        self.memory = Some(memory);
-        self.image = Some(linked.image);
-        linked
+        self.publish_image_parts(memory, linked.image);
+        linked.into()
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -189,16 +167,12 @@ impl EngineInstance {
         actual_base: u32,
         gate_base: u32,
     ) -> Result<LinkedImageMetadata32, HostError> {
-        use crate::abi::arena::{TRANSFER_OFFSET, TRANSFER_SIZE};
-
-        let pages = self.image_capacity()?;
-        if length as usize > TRANSFER_SIZE {
-            return Err(HostError::InvalidRequest);
-        }
-        let bytes = &self.arena()[TRANSFER_OFFSET..TRANSFER_OFFSET + length as usize];
-        let image =
-            load_pe32_linked_at(bytes, actual_base, gate_base, pages).map_err(HostError::Loader)?;
-        Ok(self.publish_linked_image(image))
+        self.load_linked_transfer(
+            length,
+            actual_base,
+            gate_base,
+            ProviderProfile::LastErrorOnly,
+        )
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -208,16 +182,31 @@ impl EngineInstance {
         actual_base: u32,
         gate_base: u32,
     ) -> Result<LinkedImageMetadata32V2, HostError> {
-        use crate::abi::arena::{TRANSFER_OFFSET, TRANSFER_SIZE};
+        self.load_linked_transfer(
+            length,
+            actual_base,
+            gate_base,
+            ProviderProfile::LastErrorAndExit,
+        )
+    }
 
+    #[cfg(target_arch = "wasm32")]
+    fn load_linked_transfer<M: From<LinkedMetadata32>>(
+        &mut self,
+        length: u32,
+        actual_base: u32,
+        gate_base: u32,
+        profile: ProviderProfile,
+    ) -> Result<M, HostError> {
+        use crate::abi::arena::{TRANSFER_OFFSET, TRANSFER_SIZE};
         let pages = self.image_capacity()?;
         if length as usize > TRANSFER_SIZE {
             return Err(HostError::InvalidRequest);
         }
         let bytes = &self.arena()[TRANSFER_OFFSET..TRANSFER_OFFSET + length as usize];
-        let image = load_pe32_linked_v2_at(bytes, actual_base, gate_base, pages)
+        let loaded = load_linked_profile(bytes, actual_base, gate_base, pages, profile)
             .map_err(HostError::Loader)?;
-        Ok(self.publish_linked_image_v2(image))
+        Ok(self.publish_linked_image(loaded))
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -277,26 +266,13 @@ impl EngineInstance {
 
     pub(in crate::process) fn publish_image(&mut self, loaded: LoadedPe32) -> ImageMetadata32 {
         let (memory, image) = loaded.into_parts();
-        self.memory = Some(memory);
-        self.image = Some(image);
+        self.publish_image_parts(memory, image);
         image
     }
 
-    fn publish_linked_image(&mut self, loaded: LoadedLinkedPe32) -> LinkedImageMetadata32 {
-        let (memory, linked) = loaded.into_parts();
+    fn publish_image_parts(&mut self, memory: AddressSpace, image: ImageMetadata32) {
         self.memory = Some(memory);
-        self.image = Some(linked.image);
-        linked
-    }
-
-    pub(in crate::process) fn publish_linked_image_v2(
-        &mut self,
-        loaded: LoadedLinkedPe32V2,
-    ) -> LinkedImageMetadata32V2 {
-        let (memory, linked) = loaded.into_parts();
-        self.memory = Some(memory);
-        self.image = Some(linked.image);
-        linked
+        self.image = Some(image);
     }
 }
 

@@ -4,7 +4,7 @@ use crate::{
     loader::{
         ImageMetadata32, LinkedImageMetadata32V2, LinkedImageMetadata32V3, LinkedImageMetadata32V4,
         LinkedImageMetadata32V5, LinkedImageMetadata32V6, LinkedImageMetadata32V7,
-        LinkedImageMetadata32V8,
+        LinkedImageMetadata32V8, LinkedMetadata32, ProviderProfile, load_linked_profile,
     },
 };
 
@@ -43,13 +43,9 @@ impl EngineInstance {
     }
 
     pub fn load_pe32_input_at(&mut self, actual_base: u32) -> Result<ImageMetadata32, HostError> {
-        let pages = self.image_input_capacity()?;
-        let input = self.image_input.as_ref().ok_or(HostError::InvalidRequest)?;
-        if input.bytes.len() != input.total as usize {
-            return Err(HostError::InvalidRequest);
-        }
-        let loaded = crate::loader::load_pe32_at(&input.bytes, actual_base, pages)
-            .map_err(HostError::Loader)?;
+        let (pages, bytes) = self.completed_image_input()?;
+        let loaded =
+            crate::loader::load_pe32_at(bytes, actual_base, pages).map_err(HostError::Loader)?;
         let image = self.publish_image(loaded);
         self.image_input = None;
         Ok(image)
@@ -60,17 +56,7 @@ impl EngineInstance {
         actual_base: u32,
         gate_base: u32,
     ) -> Result<LinkedImageMetadata32V2, HostError> {
-        let pages = self.image_input_capacity()?;
-        let input = self.image_input.as_ref().ok_or(HostError::InvalidRequest)?;
-        if input.bytes.len() != input.total as usize {
-            return Err(HostError::InvalidRequest);
-        }
-        let image =
-            crate::loader::load_pe32_linked_v2_at(&input.bytes, actual_base, gate_base, pages)
-                .map_err(HostError::Loader)?;
-        let linked = self.publish_linked_image_v2(image);
-        self.image_input = None;
-        Ok(linked)
+        self.load_linked_input(actual_base, gate_base, ProviderProfile::LastErrorAndExit)
     }
 
     pub fn load_pe32_linked_v3_input_at(
@@ -78,17 +64,7 @@ impl EngineInstance {
         actual_base: u32,
         gate_base: u32,
     ) -> Result<LinkedImageMetadata32V3, HostError> {
-        let pages = self.image_input_capacity()?;
-        let input = self.image_input.as_ref().ok_or(HostError::InvalidRequest)?;
-        if input.bytes.len() != input.total as usize {
-            return Err(HostError::InvalidRequest);
-        }
-        let loaded =
-            crate::loader::load_pe32_linked_v3_at(&input.bytes, actual_base, gate_base, pages)
-                .map_err(HostError::Loader)?;
-        let linked = self.publish_linked_image_v3(loaded);
-        self.image_input = None;
-        Ok(linked)
+        self.load_linked_input(actual_base, gate_base, ProviderProfile::MainImageHandle)
     }
 
     pub fn load_pe32_linked_v4_input_at(
@@ -96,17 +72,7 @@ impl EngineInstance {
         actual_base: u32,
         gate_base: u32,
     ) -> Result<LinkedImageMetadata32V4, HostError> {
-        let pages = self.image_input_capacity()?;
-        let input = self.image_input.as_ref().ok_or(HostError::InvalidRequest)?;
-        if input.bytes.len() != input.total as usize {
-            return Err(HostError::InvalidRequest);
-        }
-        let loaded =
-            crate::loader::load_pe32_linked_v4_at(&input.bytes, actual_base, gate_base, pages)
-                .map_err(HostError::Loader)?;
-        let linked = self.publish_linked_image_v4(loaded);
-        self.image_input = None;
-        Ok(linked)
+        self.load_linked_input(actual_base, gate_base, ProviderProfile::VirtualAllocation)
     }
 
     pub fn load_pe32_linked_v5_input_at(
@@ -114,17 +80,7 @@ impl EngineInstance {
         actual_base: u32,
         gate_base: u32,
     ) -> Result<LinkedImageMetadata32V5, HostError> {
-        let pages = self.image_input_capacity()?;
-        let input = self.image_input.as_ref().ok_or(HostError::InvalidRequest)?;
-        if input.bytes.len() != input.total as usize {
-            return Err(HostError::InvalidRequest);
-        }
-        let loaded =
-            crate::loader::load_pe32_linked_v5_at(&input.bytes, actual_base, gate_base, pages)
-                .map_err(HostError::Loader)?;
-        let linked = self.publish_linked_image_v5(loaded);
-        self.image_input = None;
-        Ok(linked)
+        self.load_linked_input(actual_base, gate_base, ProviderProfile::VirtualMemory)
     }
 
     pub fn load_pe32_linked_v6_input_at(
@@ -132,17 +88,7 @@ impl EngineInstance {
         actual_base: u32,
         gate_base: u32,
     ) -> Result<LinkedImageMetadata32V6, HostError> {
-        let pages = self.image_input_capacity()?;
-        let input = self.image_input.as_ref().ok_or(HostError::InvalidRequest)?;
-        if input.bytes.len() != input.total as usize {
-            return Err(HostError::InvalidRequest);
-        }
-        let loaded =
-            crate::loader::load_pe32_linked_v6_at(&input.bytes, actual_base, gate_base, pages)
-                .map_err(HostError::Loader)?;
-        let linked = self.publish_linked_image_v6(loaded);
-        self.image_input = None;
-        Ok(linked)
+        self.load_linked_input(actual_base, gate_base, ProviderProfile::VirtualProtection)
     }
 
     pub fn load_pe32_linked_v7_input_at(
@@ -150,17 +96,7 @@ impl EngineInstance {
         actual_base: u32,
         gate_base: u32,
     ) -> Result<LinkedImageMetadata32V7, HostError> {
-        let pages = self.image_input_capacity()?;
-        let input = self.image_input.as_ref().ok_or(HostError::InvalidRequest)?;
-        if input.bytes.len() != input.total as usize {
-            return Err(HostError::InvalidRequest);
-        }
-        let loaded =
-            crate::loader::load_pe32_linked_v7_at(&input.bytes, actual_base, gate_base, pages)
-                .map_err(HostError::Loader)?;
-        let linked = self.publish_linked_image_v7(loaded);
-        self.image_input = None;
-        Ok(linked)
+        self.load_linked_input(actual_base, gate_base, ProviderProfile::InstructionCache)
     }
 
     pub fn load_pe32_linked_v8_input_at(
@@ -168,15 +104,28 @@ impl EngineInstance {
         actual_base: u32,
         gate_base: u32,
     ) -> Result<LinkedImageMetadata32V8, HostError> {
+        self.load_linked_input(actual_base, gate_base, ProviderProfile::CurrentProcess)
+    }
+
+    fn completed_image_input(&self) -> Result<(u32, &[u8]), HostError> {
         let pages = self.image_input_capacity()?;
         let input = self.image_input.as_ref().ok_or(HostError::InvalidRequest)?;
         if input.bytes.len() != input.total as usize {
             return Err(HostError::InvalidRequest);
         }
-        let loaded =
-            crate::loader::load_pe32_linked_v8_at(&input.bytes, actual_base, gate_base, pages)
-                .map_err(HostError::Loader)?;
-        let linked = self.publish_linked_image_v8(loaded);
+        Ok((pages, &input.bytes))
+    }
+
+    fn load_linked_input<M: From<LinkedMetadata32>>(
+        &mut self,
+        actual_base: u32,
+        gate_base: u32,
+        profile: ProviderProfile,
+    ) -> Result<M, HostError> {
+        let (pages, bytes) = self.completed_image_input()?;
+        let loaded = load_linked_profile(bytes, actual_base, gate_base, pages, profile)
+            .map_err(HostError::Loader)?;
+        let linked = self.publish_linked_image(loaded);
         self.image_input = None;
         Ok(linked)
     }
