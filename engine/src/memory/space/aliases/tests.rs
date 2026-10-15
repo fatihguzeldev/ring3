@@ -193,3 +193,85 @@ fn heterogeneous_aliases_publish_together_and_keep_other_views_code_current() {
     memory.write(GuestAddress(0x4000), &[0xc3]).unwrap();
     assert!(!memory.is_code_current(&code));
 }
+
+#[test]
+fn shared_protection_becomes_private_on_write_atomically_with_output_and_capacity() {
+    for capacity in [2, 3] {
+        let mut memory = AddressSpace::new(capacity).unwrap();
+        memory
+            .map_zeroed(range(0x8000, 1), Permissions::READ_WRITE)
+            .unwrap();
+        let pages = memory.allocate_shared_pages(1, &[1]).unwrap();
+        memory
+            .map_shared_pages(range(0x1000, 1), &pages, 0, Permissions::READ_WRITE, false)
+            .unwrap();
+        memory
+            .map_shared_pages(range(0x3000, 1), &pages, 0, Permissions::READ, false)
+            .unwrap();
+        let before = memory.transaction_version();
+        let output = super::super::WordWrite32 {
+            address: GuestAddress(0x8000),
+            value: 4,
+        };
+        let result = memory.protect_copy_with_word_write32(
+            range(0x1000, 1),
+            Permissions::READ_WRITE,
+            output,
+        );
+        if capacity == 2 {
+            assert_eq!(result, Err(MemoryError::Capacity));
+            assert_eq!(memory.transaction_version(), before);
+            let mut word = [0; 4];
+            memory.read(GuestAddress(0x8000), &mut word).unwrap();
+            assert_eq!(u32::from_le_bytes(word), 0);
+            memory.write(GuestAddress(0x1000), &[2]).unwrap();
+            let mut bytes = [0];
+            memory.read(GuestAddress(0x3000), &mut bytes).unwrap();
+            assert_eq!(bytes, [2]);
+        } else {
+            result.unwrap();
+            let mut word = [0; 4];
+            memory.read(GuestAddress(0x8000), &mut word).unwrap();
+            assert_eq!(u32::from_le_bytes(word), 4);
+            memory.write(GuestAddress(0x1000), &[3]).unwrap();
+            let mut bytes = [0];
+            memory.read(GuestAddress(0x3000), &mut bytes).unwrap();
+            assert_eq!(bytes, [1]);
+            memory.read(GuestAddress(0x1000), &mut bytes).unwrap();
+            assert_eq!(bytes, [3]);
+            memory
+                .protect_copy_with_word_write32(range(0x1000, 1), Permissions::READ_WRITE, output)
+                .unwrap();
+            assert_eq!(
+                memory.mapped_pages(),
+                3,
+                "already private pages require no extra commit capacity"
+            );
+        }
+    }
+}
+
+#[test]
+fn invalid_copy_protection_output_never_consumes_private_commit_capacity() {
+    let mut memory = AddressSpace::new(2).unwrap();
+    let pages = memory.allocate_shared_pages(1, &[7]).unwrap();
+    memory
+        .map_shared_pages(range(0x1000, 1), &pages, 0, Permissions::READ_WRITE, false)
+        .unwrap();
+    let before = memory.transaction_version();
+    assert!(
+        memory
+            .protect_copy_with_word_write32(
+                range(0x1000, 1),
+                Permissions::READ_WRITE,
+                super::super::WordWrite32 {
+                    address: GuestAddress(0xdead0000),
+                    value: 4
+                }
+            )
+            .is_err()
+    );
+    assert_eq!(memory.transaction_version(), before);
+    assert_eq!(memory.mapped_pages(), 1);
+    assert!(memory.private_slots.is_none());
+}

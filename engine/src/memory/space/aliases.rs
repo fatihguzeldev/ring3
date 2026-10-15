@@ -207,6 +207,60 @@ impl AddressSpace {
         );
         self.map_shared_page_rights(range, &rights, copy_on_write)
     }
+    pub(crate) fn is_shared_alias(
+        &self,
+        address: GuestAddress,
+        pages: &SharedPages,
+        index: usize,
+    ) -> bool {
+        self.identity == pages.identity
+            && pages.slots.get(index).is_some_and(|&slot| {
+                self.mappings[address.0 as usize / PAGE_SIZE as usize] == slot + 1
+            })
+    }
+
+    pub(crate) fn protect_copy_with_word_write32(
+        &mut self,
+        range: PageRange,
+        permissions: Permissions,
+        word: super::WordWrite32,
+    ) -> Result<(), MemoryError> {
+        self.require_mapped(range)?;
+        self.check_access(word.address, 4, Access::Write)?;
+        let required = range
+            .indices()
+            .filter(|&page| {
+                self.references[self.mappings[page] as usize - 1] > 1
+                    && self
+                        .private_slots
+                        .as_ref()
+                        .is_none_or(|slots| slots[page] == 0)
+            })
+            .count();
+        self.prepare_alias_capacity(0, required)?;
+        let version = self.advance_version()?;
+        for page in range.indices() {
+            let slot = self.mappings[page] as usize - 1;
+            if self.references[slot] > 1
+                && self
+                    .private_slots
+                    .as_ref()
+                    .is_none_or(|slots| slots[page] == 0)
+            {
+                let private = self.free.pop().unwrap();
+                self.references[private as usize] = 1;
+                self.private_slots.as_mut().unwrap()[page] = private + 1;
+            }
+        }
+        self.copy_in_validated(word.address, &word.value.to_le_bytes(), version);
+        self.code_validation_version = version;
+        for page in range.indices() {
+            let slot = self.mappings[page] as usize - 1;
+            self.change_permissions(page, slot, permissions, version);
+        }
+        Ok(())
+    }
+
     pub(crate) fn protect_alias_pages(
         &mut self,
         pages: &[(GuestAddress, Permissions)],
