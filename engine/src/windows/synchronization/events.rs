@@ -19,6 +19,10 @@ impl PreparedDuplicate32 {
     }
 }
 impl SynchronizationContext32 {
+    pub fn has_named_event(&self, name: &[u16]) -> Result<bool, Error> {
+        let name=normalize_name(name)?;
+        Ok(self.events.iter().flatten().any(|event|event.name.as_deref()==Some(name)))
+    }
     pub fn create_event(
         &mut self,
         manual: bool,

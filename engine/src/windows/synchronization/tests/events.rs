@@ -213,3 +213,49 @@ fn epoch_reset_invalidates_binding_wait_and_handle_without_reusing_guest_values(
     let (new, _) = context.create_event(false, false, false, None).unwrap();
     assert!(new > handle);
 }
+
+#[test]
+fn io_acceptance_retains_and_resets_events_in_one_failure_neutral_receipt() {
+    let mut context = context();
+    let (event, _) = context.create_event(true, true, false, None).unwrap();
+    let revision = context.revision();
+    assert!(
+        context
+            .prepare_io_events(&[event], &[], &[0xffff_fffc])
+            .is_err()
+    );
+    assert_eq!(context.revision(), revision);
+    let prepared = context
+        .prepare_io_events(&[event], &[], &[event, event])
+        .unwrap();
+    let bindings = context.commit_event_bindings(prepared);
+    assert_eq!(bindings.len(), 1);
+    assert!(matches!(
+        context
+            .wait(&[event], WaitMode32::Any, 0, false, None)
+            .unwrap(),
+        WaitOutcome32::Ready(WaitResult32 {
+            value: WAIT_TIMEOUT,
+            ..
+        })
+    ));
+    context.close_handle(event).unwrap();
+    context.validate_event_binding(bindings[0]).unwrap();
+    let signal = context.prepare_signals(&[bindings[0]]).unwrap();
+    context.commit_signals(signal);
+    context.release_event(bindings[0]).unwrap();
+}
+
+#[test]
+fn immediate_io_signal_preflights_all_handles_before_waking_waiters() {
+    let mut context=context();
+    let (first,_)=context.create_event(false,false,false,None).unwrap();
+    let wait=match context.wait(&[first],WaitMode32::Any,INFINITE,false,None).unwrap(){WaitOutcome32::Pending(wait)=>wait,_=>panic!("pending")};
+    let revision=context.revision();
+    assert!(context.prepare_signal_handles(&[first,0xffff_fffc]).is_err());
+    assert_eq!(context.revision(),revision);
+    assert_eq!(context.wait_status(wait).unwrap(),None);
+    let prepared=context.prepare_signal_handles(&[first]).unwrap();
+    context.commit_signals(prepared);
+    assert_eq!(context.take_wait(wait).unwrap().unwrap().value,0);
+}

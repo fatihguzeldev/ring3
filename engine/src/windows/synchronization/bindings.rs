@@ -9,6 +9,7 @@ pub struct PreparedEventBindings32 {
     next_revision: u64,
     release: Vec<EventBinding32>,
     bindings: Vec<EventBinding32>,
+    reset: Vec<usize>,
 }
 impl PreparedEventBindings32 {
     pub fn bindings(&self) -> &[EventBinding32] {
@@ -75,7 +76,27 @@ impl SynchronizationContext32 {
             next_revision: self.next_revision()?,
             release: old,
             bindings,
+            reset: Vec::new(),
         })
+    }
+    pub fn prepare_io_events(
+        &self,
+        handles: &[u32],
+        release: &[EventBinding32],
+        reset: &[u32],
+    ) -> Result<PreparedEventBindings32, Error> {
+        let mut prepared = self.prepare_event_bindings(handles, release)?;
+        prepared
+            .reset
+            .try_reserve_exact(reset.len())
+            .map_err(|_| Error::Allocation)?;
+        for handle in reset {
+            let event = self.handles[self.handle_index(*handle, EVENT_MODIFY_STATE)?].event;
+            if !prepared.reset.contains(&event) {
+                prepared.reset.push(event);
+            }
+        }
+        Ok(prepared)
     }
     pub fn commit_event_bindings(
         &mut self,
@@ -97,6 +118,9 @@ impl SynchronizationContext32 {
             });
             self.events[binding.event].as_mut().unwrap().bindings += 1;
             self.next_binding = binding.id;
+        }
+        for event in &prepared.reset {
+            super::context::set(&mut self.signaled, *event, false);
         }
         for old in &prepared.release {
             self.reclaim_event(old.event);

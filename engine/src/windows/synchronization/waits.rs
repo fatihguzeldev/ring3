@@ -16,6 +16,14 @@ pub struct PreparedSignals32 {
     queue: Option<(u32, u32, u64)>,
 }
 impl SynchronizationContext32 {
+    pub fn prepare_signal_handles(&self, handles: &[u32]) -> Result<PreparedSignals32, Error> {
+        if handles.len() > MAX_WAIT_OBJECTS { return Err(Error::InvalidWait); }
+        let mut slots=[0usize;MAX_WAIT_OBJECTS];
+        for (index,handle) in handles.iter().enumerate() {
+            slots[index]=self.handles[self.handle_index(*handle,super::EVENT_MODIFY_STATE)?].event;
+        }
+        self.prepare_signal_slots(&slots[..handles.len()],&[],self.now,None)
+    }
     pub fn prepare_signals(&self, bindings: &[EventBinding32]) -> Result<PreparedSignals32, Error> {
         let mut prepared = self.signal_plan(self.now, None)?;
         for binding in bindings {
