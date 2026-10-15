@@ -3,6 +3,8 @@ use super::relocation::{RelocationDirectory, prepare_fixups};
 use super::{ImageMetadata32, LoadError, LoadedPe32};
 use crate::memory::{AddressSpace, GuestAddress, PAGE_SIZE, PageRange, Permissions};
 
+pub(crate) mod module;
+
 pub(super) const MAX_IMAGE_BYTES: u32 = 16 * 1024 * 1024;
 const FILE_ALIGNMENT: u32 = 512;
 const SECTION_LIMIT: usize = 8;
