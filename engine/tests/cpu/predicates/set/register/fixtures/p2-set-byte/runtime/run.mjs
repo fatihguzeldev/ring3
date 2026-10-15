@@ -1,3 +1,4 @@
+import {generatedImports, attachDetectionApi} from '../../../../../../../support/wasm/binding.mjs';
 import {ARENA_SIZE} from '../../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
@@ -40,6 +41,7 @@ function request(ctx, bytes) {
 function fresh(owner, pages = 8) {
   const instance = new WebAssembly.Instance(engineModule, {});
   const api = Object.fromEntries(apiNames.map(name => [name, instance.exports[`ring3_abi_v1_${name}`]]));
+ attachDetectionApi(api, instance.exports);
   for (const [name, fn] of Object.entries(api)) assert.equal(typeof fn, 'function', name);
   const key = 0xc835800000000000n + BigInt(++ordinal);
   const ctx = {owner, memory: instance.exports.memory, api, low: Number(key & 0xffffffffn), high: Number(key >> 32n)};
@@ -172,7 +174,7 @@ for (const owner of ['standalone', 'replacement', 'resident']) {
   for (const [index, batch] of batches.entries()) {
     const label = `${owner}-batch${index}`;
     const unit = owner === 'standalone' ? instantiate(ctx, readFileSync(join(output, `batch-${index}.wasm`)), label) : compile(ctx, [batch.entry], [], label);
-    assert.deepEqual(unit.helpers, owner === 'standalone' ? [] : [owner === 'replacement' ? 'guard' : 'guard_resident'], `${label}: SETcc adds no helper`);
+    assert.deepEqual(unit.helpers, owner === 'standalone' ? [] : generatedImports({resident: !(owner === 'replacement'), helpers: []}).slice(1).map(item => item.name), `${label}: SETcc adds no helper`);
     const probeBefore = owner === 'standalone' ? undefined : Array.from({length: 8}, (_, word) => read(ctx, 0x9000 + word * 4));
     for (const [offset, form] of batch.forms.entries()) {
       if (form.kind === 'canonical') {
@@ -256,7 +258,7 @@ for (const base of [0x400000, 0x500000]) for (const owner of ['replacement', 're
   peRows.push({owner, base, guest_retired: 25, branch_result: 0xc8c00003, final_flags: 0x46, canary: 0, receipt_sha256: hash(receipt)});
   assert.equal(ctx.api.close(), 0);
 }
-const sourcePaths = ['Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml', 'engine/src/cpu/x86/ir.rs', 'engine/src/cpu/x86/decode/flow.rs', 'engine/src/cpu/dbt/region.rs', 'engine/src/cpu/dbt/wasm/integer/arithmetic.rs', 'engine/src/cpu/dbt/wasm/integer/bits.rs', 'engine/src/cpu/dbt/wasm/integer/carry_rotates.rs', 'engine/src/cpu/dbt/wasm/integer/decimal.rs', 'engine/src/cpu/dbt/wasm/integer/dispatch.rs', 'engine/src/cpu/dbt/wasm/integer/flags.rs', 'engine/src/cpu/dbt/wasm/integer/mod.rs', 'engine/src/cpu/dbt/wasm/integer/multiply_divide.rs', 'engine/src/cpu/dbt/wasm/integer/operands.rs', 'engine/src/cpu/dbt/wasm/integer/rotates.rs', 'engine/src/cpu/dbt/wasm/integer/shifts.rs', 'engine/src/cpu/dbt/wasm/control.rs', 'engine/tests/cpu/predicates/set/register/wasm/byte.rs', 'engine/tests/cpu/predicates/wasm.rs', 'engine/tests/support/loader/pe32/image.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/predicates/set/register/fixtures/p2-set-byte/runtime/run.mjs'];
+const sourcePaths = ['Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml', 'engine/src/cpu/x86/ir.rs', 'engine/src/cpu/x86/decode/flow.rs', 'engine/src/cpu/dbt/region.rs', 'engine/src/cpu/dbt/wasm/integer/arithmetic.rs', 'engine/src/cpu/dbt/wasm/integer/bits.rs', 'engine/src/cpu/dbt/wasm/integer/carry_rotates.rs', 'engine/src/cpu/dbt/wasm/integer/decimal.rs', 'engine/src/cpu/dbt/wasm/integer/dispatch.rs', 'engine/src/cpu/dbt/wasm/integer/flags.rs', 'engine/src/cpu/dbt/wasm/integer/mod.rs', 'engine/src/cpu/dbt/wasm/integer/multiply_divide.rs', 'engine/src/cpu/dbt/wasm/integer/operands.rs', 'engine/src/cpu/dbt/wasm/integer/rotates.rs', 'engine/src/cpu/dbt/wasm/integer/shifts.rs', 'engine/src/cpu/dbt/wasm/control.rs', 'engine/tests/cpu/predicates/set/register/wasm/byte.rs', 'engine/tests/cpu/predicates/wasm.rs', 'engine/tests/support/loader/pe32/image.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/predicates/set/register/fixtures/p2-set-byte/runtime/run.mjs', 'engine/tests/support/wasm/binding.mjs'];
 assert.equal(new Set(sourcePaths).size, sourcePaths.length);
 const canonicalCases = rows.filter(row => row.kind === 'canonical').length;
 const aliasCases = rows.filter(row => row.kind === 'ignored_reg_alias').length;

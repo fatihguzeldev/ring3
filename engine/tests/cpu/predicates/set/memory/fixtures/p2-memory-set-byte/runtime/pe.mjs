@@ -1,3 +1,4 @@
+import {detectionGuardName, generatedImports} from '../../../../../../../support/wasm/binding.mjs';
 import assert from 'node:assert/strict';
 import {ARENA_SIZE} from '../../../../../../../support/wasm/arena.mjs';
 import {createHash} from 'node:crypto';
@@ -56,16 +57,16 @@ export function runPeProof({engine, output, initial}) {
   const arena = c => Buffer.from(new Uint8Array(c.memory.buffer, c.arena, SIZE));
   function input(c, offset, bytes) {
     const expected = arena(c); expected.set(bytes, offset); new Uint8Array(c.memory.buffer).set(bytes, c.arena + offset);
-    assert.deepEqual(arena(c), expected, 'declared PE host input retains remaining full4612 arena');
+    assert.deepEqual(arena(c), expected, 'declared PE host input retains remaining complete arena arena');
   }
   function pure(c, name, args) {
-    const before = arena(c); assert.equal(c.api[name](...args), 0, name); assert.deepEqual(arena(c), before, name + ' full4612 neutrality');
+    const before = arena(c); assert.equal(c.api[name](...args), 0, name); assert.deepEqual(arena(c), before, name + ' complete arena neutrality');
   }
   function read(c, address, length, expectedBytes) {
     const observed = Buffer.alloc(length);
     for (let offset = 0; offset < length; offset++) {
       const expected = arena(c), helper = record('R3MH', 40, [0, expectedBytes[offset], 0, 0, 0, 1], 2); expected.set(helper, 100);
-      assert.equal(c.api.read8(address + offset), 0); assert.deepEqual(arena(c), expected, 'PE selected byte diagnostic retains full4612 outside helper');
+      assert.equal(c.api.read8(address + offset), 0); assert.deepEqual(arena(c), expected, 'PE selected byte diagnostic retains complete arena outside helper');
       observed[offset] = arena(c).readUInt32LE(120); counts.diagnostic_reads++;
     }
     assert.deepEqual(observed, Buffer.from(expectedBytes)); return observed;
@@ -91,9 +92,9 @@ export function runPeProof({engine, output, initial}) {
     assert.deepEqual(arena(c), expected, 'PE compilation changes only resident receipt');
     assert.ok(binding.pointer > 0 && binding.length > 8 && binding.length <= 65536);
     const bytes = Buffer.from(new Uint8Array(c.memory.buffer, binding.pointer, binding.length)), module = new WebAssembly.Module(bytes);
-    const guard = c.owner === 'replacement' ? 'guard' : 'guard_resident';
+    const guard = detectionGuardName(!(c.owner === 'replacement'));
     const helperNames = label === 'gate' ? [] : ['cpu_read32', c.owner === 'replacement' ? 'cpu_store32' : 'cpu_store_resident32', 'cpu_read8', c.owner === 'replacement' ? 'cpu_store8' : 'cpu_store_resident8'];
-    const imports = [{module: 'env', name: 'memory', kind: 'memory'}, ...[guard, ...helperNames].map(name => ({module: 'ring3', name, kind: 'function'}))];
+    const imports = [{module: 'env', name: 'memory', kind: 'memory'}, ...generatedImports({resident: !(c.owner === 'replacement'), helpers: [...helperNames]}).slice(1).map(item => item.name).map(name => ({module: 'ring3', name, kind: 'function'}))];
     assert.deepEqual(WebAssembly.Module.imports(module), imports); assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
     const forwarded = {[guard]: c.api[guard]};
     for (const name of helperNames) forwarded[name] = (...args) => {
@@ -113,7 +114,7 @@ export function runPeProof({engine, output, initial}) {
     const expected = arena(c);
     if (status === 0) {expected.set(state(registers, pc, flags)); expected.set(exit(reason, retired, version, detail), 56); if (helper) expected.set(helper, 100);}
     const observedStatus = status === 0 ? unit.run(c.arena, c.arena + 56, 64, c.arena + 96) : unit.run(0xffffffff, 0xffffffff, 0, 0xffffffff);
-    assert.equal(observedStatus, status); assert.deepEqual(arena(c), expected, 'PE run full4612 CPU/FLAGS/helper/dirtyFP: ' + label);
+    assert.equal(observedStatus, status); assert.deepEqual(arena(c), expected, 'PE run complete arena CPU/FLAGS/helper/dirtyFP: ' + label);
     const after = arena(c); observations.push({context: c.id, module: unit.file, label, expected_status: status, observed_status: observedStatus,
       expected_reason: status === 0 ? reason : null, observed_reason: status === 0 ? after.readUInt32LE(72) : null,
       expected_retired: status === 0 ? retired : null, observed_retired: status === 0 ? after.readUInt32LE(76) : null,
@@ -183,5 +184,5 @@ export function runPeProof({engine, output, initial}) {
   counts.modules = modules.length; counts.helper_calls = helper_trace.length;
   assert.deepEqual(counts, {contexts: 8, modules: 12, runs: 20, retired: 256, helper_calls: 136, provider_completions: 8, terminal_rejects: 8, diagnostic_reads: 1368, protection_probes: 32});
   return {contexts, modules, observations, helper_trace, counts, image_sha256: hash(image), program_sha256: hash(text),
-    claim: 'same independently reconstructed5632-byte PE/150-byte program at preferred/relocated bases in allfourboundprofiles; genuine startup, no CPU reseed, dirtyFPafterstartup;32 guest retirements/path, named terminal ExitProcess, observed forward-only guest helpers; full4612 run assertions and selected32-byte destination/data/stack diagnostics, no fullRAM rollback claim'};
+    claim: 'same independently reconstructed5632-byte PE/150-byte program at preferred/relocated bases in allfourboundprofiles; genuine startup, no CPU reseed, dirtyFPafterstartup;32 guest retirements/path, named terminal ExitProcess, observed forward-only guest helpers; complete arena run assertions and selected32-byte destination/data/stack diagnostics, no fullRAM rollback claim'};
 }

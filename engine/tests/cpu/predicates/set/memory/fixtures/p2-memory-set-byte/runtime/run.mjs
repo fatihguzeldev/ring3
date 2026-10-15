@@ -1,3 +1,5 @@
+import {pageFaultExit} from '../../../../../../../support/wasm/page-fault.mjs';
+import {detectionGuardName, generatedImports, attachDetectionApi} from '../../../../../../../support/wasm/binding.mjs';
 import {ARENA_SIZE} from '../../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
@@ -19,7 +21,7 @@ const sourcePaths = ['Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml', 'engine/sr
   'engine/src/process/instance.rs', 'engine/src/process/execution/compiled.rs', 'engine/src/process/execution/authority.rs', 'engine/src/process/memory/address_space.rs', 'engine/src/process/memory/scalar.rs', 'engine/src/process/memory/scalar/tests.rs', 'engine/src/process/execution/mod.rs', 'engine/src/process/memory/mod.rs', 'engine/src/process/mod.rs', 'engine/src/process/execution/resident.rs', 'engine/src/process/wasm/mod.rs', 'engine/src/process/wasm/loading.rs', 'engine/src/abi/image.rs', 'engine/src/process/wasm/execution.rs', 'engine/src/process/wasm/calls.rs', 'engine/src/process/wasm/memory.rs', 'engine/src/process/wasm/cpu.rs',
   'engine/tests/cpu/predicates/set/memory/native/byte.rs', 'engine/tests/cpu/predicates/native.rs', 'engine/tests/support/cpu/prefix/byte.rs', 'engine/tests/support/cpu/prefix/admission.rs', 'engine/tests/cpu/predicates/set/memory/wasm/byte.rs', 'engine/tests/cpu/predicates/wasm.rs', 'engine/tests/support/loader/pe32/image.rs', 'engine/tests/support/wasm.rs',
   'engine/tests/cpu/predicates/set/memory/fixtures/p2-memory-set-byte/runtime/run.mjs', 'engine/tests/cpu/predicates/set/memory/fixtures/p2-memory-set-byte/runtime/pe.mjs',
-  'engine/tests/cpu/predicates/set/memory/fixtures/p2-memory-set-byte/integer.S', 'engine/tests/support/wasm/engine.mjs'];
+  'engine/tests/cpu/predicates/set/memory/fixtures/p2-memory-set-byte/integer.S', 'engine/tests/support/wasm/engine.mjs', 'engine/tests/support/wasm/binding.mjs', 'engine/tests/support/wasm/page-fault.mjs'];
 assert.equal(new Set(sourcePaths).size, sourcePaths.length);
 sourcePaths.push(...["engine/src/abi/memory_helper/cpu.rs", "engine/src/cpu/dbt/wasm/memory/cpu_scalar.rs", "engine/src/cpu/dbt/wasm/emitter.rs", "engine/src/cpu/dbt/wasm/code_fetch.rs", "engine/src/process/memory/cpu_scalar.rs", "engine/src/process/memory/scalar/cpu_write.rs", "engine/src/process/wasm/memory/cpu_write.rs", "engine/src/abi/wasm/exports/memory/cpu_write.rs", "engine/tests/cpu/predicates/set/memory/fixtures/p2-memory-set-byte/runtime/pe.mjs"].filter(path=>!sourcePaths.includes(path)));
 const sources = () => Object.fromEntries(sourcePaths.map(p => [p, hash(readFileSync(join(root, p)))]));
@@ -100,8 +102,21 @@ function record(magic, size, fields, version = 1) {
 }
 const words = values => {const b = Buffer.alloc(values.length * 4); values.forEach((v, i) => b.writeUInt32LE(v >>> 0, i * 4)); return b;};
 const state = s => record('R3ST', 56, [...s.registers, s.pc, s.flags]);
-const exit = (reason, retired, version = 2, fault = null) => record('R3EX', 40,
-  [reason, retired, fault?.reason ?? 0, fault?.address ?? 0, fault ? 2 : 0, fault ? 1 : 0], version);
+const exit = (reason, retired, version = 2, fault = null) =>
+  reason === 5
+    ? pageFaultExit({
+        retired,
+        errorCode: 4 | ((fault ? 2 : 0) === 2 ? 2 : 0) | ((fault?.reason ?? 0) === 2 ? 1 : 0),
+        address: fault?.address ?? 0,
+        access: fault ? 2 : 0,
+        length: fault ? 1 : 0
+      })
+    : record(
+        'R3EX',
+        40,
+        [reason, retired, fault?.reason ?? 0, fault?.address ?? 0, fault ? 2 : 0, fault ? 1 : 0],
+        version
+      );
 const storePacket = fault => record('R3MH', 40, fault ? [1, 0, fault.reason, fault.address, 2, 1] : [0, 0, 0, 0, 0, 1], 10);
 const readPacket = value => record('R3MH', 40, [0, value, 0, 0, 0, 1], 2);
 const cpuReadPacket = value => record('R3MH', 40, [0, value, 0, 0, 0, 1], 10);
@@ -109,7 +124,7 @@ const arena = c => Buffer.from(new Uint8Array(c.memory.buffer, c.base, SIZE));
 const cpu = c => {const b = arena(c); return {registers: Array.from({length: 8}, (_, i) => b.readUInt32LE(16 + i * 4)), pc: b.readUInt32LE(48), flags: b.readUInt32LE(52)};};
 function input(c, offset, bytes) {
   const expected = arena(c); expected.set(bytes, offset); new Uint8Array(c.memory.buffer).set(bytes, c.base + offset);
-  assert.deepEqual(arena(c), expected, 'explicit input preserves remaining full4612');
+  assert.deepEqual(arena(c), expected, 'explicit input preserves remaining complete arena');
 }
 function host(c, name, args) {
   const expected = arena(c); assert.equal(c.api[name](...args), 0, name);
@@ -131,6 +146,7 @@ function fresh(owner, entries, purpose) {
   for (const [name, arity] of Object.entries(arities)) {
     const fn = instance.exports['ring3_abi_v1_' + name]; assert.equal(typeof fn, 'function', name); assert.equal(fn.length, arity, name); c.api[name] = fn;
   }
+ attachDetectionApi(c.api, instance.exports);
   c.low = counts.contexts; c.high = 0xc8400000;
   assert.equal(c.api.open(8, c.low, c.high), 0); c.base = c.api.arena_ptr() >>> 0; input(c, 0, initial); return c;
 }
@@ -155,7 +171,7 @@ function compile(c, label, specs, instructions, helpers = [storeName(c.owner)], 
   } else binding = {generation: c.api.generation(), pointer: c.api.module_ptr() >>> 0, length: c.api.module_len() >>> 0};
   assert.ok(binding.length > 8 && binding.length <= 65536);
   const bytes = Buffer.from(new Uint8Array(c.memory.buffer, binding.pointer, binding.length)), module = new WebAssembly.Module(bytes);
-  const names = [owner === 'resident' ? 'guard_resident' : 'guard', ...helpers];
+  const names = generatedImports({resident: owner === 'resident', helpers: [...helpers]}).slice(1).map(item => item.name);
   const imports = [{module: 'env', name: 'memory', kind: 'memory'}, ...names.map(name => ({module: 'ring3', name, kind: 'function'}))];
   assert.deepEqual(WebAssembly.Module.imports(module), imports); assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
   const ring3 = {...c.api};
@@ -174,11 +190,11 @@ function run(c, unit, budget, next, label, {reason = 1, retired = 1, status = 0,
   const expected = arena(c), traceStart = helperTrace.length;
   if (!status) {expected.set(state(next)); expected.set(exit(reason, retired, unit.version, fault), 56); if (packet) expected.set(packet, 100);}
   c.runOrdinal++; const observed = unit.run(...(pointers ?? [c.base, c.base + 56, budget, c.base + 96]));
-  assert.equal(observed, status, label); assert.deepEqual(arena(c), expected, 'full4612 CPU/FLAGS/EIP/exit/helper/dirtyFP before diagnostics: ' + label);
+  assert.equal(observed, status, label); assert.deepEqual(arena(c), expected, 'complete arena CPU/FLAGS/EIP/exit/helper/dirtyFP before diagnostics: ' + label);
   const b = arena(c); observations.push({context: c.id, run: c.runOrdinal, module: unit.file, label, budget,
     expected_status: status, observed_status: observed, expected_pc: status ? null : next.pc, observed_pc: status ? null : b.readUInt32LE(48),
     expected_flags: status ? null : next.flags, observed_flags: status ? null : b.readUInt32LE(52),
-    expected_reason: status ? null : reason, observed_reason: status ? null : b.readUInt32LE(72),
+    model_reason: reason, expected_reason: status ? null : reason === 5 ? 23 : reason, observed_reason: status ? null : b.readUInt32LE(72),
     expected_retired: status ? null : retired, observed_retired: status ? null : b.readUInt32LE(76),
     helper_events: helperTrace.slice(traceStart)});
   counts.runs++; if (!status) counts.retired += b.readUInt32LE(76);
@@ -359,7 +375,7 @@ const result = {status: 'ok', engine_sha256: engine.sha256, source_pins: sourceP
     oracle: {condition_anchors: anchors, irrelevant_seeds: irrelevantSeeds, canonical_flags: allFlags, ea_shapes: shapeDefinitions,
       batches: batches.map(b => ({index: b.index, pc: b.pc, group: b.group, forms: b.forms.length, instructions: b.forms.length + 1, hex: b.code.toString('hex')}))}}, pe,
   limits: ['existing engine memory SETcc; four bound replacement/resident explicit/entry profiles; exact13 Rust-authored micro payloads and copied PE input retained',
-    'full4612 arena asserted after each generated run before diagnostics, including dirtyFP128; saved rows are selected observations rather than raw full-arena dumps',
+    'complete arena arena asserted after each generated run before diagnostics, including dirtyFP128; saved rows are selected observations rather than raw full-arena dumps',
     '32-byte selected RAM range after each semantic row; whole declared pages only at group/live/SMC boundaries, not per-row whole guest memory',
     'actual forwarded guest memory helper chronology/status/packets is separate from public read8/read32 diagnostics; guards are canonical and not instrumented',
     'seven micro bank captures use resident7 of unchanged8slots; max8blocks/64instructions/65536Wasm unchanged; replacement banks compiled and exercised sequentially',
