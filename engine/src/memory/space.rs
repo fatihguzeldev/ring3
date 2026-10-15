@@ -4,9 +4,11 @@ mod code_fetch;
 mod cpu;
 mod mapping;
 mod paging;
+mod windows;
 
 pub(crate) use aliases::SharedPages;
 pub(crate) use mapping::PageInitialization;
+pub(crate) use windows::PrivatePageChange32;
 
 use super::address::{ADDRESS_LIMIT, GUEST_PAGES};
 use super::code::{PageVersion, new_identity};
