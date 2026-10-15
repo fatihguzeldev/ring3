@@ -1,3 +1,4 @@
+import {generatedImports, attachDetectionApi} from '../../../../../../../support/wasm/binding.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
@@ -43,6 +44,7 @@ function fresh(owner) {
     'module_ptr','module_len','guard','guard_resident','acknowledge_resident_installation','dispatcher_module',
     'guard_dispatch_entry','find_installed_resident','capture_resident_call','complete_resident_call'];
   const api=Object.fromEntries(names.map(name=>[name,instance.exports[`ring3_abi_v1_${name}`]]));
+ attachDetectionApi(api, instance.exports);
   for (const [name,fn] of Object.entries(api)) assert.equal(typeof fn,'function',name);
   const c={owner,api,memory:instance.exports.memory,low:stats.contexts,high:0xc9356000};
   assert.equal(api.open(3,c.low,c.high),0);c.base=api.arena_ptr()>>>0;
@@ -66,8 +68,7 @@ function compile(c,name,bytes,specs,gates=[]) {
     writeFileSync(join(output,`${c.owner}-${name}.wasm`),generated,{flag:'wx'});
   }
   const module=new WebAssembly.Module(generated),imports=WebAssembly.Module.imports(module);
-  assert.deepEqual(imports,[{module:'env',name:'memory',kind:'memory'},
-    ...(c.owner==='standalone'?[]:[{module:'ring3',name:c.owner==='replacement'?'guard':'guard_resident',kind:'function'}])]);
+  assert.deepEqual(imports,generatedImports({bound: !(c.owner==='standalone'), resident: !(c.owner==='replacement'), helpers: []}));
   const child=new WebAssembly.Instance(module,{env:{memory:c.memory},...(c.api?{ring3:c.api}:{})});
   modules.push({owner:c.owner,name,sha256:sha256(generated),bytes:generated.length});
   return {...binding,run:child.exports.run};
@@ -146,7 +147,7 @@ assert.equal(c.api.close(),0);
 assert.equal(stats.numeric_cases,3*2*8*14*2);assert.equal(stats.prefix_faults,3);assert.equal(stats.dispatcher_runs,2);
 assert.equal(stats.successful+stats.faults,stats.numeric_cases);
 const result={status:'ok',stats,modules,observations,engine_sha256:sha256(engineBytes),arena_bytes:SIZE,
-  sources:Object.fromEntries(['engine/tests/cpu/multiply/divide/register/native/dword.rs', 'engine/tests/cpu/multiply/native.rs', 'engine/tests/support/cpu/prefix/admission.rs', 'engine/tests/cpu/multiply/native.rs','engine/tests/cpu/multiply/divide/register/wasm/dword.rs', 'engine/tests/cpu/multiply/wasm.rs', 'engine/tests/cpu/multiply/wasm.rs','engine/tests/cpu/multiply/divide/register/fixtures/p2-division/runtime/run.mjs'].map(path=>[path,sha256(readFileSync(join(root,path)))])),
+  sources:Object.fromEntries(['engine/tests/cpu/multiply/divide/register/native/dword.rs', 'engine/tests/cpu/multiply/native.rs', 'engine/tests/support/cpu/prefix/admission.rs', 'engine/tests/cpu/multiply/native.rs','engine/tests/cpu/multiply/divide/register/wasm/dword.rs', 'engine/tests/cpu/multiply/wasm.rs', 'engine/tests/cpu/multiply/wasm.rs','engine/tests/cpu/multiply/divide/register/fixtures/p2-division/runtime/run.mjs', 'engine/tests/support/wasm/binding.mjs'].map(path=>[path,sha256(readFileSync(join(root,path)))])),
   tools:{node:process.version,v8:process.versions.v8},
   scope:'register DWORD DIV/IDIV only; all8 source aliases,14 finite operand rows,2 FLAGS seeds, standalone/replacement/resident generated execution; precise zero/overflow and completed prefix, unchanged undefined FLAGS, V5 safepoints/NeedCode/Gate and dispatcher passthrough. Native callback injection separately covers V5 NeedCode consumers. No memory/byte/word division, full x86/Windows exception dispatch, browser, performance or full CI claim.'};
 writeFileSync(join(output,'result.json'),JSON.stringify(result,null,2),{flag:'wx'});

@@ -102,7 +102,7 @@ function open(owner, entries, instruction, label) {
   const bytes = Buffer.from(new Uint8Array(c.memory.buffer, pointer, length)), module = new WebAssembly.Module(bytes);
   const imports = WebAssembly.Module.imports(module), ring3 = {...c.api};
   c.exitVersion = imports.some(row => /^(segment_load|x87|cpu_read(?:8|16|32)$|cpu_store)/.test(row.name)) ? 6 : 2;
-  for (const imp of imports.filter(row => row.module === 'ring3' && !row.name.startsWith('guard'))) {
+  for (const imp of imports.filter(row => row.module === 'ring3' && !row.name.startsWith('guard') && row.name !== 'finish_exception_detection')) {
     ring3[imp.name] = (...args) => {
       const before = arena(c), status = c.api[imp.name](...args), after = arena(c), allowed = Buffer.from(before);
       allowed.set(after.subarray(100, 140), 100);
@@ -116,7 +116,7 @@ function open(owner, entries, instruction, label) {
     };
   }
   c.run = new WebAssembly.Instance(module, {env: {memory: c.memory}, ring3}).exports.run;
-  const detachedImports = {...ring3, guard: () => 0, guard_resident: () => 0};
+  const detachedImports = {...ring3, guard_detect: () => 1n, guard_detect_resident: () => 1n};
   c.detachedPreflight = new WebAssembly.Instance(module, {env: {memory: c.memory}, ring3: detachedImports}).exports.run;
   const file = `module-${c.id}.wasm`; writeFileSync(join(output, file), bytes, {flag: 'wx'});
   modules.push({context: c.id, file, bytes: length, sha256: hash(bytes), imports});

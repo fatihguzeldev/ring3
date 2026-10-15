@@ -10,7 +10,7 @@ const engineBytes = readFileSync(enginePath);
 assert.ok(WebAssembly.validate(engineBytes), 'actual engine validates');
 const engineModule = new WebAssembly.Module(engineBytes);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), [], 'engine has no JS imports');
-const names = ['open', 'close', 'arena_ptr', 'map', 'protect', 'unmap', 'upload', 'compile', 'compile_with_gates', 'capture_call', 'complete_call', 'abandon_call', 'generation', 'module_ptr', 'module_len', 'guard', 'read32', 'write32', 'store32', 'cpu_read32', 'cpu_store32', 'write_words32'];
+const names = ['open', 'close', 'arena_ptr', 'map', 'protect', 'unmap', 'upload', 'compile', 'compile_with_gates', 'capture_call', 'complete_call', 'abandon_call', 'generation', 'module_ptr', 'module_len', 'guard', 'guard_detect', 'finish_exception_detection', 'read32', 'write32', 'store32', 'cpu_read32', 'cpu_store32', 'write_words32'];
 let keys = 0n, modules = 0, actualRuns = 0;
 const generatedHashes = [];
 
@@ -112,13 +112,13 @@ function compile(engine, blocks, gates, expectedHelpers = []) {
   const module = new WebAssembly.Module(encoded);
   const expected = [
     {module: 'env', name: 'memory', kind: 'memory'},
-    {module: 'ring3', name: 'guard', kind: 'function'},
+    {module: 'ring3', name: 'guard_detect', kind: 'function'}, {module: 'ring3', name: 'finish_exception_detection', kind: 'function'},
     ...expectedHelpers.map(name => ({module: 'ring3', name, kind: 'function'})),
   ].sort((a, b) => `${a.module}.${a.name}`.localeCompare(`${b.module}.${b.name}`));
   assert.deepEqual(sortedImports(module), expected, 'only actual memory/guard/instruction helpers; no hot gate import');
   const instance = new WebAssembly.Instance(module, {
     env: {memory: engine.memory},
-    ring3: {guard: engine.api.guard, cpu_read32: engine.api.cpu_read32, cpu_store32: engine.api.cpu_store32},
+    ring3: {guard_detect: engine.api.guard_detect, finish_exception_detection: engine.api.finish_exception_detection, cpu_read32: engine.api.cpu_read32, cpu_store32: engine.api.cpu_store32},
   });
   modules++;
   generatedHashes.push(hash(encoded));
@@ -156,8 +156,10 @@ function readState(engine) {
 }
 
 function exit(reason, retired, detail = 0, address = 0, access = 0, length = reason === 5 ? 4 : 0, version = 3) {
+  const pageFault = reason === 5;
+  if (pageFault) {reason = 23; detail = 4 | (access === 2 ? 2 : 0) | (detail === 2 ? 1 : 0);}
   const bytes = new Uint8Array(40), view = new DataView(bytes.buffer);
-  header(bytes, view, 0, 'R3EX', 40, version);
+  header(bytes, view, 0, 'R3EX', 40, pageFault ? 12 : version);
   [reason, retired, detail, address, access, length].forEach((field, index) => view.setUint32(16 + index * 4, field, true));
   return bytes;
 }

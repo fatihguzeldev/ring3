@@ -72,7 +72,7 @@ function open(owner, entries, mmx, row) {
   const pointer = resident ? compiled.readUInt32LE(156) : c.api.module_ptr() >>> 0;
   const length = resident ? compiled.readUInt32LE(160) : c.api.module_len() >>> 0;
   const bytes = Buffer.from(new Uint8Array(c.memory.buffer, pointer, length)), module = new WebAssembly.Module(bytes), ring3 = {...c.api};
-  for (const item of WebAssembly.Module.imports(module).filter(item => item.module === 'ring3' && !item.name.startsWith('guard'))) {
+  for (const item of WebAssembly.Module.imports(module).filter(item => item.module === 'ring3' && !item.name.startsWith('guard') && item.name !== 'finish_exception_detection')) {
     ring3[item.name] = (...args) => {
       const before = arena(c), status = c.api[item.name](...args), after = arena(c), allowed = Buffer.from(before);
       allowed.set(after.subarray(100, 140), 100);
