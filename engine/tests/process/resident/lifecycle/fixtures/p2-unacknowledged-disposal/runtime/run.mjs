@@ -12,9 +12,9 @@ const exportContract = assertEngineExports(fixtureEngine.module, root);
 mkdirSync(join(output, 'runtime'), {recursive: true});
 assert.ok(root, 'expected copied actual engine, output directory and repository root');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
-const SIZE = 4612, TRANSFER = 140, CODE = 0x1000, DATA = 0x4000, VICTIM = CODE + 0x10;
+const SIZE = 4796, TRANSFER = 140, CODE = 0x1000, DATA = 0x4000, VICTIM = CODE + 0x10;
 const KEY_LOW = 1, KEY_HIGH = 0xc3790000;
-const arities = {open:3, close:0, arena_ptr:0, map:3, protect:3, upload:2, read32:1, compile_resident_entries:2, resident_module:2, guard_resident:7, dispatcher_module:2, guard_dispatch_entry:5, find_installed_resident:3, acknowledge_resident_installation:5, retire_stale_resident:4, discard_unacknowledged_resident:4, cpu_read32: 1};
+const arities = {open:3, close:0, arena_ptr:0, map:3, protect:3, upload:2, read32:1, compile_resident_entries:2, resident_module:2, guard_resident:7, guard_detect_resident:7, finish_exception_detection:12, dispatcher_module:2, guard_dispatch_entry:5, find_installed_resident:3, acknowledge_resident_installation:5, retire_stale_resident:4, discard_unacknowledged_resident:4, cpu_read32: 1};
 const sourcePaths = [...execFileSync('rg', ['--files', 'engine/src'], {cwd:root, encoding:'utf8'}).trim().split('\n').sort(), 'Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml', 'engine/tests/process/resident/lifecycle/disposal/wasm.rs', 'engine/tests/process/resident/wasm.rs', 'engine/tests/process/resident/lifecycle/fixtures/p2-unacknowledged-disposal/runtime/run.mjs'];
 sourcePaths.push(...[...exportContract.sourcePaths, 'engine/tests/support/wasm/engine.mjs'].filter(path => !sourcePaths.includes(path)));
 assert.ok(sourcePaths.length > 0, 'nonempty source manifest'); assert.equal(new Set(sourcePaths).size, sourcePaths.length);
@@ -94,10 +94,10 @@ function shape(bytes, dispatcher, unit) {
     assert.equal(at,end);
   }
   const signature=n=>({parameters:Array(n).fill(127),results:[127]});
-  assert.deepEqual(types,dispatcher?[signature(4),signature(5),signature(3)]:[signature(4),signature(7)]);
-  assert.deepEqual(functions,[0]); assert.deepEqual(exports,[{name:'run',kind:0,index:dispatcher?2:1}]);
-  assert.deepEqual(imports,dispatcher?[{module:'env',name:'memory',kind:'memory',minimum:1},{module:'env',name:'table',kind:'table',minimum:8,maximum:8},{module:'ring3',name:'guard_dispatch_entry',kind:'function',type:1},{module:'ring3',name:'find_installed_resident',kind:'function',type:2}]:[{module:'env',name:'memory',kind:'memory',minimum:1},{module:'ring3',name:'guard_resident',kind:'function',type:1}]);
-  assert.deepEqual(locals,dispatcher?[[7,127]]:[[16,127],[1,126],[10,127],[1,127]]); assert.ok(guard);
+  assert.deepEqual(types,dispatcher?[signature(4),signature(5),signature(3)]:[signature(4),{parameters:Array(7).fill(127),results:[126]},{parameters:[126,...Array(11).fill(127)],results:[127]}]);
+  assert.deepEqual(functions,[0]); assert.deepEqual(exports,[{name:'run',kind:0,index:2}]);
+  assert.deepEqual(imports,dispatcher?[{module:'env',name:'memory',kind:'memory',minimum:1},{module:'env',name:'table',kind:'table',minimum:8,maximum:8},{module:'ring3',name:'guard_dispatch_entry',kind:'function',type:1},{module:'ring3',name:'find_installed_resident',kind:'function',type:2}]:[{module:'env',name:'memory',kind:'memory',minimum:1},{module:'ring3',name:'guard_detect_resident',kind:'function',type:1},{module:'ring3',name:'finish_exception_detection',kind:'function',type:2}]);
+  assert.deepEqual(locals,dispatcher?[[6,127]]:[[16,127],[1,126],[10,127],[1,127],[1,126],[6,127]]); assert.ok(guard);
   return {types,imports,exports,locals,guard};
 }
 function saveModule(bytes, label, dispatcher, binding={}) {
@@ -188,5 +188,5 @@ const counts={instances:1,resident_modules:11,dispatcher_modules:1,successful_di
 assert.deepEqual(counts,{instances:1,resident_modules:11,dispatcher_modules:1,successful_discards:3,recompiles:3,capacity_refusals:1,peak_resident_units:8,retained_old_functions:3,controls:37,generated_success_calls:5,generated_refusals:12,guest_retired:7,ram_observations:6,whole_pages:12,read32_calls:12288});
 const afterSources=sourceHashes();assert.deepEqual(afterSources,beforeSources);assert.equal(hash(readFileSync(enginePath)),hash(engineBytes));
 writeFileSync(join(output,'source-after.json'),JSON.stringify(afterSources,null,2));
-const result={counts,controls,runs,cycles,modules,observations,engine_sha256:hash(engineBytes),sources:beforeSources,source_after:afterSources,oracle:{key:[KEY_LOW,KEY_HIGH],code_address:CODE,data_address:DATA,victim:VICTIM,keeper_program:'b800003412e906000000',victim_program:'40ebfd',other_programs:Array.from({length:7},(_,index)=>({address:CODE+(index+2)*0x10,eax:0x81000000+index+2})),code_sha256:hash(codePage),data_sha256:hash(dataPage),initial_registers:initial,final_registers:finalRegisters,final_pc:VICTIM+1,final_flags:6,successful_ids:modules.filter(row=>row.id).map(row=>row.id)},limits:'Authored synchronous trusted-host flat32 ownership recovery. Unit cap dominates byte cap; native tests prove exact byte credit and wider lifecycle/Busy/currency priorities. Every removed raw pointer expires immediately and is never dereferenced again. Three old instantiated functions remain finite references for guard refusal. Whole declared code/data pages and full4236 arena are saved and asserted; no foreign Table/stack/race/GC/shrink/browser/SDK/PE/provider/game claim.'};
+const result={counts,controls,runs,cycles,modules,observations,engine_sha256:hash(engineBytes),sources:beforeSources,source_after:afterSources,oracle:{key:[KEY_LOW,KEY_HIGH],code_address:CODE,data_address:DATA,victim:VICTIM,keeper_program:'b800003412e906000000',victim_program:'40ebfd',other_programs:Array.from({length:7},(_,index)=>({address:CODE+(index+2)*0x10,eax:0x81000000+index+2})),code_sha256:hash(codePage),data_sha256:hash(dataPage),initial_registers:initial,final_registers:finalRegisters,final_pc:VICTIM+1,final_flags:6,successful_ids:modules.filter(row=>row.id).map(row=>row.id)},limits:'Authored synchronous trusted-host flat32 ownership recovery. Unit cap dominates byte cap; native tests prove exact byte credit and wider lifecycle/Busy/currency priorities. Every removed raw pointer expires immediately and is never dereferenced again. Three old instantiated functions remain finite references for guard refusal. Whole declared code/data pages and full4796 arena are saved and asserted; no foreign Table/stack/race/GC/shrink/browser/SDK/PE/provider/game claim.'};
 writeFileSync(join(output,'result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify({counts,engine_sha256:result.engine_sha256,output}));

@@ -10,9 +10,9 @@ assert.ok(root);
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const engineBytes = readFileSync(enginePath), engineModule = new WebAssembly.Module(engineBytes);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
-const SIZE = 4612, TRANSFER = 140, DATA = 0x5000;
-const names = ['open', 'close', 'arena_ptr', 'map', 'protect', 'unmap', 'upload', 'generation', 'module_ptr', 'module_len', 'guard_resident', 'compile_resident', 'resident_module', 'find_resident', 'read32', 'write32', 'store_resident32', 'cpu_read32', 'cpu_store_resident32'];
-const stats = {engine_instances: 0, compiled_units: 0, canonical_runs: 0, rejected_runs: 0, full_arena_checks: 0, metadata_checks: 0, successful_guards: 0, failed_guards: 0, find_success: 0, find_failure: 0, continuation_initial_calls: 0, continuation_resumes: 0, form_cases: 0, alias_cases: 0, smc_cases: 0, same_byte_code_writes: 0, same_byte_permission_faults: 0, bound_store_sites: 0, algorithm_cases: 0, algorithm_retired: 0, faults: 0, read_faults: 0, store_faults: 0, repairs: 0, cancellations: 0, host_reads: 0, host_writes: 0, guest_read32: 0, guest_store32: 0, raw_rejected_stores: 0};
+const SIZE = 4796, TRANSFER = 140, DATA = 0x5000;
+const names = ['guard_detect', 'guard_detect_resident', 'finish_exception_detection', 'open', 'close', 'arena_ptr', 'map', 'protect', 'unmap', 'upload', 'generation', 'module_ptr', 'module_len', 'guard_resident', 'compile_resident', 'resident_module', 'find_resident', 'read32', 'write32', 'store_resident32', 'cpu_read32', 'cpu_store_resident32', 'cpu_read_modify32'];
+const stats = {engine_instances: 0, compiled_units: 0, canonical_runs: 0, rejected_runs: 0, full_arena_checks: 0, metadata_checks: 0, successful_guards: 0, failed_guards: 0, find_success: 0, find_failure: 0, continuation_initial_calls: 0, continuation_resumes: 0, form_cases: 0, alias_cases: 0, smc_cases: 0, same_byte_code_writes: 0, same_byte_permission_faults: 0, bound_store_sites: 0, algorithm_cases: 0, algorithm_retired: 0, faults: 0, read_faults: 0, store_faults: 0, repairs: 0, cancellations: 0, host_reads: 0, host_writes: 0, guest_read32: 0, guest_read_modify32: 0, guest_store32: 0, raw_rejected_stores: 0};
 const units = [], artifacts = {}, metadata = [];
 
 function refresh(engine) {
@@ -79,10 +79,10 @@ function record(engine, before, label) {
 function compile(engine, blocks, reads, label, stores = 0) {
   descriptors(engine, blocks); const before = arena(engine); assert.equal(engine.api.compile_resident(blocks.length), 0, label);
   const selected = record(engine, before, label), module = new WebAssembly.Module(selected.bytes);
-  const helpers = [...reads.filter(name => name === 'cpu_read32'), ...(stores ? ['cpu_store_resident32'] : []), ...reads.filter(name => name !== 'cpu_read32')];
-  const expected = [{module: 'env', name: 'memory', kind: 'memory'}, {module: 'ring3', name: 'guard_resident', kind: 'function'}, ...helpers.map(name => ({module: 'ring3', name, kind: 'function'}))];
+  const helpers = [...reads.filter(name => name === 'cpu_read32'), ...(stores ? ['cpu_store_resident32'] : []), ...reads.filter(name => name !== 'cpu_read32'), ...(stores ? ['cpu_read_modify32'] : [])];
+  const expected = [{module: 'env', name: 'memory', kind: 'memory'}, {module: 'ring3', name: 'guard_detect_resident', kind: 'function'}, ...helpers.map(name => ({module: 'ring3', name, kind: 'function'})), {module: 'ring3', name: 'finish_exception_detection', kind: 'function'}];
   assert.deepEqual(WebAssembly.Module.imports(module), expected, 'exact direct bound guard/read/store imports'); assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
-  const imports = {guard_resident: engine.api.guard_resident, ...Object.fromEntries(reads.map(name => [name, engine.api[name]])), ...(stores ? {cpu_store_resident32: engine.api.cpu_store_resident32} : {})};
+  const imports = {cpu_read_modify32: engine.api.cpu_read_modify32, guard_detect_resident: engine.api.guard_detect_resident, finish_exception_detection: engine.api.finish_exception_detection, ...Object.fromEntries(reads.map(name => [name, engine.api[name]])), ...(stores ? {cpu_store_resident32: engine.api.cpu_store_resident32} : {})};
   boundStores(selected.bytes, engine, selected.id, stores, 1 + Number(reads.includes('cpu_read32')));
   const instance = new WebAssembly.Instance(module, {env: {memory: engine.memory}, ring3: imports}); assert.equal(instance.exports.run.length, 4);
   const filename = `unit-${++stats.compiled_units}.wasm`; writeFileSync(join(outputDir, filename), selected.bytes); artifacts[filename] = hash(selected.bytes);
@@ -139,12 +139,17 @@ function helper(width, value, detail = 0, address = 0, access = 1) {
   [detail ? 1 : 0, detail ? 0 : value, detail, address, detail ? access : 0, width === 4 && detail === 0 ? 0 : width].forEach((v, i) => view.setUint32(16 + i * 4, v, true)); return bytes;
 }
 function unitExit(unit, reason, retired, detail = 0, address = 0, width = 0, version = 2, access = 2) {
-  const bytes = new Uint8Array(40), view = new DataView(bytes.buffer); header(bytes, view, 0, 'R3EX', 40, unit.reads.length || (Array.isArray(unit.stores) ? unit.stores.length : unit.stores ?? 0) ? 6 : version);
-  [reason, retired, detail, address, reason === 5 ? access : 0, width].forEach((v, i) => view.setUint32(16 + i * 4, v, true)); return bytes;
+  const pageFault = reason === 5;
+  if (pageFault) access = 2;
+  const code = pageFault ? 4 + Number(detail === 2) + (access === 2 ? 2 : 0) : detail;
+  const bytes = new Uint8Array(40), view = new DataView(bytes.buffer); header(bytes, view, 0, 'R3EX', 40, pageFault ? 12 : unit.reads.length || (Array.isArray(unit.stores) ? unit.stores.length : unit.stores ?? 0) ? 6 : version);
+  [pageFault ? 23 : reason, retired, code, address, pageFault ? access : 0, width].forEach((v, i) => view.setUint32(16 + i * 4, v, true)); return bytes;
 }
 function cpuHelper(width, value, detail = 0, address = 0, access = 1) {
-  const bytes = new Uint8Array(40), view = new DataView(bytes.buffer); header(bytes, view, 0, 'R3MH', 40, 10);
-  [detail ? 1 : 0, detail ? 0 : value, detail, address, detail ? access : 0, width].forEach((v, i) => view.setUint32(16 + i * 4, v, true)); return bytes;
+  if (detail) access = 2;
+  const code = detail ? 4 + Number(detail === 2) + (access === 2 ? 2 : 0) : 0;
+  const bytes = new Uint8Array(40), view = new DataView(bytes.buffer); header(bytes, view, 0, 'R3MH', 40, detail ? 15 : 10);
+  [detail ? 9 : 0, detail ? 0 : value, code, address, detail ? access : 0, width].forEach((v, i) => view.setUint32(16 + i * 4, v, true)); return bytes;
 }
 function cpuStoreHelper(detail = 0, address = 0) { return cpuHelper(4, 0, detail, address, 2); }
 
@@ -153,9 +158,9 @@ function run(engine, unit, budget, expected, expectedExit, expectedHelper, label
   const wanted = before.slice(), view = new DataView(wanted.buffer);
   expected.registers.forEach((r, i) => view.setUint32(16 + i * 4, r, true)); view.setUint32(48, expected.eip, true); view.setUint32(52, expected.eflags, true); wanted.set(expectedExit, 56);
   if (expectedHelper !== undefined) wanted.set(expectedHelper, 100);
-  assert.deepEqual(arena(engine), wanted, `${label}: all4236 state/exit/helper/cancel/transfer bytes`); stats.canonical_runs++; stats.full_arena_checks++; noLegacy(engine);
+  assert.deepEqual(arena(engine), wanted, `${label}: all4796 state/exit/helper/cancel/transfer bytes`); stats.canonical_runs++; stats.full_arena_checks++; noLegacy(engine);
   if (continuation === 'initial') stats.continuation_initial_calls++; else if (continuation === 'resume') stats.continuation_resumes++;
-  stats.guest_read32 += reads; stats.guest_store32 += stores;
+  stats[unit.stores ? 'guest_read_modify32' : 'guest_read32'] += reads; stats.guest_store32 += stores;
 }
 function word(engine, address, value) { assert.equal(engine.api.write32(address, value), 0); stats.host_writes++; refresh(engine); }
 function observe(engine, address, width, expected) {
@@ -174,7 +179,7 @@ function boundStores(bytes, engine, id, count, index) {
     } else if (section === 10) { body = generatedRunBody(bytes); }
     cursor.i = end;
   }
-  assert.ok(body); assert.deepEqual(signatures[importTypes.get('guard_resident')], {args: Array(7).fill(0x7f), returns: [0x7f]});
+  assert.ok(body); assert.deepEqual(signatures[importTypes.get('guard_detect_resident')], {args: Array(7).fill(0x7f), returns: [0x7e]});
   if (!count) { assert.equal(importTypes.has('cpu_store_resident32'), false); return; }
   assert.deepEqual(signatures[importTypes.get('cpu_read32')], {args: [0x7f], returns: [0x7f]}); assert.equal(index, 2);
   assert.deepEqual(signatures[importTypes.get('cpu_store_resident32')], {args: Array(6).fill(0x7f), returns: [0x7f]});
@@ -238,7 +243,7 @@ for (const page of [0x8000, 0x9000]) assert.equal(engine.api.map(page, 1, 3), 0)
 for (const form of registerForms) for (const access of [1, 2]) {
   const address = access === 1 ? 0x8000 : 0x9000; assert.equal(engine.api.protect(address, 1, 3), 0); word(engine, address, 0x10); assert.equal(engine.api.protect(address, 1, access === 1 ? 2 : 1), 0);
   const start = startFor(form, false); start.registers[3] = address; reset(engine, start); const stopped = prefixed(start), source = sourceOf(form, stopped);
-  run(engine, form.unit, 8, stopped, unitExit(form.unit, 5, 1, 2, address, 4, 2, access), cpuHelper(4, 0, 2, address, access), 'first read or second store permission failure preserves binary flags', 'initial', access === 2 ? 1 : 0, 1); stats.faults++; stats[access === 1 ? 'read_faults' : 'store_faults']++;
+  run(engine, form.unit, 8, stopped, unitExit(form.unit, 5, 1, 2, address, 4, 2, access), cpuHelper(4, 0, 2, address, access), 'write-intent operand preflight permission failure preserves binary flags', 'initial', 0, 1); stats.faults++; stats[access === 1 ? 'read_faults' : 'store_faults']++;
   assert.equal(engine.api.protect(address, 1, 3), 0); observe(engine, address, 4, 0x10); word(engine, address, 0x80000000);
   run(engine, form.unit, 8, applied(stopped, form.kind, 0x80000000, source, 0x2000), unitExit(form.unit, 3, 2), cpuStoreHelper(), 'same CPU retries changed current RAM without repeating prefix', 'resume', 1, 1); observe(engine, address, 4, binary(form.kind, 0x80000000, source, stopped.eflags).value); stats.repairs++;
 }
@@ -246,7 +251,7 @@ function identitySource(kind) { return kind === 'and' ? 0xffffffff : 0; }
 for (const form of registerForms) {
   assert.equal(engine.api.protect(0x9000, 1, 3), 0); word(engine, 0x9000, 0x80000000); assert.equal(engine.api.protect(0x9000, 1, 1), 0); const start = startFor(form, false); start.registers[0] = identitySource(form.kind); start.registers[3] = 0x9000; reset(engine, start); const stopped = prefixed(start);
   assert.equal(binary(form.kind, 0x80000000, start.registers[0], stopped.eflags).value, 0x80000000);
-  run(engine, form.unit, 8, stopped, unitExit(form.unit, 5, 1, 2, 0x9000, 4), cpuStoreHelper(2, 0x9000), 'same-byte binary still requires Write permission and leaves flags uncommitted', 'initial', 1, 1); observe(engine, 0x9000, 4, 0x80000000); stats.faults++; stats.store_faults++; stats.same_byte_permission_faults++;
+  run(engine, form.unit, 8, stopped, unitExit(form.unit, 5, 1, 2, 0x9000, 4), cpuStoreHelper(2, 0x9000), 'same-byte binary still requires Write permission and leaves flags uncommitted', 'initial', 0, 1); observe(engine, 0x9000, 4, 0x80000000); stats.faults++; stats.store_faults++; stats.same_byte_permission_faults++;
 }
 const sub = registerForms.find(form => form.kind === 'sub');
 assert.equal(engine.api.map(0xb000, 2, 3), 0);
@@ -254,7 +259,7 @@ for (const access of [1, 2]) {
   assert.equal(engine.api.protect(0xc000, 1, 3), 0); word(engine, 0xbffc, 0x11223344); word(engine, 0xc000, 0x55667788);
   if (access === 1) assert.equal(engine.api.unmap(0xc000, 1), 0); else assert.equal(engine.api.protect(0xc000, 1, 1), 0);
   const start = startFor(sub, false); start.registers[3] = 0xbfff; reset(engine, start); const stopped = prefixed(start), detail = access === 1 ? 1 : 2;
-  run(engine, sub.unit, 8, stopped, unitExit(sub.unit, 5, 1, detail, 0xc000, 4, 2, access), cpuHelper(4, 0, detail, 0xc000, access), 'cross-page access rejects before partial write or flags commit', 'initial', access === 2 ? 1 : 0, 1); observe(engine, 0xbffc, 4, 0x11223344); if (access === 2) observe(engine, 0xc000, 4, 0x55667788); stats.faults++; stats[access === 1 ? 'read_faults' : 'store_faults']++;
+  run(engine, sub.unit, 8, stopped, unitExit(sub.unit, 5, 1, detail, 0xc000, 4, 2, access), cpuHelper(4, 0, detail, 0xc000, access), 'cross-page access rejects before partial write or flags commit', 'initial', 0, 1); observe(engine, 0xbffc, 4, 0x11223344); if (access === 2) observe(engine, 0xc000, 4, 0x55667788); stats.faults++; stats[access === 1 ? 'read_faults' : 'store_faults']++;
   if (access === 1) { assert.equal(engine.api.map(0xc000, 1, 3), 0); word(engine, 0xc000, 0x55667788); } else assert.equal(engine.api.protect(0xc000, 1, 3), 0); word(engine, 0xbfff, 0x80000000);
   run(engine, sub.unit, 8, applied(stopped, 'sub', 0x80000000, 1, 0x2000), unitExit(sub.unit, 3, 2), cpuStoreHelper(), 'cross-page retry reads repaired current operand', 'resume', 1, 1); observe(engine, 0xbffc, 4, 0xff223344); observe(engine, 0xc000, 4, 0x557fffff); stats.repairs++;
 }
@@ -313,7 +318,7 @@ for (const fixture of smcCases) {
   if (invalidatesA) {
     miss(e, 0x1003, 4); if (fixture.target === 'whole') miss(e, 0x4000, 4);
     if (fixture.name === 'identity-xor') {
-      rawStore(e, e.low, e.high, oldA.low, oldA.high, 4, destination); rejected(e, oldA, 4, 'same-byte code write makes original A stale'); const copied = new WebAssembly.Instance(new WebAssembly.Module(oldA.bytes.slice()), {env: {memory: e.memory}, ring3: {guard_resident: e.api.guard_resident, cpu_read32: e.api.cpu_read32, cpu_store_resident32: e.api.cpu_store_resident32}}); rejected(e, {...oldA, run: copied.exports.run}, 4, 'copied stale binary A retains baked identity');
+      rawStore(e, e.low, e.high, oldA.low, oldA.high, 4, destination); rejected(e, oldA, 4, 'same-byte code write makes original A stale'); const copied = new WebAssembly.Instance(new WebAssembly.Module(oldA.bytes.slice()), {env: {memory: e.memory}, ring3: {cpu_read_modify32: e.api.cpu_read_modify32, guard_detect_resident: e.api.guard_detect_resident, finish_exception_detection: e.api.finish_exception_detection, cpu_read32: e.api.cpu_read32, cpu_store_resident32: e.api.cpu_store_resident32}}); rejected(e, {...oldA, run: copied.exports.run}, 4, 'copied stale binary A retains baked identity');
     }
     const successor = compile(e, [[0x1003, 10]], [], `${fixture.name} fresh successor`); assert.ok(successor.id > oldA.id); select(e, 0x1003, successor);
     const continued = at(stopped, bpc); continued.registers[1] = fixture.target === 'self' ? result.value : aWord; run(e, successor, 8, continued, unitExit(successor, 3, 2, 0, 0, 0, 1), undefined, 'fresh next-PC unit never repeats retired binary or flags', 'resume');
@@ -324,19 +329,21 @@ for (const fixture of smcCases) {
   }
   observe(e, destination, 4, result.value); close(e);
 }
-assert.deepEqual(stats, {engine_instances: 14, compiled_units: 48, canonical_runs: 320, rejected_runs: 11, full_arena_checks: 817, metadata_checks: 112, successful_guards: 20, failed_guards: 14, find_success: 64, find_failure: 15, continuation_initial_calls: 155, continuation_resumes: 165, form_cases: 110, alias_cases: 7, smc_cases: 13, same_byte_code_writes: 5, same_byte_permission_faults: 5, bound_store_sites: 40, algorithm_cases: 3, algorithm_retired: 56, faults: 19, read_faults: 8, store_faults: 11, repairs: 12, cancellations: 2, host_reads: 418, host_writes: 390, guest_read32: 319, guest_store32: 195, raw_rejected_stores: 5}, 'independently precomputed authored-path counts');
+// 184 committed stores plus 17 operand faults use modify reads; two segment faults call no helper.
+assert.deepEqual(stats, {engine_instances: 14, compiled_units: 48, canonical_runs: 320, rejected_runs: 11, full_arena_checks: 817, metadata_checks: 112, successful_guards: 20, failed_guards: 14, find_success: 64, find_failure: 15, continuation_initial_calls: 155, continuation_resumes: 165, form_cases: 110, alias_cases: 7, smc_cases: 13, same_byte_code_writes: 5, same_byte_permission_faults: 5, bound_store_sites: 40, algorithm_cases: 3, algorithm_retired: 56, faults: 19, read_faults: 8, store_faults: 11, repairs: 12, cancellations: 2, host_reads: 418, host_writes: 390, guest_read32: 118, guest_read_modify32: 201, guest_store32: 184, raw_rejected_stores: 5}, 'independently precomputed authored-path counts');
 const productionPaths = execFileSync('rg', ['--files', 'engine/src'], {cwd: root, encoding: 'utf8'}).trim().split('\n').sort();
 const sourcePaths = [
   'engine/tests/support/wasm/run.mjs', 'engine/tests/process/resident/admission/wasm/binary.rs', 'engine/tests/process/resident/wasm.rs', 'engine/tests/support/wasm.rs',   'engine/tests/process/resident/admission/fixtures/p2-resident-binary/runtime/run.mjs', 'engine/tests/process/resident/admission/native/binary.rs', 'engine/tests/process/resident/native.rs',  'engine/tests/process/resident/native/identity.rs',   'engine/tests/process/resident/admission/native/read.rs',  'engine/tests/support/cpu/prefix/admission.rs',  'engine/tests/process/resident/admission/native/indirect.rs',    'engine/tests/process/resident/admission/native/store.rs',    'engine/tests/process/resident/admission/native/unary.rs',   'engine/tests/process/resident/wasm/identity.rs',     'engine/tests/process/resident/fixtures/p2-resident-process/runtime/run.mjs', 'Cargo.toml', 'engine/Cargo.toml', 'Cargo.lock', ...productionPaths];
 const provenance = {
   stats, actual_resident_runs: stats.canonical_runs + stats.rejected_runs, actual_resident_guard_entries: stats.canonical_runs + stats.rejected_runs + stats.successful_guards + stats.failed_guards, bound_store_identity_checks: stats.guest_store32 + stats.raw_rejected_stores,
-  guest_helper_calls_from_authored_execution: stats.guest_store32 + stats.guest_read32, host_observation_reads: stats.host_reads,
+  counter_semantics: 'guest_read32 counts ordinary operand helpers; guest_read_modify32 counts write-intent operand helpers. Denied RMW preflight enters no store helper. read_faults/store_faults retain the authored denied-backing/segment scenario partition; all RMW page-fault packets carry write intent. Guard/detection finalizers are excluded from operand-helper counts.',
+  guest_helper_calls_from_authored_execution: stats.guest_store32 + stats.guest_read32 + stats.guest_read_modify32, host_observation_reads: stats.host_reads,
   engine_sha256: hash(engineBytes), artifact_sha256: artifacts, module_set_sha256: hash(Object.keys(artifacts).filter(name => name.endsWith('.wasm')).sort().map(name => `${name}:${artifacts[name]}`).join('\n')),
   sources: Object.fromEntries(sourcePaths.map(path => [path, hash(readFileSync(join(root, path)))])), production: {git_head: execFileSync('git', ['rev-parse', 'HEAD'], {cwd: root, encoding: 'utf8'}).trim(), source_files: productionPaths.length, source_set_sha256: hash(productionPaths.map(path => `${path}:${hash(readFileSync(join(root, path)))}`).join('\n'))},
   authored: Object.fromEntries(Object.entries(authored).map(([name, bytes]) => [name, bytes.toString('hex')])), unit_bindings: units.map(unit => ({label: unit.label, id: unit.id.toString(), pointer: unit.pointer, length: unit.length, filename: unit.filename, reads: unit.reads, stores: unit.stores})), algorithm_rows: algorithmRows, smc_rows: smcRows, metadata_observations: metadata,
   tools: {node: process.version, v8: process.versions.v8, platform: process.platform, architecture: process.arch, rustc: execFileSync('rustc', ['--version'], {encoding: 'utf8'}).trim(), cargo: execFileSync('cargo', ['--version'], {encoding: 'utf8'}).trim()},
   commands: {run: [process.execPath, process.argv[1], enginePath, outputDir, root], generate_and_run: ['cargo', 'test', '-p', 'ring3-engine', '--test', 'process_resident_binary_wasm', '--', '--nocapture']},
   reused: 'prior resident unary31/MOV27/read/indirect module/runtime evidence and native atomic Store4/version exhaustion/identity/Busy evidence are unchanged and not rerun; late non0/non11 Infrastructure detail3 behavior is source/prior-proof reuse. The affected old resident actual target runs separately and its14modules/three unchanged authored inputs are compared by the parent; unsupported0100 deliberately becomes FF30. Fifteen legacy binary baseline captures are parent-owned with zero guest CPU runs.',
-  claim: 'actual Node engine-Wasm resident ADD/SUB/AND/OR/XOR m32 register/imm32/sign-imm8 through direct Read4 and immutable six-argument bound Store4 with the same engine memory, no legacy artifact. Exact guard0/read1/store2 and ADDRESS26/RESULT18 operands, independent literal/BigInt arithmetic flags including carry/borrow/AF/OF and deterministic logic AF0/CF0/OF0/DF policy, preserved source/GPR/old EA/neighbour RAM/full4236 arena/helperv1/Exitv2, first-read/second-store/atomic-cross-page/overflow/MAX-valid faults, prefix/current-RAM repair and budget/cancel/interior true continuations without host CPU patches. Same-byte permission checks and post-store SMC flags/RAM/retirement commit once before fresh next-PC continuation, whole/shared/separate B isolation and stale copied binding, bounded real all-five/JNZ7*n mathematics. Counts are authored-path derived, not instrumentation. No helper interception, hardware bus LOCK/concurrent atomic RMW, narrow/stack/gate writes, product installer/dispatcher/table, browser/asynchronous cancellation/performance/game/fullP2-V0 claim.',
+  claim: 'actual Node engine-Wasm resident ADD/SUB/AND/OR/XOR m32 register/imm32/sign-imm8 through write-intent cpu_read_modify32 and immutable six-argument bound Store4 with the same engine memory, no legacy artifact. Exact detect-guard0/read1/store2/modify3 and ADDRESS26/RESULT18 operands, independent literal/BigInt arithmetic flags including carry/borrow/AF/OF and deterministic logic AF0/CF0/OF0/DF policy, preserved source/GPR/old EA/neighbour RAM/full4796 arena/success-helper10/PF-helper15/ordinary-Exit6/PF-Exit12, intent-preflight/committed-store/atomic-cross-page/overflow/MAX-valid faults, prefix/current-RAM repair and budget/cancel/interior true continuations without host CPU patches. Same-byte permission checks and post-store SMC flags/RAM/retirement commit once before fresh next-PC continuation, whole/shared/separate B isolation and stale copied binding, bounded real all-five/JNZ7*n mathematics. Counts are authored-path derived, not instrumentation. No helper interception, hardware bus LOCK/concurrent atomic RMW, narrow/stack/gate writes, product installer/dispatcher/table, browser/asynchronous cancellation/performance/game/fullP2-V0 claim.',
 };
 writeFileSync(join(outputDir, 'provenance.json'), JSON.stringify(provenance, null, 2)); console.log(JSON.stringify({...provenance, sources: Object.keys(provenance.sources).length, metadata_observations: metadata.length, artifacts: outputDir}));

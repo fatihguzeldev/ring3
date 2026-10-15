@@ -10,8 +10,8 @@ assert.ok(root);
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const engineBytes = readFileSync(enginePath), engineModule = new WebAssembly.Module(engineBytes);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
-const SIZE = 4612, TRANSFER = 140, DATA = 0x5000;
-const names = ['open', 'close', 'arena_ptr', 'map', 'protect', 'unmap', 'upload', 'generation', 'module_ptr', 'module_len', 'guard_resident', 'compile_resident', 'resident_module', 'find_resident', 'read32', 'write32', 'cpu_read32'];
+const SIZE = 4796, TRANSFER = 140, DATA = 0x5000;
+const names = ['guard_detect', 'guard_detect_resident', 'finish_exception_detection', 'open', 'close', 'arena_ptr', 'map', 'protect', 'unmap', 'upload', 'generation', 'module_ptr', 'module_len', 'guard_resident', 'compile_resident', 'resident_module', 'find_resident', 'read32', 'write32', 'cpu_read32'];
 const stats = {engine_instances: 0, compiled_units: 0, canonical_runs: 0, rejected_runs: 0, full_arena_checks: 0, metadata_checks: 0, successful_guards: 0, failed_guards: 0, find_success: 0, find_failure: 0, continuation_initial_calls: 0, continuation_resumes: 0, target_cases: 0, algorithm_cases: 0, algorithm_retired: 0, faults: 0, repairs: 0, cancellations: 0, host_reads: 0, host_writes: 0, guest_read32: 0};
 const units = [], artifacts = {}, metadata = [];
 
@@ -81,9 +81,9 @@ function record(engine, before, label) {
 function compile(engine, blocks, reads, label) {
   descriptors(engine, blocks); const before = arena(engine); assert.equal(engine.api.compile_resident(blocks.length), 0, label);
   const selected = record(engine, before, label), module = new WebAssembly.Module(selected.bytes);
-  const expected = [{module: 'env', name: 'memory', kind: 'memory'}, {module: 'ring3', name: 'guard_resident', kind: 'function'}, ...reads.map(name => ({module: 'ring3', name, kind: 'function'}))];
+  const expected = [{module: 'env', name: 'memory', kind: 'memory'}, {module: 'ring3', name: 'guard_detect_resident', kind: 'function'}, ...reads.map(name => ({module: 'ring3', name, kind: 'function'})), {module: 'ring3', name: 'finish_exception_detection', kind: 'function'}];
   assert.deepEqual(WebAssembly.Module.imports(module), expected, 'exact direct guard/read imports, no store'); assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
-  const imports = {guard_resident: engine.api.guard_resident, ...Object.fromEntries(reads.map(name => [name, engine.api[name]]))};
+  const imports = {guard_detect_resident: engine.api.guard_detect_resident, finish_exception_detection: engine.api.finish_exception_detection, ...Object.fromEntries(reads.map(name => [name, engine.api[name]]))};
   const instance = new WebAssembly.Instance(module, {env: {memory: engine.memory}, ring3: imports}); assert.equal(instance.exports.run.length, 4);
   const filename = `unit-${++stats.compiled_units}.wasm`; writeFileSync(join(outputDir, filename), selected.bytes); artifacts[filename] = hash(selected.bytes);
   const unit = {...selected, module, instance, run: instance.exports.run, blocks, reads, filename, label}; units.push(unit); return unit;
@@ -129,12 +129,17 @@ function helper(width, value, detail = 0, address = 0) {
   [detail ? 1 : 0, detail ? 0 : value, detail, address, detail ? 1 : 0, width === 4 && detail === 0 ? 0 : width].forEach((v, i) => view.setUint32(16 + i * 4, v, true)); return bytes;
 }
 function unitExit(unit, reason, retired, detail = 0, address = 0, width = 0, version = 2) {
-  const bytes = new Uint8Array(40), view = new DataView(bytes.buffer); header(bytes, view, 0, 'R3EX', 40, unit.reads.length || (Array.isArray(unit.stores) ? unit.stores.length : unit.stores ?? 0) ? 6 : version);
-  [reason, retired, detail, address, reason === 5 ? 1 : 0, width].forEach((v, i) => view.setUint32(16 + i * 4, v, true)); return bytes;
+  const access = 1;
+  const pageFault = reason === 5;
+  const code = pageFault ? 4 + Number(detail === 2) + (access === 2 ? 2 : 0) : detail;
+  const bytes = new Uint8Array(40), view = new DataView(bytes.buffer); header(bytes, view, 0, 'R3EX', 40, pageFault ? 12 : unit.reads.length || (Array.isArray(unit.stores) ? unit.stores.length : unit.stores ?? 0) ? 6 : version);
+  [pageFault ? 23 : reason, retired, code, address, pageFault ? access : 0, width].forEach((v, i) => view.setUint32(16 + i * 4, v, true)); return bytes;
 }
 function cpuHelper(width, value, detail = 0, address = 0) {
-  const bytes = new Uint8Array(40), view = new DataView(bytes.buffer); header(bytes, view, 0, 'R3MH', 40, 10);
-  [detail ? 1 : 0, detail ? 0 : value, detail, address, detail ? 1 : 0, width].forEach((v, i) => view.setUint32(16 + i * 4, v, true)); return bytes;
+  const access = 1;
+  const code = detail ? 4 + Number(detail === 2) + (access === 2 ? 2 : 0) : 0;
+  const bytes = new Uint8Array(40), view = new DataView(bytes.buffer); header(bytes, view, 0, 'R3MH', 40, detail ? 15 : 10);
+  [detail ? 9 : 0, detail ? 0 : value, code, address, detail ? access : 0, width].forEach((v, i) => view.setUint32(16 + i * 4, v, true)); return bytes;
 }
 
 function run(engine, unit, budget, expected, expectedExit, expectedHelper, label, continuation, reads = 0) {
@@ -142,7 +147,7 @@ function run(engine, unit, budget, expected, expectedExit, expectedHelper, label
   const wanted = before.slice(), view = new DataView(wanted.buffer);
   expected.registers.forEach((r, i) => view.setUint32(16 + i * 4, r, true)); view.setUint32(48, expected.eip, true); view.setUint32(52, expected.eflags, true); wanted.set(expectedExit, 56);
   if (expectedHelper !== undefined) wanted.set(expectedHelper, 100);
-  assert.deepEqual(arena(engine), wanted, `${label}: all4236 state/exit/helper/cancel/transfer bytes`); stats.canonical_runs++; stats.full_arena_checks++; noLegacy(engine);
+  assert.deepEqual(arena(engine), wanted, `${label}: all4796 state/exit/helper/cancel/transfer bytes`); stats.canonical_runs++; stats.full_arena_checks++; noLegacy(engine);
   if (continuation === 'initial') stats.continuation_initial_calls++; else if (continuation === 'resume') stats.continuation_resumes++;
   stats.guest_read32 += reads;
 }
@@ -235,7 +240,7 @@ observe(engine, 0x6ffc, 4, 0x01223344); observe(engine, 0x7000, 4, 0x00000020);
 
 word(engine, DATA, 0x2000); guard(engine, a); guard(engine, b); guard(engine, r); select(engine, 0x2000, b);
 word(engine, 0x1000, 0x0023ff47); guard(engine, a, 4); guard(engine, b); guard(engine, r); rejected(engine, a, 4, 'stale A rejects before target read'); miss(engine, 0x1001, 4);
-const copied = new WebAssembly.Instance(new WebAssembly.Module(a.bytes.slice()), {env: {memory: engine.memory}, ring3: {guard_resident: engine.api.guard_resident, cpu_read32: engine.api.cpu_read32}}); rejected(engine, {...a, run: copied.exports.run}, 4, 'copied stale A retains baked ID');
+const copied = new WebAssembly.Instance(new WebAssembly.Module(a.bytes.slice()), {env: {memory: engine.memory}, ring3: {guard_detect_resident: engine.api.guard_detect_resident, finish_exception_detection: engine.api.finish_exception_detection, cpu_read32: engine.api.cpu_read32}}); rejected(engine, {...a, run: copied.exports.run}, 4, 'copied stale A retains baked ID');
 const independentB = loopStart(1); independentB.eip = 0x2000; reset(engine, independentB); const doneB = copy(independentB), dec = unary('dec', 1, independentB.eflags); doneB.registers[1] = dec.value; doneB.eflags = dec.flags; doneB.eip = 0x2007;
 run(engine, b, 3, doneB, unitExit(b, 3, 2, 0, 0, 0, 1), undefined, 'current B remains executable after A invalidation', 'initial');
 const freshA = compile(engine, a.blocks, ['cpu_read32'], 'fresh same-PC A'); assert.ok(freshA.id > a.id && freshA.id > r.id); select(engine, 0x1000, freshA); select(engine, 0x1001, freshA); select(engine, 0x1100, freshA); select(engine, 0x2000, b); guard(engine, a, 4); guard(engine, freshA);
@@ -254,6 +259,6 @@ const provenance = {
   authored: Object.fromEntries(Object.entries(authored).map(([name, bytes]) => [name, bytes.toString('hex')])), unit_bindings: units.map(unit => ({label: unit.label, id: unit.id.toString(), pointer: unit.pointer, length: unit.length, filename: unit.filename, reads: unit.reads})), algorithm_rows: algorithmRows, metadata_observations: metadata,
   tools: {node: process.version, v8: process.versions.v8, platform: process.platform, architecture: process.arch, rustc: execFileSync('rustc', ['--version'], {encoding: 'utf8'}).trim(), cargo: execFileSync('cargo', ['--version'], {encoding: 'utf8'}).trim()},
   commands: {run: [process.execPath, process.argv[1], enginePath, outputDir, root], generate_and_run: ['cargo', 'test', '-p', 'ring3-engine', '--test', 'process_resident_indirect_wasm', '--', '--nocapture']},
-  claim: 'actual Node engine-Wasm resident near indirect JMP r32/m32 through direct Wasm guard/read32 and exact same engine memory with no legacy artifact or store. Two mixed-A/register-B units plus pure ESP and fresh A replacement; independent literal/BigInt INC/DEC flags and bounded five-phase 5*n-1 arithmetic, exact numeric/local/interior/middle/external/0/MAX target and finder pairing, full4236 arena/metadata/Exitv1-v6/CPU-helperv10 oracles, live RAM source faults/repair, budget/cancel and current-CPU continuation without rereading retired pointer, stale/copied/current B/fresh/closed binding. Helper counts authored-path derived, not instrumentation. No ISA interpreter, table/dispatcher/installer, Store4/active SMC, callbacks, browser/async cancellation/concurrency/performance/game/full P2-V0 claim.',
+  claim: 'actual Node engine-Wasm resident near indirect JMP r32/m32 through direct Wasm guard/read32 and exact same engine memory with no legacy artifact or store. Two mixed-A/register-B units plus pure ESP and fresh A replacement; independent literal/BigInt INC/DEC flags and bounded five-phase 5*n-1 arithmetic, exact numeric/local/interior/middle/external/0/MAX target and finder pairing, full4796 arena/metadata/Exitv1-v6/CPU-helperv10 oracles, live RAM source faults/repair, budget/cancel and current-CPU continuation without rereading retired pointer, stale/copied/current B/fresh/closed binding. Helper counts authored-path derived, not instrumentation. No ISA interpreter, table/dispatcher/installer, Store4/active SMC, callbacks, browser/async cancellation/concurrency/performance/game/full P2-V0 claim.',
 };
 writeFileSync(join(outputDir, 'provenance.json'), JSON.stringify(provenance, null, 2)); console.log(JSON.stringify({...provenance, sources: Object.keys(provenance.sources).length, metadata_observations: metadata.length, artifacts: outputDir}));

@@ -10,8 +10,8 @@ assert.ok(root);
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const engineBytes = readFileSync(enginePath), engineModule = new WebAssembly.Module(engineBytes);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
-const SIZE = 4612, TRANSFER = 140, DATA = 0x5000;
-const names = ['open', 'close', 'arena_ptr', 'map', 'protect', 'unmap', 'upload', 'generation', 'module_ptr', 'module_len', 'guard_resident', 'compile_resident', 'resident_module', 'find_resident', 'read8', 'read16', 'read32', 'write32', 'cpu_read16', 'cpu_read32', 'cpu_read8'];
+const SIZE = 4796, TRANSFER = 140, DATA = 0x5000;
+const names = ['guard_detect', 'guard_detect_resident', 'finish_exception_detection', 'open', 'close', 'arena_ptr', 'map', 'protect', 'unmap', 'upload', 'generation', 'module_ptr', 'module_len', 'guard_resident', 'compile_resident', 'resident_module', 'find_resident', 'read8', 'read16', 'read32', 'write32', 'cpu_read16', 'cpu_read32', 'cpu_read8'];
 const stats = {engine_instances: 0, compiled_units: 0, canonical_runs: 0, rejected_runs: 0, full_arena_checks: 0, metadata_checks: 0, successful_guards: 0, failed_guards: 0, find_success: 0, find_failure: 0, continuation_initial_calls: 0, continuation_resumes: 0, form_cases: 0, faults: 0, repairs: 0, cancellations: 0, host_reads: 0, host_writes: 0, guest_read8: 0, guest_read16: 0, guest_read32: 0};
 const units = [], artifacts = {}, metadata = [];
 
@@ -81,9 +81,9 @@ function record(engine, before, label) {
 function compile(engine, blocks, reads, label) {
   descriptors(engine, blocks); const before = arena(engine); assert.equal(engine.api.compile_resident(blocks.length), 0, label);
   const selected = record(engine, before, label), module = new WebAssembly.Module(selected.bytes);
-  const expected = [{module: 'env', name: 'memory', kind: 'memory'}, {module: 'ring3', name: 'guard_resident', kind: 'function'}, ...reads.map(name => ({module: 'ring3', name, kind: 'function'}))];
+  const expected = [{module: 'env', name: 'memory', kind: 'memory'}, {module: 'ring3', name: 'guard_detect_resident', kind: 'function'}, ...reads.map(name => ({module: 'ring3', name, kind: 'function'})), {module: 'ring3', name: 'finish_exception_detection', kind: 'function'}];
   assert.deepEqual(WebAssembly.Module.imports(module), expected, 'exact direct guard/read imports, no store'); assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
-  const imports = {guard_resident: engine.api.guard_resident, ...Object.fromEntries(reads.map(name => [name, engine.api[name]]))};
+  const imports = {guard_detect_resident: engine.api.guard_detect_resident, finish_exception_detection: engine.api.finish_exception_detection, ...Object.fromEntries(reads.map(name => [name, engine.api[name]]))};
   const instance = new WebAssembly.Instance(module, {env: {memory: engine.memory}, ring3: imports}); assert.equal(instance.exports.run.length, 4);
   const filename = `unit-${++stats.compiled_units}.wasm`; writeFileSync(join(outputDir, filename), selected.bytes); artifacts[filename] = hash(selected.bytes);
   const unit = {...selected, module, instance, run: instance.exports.run, blocks, reads, filename, label}; units.push(unit); return unit;
@@ -132,12 +132,17 @@ function helper(width, value, detail = 0, address = 0) {
   [detail ? 1 : 0, detail ? 0 : value, detail, address, detail ? 1 : 0, width === 4 && detail === 0 ? 0 : width].forEach((v, i) => view.setUint32(16 + i * 4, v, true)); return bytes;
 }
 function unitExit(unit, reason, retired, detail = 0, address = 0, width = 0, version = 2) {
-  const bytes = new Uint8Array(40), view = new DataView(bytes.buffer); header(bytes, view, 0, 'R3EX', 40, unit.reads.length || (Array.isArray(unit.stores) ? unit.stores.length : unit.stores ?? 0) ? 6 : version);
-  [reason, retired, detail, address, reason === 5 ? 1 : 0, width].forEach((v, i) => view.setUint32(16 + i * 4, v, true)); return bytes;
+  const access = 1;
+  const pageFault = reason === 5;
+  const code = pageFault ? 4 + Number(detail === 2) + (access === 2 ? 2 : 0) : detail;
+  const bytes = new Uint8Array(40), view = new DataView(bytes.buffer); header(bytes, view, 0, 'R3EX', 40, pageFault ? 12 : unit.reads.length || (Array.isArray(unit.stores) ? unit.stores.length : unit.stores ?? 0) ? 6 : version);
+  [pageFault ? 23 : reason, retired, code, address, pageFault ? access : 0, width].forEach((v, i) => view.setUint32(16 + i * 4, v, true)); return bytes;
 }
 function cpuHelper(width, value, detail = 0, address = 0) {
-  const bytes = new Uint8Array(40), view = new DataView(bytes.buffer); header(bytes, view, 0, 'R3MH', 40, 10);
-  [detail ? 1 : 0, detail ? 0 : value, detail, address, detail ? 1 : 0, width].forEach((v, i) => view.setUint32(16 + i * 4, v, true)); return bytes;
+  const access = 1;
+  const code = detail ? 4 + Number(detail === 2) + (access === 2 ? 2 : 0) : 0;
+  const bytes = new Uint8Array(40), view = new DataView(bytes.buffer); header(bytes, view, 0, 'R3MH', 40, detail ? 15 : 10);
+  [detail ? 9 : 0, detail ? 0 : value, code, address, detail ? access : 0, width].forEach((v, i) => view.setUint32(16 + i * 4, v, true)); return bytes;
 }
 
 function run(engine, unit, budget, expected, expectedExit, expectedHelper, label, continuation, reads = {}) {
@@ -145,7 +150,7 @@ function run(engine, unit, budget, expected, expectedExit, expectedHelper, label
   const wanted = before.slice(), view = new DataView(wanted.buffer);
   expected.registers.forEach((r, i) => view.setUint32(16 + i * 4, r, true)); view.setUint32(48, expected.eip, true); view.setUint32(52, expected.eflags, true); wanted.set(expectedExit, 56);
   if (expectedHelper !== undefined) wanted.set(expectedHelper, 100);
-  assert.deepEqual(arena(engine), wanted, `${label}: all4236 state/exit/helper/cancel/transfer bytes`); stats.canonical_runs++; stats.full_arena_checks++; noLegacy(engine);
+  assert.deepEqual(arena(engine), wanted, `${label}: all4796 state/exit/helper/cancel/transfer bytes`); stats.canonical_runs++; stats.full_arena_checks++; noLegacy(engine);
   if (continuation === 'initial') stats.continuation_initial_calls++; else if (continuation === 'resume') stats.continuation_resumes++;
   for (const [width, count] of Object.entries(reads)) stats[`guest_read${Number(width) * 8}`] += count;
 }
@@ -272,7 +277,7 @@ word(engine, DATA, 0x12345678); guard(engine, a); guard(engine, b); select(engin
 assert.equal(engine.api.write32(first.pc, first.program.readUInt32LE(0)), 0); stats.host_writes++;
 guard(engine, a, 4); guard(engine, b); rejected(engine, a, 4, 'stale A rejects before all read helpers');
 unchanged(engine, () => engine.api.find_resident(first.pc), 4, 'stale A lookup'); stats.find_failure++;
-const copied = new WebAssembly.Instance(new WebAssembly.Module(a.bytes.slice()), {env: {memory: engine.memory}, ring3: Object.fromEntries(['guard_resident', ...a.reads].map(name => [name, engine.api[name]]))});
+const copied = new WebAssembly.Instance(new WebAssembly.Module(a.bytes.slice()), {env: {memory: engine.memory}, ring3: Object.fromEntries(['guard_detect_resident', 'finish_exception_detection', ...a.reads].map(name => [name, engine.api[name]]))});
 rejected(engine, {...a, run: copied.exports.run}, 4, 'copied stale memory unit retains immutable guard binding');
 const independentB = initial(0x2000); reset(engine, independentB); run(engine, b, 4, bResult(independentB, 0x12345678), unitExit(b, 3, 3), cpuHelper(4, 0x12345678), 'current B reads live RAM without any legacy artifact', 'initial', {4: 2});
 const freshA = compile(engine, a.blocks, a.reads, 'fresh same-PC read A'); assert.ok(freshA.id > a.id && freshA.id > b.id); select(engine, first.pc, freshA); select(engine, 0x2000, b); guard(engine, a, 4); guard(engine, freshA);
