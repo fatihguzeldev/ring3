@@ -7,6 +7,7 @@ pub use types::{
     AudioBufferId32, AudioConfig32, AudioError32, AudioState32, AudioSubmission32, AudioVoiceId32,
     AudioVoiceState32, PcmFormat32,
 };
+pub use types::{AudioVoiceControls32, AudioVoiceProgress32, SampleEncoding32};
 
 use buffer::BufferSlot;
 use submission::{PendingSubmission, VoiceSpan};
@@ -103,3 +104,6 @@ fn allocated<T>(count: usize, value: impl Fn() -> T) -> Result<Vec<T>, AudioErro
     values.resize_with(count, value);
     Ok(values)
 }
+
+#[cfg(test)]
+mod tests;

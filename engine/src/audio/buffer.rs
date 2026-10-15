@@ -1,4 +1,4 @@
-use super::{AudioBufferId32, AudioContext, AudioError32, PcmFormat32};
+use super::{AudioBufferId32, AudioContext, AudioError32, PcmFormat32, SampleEncoding32};
 
 #[derive(Default)]
 pub(super) struct BufferSlot {
@@ -9,6 +9,7 @@ pub(super) struct BufferSlot {
 pub(super) struct PcmBuffer {
     pub format: PcmFormat32,
     pub bytes: Vec<u8>,
+    pub encoding: SampleEncoding32,
 }
 
 impl PcmBuffer {
@@ -24,10 +25,25 @@ impl PcmBuffer {
         };
         let at = frame as usize * self.format.frame_bytes() as usize
             + channel * usize::from(self.format.bits_per_sample / 8);
-        if self.format.bits_per_sample == 8 {
-            (f32::from(self.bytes[at]) - 128.0) / 128.0
-        } else {
-            f32::from(i16::from_le_bytes([self.bytes[at], self.bytes[at + 1]])) / 32768.0
+        match (self.encoding, self.format.bits_per_sample) {
+            (SampleEncoding32::Integer, 8) => (f32::from(self.bytes[at]) - 128.0) / 128.0,
+            (SampleEncoding32::Integer, 16) => {
+                f32::from(i16::from_le_bytes([self.bytes[at], self.bytes[at + 1]])) / 32768.0
+            }
+            (SampleEncoding32::Integer, 24) => {
+                let sample =
+                    i32::from_le_bytes([0, self.bytes[at], self.bytes[at + 1], self.bytes[at + 2]]);
+                sample as f32 / 2_147_483_648.0
+            }
+            (SampleEncoding32::Integer, 32) => {
+                i32::from_le_bytes(self.bytes[at..at + 4].try_into().unwrap()) as f32
+                    / 2_147_483_648.0
+            }
+            (SampleEncoding32::Float, 32) => {
+                let value = f32::from_le_bytes(self.bytes[at..at + 4].try_into().unwrap());
+                if value.is_finite() { value } else { 0.0 }
+            }
+            _ => unreachable!(),
         }
     }
 }
@@ -45,6 +61,33 @@ impl AudioContext {
         {
             return Err(AudioError32::UnsupportedFormat);
         }
+        self.create_pcm_buffer(format, SampleEncoding32::Integer, byte_length)
+    }
+
+    pub fn create_stream_buffer(
+        &mut self,
+        format: PcmFormat32,
+        encoding: SampleEncoding32,
+        byte_length: u32,
+    ) -> Result<AudioBufferId32, AudioError32> {
+        if !(100..=200_000).contains(&format.sample_rate)
+            || !(1..=2).contains(&format.channels)
+            || !matches!(
+                (encoding, format.bits_per_sample),
+                (SampleEncoding32::Integer, 8 | 16 | 24 | 32) | (SampleEncoding32::Float, 32)
+            )
+        {
+            return Err(AudioError32::UnsupportedFormat);
+        }
+        self.create_pcm_buffer(format, encoding, byte_length)
+    }
+
+    fn create_pcm_buffer(
+        &mut self,
+        format: PcmFormat32,
+        encoding: SampleEncoding32,
+        byte_length: u32,
+    ) -> Result<AudioBufferId32, AudioError32> {
         if byte_length == 0 || !byte_length.is_multiple_of(format.frame_bytes()) {
             return Err(AudioError32::InvalidRequest);
         }
@@ -66,7 +109,11 @@ impl AudioContext {
             .ok_or(AudioError32::Capacity)?;
         let silence = if format.bits_per_sample == 8 { 128 } else { 0 };
         let bytes = super::allocated(byte_length as usize, || silence)?;
-        self.buffers[index].buffer = Some(PcmBuffer { format, bytes });
+        self.buffers[index].buffer = Some(PcmBuffer {
+            format,
+            bytes,
+            encoding,
+        });
         self.buffers[index].generation = generation;
         self.buffer_bytes = total;
         Ok(AudioBufferId32 {
@@ -104,6 +151,10 @@ impl AudioContext {
 
     pub fn release_buffer(&mut self, id: AudioBufferId32) -> Result<(), AudioError32> {
         self.ready()?;
+        self.release_stream_buffer(id)
+    }
+
+    pub fn release_stream_buffer(&mut self, id: AudioBufferId32) -> Result<(), AudioError32> {
         let length = self.buffer(id)?.bytes.len() as u32;
         if self
             .voices
@@ -114,6 +165,39 @@ impl AudioContext {
         }
         self.buffers[id.slot as usize].buffer = None;
         self.buffer_bytes -= length;
+        Ok(())
+    }
+
+    pub fn stream_format(
+        &self,
+        id: AudioBufferId32,
+    ) -> Result<(PcmFormat32, SampleEncoding32), AudioError32> {
+        let buffer = self.buffer(id)?;
+        Ok((buffer.format, buffer.encoding))
+    }
+
+    pub fn stream_bytes(&self, id: AudioBufferId32) -> Result<&[u8], AudioError32> {
+        Ok(&self.buffer(id)?.bytes)
+    }
+
+    pub fn write_stream_buffer(
+        &mut self,
+        id: AudioBufferId32,
+        offset: u32,
+        first: &[u8],
+        second: &[u8],
+    ) -> Result<(), AudioError32> {
+        let buffer = self.buffer(id)?;
+        let offset = offset as usize;
+        if offset >= buffer.bytes.len()
+            || first.len() > buffer.bytes.len() - offset
+            || second.len() > offset
+        {
+            return Err(AudioError32::InvalidRequest);
+        }
+        let buffer = self.buffers[id.slot as usize].buffer.as_mut().unwrap();
+        buffer.bytes[offset..offset + first.len()].copy_from_slice(first);
+        buffer.bytes[..second.len()].copy_from_slice(second);
         Ok(())
     }
 

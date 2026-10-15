@@ -34,9 +34,30 @@ pub struct PcmFormat32 {
 }
 
 impl PcmFormat32 {
-    pub(super) fn frame_bytes(self) -> u32 {
+    pub fn frame_bytes(self) -> u32 {
         u32::from(self.channels) * u32::from(self.bits_per_sample / 8)
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SampleEncoding32 {
+    Integer,
+    Float,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AudioVoiceControls32 {
+    pub frequency: u32,
+    pub gains: [f32; 2],
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AudioVoiceProgress32 {
+    pub voice: AudioVoiceId32,
+    pub first_phase: u64,
+    pub last_phase: u64,
+    pub wraps: u64,
+    pub stopped: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

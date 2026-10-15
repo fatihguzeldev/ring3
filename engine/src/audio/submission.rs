@@ -1,10 +1,15 @@
-use super::{AudioContext, AudioError32, AudioSubmission32};
+use super::{AudioContext, AudioError32, AudioSubmission32, AudioVoiceId32, AudioVoiceProgress32};
 
 #[derive(Clone, Copy, Default)]
 pub(super) struct VoiceSpan {
-    first: u32,
+    first: u64,
+    step: u64,
+    source_frames: u32,
     frames: u32,
     ended: bool,
+    looping: bool,
+    generation: u32,
+    revision: u64,
 }
 
 pub(super) struct PendingSubmission {
@@ -13,7 +18,7 @@ pub(super) struct PendingSubmission {
 }
 
 impl AudioContext {
-    /// produces immutable stereo PCM without advancing any consumed cursor.
+    /// submitted pcm is immutable; later stream mutations affect the next submission.
     pub fn submit(&mut self, frames: u32) -> Result<AudioSubmission32, AudioError32> {
         self.ready()?;
         if frames == 0 || frames > self.config.render_frames {
@@ -44,29 +49,50 @@ impl AudioContext {
                 .as_ref()
                 .unwrap();
             let source_frames = buffer.frames();
-            let count = if voice.looping {
-                frames
-            } else {
-                frames.min(source_frames - voice.produced_position)
-            };
+            let limit = u64::from(source_frames) << 32;
             let first = voice.produced_position;
             let mut source = first;
-            for frame in 0..count {
+            let mut count = 0;
+            let mut ended = false;
+            for frame in 0..frames {
+                let at = (source >> 32) as u32;
+                let next = if at + 1 < source_frames {
+                    at + 1
+                } else if voice.looping {
+                    0
+                } else {
+                    at
+                };
+                let fraction = (source as u32) as f32 / 4_294_967_296.0;
                 for channel in 0..2 {
-                    self.output[frame as usize * 2 + channel] += buffer.sample(source, channel);
+                    let a = buffer.sample(at, channel);
+                    let value = a + (buffer.sample(next, channel) - a) * fraction;
+                    self.output[frame as usize * 2 + channel] +=
+                        value * voice.controls.gains[channel];
                 }
-                source += 1;
-                if source == source_frames {
-                    source = 0;
+                count += 1;
+                source += voice.step;
+                if source >= limit {
+                    if voice.looping {
+                        source %= limit;
+                    } else {
+                        source = 0;
+                        ended = true;
+                        break;
+                    }
                 }
             }
-            let ended = !voice.looping && count == source_frames - first;
             voice.produced_position = source;
             voice.producing = !ended;
             self.spans[index] = VoiceSpan {
                 first,
+                step: voice.step,
+                source_frames,
                 frames: count,
                 ended,
+                looping: voice.looping,
+                generation: slot.generation,
+                revision: voice.revision,
             };
         }
         for sample in &mut self.output[..frames as usize * 2] {
@@ -83,33 +109,82 @@ impl AudioContext {
         Ok(&self.output[..submission.frames as usize * 2])
     }
 
-    /// cumulative progress within the exact pending submission; duplicate progress is rejected.
-    pub fn acknowledge(
-        &mut self,
+    pub fn visit_acknowledgement(
+        &self,
         submission: AudioSubmission32,
         consumed_frames: u32,
+        mut visit: impl FnMut(AudioVoiceProgress32),
     ) -> Result<(), AudioError32> {
-        let pending = self.pending_submission(submission)?;
-        if consumed_frames <= pending.consumed || consumed_frames > submission.frames {
-            return Err(AudioError32::InvalidRequest);
-        }
+        let previous = self.validate_acknowledgement(submission, consumed_frames)?;
         for (index, span) in self
             .spans
             .iter()
             .enumerate()
             .filter(|(_, span)| span.frames != 0)
         {
-            let voice = self.voices[index].voice.as_mut().unwrap();
-            let frames = self.buffers[voice.buffer.slot as usize]
-                .buffer
-                .as_ref()
-                .unwrap()
-                .frames();
-            let consumed = consumed_frames.min(span.frames);
-            voice.position =
-                ((u64::from(span.first) + u64::from(consumed)) % u64::from(frames)) as u32;
-            if span.ended && consumed == span.frames {
-                voice.playing = false;
+            let slot = &self.voices[index];
+            if slot.generation != span.generation
+                || !slot
+                    .voice
+                    .as_ref()
+                    .is_some_and(|voice| voice.revision == span.revision)
+            {
+                continue;
+            }
+            if let Some(progress) = progress(
+                *span,
+                previous,
+                consumed_frames,
+                AudioVoiceId32 {
+                    epoch: self.epoch,
+                    slot: index as u32,
+                    generation: span.generation,
+                },
+            ) {
+                visit(progress);
+            }
+        }
+        Ok(())
+    }
+
+    /// cumulative progress applies only to the exact voice generation and playback revision.
+    pub fn acknowledge(
+        &mut self,
+        submission: AudioSubmission32,
+        consumed_frames: u32,
+    ) -> Result<(), AudioError32> {
+        let previous = self.validate_acknowledgement(submission, consumed_frames)?;
+        for (index, span) in self
+            .spans
+            .iter()
+            .enumerate()
+            .filter(|(_, span)| span.frames != 0)
+        {
+            let slot = &mut self.voices[index];
+            if slot.generation != span.generation {
+                continue;
+            }
+            let Some(voice) = slot
+                .voice
+                .as_mut()
+                .filter(|voice| voice.revision == span.revision)
+            else {
+                continue;
+            };
+            if let Some(progress) = progress(
+                *span,
+                previous,
+                consumed_frames,
+                AudioVoiceId32 {
+                    epoch: self.epoch,
+                    slot: index as u32,
+                    generation: span.generation,
+                },
+            ) {
+                voice.position = progress.last_phase;
+                if progress.stopped && !voice.looping {
+                    voice.playing = false;
+                }
             }
         }
         self.consumed_frames = submission.first_frame + u64::from(consumed_frames);
@@ -121,6 +196,18 @@ impl AudioContext {
         Ok(())
     }
 
+    fn validate_acknowledgement(
+        &self,
+        id: AudioSubmission32,
+        consumed: u32,
+    ) -> Result<u32, AudioError32> {
+        let pending = self.pending_submission(id)?;
+        if consumed <= pending.consumed || consumed > id.frames {
+            return Err(AudioError32::InvalidRequest);
+        }
+        Ok(pending.consumed)
+    }
+
     fn pending_submission(
         &self,
         id: AudioSubmission32,
@@ -130,4 +217,32 @@ impl AudioContext {
             .filter(|pending| pending.id == id)
             .ok_or(AudioError32::InvalidSubmission)
     }
+}
+
+fn progress(
+    span: VoiceSpan,
+    previous: u32,
+    consumed: u32,
+    voice: AudioVoiceId32,
+) -> Option<AudioVoiceProgress32> {
+    let first = previous.min(span.frames);
+    let last = consumed.min(span.frames);
+    if first == last {
+        return None;
+    }
+    let limit = u128::from(span.source_frames) << 32;
+    let start = u128::from(span.first) + u128::from(first) * u128::from(span.step);
+    let end = u128::from(span.first) + u128::from(last) * u128::from(span.step);
+    let stopped = span.ended && last == span.frames;
+    Some(AudioVoiceProgress32 {
+        voice,
+        first_phase: (start % limit) as u64,
+        last_phase: if stopped { 0 } else { (end % limit) as u64 },
+        wraps: if span.looping {
+            (end / limit - start / limit) as u64
+        } else {
+            u64::from(stopped)
+        },
+        stopped,
+    })
 }
