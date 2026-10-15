@@ -1,5 +1,6 @@
 mod binding;
 mod needs;
+pub(in crate::cpu::dbt::wasm) mod wiring;
 
 pub(in crate::cpu::dbt::wasm) use needs::read_modify_needs;
 
@@ -58,6 +59,7 @@ pub(in crate::cpu::dbt::wasm) struct Imports {
     pub(in crate::cpu::dbt::wasm) atomic_xor_u32: Option<HelperBinding>,
 }
 
+#[derive(Clone, Copy)]
 pub(in crate::cpu::dbt::wasm) struct ImportNeeds {
     pub(in crate::cpu::dbt::wasm) stack_execute: bool,
     pub(in crate::cpu::dbt::wasm) cpu_integer: bool,
