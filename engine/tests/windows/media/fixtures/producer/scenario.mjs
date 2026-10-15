@@ -1,4 +1,4 @@
-import {builder} from './image.mjs';
+import {builder} from '../../../../support/pe32/image.mjs';
 
 export function image() {
   const b = builder([

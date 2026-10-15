@@ -301,3 +301,7 @@ path = "tests/windows/graphics/d3d8/wasm.rs"
 [[test]]
 name = "windows_media_wasm"
 path = "tests/windows/media/wasm.rs"
+
+[[test]]
+name = "windows_files_wasm"
+path = "tests/windows/files/wasm.rs"

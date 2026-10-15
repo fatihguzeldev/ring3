@@ -4,7 +4,7 @@ const BASE = 0x400000, TEXT = 0x1000, DATA = 0x6000;
 const u32 = value => {const b = Buffer.alloc(4); b.writeUInt32LE(value >>> 0); return [...b];};
 const file = rva => rva >= DATA ? 0x4200 + rva - DATA : 0x200 + rva - TEXT;
 
-export function builder(imports) {
+export function builder(imports, options = {}) {
   const bytes = Buffer.alloc(0xc200), code = [], calls = [], addresses = {}, iats = new Map();
   const word = (rva, value) => bytes.writeUInt32LE(value >>> 0, file(rva));
   const words = (rva, values) => values.forEach((value, index) => word(rva + 4 * index, value));
@@ -56,9 +56,27 @@ export function builder(imports) {
     values.forEach((value, index) => code.push(0xc7, 0x80, ...u32(index * 4), ...u32(value)));
   };
   const readLocked = (pointer, output) => {code.push(0xa1, ...u32(pointer), 0x8b, 0x00); save(output);};
-  const callbacks = [{entry: BASE + 0x4f00, words: 4}, {entry: BASE + 0x4f40, words: 2}];
-  for (const callback of callbacks) bytes.set([0xb8, 1, 0, 0, 0, 0xc2, callback.words * 4, 0], file(callback.entry - BASE));
-  const returnPc = BASE + 0x4f80, returnId = 0x5f000002;
+  const configured = options.callbacks;
+  const definitions = configured ?? [{words: 4, result: 1}, {words: 2, result: 1}];
+  assert.ok(definitions.length > 0 && definitions.length <= 2);
+  const callbacks = definitions.map((definition, index) => {
+    assert.ok(Number.isInteger(definition.words) && definition.words >= 0 && definition.words <= 16);
+    const entry = BASE + (configured ? 0x4e00 + index * 0x100 : 0x4f00 + index * 0x40);
+    const body = [];
+    if (definition.record) {
+      const argumentsAddress = allocate(`${definition.record}Arguments`, Array(definition.words).fill(0));
+      const countAddress = allocate(`${definition.record}Count`);
+      for (let argument = 0; argument < definition.words; argument++) {
+        body.push(0x8b, 0x44, 0x24, 4 + argument * 4, 0xa3, ...u32(argumentsAddress + argument * 4));
+      }
+      body.push(0xff, 0x05, ...u32(countAddress));
+    }
+    body.push(0xb8, ...u32(definition.result ?? 1), 0xc2, definition.words * 4, 0);
+    assert.ok(body.length <= (configured ? 0xe0 : 0x40));
+    bytes.set(body, file(entry - BASE));
+    return {entry, words: definition.words, length: body.length};
+  });
+  const returnPc = BASE + (configured ? 0x4fe0 : 0x4f80), returnId = 0x5f000002;
   bytes.set([0x0f, 0x0b], file(returnPc - BASE));
   return {allocate, data, string, ref, save, write, copy, external, com, writeLocked, readLocked, addresses, callbacks,
     seal() {
