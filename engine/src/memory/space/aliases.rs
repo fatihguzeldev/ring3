@@ -364,16 +364,32 @@ impl AddressSpace {
         }
     }
 
+    #[inline]
     pub(super) fn writable_slot(&mut self, page: usize, version: u64) -> usize {
         let shared = self.mappings[page] as usize - 1;
-        let private = self
-            .private_slots
-            .as_mut()
-            .map_or(0, |slots| std::mem::take(&mut slots[page]));
+        self.writable_slot_from(page, shared, version)
+    }
+
+    #[inline]
+    pub(super) fn writable_slot_from(&mut self, page: usize, shared: usize, version: u64) -> usize {
+        let private = self.private_slots.as_ref().map_or(0, |slots| slots[page]);
         if private == 0 {
-            return shared;
+            shared
+        } else {
+            self.detach_private_slot(page, shared, private as usize - 1, version)
         }
-        let private = private as usize - 1;
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn detach_private_slot(
+        &mut self,
+        page: usize,
+        shared: usize,
+        private: usize,
+        version: u64,
+    ) -> usize {
+        self.private_slots.as_mut().unwrap()[page] = 0;
         let from = shared * PAGE_SIZE as usize;
         let to = private * PAGE_SIZE as usize;
         self.backing

@@ -290,9 +290,9 @@ impl AddressSpace {
         if input.len() <= PAGE_SIZE as usize - within {
             // retain the permission-checked slot through one-page publication.
             let page = address.0 as usize / PAGE_SIZE as usize;
-            self.access_slot(page, address, Access::Write)?;
+            let slot = self.access_slot(page, address, Access::Write)?;
             let version = self.advance_version()?;
-            let slot = self.writable_slot(page, version);
+            let slot = self.writable_slot_from(page, slot, version);
             let offset = slot * PAGE_SIZE as usize + within;
             self.backing[offset..offset + input.len()].copy_from_slice(input);
             self.versions[slot].content = version;
