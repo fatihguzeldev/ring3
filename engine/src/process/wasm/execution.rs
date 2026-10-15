@@ -185,7 +185,11 @@ pub(crate) fn find_installed_resident(key_low: u32, key_high: u32, pc: u32) -> u
 fn installation_record(instance: &mut EngineInstance, installed: ResidentInstallation) {
     let output = &mut instance.arena.as_mut().get_mut()
         [TRANSFER_OFFSET..TRANSFER_OFFSET + INSTALLATION_RECORD_SIZE];
-    encode_installation(installed.unit_id, installed.slot, output.try_into().unwrap());
+    encode_installation(
+        installed.unit_id,
+        installed.slot,
+        output.try_into().unwrap(),
+    );
 }
 
 pub(crate) fn dispatcher_module(low: u32, high: u32) -> u32 {

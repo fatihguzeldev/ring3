@@ -94,16 +94,27 @@ fn plans_are_bound_to_one_module_set_even_at_equal_revisions() {
 #[test]
 fn a_direct_export_noop_does_not_stale_an_independent_load_plan() {
     let mut catalog = ModuleCatalog32::new();
-    catalog.add_guest("alpha", &image(true, 0x10000000, &[], &[(1, Some("Run"), "@1000")])).unwrap();
-    catalog.add_guest("beta", &image(true, 0x20000000, &[], &[])).unwrap();
+    catalog
+        .add_guest(
+            "alpha",
+            &image(true, 0x10000000, &[], &[(1, Some("Run"), "@1000")]),
+        )
+        .unwrap();
+    catalog
+        .add_guest("beta", &image(true, 0x20000000, &[], &[]))
+        .unwrap();
     let mut set = ModuleSet32::new();
     let mut memory = AddressSpace::new(12).unwrap();
-    catalog.plan_load(&set, &memory, "alpha", None).unwrap()
-        .install(&mut memory, &mut set).unwrap();
+    catalog
+        .plan_load(&set, &memory, "alpha", None)
+        .unwrap()
+        .install(&mut memory, &mut set)
+        .unwrap();
     let alpha = set.find("alpha").unwrap().id();
     let pending = catalog.plan_load(&set, &memory, "beta", None).unwrap();
-    let (noop, export) = catalog.plan_export_live(&set, &memory, alpha,
-        &ImportSymbol32::Name("Run".into())).unwrap();
+    let (noop, export) = catalog
+        .plan_export_live(&set, &memory, alpha, &ImportSymbol32::Name("Run".into()))
+        .unwrap();
     assert_eq!(export.address(), GuestAddress(0x10001000));
     let pages = memory.mapped_pages();
     let loaded = noop.install(&mut memory, &mut set).unwrap();

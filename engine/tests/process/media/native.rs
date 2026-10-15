@@ -206,22 +206,37 @@ fn oversized_native_input_refuses_count_before_scanning_timestamps() {
         timestamp_ns: u64::MAX,
         kind: InputKind::Focus { focused: true },
     }; 3];
-    assert_eq!(engine.submit_input(epoch, 1, &oversized),
-        Err(HostError::Media(MediaError::Input(InputError::InvalidCount))));
-    assert_eq!((
-        *engine.input().unwrap().state(),
-        engine.input().unwrap().last_sequence(),
-        engine.input().unwrap().last_timestamp_ns(),
-        engine.input().unwrap().queued_events(),
-        engine.arena().to_vec(),
-    ), before);
+    assert_eq!(
+        engine.submit_input(epoch, 1, &oversized),
+        Err(HostError::Media(MediaError::Input(
+            InputError::InvalidCount
+        )))
+    );
+    assert_eq!(
+        (
+            *engine.input().unwrap().state(),
+            engine.input().unwrap().last_sequence(),
+            engine.input().unwrap().last_timestamp_ns(),
+            engine.input().unwrap().queued_events(),
+            engine.arena().to_vec(),
+        ),
+        before
+    );
 
     let valid = [
-        TimedInputEvent { timestamp_ns: 201, kind: InputKind::Focus { focused: true } },
-        TimedInputEvent { timestamp_ns: 201, kind: InputKind::Capture { captured: true } },
+        TimedInputEvent {
+            timestamp_ns: 201,
+            kind: InputKind::Focus { focused: true },
+        },
+        TimedInputEvent {
+            timestamp_ns: 201,
+            kind: InputKind::Capture { captured: true },
+        },
     ];
-    assert_eq!(engine.submit_input(epoch, 1, &valid),
-        Err(HostError::Media(MediaError::Input(InputError::TimeOrder))));
+    assert_eq!(
+        engine.submit_input(epoch, 1, &valid),
+        Err(HostError::Media(MediaError::Input(InputError::TimeOrder)))
+    );
     engine.observe_cpu_clock(201).unwrap();
     engine.submit_input(epoch, 1, &valid).unwrap();
     assert_eq!(engine.input().unwrap().last_sequence(), 1);
