@@ -12,7 +12,7 @@ assert.ok(WebAssembly.validate(engineBytes), 'actual engine validates');
 assert.ok(WebAssembly.validate(injectorBytes), 'pure-Wasm helper injector validates');
 const engineModule = new WebAssembly.Module(engineBytes), injectorModule = new WebAssembly.Module(injectorBytes);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), [], 'engine has no JS imports');
-const names = ['open', 'close', 'arena_ptr', 'map', 'protect', 'unmap', 'upload', 'compile', 'generation', 'module_ptr', 'module_len', 'guard', 'read32', 'write32', 'store32', 'cpu_read32', 'cpu_store32'];
+const names = ['open', 'close', 'arena_ptr', 'map', 'protect', 'unmap', 'upload', 'compile', 'generation', 'module_ptr', 'module_len', 'guard', 'guard_detect', 'finish_exception_detection', 'read32', 'write32', 'store32', 'cpu_read32', 'cpu_store32'];
 let keys = 0n, modules = 0, actualRuns = 0, injectedRuns = 0;
 const generatedHashes = [];
 
@@ -83,9 +83,16 @@ function helperRecord(tag, value = 0, detail = 0, address = 0, access = 0, lengt
   return bytes;
 }
 
-function cpuHelperRecord(tag, value = 0, detail = 0, address = 0, access = 0, width = 4) {
+function legacyCpuHelperRecord(tag, value = 0, detail = 0, address = 0, access = 0, width = 4) {
   const bytes = helperRecord(tag, value, detail, address, access, width), view = new DataView(bytes.buffer);
   view.setUint16(4, 10, true); return bytes;
+}
+
+function cpuHelperRecord(tag, value = 0, detail = 0, address = 0, access = 0, width = 4) {
+  const bytes = helperRecord(tag, value, detail, address, access, width), view = new DataView(bytes.buffer);
+  view.setUint16(4, tag === 1 ? 15 : 10, true);
+  if (tag === 1) {view.setUint32(16, 9, true); view.setUint32(24, 4 | (access === 2 ? 2 : 0) | (detail === 2 ? 1 : 0), true);}
+  return bytes;
 }
 
 function guestValue(engine, address) {
@@ -117,13 +124,13 @@ function compile(engine, bytes, blocks = [[0x1000, bytes.length]], expectedHelpe
   const module = new WebAssembly.Module(encoded);
   const expected = [
     {module: 'env', name: 'memory', kind: 'memory'},
-    {module: 'ring3', name: 'guard', kind: 'function'},
+    {module: 'ring3', name: 'guard_detect', kind: 'function'}, {module: 'ring3', name: 'finish_exception_detection', kind: 'function'},
     ...expectedHelpers.map(name => ({module: 'ring3', name, kind: 'function'})),
   ].sort((a, b) => `${a.module}.${a.name}`.localeCompare(`${b.module}.${b.name}`));
   assert.deepEqual(sortedImports(module), expected, 'module imports exactly needed actual Wasm helpers');
   const instance = new WebAssembly.Instance(module, {
     env: {memory: engine.memory},
-    ring3: {guard: engine.api.guard, cpu_read32: engine.api.cpu_read32, cpu_store32: engine.api.cpu_store32},
+    ring3: {guard_detect: engine.api.guard_detect, finish_exception_detection: engine.api.finish_exception_detection, cpu_read32: engine.api.cpu_read32, cpu_store32: engine.api.cpu_store32},
   });
   modules++;
   generatedHashes.push(hash(encoded));
@@ -161,14 +168,16 @@ function readState(engine) {
 }
 
 function exit(reason, retired, detail = 0, address = 0, access = 0, length = reason === 5 ? 4 : 0, version = reason === 11 || reason === 15 ? 6 : 2) {
+  const pageFault = reason === 5;
+  if (pageFault) {reason = 23; detail = 4 | (access === 2 ? 2 : 0) | (detail === 2 ? 1 : 0);}
   const bytes = new Uint8Array(40), view = new DataView(bytes.buffer);
-  header(bytes, view, 0, 'R3EX', 40, version);
+  header(bytes, view, 0, 'R3EX', 40, pageFault ? 12 : version);
   [reason, retired, detail, address, access, length].forEach((field, index) => view.setUint32(16 + index * 4, field, true));
   return bytes;
 }
 
 function run(engine, child, budget, expected, expectedExit, label, expectedHelper = undefined, injected = false) {
-  if (child.cpuScalar || injected) {expectedExit = expectedExit.slice(); new DataView(expectedExit.buffer).setUint16(4, 6, true);}
+  if ((child.cpuScalar || injected) && new DataView(expectedExit.buffer).getUint32(16, true) !== 23) {expectedExit = expectedExit.slice(); new DataView(expectedExit.buffer).setUint16(4, 6, true);}
   const before = arena(engine);
   assert.equal(child.run(engine.base, engine.base + 56, budget, engine.base + 96), 0, `${label}: canonical runtime exit status`);
   if (injected) injectedRuns++; else actualRuns++;
@@ -464,24 +473,24 @@ for (const memory of [true, false]) {
 }
 
 const injectedCases = [
-  {name: 'memory CALL first-read infra suppresses return store', form: 'call_ebx', readRecord: cpuHelperRecord(2, 0, 1), reason: 7, detail: 1, reads: 1, stores: 0},
-  {name: 'memory CALL second-store infra retains old ESP/PC', form: 'call_ebx', storeRecord: cpuHelperRecord(2, 0, 1), reason: 7, detail: 1, reads: 1, stores: 1},
-  {name: 'memory CALL second-store protocol retains old ESP/PC', form: 'call_ebx', storeRecord: cpuHelperRecord(3), reason: 7, detail: 2, reads: 1, stores: 1},
+  {name: 'memory CALL first-read infra suppresses return store', form: 'call_ebx', readRecord: legacyCpuHelperRecord(2, 0, 1), reason: 7, detail: 1, reads: 1, stores: 0},
+  {name: 'memory CALL second-store infra retains old ESP/PC', form: 'call_ebx', storeRecord: legacyCpuHelperRecord(2, 0, 1), reason: 7, detail: 1, reads: 1, stores: 1},
+  {name: 'memory CALL second-store protocol retains old ESP/PC', form: 'call_ebx', storeRecord: legacyCpuHelperRecord(3), reason: 7, detail: 2, reads: 1, stores: 1},
   {name: 'memory CALL success retains target despite helper overwrite', form: 'call_ebx', reason: 3, detail: 0, reads: 1, stores: 1, commit: true},
   {name: 'memory CALL completion11 commits captured target', form: 'call_ebx', storeStatus: 11, reason: 6, detail: 0, reads: 1, stores: 1, commit: true},
-  {name: 'memory CALL completion11 contradiction retains old ESP/PC', form: 'call_ebx', storeRecord: cpuHelperRecord(2, 0, 1), storeStatus: 11, reason: 7, detail: 2, reads: 1, stores: 1},
-  {name: 'register CALL infra retains old target register', form: 'call_esi', storeRecord: cpuHelperRecord(2, 0, 1), reason: 7, detail: 1, reads: 0, stores: 1},
+  {name: 'memory CALL completion11 contradiction retains old ESP/PC', form: 'call_ebx', storeRecord: legacyCpuHelperRecord(2, 0, 1), storeStatus: 11, reason: 7, detail: 2, reads: 1, stores: 1},
+  {name: 'register CALL infra retains old target register', form: 'call_esi', storeRecord: legacyCpuHelperRecord(2, 0, 1), reason: 7, detail: 1, reads: 0, stores: 1},
   {name: 'register CALL success captures target before return store', form: 'call_esi', reason: 3, detail: 0, reads: 0, stores: 1, commit: true},
   {name: 'register CALL completion11 captures target', form: 'call_esi', storeStatus: 11, reason: 6, detail: 0, reads: 0, stores: 1, commit: true},
-  {name: 'memory JMP infra performs no return store', form: 'jmp_ebx', readRecord: cpuHelperRecord(2, 0, 1), reason: 7, detail: 1, reads: 1, stores: 0},
-  {name: 'memory JMP protocol performs no return store', form: 'jmp_ebx', readRecord: cpuHelperRecord(3), reason: 7, detail: 2, reads: 1, stores: 0},
+  {name: 'memory JMP infra performs no return store', form: 'jmp_ebx', readRecord: legacyCpuHelperRecord(2, 0, 1), reason: 7, detail: 1, reads: 1, stores: 0},
+  {name: 'memory JMP protocol performs no return store', form: 'jmp_ebx', readRecord: legacyCpuHelperRecord(3), reason: 7, detail: 2, reads: 1, stores: 0},
 ];
 for (const fixture of injectedCases) {
   const engine = fresh();
   const helpers = fixture.form === 'call_esi' ? ['store32'] : fixture.form === 'jmp_ebx' ? ['read32'] : ['read32', 'store32'];
   const actual = compile(engine, Uint8Array.from([...arithmeticPrefix, ...forms[fixture.form]]), undefined, helpers);
   const injector = new WebAssembly.Instance(injectorModule, {env: {memory: engine.memory}, ring3: {guard: engine.api.guard}}).exports;
-  const injected = new WebAssembly.Instance(actual.module, {env: {memory: engine.memory}, ring3: {guard: injector.guard, cpu_read32: injector.read32, cpu_store32: injector.store32}}).exports;
+  const injected = new WebAssembly.Instance(actual.module, {env: {memory: engine.memory}, ring3: {guard_detect: engine.api.guard_detect, finish_exception_detection: engine.api.finish_exception_detection, cpu_read32: injector.read32, cpu_store32: injector.store32}}).exports;
   const start = state();
   start.registers[3] = 0x4000;
   start.registers[4] = 0x9000;
@@ -492,8 +501,8 @@ for (const fixture of injectedCases) {
   expected.eip = fixture.commit ? target : 0x1008;
   if (fixture.commit && fixture.form !== 'jmp_ebx') expected.registers[4] = 0x8ffc;
   writeState(engine, start);
-  refresh(engine).bytes.set(fixture.readRecord ?? cpuHelperRecord(0, target), engine.base + 140);
-  engine.bytes.set(fixture.storeRecord ?? cpuHelperRecord(0), engine.base + 180);
+  refresh(engine).bytes.set(fixture.readRecord ?? legacyCpuHelperRecord(0, target), engine.base + 140);
+  engine.bytes.set(fixture.storeRecord ?? legacyCpuHelperRecord(0), engine.base + 180);
   injector.configure(engine.base + 100, engine.base + 140, engine.base + 180, 0, fixture.storeStatus ?? 0);
   run(engine, injected, 20, expected, exit(fixture.reason, fixture.commit ? 3 : 2, fixture.detail), `synthetic ${fixture.name}`, undefined, true);
   assert.equal(injector.read_calls(), fixture.reads);

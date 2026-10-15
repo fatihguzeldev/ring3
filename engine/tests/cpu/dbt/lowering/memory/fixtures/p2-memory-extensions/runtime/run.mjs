@@ -12,7 +12,7 @@ assert.ok(WebAssembly.validate(engineBytes), 'actual engine validates');
 assert.ok(WebAssembly.validate(injectorBytes), 'pure-Wasm helper injector validates');
 const engineModule = new WebAssembly.Module(engineBytes), injectorModule = new WebAssembly.Module(injectorBytes);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), [], 'engine has no JS imports');
-const names = ['open', 'close', 'arena_ptr', 'map', 'protect', 'unmap', 'upload', 'compile', 'compile_with_gates', 'generation', 'module_ptr', 'module_len', 'guard', 'read8', 'read16', 'cpu_read8', 'cpu_read16'];
+const names = ['open', 'close', 'arena_ptr', 'map', 'protect', 'unmap', 'upload', 'compile', 'compile_with_gates', 'generation', 'module_ptr', 'module_len', 'guard', 'guard_detect', 'finish_exception_detection', 'read8', 'read16', 'cpu_read8', 'cpu_read16'];
 let keys = 0n, modules = 0, actualRuns = 0, injectedRuns = 0, continuations = 0, helperProbes = 0;
 const generatedHashes = [];
 
@@ -83,9 +83,16 @@ function narrow(width, tag = 0, value = 0, detail = 0, address = 0, access = 0) 
   return bytes;
 }
 
-function cpuNarrow(width, tag = 0, value = 0, detail = 0, address = 0, access = 0) {
+function legacyCpuNarrow(width, tag = 0, value = 0, detail = 0, address = 0, access = 0) {
   const bytes = narrow(width, tag, value, detail, address, access), view = new DataView(bytes.buffer);
   view.setUint16(4, 10, true); return bytes;
+}
+
+function cpuNarrow(width, tag = 0, value = 0, detail = 0, address = 0, access = 0) {
+  const bytes = narrow(width, tag, value, detail, address, access), view = new DataView(bytes.buffer);
+  view.setUint16(4, tag === 1 ? 15 : 10, true);
+  if (tag === 1) {view.setUint32(16, 9, true); view.setUint32(24, 4 | (access === 2 ? 2 : 0) | (detail === 2 ? 1 : 0), true);}
+  return bytes;
 }
 
 function compile(engine, bytes, blocks = [[0x1000, bytes.length]], expectedHelpers = [], gates = []) {
@@ -109,13 +116,13 @@ function compile(engine, bytes, blocks = [[0x1000, bytes.length]], expectedHelpe
   const module = new WebAssembly.Module(encoded);
   const expected = [
     {module: 'env', name: 'memory', kind: 'memory'},
-    {module: 'ring3', name: 'guard', kind: 'function'},
+    {module: 'ring3', name: 'guard_detect', kind: 'function'}, {module: 'ring3', name: 'finish_exception_detection', kind: 'function'},
     ...expectedHelpers.map(name => ({module: 'ring3', name, kind: 'function'})),
   ].sort((a, b) => `${a.module}.${a.name}`.localeCompare(`${b.module}.${b.name}`));
   assert.deepEqual(sortedImports(module), expected, 'module imports exactly needed actual Wasm helpers');
   const instance = new WebAssembly.Instance(module, {
     env: {memory: engine.memory},
-    ring3: {guard: engine.api.guard, cpu_read8: engine.api.cpu_read8, cpu_read16: engine.api.cpu_read16},
+    ring3: {guard_detect: engine.api.guard_detect, finish_exception_detection: engine.api.finish_exception_detection, cpu_read8: engine.api.cpu_read8, cpu_read16: engine.api.cpu_read16},
   });
   modules++;
   generatedHashes.push(hash(encoded));
@@ -152,9 +159,18 @@ function readState(engine) {
   };
 }
 
-function exit(reason, retired, detail = 0, address = 0, access = 0, length = 0, version = 6) {
+function legacyExit(reason, retired, detail = 0, address = 0, access = 0, length = 0, version = 6) {
   const bytes = new Uint8Array(40), view = new DataView(bytes.buffer);
   header(bytes, view, 0, 'R3EX', 40, version);
+  [reason, retired, detail, address, access, length].forEach((field, index) => view.setUint32(16 + index * 4, field, true));
+  return bytes;
+}
+
+function exit(reason, retired, detail = 0, address = 0, access = 0, length = 0, version = 6) {
+  const pageFault = reason === 5;
+  if (pageFault) {reason = 23; detail = 4 | (access === 2 ? 2 : 0) | (detail === 2 ? 1 : 0);}
+  const bytes = new Uint8Array(40), view = new DataView(bytes.buffer);
+  header(bytes, view, 0, 'R3EX', 40, pageFault ? 12 : version);
   [reason, retired, detail, address, access, length].forEach((field, index) => view.setUint32(16 + index * 4, field, true));
   return bytes;
 }
@@ -391,13 +407,13 @@ function changed(record, offset, value, size = 4) {
   return result;
 }
 function scriptedCases(width) {
-  const success = cpuNarrow(width, 0, width === 1 ? 255 : 65535), fault = cpuNarrow(width, 1, 0, 1, 0x9000, 1), infrastructure = cpuNarrow(width, 2, 0, 1);
-  const protocol = exit(7, 1, 2), rejected = exit(7, 1, 3);
+  const success = legacyCpuNarrow(width, 0, width === 1 ? 255 : 65535), fault = legacyCpuNarrow(width, 1, 0, 1, 0x9000, 1), infrastructure = legacyCpuNarrow(width, 2, 0, 1);
+  const protocol = legacyExit(7, 1, 2), rejected = legacyExit(7, 1, 3);
   const cases = [
     {label: 'canonical success exact unsigned maximum', record: success, success: true},
-    {label: 'canonical unmapped request byte', record: fault, expected: exit(5, 1, 1, 0x9000, 1, width)},
-    {label: 'canonical infrastructure version exhaustion', record: infrastructure, expected: exit(7, 1, 1)},
-    {label: 'canonical other memory infrastructure', record: cpuNarrow(width, 2, 0, 2), expected: rejected},
+    {label: 'canonical unmapped request byte', record: fault, expected: legacyExit(5, 1, 1, 0x9000, 1, width)},
+    {label: 'canonical infrastructure version exhaustion', record: infrastructure, expected: legacyExit(7, 1, 1)},
+    {label: 'canonical other memory infrastructure', record: legacyCpuNarrow(width, 2, 0, 2), expected: rejected},
     ...[[0, 0, 4, 'magic'], [4, 1, 2, 'version'], [6, 2, 2, 'profile'], [8, 39, 4, 'length'], [12, 1, 4, 'reserved']].map(([offset, value, size, label]) => ({label: `invalid current CPU ${label}`, record: changed(success, offset, value, size)})),
     ...[[success, 'success'], [fault, 'fault'], [infrastructure, 'infrastructure']].map(([record, label]) => ({label: `wrong requested width on ${label}`, record: changed(record, 36, width === 1 ? 2 : 1)})),
     {label: 'current width4 is excluded from requested narrow result', record: changed(success, 36, 4)},
@@ -409,7 +425,7 @@ function scriptedCases(width) {
     {label: 'fault access must be read', record: changed(fault, 32, 2)},
     {label: 'fault byte precedes request', record: changed(fault, 28, 0x8fff)},
     {label: 'fault byte is after requested span', record: changed(fault, 28, 0x9000 + width)},
-    {label: 'false request overflow', record: cpuNarrow(width, 1, 0, 3, 0x9000, 1)},
+    {label: 'false request overflow', record: legacyCpuNarrow(width, 1, 0, 3, 0x9000, 1)},
     ...[[20, 'value'], [28, 'fault byte'], [32, 'access']].map(([offset, label]) => ({label: `nonzero infrastructure ${label}`, record: changed(infrastructure, offset, 1)})),
     {label: 'unknown infrastructure detail', record: changed(infrastructure, 24, 3)},
     {label: 'read lifecycle rejection is terminal infrastructure', status: 5, record: success, expected: rejected},
@@ -417,21 +433,21 @@ function scriptedCases(width) {
     {label: 'store committed status11 is rejected before parsing malformed read result', status: 11, record: changed(success, 0, 0), expected: rejected},
   ];
   if (width === 2) cases.push(
-    {label: 'terminal fault byte lies in nonoverflowing request', address: 0xfffffffe, record: cpuNarrow(2, 1, 0, 1, 0xffffffff, 1), expected: exit(5, 1, 1, 0xffffffff, 1, 2)},
-    {label: 'true request overflow', address: 0xffffffff, record: cpuNarrow(2, 1, 0, 3, 0xffffffff, 1), expected: exit(5, 1, 3, 0xffffffff, 1, 2)},
-    {label: 'overflowing request cannot report success', address: 0xffffffff, record: cpuNarrow(2, 0, 0)},
-    {label: 'overflowing request cannot report unmapped', address: 0xffffffff, record: cpuNarrow(2, 1, 0, 1, 0xffffffff, 1)},
-    {label: 'overflow fault byte must equal original request', address: 0xffffffff, record: cpuNarrow(2, 1, 0, 3, 0xfffffffe, 1)},
+    {label: 'terminal fault byte lies in nonoverflowing request', address: 0xfffffffe, record: legacyCpuNarrow(2, 1, 0, 1, 0xffffffff, 1), expected: legacyExit(5, 1, 1, 0xffffffff, 1, 2)},
+    {label: 'true request overflow', address: 0xffffffff, record: legacyCpuNarrow(2, 1, 0, 3, 0xffffffff, 1), expected: legacyExit(5, 1, 3, 0xffffffff, 1, 2)},
+    {label: 'overflowing request cannot report success', address: 0xffffffff, record: legacyCpuNarrow(2, 0, 0)},
+    {label: 'overflowing request cannot report unmapped', address: 0xffffffff, record: legacyCpuNarrow(2, 1, 0, 1, 0xffffffff, 1)},
+    {label: 'overflow fault byte must equal original request', address: 0xffffffff, record: legacyCpuNarrow(2, 1, 0, 3, 0xfffffffe, 1)},
   );
   return cases.map(test => ({status: 0, address: 0x9000, expected: protocol, ...test,
-    ...(test.address === 0xffffffff && width === 2 ? {segmentFault: true, expected: exit(11, 1)} : {})}));
+    ...(test.address === 0xffffffff && width === 2 ? {segmentFault: true, expected: legacyExit(11, 1)} : {})}));
 }
 
 const scriptedEvidence = [];
 for (const width of [1, 2]) {
   const engine = fresh(), actual = compile(engine, assembled.get(width === 1 ? 'scripted_byte' : 'scripted_word').bytes, undefined, [width === 1 ? 'read8' : 'read16']);
   const injector = new WebAssembly.Instance(injectorModule, {env: {memory: engine.memory}, ring3: {guard: engine.api.guard}});
-  const injected = new WebAssembly.Instance(actual.module, {env: {memory: engine.memory}, ring3: {guard: injector.exports.guard, cpu_read8: injector.exports.read8, cpu_read16: injector.exports.read16}});
+  const injected = new WebAssembly.Instance(actual.module, {env: {memory: engine.memory}, ring3: {guard_detect: engine.api.guard_detect, finish_exception_detection: engine.api.finish_exception_detection, cpu_read8: injector.exports.read8, cpu_read16: injector.exports.read16}});
   const child = {...actual, run: injected.exports.run};
   const cases = scriptedCases(width);
   for (const test of cases) {

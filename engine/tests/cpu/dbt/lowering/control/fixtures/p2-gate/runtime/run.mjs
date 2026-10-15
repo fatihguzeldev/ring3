@@ -11,7 +11,7 @@ const engineBytes = readFileSync(enginePath);
 assert.ok(WebAssembly.validate(engineBytes), 'actual engine validates');
 const engineModule = new WebAssembly.Module(engineBytes);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), [], 'engine has no JS imports');
-const names = ['open', 'close', 'arena_ptr', 'map', 'protect', 'unmap', 'upload', 'compile', 'compile_with_gates', 'generation', 'module_ptr', 'module_len', 'guard', 'read32', 'write32', 'store32', 'cpu_read32', 'cpu_store32'];
+const names = ['open', 'close', 'arena_ptr', 'map', 'protect', 'unmap', 'upload', 'compile', 'compile_with_gates', 'generation', 'module_ptr', 'module_len', 'guard', 'guard_detect', 'finish_exception_detection', 'read32', 'write32', 'store32', 'cpu_read32', 'cpu_store32'];
 let keys = 0n, modules = 0, actualRuns = 0, rejectedRuns = 0;
 const generatedHashes = [];
 
@@ -77,9 +77,16 @@ function helperRecord(tag, value = 0, detail = 0, address = 0, access = 0, lengt
   return bytes;
 }
 
-function cpuHelperRecord(tag, value = 0, detail = 0, address = 0, access = 0, width = 4) {
+function legacyCpuHelperRecord(tag, value = 0, detail = 0, address = 0, access = 0, width = 4) {
   const bytes = helperRecord(tag, value, detail, address, access, width), view = new DataView(bytes.buffer);
   view.setUint16(4, 10, true); return bytes;
+}
+
+function cpuHelperRecord(tag, value = 0, detail = 0, address = 0, access = 0, width = 4) {
+  const bytes = helperRecord(tag, value, detail, address, access, width), view = new DataView(bytes.buffer);
+  view.setUint16(4, tag === 1 ? 15 : 10, true);
+  if (tag === 1) {view.setUint32(16, 9, true); view.setUint32(24, 4 | (access === 2 ? 2 : 0) | (detail === 2 ? 1 : 0), true);}
+  return bytes;
 }
 
 function guestValue(engine, address) {
@@ -114,13 +121,13 @@ function compile(engine, blocks, gates = [], expectedHelpers = [], legacy = fals
   const module = new WebAssembly.Module(encoded);
   const expected = [
     {module: 'env', name: 'memory', kind: 'memory'},
-    {module: 'ring3', name: 'guard', kind: 'function'},
+    {module: 'ring3', name: 'guard_detect', kind: 'function'}, {module: 'ring3', name: 'finish_exception_detection', kind: 'function'},
     ...expectedHelpers.map(name => ({module: 'ring3', name, kind: 'function'})),
   ].sort((a, b) => `${a.module}.${a.name}`.localeCompare(`${b.module}.${b.name}`));
   assert.deepEqual(sortedImports(module), expected, 'only actual memory/guard/instruction helpers; no hot gate import');
   const instance = new WebAssembly.Instance(module, {
     env: {memory: engine.memory},
-    ring3: {guard: engine.api.guard, cpu_read32: engine.api.cpu_read32, cpu_store32: engine.api.cpu_store32},
+    ring3: {guard_detect: engine.api.guard_detect, finish_exception_detection: engine.api.finish_exception_detection, cpu_read32: engine.api.cpu_read32, cpu_store32: engine.api.cpu_store32},
   });
   modules++;
   generatedHashes.push(hash(encoded));
@@ -158,14 +165,16 @@ function readState(engine) {
 }
 
 function exit(reason, retired, detail = 0, address = 0, access = 0, length = reason === 5 ? 4 : 0, version = 3) {
+  const pageFault = reason === 5;
+  if (pageFault) {reason = 23; detail = 4 | (access === 2 ? 2 : 0) | (detail === 2 ? 1 : 0);}
   const bytes = new Uint8Array(40), view = new DataView(bytes.buffer);
-  header(bytes, view, 0, 'R3EX', 40, version);
+  header(bytes, view, 0, 'R3EX', 40, pageFault ? 12 : version);
   [reason, retired, detail, address, access, length].forEach((field, index) => view.setUint32(16 + index * 4, field, true));
   return bytes;
 }
 
 function run(engine, child, budget, expected, expectedExit, label, expectedHelper = undefined) {
-  if (child.cpuScalar) {expectedExit = expectedExit.slice(); new DataView(expectedExit.buffer).setUint16(4, 6, true);}
+  if (child.cpuScalar && new DataView(expectedExit.buffer).getUint32(16, true) !== 23) {expectedExit = expectedExit.slice(); new DataView(expectedExit.buffer).setUint16(4, 6, true);}
   const before = arena(engine);
   assert.equal(child.run(engine.base, engine.base + 56, budget, engine.base + 96), 0, `${label}: canonical runtime exit status`);
   actualRuns++;
@@ -264,7 +273,7 @@ const highId = 0xfedcba98;
   const other = fresh();
   upload(other, 0x1000, Uint8Array.from(marker));
   compile(other, [[0x1000, 2]], [[0x1000, highId]]);
-  const rebound = new WebAssembly.Instance(child.module, {env: {memory: other.memory}, ring3: {guard: other.api.guard}}).exports;
+  const rebound = new WebAssembly.Instance(child.module, {env: {memory: other.memory}, ring3: {guard_detect: other.api.guard_detect, finish_exception_detection: other.api.finish_exception_detection}}).exports;
   writeState(other, start);
   reject(other, rebound, 3, 'different instance key rejects before gate memory reads', [other.base, other.base + 56, other.base + 96]);
 }

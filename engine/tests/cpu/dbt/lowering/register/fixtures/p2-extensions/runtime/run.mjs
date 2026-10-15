@@ -55,15 +55,18 @@ function readState(ctx) {
 }
 
 function exit(reason, retired, version = 1, detail = 0, address = 0, access = 0, length = 0) {
+  const pageFault = reason === 5;
+  if (pageFault) {reason = 23; detail = 4 | (access === 2 ? 2 : 0) | (detail === 2 ? 1 : 0);}
   const bytes = new Uint8Array(40), view = new DataView(bytes.buffer);
-  header(bytes, view, 0, 'R3EX', 40, version);
+  header(bytes, view, 0, 'R3EX', 40, pageFault ? 12 : version);
   [reason, retired, detail, address, access, length].forEach((value, index) => view.setUint32(16 + index * 4, value, true));
   return bytes;
 }
 
 function helper(tag, value = 0, detail = 0, address = 0, access = 0, length = 0) {
   const bytes = new Uint8Array(40), view = new DataView(bytes.buffer);
-  header(bytes, view, 0, 'R3MH', 40, 10);
+  header(bytes, view, 0, 'R3MH', 40, tag === 1 ? 15 : 10);
+  if (tag === 1) {tag = 9; detail = 4 | (access === 2 ? 2 : 0) | (detail === 2 ? 1 : 0);}
   [tag, value, detail, address, access, length].forEach((field, index) => view.setUint32(16 + index * 4, field, true));
   return bytes;
 }
@@ -257,7 +260,7 @@ assert.ok(WebAssembly.validate(engineBytes));
 assert.deepEqual(WebAssembly.Module.imports(engineModule), [], 'actual engine has no JS imports');
 function engine() {
   const instance = new WebAssembly.Instance(engineModule, {});
-  const names = ['open', 'arena_ptr', 'map', 'upload', 'compile_entries', 'generation', 'module_ptr', 'module_len', 'guard', 'read32', 'store32', 'cpu_read32', 'cpu_store32'];
+  const names = ['open', 'arena_ptr', 'map', 'upload', 'compile_entries', 'generation', 'module_ptr', 'module_len', 'guard', 'guard_detect', 'finish_exception_detection', 'read32', 'store32', 'cpu_read32', 'cpu_store32'];
   const api = Object.fromEntries(names.map(name => {
     const fn = instance.exports[`ring3_abi_v1_${name}`];
     assert.equal(typeof fn, 'function', `actual export ${name}`);
@@ -289,10 +292,10 @@ function compile(ctx, name, entries, gates, helpers = []) {
   const pointer = ctx.api.module_ptr() >>> 0, length = ctx.api.module_len() >>> 0;
   const encoded = ctx.bytes.slice(pointer, pointer + length), module = new WebAssembly.Module(encoded);
   assert.ok(WebAssembly.validate(encoded));
-  const imports = [{module: 'env', name: 'memory', kind: 'memory'}, {module: 'ring3', name: 'guard', kind: 'function'}, ...helpers.map(name => ({module: 'ring3', name, kind: 'function'}))];
+  const imports = [{module: 'env', name: 'memory', kind: 'memory'}, {module: 'ring3', name: 'guard_detect', kind: 'function'}, {module: 'ring3', name: 'finish_exception_detection', kind: 'function'}, ...helpers.map(name => ({module: 'ring3', name, kind: 'function'}))];
   const sort = list => list.sort((a, b) => `${a.module}.${a.name}`.localeCompare(`${b.module}.${b.name}`));
   assert.deepEqual(sort(WebAssembly.Module.imports(module)), sort(imports), `${name}: bounded actual Wasm imports`);
-  const instance = new WebAssembly.Instance(module, {env: {memory: ctx.memory}, ring3: {guard: ctx.api.guard, cpu_read32: ctx.api.cpu_read32, cpu_store32: ctx.api.cpu_store32}});
+  const instance = new WebAssembly.Instance(module, {env: {memory: ctx.memory}, ring3: {guard_detect: ctx.api.guard_detect, finish_exception_detection: ctx.api.finish_exception_detection, cpu_read32: ctx.api.cpu_read32, cpu_store32: ctx.api.cpu_store32}});
   ctx.run = instance.exports.run;
   generated.set(name, hash(encoded));
   writeFileSync(join(outputDir, `${name}.wasm`), encoded);

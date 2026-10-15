@@ -12,7 +12,7 @@ assert.ok(WebAssembly.validate(engineBytes), 'actual engine validates');
 assert.ok(WebAssembly.validate(injectorBytes), 'pure-Wasm helper injector validates');
 const engineModule = new WebAssembly.Module(engineBytes), injectorModule = new WebAssembly.Module(injectorBytes);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), [], 'engine has no JS imports');
-const names = ['open', 'close', 'arena_ptr', 'map', 'protect', 'unmap', 'upload', 'compile', 'generation', 'module_ptr', 'module_len', 'guard', 'read32', 'write32', 'store32', 'cpu_read32', 'cpu_store32'];
+const names = ['open', 'close', 'arena_ptr', 'map', 'protect', 'unmap', 'upload', 'compile', 'generation', 'module_ptr', 'module_len', 'guard', 'guard_detect', 'finish_exception_detection', 'read32', 'write32', 'store32', 'cpu_read32', 'cpu_store32'];
 let keys = 0n, modules = 0, actualRuns = 0, injectedRuns = 0;
 const generatedHashes = [];
 
@@ -83,9 +83,16 @@ function helperRecord(tag, value = 0, detail = 0, address = 0, access = 0, lengt
   return bytes;
 }
 
-function cpuHelperRecord(tag, value = 0, detail = 0, address = 0, access = 0, width = 4) {
+function legacyCpuHelperRecord(tag, value = 0, detail = 0, address = 0, access = 0, width = 4) {
   const bytes = helperRecord(tag, value, detail, address, access, width), view = new DataView(bytes.buffer);
   view.setUint16(4, 10, true); return bytes;
+}
+
+function cpuHelperRecord(tag, value = 0, detail = 0, address = 0, access = 0, width = 4) {
+  const bytes = helperRecord(tag, value, detail, address, access, width), view = new DataView(bytes.buffer);
+  view.setUint16(4, tag === 1 ? 15 : 10, true);
+  if (tag === 1) {view.setUint32(16, 9, true); view.setUint32(24, 4 | (access === 2 ? 2 : 0) | (detail === 2 ? 1 : 0), true);}
+  return bytes;
 }
 
 function guestValue(engine, address) {
@@ -117,13 +124,13 @@ function compile(engine, bytes, blocks = [[0x1000, bytes.length]], expectedHelpe
   const module = new WebAssembly.Module(encoded);
   const expected = [
     {module: 'env', name: 'memory', kind: 'memory'},
-    {module: 'ring3', name: 'guard', kind: 'function'},
+    {module: 'ring3', name: 'guard_detect', kind: 'function'}, {module: 'ring3', name: 'finish_exception_detection', kind: 'function'},
     ...expectedHelpers.map(name => ({module: 'ring3', name, kind: 'function'})),
   ].sort((a, b) => `${a.module}.${a.name}`.localeCompare(`${b.module}.${b.name}`));
   assert.deepEqual(sortedImports(module), expected, 'module imports exactly needed actual Wasm helpers');
   const instance = new WebAssembly.Instance(module, {
     env: {memory: engine.memory},
-    ring3: {guard: engine.api.guard, cpu_read32: engine.api.cpu_read32, cpu_store32: engine.api.cpu_store32},
+    ring3: {guard_detect: engine.api.guard_detect, finish_exception_detection: engine.api.finish_exception_detection, cpu_read32: engine.api.cpu_read32, cpu_store32: engine.api.cpu_store32},
   });
   modules++;
   generatedHashes.push(hash(encoded));
@@ -160,9 +167,18 @@ function readState(engine) {
   };
 }
 
-function exit(reason, retired, detail = 0, address = 0, access = 0, length = reason === 5 ? 4 : 0) {
+function legacyExit(reason, retired, detail = 0, address = 0, access = 0, length = reason === 5 ? 4 : 0) {
   const bytes = new Uint8Array(40), view = new DataView(bytes.buffer);
   header(bytes, view, 0, 'R3EX', 40, 6);
+  [reason, retired, detail, address, access, length].forEach((field, index) => view.setUint32(16 + index * 4, field, true));
+  return bytes;
+}
+
+function exit(reason, retired, detail = 0, address = 0, access = 0, length = reason === 5 ? 4 : 0) {
+  const pageFault = reason === 5;
+  if (pageFault) {reason = 23; detail = 4 | (access === 2 ? 2 : 0) | (detail === 2 ? 1 : 0);}
+  const bytes = new Uint8Array(40), view = new DataView(bytes.buffer);
+  header(bytes, view, 0, 'R3EX', 40, pageFault ? 12 : 6);
   [reason, retired, detail, address, access, length].forEach((field, index) => view.setUint32(16 + index * 4, field, true));
   return bytes;
 }
@@ -457,23 +473,23 @@ for (const push of [true, false]) {
 }
 
 const injectedCases = [
-  {name: 'first read VersionExhausted suppresses store', readRecord: cpuHelperRecord(2, 0, 1), reason: 7, detail: 1, stores: 0},
-  {name: 'first read protocol suppresses store', readRecord: cpuHelperRecord(3), reason: 7, detail: 2, stores: 0},
-  {name: 'first read closed status suppresses store', readRecord: cpuHelperRecord(0), readStatus: 5, reason: 7, detail: 3, stores: 0},
-  {name: 'first read completion11 suppresses store', readRecord: cpuHelperRecord(0), readStatus: 11, reason: 7, detail: 3, stores: 0},
+  {name: 'first read VersionExhausted suppresses store', readRecord: legacyCpuHelperRecord(2, 0, 1), reason: 7, detail: 1, stores: 0},
+  {name: 'first read protocol suppresses store', readRecord: legacyCpuHelperRecord(3), reason: 7, detail: 2, stores: 0},
+  {name: 'first read closed status suppresses store', readRecord: legacyCpuHelperRecord(0), readStatus: 5, reason: 7, detail: 3, stores: 0},
+  {name: 'first read completion11 suppresses store', readRecord: legacyCpuHelperRecord(0), readStatus: 11, reason: 7, detail: 3, stores: 0},
   {name: 'first read canonical fault suppresses store', firstFault: true, reason: 5, detail: 1, stores: 0},
-  {name: 'second store VersionExhausted preserves old ESP', storeRecord: cpuHelperRecord(2, 0, 1), reason: 7, detail: 1, stores: 1},
-  {name: 'second store protocol preserves old ESP', storeRecord: cpuHelperRecord(3), reason: 7, detail: 2, stores: 1},
-  {name: 'second store closed status preserves old ESP', storeRecord: cpuHelperRecord(0), storeStatus: 5, reason: 7, detail: 3, stores: 1},
+  {name: 'second store VersionExhausted preserves old ESP', storeRecord: legacyCpuHelperRecord(2, 0, 1), reason: 7, detail: 1, stores: 1},
+  {name: 'second store protocol preserves old ESP', storeRecord: legacyCpuHelperRecord(3), reason: 7, detail: 2, stores: 1},
+  {name: 'second store closed status preserves old ESP', storeRecord: legacyCpuHelperRecord(0), storeStatus: 5, reason: 7, detail: 3, stores: 1},
   {name: 'second store canonical fault preserves old ESP', secondFault: true, reason: 5, detail: 1, stores: 1},
-  {name: 'second store completion11 contradiction preserves old ESP', storeRecord: cpuHelperRecord(2, 0, 1), storeStatus: 11, reason: 7, detail: 2, stores: 1},
-  {name: 'second store invalidation commits both-access instruction', storeRecord: cpuHelperRecord(0), storeStatus: 11, reason: 6, detail: 0, stores: 1, commit: true},
+  {name: 'second store completion11 contradiction preserves old ESP', storeRecord: legacyCpuHelperRecord(2, 0, 1), storeStatus: 11, reason: 7, detail: 2, stores: 1},
+  {name: 'second store invalidation commits both-access instruction', storeRecord: legacyCpuHelperRecord(0), storeStatus: 11, reason: 6, detail: 0, stores: 1, commit: true},
 ];
 for (const push of [true, false]) {
   const engine = fresh();
   const actual = compile(engine, Uint8Array.from([...arithmeticPrefix, ...(push ? forms.push_ebx : forms.pop_ebx), 0xb9, 0x99, 0x99, 0x99, 0x99]), undefined, ['read32', 'store32']);
   const injector = new WebAssembly.Instance(injectorModule, {env: {memory: engine.memory}, ring3: {guard: engine.api.guard}}).exports;
-  const injected = new WebAssembly.Instance(actual.module, {env: {memory: engine.memory}, ring3: {guard: injector.guard, cpu_read32: injector.read32, cpu_store32: injector.store32}}).exports;
+  const injected = new WebAssembly.Instance(actual.module, {env: {memory: engine.memory}, ring3: {guard_detect: engine.api.guard_detect, finish_exception_detection: engine.api.finish_exception_detection, cpu_read32: injector.read32, cpu_store32: injector.store32}}).exports;
   const readAddress = push ? 0x4000 : 0x9000, storeAddress = push ? 0x9000 : 0x4000;
   for (const fixture of injectedCases) {
     const start = state();
@@ -484,15 +500,15 @@ for (const push of [true, false]) {
     expected.eflags = 0x457;
     expected.eip = fixture.commit ? 0x100a : 0x1008;
     if (fixture.commit) expected.registers[4] = push ? 0x9000 : 0x9004;
-    const readRecord = fixture.firstFault ? cpuHelperRecord(1, 0, 1, readAddress, 1) : fixture.readRecord ?? cpuHelperRecord(0, value);
-    const storeRecord = fixture.secondFault ? cpuHelperRecord(1, 0, 1, storeAddress, 2) : fixture.storeRecord ?? cpuHelperRecord(0);
+    const readRecord = fixture.firstFault ? legacyCpuHelperRecord(1, 0, 1, readAddress, 1) : fixture.readRecord ?? legacyCpuHelperRecord(0, value);
+    const storeRecord = fixture.secondFault ? legacyCpuHelperRecord(1, 0, 1, storeAddress, 2) : fixture.storeRecord ?? legacyCpuHelperRecord(0);
     writeState(engine, start);
     refresh(engine).bytes.set(readRecord, engine.base + 140);
     engine.bytes.set(storeRecord, engine.base + 180);
     injector.configure(engine.base + 100, engine.base + 140, engine.base + 180, fixture.readStatus ?? 0, fixture.storeStatus ?? 0);
     const faultAddress = fixture.firstFault ? readAddress : fixture.secondFault ? storeAddress : 0;
     const access = fixture.firstFault ? 1 : fixture.secondFault ? 2 : 0;
-    run(engine, injected, 20, expected, exit(fixture.reason, fixture.commit ? 3 : 2, fixture.detail, faultAddress, access), `synthetic ${push ? 'PUSH' : 'POP'}/${fixture.name}`, undefined, true);
+    run(engine, injected, 20, expected, legacyExit(fixture.reason, fixture.commit ? 3 : 2, fixture.detail, faultAddress, access), `synthetic ${push ? 'PUSH' : 'POP'}/${fixture.name}`, undefined, true);
     assert.equal(injector.read_calls(), 1, 'one first read');
     assert.equal(injector.store_calls(), fixture.stores, 'first failure suppresses second store');
     assert.equal(injector.order(), fixture.stores ? 12 : 1, 'read occurs strictly before store');

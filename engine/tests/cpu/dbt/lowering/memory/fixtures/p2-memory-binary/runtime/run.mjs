@@ -11,7 +11,7 @@ const engineBytes = readFileSync(enginePath);
 assert.ok(WebAssembly.validate(engineBytes), 'actual engine validates');
 const engineModule = new WebAssembly.Module(engineBytes);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), [], 'engine has no JS imports');
-const names = ['open', 'close', 'arena_ptr', 'map', 'protect', 'unmap', 'upload', 'compile', 'generation', 'module_ptr', 'module_len', 'guard', 'read32', 'cpu_read32', 'cpu_store32', 'write32', 'compile_with_gates'];
+const names = ['open', 'close', 'arena_ptr', 'map', 'protect', 'unmap', 'upload', 'compile', 'generation', 'module_ptr', 'module_len', 'guard', 'guard_detect', 'finish_exception_detection', 'read32', 'cpu_read32', 'cpu_store32', 'write32', 'compile_with_gates'];
 let keys = 0n, modules = 0, actualRuns = 0, ramWords = 0;
 const counts = {flags: 0, aliases: 0, addresses: 0, read_faults: 0, continuation_scenario_runs: 0, actual_continuation_calls: 0, lifecycle: 0, folds: 0};
 const generatedHashes = [];
@@ -79,7 +79,8 @@ function helperRecord(tag, value = 0, detail = 0, address = 0, access = 0, lengt
 }
 function cpuHelperRecord(tag, value = 0, detail = 0, address = 0, access = 0, length = 4) {
   const bytes = new Uint8Array(40), view = new DataView(bytes.buffer);
-  header(bytes, view, 0, 'R3MH', 40, 10);
+  header(bytes, view, 0, 'R3MH', 40, tag === 1 ? 15 : 10);
+  if (tag === 1) {tag = 9; detail = 4 | (access === 2 ? 2 : 0) | (detail === 2 ? 1 : 0);}
   [tag, value, detail, address, access, length].forEach((field, index) => view.setUint32(16 + index * 4, field, true));
   return bytes;
 }
@@ -112,13 +113,13 @@ function compile(engine, bytes, blocks = [[0x1000, bytes.length]]) {
   const module = new WebAssembly.Module(encoded);
   const expected = [
     {module: 'env', name: 'memory', kind: 'memory'},
-    {module: 'ring3', name: 'guard', kind: 'function'},
+    {module: 'ring3', name: 'guard_detect', kind: 'function'}, {module: 'ring3', name: 'finish_exception_detection', kind: 'function'},
     {module: 'ring3', name: 'cpu_read32', kind: 'function'},
   ].sort((a, b) => `${a.module}.${a.name}`.localeCompare(`${b.module}.${b.name}`));
   assert.deepEqual(sortedImports(module), expected, 'module imports exactly needed actual Wasm helpers');
   const instance = new WebAssembly.Instance(module, {
     env: {memory: engine.memory},
-    ring3: {guard: engine.api.guard, cpu_read32: engine.api.cpu_read32},
+    ring3: {guard_detect: engine.api.guard_detect, finish_exception_detection: engine.api.finish_exception_detection, cpu_read32: engine.api.cpu_read32},
   });
   modules++;
   generatedHashes.push(hash(encoded));
@@ -156,8 +157,10 @@ function readState(engine) {
 }
 
 function exit(reason, retired, detail = 0, address = 0, access = 0, length = reason === 5 ? 4 : 0) {
+  const pageFault = reason === 5;
+  if (pageFault) {reason = 23; detail = 4 | (access === 2 ? 2 : 0) | (detail === 2 ? 1 : 0);}
   const bytes = new Uint8Array(40), view = new DataView(bytes.buffer);
-  header(bytes, view, 0, 'R3EX', 40, 6);
+  header(bytes, view, 0, 'R3EX', 40, pageFault ? 12 : 6);
   [reason, retired, detail, address, access, length].forEach((field, index) => view.setUint32(16 + index * 4, field, true));
   return bytes;
 }
