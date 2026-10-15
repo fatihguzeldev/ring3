@@ -7,3 +7,4 @@ pub(super) mod modules;
 mod strings;
 mod thread;
 pub(super) mod objects;
+pub(super) mod d3d8;
