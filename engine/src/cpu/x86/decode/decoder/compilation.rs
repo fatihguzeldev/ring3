@@ -6,10 +6,12 @@ use crate::{
 
 fn memory() -> AddressSpace {
     let mut memory = AddressSpace::new(2).unwrap();
-    memory.map_zeroed(
-        PageRange::new(GuestAddress(0x1000), 1).unwrap(),
-        Permissions::ALL,
-    ).unwrap();
+    memory
+        .map_zeroed(
+            PageRange::new(GuestAddress(0x1000), 1).unwrap(),
+            Permissions::ALL,
+        )
+        .unwrap();
     memory
 }
 
@@ -28,8 +30,13 @@ fn internal_compilation_keeps_public_semantics_and_public_snapshot_authority() {
         memory.write(pc, bytes).unwrap();
         let public = decode_one(&memory, pc).unwrap();
         let BoundDecode::Instruction(internal) = decode_for_compilation(
-            &memory, pc, DecodePolicy::Strict, None, DecodeAuthority::default(),
-        ).unwrap() else {
+            &memory,
+            pc,
+            DecodePolicy::Strict,
+            None,
+            DecodeAuthority::default(),
+        )
+        .unwrap() else {
             panic!("complete executable instruction");
         };
         assert_eq!(internal.pc(), public.pc());
@@ -50,8 +57,13 @@ fn internal_fault_capture_retains_exact_prefix_and_rechecks_repaired_mapping() {
     memory.write(pc, &[0xb8, 0x12]).unwrap();
     let cs = CodeFetchContext::from_segments(&SegmentContext::default()).unwrap();
     let BoundDecode::CodeFault(fault) = decode_for_compilation(
-        &memory, pc, DecodePolicy::Execution, Some(cs), DecodeAuthority::default(),
-    ).unwrap() else {
+        &memory,
+        pc,
+        DecodePolicy::Execution,
+        Some(cs),
+        DecodeAuthority::default(),
+    )
+    .unwrap() else {
         panic!("captured instruction fetch fault");
     };
     assert_eq!(fault.kind, CapturedFetchFaultKind32::Paging);
@@ -59,9 +71,12 @@ fn internal_fault_capture_retains_exact_prefix_and_rechecks_repaired_mapping() {
     assert_eq!(fault.consumed_prefix_length, 2);
     assert!(memory.is_code_current(fault.prefix.as_ref().unwrap()));
     assert!(fault.remains_denied(&memory, cs));
-    memory.map_zeroed(
-        PageRange::new(GuestAddress(0x2000), 1).unwrap(), Permissions::ALL,
-    ).unwrap();
+    memory
+        .map_zeroed(
+            PageRange::new(GuestAddress(0x2000), 1).unwrap(),
+            Permissions::ALL,
+        )
+        .unwrap();
     assert!(!fault.remains_denied(&memory, cs));
     assert!(memory.is_code_current(fault.prefix.as_ref().unwrap()));
     memory.write(GuestAddress(0x1fff), &[0x34]).unwrap();

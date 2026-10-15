@@ -100,7 +100,7 @@ pub(crate) fn lower(
     bytes: &[u8],
 ) -> Option<Result<AvxOperation, DecodeError>> {
     if instruction.encoding() != EncodingKind::VEX
-        || super::bit_manipulation::lower(instruction).is_some()
+        || super::bit_manipulation::recognizes(instruction.code())
     {
         return None;
     }

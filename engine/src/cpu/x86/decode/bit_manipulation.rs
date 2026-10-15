@@ -9,6 +9,25 @@ use crate::cpu::x86::{
     ir::{Operation, Value32},
 };
 
+pub(super) fn recognizes(code: Code) -> bool {
+    matches!(
+        code,
+        Code::VEX_Mulx_r32_r32_rm32
+            | Code::VEX_Andn_r32_r32_rm32
+            | Code::VEX_Pdep_r32_r32_rm32
+            | Code::VEX_Pext_r32_r32_rm32
+            | Code::VEX_Bextr_r32_rm32_r32
+            | Code::VEX_Blsi_r32_rm32
+            | Code::VEX_Blsmsk_r32_rm32
+            | Code::VEX_Blsr_r32_rm32
+            | Code::VEX_Bzhi_r32_rm32_r32
+            | Code::VEX_Shlx_r32_rm32_r32
+            | Code::VEX_Shrx_r32_rm32_r32
+            | Code::VEX_Sarx_r32_rm32_r32
+            | Code::VEX_Rorx_r32_rm32_imm8
+    )
+}
+
 pub(super) fn lower(instruction: &Instruction) -> Option<Result<Operation, DecodeError>> {
     if instruction.code() == Code::VEX_Mulx_r32_r32_rm32 {
         return Some((|| {

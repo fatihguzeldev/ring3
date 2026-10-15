@@ -6,7 +6,7 @@ use super::{
         byte_register, byte_value, effective_address, location, register, small_source,
         unsupported, value, word_register, word_value,
     },
-    profile::check_profile,
+    profile,
 };
 use crate::cpu::x86::{
     Register32,
@@ -52,14 +52,14 @@ pub(super) fn lower(
             ))
         };
     }
-    check_profile(instruction, bytes)?;
-    if super::profile::ignored_prefetch_alias(instruction)
-        || super::profile::ignored_instruction_prefetch(instruction)
-        || super::profile::legacy_nop_alias(instruction)
-    {
+    if profile::check_prefixes(instruction, bytes)? == profile::PrefixAdmission::Nop {
         return Ok(Operation::Nop);
     }
-    if super::mpx::disabled_nop(instruction) {
+    if let Some(operation) = super::families::lower(instruction, bytes) {
+        return operation;
+    }
+    profile::check_scalar(instruction)?;
+    if profile::ignored_prefetch_alias(instruction) {
         return Ok(Operation::Nop);
     }
     if let Some(operation) = super::interrupts::lower(instruction, bytes) {
@@ -67,67 +67,6 @@ pub(super) fn lower(
     }
     if let Some(operation) = super::system_registers::lower(instruction, authority.system_registers)
     {
-        return operation;
-    }
-    if let Some(operation) = super::far::lower(instruction) {
-        return operation;
-    }
-    if let Some(operation) = super::xstate::lower(instruction) {
-        return operation.map(Operation::XState);
-    }
-    if let Some(operation) = super::segment_queries::lower(instruction) {
-        return operation;
-    }
-    if let Some(operation) = super::cache_timestamp::lower(instruction) {
-        return operation;
-    }
-    if let Some(operation) = super::packed_strings::lower(instruction) {
-        return operation.map(Operation::PackedStringCompare);
-    }
-    if let Some(operation) = super::bit_manipulation::lower(instruction) {
-        return operation;
-    }
-    if let Some(operation) = super::control::lower(instruction) {
-        return operation;
-    }
-    if let Some(operation) = super::scalar_bits::lower(instruction) {
-        return operation;
-    }
-    if let Some(operation) = super::strings::lower(instruction, bytes) {
-        return operation;
-    }
-    if let Some(operation) = super::segments::lower(instruction) {
-        return operation;
-    }
-    if !matches!(
-        instruction.code(),
-        Code::Fninit | Code::Fnclex | Code::Fnstsw_AX | Code::Fnstsw_m2byte | Code::Fnstcw_m2byte
-    ) && let Some(decoded) = super::x87::decode(instruction)
-    {
-        let opcode = bytes
-            .iter()
-            .position(|byte| (0xd8..=0xdf).contains(byte))
-            .and_then(|index| {
-                bytes
-                    .get(index + 1)
-                    .map(|modrm| (u16::from(bytes[index] & 7) << 8) | u16::from(*modrm))
-            })
-            .unwrap_or(0);
-        return Ok(Operation::X87 {
-            operation: decoded.operation,
-            address: if decoded.memory {
-                Some(effective_address(instruction)?)
-            } else {
-                None
-            },
-            waiting: decoded.waiting,
-            opcode,
-        });
-    }
-    if let Some(operation) = super::simd::lower(instruction) {
-        return operation.map(Operation::Simd);
-    }
-    if let Some(operation) = super::atomic::lower(instruction) {
         return operation;
     }
     match instruction.code() {
@@ -143,15 +82,6 @@ pub(super) fn lower(
         Code::Pause => Ok(Operation::Nop),
         Code::Endbr32 | Code::Endbr64 | Code::Cldemote_m8 | Code::Rdsspd_r32 => Ok(Operation::Nop),
         Code::Fneni | Code::Fndisi | Code::Fnsetpm => Ok(Operation::Nop),
-        Code::Fninit => Ok(Operation::InitializeX87),
-        Code::Fnclex => Ok(Operation::ClearX87Exceptions),
-        Code::Fnstsw_AX => Ok(Operation::X87StatusToAx),
-        Code::Fnstsw_m2byte => Ok(Operation::X87StatusToMemory {
-            address: effective_address(instruction)?,
-        }),
-        Code::Fnstcw_m2byte => Ok(Operation::X87ControlToMemory {
-            address: effective_address(instruction)?,
-        }),
         // only bare salc has a selected defined contract; reserved prefixes stay refused.
         Code::Salc if bytes == [0xd6] => Ok(Operation::SetAlFromCarry),
         Code::Clc => Ok(Operation::Carry {

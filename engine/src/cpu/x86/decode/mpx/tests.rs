@@ -122,7 +122,7 @@ fn neighboring_reserved_opcodes_and_duplicate_or_lock_prefixes_stay_outside_the_
     ] {
         let instruction = Decoder::new(32, bytes, DecoderOptions::NONE).decode();
         assert!(disabled_nop(&instruction));
-        assert!(super::super::profile::check_profile(&instruction, bytes).is_err());
+        assert!(super::super::lower::lower(&instruction, bytes, Default::default()).is_err());
     }
 }
 
@@ -194,7 +194,7 @@ fn bounds_prefix_gate_keeps_duplicate_groups_and_other_repeat_families_refused()
         ] {
             let bitness = if default32 { 32 } else { 16 };
             let instruction = Decoder::new(bitness, &bytes, DecoderOptions::NONE).decode();
-            assert!(super::super::profile::check_profile(&instruction, &bytes).is_err());
+            assert!(super::super::lower::lower(&instruction, &bytes, Default::default()).is_err());
         }
     }
 }

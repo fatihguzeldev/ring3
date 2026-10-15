@@ -46,7 +46,13 @@ pub fn decode_one(
 ) -> Result<DecodedInstruction, DecodeError> {
     unbound(snapshot_decode(
         memory,
-        decode_core(memory, pc, DecodePolicy::Strict, None, DecodeAuthority::default())?,
+        decode_core(
+            memory,
+            pc,
+            DecodePolicy::Strict,
+            None,
+            DecodeAuthority::default(),
+        )?,
         None,
     )?)
 }
@@ -56,7 +62,13 @@ pub(crate) fn decode_for_execution(
     memory: &AddressSpace,
     pc: GuestAddress,
 ) -> Result<DecodedInstruction, DecodeError> {
-    unbound(decode(memory, pc, DecodePolicy::Execution, None, DecodeAuthority::default())?)
+    unbound(decode(
+        memory,
+        pc,
+        DecodePolicy::Execution,
+        None,
+        DecodeAuthority::default(),
+    )?)
 }
 
 fn unbound<I>(decoded: BoundDecode<I>) -> Result<I, DecodeError> {

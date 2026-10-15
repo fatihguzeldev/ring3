@@ -3,7 +3,16 @@ use iced_x86::{Code, CpuidFeature, Instruction, OpKind};
 use super::{DecodeError, operands::unsupported};
 use crate::cpu::UnsupportedFeature;
 
-pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(), DecodeError> {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum PrefixAdmission {
+    Nop,
+    Instruction,
+}
+
+pub(super) fn check_prefixes(
+    instruction: &Instruction,
+    bytes: &[u8],
+) -> Result<PrefixAdmission, DecodeError> {
     if instruction.is_privileged() && !super::system_registers::is_query(instruction.code()) {
         return Err(DecodeError::Unsupported(UnsupportedFeature::Privileged));
     }
@@ -34,10 +43,10 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
         if groups[1] != 0 || groups[2] != 0 {
             return Err(unsupported());
         }
-        return Ok(());
+        return Ok(PrefixAdmission::Nop);
     }
     if super::mpx::disabled_nop(instruction) {
-        return Ok(());
+        return Ok(PrefixAdmission::Nop);
     }
     // these compatibility encodings are nops in the fixed absent-feature profile.
     if matches!(instruction.code(), Code::Cldemote_m8 | Code::Rdsspd_r32)
@@ -49,57 +58,13 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
         {
             return Err(unsupported());
         }
-        return Ok(());
+        return Ok(PrefixAdmission::Nop);
     }
-    if let Some(operation) = super::far::lower(instruction) {
-        return operation.map(|_| ());
-    }
-    if let Some(operation) = super::xstate::lower(instruction) {
-        return operation.map(|_| ());
-    }
-    if let Some(operation) = super::segment_queries::lower(instruction) {
-        return operation.map(|_| ());
-    }
-    if let Some(operation) = super::cache_timestamp::lower(instruction) {
-        return operation.map(|_| ());
-    }
-    if let Some(operation) = super::packed_strings::lower(instruction) {
-        return operation.map(|_| ());
-    }
-    if let Some(operation) = super::control::lower(instruction) {
-        return operation.map(|_| ());
-    }
-    if let Some(operation) = super::stack::lower(instruction) {
-        return operation.map(|_| ());
-    }
-    if let Some(operation) = super::strings::lower(instruction, bytes) {
-        return operation.map(|_| ());
-    }
-    if let Some(operation) = super::segments::lower(instruction) {
-        return operation.map(|_| ());
-    }
-    if super::x87::decode(instruction).is_some() {
-        return Ok(());
-    }
-    if let Some(operation) = super::simd::lower(instruction) {
-        return operation.map(|_| ());
-    }
-    if let Some(operation) = super::atomic::lower(instruction) {
-        return operation.map(|_| ());
-    }
-    if matches!(
-        instruction.code(),
-        Code::Movbe_r16_m16 | Code::Movbe_r32_m32 | Code::Movbe_m16_r16 | Code::Movbe_m32_r32
-    ) && groups[2] != 0
-    {
-        return Err(unsupported());
-    }
-    if let Some(operation) = super::scalar_bits::lower(instruction) {
-        return operation.map(|_| ());
-    }
-    if let Some(operation) = super::bit_manipulation::lower(instruction) {
-        return operation.map(|_| ());
-    }
+    Ok(PrefixAdmission::Instruction)
+}
+
+pub(super) fn check_scalar(instruction: &Instruction) -> Result<(), DecodeError> {
+    let hle_hint = instruction.has_xacquire_prefix() || instruction.has_xrelease_prefix();
     let features = instruction.cpuid_features();
     let registers = (0..instruction.op_count())
         .filter(|&index| instruction.op_kind(index) == OpKind::Register)
@@ -192,6 +157,13 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
     }
     // decoded operand width owns 66 semantics, including byte operations that ignore it.
     Ok(())
+}
+
+pub(super) fn has_repeat_prefix(bytes: &[u8]) -> bool {
+    bytes
+        .iter()
+        .take_while(|byte| is_prefix(**byte))
+        .any(|byte| matches!(byte, 0xf2 | 0xf3))
 }
 
 // amd-compatible reserved memory types alias /0 while the wt1 facility is absent.
