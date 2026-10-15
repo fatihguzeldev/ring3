@@ -1,3 +1,6 @@
+#[path = "../../../../support/cpu/fetch/native.rs"]
+mod support_fetch;
+
 use ring3_engine::{
     abi::{
         arena::{EXIT_OFFSET, TRANSFER_OFFSET},
@@ -58,6 +61,7 @@ pub(super) fn expect_admitted(bytes: &[u8], entry: u32) {
     assert_eq!(&engine.artifact_bytes().unwrap()[..8], b"\0asm\x01\0\0\0");
 }
 
+#[allow(dead_code)]
 pub(super) fn expect_captured_fetch(
     engine: &mut EngineInstance,
     entry: u32,
@@ -69,7 +73,7 @@ pub(super) fn expect_captured_fetch(
         cpu::x86::decode::decode_one,
         memory::{FaultReason, GuestAddress},
     };
-    super::support_fetch::assert_error(
+    support_fetch::assert_error(
         decode_one(engine.memory().unwrap(), GuestAddress(entry)).unwrap_err(),
         entry,
         address,

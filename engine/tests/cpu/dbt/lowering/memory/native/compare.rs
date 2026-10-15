@@ -414,14 +414,19 @@ fn embedded_rejected(bytes: &[u8], expected: CompileError) {
         let mut instance = engine(bytes);
         describe(&mut instance, 0x1000, bytes.len());
         let before = instance.arena().to_vec();
-        assert_eq!(
-            compile(&mut instance, entries),
-            Err(HostError::Compile(expected)),
-            "{bytes:02x?}"
-        );
+        let result = compile(&mut instance, entries);
         assert_eq!(instance.arena(), before);
-        assert_eq!(instance.generation(), 0);
-        assert_eq!(instance.artifact_bytes(), Err(HostError::InvalidArtifact));
+        if entries && expected == CompileError::InstructionLimit {
+            assert_eq!(result, Ok(1), "bounded automatic capture: {bytes:02x?}");
+            instance.guard(KEY, 1).unwrap();
+            assert!(
+                instance.artifact_bytes().unwrap().len() <= CompileLimits::default().wasm_bytes
+            );
+        } else {
+            assert_eq!(result, Err(HostError::Compile(expected)), "{bytes:02x?}");
+            assert_eq!(instance.generation(), 0);
+            assert_eq!(instance.artifact_bytes(), Err(HostError::InvalidArtifact));
+        }
     }
 }
 
@@ -525,7 +530,7 @@ fn prefixes_small_width_and_declared_spans_retain_precise_errors() {
 fn comparisons_stay_sequential_and_charge_the_cap_before_later_poison() {
     let mut bytes = [0x39, 0x03].repeat(63);
     bytes.extend_from_slice(&[0xeb, 0]);
-    admit(&bytes);
+    super::support_capacity::assert_bounded_emission(&bytes, KEY);
     for bytes in [[0x39, 0x03].repeat(65), {
         let mut bytes = [0x39, 0x03].repeat(64);
         bytes.push(0xf4);

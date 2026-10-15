@@ -348,8 +348,10 @@ fn unary_operations_are_sequential_and_charge_existing_caps_before_next_decode()
         Some(CompileError::InstructionLimit)
     );
     assert_eq!(
-        prepare_entry_region(&memory, &[GuestAddress(0x1000)], CompileLimits::default()).err(),
-        Some(CompileError::InstructionLimit)
+        prepare_entry_region(&memory, &[GuestAddress(0x1000)], CompileLimits::default())
+            .unwrap()
+            .instruction_count(),
+        64
     );
     let memory = code(0x1000, &[0x40, 0xf4]);
     let limit = CompileLimits {
@@ -361,8 +363,10 @@ fn unary_operations_are_sequential_and_charge_existing_caps_before_next_decode()
         Some(CompileError::InstructionLimit)
     );
     assert_eq!(
-        prepare_entry_region(&memory, &[GuestAddress(0x1000)], limit).err(),
-        Some(CompileError::InstructionLimit)
+        prepare_entry_region(&memory, &[GuestAddress(0x1000)], limit)
+            .unwrap()
+            .instruction_count(),
+        1
     );
     let memory = code(0x1000, &[0xf7, 0xd4, 0xeb, 0]);
     assert_eq!(

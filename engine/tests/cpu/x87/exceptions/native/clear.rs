@@ -18,10 +18,7 @@ fn no_wait_fnclex_admits_before_jump() {
 use ring3_engine::{
     cpu::{
         dbt::{BlockSpec, CompileLimits, compile_entry_region, compile_region},
-        x86::{
-            decode::{DecodeError, decode_one},
-            ir::Operation,
-        },
+        x86::{decode::decode_one, ir::Operation},
     },
     memory::{FaultReason, GuestAddress},
 };
@@ -197,8 +194,12 @@ fn waiting_stack_arithmetic_and_ignored_prefixes_admit() {
         assert_eq!(operation, Operation::ClearX87Exceptions);
     }
     let engine = code(0x1fff, &[0xdb]);
-    assert!(
-        matches!(decode_one(engine.memory().unwrap(), GuestAddress(0x1fff)), Err(DecodeError::MemoryFault {fault, length: 2, ..}) if fault.reason == FaultReason::Unmapped && fault.address == GuestAddress(0x2000))
+    super::support_fetch::assert_error(
+        decode_one(engine.memory().unwrap(), GuestAddress(0x1fff)).unwrap_err(),
+        0x1fff,
+        0x2000,
+        FaultReason::Unmapped,
+        2,
     );
     let engine = code(0x1fff, &[0xdb, 0xe2]);
     assert_eq!(

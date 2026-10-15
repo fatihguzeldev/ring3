@@ -348,8 +348,10 @@ fn lea_is_sequential_and_charges_existing_instruction_and_wasm_limits() {
         Some(CompileError::InstructionLimit)
     );
     assert_eq!(
-        prepare_entry_region(&memory, &[GuestAddress(0x1000)], CompileLimits::default()).err(),
-        Some(CompileError::InstructionLimit)
+        prepare_entry_region(&memory, &[GuestAddress(0x1000)], CompileLimits::default())
+            .unwrap()
+            .instruction_count(),
+        64
     );
     let memory = code(0x1000, &[0x8d, 0x03, 0xeb, 0]);
     assert_eq!(
@@ -361,8 +363,9 @@ fn lea_is_sequential_and_charges_existing_instruction_and_wasm_limits() {
                 ..CompileLimits::default()
             }
         )
-        .err(),
-        Some(CompileError::InstructionLimit)
+        .unwrap()
+        .instruction_count(),
+        1
     );
     assert_eq!(
         compile_entry_region(

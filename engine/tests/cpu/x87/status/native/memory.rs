@@ -22,7 +22,7 @@ use ring3_engine::{
         },
         x86::{
             Register32,
-            decode::{DecodeError, decode_one},
+            decode::decode_one,
             ir::{EffectiveAddress, Operation},
         },
     },
@@ -111,8 +111,12 @@ fn status_memory_decodes_standard_32_bit_effective_addresses() {
         );
     }
     let engine = code_at(0x1fff, &[0xdd]);
-    assert!(
-        matches!(decode_one(engine.memory().unwrap(), GuestAddress(0x1fff)), Err(DecodeError::MemoryFault { fault, length: 2, .. }) if fault.reason == FaultReason::Unmapped && fault.address == GuestAddress(0x2000))
+    super::support_fetch::assert_error(
+        decode_one(engine.memory().unwrap(), GuestAddress(0x1fff)).unwrap_err(),
+        0x1fff,
+        0x2000,
+        FaultReason::Unmapped,
+        2,
     );
     let engine = code_at(0x1fff, &[0xdd, 0x38]);
     assert_eq!(
@@ -314,7 +318,7 @@ while(at<input.length) {
   const mixed=input[at++], resident=input[at++], length=input.readUInt32LE(at); at+=4;
   const bytes=input.subarray(at,at+length); at+=length;
   assert.ok(WebAssembly.validate(bytes)); const module=new WebAssembly.Module(bytes);
-  const names=[resident?'guard_resident':'guard',...(mixed?['cpu_read8','cpu_read16',resident?'cpu_store_resident8':'cpu_store8']:[]),resident?'cpu_store_resident16':'cpu_store16'];
+  const names=[resident?'guard_detect_resident':'guard_detect',...(mixed?['cpu_read8','cpu_read16',resident?'cpu_store_resident8':'cpu_store8']:[]),resident?'cpu_store_resident16':'cpu_store16','finish_exception_detection'];
   assert.deepEqual(WebAssembly.Module.imports(module),[{module:'env',name:'memory',kind:'memory'},...names.map(name=>({module:'ring3',name,kind:'function'}))]);
   assert.deepEqual(WebAssembly.Module.exports(module),[{name:'run',kind:'function'}]); count++;
 }
@@ -454,7 +458,7 @@ while(at<input.length) {
     bytes.set(segments,base+4524);
     const before=Buffer.from(bytes), expected=Buffer.from(before); let calls=0;
     const store=(...args)=>{calls++; const [address,value]=args.slice(resident?4:0); assert.equal(address>>>0,row.ea); assert.equal(value,0x81a5); bytes.set(row.packet,base+100); return row.status;};
-    const run=new WebAssembly.Instance(module,{env:{memory},ring3:resident?{guard_resident:()=>0,cpu_store_resident16:store}:{guard:()=>0,cpu_store16:store}}).exports.run;
+    const run=new WebAssembly.Instance(module,{env:{memory},ring3:resident?{guard_detect_resident:()=>1n,cpu_store_resident16:store,finish_exception_detection:()=>0}:{guard_detect:()=>1n,cpu_store16:store,finish_exception_detection:()=>0}}).exports.run;
     expected.set(row.packet,base+100); expected.writeUInt32LE(row.retired?0x1003:0x1000,base+48);
     expected.set(record('R3EX',40,[row.reason,row.retired,row.detail,row.address,row.access,row.length],6),base+56);
     assert.equal(run(base,base+56,1,base+96),0,row.label); assert.equal(calls,1,row.label);

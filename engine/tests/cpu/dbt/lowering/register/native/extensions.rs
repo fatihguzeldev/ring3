@@ -9,11 +9,11 @@ use ring3_engine::cpu::{
     x86::{
         Register32,
         decode::{DecodeError, decode_one},
-        ir::{ExtensionKind, Operation, SmallSource, SmallWidth},
+        ir::{ExtensionKind, Operation, SmallSource, SmallWidth, WordValue},
     },
 };
 use ring3_engine::memory::{
-    Access, AddressSpace, FaultReason, GuestAddress, MemoryFault, PageRange, Permissions,
+    Access, AddressSpace, FaultReason, GuestAddress, PageRange, Permissions,
 };
 use ring3_engine::process::{EngineInstance, HostError};
 
@@ -351,6 +351,18 @@ fn narrow_destinations_and_prefixes_keep_exact_decoder_categories() {
         &[0xf2, 0x0f, 0xbf, 0xc0][..],
         &[0x66, 0xc0, 0x20, 2][..],
     ] {
+        if matches!(instruction, [0x66, 0x0f, 0xb7 | 0xbf, 0xc0]) {
+            let (operation, length) = prefix_admission::admitted(instruction);
+            assert_eq!(
+                operation,
+                Operation::MoveWord {
+                    destination: Register32::Eax,
+                    source: WordValue::Register(Register32::Eax),
+                }
+            );
+            assert_eq!(length, instruction.len());
+            continue;
+        }
         if matches!(
             instruction.first(),
             Some(0x26 | 0x2e | 0x36 | 0x3e | 0x64 | 0x65 | 0x67)
@@ -401,8 +413,10 @@ fn sequential_extensions_charge_global_and_lower_caps_before_next_decode() {
         Some(CompileError::InstructionLimit)
     );
     assert_eq!(
-        prepare_entry_region(&memory, &[GuestAddress(0x1000)], CompileLimits::default()).err(),
-        Some(CompileError::InstructionLimit)
+        prepare_entry_region(&memory, &[GuestAddress(0x1000)], CompileLimits::default())
+            .unwrap()
+            .instruction_count(),
+        64
     );
     let memory = code(0x1000, &[0x0f, 0xb6, 0xc4, 0xf4]);
     let limits = CompileLimits {
@@ -414,8 +428,10 @@ fn sequential_extensions_charge_global_and_lower_caps_before_next_decode() {
         Some(CompileError::InstructionLimit)
     );
     assert_eq!(
-        prepare_entry_region(&memory, &[GuestAddress(0x1000)], limits).err(),
-        Some(CompileError::InstructionLimit)
+        prepare_entry_region(&memory, &[GuestAddress(0x1000)], limits)
+            .unwrap()
+            .instruction_count(),
+        1
     );
     assert_eq!(
         compile_region(
@@ -461,26 +477,21 @@ fn exact_instruction_ends_and_truncated_fetches_preserve_execute_fault_spans() {
         (u32::MAX - 1, u32::MAX - 1, FaultReason::AddressOverflow),
     ] {
         let memory = code(pc, &[0x0f, 0xb6]);
-        let expected = CompileError::Instruction {
-            pc: GuestAddress(pc),
-            cause: InstructionError::Decode(DecodeError::MemoryFault {
-                pc: GuestAddress(pc),
-                fault: MemoryFault {
-                    address: GuestAddress(address),
-                    access: Access::Execute,
-                    reason,
-                },
-                length: 3,
-            }),
-        };
-        assert_eq!(
-            prepare_entry_region(&memory, &[GuestAddress(pc)], CompileLimits::default()).err(),
-            Some(expected)
+        super::support_fetch::assert_compile_error(
+            prepare_entry_region(&memory, &[GuestAddress(pc)], CompileLimits::default())
+                .unwrap_err(),
+            pc,
+            address,
+            reason,
+            3,
         );
         if pc == 0x1ffe {
-            assert_eq!(
-                prepare_region(&memory, &[spec(pc, 3)], CompileLimits::default()).err(),
-                Some(expected)
+            super::support_fetch::assert_compile_error(
+                prepare_region(&memory, &[spec(pc, 3)], CompileLimits::default()).unwrap_err(),
+                pc,
+                address,
+                reason,
+                3,
             );
         }
     }
@@ -491,20 +502,13 @@ fn exact_instruction_ends_and_truncated_fetches_preserve_execute_fault_spans() {
             Permissions::READ,
         )
         .unwrap();
-    assert_eq!(
-        prepare_entry_region(&memory, &[GuestAddress(0x1ffe)], CompileLimits::default()).err(),
-        Some(CompileError::Instruction {
-            pc: GuestAddress(0x1ffe),
-            cause: InstructionError::Decode(DecodeError::MemoryFault {
-                pc: GuestAddress(0x1ffe),
-                fault: MemoryFault {
-                    address: GuestAddress(0x2000),
-                    access: Access::Execute,
-                    reason: FaultReason::Permission
-                },
-                length: 3,
-            }),
-        })
+    super::support_fetch::assert_compile_error(
+        prepare_entry_region(&memory, &[GuestAddress(0x1ffe)], CompileLimits::default())
+            .unwrap_err(),
+        0x1ffe,
+        0x2000,
+        FaultReason::Permission,
+        3,
     );
 }
 

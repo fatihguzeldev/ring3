@@ -1,6 +1,9 @@
 #[path = "../../support/cpu/prefix/admission.rs"]
 mod support_prefix_admission;
 
+#[path = "../../support/cpu/fetch/native.rs"]
+mod support_fetch;
+
 #[path = "exceptions/native/clear.rs"]
 mod cpu_x87_clear;
 

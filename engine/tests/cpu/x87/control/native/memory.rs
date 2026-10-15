@@ -22,7 +22,7 @@ use ring3_engine::{
         },
         x86::{
             Register32,
-            decode::{DecodeError, decode_one},
+            decode::decode_one,
             ir::{EffectiveAddress, Operation},
         },
     },
@@ -111,8 +111,12 @@ fn control_memory_decodes_standard_32_bit_effective_addresses() {
         );
     }
     let engine = code_at(0x1fff, &[0xd9]);
-    assert!(
-        matches!(decode_one(engine.memory().unwrap(), GuestAddress(0x1fff)), Err(DecodeError::MemoryFault { fault, length: 2, .. }) if fault.reason == FaultReason::Unmapped && fault.address == GuestAddress(0x2000))
+    super::support_fetch::assert_error(
+        decode_one(engine.memory().unwrap(), GuestAddress(0x1fff)).unwrap_err(),
+        0x1fff,
+        0x2000,
+        FaultReason::Unmapped,
+        2,
     );
     let engine = code_at(0x1fff, &[0xd9, 0x38]);
     assert_eq!(
@@ -314,7 +318,7 @@ while(at<input.length) {
   const mixed=input[at++], resident=input[at++], length=input.readUInt32LE(at); at+=4;
   const bytes=input.subarray(at,at+length); at+=length;
   assert.ok(WebAssembly.validate(bytes)); const module=new WebAssembly.Module(bytes);
-  const names=[resident?'guard_resident':'guard',...(mixed?['cpu_read8','cpu_read16',resident?'cpu_store_resident8':'cpu_store8']:[]),resident?'cpu_store_resident16':'cpu_store16'];
+  const names=[resident?'guard_detect_resident':'guard_detect',...(mixed?['cpu_read8','cpu_read16',resident?'cpu_store_resident8':'cpu_store8']:[]),resident?'cpu_store_resident16':'cpu_store16','finish_exception_detection'];
   assert.deepEqual(WebAssembly.Module.imports(module),[{module:'env',name:'memory',kind:'memory'},...names.map(name=>({module:'ring3',name,kind:'function'}))]);
   assert.deepEqual(WebAssembly.Module.exports(module),[{name:'run',kind:'function'}]); count++;
 }

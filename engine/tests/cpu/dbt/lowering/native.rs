@@ -4,6 +4,12 @@ mod support_arena;
 #[path = "../../../support/cpu/prefix/admission.rs"]
 mod support_prefix_admission;
 
+#[path = "../../../support/cpu/fetch/native.rs"]
+mod support_fetch;
+
+#[path = "support/capacity.rs"]
+mod support_capacity;
+
 #[path = "register/native/extensions.rs"]
 mod dbt_extensions;
 

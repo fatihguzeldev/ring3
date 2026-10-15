@@ -1,10 +1,6 @@
 use ring3_engine::cpu::dbt::{CompileError, InstructionError, RegistryError};
-use ring3_engine::cpu::x86::{
-    ControlOperation,
-    decode::{DecodeError, decode_one},
-    ir::Operation,
-};
-use ring3_engine::memory::{Access, FaultReason, GuestAddress, MemoryFault};
+use ring3_engine::cpu::x86::{ControlOperation, decode::decode_one, ir::Operation};
+use ring3_engine::memory::{Access, FaultReason, GuestAddress};
 use ring3_engine::process::{EngineInstance, HostError};
 
 const KEY: u64 = 0xa123_4567_89ab_cdef;
@@ -45,21 +41,6 @@ fn instruction_error(pc: u32, cause: InstructionError) -> HostError {
         pc: GuestAddress(pc),
         cause,
     })
-}
-
-fn fetch_error(pc: u32, address: u32, reason: FaultReason) -> HostError {
-    instruction_error(
-        pc,
-        InstructionError::Decode(DecodeError::MemoryFault {
-            pc: GuestAddress(pc),
-            fault: MemoryFault {
-                address: GuestAddress(address),
-                access: Access::Execute,
-                reason,
-            },
-            length: 2,
-        }),
-    )
 }
 
 #[test]
@@ -235,23 +216,32 @@ fn gate_fetch_faults_keep_original_entry_attempted_span_and_first_denied_address
         } else {
             engine.unmap(0x2000, 1).unwrap();
         }
-        assert_eq!(
-            compile(&mut engine, &[(0x1fff, 2)], &[(0x1fff, 17)]),
-            Err(fetch_error(0x1fff, 0x2000, expected))
+        super::support_fetch::assert_host_error(
+            compile(&mut engine, &[(0x1fff, 2)], &[(0x1fff, 17)]).unwrap_err(),
+            0x1fff,
+            0x2000,
+            expected,
+            2,
         );
         assert_eq!(engine.generation(), 0);
     }
     let mut engine = with_code(0x1000, &[0x0f, 0x0b]);
     engine.protect(0x1000, 1, 3).unwrap();
-    assert_eq!(
-        compile(&mut engine, &[(0x1000, 2)], &[(0x1000, 17)]),
-        Err(fetch_error(0x1000, 0x1000, FaultReason::Permission))
+    super::support_fetch::assert_host_error(
+        compile(&mut engine, &[(0x1000, 2)], &[(0x1000, 17)]).unwrap_err(),
+        0x1000,
+        0x1000,
+        FaultReason::Permission,
+        1,
     );
     let mut engine = with_code(0x1fff, &[0x90, 0x0b]);
     engine.unmap(0x2000, 1).unwrap();
-    assert_eq!(
-        compile(&mut engine, &[(0x1fff, 2)], &[(0x1fff, 17)]),
-        Err(fetch_error(0x1fff, 0x2000, FaultReason::Unmapped))
+    super::support_fetch::assert_host_error(
+        compile(&mut engine, &[(0x1fff, 2)], &[(0x1fff, 17)]).unwrap_err(),
+        0x1fff,
+        0x2000,
+        FaultReason::Unmapped,
+        2,
     );
 }
 
@@ -382,22 +372,29 @@ fn failed_gate_install_preserves_old_artifact_arena_and_generation_until_replace
         (
             vec![(0x3000, 2)],
             vec![(0x3000, 0)],
-            HostError::Compile(CompileError::InvalidGates),
+            Some(HostError::Compile(CompileError::InvalidGates)),
         ),
         (
             vec![(0x3000, 2)],
             vec![(0x3000, 17)],
-            instruction_error(0x3000, InstructionError::InvalidGate),
+            Some(instruction_error(0x3000, InstructionError::InvalidGate)),
         ),
-        (
-            vec![(0x5000, 2)],
-            vec![(0x5000, 17)],
-            fetch_error(0x5000, 0x5000, FaultReason::Unmapped),
-        ),
+        (vec![(0x5000, 2)], vec![(0x5000, 17)], None),
     ] {
         describe(&mut engine, &blocks, &gates);
         let before = engine.arena().to_vec();
-        assert_eq!(engine.compile_with_gates(1, 1), Err(expected));
+        let result = engine.compile_with_gates(1, 1);
+        if let Some(expected) = expected {
+            assert_eq!(result, Err(expected));
+        } else {
+            super::support_fetch::assert_host_error(
+                result.unwrap_err(),
+                0x5000,
+                0x5000,
+                FaultReason::Unmapped,
+                1,
+            );
+        }
         assert_eq!(engine.arena(), before);
         assert_eq!(engine.generation(), 1);
         assert_eq!(engine.artifact_bytes().unwrap(), installed);

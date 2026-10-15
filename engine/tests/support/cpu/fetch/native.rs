@@ -1,6 +1,8 @@
 use ring3_engine::{
+    cpu::dbt::{CompileError, InstructionError},
     cpu::x86::{CpuPagingError32, PagingAccess32, decode::DecodeError},
     memory::{Access, FaultReason, GuestAddress, MemoryFault},
+    process::HostError,
 };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -64,4 +66,37 @@ pub fn expected(pc: u32, address: u32, reason: FaultReason, length: u32) -> Fetc
 
 pub fn assert_error(error: DecodeError, pc: u32, address: u32, reason: FaultReason, length: u32) {
     assert_eq!(observed(error), expected(pc, address, reason, length));
+}
+
+#[allow(dead_code)]
+pub fn assert_compile_error(
+    error: CompileError,
+    pc: u32,
+    address: u32,
+    reason: FaultReason,
+    length: u32,
+) {
+    let CompileError::Instruction {
+        pc: instruction_pc,
+        cause: InstructionError::Decode(error),
+    } = error
+    else {
+        panic!("expected an instruction decode fault, got {error:?}");
+    };
+    assert_eq!(instruction_pc, GuestAddress(pc));
+    assert_error(error, pc, address, reason, length);
+}
+
+#[allow(dead_code)]
+pub fn assert_host_error(
+    error: HostError,
+    pc: u32,
+    address: u32,
+    reason: FaultReason,
+    length: u32,
+) {
+    let HostError::Compile(error) = error else {
+        panic!("expected a process compilation fault, got {error:?}");
+    };
+    assert_compile_error(error, pc, address, reason, length);
 }

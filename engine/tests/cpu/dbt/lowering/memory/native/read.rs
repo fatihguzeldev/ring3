@@ -6,7 +6,7 @@ use ring3_engine::cpu::dbt::{
 };
 use ring3_engine::cpu::x86::decode::DecodeError;
 use ring3_engine::memory::{
-    Access, AddressSpace, FaultReason, GuestAddress, MemoryFault, PageRange, Permissions,
+    Access, AddressSpace, FaultReason, GuestAddress, PageRange, Permissions,
 };
 use ring3_engine::process::{EngineInstance, HostError};
 
@@ -244,20 +244,12 @@ fn truncated_fetch_retains_original_instruction_pc_and_attempted_span() {
     let mut engine = EngineInstance::new(1, KEY).unwrap();
     engine.map(0x1000, 1, 7).unwrap();
     upload(&mut engine, 0x1fff, &[0x8b]);
-    assert_eq!(
-        compile(&mut engine, 0x1fff, 2),
-        Err(HostError::Compile(CompileError::Instruction {
-            pc: GuestAddress(0x1fff),
-            cause: InstructionError::Decode(DecodeError::MemoryFault {
-                pc: GuestAddress(0x1fff),
-                fault: MemoryFault {
-                    address: GuestAddress(0x2000),
-                    access: Access::Execute,
-                    reason: FaultReason::Unmapped
-                },
-                length: 2,
-            }),
-        }))
+    super::support_fetch::assert_host_error(
+        compile(&mut engine, 0x1fff, 2).unwrap_err(),
+        0x1fff,
+        0x2000,
+        FaultReason::Unmapped,
+        2,
     );
     assert_eq!(engine.generation(), 0);
 }

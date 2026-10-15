@@ -6,7 +6,7 @@ use ring3_engine::cpu::dbt::{
 use ring3_engine::cpu::x86::decode::{DecodeError, decode_one};
 use ring3_engine::cpu::x86::ir::Operation;
 use ring3_engine::memory::{
-    Access, AddressSpace, FaultReason, GuestAddress, MemoryFault, PageRange, Permissions,
+    Access, AddressSpace, FaultReason, GuestAddress, PageRange, Permissions,
 };
 use ring3_engine::process::{EngineInstance, HostError};
 
@@ -249,6 +249,7 @@ fn far_prefixed_and_sixteen_bit_stack_forms_keep_decoder_rejection_at_their_pc()
         bytes.extend_from_slice(instruction);
         let mut engine = with_code(0x1000, &bytes);
         let far = match instruction {
+            [0xf3, 0xc3] => Some(Operation::Return { stack_adjust: 0 }),
             [0x9a, 0x78, 0x56, 0x34, 0x12, 8, 0] => Some(Operation::FarCall {
                 width: FarWidth::Dword,
                 target: FarPointer::Immediate {
@@ -331,20 +332,12 @@ fn declared_call_end_and_truncated_fetch_keep_precise_error_spans() {
         )))
     );
     let mut engine = with_code(0x1fff, &[0xe8]);
-    assert_eq!(
-        compile(&mut engine, &[(0x1fff, 5)]),
-        Err(HostError::Compile(instruction_error(
-            0x1fff,
-            InstructionError::Decode(DecodeError::MemoryFault {
-                pc: GuestAddress(0x1fff),
-                fault: MemoryFault {
-                    address: GuestAddress(0x2000),
-                    access: Access::Execute,
-                    reason: FaultReason::Unmapped
-                },
-                length: 2,
-            })
-        )))
+    super::support_fetch::assert_host_error(
+        compile(&mut engine, &[(0x1fff, 5)]).unwrap_err(),
+        0x1fff,
+        0x2000,
+        FaultReason::Unmapped,
+        2,
     );
 }
 

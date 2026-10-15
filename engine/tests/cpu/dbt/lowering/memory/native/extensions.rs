@@ -279,9 +279,9 @@ fn checked_memory_address_forms_keep_scales_base_index_and_signed_displacements(
             },
         ),
     ];
-    let mut bytes = Vec::new();
-    let mut expected = Vec::new();
     for (opcode, kind, width) in FORMS {
+        let mut bytes = Vec::new();
+        let mut expected = Vec::new();
         for (tail, address) in cases {
             bytes.extend_from_slice(&[0x0f, opcode]);
             bytes.extend_from_slice(tail);
@@ -297,17 +297,17 @@ fn checked_memory_address_forms_keep_scales_base_index_and_signed_displacements(
                 },
             ));
         }
+        bytes.extend_from_slice(&[0xeb, 0]);
+        let instance = engine(&bytes);
+        let mut pc = 0x1000;
+        for (length, operation) in expected {
+            let instruction = decode_one(instance.memory().unwrap(), GuestAddress(pc)).unwrap();
+            assert_eq!(*instruction.operation(), operation);
+            assert_eq!(instruction.length(), length);
+            pc += u32::from(length);
+        }
+        admit(&bytes);
     }
-    bytes.extend_from_slice(&[0xeb, 0]);
-    let instance = engine(&bytes);
-    let mut pc = 0x1000;
-    for (length, operation) in expected {
-        let instruction = decode_one(instance.memory().unwrap(), GuestAddress(pc)).unwrap();
-        assert_eq!(*instruction.operation(), operation);
-        assert_eq!(instruction.length(), length);
-        pc += u32::from(length);
-    }
-    admit(&bytes);
 }
 
 fn standalone_code(bytes: &[u8]) -> AddressSpace {
@@ -431,7 +431,7 @@ fn embedded_small_width_prefix_and_adjacent_errors_remain_precise() {
 fn embedded_extensions_remain_sequential_and_charge_instruction_limit_before_poison() {
     let mut bytes = [0x0f, 0xb6, 0x03].repeat(63);
     bytes.extend_from_slice(&[0xeb, 0]);
-    admit(&bytes);
+    super::support_capacity::assert_bounded_emission(&bytes, KEY);
     for bytes in [[0x0f, 0xb6, 0x03].repeat(65), {
         let mut bytes = [0x0f, 0xb6, 0x03].repeat(64);
         bytes.push(0xf4);
@@ -455,11 +455,21 @@ fn embedded_extensions_remain_sequential_and_charge_instruction_limit_before_poi
             } else {
                 instance.compile(1)
             };
-            assert_eq!(
-                result,
-                Err(HostError::Compile(CompileError::InstructionLimit))
-            );
             assert_eq!(instance.arena(), before);
+            if entry_format {
+                assert_eq!(result, Ok(1));
+                instance.guard(KEY, 1).unwrap();
+                assert!(
+                    instance.artifact_bytes().unwrap().len() <= CompileLimits::default().wasm_bytes
+                );
+            } else {
+                assert_eq!(
+                    result,
+                    Err(HostError::Compile(CompileError::InstructionLimit))
+                );
+                assert_eq!(instance.generation(), 0);
+                assert_eq!(instance.artifact_bytes(), Err(HostError::InvalidArtifact));
+            }
         }
     }
 }

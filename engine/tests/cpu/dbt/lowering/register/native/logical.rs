@@ -358,8 +358,10 @@ fn logical_instructions_charge_existing_caps_and_do_not_terminate_discovery() {
         Some(CompileError::InstructionLimit)
     );
     assert_eq!(
-        prepare_entry_region(&memory, &[GuestAddress(0x1000)], CompileLimits::default()).err(),
-        Some(CompileError::InstructionLimit)
+        prepare_entry_region(&memory, &[GuestAddress(0x1000)], CompileLimits::default())
+            .unwrap()
+            .instruction_count(),
+        64
     );
     let memory = code(0x1000, &[0x85, 0xe4, 0xeb, 0]);
     assert_eq!(
@@ -371,8 +373,9 @@ fn logical_instructions_charge_existing_caps_and_do_not_terminate_discovery() {
                 ..CompileLimits::default()
             }
         )
-        .err(),
-        Some(CompileError::InstructionLimit)
+        .unwrap()
+        .instruction_count(),
+        1
     );
     assert_eq!(
         compile_entry_region(
