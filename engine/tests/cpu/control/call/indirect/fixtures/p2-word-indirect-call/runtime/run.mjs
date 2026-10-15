@@ -1,3 +1,5 @@
+import {pageFaultExit, pageFaultPacket} from '../../../../../../../support/wasm/page-fault.mjs';
+import {generatedImports, attachDetectionApi} from '../../../../../../../support/wasm/binding.mjs';
 import {ARENA_SIZE} from '../../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
@@ -18,7 +20,7 @@ const paths = [
   'engine/src/cpu/x86/decode/flow.rs', 'engine/src/cpu/x86/decode/profile.rs', 'engine/src/cpu/dbt/region.rs',
   'engine/src/cpu/dbt/wasm/integer/arithmetic.rs', 'engine/src/cpu/dbt/wasm/integer/bits.rs', 'engine/src/cpu/dbt/wasm/integer/carry_rotates.rs', 'engine/src/cpu/dbt/wasm/integer/decimal.rs', 'engine/src/cpu/dbt/wasm/integer/dispatch.rs', 'engine/src/cpu/dbt/wasm/integer/flags.rs', 'engine/src/cpu/dbt/wasm/integer/mod.rs', 'engine/src/cpu/dbt/wasm/integer/multiply_divide.rs', 'engine/src/cpu/dbt/wasm/integer/operands.rs', 'engine/src/cpu/dbt/wasm/integer/rotates.rs', 'engine/src/cpu/dbt/wasm/integer/shifts.rs', 'engine/src/cpu/dbt/wasm/memory.rs', 'engine/src/cpu/dbt/wasm/memory/narrow.rs',
   'engine/src/cpu/dbt/wasm/memory/word_store.rs', 'engine/src/cpu/dbt/wasm/abi.rs', 'engine/src/cpu/dbt/wasm/emitter.rs', 'engine/src/cpu/dbt/wasm/locals.rs',
-  'engine/src/memory/space.rs', 'engine/src/memory/space/atomic.rs', 'engine/src/process/instance.rs', 'engine/src/process/execution/compiled.rs', 'engine/src/process/execution/authority.rs', 'engine/src/process/memory/address_space.rs', 'engine/src/process/memory/scalar.rs', 'engine/src/process/memory/scalar/tests.rs', 'engine/src/process/execution/mod.rs', 'engine/src/process/memory/mod.rs', 'engine/src/process/mod.rs', 'engine/src/process/execution/resident.rs', 'engine/src/process/wasm/mod.rs', 'engine/src/process/wasm/loading.rs', 'engine/src/abi/image.rs', 'engine/src/process/wasm/execution.rs', 'engine/src/process/wasm/calls.rs', 'engine/src/process/wasm/memory.rs', 'engine/src/process/wasm/cpu.rs', 'engine/tests/cpu/control/call/indirect/native/word.rs', 'engine/tests/cpu/control/native.rs', 'engine/tests/support/cpu/prefix/admission.rs', 'engine/tests/support/cpu/prefix/word.rs', 'engine/tests/cpu/control/call/indirect/wasm/word.rs', 'engine/tests/cpu/control/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/control/call/indirect/fixtures/p2-word-indirect-call/runtime/run.mjs', 'engine/tests/support/wasm/engine.mjs',
+  'engine/src/memory/space.rs', 'engine/src/memory/space/atomic.rs', 'engine/src/process/instance.rs', 'engine/src/process/execution/compiled.rs', 'engine/src/process/execution/authority.rs', 'engine/src/process/memory/address_space.rs', 'engine/src/process/memory/scalar.rs', 'engine/src/process/memory/scalar/tests.rs', 'engine/src/process/execution/mod.rs', 'engine/src/process/memory/mod.rs', 'engine/src/process/mod.rs', 'engine/src/process/execution/resident.rs', 'engine/src/process/wasm/mod.rs', 'engine/src/process/wasm/loading.rs', 'engine/src/abi/image.rs', 'engine/src/process/wasm/execution.rs', 'engine/src/process/wasm/calls.rs', 'engine/src/process/wasm/memory.rs', 'engine/src/process/wasm/cpu.rs', 'engine/tests/cpu/control/call/indirect/native/word.rs', 'engine/tests/cpu/control/native.rs', 'engine/tests/support/cpu/prefix/admission.rs', 'engine/tests/support/cpu/prefix/word.rs', 'engine/tests/cpu/control/call/indirect/wasm/word.rs', 'engine/tests/cpu/control/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/control/call/indirect/fixtures/p2-word-indirect-call/runtime/run.mjs', 'engine/tests/support/wasm/engine.mjs', 'engine/tests/support/wasm/binding.mjs', 'engine/tests/support/wasm/page-fault.mjs',
 ];
 assert.equal(new Set(paths).size, paths.length);
 const sources = () => Object.fromEntries(paths.map(path => [path, hash(readFileSync(join(root, path)))]));
@@ -39,9 +41,35 @@ function record(magic, size, fields, version = 1) {
   fields.forEach((v, i) => b.writeUInt32LE(v >>> 0, 16 + i * 4)); return b;
 }
 const state = c => record('R3ST', 56, [...c.registers, c.pc, c.flags]);
-const exit = (reason, retired, f, version) => record('R3EX', 40,
-  [reason, retired, f?.detail ?? 0, f?.address ?? 0, f?.access ?? 0, f ? 2 : 0], version);
-const helper = (access, value = 0, f) => record('R3MH', 40, [f ? 1 : 0, value, f?.detail ?? 0, f?.address ?? 0, f?.access ?? 0, 2], 10);
+const exit = (reason, retired, f, version) =>
+  reason === 5
+    ? pageFaultExit({
+        retired,
+        errorCode: 4 | ((f?.access ?? 0) === 2 ? 2 : 0) | ((f?.detail ?? 0) === 2 ? 1 : 0),
+        address: f?.address ?? 0,
+        access: f?.access ?? 0,
+        length: f ? 2 : 0
+      })
+    : record(
+        'R3EX',
+        40,
+        [reason, retired, f?.detail ?? 0, f?.address ?? 0, f?.access ?? 0, f ? 2 : 0],
+        version
+      );
+const helper = (value = 0, f) =>
+  Boolean(f) && ((f?.detail ?? 0) === 1 || (f?.detail ?? 0) === 2)
+    ? pageFaultPacket({
+        errorCode: 4 | ((f?.access ?? 0) === 2 ? 2 : 0) | ((f?.detail ?? 0) === 2 ? 1 : 0),
+        address: f?.address ?? 0,
+        access: f?.access ?? 0,
+        length: 2
+      })
+    : record(
+        'R3MH',
+        40,
+        [f ? 1 : 0, value, f?.detail ?? 0, f?.address ?? 0, f?.access ?? 0, 2],
+        10
+      );
 const arena = c => Buffer.from(new Uint8Array(c.memory.buffer, c.base, SIZE));
 function input(c, offset, bytes) {
   const expected = arena(c); expected.set(bytes, offset); new Uint8Array(c.memory.buffer).set(bytes, c.base + offset);
@@ -84,14 +112,14 @@ function run(c, unit, budget, next, {label, reason = 1, retired = 1, fault, even
   const expected = arena(c);
   if (status === 0) {
     expected.set(state(next)); expected.set(exit(reason, retired, fault, reason === 11 || reason === 15 ? 6 : unit.exitVersion), 56);
-    if (events.length) expected.set(helper(events.at(-1).access, fault ? 0 : value, fault), 100);
+    if (events.length) expected.set(helper(fault ? 0 : value, fault), 100);
   }
   c.trace = []; const observedStatus = unit.run(c.base, c.base + 56, budget, c.base + 96);
   assert.equal(observedStatus, status, label); assert.deepEqual(c.trace, events, 'canonical read16/store16 chronology: ' + label);
-  assert.deepEqual(arena(c), expected, 'full4612 GPR/FLAGS/helper/dirtyFP effect: ' + label);
+  assert.deepEqual(arena(c), expected, 'complete arena GPR/FLAGS/helper/dirtyFP effect: ' + label);
   const after = arena(c);
   observations.push({context: c.id, label, expected_status: status, observed_status: observedStatus,
-    expected_reason: status === 0 ? reason : null, observed_reason: status === 0 ? after.readUInt32LE(72) : null,
+    model_reason: reason, expected_reason: status === 0 ? (reason === 5 ? 23 : reason) : null, observed_reason: status === 0 ? after.readUInt32LE(72) : null,
     expected_retired: status === 0 ? retired : null, observed_retired: status === 0 ? after.readUInt32LE(76) : null,
     expected_pc: status === 0 ? next.pc : null, observed_pc: status === 0 ? after.readUInt32LE(48) : null,
     expected_flags: status === 0 ? next.flags : null, observed_flags: status === 0 ? after.readUInt32LE(52) : null, events: c.trace});
@@ -110,7 +138,7 @@ function compile(c, blocks) {
     : {generation: c.api.generation(), pointer: c.api.module_ptr() >>> 0, length: c.api.module_len() >>> 0};
   const bytes = Buffer.from(new Uint8Array(c.memory.buffer, binding.pointer, binding.length)), module = new WebAssembly.Module(bytes);
   const reads = blocks.some(b => b.read), stores = blocks.some(b => b.store);
-  const names = [c.owner === 'resident' ? 'guard_resident' : 'guard', ...(reads ? ['cpu_read16'] : []), ...(stores ? [c.owner === 'resident' ? 'cpu_store_resident16' : 'cpu_store16'] : [])];
+  const names = generatedImports({resident: c.owner === 'resident', helpers: [...(reads ? ['cpu_read16'] : []), ...(stores ? [c.owner === 'resident' ? 'cpu_store_resident16' : 'cpu_store16'] : [])]}).slice(1).map(item => item.name);
   assert.deepEqual(WebAssembly.Module.imports(module), [{module: 'env', name: 'memory', kind: 'memory'}, ...names.map(name => ({module: 'ring3', name, kind: 'function'}))]);
   assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
   const imports = {...c.api, cpu_read16: address => {c.trace.push({access: 1, address: address >>> 0}); return c.api.cpu_read16(address);},
@@ -165,6 +193,7 @@ function open(owner, entries, purpose = 'core') {
   for (const name of ['open', 'close', 'arena_ptr', 'map', 'unmap', 'protect', 'upload', 'read8', 'read16', 'cpu_read16', 'cpu_store16', 'cpu_store_resident16', 'store16', 'store_resident16',
     'compile', 'compile_entries', 'compile_resident', 'compile_resident_entries', 'generation', 'module_ptr', 'module_len', 'guard', 'guard_resident'])
     c.api[name] = instance.exports['ring3_abi_v1_' + name];
+ attachDetectionApi(c.api, instance.exports);
   assert.equal(c.api.open(12, c.id, c.keyHigh), 0); c.base = c.api.arena_ptr() >>> 0; input(c, 0, initial);
   if (purpose !== 'core') return c;
   for (const address of [PC, 0x1234f000, DATA, DATA + 4096, HIGH, 0xfffff000, 0, 0x8000, rxPC])

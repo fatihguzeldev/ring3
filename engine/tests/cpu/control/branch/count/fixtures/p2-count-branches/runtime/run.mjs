@@ -1,3 +1,4 @@
+import {detectionGuardName, generatedImports, attachDetectionApi} from '../../../../../../../support/wasm/binding.mjs';
 import assert from "node:assert/strict";
 import {createHash} from "node:crypto";
 import {readFileSync,writeFileSync} from "node:fs";
@@ -15,7 +16,7 @@ for(const [name,b]of [["count-branches.x86",core],["endpoints.x86",endpoints],["
 const paths=["engine/src/abi/arena.rs","engine/src/abi/x86/state.rs","engine/src/cpu/x86/ir.rs","engine/src/cpu/x86/decode/flow.rs",
   "engine/src/cpu/x86/decode/profile.rs","engine/src/cpu/x86/decode/decoder.rs","engine/src/cpu/dbt/region.rs","engine/src/cpu/dbt/cold.rs",
   "engine/src/cpu/dbt/wasm/integer/arithmetic.rs", "engine/src/cpu/dbt/wasm/integer/bits.rs", "engine/src/cpu/dbt/wasm/integer/carry_rotates.rs", "engine/src/cpu/dbt/wasm/integer/decimal.rs", "engine/src/cpu/dbt/wasm/integer/dispatch.rs", "engine/src/cpu/dbt/wasm/integer/flags.rs", "engine/src/cpu/dbt/wasm/integer/mod.rs", "engine/src/cpu/dbt/wasm/integer/multiply_divide.rs", "engine/src/cpu/dbt/wasm/integer/operands.rs", "engine/src/cpu/dbt/wasm/integer/rotates.rs", "engine/src/cpu/dbt/wasm/integer/shifts.rs","engine/src/cpu/dbt/wasm/control.rs","engine/src/cpu/dbt/wasm/locals.rs","engine/src/cpu/dbt/wasm/abi.rs",
-  "engine/tests/cpu/control/branch/count/wasm/dword.rs", "engine/tests/cpu/control/wasm.rs", "engine/tests/support/wasm.rs", "engine/tests/cpu/control/branch/count/fixtures/p2-count-branches/runtime/run.mjs","engine/tests/support/wasm/engine.mjs"];
+  "engine/tests/cpu/control/branch/count/wasm/dword.rs", "engine/tests/cpu/control/wasm.rs", "engine/tests/support/wasm.rs", "engine/tests/cpu/control/branch/count/fixtures/p2-count-branches/runtime/run.mjs","engine/tests/support/wasm/engine.mjs", 'engine/tests/support/wasm/binding.mjs'];
 const sourcePins=()=>Object.fromEntries(paths.map(path=>{const b=readFileSync(join(root,path));return[path,{bytes:b.length,sha256:hash(b)}];})),sources=sourcePins();
 const frames=[],journal=[],modules=[],targets=[];
 const counts={owners:0,modules:0,core_targets:0,branch_retired:0,generated_calls:0,controls:0,cold_calls:0};
@@ -52,13 +53,14 @@ function compile(ctx,specs,entries,bankName){input(ctx,140,words(entries?specs.m
     binding=Object.fromEntries(["low","high","pointer","length"].map((name,i)=>[name,b.readUInt32LE(148+i*4)]));assert.ok(binding.low&&binding.length);old.set(b.subarray(140,164),140);}
   else binding={generation:ctx.api.generation(),pointer:ctx.api.module_ptr()>>>0,length:ctx.api.module_len()>>>0};
   assert.deepEqual(arena(ctx),old,"only resident compiler receipt may change");journal.push({owner:ctx.owner,type:"host",name,args,before,after:capture(ctx,"after "+name)});
-  const b=Buffer.from(new Uint8Array(ctx.memory.buffer,binding.pointer,binding.length)),m=new WebAssembly.Module(b),guard=ctx.owner==="resident"?"guard_resident":"guard";
-  assert.deepEqual(WebAssembly.Module.imports(m),[{module:"env",name:"memory",kind:"memory"},{module:"ring3",name:guard,kind:"function"}]);
+  const b=Buffer.from(new Uint8Array(ctx.memory.buffer,binding.pointer,binding.length)),m=new WebAssembly.Module(b),guard=detectionGuardName(ctx.owner==="resident");
+  assert.deepEqual(WebAssembly.Module.imports(m),generatedImports({bound: true, resident: ctx.owner==="resident", helpers: []}));
   assert.deepEqual(WebAssembly.Module.exports(m),[{name:"run",kind:"function"}]);ctx.run=new WebAssembly.Instance(m,{env:{memory:ctx.memory},ring3:ctx.api}).exports.run;assert.equal(ctx.run.length,4);
   ctx.binding=binding;ctx.module=modules.length;const file="module-"+ctx.module+".wasm";writeFileSync(join(output,file),b,{flag:"wx"});
-  modules.push({owner:ctx.owner,file,bytes:b.length,sha256:hash(b),entries,bank:bankName,specs,imports:[guard],...binding});counts.modules++;}
+  modules.push({owner:ctx.owner,file,bytes:b.length,sha256:hash(b),entries,bank:bankName,specs,imports:generatedImports({resident: ctx.owner==="resident", helpers: []}).slice(1).map(item => item.name),...binding});counts.modules++;}
 function open(owner){const instance=new WebAssembly.Instance(engine.module,{}),ctx={owner,memory:instance.exports.memory,api:{}};
   for(const name of ["open","close","arena_ptr","map","upload","compile","compile_entries","compile_resident","compile_resident_entries","generation","module_ptr","module_len","guard","guard_resident"]){ctx.api[name]=instance.exports["ring3_abi_v1_"+name];assert.equal(typeof ctx.api[name],"function",name);}
+ attachDetectionApi(ctx.api, instance.exports);
   assert.equal(ctx.api.open(4,1,0x62636465),0);ctx.base=ctx.api.arena_ptr()>>>0;
   for(const pc of [PC,END,0xfffff000])host(ctx,"map",[pc,1,7]);upload(ctx,PC,core);
   const fp=record("R3FP",128,[0x55aa037f,0x03ffffff,0xf1234567,0xfedcba98,0xe246f135]);fp.set(Buffer.from(Array.from({length:80},(_,i)=>(i*73+29)&255)),40);

@@ -1,3 +1,4 @@
+import {generatedImports, attachDetectionApi} from '../../../../../../support/wasm/binding.mjs';
 import {ARENA_SIZE} from '../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
@@ -16,7 +17,7 @@ const paths = ['engine/src/abi/arena.rs', 'engine/src/cpu/x86/decode/profile.rs'
   'engine/src/cpu/dbt/wasm/dispatcher.rs', 'engine/src/process/instance.rs', 'engine/src/process/execution/compiled.rs', 'engine/src/process/execution/authority.rs', 'engine/src/process/memory/address_space.rs', 'engine/src/process/memory/scalar.rs', 'engine/src/process/memory/scalar/tests.rs', 'engine/src/process/execution/mod.rs', 'engine/src/process/memory/mod.rs', 'engine/src/process/mod.rs', 'engine/src/process/execution/resident.rs', 'engine/src/process/execution/installation.rs', 'engine/src/process/wasm/mod.rs', 'engine/src/process/wasm/loading.rs', 'engine/src/abi/image.rs', 'engine/src/process/wasm/execution.rs', 'engine/src/process/wasm/calls.rs', 'engine/src/process/wasm/memory.rs', 'engine/src/process/wasm/cpu.rs', 'engine/src/memory/space.rs', 'engine/src/memory/space/atomic.rs',
   'engine/tests/cpu/control/hints/native/pause.rs', 'engine/tests/cpu/control/native.rs', 'engine/tests/support/cpu/prefix/admission.rs', 'engine/tests/cpu/control/hints/wasm/pause.rs', 'engine/tests/cpu/control/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/control/hints/fixtures/p2-pause/kernel.c',
   'engine/tests/cpu/control/hints/fixtures/p2-pause/kernel.text.bin', 'engine/tests/cpu/control/hints/fixtures/p2-pause/receipt.json',
-  'engine/tests/cpu/control/hints/fixtures/p2-pause/runtime/run.mjs', 'engine/tests/support/wasm/engine.mjs'];
+  'engine/tests/cpu/control/hints/fixtures/p2-pause/runtime/run.mjs', 'engine/tests/support/wasm/engine.mjs', 'engine/tests/support/wasm/binding.mjs'];
 const sources = () => Object.fromEntries(paths.map(p => [p, hash(readFileSync(join(root, p)))]));
 const sourcePins = sources(), contexts = [], modules = [], observations = [], helperTrace = [];
 const counts = {contexts: 0, runs: 0, retired: 0, pure_flags: 0, polls: 0, helper_calls: 0, read32: 0, store32: 0};
@@ -61,6 +62,7 @@ function open(owner, entries, purpose) {
   if (owner === 'standalone') {c.memory = new WebAssembly.Memory({initial: 1}); c.base = 128; input(c, 0, initial); return c;}
   const instance = new WebAssembly.Instance(engine.module, {}); c.memory = instance.exports.memory; c.api = {};
   for (const [name, arity] of Object.entries(arities)) {c.api[name] = instance.exports['ring3_abi_v1_' + name]; assert.equal(c.api[name]?.length, arity, name);}
+  attachDetectionApi(c.api, instance.exports);
   assert.equal(c.api.open(4, c.id, c.high), 0); c.base = c.api.arena_ptr() >>> 0; input(c, 0, initial);
   for (const [address, permission] of [[0x1000, 7], [0x2000, 7], [0x5000, 3], [0x7000, 3]]) host(c, 'map', [address, 1, permission]);
   for (const b of [...pure, ...live]) upload(c, b.pc, b.bytes);
@@ -81,8 +83,8 @@ function compile(c, name, blocks) {
     bytes = Buffer.from(new Uint8Array(c.memory.buffer, binding.pointer, binding.length));
   }
   assert.ok(bytes.length <= 65536); const module = new WebAssembly.Module(bytes), guard = c.owner === 'resident' ? 'guard_resident' : 'guard';
-  const imports = [{module: 'env', name: 'memory', kind: 'memory'}, ...(c.owner === 'standalone' ? [] : [{module: 'ring3', name: guard, kind: 'function'}]),
-    ...(name === 'poll' ? ['cpu_read32', c.owner === 'resident' ? 'cpu_store_resident32' : 'cpu_store32'].map(name => ({module: 'ring3', name, kind: 'function'})) : [])];
+  const imports = generatedImports({bound: c.owner !== 'standalone', resident: c.owner === 'resident',
+    helpers: name === 'poll' ? ['cpu_read32', c.owner === 'resident' ? 'cpu_store_resident32' : 'cpu_store32'] : []});
   assert.deepEqual(WebAssembly.Module.imports(module), imports); assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
   const ring3 = {...c.api};
   if (name === 'poll') for (const imported of imports.filter(i => i.name === 'cpu_read32' || i.name.startsWith('cpu_store'))) ring3[imported.name] = (...args) => {
@@ -101,7 +103,7 @@ function compile(c, name, blocks) {
 function run(c, unit, budget, next, label, {reason = 1, retired = 1, status = 0, value, transfer, version = unit.exitVersion} = {}) {
   const before = arena(c), expected = Buffer.from(before), beforeEvents = helperTrace.length;
   if (status === 0) {expected.set(state(next)); expected.set(exit(reason, retired, version), 56); if (value !== undefined) expected.set(cpuHelper(value), 100); if (transfer) expected.set(transfer, 140);}
-  const actual = unit.run(c.base, c.base + 56, budget, c.base + 96); assert.equal(actual, status, label); assert.deepEqual(arena(c), expected, 'full4612: ' + label);
+  const actual = unit.run(c.base, c.base + 56, budget, c.base + 96); assert.equal(actual, status, label); assert.deepEqual(arena(c), expected, 'complete arena: ' + label);
   const b = arena(c), saved = {};
   if (c.purpose === 'poll') for (const [phase, bytes] of [['before', before], ['after', b]]) {
     const file = `arena-${c.id}-${counts.runs + 1}-${phase}.bin`; writeFileSync(join(output, file), bytes, {flag: 'wx'}); saved[phase] = {file, sha256: hash(bytes), bytes: bytes.length};
@@ -208,7 +210,7 @@ assert.deepEqual(counts, {contexts: 10, runs: 188, retired: 444, pure_flags: 48,
 assert.equal(modules.length, 18);
 const result = {status: 'ok', engine_sha256: engine.sha256, source_pins: sourcePins, counts, contexts, modules, observations, helper_trace: helperTrace,
   limits: ['exact F390 PAUSE architectural no-op only; selected FLAGS and live producer/ADC/SETcc in six profiles; all128 NOP FLAGS evidence reused',
-    'original unmodified40-byte compiler polling leaf, four bound profiles, finite limit0/3/5 and controlled ready values; full4612 including dirtyFP128 compared per call',
+    'original unmodified40-byte compiler polling leaf, four bound profiles, finite limit0/3/5 and controlled ready values; complete arena including dirtyFP128 compared per call',
     'canonical read32/store32 forwarding observed separately from selected RAM diagnostic reads; no arbitrary helper substitute or whole RAM dump',
     'two pure captures/context and one polling capture/context; poll7blocks20instructions, pure1block2 and live1block6; default8/64/65536 limits unchanged',
     'two resident polling contexts reuse one installed identity and returning dispatcher; cancellation/budget/host ready write resume returned CPU without reseed',

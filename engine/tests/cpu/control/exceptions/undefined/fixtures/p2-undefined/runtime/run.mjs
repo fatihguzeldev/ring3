@@ -1,3 +1,4 @@
+import {detectionGuardName, generatedImports, attachDetectionApi} from '../../../../../../../support/wasm/binding.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
@@ -12,7 +13,7 @@ const keyHigh = 0x55443031, transfer = 140;
 const counts = {contexts: 0, modules: 0, faults: 0, controls: 0, refusals: 0, fullRamPairs: 0};
 const observations = [];
 const sourcePaths = [...exportSources,
-  'engine/tests/support/wasm/arena.mjs', 'engine/tests/support/wasm/engine.mjs',
+  'engine/tests/support/wasm/arena.mjs', 'engine/tests/support/wasm/engine.mjs', 'engine/tests/support/wasm/binding.mjs',
   'engine/src/cpu/x86/decode/control.rs', 'engine/src/cpu/x86/decode/decoder.rs', 'engine/src/cpu/x86/decode/profile.rs',
   'engine/src/cpu/x86/control.rs', 'engine/src/cpu/dbt/region.rs', 'engine/src/cpu/dbt/wasm/control_instructions.rs',
   'engine/src/cpu/dbt/wasm/integer/dispatch.rs', 'engine/src/cpu/dbt/wasm/emitter.rs', 'engine/src/cpu/dbt/wasm/abi.rs',
@@ -31,6 +32,7 @@ function upload(c, address, bytes) {put(c, transfer, bytes); host(c, 'upload', [
 function open(resident, entries) {
   const instance = new WebAssembly.Instance(engine.module, {}), c = {resident, entries, api: {}, memory: instance.exports.memory};
   for (const [name, value] of Object.entries(instance.exports)) if (name.startsWith('ring3_abi_v1_')) c.api[name.slice(13)] = value;
+ attachDetectionApi(c.api, instance.exports);
   const arities = {open: 3, close: 0, arena_ptr: 0, arena_len: 0, map: 3, upload: 2, compile: 1, compile_entries: 2,
     compile_resident: 1, compile_resident_entries: 2, discard_unacknowledged_resident: 4, module_ptr: 0, module_len: 0,
     guard: 6, guard_resident: 7, cpu_read: 3};
@@ -59,9 +61,9 @@ function compile(c, row) {
   const binary = Buffer.from(new Uint8Array(c.memory.buffer, pointer, length));
   writeFileSync(join(output, `module-${++counts.modules}.wasm`), binary, {flag: 'wx'});
   const module = new WebAssembly.Module(binary);
-  const guard = c.resident ? 'guard_resident' : 'guard';
+  const guard = detectionGuardName(c.resident);
   assert.deepEqual(WebAssembly.Module.imports(module).map(item => `${item.module}:${item.name}:${item.kind}`).sort(),
-    ['env:memory:memory', `ring3:${guard}:function`].sort(), `${row.name}: no operand helper or segment import`);
+    generatedImports({resident: c.resident, helpers: []}).map(item => `${item.module}:${item.name}:${item.kind}`).sort(), `${row.name}: no operand helper or segment import`);
   assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
   let guards = 0;
   const ring3 = {[guard]: (...args) => {guards++; return c.api[guard](...args);}};

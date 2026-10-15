@@ -1,3 +1,4 @@
+import {detectionGuardName, generatedImports, attachDetectionApi} from '../../../../../../../support/wasm/binding.mjs';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -27,7 +28,7 @@ const paths = [
   'engine/tests/cpu/control/branch/short/fixtures/p2-short-word/runtime/run.mjs',
   'engine/tests/support/wasm.rs',
   'engine/tests/support/wasm/arena.mjs',
-  'engine/tests/support/wasm/engine.mjs',
+  'engine/tests/support/wasm/engine.mjs', 'engine/tests/support/wasm/binding.mjs',
 ];
 assert.equal(new Set(paths).size, paths.length);
 const sourcePins = () =>
@@ -248,11 +249,8 @@ function compile(ctx, batch) {
   assert.ok(length > 0 && length <= 65536);
   const bytes = Buffer.from(new Uint8Array(ctx.memory.buffer, pointer, length));
   const module = new WebAssembly.Module(bytes),
-    guard = ctx.owner === 'resident' ? 'guard_resident' : 'guard';
-  assert.deepEqual(WebAssembly.Module.imports(module), [
-    { module: 'env', name: 'memory', kind: 'memory' },
-    { module: 'ring3', name: guard, kind: 'function' },
-  ]);
+    guard = detectionGuardName(ctx.owner === 'resident');
+  assert.deepEqual(WebAssembly.Module.imports(module), generatedImports({bound: true, resident: ctx.owner === 'resident', helpers: []}));
   assert.deepEqual(WebAssembly.Module.exports(module), [{ name: 'run', kind: 'function' }]);
   const run = new WebAssembly.Instance(module, { env: { memory: ctx.memory }, ring3: ctx.api })
     .exports.run;
@@ -284,6 +282,7 @@ for (const owner of ['replacement', 'resident']) {
     ctx.api[name] = instance.exports[`ring3_abi_v1_${name}`];
     assert.equal(typeof ctx.api[name], 'function', name);
   }
+ attachDetectionApi(ctx.api, instance.exports);
   assert.equal(ctx.api.open(3, 1, 0x73686f72), 0);
   ctx.base = ctx.api.arena_ptr() >>> 0;
   const initial = createArena();
