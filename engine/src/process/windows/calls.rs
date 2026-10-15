@@ -5,7 +5,83 @@ use crate::{
     windows::{ProcessContext32, WindowsApi32, WindowsOutcome32},
 };
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WindowsGateInfo32 {
+    pub convention: crate::windows::CallingConvention32,
+    pub stack_words: u32,
+}
+
+pub fn windows_gate_info(id: u32) -> Option<WindowsGateInfo32> {
+    if let Some(api) = WindowsApi32::from_id(id) {
+        return Some(WindowsGateInfo32 {
+            convention: api.convention(),
+            stack_words: api.stack_words(),
+        });
+    }
+    if let Some(api) = crate::windows::user32::User32Api32::from_id(id) {
+        return Some(WindowsGateInfo32 {
+            convention: crate::windows::CallingConvention32::Stdcall,
+            stack_words: api.stack_words(),
+        });
+    }
+    let words = if id == crate::graphics::d3d8::api::CREATE_GATE {
+        1
+    } else {
+        u32::from(
+            crate::graphics::d3d8::api::MethodGate::from_id(id)?
+                .method()
+                .stack_words,
+        )
+    };
+    Some(WindowsGateInfo32 {
+        convention: crate::windows::CallingConvention32::Stdcall,
+        stack_words: words,
+    })
+}
+
 impl EngineInstance {
+    pub fn capture_windows_call(
+        &mut self,
+        key: u64,
+        generation: u32,
+    ) -> Result<crate::abi::call_frame::CallRecord32, HostError> {
+        let info = self.current_windows_gate_info()?;
+        self.capture_call(key, generation, info.convention, info.stack_words)
+    }
+    pub fn capture_resident_windows_call(
+        &mut self,
+        key: u64,
+        unit_id: u64,
+    ) -> Result<crate::abi::call_frame::CallRecord32, HostError> {
+        let info = self.current_windows_gate_info()?;
+        self.capture_resident_call(key, unit_id, info.convention, info.stack_words)
+    }
+    pub fn capture_active_resident_callback_windows_call(
+        &mut self,
+        key: u64,
+        unit_id: u64,
+        callback_token: u32,
+    ) -> Result<crate::abi::call_frame::CallRecord32, HostError> {
+        let info = self.current_windows_gate_info()?;
+        self.capture_active_resident_callback_call(
+            key,
+            unit_id,
+            callback_token,
+            info.convention,
+            info.stack_words,
+        )
+    }
+    fn current_windows_gate_info(&self) -> Result<WindowsGateInfo32, HostError> {
+        let exit = decode_exit(
+            &self.arena()[crate::abi::arena::EXIT_OFFSET
+                ..crate::abi::arena::EXIT_OFFSET + crate::abi::x86::EXIT_SIZE],
+        )
+        .map_err(|_| HostError::Infrastructure)?;
+        let ExitReason::Gate { id } = exit.reason else {
+            return Err(HostError::Call(CallError::InvalidStop));
+        };
+        windows_gate_info(id).ok_or(HostError::Call(CallError::InvalidRequest))
+    }
     pub fn complete_windows_call(
         &mut self,
         key: u64,
@@ -48,13 +124,19 @@ impl EngineInstance {
         if self.retry_module_windows_call(owner, token)? {
             return Ok(());
         }
-        if self.callback.is_some() && !matches!(owner, PendingOwner::ResidentCallback { .. }) {
-            return Err(HostError::Call(CallError::Busy));
+        if self.retry_windows_callback_reply(owner, token)? {
+            return Ok(());
         }
+        self.validate_windows_provider_owner(owner)?;
         let exit = decode_exit(&saved_exit).map_err(|_| HostError::Infrastructure)?;
         let ExitReason::Gate { id } = exit.reason else {
             return Err(HostError::Infrastructure);
         };
+        if self.try_complete_user32_call(owner, token, id, frame)?
+            || self.try_complete_d3d8_call(owner, token, id, frame)?
+        {
+            return Ok(());
+        }
         let api = WindowsApi32::from_id(id).ok_or(HostError::Call(CallError::InvalidRequest))?;
         if self.complete_module_api(api, frame)? {
             return Ok(());

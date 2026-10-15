@@ -28,6 +28,8 @@ pub enum HostError {
     Infrastructure,
     Call(CallError),
     Media(crate::process::media::MediaError),
+    User32(crate::windows::user32::User32Error32),
+    D3D8(crate::process::windows::d3d8::D3D8Error32),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -68,10 +70,14 @@ pub struct EngineInstance {
     pub(in crate::process) image_started: bool,
     pub(in crate::process) exit_code: Option<u32>,
     pub(in crate::process) windows_thread: crate::windows::ThreadState32,
+    pub(in crate::process) user32: Option<crate::process::windows::user32::User32Context32>,
+    pub(in crate::process) user32_reply: Vec<crate::process::windows::callbacks::WindowsReply32>,
     pub(in crate::process) segment_descriptors: crate::cpu::x86::SegmentDescriptorTable,
     pub(in crate::process) virtual_allocations: Vec<PageRange>,
     pub(in crate::process) media: Option<crate::process::media::MediaContexts>,
     pub(in crate::process) media_epoch: u64,
+    pub(in crate::process) d3d8: Option<crate::process::windows::d3d8::D3D8Runtime32>,
+    pub(in crate::process) d3d8_reply: Option<crate::process::windows::d3d8::D3D8Reply32>,
 }
 
 impl EngineInstance {
@@ -115,10 +121,14 @@ impl EngineInstance {
             image_started: false,
             exit_code: None,
             windows_thread: crate::windows::ThreadState32::default(),
+            user32: None,
+            user32_reply: Vec::new(),
             segment_descriptors: crate::cpu::x86::SegmentDescriptorTable::default(),
             virtual_allocations: Vec::new(),
             media: None,
             media_epoch: 0,
+            d3d8: None,
+            d3d8_reply: None,
         })
     }
 
@@ -144,6 +154,8 @@ impl EngineInstance {
     }
 
     pub fn close(&mut self) {
+        self.d3d8 = None;
+        self.d3d8_reply = None;
         self.numerical_workspace = Default::default();
         self.media = None;
         self.cpu_clock = crate::process::clock::CpuClock::default();
@@ -158,6 +170,8 @@ impl EngineInstance {
         }
         self.pending_call = None;
         self.module_windows_reply = None;
+        self.user32 = None;
+        self.user32_reply = Vec::new();
         self.cpu_event = None;
         self.callback = None;
         self.artifact = None;

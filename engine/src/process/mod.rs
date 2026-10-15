@@ -20,3 +20,9 @@ pub use loading::modules::{
     ModuleInitializer32, ModuleInitializerKind32, ModuleOperation32, ModuleRuntimeConfig32,
 };
 pub use media::{MediaConfig, MediaError};
+pub use windows::callbacks::{
+    WINDOWS_CALLBACK_ARGUMENTS32, WindowsCallback32, WindowsCallbackProvider32,
+    WindowsProviderOutcome32,
+};
+pub use windows::calls::{WindowsGateInfo32, windows_gate_info};
+pub use windows::d3d8::{D3D8Config32, D3D8DeviceInfo32, D3D8Error32};

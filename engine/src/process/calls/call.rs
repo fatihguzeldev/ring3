@@ -397,6 +397,9 @@ impl EngineInstance {
         result: u32,
     ) -> Result<(), HostError> {
         let pending = self.checked_pending_call(owner, token)?;
+        if self.windows_provider_owns_token(token) || self.d3d8_provider_owns_token(token) {
+            return Err(HostError::Call(CallError::Busy));
+        }
         let exit = decode_exit(&pending.exit).map_err(|_| HostError::Infrastructure)?;
         if matches!(exit.reason, ExitReason::Gate { id } if id == WindowsApi32::ExitProcess.id()) {
             return Err(HostError::Call(CallError::InvalidRequest));
@@ -481,11 +484,17 @@ impl EngineInstance {
         if key != self.key {
             return Err(HostError::InvalidArtifact);
         }
+        if self.d3d8_provider_owns_token(token) {
+            return Err(HostError::Call(CallError::Busy));
+        }
         if self
             .callback
             .as_ref()
             .is_some_and(|callback| callback.contains_outer_token(token))
         {
+            return Err(HostError::Call(CallError::Busy));
+        }
+        if self.windows_provider_owns_token(token) {
             return Err(HostError::Call(CallError::Busy));
         }
         if token == 0

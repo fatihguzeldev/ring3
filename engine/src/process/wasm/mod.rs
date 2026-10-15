@@ -160,6 +160,64 @@ pub(super) fn status(error: HostError) -> u32 {
             CallError::Memory(_) => 8,
         },
         HostError::Media(error) => media::status(error),
+        HostError::User32(error) => {
+            use crate::windows::user32::User32Error32 as U;
+            match error {
+                U::Busy => 12,
+                U::Capacity => 18,
+                U::Allocation => 9,
+                U::InvalidToken => 14,
+                U::Memory(_) => 8,
+                U::Window(
+                    crate::windows::window::WindowError32::QueueFull
+                    | crate::windows::window::WindowError32::Capacity,
+                ) => 18,
+                U::Window(
+                    crate::windows::window::WindowError32::Exhausted
+                    | crate::windows::window::WindowError32::Allocation,
+                ) => 9,
+                _ => 7,
+            }
+        }
+        HostError::D3D8(error) => {
+            use crate::{
+                graphics::d3d8::{
+                    commands::CommandError as C, device::DeviceError as D,
+                    resources::ResourceError as R, shader::registry::RegistryError as S,
+                },
+                process::D3D8Error32 as E,
+            };
+            match error {
+                E::NotConfigured => 38,
+                E::AlreadyConfigured => 39,
+                E::InvalidConfiguration => 7,
+                E::Allocation => 9,
+                E::InvalidDevice | E::StaleReply => 40,
+                E::Busy => 12,
+                E::Device(error) => match error {
+                    D::Lost => 44,
+                    D::NotReset => 45,
+                    D::Removed => 46,
+                    D::NotAvailable | D::Resource(R::NotAvailable) => 20,
+                    D::PendingReadback
+                    | D::Resource(R::ReadbackRequired)
+                    | D::Command(C::Backpressure) => 12,
+                    D::StaleReadback
+                    | D::Resource(R::StaleResource)
+                    | D::Command(C::StaleBatch | C::StalePreparation) => 40,
+                    D::Allocation
+                    | D::IdentityExhausted
+                    | D::Resource(R::Allocation | R::IdentityExhausted)
+                    | D::Command(C::Allocation | C::IdentityExhausted)
+                    | D::Shader(S::Allocation | S::IdentityExhausted) => 9,
+                    D::Capacity
+                    | D::Resource(R::ByteCapacity | R::ResourceCapacity)
+                    | D::Command(C::Capacity | C::OutputTooSmall)
+                    | D::Shader(S::ObjectCapacity | S::ByteCapacity) => 18,
+                    _ => 7,
+                },
+            }
+        }
     }
 }
 

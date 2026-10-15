@@ -8,6 +8,7 @@ mod lifecycle;
 mod memory;
 mod messages;
 mod properties;
+mod runtime;
 
 use crate::{
     memory::{GuestAddress, PageRange},

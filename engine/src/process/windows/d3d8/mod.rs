@@ -9,16 +9,21 @@ mod locks;
 mod memory;
 mod objects;
 mod presentation;
+mod readback_input;
 mod resources;
+mod runtime;
 mod shaders;
 mod state;
 mod transfers;
+mod transport;
 mod types;
+pub(in crate::process) use runtime::D3D8Reply32;
 
 #[cfg(test)]
 mod tests;
 
 pub(in crate::process) use context::D3D8Runtime32;
+pub use transport::D3D8DeviceInfo32;
 pub use types::{D3D8Config32, D3D8Error32};
 
 use crate::graphics::d3d8::api::HResult;

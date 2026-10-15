@@ -21,6 +21,7 @@ pub(in crate::process) struct D3D8Runtime32 {
     pub(super) retired_devices: Vec<super::garbage::RetiredDevice32>,
     pub(super) deferred_private_releases: Vec<GuestAddress>,
     pub(super) device_slots: Vec<usize>,
+    pub(super) readback_input: Option<super::readback_input::ReadbackInput32>,
 }
 
 impl D3D8Runtime32 {
@@ -69,6 +70,7 @@ impl D3D8Runtime32 {
             locks,
             private_callbacks: Vec::new(),
             private_sequence: 0,
+            readback_input: None,
             garbage: Vec::new(),
             retired_devices: Vec::new(),
             deferred_private_releases: Vec::new(),

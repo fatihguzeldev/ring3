@@ -100,6 +100,10 @@ impl EngineInstance {
         callback_id: u64,
         token: u32,
     ) -> Result<ResidentCallbackResult32, HostError> {
+        if self.windows_provider_owns_callback_token(token) {
+            self.guard_resident_unit(key, callback_id)?;
+            return Err(HostError::Call(CallError::Busy));
+        }
         self.finish_provider_resident_callback(key, callback_id, token)
     }
 
@@ -287,6 +291,10 @@ impl EngineInstance {
         return_id: u32,
         arguments: &[u32],
     ) -> Result<ResidentCallbackRecord32, HostError> {
+        if self.windows_provider_owns_token(outer_token) {
+            self.guard_resident_unit(key, outer_id)?;
+            return Err(HostError::Call(CallError::Busy));
+        }
         self.begin_provider_resident_callback(
             key,
             outer_id,

@@ -12,7 +12,7 @@ mod input;
 
 static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);
 
-fn next_session() -> Result<u64, HostError> {
+pub(in crate::process) fn next_session() -> Result<u64, HostError> {
     NEXT_SESSION
         .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |epoch| {
             epoch.checked_add(1)
@@ -65,7 +65,8 @@ impl EngineInstance {
         }
         let (origin_ns, _) = self.cpu_clock.monotonic_bounds()?;
         let epoch = next_session()?;
-        let media = MediaContexts::new(epoch, origin_ns, config)?;
+        let mut media = MediaContexts::new(epoch, origin_ns, config)?;
+        self.initialize_windows_input(&mut media.input, origin_ns)?;
         self.media = Some(media);
         self.media_epoch = epoch;
         Ok(epoch)
@@ -76,7 +77,8 @@ impl EngineInstance {
         let (_, now_ns) = self.cpu_clock.monotonic_bounds()?;
         let epoch = next_session()?;
         // prepare every owner before replacing any live context.
-        let replacement = MediaContexts::new(epoch, now_ns, config)?;
+        let mut replacement = MediaContexts::new(epoch, now_ns, config)?;
+        self.initialize_windows_input(&mut replacement.input, now_ns)?;
         self.media = Some(replacement);
         self.media_epoch = epoch;
         Ok(epoch)

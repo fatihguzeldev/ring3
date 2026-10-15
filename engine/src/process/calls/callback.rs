@@ -149,6 +149,10 @@ impl EngineInstance {
         return_id: u32,
         arguments: &[u32],
     ) -> Result<CallbackRecord32, HostError> {
+        if self.windows_provider_owns_token(outer_token) {
+            self.guard_artifact(key, generation)?;
+            return Err(call_error(CallError::Busy));
+        }
         self.begin_provider_callback(
             key,
             generation,
@@ -284,6 +288,10 @@ impl EngineInstance {
         generation: u32,
         token: u32,
     ) -> Result<CallbackRecord32, HostError> {
+        if self.windows_provider_owns_callback_token(token) {
+            self.guard_artifact(key, generation)?;
+            return Err(call_error(CallError::Busy));
+        }
         self.finish_provider_callback(key, generation, token)
     }
 
@@ -356,6 +364,9 @@ impl EngineInstance {
                 .is_none_or(|callback| callback.token() != token)
         {
             return Err(call_error(CallError::InvalidToken));
+        }
+        if self.windows_provider_owns_callback_token(token) {
+            return Err(call_error(CallError::Busy));
         }
         let mut callback = self.callback.take().unwrap();
         self.callback = callback.parent.take().map(|parent| {

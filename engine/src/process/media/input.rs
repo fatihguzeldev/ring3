@@ -85,3 +85,54 @@ impl EngineInstance {
         Ok(self.media_contexts_mut()?.input.drain_relative())
     }
 }
+
+impl EngineInstance {
+    pub(in crate::process) fn prepare_windows_input_flags(
+        &self,
+        focused: bool,
+        captured: bool,
+    ) -> Result<Option<crate::input::PreparedWindowInput32>, HostError> {
+        let Some(media) = self.media.as_ref() else {
+            return Ok(None);
+        };
+        let (_, timestamp) = self.cpu_clock.monotonic_bounds()?;
+        media
+            .input
+            .prepare_window_flags(focused, captured, timestamp)
+            .map(Some)
+            .map_err(|error| HostError::Media(MediaError::Input(error)))
+    }
+
+    pub(in crate::process) fn commit_windows_input_flags(
+        &mut self,
+        prepared: Option<crate::input::PreparedWindowInput32>,
+    ) {
+        if let Some(prepared) = prepared {
+            self.media
+                .as_mut()
+                .expect("prepared input context exists")
+                .input
+                .commit_window_flags(prepared);
+        }
+    }
+}
+
+impl EngineInstance {
+    pub(in crate::process) fn initialize_windows_input(
+        &self,
+        input: &mut InputContext,
+        timestamp_ns: u64,
+    ) -> Result<(), HostError> {
+        if let Some(windows) = self.user32_windows() {
+            let prepared = input
+                .prepare_window_flags(
+                    windows.focus().is_some(),
+                    windows.capture().is_some(),
+                    timestamp_ns,
+                )
+                .map_err(|error| HostError::Media(MediaError::Input(error)))?;
+            input.commit_window_flags(prepared);
+        }
+        Ok(())
+    }
+}
