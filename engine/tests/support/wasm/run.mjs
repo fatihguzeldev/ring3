@@ -12,7 +12,7 @@ export function generatedRunBody(bytes, {csBase = 0, default32 = true} = {}) {
     return value;
   };
   const vector = () => {const length = leb(), result = [...bytes.subarray(p, p + length)]; p += length; return result;};
-  const types = [], functions = [], bodies = [], importedTypes = [], guards = [];
+  const types = [], functions = [], bodies = [], importedTypes = [], guards = [], finalizers = [];
   let globals;
   const signed = () => {
     let value = 0n, shift = 0n, byte;
@@ -22,7 +22,7 @@ export function generatedRunBody(bytes, {csBase = 0, default32 = true} = {}) {
     return Number(BigInt.asUintN(32, value));
   };
   const string = () => Buffer.from(vector()).toString();
-  const arities = {guard: 6, guard_resident: 7, read8: 1, read16: 1, read32: 1, store8: 2, store16: 2, store32: 2, store_resident8: 6, store_resident16: 6, store_resident32: 6, cpu_read8: 1, cpu_read16: 1, cpu_read32: 1, cpu_store8: 2, cpu_store16: 2, cpu_store32: 2, cpu_store_resident8: 6, cpu_store_resident16: 6, cpu_store_resident32: 6};
+  const arities = {guard: 6, guard_resident: 7, guard_detect: 6, guard_detect_resident: 7, finish_exception_detection: 12, read8: 1, read16: 1, read32: 1, store8: 2, store16: 2, store32: 2, store_resident8: 6, store_resident16: 6, store_resident32: 6, cpu_read8: 1, cpu_read16: 1, cpu_read32: 1, cpu_read_modify8: 1, cpu_read_modify16: 1, cpu_read_modify32: 1, cpu_store8: 2, cpu_store16: 2, cpu_store32: 2, cpu_store_resident8: 6, cpu_store_resident16: 6, cpu_store_resident32: 6};
   while (p < bytes.length) {
     const section = bytes[p++], size = leb(), end = p + size;
     assert.ok(end <= bytes.length);
@@ -33,7 +33,7 @@ export function generatedRunBody(bytes, {csBase = 0, default32 = true} = {}) {
       for (let n = leb(); n; n--) {
         const module = string(), name = string(), kind = bytes[p++];
         if (kind === 2) {assert.equal(module, 'env'); assert.equal(name, 'memory'); assert.equal(leb(), 0); assert.equal(leb(), 1);}
-        else {assert.equal(kind, 0); assert.equal(module, 'ring3'); assert.ok(Object.hasOwn(arities, name)); importedTypes.push([leb(), arities[name]]); if (name === 'guard' || name === 'guard_resident') guards.push(name);}
+        else {assert.equal(kind, 0); assert.equal(module, 'ring3'); assert.ok(Object.hasOwn(arities, name), `known generated import ${name}`); importedTypes.push([leb(), name]); if (name === 'guard' || name === 'guard_resident' || name === 'guard_detect' || name === 'guard_detect_resident') guards.push(name); if (name === 'finish_exception_detection') finalizers.push(name);}
       }
       assert.equal(p, end);
     } else if (section === 3) {
@@ -55,9 +55,17 @@ export function generatedRunBody(bytes, {csBase = 0, default32 = true} = {}) {
   }
   assert.ok(guards.length <= 1, 'one guard identifies a bound module');
   const bound = guards.length === 1;
+  const detects = bound && guards[0].startsWith('guard_detect');
+  assert.equal(finalizers.length, Number(detects), 'one finalizer accompanies a detection guard');
   assert.deepEqual(globals, [Number(bound), csBase, Number(default32)], 'literal retained code key');
   const usedTypes = new Set(functions);
-  for (const [type, arity] of importedTypes) {assert.deepEqual(types[type], [Array(arity).fill(0x7f), [0x7f]]); usedTypes.add(type);}
+  for (const [type, name] of importedTypes) {
+    const parameters = Array(arities[name]).fill(0x7f);
+    if (name === 'finish_exception_detection') parameters[0] = 0x7e;
+    const result = name.startsWith('guard_detect') ? 0x7e : 0x7f;
+    assert.deepEqual(types[type], [parameters, [result]], `exact signature for ${name}`);
+    usedTypes.add(type);
+  }
   assert.equal(usedTypes.size, types.length, 'every signature belongs to an imported or defined function');
   assert.ok(functions.length === 1 || functions.length === 2);
   assert.equal(functions.length, bodies.length);
@@ -69,10 +77,10 @@ export function generatedRunBody(bytes, {csBase = 0, default32 = true} = {}) {
     const result = []; for (let n = read(); n; n--) result.push([read(), body[at++]]);
     return {result, at};
   };
-  assert.deepEqual(locals(bodies[0]).result, [[16, 0x7f], [1, 0x7e], [10, 0x7f], ...(bound ? [[1, 0x7f]] : [])]);
+  assert.deepEqual(locals(bodies[0]).result, [[16, 0x7f], [1, 0x7e], [10, 0x7f], ...(bound ? [[1, 0x7f]] : []), ...(detects ? [[1, 0x7e], [6, 0x7f]] : [])]);
   if (functions.length === 2) {
-    assert.equal(functions[1], types.length - 1);
-    assert.deepEqual(types.at(-1), [Array(6).fill(0x7f), [0x7f]]);
+    assert.equal(functions[1], types.length - 1 - Number(detects));
+    assert.deepEqual(types[functions[1]], [Array(6).fill(0x7f), [0x7f]]);
     const body = bodies[1], shape = locals(body); assert.deepEqual(shape.result, [[3, 0x7f]]);
     let at = shape.at, depth = 0;
     const immediate = () => {let count = 0, byte; do {byte = body[at++]; assert.ok(byte !== undefined && ++count <= 5);} while (byte & 128);};
