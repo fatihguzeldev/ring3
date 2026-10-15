@@ -1,3 +1,4 @@
+import {detectionGuardName, generatedImports} from '../../../../../../support/wasm/binding.mjs';
 import {createArena} from '../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
@@ -88,9 +89,8 @@ function compile(ctx) {
     bytes = Buffer.from(ctx.bytes.subarray(binding.pointer, binding.pointer + binding.length));
     writeFileSync(join(output, `${ctx.owner}-${ctx.kind}.wasm`), bytes, {flag: 'wx'});
   }
-  const module = new WebAssembly.Module(bytes), guard = ctx.owner === 'replacement' ? 'guard' : 'guard_resident';
-  assert.deepEqual(WebAssembly.Module.imports(module), [{module: 'env', name: 'memory', kind: 'memory'},
-    ...(ctx.owner === 'standalone' ? [] : [{module: 'ring3', name: guard, kind: 'function'}])]);
+  const module = new WebAssembly.Module(bytes), guard = detectionGuardName(!(ctx.owner === 'replacement'));
+  assert.deepEqual(WebAssembly.Module.imports(module), generatedImports({bound: !(ctx.owner === 'standalone'), resident: !(ctx.owner === 'replacement'), helpers: []}));
   assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
   const child = new WebAssembly.Instance(module, {env: {memory: ctx.memory}, ...(ctx.owner === 'standalone' ? {} : {ring3: ctx.api})});
   assert.equal(child.exports.run.length, 4); counts.modules++;
@@ -196,7 +196,7 @@ const result = {status: 'ok', engine_sha256: hash(engineBytes), tools: {node: pr
     sahf_bit_positions: [0, 2, 4, 6, 7], sahf_ah_range: [0, 255], preserved_of_df: OFDF, old_status: OLD_STATUS,
     live: [{ah: 0, initial_flags: 0xcd7, sahf_flags: 0xc02, adc_ebx: 0xffffffff, adc_flags: 0x486}, {ah: 1, initial_flags: 0xc02, sahf_flags: 0xc03, adc_ebx: 0, adc_flags: 0x457}],
     programs: Object.fromEntries(Object.entries(programs).map(([name, bytes]) => [name, bytes.toString('hex')])), arena_bytes: SIZE, page_sha256: hash(pattern)},
-  test_sha256: Object.fromEntries(['engine/tests/cpu/bits_flags/flags/wasm/ah.rs', 'engine/tests/cpu/bits_flags/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/bits_flags/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/bits_flags/flags/fixtures/p2-flags-ah/runtime/run.mjs'].map(path => [path, hash(readFileSync(join(root, path)))])),
+  test_sha256: Object.fromEntries(['engine/tests/cpu/bits_flags/flags/wasm/ah.rs', 'engine/tests/cpu/bits_flags/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/bits_flags/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/bits_flags/flags/fixtures/p2-flags-ah/runtime/run.mjs', 'engine/tests/support/wasm/binding.mjs'].map(path => [path, hash(readFileSync(join(root, path)))])),
   claim: 'flat32 prefix-free LAHF9F/SAHF9E in native-generated standalone and actual engine-Wasm-generated replacement/resident modules; LAHF128 FLAGS/two dirty EAX vectors with real second-LAHF idempotence; SAHF256 AH/four OFDF/two old-status seeds and genuine SAHF-LAHF-SAHF continuation; independent literal canonical-AH table and explicit SAHF bit-position oracle, full GPR/FLAGS/arena and complete untouched patterned4KB page; literal guest-produced CF feeds CMOVB/ADC and exact carry exits; focused known-entry preflight and stale/closed guards; no wider ISA, PE/provider, SDK/browser, performance or game claim'};
 writeFileSync(join(output, 'result.json'), JSON.stringify(result, null, 2), {flag: 'wx'});
 console.log(JSON.stringify({status: result.status, engine_sha256: result.engine_sha256, counts, output}));

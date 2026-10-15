@@ -1,3 +1,5 @@
+import {pageFaultExit, pageFaultPacket} from '../../../../../../../support/wasm/page-fault.mjs';
+import {generatedImports, attachDetectionApi} from '../../../../../../../support/wasm/binding.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
@@ -17,14 +19,55 @@ const forms=[[0x0f,0xa3,0x0b],[0x0f,0xa3,0x00],[0x0f,0xa3,0x4c,0x8a,0x80],
   ...immediates.map(n=>[0x0f,0xba,0x23,n]),[0xb9,32,0,0,0,0x0f,0xa3,0x0b]];
 const stats={contexts:0,numeric:0,aliases:0,boundaries:0,read_faults:0,repairs:0,chains:0,runs:0,preflight:0,controls:0};
 const observations=[],modules=[],frames=[],events=[];
-const sources=['engine/tests/cpu/bits_flags/test/memory/native/dword.rs', 'engine/tests/cpu/bits_flags/native.rs', 'engine/tests/support/cpu/prefix/admission.rs', 'engine/tests/cpu/bits_flags/native.rs','engine/tests/cpu/bits_flags/test/memory/wasm/dword.rs', 'engine/tests/cpu/bits_flags/wasm.rs', 'engine/tests/cpu/bits_flags/wasm.rs','engine/tests/cpu/bits_flags/test/memory/fixtures/p2-memory-bit-test32/runtime/run.mjs'];
+const sources=['engine/tests/cpu/bits_flags/test/memory/native/dword.rs', 'engine/tests/cpu/bits_flags/native.rs', 'engine/tests/support/cpu/prefix/admission.rs', 'engine/tests/cpu/bits_flags/native.rs','engine/tests/cpu/bits_flags/test/memory/wasm/dword.rs', 'engine/tests/cpu/bits_flags/wasm.rs', 'engine/tests/cpu/bits_flags/wasm.rs','engine/tests/cpu/bits_flags/test/memory/fixtures/p2-memory-bit-test32/runtime/run.mjs', 'engine/tests/support/wasm/binding.mjs', 'engine/tests/support/wasm/page-fault.mjs'];
 const sourcePins=()=>Object.fromEntries(sources.map(p=>[p,hash(readFileSync(join(root,p)))])),initialSources=sourcePins();
 function record(magic,size,fields,version=1){const b=Buffer.alloc(size);b.write(magic);b.writeUInt16LE(version,4);b.writeUInt16LE(1,6);b.writeUInt32LE(size,8);fields.forEach((v,i)=>b.writeUInt32LE(v>>>0,16+i*4));return b;}
 const state=(r,pc,f)=>record('R3ST',56,[...r,pc,f]);
-const exit=(reason,retired,detail=0,address=0)=>record('R3EX',40,[reason,retired,detail,address,reason===5?1:0,reason===5?4:0],reason===11?6:2);
-const cpuExit=(reason,retired,detail=0,address=0)=>record('R3EX',40,[reason,retired,detail,address,reason===5?1:0,reason===5?4:0],6);
+const exit = (reason, retired, detail = 0, address = 0) =>
+  reason === 5
+    ? pageFaultExit({
+        retired,
+        errorCode: 4 | ((reason === 5 ? 1 : 0) === 2 ? 2 : 0) | (detail === 2 ? 1 : 0),
+        address,
+        access: reason === 5 ? 1 : 0,
+        length: reason === 5 ? 4 : 0
+      })
+    : record(
+        'R3EX',
+        40,
+        [reason, retired, detail, address, reason === 5 ? 1 : 0, reason === 5 ? 4 : 0],
+        reason === 11 ? 6 : 2
+      );
+const cpuExit = (reason, retired, detail = 0, address = 0) =>
+  reason === 5
+    ? pageFaultExit({
+        retired,
+        errorCode: 4 | ((reason === 5 ? 1 : 0) === 2 ? 2 : 0) | (detail === 2 ? 1 : 0),
+        address,
+        access: reason === 5 ? 1 : 0,
+        length: reason === 5 ? 4 : 0
+      })
+    : record(
+        'R3EX',
+        40,
+        [reason, retired, detail, address, reason === 5 ? 1 : 0, reason === 5 ? 4 : 0],
+        6
+      );
 const helper=(value=0,detail=0,address=0)=>record('R3MH',40,[detail?1:0,detail?0:value,detail,address,detail?1:0,detail?4:0]);
-const cpuHelper=(value=0,detail=0,address=0)=>record('R3MH',40,[detail?1:0,detail?0:value,detail,address,detail?1:0,4],10);
+const cpuHelper = (value = 0, detail = 0, address = 0) =>
+  Boolean(detail) && (detail === 1 || detail === 2)
+    ? pageFaultPacket({
+        errorCode: 4 | ((detail ? 1 : 0) === 2 ? 2 : 0) | (detail === 2 ? 1 : 0),
+        address,
+        access: detail ? 1 : 0,
+        length: 4
+      })
+    : record(
+        'R3MH',
+        40,
+        [detail ? 1 : 0, detail ? 0 : value, detail, address, detail ? 1 : 0, 4],
+        10
+      );
 const words=a=>{const b=Buffer.alloc(a.length*4);a.forEach((v,i)=>b.writeUInt32LE(v>>>0,i*4));return b;};
 function refresh(c){c.bytes=new Uint8Array(c.memory.buffer);c.view=new DataView(c.memory.buffer);return c;}
 function arena(c){return Buffer.from(refresh(c).bytes.subarray(c.base,c.base+SIZE));}
@@ -39,7 +82,8 @@ function unmap(c,address){pure(c,()=>c.api.unmap(address,1));events.push({contex
 function seed(c,r,pc,f){refresh(c).bytes.set(state(r,pc,f),c.base);c.bytes.set(exit(3,0),c.base+56);c.view.setUint32(c.base+96,0,true);c.bytes.set(helper(0xad),c.base+100);c.bytes.set(opaque,c.base+FP);}
 function program(){const saved=readFileSync(join(output,'bt.x86')),wanted=Buffer.alloc(128,0xcc),specs=[];for(const [i,form]of forms.entries()){const at=i*16;wanted.set(form,at);wanted[at+form.length]=0xe9;wanted.writeInt32LE(COLD-(PC+at+form.length+5),at+form.length+1);specs.push([PC+at,form.length+5]);}assert.deepEqual(saved,wanted);assert.equal(specs.length,8);return{saved,specs};}
 function fresh(owner,entries){const instance=new WebAssembly.Instance(engineModule,{}),names=['open','close','arena_ptr','map','unmap','protect','upload','compile','compile_entries','compile_resident','compile_resident_entries','generation','module_ptr','module_len','guard','guard_resident','read32','cpu_read32'];
- const api=Object.fromEntries(names.map(n=>[n,instance.exports[`ring3_abi_v1_${n}`]]));for(const fn of Object.values(api))assert.equal(typeof fn,'function');
+ const api=Object.fromEntries(names.map(n=>[n,instance.exports[`ring3_abi_v1_${n}`]]));
+ attachDetectionApi(api, instance.exports);for(const fn of Object.values(api))assert.equal(typeof fn,'function');
  const c={owner,entries,label:`${owner}-${entries?'entries':'extent'}`,api,memory:instance.exports.memory,low:++stats.contexts,high:0xc9506000};assert.equal(api.open(8,c.low,c.high),0);c.base=api.arena_ptr()>>>0;assert.deepEqual(arena(c),initial);
  pure(c,()=>api.map(PC,1,7));events.push({context:c.label,type:'map',address:PC,pages:1,bits:7,before_frame:frames.length});
  map(c,DATA,2);for(const at of [0xfffff000,0,0xf0005000,0x10005000])map(c,at);
@@ -47,7 +91,7 @@ function fresh(owner,entries){const instance=new WebAssembly.Instance(engineModu
  if(owner==='replacement'){pure(c,()=>entries?api.compile_entries(8,0):api.compile(8));binding={generation:api.generation(),pointer:api.module_ptr()>>>0,length:api.module_len()>>>0};}
  else{const before=arena(c);assert.equal(entries?api.compile_resident_entries(8,0):api.compile_resident(8),0);refresh(c);binding=Object.fromEntries(['low','high','pointer','length'].map((n,i)=>[n,c.view.getUint32(c.base+TRANSFER+8+i*4,true)]));before.set(words([1,24,binding.low,binding.high,binding.pointer,binding.length]),TRANSFER);assert.deepEqual(arena(c),before);}
  const generated=Buffer.from(refresh(c).bytes.subarray(binding.pointer,binding.pointer+binding.length)),module=new WebAssembly.Module(generated);
- assert.deepEqual(WebAssembly.Module.imports(module),[{module:'env',name:'memory',kind:'memory'},{module:'ring3',name:owner==='replacement'?'guard':'guard_resident',kind:'function'},{module:'ring3',name:'cpu_read32',kind:'function'}]);
+ assert.deepEqual(WebAssembly.Module.imports(module),generatedImports({bound: true, resident: !(owner==='replacement'), helpers: ['cpu_read32']}));
  writeFileSync(join(output,`actual-${c.label}.wasm`),generated,{flag:'wx'});modules.push({context:c.label,bytes:generated.length,sha256:hash(generated),specs:p.specs});return[c,{...binding,run:new WebAssembly.Instance(module,{env:{memory:c.memory},ring3:api}).exports.run}];}
 function run(c,u,budget,r,pc,f,reason=1,retired=1,value,detail=0,address=0,input={}){const before=arena(c),wanted=Buffer.from(before);wanted.set(state(r,pc,f));wanted.set(cpuExit(reason,retired,detail,address),56);if(value!==undefined||reason===5)wanted.set(cpuHelper(value,detail,address),100);const status=u.run(c.base,c.base+56,budget,c.base+96),after=arena(c);assert.equal(status,0);assert.deepEqual(after,wanted,'full4612: GPR/FLAGS/precise target retirement/helper/transfer/opaqueFP continuity');capture(c,before,after,{type:'run',budget,status,input});stats.runs++;}
 function neutral(c,u,status,pointer,type){const before=arena(c),actual=u.run(pointer,c.base+56,1,c.base+96),after=arena(c);assert.equal(actual,status);assert.deepEqual(after,before);capture(c,before,after,{type,status:actual});}

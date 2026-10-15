@@ -1,3 +1,4 @@
+import {detectionGuardName, generatedImports} from '../../../../../../../support/wasm/binding.mjs';
 import {createArena} from '../../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
@@ -94,9 +95,8 @@ function compile(ctx) {
     bytes = Buffer.from(ctx.bytes.subarray(binding.pointer, binding.pointer + binding.length));
     writeFileSync(join(output, `${ctx.owner}-${ctx.name}.wasm`), bytes, {flag: 'wx'});
   }
-  const module = new WebAssembly.Module(bytes), guard = ctx.owner === 'replacement' ? 'guard' : 'guard_resident';
-  assert.deepEqual(WebAssembly.Module.imports(module), [{module: 'env', name: 'memory', kind: 'memory'},
-    ...(ctx.owner === 'standalone' ? [] : [{module: 'ring3', name: guard, kind: 'function'}])]);
+  const module = new WebAssembly.Module(bytes), guard = detectionGuardName(!(ctx.owner === 'replacement'));
+  assert.deepEqual(WebAssembly.Module.imports(module), generatedImports({bound: !(ctx.owner === 'standalone'), resident: !(ctx.owner === 'replacement'), helpers: []}));
   assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
   const child = new WebAssembly.Instance(module, {env: {memory: ctx.memory}, ...(ctx.owner === 'standalone' ? {} : {ring3: ctx.api})});
   assert.equal(child.exports.run.length, 4); counts.modules++;
@@ -176,7 +176,7 @@ const result = {status: 'ok', engine_sha256: hash(engineBytes), tools: {node: pr
   oracle: {sources: INPUTS, flag_seeds: FLAGS, literal_anchors: ANCHORS, registers: REG, specs, cold_target: COLD,
     flag_policy: 'ZF iffzero; PF whole32 source even ones count; CF/OF/SF/AF0; DF/fixed2 preserved; zero source retains destination',
     programs: Object.fromEntries(Object.entries(programs).map(([name, bytes]) => [name, bytes.toString('hex')])), arena_bytes: SIZE, page_sha256: hash(pattern)},
-  test_sha256: Object.fromEntries(['engine/tests/cpu/bits_flags/scan/register/wasm/dword.rs', 'engine/tests/cpu/bits_flags/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/bits_flags/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/bits_flags/scan/register/fixtures/p2-bit-scan/runtime/run.mjs'].map(path => [path, hash(readFileSync(join(root, path)))])),
+  test_sha256: Object.fromEntries(['engine/tests/cpu/bits_flags/scan/register/wasm/dword.rs', 'engine/tests/cpu/bits_flags/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/bits_flags/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/bits_flags/scan/register/fixtures/p2-bit-scan/runtime/run.mjs', 'engine/tests/support/wasm/binding.mjs'].map(path => [path, hash(readFileSync(join(root, path)))])),
   claim: 'flat32 register-source BSF/BSR in native-generated standalone and actual engine-Wasm-generated replacement/resident modules;zero/all32 single bits/five mixed source rows,16 FLAGS basis, all8 destinations and self-alias/rotated source; independent bit-string first/last-one and whole-source parity oracle with literal anchors; first scan full-state observation precedes SETZAL/SETPDL/JMP, no intermediate CPU repair, dirty rotated destination preserved on zero, full arena and complete untouched patterned4KB page; focused known-entry preflight and stale/closed guards; no exhaustive operands/128FLAGS/memory-source/POPCNT/TZCNT/LZCNT/wider ISA, PE/provider, SDK/browser, performance or game claim'};
 writeFileSync(join(output, 'result.json'), JSON.stringify(result, null, 2), {flag: 'wx'});
 console.log(JSON.stringify({status: result.status, engine_sha256: result.engine_sha256, counts, output}));
