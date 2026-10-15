@@ -2,6 +2,7 @@
 
 mod batch;
 mod context;
+pub mod d3d8;
 mod resource;
 
 pub use context::GraphicsContext;
