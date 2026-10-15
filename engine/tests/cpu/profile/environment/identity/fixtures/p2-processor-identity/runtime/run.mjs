@@ -1,3 +1,4 @@
+import {generatedImports, attachDetectionApi} from '../../../../../../../support/wasm/binding.mjs';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -17,7 +18,7 @@ assert.equal(ARENA_SIZE, 4756);
 const hash = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const sourcePaths = [
   ...exportSources,
-  'engine/tests/support/wasm/engine.mjs',
+  'engine/tests/support/wasm/engine.mjs', 'engine/tests/support/wasm/binding.mjs',
   'engine/tests/support/wasm/arena.mjs',
   'engine/src/cpu/x86/environment.rs',
   'engine/src/cpu/x86/capabilities.rs',
@@ -96,6 +97,7 @@ function open(resident, entries) {
     if (name.startsWith('ring3_abi_v1_') && typeof fn === 'function')
       context.api[name.slice(13)] = fn;
   }
+ attachDetectionApi(context.api, instance.exports);
   for (const [name, arity] of Object.entries({
     open: 3,
     map: 3,
@@ -184,11 +186,7 @@ function capture(context, name, bytes, timestamps = false, pc = PC) {
     WebAssembly.Module.imports(module)
       .map((row) => `${row.module}:${row.name}:${row.kind}`)
       .sort(),
-    [
-      'env:memory:memory',
-      `ring3:${context.resident ? 'guard_resident' : 'guard'}:function`,
-      ...(timestamps ? [`ring3:${helper}:function`] : []),
-    ].sort(),
+    generatedImports({resident: context.resident, helpers: [...(timestamps ? [helper] : [])]}).map(item => `${item.module}:${item.name}:${item.kind}`).sort(),
     `${name}: identity adds no platform/memory/timestamp helper`,
   );
   assert.deepEqual(WebAssembly.Module.exports(module), [{ name: 'run', kind: 'function' }]);

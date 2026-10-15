@@ -39,7 +39,7 @@ function open(program, abiOnly = false) {
   for (const imp of WebAssembly.Module.imports(module)) {
     if (imp.kind === 'function') ring3[imp.name] = (...args) => {
       // a permissive guard isolates generated ABI validation from host pointer checks.
-      if (abiOnly && imp.name.startsWith('guard')) return 0;
+      if (abiOnly && imp.name.startsWith('guard')) return 1n;
       if (!imp.name.startsWith('guard')) helpers++;
       return api[imp.name](...args);
     };

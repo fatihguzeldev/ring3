@@ -1,3 +1,4 @@
+import {generatedImports, attachDetectionApi} from '../../../../../../../support/wasm/binding.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
@@ -10,7 +11,7 @@ const sourcePaths = [
   'engine/src/cpu/x86/decode/cache_timestamp.rs', 'engine/src/cpu/x86/decode/decoder.rs', 'engine/src/cpu/x86/decode/profile.rs', 'engine/src/cpu/x86/decode/lower.rs', 'engine/src/cpu/x86/ir.rs',
   'engine/src/cpu/dbt/region.rs', 'engine/src/cpu/dbt/wasm/cache_flush.rs', 'engine/src/cpu/dbt/wasm/integer_system.rs', 'engine/src/cpu/dbt/wasm/integer/dispatch.rs', 'engine/src/cpu/dbt/wasm/atomic.rs', 'engine/src/cpu/dbt/wasm/cpu_result.rs',
   'engine/src/cpu/dbt/wasm/memory.rs', 'engine/src/cpu/dbt/wasm/memory/narrow.rs', 'engine/src/cpu/dbt/wasm/segments.rs', 'engine/src/process/cpu/integer.rs', 'engine/src/memory/space.rs', 'engine/src/memory/space/atomic.rs', 'engine/src/abi/cpu_helper.rs',
-  'engine/tests/cpu/profile/environment/ordering/native.rs', 'engine/tests/cpu/profile/environment/ordering/wasm.rs', 'engine/tests/cpu/profile/environment/ordering/fixtures/p2-cache-timestamp/runtime/run.mjs',
+  'engine/tests/cpu/profile/environment/ordering/native.rs', 'engine/tests/cpu/profile/environment/ordering/wasm.rs', 'engine/tests/cpu/profile/environment/ordering/fixtures/p2-cache-timestamp/runtime/run.mjs', 'engine/tests/support/wasm/binding.mjs',
 ];
 const sources = () => Object.fromEntries(sourcePaths.map(path => [path, createHash('sha256').update(readFileSync(join(root, path))).digest('hex')]));
 const sourcePins = sources();
@@ -33,6 +34,7 @@ function seed(c, source = 0, address = DATA + 7) {
 function open(owner, entries) {
   const instance = new WebAssembly.Instance(engine.module, {}), c = {owner, entries, api: {}, memory: instance.exports.memory, calls: [], tsc: 0};
   for (const [name, value] of Object.entries(instance.exports)) if (name.startsWith('ring3_abi_v1_') && typeof value === 'function') c.api[name.slice(13)] = value;
+ attachDetectionApi(c.api, instance.exports);
   c.keyLow = ++counts.contexts;
   assert.equal(c.api.open(8, c.keyLow, 0x43545343), 0); c.base = c.api.arena_ptr() >>> 0;
   assert.equal(c.api.configure_cpu_clock(1_000_000_000, 0, 0, 0), 0);
@@ -55,7 +57,7 @@ function compile(c, instruction, helpers) {
   const bytes = Buffer.from(new Uint8Array(c.memory.buffer, pointer, length)), module = new WebAssembly.Module(bytes);
   const bound = name => c.owner === 'resident' ? (name === 'cpu_integer' ? 'cpu_integer_resident' : name === 'store32' ? 'store_resident32' : name) : name;
   const imports = WebAssembly.Module.imports(module);
-  assert.deepEqual(imports.map(row => `${row.module}:${row.name}:${row.kind}`).sort(), ['env:memory:memory', `ring3:${c.owner === 'resident' ? 'guard_resident' : 'guard'}:function`, ...helpers.map(name => `ring3:${bound(name)}:function`)].sort());
+  assert.deepEqual(imports.map(row => `${row.module}:${row.name}:${row.kind}`).sort(), generatedImports({resident: c.owner === 'resident', helpers: [...helpers.map((name) => bound(name))]}).map(item => `${item.module}:${item.name}:${item.kind}`).sort());
   writeFileSync(join(output, `module-${++counts.modules}.wasm`), bytes, {flag: 'wx'});
   const ring3 = {...c.api};
   for (const name of helpers.map(bound)) ring3[name] = (...args) => {
