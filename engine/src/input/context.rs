@@ -1,3 +1,7 @@
+mod window;
+pub(crate) use window::PreparedWindowInput32;
+use window::{PhysicalInput32, host_transition};
+
 use super::{
     BUTTON_COUNT, InputError, InputKind, InputLease, InputLimits, InputOrigin, InputRecord,
     InputState, KEY_COUNT, MAX_BATCH_EVENTS, MAX_QUEUE_EVENTS, MIN_QUEUE_EVENTS, RelativeTotals,
@@ -11,6 +15,8 @@ pub struct InputContext {
     sequence: u64,
     timestamp_ns: u64,
     state: InputState,
+    physical: PhysicalInput32,
+    window_flags: Option<(bool, bool)>,
     focus_generation: u64,
     capture_generation: u64,
     pub(super) queue: Box<[InputRecord]>,
@@ -43,6 +49,8 @@ impl InputContext {
             sequence: 0,
             timestamp_ns: clock_epoch_ns,
             state: InputState::default(),
+            physical: PhysicalInput32::default(),
+            window_flags: None,
             focus_generation: 0,
             capture_generation: 0,
             queue: queue.into_boxed_slice(),
@@ -103,16 +111,19 @@ impl InputContext {
         let mut focus_generation = self.focus_generation;
         let mut capture_generation = self.capture_generation;
         let mut timestamp_ns = self.timestamp_ns;
+        let mut physical = self.physical;
         let mut required = 0;
         let available = self.queue.len() - self.length;
         for event in events.clone() {
             if event.timestamp_ns < self.clock_epoch_ns || event.timestamp_ns < timestamp_ns {
                 return Err(InputError::TimeOrder);
             }
-            transition(
+            host_transition(
                 &mut state,
                 &mut focus_generation,
                 &mut capture_generation,
+                &mut physical,
+                self.window_flags,
                 event,
                 |_, _| {
                     required += 1;
@@ -127,11 +138,15 @@ impl InputContext {
         let mut published_state = self.state;
         let mut published_focus = self.focus_generation;
         let mut published_capture = self.capture_generation;
+        let mut published_physical = self.physical;
+        let window_flags = self.window_flags;
         for event in events {
-            transition(
+            host_transition(
                 &mut published_state,
                 &mut published_focus,
                 &mut published_capture,
+                &mut published_physical,
+                window_flags,
                 event,
                 |event, origin| {
                     self.push(InputRecord {
@@ -144,6 +159,7 @@ impl InputContext {
             )
             .expect("input transitions were preflighted against unchanged state");
         }
+        self.physical = physical;
         self.state = state;
         self.focus_generation = focus_generation;
         self.capture_generation = capture_generation;
@@ -220,6 +236,7 @@ impl InputContext {
         self.sequence = 0;
         self.timestamp_ns = now_ns;
         self.state = InputState::default();
+        self.physical = PhysicalInput32::default();
         self.focus_generation = 0;
         self.capture_generation = 0;
         self.head = 0;

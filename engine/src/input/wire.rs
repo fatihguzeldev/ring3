@@ -181,6 +181,7 @@ fn encode_record(record: InputRecord, output: &mut [u8]) {
     let origin: u32 = match record.origin {
         InputOrigin::Host => 0,
         InputOrigin::FocusRelease => 1,
+        InputOrigin::Window => 2,
     };
     output[40..44].copy_from_slice(&origin.to_le_bytes());
 }

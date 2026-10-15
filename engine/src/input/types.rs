@@ -71,6 +71,8 @@ pub struct TimedInputEvent {
 pub enum InputOrigin {
     Host,
     FocusRelease,
+    /// a logical hwnd transition; it cannot grant host focus or pointer lock.
+    Window,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
