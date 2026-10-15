@@ -23,3 +23,5 @@ pub use modules::kernel32_module;
 pub mod files;
 
 pub mod text;
+
+pub mod process;
