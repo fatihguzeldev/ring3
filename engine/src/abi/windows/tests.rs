@@ -25,9 +25,9 @@ fn windows_callback_carries_sixteen_arguments_and_rejects_reserved_tail() {
 }
 
 #[test]
-fn media_callback_providers_keep_the_wire_shape_and_reject_unknown_providers() {
+fn known_callback_providers_keep_the_wire_shape_and_reject_unknown_providers() {
     let mut bytes = [0; WINDOWS_CALLBACK_RECORD_SIZE];
-    for provider in [3, 4] {
+    for provider in [3, 4, 5] {
         let record = WindowsCallbackRecord32 {
             provider,
             procedure: 0x1234,
@@ -37,10 +37,45 @@ fn media_callback_providers_keep_the_wire_shape_and_reject_unknown_providers() {
         };
         encode_windows_callback(Some(record), &mut bytes).unwrap();
         assert_eq!(decode_windows_callback(&bytes), Ok(Some(record)));
-        bytes[12..16].copy_from_slice(&5u32.to_le_bytes());
+        bytes[12..16].copy_from_slice(&6u32.to_le_bytes());
         assert_eq!(
             decode_windows_callback(&bytes),
             Err(AbiError::CallbackFrame)
         );
     }
+}
+
+#[test]
+fn files_progress_callback_has_literal_provider_and_thirteen_stack_words() {
+    let record = WindowsCallbackRecord32 {
+        provider: 5,
+        procedure: 0x12345678,
+        count: 13,
+        continuation: 0x1122334455667788,
+        arguments: [
+            8, 0, 0, 0, 8, 0, 0, 0, 1, 1, 0x80000000, 0x80000004, 0xfeedbeef, 0, 0, 0,
+        ],
+    };
+    let mut bytes = [0; 96];
+    encode_windows_callback(Some(record), &mut bytes).unwrap();
+    assert_eq!(
+        &bytes[..32],
+        &[
+            82, 51, 87, 67, 1, 0, 1, 0, 96, 0, 0, 0, 5, 0, 0, 0, 0x78, 0x56, 0x34, 0x12, 13, 0, 0,
+            0, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11
+        ]
+    );
+    assert_eq!(
+        &bytes[64..84],
+        &[
+            1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0x80, 4, 0, 0, 0x80, 0xef, 0xbe, 0xed, 0xfe
+        ]
+    );
+    assert_eq!(&bytes[84..], &[0; 12]);
+    assert_eq!(decode_windows_callback(&bytes), Ok(Some(record)));
+    bytes[12..16].copy_from_slice(&6u32.to_le_bytes());
+    assert_eq!(
+        decode_windows_callback(&bytes),
+        Err(AbiError::CallbackFrame)
+    );
 }
