@@ -69,3 +69,36 @@ fn private_data_replacement_and_removal_return_budget_without_changing_render_ve
         Err(ResourceError::NotFound)
     );
 }
+
+#[test]
+fn priority_is_managed_only_and_dynamic_scratch_creation_is_neutral() {
+    let mut store = store();
+    for pool in [
+        Pool::Default,
+        Pool::Managed,
+        Pool::SystemMemory,
+        Pool::Scratch,
+    ] {
+        let id = store
+            .create(texture(TextureKind::Volume, Format::A8, pool))
+            .unwrap();
+        assert_eq!(store.set_priority(id, 7), Ok(0));
+        assert_eq!(
+            store.priority(id),
+            Ok(if pool == Pool::Managed { 7 } else { 0 })
+        );
+    }
+    let before = store.resource_bytes();
+    let ResourceDesc::Texture(desc) = texture(TextureKind::Volume, Format::A8, Pool::Scratch)
+    else {
+        unreachable!()
+    };
+    assert_eq!(
+        store.create(ResourceDesc::Texture(TextureDesc {
+            usage: Usage(Usage::DYNAMIC),
+            ..desc
+        })),
+        Err(ResourceError::InvalidCall)
+    );
+    assert_eq!(store.resource_bytes(), before);
+}

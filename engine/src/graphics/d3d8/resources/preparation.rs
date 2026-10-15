@@ -229,5 +229,6 @@ fn allocate(
         dirty,
         bytes,
         private_data: Vec::new(),
+        private_revision: 1,
     })
 }

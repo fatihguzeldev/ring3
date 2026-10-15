@@ -10,6 +10,7 @@ mod types;
 pub use copy::PreparedCopy;
 pub use format::Format;
 pub use preparation::{PreparedReplacement, PreparedResource};
+pub use private::PreparedPrivateData;
 pub use storage::ResourceStore;
 pub use types::{
     Box3, BufferDesc, BufferKind, LockFlags, LockInfo, Pool, Rect, ResourceDesc, ResourceError,

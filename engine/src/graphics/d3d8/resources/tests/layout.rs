@@ -78,3 +78,56 @@ fn failed_creation_and_generation_reuse_do_not_alias_or_consume_budget() {
     assert_ne!(old.generation, new.generation);
     assert_eq!(store.desc(old), Err(ResourceError::StaleResource));
 }
+
+#[test]
+fn dxt_top_levels_are_block_aligned_but_tail_mips_and_yuv_width_are_not_conflated() {
+    let mut store = store();
+    for format in [
+        Format::Dxt1,
+        Format::Dxt2,
+        Format::Dxt3,
+        Format::Dxt4,
+        Format::Dxt5,
+    ] {
+        let ResourceDesc::Texture(desc) = texture(TextureKind::Texture2D, format, Pool::Scratch)
+        else {
+            unreachable!()
+        };
+        assert_eq!(
+            store.create(ResourceDesc::Texture(TextureDesc { width: 2, ..desc })),
+            Err(ResourceError::InvalidCall)
+        );
+        let id = store.create(ResourceDesc::Texture(desc)).unwrap();
+        assert_eq!(
+            store
+                .info(SurfaceRef {
+                    resource: id,
+                    subresource: 3
+                })
+                .unwrap()
+                .width,
+            1
+        );
+    }
+    let ResourceDesc::Texture(desc) = texture(TextureKind::Texture2D, Format::Yuy2, Pool::Scratch)
+    else {
+        unreachable!()
+    };
+    let odd = store
+        .create(ResourceDesc::Texture(TextureDesc {
+            width: 3,
+            levels: 1,
+            ..desc
+        }))
+        .unwrap();
+    assert_eq!(
+        store
+            .info(SurfaceRef {
+                resource: odd,
+                subresource: 0
+            })
+            .unwrap()
+            .row_pitch,
+        8
+    );
+}

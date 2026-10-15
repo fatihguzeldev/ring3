@@ -7,7 +7,7 @@ pub(super) fn describe(
 ) -> Result<(ResourceDesc, Vec<SubresourceInfo>, usize), ResourceError> {
     let usage = desc.usage();
     if usage.0 & !Usage::KNOWN != 0
-        || (usage.contains(Usage::DYNAMIC) && desc.pool() == Pool::Managed)
+        || (usage.contains(Usage::DYNAMIC) && matches!(desc.pool(), Pool::Managed | Pool::Scratch))
     {
         return Err(ResourceError::InvalidCall);
     }
@@ -45,6 +45,7 @@ pub(super) fn describe(
             total = buffer.length as usize;
         }
         ResourceDesc::Surface(surface) => {
+            validate_top_level(surface.format, surface.width, surface.height)?;
             if surface.format.is_buffer()
                 || surface.multisample == 1
                 || surface.multisample > 16
@@ -67,6 +68,7 @@ pub(super) fn describe(
             layouts.push(layout);
         }
         ResourceDesc::Texture(texture) => {
+            validate_top_level(texture.format, texture.width, texture.height)?;
             if texture.width == 0
                 || texture.height == 0
                 || texture.depth == 0
@@ -122,6 +124,17 @@ pub(super) fn describe(
         }
     }
     Ok((desc, layouts, total))
+}
+
+fn validate_top_level(format: Format, width: u32, height: u32) -> Result<(), ResourceError> {
+    if matches!(
+        format,
+        Format::Dxt1 | Format::Dxt2 | Format::Dxt3 | Format::Dxt4 | Format::Dxt5
+    ) && (!width.is_multiple_of(4) || !height.is_multiple_of(4))
+    {
+        return Err(ResourceError::InvalidCall);
+    }
+    Ok(())
 }
 
 fn image_layout(

@@ -26,7 +26,8 @@ pub(super) struct Resource {
     pub lod: u32,
     pub dirty: Vec<Option<Box3>>,
     pub bytes: usize,
-    pub private_data: Vec<([u8; 16], Vec<u8>)>,
+    pub private_data: Vec<super::private::Entry>,
+    pub private_revision: u64,
 }
 
 #[derive(Default)]
@@ -132,6 +133,18 @@ impl ResourceStore {
         Ok(self.resource(id)?.dirty.iter().any(Option::is_some))
     }
 
+    pub fn dirty_region(&self, id: ResourceId, face: u32) -> Result<Option<Box3>, ResourceError> {
+        let resource = self.resource(id)?;
+        if !matches!(resource.desc, ResourceDesc::Texture(_)) {
+            return Err(ResourceError::InvalidCall);
+        }
+        resource
+            .dirty
+            .get(face as usize)
+            .copied()
+            .ok_or(ResourceError::InvalidCall)
+    }
+
     pub fn add_dirty(
         &mut self,
         id: ResourceId,
@@ -168,6 +181,9 @@ impl ResourceStore {
     }
     pub fn set_priority(&mut self, id: ResourceId, value: u32) -> Result<u32, ResourceError> {
         let resource = self.resource_mut(id)?;
+        if resource.desc.pool() != Pool::Managed {
+            return Ok(0);
+        }
         Ok(std::mem::replace(&mut resource.priority, value))
     }
 

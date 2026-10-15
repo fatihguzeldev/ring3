@@ -6,6 +6,21 @@ use super::{
 use crate::graphics::ResourceId;
 
 impl ResourceStore {
+    pub fn cancel_lock(&mut self, id: ResourceId, token: u64) -> Result<(), ResourceError> {
+        let resource = self.resource_mut(id)?;
+        for subresource in &mut resource.subresources {
+            if let Some(index) = subresource
+                .locks
+                .iter()
+                .position(|lock| lock.info.token == token)
+            {
+                subresource.locks.remove(index);
+                return Ok(());
+            }
+        }
+        Err(ResourceError::InvalidCall)
+    }
+
     pub fn can_unlock(
         &self,
         id: ResourceId,
@@ -191,6 +206,22 @@ impl ResourceStore {
                 }
                 return Ok(&subresource.bytes
                     [lock.info.offset as usize..(lock.info.offset + lock.info.length) as usize]);
+            }
+        }
+        Err(ResourceError::InvalidCall)
+    }
+
+    pub fn lock_backing_bytes(&self, id: ResourceId, token: u64) -> Result<&[u8], ResourceError> {
+        for subresource in &self.resource(id)?.subresources {
+            if let Some(lock) = subresource
+                .locks
+                .iter()
+                .find(|lock| lock.info.token == token)
+            {
+                if !subresource.cpu_current && !lock.info.flags.contains(LockFlags::DISCARD) {
+                    return Err(ResourceError::ReadbackRequired);
+                }
+                return Ok(&subresource.bytes);
             }
         }
         Err(ResourceError::InvalidCall)
