@@ -20,17 +20,18 @@ impl EngineInstance {
         token: u32,
         frame: CallFrame32,
     ) -> Result<bool, HostError> {
-        if frame.convention() != crate::windows::CallingConvention32::Stdcall
-            || frame.stack_words() != 4
-        {
-            return Err(HostError::Call(crate::process::CallError::InvalidRequest));
-        }
+        let Some(files) = self.files.as_ref() else {
+            return Ok(false);
+        };
         let args = frame.arguments();
-        if args[0] == 0 || args[1] == 0 {
+        let Some((&address, &size)) = args.first().zip(args.get(1)) else {
+            return Ok(false);
+        };
+        if address == 0 || size == 0 {
             return Ok(false);
         }
-        let start = args[0] & !(PAGE_SIZE - 1);
-        let end = u64::from(args[0]) + u64::from(args[1]);
+        let start = address & !(PAGE_SIZE - 1);
+        let end = u64::from(address) + u64::from(size);
         if end > 1u64 << 32 {
             return Ok(false);
         }
@@ -39,15 +40,16 @@ impl EngineInstance {
             ((end - u64::from(start)).div_ceil(u64::from(PAGE_SIZE))) as u32,
         )
         .map_err(HostError::Memory)?;
-        if self
-            .files
-            .as_ref()
-            .is_none_or(|files| !files.mappings.contains_range(range))
-        {
+        if !files.mappings.contains_range(range) {
             return Ok(false);
         }
         self.validate_windows_provider_owner(owner)?;
         self.checked_pending_call(owner, token)?;
+        if frame.convention() != crate::windows::CallingConvention32::Stdcall
+            || frame.stack_words() != 4
+        {
+            return Err(HostError::Call(crate::process::CallError::InvalidRequest));
+        }
         Self::prepare_completed_call(frame.complete(0))?;
         self.check_windows_thread_write()?;
         self.memory()?

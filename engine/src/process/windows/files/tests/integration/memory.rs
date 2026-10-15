@@ -53,3 +53,47 @@ fn raw_virtual_alloc_gate_with_wrong_stack_metadata_is_rejected_before_argument_
         engine.abandon_call(KEY, token).unwrap();
     }
 }
+
+#[test]
+fn mapping_virtual_alloc_falls_back_when_unowned_and_preserves_owned_token_priority() {
+    use crate::process::calls::call::PendingOwner;
+    let mut engine = engine();
+    let token = capture(&mut engine, Api::VirtualAlloc.id(), &[], Some(0));
+    let frame = engine.pending_call.as_ref().unwrap().frame;
+    let owner = PendingOwner::Replacement(engine.generation);
+    assert!(
+        !engine
+            .try_complete_file_mapping_allocation(owner, 0, frame)
+            .unwrap()
+    );
+    let files = engine.files.take();
+    assert!(
+        !engine
+            .try_complete_file_mapping_allocation(owner, 0, frame)
+            .unwrap()
+    );
+    engine.files = files;
+    engine.abandon_call(KEY, token).unwrap();
+    let section = complete(
+        &mut engine,
+        File::CreateFileMappingW.id(),
+        &[u32::MAX, 0, 0x0400_0004, 0, 4096, 0],
+    );
+    let view = complete(
+        &mut engine,
+        File::MapViewOfFile.id(),
+        &[section, 4, 0, 0, 0],
+    );
+    let token = capture(&mut engine, Api::VirtualAlloc.id(), &[view, 1], Some(2));
+    let frame = engine.pending_call.as_ref().unwrap().frame;
+    let owner = PendingOwner::Replacement(engine.generation);
+    assert_eq!(
+        engine.try_complete_file_mapping_allocation(owner, token + 1, frame),
+        Err(HostError::Call(CallError::InvalidToken))
+    );
+    assert_eq!(
+        engine.try_complete_file_mapping_allocation(owner, token, frame),
+        Err(HostError::Call(CallError::InvalidRequest))
+    );
+    engine.abandon_call(KEY, token).unwrap();
+}
