@@ -1,4 +1,4 @@
-import {detectionGuardName, generatedImports} from '../../../../../../../support/wasm/binding.mjs';
+import {detectionGuardName, generatedImports, attachDetectionApi} from '../../../../../../../support/wasm/binding.mjs';
 import assert from 'node:assert/strict';
 import {ARENA_SIZE} from '../../../../../../../support/wasm/arena.mjs';
 import {createHash} from 'node:crypto';
@@ -57,7 +57,7 @@ export function runPeProof({engine, output, initial}) {
   const arena = c => Buffer.from(new Uint8Array(c.memory.buffer, c.arena, SIZE));
   function input(c, offset, bytes) {
     const expected = arena(c); expected.set(bytes, offset); new Uint8Array(c.memory.buffer).set(bytes, c.arena + offset);
-    assert.deepEqual(arena(c), expected, 'declared PE host input retains remaining complete arena arena');
+    assert.deepEqual(arena(c), expected, 'declared PE host input retains remaining complete arena');
   }
   function pure(c, name, args) {
     const before = arena(c); assert.equal(c.api[name](...args), 0, name); assert.deepEqual(arena(c), before, name + ' complete arena neutrality');
@@ -96,7 +96,7 @@ export function runPeProof({engine, output, initial}) {
     const helperNames = label === 'gate' ? [] : ['cpu_read32', c.owner === 'replacement' ? 'cpu_store32' : 'cpu_store_resident32', 'cpu_read8', c.owner === 'replacement' ? 'cpu_store8' : 'cpu_store_resident8'];
     const imports = [{module: 'env', name: 'memory', kind: 'memory'}, ...generatedImports({resident: !(c.owner === 'replacement'), helpers: [...helperNames]}).slice(1).map(item => item.name).map(name => ({module: 'ring3', name, kind: 'function'}))];
     assert.deepEqual(WebAssembly.Module.imports(module), imports); assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
-    const forwarded = {[guard]: c.api[guard]};
+    const forwarded = {[guard]: c.api[guard], finish_exception_detection: c.api.finish_exception_detection};
     for (const name of helperNames) forwarded[name] = (...args) => {
       const before = arena(c), status = c.api[name](...args), after = arena(c), expected = Buffer.from(before); expected.set(after.subarray(100, 140), 100);
       assert.equal(status, 0); assert.deepEqual(after, expected, 'forwarded PE guest helper touches only canonical40-byte packet');
@@ -131,6 +131,7 @@ export function runPeProof({engine, output, initial}) {
     const id = `pe-${++counts.contexts}`, instance = new WebAssembly.Instance(engine.module, {});
     const c = {id, owner, entries, image_base: base, entry: base + 0x1000, memory: instance.exports.memory, captures: 0, low: 0x50450000 + counts.contexts, high: 0xc8400000};
     c.api = Object.fromEntries(Object.entries(arities).map(([name, arity]) => {const fn = instance.exports['ring3_abi_v1_' + name]; assert.equal(typeof fn, 'function', name); assert.equal(fn.length, arity); return [name, fn];}));
+    attachDetectionApi(c.api, instance.exports);
     assert.equal(c.api.open(8, c.low, c.high), 0); c.arena = c.api.arena_ptr() >>> 0;
     pure(c, 'begin_image_input', [image.length]);
     for (const [offset, length] of [[0, 4096], [4096, 1536]]) {input(c, TRANSFER, image.subarray(offset, offset + length)); pure(c, 'append_image_input', [offset, length]); input(c, TRANSFER, Buffer.alloc(4096, 0xa5));}

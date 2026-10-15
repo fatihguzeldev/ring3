@@ -1,4 +1,4 @@
-import {generatedImports} from '../../../../../../../support/wasm/binding.mjs';
+import {generatedImports, attachDetectionApi} from '../../../../../../../support/wasm/binding.mjs';
 import {createArena} from '../../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
@@ -84,6 +84,7 @@ function fresh(owner, bank) {
     ctx.api = Object.fromEntries(Object.entries(arities).map(([name, arity]) => {
       const fn = instance.exports[`ring3_abi_v1_${name}`]; assert.equal(typeof fn, 'function', name); assert.equal(fn.length, arity, name); return [name, fn];
     }));
+    attachDetectionApi(ctx.api, instance.exports);
     ctx.memory = instance.exports.memory; assert.equal(ctx.api.open(3, ctx.low, ctx.high), 0);
     ctx.base = ctx.api.arena_ptr() >>> 0; ctx.dataAddress = 0x3000; ctx.codeAddress = PC; check(ctx, 'independently initialized arena');
     for (const [address, permissions, bytes] of [[ctx.dataAddress, 3, pattern], [PC, 7, banks[bank].bytes]]) {
