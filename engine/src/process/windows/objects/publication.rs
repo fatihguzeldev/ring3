@@ -1,6 +1,6 @@
 use super::{
-    GuestComError32, GuestComObjects32, InterfaceLayout32, ObjectAllocation32, Vtable32,
-    allocation::validate_layouts,
+    GuestComCreation32, GuestComError32, GuestComObjects32, InterfaceLayout32, ObjectAllocation32,
+    Vtable32, allocation::validate_layouts,
 };
 use crate::{
     memory::{
@@ -24,7 +24,7 @@ impl GuestComObjects32 {
         payload: u64,
         layouts: &[InterfaceLayout32<'_>],
     ) -> Result<ComIdentity32, GuestComError32> {
-        self.create_publication(memory, payload, layouts, None, &[])
+        self.create_with_lifetime(memory, payload, layouts, GuestComCreation32::default())
     }
 
     pub(crate) fn create_with_output(
@@ -47,18 +47,35 @@ impl GuestComObjects32 {
         iid: InterfaceId,
         words: &[WordWrite32],
     ) -> Result<ComIdentity32, GuestComError32> {
-        self.create_publication(memory, payload, layouts, Some((output, iid)), words)
+        self.create_with_lifetime(
+            memory,
+            payload,
+            layouts,
+            GuestComCreation32 {
+                output: Some((output, iid)),
+                writes: words,
+                ..GuestComCreation32::default()
+            },
+        )
     }
 
-    fn create_publication(
+    pub(crate) fn create_with_lifetime(
         &mut self,
         memory: &mut AddressSpace,
         payload: u64,
         layouts: &[InterfaceLayout32<'_>],
-        output: Option<(GuestAddress, InterfaceId)>,
-        words: &[WordWrite32],
+        publication: GuestComCreation32<'_>,
     ) -> Result<ComIdentity32, GuestComError32> {
+        let GuestComCreation32 {
+            output,
+            writes: words,
+            initial,
+            retain,
+        } = publication;
         validate_layouts(layouts)?;
+        for &pointer in retain {
+            self.preflight(memory, pointer)?;
+        }
         if let Some((_, iid)) = output
             && iid != IID_IUNKNOWN
             && !layouts.iter().any(|layout| layout.iid == iid)
@@ -169,7 +186,9 @@ impl GuestComObjects32 {
             });
         }
         publication_words.sort_unstable_by_key(|word| word.address.0);
-        let prepared = self.registry.prepare_registration(payload, &bindings)?;
+        let prepared = self
+            .registry
+            .prepare_registration_with_lifetime(payload, &bindings, initial, retain)?;
         memory.install_pages_with_word_writes(&initialized, &publication_words)?;
         let mapping_version = memory.transaction_version();
         let identity = prepared.publish();

@@ -13,6 +13,27 @@ pub(crate) struct InterfaceLayout32<'a> {
     pub methods: &'a [GuestAddress],
 }
 
+pub(crate) struct GuestComCreation32<'a> {
+    pub output: Option<(GuestAddress, InterfaceId)>,
+    pub writes: &'a [crate::memory::WordWrite32],
+    pub initial: crate::windows::com::ReferenceState32,
+    pub retain: &'a [GuestAddress],
+}
+
+impl Default for GuestComCreation32<'_> {
+    fn default() -> Self {
+        Self {
+            output: None,
+            writes: &[],
+            initial: crate::windows::com::ReferenceState32 {
+                references: 1,
+                holds: 0,
+            },
+            retain: &[],
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum GuestComError32 {
     InvalidLimits,

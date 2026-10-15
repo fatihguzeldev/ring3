@@ -53,6 +53,23 @@ impl PreparedReferenceChanges32<'_> {
 }
 
 impl ComRegistry32 {
+    pub(super) fn creation_retains(
+        &self,
+        retain: &[GuestAddress],
+    ) -> Result<Vec<(usize, u32)>, ComError32> {
+        let plan = self.reference_plan(retain, &[], &[], &[], false)?;
+        let mut retained = Vec::new();
+        retained
+            .try_reserve_exact(plan.changes.len())
+            .map_err(|_| ComError32::Allocation)?;
+        retained.extend(
+            plan.changes
+                .into_iter()
+                .map(|change| (change.slot, change.references as u32)),
+        );
+        Ok(retained)
+    }
+
     pub(crate) fn prepare_reference_changes(
         &mut self,
         retain: &[GuestAddress],

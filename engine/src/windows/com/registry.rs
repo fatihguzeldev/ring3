@@ -25,6 +25,7 @@ pub(crate) struct PreparedRegistration32<'a> {
     slot: usize,
     interfaces: usize,
     next_id: u64,
+    retained: Vec<(usize, u32)>,
 }
 
 impl PreparedRegistration32<'_> {
@@ -35,8 +36,12 @@ impl PreparedRegistration32<'_> {
             slot,
             interfaces,
             next_id,
+            retained,
         } = self;
         let identity = object.identity;
+        for (slot, references) in retained {
+            registry.objects[slot].as_mut().unwrap().references = references;
+        }
         let mut previous = None;
         for binding in &object.interfaces {
             if previous != Some(binding.address) {
@@ -113,6 +118,28 @@ impl ComRegistry32 {
         payload: u64,
         bindings: &[InterfaceBinding32],
     ) -> Result<PreparedRegistration32<'_>, ComError32> {
+        self.prepare_registration_with_lifetime(
+            payload,
+            bindings,
+            ReferenceState32 {
+                references: 1,
+                holds: 0,
+            },
+            &[],
+        )
+    }
+
+    pub(crate) fn prepare_registration_with_lifetime(
+        &mut self,
+        payload: u64,
+        bindings: &[InterfaceBinding32],
+        initial: ReferenceState32,
+        retain: &[GuestAddress],
+    ) -> Result<PreparedRegistration32<'_>, ComError32> {
+        if initial.references == 0 && initial.holds == 0 {
+            return Err(ComError32::InvalidBinding);
+        }
+        let retained = self.creation_retains(retain)?;
         if bindings.is_empty() || bindings.len() > 64 {
             return Err(ComError32::InvalidBinding);
         }
@@ -165,8 +192,8 @@ impl ComRegistry32 {
                 payload,
             },
             interfaces: owned.into_boxed_slice(),
-            references: 1,
-            holds: 0,
+            references: initial.references,
+            holds: initial.holds,
         };
         Ok(PreparedRegistration32 {
             registry: self,
@@ -174,6 +201,7 @@ impl ComRegistry32 {
             slot,
             interfaces,
             next_id,
+            retained,
         })
     }
 

@@ -284,3 +284,61 @@ fn output_words_and_reference_edges_publish_together_or_remain_neutral() {
     memory.read(GuestAddress(0x8000), &mut output).unwrap();
     assert_eq!(output, [0; 4]);
 }
+
+#[test]
+fn initial_holds_and_parent_references_publish_atomically_with_new_identity() {
+    let mut memory = AddressSpace::new(6).unwrap();
+    memory
+        .map_zeroed(
+            PageRange::new(GuestAddress(0x8000), 1).unwrap(),
+            Permissions::READ_WRITE,
+        )
+        .unwrap();
+    let mut objects = owner();
+    let parent = objects.create(&mut memory, 1, &[layout(IA)]).unwrap();
+    let initial = ReferenceState32 {
+        references: 1,
+        holds: 1,
+    };
+    let before = memory.transaction_version();
+    let publication = super::super::GuestComCreation32 {
+        output: Some((GuestAddress(0x9000), IA)),
+        initial,
+        retain: &[parent.identity_pointer],
+        writes: &[],
+    };
+    assert!(
+        objects
+            .create_with_lifetime(&mut memory, 2, &[layout(IA)], publication)
+            .is_err()
+    );
+    assert_eq!(objects.references(parent.identity_pointer), Ok(1));
+    assert_eq!(objects.live_objects(), 1);
+    assert_eq!(memory.transaction_version(), before);
+    let publication = super::super::GuestComCreation32 {
+        output: Some((GuestAddress(0x8000), IA)),
+        initial,
+        retain: &[parent.identity_pointer],
+        writes: &[],
+    };
+    let child = objects
+        .create_with_lifetime(&mut memory, 2, &[layout(IA)], publication)
+        .unwrap();
+    assert_eq!(objects.references(parent.identity_pointer), Ok(2));
+    assert_eq!(objects.state(child.identity_pointer), Ok(initial));
+    assert_eq!(memory.transaction_version(), before + 1);
+    assert_eq!(
+        objects
+            .release(&mut memory, child.identity_pointer)
+            .unwrap()
+            .remaining,
+        0
+    );
+    assert_eq!(
+        objects.state(child.identity_pointer),
+        Ok(ReferenceState32 {
+            references: 0,
+            holds: 1
+        })
+    );
+}
