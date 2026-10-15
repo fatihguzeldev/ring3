@@ -1,3 +1,5 @@
+import {pageFaultExit, pageFaultPacket} from '../../../../../../../support/wasm/page-fault.mjs';
+import {detectionGuardName, generatedImports, attachDetectionApi} from '../../../../../../../support/wasm/binding.mjs';
 import {ARENA_SIZE} from '../../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
@@ -16,7 +18,7 @@ const sourcePaths = ['engine/src/memory/space.rs', 'engine/src/memory/space/atom
   'engine/src/cpu/dbt/wasm/memory.rs', 'engine/src/cpu/dbt/wasm/memory/exchange.rs', 'engine/src/cpu/dbt/wasm/memory/byte_exchange.rs', 'engine/src/cpu/dbt/wasm/locals.rs',
   'engine/tests/process/memory/compare_exchange/native/byte.rs', 'engine/tests/process/memory/native.rs', 'engine/tests/cpu/atomic/compare_exchange/locked/native/byte.rs', 'engine/tests/cpu/atomic/native.rs', 'engine/tests/support/cpu/prefix/admission.rs', 'engine/tests/cpu/atomic/compare_exchange/locked/wasm/byte.rs', 'engine/tests/cpu/atomic/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/atomic/compare_exchange/locked/compiler/native/byte.rs', ...['runtime/run.mjs', 'kernel.c', 'build.py', 'kernel.obj', 'kernel.text.bin', 'kernel.disasm.txt', 'receipt.json', 'PROVENANCE.md']
     .map(p => 'engine/tests/cpu/atomic/compare_exchange/locked/fixtures/p2-locked-cmpxchg8/' + p),
-  'engine/tests/programs/records/fixtures/p2-compiled-records/build.py', 'engine/tests/support/wasm/engine.mjs'];
+  'engine/tests/programs/records/fixtures/p2-compiled-records/build.py', 'engine/tests/support/wasm/engine.mjs', 'engine/tests/support/wasm/binding.mjs', 'engine/tests/support/wasm/page-fault.mjs'];
 sourcePaths.push('engine/src/abi/memory_helper/cpu.rs','engine/src/cpu/dbt/wasm/memory/cpu_scalar.rs','engine/src/cpu/dbt/wasm/emitter.rs','engine/src/process/memory/cpu_scalar.rs','engine/src/process/memory/scalar/cpu_write.rs','engine/src/process/wasm/memory/cpu_write.rs','engine/src/abi/wasm/exports/memory/cpu_write.rs','engine/src/memory/space/cpu/atomic.rs');
 const sourceHashes = () => Object.fromEntries(sourcePaths.map(p => [p, hash(readFileSync(join(root, p)))]));
 const sourcesBefore = sourceHashes(), contexts = [], modules = [], observations = [], helperTrace = [], diagnostics = [], controls = [];
@@ -29,9 +31,23 @@ function record(magic, version, size, fields) {
   fields.forEach((v, i) => b.writeUInt32LE(v >>> 0, 16 + i * 4)); return b;
 }
 const state = s => record('R3ST', 1, 56, [...s.registers, s.pc, s.flags]);
-const exit = (reason, retired, {detail = 0, address = 0, access = 0} = {}, version = 2) => record('R3EX', version, 40, [reason, retired, detail, address, access, access ? 1 : 0]);
+const legacyExit = (reason, retired, {detail = 0, address = 0, access = 0} = {}, version = 2) => record('R3EX', version, 40, [reason, retired, detail, address, access, access ? 1 : 0]);
+const exit = (reason, retired, { detail = 0, address = 0, access = 0 } = {}, version = 2) =>
+  reason === 5
+    ? pageFaultExit({
+        retired,
+        errorCode: 6 | (detail === 2 ? 1 : 0),
+        address,
+        access: 2,
+        length: access ? 1 : 0
+      })
+    : record('R3EX', version, 40, [reason, retired, detail, address, access, access ? 1 : 0]);
 const initialHelper = (value = 0, {detail = 0, address = 0, access = 0} = {}) => record('R3MH', 5, 40, [access ? 1 : 0, value, detail, address, access, 1]);
-const helper = (value = 0, {detail = 0, address = 0, access = 0} = {}) => record('R3MH', 10, 40, [access ? 1 : 0, value, detail, address, access, 1]);
+const legacyHelper = (value = 0, {detail = 0, address = 0, access = 0} = {}) => record('R3MH', 10, 40, [access ? 1 : 0, value, detail, address, access, 1]);
+const helper = (value = 0, { detail = 0, address = 0, access = 0 } = {}) =>
+  Boolean(access) && (detail === 1 || detail === 2)
+    ? pageFaultPacket({ errorCode: 6 | (detail === 2 ? 1 : 0), address, access: 2, length: 1 })
+    : record('R3MH', 10, 40, [access ? 1 : 0, value, detail, address, access, 1]);
 const helper32 = value => record('R3MH', 1, 40, [0, value, 0, 0, 0, 0]);
 const cpuHelper32 = value => record('R3MH', 10, 40, [0, value, 0, 0, 0, 4]);
 const helper8 = value => record('R3MH', 2, 40, [0, value, 0, 0, 0, 1]);
@@ -100,7 +116,7 @@ for (const [a,b,flags] of [[0,0,0x46],[0,1,0x97],[0x80,1,0x812],[0x7f,0xff,0x883
 const arena = c => Buffer.from(new Uint8Array(c.memory.buffer, c.base, SIZE));
 const cpu = c => {const b = arena(c); return {registers: Array.from({length: 8}, (_, i) => b.readUInt32LE(16 + 4 * i)), pc: b.readUInt32LE(48), flags: b.readUInt32LE(52)};};
 function input(c, offset, bytes) {const expected = arena(c); expected.set(bytes, offset); new Uint8Array(c.memory.buffer).set(bytes, c.base + offset); assert.deepEqual(arena(c), expected);}
-function host(c, name, args, span) {const expected = arena(c); assert.equal(c.api[name](...args), 0, name); if (span) expected.set(arena(c).subarray(...span), span[0]); assert.deepEqual(arena(c), expected, 'host full4612 ' + name);}
+function host(c, name, args, span) {const expected = arena(c); assert.equal(c.api[name](...args), 0, name); if (span) expected.set(arena(c).subarray(...span), span[0]); assert.deepEqual(arena(c), expected, 'host complete arena ' + name);}
 function map(c, page, permission = 3) {host(c, 'map', [page, 1, permission]); c.pages.add(page); c.maxPages = Math.max(c.maxPages, c.pages.size); assert.ok(c.maxPages <= 12);}
 function protect(c, page, permission) {host(c, 'protect', [page, 1, permission]);}
 function unmap(c, page) {host(c, 'unmap', [page, 1]); c.pages.delete(page);}
@@ -113,6 +129,7 @@ const arities = {open: 3, close: 0, arena_ptr: 0, map: 3, protect: 3, unmap: 2, 
 function open(owner, entries, purpose) {
   const instance = new WebAssembly.Instance(engine.module, {}), c = {id: ++counts.contexts, owner, entries, purpose, memory: instance.exports.memory, api: {}, high: 0x4341534c, captures: 0, pages: new Set(), maxPages: 0};
   for (const [name, arity] of Object.entries(arities)) {c.api[name] = instance.exports['ring3_abi_v1_' + name]; assert.equal(c.api[name]?.length, arity, name);}
+ attachDetectionApi(c.api, instance.exports);
   for (const name of ['read32', 'read8', 'store8', 'store_resident8', 'store32', 'store_resident32', 'compare_exchange8', 'compare_exchange_resident8']) {c.api['cpu_'+name] = instance.exports['ring3_abi_v1_cpu_'+name]; assert.equal(c.api['cpu_'+name]?.length, arities[name], 'cpu_'+name);}
   assert.equal(c.api.open(12, c.id, c.high), 0); c.base = c.api.arena_ptr() >>> 0; input(c, 0, initial);
   for (const [page, permission] of [[0, 3], [0x1000, 7], [0x2000, 7], [0x3000, 7], [0x5000, 3], [0x6000, 3], [0x7000, 3], [0xfffff000, 3]]) map(c, page, permission);
@@ -128,9 +145,9 @@ function compile(c, name, blocks, helpers = ['compare']) {
   const method = c.owner === 'resident' ? (c.entries ? 'compile_resident_entries' : 'compile_resident') : (c.entries ? 'compile_entries' : 'compile');
   host(c, method, c.entries ? [blocks.length, 0] : [blocks.length], c.owner === 'resident' ? [140, 164] : null);
   const b = arena(c), binding = c.owner === 'resident' ? {low: b.readUInt32LE(148), high: b.readUInt32LE(152), pointer: b.readUInt32LE(156), length: b.readUInt32LE(160)} : {generation: c.api.generation(), pointer: c.api.module_ptr() >>> 0, length: c.api.module_len() >>> 0};
-  const bytes = Buffer.from(new Uint8Array(c.memory.buffer, binding.pointer, binding.length)), module = new WebAssembly.Module(bytes), guard = c.owner === 'resident' ? 'guard_resident' : 'guard';
+  const bytes = Buffer.from(new Uint8Array(c.memory.buffer, binding.pointer, binding.length)), module = new WebAssembly.Module(bytes), guard = detectionGuardName(c.owner === 'resident');
   const names = helpers.map(n => n === 'compare' ? (c.owner === 'resident' ? 'compare_exchange_resident8' : 'compare_exchange8') : n === 'store' ? (c.owner === 'resident' ? 'store_resident32' : 'store32') : n === 'store8' ? (c.owner === 'resident' ? 'store_resident8' : 'store8') : n).map(n => 'cpu_'+n);
-  const imports = [{module: 'env', name: 'memory', kind: 'memory'}, ...[guard, ...names].map(name => ({module: 'ring3', name, kind: 'function'}))];
+  const imports = [{module: 'env', name: 'memory', kind: 'memory'}, ...generatedImports({resident: c.owner === 'resident', helpers: [...names]}).slice(1).map(item => item.name).map(name => ({module: 'ring3', name, kind: 'function'}))];
   assert.ok(bytes.length <= 65536); assert.deepEqual(WebAssembly.Module.imports(module), imports); assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
   const ring3 = {...c.api};
   for (const name of names) ring3[name] = (...args) => {
@@ -149,10 +166,10 @@ function compile(c, name, blocks, helpers = ['compare']) {
 }
 function run(c, unit, budget, next, label, {status = 0, reason = 1, retired = 1, packet, fault = {}, synthetic = false} = {}) {
   const before = arena(c), expected = Buffer.from(before), at = helperTrace.length;
-  if (status === 0) {expected.set(state(next)); expected.set(exit(reason, retired, fault, unit.exitVersion), 56); if (packet) expected.set(packet, 100);}
-  const observed = unit.run(c.base, c.base + 56, budget, c.base + 96); assert.equal(observed, status, label); assert.deepEqual(arena(c), expected, 'full4612 ' + label);
+  if (status === 0) {expected.set(state(next)); expected.set((synthetic ? legacyExit : exit)(reason, retired, fault, unit.exitVersion), 56); if (packet) expected.set(packet, 100);}
+  const observed = unit.run(c.base, c.base + 56, budget, c.base + 96); assert.equal(observed, status, label); assert.deepEqual(arena(c), expected, 'complete arena ' + label);
   const after = arena(c); observations.push({context: c.id, module: unit.name, label, budget, synthetic, expected_status: status, observed_status: observed,
-    expected_reason: status ? null : reason, observed_reason: status ? null : after.readUInt32LE(72), expected_retired: status ? null : retired, observed_retired: status ? null : after.readUInt32LE(76),
+    model_reason: reason, expected_reason: status ? null : reason === 5 && !synthetic ? 23 : reason, observed_reason: status ? null : after.readUInt32LE(72), expected_retired: status ? null : retired, observed_retired: status ? null : after.readUInt32LE(76),
     expected_pc: status ? null : next.pc, observed_pc: status ? null : after.readUInt32LE(48), expected_flags: status ? null : next.flags, observed_flags: status ? null : after.readUInt32LE(52),
     expected_cpu: status ? null : next, observed_cpu: status ? null : cpu(c), helper_calls: helperTrace.length - at, helper_hex: after.subarray(100, 140).toString('hex')});
   counts.runs++; if (!status) counts.retired += retired;
@@ -217,13 +234,13 @@ function core(owner, entries) {
   input(c, 96, word(0)); let start = seed(c, 0x1900, 0x402);
   run(c, b, 2, start, 'cold-pc', {reason: 3, retired: 0}); controls.push({context: c.id, kind: 'cold-pc'});
   const faultCases = [
-    {name:'unmapped', address:0x9010, page:0x9000, permission:null, access:1, detail:1},
-    {name:'none', address:0x9010, page:0x9000, permission:0, access:1, detail:2},
-    {name:'write-only', address:0x9010, page:0x9000, permission:2, access:1, detail:2},
-    {name:'execute-only', address:0x9010, page:0x9000, permission:4, access:1, detail:2},
+    {name:'unmapped', address:0x9010, page:0x9000, permission:null, access: 2, detail:1},
+    {name:'none', address:0x9010, page:0x9000, permission:0, access: 2, detail:2},
+    {name:'write-only', address:0x9010, page:0x9000, permission:2, access: 2, detail:2},
+    {name:'execute-only', address:0x9010, page:0x9000, permission:4, access: 2, detail:2},
     {name:'match-read-only', address:0x9010, page:0x9000, permission:1, access:2, detail:2},
     {name:'mismatch-read-execute', address:0x9010, page:0x9000, permission:5, access:2, detail:2, mismatch:true},
-    {name:'top-read-denied', address:0xffffffff, page:0xfffff000, permission:2, access:1, detail:2},
+    {name:'top-read-denied', address:0xffffffff, page:0xfffff000, permission:2, access: 2, detail:2},
     {name:'top-mismatch-write-denied', address:0xffffffff, page:0xfffff000, permission:1, access:2, detail:2, mismatch:true},
   ];
   for (const item of faultCases) {
@@ -232,8 +249,8 @@ function core(owner, entries) {
     if (item.permission === null) unmap(c, item.page); else protect(c, item.page, item.permission);
     const registers = parents(); setSource(registers, 0, item.mismatch ? 0x34 : 0xa7); setSource(registers, 1, 0xd3); registers[6] = item.address;
     const fault = {detail:item.detail,address:item.address,access:item.access};
-    stopped(c,b,registers,0xcd7,fault,item.name); if (item.access === 2) checkRam(c,f.address,f.bytes);
-    stopped(c,b,registers,0xcd7,fault,item.name+'-unchanged',false); if (item.access === 2) checkRam(c,f.address,f.bytes);
+    stopped(c,b,registers,0xcd7,fault,item.name); if (item.permission === 1) checkRam(c,f.address,f.bytes);
+    stopped(c,b,registers,0xcd7,fault,item.name+'-unchanged',false); if (item.permission === 1) checkRam(c,f.address,f.bytes);
     if (item.permission === null) {map(c,item.page); f={...f,bytes:Buffer.alloc(32)};} else protect(c,item.page,3);
     checkRam(c,f.address,f.bytes);
     const s=cpu(c), old=f.bytes[item.address-f.address], value=byteOf(s.registers[0],0)===old?byteOf(s.registers[1],1):old;
@@ -261,24 +278,24 @@ function synthetic(c, unit) {
   const replies = [
     {name: 'magic', edit: b => b.write('BAD!')}, {name: 'legacy-reply-version', edit: b => b.writeUInt16LE(5, 4)},
     {name: 'size', edit: b => b.writeUInt32LE(36, 8)}, {name: 'reserved', edit: b => b.writeUInt32LE(1, 12)},
-    {name: 'success-fault-field', edit: b => b.writeUInt32LE(2, 24)}, {name: 'old-value-too-wide', packet: helper(0x100)},
+    {name: 'success-fault-field', edit: b => b.writeUInt32LE(2, 24)}, {name: 'old-value-too-wide', packet: legacyHelper(0x100)},
     {name: 'success-length-zero', edit: b => b.writeUInt32LE(0, 36)}, {name: 'success-length-dword', edit: b => b.writeUInt32LE(4, 36)},
-    {name: 'fault-value', packet: helper(1, {detail: 2, address: DATA, access: 1})},
-    {name: 'write-unmapped', packet: helper(0, {detail: 1, address: DATA, access: 2})},
-    {name: 'read-overflow', address: 0xffffffff, packet: helper(0, {detail: 3, address: 0xffffffff, access: 1})},
-    {name: 'write-overflow', address: 0xffffffff, packet: helper(0, {detail: 3, address: 0xffffffff, access: 2})},
-    {name: 'invalidated-fault', status: 11, packet: helper(0, {detail: 2, address: DATA, access: 1})},
-    {name: 'fault-outside-byte', packet: helper(0, {detail: 2, address: DATA + 1, access: 1})},
-    {name: 'fault-width', packet: helper(0, {detail: 2, address: DATA, access: 1}), edit: b => b.writeUInt32LE(2, 36)},
-    {name: 'fault-access', packet: helper(0, {detail: 2, address: DATA, access: 3})},
-    {name: 'fault-reason', packet: helper(0, {detail: 4, address: DATA, access: 1})},
+    {name: 'fault-value', packet: legacyHelper(1, {detail: 2, address: DATA, access: 1})},
+    {name: 'write-unmapped', packet: legacyHelper(0, {detail: 1, address: DATA, access: 2})},
+    {name: 'read-overflow', address: 0xffffffff, packet: legacyHelper(0, {detail: 3, address: 0xffffffff, access: 1})},
+    {name: 'write-overflow', address: 0xffffffff, packet: legacyHelper(0, {detail: 3, address: 0xffffffff, access: 2})},
+    {name: 'invalidated-fault', status: 11, packet: legacyHelper(0, {detail: 2, address: DATA, access: 1})},
+    {name: 'fault-outside-byte', packet: legacyHelper(0, {detail: 2, address: DATA + 1, access: 1})},
+    {name: 'fault-width', packet: legacyHelper(0, {detail: 2, address: DATA, access: 1}), edit: b => b.writeUInt32LE(2, 36)},
+    {name: 'fault-access', packet: legacyHelper(0, {detail: 2, address: DATA, access: 3})},
+    {name: 'fault-reason', packet: legacyHelper(0, {detail: 4, address: DATA, access: 1})},
     {name: 'infrastructure-value', packet: record('R3MH',10,40,[2,1, 1, 0, 0, 1])},
     {name: 'infrastructure-reason', packet: record('R3MH',10,40,[2,0, 3, 0, 0, 1])},
     {name: 'infrastructure-address', packet: record('R3MH',10,40,[2,0, 1, DATA, 0, 1])},
     {name: 'unknown-status', status: 99, detail: 3},
-    {name: 'top-wrapped-fault', address: 0xffffffff, packet: helper(0, {detail: 2, address: 0, access: 1})},
-    {name: 'top-preceding-fault', address: 0xffffffff, packet: helper(0, {detail: 2, address: 0xfffffffe, access: 2})},
-    {name: 'current-v10-top-read-fault', address: 0xffffffff, validFault: {detail: 2, address: 0xffffffff, access: 1}, packet: helper(0, {detail: 2, address: 0xffffffff, access: 1})},
+    {name: 'top-wrapped-fault', address: 0xffffffff, packet: legacyHelper(0, {detail: 2, address: 0, access: 1})},
+    {name: 'top-preceding-fault', address: 0xffffffff, packet: legacyHelper(0, {detail: 2, address: 0xfffffffe, access: 2})},
+    {name: 'current-v10-top-read-fault', address: 0xffffffff, validFault: {detail: 2, address: 0xffffffff, access: 1}, packet: legacyHelper(0, {detail: 2, address: 0xffffffff, access: 1})},
     {name: 'invalidated-infrastructure', status: 11, packet: record('R3MH',10,40,[2,0, 1, 0, 0, 1])},
     {name: 'infrastructure-length', packet: record('R3MH',10,40,[2,0, 1, 0, 0, 4])},
     {name: 'canonical-version-exhaustion', packet: record('R3MH',10,40,[2,0, 1, 0, 0, 1]), detail: 1},
@@ -287,7 +304,7 @@ function synthetic(c, unit) {
   assert.equal(replies.length, 28);
   for (const row of replies) {
     const address = row.address ?? DATA, r = parents(); r[6] = address; r[0] = 0x89abcdef; r[1] = 0x12345678;
-    const f = frame(c, address, 0x11), packet = Buffer.from(row.packet ?? helper(0x11)); row.edit?.(packet);
+    const f = frame(c, address, 0x11), packet = Buffer.from(row.packet ?? legacyHelper(0x11)); row.edit?.(packet);
     let calls = 0; const ring3 = {...unit.ring3}, name = c.owner === 'resident' ? 'compare_exchange_resident8' : 'compare_exchange8';
     ring3['cpu_'+name] = (...args) => {
       assert.deepEqual(args.slice(name.includes('resident') ? 4 : 0).map(v => v >>> 0), [address, 0xef, 0x78]);

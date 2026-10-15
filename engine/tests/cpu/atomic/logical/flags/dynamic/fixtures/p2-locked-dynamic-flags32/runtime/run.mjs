@@ -1,3 +1,5 @@
+import {pageFaultExit, pageFaultPacket} from '../../../../../../../../support/wasm/page-fault.mjs';
+import {generatedImports, attachDetectionApi} from '../../../../../../../../support/wasm/binding.mjs';
 import {ARENA_SIZE} from '../../../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
@@ -15,7 +17,7 @@ const sourcePaths=['engine/src/cpu/x86/decode/profile.rs','engine/src/cpu/x86/de
   'engine/src/cpu/dbt/wasm/memory.rs','engine/src/cpu/dbt/wasm/memory/exchange.rs','engine/src/cpu/dbt/wasm/locals.rs',
   'engine/src/memory/space.rs', 'engine/src/memory/space/atomic.rs','engine/src/process/instance.rs', 'engine/src/process/execution/compiled.rs', 'engine/src/process/execution/authority.rs', 'engine/src/process/memory/address_space.rs', 'engine/src/process/memory/scalar.rs', 'engine/src/process/memory/scalar/tests.rs', 'engine/src/process/execution/mod.rs', 'engine/src/process/memory/mod.rs', 'engine/src/process/mod.rs','engine/src/process/wasm/mod.rs', 'engine/src/process/wasm/loading.rs', 'engine/src/abi/image.rs', 'engine/src/process/wasm/execution.rs', 'engine/src/process/wasm/calls.rs', 'engine/src/process/wasm/memory.rs', 'engine/src/process/wasm/cpu.rs', 'engine/src/process/execution/resident.rs', 'engine/src/abi/memory_helper.rs','engine/src/abi/arena.rs','engine/src/abi/wasm/exports/calls.rs', 'engine/src/abi/wasm/exports/cpu.rs', 'engine/src/abi/wasm/exports/execution.rs', 'engine/src/abi/wasm/exports/image.rs', 'engine/src/abi/wasm/exports/instance.rs', 'engine/src/abi/wasm/exports/memory.rs', 'engine/src/abi/wasm/exports/mod.rs',
   'engine/tests/cpu/atomic/logical/locked/native/register32.rs', 'engine/tests/cpu/atomic/native.rs', 'engine/tests/support/cpu/prefix/admission.rs', 'engine/tests/cpu/atomic/logical/flags/dynamic/native.rs', 'engine/tests/cpu/atomic/logical/flags/dynamic/wasm.rs', 'engine/tests/cpu/atomic/wasm.rs', 'engine/tests/support/wasm.rs', ...['kernel.c','build.py','PROVENANCE.md','kernel.obj','kernel.text.bin','kernel.disasm.txt','receipt.json','runtime/run.mjs'].map(p=>'engine/tests/cpu/atomic/logical/flags/dynamic/fixtures/p2-locked-dynamic-flags32/'+p),
-  'engine/tests/programs/records/fixtures/p2-compiled-records/build.py','engine/tests/support/wasm/engine.mjs'];
+  'engine/tests/programs/records/fixtures/p2-compiled-records/build.py','engine/tests/support/wasm/engine.mjs', 'engine/tests/support/wasm/binding.mjs', 'engine/tests/support/wasm/page-fault.mjs'];
 sourcePaths.push('engine/src/abi/memory_helper/cpu.rs','engine/src/cpu/dbt/wasm/memory/cpu_scalar.rs','engine/src/cpu/dbt/wasm/emitter.rs','engine/src/process/memory/cpu_scalar.rs','engine/src/process/memory/scalar/cpu_write.rs','engine/src/process/wasm/memory/cpu_write.rs','engine/src/abi/wasm/exports/memory/cpu_write.rs','engine/src/memory/space/cpu/atomic.rs');
 const sourceHashes=()=>Object.fromEntries(sourcePaths.map(p=>[p,hash(readFileSync(join(root,p)))]));
 const sourcesBefore=sourceHashes(),contexts=[],modules=[],observations=[],helperTrace=[],diagnostics=[];
@@ -23,9 +25,21 @@ const counts={contexts:0,modules:0,runs:0,retired:0,helper_calls:0,read32:0,stor
 const word=n=>{const b=Buffer.alloc(4);b.writeUInt32LE(n>>>0);return b;},words=v=>Buffer.concat(v.map(word));
 function record(magic,version,size,fields){const b=Buffer.alloc(size);b.write(magic);b.writeUInt16LE(version,4);b.writeUInt16LE(1,6);b.writeUInt32LE(size,8);fields.forEach((v,i)=>b.writeUInt32LE(v>>>0,16+4*i));return b;}
 const state=s=>record('R3ST',1,56,[...s.registers,s.pc,s.flags]);
-const exit=(reason,retired,{detail=0,address=0,access=0}={},version=2)=>record('R3EX',version,40,[reason,retired,detail,address,access,access?4:0]);
+const exit = (reason, retired, { detail = 0, address = 0, access = 0 } = {}, version = 2) =>
+  reason === 5
+    ? pageFaultExit({
+        retired,
+        errorCode: 6 | (detail === 2 ? 1 : 0),
+        address,
+        access: 2,
+        length: access ? 4 : 0
+      })
+    : record('R3EX', version, 40, [reason, retired, detail, address, access, access ? 4 : 0]);
 const initialHelper=(value,{detail=0,address=0,access=0}={})=>record('R3MH',1,40,[access?1:0,value,detail,address,access,access?4:0]);
-const helper=(value,{detail=0,address=0,access=0}={})=>record('R3MH',10,40,[access?1:0,value,detail,address,access,4]);
+const helper = (value, { detail = 0, address = 0, access = 0 } = {}) =>
+  Boolean(access) && (detail === 1 || detail === 2)
+    ? pageFaultPacket({ errorCode: 6 | (detail === 2 ? 1 : 0), address, access: 2, length: 4 })
+    : record('R3MH', 10, 40, [access ? 1 : 0, value, detail, address, access, 4]);
 const parents=()=>Array.from({length:8},(_,i)=>(0xa100+i)*65536+0x1234+i);
 const parity=value=>{let n=value&255,ones=0;while(n){ones+=n&1;n>>>=1;}return ones%2===0?4:0;};
 const logicalFlags=value=>0x402|parity(value)|(value===0?0x40:0)|(value>=0x80000000?0x80:0);
@@ -52,13 +66,14 @@ const arities={open:3,close:0,arena_ptr:0,map:3,protect:3,upload:2,read32:1,stor
 const arena=c=>Buffer.from(new Uint8Array(c.memory.buffer,c.base,SIZE));
 const cpu=c=>{const a=arena(c);return{registers:Array.from({length:8},(_,i)=>a.readUInt32LE(16+4*i)),pc:a.readUInt32LE(48),flags:a.readUInt32LE(52)};};
 function input(c,offset,bytes){const expected=arena(c);expected.set(bytes,offset);new Uint8Array(c.memory.buffer).set(bytes,c.base+offset);assert.deepEqual(arena(c),expected);}
-function host(c,name,args,span){const expected=arena(c);assert.equal(c.api[name](...args),0,name);if(span)expected.set(arena(c).subarray(...span),span[0]);assert.deepEqual(arena(c),expected,'host full4612 '+name);}
+function host(c,name,args,span){const expected=arena(c);assert.equal(c.api[name](...args),0,name);if(span)expected.set(arena(c).subarray(...span),span[0]);assert.deepEqual(arena(c),expected,'host complete arena '+name);}
 function upload(c,address,bytes){input(c,140,bytes);host(c,'upload',[address,bytes.length]);}
 function seed(c,pc,registers){const s={registers:[...registers],pc,flags:0xcd7};input(c,0,Buffer.concat([state(s),exit(1,0),word(0),initialHelper(0xad)]));return s;}
 function name(c,kind){if(kind==='read32')return 'cpu_read32';if(kind==='store32')return c.owner==='resident'?'cpu_store_resident32':'cpu_store32';return 'cpu_atomic_'+kind+(c.owner==='resident'?'_resident_u32':'_u32');}
 function open(owner,entries){
   const instance=new WebAssembly.Instance(engine.module,{}),c={id:++counts.contexts,owner,entries,memory:instance.exports.memory,api:{},high:0x44594e41,captures:0};
   for(const[n,arity]of Object.entries(arities)){c.api[n]=instance.exports['ring3_abi_v1_'+n];assert.equal(c.api[n]?.length,arity,n);}
+ attachDetectionApi(c.api, instance.exports);
   for (const name of ['read32', 'store32', 'store_resident32', 'atomic_or_u32', 'atomic_or_resident_u32', 'atomic_and_u32', 'atomic_and_resident_u32', 'atomic_xor_u32', 'atomic_xor_resident_u32']) {c.api['cpu_'+name] = instance.exports['ring3_abi_v1_cpu_'+name]; assert.equal(c.api['cpu_'+name]?.length, arities[name], 'cpu_'+name);}
   assert.equal(c.api.open(12,c.id,c.high),0);c.base=c.api.arena_ptr()>>>0;input(c,0,initial);
   for(const[page,permission]of[[0x1000,7],[0x2000,7],[0x3000,7],[0x5000,3],[0x7000,3],[0xc000,7]])host(c,'map',[page,1,permission]);
@@ -73,7 +88,7 @@ function compile(c,title,blocks,kinds){
   host(c,method,c.entries?[blocks.length,0]:[blocks.length],c.owner==='resident'?[140,164]:null);
   const a=arena(c),binding=c.owner==='resident'?{low:a.readUInt32LE(148),high:a.readUInt32LE(152),pointer:a.readUInt32LE(156),length:a.readUInt32LE(160)}:{generation:c.api.generation(),pointer:c.api.module_ptr()>>>0,length:c.api.module_len()>>>0};
   if(c.owner==='resident'){assert.equal(a.readUInt32LE(140),1);assert.equal(a.readUInt32LE(144),24);assert.ok(binding.low||binding.high);}
-  const bytes=Buffer.from(new Uint8Array(c.memory.buffer,binding.pointer,binding.length)),module=new WebAssembly.Module(bytes),names=[c.owner==='resident'?'guard_resident':'guard',...kinds.map(k=>name(c,k))];
+  const bytes=Buffer.from(new Uint8Array(c.memory.buffer,binding.pointer,binding.length)),module=new WebAssembly.Module(bytes),names=generatedImports({resident: c.owner==='resident', helpers: [...kinds.map(k=>name(c,k))]}).slice(1).map(item => item.name);
   const imports=[{module:'env',name:'memory',kind:'memory'},...names.map(n=>({module:'ring3',name:n,kind:'function'}))];
   assert.ok(bytes.length<=65536);assert.deepEqual(WebAssembly.Module.imports(module),imports);assert.deepEqual(WebAssembly.Module.exports(module),[{name:'run',kind:'function'}]);
   const ring3={...c.api};for(const kind of kinds){const n=name(c,kind);ring3[n]=(...args)=>{const before=arena(c),status=c.api[n](...args),after=arena(c);before.set(after.subarray(100,140),100);assert.deepEqual(after,before,'canonical helper40B only');
@@ -85,10 +100,10 @@ function compile(c,title,blocks,kinds){
 function run(c,unit,budget,s,label,{status=0,reason=1,retired=budget,packet,fault={}}={}){
   const expected=arena(c),at=helperTrace.length;
   if(status===0){expected.set(state(s));expected.set(exit(reason,retired,fault,unit.exitVersion),56);if(packet)expected.set(packet,100);}
-  const observed=unit.run(c.base,c.base+56,budget,c.base+96);assert.equal(observed,status,label);assert.deepEqual(arena(c),expected,'full4612 '+label);const a=arena(c);
+  const observed=unit.run(c.base,c.base+56,budget,c.base+96);assert.equal(observed,status,label);assert.deepEqual(arena(c),expected,'complete arena '+label);const a=arena(c);
   observations.push({context:c.id,module:unit.name,label,budget,observed_status:observed,observed_reason:status?null:a.readUInt32LE(72),observed_retired:status?null:a.readUInt32LE(76),observed_cpu:cpu(c),helper_calls:helperTrace.length-at,helper_hex:a.subarray(100,140).toString('hex')});counts.runs++;if(!status)counts.retired+=retired;
 }
-function checkRam(c,address,expected){for(let i=0;i<expected.length;i+=4){const a=arena(c),value=expected.readUInt32LE(i);assert.equal(c.api.read32(address+i),0);a.set(initialHelper(value),100);assert.deepEqual(arena(c),a,'diagnostic full4612');diagnostics.push({context:c.id,address:address+i,value});}}
+function checkRam(c,address,expected){for(let i=0;i<expected.length;i+=4){const a=arena(c),value=expected.readUInt32LE(i);assert.equal(c.api.read32(address+i),0);a.set(initialHelper(value),100);assert.deepEqual(arena(c),a,'diagnostic complete arena');diagnostics.push({context:c.id,address:address+i,value});}}
 function next(s,pc,flags=s.flags,updates={}){const n={registers:[...s.registers],pc,flags};for(const[r,v]of Object.entries(updates))n.registers[Number(r)]=v>>>0;return n;}
 function probeProof(c,unit){for(const p of probes){const registers=parents();for(const[r,v]of Object.entries(p.set))registers[Number(r)]=v;const start=p.address-12,frame=Buffer.from(Array.from({length:32},(_,i)=>(i*17+23)&255));frame.writeUInt32LE(p.old,12);upload(c,start,frame);
   const s=seed(c,p.pc,registers);run(c,unit,1,next(s,p.pc+p.bytes.length,p.flags),`register-source-${p.kind}`,{packet:helper(p.old)});counts.probes++;frame.writeUInt32LE(p.value,12);checkRam(c,start,frame);
@@ -158,6 +173,6 @@ assert.deepEqual(counts,{contexts:4,modules:16,runs:68,retired:212,helper_calls:
 const result={engine:{path:enginePath,sha256:engine.sha256,bytes:engine.bytes.length},source_pins:sourcesBefore,initial_arena_sha256:hash(initial),counts,contexts,modules,observations,helper_trace:helperTrace,public_diagnostics:diagnostics,
   compiler:{text_hex:kernel.toString('hex'),text_sha256:hash(kernel),calls:8,combined_blocks:4,combined_instructions:31},
   limits:{blocks:8,instructions:64,module_bytes:65536,captures_per_context:6,mapped_pages:12},
-  verification_ceiling:'per-run full4612 asserted;4final plus16compiler milestone arenas persisted;selected32Bprobe/fault frames,64Bcompiler data,32Bstack and12B SMCcode only,no wholeRAM;one named fault/protect-onlyretry and changedSMC/footer risk added,priorcanonicalfault/MAX/malformed proof reused',
+  verification_ceiling:'per-run complete arena asserted;4final plus16compiler milestone arenas persisted;selected32Bprobe/fault frames,64Bcompiler data,32Bstack and12B SMCcode only,no wholeRAM;one named fault/protect-onlyretry and changedSMC/footer risk added,priorcanonicalfault/MAX/malformed proof reused',
   claim:'finite private flat32 synchronous unshared whole original38B C11consumer plus exact singleF0 09/21/31 DWORDmemory fullregistersources;no hardwareLOCK,C11concurrency,sharedordering,performance or generalcoverage claim'};
 assert.deepEqual(Object.keys(result.engine),['path','sha256','bytes']);writeFileSync(join(output,'result.json'),JSON.stringify(result,null,2)+'\n',{flag:'wx'});console.log(JSON.stringify({output,counts,result:join(output,'result.json')}));
