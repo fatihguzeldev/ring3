@@ -26,3 +26,7 @@ pub use windows::callbacks::{
 };
 pub use windows::calls::{WindowsGateInfo32, windows_gate_info};
 pub use windows::d3d8::{D3D8Config32, D3D8DeviceInfo32, D3D8Error32};
+pub use windows::dinput::{DirectInputConfig32, DirectInputError32};
+pub use windows::dsound::{DSoundConfig32, DSoundError32};
+pub use windows::synchronization::WindowsWait32;
+pub use windows::user32::User32CursorRequest32;

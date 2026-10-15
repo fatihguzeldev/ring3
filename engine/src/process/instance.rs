@@ -30,6 +30,9 @@ pub enum HostError {
     Media(crate::process::media::MediaError),
     User32(crate::windows::user32::User32Error32),
     D3D8(crate::process::windows::d3d8::D3D8Error32),
+    Synchronization(crate::windows::synchronization::SynchronizationError32),
+    DSound(crate::process::windows::dsound::DSoundError32),
+    DirectInput(crate::process::windows::dinput::DirectInputError32),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -76,8 +79,13 @@ pub struct EngineInstance {
     pub(in crate::process) virtual_allocations: Vec<PageRange>,
     pub(in crate::process) media: Option<crate::process::media::MediaContexts>,
     pub(in crate::process) media_epoch: u64,
+    pub(in crate::process) windows_input_delivery_error: Option<HostError>,
     pub(in crate::process) d3d8: Option<crate::process::windows::d3d8::D3D8Runtime32>,
     pub(in crate::process) d3d8_reply: Option<crate::process::windows::d3d8::D3D8Reply32>,
+    pub(in crate::process) synchronization:
+        Option<crate::process::windows::synchronization::SynchronizationRuntime32>,
+    pub(in crate::process) dsound: Option<crate::process::windows::dsound::DSoundRuntime32>,
+    pub(in crate::process) dinput: Option<crate::process::windows::dinput::DirectInputRuntime32>,
 }
 
 impl EngineInstance {
@@ -127,8 +135,12 @@ impl EngineInstance {
             virtual_allocations: Vec::new(),
             media: None,
             media_epoch: 0,
+            windows_input_delivery_error: None,
             d3d8: None,
             d3d8_reply: None,
+            synchronization: None,
+            dsound: None,
+            dinput: None,
         })
     }
 
@@ -156,8 +168,12 @@ impl EngineInstance {
     pub fn close(&mut self) {
         self.d3d8 = None;
         self.d3d8_reply = None;
+        self.synchronization = None;
+        self.dsound = None;
+        self.dinput = None;
         self.numerical_workspace = Default::default();
         self.media = None;
+        self.windows_input_delivery_error = None;
         self.cpu_clock = crate::process::clock::CpuClock::default();
         self.image_input = None;
         self.modules = crate::process::loading::modules::ModuleProcess32::default();

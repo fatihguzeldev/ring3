@@ -1,5 +1,3 @@
-use std::collections::VecDeque;
-
 use super::{Message32, Point32, User32Error32, User32Limits32, WindowClass32, WindowData32};
 use crate::windows::window::{WindowContext32, WindowDescription32, WindowHandle32};
 
@@ -13,8 +11,7 @@ pub(crate) struct User32State32 {
     classes: Vec<WindowClass32>,
     windows: WindowContext32,
     slots: Vec<WindowSlot32>,
-    posted: VecDeque<Message32>,
-    quits: Vec<Message32>,
+    queue: super::queue::MessageQueue32,
     next_atom: u16,
 }
 
@@ -32,21 +29,13 @@ impl User32State32 {
         slots
             .try_reserve_exact(limits.windows)
             .map_err(|_| User32Error32::Allocation)?;
-        let mut posted = VecDeque::new();
-        posted
-            .try_reserve_exact(limits.messages)
-            .map_err(|_| User32Error32::Allocation)?;
-        let mut quits = Vec::new();
-        quits
-            .try_reserve_exact(limits.messages)
-            .map_err(|_| User32Error32::Allocation)?;
+        let queue = super::queue::MessageQueue32::new(limits.messages)?;
         Ok(Self {
             limits,
             classes,
             windows,
             slots,
-            posted,
-            quits,
+            queue,
             next_atom: 0xc000,
         })
     }
@@ -216,7 +205,7 @@ impl User32State32 {
         let index = self.slot(handle)?;
         self.windows.remove_delivered(thread_id, handle)?;
         self.slots.remove(index);
-        self.posted.retain(|message| message.window != handle.get());
+        self.queue.retain_window(handle.get());
         Ok(())
     }
 
@@ -294,27 +283,34 @@ impl User32State32 {
     }
 
     pub(crate) fn post(&mut self, message: Message32) -> Result<(), User32Error32> {
-        if self.posted.len() == self.limits.messages {
-            return Err(User32Error32::Win32(1816));
-        }
-        self.posted.push_back(message);
-        Ok(())
+        self.queue.post(message)
     }
-
+    pub(crate) fn project_input_messages(
+        &self,
+        thread: u32,
+        messages: &[Message32],
+    ) -> Result<(u32, u32, u64), User32Error32> {
+        self.queue.project_input(thread, messages)
+    }
+    pub(crate) fn post_input(
+        &mut self,
+        message: Message32,
+        key: Option<super::QueuedKey32>,
+        state: [u8; 256],
+    ) -> Result<(), User32Error32> {
+        self.queue.post_input(message, key, state)
+    }
+    pub(crate) fn can_post(&self, count: usize) -> Result<(), User32Error32> {
+        self.queue.can_post(count)
+    }
+    pub(crate) fn queue_status(&self, thread: u32) -> (u32, u32, u64) {
+        self.queue.status(thread)
+    }
+    pub(crate) fn observe_queue(&mut self, thread: u32, mask: u32) {
+        self.queue.observe(thread, mask)
+    }
     pub(crate) fn post_quit(&mut self, message: Message32) -> Result<(), User32Error32> {
-        if let Some(existing) = self
-            .quits
-            .iter_mut()
-            .find(|existing| existing.thread_id == message.thread_id)
-        {
-            *existing = message;
-            return Ok(());
-        }
-        if self.quits.len() == self.limits.messages {
-            return Err(User32Error32::Capacity);
-        }
-        self.quits.push(message);
-        Ok(())
+        self.queue.post_quit(message)
     }
 
     pub(crate) fn find_message(
@@ -323,6 +319,16 @@ impl User32State32 {
         window: u32,
         min: u32,
         max: u32,
+    ) -> Result<Option<(usize, Message32)>, User32Error32> {
+        self.find_message_mask(thread_id, window, min, max, u32::MAX)
+    }
+    pub(crate) fn find_message_mask(
+        &self,
+        thread_id: u32,
+        window: u32,
+        min: u32,
+        max: u32,
+        mask: u32,
     ) -> Result<Option<(usize, Message32)>, User32Error32> {
         if window != 0
             && window != u32::MAX
@@ -335,35 +341,23 @@ impl User32State32 {
         {
             return Err(User32Error32::Win32(1400));
         }
-        Ok(self
-            .posted
-            .iter()
-            .copied()
-            .enumerate()
-            .find(|(_, message)| {
-                message.thread_id == thread_id
-                    && (message.message == 0x0012
-                        || ((window == 0
-                            || window == u32::MAX && message.window == 0
-                            || self.is_descendant(message.window, window))
-                            && (min == 0 && max == 0 || (min..=max).contains(&message.message))))
-            })
-            .or_else(|| {
-                self.quits
-                    .iter()
-                    .copied()
-                    .enumerate()
-                    .find(|(_, message)| message.thread_id == thread_id)
-                    .map(|(index, message)| (self.limits.messages + index, message))
-            }))
+        Ok(self.queue.find(thread_id, mask, |message| {
+            message.message == 0x12
+                || ((window == 0
+                    || window == u32::MAX && message.window == 0
+                    || self.is_descendant(message.window, window))
+                    && (min == 0 && max == 0 || (min..=max).contains(&message.message)))
+        }))
     }
 
-    pub(crate) fn remove_message(&mut self, index: usize) {
-        if index < self.limits.messages {
-            self.posted.remove(index);
-        } else {
-            self.quits.remove(index - self.limits.messages);
-        }
+    pub(crate) fn discard_input_messages(&mut self) {
+        self.queue.discard_input();
+    }
+    pub(crate) fn queue_without_input(&self, thread: u32) -> (u32, u32, u64) {
+        self.queue.project_without_input(thread)
+    }
+    pub(crate) fn remove_message(&mut self, index: usize) -> Option<super::QueuedKeyboard32> {
+        self.queue.remove(index)
     }
 
     fn is_descendant(&self, mut window: u32, parent: u32) -> bool {

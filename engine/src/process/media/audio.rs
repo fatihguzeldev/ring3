@@ -75,6 +75,7 @@ impl EngineInstance {
     }
 
     pub fn audio_submit(&mut self, frames: u32) -> Result<AudioSubmission32, HostError> {
+        self.refresh_dsound_focus()?;
         self.media_contexts_mut()?
             .audio
             .submit(frames)
@@ -86,9 +87,40 @@ impl EngineInstance {
         submission: AudioSubmission32,
         cumulative_consumed_frames: u32,
     ) -> Result<(), HostError> {
-        self.media_contexts_mut()?
+        self.media_contexts()?;
+        let audio = &self.media.as_ref().unwrap().audio;
+        let signals = if let Some(sound) = &mut self.dsound {
+            let occurrences = sound
+                .prepare_audio_signals(audio, submission, cumulative_consumed_frames)
+                .map_err(|error| HostError::Media(MediaError::Audio(error)))?;
+            if occurrences.is_empty() {
+                None
+            } else {
+                Some(
+                    self.synchronization
+                        .as_ref()
+                        .ok_or(HostError::Infrastructure)?
+                        .context()
+                        .prepare_signal_occurrences(occurrences)
+                        .map_err(HostError::Synchronization)?,
+                )
+            }
+        } else {
+            None
+        };
+        self.media
+            .as_mut()
+            .unwrap()
             .audio
             .acknowledge(submission, cumulative_consumed_frames)
-            .map_err(|error| HostError::Media(MediaError::Audio(error)))
+            .map_err(|error| HostError::Media(MediaError::Audio(error)))?;
+        if let Some(signals) = signals {
+            self.synchronization
+                .as_mut()
+                .unwrap()
+                .context_mut()
+                .commit_signals(signals);
+        }
+        Ok(())
     }
 }

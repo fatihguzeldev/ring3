@@ -277,4 +277,33 @@ fn close_releases_contexts_and_all_public_entrypoints_fail_closed() {
     assert_eq!(engine.graphics_present(1), Err(HostError::Closed));
     assert_eq!(engine.audio_submit(1), Err(HostError::Closed));
     assert_eq!(engine.submit_input(1, 1, &[]), Err(HostError::Closed));
+    assert_eq!(engine.sync_windows_input(), Err(HostError::Closed));
+    assert_eq!(
+        engine.submit_windows_input(1, 1, &[]),
+        Err(HostError::Closed)
+    );
+    assert_eq!(
+        engine.register_input_controller(
+            0,
+            ring3_engine::input::dinput::ControllerDescriptor32 {
+                instance: [0; 16],
+                product: [0; 16],
+                name: Vec::new(),
+                axes: 0,
+                povs: 0,
+                buttons: 0,
+                kind: ring3_engine::input::dinput::ControllerKind32::Gamepad,
+            }
+        ),
+        Err(HostError::Closed)
+    );
+}
+
+#[test]
+fn unconfigured_input_delivery_preserves_lazy_media_admission_without_a_clock() {
+    let mut engine = EngineInstance::new(4, 9).unwrap();
+    assert_eq!(engine.sync_windows_input(), Ok(()));
+    let missing = HostError::Media(ring3_engine::process::MediaError::NotConfigured);
+    assert_eq!(engine.submit_input(1, 1, &[]), Err(missing));
+    assert_eq!(engine.submit_windows_input(1, 1, &[]), Err(missing));
 }

@@ -5,7 +5,6 @@ use crate::{
 };
 impl EngineInstance {
     pub(in crate::process) fn sync_dinput_input(&mut self) -> Result<(), HostError> {
-        let clock_origin = self.cpu_clock.monotonic_bounds()?.0;
         let next_policy = match (self.dinput.as_ref(), self.media.as_ref()) {
             (Some(runtime), Some(media)) => runtime.policy_after_sync(
                 media.input.source(),
@@ -16,6 +15,7 @@ impl EngineInstance {
             ),
             _ => return Ok(()),
         };
+        let clock_origin = self.cpu_clock.monotonic_bounds()?.0;
         let previous_policy = self.dinput.as_ref().unwrap().input_policy();
         let policy_receipt = if next_policy != previous_policy {
             self.prepare_dinput_policy()?

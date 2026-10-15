@@ -28,6 +28,7 @@ impl EngineInstance {
         slot: u8,
         descriptor: ControllerDescriptor32,
     ) -> Result<(), HostError> {
+        self.memory()?;
         descriptor
             .validate()
             .map_err(|_| HostError::DirectInput(DirectInputError32::InvalidRequest))?;

@@ -52,6 +52,12 @@ impl EngineInstance {
                     .map(|(focused, captured)| self.prepare_windows_input_flags(focused, captured))
                     .transpose()?
                     .flatten();
+                let window_ids = self.user32_window_identities();
+                let window_event = if flags.is_some() {
+                    self.prepare_user32_window_event()?
+                } else {
+                    None
+                };
                 let context = self.user32.as_mut().ok_or(HostError::InvalidRequest)?;
                 let outcome = context
                     .complete(
@@ -66,10 +72,25 @@ impl EngineInstance {
                     context.windows().capture().is_some(),
                 );
                 self.commit_windows_input_flags(if flags == Some(actual) { input } else { None });
+                self.commit_user32_window_event(window_event, window_ids);
                 self.accept_user32_outcome(outcome, error)?;
+                let _ = self.sync_windows_input();
             }
-            WindowsCallbackProvider32::D3D8 => {
-                let outcome = self.resume_d3d8_callback(reply.continuation, result)?;
+            WindowsCallbackProvider32::D3D8
+            | WindowsCallbackProvider32::DirectSound
+            | WindowsCallbackProvider32::DirectInput => {
+                let outcome = match reply.provider {
+                    WindowsCallbackProvider32::D3D8 => {
+                        self.resume_d3d8_callback(reply.continuation, result)?
+                    }
+                    WindowsCallbackProvider32::DirectSound => {
+                        self.resume_dsound_callback(reply.continuation, result)?
+                    }
+                    WindowsCallbackProvider32::DirectInput => {
+                        self.resume_dinput_callback(reply.continuation, result)?
+                    }
+                    WindowsCallbackProvider32::User32 => unreachable!(),
+                };
                 let last = self.windows_replies.last_mut().unwrap();
                 match outcome {
                     WindowsProviderOutcome32::Return(value) => {
@@ -170,11 +191,14 @@ impl EngineInstance {
         }
         self.checked_pending_call(reply.owner, reply.token)?;
         self.check_windows_thread_write()?;
+        self.refresh_user32_input()?;
+        let queue = self.prepare_user32_queue_change()?;
         let context = self.user32.as_mut().ok_or(HostError::InvalidRequest)?;
         let outcome = context
             .resume_wait(continuation, self.memory.as_mut().ok_or(HostError::Closed)?)
             .map_err(HostError::User32)?;
         let error = context.take_last_error();
+        self.commit_user32_queue_change(queue);
         self.accept_user32_outcome(outcome, error)?;
         if self
             .windows_replies

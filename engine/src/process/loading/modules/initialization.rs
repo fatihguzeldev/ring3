@@ -52,6 +52,38 @@ mod gate_namespace {
                 );
             }
         }
+        for factory in crate::audio::dsound::FactoryGate::ALL {
+            assert!(ids.insert(factory.id()));
+        }
+        for interface in crate::audio::dsound::InterfaceKind::ALL {
+            for slot in 0..interface.methods().len() {
+                assert!(
+                    ids.insert(
+                        crate::audio::dsound::MethodGate {
+                            interface,
+                            slot: slot as u8
+                        }
+                        .id()
+                    )
+                );
+            }
+        }
+        for factory in crate::input::dinput::FactoryGate::ALL {
+            assert!(ids.insert(factory.id()));
+        }
+        for interface in crate::input::dinput::InterfaceKind32::ALL {
+            for slot in 0..interface.words().len() {
+                assert!(
+                    ids.insert(
+                        crate::input::dinput::MethodGate {
+                            interface,
+                            slot: slot as u8
+                        }
+                        .id()
+                    )
+                );
+            }
+        }
     }
 }
 

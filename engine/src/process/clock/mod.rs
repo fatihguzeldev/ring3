@@ -81,13 +81,23 @@ impl EngineInstance {
     /// observes host monotonic nanoseconds; equal samples do not advance the counter.
     pub fn observe_cpu_clock(&mut self, now_ns: u64) -> Result<(), HostError> {
         self.memory()?;
-        self.cpu_clock.observe(now_ns)
+        let prepared = self.prepare_synchronization_clock(now_ns)?;
+        self.cpu_clock.observe(now_ns)?;
+        self.commit_synchronization_clock(prepared);
+        Ok(())
     }
 
     /// advances the same clock explicitly for deterministic execution.
     pub fn advance_cpu_clock(&mut self, delta_ns: u64) -> Result<(), HostError> {
         self.memory()?;
-        self.cpu_clock.advance(delta_ns)
+        let (_, previous_ns) = self.cpu_clock.monotonic_bounds()?;
+        let now_ns = previous_ns
+            .checked_add(delta_ns)
+            .ok_or(HostError::InvalidRequest)?;
+        let prepared = self.prepare_synchronization_clock(now_ns)?;
+        self.cpu_clock.advance(delta_ns)?;
+        self.commit_synchronization_clock(prepared);
+        Ok(())
     }
 }
 

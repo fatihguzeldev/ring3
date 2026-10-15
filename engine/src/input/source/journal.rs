@@ -133,6 +133,23 @@ impl InputSource32 {
                 .checked_add(additional as u64)
                 .is_some_and(|count| count <= self.records.len() as u64)
     }
+    pub fn commit_translation_policy(
+        &mut self,
+        prepared: PreparedSourceWindow32,
+        layout: crate::input::keyboard::KeyboardLayout32,
+        swapped: bool,
+    ) {
+        assert!(
+            self.epoch == prepared.epoch
+                && self.sequence == prepared.sequence
+                && self.timestamp_ns == prepared.previous_timestamp,
+            "prepared source owner changed"
+        );
+        self.push(
+            prepared.timestamp,
+            SourceKind32::TranslationPolicy { layout, swapped },
+        );
+    }
     pub fn commit_cursor_policy(
         &mut self,
         prepared: PreparedSourceWindow32,

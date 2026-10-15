@@ -22,16 +22,32 @@ impl User32Context32 {
             return Err(User32Error32::Win32(87));
         }
         let remove = blocking || args[4] & 1 != 0;
-        if !blocking && args[4] & !3 != 0 {
+        if !blocking && args[4] & !(3 | (0x1cff << 16)) != 0 {
             return Err(User32Error32::Win32(87));
         }
-        if let Some((index, message)) =
-            self.state
-                .find_message(context.thread_id, args[1], args[2], args[3])?
-        {
+        let queue_mask = if blocking || args[4] >> 16 == 0 {
+            u32::MAX
+        } else {
+            args[4] >> 16
+        };
+        let observed = (queue_mask | 8)
+            & if args[2] == 0 && args[3] == 0 {
+                u32::MAX
+            } else {
+                !0x100
+            };
+        if let Some((index, message)) = self.state.find_message_mask(
+            context.thread_id,
+            args[1],
+            args[2],
+            args[3],
+            queue_mask,
+        )? {
             memory::write_message(memory, args[0], message)?;
-            if remove {
-                self.state.remove_message(index);
+            self.state.observe_queue(context.thread_id, observed);
+            self.input.message = message;
+            if remove && let Some(keyboard) = self.state.remove_message(index) {
+                self.input.queued = keyboard.state;
             }
             return Ok(User32Outcome32::Return(if blocking {
                 u32::from(message.message != 0x0012)
@@ -39,6 +55,7 @@ impl User32Context32 {
                 1
             }));
         }
+        self.state.observe_queue(context.thread_id, observed);
         if !blocking {
             return Ok(User32Outcome32::Return(0));
         }
@@ -82,7 +99,18 @@ impl User32Context32 {
         };
         if let Some((index, message)) = message {
             memory::write_message(memory, output, message)?;
-            self.state.remove_message(index);
+            self.state.observe_queue(
+                thread,
+                if min == 0 && max == 0 {
+                    u32::MAX
+                } else {
+                    !0x100
+                },
+            );
+            self.input.message = message;
+            if let Some(keyboard) = self.state.remove_message(index) {
+                self.input.queued = keyboard.state;
+            }
             self.pending.pop();
             Ok(User32Outcome32::Return(u32::from(
                 message.message != 0x0012,
@@ -179,46 +207,6 @@ impl User32Context32 {
         Ok(User32Outcome32::Return(0))
     }
 
-    pub(super) fn translate_message(
-        &mut self,
-        address: u32,
-        memory: &AddressSpace,
-        context: User32CallContext32,
-    ) -> Result<User32Outcome32, User32Error32> {
-        let message = memory::message(memory, address)?;
-        if !matches!(message.message, 0x0100 | 0x0101 | 0x0104 | 0x0105) {
-            return Ok(User32Outcome32::Return(0));
-        }
-        if matches!(message.message, 0x0100 | 0x0104)
-            && let Some(character) = key_character(
-                message.wparam,
-                context.shift,
-                context.caps_lock,
-                context.control,
-            )
-        {
-            let thread_id = if message.window == 0 {
-                context.thread_id
-            } else {
-                self.windows()
-                    .get(WindowHandle32::try_from(message.window)?)?
-                    .description
-                    .thread_id
-            };
-            self.state.post(Message32 {
-                message: if message.message == 0x0104 {
-                    0x0106
-                } else {
-                    0x0102
-                },
-                wparam: character,
-                thread_id,
-                ..message
-            })?;
-        }
-        Ok(User32Outcome32::Return(1))
-    }
-
     pub(super) fn call_window_proc(
         &mut self,
         args: &[u32],
@@ -267,46 +255,4 @@ fn message_has_pointer(message: u32) -> bool {
             | 0x0081
             | 0x0083
     )
-}
-
-fn key_character(key: u32, shift: bool, caps: bool, control: bool) -> Option<u32> {
-    if control {
-        return match key {
-            0x41..=0x5a => Some(key - 0x40),
-            0xdb => Some(0x1b),
-            0xdc => Some(0x1c),
-            0xdd => Some(0x1d),
-            0x36 if shift => Some(0x1e),
-            0xbd if shift => Some(0x1f),
-            _ => None,
-        };
-    }
-    if (0x41..=0x5a).contains(&key) {
-        return Some(if shift ^ caps { key } else { key + 32 });
-    }
-    if (0x30..=0x39).contains(&key) {
-        return Some(if shift {
-            u32::from(b")!@#$%^&*("[(key - 0x30) as usize])
-        } else {
-            key
-        });
-    }
-    if matches!(key, 0x08 | 0x09 | 0x0d | 0x1b | 0x20) {
-        return Some(key);
-    }
-    let (plain, shifted) = match key {
-        0xba => (';', ':'),
-        0xbb => ('=', '+'),
-        0xbc => (',', '<'),
-        0xbd => ('-', '_'),
-        0xbe => ('.', '>'),
-        0xbf => ('/', '?'),
-        0xc0 => ('`', '~'),
-        0xdb => ('[', '{'),
-        0xdc => ('\\', '|'),
-        0xdd => (']', '}'),
-        0xde => ('\'', '"'),
-        _ => return None,
-    };
-    Some(if shift { shifted as u32 } else { plain as u32 })
 }

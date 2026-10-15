@@ -62,6 +62,10 @@ impl Default for SourceSnapshot32 {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SourceKind32 {
+    TranslationPolicy {
+        layout: crate::input::keyboard::KeyboardLayout32,
+        swapped: bool,
+    },
     CursorPolicy {
         x: i32,
         y: i32,

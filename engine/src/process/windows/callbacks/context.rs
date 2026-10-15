@@ -89,6 +89,19 @@ impl EngineInstance {
         self.park_windows_callback(request)
     }
 
+    pub(in crate::process) fn park_media_callback(
+        &mut self,
+        request: WindowsCallback32,
+    ) -> Result<(), HostError> {
+        if !matches!(
+            request.provider,
+            WindowsCallbackProvider32::DirectSound | WindowsCallbackProvider32::DirectInput
+        ) {
+            return Err(HostError::InvalidRequest);
+        }
+        self.park_windows_callback(request)
+    }
+
     fn park_windows_callback(&mut self, request: WindowsCallback32) -> Result<(), HostError> {
         validate_request(request)?;
         self.check_windows_callback_capacity()?;
@@ -124,7 +137,12 @@ impl EngineInstance {
     }
 
     pub(in crate::process) fn windows_provider_owns_token(&self, token: u32) -> bool {
-        token != 0 && self.windows_replies.iter().any(|reply| reply.token == token)
+        token != 0
+            && (self
+                .windows_replies
+                .iter()
+                .any(|reply| reply.token == token)
+                || self.synchronization_provider_owns_token(token))
     }
 
     pub fn pending_windows_callback(&self) -> Option<WindowsCallback32> {

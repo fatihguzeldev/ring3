@@ -24,6 +24,30 @@ pub fn windows_gate_info(id: u32) -> Option<WindowsGateInfo32> {
             stack_words: api.stack_words(),
         });
     }
+    if let Some(words) = crate::audio::dsound::FactoryGate::from_id(id)
+        .map(|gate| gate.stack_words())
+        .or_else(|| {
+            crate::audio::dsound::MethodGate::from_id(id)
+                .map(|gate| u32::from(gate.method().stack_words))
+        })
+    {
+        return Some(WindowsGateInfo32 {
+            convention: crate::windows::CallingConvention32::Stdcall,
+            stack_words: words,
+        });
+    }
+    if let Some(words) = crate::input::dinput::FactoryGate::from_id(id)
+        .map(|gate| gate.stack_words())
+        .or_else(|| {
+            crate::input::dinput::MethodGate::from_id(id)
+                .map(|gate| u32::from(gate.method().stack_words))
+        })
+    {
+        return Some(WindowsGateInfo32 {
+            convention: crate::windows::CallingConvention32::Stdcall,
+            stack_words: words,
+        });
+    }
     let words = if id == crate::graphics::d3d8::api::CREATE_GATE {
         1
     } else {
@@ -132,8 +156,11 @@ impl EngineInstance {
         let ExitReason::Gate { id } = exit.reason else {
             return Err(HostError::Infrastructure);
         };
-        if self.try_complete_user32_call(owner, token, id, frame)?
+        if self.try_complete_synchronization_call(owner, token, id, frame)?
+            || self.try_complete_user32_call(owner, token, id, frame)?
             || self.try_complete_d3d8_call(owner, token, id, frame)?
+            || self.try_complete_dsound_call(owner, token, id, frame)?
+            || self.try_complete_dinput_call(owner, token, id, frame)?
         {
             return Ok(());
         }

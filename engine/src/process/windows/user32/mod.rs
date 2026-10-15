@@ -18,6 +18,7 @@ use crate::{
     },
 };
 use callback::Pending32;
+pub use input::User32CursorRequest32;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct User32CallContext32 {
@@ -52,6 +53,7 @@ pub(crate) struct User32Context32 {
     next_token: u64,
     last_error: Option<u32>,
     runtime_input: User32CallContext32,
+    input: input::User32Input32,
     destructions: Vec<destruction::DestroyPlan32>,
 }
 

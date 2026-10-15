@@ -15,6 +15,8 @@ const MAX_REPLIES: usize = 33;
 pub enum WindowsCallbackProvider32 {
     User32,
     D3D8,
+    DirectSound,
+    DirectInput,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

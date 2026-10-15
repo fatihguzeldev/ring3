@@ -79,8 +79,47 @@ impl EngineInstance {
         // prepare every owner before replacing any live context.
         let mut replacement = MediaContexts::new(epoch, now_ns, config)?;
         self.initialize_windows_input(&mut replacement.input, now_ns)?;
+        let sound = self.prepare_dsound_media_reset(&mut replacement.audio)?;
+        let input = self.prepare_dinput_media_reset()?;
+        let queue = self.prepare_user32_media_reset()?;
+        let queue = if self.synchronization.is_some() {
+            queue
+        } else {
+            None
+        };
+        let count = sound
+            .notifications()
+            .len()
+            .checked_add(input.notifications().len())
+            .ok_or(HostError::Infrastructure)?;
+        let signals = if count == 0 && queue.is_none() {
+            None
+        } else {
+            let mut occurrences = Vec::new();
+            occurrences
+                .try_reserve_exact(count)
+                .map_err(|_| HostError::Infrastructure)?;
+            occurrences.extend_from_slice(sound.notifications());
+            occurrences.extend_from_slice(input.notifications());
+            Some(
+                self.synchronization()?
+                    .prepare_signal_occurrences_with_messages(&occurrences, queue)
+                    .map_err(HostError::Synchronization)?,
+            )
+        };
+        self.commit_dsound_media_reset(sound);
+        self.commit_dinput_media_reset(input);
         self.media = Some(replacement);
         self.media_epoch = epoch;
+        self.commit_user32_media_reset();
+        if let Some(signals) = signals {
+            self.synchronization
+                .as_mut()
+                .unwrap()
+                .context_mut()
+                .commit_signals(signals);
+        }
+        self.windows_input_delivery_error = None;
         Ok(epoch)
     }
 

@@ -23,7 +23,13 @@ impl EngineInstance {
         {
             return Err(HostError::User32(User32Error32::Busy));
         }
-        let context = User32Context32::new(limits, scratch_bounds).map_err(HostError::User32)?;
+        let mut context =
+            User32Context32::new(limits, scratch_bounds).map_err(HostError::User32)?;
+        if let Some(media) = self.media.as_ref() {
+            context
+                .input
+                .attach(media.input.source().tail(), media.input.source().snapshot());
+        }
         let input = self.prepare_windows_input_flags(false, false)?;
         self.user32 = Some(context);
         self.commit_windows_input_flags(input);
@@ -54,6 +60,7 @@ impl EngineInstance {
 
     pub fn post_user32_message(&mut self, mut message: Message32) -> Result<(), HostError> {
         self.memory()?;
+        let queue = self.prepare_user32_queue_change()?;
         let context = self.user32.as_mut().ok_or(HostError::InvalidRequest)?;
         if message.thread_id != 1 || message.message > 0xffff {
             return Err(HostError::InvalidRequest);
@@ -83,6 +90,7 @@ impl EngineInstance {
             context.state.post(message).map_err(HostError::User32)?;
         }
         context.runtime_input.cursor = point;
+        self.commit_user32_queue_change(queue);
         Ok(())
     }
 
@@ -101,6 +109,7 @@ impl EngineInstance {
         if self.checked_pending_call(owner, token)?.frame != frame {
             return Err(HostError::InvalidRequest);
         }
+        self.refresh_user32_input()?;
         self.reserve_windows_reply()?;
         self.check_windows_thread_write()?;
         Self::prepare_completed_call(frame.complete(0))?;
@@ -113,6 +122,40 @@ impl EngineInstance {
             .map(|(focused, captured)| self.prepare_windows_input_flags(focused, captured))
             .transpose()?
             .flatten();
+        let window_ids = self.user32_window_identities();
+        let translation = matches!(
+            api,
+            User32Api32::ActivateKeyboardLayout
+                | User32Api32::LoadKeyboardLayoutA
+                | User32Api32::LoadKeyboardLayoutW
+                | User32Api32::SwapMouseButton
+        );
+        let previous_translation = self.user32_translation_settings();
+        let window_event = if flags.is_some()
+            || translation
+            || matches!(api, User32Api32::SetCursorPos | User32Api32::ClipCursor)
+        {
+            self.prepare_user32_window_event()?
+        } else {
+            None
+        };
+        let queue = if matches!(
+            api,
+            User32Api32::PeekMessageA
+                | User32Api32::PeekMessageW
+                | User32Api32::GetMessageA
+                | User32Api32::GetMessageW
+                | User32Api32::TranslateMessage
+                | User32Api32::PostMessageA
+                | User32Api32::PostMessageW
+                | User32Api32::PostQuitMessage
+                | User32Api32::GetQueueStatus
+                | User32Api32::GetInputState
+        ) {
+            self.prepare_user32_queue_change()?
+        } else {
+            None
+        };
         let context = self
             .user32
             .as_mut()
@@ -131,7 +174,18 @@ impl EngineInstance {
             context.windows().capture().is_some(),
         );
         self.commit_windows_input_flags(if flags == Some(actual) { input } else { None });
+        if matches!(api, User32Api32::SetCursorPos | User32Api32::ClipCursor)
+            && outcome == super::User32Outcome32::Return(1)
+        {
+            self.commit_user32_cursor_event(window_event, api == User32Api32::ClipCursor);
+        } else if translation {
+            self.commit_user32_translation_event(window_event, previous_translation);
+        } else {
+            self.commit_user32_window_event(window_event, window_ids);
+        }
+        self.commit_user32_queue_change(queue);
         self.publish_user32_result(owner, token, frame, outcome, error)?;
+        let _ = self.sync_windows_input();
         Ok(true)
     }
 

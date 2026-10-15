@@ -37,6 +37,7 @@ impl User32Context32 {
             next_token: 0,
             last_error: None,
             runtime_input: User32CallContext32::default(),
+            input: super::input::User32Input32::default(),
             destructions,
         })
     }
@@ -44,8 +45,27 @@ impl User32Context32 {
     pub(crate) fn windows(&self) -> &WindowContext32 {
         self.state.windows()
     }
+    pub(in crate::process) fn is_top_level_window(&self, raw: u32) -> bool {
+        WindowHandle32::try_from(raw)
+            .ok()
+            .and_then(|handle| self.state.record(handle).ok())
+            .is_some_and(|data| {
+                !data.destroying
+                    && data.style & 0x4000_0000 == 0
+                    && self
+                        .windows()
+                        .get(data.handle)
+                        .is_ok_and(|record| record.description.thread_id == 1)
+            })
+    }
+    pub(in crate::process) fn source_cursor(&self) -> Option<crate::input::source::InputCursor32> {
+        self.input.cursor
+    }
     pub(crate) fn take_last_error(&mut self) -> Option<u32> {
         self.last_error.take()
+    }
+    pub(in crate::process) fn wait_queue_status(&self) -> (u32, u32, u64) {
+        self.state.queue_status(1)
     }
 
     pub(crate) fn prepare(
@@ -108,6 +128,10 @@ impl User32Context32 {
             SetWindowLongA | SetWindowLongW => self.set_window_long(args, memory, context),
             CallWindowProcA | CallWindowProcW => self.call_window_proc(args),
             SendMessageA | SendMessageW => self.send_message(args, context),
+            MsgWaitForMultipleObjects | MsgWaitForMultipleObjectsEx | WaitMessage => {
+                Err(User32Error32::InvalidRequest)
+            }
+            _ => self.input_query(api, args, memory, context),
         };
         match result {
             Err(User32Error32::Win32(error)) => {

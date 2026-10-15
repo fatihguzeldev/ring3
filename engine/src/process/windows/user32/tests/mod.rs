@@ -1,5 +1,6 @@
 mod activation;
 mod destruction;
+mod input;
 mod lifecycle;
 mod messages;
 mod runtime;

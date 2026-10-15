@@ -4,7 +4,7 @@ use crate::{loader::SystemExportTarget32, memory::GuestAddress, windows::Calling
 #[test]
 fn user32_catalog_resolves_explicit_stdcall_gates_without_id_or_symbol_aliases() {
     let module = user32_module(0x70000000);
-    assert_eq!(module.exports.len(), 40);
+    assert_eq!(module.exports.len(), 89);
     for api in User32Api32::catalog() {
         assert_eq!(User32Api32::from_id(api.id()), Some(api));
         assert_eq!(User32Api32::resolve("USER32.DLL", api.name()), Some(api));
@@ -23,7 +23,7 @@ fn user32_catalog_resolves_explicit_stdcall_gates_without_id_or_symbol_aliases()
         None
     );
     assert_eq!(User32Api32::resolve("user32.dll", "createwindowexa"), None);
-    assert_eq!(User32Api32::from_id(0x20029), None);
+    assert_eq!(User32Api32::from_id(0x2005a), None);
     assert_eq!(User32Api32::CreateWindowExW.stack_words(), 12);
 }
 
