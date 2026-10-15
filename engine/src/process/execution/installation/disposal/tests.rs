@@ -397,7 +397,7 @@ struct PendingObservation {
     frame: CallFrame32,
     state: [u8; 56],
     exit: [u8; EXIT_SIZE],
-    extended: crate::process::calls::context::ExtendedCpuState,
+    extended: crate::process::cpu::context::ExtendedCpuState,
 }
 
 fn observe_pending(pending: &PendingCall) -> PendingObservation {

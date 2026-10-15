@@ -21,7 +21,7 @@ const sources = [
   'engine/src/abi/x86/event.rs', 'engine/src/abi/wasm/exports/events.rs',
   'engine/src/process/cpu/events/snapshot.rs', 'engine/src/process/wasm/detection.rs',
   'engine/src/cpu/dbt/wasm/x87.rs', 'engine/src/process/cpu/x87.rs', 'engine/src/process/cpu/avx.rs',
-  'engine/src/process/cpu/far/return.rs', 'engine/src/process/calls/context.rs',
+  'engine/src/process/cpu/far/return.rs', 'engine/src/process/cpu/context.rs',
   'engine/src/cpu/x86/system_registers.rs', 'engine/src/process/cpu/system_registers.rs',
   'engine/tests/cpu/control/system_registers/fixtures/p2-system-registers/runtime/default.mjs',
   'engine/tests/support/wasm/arena.mjs', 'engine/tests/support/wasm/engine.mjs',

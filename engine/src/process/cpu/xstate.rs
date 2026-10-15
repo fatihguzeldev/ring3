@@ -211,8 +211,8 @@ mod tests {
             calls::{
                 call::{PendingCall, PendingOwner},
                 callback::{SuspendedCallback, SuspendedRecord},
-                context::ExtendedCpuState,
             },
+            cpu::context::ExtendedCpuState,
         },
         windows::{CallFrame32, CallingConvention32},
     };

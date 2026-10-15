@@ -245,8 +245,8 @@ fn pending_and_unauthorized_callback_authority_precede_all_new_guest_checks() {
             calls::{
                 call::{PendingCall, PendingOwner},
                 callback::{SuspendedCallback, SuspendedRecord},
-                context::ExtendedCpuState,
             },
+            cpu::context::ExtendedCpuState,
         },
         windows::{CallFrame32, CallingConvention32},
     };

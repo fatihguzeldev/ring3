@@ -13,8 +13,8 @@ use crate::{
     },
     memory::MemoryFault,
     process::{
-        CallError, EngineInstance, HostError,
-        calls::{call::PendingOwner, context::ExtendedCpuState},
+        CallError, EngineInstance, HostError, calls::call::PendingOwner,
+        cpu::context::ExtendedCpuState,
     },
 };
 

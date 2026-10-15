@@ -43,7 +43,7 @@ const sourcePaths = [
   `${fixture}/receipt.json`, 'engine/tests/process/images/startup/imports/integer/native.rs', 'engine/tests/process/images/native.rs', 'engine/tests/process/images/startup/imports/integer/wasm.rs', 'engine/tests/process/images/wasm.rs', 'engine/tests/support/wasm.rs',
   'engine/tests/support/wasm/engine.mjs', 'engine/src/process/loading/input.rs', 'engine/src/process/loading/mod.rs', 'engine/src/process/mod.rs',
   'engine/src/process/loading/startup.rs', 'engine/src/process/execution/resident.rs', 'engine/src/process/execution/authority.rs', 'engine/src/process/execution/mod.rs', 'engine/src/process/execution/installation.rs',
-  'engine/src/process/calls/call.rs', 'engine/src/process/calls/context.rs', 'engine/src/process/calls/mod.rs', 'engine/src/process/windows/calls.rs', 'engine/src/process/windows/mod.rs', 'engine/src/windows/provider.rs',
+  'engine/src/process/calls/call.rs', 'engine/src/process/cpu/context.rs', 'engine/src/process/calls/mod.rs', 'engine/src/process/windows/calls.rs', 'engine/src/process/windows/mod.rs', 'engine/src/windows/provider.rs',
   'engine/src/windows/calling_convention.rs', 'engine/src/cpu/dbt/wasm/dispatcher.rs',
 ];
 const sourceHashes = () => Object.fromEntries(sourcePaths.map(path => [path, hash(readFileSync(join(root, path)))]));

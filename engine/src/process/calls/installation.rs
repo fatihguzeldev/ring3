@@ -2,7 +2,7 @@
 
 use crate::process::{
     CallError, EngineInstance, HostError, ResidentInstallation, calls::callback::SuspendedRecord,
-    calls::context::ExtendedCpuState,
+    cpu::context::ExtendedCpuState,
 };
 use crate::{
     abi::{

@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use crate::process::{CallError, EngineInstance, HostError, calls::context::ExtendedCpuState};
+use crate::process::{CallError, EngineInstance, HostError, cpu::context::ExtendedCpuState};
 use crate::{
     abi::{
         arena::{EXIT_OFFSET, STATE_OFFSET},

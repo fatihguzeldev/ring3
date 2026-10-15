@@ -183,9 +183,9 @@ fn stopped_entry_requires_live_prior_snapshot_and_available_generation() {
 fn stopped_entry_cannot_replace_code_owned_by_a_pending_call() {
     use crate::{
         abi::x86::decode_state,
-        process::calls::{
-            call::{PendingCall, PendingOwner},
-            context::ExtendedCpuState,
+        process::{
+            calls::call::{PendingCall, PendingOwner},
+            cpu::context::ExtendedCpuState,
         },
         windows::{CallFrame32, CallingConvention32},
     };

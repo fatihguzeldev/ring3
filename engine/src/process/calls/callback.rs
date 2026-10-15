@@ -2,10 +2,8 @@
 
 use crate::process::{
     CallError, EngineInstance, HostError,
-    calls::{
-        call::{PendingCall, PendingOwner},
-        context::ExtendedCpuState,
-    },
+    calls::call::{PendingCall, PendingOwner},
+    cpu::context::ExtendedCpuState,
 };
 use crate::{
     abi::{

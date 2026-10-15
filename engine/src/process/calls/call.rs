@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use crate::process::calls::context::ExtendedCpuState;
+use crate::process::cpu::context::ExtendedCpuState;
 use crate::process::{EngineInstance, HostError, calls::callback::SuspendedRecord};
 use crate::{
     abi::{

@@ -9,11 +9,9 @@ use crate::{
     memory::{AddressSpace, GuestAddress, MemoryError, PageRange, Permissions},
     process::{
         CallError,
+        calls::call::{PendingCall, PendingOwner},
         calls::callback::{SuspendedCallback, SuspendedRecord},
-        calls::{
-            call::{PendingCall, PendingOwner},
-            context::ExtendedCpuState,
-        },
+        cpu::context::ExtendedCpuState,
     },
     windows::{CallFrame32, CallingConvention32, WindowsApi32, WindowsOutcome32},
 };

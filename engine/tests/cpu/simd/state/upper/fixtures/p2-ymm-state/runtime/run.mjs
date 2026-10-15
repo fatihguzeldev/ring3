@@ -30,7 +30,7 @@ const sourcePaths = [...new Set([
   'engine/src/cpu/dbt/wasm/abi.rs', 'engine/src/cpu/dbt/wasm/simd.rs',
   'engine/src/cpu/dbt/wasm/simd/direct.rs', 'engine/src/cpu/dbt/wasm/xstate.rs',
   'engine/src/process/instance.rs', 'engine/src/process/wasm/mod.rs',
-  'engine/src/process/calls/context.rs', 'engine/src/process/calls/call.rs',
+  'engine/src/process/cpu/context.rs', 'engine/src/process/calls/call.rs',
   'engine/src/process/calls/callback.rs', 'engine/src/process/calls/resident_callback.rs',
   'engine/src/process/loading/startup.rs', 'engine/src/process/cpu/simd.rs',
   'engine/src/process/memory/span.rs',

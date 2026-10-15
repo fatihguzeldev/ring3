@@ -2,8 +2,9 @@
 
 use crate::process::{
     CallError, EngineInstance, HostError,
+    calls::call::PendingOwner,
     calls::callback::{SuspendedCallback, SuspendedRecord},
-    calls::{call::PendingOwner, context::ExtendedCpuState},
+    cpu::context::ExtendedCpuState,
     execution::compiled::DescriptorFormat,
 };
 use crate::{

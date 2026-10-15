@@ -105,11 +105,9 @@ mod tests {
         memory::GuestAddress,
         process::{
             CallError,
+            calls::call::{PendingCall, PendingOwner},
             calls::callback::{SuspendedCallback, SuspendedRecord},
-            calls::{
-                call::{PendingCall, PendingOwner},
-                context::ExtendedCpuState,
-            },
+            cpu::context::ExtendedCpuState,
         },
         windows::{CallFrame32, CallingConvention32},
     };

@@ -7,10 +7,8 @@ use crate::{
     cpu::x86::{Register32, simd::SimdState},
     process::{
         CallError,
-        calls::{
-            call::{PendingCall, PendingOwner},
-            context::ExtendedCpuState,
-        },
+        calls::call::{PendingCall, PendingOwner},
+        cpu::context::ExtendedCpuState,
     },
     windows::{CallFrame32, CallingConvention32},
 };

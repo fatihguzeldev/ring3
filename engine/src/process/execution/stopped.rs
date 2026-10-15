@@ -11,7 +11,7 @@ use crate::{
         },
     },
     memory::GuestAddress,
-    process::{CallError, EngineInstance, HostError, calls::context::ExtendedCpuState},
+    process::{CallError, EngineInstance, HostError, cpu::context::ExtendedCpuState},
 };
 
 impl EngineInstance {

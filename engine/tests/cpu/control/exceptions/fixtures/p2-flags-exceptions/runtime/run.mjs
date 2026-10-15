@@ -24,7 +24,7 @@ const sources = [
   'engine/src/cpu/dbt/wasm/segments.rs',
   'engine/src/cpu/dbt/wasm/locals.rs',
   'engine/src/abi/header.rs',
-  'engine/src/process/calls/context.rs',
+  'engine/src/process/cpu/context.rs',
   'engine/src/process/calls/callback.rs',
   'engine/src/windows/callback_frame.rs',
   'engine/src/windows/calling_convention.rs',
