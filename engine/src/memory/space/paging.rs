@@ -31,11 +31,11 @@ impl AddressSpace {
                 let mapping = self.mappings[page];
                 let present = mapping != 0;
                 if !present
-                    || !self.permissions[mapping as usize - 1].allows(access)
+                    || !self.permissions[page].allows(access)
                     || backing_access
                         .into_iter()
                         .flatten()
-                        .any(|required| !self.permissions[mapping as usize - 1].allows(required))
+                        .any(|required| !self.permissions[page].allows(required))
                 {
                     return Err(PagingCheckError32::Fault(PagingFaultFacts32 {
                         identity: self.identity,

@@ -41,7 +41,7 @@ impl AddressSpace {
             .map_err(|_| MemoryError::Allocation)?;
         for index in 0..count {
             let page = (first + index) % GUEST_PAGES;
-            versions.push(self.versions[self.mappings[page] as usize - 1]);
+            versions.push(self.page_version(page));
         }
         Ok(CodeSnapshot {
             identity: self.identity,

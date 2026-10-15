@@ -1,9 +1,11 @@
+mod aliases;
 mod atomic;
 mod code_fetch;
 mod cpu;
 mod mapping;
 mod paging;
 
+pub(crate) use aliases::{PreparedSharedPages, SharedPages};
 pub(crate) use mapping::PageInitialization;
 
 use super::address::{ADDRESS_LIMIT, GUEST_PAGES};
@@ -14,6 +16,10 @@ pub struct AddressSpace {
     backing: Box<[u8]>,
     mappings: Box<[u32]>,
     permissions: Box<[Permissions]>,
+    mapping_versions: Box<[u64]>,
+    references: Box<[u32]>,
+    executable_views: Box<[u32]>,
+    private_slots: Option<Box<[u32]>>,
     free: Vec<u32>,
     identity: u64,
     version: u64,
@@ -28,6 +34,13 @@ impl AddressSpace {
 
     pub(crate) fn code_validation_version(&self) -> u64 {
         self.code_validation_version
+    }
+
+    pub(crate) fn ensure_transaction_versions(&self, count: u64) -> Result<(), MemoryError> {
+        self.version
+            .checked_add(count)
+            .map(|_| ())
+            .ok_or(MemoryError::VersionExhausted)
     }
 
     pub(crate) fn transaction_version(&self) -> u64 {
@@ -50,7 +63,7 @@ impl AddressSpace {
             .try_reserve_exact(last - first + 1)
             .map_err(|_| MemoryError::Allocation)?;
         for page in first..=last {
-            versions.push(self.versions[self.mappings[page] as usize - 1]);
+            versions.push(self.page_version(page));
         }
         Ok(CodeSnapshot {
             identity: self.identity,
@@ -67,7 +80,8 @@ impl AddressSpace {
                 .enumerate()
                 .all(|(index, version)| {
                     let mapping = self.mappings[(snapshot.first + index) % GUEST_PAGES];
-                    mapping != 0 && self.versions[mapping as usize - 1] == *version
+                    mapping != 0
+                        && self.page_version((snapshot.first + index) % GUEST_PAGES) == *version
                 })
     }
 
@@ -78,7 +92,10 @@ impl AddressSpace {
         }
         let backing = filled(bytes as usize, 0)?.into_boxed_slice();
         let mappings = filled(GUEST_PAGES, 0)?.into_boxed_slice();
-        let permissions = filled(resident_pages as usize, Permissions::NONE)?.into_boxed_slice();
+        let permissions = filled(GUEST_PAGES, Permissions::NONE)?.into_boxed_slice();
+        let mapping_versions = filled(GUEST_PAGES, 0)?.into_boxed_slice();
+        let references = filled(resident_pages as usize, 0)?.into_boxed_slice();
+        let executable_views = filled(resident_pages as usize, 0)?.into_boxed_slice();
         let versions = filled(resident_pages as usize, PageVersion::default())?.into_boxed_slice();
         let mut free = Vec::new();
         free.try_reserve_exact(resident_pages as usize)
@@ -88,6 +105,10 @@ impl AddressSpace {
             backing,
             mappings,
             permissions,
+            mapping_versions,
+            references,
+            executable_views,
+            private_slots: None,
             free,
             identity: new_identity()?,
             version: 0,
@@ -97,7 +118,7 @@ impl AddressSpace {
     }
 
     pub fn capacity_pages(&self) -> u32 {
-        self.permissions.len() as u32
+        self.references.len() as u32
     }
 
     pub fn mapped_pages(&self) -> u32 {
@@ -155,7 +176,10 @@ impl AddressSpace {
             let slot = self.free.pop().unwrap();
             let offset = slot as usize * PAGE_SIZE as usize;
             self.backing[offset..offset + PAGE_SIZE as usize].fill(0);
-            self.permissions[slot as usize] = permissions;
+            self.permissions[page] = permissions;
+            self.mapping_versions[page] = version;
+            self.references[slot as usize] = 1;
+            self.executable_views[slot as usize] = u32::from(permissions.allows(Access::Execute));
             self.versions[slot as usize] = PageVersion {
                 mapping: version,
                 content: version,
@@ -175,8 +199,7 @@ impl AddressSpace {
         self.code_validation_version = version;
         for page in range.indices() {
             let slot = self.mappings[page] as usize - 1;
-            self.permissions[slot] = permissions;
-            self.versions[slot].mapping = version;
+            self.change_permissions(page, slot, permissions, version);
         }
         Ok(())
     }
@@ -189,7 +212,7 @@ impl AddressSpace {
                 address: page_address(page),
             });
         }
-        Ok(self.permissions[mapping as usize - 1])
+        Ok(self.permissions[page])
     }
 
     pub(crate) fn mapping_version_at(&self, address: GuestAddress) -> Result<u64, MemoryError> {
@@ -200,7 +223,7 @@ impl AddressSpace {
                 address: page_address(page),
             });
         }
-        Ok(self.versions[mapping as usize - 1].mapping)
+        Ok(self.mapping_versions[page])
     }
 
     pub(crate) fn protect_with_word_write32(
@@ -216,8 +239,7 @@ impl AddressSpace {
         self.code_validation_version = version;
         for page in range.indices() {
             let slot = self.mappings[page] as usize - 1;
-            self.permissions[slot] = permissions;
-            self.versions[slot].mapping = version;
+            self.change_permissions(page, slot, permissions, version);
         }
         Ok(())
     }
@@ -226,10 +248,7 @@ impl AddressSpace {
         self.require_mapped(range)?;
         self.code_validation_version = self.advance_version()?;
         for page in range.indices() {
-            let slot = self.mappings[page] - 1;
-            self.mappings[page] = 0;
-            self.permissions[slot as usize] = Permissions::NONE;
-            self.free.push(slot);
+            self.release_mapping(page);
         }
         Ok(())
     }
@@ -271,12 +290,13 @@ impl AddressSpace {
         if input.len() <= PAGE_SIZE as usize - within {
             // retain the permission-checked slot through one-page publication.
             let page = address.0 as usize / PAGE_SIZE as usize;
-            let slot = self.access_slot(page, address, Access::Write)?;
+            self.access_slot(page, address, Access::Write)?;
             let version = self.advance_version()?;
+            let slot = self.writable_slot(page, version);
             let offset = slot * PAGE_SIZE as usize + within;
             self.backing[offset..offset + input.len()].copy_from_slice(input);
             self.versions[slot].content = version;
-            if self.permissions[slot].allows(Access::Execute) {
+            if self.executable_views[slot] != 0 {
                 self.code_validation_version = version;
             }
             return Ok(());
@@ -427,11 +447,11 @@ impl AddressSpace {
             let page = current as usize / PAGE_SIZE as usize;
             let within = current as usize % PAGE_SIZE as usize;
             let count = (PAGE_SIZE as usize - within).min(input.len() - copied);
-            let slot = self.mappings[page] as usize - 1;
+            let slot = self.writable_slot(page, version);
             let offset = slot * PAGE_SIZE as usize + within;
             self.backing[offset..offset + count].copy_from_slice(&input[copied..copied + count]);
             self.versions[slot].content = version;
-            if self.permissions[slot].allows(Access::Execute) {
+            if self.executable_views[slot] != 0 {
                 self.code_validation_version = version;
             }
             copied += count;
@@ -502,7 +522,7 @@ impl AddressSpace {
             return Err(fault(address, access, FaultReason::Unmapped));
         }
         let slot = mapping as usize - 1;
-        if !self.permissions[slot].allows(access) {
+        if !self.permissions[page].allows(access) {
             return Err(fault(address, access, FaultReason::Permission));
         }
         Ok(slot)

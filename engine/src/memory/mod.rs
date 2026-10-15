@@ -9,6 +9,6 @@ pub use address::{
 };
 pub use code::CodeSnapshot;
 pub use space::AddressSpace;
-pub(crate) use space::PageInitialization;
+pub(crate) use space::{PageInitialization, PreparedSharedPages, SharedPages};
 
 pub(crate) use paging::{PagingBacking32, PagingCheckError32};

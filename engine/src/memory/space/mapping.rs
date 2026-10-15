@@ -50,7 +50,11 @@ impl AddressSpace {
             let target = &mut self.backing[offset..offset + PAGE_SIZE as usize];
             target[..page.bytes.len()].copy_from_slice(page.bytes);
             target[page.bytes.len()..].fill(0);
-            self.permissions[slot] = page.permissions;
+            let guest_page = (page.address.0 / PAGE_SIZE) as usize;
+            self.permissions[guest_page] = page.permissions;
+            self.mapping_versions[guest_page] = version;
+            self.references[slot] = 1;
+            self.executable_views[slot] = u32::from(page.permissions.allows(Access::Execute));
             self.versions[slot] = PageVersion {
                 mapping: version,
                 content: version,
@@ -112,10 +116,7 @@ impl AddressSpace {
         }
         for range in ranges {
             for page in range.indices() {
-                let slot = self.mappings[page] - 1;
-                self.mappings[page] = 0;
-                self.permissions[slot as usize] = Permissions::NONE;
-                self.free.push(slot);
+                self.release_mapping(page);
             }
         }
         Ok(())
