@@ -17,7 +17,7 @@ fn current_mappings_and_rwx_permissions_are_the_only_access_authority() {
     let facts = fault(memory.cpu_paging_check32(
         GuestAddress(0x1011),
         4,
-        PagingAccess32::Read,
+        Access::Read,
         PagingBacking32::Read,
     ));
     assert_eq!(
@@ -28,30 +28,25 @@ fn current_mappings_and_rwx_permissions_are_the_only_access_authority() {
         .map_zeroed(range(0x1000), Permissions::READ_WRITE)
         .unwrap();
     assert_eq!(
-        memory.cpu_paging_check32(
-            GuestAddress(0x1011),
-            4,
-            PagingAccess32::Read,
-            PagingBacking32::Read
-        ),
+        memory.cpu_paging_check32(GuestAddress(0x1011), 4, Access::Read, PagingBacking32::Read),
         Ok(())
     );
     let facts = fault(memory.cpu_paging_check32(
         GuestAddress(0x1011),
         4,
-        PagingAccess32::Execute,
+        Access::Execute,
         PagingBacking32::Execute,
     ));
     assert_eq!(
         (facts.linear(), facts.access(), facts.present()),
-        (GuestAddress(0x1011), PagingAccess32::Execute, true)
+        (GuestAddress(0x1011), Access::Execute, true)
     );
     memory.protect(range(0x1000), Permissions::EXECUTE).unwrap();
     assert_eq!(
         memory.cpu_paging_check32(
             GuestAddress(0x1011),
             4,
-            PagingAccess32::Execute,
+            Access::Execute,
             PagingBacking32::Execute
         ),
         Ok(())
@@ -60,7 +55,7 @@ fn current_mappings_and_rwx_permissions_are_the_only_access_authority() {
         fault(memory.cpu_paging_check32(
             GuestAddress(0x1011),
             4,
-            PagingAccess32::Read,
+            Access::Read,
             PagingBacking32::Read
         ))
         .present()
@@ -70,7 +65,7 @@ fn current_mappings_and_rwx_permissions_are_the_only_access_authority() {
         !fault(memory.cpu_paging_check32(
             GuestAddress(0x1011),
             4,
-            PagingAccess32::Execute,
+            Access::Execute,
             PagingBacking32::Execute
         ))
         .present()
@@ -84,13 +79,10 @@ fn rmw_checks_write_intent_and_required_read_access_before_any_payload() {
     let facts = fault(memory.cpu_paging_check32(
         GuestAddress(0x1011),
         4,
-        PagingAccess32::Write,
+        Access::Write,
         PagingBacking32::Read,
     ));
-    assert_eq!(
-        (facts.access(), facts.present()),
-        (PagingAccess32::Write, true)
-    );
+    assert_eq!((facts.access(), facts.present()), (Access::Write, true));
     memory
         .protect(range(0x1000), Permissions::from_bits(2).unwrap())
         .unwrap();
@@ -98,7 +90,7 @@ fn rmw_checks_write_intent_and_required_read_access_before_any_payload() {
         memory.cpu_paging_check32(
             GuestAddress(0x1011),
             4,
-            PagingAccess32::Write,
+            Access::Write,
             PagingBacking32::Write
         ),
         Ok(())
@@ -106,13 +98,10 @@ fn rmw_checks_write_intent_and_required_read_access_before_any_payload() {
     let facts = fault(memory.cpu_paging_check32(
         GuestAddress(0x1011),
         4,
-        PagingAccess32::Write,
+        Access::Write,
         PagingBacking32::Read,
     ));
-    assert_eq!(
-        (facts.access(), facts.present()),
-        (PagingAccess32::Write, true)
-    );
+    assert_eq!((facts.access(), facts.present()), (Access::Write, true));
 }
 
 #[test]
@@ -126,7 +115,7 @@ fn full_span_and_wrapping_access_report_the_first_denied_byte_without_side_effec
     let facts = fault(memory.cpu_paging_check32(
         GuestAddress(0x1fff),
         2,
-        PagingAccess32::Write,
+        Access::Write,
         PagingBacking32::Modify,
     ));
     assert_eq!(
@@ -136,7 +125,7 @@ fn full_span_and_wrapping_access_report_the_first_denied_byte_without_side_effec
     let facts = fault(memory.cpu_paging_check32(
         GuestAddress(0xfffffffe),
         4,
-        PagingAccess32::Read,
+        Access::Read,
         PagingBacking32::Read,
     ));
     assert_eq!((facts.linear(), facts.present()), (GuestAddress(0), false));
@@ -150,7 +139,7 @@ fn invalid_requests_stay_engine_errors_and_empty_spans_do_not_fault() {
         memory.cpu_paging_check32(
             GuestAddress(u32::MAX),
             0,
-            PagingAccess32::Read,
+            Access::Read,
             PagingBacking32::Read
         ),
         Ok(())
@@ -160,7 +149,7 @@ fn invalid_requests_stay_engine_errors_and_empty_spans_do_not_fault() {
         memory.cpu_paging_check32(
             GuestAddress(0),
             (1_usize << 32) + 1,
-            PagingAccess32::Read,
+            Access::Read,
             PagingBacking32::Read
         ),
         Err(PagingCheckError32::Memory(

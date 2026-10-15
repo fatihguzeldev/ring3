@@ -1,10 +1,7 @@
 use super::{AddressSpace, PAGE_SIZE, cpu::CpuSpan, page_address};
-use crate::{
-    cpu::x86::PagingAccess32,
-    memory::{
-        Access, GuestAddress,
-        paging::{PagingBacking32, PagingCheckError32, PagingFaultFacts32},
-    },
+use crate::memory::{
+    Access, GuestAddress,
+    paging::{PagingBacking32, PagingCheckError32, PagingFaultFacts32},
 };
 
 impl AddressSpace {
@@ -12,15 +9,10 @@ impl AddressSpace {
         &self,
         address: GuestAddress,
         length: usize,
-        access: PagingAccess32,
+        access: Access,
         backing: PagingBacking32,
     ) -> Result<(), PagingCheckError32> {
         let span = CpuSpan::new(address, length).map_err(PagingCheckError32::Memory)?;
-        let required = match access {
-            PagingAccess32::Read => Access::Read,
-            PagingAccess32::Write => Access::Write,
-            PagingAccess32::Execute => Access::Execute,
-        };
         let backing_access = match backing {
             PagingBacking32::Read => [Some(Access::Read), None],
             PagingBacking32::Write => [Some(Access::Write), None],
@@ -39,7 +31,7 @@ impl AddressSpace {
                 let mapping = self.mappings[page];
                 let present = mapping != 0;
                 if !present
-                    || !self.permissions[mapping as usize - 1].allows(required)
+                    || !self.permissions[mapping as usize - 1].allows(access)
                     || backing_access
                         .into_iter()
                         .flatten()

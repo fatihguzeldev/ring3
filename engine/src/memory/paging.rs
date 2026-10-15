@@ -1,13 +1,10 @@
-use crate::{
-    cpu::x86::PagingAccess32,
-    memory::{GuestAddress, MemoryError},
-};
+use super::{Access, GuestAddress, MemoryError};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct PagingFaultFacts32 {
     pub(super) identity: u64,
     pub(super) linear: GuestAddress,
-    pub(super) access: PagingAccess32,
+    pub(super) access: Access,
     pub(super) present: bool,
 }
 
@@ -18,7 +15,7 @@ impl PagingFaultFacts32 {
     pub(crate) const fn linear(self) -> GuestAddress {
         self.linear
     }
-    pub(crate) const fn access(self) -> PagingAccess32 {
+    pub(crate) const fn access(self) -> Access {
         self.access
     }
     pub(crate) const fn present(self) -> bool {
