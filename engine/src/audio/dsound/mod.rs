@@ -1,5 +1,6 @@
 mod api;
 mod buffer;
+mod capture;
 mod device;
 mod spatial;
 mod types;
@@ -9,6 +10,7 @@ pub use spatial::{Buffer3D, Listener3D, Vector3};
 pub use types::{BufferDescription, HResult, WaveFormat};
 
 pub use buffer::{Buffer, LockSpan};
+pub use capture::{CaptureProgress, CaptureRequest, CaptureRing, PreparedCaptureWrite};
 pub use device::Device;
 
 #[cfg(test)]

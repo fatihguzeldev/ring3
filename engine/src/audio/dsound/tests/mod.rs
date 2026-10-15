@@ -1,4 +1,5 @@
 mod buffers;
+mod capture;
 mod spatial;
 
 use super::*;
