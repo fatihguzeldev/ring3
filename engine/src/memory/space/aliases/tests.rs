@@ -159,3 +159,37 @@ fn alias_unmap_and_remap_never_revive_an_old_code_snapshot() {
         mapping
     );
 }
+
+#[test]
+fn heterogeneous_aliases_publish_together_and_keep_other_views_code_current() {
+    let mut memory = AddressSpace::new(2).unwrap();
+    let first = memory.allocate_shared_pages(1, &[0x90]).unwrap();
+    let prepared = memory.prepare_shared_pages(1, &[7]).unwrap();
+    let second = memory.commit_shared_pages(prepared);
+    memory
+        .map_shared_pages(
+            range(0x1000, 1),
+            &first,
+            0,
+            Permissions::READ_EXECUTE,
+            false,
+        )
+        .unwrap();
+    let code = memory.snapshot_code(GuestAddress(0x1000), 1).unwrap();
+    let version = memory.transaction_version();
+    memory
+        .map_shared_page_list(
+            range(0x4000, 2),
+            &[(&first, 0), (&second, 0)],
+            Permissions::READ_WRITE,
+            false,
+        )
+        .unwrap();
+    assert_eq!(memory.transaction_version(), version + 1);
+    assert!(
+        memory.is_code_current(&code),
+        "adding another alias does not replace the existing view mapping identity"
+    );
+    memory.write(GuestAddress(0x4000), &[0xc3]).unwrap();
+    assert!(!memory.is_code_current(&code));
+}

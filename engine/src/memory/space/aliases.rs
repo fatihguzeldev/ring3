@@ -12,12 +12,6 @@ pub(crate) struct PreparedSharedPages {
     bytes: Vec<u8>,
 }
 
-impl SharedPages {
-    pub(crate) fn page_count(&self) -> usize {
-        self.slots.len()
-    }
-}
-
 impl AddressSpace {
     pub(crate) fn find_alias_range(
         &self,
@@ -99,6 +93,7 @@ impl AddressSpace {
             slots: prepared.slots,
         }
     }
+    #[cfg(test)]
     pub(crate) fn allocate_shared_pages(
         &mut self,
         page_count: u32,
@@ -115,6 +110,7 @@ impl AddressSpace {
         Ok(())
     }
 
+    #[cfg(test)]
     pub(crate) fn map_shared_pages(
         &mut self,
         range: PageRange,
@@ -174,6 +170,25 @@ impl AddressSpace {
         Ok(())
     }
 
+    pub(crate) fn prepare_alias_capacity(
+        &mut self,
+        shared_pages: usize,
+        private_pages: usize,
+    ) -> Result<(), MemoryError> {
+        if shared_pages
+            .checked_add(private_pages)
+            .is_none_or(|count| count > self.free.len())
+        {
+            return Err(MemoryError::Capacity);
+        }
+        self.ensure_transaction_versions(1 + u64::from(shared_pages != 0))?;
+        if private_pages != 0 && self.private_slots.is_none() {
+            self.private_slots = Some(filled(GUEST_PAGES, 0)?.into_boxed_slice());
+        }
+        Ok(())
+    }
+
+    #[cfg(test)]
     pub(crate) fn map_shared_page_list(
         &mut self,
         range: PageRange,
@@ -181,10 +196,49 @@ impl AddressSpace {
         permissions: Permissions,
         copy_on_write: bool,
     ) -> Result<(), MemoryError> {
+        let mut rights = Vec::new();
+        rights
+            .try_reserve_exact(pages.len())
+            .map_err(|_| MemoryError::Allocation)?;
+        rights.extend(
+            pages
+                .iter()
+                .map(|&(pages, index)| (pages, index, permissions)),
+        );
+        self.map_shared_page_rights(range, &rights, copy_on_write)
+    }
+    pub(crate) fn protect_alias_pages(
+        &mut self,
+        pages: &[(GuestAddress, Permissions)],
+    ) -> Result<(), MemoryError> {
+        if pages.is_empty() {
+            return Err(MemoryError::InvalidRange);
+        }
+        for &(address, _) in pages {
+            if !address.0.is_multiple_of(PAGE_SIZE) {
+                return Err(MemoryError::InvalidRange);
+            }
+            self.require_mapped(PageRange::new(address, 1)?)?;
+        }
+        let version = self.advance_version()?;
+        self.code_validation_version = version;
+        for &(address, permissions) in pages {
+            let page = (address.0 / PAGE_SIZE) as usize;
+            let slot = self.mappings[page] as usize - 1;
+            self.change_permissions(page, slot, permissions, version);
+        }
+        Ok(())
+    }
+    pub(crate) fn map_shared_page_rights(
+        &mut self,
+        range: PageRange,
+        pages: &[(&SharedPages, usize, Permissions)],
+        copy_on_write: bool,
+    ) -> Result<(), MemoryError> {
         if range.count != pages.len() {
             return Err(MemoryError::InvalidRange);
         }
-        for (page, (owner, index)) in range.indices().zip(pages) {
+        for (page, (owner, index, _)) in range.indices().zip(pages) {
             self.validate_shared(owner)?;
             let slot = *owner.slots.get(*index).ok_or(MemoryError::InvalidRange)?;
             if self.mappings[page] != 0 {
@@ -208,12 +262,12 @@ impl AddressSpace {
         }
         let version = self.advance_version()?;
         self.code_validation_version = version;
-        for (page, (owner, index)) in range.indices().zip(pages) {
+        for (page, (owner, index, permissions)) in range.indices().zip(pages) {
             let slot = owner.slots[*index];
             self.references[slot as usize] += 1;
             self.executable_views[slot as usize] += u32::from(permissions.allows(Access::Execute));
             self.mappings[page] = slot + 1;
-            self.permissions[page] = permissions;
+            self.permissions[page] = *permissions;
             self.mapping_versions[page] = version;
             if copy_on_write {
                 let private = self.free.pop().unwrap();
@@ -260,12 +314,8 @@ impl AddressSpace {
     }
 
     fn validate_shared(&self, pages: &SharedPages) -> Result<(), MemoryError> {
-        if pages.identity != self.identity
-            || pages
-                .slots
-                .iter()
-                .any(|&slot| self.references[slot as usize] == 0)
-        {
+        // the non-clone owner keeps its physical references until consumed by release.
+        if pages.identity != self.identity {
             return Err(MemoryError::InvalidRange);
         }
         Ok(())

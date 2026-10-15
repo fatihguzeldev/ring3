@@ -5,7 +5,7 @@ mod cpu;
 mod mapping;
 mod paging;
 
-pub(crate) use aliases::{PreparedSharedPages, SharedPages};
+pub(crate) use aliases::SharedPages;
 pub(crate) use mapping::PageInitialization;
 
 use super::address::{ADDRESS_LIMIT, GUEST_PAGES};
