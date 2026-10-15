@@ -277,3 +277,7 @@ path = "tests/loader/modules/wasm.rs"
 [[test]]
 name = "graphics"
 path = "tests/graphics/native.rs"
+
+[[test]]
+name = "audio"
+path = "tests/audio/native.rs"
