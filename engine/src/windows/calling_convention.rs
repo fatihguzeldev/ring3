@@ -1,7 +1,24 @@
 use crate::{
-    cpu::x86::{Register32, State32},
+    cpu::x86::{Register32, SegmentAccess, SegmentContext, SegmentRegister, State32},
     memory::{AddressSpace, GuestAddress, MemoryError},
 };
+
+pub(crate) fn validate_call_context(context: &SegmentContext) -> Result<(), FrameError> {
+    let code = context.caches[SegmentRegister::Cs.index()];
+    let stack = context.caches[SegmentRegister::Ss.index()];
+    if [SegmentRegister::Cs, SegmentRegister::Ss]
+        .into_iter()
+        .any(|segment| context.state.bases[segment.index()] != 0)
+        || !code.default32()
+        || code.limit() != u32::MAX
+        || !stack.default32()
+        || stack.limit() != u32::MAX
+        || stack.check_span(0, 1, SegmentAccess::Write).is_err()
+    {
+        return Err(FrameError::InvalidRequest);
+    }
+    Ok(())
+}
 
 pub const MAX_STACK_WORDS: usize = 16;
 

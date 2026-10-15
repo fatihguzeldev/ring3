@@ -11,10 +11,7 @@ use crate::{
             encode_state_current as encode_state,
         },
     },
-    cpu::{
-        ExecutionExit, ExitReason,
-        x86::{SegmentAccess, SegmentRegister, State32},
-    },
+    cpu::{ExecutionExit, ExitReason, x86::State32},
     memory::MemoryError,
     windows::{CallFrame32, CallingConvention32, FrameError, MAX_STACK_WORDS, WindowsApi32},
 };
@@ -55,20 +52,8 @@ pub(in crate::process) struct PreparedCall32 {
 impl EngineInstance {
     pub(in crate::process::calls) fn require_flat_windows_segments(&self) -> Result<(), HostError> {
         let context = self.segment_context()?;
-        let code = context.caches[SegmentRegister::Cs.index()];
-        let stack = context.caches[SegmentRegister::Ss.index()];
-        if [SegmentRegister::Cs, SegmentRegister::Ss]
-            .into_iter()
-            .any(|segment| context.state.bases[segment.index()] != 0)
-            || !code.default32()
-            || code.limit() != u32::MAX
-            || !stack.default32()
-            || stack.limit() != u32::MAX
-            || stack.check_span(0, 1, SegmentAccess::Write).is_err()
-        {
-            return Err(HostError::Call(CallError::InvalidRequest));
-        }
-        Ok(())
+        crate::windows::validate_call_context(&context)
+            .map_err(|_| HostError::Call(CallError::InvalidRequest))
     }
 
     pub fn capture_active_resident_callback_call(

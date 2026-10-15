@@ -3,8 +3,8 @@ use std::collections::VecDeque;
 use super::{
     ModuleInitializerKind32, ModuleOperation32, ModuleRuntimeConfig32,
     initialization::{
-        InitStep, InitializerCall32, LoadCompletion, ModuleOperation, OperationPurpose,
-        PreparedInitializer, SavedModuleContext, load_steps,
+        InitStep, InitialModuleContext, InitializerCall32, LoadCompletion, ModuleOperation,
+        OperationPurpose, PreparedInitializer, SavedModuleContext, load_steps,
     },
     lifetime::ModuleReference,
     tls::InitialThreadTls,
@@ -158,7 +158,7 @@ impl EngineInstance {
             };
         }
         let initial_before = initial
-            .then(|| SavedModuleContext::capture(self.arena()))
+            .then(|| InitialModuleContext::capture(self))
             .transpose()?;
         let slots = self
             .modules
@@ -191,14 +191,6 @@ impl EngineInstance {
             .map_err(|_| HostError::Module(ModuleError32::Allocation))?;
         ready_arena.extend_from_slice(self.arena());
         if initial {
-            let selector = self.segment_context()?.state.selectors[SegmentRegister::Fs.index()];
-            let descriptor = self
-                .segment_descriptors
-                .raw_descriptor(selector)
-                .ok_or(HostError::Module(ModuleError32::InvalidRequest))?;
-            if !descriptor.code_data() && self.segment_descriptors.descriptor(selector).is_none() {
-                return Err(HostError::Module(ModuleError32::InvalidRequest));
-            }
             let mut state = State32 {
                 eip: root
                     .entry()
@@ -316,7 +308,7 @@ impl EngineInstance {
                     .sum(),
             });
             self.image_started = true;
-            let selector = self.segment_context()?.state.selectors[SegmentRegister::Fs.index()];
+            let selector = initial_before.as_ref().unwrap().fs_selector;
             self.segment_descriptors
                 .update_base(selector, self.modules.thread.as_ref().unwrap().teb())
                 .expect("initial thread descriptor was validated before module publication");
@@ -392,19 +384,7 @@ impl EngineInstance {
             initial_before: None,
             last_returned: 0,
         };
-        let result = self.advance_module_operation(operation);
-        if result.is_err()
-            && self
-                .modules
-                .operations
-                .last()
-                .is_some_and(|operation| operation.last_returned == 0 && operation.active.is_none())
-        {
-            let operation = self.modules.operations.pop().unwrap();
-            operation.saved.restore(self.arena.as_mut().get_mut());
-            self.pending_call = operation.outer;
-        }
-        result
+        self.begin_module_operation(operation)
     }
 
     pub fn detach_modules_for_exit(&mut self) -> Result<ModuleOperation32, HostError> {
@@ -447,7 +427,26 @@ impl EngineInstance {
             initial_before: None,
             last_returned: 0,
         };
-        self.advance_module_operation(operation)
+        self.begin_module_operation(operation)
+    }
+
+    fn begin_module_operation(
+        &mut self,
+        operation: ModuleOperation,
+    ) -> Result<ModuleOperation32, HostError> {
+        let result = self.advance_module_operation(operation);
+        if result.is_err()
+            && self
+                .modules
+                .operations
+                .last()
+                .is_some_and(|operation| operation.last_returned == 0 && operation.active.is_none())
+        {
+            let operation = self.modules.operations.pop().unwrap();
+            operation.saved.restore(self.arena.as_mut().get_mut());
+            self.pending_call = operation.outer;
+        }
+        result
     }
 
     pub(super) fn detach_steps(&self, ids: &[ModuleId32]) -> Result<VecDeque<InitStep>, HostError> {
@@ -591,10 +590,7 @@ impl EngineInstance {
                         .initial_before
                         .as_ref()
                         .ok_or(HostError::Infrastructure)?
-                        .restore(self.arena.as_mut().get_mut());
-                    self.segment_descriptors
-                        .update_base(0x3b, 0)
-                        .expect("default initial thread descriptor remains configured");
+                        .restore(self);
                     self.image = None;
                     self.image_started = false;
                 } else {
@@ -728,7 +724,7 @@ fn prepare_first_initializer(
                     reason,
                     reserved,
                 },
-                saved.state()?,
+                saved,
                 return_pc,
             )?;
             if let Some(InitStep::Tls { index, .. }) = steps.front_mut() {

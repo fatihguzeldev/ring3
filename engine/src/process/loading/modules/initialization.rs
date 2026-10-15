@@ -5,10 +5,14 @@ use crate::{
     abi::{
         arena::{EXIT_OFFSET, STATE_OFFSET},
         x86::{
-            EXIT_SIZE, STATE_SIZE, decode_exit, decode_state, encode_exit_v3, encode_state_current,
+            EXIT_SIZE, STATE_SIZE, decode_current_segment_context, decode_exit, decode_state,
+            encode_exit_v3, encode_state_current,
         },
     },
-    cpu::{ExecutionExit, ExitReason, x86::State32},
+    cpu::{
+        ExecutionExit, ExitReason,
+        x86::{SegmentRegister, State32},
+    },
     loader::{LoadedModule32, ModuleError32, ModuleId32},
     memory::GuestAddress,
     process::{
@@ -31,6 +35,7 @@ impl SavedModuleContext {
             .map_err(|_| HostError::Module(ModuleError32::InvalidRequest))?;
         decode_exit(&arena[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE])
             .map_err(|_| HostError::Module(ModuleError32::InvalidRequest))?;
+        let extended = ExtendedCpuState::capture(arena)?;
         Ok(Self {
             state: arena[STATE_OFFSET..STATE_OFFSET + STATE_SIZE]
                 .try_into()
@@ -38,7 +43,7 @@ impl SavedModuleContext {
             exit: arena[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE]
                 .try_into()
                 .unwrap(),
-            extended: ExtendedCpuState::capture(arena)?,
+            extended,
         })
     }
 
@@ -46,10 +51,63 @@ impl SavedModuleContext {
         decode_state(&self.state).map_err(|_| HostError::Infrastructure)
     }
 
+    fn validate_initializer_context(&self) -> Result<(), HostError> {
+        let context = decode_current_segment_context(
+            &self.extended.segments,
+            self.extended
+                .segment_bases
+                .as_ref()
+                .map(|bases| bases.as_slice()),
+        )
+        .map_err(|_| HostError::Module(ModuleError32::InvalidRequest))?;
+        crate::windows::validate_call_context(&context)
+            .map_err(|_| HostError::Module(ModuleError32::InvalidRequest))
+    }
+
     pub fn restore(&self, arena: &mut [u8]) {
         arena[STATE_OFFSET..STATE_OFFSET + STATE_SIZE].copy_from_slice(&self.state);
         arena[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE].copy_from_slice(&self.exit);
         self.extended.restore(arena);
+    }
+}
+
+pub(super) struct InitialModuleContext {
+    context: SavedModuleContext,
+    pub fs_selector: u16,
+    fs_descriptor_base: u32,
+}
+
+impl InitialModuleContext {
+    pub fn capture(engine: &EngineInstance) -> Result<Self, HostError> {
+        let context = SavedModuleContext::capture(engine.arena())?;
+        let fs_selector = engine.segment_context()?.state.selectors[SegmentRegister::Fs.index()];
+        let descriptor = engine
+            .segment_descriptors
+            .raw_descriptor(fs_selector)
+            .ok_or(HostError::Module(ModuleError32::InvalidRequest))?;
+        let fs_descriptor_base = descriptor
+            .code_data_base()
+            .or_else(|| {
+                engine
+                    .segment_descriptors
+                    .descriptor(fs_selector)
+                    .map(|descriptor| descriptor.base)
+            })
+            .ok_or(HostError::Module(ModuleError32::InvalidRequest))?;
+        Ok(Self {
+            context,
+            fs_selector,
+            fs_descriptor_base,
+        })
+    }
+
+    pub fn restore(&self, engine: &mut EngineInstance) {
+        // the descriptor base and loaded cache may differ before thread startup.
+        engine
+            .segment_descriptors
+            .update_base(self.fs_selector, self.fs_descriptor_base)
+            .expect("initial thread descriptor remains configured during rollback");
+        self.context.restore(engine.arena.as_mut().get_mut());
     }
 }
 
@@ -98,7 +156,7 @@ pub(super) struct ModuleOperation {
     pub active: Option<ModuleInitializer32>,
     pub saved: SavedModuleContext,
     pub outer: Option<PendingCall>,
-    pub initial_before: Option<SavedModuleContext>,
+    pub initial_before: Option<InitialModuleContext>,
     pub last_returned: u64,
 }
 
@@ -121,11 +179,12 @@ impl PreparedInitializer {
         token: u64,
         module: &LoadedModule32,
         call: InitializerCall32,
-        state: State32,
+        saved: &SavedModuleContext,
         return_pc: u32,
     ) -> Result<Self, HostError> {
+        saved.validate_initializer_context()?;
         let frame = CallbackFrame32::prepare(
-            state,
+            saved.state()?,
             call.entry,
             return_pc,
             &[module.base(), call.reason, call.reserved],
@@ -388,7 +447,7 @@ impl EngineInstance {
                         reason,
                         reserved,
                     },
-                    operation.saved.state()?,
+                    &operation.saved,
                     return_pc,
                 )
                 .map(Some)
