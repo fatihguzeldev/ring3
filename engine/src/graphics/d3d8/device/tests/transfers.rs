@@ -41,7 +41,10 @@ fn device_loss_cancels_pending_readbacks_and_rejects_late_host_bytes() {
             device.complete_readback(request, generation, &[1; 1024]),
             Err(DeviceError::StaleReadback)
         );
-        assert_eq!(device.resources().bytes(surface), Err(ResourceError::ReadbackRequired));
+        assert_eq!(
+            device.resources().bytes(surface),
+            Err(ResourceError::ReadbackRequired)
+        );
     }
 }
 

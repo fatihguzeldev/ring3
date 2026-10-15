@@ -68,8 +68,13 @@ fn invalid_failure_payload_and_identity_leave_output_untouched() {
 #[test]
 fn staged_header_pins_large_length_without_accepting_overflow_or_failure_bytes() {
     let receipt = ReadbackReceipt {
-        id: ReadbackId { epoch: 1, sequence: 2 }, source: source(),
-        status: ReadbackStatus::Complete, bytes: &[0; 8192],
+        id: ReadbackId {
+            epoch: 1,
+            sequence: 2,
+        },
+        source: source(),
+        status: ReadbackStatus::Complete,
+        bytes: &[0; 8192],
     };
     let mut bytes = [0; 8256];
     encode_readback_receipt(receipt, &mut bytes).unwrap();
@@ -81,5 +86,8 @@ fn staged_header_pins_large_length_without_accepting_overflow_or_failure_bytes()
     assert_eq!(readback_header(&bytes[..64]), Err(CodecError::Length));
     bytes[12..16].copy_from_slice(&8192u32.to_le_bytes());
     bytes[60..64].copy_from_slice(&1u32.to_le_bytes());
-    assert_eq!(readback_header(&bytes[..64]), Err(CodecError::InvalidCommand));
+    assert_eq!(
+        readback_header(&bytes[..64]),
+        Err(CodecError::InvalidCommand)
+    );
 }

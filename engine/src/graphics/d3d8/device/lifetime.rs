@@ -232,7 +232,9 @@ impl Device {
             .queue
             .submit(&Command::DeviceEvent { generation, event })?;
         self.status = status;
-        if matches!(status,DeviceStatus::Lost|DeviceStatus::Removed) {self.readbacks.clear();}
+        if matches!(status, DeviceStatus::Lost | DeviceStatus::Removed) {
+            self.readbacks.clear();
+        }
         Ok(Outcome::new((), progress))
     }
 

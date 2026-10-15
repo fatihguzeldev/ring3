@@ -7,8 +7,8 @@ mod modules;
 mod provider;
 
 pub mod com;
-pub mod window;
 pub mod user32;
+pub mod window;
 
 pub(crate) use api::ProviderProfile;
 pub use api::WindowsApi32;

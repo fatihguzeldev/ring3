@@ -13,10 +13,18 @@ pub fn system_module(preferred_base: u32) -> SystemModule32 {
                 name: None,
                 ordinal: None,
                 target: SystemExportTarget32::PrivateGate(
-                    MethodGate { interface, slot: slot as u8 }.id(),
+                    MethodGate {
+                        interface,
+                        slot: slot as u8,
+                    }
+                    .id(),
                 ),
             });
         }
     }
-    SystemModule32 { name: "d3d8.dll".into(), preferred_base, exports }
+    SystemModule32 {
+        name: "d3d8.dll".into(),
+        preferred_base,
+        exports,
+    }
 }

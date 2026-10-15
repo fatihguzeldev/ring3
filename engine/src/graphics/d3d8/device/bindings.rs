@@ -320,7 +320,12 @@ fn handles(values: impl Iterator<Item = u32>) -> Result<Vec<u32>, DeviceError> {
 
 fn prepared_value<T>(value: T) -> Result<Box<[T; 1]>, DeviceError> {
     let mut storage = Vec::new();
-    storage.try_reserve_exact(1).map_err(|_| DeviceError::Allocation)?;
+    storage
+        .try_reserve_exact(1)
+        .map_err(|_| DeviceError::Allocation)?;
     storage.push(value);
-    Ok(storage.into_boxed_slice().try_into().unwrap_or_else(|_| unreachable!("one prepared value")))
+    Ok(storage
+        .into_boxed_slice()
+        .try_into()
+        .unwrap_or_else(|_| unreachable!("one prepared value")))
 }

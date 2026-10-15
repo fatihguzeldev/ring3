@@ -1,7 +1,7 @@
 mod allocation;
 mod lifetime;
-mod publication;
 mod prepared;
+mod publication;
 pub(crate) use prepared::PreparedGuestLifetime32;
 
 use crate::{

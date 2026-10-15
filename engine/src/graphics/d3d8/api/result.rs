@@ -1,4 +1,4 @@
-/// HRESULT values shared by the D3D8 engine and its guest adapter.
+/// hresult values shared by the D3D8 engine and its guest adapter.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct HResult(pub u32);
 

@@ -14,12 +14,17 @@ pub struct DisplayMode32 {
 
 impl DisplayMode32 {
     pub const fn words(self) -> [u32; 4] {
-        [self.width, self.height, self.refresh_rate, self.format as u32]
+        [
+            self.width,
+            self.height,
+            self.refresh_rate,
+            self.format as u32,
+        ]
     }
 }
 
-/// Engine/backend contract, never a probe of the browser's physical adapter.
-/// A host selects this profile before guest device creation and must implement
+/// engine/backend contract, never a probe of the browser's physical adapter.
+/// a host selects this profile before guest device creation and must implement
 /// its semantic command stream, including the advertised sampling modes.
 #[derive(Clone, Debug)]
 pub struct AdapterProfile32 {
@@ -34,42 +39,96 @@ pub struct AdapterProfile32 {
 }
 
 impl AdapterProfile32 {
-    pub fn validate(&self)->Result<(),HResult> {
-        if self.modes.is_empty()||self.modes.len()>256||!self.modes.contains(&self.display)
-            || !(1..=16_384).contains(&self.max_texture_extent)||!(1..=2048).contains(&self.max_volume_extent)
-            || !(1..=16).contains(&self.max_anisotropy)||self.multisamples&1==0||self.multisamples&!0x1_fffd!=0
-            || self.presentation_intervals&1==0||self.presentation_intervals&!0x8000_000f!=0
-            || self.modes.iter().any(|mode|mode.width==0||mode.height==0||mode.width>16_384||mode.height>16_384
-                ||mode.refresh_rate==0||!is_display_format(mode.format))
-        {Err(HResult::INVALID_CALL)} else {Ok(())}
+    pub fn validate(&self) -> Result<(), HResult> {
+        if self.modes.is_empty()
+            || self.modes.len() > 256
+            || !self.modes.contains(&self.display)
+            || !(1..=16_384).contains(&self.max_texture_extent)
+            || !(1..=2048).contains(&self.max_volume_extent)
+            || !(1..=16).contains(&self.max_anisotropy)
+            || self.multisamples & 1 == 0
+            || self.multisamples & !0x1_fffd != 0
+            || self.presentation_intervals & 1 == 0
+            || self.presentation_intervals & !0x8000_000f != 0
+            || self.modes.iter().any(|mode| {
+                mode.width == 0
+                    || mode.height == 0
+                    || mode.width > 16_384
+                    || mode.height > 16_384
+                    || mode.refresh_rate == 0
+                    || !is_display_format(mode.format)
+            })
+        {
+            Err(HResult::INVALID_CALL)
+        } else {
+            Ok(())
+        }
     }
     pub fn new(display: DisplayMode32, modes: Vec<DisplayMode32>) -> Result<Self, HResult> {
-        if modes.is_empty() || modes.len() > 256 || !modes.contains(&display)
-            || modes.iter().any(|mode| mode.width == 0 || mode.height == 0
-                || mode.width > 16_384 || mode.height > 16_384
-                || mode.refresh_rate == 0 || !is_display_format(mode.format))
-        { return Err(HResult::INVALID_CALL); }
-        Ok(Self { display, modes, max_texture_extent: 16_384, max_volume_extent: 2_048,
-            max_anisotropy: 16, multisamples: 1, presentation_intervals: 0x8000_000f,
-            read_scanline: false })
+        if modes.is_empty()
+            || modes.len() > 256
+            || !modes.contains(&display)
+            || modes.iter().any(|mode| {
+                mode.width == 0
+                    || mode.height == 0
+                    || mode.width > 16_384
+                    || mode.height > 16_384
+                    || mode.refresh_rate == 0
+                    || !is_display_format(mode.format)
+            })
+        {
+            return Err(HResult::INVALID_CALL);
+        }
+        Ok(Self {
+            display,
+            modes,
+            max_texture_extent: 16_384,
+            max_volume_extent: 2_048,
+            max_anisotropy: 16,
+            multisamples: 1,
+            presentation_intervals: 0x8000_000f,
+            read_scanline: false,
+        })
     }
 
-    pub fn check_device_type(&self, adapter: Format, target: Format, windowed: bool) -> Result<(), HResult> {
-        if !is_display_format(adapter) || !is_render_format(target)
+    pub fn check_device_type(
+        &self,
+        adapter: Format,
+        target: Format,
+        windowed: bool,
+    ) -> Result<(), HResult> {
+        if !is_display_format(adapter)
+            || !is_render_format(target)
             || windowed && adapter != self.display.format
             || !compatible_display(adapter, target)
-        { Err(HResult::NOT_AVAILABLE) } else { Ok(()) }
+        {
+            Err(HResult::NOT_AVAILABLE)
+        } else {
+            Ok(())
+        }
     }
 
-    pub fn check_format(&self, usage: Usage, resource_type: u32, format: Format) -> Result<(), HResult> {
+    pub fn check_format(
+        &self,
+        usage: Usage,
+        resource_type: u32,
+        format: Format,
+    ) -> Result<(), HResult> {
         if usage.0 & !Usage::KNOWN != 0 || !(1..=5).contains(&resource_type) {
             return Err(HResult::INVALID_CALL);
         }
         if usage.0 & (Usage::RT_PATCHES | Usage::NP_PATCHES) != 0 {
             return Err(HResult::NOT_AVAILABLE);
         }
-        let allowed=match resource_type {1=>3,2|4=>Usage::DYNAMIC,3|5=>3|Usage::DYNAMIC,_=>0};
-        if usage.0 & !allowed!=0 {return Err(HResult::NOT_AVAILABLE);}
+        let allowed = match resource_type {
+            1 => 3,
+            2 | 4 => Usage::DYNAMIC,
+            3 | 5 => 3 | Usage::DYNAMIC,
+            _ => 0,
+        };
+        if usage.0 & !allowed != 0 {
+            return Err(HResult::NOT_AVAILABLE);
+        }
         let available = match resource_type {
             1 => !format.is_buffer(),
             2 => !format.is_buffer() && !format.is_depth() && usage.0 & 3 == 0,
@@ -79,21 +138,35 @@ impl AdapterProfile32 {
             7 => matches!(format, Format::Index16 | Format::Index32) && usage.0 & 3 == 0,
             _ => false,
         };
-        if !available || usage.contains(Usage::RENDER_TARGET) && !is_render_format(format)
+        if !available
+            || usage.contains(Usage::RENDER_TARGET) && !is_render_format(format)
             || usage.contains(Usage::DEPTH_STENCIL) != format.is_depth()
             || usage.contains(Usage::RENDER_TARGET | Usage::DEPTH_STENCIL)
-        { Err(HResult::NOT_AVAILABLE) } else { Ok(()) }
+        {
+            Err(HResult::NOT_AVAILABLE)
+        } else {
+            Ok(())
+        }
     }
 
     pub fn check_multisample(&self, format: Format, sample: u32) -> Result<(), HResult> {
-        if sample == 1 || sample > 16 { return Err(HResult::INVALID_CALL); }
-        if !is_render_format(format) && !format.is_depth() || self.multisamples & (1 << sample) == 0 {
+        if sample == 1 || sample > 16 {
+            return Err(HResult::INVALID_CALL);
+        }
+        if !is_render_format(format) && !format.is_depth() || self.multisamples & (1 << sample) == 0
+        {
             Err(HResult::NOT_AVAILABLE)
-        } else { Ok(()) }
+        } else {
+            Ok(())
+        }
     }
 
     pub fn check_depth_stencil(&self, color: Format, depth: Format) -> Result<(), HResult> {
-        if is_render_format(color) && depth.is_depth() { Ok(()) } else { Err(HResult::NOT_AVAILABLE) }
+        if is_render_format(color) && depth.is_depth() {
+            Ok(())
+        } else {
+            Err(HResult::NOT_AVAILABLE)
+        }
     }
 
     pub fn caps(&self) -> [u32; CAPS_WORDS] {
@@ -114,20 +187,42 @@ impl AdapterProfile32 {
         caps[14] = 0x84208;
         caps[15] = 0x1ecc5; // cube/volume/mip, alpha, projected, unrestricted NPOT.
         caps[16] = 0x0703_0700;
-        caps[17] = caps[16]; caps[18] = caps[16];
-        caps[19] = 0x3f; caps[20] = 0x3f; caps[21] = 0x1f;
-        caps[22] = self.max_texture_extent; caps[23] = self.max_texture_extent;
+        caps[17] = caps[16];
+        caps[18] = caps[16];
+        caps[19] = 0x3f;
+        caps[20] = 0x3f;
+        caps[21] = 0x1f;
+        caps[22] = self.max_texture_extent;
+        caps[23] = self.max_texture_extent;
         caps[24] = self.max_volume_extent;
-        caps[25] = 32_768; caps[26] = self.max_texture_extent; caps[27] = self.max_anisotropy;
+        caps[25] = 32_768;
+        caps[26] = self.max_texture_extent;
+        caps[27] = self.max_anisotropy;
         caps[28] = 1.0e10f32.to_bits();
-        for slot in [29, 30] { caps[slot] = (-32_768.0f32).to_bits(); }
-        for slot in [31, 32] { caps[slot] = 32_768.0f32.to_bits(); }
-        caps[34] = 0xff; caps[35] = 0x0018_0008;
-        caps[36] = 0x03ff_ffff; caps[37] = 8; caps[38] = 8;
-        caps[39] = 0x7b; caps[40] = 8; caps[41] = 6; caps[42] = 4; caps[43] = 255;
-        caps[44] = 64.0f32.to_bits(); caps[45] = 0x00ff_ffff; caps[46] = 0x00ff_ffff;
-        caps[47] = 16; caps[48] = 255;
-        caps[49] = 0xfffe_0101; caps[50] = 96; caps[51] = 0xffff_0104;
+        for slot in [29, 30] {
+            caps[slot] = (-32_768.0f32).to_bits();
+        }
+        for slot in [31, 32] {
+            caps[slot] = 32_768.0f32.to_bits();
+        }
+        caps[34] = 0xff;
+        caps[35] = 0x0018_0008;
+        caps[36] = 0x03ff_ffff;
+        caps[37] = 8;
+        caps[38] = 8;
+        caps[39] = 0x7b;
+        caps[40] = 8;
+        caps[41] = 6;
+        caps[42] = 4;
+        caps[43] = 255;
+        caps[44] = 64.0f32.to_bits();
+        caps[45] = 0x00ff_ffff;
+        caps[46] = 0x00ff_ffff;
+        caps[47] = 16;
+        caps[48] = 255;
+        caps[49] = 0xfffe_0101;
+        caps[50] = 96;
+        caps[51] = 0xffff_0104;
         caps[52] = 8.0f32.to_bits();
         caps
     }
@@ -144,14 +239,24 @@ impl AdapterProfile32 {
 }
 
 pub fn is_display_format(format: Format) -> bool {
-    matches!(format, Format::R5G6B5 | Format::X1R5G5B5 | Format::X8R8G8B8 | Format::A2B10G10R10)
+    matches!(
+        format,
+        Format::R5G6B5 | Format::X1R5G5B5 | Format::X8R8G8B8 | Format::A2B10G10R10
+    )
 }
 
 pub fn is_render_format(format: Format) -> bool {
-    is_display_format(format) || matches!(format, Format::A8R8G8B8 | Format::A1R5G5B5 | Format::A4R4G4B4 | Format::X4R4G4B4)
+    is_display_format(format)
+        || matches!(
+            format,
+            Format::A8R8G8B8 | Format::A1R5G5B5 | Format::A4R4G4B4 | Format::X4R4G4B4
+        )
 }
 
 pub(super) fn compatible_display(display: Format, target: Format) -> bool {
-    display == target || matches!((display, target),
-        (Format::X8R8G8B8, Format::A8R8G8B8) | (Format::X1R5G5B5, Format::A1R5G5B5))
+    display == target
+        || matches!(
+            (display, target),
+            (Format::X8R8G8B8, Format::A8R8G8B8) | (Format::X1R5G5B5, Format::A1R5G5B5)
+        )
 }

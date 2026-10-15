@@ -136,24 +136,55 @@ fn coissue_sources_read_the_preceding_pair_input_state() {
 
 #[test]
 fn legacy_texture_arithmetic_initializes_only_written_lanes() {
-    let partial = [0xffff_0101,
-        1, destination(3, 0, 7), source(1, 0),
-        1, destination(0, 0, 15), source(3, 0), 0xffff];
-    assert_eq!(Program::parse(&partial, Stage::Pixel).unwrap_err(), ShaderError::UninitializedRegister);
-    let selected = [0xffff_0101,
-        1, destination(3, 0, 7), source(1, 0),
-        1, destination(0, 0, 7), source(3, 0),
-        1, destination(0, 0, 8), source(1, 0), 0xffff];
+    let partial = [
+        0xffff_0101,
+        1,
+        destination(3, 0, 7),
+        source(1, 0),
+        1,
+        destination(0, 0, 15),
+        source(3, 0),
+        0xffff,
+    ];
+    assert_eq!(
+        Program::parse(&partial, Stage::Pixel).unwrap_err(),
+        ShaderError::UninitializedRegister
+    );
+    let selected = [
+        0xffff_0101,
+        1,
+        destination(3, 0, 7),
+        source(1, 0),
+        1,
+        destination(0, 0, 7),
+        source(3, 0),
+        1,
+        destination(0, 0, 8),
+        source(1, 0),
+        0xffff,
+    ];
     assert!(Program::parse(&selected, Stage::Pixel).is_ok());
 }
 
 #[test]
 fn legacy_texture_coissue_reads_the_input_before_both_instructions() {
-    let paired = [0xffff_0101,
-        1, destination(0, 0, 7), source(1, 0),
-        1, destination(3, 0, 7), source(1, 0),
-        0x4000_0001, destination(0, 0, 8), 0xb0aa_0000, 0xffff];
-    assert_eq!(Program::parse(&paired, Stage::Pixel).unwrap_err(), ShaderError::UninitializedRegister);
+    let paired = [
+        0xffff_0101,
+        1,
+        destination(0, 0, 7),
+        source(1, 0),
+        1,
+        destination(3, 0, 7),
+        source(1, 0),
+        0x4000_0001,
+        destination(0, 0, 8),
+        0xb0aa_0000,
+        0xffff,
+    ];
+    assert_eq!(
+        Program::parse(&paired, Stage::Pixel).unwrap_err(),
+        ShaderError::UninitializedRegister
+    );
     let mut initialized = vec![0xffff_0101, 66, destination(3, 0, 15)];
     initialized.extend_from_slice(&paired[1..]);
     assert!(Program::parse(&initialized, Stage::Pixel).is_ok());
@@ -161,9 +192,19 @@ fn legacy_texture_coissue_reads_the_input_before_both_instructions() {
 
 #[test]
 fn legacy_texture_address_instructions_require_the_full_destination_mask() {
-    let masked = [0xffff_0101, 66, destination(3, 0, 7),
-        1, destination(0, 0, 15), source(3, 0), 0xffff];
-    assert_eq!(Program::parse(&masked, Stage::Pixel).unwrap_err(), ShaderError::InvalidModifier);
+    let masked = [
+        0xffff_0101,
+        66,
+        destination(3, 0, 7),
+        1,
+        destination(0, 0, 15),
+        source(3, 0),
+        0xffff,
+    ];
+    assert_eq!(
+        Program::parse(&masked, Stage::Pixel).unwrap_err(),
+        ShaderError::InvalidModifier
+    );
 }
 
 #[test]

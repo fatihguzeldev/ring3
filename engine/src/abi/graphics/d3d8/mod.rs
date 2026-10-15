@@ -10,8 +10,8 @@ pub use packet::{
     BatchHeader, Fragment, FragmentIter, append_fragment, packet, write_batch_header,
 };
 pub use readback::HEADER_SIZE as READBACK_HEADER_SIZE;
-pub use readback::{ReadbackReceipt, ReadbackStatus, encode_readback_receipt, readback_receipt};
 pub use readback::{ReadbackHeader, readback_header};
+pub use readback::{ReadbackReceipt, ReadbackStatus, encode_readback_receipt, readback_receipt};
 
 pub const BATCH_HEADER_SIZE: usize = 64;
 pub const FRAGMENT_HEADER_SIZE: usize = 32;

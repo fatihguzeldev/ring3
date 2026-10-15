@@ -124,7 +124,8 @@ impl D3D8Runtime32 {
             if let Some(ObjectKind32::Resource(resource)) = self.records[identity.payload as usize]
                 .as_ref()
                 .map(|object| &object.kind)
-                && resource.device == pointer && !disposal.contains(&resource.resource)
+                && resource.device == pointer
+                && !disposal.contains(&resource.resource)
             {
                 disposal.push(resource.resource);
             }
@@ -132,8 +133,8 @@ impl D3D8Runtime32 {
         for garbage in &self.garbage {
             if let Garbage32::Resource { device, resource } = *garbage
                 && device == pointer
-                    && !self.live_resource_identity(resource)
-                    && !disposal.contains(&resource)
+                && !self.live_resource_identity(resource)
+                && !disposal.contains(&resource)
             {
                 disposal.push(resource);
             }

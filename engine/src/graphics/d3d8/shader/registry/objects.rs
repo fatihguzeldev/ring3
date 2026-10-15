@@ -13,11 +13,7 @@ impl VertexShader {
             .constants()
             .iter()
             .map(|(index, value)| (u32::from(*index), *value))
-            .chain(
-                self.function
-                    .iter()
-                    .flat_map(definitions),
-            )
+            .chain(self.function.iter().flat_map(definitions))
     }
 
     pub(super) fn retained_bytes(&self) -> usize {

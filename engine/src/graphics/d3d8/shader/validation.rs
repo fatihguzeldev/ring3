@@ -184,10 +184,16 @@ pub(super) fn validate(version: Version, instructions: &[Instruction]) -> Result
                 && version.minor < 4
                 && source.register.file == RegisterFile::Texture
             {
-                let needed = swizzled_mask(*source, read_mask(
-                    operation, source_index,
-                    instruction.destination.map_or(15, |destination| destination.write_mask),
-                ));
+                let needed = swizzled_mask(
+                    *source,
+                    read_mask(
+                        operation,
+                        source_index,
+                        instruction
+                            .destination
+                            .map_or(15, |destination| destination.write_mask),
+                    ),
+                );
                 if read_texture_initialized[source.register.index as usize] & needed != needed {
                     return Err(ShaderError::UninitializedRegister);
                 }
