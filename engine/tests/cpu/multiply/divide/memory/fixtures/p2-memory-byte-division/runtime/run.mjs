@@ -1,3 +1,5 @@
+import {pageFaultExit,pageFaultPacket} from '../../../../../../../support/wasm/page-fault.mjs';
+import {generatedImports, attachDetectionApi} from '../../../../../../../support/wasm/binding.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
@@ -53,7 +55,9 @@ function program(name) {
 }
 function fresh(owner, entries, name) {
   const instance = new WebAssembly.Instance(engineModule, {}), names = ['open', 'close', 'arena_ptr', 'map', 'unmap', 'protect', 'upload', 'compile', 'compile_entries', 'compile_resident', 'compile_resident_entries', 'generation', 'module_ptr', 'module_len', 'guard', 'guard_resident', 'read8'];
-  const api = Object.fromEntries(names.map(n => [n, instance.exports[`ring3_abi_v1_${n}`]])); for (const fn of Object.values(api)) assert.equal(typeof fn, 'function');
+  const api = Object.fromEntries(names.map(n => [n, instance.exports[`ring3_abi_v1_${n}`]]));
+ attachDetectionApi(api, instance.exports);
+  api.cpu_read8=instance.exports.ring3_abi_v1_cpu_read8;assert.equal(api.cpu_read8.length,1); for (const fn of Object.values(api)) assert.equal(typeof fn, 'function');
   const c = {owner, entries, name, label: `${owner}-${entries ? 'entries' : 'extent'}-${name}`, api, memory: instance.exports.memory, low: ++stats.contexts, high: 0xc9486000};
   assert.equal(api.open(4, c.low, c.high), 0); c.base = api.arena_ptr() >>> 0; assert.deepEqual(arena(c), initial);
   pure(c, () => api.map(PC, 1, 7)); for (const at of [DATA, ALIAS, TOP]) map(c, at);
@@ -68,13 +72,21 @@ function fresh(owner, entries, name) {
     before.set(words([1, 24, binding.low, binding.high, binding.pointer, binding.length]), TRANSFER); assert.deepEqual(arena(c), before);
   }
   const generated = Buffer.from(refresh(c).bytes.subarray(binding.pointer, binding.pointer + binding.length)), module = new WebAssembly.Module(generated);
-  assert.deepEqual(WebAssembly.Module.imports(module), [{module: 'env', name: 'memory', kind: 'memory'}, {module: 'ring3', name: owner === 'replacement' ? 'guard' : 'guard_resident', kind: 'function'}, {module: 'ring3', name: 'read8', kind: 'function'}]);
+  assert.deepEqual(WebAssembly.Module.imports(module), generatedImports({bound: true, resident: !(owner === 'replacement'), helpers: ['cpu_read8']}));
   writeFileSync(join(output, `actual-${c.label}.wasm`), generated, {flag: 'wx'}); modules.push({context: c.label, bytes: generated.length, sha256: hash(generated), specs: p.specs});
   return [c, {...binding, run: new WebAssembly.Instance(module, {env: {memory: c.memory}, ring3: api}).exports.run}];
 }
 function run(c, u, budget, r, pc, f, reason = 1, retired = 1, value, detail = 0, address = 0, input = {}) {
-  const before = arena(c), wanted = Buffer.from(before); wanted.set(state(r, pc, f)); wanted.set(exit(reason, retired, detail, address), 56);
-  if (value !== undefined || reason === 5) wanted.set(helper(value, detail, address), 100);
+  const pageFault = reason === 5 ? {
+    errorCode: 4 + Number(detail === 2),
+    address,
+    access: 1,
+    length: 1,
+  } : null;
+  if (pageFault) assert.ok(detail === 1 || detail === 2, 'declared backing fault');
+
+  const before = arena(c), wanted = Buffer.from(before); wanted.set(state(r, pc, f)); wanted.set(pageFault?pageFaultExit({retired,...pageFault}):record("R3EX",40,[reason,retired,0,0,0,0],6),56);
+  if (value !== undefined || reason === 5) wanted.set(pageFault?pageFaultPacket(pageFault):record("R3MH",40,[0,value??0,0,0,0,1],10),100);
   const status = u.run(c.base, c.base + 56, budget, c.base + 96), after = arena(c);
   assert.equal(status, 0); assert.deepEqual(after, wanted, 'full arena: precise retirement, current AX, other GPR/FLAGS/transfer/x87 preserved');
   capture(c, before, after, {type: 'run', budget, status, input}); stats.runs++;
@@ -146,6 +158,6 @@ assert.equal(stats.ea_cases, 4 * 2 * 8); assert.equal(stats.boundaries, 4 * 2 * 
 assert.equal(stats.chains, 4); assert.equal(stats.preflight, 16); assert.equal(stats.controls, 16);
 const raw = Buffer.concat(frames); writeFileSync(join(output, 'arenas.bin'), raw, {flag: 'wx'});
 const result = {status: 'ok', stats, modules, observations, raw: {file: 'arenas.bin', frames: frames.length, bytes: raw.length, sha256: hash(raw)}, engine_sha256: hash(engineBytes), arena_bytes: SIZE,
-  tools: {node: process.version, v8: process.versions.v8}, sources: Object.fromEntries(['engine/tests/cpu/multiply/divide/memory/native/byte.rs', 'engine/tests/cpu/multiply/native.rs', 'engine/tests/support/cpu/prefix/byte.rs', 'engine/tests/support/cpu/prefix/admission.rs', 'engine/tests/cpu/multiply/native.rs', 'engine/tests/cpu/multiply/divide/memory/wasm/byte.rs', 'engine/tests/cpu/multiply/wasm.rs', 'engine/tests/cpu/multiply/wasm.rs', 'engine/tests/cpu/multiply/divide/memory/fixtures/p2-memory-byte-division/runtime/run.mjs'].map(p => [p, hash(readFileSync(join(root, p)))])),
+  tools: {node: process.version, v8: process.versions.v8}, sources: Object.fromEntries(['engine/tests/cpu/multiply/divide/memory/native/byte.rs', 'engine/tests/cpu/multiply/native.rs', 'engine/tests/support/cpu/prefix/byte.rs', 'engine/tests/support/cpu/prefix/admission.rs', 'engine/tests/cpu/multiply/native.rs', 'engine/tests/cpu/multiply/divide/memory/wasm/byte.rs', 'engine/tests/cpu/multiply/wasm.rs', 'engine/tests/cpu/multiply/wasm.rs', 'engine/tests/cpu/multiply/divide/memory/fixtures/p2-memory-byte-division/runtime/run.mjs', 'engine/tests/support/wasm/binding.mjs','engine/tests/support/wasm/page-fault.mjs'].map(p => [p, hash(readFileSync(join(root, p)))])),
   scope: 'Memory BYTE DIV/IDIV F6/6,/7 only; four bound extent/entry replacement/resident profiles, sixteen finite numeric rows/two FLAGS seeds, eight32EA witnesses including successful oldEAX/EDX, single-byte1FFF/FFFFFFFF endpoints, Read8-before-arithmetic faults, sameCPU/module RAM-only repairs/currentAX prefix chain. Full4612 arena pairs for every generated run/preflight/stale/closed attempt and four captured hostrepair pairs. Default opaque x87 tail preserved. No standalone/memoryBYTE multiply/word/x64/REP, arbitraryFPseed, directguard/rawRAMdump, hardware undefinedFLAGS, browser/game/performance/fullCI claim.'};
 writeFileSync(join(output, 'result.json'), JSON.stringify(result, null, 2), {flag: 'wx'}); console.log(JSON.stringify({status: result.status, stats, engine_sha256: result.engine_sha256, output}));

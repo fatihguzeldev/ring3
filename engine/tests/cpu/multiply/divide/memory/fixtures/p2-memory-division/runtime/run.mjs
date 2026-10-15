@@ -1,3 +1,5 @@
+import {pageFaultExit,pageFaultPacket} from '../../../../../../../support/wasm/page-fault.mjs';
+import {generatedImports, attachDetectionApi} from '../../../../../../../support/wasm/binding.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
@@ -34,7 +36,9 @@ function upload(c,address,b){request(c,b);pure(c,()=>c.api.upload(address,b.leng
 function put(c,address,value){upload(c,address,words([value]));}
 function fresh(owner,kind){
   const instance=new WebAssembly.Instance(engineModule,{}), names=['open','close','arena_ptr','map','unmap','protect','upload','read32','write8','compile','compile_resident','generation','module_ptr','module_len','guard','guard_resident'];
-  const api=Object.fromEntries(names.map(name=>[name,instance.exports[`ring3_abi_v1_${name}`]]));for(const fn of Object.values(api))assert.equal(typeof fn,'function');
+  const api=Object.fromEntries(names.map(name=>[name,instance.exports[`ring3_abi_v1_${name}`]]));
+ attachDetectionApi(api, instance.exports);
+  api.cpu_read32=instance.exports.ring3_abi_v1_cpu_read32;assert.equal(api.cpu_read32.length,1);for(const fn of Object.values(api))assert.equal(typeof fn,'function');
   const c={owner,kind,api,memory:instance.exports.memory,pages:new Map(),low:++stats.contexts,high:0xc9466000};
   assert.equal(api.open(7,c.low,c.high),0);c.base=api.arena_ptr()>>>0;assert.deepEqual(arena(c),initial);
   pure(c,()=>api.map(PC,1,7));for(const address of [0,DATA,SECOND,TOP])map(c,address);
@@ -51,13 +55,21 @@ function fresh(owner,kind){
   if(owner==='replacement'){pure(c,()=>api.compile(specs.length));binding={generation:api.generation(),pointer:api.module_ptr()>>>0,length:api.module_len()>>>0};}
   else {const before=arena(c);assert.equal(api.compile_resident(specs.length),0);refresh(c);binding=Object.fromEntries(['low','high','pointer','length'].map((key,i)=>[key,c.view.getUint32(c.base+TRANSFER+8+i*4,true)]));before.set(words([1,24,binding.low,binding.high,binding.pointer,binding.length]),TRANSFER);assert.deepEqual(arena(c),before);}
   const generated=Buffer.from(refresh(c).bytes.subarray(binding.pointer,binding.pointer+binding.length)),module=new WebAssembly.Module(generated);
-  assert.deepEqual(WebAssembly.Module.imports(module),[{module:'env',name:'memory',kind:'memory'},{module:'ring3',name:owner==='replacement'?'guard':'guard_resident',kind:'function'},{module:'ring3',name:'read32',kind:'function'}]);
+  assert.deepEqual(WebAssembly.Module.imports(module),generatedImports({bound: true, resident: !(owner==='replacement'), helpers: ['cpu_read32']}));
   const u={...binding,run:new WebAssembly.Instance(module,{env:{memory:c.memory},ring3:api}).exports.run};
   writeFileSync(join(output,`${owner}-${kind}.wasm`),generated,{flag:'wx'});modules.push({owner,kind,bytes:generated.length,sha256:hash(generated)});return [c,u];
 }
 function seed(c,r,pc,f){refresh(c).bytes.set(state(r,pc,f),c.base);c.bytes.set(exit(3,0),c.base+56);c.view.setUint32(c.base+96,0,true);c.bytes.set(helper(0xdecafbad),c.base+100);}
 function run(c,u,budget,r,pc,f,reason=1,retired=1,value,detail=0,address=0){
-  const wanted=arena(c);wanted.set(state(r,pc,f));wanted.set(exit(reason,retired,detail,address),56);if(value!==undefined||reason===5)wanted.set(helper(value,detail,address),100);
+  const pageFault = reason === 5 ? {
+    errorCode: 4 + Number(detail === 2),
+    address,
+    access: 1,
+    length: 4,
+  } : null;
+  if (pageFault) assert.ok(detail === 1 || detail === 2, 'declared backing fault');
+
+  const wanted=arena(c);wanted.set(state(r,pc,f));wanted.set(pageFault?pageFaultExit({retired,...pageFault}):record("R3EX",40,[reason,retired,0,0,0,0],6),56);if(value!==undefined||reason===5)wanted.set(pageFault?pageFaultPacket(pageFault):record("R3MH",40,[0,value??0,0,0,0,4],10),100);
   assert.equal(u.run(c.base,c.base+56,budget,c.base+96),0);assert.deepEqual(arena(c),wanted,'full arena including x87/transfer exact');stats.runs++;
   observations.push({owner:c.owner,kind:c.kind,state_hex:arena(c).subarray(0,56).toString('hex'),exit_hex:arena(c).subarray(56,96).toString('hex'),helper_hex:arena(c).subarray(100,140).toString('hex')});
 }
@@ -103,6 +115,6 @@ for(const owner of ['replacement','resident'])for(const kind of ['unsigned','sig
 }
 assert.equal(stats.numeric_cases,2*2*14*2);assert.equal(stats.ea_cases,2*2*7*2);assert.equal(stats.boundaries,2*2*3*2);assert.equal(stats.read_faults,2*2*5);assert.equal(stats.divide_repairs,2*2*2);assert.equal(stats.prefix_faults,4);assert.equal(stats.retained_retries,20);assert.equal(stats.controls,8);
 const result={status:'ok',stats,modules,observations,engine_sha256:hash(engineBytes),arena_bytes:SIZE,tools:{node:process.version,v8:process.versions.v8},
-  sources:Object.fromEntries(['engine/tests/cpu/multiply/divide/memory/native/dword.rs', 'engine/tests/cpu/multiply/native.rs', 'engine/tests/support/cpu/prefix/admission.rs', 'engine/tests/cpu/multiply/native.rs','engine/tests/cpu/multiply/divide/memory/wasm/dword.rs', 'engine/tests/cpu/multiply/wasm.rs', 'engine/tests/cpu/multiply/wasm.rs','engine/tests/cpu/multiply/divide/memory/fixtures/p2-memory-division/runtime/run.mjs'].map(path=>[path,hash(readFileSync(join(root,path)))])),
+  sources:Object.fromEntries(['engine/tests/cpu/multiply/divide/memory/native/dword.rs', 'engine/tests/cpu/multiply/native.rs', 'engine/tests/support/cpu/prefix/admission.rs', 'engine/tests/cpu/multiply/native.rs','engine/tests/cpu/multiply/divide/memory/wasm/dword.rs', 'engine/tests/cpu/multiply/wasm.rs', 'engine/tests/cpu/multiply/wasm.rs','engine/tests/cpu/multiply/divide/memory/fixtures/p2-memory-division/runtime/run.mjs', 'engine/tests/support/wasm/binding.mjs','engine/tests/support/wasm/page-fault.mjs'].map(path=>[path,hash(readFileSync(join(root,path)))])),
   scope:'prefix-free memory DWORD DIV/IDIV, two bound owners, finite112 numeric cases/56 EA cases including old EAX/EDX/24 valid crossing and modulo32 boundaries; precise Read4 priority and sameCPU/module repairs, V5 arithmetic faults, preserved undefinedFLAGS and opaque x87 tail, successful source RAM unchanged, budget/cancel/stale/closed. No store, REP/word/byte/x64 division, hardware undefinedFLAGS, browser/game/performance/fullCI claim.'};
 writeFileSync(join(output,'result.json'),JSON.stringify(result,null,2),{flag:'wx'});console.log(JSON.stringify({status:result.status,stats,engine_sha256:result.engine_sha256,output}));

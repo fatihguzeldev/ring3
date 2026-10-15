@@ -1,3 +1,5 @@
+import {pageFaultExit,pageFaultPacket} from '../../../../../../../support/wasm/page-fault.mjs';
+import {generatedImports, attachDetectionApi} from '../../../../../../../support/wasm/binding.mjs';
 import {ARENA_SIZE} from '../../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
@@ -20,7 +22,7 @@ const paths = [
   'engine/src/cpu/dbt/wasm/memory/narrow.rs', 'engine/src/memory/space.rs', 'engine/src/memory/space/atomic.rs',
   'engine/src/process/instance.rs', 'engine/src/process/execution/compiled.rs', 'engine/src/process/execution/authority.rs', 'engine/src/process/memory/address_space.rs', 'engine/src/process/memory/scalar.rs', 'engine/src/process/memory/scalar/tests.rs', 'engine/src/process/execution/mod.rs', 'engine/src/process/memory/mod.rs', 'engine/src/process/mod.rs', 'engine/src/process/execution/resident.rs',
   'engine/tests/cpu/multiply/accumulator/register/wasm/word.rs', 'engine/tests/cpu/multiply/wasm.rs', 'engine/tests/support/wasm.rs',
-  'engine/tests/cpu/multiply/accumulator/register/fixtures/p2-word-accumulator-multiply/runtime/run.mjs'];
+  'engine/tests/cpu/multiply/accumulator/register/fixtures/p2-word-accumulator-multiply/runtime/run.mjs', 'engine/tests/support/wasm/binding.mjs','engine/tests/support/wasm/page-fault.mjs'];
 assert.equal(new Set(paths).size, paths.length);
 const sources = () => Object.fromEntries(paths.map(path => [path, hash(readFileSync(join(root, path)))]));
 const sourcePins = sources(), modules = [];
@@ -35,8 +37,7 @@ function record(magic, size, fields, version = 1) {
 const state = c => record('R3ST', 56, [...c.registers, c.pc, c.flags]);
 const exit = (reason, n, f, version = 2) => record('R3EX', 40,
   [reason, n, f?.detail ?? 0, f?.address ?? 0, f?.access ?? 0, f ? 2 : 0], version);
-const helper = (version, value = 0, f) => record('R3MH', 40,
-  [f ? 1 : 0, value, f?.detail ?? 0, f?.address ?? 0, f?.access ?? 0, 2], version);
+const helper = (value = 0) => record('R3MH',40,[0,value,0,0,0,2],10);
 const arena = c => Buffer.from(new Uint8Array(c.memory.buffer, c.base, SIZE));
 function input(c, offset, bytes) {
   const expected = arena(c); expected.set(bytes, offset);
@@ -63,8 +64,19 @@ function seed(c, pc, r = registers(), flags = 0xcd7) {
 function run(c, module, budget, next, {label, reason = 1, retired = 1, fault, helperVersion = null, helperValue = 0, status = 0, exitVersion = 2} = {}) {
   const expected = arena(c);
   if (status === 0) {
-    expected.set(state(next)); expected.set(exit(reason, retired, fault, exitVersion), 56);
-    if (helperVersion !== null) expected.set(helper(helperVersion, helperValue, fault), 100);
+    expected.set(state(next));
+    if (fault) assert.ok(fault.detail === 1 || fault.detail === 2, 'declared backing fault');
+    const pageFault = fault ? {
+      errorCode: (fault.access === 2 ? 6 : 4) + Number(fault.detail === 2),
+      address: fault.address,
+      access: fault.access,
+      length: 2,
+    } : null;
+    expected.set(
+      pageFault ? pageFaultExit({retired, ...pageFault}) : exit(reason, retired, undefined, module.memoryOps?6:exitVersion),
+      56,
+    );
+    if (helperVersion !== null) expected.set(pageFault ? pageFaultPacket(pageFault) : helper(helperValue), 100);
   }
   assert.equal(module.run(c.base, c.base + 56, budget, c.base + 96), status, label);
   assert.deepEqual(arena(c), expected, 'full4612 CPU/exit/helper/FP128 effect: ' + label);
@@ -90,7 +102,7 @@ function compile(c, blocks, codePermissions) {
   const bytes = Buffer.from(new Uint8Array(c.memory.buffer, binding.pointer, binding.length));
   const module = new WebAssembly.Module(bytes), imports = WebAssembly.Module.imports(module);
   const memoryOps = blocks.some(b => b.memory !== false);
-  const names = [c.owner === 'resident' ? 'guard_resident' : 'guard', ...(memoryOps ? ['read16'] : [])];
+  const names = generatedImports({resident: c.owner === 'resident', helpers: [...(memoryOps ? ['cpu_read16'] : [])]}).slice(1).map(item => item.name);
   assert.deepEqual(imports, [{module: 'env', name: 'memory', kind: 'memory'}, ...names.map(name => ({module: 'ring3', name, kind: 'function'}))]);
   assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
   const file = `module-${modules.length + 1}.wasm`; writeFileSync(join(output, file), bytes, {flag: 'wx'});
@@ -104,6 +116,8 @@ function open(owner, entries) {
   for (const name of ['open', 'close', 'arena_ptr', 'map', 'unmap', 'protect', 'upload', 'read8', 'read16',
     'compile', 'compile_entries', 'compile_resident', 'compile_resident_entries', 'generation', 'module_ptr', 'module_len', 'guard', 'guard_resident'])
     c.api[name] = instance.exports['ring3_abi_v1_' + name];
+ attachDetectionApi(c.api, instance.exports);
+  for(const name of ["cpu_read16"]) {c.api[name]=instance.exports['ring3_abi_v1_'+name];assert.equal(typeof c.api[name],'function',name);}
   assert.equal(c.api.open(8, c.id, 0x57414d55), 0); c.base = c.api.arena_ptr() >>> 0; input(c, 0, initial);
   for (const args of [[PC, 1, 7], [DATA, 2, 3], [0xa53c5000, 1, 3], [0xfffff000, 1, 3]]) host(c, 'map', args);
   return c;

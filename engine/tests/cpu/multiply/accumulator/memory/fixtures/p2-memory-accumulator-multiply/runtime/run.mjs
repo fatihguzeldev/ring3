@@ -1,3 +1,5 @@
+import {pageFaultExit,pageFaultPacket} from '../../../../../../../support/wasm/page-fault.mjs';
+import {detectionGuardName, generatedImports, attachDetectionApi} from '../../../../../../../support/wasm/binding.mjs';
 import {createArena} from '../../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
@@ -73,6 +75,8 @@ function fresh(owner, kind) {
   const api = Object.fromEntries(Object.entries(arities).map(([name, arity]) => {
     const fn = instance.exports[`ring3_abi_v1_${name}`]; assert.equal(typeof fn, 'function', name); assert.equal(fn.length, arity, name); return [name, fn];
   }));
+ attachDetectionApi(api, instance.exports);
+  api.cpu_read32=instance.exports.ring3_abi_v1_cpu_read32;assert.equal(api.cpu_read32.length,1);
   const ctx = {owner, kind, api, memory: instance.exports.memory, low: ordinal, high: 0xc8397000, expected: createArena(SIZE), pages: new Map()};
   assert.equal(api.open(6, ctx.low, ctx.high), 0); ctx.base = api.arena_ptr() >>> 0;
   ctx.expected.set(state(Array(8).fill(0), 0, 2)); ctx.expected.set(record('R3EX', 40, [1, 0, 0, 0, 0, 0]), 56); ctx.expected.set(helper(), 100); check(ctx, 'independently initialized arena');
@@ -93,9 +97,8 @@ function compile(ctx) {
   }
   refresh(ctx); assert.ok(binding.pointer > 0 && binding.length > 8 && binding.pointer + binding.length <= ctx.bytes.length);
   const bytes = Buffer.from(ctx.bytes.subarray(binding.pointer, binding.pointer + binding.length)), module = new WebAssembly.Module(bytes);
-  const guard = ctx.owner === 'replacement' ? 'guard' : 'guard_resident';
-  assert.deepEqual(WebAssembly.Module.imports(module), [{module: 'env', name: 'memory', kind: 'memory'},
-    {module: 'ring3', name: guard, kind: 'function'}, {module: 'ring3', name: 'read32', kind: 'function'}]);
+  const guard = detectionGuardName(!(ctx.owner === 'replacement'));
+  assert.deepEqual(WebAssembly.Module.imports(module), generatedImports({bound: true, resident: !(ctx.owner === 'replacement'), helpers: ['cpu_read32']}));
   assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
   const child = new WebAssembly.Instance(module, {env: {memory: ctx.memory}, ring3: ctx.api}); assert.equal(child.exports.run.length, 4);
   writeFileSync(join(output, `${ctx.owner}-${ctx.kind}.wasm`), bytes, {flag: 'wx'}); counts.modules++;
@@ -107,8 +110,16 @@ function seed(ctx, registers, pc, flags) {
 }
 function cancel(ctx, value) {ctx.expected.writeUInt32LE(value, 96); refresh(ctx).view.setUint32(ctx.base + 96, value, true);}
 function run(ctx, unit, budget, label, registers, pc, flags, reason = 1, retired = 1, read, detail = 0, faultAddress = 0) {
-  check(ctx, `before ${label}`); ctx.expected.set(state(registers, pc, flags)); ctx.expected.set(exit(reason, retired, detail, faultAddress), 56);
-  if (read !== undefined || detail !== 0) ctx.expected.set(helper(read, detail, faultAddress), 100);
+  const pageFault = reason === 5 ? {
+    errorCode: 4 + Number(detail === 2),
+    address: faultAddress,
+    access: 1,
+    length: 4,
+  } : null;
+  if (pageFault) assert.ok(detail === 1 || detail === 2, 'declared backing fault');
+
+  check(ctx, `before ${label}`); ctx.expected.set(state(registers, pc, flags)); ctx.expected.set(pageFault?pageFaultExit({retired,...pageFault}):record("R3EX",40,[reason,retired,0,0,0,0],6),56);
+  if (read !== undefined || detail !== 0) ctx.expected.set(pageFault?pageFaultPacket(pageFault):record("R3MH",40,[0,read??0,0,0,0,4],10),100);
   assert.equal(unit.run(ctx.base, ctx.base + 56, budget, ctx.base + 96), 0, label); check(ctx, label); counts.generated_calls++;
 }
 function preflight(ctx, unit, registers, pc, flags) {
@@ -217,7 +228,7 @@ const result = {status: 'ok', engine_sha256: hash(engineBytes), tools: {node: pr
     alias_words: [[0x4040, 0xfffffffe], [0x4046, 0x89abcdef], [0x405c, 0xffffffff], [0x4060, 0x80000001]],
     flag_policy: 'CF/OF numeric-range overflow; SF/ZF/AF/PF0; fixed2/DF preserved', program_sha256: Object.fromEntries(Object.entries(programs).map(([kind, bytes]) => [kind, hash(bytes)])),
     arena_bytes: SIZE, patterned_page_sha256: hash(pattern), declared_data_page_sha256: hash(data)},
-  test_sha256: Object.fromEntries(['engine/tests/cpu/multiply/accumulator/memory/wasm/dword.rs', 'engine/tests/cpu/multiply/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/multiply/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/multiply/accumulator/memory/fixtures/p2-memory-accumulator-multiply/runtime/run.mjs'].map(path => [path, hash(readFileSync(join(root, path)))])),
+  test_sha256: Object.fromEntries(['engine/tests/cpu/multiply/accumulator/memory/wasm/dword.rs', 'engine/tests/cpu/multiply/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/multiply/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/multiply/accumulator/memory/fixtures/p2-memory-accumulator-multiply/runtime/run.mjs', 'engine/tests/support/wasm/binding.mjs','engine/tests/support/wasm/page-fault.mjs'].map(path => [path, hash(readFileSync(join(root, path)))])),
   claim: 'flat32 memory-source MUL32/one-operand IMUL32 in actual engine-generated replacement/resident modules with direct read32;10 operand rows/16 FLAGS basis, sequential products and real JC/JO, old EAX/EDX base/index addresses, cross-page/final valid Read4; EAX0 still reads and faults, precise fault/prefix preservation, data-only retry at same PC/state/module and real branch without CPU repair; full GPR/FLAGS/arena and complete source/neighbor pages; BigInt numeric-range/literal full-product oracle and explicit undefined-status0 policy; no standalone memory binding, exhaustive operands/128FLAGS, DIV/wider ISA, PE/provider, SDK/browser, performance or game claim'};
 writeFileSync(join(output, 'result.json'), JSON.stringify(result, null, 2), {flag: 'wx'});
 console.log(JSON.stringify({status: result.status, engine_sha256: result.engine_sha256, counts, output}));
