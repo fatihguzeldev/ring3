@@ -1,3 +1,5 @@
+import {attachDetectionApi, generatedImports} from '../../../../../../../../support/wasm/binding.mjs';
+import {generatedRunBody} from '../../../../../../../../support/wasm/run.mjs';
 import {ARENA_SIZE, createArena} from '../../../../../../../../support/wasm/arena.mjs';
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
@@ -382,7 +384,7 @@ const chapter = Buffer.from(
 assert.equal(chapter.length, source.chapter_bytes);
 assert.equal(hash(chapter), source.chapter_sha256);
 source.saved_chapter = artifact("intel-rotate.txt", chapter);
-const sourcePaths = [
+const sourcePaths = ['engine/tests/support/wasm/binding.mjs','engine/tests/support/wasm/run.mjs',
   "engine/src/cpu/x86/ir.rs",
   "engine/src/cpu/x86/decode/integer.rs",
   "engine/src/cpu/dbt/region.rs",
@@ -408,101 +410,19 @@ const sourceIdentities = () =>
   );
 const sourcePins = sourceIdentities();
 function profile(bytes, owner) {
+  const run = generatedRunBody(bytes);
   let at = 8;
-  assert.deepEqual([...bytes.subarray(0, 8)], [0, 97, 115, 109, 1, 0, 0, 0]);
-  const uleb = () => {
-    let value = 0,
-      scale = 1;
-    for (let i = 0; i < 5; i++) {
-      assert.ok(at < bytes.length);
-      const byte = bytes[at++];
-      value += (byte & 127) * scale;
-      if (!(byte & 128)) {
-        assert.ok(value <= 0xffffffff);
-        return value;
-      }
-      scale *= 128;
-    }
-    assert.fail("invalid bounded unsigned LEB");
-  };
-  const text = () => {
-    const n = uleb();
-    assert.ok(at + n <= bytes.length);
-    const value = bytes.subarray(at, at + n).toString("utf8");
-    at += n;
-    return value;
-  };
+  const unsigned = () => {let value=0,shift=0,byte; do {byte=bytes[at++]; assert.ok(byte!==undefined&&shift<=28); value+=(byte&127)*2**shift; shift+=7;} while(byte&128); return value;};
   const sections = new Map();
-  while (at < bytes.length) {
-    const id = bytes[at++],
-      n = uleb();
-    assert.ok(at + n <= bytes.length && !sections.has(id));
-    sections.set(id, [at, at + n]);
-    at += n;
-  }
-  assert.deepEqual([...sections.keys()], [1, 2, 3, 6, 7, 10]);
-  const section = (id) => {
-      at = sections.get(id)[0];
-    },
-    ended = (id) => assert.equal(at, sections.get(id)[1]);
-  section(1);
-  const types = [];
-  for (let i = 0, n = uleb(); i < n; i++) {
-    assert.equal(bytes[at++], 0x60);
-    const parameters = [],
-      results = [];
-    for (let j = 0, n = uleb(); j < n; j++) parameters.push(bytes[at++]);
-    for (let j = 0, n = uleb(); j < n; j++) results.push(bytes[at++]);
-    types.push({ parameters, results });
-  }
-  ended(1);
-  const standalone = owner === "standalone";
-  assert.deepEqual(types, [
-    { parameters: Array(4).fill(0x7f), results: [0x7f] },
-    ...(standalone
-      ? []
-      : [{ parameters: Array(owner === "replacement" ? 6 : 7).fill(0x7f), results: [0x7f] }]),
-  ]);
-  section(2);
-  assert.equal(uleb(), standalone ? 1 : 2);
-  assert.equal(text(), "env");
-  assert.equal(text(), "memory");
-  assert.equal(bytes[at++], 2);
-  assert.equal(uleb(), 0);
-  assert.equal(uleb(), 1);
-  if (!standalone) {
-    assert.equal(text(), "ring3");
-    assert.equal(text(), owner === "replacement" ? "guard" : "guard_resident");
-    assert.equal(bytes[at++], 0);
-    assert.equal(uleb(), 1);
-  }
-  ended(2);
-  section(3);
-  assert.equal(uleb(), 1);
-  assert.equal(uleb(), 0);
-  ended(3);
-  section(6);
-  assert.deepEqual([...bytes.subarray(at, sections.get(6)[1])],
-    [3, 0x7f, 0, 0x41, owner === 'standalone' ? 0 : 1, 0x0b, 0x7f, 0, 0x41, 0, 0x0b, 0x7f, 0, 0x41, 1, 0x0b],
-    'exact immutable flat decode key: bound, CS.base0, default32');
-  at = sections.get(6)[1]; ended(6);
-  section(7);
-  assert.equal(uleb(), 1);
-  assert.equal(text(), "run");
-  assert.equal(bytes[at++], 0);
-  assert.equal(uleb(), standalone ? 0 : 1);
-  ended(7);
-  section(10);
-  assert.equal(uleb(), 1);
-  const bodyBytes = uleb(),
-    end = at + bodyBytes;
-  assert.equal(end, sections.get(10)[1]);
-  const locals = [];
-  for (let i = 0, n = uleb(); i < n; i++) locals.push([uleb(), bytes[at++]]);
-  assert.deepEqual(locals, owner === 'standalone' ? [[16, 0x7f], [1, 0x7e], [10, 0x7f]] : [[16, 0x7f], [1, 0x7e], [10, 0x7f], [1, 0x7f]]);
-  assert.ok(at < end);
-  assert.equal(bytes[end - 1], 0x0b);
-  return { types, locals, body_bytes: bodyBytes, sections: [...sections.keys()] };
+  while(at<bytes.length) {const id=bytes[at++],length=unsigned(); assert.ok(at+length<=bytes.length&&!sections.has(id)); sections.set(id,[at,at+length]); at+=length;}
+  assert.deepEqual([...sections.keys()],[1,2,3,6,7,10]);
+  at=sections.get(1)[0]; const types=[];
+  for(let n=unsigned();n;n--) {assert.equal(bytes[at++],0x60); const parameters=Array.from({length:unsigned()},()=>bytes[at++]),results=Array.from({length:unsigned()},()=>bytes[at++]); types.push({parameters,results});}
+  assert.equal(at,sections.get(1)[1]);
+  at=sections.get(10)[0]; unsigned(); const bodyBytes=unsigned(),bodyStart=at;
+  assert.deepEqual(bytes.subarray(bodyStart,bodyStart+bodyBytes),run);
+  const locals=Array.from({length:unsigned()},()=>[unsigned(),bytes[at++]]);
+  return {types, locals, body_bytes: bodyBytes, sections: [...sections.keys()]};
 }
 function record(magic, size, fields) {
   const bytes = Buffer.alloc(size);
@@ -642,7 +562,7 @@ function fresh(owner, selected, label, writable = false) {
     check(ctx, "independent standalone initialized arena");
   } else {
     const instance = new WebAssembly.Instance(engineModule, {}),
-      api = {};
+      api = attachDetectionApi({}, instance.exports);
     ctx.memory = instance.exports.memory;
     ctx.api = api;
     const arities = {
@@ -763,17 +683,14 @@ function compile(ctx, phase, specs = ctx.selected.specs, scan = null) {
   }
   assert.ok(bytes.length > 8 && bytes.length <= 65536 && WebAssembly.validate(bytes));
   const module = new WebAssembly.Module(bytes),
-    guard = ctx.owner === "replacement" ? "guard" : "guard_resident";
-  const imports = [
-    { module: "env", name: "memory", kind: "memory" },
-    ...(ctx.owner === "standalone" ? [] : [{ module: "ring3", name: guard, kind: "function" }]),
-  ];
+    guard = ctx.owner === "replacement" ? "guard_detect" : "guard_detect_resident";
+  const imports=generatedImports({bound:ctx.owner!=='standalone',resident:guard==='guard_detect_resident'});
   assert.deepEqual(WebAssembly.Module.imports(module), imports);
   assert.deepEqual(WebAssembly.Module.exports(module), [{ name: "run", kind: "function" }]);
   const abi = profile(bytes, ctx.owner);
   const child = new WebAssembly.Instance(module, {
     env: { memory: ctx.memory },
-    ...(ctx.api ? { ring3: { [guard]: ctx.api[guard] } } : {}),
+    ...(ctx.api ? { ring3: { [guard]: ctx.api[guard] ,finish_exception_detection: ctx.api.finish_exception_detection} } : {}),
   });
   assert.equal(child.exports.run.length, 4);
   const saved = artifact(file, bytes, ctx.owner !== "standalone"),

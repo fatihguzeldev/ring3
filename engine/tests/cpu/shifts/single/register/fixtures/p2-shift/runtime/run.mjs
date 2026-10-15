@@ -1,3 +1,5 @@
+import {attachDetectionApi, generatedImports} from '../../../../../../../support/wasm/binding.mjs';
+import {generatedRunBody} from '../../../../../../../support/wasm/run.mjs';
 import {ARENA_SIZE, createArena} from '../../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
@@ -50,33 +52,9 @@ function authoredText(object) {
   return text;
 }
 function childLocals(module) {
-  let at=8, keyGlobals=false;
-  const unsigned=()=>{
-    let value=0,shift=0;
-    for(let index=0;index<5;index++) {
-      assert.ok(at<module.length);const byte=module[at++];value|=(byte&127)<<shift;
-      if(!(byte&128))return value>>>0;
-      shift+=7;
-    }
-    assert.fail('invalid bounded unsigned LEB');
-  };
-  while(at<module.length) {
-    const id=module[at++],length=unsigned(),end=at+length;
-    assert.ok(end<=module.length);
-    if(id===6) {
-      assert.deepEqual([...module.subarray(at,end)], [3,0x7f,0,0x41,1,0x0b,0x7f,0,0x41,0,0x0b,0x7f,0,0x41,1,0x0b], 'exact immutable flat bound decode key'); keyGlobals=true;
-    }
-    if(id===10) {
-      assert.equal(keyGlobals,true,'bound child retains exact key globals before code');
-      assert.equal(unsigned(),1);const bodyLength=unsigned(),bodyEnd=at+bodyLength;
-      assert.equal(bodyEnd,end);const count=unsigned(),locals=[];
-      for(let index=0;index<count;index++)locals.push([unsigned(),module[at++]]);
-      assert.deepEqual(locals,[[16, 0x7f], [1, 0x7e], [10, 0x7f], [1, 0x7f]]);
-      return locals;
-    }
-    at=end;
-  }
-  assert.fail('missing child code section');
+  const body=generatedRunBody(module); let at=0;
+  const unsigned=()=>{let value=0,shift=0,byte;do{byte=body[at++];assert.ok(byte!==undefined&&shift<=28);value+=(byte&127)*2**shift;shift+=7;}while(byte&128);return value;};
+  return Array.from({length:unsigned()},()=>[unsigned(),body[at++]]);
 }
 const objectPath=join(outputDir,'program.o');
 const assemble=['-target','i386-unknown-linux-gnu','-c',join(fixture,'program.S'),'-o',objectPath];
@@ -86,7 +64,7 @@ const text=authoredText(readFileSync(objectPath));
 writeFileSync(join(outputDir,'program.x86'),text);writeFileSync(join(outputDir,'program.S'),source);
 writeFileSync(join(outputDir,'authored-oracle.json'),oracleBytes);writeFileSync(join(outputDir,'runtime/run.mjs'),readFileSync(import.meta.filename));
 const production=execFileSync('rg',['--files','engine/src'],{cwd:root,encoding:'utf8'}).trim().split('\n').sort();
-const paths=[...production,'Cargo.toml','engine/Cargo.toml','Cargo.lock','engine/tests/cpu/shifts/single/register/wasm/dword.rs', 'engine/tests/cpu/shifts/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/shifts/single/register/fixtures/p2-shift/program.S','engine/tests/cpu/shifts/single/register/fixtures/p2-shift/oracle.json','engine/tests/cpu/shifts/single/register/fixtures/p2-shift/runtime/run.mjs'];
+const paths=['engine/tests/support/wasm/binding.mjs','engine/tests/support/wasm/run.mjs',...production,'Cargo.toml','engine/Cargo.toml','Cargo.lock','engine/tests/cpu/shifts/single/register/wasm/dword.rs', 'engine/tests/cpu/shifts/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/shifts/single/register/fixtures/p2-shift/program.S','engine/tests/cpu/shifts/single/register/fixtures/p2-shift/oracle.json','engine/tests/cpu/shifts/single/register/fixtures/p2-shift/runtime/run.mjs'];
 paths.push('engine/tests/support/wasm/arena.mjs');
 const sources=Object.fromEntries(paths.map(path=>[path,hash(readFileSync(join(root,path)))]));
 writeFileSync(join(outputDir,'source-sha256.json'),JSON.stringify(sources,null,2));
@@ -95,8 +73,8 @@ for(const file of ['program.o','program.disassembly.txt','program.x86','program.
   artifacts[file]=hash(readFileSync(join(outputDir,file)));
 assert.ok(WebAssembly.validate(engineBytes));
 const engineModule=new WebAssembly.Module(engineBytes);assert.deepEqual(WebAssembly.Module.imports(engineModule),[]);
-const names=['open','close','arena_ptr','map','protect','upload','generation','module_ptr','module_len',
-  'compile_entries','compile_resident_entries','guard','guard_resident','find_resident'];
+const names=['guard','guard_resident','open','close','arena_ptr','map','protect','upload','generation','module_ptr','module_len',
+  'compile_entries','compile_resident_entries','guard_detect','guard_detect_resident','find_resident'];
 let engine,ordinal=0,moduleOrdinal=0;
 function refresh() {
   if(engine.buffer!==engine.memory.buffer) {
@@ -113,7 +91,7 @@ function operation(label,action,status=0,patches=[]) {
 function cancel(value) {refresh().view.setUint32(engine.base+96,value,true);}
 function fresh(owner,label) {
   const instance=new WebAssembly.Instance(engineModule,{});
-  const api=Object.fromEntries(names.map(name=>[name,instance.exports['ring3_abi_v1_'+name]]));
+  const api=attachDetectionApi(Object.fromEntries(names.map(name=>[name,instance.exports['ring3_abi_v1_'+name]])), instance.exports);
   for(const [name,fn] of Object.entries(api))assert.equal(typeof fn,'function',name);
   assert.equal(api.guard.length,6);assert.equal(api.guard_resident.length,7);
   assert.equal(api.compile_entries.length,2);assert.equal(api.compile_resident_entries.length,2);
@@ -121,7 +99,9 @@ function fresh(owner,label) {
   engine={owner,name:owner+'/'+label,api,key,low:Number(key&0xffffffffn),high:Number(key>>32n),memory:instance.exports.memory,started:false};
   assert.ok(engine.memory instanceof WebAssembly.Memory);assert.equal(api.open(1,engine.low,engine.high),0);
   engine.base=api.arena_ptr()>>>0;refresh();assert.ok(engine.base>0&&engine.base+size<=engine.bytes.length);
-  engine.bytes.fill(0xa5,engine.base+100,engine.base+size);
+  const opaque=createArena(); opaque.fill(0xa5,100,4236);
+  for(const [start,end] of [[4276,4356],[4396,4524],[4628,4756]])opaque.fill(0xa5,start,end);
+  engine.bytes.set(opaque.subarray(100),engine.base+100);
   // explicit valid flat input for bound code preparation; opaque fp/helper/TRANSFER sentinels stay declared.
   const flat=createArena(ARENA_SIZE);
   engine.bytes.set(flat.subarray(4524,4588),engine.base+4524);
@@ -152,11 +132,11 @@ function compile(seeds,label) {
   }
   refresh();assert.ok(unit.pointer>0&&unit.length>8&&unit.pointer+unit.length<=engine.bytes.length);
   const raw=engine.bytes.slice(unit.pointer,unit.pointer+unit.length),module=new WebAssembly.Module(raw);
-  const guard=engine.owner==='resident'?'guard_resident':'guard';
-  assert.deepEqual(WebAssembly.Module.imports(module),[{module:'env',name:'memory',kind:'memory'},{module:'ring3',name:guard,kind:'function'}]);
+  const guard=engine.owner==='resident'?'guard_detect_resident':'guard_detect';
+  assert.deepEqual(WebAssembly.Module.imports(module),generatedImports({resident:guard==='guard_detect_resident'}));
   assert.deepEqual(WebAssembly.Module.exports(module),[{name:'run',kind:'function'}]);
   const locals=childLocals(raw);
-  const instance=new WebAssembly.Instance(module,{env:{memory:engine.memory},ring3:{[guard]:engine.api[guard]}});
+  const instance=new WebAssembly.Instance(module,{env:{memory:engine.memory},ring3:{[guard]:engine.api[guard],finish_exception_detection: engine.api.finish_exception_detection}});
   unit.run=instance.exports.run;assert.equal(unit.run.length,4);
   const filename='unit-'+(++moduleOrdinal)+'.wasm';writeFileSync(join(outputDir,filename),raw);artifacts[filename]=hash(raw);
   identities.push({instance:ordinal,owner:engine.owner,label,key:engine.key.toString(),id:unit.id?.toString(),
