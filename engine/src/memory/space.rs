@@ -122,13 +122,14 @@ impl AddressSpace {
         let end = bounds.first + bounds.count;
         let mut first = bounds.first.div_ceil(stride) * stride;
         while first + count <= end {
-            if self.mappings[first..first + count]
+            if let Some(occupied) = self.mappings[first..first + count]
                 .iter()
-                .all(|mapping| *mapping == 0)
+                .position(|mapping| *mapping != 0)
             {
+                first = (first + occupied + 1).div_ceil(stride) * stride;
+            } else {
                 return Ok(PageRange { first, count });
             }
-            first += stride;
         }
         Err(MemoryError::Capacity)
     }
