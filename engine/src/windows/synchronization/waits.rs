@@ -6,6 +6,11 @@ use super::{
     WaitOutcome32, WaitResult32, WaitToken32,
 };
 
+pub struct WaitHandles32<'a> {
+    pub original: &'a [u32],
+    pub projected: &'a [u32],
+}
+
 pub struct PreparedSignals32 {
     epoch: u64,
     revision: u64,
@@ -17,12 +22,15 @@ pub struct PreparedSignals32 {
 }
 impl SynchronizationContext32 {
     pub fn prepare_signal_handles(&self, handles: &[u32]) -> Result<PreparedSignals32, Error> {
-        if handles.len() > MAX_WAIT_OBJECTS { return Err(Error::InvalidWait); }
-        let mut slots=[0usize;MAX_WAIT_OBJECTS];
-        for (index,handle) in handles.iter().enumerate() {
-            slots[index]=self.handles[self.handle_index(*handle,super::EVENT_MODIFY_STATE)?].event;
+        if handles.len() > MAX_WAIT_OBJECTS {
+            return Err(Error::InvalidWait);
         }
-        self.prepare_signal_slots(&slots[..handles.len()],&[],self.now,None)
+        let mut slots = [0usize; MAX_WAIT_OBJECTS];
+        for (index, handle) in handles.iter().enumerate() {
+            slots[index] =
+                self.handles[self.handle_index(*handle, super::EVENT_MODIFY_STATE)?].event;
+        }
+        self.prepare_signal_slots(&slots[..handles.len()], &[], self.now, None)
     }
     pub fn prepare_signals(&self, bindings: &[EventBinding32]) -> Result<PreparedSignals32, Error> {
         let mut prepared = self.signal_plan(self.now, None)?;
@@ -220,10 +228,32 @@ impl SynchronizationContext32 {
         message: MessageWait32,
         queue: (u32, u32, u64),
     ) -> Result<WaitOutcome32, Error> {
+        self.wait_with_messages_projected(
+            WaitHandles32 {
+                original: handles,
+                projected: handles,
+            },
+            mode,
+            timeout_ms,
+            alertable,
+            message,
+            queue,
+        )
+    }
+    pub fn wait_with_messages_projected(
+        &mut self,
+        handles: WaitHandles32<'_>,
+        mode: WaitMode32,
+        timeout_ms: u32,
+        alertable: bool,
+        message: MessageWait32,
+        queue: (u32, u32, u64),
+    ) -> Result<WaitOutcome32, Error> {
         if queue.2 < self.queue_generation {
             return Err(Error::Stale);
         }
-        let wait = self.validated_wait(handles, mode, timeout_ms, alertable, Some(message))?;
+        let wait =
+            self.validated_wait_projected(handles, mode, timeout_ms, alertable, Some(message))?;
         let mut prepared = self.prepare_signal_slots(&[], &[], self.now, Some(queue))?;
         let result = self.resolve(&wait, &mut prepared.signaled, queue.0, queue.1);
         let slot = if result.is_none() && timeout_ms != 0 {
@@ -265,7 +295,26 @@ impl SynchronizationContext32 {
         alertable: bool,
         message: Option<MessageWait32>,
     ) -> Result<WaitOutcome32, Error> {
-        let wait = self.validated_wait(handles, mode, timeout_ms, alertable, message)?;
+        self.wait_projected(
+            WaitHandles32 {
+                original: handles,
+                projected: handles,
+            },
+            mode,
+            timeout_ms,
+            alertable,
+            message,
+        )
+    }
+    pub fn wait_projected(
+        &mut self,
+        handles: WaitHandles32<'_>,
+        mode: WaitMode32,
+        timeout_ms: u32,
+        alertable: bool,
+        message: Option<MessageWait32>,
+    ) -> Result<WaitOutcome32, Error> {
+        let wait = self.validated_wait_projected(handles, mode, timeout_ms, alertable, message)?;
         let revision = self.next_revision()?;
         let mut signaled = self.signaled;
         if let Some(result) = self.resolve(&wait, &mut signaled, self.queue_current, self.queue_new)
@@ -307,6 +356,30 @@ impl SynchronizationContext32 {
         alertable: bool,
         message: Option<MessageWait32>,
     ) -> Result<Wait32, Error> {
+        self.validated_wait_projected(
+            WaitHandles32 {
+                original: handles,
+                projected: handles,
+            },
+            mode,
+            timeout_ms,
+            alertable,
+            message,
+        )
+    }
+    fn validated_wait_projected(
+        &self,
+        projection: WaitHandles32<'_>,
+        mode: WaitMode32,
+        timeout_ms: u32,
+        alertable: bool,
+        message: Option<MessageWait32>,
+    ) -> Result<Wait32, Error> {
+        let handles = projection.projected;
+        let original = projection.original;
+        if original.len() != handles.len() {
+            return Err(Error::InvalidWait);
+        }
         if handles.len() > MAX_WAIT_OBJECTS - usize::from(message.is_some())
             || mode != WaitMode32::Sleep && handles.is_empty() && message.is_none()
             || mode == WaitMode32::Sleep && (!handles.is_empty() || message.is_some())
@@ -335,7 +408,7 @@ impl SynchronizationContext32 {
         };
         for (index, handle) in handles.iter().enumerate() {
             let event = self.handles[self.handle_index(*handle, SYNCHRONIZE)?].event;
-            if wait.handles[..index].contains(handle)
+            if original[..index].contains(&original[index])
                 || mode == WaitMode32::All && wait.events[..index].contains(&event)
             {
                 return Err(Error::InvalidWait);

@@ -13,15 +13,74 @@ pub struct PreparedDuplicate32 {
     duplicate: Option<Handle32>,
     close: bool,
 }
+pub struct PreparedCloseHandles32 {
+    closes: Vec<PreparedDuplicate32>,
+}
+
 impl PreparedDuplicate32 {
     pub fn handle(&self) -> Option<u32> {
         self.duplicate.map(|handle| handle.value)
     }
 }
 impl SynchronizationContext32 {
+    pub fn validate_wait_handle(&self, handle: u32) -> Result<(), Error> {
+        self.handle_index(handle, super::SYNCHRONIZE).map(|_| ())
+    }
+    pub fn ensure_unnamed_event_capacity(&self, count: usize) -> Result<(), Error> {
+        if self.events.iter().filter(|event| event.is_none()).count() < count
+            || self
+                .handles
+                .len()
+                .checked_add(count)
+                .is_none_or(|total| total > self.handle_limit)
+        {
+            return Err(Error::Capacity);
+        }
+        let count = u64::try_from(count).map_err(|_| Error::Exhausted)?;
+        self.next_object
+            .checked_add(count)
+            .ok_or(Error::Exhausted)?;
+        self.revision.checked_add(count).ok_or(Error::Exhausted)?;
+        self.next_handle
+            .checked_add(
+                u32::try_from(count.checked_mul(4).ok_or(Error::Exhausted)?)
+                    .map_err(|_| Error::Exhausted)?,
+            )
+            .filter(|value| *value < 0x8000_0000)
+            .ok_or(Error::Exhausted)?;
+        Ok(())
+    }
+    pub fn prepare_close_handles(&self, handles: &[u32]) -> Result<PreparedCloseHandles32, Error> {
+        self.revision
+            .checked_add(handles.len() as u64)
+            .ok_or(Error::Exhausted)?;
+        let mut closes = Vec::new();
+        closes
+            .try_reserve_exact(handles.len())
+            .map_err(|_| Error::Allocation)?;
+        for (index, &handle) in handles.iter().enumerate() {
+            if handles[..index].contains(&handle) {
+                return Err(Error::InvalidHandle);
+            }
+            let mut prepared = self.prepare_duplicate(handle, 0, false, true, true, false)?;
+            prepared.revision = self.revision + index as u64;
+            prepared.next_revision = prepared.revision + 1;
+            closes.push(prepared);
+        }
+        Ok(PreparedCloseHandles32 { closes })
+    }
+    pub fn commit_close_handles(&mut self, prepared: PreparedCloseHandles32) {
+        for close in prepared.closes {
+            self.commit_duplicate(close);
+        }
+    }
     pub fn has_named_event(&self, name: &[u16]) -> Result<bool, Error> {
-        let name=normalize_name(name)?;
-        Ok(self.events.iter().flatten().any(|event|event.name.as_deref()==Some(name)))
+        let name = normalize_name(name)?;
+        Ok(self
+            .events
+            .iter()
+            .flatten()
+            .any(|event| event.name.as_deref() == Some(name)))
     }
     pub fn create_event(
         &mut self,

@@ -248,14 +248,24 @@ fn io_acceptance_retains_and_resets_events_in_one_failure_neutral_receipt() {
 
 #[test]
 fn immediate_io_signal_preflights_all_handles_before_waking_waiters() {
-    let mut context=context();
-    let (first,_)=context.create_event(false,false,false,None).unwrap();
-    let wait=match context.wait(&[first],WaitMode32::Any,INFINITE,false,None).unwrap(){WaitOutcome32::Pending(wait)=>wait,_=>panic!("pending")};
-    let revision=context.revision();
-    assert!(context.prepare_signal_handles(&[first,0xffff_fffc]).is_err());
-    assert_eq!(context.revision(),revision);
-    assert_eq!(context.wait_status(wait).unwrap(),None);
-    let prepared=context.prepare_signal_handles(&[first]).unwrap();
+    let mut context = context();
+    let (first, _) = context.create_event(false, false, false, None).unwrap();
+    let wait = match context
+        .wait(&[first], WaitMode32::Any, INFINITE, false, None)
+        .unwrap()
+    {
+        WaitOutcome32::Pending(wait) => wait,
+        _ => panic!("pending"),
+    };
+    let revision = context.revision();
+    assert!(
+        context
+            .prepare_signal_handles(&[first, 0xffff_fffc])
+            .is_err()
+    );
+    assert_eq!(context.revision(), revision);
+    assert_eq!(context.wait_status(wait).unwrap(), None);
+    let prepared = context.prepare_signal_handles(&[first]).unwrap();
     context.commit_signals(prepared);
-    assert_eq!(context.take_wait(wait).unwrap().unwrap().value,0);
+    assert_eq!(context.take_wait(wait).unwrap().unwrap().value, 0);
 }

@@ -3,6 +3,11 @@ use super::{
     EVENT_MODIFY_STATE, EventBinding32, SynchronizationContext32, SynchronizationError32 as Error,
 };
 
+pub struct PreparedIoSignals32 {
+    signals: super::PreparedSignals32,
+    release: PreparedEventBindings32,
+}
+
 pub struct PreparedEventBindings32 {
     epoch: u64,
     revision: u64,
@@ -17,6 +22,23 @@ impl PreparedEventBindings32 {
     }
 }
 impl SynchronizationContext32 {
+    pub fn prepare_signals_and_release(
+        &self,
+        bindings: &[EventBinding32],
+    ) -> Result<PreparedIoSignals32, Error> {
+        let signals = self.prepare_signals(bindings)?;
+        let mut release = self.prepare_event_bindings(&[], bindings)?;
+        release.revision = release.next_revision;
+        release.next_revision = release
+            .next_revision
+            .checked_add(1)
+            .ok_or(Error::Exhausted)?;
+        Ok(PreparedIoSignals32 { signals, release })
+    }
+    pub fn commit_signals_and_release(&mut self, prepared: PreparedIoSignals32) {
+        self.commit_signals(prepared.signals);
+        self.commit_event_bindings(prepared.release);
+    }
     pub fn prepare_event_bindings(
         &self,
         handles: &[u32],
