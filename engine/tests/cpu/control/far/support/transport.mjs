@@ -1,3 +1,4 @@
+import {attachDetectionApi, generatedImports} from '../../../../support/wasm/binding.mjs';
 import assert from 'node:assert/strict';
 import {readFileSync,writeFileSync} from 'node:fs';
 import {createHash} from 'node:crypto';
@@ -30,7 +31,7 @@ export function snapshotRAM(c){return new Map(c.pages.map(address=>[address,read
 export function assertRAM(c,want,label){for(const [address,bytes] of want)assert.deepEqual(readRAM(c,address,bytes.length),bytes,`${label}: RAM ${address.toString(16)}`);}
 export function writeExpected(ram,address,bytes){for(const [i,value] of bytes.entries()){const at=(address+i)>>>0,page=at&0xfffff000;assert.ok(ram.has(page>>>0));ram.get(page>>>0)[at&4095]=value;}}
 export function open(engine,resident,entries){
- const instance=new WebAssembly.Instance(engine.module,{}),api=Object.fromEntries(Object.entries(instance.exports).filter(([name])=>name.startsWith('ring3_abi_v1_')).map(([name,fn])=>[name.slice(13),fn]));
+ const instance=new WebAssembly.Instance(engine.module,{}),api=attachDetectionApi(Object.fromEntries(Object.entries(instance.exports).filter(([name])=>name.startsWith('ring3_abi_v1_')).map(([name,fn])=>[name.slice(13),fn])), instance.exports);
  const c={engine,resident,entries,api,memory:instance.exports.memory,key:++counts.contexts,calls:[],pages:[],permissions:new Map()};
  host(c,'open',[8,c.key,KEY_HIGH]);c.base=api.arena_ptr()>>>0;
  for(const [address,permissions] of [[PC,7],[TARGET,7],[0x5000,3],[0x7000,3]])map(c,address,permissions);
@@ -94,7 +95,8 @@ function validateModule(bytes, expectedImports, hasGuard, arities) {
   assert.deepEqual(types[0], [[127, 127, 127, 127], [127]]);
   for (const [name, type] of imported) {
     const arity = arities[name]; assert.notEqual(arity, undefined, name);
-    assert.deepEqual(types[type], [Array(arity).fill(127), [127]], name);
+    const parameters=Array(arity).fill(127);if(name==='finish_exception_detection')parameters[0]=126;
+    assert.deepEqual(types[type], [parameters, [name.startsWith('guard_detect')?126:127]], name);
   }
   assert.equal(functions.length, hasGuard ? 2 : 1); assert.equal(bodies.length, functions.length); assert.equal(functions[0], 0);
   const locals = body => {let p = 0; const read = () => {let n = 0, shift = 0, v; do {v = body[p++]; n += (v & 127) * 2 ** shift; shift += 7;} while (v & 128); return n;}; return Array.from({length: read()}, () => [read(), body[p++]]);};
@@ -116,8 +118,8 @@ export function compile(c,bytes,{kind,read=false,guard=true,returnBytes,targetBy
  const a=arena(c);c.id=c.resident?[a.readUInt32LE(148),a.readUInt32LE(152)]:null;c.binding=c.id?[c.key,KEY_HIGH,...c.id]:[];
  const address=c.id?a.readUInt32LE(156):c.api.module_ptr()>>>0,size=c.id?a.readUInt32LE(160):c.api.module_len()>>>0;
  const bytesOut=Buffer.from(new Uint8Array(c.memory.buffer,address,size)),helper=c.resident?`${kind}_resident`:kind;
- const imports=['env:memory:memory',`ring3:${c.resident?'guard_resident':'guard'}:function`,`ring3:${helper}:function`,...(returnBytes?[`ring3:${c.resident?'far_return_resident':'far_return'}:function`]:[]),...(read?['ring3:cpu_read:function']:[])];
- const arities={guard:6,guard_resident:7,cpu_read:3,far_jump:3,far_jump_resident:7,far_call:5,far_call_resident:9,far_return:3,far_return_resident:7};
+ const imports=generatedImports({resident:c.resident,helpers:[helper,...(returnBytes?[c.resident?'far_return_resident':'far_return']:[]),...(read?['cpu_read']:[])]}).map(row=>`${row.module}:${row.name}:${row.kind}`);
+ const arities={guard_detect:6,guard_detect_resident:7,finish_exception_detection:12,cpu_read:3,far_jump:3,far_jump_resident:7,far_call:5,far_call_resident:9,far_return:3,far_return_resident:7};
  const module=validateModule(bytesOut,imports,guard,arities);c.helper=helper;
  writeFileSync(join(output,`module-${++counts.modules}.wasm`),bytesOut,{flag:'wx'});
  const ring3=Object.fromEntries(WebAssembly.Module.imports(module).filter(row=>row.kind==='function').map(row=>[row.name,(...args)=>{
@@ -136,7 +138,7 @@ export function seed({esp=STACK,logical=POINTER,flags=0x244cd7,cancel=0,context}
 export function run(c,label,input,want,ram,{budget=1,helpers,argumentsList}={}){
  put(c,0,input);c.calls=[];assert.equal(c.run(c.base,c.base+56,budget,c.base+96),0,label);
  assert.deepEqual(arena(c),want,`${label}: entire arena`);assertRAM(c,ram,label);
- const actual=c.calls.filter(([name])=>!name.startsWith('guard'));
+ const actual=c.calls.filter(([name])=>!name.startsWith('guard')&&name!=='finish_exception_detection');
  assert.deepEqual(actual.map(([name])=>name),helpers,`${label}: exact helper schedule`);
  if(argumentsList)assert.deepEqual(actual.map(([,args])=>args.map(value=>value>>>0)),argumentsList.map(args=>args.map(value=>value>>>0)),`${label}: exact helper arguments`);
  counts.runs++;const reason=want.readUInt32LE(72),retired=want.readUInt32LE(76);

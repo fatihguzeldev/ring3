@@ -1,3 +1,4 @@
+import {attachDetectionApi, generatedImports} from '../../../../../../../support/wasm/binding.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {mkdirSync, readFileSync, writeFileSync} from 'node:fs';
@@ -12,7 +13,7 @@ const [enginePath, output, root, mode] = process.argv.slice(2), engine = readEng
 const PC = 0x1000, TARGET = 0x2000, POINTER = 0x5010, SEG = 4524, KEY_HIGH = 0x464152;
 const counts = {contexts: 0, modules: 0, runs: 0, success: 0, faults: 0, refusals: 0, controls: 0};
 const observations = [];
-const sources = [
+const sources = ['engine/tests/support/wasm/binding.mjs',
   "engine/src/abi/wasm/exports/calls.rs",
   "engine/src/abi/wasm/exports/execution.rs",
   "engine/src/abi/wasm/exports/image.rs",
@@ -132,7 +133,7 @@ function oracle(selector, raw, offset, word) {
 }
 function pointer(word, offset, selector) {const bytes = Buffer.alloc(word ? 4 : 6); if (word) bytes.writeUInt16LE(offset & 0xffff); else bytes.writeUInt32LE(offset >>> 0); bytes.writeUInt16LE(selector, bytes.length - 2); return bytes;}
 function open(resident, entries, word, source) {
-  const instance = new WebAssembly.Instance(engine.module, {}), api = Object.fromEntries(Object.entries(instance.exports).filter(([name]) => name.startsWith('ring3_abi_v1_')).map(([name, fn]) => [name.slice(13), fn]));
+  const instance = new WebAssembly.Instance(engine.module, {}), api = attachDetectionApi(Object.fromEntries(Object.entries(instance.exports).filter(([name]) => name.startsWith('ring3_abi_v1_')).map(([name, fn]) => [name.slice(13), fn])), instance.exports);
   const c = {resident, entries, word, source, api, memory: instance.exports.memory, key: ++counts.contexts, calls: []};
   host(c, 'open', [8, c.key, KEY_HIGH]); c.base = api.arena_ptr() >>> 0;
   for (const [address, permissions] of [[PC, 7], [TARGET, 7], [0x5000, 3]]) host(c, 'map', [address, 1, permissions]);
@@ -161,8 +162,10 @@ function validateModule(bytes, expectedImports, hasGuard) {
   }
   assert.deepEqual(types[0], [[127, 127, 127, 127], [127]]);
   for (const [name, type] of imported) {
-    const arity = name === 'guard' ? 6 : name === 'guard_resident' || name === 'far_jump_resident' ? 7 : 3;
-    assert.deepEqual(types[type], [Array(arity).fill(127), [127]], name);
+    const arity = name === 'guard_detect' ? 6 : name === 'guard_detect_resident' || name === 'far_jump_resident' ? 7 : name === 'finish_exception_detection' ? 12 : 3;
+    const parameters = Array(arity).fill(127);
+    if (name === 'finish_exception_detection') parameters[0] = 126;
+    assert.deepEqual(types[type], [parameters, [name.startsWith('guard_detect') ? 126 : 127]], name);
   }
   assert.equal(functions.length, hasGuard ? 2 : 1); assert.equal(bodies.length, functions.length); assert.equal(functions[0], 0);
   const locals = body => {let p = 0; const read = () => {let n = 0, shift = 0, v; do {v = body[p++]; n += (v & 127) * 2 ** shift; shift += 7;} while (v & 128); return n;}; return Array.from({length: read()}, () => [read(), body[p++]]);};
@@ -187,7 +190,7 @@ function compile(c, {twoBlocks = false, bytes} = {}) {
   const generated = Buffer.from(new Uint8Array(c.memory.buffer, address, size));
   const helper = c.resident ? 'far_jump_resident' : 'far_jump';
   const memory = c.source !== 'immediate';
-  const module = validateModule(generated, ['env:memory:memory', `ring3:${c.resident ? 'guard_resident' : 'guard'}:function`, `ring3:${helper}:function`, ...(memory ? ['ring3:cpu_read:function'] : [])], memory);
+  const module = validateModule(generated, generatedImports({resident:c.resident, helpers:[helper, ...(memory ? ['cpu_read'] : [])]}).map(row => `${row.module}:${row.name}:${row.kind}`), memory);
   writeFileSync(join(output, `module-${++counts.modules}.wasm`), generated, {flag: 'wx'});
   const ring3 = Object.fromEntries(WebAssembly.Module.imports(module).filter(row => row.kind === 'function').map(row => [row.name, (...args) => {
     c.calls.push([row.name, args]);
@@ -218,11 +221,11 @@ function execute(c, label, expected, {address = POINTER, sourceSegment, logical 
     if (flags & 0x100) reason = 16;
     else if (budget > 1) {reason = c.twoBlocks && !expected.base ? 1 : 3; retired = c.twoBlocks && !expected.base ? 2 : 1;}
   }
-  if (faultRead) {reason = 5; retired = 0; detail = faultRead.detail; at = faultRead.address; access = 1; length = c.word ? 4 : 6;}
-  want.set(packet('R3EX', 40, [reason, retired, detail, at, access, length], reason >= 16 ? 7 : 6), 56);
+  if (faultRead) {reason = 23; retired = 0; detail = faultRead.detail === 1 ? 4 : 5; at = faultRead.address; access = 1; length = c.word ? 4 : 6;}
+  want.set(packet('R3EX', 40, [reason, retired, detail, at, access, length], reason === 23 ? 12 : reason >= 16 ? 7 : 6), 56);
   if (helper) {
     if (c.source !== 'immediate' && pointerBytes && !faultRead) want.set(pointerBytes, 140);
-    if (faultRead) want.set(packet('R3MH', 40, [1, 0, detail, at, 1, length], 7), 100);
+    if (faultRead) want.set(packet('R3MH', 40, [9, 0, detail, at, 1, length], 15), 100);
     else if (!expected.host) want.set(packet('R3MH', 40, [expected.status, success ? expected.target : 0, expected.detail ?? 0, 0, 0, 0], expected.gate ? 9 : 7), 100);
     else if (c.source !== 'immediate' && pointerBytes) want.set(packet('R3MH', 40, [0, 0, 0, 0, 0, pointerBytes.length], 7), 100);
   }
@@ -230,10 +233,10 @@ function execute(c, label, expected, {address = POINTER, sourceSegment, logical 
   c.calls = []; assert.equal(c.run(c.base, c.base + 56, budget, c.base + 96), 0, label);
   assert.deepEqual(arena(c), want, label);
   const expectedCalls = !helper ? 0 : faultRead ? 1 : c.source === 'immediate' ? 1 : 2;
-  assert.equal(c.calls.filter(([name]) => !name.startsWith('guard')).length, expectedCalls, `${label}: exact helper schedule`);
+  assert.equal(c.calls.filter(([name]) => !name.startsWith('guard') && name !== 'finish_exception_detection').length, expectedCalls, `${label}: exact helper schedule`);
   if (helper && c.source !== 'immediate') assert.deepEqual(c.calls.find(([name]) => name === 'cpu_read')[1], [address, c.word ? 4 : 6, 1], `${label}: exact pointer width/alignment`);
   counts.runs++; if (success) counts.success++; else if (expected.host && helper) counts.refusals++; else if (reason >= 5) counts.faults++; else counts.controls++;
-  observations.push({label, reason, retired, detail, calls: c.calls.filter(([name]) => !name.startsWith('guard')).map(([name]) => name)});
+  observations.push({label, reason, retired, detail, calls: c.calls.filter(([name]) => !name.startsWith('guard') && name !== 'finish_exception_detection').map(([name]) => name)});
 }
 if (mode !== 'protocol') for (const resident of [false, true]) for (const entries of [false, true]) for (const word of [false, true]) for (const source of ['immediate', 'memory']) {
   const c = open(resident, entries, word, source); compile(c);
@@ -340,7 +343,7 @@ function protocolProof() {
       want.set(packet('R3EX', 40, [reason, 0, detail, 0, 0, 0], 6), 56);
       assert.equal(c.run(c.base, c.base + 56, 1, c.base + 96), 0, row.label);
       assert.deepEqual(arena(c), want, `${row.label}: exact packet and zero architectural publication`);
-      const calls = c.calls.filter(([name]) => !name.startsWith('guard'));
+      const calls = c.calls.filter(([name]) => !name.startsWith('guard') && name !== 'finish_exception_detection');
       assert.deepEqual(calls.map(([name]) => name), source === 'memory' ? ['cpu_read', resident ? 'far_jump_resident' : 'far_jump'] : [resident ? 'far_jump_resident' : 'far_jump']);
       if (source === 'memory') assert.deepEqual(calls[0][1], [POINTER, word ? 4 : 6, 1]);
       counts.runs++; counts.controls++;
