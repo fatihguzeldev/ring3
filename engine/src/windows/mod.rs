@@ -19,3 +19,5 @@ pub use calling_convention::{CallFrame32, CallingConvention32, FrameError, MAX_S
 pub(crate) use provider::{ProcessContext32, ThreadState32, WindowsOutcome32};
 
 pub use modules::kernel32_module;
+
+pub mod files;
