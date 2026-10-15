@@ -1,5 +1,5 @@
 use super::{
-    LoadError,
+    LoadError, ProviderProfile,
     pe32::ImagePlan,
     relocation::{Fixup, RelocationDirectory},
 };
@@ -7,18 +7,6 @@ use crate::{cpu::dbt::GateSpec, memory::GuestAddress, windows::WindowsApi32};
 
 const MAX_SLOTS: usize = 8;
 const MAX_METADATA_RANGES: usize = 4 + MAX_SLOTS;
-
-#[derive(Clone, Copy)]
-pub(super) enum ProviderProfile {
-    LastErrorOnly,
-    LastErrorAndExit,
-    MainImageHandle,
-    VirtualAllocation,
-    VirtualMemory,
-    VirtualProtection,
-    InstructionCache,
-    CurrentProcess,
-}
 
 #[derive(Clone, Copy)]
 pub(super) struct ImportDirectory {
@@ -126,100 +114,17 @@ impl ImportPlan<'_> {
                 id: 0,
             }; 8],
         };
-        let mut used = [false; 9];
+        let mut used = [false; WindowsApi32::CATALOG_LEN];
         for (index, symbol) in self.symbols[..self.slot_count].iter().enumerate() {
             let api = WindowsApi32::resolve(self.module, symbol).ok_or(LoadError::Unsupported)?;
-            let gate_index = match api {
-                WindowsApi32::GetLastError => 0,
-                WindowsApi32::SetLastError => 1,
-                WindowsApi32::ExitProcess => match profile {
-                    ProviderProfile::LastErrorOnly => return Err(LoadError::Unsupported),
-                    ProviderProfile::LastErrorAndExit
-                    | ProviderProfile::MainImageHandle
-                    | ProviderProfile::VirtualAllocation
-                    | ProviderProfile::VirtualMemory
-                    | ProviderProfile::VirtualProtection
-                    | ProviderProfile::InstructionCache
-                    | ProviderProfile::CurrentProcess => 2,
-                },
-                WindowsApi32::GetModuleHandleA => match profile {
-                    ProviderProfile::MainImageHandle
-                    | ProviderProfile::VirtualAllocation
-                    | ProviderProfile::VirtualMemory
-                    | ProviderProfile::VirtualProtection
-                    | ProviderProfile::InstructionCache
-                    | ProviderProfile::CurrentProcess => 3,
-                    ProviderProfile::LastErrorOnly | ProviderProfile::LastErrorAndExit => {
-                        return Err(LoadError::Unsupported);
-                    }
-                },
-                WindowsApi32::VirtualAlloc => match profile {
-                    ProviderProfile::VirtualAllocation
-                    | ProviderProfile::VirtualMemory
-                    | ProviderProfile::VirtualProtection
-                    | ProviderProfile::InstructionCache
-                    | ProviderProfile::CurrentProcess => 4,
-                    ProviderProfile::LastErrorOnly
-                    | ProviderProfile::LastErrorAndExit
-                    | ProviderProfile::MainImageHandle => return Err(LoadError::Unsupported),
-                },
-                WindowsApi32::VirtualFree => match profile {
-                    ProviderProfile::VirtualMemory
-                    | ProviderProfile::VirtualProtection
-                    | ProviderProfile::InstructionCache
-                    | ProviderProfile::CurrentProcess => 5,
-                    ProviderProfile::LastErrorOnly
-                    | ProviderProfile::LastErrorAndExit
-                    | ProviderProfile::MainImageHandle
-                    | ProviderProfile::VirtualAllocation => return Err(LoadError::Unsupported),
-                },
-                WindowsApi32::VirtualProtect => match profile {
-                    ProviderProfile::VirtualProtection
-                    | ProviderProfile::InstructionCache
-                    | ProviderProfile::CurrentProcess => 6,
-                    ProviderProfile::LastErrorOnly
-                    | ProviderProfile::LastErrorAndExit
-                    | ProviderProfile::MainImageHandle
-                    | ProviderProfile::VirtualAllocation
-                    | ProviderProfile::VirtualMemory => return Err(LoadError::Unsupported),
-                },
-                WindowsApi32::FlushInstructionCache => match profile {
-                    ProviderProfile::InstructionCache | ProviderProfile::CurrentProcess => 7,
-                    ProviderProfile::LastErrorOnly
-                    | ProviderProfile::LastErrorAndExit
-                    | ProviderProfile::MainImageHandle
-                    | ProviderProfile::VirtualAllocation
-                    | ProviderProfile::VirtualMemory
-                    | ProviderProfile::VirtualProtection => return Err(LoadError::Unsupported),
-                },
-                WindowsApi32::GetCurrentProcess => match profile {
-                    ProviderProfile::CurrentProcess => 8,
-                    ProviderProfile::LastErrorOnly
-                    | ProviderProfile::LastErrorAndExit
-                    | ProviderProfile::MainImageHandle
-                    | ProviderProfile::VirtualAllocation
-                    | ProviderProfile::VirtualMemory
-                    | ProviderProfile::VirtualProtection
-                    | ProviderProfile::InstructionCache => return Err(LoadError::Unsupported),
-                },
-            };
+            if !profile.supports(api) {
+                return Err(LoadError::Unsupported);
+            }
+            let gate_index = api.catalog_index();
             used[gate_index] = true;
             resolved.slots[index] = gate_base + gate_index as u32 * 16;
         }
-        for (index, api) in [
-            WindowsApi32::GetLastError,
-            WindowsApi32::SetLastError,
-            WindowsApi32::ExitProcess,
-            WindowsApi32::GetModuleHandleA,
-            WindowsApi32::VirtualAlloc,
-            WindowsApi32::VirtualFree,
-            WindowsApi32::VirtualProtect,
-            WindowsApi32::FlushInstructionCache,
-            WindowsApi32::GetCurrentProcess,
-        ]
-        .into_iter()
-        .enumerate()
-        {
+        for (index, api) in WindowsApi32::catalog().enumerate() {
             if used[index] {
                 resolved.gates[resolved.gate_count as usize] = GateSpec {
                     entry: GuestAddress(gate_base + index as u32 * 16),

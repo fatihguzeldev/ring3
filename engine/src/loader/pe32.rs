@@ -1,4 +1,5 @@
-use super::imports::{ImportDirectory, ProviderProfile, prepare_imports};
+use super::ProviderProfile;
+use super::imports::{ImportDirectory, prepare_imports};
 use super::relocation::{RelocationDirectory, prepare_fixups};
 use super::{
     ImageMetadata32, LinkedImageMetadata32, LinkedImageMetadata32V2, LinkedImageMetadata32V3,

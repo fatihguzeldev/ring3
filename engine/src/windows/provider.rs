@@ -1,22 +1,8 @@
-use super::{CallFrame32, CallingConvention32, FrameError};
+use super::{CallFrame32, FrameError, WindowsApi32};
 use crate::{
     cpu::x86::Register32,
     memory::{GuestAddress, PAGE_SIZE, PageRange, Permissions},
 };
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(u32)]
-pub enum WindowsApi32 {
-    GetLastError = 0x0001_0001,
-    SetLastError = 0x0001_0002,
-    ExitProcess = 0x0001_0003,
-    GetModuleHandleA = 0x0001_0004,
-    VirtualAlloc = 0x0001_0005,
-    VirtualFree = 0x0001_0006,
-    VirtualProtect = 0x0001_0007,
-    FlushInstructionCache = 0x0001_0008,
-    GetCurrentProcess = 0x0001_0009,
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum WindowsOutcome32 {
@@ -34,58 +20,6 @@ pub(crate) enum WindowsOutcome32 {
         permissions: Permissions,
         old_output: GuestAddress,
     },
-}
-
-impl WindowsApi32 {
-    pub fn resolve(module: &str, symbol: &str) -> Option<Self> {
-        if !module.eq_ignore_ascii_case("kernel32.dll") {
-            return None;
-        }
-        match symbol {
-            "GetLastError" => Some(Self::GetLastError),
-            "SetLastError" => Some(Self::SetLastError),
-            "ExitProcess" => Some(Self::ExitProcess),
-            "GetModuleHandleA" => Some(Self::GetModuleHandleA),
-            "VirtualAlloc" => Some(Self::VirtualAlloc),
-            "VirtualFree" => Some(Self::VirtualFree),
-            "VirtualProtect" => Some(Self::VirtualProtect),
-            "FlushInstructionCache" => Some(Self::FlushInstructionCache),
-            "GetCurrentProcess" => Some(Self::GetCurrentProcess),
-            _ => None,
-        }
-    }
-
-    pub fn from_id(id: u32) -> Option<Self> {
-        match id {
-            0x0001_0001 => Some(Self::GetLastError),
-            0x0001_0002 => Some(Self::SetLastError),
-            0x0001_0003 => Some(Self::ExitProcess),
-            0x0001_0004 => Some(Self::GetModuleHandleA),
-            0x0001_0005 => Some(Self::VirtualAlloc),
-            0x0001_0006 => Some(Self::VirtualFree),
-            0x0001_0007 => Some(Self::VirtualProtect),
-            0x0001_0008 => Some(Self::FlushInstructionCache),
-            0x0001_0009 => Some(Self::GetCurrentProcess),
-            _ => None,
-        }
-    }
-
-    pub fn id(self) -> u32 {
-        self as u32
-    }
-
-    pub fn convention(self) -> CallingConvention32 {
-        CallingConvention32::Stdcall
-    }
-
-    pub fn stack_words(self) -> u32 {
-        match self {
-            Self::GetLastError | Self::GetCurrentProcess => 0,
-            Self::SetLastError | Self::ExitProcess | Self::GetModuleHandleA => 1,
-            Self::VirtualAlloc | Self::VirtualProtect => 4,
-            Self::VirtualFree | Self::FlushInstructionCache => 3,
-        }
-    }
 }
 
 #[derive(Clone, Copy, Default)]
@@ -233,6 +167,7 @@ mod tests {
     use crate::{
         cpu::x86::State32,
         memory::{AddressSpace, PageRange, Permissions},
+        windows::CallingConvention32,
     };
 
     fn frame(arguments: [u32; 4], convention: CallingConvention32, count: u32) -> CallFrame32 {

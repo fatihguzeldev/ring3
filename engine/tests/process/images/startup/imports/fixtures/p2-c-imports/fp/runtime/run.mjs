@@ -47,7 +47,7 @@ const sourcePaths = [
   'engine/tests/process/images/startup/imports/floating/native.rs', 'engine/tests/process/images/native.rs', 'engine/tests/process/images/startup/imports/floating/wasm.rs', 'engine/tests/process/images/wasm.rs', 'engine/tests/support/wasm.rs',
   'engine/tests/support/wasm/engine.mjs', 'engine/src/process/loading/input.rs', 'engine/src/process/loading/mod.rs', 'engine/src/process/mod.rs',
   'engine/src/process/loading/startup.rs', 'engine/src/process/execution/resident.rs', 'engine/src/process/execution/authority.rs', 'engine/src/process/execution/mod.rs', 'engine/src/process/execution/installation.rs',
-  'engine/src/process/calls/call.rs', 'engine/src/process/cpu/context.rs', 'engine/src/process/calls/mod.rs', 'engine/src/process/windows/calls.rs', 'engine/src/process/windows/mod.rs', 'engine/src/windows/provider.rs',
+  'engine/src/process/calls/call.rs', 'engine/src/process/cpu/context.rs', 'engine/src/process/calls/mod.rs', 'engine/src/process/windows/calls.rs', 'engine/src/process/windows/mod.rs', 'engine/src/windows/provider.rs', 'engine/src/windows/api/mod.rs', 'engine/src/windows/api/catalog.rs',
   'engine/src/cpu/dbt/wasm/dispatcher.rs', 'engine/src/process/cpu/simd.rs', 'engine/src/process/cpu/mod.rs',
   'engine/src/process/memory/span.rs', 'engine/src/process/memory/mod.rs',
   'engine/src/cpu/dbt/wasm/simd.rs', 'engine/src/cpu/dbt/wasm/simd/direct.rs',

@@ -2,6 +2,8 @@ mod imports;
 mod pe32;
 mod relocation;
 
+pub(crate) use crate::windows::ProviderProfile;
+
 use crate::cpu::dbt::GateSpec;
 use crate::memory::{AddressSpace, MemoryError};
 
