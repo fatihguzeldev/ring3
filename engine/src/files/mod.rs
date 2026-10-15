@@ -4,6 +4,7 @@ mod content;
 mod context;
 mod handles;
 mod io;
+mod namespace;
 pub(crate) mod path;
 mod tree;
 mod types;
