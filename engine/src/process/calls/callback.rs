@@ -121,6 +121,10 @@ impl EngineInstance {
         return_id: u32,
         count: u32,
     ) -> Result<CallbackRecord32, HostError> {
+        if self.callback.is_some() || self.windows_provider_owns_token(outer_token) {
+            self.guard_artifact(key, generation)?;
+            return Err(call_error(CallError::Busy));
+        }
         self.callback_request(key, generation, count as usize)?;
         let mut arguments = [0; MAX_STACK_WORDS];
         for (index, argument) in arguments[..count as usize].iter_mut().enumerate() {
@@ -149,7 +153,7 @@ impl EngineInstance {
         return_id: u32,
         arguments: &[u32],
     ) -> Result<CallbackRecord32, HostError> {
-        if self.windows_provider_owns_token(outer_token) {
+        if self.callback.is_some() || self.windows_provider_owns_token(outer_token) {
             self.guard_artifact(key, generation)?;
             return Err(call_error(CallError::Busy));
         }
@@ -408,7 +412,109 @@ fn call_error(error: CallError) -> HostError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{cpu::x86::State32, windows::CallingConvention32};
+    use crate::{cpu::x86::State32, memory::GuestAddress, windows::CallingConvention32};
+
+    #[test]
+    fn public_nested_callbacks_stay_busy_while_provider_nesting_remains_available() {
+        let mut engine = EngineInstance::new(2, 91).unwrap();
+        engine.map(0x1000, 1, 7).unwrap();
+        engine.map(0x8000, 1, 3).unwrap();
+        for (address, bytes) in [
+            (0x1000, &[0x0f, 0x0b][..]),
+            (0x1100, &[0x90][..]),
+            (0x1150, &[0x0f, 0x0b][..]),
+            (0x1200, &[0x0f, 0x0b][..]),
+            (0x1250, &[0x0f, 0x0b][..]),
+        ] {
+            engine
+                .memory
+                .as_mut()
+                .unwrap()
+                .write(GuestAddress(address), bytes)
+                .unwrap();
+        }
+        for (index, value) in [
+            0x1000_u32, 2, 0x1100, 1, 0x1150, 2, 0x1200, 2, 0x1250, 2, 0x1000, 17, 0x1150, 19,
+            0x1200, 18, 0x1250, 20,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            engine.arena_mut().unwrap()
+                [TRANSFER_OFFSET + index * 4..TRANSFER_OFFSET + index * 4 + 4]
+                .copy_from_slice(&value.to_le_bytes());
+        }
+        let generation = engine.compile_with_gates(5, 4).unwrap();
+        engine.write32(0x8010, 0x2000).unwrap();
+        let mut state = State32 {
+            eip: 0x1000,
+            ..State32::default()
+        };
+        state.registers[4] = 0x8010;
+        encode_state(&state, &mut engine.arena_mut().unwrap()[..STATE_SIZE]).unwrap();
+        encode_exit_v3(
+            &ExecutionExit {
+                retired: 0,
+                reason: ExitReason::Gate { id: 17 },
+            },
+            &mut engine.arena_mut().unwrap()[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE],
+        )
+        .unwrap();
+        let outer = engine
+            .capture_call(91, generation, CallingConvention32::Cdecl, 0)
+            .unwrap();
+        let callback = engine
+            .begin_callback(91, generation, outer.token, 0x1100, 0x1200, 18, &[])
+            .unwrap();
+        let mut state = decode_state(&engine.arena()[..STATE_SIZE]).unwrap();
+        state.eip = 0x1150;
+        encode_state(&state, &mut engine.arena_mut().unwrap()[..STATE_SIZE]).unwrap();
+        encode_exit_v3(
+            &ExecutionExit {
+                retired: 0,
+                reason: ExitReason::Gate { id: 19 },
+            },
+            &mut engine.arena_mut().unwrap()[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE],
+        )
+        .unwrap();
+        let inner = engine
+            .capture_call(91, generation, CallingConvention32::Cdecl, 0)
+            .unwrap();
+        let before = engine.arena().to_vec();
+        assert_eq!(
+            engine.begin_callback(91, generation, inner.token, 0x1100, 0x1250, 20, &[0; 17]),
+            Err(call_error(CallError::Busy))
+        );
+        assert_eq!(
+            engine.begin_callback_from_transfer(
+                91,
+                generation,
+                inner.token,
+                0x1100,
+                0x1250,
+                20,
+                17
+            ),
+            Err(call_error(CallError::Busy))
+        );
+        assert_eq!(engine.arena(), before);
+        let nested = engine
+            .begin_provider_callback(91, generation, inner.token, 0x1100, 0x1250, 20, &[])
+            .unwrap();
+        assert_eq!(engine.callback.as_ref().unwrap().depth(), 2);
+        engine.abort_callback(91, nested.token).unwrap();
+        assert_eq!(
+            engine
+                .callback
+                .as_ref()
+                .unwrap()
+                .replacement_record()
+                .unwrap()
+                .token,
+            callback.token
+        );
+        assert_eq!(engine.pending_call.as_ref().unwrap().token, inner.token);
+    }
 
     #[test]
     fn last_callback_token_is_committed_once_and_exhaustion_precedes_stack_writes() {
