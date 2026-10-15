@@ -1,20 +1,16 @@
 #![forbid(unsafe_code)]
 
 use crate::process::{
-    CallError, EngineInstance, HostError, ResidentInstallation, calls::callback::SuspendedRecord,
+    CallError, EngineInstance, HostError, ResidentInstallation,
+    calls::{callback::SuspendedRecord, code::validate_callback_code_stop},
     cpu::context::ExtendedCpuState,
 };
 use crate::{
     abi::{
         arena::{EXIT_OFFSET, STATE_OFFSET},
-        x86::{
-            EXIT_SIZE, EXIT_VERSION_3, EXIT_VERSION_5, EXIT_VERSION_6, EXIT_VERSION_7,
-            EXIT_VERSION_8, EXIT_VERSION_9, EXIT_VERSION_10, EXIT_VERSION_11, EXIT_VERSION_12,
-            EXIT_VERSION_13, EXIT_VERSION_14, EXIT_VERSION_15, STATE_SIZE, decode_exit,
-            decode_state,
-        },
+        x86::{EXIT_SIZE, STATE_SIZE, decode_state},
     },
-    cpu::{ExitReason, dbt::UnitId},
+    cpu::dbt::UnitId,
 };
 
 impl EngineInstance {
@@ -85,26 +81,10 @@ impl EngineInstance {
         ExtendedCpuState::capture(self.arena())?;
         let state = decode_state(&self.arena()[STATE_OFFSET..STATE_OFFSET + STATE_SIZE])
             .map_err(|_| HostError::Call(CallError::InvalidStop))?;
-        let exit_bytes = &self.arena()[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE];
-        let exit = decode_exit(exit_bytes).map_err(|_| HostError::Call(CallError::InvalidStop))?;
-        if !matches!(
-            u16::from_le_bytes([exit_bytes[4], exit_bytes[5]]),
-            EXIT_VERSION_3
-                | EXIT_VERSION_5
-                | EXIT_VERSION_6
-                | EXIT_VERSION_7
-                | EXIT_VERSION_8
-                | EXIT_VERSION_9
-                | EXIT_VERSION_10
-                | EXIT_VERSION_11
-                | EXIT_VERSION_12
-                | EXIT_VERSION_13
-                | EXIT_VERSION_14
-                | EXIT_VERSION_15
-        ) || exit.reason != ExitReason::NeedCode
-        {
-            return Err(HostError::Call(CallError::InvalidStop));
-        }
+        let exit_bytes: &[u8; EXIT_SIZE] = self.arena()[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE]
+            .try_into()
+            .unwrap();
+        validate_callback_code_stop(exit_bytes)?;
         if self.call_cancelled() {
             return Err(HostError::Call(CallError::Cancelled));
         }

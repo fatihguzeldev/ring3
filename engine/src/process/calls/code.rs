@@ -21,6 +21,29 @@ use crate::{
     cpu::{ExitReason, dbt::CompiledRegion},
 };
 
+pub(super) fn validate_callback_code_stop(bytes: &[u8; EXIT_SIZE]) -> Result<(), HostError> {
+    let exit = decode_exit(bytes).map_err(|_| HostError::Call(CallError::InvalidStop))?;
+    if !matches!(
+        u16::from_le_bytes([bytes[4], bytes[5]]),
+        EXIT_VERSION_3
+            | EXIT_VERSION_5
+            | EXIT_VERSION_6
+            | EXIT_VERSION_7
+            | EXIT_VERSION_8
+            | EXIT_VERSION_9
+            | EXIT_VERSION_10
+            | EXIT_VERSION_11
+            | EXIT_VERSION_12
+            | EXIT_VERSION_13
+            | EXIT_VERSION_14
+            | EXIT_VERSION_15
+    ) || exit.reason != ExitReason::NeedCode
+    {
+        return Err(HostError::Call(CallError::InvalidStop));
+    }
+    Ok(())
+}
+
 struct PreparedCallbackCode {
     key: u64,
     generation: u32,
@@ -104,27 +127,7 @@ impl EngineInstance {
             .unwrap();
         let extended = ExtendedCpuState::capture(self.arena())?;
         let stopped = decode_state(&state).map_err(|_| HostError::Call(CallError::InvalidStop))?;
-        if !matches!(
-            u16::from_le_bytes(exit[4..6].try_into().unwrap()),
-            EXIT_VERSION_3
-                | EXIT_VERSION_5
-                | EXIT_VERSION_6
-                | EXIT_VERSION_7
-                | EXIT_VERSION_8
-                | EXIT_VERSION_9
-                | EXIT_VERSION_10
-                | EXIT_VERSION_11
-                | EXIT_VERSION_12
-                | EXIT_VERSION_13
-                | EXIT_VERSION_14
-                | EXIT_VERSION_15
-        ) || decode_exit(&exit)
-            .map_err(|_| HostError::Call(CallError::InvalidStop))?
-            .reason
-            != ExitReason::NeedCode
-        {
-            return Err(HostError::Call(CallError::InvalidStop));
-        }
+        validate_callback_code_stop(&exit)?;
         if self.call_cancelled() {
             return Err(HostError::Call(CallError::Cancelled));
         }
