@@ -470,7 +470,10 @@ fn capture_word_memory_predicate_raw_inputs_without_guest_execution() {
         data[at..at + 2].copy_from_slice(&value.to_le_bytes());
     }
     let initial = EngineInstance::new(1, LEGACY_KEY).unwrap().arena().to_vec();
-    assert_eq!((bank.len(), data.len(), initial.len()), (4096, 4096, ring3_engine::abi::arena::ARENA_SIZE));
+    assert_eq!(
+        (bank.len(), data.len(), initial.len()),
+        (4096, 4096, ring3_engine::abi::arena::ARENA_SIZE)
+    );
     let mut metadata = Vec::new();
     for group in groups {
         let blocks: Vec<_> = group

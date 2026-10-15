@@ -8,7 +8,8 @@ use ring3_engine::{
     process::{EngineInstance, HostError},
 };
 
-const ORIGINAL: &[u8] = include_bytes!("../../relocation/fixtures/p2-pe32-relocatable/relocations.exe");
+const ORIGINAL: &[u8] =
+    include_bytes!("../../relocation/fixtures/p2-pe32-relocatable/relocations.exe");
 const KEY: u64 = 0xa349_cdef_1234_5678;
 const PREFERRED: u32 = 0x0040_0000;
 

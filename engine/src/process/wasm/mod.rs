@@ -216,25 +216,25 @@ pub(crate) use xstate::{
 
 mod cpu;
 pub(crate) use cpu::{
-    configure_segment_descriptor,
-    configure_segment_descriptor_raw, configure_system_register_bank, cpu_fxsave,
-    cpu_fxsave_resident, cpu_integer, cpu_integer_resident, cpu_mask_write,
+    configure_segment_descriptor, configure_segment_descriptor_raw, configure_system_register_bank,
+    cpu_fxsave, cpu_fxsave_resident, cpu_integer, cpu_integer_resident, cpu_mask_write,
     cpu_mask_write_resident, cpu_read, cpu_read8, cpu_read16, cpu_read32, cpu_write,
     cpu_write_resident, far_call, far_call_resident, far_jump, far_jump_resident, far_return,
-    far_return_resident, segment_load, segment_load_far,
-    segment_load_far_resident, segment_load_resident, set_segment_base, simd_execute,
-    simd_execute_resident, stack_execute, stack_execute_resident, x87_op, x87_resident_op,
+    far_return_resident, segment_load, segment_load_far, segment_load_far_resident,
+    segment_load_resident, set_segment_base, simd_execute, simd_execute_resident, stack_execute,
+    stack_execute_resident, x87_op, x87_resident_op,
 };
 
 mod paging;
 pub(crate) use paging::{
-    cpu_fetch_fault,
-    cpu_fetch_fault_resident, cpu_read_modify, cpu_read_modify8, cpu_read_modify16,
-    cpu_read_modify32, read_cr2,
+    cpu_fetch_fault, cpu_fetch_fault_resident, cpu_read_modify, cpu_read_modify8,
+    cpu_read_modify16, cpu_read_modify32, read_cr2,
 };
 
 mod detection;
-pub(crate) use detection::{finish_exception_detection, guard_detect, guard_detect_resident, take_cpu_event};
+pub(crate) use detection::{
+    finish_exception_detection, guard_detect, guard_detect_resident, take_cpu_event,
+};
 
 mod avx;
 pub(crate) use avx::{avx_execute, avx_execute_resident};

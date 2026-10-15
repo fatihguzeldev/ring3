@@ -37,7 +37,9 @@ fn run(script: &str, output_name: &str) {
     fs::write(output.join("initial-arena.bin"), initial).unwrap();
     let result = support_wasm::run_node(
         root,
-        &format!("engine/tests/cpu/control/exceptions/availability/optional/fixtures/p2-optional-availability/runtime/{script}"),
+        &format!(
+            "engine/tests/cpu/control/exceptions/availability/optional/fixtures/p2-optional-availability/runtime/{script}"
+        ),
         &engine,
         &output,
         Some(&expected),

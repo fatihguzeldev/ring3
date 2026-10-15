@@ -12,14 +12,16 @@ fn actual_x87_cached_segment_spans_preserve_waiting_exception_priority() {
     let engine = std::env::var_os("RING3_ENGINE_WASM")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| root.join("target/wasm32-unknown-unknown/debug/ring3_engine.wasm"));
-    let output = root.join("target/p2-x87-segment-access-fixtures").join(format!(
-        "segments-{}-{}",
-        std::process::id(),
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
+    let output = root
+        .join("target/p2-x87-segment-access-fixtures")
+        .join(format!(
+            "segments-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
     fs::create_dir_all(&output).unwrap();
     let result = wasm_support::run_node(
         root,

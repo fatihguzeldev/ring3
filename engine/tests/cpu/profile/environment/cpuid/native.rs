@@ -97,7 +97,9 @@ fn native_cpuid_modules_report_only_the_proven_cpu_profile() {
     }
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
     let mut child = Command::new("node")
-        .arg(root.join("engine/tests/cpu/profile/environment/cpuid/fixtures/p2-cpuid/runtime/native.mjs"))
+        .arg(root.join(
+            "engine/tests/cpu/profile/environment/cpuid/fixtures/p2-cpuid/runtime/native.mjs",
+        ))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

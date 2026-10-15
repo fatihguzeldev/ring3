@@ -49,10 +49,8 @@ pub const KERNEL_RAW_TEXT: &[u8] =
     include_bytes!("../fixtures/p2-compiled-switch/kernel.text.raw.bin");
 pub const KERNEL_RAW_TABLE: &[u8] =
     include_bytes!("../fixtures/p2-compiled-switch/kernel.rdata.raw.bin");
-pub const KERNEL: &[u8] =
-    include_bytes!("../fixtures/p2-compiled-switch/kernel.text.bin");
-pub const TABLE: &[u8] =
-    include_bytes!("../fixtures/p2-compiled-switch/kernel.rdata.bin");
+pub const KERNEL: &[u8] = include_bytes!("../fixtures/p2-compiled-switch/kernel.text.bin");
+pub const TABLE: &[u8] = include_bytes!("../fixtures/p2-compiled-switch/kernel.rdata.bin");
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Fixup {

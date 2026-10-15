@@ -78,7 +78,6 @@ mod avx2_widen_capability;
 #[path = "avx/shift/variable/capability/native.rs"]
 mod variable_shift_capability;
 
-
 #[path = "avx/broadcast/capability/native.rs"]
 mod broadcast_capability;
 

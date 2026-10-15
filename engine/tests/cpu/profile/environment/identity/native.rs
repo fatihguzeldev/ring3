@@ -115,7 +115,10 @@ fn timestamp_control_keeps_aux_zero_and_observed_time() {
             expected[TRANSFER_OFFSET + 20..TRANSFER_OFFSET + 24].fill(0);
         }
         assert_eq!(engine.arena(), expected);
-        assert_eq!((word(&engine, 2), word(&engine, 3)), ((sample - 100) as u32, 0));
+        assert_eq!(
+            (word(&engine, 2), word(&engine, 3)),
+            ((sample - 100) as u32, 0)
+        );
     }
 }
 

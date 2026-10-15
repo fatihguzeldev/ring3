@@ -9,8 +9,7 @@ pub use readonly::{
 pub const CHECKSUM1_RVA: u32 = DATA_RVA;
 pub const CHECKSUM2_RVA: u32 = DATA_RVA + 4;
 pub const KERNEL_OFFSET: u32 = 0x200;
-pub const KERNEL: &[u8] =
-    include_bytes!("../fixtures/p2-mutable-records/kernel.text.bin");
+pub const KERNEL: &[u8] = include_bytes!("../fixtures/p2-mutable-records/kernel.text.bin");
 pub const KERNEL_SHA256: &str = "600b2c46774458e4e3b1b96f032270388195c0afa65b563c9c63731623e48c5a";
 pub const MAIN_ENTRIES: [u32; 6] = [0, 20, 47, 60, 77, 99];
 pub const KERNEL_ENTRIES: [u32; 4] = [0x200, 0x210, 0x212, 0x260];
