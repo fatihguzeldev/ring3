@@ -88,7 +88,7 @@ function open(program, resident, gated = false) {
   const ring3 = Object.fromEntries(WebAssembly.Module.imports(module)
     .filter(imported => imported.kind === 'function')
     .map(imported => [imported.name, (...args) => {
-      if (!imported.name.startsWith('guard')) calls++;
+      if (!imported.name.startsWith('guard') && imported.name !== 'finish_exception_detection') calls++;
       return api[imported.name](...args);
     }]));
   const run = new WebAssembly.Instance(module, {env: {memory}, ring3}).exports.run;
@@ -207,10 +207,10 @@ execute([0x62, 0x03], {label: 'reversed bounds reject every index', index: 0, da
   {reason: 19, retired: 0, pc: PC});
 execute([0x62, 0x03], {label: 'BOUND upper memory fault precedes lower comparison', index: -1,
   address: 0x5ffc, data: words([0])},
-  {reason: 5, retired: 0, pc: PC, detail: 1, address: 0x6000, access: 1, length: 8});
+  {reason: 23, retired: 0, pc: PC, detail: 4, address: 0x6000, access: 1, length: 8, exitVersion: 12});
 execute([0x66, 0x62, 0x03], {label: 'BOUND16 upper memory fault preserves state', index: -1,
   address: 0x5ffe, data: words([0], true)},
-  {reason: 5, retired: 0, pc: PC, detail: 1, address: 0x6000, access: 1, length: 4});
+  {reason: 23, retired: 0, pc: PC, detail: 4, address: 0x6000, access: 1, length: 4, exitVersion: 12});
 execute([0x62, 0x03], {label: 'BOUND logical span overflow precedes RAM access', address: 0xfffffffc},
   {reason: 11, retired: 0, pc: PC, noHelper: true});
 
@@ -223,9 +223,9 @@ execute([0x9d], {label: 'POPFD cannot clear IF at CPL3 with IOPL0', flags: 0x202
 execute([0x66, 0x9d], {label: 'POPF cannot clear IF at CPL3 with IOPL0', flags: 0x202,
   data: words([0], true)}, {flags: 0x202, stack: 0x5002});
 execute([0x9d], {label: 'POPFD stack fault preserves flags and ESP', stack: 0x5ffe, flags: 0x8d7},
-  {reason: 5, retired: 0, pc: PC, detail: 1, address: 0x6000, access: 1, length: 4});
+  {reason: 23, retired: 0, pc: PC, detail: 4, address: 0x6000, access: 1, length: 4, exitVersion: 12});
 execute([0x66, 0x9d], {label: 'POPF stack fault preserves flags and ESP', stack: 0x5fff, flags: 0x8d7},
-  {reason: 5, retired: 0, pc: PC, detail: 1, address: 0x6000, access: 1, length: 2});
+  {reason: 23, retired: 0, pc: PC, detail: 4, address: 0x6000, access: 1, length: 2, exitVersion: 12});
 
 execute([0x9d, 0x90], {label: 'POPFD enabling TF traps after the following instruction',
   data: words([0x102]), budget: 8}, {reason: 16, retired: 2, pc: PC + 2, flags: 0x102, stack: 0x5004});
@@ -281,7 +281,7 @@ execute([0x8e, 0xd0, 0x8e, 0xd0, 0x90], {label: 'consecutive MOV SS does not ext
   index: 0x23, flags: 0x102, budget: 8}, {reason: 16, retired: 2, pc: PC + 4});
 execute([0x8e, 0xd0, 0x8b, 0x05, 0, 0x60, 0, 0], {
   label: 'fault in the following instruction ends SS debug inhibition', index: 0x23, flags: 0x102, budget: 8,
-}, {reason: 5, retired: 1, pc: PC + 2, detail: 1, address: 0x6000, access: 1, length: 4});
+}, {reason: 23, retired: 1, pc: PC + 2, detail: 4, address: 0x6000, access: 1, length: 4, exitVersion: 12});
 execute([0x8e, 0xd0], {label: 'failed MOV SS never arms debug inhibition', index: 0, flags: 0x102, budget: 8},
   {reason: 11, retired: 0, pc: PC});
 execute([0x0f, 0xb2, 0x23, 0x90], {label: 'LSS has no MOV SS debug inhibition',

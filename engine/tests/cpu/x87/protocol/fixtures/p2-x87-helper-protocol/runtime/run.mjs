@@ -54,8 +54,8 @@ function open(resident, entries) {
   const helper = resident ? 'x87_resident_op' : 'x87_op';
   for (const imp of WebAssembly.Module.imports(module)) {
     if (imp.module === 'ring3' && imp.name.startsWith('guard')) {
-      // raw replies isolate generated validation; canonical runs retain the real owner guard.
-      ring3[imp.name] = (...args) => c.synthetic === null ? api[imp.name](...args) : 0;
+      // synthetic helper replies retain the real owner and positive detection epoch.
+      ring3[imp.name] = (...args) => api[imp.name](...args);
     }
   }
   ring3[helper] = (...args) => {
