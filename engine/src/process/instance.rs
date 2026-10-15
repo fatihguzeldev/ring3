@@ -22,6 +22,7 @@ pub enum HostError {
     GenerationExhausted,
     Memory(MemoryError),
     Loader(crate::loader::LoadError),
+    Module(crate::loader::ModuleError32),
     Compile(CompileError),
     Resident(RegistryError),
     Infrastructure,
@@ -57,6 +58,7 @@ pub struct EngineInstance {
     pub(in crate::process) exception_detection:
         Option<Box<[crate::process::cpu::events::detection::DetectionSlot32; 1]>>,
     pub(in crate::process) system_register_bank: Option<crate::cpu::x86::UserSystemRegisterBank32>,
+    pub(in crate::process) modules: crate::process::loading::modules::ModuleProcess32,
     pub(in crate::process) image: Option<crate::loader::ImageMetadata32>,
     pub(in crate::process) image_input: Option<crate::process::loading::input::ImageInput>,
     pub(in crate::process) image_started: bool,
@@ -99,6 +101,7 @@ impl EngineInstance {
             #[cfg(any(target_arch = "wasm32", test))]
             exception_detection: None,
             system_register_bank: Some(crate::cpu::x86::UserSystemRegisterBank32::application()),
+            modules: crate::process::loading::modules::ModuleProcess32::default(),
             image: None,
             image_input: None,
             image_started: false,
@@ -133,6 +136,7 @@ impl EngineInstance {
     pub fn close(&mut self) {
         self.cpu_clock = crate::process::clock::CpuClock::default();
         self.image_input = None;
+        self.modules = crate::process::loading::modules::ModuleProcess32::default();
         self.system_register_bank = None;
         self.cr2 = None;
         self.cpu_page_fault_sequence = 0;

@@ -12,30 +12,39 @@ impl EngineInstance {
         size: u32,
         permissions: Permissions,
     ) -> Result<(), HostError> {
-        let bounds = PageRange::new(GuestAddress(0x1000_0000), 0x6000_0000 / PAGE_SIZE)
-            .map_err(HostError::Memory)?;
-        let mut planned = self
-            .memory()?
-            .find_free_range(bounds, size.div_ceil(PAGE_SIZE), 65536);
-        if let (Ok(range), Some(image)) = (planned, self.image) {
-            let range_start = range.first as u64 * u64::from(PAGE_SIZE);
-            let range_end = range_start + range.count as u64 * u64::from(PAGE_SIZE);
-            let image_start = u64::from(image.image_base);
-            let image_end = image_start + u64::from(image.image_size);
-            if range_start < image_end && image_start < range_end {
-                planned = if image_end >= 0x7000_0000 {
-                    Err(MemoryError::Capacity)
-                } else {
-                    let bounds = PageRange::new(
-                        GuestAddress(image_end as u32),
-                        (0x7000_0000 - image_end) as u32 / PAGE_SIZE,
-                    )
-                    .map_err(HostError::Memory)?;
-                    self.memory()?
-                        .find_free_range(bounds, size.div_ceil(PAGE_SIZE), 65536)
-                };
+        let mut lower = 0x1000_0000_u64;
+        let planned = loop {
+            if lower >= 0x7000_0000 {
+                break Err(MemoryError::Capacity);
             }
-        }
+            let bounds = PageRange::new(
+                GuestAddress(lower as u32),
+                ((0x7000_0000 - lower) / u64::from(PAGE_SIZE)) as u32,
+            )
+            .map_err(HostError::Memory)?;
+            let range =
+                match self
+                    .memory()?
+                    .find_free_range(bounds, size.div_ceil(PAGE_SIZE), 65536)
+                {
+                    Ok(range) => range,
+                    Err(error) => break Err(error),
+                };
+            let start = range.first as u64 * u64::from(PAGE_SIZE);
+            let end = start + range.count as u64 * u64::from(PAGE_SIZE);
+            let mut reserved_end = self.module_reservation_end(range);
+            if let Some(image) = self.image {
+                let image_start = u64::from(image.image_base);
+                let image_end = image_start + u64::from(image.image_size);
+                if start < image_end && image_start < end {
+                    reserved_end = Some(reserved_end.unwrap_or(0).max(image_end));
+                }
+            }
+            match reserved_end {
+                None => break Ok(range),
+                Some(end) => lower = end.div_ceil(65536) * 65536,
+            }
+        };
         let range = match planned {
             Ok(range) => range,
             Err(MemoryError::Capacity) => {
@@ -101,10 +110,12 @@ impl EngineInstance {
     ) -> Result<(), HostError> {
         let success = Self::prepare_completed_call(frame.complete(1))?;
         let failure = Self::prepare_completed_call(frame.complete(0))?;
-        if !self.virtual_allocations.iter().any(|allocation| {
-            range.first >= allocation.first
-                && range.first + range.count <= allocation.first + allocation.count
-        }) {
+        if !self.module_image_contains_range(range)
+            && !self.virtual_allocations.iter().any(|allocation| {
+                range.first >= allocation.first
+                    && range.first + range.count <= allocation.first + allocation.count
+            })
+        {
             self.publish_prepared_call(failure);
             self.windows_thread = thread.protection_failed(487);
             return Ok(());

@@ -106,6 +106,32 @@ pub(super) fn status(error: HostError) -> u32 {
             crate::loader::LoadError::Unsupported => 20,
             crate::loader::LoadError::Capacity | crate::loader::LoadError::Memory(_) => 8,
         },
+        HostError::Module(error) => match error {
+            crate::loader::ModuleError32::Pe(error) => status(HostError::Loader(error)),
+            crate::loader::ModuleError32::Memory(_)
+            | crate::loader::ModuleError32::Allocation
+            | crate::loader::ModuleError32::Capacity => 8,
+            crate::loader::ModuleError32::Busy => 12,
+            crate::loader::ModuleError32::InvalidRequest => 7,
+            crate::loader::ModuleError32::InvalidToken => 14,
+            crate::loader::ModuleError32::InvalidReturn => 13,
+            crate::loader::ModuleError32::InvalidName => 22,
+            crate::loader::ModuleError32::DuplicateModule => 23,
+            crate::loader::ModuleError32::DuplicateSymbol => 24,
+            crate::loader::ModuleError32::MissingModule => 25,
+            crate::loader::ModuleError32::MissingSymbol => 26,
+            crate::loader::ModuleError32::InvalidForwarder => 27,
+            crate::loader::ModuleError32::ForwarderCycle => 28,
+            crate::loader::ModuleError32::InvalidSystemExport => 29,
+            crate::loader::ModuleError32::InvalidModuleKind => 30,
+            crate::loader::ModuleError32::AddressConflict => 31,
+            crate::loader::ModuleError32::StalePlan => 32,
+            crate::loader::ModuleError32::ModuleInUse => 33,
+            crate::loader::ModuleError32::NotFound => 34,
+            crate::loader::ModuleError32::InvalidHandle => 35,
+            crate::loader::ModuleError32::ReferenceExhausted => 36,
+            crate::loader::ModuleError32::InitializationFailed => 37,
+        },
         HostError::Compile(_) => 10,
         HostError::Resident(error) => match error {
             RegistryError::InvalidLimits

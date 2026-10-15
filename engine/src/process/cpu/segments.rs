@@ -189,7 +189,10 @@ impl EngineInstance {
 
     fn segment_configuration_guard(&self) -> Result<(), HostError> {
         self.memory()?;
-        if self.pending_call.is_some() || self.callback.is_some() {
+        if self.pending_call.is_some()
+            || self.callback.is_some()
+            || self.has_active_module_operation()
+        {
             return Err(HostError::Call(CallError::Busy));
         }
         Ok(())

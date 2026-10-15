@@ -2,4 +2,5 @@
 
 pub(super) mod image;
 pub(super) mod input;
+pub(super) mod modules;
 pub(super) mod startup;
