@@ -13,6 +13,10 @@ pub enum MediaRecordKind {
     AudioVoiceState = 8,
     InputState = 9,
     InputRelative = 11,
+    D3D8Device = 12,
+    D3D8Batch = 13,
+    WindowsWait = 14,
+    WindowsGate = 15,
 }
 
 // r3mr v1: kind at 6, byte size at 8, reserved zero at 12, epoch at 16, five u64 values at 24.

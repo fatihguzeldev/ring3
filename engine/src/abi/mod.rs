@@ -3,8 +3,8 @@ pub mod call_frame;
 pub mod callback;
 pub mod cpu_helper;
 pub mod execution;
-pub mod graphics;
 pub mod far;
+pub mod graphics;
 #[forbid(unsafe_code)]
 pub(crate) mod header;
 pub mod image;
@@ -14,6 +14,7 @@ pub mod modules;
 pub mod resident_callback;
 #[cfg(target_arch = "wasm32")]
 mod wasm;
+pub mod windows;
 #[forbid(unsafe_code)]
 pub mod x86;
 
