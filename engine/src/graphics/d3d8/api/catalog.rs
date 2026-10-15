@@ -1,6 +1,6 @@
 use super::InterfaceKind;
 
-pub const CREATE_GATE: u32 = 0x0003_0001;
+pub const CREATE_GATE: u32 = 0x0005_0001;
 const METHOD_BASE: u32 = 0x0004_0000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

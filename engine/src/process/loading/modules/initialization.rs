@@ -23,6 +23,38 @@ use crate::{
 
 pub(super) const INITIALIZER_RETURN_ID: u32 = 0x0003_0001;
 
+#[cfg(test)]
+mod gate_namespace {
+    use super::INITIALIZER_RETURN_ID;
+    use crate::graphics::d3d8::api::{CREATE_GATE, InterfaceKind, MethodGate};
+
+    #[test]
+    fn windows_module_returns_factories_and_com_methods_have_distinct_gate_ids() {
+        let mut ids = std::collections::BTreeSet::new();
+        assert!(ids.insert(INITIALIZER_RETURN_ID));
+        assert!(ids.insert(CREATE_GATE));
+        for api in crate::windows::WindowsApi32::catalog() {
+            assert!(ids.insert(api.id()));
+        }
+        for api in crate::windows::user32::User32Api32::catalog() {
+            assert!(ids.insert(api as u32));
+        }
+        for interface in InterfaceKind::ALL {
+            for slot in 0..interface.methods().len() {
+                assert!(
+                    ids.insert(
+                        MethodGate {
+                            interface,
+                            slot: slot as u8
+                        }
+                        .id()
+                    )
+                );
+            }
+        }
+    }
+}
+
 pub(super) struct SavedModuleContext {
     state: [u8; STATE_SIZE],
     exit: [u8; EXIT_SIZE],
