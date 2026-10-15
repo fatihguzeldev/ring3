@@ -1,3 +1,4 @@
+import {detectionGuardName, generatedImports} from '../../../../../../../support/wasm/binding.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync, existsSync} from 'node:fs';
@@ -56,7 +57,7 @@ export async function harness(enginePath, output, root) {
     'engine/src/process/execution/compiled.rs', 'engine/src/process/execution/resident.rs',
     'engine/src/process/execution/stopped.rs', 'engine/src/process/wasm/execution.rs',
     'engine/src/process/cpu/far.rs', 'engine/src/process/memory/scalar.rs', 'engine/src/process/memory/span.rs',
-    'engine/tests/support/wasm.rs', 'engine/tests/support/wasm/engine.mjs', 'engine/tests/cpu/segments/wasm.rs',
+    'engine/tests/support/wasm.rs', 'engine/tests/support/wasm/engine.mjs', 'engine/tests/support/wasm/binding.mjs', 'engine/tests/cpu/segments/wasm.rs',
     'engine/src/memory/code.rs', 'engine/src/memory/space.rs', 'engine/src/memory/space/atomic.rs', 'engine/src/memory/space/code_fetch.rs',
     'engine/tests/cpu/segments/code/wrap/native.rs', 'engine/tests/cpu/segments/code/wrap/wasm.rs',
     'engine/tests/cpu/segments/code/wrap/fixtures/p2-cs-linear-wrap/runtime/run.mjs',
@@ -71,7 +72,7 @@ export async function harness(enginePath, output, root) {
   const host = (c, name, args = []) => assert.equal(c.api[name](...args), 0, `${c.label}: ${name}`);
   function open(resident, entries, label, pages) {
     const instance = new WebAssembly.Instance(engine.module, {});
-    const c = {resident, entries, label, key: ++nextKey, memory: instance.exports.memory, calls: [], pages: [], hook: null};
+    const c = {resident, entries, label, key: ++nextKey, memory: instance.exports.memory, calls: [], epoch: 0n, pages: [], hook: null};
     c.api = Object.fromEntries(Object.entries(instance.exports).filter(([name, fn]) => name.startsWith('ring3_abi_v1_') && typeof fn === 'function').map(([name, fn]) => [name.slice(13), fn]));
     host(c, 'open', [16, c.key, KEY_HIGH]); c.base = c.api.arena_ptr() >>> 0; put(c, 0, initial);
     for (const [page, permission = 7] of pages) {host(c, 'map', [page, 1, permission]); c.pages.push(page >>> 0);}
@@ -118,12 +119,15 @@ export async function harness(enginePath, output, root) {
     const pointer = c.resident ? a.readUInt32LE(156) : c.api.module_ptr() >>> 0;
     const length = c.resident ? a.readUInt32LE(160) : c.api.module_len() >>> 0;
     const bytes = Buffer.from(new Uint8Array(c.memory.buffer, pointer, length)), module = new WebAssembly.Module(bytes);
-    const imports = WebAssembly.Module.imports(module), guard = c.resident ? 'guard_resident' : 'guard';
+    const imports = WebAssembly.Module.imports(module);
     assert.deepEqual(imports.map(imp => `${imp.module}:${imp.name}:${imp.kind}`).sort(),
-      ['env:memory:memory', `ring3:${guard}:function`, ...expectedHelpers.map(name => `ring3:${name}:function`)].sort(), 'only the real declared helpers and guard');
+      generatedImports({resident: c.resident, helpers: [...expectedHelpers.map((name) => name)]}).map(item => `${item.module}:${item.name}:${item.kind}`).sort(), 'only the real declared helpers and guard');
     const ring3 = Object.fromEntries(imports.filter(imp => imp.kind === 'function').map(imp => [imp.name, (...args) => {
       if (c.hook?.name === imp.name) {const hook = c.hook; c.hook = null; hook.run();}
-      const status = c.api[imp.name](...args); c.calls.push({name: imp.name, args: args.map(v => v >>> 0), status}); return status;
+      const status = c.api[imp.name](...args);
+      const logged = value => typeof value === 'bigint' ? value.toString(10) : value;
+      c.calls.push({name: imp.name, args: args.map(value => typeof value === 'bigint' ? logged(value) : value >>> 0),
+        status: logged(status)}); return status;
     }]));
     const material = {run: new WebAssembly.Instance(module, {env: {memory: c.memory}, ring3}).exports.run,
       binding, pointer, length, generation: c.api.generation() >>> 0, helpers: expectedHelpers};
@@ -151,16 +155,31 @@ export async function harness(enginePath, output, root) {
       {kind: 'compile', expected_status: expectedStatus, status, classification: status === expectedStatus ? 'executed-host-contract' : 'compile-admission-or-capability', name, args});
     return status === 0 && expectedStatus === 0 ? capture(c, label, helpers) : null;
   }
+  function expectedCalls(c, material, status, want, helpers) {
+    assert.ok(status === 0 || status === 4, 'declared successful entry or stale-material refusal');
+    const epoch = status === 0 ? (++c.epoch).toString(10) : '-4';
+    const guard = {name: detectionGuardName(c.resident),
+      args: [...(c.resident ? material.binding : [c.key, KEY_HIGH, material.generation]), c.base, c.base + 56, c.base + 96],
+      status: epoch};
+    if (status !== 0) return [guard];
+    const reason = want.readUInt32LE(72), event = reason === 3 || reason === 5 || reason >= 10 && reason <= 24;
+    if (helpers.some(call => call.name === 'finish_exception_detection')) return [guard, ...helpers];
+    if (!event) return [guard, ...helpers];
+    assert.ok(![16, 17, 18, 24].includes(reason), 'instruction traps require explicit original-site metadata');
+    const fields = [72, 80, 84, 88, 92].map(offset => want.readUInt32LE(offset));
+    return [guard, ...helpers, {name: 'finish_exception_detection',
+      args: [epoch, ...fields, 0, 0, 0, 0, 0, 0], status: 0}];
+  }
   function observe(c, label, {input = arena(c), want, wantRAM, budget = 1, material = c.material, status = 0, helpers = [], kind = 'semantic'} = {}) {
     put(c, 0, input); const before = arena(c), beforeRAM = ram(c), desiredRAM = wantRAM ?? cloneRAM(beforeRAM), start = c.calls.length;
     const actualStatus = material.run(c.base, c.base + 56, budget, c.base + 96), after = arena(c), calls = c.calls.slice(start), errors = [];
     if (actualStatus !== status) errors.push(`run transport ${actualStatus}, expected ${status}`);
     if (!after.equals(want)) errors.push('literal complete arena');
-    const actualHelpers = calls.filter(call => !call.name.startsWith('guard'));
-    if (JSON.stringify(actualHelpers) !== JSON.stringify(helpers)) errors.push('exact real helper names/arguments/status');
+    const expected = expectedCalls(c, material, status, want, helpers);
+    if (JSON.stringify(calls) !== JSON.stringify(expected)) errors.push('exact real entry epoch/helper/finalizer trace');
     const afterRAM = ram(c); checkRAM(afterRAM, desiredRAM, errors);
     return receipt(c, label, before, after, want, beforeRAM, afterRAM, desiredRAM, errors,
-      {kind, status: actualStatus, expected_status: status, classification: actualStatus === 2 ? 'runtime-record-admission' : 'executed-module',
+      {kind, status: actualStatus, expected_status: status, expected_calls: expected, classification: actualStatus === 2 ? 'runtime-record-admission' : 'executed-module',
         expected_exit: {reason: want.readUInt32LE(72), retired: want.readUInt32LE(76), eip: want.readUInt32LE(48), flags: want.readUInt32LE(52)},
         actual_exit: {reason: after.readUInt32LE(72), retired: after.readUInt32LE(76), eip: after.readUInt32LE(48), flags: after.readUInt32LE(52)}, calls});
   }
