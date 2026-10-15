@@ -190,6 +190,45 @@ fn input_uses_observed_engine_time_and_failure_does_not_consume_sequence() {
 }
 
 #[test]
+fn oversized_native_input_refuses_count_before_scanning_timestamps() {
+    let mut engine = engine(8);
+    let mut config = MediaConfig::default();
+    config.input.batch_events = 2;
+    let epoch = engine.configure_media(config).unwrap();
+    let before = (
+        *engine.input().unwrap().state(),
+        engine.input().unwrap().last_sequence(),
+        engine.input().unwrap().last_timestamp_ns(),
+        engine.input().unwrap().queued_events(),
+        engine.arena().to_vec(),
+    );
+    let oversized = [TimedInputEvent {
+        timestamp_ns: u64::MAX,
+        kind: InputKind::Focus { focused: true },
+    }; 3];
+    assert_eq!(engine.submit_input(epoch, 1, &oversized),
+        Err(HostError::Media(MediaError::Input(InputError::InvalidCount))));
+    assert_eq!((
+        *engine.input().unwrap().state(),
+        engine.input().unwrap().last_sequence(),
+        engine.input().unwrap().last_timestamp_ns(),
+        engine.input().unwrap().queued_events(),
+        engine.arena().to_vec(),
+    ), before);
+
+    let valid = [
+        TimedInputEvent { timestamp_ns: 201, kind: InputKind::Focus { focused: true } },
+        TimedInputEvent { timestamp_ns: 201, kind: InputKind::Capture { captured: true } },
+    ];
+    assert_eq!(engine.submit_input(epoch, 1, &valid),
+        Err(HostError::Media(MediaError::Input(InputError::TimeOrder))));
+    engine.observe_cpu_clock(201).unwrap();
+    engine.submit_input(epoch, 1, &valid).unwrap();
+    assert_eq!(engine.input().unwrap().last_sequence(), 1);
+    assert_eq!(engine.input().unwrap().queued_events(), 2);
+}
+
+#[test]
 fn distinct_instances_cannot_accept_each_others_resources() {
     let mut first = engine(5);
     let mut second = engine(6);

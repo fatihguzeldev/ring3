@@ -15,7 +15,10 @@ impl EngineInstance {
         sequence: u64,
         events: &[TimedInputEvent],
     ) -> Result<(), HostError> {
-        self.media_contexts()?;
+        let limit = self.media_contexts()?.config.input.batch_events;
+        if events.len() > limit {
+            return Err(HostError::Media(MediaError::Input(InputError::InvalidCount)));
+        }
         let (_, observed_ns) = self.cpu_clock.monotonic_bounds()?;
         if events.iter().any(|event| event.timestamp_ns > observed_ns) {
             return Err(HostError::Media(MediaError::Input(InputError::TimeOrder)));
