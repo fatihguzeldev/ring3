@@ -1,3 +1,5 @@
+import {pageFaultExit,pageFaultPacket} from '../../../../../../support/wasm/page-fault.mjs';
+import {generatedImports, attachDetectionApi} from '../../../../../../support/wasm/binding.mjs';
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -18,7 +20,7 @@ const sourcePaths = ["engine/src/abi/arena.rs", "engine/src/cpu/x86/ir.rs", "eng
   "engine/src/cpu/dbt/wasm/integer/arithmetic.rs", "engine/src/cpu/dbt/wasm/integer/bits.rs", "engine/src/cpu/dbt/wasm/integer/carry_rotates.rs", "engine/src/cpu/dbt/wasm/integer/decimal.rs", "engine/src/cpu/dbt/wasm/integer/dispatch.rs", "engine/src/cpu/dbt/wasm/integer/flags.rs", "engine/src/cpu/dbt/wasm/integer/mod.rs", "engine/src/cpu/dbt/wasm/integer/multiply_divide.rs", "engine/src/cpu/dbt/wasm/integer/operands.rs", "engine/src/cpu/dbt/wasm/integer/rotates.rs", "engine/src/cpu/dbt/wasm/integer/shifts.rs", "engine/src/cpu/dbt/wasm/memory.rs",
   "engine/src/cpu/dbt/wasm/memory/narrow.rs", "engine/src/cpu/dbt/wasm/memory/byte_store.rs",
   "engine/tests/cpu/strings/integration/wasm/byte.rs", "engine/tests/cpu/strings/wasm.rs", "engine/tests/support/wasm.rs", "engine/tests/cpu/strings/integration/fixtures/p2-strings/runtime/run.mjs",
-  "engine/tests/support/wasm/engine.mjs"];
+  "engine/tests/support/wasm/engine.mjs", 'engine/tests/support/wasm/binding.mjs','engine/tests/support/wasm/page-fault.mjs'];
 sourcePaths.push(...["engine/src/abi/memory_helper/cpu.rs", "engine/src/cpu/dbt/wasm/memory/cpu_scalar.rs", "engine/src/cpu/dbt/wasm/emitter.rs", "engine/src/cpu/dbt/wasm/code_fetch.rs", "engine/src/process/memory/cpu_scalar.rs", "engine/src/process/memory/scalar/cpu_write.rs", "engine/src/process/wasm/memory/cpu_write.rs", "engine/src/abi/wasm/exports/memory/cpu_write.rs"].filter(path=>!sourcePaths.includes(path)));
 const sourcePins = () => Object.fromEntries(sourcePaths.map(path => {
   const bytes = readFileSync(join(root, path)); return [path, { bytes: bytes.length, sha256: hash(bytes) }];
@@ -36,8 +38,14 @@ const exit = (reason, count, detail = 0, address = 0, access = 0, version = 2) =
   record("R3EX", 40, [reason, count, detail, address, access, access ? 1 : 0], version);
 const helper = (version, value = 0, detail = 0, address = 0, access = 0) =>
   record("R3MH", 40, [detail ? 1 : 0, detail ? 0 : value, detail, detail ? address : 0, access, 1], version);
+const faultGeometry = f => {
+  assert.ok(f.detail===1||f.detail===2,'declared backing fault');
+  const access=f.access??1;
+  return {errorCode:(access===2?6:4)+Number(f.detail===2),address:f.address,access,length:1};
+};
 const cpuHelper = (version, value = 0, detail = 0, address = 0, access = 0) =>
-  record("R3MH", 40, [detail ? 1 : 0, detail ? 0 : value, detail, detail ? address : 0, access, 1], version);
+  detail ? pageFaultPacket(faultGeometry({detail,address,access}))
+    : record("R3MH",40,[0,value,0,0,0,1],version);
 const words = values => Buffer.concat(values.map(value => { const bytes = Buffer.alloc(4); bytes.writeUInt32LE(value >>> 0); return bytes; }));
 function arena(ctx) { return Buffer.from(new Uint8Array(ctx.memory.buffer, ctx.base, SIZE)); }
 function capture(ctx, label) {
@@ -69,11 +77,11 @@ function seed(ctx, pc, flags, source = SRC + 8, destination = DST + 8) {
   bytes.set(record("R3MH",40,[0,0xdecafbad,0,0,0,0]),100);
   input(ctx, 0, bytes, "explicit initial CPU"); return cpu(ctx);
 }
-function run(ctx, budget, label, expectedCPU, reason = 1, count = 1, expectedHelper, fault = null, status = 0) {
+function run(ctx, budget, label, expectedCPU, reason = 1, count = 1, expectedHelper, fault = null, status = 0) {if(fault)reason=23;
   const beforeBytes = arena(ctx), before = capture(ctx, "before generated " + label);
   const expected = Buffer.from(beforeBytes);
   if (status === 0) {
-    expected.set(state(expectedCPU)); expected.set(exit(reason,count, fault?.detail, fault?.address, fault?.access,6),56);
+    expected.set(state(expectedCPU)); expected.set(fault?pageFaultExit({retired:count,...faultGeometry(fault)}):exit(reason,count, fault?.detail, fault?.address, fault?.access,6),56);
     if (expectedHelper) expected.set(expectedHelper,100);
   }
   assert.equal(ctx.run(ctx.base,ctx.base+56,budget,ctx.base+96),status,label);
@@ -99,6 +107,7 @@ function open(owner, ordinal) {
   for (const name of ["open","close","arena_ptr","map","unmap","protect","upload","read8","compile",
     "compile_resident","generation","module_ptr","module_len","guard","guard_resident","store8","store_resident8"])
     ctx.api[name] = instance.exports["ring3_abi_v1_"+name];
+ attachDetectionApi(ctx.api, instance.exports);
   for(const name of ["read8", "store8", "store_resident8"]) {ctx.api["cpu_"+name]=instance.exports["ring3_abi_v1_cpu_"+name];assert.equal(ctx.api["cpu_"+name]?.length,name.startsWith("read")?1:name.includes("resident")?6:2,"cpu_"+name);}
  assert.equal(ctx.api.open(8,ordinal,0x51525354),0); ctx.base = ctx.api.arena_ptr()>>>0;
   for (const address of [PC,SRC,DST,0xfffff000,0]) host(ctx,"map",[address,1,address === PC ? 7 : 3]);
@@ -112,8 +121,8 @@ function open(owner, ordinal) {
     binding = Object.fromEntries(["low","high","pointer","length"].map((name,i)=>[name,receipt.readUInt32LE(148+i*4)]));
   }
   const bytes = Buffer.from(new Uint8Array(ctx.memory.buffer,binding.pointer,binding.length));
-  const module = new WebAssembly.Module(bytes), names = owner === "replacement" ? ["guard","cpu_read8","cpu_store8"]
-    : ["guard_resident","cpu_read8","cpu_store_resident8"];
+  const module = new WebAssembly.Module(bytes), names = owner === "replacement" ? generatedImports({resident: false, helpers: ["cpu_read8", "cpu_store8"]}).slice(1).map(item => item.name)
+    : generatedImports({resident: true, helpers: ["cpu_read8", "cpu_store_resident8"]}).slice(1).map(item => item.name);
   assert.deepEqual(WebAssembly.Module.imports(module),[{module:"env",name:"memory",kind:"memory"},
     ...names.map(name=>({module:"ring3",name,kind:"function"}))]);
   ctx.run = new WebAssembly.Instance(module,{env:{memory:ctx.memory},ring3:ctx.api}).exports.run;

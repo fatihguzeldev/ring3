@@ -1,3 +1,5 @@
+import {pageFaultExit,pageFaultPacket} from '../../../../../../support/wasm/page-fault.mjs';
+import {generatedImports, attachDetectionApi} from '../../../../../../support/wasm/binding.mjs';
 import assert from "node:assert/strict";
 import {createHash} from "node:crypto";
 import {readFileSync,writeFileSync} from "node:fs";
@@ -15,7 +17,7 @@ assert.deepEqual(bank,readFileSync(join(output,"string-compare.x86")),"independe
 const paths=["engine/src/abi/arena.rs","engine/src/cpu/x86/ir.rs","engine/src/cpu/x86/decode/lower.rs",
   "engine/src/cpu/x86/decode/profile.rs","engine/src/cpu/dbt/region.rs","engine/src/cpu/dbt/wasm/integer/arithmetic.rs", "engine/src/cpu/dbt/wasm/integer/bits.rs", "engine/src/cpu/dbt/wasm/integer/carry_rotates.rs", "engine/src/cpu/dbt/wasm/integer/decimal.rs", "engine/src/cpu/dbt/wasm/integer/dispatch.rs", "engine/src/cpu/dbt/wasm/integer/flags.rs", "engine/src/cpu/dbt/wasm/integer/mod.rs", "engine/src/cpu/dbt/wasm/integer/multiply_divide.rs", "engine/src/cpu/dbt/wasm/integer/operands.rs", "engine/src/cpu/dbt/wasm/integer/rotates.rs", "engine/src/cpu/dbt/wasm/integer/shifts.rs",
   "engine/src/cpu/dbt/wasm/memory.rs","engine/src/cpu/dbt/wasm/memory/narrow.rs",
-  "engine/tests/cpu/strings/compare/wasm/byte.rs", "engine/tests/cpu/strings/wasm.rs", "engine/tests/support/wasm.rs", "engine/tests/cpu/strings/wasm.rs", "engine/tests/support/wasm.rs","engine/tests/cpu/strings/compare/fixtures/p2-string-compare/runtime/run.mjs","engine/tests/support/wasm/engine.mjs"];
+  "engine/tests/cpu/strings/compare/wasm/byte.rs", "engine/tests/cpu/strings/wasm.rs", "engine/tests/support/wasm.rs", "engine/tests/cpu/strings/wasm.rs", "engine/tests/support/wasm.rs","engine/tests/cpu/strings/compare/fixtures/p2-string-compare/runtime/run.mjs","engine/tests/support/wasm/engine.mjs", 'engine/tests/support/wasm/binding.mjs','engine/tests/support/wasm/page-fault.mjs'];
 paths.push(...["engine/src/abi/memory_helper/cpu.rs", "engine/src/cpu/dbt/wasm/memory/cpu_scalar.rs", "engine/src/cpu/dbt/wasm/emitter.rs", "engine/src/cpu/dbt/wasm/code_fetch.rs", "engine/src/process/memory/cpu_scalar.rs", "engine/src/process/memory/scalar/cpu_write.rs", "engine/src/process/wasm/memory/cpu_write.rs", "engine/src/abi/wasm/exports/memory/cpu_write.rs"].filter(path=>!paths.includes(path)));
 const sourcePins=()=>Object.fromEntries(paths.map(path=>{const b=readFileSync(join(root,path));return [path,{bytes:b.length,sha256:hash(b)}];}));
 const sources=sourcePins(), frames=[],journal=[],modules=[],targets=[];
@@ -28,7 +30,14 @@ function record(magic,size,fields,version=1) {
 const state=c=>record("R3ST",56,[...c.registers,c.pc,c.flags]);
 const exit=(reason,n,detail=0,address=0,version=2)=>record("R3EX",40,[reason,n,detail,address,detail?1:0,detail?1:0],version);
 const helper=(value,detail=0,address=0)=>record("R3MH",40,[detail?1:0,detail?0:value,detail,detail?address:0,detail?1:0,1],2);
-const cpuHelper=(value,detail=0,address=0)=>record("R3MH",40,[detail?1:0,detail?0:value,detail,detail?address:0,detail?1:0,1],10);
+const faultGeometry = f => {
+  assert.ok(f.detail===1||f.detail===2,'declared backing fault');
+  const access=f.access??1;
+  return {errorCode:(access===2?6:4)+Number(f.detail===2),address:f.address,access,length:1};
+};
+const cpuHelper = (value,detail=0,address=0) =>
+  detail ? pageFaultPacket(faultGeometry({detail,address}))
+    : record("R3MH",40,[0,value,0,0,0,1],10);
 const words=values=>Buffer.concat(values.map(v=>{const b=Buffer.alloc(4);b.writeUInt32LE(v>>>0);return b;}));
 function arena(ctx){return Buffer.from(new Uint8Array(ctx.memory.buffer,ctx.base,SIZE));}
 function capture(ctx,label){const b=arena(ctx),row={profile:ctx.profile,label,offset:frames.length*SIZE,sha256:hash(b)};frames.push(b);return row;}
@@ -42,8 +51,8 @@ function upload(ctx,address,bytes){input(ctx,140,bytes,"uploaded literal bytes")
 function read(ctx,address,value){host(ctx,"read8",[address],helper(value));assert.equal(arena(ctx).readUInt32LE(120),value,"declared physical byte");}
 function seed(ctx,pc,flags,source=SRC,destination=DST,al=0x5a){const c={registers:[(0xa1b2c300|al)>>>0,0xb1c2d378,0x34560f10,0x4567ff00,0x56789abc,0x6789abcd,source,destination],pc,flags};
   const b=Buffer.alloc(140);b.set(state(c));b.set(exit(3,0),56);b.set(record("R3MH",40,[0,0xdecafbad,0,0,0,0]),100);input(ctx,0,b,"explicit initial CPU");return c;}
-function run(ctx,budget,label,next,reason=1,n=1,nextHelper,fault,status=0){const beforeBytes=arena(ctx),before=capture(ctx,"before generated "+label),expected=Buffer.from(beforeBytes);
-  if(status===0){expected.set(state(next));expected.set(exit(reason,n,fault?.detail,fault?.address,6),56);if(nextHelper)expected.set(nextHelper,100);}
+function run(ctx,budget,label,next,reason=1,n=1,nextHelper,fault,status=0){if(fault)reason=23;const beforeBytes=arena(ctx),before=capture(ctx,"before generated "+label),expected=Buffer.from(beforeBytes);
+  if(status===0){expected.set(state(next));expected.set(fault?pageFaultExit({retired:n,...faultGeometry(fault)}):exit(reason,n,fault?.detail,fault?.address,6),56);if(nextHelper)expected.set(nextHelper,100);}
   assert.equal(ctx.run(ctx.base,ctx.base+56,budget,ctx.base+96),status,label);assert.deepEqual(arena(ctx),expected,"full generated arena "+ctx.profile+"/"+label);
   counts.generated_calls++;counts.retired+=status===0?n:0;const row={profile:ctx.profile,type:"run",label,budget,status,reason,n,before,after:capture(ctx,"after generated "+label)};journal.push(row);return row;}
 function compare(ctx,kind,left,right,flags,label){const before=cpu(ctx),next={registers:[...before.registers],pc:(before.pc+1)>>>0,flags:flags|(before.flags&0x400)};
@@ -57,6 +66,7 @@ function jump(ctx,next){run(ctx,2,"JMP with spare budget then cold continuation"
 function open(owner,entries){const instance=new WebAssembly.Instance(engine.module,{}),ctx={owner,entries,profile:owner+"/"+(entries?"entry":"explicit"),memory:instance.exports.memory,api:{}};
   for(const name of ["open","close","arena_ptr","map","unmap","protect","upload","read8","compile","compile_entries",
     "compile_resident","compile_resident_entries","generation","module_ptr","module_len","guard","guard_resident"]){ctx.api[name]=instance.exports["ring3_abi_v1_"+name];assert.equal(typeof ctx.api[name],"function",name);}
+ attachDetectionApi(ctx.api, instance.exports);
   for(const name of ["read8"]) {ctx.api["cpu_"+name]=instance.exports["ring3_abi_v1_cpu_"+name];assert.equal(ctx.api["cpu_"+name]?.length,name.startsWith("read")?1:name.includes("resident")?6:2,"cpu_"+name);}
  assert.equal(ctx.api.open(8,1,0x51525354),0);ctx.base=ctx.api.arena_ptr()>>>0;
   for(const address of [PC,0x5000,0x6000,0xfffff000,0])host(ctx,"map",[address,1,address===PC?7:3]);upload(ctx,PC,bank);
@@ -66,7 +76,7 @@ function open(owner,entries){const instance=new WebAssembly.Instance(engine.modu
     const b=arena(ctx);assert.equal(b.readUInt32LE(140),1);assert.equal(b.readUInt32LE(144),24);
     binding=Object.fromEntries(["low","high","pointer","length"].map((name,i)=>[name,b.readUInt32LE(148+i*4)]));assert.ok(binding.low&&binding.length);
     old.set(b.subarray(140,164),140);assert.deepEqual(b,old,"only declared resident receipt changes");journal.push({profile:ctx.profile,type:"host",name:"compile_resident",before,after:capture(ctx,"after resident compile")});}
-  const bytes=Buffer.from(new Uint8Array(ctx.memory.buffer,binding.pointer,binding.length)),module=new WebAssembly.Module(bytes),names=[owner==="resident"?"guard_resident":"guard","cpu_read8"];
+  const bytes=Buffer.from(new Uint8Array(ctx.memory.buffer,binding.pointer,binding.length)),module=new WebAssembly.Module(bytes),names=generatedImports({resident: owner==="resident", helpers: ["cpu_read8"]}).slice(1).map(item => item.name);
   assert.deepEqual(WebAssembly.Module.imports(module),[{module:"env",name:"memory",kind:"memory"},...names.map(name=>({module:"ring3",name,kind:"function"}))]);
   assert.deepEqual(WebAssembly.Module.exports(module),[{name:"run",kind:"function"}]);ctx.run=new WebAssembly.Instance(module,{env:{memory:ctx.memory},ring3:ctx.api}).exports.run;assert.equal(ctx.run.length,4);ctx.binding=binding;
   const file="module-"+modules.length+".wasm";writeFileSync(join(output,file),bytes,{flag:"wx"});modules.push({profile:ctx.profile,file,bytes:bytes.length,sha256:hash(bytes),imports:names,...binding});counts.profiles++;counts.modules++;return ctx;}
