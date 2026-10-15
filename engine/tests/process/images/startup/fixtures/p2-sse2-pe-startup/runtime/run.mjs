@@ -1,3 +1,4 @@
+import {attachDetectionApi} from '../../../../../../support/wasm/binding.mjs';
 import {ARENA_SIZE} from '../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
@@ -43,7 +44,7 @@ function save(name, bytes) {
   artifacts[name] = {bytes: bytes.length, sha256: hash(bytes)};
   return name;
 }
-const sourcePaths = [
+const sourcePaths = ['engine/tests/support/wasm/binding.mjs',
   `${fixture}/runtime/run.mjs`, `${fixture}/oracle.json`, `${fixture}/entry.c`, `${fixture}/build.py`,
   `${fixture}/program.exe`, `${fixture}/kernel.obj`, `${fixture}/kernel.text.bin`, `${fixture}/receipt.json`,
   'engine/tests/programs/numeric/fixtures/p2-fp-compiled/sse2/cases.json',
@@ -146,11 +147,12 @@ function bindHelper(c, unit, name) {
   return (...raw) => {
     const before = arena(c), expected = Buffer.from(before);
     const args = raw.map(value => value >>> 0);
-    if (name === 'guard_resident') {
+    if (name === 'guard_detect_resident') {
       assert.deepEqual(args, [KEY_LOW, KEY_HIGH, unit.low, unit.high, c.base, c.base + 56, c.base + 96]);
-      assert.equal(c.api[name](...raw), 0);
+      const epoch = c.api[name](...raw);
+      assert.equal(typeof epoch, 'bigint'); assert.ok(epoch > 0n, 'positive owner detection epoch');
       assert.deepEqual(arena(c), before, 'resident guard is neutral');
-      return 0;
+      return epoch;
     }
     const resident = ['cpu_store_resident32', 'cpu_write_resident', 'simd_execute_resident'].includes(name);
     if (resident) assert.deepEqual(args.slice(0, 4), [KEY_LOW, KEY_HIGH, unit.low, unit.high]);
@@ -216,14 +218,14 @@ function capture(c, label, rvas, slot) {
   const bytes = Buffer.from(new Uint8Array(c.memory.buffer, unit.pointer, unit.length));
   const module = new WebAssembly.Module(bytes), imports = WebAssembly.Module.imports(module), ring3 = {};
   assert.deepEqual(imports[0], {module: 'env', name: 'memory', kind: 'memory'});
-  const allowed = new Set(['guard_resident', 'cpu_read32', 'cpu_store_resident32', 'cpu_read', 'cpu_write_resident', 'simd_execute_resident']);
+  const allowed = new Set(['guard_detect_resident', 'cpu_read32', 'cpu_store_resident32', 'cpu_read', 'cpu_write_resident', 'simd_execute_resident', 'finish_exception_detection']);
   for (const item of imports.slice(1)) {
     assert.equal(item.module, 'ring3');
     assert.equal(item.kind, 'function');
     assert.ok(allowed.has(item.name), item.name);
     ring3[item.name] = bindHelper(c, unit, item.name);
   }
-  const instance = new WebAssembly.Instance(module, {env: {memory: c.memory}, ring3});
+  const instance = new WebAssembly.Instance(module, {env: {memory: c.memory}, ring3: {...(ring3), finish_exception_detection: c.api.finish_exception_detection}});
   assert.equal(instance.exports.run.length, 4);
   c.table.set(slot, instance.exports.run);
   host(c, 'acknowledge exact table installation', () => c.api.acknowledge_resident_installation(KEY_LOW, KEY_HIGH, unit.low, unit.high, slot), [[T, installation(unit)]]);
@@ -291,7 +293,7 @@ function run(c, label, budget, retired, reason, registers, rva, flags, simd) {
 }
 
 for (const actualBase of [0x400000, 0x500000]) {
-  const instance = new WebAssembly.Instance(engine.module, {}), api = {};
+  const instance = new WebAssembly.Instance(engine.module, {}), api = attachDetectionApi({}, instance.exports);
   for (const [name, value] of Object.entries(instance.exports)) {
     if (name.startsWith('ring3_abi_v1_') && typeof value === 'function') api[name.slice(13)] = value;
   }

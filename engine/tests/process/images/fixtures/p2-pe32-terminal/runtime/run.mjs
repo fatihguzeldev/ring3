@@ -1,3 +1,4 @@
+import {attachDetectionApi, generatedImports} from '../../../../../support/wasm/binding.mjs';
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
@@ -10,10 +11,10 @@ assert.ok(root, 'expected actual engine, output directory and repository root');
 const fixtureRoot = join(root, 'engine/tests/process/images/fixtures/p2-pe32-terminal');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const oracleBytes = readFileSync(join(fixtureRoot, 'oracle.json')), oracle = JSON.parse(oracleBytes);
-assert.equal(hash(oracleBytes), 'c494e48d167db98b73c30b79b82195baa2934dd915d2974e53a391d4b324441f');
+assert.equal(hash(oracleBytes), 'eb8589e7194cc41d9c6421adba013445c80a9503566587110cbde24b46f30d7f');
 const programBytes = readFileSync(join(fixtureRoot, 'program.S'));
 assert.equal(hash(programBytes), '40e257bd9b6271283756a117167c1e215f2f81c0f2228b0e2b530bdfbd336d2a');
-const size = 4612, transfer = 140, artifacts = {}, observations = [], identities = [];
+const size = 4796, transfer = 140, artifacts = {}, observations = [], identities = [];
 
 function authoredText(object) {
   const view = new DataView(object.buffer, object.byteOffset, object.byteLength);
@@ -80,13 +81,13 @@ writeFileSync(join(outputDir, 'program.x86'), code); artifacts['program.x86'] = 
 writeFileSync(join(outputDir, 'program.S'), programBytes); writeFileSync(join(outputDir, 'terminal-oracle.json'), oracleBytes);
 writeFileSync(join(outputDir, 'runtime/run.mjs'), readFileSync(import.meta.filename));
 const productionPaths = execFileSync('rg', ['--files','engine/src'], {cwd: root, encoding: 'utf8'}).trim().split('\n').sort();
-const sourcePaths = [...productionPaths,'Cargo.toml','engine/Cargo.toml','Cargo.lock','engine/tests/process/images/wasm/terminal.rs', 'engine/tests/process/images/wasm.rs', 'engine/tests/support/wasm.rs','engine/tests/process/images/fixtures/p2-pe32-terminal/program.S','engine/tests/process/images/fixtures/p2-pe32-terminal/oracle.json','engine/tests/process/images/fixtures/p2-pe32-terminal/runtime/run.mjs'];
+const sourcePaths = ['engine/tests/support/wasm/binding.mjs', ...productionPaths,'Cargo.toml','engine/Cargo.toml','Cargo.lock','engine/tests/process/images/wasm/terminal.rs', 'engine/tests/process/images/wasm.rs', 'engine/tests/support/wasm.rs','engine/tests/process/images/fixtures/p2-pe32-terminal/program.S','engine/tests/process/images/fixtures/p2-pe32-terminal/oracle.json','engine/tests/process/images/fixtures/p2-pe32-terminal/runtime/run.mjs'];
 const sources = Object.fromEntries(sourcePaths.map(file => [file, hash(readFileSync(join(root, file)))]));
 writeFileSync(join(outputDir, 'source-sha256.json'), JSON.stringify(sources, null, 2));
 const engineBytes = readFileSync(enginePath); writeFileSync(join(outputDir, 'engine.wasm'), engineBytes);
 assert.ok(WebAssembly.validate(engineBytes));
 const engineModule = new WebAssembly.Module(engineBytes); assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
-const names = ['open','close','arena_ptr','load_pe32','load_pe32_at','load_pe32_linked_at','load_pe32_linked_v2_at','start_loaded_image','map','compile_entries','compile_resident_entries','generation','module_ptr','module_len','resident_module','find_resident','acknowledge_resident_installation','find_installed_resident','dispatcher_module','guard','guard_dispatch_entry','guard_resident','read32','write32','store32','store_resident32','capture_call','capture_resident_call','complete_call','complete_resident_call','complete_windows_call','complete_resident_windows_call', 'cpu_read32', 'cpu_store32', 'cpu_store_resident32'];
+const names = ['guard', 'guard_resident', 'guard_detect', 'guard_detect_resident', 'finish_exception_detection', 'open','close','arena_ptr','load_pe32','load_pe32_at','load_pe32_linked_at','load_pe32_linked_v2_at','start_loaded_image','map','compile_entries','compile_resident_entries','generation','module_ptr','module_len','resident_module','find_resident','acknowledge_resident_installation','find_installed_resident','dispatcher_module','guard_dispatch_entry','read32','write32','store32','store_resident32','capture_call','capture_resident_call','complete_call','complete_resident_call','complete_windows_call','complete_resident_windows_call', 'cpu_read32', 'cpu_store32', 'cpu_store_resident32'];
 let engine, nextInstance = 0;
 const fromHex = hex => new Uint8Array(Buffer.from(hex, 'hex'));
 function refresh() { if (engine.buffer !== engine.memory.buffer) { engine.buffer = engine.memory.buffer; engine.bytes = new Uint8Array(engine.buffer); engine.view = new DataView(engine.buffer); } return engine; }
@@ -113,7 +114,7 @@ function fault(address, access, detail, label) { operation(label, () => access =
 function stack(values, label) { return oracle.runtime.stack_addresses.map((address, index) => read(address, values[index], `${label}/word${index}`)); }
 function fresh(name, pages = oracle.runtime.pages) {
   const instance = new WebAssembly.Instance(engineModule, {});
-  const api = Object.fromEntries(names.map(name => { const fn = instance.exports[`ring3_abi_v1_${name}`]; assert.equal(typeof fn, 'function', name); return [name,fn]; }));
+  const api = attachDetectionApi(Object.fromEntries(names.map(name => { const fn = instance.exports[`ring3_abi_v1_${name}`]; assert.equal(typeof fn, 'function', name); return [name,fn]; })), instance.exports);
   assert.equal(api.load_pe32_linked_v2_at.length, 3); assert.equal(api.load_pe32_linked_at.length, 3);
   assert.equal(api.complete_windows_call.length, 4); assert.equal(api.complete_resident_windows_call.length, 5);
   const ordinal = ++nextInstance, key = 0xa345cdef00000000n + BigInt(ordinal);
@@ -144,8 +145,8 @@ function instantiate(unit, helpers) {
   unit.bytes = engine.bytes.slice(unit.pointer, unit.pointer + unit.length);
   const module = new WebAssembly.Module(unit.bytes), imports = WebAssembly.Module.imports(module);
   const sort = rows => rows.sort((a,b)=>`${a.module}.${a.name}`.localeCompare(`${b.module}.${b.name}`));
-  assert.deepEqual(sort(imports), sort([{module:'env',name:'memory',kind:'memory'},...helpers.map(name=>({module:'ring3',name,kind:'function'}))]));
-  unit.instance = new WebAssembly.Instance(module, {env:{memory:engine.memory},ring3:Object.fromEntries(helpers.map(name=>[name,engine.api[name]]))});
+  assert.deepEqual(sort(imports), sort(generatedImports({resident: helpers[0] === 'guard_detect_resident', helpers: helpers.slice(1)})));
+  unit.instance = new WebAssembly.Instance(module, {env: {memory: engine.memory}, ring3: {...(Object.fromEntries(helpers.map(name=>[name,engine.api[name]]))), finish_exception_detection: engine.api.finish_exception_detection}});
   unit.run = unit.instance.exports.run; assert.equal(typeof unit.run, 'function'); assert.equal(unit.run.length, 4); engine.units.push(unit);
   const filename = `${engine.name}-${unit.label}.wasm`; writeFileSync(join(outputDir, filename), unit.bytes); artifacts[filename] = hash(unit.bytes);
   identities.push({instance:engine.ordinal,owner:engine.owner,key:engine.key.toString(),label:unit.label,id:unit.id?.toString(),generation:unit.generation,pointer:unit.pointer,length:unit.length,module_sha256:hash(unit.bytes)});

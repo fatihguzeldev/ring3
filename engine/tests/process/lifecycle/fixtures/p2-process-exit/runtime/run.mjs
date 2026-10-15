@@ -1,3 +1,4 @@
+import {attachDetectionApi, generatedImports} from '../../../../../support/wasm/binding.mjs';
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
@@ -10,10 +11,10 @@ assert.ok(root, 'expected actual engine, output directory and repository root');
 const fixtureRoot = join(root, 'engine/tests/process/lifecycle/fixtures/p2-process-exit');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const oracleBytes = readFileSync(join(fixtureRoot, 'oracle.json')), oracle = JSON.parse(oracleBytes);
-assert.equal(hash(oracleBytes), '87b9865412e5bce7c35453af93fe080b9d7fdccb1bf5ea7b743923dbf5643bad');
+assert.equal(hash(oracleBytes), '062766d5ca3f06e49fb23a6e69e9697cbabf4949f7fd6cc63342a9f9ccb33161');
 const programBytes = readFileSync(join(fixtureRoot, 'program.S'));
 assert.equal(hash(programBytes), '965a52f56696c934d64bc58acbe0a496b246983047c2171555c9f26f831d521a');
-const size = 4612, transfer = 140;
+const size = 4796, transfer = 140;
 const artifacts = {}, observations = [], identities = [];
 
 function authoredText(object) {
@@ -82,7 +83,7 @@ writeFileSync(join(outputDir, 'program.S'), programBytes);
 writeFileSync(join(outputDir, 'terminal-oracle.json'), oracleBytes);
 writeFileSync(join(outputDir, 'runtime/run.mjs'), readFileSync(import.meta.filename));
 const productionPaths = execFileSync('rg', ['--files', 'engine/src'], {cwd: root, encoding: 'utf8'}).trim().split('\n').sort();
-const sourcePaths = [...productionPaths, 'Cargo.toml', 'engine/Cargo.toml', 'Cargo.lock', 'engine/tests/process/lifecycle/wasm/exit.rs', 'engine/tests/process/lifecycle/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/process/lifecycle/fixtures/p2-process-exit/program.S', 'engine/tests/process/lifecycle/fixtures/p2-process-exit/oracle.json', 'engine/tests/process/lifecycle/fixtures/p2-process-exit/runtime/run.mjs'];
+const sourcePaths = ['engine/tests/support/wasm/binding.mjs', ...productionPaths, 'Cargo.toml', 'engine/Cargo.toml', 'Cargo.lock', 'engine/tests/process/lifecycle/wasm/exit.rs', 'engine/tests/process/lifecycle/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/process/lifecycle/fixtures/p2-process-exit/program.S', 'engine/tests/process/lifecycle/fixtures/p2-process-exit/oracle.json', 'engine/tests/process/lifecycle/fixtures/p2-process-exit/runtime/run.mjs'];
 const sources = Object.fromEntries(sourcePaths.map(file => [file, hash(readFileSync(join(root, file)))]));
 writeFileSync(join(outputDir, 'source-sha256.json'), JSON.stringify(sources, null, 2));
 const engineBytes = readFileSync(enginePath);
@@ -90,7 +91,7 @@ writeFileSync(join(outputDir, 'engine.wasm'), engineBytes);
 assert.ok(WebAssembly.validate(engineBytes));
 const engineModule = new WebAssembly.Module(engineBytes);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
-const names = ['open', 'close', 'arena_ptr', 'load_pe32', 'start_loaded_image', 'map', 'write32', 'compile_entries', 'compile_resident_entries', 'generation', 'module_ptr', 'module_len', 'resident_module', 'find_resident', 'acknowledge_resident_installation', 'find_installed_resident', 'dispatcher_module', 'guard', 'guard_dispatch_entry', 'guard_resident', 'read32', 'store32', 'store_resident32', 'capture_call', 'capture_resident_call', 'complete_call', 'complete_resident_call', 'complete_windows_call', 'complete_resident_windows_call', 'cpu_read32', 'cpu_store32', 'cpu_store_resident32'];
+const names = ['guard', 'guard_resident', 'guard_detect', 'guard_detect_resident', 'finish_exception_detection', 'open', 'close', 'arena_ptr', 'load_pe32', 'start_loaded_image', 'map', 'write32', 'compile_entries', 'compile_resident_entries', 'generation', 'module_ptr', 'module_len', 'resident_module', 'find_resident', 'acknowledge_resident_installation', 'find_installed_resident', 'dispatcher_module',  'guard_dispatch_entry',  'read32', 'store32', 'store_resident32', 'capture_call', 'capture_resident_call', 'complete_call', 'complete_resident_call', 'complete_windows_call', 'complete_resident_windows_call', 'cpu_read32', 'cpu_store32', 'cpu_store_resident32'];
 let engine, nextInstance = 0;
 const bytesFromHex = hex => new Uint8Array(Buffer.from(hex, 'hex'));
 
@@ -126,10 +127,10 @@ function instantiate(unit, helpers) {
   unit.bytes = engine.bytes.slice(unit.pointer, unit.pointer + unit.length);
   const module = new WebAssembly.Module(unit.bytes), imports = WebAssembly.Module.imports(module);
   const sort = rows => rows.sort((a, b) => `${a.module}.${a.name}`.localeCompare(`${b.module}.${b.name}`));
-  assert.deepEqual(sort(imports), sort([{module: 'env', name: 'memory', kind: 'memory'}, ...helpers.map(name => ({module: 'ring3', name, kind: 'function'}))]));
-  const allowed = new Set(['guard', 'guard_resident', 'cpu_store32', 'cpu_store_resident32']);
+  assert.deepEqual(sort(imports), sort(generatedImports({resident: helpers[0] === 'guard_detect_resident', helpers: helpers.slice(1)})));
+  const allowed = new Set(['guard_detect', 'guard_detect_resident', 'cpu_store32', 'cpu_store_resident32', 'finish_exception_detection']);
   const binding = Object.fromEntries(imports.filter(item => item.module === 'ring3').map(item => { assert.ok(allowed.has(item.name)); return [item.name, engine.api[item.name]]; }));
-  unit.instance = new WebAssembly.Instance(module, {env: {memory: engine.memory}, ring3: binding}); unit.run = unit.instance.exports.run;
+  unit.instance = new WebAssembly.Instance(module, {env: {memory: engine.memory}, ring3: {...(binding), finish_exception_detection: engine.api.finish_exception_detection}}); unit.run = unit.instance.exports.run;
   assert.equal(typeof unit.run, 'function'); assert.equal(unit.run.length, 4);
   engine.units.push(unit);
   const filename = `${engine.name}-${unit.label}.wasm`; writeFileSync(join(outputDir, filename), unit.bytes); artifacts[filename] = hash(unit.bytes);
@@ -175,7 +176,7 @@ function dispatcher() {
 }
 function setup(owner, name = owner) {
   const instance = new WebAssembly.Instance(engineModule, {});
-  const api = Object.fromEntries(names.map(name => { const fn = instance.exports[`ring3_abi_v1_${name}`]; assert.equal(typeof fn, 'function', name); return [name, fn]; }));
+  const api = attachDetectionApi(Object.fromEntries(names.map(name => { const fn = instance.exports[`ring3_abi_v1_${name}`]; assert.equal(typeof fn, 'function', name); return [name, fn]; })), instance.exports);
   assert.equal(api.complete_windows_call.length, 4); assert.equal(api.complete_resident_windows_call.length, 5);
   const ordinal = ++nextInstance, key = 0xa344cdef00000000n + BigInt(ordinal);
   engine = {owner, name, ordinal, api, key, low: Number(key & 0xffffffffn), high: Number(key >> 32n), memory: instance.exports.memory, units: []};

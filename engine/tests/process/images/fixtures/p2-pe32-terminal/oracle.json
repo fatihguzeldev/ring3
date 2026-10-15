@@ -594,7 +594,7 @@
       "generation": 1,
       "entry_seed_count": 8,
       "helper_imports": [
-        "guard",
+        "guard_detect",
         "read32",
         "store32"
       ],
@@ -605,10 +605,10 @@
       "gate_slot": 0,
       "caller_slot": 1,
       "gate_helper_imports": [
-        "guard_resident"
+        "guard_detect_resident"
       ],
       "caller_helper_imports": [
-        "guard_resident",
+        "guard_detect_resident",
         "read32",
         "store_resident32"
       ],

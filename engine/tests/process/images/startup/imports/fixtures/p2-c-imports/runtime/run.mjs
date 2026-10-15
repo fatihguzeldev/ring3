@@ -1,3 +1,4 @@
+import {attachDetectionApi, generatedImports} from '../../../../../../../support/wasm/binding.mjs';
 import {ARENA_SIZE} from '../../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
@@ -37,7 +38,7 @@ function save(name, bytes) {
   artifacts[name] = {bytes: bytes.length, sha256: hash(bytes)};
   return name;
 }
-const sourcePaths = [
+const sourcePaths = ['engine/tests/support/wasm/binding.mjs',
   `${fixture}/runtime/run.mjs`, `${fixture}/oracle.json`, `${fixture}/entry.c`, `${fixture}/kernel32.def`,
   `${fixture}/build.py`, `${fixture}/program.exe`, `${fixture}/entry.obj`, `${fixture}/kernel32.lib`,
   `${fixture}/receipt.json`, 'engine/tests/process/images/startup/imports/integer/native.rs', 'engine/tests/process/images/native.rs', 'engine/tests/process/images/startup/imports/integer/wasm.rs', 'engine/tests/process/images/wasm.rs', 'engine/tests/support/wasm.rs',
@@ -145,11 +146,12 @@ function dataProjection(values) {
 function bindHelper(c, unit, name) {
   return (...raw) => {
     const before = arena(c), args = raw.map(value => value >>> 0);
-    if (name === 'guard_resident') {
+    if (name === 'guard_detect_resident') {
       assert.deepEqual(args, [KEY_LOW, KEY_HIGH, unit.low, unit.high, c.base, c.base + 56, c.base + 96]);
-      assert.equal(c.api[name](...raw), 0);
+      const epoch = c.api[name](...raw);
+      assert.equal(typeof epoch, 'bigint'); assert.ok(epoch > 0n, 'positive owner detection epoch');
       assert.deepEqual(arena(c), before, 'resident guard is neutral');
-      return 0;
+      return epoch;
     }
     const access = c.accesses.shift();
     assert.ok(access, 'every generated helper has an original literal access');
@@ -193,13 +195,12 @@ function captureUnit(c, label, entries, gates, slot) {
   assert.ok(unit.pointer + unit.length <= c.memory.buffer.byteLength);
   const bytes = Buffer.from(new Uint8Array(c.memory.buffer, unit.pointer, unit.length));
   const module = new WebAssembly.Module(bytes), imports = WebAssembly.Module.imports(module);
-  const expectedHelpers = ['guard_resident'];
+  const expectedHelpers = ['guard_detect_resident'];
   if (label === 'caller-1' || label === 'caller-2') expectedHelpers.push('cpu_read32');
   if (label !== 'gates') expectedHelpers.push('cpu_store_resident32');
-  assert.deepEqual(imports, [{module: 'env', name: 'memory', kind: 'memory'},
-    ...expectedHelpers.map(name => ({module: 'ring3', name, kind: 'function'}))]);
+  assert.deepEqual(imports, generatedImports({resident: expectedHelpers[0] === 'guard_detect_resident', helpers: expectedHelpers.slice(1)}));
   const ring3 = Object.fromEntries(expectedHelpers.map(name => [name, bindHelper(c, unit, name)]));
-  unit.instance = new WebAssembly.Instance(module, {env: {memory: c.memory}, ring3});
+  unit.instance = new WebAssembly.Instance(module, {env: {memory: c.memory}, ring3: {...(ring3), finish_exception_detection: c.api.finish_exception_detection}});
   assert.equal(unit.instance.exports.run.length, 4);
   c.table.set(slot, unit.instance.exports.run);
   host(c, 'acknowledge exact table installation', () => c.api.acknowledge_resident_installation(
@@ -302,8 +303,8 @@ function completeProvider(c, stage, token, gateOwner) {
 }
 
 for (const test of oracle.cases) {
-  const instance = new WebAssembly.Instance(engine.module, {}), api = {};
-  const arities = {open: 3, close: 0, arena_ptr: 0, begin_image_input: 1, append_image_input: 2,
+  const instance = new WebAssembly.Instance(engine.module, {}), api = attachDetectionApi({}, instance.exports);
+  const arities = {guard_detect: 6, guard_detect_resident: 7, finish_exception_detection: 12, open: 3, close: 0, arena_ptr: 0, begin_image_input: 1, append_image_input: 2,
     load_pe32_linked_v2_input_at: 2, start_loaded_image: 2, compile_resident_entries: 2,
     acknowledge_resident_installation: 5, dispatcher_module: 2, guard_dispatch_entry: 5,
     find_installed_resident: 3, guard_resident: 7, read32: 1, store_resident32: 6,

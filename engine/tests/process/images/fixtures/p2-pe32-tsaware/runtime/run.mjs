@@ -1,3 +1,4 @@
+import {attachDetectionApi, generatedImports} from '../../../../../support/wasm/binding.mjs';
 import {ARENA_SIZE} from '../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
@@ -29,7 +30,7 @@ function save(file, bytes) {writeFileSync(join(output, file), bytes, {flag: 'wx'
 save('engine.wasm', engine.bytes); save('input-original.exe', original); save('input-unsupported-force-integrity.exe', unsupported);
 const rustPaths = dir => readdirSync(join(root, dir), {withFileTypes: true}).flatMap(item => item.isDirectory()
   ? rustPaths(`${dir}/${item.name}`) : item.name.endsWith('.rs') ? [`${dir}/${item.name}`] : []);
-const paths = [...rustPaths('engine/src'), 'Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml', 'rust-toolchain.toml',
+const paths = ['engine/tests/support/wasm/binding.mjs',...rustPaths('engine/src'), 'Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml', 'rust-toolchain.toml',
   'engine/tests/loader/pe32/native/characteristics.rs', 'engine/tests/loader/pe32/native.rs', 'engine/tests/support/loader/pe32/image.rs', 'engine/tests/support/loader/pe32/relocation.rs', 'engine/tests/process/images/wasm/tsaware.rs', 'engine/tests/process/images/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/support/wasm/engine.mjs',
   ...['program.S', 'build.py', 'PROVENANCE.md', 'runtime/run.mjs', 'program.exe', 'program.obj', 'program.text.bin', 'program.disasm.txt', 'receipt.json'].map(n => `${fixture}/${n}`)].sort();
 assert.equal(new Set(paths).size, paths.length);
@@ -84,10 +85,10 @@ function compile(c) {
   assert.deepEqual(after, expected, 'compilation preserves full arena except exact resident receipt');
   assert.ok(binding.length > 8 && binding.length <= 65536);
   const bytes = Buffer.from(new Uint8Array(c.memory.buffer, binding.pointer, binding.length)), module = new WebAssembly.Module(bytes);
-  const guard = c.owner === 'resident' ? 'guard_resident' : 'guard';
-  const imports = [{module: 'env', name: 'memory', kind: 'memory'}, {module: 'ring3', name: guard, kind: 'function'}];
+  const guard = c.owner === 'resident' ? 'guard_detect_resident' : 'guard_detect';
+  const imports = generatedImports({resident: guard === 'guard_detect_resident', helpers: []});
   assert.deepEqual(WebAssembly.Module.imports(module), imports); assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
-  const run = new WebAssembly.Instance(module, {env: {memory: c.memory}, ring3: {[guard]: c.api[guard]}}).exports.run;
+  const run = new WebAssembly.Instance(module, {env: {memory: c.memory}, ring3: {...({[guard]: c.api[guard]}), finish_exception_detection: c.api.finish_exception_detection}}).exports.run;
   assert.equal(run.length, 4);
   const file = save(`module-${++counts.modules}.wasm`, bytes);
   modules.push({context: c.id, owner: c.owner, file, sha256: hash(bytes), bytes: bytes.length, imports,
@@ -96,11 +97,11 @@ function compile(c) {
 }
 for (const owner of ['replacement', 'resident']) {
   const instance = new WebAssembly.Instance(engine.module, {}), memory = instance.exports.memory;
-  const arities = {open: 3, close: 0, arena_ptr: 0, load_pe32: 1, compile_entries: 2, compile_resident_entries: 2,
+  const arities = {guard_detect: 6, guard_detect_resident: 7, finish_exception_detection: 12, open: 3, close: 0, arena_ptr: 0, load_pe32: 1, compile_entries: 2, compile_resident_entries: 2,
     generation: 0, module_ptr: 0, module_len: 0, read8: 1, write8: 2, guard: 6, guard_resident: 7};
-  const api = Object.fromEntries(Object.entries(arities).map(([name, arity]) => {
+  const api = attachDetectionApi(Object.fromEntries(Object.entries(arities).map(([name, arity]) => {
     const fn = instance.exports[`ring3_abi_v1_${name}`]; assert.equal(typeof fn, 'function'); assert.equal(fn.length, arity, name); return [name, fn];
-  }));
+  })), instance.exports);
   const c = {id: ++counts.contexts, owner, api, memory, captures: 0}; assert.ok(memory instanceof WebAssembly.Memory);
   assert.equal(api.open(2, c.id, 0x54534157), 0); c.base = api.arena_ptr() >>> 0;
   assert.ok(c.base > 0 && c.base + SIZE <= memory.buffer.byteLength); input(c, 0, initial);

@@ -1,3 +1,4 @@
+import {attachDetectionApi, generatedImports} from '../../../../../support/wasm/binding.mjs';
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
@@ -10,7 +11,7 @@ assert.ok(root, 'expected actual engine, output directory and repository root');
 const fixtureRoot = join(root, 'engine/tests/process/images/fixtures/p2-pe32-imports');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const oracleBytes = readFileSync(join(fixtureRoot, 'oracle.json')), oracle = JSON.parse(oracleBytes);
-const size = 4612, transfer = 140, transferEnd = transfer + 4096;
+const size = 4796, transfer = 140, transferEnd = transfer + 4096;
 const artifacts = {}, observations = [], identities = [];
 
 function authoredCode(object) {
@@ -84,7 +85,7 @@ writeFileSync(join(outputDir, 'authored-oracle.json'), oracleBytes);
 writeFileSync(join(outputDir, 'program.S'), readFileSync(assembly));
 writeFileSync(join(outputDir, 'runtime/run.mjs'), readFileSync(import.meta.filename));
 const productionPaths = execFileSync('rg', ['--files', 'engine/src'], {cwd: root, encoding: 'utf8'}).trim().split('\n').sort();
-const sourcePaths = [...productionPaths, 'Cargo.toml', 'engine/Cargo.toml', 'Cargo.lock', 'engine/tests/process/images/wasm/imports.rs', 'engine/tests/process/images/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/process/images/fixtures/p2-pe32-imports/program.S', 'engine/tests/process/images/fixtures/p2-pe32-imports/oracle.json', 'engine/tests/process/images/fixtures/p2-pe32-imports/runtime/run.mjs'];
+const sourcePaths = ['engine/tests/support/wasm/binding.mjs', ...productionPaths, 'Cargo.toml', 'engine/Cargo.toml', 'Cargo.lock', 'engine/tests/process/images/wasm/imports.rs', 'engine/tests/process/images/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/process/images/fixtures/p2-pe32-imports/program.S', 'engine/tests/process/images/fixtures/p2-pe32-imports/oracle.json', 'engine/tests/process/images/fixtures/p2-pe32-imports/runtime/run.mjs'];
 const sources = Object.fromEntries(sourcePaths.map(file => [file, hash(readFileSync(join(root, file)))]));
 writeFileSync(join(outputDir, 'source-sha256.json'), JSON.stringify(sources, null, 2));
 const engineBytes = readFileSync(enginePath);
@@ -92,7 +93,7 @@ writeFileSync(join(outputDir, 'engine.wasm'), engineBytes);
 assert.ok(WebAssembly.validate(engineBytes));
 const engineModule = new WebAssembly.Module(engineBytes);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), [], 'Rust PE linker and provider need no host imports');
-const names = ['open', 'close', 'arena_ptr', 'load_pe32', 'load_pe32_at', 'load_pe32_linked_at', 'map', 'unmap', 'compile_entries', 'compile_with_gates', 'compile_resident_with_gates', 'generation', 'module_ptr', 'module_len', 'guard', 'guard_resident', 'read32', 'write32', 'store32', 'store_resident32', 'capture_call', 'capture_resident_call', 'complete_windows_call', 'complete_resident_windows_call', 'cpu_read32', 'cpu_store32', 'cpu_store_resident32'];
+const names = ['guard', 'guard_resident', 'guard_detect', 'guard_detect_resident', 'finish_exception_detection', 'open', 'close', 'arena_ptr', 'load_pe32', 'load_pe32_at', 'load_pe32_linked_at', 'map', 'unmap', 'compile_entries', 'compile_with_gates', 'compile_resident_with_gates', 'generation', 'module_ptr', 'module_len',   'read32', 'write32', 'store32', 'store_resident32', 'capture_call', 'capture_resident_call', 'complete_windows_call', 'complete_resident_windows_call', 'cpu_read32', 'cpu_store32', 'cpu_store_resident32'];
 let nextInstance = 0;
 
 function refresh(engine) {
@@ -126,10 +127,10 @@ function operation(engine, label, action, status = 0, patches = []) {
 }
 function fresh(pages = 8) {
   const instance = new WebAssembly.Instance(engineModule, {});
-  const api = Object.fromEntries(names.map(name => {
+  const api = attachDetectionApi(Object.fromEntries(names.map(name => {
     const fn = instance.exports[`ring3_abi_v1_${name}`];
     assert.equal(typeof fn, 'function', name); return [name, fn];
-  }));
+  })), instance.exports);
   assert.equal(api.load_pe32_linked_at.length, 3);
   assert.equal(api.complete_windows_call.length, 4); assert.equal(api.complete_resident_windows_call.length, 5);
   const ordinal = ++nextInstance, key = 0xa3410000c0000000n + BigInt(ordinal);
@@ -222,11 +223,11 @@ function child(engine, label, blocks, gates, caller, residentId) {
     identities.push({instance: engine.ordinal, key: engine.key.toString(), generation: 1, label, pointer, length});
   }
   assert.ok(WebAssembly.validate(bytes));
-  const module = new WebAssembly.Module(bytes), guard = residentId === undefined ? 'guard' : 'guard_resident';
+  const module = new WebAssembly.Module(bytes), guard = residentId === undefined ? 'guard_detect' : 'guard_detect_resident';
   const imports = [guard, ...(caller ? ['cpu_read32', residentId === undefined ? 'cpu_store32' : 'cpu_store_resident32'] : [])];
   const sort = rows => rows.sort((a, b) => `${a.module}.${a.name}`.localeCompare(`${b.module}.${b.name}`));
-  assert.deepEqual(sort(WebAssembly.Module.imports(module)), sort([{module: 'env', name: 'memory', kind: 'memory'}, ...imports.map(name => ({module: 'ring3', name, kind: 'function'}))]), `${label}: exact indirect-CALL/read/store imports`);
-  const run = new WebAssembly.Instance(module, {env: {memory: engine.memory}, ring3: Object.fromEntries(imports.map(name => [name, engine.api[name]]))}).exports.run;
+  assert.deepEqual(sort(WebAssembly.Module.imports(module)), sort(generatedImports({resident: imports[0] === 'guard_detect_resident', helpers: imports.slice(1)})), `${label}: exact indirect-CALL/read/store imports`);
+  const run = new WebAssembly.Instance(module, {env: {memory: engine.memory}, ring3: {...(Object.fromEntries(imports.map(name => [name, engine.api[name]]))), finish_exception_detection: engine.api.finish_exception_detection}}).exports.run;
   assert.equal(typeof run, 'function'); assert.equal(run.length, 4);
   const filename = `engine-${engine.ordinal}-${label}.wasm`;
   writeFileSync(join(outputDir, filename), bytes); artifacts[filename] = hash(bytes);

@@ -1,3 +1,4 @@
+import {attachDetectionApi, generatedImports} from '../../../../../../support/wasm/binding.mjs';
 import {ARENA_SIZE} from '../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
@@ -36,7 +37,7 @@ function save(file, bytes) {writeFileSync(join(output, file), bytes, {flag: 'wx'
 save('engine.wasm', engine.bytes); save('input-original.exe', original); save('input-unsupported-no-isolation.exe', unsupported);
 const rustPaths = dir => readdirSync(join(root, dir), {withFileTypes: true}).flatMap(item => item.isDirectory()
   ? rustPaths(`${dir}/${item.name}`) : item.name.endsWith('.rs') ? [`${dir}/${item.name}`] : []);
-const paths = [...rustPaths('engine/src'), 'Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml', 'rust-toolchain.toml',
+const paths = ['engine/tests/support/wasm/binding.mjs',...rustPaths('engine/src'), 'Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml', 'rust-toolchain.toml',
   'engine/tests/loader/pe32/native/declarations.rs', 'engine/tests/loader/pe32/native.rs', 'engine/tests/support/loader/pe32/image.rs', 'engine/tests/support/loader/pe32/relocation.rs', 'engine/tests/process/images/input/native/original.rs', 'engine/tests/process/images/native.rs', 'engine/tests/process/images/relocation/wasm/original.rs', 'engine/tests/process/images/wasm.rs', 'engine/tests/support/wasm.rs',
   'engine/tests/support/wasm/engine.mjs', ...['i386.s', 'relocations.obj', 'relocations.exe', 'inspection.txt',
     'fixture.json', 'evidence.json', 'producer-source-pins.json', 'PROVENANCE.md', 'runtime/run.mjs'].map(n => `${fixture}/${n}`)].sort();
@@ -110,8 +111,8 @@ function compile(c, entry) {
   } else binding = {generation: c.api.generation(), pointer: c.api.module_ptr() >>> 0, length: c.api.module_len() >>> 0};
   assert.deepEqual(after, expected, 'compile changes only the exact resident receipt'); assert.ok(binding.length > 8 && binding.length <= 65536);
   const bytes = Buffer.from(new Uint8Array(c.memory.buffer, binding.pointer, binding.length)), module = new WebAssembly.Module(bytes);
-  const guard = c.owner === 'resident' ? 'guard_resident' : 'guard', store = c.owner === 'resident' ? 'cpu_store_resident32' : 'cpu_store32';
-  const imports = [{module: 'env', name: 'memory', kind: 'memory'}, ...[guard, 'cpu_read32', store].map(name => ({module: 'ring3', name, kind: 'function'}))];
+  const guard = c.owner === 'resident' ? 'guard_detect_resident' : 'guard_detect', store = c.owner === 'resident' ? 'cpu_store_resident32' : 'cpu_store32';
+  const imports = generatedImports({resident: (guard) === 'guard_detect_resident', helpers: [ 'cpu_read32', store]});
   assert.deepEqual(WebAssembly.Module.imports(module), imports); assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
   const forwarded = name => (...raw) => {
     const args = raw.map(v => v >>> 0), next = c.helperSchedule.shift(); assert.ok(next, 'unexpected guest helper'); assert.equal(name, next.name);
@@ -122,7 +123,7 @@ function compile(c, entry) {
     helperTrace.push({context: c.id, run: c.run, name, args, observed_status: status, helper_hex: after.subarray(100, 140).toString('hex')});
     counts.helper_calls++; counts[name === 'cpu_read32' ? 'read32' : 'store32']++; return status;
   };
-  const run = new WebAssembly.Instance(module, {env: {memory: c.memory}, ring3: {[guard]: c.api[guard], cpu_read32: forwarded('cpu_read32'), [store]: forwarded(store)}}).exports.run;
+  const run = new WebAssembly.Instance(module, {env: {memory: c.memory}, ring3: {...({[guard]: c.api[guard], cpu_read32: forwarded('cpu_read32'), [store]: forwarded(store)}), finish_exception_detection: c.api.finish_exception_detection}}).exports.run;
   assert.equal(run.length, 4); const file = save(`context-${c.id}-module.wasm`, bytes);
   modules.push({context: c.id, owner: c.owner, file, sha256: hash(bytes), bytes: bytes.length, imports,
     block_specs: specs, blocks: 3, instructions: 5, source_bytes: 15, ...binding}); counts.modules++;
@@ -133,12 +134,12 @@ function compile(c, entry) {
 }
 for (const actualBase of [0x400000, 0x500000, 0x300000]) for (const owner of ['replacement', 'resident']) {
   const instance = new WebAssembly.Instance(engine.module, {}), memory = instance.exports.memory;
-  const arities = {open: 3, close: 0, arena_ptr: 0, begin_image_input: 1, append_image_input: 2, abort_image_input: 0, load_pe32_input_at: 1,
+  const arities = {guard_detect: 6, guard_detect_resident: 7, finish_exception_detection: 12, open: 3, close: 0, arena_ptr: 0, begin_image_input: 1, append_image_input: 2, abort_image_input: 0, load_pe32_input_at: 1,
     map: 3, protect: 3, upload: 2, compile: 1, compile_resident: 1, compile_entries: 2, generation: 0, module_ptr: 0, module_len: 0,
     read32: 1, write32: 2, store32: 2, store_resident32: 6, guard: 6, guard_resident: 7, cpu_read32: 1, cpu_store32: 2, cpu_store_resident32: 6};
-  const api = Object.fromEntries(Object.entries(arities).map(([name, arity]) => {
+  const api = attachDetectionApi(Object.fromEntries(Object.entries(arities).map(([name, arity]) => {
     const fn = instance.exports[`ring3_abi_v1_${name}`]; assert.equal(typeof fn, 'function'); assert.equal(fn.length, arity, name); return [name, fn];
-  }));
+  })), instance.exports);
   const c = {id: ++counts.contexts, owner, actualBase, api, memory, captures: 0, run: 0, helperSchedule: []};
   assert.ok(memory instanceof WebAssembly.Memory); assert.equal(api.open(7, c.id, 0x52454c4f), 0); c.base = api.arena_ptr() >>> 0;
   assert.ok(c.base > 0 && c.base + SIZE <= memory.buffer.byteLength); input(c, 0, initial);

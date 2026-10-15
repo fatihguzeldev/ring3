@@ -1,3 +1,4 @@
+import {attachDetectionApi, generatedImports} from '../../../../../../support/wasm/binding.mjs';
 import {assertEngineExports} from '../../../../../../support/wasm/exports.mjs';
 import {readEngine} from '../../../../../../support/wasm/engine.mjs';
 import assert from 'node:assert/strict';
@@ -11,11 +12,11 @@ const fixtureEngine = readEngine(enginePath);
 const exportContract = assertEngineExports(fixtureEngine.module, root);
 assert.ok(root, 'expected copied engine, unique output and repository root');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
-const SIZE = 4612, TRANSFER = 140, LOW = 0xe0000000, HIGH = 0xd3456789;
+const SIZE = 4796, TRANSFER = 140, LOW = 0xe0000000, HIGH = 0xd3456789;
 const OUTER = 0x80000011, RETURN = 0x80000012, INNER = 0x80000013;
 const engineBytes = fixtureEngine.bytes;
 assert.match(process.env.RING3_ENGINE_SHA256 ?? '', /^[a-f0-9]{64}$/, 'cold retry requires the requested engine SHA-256');
-const arities = {
+const arities = {guard_detect: 6, guard_detect_resident: 7, finish_exception_detection: 12,
   open:3, close:0, arena_ptr:0, map:3, upload:2, generation:0,
   compile_resident_with_gates:2, compile_resident_callback_unit:7,
   acknowledge_resident_callback_installation:8, dispatcher_module:2,
@@ -28,7 +29,7 @@ const arities = {
 const productionPaths = ['Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml',
   ...execFileSync('rg', ['--files', 'engine/src'], {cwd:root, encoding:'utf8'}).trim().split('\n')].sort();
 assert.ok(productionPaths.length > 0, 'nonempty source manifest'); assert.equal(new Set(productionPaths).size, productionPaths.length);
-const sourcePaths = [...productionPaths, 'engine/tests/process/callbacks/resident/wasm/retry.rs', 'engine/tests/process/callbacks/wasm.rs',
+const sourcePaths = ['engine/tests/support/wasm/binding.mjs', ...productionPaths, 'engine/tests/process/callbacks/resident/wasm/retry.rs', 'engine/tests/process/callbacks/wasm.rs',
   'engine/tests/process/callbacks/resident/fixtures/p2-cold-callback-retry/runtime/run.mjs'].sort();
 sourcePaths.push(...[...exportContract.sourcePaths, 'engine/tests/support/wasm/engine.mjs'].filter(path => !sourcePaths.includes(path)));
 assert.ok(sourcePaths.length > 0, 'nonempty source manifest'); assert.equal(new Set(sourcePaths).size, sourcePaths.length);
@@ -99,7 +100,7 @@ for (const [label,,hex] of inputs) save(`inputs/${label}.x86`, Buffer.from(hex,'
 const engineModule = fixtureEngine.module;
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
 const engine = new WebAssembly.Instance(engineModule, {});
-const api = Object.fromEntries(Object.keys(arities).map(name => [name,engine.exports[`ring3_abi_v1_${name}`]]));
+const api = attachDetectionApi(Object.fromEntries(Object.keys(arities).map(name => [name,engine.exports[`ring3_abi_v1_${name}`]])), engine.exports);
 for (const [name,arity] of Object.entries(arities)) {
   assert.equal(typeof api[name], 'function', name); assert.equal(api[name].length, arity, name);
 }
@@ -137,14 +138,13 @@ function compile(label, blocks, gates, helpers, slot, action) {
   record(`${label}: metadata24 only`,before,expected,0,[[TRANSFER,patch]]);
   unit.code = bytes.slice(pointer,pointer+length); unit.file = save(`modules/${label}.wasm`,unit.code);
   unit.module = new WebAssembly.Module(unit.code);
-  assert.deepEqual(WebAssembly.Module.imports(unit.module), [{module:'env',name:'memory',kind:'memory'},
-    ...['guard_resident',...helpers].map(name => ({module:'ring3',name,kind:'function'}))]);
+  assert.deepEqual(WebAssembly.Module.imports(unit.module), generatedImports({resident: ('guard_detect_resident') === 'guard_detect_resident', helpers: [...helpers]}));
   assert.deepEqual(WebAssembly.Module.exports(unit.module), [{name:'run',kind:'function'}]);
   units[label] = unit; return unit;
 }
 const table = new WebAssembly.Table({element:'anyfunc',initial:8,maximum:8});
 function instantiate(unit, stage) {
-  unit.instance = new WebAssembly.Instance(unit.module, {env:{memory},ring3:Object.fromEntries(['guard_resident',...unit.helpers].map(name => [name,api[name]]))});
+  unit.instance = new WebAssembly.Instance(unit.module, {env: {memory}, ring3: {...(Object.fromEntries(['guard_detect_resident',...unit.helpers].map(name => [name,api[name]]))), finish_exception_detection: api.finish_exception_detection}});
   unit.run = unit.instance.exports.run; assert.equal(unit.run.length,4);
   if (stage) { table.set(unit.slot,unit.run); assert.equal(table.get(unit.slot),unit.run); }
 }

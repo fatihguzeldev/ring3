@@ -154,7 +154,7 @@
       "compile": "compile_entries seeds[receipt entry, authored return canary, authored Gate] and one numeric GateSpec; canary is precompiled negative-control admission only",
       "generation": 1,
       "helper_imports": [
-        "guard",
+        "guard_detect",
         "store32"
       ],
       "run_arity": 4,
@@ -163,11 +163,11 @@
     "resident": {
       "compile": "compile_resident_entries Gate B and caller A with[receipt entry, authored return canary]; no caller extents",
       "caller_helper_imports": [
-        "guard_resident",
+        "guard_detect_resident",
         "store_resident32"
       ],
       "gate_helper_imports": [
-        "guard_resident"
+        "guard_detect_resident"
       ],
       "units": 2,
       "returned_ids": "dynamic distinct nonzero full-u64",

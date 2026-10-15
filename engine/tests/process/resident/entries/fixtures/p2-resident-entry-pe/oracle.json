@@ -154,36 +154,36 @@
   },
   "module_helpers": {
     "gate": [
-      "guard_resident"
+      "guard_detect_resident"
     ],
     "callers": [
       [
-        "guard_resident",
+        "guard_detect_resident",
         "read32",
         "store_resident32"
       ],
       [
-        "guard_resident",
+        "guard_detect_resident",
         "read32",
         "store_resident32"
       ],
       [
-        "guard_resident",
+        "guard_detect_resident",
         "read32",
         "store_resident32"
       ],
       [
-        "guard_resident",
+        "guard_detect_resident",
         "read32",
         "store_resident32"
       ],
       [
-        "guard_resident",
+        "guard_detect_resident",
         "read32",
         "store_resident32"
       ],
       [
-        "guard_resident"
+        "guard_detect_resident"
       ]
     ]
   },

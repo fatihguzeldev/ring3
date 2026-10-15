@@ -1,3 +1,4 @@
+import {attachDetectionApi, generatedImports} from '../../../../../../support/wasm/binding.mjs';
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
@@ -7,7 +8,7 @@ import {dirname, join} from 'node:path';
 const [enginePath, outputDir, root] = process.argv.slice(2);
 assert.ok(root);
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
-const SIZE = 4612, TRANSFER = 140, KEY = 0xd3456789e0000000n;
+const SIZE = 4796, TRANSFER = 140, KEY = 0xd3456789e0000000n;
 const LOW = Number(KEY & 0xffffffffn), HIGH = Number(KEY >> 32n);
 const OUTER = 0x80000011, RETURN = 0x80000012, INNER = 0x80000013;
 const engineBytes = readFileSync(enginePath);
@@ -15,7 +16,7 @@ const ownSources = [
   'engine/tests/process/callbacks/resident/wasm/installation.rs', 'engine/tests/process/callbacks/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/process/callbacks/wasm.rs', 'engine/tests/support/wasm.rs',
   'engine/tests/process/callbacks/resident/fixtures/p2-resident-callback-installation/runtime/run.mjs',
 ];
-const sourcePaths = [...new Set([
+const sourcePaths = ['engine/tests/support/wasm/binding.mjs', ...new Set([
   ...execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard',
     'Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml', 'engine/src'], {cwd: root, encoding: 'utf8'}).trim().split('\n'),
   ...ownSources,
@@ -71,15 +72,15 @@ writeFileSync(join(outputDir, 'authored-oracle.json'), JSON.stringify(oracle, nu
 const module = new WebAssembly.Module(engineBytes);
 assert.deepEqual(WebAssembly.Module.imports(module), []);
 const instance = new WebAssembly.Instance(module, {});
-const names = [
+const names = ['guard', 'guard_resident', 'guard_detect', 'guard_detect_resident', 'finish_exception_detection',
   'open', 'close', 'arena_ptr', 'map', 'upload', 'generation', 'compile_resident_with_gates',
   'compile_resident_callback_unit', 'acknowledge_resident_callback_installation',
-  'dispatcher_module', 'guard_dispatch_entry', 'guard_resident', 'find_resident',
+  'dispatcher_module', 'guard_dispatch_entry',  'find_resident',
   'find_installed_resident', 'read32', 'write32', 'store_resident32',
   'acknowledge_resident_installation', 'capture_resident_call', 'complete_resident_call',
   'begin_resident_callback', 'authorize_resident_callback', 'select_resident_callback_unit',
   'capture_active_resident_callback_call', 'complete_active_resident_callback_call', 'finish_resident_callback', 'abandon_call', 'cpu_read32', 'cpu_store_resident32'];
-const api = Object.fromEntries(names.map(name => [name, instance.exports[`ring3_abi_v1_${name}`]]));
+const api = attachDetectionApi(Object.fromEntries(names.map(name => [name, instance.exports[`ring3_abi_v1_${name}`]])), instance.exports);
 for (const [name, fn] of Object.entries(api)) assert.equal(typeof fn, 'function', name);
 assert.equal(api.compile_resident_callback_unit.length, 7);
 assert.equal(api.acknowledge_resident_callback_installation.length, 8);
@@ -118,17 +119,14 @@ function compile(label, blocks, gates, helpers, slot, action, frameSize = SIZE) 
   [1, 24, low, high, pointer, length].forEach((value, i) => mv.setUint32(i * 4, value, true));
   const expected = before.slice(); expected.set(metadata, TRANSFER); check(expected, `${label}: metadata24 only`);
   const code = bytes.slice(pointer, pointer + length), compiled = new WebAssembly.Module(code);
-  assert.deepEqual(WebAssembly.Module.imports(compiled), [
-    {module: 'env', name: 'memory', kind: 'memory'},
-    ...['guard_resident', ...helpers].map(name => ({module: 'ring3', name, kind: 'function'})),
-  ]);
+  assert.deepEqual(WebAssembly.Module.imports(compiled), generatedImports({resident: ('guard_detect_resident') === 'guard_detect_resident', helpers: [ ...helpers]}));
   artifact(`${label}.wasm`, code);
   const unit = {label, id, low, high, pointer, length, code, module: compiled, helpers, slot};
   units[label] = unit; return unit;
 }
 const table = new WebAssembly.Table({element: 'anyfunc', initial: 8, maximum: 8});
 function instantiate(unit) {
-  unit.instance = new WebAssembly.Instance(unit.module, {env: {memory}, ring3: Object.fromEntries(['guard_resident', ...unit.helpers].map(name => [name, api[name]]))});
+  unit.instance = new WebAssembly.Instance(unit.module, {env: {memory}, ring3: {...(Object.fromEntries(['guard_detect_resident', ...unit.helpers, 'finish_exception_detection'].map(name => [name, api[name]]))), finish_exception_detection: api.finish_exception_detection}});
   unit.run = unit.instance.exports.run; table.set(unit.slot, unit.run);
   assert.equal(table.get(unit.slot), unit.run);
 }

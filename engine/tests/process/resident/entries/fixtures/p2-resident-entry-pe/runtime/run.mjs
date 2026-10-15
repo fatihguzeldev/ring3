@@ -1,3 +1,4 @@
+import {attachDetectionApi, generatedImports} from '../../../../../../support/wasm/binding.mjs';
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
@@ -15,7 +16,7 @@ const programBytes = readFileSync(programPath), cpuOracleBytes = readFileSync(cp
 assert.equal(hash(programBytes), oracle.reused_program.sha256);
 assert.equal(hash(cpuOracleBytes), oracle.reused_cpu_oracle.sha256);
 const cpuOracle = JSON.parse(cpuOracleBytes), selected = cpuOracle.cases.find(item => item.name === 'selected');
-const size = 4612, transfer = 140;
+const size = 4796, transfer = 140;
 const artifacts = {}, observations = [], identities = [];
 
 function authoredCode(object) {
@@ -82,7 +83,7 @@ writeFileSync(join(outputDir, 'reused-cpu-oracle.json'), cpuOracleBytes);
 writeFileSync(join(outputDir, 'runtime-oracle.json'), oracleBytes);
 writeFileSync(join(outputDir, 'runtime/run.mjs'), readFileSync(import.meta.filename));
 const productionPaths = execFileSync('rg', ['--files', 'engine/src'], {cwd: root, encoding: 'utf8'}).trim().split('\n').sort();
-const sourcePaths = [...productionPaths, 'Cargo.toml', 'engine/Cargo.toml', 'Cargo.lock', 'engine/tests/process/resident/entries/wasm/resident.rs', 'engine/tests/process/resident/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/process/resident/entries/fixtures/p2-resident-entry-pe/oracle.json', 'engine/tests/process/resident/entries/fixtures/p2-resident-entry-pe/runtime/run.mjs', 'engine/tests/process/images/fixtures/p2-pe32-imports/program.S', 'engine/tests/process/images/fixtures/p2-pe32-imports/oracle.json'];
+const sourcePaths = ['engine/tests/support/wasm/binding.mjs', ...productionPaths, 'Cargo.toml', 'engine/Cargo.toml', 'Cargo.lock', 'engine/tests/process/resident/entries/wasm/resident.rs', 'engine/tests/process/resident/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/process/resident/entries/fixtures/p2-resident-entry-pe/oracle.json', 'engine/tests/process/resident/entries/fixtures/p2-resident-entry-pe/runtime/run.mjs', 'engine/tests/process/images/fixtures/p2-pe32-imports/program.S', 'engine/tests/process/images/fixtures/p2-pe32-imports/oracle.json'];
 const sources = Object.fromEntries(sourcePaths.map(file => [file, hash(readFileSync(join(root, file)))]));
 writeFileSync(join(outputDir, 'source-sha256.json'), JSON.stringify(sources, null, 2));
 const engineBytes = readFileSync(enginePath);
@@ -90,9 +91,9 @@ writeFileSync(join(outputDir, 'engine.wasm'), engineBytes);
 assert.ok(WebAssembly.validate(engineBytes));
 const engineModule = new WebAssembly.Module(engineBytes);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
-const names = ['open', 'close', 'arena_ptr', 'load_pe32_linked_at', 'map', 'protect', 'generation', 'module_len', 'compile_resident_entries', 'resident_module', 'find_resident', 'acknowledge_resident_installation', 'find_installed_resident', 'dispatcher_module', 'guard_dispatch_entry', 'guard_resident', 'read32', 'write32', 'store_resident32', 'capture_resident_call', 'complete_resident_windows_call', 'cpu_read32', 'cpu_store_resident32'];
+const names = ['guard', 'guard_resident', 'guard_detect', 'guard_detect_resident', 'finish_exception_detection', 'open', 'close', 'arena_ptr', 'load_pe32_linked_at', 'map', 'protect', 'generation', 'module_len', 'compile_resident_entries', 'resident_module', 'find_resident', 'acknowledge_resident_installation', 'find_installed_resident', 'dispatcher_module', 'guard_dispatch_entry',  'read32', 'write32', 'store_resident32', 'capture_resident_call', 'complete_resident_windows_call', 'cpu_read32', 'cpu_store_resident32'];
 const instance = new WebAssembly.Instance(engineModule, {});
-const api = Object.fromEntries(names.map(name => { const fn = instance.exports[`ring3_abi_v1_${name}`]; assert.equal(typeof fn, 'function', name); return [name, fn]; }));
+const api = attachDetectionApi(Object.fromEntries(names.map(name => { const fn = instance.exports[`ring3_abi_v1_${name}`]; assert.equal(typeof fn, 'function', name); return [name, fn]; })), instance.exports);
 assert.equal(api.compile_resident_entries.length, 2);
 const key = 0xa342cdef89abcdefn;
 const engine = {api, key, low: Number(key & 0xffffffffn), high: Number(key >> 32n), memory: instance.exports.memory, units: [], installed: new Map()};
@@ -147,10 +148,10 @@ function compile(entries, gates, label, helpers) {
   unit.bytes = engine.bytes.slice(unit.pointer, unit.pointer + unit.length);
   const module = new WebAssembly.Module(unit.bytes), imports = WebAssembly.Module.imports(module);
   const sort = rows => rows.sort((a, b) => `${a.module}.${a.name}`.localeCompare(`${b.module}.${b.name}`));
-  assert.deepEqual(sort(imports), sort([{module: 'env', name: 'memory', kind: 'memory'}, ...helpers.map(name => ({module: 'ring3', name, kind: 'function'}))]), 'exact independently frozen required helpers');
-  const allowed = new Set(['guard_resident', 'cpu_read32', 'cpu_store_resident32']);
+  assert.deepEqual(sort(imports), sort(generatedImports({resident: helpers[0] === 'guard_detect_resident', helpers: helpers.slice(1)})), 'exact independently frozen required helpers');
+  const allowed = new Set(['guard_detect_resident', 'cpu_read32', 'cpu_store_resident32', 'finish_exception_detection']);
   const binding = Object.fromEntries(imports.filter(item => item.module === 'ring3').map(item => { assert.ok(allowed.has(item.name)); return [item.name, api[item.name]]; }));
-  unit.instance = new WebAssembly.Instance(module, {env: {memory: engine.memory}, ring3: binding}); unit.run = unit.instance.exports.run;
+  unit.instance = new WebAssembly.Instance(module, {env: {memory: engine.memory}, ring3: {...(binding), finish_exception_detection: engine.api.finish_exception_detection}}); unit.run = unit.instance.exports.run;
   assert.equal(typeof unit.run, 'function'); assert.equal(unit.run.length, 4);
   engine.units.push(unit);
   const filename = `resident-${engine.units.length}-${label}.wasm`; writeFileSync(join(outputDir, filename), unit.bytes); artifacts[filename] = hash(unit.bytes);

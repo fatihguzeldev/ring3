@@ -522,36 +522,36 @@
       "ring3.find_installed_resident"
     ],
     "gate_module_helpers": [
-      "guard_resident"
+      "guard_detect_resident"
     ],
     "caller_module_helpers": [
       [
-        "guard_resident",
+        "guard_detect_resident",
         "read32",
         "store_resident32"
       ],
       [
-        "guard_resident",
+        "guard_detect_resident",
         "read32",
         "store_resident32"
       ],
       [
-        "guard_resident",
+        "guard_detect_resident",
         "read32",
         "store_resident32"
       ],
       [
-        "guard_resident",
+        "guard_detect_resident",
         "read32",
         "store_resident32"
       ],
       [
-        "guard_resident",
+        "guard_detect_resident",
         "read32",
         "store_resident32"
       ],
       [
-        "guard_resident"
+        "guard_detect_resident"
       ]
     ],
     "cold_miss": {
