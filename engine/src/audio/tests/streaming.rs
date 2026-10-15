@@ -35,6 +35,7 @@ fn old_partial_ack_cannot_overwrite_seek_stop_or_reused_voice_identity() {
     let packet = audio.submit(4).unwrap();
     audio.acknowledge(packet, 1).unwrap();
     audio.seek_stream(voice, 3).unwrap();
+    assert_eq!(audio.acknowledgement_progress(packet, 2, voice), Ok(None));
     audio.acknowledge(packet, 2).unwrap();
     assert_eq!(audio.voice_state(voice).unwrap().position_frames, 3);
     audio.stop_stream(voice).unwrap();
@@ -43,6 +44,7 @@ fn old_partial_ack_cannot_overwrite_seek_stop_or_reused_voice_identity() {
     assert_eq!(reused.slot, voice.slot);
     assert_ne!(reused.generation, voice.generation);
     audio.play_stream(reused, true).unwrap();
+    assert_eq!(audio.acknowledgement_progress(packet, 4, reused), Ok(None));
     audio.acknowledge(packet, 4).unwrap();
     assert_eq!(audio.voice_state(reused).unwrap().position_frames, 0);
     assert!(audio.voice_state(reused).unwrap().playing);
@@ -62,6 +64,14 @@ fn consumed_progress_distinguishes_multiple_wraps_from_unchanged_cursor() {
         .visit_acknowledgement(packet, 6, |value| progress = Some(value))
         .unwrap();
     let progress = progress.unwrap();
+    assert_eq!(
+        audio.acknowledgement_progress(packet, 6, voice),
+        Ok(Some(progress))
+    );
+    assert_eq!(
+        audio.can_acknowledge(packet, 0),
+        Err(super::AudioError32::InvalidRequest)
+    );
     assert_eq!(
         (
             progress.first_phase,

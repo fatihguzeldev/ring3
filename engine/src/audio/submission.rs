@@ -148,6 +148,36 @@ impl AudioContext {
         Ok(())
     }
 
+    pub fn can_acknowledge(
+        &self,
+        submission: AudioSubmission32,
+        consumed_frames: u32,
+    ) -> Result<(), AudioError32> {
+        self.validate_acknowledgement(submission, consumed_frames)?;
+        Ok(())
+    }
+
+    /// queries one live voice without scanning unrelated spans or retaining a progress cache.
+    pub fn acknowledgement_progress(
+        &self,
+        submission: AudioSubmission32,
+        consumed_frames: u32,
+        id: AudioVoiceId32,
+    ) -> Result<Option<AudioVoiceProgress32>, AudioError32> {
+        let previous = self.validate_acknowledgement(submission, consumed_frames)?;
+        let voice = self.voice(id)?;
+        let span = self.spans[id.slot as usize];
+        if span.frames == 0 || span.generation != id.generation || span.revision != voice.revision {
+            return Ok(None);
+        }
+        Ok(
+            progress(span, previous, consumed_frames, id).map(|mut progress| {
+                progress.stopped &= !voice.looping;
+                progress
+            }),
+        )
+    }
+
     /// cumulative progress applies only to the exact voice generation and playback revision.
     pub fn acknowledge(
         &mut self,
