@@ -1,13 +1,16 @@
+import {generatedImports} from '../../../../../../support/wasm/binding.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {readEngine} from '../../../../../../support/wasm/engine.mjs';
+import {ARENA_SIZE} from '../../../../../../support/wasm/arena.mjs';
 
 const [enginePath, output, root] = process.argv.slice(2);
 const engine = readEngine(enginePath);
 const initial = readFileSync(join(output, 'initial-arena.bin'));
-const SIZE = initial.length, T = 140, FP = 4236, SV = 4364, BASE = 0x5000;
+assert.equal(initial.length, ARENA_SIZE, 'current complete arena');
+const SIZE = ARENA_SIZE, T = 140, FP = 4236, SV = 4364, BASE = 0x5000;
 const hex = value => Buffer.from(value, 'hex');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const dwords = values => {
@@ -25,10 +28,16 @@ const record = (magic, version, size, values) => {
   return bytes;
 };
 const state = (registers, pc) => record('R3ST', 1, 56, [...registers, pc, 0xcd7]);
-const exit = (reason, retired, detail = 0, address = 0, access = 0, length = 0) =>
+const legacyExit = (reason, retired, detail = 0, address = 0, access = 0, length = 0) =>
   record('R3EX', 9, 40, [reason, retired, detail, address, access, length]);
-const packet = (status = 0, detail = 0, address = 0, access = 0, value = 0) =>
+const exit = (reason, retired, detail = 0, address = 0, access = 0, length = 0) =>
+  reason === 5 ? record('R3EX', 12, 40, [23, retired, 4 | (access === 2 ? 2 : 0) | (detail === 2 ? 1 : 0), address, access, length])
+    : legacyExit(reason, retired, detail, address, access, length);
+const legacyPacket = (status = 0, detail = 0, address = 0, access = 0, value = 0) =>
   record('R3MH', 8, 40, [status, value, detail, address, access, 832]);
+const packet = (status = 0, detail = 0, address = 0, access = 0, value = 0) =>
+  status === 1 ? record('R3MH', 15, 40, [9, value, 4 | (access === 2 ? 2 : 0) | (detail === 2 ? 1 : 0), address, access, 832])
+    : legacyPacket(status, detail, address, access, value);
 const parents = () => [3, 0x11223344, 0, 0x44556677, 0x7080, 0x66778899, 0x778899aa, BASE];
 
 // fixed physical tags: valid, zero, special, empty, valid, special, valid, empty.
@@ -119,7 +128,7 @@ for (const code of [saveCode, restoreCode]) {
   rows.push({name: `${code}-alignment-before-unmapped`, code, address: 0x9001, reason: 11, status: 3});
   rows.push({name: `${code}-header-page-fault-before-components`, code, address: 0x5e00,
     seeds: [[0x5e00, Buffer.alloc(512, 0x9b)]], unchanged: [[0x5e00, Buffer.alloc(512, 0x9b)]],
-    reason: 5, status: 1, detail: 1, fault: 0x6000, access: 1});
+    reason: 5, status: 1, detail: 1, fault: 0x6000, access: code === saveCode ? 2 : 1});
   rows.push({name: `${code}-header-address-overflow`, code, address: 0xfffffe00,
     reason: 11, status: 3});
 }
@@ -130,7 +139,7 @@ rows.push({name: 'save-late-readonly-header-write-preserves-earlier-component-by
   reason: 5, status: 1, detail: 2, fault: 0x6000, access: 2});
 rows.push({name: 'save-writeonly-header-still-requires-read-before-write', code: saveCode, mask: 0,
   image: Buffer.alloc(576, 0x9b), protects: [[BASE, 2]],
-  reason: 5, status: 1, detail: 2, fault: BASE + 512, access: 1});
+  reason: 5, status: 1, detail: 2, fault: BASE + 512, access: 2});
 const header = Buffer.alloc(24);
 const badHeader = Buffer.from(header); badHeader[0] = 8;
 rows.push({name: 'restore-invalid-header-precedes-unmapped-mxcsr', code: restoreCode, address: 0x4e00,
@@ -145,7 +154,7 @@ rows.push({name: 'xgetbv-zero-direct-preserves-flags', code: '0f01d0', control: 
 rows.push({name: 'xgetbv-one-gp-without-publication', code: '0f01d0', control: 1, direct: true, reason: 11});
 rows.push({name: 'xgetbv-high-index-gp-without-publication', code: '0f01d0', control: 0xffffffff, direct: true, reason: 11});
 
-const sourcePaths = [
+const sourcePaths = ['engine/tests/support/wasm/arena.mjs', 'engine/tests/support/wasm/binding.mjs',
   'engine/src/cpu/x86/xstate.rs', 'engine/src/cpu/x86/xstate/legacy.rs',
   'engine/src/cpu/x86/decode/xstate.rs', 'engine/src/cpu/dbt/wasm/xstate.rs',
   'engine/src/process/cpu/xstate.rs', 'engine/src/process/cpu/xstate/upper.rs',
@@ -182,15 +191,28 @@ function open(owner, entries, batch) {
     ? {pointer: snapshot.readUInt32LE(T + 16), length: snapshot.readUInt32LE(T + 20)}
     : {pointer: context.api.module_ptr() >>> 0, length: context.api.module_len() >>> 0};
   const bytes = Buffer.from(new Uint8Array(context.memory.buffer, binding.pointer, binding.length));
-  const module = new WebAssembly.Module(bytes), ring3 = {};
-  for (const imported of WebAssembly.Module.imports(module)) if (imported.kind === 'function') {
+  const module = new WebAssembly.Module(bytes), ring3 = {}, imports = WebAssembly.Module.imports(module);
+  const operations = ['xsave', 'xrstor'].filter(name => batch.some(row => {
+    const operand = row.code.match(/0fae([0-9a-f]{2})/);
+    return operand !== null && (((parseInt(operand[1], 16) >>> 3) & 7) === 4) === (name === 'xsave');
+  }));
+  assert.deepEqual(imports, generatedImports({resident: owner === 'resident', helpers: operations.map(name =>
+    `cpu_${name}_avx${owner === 'resident' ? '_resident' : ''}`)}));
+  for (const imported of imports.slice(1)) {
+    assert.equal(imported.kind, 'function'); assert.equal(imported.module, 'ring3');
     ring3[imported.name] = (...args) => {
       let status;
       if (context.raw && imported.name.startsWith('cpu_x')) {
         input(context, 100, context.raw.packet);
         status = context.raw.returnStatus ?? 0;
       } else status = context.api[imported.name](...args);
-      if (!imported.name.startsWith('guard')) helpers.push({context: context.id, name: imported.name,
+      if (imported.name.startsWith('guard')) {
+        assert.equal(typeof status, 'bigint'); assert.ok(status > 0n, 'positive bound entry epoch'); context.epoch = status;
+      } else if (imported.name === 'finish_exception_detection') {
+        assert.equal(status, 0, 'actual stop finalizer');
+        const after = arena(context);
+        assert.deepEqual(args, [context.epoch, ...[72, 80, 84, 88, 92].map(at => after.readUInt32LE(at)), 0, 0, 0, 0, 0, 0]);
+      } else helpers.push({context: context.id, name: imported.name,
         args: args.map(value => value >>> 0), status, packet: arena(context).subarray(100, 140).toString('hex'),
         nonforwarded: Boolean(context.raw)});
       return status;
@@ -239,6 +261,7 @@ function test(context, block, row) {
     assert.equal(event.name, `cpu_${row.code === saveCode ? 'xsave' : 'xrstor'}_avx${context.owner === 'resident' ? '_resident' : ''}`);
     assert.deepEqual(event.args.slice(-4), [3, row.address ?? BASE, row.mask ?? 3, row.high ?? 0]);
     assert.equal(event.packet, expected.subarray(100, 140).toString('hex'));
+    assert.equal(event.status, reason === 5 ? 23 : 0, 'real native helper transport');
   }
   assert.deepEqual(actual, expected, row.name + ' complete arena');
   exitRecords.push(actual.subarray(56, 96));
@@ -275,29 +298,30 @@ for (const owner of ['replacement', 'resident']) for (const entries of [false, t
   host(context, 'close', []);
 }
 
+// injected legacy packets test the lowerer protocol, not native page-fault certification.
 const rawRows = [
-  {name: 'success-value-must-be-zero', packet: packet(0, 0, 0, 0, 1)},
+  {name: 'success-value-must-be-zero', packet: legacyPacket(0, 0, 0, 0, 1)},
   {name: 'legacy-packet-version7-is-rejected-by-active-generated-path', packet: record('R3MH', 7, 40, [0, 0, 0, 0, 0, 576])},
-  {name: 'unrequested-upper-payload-fault-is-rejected', packet: packet(1, 1, BASE + 576, 1)},
-  {name: 'selected-upper-payload-read-fault-is-canonical', mask: 4, packet: packet(1, 1, BASE + 576, 1), reason: 5, detail: 1, fault: BASE + 576, access: 1, upper: true},
-  {name: 'upper-reserved-tail-fault-is-rejected', mask: 4, packet: packet(1, 1, BASE + 704, 1)},
-  {name: 'floating-exception-is-not-xstate-status', packet: packet(5, 0x1f81)},
-  {name: 'gp-error-code-must-be-zero', packet: packet(3, 1)},
-  {name: 'fault-in-reserved-gap-is-rejected', packet: packet(1, 1, BASE + 300, 1)},
-  {name: 'fault-in-unrequested-mxcsr-is-rejected', mask: 1, packet: packet(1, 1, BASE + 24, 1)},
-  {name: 'success-at-misaligned-address-is-rejected', address: BASE + 1, packet: packet()},
-  {name: 'header-read-fault-is-canonical', packet: packet(1, 1, BASE + 512, 1), reason: 5, detail: 1, fault: BASE + 512, access: 1},
-  {name: 'canonical-gp-zero-is-accepted', packet: packet(3), reason: 11},
+  {name: 'unrequested-upper-payload-fault-is-rejected', packet: legacyPacket(1, 1, BASE + 576, 1)},
+  {name: 'selected-upper-payload-read-fault-is-canonical', mask: 4, packet: legacyPacket(1, 1, BASE + 576, 1), reason: 5, detail: 1, fault: BASE + 576, access: 1, upper: true},
+  {name: 'upper-reserved-tail-fault-is-rejected', mask: 4, packet: legacyPacket(1, 1, BASE + 704, 1)},
+  {name: 'floating-exception-is-not-xstate-status', packet: legacyPacket(5, 0x1f81)},
+  {name: 'gp-error-code-must-be-zero', packet: legacyPacket(3, 1)},
+  {name: 'fault-in-reserved-gap-is-rejected', packet: legacyPacket(1, 1, BASE + 300, 1)},
+  {name: 'fault-in-unrequested-mxcsr-is-rejected', mask: 1, packet: legacyPacket(1, 1, BASE + 24, 1)},
+  {name: 'success-at-misaligned-address-is-rejected', address: BASE + 1, packet: legacyPacket()},
+  {name: 'header-read-fault-is-canonical', packet: legacyPacket(1, 1, BASE + 512, 1), reason: 5, detail: 1, fault: BASE + 512, access: 1},
+  {name: 'canonical-gp-zero-is-accepted', packet: legacyPacket(3), reason: 11},
 ];
 for (const owner of ['replacement', 'resident']) for (const entries of [false, true]) for (const code of [saveCode, restoreCode]) {
   const [context, blocks] = open(owner, entries, [{code}]);
   for (const original of rawRows) {
-    const row = original.upper && code === saveCode ? {...original, packet: packet(1, 1, BASE + 576, 2), access: 2} : original;
+    const row = original.upper && code === saveCode ? {...original, packet: legacyPacket(1, 1, BASE + 576, 2), access: 2} : original;
     input(context, 0, initial);
     const registers = parents(); registers[0] = row.mask ?? 3; registers[7] = row.address ?? BASE;
     input(context, 0, state(registers, blocks[0].pc)); input(context, 56, exit(1, 0));
     const expected = arena(context), reason = row.reason ?? 7;
-    expected.set(exit(reason, 0, row.detail ?? (reason === 7 ? 2 : 0), row.fault ?? 0, row.access ?? 0, reason === 5 ? 832 : 0), 56);
+    expected.set(legacyExit(reason, 0, row.detail ?? (reason === 7 ? 2 : 0), row.fault ?? 0, row.access ?? 0, reason === 5 ? 832 : 0), 56);
     expected.set(row.packet, 100);
     const start = helpers.length; context.raw = row;
     assert.equal(context.run(context.base, context.base + 56, 1, context.base + 96), 0, row.name);

@@ -1,3 +1,4 @@
+import {generatedImports} from '../../../../../../support/wasm/binding.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
@@ -31,9 +32,11 @@ const record = (magic, version, size, values) => {
 };
 const state = (registers, pc) => record('R3ST', 1, 56, [...registers, pc, 0xcd7]);
 const exit = (reason, retired, detail = 0, address = 0, access = 0, length = 0) =>
-  record('R3EX', 6, 40, [reason, retired, detail, address, access, length]);
+  record('R3EX', reason === 5 ? 12 : 6, 40, [reason === 5 ? 23 : reason, retired,
+    reason === 5 ? 4 | (access === 2 ? 2 : 0) | (detail === 2 ? 1 : 0) : detail, address, access, length]);
 const packet = (version, length = 0, status = 0, detail = 0, address = 0, access = 0, value = 0) =>
-  record('R3MH', version, 40, [status, value, detail, address, access, length]);
+  record('R3MH', status === 1 ? 15 : version, 40, [status === 1 ? 9 : status, value,
+    status === 1 ? 4 | (access === 2 ? 2 : 0) | (detail === 2 ? 1 : 0) : detail, address, access, length]);
 const parents = address => [address, 0x21314151, 0x32425262, 0x43536373,
   0x7080, 0x65758595, 0x768696a6, 0x8797a7b7];
 const raw = {
@@ -50,13 +53,13 @@ const rows = [4, 8].flatMap(width => {
     {name: `mov${width === 4 ? 'ss' : 'sd'}-memory-infinity-exact-width`, width, code: prefix + '0f1110', kind: 'write', value: raw[width].infinity},
   ];
 });
-const sources = ['engine/tests/cpu/simd/moves/fixtures/p2-simd-scalar-move/runtime/run.mjs',
+const sources = ['engine/tests/support/wasm/binding.mjs', 'engine/tests/cpu/simd/moves/fixtures/p2-simd-scalar-move/runtime/run.mjs',
   'engine/tests/support/wasm/engine.mjs', 'engine/tests/support/wasm/arena.mjs',
   'engine/src/cpu/x86/decode/simd.rs', 'engine/src/cpu/dbt/wasm/simd.rs',
   'engine/src/cpu/dbt/wasm/simd/direct.rs', 'engine/src/process/memory/span.rs', 'engine/src/process/memory/mod.rs', 'engine/src/process/mod.rs'];
 const sourceHashes = () => Object.fromEntries(sources.map(path => [path, hash(readFileSync(join(root, path)))]));
 const sourceBefore = sourceHashes();
-const contexts = [], modules = [], observations = [], helpers = [], ramChecks = [], repairs = [];
+const contexts = [], modules = [], observations = [], helpers = [], detections = [], ramChecks = [], repairs = [];
 const arena = context => Buffer.from(new Uint8Array(context.memory.buffer, context.base, ARENA_SIZE));
 function input(context, offset, bytes) {
   const expected = arena(context);
@@ -113,8 +116,17 @@ function seed(context, block, value, address = DATA) {
 function forward(context, name, args) {
   const before = arena(context), status = context.api[name](...args), after = arena(context);
   if (name.startsWith('guard')) {
-    assert.equal(status, context.stale ? 4 : 0, 'canonical bound guard');
+    assert.equal(typeof status, 'bigint', 'i64 bound entry guard');
+    if (context.stale) assert.equal(status, -4n, 'stale material guard status');
+    else {assert.ok(status > 0n, 'positive bound entry epoch'); context.epoch = status;}
     assert.deepEqual(after, before, 'guard is arena-neutral');
+    return status;
+  }
+  if (name === 'finish_exception_detection') {
+    assert.equal(status, 0, 'actual stop finalizer');
+    assert.deepEqual(args, [context.epoch, ...[72, 80, 84, 88, 92].map(at => after.readUInt32LE(at)), 0, 0, 0, 0, 0, 0]);
+    assert.deepEqual(after, before, 'detector is arena-neutral');
+    detections.push({context: context.id, args: args.map(value => typeof value === 'bigint' ? value.toString() : value >>> 0), status});
     return status;
   }
   assert.ok(['cpu_read', 'cpu_write', 'cpu_write_resident'].includes(name), name);
@@ -125,7 +137,7 @@ function forward(context, name, args) {
     fault ? 0x6000 : 0, fault ? (name === 'cpu_read' ? 1 : 2) : 0), 100);
   if (name === 'cpu_read' && !fault) expected.set(context.access.value, T);
   if (name !== 'cpu_read') assert.deepEqual(before.subarray(T, T + payload[1]), context.access.value);
-  assert.equal(status, context.access.smc ? 11 : 0, 'canonical checked helper status');
+  assert.equal(status, fault ? 23 : context.access.smc ? 11 : 0, 'canonical checked helper status');
   assert.deepEqual(after, expected, name + ' exact helper mutation');
   helpers.push({context: context.id, name, args: args.map(value => value >>> 0), status,
     packet_hex: after.subarray(100, 140).toString('hex')});
@@ -152,11 +164,11 @@ function open(owner, entries) {
     {generation: context.api.generation(), pointer: context.api.module_ptr() >>> 0, length: context.api.module_len() >>> 0};
   const bytes = Buffer.from(new Uint8Array(context.memory.buffer, context.binding.pointer, context.binding.length));
   const module = new WebAssembly.Module(bytes), imports = WebAssembly.Module.imports(module), ring3 = {};
-  assert.deepEqual(imports[0], {module: 'env', name: 'memory', kind: 'memory'});
+  assert.deepEqual(imports, generatedImports({resident: owner === 'resident', helpers: ['cpu_read', owner === 'resident' ? 'cpu_write_resident' : 'cpu_write']}));
   for (const item of imports.slice(1)) {
     assert.equal(item.module, 'ring3');
     assert.equal(item.kind, 'function');
-    assert.ok(['guard', 'guard_resident', 'cpu_read', 'cpu_write', 'cpu_write_resident'].includes(item.name), 'scalar move has no execution helper: ' + item.name);
+    assert.ok(['guard_detect', 'guard_detect_resident', 'finish_exception_detection', 'cpu_read', 'cpu_write', 'cpu_write_resident'].includes(item.name), 'scalar move has no execution helper: ' + item.name);
     ring3[item.name] = (...args) => forward(context, item.name, args);
   }
   assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
@@ -251,7 +263,7 @@ assert.deepEqual(counts, {contexts: 4, modules: 4, runs: 44, retired: 38, helper
   read_faults: 2, write_faults: 2, protect_only_retries: 4, executable_writes: 2, stale_refusals: 2});
 const result = {status: 'PASS', engine: {path: enginePath, sha256: engine.sha256, bytes: engine.bytes.length},
   arena_bytes: ARENA_SIZE, initial_arena_sha256: hash(initial), source_sha256: sourceBefore,
-  counts, contexts, modules, observations, helpers, selected_ram: ramChecks, repairs,
+  counts, contexts, modules, observations, helpers, detections, selected_ram: ramChecks, repairs,
   scope: 'authored scalar MOVSS/MOVSD raw-bit witnesses; four bound profiles for register merge/alias/load/store, explicit replacement/resident cross-page fault/retry and committed executable write; exact full arenas including scratch and unchanged FLAGS/MXCSR/x87; only canonical cpu_read/write imports and calls, no simd_execute; selected RAM/canaries only, no whole RAM, hardware numeric or performance claim'};
 writeFileSync(join(output, 'result.json'), JSON.stringify(result, null, 2) + '\n', {flag: 'wx'});
 console.log(JSON.stringify({status: result.status, output, ...counts}));
