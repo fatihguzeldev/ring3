@@ -1,3 +1,4 @@
+import {generatedImports, attachDetectionApi} from '../../../../../../../support/wasm/binding.mjs';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -12,7 +13,7 @@ const engine = readEngine(enginePath),
   PC = 0x12341000,
   FP = 4236;
 const hash = (bytes) => createHash('sha256').update(bytes).digest('hex');
-const paths = [
+const paths = ['engine/tests/support/wasm/binding.mjs',
   'engine/src/cpu/x86/decode/profile.rs',
   'engine/src/cpu/x86/decode/lower.rs',
   'engine/src/cpu/x86/decode/x87.rs',
@@ -90,14 +91,9 @@ function compile(c, rows, wait) {
   const pointer = c.resident ? receipt.readUInt32LE(156) : c.api.module_ptr() >>> 0;
   const length = c.resident ? receipt.readUInt32LE(160) : c.api.module_len() >>> 0;
   const bytes = Buffer.from(new Uint8Array(c.memory.buffer, pointer, length));
-  const module = new WebAssembly.Module(bytes),
-    guard = c.resident ? 'guard_resident' : 'guard';
+  const module = new WebAssembly.Module(bytes);
   const x87 = c.resident ? 'x87_resident_op' : 'x87_op';
-  assert.deepEqual(WebAssembly.Module.imports(module), [
-    { module: 'env', name: 'memory', kind: 'memory' },
-    { module: 'ring3', name: guard, kind: 'function' },
-    ...(wait ? [{ module: 'ring3', name: x87, kind: 'function' }] : []),
-  ]);
+  assert.deepEqual(WebAssembly.Module.imports(module), generatedImports({resident:c.resident,helpers:wait?[x87]:[]}));
   assert.deepEqual(WebAssembly.Module.exports(module), [{ name: 'run', kind: 'function' }]);
   const ring3 = {
     ...c.api,
@@ -200,6 +196,7 @@ for (const resident of [false, true]) {
     c.api[name] = instance.exports['ring3_abi_v1_' + name];
     assert.equal(typeof c.api[name], 'function', name);
   }
+  attachDetectionApi(c.api, instance.exports);
   assert.equal(c.api.open(1, 1, 0x786e6f70), 0);
   c.base = c.api.arena_ptr() >>> 0;
   host(c, 'map', [PC, 1, 7]);

@@ -1,4 +1,5 @@
-import {createArena} from '../../../../../../support/wasm/arena.mjs';
+import {generatedImports, attachDetectionApi} from '../../../../../../support/wasm/binding.mjs';
+import {createArena, ARENA_SIZE} from '../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
@@ -10,7 +11,7 @@ assert.ok(root);
 assert.match(process.env.RING3_ENGINE_SHA256 ?? '', /^[a-f0-9]{64}$/);
 const engine = readEngine(enginePath);
 assert.deepEqual(WebAssembly.Module.imports(engine.module), []);
-const SIZE = 4612, FP = 4236, TRANSFER = 140, PC = 0x1000;
+const SIZE = ARENA_SIZE, FP = 4236, TRANSFER = 140, PC = 0x1000;
 const program = Buffer.from('dfe0dbe3dfe0eb00', 'hex');
 const REG = [0xa53c1234, 0x1234807f, 0x23457f80, 0x34560f10, 0x4567ff00, 0x56789abc, 0x6789abcd, 0x789abcde];
 const raw = Buffer.from(Array.from({length: 80}, (_, index) => (index * 73 + 29) & 255));
@@ -53,6 +54,7 @@ function fresh(owner, entries) {
     ctx.api = Object.fromEntries(Object.entries(arities).map(([name, arity]) => {
       const fn = instance.exports[`ring3_abi_v1_${name}`]; assert.equal(typeof fn, 'function', name); assert.equal(fn.length, arity, name); return [name, fn];
     }));
+    attachDetectionApi(ctx.api, instance.exports);
     assert.equal(ctx.api.open(2, ctx.low, ctx.high), 0); ctx.base = ctx.api.arena_ptr() >>> 0; check(ctx, 'default including exact FPU');
     pure(ctx, () => ctx.api.map(PC, 1, 7), 'code map'); input(ctx, TRANSFER, program);
     pure(ctx, () => ctx.api.upload(PC, program.length), 'code upload');
@@ -77,9 +79,8 @@ function compile(ctx) {
     bytes = Buffer.from(ctx.bytes.subarray(binding.pointer, binding.pointer + binding.length));
     writeFileSync(join(output, `${ctx.owner}-${ctx.entries}.wasm`), bytes, {flag: 'wx'});
   }
-  const module = new WebAssembly.Module(bytes), guard = ctx.owner === 'replacement' ? 'guard' : 'guard_resident';
-  assert.deepEqual(WebAssembly.Module.imports(module), [{module: 'env', name: 'memory', kind: 'memory'},
-    ...(ctx.owner === 'standalone' ? [] : [{module: 'ring3', name: guard, kind: 'function'}])]);
+  const module = new WebAssembly.Module(bytes);
+  assert.deepEqual(WebAssembly.Module.imports(module), generatedImports({bound: ctx.owner !== 'standalone', resident: ctx.owner === 'resident'}));
   assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
   const instance = new WebAssembly.Instance(module, {env: {memory: ctx.memory}, ...(ctx.owner === 'standalone' ? {} : {ring3: ctx.api})});
   assert.equal(instance.exports.run.length, 4); counts.modules++;
@@ -144,7 +145,7 @@ for (const owner of ['standalone', 'replacement', 'resident']) for (const entrie
 for (const entries of [false, true]) preflight(entries);
 assert.deepEqual(counts, {modules: 6, chains: 72, x87: 216, jumps: 72, controls: 40, preflight: 26});
 const result = {status: 'ok', engine_sha256: engine.sha256, counts, modules,
-  source_sha256: Object.fromEntries(['engine/tests/cpu/x87/control/wasm/register.rs', 'engine/tests/cpu/x87/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/x87/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/x87/control/fixtures/p2-x87-control/runtime/run.mjs'].map(path => [path, hash(readFileSync(join(root, path)))])),
+  source_sha256: Object.fromEntries(['engine/tests/support/wasm/binding.mjs', 'engine/tests/support/wasm/arena.mjs', 'engine/tests/cpu/x87/control/wasm/register.rs', 'engine/tests/cpu/x87/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/x87/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/x87/control/fixtures/p2-x87-control/runtime/run.mjs'].map(path => [path, hash(readFileSync(join(root, path)))])),
   claim: 'exact FNINIT/FNSTSW AX no-wait environment/status in all six standalone and actual bound compiler profiles; full arena, raw80 payload preservation, low AX/high EAX/FLAGS, budget/cancel/cold/owner controls and canonical tail preflight; no stack, arithmetic, waited forms or performance claim'};
 writeFileSync(join(output, 'result.json'), JSON.stringify(result, null, 2), {flag: 'wx'});
 console.log(JSON.stringify({status: result.status, engine_sha256: engine.sha256, counts, output}));

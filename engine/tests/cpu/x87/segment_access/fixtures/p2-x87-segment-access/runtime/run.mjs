@@ -1,3 +1,4 @@
+import {ARENA_SIZE} from '../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
@@ -5,12 +6,12 @@ import {join} from 'node:path';
 import {readEngine} from '../../../../../../support/wasm/engine.mjs';
 
 const [enginePath, output, root] = process.argv.slice(2), engine = readEngine(enginePath);
-const PC = 0x1000, SEG = 4524, SIZE = 4612, keyHigh = 0x5350414e;
+const PC = 0x1000, SEG = 4524, SIZE = ARENA_SIZE, keyHigh = 0x5350414e;
 const defaults = [0xf33fffff, 0xf3bfffff, 0xf33fffff, 0xf33fffff, 0xf33fffff, 0];
 const offsets = [28, 32, 36, 40, 44, 56], data = Buffer.from([0, 0, 0, 0, 3, 0, 0, 0, ...Array(24).fill(0x5a)]);
 const counts = {contexts: 0, modules: 0, runs: 0, faults: 0, successes: 0, controls: 0};
 const FP = 4236;
-const paths = ['engine/src/process/cpu/segments.rs', 'engine/src/cpu/dbt/wasm/integer/dispatch.rs', 'engine/src/process/cpu/x87.rs', 'engine/src/cpu/dbt/wasm/x87.rs', 'engine/src/cpu/x86/segments/cache.rs', 'engine/tests/cpu/x87/segment_access/wasm/cached.rs', 'engine/tests/cpu/x87/segment_access/fixtures/p2-x87-segment-access/runtime/run.mjs'];
+const paths = ['engine/tests/support/wasm/arena.mjs', 'engine/src/process/cpu/segments.rs', 'engine/src/cpu/dbt/wasm/integer/dispatch.rs', 'engine/src/process/cpu/x87.rs', 'engine/src/cpu/dbt/wasm/x87.rs', 'engine/src/cpu/x86/segments/cache.rs', 'engine/tests/cpu/x87/segment_access/wasm/cached.rs', 'engine/tests/cpu/x87/segment_access/fixtures/p2-x87-segment-access/runtime/run.mjs'];
 const pins = () => Object.fromEntries(paths.map(p => [p, createHash('sha256').update(readFileSync(join(root, p))).digest('hex')])), sourcePins = pins();
 const words = values => {const b = Buffer.alloc(values.length * 4); values.forEach((v, i) => b.writeUInt32LE(v >>> 0, i * 4)); return b;};
 function record(magic, fields, version = 1, size = 40) {
@@ -38,10 +39,10 @@ function compile(c, instruction, name, terminal = false) {
   if (c.owner === 'resident') c.previous = [b.readUInt32LE(148), b.readUInt32LE(152)];
   const length = c.owner === 'resident' ? b.readUInt32LE(160) : c.api.module_len() >>> 0;
   const bytes = Buffer.from(new Uint8Array(c.memory.buffer, pointer, length)), module = new WebAssembly.Module(bytes), imports = WebAssembly.Module.imports(module), ring3 = {...c.api};
-  for (const i of imports.filter(i => i.module === 'ring3' && !i.name.startsWith('guard'))) ring3[i.name] = (...args) => {c.calls.push(i.name); return c.api[i.name](...args);};
+  for (const i of imports.filter(i => i.module === 'ring3' && !i.name.startsWith('guard') && i.name !== 'finish_exception_detection')) ring3[i.name] = (...args) => {c.calls.push(i.name); return c.api[i.name](...args);};
   writeFileSync(join(output, `module-${++counts.modules}.wasm`), bytes, {flag: 'wx'});
   return {run: new WebAssembly.Instance(module, {env: {memory: c.memory}, ring3}).exports.run,
-    memory: imports.some(i => i.module === 'ring3' && !i.name.startsWith('guard')),
+    memory: imports.some(i => i.module === 'ring3' && !i.name.startsWith('guard') && i.name !== 'finish_exception_detection'),
     cpu: imports.some(i => /^(cpu_|segment_load|stack_execute|simd_execute|x87_op)/.test(i.name)), instructionLength: instruction.length};
 }
 function setup(c, row) {

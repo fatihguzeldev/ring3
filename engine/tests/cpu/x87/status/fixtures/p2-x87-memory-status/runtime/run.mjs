@@ -1,4 +1,6 @@
-import {createArena} from '../../../../../../support/wasm/arena.mjs';
+import {pageFaultExit, pageFaultPacket} from '../../../../../../support/wasm/page-fault.mjs';
+import {generatedImports, attachDetectionApi} from '../../../../../../support/wasm/binding.mjs';
+import {createArena, ARENA_SIZE} from '../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
@@ -8,7 +10,7 @@ import {readEngine} from '../../../../../../support/wasm/engine.mjs';
 const [enginePath, output, root] = process.argv.slice(2);
 assert.ok(enginePath && output && root);
 assert.match(process.env.RING3_ENGINE_SHA256 ?? '', /^[a-f0-9]{64}$/);
-const engine = readEngine(enginePath), SIZE = 4612, FP = 4236, PC = 0x1000, DST = 0x5008;
+const engine = readEngine(enginePath), SIZE = ARENA_SIZE, FP = 4236, PC = 0x1000, DST = 0x5008;
 const bank = Buffer.alloc(64, 0xcc);
 for (const [offset, bytes] of [[0,[0xdd,0x3b,0xdb,0xe2,0xdd,0x7b,2,0xdf,0xe0,0xeb,0]], [32,[0xdd,0x3b,0xeb,0]], [40,[0x90,0xdd,0x3b,0xeb,0]]]) bank.set(bytes, offset);
 assert.deepEqual(bank, readFileSync(join(output, 'status-memory.x86')), 'independent Rust/JS bank');
@@ -16,7 +18,7 @@ const STATUS = [[0,0,0],[0xffff,0xff,0xff],[0x81a5,0xa5,0x81],
   [1,1,0],[2,2,0],[4,4,0],[8,8,0],[0x10,0x10,0],[0x20,0x20,0],[0x40,0x40,0],[0x80,0x80,0],
   [0x100,0,1],[0x200,0,2],[0x400,0,4],[0x800,0,8],[0x1000,0,0x10],[0x2000,0,0x20],[0x4000,0,0x40],[0x8000,0,0x80]];
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
-const sourcePaths = ['engine/tests/cpu/x87/status/wasm/memory.rs', 'engine/tests/cpu/x87/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/x87/status/fixtures/p2-x87-memory-status/runtime/run.mjs','engine/tests/support/wasm/engine.mjs'];
+const sourcePaths = ['engine/tests/support/wasm/page-fault.mjs', 'engine/tests/support/wasm/arena.mjs', 'engine/tests/support/wasm/binding.mjs', 'engine/tests/cpu/x87/status/wasm/memory.rs', 'engine/tests/cpu/x87/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/x87/status/fixtures/p2-x87-memory-status/runtime/run.mjs','engine/tests/support/wasm/engine.mjs'];
 const sourcePins = () => Object.fromEntries(sourcePaths.map(path => [path, hash(readFileSync(join(root,path)))]));
 const initialSources = sourcePins(), modules = [], rawRows = [], rawFrames = [];
 const counts = {profiles:0,modules:0,words:0,clears:0,ax_reads:0,jumps:0,fault_calls:0,controls:0,preflight:0,generated_calls:0,retired:0,raw_pairs:0};
@@ -25,8 +27,12 @@ function record(magic,size,fields=[],version=1) {
   fields.forEach((value,index)=>bytes.writeUInt32LE(value>>>0,16+index*4)); return bytes;
 }
 const state = cpu => record('R3ST',56,[...cpu.registers,cpu.pc,cpu.flags]);
-const exit = (reason,retired,detail=0,address=0,access=0,length=0,version=2) => record('R3EX',40,[reason,retired,detail,address,access,length],version);
-const helper = (version,fields) => record('R3MH',40,fields,version);
+const exit = (reason,retired,detail=0,address=0,access=0,length=0,version=6) => reason === 5
+  ? pageFaultExit({retired, errorCode: 6 | (detail === 2 ? 1 : 0), address, access, length})
+  : record('R3EX',40,[reason,retired,detail,address,access,length],version);
+const helper = (version,fields) => version === 4 && fields[0] === 1
+  ? pageFaultPacket({errorCode: 6 | (fields[2] === 2 ? 1 : 0), address: fields[3], access: fields[4], length: fields[5]})
+  : record('R3MH',40,fields,version === 4 ? 10 : version);
 const words = values => Buffer.concat(values.map(value=>{const bytes=Buffer.alloc(4); bytes.writeUInt32LE(value>>>0); return bytes;}));
 function fpu(status,seed=0) {
   const bytes=record('R3FP',128); bytes.writeUInt16LE(seed&1?0xffff:0,16); bytes.writeUInt16LE(status,18);
@@ -47,9 +53,10 @@ function open(owner,entries) {
   const instance=new WebAssembly.Instance(engine.module,{}), ctx={owner,entries,memory:instance.exports.memory,api:{},expected:initial()};
   for(const [name,arity] of Object.entries({open:3,close:0,arena_ptr:0,map:3,unmap:2,protect:3,upload:2,read8:1,
     compile:1,compile_entries:2,compile_resident:1,compile_resident_entries:2,generation:0,module_ptr:0,module_len:0,
-    guard:6,guard_resident:7,store16:2,store_resident16:6,discard_unacknowledged_resident:4})) {
+    guard:6,guard_resident:7,store16:2,store_resident16:6,cpu_store16:2,cpu_store_resident16:6,discard_unacknowledged_resident:4})) {
     const fn=instance.exports['ring3_abi_v1_'+name]; assert.equal(typeof fn,'function',name); assert.equal(fn.length,arity,name); ctx.api[name]=fn;
   }
+  attachDetectionApi(ctx.api,instance.exports);
   assert.equal(ctx.api.open(8,1,0x9abcde00),0); ctx.base=ctx.api.arena_ptr()>>>0; check(ctx,'default full arena');
   for(const address of [PC,0x5000,0xfffff000,0]) host(ctx,'map',address,1,address===PC?7:3);
   upload(ctx,PC,bank); counts.profiles++; return ctx;
@@ -67,8 +74,7 @@ function compile(ctx,bare=false) {
     ctx.expected.set(words([1,24,binding.low,binding.high,binding.pointer,binding.length]),140); check(ctx,'resident metadata');
   }
   const bytes=Buffer.from(new Uint8Array(ctx.memory.buffer,binding.pointer,binding.length)), module=new WebAssembly.Module(bytes);
-  const names=ctx.owner==='replacement'?['guard','store16']:['guard_resident','store_resident16'];
-  assert.deepEqual(WebAssembly.Module.imports(module),[{module:'env',name:'memory',kind:'memory'},...names.map(name=>({module:'ring3',name,kind:'function'}))]);
+  assert.deepEqual(WebAssembly.Module.imports(module),generatedImports({resident:ctx.owner==='resident',helpers:[ctx.owner==='resident'?'cpu_store_resident16':'cpu_store16']}));
   assert.deepEqual(WebAssembly.Module.exports(module),[{name:'run',kind:'function'}]);
   const unit={...binding,run:new WebAssembly.Instance(module,{env:{memory:ctx.memory},ring3:ctx.api}).exports.run}; assert.equal(unit.run.length,4);
   const file=`module-${counts.modules}.wasm`; writeFileSync(join(output,file),bytes,{flag:'wx'}); modules.push({owner:ctx.owner,entries:ctx.entries,bare,file,bytes:bytes.length,sha256:hash(bytes)}); counts.modules++; return unit;
@@ -81,7 +87,7 @@ function run(ctx,unit,budget,next,reason=1,retired=1,nextHelper,nextFpu,status=0
   if (fault?.detail === 3) {reason = 11; fault = undefined; nextHelper = undefined;}
   check(ctx,'before generated'); const before=observed(ctx);
   if(status===0) {
-    ctx.expected.set(state(next)); ctx.expected.set(exit(reason,retired,fault?.detail,fault?.address,fault?.access,fault?2:0,reason===11?6:2),56);
+    ctx.expected.set(state(next)); ctx.expected.set(exit(reason,retired,fault?.detail,fault?.address,fault?.access,fault?2:0,6),56);
     if(nextHelper)ctx.expected.set(nextHelper,100); if(nextFpu)ctx.expected.set(nextFpu,FP);
   }
   assert.equal(unit.run(ctx.base,ctx.base+56,budget,ctx.base+96),status); check(ctx,'after generated');
