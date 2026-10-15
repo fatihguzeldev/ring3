@@ -1,4 +1,5 @@
 mod context;
+pub mod dinput;
 pub mod keyboard;
 pub mod source;
 mod types;

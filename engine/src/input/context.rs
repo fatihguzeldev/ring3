@@ -182,7 +182,7 @@ impl InputContext {
             )?;
             timestamp_ns = event.timestamp_ns;
         }
-        self.source
+        self.source_mut()
             .publish_physical(events.clone())
             .expect("source and legacy input were preflighted together");
         let mut published_state = self.state;
