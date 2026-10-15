@@ -1,5 +1,8 @@
+import {pageFaultExit, pageFaultPacket} from '../../../../../../../support/wasm/page-fault.mjs';
+import {generatedRunBody} from '../../../../../../../support/wasm/run.mjs';
+import {generatedImports, attachDetectionApi} from '../../../../../../../support/wasm/binding.mjs';
 import {assertEngineExports} from '../../../../../../../support/wasm/exports.mjs';
-import {createArena} from '../../../../../../../support/wasm/arena.mjs';
+import {ARENA_SIZE, createArena} from '../../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
@@ -10,11 +13,11 @@ const [enginePath, outputDir, root] = process.argv.slice(2);
 assert.ok(root, 'expected actual engine, output directory and repository root');
 const fixtureRoot = join(root, 'engine/tests/cpu/multiply/signed/memory/fixtures/p2-memory-multiply');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
-const oracleBytes = readFileSync(join(fixtureRoot, 'oracle.json')), oracle = JSON.parse(oracleBytes);
+const oracleBytes = readFileSync(join(fixtureRoot, 'oracle.json')), oracle = currentWireOracle(JSON.parse(oracleBytes));
 const programBytes = readFileSync(join(fixtureRoot, 'program.S'));
 assert.equal(hash(oracleBytes), '0a2ce2055da7025bd2d775f1a2528fbc5d228f2b647b2799e17abab5f4494421');
 assert.equal(hash(programBytes), 'a7789ab0da7ec1c46f3fd27f1768aef2b9313c4560811523b8b8ab29ac166bf6');
-const size = 4612, transfer = 140, artifacts = {}, identities = [], operations = [], hostInputs = [], observations = [], ramChecks = [], stackChecks = [];
+const size = ARENA_SIZE, transfer = 140, artifacts = {}, identities = [], operations = [], hostInputs = [], observations = [], ramChecks = [], stackChecks = [];
 const fromHex = hex => new Uint8Array(Buffer.from(hex, 'hex'));
 function save(filename, bytes) { writeFileSync(join(outputDir, filename), bytes); artifacts[filename] = hash(bytes); return filename; }
 function words(fields) { const bytes = new Uint8Array(fields.length * 4), view = new DataView(bytes.buffer); fields.forEach((value, index) => view.setUint32(index * 4, value, true)); return bytes; }
@@ -24,6 +27,43 @@ function record(magic, length, fields, version = 1) {
   fields.forEach((value, index) => view.setUint32(16 + index * 4, value, true)); return bytes;
 }
 function helper(value = 0) { return record('R3MH', 40, [0, value, 0, 0, 0, 0]); }
+// transport comes from the authored oracle; instruction, state and RAM literals remain intact.
+function currentWireOracle(original) {
+  const current = structuredClone(original);
+  const version = (hex, value) => {
+    const bytes = Buffer.from(hex, 'hex'); assert.equal(bytes.length, 40);
+    bytes.writeUInt16LE(value, 4); return bytes.toString('hex');
+  };
+  const scalarHelper = hex => {
+    const bytes = Buffer.from(version(hex, 10), 'hex');
+    assert.equal(bytes.subarray(0, 4).toString(), 'R3MH');
+    bytes.writeUInt32LE(4, 36); return bytes.toString('hex');
+  };
+  for (const item of current.cases) for (const key of ['after_jno', 'after_jo', 'api']) {
+    if (item.owner === 'replacement') item[key].exit_hex = version(item[key].exit_hex, 6);
+    item[key].helper_hex = scalarHelper(item[key].helper_hex);
+  }
+  for (const item of current.controls) {
+    for (const key of ['success_exit_hex', 'pause_cancel_exit_hex', 'pause_budget_exit_hex'])
+      if (key in item) item[key] = version(item[key], 6);
+    if ('success_helper_hex' in item) item.success_helper_hex = scalarHelper(item.success_helper_hex);
+    if (item.detail === 1 || item.detail === 2) {
+      const retired = Buffer.from(item.fault_exit_hex, 'hex').readUInt32LE(20);
+      const fault = {errorCode: 4 | Number(item.detail === 2), address: item.fault_address, access: 1, length: 4};
+      item.fault_exit_hex = pageFaultExit({retired, ...fault}).toString('hex');
+      item.fault_helper_hex = pageFaultPacket(fault).toString('hex');
+    }
+  }
+  for (const [key, values] of Object.entries(current.transport)) if (key.endsWith('_imports') && key !== 'dispatcher_imports' && Array.isArray(values)) {
+    const guard = values[0]; assert.ok(guard === 'guard' || guard === 'guard_resident');
+    const names = values.slice(1).map(name => name.startsWith('cpu_') ? name : 'cpu_' + name);
+    current.transport[key] = generatedImports({resident: guard === 'guard_resident', helpers: names}).slice(1).map(item => item.name);
+  }
+  current.transport.arena_bytes = ARENA_SIZE;
+  current.transport.locals = [[16, 127], [1, 126], [10, 127], [1, 127], [1, 126], [6, 127]];
+  return current;
+}
+
 function residentRecord(unit) { return words([1, 24, unit.low, unit.high, unit.pointer, unit.length]); }
 function installation(unit, slot) { return record('R3IN', 32, [unit.low, unit.high, slot, 0]); }
 function authoredText(object) {
@@ -80,7 +120,7 @@ save('program.x86', code); save('program.S', programBytes); save('input-oracle.j
 const productionPaths = execFileSync('rg', ['--files','engine/src'], {cwd: root, encoding: 'utf8'}).trim().split('\n').sort();
 const engineBytes = readFileSync(enginePath), engineModule = new WebAssembly.Module(engineBytes);
 const engineExportContract = assertEngineExports(engineModule, root);
-const sourcePaths = [...productionPaths,'Cargo.toml','engine/Cargo.toml','Cargo.lock','engine/tests/cpu/multiply/signed/memory/wasm/dword.rs', 'engine/tests/cpu/multiply/wasm.rs', 'engine/tests/support/wasm.rs','engine/tests/cpu/multiply/signed/memory/fixtures/p2-memory-multiply/program.S','engine/tests/cpu/multiply/signed/memory/fixtures/p2-memory-multiply/oracle.json','engine/tests/cpu/multiply/signed/memory/fixtures/p2-memory-multiply/runtime/run.mjs'];
+const sourcePaths = [...productionPaths,'Cargo.toml','engine/Cargo.toml','Cargo.lock','engine/tests/cpu/multiply/signed/memory/wasm/dword.rs', 'engine/tests/cpu/multiply/wasm.rs', 'engine/tests/support/wasm.rs','engine/tests/cpu/multiply/signed/memory/fixtures/p2-memory-multiply/program.S','engine/tests/cpu/multiply/signed/memory/fixtures/p2-memory-multiply/oracle.json','engine/tests/cpu/multiply/signed/memory/fixtures/p2-memory-multiply/runtime/run.mjs', 'engine/tests/support/wasm/arena.mjs', 'engine/tests/support/wasm/run.mjs', 'engine/tests/support/wasm/page-fault.mjs', 'engine/tests/support/wasm/binding.mjs'];
 assert.equal(new Set(sourcePaths).size, sourcePaths.length);
 sourcePaths.push(...engineExportContract.sourcePaths.filter(path => !sourcePaths.includes(path)));
 assert.equal(new Set(sourcePaths).size, sourcePaths.length);
@@ -89,7 +129,7 @@ const sources = Object.fromEntries(sourcePaths.map(file => [file, hash(readFileS
  assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
 
 
-const arities = {open:3,close:0,arena_ptr:0,map:3,protect:3,upload:2,begin_image_input:1,append_image_input:2,load_pe32_linked_v2_input_at:2,start_loaded_image:2,compile_entries:2,compile_resident_entries:2,generation:0,module_ptr:0,module_len:0,find_resident:1,acknowledge_resident_installation:5,find_installed_resident:3,dispatcher_module:2,guard:6,guard_resident:7,guard_dispatch_entry:5,read32:1,store32:2,store_resident32:6,capture_call:5,capture_resident_call:6,complete_windows_call:4,complete_resident_windows_call:5};
+const arities = {guard_detect:6,guard_detect_resident:7,finish_exception_detection:12,cpu_read_modify32:1,cpu_read32:1,cpu_store32:2,cpu_store_resident32:6,open:3,close:0,arena_ptr:0,map:3,protect:3,upload:2,begin_image_input:1,append_image_input:2,load_pe32_linked_v2_input_at:2,start_loaded_image:2,compile_entries:2,compile_resident_entries:2,generation:0,module_ptr:0,module_len:0,find_resident:1,acknowledge_resident_installation:5,find_installed_resident:3,dispatcher_module:2,guard:6,guard_resident:7,guard_dispatch_entry:5,read32:1,store32:2,store_resident32:6,capture_call:5,capture_resident_call:6,complete_windows_call:4,complete_resident_windows_call:5};
 let engine, nextInstance = 0;
 function refresh() { if (engine.buffer !== engine.memory.buffer) { engine.buffer = engine.memory.buffer; engine.bytes = new Uint8Array(engine.buffer); engine.view = new DataView(engine.buffer); } return engine; }
 function arena() { return refresh().bytes.slice(engine.base, engine.base + size); }
@@ -97,7 +137,7 @@ function operation(label, action, status = 0, patches = []) {
   const before = arena(), returned = action(), after = arena(), expected = before.slice(), outputPatches = typeof patches === 'function' ? patches(after) : patches;
   for (const [offset, bytes] of outputPatches) expected.set(bytes, offset);
   if (status !== null) assert.equal(returned, status, `${engine.name}/${label}: status or value`);
-  assert.deepEqual(after, expected, `${engine.name}/${label}: whole4236 arena`);
+  assert.deepEqual(after, expected, `${engine.name}/${label}: whole4796 arena`);
   const prefix = `${String(operations.length).padStart(4,'0')}-${engine.name}`;
   operations.push({instance:engine.ordinal,name:engine.name,label,returned,expected_status:status,patches:outputPatches.map(([offset,bytes]) => ({offset,bytes:bytes.length,hex:Buffer.from(bytes).toString('hex')})),before:save(`${prefix}-before.bin`,before),expected:save(`${prefix}-expected.bin`,expected),after:save(`${prefix}-after.bin`,after)});
   return returned;
@@ -111,6 +151,7 @@ function request(bytes, label = 'explicit host Transfer input') { assert.ok(byte
 function fresh(name, owner, pages = 8) {
   const instance = new WebAssembly.Instance(engineModule, {}), api = {};
   for (const [name, arity] of Object.entries(arities)) { const fn = instance.exports[`ring3_abi_v1_${name}`]; assert.equal(typeof fn,'function',name); assert.equal(fn.length,arity,name); api[name]=fn; }
+ attachDetectionApi(api, instance.exports);
   const ordinal = ++nextInstance, key = 0xa350cdef00000000n + BigInt(ordinal);
   engine = {name,owner,ordinal,api,key,low:Number(key & 0xffffffffn),high:Number(key >> 32n),memory:instance.exports.memory,units:[]};
   assert.ok(engine.memory instanceof WebAssembly.Memory); assert.equal(api.open(pages,engine.low,engine.high),0); engine.base=api.arena_ptr()>>>0; refresh();
@@ -130,7 +171,7 @@ function stack(values, label) { const actual=oracle.runtime.stack_addresses.map(
 function entriesRequest(entries, gates = []) { request(words([...entries,...gates.flat()]),'explicit authored/canonical entry and receipt Gate compiler input'); }
 function instantiate(unit, helpers) {
   refresh(); assert.ok(unit.pointer>0 && unit.length>8 && unit.pointer+unit.length<=engine.bytes.length); unit.bytes=engine.bytes.slice(unit.pointer,unit.pointer+unit.length);
-  assert.ok(WebAssembly.validate(unit.bytes)); const module=new WebAssembly.Module(unit.bytes), sorted=rows=>rows.sort((a,b)=>`${a.module}.${a.name}`.localeCompare(`${b.module}.${b.name}`));
+  assert.ok(WebAssembly.validate(unit.bytes)); generatedRunBody(unit.bytes); const module=new WebAssembly.Module(unit.bytes), sorted=rows=>rows.sort((a,b)=>`${a.module}.${a.name}`.localeCompare(`${b.module}.${b.name}`));
   const imports=WebAssembly.Module.imports(module); assert.deepEqual(sorted(imports),sorted([{module:'env',name:'memory',kind:'memory'},...helpers.map(name=>({module:'ring3',name,kind:'function'}))]));
   unit.instance=new WebAssembly.Instance(module,{env:{memory:engine.memory},ring3:Object.fromEntries(helpers.map(name=>[name,engine.api[name]]))}); unit.run=unit.instance.exports.run; assert.equal(unit.run.length,4);
   unit.filename=save(`${engine.name}-${unit.label}.wasm`,unit.bytes); engine.units.push(unit);
@@ -201,7 +242,7 @@ function setupPositive(example) {
   else {
     engine.table=new WebAssembly.Table({element:'anyfunc',initial:8,maximum:8});
     engine.gate=resident(receipt.gates.map(([pc])=>pc),receipt.gates,'gate',oracle.transport.resident_gate_imports); install(engine.gate,0);
-    engine.canary=resident([canary],[],'precompiled-canary',['guard_resident','store_resident32']); install(engine.canary,1); dispatcher(); engine.primary=engine.dispatcher;
+    engine.canary=resident([canary],[],'precompiled-canary',generatedImports({resident: true, helpers: ['cpu_store_resident32']}).slice(1).map(item => item.name)); install(engine.canary,1); dispatcher(); engine.primary=engine.dispatcher;
     operation('resident replacement generation remains zero',()=>engine.api.generation(),0);
   }
   assert.deepEqual(arena().subarray(0,96),initial,'all loading/metadata preserve initial context');
