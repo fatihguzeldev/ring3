@@ -7,6 +7,7 @@ pub mod far;
 pub(crate) mod header;
 pub mod image;
 pub mod memory_helper;
+pub mod modules;
 pub mod resident_callback;
 #[cfg(target_arch = "wasm32")]
 mod wasm;
@@ -28,4 +29,5 @@ pub enum AbiError {
     MemoryHelper,
     CallFrame,
     CallbackFrame,
+    Module,
 }
