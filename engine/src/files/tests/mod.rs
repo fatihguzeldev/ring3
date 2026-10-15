@@ -2,6 +2,7 @@ use super::*;
 mod io;
 mod lifetime;
 mod namespace;
+mod termination;
 fn utf16(value: &str) -> Vec<u16> {
     value.encode_utf16().collect()
 }

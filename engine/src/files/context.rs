@@ -113,6 +113,9 @@ impl Vfs32 {
     pub(crate) fn revision(&self) -> u64 {
         self.revision
     }
+    pub(crate) fn max_io_bytes(&self) -> usize {
+        self.limits.max_io_bytes
+    }
     pub(crate) fn set_time(&mut self, filetime: u64) -> Result<(), FileError32> {
         self.now = filetime;
         Ok(())

@@ -2,6 +2,9 @@ mod closing;
 mod context;
 mod lifetime;
 mod opening;
+mod termination;
+
+pub(crate) use termination::PreparedFileExit32;
 
 use super::{
     path,
