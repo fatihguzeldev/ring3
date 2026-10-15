@@ -21,3 +21,5 @@ pub(crate) use provider::{ProcessContext32, ThreadState32, WindowsOutcome32};
 pub use modules::kernel32_module;
 
 pub mod files;
+
+pub mod text;
