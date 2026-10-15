@@ -758,7 +758,7 @@ fn forged_terminal_exit_bytes_do_not_terminate_a_fresh_private_context() {
 }
 
 #[test]
-fn replacement_callback_terminal_provider_is_busy_and_scalar_inner_cannot_bypass_it() {
+fn replacement_callback_inner_exit_terminates_without_resuming_the_outer() {
     let mut f = fixture();
     let outer = capture(
         &mut f,
@@ -798,16 +798,19 @@ fn replacement_callback_terminal_provider_is_busy_and_scalar_inner_cannot_bypass
         complete(f, Owner::Replacement, inner)
     });
     f.engine.arena_mut().unwrap()[CANCEL_OFFSET] = 0;
-    reject(&mut f, HostError::Call(CallError::Busy), |f| {
-        complete(f, Owner::Replacement, inner)
-    });
     reject(&mut f, HostError::Call(CallError::InvalidRequest), |f| {
         scalar(f, Owner::Replacement, inner)
     });
-    f.engine.abandon_call(KEY, inner).unwrap();
-    f.engine.abort_callback(KEY, callback.token).unwrap();
-    assert_eq!(complete(&mut f, Owner::Replacement, outer), Ok(()));
-    assert_eq!(&f.engine.arena()[56..96], &terminal(7, 0));
+    let mut expected = f.engine.arena().to_vec();
+    expected[56..96].copy_from_slice(&terminal(u32::MAX, 0));
+    assert_eq!(complete(&mut f, Owner::Replacement, inner), Ok(()));
+    assert_eq!(f.engine.arena(), expected);
+    reject(&mut f, HostError::ProcessExited, |f| {
+        f.engine.abort_callback(KEY, callback.token)
+    });
+    reject(&mut f, HostError::ProcessExited, |f| {
+        complete(f, Owner::Replacement, outer)
+    });
 }
 
 #[test]

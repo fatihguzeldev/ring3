@@ -572,7 +572,7 @@ fn closed_first_preserves_tombstone_and_cannot_reopen_context() {
 }
 
 #[test]
-fn replacement_callback_inner_provider_is_busy_after_shared_validation() {
+fn replacement_callback_inner_provider_completes_after_shared_validation() {
     let mut f = fixture(KEY);
     let (outer, _) = capture(
         &mut f,
@@ -597,9 +597,9 @@ fn replacement_callback_inner_provider_is_busy_after_shared_validation() {
     reject(&mut f, call(CallError::Busy), |f| {
         complete(f, Owner::Replacement, outer)
     });
-    f.engine.write32(0x8040, MAIN + 0x300).unwrap();
+    f.engine.write32(0x8040, RETURN).unwrap();
     f.engine.write32(0x8044, 0xffff_ffff).unwrap();
-    stop(&mut f.engine, MAIN, SET, 0x8040);
+    let inner_state = stop(&mut f.engine, MAIN, SET, 0x8040);
     let inner = f
         .engine
         .capture_call(KEY, f.generation, CallingConvention32::Stdcall, 1)
@@ -617,13 +617,20 @@ fn replacement_callback_inner_provider_is_busy_after_shared_validation() {
         complete(f, Owner::Replacement, inner.token)
     });
     f.engine.arena_mut().unwrap()[CANCEL_OFFSET] = 0;
-    reject(&mut f, call(CallError::Busy), |f| {
+    completed(
+        &mut f,
+        Owner::Replacement,
+        inner.token,
+        inner_state,
+        0x89ab_cdef,
+        8,
+    );
+    reject(&mut f, call(CallError::InvalidToken), |f| {
         complete(f, Owner::Replacement, inner.token)
     });
-    generic(&mut f, Owner::Replacement, inner.token);
     f.engine.abort_callback(KEY, callback.token).unwrap();
     generic(&mut f, Owner::Replacement, outer);
-    assert_last_error(&mut f, Owner::Replacement, 0);
+    assert_last_error(&mut f, Owner::Replacement, u32::MAX);
 }
 
 #[test]

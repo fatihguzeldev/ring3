@@ -307,8 +307,8 @@ for (const [label, gateId, tag] of [['unknown gate', 0xabcdef01, 2], ['wrong con
   observations.push({cancelled_set_following_get: 0, old_generic_only_in_negative_control: true});
 }
 
-// a real nested replacement call retains the old callback lifecycle, while
-// the new ordinary provider entry rejects callback-owned execution as busy.
+// the suspended outer call remains busy while the matching inner callback
+// owner can complete its captured provider call before the outer is restored.
 {
   const ctx = setup('replacement'), {engine, caller} = ctx, first = oracle.stages[0];
   dispatch(ctx, first); capture(ctx, first, 1);
@@ -319,20 +319,20 @@ for (const [label, gateId, tag] of [['unknown gate', 0xabcdef01, 2], ['wrong con
   operation(engine, 'real callback inner CALL reaches Get Gate', () => caller.run(engine.base, engine.base + 56, budget, engine.base + 96), 0, [[0, cpu(innerRegisters, 0x2000)], [56, exit(8, 1, 0x10001, 6)], [100, cpuHelper()]]);
   const inner = {...first, stop_registers: innerRegisters};
   capture(ctx, inner, 3);
-  operation(engine, 'matching inner owner is still outside provider scope', () => provider(ctx, 3), 12);
-  stack(engine, [0x1005, 0x2100, 0x1005, 0xddeeff00], 'callback provider refusal preserves nested RAM');
   const innerReturned = [0, 0x2468ace0, 0x89abcdef, 0x10203040, 0x8ff8, 0x55667788, 0x99aabbcc, 0xddeeff00];
-  generic(ctx, inner, 3, 0, innerReturned);
+  complete(ctx, inner, 3, innerReturned);
+  stack(engine, [0x1005, 0x2100, 0x1005, 0xddeeff00], 'callback provider completion preserves nested RAM');
+  operation(engine, 'completed inner provider token cannot replay', () => provider(ctx, 3), 14);
   operation(engine, 'old callback abort restores exact outer stop', () => engine.api.abort_callback(engine.low, engine.high, 2), 0, [[0, cpu(first.stop_registers, first.gate_pc)], [56, exit(8, 1, first.id, 6)]]);
   complete(ctx, first, 1); close(ctx);
-  observations.push({callback_outer_status: 12, callback_inner_status: 12, provider_after_abort: 'Get0'});
+  observations.push({callback_outer_status: 12, callback_inner_status: 0, callback_inner_replay_status: 14, provider_after_abort: 'Get0'});
 }
 
 const provenance = {
   engine_sha256: hash(engineBytes), oracle_sha256: hash(oracleBytes), artifacts, sources, identities, observations,
   command: [process.execPath, process.argv[1], enginePath, outputDir, root], assembly_command: ['clang', ...assemble],
   tools: {node: process.version, v8: process.versions.v8, clang: execFileSync('clang', ['--version'], {encoding: 'utf8'}).split('\n')[0]},
-  claim: 'actual engine-owned closed GetLastError/SetLastError semantics from real authored CALL/PUSH and real caller continuations, both replacement and resident caller-A/Gate-B ownership. Positive programme runs initialGet0→Setfull-u32→Getfull→Set0→Get0→callerLEA7, exactly13 emitted retirements. Literal LLVM/CPU/stack/provider/Exit oracles precede product; Gate and provider completion retire0. CPU written by host only at startup; Exit corruption/cancel/transfer tamper are deliberate negative host-input controls. Rust uses private captured metadata and owns semantics; positive paths never supply host scalar. Extra negative controls prove old scalar fallback, unpublished cancelled Set via later Get0, and active-callback Busy without adding callback providers. Independent instance Get0 does not clear main magic. Complete4236arena preservation on errors and stack checks surround captures/completions. Native-only name profile is copied in oracle, not a Wasm resolver/PE import/IAT/DLL/ordinal link claim. No other APIs, threads/TEB/TLS, async/pointee/handles/startup, SDK/browser/game/fullP2-V0 claim.',
+  claim: 'actual engine-owned closed GetLastError/SetLastError semantics from real authored CALL/PUSH and real caller continuations, both replacement and resident caller-A/Gate-B ownership. Positive programme runs initialGet0→Setfull-u32→Getfull→Set0→Get0→callerLEA7, exactly13 emitted retirements. Literal LLVM/CPU/stack/provider/Exit oracles precede product; Gate and provider completion retire0. CPU written by host only at startup; Exit corruption/cancel/transfer tamper are deliberate negative host-input controls. Rust uses private captured metadata and owns semantics; positive paths never supply host scalar. Extra negative controls prove old scalar fallback, unpublished cancelled Set via later Get0, and suspended outer Busy with exact matching inner provider completion and replay rejection. Independent instance Get0 does not clear main magic. Complete4236arena preservation on errors and stack checks surround captures/completions. Native-only name profile is copied in oracle, not a Wasm resolver/PE import/IAT/DLL/ordinal link claim. No other APIs, threads/TEB/TLS, async/pointee/handles/startup, SDK/browser/game/fullP2-V0 claim.',
 };
 writeFileSync(join(outputDir, 'provenance.json'), JSON.stringify(provenance, null, 2));
 console.log(JSON.stringify({status: 'ok', engine_sha256: provenance.engine_sha256, oracle_sha256: provenance.oracle_sha256, owners: ['replacement', 'resident'], positive_retired_each: 13, output: outputDir}));

@@ -1,4 +1,4 @@
-import {attachDetectionApi} from '../../../../../../support/wasm/binding.mjs';
+import {attachDetectionApi, generatedImports} from '../../../../../../support/wasm/binding.mjs';
 import {assertEngineExports} from '../../../../../../support/wasm/exports.mjs';
 import {readEngine} from '../../../../../../support/wasm/engine.mjs';
 import assert from 'node:assert/strict';
@@ -58,7 +58,10 @@ function read(ctx, address) {
 function page(ctx, address) { const bytes = new Uint8Array(4096), view = new DataView(bytes.buffer); for (let i = 0; i < 1024; i++) view.setUint32(i * 4, read(ctx, address + i * 4), true); return bytes; }
 function child(ctx, bytes, label, helpers, table = false) {
   assert.ok(bytes.length <= 65536); const module = new WebAssembly.Module(bytes);
-  const imports = [{module: 'env', name: 'memory', kind: 'memory'}, ...(table ? [{module: 'env', name: 'table', kind: 'table'}] : []), ...helpers.map(name => ({module: 'ring3', name, kind: 'function'}))];
+  if (!table) assert.equal(helpers[0], 'guard_detect_resident');
+  const imports = table
+    ? [{module: 'env', name: 'memory', kind: 'memory'}, {module: 'env', name: 'table', kind: 'table'}, ...helpers.map(name => ({module: 'ring3', name, kind: 'function'}))]
+    : generatedImports({resident: true, helpers: helpers.slice(1)});
   assert.deepEqual(WebAssembly.Module.imports(module), imports);
   const instance = new WebAssembly.Instance(module, {env: {memory: ctx.memory, table: ctx.table}, ring3: ctx.api}); assert.equal(instance.exports.run.length, 4);
   save(`${label}.wasm`, bytes); modules.push({path: ctx.label, artifact: `${label}.wasm`, imports, run_arity: 4}); return instance.exports.run;
