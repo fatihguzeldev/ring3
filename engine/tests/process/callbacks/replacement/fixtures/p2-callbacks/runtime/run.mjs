@@ -10,7 +10,7 @@ const engineBytes = readFileSync(enginePath);
 assert.ok(WebAssembly.validate(engineBytes), 'actual engine validates');
 const engineModule = new WebAssembly.Module(engineBytes);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), [], 'engine has no JS imports');
-const names = ['open', 'close', 'arena_ptr', 'map', 'protect', 'unmap', 'upload', 'compile', 'compile_with_gates', 'capture_call', 'complete_call', 'abandon_call', 'begin_callback', 'finish_callback', 'abort_callback', 'generation', 'module_ptr', 'module_len', 'guard', 'read32', 'write32', 'store32', 'cpu_read32', 'cpu_store32'];
+const names = ['guard_detect', 'guard_detect_resident', 'finish_exception_detection', 'open', 'close', 'arena_ptr', 'map', 'protect', 'unmap', 'upload', 'compile', 'compile_with_gates', 'capture_call', 'complete_call', 'abandon_call', 'begin_callback', 'finish_callback', 'abort_callback', 'generation', 'module_ptr', 'module_len', 'guard', 'read32', 'write32', 'store32', 'cpu_read32', 'cpu_store32'];
 let keys = 0n, modules = 0, actualRuns = 0;
 const generatedHashes = [];
 
@@ -45,13 +45,13 @@ function fresh() {
   assert.equal(api.open(12, engine.low, engine.high), 0);
   engine.base = api.arena_ptr() >>> 0;
   refresh(engine);
-  assert.ok(engine.base > 0 && engine.base + 4612 <= engine.bytes.length);
+  assert.ok(engine.base > 0 && engine.base + 4796 <= engine.bytes.length);
   assert.equal(api.map(0x1000, 1, 7), 0);
   return engine;
 }
 
 function arena(engine) {
-  return refresh(engine).bytes.slice(engine.base, engine.base + 4612);
+  return refresh(engine).bytes.slice(engine.base, engine.base + 4796);
 }
 
 function upload(engine, address, bytes) {
@@ -120,13 +120,12 @@ function compile(engine, blocks, gates, expectedHelpers = []) {
   const module = new WebAssembly.Module(encoded);
   const expected = [
     {module: 'env', name: 'memory', kind: 'memory'},
-    {module: 'ring3', name: 'guard', kind: 'function'},
-    ...expectedHelpers.map(name => ({module: 'ring3', name, kind: 'function'})),
-  ].sort((a, b) => `${a.module}.${a.name}`.localeCompare(`${b.module}.${b.name}`));
+    {module: 'ring3', name: 'guard_detect', kind: 'function'},
+    ...expectedHelpers.map(name => ({module: 'ring3', name, kind: 'function'})), {module: 'ring3', name: 'finish_exception_detection', kind: 'function'}].sort((a, b) => `${a.module}.${a.name}`.localeCompare(`${b.module}.${b.name}`));
   assert.deepEqual(sortedImports(module), expected, 'only actual memory/guard/instruction helpers; no hot gate import');
   const instance = new WebAssembly.Instance(module, {
     env: {memory: engine.memory},
-    ring3: {guard: engine.api.guard, cpu_read32: engine.api.cpu_read32, cpu_store32: engine.api.cpu_store32},
+    ring3: {guard_detect: engine.api.guard_detect, finish_exception_detection: engine.api.finish_exception_detection, cpu_read32: engine.api.cpu_read32, cpu_store32: engine.api.cpu_store32},
   });
   modules++;
   generatedHashes.push(hash(encoded));

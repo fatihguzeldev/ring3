@@ -10,11 +10,11 @@ const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 const engineBytes = readFileSync(enginePath);
 const engineModule = new WebAssembly.Module(engineBytes);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
-const SIZE = 4612, TRANSFER = 140;
+const SIZE = 4796, TRANSFER = 140;
 const KEY = 0xd3456789e0000000n;
 const OUTER = 0x80000011, RETURN = 0x80000012, INNER = 0x80000033;
 const LEGACY = 0x80000077, LEGACY_RETURN = 0x80000078;
-const apiNames = [
+const apiNames = ['guard_detect', 'guard_detect_resident', 'finish_exception_detection',
   'open', 'close', 'arena_ptr', 'map', 'upload', 'compile_with_gates',
   'module_ptr', 'module_len', 'generation', 'compile_resident_with_gates',
   'dispatcher_module', 'guard_dispatch_entry', 'guard_resident', 'guard',
@@ -196,7 +196,7 @@ function reset(e, s) {
 }
 function cancel(e, value) { refresh(e).view.setUint32(e.base + 96, value, true); }
 function checkArena(e, expected, label) {
-  assert.deepEqual(arena(e), expected, `${label}: entire4236arena`);
+  assert.deepEqual(arena(e), expected, `${label}: entire4796arena`);
   stats.arena_checks++;
 }
 function pure(e, action, status, label, countOther = true) {
@@ -302,12 +302,11 @@ function resident(e, blocks, gates, helpers, label) {
   const bytes = e.bytes.slice(pointer, pointer + length), module = new WebAssembly.Module(bytes);
   assert.deepEqual(WebAssembly.Module.imports(module), [
     {module: 'env', name: 'memory', kind: 'memory'},
-    {module: 'ring3', name: 'guard_resident', kind: 'function'},
-    ...helpers.map(name => ({module: 'ring3', name, kind: 'function'})),
-  ]);
+    {module: 'ring3', name: 'guard_detect_resident', kind: 'function'},
+    ...helpers.map(name => ({module: 'ring3', name, kind: 'function'})), {module: 'ring3', name: 'finish_exception_detection', kind: 'function'}]);
   const instance = new WebAssembly.Instance(module, {
     env: {memory: e.memory},
-    ring3: Object.fromEntries(['guard_resident', ...helpers].map(name => [name, e.api[name]])),
+    ring3: Object.fromEntries(['guard_detect_resident', 'finish_exception_detection', ...helpers].map(name => [name, e.api[name]])),
   });
   const file = `resident-${++stats.resident_units}.wasm`;
   saveArtifact(file, bytes);
@@ -329,11 +328,10 @@ function legacyModule(e, blocks, gates, helpers = []) {
   const bytes = e.bytes.slice(pointer, pointer + length), module = new WebAssembly.Module(bytes);
   assert.deepEqual(WebAssembly.Module.imports(module), [
     {module: 'env', name: 'memory', kind: 'memory'},
-    {module: 'ring3', name: 'guard', kind: 'function'},
-    ...helpers.map(name => ({module: 'ring3', name, kind: 'function'})),
-  ]);
+    {module: 'ring3', name: 'guard_detect', kind: 'function'},
+    ...helpers.map(name => ({module: 'ring3', name, kind: 'function'})), {module: 'ring3', name: 'finish_exception_detection', kind: 'function'}]);
   const instance = new WebAssembly.Instance(module, {
-    env: {memory: e.memory}, ring3: Object.fromEntries(['guard', ...helpers].map(name => [name, e.api[name]])),
+    env: {memory: e.memory}, ring3: Object.fromEntries(['guard_detect', 'finish_exception_detection', ...helpers].map(name => [name, e.api[name]])),
   });
   const file = `legacy-${++stats.legacy_modules}.wasm`; saveArtifact(file, bytes);
   unitBindings.push({key: e.key.toString(), generation, pointer, length, sha256: sha256(bytes), file, blocks, gates});
@@ -784,7 +782,7 @@ const provenance = {
     run: [process.execPath, process.argv[1], enginePath, outputDir, root],
     generate_and_run: ['cargo', 'test', '-p', 'ring3-engine', '--test', 'process_resident_callback_call_wasm', '--', '--nocapture'],
   },
-  counts: 'all40 counters and both complete rows were independently derived before runtime. Each of129 full-arena checks compares all4236 bytes against pre-operation input plus only independent full State56/Exit40/helper40/known record bytes. Source-derived counts are not intercepted imports or Wasm instrumentation. metadata32 counts four immutable dispatcher getter publications only; acknowledgements and standalone finder records have their own exact records. Dispatcher lookup counters cover nine calls (eight success/one final caller miss); two direct finder inspections are separately recorded, one named success/one foreign Busy. Thirty ordered raw records, seven module bindings and thirteen strict function-reference observations are preserved. All20 complete input/generated artifacts include nine emitted Wasm modules and eleven x86 inputs with21 instruction boundaries; executed engine bytes are separate. Every one of92 explicit portable source/config/proof paths is copied before the first engine instance and verified byte-for-byte unchanged after proof.',
+  counts: 'all40 counters and both complete rows were independently derived before runtime. Each of129 full-arena checks compares all4796 bytes against pre-operation input plus only independent full State56/Exit40/helper40/known record bytes. Source-derived counts are not intercepted imports or Wasm instrumentation. metadata32 counts four immutable dispatcher getter publications only; acknowledgements and standalone finder records have their own exact records. Dispatcher lookup counters cover nine calls (eight success/one final caller miss); two direct finder inspections are separately recorded, one named success/one foreign Busy. Thirty ordered raw records, seven module bindings and thirteen strict function-reference observations are preserved. All20 complete input/generated artifacts include nine emitted Wasm modules and eleven x86 inputs with21 instruction boundaries; executed engine bytes are separate. Every one of92 explicit portable source/config/proof paths is copied before the first engine instance and verified byte-for-byte unchanged after proof.',
   parity: 'root separately runs the unchanged332 finish target,331 execution target and old Replacement callbacks target once and compares complete selected artifacts/counters/rows/records with pinned references. This portable producer reads no ignored historical output. Unaffected foundation is reused by current full source equality.',
   claim: 'one explicitly authorized distinct-unit Resident callback owns one ordinary inner pending at a time through additive token-named capture/complete APIs. Main real callerCALL reaches outerGate/capture1/begin2; direct MOV/PUSH then product dispatcherCALL reaches ordinaryINNER5200, captures3 Stdcall1 with exact return500a/arg11223344/ESP8fe8. A named finder32 publication and immutable dispatcher getter overwrite publicCF112 without changing private authority. Protected outer1, old Resident/Replacement owners, parked guards, frozen CPU and cancel controls preserve complete outputs. Explicit inner scalarfffffffd restores ESP8ff0/PC500a; callback LEA3 wraps0 and RET8 restores ESP8ffc at registered return5100. Finish2 publishes result0/restores exact outer1; explicit outercompletion and actual callerLEA produce3. Recovery commits MOV/PUSH/CALL then same-byte outer-only invalidation, cancel and malformed CPU reject newcompletion4 without losing inner prefix; neutralabort2 discards inner3/callback2, restores exact stale outer1 and preserves committed RAM/helper/cancel/transfer. Dead inner3 rejects14 while callback unit stayscurrent, restored outercompletion4 then explicitabandon/close recovers. Callback retirement is5 main/3 recovery and no callback body executes after recoveryINNER. MAX/global-token retention/abandon-retry and wider priorities are native/source evidence; actual RAM scope is35 bounded four-byte frame/neighbour observations, not whole guest RAM. Prepared legacy Gate never executes. No nested callback, new ISA, return-target or hostTable/Memory authentication, migration/provider/SDK/browser/async/race/performance/fullP2-V0/gameplay claim.',
 };

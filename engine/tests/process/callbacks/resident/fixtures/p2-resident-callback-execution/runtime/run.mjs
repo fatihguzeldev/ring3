@@ -10,11 +10,11 @@ const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 const engineBytes = readFileSync(enginePath);
 const engineModule = new WebAssembly.Module(engineBytes);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
-const SIZE = 4612, TRANSFER = 140;
+const SIZE = 4796, TRANSFER = 140;
 const KEY = 0xd3456789e0000000n;
 const OUTER = 0x80000011, RETURN = 0x80000012;
 const LEGACY = 0x80000077, LEGACY_RETURN = 0x80000078;
-const apiNames = [
+const apiNames = ['guard_detect', 'guard_detect_resident', 'finish_exception_detection',
   'open', 'close', 'arena_ptr', 'map', 'upload', 'compile_with_gates',
   'module_ptr', 'module_len', 'generation', 'compile_resident_with_gates',
   'dispatcher_module', 'guard_dispatch_entry', 'guard_resident', 'guard',
@@ -91,7 +91,7 @@ function reset(e, s) {
 }
 function cancel(e, value) { refresh(e).view.setUint32(e.base + 96, value, true); }
 function checkArena(e, expected, label) {
-  assert.deepEqual(arena(e), expected, `${label}: entire4236arena`);
+  assert.deepEqual(arena(e), expected, `${label}: entire4796arena`);
   stats.arena_checks++;
 }
 function pure(e, action, status, label, countOther = true) {
@@ -194,12 +194,11 @@ function resident(e, blocks, gates, helpers, label) {
   const bytes = e.bytes.slice(pointer, pointer + length), module = new WebAssembly.Module(bytes);
   assert.deepEqual(WebAssembly.Module.imports(module), [
     {module: 'env', name: 'memory', kind: 'memory'},
-    {module: 'ring3', name: 'guard_resident', kind: 'function'},
-    ...helpers.map(name => ({module: 'ring3', name, kind: 'function'})),
-  ]);
+    {module: 'ring3', name: 'guard_detect_resident', kind: 'function'},
+    ...helpers.map(name => ({module: 'ring3', name, kind: 'function'})), {module: 'ring3', name: 'finish_exception_detection', kind: 'function'}]);
   const instance = new WebAssembly.Instance(module, {
     env: {memory: e.memory},
-    ring3: Object.fromEntries(['guard_resident', ...helpers].map(name => [name, e.api[name]])),
+    ring3: Object.fromEntries(['guard_detect_resident', 'finish_exception_detection', ...helpers].map(name => [name, e.api[name]])),
   });
   const file = `resident-${++stats.resident_units}.wasm`;
   saveArtifact(file, bytes);
@@ -221,11 +220,10 @@ function legacyModule(e, blocks, gates, helpers = []) {
   const bytes = e.bytes.slice(pointer, pointer + length), module = new WebAssembly.Module(bytes);
   assert.deepEqual(WebAssembly.Module.imports(module), [
     {module: 'env', name: 'memory', kind: 'memory'},
-    {module: 'ring3', name: 'guard', kind: 'function'},
-    ...helpers.map(name => ({module: 'ring3', name, kind: 'function'})),
-  ]);
+    {module: 'ring3', name: 'guard_detect', kind: 'function'},
+    ...helpers.map(name => ({module: 'ring3', name, kind: 'function'})), {module: 'ring3', name: 'finish_exception_detection', kind: 'function'}]);
   const instance = new WebAssembly.Instance(module, {
-    env: {memory: e.memory}, ring3: Object.fromEntries(['guard', ...helpers].map(name => [name, e.api[name]])),
+    env: {memory: e.memory}, ring3: Object.fromEntries(['guard_detect', 'finish_exception_detection', ...helpers].map(name => [name, e.api[name]])),
   });
   const file = `legacy-${++stats.legacy_modules}.wasm`; saveArtifact(file, bytes);
   unitBindings.push({key: e.key.toString(), generation, pointer, length, sha256: sha256(bytes), file, blocks, gates});
@@ -663,7 +661,7 @@ const provenance = {
     run: [process.execPath, process.argv[1], enginePath, outputDir, root],
     generate_and_run: ['cargo', 'test', '-p', 'ring3-engine', '--test', 'process_resident_callback_execution_wasm', '--', '--nocapture'],
   },
-  counts: 'all34 integer counters, all4 complete section rows, and all7 retired callback instructions were independently derived from the authored paths before runtime. Counters are not Wasm instrumentation or intercepted imports. Dispatcher lookup_success/failure cover only its nine actual finder calls; explicit foreign/closed finder controls are other_rejected. Each of193 full-arena checks compares all4236 bytes against pre-operation input plus only independently encoded complete State56/Exitv3-40/helper40/known metadata. Metadata pointer/length are allocator coordinates checked for bounds, full identity and immutable emitted bytes. Positive table references are exact exports installed before suspension and retained unchanged. All41 exact records include raw bytes and hashes; all35 emitted/input artifacts are preserved.',
+  counts: 'all34 integer counters, all4 complete section rows, and all7 retired callback instructions were independently derived from the authored paths before runtime. Counters are not Wasm instrumentation or intercepted imports. Dispatcher lookup_success/failure cover only its nine actual finder calls; explicit foreign/closed finder controls are other_rejected. Each of193 full-arena checks compares all4796 bytes against pre-operation input plus only independently encoded complete State56/Exitv3-40/helper40/known metadata. Metadata pointer/length are allocator coordinates checked for bounds, full identity and immutable emitted bytes. Positive table references are exact exports installed before suspension and retained unchanged. All41 exact records include raw bytes and hashes; all35 emitted/input artifacts are preserved.',
   parity: 'root separately ran the four affected old actual targets once and checked their complete integer fields, rows and artifact/input bytes; this portable authored target depends on no ignored historical output',
   claim: 'explicit distinct-unit Resident callback execution authorization only. Main real guest CALL pushes3005, actual Gate capture1 and atomic begin2 with two arguments precede a pure private authorization after public getter reuse. Direct LEA and data Store6 each retire one under split budgets; cancel/budget stop before lookup; product dispatcher runs actual RET8 and registered return Gate. The stop keeps callback authority. Neutral abort discards callback EAX89abcdf2, restores exact private outer State/Exit, then explicit outer scalar55 and actual caller LEA produce58 without host CPU advancement. Prepared uninstalled callback runs directly while dispatcher misses17 and ack remainsBusy; cross-unit NeedCode meets current foreign finderBusy12 before any child publication. Callback stale4 and committed outer-only MOV/RET2 with next-entry stale4 preserve prefix RAM/helper/transfer. Same-ID begin/abort remains valid but execution authorizes7; Replacement family authorizes14. Close revokes armed authority. Auxiliary direct Gate controls use host-authored return words and do not claim guest CALL execution. RAM proof comprises44 bounded four-byte frame/neighbour/data reads, not all guest RAM. Historical R3RC72 outcome remains begin mask0 and phase1/result0. No resident finish/result publication, innercalls, same-unit execution, migration, provider/SDK/browser/async/race/table authentication/eviction/performance/fullP2-V0/gameplay claim.',
 };

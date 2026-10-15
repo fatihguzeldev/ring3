@@ -8,7 +8,7 @@ const [enginePath, outputDir, root] = process.argv.slice(2);
 assert.ok(root);
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 const engineBytes = readFileSync(enginePath);
-const SIZE = 4612, TRANSFER = 140, KEY = 0xd3456789e0000000n;
+const SIZE = 4796, TRANSFER = 140, KEY = 0xd3456789e0000000n;
 const OUTER = 0x80000011, RETURN = 0x80000012, INNER = 0x80000013;
 const sourcePaths = [
   'Cargo.lock',
@@ -123,7 +123,7 @@ writeFileSync(join(outputDir, 'executed-engine.wasm'), engineBytes);
 // the complete source union is preserved before any module is created.
 const engineModule = new WebAssembly.Module(engineBytes);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
-const names = [
+const names = ['guard_detect', 'guard_detect_resident', 'finish_exception_detection',
   'open', 'close', 'arena_ptr', 'map', 'upload', 'compile_resident_with_gates',
   'dispatcher_module', 'guard_dispatch_entry', 'guard_resident', 'read32', 'write32',
   'store_resident32', 'acknowledge_resident_installation', 'find_installed_resident', 'generation',
@@ -169,7 +169,7 @@ function refresh(e) {
 }
 const arena = e => refresh(e).bytes.slice(e.base, e.base + SIZE);
 function check(e, expected, label) {
-  assert.deepEqual(arena(e), expected, `${label}: complete4236arena`); stats.arena_checks++;
+  assert.deepEqual(arena(e), expected, `${label}: complete4796arena`); stats.arena_checks++;
 }
 function record(kind, bytes, extra = {}) {
   records.push({key: KEY.toString(), kind, byte_length: bytes.length, hex: Buffer.from(bytes).toString('hex'), sha256: sha256(bytes), ...extra});
@@ -249,10 +249,9 @@ function resident(e, blocks, gates, helpers, label, slot) {
   const bytes = e.bytes.slice(pointer, pointer + length), module = new WebAssembly.Module(bytes);
   assert.deepEqual(WebAssembly.Module.imports(module), [
     {module: 'env', name: 'memory', kind: 'memory'},
-    {module: 'ring3', name: 'guard_resident', kind: 'function'},
-    ...helpers.map(name => ({module: 'ring3', name, kind: 'function'})),
-  ]);
-  const instance = new WebAssembly.Instance(module, {env: {memory: e.memory}, ring3: Object.fromEntries(['guard_resident', ...helpers].map(name => [name, e.api[name]]))});
+    {module: 'ring3', name: 'guard_detect_resident', kind: 'function'},
+    ...helpers.map(name => ({module: 'ring3', name, kind: 'function'})), {module: 'ring3', name: 'finish_exception_detection', kind: 'function'}]);
+  const instance = new WebAssembly.Instance(module, {env: {memory: e.memory}, ring3: Object.fromEntries(['guard_detect_resident', 'finish_exception_detection', ...helpers].map(name => [name, e.api[name]]))});
   const unit = {cpuScalar: helpers.some(name => name.startsWith('cpu_')), id, low, high, pointer, length, bytes, module, instance, run: instance.exports.run, label, slot};
   const file = `resident-${low}.wasm`; artifact(file, bytes);
   bindings.push({key: KEY.toString(), id: id.toString(), pointer, length, sha256: sha256(bytes), file, label, blocks, gates, slot});
