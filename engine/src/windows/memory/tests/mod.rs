@@ -1,3 +1,4 @@
+mod heap;
 mod regions;
 
 use super::*;
