@@ -5,6 +5,7 @@ pub mod cpu_helper;
 pub mod far;
 #[forbid(unsafe_code)]
 pub(crate) mod header;
+pub mod image;
 pub mod memory_helper;
 pub mod resident_callback;
 #[cfg(target_arch = "wasm32")]
