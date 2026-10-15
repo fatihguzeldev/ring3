@@ -131,7 +131,7 @@ impl AudioContext {
             {
                 continue;
             }
-            if let Some(progress) = progress(
+            if let Some(mut progress) = progress(
                 *span,
                 previous,
                 consumed_frames,
@@ -141,6 +141,7 @@ impl AudioContext {
                     generation: span.generation,
                 },
             ) {
+                progress.stopped &= !slot.voice.as_ref().unwrap().looping;
                 visit(progress);
             }
         }

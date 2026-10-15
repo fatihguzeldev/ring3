@@ -90,6 +90,11 @@ fn repeated_play_preserves_pending_end_and_only_new_looping_flags_resume_product
         assert!(!audio.voice_state(voice).unwrap().producing);
         audio.play_stream(voice, looping).unwrap();
         assert_eq!(audio.voice_state(voice).unwrap().producing, looping);
+        let mut stopped = None;
+        audio
+            .visit_acknowledgement(packet, 4, |progress| stopped = Some(progress.stopped))
+            .unwrap();
+        assert_eq!(stopped, Some(!looping));
         assert_eq!(
             audio.submission_pcm(packet).unwrap(),
             &[0.5, 0.5, 0.5, 0.5, 0.0, 0.0, 0.0, 0.0]
