@@ -3,6 +3,7 @@ pub mod call_frame;
 pub mod callback;
 pub mod cpu_helper;
 pub mod execution;
+pub mod graphics;
 pub mod far;
 #[forbid(unsafe_code)]
 pub(crate) mod header;
