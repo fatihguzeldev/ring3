@@ -71,7 +71,7 @@ pub struct EngineInstance {
     pub(in crate::process) exit_code: Option<u32>,
     pub(in crate::process) windows_thread: crate::windows::ThreadState32,
     pub(in crate::process) user32: Option<crate::process::windows::user32::User32Context32>,
-    pub(in crate::process) user32_reply: Vec<crate::process::windows::callbacks::WindowsReply32>,
+    pub(in crate::process) windows_replies: Vec<crate::process::windows::callbacks::WindowsReply32>,
     pub(in crate::process) segment_descriptors: crate::cpu::x86::SegmentDescriptorTable,
     pub(in crate::process) virtual_allocations: Vec<PageRange>,
     pub(in crate::process) media: Option<crate::process::media::MediaContexts>,
@@ -122,7 +122,7 @@ impl EngineInstance {
             exit_code: None,
             windows_thread: crate::windows::ThreadState32::default(),
             user32: None,
-            user32_reply: Vec::new(),
+            windows_replies: Vec::new(),
             segment_descriptors: crate::cpu::x86::SegmentDescriptorTable::default(),
             virtual_allocations: Vec::new(),
             media: None,
@@ -171,7 +171,7 @@ impl EngineInstance {
         self.pending_call = None;
         self.module_windows_reply = None;
         self.user32 = None;
-        self.user32_reply = Vec::new();
+        self.windows_replies = Vec::new();
         self.cpu_event = None;
         self.callback = None;
         self.artifact = None;

@@ -44,17 +44,17 @@ impl EngineInstance {
     }
 
     pub(in crate::process::windows) fn reserve_windows_reply(&mut self) -> Result<(), HostError> {
-        if self.user32_reply.len() >= MAX_REPLIES {
+        if self.windows_replies.len() >= MAX_REPLIES {
             return Err(HostError::Call(CallError::Busy));
         }
-        self.user32_reply
-            .try_reserve_exact(MAX_REPLIES - self.user32_reply.len())
+        self.windows_replies
+            .try_reserve_exact(MAX_REPLIES - self.windows_replies.len())
             .map_err(|_| HostError::Infrastructure)
     }
 
     pub(in crate::process) fn check_windows_callback_capacity(&mut self) -> Result<(), HostError> {
         self.memory()?;
-        if self.user32_reply.len() >= MAX_REPLIES - 1 {
+        if self.windows_replies.len() >= MAX_REPLIES - 1 {
             return Err(HostError::Call(CallError::Busy));
         }
         self.reserve_windows_reply()
@@ -65,7 +65,7 @@ impl EngineInstance {
         owner: PendingOwner,
         token: u32,
     ) -> Result<(), HostError> {
-        let Some(reply) = self.user32_reply.last() else {
+        let Some(reply) = self.windows_replies.last() else {
             return Ok(());
         };
         if reply.owner == owner && reply.token == token {
@@ -101,13 +101,13 @@ impl EngineInstance {
         self.validate_new_windows_reply(owner, token)?;
         self.checked_pending_call(owner, token)?;
         if self
-            .user32_reply
+            .windows_replies
             .last()
             .is_some_and(|reply| reply.owner == owner && reply.token == token)
         {
             return Err(HostError::Call(CallError::Busy));
         }
-        self.user32_reply.push(WindowsReply32 {
+        self.windows_replies.push(WindowsReply32 {
             owner,
             token,
             frame,
@@ -120,15 +120,15 @@ impl EngineInstance {
     }
 
     pub(in crate::process) fn windows_provider_owns_callback_token(&self, token: u32) -> bool {
-        token!=0&&self.user32_reply.iter().any(|reply|matches!(reply.stage,ReplyStage32::Resident { token:owned,.. }|ReplyStage32::Replacement { token:owned,.. } if owned==token))
+        token!=0&&self.windows_replies.iter().any(|reply|matches!(reply.stage,ReplyStage32::Resident { token:owned,.. }|ReplyStage32::Replacement { token:owned,.. } if owned==token))
     }
 
     pub(in crate::process) fn windows_provider_owns_token(&self, token: u32) -> bool {
-        token != 0 && self.user32_reply.iter().any(|reply| reply.token == token)
+        token != 0 && self.windows_replies.iter().any(|reply| reply.token == token)
     }
 
     pub fn pending_windows_callback(&self) -> Option<WindowsCallback32> {
-        let reply = self.user32_reply.last()?;
+        let reply = self.windows_replies.last()?;
         let ReplyStage32::Ready(request) = reply.stage else {
             return None;
         };

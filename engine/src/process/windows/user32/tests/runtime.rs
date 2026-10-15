@@ -202,7 +202,7 @@ fn shared_bridge_parks_real_guest_wndproc_then_finishes_original_stdcall_once() 
     assert_eq!(state.registers[4], STACK + 8);
     assert_eq!(state.eip, 0);
     assert!(engine.pending_call.is_none());
-    assert!(engine.user32_reply.is_empty());
+    assert!(engine.windows_replies.is_empty());
     assert_eq!(engine.pending_windows_callback(), None);
     assert_eq!(
         engine.finish_windows_resident_callback(KEY, callback, record.token),
@@ -270,7 +270,7 @@ fn input_queue_full_keeps_hwnd_focus_and_captured_guest_frame_unchanged() {
     assert_eq!(*engine.input().unwrap().state(), input);
     assert_eq!(engine.arena(), before);
     assert_eq!(engine.pending_call.as_ref().unwrap().token, token);
-    assert!(engine.user32_reply.is_empty());
+    assert!(engine.windows_replies.is_empty());
     assert_eq!(
         engine.validate_windows_provider_owner(PendingOwner::Resident(outer)),
         Ok(())
@@ -321,7 +321,7 @@ fn waiting_getmessage_cannot_be_abandoned_and_close_tears_down_the_accepted_owne
     assert_eq!(engine.pending_call.as_ref().unwrap().token, token);
     engine.close();
     assert!(engine.user32.is_none());
-    assert!(engine.user32_reply.is_empty());
+    assert!(engine.windows_replies.is_empty());
     assert!(engine.pending_call.is_none());
     assert!(engine.callback.is_none());
     assert!(!engine.is_open());
@@ -436,7 +436,7 @@ fn replacement_bridge_keeps_low_level_callback_paths_from_consuming_provider_own
         .unwrap();
     assert!(engine.pending_call.is_none());
     assert!(engine.callback.is_none());
-    assert!(engine.user32_reply.is_empty());
+    assert!(engine.windows_replies.is_empty());
 }
 
 #[test]
@@ -512,7 +512,7 @@ fn hidden_show_resident_callbacks_publish_logical_focus_without_granting_physica
         assert_eq!(engine.input().unwrap().state().focused, host_focused);
         assert!(!engine.input().unwrap().state().captured);
         assert!(engine.pending_call.is_none());
-        assert!(engine.user32_reply.is_empty());
+        assert!(engine.windows_replies.is_empty());
         let state = decode_state(&engine.arena()[STATE_OFFSET..STATE_OFFSET + STATE_SIZE]).unwrap();
         assert_eq!(state.registers[0], 0);
         assert_eq!(state.registers[4], STACK + 12);
@@ -629,6 +629,6 @@ fn visible_creation_reuses_activation_callbacks_and_focus_receipt_after_scratch_
     let state = decode_state(&engine.arena()[STATE_OFFSET..STATE_OFFSET + STATE_SIZE]).unwrap();
     assert_eq!(state.registers[0], window);
     assert_eq!(state.registers[4], STACK + 52);
-    assert!(engine.user32_reply.is_empty());
+    assert!(engine.windows_replies.is_empty());
     assert!(engine.pending_call.is_none());
 }

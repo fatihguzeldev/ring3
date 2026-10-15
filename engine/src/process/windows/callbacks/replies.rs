@@ -17,7 +17,7 @@ impl EngineInstance {
         token: u32,
     ) -> Result<bool, HostError> {
         let Some(reply) = self
-            .user32_reply
+            .windows_replies
             .last()
             .copied()
             .filter(|reply| reply.owner == owner && reply.token == token)
@@ -35,7 +35,7 @@ impl EngineInstance {
 
     pub(super) fn resume_windows_reply(&mut self) -> Result<(), HostError> {
         let reply = *self
-            .user32_reply
+            .windows_replies
             .last()
             .ok_or(HostError::Call(CallError::InvalidToken))?;
         self.checked_pending_call(reply.owner, reply.token)?;
@@ -70,7 +70,7 @@ impl EngineInstance {
             }
             WindowsCallbackProvider32::D3D8 => {
                 let outcome = self.resume_d3d8_callback(reply.continuation, result)?;
-                let last = self.user32_reply.last_mut().unwrap();
+                let last = self.windows_replies.last_mut().unwrap();
                 match outcome {
                     WindowsProviderOutcome32::Return(value) => {
                         last.stage = ReplyStage32::Complete(value)
@@ -87,7 +87,7 @@ impl EngineInstance {
             }
         }
         if self
-            .user32_reply
+            .windows_replies
             .last()
             .is_some_and(|reply| matches!(reply.stage, ReplyStage32::Complete(_)))
         {
@@ -98,7 +98,7 @@ impl EngineInstance {
 
     fn publish_windows_reply(&mut self) -> Result<(), HostError> {
         let reply = *self
-            .user32_reply
+            .windows_replies
             .last()
             .ok_or(HostError::Call(CallError::InvalidToken))?;
         let ReplyStage32::Complete(result) = reply.stage else {
@@ -111,7 +111,7 @@ impl EngineInstance {
             self.publish_windows_thread(thread)?;
         }
         self.publish_prepared_call(prepared);
-        self.user32_reply.pop();
+        self.windows_replies.pop();
         Ok(())
     }
 
@@ -123,7 +123,7 @@ impl EngineInstance {
         outcome: User32Outcome32,
         error: Option<u32>,
     ) -> Result<(), HostError> {
-        self.user32_reply.push(WindowsReply32 {
+        self.windows_replies.push(WindowsReply32 {
             owner,
             token,
             frame,
@@ -134,7 +134,7 @@ impl EngineInstance {
         });
         self.accept_user32_outcome(outcome, error)?;
         if self
-            .user32_reply
+            .windows_replies
             .last()
             .is_some_and(|reply| matches!(reply.stage, ReplyStage32::Complete(_)))
         {
@@ -144,7 +144,7 @@ impl EngineInstance {
     }
 
     pub fn waiting_user32_message(&self) -> Option<u64> {
-        let reply = self.user32_reply.last()?;
+        let reply = self.windows_replies.last()?;
         if !matches!(reply.stage, ReplyStage32::Wait)
             || reply.provider != WindowsCallbackProvider32::User32
         {
@@ -159,7 +159,7 @@ impl EngineInstance {
             return Err(HostError::InvalidArtifact);
         }
         let reply = *self
-            .user32_reply
+            .windows_replies
             .last()
             .ok_or(HostError::Call(CallError::InvalidToken))?;
         if !matches!(reply.stage, ReplyStage32::Wait)
@@ -177,7 +177,7 @@ impl EngineInstance {
         let error = context.take_last_error();
         self.accept_user32_outcome(outcome, error)?;
         if self
-            .user32_reply
+            .windows_replies
             .last()
             .is_some_and(|reply| matches!(reply.stage, ReplyStage32::Complete(_)))
         {
@@ -192,7 +192,7 @@ impl EngineInstance {
         error: Option<u32>,
     ) -> Result<(), HostError> {
         let reply = self
-            .user32_reply
+            .windows_replies
             .last_mut()
             .ok_or(HostError::Infrastructure)?;
         if error.is_some() {

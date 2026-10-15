@@ -16,7 +16,7 @@ impl EngineInstance {
         return_id: u32,
     ) -> Result<ResidentCallbackRecord32, HostError> {
         let reply = *self
-            .user32_reply
+            .windows_replies
             .last()
             .ok_or(HostError::Call(CallError::InvalidToken))?;
         let ReplyStage32::Ready(request) = reply.stage else {
@@ -37,7 +37,7 @@ impl EngineInstance {
             return_id,
             &request.arguments[..request.count as usize],
         )?;
-        self.user32_reply.last_mut().unwrap().stage = ReplyStage32::Resident {
+        self.windows_replies.last_mut().unwrap().stage = ReplyStage32::Resident {
             callback_id,
             token: record.token,
         };
@@ -51,7 +51,7 @@ impl EngineInstance {
         token: u32,
     ) -> Result<ResidentCallbackResult32, HostError> {
         let reply = *self
-            .user32_reply
+            .windows_replies
             .last()
             .ok_or(HostError::Call(CallError::InvalidToken))?;
         if !matches!(reply.stage,ReplyStage32::Resident { callback_id:id,token:expected } if id==callback_id&&expected==token)
@@ -59,7 +59,7 @@ impl EngineInstance {
             return Err(HostError::Call(CallError::InvalidToken));
         }
         let result = self.finish_provider_resident_callback(key, callback_id, token)?;
-        self.user32_reply.last_mut().unwrap().stage = ReplyStage32::Received(result.result);
+        self.windows_replies.last_mut().unwrap().stage = ReplyStage32::Received(result.result);
         self.resume_windows_reply()?;
         Ok(result)
     }
@@ -72,7 +72,7 @@ impl EngineInstance {
         return_id: u32,
     ) -> Result<CallbackRecord32, HostError> {
         let reply = *self
-            .user32_reply
+            .windows_replies
             .last()
             .ok_or(HostError::Call(CallError::InvalidToken))?;
         let ReplyStage32::Ready(request) = reply.stage else {
@@ -91,7 +91,7 @@ impl EngineInstance {
             return_id,
             &request.arguments[..request.count as usize],
         )?;
-        self.user32_reply.last_mut().unwrap().stage = ReplyStage32::Replacement {
+        self.windows_replies.last_mut().unwrap().stage = ReplyStage32::Replacement {
             generation,
             token: record.token,
         };
@@ -105,7 +105,7 @@ impl EngineInstance {
         token: u32,
     ) -> Result<CallbackRecord32, HostError> {
         let reply = *self
-            .user32_reply
+            .windows_replies
             .last()
             .ok_or(HostError::Call(CallError::InvalidToken))?;
         if !matches!(reply.stage,ReplyStage32::Replacement { generation:expected_generation,token:expected } if expected_generation==generation&&expected==token)
@@ -113,7 +113,7 @@ impl EngineInstance {
             return Err(HostError::Call(CallError::InvalidToken));
         }
         let result = self.finish_provider_callback(key, generation, token)?;
-        self.user32_reply.last_mut().unwrap().stage = ReplyStage32::Received(result.result);
+        self.windows_replies.last_mut().unwrap().stage = ReplyStage32::Received(result.result);
         self.resume_windows_reply()?;
         Ok(result)
     }

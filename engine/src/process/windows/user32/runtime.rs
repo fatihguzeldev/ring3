@@ -19,7 +19,7 @@ impl EngineInstance {
         if self.user32.is_some()
             || self.pending_call.is_some()
             || self.callback.is_some()
-            || !self.user32_reply.is_empty()
+            || !self.windows_replies.is_empty()
         {
             return Err(HostError::User32(User32Error32::Busy));
         }
