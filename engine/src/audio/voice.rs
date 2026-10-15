@@ -108,6 +108,7 @@ impl AudioContext {
     }
 
     pub fn stop_stream(&mut self, id: AudioVoiceId32) -> Result<(), AudioError32> {
+        self.can_stop_stream(id)?;
         let voice = self.voice_mut(id)?;
         let revision = voice
             .revision
@@ -117,6 +118,14 @@ impl AudioContext {
         voice.playing = false;
         voice.producing = false;
         voice.produced_position = voice.position;
+        Ok(())
+    }
+
+    pub fn can_stop_stream(&self, id: AudioVoiceId32) -> Result<(), AudioError32> {
+        self.voice(id)?
+            .revision
+            .checked_add(1)
+            .ok_or(AudioError32::Exhausted)?;
         Ok(())
     }
 
@@ -147,6 +156,19 @@ impl AudioContext {
         id: AudioVoiceId32,
         controls: AudioVoiceControls32,
     ) -> Result<(), AudioError32> {
+        self.can_set_voice_controls(id, controls)?;
+        let step = (u64::from(controls.frequency) << 32) / u64::from(self.config.sample_rate);
+        let voice = self.voice_mut(id)?;
+        voice.controls = controls;
+        voice.step = step;
+        Ok(())
+    }
+
+    pub fn can_set_voice_controls(
+        &self,
+        id: AudioVoiceId32,
+        controls: AudioVoiceControls32,
+    ) -> Result<(), AudioError32> {
         if !(100..=200_000).contains(&controls.frequency)
             || controls
                 .gains
@@ -155,10 +177,7 @@ impl AudioContext {
         {
             return Err(AudioError32::InvalidRequest);
         }
-        let step = (u64::from(controls.frequency) << 32) / u64::from(self.config.sample_rate);
-        let voice = self.voice_mut(id)?;
-        voice.controls = controls;
-        voice.step = step;
+        self.voice(id)?;
         Ok(())
     }
 
