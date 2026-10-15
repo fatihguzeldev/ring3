@@ -17,5 +17,8 @@ mod windows_current_process;
 #[path = "modules/handle/native.rs"]
 mod windows_module_handle;
 
+#[path = "modules/loading/native.rs"]
+mod windows_module_loading;
+
 #[path = "native/core.rs"]
 mod windows_provider;

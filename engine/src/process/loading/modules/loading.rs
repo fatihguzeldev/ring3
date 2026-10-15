@@ -591,6 +591,7 @@ impl EngineInstance {
                     operation.saved.restore(self.arena.as_mut().get_mut());
                 }
                 self.pending_call = operation.outer;
+                self.complete_module_windows_initializer(result, operation.last_returned)?;
                 Ok(result)
             }
             Err(error) => {

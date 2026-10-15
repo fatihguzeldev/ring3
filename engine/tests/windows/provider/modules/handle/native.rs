@@ -286,7 +286,7 @@ fn reject(
 }
 
 #[test]
-fn closed_name_id_and_stdcall_shape_have_one_new_entry() {
+fn module_handle_a_keeps_its_exact_name_id_and_stdcall_shape() {
     for module in ["kernel32.dll", "KERNEL32.DLL", "KeRnEl32.dLl"] {
         assert_eq!(
             WindowsApi32::resolve(module, "GetModuleHandleA"),
@@ -299,7 +299,7 @@ fn closed_name_id_and_stdcall_shape_have_one_new_entry() {
     assert_eq!(api.convention(), CallingConvention32::Stdcall);
     assert_eq!(api.stack_words(), 1);
     for name in [
-        "GetModuleHandleW",
+        "GetModuleHandleExW",
         "getmodulehandlea",
         "GetModuleHandle",
         "GetModuleHandleA\0",

@@ -46,6 +46,8 @@ pub struct EngineInstance {
     pub(in crate::process) key: u64,
     pub(in crate::process) generation: u32,
     pub(in crate::process) pending_call: Option<PendingCall>,
+    pub(in crate::process) module_windows_reply:
+        Option<crate::process::windows::modules::ModuleWindowsReply>,
     pub(in crate::process) callback: Option<SuspendedCallback>,
     pub(in crate::process) call_token: u32,
     pub(in crate::process) cpu_event: Option<crate::process::CpuEvent32>,
@@ -90,6 +92,7 @@ impl EngineInstance {
             key,
             generation: 0,
             pending_call: None,
+            module_windows_reply: None,
             callback: None,
             call_token: 0,
             cpu_event: None,
@@ -145,6 +148,7 @@ impl EngineInstance {
             self.exception_detection = None;
         }
         self.pending_call = None;
+        self.module_windows_reply = None;
         self.cpu_event = None;
         self.callback = None;
         self.artifact = None;

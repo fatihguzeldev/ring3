@@ -1,10 +1,7 @@
 use crate::process::{CallError, EngineInstance, HostError, calls::call::PendingOwner};
 use crate::{
-    abi::{
-        arena::EXIT_OFFSET,
-        x86::{EXIT_SIZE, decode_exit, encode_exit_v4},
-    },
-    cpu::{ExecutionExit, ExitReason},
+    abi::x86::decode_exit,
+    cpu::ExitReason,
     windows::{ProcessContext32, WindowsApi32, WindowsOutcome32},
 };
 
@@ -46,19 +43,36 @@ impl EngineInstance {
         token: u32,
     ) -> Result<(), HostError> {
         let pending = self.checked_pending_call(owner, token)?;
+        let frame = pending.frame;
+        let saved_exit = pending.exit;
+        if self.retry_module_windows_call(owner, token)? {
+            return Ok(());
+        }
         if self.callback.is_some() && !matches!(owner, PendingOwner::ResidentCallback { .. }) {
             return Err(HostError::Call(CallError::Busy));
         }
-        let exit = decode_exit(&pending.exit).map_err(|_| HostError::Infrastructure)?;
+        let exit = decode_exit(&saved_exit).map_err(|_| HostError::Infrastructure)?;
         let ExitReason::Gate { id } = exit.reason else {
             return Err(HostError::Infrastructure);
         };
         let api = WindowsApi32::from_id(id).ok_or(HostError::Call(CallError::InvalidRequest))?;
-        let (outcome, thread) = self
-            .windows_thread
+        if self.complete_module_api(api, frame)? {
+            return Ok(());
+        }
+        let thread = self.current_windows_thread()?;
+        if matches!(
+            api,
+            WindowsApi32::SetLastError
+                | WindowsApi32::VirtualAlloc
+                | WindowsApi32::VirtualFree
+                | WindowsApi32::VirtualProtect
+        ) {
+            self.check_windows_thread_write()?;
+        }
+        let (outcome, thread) = thread
             .prepare(
                 api,
-                &pending.frame,
+                &frame,
                 ProcessContext32 {
                     main_image_base: self
                         .image
@@ -68,32 +82,17 @@ impl EngineInstance {
             .map_err(|_| HostError::Call(CallError::InvalidRequest))?;
         match outcome {
             WindowsOutcome32::Return(result) => {
-                let state = pending.frame.complete(result);
-                self.publish_completed_call(state)?;
-                self.windows_thread = thread;
+                let prepared = Self::prepare_completed_call(frame.complete(result))?;
+                self.publish_windows_thread(thread)?;
+                self.publish_prepared_call(prepared);
             }
             WindowsOutcome32::ExitProcess(code) => {
-                let mut bytes = [0; EXIT_SIZE];
-                encode_exit_v4(
-                    &ExecutionExit {
-                        retired: 0,
-                        reason: ExitReason::ProcessExited { code },
-                    },
-                    &mut bytes,
-                )
-                .map_err(|_| HostError::Infrastructure)?;
-                self.arena.as_mut().get_mut()[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE]
-                    .copy_from_slice(&bytes);
-                self.exit_code = Some(code);
-                self.pending_call = None;
-                self.callback = None;
+                self.publish_process_exit(code)?;
             }
             WindowsOutcome32::Allocate { size, permissions } => {
-                let frame = pending.frame;
                 self.complete_virtual_alloc(frame, thread, size, permissions)?;
             }
             WindowsOutcome32::Release { address } => {
-                let frame = pending.frame;
                 self.complete_virtual_free(frame, thread, address)?;
             }
             WindowsOutcome32::Protect {
@@ -101,7 +100,6 @@ impl EngineInstance {
                 permissions,
                 old_output,
             } => {
-                let frame = pending.frame;
                 self.complete_virtual_protect(frame, thread, range, permissions, old_output)?;
             }
         }

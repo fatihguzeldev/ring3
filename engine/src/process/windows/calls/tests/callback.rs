@@ -1,11 +1,11 @@
 use super::*;
 use crate::{
     abi::{
-        arena::{STATE_OFFSET, TRANSFER_OFFSET},
+        arena::{EXIT_OFFSET, STATE_OFFSET, TRANSFER_OFFSET},
         resident_callback::ResidentCallbackRecord32,
-        x86::{STATE_SIZE, decode_state, encode_exit_v3, encode_state},
+        x86::{EXIT_SIZE, STATE_SIZE, decode_state, encode_exit_v3, encode_state},
     },
-    cpu::x86::State32,
+    cpu::{ExecutionExit, x86::State32},
     memory::{GuestAddress, MemoryError},
     process::{ResidentInstallation, calls::call::PendingCall, calls::callback::SuspendedRecord},
     windows::{CallFrame32, CallingConvention32},

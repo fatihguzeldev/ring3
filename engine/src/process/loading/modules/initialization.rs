@@ -205,6 +205,9 @@ impl EngineInstance {
         token: u64,
     ) -> Result<ModuleOperation32, HostError> {
         self.memory()?;
+        if let Some(result) = self.retry_module_windows_initializer(token)? {
+            return Ok(result);
+        }
         self.guard_detection_material_change()?;
         if self.call_cancelled() {
             return Err(HostError::Call(crate::process::CallError::Cancelled));

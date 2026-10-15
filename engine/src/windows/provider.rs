@@ -33,6 +33,14 @@ pub(crate) struct ThreadState32 {
 }
 
 impl ThreadState32 {
+    pub(crate) fn last_error(self) -> u32 {
+        self.last_error
+    }
+
+    pub(crate) fn with_last_error(self, last_error: u32) -> Self {
+        Self { last_error }
+    }
+
     pub(crate) fn allocation_failed(mut self) -> Self {
         self.last_error = 8;
         self
@@ -58,6 +66,13 @@ impl ThreadState32 {
             return Err(FrameError::InvalidRequest);
         }
         Ok(match api {
+            WindowsApi32::LoadLibraryA
+            | WindowsApi32::LoadLibraryW
+            | WindowsApi32::LoadLibraryExA
+            | WindowsApi32::LoadLibraryExW
+            | WindowsApi32::GetProcAddress
+            | WindowsApi32::FreeLibrary
+            | WindowsApi32::GetModuleHandleW => return Err(FrameError::InvalidRequest),
             WindowsApi32::GetLastError => (WindowsOutcome32::Return(self.last_error), self),
             WindowsApi32::GetCurrentProcess => (WindowsOutcome32::Return(u32::MAX), self),
             WindowsApi32::SetLastError => (

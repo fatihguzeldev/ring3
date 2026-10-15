@@ -12,6 +12,13 @@ pub enum WindowsApi32 {
     VirtualProtect = 0x0001_0007,
     FlushInstructionCache = 0x0001_0008,
     GetCurrentProcess = 0x0001_0009,
+    LoadLibraryA = 0x0001_000a,
+    LoadLibraryW = 0x0001_000b,
+    LoadLibraryExA = 0x0001_000c,
+    LoadLibraryExW = 0x0001_000d,
+    GetProcAddress = 0x0001_000e,
+    FreeLibrary = 0x0001_000f,
+    GetModuleHandleW = 0x0001_0010,
 }
 
 #[derive(Clone, Copy)]
@@ -25,6 +32,7 @@ pub(crate) enum ProviderProfile {
     VirtualProtection = 6,
     InstructionCache = 7,
     CurrentProcess = 8,
+    Modules = 9,
 }
 
 struct ApiDefinition {
@@ -34,7 +42,7 @@ struct ApiDefinition {
     introduced: ProviderProfile,
 }
 
-const APIS: [ApiDefinition; 9] = [
+const APIS: [ApiDefinition; 16] = [
     ApiDefinition {
         api: WindowsApi32::GetLastError,
         name: "GetLastError",
@@ -89,6 +97,48 @@ const APIS: [ApiDefinition; 9] = [
         stack_words: 0,
         introduced: ProviderProfile::CurrentProcess,
     },
+    ApiDefinition {
+        api: WindowsApi32::LoadLibraryA,
+        name: "LoadLibraryA",
+        stack_words: 1,
+        introduced: ProviderProfile::Modules,
+    },
+    ApiDefinition {
+        api: WindowsApi32::LoadLibraryW,
+        name: "LoadLibraryW",
+        stack_words: 1,
+        introduced: ProviderProfile::Modules,
+    },
+    ApiDefinition {
+        api: WindowsApi32::LoadLibraryExA,
+        name: "LoadLibraryExA",
+        stack_words: 3,
+        introduced: ProviderProfile::Modules,
+    },
+    ApiDefinition {
+        api: WindowsApi32::LoadLibraryExW,
+        name: "LoadLibraryExW",
+        stack_words: 3,
+        introduced: ProviderProfile::Modules,
+    },
+    ApiDefinition {
+        api: WindowsApi32::GetProcAddress,
+        name: "GetProcAddress",
+        stack_words: 2,
+        introduced: ProviderProfile::Modules,
+    },
+    ApiDefinition {
+        api: WindowsApi32::FreeLibrary,
+        name: "FreeLibrary",
+        stack_words: 1,
+        introduced: ProviderProfile::Modules,
+    },
+    ApiDefinition {
+        api: WindowsApi32::GetModuleHandleW,
+        name: "GetModuleHandleW",
+        stack_words: 1,
+        introduced: ProviderProfile::Modules,
+    },
 ];
 
 impl WindowsApi32 {
@@ -113,6 +163,10 @@ impl WindowsApi32 {
         self as u32
     }
 
+    pub fn name(self) -> &'static str {
+        APIS[self.catalog_index()].name
+    }
+
     pub fn convention(self) -> CallingConvention32 {
         CallingConvention32::Stdcall
     }
@@ -132,6 +186,13 @@ impl WindowsApi32 {
             Self::VirtualProtect => 6,
             Self::FlushInstructionCache => 7,
             Self::GetCurrentProcess => 8,
+            Self::LoadLibraryA => 9,
+            Self::LoadLibraryW => 10,
+            Self::LoadLibraryExA => 11,
+            Self::LoadLibraryExW => 12,
+            Self::GetProcAddress => 13,
+            Self::FreeLibrary => 14,
+            Self::GetModuleHandleW => 15,
         }
     }
 

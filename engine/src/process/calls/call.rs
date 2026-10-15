@@ -488,6 +488,7 @@ impl EngineInstance {
         arena[STATE_OFFSET..STATE_OFFSET + STATE_SIZE].copy_from_slice(&prepared.state);
         arena[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE].copy_from_slice(&prepared.exit);
         self.pending_call = None;
+        self.module_windows_reply = None;
     }
 
     pub fn abandon_call(&mut self, key: u64, token: u32) -> Result<(), HostError> {
@@ -511,6 +512,7 @@ impl EngineInstance {
             return Err(HostError::Call(CallError::InvalidToken));
         }
         self.pending_call = None;
+        self.module_windows_reply = None;
         Ok(())
     }
 

@@ -49,8 +49,8 @@ impl EngineInstance {
             Ok(range) => range,
             Err(MemoryError::Capacity) => {
                 let prepared = Self::prepare_completed_call(frame.complete(0))?;
+                self.publish_windows_thread(thread.allocation_failed())?;
                 self.publish_prepared_call(prepared);
-                self.windows_thread = thread.allocation_failed();
                 return Ok(());
             }
             Err(error) => return Err(HostError::Memory(error)),
@@ -83,8 +83,8 @@ impl EngineInstance {
             .position(|range| range.first as u32 * PAGE_SIZE == address)
         else {
             let prepared = Self::prepare_completed_call(frame.complete(0))?;
+            self.publish_windows_thread(thread.release_failed())?;
             self.publish_prepared_call(prepared);
-            self.windows_thread = thread.release_failed();
             return Ok(());
         };
         let range = self.virtual_allocations[index];
@@ -116,8 +116,8 @@ impl EngineInstance {
                     && range.first + range.count <= allocation.first + allocation.count
             })
         {
+            self.publish_windows_thread(thread.protection_failed(487))?;
             self.publish_prepared_call(failure);
-            self.windows_thread = thread.protection_failed(487);
             return Ok(());
         }
         let old = self
@@ -134,8 +134,8 @@ impl EngineInstance {
             _ => return Err(HostError::Call(crate::process::CallError::InvalidRequest)),
         };
         if old_output.0 == 0 {
+            self.publish_windows_thread(thread.protection_failed(998))?;
             self.publish_prepared_call(failure);
-            self.windows_thread = thread.protection_failed(998);
             return Ok(());
         }
         let result = self
@@ -156,8 +156,8 @@ impl EngineInstance {
                 self.windows_thread = thread;
             }
             Err(MemoryError::Fault(_)) => {
+                self.publish_windows_thread(thread.protection_failed(998))?;
                 self.publish_prepared_call(failure);
-                self.windows_thread = thread.protection_failed(998);
             }
             Err(error) => return Err(HostError::Memory(error)),
         }
