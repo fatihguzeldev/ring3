@@ -19,6 +19,22 @@ pub enum WindowsApi32 {
     GetProcAddress = 0x0001_000e,
     FreeLibrary = 0x0001_000f,
     GetModuleHandleW = 0x0001_0010,
+    CreateEventA = 0x0001_0011,
+    CreateEventW = 0x0001_0012,
+    OpenEventA = 0x0001_0013,
+    OpenEventW = 0x0001_0014,
+    SetEvent = 0x0001_0015,
+    ResetEvent = 0x0001_0016,
+    PulseEvent = 0x0001_0017,
+    CloseHandle = 0x0001_0018,
+    DuplicateHandle = 0x0001_0019,
+    WaitForSingleObject = 0x0001_001a,
+    WaitForSingleObjectEx = 0x0001_001b,
+    WaitForMultipleObjects = 0x0001_001c,
+    WaitForMultipleObjectsEx = 0x0001_001d,
+    Sleep = 0x0001_001e,
+    SleepEx = 0x0001_001f,
+    SignalObjectAndWait = 0x0001_0020,
 }
 
 #[derive(Clone, Copy)]
@@ -33,6 +49,7 @@ pub(crate) enum ProviderProfile {
     InstructionCache = 7,
     CurrentProcess = 8,
     Modules = 9,
+    Synchronization = 10,
 }
 
 struct ApiDefinition {
@@ -42,7 +59,7 @@ struct ApiDefinition {
     introduced: ProviderProfile,
 }
 
-const APIS: [ApiDefinition; 16] = [
+const APIS: [ApiDefinition; 32] = [
     ApiDefinition {
         api: WindowsApi32::GetLastError,
         name: "GetLastError",
@@ -139,6 +156,102 @@ const APIS: [ApiDefinition; 16] = [
         stack_words: 1,
         introduced: ProviderProfile::Modules,
     },
+    ApiDefinition {
+        api: WindowsApi32::CreateEventA,
+        name: "CreateEventA",
+        stack_words: 4,
+        introduced: ProviderProfile::Synchronization,
+    },
+    ApiDefinition {
+        api: WindowsApi32::CreateEventW,
+        name: "CreateEventW",
+        stack_words: 4,
+        introduced: ProviderProfile::Synchronization,
+    },
+    ApiDefinition {
+        api: WindowsApi32::OpenEventA,
+        name: "OpenEventA",
+        stack_words: 3,
+        introduced: ProviderProfile::Synchronization,
+    },
+    ApiDefinition {
+        api: WindowsApi32::OpenEventW,
+        name: "OpenEventW",
+        stack_words: 3,
+        introduced: ProviderProfile::Synchronization,
+    },
+    ApiDefinition {
+        api: WindowsApi32::SetEvent,
+        name: "SetEvent",
+        stack_words: 1,
+        introduced: ProviderProfile::Synchronization,
+    },
+    ApiDefinition {
+        api: WindowsApi32::ResetEvent,
+        name: "ResetEvent",
+        stack_words: 1,
+        introduced: ProviderProfile::Synchronization,
+    },
+    ApiDefinition {
+        api: WindowsApi32::PulseEvent,
+        name: "PulseEvent",
+        stack_words: 1,
+        introduced: ProviderProfile::Synchronization,
+    },
+    ApiDefinition {
+        api: WindowsApi32::CloseHandle,
+        name: "CloseHandle",
+        stack_words: 1,
+        introduced: ProviderProfile::Synchronization,
+    },
+    ApiDefinition {
+        api: WindowsApi32::DuplicateHandle,
+        name: "DuplicateHandle",
+        stack_words: 7,
+        introduced: ProviderProfile::Synchronization,
+    },
+    ApiDefinition {
+        api: WindowsApi32::WaitForSingleObject,
+        name: "WaitForSingleObject",
+        stack_words: 2,
+        introduced: ProviderProfile::Synchronization,
+    },
+    ApiDefinition {
+        api: WindowsApi32::WaitForSingleObjectEx,
+        name: "WaitForSingleObjectEx",
+        stack_words: 3,
+        introduced: ProviderProfile::Synchronization,
+    },
+    ApiDefinition {
+        api: WindowsApi32::WaitForMultipleObjects,
+        name: "WaitForMultipleObjects",
+        stack_words: 4,
+        introduced: ProviderProfile::Synchronization,
+    },
+    ApiDefinition {
+        api: WindowsApi32::WaitForMultipleObjectsEx,
+        name: "WaitForMultipleObjectsEx",
+        stack_words: 5,
+        introduced: ProviderProfile::Synchronization,
+    },
+    ApiDefinition {
+        api: WindowsApi32::Sleep,
+        name: "Sleep",
+        stack_words: 1,
+        introduced: ProviderProfile::Synchronization,
+    },
+    ApiDefinition {
+        api: WindowsApi32::SleepEx,
+        name: "SleepEx",
+        stack_words: 2,
+        introduced: ProviderProfile::Synchronization,
+    },
+    ApiDefinition {
+        api: WindowsApi32::SignalObjectAndWait,
+        name: "SignalObjectAndWait",
+        stack_words: 4,
+        introduced: ProviderProfile::Synchronization,
+    },
 ];
 
 impl WindowsApi32 {
@@ -193,6 +306,22 @@ impl WindowsApi32 {
             Self::GetProcAddress => 13,
             Self::FreeLibrary => 14,
             Self::GetModuleHandleW => 15,
+            Self::CreateEventA => 16,
+            Self::CreateEventW => 17,
+            Self::OpenEventA => 18,
+            Self::OpenEventW => 19,
+            Self::SetEvent => 20,
+            Self::ResetEvent => 21,
+            Self::PulseEvent => 22,
+            Self::CloseHandle => 23,
+            Self::DuplicateHandle => 24,
+            Self::WaitForSingleObject => 25,
+            Self::WaitForSingleObjectEx => 26,
+            Self::WaitForMultipleObjects => 27,
+            Self::WaitForMultipleObjectsEx => 28,
+            Self::Sleep => 29,
+            Self::SleepEx => 30,
+            Self::SignalObjectAndWait => 31,
         }
     }
 

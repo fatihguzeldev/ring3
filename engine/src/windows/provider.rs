@@ -66,7 +66,23 @@ impl ThreadState32 {
             return Err(FrameError::InvalidRequest);
         }
         Ok(match api {
-            WindowsApi32::LoadLibraryA
+            WindowsApi32::CreateEventA
+            | WindowsApi32::CreateEventW
+            | WindowsApi32::OpenEventA
+            | WindowsApi32::OpenEventW
+            | WindowsApi32::SetEvent
+            | WindowsApi32::ResetEvent
+            | WindowsApi32::PulseEvent
+            | WindowsApi32::CloseHandle
+            | WindowsApi32::DuplicateHandle
+            | WindowsApi32::WaitForSingleObject
+            | WindowsApi32::WaitForSingleObjectEx
+            | WindowsApi32::WaitForMultipleObjects
+            | WindowsApi32::WaitForMultipleObjectsEx
+            | WindowsApi32::Sleep
+            | WindowsApi32::SleepEx
+            | WindowsApi32::SignalObjectAndWait
+            | WindowsApi32::LoadLibraryA
             | WindowsApi32::LoadLibraryW
             | WindowsApi32::LoadLibraryExA
             | WindowsApi32::LoadLibraryExW

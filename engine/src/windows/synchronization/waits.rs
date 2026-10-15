@@ -30,15 +30,26 @@ impl SynchronizationContext32 {
         &self,
         occurrences: &[(EventBinding32, u64)],
     ) -> Result<PreparedSignals32, Error> {
-        let mut prepared = self.signal_plan(self.now, None)?;
-        for (binding, count) in occurrences {
-            self.prepare_occurrence(&mut prepared, *binding, *count)?;
+        self.prepare_signal_occurrences_with_messages(occurrences, None)
+    }
+    pub fn prepare_signal_occurrences_with_messages(
+        &self,
+        occurrences: &[(EventBinding32, u64)],
+        queue: Option<(u32, u32, u64)>,
+    ) -> Result<PreparedSignals32, Error> {
+        if queue.is_some_and(|(_, _, generation)| generation < self.queue_generation) {
+            return Err(Error::Stale);
+        }
+        let mut prepared = self.signal_plan(self.now, queue)?;
+        for &(binding, count) in occurrences {
+            self.prepare_occurrence(&mut prepared, binding, count)?;
         }
         if occurrences.is_empty() {
             self.resolve_waiters(&mut prepared);
         }
         Ok(prepared)
     }
+
     fn prepare_occurrence(
         &self,
         prepared: &mut PreparedSignals32,
@@ -191,6 +202,52 @@ impl SynchronizationContext32 {
             return Err(Error::Stale);
         }
         self.prepare_signal_slots(&[], &[], self.now, Some((current, new, generation)))
+    }
+    pub fn wait_with_messages(
+        &mut self,
+        handles: &[u32],
+        mode: WaitMode32,
+        timeout_ms: u32,
+        alertable: bool,
+        message: MessageWait32,
+        queue: (u32, u32, u64),
+    ) -> Result<WaitOutcome32, Error> {
+        if queue.2 < self.queue_generation {
+            return Err(Error::Stale);
+        }
+        let wait = self.validated_wait(handles, mode, timeout_ms, alertable, Some(message))?;
+        let mut prepared = self.prepare_signal_slots(&[], &[], self.now, Some(queue))?;
+        let result = self.resolve(&wait, &mut prepared.signaled, queue.0, queue.1);
+        let slot = if result.is_none() && timeout_ms != 0 {
+            Some(
+                self.waits
+                    .iter()
+                    .position(Option::is_none)
+                    .ok_or(Error::Capacity)?,
+            )
+        } else {
+            None
+        };
+        prepared.queue = Some((queue.0, queue.1 & !message.mask, queue.2));
+        self.commit_signals(prepared);
+        if let Some(result) = result {
+            return Ok(WaitOutcome32::Ready(result));
+        }
+        if let Some(slot) = slot {
+            self.next_wait = wait.id;
+            let token = WaitToken32 {
+                epoch: self.epoch,
+                slot,
+                id: wait.id,
+            };
+            self.waits[slot] = Some(wait);
+            Ok(WaitOutcome32::Pending(token))
+        } else {
+            Ok(WaitOutcome32::Ready(WaitResult32 {
+                value: WAIT_TIMEOUT,
+                last_error: None,
+            }))
+        }
     }
     pub fn wait(
         &mut self,
@@ -381,6 +438,20 @@ impl SynchronizationContext32 {
     ) -> Result<(Option<u64>, bool, Option<MessageWait32>), Error> {
         let wait = self.wait_record(token)?;
         Ok((wait.deadline, wait.alertable, wait.message))
+    }
+    pub fn take_wait_observing_messages(
+        &mut self,
+        token: WaitToken32,
+    ) -> Result<Option<WaitResult32>, Error> {
+        let mask = self
+            .wait_record(token)?
+            .message
+            .map_or(0, |message| message.mask);
+        let result = self.take_wait(token)?;
+        if result.is_some() {
+            self.queue_new &= !mask;
+        }
+        Ok(result)
     }
     pub fn take_wait(&mut self, token: WaitToken32) -> Result<Option<WaitResult32>, Error> {
         let result = self.wait_record(token)?.result;

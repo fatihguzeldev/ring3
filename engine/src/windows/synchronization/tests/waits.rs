@@ -277,3 +277,58 @@ fn close_pending_handle_fails_that_wait_and_atomic_signal_wait_validates_before_
     );
     assert!(!context.event_is_signaled(new).unwrap());
 }
+
+#[test]
+fn message_wait_observes_new_messages_once_and_inputavailable_sees_old_queue_entries() {
+    let mut context = context();
+    let message = MessageWait32 {
+        mask: 1,
+        input_available: false,
+    };
+    assert_eq!(
+        ready(
+            context
+                .wait_with_messages(&[], WaitMode32::Any, 0, false, message, (1, 1, 1))
+                .unwrap()
+        ),
+        0
+    );
+    assert_eq!(
+        ready(
+            context
+                .wait(&[], WaitMode32::Any, 0, false, Some(message))
+                .unwrap()
+        ),
+        WAIT_TIMEOUT
+    );
+    assert_eq!(
+        ready(
+            context
+                .wait(
+                    &[],
+                    WaitMode32::Any,
+                    0,
+                    false,
+                    Some(MessageWait32 {
+                        input_available: true,
+                        ..message
+                    })
+                )
+                .unwrap()
+        ),
+        0
+    );
+    context.revision = u64::MAX;
+    assert_eq!(
+        context.wait_with_messages(&[], WaitMode32::Any, INFINITE, false, message, (1, 1, 2)),
+        Err(SynchronizationError32::Exhausted)
+    );
+    assert_eq!(
+        (
+            context.queue_current,
+            context.queue_new,
+            context.queue_generation
+        ),
+        (1, 0, 1)
+    );
+}

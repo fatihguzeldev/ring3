@@ -55,6 +55,10 @@ pub struct SynchronizationContext32 {
     pub(super) queue_generation: u64,
 }
 impl SynchronizationContext32 {
+    #[cfg(test)]
+    pub(crate) fn set_revision_for_test(&mut self, revision: u64) {
+        self.revision = revision;
+    }
     pub fn new(epoch: u64, limits: SynchronizationLimits32, now_ns: u64) -> Result<Self, Error> {
         if epoch == 0
             || !(1..=MAX_EVENTS as u32).contains(&limits.events)
