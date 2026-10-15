@@ -1,3 +1,4 @@
+import {detectionGuardName, generatedImports, attachDetectionApi} from '../../../../../../../../support/wasm/binding.mjs';
 import {ARENA_SIZE} from '../../../../../../../../support/wasm/arena.mjs';
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
@@ -75,7 +76,7 @@ const paths = [
     "engine/src/cpu/x86/decode/integer.rs", "engine/src/cpu/dbt/region.rs",
     "engine/src/cpu/dbt/wasm/integer/arithmetic.rs", "engine/src/cpu/dbt/wasm/integer/bits.rs", "engine/src/cpu/dbt/wasm/integer/carry_rotates.rs", "engine/src/cpu/dbt/wasm/integer/decimal.rs", "engine/src/cpu/dbt/wasm/integer/dispatch.rs", "engine/src/cpu/dbt/wasm/integer/flags.rs", "engine/src/cpu/dbt/wasm/integer/mod.rs", "engine/src/cpu/dbt/wasm/integer/multiply_divide.rs", "engine/src/cpu/dbt/wasm/integer/operands.rs", "engine/src/cpu/dbt/wasm/integer/rotates.rs", "engine/src/cpu/dbt/wasm/integer/shifts.rs", "engine/src/cpu/dbt/wasm/emitter.rs",
     "engine/src/cpu/dbt/wasm/abi.rs", "engine/src/cpu/dbt/wasm/locals.rs",
-    "engine/src/memory/space.rs", "engine/src/memory/space/atomic.rs", "engine/src/process/instance.rs", "engine/src/process/execution/compiled.rs", "engine/src/process/execution/authority.rs", "engine/src/process/memory/address_space.rs", "engine/src/process/memory/scalar.rs", "engine/src/process/memory/scalar/tests.rs", "engine/src/process/execution/mod.rs", "engine/src/process/memory/mod.rs", "engine/src/process/mod.rs", "engine/src/process/execution/resident.rs", "engine/src/process/wasm/mod.rs", "engine/src/process/wasm/loading.rs", "engine/src/abi/image.rs", "engine/src/process/wasm/execution.rs", "engine/src/process/wasm/calls.rs", "engine/src/process/wasm/memory.rs", "engine/src/process/wasm/cpu.rs", "engine/tests/cpu/shifts/rotate/register/word/wasm/left.rs", "engine/tests/cpu/shifts/wasm.rs", "engine/tests/support/wasm.rs", "engine/tests/cpu/shifts/rotate/register/word/fixtures/p2-word-rol/runtime/run.mjs", "engine/tests/support/wasm/engine.mjs",
+    "engine/src/memory/space.rs", "engine/src/memory/space/atomic.rs", "engine/src/process/instance.rs", "engine/src/process/execution/compiled.rs", "engine/src/process/execution/authority.rs", "engine/src/process/memory/address_space.rs", "engine/src/process/memory/scalar.rs", "engine/src/process/memory/scalar/tests.rs", "engine/src/process/execution/mod.rs", "engine/src/process/memory/mod.rs", "engine/src/process/mod.rs", "engine/src/process/execution/resident.rs", "engine/src/process/wasm/mod.rs", "engine/src/process/wasm/loading.rs", "engine/src/abi/image.rs", "engine/src/process/wasm/execution.rs", "engine/src/process/wasm/calls.rs", "engine/src/process/wasm/memory.rs", "engine/src/process/wasm/cpu.rs", "engine/tests/cpu/shifts/rotate/register/word/wasm/left.rs", "engine/tests/cpu/shifts/wasm.rs", "engine/tests/support/wasm.rs", "engine/tests/cpu/shifts/rotate/register/word/fixtures/p2-word-rol/runtime/run.mjs", "engine/tests/support/wasm/engine.mjs", 'engine/tests/support/wasm/binding.mjs',
 ];
 function pins() {
     return Object.fromEntries(paths.map(path => {
@@ -170,7 +171,7 @@ function run(context, budget, label, wanted, reason = 1, retired = 1, status = 0
     }
     const params = args ?? [context.base, context.base + 56, budget, context.base + 96];
     assert.equal(context.run(...params), status, label);
-    assert.deepEqual(arena(context), expected, "full4612 " + label);
+    assert.deepEqual(arena(context), expected, "complete arena " + label);
     counts.generated_calls++;
     if (status === 0) counts.retired += retired;
     journal.push({ context: context.context, name: "run", label, budget, status, args: params,
@@ -214,10 +215,8 @@ function compile(context, group) {
     }
     const bytes = Buffer.from(new Uint8Array(context.memory.buffer, binding.pointer, binding.length));
     const module = new WebAssembly.Module(bytes);
-    const guard = context.owner === "resident" ? "guard_resident" : "guard";
-    assert.deepEqual(WebAssembly.Module.imports(module), [
-        { module: "env", name: "memory", kind: "memory" }, { module: "ring3", name: guard, kind: "function" },
-    ]);
+    const guard = detectionGuardName(context.owner === "resident");
+    assert.deepEqual(WebAssembly.Module.imports(module), generatedImports({bound: true, resident: context.owner === "resident", helpers: []}));
     assert.deepEqual(WebAssembly.Module.exports(module), [{ name: "run", kind: "function" }]);
     context.run = new WebAssembly.Instance(module, { env: { memory: context.memory }, ring3: context.api }).exports.run;
     assert.equal(context.run.length, 4);
@@ -225,7 +224,7 @@ function compile(context, group) {
     const file = `${context.owner}-${context.entries ? "entries" : "explicit"}-group${groupIndex}.wasm`;
     writeFileSync(join(output, file), bytes, { flag: "wx" });
     modules.push({ context: context.context, owner: context.owner, entries: context.entries, group: groupIndex,
-        arena_base: context.base, file, ...binding, bytes: bytes.length, sha256: hash(bytes), imports: [guard] });
+        arena_base: context.base, file, ...binding, bytes: bytes.length, sha256: hash(bytes), imports: generatedImports({resident: context.owner === "resident", helpers: []}).slice(1).map(item => item.name) });
 }
 function open(owner, entries) {
     const instance = new WebAssembly.Instance(engine.module, {});
@@ -234,6 +233,7 @@ function open(owner, entries) {
         "compile_resident", "compile_resident_entries", "generation", "module_ptr", "module_len", "guard", "guard_resident"]) {
         context.api[name] = instance.exports["ring3_abi_v1_" + name];
     }
+ attachDetectionApi(context.api, instance.exports);
     assert.equal(context.api.open(2, context.context, 0x726f6c61), 0);
     context.base = context.api.arena_ptr() >>> 0;
     input(context, 0, initial, "canonical initialized full arena");
@@ -361,7 +361,7 @@ const result = {
     modules, journal, raw: { file: "arenas.bin", frames: frames.length, bytes: raw.length, sha256: hash(raw) },
     limits: [
         "finite exact register WORD ROL families in four bound profiles; native standalone proof is separate",
-        "full4612 input/host/generated pairs and preclose frame; current low16/high16/other parents and unaffected FLAGS, no memory helper or stack effect",
+        "complete arena input/host/generated pairs and preclose frame; current low16/high16/other parents and unaffected FLAGS, no memory helper or stack effect",
         "two resident units/context, instruction banks33/11 both<=64, no expired pointer use; retained q0/q16/q17/SETcc/ADC/currentCXCL/JZ has no interphase host reseed",
         "stale4 follows combined Execute-only4 to RWX7 permission change and same-byte upload; this witness does not isolate upload invalidation",
         "initial Rust arena and first frames require canonical source-default joins; initialized opaque FP128 preserved, not arbitrary raw80 seeds",

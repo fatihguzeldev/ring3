@@ -1,3 +1,4 @@
+import {generatedImports} from '../../../../../../../../../support/wasm/binding.mjs';
 import {createArena} from '../../../../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
@@ -114,7 +115,7 @@ function compile(ctx) {
     refresh(ctx); assert.ok(binding.pointer > 0 && binding.length > 8 && binding.length <= 65536 && binding.pointer + binding.length <= ctx.bytes.length);
     bytes = Buffer.from(ctx.bytes.subarray(binding.pointer, binding.pointer + binding.length)); writeFileSync(join(output, `${ctx.owner}-${ctx.kind}.wasm`), bytes, {flag: 'wx'});
   }
-  assert.ok(bytes.length <= 65536); const module = new WebAssembly.Module(bytes), imports = ctx.owner === 'standalone' ? [] : [ctx.owner === 'replacement' ? 'guard' : 'guard_resident'];
+  assert.ok(bytes.length <= 65536); const module = new WebAssembly.Module(bytes), imports = ctx.owner === 'standalone' ? [] : generatedImports({resident: !(ctx.owner === 'replacement'), helpers: []}).slice(1).map(item => item.name);
   assert.deepEqual(WebAssembly.Module.imports(module), [{module: 'env', name: 'memory', kind: 'memory'}, ...imports.map(name => ({module: 'ring3', name, kind: 'function'}))]);
   assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
   const child = new WebAssembly.Instance(module, {env: {memory: ctx.memory}, ...(ctx.api ? {ring3: ctx.api} : {})}); assert.equal(child.exports.run.length, 4); counts.modules++;
@@ -209,7 +210,7 @@ const result = {status: 'ok', engine_sha256: hash(engineBytes), tools: {node: pr
     flag_policy: 'only CF/OF change; retain SF/ZF/AF/PF/DF/fixed bit 1, including zero operands; second same-alias rotate reads current byte after AL/DL consumers',
     programs: Object.fromEntries(Object.entries(programs).map(([name, bytes]) => [name, {hex: bytes.toString('hex'), sha256: hash(bytes)}])), arena_bytes: SIZE, pattern_sha256: hash(pattern)},
   artifact_census: {x86_banks: 2, modules: 6, result_files: 1, total: 9},
-  test_sha256: Object.fromEntries(['engine/tests/cpu/shifts/rotate/register/one/byte/wasm.rs', 'engine/tests/cpu/shifts/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/shifts/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/shifts/rotate/register/one/byte/fixtures/p2-byte-rotate-one/runtime/run.mjs'].map(path => [path, hash(readFileSync(join(root, path)))])),
+  test_sha256: Object.fromEntries(['engine/tests/cpu/shifts/rotate/register/one/byte/wasm.rs', 'engine/tests/cpu/shifts/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/shifts/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/shifts/rotate/register/one/byte/fixtures/p2-byte-rotate-one/runtime/run.mjs', 'engine/tests/support/wasm/binding.mjs'].map(path => [path, hash(readFileSync(join(root, path)))])),
   claim: 'flat32 register-only D0 count-one ROL/ROR8 through native-generated standalone and actual engine-Wasm-generated replacement/resident modules: all AL/CL/DL/BL/AH/CH/DH/BH aliases, all 256 byte sources with complementary FLAGS 2/cd7 plus six declared boundary bytes with all 128 legal FLAGS represented once; 576 corpus overlaps explicitly skipped, 60864 numeric initial rows and 12 literal live ADD rows; independent eight-character bitstring/literal rotation and widened/literal ADD oracle, numerical byte extraction/insertion, complete parent and CPU observed before partial flag consumers; two real rotates without CPU repair, second AL/DL uses current SETB/SETO outputs, other parent bits and GPRs modeled exactly; zero operand retires and retains unaffected FLAGS; literal one despite CL 0/1/31/32/255, guest SETB/SETO twice and near JMP plus BH EDI canary; exact pure imports, default caps and 4236-byte arena with unchanged helper during guest execution, complete current code/patterned data pages; known-entry budget/cancel, cold/malformed, wrong owner key/identity, same-byte code upload stale4 and closed5 before cancelled malformed arguments; no exhaustive full byte×FLAGS Cartesian product, memory rotation, other counts, carry rotation, ABI, PE/browser/performance/game claim'};
 const resultBytes = Buffer.from(JSON.stringify(result, null, 2)); writeFileSync(join(output, 'result.json'), resultBytes, {flag: 'wx'});
 console.log(JSON.stringify({status: result.status, engine_sha256: result.engine_sha256, result_sha256: hash(resultBytes), counts, output}));

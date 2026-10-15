@@ -1,3 +1,4 @@
+import {detectionGuardName, generatedImports} from '../../../../../../../../../support/wasm/binding.mjs';
 import {createArena} from '../../../../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
@@ -113,9 +114,8 @@ function compile(ctx) {
     bytes = Buffer.from(ctx.bytes.subarray(binding.pointer, binding.pointer + binding.length));
     writeFileSync(join(output, `${ctx.owner}-${ctx.kind}.wasm`), bytes, {flag: 'wx'});
   }
-  const module = new WebAssembly.Module(bytes), guard = ctx.owner === 'replacement' ? 'guard' : 'guard_resident';
-  assert.deepEqual(WebAssembly.Module.imports(module), [{module: 'env', name: 'memory', kind: 'memory'},
-    ...(ctx.owner === 'standalone' ? [] : [{module: 'ring3', name: guard, kind: 'function'}])]);
+  const module = new WebAssembly.Module(bytes), guard = detectionGuardName(!(ctx.owner === 'replacement'));
+  assert.deepEqual(WebAssembly.Module.imports(module), generatedImports({bound: !(ctx.owner === 'standalone'), resident: !(ctx.owner === 'replacement'), helpers: []}));
   assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
   const child = new WebAssembly.Instance(module, {env: {memory: ctx.memory}, ...(ctx.owner === 'standalone' ? {} : {ring3: ctx.api})});
   assert.equal(child.exports.run.length, 4); counts.modules++;
@@ -220,7 +220,7 @@ const result = {status: 'ok', engine_sha256: hash(engineBytes), tools: {node: pr
     specs, scans, instructions: 43, cold_target: COLD, flag_policy: 'CF from old destination MSB for RCL or LSB for RCR; OF RCL result MSB xor outgoing CF, RCR old MSB xor incoming CF; SF, ZF, AF, PF, DF and fixed bit 1 preserved',
     programs: Object.fromEntries(Object.entries(programs).map(([name, bytes]) => [name, {hex: bytes.toString('hex'), sha256: hash(bytes)}])),
     arena_bytes: SIZE, data_page_sha256: hash(pattern)},
-  test_sha256: Object.fromEntries(['engine/tests/cpu/shifts/carry_rotate/register/one/dword/wasm.rs', 'engine/tests/cpu/shifts/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/shifts/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/shifts/carry_rotate/register/one/dword/fixtures/p2-carry-rotate-one/runtime/run.mjs'].map(path => [path, hash(readFileSync(join(root, path)))])),
+  test_sha256: Object.fromEntries(['engine/tests/cpu/shifts/carry_rotate/register/one/dword/wasm.rs', 'engine/tests/cpu/shifts/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/shifts/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/shifts/carry_rotate/register/one/dword/fixtures/p2-carry-rotate-one/runtime/run.mjs', 'engine/tests/support/wasm/binding.mjs'].map(path => [path, hash(readFileSync(join(root, path)))])),
   claim: 'flat32 count-one register RCL/RCR in native-generated standalone and actual engine-Wasm-generated replacement/resident modules; declared 12 source values, all 128 valid FLAGS including both incoming CF values, all eight destinations and literal anchors for every source/carry pair; independent 33-bit binary-string rotation, fixed count 1 despite observed CL 0/1/31/32/255, full CPU before SETB AL/SETO DL, second carry rotate uses the outgoing guest CF and current destination including AL/DL overlap; real CLC/STC/CMC producers each start with CF 0 and 1 and continue through both rotations without intermediate CPU writes; full 4236-byte arena including untouched helper during guest runs, complete declared code and patterned data pages, exact pure imports and focused preflight/owner guards; no exhaustive operands, memory carry rotate, other counts, wider ISA, ABI, PE/provider, SDK/browser, performance or game claim'};
 const resultBytes = Buffer.from(JSON.stringify(result, null, 2));
 writeFileSync(join(output, 'result.json'), resultBytes, {flag: 'wx'});
