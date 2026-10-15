@@ -1,4 +1,5 @@
 mod buffer;
+pub mod dsound;
 mod submission;
 mod types;
 mod voice;
