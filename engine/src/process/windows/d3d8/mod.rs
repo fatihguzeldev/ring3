@@ -1,17 +1,26 @@
+mod bindings;
 mod context;
+mod dispatch;
+mod draw;
 mod factory;
+mod garbage;
 mod lifetime;
+mod locks;
 mod memory;
 mod objects;
-mod types;
+mod presentation;
 mod resources;
-mod locks;
-mod garbage;
+mod shaders;
+mod state;
+mod transfers;
+mod types;
 
 #[cfg(test)]
 mod tests;
-pub use types::{D3D8Config32,D3D8Error32};
+
 pub(in crate::process) use context::D3D8Runtime32;
+pub use types::{D3D8Config32, D3D8Error32};
+
 use crate::graphics::d3d8::api::HResult;
 use crate::process::windows::objects::GuestComError32;
 

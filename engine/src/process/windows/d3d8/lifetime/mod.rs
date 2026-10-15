@@ -27,3 +27,6 @@ pub(super) struct PreparedUpHolds32 {
     lifetime: PreparedLifetimeChange32,
     released: Vec<GuestAddress>,
 }
+
+#[cfg(test)]
+mod tests;
