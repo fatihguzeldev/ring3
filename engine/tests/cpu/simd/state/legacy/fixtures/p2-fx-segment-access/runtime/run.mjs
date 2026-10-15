@@ -1,3 +1,4 @@
+import {ARENA_SIZE} from '../../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
@@ -5,12 +6,12 @@ import {join} from 'node:path';
 import {readEngine} from '../../../../../../../support/wasm/engine.mjs';
 
 const [enginePath, output, root] = process.argv.slice(2), engine = readEngine(enginePath);
-const PC = 0x1000, SEG = 4524, SIZE = 4612, keyHigh = 0x5350414e;
+const PC = 0x1000, SEG = 4524, SIZE = ARENA_SIZE, keyHigh = 0x5350414e;
 const defaults = [0xf33fffff, 0xf3bfffff, 0xf33fffff, 0xf33fffff, 0xf33fffff, 0];
 const offsets = [28, 32, 36, 40, 44, 56];
 const counts = {contexts: 0, modules: 0, runs: 0, faults: 0, successes: 0, controls: 0};
 const FP = 4236, SV = 4364, T = 140, DATA = 0x5010;
-const paths = ['engine/src/cpu/dbt/wasm/simd.rs', 'engine/src/cpu/dbt/wasm/segments/access.rs', 'engine/src/process/memory/span.rs', 'engine/src/cpu/x86/simd.rs', 'engine/src/cpu/x86/xstate/legacy.rs',
+const paths = ['engine/tests/support/wasm/arena.mjs', 'engine/src/cpu/dbt/wasm/simd.rs', 'engine/src/cpu/dbt/wasm/segments/access.rs', 'engine/src/process/memory/span.rs', 'engine/src/cpu/x86/simd.rs', 'engine/src/cpu/x86/xstate/legacy.rs',
   'engine/tests/cpu/simd/state/legacy/native/segments.rs', 'engine/tests/cpu/simd/state/legacy/wasm/segments.rs',
   'engine/tests/cpu/simd/state/legacy/fixtures/p2-fx-segment-access/runtime/run.mjs'];
 const pins = () => Object.fromEntries(paths.map(p => [p, createHash('sha256').update(readFileSync(join(root, p))).digest('hex')])), sourcePins = pins();
@@ -40,10 +41,10 @@ function compile(c, instruction, name, terminal = false) {
   if (c.owner === 'resident') c.previous = [b.readUInt32LE(148), b.readUInt32LE(152)];
   const length = c.owner === 'resident' ? b.readUInt32LE(160) : c.api.module_len() >>> 0;
   const bytes = Buffer.from(new Uint8Array(c.memory.buffer, pointer, length)), module = new WebAssembly.Module(bytes), imports = WebAssembly.Module.imports(module), ring3 = {...c.api};
-  for (const i of imports.filter(i => i.module === 'ring3' && !i.name.startsWith('guard'))) ring3[i.name] = (...args) => {c.calls.push(i.name); return c.api[i.name](...args);};
+  for (const i of imports.filter(i => i.module === 'ring3' && !i.name.startsWith('guard') && i.name !== 'finish_exception_detection')) ring3[i.name] = (...args) => {c.calls.push(i.name); return c.api[i.name](...args);};
   writeFileSync(join(output, `module-${++counts.modules}.wasm`), bytes, {flag: 'wx'});
   return {run: new WebAssembly.Instance(module, {env: {memory: c.memory}, ring3}).exports.run,
-    memory: imports.some(i => i.module === 'ring3' && !i.name.startsWith('guard')),
+    memory: imports.some(i => i.module === 'ring3' && !i.name.startsWith('guard') && i.name !== 'finish_exception_detection'),
     cpu: imports.some(i => /^(cpu_|segment_load|stack_execute|simd_execute|x87_op)/.test(i.name)), instructionLength: instruction.length};
 }
 function setup(c, row) {

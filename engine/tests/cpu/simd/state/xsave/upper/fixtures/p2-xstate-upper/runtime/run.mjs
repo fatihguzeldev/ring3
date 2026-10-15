@@ -1,3 +1,6 @@
+import {pageFaultPacket} from '../../../../../../../../support/wasm/page-fault.mjs';
+import {ARENA_SIZE} from '../../../../../../../../support/wasm/arena.mjs';
+import {generatedImports} from '../../../../../../../../support/wasm/binding.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
@@ -9,10 +12,10 @@ const probe = new WebAssembly.Instance(engine.module, {});
 assert.equal(typeof probe.exports.ring3_abi_v1_cpu_xsave_avx, 'function', 'explicit segmented XSAVE2 dependency helper exists');
 assert.equal(typeof probe.exports.ring3_abi_v1_cpu_xrstor_avx, 'function', 'explicit segmented XRSTOR2 dependency helper exists');
 const receipt = assertEngineExports(engine.module, root), initial = readFileSync(join(output, 'initial-arena.bin'));
-const SIZE = 4756, T = 140, FP = 4236, SV = 4364, SG = 4524, YU = 4612, BASE = 0x5000;
+const SIZE = ARENA_SIZE, T = 140, FP = 4236, SV = 4364, SG = 4524, YU = 4612, BASE = 0x5000;
 assert.equal(initial.length, SIZE);
 const hash = value => createHash('sha256').update(value).digest('hex');
-const sourcePaths = [...new Set([...receipt.sourcePaths,
+const sourcePaths = ['engine/tests/support/wasm/page-fault.mjs', 'engine/tests/support/wasm/arena.mjs', 'engine/tests/support/wasm/binding.mjs', ...new Set([...receipt.sourcePaths,
   'engine/tests/support/wasm/engine.mjs', 'engine/tests/cpu/simd/state/xsave/upper/native.rs', 'engine/tests/cpu/simd/state/xsave/upper/wasm.rs',
   'engine/tests/cpu/simd/state/xsave/upper/fixtures/p2-xstate-upper/runtime/run.mjs',
   'engine/src/cpu/x86/capabilities.rs', 'engine/src/cpu/x86/xstate.rs', 'engine/src/cpu/x86/xstate/upper.rs',
@@ -30,7 +33,9 @@ const record = (magic, version, size, fields = []) => {
   fields.forEach((value, i) => b.writeUInt32LE(value >>> 0, 16 + i * 4)); return b;
 };
 const words = values => {const b = Buffer.alloc(values.length * 4); values.forEach((v, i) => b.writeUInt32LE(v >>> 0, i * 4)); return b;};
-const packet = (fields = [0, 0, 0, 0, 0, 832], version = 8) => record('R3MH', version, 40, fields);
+const packet = (fields = [0, 0, 0, 0, 0, 832], version = 8) => fields[0] === 1
+  ? pageFaultPacket({errorCode: 4 | (fields[4] === 2 ? 2 : 0) | (fields[2] === 2 ? 1 : 0),
+    address: fields[3], access: fields[4], length: fields[5]}) : record('R3MH', version, 40, fields);
 const exit = (reason, detail = 0) => record('R3EX', 9, 40, [reason, 0, detail, 0, 0, 0]);
 const arena = c => Buffer.from(new Uint8Array(c.memory.buffer, c.base, SIZE));
 const input = (c, at, bytes) => new Uint8Array(c.memory.buffer, c.base + at, bytes.length).set(bytes);
@@ -97,8 +102,7 @@ function fresh(owner, entries) {
     };
   }
   assert.deepEqual(WebAssembly.Module.imports(module).map(value => `${value.module}:${value.name}:${value.kind}`).sort(),
-    ['env:memory:memory', `ring3:${owner === 'resident' ? 'guard_resident' : 'guard'}:function`,
-      ...['xsave', 'xrstor'].map(name => `ring3:cpu_${name}_avx${owner === 'resident' ? '_resident' : ''}:function`)].sort());
+    generatedImports({resident: owner === 'resident', helpers: ['xsave', 'xrstor'].map(name => `cpu_${name}_avx${owner === 'resident' ? '_resident' : ''}`)}).map(i => `${i.module}:${i.name}:${i.kind}`).sort());
   assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
   c.run = new WebAssembly.Instance(module, {env: {memory: c.memory}, ring3: imports}).exports.run;
   modules.push({context: c.id, sha256: hash(bytes), bytes: bytes.length, imports: WebAssembly.Module.imports(module)}); writeFileSync(join(output, `module-${c.id}.wasm`), bytes); return c;
@@ -128,9 +132,10 @@ function execute(c, row) {
       if (request & 4) expected.set(present & 4n ? restoredUpper : Buffer.alloc(128), YU + 16);
     }
   }
-  const call = invoke(c, row); assert.equal(call.run(), row.hostStatus ?? 0, `${row.name}: transport status`);
+  const transport = row.hostStatus ?? (fields[0] === 1 ? 23 : 0);
+  const call = invoke(c, row); assert.equal(call.run(), transport, `${row.name}: transport status`);
   const after = arena(c); assert.deepEqual(after, expected, `${row.name}: entire current arena`);
-  frames.push(before, after); rows.push({context: c.id, owner: c.owner, entries: c.entries, name: row.name, api: call.name, args: call.args, status: row.hostStatus ?? 0, packet: after.subarray(100, 140).toString('hex'), frame_sha256: hash(after)});
+  frames.push(before, after); rows.push({context: c.id, owner: c.owner, entries: c.entries, name: row.name, api: call.name, args: call.args, status: transport, packet: after.subarray(100, 140).toString('hex'), frame_sha256: hash(after)});
   if (row.unmap) {host(c, 'map', [0x6000, 1, 3]); expectedRam.fill(0, 4096);}
   if (row.protect) host(c, 'protect', [row.protect[0], row.protect[1], 3]);
   assert.deepEqual(readRam(c, BASE, 8192), expectedRam, `${row.name}: whole RAM including reserved and unselected bytes`);
@@ -207,5 +212,5 @@ for (const owner of ['replacement', 'resident']) for (const entries of [false, t
   before = arena(c); assert.equal(invoke(c, {operation: 'xsave', mask: 4}).run(), 4); assert.deepEqual(arena(c), before, 'stale authority neutral'); rows.push({context: c.id, name: 'stale-authority-neutral'}); host(c, 'close', []);
 }
 assert.deepEqual(pins(), sources, 'all source pins stable'); writeFileSync(join(output, 'arenas.bin'), Buffer.concat(frames), {flag: 'wx'});
-const result = {status: 'PASS', engine: {path: enginePath, sha256: engine.sha256}, counts: {contexts: identities, modules: modules.length, cases: rows.length, full_frame_pairs: frames.length / 2, frame_bytes: SIZE}, sources, modules, rows, limits: ['active guest XSAVE/XRSTOR use version8 segmented helpers and exit9; direct legacy576 helpers remain version7', 'IA32 exact128B payload with reserved704..831 preserved/ignored under permitted Ring3 policy', 'segment-before-page is deterministic Ring3 policy', 'active generated modules reject legacy packet7; frozen pre-activation proof retains old-module packet8 rejection', 'native tests separately prove memory-version exhaustion, pending/callback guards and single-version save']};
+const result = {status: 'PASS', engine: {path: enginePath, sha256: engine.sha256}, counts: {contexts: identities, modules: modules.length, cases: rows.length, full_frame_pairs: frames.length / 2, frame_bytes: SIZE}, sources, modules, rows, limits: ['successful active guest XSAVE/XRSTOR use helper8 and exit9; native faults use helper15; direct legacy576 successes retain helper7', 'IA32 exact128B payload with reserved704..831 preserved/ignored under permitted Ring3 policy', 'segment-before-page is deterministic Ring3 policy', 'active generated modules reject legacy packet7; frozen pre-activation proof retains old-module packet8 rejection', 'native tests separately prove memory-version exhaustion, pending/callback guards and single-version save']};
 writeFileSync(join(output, 'result.json'), JSON.stringify(result, null, 2), {flag: 'wx'}); console.log(JSON.stringify({status: result.status, ...result.counts, output}));
