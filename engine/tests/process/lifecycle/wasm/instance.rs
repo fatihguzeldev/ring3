@@ -58,7 +58,7 @@ fn helper_probe() -> Vec<u8> {
 #[test]
 fn actual_engine_wasm_owns_arena_helpers_and_guarded_generated_modules() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-    let engine = root.join("target/wasm32-unknown-unknown/debug/ring3_engine.wasm");
+    let engine = crate::support_wasm::selected_engine(root);
     assert!(
         engine.is_file(),
         "build the actual engine wasm32 cdylib before this integration test: {}",

@@ -3,16 +3,14 @@ use super::support_wasm as wasm_support;
 use ring3_engine::{abi::arena::ARENA_SIZE, process::EngineInstance};
 use std::{
     fs,
-    path::{Path, PathBuf},
+    path::Path,
     time::{SystemTime, UNIX_EPOCH},
 };
 
 #[test]
 fn actual_original_fp_import_pe_resumes_arithmetic_after_provider_completion() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-    let engine = std::env::var_os("RING3_ENGINE_WASM")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| root.join("target/wasm32-unknown-unknown/debug/ring3_engine.wasm"));
+    let engine = crate::support_wasm::selected_engine(root);
     assert!(engine.is_file(), "build the integrated engine wasm first");
     let output = root.join("target/p2-fp-imports-fixtures").join(format!(
         "wasm-{}-{}",

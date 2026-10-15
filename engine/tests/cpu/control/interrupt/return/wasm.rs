@@ -2,16 +2,14 @@ use super::support_wasm as wasm_support;
 
 use std::{
     fs,
-    path::{Path, PathBuf},
+    path::Path,
     time::{SystemTime, UNIX_EPOCH},
 };
 
 #[test]
 fn actual_interrupt_returns_preserve_frames_flags_and_resume_flag_lifetime() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-    let engine = std::env::var_os("RING3_ENGINE_WASM")
-        .map(PathBuf::from)
-        .expect("set RING3_ENGINE_WASM to the integrated engine artifact");
+    let engine = crate::support_wasm::selected_engine(root);
     let expected_sha =
         std::env::var("RING3_ENGINE_SHA256").expect("set the selected engine SHA-256");
     let output = root.join("target/p2-iret-fixtures").join(format!(

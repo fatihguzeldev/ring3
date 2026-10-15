@@ -123,7 +123,7 @@ fn arithmetic_image() -> Vec<u8> {
 #[test]
 fn memory_byte_arithmetic_uses_real_read_store_and_recovers_defined_flags_after_commit() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-    let engine = root.join("target/wasm32-unknown-unknown/debug/ring3_engine.wasm");
+    let engine = crate::support_wasm::selected_engine(root);
     assert!(
         engine.is_file(),
         "build the actual engine wasm32 cdylib first"

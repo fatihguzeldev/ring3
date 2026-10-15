@@ -14,7 +14,7 @@ use ring3_engine::{
 #[test]
 fn actual_wasm_scans_register_bits_and_exposes_zero_and_full_source_parity() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-    let engine = root.join("target/wasm32-unknown-unknown/debug/ring3_engine.wasm");
+    let engine = crate::support_wasm::selected_engine(root);
     assert!(
         engine.is_file(),
         "build the actual engine wasm32 cdylib first"

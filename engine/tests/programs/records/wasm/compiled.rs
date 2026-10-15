@@ -6,7 +6,7 @@ use ring3_engine::{
 };
 use std::{
     fs,
-    path::{Path, PathBuf},
+    path::Path,
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -15,9 +15,7 @@ use super::support_pe32_compiled_records as pe;
 #[test]
 fn actual_compiled_scalar_leaf_runs_in_relocated_pe() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-    let engine = std::env::var_os("RING3_ENGINE_WASM")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| root.join("target/wasm32-unknown-unknown/debug/ring3_engine.wasm"));
+    let engine = crate::support_wasm::selected_engine(root);
     assert!(engine.is_file(), "build the integrated engine wasm first");
     let output = root
         .join("target/p2-compiled-records-fixtures")

@@ -21,9 +21,7 @@ fn banks() -> [Vec<u8>; 3] {
 #[test]
 fn actual_count_branches_live_ecx_flags_cold_and_retained_loops() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-    let engine = std::env::var_os("RING3_ENGINE_WASM")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| root.join("target/wasm32-unknown-unknown/debug/ring3_engine.wasm"));
+    let engine = crate::support_wasm::selected_engine(root);
     assert!(engine.is_file(), "build the integrated engine Wasm first");
     let expected = std::env::var("RING3_ENGINE_SHA256").expect("pin the integrated engine SHA256");
     assert!(

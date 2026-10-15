@@ -123,7 +123,7 @@ fn compare_image() -> Vec<u8> {
 #[test]
 fn byte_comparisons_execute_with_byte_flags_and_copied_pe_exit() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-    let engine = root.join("target/wasm32-unknown-unknown/debug/ring3_engine.wasm");
+    let engine = crate::support_wasm::selected_engine(root);
     assert!(
         engine.is_file(),
         "build the actual engine wasm32 cdylib first"

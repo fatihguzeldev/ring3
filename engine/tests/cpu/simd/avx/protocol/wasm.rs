@@ -9,9 +9,7 @@ use std::{
 #[test]
 fn actual_avx_helper_rejects_impossible_segment_faults_and_preserves_fault_state() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-    let engine = std::env::var_os("RING3_ENGINE_WASM")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| root.join("target/wasm32-unknown-unknown/debug/ring3_engine.wasm"));
+    let engine = crate::support_wasm::selected_engine(root);
     assert!(
         engine.is_file(),
         "build the coherent AVX verification engine first"

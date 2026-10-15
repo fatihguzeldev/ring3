@@ -9,9 +9,7 @@ use std::{
 #[test]
 fn actual_raw_descriptor_transport_preserves_loaded_caches_and_faults() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-    let engine = std::env::var_os("RING3_ENGINE_WASM")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| root.join("target/wasm32-unknown-unknown/debug/ring3_engine.wasm"));
+    let engine = crate::support_wasm::selected_engine(root);
     let output = root
         .join("target/p2-raw-descriptors-fixtures")
         .join(format!(

@@ -2,16 +2,14 @@ use super::support_wasm as wasm_support;
 use ring3_engine::process::EngineInstance;
 use std::{
     fs,
-    path::{Path, PathBuf},
+    path::Path,
     time::{SystemTime, UNIX_EPOCH},
 };
 
 #[test]
 fn actual_code_linear_wrap_keeps_physical_capture_and_context_fault_identity() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-    let engine = std::env::var_os("RING3_ENGINE_WASM")
-        .map(PathBuf::from)
-        .expect("set RING3_ENGINE_WASM to the integrated engine artifact");
+    let engine = crate::support_wasm::selected_engine(root);
     assert!(engine.is_file(), "selected engine artifact must exist");
     let expected = std::env::var("RING3_ENGINE_SHA256").expect("select its explicit SHA-256");
     let output = root.join("target/p2-cs-linear-wrap-fixtures").join(format!(

@@ -9,9 +9,7 @@ use std::{
 #[test]
 fn actual_arpl_preserves_aliases_cached_write_authority_and_precise_fault_retirement() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-    let engine = std::env::var_os("RING3_ENGINE_WASM")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| root.join("target/wasm32-unknown-unknown/debug/ring3_engine.wasm"));
+    let engine = crate::support_wasm::selected_engine(root);
     let output = root.join("target/p2-segment-loads-fixtures").join(format!(
         "arpl-{}-{}",
         std::process::id(),

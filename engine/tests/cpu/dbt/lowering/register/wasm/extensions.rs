@@ -37,7 +37,7 @@ fn artifact(output: &Path, name: &str, bytes: &[u8]) {
 #[test]
 fn register_extensions_execute_against_independent_llvm_and_extraction_oracles() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-    let engine = root.join("target/wasm32-unknown-unknown/debug/ring3_engine.wasm");
+    let engine = crate::support_wasm::selected_engine(root);
     assert!(
         engine.is_file(),
         "build the actual engine Wasm cdylib first"

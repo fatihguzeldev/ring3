@@ -11,7 +11,7 @@ use ring3_engine::cpu::dbt::CompileLimits;
 #[test]
 fn actual_wasm_memory_byte_rotates_separate_count_policy_from_distance() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-    let engine = root.join("target/wasm32-unknown-unknown/debug/ring3_engine.wasm");
+    let engine = crate::support_wasm::selected_engine(root);
     assert!(
         engine.is_file(),
         "build the actual engine wasm32 cdylib first"

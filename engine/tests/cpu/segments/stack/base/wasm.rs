@@ -1,16 +1,14 @@
 use super::support_wasm as wasm_support;
 use std::{
     fs,
-    path::{Path, PathBuf},
+    path::Path,
     time::{SystemTime, UNIX_EPOCH},
 };
 
 #[test]
 fn actual_ss_base_keeps_esp_logical_across_scalar_compound_far_and_interrupt_stacks() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-    let engine = std::env::var_os("RING3_ENGINE_WASM")
-        .map(PathBuf::from)
-        .expect("set RING3_ENGINE_WASM to the selected integrated engine");
+    let engine = crate::support_wasm::selected_engine(root);
     let expected_sha =
         std::env::var("RING3_ENGINE_SHA256").expect("pin the selected engine SHA-256");
     assert!(engine.is_file());

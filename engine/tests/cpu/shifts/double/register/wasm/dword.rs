@@ -32,7 +32,7 @@ fn write_bank(output: &Path, name: &str, forms: &[Vec<u8>], canary: bool, packed
 #[test]
 fn actual_wasm_double_shifts_preserve_old_operands_flags_and_current_tail_continuation() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-    let engine = root.join("target/wasm32-unknown-unknown/debug/ring3_engine.wasm");
+    let engine = crate::support_wasm::selected_engine(root);
     assert!(
         engine.is_file(),
         "build the actual engine wasm32 cdylib first"

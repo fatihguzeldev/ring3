@@ -2,16 +2,14 @@ use super::support_wasm as wasm_support;
 use ring3_engine::process::EngineInstance;
 use std::{
     fs,
-    path::{Path, PathBuf},
+    path::Path,
     time::{SystemTime, UNIX_EPOCH},
 };
 
 #[test]
 fn actual_same_cpl_call_gates_preserve_selected_width_fault_order_and_key_authority() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-    let engine = std::env::var_os("RING3_ENGINE_WASM")
-        .map(PathBuf::from)
-        .expect("set RING3_ENGINE_WASM to the selected integrated engine artifact");
+    let engine = crate::support_wasm::selected_engine(root);
     assert!(engine.is_file(), "selected engine artifact must exist");
     let expected = std::env::var("RING3_ENGINE_SHA256").expect("select its explicit SHA-256");
     let output = root.join("target/p2-call-gate-fixtures").join(format!(

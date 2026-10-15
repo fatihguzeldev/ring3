@@ -9,10 +9,7 @@ use std::{
 #[test]
 fn actual_x87_success_packets_reject_illegal_integer_flags_before_publication() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-    let engine = std::path::PathBuf::from(
-        std::env::var_os("RING3_ENGINE_WASM")
-            .expect("provide the validated engine Wasm with RING3_ENGINE_WASM"),
-    );
+    let engine = crate::support_wasm::selected_engine(root);
     assert!(engine.is_file(), "the selected engine Wasm must exist");
     let expected = std::env::var("RING3_ENGINE_SHA256")
         .expect("provide the selected engine SHA-256 with RING3_ENGINE_SHA256");

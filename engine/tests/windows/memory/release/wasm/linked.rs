@@ -2,7 +2,7 @@ use super::support_wasm as wasm_support;
 
 use std::{
     fs,
-    path::{Path, PathBuf},
+    path::Path,
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -78,9 +78,7 @@ fn release_image() -> Vec<u8> {
 #[test]
 fn copied_named_virtual_free_reuses_zeroed_pages_after_rust_startup_in_both_owners() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-    let engine = std::env::var_os("RING3_ENGINE_WASM")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| root.join("target/wasm32-unknown-unknown/debug/ring3_engine.wasm"));
+    let engine = crate::support_wasm::selected_engine(root);
     assert!(
         engine.is_file(),
         "build the actual engine wasm32 cdylib first"

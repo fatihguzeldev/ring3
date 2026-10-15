@@ -46,9 +46,7 @@ fn standalone(output: &Path, name: &str, pc: u32, bytes: &[u8], specs: &[BlockSp
 #[test]
 fn actual_byte_division_captures_ax_aliases_and_has_precise_retained_faults() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-    let engine = std::env::var_os("RING3_ENGINE_WASM")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| root.join("target/wasm32-unknown-unknown/debug/ring3_engine.wasm"));
+    let engine = crate::support_wasm::selected_engine(root);
     assert!(
         engine.is_file(),
         "build the integrated actual engine Wasm first"

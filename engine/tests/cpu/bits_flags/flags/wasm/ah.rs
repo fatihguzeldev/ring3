@@ -14,7 +14,7 @@ use ring3_engine::{
 #[test]
 fn actual_wasm_transfers_status_flags_through_ah_and_carry_consumers() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-    let engine = root.join("target/wasm32-unknown-unknown/debug/ring3_engine.wasm");
+    let engine = crate::support_wasm::selected_engine(root);
     assert!(
         engine.is_file(),
         "build the actual engine wasm32 cdylib first"

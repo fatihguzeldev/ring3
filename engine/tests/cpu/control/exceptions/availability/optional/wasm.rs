@@ -2,7 +2,7 @@ use super::support_wasm;
 use ring3_engine::process::EngineInstance;
 use std::{
     fs,
-    path::{Path, PathBuf},
+    path::Path,
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -18,9 +18,7 @@ fn actual_disabled_mpx_forms_preserve_default_address_fetch_and_no_operand_contr
 
 fn run(script: &str, output_name: &str) {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-    let engine = std::env::var_os("RING3_ENGINE_WASM")
-        .map(PathBuf::from)
-        .expect("select the integrated engine Wasm");
+    let engine = crate::support_wasm::selected_engine(root);
     let expected = std::env::var("RING3_ENGINE_SHA256").expect("pin the selected engine SHA256");
     assert!(engine.is_file());
     let output = root.join("target").join(output_name).join(format!(

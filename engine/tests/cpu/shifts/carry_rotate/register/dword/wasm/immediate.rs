@@ -65,7 +65,7 @@ fn local_tail(bytes: &mut [u8], at: usize) -> usize {
 #[test]
 fn native_pure_and_actual_bound_immediate_dword_carry_rotates() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-    let engine = root.join("target/wasm32-unknown-unknown/debug/ring3_engine.wasm");
+    let engine = crate::support_wasm::selected_engine(root);
     assert!(
         engine.is_file(),
         "build the current actual engine wasm32 cdylib first"

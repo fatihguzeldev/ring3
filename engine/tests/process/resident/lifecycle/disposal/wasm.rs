@@ -1,6 +1,6 @@
 use std::{
     env, fs,
-    path::{Path, PathBuf},
+    path::Path,
     process::Command,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -8,11 +8,7 @@ use std::{
 #[test]
 fn actual_engine_wasm_discards_three_current_unacknowledged_units_and_reuses_capacity() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-    let engine = env::var_os("RING3_ENGINE_WASM")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| root.join("target/wasm32-unknown-unknown/debug/ring3_engine.wasm"))
-        .canonicalize()
-        .expect("build or provide the actual engine wasm32 cdylib first");
+    let engine = crate::support_wasm::selected_engine(root);
     let unique = format!(
         "wasm-{}-{}",
         std::process::id(),

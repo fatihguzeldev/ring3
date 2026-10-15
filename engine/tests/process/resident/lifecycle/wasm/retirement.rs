@@ -60,7 +60,7 @@ fn retirement_image() -> Vec<u8> {
 #[test]
 fn copied_pe_dispatches_through_nine_explicit_stale_retirements_and_same_slot_reinstalls() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-    let engine = root.join("target/wasm32-unknown-unknown/debug/ring3_engine.wasm");
+    let engine = crate::support_wasm::selected_engine(root);
     assert!(
         engine.is_file(),
         "build the actual engine wasm32 cdylib first"

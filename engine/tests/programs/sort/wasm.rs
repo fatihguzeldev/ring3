@@ -1,6 +1,6 @@
 use std::{
     fs,
-    path::{Path, PathBuf},
+    path::Path,
     process::Command,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -10,9 +10,7 @@ use super::support_pe32_sort as pe;
 #[test]
 fn actual_resident_pe_sorts_and_checksums_without_host_cpu_reseed() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-    let engine = std::env::var_os("RING3_ENGINE_WASM")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| root.join("target/wasm32-unknown-unknown/debug/ring3_engine.wasm"));
+    let engine = crate::support_wasm::selected_engine(root);
     assert!(
         engine.is_file(),
         "build the actual engine wasm32 cdylib first"

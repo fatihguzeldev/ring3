@@ -91,7 +91,7 @@ fn callback_image(selected: bool) -> Vec<u8> {
 #[test]
 fn active_callback_completes_windows_alloc_and_returns_to_the_frozen_outer() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-    let engine = root.join("target/wasm32-unknown-unknown/debug/ring3_engine.wasm");
+    let engine = crate::support_wasm::selected_engine(root);
     assert!(
         engine.is_file(),
         "build the actual engine wasm32 cdylib first"

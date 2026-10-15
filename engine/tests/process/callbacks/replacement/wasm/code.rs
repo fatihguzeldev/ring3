@@ -9,7 +9,7 @@ use std::{
 #[test]
 fn actual_engine_wasm_installs_callback_code_without_replaying_call() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-    let engine = root.join("target/wasm32-unknown-unknown/debug/ring3_engine.wasm");
+    let engine = crate::support_wasm::selected_engine(root);
     assert!(
         engine.is_file(),
         "build the actual engine wasm32 cdylib before this integration test: {}",

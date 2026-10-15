@@ -1,3 +1,8 @@
+#[path = "wasm/engine.rs"]
+mod engine;
+
+pub use engine::selected_engine;
+
 use std::{
     path::Path,
     process::{Command, Output},

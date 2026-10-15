@@ -2,15 +2,13 @@ use super::support_wasm;
 use ring3_engine::process::EngineInstance;
 use std::{
     fs,
-    path::{Path, PathBuf},
+    path::Path,
     time::{SystemTime, UNIX_EPOCH},
 };
 #[test]
 fn actual_automatic_capacity_prefixes_resume_at_exact_fallthrough_without_weakening_whole_units() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-    let engine = std::env::var_os("RING3_ENGINE_WASM")
-        .map(PathBuf::from)
-        .expect("select engine Wasm");
+    let engine = crate::support_wasm::selected_engine(root);
     let expected = std::env::var("RING3_ENGINE_SHA256").expect("pin selected engine SHA256");
     let output = root.join("target/p2-module-capacity").join(format!(
         "{}-{}",

@@ -2,16 +2,14 @@ use super::support_wasm;
 use ring3_engine::process::EngineInstance;
 use std::{
     fs,
-    path::{Path, PathBuf},
+    path::Path,
     time::{SystemTime, UNIX_EPOCH},
 };
 
 #[test]
 fn actual_documented_legacy_nop_aliases_keep_full_fetch_and_no_operand_effects() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-    let engine = std::env::var_os("RING3_ENGINE_WASM")
-        .map(PathBuf::from)
-        .expect("select the integrated engine Wasm");
+    let engine = crate::support_wasm::selected_engine(root);
     let expected = std::env::var("RING3_ENGINE_SHA256").expect("pin the selected engine SHA256");
     assert!(engine.is_file());
     let output = root.join("target/p2-legacy-nop").join(format!(

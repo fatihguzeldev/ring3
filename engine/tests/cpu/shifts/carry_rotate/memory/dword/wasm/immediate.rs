@@ -96,9 +96,7 @@ fn bank(extension: u8) -> (Vec<u8>, Vec<Vec<u32>>) {
 #[test]
 fn native_bound_and_actual_engine_memory_immediate_dword_carry_rotates() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-    let engine_path = std::env::var_os("RING3_ENGINE_WASM")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| root.join("target/wasm32-unknown-unknown/debug/ring3_engine.wasm"));
+    let engine_path = crate::support_wasm::selected_engine(root);
     assert!(
         engine_path.is_file(),
         "build the current engine wasm32 cdylib first"

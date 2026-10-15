@@ -112,7 +112,7 @@ fn carry_image() -> Vec<u8> {
 #[test]
 fn register_memory_byte_carry_reuses_guest_cf_after_checked_read_and_copied_pe_paths() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-    let engine = root.join("target/wasm32-unknown-unknown/debug/ring3_engine.wasm");
+    let engine = crate::support_wasm::selected_engine(root);
     assert!(
         engine.is_file(),
         "build the actual engine wasm32 cdylib first"

@@ -120,7 +120,7 @@ fn set_image() -> Vec<u8> {
 #[test]
 fn setcc_writes_only_selected_bytes_preserves_flags_and_reaches_copied_pe_exit() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-    let engine = root.join("target/wasm32-unknown-unknown/debug/ring3_engine.wasm");
+    let engine = crate::support_wasm::selected_engine(root);
     assert!(
         engine.is_file(),
         "build the actual engine wasm32 cdylib first"

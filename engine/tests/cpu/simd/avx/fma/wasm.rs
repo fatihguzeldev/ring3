@@ -8,9 +8,7 @@ use std::{
 #[test]
 fn actual_fma_guest_preserves_fused_numeric_state_and_precise_memory_authority() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-    let engine = std::env::var_os("RING3_ENGINE_WASM")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| root.join("target/wasm32-unknown-unknown/debug/ring3_engine.wasm"));
+    let engine = crate::support_wasm::selected_engine(root);
     let output = root.join("target/p2-fma-fixtures").join(format!(
         "wasm-{}-{}",
         std::process::id(),

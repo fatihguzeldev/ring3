@@ -21,9 +21,7 @@ use std::{
 #[test]
 fn actual_word_jump_truncates_targets_and_preserves_live_state_in_six_profiles() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-    let engine = std::env::var_os("RING3_ENGINE_WASM")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| root.join("target/wasm32-unknown-unknown/debug/ring3_engine.wasm"));
+    let engine = crate::support_wasm::selected_engine(root);
     assert!(engine.is_file(), "build the integrated engine Wasm first");
     let output = root.join("target/p2-word-jump-fixtures").join(format!(
         "wasm-{}-{}",

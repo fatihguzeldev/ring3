@@ -2,7 +2,7 @@ use super::support_wasm as wasm_support;
 
 use std::{
     fs,
-    path::{Path, PathBuf},
+    path::Path,
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -32,9 +32,7 @@ fn wrong_signature() -> Vec<u8> {
 #[test]
 fn actual_engine_wasm_runs_product_returning_dispatcher() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-    let engine = std::env::var_os("RING3_ENGINE_WASM")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| root.join("target/wasm32-unknown-unknown/debug/ring3_engine.wasm"));
+    let engine = crate::support_wasm::selected_engine(root);
     let expected = std::env::var("RING3_ENGINE_SHA256").ok();
     assert!(
         engine.is_file(),

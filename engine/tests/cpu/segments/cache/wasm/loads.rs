@@ -16,9 +16,7 @@ use std::{
 #[test]
 fn actual_segment_reads_descriptor_loads_and_plain_strings_preserve_precise_state() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-    let engine = std::env::var_os("RING3_ENGINE_WASM")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| root.join("target/wasm32-unknown-unknown/debug/ring3_engine.wasm"));
+    let engine = crate::support_wasm::selected_engine(root);
     let output = root.join("target/p2-segment-loads-fixtures").join(format!(
         "wasm-{}-{}",
         std::process::id(),
@@ -60,9 +58,7 @@ fn actual_segment_reads_descriptor_loads_and_plain_strings_preserve_precise_stat
 #[test]
 fn actual_normal_memory_enforces_cached_segment_intent_and_entire_spans() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-    let engine = std::env::var_os("RING3_ENGINE_WASM")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| root.join("target/wasm32-unknown-unknown/debug/ring3_engine.wasm"));
+    let engine = crate::support_wasm::selected_engine(root);
     let output = root.join("target/p2-segment-loads-fixtures").join(format!(
         "access-{}-{}",
         std::process::id(),

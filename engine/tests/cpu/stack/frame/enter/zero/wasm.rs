@@ -13,9 +13,7 @@ use std::{
 #[test]
 fn actual_enter_zero_publishes_checked_frames_and_preserves_live_inputs() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-    let engine = std::env::var_os("RING3_ENGINE_WASM")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| root.join("target/wasm32-unknown-unknown/debug/ring3_engine.wasm"));
+    let engine = crate::support_wasm::selected_engine(root);
     assert!(engine.is_file(), "build the integrated engine Wasm first");
     let parent = root.join("target/p2-enter-zero-fixtures");
     fs::create_dir_all(&parent).unwrap();

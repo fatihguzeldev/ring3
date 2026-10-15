@@ -11,9 +11,7 @@ use std::{
 #[test]
 fn actual_word_ror_uses_current_low_word_and_masked_counts() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-    let engine = std::env::var_os("RING3_ENGINE_WASM")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| root.join("target/wasm32-unknown-unknown/debug/ring3_engine.wasm"));
+    let engine = crate::support_wasm::selected_engine(root);
     let expected = std::env::var("RING3_ENGINE_SHA256").expect("pin the integrated engine SHA256");
     assert!(
         expected.len() == 64

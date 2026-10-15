@@ -8,9 +8,7 @@ use std::{
 #[test]
 fn actual_integer_nops_preserve_pending_x87_and_wait_stays_separate() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-    let engine = std::env::var_os("RING3_ENGINE_WASM")
-        .map(std::path::PathBuf::from)
-        .expect("select the integrated engine Wasm");
+    let engine = crate::support_wasm::selected_engine(root);
     let expected = std::env::var("RING3_ENGINE_SHA256").expect("pin the engine SHA256");
     let output = root.join("target/p2-x87-compatibility").join(format!(
         "{}-{}",

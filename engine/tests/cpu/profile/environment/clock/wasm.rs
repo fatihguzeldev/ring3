@@ -5,7 +5,7 @@ use std::{fs, path::Path, time::SystemTime};
 #[test]
 fn actual_timestamp_clock_preserves_time_and_unblocks_a_guest_polling_loop() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-    let engine = std::env::var_os("RING3_ENGINE_WASM").expect("select the integrated clock engine");
+    let engine = crate::support_wasm::selected_engine(root);
     let engine = Path::new(&engine);
     let expected = std::env::var("RING3_ENGINE_SHA256").expect("select its explicit SHA-256");
     let output = root.join("target/cpu-clock").join(format!(

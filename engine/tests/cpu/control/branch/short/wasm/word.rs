@@ -8,9 +8,7 @@ use std::{
 #[test]
 fn actual_short_word_targets_and_count_widths_in_bound_modes() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-    let engine = std::env::var_os("RING3_ENGINE_WASM")
-        .map(std::path::PathBuf::from)
-        .expect("select the integrated engine Wasm");
+    let engine = crate::support_wasm::selected_engine(root);
     let expected = std::env::var("RING3_ENGINE_SHA256").expect("pin the engine SHA256");
     assert!(engine.is_file());
     let output = root.join("target/p2-short-word-fixtures").join(format!(
