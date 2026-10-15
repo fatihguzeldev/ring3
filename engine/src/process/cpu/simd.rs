@@ -5,8 +5,11 @@ use crate::{
         cpu_helper::{CpuMemoryError, encode_cpu_result},
         memory_helper::HELPER_SIZE,
     },
-    cpu::x86::simd::{SimdError, execute_descriptor},
+    cpu::x86::simd::SimdError,
 };
+
+mod arena;
+use arena::execute_descriptor;
 
 impl EngineInstance {
     pub fn simd_execute(
@@ -143,7 +146,8 @@ mod tests {
             scalar: false,
             implicit_address: None,
         }
-        .descriptor().unwrap()
+        .descriptor()
+        .unwrap()
     }
 
     #[test]

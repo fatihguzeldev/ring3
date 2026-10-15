@@ -1,6 +1,7 @@
 use super::{X87State, ir::EffectiveAddress, simd::SimdState};
 
 pub(crate) mod access;
+pub(crate) mod fxsave;
 pub(in crate::cpu::x86) mod legacy;
 pub mod upper;
 
