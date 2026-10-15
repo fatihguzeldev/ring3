@@ -2,11 +2,13 @@ use super::*;
 use crate::process::FileEnvironment32;
 #[test]
 fn environment_codec_preserves_utf16_and_staged_lengths_without_unbounded_records() {
-    let mut environment = FileEnvironment32::default();
-    environment.search_path = vec![
-        vec![67, 58, 92, 0xd800],
-        "C:\\games".encode_utf16().collect(),
-    ];
+    let environment = FileEnvironment32 {
+        search_path: vec![
+            vec![67, 58, 92, 0xd800],
+            "C:\\games".encode_utf16().collect(),
+        ],
+        ..Default::default()
+    };
     let lengths: Vec<u32> = [
         &environment.application_directory,
         &environment.windows_directory,

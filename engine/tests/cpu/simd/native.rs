@@ -1,3 +1,6 @@
+#[path = "../../support/cpu/fetch/native.rs"]
+mod fetch_fault;
+
 #[path = "moves/native/scalar.rs"]
 mod cpu_simd_scalar_move;
 

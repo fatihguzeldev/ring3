@@ -1,3 +1,6 @@
+#[path = "../../support/cpu/fetch/native.rs"]
+mod support_fetch;
+
 #[path = "../../support/cpu/arena.rs"]
 mod support_arena;
 

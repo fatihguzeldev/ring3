@@ -11,7 +11,7 @@ use ring3_engine::cpu::dbt::CompileLimits;
 #[test]
 fn actual_wasm_memory_xadd_byte_commits_checked_lanes_and_resumes_current_tails() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-    let engine = super::engine_artifact::selected_engine(root);
+    let engine = wasm_support::selected_engine(root);
     assert!(
         engine.is_file(),
         "build the actual engine wasm32 cdylib first"

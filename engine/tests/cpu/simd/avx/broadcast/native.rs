@@ -1,5 +1,4 @@
-#[path = "../../../../support/cpu/fetch/native.rs"]
-mod fetch_fault;
+use crate::fetch_fault;
 
 use ring3_engine::{
     abi::{

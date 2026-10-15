@@ -2,11 +2,13 @@ use super::*;
 #[test]
 fn inverse_distance_pan_cone_doppler_and_disabled_3d_have_observable_output_controls() {
     let listener = Listener3D::default();
-    let mut source = Buffer3D::default();
-    source.position = Vector3 {
-        x: 2.0,
-        y: 0.0,
-        z: 0.0,
+    let mut source = Buffer3D {
+        position: Vector3 {
+            x: 2.0,
+            y: 0.0,
+            z: 0.0,
+        },
+        ..Buffer3D::default()
     };
     let controls = source.controls(listener, 48_000, 0, false);
     assert_eq!(controls.gains, [0.0, 0.5]);
