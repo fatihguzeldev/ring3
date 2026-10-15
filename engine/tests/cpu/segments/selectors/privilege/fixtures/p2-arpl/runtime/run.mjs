@@ -11,7 +11,7 @@ const paths = [
   'engine/src/cpu/x86/decode/segment_queries.rs', 'engine/src/cpu/x86/decode/decoder.rs', 'engine/src/cpu/x86/decode/profile.rs', 'engine/src/cpu/x86/decode/lower.rs', 'engine/src/cpu/x86/ir.rs',
   'engine/src/cpu/x86/segments.rs', 'engine/src/cpu/x86/segments/cache.rs', 'engine/src/cpu/x86/segments/descriptors.rs', 'engine/src/abi/x86/segments.rs',
   'engine/src/cpu/dbt/region.rs', 'engine/src/cpu/dbt/wasm/segment_queries.rs', 'engine/src/cpu/dbt/wasm/integer/dispatch.rs', 'engine/src/cpu/dbt/wasm/atomic.rs', 'engine/src/cpu/dbt/wasm/cpu_result.rs',
-  'engine/src/cpu/dbt/wasm/memory.rs', 'engine/src/cpu/dbt/wasm/segments.rs', 'engine/src/process/cpu/integer.rs', 'engine/src/process/cpu/segment_queries.rs', 'engine/src/memory/space.rs', 'engine/src/abi/cpu_helper.rs',
+  'engine/src/cpu/dbt/wasm/memory.rs', 'engine/src/cpu/dbt/wasm/segments.rs', 'engine/src/process/cpu/integer.rs', 'engine/src/process/cpu/segment_queries.rs', 'engine/src/memory/space.rs', 'engine/src/memory/space/atomic.rs', 'engine/src/abi/cpu_helper.rs',
   'engine/tests/cpu/segments/selectors/privilege/native.rs', 'engine/tests/cpu/segments/selectors/privilege/wasm.rs', 'engine/tests/cpu/segments/selectors/privilege/fixtures/p2-arpl/runtime/run.mjs',
 ];
 const pins = () => Object.fromEntries(paths.map(path => [path, createHash('sha256').update(readFileSync(join(root, path))).digest('hex')])), sourcePins = pins();

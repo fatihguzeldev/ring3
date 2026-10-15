@@ -34,7 +34,7 @@ const sources=[
   "engine/src/process/cpu/far/return.rs",
   "engine/src/process/cpu/segments.rs",
   "engine/src/process/memory/span.rs",
-  "engine/src/memory/space.rs",
+  "engine/src/memory/space.rs", "engine/src/memory/space/atomic.rs",
   "engine/src/process/execution/authority.rs",
   "engine/src/process/wasm/cpu.rs",
   "engine/src/process/wasm/mod.rs",

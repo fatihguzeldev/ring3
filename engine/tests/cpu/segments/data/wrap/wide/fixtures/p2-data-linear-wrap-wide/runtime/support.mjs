@@ -67,7 +67,7 @@ export async function harness(enginePath, output, root) {
     "engine/src/process/memory/scalar/cpu_write.rs",
     "engine/src/process/wasm/memory/cpu_write.rs",
     "engine/src/process/execution/authority.rs",
-    "engine/src/memory/space.rs",
+    "engine/src/memory/space.rs", "engine/src/memory/space/atomic.rs",
     "engine/src/memory/space/cpu.rs",
     "engine/src/memory/space/cpu/read.rs",
     "engine/src/memory/space/cpu/write.rs",

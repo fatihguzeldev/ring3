@@ -46,7 +46,7 @@ const sourcePaths = [
   'engine/src/cpu/dbt/wasm/avx/execute.rs',
   'engine/src/cpu/dbt/wasm/cpu_result.rs',
   'engine/src/process/cpu/avx.rs',
-  'engine/src/memory/space.rs',
+  'engine/src/memory/space.rs', 'engine/src/memory/space/atomic.rs',
   'engine/src/abi/x86/avx.rs',
   'engine/src/abi/x86/simd.rs',
   'engine/src/abi/x86/ymm.rs',

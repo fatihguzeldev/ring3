@@ -9,7 +9,7 @@ const engine = readEngine(enginePath), PC = 0x1000, DATA = 0x5000, SIZE = 4612;
 const sourcePaths = [
   'engine/src/cpu/x86/decode/cache_timestamp.rs', 'engine/src/cpu/x86/decode/decoder.rs', 'engine/src/cpu/x86/decode/profile.rs', 'engine/src/cpu/x86/decode/lower.rs', 'engine/src/cpu/x86/ir.rs',
   'engine/src/cpu/dbt/region.rs', 'engine/src/cpu/dbt/wasm/cache_flush.rs', 'engine/src/cpu/dbt/wasm/integer_system.rs', 'engine/src/cpu/dbt/wasm/integer/dispatch.rs', 'engine/src/cpu/dbt/wasm/atomic.rs', 'engine/src/cpu/dbt/wasm/cpu_result.rs',
-  'engine/src/cpu/dbt/wasm/memory.rs', 'engine/src/cpu/dbt/wasm/memory/narrow.rs', 'engine/src/cpu/dbt/wasm/segments.rs', 'engine/src/process/cpu/integer.rs', 'engine/src/memory/space.rs', 'engine/src/abi/cpu_helper.rs',
+  'engine/src/cpu/dbt/wasm/memory.rs', 'engine/src/cpu/dbt/wasm/memory/narrow.rs', 'engine/src/cpu/dbt/wasm/segments.rs', 'engine/src/process/cpu/integer.rs', 'engine/src/memory/space.rs', 'engine/src/memory/space/atomic.rs', 'engine/src/abi/cpu_helper.rs',
   'engine/tests/cpu/profile/environment/ordering/native.rs', 'engine/tests/cpu/profile/environment/ordering/wasm.rs', 'engine/tests/cpu/profile/environment/ordering/fixtures/p2-cache-timestamp/runtime/run.mjs',
 ];
 const sources = () => Object.fromEntries(sourcePaths.map(path => [path, createHash('sha256').update(readFileSync(join(root, path))).digest('hex')]));

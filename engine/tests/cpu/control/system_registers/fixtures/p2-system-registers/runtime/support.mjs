@@ -80,7 +80,7 @@ export async function harness(enginePath, output, root) {
     "engine/src/cpu/x86/mod.rs",
     "engine/src/cpu/x86/system_registers.rs",
     "engine/src/memory/code.rs",
-    "engine/src/memory/space.rs",
+    "engine/src/memory/space.rs", "engine/src/memory/space/atomic.rs",
     "engine/src/memory/space/code_fetch.rs",
     "engine/src/process/calls/callback.rs",
     "engine/src/process/calls/context.rs",

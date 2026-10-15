@@ -18,7 +18,7 @@ const sourcePaths = [
   'engine/src/cpu/dbt/wasm/simd.rs', 'engine/src/cpu/dbt/wasm/memory.rs',
   'engine/src/cpu/dbt/wasm/segments/access.rs', 'engine/src/cpu/dbt/wasm/segments/context.rs',
   'engine/src/cpu/x86/simd.rs', 'engine/src/cpu/x86/decode/simd.rs',
-  'engine/src/process/cpu/simd.rs', 'engine/src/process/memory/span.rs', 'engine/src/memory/space.rs',
+  'engine/src/process/cpu/simd.rs', 'engine/src/process/memory/span.rs', 'engine/src/memory/space.rs', 'engine/src/memory/space/atomic.rs',
   'engine/tests/support/wasm.rs', 'engine/tests/support/wasm/engine.mjs',
   'engine/tests/cpu/simd/wasm.rs', 'engine/tests/cpu/simd/memory/masked/wasm.rs',
   'engine/tests/cpu/simd/memory/masked/fixtures/p2-maskmov-authority/runtime/run.mjs',

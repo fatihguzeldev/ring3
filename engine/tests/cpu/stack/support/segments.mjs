@@ -17,7 +17,7 @@ function record(magic, fields, version = 1, size = 40) {
 const packet = fields => record('R3MH', fields, 7);
 export function harness(family, sourcePaths) {
   const [enginePath, output, root] = process.argv.slice(2), engine = readEngine(enginePath);
-  const paths = ['engine/src/process/cpu/stack.rs', 'engine/src/process/cpu/segments.rs', 'engine/src/cpu/x86/stack.rs', 'engine/src/memory/space.rs', 'engine/src/cpu/x86/segments/cache.rs', 'engine/src/cpu/dbt/wasm/stack.rs', 'engine/src/abi/cpu_helper.rs', 'engine/src/abi/x86/segments.rs', 'engine/tests/support/wasm/engine.mjs', 'engine/tests/cpu/stack/support/segments.mjs', ...sourcePaths];
+  const paths = ['engine/src/process/cpu/stack.rs', 'engine/src/process/cpu/segments.rs', 'engine/src/cpu/x86/stack.rs', 'engine/src/memory/space.rs', 'engine/src/memory/space/atomic.rs', 'engine/src/cpu/x86/segments/cache.rs', 'engine/src/cpu/dbt/wasm/stack.rs', 'engine/src/abi/cpu_helper.rs', 'engine/src/abi/x86/segments.rs', 'engine/tests/support/wasm/engine.mjs', 'engine/tests/cpu/stack/support/segments.mjs', ...sourcePaths];
   assert.equal(new Set(paths).size, paths.length);
   const pins = () => Object.fromEntries(paths.map(p => [p, hash(readFileSync(join(root, p)))])), sourcePins = pins();
   const observations = [], modules = [], frames = [], ramFrames = [], exits = [], helperCalls = [];

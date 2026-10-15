@@ -22,7 +22,7 @@ const paths = [
   'engine/src/cpu/dbt/wasm/control_instructions.rs', 'engine/src/cpu/dbt/wasm/integer/dispatch.rs',
   'engine/src/cpu/dbt/wasm/integer_system.rs', 'engine/src/cpu/dbt/wasm/emitter.rs',
   'engine/src/cpu/dbt/wasm/code_fetch.rs', 'engine/src/cpu/dbt/wasm/integer/flags.rs',
-  'engine/src/process/execution/stopped.rs', 'engine/src/memory/space.rs',
+  'engine/src/process/execution/stopped.rs', 'engine/src/memory/space.rs', 'engine/src/memory/space/atomic.rs',
   'engine/tests/cpu/control/wasm.rs', own + 'wasm.rs',
   own + 'fixtures/p2-optional-availability/runtime/run.mjs',
   own + 'fixtures/p2-optional-availability/runtime/vectors.mjs',

@@ -57,7 +57,7 @@ export async function harness(enginePath, output, root) {
     'engine/src/process/execution/stopped.rs', 'engine/src/process/wasm/execution.rs',
     'engine/src/process/cpu/far.rs', 'engine/src/process/memory/scalar.rs', 'engine/src/process/memory/span.rs',
     'engine/tests/support/wasm.rs', 'engine/tests/support/wasm/engine.mjs', 'engine/tests/cpu/segments/wasm.rs',
-    'engine/src/memory/code.rs', 'engine/src/memory/space.rs', 'engine/src/memory/space/code_fetch.rs',
+    'engine/src/memory/code.rs', 'engine/src/memory/space.rs', 'engine/src/memory/space/atomic.rs', 'engine/src/memory/space/code_fetch.rs',
     'engine/tests/cpu/segments/code/wrap/native.rs', 'engine/tests/cpu/segments/code/wrap/wasm.rs',
     'engine/tests/cpu/segments/code/wrap/fixtures/p2-cs-linear-wrap/runtime/run.mjs',
     'engine/tests/cpu/segments/code/wrap/fixtures/p2-cs-linear-wrap/runtime/support.mjs',

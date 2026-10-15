@@ -91,7 +91,7 @@ const sourcePaths = [
   'engine/src/memory/address.rs',
   'engine/src/memory/code.rs',
   'engine/src/memory/mod.rs',
-  'engine/src/memory/space.rs',
+  'engine/src/memory/space.rs', 'engine/src/memory/space/atomic.rs',
   'engine/src/process/calls/call.rs', 'engine/src/process/calls/context.rs', 'engine/src/process/calls/mod.rs', 'engine/src/process/mod.rs',
   'engine/src/process/calls/callback.rs',
   'engine/src/process/calls/code.rs',

@@ -20,7 +20,7 @@ const sourcePaths = [
   'engine/src/process/execution/compiled.rs', 'engine/src/process/execution/stopped.rs',
   'engine/src/process/execution/resident.rs', 'engine/src/process/execution/authority.rs',
   'engine/src/process/wasm/execution.rs', 'engine/src/process/wasm/mod.rs', 'engine/src/abi/wasm/exports/execution.rs',
-  'engine/src/memory/space.rs', 'engine/tests/support/wasm.rs', 'engine/tests/support/wasm/engine.mjs',
+  'engine/src/memory/space.rs', 'engine/src/memory/space/atomic.rs', 'engine/tests/support/wasm.rs', 'engine/tests/support/wasm/engine.mjs',
   'engine/tests/cpu/segments/code/fetch/native.rs', 'engine/tests/cpu/segments/code/fetch/wasm.rs',
   'engine/tests/cpu/segments/native.rs', 'engine/tests/cpu/segments/wasm.rs',
   'engine/tests/cpu/segments/code/fetch/fixtures/p2-code-fetch/runtime/run.mjs',

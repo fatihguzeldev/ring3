@@ -17,7 +17,7 @@ const paths = [
   'engine/src/cpu/dbt/wasm/memory/exchange.rs', 'engine/src/cpu/dbt/wasm/memory/byte_store.rs',
   'engine/src/cpu/dbt/wasm/memory/word_store.rs', 'engine/src/cpu/dbt/wasm/integer/dispatch.rs',
   'engine/src/cpu/dbt/wasm/integer/operands.rs', 'engine/src/process/memory/scalar.rs',
-  'engine/src/memory/space.rs', 'engine/src/abi/memory_helper.rs',
+  'engine/src/memory/space.rs', 'engine/src/memory/space/atomic.rs', 'engine/src/abi/memory_helper.rs',
   'engine/tests/cpu/atomic/wasm.rs', 'engine/tests/cpu/atomic/hints/wasm.rs',
   'engine/tests/cpu/atomic/hints/fixtures/p2-hle/runtime/run.mjs', supportPath,
 ];

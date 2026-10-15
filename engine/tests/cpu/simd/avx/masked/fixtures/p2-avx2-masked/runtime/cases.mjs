@@ -198,7 +198,7 @@ export const maskedSourcePaths = [
   'engine/src/abi/x86/avx.rs',
   'engine/src/abi/x86/segments.rs',
   'engine/src/cpu/x86/segments/cache.rs',
-  'engine/src/memory/space.rs',
+  'engine/src/memory/space.rs', 'engine/src/memory/space/atomic.rs',
   'engine/tests/cpu/simd/avx/execution/wasm.rs',
   'engine/tests/cpu/simd/avx/masked/fixtures/p2-avx2-masked/runtime/cases.mjs',
 ];

@@ -19,7 +19,7 @@ const sourcePaths=[
   'engine/src/cpu/dbt/wasm/memory.rs','engine/src/cpu/dbt/wasm/emitter.rs',
   'engine/src/process/cpu/stack.rs','engine/src/process/memory/span.rs',
   'engine/src/process/execution/authority.rs','engine/src/process/cpu/segments.rs',
-  'engine/src/memory/space.rs','engine/src/abi/x86/segments.rs',
+  'engine/src/memory/space.rs', 'engine/src/memory/space/atomic.rs','engine/src/abi/x86/segments.rs',
   'engine/tests/support/wasm/engine.mjs',
 ];
 const pins=()=>Object.fromEntries(sourcePaths.map(path=>[path,hash(readFileSync(join(root,path)))]));

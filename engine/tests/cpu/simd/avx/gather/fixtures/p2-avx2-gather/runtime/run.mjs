@@ -54,7 +54,7 @@ const sourcePaths = [
   'engine/src/cpu/dbt/wasm/emitter.rs',
   'engine/src/process/cpu/avx.rs',
   'engine/src/process/execution/authority.rs',
-  'engine/src/memory/space.rs',
+  'engine/src/memory/space.rs', 'engine/src/memory/space/atomic.rs',
   'engine/src/cpu/x86/segments/cache.rs',
 ];
 assert.equal(new Set(sourcePaths).size, sourcePaths.length, 'every source pin has one owner');

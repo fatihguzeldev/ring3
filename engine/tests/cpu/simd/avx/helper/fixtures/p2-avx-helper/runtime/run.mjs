@@ -23,7 +23,7 @@ const sourcePaths = [...new Set([...receipt.sourcePaths,
   'engine/src/abi/x86/avx.rs','engine/src/cpu/x86/avx/operation.rs','engine/src/cpu/x86/avx/dispatch.rs',
   'engine/src/cpu/x86/avx/masked.rs','engine/src/process/cpu/avx.rs','engine/src/process/wasm/avx.rs',
   'engine/src/process/wasm/mod.rs',
-  'engine/src/abi/cpu_helper.rs','engine/src/abi/header.rs','engine/src/memory/space.rs',
+  'engine/src/abi/cpu_helper.rs','engine/src/abi/header.rs','engine/src/memory/space.rs', 'engine/src/memory/space/atomic.rs',
   'engine/src/process/execution/authority.rs','engine/src/process/memory/span.rs',
   'engine/src/abi/x86/simd.rs','engine/src/abi/x86/ymm.rs','engine/src/abi/x86/segments.rs',
 ])];

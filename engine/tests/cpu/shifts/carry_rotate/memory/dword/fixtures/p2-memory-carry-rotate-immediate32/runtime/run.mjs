@@ -135,7 +135,7 @@ const sourcePaths = [
   "engine/src/cpu/x86/decode/profile.rs",
   "engine/src/cpu/dbt/wasm/emitter.rs",
   "engine/src/cpu/dbt/wasm/locals.rs",
-  "engine/src/memory/space.rs",
+  "engine/src/memory/space.rs", "engine/src/memory/space/atomic.rs",
   "engine/src/process/instance.rs", "engine/src/process/execution/compiled.rs", "engine/src/process/execution/authority.rs", "engine/src/process/memory/address_space.rs", "engine/src/process/memory/scalar.rs", "engine/src/process/memory/scalar/tests.rs", "engine/src/process/execution/mod.rs", "engine/src/process/memory/mod.rs", "engine/src/process/mod.rs",
   "engine/src/process/execution/resident.rs", "engine/src/abi/arena.rs",
   "engine/src/abi/memory_helper.rs",
