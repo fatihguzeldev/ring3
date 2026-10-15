@@ -9,6 +9,7 @@ use crate::{
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SystemExportTarget32 {
     Gate(u32),
+    PrivateGate(u32),
     Address(GuestAddress),
     Forwarder(String),
 }
@@ -149,7 +150,9 @@ impl ModuleCatalog32 {
             return Err(ModuleError32::InvalidSystemExport);
         }
         for (index, export) in module.exports.iter().enumerate() {
-            if export.name.is_none() && export.ordinal.is_none() {
+            if matches!(export.target, SystemExportTarget32::PrivateGate(_))
+                != (export.name.is_none() && export.ordinal.is_none())
+            {
                 return Err(ModuleError32::InvalidSystemExport);
             }
             if let Some(name) = &export.name
@@ -164,7 +167,9 @@ impl ModuleCatalog32 {
                 return Err(ModuleError32::DuplicateSymbol);
             }
             match &export.target {
-                SystemExportTarget32::Gate(0) | SystemExportTarget32::Address(GuestAddress(0)) => {
+                SystemExportTarget32::Gate(0)
+                | SystemExportTarget32::PrivateGate(0)
+                | SystemExportTarget32::Address(GuestAddress(0)) => {
                     return Err(ModuleError32::InvalidSystemExport);
                 }
                 SystemExportTarget32::Forwarder(forwarder) => {

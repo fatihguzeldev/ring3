@@ -79,6 +79,7 @@ pub(super) fn export_value(
                         gate: *gate,
                     }))
                 }
+                SystemExportTarget32::PrivateGate(_) => Err(ModuleError32::MissingSymbol),
                 SystemExportTarget32::Forwarder(value) => {
                     Ok(ExportValue32::Forwarder(value.clone()))
                 }

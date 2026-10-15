@@ -11,7 +11,8 @@ fn gate_ids(module: &SystemModule32) -> Result<Vec<u32>, ModuleError32> {
     ids.try_reserve_exact(module.exports.len())
         .map_err(|_| ModuleError32::Allocation)?;
     for export in &module.exports {
-        if let SystemExportTarget32::Gate(id) = export.target
+        if let SystemExportTarget32::Gate(id) | SystemExportTarget32::PrivateGate(id) =
+            export.target
             && !ids.contains(&id)
         {
             ids.push(id);
@@ -56,3 +57,6 @@ pub(super) fn prepare(
     }
     Ok((pages, gates))
 }
+
+#[cfg(test)]
+mod tests;
