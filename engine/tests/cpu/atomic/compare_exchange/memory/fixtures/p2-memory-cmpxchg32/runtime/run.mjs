@@ -1,4 +1,6 @@
-import {createArena} from '../../../../../../../support/wasm/arena.mjs';
+import {pageFaultExit, pageFaultPacket} from '../../../../../../../support/wasm/page-fault.mjs';
+import {generatedImports, attachDetectionApi} from '../../../../../../../support/wasm/binding.mjs';
+import {ARENA_SIZE, createArena} from '../../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, readdirSync, writeFileSync} from 'node:fs';
@@ -10,7 +12,7 @@ assert.ok(root, 'expected actual engine Wasm, output directory and repository ro
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const {bytes: engineBytes, module: engineModule, sha256: engineSha256} = readEngine(enginePath);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
-const SIZE = 4612, TRANSFER = 140, PC = 0x1000, COLD = PC + 128, KEEP = 0x3000, DATA = 0x4000, SECOND = 0x5000, WORD = 0x4010;
+const SIZE = ARENA_SIZE, TRANSFER = 140, PC = 0x1000, COLD = PC + 128, KEEP = 0x3000, DATA = 0x4000, SECOND = 0x5000, WORD = 0x4010;
 const OWNERS = ['replacement', 'resident'], FLAGS = [2, 0xcd7];
 const REG = [0x1234807f, 0x23457f80, 0x34560f10, 0x4567ff00, 0x56789abc, 0x6789abcd, 0x789abcde, 0x89abcdef];
 const GPRS = ['EAX', 'ECX', 'EDX', 'EBX', 'ESP', 'EBP', 'ESI', 'EDI'];
@@ -56,8 +58,8 @@ const banks = {
 };
 assert.deepEqual(banks.special.scans.map(scan => scan.entry - PC), [0, 11, 24, 36, 48, 60, 74]);
 const faultShapes = [
-  {name: 'cross-read-unmapped', detail: 1, fault: SECOND, access: 1, missing: SECOND},
-  {name: 'cross-read-denied', detail: 2, fault: SECOND, access: 1, denied: SECOND, permissions: 2},
+  {name: 'cross-read-unmapped', detail: 1, fault: SECOND, access: 2, missing: SECOND},
+  {name: 'cross-read-denied', detail: 2, fault: SECOND, access: 2, denied: SECOND, permissions: 2},
   {name: 'cross-first-read-only', detail: 2, fault: 0x4ffe, access: 2, denied: DATA, permissions: 1},
   {name: 'cross-second-read-only', detail: 2, fault: SECOND, access: 2, denied: SECOND, permissions: 1},
 ];
@@ -88,7 +90,7 @@ const source = {provenance: 'existing physically pinned local Intel primary; no 
 for (const kind of ['pdf', 'full_text']) {const bytes = readFileSync(join(root, source[`${kind}_path`])); assert.equal(bytes.length, source[`${kind}_bytes`]); assert.equal(hash(bytes), source[`${kind}_sha256`]);}
 const chapter = Buffer.from(readFileSync(join(root, source.full_text_path), 'utf8').split('\n').slice(15501, 15590).join('\n') + '\n');
 assert.equal(chapter.length, source.chapter_bytes); assert.equal(hash(chapter), source.chapter_sha256); source.saved_chapter = artifact('intel-cmpxchg.txt', chapter);
-const sourcePaths = ['engine/tests/cpu/atomic/compare_exchange/memory/native/dword.rs', 'engine/tests/cpu/atomic/native.rs', 'engine/tests/support/cpu/prefix/admission.rs', 'engine/tests/cpu/atomic/compare_exchange/memory/wasm/dword.rs', 'engine/tests/cpu/atomic/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/atomic/compare_exchange/memory/fixtures/p2-memory-cmpxchg32/runtime/run.mjs', 'engine/tests/support/wasm/engine.mjs'];
+const sourcePaths = ['engine/tests/cpu/atomic/compare_exchange/memory/native/dword.rs', 'engine/tests/cpu/atomic/native.rs', 'engine/tests/support/cpu/prefix/admission.rs', 'engine/tests/cpu/atomic/compare_exchange/memory/wasm/dword.rs', 'engine/tests/cpu/atomic/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/atomic/compare_exchange/memory/fixtures/p2-memory-cmpxchg32/runtime/run.mjs', 'engine/tests/support/wasm/engine.mjs', 'engine/tests/support/wasm/binding.mjs', 'engine/tests/support/wasm/page-fault.mjs'];
 sourcePaths.push('engine/src/abi/memory_helper/cpu.rs','engine/src/cpu/dbt/wasm/memory/cpu_scalar.rs','engine/src/cpu/dbt/wasm/emitter.rs','engine/src/process/memory/cpu_scalar.rs','engine/src/process/memory/scalar/cpu_write.rs','engine/src/process/wasm/memory/cpu_write.rs','engine/src/abi/wasm/exports/memory/cpu_write.rs','engine/src/memory/space/cpu/atomic.rs');
 const sourceHashes = () => Object.fromEntries(sourcePaths.map(path => [path, hash(readFileSync(join(root, path)))]));
 const testHashes = sourceHashes();
@@ -100,9 +102,21 @@ function record(magic, version, size, fields) {
   fields.forEach((value, index) => bytes.writeUInt32LE(value >>> 0, 16 + index * 4)); return bytes;
 }
 const state = (registers, pc, flags) => record('R3ST', 1, 56, [...registers, pc, flags]);
-const exit = (version, reason, retired, detail = 0, address = 0, access = 0) => record('R3EX', version, 40, [reason, retired, detail, address, access, access ? 4 : 0]);
+const exit = (version, reason, retired, detail = 0, address = 0, access = 0) =>
+  reason === 5
+    ? pageFaultExit({
+        retired,
+        errorCode: 6 | (detail === 2 ? 1 : 0),
+        address,
+        access: 2,
+        length: access ? 4 : 0
+      })
+    : record('R3EX', version, 40, [reason, retired, detail, address, access, access ? 4 : 0]);
 const helper = (value = 0, detail = 0, address = 0, access = 0) => record('R3MH', 1, 40, [access ? 1 : 0, value, detail, address, access, access ? 4 : 0]);
-const cpuHelper = (value = 0, detail = 0, address = 0, access = 0) => record('R3MH', 10, 40, [access ? 1 : 0, value, detail, address, access, 4]);
+const cpuHelper = (value = 0, detail = 0, address = 0, access = 0) =>
+  Boolean(access) && (detail === 1 || detail === 2)
+    ? pageFaultPacket({ errorCode: 6 | (detail === 2 ? 1 : 0), address, access: 2, length: 4 })
+    : record('R3MH', 10, 40, [access ? 1 : 0, value, detail, address, access, 4]);
 const pattern = Buffer.from(Array.from({length: 4096}, (_, index) => index % 251 + 1));
 function refresh(ctx) {ctx.bytes = new Uint8Array(ctx.memory.buffer); ctx.view = new DataView(ctx.memory.buffer); return ctx;}
 function arena(ctx) {return Buffer.from(refresh(ctx).bytes.subarray(ctx.base, ctx.base + SIZE));}
@@ -121,6 +135,9 @@ function fresh(owner, selected, label) {
   const arities = {open: 3, close: 0, arena_ptr: 0, map: 3, unmap: 2, protect: 3, upload: 2, read32: 1,
     compile_entries: 2, compile_resident: 1, generation: 0, module_ptr: 0, module_len: 0, guard: 6, guard_resident: 7, store32: 2, store_resident32: 6};
   for (const [name, arity] of Object.entries(arities)) {api[name] = instance.exports[`ring3_abi_v1_${name}`]; assert.equal(typeof api[name], 'function', name); assert.equal(api[name].length, arity, name);}
+ attachDetectionApi(api, instance.exports);
+  api.cpu_read_modify32 = instance.exports.ring3_abi_v1_cpu_read_modify32;
+  assert.equal(api.cpu_read_modify32?.length, 1, 'native read-modify helper');
   for (const name of ['read32', 'store32', 'store_resident32']) {api['cpu_'+name] = instance.exports['ring3_abi_v1_cpu_'+name]; assert.equal(api['cpu_'+name]?.length, arities[name], 'cpu_'+name);}
   const ctx = {owner, ordinal, bank: selected, label, api, memory: instance.exports.memory, low: ordinal, high: 0x434d5032,
     expected: createArena(SIZE), pages: new Map(), permissions: new Map(), units: []};
@@ -143,7 +160,7 @@ function compile(ctx, phase = 'initial', tail) {
   }
   refresh(ctx); assert.ok(binding.pointer > 0 && binding.length > 8 && binding.length <= 65536 && binding.pointer + binding.length <= ctx.bytes.length);
   const bytes = Buffer.from(ctx.bytes.subarray(binding.pointer, binding.pointer + binding.length)), module = new WebAssembly.Module(bytes);
-  const names = [ctx.owner === 'replacement' ? 'guard' : 'guard_resident', ...(memory ? ['cpu_read32', ctx.owner === 'replacement' ? 'cpu_store32' : 'cpu_store_resident32'] : [])];
+  const names = generatedImports({resident: !(ctx.owner === 'replacement'), helpers: [...(memory ? ['cpu_read32', ctx.owner === 'replacement' ? 'cpu_store32' : 'cpu_store_resident32', 'cpu_read_modify32'] : [])]}).slice(1).map(item => item.name);
   const imports = [{module: 'env', name: 'memory', kind: 'memory'}, ...names.map(name => ({module: 'ring3', name, kind: 'function'}))];
   assert.deepEqual(WebAssembly.Module.imports(module), imports); assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
   const child = new WebAssembly.Instance(module, {env: {memory: ctx.memory}, ring3: ctx.api}); assert.equal(child.exports.run.length, 4);
