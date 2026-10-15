@@ -3,6 +3,7 @@ import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {mkdirSync, readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
+import {ARENA_SIZE} from '../../../../../support/wasm/arena.mjs';
 
 const [enginePath, outputDir, root] = process.argv.slice(2);
 mkdirSync(join(outputDir, 'runtime'), {recursive: true});
@@ -11,7 +12,7 @@ const fixtureRoot = join(root, 'engine/tests/process/images/fixtures/p2-pe32');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const oracleBytes = readFileSync(join(fixtureRoot, 'oracle.json'));
 const oracle = JSON.parse(oracleBytes);
-const size = 4612, transfer = 140, stack = 0x70000000;
+const size = ARENA_SIZE, transfer = 140, stack = 0x70000000;
 const observations = [], artifacts = {};
 
 function elfPrograms(object) {
@@ -85,7 +86,7 @@ writeFileSync(join(outputDir, 'authored-oracle.json'), oracleBytes);
 writeFileSync(join(outputDir, 'programs.S'), readFileSync(assembly));
 writeFileSync(join(outputDir, 'runtime/run.mjs'), readFileSync(import.meta.filename));
 const productionPaths = execFileSync('rg', ['--files', 'engine/src'], {cwd: root, encoding: 'utf8'}).trim().split('\n').sort();
-const sourcePaths = [...productionPaths, 'Cargo.toml', 'engine/Cargo.toml', 'Cargo.lock', 'engine/tests/process/images/wasm/load.rs', 'engine/tests/process/images/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/process/images/fixtures/p2-pe32/programs.S', 'engine/tests/process/images/fixtures/p2-pe32/oracle.json', 'engine/tests/process/images/fixtures/p2-pe32/runtime/run.mjs'];
+const sourcePaths = [...productionPaths, 'Cargo.toml', 'engine/Cargo.toml', 'Cargo.lock', 'engine/tests/process/images/wasm/load.rs', 'engine/tests/process/images/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/support/wasm/arena.mjs', 'engine/tests/process/images/fixtures/p2-pe32/programs.S', 'engine/tests/process/images/fixtures/p2-pe32/oracle.json', 'engine/tests/process/images/fixtures/p2-pe32/runtime/run.mjs'];
 const sources = Object.fromEntries(sourcePaths.map(file => [file, hash(readFileSync(join(root, file)))]));
 writeFileSync(join(outputDir, 'source-sha256.json'), JSON.stringify(sources, null, 2));
 const engineBytes = readFileSync(enginePath);
@@ -93,7 +94,7 @@ writeFileSync(join(outputDir, 'engine.wasm'), engineBytes);
 assert.ok(WebAssembly.validate(engineBytes), 'actual engine validates');
 const engineModule = new WebAssembly.Module(engineBytes);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), [], 'actual engine has no host imports');
-const names = ['open', 'close', 'arena_ptr', 'load_pe32', 'map', 'compile_entries', 'generation', 'module_ptr', 'module_len', 'guard', 'read32', 'write32', 'store32', 'cpu_read32', 'cpu_store32'];
+const names = ['open', 'close', 'arena_ptr', 'arena_len', 'load_pe32', 'map', 'compile_entries', 'generation', 'module_ptr', 'module_len', 'guard', 'guard_detect', 'finish_exception_detection', 'read32', 'write32', 'store32', 'cpu_read32', 'cpu_store32'];
 let nextKey = 0n;
 
 function refresh(engine) {
@@ -114,7 +115,8 @@ function fresh(pages = 8) {
   const memory = instance.exports.memory, key = 0xa338000000000000n + ++nextKey;
   assert.ok(memory instanceof WebAssembly.Memory);
   assert.equal(api.open(pages, Number(key & 0xffffffffn), Number(key >> 32n)), 0);
-  const engine = refresh({api, memory, base: api.arena_ptr() >>> 0});
+  const engine = refresh({api, memory, key, base: api.arena_ptr() >>> 0, epoch: 0n, calls: []});
+  assert.equal(api.arena_len(), size, 'current complete arena');
   assert.ok(engine.base > 0 && engine.base + size <= engine.bytes.length);
   engine.bytes.fill(0xa5, engine.base, engine.base + transfer + 4096);
   return engine;
@@ -168,11 +170,17 @@ function compile(engine, name, receipt) {
   refresh(engine); assert.ok(length > 8 && pointer + length <= engine.bytes.length);
   const bytes = engine.bytes.slice(pointer, pointer + length), module = new WebAssembly.Module(bytes);
   const helpers = name === 'data_bss' ? ['cpu_read32', 'cpu_store32'] : [];
-  const expectedImports = [{module: 'env', name: 'memory', kind: 'memory'}, {module: 'ring3', name: 'guard', kind: 'function'}, ...helpers.map(helper => ({module: 'ring3', name: helper, kind: 'function'}))];
-  const sort = imports => imports.sort((a, b) => `${a.module}.${a.name}`.localeCompare(`${b.module}.${b.name}`));
-  assert.deepEqual(sort(WebAssembly.Module.imports(module)), sort(expectedImports), `${name}: exact needed imports`);
-  const ring3 = {guard: engine.api.guard};
-  for (const helper of helpers) ring3[helper] = engine.api[helper];
+  const expectedImports = [{module: 'env', name: 'memory', kind: 'memory'}, ...['guard_detect', ...helpers, 'finish_exception_detection'].map(helper => ({module: 'ring3', name: helper, kind: 'function'}))];
+  assert.deepEqual(WebAssembly.Module.imports(module), expectedImports, `${name}: exact needed imports in ABI order`);
+  const ring3 = Object.fromEntries(expectedImports.filter(item => item.kind === 'function').map(({name}) => [name, (...args) => {
+    const status = engine.api[name](...args);
+    if (name === 'guard_detect') {
+      assert.equal(status, engine.epoch + 1n, 'real positive entry epoch');
+      engine.epoch = status;
+    }
+    engine.calls.push({name, args: args.map(value => typeof value === 'bigint' ? value.toString() : value >>> 0), status: typeof status === 'bigint' ? status.toString() : status});
+    return status;
+  }]));
   const run = new WebAssembly.Instance(module, {env: {memory: engine.memory}, ring3}).exports.run;
   assert.equal(typeof run, 'function'); assert.equal(run.length, 4);
   writeFileSync(join(outputDir, `${name}.wasm`), bytes); artifacts[`${name}.wasm`] = hash(bytes);
@@ -191,9 +199,17 @@ function runProgram(engine, name, run) {
   for (const expected of oracle[name].runs) {
     const patches = [[0, record('R3ST', 56, [...expected.registers, expected.eip, expected.eflags])], [56, record('R3EX', 40, [expected.reason, expected.retired, 0, 0, 0, 0], name === 'data_bss' ? 6 : expected.exit_version)]];
     if (name === 'data_bss') patches.push([100, record('R3MH', 40, [0, 0, 0, 0, 0, 4], 10)]);
+    engine.calls = [];
     operation(engine, `${name} budget ${expected.budget}`, () => run(engine.base, engine.base + 56, expected.budget, engine.base + 96), 0, patches);
+    const calls = [{name: 'guard_detect', args: [Number(engine.key & 0xffffffffn), Number(engine.key >> 32n), 1, engine.base, engine.base + 56, engine.base + 96], status: engine.epoch.toString()}];
+    if (name === 'data_bss') calls.push(
+      {name: 'cpu_read32', args: [oracle[name].initialized_word.address], status: 0},
+      {name: 'cpu_read32', args: [oracle[name].bss_word.address], status: 0},
+      {name: 'cpu_store32', args: [oracle[name].bss_word.address, 42], status: 0});
+    if (expected.reason === 3) calls.push({name: 'finish_exception_detection', args: [engine.epoch.toString(), 3, ...Array(10).fill(0)], status: 0});
+    assert.deepEqual(engine.calls, calls, `${name}: exact guard, instruction helpers and need-code cleanup`);
     retired += expected.retired;
-    observations.push({program: name, budget: expected.budget, registers: expected.registers, eip: expected.eip, eflags: expected.eflags, reason: expected.reason, retired: expected.retired});
+    observations.push({program: name, budget: expected.budget, registers: expected.registers, eip: expected.eip, eflags: expected.eflags, reason: expected.reason, retired: expected.retired, calls: engine.calls});
   }
   assert.equal(retired, oracle[name].total_retired);
 }
