@@ -1,3 +1,4 @@
+import {detectionGuardName, generatedImports, attachDetectionApi} from '../../../../../../support/wasm/binding.mjs';
 import {ARENA_SIZE} from '../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
@@ -16,7 +17,7 @@ const paths = ['engine/src/abi/arena.rs', 'engine/src/cpu/x86/ir.rs', 'engine/sr
   'engine/src/cpu/dbt/wasm/integer/arithmetic.rs', 'engine/src/cpu/dbt/wasm/integer/bits.rs', 'engine/src/cpu/dbt/wasm/integer/carry_rotates.rs', 'engine/src/cpu/dbt/wasm/integer/decimal.rs', 'engine/src/cpu/dbt/wasm/integer/dispatch.rs', 'engine/src/cpu/dbt/wasm/integer/flags.rs', 'engine/src/cpu/dbt/wasm/integer/mod.rs', 'engine/src/cpu/dbt/wasm/integer/multiply_divide.rs', 'engine/src/cpu/dbt/wasm/integer/operands.rs', 'engine/src/cpu/dbt/wasm/integer/rotates.rs', 'engine/src/cpu/dbt/wasm/integer/shifts.rs', 'engine/src/cpu/dbt/wasm/emitter.rs', 'engine/src/process/instance.rs', 'engine/src/process/execution/compiled.rs', 'engine/src/process/execution/authority.rs', 'engine/src/process/memory/address_space.rs', 'engine/src/process/memory/scalar.rs', 'engine/src/process/memory/scalar/tests.rs', 'engine/src/process/execution/mod.rs', 'engine/src/process/memory/mod.rs', 'engine/src/process/mod.rs',
   'engine/src/process/execution/resident.rs', 'engine/src/process/wasm/mod.rs', 'engine/src/process/wasm/loading.rs', 'engine/src/abi/image.rs', 'engine/src/process/wasm/execution.rs', 'engine/src/process/wasm/calls.rs', 'engine/src/process/wasm/memory.rs', 'engine/src/process/wasm/cpu.rs', 'engine/src/memory/space.rs', 'engine/src/memory/space/atomic.rs',
   'engine/tests/cpu/arithmetic/adjustment/native/decimal.rs', 'engine/tests/cpu/arithmetic/native.rs', 'engine/tests/support/cpu/prefix/admission.rs', 'engine/tests/cpu/arithmetic/adjustment/wasm/decimal.rs', 'engine/tests/cpu/arithmetic/wasm.rs', 'engine/tests/support/wasm.rs',
-  'engine/tests/cpu/arithmetic/adjustment/fixtures/p2-decimal-adjust/runtime/run.mjs', 'engine/tests/support/wasm/engine.mjs'];
+  'engine/tests/cpu/arithmetic/adjustment/fixtures/p2-decimal-adjust/runtime/run.mjs', 'engine/tests/support/wasm/engine.mjs', 'engine/tests/support/wasm/binding.mjs'];
 assert.equal(new Set(paths).size, paths.length);
 const sources = () => Object.fromEntries(paths.map(path => [path, hash(readFileSync(join(root, path)))]));
 const sourcePins = sources(), modules = [], observations = [], contexts = [];
@@ -83,7 +84,7 @@ function run(c, unit, budget, next, label, {reason = 1, retired = 1, status = 0,
   const before = cpu(c), expected = arena(c);
   if (status === 0) {expected.set(state(next)); expected.set(exit(reason, retired), 56);}
   const observedStatus = unit.run(c.base, c.base + 56, budget, c.base + 96);
-  assert.equal(observedStatus, status, label); assert.deepEqual(arena(c), expected, 'full4612/GPR/AL-high24/FLAGS/helper/dirtyFP: ' + label);
+  assert.equal(observedStatus, status, label); assert.deepEqual(arena(c), expected, 'complete arena/GPR/AL-high24/FLAGS/helper/dirtyFP: ' + label);
   const after = arena(c), accepted = observedStatus === 0;
   observations.push({context: c.id, category, label, input_pc: before.pc, input_al: before.registers[0] % 256, input_flags: before.flags,
     expected_status: status, observed_status: observedStatus, expected_reason: status === 0 ? reason : null,
@@ -107,8 +108,8 @@ function compile(c, name, blocks) {
       : {generation: c.api.generation(), pointer: c.api.module_ptr() >>> 0, length: c.api.module_len() >>> 0};
     bytes = Buffer.from(new Uint8Array(c.memory.buffer, binding.pointer, binding.length));
   }
-  assert.ok(bytes.length <= 65536); const module = new WebAssembly.Module(bytes), guard = c.owner === 'resident' ? 'guard_resident' : 'guard';
-  const imports = [{module: 'env', name: 'memory', kind: 'memory'}, ...(c.owner === 'standalone' ? [] : [{module: 'ring3', name: guard, kind: 'function'}])];
+  assert.ok(bytes.length <= 65536); const module = new WebAssembly.Module(bytes), guard = detectionGuardName(c.owner === 'resident');
+  const imports = generatedImports({bound: !(c.owner === 'standalone'), resident: c.owner === 'resident', helpers: []});
   assert.deepEqual(WebAssembly.Module.imports(module), imports); assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
   const file = `module-${modules.length + 1}.wasm`; writeFileSync(join(output, file), bytes, {flag: 'wx'});
   modules.push({context: c.id, owner: c.owner, entries: c.entries, name, blocks: blocks.length, instructions, file, sha256: hash(bytes), imports, exit_version: 1, ...binding});
@@ -120,6 +121,7 @@ function open(owner, entries) {
   const instance = new WebAssembly.Instance(engine.module, {}); c.memory = instance.exports.memory; c.api = {};
   for (const name of ['open', 'close', 'arena_ptr', 'map', 'protect', 'upload', 'read8', 'compile', 'compile_entries',
     'compile_resident', 'compile_resident_entries', 'generation', 'module_ptr', 'module_len', 'guard', 'guard_resident']) c.api[name] = instance.exports['ring3_abi_v1_' + name];
+ attachDetectionApi(c.api, instance.exports);
   assert.equal(c.api.open(2, c.id, 0x44414441), 0); c.base = c.api.arena_ptr() >>> 0; input(c, 0, initial);
   for (const page of [0x1000, 0x7000]) host(c, 'map', [page, 1, 7]);
   for (const b of [...main, ...live]) upload(c, b.pc, b.bytes);
@@ -185,7 +187,7 @@ const result = {status: 'ok', engine_sha256: engine.sha256, source_pins: sourceP
   literal_anchors: literals, limits: ['finite exact27/2F pure six-profile proof; exhaustiveAL256×AF/CF4 per form/profile plus all128 admittedFLAGS at selected thresholds',
     'independent closed-form corrections preserve DAS low borrow and use original AL/CF; literal anchors distinguish DAA high-false CF reset and original-byte high conditions',
     'OF deterministic clear is Ring3 undefined-flag policy; SF/ZF/PF derive from final byte, DF/bit1 and EAX high24/allotherGPR/helper/dirtyFP128 retained',
-    'full4612 arena equality and selected bound readonly RAM canaries; no guest memory operand, generated helper, arbitrary-host rollback or wholeRAM snapshot claim',
+    'complete arena arena equality and selected bound readonly RAM canaries; no guest memory operand, generated helper, arbitrary-host rollback or wholeRAM snapshot claim',
     'live real byteADD/SUB→adjust→SETB/SETO→ADC has no CPU reseeding; observed per-row status/reason/retirement/PC/FLAGS are persisted and neutral3/4 observations are null',
     'two blocks/four instructions main and two blocks/twelve instructions live, two captures/context; allcode/protections before captures; default8/64/65536/sixcapture unchanged',
     'unbound saved modules have no runtime source guard; bound replacement generation3 and same-byte RWX source CodeInvalidated4 are neutral; helper trace empty by exact pure imports',

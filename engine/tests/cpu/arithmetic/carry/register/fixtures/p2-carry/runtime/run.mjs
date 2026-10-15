@@ -1,3 +1,5 @@
+import {pageFaultExit, pageFaultPacket} from '../../../../../../../support/wasm/page-fault.mjs';
+import {detectionGuardName, generatedImports, attachDetectionApi} from '../../../../../../../support/wasm/binding.mjs';
 import {ARENA_SIZE} from '../../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
@@ -58,7 +60,7 @@ writeFileSync(join(outputDir,'program.S'),source); writeFileSync(join(outputDir,
 writeFileSync(join(outputDir,'run.mjs'),readFileSync(import.meta.filename));
 const production = execFileSync('rg',['--files','engine/src'],{cwd:root,encoding:'utf8'}).trim().split('\n').sort();
 const sourcePaths = [...production,'Cargo.toml','engine/Cargo.toml','Cargo.lock','engine/tests/cpu/arithmetic/carry/register/wasm/dword.rs', 'engine/tests/cpu/arithmetic/wasm.rs', 'engine/tests/support/wasm.rs',
-  'engine/tests/cpu/arithmetic/carry/register/fixtures/p2-carry/program.S','engine/tests/cpu/arithmetic/carry/register/fixtures/p2-carry/oracle.json','engine/tests/cpu/arithmetic/carry/register/fixtures/p2-carry/runtime/run.mjs'];
+  'engine/tests/cpu/arithmetic/carry/register/fixtures/p2-carry/program.S','engine/tests/cpu/arithmetic/carry/register/fixtures/p2-carry/oracle.json','engine/tests/cpu/arithmetic/carry/register/fixtures/p2-carry/runtime/run.mjs', 'engine/tests/support/wasm/binding.mjs', 'engine/tests/support/wasm/page-fault.mjs'];
 const sources = Object.fromEntries(sourcePaths.map(file => [file,hash(readFileSync(join(root,file)))]));
 writeFileSync(join(outputDir,'source-sha256.json'),JSON.stringify(sources,null,2));
 const engineBytes = readFileSync(enginePath); writeFileSync(join(outputDir,'engine.wasm'),engineBytes);
@@ -102,6 +104,8 @@ function readWords(expected,label) {
 function fresh(owner,label,{data=true,cross=false,codeWritable=false}={}) {
   const instance=new WebAssembly.Instance(engineModule,{});
   const api=Object.fromEntries(names.map(name=>[name,instance.exports['ring3_abi_v1_'+name]]));
+ attachDetectionApi(api, instance.exports);
+ api.cpu_read_modify32=instance.exports.ring3_abi_v1_cpu_read_modify32;assert.equal(api.cpu_read_modify32?.length,1);
   for(const [name,fn] of Object.entries(api))assert.equal(typeof fn,'function',name);
   assert.equal(api.guard.length,6);assert.equal(api.guard_resident.length,7);assert.equal(api.read32.length,1);
   assert.equal(api.store32.length,2);assert.equal(api.store_resident32.length,6);
@@ -139,9 +143,9 @@ function compile(seeds,access,label) {
   }
   refresh();assert.ok(unit.pointer>0&&unit.length>8&&unit.pointer+unit.length<=engine.bytes.length);
   unit.bytes=engine.bytes.slice(unit.pointer,unit.pointer+unit.length);const module=new WebAssembly.Module(unit.bytes);
-  const guard=engine.owner==='resident'?'guard_resident':'guard';
-  const helpers=[guard,...(access.read?['cpu_read32']:[]),...(access.store?[engine.owner==='resident'?'cpu_store_resident32':'cpu_store32']:[])];
-  unit.memory=access.read||access.store;
+  const guard=detectionGuardName(engine.owner==='resident');
+  const helpers=generatedImports({resident: engine.owner==='resident', helpers: [...(access.read?['cpu_read32']:[]), ...(access.store?[engine.owner==='resident'?'cpu_store_resident32':'cpu_store32', 'cpu_read_modify32']:[])]}).slice(1).map(item => item.name);
+  unit.memory=access.read||access.store;unit.writeIntent=access.store;
   assert.deepEqual(WebAssembly.Module.imports(module),[{module:'env',name:'memory',kind:'memory'},...helpers.map(name=>({module:'ring3',name,kind:'function'}))]);
   assert.deepEqual(WebAssembly.Module.exports(module),[{name:'run',kind:'function'}]);
   const instance=new WebAssembly.Instance(module,{env:{memory:engine.memory},ring3:Object.fromEntries(helpers.map(name=>[name,engine.api[name]]))});
@@ -158,10 +162,16 @@ function seed(initial) {
 }
 // the independently authored original oracle remains byte-for-byte frozen above.
 // this named wire revision changes only declared scalar output headers/width, never CPU/RAM/flags math.
-function currentWireExpected(expected, memory) {
+function currentWireExpected(expected, memory, writeIntent) {
   if (!expected || !memory) return expected;
   const exit=bytes(expected.exit_hex), exitView=new DataView(exit.buffer);
   assert.equal(exit.length,40); assert.equal(Buffer.from(exit.subarray(0,4)).toString(),'R3EX');
+  if(exitView.getUint32(16,true)===5){
+    const access=writeIntent?2:exitView.getUint32(32,true),address=exitView.getUint32(28,true),length=exitView.getUint32(36,true);
+    const errorCode=4|(access===2?2:0)|Number(exitView.getUint32(24,true)===2);
+    return {...expected,exit_hex:pageFaultExit({retired:exitView.getUint32(20,true),errorCode,address,access,length}).toString('hex'),
+      helper_hex:expected.helper_hex==='preserve'?'preserve':pageFaultPacket({errorCode,address,access,length}).toString('hex')};
+  }
   exitView.setUint16(4,6,true);
   let helper=expected.helper_hex;
   if (helper!=='preserve') {
@@ -172,7 +182,7 @@ function currentWireExpected(expected, memory) {
   return {...expected,exit_hex:Buffer.from(exit).toString('hex'),helper_hex:helper};
 }
 function run(unit,budget,expected,label,status=0) {
-  expected=currentWireExpected(expected,unit.memory);
+  expected=currentWireExpected(expected,unit.memory,unit.writeIntent);
   engine.started=true;
   const patches=expected?[[0,bytes(expected.state_hex)],[56,bytes(expected.exit_hex)]]:[];
   if(expected&&expected.helper_hex!=='preserve')patches.push([100,bytes(expected.helper_hex)]);

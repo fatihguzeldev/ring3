@@ -1,3 +1,5 @@
+import {pageFaultExit, pageFaultPacket} from '../../../../../../../support/wasm/page-fault.mjs';
+import {generatedImports, attachDetectionApi} from '../../../../../../../support/wasm/binding.mjs';
 import {ARENA_SIZE} from '../../../../../../../support/wasm/arena.mjs';
 import {generatedRunBody} from '../../../../../../../support/wasm/run.mjs';
 import {assertEngineExports} from '../../../../../../../support/wasm/exports.mjs';
@@ -35,17 +37,17 @@ function engineSignatures(bytes) {
   for (const [name, arity] of Object.entries(expectedArities)) assert.equal(declaredArities[name], arity, name);
   assert.equal(exports.length, engineExportContract.functions.length + 1); assert.deepEqual(exports.filter(row => row.kind !== 0), [{name: 'memory', kind: 2, index: 0}]);
   const signatures = {};
-  for (const item of exports.filter(row => row.kind === 0)) {assert.ok(Object.hasOwn(declaredArities, item.name)); assert.ok(!Object.hasOwn(signatures, item.name)); const expected = {parameters: Array(declaredArities[item.name]).fill(0x7f), results: [0x7f]}; assert.deepEqual(types[functions[item.index]], expected, item.name); signatures[item.name] = expected;}
+  for (const item of exports.filter(row => row.kind === 0)) {assert.ok(Object.hasOwn(declaredArities, item.name)); assert.ok(!Object.hasOwn(signatures, item.name)); const expected = {parameters: Array.from({length: declaredArities[item.name]}, (_, index) => ['finish_exception_detection', 'ring3_abi_v1_finish_exception_detection'].includes(item.name) && index === 0 ? 0x7e : 0x7f), results: [['guard_detect', 'guard_detect_resident', 'ring3_abi_v1_guard_detect', 'ring3_abi_v1_guard_detect_resident'].includes(item.name) ? 0x7e : 0x7f]}; assert.deepEqual(types[functions[item.index]], expected, item.name); signatures[item.name] = expected;}
   assert.equal(Object.keys(signatures).length, engineExportContract.functions.length); return signatures;
 }
 const engineFunctionSignatures = engineSignatures(engineBytes);
 const SIZE = ARENA_SIZE, TRANSFER = 140, EXIT = 0x8020, EXIT_ID = 0x10003, MARKER = 0xc8c0000f;
 const boundaries = [0, 1, 15, 16, 127, 128, 255], flagSeeds = [2, 3, 0xcd6, 0xcd7];
 const initialRegisters = [0x1234807f, 0x23457f80, 0x34560f10, 0x4567ff00, 0x56789abc, 0x6789abcd, 0x789abcde, 0x89abcdef];
-const arities = {cpu_read8: 1, cpu_read32: 1, cpu_store32: 2, cpu_store_resident32: 6, cpu_store8: 2, cpu_store_resident8: 6, open: 3, close: 0, arena_ptr: 0, map: 3, protect: 3, upload: 2, read8: 1, read32: 1, write8: 2, compile_entries: 2, compile_resident_entries: 2, generation: 0, module_ptr: 0, module_len: 0, guard: 6, guard_resident: 7, store32: 2, store_resident32: 6, store8: 2, store_resident8: 6, begin_image_input: 1, append_image_input: 2, load_pe32_linked_v2_input_at: 2, start_loaded_image: 2, capture_call: 5, capture_resident_call: 6, complete_windows_call: 4, complete_resident_windows_call: 5};
-const sourcePaths = ['Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml', 'engine/src/cpu/x86/ir.rs', 'engine/src/cpu/x86/decode/decoder.rs', 'engine/src/cpu/x86/decode/integer.rs', 'engine/src/cpu/x86/decode/operands.rs', 'engine/src/cpu/x86/decode/flow.rs', 'engine/src/cpu/dbt/region.rs', 'engine/src/cpu/dbt/wasm/integer/arithmetic.rs', 'engine/src/cpu/dbt/wasm/integer/bits.rs', 'engine/src/cpu/dbt/wasm/integer/carry_rotates.rs', 'engine/src/cpu/dbt/wasm/integer/decimal.rs', 'engine/src/cpu/dbt/wasm/integer/dispatch.rs', 'engine/src/cpu/dbt/wasm/integer/flags.rs', 'engine/src/cpu/dbt/wasm/integer/mod.rs', 'engine/src/cpu/dbt/wasm/integer/multiply_divide.rs', 'engine/src/cpu/dbt/wasm/integer/operands.rs', 'engine/src/cpu/dbt/wasm/integer/rotates.rs', 'engine/src/cpu/dbt/wasm/integer/shifts.rs', 'engine/src/cpu/dbt/wasm/control.rs', 'engine/src/cpu/dbt/wasm/memory.rs', 'engine/src/cpu/dbt/wasm/memory/narrow.rs', 'engine/src/cpu/dbt/wasm/memory/byte_store.rs', 'engine/src/cpu/dbt/wasm/abi.rs', 'engine/src/cpu/dbt/wasm/emitter.rs', 'engine/src/cpu/dbt/wasm/locals.rs', 'engine/src/process/loading/startup.rs', 'engine/src/process/loading/mod.rs', 'engine/src/process/mod.rs', 'engine/src/abi/x86/exit.rs', 'engine/src/process/instance.rs', 'engine/src/process/execution/compiled.rs', 'engine/src/process/execution/authority.rs', 'engine/src/process/memory/address_space.rs', 'engine/src/process/memory/scalar.rs', 'engine/src/process/memory/scalar/tests.rs', 'engine/src/process/execution/mod.rs', 'engine/src/process/memory/mod.rs', 'engine/src/process/wasm/mod.rs', 'engine/src/process/wasm/loading.rs', 'engine/src/abi/image.rs', 'engine/src/process/wasm/execution.rs', 'engine/src/process/wasm/calls.rs', 'engine/src/process/wasm/memory.rs', 'engine/src/process/wasm/cpu.rs', 'engine/src/process/calls/call.rs', 'engine/src/process/cpu/context.rs', 'engine/src/process/calls/mod.rs', 'engine/src/process/windows/calls.rs', 'engine/src/process/windows/mod.rs', 'engine/src/abi/wasm/exports/calls.rs', 'engine/src/abi/wasm/exports/cpu.rs', 'engine/src/abi/wasm/exports/execution.rs', 'engine/src/abi/wasm/exports/image.rs', 'engine/src/abi/wasm/exports/instance.rs', 'engine/src/abi/wasm/exports/memory.rs', 'engine/src/abi/wasm/exports/mod.rs', 'engine/src/abi/memory_helper.rs', 'engine/src/loader/mod.rs', 'engine/src/loader/image.rs', 'engine/src/loader/imports.rs', 'engine/src/windows/api/mod.rs', 'engine/src/windows/api/catalog.rs', 'engine/src/loader/relocation.rs', 'engine/src/memory/space.rs', 'engine/src/memory/space/atomic.rs', 'engine/src/loader/pe32.rs', 'engine/src/loader/linking/mod.rs', 'engine/src/loader/linking/image.rs', 'engine/src/loader/linking/compatibility.rs', 'engine/src/loader/linking/load.rs', 'engine/src/process/loading/input.rs', 'engine/src/process/loading/image.rs', 'engine/src/cpu/dbt/resident.rs', 'engine/src/cpu/dbt/artifact.rs', 'engine/src/cpu/dbt/gate.rs', 'engine/src/memory/address.rs', 'engine/src/memory/code.rs', 'engine/src/abi/x86/state.rs', 'engine/src/abi/call_frame.rs', 'engine/src/cpu/x86/decode/lower.rs', 'engine/src/cpu/x86/decode/profile.rs', 'engine/src/cpu/dbt/wasm/mod.rs', 'engine/tests/support/loader/pe32/image.rs', 'engine/tests/cpu/arithmetic/binary/modify/wasm/byte.rs', 'engine/tests/cpu/arithmetic/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/arithmetic/binary/modify/fixtures/p2-memory-byte-arithmetic/runtime/run.mjs', 'engine/tests/cpu/arithmetic/binary/modify/fixtures/p2-memory-byte-arithmetic/integer.S'];
+const arities = {guard_detect:6,guard_detect_resident:7,finish_exception_detection:12,cpu_read_modify8: 1, cpu_read8: 1, cpu_read32: 1, cpu_store32: 2, cpu_store_resident32: 6, cpu_store8: 2, cpu_store_resident8: 6, open: 3, close: 0, arena_ptr: 0, map: 3, protect: 3, upload: 2, read8: 1, read32: 1, write8: 2, compile_entries: 2, compile_resident_entries: 2, generation: 0, module_ptr: 0, module_len: 0, guard: 6, guard_resident: 7, store32: 2, store_resident32: 6, store8: 2, store_resident8: 6, begin_image_input: 1, append_image_input: 2, load_pe32_linked_v2_input_at: 2, start_loaded_image: 2, capture_call: 5, capture_resident_call: 6, complete_windows_call: 4, complete_resident_windows_call: 5};
+const sourcePaths = ['Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml', 'engine/src/cpu/x86/ir.rs', 'engine/src/cpu/x86/decode/decoder.rs', 'engine/src/cpu/x86/decode/integer.rs', 'engine/src/cpu/x86/decode/operands.rs', 'engine/src/cpu/x86/decode/flow.rs', 'engine/src/cpu/dbt/region.rs', 'engine/src/cpu/dbt/wasm/integer/arithmetic.rs', 'engine/src/cpu/dbt/wasm/integer/bits.rs', 'engine/src/cpu/dbt/wasm/integer/carry_rotates.rs', 'engine/src/cpu/dbt/wasm/integer/decimal.rs', 'engine/src/cpu/dbt/wasm/integer/dispatch.rs', 'engine/src/cpu/dbt/wasm/integer/flags.rs', 'engine/src/cpu/dbt/wasm/integer/mod.rs', 'engine/src/cpu/dbt/wasm/integer/multiply_divide.rs', 'engine/src/cpu/dbt/wasm/integer/operands.rs', 'engine/src/cpu/dbt/wasm/integer/rotates.rs', 'engine/src/cpu/dbt/wasm/integer/shifts.rs', 'engine/src/cpu/dbt/wasm/control.rs', 'engine/src/cpu/dbt/wasm/memory.rs', 'engine/src/cpu/dbt/wasm/memory/narrow.rs', 'engine/src/cpu/dbt/wasm/memory/byte_store.rs', 'engine/src/cpu/dbt/wasm/abi.rs', 'engine/src/cpu/dbt/wasm/emitter.rs', 'engine/src/cpu/dbt/wasm/locals.rs', 'engine/src/process/loading/startup.rs', 'engine/src/process/loading/mod.rs', 'engine/src/process/mod.rs', 'engine/src/abi/x86/exit.rs', 'engine/src/process/instance.rs', 'engine/src/process/execution/compiled.rs', 'engine/src/process/execution/authority.rs', 'engine/src/process/memory/address_space.rs', 'engine/src/process/memory/scalar.rs', 'engine/src/process/memory/scalar/tests.rs', 'engine/src/process/execution/mod.rs', 'engine/src/process/memory/mod.rs', 'engine/src/process/wasm/mod.rs', 'engine/src/process/wasm/loading.rs', 'engine/src/abi/image.rs', 'engine/src/process/wasm/execution.rs', 'engine/src/process/wasm/calls.rs', 'engine/src/process/wasm/memory.rs', 'engine/src/process/wasm/cpu.rs', 'engine/src/process/calls/call.rs', 'engine/src/process/cpu/context.rs', 'engine/src/process/calls/mod.rs', 'engine/src/process/windows/calls.rs', 'engine/src/process/windows/mod.rs', 'engine/src/abi/wasm/exports/calls.rs', 'engine/src/abi/wasm/exports/cpu.rs', 'engine/src/abi/wasm/exports/execution.rs', 'engine/src/abi/wasm/exports/image.rs', 'engine/src/abi/wasm/exports/instance.rs', 'engine/src/abi/wasm/exports/memory.rs', 'engine/src/abi/wasm/exports/mod.rs', 'engine/src/abi/memory_helper.rs', 'engine/src/loader/mod.rs', 'engine/src/loader/image.rs', 'engine/src/loader/imports.rs', 'engine/src/windows/api/mod.rs', 'engine/src/windows/api/catalog.rs', 'engine/src/loader/relocation.rs', 'engine/src/memory/space.rs', 'engine/src/memory/space/atomic.rs', 'engine/src/loader/pe32.rs', 'engine/src/loader/linking/mod.rs', 'engine/src/loader/linking/image.rs', 'engine/src/loader/linking/compatibility.rs', 'engine/src/loader/linking/load.rs', 'engine/src/process/loading/input.rs', 'engine/src/process/loading/image.rs', 'engine/src/cpu/dbt/resident.rs', 'engine/src/cpu/dbt/artifact.rs', 'engine/src/cpu/dbt/gate.rs', 'engine/src/memory/address.rs', 'engine/src/memory/code.rs', 'engine/src/abi/x86/state.rs', 'engine/src/abi/call_frame.rs', 'engine/src/cpu/x86/decode/lower.rs', 'engine/src/cpu/x86/decode/profile.rs', 'engine/src/cpu/dbt/wasm/mod.rs', 'engine/tests/support/loader/pe32/image.rs', 'engine/tests/cpu/arithmetic/binary/modify/wasm/byte.rs', 'engine/tests/cpu/arithmetic/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/arithmetic/binary/modify/fixtures/p2-memory-byte-arithmetic/runtime/run.mjs', 'engine/tests/support/wasm/binding.mjs', 'engine/tests/support/wasm/page-fault.mjs', 'engine/tests/cpu/arithmetic/binary/modify/fixtures/p2-memory-byte-arithmetic/integer.S'];
 assert.equal(new Set(sourcePaths).size, sourcePaths.length);
-assert.equal(sourcePaths.length, 81);
+assert.equal(sourcePaths.length, 92);
 sourcePaths.push(...engineExportContract.sourcePaths.filter(path => !sourcePaths.includes(path)));
 sourcePaths.push('engine/tests/support/wasm/run.mjs');
 assert.equal(new Set(sourcePaths).size, sourcePaths.length);
@@ -68,9 +70,36 @@ function refresh(ctx) { ctx.bytes = new Uint8Array(ctx.memory.buffer); ctx.view 
 function arena(ctx) { return refresh(ctx).bytes.slice(ctx.base, ctx.base + SIZE); }
 function stateRecord(registers, pc, flags) { return record('R3ST', 56, [...registers, pc, flags]); }
 function exitRecord(reason, count, version = 2, detail = 0, address = 0, access = 0, length = 0) { return record('R3EX', 40, [reason, count, detail, address, access, length], version); }
-function cpuExitRecord(reason, count, version = 6, detail = 0, address = 0, access = 0, length = 0) { return record('R3EX', 40, [reason, count, detail, address, access, length], version); }
+function cpuExitRecord(
+  reason,
+  count,
+  version = 6,
+  detail = 0,
+  address = 0,
+  access = 0,
+  length = 0
+) {
+  if (reason === 5)
+    return pageFaultExit({
+      retired: count,
+      errorCode: 6 | Number(detail === 2),
+      address,
+      access: 2,
+      length
+    });
+  return record('R3EX', 40, [reason, count, detail, address, access, length], version);
+}
 function helper(value, reason = 0, address = 0) { return record('R3MH', 40, [reason ? 1 : 0, reason ? 0 : value, reason, address, reason ? 1 : 0, 1], 2); }
-function cpuHelper(value, reason = 0, address = 0) { return record('R3MH', 40, [reason ? 1 : 0, reason ? 0 : value, reason, address, reason ? 1 : 0, 1], 10); }
+function cpuHelper(value, reason = 0, address = 0) {
+  if (reason === 1 || reason === 2)
+    return pageFaultPacket({ errorCode: 6 | Number(reason === 2), address, access: 2, length: 1 });
+  return record(
+    'R3MH',
+    40,
+    [reason ? 1 : 0, reason ? 0 : value, reason, address, reason ? 1 : 0, 1],
+    10
+  );
+}
 function request(ctx, bytes) { assert.ok(bytes.length <= 4096); refresh(ctx).bytes.set(bytes, ctx.base + TRANSFER); }
 function pure(ctx, action, status, name, control = true) {
   const before = arena(ctx); assert.equal(action(), status, name); assert.deepEqual(arena(ctx), before, `${name}: full arena unchanged`);
@@ -81,6 +110,7 @@ function fresh(owner, pages = 8) {
   const api = Object.fromEntries(Object.entries(arities).map(([name, arity]) => {
     const fn = instance.exports[`ring3_abi_v1_${name}`]; assert.equal(typeof fn, 'function', name); assert.equal(fn.length, arity, name); return [name, fn];
   }));
+ attachDetectionApi(api, instance.exports);
   const ctx = {owner, memory: instance.exports.memory, api, low: Number(key & 0xffffffffn), high: Number(key >> 32n), ramPages: new Map(), units: 0};
   assert.equal(api.open(pages, ctx.low, ctx.high), 0); ctx.base = api.arena_ptr() >>> 0; return refresh(ctx);
 }
@@ -108,7 +138,7 @@ function childShape(ctx, bytes, binding, helpers, hasGates) {
     else if (section === 7) for (let count = unsigned(); count > 0; count--) exports.push({name: name(), kind: bytes[at++], index: unsigned()});
     else if (section === 10) {
       assert.equal(unsigned(), functions.length); const bodyLength = unsigned(); assert.equal(bodyLength, runBody.length); assert.ok(at + bodyLength <= end);
-      locals = Array.from({length: unsigned()}, () => [unsigned(), bytes[at++]]); assert.deepEqual(locals, [[16, 0x7f], [1, 0x7e], [10, 0x7f], [1, 0x7f]]);
+      locals = Array.from({length: unsigned()}, () => [unsigned(), bytes[at++]]); assert.deepEqual(locals, [[16, 0x7f], [1, 0x7e], [10, 0x7f], [1, 0x7f], [1, 0x7e], [6, 0x7f]]);
       const constants = [ctx.low, ctx.high, ...(ctx.owner === 'replacement' ? [binding.generation] : [binding.low, binding.high])];
       for (const value of constants) {assert.equal(bytes[at++], 0x41); assert.equal(signed(), value);}
       for (const index of [0, 1, 3]) {assert.equal(bytes[at++], 0x20); assert.equal(unsigned(), index);}
@@ -116,16 +146,16 @@ function childShape(ctx, bytes, binding, helpers, hasGates) {
     } else assert.fail(`unexpected child section ${section}`);
     assert.equal(at, end);
   }
-  assert.deepEqual(functions, [0, ...(functions.length === 2 ? [types.length - 1] : [])]); if (functions.length === 2) assert.deepEqual(types.at(-1), {parameters: Array(6).fill(0x7f), results: [0x7f]}); assert.deepEqual(types[0], {parameters: Array(4).fill(0x7f), results: [0x7f]});
+  assert.deepEqual(functions, [0, ...(functions.length === 2 ? [types.length - 2] : [])]); if (functions.length === 2) assert.deepEqual(types.at(-2), {parameters: Array(6).fill(0x7f), results: [0x7f]}); assert.deepEqual(types[0], {parameters: Array(4).fill(0x7f), results: [0x7f]});
   assert.deepEqual(imports[0], {module: 'env', name: 'memory', kind: 'memory'});
   assert.deepEqual(imports.slice(1).map(({module, name, kind}) => ({module, name, kind})), helpers.map(name => ({module: 'ring3', name, kind: 'function'})));
   assert.deepEqual(exports, [{name: 'run', kind: 0, index: helpers.length}]); assert.ok(locals && guard);
   const signatures = Object.fromEntries(imports.slice(1).map(row => {
-    const expected = {parameters: Array(arities[row.name]).fill(0x7f), results: [0x7f]}; assert.deepEqual(types[row.type], expected); return [row.name, expected];
+    const expected = {parameters: Array.from({length: arities[row.name]}, (_, index) => ['finish_exception_detection', 'ring3_abi_v1_finish_exception_detection'].includes(row.name) && index === 0 ? 0x7e : 0x7f), results: [['guard_detect', 'guard_detect_resident', 'ring3_abi_v1_guard_detect', 'ring3_abi_v1_guard_detect_resident'].includes(row.name) ? 0x7e : 0x7f]}; assert.deepEqual(types[row.type], expected); return [row.name, expected];
   }));
   return {locals, guard, import_signatures: signatures, run_signature: types[0]};
 }
-function compile(ctx, entries, gates, label, extraHelpers = ['cpu_read8', ctx.owner === 'replacement' ? 'cpu_store8' : 'cpu_store_resident8']) {
+function compile(ctx, entries, gates, label, extraHelpers = ['cpu_read8', 'cpu_read_modify8', ctx.owner === 'replacement' ? 'cpu_store8' : 'cpu_store_resident8']) {
   assert.ok(entries.length <= 8); if (ctx.owner === 'resident') {assert.ok(++ctx.units <= 8, 'finite resident occupancy'); residentPeak = Math.max(residentPeak, ctx.units);} request(ctx, words([...entries, ...gates.flat()])); const before = arena(ctx); let binding, expected = before.slice();
   if (ctx.owner === 'replacement') {
     assert.equal(ctx.api.compile_entries(entries.length, gates.length), 0);
@@ -138,7 +168,7 @@ function compile(ctx, entries, gates, label, extraHelpers = ['cpu_read8', ctx.ow
   }
   assert.deepEqual(arena(ctx), expected, 'successful publication preserves CPU/exit/helper and exact owner receipt');
   refresh(ctx); assert.ok(binding.pointer > 0 && binding.length > 8 && binding.length <= 65536 && binding.pointer + binding.length <= ctx.bytes.length);
-  const bytes = ctx.bytes.slice(binding.pointer, binding.pointer + binding.length), helpers = [ctx.owner === 'replacement' ? 'guard' : 'guard_resident', ...extraHelpers];
+  const bytes = ctx.bytes.slice(binding.pointer, binding.pointer + binding.length), helpers = generatedImports({resident: !(ctx.owner === 'replacement'), helpers: [...extraHelpers]}).slice(1).map(item => item.name);
   assert.ok(WebAssembly.validate(bytes)); const shape = childShape(ctx, bytes, binding, helpers, gates.length > 0), module = new WebAssembly.Module(bytes);
   const imports = WebAssembly.Module.imports(module); assert.deepEqual(imports, [{module: 'env', name: 'memory', kind: 'memory'}, ...helpers.map(name => ({module: 'ring3', name, kind: 'function'}))]);
   assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
@@ -155,7 +185,16 @@ function seed(ctx, registers, pc, flags, cancel = 0) {
 }
 
 function storeHelper(reason = 0, address = 0) {return record('R3MH', 40, [reason ? 1 : 0, 0, reason, reason ? address : 0, reason ? 2 : 0, 1], 3);}
-function cpuStoreHelper(reason = 0, address = 0) {return record('R3MH', 40, [reason ? 1 : 0, 0, reason, reason ? address : 0, reason ? 2 : 0, 1], 10);}
+function cpuStoreHelper(reason = 0, address = 0) {
+  if (reason === 1 || reason === 2)
+    return pageFaultPacket({ errorCode: 6 | Number(reason === 2), address, access: 2, length: 1 });
+  return record(
+    'R3MH',
+    40,
+    [reason ? 1 : 0, 0, reason, reason ? address : 0, reason ? 2 : 0, 1],
+    10
+  );
+}
 function arithmetic(kind, left, right, oldFlags) {
   const mathematical = kind === 'add' ? left + right : left - right, result = (mathematical % 256 + 256) % 256;
   const carry = kind === 'add' ? mathematical > 255 : left < right;
@@ -412,7 +451,7 @@ for (const base of [0x400000, 0x500000]) for (const owner of ['replacement', 're
   assertWords(ctx, base + 0x3000, Array(8).fill(0)); for (let index = 0; index < 32; index++) read8(ctx, base + 0x3fe0 + index, index === 31 ? 0xff : index + 1);
   read8(ctx, base + 0x4000, 0, 1); controls.push({owner, name: `${label}: page after operand is unmapped`, address: base + 0x4000, reason: 1, length: 1});
   const entries = callerOffsets.map(offset => entry + offset), gates = [[EXIT, EXIT_ID]]; if (owner === 'replacement') entries.push(EXIT);
-  const caller = compile(ctx, entries, owner === 'replacement' ? gates : [], `${label}-caller`, ['cpu_read32', owner === 'replacement' ? 'cpu_store32' : 'cpu_store_resident32', 'cpu_read8', owner === 'replacement' ? 'cpu_store8' : 'cpu_store_resident8']);
+  const caller = compile(ctx, entries, owner === 'replacement' ? gates : [], `${label}-caller`, ['cpu_read32', owner === 'replacement' ? 'cpu_store32' : 'cpu_store_resident32', 'cpu_read8', 'cpu_read_modify8', owner === 'replacement' ? 'cpu_store8' : 'cpu_store_resident8']);
   const gate = owner === 'replacement' ? caller : compile(ctx, [EXIT], gates, `${label}-gate`, []);
   const expectedStart = arena(ctx); expectedStart.set(stateRecord([0, 0, 0, 0, 0x71000, 0, 0, 0], entry, 2)); expectedStart.set(exitRecord(3, 0, 3), 56);
   assert.equal(ctx.api.start_loaded_image(0x70000, 1), 0); assert.deepEqual(arena(ctx), expectedStart, 'Rust startup owns CPU/stack with R3EXv3'); ctx.ramPages.set(0x70000, Buffer.alloc(4096)); const startupPages = readPages(ctx);
@@ -443,7 +482,7 @@ const counts = {
   llvm_encoding_symbols: llvm.length, runtime_sources: sourcePaths.length, generated_function_invocations: generatedRuns.length, maximum_resident_units: residentPeak,
   complete_page_observations: pageChecks, host_read32_observations: hostRead32Calls, host_read8_observations: hostRead8Calls, neighbor_or_stack_range_checks: ramChecks,
 };
-assert.deepEqual(counts, {instances: 22, canonical_forms_per_owner: 24, alias_forms_per_owner: 16, canonical_cases: 192, boundary_cases: 196, alias_cases: 64, finite_guest_retired: 452, modules: 36, controls: 118, live_paths: 8, live_runs: 96, live_faults: 16, live_guest_retired: 40, semantic_repair_phases: 16, repair_api_calls: 40, diagnostic_paths: 4, diagnostic_faults: 8, smc_paths: 8, smc_guest_retired: 16, smc_idempotent_paths: 4, pe_paths: 4, pe_guest_retired: 116, total_guest_retired: 624, llvm_encoding_symbols: 4, runtime_sources: 86, generated_function_invocations: 624, maximum_resident_units: 3, complete_page_observations: 3068, host_read32_observations: 3141764, host_read8_observations: 31366, neighbor_or_stack_range_checks: 984});
+assert.deepEqual(counts, {instances: 22, canonical_forms_per_owner: 24, alias_forms_per_owner: 16, canonical_cases: 192, boundary_cases: 196, alias_cases: 64, finite_guest_retired: 452, modules: 36, controls: 118, live_paths: 8, live_runs: 96, live_faults: 16, live_guest_retired: 40, semantic_repair_phases: 16, repair_api_calls: 40, diagnostic_paths: 4, diagnostic_faults: 8, smc_paths: 8, smc_guest_retired: 16, smc_idempotent_paths: 4, pe_paths: 4, pe_guest_retired: 116, total_guest_retired: 624, llvm_encoding_symbols: 4, runtime_sources: 101, generated_function_invocations: 624, maximum_resident_units: 3, complete_page_observations: 3068, host_read32_observations: 3141764, host_read8_observations: 31366, neighbor_or_stack_range_checks: 984});
 assert.equal(counts.live_faults + counts.diagnostic_faults, 24);
 for (const owner of ['replacement', 'resident']) {
   const owned = rows.filter(row => row.owner === owner); assert.equal(owned.length, 226);
@@ -467,6 +506,6 @@ const result = {cpu_source_sha256: cpuSourcePins,
     pe_final_registers: [0x12348001, 0x23450101, 0x34560001, 0x45670101, 0x70ff8, 0, MARKER, 0], pe_final_flags: 0x82,
     host_observation_scope: 'normal public Read32 checks complete4096byte declared pages and each strict helper, then the complete arena except the last helper; guest arena is checked before observations; normal public Read8 checks the target and31 nonzero neighbors; unreadable diagnostic pages are restored by explicit protect before observation'},
   generated_runs: generatedRuns, cases: rows, controls, live: liveRows, diagnostics: diagnosticRows, smc: smcRows, pe: peRows, modules,
-  claim: 'finite authored memory-destination ADD8/SUB8 generated by actual engine-Wasm bound replacement/resident compilers with real Read8v2 and strict Store8v3;452 saved expected-outcome rows backed by live full4236arena and complete declared guest pages plus byte-neighbor assertions, not raw per-row CPU/RAM snapshots or unique states;8 data-only live repair paths16 real faults re-read changed RAM without CPU/FLAGS/EIP patch or prefix replay, plus4 separately seeded zero-immediate diagnostics8 real permission faults;8 changed/idempotent consumed-page SMC paths and fresh pure successors;four independently reconstructed PE/startup/direct arithmetic SETcc/predicate/Jcc/named ExitProcess paths;strict generated Reason6 requires real Store8 status11 without a captured direct helper return;LLVM proves encoding only;no standalone binding, memory carry/RHS/general RMW/ISA/EA/flag domain, browser/SDK/performance/P2 completion or playable-game claim',
+  claim: 'finite authored memory-destination ADD8/SUB8 generated by actual engine-Wasm bound replacement/resident compilers with real Read8v2 and strict Store8v3;452 saved expected-outcome rows backed by live complete arena and complete declared guest pages plus byte-neighbor assertions, not raw per-row CPU/RAM snapshots or unique states;8 data-only live repair paths16 real faults re-read changed RAM without CPU/FLAGS/EIP patch or prefix replay, plus4 separately seeded zero-immediate diagnostics8 real permission faults;8 changed/idempotent consumed-page SMC paths and fresh pure successors;four independently reconstructed PE/startup/direct arithmetic SETcc/predicate/Jcc/named ExitProcess paths;strict generated Reason6 requires real Store8 status11 without a captured direct helper return;LLVM proves encoding only;no standalone binding, memory carry/RHS/general RMW/ISA/EA/flag domain, browser/SDK/performance/P2 completion or playable-game claim',
 };
 writeFileSync(join(output, 'result.json'), JSON.stringify(result, null, 2)); console.log(JSON.stringify({status: result.status, engine_sha256: result.engine_sha256, counts, output}));
