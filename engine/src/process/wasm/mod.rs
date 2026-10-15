@@ -162,6 +162,40 @@ pub(super) fn status(error: HostError) -> u32 {
             CallError::Memory(_) => 8,
         },
         HostError::Media(error) => media::status(error),
+        HostError::DSound(error) => {
+            use crate::process::DSoundError32 as D;
+            match error {
+                D::NotConfigured => 38,
+                D::AlreadyConfigured => 39,
+                D::Allocation => 9,
+                D::InvalidConfiguration | D::InvalidRequest => 7,
+            }
+        }
+        HostError::DirectInput(error) => {
+            use crate::process::DirectInputError32 as D;
+            match error {
+                D::NotConfigured => 38,
+                D::AlreadyConfigured => 39,
+                D::Allocation => 9,
+                D::Busy => 12,
+                D::InvalidToken => 14,
+                D::Memory(_) => 8,
+                D::Input(error) => media::status(crate::process::MediaError::Input(error)),
+                D::Synchronization(error) => status(HostError::Synchronization(error)),
+                D::InvalidConfiguration | D::InvalidRequest => 7,
+            }
+        }
+        HostError::Synchronization(error) => {
+            use crate::windows::synchronization::SynchronizationError32 as S;
+            match error {
+                S::Stale => 40,
+                S::Capacity => 18,
+                S::Allocation | S::Exhausted => 9,
+                S::Busy => 12,
+                S::Unsupported => 20,
+                _ => 7,
+            }
+        }
         HostError::User32(error) => {
             use crate::windows::user32::User32Error32 as U;
             match error {
@@ -246,8 +280,8 @@ pub(crate) use modules::{
     abort_module_input, abort_module_operation, append_module_input, begin_module_input,
     commit_module_input, configure_module_limits, detach_modules_for_exit,
     finish_module_initializer, free_library_module, load_library_module, module_gates,
-    module_handle, module_initializer, module_teb, register_kernel32_module, resolve_module_export,
-    start_module_process,
+    module_gates_page, module_handle, module_initializer, module_teb, register_kernel32_module,
+    resolve_module_export, start_module_process,
 };
 
 mod loading;

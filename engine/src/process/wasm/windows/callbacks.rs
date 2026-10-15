@@ -23,6 +23,8 @@ pub(crate) fn pending_windows_callback() -> u32 {
                 provider: match request.provider {
                     WindowsCallbackProvider32::User32 => 1,
                     WindowsCallbackProvider32::D3D8 => 2,
+                    WindowsCallbackProvider32::DirectSound => 3,
+                    WindowsCallbackProvider32::DirectInput => 4,
                 },
                 procedure: request.procedure.0,
                 count: request.count,

@@ -179,6 +179,30 @@ pub(crate) fn module_gates() -> u32 {
     })
 }
 
+pub(crate) fn module_gates_page(start: u32, maximum: u32) -> u32 {
+    mutate(|instance| {
+        let capacity = (TRANSFER_SIZE - modules::MODULE_GATE_PAGE_HEADER_SIZE) / 8;
+        if maximum == 0 || maximum as usize > capacity {
+            return Err(HostError::InvalidRequest);
+        }
+        let mut gates = instance.module_gates()?;
+        gates.sort_unstable_by_key(|gate| gate.entry.0);
+        let total = u32::try_from(gates.len()).map_err(|_| HostError::Infrastructure)?;
+        if start > total {
+            return Err(HostError::InvalidRequest);
+        }
+        let count = maximum.min(total - start) as usize;
+        let size = modules::MODULE_GATE_PAGE_HEADER_SIZE + count * 8;
+        modules::encode_module_gate_page(
+            &gates[start as usize..start as usize + count],
+            total,
+            start,
+            &mut instance.arena.as_mut().get_mut()[TRANSFER_OFFSET..TRANSFER_OFFSET + size],
+        )
+        .map_err(|_| HostError::Infrastructure)
+    })
+}
+
 fn optional_base(base: u32) -> Option<u32> {
     (base != 0).then_some(base)
 }

@@ -1,3 +1,7 @@
+mod dinput;
+mod dsound;
+mod synchronization;
+
 export_process_calls! {
     configure_user32(classes:u32,windows:u32,messages:u32,continuations:u32,scratch_base:u32,scratch_pages:u32);
     register_user32_module(base:u32);
@@ -5,6 +9,10 @@ export_process_calls! {
     post_user32_message(window:u32,message:u32,wparam:u32,lparam:u32,time_ms:u32,x:u32,y:u32);
     waiting_user32_message();
     resume_user32_wait(low:u32,high:u32,continuation_low:u32,continuation_high:u32);
+    pending_user32_input();
+    pending_user32_cursor();
+    acknowledge_user32_cursor(revision_low:u32,revision_high:u32);
+    set_user32_desktop(left:u32,top:u32,right:u32,bottom:u32);
     pending_windows_callback();
     windows_gate_info(id:u32);
     capture_windows_call(low:u32,high:u32,generation:u32);

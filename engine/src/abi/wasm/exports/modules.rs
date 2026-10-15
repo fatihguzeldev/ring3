@@ -15,5 +15,6 @@ export_process_calls! {
     abort_module_operation();
     module_handle(name_length: u32);
     module_gates();
+    module_gates_page(start:u32,maximum:u32);
     module_teb();
 }

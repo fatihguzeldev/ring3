@@ -17,6 +17,11 @@ pub enum MediaRecordKind {
     D3D8Batch = 13,
     WindowsWait = 14,
     WindowsGate = 15,
+    SynchronizationWait = 16,
+    DSoundCapture = 17,
+    User32Input = 18,
+    User32Cursor = 19,
+    WindowsInputDelivery = 20,
 }
 
 // r3mr v1: kind at 6, byte size at 8, reserved zero at 12, epoch at 16, five u64 values at 24.

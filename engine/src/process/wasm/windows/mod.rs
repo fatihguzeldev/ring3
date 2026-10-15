@@ -9,11 +9,17 @@ use crate::{
 mod callbacks;
 mod configuration;
 mod d3d8;
+mod dinput;
+mod dsound;
+mod synchronization;
 mod user32;
 
 pub(crate) use callbacks::*;
 pub(crate) use configuration::*;
 pub(crate) use d3d8::*;
+pub(crate) use dinput::*;
+pub(crate) use dsound::*;
+pub(crate) use synchronization::*;
 pub(crate) use user32::*;
 
 fn wide(low: u32, high: u32) -> u64 {

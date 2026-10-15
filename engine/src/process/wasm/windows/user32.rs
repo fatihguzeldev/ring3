@@ -3,7 +3,7 @@ use crate::{
     abi::media::MediaRecordKind,
     memory::{GuestAddress, PageRange},
     process::{HostError, wasm::mutate},
-    windows::user32::{Message32, Point32, User32Limits32},
+    windows::user32::{Message32, Point32, Rect32, User32Limits32},
 };
 
 pub(crate) fn configure_user32(
@@ -81,5 +81,59 @@ pub(crate) fn resume_user32_wait(
 ) -> u32 {
     mutate(|instance| {
         instance.resume_user32_wait(wide(low, high), wide(continuation_low, continuation_high))
+    })
+}
+
+pub(crate) fn pending_user32_input() -> u32 {
+    mutate(|instance| {
+        instance.memory()?;
+        let epoch = instance.media_epoch().unwrap_or(0);
+        let pending = u64::from(instance.pending_user32_input());
+        record(
+            instance,
+            MediaRecordKind::User32Input,
+            epoch,
+            [pending, 0, 0, 0, 0],
+        );
+        Ok(())
+    })
+}
+
+pub(crate) fn pending_user32_cursor() -> u32 {
+    mutate(|instance| {
+        instance.memory()?;
+        let pack = |a: i32, b: i32| u64::from(a as u32) | u64::from(b as u32) << 32;
+        let values = if let Some(request) = instance.pending_user32_cursor() {
+            let flags = u64::from(request.changes)
+                | u64::from(request.visible) << 8
+                | u64::from(request.clip.is_some()) << 9
+                | u64::from(request.cursor) << 32;
+            [
+                request.revision,
+                flags,
+                pack(request.position.x, request.position.y),
+                request.clip.map_or(0, |clip| pack(clip.left, clip.top)),
+                request.clip.map_or(0, |clip| pack(clip.right, clip.bottom)),
+            ]
+        } else {
+            [0; 5]
+        };
+        record(instance, MediaRecordKind::User32Cursor, 0, values);
+        Ok(())
+    })
+}
+
+pub(crate) fn acknowledge_user32_cursor(revision_low: u32, revision_high: u32) -> u32 {
+    mutate(|instance| instance.acknowledge_user32_cursor(wide(revision_low, revision_high)))
+}
+
+pub(crate) fn set_user32_desktop(left: u32, top: u32, right: u32, bottom: u32) -> u32 {
+    mutate(|instance| {
+        instance.set_user32_desktop(Rect32 {
+            left: left as i32,
+            top: top as i32,
+            right: right as i32,
+            bottom: bottom as i32,
+        })
     })
 }
