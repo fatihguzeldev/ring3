@@ -89,6 +89,7 @@ macro_rules! methods {($($name:literal:$words:literal),* $(,)?)=>{&[$(Method{nam
 impl InterfaceKind {
     pub fn methods(self) -> &'static [Method] {
         match self {
+            Self::Unknown => methods!["QueryInterface":3,"AddRef":1,"Release":1],
             Self::Device => &DEVICE[..11],
             Self::Device8 => DEVICE,
             Self::Buffer => &BUFFER[..21],

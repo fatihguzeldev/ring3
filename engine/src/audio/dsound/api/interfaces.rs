@@ -14,6 +14,7 @@ pub enum InterfaceKind {
     CaptureBuffer = 9,
     CaptureBuffer8 = 10,
     FullDuplex = 11,
+    Unknown = 12,
 }
 
 const fn guid(a: u32, b: u16, c: u16, d: [u8; 8]) -> InterfaceId {
@@ -27,7 +28,7 @@ const fn guid(a: u32, b: u16, c: u16, d: [u8; 8]) -> InterfaceId {
 }
 
 impl InterfaceKind {
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::Device,
         Self::Device8,
         Self::Buffer,
@@ -39,12 +40,14 @@ impl InterfaceKind {
         Self::CaptureBuffer,
         Self::CaptureBuffer8,
         Self::FullDuplex,
+        Self::Unknown,
     ];
     pub fn from_tag(tag: u8) -> Option<Self> {
         Self::ALL.into_iter().find(|kind| *kind as u8 == tag)
     }
     pub const fn iid(self) -> InterfaceId {
         match self {
+            Self::Unknown => crate::windows::com::IID_IUNKNOWN,
             Self::Device => guid(
                 0x279afa83,
                 0x4981,
