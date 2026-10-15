@@ -1,3 +1,4 @@
+import {generatedImports, attachDetectionApi} from '../../../../../../../support/wasm/binding.mjs';
 import {ARENA_SIZE} from '../../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
@@ -21,7 +22,7 @@ const paths = [
   'engine/src/cpu/dbt/wasm/emitter.rs', 'engine/src/process/wasm/mod.rs', 'engine/src/process/wasm/loading.rs', 'engine/src/abi/image.rs', 'engine/src/process/wasm/execution.rs', 'engine/src/process/wasm/calls.rs', 'engine/src/process/wasm/memory.rs', 'engine/src/process/wasm/cpu.rs', 'engine/src/process/mod.rs',
   'engine/src/process/instance.rs', 'engine/src/process/execution/compiled.rs', 'engine/src/process/execution/authority.rs', 'engine/src/process/memory/address_space.rs', 'engine/src/process/memory/scalar.rs', 'engine/src/process/memory/scalar/tests.rs', 'engine/src/process/execution/mod.rs', 'engine/src/process/memory/mod.rs', 'engine/src/process/execution/resident.rs',
   'engine/tests/cpu/moves/exchange/register/wasm/word.rs', 'engine/tests/cpu/moves/wasm.rs', 'engine/tests/support/wasm.rs',
-  'engine/tests/cpu/moves/exchange/register/fixtures/p2-word-register-exchange/runtime/run.mjs', 'engine/tests/support/wasm/engine.mjs'];
+  'engine/tests/cpu/moves/exchange/register/fixtures/p2-word-register-exchange/runtime/run.mjs', 'engine/tests/support/wasm/engine.mjs', 'engine/tests/support/wasm/binding.mjs'];
 assert.equal(new Set(paths).size, paths.length);
 const sources = () => Object.fromEntries(paths.map(path => [path, hash(readFileSync(join(root, path)))]));
 const sourcePins = sources(), modules = [];
@@ -61,7 +62,7 @@ function run(c, module, budget, next, {label, reason = 1, retired = 1, status = 
   const expected = arena(c);
   if (status === 0) {expected.set(state(next)); expected.set(exit(reason, retired, exitVersion), 56);}
   assert.equal(module.run(c.base, c.base + 56, budget, c.base + 96), status, label);
-  assert.deepEqual(arena(c), expected, 'full4612 CPU/exit/unchanged helper/FP128 effect: ' + label);
+  assert.deepEqual(arena(c), expected, 'complete arena CPU/exit/unchanged helper/FP128 effect: ' + label);
   counts.runs++; if (status === 0) counts.retired += retired;
 }
 function checkRam(c, address, expected) {
@@ -79,7 +80,7 @@ function compile(c, blocks) {
     ? {low: b.readUInt32LE(148), high: b.readUInt32LE(152), pointer: b.readUInt32LE(156), length: b.readUInt32LE(160)}
     : {generation: c.api.generation(), pointer: c.api.module_ptr() >>> 0, length: c.api.module_len() >>> 0};
   const bytes = Buffer.from(new Uint8Array(c.memory.buffer, binding.pointer, binding.length));
-  const module = new WebAssembly.Module(bytes), names = [c.owner === 'resident' ? 'guard_resident' : 'guard'];
+  const module = new WebAssembly.Module(bytes), names = generatedImports({resident: c.owner === 'resident', helpers: []}).slice(1).map(item => item.name);
   assert.deepEqual(WebAssembly.Module.imports(module), [{module: 'env', name: 'memory', kind: 'memory'}, ...names.map(name => ({module: 'ring3', name, kind: 'function'}))]);
   assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
   const file = `module-${modules.length + 1}.wasm`; writeFileSync(join(output, file), bytes, {flag: 'wx'});
@@ -94,6 +95,7 @@ function open(owner, entries) {
   for (const name of ['open', 'close', 'arena_ptr', 'map', 'protect', 'upload', 'read8',
     'compile', 'compile_entries', 'compile_resident', 'compile_resident_entries', 'generation', 'module_ptr', 'module_len', 'guard', 'guard_resident'])
     c.api[name] = instance.exports['ring3_abi_v1_' + name];
+ attachDetectionApi(c.api, instance.exports);
   assert.equal(c.api.open(4, c.id, 0x57584348), 0); c.base = c.api.arena_ptr() >>> 0; input(c, 0, initial);
   for (const args of [[PC, 1, 7], [DATA, 1, 3]]) host(c, 'map', args);
   upload(c, DATA, canary); host(c, 'protect', [DATA, 1, 1]); return c;

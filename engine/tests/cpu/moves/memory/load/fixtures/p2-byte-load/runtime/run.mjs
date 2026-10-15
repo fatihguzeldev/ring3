@@ -1,3 +1,5 @@
+import {pageFaultExit, pageFaultPacket} from '../../../../../../../support/wasm/page-fault.mjs';
+import {generatedImports} from '../../../../../../../support/wasm/binding.mjs';
 import {generatedRunBody} from '../../../../../../../support/wasm/run.mjs';
 import {assertEngineExports} from '../../../../../../../support/wasm/exports.mjs';
 import {ARENA_SIZE, createArena} from '../../../../../../../support/wasm/arena.mjs';
@@ -12,6 +14,24 @@ assert.ok(root, 'expected actual engine, output directory and repository root');
 const fixtureRoot = join(root, 'engine/tests/cpu/moves/memory/load/fixtures/p2-byte-load');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const oracleBytes = readFileSync(join(fixtureRoot, 'oracle.json')), oracle = JSON.parse(oracleBytes);
+// Keep the immutable instruction oracle; declare the current native binding envelope.
+for (const [key, names] of Object.entries(oracle.transport)) {
+  if (!key.endsWith('_imports') || !Array.isArray(names)) continue;
+  const guard = names.find(name => name === 'guard' || name === 'guard_resident');
+  if (guard) oracle.transport[key] = generatedImports({resident: guard === 'guard_resident', helpers: names.filter(name => name !== guard)}).slice(1).map(item => item.name);
+}
+// Re-encode authored native fault facts; synthetic protocol packets keep their original bytes.
+for (const row of oracle.finite) for (const [name, value] of Object.entries(row)) {
+  if (!name.endsWith('_hex') || typeof value !== 'string' || value.length !== 80) continue;
+  const packet = Buffer.from(value, 'hex'), magic = packet.toString('ascii', 0, 4);
+  const status = packet.readUInt32LE(16), detail = packet.readUInt32LE(24);
+  if (!((magic === 'R3EX' && status === 5) || (magic === 'R3MH' && status === 1))) continue;
+  const address = packet.readUInt32LE(28), access = packet.readUInt32LE(32), length = packet.readUInt32LE(36);
+  const errorCode = 4 | (access === 2 ? 2 : 0) | (detail === 2 ? 1 : 0);
+  row[name] = (magic === 'R3EX'
+    ? pageFaultExit({retired: packet.readUInt32LE(20), errorCode, address, access, length})
+    : pageFaultPacket({errorCode, address, access, length})).toString('hex');
+}
 const programBytes = readFileSync(join(fixtureRoot, 'program.S'));
 assert.equal(hash(oracleBytes), '8195f9a9bf3174a390e73b96910bdd9f3372a13a7d28bb9abe23ed165d1adf01');
 assert.equal(hash(programBytes), '15886209e03e8839ca539c3ae630cff08645a2238a0eab9939425db05850f236');
@@ -80,13 +100,14 @@ const engineExportContract = assertEngineExports(engineModule, root);
 const sourcePaths=[...productionPaths,'Cargo.toml','engine/Cargo.toml','Cargo.lock','engine/tests/cpu/moves/memory/load/wasm/byte.rs', 'engine/tests/cpu/moves/wasm.rs', 'engine/tests/support/wasm.rs','engine/tests/cpu/moves/memory/load/fixtures/p2-byte-load/program.S','engine/tests/cpu/moves/memory/load/fixtures/p2-byte-load/oracle.json','engine/tests/cpu/moves/memory/load/fixtures/p2-byte-load/runtime/run.mjs'];
 assert.equal(new Set(sourcePaths).size, sourcePaths.length);
 assert.equal(sourcePaths.length,productionPaths.length + 9); sourcePaths.push(...engineExportContract.sourcePaths.filter(path => !sourcePaths.includes(path)));
+sourcePaths.push('engine/tests/support/wasm/binding.mjs', 'engine/tests/support/wasm/page-fault.mjs');
 sourcePaths.push('engine/tests/support/wasm/run.mjs');
 assert.equal(new Set(sourcePaths).size, sourcePaths.length);
 const sources=Object.fromEntries(sourcePaths.map(file=>[file,hash(readFileSync(join(root,file)))]));save('source-sha256.json',JSON.stringify(sources,null,2));
 save('engine.wasm',engineBytes);assert.ok(WebAssembly.validate(engineBytes));
 assert.deepEqual(WebAssembly.Module.imports(engineModule),[]);
 
-const arities={cpu_read8:1,cpu_read16:1,cpu_read32:1,cpu_store8:2,cpu_store_resident8:6,cpu_store32:2,cpu_store_resident32:6,open:3,close:0,arena_ptr:0,generation:0,module_ptr:0,module_len:0,map:3,protect:3,upload:2,begin_image_input:1,append_image_input:2,load_pe32_linked_v2_input_at:2,start_loaded_image:2,compile_entries:2,compile_resident_entries:2,find_resident:1,acknowledge_resident_installation:5,find_installed_resident:3,dispatcher_module:2,guard:6,guard_resident:7,guard_dispatch_entry:5,read32:1,read8:1,read16:1,write8:2,store32:2,store_resident32:6,store8:2,store_resident8:6,capture_call:5,capture_resident_call:6,complete_windows_call:4,complete_resident_windows_call:5};
+const arities = {guard_detect:6,guard_detect_resident:7,finish_exception_detection:12,cpu_read8:1,cpu_read16:1,cpu_read32:1,cpu_store8:2,cpu_store_resident8:6,cpu_store32:2,cpu_store_resident32:6,open:3,close:0,arena_ptr:0,generation:0,module_ptr:0,module_len:0,map:3,protect:3,upload:2,begin_image_input:1,append_image_input:2,load_pe32_linked_v2_input_at:2,start_loaded_image:2,compile_entries:2,compile_resident_entries:2,find_resident:1,acknowledge_resident_installation:5,find_installed_resident:3,dispatcher_module:2,guard:6,guard_resident:7,guard_dispatch_entry:5,read32:1,read8:1,read16:1,write8:2,store32:2,store_resident32:6,store8:2,store_resident8:6,capture_call:5,capture_resident_call:6,complete_windows_call:4,complete_resident_windows_call:5};
 let engine, nextInstance=0, guestRetirements=0;
 function refresh() { if (engine.buffer !== engine.memory.buffer) { engine.buffer = engine.memory.buffer; engine.bytes = new Uint8Array(engine.buffer); engine.view = new DataView(engine.buffer); } return engine; }
 function arena() { return refresh().bytes.slice(engine.base, engine.base + size); }
@@ -153,18 +174,18 @@ function childShape(bytes, unit, helpers, dispatch = false) {
     else if(section===7) {for(let count=unsigned();count>0;count--)exports.push({name:name(),kind:bytes[at++],index:unsigned()});}
     else if(section===10) {
       assert.equal(unsigned(), functions.length);const bodyLength=unsigned(),bodyEnd=at+bodyLength;if (dispatch) assert.equal(bodyEnd, end); else {assert.equal(bodyLength, runBody.length); assert.ok(bodyEnd <= end);}locals=Array.from({length:unsigned()},()=>[unsigned(),bytes[at++]]);
-      assert.deepEqual(locals,dispatch?[[7,0x7f]]:[[16,0x7f],[1,0x7e],[10,0x7f],[1,0x7f]]);
+      assert.deepEqual(locals,dispatch?[[6,0x7f]]:[[16,0x7f],[1,0x7e],[10,0x7f],[1,0x7f],[1,0x7e],[6,0x7f]]);
       const expected=[engine.low,engine.high,...(dispatch?[]:engine.owner==='resident'?[unit.low,unit.high]:[unit.generation])];
-      guard={name:dispatch?'guard_dispatch_entry':engine.owner==='resident'?'guard_resident':'guard',constants:expected};
+      guard={name:dispatch?'guard_dispatch_entry':engine.owner==='resident'?'guard_detect_resident':'guard_detect',constants:expected};
       for(const value of expected){assert.equal(bytes[at++],0x41);assert.equal(signed(),value);}
       for(const index of [0,1,3]){assert.equal(bytes[at++],0x20);assert.equal(unsigned(),index);}
       assert.equal(bytes[at++],0x10);assert.equal(unsigned(),0);at=end;
     } else assert.fail(`unexpected generated child section${section}`);
     assert.equal(at,end);
   }
-  if (dispatch) assert.deepEqual(functions, [0]); else {assert.deepEqual(functions, [0, ...(functions.length === 2 ? [types.length - 1] : [])]); if (functions.length === 2) assert.deepEqual(types.at(-1), {parameters: Array(6).fill(0x7f), results: [0x7f]});}assert.deepEqual(types[0],{parameters:[0x7f,0x7f,0x7f,0x7f],results:[0x7f]});
+  if (dispatch) assert.deepEqual(functions, [0]); else {assert.deepEqual(functions, [0, ...(functions.length === 2 ? [types.length - 2] : [])]); if (functions.length === 2) assert.deepEqual(types.at(-2), {parameters: Array(6).fill(0x7f), results: [0x7f]});}assert.deepEqual(types[0],{parameters:[0x7f,0x7f,0x7f,0x7f],results:[0x7f]});
   assert.deepEqual(exports,[{name:'run',kind:0,index:helpers.length}]);assert.ok(locals && guard);
-  const importArities={};for(const row of imports.filter(row=>row.kind==='function')){const type=types[row.type],arity=arities[row.name];assert.ok(arity!==undefined);assert.deepEqual(type,{parameters:Array(arity).fill(0x7f),results:[0x7f]});importArities[row.name]=arity;}
+  const importArities={};for(const row of imports.filter(row=>row.kind==='function')){const type=types[row.type],arity=arities[row.name];assert.ok(arity!==undefined);assert.deepEqual(type,{parameters:Array.from({length:arity},(_,index)=>row.name==='finish_exception_detection'&&index===0?0x7e:0x7f),results:[row.name.startsWith('guard_detect')?0x7e:0x7f]});importArities[row.name]=arity;}
   assert.deepEqual(imports.filter(row=>row.kind==='function').map(row=>row.name),helpers);
   return {locals,guard,import_arities:importArities,run_arity:4};
 }
@@ -381,5 +402,5 @@ assert.equal(guestRetirements,164);assert.equal(nextInstance,14);assert.equal(id
 const artifactFiles=readdirSync(outputDir).filter(name=>name!=='provenance.json').sort();assert.deepEqual(artifactFiles,Object.keys(artifacts).sort());for(const file of artifactFiles)assert.equal(hash(readFileSync(join(outputDir,file))),artifacts[file]);
 const counts={instances:nextInstance,children:identities.length,operations:operations.length,host_inputs:hostInputs.length,observations:observations.length,ram_checks:ramChecks.length,stack_checks:stackChecks.length,guest_retired:guestRetirements,synthetic_bindings:syntheticBindings.length,synthetic_rows:syntheticObservations.length,artifacts:artifactFiles.length};
 assert.deepEqual(counts,{instances:14,children:18,operations:908,host_inputs:134,observations:92,ram_checks:82,stack_checks:8,guest_retired:164,synthetic_bindings:2,synthetic_rows:10,artifacts:3134});
-const provenance={engine_sha256:hash(engineBytes),oracle_sha256:hash(oracleBytes),program_sha256:hash(programBytes),text_sha256:hash(code),pe_sha256:hash(image),artifacts,sources,identities,operations,host_inputs:hostInputs,observations,ram_checks:ramChecks,stack_checks:stackChecks,synthetic_bindings:syntheticBindings,synthetic_observations:syntheticObservations,counts,command:[process.execPath,process.argv[1],enginePath,outputDir,root],assembly_command:['clang',...assemblyArgs],tools:{node:process.version,v8:process.versions.v8,clang:execFileSync('clang',['--version'],{encoding:'utf8'}).split('\n')[0]},claim:oracle.claim_ceiling};
+const provenance={current_wire_revision:'Real detection epochs and native PF exit12/helper15; authored synthetic legacy packets unchanged',engine_sha256:hash(engineBytes),oracle_sha256:hash(oracleBytes),program_sha256:hash(programBytes),text_sha256:hash(code),pe_sha256:hash(image),artifacts,sources,identities,operations,host_inputs:hostInputs,observations,ram_checks:ramChecks,stack_checks:stackChecks,synthetic_bindings:syntheticBindings,synthetic_observations:syntheticObservations,counts,command:[process.execPath,process.argv[1],enginePath,outputDir,root],assembly_command:['clang',...assemblyArgs],tools:{node:process.version,v8:process.versions.v8,clang:execFileSync('clang',['--version'],{encoding:'utf8'}).split('\n')[0]},claim:oracle.claim_ceiling};
 writeFileSync(join(outputDir,'provenance.json'),JSON.stringify(provenance,null,2));console.log(JSON.stringify({status:'ok',engine_sha256:provenance.engine_sha256,oracle_sha256:provenance.oracle_sha256,counts,output:outputDir}));

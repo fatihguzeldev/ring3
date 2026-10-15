@@ -1,3 +1,4 @@
+import {generatedImports} from '../../../../../../support/wasm/binding.mjs';
 import {generatedRunBody} from '../../../../../../support/wasm/run.mjs';
 import {assertEngineExports} from '../../../../../../support/wasm/exports.mjs';
 import {ARENA_SIZE, createArena} from '../../../../../../support/wasm/arena.mjs';
@@ -12,6 +13,12 @@ assert.ok(root, 'expected actual engine, output directory and repository root');
 const fixtureRoot = join(root, 'engine/tests/cpu/moves/register/fixtures/p2-byte-move');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const oracleBytes = readFileSync(join(fixtureRoot, 'oracle.json')), oracle = JSON.parse(oracleBytes);
+// Keep the immutable instruction oracle; declare the current native binding envelope.
+for (const [key, names] of Object.entries(oracle.transport)) {
+  if (!key.endsWith('_imports') || !Array.isArray(names)) continue;
+  const guard = names.find(name => name === 'guard' || name === 'guard_resident');
+  if (guard) oracle.transport[key] = generatedImports({resident: guard === 'guard_resident', helpers: names.filter(name => name !== guard)}).slice(1).map(item => item.name);
+}
 const programBytes = readFileSync(join(fixtureRoot, 'program.S'));
 assert.equal(hash(oracleBytes), '8305ab06d5d53f4e11f7458ba063afc12c0168d8565f024184a1057d3c2542e0');
 assert.equal(hash(programBytes), 'a2cb5ef91e8ef5184ad3baf80cbe5ac51a79aaecdfe7dc3263a91675b4922f05');
@@ -68,13 +75,14 @@ const engineExportContract = assertEngineExports(engineModule, root);
 const sourcePaths=[...productionPaths,'Cargo.toml','engine/Cargo.toml','Cargo.lock','engine/tests/cpu/moves/register/wasm/byte.rs', 'engine/tests/cpu/moves/wasm.rs', 'engine/tests/support/wasm.rs','engine/tests/cpu/moves/register/fixtures/p2-byte-move/program.S','engine/tests/cpu/moves/register/fixtures/p2-byte-move/oracle.json','engine/tests/cpu/moves/register/fixtures/p2-byte-move/runtime/run.mjs'];
 assert.equal(new Set(sourcePaths).size, sourcePaths.length);
 assert.equal(sourcePaths.length,productionPaths.length + 9); sourcePaths.push(...engineExportContract.sourcePaths.filter(path => !sourcePaths.includes(path)));
+sourcePaths.push('engine/tests/support/wasm/binding.mjs');
 sourcePaths.push('engine/tests/support/wasm/run.mjs');
 assert.equal(new Set(sourcePaths).size, sourcePaths.length);
 const sources=Object.fromEntries(sourcePaths.map(file=>[file,hash(readFileSync(join(root,file)))]));save('source-sha256.json',JSON.stringify(sources,null,2));
 save('engine.wasm',engineBytes);assert.ok(WebAssembly.validate(engineBytes));
 assert.deepEqual(WebAssembly.Module.imports(engineModule),[]);
 
-const arities={cpu_read8:1,cpu_read16:1,cpu_read32:1,cpu_store8:2,cpu_store_resident8:6,cpu_store32:2,cpu_store_resident32:6,open:3,close:0,arena_ptr:0,generation:0,module_ptr:0,module_len:0,map:3,protect:3,upload:2,begin_image_input:1,append_image_input:2,load_pe32_linked_v2_input_at:2,start_loaded_image:2,compile_entries:2,compile_resident_entries:2,find_resident:1,acknowledge_resident_installation:5,find_installed_resident:3,dispatcher_module:2,guard:6,guard_resident:7,guard_dispatch_entry:5,read32:1,read8:1,read16:1,write8:2,store32:2,store_resident32:6,store8:2,store_resident8:6,capture_call:5,capture_resident_call:6,complete_windows_call:4,complete_resident_windows_call:5};
+const arities = {guard_detect:6,guard_detect_resident:7,finish_exception_detection:12,cpu_read8:1,cpu_read16:1,cpu_read32:1,cpu_store8:2,cpu_store_resident8:6,cpu_store32:2,cpu_store_resident32:6,open:3,close:0,arena_ptr:0,generation:0,module_ptr:0,module_len:0,map:3,protect:3,upload:2,begin_image_input:1,append_image_input:2,load_pe32_linked_v2_input_at:2,start_loaded_image:2,compile_entries:2,compile_resident_entries:2,find_resident:1,acknowledge_resident_installation:5,find_installed_resident:3,dispatcher_module:2,guard:6,guard_resident:7,guard_dispatch_entry:5,read32:1,read8:1,read16:1,write8:2,store32:2,store_resident32:6,store8:2,store_resident8:6,capture_call:5,capture_resident_call:6,complete_windows_call:4,complete_resident_windows_call:5};
 let engine, nextInstance=0, guestRetirements=0;
 function refresh() { if (engine.buffer !== engine.memory.buffer) { engine.buffer = engine.memory.buffer; engine.bytes = new Uint8Array(engine.buffer); engine.view = new DataView(engine.buffer); } return engine; }
 function arena() { return refresh().bytes.slice(engine.base, engine.base + size); }
@@ -141,18 +149,18 @@ function childShape(bytes, unit, helpers, dispatch = false, pure = false) {
     else if(section===7) {for(let count=unsigned();count>0;count--)exports.push({name:name(),kind:bytes[at++],index:unsigned()});}
     else if(section===10) {
       assert.equal(unsigned(),functions.length);const bodyLength=unsigned(),bodyEnd=at+bodyLength; if(dispatch) assert.equal(bodyEnd,end); else {assert.equal(bodyLength,runBody.length);assert.ok(bodyEnd<=end);}locals=Array.from({length:unsigned()},()=>[unsigned(),bytes[at++]]);
-      assert.deepEqual(locals,dispatch?[[7,0x7f]]:[[16,0x7f],[1,0x7e],[10,0x7f],[1,0x7f]]);
+      assert.deepEqual(locals,dispatch?[[6,0x7f]]:[[16,0x7f],[1,0x7e],[10,0x7f],[1,0x7f],[1,0x7e],[6,0x7f]]);
       const expected=[engine.low,engine.high,...(dispatch?[]:engine.owner==='resident'?[unit.low,unit.high]:[unit.generation])];
-      guard={name:dispatch?'guard_dispatch_entry':engine.owner==='resident'?'guard_resident':'guard',constants:expected};
+      guard={name:dispatch?'guard_dispatch_entry':engine.owner==='resident'?'guard_detect_resident':'guard_detect',constants:expected};
       for(const value of expected){assert.equal(bytes[at++],0x41);assert.equal(signed(),value);}
       for(const index of [0,1,3]){assert.equal(bytes[at++],0x20);assert.equal(unsigned(),index);}
       assert.equal(bytes[at++],0x10);assert.equal(unsigned(),0);at=end;
     } else assert.fail(`unexpected generated child section${section}`);
     assert.equal(at,end);
   }
-  if(dispatch) assert.deepEqual(functions,[0]); else {assert.deepEqual(functions,[0,...(functions.length===2?[types.length-1]:[])]); if(functions.length===2) assert.deepEqual(types.at(-1),{parameters:Array(6).fill(0x7f),results:[0x7f]});}assert.deepEqual(types[0],{parameters:[0x7f,0x7f,0x7f,0x7f],results:[0x7f]});
+  if(dispatch) assert.deepEqual(functions,[0]); else {assert.deepEqual(functions,[0,...(functions.length===2?[types.length-2]:[])]); if(functions.length===2) assert.deepEqual(types.at(-2),{parameters:Array(6).fill(0x7f),results:[0x7f]});}assert.deepEqual(types[0],{parameters:[0x7f,0x7f,0x7f,0x7f],results:[0x7f]});
   assert.deepEqual(exports,[{name:'run',kind:0,index:helpers.length}]);assert.ok(locals && guard);
-  const importArities={};for(const row of imports.filter(row=>row.kind==='function')){const type=types[row.type],arity=arities[row.name];assert.ok(arity!==undefined);assert.deepEqual(type,{parameters:Array(arity).fill(0x7f),results:[0x7f]});importArities[row.name]=arity;}
+  const importArities={};for(const row of imports.filter(row=>row.kind==='function')){const type=types[row.type],arity=arities[row.name];assert.ok(arity!==undefined);assert.deepEqual(type,{parameters:Array.from({length:arity},(_,index)=>row.name==='finish_exception_detection'&&index===0?0x7e:0x7f),results:[row.name.startsWith('guard_detect')?0x7e:0x7f]});importArities[row.name]=arity;}
   assert.deepEqual(imports.filter(row=>row.kind==='function').map(row=>row.name),helpers);
   return {locals,guard,import_arities:importArities,run_arity:4};
 }

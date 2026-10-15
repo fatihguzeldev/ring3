@@ -1,3 +1,5 @@
+import {pageFaultExit} from '../../../../../../../support/wasm/page-fault.mjs';
+import {generatedImports, attachDetectionApi} from '../../../../../../../support/wasm/binding.mjs';
 import {createArena} from '../../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
@@ -15,7 +17,7 @@ const table=Buffer.from(Array.from({length:256},(_,index)=>(index*73+29)&255));
 assert.deepEqual(bank,readFileSync(join(output,'xlat.x86')),'independent Rust/JS bank');
 assert.deepEqual(table,readFileSync(join(output,'table.bin')),'independent Rust/JS table');
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
-const sourcePaths=['engine/tests/cpu/moves/addressing/lookup/wasm/xlat.rs', 'engine/tests/cpu/moves/wasm.rs', 'engine/tests/support/wasm.rs','engine/tests/cpu/moves/addressing/lookup/fixtures/p2-xlat/runtime/run.mjs','engine/tests/support/wasm/engine.mjs',
+const sourcePaths=['engine/tests/cpu/moves/addressing/lookup/wasm/xlat.rs', 'engine/tests/cpu/moves/wasm.rs', 'engine/tests/support/wasm.rs','engine/tests/cpu/moves/addressing/lookup/fixtures/p2-xlat/runtime/run.mjs','engine/tests/support/wasm/engine.mjs', 'engine/tests/support/wasm/binding.mjs', 'engine/tests/support/wasm/page-fault.mjs',
   'engine/src/cpu/x86/ir.rs','engine/src/cpu/x86/decode/lower.rs','engine/src/cpu/dbt/region.rs',
   'engine/src/cpu/dbt/wasm/integer/arithmetic.rs', 'engine/src/cpu/dbt/wasm/integer/bits.rs', 'engine/src/cpu/dbt/wasm/integer/carry_rotates.rs', 'engine/src/cpu/dbt/wasm/integer/decimal.rs', 'engine/src/cpu/dbt/wasm/integer/dispatch.rs', 'engine/src/cpu/dbt/wasm/integer/flags.rs', 'engine/src/cpu/dbt/wasm/integer/mod.rs', 'engine/src/cpu/dbt/wasm/integer/multiply_divide.rs', 'engine/src/cpu/dbt/wasm/integer/operands.rs', 'engine/src/cpu/dbt/wasm/integer/rotates.rs', 'engine/src/cpu/dbt/wasm/integer/shifts.rs','engine/src/cpu/dbt/wasm/memory.rs','engine/src/cpu/dbt/wasm/memory/narrow.rs'];
 assert.equal(new Set(sourcePaths).size, sourcePaths.length);
@@ -26,7 +28,16 @@ const counts={profiles:0,modules:0,translations:0,all_al:0,chained:0,boundaries:
 function record(magic,size,fields=[],version=1){const b=Buffer.alloc(size);b.write(magic);b.writeUInt16LE(version,4);b.writeUInt16LE(1,6);b.writeUInt32LE(size,8);fields.forEach((v,i)=>b.writeUInt32LE(v>>>0,16+i*4));return b;}
 const words=values=>Buffer.concat(values.map(v=>{const b=Buffer.alloc(4);b.writeUInt32LE(v>>>0);return b;}));
 const state=cpu=>record('R3ST',56,[...cpu.registers,cpu.pc,cpu.flags]);
-const exit=(reason,retired,detail=0,address=0,access=0,length=0,version=2)=>record('R3EX',40,[reason,retired,detail,address,access,length],version);
+const exit = (reason, retired, detail = 0, address = 0, access = 0, length = 0, version = 2) =>
+  reason === 5
+    ? pageFaultExit({
+        retired,
+        errorCode: 4 | (access === 2 ? 2 : 0) | (detail === 2 ? 1 : 0),
+        address,
+        access: access,
+        length
+      })
+    : record('R3EX', 40, [reason, retired, detail, address, access, length], version);
 const helper=(value,detail=0,address=0)=>record('R3MH',40,detail?[1,0,detail,address,1,1]:[0,value,0,0,0,1],2);
 const cpuHelper=(value,detail=0,address=0)=>record('R3MH',40,detail?[1,0,detail,address,1,1]:[0,value,0,0,0,1],10);
 function initial(){const b=createArena(SIZE);b.set(state({registers:Array(8).fill(0),pc:0,flags:2}));b.set(record('R3EX',40,[1,0,0,0,0,0]),56);b.set(record('R3MH',40),100);const fp=record('R3FP',128);fp.writeUInt16LE(0x37f,16);fp.writeUInt16LE(0xffff,20);b.set(fp,FP);return b;}
@@ -39,6 +50,7 @@ function upload(ctx,address,bytes){input(ctx,140,bytes);host(ctx,'upload',addres
 function open(owner,entries){
   const instance=new WebAssembly.Instance(engine.module,{}),ctx={owner,entries,profile:`${owner}/${entries?'entry':'explicit'}`,memory:instance.exports.memory,api:{},expected:initial()};
   for(const [name,arity] of Object.entries({open:3,close:0,arena_ptr:0,map:3,unmap:2,protect:3,upload:2,read8:1,compile:1,compile_entries:2,compile_resident:1,compile_resident_entries:2,generation:0,module_ptr:0,module_len:0,guard:6,guard_resident:7})){const fn=instance.exports['ring3_abi_v1_'+name];assert.equal(typeof fn,'function',name);assert.equal(fn.length,arity,name);ctx.api[name]=fn;}
+ attachDetectionApi(ctx.api, instance.exports);
   for(const name of ["read8"]) {ctx.api["cpu_"+name]=instance.exports["ring3_abi_v1_cpu_"+name];assert.equal(ctx.api["cpu_"+name]?.length,name.startsWith("read")?1:name.includes("resident")?6:2,"cpu_"+name);}
  assert.equal(ctx.api.open(6,1,0x9abcde00),0);ctx.base=ctx.api.arena_ptr()>>>0;check(ctx,'default full arena');
   for(const address of [PC,TABLE,0xfffff000,0])host(ctx,'map',address,1,address===PC?7:3);
@@ -49,7 +61,7 @@ function compile(ctx){
   if(ctx.owner==='replacement'){host(ctx,ctx.entries?'compile_entries':'compile',3,...(ctx.entries?[0]:[]));binding={generation:ctx.api.generation(),pointer:ctx.api.module_ptr()>>>0,length:ctx.api.module_len()>>>0};}
   else{check(ctx,'before resident compile');assert.equal(ctx.entries?ctx.api.compile_resident_entries(3,0):ctx.api.compile_resident(3),0);const receipt=observed(ctx);assert.equal(receipt.readUInt32LE(140),1);assert.equal(receipt.readUInt32LE(144),24);binding=Object.fromEntries(['low','high','pointer','length'].map((n,i)=>[n,receipt.readUInt32LE(148+i*4)]));ctx.expected.set(words([1,24,binding.low,binding.high,binding.pointer,binding.length]),140);check(ctx,'resident metadata');events.push({profile:ctx.profile,kind:'compile_resident',entries:ctx.entries,binding});}
   const bytes=Buffer.from(new Uint8Array(ctx.memory.buffer,binding.pointer,binding.length)),module=new WebAssembly.Module(bytes);
-  const names=[ctx.owner==='replacement'?'guard':'guard_resident','cpu_read8'];assert.deepEqual(WebAssembly.Module.imports(module),[{module:'env',name:'memory',kind:'memory'},...names.map(name=>({module:'ring3',name,kind:'function'}))]);assert.deepEqual(WebAssembly.Module.exports(module),[{name:'run',kind:'function'}]);
+  const names=generatedImports({resident: !(ctx.owner==='replacement'), helpers: ['cpu_read8']}).slice(1).map(item => item.name);assert.deepEqual(WebAssembly.Module.imports(module),[{module:'env',name:'memory',kind:'memory'},...names.map(name=>({module:'ring3',name,kind:'function'}))]);assert.deepEqual(WebAssembly.Module.exports(module),[{name:'run',kind:'function'}]);
   const unit={...binding,run:new WebAssembly.Instance(module,{env:{memory:ctx.memory},ring3:ctx.api}).exports.run};assert.equal(unit.run.length,4);
   const file=`module-${counts.modules}.wasm`;writeFileSync(join(output,file),bytes,{flag:'wx'});modules.push({profile:ctx.profile,file,bytes:bytes.length,sha256:hash(bytes),binding});counts.modules++;return unit;
 }

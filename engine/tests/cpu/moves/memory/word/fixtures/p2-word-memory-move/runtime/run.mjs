@@ -1,3 +1,5 @@
+import {pageFaultExit, pageFaultPacket} from '../../../../../../../support/wasm/page-fault.mjs';
+import {generatedImports, attachDetectionApi} from '../../../../../../../support/wasm/binding.mjs';
 import {ARENA_SIZE} from '../../../../../../../support/wasm/arena.mjs';
 import assert from "node:assert/strict";
 import {createHash} from "node:crypto";
@@ -19,8 +21,35 @@ function record(magic, size, fields, version = 1) {
   fields.forEach((v, i) => b.writeUInt32LE(u32(v), 16 + i * 4)); return b;
 }
 const state = c => record("R3ST", 56, [...c.registers, c.pc, c.flags]);
-const exit = (reason, count, fault, version = 2) => record("R3EX", 40, [reason, count, fault?.detail ?? 0, fault?.address ?? 0, fault?.access ?? 0, fault ? 2 : 0], version);
-const helper = (form, value = 0, fault) => record("R3MH", 40, [fault ? 1 : 0, value, fault?.detail ?? 0, fault?.address ?? 0, fault?.access ?? 0, 2], 10);
+const exit = (reason, count, fault, version = 2) =>
+  reason === 5
+    ? pageFaultExit({
+        retired: count,
+        errorCode: 4 | ((fault?.access ?? 0) === 2 ? 2 : 0) | ((fault?.detail ?? 0) === 2 ? 1 : 0),
+        address: fault?.address ?? 0,
+        access: fault?.access ?? 0,
+        length: fault ? 2 : 0
+      })
+    : record(
+        'R3EX',
+        40,
+        [reason, count, fault?.detail ?? 0, fault?.address ?? 0, fault?.access ?? 0, fault ? 2 : 0],
+        version
+      );
+const helper = (value = 0, fault) =>
+  Boolean(fault) && ((fault?.detail ?? 0) === 1 || (fault?.detail ?? 0) === 2)
+    ? pageFaultPacket({
+        errorCode: 4 | ((fault?.access ?? 0) === 2 ? 2 : 0) | ((fault?.detail ?? 0) === 2 ? 1 : 0),
+        address: fault?.address ?? 0,
+        access: fault?.access ?? 0,
+        length: 2
+      })
+    : record(
+        'R3MH',
+        40,
+        [fault ? 1 : 0, value, fault?.detail ?? 0, fault?.address ?? 0, fault?.access ?? 0, 2],
+        10
+      );
 const words = values => {const b = Buffer.alloc(values.length * 4); values.forEach((v, i) => b.writeUInt32LE(u32(v), i * 4)); return b;};
 const copy = c => ({...c, registers: [...c.registers]});
 const defaultRegisters = [0xb64d8001, 0xc75e2222, 0xd86f3333, 0xe9704444, 0xfa815555, 0x8b926666, 0x9ca37777, 0x5008];
@@ -73,7 +102,7 @@ function makePlan() {
     host(c, name, c.entries ? [blocks.length, 0] : [blocks.length]);
     if (c.owner === "replacement") for (const getter of ["generation", "module_ptr", "module_len"]) host(c, getter, []);
     const module = {id: modules.length + 1, context: c.id, bank: bank.id, label, owner: c.owner, entries: c.entries, version: helperNames.length ? 6 : 1,
-      imports: [c.owner === "resident" ? "guard_resident" : "guard", ...helperNames.map(name => "cpu_" + (name === "store16" && c.owner === "resident" ? "store_resident16" : name))]};
+      imports: generatedImports({resident: c.owner === "resident", helpers: [...helperNames.map(name => "cpu_" + (name === "store16" && c.owner === "resident" ? "store_resident16" : name))]}).slice(1).map(item => item.name)};
     modules.push(module); add(c, "module", {module: module.id}); return module;
   }
   function discard(c, module) {if (c.owner === "resident") host(c, "discard_unacknowledged_resident", ["key_low", "key_high", `module:${module.id}:low`, `module:${module.id}:high`]);}
@@ -86,7 +115,7 @@ function makePlan() {
     const next = copy(c.cpu); next.pc += code.length;
     const value = test.form === "load" ? test.word : test.form === "store" ? test.registers[test.register] & 65535 : test.word;
     if (test.form === "load") next.registers[test.register] = u32((next.registers[test.register] & 0xffff0000) | value);
-    run(c, module, 1, test.id, next, 1, 1, helper(test.form, test.form === "load" ? value : 0));
+    run(c, module, 1, test.id, next, 1, 1, helper(test.form === "load" ? value : 0));
     if (test.form !== "load") {c.ram.set(at, value & 255); c.ram.set(at + 1, value >>> 8);}
     diagnose(c, start, length, "positive canaries after " + test.id); for (const page of mapped) unmap(c, page);
   }
@@ -105,8 +134,8 @@ function makePlan() {
       if (permission) host(c, "protect", [denied, 1, form === "load" ? 2 : 1]);
       const registers = [...defaultRegisters]; registers[7] = at; seed(c, entry, registers);
       const next = {...copy(c.cpu), pc: target}, fault = {detail: overflow ? 3 : permission ? 2 : 1, address: overflow ? at : crossing ? 0x7000 : at, access: form === "load" ? 1 : 2};
-      run(c, module, 2, form + " " + kind + " prefix then fault", next, overflow ? 11 : 5, 1, overflow ? undefined : helper(form, 0, fault), overflow ? undefined : fault);
-      run(c, module, 1, form + " " + kind + " unchangedCPU retry", next, overflow ? 11 : 5, 0, overflow ? undefined : helper(form, 0, fault), overflow ? undefined : fault);
+      run(c, module, 2, form + " " + kind + " prefix then fault", next, overflow ? 11 : 5, 1, overflow ? undefined : helper(0, fault), overflow ? undefined : fault);
+      run(c, module, 1, form + " " + kind + " unchangedCPU retry", next, overflow ? 11 : 5, 0, overflow ? undefined : helper(0, fault), overflow ? undefined : fault);
       if (overflow) diagnose(c, 0xfffffffe, 2, "overflow top-byte preservation before address repair");
       if (overflow) {c.cpu.registers[7] = 0x5008; input(c, 44, words([0x5008]), "explicit overflow address-register repair");}
       else if (permission) host(c, "protect", [denied, 1, 3]); else map(c, crossing ? 0x7000 : 0x6000);
@@ -114,7 +143,7 @@ function makePlan() {
       const diagnosticLength = 4; diagnose(c, diagnosticStart, diagnosticLength, "failed target bytes after repair before retry");
       const value = form === "load" ? (c.ram.get(repaired) ?? 0) | ((c.ram.get(repaired + 1) ?? 0) << 8) : 0x8001;
       const done = {...copy(c.cpu), pc: target + targetLength}; if (form === "load") done.registers[0] = u32((done.registers[0] & 0xffff0000) | value);
-      run(c, module, 1, form + " " + kind + " repaired exact target", done, 1, 1, helper(form, form === "load" ? value : 0));
+      run(c, module, 1, form + " " + kind + " repaired exact target", done, 1, 1, helper(form === "load" ? value : 0));
       if (form !== "load") {c.ram.set(repaired, 1); c.ram.set(repaired + 1, 0x80);}
       diagnose(c, diagnosticStart, diagnosticLength, "repaired target canaries after");
       if (overflow) unmap(c, 0xfffff000); else unmap(c, 0x6000, crossing ? 2 : 1);
@@ -123,7 +152,7 @@ function makePlan() {
     run(c, module, 0, form + " zero before unmapped target", c.cpu, 1, 0);
     input(c, 96, words([1]), "declared cancel"); run(c, module, 1, form + " cancel1", c.cpu, 2, 0); run(c, module, 0, form + " cancel0", c.cpu, 2, 0); input(c, 96, words([0]), "clear cancel");
     if (form !== "immediate") {
-      seed(c, target); const packet = helper(form, form === "load" ? 0x8001 : 0); packet.writeUInt32LE(1, 36);
+      seed(c, target); const packet = helper(form === "load" ? 0x8001 : 0); packet.writeUInt32LE(1, 36);
       diagnose(c, 0x5007, 4, "inert malformed helper RAM before");
       run(c, module, 1, form + " inert foreign wrong-width helper", c.cpu, 7, 0, packet, undefined, 0, {foreign_helper: form, foreign_packet: packet.toString("hex"), protocol_detail: 2});
       diagnose(c, 0x5007, 4, "inert malformed helper RAM after");
@@ -133,16 +162,16 @@ function makePlan() {
     const module = compile(c, [{pc: data.mixed.pc, hex: data.mixed.x86}], "mixed currentRAM chain", ["read16", "store16"]);
     map(c, 0x6000, 2); upload(c, 0x6ffc, Buffer.alloc(6, 0x55)); seed(c, 0x1400, data.mixed.registers, data.mixed.flags);
     const end = copy(c.cpu); end.registers[0] = 0xa53c8002; end.registers[2] = 0xb74d8002; end.flags = 0x482; end.pc = 0x1800;
-    run(c, module, 8, "mixed normal without reseed", end, 3, 6, helper("load", 0x8002));
+    run(c, module, 8, "mixed normal without reseed", end, 3, 6, helper(0x8002));
     for (const [at, value] of [[0x6ffd, 1], [0x6ffe, 0x80], [0x6fff, 2], [0x7000, 0x80]]) c.ram.set(at, value);
     diagnose(c, 0x6ffc, 6, "mixed normal final RAM"); unmap(c, 0x6000, 2); map(c, 0x6000); upload(c, 0x6ffc, Buffer.alloc(4, 0x55)); seed(c, 0x1400, data.mixed.registers, data.mixed.flags);
     const stopped = copy(c.cpu); stopped.registers[0] = 0xa53c8002; stopped.flags = 0x482; stopped.pc = 0x140c;
     const fault = {detail: 1, address: 0x7000, access: 2};
-    run(c, module, 8, "mixed first3 then atomic fault", stopped, 5, 3, helper("store", 0, fault), fault); c.ram.set(0x6ffd, 1); c.ram.set(0x6ffe, 0x80);
-    diagnose(c, 0x6ffc, 4, "mixed fault accessible prefix unchanged"); run(c, module, 1, "mixed unchangedCPU retry", c.cpu, 5, 0, helper("store", 0, fault), fault);
+    run(c, module, 8, "mixed first3 then atomic fault", stopped, 5, 3, helper(0, fault), fault); c.ram.set(0x6ffd, 1); c.ram.set(0x6ffe, 0x80);
+    diagnose(c, 0x6ffc, 4, "mixed fault accessible prefix unchanged"); run(c, module, 1, "mixed unchangedCPU retry", c.cpu, 5, 0, helper(0, fault), fault);
     map(c, 0x7000); diagnose(c, 0x6ffc, 6, "mixed map-only repair before retry");
-    run(c, module, 1, "mixed map-only store continuation", {...copy(c.cpu), pc: 0x1410}, 1, 1, helper("store")); c.ram.set(0x6fff, 2); c.ram.set(0x7000, 0x80);
-    const reload = {...copy(c.cpu), pc: 0x1414}; reload.registers[2] = 0xb74d8002; run(c, module, 1, "mixed reload currentRAM", reload, 1, 1, helper("load", 0x8002));
+    run(c, module, 1, "mixed map-only store continuation", {...copy(c.cpu), pc: 0x1410}, 1, 1, helper()); c.ram.set(0x6fff, 2); c.ram.set(0x7000, 0x80);
+    const reload = {...copy(c.cpu), pc: 0x1414}; reload.registers[2] = 0xb74d8002; run(c, module, 1, "mixed reload currentRAM", reload, 1, 1, helper(0x8002));
     run(c, module, 2, "mixed cold continuation no replay", {...copy(c.cpu), pc: 0x1800}, 3, 1); diagnose(c, 0x6ffc, 6, "mixed repaired final RAM");
     for (const field of ["state", "exit", "cancel"]) run(c, module, 1, "invalid " + field + " pointer", c.cpu, 1, 0, undefined, undefined, 1, {invalid_pointer: field});
     pc(c, 0x1800); run(c, module, 1, "cold PC", c.cpu, 3, 0);
@@ -169,7 +198,7 @@ function makePlan() {
     let unrelated; if (c.owner === "resident") {map(c, 0x3000, 1, 7); unrelated = compile(c, [{pc: 0x3000, hex: "90eb00"}], "unrelated retained owner", []);}
     const value = same ? bytes(x86).readUInt16LE(0) : 0x9090, registers = [...defaultRegisters]; registers[0] = 0xa53c0000 | value; registers[7] = codePC; seed(c, codePC, registers, 2);
     diagnose(c, codePC, 2, "self-code before"); const next = {...copy(c.cpu), pc: codePC + (form === "store" ? 3 : 5)};
-    run(c, module, 1, "self-code commits before invalidation", next, 6, 1, helper("store")); c.ram.set(codePC, value & 255); c.ram.set(codePC + 1, value >>> 8); diagnose(c, codePC, 2, "self-code after");
+    run(c, module, 1, "self-code commits before invalidation", next, 6, 1, helper()); c.ram.set(codePC, value & 255); c.ram.set(codePC + 1, value >>> 8); diagnose(c, codePC, 2, "self-code after");
     run(c, module, 1, "self-code stale neutral", c.cpu, 1, 0, undefined, undefined, 4);
     const tail = compile(c, [{pc: next.pc, hex: "eb00"}], "fresh suffix no CPU/RAM repair", [], false);
     run(c, tail, 2, "suffix no store replay", {...copy(c.cpu), pc: next.pc + 2}, 3, 1);
@@ -183,7 +212,7 @@ function makePlan() {
     const companion = compile(c, [{pc: to, hex: data.cross_owner.companion}], "affected companion", []);
     const unrelated = compile(c, [{pc: 0x5000, hex: data.cross_owner.unrelated}], "unrelated companion", []);
     const registers = [...defaultRegisters]; registers[0] = 0xa53c0000 | word; registers[7] = to; seed(c, from, registers);
-    diagnose(c, to, 2, "cross-owner before"); run(c, writer, 1, "writer stays current while companion invalidates", {...copy(c.cpu), pc: from + 3}, 1, 1, helper("store")); c.ram.set(to, word & 255); c.ram.set(to + 1, word >>> 8); diagnose(c, to, 2, "cross-owner after");
+    diagnose(c, to, 2, "cross-owner before"); run(c, writer, 1, "writer stays current while companion invalidates", {...copy(c.cpu), pc: from + 3}, 1, 1, helper()); c.ram.set(to, word & 255); c.ram.set(to + 1, word >>> 8); diagnose(c, to, 2, "cross-owner after");
     run(c, companion, 1, "affected companion stale", c.cpu, 1, 0, undefined, undefined, 4); pc(c, 0x5000); run(c, unrelated, 1, "cross-owner unrelated current", {...copy(c.cpu), pc: 0x5001}, 1, 1);
     close(c, writer); add(c, "closed_run", {module: companion.id, args: [0xffffffff, 0xffffffff, 1, 0xffffffff], label: "closed affected companion"}); calls++;
   }
@@ -216,7 +245,7 @@ if (process.argv[2] === "--plan") {
   const initial = readFileSync(join(output, "initial-arena.bin")); assert.equal(initial.length, SIZE);
   assert.deepEqual(readFileSync(join(output, "cases.json")), dataBytes, "Rust bridge/source authored input agreement");
   writePlan(output, false); writeFileSync(join(output, "engine.wasm"), engine.bytes, {flag: "wx"});
-  const paths = ["engine/src/abi/arena.rs", "engine/src/abi/memory_helper.rs", "engine/src/abi/x86/x87.rs", "engine/src/abi/wasm/exports/calls.rs", "engine/src/abi/wasm/exports/cpu.rs", "engine/src/abi/wasm/exports/execution.rs", "engine/src/abi/wasm/exports/image.rs", "engine/src/abi/wasm/exports/instance.rs", "engine/src/abi/wasm/exports/memory.rs", "engine/src/abi/wasm/exports/mod.rs", "engine/src/cpu/x86/ir.rs", "engine/src/cpu/x86/decode/lower.rs", "engine/src/cpu/x86/decode/profile.rs", "engine/src/cpu/dbt/region.rs", "engine/src/cpu/dbt/wasm/integer/arithmetic.rs", "engine/src/cpu/dbt/wasm/integer/bits.rs", "engine/src/cpu/dbt/wasm/integer/carry_rotates.rs", "engine/src/cpu/dbt/wasm/integer/decimal.rs", "engine/src/cpu/dbt/wasm/integer/dispatch.rs", "engine/src/cpu/dbt/wasm/integer/flags.rs", "engine/src/cpu/dbt/wasm/integer/mod.rs", "engine/src/cpu/dbt/wasm/integer/multiply_divide.rs", "engine/src/cpu/dbt/wasm/integer/operands.rs", "engine/src/cpu/dbt/wasm/integer/rotates.rs", "engine/src/cpu/dbt/wasm/integer/shifts.rs", "engine/src/cpu/dbt/wasm/emitter.rs", "engine/src/cpu/dbt/wasm/locals.rs", "engine/src/cpu/dbt/wasm/memory.rs", "engine/src/cpu/dbt/wasm/memory/narrow.rs", "engine/src/cpu/dbt/wasm/memory/word_store.rs", "engine/src/memory/space.rs", "engine/src/memory/space/atomic.rs", "engine/src/process/instance.rs", "engine/src/process/execution/compiled.rs", "engine/src/process/execution/authority.rs", "engine/src/process/memory/address_space.rs", "engine/src/process/memory/scalar.rs", "engine/src/process/memory/scalar/tests.rs", "engine/src/process/execution/mod.rs", "engine/src/process/memory/mod.rs", "engine/src/process/mod.rs", "engine/src/process/execution/resident.rs", "engine/tests/cpu/moves/memory/word/wasm/operations.rs", "engine/tests/cpu/moves/wasm.rs", "engine/tests/cpu/moves/memory/word/fixtures/p2-word-memory-move/runtime/run.mjs", "engine/tests/cpu/moves/memory/word/fixtures/p2-word-memory-move/cases.json", "engine/tests/support/wasm/engine.mjs"];
+  const paths = ["engine/src/abi/arena.rs", "engine/src/abi/memory_helper.rs", "engine/src/abi/x86/x87.rs", "engine/src/abi/wasm/exports/calls.rs", "engine/src/abi/wasm/exports/cpu.rs", "engine/src/abi/wasm/exports/execution.rs", "engine/src/abi/wasm/exports/image.rs", "engine/src/abi/wasm/exports/instance.rs", "engine/src/abi/wasm/exports/memory.rs", "engine/src/abi/wasm/exports/mod.rs", "engine/src/cpu/x86/ir.rs", "engine/src/cpu/x86/decode/lower.rs", "engine/src/cpu/x86/decode/profile.rs", "engine/src/cpu/dbt/region.rs", "engine/src/cpu/dbt/wasm/integer/arithmetic.rs", "engine/src/cpu/dbt/wasm/integer/bits.rs", "engine/src/cpu/dbt/wasm/integer/carry_rotates.rs", "engine/src/cpu/dbt/wasm/integer/decimal.rs", "engine/src/cpu/dbt/wasm/integer/dispatch.rs", "engine/src/cpu/dbt/wasm/integer/flags.rs", "engine/src/cpu/dbt/wasm/integer/mod.rs", "engine/src/cpu/dbt/wasm/integer/multiply_divide.rs", "engine/src/cpu/dbt/wasm/integer/operands.rs", "engine/src/cpu/dbt/wasm/integer/rotates.rs", "engine/src/cpu/dbt/wasm/integer/shifts.rs", "engine/src/cpu/dbt/wasm/emitter.rs", "engine/src/cpu/dbt/wasm/locals.rs", "engine/src/cpu/dbt/wasm/memory.rs", "engine/src/cpu/dbt/wasm/memory/narrow.rs", "engine/src/cpu/dbt/wasm/memory/word_store.rs", "engine/src/memory/space.rs", "engine/src/memory/space/atomic.rs", "engine/src/process/instance.rs", "engine/src/process/execution/compiled.rs", "engine/src/process/execution/authority.rs", "engine/src/process/memory/address_space.rs", "engine/src/process/memory/scalar.rs", "engine/src/process/memory/scalar/tests.rs", "engine/src/process/execution/mod.rs", "engine/src/process/memory/mod.rs", "engine/src/process/mod.rs", "engine/src/process/execution/resident.rs", "engine/tests/cpu/moves/memory/word/wasm/operations.rs", "engine/tests/cpu/moves/wasm.rs", "engine/tests/cpu/moves/memory/word/fixtures/p2-word-memory-move/runtime/run.mjs", "engine/tests/cpu/moves/memory/word/fixtures/p2-word-memory-move/cases.json", "engine/tests/support/wasm/engine.mjs", 'engine/tests/support/wasm/binding.mjs', 'engine/tests/support/wasm/page-fault.mjs'];
 assert.equal(new Set(paths).size, paths.length);
   paths.push(...["engine/src/abi/memory_helper/cpu.rs", "engine/src/cpu/dbt/wasm/memory/cpu_scalar.rs", "engine/src/cpu/dbt/wasm/emitter.rs", "engine/src/cpu/dbt/wasm/code_fetch.rs", "engine/src/process/memory/cpu_scalar.rs", "engine/src/process/memory/scalar/cpu_write.rs", "engine/src/process/wasm/memory/cpu_write.rs", "engine/src/abi/wasm/exports/memory/cpu_write.rs"].filter(path=>!paths.includes(path)));
   const sources = () => Object.fromEntries(paths.map(path => {const b = readFileSync(join(root, path)); return [path, {bytes: b.length, sha256: sha(b)}];}));
@@ -236,6 +265,7 @@ assert.equal(new Set(paths).size, paths.length);
     try {
     if (event.kind === "open") {
       const instance = new WebAssembly.Instance(engine.module, {}), api = Object.fromEntries(Object.entries(instance.exports).filter(([name]) => name.startsWith("ring3_abi_v1_")).map(([name, fn]) => [name.slice(13), fn]));
+ attachDetectionApi(api, instance.exports);
       assert.equal(api.open(...event.args), 0); c = {api, memory: instance.exports.memory, base: api.arena_ptr() >>> 0, closed: false, key: event.args.slice(1), getters: {}}; contexts.set(event.context, c);
       Object.assign(row, {args: event.args, return_value: 0, arena_base: c.base, after_frame: frame(c)});
     } else if (event.kind === "module") {
@@ -278,7 +308,7 @@ assert.equal(new Set(paths).size, paths.length);
         }
         if (foreign) {row.foreign_helper = event.foreign_helper; row.foreign_trace = {calls: foreign.exports.calls(), address: foreign.exports.address() >>> 0, value: foreign.exports.value() >>> 0}; assert.equal(row.foreign_trace.calls, 1);}
       }
-      if (!c.closed) {row.after_frame = frame(c); assert.deepEqual(snapshot(c), expected, "full4612 " + event.label);}
+      if (!c.closed) {row.after_frame = frame(c); assert.deepEqual(snapshot(c), expected, "complete arena " + event.label);}
     }
     journal.push(row);
     } catch (error) {

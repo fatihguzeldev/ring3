@@ -1,3 +1,4 @@
+import {detectionGuardName, generatedImports, attachDetectionApi} from '../../../../../../support/wasm/binding.mjs';
 import {ARENA_SIZE} from '../../../../../../support/wasm/arena.mjs';
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
@@ -23,7 +24,7 @@ const paths=["engine/src/abi/arena.rs","engine/src/abi/header.rs","engine/src/ab
  "engine/src/cpu/x86/ir.rs","engine/src/cpu/x86/decode/decoder.rs","engine/src/cpu/x86/decode/operands.rs","engine/src/cpu/x86/decode/lower.rs","engine/src/cpu/x86/decode/profile.rs",
  "engine/src/cpu/dbt/region.rs","engine/src/cpu/dbt/wasm/integer/arithmetic.rs", "engine/src/cpu/dbt/wasm/integer/bits.rs", "engine/src/cpu/dbt/wasm/integer/carry_rotates.rs", "engine/src/cpu/dbt/wasm/integer/decimal.rs", "engine/src/cpu/dbt/wasm/integer/dispatch.rs", "engine/src/cpu/dbt/wasm/integer/flags.rs", "engine/src/cpu/dbt/wasm/integer/mod.rs", "engine/src/cpu/dbt/wasm/integer/multiply_divide.rs", "engine/src/cpu/dbt/wasm/integer/operands.rs", "engine/src/cpu/dbt/wasm/integer/rotates.rs", "engine/src/cpu/dbt/wasm/integer/shifts.rs","engine/src/cpu/dbt/wasm/emitter.rs","engine/src/cpu/dbt/wasm/abi.rs","engine/src/cpu/dbt/wasm/locals.rs",
  "engine/src/memory/space.rs", "engine/src/memory/space/atomic.rs","engine/src/process/instance.rs", "engine/src/process/execution/compiled.rs", "engine/src/process/execution/authority.rs", "engine/src/process/memory/address_space.rs", "engine/src/process/memory/scalar.rs", "engine/src/process/memory/scalar/tests.rs", "engine/src/process/execution/mod.rs", "engine/src/process/memory/mod.rs", "engine/src/process/mod.rs","engine/src/process/execution/resident.rs","engine/src/process/wasm/mod.rs", "engine/src/process/wasm/loading.rs", "engine/src/abi/image.rs", "engine/src/process/wasm/execution.rs", "engine/src/process/wasm/calls.rs", "engine/src/process/wasm/memory.rs", "engine/src/process/wasm/cpu.rs","engine/tests/cpu/moves/register/wasm/word.rs", "engine/tests/cpu/moves/wasm.rs", "engine/tests/support/wasm.rs",
- "engine/tests/cpu/moves/register/fixtures/p2-word-register-move/runtime/run.mjs","engine/tests/support/wasm/engine.mjs"];
+ "engine/tests/cpu/moves/register/fixtures/p2-word-register-move/runtime/run.mjs","engine/tests/support/wasm/engine.mjs", 'engine/tests/support/wasm/binding.mjs'];
 assert.equal(new Set(paths).size, paths.length);
 const pins=()=>Object.fromEntries(paths.map(path=>{const b=readFileSync(join(root,path));return[path,{bytes:b.length,sha256:hash(b)}];})),sourcePins=pins(),frames=[],journal=[],modules=[];
 const counts={contexts:0,targets:0,matrix:0,retained:0,current:0,mov89:0,mov8b:0,generated_calls:0,retired:0,jumps:0,controls:0};
@@ -45,7 +46,7 @@ function seed(c,pc,salt,flags){const b=Buffer.alloc(100),r=Array.from({length:8}
  b.set(state({registers:r,pc,flags}));b.set(exit(3,0),56);input(c,0,b,"explicit CPU and exit seed");return cpu(c);}
 function run(c,budget,label,wanted,reason=1,n=1,status=0,args){const before=capture(c,"before generated "+label),expected=arena(c);
  if(status===0){expected.set(state(wanted));expected.set(exit(reason,n),56);}const params=args??[c.base,c.base+56,budget,c.base+96];
- assert.equal(c.run(...params),status,label);assert.deepEqual(arena(c),expected,"full4612 "+label);counts.generated_calls++;if(status===0)counts.retired+=n;
+ assert.equal(c.run(...params),status,label);assert.deepEqual(arena(c),expected,"complete arena "+label);counts.generated_calls++;if(status===0)counts.retired+=n;
  journal.push({context:c.context,name:"run",label,budget,status,args:params,before,after:capture(c,"after generated "+label)});}
 function move(c,opcode,destination,source,label,category){const old=cpu(c),next={registers:[...old.registers],pc:old.pc+3,flags:old.flags};
  next.registers[destination]=((old.registers[destination]&0xffff0000)|(old.registers[source]&0xffff))>>>0;
@@ -55,13 +56,14 @@ function compile(c,group){const starts=group.specs.map(spec=>spec.pc),lengths=gr
  const method=c.owner==="resident"?(c.entries?"compile_resident_entries":"compile_resident"):(c.entries?"compile_entries":"compile");host(c,method,c.entries?[4,0]:[4]);let binding;
  if(c.owner==="resident"){const b=arena(c);binding=Object.fromEntries(["low","high","pointer","length"].map((name,i)=>[name,b.readUInt32LE(148+i*4)]));}
  else binding={generation:c.api.generation(),pointer:c.api.module_ptr()>>>0,length:c.api.module_len()>>>0};
- const bytes=Buffer.from(new Uint8Array(c.memory.buffer,binding.pointer,binding.length)),module=new WebAssembly.Module(bytes),name=c.owner==="resident"?"guard_resident":"guard";
- assert.deepEqual(WebAssembly.Module.imports(module),[{module:"env",name:"memory",kind:"memory"},{module:"ring3",name,kind:"function"}]);
+ const bytes=Buffer.from(new Uint8Array(c.memory.buffer,binding.pointer,binding.length)),module=new WebAssembly.Module(bytes),name=detectionGuardName(c.owner==="resident");
+ assert.deepEqual(WebAssembly.Module.imports(module),generatedImports({resident: c.owner==="resident", helpers: []}));
  assert.deepEqual(WebAssembly.Module.exports(module),[{name:"run",kind:"function"}]);c.run=new WebAssembly.Instance(module,{env:{memory:c.memory},ring3:c.api}).exports.run;
  const file=`${c.owner}-${c.entries?"entries":"explicit"}-group${groups.indexOf(group)}.wasm`;writeFileSync(join(output,file),bytes,{flag:"wx"});
- modules.push({context:c.context,owner:c.owner,entries:c.entries,group:groups.indexOf(group),arena_base:c.base,file,...binding,bytes:bytes.length,sha256:hash(bytes),imports:[name]});}
+ modules.push({context:c.context,owner:c.owner,entries:c.entries,group:groups.indexOf(group),arena_base:c.base,file,...binding,bytes:bytes.length,sha256:hash(bytes),imports:generatedImports({resident: c.owner==="resident", helpers: []}).slice(1).map(item => item.name)});}
 function open(owner,entries){const instance=new WebAssembly.Instance(engine.module,{}),c={owner,entries,context:++counts.contexts,memory:instance.exports.memory,api:{}};
  for(const name of ["open","close","arena_ptr","map","protect","upload","compile","compile_entries","compile_resident","compile_resident_entries","generation","module_ptr","module_len","guard","guard_resident"])c.api[name]=instance.exports["ring3_abi_v1_"+name];
+ attachDetectionApi(c.api, instance.exports);
  assert.equal(c.api.open(2,c.context,0x65555657),0);c.base=c.api.arena_ptr()>>>0;input(c,0,initial,"full initial arena with opaque FP128");
  host(c,"map",[PC,1,7]);upload(c,PC,bank);host(c,"protect",[PC,1,4]);return c;}
 function close(c){const before=capture(c,"before close");assert.equal(c.api.close(),0);journal.push({context:c.context,name:"close",args:[],before});
@@ -91,7 +93,7 @@ const raw=Buffer.concat(frames);writeFileSync(join(output,"arenas.bin"),raw,{fla
 const result={status:"ok",engine:{bytes:engine.bytes.length,sha256:engine.sha256,caller_sha256:process.env.RING3_ENGINE_SHA256},source_pins:sourcePins,
  counts:{...counts,modules:modules.length,host_counts:hostCounts,host_inputs:journal.filter(row=>row.name==="input").length,journal_records:journal.length,raw_frames:frames.length},modules,journal,
  raw:{file:"arenas.bin",frames:frames.length,bytes:raw.length,sha256:hash(raw)},limits:["finite register-only WORD MOV89/8B all64pairs each in four bound profiles; native standalone emission is separate",
- "full4612 saved input/host/generated pairs plus preclose frames; no guest RAM helper or data memory effect","opaque initialized FP128 preserved, not arbitrary raw80 seeds",
+ "complete arena saved input/host/generated pairs plus preclose frames; no guest RAM helper or data memory effect","opaque initialized FP128 preserved, not arbitrary raw80 seeds",
  "Module validation/imports/hash pin only; no full Wasm body or allocator history proof","open/getters and binding pointers are bounded physical correspondences; closed call raw status only",
  "no full ISA, exhaustive values, hardware, performance, CI, browser or game claim"]};
 writeFileSync(join(output,"result.json"),JSON.stringify(result,null,2),{flag:"wx"});console.log(JSON.stringify({status:result.status,...result.counts,output}));
