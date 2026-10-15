@@ -3,18 +3,21 @@ import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
+import {pathToFileURL} from 'node:url';
 
 const [enginePath, outputDir, root] = process.argv.slice(2);
 assert.ok(root, 'expected engine, output directory and repository root');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
-const engineBytes = readFileSync(enginePath), dispatcherBytes = readFileSync(join(outputDir, 'dispatcher.wasm'));
+const {readEngine} = await import(pathToFileURL(join(root, 'engine/tests/support/wasm/engine.mjs')));
+const {bytes: engineBytes, module: engineModule} = readEngine(enginePath);
+const dispatcherBytes = readFileSync(join(outputDir, 'dispatcher.wasm'));
 assert.ok(WebAssembly.validate(engineBytes)); assert.ok(WebAssembly.validate(dispatcherBytes));
-const engineModule = new WebAssembly.Module(engineBytes), dispatcherModule = new WebAssembly.Module(dispatcherBytes);
+const dispatcherModule = new WebAssembly.Module(dispatcherBytes);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
 assert.deepEqual(WebAssembly.Module.imports(dispatcherModule), [{module: 'env', name: 'memory', kind: 'memory'}, {module: 'env', name: 'table', kind: 'table'}]);
 assert.deepEqual(WebAssembly.Module.exports(dispatcherModule), [{name: 'run', kind: 'function'}]);
-const names = ['open', 'close', 'arena_ptr', 'map', 'protect', 'unmap', 'upload', 'compile', 'compile_with_gates', 'generation', 'module_ptr', 'module_len', 'guard', 'read32', 'write32', 'capture_call', 'abandon_call', 'compile_resident', 'resident_module', 'guard_resident', 'find_resident'];
-const SIZE = 4612, TRANSFER = 140, READY = 4224, CALLS = 4228;
+const names = ['open', 'close', 'arena_ptr', 'map', 'protect', 'unmap', 'upload', 'compile', 'compile_with_gates', 'generation', 'module_ptr', 'module_len', 'guard', 'guard_detect', 'guard_detect_resident', 'finish_exception_detection', 'read32', 'write32', 'capture_call', 'abandon_call', 'compile_resident', 'resident_module', 'guard_resident', 'find_resident'];
+const SIZE = 4796, TRANSFER = 140, READY = 4224, CALLS = 4228;
 const authored = {a: Buffer.from('40e9fa0f0000', 'hex'), b: Buffer.from('490f85f9efffff', 'hex'), gate: Buffer.from('0f0b', 'hex'), unsupported: Buffer.from('0f06', 'hex')};
 for (const [name, bytes] of Object.entries(authored)) writeFileSync(join(outputDir, `${name}.x86`), bytes);
 const artifacts = {'dispatcher.wasm': hash(dispatcherBytes)}, units = [], metadata = [];
@@ -146,9 +149,9 @@ function readMetadata(engine, before, label, origin) {
 function compile(engine, pc, length, label) {
   descriptors(engine, [[pc, length]]); const before = arena(engine); assert.equal(engine.api.compile_resident(1), 0, label); stats.resident_compiles++;
   const record = readMetadata(engine, before, label, 'compile'), module = new WebAssembly.Module(record.bytes);
-  assert.deepEqual(WebAssembly.Module.imports(module), [{module: 'env', name: 'memory', kind: 'memory'}, {module: 'ring3', name: 'guard_resident', kind: 'function'}]);
+  assert.deepEqual(WebAssembly.Module.imports(module), [{module: 'env', name: 'memory', kind: 'memory'}, {module: 'ring3', name: 'guard_detect_resident', kind: 'function'}, {module: 'ring3', name: 'finish_exception_detection', kind: 'function'}]);
   assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
-  const instance = new WebAssembly.Instance(module, {env: {memory: engine.memory}, ring3: {guard_resident: engine.api.guard_resident}}); assert.equal(instance.exports.run.length, 4);
+  const instance = new WebAssembly.Instance(module, {env: {memory: engine.memory}, ring3: {guard_detect_resident: engine.api.guard_detect_resident, finish_exception_detection: engine.api.finish_exception_detection}}); assert.equal(instance.exports.run.length, 4);
   const filename = `unit-${units.length + 1}.wasm`; writeFileSync(join(outputDir, filename), record.bytes); artifacts[filename] = hash(record.bytes);
   const unit = {...record, module, instance, run: instance.exports.run, label, filename}; units.push(unit); return unit;
 }
@@ -174,8 +177,8 @@ function legacy(engine) {
   descriptors(engine, [[0x3000, 2]]); engine.view.setUint32(engine.base + TRANSFER + 8, 0x3000, true); engine.view.setUint32(engine.base + TRANSFER + 12, 77, true);
   assert.equal(engine.api.compile_with_gates(1, 1), 0); refresh(engine);
   const generation = engine.api.generation() >>> 0, pointer = engine.api.module_ptr() >>> 0, length = engine.api.module_len() >>> 0, bytes = engine.bytes.slice(pointer, pointer + length);
-  const module = new WebAssembly.Module(bytes); assert.deepEqual(WebAssembly.Module.imports(module), [{module: 'env', name: 'memory', kind: 'memory'}, {module: 'ring3', name: 'guard', kind: 'function'}]);
-  const instance = new WebAssembly.Instance(module, {env: {memory: engine.memory}, ring3: {guard: engine.api.guard}});
+  const module = new WebAssembly.Module(bytes); assert.deepEqual(WebAssembly.Module.imports(module), [{module: 'env', name: 'memory', kind: 'memory'}, {module: 'ring3', name: 'guard_detect', kind: 'function'}, {module: 'ring3', name: 'finish_exception_detection', kind: 'function'}]);
+  const instance = new WebAssembly.Instance(module, {env: {memory: engine.memory}, ring3: {guard_detect: engine.api.guard_detect, finish_exception_detection: engine.api.finish_exception_detection}});
   writeFileSync(join(outputDir, 'legacy.wasm'), bytes); artifacts['legacy.wasm'] = hash(bytes); return {generation, pointer, length, bytes, run: instance.exports.run};
 }
 function legacyStable(engine, child) {
@@ -253,14 +256,14 @@ assert.equal(engine.api.write32(0x1000, authored.a.readUInt32LE(0)), 0, 'real sa
 guard(engine, a, 4, {state: 0}); guard(engine, b); rejectUnit(engine, a, 4, 'stale A cannot execute');
 findFailure(engine, 0x1000, 4, 'whole-unit stale A entry'); findFailure(engine, 0x1001, 4, 'whole-unit stale A interior'); findFailure(engine, 0x1002, 17, 'stale A displacement is still absent'); findFailure(engine, 0x9000, 17, 'unrelated stale unit does not turn unknown query into stale'); find(engine, 0x2000, b, 'current B survives unrelated A mutation'); find(engine, 0x2001, b, 'current B interior survives');
 unchanged(engine, () => engine.api.resident_module(a.low, a.high), 4, 'stale module retrieval', 'getter_rejections'); getter(engine, b, 'B current after unrelated A mutation');
-const copiedA = new WebAssembly.Instance(new WebAssembly.Module(a.bytes.slice()), {env: {memory: engine.memory}, ring3: {guard_resident: engine.api.guard_resident}});
+const copiedA = new WebAssembly.Instance(new WebAssembly.Module(a.bytes.slice()), {env: {memory: engine.memory}, ring3: {guard_detect_resident: engine.api.guard_detect_resident, finish_exception_detection: engine.api.finish_exception_detection}});
 rejectUnit(engine, {...a, run: copiedA.exports.run}, 4, 'reinstantiating old bytes cannot change baked ID');
 const replacement = compile(engine, 0x1000, authored.a.length, 'fresh same-PC A'); assert.ok(replacement.id > a.id && replacement.id > b.id); assert.notDeepEqual(replacement.bytes, a.bytes);
 find(engine, 0x1000, replacement, 'fresh same-PC A wins over stale A'); find(engine, 0x1001, replacement, 'fresh A interior selects new ID and bytes'); find(engine, 0x2000, b, 'fresh A publication preserves B selection');
 guard(engine, a, 4); rejectUnit(engine, a, 4, 'old A rejects even when fresh A exists at same PC'); guard(engine, replacement); getter(engine, b, 'B pointer stable after replacement'); legacyStable(engine, oldLegacy);
 engine.table.set(0, replacement.run); const replacementStart = initial(0xffffffff, 2, 0x403); reset(engine, replacementStart); slice(engine, replacementStart, 0, 9, 'fresh A and retained B warm completion');
 const foreign = fresh(); assert.equal(foreign.api.map(0x1000, 1, 7), 0); upload(foreign, 0x1000, authored.a); const foreignA = compile(foreign, 0x1000, authored.a.length, 'separate engine A');
-const rebound = new WebAssembly.Instance(foreignA.module, {env: {memory: engine.memory}, ring3: {guard_resident: engine.api.guard_resident}}); rejectUnit(engine, {...foreignA, run: rebound.exports.run}, 3, 'foreign key baked into unit rejects installation into main engine');
+const rebound = new WebAssembly.Instance(foreignA.module, {env: {memory: engine.memory}, ring3: {guard_detect_resident: engine.api.guard_detect_resident, finish_exception_detection: engine.api.finish_exception_detection}}); rejectUnit(engine, {...foreignA, run: rebound.exports.run}, 3, 'foreign key baked into unit rejects installation into main engine');
 assert.notEqual(foreign.key, engine.key); guard(foreign, foreignA); const foreignBeforeClose = arena(foreign); assert.equal(foreign.api.close(), 0); assert.deepEqual(arena(foreign), foreignBeforeClose); stats.full_arena_snapshots++;
 rejectUnit(foreign, foreignA, 5, 'copied installed unit rejects closed engine'); guard(foreign, foreignA, 5, {low: 0, idLow: 0, state: 0}); unchanged(foreign, () => foreign.api.resident_module(foreignA.low, foreignA.high), 5, 'closed metadata getter', 'getter_rejections');
 findFailure(foreign, 0x1000, 5, 'closed finder before matching start'); findFailure(foreign, 0xffffffff, 5, 'closed finder before absent query');
@@ -279,7 +282,7 @@ assert.equal(stats.dispatcher_calls, stats.budget_exits + stats.cancelled_exits 
 assert.equal(stats.find_failure, stats.find_misses + stats.find_stale + stats.find_closed); assert.equal(stats.find_success, stats.find_metadata_snapshots); assert.equal(stats.metadata_only_snapshots, stats.resident_compiles + stats.resident_getters + stats.find_success);
 for (const [name, bytes] of Object.entries(authored)) artifacts[`${name}.x86`] = hash(bytes);
 const productionPaths = execFileSync('rg', ['--files', 'engine/src'], {cwd: root, encoding: 'utf8'}).trim().split('\n').sort();
-const sourcePaths = ['engine/tests/process/resident/wasm/identity.rs', 'engine/tests/process/resident/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/process/resident/fixtures/p2-resident-process/runtime/run.mjs', 'engine/tests/process/resident/native/identity.rs', 'engine/tests/process/resident/native.rs', 'Cargo.toml', 'engine/Cargo.toml', 'Cargo.lock', ...productionPaths];
+const sourcePaths = ['engine/tests/process/resident/wasm/identity.rs', 'engine/tests/process/resident/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/support/wasm/engine.mjs', 'engine/tests/process/resident/fixtures/p2-resident-process/runtime/run.mjs', 'engine/tests/process/resident/native/identity.rs', 'engine/tests/process/resident/native.rs', 'Cargo.toml', 'engine/Cargo.toml', 'Cargo.lock', ...productionPaths];
 const provenance = {
   stats, actual_resident_run_calls: stats.dispatcher_child_calls + stats.direct_unit_calls, actual_resident_guard_calls: stats.dispatcher_child_calls + stats.direct_unit_calls + stats.direct_guard_calls,
   engine_sha256: hash(engineBytes), artifact_sha256: artifacts, module_set_sha256: hash(Object.keys(artifacts).filter(name => name.endsWith('.wasm')).sort().map(name => `${name}:${artifacts[name]}`).join('\n')),

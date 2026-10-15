@@ -2,7 +2,7 @@ use super::support_wasm as wasm_support;
 
 use std::{
     fs,
-    path::Path,
+    path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -179,7 +179,10 @@ fn dispatcher() -> Vec<u8> {
 #[test]
 fn actual_engine_wasm_guards_process_resident_units() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-    let engine = root.join("target/wasm32-unknown-unknown/debug/ring3_engine.wasm");
+    let engine = std::env::var_os("RING3_ENGINE_WASM")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| root.join("target/wasm32-unknown-unknown/debug/ring3_engine.wasm"));
+    let expected = std::env::var("RING3_ENGINE_SHA256").ok();
     assert!(
         engine.is_file(),
         "build the actual engine wasm32 cdylib first"
@@ -202,7 +205,7 @@ fn actual_engine_wasm_guards_process_resident_units() {
         "engine/tests/process/resident/fixtures/p2-resident-process/runtime/run.mjs",
         &engine,
         &output,
-        None,
+        expected.as_deref(),
     );
     assert!(
         result.status.success(),

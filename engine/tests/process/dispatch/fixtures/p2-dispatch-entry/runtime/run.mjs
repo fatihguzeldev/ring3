@@ -12,7 +12,7 @@ const {readEngine} = await import(pathToFileURL(join(root, 'engine/tests/support
 const {bytes: engineBytes, module: engineModule} = readEngine(enginePath);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
 const KEY = 0xa1345678c0000001n, SIZE = 4796, TRANSFER = 140;
-const names = ['open', 'close', 'arena_ptr', 'map', 'upload', 'compile_with_gates', 'generation', 'module_ptr', 'module_len', 'guard', 'guard_dispatch_entry', 'compile_resident_with_gates', 'resident_module', 'guard_resident', 'acknowledge_resident_installation', 'read32', 'write32', 'capture_resident_call', 'capture_call', 'abandon_call', 'begin_callback', 'abort_callback', 'cpu_read32'];
+const names = ['open', 'close', 'arena_ptr', 'map', 'upload', 'compile_with_gates', 'generation', 'module_ptr', 'module_len', 'guard', 'guard_detect', 'guard_detect_resident', 'finish_exception_detection', 'guard_dispatch_entry', 'compile_resident_with_gates', 'resident_module', 'guard_resident', 'acknowledge_resident_installation', 'read32', 'write32', 'capture_resident_call', 'capture_call', 'abandon_call', 'begin_callback', 'abort_callback', 'cpu_read32'];
 const stats = {engine_instances: 0, preopen_guard_calls: 0, direct_guard_calls: 0, direct_guard_success: 0, direct_guard_rejections: 0, probe_calls: 0, probe_guard_success: 0, probe_guard_rejections: 0, probe_child_calls: 0, probe_child_canonical: 0, probe_child_rejections: 0, direct_resident_runs: 0, direct_legacy_runs: 0, resident_compiles: 0, resident_getters: 0, metadata24_checks: 0, installation32_checks: 0, resident_captures: 0, legacy_captures: 0, pending_abandons: 0, callback_begins: 0, callback_aborts: 0, host_reads: 0, host_writes: 0, callback_word_writes: 0, full_arena_checks: 0, ram_snapshots: 0, header_cases: 0, pointer_cases: 0, closed_engines: 0};
 const artifacts = {}, authored = {}, units = [], metadata = [], controls = [], sections = [];
 for (const file of ['probe.wasm', 'foreign-probe.wasm']) artifacts[file] = hash(readFileSync(join(outputDir, file)));
@@ -70,8 +70,8 @@ function metadata24(e, before, id, label, known) {
 }
 function compileResident(e, blocks, gates, label, id) {
   descriptors(e, blocks, gates); const before = arena(e); assert.equal(e.api.compile_resident_with_gates(blocks.length, gates.length), 0); const record = metadata24(e, before, id, label);
-  const module = new WebAssembly.Module(record.bytes); assert.deepEqual(WebAssembly.Module.imports(module), [{module: 'env', name: 'memory', kind: 'memory'}, {module: 'ring3', name: 'guard_resident', kind: 'function'}]);
-  const instance = new WebAssembly.Instance(module, {env: {memory: e.memory}, ring3: {guard_resident: e.api.guard_resident}}); assert.equal(instance.exports.run.length, 4);
+  const module = new WebAssembly.Module(record.bytes); assert.deepEqual(WebAssembly.Module.imports(module), [{module: 'env', name: 'memory', kind: 'memory'}, {module: 'ring3', name: 'guard_detect_resident', kind: 'function'}, {module: 'ring3', name: 'finish_exception_detection', kind: 'function'}]);
+  const instance = new WebAssembly.Instance(module, {env: {memory: e.memory}, ring3: {guard_detect_resident: e.api.guard_detect_resident, finish_exception_detection: e.api.finish_exception_detection}}); assert.equal(instance.exports.run.length, 4);
   const file = `unit-${++stats.resident_compiles}.wasm`; writeFileSync(join(outputDir, file), record.bytes); artifacts[file] = hash(record.bytes); const u = {...record, file, run: instance.exports.run, module, instance, blocks, gates, label}; units.push(u); return u;
 }
 function getter(e, u) { const before = arena(e); assert.equal(e.api.resident_module(u.low, u.high), 0); metadata24(e, before, u.id, 'unchanged immutable resident getter', u); stats.resident_getters++; }
@@ -141,8 +141,8 @@ before = {...stats};
 assert.equal(api.map(0x4000, 1, 7), 0); const legacyX86 = Buffer.alloc(0x202, 0x90); legacyX86.set([0x0f, 0x0b], 0); legacyX86.set([0x0f, 0x0b], 0x200); upload(e, 0x4000, legacyX86, 'legacy-callback');
 descriptors(e, [[0x4000, 2], [0x4100, 1], [0x4200, 2]], [[0x4000, 17], [0x4200, 18]]); assert.equal(api.compile_with_gates(3, 2), 0); assert.equal(api.generation(), 1);
 const legacyPointer = api.module_ptr() >>> 0, legacyLength = api.module_len() >>> 0, legacyBytes = refresh(e).bytes.slice(legacyPointer, legacyPointer + legacyLength); unitPrefix(legacyBytes, [e.low, e.high, 1]);
-const legacyModule = new WebAssembly.Module(legacyBytes); assert.deepEqual(WebAssembly.Module.imports(legacyModule), [{module: 'env', name: 'memory', kind: 'memory'}, {module: 'ring3', name: 'guard', kind: 'function'}]);
-const legacyInstance = new WebAssembly.Instance(legacyModule, {env: {memory: e.memory}, ring3: {guard: e.api.guard}}), legacy = {run: legacyInstance.exports.run}; writeFileSync(join(outputDir, 'legacy.wasm'), legacyBytes); artifacts['legacy.wasm'] = hash(legacyBytes);
+const legacyModule = new WebAssembly.Module(legacyBytes); assert.deepEqual(WebAssembly.Module.imports(legacyModule), [{module: 'env', name: 'memory', kind: 'memory'}, {module: 'ring3', name: 'guard_detect', kind: 'function'}, {module: 'ring3', name: 'finish_exception_detection', kind: 'function'}]);
+const legacyInstance = new WebAssembly.Instance(legacyModule, {env: {memory: e.memory}, ring3: {guard_detect: e.api.guard_detect, finish_exception_detection: e.api.finish_exception_detection}}), legacy = {run: legacyInstance.exports.run}; writeFileSync(join(outputDir, 'legacy.wasm'), legacyBytes); artifacts['legacy.wasm'] = hash(legacyBytes);
 const legacyStop = state(0x4000); reset(e, legacyStop); run(e, legacy, 1, legacyStop, exit(8, 0, 3, 17), true);
 const beforeLegacyCapture = arena(e), expectedLegacyCapture = beforeLegacyCapture.slice(); expectedLegacyCapture.set(callRecord(2, 17, legacyStop), TRANSFER);
 assert.equal(api.capture_call(e.low, e.high, 1, 1, 0), 0); check(e, expectedLegacyCapture, 'real legacy Gate capture112'); stats.legacy_captures++;
