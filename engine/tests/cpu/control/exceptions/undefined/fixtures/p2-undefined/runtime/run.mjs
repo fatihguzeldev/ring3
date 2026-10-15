@@ -14,9 +14,9 @@ const counts = {contexts: 0, modules: 0, faults: 0, controls: 0, refusals: 0, fu
 const observations = [];
 const sourcePaths = [...exportSources,
   'engine/tests/support/wasm/arena.mjs', 'engine/tests/support/wasm/engine.mjs', 'engine/tests/support/wasm/binding.mjs',
-  'engine/src/cpu/x86/decode/control.rs', 'engine/src/cpu/x86/decode/decoder.rs', 'engine/src/cpu/x86/decode/profile.rs',
-  'engine/src/cpu/x86/control.rs', 'engine/src/cpu/dbt/region.rs', 'engine/src/cpu/dbt/wasm/control_instructions.rs',
-  'engine/src/cpu/dbt/wasm/integer/dispatch.rs', 'engine/src/cpu/dbt/wasm/emitter.rs', 'engine/src/cpu/dbt/wasm/abi.rs',
+  'engine/src/cpu/x86/decode/control.rs', 'engine/src/cpu/x86/decode/decoder.rs', 'engine/src/cpu/x86/decode/instruction.rs', 'engine/src/cpu/x86/decode/profile.rs', 'engine/src/cpu/x86/decode/families.rs',
+  'engine/src/cpu/x86/control.rs', 'engine/src/cpu/dbt/region.rs', 'engine/src/cpu/dbt/wasm/instructions/control_instructions.rs',
+  'engine/src/cpu/dbt/wasm/instructions/integer/dispatch.rs', 'engine/src/cpu/dbt/wasm/emitter/mod.rs', 'engine/src/cpu/dbt/wasm/emitter/module.rs', 'engine/src/cpu/dbt/wasm/emitter/body.rs', 'engine/src/cpu/dbt/wasm/requirements.rs', 'engine/src/cpu/dbt/wasm/imports/wiring.rs', 'engine/src/cpu/dbt/wasm/abi.rs',
   'engine/src/abi/x86/state.rs', 'engine/src/abi/x86/exit.rs',
   'engine/tests/cpu/control/exceptions/undefined/native.rs', 'engine/tests/cpu/control/exceptions/undefined/wasm.rs',
   'engine/tests/cpu/control/exceptions/undefined/fixtures/p2-undefined/runtime/run.mjs'];

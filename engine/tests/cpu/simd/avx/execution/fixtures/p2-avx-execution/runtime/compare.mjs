@@ -24,9 +24,9 @@ assert.ok(['replacement', 'resident'].includes(owner), 'explicit supported bindi
 const sourcePaths = [...exportSources, 'engine/tests/support/wasm/engine.mjs', 'Cargo.lock',
   'engine/src/cpu/x86/capabilities.rs', 'engine/src/cpu/x86/avx/operation.rs', 'engine/src/cpu/x86/avx/dispatch.rs',
   'engine/src/cpu/x86/avx/arithmetic.rs', 'engine/src/cpu/x86/avx/mod.rs', 'engine/src/cpu/x86/simd/float.rs',
-  'engine/src/cpu/dbt/wasm/emitter.rs', 'engine/src/cpu/dbt/wasm/avx/direct.rs', 'engine/src/cpu/dbt/wasm/avx/integer.rs',
-  'engine/src/cpu/dbt/wasm/avx/logical.rs', 'engine/src/cpu/dbt/wasm/avx/execute.rs', 'engine/src/cpu/dbt/wasm/simd.rs',
-  'engine/src/cpu/dbt/wasm/simd/direct.rs', 'engine/src/cpu/dbt/wasm/cpu_result.rs', 'engine/src/process/cpu/avx.rs',
+  'engine/src/cpu/dbt/wasm/emitter/mod.rs', 'engine/src/cpu/dbt/wasm/emitter/module.rs', 'engine/src/cpu/dbt/wasm/emitter/body.rs', 'engine/src/cpu/dbt/wasm/requirements.rs', 'engine/src/cpu/dbt/wasm/imports/wiring.rs', 'engine/src/cpu/dbt/wasm/instructions/avx/direct.rs', 'engine/src/cpu/dbt/wasm/instructions/avx/integer.rs',
+  'engine/src/cpu/dbt/wasm/instructions/avx/logical.rs', 'engine/src/cpu/dbt/wasm/instructions/avx/execute.rs', 'engine/src/cpu/dbt/wasm/instructions/simd.rs',
+  'engine/src/cpu/dbt/wasm/instructions/simd/direct.rs', 'engine/src/cpu/dbt/wasm/helpers/result.rs', 'engine/src/process/cpu/avx.rs',
   'engine/src/process/cpu/simd.rs', 'engine/src/math/ieee.rs'];
 assert.equal(new Set(sourcePaths).size, sourcePaths.length, 'unique production pins');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');

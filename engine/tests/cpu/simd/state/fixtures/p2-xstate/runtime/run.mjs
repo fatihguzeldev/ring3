@@ -156,10 +156,10 @@ rows.push({name: 'xgetbv-high-index-gp-without-publication', code: '0f01d0', con
 
 const sourcePaths = ['engine/tests/support/wasm/arena.mjs', 'engine/tests/support/wasm/binding.mjs',
   'engine/src/cpu/x86/xstate.rs', 'engine/src/cpu/x86/xstate/legacy.rs',
-  'engine/src/cpu/x86/decode/xstate.rs', 'engine/src/cpu/dbt/wasm/xstate.rs',
+  'engine/src/cpu/x86/decode/xstate.rs', 'engine/src/cpu/dbt/wasm/instructions/xstate.rs',
   'engine/src/process/cpu/xstate.rs', 'engine/src/process/cpu/xstate/upper.rs',
   'engine/src/cpu/x86/capabilities.rs', 'engine/src/cpu/x86/xstate/upper.rs',
-  'engine/src/cpu/x86/xstate/upper/access.rs', 'engine/src/cpu/dbt/wasm/xstate/upper.rs', 'engine/tests/cpu/simd/state/native/xsave.rs',
+  'engine/src/cpu/x86/xstate/upper/access.rs', 'engine/src/cpu/dbt/wasm/instructions/xstate/upper.rs', 'engine/tests/cpu/simd/state/native/xsave.rs',
   'engine/tests/cpu/simd/state/wasm/xsave.rs',
   'engine/tests/cpu/simd/state/fixtures/p2-xstate/runtime/run.mjs',
 ];

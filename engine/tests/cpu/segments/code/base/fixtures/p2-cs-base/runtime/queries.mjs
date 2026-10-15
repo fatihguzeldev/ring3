@@ -11,8 +11,8 @@ const engine=readEngine(enginePath);mkdirSync(output,{recursive:true});
 const PC=0x1000,SIZE=4796,TRANSFER=140,BASES=4756;
 const original=[0x43,0x22220002,0x33330003,0x44440004,0x3000,0x55550005,0x66660006,0x77770007];
 const hash=b=>createHash('sha256').update(b).digest('hex');
-const paths=['engine/src/cpu/dbt/wasm/atomic.rs','engine/src/cpu/dbt/wasm/segment_queries.rs',
-  'engine/src/cpu/dbt/wasm/code_fetch.rs','engine/src/cpu/dbt/wasm/memory.rs',
+const paths=['engine/src/cpu/dbt/wasm/instructions/atomic.rs', 'engine/src/cpu/dbt/wasm/helpers/integer.rs','engine/src/cpu/dbt/wasm/instructions/segment_queries.rs',
+  'engine/src/cpu/dbt/wasm/code_fetch.rs','engine/src/cpu/dbt/wasm/imports/mod.rs', 'engine/src/cpu/dbt/wasm/imports/binding.rs', 'engine/src/cpu/dbt/wasm/imports/context.rs', 'engine/src/cpu/dbt/wasm/imports/needs.rs', 'engine/src/cpu/dbt/wasm/helpers/protocol.rs', 'engine/src/cpu/dbt/wasm/instructions/memory/mod.rs', 'engine/src/cpu/dbt/wasm/instructions/memory/address.rs', 'engine/src/cpu/dbt/wasm/instructions/memory/scalar.rs', 'engine/src/cpu/dbt/wasm/instructions/memory/stack.rs',
   'engine/src/process/cpu/integer.rs','engine/src/process/cpu/segment_queries.rs',
   'engine/src/cpu/x86/segments/queries.rs','engine/src/process/execution/authority.rs',
   'engine/src/process/cpu/segments.rs','engine/src/abi/x86/segments.rs','engine/tests/support/wasm/engine.mjs'];

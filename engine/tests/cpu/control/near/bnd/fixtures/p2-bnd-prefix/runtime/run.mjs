@@ -10,10 +10,10 @@ const h = await harness(enginePath, output, root), CODE = 0x1100, TARGET = 0x120
 const RF = 0x10000, ZF = 0x40, FLAGS = 0x244cd7;
 const own = 'engine/tests/cpu/control/near/bnd/';
 const paths = ['engine/src/cpu/x86/capabilities.rs', 'engine/src/cpu/x86/decode/mpx.rs',
-  'engine/src/cpu/x86/decode/mpx/tests.rs', 'engine/src/cpu/x86/decode/profile.rs',
-  'engine/src/cpu/x86/decode/flow.rs', 'engine/src/cpu/x86/decode/lower.rs',
-  'engine/src/cpu/dbt/wasm/memory/narrow.rs', 'engine/src/cpu/dbt/wasm/memory/word_store.rs',
-  'engine/src/cpu/dbt/wasm/integer/dispatch.rs', 'engine/tests/cpu/control/native.rs',
+  'engine/src/cpu/x86/decode/mpx/tests.rs', 'engine/src/cpu/x86/decode/profile.rs', 'engine/src/cpu/x86/decode/families.rs',
+  'engine/src/cpu/x86/decode/flow.rs', 'engine/src/cpu/x86/decode/lower.rs', 'engine/src/cpu/x86/decode/families.rs',
+  'engine/src/cpu/dbt/wasm/instructions/memory/narrow.rs', 'engine/src/cpu/dbt/wasm/instructions/memory/word_store.rs',
+  'engine/src/cpu/dbt/wasm/instructions/integer/dispatch.rs', 'engine/tests/cpu/control/native.rs',
   'engine/tests/cpu/control/wasm.rs', own + 'native.rs', own + 'wasm.rs',
   own + 'fixtures/p2-bnd-prefix/runtime/run.mjs', supportPath];
 const pins = () => Object.fromEntries(paths.map(path => [path, hash(readFileSync(join(root, path)))]));

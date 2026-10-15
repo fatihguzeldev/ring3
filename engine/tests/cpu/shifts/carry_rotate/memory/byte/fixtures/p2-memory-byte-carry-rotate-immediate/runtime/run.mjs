@@ -107,12 +107,12 @@ assert.equal(nativeManifest.length, 10);
 const sourcePaths = [
   "engine/src/cpu/x86/ir.rs",
   "engine/src/cpu/x86/decode/integer.rs",
-  "engine/src/cpu/x86/decode/profile.rs",
+  "engine/src/cpu/x86/decode/profile.rs", "engine/src/cpu/x86/decode/families.rs",
   "engine/src/cpu/dbt/region.rs",
-  "engine/src/cpu/dbt/wasm/integer/arithmetic.rs", "engine/src/cpu/dbt/wasm/integer/bits.rs", "engine/src/cpu/dbt/wasm/integer/carry_rotates.rs", "engine/src/cpu/dbt/wasm/integer/decimal.rs", "engine/src/cpu/dbt/wasm/integer/dispatch.rs", "engine/src/cpu/dbt/wasm/integer/flags.rs", "engine/src/cpu/dbt/wasm/integer/mod.rs", "engine/src/cpu/dbt/wasm/integer/multiply_divide.rs", "engine/src/cpu/dbt/wasm/integer/operands.rs", "engine/src/cpu/dbt/wasm/integer/rotates.rs", "engine/src/cpu/dbt/wasm/integer/shifts.rs",
-  "engine/src/cpu/dbt/wasm/memory.rs",
-  "engine/src/cpu/dbt/wasm/memory/byte_store.rs",
-  "engine/src/cpu/dbt/wasm/memory/narrow.rs",
+  "engine/src/cpu/dbt/wasm/instructions/integer/arithmetic.rs", "engine/src/cpu/dbt/wasm/instructions/integer/bits.rs", "engine/src/cpu/dbt/wasm/instructions/integer/carry_rotates.rs", "engine/src/cpu/dbt/wasm/instructions/integer/decimal.rs", "engine/src/cpu/dbt/wasm/instructions/integer/dispatch.rs", "engine/src/cpu/dbt/wasm/instructions/integer/flags.rs", "engine/src/cpu/dbt/wasm/instructions/integer/mod.rs", "engine/src/cpu/dbt/wasm/instructions/integer/multiply_divide.rs", "engine/src/cpu/dbt/wasm/instructions/integer/operands.rs", "engine/src/cpu/dbt/wasm/instructions/integer/rotates.rs", "engine/src/cpu/dbt/wasm/instructions/integer/shifts.rs",
+  "engine/src/cpu/dbt/wasm/imports/mod.rs", "engine/src/cpu/dbt/wasm/imports/binding.rs", "engine/src/cpu/dbt/wasm/imports/context.rs", "engine/src/cpu/dbt/wasm/imports/needs.rs", "engine/src/cpu/dbt/wasm/helpers/protocol.rs", "engine/src/cpu/dbt/wasm/instructions/memory/mod.rs", "engine/src/cpu/dbt/wasm/instructions/memory/address.rs", "engine/src/cpu/dbt/wasm/instructions/memory/scalar.rs", "engine/src/cpu/dbt/wasm/instructions/memory/stack.rs",
+  "engine/src/cpu/dbt/wasm/instructions/memory/byte_store.rs",
+  "engine/src/cpu/dbt/wasm/instructions/memory/narrow.rs",
   "engine/src/process/instance.rs", "engine/src/process/execution/compiled.rs", "engine/src/process/execution/authority.rs", "engine/src/process/memory/address_space.rs", "engine/src/process/memory/scalar.rs", "engine/src/process/memory/scalar/tests.rs", "engine/src/process/execution/mod.rs", "engine/src/process/memory/mod.rs", "engine/src/process/mod.rs",
   "engine/src/process/execution/resident.rs", "engine/src/abi/arena.rs",
   "engine/src/abi/memory_helper.rs",
@@ -1139,7 +1139,7 @@ for (const [name, expected] of Object.entries(plan))
   assert.equal(counts[name], expected, `frozen prospective ${name} census`);
 assert.deepEqual(pinSources(), sourcePins, "selected sources byte-stable during execution");
 assert.equal(hash(readFileSync(enginePath)), engineSha256);
-const cpuSourcePins = Object.fromEntries(["engine/src/abi/memory_helper/cpu.rs", "engine/src/cpu/dbt/wasm/memory/cpu_scalar.rs", "engine/src/cpu/dbt/wasm/emitter.rs", "engine/src/cpu/dbt/wasm/code_fetch.rs", "engine/src/process/memory/cpu_scalar.rs", "engine/src/process/memory/scalar/cpu_write.rs", "engine/src/process/wasm/memory/cpu_write.rs", "engine/src/abi/wasm/exports/memory/cpu_write.rs", "engine/tests/support/wasm/arena.mjs"].map(path=>[path,hash(readFileSync(join(root,path)))]));
+const cpuSourcePins = Object.fromEntries(["engine/src/abi/memory_helper/cpu.rs", "engine/src/cpu/dbt/wasm/instructions/memory/cpu_scalar.rs", "engine/src/cpu/dbt/wasm/emitter/mod.rs", "engine/src/cpu/dbt/wasm/emitter/module.rs", "engine/src/cpu/dbt/wasm/emitter/body.rs", "engine/src/cpu/dbt/wasm/requirements.rs", "engine/src/cpu/dbt/wasm/imports/wiring.rs", "engine/src/cpu/dbt/wasm/code_fetch.rs", "engine/src/process/memory/cpu_scalar.rs", "engine/src/process/memory/scalar/cpu_write.rs", "engine/src/process/wasm/memory/cpu_write.rs", "engine/src/abi/wasm/exports/memory/cpu_write.rs", "engine/tests/support/wasm/arena.mjs"].map(path=>[path,hash(readFileSync(join(root,path)))]));
 const result = {cpu_source_sha256: cpuSourcePins,
   status: "ok",
   profile: "finite flat32 C0 /2,/3 memory-byte immediate carry rotate",

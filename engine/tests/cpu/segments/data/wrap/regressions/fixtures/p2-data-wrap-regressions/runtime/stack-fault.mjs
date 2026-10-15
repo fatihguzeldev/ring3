@@ -3,7 +3,7 @@ import {harness,PC,state,record,exit,words} from '../../../../fixtures/p2-data-l
 const[enginePath,output,root]=process.argv.slice(2);assert.ok(enginePath&&output&&root);
 const h=await harness(enginePath,output,root,{
   runnerURL:new URL(import.meta.url),
-  sourcePaths:["engine/tests/cpu/segments/data/wrap/regressions/wasm.rs", "engine/tests/cpu/segments/data/wrap/regressions/fixtures/p2-data-wrap-regressions/runtime/stack-fault.mjs", "engine/src/cpu/dbt/wasm/stack.rs", "engine/src/cpu/x86/stack.rs", "engine/src/cpu/x86/stack/pointer.rs", "engine/src/process/cpu/stack.rs"]
+  sourcePaths:["engine/tests/cpu/segments/data/wrap/regressions/wasm.rs", "engine/tests/cpu/segments/data/wrap/regressions/fixtures/p2-data-wrap-regressions/runtime/stack-fault.mjs", "engine/src/cpu/dbt/wasm/instructions/stack.rs", "engine/src/cpu/x86/stack.rs", "engine/src/cpu/x86/stack/pointer.rs", "engine/src/process/cpu/stack.rs"]
 });
 try{
 for(const resident of [false,true])for(const entries of [false,true])for(const push of [true,false])for(const flat of [false,true]){

@@ -3,7 +3,7 @@ import {harness,PC,state,registers,record,exit} from '../../../../fixtures/p2-da
 const[enginePath,output,root]=process.argv.slice(2);assert.ok(enginePath&&output&&root);
 const h=await harness(enginePath,output,root,{
   runnerURL:new URL(import.meta.url),
-  sourcePaths:["engine/tests/cpu/segments/data/wrap/regressions/wasm.rs", "engine/tests/cpu/segments/data/wrap/regressions/fixtures/p2-data-wrap-regressions/runtime/xsave-header.mjs", "engine/src/process/cpu/xstate.rs", "engine/src/process/cpu/xstate/upper.rs", "engine/src/cpu/x86/xstate.rs", "engine/src/cpu/x86/xstate/upper.rs", "engine/src/cpu/x86/xstate/upper/access.rs", "engine/src/cpu/dbt/wasm/xstate.rs", "engine/src/cpu/dbt/wasm/xstate/upper.rs", "engine/src/abi/x86/x87.rs", "engine/src/abi/x86/simd.rs", "engine/src/abi/x86/ymm.rs"]
+  sourcePaths:["engine/tests/cpu/segments/data/wrap/regressions/wasm.rs", "engine/tests/cpu/segments/data/wrap/regressions/fixtures/p2-data-wrap-regressions/runtime/xsave-header.mjs", "engine/src/process/cpu/xstate.rs", "engine/src/process/cpu/xstate/upper.rs", "engine/src/cpu/x86/xstate.rs", "engine/src/cpu/x86/xstate/upper.rs", "engine/src/cpu/x86/xstate/upper/access.rs", "engine/src/cpu/dbt/wasm/instructions/xstate.rs", "engine/src/cpu/dbt/wasm/instructions/xstate/upper.rs", "engine/src/abi/x86/x87.rs", "engine/src/abi/x86/simd.rs", "engine/src/abi/x86/ymm.rs"]
 });
 const HEADER=Buffer.from('4000000000000080','hex');
 try{

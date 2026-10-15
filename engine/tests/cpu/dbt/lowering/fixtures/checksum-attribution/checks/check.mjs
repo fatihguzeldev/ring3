@@ -474,7 +474,7 @@ function sourcePins(result, campaign) {
   }
   for (const path of ['Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml',
     'engine/tests/support/wasm/arena.mjs', 'engine/tests/programs/sort/fixtures/p2-pe32-sort/runtime/oracle.mjs',
-    ...(result.authority ? ['engine/src/cpu/dbt/wasm/emitter.rs', 'engine/src/process/memory/paging/port.rs']
+    ...(result.authority ? ['engine/src/cpu/dbt/wasm/emitter/mod.rs', 'engine/src/cpu/dbt/wasm/emitter/module.rs', 'engine/src/cpu/dbt/wasm/emitter/body.rs', 'engine/src/cpu/dbt/wasm/requirements.rs', 'engine/src/cpu/dbt/wasm/imports/wiring.rs', 'engine/src/process/memory/paging/port.rs']
       : ['engine/tests/programs/sort/support/pe32.rs', ...['checks/plan.mjs', 'runtime/run.mjs', 'checks/check.mjs', 'benchmarks/statistics.mjs', 'measure.py'].map(name => `engine/tests/process/resident/fixtures/resident-phases/${name}`)])]) {
     assert(expected.some(row => row.path === path), 'product/build/dependency source authority');
   }

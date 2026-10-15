@@ -389,5 +389,5 @@ export const gatherSourcePaths = [
   'engine/src/cpu/x86/decode/avx/gather.rs',
   'engine/src/abi/x86/avx/gather.rs',
   'engine/src/process/cpu/avx/gather.rs',
-  'engine/src/cpu/dbt/wasm/avx/gather.rs',
+  'engine/src/cpu/dbt/wasm/instructions/avx/gather.rs',
 ];

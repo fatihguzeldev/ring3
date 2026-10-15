@@ -11,10 +11,10 @@ const own = 'engine/tests/cpu/control/exceptions/availability/scalar/';
 const paths = ['engine/src/cpu/x86/environment.rs', 'engine/src/cpu/x86/capabilities.rs',
   'engine/src/cpu/x86/decode/execution_faults.rs', 'engine/src/cpu/x86/decode/execution_faults/optional.rs',
   'engine/src/cpu/x86/decode/execution_faults/optional/amd.rs',
-  'engine/src/cpu/x86/decode/execution_faults/optional/amd/tests/scalar.rs', 'engine/src/cpu/x86/decode/decoder.rs',
-  'engine/src/cpu/x86/decode/profile.rs', 'engine/src/cpu/x86/decode/lower.rs',
+  'engine/src/cpu/x86/decode/execution_faults/optional/amd/tests/scalar.rs', 'engine/src/cpu/x86/decode/decoder.rs', 'engine/src/cpu/x86/decode/instruction.rs',
+  'engine/src/cpu/x86/decode/profile.rs', 'engine/src/cpu/x86/decode/families.rs', 'engine/src/cpu/x86/decode/lower.rs', 'engine/src/cpu/x86/decode/families.rs',
   'engine/src/cpu/x86/decode/profile/tests/prefetch/instruction.rs',
-  'engine/src/cpu/dbt/wasm/control_instructions.rs', 'engine/src/cpu/dbt/wasm/integer/dispatch.rs',
+  'engine/src/cpu/dbt/wasm/instructions/control_instructions.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch.rs',
   'engine/src/process/execution/stopped.rs', 'engine/tests/cpu/control/native.rs', 'engine/tests/cpu/control/wasm.rs',
   own + 'native.rs', own + 'wasm.rs', own + 'fixtures/p2-scalar-availability/runtime/run.mjs', supportPath];
 const pins = () => Object.fromEntries(paths.map(path => [path, hash(readFileSync(join(root, path)))]));

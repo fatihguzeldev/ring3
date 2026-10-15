@@ -37,7 +37,7 @@ assert.equal(hash(readFileSync(join(root, fixture, 'kernel.c'))), spec.source_sh
 assert.deepEqual(spec.cases.map(row => row.count), [0, 1, 17]);
 const sourcePaths = ['kernel.c', 'kernel.obj', 'kernel.text.bin', 'kernel.disasm.txt', 'receipt.json', 'cases.json', 'runtime/run.mjs'].map(file => fixture + '/' + file);
 sourcePaths.push('engine/tests/support/wasm/engine.mjs', 'engine/tests/support/wasm/arena.mjs',
-  'engine/src/cpu/dbt/wasm/simd/direct.rs', 'engine/src/cpu/dbt/wasm/simd.rs', 'engine/src/process/memory/span.rs', 'engine/src/process/memory/mod.rs', 'engine/src/process/mod.rs');
+  'engine/src/cpu/dbt/wasm/instructions/simd/direct.rs', 'engine/src/cpu/dbt/wasm/instructions/simd.rs', 'engine/src/process/memory/span.rs', 'engine/src/process/memory/mod.rs', 'engine/src/process/mod.rs');
 const sourceHashes = () => Object.fromEntries(sourcePaths.map(path => [path, hash(readFileSync(join(root, path)))]));
 const sourceBefore = sourceHashes(), contexts = [], modules = [], observations = [], helpers = [], cases = [], diagnostics = [];
 const prefix = Buffer.concat([hex('5068'), words([COEFF]), hex('68'), words([INPUT]), hex('68'), words([VECTOR])]);

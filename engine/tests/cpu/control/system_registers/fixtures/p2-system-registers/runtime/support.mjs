@@ -64,14 +64,14 @@ export async function harness(enginePath, output, root) {
     "engine/src/cpu/dbt/resident.rs",
     "engine/src/cpu/dbt/resident/tests/entries.rs",
     "engine/src/cpu/dbt/wasm/code_fetch.rs",
-    "engine/src/cpu/dbt/wasm/integer/dispatch.rs",
-    "engine/src/cpu/dbt/wasm/memory.rs",
-    "engine/src/cpu/dbt/wasm/mod.rs",
-    "engine/src/cpu/dbt/wasm/system_registers.rs",
-    "engine/src/cpu/x86/decode/decoder.rs",
-    "engine/src/cpu/x86/decode/lower.rs",
+    "engine/src/cpu/dbt/wasm/instructions/integer/dispatch.rs",
+    "engine/src/cpu/dbt/wasm/imports/mod.rs", "engine/src/cpu/dbt/wasm/imports/binding.rs", "engine/src/cpu/dbt/wasm/imports/context.rs", "engine/src/cpu/dbt/wasm/imports/needs.rs", "engine/src/cpu/dbt/wasm/helpers/protocol.rs", "engine/src/cpu/dbt/wasm/instructions/memory/mod.rs", "engine/src/cpu/dbt/wasm/instructions/memory/address.rs", "engine/src/cpu/dbt/wasm/instructions/memory/scalar.rs", "engine/src/cpu/dbt/wasm/instructions/memory/stack.rs",
+    "engine/src/cpu/dbt/wasm/mod.rs", "engine/src/cpu/dbt/wasm/instructions/mod.rs", "engine/src/cpu/dbt/wasm/helpers/mod.rs", "engine/src/cpu/dbt/wasm/imports/mod.rs",
+    "engine/src/cpu/dbt/wasm/instructions/system_registers.rs",
+    "engine/src/cpu/x86/decode/decoder.rs", "engine/src/cpu/x86/decode/instruction.rs",
+    "engine/src/cpu/x86/decode/lower.rs", "engine/src/cpu/x86/decode/families.rs",
     "engine/src/cpu/x86/decode/mod.rs",
-    "engine/src/cpu/x86/decode/profile.rs",
+    "engine/src/cpu/x86/decode/profile.rs", "engine/src/cpu/x86/decode/families.rs",
     "engine/src/cpu/x86/decode/strings/defaults.rs",
     "engine/src/cpu/x86/decode/system_registers.rs",
     "engine/src/cpu/x86/decode/system_registers/tests.rs",
@@ -104,10 +104,10 @@ export async function harness(enginePath, output, root) {
     "engine/tests/support/wasm/engine.mjs",
     "engine/tests/support/wasm/exports.mjs"
 ];
-  paths.push(...["engine/src/abi/cpu_helper.rs", "engine/src/abi/call_frame.rs", "engine/src/abi/callback.rs", "engine/src/abi/resident_callback.rs", "engine/src/abi/x86/x87.rs", "engine/src/abi/x86/simd.rs", "engine/src/abi/x86/ymm.rs", "engine/src/process/calls/call.rs", "engine/src/process/execution/authority.rs", "engine/src/process/wasm/execution.rs", "engine/src/cpu/dbt/wasm/abi.rs", "engine/src/cpu/dbt/wasm/emitter.rs", "engine/src/cpu/dbt/wasm/cpu_result.rs", "engine/src/cpu/dbt/wasm/segments/context.rs", "engine/src/cpu/dbt/wasm/segments/access.rs", "engine/src/cpu/x86/decode/operands.rs", "engine/src/cpu/x86/decode/execution_faults.rs", "engine/src/cpu/x86/segments/cache.rs", "engine/src/windows/callback_frame.rs"].filter(path => !paths.includes(path)));
+  paths.push(...["engine/src/abi/cpu_helper.rs", "engine/src/abi/call_frame.rs", "engine/src/abi/callback.rs", "engine/src/abi/resident_callback.rs", "engine/src/abi/x86/x87.rs", "engine/src/abi/x86/simd.rs", "engine/src/abi/x86/ymm.rs", "engine/src/process/calls/call.rs", "engine/src/process/execution/authority.rs", "engine/src/process/wasm/execution.rs", "engine/src/abi/execution.rs", "engine/src/cpu/dbt/wasm/abi.rs", "engine/src/cpu/dbt/wasm/emitter/mod.rs", "engine/src/cpu/dbt/wasm/emitter/module.rs", "engine/src/cpu/dbt/wasm/emitter/body.rs", "engine/src/cpu/dbt/wasm/requirements.rs", "engine/src/cpu/dbt/wasm/imports/wiring.rs", "engine/src/cpu/dbt/wasm/helpers/result.rs", "engine/src/cpu/dbt/wasm/instructions/segments/context.rs", "engine/src/cpu/dbt/wasm/instructions/segments/access.rs", "engine/src/cpu/x86/decode/operands.rs", "engine/src/cpu/x86/decode/execution_faults.rs", "engine/src/cpu/x86/segments/cache.rs", "engine/src/windows/callback_frame.rs"].filter(path => !paths.includes(path)));
   paths.push(...[
     'engine/src/abi/cpu_helper/paging.rs', 'engine/src/abi/x86/exit/paging.rs',
-    'engine/src/cpu/dbt/wasm/detection.rs', 'engine/src/cpu/dbt/wasm/cpu_result/paging.rs',
+    'engine/src/cpu/dbt/wasm/detection.rs', 'engine/src/cpu/dbt/wasm/helpers/result/paging.rs',
     'engine/src/cpu/dbt/wasm/code_fetch/paging.rs', 'engine/src/cpu/x86/decode/fetch.rs',
     'engine/src/cpu/x86/interrupts/cause/paging.rs', 'engine/src/cpu/x86/paging/inspect.rs',
     'engine/src/process/cpu/events/detection.rs', 'engine/src/process/cpu/events/detection/site.rs',

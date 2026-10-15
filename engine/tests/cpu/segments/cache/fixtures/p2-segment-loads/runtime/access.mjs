@@ -10,11 +10,11 @@ const defaults = [0xf33fffff, 0xf3bfffff, 0xf33fffff, 0xf33fffff, 0xf33fffff, 0]
 const offsets = [28, 32, 36, 40, 44, 56], data = Buffer.from([0, 0, 0, 0, 3, 0, 0, 0, ...Array(24).fill(0x5a)]);
 const counts = {contexts: 0, modules: 0, runs: 0, faults: 0, successes: 0, controls: 0};
 const paths = ['engine/src/cpu/x86/ir.rs', 'engine/src/cpu/x86/segments/cache.rs',
-  'engine/src/cpu/dbt/wasm/segments/access.rs', 'engine/src/cpu/dbt/wasm/segments.rs',
-  'engine/src/cpu/dbt/wasm/memory.rs', 'engine/src/cpu/dbt/wasm/strings.rs',
-  'engine/src/cpu/dbt/wasm/simd.rs', 'engine/src/cpu/dbt/wasm/simd/direct.rs',
-  'engine/src/cpu/dbt/wasm/integer/dispatch.rs', 'engine/src/cpu/dbt/wasm/integer/bits.rs',
-  'engine/src/cpu/dbt/wasm/atomic.rs', 'engine/tests/cpu/segments/cache/fixtures/p2-segment-loads/runtime/access.mjs'];
+  'engine/src/cpu/dbt/wasm/instructions/segments/access.rs', 'engine/src/cpu/dbt/wasm/instructions/segments.rs',
+  'engine/src/cpu/dbt/wasm/imports/mod.rs', 'engine/src/cpu/dbt/wasm/imports/binding.rs', 'engine/src/cpu/dbt/wasm/imports/context.rs', 'engine/src/cpu/dbt/wasm/imports/needs.rs', 'engine/src/cpu/dbt/wasm/helpers/protocol.rs', 'engine/src/cpu/dbt/wasm/instructions/memory/mod.rs', 'engine/src/cpu/dbt/wasm/instructions/memory/address.rs', 'engine/src/cpu/dbt/wasm/instructions/memory/scalar.rs', 'engine/src/cpu/dbt/wasm/instructions/memory/stack.rs', 'engine/src/cpu/dbt/wasm/instructions/strings.rs',
+  'engine/src/cpu/dbt/wasm/instructions/simd.rs', 'engine/src/cpu/dbt/wasm/instructions/simd/direct.rs',
+  'engine/src/cpu/dbt/wasm/instructions/integer/dispatch.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/bits.rs',
+  'engine/src/cpu/dbt/wasm/instructions/atomic.rs', 'engine/src/cpu/dbt/wasm/helpers/integer.rs', 'engine/tests/cpu/segments/cache/fixtures/p2-segment-loads/runtime/access.mjs'];
 const pins = () => Object.fromEntries(paths.map(p => [p, createHash('sha256').update(readFileSync(join(root, p))).digest('hex')])), sourcePins = pins();
 const words = values => {const b = Buffer.alloc(values.length * 4); values.forEach((v, i) => b.writeUInt32LE(v >>> 0, i * 4)); return b;};
 function record(magic, fields, version = 1, size = 40) {

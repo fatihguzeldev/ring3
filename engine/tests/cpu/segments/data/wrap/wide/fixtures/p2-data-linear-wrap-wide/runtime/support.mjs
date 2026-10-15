@@ -56,10 +56,10 @@ export async function harness(enginePath, output, root) {
     "engine/src/abi/x86/segments.rs",
     "engine/src/abi/x86/state.rs",
     "engine/src/abi/x86/exit.rs",
-    "engine/src/cpu/dbt/wasm/emitter.rs",
-    "engine/src/cpu/dbt/wasm/memory.rs",
-    "engine/src/cpu/dbt/wasm/memory/cpu_scalar.rs",
-    "engine/src/cpu/dbt/wasm/stack/pointer.rs",
+    "engine/src/cpu/dbt/wasm/emitter/mod.rs", "engine/src/cpu/dbt/wasm/emitter/module.rs", "engine/src/cpu/dbt/wasm/emitter/body.rs", "engine/src/cpu/dbt/wasm/requirements.rs", "engine/src/cpu/dbt/wasm/imports/wiring.rs",
+    "engine/src/cpu/dbt/wasm/imports/mod.rs", "engine/src/cpu/dbt/wasm/imports/binding.rs", "engine/src/cpu/dbt/wasm/imports/context.rs", "engine/src/cpu/dbt/wasm/imports/needs.rs", "engine/src/cpu/dbt/wasm/helpers/protocol.rs", "engine/src/cpu/dbt/wasm/instructions/memory/mod.rs", "engine/src/cpu/dbt/wasm/instructions/memory/address.rs", "engine/src/cpu/dbt/wasm/instructions/memory/scalar.rs", "engine/src/cpu/dbt/wasm/instructions/memory/stack.rs",
+    "engine/src/cpu/dbt/wasm/instructions/memory/cpu_scalar.rs",
+    "engine/src/cpu/dbt/wasm/instructions/stack/pointer.rs",
     "engine/src/cpu/dbt/wasm/code_fetch.rs",
     "engine/src/cpu/dbt/wasm/abi.rs",
     "engine/src/cpu/x86/segments/cache.rs",
@@ -82,7 +82,7 @@ export async function harness(enginePath, output, root) {
     "engine/tests/cpu/segments/data/wrap/wide/fixtures/p2-data-linear-wrap-wide/runtime/support.mjs"
 ];
   paths.push(...declarations.sourcePaths.filter(path=>!paths.includes(path)));
-  paths.push(...["engine/src/cpu/dbt/wasm/stack.rs", "engine/src/cpu/dbt/wasm/cpu_result.rs", "engine/src/cpu/x86/stack.rs", "engine/src/cpu/x86/stack/pointer.rs", "engine/src/process/cpu/stack.rs", "engine/src/process/memory/span.rs", "engine/src/cpu/dbt/wasm/simd.rs", "engine/src/cpu/dbt/wasm/simd/direct.rs", "engine/src/cpu/dbt/wasm/x87.rs", "engine/src/process/cpu/x87.rs", "engine/src/process/cpu/simd.rs", "engine/src/cpu/x86/x87/execute.rs", "engine/src/cpu/x86/x87/value.rs", "engine/src/cpu/x86/simd.rs", "engine/src/cpu/x86/decode/simd.rs", "engine/src/cpu/x86/decode/x87.rs", "engine/src/cpu/x86/xstate/legacy.rs", "engine/src/abi/x86/x87.rs", "engine/src/abi/x86/simd.rs", "engine/src/abi/x86/ymm.rs", "engine/src/abi/x86/system_registers.rs", "engine/src/cpu/dbt/wasm/system_registers.rs", "engine/src/process/cpu/system_registers.rs"].filter(path=>!paths.includes(path)));
+  paths.push(...["engine/src/cpu/dbt/wasm/instructions/stack.rs", "engine/src/cpu/dbt/wasm/helpers/result.rs", "engine/src/cpu/x86/stack.rs", "engine/src/cpu/x86/stack/pointer.rs", "engine/src/process/cpu/stack.rs", "engine/src/process/memory/span.rs", "engine/src/cpu/dbt/wasm/instructions/simd.rs", "engine/src/cpu/dbt/wasm/instructions/simd/direct.rs", "engine/src/cpu/dbt/wasm/instructions/x87.rs", "engine/src/process/cpu/x87.rs", "engine/src/process/cpu/simd.rs", "engine/src/cpu/x86/x87/execute.rs", "engine/src/cpu/x86/x87/value.rs", "engine/src/cpu/x86/simd/mod.rs", "engine/src/cpu/x86/simd/state.rs", "engine/src/cpu/x86/simd/operation.rs", "engine/src/cpu/x86/simd/descriptor.rs", "engine/src/cpu/x86/simd/execute.rs", "engine/src/cpu/x86/xstate/fxsave.rs", "engine/src/process/cpu/simd/arena.rs", "engine/src/cpu/x86/decode/simd.rs", "engine/src/cpu/x86/decode/x87.rs", "engine/src/cpu/x86/xstate/legacy.rs", "engine/src/abi/x86/x87.rs", "engine/src/abi/x86/simd.rs", "engine/src/abi/x86/ymm.rs", "engine/src/abi/x86/system_registers.rs", "engine/src/cpu/dbt/wasm/instructions/system_registers.rs", "engine/src/process/cpu/system_registers.rs"].filter(path=>!paths.includes(path)));
   const missingSources = paths.filter(path => !existsSync(join(root,path)));
   const pins = () => ({...Object.fromEntries(paths.filter(path => existsSync(join(root,path))).map(path => [path, hash(readFileSync(join(root,path)))])), executed_support:hash(readFileSync(new URL(import.meta.url))), executed_runner:hash(readFileSync(new URL('./run.mjs',import.meta.url)))});
   const sourcePins = pins(), rows = [], modules = [], contexts = [];

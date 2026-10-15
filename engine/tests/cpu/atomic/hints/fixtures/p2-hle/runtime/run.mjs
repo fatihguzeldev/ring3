@@ -10,13 +10,13 @@ const {harness, PC, SEG, words, record, state, registers, exit, hash, writeRAM} 
   await import(pathToFileURL(join(root, supportPath)));
 const h = await harness(enginePath, output, root);
 const paths = [
-  'engine/src/cpu/x86/capabilities.rs', 'engine/src/cpu/x86/decode/profile.rs',
-  'engine/src/cpu/x86/decode/atomic.rs', 'engine/src/cpu/x86/decode/lower.rs',
+  'engine/src/cpu/x86/capabilities.rs', 'engine/src/cpu/x86/decode/profile.rs', 'engine/src/cpu/x86/decode/families.rs',
+  'engine/src/cpu/x86/decode/atomic.rs', 'engine/src/cpu/x86/decode/lower.rs', 'engine/src/cpu/x86/decode/families.rs',
   'engine/src/cpu/x86/decode/integer.rs', 'engine/src/cpu/x86/decode/operands.rs',
-  'engine/src/cpu/x86/decode/execution_faults.rs', 'engine/src/cpu/dbt/wasm/atomic.rs',
-  'engine/src/cpu/dbt/wasm/memory/exchange.rs', 'engine/src/cpu/dbt/wasm/memory/byte_store.rs',
-  'engine/src/cpu/dbt/wasm/memory/word_store.rs', 'engine/src/cpu/dbt/wasm/integer/dispatch.rs',
-  'engine/src/cpu/dbt/wasm/integer/operands.rs', 'engine/src/process/memory/scalar.rs',
+  'engine/src/cpu/x86/decode/execution_faults.rs', 'engine/src/cpu/dbt/wasm/instructions/atomic.rs', 'engine/src/cpu/dbt/wasm/helpers/integer.rs',
+  'engine/src/cpu/dbt/wasm/instructions/memory/exchange.rs', 'engine/src/cpu/dbt/wasm/instructions/memory/byte_store.rs',
+  'engine/src/cpu/dbt/wasm/instructions/memory/word_store.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch.rs',
+  'engine/src/cpu/dbt/wasm/instructions/integer/operands.rs', 'engine/src/process/memory/scalar.rs',
   'engine/src/memory/space.rs', 'engine/src/memory/space/atomic.rs', 'engine/src/abi/memory_helper.rs',
   'engine/tests/cpu/atomic/wasm.rs', 'engine/tests/cpu/atomic/hints/wasm.rs',
   'engine/tests/cpu/atomic/hints/fixtures/p2-hle/runtime/run.mjs', supportPath,

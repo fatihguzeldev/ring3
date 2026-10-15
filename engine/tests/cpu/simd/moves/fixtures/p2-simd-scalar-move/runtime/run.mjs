@@ -55,8 +55,8 @@ const rows = [4, 8].flatMap(width => {
 });
 const sources = ['engine/tests/support/wasm/binding.mjs', 'engine/tests/cpu/simd/moves/fixtures/p2-simd-scalar-move/runtime/run.mjs',
   'engine/tests/support/wasm/engine.mjs', 'engine/tests/support/wasm/arena.mjs',
-  'engine/src/cpu/x86/decode/simd.rs', 'engine/src/cpu/dbt/wasm/simd.rs',
-  'engine/src/cpu/dbt/wasm/simd/direct.rs', 'engine/src/process/memory/span.rs', 'engine/src/process/memory/mod.rs', 'engine/src/process/mod.rs'];
+  'engine/src/cpu/x86/decode/simd.rs', 'engine/src/cpu/dbt/wasm/instructions/simd.rs',
+  'engine/src/cpu/dbt/wasm/instructions/simd/direct.rs', 'engine/src/process/memory/span.rs', 'engine/src/process/memory/mod.rs', 'engine/src/process/mod.rs'];
 const sourceHashes = () => Object.fromEntries(sources.map(path => [path, hash(readFileSync(join(root, path)))]));
 const sourceBefore = sourceHashes();
 const contexts = [], modules = [], observations = [], helpers = [], detections = [], ramChecks = [], repairs = [];

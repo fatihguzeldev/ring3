@@ -7,9 +7,9 @@ const [enginePath, output, root] = process.argv.slice(2);
 assert.ok(enginePath && output && root, 'explicit engine, output and root');
 const paths = ['engine/src/abi/x86/segments/modes.rs', 'engine/src/cpu/x86/decode/modes.rs',
   'engine/src/cpu/x86/decode/strings/defaults.rs', 'engine/src/cpu/x86/segments/transfers/tests.rs',
-  'engine/src/process/calls/call/modes.rs', 'engine/src/cpu/x86/decode/lower.rs',
-  'engine/src/cpu/dbt/wasm/strings.rs', 'engine/src/cpu/dbt/wasm/integer/dispatch.rs',
-  'engine/src/cpu/dbt/wasm/segments.rs', 'engine/src/process/cpu/segments.rs',
+  'engine/src/process/calls/call/modes.rs', 'engine/src/cpu/x86/decode/lower.rs', 'engine/src/cpu/x86/decode/families.rs',
+  'engine/src/cpu/dbt/wasm/instructions/strings.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch.rs',
+  'engine/src/cpu/dbt/wasm/instructions/segments.rs', 'engine/src/process/cpu/segments.rs',
   'engine/src/cpu/x86/decode/strings.rs', 'engine/src/cpu/x86/decode/operands.rs',
   'engine/src/cpu/x86/decode/flow.rs', 'engine/src/cpu/x86/segments/cache.rs', 'engine/src/cpu/x86/segments/transfers.rs',
   'engine/src/process/calls/call.rs', 'engine/tests/cpu/segments/code/defaults/wasm.rs',

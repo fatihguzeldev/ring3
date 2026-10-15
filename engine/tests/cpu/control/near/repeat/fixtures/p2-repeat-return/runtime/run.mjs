@@ -7,9 +7,9 @@ const [enginePath, output, root] = process.argv.slice(2);
 const support = 'engine/tests/cpu/segments/code/base/fixtures/p2-cs-base/runtime/support.mjs';
 const {harness, hash, record, words, registers, PC, SEG, BASES} = await import(pathToFileURL(join(root, support)));
 const h = await harness(enginePath, output, root), TARGET = 0x2000;
-const sourcePaths = ['engine/src/cpu/x86/decode/profile.rs',
-  'engine/src/cpu/x86/decode/flow.rs', 'engine/src/cpu/dbt/wasm/integer/dispatch.rs',
-  'engine/src/cpu/dbt/wasm/memory.rs', 'engine/src/cpu/dbt/wasm/stack/pointer.rs',
+const sourcePaths = ['engine/src/cpu/x86/decode/profile.rs', 'engine/src/cpu/x86/decode/families.rs',
+  'engine/src/cpu/x86/decode/flow.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch.rs',
+  'engine/src/cpu/dbt/wasm/imports/mod.rs', 'engine/src/cpu/dbt/wasm/imports/binding.rs', 'engine/src/cpu/dbt/wasm/imports/context.rs', 'engine/src/cpu/dbt/wasm/imports/needs.rs', 'engine/src/cpu/dbt/wasm/helpers/protocol.rs', 'engine/src/cpu/dbt/wasm/instructions/memory/mod.rs', 'engine/src/cpu/dbt/wasm/instructions/memory/address.rs', 'engine/src/cpu/dbt/wasm/instructions/memory/scalar.rs', 'engine/src/cpu/dbt/wasm/instructions/memory/stack.rs', 'engine/src/cpu/dbt/wasm/instructions/stack/pointer.rs',
   'engine/tests/cpu/control/near/repeat/native.rs', 'engine/tests/cpu/control/near/repeat/wasm.rs',
   'engine/tests/cpu/control/near/repeat/fixtures/p2-repeat-return/runtime/run.mjs'];
 const pins = () => Object.fromEntries(sourcePaths.map(path => [path, hash(readFileSync(join(root, path)))]));

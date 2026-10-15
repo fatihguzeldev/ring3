@@ -7,7 +7,7 @@ const [enginePath, output, root] = process.argv.slice(2);
 const support = 'engine/tests/cpu/segments/code/base/fixtures/p2-cs-base/runtime/support.mjs';
 const {harness, hash, record, registers, PC, SEG, BASES} = await import(pathToFileURL(join(root, support)));
 const h = await harness(enginePath, output, root);
-const sources = ['engine/src/cpu/x86/decode/profile.rs', 'engine/src/cpu/x86/decode/lower.rs',
+const sources = ['engine/src/cpu/x86/decode/profile.rs', 'engine/src/cpu/x86/decode/families.rs', 'engine/src/cpu/x86/decode/lower.rs', 'engine/src/cpu/x86/decode/families.rs',
   'engine/tests/cpu/control/hints/alignment/native.rs', 'engine/tests/cpu/control/hints/alignment/wasm.rs',
   'engine/tests/cpu/control/hints/alignment/fixtures/p2-compiler-alignment/runtime/run.mjs'];
 const pins = () => Object.fromEntries(sources.map(path => [path, hash(readFileSync(join(root, path)))]));

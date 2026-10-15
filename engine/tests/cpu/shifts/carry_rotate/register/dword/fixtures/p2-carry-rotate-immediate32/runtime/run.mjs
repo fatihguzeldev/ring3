@@ -390,19 +390,19 @@ const sourcePaths = ['engine/tests/support/wasm/binding.mjs','engine/tests/suppo
   "engine/src/cpu/x86/ir.rs",
   "engine/src/cpu/x86/decode/integer.rs",
   "engine/src/cpu/dbt/region.rs",
-  "engine/src/cpu/dbt/wasm/integer/arithmetic.rs", "engine/src/cpu/dbt/wasm/integer/bits.rs", "engine/src/cpu/dbt/wasm/integer/carry_rotates.rs", "engine/src/cpu/dbt/wasm/integer/decimal.rs", "engine/src/cpu/dbt/wasm/integer/dispatch.rs", "engine/src/cpu/dbt/wasm/integer/flags.rs", "engine/src/cpu/dbt/wasm/integer/mod.rs", "engine/src/cpu/dbt/wasm/integer/multiply_divide.rs", "engine/src/cpu/dbt/wasm/integer/operands.rs", "engine/src/cpu/dbt/wasm/integer/rotates.rs", "engine/src/cpu/dbt/wasm/integer/shifts.rs",
-  "engine/src/cpu/x86/decode/profile.rs",
+  "engine/src/cpu/dbt/wasm/instructions/integer/arithmetic.rs", "engine/src/cpu/dbt/wasm/instructions/integer/bits.rs", "engine/src/cpu/dbt/wasm/instructions/integer/carry_rotates.rs", "engine/src/cpu/dbt/wasm/instructions/integer/decimal.rs", "engine/src/cpu/dbt/wasm/instructions/integer/dispatch.rs", "engine/src/cpu/dbt/wasm/instructions/integer/flags.rs", "engine/src/cpu/dbt/wasm/instructions/integer/mod.rs", "engine/src/cpu/dbt/wasm/instructions/integer/multiply_divide.rs", "engine/src/cpu/dbt/wasm/instructions/integer/operands.rs", "engine/src/cpu/dbt/wasm/instructions/integer/rotates.rs", "engine/src/cpu/dbt/wasm/instructions/integer/shifts.rs",
+  "engine/src/cpu/x86/decode/profile.rs", "engine/src/cpu/x86/decode/families.rs",
   "engine/src/cpu/x86/decode/operands.rs",
-  "engine/src/cpu/dbt/wasm/emitter.rs",
+  "engine/src/cpu/dbt/wasm/emitter/mod.rs", "engine/src/cpu/dbt/wasm/emitter/module.rs", "engine/src/cpu/dbt/wasm/emitter/body.rs", "engine/src/cpu/dbt/wasm/requirements.rs", "engine/src/cpu/dbt/wasm/imports/wiring.rs",
   "engine/src/cpu/dbt/wasm/locals.rs",
-  "engine/src/cpu/dbt/wasm/memory.rs",
+  "engine/src/cpu/dbt/wasm/imports/mod.rs", "engine/src/cpu/dbt/wasm/imports/binding.rs", "engine/src/cpu/dbt/wasm/imports/context.rs", "engine/src/cpu/dbt/wasm/imports/needs.rs", "engine/src/cpu/dbt/wasm/helpers/protocol.rs", "engine/src/cpu/dbt/wasm/instructions/memory/mod.rs", "engine/src/cpu/dbt/wasm/instructions/memory/address.rs", "engine/src/cpu/dbt/wasm/instructions/memory/scalar.rs", "engine/src/cpu/dbt/wasm/instructions/memory/stack.rs",
   "engine/Cargo.toml",
   "engine/tests/cpu/shifts/carry_rotate/register/one/dword/native.rs", "engine/tests/cpu/shifts/native.rs", "engine/tests/support/cpu/prefix/admission.rs", "engine/tests/cpu/shifts/carry_rotate/immediate/one/dword/native.rs", "engine/tests/cpu/shifts/rotate/register/dword/native/counts.rs", "engine/tests/cpu/shifts/rotate/memory/dword/native/counts.rs", "engine/tests/cpu/shifts/carry_rotate/immediate/one/dword/fixtures/p2-carry-rotate-immediate-one/runtime/run.mjs",
   "engine/tests/cpu/shifts/carry_rotate/immediate/one/dword/wasm.rs", "engine/tests/cpu/shifts/wasm.rs", "engine/tests/support/wasm.rs", "engine/tests/cpu/shifts/carry_rotate/register/dword/native/immediate.rs", "engine/tests/cpu/shifts/carry_rotate/register/dword/wasm/immediate.rs", "engine/tests/cpu/shifts/carry_rotate/register/dword/fixtures/p2-carry-rotate-immediate32/runtime/run.mjs",
   "engine/tests/cpu/shifts/carry_rotate/register/dword/fixtures/p2-carry-rotate-immediate32/runtime/oracle.mjs",
   "engine/tests/support/wasm/engine.mjs",
 ];
-sourcePaths.push(...['engine/src/cpu/dbt/wasm/emitter.rs', 'engine/src/cpu/dbt/wasm/code_fetch.rs', 'engine/tests/support/wasm/arena.mjs'].filter(path => !sourcePaths.includes(path)));
+sourcePaths.push(...['engine/src/cpu/dbt/wasm/emitter/mod.rs', 'engine/src/cpu/dbt/wasm/emitter/module.rs', 'engine/src/cpu/dbt/wasm/emitter/body.rs', 'engine/src/cpu/dbt/wasm/requirements.rs', 'engine/src/cpu/dbt/wasm/imports/wiring.rs', 'engine/src/cpu/dbt/wasm/code_fetch.rs', 'engine/tests/support/wasm/arena.mjs'].filter(path => !sourcePaths.includes(path)));
 assert.equal(new Set(sourcePaths).size, sourcePaths.length);
 const sourceIdentities = () =>
   Object.fromEntries(

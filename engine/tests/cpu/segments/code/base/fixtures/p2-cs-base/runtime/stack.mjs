@@ -15,8 +15,8 @@ const hash = value => createHash('sha256').update(value).digest('hex');
 const original=[0x11110001,0x22220002,0x33330003,0x44440004,0x3000,0x55550005,0x66660006,0x77770007];
 const slots=[0x1011,0x2022,0x3033,0xdead,0x4044,0x5055,0x6066,0x7077];
 const sourcePaths=[
-  'engine/src/cpu/dbt/wasm/stack.rs','engine/src/cpu/dbt/wasm/code_fetch.rs',
-  'engine/src/cpu/dbt/wasm/memory.rs','engine/src/cpu/dbt/wasm/emitter.rs',
+  'engine/src/cpu/dbt/wasm/instructions/stack.rs','engine/src/cpu/dbt/wasm/code_fetch.rs',
+  'engine/src/cpu/dbt/wasm/imports/mod.rs', 'engine/src/cpu/dbt/wasm/imports/binding.rs', 'engine/src/cpu/dbt/wasm/imports/context.rs', 'engine/src/cpu/dbt/wasm/imports/needs.rs', 'engine/src/cpu/dbt/wasm/helpers/protocol.rs', 'engine/src/cpu/dbt/wasm/instructions/memory/mod.rs', 'engine/src/cpu/dbt/wasm/instructions/memory/address.rs', 'engine/src/cpu/dbt/wasm/instructions/memory/scalar.rs', 'engine/src/cpu/dbt/wasm/instructions/memory/stack.rs','engine/src/cpu/dbt/wasm/emitter/mod.rs', 'engine/src/cpu/dbt/wasm/emitter/module.rs', 'engine/src/cpu/dbt/wasm/emitter/body.rs', 'engine/src/cpu/dbt/wasm/requirements.rs', 'engine/src/cpu/dbt/wasm/imports/wiring.rs',
   'engine/src/process/cpu/stack.rs','engine/src/process/memory/span.rs',
   'engine/src/process/execution/authority.rs','engine/src/process/cpu/segments.rs',
   'engine/src/memory/space.rs', 'engine/src/memory/space/atomic.rs','engine/src/abi/x86/segments.rs',

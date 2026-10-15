@@ -32,7 +32,7 @@ const currentOwners = [
   "engine/src/cpu/x86/avx/operation/factory/compound.rs",
   "engine/src/cpu/x86/avx/arithmetic.rs", "engine/src/cpu/x86/avx/compound/mod.rs",
   "engine/src/cpu/x86/avx/arithmetic/memory/fixtures/runtime/run.mjs",
-  "engine/src/cpu/x86/avx/compound/fixtures/runtime/run.mjs", "engine/src/cpu/x86/simd.rs",
+  "engine/src/cpu/x86/avx/compound/fixtures/runtime/run.mjs", "engine/src/cpu/x86/simd/mod.rs", "engine/src/cpu/x86/simd/state.rs", "engine/src/cpu/x86/simd/operation.rs", "engine/src/cpu/x86/simd/descriptor.rs", "engine/src/cpu/x86/simd/execute.rs", "engine/src/cpu/x86/xstate/fxsave.rs", "engine/src/process/cpu/simd/arena.rs",
   "engine/src/cpu/x86/simd/float.rs", "engine/src/cpu/x86/simd/packed.rs", "engine/src/math/ieee.rs",
 ];
 

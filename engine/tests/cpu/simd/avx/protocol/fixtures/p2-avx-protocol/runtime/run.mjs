@@ -11,7 +11,7 @@ const [enginePath, output, root] = process.argv.slice(2), engine = readEngine(en
 const {sourcePaths: exportSources} = assertEngineExports(engine.module, root);
 const sourcePaths = ['engine/tests/support/wasm/arena.mjs', 'engine/tests/support/wasm/binding.mjs', ...exportSources, 'engine/tests/support/wasm/engine.mjs',
   'engine/src/cpu/x86/decode/avx/mod.rs', 'engine/src/cpu/x86/avx/operation.rs',
-  'engine/src/cpu/dbt/wasm/avx/execute.rs', 'engine/src/cpu/dbt/wasm/cpu_result.rs',
+  'engine/src/cpu/dbt/wasm/instructions/avx/execute.rs', 'engine/src/cpu/dbt/wasm/helpers/result.rs',
   'engine/src/process/cpu/avx.rs', 'engine/src/cpu/x86/avx/dispatch.rs',
   'engine/tests/cpu/simd/avx/protocol/wasm.rs',
   'engine/tests/cpu/simd/avx/protocol/fixtures/p2-avx-protocol/runtime/run.mjs'];

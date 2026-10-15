@@ -15,9 +15,9 @@ assert.equal(initial.toString('ascii', 4756, 4760), 'R3SB');
 assert.equal(initial.readUInt16LE(FP + 18), 0x2800, 'nonzero x87 TOP makes MMX transition observable');
 const sourcePaths = [
   'engine/src/abi/arena.rs', 'engine/src/abi/cpu_helper.rs',
-  'engine/src/cpu/dbt/wasm/simd.rs', 'engine/src/cpu/dbt/wasm/memory.rs',
-  'engine/src/cpu/dbt/wasm/segments/access.rs', 'engine/src/cpu/dbt/wasm/segments/context.rs',
-  'engine/src/cpu/x86/simd.rs', 'engine/src/cpu/x86/decode/simd.rs',
+  'engine/src/cpu/dbt/wasm/instructions/simd.rs', 'engine/src/cpu/dbt/wasm/imports/mod.rs', 'engine/src/cpu/dbt/wasm/imports/binding.rs', 'engine/src/cpu/dbt/wasm/imports/context.rs', 'engine/src/cpu/dbt/wasm/imports/needs.rs', 'engine/src/cpu/dbt/wasm/helpers/protocol.rs', 'engine/src/cpu/dbt/wasm/instructions/memory/mod.rs', 'engine/src/cpu/dbt/wasm/instructions/memory/address.rs', 'engine/src/cpu/dbt/wasm/instructions/memory/scalar.rs', 'engine/src/cpu/dbt/wasm/instructions/memory/stack.rs',
+  'engine/src/cpu/dbt/wasm/instructions/segments/access.rs', 'engine/src/cpu/dbt/wasm/instructions/segments/context.rs',
+  'engine/src/cpu/x86/simd/mod.rs', 'engine/src/cpu/x86/simd/state.rs', 'engine/src/cpu/x86/simd/operation.rs', 'engine/src/cpu/x86/simd/descriptor.rs', 'engine/src/cpu/x86/simd/execute.rs', 'engine/src/cpu/x86/xstate/fxsave.rs', 'engine/src/process/cpu/simd/arena.rs', 'engine/src/cpu/x86/decode/simd.rs',
   'engine/src/process/cpu/simd.rs', 'engine/src/process/memory/span.rs', 'engine/src/memory/space.rs', 'engine/src/memory/space/atomic.rs',
   'engine/tests/support/wasm.rs', 'engine/tests/support/wasm/engine.mjs',
   'engine/tests/cpu/simd/wasm.rs', 'engine/tests/cpu/simd/memory/masked/wasm.rs',

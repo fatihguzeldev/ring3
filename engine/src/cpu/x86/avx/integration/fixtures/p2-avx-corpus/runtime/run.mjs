@@ -16,9 +16,9 @@ function ownerFiles(path) {
   });
 }
 const sourcePaths = [...new Set([...receipt.sourcePaths, 'engine/tests/support/wasm/engine.mjs', 'engine/tests/support/wasm/arena.mjs',
-  ...ownerFiles('engine/src/cpu/x86/avx'), ...ownerFiles('engine/src/cpu/x86/decode/avx'), ...ownerFiles('engine/src/cpu/dbt/wasm/avx'),
-  'engine/src/cpu/x86/simd.rs', 'engine/src/cpu/dbt/wasm/cpu_result.rs', 'engine/src/cpu/dbt/wasm/emitter.rs',
-  'engine/src/cpu/dbt/wasm/integer/dispatch.rs', 'engine/src/cpu/dbt/wasm/memory.rs', 'engine/src/process/cpu/avx.rs',
+  ...ownerFiles('engine/src/cpu/x86/avx'), ...ownerFiles('engine/src/cpu/x86/decode/avx'), ...ownerFiles('engine/src/cpu/dbt/wasm/instructions/avx'),
+  'engine/src/cpu/x86/simd/mod.rs', 'engine/src/cpu/x86/simd/state.rs', 'engine/src/cpu/x86/simd/operation.rs', 'engine/src/cpu/x86/simd/descriptor.rs', 'engine/src/cpu/x86/simd/execute.rs', 'engine/src/cpu/x86/xstate/fxsave.rs', 'engine/src/process/cpu/simd/arena.rs', 'engine/src/cpu/dbt/wasm/helpers/result.rs', 'engine/src/cpu/dbt/wasm/emitter/mod.rs', 'engine/src/cpu/dbt/wasm/emitter/module.rs', 'engine/src/cpu/dbt/wasm/emitter/body.rs', 'engine/src/cpu/dbt/wasm/requirements.rs', 'engine/src/cpu/dbt/wasm/imports/wiring.rs',
+  'engine/src/cpu/dbt/wasm/instructions/integer/dispatch.rs', 'engine/src/cpu/dbt/wasm/imports/mod.rs', 'engine/src/cpu/dbt/wasm/imports/binding.rs', 'engine/src/cpu/dbt/wasm/imports/context.rs', 'engine/src/cpu/dbt/wasm/imports/needs.rs', 'engine/src/cpu/dbt/wasm/helpers/protocol.rs', 'engine/src/cpu/dbt/wasm/instructions/memory/mod.rs', 'engine/src/cpu/dbt/wasm/instructions/memory/address.rs', 'engine/src/cpu/dbt/wasm/instructions/memory/scalar.rs', 'engine/src/cpu/dbt/wasm/instructions/memory/stack.rs', 'engine/src/process/cpu/avx.rs',
   'engine/src/cpu/dbt/wasm/detection.rs', 'engine/src/process/wasm/detection.rs',
   'engine/src/process/cpu/events/detection.rs', 'engine/src/process/execution/authority.rs',
   'engine/src/abi/arena.rs', 'engine/src/abi/x86/avx.rs', 'engine/src/abi/x86/ymm.rs', 'engine/src/cpu/x86/capabilities.rs'])].sort();

@@ -10,8 +10,8 @@ const {harness, PC, SEG, BASES, words, record, state, exit, hash} = await import
 const h = await harness(enginePath, output, root);
 const own = 'engine/tests/cpu/control/exceptions/availability/optional/';
 const paths = ['engine/src/cpu/x86/capabilities.rs', 'engine/src/cpu/x86/decode/mpx.rs',
-  'engine/src/cpu/x86/decode/mpx/tests.rs', 'engine/src/cpu/x86/decode/profile.rs',
-  'engine/src/cpu/x86/decode/lower.rs', 'engine/src/cpu/x86/decode/decoder.rs',
+  'engine/src/cpu/x86/decode/mpx/tests.rs', 'engine/src/cpu/x86/decode/profile.rs', 'engine/src/cpu/x86/decode/families.rs',
+  'engine/src/cpu/x86/decode/lower.rs', 'engine/src/cpu/x86/decode/families.rs', 'engine/src/cpu/x86/decode/decoder.rs', 'engine/src/cpu/x86/decode/instruction.rs',
   'engine/src/cpu/dbt/wasm/code_fetch/hoist.rs', 'engine/src/cpu/dbt/wasm/abi.rs',
   own + 'wasm.rs', own + 'fixtures/p2-optional-availability/runtime/disabled-mpx.mjs', supportPath];
 const pins = () => Object.fromEntries(paths.map(path => [path, hash(readFileSync(join(root, path)))]));

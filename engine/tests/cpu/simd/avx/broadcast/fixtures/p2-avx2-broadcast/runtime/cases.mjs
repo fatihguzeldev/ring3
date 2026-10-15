@@ -244,7 +244,7 @@ export const broadcastSourcePaths = [
   'engine/src/cpu/x86/avx/operation/factory/cross_lane.rs',
   'engine/src/cpu/x86/decode/avx/cross_lane.rs',
   'engine/src/abi/x86/segments.rs',
-  'engine/src/cpu/dbt/wasm/segments/access.rs',
+  'engine/src/cpu/dbt/wasm/instructions/segments/access.rs',
   'engine/tests/cpu/simd/avx/execution/wasm.rs',
   'engine/tests/cpu/simd/avx/broadcast/fixtures/p2-avx2-broadcast/runtime/cases.mjs',
 ];

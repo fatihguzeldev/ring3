@@ -8,9 +8,9 @@ const support = 'engine/tests/cpu/segments/code/base/fixtures/p2-cs-base/runtime
 const {harness, hash, record, registers, PC, SEG, BASES} = await import(pathToFileURL(join(root, support)));
 const h = await harness(enginePath, output, root), handoffs = [];
 const sourcePaths = ['engine/src/cpu/exit.rs', 'engine/src/cpu/x86/control.rs',
-  'engine/src/cpu/x86/decode/control.rs', 'engine/src/cpu/x86/decode/profile.rs',
-  'engine/src/cpu/dbt/wasm/control_instructions.rs', 'engine/src/cpu/dbt/wasm/software_interrupts.rs',
-  'engine/src/cpu/dbt/wasm/detection.rs', 'engine/src/cpu/dbt/wasm/emitter.rs',
+  'engine/src/cpu/x86/decode/control.rs', 'engine/src/cpu/x86/decode/profile.rs', 'engine/src/cpu/x86/decode/families.rs',
+  'engine/src/cpu/dbt/wasm/instructions/control_instructions.rs', 'engine/src/cpu/dbt/wasm/instructions/software_interrupts.rs',
+  'engine/src/cpu/dbt/wasm/detection.rs', 'engine/src/cpu/dbt/wasm/emitter/mod.rs', 'engine/src/cpu/dbt/wasm/emitter/module.rs', 'engine/src/cpu/dbt/wasm/emitter/body.rs', 'engine/src/cpu/dbt/wasm/requirements.rs', 'engine/src/cpu/dbt/wasm/imports/wiring.rs',
   'engine/src/cpu/dbt/wasm/abi.rs', 'engine/src/cpu/dbt/region.rs',
   'engine/src/abi/x86/exit.rs', 'engine/src/abi/x86/event.rs',
   'engine/src/process/cpu/events/snapshot.rs', 'engine/src/process/wasm/detection.rs',

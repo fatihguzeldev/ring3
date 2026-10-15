@@ -10,10 +10,10 @@ assert.ok(['basic', 'privileged'].includes(suite));
 const scenario = suite === 'privileged' ? await import('./privileged-cases.mjs') : undefined;
 const PC = 0x1000, KEY_HIGH = 0x4641554c, observations = [], modules = []; let contexts = 0, runs = 0, refusals = 0;
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
-const paths = ['engine/src/cpu/x86/decode/decoder.rs', 'engine/src/cpu/x86/decode/execution_faults.rs',
+const paths = ['engine/src/cpu/x86/decode/decoder.rs', 'engine/src/cpu/x86/decode/instruction.rs', 'engine/src/cpu/x86/decode/execution_faults.rs',
   'engine/src/cpu/x86/control.rs', 'engine/src/cpu/x86/environment.rs', 'engine/src/cpu/dbt/cold.rs', 'engine/src/cpu/dbt/artifact.rs',
-  'engine/src/cpu/dbt/region.rs', 'engine/src/cpu/dbt/wasm/control_instructions.rs', 'engine/src/cpu/dbt/wasm/emitter.rs',
-  'engine/src/process/execution/stopped.rs', 'engine/src/process/wasm/execution.rs', 'engine/src/abi/wasm/exports/execution.rs',
+  'engine/src/cpu/dbt/region.rs', 'engine/src/cpu/dbt/wasm/instructions/control_instructions.rs', 'engine/src/cpu/dbt/wasm/emitter/mod.rs', 'engine/src/cpu/dbt/wasm/emitter/module.rs', 'engine/src/cpu/dbt/wasm/emitter/body.rs', 'engine/src/cpu/dbt/wasm/requirements.rs', 'engine/src/cpu/dbt/wasm/imports/wiring.rs',
+  'engine/src/process/execution/stopped.rs', 'engine/src/process/wasm/execution.rs', 'engine/src/abi/execution.rs', 'engine/src/abi/wasm/exports/execution.rs',
   'engine/tests/cpu/control/exceptions/fixtures/p2-execution-faults/runtime/run.mjs'];
 if (scenario) paths.push('engine/src/cpu/x86/decode/execution_faults/tests/faults.rs',
   'engine/src/cpu/x86/decode/execution_faults/tests/environment.rs',

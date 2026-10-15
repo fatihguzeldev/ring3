@@ -51,7 +51,7 @@ const sourcePaths = ['engine/tests/support/wasm/binding.mjs',
   'engine/src/process/calls/call.rs', 'engine/src/process/cpu/context.rs', 'engine/src/process/calls/mod.rs', 'engine/src/process/windows/calls.rs', 'engine/src/process/windows/mod.rs', 'engine/src/windows/provider.rs', 'engine/src/windows/api/mod.rs', 'engine/src/windows/api/catalog.rs',
   'engine/src/cpu/dbt/wasm/dispatcher.rs', 'engine/src/process/cpu/simd.rs', 'engine/src/process/cpu/mod.rs',
   'engine/src/process/memory/span.rs', 'engine/src/process/memory/mod.rs',
-  'engine/src/cpu/dbt/wasm/simd.rs', 'engine/src/cpu/dbt/wasm/simd/direct.rs',
+  'engine/src/cpu/dbt/wasm/instructions/simd.rs', 'engine/src/cpu/dbt/wasm/instructions/simd/direct.rs',
   'engine/src/cpu/x86/simd/float.rs', 'engine/src/math/mod.rs', 'engine/src/math/ieee.rs', 'engine/src/math/integer.rs', 'engine/src/lib.rs', 'engine/src/abi/x86/simd.rs',
 ];
 const sourceHashes = () => Object.fromEntries(sourcePaths.map(path => [path, hash(readFileSync(join(root, path)))]));

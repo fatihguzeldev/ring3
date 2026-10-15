@@ -19,7 +19,7 @@ const sourcePaths = [support, prefix + 'wasm.rs', ...['run.mjs', 'cases.mjs', 'o
   'engine/src/process/memory/cpu_scalar.rs', 'engine/src/process/memory/scalar/cpu_write.rs',
   'engine/src/process/memory/span.rs', 'engine/src/process/cpu/fetch.rs',
   'engine/src/process/cpu/avx/gather.rs', 'engine/src/process/cpu/avx/gather/projection.rs',
-  'engine/src/cpu/dbt/wasm/detection.rs', 'engine/src/cpu/dbt/wasm/cpu_result/paging.rs',
+  'engine/src/cpu/dbt/wasm/detection.rs', 'engine/src/cpu/dbt/wasm/helpers/result/paging.rs',
   'engine/src/cpu/dbt/wasm/code_fetch/paging.rs', 'engine/src/cpu/dbt/wasm/abi.rs',
   'engine/src/process/wasm/paging/transport.rs', 'engine/src/process/wasm/detection.rs',
   'engine/src/abi/cpu_helper/paging.rs', 'engine/src/abi/cpu_helper/fetch.rs',

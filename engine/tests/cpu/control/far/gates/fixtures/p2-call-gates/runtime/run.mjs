@@ -7,8 +7,8 @@ const [enginePath, output, root] = process.argv.slice(2);
 assert.ok(enginePath && output && root, 'explicit engine, output and root');
 const paths = ['engine/src/abi/far.rs', 'engine/src/abi/cpu_helper.rs',
   'engine/src/cpu/x86/segments/transfers.rs', 'engine/src/cpu/x86/segments/transfers/gates.rs',
-  'engine/src/cpu/dbt/wasm/cpu_result.rs', 'engine/src/cpu/dbt/wasm/far/gate.rs',
-  'engine/src/process/cpu/far/call.rs', 'engine/src/cpu/dbt/wasm/stack/pointer.rs',
+  'engine/src/cpu/dbt/wasm/helpers/result.rs', 'engine/src/cpu/dbt/wasm/instructions/far/gate.rs',
+  'engine/src/process/cpu/far/call.rs', 'engine/src/cpu/dbt/wasm/instructions/stack/pointer.rs',
   'engine/tests/cpu/control/far/gates/wasm.rs',
   'engine/tests/cpu/control/far/gates/fixtures/p2-call-gates/runtime/run.mjs'];
 const pins = () => Object.fromEntries(paths.map(path => [path, hash(readFileSync(join(root, path)))]));

@@ -12,14 +12,14 @@ const contexts = [], modules = [], observations = [], refusals = [], helpers = [
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 assert.equal(initial.length, SIZE);
 const sourcePaths = [
-  'engine/src/cpu/x86/decode/decoder.rs', 'engine/src/cpu/x86/decode/fetch.rs', 'engine/src/cpu/x86/decode/mod.rs',
+  'engine/src/cpu/x86/decode/decoder.rs', 'engine/src/cpu/x86/decode/instruction.rs', 'engine/src/cpu/x86/decode/fetch.rs', 'engine/src/cpu/x86/decode/mod.rs',
   'engine/src/cpu/dbt/region.rs', 'engine/src/cpu/dbt/cold.rs', 'engine/src/cpu/dbt/gate.rs',
-  'engine/src/cpu/dbt/artifact.rs', 'engine/src/cpu/dbt/resident.rs', 'engine/src/cpu/dbt/wasm/emitter.rs',
-  'engine/src/cpu/dbt/wasm/abi.rs', 'engine/src/cpu/dbt/wasm/segments/context.rs',
+  'engine/src/cpu/dbt/artifact.rs', 'engine/src/cpu/dbt/resident.rs', 'engine/src/cpu/dbt/wasm/emitter/mod.rs', 'engine/src/cpu/dbt/wasm/emitter/module.rs', 'engine/src/cpu/dbt/wasm/emitter/body.rs', 'engine/src/cpu/dbt/wasm/requirements.rs', 'engine/src/cpu/dbt/wasm/imports/wiring.rs',
+  'engine/src/cpu/dbt/wasm/abi.rs', 'engine/src/cpu/dbt/wasm/instructions/segments/context.rs',
   'engine/src/cpu/dbt/wasm/code_fetch.rs', 'engine/src/cpu/dbt/wasm/dispatcher.rs',
   'engine/src/process/execution/compiled.rs', 'engine/src/process/execution/stopped.rs',
   'engine/src/process/execution/resident.rs', 'engine/src/process/execution/authority.rs',
-  'engine/src/process/wasm/execution.rs', 'engine/src/process/wasm/mod.rs', 'engine/src/abi/wasm/exports/execution.rs',
+  'engine/src/process/wasm/execution.rs', 'engine/src/abi/execution.rs', 'engine/src/process/wasm/mod.rs', 'engine/src/abi/wasm/exports/execution.rs',
   'engine/src/memory/space.rs', 'engine/src/memory/space/atomic.rs', 'engine/tests/support/wasm.rs', 'engine/tests/support/wasm/engine.mjs',
   'engine/tests/cpu/segments/code/fetch/native.rs', 'engine/tests/cpu/segments/code/fetch/wasm.rs',
   'engine/tests/cpu/segments/native.rs', 'engine/tests/cpu/segments/wasm.rs',

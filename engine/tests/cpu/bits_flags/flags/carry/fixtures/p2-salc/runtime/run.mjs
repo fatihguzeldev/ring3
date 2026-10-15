@@ -10,12 +10,12 @@ const h = await harness(enginePath, output, root);
 const own = 'engine/tests/cpu/bits_flags/flags/carry/';
 const paths = [own + 'wasm.rs', own + 'native.rs', own + 'fixtures/p2-salc/runtime/run.mjs',
   'engine/tests/cpu/bits_flags/wasm.rs', 'engine/tests/cpu/bits_flags/native.rs',
-  'engine/src/cpu/x86/ir.rs', 'engine/src/cpu/x86/decode/lower.rs',
-  'engine/src/cpu/x86/decode/lower/tests/salc.rs', 'engine/src/cpu/x86/decode/profile.rs',
-  'engine/src/cpu/x86/decode/decoder.rs', 'engine/src/cpu/x86/decode/execution_faults.rs',
+  'engine/src/cpu/x86/ir.rs', 'engine/src/cpu/x86/decode/lower.rs', 'engine/src/cpu/x86/decode/families.rs',
+  'engine/src/cpu/x86/decode/lower/tests/salc.rs', 'engine/src/cpu/x86/decode/profile.rs', 'engine/src/cpu/x86/decode/families.rs',
+  'engine/src/cpu/x86/decode/decoder.rs', 'engine/src/cpu/x86/decode/instruction.rs', 'engine/src/cpu/x86/decode/execution_faults.rs',
   'engine/src/cpu/x86/capabilities.rs', 'engine/src/cpu/x86/environment.rs',
-  'engine/src/cpu/dbt/region.rs', 'engine/src/cpu/dbt/wasm/integer/dispatch.rs',
-  'engine/src/cpu/dbt/wasm/integer/operands.rs', 'engine/src/cpu/dbt/wasm/control.rs',
+  'engine/src/cpu/dbt/region.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch.rs',
+  'engine/src/cpu/dbt/wasm/instructions/integer/operands.rs', 'engine/src/cpu/dbt/wasm/instructions/control.rs',
   'engine/src/cpu/dbt/wasm/abi.rs', support];
 const pins = () => Object.fromEntries(paths.map(path => [path, hash(readFileSync(join(root, path)))]));
 const sourcePins = pins();

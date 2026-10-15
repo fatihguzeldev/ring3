@@ -11,7 +11,7 @@ const defaults = [0xf33fffff, 0xf3bfffff, 0xf33fffff, 0xf33fffff, 0xf33fffff, 0]
 const offsets = [28, 32, 36, 40, 44, 56];
 const counts = {contexts: 0, modules: 0, runs: 0, faults: 0, successes: 0, controls: 0};
 const FP = 4236, SV = 4364, T = 140, DATA = 0x5010;
-const paths = ['engine/tests/support/wasm/arena.mjs', 'engine/src/cpu/dbt/wasm/simd.rs', 'engine/src/cpu/dbt/wasm/segments/access.rs', 'engine/src/process/memory/span.rs', 'engine/src/cpu/x86/simd.rs', 'engine/src/cpu/x86/xstate/legacy.rs',
+const paths = ['engine/tests/support/wasm/arena.mjs', 'engine/src/cpu/dbt/wasm/instructions/simd.rs', 'engine/src/cpu/dbt/wasm/instructions/segments/access.rs', 'engine/src/process/memory/span.rs', 'engine/src/cpu/x86/simd/mod.rs', 'engine/src/cpu/x86/simd/state.rs', 'engine/src/cpu/x86/simd/operation.rs', 'engine/src/cpu/x86/simd/descriptor.rs', 'engine/src/cpu/x86/simd/execute.rs', 'engine/src/cpu/x86/xstate/fxsave.rs', 'engine/src/process/cpu/simd/arena.rs', 'engine/src/cpu/x86/xstate/legacy.rs',
   'engine/tests/cpu/simd/state/legacy/native/segments.rs', 'engine/tests/cpu/simd/state/legacy/wasm/segments.rs',
   'engine/tests/cpu/simd/state/legacy/fixtures/p2-fx-segment-access/runtime/run.mjs'];
 const pins = () => Object.fromEntries(paths.map(p => [p, createHash('sha256').update(readFileSync(join(root, p))).digest('hex')])), sourcePins = pins();

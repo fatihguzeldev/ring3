@@ -12,10 +12,10 @@ const h = await harness(enginePath, output, root);
 const paths = [
   'engine/src/cpu/x86/decode/aliases.rs', 'engine/src/cpu/x86/decode/aliases/tests.rs',
   'engine/src/cpu/x86/decode/aliases/tests/word.rs',
-  'engine/src/cpu/x86/decode/mod.rs', 'engine/src/cpu/x86/decode/lower.rs',
+  'engine/src/cpu/x86/decode/mod.rs', 'engine/src/cpu/x86/decode/lower.rs', 'engine/src/cpu/x86/decode/families.rs',
   'engine/src/cpu/x86/decode/integer.rs', 'engine/src/cpu/x86/decode/atomic.rs',
-  'engine/src/cpu/x86/decode/profile.rs', 'engine/src/cpu/dbt/wasm/integer/shifts.rs',
-  'engine/src/cpu/dbt/wasm/integer/dispatch.rs', 'engine/src/cpu/dbt/wasm/integer/operands.rs',
+  'engine/src/cpu/x86/decode/profile.rs', 'engine/src/cpu/x86/decode/families.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/shifts.rs',
+  'engine/src/cpu/dbt/wasm/instructions/integer/dispatch.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/operands.rs',
   'engine/tests/cpu/arithmetic/native.rs', 'engine/tests/cpu/arithmetic/wasm.rs',
   'engine/tests/cpu/arithmetic/aliases/native.rs', 'engine/tests/cpu/arithmetic/aliases/wasm.rs',
   'engine/tests/cpu/arithmetic/aliases/fixtures/p2-legacy-aliases/runtime/run.mjs', supportPath,

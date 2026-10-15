@@ -9,9 +9,9 @@ const [enginePath, output, root] = process.argv.slice(2), engine = readEngine(en
 const PC = 0x1000, SEG = 4524, SIZE = 4612, keyHigh = 0x565252;
 const counts = {contexts: 0, modules: 0, runs: 0, registers: 0, memory: 0, faults: 0, controls: 0};
 const paths = [
-  'engine/src/cpu/x86/segments/descriptors.rs', 'engine/src/cpu/x86/decode/segment_queries.rs', 'engine/src/cpu/x86/decode/decoder.rs',
-  'engine/src/cpu/x86/ir.rs', 'engine/src/cpu/dbt/region.rs', 'engine/src/cpu/dbt/wasm/memory.rs', 'engine/src/cpu/dbt/wasm/memory/narrow.rs',
-  'engine/src/cpu/dbt/wasm/segments.rs', 'engine/src/cpu/dbt/wasm/segment_queries.rs', 'engine/src/cpu/dbt/wasm/integer/dispatch.rs',
+  'engine/src/cpu/x86/segments/descriptors.rs', 'engine/src/cpu/x86/decode/segment_queries.rs', 'engine/src/cpu/x86/decode/decoder.rs', 'engine/src/cpu/x86/decode/instruction.rs',
+  'engine/src/cpu/x86/ir.rs', 'engine/src/cpu/dbt/region.rs', 'engine/src/cpu/dbt/wasm/imports/mod.rs', 'engine/src/cpu/dbt/wasm/imports/binding.rs', 'engine/src/cpu/dbt/wasm/imports/context.rs', 'engine/src/cpu/dbt/wasm/imports/needs.rs', 'engine/src/cpu/dbt/wasm/helpers/protocol.rs', 'engine/src/cpu/dbt/wasm/instructions/memory/mod.rs', 'engine/src/cpu/dbt/wasm/instructions/memory/address.rs', 'engine/src/cpu/dbt/wasm/instructions/memory/scalar.rs', 'engine/src/cpu/dbt/wasm/instructions/memory/stack.rs', 'engine/src/cpu/dbt/wasm/instructions/memory/narrow.rs',
+  'engine/src/cpu/dbt/wasm/instructions/segments.rs', 'engine/src/cpu/dbt/wasm/instructions/segment_queries.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch.rs',
   'engine/src/process/cpu/integer.rs', 'engine/src/process/cpu/segment_queries.rs',
   'engine/tests/cpu/segments/selectors/verify/native.rs', 'engine/tests/cpu/segments/selectors/verify/wasm.rs', 'engine/tests/cpu/segments/selectors/verify/fixtures/p2-segment-queries/runtime/run.mjs', 'engine/tests/support/wasm/binding.mjs',
 ];

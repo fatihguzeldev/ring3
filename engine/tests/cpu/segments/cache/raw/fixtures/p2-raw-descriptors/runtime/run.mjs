@@ -14,9 +14,9 @@ const counts = {contexts: 0, modules: 0, runs: 0, loads: 0, queries: 0, controls
 const sourcePaths = [...new Set([...exportSources, 'engine/tests/support/wasm/engine.mjs', 'engine/tests/support/wasm/binding.mjs',
   'engine/src/cpu/x86/segments/descriptor_record.rs', 'engine/src/cpu/x86/segments/descriptors.rs',
   'engine/src/cpu/x86/segments/cache.rs', 'engine/src/abi/x86/segments.rs', 'engine/src/process/cpu/segments.rs',
-  'engine/src/process/wasm/cpu.rs', 'engine/src/process/wasm/mod.rs', 'engine/src/cpu/dbt/wasm/segments.rs', 'engine/src/cpu/dbt/wasm/segments/context.rs',
+  'engine/src/process/wasm/cpu.rs', 'engine/src/process/wasm/mod.rs', 'engine/src/cpu/dbt/wasm/instructions/segments.rs', 'engine/src/cpu/dbt/wasm/instructions/segments/context.rs',
   'engine/src/process/cpu/segment_queries.rs', 'engine/src/process/cpu/integer.rs',
-  'engine/src/cpu/dbt/wasm/segment_queries.rs',
+  'engine/src/cpu/dbt/wasm/instructions/segment_queries.rs',
   'engine/tests/cpu/segments/cache/raw/wasm.rs', 'engine/tests/cpu/segments/wasm.rs', 'engine/tests/support/wasm.rs',
   'engine/tests/cpu/segments/cache/raw/fixtures/p2-raw-descriptors/runtime/run.mjs'])];
 const pins = () => Object.fromEntries(sourcePaths.map(path => [path, createHash('sha256').update(readFileSync(join(root, path))).digest('hex')]));

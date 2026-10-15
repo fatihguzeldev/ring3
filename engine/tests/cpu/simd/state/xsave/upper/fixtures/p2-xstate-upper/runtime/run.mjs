@@ -23,7 +23,7 @@ const sourcePaths = ['engine/tests/support/wasm/page-fault.mjs', 'engine/tests/s
   'engine/src/abi/x86/exit.rs', 'engine/src/abi/x86/mod.rs', 'engine/src/abi/header.rs', 'engine/src/abi/x86/ymm.rs', 'engine/src/abi/arena.rs', 'engine/src/process/cpu/xstate.rs',
   'engine/src/process/cpu/xstate/upper.rs', 'engine/src/cpu/x86/segments/cache.rs', 'engine/src/abi/x86/segments.rs', 'engine/src/process/wasm/mod.rs', 'engine/src/process/cpu/segments.rs', 'engine/src/process/wasm/xstate.rs',
   'engine/src/process/execution/authority.rs', 'engine/src/process/memory/span.rs', 'engine/src/memory/space.rs', 'engine/src/memory/space/atomic.rs',
-  'engine/src/cpu/dbt/wasm/xstate.rs', 'engine/src/cpu/dbt/wasm/cpu_result.rs',
+  'engine/src/cpu/dbt/wasm/instructions/xstate.rs', 'engine/src/cpu/dbt/wasm/helpers/result.rs',
 ])];
 const pins = () => Object.fromEntries(sourcePaths.map(path => [path, hash(readFileSync(join(root, path)))]));
 const sources = pins(), rows = [], frames = [], modules = [];
