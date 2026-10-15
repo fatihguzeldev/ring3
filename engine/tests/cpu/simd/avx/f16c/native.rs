@@ -114,7 +114,7 @@ fn numerical_store_preflights_write_authority_before_sticky_publication() {
         .copy_from_slice(b"R3AM\x01\0\x01\0\x18\0\0\0\0\0\0\0\x03\0\0\0\xfc\x5f\0\0");
     let before = engine.arena().to_vec();
     let mut expected = before.clone();
-    expected[HELPER_OFFSET..HELPER_OFFSET + 40].copy_from_slice(b"R3MH\x07\0\x01\0\x28\0\0\0\0\0\0\0\x01\0\0\0\0\0\0\0\x01\0\0\0\0\x60\0\0\x02\0\0\0\x10\0\0\0");
+    expected[HELPER_OFFSET..HELPER_OFFSET + 40].copy_from_slice(b"R3MH\x0f\0\x01\0\x28\0\0\0\0\0\0\0\x09\0\0\0\0\0\0\0\x06\0\0\0\0\x60\0\0\x02\0\0\0\x10\0\0\0");
     assert_eq!(
         engine.avx_execute(0x0100_1204, 1 << 6 | 1 << 13, 0, 0, 0, 2),
         Ok(StoreCompletion::Complete)

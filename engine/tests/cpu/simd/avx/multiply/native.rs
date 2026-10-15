@@ -1,3 +1,6 @@
+#[path = "../../../../support/cpu/fetch/native.rs"]
+mod fetch_fault;
+
 use ring3_engine::{
     abi::{
         arena::{ARENA_SIZE, HELPER_OFFSET, SIMD_OFFSET, TRANSFER_OFFSET, YMM_OFFSET},
@@ -9,9 +12,7 @@ use ring3_engine::{
         ir::Operation,
         simd::{SimdState, ymm::YmmUpperState},
     },
-    memory::{
-        Access, AddressSpace, FaultReason, GuestAddress, MemoryFault, PageRange, Permissions,
-    },
+    memory::{AddressSpace, FaultReason, GuestAddress, PageRange, Permissions},
     process::{EngineInstance, HostError, StoreCompletion},
 };
 
@@ -157,7 +158,8 @@ fn expected(before: &[u8], output: Option<(usize, [u8; 32])>, fields: [u32; 6]) 
     }
     let packet = &mut expected[HELPER_OFFSET..HELPER_OFFSET + 40];
     packet.fill(0);
-    packet[..12].copy_from_slice(&[b'R', b'3', b'M', b'H', 7, 0, 1, 0, 40, 0, 0, 0]);
+    let version = if fields[0] == 9 { 15 } else { 7 };
+    packet[..12].copy_from_slice(&[b'R', b'3', b'M', b'H', version, 0, 1, 0, 40, 0, 0, 0]);
     for (index, field) in fields.into_iter().enumerate() {
         packet[16 + index * 4..20 + index * 4].copy_from_slice(&field.to_le_bytes());
     }
@@ -379,7 +381,7 @@ fn wide_memory_reads_exact32_before_any_result_publication() {
     upload(&mut engine, 0x5fe0, &operand);
     let before_ram = ram(&engine);
     for &(_, _, kind) in FORMS {
-        for (address, status, fault) in [(0x5fe0, 0, 0), (0x5fe1, 1, 0x6000), (0xffffffff, 3, 0)] {
+        for (address, status, fault) in [(0x5fe0, 0, 0), (0x5fe1, 9, 0x6000), (0xffffffff, 3, 0)] {
             let vectors = std::array::from_fn(|r| pattern(r, 0));
             let value = oracle(kind, &vectors[1], &operand);
             let mut before = seeded(&engine, &vectors);
@@ -388,9 +390,9 @@ fn wide_memory_reads_exact32_before_any_result_publication() {
             let fields = [
                 status,
                 0,
-                u32::from(status == 1),
+                if status == 9 { 4 } else { 0 },
                 fault,
-                u32::from(status == 1),
+                u32::from(status == 9),
                 32,
             ];
             let expected = expected(&before, (status == 0).then_some((1, value)), fields);
@@ -419,17 +421,12 @@ fn full_capture_and_page_last_fetch_do_not_access_operand_ram() {
             assert_eq!(engine.compile(1), Ok(1));
             assert_eq!(engine.arena(), before);
             assert!(decode(&encoded, 0x1ffb).is_ok());
-            assert_eq!(
-                decode(&encoded[..4], 0x1ffc),
-                Err(DecodeError::MemoryFault {
-                    pc: GuestAddress(0x1ffc),
-                    fault: MemoryFault {
-                        address: GuestAddress(0x2000),
-                        access: Access::Execute,
-                        reason: FaultReason::Unmapped
-                    },
-                    length: 5,
-                })
+            fetch_fault::assert_error(
+                decode(&encoded[..4], 0x1ffc).unwrap_err(),
+                0x1ffc,
+                0x2000,
+                FaultReason::Unmapped,
+                5,
             );
         }
     }

@@ -38,11 +38,23 @@ fn checked_encoder_preserves_literal_descriptor_and_rejects_invalid_shapes() {
     let operation = vector_move();
     let descriptor = operation.descriptor().unwrap();
     assert_eq!(descriptor, (0x3400, 0x0908, 0));
-    assert_eq!(simd::decode_descriptor(descriptor.0, descriptor.1, descriptor.2), Ok(operation));
+    assert_eq!(
+        simd::decode_descriptor(descriptor.0, descriptor.1, descriptor.2),
+        Ok(operation)
+    );
     for invalid in [
-        SimdOperation { vector_bytes: 3, ..operation },
-        SimdOperation { destination: SimdOperand::Register(SimdRegister::Xmm(8)), ..operation },
-        SimdOperation { immediate: Some(1), ..operation },
+        SimdOperation {
+            vector_bytes: 3,
+            ..operation
+        },
+        SimdOperation {
+            destination: SimdOperand::Register(SimdRegister::Xmm(8)),
+            ..operation
+        },
+        SimdOperation {
+            immediate: Some(1),
+            ..operation
+        },
     ] {
         assert_eq!(invalid.descriptor(), Err(SimdError::InvalidDescriptor));
     }

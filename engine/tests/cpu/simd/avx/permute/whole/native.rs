@@ -175,9 +175,10 @@ fn expected(
     }
     let packet = &mut result[HELPER_OFFSET..HELPER_OFFSET + 40];
     packet.fill(0);
-    packet[..12].copy_from_slice(&[b'R', b'3', b'M', b'H', 7, 0, 1, 0, 40, 0, 0, 0]);
+    let version = if fault { 15 } else { 7 };
+    packet[..12].copy_from_slice(&[b'R', b'3', b'M', b'H', version, 0, 1, 0, 40, 0, 0, 0]);
     let fields = if fault {
-        [1, 0, 1, 0x5000, 1, length]
+        [9, 0, 4, 0x5000, 1, length]
     } else {
         [0, 0, 0, 0, 0, length]
     };

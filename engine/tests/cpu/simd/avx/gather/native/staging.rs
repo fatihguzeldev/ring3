@@ -206,7 +206,8 @@ fn frame(
 
 fn packet(fields: [u32; 6]) -> [u8; 40] {
     let mut packet = [0; 40];
-    packet[..12].copy_from_slice(&[b'R', b'3', b'G', b'H', 1, 0, 1, 0, 40, 0, 0, 0]);
+    let version = if fields[0] == 9 { 2 } else { 1 };
+    packet[..12].copy_from_slice(&[b'R', b'3', b'G', b'H', version, 0, 1, 0, 40, 0, 0, 0]);
     for (index, field) in fields.into_iter().enumerate() {
         packet[16 + index * 4..20 + index * 4].copy_from_slice(&field.to_le_bytes());
     }
@@ -414,7 +415,7 @@ fn partial_faults_stage_a_completed_prefix_and_normalize_every_pending_mask() {
         );
         assert_eq!(
             engine.arena(),
-            expected(&before, &output, &mask, [1, 1, 0x7000, 1, 1, 1])
+            expected(&before, &output, &mask, [9, 4, 0x7000, 1, 1, 1])
         );
         assert_eq!(ram(&engine), before_ram);
     }
@@ -431,7 +432,7 @@ fn lower_page_fault_wins_over_a_higher_segment_fault_and_each_lane_has_exact_wid
                 0x7fff,
                 0x6000,
                 0x2000,
-                [1, 1, 0x6000, 1, 0, 0],
+                [9, 4, 0x6000, 1, 0, 0],
             ),
             (SegmentRegister::Ds, 0x5fff, 0x6000, 0, [3, 0, 0, 0, 0, 0]),
             (SegmentRegister::Ss, 0x5fff, 0x6000, 0, [7, 0, 0, 0, 0, 0]),
@@ -484,7 +485,7 @@ fn lower_page_fault_wins_over_a_higher_segment_fault_and_each_lane_has_exact_wid
         );
         assert_eq!(
             engine.arena(),
-            expected(&before, &output, &mask, [1, 1, 0x6000, 1, 0, 0])
+            expected(&before, &output, &mask, [9, 4, 0x6000, 1, 0, 0])
         );
         assert_eq!(ram(&engine), before_ram);
     }

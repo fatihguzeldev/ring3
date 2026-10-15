@@ -252,7 +252,11 @@ fn seed(engine: &mut EngineInstance, address: u32, bytes: &[u8]) {
 
 fn assert_packet(engine: &EngineInstance, status: u32, detail: u32, address: u32, access: u32) {
     let p = &engine.arena()[HELPER_OFFSET..HELPER_OFFSET + 40];
-    assert_eq!(&p[..4], b"R3MH");
+    let version = if status == 9 { 15 } else { 7 };
+    assert_eq!(
+        &p[..12],
+        &[b'R', b'3', b'M', b'H', version, 0, 1, 0, 40, 0, 0, 0]
+    );
     for (offset, value) in [
         (16, status),
         (20, 0),
@@ -340,7 +344,8 @@ fn xstate_alignment_header_read_and_late_write_faults_are_atomic() {
         .read(GuestAddress(0x2e00), &mut before)
         .unwrap();
     engine.cpu_xsave(0x2e00, 3, 0).unwrap();
-    assert_packet(&engine, 1, 1, 0x3000, 1);
+    // the header read is part of xsave's read/modify/write, so faults carry write intent.
+    assert_packet(&engine, 9, 6, 0x3000, 2);
     let mut after = [0; 512];
     engine
         .memory()
@@ -351,7 +356,7 @@ fn xstate_alignment_header_read_and_late_write_faults_are_atomic() {
     engine.map(0x3000, 1, 3).unwrap();
     engine.protect(0x3000, 1, 1).unwrap();
     engine.cpu_xsave(0x2e00, 3, 0).unwrap();
-    assert_packet(&engine, 1, 2, 0x3000, 2);
+    assert_packet(&engine, 9, 7, 0x3000, 2);
     engine
         .memory()
         .unwrap()
@@ -360,10 +365,10 @@ fn xstate_alignment_header_read_and_late_write_faults_are_atomic() {
     assert_eq!(after, before);
     engine.protect(0x3000, 1, 2).unwrap();
     engine.cpu_xsave(0x2e00, 0, 0).unwrap();
-    assert_packet(&engine, 1, 2, 0x3000, 1);
+    assert_packet(&engine, 9, 7, 0x3000, 2);
     engine.cpu_xsave(0xffff_fe00, 0, 0).unwrap();
     // the selected header starts at (FFFFFE00 + 512) mod2^32 = 0.
-    assert_packet(&engine, 1, 1, 0, 1);
+    assert_packet(&engine, 9, 6, 0, 2);
 }
 
 #[test]

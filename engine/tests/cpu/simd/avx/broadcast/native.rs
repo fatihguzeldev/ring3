@@ -1,3 +1,6 @@
+#[path = "../../../../support/cpu/fetch/native.rs"]
+mod fetch_fault;
+
 use ring3_engine::{
     abi::{
         arena::{ARENA_SIZE, HELPER_OFFSET, SIMD_OFFSET, TRANSFER_OFFSET, YMM_OFFSET},
@@ -9,9 +12,7 @@ use ring3_engine::{
         ir::Operation,
         simd::{SimdState, ymm::YmmUpperState},
     },
-    memory::{
-        Access, AddressSpace, FaultReason, GuestAddress, MemoryFault, PageRange, Permissions,
-    },
+    memory::{AddressSpace, FaultReason, GuestAddress, PageRange, Permissions},
     process::{EngineInstance, HostError, StoreCompletion},
 };
 
@@ -246,7 +247,8 @@ fn expected(before: &[u8], output: Option<(usize, [u8; 32])>, fields: [u32; 6]) 
     }
     let packet = &mut expected[HELPER_OFFSET..HELPER_OFFSET + 40];
     packet.fill(0);
-    packet[..12].copy_from_slice(&[b'R', b'3', b'M', b'H', 7, 0, 1, 0, 40, 0, 0, 0]);
+    let version = if fields[0] == 9 { 15 } else { 7 };
+    packet[..12].copy_from_slice(&[b'R', b'3', b'M', b'H', version, 0, 1, 0, 40, 0, 0, 0]);
     for (index, field) in fields.into_iter().enumerate() {
         packet[16 + index * 4..20 + index * 4].copy_from_slice(&field.to_le_bytes());
     }
@@ -364,12 +366,12 @@ fn memory_helpers_read_exact_elements_and_publish_no_partial_fault_result() {
             (end, 0, 0),
             (
                 0xffffffff,
-                if form.bytes == 1 { 1 } else { 3 },
+                if form.bytes == 1 { 9 } else { 3 },
                 if form.bytes == 1 { 0xffffffff } else { 0 },
             ),
         ]
         .into_iter()
-        .chain((form.bytes > 1).then_some((end + 1, 1, 0x6000)))
+        .chain((form.bytes > 1).then_some((end + 1, 9, 0x6000)))
         {
             let vectors = std::array::from_fn(|r| [0x91 + r as u8; 32]);
             let mut before = seeded(&engine, &vectors);
@@ -383,9 +385,9 @@ fn memory_helpers_read_exact_elements_and_publish_no_partial_fault_result() {
             let fields = [
                 status,
                 0,
-                u32::from(status == 1),
+                if status == 9 { 4 } else { 0 },
                 fault,
-                u32::from(status == 1),
+                u32::from(status == 9),
                 form.bytes as u32,
             ];
             let expected = expected(&before, output, fields);
@@ -424,17 +426,12 @@ fn complete_capture_and_fetch_faults_use_only_instruction_authority() {
             assert!(decode(&encoded, 0x2000 - encoded.len() as u32).is_ok());
             for length in 1..encoded.len() {
                 let pc = 0x2000 - length as u32;
-                assert_eq!(
-                    decode(&encoded[..length], pc),
-                    Err(DecodeError::MemoryFault {
-                        pc: GuestAddress(pc),
-                        fault: MemoryFault {
-                            address: GuestAddress(0x2000),
-                            access: Access::Execute,
-                            reason: FaultReason::Unmapped
-                        },
-                        length: length as u32 + 1,
-                    })
+                fetch_fault::assert_error(
+                    decode(&encoded[..length], pc).unwrap_err(),
+                    pc,
+                    0x2000,
+                    FaultReason::Unmapped,
+                    length as u32 + 1,
                 );
             }
         }

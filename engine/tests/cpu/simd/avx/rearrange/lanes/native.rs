@@ -228,7 +228,8 @@ fn helper_engine() -> (EngineInstance, u64) {
 fn packet(expected: &mut [u8], fields: [u32; 6]) {
     let output = &mut expected[HELPER_OFFSET..HELPER_OFFSET + 40];
     output.fill(0);
-    output[..12].copy_from_slice(&[b'R', b'3', b'M', b'H', 7, 0, 1, 0, 40, 0, 0, 0]);
+    let version = if fields[0] == 9 { 15 } else { 7 };
+    output[..12].copy_from_slice(&[b'R', b'3', b'M', b'H', version, 0, 1, 0, 40, 0, 0, 0]);
     for (index, field) in fields.into_iter().enumerate() {
         output[16 + index * 4..20 + index * 4].copy_from_slice(&field.to_le_bytes());
     }
@@ -611,7 +612,7 @@ fn ymm_memory_helpers_check_full_thirty_two_bytes_before_any_vector_publication(
                 let before = engine.arena().to_vec();
                 let expected = if fault {
                     let mut expected = before;
-                    packet(&mut expected, [1, 0, 1, 0x6000, 1, 32]);
+                    packet(&mut expected, [9, 0, 4, 0x6000, 1, 32]);
                     expected
                 } else {
                     success(

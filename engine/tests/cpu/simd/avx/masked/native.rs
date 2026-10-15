@@ -297,7 +297,7 @@ fn shared_helpers_preserve_raw_selected_values_and_atomic_faults_while_avx2_is_o
                 let mut expected = before;
                 let fault = scenario >= 3;
                 let status: u32 = if scenario == 3 {
-                    1
+                    9
                 } else if scenario == 4 {
                     3
                 } else if scenario == 5 {
@@ -306,15 +306,16 @@ fn shared_helpers_preserve_raw_selected_values_and_atomic_faults_while_avx2_is_o
                     0
                 };
                 expected[HELPER_OFFSET..HELPER_OFFSET + 40].fill(0);
+                let version = if scenario == 3 { 15 } else { 7 };
                 expected[HELPER_OFFSET..HELPER_OFFSET + 12]
-                    .copy_from_slice(&[b'R', b'3', b'M', b'H', 7, 0, 1, 0, 40, 0, 0, 0]);
+                    .copy_from_slice(&[b'R', b'3', b'M', b'H', version, 0, 1, 0, 40, 0, 0, 0]);
                 expected[HELPER_OFFSET + 16..HELPER_OFFSET + 20]
                     .copy_from_slice(&status.to_le_bytes());
                 expected[HELPER_OFFSET + 36..HELPER_OFFSET + 40]
                     .copy_from_slice(&(form.width as u32).to_le_bytes());
                 if scenario == 3 {
                     expected[HELPER_OFFSET + 24..HELPER_OFFSET + 28]
-                        .copy_from_slice(&1_u32.to_le_bytes());
+                        .copy_from_slice(&(if form.store { 6_u32 } else { 4 }).to_le_bytes());
                     expected[HELPER_OFFSET + 28..HELPER_OFFSET + 32]
                         .copy_from_slice(&0x6000_u32.to_le_bytes());
                     expected[HELPER_OFFSET + 32..HELPER_OFFSET + 36]

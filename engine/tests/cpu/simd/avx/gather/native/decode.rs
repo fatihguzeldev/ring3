@@ -1,11 +1,12 @@
+#[path = "../../../../../support/cpu/fetch/native.rs"]
+mod fetch_fault;
+
 use ring3_engine::{
     cpu::x86::{
         decode::{DecodeError, decode_one},
         ir::Operation,
     },
-    memory::{
-        Access, AddressSpace, FaultReason, GuestAddress, MemoryFault, PageRange, Permissions,
-    },
+    memory::{AddressSpace, FaultReason, GuestAddress, PageRange, Permissions},
 };
 
 // (data bytes, index bytes, VEX.L), independently transcribed from the opcode tables.
@@ -141,17 +142,12 @@ fn malformed_vsib_and_pairwise_aliases_refuse_before_operand_access() {
 #[test]
 fn missing_final_sib_is_a_fetch_fault_and_existing_avx_loads_stay_available() {
     let valid = bytes(GEOMETRY[0], false, 2, 0);
-    assert_eq!(
-        decode(&valid[..5], 0x1ffb),
-        Err(DecodeError::MemoryFault {
-            pc: GuestAddress(0x1ffb),
-            fault: MemoryFault {
-                address: GuestAddress(0x2000),
-                access: Access::Execute,
-                reason: FaultReason::Unmapped,
-            },
-            length: 6,
-        })
+    fetch_fault::assert_error(
+        decode(&valid[..5], 0x1ffb).unwrap_err(),
+        0x1ffb,
+        0x2000,
+        FaultReason::Unmapped,
+        6,
     );
     for ordinary in [&[0xc5, 0xf8, 0x10, 0x08][..], &[0xc5, 0xfe, 0x6f, 0x08]] {
         assert!(matches!(

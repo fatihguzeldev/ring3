@@ -306,10 +306,11 @@ fn ymm_memory_reads_all_bytes_before_publishing_an_aliased_destination() {
             let packet = &mut expected[HELPER_OFFSET..HELPER_OFFSET + 40];
             packet.fill(0);
             packet[..4].copy_from_slice(b"R3MH");
-            packet[4..8].copy_from_slice(&[7, 0, 1, 0]);
+            let version = if fault { 15 } else { 7 };
+            packet[4..8].copy_from_slice(&[version, 0, 1, 0]);
             packet[8..12].copy_from_slice(&40_u32.to_le_bytes());
             let fields = if fault {
-                [1_u32, 0, 1, 0x5000, 1, 32]
+                [9_u32, 0, 4, 0x5000, 1, 32]
             } else {
                 [0, 0, 0, 0, 0, 32]
             };

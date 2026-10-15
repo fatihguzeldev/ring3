@@ -71,7 +71,8 @@ fn helper_engine() -> (EngineInstance, u64) {
 fn packet(expected: &mut [u8], fields: [u32; 6]) {
     let output = &mut expected[HELPER_OFFSET..HELPER_OFFSET + 40];
     output.fill(0);
-    output[..12].copy_from_slice(&[b'R', b'3', b'M', b'H', 7, 0, 1, 0, 40, 0, 0, 0]);
+    let version = if fields[0] == 9 { 15 } else { 7 };
+    output[..12].copy_from_slice(&[b'R', b'3', b'M', b'H', version, 0, 1, 0, 40, 0, 0, 0]);
     for (index, field) in fields.into_iter().enumerate() {
         output[16 + index * 4..20 + index * 4].copy_from_slice(&field.to_le_bytes());
     }
@@ -207,7 +208,7 @@ fn shared_aligned_ymm_helper_remains_available_with_exact_read_alignment_and_fau
                 (0x5fe0, [0, 0, 0, 0, 0, 32]),
                 (0x5010, [3, 0, 0, 0, 0, 32]),
                 (0x5ff0, [3, 0, 0, 0, 0, 32]),
-                (0x6000, [1, 0, 1, 0x6000, 1, 32]),
+                (0x6000, [9, 0, 4, 0x6000, 1, 32]),
             ] {
                 seed(&mut engine);
                 address(&mut engine, 3, offset);
