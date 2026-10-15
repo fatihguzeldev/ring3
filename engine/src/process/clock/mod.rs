@@ -58,6 +58,13 @@ impl CpuClock {
             .map(|state| state.timestamp)
             .ok_or(HostError::Infrastructure)
     }
+
+    pub(in crate::process) fn monotonic_bounds(&self) -> Result<(u64, u64), HostError> {
+        self.state
+            .as_ref()
+            .map(|state| (state.epoch_ns, state.observed_ns))
+            .ok_or(HostError::Infrastructure)
+    }
 }
 
 impl EngineInstance {

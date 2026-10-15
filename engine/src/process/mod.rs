@@ -6,6 +6,7 @@ mod cpu;
 mod execution;
 mod instance;
 mod loading;
+mod media;
 mod memory;
 #[cfg(target_arch = "wasm32")]
 pub(crate) mod wasm;
@@ -18,3 +19,4 @@ pub use instance::{EngineInstance, HostError, StoreCompletion};
 pub use loading::modules::{
     ModuleInitializer32, ModuleInitializerKind32, ModuleOperation32, ModuleRuntimeConfig32,
 };
+pub use media::{MediaConfig, MediaError};

@@ -27,6 +27,7 @@ pub enum HostError {
     Resident(RegistryError),
     Infrastructure,
     Call(CallError),
+    Media(crate::process::media::MediaError),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -68,6 +69,8 @@ pub struct EngineInstance {
     pub(in crate::process) windows_thread: crate::windows::ThreadState32,
     pub(in crate::process) segment_descriptors: crate::cpu::x86::SegmentDescriptorTable,
     pub(in crate::process) virtual_allocations: Vec<PageRange>,
+    pub(in crate::process) media: Option<crate::process::media::MediaContexts>,
+    pub(in crate::process) media_epoch: u64,
 }
 
 impl EngineInstance {
@@ -112,6 +115,8 @@ impl EngineInstance {
             windows_thread: crate::windows::ThreadState32::default(),
             segment_descriptors: crate::cpu::x86::SegmentDescriptorTable::default(),
             virtual_allocations: Vec::new(),
+            media: None,
+            media_epoch: 0,
         })
     }
 
@@ -137,6 +142,7 @@ impl EngineInstance {
     }
 
     pub fn close(&mut self) {
+        self.media = None;
         self.cpu_clock = crate::process::clock::CpuClock::default();
         self.image_input = None;
         self.modules = crate::process::loading::modules::ModuleProcess32::default();

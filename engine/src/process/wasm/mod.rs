@@ -146,6 +146,7 @@ pub(super) fn status(error: HostError) -> u32 {
             RegistryError::CodeInvalidated => 4,
         },
         HostError::GenerationExhausted | HostError::Infrastructure => 9,
+        HostError::Media(_) => 7,
         HostError::Call(error) => match error {
             CallError::Busy => 12,
             CallError::InvalidStop => 13,
