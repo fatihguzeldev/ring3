@@ -1,3 +1,5 @@
+import {pageFaultExit,pageFaultPacket} from '../../../../../../support/wasm/page-fault.mjs';
+import {generatedImports, attachDetectionApi} from '../../../../../../support/wasm/binding.mjs';
 import {ARENA_SIZE} from '../../../../../../support/wasm/arena.mjs';
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
@@ -16,7 +18,7 @@ const sourcePaths=[
  "engine/src/cpu/x86/ir.rs","engine/src/cpu/x86/decode/flow.rs","engine/src/cpu/x86/decode/profile.rs","engine/src/cpu/dbt/region.rs",
  "engine/src/cpu/dbt/wasm/integer/arithmetic.rs", "engine/src/cpu/dbt/wasm/integer/bits.rs", "engine/src/cpu/dbt/wasm/integer/carry_rotates.rs", "engine/src/cpu/dbt/wasm/integer/decimal.rs", "engine/src/cpu/dbt/wasm/integer/dispatch.rs", "engine/src/cpu/dbt/wasm/integer/flags.rs", "engine/src/cpu/dbt/wasm/integer/mod.rs", "engine/src/cpu/dbt/wasm/integer/multiply_divide.rs", "engine/src/cpu/dbt/wasm/integer/operands.rs", "engine/src/cpu/dbt/wasm/integer/rotates.rs", "engine/src/cpu/dbt/wasm/integer/shifts.rs","engine/src/cpu/dbt/wasm/memory.rs","engine/src/cpu/dbt/wasm/emitter.rs","engine/src/cpu/dbt/wasm/locals.rs",
  "engine/src/memory/space.rs", "engine/src/memory/space/atomic.rs","engine/src/process/instance.rs", "engine/src/process/execution/compiled.rs", "engine/src/process/execution/authority.rs", "engine/src/process/memory/address_space.rs", "engine/src/process/memory/scalar.rs", "engine/src/process/memory/scalar/tests.rs", "engine/src/process/execution/mod.rs", "engine/src/process/memory/mod.rs", "engine/src/process/mod.rs","engine/src/process/execution/resident.rs",   "engine/src/process/wasm/mod.rs", "engine/src/process/wasm/loading.rs", "engine/src/abi/image.rs", "engine/src/process/wasm/execution.rs", "engine/src/process/wasm/calls.rs", "engine/src/process/wasm/memory.rs", "engine/src/process/wasm/cpu.rs",
- "engine/tests/cpu/stack/flags/wasm/dword.rs", "engine/tests/cpu/stack/wasm.rs", "engine/tests/support/wasm.rs",  "engine/tests/cpu/stack/flags/fixtures/p2-push-flags/runtime/run.mjs","engine/tests/support/wasm/engine.mjs"];
+ "engine/tests/cpu/stack/flags/wasm/dword.rs", "engine/tests/cpu/stack/wasm.rs", "engine/tests/support/wasm.rs",  "engine/tests/cpu/stack/flags/fixtures/p2-push-flags/runtime/run.mjs","engine/tests/support/wasm/engine.mjs", 'engine/tests/support/wasm/binding.mjs','engine/tests/support/wasm/page-fault.mjs'];
 const pins=()=>Object.fromEntries(sourcePaths.map(path=>{const b=readFileSync(join(root,path));return[path,{bytes:b.length,sha256:hash(b)}];}));
 const sourcePins=pins(),frames=[],journal=[],modules=[];let contexts=0,generated=0,retired=0,pushes=0,faults=0;
 writeFileSync(join(output,"engine.wasm"),engine.bytes,{flag:"wx"});
@@ -37,20 +39,34 @@ function cpu(c){const b=arena(c);return{registers:Array.from({length:8},(_,i)=>b
 function seed(c,pc,flags,esp=RAM+0x100){const r=[0xa5812347,0x91b2c378,0x34560f10,0x4567ff00,esp,0x6789abcd,0x789a1234,0x89abcdef],b=Buffer.alloc(140);b.set(state({registers:r,pc,flags}));b.set(exit(3,0),56);b.set(helper(0xdecafbad),100);input(c,0,b,"explicit CPU seed");return cpu(c);}
 function diagnostic(c,address,value){host(c,"read32",[address],"declared current DWORD RAM");assert.deepEqual(arena(c).subarray(100,140),helper(value),"RAM diagnostic equals declared expected DWORD");}
 function run(c,budget,label,wanted,reason=1,count=1,f,raw=0,helperValue,params,exitVersion=2){const before=capture(c,"before generated "+label),expected=arena(c);
- if(raw===0){expected.set(state(wanted));expected.set(exit(reason,count,f,exitVersion),56);if(f||helperValue!==undefined)expected.set(helper(helperValue??0,f),100);}
+ if(raw===0){expected.set(state(wanted));
+   const pageFault = f ? {
+     errorCode: 6 + Number(f.detail === 2),
+     address: f.address,
+     access: 2,
+     length: 4,
+   } : null;
+   if (pageFault) {
+     assert.ok(f.detail === 1 || f.detail === 2);
+     reason = 23;
+   }
+   expected.set(pageFault?pageFaultExit({retired:count,...pageFault}):exit(reason,count,undefined,exitVersion===2?6:exitVersion),56);
+   if(f||helperValue!==undefined)expected.set(pageFault?pageFaultPacket(pageFault):record("R3MH",40,[0,helperValue??0,0,0,0,4],10),100);}
  const args=params??[c.base,c.base+56,budget,c.base+96];assert.equal(c.run(...args),raw,label);assert.deepEqual(arena(c),expected,"full4612 "+label);
  generated++;if(raw===0)retired+=count;if(f||reason===15)faults++;journal.push({context:c.ordinal,owner:c.owner,entries:c.entries,name:"run",label,budget,status:raw,args,before,after:capture(c,"after generated "+label)});}
 function push(c,label,reason=1){const old=cpu(c),next={registers:[...old.registers],pc:(old.pc+1)>>>0,flags:old.flags};next.registers[4]=(old.registers[4]-4)>>>0;
  run(c,1,label,next,reason,1,undefined,0,0);pushes++;if(reason===1)diagnostic(c,next.registers[4],old.flags&0x00fcffff);return next;}
 function open(owner,entries,mode){const instance=new WebAssembly.Instance(engine.module,{}),c={owner,entries,mode,ordinal:++contexts,memory:instance.exports.memory,api:{}};
  for(const name of ["open","close","arena_ptr","map","unmap","protect","upload","read32","compile","compile_entries","compile_resident","compile_resident_entries","generation","module_ptr","module_len","guard","guard_resident","store32","store_resident32"])c.api[name]=instance.exports["ring3_abi_v1_"+name];
+ attachDetectionApi(c.api, instance.exports);
+ for(const name of ['cpu_read32','cpu_store32','cpu_store_resident32'])c.api[name]=instance.exports['ring3_abi_v1_'+name];
  assert.equal(c.api.open(8,c.ordinal,0x52535455),0);c.base=c.api.arena_ptr()>>>0;input(c,0,initial,"full initial arena including opaque128 FP");
  for(const args of [[PC,1,7],[RAM,2,3],[0xfffff000,1,3],[0,1,3]])host(c,"map",args);
  upload(c,PC,bank);const starts=[PC,PC+16,PC+32],lengths=[3,8,8];input(c,140,words(entries?starts:starts.flatMap((pc,i)=>[pc,lengths[i]])),"three block descriptors");
  const method=owner==="resident"?(entries?"compile_resident_entries":"compile_resident"):(entries?"compile_entries":"compile");host(c,method,entries?[3,0]:[3]);
  let binding;if(owner==="resident"){const b=arena(c);binding=Object.fromEntries(["low","high","pointer","length"].map((name,i)=>[name,b.readUInt32LE(148+i*4)]));}
  else binding={generation:c.api.generation(),pointer:c.api.module_ptr()>>>0,length:c.api.module_len()>>>0};
- const bytes=Buffer.from(new Uint8Array(c.memory.buffer,binding.pointer,binding.length)),module=new WebAssembly.Module(bytes),names=[owner==="resident"?"guard_resident":"guard","read32",owner==="resident"?"store_resident32":"store32"];
+ const bytes=Buffer.from(new Uint8Array(c.memory.buffer,binding.pointer,binding.length)),module=new WebAssembly.Module(bytes),names=generatedImports({resident: owner==="resident", helpers: ["cpu_read32", owner==="resident"?"cpu_store_resident32":"cpu_store32"]}).slice(1).map(item => item.name);
  assert.deepEqual(WebAssembly.Module.imports(module),[{module:"env",name:"memory",kind:"memory"},...names.map(name=>({module:"ring3",name,kind:"function"}))]);
  c.run=new WebAssembly.Instance(module,{env:{memory:c.memory},ring3:c.api}).exports.run;const file=`${mode}-${owner}-${entries?"entries":"explicit"}.wasm`;
  writeFileSync(join(output,file),bytes,{flag:"wx"});modules.push({context:c.ordinal,owner,entries,mode,file,...binding,bytes:bytes.length,sha256:hash(bytes),imports:names});return c;}

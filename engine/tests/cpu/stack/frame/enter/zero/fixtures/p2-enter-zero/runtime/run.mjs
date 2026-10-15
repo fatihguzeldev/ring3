@@ -1,3 +1,5 @@
+import {pageFaultExit,pageFaultPacket} from '../../../../../../../../support/wasm/page-fault.mjs';
+import {generatedImports, attachDetectionApi} from '../../../../../../../../support/wasm/binding.mjs';
 import {ARENA_SIZE} from '../../../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
@@ -21,7 +23,7 @@ const paths = [
   'engine/src/process/instance.rs', 'engine/src/process/execution/compiled.rs', 'engine/src/process/execution/authority.rs', 'engine/src/process/memory/address_space.rs', 'engine/src/process/memory/scalar.rs', 'engine/src/process/memory/scalar/tests.rs', 'engine/src/process/execution/mod.rs', 'engine/src/process/memory/mod.rs', 'engine/src/process/mod.rs', 'engine/src/process/execution/resident.rs',    'engine/src/process/wasm/mod.rs', 'engine/src/process/wasm/loading.rs', 'engine/src/abi/image.rs', 'engine/src/process/wasm/execution.rs', 'engine/src/process/wasm/calls.rs', 'engine/src/process/wasm/memory.rs', 'engine/src/process/wasm/cpu.rs',
   'engine/src/cpu/x86/stack.rs', 'engine/src/cpu/x86/decode/stack.rs', 'engine/src/cpu/dbt/wasm/stack.rs', 'engine/src/process/cpu/stack.rs', 'engine/src/process/cpu/mod.rs',  'engine/src/abi/cpu_helper.rs',
   'engine/tests/cpu/stack/frame/enter/zero/native.rs', 'engine/tests/cpu/stack/native.rs',  'engine/tests/cpu/stack/frame/enter/zero/wasm.rs', 'engine/tests/cpu/stack/wasm.rs', 'engine/tests/support/wasm.rs',
-  'engine/tests/cpu/stack/frame/enter/zero/fixtures/p2-enter-zero/runtime/run.mjs', 'engine/tests/support/wasm/engine.mjs',
+  'engine/tests/cpu/stack/frame/enter/zero/fixtures/p2-enter-zero/runtime/run.mjs', 'engine/tests/support/wasm/engine.mjs', 'engine/tests/support/wasm/binding.mjs','engine/tests/support/wasm/page-fault.mjs',
 ];
 assert.equal(new Set(paths).size, paths.length);
 const sources = () => Object.fromEntries(paths.map(path => [path, hash(readFileSync(join(root, path)))]));
@@ -46,9 +48,9 @@ const exit = (reason, retired, fault, version = 2) => record('R3EX', 40,
   [reason, retired, fault?.detail ?? 0, fault?.address ?? 0, fault?.access ?? 0, fault?.segment ? 0 : fault?.width ?? 0], version);
 function helper(event, fault) {
   if (event.stack) return record('R3MH', 40, [fault?.segment ? 7 : fault ? 1 : 0, 0, fault?.detail ?? 0, fault?.address ?? 0, fault?.access ?? 0, fault ? event.width : 0], 7);
-  const version = event.width === 4 ? 1 : event.access === 1 ? 2 : 4;
+  const version=10;
   return record('R3MH', 40, [fault ? 1 : 0, fault ? 0 : event.access === 1 ? event.value : 0,
-    fault?.detail ?? 0, fault?.address ?? 0, fault?.access ?? 0, event.width === 2 || fault ? event.width : 0], version);
+    fault?.detail ?? 0, fault?.address ?? 0, fault?.access ?? 0, event.width], version);
 }
 const arena = c => Buffer.from(new Uint8Array(c.memory.buffer, c.base, SIZE));
 function input(c, offset, bytes) {
@@ -83,8 +85,22 @@ function seed(c, pc, r = registers(), flag = 0xcd7) {
 function run(c, unit, budget, next, {label, reason = 1, retired = 1, fault, events = [], status = 0} = {}) {
   const expected = arena(c);
   if (status === 0) {
-    expected.set(state(next)); expected.set(exit(reason, retired, fault, unit.exitVersion), 56);
-    if (events.length) expected.set(helper(events.at(-1), fault), 100);
+    const pageFault = fault && !fault.segment ? {
+      errorCode: (fault.access === 2 ? 6 : 4) + Number(fault.detail === 2),
+      address: fault.address,
+      access: fault.access,
+      length: fault.width,
+    } : null;
+    if (pageFault) {
+      assert.ok(fault.detail === 1 || fault.detail === 2);
+      reason = 23;
+    }
+    expected.set(state(next));
+    expected.set(
+      pageFault ? pageFaultExit({retired, ...pageFault}) : exit(reason, retired, fault, unit.exitVersion),
+      56,
+    );
+    if(events.length)expected.set(pageFault?pageFaultPacket(pageFault):helper(events.at(-1),fault),100);
     const stack = events.find(event => event.stack);
     if (stack) expected.set(words(fault ? stack.input : stack.result), 140);
   }
@@ -113,24 +129,23 @@ function compile(c, blocks) {
     : {generation: c.api.generation(), pointer: c.api.module_ptr() >>> 0, length: c.api.module_len() >>> 0};
   const bytes = Buffer.from(new Uint8Array(c.memory.buffer, binding.pointer, binding.length)), module = new WebAssembly.Module(bytes);
   const needs = name => blocks.some(b => b[name]);
-  const storeName = width => c.owner === 'resident' ? 'store_resident' + width : 'store' + width;
-  const names = [c.owner === 'resident' ? 'guard_resident' : 'guard', ...(needs('read32') ? ['read32'] : []),
-    ...(needs('store32') ? [storeName(32)] : []), ...(needs('read16') ? ['read16'] : []), ...(needs('store16') ? [storeName(16)] : []), ...(needs('stack') ? [c.owner === 'resident' ? 'stack_execute_resident' : 'stack_execute'] : [])];
+  const storeName=width=>c.owner==='resident'?'cpu_store_resident'+width:'cpu_store'+width;
+  const names = generatedImports({resident: c.owner === 'resident', helpers: [...(needs('read32') ? ['cpu_read32'] : []), ...(needs('store32') ? [storeName(32)] : []), ...(needs('read16') ? ['cpu_read16'] : []), ...(needs('store16') ? [storeName(16)] : []), ...(needs('stack') ? [c.owner === 'resident' ? 'stack_execute_resident' : 'stack_execute'] : [])]}).slice(1).map(item => item.name);
   assert.deepEqual(WebAssembly.Module.imports(module), [{module: 'env', name: 'memory', kind: 'memory'}, ...names.map(name => ({module: 'ring3', name, kind: 'function'}))]);
   assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
   const imports = {...c.api};
   for (const width of [2, 4]) {
     const bits = width * 8;
-    imports['read' + bits] = address => {
-      const status = c.api['read' + bits](address), value = arena(c).readUInt32LE(120);
+    imports['cpu_read' + bits] = address => {
+      const status = c.api['cpu_read' + bits](address), value = arena(c).readUInt32LE(120);
       c.trace.push({access: 1, width, address: address >>> 0, value}); return status;
     };
-    imports['store' + bits] = (address, value) => {
-      c.trace.push({access: 2, width, address: address >>> 0, value: value >>> 0}); return c.api['store' + bits](address, value);
+    imports['cpu_store' + bits] = (address, value) => {
+      c.trace.push({access: 2, width, address: address >>> 0, value: value >>> 0}); return c.api['cpu_store' + bits](address, value);
     };
-    imports['store_resident' + bits] = (...args) => {
+    imports['cpu_store_resident' + bits] = (...args) => {
       assert.deepEqual(args.slice(0, 4).map(n => n >>> 0), [c.id, c.keyHigh, binding.low, binding.high]);
-      c.trace.push({access: 2, width, address: args[4] >>> 0, value: args[5] >>> 0}); return c.api['store_resident' + bits](...args);
+      c.trace.push({access: 2, width, address: args[4] >>> 0, value: args[5] >>> 0}); return c.api['cpu_store_resident' + bits](...args);
     };
   }
   const stackName = c.owner === 'resident' ? 'stack_execute_resident' : 'stack_execute';
@@ -147,7 +162,7 @@ function compile(c, blocks) {
   const file = `module-${modules.length + 1}.wasm`; writeFileSync(join(output, file), bytes, {flag: 'wx'});
   modules.push({context: c.id, purpose: c.purpose, capture: c.captures, owner: c.owner, entries: c.entries, file,
     sha256: hash(bytes), imports: names, blocks: blocks.length, instructions, bytes: bytesTotal});
-  return {...binding, exitVersion: needs('stack') ? 6 : names.length > 1 ? 2 : 1, run: new WebAssembly.Instance(module, {env: {memory: c.memory}, ring3: imports}).exports.run};
+  return {...binding, exitVersion:needs('stack')||blocks.some(b=>b.read32||b.store32||b.read16||b.store16)?6:1, run: new WebAssembly.Instance(module, {env: {memory: c.memory}, ring3: imports}).exports.run};
 }
 const enterBytes = width => Buffer.from(width === 4 ? [0xc8, 0, 0, 0] : [0x66, 0xc8, 0, 0, 0]);
 const enterBlock = (pc, width) => ({pc, width, stack: true, instructions: 2, bytes: Buffer.concat([enterBytes(width), Buffer.from([0xeb, 0])])});
@@ -165,6 +180,8 @@ function open(owner, entries, purpose = 'core') {
   for (const name of ['open', 'close', 'arena_ptr', 'map', 'unmap', 'protect', 'upload', 'read8', 'read16', 'read32', 'store16', 'store32', 'store_resident16', 'store_resident32', 'stack_execute', 'stack_execute_resident',
     'compile', 'compile_entries', 'compile_resident', 'compile_resident_entries', 'generation', 'module_ptr', 'module_len', 'guard', 'guard_resident'])
     c.api[name] = instance.exports['ring3_abi_v1_' + name];
+ attachDetectionApi(c.api, instance.exports);
+ for(const name of ['cpu_read32','cpu_read16','cpu_store32','cpu_store16','cpu_store_resident32','cpu_store_resident16'])c.api[name]=instance.exports['ring3_abi_v1_'+name];
   assert.equal(c.api.open(12, c.id, c.keyHigh), 0); c.base = c.api.arena_ptr() >>> 0; input(c, 0, initial);
   if (purpose !== 'core') return c;
   for (const address of [PC, DATA, DATA + 4096, HIGH, 0xf000, 0x10000, 0xfffff000, 0, 0x8000]) map(c, address, address === PC ? 7 : 3);

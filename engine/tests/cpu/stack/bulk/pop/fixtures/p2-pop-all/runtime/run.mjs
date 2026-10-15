@@ -1,3 +1,5 @@
+import {pageFaultExit,pageFaultPacket} from '../../../../../../../support/wasm/page-fault.mjs';
+import {generatedImports, attachDetectionApi} from '../../../../../../../support/wasm/binding.mjs';
 import {ARENA_SIZE} from '../../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
@@ -22,7 +24,7 @@ const paths = [
   'engine/src/memory/space.rs', 'engine/src/memory/space/atomic.rs', 'engine/src/process/instance.rs', 'engine/src/process/execution/compiled.rs', 'engine/src/process/execution/authority.rs', 'engine/src/process/memory/address_space.rs', 'engine/src/process/memory/scalar.rs', 'engine/src/process/memory/scalar/tests.rs', 'engine/src/process/execution/mod.rs', 'engine/src/process/memory/mod.rs', 'engine/src/process/mod.rs', 'engine/src/process/execution/resident.rs',    'engine/src/process/wasm/mod.rs', 'engine/src/process/wasm/loading.rs', 'engine/src/abi/image.rs', 'engine/src/process/wasm/execution.rs', 'engine/src/process/wasm/calls.rs', 'engine/src/process/wasm/memory.rs', 'engine/src/process/wasm/cpu.rs',
   'engine/src/cpu/x86/stack.rs', 'engine/src/cpu/x86/decode/stack.rs', 'engine/src/cpu/dbt/wasm/stack.rs', 'engine/src/process/cpu/stack.rs', 'engine/src/process/cpu/mod.rs',  'engine/src/abi/cpu_helper.rs',
   'engine/tests/cpu/stack/bulk/pop/native.rs', 'engine/tests/cpu/stack/native.rs',  'engine/tests/cpu/stack/bulk/pop/wasm.rs', 'engine/tests/cpu/stack/wasm.rs', 'engine/tests/support/wasm.rs',
-  'engine/tests/cpu/stack/bulk/pop/fixtures/p2-pop-all/runtime/run.mjs', 'engine/tests/support/wasm/engine.mjs',
+  'engine/tests/cpu/stack/bulk/pop/fixtures/p2-pop-all/runtime/run.mjs', 'engine/tests/support/wasm/engine.mjs', 'engine/tests/support/wasm/binding.mjs','engine/tests/support/wasm/page-fault.mjs',
 ];
 assert.equal(new Set(paths).size, paths.length);
 const sources = () => Object.fromEntries(paths.map(path => [path, hash(readFileSync(join(root, path)))]));
@@ -95,11 +97,25 @@ function seed(c, pc, esp, flag = 0xcd7, r = registers()) {
 function run(c, module, budget, next, {label, reason = 1, retired = 1, row, bytes, fault, expectedReads = [], stackInput, status = 0} = {}) {
   const expected = arena(c);
   if (status === 0) {
-    expected.set(state(next)); expected.set(exit(reason, retired, fault, module.exitVersion), 56);
+    const pageFault = fault && !fault.segment ? {
+      errorCode: 4 + Number(fault.detail === 2),
+      address: fault.address,
+      access: 1,
+      length: fault.width,
+    } : null;
+    if (pageFault) {
+      assert.ok(fault.detail === 1 || fault.detail === 2);
+      reason = 23;
+    }
+    expected.set(state(next));
+    expected.set(
+      pageFault ? pageFaultExit({retired, ...pageFault}) : exit(reason, retired, fault, module.exitVersion),
+      56,
+    );
     if (row) {
       const original = stackInput ?? cpu(c).registers;
       expected.set(words(fault ? original : next.registers), 140);
-      expected.set(helper(row.width, fault), 100);
+      expected.set(pageFault?pageFaultPacket(pageFault):helper(row.width,fault),100);
     }
   }
   const expectedCalls = row && status === 0 ? [{control: row.width === 4 ? 2 : 3,
@@ -127,7 +143,7 @@ function compile(c, blocks) {
     : {generation: c.api.generation(), pointer: c.api.module_ptr() >>> 0, length: c.api.module_len() >>> 0};
   const bytes = Buffer.from(new Uint8Array(c.memory.buffer, binding.pointer, binding.length)), module = new WebAssembly.Module(bytes);
   const hasStack = blocks.some(b => b.width), stackName = c.owner === 'resident' ? 'stack_execute_resident' : 'stack_execute';
-  const names = [c.owner === 'resident' ? 'guard_resident' : 'guard', ...(hasStack ? [stackName] : [])];
+  const names = generatedImports({resident: c.owner === 'resident', helpers: [...(hasStack ? [stackName] : [])]}).slice(1).map(item => item.name);
   assert.deepEqual(WebAssembly.Module.imports(module), [{module: 'env', name: 'memory', kind: 'memory'}, ...names.map(name => ({module: 'ring3', name, kind: 'function'}))]);
   assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
   const file = `module-${modules.length + 1}.wasm`; writeFileSync(join(output, file), bytes, {flag: 'wx'});
@@ -155,6 +171,7 @@ function open(owner, entries) {
   for (const name of ['open', 'close', 'arena_ptr', 'map', 'unmap', 'protect', 'upload', 'read8', 'read16', 'read32', 'stack_execute', 'stack_execute_resident',
     'compile', 'compile_entries', 'compile_resident', 'compile_resident_entries', 'generation', 'module_ptr', 'module_len', 'guard', 'guard_resident'])
     c.api[name] = instance.exports['ring3_abi_v1_' + name];
+ attachDetectionApi(c.api, instance.exports);
   assert.equal(c.api.open(12, c.id, 0x504f5041), 0); c.base = c.api.arena_ptr() >>> 0; input(c, 0, initial);
   for (const [address, pages] of [[PC, 1], [DATA, 2], [HIGH, 1], [0xfffff000, 1], [0, 1], [0x8000, 1], [0xf000, 2]]) map(c, address, pages);
   const code = Buffer.alloc(0x300, 0xcc);
