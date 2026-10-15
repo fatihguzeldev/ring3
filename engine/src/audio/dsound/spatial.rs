@@ -17,19 +17,31 @@ impl Vector3 {
         self.x.is_finite() && self.y.is_finite() && self.z.is_finite()
     }
     fn dot(self, other: Self) -> f32 {
-        self.x * other.x + self.y * other.y + self.z * other.z
+        (f64::from(self.x) * f64::from(other.x)
+            + f64::from(self.y) * f64::from(other.y)
+            + f64::from(self.z) * f64::from(other.z))
+        .clamp(-f64::from(f32::MAX), f64::from(f32::MAX)) as f32
     }
     fn length(self) -> f32 {
-        self.dot(self).sqrt()
+        (f64::from(self.x).powi(2) + f64::from(self.y).powi(2) + f64::from(self.z).powi(2))
+            .sqrt()
+            .min(f64::from(f32::MAX)) as f32
     }
     fn normalized(self) -> Self {
-        let length = self.length();
+        let length =
+            (f64::from(self.x).powi(2) + f64::from(self.y).powi(2) + f64::from(self.z).powi(2))
+                .sqrt();
         if length > 0.0 {
-            self.scale(1.0 / length)
+            Self {
+                x: (f64::from(self.x) / length) as f32,
+                y: (f64::from(self.y) / length) as f32,
+                z: (f64::from(self.z) / length) as f32,
+            }
         } else {
             Self::ZERO
         }
     }
+
     fn scale(self, value: f32) -> Self {
         Self {
             x: self.x * value,
@@ -39,9 +51,12 @@ impl Vector3 {
     }
     fn sub(self, other: Self) -> Self {
         Self {
-            x: self.x - other.x,
-            y: self.y - other.y,
-            z: self.z - other.z,
+            x: (f64::from(self.x) - f64::from(other.x))
+                .clamp(-f64::from(f32::MAX), f64::from(f32::MAX)) as f32,
+            y: (f64::from(self.y) - f64::from(other.y))
+                .clamp(-f64::from(f32::MAX), f64::from(f32::MAX)) as f32,
+            z: (f64::from(self.z) - f64::from(other.z))
+                .clamp(-f64::from(f32::MAX), f64::from(f32::MAX)) as f32,
         }
     }
     fn cross(self, other: Self) -> Self {
@@ -92,7 +107,12 @@ impl Listener3D {
             || !self.top.finite()
             || self.front.length() == 0.0
             || self.top.length() == 0.0
-            || self.front.cross(self.top).length() == 0.0
+            || self
+                .front
+                .normalized()
+                .cross(self.top.normalized())
+                .length()
+                == 0.0
             || !self.distance_factor.is_finite()
             || self.distance_factor <= 0.0
             || !self.rolloff_factor.is_finite()
@@ -186,7 +206,11 @@ impl Buffer3D {
                 z: 0.0,
             }
         } else {
-            listener.top.cross(listener.front).normalized()
+            listener
+                .top
+                .normalized()
+                .cross(listener.front.normalized())
+                .normalized()
         };
         let pan = direction.dot(right).clamp(-1.0, 1.0);
         let distance_gain = if mute_at_max && distance >= self.max_distance {
@@ -218,18 +242,21 @@ impl Buffer3D {
             )
         };
         let gain = attenuation(volume) * distance_gain * cone;
-        let speed = 343.5;
-        let source =
-            self.velocity.dot(direction) * listener.distance_factor * listener.doppler_factor;
+        let speed = 343.5f64;
+        let source = f64::from(self.velocity.dot(direction))
+            * f64::from(listener.distance_factor)
+            * f64::from(listener.doppler_factor);
         let receiver = if self.mode == 1 {
             0.0
         } else {
-            listener.velocity.dot(direction) * listener.distance_factor * listener.doppler_factor
+            f64::from(listener.velocity.dot(direction))
+                * f64::from(listener.distance_factor)
+                * f64::from(listener.doppler_factor)
         };
         let ratio = ((speed + receiver).max(speed * 0.1) / (speed + source).max(speed * 0.1))
             .clamp(0.1, 10.0);
         AudioVoiceControls32 {
-            frequency: (frequency as f32 * ratio).clamp(100.0, 200_000.0) as u32,
+            frequency: (f64::from(frequency) * ratio).clamp(100.0, 200_000.0) as u32,
             gains: [gain * (1.0 - pan.max(0.0)), gain * (1.0 + pan.min(0.0))],
         }
     }

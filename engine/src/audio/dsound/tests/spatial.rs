@@ -47,3 +47,39 @@ fn deferred_listener_and_buffer_parameters_change_applied_state_only_on_commit()
     device.applied_listener = device.listener;
     assert_eq!(device.applied_listener, value);
 }
+
+#[test]
+fn extreme_finite_geometry_and_velocities_never_create_nonfinite_mixer_controls() {
+    let listener = Listener3D {
+        position: Vector3 {
+            x: -f32::MAX,
+            y: 0.0,
+            z: 0.0,
+        },
+        velocity: Vector3 {
+            x: f32::MAX,
+            y: 0.0,
+            z: 0.0,
+        },
+        distance_factor: f32::MAX,
+        ..Listener3D::default()
+    };
+    let source = Buffer3D {
+        position: Vector3 {
+            x: f32::MAX,
+            y: 0.0,
+            z: 0.0,
+        },
+        velocity: Vector3 {
+            x: f32::MAX,
+            y: 0.0,
+            z: 0.0,
+        },
+        ..Buffer3D::default()
+    };
+    assert!(listener.validate().is_ok());
+    assert!(source.validate().is_ok());
+    let controls = source.controls(listener, 48_000, 0, false);
+    assert!(controls.gains.iter().all(|gain| gain.is_finite()));
+    assert!((100..=200_000).contains(&controls.frequency));
+}
