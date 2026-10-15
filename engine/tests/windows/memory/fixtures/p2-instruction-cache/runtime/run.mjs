@@ -1,3 +1,4 @@
+import {attachDetectionApi, generatedImports} from '../../../../../support/wasm/binding.mjs';
 import {ARENA_SIZE} from '../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
@@ -56,7 +57,7 @@ function authoredPe() {
 }
 const image = readFileSync(join(output, 'instruction-cache.exe')); assert.deepEqual(image, authoredPe());
 save('program.bin', program); save('guest-function.bin', functionBytes); save('engine.wasm', engine.bytes);
-const sourcePaths = [...execFileSync('rg', ['--files', 'engine/src'], {cwd: root, encoding: 'utf8'}).trim().split('\n'), 'Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml', 'rust-toolchain.toml', 'engine/tests/support/loader/pe32/image.rs', 'engine/tests/loader/imports/native/v7.rs', 'engine/tests/loader/imports/native.rs', 'engine/tests/windows/memory/wasm/flush.rs', 'engine/tests/windows/memory/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/windows/memory/fixtures/p2-instruction-cache/runtime/run.mjs', 'engine/tests/support/wasm/engine.mjs'].sort();
+const sourcePaths = ['engine/tests/support/wasm/binding.mjs', ...execFileSync('rg', ['--files', 'engine/src'], {cwd: root, encoding: 'utf8'}).trim().split('\n'), 'Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml', 'rust-toolchain.toml', 'engine/tests/support/loader/pe32/image.rs', 'engine/tests/loader/imports/native/v7.rs', 'engine/tests/loader/imports/native.rs', 'engine/tests/windows/memory/wasm/flush.rs', 'engine/tests/windows/memory/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/windows/memory/fixtures/p2-instruction-cache/runtime/run.mjs', 'engine/tests/support/wasm/engine.mjs'].sort();
 const sourceMap = () => Object.fromEntries(sourcePaths.map(path => { const bytes = readFileSync(join(root, path)); return [path, {bytes: bytes.length, sha256: hash(bytes)}]; }));
 const sourcesBefore = sourceMap();
 function words(values) { const bytes = Buffer.alloc(values.length * 4); values.forEach((value, i) => bytes.writeUInt32LE(value >>> 0, i * 4)); return bytes; }
@@ -73,9 +74,9 @@ function exit(e) { const bytes = arena(e); return {version: bytes.readUInt16LE(6
 function unchanged(before, after, spans, label) { for (let i = 0; i < SIZE; i++) if (!spans.some(([start, end]) => i >= start && i < end)) assert.equal(after[i], before[i], `${label}: arena byte ${i}`); }
 function apiCall(e, name, args, spans = [], expected = 0) { const before = arena(e), status = e.api[name](...args); assert.equal(status, expected, name); unchanged(before, arena(e), spans, name); return status; }
 function transfer(e, bytes) { assert.ok(bytes.length <= 4096); new Uint8Array(e.memory.buffer).set(bytes, e.base + TRANSFER); }
-const arities = {open: 3, close: 0, arena_ptr: 0, begin_image_input: 1, append_image_input: 2, load_pe32_linked_v7_input_at: 2, start_loaded_image: 2, compile_entries: 2, compile_resident_entries: 2, generation: 0, module_ptr: 0, module_len: 0, guard: 6, guard_resident: 7, read32: 1, store32: 2, store_resident32: 6, capture_call: 5, capture_resident_call: 6, complete_windows_call: 4, complete_resident_windows_call: 5, acknowledge_resident_installation: 5, dispatcher_module: 2, guard_dispatch_entry: 5, find_installed_resident: 3, discard_installed_resident: 5, retire_stale_resident: 4, cpu_read32: 1, cpu_store32: 2, cpu_store_resident32: 6};
+const arities = {guard_detect: 6, guard_detect_resident: 7, finish_exception_detection: 12, open: 3, close: 0, arena_ptr: 0, begin_image_input: 1, append_image_input: 2, load_pe32_linked_v7_input_at: 2, start_loaded_image: 2, compile_entries: 2, compile_resident_entries: 2, generation: 0, module_ptr: 0, module_len: 0, guard: 6, guard_resident: 7, read32: 1, store32: 2, store_resident32: 6, capture_call: 5, capture_resident_call: 6, complete_windows_call: 4, complete_resident_windows_call: 5, acknowledge_resident_installation: 5, dispatcher_module: 2, guard_dispatch_entry: 5, find_installed_resident: 3, discard_installed_resident: 5, retire_stale_resident: 4, cpu_read32: 1, cpu_store32: 2, cpu_store_resident32: 6};
 function fresh(owner) {
-  const instance = new WebAssembly.Instance(engine.module, {}), api = Object.fromEntries(Object.entries(arities).map(([name, arity]) => { const fn = instance.exports[`ring3_abi_v1_${name}`]; assert.equal(typeof fn, 'function', name); assert.equal(fn.length, arity, name); return [name, fn]; }));
+  const instance = new WebAssembly.Instance(engine.module, {}), api = attachDetectionApi(Object.fromEntries(Object.entries(arities).map(([name, arity]) => { const fn = instance.exports[`ring3_abi_v1_${name}`]; assert.equal(typeof fn, 'function', name); assert.equal(fn.length, arity, name); return [name, fn]; })), instance.exports);
   const e = {owner, label: owner, api, memory: instance.exports.memory, low: 0x53800001 + contexts.length, high: 0xa5380000, units: [], compilations: 0, tokens: 0, calls: 0, retired: 0, diagnostics: 0, table: owner === 'resident' ? new WebAssembly.Table({element: 'anyfunc', initial: 8, maximum: 8}) : null};
   assert.equal(api.open(8, e.low, e.high), 0); e.base = api.arena_ptr() >>> 0; contexts.push(e);
   apiCall(e, 'begin_image_input', [image.length]); transfer(e, image); apiCall(e, 'append_image_input', [0, image.length]); transfer(e, Buffer.alloc(4096, 0xa5));
@@ -101,9 +102,9 @@ function compile(e, name, pcs, gateSpecs = [], instructions = 1, slot = 0) {
   else { unit.generation = e.api.generation(); unit.pointer = e.api.module_ptr() >>> 0; unit.length = e.api.module_len() >>> 0; assert.equal(unit.generation, e.compilations); }
   assert.ok(unit.pointer > 0 && unit.length > 8 && unit.length <= 65536 && unit.pointer + unit.length <= e.memory.buffer.byteLength);
   const bytes = Buffer.from(new Uint8Array(e.memory.buffer, unit.pointer, unit.length)), module = new WebAssembly.Module(bytes), imports = WebAssembly.Module.imports(module), ring3 = {};
-  const guard = e.table ? 'guard_resident' : 'guard', store = e.table ? 'cpu_store_resident32' : 'cpu_store32';
+  const guard = e.table ? 'guard_detect_resident' : 'guard_detect', store = e.table ? 'cpu_store_resident32' : 'cpu_store32';
   const helperNames = name.startsWith('dynamic-leaf') ? [guard, 'cpu_read32'] : [guard, 'cpu_read32', store];
-  assert.deepEqual(imports, [{module: 'env', name: 'memory', kind: 'memory'}, ...helperNames.map(name => ({module: 'ring3', name, kind: 'function'}))]);
+  assert.deepEqual(imports, generatedImports({resident: helperNames[0] === 'guard_detect_resident', helpers: helperNames.slice(1)}));
   assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
   ring3[guard] = e.api[guard];
   for (const name of ['cpu_read32', store]) ring3[name] = (...args) => {
@@ -115,7 +116,7 @@ function compile(e, name, pcs, gateSpecs = [], instructions = 1, slot = 0) {
     assert.deepEqual(after.subarray(100, 140), cpuHelperBytes(name === 'cpu_read32' ? step[2] : 0));
     helperTrace.push({context: e.label, call: e.calls + 1, unit: unit.name, name, args: args.map(x => x >>> 0), status, helper_hex: after.subarray(100, 140).toString('hex')}); return status;
   };
-  unit.run = new WebAssembly.Instance(module, {env: {memory: e.memory}, ring3}).exports.run; assert.equal(unit.run.length, 4);
+  unit.run = new WebAssembly.Instance(module, {env: {memory: e.memory}, ring3: {...(ring3), finish_exception_detection: e.api.finish_exception_detection}}).exports.run; assert.equal(unit.run.length, 4);
   if (e.table) { assert.equal(e.table.get(slot), null); e.table.set(slot, unit.run); apiCall(e, 'acknowledge_resident_installation', [e.low, e.high, unit.low, unit.high, slot], [[TRANSFER, TRANSFER + 32]]); assert.deepEqual(arena(e).subarray(TRANSFER, TRANSFER + 32), installBytes(unit)); }
   const file = `${e.label}-${e.compilations}-${name}.wasm`; save(file, bytes); e.units.push(unit); unit.active = true; e.peakUnits = Math.max(e.peakUnits ?? 0, e.units.filter(u => u.active).length); if (e.table) assert.ok(e.peakUnits <= 3); modules.push({context: e.label, name, file, generation: unit.generation ?? null, id_low: unit.low ?? null, id_high: unit.high ?? null, slot: e.table ? slot : null, entries: pcs, instructions, bytes: bytes.length, sha256: hash(bytes), imports}); return unit;
 }

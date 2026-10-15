@@ -660,21 +660,21 @@
       ]
     ],
     "replacement_phase1_imports": [
-      "guard",
+      "guard_detect",
       "read32",
       "store32"
     ],
     "replacement_phase2_imports": [
-      "guard",
+      "guard_detect",
       "read32",
       "store32",
       "read16"
     ],
     "resident_gate_imports": [
-      "guard_resident"
+      "guard_detect_resident"
     ],
     "resident_caller_imports": [
-      "guard_resident",
+      "guard_detect_resident",
       "read32",
       "store_resident32",
       "read16"

@@ -1,3 +1,4 @@
+import {attachDetectionApi, generatedImports} from '../../../../../../support/wasm/binding.mjs';
 import {assertEngineExports} from '../../../../../../support/wasm/exports.mjs';
 import {readEngine} from '../../../../../../support/wasm/engine.mjs';
 import {createArena} from '../../../../../../support/wasm/arena.mjs';
@@ -74,7 +75,7 @@ save('engine.wasm', engineBytes);
 function sourceMap() {
   const physical = execFileSync('rg', ['--files', 'engine/src'], {cwd: root, encoding: 'utf8'}).trim().split('\n').sort();
   assert.ok(physical.length > 0, 'nonempty production source manifest');
-  const paths = ['Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml', 'rust-toolchain.toml', ...physical, 'engine/tests/support/loader/pe32/image.rs', 'engine/tests/windows/memory/release/wasm/linked.rs', 'engine/tests/windows/memory/wasm.rs',  'engine/tests/support/wasm.rs',   'engine/tests/windows/memory/release/fixtures/p2-pe32-virtual-free/runtime/run.mjs'];
+  const paths = ['engine/tests/support/wasm/binding.mjs','Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml', 'rust-toolchain.toml', ...physical, 'engine/tests/support/loader/pe32/image.rs', 'engine/tests/windows/memory/release/wasm/linked.rs', 'engine/tests/windows/memory/wasm.rs',  'engine/tests/support/wasm.rs',   'engine/tests/windows/memory/release/fixtures/p2-pe32-virtual-free/runtime/run.mjs'];
   paths.push(...[...exportContract.sourcePaths, 'engine/tests/support/wasm/engine.mjs'].filter(path => !paths.includes(path)));
   assert.equal(new Set(paths).size, paths.length);
   return Object.fromEntries(paths.map(path => { const bytes = readFileSync(join(root, path)); return [path, {bytes: bytes.length, sha256: hash(bytes)}]; }));
@@ -92,7 +93,7 @@ new DataView(dataPage.buffer).setUint32(0x158, GATE + 32, true);
 const fixupPage = new Uint8Array(4096); fixupPage.set(image.subarray(0x600, 0x800));
 const gatePage = new Uint8Array(4096); gates.forEach(([pc]) => gatePage.set([0x0f, 0x0b], pc - GATE));
 const receipt = record('R3LI', 96, [BASE, 0x6000, ENTRY, 5, GATE, 3, 0, 0, ...gates.flat(), 0, 0, 0, 0, 0, 0], 5);
-const names = ['open', 'close', 'arena_ptr', 'begin_image_input', 'append_image_input', 'load_pe32_linked_v5_input_at', 'start_loaded_image', 'read32', 'compile_entries', 'compile_resident_entries', 'generation', 'module_ptr', 'module_len', 'guard', 'guard_resident', 'store32', 'store_resident32', 'capture_call', 'capture_resident_call', 'complete_windows_call', 'complete_resident_windows_call', 'cpu_read32', 'cpu_store32', 'cpu_store_resident32'];
+const names = ['guard', 'guard_resident', 'guard_detect', 'guard_detect_resident', 'finish_exception_detection', 'open', 'close', 'arena_ptr', 'begin_image_input', 'append_image_input', 'load_pe32_linked_v5_input_at', 'start_loaded_image', 'read32', 'compile_entries', 'compile_resident_entries', 'generation', 'module_ptr', 'module_len',   'store32', 'store_resident32', 'capture_call', 'capture_resident_call', 'complete_windows_call', 'complete_resident_windows_call', 'cpu_read32', 'cpu_store32', 'cpu_store_resident32'];
 const observations = [], pages = [], modules = [], rows = [], controls = [];
 let generatedCalls = 0, guestRetired = 0, captures = 0, completions = 0, hostReads = 0;
 function snapshot(ctx) { return new Uint8Array(ctx.memory.buffer).slice(ctx.base, ctx.base + ARENA); }
@@ -108,7 +109,7 @@ function request(ctx, bytes) {
   assert.deepEqual(snapshot(ctx), ctx.expected, 'host writes only literal Transfer request');
 }
 function fresh(owner, low) {
-  const instance = new WebAssembly.Instance(engineModule, {}), api = Object.fromEntries(names.map(name => [name, instance.exports[`ring3_abi_v1_${name}`]]));
+  const instance = new WebAssembly.Instance(engineModule, {}), api = attachDetectionApi(Object.fromEntries(names.map(name => [name, instance.exports[`ring3_abi_v1_${name}`]])), instance.exports);
   for (const [name, fn] of Object.entries(api)) assert.equal(typeof fn, 'function', name);
   assert.equal(api.load_pe32_linked_v5_input_at.length, 2); assert.equal(api.start_loaded_image.length, 2);
   const ctx = {owner, api, memory: instance.exports.memory, low, high: 0xa0050000, compileOrdinal: 0, expected: new Uint8Array(createArena(ARENA))};
@@ -140,11 +141,11 @@ function compile(ctx, entries, gateSpecs, name) {
   assert.ok(unit.pointer > 0 && unit.length > 8 && unit.pointer + unit.length <= ctx.memory.buffer.byteLength);
   observe(ctx, `compile-${name}`);
   const bytes = new Uint8Array(ctx.memory.buffer).slice(unit.pointer, unit.pointer + unit.length), module = new WebAssembly.Module(bytes);
-  const guard = ctx.owner === 'replacement' ? 'guard' : 'guard_resident', store = ctx.owner === 'replacement' ? 'cpu_store32' : 'cpu_store_resident32';
+  const guard = ctx.owner === 'replacement' ? 'guard_detect' : 'guard_detect_resident', store = ctx.owner === 'replacement' ? 'cpu_store32' : 'cpu_store_resident32';
   const helpers = name === 'gates' ? [] : ['cpu_read32', store];
-  assert.deepEqual(WebAssembly.Module.imports(module), [{module: 'env', name: 'memory', kind: 'memory'}, ...[guard, ...helpers].map(name => ({module: 'ring3', name, kind: 'function'}))]);
+  assert.deepEqual(WebAssembly.Module.imports(module), generatedImports({resident: (guard) === 'guard_detect_resident', helpers: [ ...helpers]}));
   assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
-  unit.run = new WebAssembly.Instance(module, {env: {memory: ctx.memory}, ring3: ctx.api}).exports.run; assert.equal(unit.run.length, 4);
+  unit.run = new WebAssembly.Instance(module, {env: {memory: ctx.memory}, ring3: {...(ctx.api), finish_exception_detection: ctx.api.finish_exception_detection}}).exports.run; assert.equal(unit.run.length, 4);
   const filename = `${ctx.owner}-${name}.wasm`; save(filename, bytes);
   modules.push({owner: ctx.owner, name, filename, helpers, key_low: ctx.low, key_high: ctx.high, generation: unit.generation ?? 0, id: unit.low ?? 0, pointer: unit.pointer, length: unit.length, sha256: hash(bytes)});
   return unit;
