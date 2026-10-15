@@ -159,6 +159,21 @@ impl Default for Buffer3D {
     }
 }
 impl Buffer3D {
+    pub fn beyond_max_distance(self, listener: Listener3D) -> bool {
+        if self.mode == 2 {
+            return false;
+        }
+        let origin = if self.mode == 1 {
+            Vector3::ZERO
+        } else {
+            listener.position
+        };
+        let x = f64::from(self.position.x) - f64::from(origin.x);
+        let y = f64::from(self.position.y) - f64::from(origin.y);
+        let z = f64::from(self.position.z) - f64::from(origin.z);
+        x * x + y * y + z * z > f64::from(self.max_distance).powi(2)
+    }
+
     pub fn validate(self) -> Result<Self, HResult> {
         if !self.position.finite()
             || !self.velocity.finite()

@@ -116,6 +116,14 @@ impl Buffer {
             .set_voice_controls(self.voice, self.controls(device))
             .map_err(Into::into)
     }
+    pub fn distance_stops_playback(&self, device: &Device) -> bool {
+        self.description.flags
+            & (BufferDescription::CONTROL_3D | BufferDescription::MUTE_AT_MAX_DISTANCE)
+            == BufferDescription::CONTROL_3D | BufferDescription::MUTE_AT_MAX_DISTANCE
+            && self
+                .applied_spatial
+                .beyond_max_distance(device.applied_listener)
+    }
     pub fn length(&self, audio: &AudioContext) -> Result<u32, HResult> {
         Ok(audio.stream_bytes(self.storage)?.len() as u32)
     }
@@ -175,6 +183,12 @@ impl Buffer {
         priority: u32,
         flags: u32,
     ) -> Result<(), HResult> {
+        self.validate_play(reserved, priority, flags)?;
+        audio
+            .play_stream(self.voice, flags & 1 != 0)
+            .map_err(Into::into)
+    }
+    pub fn validate_play(&self, reserved: u32, priority: u32, flags: u32) -> Result<(), HResult> {
         if self.lost {
             return Err(HResult::BUFFER_LOST);
         }
@@ -191,9 +205,7 @@ impl Buffer {
         if flags & 2 != 0 {
             return Err(HResult::CONTROL_UNAVAILABLE);
         }
-        audio
-            .play_stream(self.voice, flags & 1 != 0)
-            .map_err(Into::into)
+        Ok(())
     }
     pub fn set_spatial(&mut self, value: Buffer3D, apply: u32) -> Result<(), HResult> {
         if apply > 1 {
@@ -211,6 +223,6 @@ impl Buffer {
             return Ok(2);
         }
         let state = audio.voice_state(self.voice)?;
-        Ok(u32::from(state.playing) | if state.looping { 4 } else { 0 })
+        Ok(u32::from(state.playing) | if state.playing && state.looping { 4 } else { 0 })
     }
 }
