@@ -7,6 +7,7 @@ mod modules;
 mod provider;
 
 pub mod com;
+pub mod synchronization;
 pub mod user32;
 pub mod window;
 
