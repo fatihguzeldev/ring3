@@ -1,5 +1,6 @@
 mod dinput;
 mod dsound;
+mod files;
 mod synchronization;
 
 export_process_calls! {

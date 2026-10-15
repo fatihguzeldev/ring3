@@ -100,6 +100,14 @@ pub(super) fn mutate(operation: impl FnOnce(&mut EngineInstance) -> Result<(), H
 
 pub(super) fn status(error: HostError) -> u32 {
     match error {
+        HostError::File(error) => match error {
+            crate::files::FileError32::Stale => 40,
+            crate::files::FileError32::Capacity => 18,
+            crate::files::FileError32::Allocation | crate::files::FileError32::Exhausted => 9,
+            crate::files::FileError32::Busy => 12,
+            crate::files::FileError32::Unsupported => 20,
+            _ => 7,
+        },
         HostError::Closed => 5,
         HostError::ProcessExited => 21,
         HostError::InvalidRequest => 7,

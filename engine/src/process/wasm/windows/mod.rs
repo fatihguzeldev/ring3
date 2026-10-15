@@ -11,6 +11,7 @@ mod configuration;
 mod d3d8;
 mod dinput;
 mod dsound;
+mod files;
 mod synchronization;
 mod user32;
 
@@ -19,6 +20,7 @@ pub(crate) use configuration::*;
 pub(crate) use d3d8::*;
 pub(crate) use dinput::*;
 pub(crate) use dsound::*;
+pub(crate) use files::*;
 pub(crate) use synchronization::*;
 pub(crate) use user32::*;
 

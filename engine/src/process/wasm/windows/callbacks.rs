@@ -25,6 +25,7 @@ pub(crate) fn pending_windows_callback() -> u32 {
                     WindowsCallbackProvider32::D3D8 => 2,
                     WindowsCallbackProvider32::DirectSound => 3,
                     WindowsCallbackProvider32::DirectInput => 4,
+                    WindowsCallbackProvider32::Files => 5,
                 },
                 procedure: request.procedure.0,
                 count: request.count,

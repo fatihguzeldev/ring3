@@ -1,0 +1,25 @@
+export_process_calls! {
+    configure_files(length:u32);
+    mount_file(length:u32);
+    begin_file_mount(epoch_low:u32,epoch_high:u32,length:u32);
+    begin_file_environment(epoch_low:u32,epoch_high:u32,length:u32);
+    set_files_environment(epoch_low:u32,epoch_high:u32,length:u32);
+    append_file_input(epoch_low:u32,epoch_high:u32,token_low:u32,token_high:u32,offset:u32,length:u32);
+    finish_file_mount(epoch_low:u32,epoch_high:u32,token_low:u32,token_high:u32);
+    finish_file_environment(epoch_low:u32,epoch_high:u32,token_low:u32,token_high:u32);
+    abort_file_input(epoch_low:u32,epoch_high:u32,token_low:u32,token_high:u32);
+    pending_file_input();
+    files_info();
+    set_files_time(epoch_low:u32,epoch_high:u32,time_low:u32,time_high:u32);
+    pending_file_request();
+    cancel_file_request(length:u32);
+    supply_file_bytes(offset:u32,length:u32);
+    pending_file_call();
+    progress_file_io(epoch_low:u32,epoch_high:u32);
+    resume_file_call(low:u32,high:u32,token:u32);
+    cancel_file_call(low:u32,high:u32,token:u32);
+    file_overlay_entry(epoch_low:u32,epoch_high:u32,index:u32);
+    read_file_overlay_path(epoch_low:u32,epoch_high:u32,revision_low:u32,revision_high:u32,index:u32,offset:u32,length:u32);
+    read_file_overlay(epoch_low:u32,epoch_high:u32,file_low:u32,file_high:u32,revision_low:u32,revision_high:u32,offset_low:u32,offset_high:u32,length:u32);
+    acknowledge_file_overlay(epoch_low:u32,epoch_high:u32,revision_low:u32,revision_high:u32);
+}
