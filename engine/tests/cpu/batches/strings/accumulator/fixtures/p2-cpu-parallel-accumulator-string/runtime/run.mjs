@@ -100,5 +100,5 @@ assert.deepEqual(sourcePins(), beforeSources);
 const result = {status: "ok", engine: {bytes: engine.bytes.length, sha256: engine.sha256}, modules, phases, ram,
   raw: {file: "arenas.bin", frames: frames.length, bytes: raw.length, sha256: hash(raw)}, source_sha256: beforeSources,
   counts: {owners: 2, directions: 2, contexts: 4, modules: 4, generated_calls: 24, retired: 28, lodsd: 4, stosd: 4, mov_edi: 4, scasd: 4, movsd: 4, cmpsd: 4, jumps: 4, raw_frames: 48, live_ram_bytes: 56, physical_files: 8},
-  claim: "full current LODSD EAX→STOSD RAM→guest EDI reset→SCASD Read32 witness→MOVSD→CMPSD→cold, both DF directions/owners; six retained phases/context with no CPU reseed; 48 physical complete arena arenas/opaqueFP; destination/sentinel bytes are live selected Read8 diagnostics, not saved RAM pages or performance proof"};
+  claim: "full current LODSD EAX→STOSD RAM→guest EDI reset→SCASD Read32 witness→MOVSD→CMPSD→cold, both DF directions/owners; six retained phases/context with no CPU reseed; 48 physical complete arenas/opaqueFP; destination/sentinel bytes are live selected Read8 diagnostics, not saved RAM pages or performance proof"};
 writeFileSync(join(output, "result.json"), JSON.stringify(result, null, 2), {flag: "wx"}); console.log(JSON.stringify({status: result.status, counts: result.counts, output}));

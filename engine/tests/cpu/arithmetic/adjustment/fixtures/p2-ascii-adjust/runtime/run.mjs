@@ -418,7 +418,7 @@ const result = {status: 'ok', engine_sha256: engine.sha256, source_pins: sourceP
     'AAA/AAS CF=AF=adjustmentcondition and SF/ZF/PF/OF clear; AAD derivesSZP from lowbyte and clearsCF/AF/OF; undefined-flag clearing is Ring3 policy, DF/bit1 retained',
     'AAD all256 bases at four selectedAX and exhaustiveAL at four selectedAH/base pairs, all128FLAGS with identicalAX/base; not exhaustivewholeAX×allbases',
     'AAD unsigned u8 identity is native typedIR evidence: signed-vs-unsigned multiplication is congruent modulo256 and not discriminated by runtime results',
-    'complete arena arena equality preserves ownEAXhigh16/allotherGPR/helper/dirtyFP128; selected bound readonlyRAMcanaries, no guest-memoryoperand/arbitrary-hostrollback/wholeRAMsnapshot claim',
+    'complete arena equality preserves ownEAXhigh16/allotherGPR/helper/dirtyFP128; selected bound readonlyRAMcanaries, no guest-memoryoperand/arbitrary-hostrollback/wholeRAMsnapshot claim',
     'live byteADD/SUB→AAA/AAS→SETB/SETO→ADC and MOVAH/AL→AAD→SETZ/SETP/SETB/SETO→ADC have no CPU reseeding; observed per-row status/reason/retirement/PC/FLAGS/AX persisted, neutral3/4 observations null',
     'oldmain2blocks4instructions/live2blocks12instructions and2captures/context; AAD five1blockbanks64/64/64/64/5instructions plus2block18instructionlive, exactly6captures/context',
     'allcode/protections before captures; default8/64/65536/sixcapture unchanged; unbound savedmodules lack runtime sourceguard; replacement generation3 and same-byteRWX source CodeInvalidated4 are neutral',

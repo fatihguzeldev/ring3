@@ -186,7 +186,7 @@ assert.deepEqual(counts, {contexts: 6, runs: 12460, retired: 12460, flag_inputs:
   controls: 36, consumers: 60, retained: 6, invalidated: 4}); assert.equal(modules.length, 18);
 const result = {status: 'ok', engine_sha256: engine.sha256, source_pins: sourcePins, counts, modules, observations,
   limits: ['finite16 exact66 nearJcc forms in six standalone/replacement/resident explicit/entry profiles; arithmetic predicate and signed-modulo oracles plus literal truth/target anchors',
-    'all16 conditions/all128 valid FLAGS, eight GPRs and complete arena arena including dirtyFP128/helper retained; pure memory-only standalone or guard-only bound imports, ExitV1',
+    'all16 conditions/all128 valid FLAGS, eight GPRs and complete arena including dirtyFP128/helper retained; pure memory-only standalone or guard-only bound imports, ExitV1',
     'taken low16 target versus false full32 wrapping nextPC; absent/readonly successors are not Execute fetched; live CMP/JZ/WORD-JMP/ADC/SETcc uses returned state without CPU repair',
     'two banks eight blocks/eight instructions each; third bank six blocks/twelve instructions; three captures/context, all code and permissions fixed before capture',
     'native standalone source currentness checks byte retrieval; saved unbound modules have no runtime source guard; bound generation3 and codeinvalidated4 are neutral',

@@ -278,7 +278,7 @@ assert.equal(counts.controls, 8);
 assert.equal(modules.length, 60);
 const result = {status: 'ok', engine_sha256: engine.sha256, source_pins: sourcePins, counts, modules,
   limits: ['finite exact single66 WORD ADC11/SBB19 memory-destination register-source cases in four bound profiles',
-    'real read16/store16 paths; no arbitrary-host memory rollback claim', 'complete arena arena comparisons preserve FP128; selected live RAM/canary checks',
+    'real read16/store16 paths; no arbitrary-host memory rollback claim', 'complete arena comparisons preserve FP128; selected live RAM/canary checks',
     'no hardware, exhaustive ISA, throughput, browser or game claim']};
 writeFileSync(join(output, 'result.json'), JSON.stringify(result, null, 2) + '\n', {flag: 'wx'});
 console.log(JSON.stringify({status: result.status, ...counts, modules: modules.length, output}));

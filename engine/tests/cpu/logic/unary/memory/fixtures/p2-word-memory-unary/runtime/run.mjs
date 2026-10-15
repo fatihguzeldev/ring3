@@ -337,7 +337,7 @@ assert.equal(counts.neg_not_chains, 4); assert.equal(counts.controls, 8); assert
 const result = {status: 'ok', engine_sha256: engine.sha256, source_pins: sourcePins, counts, modules,
   limits: ['finite exact single66 WORD memory INC/DEC FF/0,/1 and NOT/NEG F7/2,/3 in four bound profiles',
     'real read16/store16 paths and selected RAM/canary checks; no arbitrary-host rollback claim',
-    'complete arena arena preserves FP128; NOT preserves complete admitted raw FLAGS, INC/DEC preserve CF',
+    'complete arena preserves FP128; NOT preserves complete admitted raw FLAGS, INC/DEC preserve CF',
     'changed code writes for all4; true same-byte NEG zero/minimum only, the other unary operations have no WORD fixed point',
     'no exhaustive ISA, hardware, throughput, browser or game claim']};
 writeFileSync(join(output, 'result.json'), JSON.stringify(result, null, 2) + '\n', {flag: 'wx'});

@@ -345,7 +345,7 @@ const result = {status: 'ok', engine_sha256: engine.sha256, source_pins: sourceP
     'ZF is defined by the source; destination-on-zero and PF/other arithmetic choices follow Ring3 policy, without hardware undefined-bit equality claim',
     'scanner-only memory imports guard/read16; only the declared existing-XOR live consumer additionally stores the bitmap',
     'real read16 failures and selected RAM/canary checks; readable code/data scans never store or cause SMC',
-    'complete arena arena preserves FP128; retry/current-input/live returned-index and flag consumers avoid hidden CPU reseeding',
+    'complete arena preserves FP128; retry/current-input/live returned-index and flag consumers avoid hidden CPU reseeding',
     'no exhaustive ISA, throughput, PE/browser/SDK/game or CI claim']};
 writeFileSync(join(output, 'result.json'), JSON.stringify(result, null, 2) + '\n', {flag: 'wx'});
 console.log(JSON.stringify({status: result.status, ...counts, modules: modules.length, output}));

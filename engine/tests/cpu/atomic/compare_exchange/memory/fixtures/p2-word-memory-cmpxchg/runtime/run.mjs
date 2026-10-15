@@ -334,7 +334,7 @@ const result = {status: 'ok', engine_sha256: engine.sha256, source_pins: sourceP
     'AX/source/EA aliases use old GPRs until checked store succeeds; high16 retained and sourceAX follows accumulator semantics',
     'read faults precede comparisons; equality labels on those cases describe authored inputs, no read-success claim',
     'real read16/store16 paths and selected RAM/canary checks; no arbitrary-host rollback or LOCK/thread atomicity claim',
-    'complete arena arena preserves FP128; current retry inputs and live consumers require no implicit reseed',
+    'complete arena preserves FP128; current retry inputs and live consumers require no implicit reseed',
     'no exhaustive ISA, hardware, throughput, retained PE, browser or game claim']};
 writeFileSync(join(output, 'result.json'), JSON.stringify(result, null, 2) + '\n', {flag: 'wx'});
 console.log(JSON.stringify({status: result.status, ...counts, modules: modules.length, output}));

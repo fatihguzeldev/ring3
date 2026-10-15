@@ -187,7 +187,7 @@ const result = {status: 'ok', engine_sha256: engine.sha256, source_pins: sourceP
   literal_anchors: literals, limits: ['finite exact27/2F pure six-profile proof; exhaustiveAL256×AF/CF4 per form/profile plus all128 admittedFLAGS at selected thresholds',
     'independent closed-form corrections preserve DAS low borrow and use original AL/CF; literal anchors distinguish DAA high-false CF reset and original-byte high conditions',
     'OF deterministic clear is Ring3 undefined-flag policy; SF/ZF/PF derive from final byte, DF/bit1 and EAX high24/allotherGPR/helper/dirtyFP128 retained',
-    'complete arena arena equality and selected bound readonly RAM canaries; no guest memory operand, generated helper, arbitrary-host rollback or wholeRAM snapshot claim',
+    'complete arena equality and selected bound readonly RAM canaries; no guest memory operand, generated helper, arbitrary-host rollback or wholeRAM snapshot claim',
     'live real byteADD/SUB→adjust→SETB/SETO→ADC has no CPU reseeding; observed per-row status/reason/retirement/PC/FLAGS are persisted and neutral3/4 observations are null',
     'two blocks/four instructions main and two blocks/twelve instructions live, two captures/context; allcode/protections before captures; default8/64/65536/sixcapture unchanged',
     'unbound saved modules have no runtime source guard; bound replacement generation3 and same-byte RWX source CodeInvalidated4 are neutral; helper trace empty by exact pure imports',

@@ -312,7 +312,7 @@ const result = {status: 'ok', engine_sha256: engine.sha256, source_pins: sourceP
     'ADD16 ignores incoming carry and defines CF/PF/AF/ZF/SF/OF while retaining DF',
     'source.low16 receives old memory only after checked store; high16 and other GPRs retain authored values',
     'real read16/store16 paths and selected RAM/canary checks; no arbitrary-host rollback or LOCK/thread atomicity claim',
-    'complete arena arena preserves FP128; effective address uses old source and explicit retry consumes current inputs',
+    'complete arena preserves FP128; effective address uses old source and explicit retry consumes current inputs',
     'no exhaustive ISA, hardware, throughput, retained PE, browser or game claim']};
 writeFileSync(join(output, 'result.json'), JSON.stringify(result, null, 2) + '\n', {flag: 'wx'});
 console.log(JSON.stringify({status: result.status, ...counts, modules: modules.length, output}));
