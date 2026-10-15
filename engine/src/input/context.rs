@@ -9,6 +9,7 @@ use super::{
 };
 
 pub struct InputContext {
+    source: super::source::InputSource32,
     pub(super) epoch: u64,
     clock_epoch_ns: u64,
     limits: InputLimits,
@@ -17,6 +18,7 @@ pub struct InputContext {
     state: InputState,
     physical: PhysicalInput32,
     window_flags: Option<(bool, bool)>,
+    mirror_window_events: bool,
     focus_generation: u64,
     capture_generation: u64,
     pub(super) queue: Box<[InputRecord]>,
@@ -43,6 +45,11 @@ impl InputContext {
             .map_err(|_| InputError::Allocation)?;
         queue.resize(limits.queue_events, InputRecord::default());
         Ok(Self {
+            source: super::source::InputSource32::new(
+                session_epoch,
+                clock_epoch_ns,
+                limits.queue_events,
+            )?,
             epoch: session_epoch,
             clock_epoch_ns,
             limits,
@@ -51,6 +58,7 @@ impl InputContext {
             state: InputState::default(),
             physical: PhysicalInput32::default(),
             window_flags: None,
+            mirror_window_events: true,
             focus_generation: 0,
             capture_generation: 0,
             queue: queue.into_boxed_slice(),
@@ -65,6 +73,10 @@ impl InputContext {
 
     pub fn state(&self) -> &InputState {
         &self.state
+    }
+
+    pub fn source(&self) -> &super::source::InputSource32 {
+        &self.source
     }
 
     pub fn queued_events(&self) -> usize {
@@ -85,11 +97,33 @@ impl InputContext {
         sequence: u64,
         events: &[TimedInputEvent],
     ) -> Result<(), InputError> {
-        self.submit_events(epoch, sequence, events.iter().copied())
+        self.submit_events(epoch, sequence, events.iter().copied(), true)
     }
 
     pub fn submit_encoded(&mut self, batch: &EncodedBatch<'_>) -> Result<(), InputError> {
-        self.submit_events(batch.session_epoch(), batch.sequence(), batch.events())
+        self.submit_events(
+            batch.session_epoch(),
+            batch.sequence(),
+            batch.events(),
+            true,
+        )
+    }
+
+    pub fn submit_windows_batch(
+        &mut self,
+        epoch: u64,
+        sequence: u64,
+        events: &[TimedInputEvent],
+    ) -> Result<(), InputError> {
+        self.submit_events(epoch, sequence, events.iter().copied(), false)
+    }
+    pub fn submit_windows_encoded(&mut self, batch: &EncodedBatch<'_>) -> Result<(), InputError> {
+        self.submit_events(
+            batch.session_epoch(),
+            batch.sequence(),
+            batch.events(),
+            false,
+        )
     }
 
     fn submit_events(
@@ -97,6 +131,7 @@ impl InputContext {
         epoch: u64,
         sequence: u64,
         events: impl ExactSizeIterator<Item = TimedInputEvent> + Clone,
+        mirror: bool,
     ) -> Result<(), InputError> {
         if epoch != self.epoch {
             return Err(InputError::StaleSession);
@@ -107,13 +142,18 @@ impl InputContext {
         if events.len() == 0 || events.len() > self.limits.batch_events {
             return Err(InputError::InvalidCount);
         }
+        self.source.check_physical(events.clone())?;
         let mut state = self.state;
         let mut focus_generation = self.focus_generation;
         let mut capture_generation = self.capture_generation;
         let mut timestamp_ns = self.timestamp_ns;
         let mut physical = self.physical;
         let mut required = 0;
-        let available = self.queue.len() - self.length;
+        let available = if mirror {
+            self.queue.len() - self.length
+        } else {
+            usize::MAX
+        };
         for event in events.clone() {
             if event.timestamp_ns < self.clock_epoch_ns || event.timestamp_ns < timestamp_ns {
                 return Err(InputError::TimeOrder);
@@ -135,6 +175,9 @@ impl InputContext {
             )?;
             timestamp_ns = event.timestamp_ns;
         }
+        self.source
+            .publish_physical(events.clone())
+            .expect("source and legacy input were preflighted together");
         let mut published_state = self.state;
         let mut published_focus = self.focus_generation;
         let mut published_capture = self.capture_generation;
@@ -149,11 +192,13 @@ impl InputContext {
                 window_flags,
                 event,
                 |event, origin| {
-                    self.push(InputRecord {
-                        batch_sequence: sequence,
-                        event,
-                        origin,
-                    });
+                    if mirror {
+                        self.push(InputRecord {
+                            batch_sequence: sequence,
+                            event,
+                            origin,
+                        });
+                    }
                     Ok(())
                 },
             )
@@ -165,6 +210,7 @@ impl InputContext {
         self.capture_generation = capture_generation;
         self.timestamp_ns = timestamp_ns;
         self.sequence = sequence;
+        self.mirror_window_events = mirror;
         Ok(())
     }
 
@@ -232,6 +278,7 @@ impl InputContext {
         if now_ns < self.timestamp_ns {
             return Err(InputError::TimeOrder);
         }
+        self.source.reset(new_epoch, now_ns)?;
         self.epoch = new_epoch;
         self.sequence = 0;
         self.timestamp_ns = now_ns;
@@ -239,6 +286,7 @@ impl InputContext {
         self.physical = PhysicalInput32::default();
         self.focus_generation = 0;
         self.capture_generation = 0;
+        self.mirror_window_events = true;
         self.head = 0;
         self.length = 0;
         Ok(())

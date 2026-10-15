@@ -1,4 +1,5 @@
 mod context;
+pub mod source;
 mod types;
 pub mod wire;
 

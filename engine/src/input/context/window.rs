@@ -17,6 +17,7 @@ pub(crate) struct PreparedWindowInput32 {
     previous_capture: u64,
     physical: PhysicalInput32,
     previous_flags: Option<(bool, bool)>,
+    mirror_window_events: bool,
     flags: (bool, bool),
     state: InputState,
     focus: u64,
@@ -47,6 +48,7 @@ impl InputContext {
             previous_capture: self.capture_generation,
             physical: self.physical,
             previous_flags: self.window_flags,
+            mirror_window_events: self.mirror_window_events,
             flags: (focused, captured),
             state: self.state,
             focus: self.focus_generation,
@@ -57,7 +59,11 @@ impl InputContext {
         };
         let effective_focus = self.physical.focused && focused;
         let effective_capture = self.physical.captured && captured && effective_focus;
-        let available = self.queue.len() - self.length;
+        let available = if self.mirror_window_events {
+            self.queue.len() - self.length
+        } else {
+            usize::MAX
+        };
         let sequence = self.sequence;
         let mut emit = |event, origin| {
             if prepared.count == available || prepared.count == prepared.records.len() {
@@ -120,8 +126,14 @@ impl InputContext {
                 && self.window_flags == prepared.previous_flags,
             "prepared window input owner changed"
         );
-        for record in prepared.records[..prepared.count].iter().copied() {
-            self.push(record);
+        assert_eq!(
+            self.mirror_window_events, prepared.mirror_window_events,
+            "prepared input delivery changed"
+        );
+        if self.mirror_window_events {
+            for record in prepared.records[..prepared.count].iter().copied() {
+                self.push(record);
+            }
         }
         self.window_flags = Some(prepared.flags);
         self.state = prepared.state;
