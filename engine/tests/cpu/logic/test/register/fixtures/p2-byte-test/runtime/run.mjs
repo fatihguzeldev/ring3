@@ -1,3 +1,4 @@
+import {generatedImports, attachDetectionApi} from '../../../../../../../support/wasm/binding.mjs';
 import {ARENA_SIZE} from '../../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
@@ -41,6 +42,7 @@ function request(ctx, bytes) {
 function fresh(owner, pages = 8) {
   const instance = new WebAssembly.Instance(engineModule, {});
   const api = Object.fromEntries(apiNames.map(name => [name, instance.exports[`ring3_abi_v1_${name}`]]));
+ attachDetectionApi(api, instance.exports);
   for (const [name, fn] of Object.entries(api)) assert.equal(typeof fn, 'function', name);
   const key = 0xc835600000000000n + BigInt(++ordinal);
   const ctx = {owner, memory: instance.exports.memory, api, low: Number(key & 0xffffffffn), high: Number(key >> 32n)};
@@ -164,7 +166,7 @@ for (const owner of ['standalone', 'replacement', 'resident']) {
   for (const [index, batch] of batches.entries()) {
     const label = `${owner}-batch${index}`;
     const unit = owner === 'standalone' ? instantiate(ctx, readFileSync(join(output, `batch-${index}.wasm`)), label) : compile(ctx, [batch.entry], [], label);
-    assert.deepEqual(unit.helpers, owner === 'standalone' ? [] : [owner === 'replacement' ? 'guard' : 'guard_resident'], `${label}: TEST adds no helper`);
+    assert.deepEqual(unit.helpers, owner === 'standalone' ? [] : generatedImports({resident: !(owner === 'replacement'), helpers: []}).slice(1).map(item => item.name), `${label}: TEST adds no helper`);
     const probeBefore = owner === 'standalone' ? undefined : Array.from({length: 8}, (_, word) => read(ctx, 0x9000 + word * 4));
     batch.forms.forEach((form, offset) => runTest(ctx, unit, form, [...initialRegisters], offset % 2 ? 2 : 0xcd7, `${label}-form${offset}`));
     for (const form of batch.forms.filter(form => form.left === 0 && form.right === 1)) {
@@ -242,7 +244,7 @@ for (const base of [0x400000, 0x500000]) for (const owner of ['replacement', 're
   peRows.push({owner, base, guest_retired: 15, branch_result: 0xc8c00002, final_flags: 0x46, canary: 0, receipt_sha256: hash(receipt)});
   assert.equal(ctx.api.close(), 0);
 }
-const sourcePaths = ['Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml', 'engine/src/cpu/x86/ir.rs', 'engine/src/cpu/x86/decode/integer.rs', 'engine/src/cpu/dbt/region.rs', 'engine/src/cpu/dbt/wasm/integer/arithmetic.rs', 'engine/src/cpu/dbt/wasm/integer/bits.rs', 'engine/src/cpu/dbt/wasm/integer/carry_rotates.rs', 'engine/src/cpu/dbt/wasm/integer/decimal.rs', 'engine/src/cpu/dbt/wasm/integer/dispatch.rs', 'engine/src/cpu/dbt/wasm/integer/flags.rs', 'engine/src/cpu/dbt/wasm/integer/mod.rs', 'engine/src/cpu/dbt/wasm/integer/multiply_divide.rs', 'engine/src/cpu/dbt/wasm/integer/operands.rs', 'engine/src/cpu/dbt/wasm/integer/rotates.rs', 'engine/src/cpu/dbt/wasm/integer/shifts.rs', 'engine/tests/cpu/logic/test/register/wasm/byte.rs', 'engine/tests/cpu/logic/wasm.rs', 'engine/tests/support/loader/pe32/image.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/logic/test/register/fixtures/p2-byte-test/runtime/run.mjs'];
+const sourcePaths = ['Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml', 'engine/src/cpu/x86/ir.rs', 'engine/src/cpu/x86/decode/integer.rs', 'engine/src/cpu/dbt/region.rs', 'engine/src/cpu/dbt/wasm/integer/arithmetic.rs', 'engine/src/cpu/dbt/wasm/integer/bits.rs', 'engine/src/cpu/dbt/wasm/integer/carry_rotates.rs', 'engine/src/cpu/dbt/wasm/integer/decimal.rs', 'engine/src/cpu/dbt/wasm/integer/dispatch.rs', 'engine/src/cpu/dbt/wasm/integer/flags.rs', 'engine/src/cpu/dbt/wasm/integer/mod.rs', 'engine/src/cpu/dbt/wasm/integer/multiply_divide.rs', 'engine/src/cpu/dbt/wasm/integer/operands.rs', 'engine/src/cpu/dbt/wasm/integer/rotates.rs', 'engine/src/cpu/dbt/wasm/integer/shifts.rs', 'engine/tests/cpu/logic/test/register/wasm/byte.rs', 'engine/tests/cpu/logic/wasm.rs', 'engine/tests/support/loader/pe32/image.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/logic/test/register/fixtures/p2-byte-test/runtime/run.mjs', 'engine/tests/support/wasm/binding.mjs'];
 assert.equal(new Set(sourcePaths).size, sourcePaths.length);
 sourcePaths.push(...["engine/src/abi/memory_helper/cpu.rs", "engine/src/cpu/dbt/wasm/memory/cpu_scalar.rs", "engine/src/cpu/dbt/wasm/emitter.rs", "engine/src/cpu/dbt/wasm/code_fetch.rs", "engine/src/process/memory/cpu_scalar.rs", "engine/src/process/memory/scalar/cpu_write.rs", "engine/src/process/wasm/memory/cpu_write.rs", "engine/src/abi/wasm/exports/memory/cpu_write.rs", "engine/tests/support/wasm/arena.mjs"].filter(path=>!sourcePaths.includes(path)));
 const result = {status: 'ok', engine_sha256: hash(engineBytes), pe_sha256: hash(image), source_sha256: Object.fromEntries(sourcePaths.map(path => [path, hash(readFileSync(join(root, path)))])), tools: {node: process.version, v8: process.versions.v8}, flag_policy: 'CF/OF clear; undefined AF deterministically clear; DF preserved; ZF/SF/PF from the 8-bit result', counts: {test_cases: rows.length, canonical_forms_per_mode: forms.length, boundary_pairs_per_mode: 49, finite_guest_retired: rows.length, pe_paths: peRows.length, pe_guest_retired: 60}, cases: rows, controls, pe: peRows, modules, claim: 'finite authored TEST8 in native-generated standalone Wasm and engine-Wasm-generated bound modules, plus four copied PE startup/branch/ExitProcess paths; no browser, SDK, general ISA, performance or playable game claim'};

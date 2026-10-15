@@ -1,3 +1,4 @@
+import {generatedImports, attachDetectionApi} from '../../../../../../../support/wasm/binding.mjs';
 import {ARENA_SIZE, createArena} from '../../../../../../../support/wasm/arena.mjs';
 import {assertEngineExports} from '../../../../../../../support/wasm/exports.mjs';
 import assert from 'node:assert/strict';
@@ -18,7 +19,7 @@ const SIZE = ARENA_SIZE, TRANSFER = 140, EXIT = 0x8020, EXIT_ID = 0x10003, MARKE
 const initialRegisters = [0x1234807f, 0x23457f80, 0x34560f10, 0x4567ff00, 0x56789abc, 0x6789abcd, 0x789abcde, 0x89abcdef];
 const boundaries = [0, 1, 15, 16, 127, 128, 255];
 const apiNames = ['open', 'close', 'arena_ptr', 'map', 'upload', 'read32', 'write8', 'compile_entries', 'compile_resident_entries', 'generation', 'module_ptr', 'module_len', 'guard', 'guard_resident', 'store32', 'store_resident32', 'cpu_read32', 'cpu_store32', 'cpu_store_resident32', 'begin_image_input', 'append_image_input', 'load_pe32_linked_v2_input_at', 'start_loaded_image', 'capture_call', 'capture_resident_call', 'complete_windows_call', 'complete_resident_windows_call'];
-const sourcePaths = ['Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml', 'engine/src/cpu/x86/ir.rs', 'engine/src/cpu/x86/decode/decoder.rs', 'engine/src/cpu/x86/decode/integer.rs', 'engine/src/cpu/x86/decode/operands.rs', 'engine/src/cpu/x86/decode/flow.rs', 'engine/src/cpu/dbt/region.rs', 'engine/src/cpu/dbt/wasm/integer/arithmetic.rs', 'engine/src/cpu/dbt/wasm/integer/bits.rs', 'engine/src/cpu/dbt/wasm/integer/carry_rotates.rs', 'engine/src/cpu/dbt/wasm/integer/decimal.rs', 'engine/src/cpu/dbt/wasm/integer/dispatch.rs', 'engine/src/cpu/dbt/wasm/integer/flags.rs', 'engine/src/cpu/dbt/wasm/integer/mod.rs', 'engine/src/cpu/dbt/wasm/integer/multiply_divide.rs', 'engine/src/cpu/dbt/wasm/integer/operands.rs', 'engine/src/cpu/dbt/wasm/integer/rotates.rs', 'engine/src/cpu/dbt/wasm/integer/shifts.rs', 'engine/src/cpu/dbt/wasm/control.rs', 'engine/src/cpu/dbt/wasm/memory.rs', 'engine/src/process/instance.rs', 'engine/src/process/execution/compiled.rs', 'engine/src/process/execution/authority.rs', 'engine/src/process/memory/address_space.rs', 'engine/src/process/memory/scalar.rs', 'engine/src/process/memory/scalar/tests.rs', 'engine/src/process/execution/mod.rs', 'engine/src/process/memory/mod.rs', 'engine/src/process/mod.rs', 'engine/src/process/wasm/mod.rs', 'engine/src/process/wasm/loading.rs', 'engine/src/abi/image.rs', 'engine/src/process/wasm/execution.rs', 'engine/src/process/wasm/calls.rs', 'engine/src/process/wasm/memory.rs', 'engine/src/process/wasm/cpu.rs', 'engine/src/process/calls/call.rs', 'engine/src/process/cpu/context.rs', 'engine/src/process/calls/mod.rs', 'engine/src/process/windows/calls.rs', 'engine/src/process/windows/mod.rs', 'engine/src/abi/wasm/exports/calls.rs', 'engine/src/abi/wasm/exports/cpu.rs', 'engine/src/abi/wasm/exports/execution.rs', 'engine/src/abi/wasm/exports/image.rs', 'engine/src/abi/wasm/exports/instance.rs', 'engine/src/abi/wasm/exports/memory.rs', 'engine/src/abi/wasm/exports/mod.rs', 'engine/src/loader/mod.rs', 'engine/src/loader/image.rs', 'engine/src/loader/imports.rs', 'engine/src/windows/api/mod.rs', 'engine/src/windows/api/catalog.rs', 'engine/src/loader/relocation.rs', 'engine/tests/support/loader/pe32/image.rs', 'engine/tests/cpu/logic/unary/register/wasm/byte.rs', 'engine/tests/cpu/logic/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/logic/unary/register/fixtures/p2-byte-unary/runtime/run.mjs', 'engine/tests/cpu/logic/unary/register/fixtures/p2-byte-unary/integer.S'];
+const sourcePaths = ['Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml', 'engine/src/cpu/x86/ir.rs', 'engine/src/cpu/x86/decode/decoder.rs', 'engine/src/cpu/x86/decode/integer.rs', 'engine/src/cpu/x86/decode/operands.rs', 'engine/src/cpu/x86/decode/flow.rs', 'engine/src/cpu/dbt/region.rs', 'engine/src/cpu/dbt/wasm/integer/arithmetic.rs', 'engine/src/cpu/dbt/wasm/integer/bits.rs', 'engine/src/cpu/dbt/wasm/integer/carry_rotates.rs', 'engine/src/cpu/dbt/wasm/integer/decimal.rs', 'engine/src/cpu/dbt/wasm/integer/dispatch.rs', 'engine/src/cpu/dbt/wasm/integer/flags.rs', 'engine/src/cpu/dbt/wasm/integer/mod.rs', 'engine/src/cpu/dbt/wasm/integer/multiply_divide.rs', 'engine/src/cpu/dbt/wasm/integer/operands.rs', 'engine/src/cpu/dbt/wasm/integer/rotates.rs', 'engine/src/cpu/dbt/wasm/integer/shifts.rs', 'engine/src/cpu/dbt/wasm/control.rs', 'engine/src/cpu/dbt/wasm/memory.rs', 'engine/src/process/instance.rs', 'engine/src/process/execution/compiled.rs', 'engine/src/process/execution/authority.rs', 'engine/src/process/memory/address_space.rs', 'engine/src/process/memory/scalar.rs', 'engine/src/process/memory/scalar/tests.rs', 'engine/src/process/execution/mod.rs', 'engine/src/process/memory/mod.rs', 'engine/src/process/mod.rs', 'engine/src/process/wasm/mod.rs', 'engine/src/process/wasm/loading.rs', 'engine/src/abi/image.rs', 'engine/src/process/wasm/execution.rs', 'engine/src/process/wasm/calls.rs', 'engine/src/process/wasm/memory.rs', 'engine/src/process/wasm/cpu.rs', 'engine/src/process/calls/call.rs', 'engine/src/process/cpu/context.rs', 'engine/src/process/calls/mod.rs', 'engine/src/process/windows/calls.rs', 'engine/src/process/windows/mod.rs', 'engine/src/abi/wasm/exports/calls.rs', 'engine/src/abi/wasm/exports/cpu.rs', 'engine/src/abi/wasm/exports/execution.rs', 'engine/src/abi/wasm/exports/image.rs', 'engine/src/abi/wasm/exports/instance.rs', 'engine/src/abi/wasm/exports/memory.rs', 'engine/src/abi/wasm/exports/mod.rs', 'engine/src/loader/mod.rs', 'engine/src/loader/image.rs', 'engine/src/loader/imports.rs', 'engine/src/windows/api/mod.rs', 'engine/src/windows/api/catalog.rs', 'engine/src/loader/relocation.rs', 'engine/tests/support/loader/pe32/image.rs', 'engine/tests/cpu/logic/unary/register/wasm/byte.rs', 'engine/tests/cpu/logic/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/logic/unary/register/fixtures/p2-byte-unary/runtime/run.mjs', 'engine/tests/support/wasm/binding.mjs', 'engine/tests/cpu/logic/unary/register/fixtures/p2-byte-unary/integer.S'];
 assert.equal(new Set(sourcePaths).size, sourcePaths.length);
 sourcePaths.push(...engineExportContract.sourcePaths.filter(path => !sourcePaths.includes(path)));
 assert.equal(new Set(sourcePaths).size, sourcePaths.length);
@@ -49,6 +50,7 @@ function pure(ctx, action, status, name) {
 function fresh(owner, pages = 8) {
   const instance = new WebAssembly.Instance(engineModule, {}), key = 0xc836500000000000n + BigInt(++ordinal);
   const api = Object.fromEntries(apiNames.map(name => [name, instance.exports[`ring3_abi_v1_${name}`]]));
+ attachDetectionApi(api, instance.exports);
   for (const [name, fn] of Object.entries(api)) assert.equal(typeof fn, 'function', name);
   assert.equal(api.guard.length, 6); assert.equal(api.guard_resident.length, 7);
   const ctx = {owner, memory: instance.exports.memory, api, low: Number(key & 0xffffffffn), high: Number(key >> 32n)};
@@ -82,7 +84,7 @@ function compile(ctx, entries, gates, label, extraHelpers = []) {
   }
   refresh(ctx); assert.ok(binding.pointer > 0 && binding.length > 8 && binding.pointer + binding.length <= ctx.bytes.length);
   const unit = instantiate(ctx, ctx.bytes.slice(binding.pointer, binding.pointer + binding.length), label, binding);
-  assert.deepEqual(unit.helpers, [ctx.owner === 'replacement' ? 'guard' : 'guard_resident', ...extraHelpers]); return unit;
+  assert.deepEqual(unit.helpers, generatedImports({resident: !(ctx.owner === 'replacement'), helpers: [...extraHelpers]}).slice(1).map(item => item.name)); return unit;
 }
 function seed(ctx, registers, pc, flags, cancel = 0) {
   refresh(ctx).bytes.set(stateRecord(registers, pc, flags), ctx.base); ctx.bytes.set(exitRecord(3, 0), ctx.base + 56);
@@ -201,7 +203,7 @@ for (const owner of ['standalone', 'replacement', 'resident']) {
   for (const [index, batch] of batches.entries()) {
     const label = `${owner}-batch${index}`;
     const unit = owner === 'standalone' ? instantiate(ctx, readFileSync(join(output, `batch-${index}.wasm`)), label) : compile(ctx, [batch.entry], [], label);
-    assert.deepEqual(unit.helpers, owner === 'standalone' ? [] : [owner === 'replacement' ? 'guard' : 'guard_resident'], 'unary bytes add no RAM helper');
+    assert.deepEqual(unit.helpers, owner === 'standalone' ? [] : generatedImports({resident: !(owner === 'replacement'), helpers: []}).slice(1).map(item => item.name), 'unary bytes add no RAM helper');
     const probeBefore = owner === 'standalone' ? undefined : readWords(ctx, 0x9000, 8);
     for (const form of batch.forms) for (const operand of boundaries) for (const flags of flagSeeds) {
       const registers = [...initialRegisters]; replaceByte(registers, form.destination, operand);
@@ -222,7 +224,7 @@ for (const owner of ['standalone', 'replacement', 'resident']) {
     pure(ctx, () => lastUnit.run(0xffffffff, 0xffffffff, 0, 0xffffffff), 1, `${owner}: current generated entry malformed pointers`);
   }
   const chain = owner === 'standalone' ? instantiate(ctx, readFileSync(join(output, 'chain.wasm')), `${owner}-chain`) : compile(ctx, [0x2000], [], `${owner}-chain`);
-  assert.deepEqual(chain.helpers, owner === 'standalone' ? [] : [owner === 'replacement' ? 'guard' : 'guard_resident']);
+  assert.deepEqual(chain.helpers, owner === 'standalone' ? [] : generatedImports({resident: !(owner === 'replacement'), helpers: []}).slice(1).map(item => item.name));
   runChain(ctx, chain);
   if (owner !== 'standalone') {
     assert.equal(ctx.api.write8(0x2000, chainCode[0]), 0);
