@@ -1,8 +1,8 @@
 pub(crate) mod aes;
 pub(crate) mod extended;
 pub(crate) mod ieee;
-pub(crate) mod spectral;
 mod integer;
+pub(crate) mod spectral;
 mod workspace;
 
 pub(crate) use workspace::NumericalWorkspace;
