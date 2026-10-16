@@ -424,7 +424,9 @@ static void numeric_text_boundaries_and_dates(void) {
         -0.0, 0.0001, 0.00001, 0.000001, 0.0000001, 0.00000001,
         -0.0001, -0.00001, -0.000001, -0.0000001, -0.00000001,
         999999, 1000000, 10000000, 999999999999999.0, 1000000000000000.0,
-        9.999999499999999e-5, 9.999999999999995e-5
+        9.999999499999999e-5, 9.999999999999995e-5,
+        1.234567e-5, 1.234567e-7, 1.234567e-8,
+        1.23456789012345e-8, 1.23456789012345e-14, 1.23456789012345e-15
     };
     static const DATE dates[] = { 0, 1.5, -1.25, 36925.0, 36925.54309027778 };
     static const WCHAR *date_text[] = {
@@ -471,9 +473,154 @@ static void numeric_text_boundaries_and_dates(void) {
     }
 }
 
+static void empty_null_conversions(void) {
+    static const VARTYPE targets[] = {
+        VT_EMPTY, VT_NULL, VT_I4, VT_R8, VT_BOOL, VT_BSTR, VT_DATE, VT_DECIMAL, VT_UNKNOWN
+    };
+    unsigned source_kind, target;
+    for (source_kind = VT_EMPTY; source_kind <= VT_NULL; ++source_kind) {
+        for (target = 0; target < sizeof(targets) / sizeof(targets[0]); ++target) {
+            VARIANT source, destination;
+            HRESULT result;
+            char name[64];
+            VariantInit(&source); VariantInit(&destination);
+            V_VT(&source) = (VARTYPE)source_kind;
+            result = VariantChangeTypeEx(&destination, &source, 0x409, 0, targets[target]);
+            sprintf_s(name, sizeof(name), "empty-null-conversion-%u-%u", source_kind, targets[target]);
+            variant_result(name, result, &destination); VariantClear(&destination);
+        }
+    }
+}
+
+typedef struct {
+    IDispatch dispatch;
+    ULONG references, additions, releases, queries, invocations;
+    unsigned mode;
+    DISPID member;
+    LCID locale;
+    WORD flags;
+    UINT arguments, named;
+    unsigned null_iid, parameters_present, result_present, exception_present, error_present;
+} CountedDispatch;
+
+static const GUID dispatch_unknown_iid = { 0, 0, 0, { 0xc0, 0, 0, 0, 0, 0, 0, 0x46 } };
+static const GUID dispatch_iid = { 0x00020400, 0, 0, { 0xc0, 0, 0, 0, 0, 0, 0, 0x46 } };
+static const GUID dispatch_null_iid;
+
+static ULONG STDMETHODCALLTYPE dispatch_addref(IDispatch *self) {
+    CountedDispatch *value = (CountedDispatch *)self;
+    ++value->additions;
+    return ++value->references;
+}
+static ULONG STDMETHODCALLTYPE dispatch_release(IDispatch *self) {
+    CountedDispatch *value = (CountedDispatch *)self;
+    ++value->releases;
+    return --value->references;
+}
+static HRESULT STDMETHODCALLTYPE dispatch_query(IDispatch *self, REFIID iid, void **output) {
+    CountedDispatch *value = (CountedDispatch *)self;
+    ++value->queries;
+    if (!output) return E_POINTER;
+    *output = NULL;
+    if (memcmp(iid, &dispatch_unknown_iid, sizeof(GUID)) != 0 &&
+        (value->mode == 4 || memcmp(iid, &dispatch_iid, sizeof(GUID)) != 0)) return E_NOINTERFACE;
+    *output = self;
+    dispatch_addref(self);
+    return S_OK;
+}
+static HRESULT STDMETHODCALLTYPE dispatch_type_count(IDispatch *self, UINT *output) {
+    (void)self;
+    if (!output) return E_POINTER;
+    *output = 0;
+    return S_OK;
+}
+static HRESULT STDMETHODCALLTYPE dispatch_type_info(IDispatch *self, UINT index, LCID locale, ITypeInfo **output) {
+    (void)self; (void)index; (void)locale;
+    if (output) *output = NULL;
+    return E_NOTIMPL;
+}
+static HRESULT STDMETHODCALLTYPE dispatch_names(IDispatch *self, REFIID iid, LPOLESTR *names,
+    UINT count, LCID locale, DISPID *output) {
+    (void)self; (void)iid; (void)names; (void)count; (void)locale; (void)output;
+    return DISP_E_UNKNOWNNAME;
+}
+static HRESULT STDMETHODCALLTYPE dispatch_invoke(IDispatch *self, DISPID member, REFIID iid,
+    LCID locale, WORD flags, DISPPARAMS *parameters, VARIANT *result,
+    EXCEPINFO *exception, UINT *error) {
+    CountedDispatch *value = (CountedDispatch *)self;
+    const WCHAR embedded[] = { 'a', 0, 'z' };
+    ++value->invocations;
+    value->member = member; value->locale = locale; value->flags = flags;
+    value->null_iid = iid != NULL && memcmp(iid, &dispatch_null_iid, sizeof(GUID)) == 0;
+    value->parameters_present = parameters != NULL;
+    value->result_present = result != NULL;
+    value->exception_present = exception != NULL;
+    value->error_present = error != NULL;
+    value->arguments = parameters ? parameters->cArgs : 0xffffffff;
+    value->named = parameters ? parameters->cNamedArgs : 0xffffffff;
+    if (value->mode == 2) return DISP_E_UNKNOWNNAME;
+    if (member != DISPID_VALUE) return DISP_E_MEMBERNOTFOUND;
+    if (!result) return E_POINTER;
+    VariantInit(result);
+    if (value->mode == 1) {
+        V_VT(result) = VT_BSTR;
+        V_BSTR(result) = SysAllocStringLen(embedded, 3);
+        if (!V_BSTR(result)) return E_OUTOFMEMORY;
+    } else {
+        V_VT(result) = VT_I4;
+        V_I4(result) = 37;
+    }
+    return S_OK;
+}
+static const IDispatchVtbl dispatch_vtable = {
+    dispatch_query, dispatch_addref, dispatch_release, dispatch_type_count,
+    dispatch_type_info, dispatch_names, dispatch_invoke
+};
+static void dispatch_state(const char *name, unsigned index, const CountedDispatch *value) {
+    row(name);
+    printf(",\"index\":%u,\"references\":%lu,\"additions\":%lu,\"releases\":%lu,\"queries\":%lu,\"invocations\":%lu",
+        index, (unsigned long)value->references, (unsigned long)value->additions,
+        (unsigned long)value->releases, (unsigned long)value->queries, (unsigned long)value->invocations);
+    printf(",\"member\":%ld,\"locale\":%lu,\"flags\":%u,\"nullIid\":%u,\"parametersPresent\":%u,\"resultPresent\":%u,\"exceptionPresent\":%u,\"errorPresent\":%u,\"arguments\":%u,\"named\":%u}",
+        (long)value->member, (unsigned long)value->locale, (unsigned)value->flags,
+        value->null_iid, value->parameters_present, value->result_present,
+        value->exception_present, value->error_present, value->arguments, value->named);
+}
+static void dispatch_conversions(void) {
+    static const struct { VARTYPE source, target; USHORT flags; unsigned mode; } cases[] = {
+        { VT_DISPATCH, VT_I4, 0, 0 },
+        { VT_DISPATCH, VT_I4, VARIANT_NOVALUEPROP, 0 },
+        { VT_DISPATCH, VT_BSTR, 0, 1 },
+        { VT_DISPATCH, VT_I4, 0, 2 },
+        { VT_UNKNOWN, VT_I4, 0, 0 },
+        { VT_UNKNOWN, VT_DISPATCH, 0, 0 },
+        { VT_DISPATCH, VT_UNKNOWN, 0, 0 },
+        { VT_UNKNOWN, VT_DISPATCH, 0, 4 },
+        { VT_DISPATCH, VT_DISPATCH, 0, 0 }
+    };
+    unsigned index;
+    for (index = 0; index < sizeof(cases) / sizeof(cases[0]); ++index) {
+        CountedDispatch value;
+        VARIANT source, destination;
+        HRESULT result;
+        char name[64];
+        memset(&value, 0, sizeof(value));
+        value.dispatch.lpVtbl = &dispatch_vtable; value.references = 1; value.mode = cases[index].mode;
+        VariantInit(&source); VariantInit(&destination);
+        V_VT(&source) = cases[index].source;
+        V_BYREF(&source) = &value.dispatch;
+        result = VariantChangeTypeEx(&destination, &source, 0x407, cases[index].flags, cases[index].target);
+        sprintf_s(name, sizeof(name), "dispatch-conversion-%u", index);
+        variant_result(name, result, &destination);
+        dispatch_state("dispatch-conversion-before-clear", index, &value);
+        VariantClear(&destination); VariantClear(&source);
+        dispatch_state("dispatch-conversion-after-clear", index, &value);
+    }
+}
+
 int main(void) {
     printf("{\"schema\":1,\"pointerBytes\":%u,\"variantBytes\":%u,\"rows\":[", (unsigned)sizeof(void *), (unsigned)sizeof(VARIANT));
-    strings(); variants(); arrays(); references(); ordinals(); numeric_precision(); boolean_numeric_and_null_strings(); numeric_text_boundaries_and_dates();
+    strings(); variants(); arrays(); references(); ordinals(); numeric_precision(); boolean_numeric_and_null_strings(); numeric_text_boundaries_and_dates(); empty_null_conversions(); dispatch_conversions();
     printf("]}\n");
     return 0;
 }
