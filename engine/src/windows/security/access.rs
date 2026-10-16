@@ -1,20 +1,20 @@
 use super::{Dacl32, SecurityDescriptor32, SecurityError32 as Error, Sid32, Token32};
 
 #[derive(Clone, Copy, Debug)]
-pub struct GenericMapping32 {
+pub(crate) struct GenericMapping32 {
     pub read: u32,
     pub write: u32,
     pub execute: u32,
     pub all: u32,
 }
-pub const FILE_GENERIC_MAPPING: GenericMapping32 = GenericMapping32 {
+pub(crate) const FILE_GENERIC_MAPPING: GenericMapping32 = GenericMapping32 {
     read: 0x0012_0089,
     write: 0x0012_0116,
     execute: 0x0012_00a0,
     all: 0x001f_01ff,
 };
 impl GenericMapping32 {
-    pub fn map(self, access: u32) -> u32 {
+    pub(crate) fn map(self, access: u32) -> u32 {
         let mut mapped = access & !0xf000_0000;
         for (flag, mask) in [
             (0x8000_0000, self.read),
@@ -30,7 +30,7 @@ impl GenericMapping32 {
     }
 }
 impl SecurityDescriptor32 {
-    pub fn check_access(
+    pub(crate) fn check_access(
         &self,
         token: &Token32,
         desired: u32,

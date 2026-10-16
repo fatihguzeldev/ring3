@@ -5,28 +5,28 @@ use super::{SecurityError32 as Error, Sid32, Token32};
 const SELF_RELATIVE: u16 = 0x8000;
 const DACL_PRESENT: u16 = 4;
 const SACL_PRESENT: u16 = 16;
-pub const MAX_DESCRIPTOR_BYTES: usize = 65_536;
+pub(crate) const MAX_DESCRIPTOR_BYTES: usize = 65_536;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct AccessAce32 {
+pub(crate) struct AccessAce32 {
     pub kind: u8,
     pub flags: u8,
     pub mask: u32,
     pub sid: Sid32,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Acl32 {
+pub(crate) struct Acl32 {
     pub revision: u8,
     pub aces: Vec<AccessAce32>,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Dacl32 {
+pub(crate) enum Dacl32 {
     Absent,
     Null,
     Acl(Acl32),
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SecurityDescriptor32 {
+pub(crate) struct SecurityDescriptor32 {
     pub owner: Option<Sid32>,
     pub group: Option<Sid32>,
     pub dacl: Dacl32,
@@ -109,7 +109,7 @@ impl Acl32 {
     }
 }
 impl SecurityDescriptor32 {
-    pub fn snapshot(&self) -> Result<Self, Error> {
+    pub(crate) fn snapshot(&self) -> Result<Self, Error> {
         let copy_acl = |source: &Dacl32| -> Result<Dacl32, Error> {
             Ok(match source {
                 Dacl32::Absent => Dacl32::Absent,
@@ -135,7 +135,7 @@ impl SecurityDescriptor32 {
             resource_manager: self.resource_manager,
         })
     }
-    pub fn from_self_relative(bytes: &[u8]) -> Result<Self, Error> {
+    pub(crate) fn from_self_relative(bytes: &[u8]) -> Result<Self, Error> {
         if bytes.len() < 20 || bytes.len() > MAX_DESCRIPTOR_BYTES || bytes[0] != 1 {
             return Err(Error::InvalidDescriptor);
         }
@@ -171,7 +171,7 @@ impl SecurityDescriptor32 {
             resource_manager: bytes[1],
         })
     }
-    pub fn to_self_relative(&self) -> Result<Vec<u8>, Error> {
+    pub(crate) fn to_self_relative(&self) -> Result<Vec<u8>, Error> {
         let mut length = 20;
         for sid in [self.owner, self.group].into_iter().flatten() {
             length += sid.byte_len();
@@ -219,7 +219,7 @@ impl SecurityDescriptor32 {
         }
         Ok(bytes)
     }
-    pub fn for_token(token: &Token32) -> Result<Self, Error> {
+    pub(crate) fn for_token(token: &Token32) -> Result<Self, Error> {
         let mut aces = Vec::new();
         aces.try_reserve_exact(2).map_err(|_| Error::Allocation)?;
         for sid in [token.user(), Sid32::system()] {

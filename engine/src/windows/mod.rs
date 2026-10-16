@@ -44,6 +44,6 @@ pub mod rawinput;
 
 pub mod console;
 pub mod native;
-pub mod security;
+pub(crate) mod security;
 
 pub mod activation;

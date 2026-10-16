@@ -1,12 +1,12 @@
 use super::{SecurityError32 as Error, Sid32};
 
 #[derive(Clone, Copy, Debug)]
-pub struct TokenGroup32 {
+pub(crate) struct TokenGroup32 {
     pub sid: Sid32,
     pub deny_only: bool,
 }
 #[derive(Clone, Debug)]
-pub struct Token32 {
+pub(crate) struct Token32 {
     user: Sid32,
     primary_group: Sid32,
     groups: [Option<TokenGroup32>; 16],
@@ -17,7 +17,7 @@ impl Token32 {
     pub(crate) fn user_name(&self) -> &'static str {
         "ring3"
     }
-    pub fn virtual_process() -> Self {
+    pub(crate) fn virtual_process() -> Self {
         let mut groups = [None; 16];
         for (slot, sid) in groups.iter_mut().zip([
             Sid32::everyone(),
@@ -37,13 +37,13 @@ impl Token32 {
             restore_privilege: false,
         }
     }
-    pub fn user(&self) -> Sid32 {
+    pub(crate) fn user(&self) -> Sid32 {
         self.user
     }
-    pub fn primary_group(&self) -> Sid32 {
+    pub(crate) fn primary_group(&self) -> Sid32 {
         self.primary_group
     }
-    pub fn matches(&self, sid: Sid32, deny: bool) -> bool {
+    pub(crate) fn matches(&self, sid: Sid32, deny: bool) -> bool {
         self.user == sid
             || self
                 .groups
@@ -51,10 +51,10 @@ impl Token32 {
                 .flatten()
                 .any(|group| group.sid == sid && (deny || !group.deny_only))
     }
-    pub fn may_set_owner(&self, owner: Sid32) -> bool {
+    pub(crate) fn may_set_owner(&self, owner: Sid32) -> bool {
         owner == self.user || self.restore_privilege
     }
-    pub fn check_security_privilege(&self) -> Result<(), Error> {
+    pub(crate) fn check_security_privilege(&self) -> Result<(), Error> {
         if self.security_privilege {
             Ok(())
         } else {

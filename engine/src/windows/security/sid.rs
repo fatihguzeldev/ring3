@@ -1,13 +1,13 @@
 use super::SecurityError32 as Error;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Sid32 {
+pub(crate) struct Sid32 {
     authority: u64,
     subauthorities: [u32; 15],
     count: u8,
 }
 impl Sid32 {
-    pub fn new(authority: u64, subauthorities: &[u32]) -> Result<Self, Error> {
+    pub(crate) fn new(authority: u64, subauthorities: &[u32]) -> Result<Self, Error> {
         if authority >> 48 != 0 || subauthorities.len() > 15 {
             return Err(Error::InvalidSid);
         }
@@ -19,7 +19,7 @@ impl Sid32 {
         value.subauthorities[..subauthorities.len()].copy_from_slice(subauthorities);
         Ok(value)
     }
-    pub fn parse(bytes: &[u8]) -> Result<Self, Error> {
+    pub(crate) fn parse(bytes: &[u8]) -> Result<Self, Error> {
         if bytes.len() < 8 || bytes[0] != 1 || bytes[1] > 15 {
             return Err(Error::InvalidSid);
         }
@@ -36,10 +36,10 @@ impl Sid32 {
         }
         Self::new(authority, &subauthorities[..count])
     }
-    pub fn byte_len(self) -> usize {
+    pub(crate) fn byte_len(self) -> usize {
         8 + usize::from(self.count) * 4
     }
-    pub fn write(self, output: &mut [u8]) -> Result<usize, Error> {
+    pub(crate) fn write(self, output: &mut [u8]) -> Result<usize, Error> {
         let length = self.byte_len();
         if output.len() < length {
             return Err(Error::InvalidParameter);
@@ -55,22 +55,22 @@ impl Sid32 {
         }
         Ok(length)
     }
-    pub fn everyone() -> Self {
+    pub(crate) fn everyone() -> Self {
         Self::new(1, &[0]).unwrap()
     }
-    pub fn owner_rights() -> Self {
+    pub(crate) fn owner_rights() -> Self {
         Self::new(3, &[4]).unwrap()
     }
-    pub fn creator_owner() -> Self {
+    pub(crate) fn creator_owner() -> Self {
         Self::new(3, &[0]).unwrap()
     }
-    pub fn creator_group() -> Self {
+    pub(crate) fn creator_group() -> Self {
         Self::new(3, &[1]).unwrap()
     }
-    pub fn system() -> Self {
+    pub(crate) fn system() -> Self {
         Self::new(5, &[18]).unwrap()
     }
-    pub fn virtual_user() -> Self {
+    pub(crate) fn virtual_user() -> Self {
         Self::new(5, &[21, 0x5233, 0, 0, 1000]).unwrap()
     }
 }

@@ -91,7 +91,7 @@ fn inherit_acl(
     Ok(())
 }
 impl SecurityDescriptor32 {
-    pub fn inherit_parent_dacl(
+    pub(crate) fn inherit_parent_dacl(
         &mut self,
         parent: &Self,
         directory: bool,
@@ -117,7 +117,7 @@ impl SecurityDescriptor32 {
         self.to_self_relative()?;
         Ok(())
     }
-    pub fn inherited(
+    pub(crate) fn inherited(
         parent: &Self,
         explicit: Option<Self>,
         token: &Token32,
