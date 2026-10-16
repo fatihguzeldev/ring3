@@ -63,3 +63,4 @@ pub use windows::activation::{ActivationConfig32, ActivationError32, ActivationW
 pub use windows::nls::{NlsError32, NlsProfile32};
 
 pub use windows::version::PendingVersionCall32;
+pub use windows::gdi::{GdiConfig32, GdiFrame32};

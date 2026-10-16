@@ -100,6 +100,11 @@ pub(super) fn mutate(operation: impl FnOnce(&mut EngineInstance) -> Result<(), H
 
 pub(super) fn status(error: HostError) -> u32 {
     match error {
+        HostError::Gdi(error) => match error {
+            crate::windows::gdi::GdiError32::Allocation => 9,
+            crate::windows::gdi::GdiError32::Capacity => 18,
+            _ => 7,
+        },
         HostError::Version(_) | HostError::Shlwapi(_) | HostError::Shell(_) => 7,
         HostError::Activation(error) => match error {
             crate::windows::activation::ActivationError32::NotEnoughMemory => 9,

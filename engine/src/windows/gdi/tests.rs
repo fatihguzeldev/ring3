@@ -160,7 +160,7 @@ fn explicit_555_masks_preserve_the_native_truncation_and_bit_replication_contrac
             rgb.read_pixel(&rgb_bytes, &[], 0, 0)
         );
     }
-    assert_eq!(fields.color_masks(), [0x7c00, 0x03e0, 0x001f]);
+    assert_eq!(fields.masks, Some([0x7c00, 0x03e0, 0x001f]));
     assert_eq!(fields.compression(), 3);
     assert_eq!(rgb.compression(), 0);
 }

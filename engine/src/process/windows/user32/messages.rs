@@ -78,6 +78,20 @@ impl User32Context32 {
                 1
             }));
         }
+        if let Some(message) = self.state.paint_message(
+            context.thread_id,
+            args[1],
+            args[2],
+            args[3],
+            queue_mask,
+            context.time_ms,
+            self.runtime_input.cursor,
+        )? {
+            memory::write_message(memory, args[0], message)?;
+            self.observe_queue_with_timers(context.thread_id, observed);
+            self.input.message = message;
+            return Ok(User32Outcome32::Return(1));
+        }
         if let Some(message) = self.retrieve_timer_message(
             memory,
             super::timers::TimerMessageQuery32 {
@@ -210,6 +224,20 @@ impl User32Context32 {
             Ok(User32Outcome32::Return(u32::from(
                 message.message != 0x0012,
             )))
+        } else if let Some(message) = self.state.paint_message(
+            thread,
+            window,
+            min,
+            max,
+            u32::MAX,
+            self.runtime_input.time_ms,
+            self.runtime_input.cursor,
+        )? {
+            memory::write_message(memory, output, message)?;
+            self.observe_queue_with_timers(thread, u32::MAX);
+            self.input.message = message;
+            self.pending.pop();
+            Ok(User32Outcome32::Return(1))
         } else if let Some(message) = self.retrieve_timer_message(
             memory,
             super::timers::TimerMessageQuery32 {

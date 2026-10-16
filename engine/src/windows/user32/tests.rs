@@ -4,7 +4,11 @@ use crate::{loader::SystemExportTarget32, memory::GuestAddress, windows::Calling
 #[test]
 fn user32_catalog_resolves_explicit_stdcall_gates_without_id_or_symbol_aliases() {
     let module = user32_module(0x70000000);
-    assert_eq!(module.exports.len(), 105);
+    let named = User32Api32::catalog().count()
+        + crate::windows::resources::user32_resource_exports().len()
+        + crate::windows::rawinput::raw_input_exports().count()
+        + crate::windows::gdi::user32_gdi_exports().count();
+    assert_eq!(module.exports.len(), named);
     let mut names = std::collections::BTreeSet::new();
     let mut gates = std::collections::BTreeSet::new();
     for export in &module.exports {

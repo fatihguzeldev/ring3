@@ -361,6 +361,9 @@ impl EngineInstance {
         self.threads.fls.retire_thread(id);
         self.exceptions.retire_thread(id);
         self.nls.retire_thread(id);
+        if let Some(gdi) = self.gdi.as_mut() {
+            gdi.retire_thread(id);
+        }
         self.commit_activation_thread_exit(activation);
         self.commit_com_thread_exit_after_memory(com, memory_changed);
         if let Some(runtime) = self.ole32.as_mut() {

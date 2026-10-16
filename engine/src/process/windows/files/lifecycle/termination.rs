@@ -6,6 +6,7 @@ impl EngineInstance {
         &mut self,
         media_bindings: &[crate::windows::synchronization::EventBinding32],
         internal_handles: &[u32],
+        extra_unmap: &[crate::memory::PageRange],
     ) -> Result<bool, HostError> {
         if self.files.is_none() {
             let process = self.current_windows_process_id();
@@ -14,9 +15,23 @@ impl EngineInstance {
                     .context()
                     .prepare_process_exit_with_events(process, media_bindings, internal_handles)
                     .map_err(HostError::Synchronization)?;
+                if !extra_unmap.is_empty() {
+                    self.memory
+                        .as_mut()
+                        .unwrap()
+                        .unmap_ranges_with_word_writes(extra_unmap, &[])
+                        .map_err(HostError::Memory)?;
+                }
                 sync.context_mut().commit_signals_and_release(prepared);
             } else if !media_bindings.is_empty() || !internal_handles.is_empty() {
                 return Err(HostError::Infrastructure);
+            }
+            if self.synchronization.is_none() && !extra_unmap.is_empty() {
+                self.memory
+                    .as_mut()
+                    .unwrap()
+                    .unmap_ranges_with_word_writes(extra_unmap, &[])
+                    .map_err(HostError::Memory)?;
             }
             return Ok(true);
         }
@@ -51,7 +66,7 @@ impl EngineInstance {
         native.validate(&files.vfs).map_err(HostError::File)?;
         let mappings = files
             .mappings
-            .prepare_process_exit(self.memory.as_ref().unwrap())
+            .prepare_process_exit(self.memory.as_ref().unwrap(), extra_unmap)
             .map_err(HostError::File)?;
         let mut bindings = files
             .asynchronous

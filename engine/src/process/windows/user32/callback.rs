@@ -36,6 +36,11 @@ pub(super) enum PositionStage32 {
 
 #[derive(Clone, Copy)]
 pub(super) enum Continuation32 {
+    Paint {
+        window: WindowHandle32,
+        output: super::gdi::PaintOutput32,
+        dc: u32,
+    },
     Dialog {
         id: u64,
     },
@@ -109,6 +114,10 @@ impl User32Context32 {
             .cloned()
             .ok_or(User32Error32::InvalidToken)?;
         let (procedure, arguments) = match pending.continuation {
+            Continuation32::Paint { window, dc, .. } => (
+                self.windows().get(window)?.description.procedure,
+                [window.get(), 0x14, dc, 0],
+            ),
             Continuation32::Dialog { .. } | Continuation32::DialogRemoteHelp { .. } => {
                 return Ok(User32Outcome32::Wait {
                     continuation: pending.token,
@@ -234,6 +243,12 @@ impl User32Context32 {
             .cloned()
             .ok_or(User32Error32::InvalidToken)?;
         match pending.continuation {
+            Continuation32::Paint { window, output, dc } => {
+                self.windows().get(window)?;
+                output.complete(memory, result != 0)?;
+                self.pending.pop();
+                Ok(User32Outcome32::Return(dc))
+            }
             Continuation32::Dialog { .. } | Continuation32::DialogRemoteHelp { .. } => {
                 Err(User32Error32::InvalidToken)
             }

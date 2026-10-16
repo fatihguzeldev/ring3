@@ -1,4 +1,5 @@
 mod activation;
+mod gdi;
 mod configuration;
 mod dinput;
 mod dsound;

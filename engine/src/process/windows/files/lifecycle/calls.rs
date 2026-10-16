@@ -34,7 +34,11 @@ impl EngineInstance {
             self.publish_process_exit(self.pending_process_exit.ok_or(HostError::Infrastructure)?)?;
         } else {
             self.execute_pending_guarded_service(reply.owner, token, |engine| {
-                engine.try_complete_file_call(reply.owner, token, reply.id, reply.frame)?;
+                if crate::windows::gdi::GdiApi32::from_id(reply.id).is_some() {
+                    engine.try_complete_gdi_call(reply.owner, token, reply.id, reply.frame)?;
+                } else {
+                    engine.try_complete_file_call(reply.owner, token, reply.id, reply.frame)?;
+                }
                 Ok(())
             })?;
         }

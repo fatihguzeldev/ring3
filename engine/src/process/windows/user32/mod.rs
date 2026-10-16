@@ -1,4 +1,5 @@
 mod dialogs;
+mod gdi;
 pub use dialogs::{User32DialogIcon32, User32DialogRequest32};
 mod activation;
 mod callback;

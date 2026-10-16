@@ -2,7 +2,7 @@ use super::super::BitmapLayout32;
 
 #[test]
 fn rgb555_truncation_and_returned_colors_match_public_windows_reference() {
-    // authored Windows i386 oracle; retained native-reference/gdi-casing.json.
+    // authored Windows i386 oracle; retained gdi-casing.json and search-message-partial-reference.json.
     let layout = BitmapLayout32::new(1, -1, 16, true).unwrap();
     for (color, raw, returned) in [
         (0x010101, 0x0000, 0x000000),

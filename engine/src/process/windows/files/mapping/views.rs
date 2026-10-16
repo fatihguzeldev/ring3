@@ -11,6 +11,7 @@ pub(super) struct MapViewRequest32 {
     pub(super) offset: u64,
     pub(super) length: u32,
     pub(super) base: u32,
+    pub(super) purpose: MappingViewPurpose32,
 }
 
 impl FileRuntime32 {
@@ -26,10 +27,16 @@ impl FileRuntime32 {
             offset,
             length,
             base,
+            purpose,
         } = request;
         let object_index = self.mappings.index(id)?;
         let object = &self.mappings.objects[object_index];
-        if !offset.is_multiple_of(65_536) || !base.is_multiple_of(65_536) {
+        let offset_alignment = if purpose == MappingViewPurpose32::Ordinary {
+            65_536
+        } else {
+            u64::from(PAGE_SIZE)
+        };
+        if !offset.is_multiple_of(offset_alignment) || !base.is_multiple_of(65_536) {
             return Err(FileError32::MappedAlignment);
         }
         let (permissions, copy) = object.protection.view(access)?;
@@ -61,6 +68,24 @@ impl FileRuntime32 {
         let range = self
             .mappings
             .choose_range(memory, reserved, count as u32, base)?;
+        let address = range.first as u32 * PAGE_SIZE;
+        let word = if let MappingViewPurpose32::Dib { output, within } = purpose {
+            let word = crate::memory::WordWrite32 {
+                address: GuestAddress(output),
+                value: address
+                    .checked_add(within)
+                    .ok_or(FileError32::InvalidAddress)?,
+            };
+            memory
+                .check_span(word.address, 4, crate::memory::Access::Write)
+                .map_err(memory_error)?;
+            memory
+                .observe_mapping_incarnations(range)
+                .map_err(memory_error)?;
+            Some(word)
+        } else {
+            None
+        };
         let mut protections = Vec::new();
         protections
             .try_reserve_exact(count)
@@ -116,6 +141,7 @@ impl FileRuntime32 {
                 stage.length,
                 stage.base,
             ) != (id, access, offset, length, base)
+                || stage.purpose != purpose
                 || stage.missing != missing
             {
                 return Err(FileError32::Busy);
@@ -136,6 +162,7 @@ impl FileRuntime32 {
                 missing,
                 bytes,
                 filled: 0,
+                purpose,
             }
         };
         while stage.filled < stage.missing.len() {
@@ -208,9 +235,8 @@ impl FileRuntime32 {
             aliases.push((&self.mappings.pages[group].backing, page, rights));
         }
         memory
-            .map_shared_page_rights(range, &aliases, copy)
+            .map_shared_page_rights_with_word_writes(range, &aliases, copy, word.as_slice())
             .expect("mapping capacity, guest extent, aliases and version were preflighted");
-        let address = range.first as u32 * PAGE_SIZE;
         for (page, version) in protection_versions.iter_mut().enumerate() {
             *version = memory
                 .content_version_at(GuestAddress(address + page as u32 * PAGE_SIZE))
@@ -228,7 +254,9 @@ impl FileRuntime32 {
             protections,
             protection_versions,
         });
-        Ok(FileCallOutcome32::success(address))
+        Ok(FileCallOutcome32::success(
+            word.map_or(address, |word| word.value),
+        ))
     }
 }
 impl MappingRuntime32 {

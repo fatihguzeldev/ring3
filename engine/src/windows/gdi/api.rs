@@ -38,12 +38,27 @@ gdi_apis! {
     GetDC,1; GetWindowDC,1; ReleaseDC,2; WindowFromDC,1;
     BeginPaint,2; EndPaint,2; InvalidateRect,3; ValidateRect,2; GetUpdateRect,3; UpdateWindow,1;
     FillRect,3; FrameRect,3; InvertRect,2;
+    CreateFontA,14; CreateFontW,14; CreateFontIndirectA,1; CreateFontIndirectW,1;
+    GetTextMetricsA,2; GetTextMetricsW,2; GetTextFaceA,3; GetTextFaceW,3;
+    GetTextExtentPoint32A,4; GetTextExtentPoint32W,4; GetTextExtentExPointA,7; GetTextExtentExPointW,7;
+    GetCharWidth32A,4; GetCharWidth32W,4; GetCharABCWidthsA,4; GetCharABCWidthsW,4;
+    GetGlyphIndicesA,5; GetGlyphIndicesW,5;
+    TextOutA,5; TextOutW,5; ExtTextOutA,8; ExtTextOutW,8;
+    GetTextAlign,1; SetTextAlign,2; GetTextCharacterExtra,1; SetTextCharacterExtra,2; SetTextJustification,3;
+    DrawTextA,5; DrawTextW,5; DrawTextExA,6; DrawTextExW,6;
+    GetSysColor,1; GetSysColorBrush,1;
 }
 impl GdiApi32 {
     pub fn user32(self) -> bool {
         matches!(
             self,
-            Self::GetDC
+            Self::GetSysColor
+                | Self::GetSysColorBrush
+                | Self::DrawTextA
+                | Self::DrawTextW
+                | Self::DrawTextExA
+                | Self::DrawTextExW
+                | Self::GetDC
                 | Self::GetWindowDC
                 | Self::ReleaseDC
                 | Self::WindowFromDC
@@ -61,7 +76,17 @@ impl GdiApi32 {
     pub fn failure_value(self) -> u32 {
         if matches!(
             self,
-            Self::GetPixel
+            Self::GetTextCharacterExtra | Self::SetTextCharacterExtra
+        ) {
+            return 0x8000_0000;
+        }
+        if matches!(
+            self,
+            Self::GetGlyphIndicesA
+                | Self::GetGlyphIndicesW
+                | Self::SetTextAlign
+                | Self::GetTextAlign
+                | Self::GetPixel
                 | Self::SetPixel
                 | Self::SetTextColor
                 | Self::GetTextColor

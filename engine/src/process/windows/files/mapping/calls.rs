@@ -45,6 +45,7 @@ impl FileRuntime32 {
                         offset: u64::from(args[2]) << 32 | u64::from(args[3]),
                         length: args[4],
                         base: if api == MapViewOfFileEx { args[5] } else { 0 },
+                        purpose: MappingViewPurpose32::Ordinary,
                     },
                 )
             }

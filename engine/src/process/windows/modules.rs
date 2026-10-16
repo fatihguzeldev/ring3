@@ -405,6 +405,19 @@ impl EngineInstance {
             &mut bytes,
         )
         .map_err(|_| HostError::Infrastructure)?;
+        let extra_ranges = if let Some(gdi) = self.gdi.as_ref() {
+            gdi.check_process_exit(self.memory()?)
+                .map_err(HostError::Gdi)?;
+            let mut ranges = Vec::new();
+            ranges
+                .try_reserve_exact(gdi.process_exit_ranges().count())
+                .map_err(|_| HostError::Infrastructure)?;
+            ranges.extend(gdi.process_exit_ranges());
+            ranges.sort_unstable_by_key(|range| range.first);
+            ranges
+        } else {
+            Vec::new()
+        };
         let media = self.prepare_media_process_exit()?;
         let mut bindings = self
             .registry
@@ -417,12 +430,15 @@ impl EngineInstance {
             .try_reserve(media.bindings().len())
             .map_err(|_| HostError::Infrastructure)?;
         bindings.extend_from_slice(media.bindings());
-        if !self.finalize_file_process_exit(&bindings, media.handles())? {
+        if !self.finalize_file_process_exit(&bindings, media.handles(), &extra_ranges)? {
             self.pending_process_exit = Some(code);
             self.process_exit_owner = Some(self.threads.current_id());
             return Ok(());
         }
         self.commit_media_process_exit(media);
+        if let Some(gdi) = self.gdi.as_mut() {
+            gdi.retire_process();
+        }
         if let Some(resources) = self.resources.as_mut() {
             resources.commit_process_exit();
         }

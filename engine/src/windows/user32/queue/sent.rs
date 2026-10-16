@@ -9,6 +9,11 @@ pub(crate) struct PreparedSentChange32 {
     status: (u32, u32, u64),
 }
 impl PreparedSentChange32 {
+    pub(crate) fn with_flags(mut self, current: u32, fresh: u32) -> Self {
+        self.status.0 |= current;
+        self.status.1 |= fresh;
+        self
+    }
     pub(crate) fn thread(&self) -> u32 {
         self.thread
     }

@@ -1,6 +1,8 @@
 mod thread;
 pub(in crate::process::windows::files) use thread::MappingThreadReply32;
 mod calls;
+mod dib;
+pub(in crate::process) use dib::DibSection32;
 mod context;
 mod lifecycle;
 mod protection;

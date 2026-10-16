@@ -1,3 +1,4 @@
+mod gdi;
 use crate::{
     abi::{
         arena::{TRANSFER_OFFSET, TRANSFER_SIZE},
@@ -61,3 +62,5 @@ fn record(instance: &mut EngineInstance, kind: MediaRecordKind, epoch: u64, valu
             .unwrap(),
     );
 }
+
+pub(crate) use gdi::*;

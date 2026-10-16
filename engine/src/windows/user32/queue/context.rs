@@ -3,6 +3,18 @@ use crate::windows::user32::{Message32, User32Error32};
 use std::collections::VecDeque;
 
 impl MessageQueue32 {
+    pub(crate) fn check_external_change(&self) -> Result<(), User32Error32> {
+        self.generation
+            .checked_add(1)
+            .map(|_| ())
+            .ok_or(User32Error32::Capacity)
+    }
+    pub(crate) fn commit_external_change(&mut self) {
+        self.generation = self
+            .generation
+            .checked_add(1)
+            .expect("external queue change preflight");
+    }
     pub(crate) fn new(limit: usize) -> Result<Self, User32Error32> {
         let mut posted = VecDeque::new();
         posted

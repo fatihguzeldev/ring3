@@ -1,9 +1,14 @@
 use super::{Message32, Point32, User32Error32, User32Limits32, WindowClass32, WindowData32};
 use crate::windows::window::{WindowContext32, WindowDescription32, WindowHandle32};
 
+mod paint;
+
 struct WindowSlot32 {
     data: WindowData32,
     extra: Box<[u8]>,
+    update: crate::windows::gdi::Region32,
+    erase: bool,
+    paint_seen: bool,
 }
 
 pub(crate) struct User32State32 {
@@ -122,6 +127,7 @@ impl User32State32 {
         &self,
         description: WindowDescription32,
     ) -> Result<WindowHandle32, User32Error32> {
+        self.queue.check_external_change()?;
         Ok(self.windows.check_create(description)?)
     }
 
@@ -136,7 +142,19 @@ impl User32State32 {
             .create(description)
             .expect("preflighted window publication");
         data.handle = handle;
-        self.slots.push(WindowSlot32 { data, extra });
+        self.slots.push(WindowSlot32 {
+            data,
+            extra,
+            update: crate::windows::gdi::Region32::rectangle(super::Rect32 {
+                left: 0,
+                top: 0,
+                right: description.extent.width as i32,
+                bottom: description.extent.height as i32,
+            }),
+            erase: true,
+            paint_seen: false,
+        });
+        self.queue.commit_external_change();
         handle
     }
 
@@ -316,7 +334,9 @@ impl User32State32 {
         thread: u32,
         messages: &[Message32],
     ) -> Result<(u32, u32, u64), User32Error32> {
-        self.queue.project_input(thread, messages)
+        self.queue
+            .project_input(thread, messages)
+            .map(|status| self.with_paint_status(thread, status))
     }
     pub(crate) fn post_input(
         &mut self,
@@ -333,19 +353,33 @@ impl User32State32 {
         self.queue.can_post(count)
     }
     pub(crate) fn queue_status(&self, thread: u32) -> (u32, u32, u64) {
-        self.queue.status(thread)
+        self.with_paint_status(thread, self.queue.status(thread))
     }
     pub(crate) fn prepare_sent_change(
         &self,
         thread: u32,
         delta: i32,
     ) -> Result<super::PreparedSentChange32, User32Error32> {
-        self.queue.prepare_sent_change(thread, delta)
+        let paint = self.paint_status(thread);
+        self.queue
+            .prepare_sent_change(thread, delta)
+            .map(|prepared| prepared.with_flags(paint.0, paint.1))
     }
     pub(crate) fn commit_sent_change(&mut self, prepared: super::PreparedSentChange32) {
         self.queue.commit_sent_change(prepared);
     }
     pub(crate) fn observe_queue(&mut self, thread: u32, mask: u32) {
+        if mask & 0x20 != 0 {
+            for slot in &mut self.slots {
+                if self
+                    .windows
+                    .get(slot.data.handle)
+                    .is_ok_and(|window| window.description.thread_id == thread)
+                {
+                    slot.paint_seen = true;
+                }
+            }
+        }
         self.queue.observe(thread, mask)
     }
     pub(crate) fn post_quit(&mut self, message: Message32) -> Result<(), User32Error32> {
@@ -393,7 +427,7 @@ impl User32State32 {
         self.queue.discard_input();
     }
     pub(crate) fn queue_without_input(&self, thread: u32) -> (u32, u32, u64) {
-        self.queue.project_without_input(thread)
+        self.with_paint_status(thread, self.queue.project_without_input(thread))
     }
     pub(crate) fn remove_message(&mut self, index: usize) -> Option<super::QueuedKeyboard32> {
         self.queue.remove(index)

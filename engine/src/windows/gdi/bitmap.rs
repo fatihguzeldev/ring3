@@ -59,13 +59,6 @@ impl BitmapLayout32 {
         self.masks = Some(masks);
         Ok(self)
     }
-    pub fn color_masks(self) -> [u32; 3] {
-        self.masks.unwrap_or(match self.bits_per_pixel {
-            16 => [0x7c00, 0x03e0, 0x001f],
-            24 | 32 => [0xff0000, 0x00ff00, 0x0000ff],
-            _ => [0; 3],
-        })
-    }
     pub fn compression(self) -> u32 {
         if self.masks.is_some() { 3 } else { 0 }
     }

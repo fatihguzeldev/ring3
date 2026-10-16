@@ -146,6 +146,7 @@ pub fn user32_module(preferred_base: u32) -> SystemModule32 {
             })
             .chain(crate::windows::resources::user32_resource_exports())
             .chain(crate::windows::rawinput::raw_input_exports())
+            .chain(crate::windows::gdi::user32_gdi_exports())
             .collect(),
     }
 }

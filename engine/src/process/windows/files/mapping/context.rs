@@ -116,6 +116,13 @@ pub(super) struct PendingView32 {
     pub missing: Vec<u64>,
     pub bytes: Vec<u8>,
     pub filled: usize,
+    pub purpose: MappingViewPurpose32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum MappingViewPurpose32 {
+    Ordinary,
+    Dib { output: u32, within: u32 },
 }
 
 impl MappingRuntime32 {

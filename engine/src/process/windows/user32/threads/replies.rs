@@ -45,7 +45,20 @@ impl User32Context32 {
                 ..
             } => match self.state.find_message(thread, window, min, max) {
                 Ok(message) => {
-                    message.is_some() || self.timer_message_ready(thread, window, min, max)
+                    message.is_some()
+                        || self
+                            .state
+                            .paint_message(
+                                thread,
+                                window,
+                                min,
+                                max,
+                                u32::MAX,
+                                self.runtime_input.time_ms,
+                                self.runtime_input.cursor,
+                            )
+                            .is_ok_and(|message| message.is_some())
+                        || self.timer_message_ready(thread, window, min, max)
                 }
                 Err(_) => true,
             },
@@ -261,6 +274,7 @@ fn check_scratch(
 ) -> Result<(), User32Error32> {
     for pending in pending {
         match pending.continuation {
+            super::super::callback::Continuation32::Paint { output, .. } => output.check(memory)?,
             super::super::callback::Continuation32::DialogHelp { scratch, .. }
             | super::super::callback::Continuation32::DialogRemoteHelp { scratch, .. }
             | super::super::callback::Continuation32::Create { scratch, .. }
