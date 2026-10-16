@@ -259,13 +259,13 @@ impl Ext80 {
         let exceptions = self.operand_exceptions() | rhs.operand_exceptions();
         match (self.kind(), rhs.kind()) {
             (Kind::Infinity, Kind::Infinity) | (Kind::Zero, Kind::Zero) => Rounded::invalid(),
+            (Kind::Infinity, _) => {
+                Rounded::exact(Self::from_parts(negative, 0x7fff, 1 << 63), exceptions)
+            }
             (_, Kind::Zero) => Rounded::exact(
                 Self::from_parts(negative, 0x7fff, 1 << 63),
                 exceptions | ZERO_DIVIDE,
             ),
-            (Kind::Infinity, _) => {
-                Rounded::exact(Self::from_parts(negative, 0x7fff, 1 << 63), exceptions)
-            }
             (Kind::Zero, _) | (_, Kind::Infinity) => {
                 Rounded::exact(Self::from_parts(negative, 0, 0), exceptions)
             }
@@ -718,6 +718,10 @@ impl Ext80 {
         )
     }
 }
+
+#[cfg(test)]
+#[path = "value/tests/division.rs"]
+mod division_tests;
 
 impl Rounded {
     pub(crate) fn exact(value: Ext80, exceptions: u16) -> Self {

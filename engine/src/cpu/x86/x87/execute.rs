@@ -3,6 +3,10 @@ use core::cmp::Ordering;
 use super::X87State;
 use super::value::{DENORMAL, Ext80, INVALID, Kind, Rounded, X87Rounding};
 
+#[cfg(test)]
+#[path = "execute/tests/division.rs"]
+mod division_tests;
+
 const C0: u16 = 1 << 8;
 const C1: u16 = 1 << 9;
 const C2: u16 = 1 << 10;
