@@ -1,3 +1,4 @@
+mod codepages;
 mod notifications;
 mod publication;
 mod values;

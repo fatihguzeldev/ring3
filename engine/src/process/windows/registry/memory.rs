@@ -56,6 +56,7 @@ pub(super) fn string(
     address: u32,
     wide: bool,
     maximum: usize,
+    cp: CodePage32,
 ) -> Result<Vec<u16>, E> {
     if address == 0 {
         return Ok(Vec::new());
@@ -75,7 +76,10 @@ pub(super) fn string(
         }
     } else {
         let mut bytes = Vec::new();
-        for index in 0..=maximum {
+        let maximum_bytes = maximum
+            .checked_mul(cp.maximum_char_size() as usize)
+            .ok_or(E::InvalidParameter)?;
+        for index in 0..=maximum_bytes {
             let byte = read::<1>(
                 memory,
                 address
@@ -83,9 +87,12 @@ pub(super) fn string(
                     .ok_or(E::InvalidParameter)?,
             )?[0];
             if byte == 0 {
-                return CodePage32::Windows1252
-                    .decode(&bytes, false)
-                    .map_err(|_| E::InvalidData);
+                let units = cp.decode(&bytes, false).map_err(|_| E::InvalidData)?;
+                return if units.len() <= maximum {
+                    Ok(units)
+                } else {
+                    Err(E::InvalidParameter)
+                };
             }
             bytes.try_reserve(1).map_err(|_| E::NotEnoughMemory)?;
             bytes.push(byte);
@@ -93,7 +100,12 @@ pub(super) fn string(
     }
     Err(E::InvalidParameter)
 }
-pub(super) fn encoded_name(units: &[u16], wide: bool, terminated: bool) -> Result<Vec<u8>, E> {
+pub(super) fn encoded_name(
+    units: &[u16],
+    wide: bool,
+    terminated: bool,
+    cp: CodePage32,
+) -> Result<Vec<u8>, E> {
     let mut bytes = if wide {
         let mut bytes = Vec::new();
         bytes
@@ -104,10 +116,7 @@ pub(super) fn encoded_name(units: &[u16], wide: bool, terminated: bool) -> Resul
         }
         bytes
     } else {
-        CodePage32::Windows1252
-            .encode(units, false)
-            .map_err(|_| E::InvalidData)?
-            .0
+        cp.encode(units, false).map_err(|_| E::InvalidData)?.0
     };
     if terminated {
         bytes.push(0);
@@ -117,21 +126,26 @@ pub(super) fn encoded_name(units: &[u16], wide: bool, terminated: bool) -> Resul
     }
     Ok(bytes)
 }
-pub(super) fn value_guest_length(kind: u32, bytes: &[u8], wide: bool) -> Result<usize, E> {
+pub(super) fn value_guest_length(
+    kind: u32,
+    bytes: &[u8],
+    wide: bool,
+    cp: CodePage32,
+) -> Result<usize, E> {
     if wide || !matches!(kind, 1 | 2 | 7) {
         return Ok(bytes.len());
     }
     if !bytes.len().is_multiple_of(2) {
         return Err(E::InvalidData);
     }
-    Ok(char::decode_utf16(
-        bytes
-            .chunks_exact(2)
-            .map(|bytes| u16::from_le_bytes(bytes.try_into().unwrap())),
-    )
-    .count())
+    Ok(value_to_guest(kind, bytes, wide, cp)?.len())
 }
-pub(super) fn value_to_guest(kind: u32, bytes: &[u8], wide: bool) -> Result<Vec<u8>, E> {
+pub(super) fn value_to_guest(
+    kind: u32,
+    bytes: &[u8],
+    wide: bool,
+    cp: CodePage32,
+) -> Result<Vec<u8>, E> {
     if wide || !matches!(kind, 1 | 2 | 7) {
         let mut copy = Vec::new();
         copy.try_reserve_exact(bytes.len())
@@ -146,19 +160,21 @@ pub(super) fn value_to_guest(kind: u32, bytes: &[u8], wide: bool) -> Result<Vec<
         .chunks_exact(2)
         .map(|bytes| u16::from_le_bytes(bytes.try_into().unwrap()))
         .collect();
-    CodePage32::Windows1252
-        .encode(&units, false)
+    cp.encode(&units, false)
         .map(|(bytes, _)| bytes)
         .map_err(|_| E::InvalidData)
 }
-pub(super) fn value_from_guest(kind: u32, bytes: Vec<u8>, wide: bool) -> Result<Vec<u8>, E> {
+pub(super) fn value_from_guest(
+    kind: u32,
+    bytes: Vec<u8>,
+    wide: bool,
+    cp: CodePage32,
+) -> Result<Vec<u8>, E> {
     if wide || !matches!(kind, 1 | 2 | 7) {
         return Ok(bytes);
     }
-    let units = CodePage32::Windows1252
-        .decode(&bytes, false)
-        .map_err(|_| E::InvalidData)?;
-    encoded_name(&units, true, false)
+    let units = cp.decode(&bytes, false).map_err(|_| E::InvalidData)?;
+    encoded_name(&units, true, false, cp)
 }
 pub(super) fn publish(
     memory: &mut AddressSpace,

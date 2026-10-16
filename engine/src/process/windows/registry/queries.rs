@@ -2,14 +2,15 @@ use super::{RegistryError32 as E, memory, output::Outputs32};
 use crate::{process::EngineInstance, windows::registry::Advapi32Api32 as Api};
 impl EngineInstance {
     pub(super) fn registry_value(&mut self, api: Api, args: &[u32]) -> Result<u32, E> {
+        let cp = self.windows_ansi_code_page();
         let mem = self.memory.as_ref().ok_or(E::NotConfigured)?;
         let registry = &self.registry.as_ref().ok_or(E::NotConfigured)?.native;
         let get = matches!(api, Api::RegGetValueA | Api::RegGetValueW);
         let legacy = matches!(api, Api::RegQueryValueA | Api::RegQueryValueW);
         let (name, path, flags, type_pointer, data_pointer, size_pointer) = if get {
             (
-                memory::string(mem, args[2], api.wide(), 16383)?,
-                memory::string(mem, args[1], api.wide(), 32767)?,
+                memory::string(mem, args[2], api.wide(), 16383, cp)?,
+                memory::string(mem, args[1], api.wide(), 32767, cp)?,
                 args[3],
                 args[4],
                 args[5],
@@ -18,7 +19,7 @@ impl EngineInstance {
         } else if legacy {
             (
                 Vec::new(),
-                memory::string(mem, args[1], api.wide(), 32767)?,
+                memory::string(mem, args[1], api.wide(), 32767, cp)?,
                 0,
                 0,
                 args[2],
@@ -29,7 +30,7 @@ impl EngineInstance {
                 return Err(E::InvalidParameter);
             }
             (
-                memory::string(mem, args[1], api.wide(), 16383)?,
+                memory::string(mem, args[1], api.wide(), 16383, cp)?,
                 Vec::new(),
                 0,
                 args[3],
@@ -101,13 +102,14 @@ impl EngineInstance {
                         &expanded.encode_utf16().collect::<Vec<_>>(),
                         api.wide(),
                         true,
+                        cp,
                     )?);
                     output_type = 1;
                 }
                 let mut length = if let Some(bytes) = &expanded_bytes {
                     bytes.len()
                 } else {
-                    memory::value_guest_length(value.kind, value.bytes, api.wide())?
+                    memory::value_guest_length(value.kind, value.bytes, api.wide(), cp)?
                 };
                 let mut additional = 0;
                 if get && expanded_bytes.is_none() && matches!(output_type, 1 | 2 | 7) {
@@ -132,7 +134,9 @@ impl EngineInstance {
                         memory::output(mem, data_pointer, length)?;
                         bytes = match expanded_bytes {
                             Some(bytes) => bytes,
-                            None => memory::value_to_guest(value.kind, value.bytes, api.wide())?,
+                            None => {
+                                memory::value_to_guest(value.kind, value.bytes, api.wide(), cp)?
+                            }
                         };
                         bytes
                             .try_reserve_exact(additional)

@@ -95,6 +95,9 @@ impl NlsRuntime32 {
     }
 }
 impl crate::process::EngineInstance {
+    pub(in crate::process) fn windows_ansi_code_page(&self) -> crate::windows::text::CodePage32 {
+        self.nls.profile.ansi
+    }
     pub(in crate::process) fn windows_oem_code_page(&self) -> crate::windows::text::CodePage32 {
         self.nls.profile.oem
     }

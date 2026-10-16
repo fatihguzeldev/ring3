@@ -3,6 +3,7 @@ use crate::{process::EngineInstance, windows::registry::Advapi32Api32 as Api};
 impl EngineInstance {
     pub(super) fn registry_multiple(&mut self, api: Api, args: &[u32]) -> Result<u32, E> {
         const LIMIT: usize = 1024 * 1024;
+        let cp = self.windows_ansi_code_page();
         let mem = self.memory.as_ref().ok_or(E::NotConfigured)?;
         let registry = &self.registry.as_ref().ok_or(E::NotConfigured)?.native;
         if args[2] == 0 || args[4] == 0 {
@@ -24,9 +25,10 @@ impl EngineInstance {
                 u32::from_le_bytes(entry[..4].try_into().unwrap()),
                 api.wide(),
                 16383,
+                cp,
             )?;
             let value = registry.query_value(args[0], &name)?;
-            let value_length = memory::value_guest_length(value.kind, value.bytes, api.wide())?;
+            let value_length = memory::value_guest_length(value.kind, value.bytes, api.wide(), cp)?;
             let offset = data
                 .len()
                 .checked_add(3)
@@ -36,7 +38,7 @@ impl EngineInstance {
                 .checked_add(value_length)
                 .filter(|&end| end <= LIMIT - length)
                 .ok_or(E::TransferTooLong)?;
-            let bytes = memory::value_to_guest(value.kind, value.bytes, api.wide())?;
+            let bytes = memory::value_to_guest(value.kind, value.bytes, api.wide(), cp)?;
             data.try_reserve(end - data.len())
                 .map_err(|_| E::NotEnoughMemory)?;
             data.resize(offset, 0);

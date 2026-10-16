@@ -117,57 +117,67 @@ impl Registry32 {
         })
     }
     pub fn query_info(&self, handle: u32) -> Result<RegistryKeyInfo32<'_>, E> {
-        self.query_info_encoded(handle, false)
+        self.query_info_for_code_page(handle, None)
     }
     pub fn query_info_encoded(&self, handle: u32, ansi: bool) -> Result<RegistryKeyInfo32<'_>, E> {
+        self.query_info_for_code_page(
+            handle,
+            ansi.then_some(crate::windows::text::CodePage32::Windows1252),
+        )
+    }
+    pub fn query_info_for_code_page(
+        &self,
+        handle: u32,
+        cp: Option<crate::windows::text::CodePage32>,
+    ) -> Result<RegistryKeyInfo32<'_>, E> {
         let (target, _) = self.target(handle, 1)?;
         let target = self.effective_target(target)?;
         let key = self.live_key(target.primary)?;
         let keys = self.keys_for(target)?;
         let values = self.values_for(target)?;
-        let length = |units: &[u16]| -> usize {
-            if ansi {
-                char::decode_utf16(units.iter().copied()).count()
-            } else {
-                units.len()
+        let length = |units: &[u16]| -> Result<u32, E> {
+            match cp {
+                Some(cp) => cp
+                    .encode(units, false)
+                    .map(|(bytes, _)| bytes.len() as u32)
+                    .map_err(|_| E::InvalidData),
+                None => Ok(units.len() as u32),
             }
         };
+        let mut maximum_subkey_name = 0;
+        let mut maximum_subkey_class = 0;
+        for (key, start) in &keys {
+            maximum_subkey_name = maximum_subkey_name.max(length(&key.path[*start..])?);
+            maximum_subkey_class = maximum_subkey_class.max(length(&key.class)?);
+        }
+        let mut maximum_value_name = 0;
+        let mut maximum_value_bytes = 0;
+        for value in &values {
+            maximum_value_name = maximum_value_name.max(length(&value.name)?);
+            let size = if cp.is_some() && matches!(value.kind, 1 | 2 | 7) {
+                if !value.bytes.len().is_multiple_of(2) {
+                    return Err(E::InvalidData);
+                }
+                let units: Vec<u16> = value
+                    .bytes
+                    .chunks_exact(2)
+                    .map(|bytes| u16::from_le_bytes(bytes.try_into().unwrap()))
+                    .collect();
+                length(&units)?
+            } else {
+                value.bytes.len() as u32
+            };
+            maximum_value_bytes = maximum_value_bytes.max(size);
+        }
         Ok(RegistryKeyInfo32 {
             class: &key.class,
             modified: key.modified,
             subkeys: keys.len() as u32,
-            maximum_subkey_name: keys
-                .iter()
-                .map(|(key, start)| length(&key.path[*start..]) as u32)
-                .max()
-                .unwrap_or(0),
-            maximum_subkey_class: keys
-                .iter()
-                .map(|(key, _)| length(&key.class) as u32)
-                .max()
-                .unwrap_or(0),
+            maximum_subkey_name,
+            maximum_subkey_class,
             values: values.len() as u32,
-            maximum_value_name: values
-                .iter()
-                .map(|value| length(&value.name) as u32)
-                .max()
-                .unwrap_or(0),
-            maximum_value_bytes: values
-                .iter()
-                .map(|value| {
-                    if ansi && matches!(value.kind, 1 | 2 | 7) {
-                        let units: Vec<u16> = value
-                            .bytes
-                            .chunks_exact(2)
-                            .map(|bytes| u16::from_le_bytes(bytes.try_into().unwrap()))
-                            .collect();
-                        length(&units) as u32
-                    } else {
-                        value.bytes.len() as u32
-                    }
-                })
-                .max()
-                .unwrap_or(0),
+            maximum_value_name,
+            maximum_value_bytes,
         })
     }
 }

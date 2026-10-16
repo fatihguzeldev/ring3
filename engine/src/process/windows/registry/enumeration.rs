@@ -10,6 +10,7 @@ impl EngineInstance {
         }
     }
     fn registry_enum_key(&mut self, api: Api, args: &[u32]) -> Result<u32, E> {
+        let cp = self.windows_ansi_code_page();
         let memory = self.memory.as_ref().ok_or(E::NotConfigured)?;
         let registry = &self.registry.as_ref().ok_or(E::NotConfigured)?.native;
         let legacy = matches!(api, Api::RegEnumKeyA | Api::RegEnumKeyW);
@@ -24,7 +25,7 @@ impl EngineInstance {
             memory::dword(memory, args[3])?
         } as usize;
         let entry = registry.enumerate_key(args[0], args[1])?;
-        let name = memory::encoded_name(entry.name, api.wide(), true)?;
+        let name = memory::encoded_name(entry.name, api.wide(), true, cp)?;
         let unit = if api.wide() { 2 } else { 1 };
         let length = name.len() / unit - 1;
         let mut outputs = Outputs32::new();
@@ -37,7 +38,7 @@ impl EngineInstance {
         }
         let class = if !legacy && args[6] != 0 {
             let class_capacity = memory::dword(memory, args[6])? as usize;
-            let class = memory::encoded_name(entry.class, api.wide(), true)?;
+            let class = memory::encoded_name(entry.class, api.wide(), true, cp)?;
             let class_length = class.len() / unit - 1;
             outputs.word(memory, args[6], class_length as u32)?;
             if args[5] != 0 && class_capacity <= class_length {
@@ -60,6 +61,7 @@ impl EngineInstance {
         Ok(result)
     }
     fn registry_enum_value(&mut self, api: Api, args: &[u32]) -> Result<u32, E> {
+        let cp = self.windows_ansi_code_page();
         let memory = self.memory.as_ref().ok_or(E::NotConfigured)?;
         let registry = &self.registry.as_ref().ok_or(E::NotConfigured)?.native;
         if args[2] == 0 || args[3] == 0 || args[4] != 0 || (args[6] != 0 && args[7] == 0) {
@@ -72,9 +74,9 @@ impl EngineInstance {
             memory::dword(memory, args[7])? as usize
         };
         let entry = registry.enumerate_value(args[0], args[1])?;
-        let name = memory::encoded_name(entry.name, api.wide(), true)?;
+        let name = memory::encoded_name(entry.name, api.wide(), true, cp)?;
         let length = name.len() / if api.wide() { 2 } else { 1 } - 1;
-        let bytes = memory::value_to_guest(entry.value.kind, entry.value.bytes, api.wide())?;
+        let bytes = memory::value_to_guest(entry.value.kind, entry.value.bytes, api.wide(), cp)?;
         let mut outputs = Outputs32::new();
         outputs.word(memory, args[3], length as u32)?;
         outputs.word(memory, args[5], entry.value.kind)?;
@@ -92,13 +94,14 @@ impl EngineInstance {
         Ok(result)
     }
     fn registry_info(&mut self, api: Api, args: &[u32]) -> Result<u32, E> {
+        let cp = self.windows_ansi_code_page();
         let memory = self.memory.as_ref().ok_or(E::NotConfigured)?;
         let registry = &self.registry.as_ref().ok_or(E::NotConfigured)?.native;
         if args[3] != 0 || (args[1] != 0 && args[2] == 0) {
             return Err(E::InvalidParameter);
         }
-        let info = registry.query_info_encoded(args[0], !api.wide())?;
-        let class = memory::encoded_name(info.class, api.wide(), true)?;
+        let info = registry.query_info_for_code_page(args[0], (!api.wide()).then_some(cp))?;
+        let class = memory::encoded_name(info.class, api.wide(), true, cp)?;
         let class_length = class.len() / if api.wide() { 2 } else { 1 } - 1;
         let mut outputs = Outputs32::new();
         let mut result = 0;

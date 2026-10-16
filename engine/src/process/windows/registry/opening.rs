@@ -4,6 +4,7 @@ use crate::{
 };
 impl EngineInstance {
     pub(super) fn registry_open(&mut self, api: Api, args: &[u32], time: u64) -> Result<u32, E> {
+        let cp = self.windows_ansi_code_page();
         let mem = self.memory.as_mut().ok_or(E::NotConfigured)?;
         let runtime = self.registry.as_mut().ok_or(E::NotConfigured)?;
         if api == Api::RegOpenCurrentUser {
@@ -16,7 +17,7 @@ impl EngineInstance {
         }
         let (parent, path, desired, out, class, volatile, disposition, create) = match api {
             Api::RegConnectRegistryA | Api::RegConnectRegistryW => {
-                let name = memory::string(mem, args[0], api.wide(), 32767)?;
+                let name = memory::string(mem, args[0], api.wide(), 32767, cp)?;
                 let name = String::from_utf16_lossy(&name)
                     .trim_start_matches('\\')
                     .to_ascii_uppercase();
@@ -40,7 +41,7 @@ impl EngineInstance {
                 }
                 (
                     args[0],
-                    memory::string(mem, args[1], api.wide(), 32767)?,
+                    memory::string(mem, args[1], api.wide(), 32767, cp)?,
                     args[3],
                     args[4],
                     Vec::new(),
@@ -51,7 +52,7 @@ impl EngineInstance {
             }
             Api::RegOpenKeyA | Api::RegOpenKeyW => (
                 args[0],
-                memory::string(mem, args[1], api.wide(), 32767)?,
+                memory::string(mem, args[1], api.wide(), 32767, cp)?,
                 0xf003f,
                 args[2],
                 Vec::new(),
@@ -61,7 +62,7 @@ impl EngineInstance {
             ),
             Api::RegCreateKeyA | Api::RegCreateKeyW => (
                 args[0],
-                memory::string(mem, args[1], api.wide(), 32767)?,
+                memory::string(mem, args[1], api.wide(), 32767, cp)?,
                 0xf003f,
                 args[2],
                 Vec::new(),
@@ -84,10 +85,10 @@ impl EngineInstance {
                 }
                 (
                     args[0],
-                    memory::string(mem, args[1], api.wide(), 32767)?,
+                    memory::string(mem, args[1], api.wide(), 32767, cp)?,
                     args[5],
                     args[7],
-                    memory::string(mem, args[3], api.wide(), 255)?,
+                    memory::string(mem, args[3], api.wide(), 255, cp)?,
                     args[4] & 1 != 0,
                     args[8],
                     true,
