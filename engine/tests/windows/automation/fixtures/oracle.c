@@ -562,7 +562,12 @@ static HRESULT STDMETHODCALLTYPE dispatch_invoke(IDispatch *self, DISPID member,
     if (member != DISPID_VALUE) return DISP_E_MEMBERNOTFOUND;
     if (!result) return E_POINTER;
     VariantInit(result);
-    if (value->mode == 1) {
+    if (value->mode == 5 || value->mode == 6) {
+        V_VT(result) = VT_UNKNOWN;
+        V_UNKNOWN(result) = (IUnknown *)self;
+        dispatch_addref(self);
+        if (value->mode == 5) return DISP_E_UNKNOWNNAME;
+    } else if (value->mode == 1) {
         V_VT(result) = VT_BSTR;
         V_BSTR(result) = SysAllocStringLen(embedded, 3);
         if (!V_BSTR(result)) return E_OUTOFMEMORY;
@@ -596,7 +601,9 @@ static void dispatch_conversions(void) {
         { VT_UNKNOWN, VT_DISPATCH, 0, 0 },
         { VT_DISPATCH, VT_UNKNOWN, 0, 0 },
         { VT_UNKNOWN, VT_DISPATCH, 0, 4 },
-        { VT_DISPATCH, VT_DISPATCH, 0, 0 }
+        { VT_DISPATCH, VT_DISPATCH, 0, 0 },
+        { VT_DISPATCH, VT_I4, 0, 5 },
+        { VT_DISPATCH, VT_I4, 0, 6 }
     };
     unsigned index;
     for (index = 0; index < sizeof(cases) / sizeof(cases[0]); ++index) {

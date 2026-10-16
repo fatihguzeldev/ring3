@@ -1,0 +1,7 @@
+#include <windows.h>
+
+100 ACCELERATORS
+BEGIN
+    "A", 41, VIRTKEY, CONTROL
+    "x", 42, ASCII
+END

@@ -1,6 +1,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <stdio.h>
+#include <string.h>
 
 static void failed_dib(const char *name, BITMAPINFO *info, HANDLE section, DWORD offset, int comma) {
     void *bits = (void *)(ULONG_PTR)0x12345678;
@@ -10,6 +11,82 @@ static void failed_dib(const char *name, BITMAPINFO *info, HANDLE section, DWORD
     printf("%s{\"case\":\"%s\",\"created\":%u,\"bits\":%lu,\"error\":%lu}",
         comma ? "," : "", name, bitmap != NULL, (unsigned long)(ULONG_PTR)bits, error);
     if (bitmap) DeleteObject(bitmap);
+}
+
+
+static unsigned long quad_color(RGBQUAD value) {
+    return RGB(value.rgbRed, value.rgbGreen, value.rgbBlue);
+}
+
+static void system_brush_reference(void) {
+    HBRUSH brush = GetSysColorBrush(COLOR_BTNFACE);
+    LOGBRUSH before = {0}, after = {0};
+    int before_bytes = GetObjectW(brush, sizeof(before), &before);
+    SetLastError(0xabcdef01);
+    BOOL deleted = DeleteObject(brush);
+    DWORD error = GetLastError();
+    HBRUSH repeated = GetSysColorBrush(COLOR_BTNFACE);
+    int after_bytes = GetObjectW(brush, sizeof(after), &after);
+    printf(",\"systemBrush\":{\"cached\":%u,\"deleteResult\":%u,\"deleteError\":%lu,\"beforeBytes\":%d,\"afterBytes\":%d,\"beforeColor\":%lu,\"afterColor\":%lu,\"queriedColor\":%lu}",
+        brush == repeated, deleted, error, before_bytes, after_bytes, before.lbColor, after.lbColor, GetSysColor(COLOR_BTNFACE));
+}
+
+static void bitmap_masks_reference(void) {
+    struct HeaderMasks { BITMAPINFOHEADER header; DWORD masks[3]; } info = {0};
+    const unsigned bits[] = {16, 24, 32, 16, 16, 32};
+    const DWORD compression[] = {BI_RGB, BI_RGB, BI_RGB, BI_BITFIELDS, BI_BITFIELDS, BI_BITFIELDS};
+    const DWORD masks[][3] = {{0,0,0}, {0,0,0}, {0,0,0}, {0x7c00,0x3e0,0x1f}, {0xf800,0x7e0,0x1f}, {0xff,0xff00,0xff0000}};
+    printf(",\"bitmapMasks\":[");
+    for (unsigned i = 0; i < sizeof(bits)/sizeof(bits[0]); ++i) {
+        info.header.biSize = sizeof(BITMAPINFOHEADER);
+        info.header.biWidth = 2; info.header.biHeight = -1;
+        info.header.biPlanes = 1; info.header.biBitCount = (WORD)bits[i];
+        info.header.biCompression = compression[i];
+        memcpy(info.masks, masks[i], sizeof(info.masks));
+        void *pixels = NULL;
+        HBITMAP bitmap = CreateDIBSection(NULL, (BITMAPINFO *)&info, DIB_RGB_COLORS, &pixels, NULL, 0);
+        DIBSECTION object = {0};
+        int size = GetObjectW(bitmap, sizeof(object), &object);
+        HDC dc = CreateCompatibleDC(NULL);
+        HGDIOBJ previous = SelectObject(dc, bitmap);
+        COLORREF actual = SetPixel(dc, 0, 0, 0x332211);
+        DWORD raw = 0;
+        if (pixels) memcpy(&raw, pixels, bits[i]/8);
+        printf("%s{\"bits\":%u,\"compression\":%lu,\"created\":%u,\"objectBytes\":%d,\"objectCompression\":%lu,\"masks\":[%lu,%lu,%lu],\"pixelResult\":%lu,\"raw\":%lu}",
+            i ? "," : "", bits[i], compression[i], bitmap != NULL, size, object.dsBmih.biCompression,
+            object.dsBitfields[0], object.dsBitfields[1], object.dsBitfields[2], actual, raw);
+        SelectObject(dc, previous); DeleteDC(dc); DeleteObject(bitmap);
+    }
+    printf("]");
+}
+
+static void logical_palette_reference(void) {
+    struct Palette3 { WORD version, count; PALETTEENTRY entries[3]; } logical = {0x300, 3, {{255,0,0,0},{0,255,0,0},{0,0,255,0}}};
+    struct IndexedInfo { BITMAPINFOHEADER header; WORD indexes[4]; } info = {0};
+    info.header.biSize = sizeof(BITMAPINFOHEADER);
+    info.header.biWidth = 2; info.header.biHeight = -1;
+    info.header.biPlanes = 1; info.header.biBitCount = 8; info.header.biClrUsed = 3;
+    info.indexes[0] = 2; info.indexes[1] = 0; info.indexes[2] = 1;
+    HPALETTE palette = CreatePalette((LOGPALETTE *)&logical);
+    HDC dc = CreateCompatibleDC(NULL);
+    HPALETTE old_palette = SelectPalette(dc, palette, FALSE);
+    void *pixels = NULL;
+    HBITMAP bitmap = CreateDIBSection(dc, (BITMAPINFO *)&info, DIB_PAL_COLORS, &pixels, NULL, 0);
+    HGDIOBJ previous = SelectObject(dc, bitmap);
+    RGBQUAD before[3] = {0}, changed[3] = {0}, realized[3] = {0};
+    UINT before_count = GetDIBColorTable(dc, 0, 3, before);
+    PALETTEENTRY replacement = {0x11,0x22,0x33,0};
+    UINT set_count = SetPaletteEntries(palette, 0, 1, &replacement);
+    UINT changed_count = GetDIBColorTable(dc, 0, 3, changed);
+    UINT realization = RealizePalette(dc);
+    UINT realized_count = GetDIBColorTable(dc, 0, 3, realized);
+    printf(",\"logicalPalette\":{\"created\":%u,\"selected\":%u,\"dibCreated\":%u,\"counts\":[%u,%u,%u,%u],\"realization\":%u,\"before\":[%lu,%lu,%lu],\"changed\":[%lu,%lu,%lu],\"realized\":[%lu,%lu,%lu]}",
+        palette != NULL, old_palette != NULL, bitmap != NULL, before_count, set_count, changed_count, realized_count, realization,
+        quad_color(before[0]), quad_color(before[1]), quad_color(before[2]),
+        quad_color(changed[0]), quad_color(changed[1]), quad_color(changed[2]),
+        quad_color(realized[0]), quad_color(realized[1]), quad_color(realized[2]));
+    SelectObject(dc, previous); DeleteObject(bitmap);
+    SelectPalette(dc, old_palette, FALSE); DeleteDC(dc); DeleteObject(palette);
 }
 
 int main(void) {
@@ -60,6 +137,9 @@ int main(void) {
     printf("]");
     if (alias) { *(DWORD *)(alias + 4) = 7; UnmapViewOfFile(alias); }
     CloseHandle(section);
+    system_brush_reference();
+    bitmap_masks_reference();
+    logical_palette_reference();
     DestroyWindow(parent);
     puts("}");
     return 0;
