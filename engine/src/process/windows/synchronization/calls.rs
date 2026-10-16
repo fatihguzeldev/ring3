@@ -37,7 +37,6 @@ impl EngineInstance {
             return Err(HostError::Call(CallError::InvalidRequest));
         }
         self.checked_pending_call(owner, token)?;
-        self.collect_activation_captures()?;
         if let Some(reply) = self
             .synchronization
             .as_ref()
@@ -188,6 +187,7 @@ impl EngineInstance {
             .and_then(|runtime| runtime.reply)
             .ok_or(HostError::Call(CallError::InvalidToken))?;
         self.checked_pending_call(reply.owner, reply.token)?;
+        self.collect_activation_captures()?;
         if reply.alertable && self.has_pending_thread_apc(self.threads.current_id()) {
             return Ok(());
         }
