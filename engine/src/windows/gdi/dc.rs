@@ -27,7 +27,7 @@ impl GdiContext32 {
         Ok(match self.object(object)? {
             GdiObject32::Brush(_) => current.state.brush,
             GdiObject32::Pen(_) => current.state.pen,
-            GdiObject32::StockFont(_) => current.state.font,
+            GdiObject32::StockFont(_) | GdiObject32::Font(_) => current.state.font,
             GdiObject32::StockPalette => return Err(GdiError32::InvalidRequest),
             GdiObject32::Bitmap(_) => {
                 if !matches!(current.kind, DcKind32::Memory { .. }) {
@@ -56,7 +56,7 @@ impl GdiContext32 {
         match object_type {
             GdiObject32::Brush(_) => state.brush = object,
             GdiObject32::Pen(_) => state.pen = object,
-            GdiObject32::StockFont(_) => state.font = object,
+            GdiObject32::StockFont(_) | GdiObject32::Font(_) => state.font = object,
             GdiObject32::Bitmap(_) => state.bitmap = object,
             GdiObject32::Region(region) => state.clip = Some(region),
             GdiObject32::StockPalette => unreachable!(),

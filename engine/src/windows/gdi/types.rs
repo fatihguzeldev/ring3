@@ -76,6 +76,7 @@ pub enum GdiObject32 {
     Bitmap(super::BitmapLayout32),
     Region(super::Region32),
     StockFont(u32),
+    Font(super::LogicalFont32),
     StockPalette,
 }
 impl GdiObject32 {
@@ -84,7 +85,7 @@ impl GdiObject32 {
             Self::Pen(_) => 1,
             Self::Brush(_) => 2,
             Self::StockPalette => 5,
-            Self::StockFont(_) => 6,
+            Self::StockFont(_) | Self::Font(_) => 6,
             Self::Bitmap(_) => 7,
             Self::Region(_) => 8,
         }
@@ -113,6 +114,10 @@ pub struct DcState32 {
     pub font: u32,
     pub palette: u32,
     pub text_color: u32,
+    pub text_align: u32,
+    pub character_extra: i32,
+    pub justification_extra: i32,
+    pub justification_breaks: u32,
     pub background_color: u32,
     pub background_mode: u32,
     pub dc_brush_color: u32,
@@ -137,6 +142,10 @@ impl Default for DcState32 {
             font: super::context::stock_handle(13),
             palette: super::context::stock_handle(15),
             text_color: 0,
+            text_align: 0,
+            character_extra: 0,
+            justification_extra: 0,
+            justification_breaks: 0,
             background_color: 0x00ff_ffff,
             background_mode: 2,
             dc_brush_color: 0x00ff_ffff,
@@ -156,42 +165,22 @@ impl Default for DcState32 {
 }
 impl DcState32 {
     pub fn device_point(&self, point: Point32) -> Result<Point32, GdiError32> {
-        let axis = |value: i32, window: i32, viewport: i32, numerator: i32, denominator: i32| {
-            if denominator == 0 {
-                return Err(GdiError32::InvalidRequest);
-            }
-            let product = (i64::from(value) - i64::from(window)) * i64::from(numerator);
-            let divisor = i64::from(denominator);
-            let quotient = product / divisor;
-            let remainder = product % divisor;
-            let rounded = quotient
-                + if remainder.abs() * 2 >= divisor.abs() {
-                    if (product < 0) != (divisor < 0) {
-                        -1
-                    } else {
-                        1
-                    }
-                } else {
-                    0
-                };
-            i32::try_from(rounded + i64::from(viewport)).map_err(|_| GdiError32::InvalidRequest)
-        };
-        Ok(Point32 {
-            x: axis(
-                point.x,
-                self.window_origin.x,
-                self.viewport_origin.x,
-                self.viewport_extent.x,
-                self.window_extent.x,
-            )?,
-            y: axis(
-                point.y,
-                self.window_origin.y,
-                self.viewport_origin.y,
-                self.viewport_extent.y,
-                self.window_extent.y,
-            )?,
-        })
+        mapped_point(
+            point,
+            self.window_origin,
+            self.viewport_origin,
+            self.window_extent,
+            self.viewport_extent,
+        )
+    }
+    pub fn logical_point(&self, point: Point32) -> Result<Point32, GdiError32> {
+        mapped_point(
+            point,
+            self.viewport_origin,
+            self.window_origin,
+            self.viewport_extent,
+            self.window_extent,
+        )
     }
     pub fn accepts(&self, point: Point32, bounds: Rect32) -> bool {
         point.x >= bounds.left
@@ -200,4 +189,49 @@ impl DcState32 {
             && point.y < bounds.bottom
             && self.clip.as_ref().is_none_or(|clip| clip.contains(point))
     }
+}
+
+fn mapped_point(
+    point: Point32,
+    source: Point32,
+    target: Point32,
+    source_extent: Point32,
+    target_extent: Point32,
+) -> Result<Point32, GdiError32> {
+    let axis = |value: i32, window: i32, viewport: i32, numerator: i32, denominator: i32| {
+        if denominator == 0 {
+            return Err(GdiError32::InvalidRequest);
+        }
+        let product = (i64::from(value) - i64::from(window)) * i64::from(numerator);
+        let divisor = i64::from(denominator);
+        let quotient = product / divisor;
+        let remainder = product % divisor;
+        let rounded = quotient
+            + if remainder.abs() * 2 >= divisor.abs() {
+                if (product < 0) != (divisor < 0) {
+                    -1
+                } else {
+                    1
+                }
+            } else {
+                0
+            };
+        i32::try_from(rounded + i64::from(viewport)).map_err(|_| GdiError32::InvalidRequest)
+    };
+    Ok(Point32 {
+        x: axis(
+            point.x,
+            source.x,
+            target.x,
+            target_extent.x,
+            source_extent.x,
+        )?,
+        y: axis(
+            point.y,
+            source.y,
+            target.y,
+            target_extent.y,
+            source_extent.y,
+        )?,
+    })
 }
