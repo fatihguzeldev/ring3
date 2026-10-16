@@ -76,6 +76,11 @@ impl EngineInstance {
             GetCurrentProcessId => self.process_runtime.launch.process_id,
             GetCurrentThreadId => self.current_windows_thread_id()?,
             GetCurrentThread => u32::MAX - 1,
+            EncodePointer => crate::windows::process::PointerCodec32::new(self.key).encode(args[0]),
+            DecodePointer => crate::windows::process::PointerCodec32::new(self.key).decode(args[0]),
+            IsProcessorFeaturePresent => {
+                u32::from(crate::windows::process::processor_feature_present(args[0]))
+            }
             GetCommandLineA | GetCommandLineW => {
                 self.process_runtime
                     .startup
@@ -268,3 +273,7 @@ impl EngineInstance {
 #[cfg(test)]
 #[path = "tests/module_names.rs"]
 mod module_name_tests;
+
+#[cfg(test)]
+#[path = "tests/runtime/mod.rs"]
+mod runtime_tests;

@@ -39,4 +39,7 @@ catalog! {
  GetVersion=0x000c_001c,"GetVersion",0;
  GetVersionExA=0x000c_001d,"GetVersionExA",1;
  GetVersionExW=0x000c_001e,"GetVersionExW",1;
+ EncodePointer=0x000c_0020,"EncodePointer",1;
+ DecodePointer=0x000c_0021,"DecodePointer",1;
+ IsProcessorFeaturePresent=0x000c_0022,"IsProcessorFeaturePresent",1;
 }
