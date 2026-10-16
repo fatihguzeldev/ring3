@@ -14,7 +14,7 @@ const PC = 0x1000,
   DATA = 0x5000,
   T = 140,
   KEY_HIGH = 0x4944454e;
-assert.equal(ARENA_SIZE, 4756);
+assert.equal(ARENA_SIZE, 4796);
 const hash = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const sourcePaths = [
   ...exportSources,
@@ -25,7 +25,7 @@ const sourcePaths = [
   'engine/src/cpu/x86/decode/cache_timestamp.rs',
   'engine/src/cpu/x86/decode/decoder.rs', 'engine/src/cpu/x86/decode/instruction.rs',
   'engine/src/cpu/x86/decode/profile.rs', 'engine/src/cpu/x86/decode/families.rs',
-  'engine/src/cpu/x86/decode/lower.rs', 'engine/src/cpu/x86/decode/families.rs',
+  'engine/src/cpu/x86/decode/lower.rs', 
   'engine/src/cpu/x86/ir.rs',
   'engine/src/cpu/dbt/region.rs',
   'engine/src/cpu/dbt/wasm/instructions/integer_system.rs',

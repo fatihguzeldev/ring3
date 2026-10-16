@@ -9,7 +9,7 @@ const [enginePath, output, root] = process.argv.slice(2), engine = readEngine(en
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const paths = ['engine/src/cpu/dbt/wasm/instructions/integer_system.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/mod.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/arithmetic.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/moves.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/exchange.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/predicates.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/shifts.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/control.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/extended.rs',
   'engine/src/cpu/x86/capabilities.rs',
-  'engine/src/cpu/x86/decode/profile.rs', 'engine/src/cpu/x86/decode/families.rs', 'engine/src/cpu/x86/decode/lower.rs', 'engine/src/cpu/x86/decode/families.rs',
+  'engine/src/cpu/x86/decode/profile.rs', 'engine/src/cpu/x86/decode/families.rs', 'engine/src/cpu/x86/decode/lower.rs', 
   'engine/tests/cpu/profile/environment/cpuid/native.rs', 'engine/tests/cpu/profile/environment/cpuid/wasm.rs',
   ...['oracle.mjs', 'checks.mjs', 'native.mjs', 'run.mjs'].map(name => 'engine/tests/cpu/profile/environment/cpuid/fixtures/p2-cpuid/runtime/' + name)];
 const pins = () => Object.fromEntries(paths.map(path => [path, hash(readFileSync(join(root, path)))]));
