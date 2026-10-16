@@ -35,6 +35,14 @@ impl EngineInstance {
                 reply.continuation,
             )?;
         }
+        if reply.provider == super::WindowsCallbackProvider32::Automation {
+            self.check_automation_callback(
+                reply.owner,
+                reply.token,
+                reply.frame,
+                reply.continuation,
+            )?;
+        }
         if reply.provider == super::WindowsCallbackProvider32::User32 {
             self.user32
                 .as_ref()
@@ -117,6 +125,14 @@ impl EngineInstance {
         self.checked_pending_call(reply.owner, reply.token)?;
         if reply.provider == super::WindowsCallbackProvider32::Ole32 {
             self.check_registered_com_callback(
+                reply.owner,
+                reply.token,
+                reply.frame,
+                reply.continuation,
+            )?;
+        }
+        if reply.provider == super::WindowsCallbackProvider32::Automation {
+            self.check_automation_callback(
                 reply.owner,
                 reply.token,
                 reply.frame,

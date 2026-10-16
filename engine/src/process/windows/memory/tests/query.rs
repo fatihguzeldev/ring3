@@ -130,3 +130,27 @@ fn canonical_thread_storage_keeps_its_reserve_commit_query_boundaries() {
         (base + 0xf000, base, PAGE_SIZE, MEM_COMMIT, 4)
     );
 }
+
+#[test]
+fn automation_callback_arena_has_one_reserved_owner_before_guest_allocation() {
+    let mut engine = engine();
+    let range = engine.automation_scratch_bounds();
+    let base = range.first as u32 * PAGE_SIZE;
+    let info = query(&mut engine, base + 3, 0x1800);
+    assert_eq!(
+        (info[0], info[1], info[3], info[4], info[5], info[6]),
+        (base, base, 32 * PAGE_SIZE, MEM_RESERVE, 0, MEM_PRIVATE)
+    );
+    assert_eq!(
+        engine.memory_allocate(&[base, PAGE_SIZE, MEM_RESERVE, 4]),
+        Err(MemoryError32::InvalidAddress)
+    );
+    assert!(engine.check_guest_reservation_admission(&[range]).is_err());
+    assert!(
+        engine
+            .memory()
+            .unwrap()
+            .permissions_at(GuestAddress(base))
+            .is_err()
+    );
+}

@@ -20,12 +20,15 @@ impl EngineInstance {
         let saved = self.threads.execution_pins().count()
             + self.exceptions.execution_pins().count()
             + self.modules.execution_pins().count();
-        let capacity =
-            (depth * 4 + self.windows_replies.len() + self.ole32_pending_owners().count() + 8)
-                .checked_add(saved)
-                .ok_or(HostError::Resident(
-                    crate::cpu::dbt::RegistryError::Allocation,
-                ))?;
+        let capacity = (depth * 4
+            + self.windows_replies.len()
+            + self.ole32_pending_owners().count()
+            + self.automation_pending_owners().count()
+            + 8)
+        .checked_add(saved)
+        .ok_or(HostError::Resident(
+            crate::cpu::dbt::RegistryError::Allocation,
+        ))?;
         let mut pins = Vec::new();
         pins.try_reserve_exact(capacity)
             .map_err(|_| HostError::Resident(crate::cpu::dbt::RegistryError::Allocation))?;
@@ -33,6 +36,9 @@ impl EngineInstance {
             owner(&mut pins, call.owner);
         }
         for value in self.ole32_pending_owners() {
+            owner(&mut pins, value);
+        }
+        for value in self.automation_pending_owners() {
             owner(&mut pins, value);
         }
         if let Some(value) = self.version.pending_owner() {

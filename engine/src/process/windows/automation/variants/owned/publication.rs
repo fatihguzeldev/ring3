@@ -9,6 +9,22 @@ use crate::{
 };
 
 impl EngineInstance {
+    pub(in crate::process::windows::automation) fn preflight_retained_variant_plan(
+        &mut self,
+        plan: &OwnedValuePlan32,
+    ) -> Result<(), HostError> {
+        self.check_owned_plan_capacity(plan)?;
+        self.check_retained_variant_allocations(plan)?;
+        if !plan.blocks.is_empty() || !plan.retire.is_empty() {
+            let mut sizes = Vec::new();
+            sizes
+                .try_reserve_exact(plan.blocks.len())
+                .map_err(|_| HostError::Automation(E::Allocation))?;
+            sizes.extend(plan.blocks.iter().map(|block| block.len() as u32));
+            self.prepare_windows_local_initialized_group(&sizes, &plan.retire)?;
+        }
+        Ok(())
+    }
     pub(in crate::process::windows::automation) fn publish_retained_variant_plan(
         &mut self,
         destination: u32,
@@ -120,6 +136,7 @@ impl EngineInstance {
         );
         drop(payloads);
         if let Err(error) = result {
+            // retained plans must keep original source pointers for callback retry and compensation.
             for fixup in &plan.fixups {
                 let (bytes, offset) = match fixup.place {
                     Place32::Root(offset) => (&mut plan.root, offset),

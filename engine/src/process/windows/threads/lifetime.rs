@@ -17,6 +17,7 @@ impl EngineInstance {
         if id == self.threads.current_id() {
             crate::process::cpu::context::ExtendedCpuState::capture(self.arena())?;
         }
+        self.check_automation_thread_scratch(id)?;
         let record = &self.threads.threads[index];
         if id == self.threads.current_id() {
             if let Some(user32) = self.user32.as_ref() {
@@ -74,6 +75,7 @@ impl EngineInstance {
             .and_then(|count| count.checked_add(extra))
             .and_then(|count| count.checked_add(resource_ranges.len()))
             .and_then(|count| count.checked_add(nls_ranges.len()))
+            .and_then(|count| count.checked_add(self.automation_thread_scratch_ranges(id).count()))
             .and_then(|count| {
                 count.checked_add(
                     activation
@@ -123,6 +125,7 @@ impl EngineInstance {
         }
         ranges.extend(resource_ranges);
         ranges.extend(nls_ranges);
+        ranges.extend(self.automation_thread_scratch_ranges(id));
         if let Some(receipt) = &activation {
             ranges.extend_from_slice(receipt.ranges());
         }
@@ -361,6 +364,7 @@ impl EngineInstance {
         self.threads.fls.retire_thread(id);
         self.exceptions.retire_thread(id);
         self.nls.retire_thread(id);
+        self.automation_retire_thread(id);
         if let Some(gdi) = self.gdi.as_mut() {
             gdi.retire_thread(id);
             if let Some(context) = self.user32.as_mut() {

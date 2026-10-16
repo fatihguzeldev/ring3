@@ -87,9 +87,13 @@ impl EngineInstance {
                     .map(|runtime| runtime.scratch_reservation()),
             )
             .chain(core::iter::once(self.nls.scratch_reservation()))
+            .chain(core::iter::once(self.automation_scratch_bounds()))
             .chain(self.activation.iter().map(|runtime| runtime.reservation()));
-        media.chain(graphics).chain(com).chain(windows)
-            .chain(self.gdi.iter().flat_map(|runtime| runtime.guest_reservations()))
+        media.chain(graphics).chain(com).chain(windows).chain(
+            self.gdi
+                .iter()
+                .flat_map(|runtime| runtime.guest_reservations()),
+        )
     }
     pub(in crate::process) fn check_guest_reservation_admission(
         &self,

@@ -30,7 +30,15 @@ impl EngineInstance {
             .ensure_transaction_versions(1)
             .map_err(HostError::Memory)?;
         let result = if api.is_variant() {
-            self.automation_variant_call(api, frame.arguments())
+            match self.automation_variant_outcome(owner, token, frame, api) {
+                Ok(super::super::callbacks::WindowsProviderOutcome32::Callback(request)) => {
+                    self.park_automation_callback(request)?;
+                    return Ok(true);
+                }
+                Ok(super::super::callbacks::WindowsProviderOutcome32::Return(value)) => Ok(value),
+                Err(error) if self.automation_provider_owns_token(token) => return Err(error),
+                Err(error) => Err(error),
+            }
         } else if api.is_array() {
             self.automation_array_call(api, frame.arguments())
         } else {

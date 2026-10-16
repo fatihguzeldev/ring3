@@ -118,6 +118,9 @@ impl ThreadRuntime32 {
     pub(in crate::process) fn handle_limit(&self) -> usize {
         self.limits.handles as usize
     }
+    pub(in crate::process) fn thread_limit(&self) -> usize {
+        self.limits.threads as usize
+    }
     pub(in crate::process) fn current_teb(&self) -> Option<u32> {
         self.threads
             .iter()

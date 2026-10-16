@@ -21,25 +21,14 @@ pub(super) enum VariantOperation32 {
         destination: u32,
         plan: OwnedValuePlan32,
     },
+    Query {
+        destination: u32,
+        plan: OwnedValuePlan32,
+        source: u32,
+        target: u16,
+    },
 }
 impl EngineInstance {
-    pub(in crate::process::windows::automation) fn automation_variant_call(
-        &mut self,
-        api: Api,
-        args: &[u32],
-    ) -> Result<u32, HostError> {
-        match self.prepare_automation_variant_operation(api, args)? {
-            VariantOperation32::Complete(value) => Ok(value),
-            VariantOperation32::Publish {
-                destination,
-                mut plan,
-            } => {
-                self.publish_retained_variant_plan(destination, &mut plan)?;
-                Ok(0)
-            }
-        }
-    }
-
     pub(super) fn prepare_automation_variant_operation(
         &mut self,
         api: Api,
@@ -88,7 +77,13 @@ impl EngineInstance {
                 && matches!(target, 9 | 13)
                 && target != source.vartype()
             {
-                return Err(HostError::Automation(E::NotImplemented));
+                let plan = self.plan_owned_variant(Variant32::EMPTY, destination, true)?;
+                return Ok(VariantOperation32::Query {
+                    destination: args[0],
+                    plan,
+                    source: source.pointer(),
+                    target,
+                });
             }
             if source.vartype() == 9
                 && source.pointer() != 0

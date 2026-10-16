@@ -23,6 +23,7 @@ pub enum WindowsCallbackProvider32 {
     Resources,
     Nls,
     Ole32,
+    Automation,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

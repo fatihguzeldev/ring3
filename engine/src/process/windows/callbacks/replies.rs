@@ -151,6 +151,7 @@ impl EngineInstance {
             WindowsCallbackProvider32::D3D8
             | WindowsCallbackProvider32::DirectSound
             | WindowsCallbackProvider32::DirectInput
+            | WindowsCallbackProvider32::Automation
             | WindowsCallbackProvider32::Nls => {
                 let outcome = match reply.provider {
                     WindowsCallbackProvider32::D3D8 => {
@@ -165,6 +166,9 @@ impl EngineInstance {
                     WindowsCallbackProvider32::Ole32 => unreachable!(),
                     WindowsCallbackProvider32::Nls => {
                         self.resume_nls_callback(reply.continuation, result)?
+                    }
+                    WindowsCallbackProvider32::Automation => {
+                        self.resume_automation_callback(reply.continuation, result)?
                     }
                     WindowsCallbackProvider32::User32
                     | WindowsCallbackProvider32::Files

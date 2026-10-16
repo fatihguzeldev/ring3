@@ -13,6 +13,8 @@ impl EngineInstance {
     ) -> Result<OwnedValuePlan32, HostError> {
         let mut plan =
             OwnedValuePlan32::new(&Variant32::new(8, &[]).0).map_err(HostError::Automation)?;
+        plan.source = Variant32::EMPTY;
+        plan.old = old;
         self.retire_variant_tree(&mut plan, old, 0)?;
         let size = payload
             .len()
@@ -48,6 +50,10 @@ impl EngineInstance {
         clear: bool,
     ) -> Result<OwnedValuePlan32, HostError> {
         let mut plan = OwnedValuePlan32::new(&value.0).map_err(HostError::Automation)?;
+        plan.old = old;
+        if clear {
+            plan.source = Variant32::EMPTY;
+        }
         self.retire_variant_tree(&mut plan, old, 0)?;
         if !clear {
             self.clone_variant_tree(&mut plan, value, Place32::Root(8), &mut [0; 128], 0)?;
@@ -75,9 +81,6 @@ impl EngineInstance {
         value.validate().map_err(HostError::Automation)?;
         if value.by_ref() {
             return Ok(());
-        }
-        if matches!(value.base(), 9 | 13) && !value.array() && value.pointer() != 0 {
-            return Err(HostError::Automation(E::NotImplemented));
         }
         if value.array() {
             if value.pointer() == 0 {
@@ -186,7 +189,11 @@ impl EngineInstance {
         plan.arrays
             .try_reserve(1)
             .map_err(|_| HostError::Automation(E::Allocation))?;
-        plan.arrays.push(ArrayCopy32 { block, layout });
+        plan.arrays.push(ArrayCopy32 {
+            source: pointer,
+            block,
+            layout,
+        });
         Ok(())
     }
 
@@ -199,9 +206,6 @@ impl EngineInstance {
         value.validate().map_err(HostError::Automation)?;
         if value.by_ref() || value.pointer() == 0 {
             return Ok(());
-        }
-        if matches!(value.base(), 9 | 13) && !value.array() && value.pointer() != 0 {
-            return Err(HostError::Automation(E::NotImplemented));
         }
         if value.array() {
             if depth >= self.automation.limits.nesting {
@@ -223,6 +227,11 @@ impl EngineInstance {
             plan.retired_arrays += 1;
             let mut frozen = Vec::new();
             if matches!(array.layout.vartype, 9 | 12 | 13) {
+                plan.retired_payload_bytes = plan
+                    .retired_payload_bytes
+                    .checked_add(array.layout.data_bytes)
+                    .filter(|&bytes| bytes <= self.automation.limits.bytes)
+                    .ok_or(HostError::Automation(E::Capacity))?;
                 frozen
                     .try_reserve_exact(array.layout.data_bytes)
                     .map_err(|_| HostError::Automation(E::Allocation))?;
@@ -255,6 +264,14 @@ impl EngineInstance {
                     self.retire_variant_tree(plan, value, depth + 1)?;
                 }
             }
+            plan.retired_payloads
+                .try_reserve(1)
+                .map_err(|_| HostError::Automation(E::Allocation))?;
+            plan.retired_payloads.push(super::RetiredArray32 {
+                pointer: value.pointer(),
+                vartype: array.layout.vartype,
+                bytes: frozen,
+            });
         } else if value.base() == 8 {
             let string = self
                 .automation

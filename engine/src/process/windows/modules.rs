@@ -405,7 +405,7 @@ impl EngineInstance {
             &mut bytes,
         )
         .map_err(|_| HostError::Infrastructure)?;
-        let extra_ranges = if let Some(gdi) = self.gdi.as_ref() {
+        let mut extra_ranges = if let Some(gdi) = self.gdi.as_ref() {
             gdi.check_process_exit(self.memory()?)
                 .map_err(HostError::Gdi)?;
             let mut ranges = Vec::new();
@@ -418,6 +418,12 @@ impl EngineInstance {
         } else {
             Vec::new()
         };
+        self.check_automation_process_scratch()?;
+        extra_ranges
+            .try_reserve_exact(self.automation_process_scratch_ranges().count())
+            .map_err(|_| HostError::Infrastructure)?;
+        extra_ranges.extend(self.automation_process_scratch_ranges());
+        extra_ranges.sort_unstable_by_key(|range| range.first);
         let media = self.prepare_media_process_exit()?;
         let mut bindings = self
             .registry

@@ -12,6 +12,8 @@ pub(in crate::process) struct AutomationRuntime32 {
     pub(super) strings: Vec<Bstr32>,
     pub(super) arrays: Vec<super::arrays::Array32>,
     pub(super) bytes: usize,
+    pub(super) references: Vec<super::references::ReferenceWork32>,
+    pub(super) next_reference: u64,
 }
 impl Default for AutomationRuntime32 {
     fn default() -> Self {
@@ -20,6 +22,8 @@ impl Default for AutomationRuntime32 {
             strings: Vec::new(),
             arrays: Vec::new(),
             bytes: 0,
+            references: Vec::new(),
+            next_reference: 0,
         }
     }
 }
@@ -28,6 +32,7 @@ impl AutomationRuntime32 {
         self.strings.clear();
         self.arrays.clear();
         self.bytes = 0;
+        self.references.clear();
     }
     pub(super) fn prepare_string(&mut self, bytes: usize, replace: Option<usize>) -> Result<(), E> {
         let old = replace.map_or(0, |i| self.strings[i].bytes);
@@ -53,6 +58,7 @@ impl EngineInstance {
             || self.callback.is_some()
             || !self.automation.strings.is_empty()
             || !self.automation.arrays.is_empty()
+            || !self.automation.references.is_empty()
         {
             return Err(HostError::InvalidRequest);
         }

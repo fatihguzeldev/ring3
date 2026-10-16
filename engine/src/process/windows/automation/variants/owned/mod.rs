@@ -1,7 +1,9 @@
 mod publication;
 mod snapshot;
 
-use crate::windows::automation::{ArrayLayout32, AutomationError32 as E, AutomationLimits32};
+use crate::windows::automation::{
+    ArrayLayout32, AutomationError32 as E, AutomationLimits32, variants::Variant32,
+};
 
 #[derive(Clone, Copy)]
 enum Place32 {
@@ -17,8 +19,14 @@ struct Fixup32 {
 }
 
 struct ArrayCopy32 {
+    source: u32,
     block: usize,
     layout: ArrayLayout32,
+}
+struct RetiredArray32 {
+    pointer: u32,
+    vartype: u16,
+    bytes: Vec<u8>,
 }
 
 pub(in crate::process::windows::automation) struct OwnedValuePlan32 {
@@ -33,6 +41,10 @@ pub(in crate::process::windows::automation) struct OwnedValuePlan32 {
     retired_arrays: usize,
     freed: usize,
     bytes: usize,
+    source: Variant32,
+    old: Variant32,
+    retired_payloads: Vec<RetiredArray32>,
+    retired_payload_bytes: usize,
 }
 
 impl OwnedValuePlan32 {
@@ -54,7 +66,42 @@ impl OwnedValuePlan32 {
             retired_arrays: 0,
             freed: 0,
             bytes: 0,
+            source: Variant32(root.try_into().map_err(|_| E::InvalidParameter)?),
+            old: Variant32::EMPTY,
+            retired_payloads: Vec::new(),
+            retired_payload_bytes: 0,
         })
+    }
+
+    pub(in crate::process::windows::automation) fn source(&self) -> Variant32 {
+        self.source
+    }
+    pub(in crate::process::windows::automation) fn old(&self) -> Variant32 {
+        self.old
+    }
+    pub(in crate::process::windows::automation) fn acquired_root(&mut self, value: Variant32) {
+        self.root.copy_from_slice(&value.0);
+        self.source = Variant32::EMPTY;
+    }
+    pub(in crate::process::windows::automation) fn source_array(
+        &self,
+        pointer: u32,
+    ) -> Option<(u16, &[u8])> {
+        let array = self.arrays.iter().find(|array| array.source == pointer)?;
+        let start = array.layout.data_offset();
+        Some((
+            array.layout.vartype,
+            &self.blocks[array.block][start..start + array.layout.data_bytes],
+        ))
+    }
+    pub(in crate::process::windows::automation) fn old_array(
+        &self,
+        pointer: u32,
+    ) -> Option<(u16, &[u8])> {
+        self.retired_payloads
+            .iter()
+            .find(|array| array.pointer == pointer)
+            .map(|array| (array.vartype, array.bytes.as_slice()))
     }
 
     fn reserve_block(&mut self, size: usize, limits: AutomationLimits32) -> Result<usize, E> {

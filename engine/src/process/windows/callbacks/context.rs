@@ -8,6 +8,10 @@ use crate::process::{
 };
 
 impl EngineInstance {
+    pub(in crate::process) fn windows_callback_work_capacity(&self) -> usize {
+        self.threads.thread_limit() * (MAX_REPLIES - 1)
+    }
+
     pub(in crate::process) fn validate_windows_provider_owner(
         &self,
         owner: PendingOwner,
@@ -140,6 +144,15 @@ impl EngineInstance {
         }
         self.park_windows_callback(request)
     }
+    pub(in crate::process) fn park_automation_callback(
+        &mut self,
+        request: WindowsCallback32,
+    ) -> Result<(), HostError> {
+        if request.provider != WindowsCallbackProvider32::Automation {
+            return Err(HostError::InvalidRequest);
+        }
+        self.park_windows_callback(request)
+    }
     fn park_windows_callback(&mut self, request: WindowsCallback32) -> Result<(), HostError> {
         validate_request(request)?;
         self.check_windows_callback_capacity()?;
@@ -189,6 +202,7 @@ impl EngineInstance {
                 || self.activation_provider_owns_token(token)
                 || self.version_provider_owns_token(token)
                 || self.ole32_provider_owns_token(token)
+                || self.automation_provider_owns_token(token)
                 || self.module_source_provider_owns_token(token)
                 || self.winmm_provider_owns_token(token))
     }
