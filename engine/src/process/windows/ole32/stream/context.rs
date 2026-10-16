@@ -20,6 +20,8 @@ pub(in crate::process::windows::ole32) struct StreamRuntime32 {
     pub(in crate::process::windows::ole32) store: StreamStore32,
     pub(super) entries: Vec<Option<StreamEntry32>>,
     pub(super) methods: [GuestAddress; 14],
+    pub(in crate::process::windows::ole32) copy_limit: usize,
+    pub(in crate::process::windows::ole32) copies: Vec<super::copy::StreamCopy32>,
 }
 impl StreamRuntime32 {
     pub(in crate::process::windows::ole32) fn buffer_reservation() -> crate::memory::PageRange {
@@ -34,7 +36,13 @@ impl StreamRuntime32 {
         entries.resize_with(objects, || None);
         let limits =
             StreamLimits32::for_objects(objects).map_err(|_| Ole32Error32::InvalidConfiguration)?;
+        let mut copies = Vec::new();
+        copies
+            .try_reserve_exact(objects.min(64))
+            .map_err(|_| Ole32Error32::Allocation)?;
         Ok(Self {
+            copies,
+            copy_limit: objects.min(64),
             store: StreamStore32::new(limits).map_err(|_| Ole32Error32::Allocation)?,
             entries,
             methods: [GuestAddress(0); 14],

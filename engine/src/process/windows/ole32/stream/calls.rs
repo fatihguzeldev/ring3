@@ -33,6 +33,24 @@ impl EngineInstance {
             return Err(HostError::Call(CallError::InvalidRequest));
         }
         Self::prepare_completed_call(frame.complete(0))?;
+        if self.resume_stream_copy()? {
+            return Ok(true);
+        }
+        if method.0 == 7 {
+            let runtime = self.ole32.as_ref().ok_or(HostError::InvalidRequest)?;
+            let target = u64::from(frame.arguments()[1]);
+            let range = runtime.com.reservation();
+            // The entire configured object arena remains engine-owned, including
+            // released/stale addresses and identities with another payload.
+            if target < range.first as u64 * 4096
+                || target >= (range.first + range.count) as u64 * 4096
+            {
+                let index = runtime.stream_index(self.memory()?, frame.arguments()[0])?;
+                let id = runtime.streams.entries[index].unwrap().id;
+                self.begin_stream_copy(owner, token, frame, id)?;
+                return Ok(true);
+            }
+        }
         let runtime = self.ole32.as_mut().ok_or(HostError::InvalidRequest)?;
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
         let index = runtime.stream_index(memory, frame.arguments()[0])?;

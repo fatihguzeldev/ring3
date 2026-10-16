@@ -32,6 +32,8 @@ pub(in crate::process) struct PreparedComThreadExit32 {
     transfers: super::transfer::PreparedTransferExit32,
     rpc: super::super::rpc::PreparedRpcThreadExit32,
     references: Option<PreparedGuestLifetime32>,
+    stream_copies: super::super::stream::copy::PreparedStreamCopyExit32,
+    streams: Option<super::super::stream::copy::PreparedDestroyedStreams32>,
 }
 impl PreparedComThreadExit32 {
     pub(in crate::process) fn ranges(&self) -> &[PageRange] {
@@ -66,6 +68,8 @@ impl EngineInstance {
             transfers: self.prepare_com_transfer_exit(thread)?,
             rpc: self.prepare_rpc_thread_exit(thread)?,
             references: None,
+            stream_copies: self.prepare_stream_copy_exit(thread)?,
+            streams: None,
             ranges: Vec::new(),
             actions: Vec::new(),
             waking: Vec::new(),
@@ -80,18 +84,33 @@ impl EngineInstance {
         let Some(runtime) = self.ole32.as_ref() else {
             return Ok(result);
         };
-        if !result.rpc.releases().is_empty() {
+        if !result.rpc.releases().is_empty() || !result.stream_copies.unholds().is_empty() {
             let receipt = runtime
                 .com
-                .prepare_lifetime_changes(self.memory()?, &[], result.rpc.releases(), &[], &[], &[])
+                .prepare_lifetime_changes(
+                    self.memory()?,
+                    &[],
+                    result.rpc.releases(),
+                    &[],
+                    result.stream_copies.unholds(),
+                    &[],
+                )
                 .map_err(super::super::rpc::com_reference_error)?;
             result
                 .ranges
                 .try_reserve_exact(receipt.ranges().len())
                 .map_err(|_| HostError::Infrastructure)?;
             result.ranges.extend_from_slice(receipt.ranges());
+            result.streams = Some(runtime.prepare_destroyed_streams(receipt.destroyed())?);
             result.references = Some(receipt);
         }
+        result
+            .ranges
+            .try_reserve_exact(result.stream_copies.ranges().len())
+            .map_err(|_| HostError::Infrastructure)?;
+        result
+            .ranges
+            .extend_from_slice(result.stream_copies.ranges());
         let count = runtime
             .activation
             .pending
@@ -250,6 +269,9 @@ impl EngineInstance {
                 memory_changed,
             );
             runtime.rpc.record_destroyed_identities(&destroyed);
+            if let Some(streams) = prepared.streams.take() {
+                runtime.commit_destroyed_streams(streams);
+            }
         }
         self.commit_com_thread_exit_metadata(prepared);
     }
@@ -265,6 +287,7 @@ impl EngineInstance {
     }
 
     fn commit_com_thread_exit_metadata(&mut self, prepared: PreparedComThreadExit32) {
+        self.commit_stream_copy_exit(prepared.stream_copies);
         let Some(runtime) = self.ole32.as_mut() else {
             return;
         };

@@ -128,3 +128,44 @@ impl StreamStore32 {
         Ok(self.owned(self.stream(id)?.1.buffer).0.len() as u64)
     }
 }
+
+pub(crate) struct PreparedStreamsRelease32 {
+    revision: u64,
+    slots: Vec<usize>,
+}
+impl StreamStore32 {
+    pub(crate) fn prepare_release_streams(
+        &self,
+        ids: &[StreamId32],
+    ) -> Result<PreparedStreamsRelease32, StreamError32> {
+        if !ids.is_empty() {
+            self.changed()?;
+        }
+        let mut slots = Vec::new();
+        slots
+            .try_reserve_exact(ids.len())
+            .map_err(|_| StreamError32::OutOfMemory)?;
+        for id in ids {
+            let (slot, _) = self.stream(*id)?;
+            if slots.contains(&slot) {
+                return Err(StreamError32::InvalidParameter);
+            }
+            slots.push(slot);
+        }
+        Ok(PreparedStreamsRelease32 {
+            revision: self.revision,
+            slots,
+        })
+    }
+    pub(crate) fn commit_release_streams(&mut self, prepared: PreparedStreamsRelease32) {
+        self.check_revision(prepared.revision)
+            .expect("stream retirement was preflighted");
+        if !prepared.slots.is_empty() {
+            for slot in prepared.slots {
+                let stream = self.streams[slot].take().unwrap();
+                self.drop_buffer(stream.buffer);
+            }
+            self.revision += 1;
+        }
+    }
+}
