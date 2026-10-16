@@ -9,11 +9,51 @@ assert.ok(['all','prefix-boundaries'].includes(mode),'known integer fixture mode
 const initial=readFileSync(join(output,'initial-arena.bin')),SIZE=initial.length,T=140,DATA=0x5010;
 const hash=b=>createHash('sha256').update(b).digest('hex'),hex=s=>Buffer.from(s,'hex');
 const contexts=[],modules=[],observations=[],helpers=[],diagnostics=[];
-const sourcePaths=['engine/src/cpu/x86/atomic.rs','engine/src/cpu/x86/decode/atomic.rs',
- 'engine/src/cpu/x86/decode/flow.rs','engine/src/cpu/x86/decode/lower.rs', 'engine/src/cpu/x86/decode/families.rs','engine/src/cpu/x86/decode/profile.rs', 'engine/src/cpu/x86/decode/families.rs',
- 'engine/src/cpu/x86/ir.rs','engine/src/cpu/dbt/region.rs','engine/src/cpu/dbt/wasm/instructions/atomic.rs', 'engine/src/cpu/dbt/wasm/helpers/integer.rs','engine/src/cpu/dbt/wasm/instructions/integer_system.rs',
- 'engine/src/cpu/dbt/wasm/instructions/integer/arithmetic.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/bits.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/carry_rotates.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/decimal.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/flags.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/mod.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/multiply_divide.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/operands.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/rotates.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/shifts.rs','engine/src/process/cpu/integer.rs', 'engine/src/process/cpu/mod.rs', 'engine/src/process/mod.rs','engine/src/abi/cpu_helper.rs',
- 'engine/tests/cpu/profile/integer/native/completion.rs', 'engine/tests/cpu/profile/native.rs', 'engine/tests/cpu/control/integration/native/prefixes.rs', 'engine/tests/cpu/control/native.rs', 'engine/tests/cpu/atomic/exchange/prefixes/native/lock.rs', 'engine/tests/cpu/atomic/native.rs', 'engine/tests/cpu/profile/integer/wasm/completion.rs', 'engine/tests/cpu/profile/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/profile/integer/fixtures/p2-integer-completion/runtime/run.mjs'];
+const sourcePaths=[
+  'engine/src/cpu/x86/atomic.rs',
+  'engine/src/cpu/x86/decode/atomic.rs',
+  'engine/src/cpu/x86/decode/flow.rs',
+  'engine/src/cpu/x86/decode/lower.rs',
+  'engine/src/cpu/x86/decode/families.rs',
+  'engine/src/cpu/x86/decode/profile.rs',
+  'engine/src/cpu/x86/ir.rs',
+  'engine/src/cpu/dbt/region.rs',
+  'engine/src/cpu/dbt/wasm/instructions/atomic.rs',
+  'engine/src/cpu/dbt/wasm/helpers/integer.rs',
+  'engine/src/cpu/dbt/wasm/instructions/integer_system.rs',
+  'engine/src/cpu/dbt/wasm/instructions/integer/arithmetic.rs',
+  'engine/src/cpu/dbt/wasm/instructions/integer/bits.rs',
+  'engine/src/cpu/dbt/wasm/instructions/integer/carry_rotates.rs',
+  'engine/src/cpu/dbt/wasm/instructions/integer/decimal.rs',
+  'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/mod.rs',
+  'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/arithmetic.rs',
+  'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/moves.rs',
+  'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/exchange.rs',
+  'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/predicates.rs',
+  'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/shifts.rs',
+  'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/control.rs',
+  'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/extended.rs',
+  'engine/src/cpu/dbt/wasm/instructions/integer/flags.rs',
+  'engine/src/cpu/dbt/wasm/instructions/integer/mod.rs',
+  'engine/src/cpu/dbt/wasm/instructions/integer/multiply_divide.rs',
+  'engine/src/cpu/dbt/wasm/instructions/integer/operands.rs',
+  'engine/src/cpu/dbt/wasm/instructions/integer/rotates.rs',
+  'engine/src/cpu/dbt/wasm/instructions/integer/shifts.rs',
+  'engine/src/process/cpu/integer.rs',
+  'engine/src/process/cpu/mod.rs',
+  'engine/src/process/mod.rs',
+  'engine/src/abi/cpu_helper.rs',
+  'engine/tests/cpu/profile/integer/native/completion.rs',
+  'engine/tests/cpu/profile/native.rs',
+  'engine/tests/cpu/control/integration/native/prefixes.rs',
+  'engine/tests/cpu/control/native.rs',
+  'engine/tests/cpu/atomic/exchange/prefixes/native/lock.rs',
+  'engine/tests/cpu/atomic/native.rs',
+  'engine/tests/cpu/profile/integer/wasm/completion.rs',
+  'engine/tests/cpu/profile/wasm.rs',
+  'engine/tests/support/wasm.rs',
+  'engine/tests/cpu/profile/integer/fixtures/p2-integer-completion/runtime/run.mjs'
+];
 const pins=()=>Object.fromEntries(sourcePaths.map(p=>[p,hash(readFileSync(join(root,p)))])),beforePins=pins();
 function record(magic,size,fields,version=1){const b=Buffer.alloc(size);b.write(magic);b.writeUInt16LE(version,4);b.writeUInt16LE(1,6);b.writeUInt32LE(size,8);fields.forEach((v,i)=>b.writeUInt32LE(v>>>0,16+i*4));return b;}
 const state=s=>record('R3ST',56,[...s.r,s.pc,s.flags]);

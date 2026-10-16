@@ -29,7 +29,7 @@ const sources = [
   'engine/src/windows/callback_frame.rs',
   'engine/src/windows/calling_convention.rs',
   'engine/src/process/calls/call.rs',
-  'engine/src/cpu/dbt/wasm/instructions/integer/dispatch.rs',
+  'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/mod.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/arithmetic.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/moves.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/exchange.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/predicates.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/shifts.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/control.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/extended.rs',
   'engine/src/cpu/dbt/wasm/instructions/integer/flags.rs',
   'engine/src/cpu/dbt/wasm/instructions/integer/bits.rs',
   'engine/src/cpu/dbt/wasm/instructions/integer/decimal.rs',

@@ -13,7 +13,7 @@ const paths = ['engine/src/cpu/x86/capabilities.rs', 'engine/src/cpu/x86/decode/
   'engine/src/cpu/x86/decode/mpx/tests.rs', 'engine/src/cpu/x86/decode/profile.rs', 'engine/src/cpu/x86/decode/families.rs',
   'engine/src/cpu/x86/decode/flow.rs', 'engine/src/cpu/x86/decode/lower.rs', 'engine/src/cpu/x86/decode/families.rs',
   'engine/src/cpu/dbt/wasm/instructions/memory/narrow.rs', 'engine/src/cpu/dbt/wasm/instructions/memory/word_store.rs',
-  'engine/src/cpu/dbt/wasm/instructions/integer/dispatch.rs', 'engine/tests/cpu/control/native.rs',
+  'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/mod.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/arithmetic.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/moves.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/exchange.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/predicates.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/shifts.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/control.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/extended.rs', 'engine/tests/cpu/control/native.rs',
   'engine/tests/cpu/control/wasm.rs', own + 'native.rs', own + 'wasm.rs',
   own + 'fixtures/p2-bnd-prefix/runtime/run.mjs', supportPath];
 const pins = () => Object.fromEntries(paths.map(path => [path, hash(readFileSync(join(root, path)))]));

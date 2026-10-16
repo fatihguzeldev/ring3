@@ -15,7 +15,7 @@ const paths = [
   'engine/src/cpu/x86/decode/integer.rs', 'engine/src/cpu/x86/decode/operands.rs',
   'engine/src/cpu/x86/decode/execution_faults.rs', 'engine/src/cpu/dbt/wasm/instructions/atomic.rs', 'engine/src/cpu/dbt/wasm/helpers/integer.rs',
   'engine/src/cpu/dbt/wasm/instructions/memory/exchange.rs', 'engine/src/cpu/dbt/wasm/instructions/memory/byte_store.rs',
-  'engine/src/cpu/dbt/wasm/instructions/memory/word_store.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch.rs',
+  'engine/src/cpu/dbt/wasm/instructions/memory/word_store.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/mod.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/arithmetic.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/moves.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/exchange.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/predicates.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/shifts.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/control.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/extended.rs',
   'engine/src/cpu/dbt/wasm/instructions/integer/operands.rs', 'engine/src/process/memory/scalar.rs',
   'engine/src/memory/space.rs', 'engine/src/memory/space/atomic.rs', 'engine/src/abi/memory_helper.rs',
   'engine/tests/cpu/atomic/wasm.rs', 'engine/tests/cpu/atomic/hints/wasm.rs',

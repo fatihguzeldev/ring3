@@ -15,7 +15,7 @@ const paths = [
   'engine/src/cpu/x86/decode/profile.rs', 'engine/src/cpu/x86/decode/families.rs', 'engine/src/cpu/x86/decode/lower.rs', 'engine/src/cpu/x86/decode/families.rs',
   'engine/src/cpu/x86/decode/execution_faults.rs', 'engine/src/cpu/dbt/wasm/emitter/mod.rs', 'engine/src/cpu/dbt/wasm/emitter/module.rs', 'engine/src/cpu/dbt/wasm/emitter/body.rs', 'engine/src/cpu/dbt/wasm/requirements.rs', 'engine/src/cpu/dbt/wasm/imports/wiring.rs',
   'engine/src/cpu/dbt/wasm/abi.rs', 'engine/src/cpu/dbt/wasm/code_fetch.rs',
-  'engine/src/cpu/dbt/wasm/instructions/integer/dispatch.rs', 'engine/src/process/execution/stopped.rs',
+  'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/mod.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/arithmetic.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/moves.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/exchange.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/predicates.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/shifts.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/control.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/extended.rs', 'engine/src/process/execution/stopped.rs',
   'engine/tests/cpu/control/native.rs', 'engine/tests/cpu/control/wasm.rs',
   own + 'native.rs', own + 'wasm.rs', own + 'fixtures/p2-data-prefetch/runtime/run.mjs',
   'engine/tests/cpu/profile/environment/cpuid/fixtures/p2-cpuid/runtime/oracle.mjs',

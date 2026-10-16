@@ -8,7 +8,7 @@ assert.ok(enginePath && output && root, 'explicit engine, output and root');
 const paths = ['engine/src/abi/x86/segments/modes.rs', 'engine/src/cpu/x86/decode/modes.rs',
   'engine/src/cpu/x86/decode/strings/defaults.rs', 'engine/src/cpu/x86/segments/transfers/tests.rs',
   'engine/src/process/calls/call/modes.rs', 'engine/src/cpu/x86/decode/lower.rs', 'engine/src/cpu/x86/decode/families.rs',
-  'engine/src/cpu/dbt/wasm/instructions/strings.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch.rs',
+  'engine/src/cpu/dbt/wasm/instructions/strings.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/mod.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/arithmetic.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/moves.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/exchange.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/predicates.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/shifts.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/control.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/extended.rs',
   'engine/src/cpu/dbt/wasm/instructions/segments.rs', 'engine/src/process/cpu/segments.rs',
   'engine/src/cpu/x86/decode/strings.rs', 'engine/src/cpu/x86/decode/operands.rs',
   'engine/src/cpu/x86/decode/flow.rs', 'engine/src/cpu/x86/segments/cache.rs', 'engine/src/cpu/x86/segments/transfers.rs',

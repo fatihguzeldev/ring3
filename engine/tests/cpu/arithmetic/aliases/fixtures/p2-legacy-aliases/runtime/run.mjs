@@ -15,7 +15,7 @@ const paths = [
   'engine/src/cpu/x86/decode/mod.rs', 'engine/src/cpu/x86/decode/lower.rs', 'engine/src/cpu/x86/decode/families.rs',
   'engine/src/cpu/x86/decode/integer.rs', 'engine/src/cpu/x86/decode/atomic.rs',
   'engine/src/cpu/x86/decode/profile.rs', 'engine/src/cpu/x86/decode/families.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/shifts.rs',
-  'engine/src/cpu/dbt/wasm/instructions/integer/dispatch.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/operands.rs',
+  'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/mod.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/arithmetic.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/moves.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/exchange.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/predicates.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/shifts.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/control.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/extended.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/operands.rs',
   'engine/tests/cpu/arithmetic/native.rs', 'engine/tests/cpu/arithmetic/wasm.rs',
   'engine/tests/cpu/arithmetic/aliases/native.rs', 'engine/tests/cpu/arithmetic/aliases/wasm.rs',
   'engine/tests/cpu/arithmetic/aliases/fixtures/p2-legacy-aliases/runtime/run.mjs', supportPath,

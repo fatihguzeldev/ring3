@@ -23,7 +23,7 @@ const sources=[
   "engine/src/cpu/dbt/wasm/instructions/far/return.rs",
   "engine/src/cpu/dbt/wasm/emitter/mod.rs", "engine/src/cpu/dbt/wasm/emitter/module.rs", "engine/src/cpu/dbt/wasm/emitter/body.rs", "engine/src/cpu/dbt/wasm/requirements.rs", "engine/src/cpu/dbt/wasm/imports/wiring.rs",
   "engine/src/cpu/dbt/wasm/imports/mod.rs", "engine/src/cpu/dbt/wasm/imports/binding.rs", "engine/src/cpu/dbt/wasm/imports/context.rs", "engine/src/cpu/dbt/wasm/imports/needs.rs", "engine/src/cpu/dbt/wasm/helpers/protocol.rs", "engine/src/cpu/dbt/wasm/instructions/memory/mod.rs", "engine/src/cpu/dbt/wasm/instructions/memory/address.rs", "engine/src/cpu/dbt/wasm/instructions/memory/scalar.rs", "engine/src/cpu/dbt/wasm/instructions/memory/stack.rs",
-  "engine/src/cpu/dbt/wasm/instructions/integer/dispatch.rs",
+  "engine/src/cpu/dbt/wasm/instructions/integer/dispatch/mod.rs", "engine/src/cpu/dbt/wasm/instructions/integer/dispatch/arithmetic.rs", "engine/src/cpu/dbt/wasm/instructions/integer/dispatch/moves.rs", "engine/src/cpu/dbt/wasm/instructions/integer/dispatch/exchange.rs", "engine/src/cpu/dbt/wasm/instructions/integer/dispatch/predicates.rs", "engine/src/cpu/dbt/wasm/instructions/integer/dispatch/shifts.rs", "engine/src/cpu/dbt/wasm/instructions/integer/dispatch/control.rs", "engine/src/cpu/dbt/wasm/instructions/integer/dispatch/extended.rs",
   "engine/src/cpu/dbt/wasm/helpers/result.rs",
   "engine/src/cpu/dbt/wasm/instructions/segments.rs",
   "engine/src/cpu/dbt/wasm/instructions/segments/access.rs",

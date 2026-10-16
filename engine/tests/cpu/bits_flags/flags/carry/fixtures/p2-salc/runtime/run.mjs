@@ -14,7 +14,7 @@ const paths = [own + 'wasm.rs', own + 'native.rs', own + 'fixtures/p2-salc/runti
   'engine/src/cpu/x86/decode/lower/tests/salc.rs', 'engine/src/cpu/x86/decode/profile.rs', 'engine/src/cpu/x86/decode/families.rs',
   'engine/src/cpu/x86/decode/decoder.rs', 'engine/src/cpu/x86/decode/instruction.rs', 'engine/src/cpu/x86/decode/execution_faults.rs',
   'engine/src/cpu/x86/capabilities.rs', 'engine/src/cpu/x86/environment.rs',
-  'engine/src/cpu/dbt/region.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch.rs',
+  'engine/src/cpu/dbt/region.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/mod.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/arithmetic.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/moves.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/exchange.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/predicates.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/shifts.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/control.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/extended.rs',
   'engine/src/cpu/dbt/wasm/instructions/integer/operands.rs', 'engine/src/cpu/dbt/wasm/instructions/control.rs',
   'engine/src/cpu/dbt/wasm/abi.rs', support];
 const pins = () => Object.fromEntries(paths.map(path => [path, hash(readFileSync(join(root, path)))]));

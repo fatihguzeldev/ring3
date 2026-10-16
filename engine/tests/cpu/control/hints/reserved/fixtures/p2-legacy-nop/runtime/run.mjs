@@ -14,7 +14,7 @@ const paths = [own + 'wasm.rs', own + 'fixtures/p2-legacy-nop/runtime/run.mjs',
   'engine/tests/cpu/control/wasm.rs', 'engine/src/cpu/x86/capabilities.rs',
   'engine/src/cpu/x86/decode/profile.rs', 'engine/src/cpu/x86/decode/families.rs', 'engine/src/cpu/x86/decode/profile/tests/nop.rs',
   'engine/src/cpu/x86/decode/lower.rs', 'engine/src/cpu/x86/decode/families.rs', 'engine/src/cpu/x86/decode/decoder.rs', 'engine/src/cpu/x86/decode/instruction.rs',
-  'engine/src/cpu/x86/decode/execution_faults.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch.rs', support];
+  'engine/src/cpu/x86/decode/execution_faults.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/mod.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/arithmetic.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/moves.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/exchange.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/predicates.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/shifts.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/control.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/extended.rs', support];
 const pins = () => Object.fromEntries(paths.map(path => [path, hash(readFileSync(join(root, path)))]));
 const sourcePins = pins(), RF = 0x10000, TF = 0x100, FLAGS = 0x244ed7, TARGET = 0x1100;
 const regs = [0xffffffff, 0xfffffffe, 0xfffffff9, 0xfffffffd, 0x7000, 0xfffffffc, 0xfffffffb, 0xfffffffa];

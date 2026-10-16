@@ -64,7 +64,7 @@ export async function harness(enginePath, output, root) {
     "engine/src/cpu/dbt/resident.rs",
     "engine/src/cpu/dbt/resident/tests/entries.rs",
     "engine/src/cpu/dbt/wasm/code_fetch.rs",
-    "engine/src/cpu/dbt/wasm/instructions/integer/dispatch.rs",
+    "engine/src/cpu/dbt/wasm/instructions/integer/dispatch/mod.rs", "engine/src/cpu/dbt/wasm/instructions/integer/dispatch/arithmetic.rs", "engine/src/cpu/dbt/wasm/instructions/integer/dispatch/moves.rs", "engine/src/cpu/dbt/wasm/instructions/integer/dispatch/exchange.rs", "engine/src/cpu/dbt/wasm/instructions/integer/dispatch/predicates.rs", "engine/src/cpu/dbt/wasm/instructions/integer/dispatch/shifts.rs", "engine/src/cpu/dbt/wasm/instructions/integer/dispatch/control.rs", "engine/src/cpu/dbt/wasm/instructions/integer/dispatch/extended.rs",
     "engine/src/cpu/dbt/wasm/imports/mod.rs", "engine/src/cpu/dbt/wasm/imports/binding.rs", "engine/src/cpu/dbt/wasm/imports/context.rs", "engine/src/cpu/dbt/wasm/imports/needs.rs", "engine/src/cpu/dbt/wasm/helpers/protocol.rs", "engine/src/cpu/dbt/wasm/instructions/memory/mod.rs", "engine/src/cpu/dbt/wasm/instructions/memory/address.rs", "engine/src/cpu/dbt/wasm/instructions/memory/scalar.rs", "engine/src/cpu/dbt/wasm/instructions/memory/stack.rs",
     "engine/src/cpu/dbt/wasm/mod.rs", "engine/src/cpu/dbt/wasm/instructions/mod.rs", "engine/src/cpu/dbt/wasm/helpers/mod.rs", "engine/src/cpu/dbt/wasm/imports/mod.rs",
     "engine/src/cpu/dbt/wasm/instructions/system_registers.rs",

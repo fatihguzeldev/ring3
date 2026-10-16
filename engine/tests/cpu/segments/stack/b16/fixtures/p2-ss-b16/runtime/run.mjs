@@ -18,7 +18,7 @@ const sourcePaths = [
   'engine/src/cpu/x86/segments.rs', 'engine/src/cpu/x86/segments/cache.rs',
   'engine/src/cpu/x86/segments/descriptors.rs', 'engine/src/abi/x86/segments.rs',
   'engine/src/cpu/dbt/wasm/instructions/segments/context.rs', 'engine/src/cpu/dbt/wasm/imports/mod.rs', 'engine/src/cpu/dbt/wasm/imports/binding.rs', 'engine/src/cpu/dbt/wasm/imports/context.rs', 'engine/src/cpu/dbt/wasm/imports/needs.rs', 'engine/src/cpu/dbt/wasm/helpers/protocol.rs', 'engine/src/cpu/dbt/wasm/instructions/memory/mod.rs', 'engine/src/cpu/dbt/wasm/instructions/memory/address.rs', 'engine/src/cpu/dbt/wasm/instructions/memory/scalar.rs', 'engine/src/cpu/dbt/wasm/instructions/memory/stack.rs',
-  'engine/src/cpu/dbt/wasm/instructions/integer/dispatch.rs', 'engine/src/cpu/dbt/wasm/instructions/stack.rs',
+  'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/mod.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/arithmetic.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/moves.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/exchange.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/predicates.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/shifts.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/control.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/extended.rs', 'engine/src/cpu/dbt/wasm/instructions/stack.rs',
   'engine/src/cpu/dbt/wasm/instructions/segments.rs', 'engine/src/cpu/dbt/wasm/instructions/control_instructions.rs',
   'engine/src/cpu/dbt/wasm/instructions/far/call.rs', 'engine/src/cpu/dbt/wasm/instructions/far/return.rs',
   'engine/src/cpu/dbt/wasm/instructions/far/interrupt.rs', 'engine/src/process/cpu/stack.rs',

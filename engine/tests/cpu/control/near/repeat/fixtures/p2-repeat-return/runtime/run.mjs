@@ -8,7 +8,7 @@ const support = 'engine/tests/cpu/segments/code/base/fixtures/p2-cs-base/runtime
 const {harness, hash, record, words, registers, PC, SEG, BASES} = await import(pathToFileURL(join(root, support)));
 const h = await harness(enginePath, output, root), TARGET = 0x2000;
 const sourcePaths = ['engine/src/cpu/x86/decode/profile.rs', 'engine/src/cpu/x86/decode/families.rs',
-  'engine/src/cpu/x86/decode/flow.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch.rs',
+  'engine/src/cpu/x86/decode/flow.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/mod.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/arithmetic.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/moves.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/exchange.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/predicates.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/shifts.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/control.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/extended.rs',
   'engine/src/cpu/dbt/wasm/imports/mod.rs', 'engine/src/cpu/dbt/wasm/imports/binding.rs', 'engine/src/cpu/dbt/wasm/imports/context.rs', 'engine/src/cpu/dbt/wasm/imports/needs.rs', 'engine/src/cpu/dbt/wasm/helpers/protocol.rs', 'engine/src/cpu/dbt/wasm/instructions/memory/mod.rs', 'engine/src/cpu/dbt/wasm/instructions/memory/address.rs', 'engine/src/cpu/dbt/wasm/instructions/memory/scalar.rs', 'engine/src/cpu/dbt/wasm/instructions/memory/stack.rs', 'engine/src/cpu/dbt/wasm/instructions/stack/pointer.rs',
   'engine/tests/cpu/control/near/repeat/native.rs', 'engine/tests/cpu/control/near/repeat/wasm.rs',
   'engine/tests/cpu/control/near/repeat/fixtures/p2-repeat-return/runtime/run.mjs'];

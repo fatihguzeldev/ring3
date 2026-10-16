@@ -19,7 +19,7 @@ const paths = [own + 'wasm.rs', own + 'native.rs', own + 'fixtures/p2-system-ava
   'engine/src/cpu/x86/decode/execution_faults/optional.rs', 'engine/src/cpu/x86/decode/execution_faults/optional/amd.rs',
   'engine/src/cpu/x86/decode/execution_faults/optional/amd/tests.rs', 'engine/src/cpu/x86/decode/decoder.rs', 'engine/src/cpu/x86/decode/instruction.rs',
   'engine/src/cpu/x86/decode/profile.rs', 'engine/src/cpu/x86/decode/families.rs', 'engine/src/cpu/dbt/wasm/instructions/control_instructions.rs',
-  'engine/src/cpu/dbt/wasm/instructions/integer/dispatch.rs', 'engine/src/abi/x86/exit.rs',
+  'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/mod.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/arithmetic.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/moves.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/exchange.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/predicates.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/shifts.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/control.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/extended.rs', 'engine/src/abi/x86/exit.rs',
   'engine/src/process/execution/stopped.rs', support];
 const pins = () => Object.fromEntries(paths.map(path => [path, hash(readFileSync(join(root, path)))]));
 const sourcePins = pins(), RF = 0x10000, TF = 0x100, FLAGS = 0x244cd7;
