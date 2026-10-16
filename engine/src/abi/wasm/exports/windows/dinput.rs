@@ -1,4 +1,8 @@
 export_process_calls! {
+    configure_controller_haptics(epoch_low:u32,epoch_high:u32,slot:u32,axes:u32,max_effects:u32);
+    render_dinput_haptics(epoch_low:u32,epoch_high:u32,slot:u32,time_low:u32,time_high:u32);
+    pending_dinput_haptics(slot:u32);
+    acknowledge_dinput_haptics(epoch_low:u32,epoch_high:u32,slot:u32,sequence_low:u32,sequence_high:u32);
     configure_dinput(length:u32);
     register_dinput_module(base:u32);
     register_dinput8_module(base:u32);

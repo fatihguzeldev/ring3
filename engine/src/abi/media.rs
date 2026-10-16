@@ -1,4 +1,5 @@
 pub const MEDIA_RECORD_SIZE: usize = 64;
+pub mod haptics;
 
 #[derive(Clone, Copy)]
 #[repr(u16)]
@@ -22,6 +23,7 @@ pub enum MediaRecordKind {
     User32Input = 18,
     User32Cursor = 19,
     WindowsInputDelivery = 20,
+    DInputHaptics = 21,
 }
 
 // r3mr v1: kind at 6, byte size at 8, reserved zero at 12, epoch at 16, five u64 values at 24.

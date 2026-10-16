@@ -24,6 +24,9 @@ pub(in crate::process) struct DirectInputRuntime32 {
     pub(super) ansi: crate::windows::text::CodePage32,
     pub(super) haptic_capabilities:
         [Option<crate::input::dinput::haptics::HapticCapabilities32>; 8],
+    pub(super) haptic_frames: [Option<crate::input::dinput::haptics::HapticFrame32>; 8],
+    pub(super) haptic_sequence: u64,
+    pub(super) haptic_time: [u64; 8],
     pub(super) signals: Vec<crate::windows::synchronization::EventBinding32>,
 }
 impl DirectInputRuntime32 {
@@ -80,6 +83,9 @@ impl DirectInputRuntime32 {
             now: 0,
             ansi: crate::windows::text::CodePage32::default(),
             haptic_capabilities: [None; 8],
+            haptic_frames: [None; 8],
+            haptic_sequence: 0,
+            haptic_time: [0; 8],
             signals,
         })
     }
@@ -174,6 +180,8 @@ impl DirectInputRuntime32 {
         self.policy_matching(|native| !native.will_lose(source, active))
     }
     pub(in crate::process) fn epoch_changed(&mut self) {
+        self.haptic_frames.fill(None);
+        self.haptic_time.fill(0);
         for record in self.records.iter_mut().flatten() {
             if let ObjectKind32::Device(device) = &mut record.kind {
                 device.native.epoch_changed();

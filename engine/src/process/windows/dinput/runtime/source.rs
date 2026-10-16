@@ -122,6 +122,9 @@ impl EngineInstance {
             .publish_controller(epoch, slot, timestamp_ns, state)
             .map_err(|error| HostError::DirectInput(DirectInputError32::Input(error)))?;
         let _ = self.sync_windows_input();
+        if let Some(runtime) = self.dinput.as_mut() {
+            runtime.observe_controller_haptics(slot, timestamp_ns, &state);
+        }
         Ok(())
     }
     pub fn submit_windows_pointer(

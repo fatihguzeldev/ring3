@@ -1,7 +1,9 @@
 mod configuration;
+mod haptics;
 mod input;
 
 pub(crate) use configuration::*;
+pub(crate) use haptics::*;
 pub(crate) use input::*;
 
 use crate::process::HostError;
