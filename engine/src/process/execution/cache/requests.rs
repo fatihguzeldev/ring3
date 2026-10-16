@@ -122,6 +122,9 @@ impl EngineInstance {
             .filter(|pending| serial != 0 && pending.request.serial == serial)
             .ok_or(HostError::Call(CallError::InvalidToken))?;
         if pending.owned_unit {
+            if self.cache_pins()?.contains(&pending.request.unit_id) {
+                return Err(HostError::Call(CallError::Busy));
+            }
             if self
                 .resident_installations
                 .iter()
