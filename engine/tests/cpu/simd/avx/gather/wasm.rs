@@ -14,7 +14,7 @@ fn actual_gather_preserves_partial_progress_and_validates_staged_outputs() {
         engine.is_file(),
         "build the private gather proof engine first"
     );
-    assert_eq!(ARENA_SIZE, 4756);
+    assert_eq!(ARENA_SIZE, 4796);
     let output = root.join("target/p2-avx2-gather").join(format!(
         "wasm-{}-{}",
         std::process::id(),

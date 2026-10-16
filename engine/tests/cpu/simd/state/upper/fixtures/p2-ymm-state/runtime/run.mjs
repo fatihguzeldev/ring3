@@ -1,3 +1,4 @@
+import {ARENA_SIZE} from '../../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
@@ -9,7 +10,7 @@ const [enginePath, output, root] = process.argv.slice(2);
 const engine = readEngine(enginePath);
 const initial = readFileSync(join(output, 'initial-arena.bin'));
 const descriptors = readFileSync(join(output, 'fx-descriptors.bin'));
-const SIZE = 4756, UPPER = 4612, PAYLOAD = 4628, SV = 4364, T = 140;
+const SIZE = ARENA_SIZE, UPPER = 4612, PAYLOAD = 4628, SV = 4364, T = 140;
 const hash = value => createHash('sha256').update(value).digest('hex');
 const first = new WebAssembly.Instance(engine.module, {});
 assert.equal(typeof first.exports.ring3_abi_v1_arena_len, 'function', 'versioned upper arena length discovery exists');

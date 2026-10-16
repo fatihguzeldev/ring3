@@ -1,3 +1,4 @@
+import {consumeCpuEvent} from '../../../../../../../../support/wasm/events.mjs';
 import {pageFaultExit, pageFaultPacket} from '../../../../../../../../support/wasm/page-fault.mjs';
 import {ARENA_SIZE} from '../../../../../../../../support/wasm/arena.mjs';
 import {generatedImports} from '../../../../../../../../support/wasm/binding.mjs';
@@ -18,7 +19,7 @@ const PC = 0x1000,
   SIZE = ARENA_SIZE,
   keyHigh = 0x415658;
 const counts = { contexts: 0, modules: 0, runs: 0, controls: 0, faults: 0, fullRamPairs: 0 };
-const sourcePaths = ['engine/tests/support/wasm/page-fault.mjs', 'engine/tests/support/wasm/arena.mjs', 'engine/tests/support/wasm/binding.mjs',
+const sourcePaths = ['engine/tests/support/wasm/events.mjs', 'engine/tests/support/wasm/page-fault.mjs', 'engine/tests/support/wasm/arena.mjs', 'engine/tests/support/wasm/binding.mjs',
   ...exportsSources,
   'engine/tests/support/wasm/engine.mjs',
   'engine/src/cpu/x86/capabilities.rs',
@@ -290,6 +291,7 @@ function execute(c, fn, row, { budget = row.retired ?? 1, cancel = false } = {})
     `${row.name}: complete mapped RAM budget=${budget} cancel=${cancel}`,
   );
   assert.deepEqual(arena(c), expected, `${row.name}: RAM observations preserve the complete arena`);
+  consumeCpuEvent(c, SIZE);
   counts.fullRamPairs++;
   if (row.checkRam && changed) {
     host(c, 'cpu_read', [row.address, row.checkRam.length, 1]);

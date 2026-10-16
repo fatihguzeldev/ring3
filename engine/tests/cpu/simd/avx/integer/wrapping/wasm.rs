@@ -14,7 +14,7 @@ fn actual_wide_wrapping_preserves_aliases_upper_lanes_and_full_memory_faults() {
         engine.is_file(),
         "build the coherent AVX verification engine first"
     );
-    assert_eq!(ARENA_SIZE, 4756);
+    assert_eq!(ARENA_SIZE, 4796);
     let output = root.join("target/p2-avx2-wrapping").join(format!(
         "wasm-{}-{}",
         std::process::id(),

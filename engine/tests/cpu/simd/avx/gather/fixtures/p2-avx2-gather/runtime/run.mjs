@@ -1,3 +1,4 @@
+import {consumeCpuEvent} from '../../../../../../../support/wasm/events.mjs';
 import {pageFaultExit} from '../../../../../../../support/wasm/page-fault.mjs';
 import {ARENA_SIZE} from '../../../../../../../support/wasm/arena.mjs';
 import {generatedImports} from '../../../../../../../support/wasm/binding.mjs';
@@ -29,7 +30,7 @@ const PC = 0x3000,
   SG = 4524,
   WK = 4588,
   SIZE = ARENA_SIZE;
-const sourcePaths = ['engine/tests/support/wasm/page-fault.mjs', 'engine/tests/support/wasm/arena.mjs', 'engine/tests/support/wasm/binding.mjs',
+const sourcePaths = ['engine/tests/support/wasm/events.mjs', 'engine/tests/support/wasm/page-fault.mjs', 'engine/tests/support/wasm/arena.mjs', 'engine/tests/support/wasm/binding.mjs',
   ...exportsReceipt.sourcePaths,
   ...gatherSourcePaths,
   'engine/tests/support/wasm/engine.mjs',
@@ -541,6 +542,7 @@ function execute(
   if (active && value.status && !synthetic) counts.partial++;
   if (resume) counts.resumed++;
   if (synthetic?.invalid) counts.protocol++;
+  consumeCpuEvent(c, SIZE);
   c.synthetic = null;
   return value;
 }

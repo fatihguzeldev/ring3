@@ -14,7 +14,7 @@ fn actual_avx_helper_rejects_impossible_segment_faults_and_preserves_fault_state
         engine.is_file(),
         "build the coherent AVX verification engine first"
     );
-    assert_eq!(ARENA_SIZE, 4756);
+    assert_eq!(ARENA_SIZE, 4796);
     let output = root.join("target/p2-avx-protocol").join(format!(
         "wasm-{}-{}",
         std::process::id(),

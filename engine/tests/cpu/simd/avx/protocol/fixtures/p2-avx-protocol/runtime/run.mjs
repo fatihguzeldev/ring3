@@ -1,3 +1,4 @@
+import {consumeCpuEvent} from '../../../../../../../support/wasm/events.mjs';
 import {ARENA_SIZE} from '../../../../../../../support/wasm/arena.mjs';
 import {generatedImports} from '../../../../../../../support/wasm/binding.mjs';
 import assert from 'node:assert/strict';
@@ -9,7 +10,7 @@ import {assertEngineExports} from '../../../../../../../support/wasm/exports.mjs
 
 const [enginePath, output, root] = process.argv.slice(2), engine = readEngine(enginePath);
 const {sourcePaths: exportSources} = assertEngineExports(engine.module, root);
-const sourcePaths = ['engine/tests/support/wasm/arena.mjs', 'engine/tests/support/wasm/binding.mjs', ...exportSources, 'engine/tests/support/wasm/engine.mjs',
+const sourcePaths = ['engine/tests/support/wasm/events.mjs', 'engine/tests/support/wasm/arena.mjs', 'engine/tests/support/wasm/binding.mjs', ...exportSources, 'engine/tests/support/wasm/engine.mjs',
   'engine/src/cpu/x86/decode/avx/mod.rs', 'engine/src/cpu/x86/avx/operation.rs',
   'engine/src/cpu/dbt/wasm/instructions/avx/execute.rs', 'engine/src/cpu/dbt/wasm/helpers/result.rs',
   'engine/src/process/cpu/avx.rs', 'engine/src/cpu/x86/avx/dispatch.rs',
@@ -87,6 +88,7 @@ function execute(c, run, row, budget = 1, cancelled = false) {
   c.calls = 0; assert.equal(run(c.base, c.base + 56, budget, c.base + 96), 0, row.name);
   assert.deepEqual(arena(c), expected, `${row.name}: exact full arena, budget=${budget}, cancelled=${cancelled}`);
   assert.equal(c.calls, Number(invokes), `${row.name}: helper calls`);
+  consumeCpuEvent(c, SIZE);
   counts.runs++; if (!invokes) counts.controls++; else if (reason === 7) counts.rejected++; else counts.accepted++;
 }
 const rows = [];

@@ -1,3 +1,4 @@
+import {consumeCpuEvent} from '../../../../../../../support/wasm/events.mjs';
 import {pageFaultExit, pageFaultPacket} from '../../../../../../../support/wasm/page-fault.mjs';
 import {ARENA_SIZE} from '../../../../../../../support/wasm/arena.mjs';
 import {generatedImports} from '../../../../../../../support/wasm/binding.mjs';
@@ -27,7 +28,7 @@ const counts = {
   neutral: 0,
   fullRamPairs: 0,
 };
-const sourcePaths = ['engine/tests/support/wasm/page-fault.mjs', 'engine/tests/support/wasm/arena.mjs', 'engine/tests/support/wasm/binding.mjs',
+const sourcePaths = ['engine/tests/support/wasm/events.mjs', 'engine/tests/support/wasm/page-fault.mjs', 'engine/tests/support/wasm/arena.mjs', 'engine/tests/support/wasm/binding.mjs',
   ...exportsReceipt.sourcePaths,
   'engine/tests/support/wasm/engine.mjs',
   'engine/tests/cpu/simd/avx/f16c/native.rs',
@@ -339,6 +340,7 @@ function execute(c, fn, row, budget = 1, cancel = false) {
     retired,
   });
   frames.push(before, after);
+  consumeCpuEvent(c, SIZE);
   counts.runs++;
   counts.fullRamPairs++;
   if (!active) counts.controls++;

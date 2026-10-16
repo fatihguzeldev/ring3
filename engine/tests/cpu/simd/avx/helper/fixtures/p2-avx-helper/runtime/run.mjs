@@ -1,3 +1,5 @@
+import {pageFaultPacket} from '../../../../../../../support/wasm/page-fault.mjs';
+import {ARENA_SIZE} from '../../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
@@ -13,10 +15,10 @@ assert.equal(first.exports.ring3_abi_v1_avx_execute.length, 6);
 assert.equal(first.exports.ring3_abi_v1_avx_execute_resident.length, 10);
 const receipt = assertEngineExports(engine.module, root);
 const initial = readFileSync(join(output, 'initial-arena.bin'));
-const SIZE=4756, T=140, H=100, SV=4364, SG=4524, YU=4612, XP=SV+32, UP=YU+16;
+const SIZE=ARENA_SIZE, T=140, H=100, SV=4364, SG=4524, YU=4612, XP=SV+32, UP=YU+16;
 assert.equal(initial.length,SIZE);
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
-const sourcePaths = [...new Set([...receipt.sourcePaths,
+const sourcePaths = [...new Set(['engine/tests/support/wasm/arena.mjs', 'engine/tests/support/wasm/page-fault.mjs', ...receipt.sourcePaths,
   'engine/tests/support/wasm/engine.mjs',
   'engine/tests/cpu/simd/avx/helper/native.rs', 'engine/tests/cpu/simd/avx/helper/wasm.rs',
   'engine/tests/cpu/simd/avx/helper/fixtures/p2-avx-helper/runtime/run.mjs',
@@ -41,7 +43,7 @@ function vector(bytes,index) {return Buffer.concat([bytes.subarray(XP+index*16,X
 function publish(bytes,index,value) {bytes.set(value.subarray(0,16),XP+index*16);bytes.set(value.subarray(16,32),UP+index*16);}
 function metadata(c,segment,offset) {input(c,T+544,record('R3AM',1,24,[segment,offset]));}
 function success(c,length,amend=()=>{},gpr=0,flags=0x244fd7) {const b=arena(c);b.set(packet(length),H);b.fill(0,T+512,T+544);b.set(words([gpr,flags]),T+512);amend(b);return b;}
-function fault(c,length,status,detail=0,address=0,access=0) {const b=arena(c);b.set(packet(length,status,detail,address,access),H);return b;}
+function fault(c,length,status,detail=0,address=0,access=0) {const b=arena(c);b.set(status===1&&detail<=2?pageFaultPacket({errorCode:4|(access===2?2:0)|(detail===2?1:0),address,access,length}):packet(length,status,detail,address,access),H);return b;}
 function call(c,descriptor,operands,immediate=0,live0=0,live1=0,flags=0x244fd7) {return c.resident ? c.api.avx_execute_resident(c.low,c.high,c.id,0,descriptor,operands,immediate,live0,live1,flags) : c.api.avx_execute(descriptor,operands,immediate,live0,live1,flags);}
 function ram(c) {
   const saved=arena(c),result=Buffer.alloc(c.pages.size*4096);let cursor=0;
@@ -51,9 +53,9 @@ function ram(c) {
   }
   input(c,0,saved);return result;
 }
-function checked(c,label,expected,action,status=0,expectedRam) {
+function checked(c,label,expected,action,status=expected.readUInt16LE(H+4)===15&&expected.readUInt32LE(H+16)===9?23:0,expectedRam) {
   const before=arena(c),beforeRam=ram(c),actual=action();assert.equal(actual,status,label);const after=arena(c);
-  assert.deepEqual(after,expected,`${label}: full4756B frame`);
+  assert.deepEqual(after,expected,`${label}: complete arena frame`);
   const afterRam=ram(c);assert.deepEqual(afterRam,expectedRam??beforeRam,`${label}: all mapped RAM`);
   rows.push({context:c.number,profile:c.resident?'resident':'standalone',label,status:actual,before:frames.length,after:frames.length+1,ramBefore:ramFrames.length,ramAfter:ramFrames.length+1});frames.push(before,after);ramFrames.push(beforeRam,afterRam);
 }
