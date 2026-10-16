@@ -16,3 +16,5 @@ pub use types::{
 
 #[cfg(test)]
 mod tests;
+
+pub(crate) mod menus;
