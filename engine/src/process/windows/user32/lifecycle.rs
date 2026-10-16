@@ -34,7 +34,13 @@ impl User32Context32 {
             class.unicode,
             class.extra_bytes,
         );
-        let (procedure, unicode) = if self.state.standard_kind(class.atom).is_some() {
+        let (procedure, unicode) = if class.name.as_slice() == [35, 51, 50, 55, 55, 48] {
+            let procedures = self
+                .resource_dialogs
+                .procedures
+                .ok_or(User32Error32::Win32(1407))?;
+            (procedures[usize::from(api.wide())], api.wide())
+        } else if self.state.standard_kind(class.atom).is_some() {
             let procedures = self.builtin_procedures.ok_or(User32Error32::Win32(1407))?;
             (procedures[usize::from(api.wide())], api.wide())
         } else {

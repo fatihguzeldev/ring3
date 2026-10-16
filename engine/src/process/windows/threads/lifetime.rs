@@ -363,6 +363,11 @@ impl EngineInstance {
         self.nls.retire_thread(id);
         if let Some(gdi) = self.gdi.as_mut() {
             gdi.retire_thread(id);
+            if let Some(context) = self.user32.as_mut() {
+                context
+                    .retire_resource_dialog_fonts(gdi)
+                    .expect("dialog fonts retain their canonical GDI object identity");
+            }
         }
         self.commit_activation_thread_exit(activation);
         self.commit_com_thread_exit_after_memory(com, memory_changed);

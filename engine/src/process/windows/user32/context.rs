@@ -44,6 +44,10 @@ impl User32Context32 {
             destructions,
             timers: super::timers::TimerState32::new(limits.messages, limits.windows)?,
             dialogs: Vec::new(),
+            resource_dialogs: super::dialogs::resources::ResourceDialogs32::new(
+                limits.continuations,
+                limits.windows,
+            )?,
             provenance: super::messages::MessageProvenance32::new(limits.messages)?,
             call_activation: Default::default(),
             activation_capture_limit: limits
@@ -124,6 +128,20 @@ impl User32Context32 {
                 self.unregister_class(api, args, memory, context)
             }
             CreateWindowExA | CreateWindowExW => self.create_window(api, args, memory, context),
+            DefDlgProcA | DefDlgProcW => self.def_dialog_proc(args, api.wide(), memory, context),
+            EndDialog
+            | GetDlgItem
+            | GetDlgCtrlID
+            | MapDialogRect
+            | GetDialogBaseUnits
+            | GetWindowContextHelpId
+            | SetWindowContextHelpId => self.resource_dialog_query(
+                api,
+                args,
+                memory,
+                context,
+                self.resource_dialogs.system_base,
+            ),
             DestroyWindow => self.destroy_window(args[0], context),
             GetClientRect | GetWindowRect => self.get_rect(api, args, memory),
             IsWindow => Ok(User32Outcome32::Return(u32::from(

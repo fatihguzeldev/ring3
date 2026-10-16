@@ -73,6 +73,7 @@ pub(crate) struct User32Context32 {
     destructions: Vec<destruction::DestroyPlan32>,
     timers: timers::TimerState32,
     dialogs: Vec<dialogs::Dialog32>,
+    resource_dialogs: dialogs::resources::ResourceDialogs32,
     call_activation: crate::windows::activation::CapturedActivation32,
     activation_capture_limit: usize,
     provenance: messages::MessageProvenance32,

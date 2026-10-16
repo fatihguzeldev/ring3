@@ -361,12 +361,34 @@ impl EngineInstance {
         self.check_windows_thread_write()?;
         self.refresh_user32_input()?;
         self.dispatch_user32_dialog_remote_help(continuation)?;
+        let flags = self
+            .user32
+            .as_ref()
+            .ok_or(HostError::InvalidRequest)?
+            .preview_resource_dialog_wait_input_flags(continuation)
+            .map_err(HostError::User32)?;
+        let input = flags
+            .map(|(focused, captured)| self.prepare_windows_input_flags(focused, captured))
+            .transpose()?
+            .flatten();
+        let window_ids = self.user32_window_identities();
+        let window_event = if flags.is_some() {
+            self.prepare_user32_window_event()?
+        } else {
+            None
+        };
         let queue = self.prepare_user32_queue_change()?;
         let context = self.user32.as_mut().ok_or(HostError::InvalidRequest)?;
         let outcome = context
             .resume_wait(continuation, self.memory.as_mut().ok_or(HostError::Closed)?)
             .map_err(HostError::User32)?;
         let error = context.take_last_error();
+        let actual = (
+            context.windows().focus().is_some(),
+            context.windows().capture().is_some(),
+        );
+        self.commit_windows_input_flags(if flags == Some(actual) { input } else { None });
+        self.commit_user32_window_event(window_event, window_ids);
         self.commit_user32_queue_change(queue);
         self.accept_user32_outcome(outcome, error)?;
         if self
@@ -376,6 +398,7 @@ impl EngineInstance {
         {
             self.publish_windows_reply()?;
         }
+        let _ = self.sync_windows_input();
         Ok(())
     }
 

@@ -123,7 +123,8 @@ impl EngineInstance {
         self.check_windows_thread_write()?;
         Self::prepare_completed_call(frame.complete(0))?;
         let call_context = self.user32_call_context()?;
-        let message_phase = api.sent_message(frame.arguments()).is_some()
+        let message_phase = api.dialog_modal()
+            || api.sent_message(frame.arguments()).is_some()
             || matches!(
                 api,
                 User32Api32::SendMessageA
@@ -232,6 +233,21 @@ impl EngineInstance {
         } else {
             None
         };
+        let resource_creation = if api.dialog_template() {
+            Some(self.prepare_resource_dialog_creation(api, frame.arguments(), call_context))
+        } else {
+            None
+        };
+        if api == User32Api32::GetDialogBaseUnits {
+            let gdi = self.gdi.as_ref().ok_or(HostError::InvalidRequest)?;
+            let font = gdi.system_font().map_err(HostError::Gdi)?;
+            let base = gdi.dialog_base_units(&font).map_err(HostError::Gdi)?;
+            self.user32.as_mut().unwrap().resource_dialogs.system_base = base;
+        }
+        let resource_font = resource_creation
+            .as_ref()
+            .and_then(|result| result.as_ref().ok())
+            .map(|creation| creation.font);
         let activation = if matches!(
             api,
             User32Api32::PostMessageA | User32Api32::PostMessageW | User32Api32::SetTimer
@@ -247,7 +263,18 @@ impl EngineInstance {
         context.call_activation = activation
             .as_ref()
             .map_or_else(Default::default, |capture| capture.token());
-        let result = if let Some(dialog) = dialog {
+        let result = if let Some(creation) = resource_creation {
+            match creation {
+                Ok(creation) => context.begin_resource_dialog(
+                    creation,
+                    self.memory.as_mut().ok_or(HostError::Closed)?,
+                ),
+                Err(HostError::User32(error)) => Err(error),
+                Err(HostError::Resource(error)) => Err(User32Error32::Win32(error.win32())),
+                Err(HostError::Gdi(error)) => Err(User32Error32::Win32(error.win32())),
+                Err(error) => return Err(error),
+            }
+        } else if let Some(dialog) = dialog {
             match dialog {
                 Ok(dialog) => context.begin_dialog(dialog),
                 Err(HostError::User32(error)) => Err(error),
@@ -266,6 +293,15 @@ impl EngineInstance {
                 call_context,
             )
         };
+        if result.is_err()
+            && let Some(font) = resource_font.filter(|&font| font != 0)
+        {
+            self.gdi
+                .as_mut()
+                .unwrap()
+                .retire_dialog_font(font)
+                .expect("unpublished dialog font has no DC selection");
+        }
         context.call_activation = Default::default();
         let outcome = match result {
             Ok(outcome) => outcome,

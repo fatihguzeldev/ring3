@@ -120,11 +120,60 @@ api_catalog! {
     GetWindowTextLengthW=0x0002_0063,1;
     SetWindowTextA=0x0002_0064,2;
     SetWindowTextW=0x0002_0065,2;
+    CreateDialogParamA=0x0002_0066,5;
+    CreateDialogParamW=0x0002_0067,5;
+    CreateDialogIndirectParamA=0x0002_0068,5;
+    CreateDialogIndirectParamW=0x0002_0069,5;
+    DialogBoxParamA=0x0002_006a,5;
+    DialogBoxParamW=0x0002_006b,5;
+    DialogBoxIndirectParamA=0x0002_006c,5;
+    DialogBoxIndirectParamW=0x0002_006d,5;
+    EndDialog=0x0002_006e,2;
+    DefDlgProcA=0x0002_006f,4;
+    DefDlgProcW=0x0002_0070,4;
+    GetDlgItem=0x0002_0071,2;
+    GetDlgCtrlID=0x0002_0072,1;
+    MapDialogRect=0x0002_0073,2;
+    GetDialogBaseUnits=0x0002_0074,0;
+    GetWindowContextHelpId=0x0002_0075,1;
+    SetWindowContextHelpId=0x0002_0076,2;
 }
 
 impl User32Api32 {
+    pub(crate) fn dialog_template(self) -> bool {
+        matches!(
+            self,
+            Self::CreateDialogParamA
+                | Self::CreateDialogParamW
+                | Self::CreateDialogIndirectParamA
+                | Self::CreateDialogIndirectParamW
+                | Self::DialogBoxParamA
+                | Self::DialogBoxParamW
+                | Self::DialogBoxIndirectParamA
+                | Self::DialogBoxIndirectParamW
+        )
+    }
+    pub(crate) fn dialog_modal(self) -> bool {
+        matches!(
+            self,
+            Self::DialogBoxParamA
+                | Self::DialogBoxParamW
+                | Self::DialogBoxIndirectParamA
+                | Self::DialogBoxIndirectParamW
+        )
+    }
+    pub(crate) fn dialog_indirect(self) -> bool {
+        matches!(
+            self,
+            Self::CreateDialogIndirectParamA
+                | Self::CreateDialogIndirectParamW
+                | Self::DialogBoxIndirectParamA
+                | Self::DialogBoxIndirectParamW
+        )
+    }
     pub(crate) fn failure_value(self) -> u32 {
-        if matches!(
+        if self.dialog_modal()
+            || matches!(
                 self,
                 Self::GetMessageA
                     | Self::GetMessageW

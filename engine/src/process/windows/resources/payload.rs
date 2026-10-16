@@ -5,6 +5,30 @@ use crate::{
 };
 
 impl EngineInstance {
+    pub(in crate::process::windows) fn user32_resource_bytes(
+        &self,
+        instance: u32,
+        kind: u16,
+        name_address: u32,
+        wide: bool,
+        max_bytes: usize,
+    ) -> Result<Vec<u8>, HostError> {
+        let name = super::memory::identifier(
+            self.memory.as_ref().ok_or(HostError::Closed)?,
+            name_address,
+            wide,
+            self.windows_ansi_code_page(),
+        )
+        .map_err(HostError::Resource)?;
+        self.resource_data_bytes(
+            instance,
+            &ResourceIdentifier32::Id(u32::from(kind)),
+            &name,
+            0,
+            max_bytes,
+        )
+    }
+
     pub(in crate::process) fn resource_data_bytes(
         &self,
         handle: u32,

@@ -36,6 +36,18 @@ pub(super) enum PositionStage32 {
 
 #[derive(Clone, Copy)]
 pub(super) enum Continuation32 {
+    ResourceDialog {
+        plan: u64,
+        scratch: Scratch32,
+        child: Option<u64>,
+        completed: Option<u64>,
+    },
+    ResourceProcedure {
+        window: WindowHandle32,
+        procedure: GuestAddress,
+        arguments: [u32; 4],
+        wide: bool,
+    },
     ControlPaint(super::controls::painting::ControlPaint32),
     Paint {
         window: WindowHandle32,
@@ -115,6 +127,16 @@ impl User32Context32 {
             .cloned()
             .ok_or(User32Error32::InvalidToken)?;
         let (procedure, arguments) = match pending.continuation {
+            Continuation32::ResourceDialog { .. } => {
+                return Ok(User32Outcome32::Wait {
+                    continuation: pending.token,
+                });
+            }
+            Continuation32::ResourceProcedure {
+                procedure,
+                arguments,
+                ..
+            } => (procedure, arguments),
             Continuation32::ControlPaint(paint) => self.control_paint_callback(paint)?,
             Continuation32::Paint { window, dc, .. } => (
                 self.windows().get(window)?.description.procedure,
@@ -238,6 +260,20 @@ impl User32Context32 {
         result: u32,
         memory: &mut AddressSpace,
     ) -> Result<User32Outcome32, User32Error32> {
+        self.check_resource_dialog_scratch(memory)?;
+        if let Some(outcome) = self.retry_resource_dialog_completion(token, memory) {
+            return outcome;
+        }
+        let outcome = self.complete_step(token, result, memory)?;
+        self.complete_resource_dialog_child(token, outcome, memory)
+    }
+
+    fn complete_step(
+        &mut self,
+        token: u64,
+        result: u32,
+        memory: &mut AddressSpace,
+    ) -> Result<User32Outcome32, User32Error32> {
         let pending = self
             .pending
             .last()
@@ -245,6 +281,13 @@ impl User32Context32 {
             .cloned()
             .ok_or(User32Error32::InvalidToken)?;
         match pending.continuation {
+            Continuation32::ResourceDialog { .. } => Err(User32Error32::InvalidToken),
+            Continuation32::ResourceProcedure {
+                window,
+                arguments,
+                wide,
+                ..
+            } => self.complete_dialog_procedure(window, arguments, wide, result, memory),
             Continuation32::ControlPaint(_) => Err(User32Error32::InvalidRequest),
             Continuation32::Paint { window, output, dc } => {
                 self.windows().get(window)?;

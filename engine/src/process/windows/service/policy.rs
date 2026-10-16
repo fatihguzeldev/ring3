@@ -63,19 +63,7 @@ impl GuardFailure32 {
             return noaccess(api.failure_value());
         }
         if let Some(api) = User32Api32::from_id(id) {
-            return noaccess(
-                if matches!(
-                    api,
-                    User32Api32::GetMessageA
-                        | User32Api32::GetMessageW
-                        | User32Api32::MsgWaitForMultipleObjects
-                        | User32Api32::MsgWaitForMultipleObjectsEx
-                ) {
-                    u32::MAX
-                } else {
-                    0
-                },
-            );
+            return noaccess(api.failure_value());
         }
         if ResourceApi32::from_id(id).is_some()
             || ProcessApi32::from_id(id).is_some()

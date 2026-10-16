@@ -57,7 +57,8 @@ impl User32Context32 {
             pending.token == continuation
                 && matches!(
                     pending.continuation,
-                    Continuation32::Retrieve { .. }
+                    Continuation32::ResourceDialog { .. }
+                        | Continuation32::Retrieve { .. }
                         | Continuation32::MessageWait { .. }
                 )
         })

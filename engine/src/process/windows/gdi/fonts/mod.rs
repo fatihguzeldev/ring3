@@ -1,4 +1,5 @@
 mod calls;
+mod dialog;
 mod layout;
 mod memory;
 mod paragraph;

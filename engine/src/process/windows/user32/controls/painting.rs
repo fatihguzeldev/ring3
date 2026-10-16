@@ -175,6 +175,9 @@ impl User32Context32 {
             let outcome = self
                 .complete(token, result, memory)
                 .map_err(HostError::User32)?;
+            if let Some(gdi) = gdi {
+                self.retire_resource_dialog_fonts(gdi)?;
+            }
             return Ok(outcome);
         };
         let gdi = gdi.ok_or(HostError::Gdi(GdiError32::InvalidRequest))?;

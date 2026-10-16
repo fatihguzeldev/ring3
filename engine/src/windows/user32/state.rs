@@ -1,6 +1,7 @@
 use super::{Message32, Point32, User32Error32, User32Limits32, WindowClass32, WindowData32};
 use crate::windows::window::{WindowContext32, WindowDescription32, WindowHandle32};
 mod classes;
+mod dialogs;
 mod paint;
 mod text;
 
@@ -12,6 +13,8 @@ struct WindowSlot32 {
     paint_seen: bool,
     text: Vec<u16>,
     control: crate::windows::controls::ControlState32,
+    dialog: Option<super::dialogs::WindowDialog32>,
+    context_help: u32,
 }
 
 pub(crate) struct User32State32 {
@@ -169,6 +172,8 @@ impl User32State32 {
             extra,
             text: Vec::new(),
             control: Default::default(),
+            dialog: None,
+            context_help: 0,
             update: crate::windows::gdi::Region32::rectangle(super::Rect32 {
                 left: 0,
                 top: 0,

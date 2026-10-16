@@ -31,6 +31,9 @@ impl User32Context32 {
             return false;
         };
         match pending.continuation {
+            super::super::callback::Continuation32::ResourceDialog { plan, .. } => {
+                self.resource_dialog_ready(plan)
+            }
             super::super::callback::Continuation32::Dialog { id } => self.dialog_ready(id),
             super::super::callback::Continuation32::RemoteCall { ready, .. }
             | super::super::callback::Continuation32::DialogRemoteHelp { ready, .. } => {
@@ -92,6 +95,7 @@ impl User32Context32 {
             .iter()
             .filter_map(|pending| match pending.continuation {
                 super::super::callback::Continuation32::DialogHelp { scratch, .. }
+                | super::super::callback::Continuation32::ResourceDialog { scratch, .. }
                 | super::super::callback::Continuation32::DialogRemoteHelp { scratch, .. }
                 | super::super::callback::Continuation32::Create { scratch, .. }
                 | super::super::callback::Continuation32::Position { scratch, .. }
@@ -194,6 +198,7 @@ impl User32ThreadReply32 {
             .iter()
             .filter_map(|pending| match pending.continuation {
                 super::super::callback::Continuation32::DialogHelp { scratch, .. }
+                | super::super::callback::Continuation32::ResourceDialog { scratch, .. }
                 | super::super::callback::Continuation32::DialogRemoteHelp { scratch, .. }
                 | super::super::callback::Continuation32::Create { scratch, .. }
                 | super::super::callback::Continuation32::Position { scratch, .. }
@@ -276,6 +281,7 @@ fn check_scratch(
         match pending.continuation {
             super::super::callback::Continuation32::Paint { output, .. } => output.check(memory)?,
             super::super::callback::Continuation32::DialogHelp { scratch, .. }
+            | super::super::callback::Continuation32::ResourceDialog { scratch, .. }
             | super::super::callback::Continuation32::DialogRemoteHelp { scratch, .. }
             | super::super::callback::Continuation32::Create { scratch, .. }
             | super::super::callback::Continuation32::Position { scratch, .. }

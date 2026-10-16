@@ -132,6 +132,9 @@ impl User32Context32 {
             .filter(|pending| pending.token == token)
             .cloned()
             .ok_or(User32Error32::InvalidToken)?;
+        if let Continuation32::ResourceDialog { plan, .. } = pending.continuation {
+            return self.resume_resource_dialog(plan, memory);
+        }
         if let Continuation32::Dialog { id } = pending.continuation {
             return self.resume_dialog(id, memory);
         }
