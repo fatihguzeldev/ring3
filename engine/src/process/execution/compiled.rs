@@ -47,14 +47,16 @@ impl EngineInstance {
         }
         self.guard_detection_material_change()?;
         Self::check_region_counts(count, gate_count)?;
-        let generation = self
-            .generation
-            .checked_add(1)
-            .ok_or(HostError::GenerationExhausted)?;
+        let generation = self.next_artifact_generation()?;
         let artifact = self.prepare_artifact(count, gate_count, generation, format)?;
         self.artifact = Some(artifact);
         self.generation = generation;
+        self.generation_issuer = generation;
         Ok(generation)
+    }
+
+    pub(in crate::process) fn next_artifact_generation(&self)->Result<u32,HostError> {
+        self.generation.max(self.generation_issuer).checked_add(1).ok_or(HostError::GenerationExhausted)
     }
 
     pub(in crate::process) fn check_region_counts(

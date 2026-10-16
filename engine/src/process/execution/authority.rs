@@ -15,6 +15,7 @@ impl EngineInstance {
         if key != self.key {
             return Err(HostError::InvalidArtifact);
         }
+        self.guard_thread_execution_ready()?;
         if self.pending_call.is_some() {
             return Err(HostError::Call(CallError::Busy));
         }
@@ -31,11 +32,25 @@ impl EngineInstance {
 
     pub fn guard(&self, key: u64, generation: u32) -> Result<(), HostError> {
         self.guard_artifact(key, generation)?;
+        self.guard_thread_execution_ready()?;
         if self.pending_call.is_some()
             || self
                 .callback
                 .as_ref()
                 .is_some_and(SuspendedCallback::is_resident)
+        {
+            return Err(HostError::Call(CallError::Busy));
+        }
+        Ok(())
+    }
+
+    fn guard_thread_execution_ready(&self) -> Result<(), HostError> {
+        if self.pending_windows_thread_schedule().is_some()
+            || self.exceptions.thread_unhandled(self.threads.current_id())
+            || self
+                .threads
+                .info(self.threads.current_id())
+                .is_ok_and(|thread| thread.suspend_count != 0)
         {
             return Err(HostError::Call(CallError::Busy));
         }
@@ -56,6 +71,7 @@ impl EngineInstance {
 
     pub fn guard_resident(&self, key: u64, id: u64) -> Result<(), HostError> {
         self.guard_resident_unit(key, id)?;
+        self.guard_thread_execution_ready()?;
         if self.pending_call.is_some() {
             return Err(HostError::Call(CallError::Busy));
         }

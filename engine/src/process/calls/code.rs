@@ -131,9 +131,7 @@ impl EngineInstance {
         if self.call_cancelled() {
             return Err(HostError::Call(CallError::Cancelled));
         }
-        let next_generation = generation
-            .checked_add(1)
-            .ok_or(HostError::GenerationExhausted)?;
+        let next_generation = self.next_artifact_generation()?;
         let artifact = self.prepare_artifact(count, gate_count, next_generation, format)?;
         replacement_admission(&artifact, callback, stopped.eip)?;
         let record = CallbackRecord32 {
@@ -177,10 +175,12 @@ impl EngineInstance {
             .map_err(|_| HostError::CodeInvalidated)?;
         replacement_admission(&prepared.artifact, callback, prepared.pc)?;
 
+        if prepared.record.generation != self.next_artifact_generation()? {return Err(HostError::InvalidArtifact);}
         // every fallible check precedes the artifact and continuation publication.
         let generation = prepared.record.generation;
         self.artifact = Some(prepared.artifact);
         self.generation = generation;
+        self.generation_issuer = generation;
         let callback = self.callback.as_mut().unwrap();
         callback.record = SuspendedRecord::Replacement(prepared.record);
         callback.outer.owner = PendingOwner::Replacement(generation);

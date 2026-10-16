@@ -21,6 +21,9 @@ impl EngineInstance {
             return Err(HostError::Call(CallError::Busy));
         }
         self.guard_detection_material_change()?;
+        if self.cache_pins()?.contains(&id) {
+            return Err(HostError::Call(CallError::Busy));
+        }
         let memory = self.memory.as_ref().ok_or(HostError::Closed)?;
         self.resident
             .as_ref()
@@ -42,7 +45,9 @@ impl EngineInstance {
             .as_mut()
             .ok_or(HostError::Resident(RegistryError::InvalidUnit))?
             .discard_current_raw(memory, id)
-            .map_err(HostError::Resident)
+            .map_err(HostError::Resident)?;
+        self.cache_track_removal(id);
+        Ok(())
     }
 
     /// call only after generated execution returns and the host clears the victim slot.
@@ -61,6 +66,9 @@ impl EngineInstance {
             return Err(HostError::Call(CallError::Busy));
         }
         self.guard_detection_material_change()?;
+        if self.cache_pins()?.contains(&id) {
+            return Err(HostError::Call(CallError::Busy));
+        }
         let memory = self.memory.as_ref().ok_or(HostError::Closed)?;
         self.resident
             .as_ref()
@@ -84,6 +92,7 @@ impl EngineInstance {
             .discard_current_raw(memory, id)
             .map_err(HostError::Resident)?;
         self.resident_installations[slot] = None;
+        self.cache_track_removal(id);
         Ok(())
     }
 
@@ -97,6 +106,9 @@ impl EngineInstance {
             return Err(HostError::Call(CallError::Busy));
         }
         self.guard_detection_material_change()?;
+        if self.cache_pins()?.contains(&id) {
+            return Err(HostError::Call(CallError::Busy));
+        }
         let memory = self.memory.as_ref().ok_or(HostError::Closed)?;
         self.resident
             .as_ref()
@@ -116,6 +128,7 @@ impl EngineInstance {
                 *installed = None;
             }
         }
+        self.cache_track_removal(id);
         Ok(())
     }
 

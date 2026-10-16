@@ -228,7 +228,7 @@ struct Retained {
     dispatcher: (Vec<u8>, usize),
     usage: RegistryUsage,
     units: Vec<(u64, Vec<u8>, usize)>,
-    installations: [Option<ResidentInstallation>; 8],
+    installations: Vec<Option<ResidentInstallation>>,
     pages: Vec<PageObservation>,
 }
 
@@ -260,7 +260,7 @@ fn retained(f: &Fixture) -> Retained {
         image_input: engine.image_input.is_some(),
         image_started: engine.image_started,
         last_error,
-        virtual_allocations: engine.virtual_allocations.clone(),
+        virtual_allocations: engine.windows_memory.reservations().collect(),
         memory: (
             memory.identity(),
             memory.capacity_pages(),
@@ -291,7 +291,7 @@ fn retained(f: &Fixture) -> Retained {
                 (id, bytes.to_vec(), bytes.as_ptr() as usize)
             })
             .collect(),
-        installations: engine.resident_installations,
+        installations: engine.resident_installations.clone(),
         pages: PAGES
             .into_iter()
             .map(|address| {
@@ -451,7 +451,7 @@ type ModuleObservation = (u64, Result<(Vec<u8>, usize), HostError>);
 struct OwnershipObservation {
     stable: StableOwners,
     usage: Option<RegistryUsage>,
-    installations: [Option<ResidentInstallation>; 8],
+    installations: Vec<Option<ResidentInstallation>>,
     units: Vec<ModuleObservation>,
     registry: Option<String>,
 }
@@ -511,7 +511,7 @@ fn observe(
             pending: engine.pending_call.as_ref().map(observe_pending),
             callback,
             last_error,
-            virtual_allocations: engine.virtual_allocations.clone(),
+            virtual_allocations: engine.windows_memory.reservations().collect(),
             memory: memory.map(|memory| {
                 (
                     memory.identity(),
@@ -556,7 +556,7 @@ fn observe(
             }),
         },
         usage: engine.resident.as_ref().map(ResidentRegistry::usage),
-        installations: engine.resident_installations,
+        installations: engine.resident_installations.clone(),
         units: ids
             .iter()
             .map(|&id| {
@@ -747,7 +747,7 @@ fn discard_installed_returns_exact_byte_credit_under_a_tight_registry_budget() {
         .unwrap()
         .get();
     f.engine.resident = Some(registry);
-    f.engine.resident_installations = [None; 8];
+    f.engine.resident_installations = vec![None; 8];
     f.engine
         .acknowledge_resident_installation(KEY, id, 0)
         .unwrap();
@@ -1280,8 +1280,12 @@ fn discard_installed_handles_empty_registry_and_preserves_occupied_optional_owne
     });
     engine.image_started = true;
     engine
-        .virtual_allocations
-        .push(PageRange::new(GuestAddress(0x8000), 1).unwrap());
+        .windows_memory
+        .reserve_for_test(
+            engine.memory.as_mut().unwrap(),
+            PageRange::new(GuestAddress(0x3000_0000), 1).unwrap(),
+        )
+        .unwrap();
     let input_address = engine.image_input.as_ref().unwrap() as *const _ as usize;
     remove_exact(&mut engine, &[id], &probe, &PAGES, id, 0);
     assert_eq!(

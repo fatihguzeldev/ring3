@@ -387,9 +387,14 @@ impl EngineInstance {
 
     fn callback_request(&self, key: u64, generation: u32, count: usize) -> Result<(), HostError> {
         self.guard_artifact(key, generation)?;
+        if self.modules.parked_callback_depth()
+            + self.callback.as_ref().map_or(0, SuspendedCallback::depth)
+            >= MAX_CALLBACK_DEPTH
+        {
+            return Err(call_error(CallError::Busy));
+        }
         if let Some(callback) = &self.callback
-            && (callback.depth() >= MAX_CALLBACK_DEPTH
-                || !matches!(callback.record, SuspendedRecord::Replacement(record) if record.generation == generation)
+            && (!matches!(callback.record, SuspendedRecord::Replacement(record) if record.generation == generation)
                 || self.pending_call.as_ref().is_none_or(|pending| {
                     pending.owner != PendingOwner::Replacement(generation)
                         || callback.contains_outer_token(pending.token)

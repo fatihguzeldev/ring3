@@ -451,9 +451,14 @@ impl EngineInstance {
     ) -> Result<(), HostError> {
         self.guard_resident_unit(key, outer_id)?;
         self.guard_resident_unit(key, callback_id)?;
+        if self.modules.parked_callback_depth()
+            + self.callback.as_ref().map_or(0, SuspendedCallback::depth)
+            >= MAX_CALLBACK_DEPTH
+        {
+            return Err(HostError::Call(CallError::Busy));
+        }
         if let Some(callback) = &self.callback
-            && (callback.depth() >= MAX_CALLBACK_DEPTH
-                || callback.authorized_resident_active_id() != Some(outer_id)
+            && (callback.authorized_resident_active_id() != Some(outer_id)
                 || self.pending_call.as_ref().is_none_or(|pending| {
                     pending.owner
                         != PendingOwner::ResidentCallback {

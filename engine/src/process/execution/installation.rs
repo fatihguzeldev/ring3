@@ -52,6 +52,7 @@ impl EngineInstance {
         let installed = ResidentInstallation { unit_id: id, slot };
         // occupied slots persist until explicit discard, stale retirement or close.
         self.resident_installations[slot as usize] = Some(installed);
+        self.cache_track_installation(slot, id);
         Ok(installed)
     }
 
@@ -73,13 +74,18 @@ impl EngineInstance {
         {
             return Err(HostError::Call(CallError::Busy));
         }
-        self.resident_installations
+        let installed = self
+            .resident_installations
             .iter()
             .flatten()
             .find(|installed| installed.unit_id == unit_id)
             .copied()
             .ok_or(HostError::Resident(RegistryError::NotFound {
                 pc: GuestAddress(pc),
-            }))
+            }))?;
+        if let Some(cache) = self.execution_cache.as_ref() {
+            cache.touch(installed.slot, installed.unit_id);
+        }
+        Ok(installed)
     }
 }

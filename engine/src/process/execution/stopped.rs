@@ -42,10 +42,7 @@ impl EngineInstance {
         if self.call_cancelled() {
             return Err(HostError::Call(CallError::Cancelled));
         }
-        let next_generation = self
-            .generation
-            .checked_add(1)
-            .ok_or(HostError::GenerationExhausted)?;
+        let next_generation = self.next_artifact_generation()?;
         let artifact = compile_runtime_entry(
             self.memory()?,
             GuestAddress(state.eip),
@@ -58,6 +55,7 @@ impl EngineInstance {
         .map_err(HostError::Compile)?;
         self.artifact = Some(artifact);
         self.generation = next_generation;
+        self.generation_issuer = next_generation;
         Ok(next_generation)
     }
     /// captures only an ordinary resident code miss; strict resident compilers stay strict.
