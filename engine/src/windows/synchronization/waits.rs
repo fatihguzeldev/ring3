@@ -432,6 +432,16 @@ impl SynchronizationContext32 {
         &self,
         rows: &[(u32, u32, u32, u64)],
     ) -> Result<PreparedSignals32, Error> {
+        let mut prepared = self.signal_plan(self.now, None)?;
+        self.project_message_rows(&mut prepared, rows)?;
+        self.resolve_waiters(&mut prepared)?;
+        Ok(prepared)
+    }
+    pub(super) fn project_message_rows(
+        &self,
+        prepared: &mut PreparedSignals32,
+        rows: &[(u32, u32, u32, u64)],
+    ) -> Result<(), Error> {
         let mut additional = 0;
         for (index, &(thread, _, _, generation)) in rows.iter().enumerate() {
             if thread == 0 || rows[..index].iter().any(|row| row.0 == thread) {
@@ -452,7 +462,6 @@ impl SynchronizationContext32 {
         {
             return Err(Error::Capacity);
         }
-        let mut prepared = self.signal_plan(self.now, None)?;
         prepared
             .extra_queues
             .try_reserve_exact(rows.len().saturating_sub(1))
@@ -470,8 +479,7 @@ impl SynchronizationContext32 {
                 prepared.extra_queues.push(queue);
             }
         }
-        self.resolve_waiters(&mut prepared)?;
-        Ok(prepared)
+        Ok(())
     }
     pub fn refresh_prepared_messages_for_thread(
         &self,

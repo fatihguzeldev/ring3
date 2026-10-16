@@ -36,10 +36,15 @@ impl EngineInstance {
         critical
             .try_reserve_exact(limits.events as usize)
             .map_err(|_| HostError::Synchronization(Error::Allocation))?;
+        let mut timer_captures = Vec::new();
+        timer_captures
+            .try_reserve_exact(limits.events as usize)
+            .map_err(|_| HostError::Synchronization(Error::Allocation))?;
         self.synchronization = Some(SynchronizationRuntime32 {
             context,
             reply: None,
             critical,
+            timer_captures,
         });
         Ok(())
     }

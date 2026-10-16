@@ -17,6 +17,7 @@ pub(in crate::process) struct ActivationRuntime32 {
     pub(super) used: usize,
     pub(super) reply: Option<ActivationThreadReply32>,
     pub(super) module_contexts: Vec<(crate::loader::ModuleId32, u32)>,
+    pub(super) captures: Vec<super::captures::ManagedActivationCapture32>,
 }
 pub(in crate::process) struct ActivationThreadReply32 {
     pub(super) owner: PendingOwner,
@@ -42,6 +43,7 @@ impl ActivationRuntime32 {
             used: 0,
             reply: None,
             module_contexts: Vec::new(),
+            captures: Vec::new(),
         })
     }
     pub(in crate::process) fn reservation(&self) -> PageRange {

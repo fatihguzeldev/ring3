@@ -61,6 +61,7 @@ impl EngineInstance {
                 completion: ThreadInvocationCompletion32::Apc,
                 timer: Some(timer),
                 activation: None,
+                managed: self.waitable_timer_activation(timer.object, timer.generation),
             });
         }
         Ok(PreparedThreadTimers32 { invocations, next })

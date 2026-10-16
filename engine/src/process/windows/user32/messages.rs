@@ -1,3 +1,4 @@
+mod provenance;
 use super::{
     User32CallContext32, User32Context32, User32Outcome32, callback::Continuation32, memory,
 };
@@ -8,6 +9,8 @@ use crate::{
         window::WindowHandle32,
     },
 };
+pub(super) use provenance::MessageIdentity32;
+pub(super) use provenance::MessageProvenance32;
 
 impl User32Context32 {
     pub(super) fn retrieve_message(
@@ -43,8 +46,18 @@ impl User32Context32 {
             args[3],
             queue_mask,
         )? {
+            let (sequence, activation) = self.state.message_activation(index);
+            let delivery = self.provenance.prepare(
+                MessageIdentity32 {
+                    timer: false,
+                    sequence,
+                },
+                message,
+                activation,
+            )?;
             memory::write_message(memory, args[0], message)?;
-            self.state.observe_queue(context.thread_id, observed);
+            self.provenance.commit(delivery);
+            self.observe_queue_with_timers(context.thread_id, observed);
             self.input.message = message;
             if remove && let Some(keyboard) = self.state.remove_message(index) {
                 self.input.queued = keyboard.state;
@@ -65,7 +78,23 @@ impl User32Context32 {
                 1
             }));
         }
-        self.state.observe_queue(context.thread_id, observed);
+        if let Some(message) = self.retrieve_timer_message(
+            memory,
+            super::timers::TimerMessageQuery32 {
+                output: args[0],
+                thread: context.thread_id,
+                window: args[1],
+                min: args[2],
+                max: args[3],
+                remove,
+                mask: queue_mask,
+            },
+        )? {
+            self.observe_queue_with_timers(context.thread_id, observed);
+            self.input.message = message;
+            return Ok(User32Outcome32::Return(1));
+        }
+        self.observe_queue_with_timers(context.thread_id, observed);
         if !blocking {
             return Ok(User32Outcome32::Return(0));
         }
@@ -83,10 +112,11 @@ impl User32Context32 {
         token: u64,
         memory: &mut AddressSpace,
     ) -> Result<User32Outcome32, User32Error32> {
-        let pending = *self
+        let pending = self
             .pending
             .last()
             .filter(|pending| pending.token == token)
+            .cloned()
             .ok_or(User32Error32::InvalidToken)?;
         if let Continuation32::Retrieve {
             api,
@@ -139,8 +169,18 @@ impl User32Context32 {
             Err(error) => return Err(error),
         };
         if let Some((index, message)) = message {
+            let (sequence, activation) = self.state.message_activation(index);
+            let delivery = self.provenance.prepare(
+                MessageIdentity32 {
+                    timer: false,
+                    sequence,
+                },
+                message,
+                activation,
+            )?;
             memory::write_message(memory, output, message)?;
-            self.state.observe_queue(
+            self.provenance.commit(delivery);
+            self.observe_queue_with_timers(
                 thread,
                 if min == 0 && max == 0 {
                     u32::MAX
@@ -164,6 +204,22 @@ impl User32Context32 {
             Ok(User32Outcome32::Return(u32::from(
                 message.message != 0x0012,
             )))
+        } else if let Some(message) = self.retrieve_timer_message(
+            memory,
+            super::timers::TimerMessageQuery32 {
+                output,
+                thread,
+                window,
+                min,
+                max,
+                remove: true,
+                mask: u32::MAX,
+            },
+        )? {
+            self.observe_queue_with_timers(thread, u32::MAX);
+            self.input.message = message;
+            self.pending.pop();
+            Ok(User32Outcome32::Return(1))
         } else {
             Ok(User32Outcome32::Wait {
                 continuation: token,
@@ -179,30 +235,38 @@ impl User32Context32 {
     ) -> Result<User32Outcome32, User32Error32> {
         let message = memory::message(memory, address)?;
         if message.message == 0x0113 && message.lparam != 0 {
-            return self.start(Continuation32::Call {
-                procedure: GuestAddress(message.lparam),
-                arguments: [
-                    message.window,
-                    message.message,
-                    message.wparam,
-                    message.time_ms,
-                ],
-            });
+            return self.start_message_callback(
+                Continuation32::Timer {
+                    procedure: GuestAddress(message.lparam),
+                    arguments: [
+                        message.window,
+                        message.message,
+                        message.wparam,
+                        context.time_ms,
+                    ],
+                },
+                message,
+                context.thread_id,
+            );
         }
         if message.window == 0 {
             return Ok(User32Outcome32::Return(0));
         }
         let handle = self.owned(message.window, context.thread_id)?;
         let procedure = self.windows().get(handle)?.description.procedure;
-        self.start(Continuation32::Call {
-            procedure,
-            arguments: [
-                message.window,
-                message.message,
-                message.wparam,
-                message.lparam,
-            ],
-        })
+        self.start_message_callback(
+            Continuation32::Call {
+                procedure,
+                arguments: [
+                    message.window,
+                    message.message,
+                    message.wparam,
+                    message.lparam,
+                ],
+            },
+            message,
+            context.thread_id,
+        )
     }
 
     pub(super) fn post_message(
@@ -227,15 +291,18 @@ impl User32Context32 {
         if args[1] < 0x0400 && message_has_pointer(args[1]) {
             return Err(User32Error32::Win32(1159));
         }
-        self.state.post(Message32 {
-            window: args[0],
-            message: args[1],
-            wparam: args[2],
-            lparam: args[3],
-            time_ms: context.time_ms,
-            point: context.cursor,
-            thread_id: thread,
-        })?;
+        self.state.post_captured(
+            Message32 {
+                window: args[0],
+                message: args[1],
+                wparam: args[2],
+                lparam: args[3],
+                time_ms: context.time_ms,
+                point: context.cursor,
+                thread_id: thread,
+            },
+            self.call_activation.clone(),
+        )?;
         Ok(User32Outcome32::Return(1))
     }
 

@@ -127,13 +127,13 @@ impl User32Context32 {
                 if args[0] & !0x7fff != 0 {
                     return Err(User32Error32::Win32(87));
                 }
-                let (current, new, _) = self.state.queue_status(context.thread_id);
-                self.state.observe_queue(context.thread_id, args[0]);
+                let (current, new, _) = self.wait_queue_status(context.thread_id);
+                self.observe_queue_with_timers(context.thread_id, args[0]);
                 ((current & args[0]) << 16) | (new & args[0])
             }
             GetInputState => {
-                let (_, fresh, _) = self.state.queue_status(context.thread_id);
-                self.state.observe_queue(context.thread_id, 5);
+                let (_, fresh, _) = self.wait_queue_status(context.thread_id);
+                self.observe_queue_with_timers(context.thread_id, 5);
                 u32::from(fresh & 5 != 0)
             }
             ScreenToClient | ClientToScreen => {

@@ -68,6 +68,8 @@ impl EngineInstance {
 }
 impl User32Context32 {
     pub(in crate::process) fn terminate_raw_input(&mut self) {
+        self.timers.clear();
+        self.provenance.clear();
         self.raw_input.terminate();
     }
     pub(in crate::process::windows::user32) fn raw_input_call(

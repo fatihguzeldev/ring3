@@ -35,7 +35,19 @@ impl EngineInstance {
                 reply.continuation,
             )?;
         }
-        let activation = self.prepare_activation_entry(None)?;
+        self.collect_activation_captures()?;
+        let capture = (reply.provider == super::WindowsCallbackProvider32::User32)
+            .then(|| {
+                self.user32
+                    .as_ref()
+                    .and_then(|context| context.callback_activation(reply.continuation))
+            })
+            .flatten();
+        let activation = if let Some(handle) = capture {
+            self.prepare_activation_entry_borrowed(handle)?
+        } else {
+            self.prepare_activation_entry(None)?
+        };
         let record = self.begin_provider_resident_callback(
             key,
             outer_id,
@@ -104,7 +116,19 @@ impl EngineInstance {
                 reply.continuation,
             )?;
         }
-        let activation = self.prepare_activation_entry(None)?;
+        self.collect_activation_captures()?;
+        let capture = (reply.provider == super::WindowsCallbackProvider32::User32)
+            .then(|| {
+                self.user32
+                    .as_ref()
+                    .and_then(|context| context.callback_activation(reply.continuation))
+            })
+            .flatten();
+        let activation = if let Some(handle) = capture {
+            self.prepare_activation_entry_borrowed(handle)?
+        } else {
+            self.prepare_activation_entry(None)?
+        };
         let record = self.begin_provider_callback(
             key,
             generation,

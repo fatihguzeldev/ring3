@@ -37,6 +37,7 @@ impl EngineInstance {
             return Err(HostError::Call(CallError::InvalidRequest));
         }
         self.checked_pending_call(owner, token)?;
+        self.collect_activation_captures()?;
         if let Some(reply) = self
             .synchronization
             .as_ref()

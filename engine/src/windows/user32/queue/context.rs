@@ -50,7 +50,7 @@ impl MessageQueue32 {
         Ok((current, fresh, generation + messages.len() as u64))
     }
     pub(crate) fn post(&mut self, message: Message32) -> Result<(), User32Error32> {
-        self.post_record(message, None, false)
+        self.post_record(message, None, false, Default::default())
     }
     pub(crate) fn post_input(
         &mut self,
@@ -58,20 +58,46 @@ impl MessageQueue32 {
         key: Option<QueuedKey32>,
         state: [u8; 256],
     ) -> Result<(), User32Error32> {
-        self.post_record(message, Some(QueuedKeyboard32 { key, state }), true)
+        self.post_record(
+            message,
+            Some(QueuedKeyboard32 { key, state }),
+            true,
+            Default::default(),
+        )
     }
     pub(crate) fn post_raw_input(&mut self, message: Message32) -> Result<(), User32Error32> {
-        self.post_record(message, None, true)
+        self.post_record(message, None, true, Default::default())
+    }
+    pub(crate) fn post_captured(
+        &mut self,
+        message: Message32,
+        activation: crate::windows::activation::CapturedActivation32,
+    ) -> Result<(), User32Error32> {
+        self.post_record(message, None, false, activation)
+    }
+    pub(crate) fn activation(
+        &self,
+        index: usize,
+    ) -> (u64, crate::windows::activation::CapturedActivation32) {
+        let slot = if index < self.limit {
+            &self.posted[index]
+        } else {
+            &self.quits[index - self.limit]
+        };
+        (slot.id, slot.activation.clone())
     }
     fn post_record(
         &mut self,
         message: Message32,
         keyboard: Option<QueuedKeyboard32>,
         input: bool,
+        activation: crate::windows::activation::CapturedActivation32,
     ) -> Result<(), User32Error32> {
         self.can_post(1)?;
         self.posted.push_back(MessageSlot32 {
             message,
+            id: self.generation + 1,
+            activation,
             keyboard,
             input,
             seen: 0,
@@ -91,6 +117,8 @@ impl MessageQueue32 {
         {
             *slot = MessageSlot32 {
                 message,
+                id: generation,
+                activation: Default::default(),
                 keyboard: None,
                 input: false,
                 seen: 0,
@@ -103,6 +131,8 @@ impl MessageQueue32 {
         }
         self.quits.push(MessageSlot32 {
             message,
+            id: generation,
+            activation: Default::default(),
             keyboard: None,
             input: false,
             seen: 0,

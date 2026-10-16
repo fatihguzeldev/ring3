@@ -55,6 +55,31 @@ impl SynchronizationContext32 {
         };
         Ok((object.id, generation, thread))
     }
+    pub(crate) fn timer_callback_identity(&self, id: u64) -> Option<(u64, u32, u32)> {
+        self.objects
+            .iter()
+            .flatten()
+            .find(|object| object.id == id)
+            .and_then(|object| {
+                if let ObjectKind32::Timer {
+                    generation,
+                    thread,
+                    procedure,
+                    due,
+                    queued,
+                    ..
+                } = object.kind
+                    && (due.is_some() || queued)
+                {
+                    Some((generation, thread, procedure))
+                } else {
+                    None
+                }
+            })
+    }
+    pub(crate) fn timer_capture_capacity(&self) -> usize {
+        self.objects.len()
+    }
     pub fn next_timer_deadline(&self) -> Option<u64> {
         self.objects
             .iter()
@@ -117,6 +142,13 @@ impl SynchronizationContext32 {
         Ok(plan)
     }
     pub(crate) fn prepare_timer_clock(&self, now: u64) -> Result<PreparedSignals32, Error> {
+        self.prepare_time_with_messages(now, &[])
+    }
+    pub fn prepare_time_with_messages(
+        &self,
+        now: u64,
+        rows: &[(u32, u32, u32, u64)],
+    ) -> Result<PreparedSignals32, Error> {
         let expired =
             self.objects.iter().flatten().any(
                 |object| matches!(object.kind,ObjectKind32::Timer {due:Some(due),..} if due<=now),
@@ -126,6 +158,7 @@ impl SynchronizationContext32 {
         } else {
             self.signal_plan(now, None)?
         };
+        self.project_message_rows(&mut plan, rows)?;
         if expired {
             let callbacks=plan.objects.iter().filter(|(_,kind)|matches!(kind,ObjectKind32::Timer {due:Some(due),procedure,queued:false,..} if *due<=now && *procedure!=0)).count();
             plan.timer_apcs

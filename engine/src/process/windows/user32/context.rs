@@ -41,7 +41,19 @@ impl User32Context32 {
             input: super::input::User32Input32::default(),
             raw_input: crate::windows::rawinput::RawInputRuntime32::new(limits.messages)?,
             destructions,
+            timers: super::timers::TimerState32::new(limits.messages, limits.windows)?,
+            provenance: super::messages::MessageProvenance32::new(limits.messages)?,
+            call_activation: Default::default(),
+            activation_capture_limit: limits
+                .messages
+                .checked_mul(5)
+                .and_then(|count| count.checked_add(limits.continuations + 1))
+                .ok_or(User32Error32::InvalidLimits)?,
         })
+    }
+
+    pub(in crate::process) fn activation_capture_limit(&self) -> usize {
+        self.activation_capture_limit
     }
 
     pub(in crate::process) fn scratch_reservation(&self) -> PageRange {
@@ -68,7 +80,7 @@ impl User32Context32 {
         self.last_error.take()
     }
     pub(in crate::process) fn wait_queue_status(&self, thread: u32) -> (u32, u32, u64) {
-        self.state.queue_status(thread)
+        self.queue_status_with_timers(thread, self.timers.now)
     }
 
     pub(crate) fn prepare(
@@ -129,6 +141,8 @@ impl User32Context32 {
             PeekMessageA | PeekMessageW | GetMessageA | GetMessageW => {
                 self.retrieve_message(api, args, memory, context)
             }
+            SetTimer => self.set_timer(args, context),
+            KillTimer => self.kill_timer(args, context),
             TranslateMessage => self.translate_message(args[0], memory, context),
             DispatchMessageA | DispatchMessageW => self.dispatch_message(args[0], memory, context),
             PostMessageA | PostMessageW => self.post_message(args, context),
@@ -224,6 +238,7 @@ impl User32Context32 {
         self.pending.push(Pending32 {
             token,
             continuation,
+            activation: None,
         });
         self.next_outcome()
     }

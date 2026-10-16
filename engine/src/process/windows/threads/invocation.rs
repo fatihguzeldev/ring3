@@ -23,12 +23,18 @@ pub(super) struct ThreadInvocation32 {
     pub completion: ThreadInvocationCompletion32,
     pub timer: Option<crate::windows::synchronization::TimerApc32>,
     pub activation: Option<u32>,
+    pub managed: Option<crate::windows::activation::CapturedActivation32>,
 }
 pub(in crate::process) struct PreparedThreadInvocation32 {
     invocation: ThreadInvocation32,
     signals: Option<crate::windows::synchronization::PreparedSignals32>,
     sent: Option<crate::process::windows::user32::PreparedUser32Sent32>,
     activation: Option<crate::process::windows::activation::PreparedActivationCapture32>,
+}
+impl ThreadRuntime32 {
+    pub(in crate::process) fn managed_activation_capture_capacity(&self) -> usize {
+        self.limits.apcs as usize + self.limits.threads as usize * 32
+    }
 }
 impl EngineInstance {
     pub(in crate::process) fn prepare_thread_invocation(
@@ -124,6 +130,7 @@ impl EngineInstance {
                 completion,
                 timer: None,
                 activation: if owned { captured } else { None },
+                managed: None,
             },
         })
     }
@@ -217,6 +224,7 @@ pub(super) struct ActiveThreadInvocation32 {
     pub return_esp: u32,
     pub completion: ThreadInvocationCompletion32,
     pub activation: Option<crate::windows::activation::ActivationScope32>,
+    pub _activation_capture: Option<crate::windows::activation::CapturedActivation32>,
     pub saved: super::saved::SavedThread32,
 }
 pub(in crate::process) struct PreparedThreadApc32 {
@@ -390,7 +398,11 @@ impl EngineInstance {
                 .check_span(word.address, 4, Access::Write)
                 .map_err(HostError::Memory)?;
         }
-        let activation = self.prepare_activation_entry(invocation.activation)?;
+        let activation = if let Some(capture) = &invocation.managed {
+            self.prepare_activation_entry_borrowed(capture.handle())?
+        } else {
+            self.prepare_activation_entry(invocation.activation)?
+        };
         Ok(PreparedInvocationEntry32 {
             activation,
             invocation,
@@ -429,6 +441,7 @@ impl EngineInstance {
                 return_esp: frame.return_esp(),
                 completion: invocation.completion,
                 activation,
+                _activation_capture: invocation.managed,
                 saved,
             });
         self.arena.as_mut().get_mut()[crate::abi::arena::STATE_OFFSET

@@ -1,6 +1,8 @@
+mod captures;
 mod publication;
 mod resources;
 mod sources;
+mod waitable;
 use super::sources as source_provider;
 use super::*;
 use crate::{

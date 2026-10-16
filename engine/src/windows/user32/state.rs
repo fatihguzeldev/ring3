@@ -298,6 +298,19 @@ impl User32State32 {
     pub(crate) fn post(&mut self, message: Message32) -> Result<(), User32Error32> {
         self.queue.post(message)
     }
+    pub(crate) fn post_captured(
+        &mut self,
+        message: Message32,
+        activation: crate::windows::activation::CapturedActivation32,
+    ) -> Result<(), User32Error32> {
+        self.queue.post_captured(message, activation)
+    }
+    pub(crate) fn message_activation(
+        &self,
+        index: usize,
+    ) -> (u64, crate::windows::activation::CapturedActivation32) {
+        self.queue.activation(index)
+    }
     pub(crate) fn project_input_messages(
         &self,
         thread: u32,

@@ -173,6 +173,7 @@ impl User32Context32 {
             self.pending.push(Pending32 {
                 token,
                 continuation: Continuation32::Destroy { plan: token },
+                activation: None,
             });
         }
         self.advance_destroy(token, None)
@@ -278,6 +279,8 @@ impl User32Context32 {
                 Step32::Remove(_) => {
                     self.state.remove_delivered(thread, window)?;
                     self.raw_input.retire_window(window.get());
+                    self.timers.retire_window(window.get());
+                    self.provenance.retire_window(window.get());
                     None
                 }
             };

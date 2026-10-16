@@ -1,38 +1,48 @@
 use crate::{
-    process::{EngineInstance, HostError, windows::threads::PreparedThreadTimers32},
+    process::{
+        EngineInstance, HostError,
+        windows::{threads::PreparedThreadTimers32, user32::PreparedUser32TimerClock32},
+    },
     windows::synchronization::PreparedSignals32,
 };
 
 pub(in crate::process) struct PreparedSynchronizationClock32 {
-    signals: PreparedSignals32,
-    timers: PreparedThreadTimers32,
+    synchronization: Option<(PreparedSignals32, PreparedThreadTimers32)>,
+    user32: PreparedUser32TimerClock32,
 }
 impl EngineInstance {
     pub(in crate::process) fn prepare_synchronization_clock(
-        &self,
+        &mut self,
         now: u64,
-    ) -> Result<Option<PreparedSynchronizationClock32>, HostError> {
-        let Some(runtime) = self.synchronization.as_ref() else {
-            return Ok(None);
+    ) -> Result<PreparedSynchronizationClock32, HostError> {
+        let user32 = self.prepare_user32_timer_clock(now)?;
+        let synchronization = if let Some(runtime) = self.synchronization.as_ref() {
+            let signals = runtime
+                .context
+                .prepare_time_with_messages(now, user32.queue_rows())
+                .map_err(HostError::Synchronization)?;
+            let timers = self.prepare_thread_timer_apcs(signals.timer_apcs())?;
+            Some((signals, timers))
+        } else {
+            None
         };
-        let signals = runtime
-            .context
-            .prepare_time(now)
-            .map_err(HostError::Synchronization)?;
-        let timers = self.prepare_thread_timer_apcs(signals.timer_apcs())?;
-        Ok(Some(PreparedSynchronizationClock32 { signals, timers }))
+        Ok(PreparedSynchronizationClock32 {
+            synchronization,
+            user32,
+        })
     }
     pub(in crate::process) fn commit_synchronization_clock(
         &mut self,
-        prepared: Option<PreparedSynchronizationClock32>,
+        prepared: PreparedSynchronizationClock32,
     ) {
-        if let Some(prepared) = prepared {
+        self.commit_user32_timer_clock(prepared.user32);
+        if let Some((signals, timers)) = prepared.synchronization {
             self.synchronization
                 .as_mut()
                 .unwrap()
                 .context
-                .commit_signals(prepared.signals);
-            self.commit_thread_timer_apcs(prepared.timers);
+                .commit_signals(signals);
+            self.commit_thread_timer_apcs(timers);
         }
     }
 }

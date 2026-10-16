@@ -66,6 +66,7 @@ impl EngineInstance {
                 completion: ThreadInvocationCompletion32::Fls { operation },
                 timer: None,
                 activation: None,
+                managed: None,
             })?;
             self.threads.next_invocation = next;
             self.threads.fls.context.commit_step(step);

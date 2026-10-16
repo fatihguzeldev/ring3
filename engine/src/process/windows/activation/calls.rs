@@ -59,6 +59,7 @@ impl EngineInstance {
             return Err(HostError::Call(CallError::InvalidRequest));
         }
         Self::prepare_completed_call(frame.complete(0))?;
+        self.collect_activation_captures()?;
         self.check_windows_thread_write()?;
         self.memory()?
             .ensure_transaction_versions(2)

@@ -11,6 +11,8 @@ mod properties;
 mod rawinput;
 mod runtime;
 mod threads;
+mod timers;
+pub(in crate::process) use timers::PreparedUser32TimerClock32;
 
 use crate::{
     memory::{GuestAddress, PageRange},
@@ -28,6 +30,7 @@ pub(crate) struct User32CallContext32 {
     pub thread_id: u32,
     pub instance: u32,
     pub time_ms: u32,
+    pub now_ns: u64,
     pub ansi: crate::windows::text::CodePage32,
     pub cursor: Point32,
     pub shift: bool,
@@ -62,6 +65,10 @@ pub(crate) struct User32Context32 {
     input: input::User32Input32,
     raw_input: crate::windows::rawinput::RawInputRuntime32,
     destructions: Vec<destruction::DestroyPlan32>,
+    timers: timers::TimerState32,
+    call_activation: crate::windows::activation::CapturedActivation32,
+    activation_capture_limit: usize,
+    provenance: messages::MessageProvenance32,
 }
 
 fn raw(handle: Option<WindowHandle32>) -> u32 {

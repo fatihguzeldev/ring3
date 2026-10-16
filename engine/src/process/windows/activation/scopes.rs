@@ -10,6 +10,11 @@ pub(in crate::process) struct PreparedActivationCapture32 {
     handle: u32,
     revision: Option<u64>,
 }
+impl PreparedActivationCapture32 {
+    pub(in crate::process) fn handle(&self) -> u32 {
+        self.handle
+    }
+}
 pub(in crate::process) struct PreparedActivationEntry32 {
     push: PreparedActivationPush32,
     retained: u32,
@@ -103,6 +108,16 @@ impl EngineInstance {
             retained: retained.unwrap_or(0),
             thread,
         }))
+    }
+    pub(in crate::process) fn prepare_activation_entry_borrowed(
+        &self,
+        handle: u32,
+    ) -> Result<Option<PreparedActivationEntry32>, HostError> {
+        let mut prepared = self.prepare_activation_entry(Some(handle))?;
+        if let Some(prepared) = &mut prepared {
+            prepared.retained = 0;
+        }
+        Ok(prepared)
     }
     pub(in crate::process) fn commit_activation_entry(
         &mut self,

@@ -266,6 +266,7 @@ impl EngineInstance {
             return Err(HostError::Call(CallError::InvalidToken));
         };
         self.checked_pending_call(reply.owner, reply.token)?;
+        self.collect_activation_captures()?;
         let prepared = Self::prepare_completed_call(reply.frame.complete(result))?;
         if let Some(error) = reply.last_error {
             let thread = self.current_windows_thread()?.with_last_error(error);

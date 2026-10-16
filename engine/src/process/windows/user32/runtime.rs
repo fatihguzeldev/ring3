@@ -215,10 +215,21 @@ impl EngineInstance {
         } else {
             None
         };
+        let activation = if matches!(
+            api,
+            User32Api32::PostMessageA | User32Api32::PostMessageW | User32Api32::SetTimer
+        ) {
+            Some(self.prepare_managed_activation_capture()?)
+        } else {
+            None
+        };
         let context = self
             .user32
             .as_mut()
             .ok_or(HostError::User32(User32Error32::InvalidRequest))?;
+        context.call_activation = activation
+            .as_ref()
+            .map_or_else(Default::default, |capture| capture.token());
         let result = if let Some(error) = remote_error {
             context.last_error = Some(error);
             Ok(super::User32Outcome32::Return(0))
@@ -232,6 +243,7 @@ impl EngineInstance {
                 call_context,
             )
         };
+        context.call_activation = Default::default();
         let outcome = match result {
             Ok(outcome) => outcome,
             Err(User32Error32::Win32(error)) => {
@@ -255,6 +267,12 @@ impl EngineInstance {
             context.windows().focus().is_some(),
             context.windows().capture().is_some(),
         );
+        if error.is_none()
+            && matches!(outcome, super::User32Outcome32::Return(value) if value != 0)
+            && let Some(activation) = activation
+        {
+            self.commit_managed_activation_capture(activation);
+        }
         if let Some((prepared, continuation)) = remote {
             assert_eq!(outcome, super::User32Outcome32::Wait { continuation });
             self.commit_thread_invocation(prepared);
@@ -291,6 +309,7 @@ impl EngineInstance {
             thread_id: self.current_windows_thread_id()?,
             instance: self.image.map_or(0, |image| image.image_base),
             time_ms,
+            now_ns: self.cpu_clock.monotonic_bounds().map_or(0, |(_, now)| now),
             ansi: self.windows_ansi_code_page(),
             ..context.runtime_input
         })

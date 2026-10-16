@@ -108,6 +108,8 @@ api_catalog! {
     GetForegroundWindow = 0x0002_0057, 0;
     GetActiveWindow = 0x0002_0058, 0;
     WaitMessage = 0x0002_0059, 0;
+    SetTimer = 0x0002_005a, 4;
+    KillTimer = 0x0002_005b, 2;
 }
 
 impl User32Api32 {

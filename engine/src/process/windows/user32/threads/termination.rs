@@ -28,6 +28,8 @@ impl User32Context32 {
         });
         self.raw_input.retire_thread(thread);
         self.state.retire_thread(thread);
+        self.timers.retire_thread(thread);
+        self.provenance.retire_thread(thread);
         self.layouts.retain(|layout| layout.thread != thread);
         if self.runtime_input.thread_id == thread {
             self.pending.clear();

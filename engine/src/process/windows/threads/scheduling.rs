@@ -271,6 +271,7 @@ impl EngineInstance {
                     .and_then(|runtime| runtime.context().next_timer_deadline()),
             )
             .chain(self.active_windows_file_deadline())
+            .chain(self.user32_timer_deadline())
             .chain(self.multimedia_timer_deadline())
             .min();
         self.threads.schedule_required = None;

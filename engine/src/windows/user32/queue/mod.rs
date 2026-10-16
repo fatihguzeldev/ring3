@@ -15,9 +15,11 @@ pub(crate) struct QueuedKeyboard32 {
     pub key: Option<QueuedKey32>,
     pub state: [u8; 256],
 }
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(super) struct MessageSlot32 {
     message: Message32,
+    id: u64,
+    activation: crate::windows::activation::CapturedActivation32,
     keyboard: Option<QueuedKeyboard32>,
     input: bool,
     seen: u32,

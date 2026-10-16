@@ -1,4 +1,6 @@
 mod api;
+mod capture;
+pub(crate) use capture::CapturedActivation32;
 mod context;
 mod graph;
 mod sections;

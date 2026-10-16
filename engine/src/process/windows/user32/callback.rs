@@ -10,10 +10,11 @@ use crate::{
     },
 };
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(super) struct Pending32 {
     pub token: u64,
     pub continuation: Continuation32,
+    pub activation: Option<crate::windows::activation::CapturedActivation32>,
 }
 
 #[derive(Clone, Copy)]
@@ -46,6 +47,10 @@ pub(super) enum Continuation32 {
     },
     RemoteCall {
         ready: Option<u32>,
+    },
+    Timer {
+        procedure: GuestAddress,
+        arguments: [u32; 4],
     },
     Call {
         procedure: GuestAddress,
@@ -86,11 +91,19 @@ pub(super) enum Continuation32 {
 
 impl User32Context32 {
     pub(super) fn next_outcome(&mut self) -> Result<User32Outcome32, User32Error32> {
-        let pending = *self.pending.last().ok_or(User32Error32::InvalidToken)?;
+        let pending = self
+            .pending
+            .last()
+            .cloned()
+            .ok_or(User32Error32::InvalidToken)?;
         let (procedure, arguments) = match pending.continuation {
             Continuation32::Show(show) => return self.show_outcome(show),
             Continuation32::Destroy { plan } => return self.destroy_outcome(plan),
             Continuation32::Call {
+                procedure,
+                arguments,
+            }
+            | Continuation32::Timer {
                 procedure,
                 arguments,
             } => (procedure, arguments),
@@ -195,14 +208,19 @@ impl User32Context32 {
         result: u32,
         memory: &mut AddressSpace,
     ) -> Result<User32Outcome32, User32Error32> {
-        let pending = *self
+        let pending = self
             .pending
             .last()
             .filter(|pending| pending.token == token)
+            .cloned()
             .ok_or(User32Error32::InvalidToken)?;
         match pending.continuation {
             Continuation32::Show(show) => self.complete_show(show),
             Continuation32::Destroy { plan } => self.complete_destroy(plan, memory),
+            Continuation32::Timer { .. } => {
+                self.pending.pop();
+                Ok(User32Outcome32::Return(0))
+            }
             Continuation32::Call { .. } => {
                 self.pending.pop();
                 Ok(User32Outcome32::Return(result))

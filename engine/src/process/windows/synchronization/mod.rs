@@ -21,6 +21,7 @@ pub(in crate::process) struct SynchronizationRuntime32 {
     context: SynchronizationContext32,
     reply: Option<Reply32>,
     critical: Vec<critical::CriticalSection32>,
+    timer_captures: Vec<timers::TimerCapture32>,
 }
 #[derive(Clone, Copy)]
 struct Reply32 {

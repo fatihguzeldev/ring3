@@ -40,7 +40,9 @@ impl User32Context32 {
                 max,
                 ..
             } => match self.state.find_message(thread, window, min, max) {
-                Ok(message) => message.is_some(),
+                Ok(message) => {
+                    message.is_some() || self.timer_message_ready(thread, window, min, max)
+                }
                 Err(_) => true,
             },
             _ => false,
@@ -196,10 +198,9 @@ impl User32ThreadReply32 {
             .iter_mut()
             .find(|pending| pending.token == continuation)
             .ok_or(User32Error32::InvalidToken)?;
-        let super::super::callback::Continuation32::RemoteCall { ready, .. } =
-            &mut pending.continuation
-        else {
-            return Err(User32Error32::InvalidToken);
+        let ready = match &mut pending.continuation {
+            super::super::callback::Continuation32::RemoteCall { ready, .. } => ready,
+            _ => return Err(User32Error32::InvalidToken),
         };
         if ready.is_some() {
             return Err(User32Error32::InvalidToken);
