@@ -187,7 +187,7 @@ fn admitted(instruction: &[u8], target: Location32) {
     assert_eq!(engine.compile(1), Ok(2));
     assert_eq!(engine.arena(), arena);
     assert_unit(&engine, id, &bytes, pointer);
-    engine.arena_mut().unwrap()[140..].fill(0xa5);
+    engine.arena_mut().unwrap()[140..140 + ring3_engine::abi::arena::TRANSFER_SIZE].fill(0xa5);
     engine.arena_mut().unwrap()[140..144].copy_from_slice(&CODE.to_le_bytes());
     let before = saved(&engine, keep);
     assert_eq!(engine.compile_entries(1, 0), Ok(3));
@@ -366,7 +366,7 @@ fn jump_span_priority_and_adjacent_exclusions_preserve_previous_state() {
         (&[0x66, 0x66, 0xff, 0xe0][..], UnsupportedFeature::Opcode),
         (&[0x67, 0xff, 0x23], UnsupportedFeature::Opcode),
         (&[0x64, 0xff, 0x23], UnsupportedFeature::Segment),
-        (&[0xcd, 0x80], UnsupportedFeature::Opcode),
+        (&[0xf0, 0x90], UnsupportedFeature::Opcode),
     ] {
         if matches!(
             instruction.first(),
@@ -382,7 +382,11 @@ fn jump_span_priority_and_adjacent_exclusions_preserve_previous_state() {
             keep,
             &bytes,
             bytes.len(),
-            InstructionError::Decode(DecodeError::Unsupported(feature)),
+            InstructionError::Decode(if instruction == [0xf0, 0x90] {
+                DecodeError::InvalidEncoding
+            } else {
+                DecodeError::Unsupported(feature)
+            }),
         );
     }
     rejected(

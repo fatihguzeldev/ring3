@@ -4,7 +4,7 @@ use ring3_engine::{
         x86::{encode_exit_v3, encode_state},
     },
     cpu::{
-        ExecutionExit, ExitReason, UnsupportedFeature,
+        ExecutionExit, ExitReason,
         dbt::{
             BlockSpec, CompileError, CompileLimits, InstructionError, RegistryError,
             RegistryLimits, ResidentRegistry, compile_entry_region, compile_region,
@@ -131,7 +131,7 @@ fn reject<T: std::fmt::Debug + PartialEq>(
     action: impl FnOnce(&mut EngineInstance) -> Result<T, HostError>,
 ) {
     let before = saved(engine, ids, &[CODE, KEEP, OTHER]);
-    assert_eq!(action(engine), Err(expected));
+    super::assert_error_contract(action(engine).err(), expected);
     assert_eq!(saved(engine, ids, &[CODE, KEEP, OTHER]), before);
 }
 
@@ -146,13 +146,6 @@ fn instruction_error(pc: u32, cause: InstructionError) -> HostError {
     })
 }
 
-fn opcode_error(pc: u32) -> HostError {
-    instruction_error(
-        pc,
-        InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
-    )
-}
-
 fn fetch_error(pc: u32, address: u32, reason: FaultReason) -> HostError {
     instruction_error(
         pc,
@@ -163,7 +156,7 @@ fn fetch_error(pc: u32, address: u32, reason: FaultReason) -> HostError {
                 access: Access::Execute,
                 reason,
             },
-            length: 2,
+            length: if pc == address { 1 } else { 2 },
         }),
     )
 }
@@ -172,7 +165,7 @@ fn fetch_error(pc: u32, address: u32, reason: FaultReason) -> HostError {
 fn descriptors_markers_fetch_and_profiles_preserve_arena_legacy_and_retained_units() {
     let (mut engine, keep) = fixture();
     for (blocks, gates) in [(0, 0), (9, 0), (1, 2), (8, 9), (u32::MAX, 0), (1, u32::MAX)] {
-        engine.arena_mut().unwrap()[TRANSFER_OFFSET..].fill(0xff);
+        engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + TRANSFER_SIZE].fill(0xff);
         reject(&mut engine, &[keep], HostError::InvalidRequest, |engine| {
             engine.compile_resident_with_gates(blocks, gates)
         });
@@ -219,11 +212,12 @@ fn descriptors_markers_fetch_and_profiles_preserve_arena_legacy_and_retained_uni
         );
     }
     for marker in [&[0xcd, 0x80][..], &[0x66, 0xcd, 0x80][..]] {
-        upload(&mut engine, CODE, marker);
-        describe(&mut engine, &[(CODE, marker.len() as u32)], &[]);
-        reject(&mut engine, &[keep], opcode_error(CODE), |engine| {
-            engine.compile_resident_with_gates(1, 0)
-        });
+        let (mut interrupt, retained) = fixture();
+        upload(&mut interrupt, CODE, marker);
+        let id = compile(&mut interrupt, &[(CODE, marker.len() as u32)], &[]);
+        assert_eq!(interrupt.lookup_resident(CODE).unwrap().get(), id);
+        assert_eq!(interrupt.guard_resident(KEY, retained), Ok(()));
+        assert_eq!(interrupt.memory().unwrap().mapped_pages(), 4);
     }
     upload(&mut engine, CODE, &[0xcd, 0x80]);
     let spec = [BlockSpec {
@@ -234,7 +228,7 @@ fn descriptors_markers_fetch_and_profiles_preserve_arena_legacy_and_retained_uni
     let memory = engine.memory().unwrap();
     let expected = CompileError::Instruction {
         pc: GuestAddress(CODE),
-        cause: InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
+        cause: InstructionError::BackendUnsupported,
     };
     assert_eq!(
         prepare_region(memory, &spec, limits).map(|_| ()),
@@ -363,8 +357,8 @@ fn eight_descriptors_crosspage_markers_and_gate_instruction_charges_keep_exact_b
     let bytes = engine.resident_bytes(unit).unwrap();
     assert!(
         bytes
-            .windows(b"guard_resident".len())
-            .any(|part| part == b"guard_resident")
+            .windows(b"guard_detect_resident".len())
+            .any(|part| part == b"guard_detect_resident")
     );
     for absent in [b"cpu_read32".as_slice(), b"cpu_store_resident32".as_slice()] {
         assert!(!bytes.windows(absent.len()).any(|part| part == absent));

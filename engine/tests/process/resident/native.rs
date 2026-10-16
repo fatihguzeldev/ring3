@@ -48,3 +48,47 @@ mod process_resident_store;
 
 #[path = "admission/native/unary.rs"]
 mod process_resident_unary;
+
+#[path = "../../support/cpu/fetch/native.rs"]
+mod support_fetch;
+
+fn assert_error_contract(
+    actual: Option<ring3_engine::process::HostError>,
+    expected: ring3_engine::process::HostError,
+) {
+    use ring3_engine::{
+        cpu::dbt::{CompileError, InstructionError, RegistryError},
+        cpu::x86::decode::DecodeError,
+        process::HostError,
+    };
+    let Some(actual) = actual else {
+        panic!("expected compilation failure {expected:?}");
+    };
+    let (actual, expected) = match (actual, expected) {
+        (HostError::Compile(actual), HostError::Compile(expected)) => (actual, expected),
+        (
+            HostError::Resident(RegistryError::Compile(actual)),
+            HostError::Resident(RegistryError::Compile(expected)),
+        ) => (actual, expected),
+        (actual, expected) => {
+            assert_eq!(actual, expected);
+            return;
+        }
+    };
+    match (actual, expected) {
+        (
+            CompileError::Instruction {
+                pc: actual_pc,
+                cause: InstructionError::Decode(actual),
+            },
+            CompileError::Instruction {
+                pc,
+                cause: InstructionError::Decode(expected @ DecodeError::MemoryFault { .. }),
+            },
+        ) => {
+            assert_eq!(actual_pc, pc);
+            support_fetch::assert_decode_contract(actual, expected);
+        }
+        (actual, expected) => assert_eq!(actual, expected),
+    }
+}

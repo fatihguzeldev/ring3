@@ -144,7 +144,7 @@ fn failed<T>(
     operation: impl FnOnce(&mut EngineInstance) -> Result<T, HostError>,
 ) {
     let before = snapshot(engine, ids);
-    assert_eq!(operation(engine).err(), Some(error));
+    super::assert_error_contract(operation(engine).err(), error);
     assert_eq!(snapshot(engine, ids), before);
 }
 
@@ -254,6 +254,7 @@ fn current_resident_instruction_families_compile_without_guest_data_or_stack_rea
         (&[0xff, 0x15, 0, 0, 0xad, 0xde], true),
         (&[0xc3], true),
         (&[0xc2, 8, 0], true),
+        (&[0xcd, 0x80], true),
     ];
     for &(prefix, terminal) in cases {
         let mut engine = EngineInstance::new(1, KEY).unwrap();
@@ -374,7 +375,7 @@ fn unterminated_or_cross_page_instructions_report_execute_fault_before_publicati
 }
 
 #[test]
-fn exact_sixty_four_instruction_limit_counts_gates_and_ignores_terminal_poison() {
+fn cold_entry_budget_emits_a_bounded_prefix_and_counts_gate_cost() {
     let mut engine = fixture();
     let mut valid = vec![0x90; 63];
     valid.extend([0xeb, 0, 0x0f, 0x06]);
@@ -384,26 +385,37 @@ fn exact_sixty_four_instruction_limit_counts_gates_and_ignores_terminal_poison()
     let mut too_many = vec![0x90; 64];
     too_many.extend([0xeb, 0]);
     upload(&mut engine, B, &too_many);
-    entries(&mut engine, &[B], &[]);
+    let prefix = compile(&mut engine, B);
+    assert_eq!(engine.lookup_resident(B + 63).unwrap().get(), prefix);
+    assert!(
+        engine.lookup_resident(B + 64).is_err(),
+        "cold admission stops at its budget before the branch"
+    );
+    blocks(&mut engine, &[(B, too_many.len() as u32)], &[]);
     failed(
         &mut engine,
-        &[id],
+        &[id, prefix],
         compile_error(CompileError::InstructionLimit),
-        |engine| engine.compile_resident_entries(1, 0),
+        |engine| engine.compile_resident(1),
     );
+    let mut engine = fixture();
+    upload(&mut engine, A, &valid);
     entries(&mut engine, &[A, OUTER], &[(OUTER, 17)]);
-    failed(
-        &mut engine,
-        &[id],
-        compile_error(CompileError::InstructionLimit),
-        |engine| engine.compile_resident_entries(2, 1),
+    let with_gate = engine.compile_resident_entries(2, 1).unwrap().get();
+    assert_eq!(engine.lookup_resident(A + 62).unwrap().get(), with_gate);
+    assert!(
+        engine.lookup_resident(A + 63).is_err(),
+        "the gate reserves one instruction from the shared budget"
     );
-    let mut with_gate = vec![0x90; 62];
-    with_gate.extend([0xeb, 0]);
-    upload(&mut engine, C, &with_gate);
+    assert_eq!(engine.lookup_resident(OUTER).unwrap().get(), with_gate);
+    let mut engine = fixture();
+    let mut exact = vec![0x90; 62];
+    exact.extend([0xeb, 0]);
+    upload(&mut engine, C, &exact);
     entries(&mut engine, &[C, OUTER], &[(OUTER, 17)]);
-    let new_id = engine.compile_resident_entries(2, 1).unwrap().get();
-    assert_eq!(engine.lookup_resident(OUTER).unwrap().get(), new_id);
+    let exact = engine.compile_resident_entries(2, 1).unwrap().get();
+    assert_eq!(engine.lookup_resident(C + 62).unwrap().get(), exact);
+    assert_eq!(engine.lookup_resident(OUTER).unwrap().get(), exact);
 }
 
 #[test]
@@ -445,7 +457,7 @@ fn invalid_counts_seeds_gates_and_unsupported_profile_are_failure_atomic() {
     );
     for (code, feature) in [
         (&[0x0f, 0x06][..], UnsupportedFeature::Privileged),
-        (&[0xcd, 0x80][..], UnsupportedFeature::Opcode),
+        (&[0xf0, 0x90][..], UnsupportedFeature::Opcode),
     ] {
         upload(&mut engine, A, code);
         entries(&mut engine, &[A], &[]);
@@ -454,7 +466,11 @@ fn invalid_counts_seeds_gates_and_unsupported_profile_are_failure_atomic() {
             &[id],
             instruction_error(
                 A,
-                InstructionError::Decode(DecodeError::Unsupported(feature)),
+                InstructionError::Decode(if code == [0xf0, 0x90] {
+                    DecodeError::InvalidEncoding
+                } else {
+                    DecodeError::Unsupported(feature)
+                }),
             ),
             |engine| engine.compile_resident_entries(1, 0),
         );

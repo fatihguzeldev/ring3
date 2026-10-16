@@ -435,8 +435,8 @@ fn rejected_counts_spans_and_resident_profile_keep_legacy_and_resident_state() {
             InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Privileged)),
         ),
         (
-            &[0xcd, 0x80][..],
-            InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
+            &[0xf0, 0x90][..],
+            InstructionError::Decode(DecodeError::InvalidEncoding),
         ),
         (
             &[0xff, 0x10, 0xeb, 0][..],
@@ -457,6 +457,9 @@ fn rejected_counts_spans_and_resident_profile_keep_legacy_and_resident_state() {
             |engine| engine.compile_resident(1),
         );
     }
+    upload(&mut engine, BAD, &[0xcd, 0x80]);
+    let interrupt = compile(&mut engine, BAD, 2);
+    assert_eq!(engine.lookup_resident(BAD).unwrap().get(), interrupt);
     describe(&mut engine, &[(A, 0)]);
     failed(
         &mut engine,

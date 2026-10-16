@@ -209,7 +209,7 @@ fn all_seventeen_reads_admit_without_data_and_preserve_legacy_and_retained_units
         let arena = engine.arena().to_vec();
         assert_eq!(engine.compile(1), Ok(2), "legacy explicit {name}");
         assert_eq!(engine.arena(), arena);
-        engine.arena_mut().unwrap()[140..].fill(0xa5);
+        engine.arena_mut().unwrap()[140..140 + ring3_engine::abi::arena::TRANSFER_SIZE].fill(0xa5);
         engine.arena_mut().unwrap()[140..144].copy_from_slice(&CODE.to_le_bytes());
         let before = saved(&engine, &[keep, id.get()]);
         assert_eq!(engine.compile_entries(1, 0), Ok(3), "legacy entry {name}");

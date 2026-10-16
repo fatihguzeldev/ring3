@@ -283,7 +283,10 @@ fn unchanged_error<T>(
                 .ok()
         })
         .collect();
-    let error = operation(engine).err().expect("operation must fail");
+    let error = match operation(engine) {
+        Err(error) => error,
+        Ok(_) => panic!("operation must fail"),
+    };
     assert_eq!(engine.arena(), arena);
     assert_eq!(
         engine.artifact_bytes().map(|value| value.to_vec()),

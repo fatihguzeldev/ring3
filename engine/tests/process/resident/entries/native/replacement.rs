@@ -61,7 +61,7 @@ fn unchanged<T>(
     let arena = engine.arena().to_vec();
     let artifact = engine.artifact_bytes().map(|bytes| bytes.to_vec());
     let generation = engine.generation();
-    assert_eq!(operation(engine).err(), Some(error));
+    super::assert_error_contract(operation(engine).err(), error);
     assert_eq!(engine.arena(), arena);
     assert_eq!(
         engine.artifact_bytes().map(|bytes| bytes.to_vec()),
