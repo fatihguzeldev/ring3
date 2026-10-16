@@ -58,10 +58,23 @@ for (let offset = 0; offset < guest.bytes.length; offset += 4096) {
 assert.equal(api.commit_module_input(), 0);
 assert.equal(api.start_module_process(name('d3d8-authored.exe'), 0, 0x7e000000, 4, 0x7f000000), 0);
 assert.equal(take(72).subarray(0, 4).toString(), 'R3MO'); assert.equal(get(48), guest.entry);
-assert.equal(api.module_gates(), 0);
-const gateRecord = take(4096), gateCount = gateRecord.readUInt32LE(16);
-assert.equal(gateRecord.subarray(0, 4).toString(), 'R3MG');
-const gateRows = Array.from({length: gateCount}, (_, i) => [gateRecord.readUInt32LE(28 + i * 8), gateRecord.readUInt32LE(24 + i * 8)]);
+const gateRows = [];
+let gateCount;
+for (let start = 0; gateCount === undefined || start < gateCount;) {
+  assert.equal(api.module_gates_page(start, 128), 0);
+  const page = take(4096), total = page.readUInt32LE(16), count = page.readUInt32LE(24);
+  assert.deepEqual(page.subarray(0, 8), Buffer.from([0x52, 0x33, 0x47, 0x50, 1, 0, 1, 0]));
+  assert.equal(page.readUInt32LE(8), 32 + count * 8);
+  assert.equal(page.readUInt32LE(12), 0);
+  assert.equal(page.readUInt32LE(20), start);
+  assert.equal(page.readUInt32LE(28), 0);
+  if (gateCount === undefined) gateCount = total;
+  assert.equal(total, gateCount, 'gate inventory remains stable across pages');
+  assert.ok(count > 0 && count <= 128 && start + count <= total);
+  for (let i = 0; i < count; i++) gateRows.push([page.readUInt32LE(36 + i * 8), page.readUInt32LE(32 + i * 8)]);
+  start += count;
+}
+assert.equal(gateRows.length, gateCount, 'every advertised gate is retained');
 const gates = new Map(gateRows);
 assert.equal(gates.size, gateCount, 'all public, private COM and initializer gate IDs are distinct');
 assert.equal(new Set(gateRows.map(([, entry]) => entry)).size, gateCount, 'each gate owns one executable entry');
@@ -203,7 +216,9 @@ for (const call of guest.calls) {
     assert.ok([0, 12].includes(complete), `${call.name}: completion transport ${complete}`);
     if (call.expected === 'exit' && complete === 0) {
       assert.equal(api.pending_windows_callback(), 21, 'exited process cannot request callbacks');
-      assert.equal(api.d3d8_device(0), 21, 'exited process cannot operate devices');
+      assert.equal(api.d3d8_device(0), 0, 'final host output inventory remains available');
+      assert.equal(metadata(12).epoch, 0n, 'released and acknowledged device is reclaimed');
+      assert.equal(api.d3d8_observe_device(0, 0, 0, 0, 1), 21, 'exited process rejects new device input');
       break;
     }
     finishCallbacks(generated, generation); drain();
@@ -228,6 +243,8 @@ assert.ok(fragmentedCommands > 0, 'bounded packets fragment logical state snapsh
 for (const opcode of [1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14]) assert.ok(commands.some(item => item.opcode === opcode), `semantic command ${opcode} emitted`);
 assert.equal(commands.filter(item => item.opcode === 8).length, 2, 'fixed-function and programmable draws each submit exactly once');
 const logical = opcode => commands.filter(item => item.opcode === opcode).map(item => Buffer.from(item.payload, 'hex'));
+assert.equal(logical(13).filter(payload => payload.readUInt32LE(8) === 3).length, 1, 'device removal is submitted exactly once');
+assert.equal(commands.at(-1).opcode, 13, 'final removal follows all queued graphics work');
 const draws = logical(8);
 assert.deepEqual(draws.map(draw => draw.readBigUInt64LE(32)), [3n, 4n], 'clear and each accepted draw advance the target exactly once across packet retries');
 assert.equal(logical(9)[0].readBigUInt64LE(16), 2n, 'clear pins its output content version');
