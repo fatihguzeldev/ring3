@@ -21,17 +21,36 @@ static void probe(LCID locale, DWORD flags, unsigned pattern, const WCHAR *forma
             printf("%s%u", index ? "," : "", (unsigned)output[index]);
     }
     puts("]}");
-    char narrow_format[128] = {0};
+    DWORD locale_code_page = 0;
+    if ((flags & LOCALE_USE_CP_ACP) || !GetLocaleInfoW(locale,
+            LOCALE_IDEFAULTANSICODEPAGE | LOCALE_RETURN_NUMBER,
+            (WCHAR *)&locale_code_page, sizeof(locale_code_page) / sizeof(WCHAR)))
+        locale_code_page = 0;
+    UINT code_page = locale_code_page ? locale_code_page : GetACP();
+    char narrow_format[512] = {0};
+    BOOL format_used_default = FALSE;
+    int format_length = 0;
+    DWORD format_error = 0;
     if (format) {
-        for (unsigned index = 0; index < 127 && format[index]; ++index)
-            narrow_format[index] = (char)format[index];
+        SetLastError(0);
+        format_length = WideCharToMultiByte(code_page, 0, format, -1,
+            narrow_format, sizeof(narrow_format), NULL,
+            code_page == CP_UTF8 || code_page == CP_UTF7 ? NULL : &format_used_default);
+        format_error = GetLastError();
     }
+    BOOL called = !format || format_length > 0;
     char bytes[512] = {0};
     SetLastError(0);
-    length = GetDateFormatA(locale, flags, &date, format ? narrow_format : NULL, bytes, 512);
+    length = called ? GetDateFormatA(locale, flags, &date,
+        format ? narrow_format : NULL, bytes, sizeof(bytes)) : 0;
     error = GetLastError();
-    printf("RING3_NLS_ANSI {\"lcid\":%lu,\"flags\":%lu,\"pattern\":%u,\"length\":%d,\"error\":%lu,\"bytes\":[",
-           (unsigned long)locale, (unsigned long)flags, pattern, length, (unsigned long)error);
+    printf("RING3_NLS_ANSI {\"lcid\":%lu,\"flags\":%lu,\"pattern\":%u,\"codePage\":%u,\"called\":%s,\"formatLength\":%d,\"formatError\":%lu,\"formatUsedDefault\":%s,\"length\":%d,\"error\":%lu,\"formatBytes\":[",
+           (unsigned long)locale, (unsigned long)flags, pattern, code_page,
+           called ? "true" : "false", format_length, (unsigned long)format_error,
+           format_used_default ? "true" : "false", length, (unsigned long)error);
+    for (int index = 0; index < format_length - 1; ++index)
+        printf("%s%u", index ? "," : "", (unsigned)(unsigned char)narrow_format[index]);
+    printf("],\"bytes\":[");
     if (length > 0 && length <= 512) {
         for (int index = 0; index < length - 1; ++index)
             printf("%s%u", index ? "," : "", (unsigned)(unsigned char)bytes[index]);
@@ -53,6 +72,29 @@ static void metadata(LCID locale, CALID calendar, DWORD kind) {
             printf("%s%u", index ? "," : "", (unsigned)output[index]);
     }
     puts("]}");
+}
+static void direction_cases(void) {
+    const LCID locales[] = {0x0409, 0x0401, 0x040d, 0x0420, 0x0429, 0x045a, 0x0465};
+    const WCHAR *patterns[] = {
+        L"yyyy", L"MMMM", L"dddd", L"gg", L"'ASCII'",
+        L"'\x05e2\x05d1\x05e8\x05d9\x05ea'",
+        L"'\x0627\x0644\x0639\x0631\x0628\x064a\x0629'",
+        L"'ASCII' MMMM yyyy", L"MMMM 'ASCII' yyyy",
+        L"yyyy''MM", L"yyyy-MM-dd", L"yyyy'---'MM''dd"
+    };
+    for (unsigned locale = 0; locale < sizeof(locales) / sizeof(locales[0]); ++locale) {
+        metadata(locales[locale], 0, LOCALE_SNATIVEDIGITS);
+        metadata(locales[locale], 0, LOCALE_IREADINGLAYOUT);
+        metadata(locales[locale], 0, LOCALE_ICALENDARTYPE);
+        metadata(locales[locale], 0, LOCALE_IOPTIONALCALENDAR);
+        for (unsigned alternate = 0; alternate < 2; ++alternate) {
+            DWORD calendar = alternate ? DATE_USE_ALT_CALENDAR : 0;
+            for (unsigned pattern = 0; pattern < sizeof(patterns) / sizeof(patterns[0]); ++pattern) {
+                probe(locales[locale], calendar, 0x101 + pattern, patterns[pattern]);
+                probe(locales[locale], calendar | DATE_AUTOLAYOUT, 0x101 + pattern, patterns[pattern]);
+            }
+        }
+    }
 }
 int main(void) {
     const LCID locales[] = {0x0409, 0x0401, 0x0c01, 0x040d, 0x0429, 0x0420, 0x0411, 0x007f};
@@ -76,5 +118,6 @@ int main(void) {
                 probe(locales[locale], layouts[layout], pattern + 1, patterns[pattern]);
         }
     }
+    direction_cases();
     return 0;
 }
