@@ -1,6 +1,7 @@
 mod admission;
 mod calls;
 mod policy;
+mod query;
 
 use crate::{
     abi::{

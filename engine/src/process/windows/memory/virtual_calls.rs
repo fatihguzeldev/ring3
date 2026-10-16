@@ -147,12 +147,42 @@ impl EngineInstance {
                 .is_none()
         {
             let page = span(args[0], 1)?;
+            let external = self
+                .guest_address_reservations()
+                .map_err(|_| MemoryError32::Allocation)?;
+            // allocations remain distinct even when their physical pages have equal rights.
+            if let Some(next) = external
+                .iter()
+                .map(|range| range.first as u32 * crate::memory::PAGE_SIZE)
+                .filter(|start| *start > info.base)
+                .min()
+            {
+                info.size = info.size.min(next - info.base);
+            }
+            if let Some(range) = external.iter().find(|range| {
+                range
+                    .indices()
+                    .contains(&(args[0] as usize / crate::memory::PAGE_SIZE as usize))
+            }) {
+                info.allocation_base = range.first as u32 * crate::memory::PAGE_SIZE;
+                info.size = info.size.min(
+                    ((range.first + range.count) * crate::memory::PAGE_SIZE as usize) as u32
+                        - info.base,
+                );
+                if info.state != MEM_COMMIT {
+                    info.state = crate::windows::memory::MEM_RESERVE;
+                    info.allocation_protection = 4;
+                    info.protection = 0;
+                    info.kind = MEM_PRIVATE;
+                }
+            }
             for module in self.loaded_windows_modules() {
                 if args[0] >= module.base()
                     && u64::from(args[0])
                         < u64::from(module.base()) + u64::from(module.image_size())
                 {
                     info.allocation_base = module.base();
+                    info.allocation_protection = 0x80;
                     info.kind = 0x1000000;
                     info.size = info
                         .size
@@ -160,28 +190,24 @@ impl EngineInstance {
                     break;
                 }
             }
+            if let Some(image) = self.image.filter(|image| {
+                args[0] >= image.image_base
+                    && u64::from(args[0])
+                        < u64::from(image.image_base) + u64::from(image.image_size)
+            }) {
+                info.allocation_base = image.image_base;
+                info.allocation_protection = 0x80;
+                info.kind = 0x1000000;
+                info.size = info
+                    .size
+                    .min(image.image_base + image.image_size - info.base);
+            }
             if info.kind == MEM_PRIVATE
                 && self
                     .validate_file_mapping_protection(page, Permissions::READ)
                     .is_ok_and(|mapped| mapped)
             {
                 info.kind = 0x40000;
-            }
-            if info.state == MEM_COMMIT && info.kind == MEM_PRIVATE {
-                let external = self
-                    .guest_address_reservations()
-                    .map_err(|_| MemoryError32::Allocation)?;
-                if let Some(range) = external.into_iter().find(|range| {
-                    range
-                        .indices()
-                        .contains(&(args[0] as usize / crate::memory::PAGE_SIZE as usize))
-                }) {
-                    info.allocation_base = range.first as u32 * crate::memory::PAGE_SIZE;
-                    info.size = info.size.min(
-                        ((range.first + range.count) * crate::memory::PAGE_SIZE as usize) as u32
-                            - info.base,
-                    );
-                }
             }
         }
         if let Some((base, extent, layout)) = self
