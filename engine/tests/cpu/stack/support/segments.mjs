@@ -1,3 +1,4 @@
+import {pageFaultExit, pageFaultPacket} from '../../../support/wasm/page-fault.mjs';
 import {generatedImports, attachDetectionApi} from '../../../support/wasm/binding.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
@@ -18,7 +19,7 @@ function record(magic, fields, version = 1, size = 40) {
 const packet = fields => record('R3MH', fields, 7);
 export function harness(family, sourcePaths) {
   const [enginePath, output, root] = process.argv.slice(2), engine = readEngine(enginePath);
-  const paths = ['engine/src/process/cpu/stack.rs', 'engine/src/process/cpu/segments.rs', 'engine/src/cpu/x86/stack.rs', 'engine/src/memory/space.rs', 'engine/src/memory/space/atomic.rs', 'engine/src/cpu/x86/segments/cache.rs', 'engine/src/cpu/dbt/wasm/instructions/stack.rs', 'engine/src/abi/cpu_helper.rs', 'engine/src/abi/x86/segments.rs', 'engine/tests/support/wasm/engine.mjs', 'engine/tests/support/wasm/binding.mjs', 'engine/tests/cpu/stack/support/segments.mjs', ...sourcePaths];
+  const paths = ['engine/tests/support/wasm/page-fault.mjs', 'engine/src/process/cpu/stack.rs', 'engine/src/process/cpu/segments.rs', 'engine/src/cpu/x86/stack.rs', 'engine/src/memory/space.rs', 'engine/src/memory/space/atomic.rs', 'engine/src/cpu/x86/segments/cache.rs', 'engine/src/cpu/dbt/wasm/instructions/stack.rs', 'engine/src/abi/cpu_helper.rs', 'engine/src/abi/x86/segments.rs', 'engine/tests/support/wasm/engine.mjs', 'engine/tests/support/wasm/binding.mjs', 'engine/tests/cpu/stack/support/segments.mjs', ...sourcePaths];
   assert.equal(new Set(paths).size, paths.length);
   const pins = () => Object.fromEntries(paths.map(p => [p, hash(readFileSync(join(root, p)))])), sourcePins = pins();
   const observations = [], modules = [], frames = [], ramFrames = [], exits = [], helperCalls = [];
@@ -82,8 +83,9 @@ export function harness(family, sourcePaths) {
     const control = row.budget === 0 || row.cancel, fault = row.fault || row.synthetic, reason = row.cancel ? 2 : control ? 1 : row.synthetic ? row.synthetic.reason ?? 7 : row.fault ? row.fault[0] === 7 ? 15 : 5 : row.smc ? 6 : 1;
     const retired = control || fault ? 0 : 1, next = retired ? oracle(registers, expectedRam, row) : registers;
     expected.set(record('R3ST', [...next, PC + (retired ? row.code.length : 0), 0xcd7], 1, 56));
-    expected.set(record('R3EX', [reason, retired, ...(reason === 5 ? row.fault.slice(2) : reason === 7 ? [row.synthetic?.detail ?? 2, 0, 0, 0] : [0, 0, 0, 0])], 6), 56);
-    if (!control) {expected.set(words(retired ? next : registers), 140); expected.set(packet(row.synthetic ? row.synthetic.packet : row.fault ?? [0, 0, 0, 0, 0, 0]), 100);}
+    const paging = reason===5&&!row.synthetic&&row.fault[2]<=2?{errorCode:4|(row.fault[4]===2?2:0)|(row.fault[2]===2?1:0),address:row.fault[3],access:row.fault[4],length:row.fault[5]}:null;
+    expected.set(paging?pageFaultExit({retired,...paging}):record('R3EX', [reason, retired, ...(reason === 5 ? row.fault.slice(2) : reason === 7 ? [row.synthetic?.detail ?? 2, 0, 0, 0] : [0, 0, 0, 0])], 6), 56);
+    if (!control) {expected.set(words(retired ? next : registers), 140); expected.set(paging?pageFaultPacket(paging):packet(row.synthetic ? row.synthetic.packet : row.fault ?? [0, 0, 0, 0, 0, 0]), 100);}
     const status = run(c.base, c.base + 56, row.budget ?? 1, c.base + 96), after = arena(c);
     if (row.deny) host(c, 'protect', [row.deny[0], 1, 3]); const afterRam = peek(c);
     let error = null;
