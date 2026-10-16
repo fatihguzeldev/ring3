@@ -102,6 +102,28 @@ impl WindowContext32 {
         Ok(())
     }
 
+    pub(crate) fn retire_thread(&mut self, thread: u32) {
+        let retained = |handle: Option<WindowHandle32>| {
+            handle.filter(|&handle| {
+                self.get(handle)
+                    .is_ok_and(|record| record.description.thread_id != thread)
+            })
+        };
+        let active = retained(self.active);
+        let focus = retained(self.focus);
+        let capture = retained(self.capture);
+        self.messages.retain(|message| {
+            self.windows.iter().any(|window| {
+                window.handle == message.window && window.description.thread_id != thread
+            })
+        });
+        self.windows
+            .retain(|window| window.description.thread_id != thread);
+        self.active = active;
+        self.focus = focus;
+        self.capture = capture;
+    }
+
     pub fn get(&self, handle: WindowHandle32) -> Result<WindowRecord32, WindowError32> {
         Ok(self.windows[self.index(handle)?])
     }

@@ -197,6 +197,19 @@ impl User32State32 {
         Ok(())
     }
 
+    pub(crate) fn retire_thread(&mut self, thread: u32) {
+        self.slots.retain(|slot| {
+            self.windows
+                .get(slot.data.handle)
+                .is_ok_and(|record| record.description.thread_id != thread)
+        });
+        self.windows.retire_thread(thread);
+        self.queue.retire_thread(thread);
+    }
+    pub(crate) fn discard_raw_input(&mut self, thread: u32, ids: &[u32]) {
+        self.queue.discard_raw_input(thread, ids);
+    }
+
     pub(crate) fn remove_delivered(
         &mut self,
         thread_id: u32,
@@ -300,11 +313,24 @@ impl User32State32 {
     ) -> Result<(), User32Error32> {
         self.queue.post_input(message, key, state)
     }
+    pub(crate) fn post_raw_input(&mut self, message: Message32) -> Result<(), User32Error32> {
+        self.queue.post_raw_input(message)
+    }
     pub(crate) fn can_post(&self, count: usize) -> Result<(), User32Error32> {
         self.queue.can_post(count)
     }
     pub(crate) fn queue_status(&self, thread: u32) -> (u32, u32, u64) {
         self.queue.status(thread)
+    }
+    pub(crate) fn prepare_sent_change(
+        &self,
+        thread: u32,
+        delta: i32,
+    ) -> Result<super::PreparedSentChange32, User32Error32> {
+        self.queue.prepare_sent_change(thread, delta)
+    }
+    pub(crate) fn commit_sent_change(&mut self, prepared: super::PreparedSentChange32) {
+        self.queue.commit_sent_change(prepared);
     }
     pub(crate) fn observe_queue(&mut self, thread: u32, mask: u32) {
         self.queue.observe(thread, mask)

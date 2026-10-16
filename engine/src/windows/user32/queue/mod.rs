@@ -1,4 +1,5 @@
 mod context;
+mod sent;
 
 use super::Message32;
 use std::collections::VecDeque;
@@ -25,9 +26,19 @@ pub(super) struct MessageSlot32 {
 pub(crate) struct MessageQueue32 {
     posted: VecDeque<MessageSlot32>,
     quits: Vec<MessageSlot32>,
+    sent: Vec<SentQueue32>,
     limit: usize,
     generation: u64,
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct SentQueue32 {
+    thread: u32,
+    count: u32,
+    fresh: bool,
+}
+
+pub(crate) use sent::PreparedSentChange32;
 
 #[cfg(test)]
 mod tests {

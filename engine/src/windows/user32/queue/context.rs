@@ -12,9 +12,13 @@ impl MessageQueue32 {
         quits
             .try_reserve_exact(limit)
             .map_err(|_| User32Error32::Allocation)?;
+        let mut sent = Vec::new();
+        sent.try_reserve_exact(limit)
+            .map_err(|_| User32Error32::Allocation)?;
         Ok(Self {
             posted,
             quits,
+            sent,
             limit,
             generation: 0,
         })
@@ -55,6 +59,9 @@ impl MessageQueue32 {
         state: [u8; 256],
     ) -> Result<(), User32Error32> {
         self.post_record(message, Some(QueuedKeyboard32 { key, state }), true)
+    }
+    pub(crate) fn post_raw_input(&mut self, message: Message32) -> Result<(), User32Error32> {
+        self.post_record(message, None, true)
     }
     fn post_record(
         &mut self,
@@ -137,8 +144,7 @@ impl MessageQueue32 {
         self.posted.retain(|slot| !slot.input);
     }
     pub(crate) fn project_without_input(&self, thread: u32) -> (u32, u32, u64) {
-        let mut current = 0;
-        let mut fresh = 0;
+        let (mut current, mut fresh) = self.sent_status(thread);
         for slot in self
             .posted
             .iter()
@@ -151,12 +157,23 @@ impl MessageQueue32 {
         }
         (current, fresh, self.generation)
     }
+    pub(crate) fn retire_thread(&mut self, thread: u32) {
+        self.posted.retain(|slot| slot.message.thread_id != thread);
+        self.quits.retain(|slot| slot.message.thread_id != thread);
+        self.sent.retain(|slot| slot.thread != thread);
+    }
+    pub(crate) fn discard_raw_input(&mut self, thread: u32, ids: &[u32]) {
+        self.posted.retain(|slot| {
+            slot.message.thread_id != thread
+                || slot.message.message != 0xff
+                || ids.binary_search(&slot.message.lparam).is_err()
+        });
+    }
     pub(crate) fn retain_window(&mut self, window: u32) {
         self.posted.retain(|slot| slot.message.window != window);
     }
     pub(crate) fn status(&self, thread: u32) -> (u32, u32, u64) {
-        let mut current = 0;
-        let mut fresh = 0;
+        let (mut current, mut fresh) = self.sent_status(thread);
         for slot in self
             .posted
             .iter()
@@ -170,6 +187,11 @@ impl MessageQueue32 {
         (current, fresh, self.generation)
     }
     pub(crate) fn observe(&mut self, thread: u32, mask: u32) {
+        if mask & 0x40 != 0
+            && let Some(sent) = self.sent.iter_mut().find(|sent| sent.thread == thread)
+        {
+            sent.fresh = false;
+        }
         for slot in self
             .posted
             .iter_mut()
@@ -184,6 +206,7 @@ impl MessageQueue32 {
 fn message_mask(message: u32, input: bool) -> u32 {
     if input {
         return match message {
+            0xff => 0x400,
             0x100..=0x109 => 1,
             0x200 => 2,
             0x201..=0x20e => 4,

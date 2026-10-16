@@ -4,7 +4,35 @@ use crate::{loader::SystemExportTarget32, memory::GuestAddress, windows::Calling
 #[test]
 fn user32_catalog_resolves_explicit_stdcall_gates_without_id_or_symbol_aliases() {
     let module = user32_module(0x70000000);
-    assert_eq!(module.exports.len(), 89);
+    assert_eq!(module.exports.len(), 99);
+    let mut names = std::collections::BTreeSet::new();
+    let mut gates = std::collections::BTreeSet::new();
+    for export in &module.exports {
+        assert!(names.insert(export.name.as_deref().unwrap()));
+        let SystemExportTarget32::Gate(gate) = &export.target else {
+            panic!("user32 exports must be explicit gates");
+        };
+        assert!(gates.insert(*gate));
+    }
+    let extensions = [
+        ("RegisterRawInputDevices", 0x0014_0001),
+        ("GetRegisteredRawInputDevices", 0x0014_0002),
+        ("GetRawInputData", 0x0014_0003),
+        ("GetRawInputBuffer", 0x0014_0004),
+        ("GetRawInputDeviceList", 0x0014_0005),
+        ("GetRawInputDeviceInfoA", 0x0014_0006),
+        ("GetRawInputDeviceInfoW", 0x0014_0007),
+        ("DefRawInputProc", 0x0014_0008),
+        ("LoadStringA", 0x0013_0015),
+        ("LoadStringW", 0x0013_0016),
+    ];
+    assert_eq!(User32Api32::catalog().count() + extensions.len(), 99);
+    for (name, gate) in extensions {
+        assert!(module.exports.iter().any(|export| {
+            export.name.as_deref() == Some(name)
+                && export.target == SystemExportTarget32::Gate(gate)
+        }));
+    }
     for api in User32Api32::catalog() {
         assert_eq!(User32Api32::from_id(api.id()), Some(api));
         assert_eq!(User32Api32::resolve("USER32.DLL", api.name()), Some(api));

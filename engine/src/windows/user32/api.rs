@@ -138,6 +138,8 @@ pub fn user32_module(preferred_base: u32) -> SystemModule32 {
                 ordinal: None,
                 target: SystemExportTarget32::Gate(api.id()),
             })
+            .chain(crate::windows::resources::user32_resource_exports())
+            .chain(crate::windows::rawinput::raw_input_exports())
             .collect(),
     }
 }
