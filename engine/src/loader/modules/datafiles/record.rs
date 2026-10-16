@@ -83,9 +83,9 @@ impl DataFileModule32 {
         if end > u64::from(image.image_size) {
             return Err(ModuleError32::InvalidRequest);
         }
-        let offset = if self.layout == DataFileLayout32::Image {
-            rva
-        } else if end <= u64::from(image.header_size) {
+        let offset = if self.layout == DataFileLayout32::Image
+            || end <= u64::from(image.header_size)
+        {
             rva
         } else {
             let section = image

@@ -8,8 +8,8 @@ pub(super) fn raw_protection(permissions: Permissions, copy: bool) -> u32 {
     let guard = if permissions.is_guarded() { 0x100 } else { 0 };
     let permissions = permissions.without_guard();
     let bits = u8::from(permissions.allows(crate::memory::Access::Read))
-        | u8::from(permissions.allows(crate::memory::Access::Write)) * 2
-        | u8::from(permissions.allows(crate::memory::Access::Execute)) * 4;
+        | (u8::from(permissions.allows(crate::memory::Access::Write)) * 2)
+        | (u8::from(permissions.allows(crate::memory::Access::Execute)) * 4);
     guard
         | match (bits, copy) {
             (0, _) => 1,
