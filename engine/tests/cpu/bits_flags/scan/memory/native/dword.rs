@@ -222,41 +222,17 @@ fn every_kind_destination_and_address_has_exact_ir_and_bound_admission() {
                 decoded_forms += 1;
             }
             for resident in [false, true] {
+                let mut oversized = code(CODE, &bytes);
+                crate::support_admission::assert_oversized_explicit(
+                    &mut oversized,
+                    CODE,
+                    bytes.len() as u32,
+                    resident,
+                );
                 for entries in [false, true] {
-                    let mut engine = code(CODE, &bytes);
-                    engine.protect(CODE, 1, 4).unwrap();
-                    describe(&mut engine, CODE, bytes.len() as u32, entries);
-                    let before = engine.arena().to_vec();
-                    let id = compile(&mut engine, resident, entries).unwrap();
-                    if resident {
-                        engine.guard_resident(KEY, id).unwrap();
-                        assert_eq!(&engine.resident_bytes(id).unwrap()[..8], b"\0asm\x01\0\0\0");
-                        for &(pc, _, _, _) in &expected {
-                            assert_eq!(engine.lookup_resident(pc).unwrap().get(), id);
-                            assert!(engine.lookup_resident(pc + 1).is_err());
-                        }
-                        assert_eq!(
-                            engine
-                                .lookup_resident(CODE + bytes.len() as u32 - 2)
-                                .unwrap()
-                                .get(),
-                            id
-                        );
-                    } else {
-                        engine.guard(KEY, id as u32).unwrap();
-                        assert_eq!(&engine.artifact_bytes().unwrap()[..8], b"\0asm\x01\0\0\0");
-                    }
-                    assert_eq!(engine.arena(), before);
-                    assert_eq!(engine.memory().unwrap().mapped_pages(), 1);
-                    for data in [0, DATA] {
-                        assert!(
-                            engine
-                                .memory()
-                                .unwrap()
-                                .resolve(GuestAddress(data), Access::Read)
-                                .is_err()
-                        );
-                    }
+                    crate::support_memory_banks::assert_bounded_memory_bank(
+                        &bytes, CODE, KEY, resident, entries, 57,
+                    );
                     profiles += 1;
                 }
             }
@@ -313,10 +289,10 @@ fn excluded_forms_and_exact_operand_fetch_preserve_fault_and_snapshot_boundaries
                 exclusions += 1;
                 continue;
             }
-            assert_eq!(
-                decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),
-                Some(expected),
-                "{bytes:02x?}"
+            crate::support_fetch::assert_decode_contract(
+                (decode_one(engine.memory().unwrap(), GuestAddress(CODE)))
+                    .expect_err("instruction must fail to decode"),
+                expected,
             );
             exclusions += 1;
         }
@@ -363,9 +339,10 @@ fn excluded_forms_and_exact_operand_fetch_preserve_fault_and_snapshot_boundaries
                     0x2000 - missing.len() as u32
                 };
                 let engine = code(pc, missing);
-                assert_eq!(
-                    decode_one(engine.memory().unwrap(), GuestAddress(pc)).err(),
-                    Some(fetch_error(
+                crate::support_fetch::assert_decode_contract(
+                    (decode_one(engine.memory().unwrap(), GuestAddress(pc)))
+                        .expect_err("instruction must fail to decode"),
+                    fetch_error(
                         pc,
                         if top { pc } else { 0x2000 },
                         bytes.len() as u32,
@@ -373,15 +350,16 @@ fn excluded_forms_and_exact_operand_fetch_preserve_fault_and_snapshot_boundaries
                             FaultReason::AddressOverflow
                         } else {
                             FaultReason::Unmapped
-                        }
-                    ))
+                        },
+                    ),
                 );
             }
             let mut engine = code(0x1fff, &bytes);
             engine.protect(0x2000, 1, 3).unwrap();
-            assert_eq!(
-                decode_one(engine.memory().unwrap(), GuestAddress(0x1fff)).err(),
-                Some(fetch_error(0x1fff, 0x2000, 2, FaultReason::Permission))
+            crate::support_fetch::assert_decode_contract(
+                (decode_one(engine.memory().unwrap(), GuestAddress(0x1fff)))
+                    .expect_err("instruction must fail to decode"),
+                fetch_error(0x1fff, 0x2000, 2, FaultReason::Permission),
             );
         }
         let bytes = encoding(opcode, 0, &[0x05, 0x10, 0x50, 0, 0]);
@@ -415,10 +393,10 @@ fn excluded_forms_and_exact_operand_fetch_preserve_fault_and_snapshot_boundaries
             continue;
         }
         let engine = code(CODE, bytes);
-        assert_eq!(
-            decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),
-            Some(opcode_error),
-            "{bytes:02x?}"
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(engine.memory().unwrap(), GuestAddress(CODE)))
+                .expect_err("instruction must fail to decode"),
+            opcode_error,
         );
         exclusions += 1;
     }
@@ -532,7 +510,11 @@ fn late_memory_bit_scan_failures_preserve_both_publications() {
                     } else {
                         HostError::Compile(expected)
                     };
-                    assert_eq!(compile(&mut engine, resident, entries), Err(expected));
+                    crate::support_fetch::assert_host_contract(
+                        (compile(&mut engine, resident, entries))
+                            .expect_err("compilation must refuse this fixture"),
+                        expected,
+                    );
                     assert_eq!(
                         (
                             engine.arena().to_vec(),

@@ -28,41 +28,18 @@ fn memory_bit_test_immediate_index_admits_public_api() {
     admission(&[0x0f, 0xba, 0x23, 0xff, 0xeb, 0]);
 }
 
-use std::{
-    fs::OpenOptions,
-    io::Write,
-    process::{Command, Stdio},
-};
+use std::{fs::OpenOptions, io::Write};
 
 #[test]
 fn existing_read32_module_remains_valid_across_address_bridge() {
     let engine = admission(&[0x8b, 0x03, 0xeb, 0]);
     let bytes = engine.artifact_bytes().unwrap();
-    let script = r#"
-const assert = require('node:assert/strict');
-const bytes = require('node:fs').readFileSync(0);
-assert.ok(WebAssembly.validate(bytes));
-const module = new WebAssembly.Module(bytes);
-assert.deepEqual(WebAssembly.Module.imports(module), [
-  {module:'env',name:'memory',kind:'memory'},
-  {module:'ring3',name:'guard',kind:'function'},
-  {module:'ring3',name:'cpu_read32',kind:'function'},
-]);
-assert.deepEqual(WebAssembly.Module.exports(module), [{name:'run',kind:'function'}]);
-"#;
-    let mut child = Command::new("node")
-        .args(["-e", script])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    child.stdin.take().unwrap().write_all(bytes).unwrap();
-    let output = child.wait_with_output().unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
+    crate::support_wasm_interface::assert_bound(
+        bytes,
+        false,
+        &[("cpu_read32", 1)],
+        &[4, 6, 1],
+        true,
     );
     if let Some(path) = std::env::var_os("RING3_BT_READ32_OUTPUT") {
         OpenOptions::new()
@@ -258,33 +235,6 @@ fn memory_bit_test_ea_index_identities_require_read32_in_four_bound_profiles() {
                 .as_nanos()
         ));
     fs::create_dir_all(&output).unwrap();
-    let script = r#"
-const f=require('node:fs'),a=require('node:assert/strict');
-function u(b,p){let v=0,s=0,x;do{x=b[p.i++];v|=(x&127)<<s;s+=7;}while(x&128);return v>>>0;}
-for(let i=1;i<process.argv.length;i+=2){
- const b=f.readFileSync(process.argv[i]);a.ok(WebAssembly.validate(b));const m=new WebAssembly.Module(b);
- a.deepEqual(WebAssembly.Module.imports(m),[{module:'env',name:'memory',kind:'memory'},
-  {module:'ring3',name:process.argv[i+1],kind:'function'},{module:'ring3',name:'cpu_read32',kind:'function'}]);
- a.deepEqual(WebAssembly.Module.exports(m),[{name:'run',kind:'function'}]);
- const p={i:8};let found=0;while(p.i<b.length){const id=b[p.i++],end=u(b,p)+p.i;
-  if(id===1){a.equal(u(b,p),4);
-   for(const arity of [4,process.argv[i+1]==='guard_resident'?7:6,1,6]){
-    a.equal(b[p.i++],0x60);a.equal(u(b,p),arity);
-    a.deepEqual([...b.subarray(p.i,p.i+arity)],Array(arity).fill(0x7f));p.i+=arity;
-    a.equal(u(b,p),1);a.equal(b[p.i++],0x7f);
-   }a.equal(p.i,end);found|=1;}
-  if(id===3){a.equal(u(b,p),2);a.equal(u(b,p),0);a.equal(u(b,p),3);a.equal(p.i,end);found|=2;}
-  if(id===10){a.equal(u(b,p),2);
-   for(const expected of [[[16,0x7f],[1,0x7e],[10,0x7f]],[[3,0x7f]]]){
-    const bodyEnd=u(b,p)+p.i,n=u(b,p),locals=[];
-    for(let j=0;j<n;j++)locals.push([u(b,p),b[p.i++]]);
-    a.deepEqual(locals,expected);a.equal(b[bodyEnd-1],0x0b);p.i=bodyEnd;
-   }a.equal(p.i,end);found|=4;}
-  p.i=end;}a.equal(found,7);
-}
-"#;
-    let mut command = Command::new("node");
-    command.arg("-e").arg(script);
     for resident in [false, true] {
         for entries in [false, true] {
             let mut engine = fixture(CODE, &bytes);
@@ -299,17 +249,15 @@ for(let i=1;i<process.argv.length;i+=2){
             };
             let path = output.join(format!("{resident}-{entries}.wasm"));
             fs::write(&path, module).unwrap();
-            command
-                .arg(path)
-                .arg(if resident { "guard_resident" } else { "guard" });
+            crate::support_wasm_interface::assert_bound(
+                module,
+                resident,
+                &[("cpu_read32", 1)],
+                &[4, if resident { 7 } else { 6 }, 1],
+                true,
+            );
         }
     }
-    let result = command.output().unwrap();
-    assert!(
-        result.status.success(),
-        "{}",
-        String::from_utf8_lossy(&result.stderr)
-    );
 }
 
 #[test]
@@ -339,9 +287,10 @@ fn strict_neighbors_and_fetch_boundaries_keep_exact_categories() {
                 prefix_admission::admitted(&bytes);
                 continue;
             }
-            assert_eq!(
-                decode_one(fixture(CODE, &bytes).memory().unwrap(), GuestAddress(CODE)).err(),
-                Some(wanted)
+            crate::support_fetch::assert_decode_contract(
+                (decode_one(fixture(CODE, &bytes).memory().unwrap(), GuestAddress(CODE)))
+                    .expect_err("instruction must fail to decode"),
+                wanted,
             );
         }
         for (tail, _) in forms()
@@ -374,9 +323,10 @@ fn strict_neighbors_and_fetch_boundaries_keep_exact_categories() {
         &[0x66, 0x66, 0x0f, 0xba, 0x33, 255],
         &[0x66, 0x66, 0x0f, 0xba, 0x3b, 255],
     ] {
-        assert_eq!(
-            decode_one(fixture(CODE, bytes).memory().unwrap(), GuestAddress(CODE)).err(),
-            Some(opcode)
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(fixture(CODE, bytes).memory().unwrap(), GuestAddress(CODE)))
+                .expect_err("instruction must fail to decode"),
+            opcode,
         );
     }
     for partial in [
@@ -387,17 +337,13 @@ fn strict_neighbors_and_fetch_boundaries_keep_exact_categories() {
     ] {
         let pc = 0x2000 - partial.len() as u32;
         let engine = fixture(pc, partial);
-        assert_eq!(
-            decode_one(engine.memory().unwrap(), GuestAddress(pc)).err(),
-            Some(DecodeError::MemoryFault {
-                pc: GuestAddress(pc),
-                fault: MemoryFault {
-                    address: GuestAddress(0x2000),
-                    access: Access::Execute,
-                    reason: FaultReason::Unmapped
-                },
-                length: partial.len() as u32 + 1
-            })
+        crate::support_fetch::assert_error(
+            (decode_one(engine.memory().unwrap(), GuestAddress(pc)))
+                .expect_err("code fetch must fail"),
+            pc,
+            0x2000,
+            FaultReason::Unmapped,
+            partial.len() as u32 + 1,
         );
     }
     for (pc, address, reason) in [
@@ -408,17 +354,13 @@ fn strict_neighbors_and_fetch_boundaries_keep_exact_categories() {
         if reason == FaultReason::Permission {
             engine.map(0x2000, 1, 3).unwrap();
         }
-        assert_eq!(
-            decode_one(engine.memory().unwrap(), GuestAddress(pc)).err(),
-            Some(DecodeError::MemoryFault {
-                pc: GuestAddress(pc),
-                fault: MemoryFault {
-                    address: GuestAddress(address),
-                    access: Access::Execute,
-                    reason
-                },
-                length: 2
-            })
+        crate::support_fetch::assert_error(
+            (decode_one(engine.memory().unwrap(), GuestAddress(pc)))
+                .expect_err("code fetch must fail"),
+            pc,
+            address,
+            reason,
+            2,
         );
     }
 }
@@ -516,13 +458,31 @@ fn data_currency_late_refusals_and_caps_preserve_all_publications() {
             for (pc, bytes, length, failure) in failures {
                 upload(&mut engine, pc, &bytes);
                 describe(&mut engine, pc, length, entries);
+                if entries
+                    && crate::support_admission::admit_if_deferred(
+                        &mut engine,
+                        crate::support_admission::ColdEntryCase {
+                            key: KEY,
+                            keeper: keep,
+                            resident,
+                            pages: &[CODE, KEEP, 0x5000],
+                            expected: failure,
+                        },
+                    )
+                {
+                    continue;
+                }
                 let before = engine.arena().to_vec();
                 let wanted = if resident {
                     HostError::Resident(RegistryError::Compile(failure))
                 } else {
                     HostError::Compile(failure)
                 };
-                assert_eq!(bound(&mut engine, resident, entries), Err(wanted));
+                crate::support_fetch::assert_host_contract(
+                    (bound(&mut engine, resident, entries))
+                        .expect_err("compilation must refuse this fixture"),
+                    wanted,
+                );
                 assert_eq!(engine.arena(), before);
                 assert_eq!(engine.generation(), generation);
                 assert_eq!(engine.artifact_bytes().unwrap(), modules.0);
@@ -535,6 +495,19 @@ fn data_currency_late_refusals_and_caps_preserve_all_publications() {
                 BitIndex::Immediate(255),
             ] {
                 let mut at_limit = encoded(index, &[0x03]).repeat(63);
+                at_limit.extend([0xeb, 0]);
+                let mut oversized = fixture(CODE, &at_limit);
+                crate::support_admission::assert_oversized_explicit(
+                    &mut oversized,
+                    CODE,
+                    at_limit.len() as u32,
+                    resident,
+                );
+                crate::support_memory_banks::assert_bounded_memory_bank(
+                    &at_limit, CODE, KEY, resident, entries, 64,
+                );
+                let mut at_limit = encoded(index, &[0x03]).repeat(7);
+                at_limit.extend(std::iter::repeat_n(0x90, 56));
                 at_limit.extend([0xeb, 0]);
                 upload(&mut engine, CODE, &at_limit);
                 describe(&mut engine, CODE, at_limit.len(), entries);

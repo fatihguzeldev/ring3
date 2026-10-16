@@ -330,10 +330,10 @@ fn only_single_f3_dword_count_is_open_and_segment_priority_is_preserved() {
         }
         let engine = code_at(CODE, &bytes);
         let before = engine.arena().to_vec();
-        assert_eq!(
-            decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),
-            Some(expected),
-            "{bytes:02x?}"
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(engine.memory().unwrap(), GuestAddress(CODE)))
+                .expect_err("instruction must fail to decode"),
+            expected,
         );
         assert_eq!(engine.arena(), before);
     }
@@ -362,9 +362,10 @@ fn progressive_register_and_sib_fetches_keep_page_and_top_fault_priority() {
                     engine.map(0, 1, 4).unwrap();
                 }
                 let before = engine.arena().to_vec();
-                assert_eq!(
-                    decode_one(engine.memory().unwrap(), GuestAddress(pc)).err(),
-                    Some(fetch_error(
+                crate::support_fetch::assert_decode_contract(
+                    (decode_one(engine.memory().unwrap(), GuestAddress(pc)))
+                        .expect_err("instruction must fail to decode"),
+                    fetch_error(
                         pc,
                         if top { pc } else { 0x3000 },
                         cut + 1,
@@ -373,8 +374,7 @@ fn progressive_register_and_sib_fetches_keep_page_and_top_fault_priority() {
                         } else {
                             FaultReason::Unmapped
                         },
-                    )),
-                    "{bytes:02x?} cut={cut} top={top}"
+                    ),
                 );
                 assert_eq!(engine.arena(), before);
             }
@@ -382,9 +382,10 @@ fn progressive_register_and_sib_fetches_keep_page_and_top_fault_priority() {
     }
     let mut engine = code_at(0x2ffe, &[0xf3, 0x0f, 0xbc, 0xc0]);
     engine.protect(0x3000, 1, 3).unwrap();
-    assert_eq!(
-        decode_one(engine.memory().unwrap(), GuestAddress(0x2ffe)).err(),
-        Some(fetch_error(0x2ffe, 0x3000, 3, FaultReason::Permission))
+    crate::support_fetch::assert_decode_contract(
+        (decode_one(engine.memory().unwrap(), GuestAddress(0x2ffe)))
+            .expect_err("instruction must fail to decode"),
+        fetch_error(0x2ffe, 0x3000, 3, FaultReason::Permission),
     );
 }
 
@@ -456,6 +457,15 @@ fn count_forms_keep_the_default_instruction_limit() {
                 let mut bytes = [0xf3, 0x0f, 0xbc, 0xc0].repeat(count);
                 bytes.extend([0xeb, 0]);
                 let mut engine = code_at(CODE, &bytes);
+                if entries && count == 64 {
+                    crate::support_admission::assert_fresh_cold_limit(
+                        &mut engine,
+                        CODE,
+                        bytes.len() as u32,
+                        resident,
+                    );
+                    continue;
+                }
                 describe(&mut engine, CODE, bytes.len(), entries);
                 let before = engine.arena().to_vec();
                 let result = compile(&mut engine, resident, entries);

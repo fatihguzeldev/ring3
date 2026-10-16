@@ -363,14 +363,14 @@ fn word_memory_bit_test_prefixes_reserved_fields_and_admitted_neighbors_are_prec
                     word_prefix::admitted(&prefixed);
                     continue;
                 }
-                assert_eq!(
-                    decode_one(&code_space(CODE, &prefixed), GuestAddress(CODE)).err(),
-                    Some(if prefix == 0xf0 && opcode == 0xa3 {
+                crate::support_fetch::assert_decode_contract(
+                    (decode_one(&code_space(CODE, &prefixed), GuestAddress(CODE)))
+                        .expect_err("instruction must fail to decode"),
+                    if prefix == 0xf0 && opcode == 0xa3 {
                         DecodeError::InvalidEncoding
                     } else {
                         unsupported
-                    }),
-                    "{prefixed:02x?}"
+                    },
                 );
             }
             for prefix in [0x26, 0x2e, 0x36, 0x3e, 0x64, 0x65] {
@@ -392,19 +392,20 @@ fn word_memory_bit_test_prefixes_reserved_fields_and_admitted_neighbors_are_prec
                 },
             );
             let locked = [vec![0xf0], register].concat();
-            assert_eq!(
-                decode_one(&code_space(CODE, &locked), GuestAddress(CODE)).err(),
-                Some(DecodeError::InvalidEncoding)
+            crate::support_fetch::assert_decode_contract(
+                (decode_one(&code_space(CODE, &locked), GuestAddress(CODE)))
+                    .expect_err("instruction must fail to decode"),
+                DecodeError::InvalidEncoding,
             );
         }
     }
     for extension in 0..4 {
         for modrm in [0x03, 0xc3] {
             let bytes = [0x66, 0x0f, 0xba, modrm | extension << 3, 0xf3];
-            assert_eq!(
-                decode_one(&code_space(CODE, &bytes), GuestAddress(CODE)).err(),
-                Some(DecodeError::InvalidEncoding),
-                "{bytes:02x?}"
+            crate::support_fetch::assert_decode_contract(
+                (decode_one(&code_space(CODE, &bytes), GuestAddress(CODE)))
+                    .expect_err("instruction must fail to decode"),
+                DecodeError::InvalidEncoding,
             );
         }
     }
@@ -489,15 +490,16 @@ fn word_memory_bit_test_fetch_checks_every_address_and_raw_immediate_byte() {
             }
             for cut in 1..bytes.len() {
                 let pc = 0x2000 - cut as u32;
-                assert_eq!(
-                    decode_one(&code_space(pc, &bytes[..cut]), GuestAddress(pc)).err(),
-                    Some(fetch_error(pc, 0x2000, FaultReason::Unmapped, cut + 1)),
-                    "{bytes:02x?} cut={cut}"
+                crate::support_fetch::assert_decode_contract(
+                    (decode_one(&code_space(pc, &bytes[..cut]), GuestAddress(pc)))
+                        .expect_err("instruction must fail to decode"),
+                    fetch_error(pc, 0x2000, FaultReason::Unmapped, cut + 1),
                 );
                 let top = u32::MAX - cut as u32 + 1;
-                assert_eq!(
-                    decode_one(&code_space(top, &bytes[..cut]), GuestAddress(top)).err(),
-                    Some(fetch_error(top, top, FaultReason::AddressOverflow, cut + 1))
+                crate::support_fetch::assert_decode_contract(
+                    (decode_one(&code_space(top, &bytes[..cut]), GuestAddress(top)))
+                        .expect_err("instruction must fail to decode"),
+                    fetch_error(top, top, FaultReason::AddressOverflow, cut + 1),
                 );
             }
             let pc = 0x2000 - bytes.len() as u32 + 1;
@@ -508,14 +510,10 @@ fn word_memory_bit_test_fetch_checks_every_address_and_raw_immediate_byte() {
                     Permissions::READ,
                 )
                 .unwrap();
-            assert_eq!(
-                decode_one(&memory, GuestAddress(pc)).err(),
-                Some(fetch_error(
-                    pc,
-                    0x2000,
-                    FaultReason::Permission,
-                    bytes.len()
-                ))
+            crate::support_fetch::assert_decode_contract(
+                (decode_one(&memory, GuestAddress(pc)))
+                    .expect_err("instruction must fail to decode"),
+                fetch_error(pc, 0x2000, FaultReason::Permission, bytes.len()),
             );
         }
     }
@@ -528,8 +526,17 @@ fn word_memory_bit_test_mixed_64_instruction_block_fits_every_bound_profile() {
     bytes.extend(std::iter::repeat_n(0x90, 31));
     bytes.extend([0xeb, 0]);
     for resident in [false, true] {
+        let mut oversized = code(&bytes);
+        crate::support_admission::assert_oversized_explicit(
+            &mut oversized,
+            CODE,
+            bytes.len() as u32,
+            resident,
+        );
         for entries in [false, true] {
-            assert_bound_admission(&bytes, resident, entries);
+            crate::support_memory_banks::assert_bounded_memory_bank(
+                &bytes, CODE, KEY, resident, entries, 64,
+            );
         }
     }
 }

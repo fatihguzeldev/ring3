@@ -226,10 +226,10 @@ fn excluded_forms_and_three_byte_fetch_preserve_fault_and_snapshot_boundaries() 
                 exclusions += 1;
                 continue;
             }
-            assert_eq!(
-                decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),
-                Some(expected),
-                "{prefix:02x} 0f {opcode:02x} c3"
+            crate::support_fetch::assert_decode_contract(
+                (decode_one(engine.memory().unwrap(), GuestAddress(CODE)))
+                    .expect_err("instruction must fail to decode"),
+                expected,
             );
             exclusions += 1;
         }
@@ -244,10 +244,10 @@ fn excluded_forms_and_three_byte_fetch_preserve_fault_and_snapshot_boundaries() 
         ] {
             let bytes = [vec![0x66, 0x66, 0x0f, opcode], tail.to_vec()].concat();
             let engine = code(CODE, &bytes);
-            assert_eq!(
-                decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),
-                Some(opcode_error),
-                "{bytes:02x?}"
+            crate::support_fetch::assert_decode_contract(
+                (decode_one(engine.memory().unwrap(), GuestAddress(CODE)))
+                    .expect_err("instruction must fail to decode"),
+                opcode_error,
             );
             exclusions += 1;
         }
@@ -303,9 +303,10 @@ fn excluded_forms_and_three_byte_fetch_preserve_fault_and_snapshot_boundaries() 
                     0x2000 - length as u32
                 };
                 let engine = code(pc, missing);
-                assert_eq!(
-                    decode_one(engine.memory().unwrap(), GuestAddress(pc)).err(),
-                    Some(fetch_error(
+                crate::support_fetch::assert_decode_contract(
+                    (decode_one(engine.memory().unwrap(), GuestAddress(pc)))
+                        .expect_err("instruction must fail to decode"),
+                    fetch_error(
                         pc,
                         if top { pc } else { 0x2000 },
                         length as u32 + 1,
@@ -313,16 +314,17 @@ fn excluded_forms_and_three_byte_fetch_preserve_fault_and_snapshot_boundaries() 
                             FaultReason::AddressOverflow
                         } else {
                             FaultReason::Unmapped
-                        }
-                    ))
+                        },
+                    ),
                 );
             }
         }
         let mut engine = code(0x1ffe, &bytes);
         engine.protect(0x2000, 1, 3).unwrap();
-        assert_eq!(
-            decode_one(engine.memory().unwrap(), GuestAddress(0x1ffe)).err(),
-            Some(fetch_error(0x1ffe, 0x2000, 3, FaultReason::Permission))
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(engine.memory().unwrap(), GuestAddress(0x1ffe)))
+                .expect_err("instruction must fail to decode"),
+            fetch_error(0x1ffe, 0x2000, 3, FaultReason::Permission),
         );
         for changed in [0x1ffe, 0x2000] {
             let mut engine = code(0x1ffe, &bytes);
@@ -356,10 +358,10 @@ fn excluded_forms_and_three_byte_fetch_preserve_fault_and_snapshot_boundaries() 
             continue;
         }
         let engine = code(CODE, bytes);
-        assert_eq!(
-            decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),
-            Some(opcode_error),
-            "{bytes:02x?}"
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(engine.memory().unwrap(), GuestAddress(CODE)))
+                .expect_err("instruction must fail to decode"),
+            opcode_error,
         );
         exclusions += 1;
     }
@@ -414,7 +416,11 @@ fn late_bit_scan_failures_preserve_both_publications() {
                     } else {
                         HostError::Compile(expected)
                     };
-                    assert_eq!(compile(&mut engine, resident, entries), Err(expected));
+                    crate::support_fetch::assert_host_contract(
+                        (compile(&mut engine, resident, entries))
+                            .expect_err("compilation must refuse this fixture"),
+                        expected,
+                    );
                     assert_eq!(
                         (
                             engine.arena().to_vec(),
