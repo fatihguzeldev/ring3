@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
-import {join} from 'node:path';
+import {join, resolve} from 'node:path';
 
 const [outputDir, root] = process.argv.slice(2);
 assert.ok(root, 'expected generated artifact directory and repository root');
@@ -216,14 +216,16 @@ for (const [from, to, index, budget] of [[0, 1, 0, 1], [1, 2, 0, 1], [2, 4, 1, 2
 }
 assert.equal(stats.probe_calls, stats.probe_successes + stats.probe_traps);
 assert.equal(stats.dispatcher_calls, stats.controlled_misses + stats.cancelled_calls + stats.budget_exits + stats.done_pc_exits);
-const productionPaths = execFileSync('git', ['ls-files', 'engine/src'], {cwd: root, encoding: 'utf8'}).trim().split('\n').sort();
+const productionPaths = execFileSync('rg', ['--files', 'engine/src'], {cwd: root, encoding: 'utf8'}).trim().split('\n').sort();
 const sourcePaths = ['engine/tests/cpu/dbt/regions/dispatch/native/table.rs', 'engine/tests/cpu/dbt/regions/native.rs', 'engine/tests/cpu/dbt/regions/dispatch/fixtures/p2-table-dispatch/runtime/run.mjs', 'engine/Cargo.toml', 'Cargo.lock', ...productionPaths];
+const gitRoot = execFileSync('git', ['rev-parse', '--show-toplevel'], {cwd: root, encoding: 'utf8'}).trim();
+const gitHead = resolve(gitRoot) === resolve(root) ? execFileSync('git', ['rev-parse', 'HEAD'], {cwd: root, encoding: 'utf8'}).trim() : null;
 const artifactHashes = Object.fromEntries(['a.wasm', 'b.wasm', 'dispatcher.wasm', 'wrong.wasm', 'a.x86', 'b.x86'].map(name => [name, hash(readFileSync(join(outputDir, name)))]));
 const provenance = {
   stats, generated_modules: Object.keys(modules).length, actual_child_calls: stats.dispatcher_child_calls_observed + stats.probe_successes, artifact_sha256: artifactHashes,
   module_set_sha256: hash(['a', 'b', 'dispatcher', 'wrong'].map(name => `${name}:${artifactHashes[`${name}.wasm`]}`).join('\n')),
   sources: Object.fromEntries(sourcePaths.map(path => [path, hash(readFileSync(join(root, path)))])),
-  production: {git_head: execFileSync('git', ['rev-parse', 'HEAD'], {cwd: root, encoding: 'utf8'}).trim(), source_files: productionPaths.length, source_set_sha256: hash(productionPaths.map(path => `${path}:${hash(readFileSync(join(root, path)))}`).join('\n'))},
+  production: {git_head: gitHead, source_files: productionPaths.length, source_set_sha256: hash(productionPaths.map(path => `${path}:${hash(readFileSync(join(root, path)))}`).join('\n'))},
   mathematical_inputs: {cold: coldStart, warm: warmInputs, warm_cases: warmCases, split: resumedStart, large: {cycles: largeCycles, retired: largeCycles * 4, child_calls: largeCycles * 2}},
   tools: {node: process.version, v8: process.versions.v8, platform: process.platform, architecture: process.arch, rustc: execFileSync('rustc', ['--version'], {encoding: 'utf8'}).trim(), cargo: execFileSync('cargo', ['--version'], {encoding: 'utf8'}).trim()},
   commands: {run: [process.execPath, process.argv[1], outputDir, root], generate_and_run: ['cargo', 'test', '-p', 'ring3-engine', '--test', 'dbt_table_dispatch', '--', '--nocapture']},

@@ -252,29 +252,32 @@ fn standalone_admission_rejects_decodable_out_of_profile_before_termination() {
 #[test]
 fn decode_faults_retain_exact_pc_execute_address_reason_and_attempted_length() {
     let memory = AddressSpace::new(1).unwrap();
-    assert_eq!(
-        prepare_entry_region(&memory, &[GuestAddress(0x1234)], CompileLimits::default()).err(),
-        Some(instruction_error(
+    crate::support_fetch::assert_compile_contract(
+        (prepare_entry_region(&memory, &[GuestAddress(0x1234)], CompileLimits::default()).err())
+            .expect("code preparation must fail"),
+        instruction_error(
             0x1234,
             InstructionError::Decode(DecodeError::MemoryFault {
                 pc: GuestAddress(0x1234),
                 fault: MemoryFault {
                     address: GuestAddress(0x1234),
                     access: Access::Execute,
-                    reason: FaultReason::Unmapped
+                    reason: FaultReason::Unmapped,
                 },
                 length: 1,
-            })
-        ))
+            }),
+        ),
     );
     let mut memory = code(0x1fff, &[0xb8]);
     for permission in [None, Some(Permissions::READ)] {
         if let Some(permission) = permission {
             memory.map_zeroed(range(0x2000, 1), permission).unwrap();
         }
-        assert_eq!(
-            prepare_entry_region(&memory, &[GuestAddress(0x1fff)], CompileLimits::default()).err(),
-            Some(instruction_error(
+        crate::support_fetch::assert_compile_contract(
+            (prepare_entry_region(&memory, &[GuestAddress(0x1fff)], CompileLimits::default())
+                .err())
+            .expect("code preparation must fail"),
+            instruction_error(
                 0x1fff,
                 InstructionError::Decode(DecodeError::MemoryFault {
                     pc: GuestAddress(0x1fff),
@@ -285,45 +288,53 @@ fn decode_faults_retain_exact_pc_execute_address_reason_and_attempted_length() {
                             FaultReason::Permission
                         } else {
                             FaultReason::Unmapped
-                        }
+                        },
                     },
                     length: 2,
-                })
-            ))
+                }),
+            ),
         );
     }
     memory.protect(range(0x1000, 1), Permissions::READ).unwrap();
-    assert_eq!(
-        prepare_entry_region(&memory, &[GuestAddress(0x1fff)], CompileLimits::default()).err(),
-        Some(instruction_error(
+    crate::support_fetch::assert_compile_contract(
+        (prepare_entry_region(&memory, &[GuestAddress(0x1fff)], CompileLimits::default()).err())
+            .expect("code preparation must fail"),
+        instruction_error(
             0x1fff,
             InstructionError::Decode(DecodeError::MemoryFault {
                 pc: GuestAddress(0x1fff),
                 fault: MemoryFault {
                     address: GuestAddress(0x1fff),
                     access: Access::Execute,
-                    reason: FaultReason::Permission
+                    reason: FaultReason::Permission,
                 },
                 length: 1,
-            })
-        ))
+            }),
+        ),
     );
 }
 
 #[test]
 fn invalid_and_unsupported_decoder_errors_remain_distinct_from_backend_rejection() {
     prefix_admission::admitted(&[0xd9, 0xe8]);
+    let interrupt = code(0x1000, &[0xcd, 0x80]);
+    assert_eq!(
+        ring3_engine::cpu::x86::decode::decode_one(&interrupt, GuestAddress(0x1000))
+            .unwrap()
+            .operation(),
+        &ring3_engine::cpu::x86::ir::Operation::SoftwareInterrupt { vector: 0x80 },
+    );
     for (bytes, cause) in [
-        (&[0x8d, 0xc0][..], DecodeError::InvalidEncoding),
         (
-            &[0xcd, 0x80][..],
-            DecodeError::Unsupported(UnsupportedFeature::Opcode),
+            &[0x8d, 0xc0][..],
+            InstructionError::Decode(DecodeError::InvalidEncoding),
         ),
+        (&[0xcd, 0x80][..], InstructionError::BackendUnsupported),
     ] {
         let memory = code(0x1000, bytes);
         assert_eq!(
             prepare_entry_region(&memory, &[GuestAddress(0x1000)], CompileLimits::default()).err(),
-            Some(instruction_error(0x1000, InstructionError::Decode(cause)))
+            Some(instruction_error(0x1000, cause))
         );
     }
 }
@@ -343,8 +354,10 @@ fn global_and_lower_instruction_caps_fail_before_the_next_needed_decode() {
     );
     let memory = code(0x1fc0, &[0x90; 64]);
     assert_eq!(
-        prepare_entry_region(&memory, &[GuestAddress(0x1fc0)], CompileLimits::default()).err(),
-        Some(CompileError::InstructionLimit)
+        prepare_entry_region(&memory, &[GuestAddress(0x1fc0)], CompileLimits::default())
+            .unwrap()
+            .instruction_count(),
+        64
     );
     let memory = code(0x1000, &[0x90, 0xf4]);
     assert_eq!(
@@ -356,8 +369,9 @@ fn global_and_lower_instruction_caps_fail_before_the_next_needed_decode() {
                 ..CompileLimits::default()
             }
         )
-        .err(),
-        Some(CompileError::InstructionLimit)
+        .unwrap()
+        .instruction_count(),
+        1
     );
     let memory = code(0x1000, &[0x90, 0xeb, 0]);
     let limits = CompileLimits {
@@ -411,20 +425,21 @@ fn exact_address_space_end_stops_without_wrapping_fetch_to_zero() {
         );
     }
     let memory = code(u32::MAX, &[0xb8]);
-    assert_eq!(
-        prepare_entry_region(&memory, &[GuestAddress(u32::MAX)], CompileLimits::default()).err(),
-        Some(instruction_error(
+    crate::support_fetch::assert_compile_contract(
+        (prepare_entry_region(&memory, &[GuestAddress(u32::MAX)], CompileLimits::default()).err())
+            .expect("code preparation must fail"),
+        instruction_error(
             u32::MAX,
             InstructionError::Decode(DecodeError::MemoryFault {
                 pc: GuestAddress(u32::MAX),
                 fault: MemoryFault {
                     address: GuestAddress(u32::MAX),
                     access: Access::Execute,
-                    reason: FaultReason::AddressOverflow
+                    reason: FaultReason::AddressOverflow,
                 },
                 length: 2,
-            })
-        ))
+            }),
+        ),
     );
 }
 
@@ -533,13 +548,27 @@ fn registered_gate_slots_share_the_global_cap_in_both_seed_orders() {
             let mut engine = embedded(0x1000, &bytes);
             entry_descriptors(&mut engine, &entries, &[(gate_pc, 77)]);
             let arena = engine.arena().to_vec();
+            // Cold discovery reserves one instruction for the gate and admits the bounded prefix.
+            assert_eq!(engine.compile_entries(2, 1), Ok(1));
+            assert_eq!(engine.arena(), arena);
+            let prefix = engine.artifact_bytes().unwrap().to_vec();
+            let explicit = [0x1000, ordinary_slots as u32, gate_pc, 2, gate_pc, 77];
+            for (index, word) in explicit.into_iter().enumerate() {
+                engine.arena_mut().unwrap()[140 + index * 4..144 + index * 4]
+                    .copy_from_slice(&word.to_le_bytes());
+            }
+            let before = engine.arena().to_vec();
             let expected = if ordinary_slots == 63 {
-                Ok(1)
+                Ok(2)
             } else {
                 Err(HostError::Compile(CompileError::InstructionLimit))
             };
-            assert_eq!(engine.compile_entries(2, 1), expected);
-            assert_eq!(engine.arena(), arena);
+            assert_eq!(engine.compile_with_gates(2, 1), expected);
+            assert_eq!(engine.arena(), before);
+            if ordinary_slots == 64 {
+                assert_eq!(engine.generation(), 1);
+                assert_eq!(engine.artifact_bytes().unwrap(), prefix);
+            }
         }
     }
 }
@@ -581,20 +610,20 @@ fn gate_structure_and_interior_overlaps_are_rejected_before_unrelated_decode() {
 fn gates_fetch_exactly_two_execute_bytes_and_accept_the_final_valid_span() {
     let mut engine = embedded(0x1fff, &[0x0f]);
     entry_descriptors(&mut engine, &[0x1fff], &[(0x1fff, 17)]);
-    assert_eq!(
-        engine.compile_entries(1, 1),
-        Err(HostError::Compile(instruction_error(
+    crate::support_fetch::assert_host_contract(
+        (engine.compile_entries(1, 1)).expect_err("compilation must fail"),
+        HostError::Compile(instruction_error(
             0x1fff,
             InstructionError::Decode(DecodeError::MemoryFault {
                 pc: GuestAddress(0x1fff),
                 fault: MemoryFault {
                     address: GuestAddress(0x2000),
                     access: Access::Execute,
-                    reason: FaultReason::Unmapped
+                    reason: FaultReason::Unmapped,
                 },
                 length: 2,
-            })
-        )))
+            }),
+        )),
     );
     let mut engine = embedded(u32::MAX - 1, &[0x0f, 0x0b]);
     entry_descriptors(&mut engine, &[u32::MAX - 1], &[(u32::MAX - 1, 0xffff_ffff)]);

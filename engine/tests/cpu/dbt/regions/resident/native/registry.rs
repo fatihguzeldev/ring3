@@ -240,7 +240,7 @@ fn registry_limits_accept_inclusive_boundaries_and_reject_outside_them() {
             wasm_bytes: 1,
         },
         RegistryLimits {
-            units: 9,
+            units: 4097,
             wasm_bytes: 1,
         },
         RegistryLimits {
@@ -253,7 +253,7 @@ fn registry_limits_accept_inclusive_boundaries_and_reject_outside_them() {
         },
         RegistryLimits {
             units: 1,
-            wasm_bytes: 524_289,
+            wasm_bytes: 256 * 1024 * 1024 + 1,
         },
         RegistryLimits {
             units: 1,
@@ -271,6 +271,14 @@ fn registry_limits_accept_inclusive_boundaries_and_reject_outside_them() {
         RegistryLimits {
             units: 1,
             wasm_bytes: 1,
+        },
+        RegistryLimits {
+            units: 9,
+            wasm_bytes: 524_289,
+        },
+        RegistryLimits {
+            units: 4096,
+            wasm_bytes: 256 * 1024 * 1024,
         },
         default,
     ] {

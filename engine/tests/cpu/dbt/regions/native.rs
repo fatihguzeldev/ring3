@@ -1,3 +1,6 @@
+#[path = "../../../support/cpu/fetch/native.rs"]
+mod support_fetch;
+
 #[path = "../../../support/cpu/prefix/admission.rs"]
 mod support_prefix_admission;
 

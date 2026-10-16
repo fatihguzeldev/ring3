@@ -319,18 +319,18 @@ fn invalid_and_unsupported_decodings_are_wrapped_with_original_instruction_pc() 
         )
         .err()
         .unwrap();
-        match error {
+        let expected = if unsupported {
+            InstructionError::BackendUnsupported
+        } else {
+            InstructionError::Decode(DecodeError::InvalidEncoding)
+        };
+        assert_eq!(
+            error,
             CompileError::Instruction {
                 pc: GuestAddress(0x1001),
-                cause: InstructionError::Decode(error),
-            } => {
-                assert!(matches!(
-                    (unsupported, error),
-                    (false, DecodeError::InvalidEncoding) | (true, DecodeError::Unsupported(_))
-                ));
+                cause: expected
             }
-            other => panic!("expected original instruction decode failure, got {other:?}"),
-        }
+        );
     }
 }
 
@@ -340,24 +340,7 @@ fn instruction_fetch_fault_preserves_original_pc_address_and_attempted_span() {
     let error = prepare_region(&memory, &[spec(0x1ffd, 6)], CompileLimits::default())
         .err()
         .unwrap();
-    let CompileError::Instruction {
-        pc,
-        cause:
-            InstructionError::Decode(DecodeError::MemoryFault {
-                pc: decode_pc,
-                fault,
-                length,
-            }),
-    } = error
-    else {
-        panic!("expected instruction fetch fault, got {error:?}");
-    };
-    assert_eq!(pc.0, 0x1ffe);
-    assert_eq!(decode_pc.0, 0x1ffe);
-    assert_eq!(fault.address.0, 0x2000);
-    assert_eq!(fault.access, Access::Execute);
-    assert_eq!(fault.reason, FaultReason::Unmapped);
-    assert_eq!(length, 3);
+    crate::support_fetch::assert_compile_error(error, 0x1ffe, 0x2000, FaultReason::Unmapped, 3);
 }
 
 #[test]
