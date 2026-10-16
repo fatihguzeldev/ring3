@@ -46,6 +46,16 @@ impl EngineInstance {
     ) -> Result<u32, NlsError32> {
         use NlsApi32::*;
         match api {
+            GetLocaleInfoEx
+            | GetUserDefaultLocaleName
+            | IsValidLocaleName
+            | LCIDToLocaleName
+            | LocaleNameToLCID => self.nls.names(
+                self.memory.as_mut().unwrap(),
+                self.threads.current_id(),
+                api,
+                args,
+            ),
             MultiByteToWideChar | WideCharToMultiByte => self.nls.convert(
                 self.memory.as_mut().unwrap(),
                 api,
