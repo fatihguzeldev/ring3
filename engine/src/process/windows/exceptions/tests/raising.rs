@@ -247,6 +247,12 @@ fn terminal_unhandled_without_pending_call_finalizes_files_and_rejects_wrong_or_
     assert_eq!(engine.exit_code, None);
     engine.terminate_windows_exception(77, dispatch.id).unwrap();
     assert_eq!(engine.exit_code, Some(record.code));
+    let primary = engine.threads.info(1).unwrap();
+    assert_eq!(
+        primary.state,
+        crate::windows::thread::ThreadState32::Terminated
+    );
+    assert_eq!(primary.exit_code, record.code);
     assert_eq!(
         decode_exit(&engine.arena()[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE])
             .unwrap()

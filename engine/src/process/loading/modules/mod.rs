@@ -19,6 +19,9 @@ use initialization::ModuleOperation;
 use lifetime::ModuleReference;
 use tls::InitialThreadTls;
 
+#[cfg(test)]
+mod tests;
+
 #[derive(Default)]
 pub(in crate::process) struct ModuleProcess32 {
     catalog: ModuleCatalog32,
@@ -34,4 +37,5 @@ pub(in crate::process) struct ModuleProcess32 {
     loader_owner: Option<u32>,
     loader_depth: u32,
     waiting_request: Option<thread::ModuleRequest32>,
+    windows_runtime: bool,
 }

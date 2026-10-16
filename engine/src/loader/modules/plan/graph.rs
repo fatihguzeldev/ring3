@@ -44,9 +44,28 @@ impl ModuleCatalog32 {
         actual_base: Option<u32>,
         reserved: &[PageRange],
     ) -> Result<LoadPlan32, ModuleError32> {
+        self.plan_load_with_runtime_dependencies(set, memory, request, actual_base, reserved, &[])
+    }
+    pub fn plan_load_with_runtime_dependencies(
+        &self,
+        set: &ModuleSet32,
+        memory: &AddressSpace,
+        request: &str,
+        actual_base: Option<u32>,
+        reserved: &[PageRange],
+        runtime: &[&str],
+    ) -> Result<LoadPlan32, ModuleError32> {
+        if runtime.len() > self.limits.modules {
+            return Err(ModuleError32::Capacity);
+        }
         let name = normalize_module_name(request)?;
         let mut builder = Builder::new(self, set, memory, reserved);
         builder.plan.root = builder.ensure(&name, actual_base)?;
+        for dependency in runtime {
+            let dependency = normalize_module_name(dependency)?;
+            let id = builder.ensure(&dependency, None)?;
+            builder.dependency(builder.plan.root, id)?;
+        }
         builder.bind_imports()?;
         builder.finish()
     }

@@ -19,7 +19,9 @@ pub(in crate::process) struct ModuleWindowsReply {
     operation: Option<ModuleOperation32>,
 }
 impl ModuleWindowsReply {
-    pub(in crate::process) fn waiting_loader(&self)->bool {self.operation.is_none()}
+    pub(in crate::process) fn waiting_loader(&self) -> bool {
+        self.operation.is_none()
+    }
     pub(in crate::process) fn owner(&self) -> PendingOwner {
         self.owner
     }
@@ -27,10 +29,17 @@ impl ModuleWindowsReply {
 
 impl EngineInstance {
     pub fn register_kernel32_module(&mut self, preferred_base: u32) -> Result<(), HostError> {
-        let kernel=crate::windows::kernel32_module(preferred_base);
-        if self.has_registered_module("ntdll.dll") {self.register_system_module(kernel)} else {
-            self.register_system_module_group(vec![kernel,crate::windows::exceptions::ntdll_module(0x77f00000)])
+        let kernel = crate::windows::kernel32_module(preferred_base);
+        if self.has_registered_module("ntdll.dll") {
+            self.register_system_module(kernel)?;
+        } else {
+            self.register_system_module_group(vec![
+                kernel,
+                crate::windows::exceptions::ntdll_module(0x77f00000),
+            ])?;
         }
+        self.enable_windows_runtime_profile();
+        Ok(())
     }
 
     pub(super) fn complete_module_api(
@@ -106,8 +115,10 @@ impl EngineInstance {
                     255,
                 )?;
                 if matches!(api, LoadLibraryExA | LoadLibraryExW) && args[2] != 0 {
-                    self.load_resource_only_module(&name,args[2])
-                } else {self.load_library_module(&name, None)}
+                    self.load_resource_only_module(&name, args[2])
+                } else {
+                    self.load_library_module(&name, None)
+                }
             }
             GetModuleHandleA | GetModuleHandleW => {
                 let name = if args[0] == 0 {
@@ -128,15 +139,23 @@ impl EngineInstance {
                 };
                 self.resolve_module_export(args[0], &symbol)
             }
-            FreeLibrary => if args[0] & 3 != 0 {self.free_resource_only_module(args[0])} else {self.free_library_module(args[0])},
+            FreeLibrary => {
+                if args[0] & 3 != 0 {
+                    self.free_resource_only_module(args[0])
+                } else {
+                    self.free_library_module(args[0])
+                }
+            }
             ExitProcess => self.detach_modules_for_exit(),
             _ => unreachable!(),
         })();
         match result {
             Ok(operation) => {
-                if api==WindowsApi32::ExitProcess {self.process_exit_owner=Some(self.threads.current_id());}
+                if api == WindowsApi32::ExitProcess {
+                    self.process_exit_owner = Some(self.threads.current_id());
+                }
                 self.complete_module_windows_operation(operation)?
-            },
+            }
             Err(error) => {
                 if api == WindowsApi32::ExitProcess {
                     return Err(error);
@@ -203,9 +222,14 @@ impl EngineInstance {
             let frame = self.checked_pending_call(owner, token)?.frame;
             match self.execute_module_request(&request) {
                 Ok(operation) => {
-                    if matches!(request,crate::process::loading::modules::ModuleRequest32::Shutdown){self.process_exit_owner=Some(self.threads.current_id());}
+                    if matches!(
+                        request,
+                        crate::process::loading::modules::ModuleRequest32::Shutdown
+                    ) {
+                        self.process_exit_owner = Some(self.threads.current_id());
+                    }
                     self.complete_module_windows_operation(operation)?
-                },
+                }
                 Err(error) => match module_api_error(error) {
                     Ok(code) => self.complete_module_api_return(frame, 0, Some(code))?,
                     Err(error) => {
@@ -302,7 +326,12 @@ impl EngineInstance {
     }
 
     pub(in crate::process) fn publish_process_exit(&mut self, code: u32) -> Result<(), HostError> {
-        if self.pending_process_exit.is_some_and(|pending|pending!=code){return Err(HostError::Call(CallError::Busy));}
+        if self
+            .pending_process_exit
+            .is_some_and(|pending| pending != code)
+        {
+            return Err(HostError::Call(CallError::Busy));
+        }
         let mut bytes = [0; EXIT_SIZE];
         encode_exit_v4(
             &ExecutionExit {
@@ -325,17 +354,22 @@ impl EngineInstance {
             .map_err(|_| HostError::Infrastructure)?;
         bindings.extend_from_slice(media.bindings());
         if !self.finalize_file_process_exit(&bindings)? {
-            self.pending_process_exit=Some(code);self.process_exit_owner=Some(self.threads.current_id());return Ok(());
+            self.pending_process_exit = Some(code);
+            self.process_exit_owner = Some(self.threads.current_id());
+            return Ok(());
         }
         self.commit_media_process_exit(media);
-        if let Some(resources)=self.resources.as_mut(){resources.commit_process_exit();}
+        if let Some(resources) = self.resources.as_mut() {
+            resources.commit_process_exit();
+        }
         self.exceptions.deliveries_clear_process_exit();
+        self.threads.retire_process_threads(code);
         if let Some(registry) = self.registry.as_mut() {
             registry.commit_process_exit();
         }
         self.arena.as_mut().get_mut()[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE].copy_from_slice(&bytes);
         self.exit_code = Some(code);
-        self.pending_process_exit=None;
+        self.pending_process_exit = None;
         self.pending_call = None;
         self.module_windows_reply = None;
         self.callback = None;
@@ -377,12 +411,15 @@ impl EngineInstance {
         let args = frame.arguments();
         Ok(match api {
             LoadLibraryA | LoadLibraryW | LoadLibraryExA | LoadLibraryExW => {
-                if matches!(api, LoadLibraryExA | LoadLibraryExW) && args[1] != 0
-                {
+                if matches!(api, LoadLibraryExA | LoadLibraryExW) && args[1] != 0 {
                     return Err(HostError::Module(ModuleError32::InvalidRequest));
                 }
                 ModuleRequest32::Load {
-                    flags: if matches!(api,LoadLibraryExA|LoadLibraryExW){args[2]}else{0},
+                    flags: if matches!(api, LoadLibraryExA | LoadLibraryExW) {
+                        args[2]
+                    } else {
+                        0
+                    },
                     name: self.windows_string(
                         args[0],
                         matches!(api, LoadLibraryW | LoadLibraryExW),
@@ -413,9 +450,11 @@ impl EngineInstance {
 }
 
 impl EngineInstance {
-    pub(in crate::process) fn resume_module_loader_wait(&mut self)->Result<bool,HostError> {
-        if !self.module_loader_wait_ready(){return Ok(false);}
-        let reply=self.module_windows_reply.ok_or(HostError::Infrastructure)?;
-        self.retry_module_windows_call(reply.owner,reply.token)
+    pub(in crate::process) fn resume_module_loader_wait(&mut self) -> Result<bool, HostError> {
+        if !self.module_loader_wait_ready() {
+            return Ok(false);
+        }
+        let reply = self.module_windows_reply.ok_or(HostError::Infrastructure)?;
+        self.retry_module_windows_call(reply.owner, reply.token)
     }
 }

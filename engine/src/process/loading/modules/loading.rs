@@ -118,12 +118,17 @@ impl EngineInstance {
         let plan = self
             .modules
             .catalog
-            .plan_load_with_reservations(
+            .plan_load_with_runtime_dependencies(
                 &self.modules.loaded,
                 self.memory()?,
                 name,
                 actual_base,
                 &reservations,
+                if config.is_some() && self.modules.windows_runtime {
+                    &["ntdll.dll"]
+                } else {
+                    &[]
+                },
             )
             .map_err(HostError::Module)?;
         self.install_module_plan(plan, config, LoadCompletion::Library)

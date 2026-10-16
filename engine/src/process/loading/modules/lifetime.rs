@@ -144,6 +144,9 @@ impl ModuleProcess32 {
 }
 
 impl EngineInstance {
+    pub(in crate::process) fn enable_windows_runtime_profile(&mut self) {
+        self.modules.windows_runtime = true;
+    }
     pub(in crate::process) fn has_active_module_operation(&self) -> bool {
         !self.modules.operations.is_empty()
     }
