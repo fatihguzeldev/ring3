@@ -24,6 +24,8 @@ pub enum InterfaceKind {
     FxParametricEq = 19,
     FxI3dl2Reverb = 20,
     FxWavesReverb = 21,
+    CaptureFxAec = 22,
+    CaptureFxNoise = 23,
 }
 
 const fn guid(a: u32, b: u16, c: u16, d: [u8; 8]) -> InterfaceId {
@@ -37,7 +39,7 @@ const fn guid(a: u32, b: u16, c: u16, d: [u8; 8]) -> InterfaceId {
 }
 
 impl InterfaceKind {
-    pub const ALL: [Self; 21] = [
+    pub const ALL: [Self; 23] = [
         Self::Device,
         Self::Device8,
         Self::Buffer,
@@ -59,6 +61,8 @@ impl InterfaceKind {
         Self::FxParametricEq,
         Self::FxI3dl2Reverb,
         Self::FxWavesReverb,
+        Self::CaptureFxAec,
+        Self::CaptureFxNoise,
     ];
     pub fn from_tag(tag: u8) -> Option<Self> {
         Self::ALL.into_iter().find(|kind| *kind as u8 == tag)
@@ -79,6 +83,9 @@ impl InterfaceKind {
         }
     }
     pub const fn iid(self) -> InterfaceId {
+        if let Some(kind) = self.capture_effect() {
+            return crate::audio::capture_effects::interface_id(kind);
+        }
         if let Some(kind) = self.effect() {
             return crate::audio::dsound::effects::interface_id(kind);
         }
@@ -164,6 +171,21 @@ impl InterfaceKind {
                     None => unreachable!(),
                 })
             }
+            Self::CaptureFxAec | Self::CaptureFxNoise => {
+                crate::audio::capture_effects::interface_id(match self.capture_effect() {
+                    Some(kind) => kind,
+                    None => unreachable!(),
+                })
+            }
+        }
+    }
+    pub const fn capture_effect(self) -> Option<crate::audio::capture_effects::CaptureEffectKind> {
+        match self {
+            Self::CaptureFxAec => Some(crate::audio::capture_effects::CaptureEffectKind::Aec),
+            Self::CaptureFxNoise => {
+                Some(crate::audio::capture_effects::CaptureEffectKind::NoiseSuppress)
+            }
+            _ => None,
         }
     }
 }
