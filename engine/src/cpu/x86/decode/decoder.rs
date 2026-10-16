@@ -219,6 +219,7 @@ fn decode_core(
                         GuestAddress(pc.0.wrapping_add(length as u32)),
                         Operation::Control(operation),
                         0,
+                        false,
                     )));
                 }
                 return Err(DecodeError::InvalidEncoding);
@@ -259,6 +260,13 @@ fn decode_core(
                     GuestAddress(instruction.next_ip32()),
                     operation,
                     segments,
+                    matches!(
+                        fault,
+                        Some(
+                            crate::cpu::x86::ControlOperation::GeneralProtectionZero
+                                | crate::cpu::x86::ControlOperation::DeniedPortString { .. }
+                        )
+                    ),
                 )));
             }
             _ => return Err(DecodeError::InvalidEncoding),
@@ -273,8 +281,16 @@ fn finish(
     next_pc: GuestAddress,
     operation: Operation,
     segment_accesses: u8,
+    privileged_instruction: bool,
 ) -> DecodedOperation {
-    DecodedOperation::new(pc, length as u8, next_pc, operation, segment_accesses)
+    DecodedOperation::new(
+        pc,
+        length as u8,
+        next_pc,
+        operation,
+        segment_accesses,
+        privileged_instruction,
+    )
 }
 
 fn code_snapshot(

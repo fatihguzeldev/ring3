@@ -16,6 +16,7 @@ pub(super) enum EmbeddedBinding {
     Resident { key: u64, id: u64 },
 }
 
-pub(super) use emitter::emit;
+pub(super) use emitter::{emit, emit_with_tier};
 
 pub(crate) use dispatcher::emit_dispatcher;
+pub(crate) use dispatcher::emit_dispatcher_with_capacity;

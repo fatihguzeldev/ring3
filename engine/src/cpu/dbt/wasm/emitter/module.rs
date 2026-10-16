@@ -17,6 +17,19 @@ pub(in crate::cpu::dbt) fn emit(
     binding: Option<EmbeddedBinding>,
     decode_key: Option<CodeDecodeKey>,
 ) -> Vec<u8> {
+    emit_with_tier(
+        blocks,
+        binding,
+        decode_key,
+        crate::cpu::dbt::CompilationTier32::Baseline,
+    )
+}
+pub(in crate::cpu::dbt) fn emit_with_tier(
+    blocks: &[CompiledBlock],
+    binding: Option<EmbeddedBinding>,
+    decode_key: Option<CodeDecodeKey>,
+    tier: crate::cpu::dbt::CompilationTier32,
+) -> Vec<u8> {
     let plan = ModuleRequirements::new(blocks, binding);
     let sections = imports::wiring::build(&plan, binding);
     let mut module = Module::new();
@@ -51,7 +64,7 @@ pub(in crate::cpu::dbt) fn emit(
     let mut exports = ExportSection::new();
     exports.export("run", ExportKind::Func, sections.run_index);
     module.section(&exports);
-    let function = body::emit(blocks, binding, &plan, &mut helper_imports);
+    let function = body::emit(blocks, binding, &plan, &mut helper_imports, tier);
     let mut bodies = CodeSection::new();
     bodies.function(&function);
     if plan.has_segment_check {

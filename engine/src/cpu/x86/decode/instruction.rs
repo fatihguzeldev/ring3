@@ -10,6 +10,7 @@ pub(crate) struct DecodedOperation {
     next_pc: GuestAddress,
     operation: Operation,
     segment_accesses: u8,
+    privileged_instruction: bool,
 }
 
 impl DecodedOperation {
@@ -19,6 +20,7 @@ impl DecodedOperation {
         next_pc: GuestAddress,
         operation: Operation,
         segment_accesses: u8,
+        privileged_instruction: bool,
     ) -> Self {
         Self {
             pc,
@@ -26,6 +28,7 @@ impl DecodedOperation {
             next_pc,
             operation,
             segment_accesses,
+            privileged_instruction,
         }
     }
 
@@ -46,6 +49,9 @@ impl DecodedOperation {
     }
     pub(crate) fn segment_accesses(&self) -> u8 {
         self.segment_accesses
+    }
+    pub(crate) fn is_privileged_instruction(&self) -> bool {
+        self.privileged_instruction
     }
 }
 

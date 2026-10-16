@@ -31,10 +31,21 @@ pub struct RegionMetadata {
 #[derive(Debug)]
 pub struct CompiledRegion {
     prepared: PreparedRegion,
+    tier: super::CompilationTier32,
     bytes: Vec<u8>,
 }
 
 impl CompiledRegion {
+    pub fn tier(&self) -> super::CompilationTier32 {
+        self.tier
+    }
+    pub(crate) fn supports_indexed_entry(&self) -> bool {
+        self.prepared
+            .blocks
+            .iter()
+            .any(|block| block.indexed_span().is_some())
+    }
+
     pub(crate) fn decode_key(&self) -> CodeDecodeKey {
         self.prepared.decode_key.unwrap_or(CodeDecodeKey::FLAT)
     }
@@ -81,6 +92,15 @@ impl CompiledRegion {
         })
     }
 
+    /// immutable decode provenance, including after a consumed entry changes its own source.
+    pub(crate) fn is_privileged_instruction_at(&self, pc: u32) -> bool {
+        self.prepared.blocks.iter().any(|block| {
+            block.instructions.iter().any(|instruction| {
+                instruction.pc().0 == pc && instruction.is_privileged_instruction()
+            })
+        })
+    }
+
     pub(crate) fn matches_gate(&self, entry: u32, id: u32) -> bool {
         self.prepared.blocks.iter().any(|block| {
             block
@@ -114,8 +134,12 @@ impl CompiledRegion {
         Ok(&self.bytes)
     }
 
-    pub(super) fn retained_wasm_byte_len(&self) -> usize {
+    pub(crate) fn retained_wasm_byte_len(&self) -> usize {
         self.bytes.len()
+    }
+
+    pub(crate) fn first_entry(&self) -> Option<u32> {
+        self.executable_addresses().next().map(|entry| entry.0)
     }
 
     #[cfg(test)]
@@ -248,20 +272,56 @@ pub(super) fn emit_prepared(
     if bytes.len() > limits.wasm_bytes {
         return Err(CompileError::WasmLimit);
     }
-    Ok(CompiledRegion { prepared, bytes })
+    Ok(CompiledRegion {
+        prepared,
+        bytes,
+        tier: super::CompilationTier32::Baseline,
+    })
 }
 
 pub(super) fn emit_entry_prepared(
+    memory: &AddressSpace,
+    prepared: PreparedRegion,
+    limits: CompileLimits,
+    binding: Option<wasm::EmbeddedBinding>,
+    cs: Option<CodeFetchContext>,
+) -> Result<CompiledRegion, CompileError> {
+    emit_entry_prepared_tier(
+        memory,
+        prepared,
+        limits,
+        binding,
+        cs,
+        super::CompilationTier32::Baseline,
+    )
+}
+pub(super) fn emit_entry_prepared_tier(
     memory: &AddressSpace,
     mut prepared: PreparedRegion,
     limits: CompileLimits,
     binding: Option<wasm::EmbeddedBinding>,
     cs: Option<CodeFetchContext>,
+    tier: super::CompilationTier32,
 ) -> Result<CompiledRegion, CompileError> {
     loop {
-        let bytes = wasm::emit(&prepared.blocks, binding, prepared.decode_key);
+        let applied_tier = if tier == super::CompilationTier32::Optimized
+            && prepared
+                .blocks
+                .iter()
+                .any(|block| block.indexed_span().is_some())
+        {
+            tier
+        } else {
+            super::CompilationTier32::Baseline
+        };
+        let bytes =
+            wasm::emit_with_tier(&prepared.blocks, binding, prepared.decode_key, applied_tier);
         if bytes.len() <= limits.wasm_bytes {
-            return Ok(CompiledRegion { prepared, bytes });
+            return Ok(CompiledRegion {
+                prepared,
+                bytes,
+                tier: applied_tier,
+            });
         }
         if !shorten_entry_region(memory, &mut prepared, cs)? {
             return Err(CompileError::WasmLimit);

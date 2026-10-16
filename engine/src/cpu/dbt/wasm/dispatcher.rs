@@ -57,6 +57,10 @@ fn host_failure(code: &mut InstructionSink<'_>) {
 }
 
 pub(crate) fn emit_dispatcher(key: u64) -> Vec<u8> {
+    emit_dispatcher_with_capacity(key, 8)
+}
+
+pub(crate) fn emit_dispatcher_with_capacity(key: u64, slots: u32) -> Vec<u8> {
     let mut module = Module::new();
     let mut types = TypeSection::new();
     types.ty().function([ValType::I32; 4], [ValType::I32]);
@@ -81,8 +85,8 @@ pub(crate) fn emit_dispatcher(key: u64) -> Vec<u8> {
         EntityType::Table(TableType {
             element_type: RefType::FUNCREF,
             table64: false,
-            minimum: 8,
-            maximum: Some(8),
+            minimum: u64::from(slots),
+            maximum: Some(u64::from(slots)),
             shared: false,
         }),
     );

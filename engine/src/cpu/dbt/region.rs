@@ -95,6 +95,24 @@ pub(super) enum BlockSource {
 }
 
 impl CompiledBlock {
+    pub(super) fn indexed_span(&self) -> Option<(u32, u32)> {
+        let first = self.instructions.first()?.pc().0;
+        let last = self.instructions.last()?;
+        let end = last.pc().0.checked_add(u32::from(last.length()))?;
+        let span = end.checked_sub(first)?;
+        if span == 0 || span > 1024 || self.instructions.len() < 2 {
+            return None;
+        }
+        let mut previous = first;
+        for instruction in &self.instructions {
+            if instruction.pc().0 != previous {
+                return None;
+            }
+            previous = previous.checked_add(u32::from(instruction.length()))?;
+        }
+        Some((first, span))
+    }
+
     pub(super) fn gate(&self) -> Option<&PreparedGate> {
         if let BlockSource::Gate(gate) = &self.source {
             Some(gate)

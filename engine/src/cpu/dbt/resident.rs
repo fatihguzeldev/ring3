@@ -13,6 +13,8 @@ use super::{
 
 const MAX_UNITS: usize = 8;
 const MAX_BYTES: usize = MAX_UNITS * 65_536;
+const CONFIGURED_MAX_UNITS: usize = 4096;
+const CONFIGURED_MAX_BYTES: usize = 256 * 1024 * 1024;
 static NEXT_UNIT_ID: AtomicU64 = AtomicU64::new(1);
 
 enum EmissionPolicy {
@@ -83,7 +85,8 @@ pub struct ResidentRegistry {
 
 impl ResidentRegistry {
     pub fn new(memory: &AddressSpace, limits: RegistryLimits) -> Result<Self, RegistryError> {
-        if !(1..=MAX_UNITS).contains(&limits.units) || !(1..=MAX_BYTES).contains(&limits.wasm_bytes)
+        if !(1..=CONFIGURED_MAX_UNITS).contains(&limits.units)
+            || !(1..=CONFIGURED_MAX_BYTES).contains(&limits.wasm_bytes)
         {
             return Err(RegistryError::InvalidLimits);
         }
@@ -244,6 +247,43 @@ impl ResidentRegistry {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn compile_cached_bound(
+        &mut self,
+        memory: &AddressSpace,
+        entry: GuestAddress,
+        gate: Option<GateSpec>,
+        limits: CompileLimits,
+        key: u64,
+        cs: CodeFetchContext,
+        authority: crate::cpu::x86::decode::DecodeAuthority,
+        tier: super::CompilationTier32,
+    ) -> Result<UnitId, RegistryError> {
+        self.check_memory(memory)?;
+        if self.entries.len() == self.limits.units {
+            return Err(RegistryError::UnitCapacity);
+        }
+        let prepared = if let Some(gate) = gate {
+            prepare_resident_entry_region(memory, &[entry], limits, &[gate], Some(cs), authority)
+        } else {
+            super::cold::prepare_runtime_entry(memory, entry, limits, Some(cs), authority)
+        }
+        .map_err(RegistryError::Compile)?;
+        let id = allocate_id(&NEXT_UNIT_ID)?;
+        let region = super::artifact::emit_entry_prepared_tier(
+            memory,
+            prepared,
+            limits,
+            Some(EmbeddedBinding::Resident { key, id: id.get() }),
+            Some(cs),
+            tier,
+        )
+        .map_err(RegistryError::Compile)?;
+        let bytes = self.admit(memory, &region, Some(cs))?;
+        self.publish(id, region, bytes);
+        Ok(id)
+    }
+
     fn compile_prepared_bound(
         &mut self,
         memory: &AddressSpace,
@@ -315,7 +355,6 @@ impl ResidentRegistry {
     }
 
     /// identity-only view for a consumed execution lease; this is not an execution guard.
-    #[cfg(any(target_arch = "wasm32", test))]
     pub(crate) fn get_retained_raw(
         &self,
         memory: &AddressSpace,
@@ -327,6 +366,20 @@ impl ResidentRegistry {
             .find(|unit| unit.id.get() == id)
             .map(|unit| &unit.region)
             .ok_or(RegistryError::InvalidUnit)
+    }
+
+    pub(crate) fn discard_quiescent_raw(
+        &mut self,
+        memory: &AddressSpace,
+        id: u64,
+    ) -> Result<(), RegistryError> {
+        self.check_memory(memory)?;
+        let index = self
+            .entries
+            .iter()
+            .position(|unit| unit.id.get() == id)
+            .ok_or(RegistryError::InvalidUnit)?;
+        self.remove_unit(index)
     }
 
     pub fn get(&self, memory: &AddressSpace, id: UnitId) -> Result<&CompiledRegion, RegistryError> {

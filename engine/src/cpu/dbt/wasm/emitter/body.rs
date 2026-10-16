@@ -1,5 +1,6 @@
 use crate::cpu::{
     dbt::{
+        CompilationTier32,
         region::CompiledBlock,
         wasm::{
             EmbeddedBinding, abi, code_fetch,
@@ -17,6 +18,7 @@ pub(super) fn emit(
     binding: Option<EmbeddedBinding>,
     plan: &ModuleRequirements,
     helper_imports: &mut Imports,
+    tier: CompilationTier32,
 ) -> Function {
     let mut declarations = vec![(16, ValType::I32), (1, ValType::I64), (10, ValType::I32)];
     if blocks
@@ -149,7 +151,7 @@ pub(super) fn emit(
         code_fetch::check_context(&mut code, 1);
     }
     for block in blocks {
-        emit_block(&mut code, block, *helper_imports);
+        emit_block(&mut code, block, *helper_imports, tier);
     }
     if let Some(limit) = helper_imports.code_fetch_limit {
         code_fetch::check_pc(&mut code, limit, 1);
@@ -188,7 +190,12 @@ pub(super) fn emit(
     function
 }
 
-fn emit_block(code: &mut InstructionSink<'_>, block: &CompiledBlock, imports: Imports) {
+fn emit_block(
+    code: &mut InstructionSink<'_>,
+    block: &CompiledBlock,
+    imports: Imports,
+    tier: CompilationTier32,
+) {
     if let Some(gate) = block.gate() {
         code.local_get(EIP)
             .i32_const(gate.entry.0 as i32)
@@ -208,22 +215,35 @@ fn emit_block(code: &mut InstructionSink<'_>, block: &CompiledBlock, imports: Im
         return;
     }
     if !block.instructions.is_empty() {
-        code.i32_const(-1).local_set(RESUME).block(BlockType::Empty);
-        for (index, instruction) in block.instructions.iter().enumerate() {
+        let indexed = (tier == CompilationTier32::Optimized)
+            .then(|| block.indexed_span())
+            .flatten();
+        if let Some((base, span)) = indexed {
             code.local_get(EIP)
-                .i32_const(instruction.pc().0 as i32)
-                .i32_eq()
-                .if_(BlockType::Empty)
-                .i32_const(index as i32)
-                .local_set(RESUME)
-                .br(1)
-                .end();
+                .i32_const(base as i32)
+                .i32_sub()
+                .local_tee(RESUME)
+                .i32_const(span as i32)
+                .i32_lt_u()
+                .if_(BlockType::Empty);
+        } else {
+            code.i32_const(-1).local_set(RESUME).block(BlockType::Empty);
+            for (index, instruction) in block.instructions.iter().enumerate() {
+                code.local_get(EIP)
+                    .i32_const(instruction.pc().0 as i32)
+                    .i32_eq()
+                    .if_(BlockType::Empty)
+                    .i32_const(index as i32)
+                    .local_set(RESUME)
+                    .br(1)
+                    .end();
+            }
+            code.end()
+                .local_get(RESUME)
+                .i32_const(-1)
+                .i32_ne()
+                .if_(BlockType::Empty);
         }
-        code.end()
-            .local_get(RESUME)
-            .i32_const(-1)
-            .i32_ne()
-            .if_(BlockType::Empty);
         let helper_free = code_fetch::helper_free_block(block);
         if helper_free && let Some(limit) = imports.code_fetch_limit {
             // the loop's safepoint and key check already precede this selected block.
@@ -233,7 +253,15 @@ fn emit_block(code: &mut InstructionSink<'_>, block: &CompiledBlock, imports: Im
         for _ in 0..count {
             code.block(BlockType::Empty);
         }
-        code.local_get(RESUME).br_table(0..count, count);
+        if let Some((base, span)) = indexed {
+            let mut entries = vec![count; span as usize];
+            for (index, instruction) in block.instructions.iter().enumerate() {
+                entries[(instruction.pc().0 - base) as usize] = index as u32;
+            }
+            code.local_get(RESUME).br_table(entries, count);
+        } else {
+            code.local_get(RESUME).br_table(0..count, count);
+        }
         for (index, instruction) in block.instructions.iter().enumerate() {
             code.end();
             let remaining = count - index as u32 - 1;
