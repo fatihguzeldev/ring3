@@ -32,11 +32,15 @@ impl FontDatabase32 {
             external_leading: (face.line_gap * scale).round() as i32,
             average_width: (face.average * scale * x_scale).round() as i32,
             maximum_width: (face.maximum * scale * x_scale).ceil() as i32,
-            weight: if font.weight == 0 { 400 } else { font.weight },
+            weight: if font.weight >= 600 {
+                face.weight.max(700)
+            } else {
+                face.weight
+            },
             first: face.first,
             last: face.last,
-            default: 0x3f,
-            break_character: 0x20,
+            default: face.default,
+            break_character: face.break_character,
             fixed_pitch: face.monospace,
             italic: font.italic || face.italic,
             underline: font.underline,

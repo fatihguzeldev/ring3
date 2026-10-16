@@ -8,6 +8,9 @@ pub(super) struct FontDesign32 {
     pub line_gap: f32,
     pub average: f32,
     pub maximum: f32,
+    pub weight: i32,
+    pub default: u16,
+    pub break_character: u16,
     pub first: u16,
     pub last: u16,
     pub monospace: bool,
@@ -69,6 +72,16 @@ fn parse(bytes: &[u8]) -> Result<Arc<FontFace32>, GdiError32> {
         .map_or(average, |bytes| {
             f32::from(u16::from_be_bytes(bytes.try_into().unwrap()))
         });
+    let os2 = face
+        .raw_face()
+        .table(rustybuzz::ttf_parser::Tag::from_bytes(b"OS/2"));
+    let character = |offset, fallback| {
+        os2.filter(|_| face.tables().os2.is_some_and(|table| table.version >= 2))
+            .and_then(|table| table.get(offset..offset + 2))
+            .map_or(fallback, |bytes| {
+                u16::from_be_bytes(bytes.try_into().unwrap())
+            })
+    };
     let mut first = u16::MAX;
     let mut last = 0;
     if let Some(cmap) = face.tables().cmap {
@@ -90,6 +103,9 @@ fn parse(bytes: &[u8]) -> Result<Arc<FontFace32>, GdiError32> {
         line_gap: f32::from(face.line_gap()),
         average,
         maximum,
+        weight: i32::from(face.weight().to_number()),
+        default: character(90, 0),
+        break_character: character(92, 32),
         first,
         last,
         monospace: face.is_monospaced(),
