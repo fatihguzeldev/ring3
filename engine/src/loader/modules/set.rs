@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use super::{ModuleError32, ModuleId32, catalog::ModuleSource32, normalize_module_name};
+use super::{ModuleError32, ModuleId32, catalog::ModuleSource32, normalize_module_identity};
 use crate::{
     cpu::dbt::GateSpec,
     loader::pe32::module::{
@@ -78,6 +78,17 @@ impl LoadedModule32 {
 
     pub fn identity(&self) -> &str {
         self.source.name()
+    }
+
+    pub fn file_path(&self) -> Option<&str> {
+        match &*self.source {
+            ModuleSource32::Guest { path, .. } => path.as_deref(),
+            ModuleSource32::System(_) => None,
+        }
+    }
+
+    pub fn base_name(&self) -> &str {
+        self.identity().rsplit('\\').next().unwrap()
     }
 
     pub fn base(&self) -> u32 {
@@ -199,8 +210,16 @@ impl ModuleSet32 {
     }
 
     pub fn find(&self, name: &str) -> Option<&LoadedModule32> {
-        let name = normalize_module_name(name).ok()?;
-        self.find_normalized(&name)
+        let name = normalize_module_identity(name).ok()?;
+        self.find_normalized(&name).or_else(|| {
+            (!name.contains('\\'))
+                .then(|| {
+                    self.modules
+                        .iter()
+                        .find(|module| module.base_name().eq_ignore_ascii_case(&name))
+                })
+                .flatten()
+        })
     }
 
     pub fn containing(&self, address: GuestAddress) -> Option<&LoadedModule32> {

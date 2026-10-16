@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use super::{ModuleError32, normalize_module_name};
+use super::{ModuleError32, normalize_module_identity, normalize_module_name};
 use crate::{
     loader::pe32::module::{ParserLimits32, PreparedPe32, parse_module_with_limits},
     memory::GuestAddress,
@@ -36,6 +36,7 @@ pub struct SystemModule32 {
 pub(super) enum ModuleSource32 {
     Guest {
         name: String,
+        path: Option<String>,
         bytes: Box<[u8]>,
         image: PreparedPe32,
         parser_limits: ParserLimits32,
@@ -117,6 +118,7 @@ impl ModuleCatalog32 {
     }
 
     pub fn add_guest(&mut self, name: &str, bytes: &[u8]) -> Result<(), ModuleError32> {
+        let path = super::identity::module_source_path(name)?;
         let name = self.available_name(name)?;
         let source_bytes = self
             .source_bytes
@@ -136,6 +138,7 @@ impl ModuleCatalog32 {
         owned.extend_from_slice(bytes);
         self.sources.push(Arc::new(ModuleSource32::Guest {
             name,
+            path,
             bytes: owned.into_boxed_slice(),
             image,
             parser_limits: self.limits.parser,
@@ -168,6 +171,7 @@ impl ModuleCatalog32 {
         Ok(())
     }
     pub fn add_system(&mut self, mut module: SystemModule32) -> Result<(), ModuleError32> {
+        normalize_module_name(&module.name)?;
         module.name = self.available_name(&module.name)?;
         if module.preferred_base == 0 || !module.preferred_base.is_multiple_of(65536) {
             return Err(ModuleError32::InvalidSystemExport);
@@ -209,8 +213,16 @@ impl ModuleCatalog32 {
     }
 
     pub fn contains(&self, name: &str) -> bool {
-        normalize_module_name(name)
+        normalize_module_identity(name)
             .is_ok_and(|name| self.sources.iter().any(|source| source.name() == name))
+    }
+
+    pub fn is_system(&self, name: &str) -> bool {
+        normalize_module_identity(name).is_ok_and(|name| {
+            self.sources.iter().any(|source| {
+                source.name() == name && matches!(&**source, ModuleSource32::System(_))
+            })
+        })
     }
 
     pub(super) fn source(&self, name: &str) -> Result<Arc<ModuleSource32>, ModuleError32> {
@@ -222,7 +234,7 @@ impl ModuleCatalog32 {
     }
 
     fn available_name(&self, name: &str) -> Result<String, ModuleError32> {
-        let name = normalize_module_name(name)?;
+        let name = normalize_module_identity(name)?;
         if self.sources.iter().any(|source| source.name() == name) {
             return Err(ModuleError32::DuplicateModule);
         }

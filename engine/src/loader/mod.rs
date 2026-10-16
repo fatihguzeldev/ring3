@@ -23,7 +23,7 @@ pub use modules::{
     DataFileLayout32, DataFileModule32, DataFilePlan32, LoadPlan32, LoadedModule32,
     ModuleCatalog32, ModuleError32, ModuleId32, ModuleLimits32, ModuleLoad32, ModuleSet32,
     ModuleTls32, ResolvedExport32, SystemExport32, SystemExportTarget32, SystemModule32,
-    UnloadPlan32, normalize_module_name,
+    UnloadPlan32, normalize_module_identity, normalize_module_name,
 };
 pub use pe32::module::{
     Directory32, ImageKind32, ImportSymbol32, LoadConfig32, ParserLimits32, PreparedImagePage32,

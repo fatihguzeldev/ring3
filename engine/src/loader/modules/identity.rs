@@ -32,3 +32,43 @@ pub fn normalize_module_name(name: &str) -> Result<String, ModuleError32> {
     }
     Ok(normalized)
 }
+
+pub(crate) fn module_source_path(name: &str) -> Result<Option<String>, ModuleError32> {
+    if !name.contains(['/', '\\', ':']) {
+        return Ok(None);
+    }
+    if name.ends_with(['/', '\\']) {
+        return Err(ModuleError32::InvalidName);
+    }
+    if !(name.as_bytes().get(1) == Some(&b':')
+        && name
+            .as_bytes()
+            .get(2)
+            .is_some_and(|byte| matches!(byte, b'/' | b'\\'))
+        || name.starts_with("\\\\"))
+    {
+        return Err(ModuleError32::InvalidName);
+    }
+    let mut path = crate::files::path::normalize(
+        &name.encode_utf16().collect::<Vec<_>>(),
+        &[67, 58, 92],
+        false,
+    )
+    .map_err(|_| ModuleError32::InvalidName)?;
+    if !crate::files::path::name(&path).contains(&46) {
+        path.extend(".dll".encode_utf16());
+    }
+    String::from_utf16(&path)
+        .map(Some)
+        .map_err(|_| ModuleError32::InvalidName)
+}
+
+pub fn normalize_module_identity(name: &str) -> Result<String, ModuleError32> {
+    let Some(path) = module_source_path(name)? else {
+        return normalize_module_name(name);
+    };
+    String::from_utf16(&crate::files::path::fold(
+        &path.encode_utf16().collect::<Vec<_>>(),
+    ))
+    .map_err(|_| ModuleError32::InvalidName)
+}

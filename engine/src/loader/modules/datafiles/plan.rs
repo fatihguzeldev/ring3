@@ -2,7 +2,7 @@ use super::{DataFileLayout32, DataFileModule32, mapping};
 use crate::{
     loader::{
         ModuleCatalog32, ModuleError32, ModuleId32, ModuleSet32, PreparedImagePage32,
-        normalize_module_name,
+        normalize_module_identity,
     },
     memory::{AddressSpace, PAGE_SIZE, PageInitialization, PageRange},
 };
@@ -25,7 +25,7 @@ impl ModuleCatalog32 {
         if set.modules.len() + set.datafile_count >= self.limits.modules {
             return Err(ModuleError32::Capacity);
         }
-        let source = self.source(&normalize_module_name(name)?)?;
+        let source = self.source(&normalize_module_identity(name)?)?;
         let super::super::catalog::ModuleSource32::Guest { image, bytes, .. } = &*source else {
             return Err(ModuleError32::InvalidModuleKind);
         };

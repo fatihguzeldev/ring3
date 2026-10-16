@@ -11,7 +11,7 @@ pub use catalog::{
     ModuleCatalog32, ModuleLimits32, SystemExport32, SystemExportTarget32, SystemModule32,
 };
 pub use datafiles::{DataFileLayout32, DataFileModule32, DataFilePlan32};
-pub use identity::{ModuleId32, normalize_module_name};
+pub use identity::{ModuleId32, normalize_module_identity, normalize_module_name};
 pub use plan::{LoadPlan32, ModuleLoad32, UnloadPlan32};
 pub use set::{LoadedModule32, ModuleSet32, ModuleTls32, ResolvedExport32};
 

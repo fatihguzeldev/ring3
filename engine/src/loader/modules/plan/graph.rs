@@ -1,6 +1,10 @@
 pub(super) mod placement;
 mod system;
 
+fn default_resolution(_: &str, name: &str) -> Result<String, crate::loader::ModuleError32> {
+    crate::loader::normalize_module_name(name)
+}
+
 use std::sync::Arc;
 
 use super::{LoadPlan32, pages};
@@ -10,7 +14,7 @@ use crate::{
         modules::{
             catalog::ModuleSource32,
             linking::{self, ExportValue32},
-            normalize_module_name,
+            normalize_module_identity, normalize_module_name,
         },
         pe32::module::ImportSymbol32,
     },
@@ -23,9 +27,31 @@ struct Builder<'a> {
     memory: &'a AddressSpace,
     reserved: &'a [PageRange],
     plan: LoadPlan32,
+    resolver: &'a dyn Fn(&str, &str) -> Result<String, ModuleError32>,
 }
 
 impl ModuleCatalog32 {
+    pub fn plan_load_headers(
+        &self,
+        set: &ModuleSet32,
+        memory: &AddressSpace,
+        request: &str,
+        actual_base: Option<u32>,
+        reserved: &[PageRange],
+        runtime: &[&str],
+    ) -> Result<LoadPlan32, ModuleError32> {
+        if runtime.len() > self.limits.modules {
+            return Err(ModuleError32::Capacity);
+        }
+        let mut builder = Builder::new(self, set, memory, reserved, &default_resolution);
+        builder.plan.root = builder.ensure(&normalize_module_identity(request)?, actual_base)?;
+        for dependency in runtime {
+            let id = builder.ensure(&normalize_module_name(dependency)?, None)?;
+            builder.dependency(builder.plan.root, id)?;
+        }
+        builder.finish()
+    }
+
     pub fn plan_load(
         &self,
         set: &ModuleSet32,
@@ -55,11 +81,33 @@ impl ModuleCatalog32 {
         reserved: &[PageRange],
         runtime: &[&str],
     ) -> Result<LoadPlan32, ModuleError32> {
+        self.plan_load_with_resolver(
+            set,
+            memory,
+            request,
+            actual_base,
+            reserved,
+            runtime,
+            &default_resolution,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn plan_load_with_resolver(
+        &self,
+        set: &ModuleSet32,
+        memory: &AddressSpace,
+        request: &str,
+        actual_base: Option<u32>,
+        reserved: &[PageRange],
+        runtime: &[&str],
+        resolver: &dyn Fn(&str, &str) -> Result<String, ModuleError32>,
+    ) -> Result<LoadPlan32, ModuleError32> {
         if runtime.len() > self.limits.modules {
             return Err(ModuleError32::Capacity);
         }
-        let name = normalize_module_name(request)?;
-        let mut builder = Builder::new(self, set, memory, reserved);
+        let name = normalize_module_identity(request)?;
+        let mut builder = Builder::new(self, set, memory, reserved, resolver);
         builder.plan.root = builder.ensure(&name, actual_base)?;
         for dependency in runtime {
             let dependency = normalize_module_name(dependency)?;
@@ -87,8 +135,27 @@ impl ModuleCatalog32 {
         symbol: &ImportSymbol32,
         reserved: &[PageRange],
     ) -> Result<(LoadPlan32, ResolvedExport32), ModuleError32> {
+        self.plan_export_live_with_resolver(
+            set,
+            memory,
+            module,
+            symbol,
+            reserved,
+            &default_resolution,
+        )
+    }
+
+    pub fn plan_export_live_with_resolver(
+        &self,
+        set: &ModuleSet32,
+        memory: &AddressSpace,
+        module: ModuleId32,
+        symbol: &ImportSymbol32,
+        reserved: &[PageRange],
+        resolver: &dyn Fn(&str, &str) -> Result<String, ModuleError32>,
+    ) -> Result<(LoadPlan32, ResolvedExport32), ModuleError32> {
         set.get(module).ok_or(ModuleError32::NotFound)?;
-        let mut builder = Builder::new(self, set, memory, reserved);
+        let mut builder = Builder::new(self, set, memory, reserved, resolver);
         builder.plan.root = module;
         let result = builder.resolve(module, symbol, module)?;
         builder.bind_imports()?;
@@ -102,12 +169,14 @@ impl<'a> Builder<'a> {
         set: &'a ModuleSet32,
         memory: &'a AddressSpace,
         reserved: &'a [PageRange],
+        resolver: &'a dyn Fn(&str, &str) -> Result<String, ModuleError32>,
     ) -> Self {
         Self {
             catalog,
             set,
             memory,
             reserved,
+            resolver,
             plan: LoadPlan32 {
                 root: ModuleId32::from_sequence(0),
                 memory_identity: memory.identity(),
@@ -309,6 +378,7 @@ impl<'a> Builder<'a> {
                 ExportValue32::Resolved(value) => return Ok(value),
                 ExportValue32::Forwarder(value) => {
                     let (name, next) = linking::parse_forwarder(&value)?;
+                    let name = (self.resolver)(self.get(module)?.identity(), &name)?;
                     module = self.ensure(&name, None)?;
                     symbol = next;
                 }
@@ -324,7 +394,7 @@ impl<'a> Builder<'a> {
             let source = Arc::clone(&self.plan.additions[index].source);
             if let ModuleSource32::Guest { image, .. } = &*source {
                 for import in &image.imports {
-                    let name = normalize_module_name(&import.name)?;
+                    let name = (self.resolver)(source.name(), &import.name)?;
                     let provider = self.ensure(&name, None)?;
                     self.dependency(id, provider)?;
                     for slot in &import.slots {
