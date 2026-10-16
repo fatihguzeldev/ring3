@@ -14,6 +14,7 @@ impl EngineInstance {
         if self.pending_call.is_some() || self.callback.is_some() {
             return Err(HostError::Call(CallError::Busy));
         }
+        self.check_guest_reservation_admission(&[config.objects, config.scratch])?;
         self.dinput = Some(DirectInputRuntime32::new(config).map_err(HostError::DirectInput)?);
         Ok(())
     }

@@ -21,9 +21,10 @@ impl DirectInputRuntime32 {
         if rows.is_empty() {
             return Ok(WindowsProviderOutcome32::Return(0));
         }
-        if self.pending.len() == self.pending.capacity() {
+        if self.pending.len() == 33 {
             return Err(H::OUT_OF_MEMORY);
         }
+        self.pending.try_reserve(1).map_err(|_| H::OUT_OF_MEMORY)?;
         let token = self.sequence.checked_add(1).ok_or(H::OUT_OF_MEMORY)?;
         let range = memory.find_free_range(self.config.scratch, 1, PAGE_SIZE)?;
         let address = GuestAddress(range.first as u32 * PAGE_SIZE);

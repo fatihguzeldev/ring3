@@ -1,3 +1,4 @@
+mod activation;
 mod formats;
 mod lifetime;
 mod reading;

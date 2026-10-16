@@ -45,27 +45,7 @@ impl DirectInputRuntime32 {
         if outer != 0 {
             return Err(H::NO_AGGREGATION);
         }
-        if args[0] == 0 {
-            return Err(H::HANDLE);
-        }
-        if args[1]
-            < (if gate == FactoryGate::Create8 {
-                0x800
-            } else {
-                0x300
-            })
-        {
-            return Err(H(0x8007_047e));
-        }
-        if args[1]
-            > (if gate == FactoryGate::Create8 {
-                0x800
-            } else {
-                0x700
-            })
-        {
-            return Err(H(0x8007_000a));
-        }
+        validate_initialization(interface, args[0], args[1])?;
         self.publish(memory, interface, args[1], ObjectKind32::Input, out, None)?;
         Ok(WindowsProviderOutcome32::Return(0))
     }
@@ -127,6 +107,17 @@ impl DirectInputRuntime32 {
                 )
                 .map(WindowsProviderOutcome32::Return);
         }
+        if gate.slot == 7 {
+            validate_initialization(gate.interface, args[1], args[2])?;
+            let slot = self.slot(pointer)?;
+            if self.records[slot].as_ref().unwrap().version == 0 {
+                self.records[slot].as_mut().unwrap().version = args[2];
+            }
+            return Ok(WindowsProviderOutcome32::Return(0));
+        }
+        if self.object(pointer)?.version == 0 {
+            return Err(H::NOT_INITIALIZED);
+        }
         match gate.slot {
             3 => {
                 let interface = gate.interface.device_interface();
@@ -153,13 +144,6 @@ impl DirectInputRuntime32 {
                 Ok(WindowsProviderOutcome32::Return(result))
             }
             6 => Err(H::UNSUPPORTED),
-            7 => {
-                if args[1] == 0 || args[2] == 0 {
-                    Err(H::INVALID_PARAM)
-                } else {
-                    Ok(WindowsProviderOutcome32::Return(0))
-                }
-            }
             8 => {
                 output(memory, args[3], 16)?;
                 let class = read::<16>(memory, args[1])?;
@@ -190,4 +174,26 @@ impl DirectInputRuntime32 {
             _ => Err(H::INVALID_PARAM),
         }
     }
+}
+
+pub(super) fn validate_initialization(
+    interface: InterfaceKind32,
+    instance: u32,
+    version: u32,
+) -> Result<(), H> {
+    if instance == 0 {
+        return Err(H::HANDLE);
+    }
+    let (minimum, maximum) = if interface.generation() == 8 {
+        (0x800, 0x800)
+    } else {
+        (0x300, 0x700)
+    };
+    if version < minimum {
+        return Err(H(0x8007_047e));
+    }
+    if version > maximum {
+        return Err(H(0x8007_000a));
+    }
+    Ok(())
 }

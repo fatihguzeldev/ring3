@@ -189,3 +189,9 @@ impl From<crate::memory::MemoryError> for H {
         Self::INVALID_PARAM
     }
 }
+
+impl DirectInputRuntime32 {
+    pub(in crate::process) fn guest_reservations(&self) -> [crate::memory::PageRange; 2] {
+        [self.config.objects, self.config.scratch]
+    }
+}

@@ -22,6 +22,27 @@ impl DirectInputRuntime32 {
         out: u32,
         parent: Option<GuestAddress>,
     ) -> Result<GuestAddress, H> {
+        self.publish_iid(
+            memory,
+            interface,
+            version,
+            kind,
+            out,
+            parent,
+            interface.iid(),
+        )
+    }
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn publish_iid(
+        &mut self,
+        memory: &mut AddressSpace,
+        interface: InterfaceKind32,
+        version: u32,
+        kind: ObjectKind32,
+        out: u32,
+        parent: Option<GuestAddress>,
+        requested: InterfaceId,
+    ) -> Result<GuestAddress, H> {
         output(memory, out, 4)?;
         let slot = self
             .records
@@ -49,7 +70,7 @@ impl DirectInputRuntime32 {
             slot as u64,
             &layouts[..count],
             GuestComCreation32 {
-                output: Some((GuestAddress(out), interface.iid())),
+                output: Some((GuestAddress(out), requested)),
                 retain,
                 ..Default::default()
             },
