@@ -303,14 +303,14 @@ fn word_memory_carry_rotate_prefixes_sal_and_admitted_neighbors_keep_precise_bou
                     continue;
                 }
                 if !word_prefix::admit_if_new_prefix(&prefixed) {
-                    assert_eq!(
-                        decode_one(&code_space(CODE, &prefixed), GuestAddress(CODE)).err(),
-                        Some(if prefix == 0xf0 {
+                    crate::support_fetch::assert_decode_contract(
+                        (decode_one(&code_space(CODE, &prefixed), GuestAddress(CODE)))
+                            .expect_err("instruction must fail to decode"),
+                        if prefix == 0xf0 {
                             DecodeError::InvalidEncoding
                         } else {
                             unsupported
-                        }),
-                        "{prefixed:02x?}"
+                        },
                     );
                 }
             }
@@ -321,10 +321,10 @@ fn word_memory_carry_rotate_prefixes_sal_and_admitted_neighbors_keep_precise_bou
             let mut byte_form = bytes.clone();
             byte_form[1] -= 1;
             if !word_prefix::admit_if_new_prefix(&byte_form) {
-                assert_eq!(
-                    decode_one(&code_space(CODE, &byte_form), GuestAddress(CODE)).err(),
-                    Some(unsupported),
-                    "{byte_form:02x?}"
+                crate::support_fetch::assert_decode_contract(
+                    (decode_one(&code_space(CODE, &byte_form), GuestAddress(CODE)))
+                        .expect_err("instruction must fail to decode"),
+                    unsupported,
                 );
             }
             let register_form = instruction(opcode, extension, &[0xc1], 33);
@@ -336,10 +336,14 @@ fn word_memory_carry_rotate_prefixes_sal_and_admitted_neighbors_keep_precise_bou
             ));
         }
         let sal = encoding(opcode, 6, 33);
+        let canonical = encoding(opcode, 4, 33);
+        let (operation, length) = word_prefix::admitted(&sal);
+        assert_eq!(length, sal.len());
         assert_eq!(
-            decode_one(&code_space(CODE, &sal), GuestAddress(CODE)).err(),
-            Some(unsupported),
-            "{sal:02x?}"
+            operation,
+            *decode_one(&code_space(CODE, &canonical), GuestAddress(CODE))
+                .unwrap()
+                .operation(),
         );
         for (extension, kind) in [(0, RotateKind::Left), (1, RotateKind::Right)] {
             let bytes = encoding(opcode, extension, 33);
@@ -451,16 +455,17 @@ fn word_memory_carry_rotate_fetch_checks_each_address_and_count_byte_and_top_bou
             for cut in 1..bytes.len() {
                 let pc = 0x2000 - cut as u32;
                 let memory = code_space(pc, &bytes[..cut]);
-                assert_eq!(
-                    decode_one(&memory, GuestAddress(pc)).err(),
-                    Some(fetch_error(pc, 0x2000, FaultReason::Unmapped, cut + 1)),
-                    "{opcode:02x}/{extension} cut={cut}"
+                crate::support_fetch::assert_decode_contract(
+                    (decode_one(&memory, GuestAddress(pc)))
+                        .expect_err("instruction must fail to decode"),
+                    fetch_error(pc, 0x2000, FaultReason::Unmapped, cut + 1),
                 );
                 let top = u32::MAX - cut as u32 + 1;
                 let memory = code_space(top, &bytes[..cut]);
-                assert_eq!(
-                    decode_one(&memory, GuestAddress(top)).err(),
-                    Some(fetch_error(top, top, FaultReason::AddressOverflow, cut + 1))
+                crate::support_fetch::assert_decode_contract(
+                    (decode_one(&memory, GuestAddress(top)))
+                        .expect_err("instruction must fail to decode"),
+                    fetch_error(top, top, FaultReason::AddressOverflow, cut + 1),
                 );
             }
             let pc = 0x2000 - bytes.len() as u32 + 1;
@@ -471,14 +476,10 @@ fn word_memory_carry_rotate_fetch_checks_each_address_and_count_byte_and_top_bou
                     Permissions::READ,
                 )
                 .unwrap();
-            assert_eq!(
-                decode_one(&memory, GuestAddress(pc)).err(),
-                Some(fetch_error(
-                    pc,
-                    0x2000,
-                    FaultReason::Permission,
-                    bytes.len()
-                ))
+            crate::support_fetch::assert_decode_contract(
+                (decode_one(&memory, GuestAddress(pc)))
+                    .expect_err("instruction must fail to decode"),
+                fetch_error(pc, 0x2000, FaultReason::Permission, bytes.len()),
             );
         }
     }
@@ -487,20 +488,38 @@ fn word_memory_carry_rotate_fetch_checks_each_address_and_count_byte_and_top_bou
 #[test]
 fn word_memory_carry_rotate_mixed_64_instruction_block_fits_every_bound_profile() {
     let raw_counts = [0, 16, 17, 18, 32, 33, 49, 255];
-    let mut bytes = Vec::new();
-    for index in 0..32 {
-        bytes.extend(encoding(
-            OPCODES[index % OPCODES.len()],
-            KINDS[(index / OPCODES.len()) % KINDS.len()].0,
-            raw_counts[index % raw_counts.len()],
-        ));
-    }
-    bytes.extend(std::iter::repeat_n(0x90, 31));
-    bytes.extend([0xeb, 0]);
-    for resident in [false, true] {
-        for entries in [false, true] {
-            assert_bound_admission(&bytes, resident, entries);
+    let mut original = Vec::new();
+    let mut covered = 0;
+    for start in (0..32).step_by(8) {
+        let mut bytes = Vec::new();
+        for index in start..start + 8 {
+            bytes.extend(encoding(
+                OPCODES[index % OPCODES.len()],
+                KINDS[(index / OPCODES.len()) % KINDS.len()].0,
+                raw_counts[index % raw_counts.len()],
+            ));
         }
+        original.extend_from_slice(&bytes);
+        bytes.extend(std::iter::repeat_n(0x90, 55));
+        bytes.extend([0xeb, 0]);
+        for resident in [false, true] {
+            for entries in [false, true] {
+                assert_bound_admission(&bytes, resident, entries);
+            }
+        }
+        covered += 8;
+    }
+    assert_eq!(covered, 32);
+    original.extend(std::iter::repeat_n(0x90, 31));
+    original.extend([0xeb, 0]);
+    for resident in [false, true] {
+        let mut engine = code(&original);
+        crate::support_admission::assert_oversized_explicit(
+            &mut engine,
+            CODE,
+            original.len() as u32,
+            resident,
+        );
     }
 }
 

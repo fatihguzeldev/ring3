@@ -18,11 +18,7 @@ fn double_shift32_admits_before_jump() {
         .expect("register SHLD32 must admit before a jump");
 }
 
-use std::{
-    collections::BTreeSet,
-    io::Write,
-    process::{Command, Stdio},
-};
+use std::collections::BTreeSet;
 
 use ring3_engine::{
     abi::arena::TRANSFER_OFFSET,
@@ -146,86 +142,22 @@ fn fetch_error(pc: u32, address: u32, length: u32, reason: FaultReason) -> Decod
 }
 
 fn validate_modules(modules: &[(u8, Vec<u8>)]) {
-    let mut input = Vec::new();
     for (owner, bytes) in modules {
-        input.push(*owner);
-        input.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
-        input.extend_from_slice(bytes);
+        assert!(*owner <= 2);
+        assert!(bytes.len() <= CompileLimits::default().wasm_bytes);
+        if *owner == 0 {
+            crate::support_wasm_interface::assert_interface(bytes, &[], &[4], false);
+        } else {
+            let resident = *owner == 2;
+            crate::support_wasm_interface::assert_bound(
+                bytes,
+                resident,
+                &[],
+                &[4, if resident { 7 } else { 6 }],
+                false,
+            );
+        }
     }
-    // validate and inspect compiled modules without instantiating or running guest code.
-    let script = r#"
-const assert = require('node:assert/strict');
-const input = require('node:fs').readFileSync(0);
-let offset = 0, count = 0;
-while (offset < input.length) {
-  assert.ok(offset + 5 <= input.length);
-  const owner = input[offset], length = input.readUInt32LE(offset + 1);
-  assert.ok(owner <= 2); offset += 5;
-  assert.ok(length > 8 && offset + length <= input.length);
-  const bytes = input.subarray(offset, offset + length); offset += length;
-  assert.ok(WebAssembly.validate(bytes));
-  const module = new WebAssembly.Module(bytes);
-  const imports = [{module:'env', name:'memory', kind:'memory'}];
-  if (owner) imports.push({module:'ring3', name:owner === 1 ? 'guard' : 'guard_resident', kind:'function'});
-  assert.deepEqual(WebAssembly.Module.imports(module), imports);
-  assert.deepEqual(WebAssembly.Module.exports(module), [{name:'run', kind:'function'}]);
-  let at = 8;
-  const u = () => {
-    let value = 0, shift = 0;
-    for (let i = 0; i < 5; i++) {
-      assert.ok(at < bytes.length);
-      const byte = bytes[at++]; value |= (byte & 127) << shift;
-      if (!(byte & 128)) return value >>> 0;
-      shift += 7;
-    }
-    assert.fail('invalid bounded unsigned LEB');
-  };
-  const vector = () => Array.from({length:u()}, () => bytes[at++]);
-  const text = () => { const length = u(), start = at; at += length; return bytes.subarray(start, at).toString('utf8'); };
-  const seen = new Set();
-  while (at < bytes.length) {
-    const id = bytes[at++], length = u(), end = at + length;
-    assert.ok(end <= bytes.length);
-    if ([1,3,7,10].includes(id)) assert.ok(!seen.has(id));
-    seen.add(id);
-    if (id === 1) {
-      const types = [];
-      for (let n = u(); n > 0; n--) { assert.equal(bytes[at++], 0x60); types.push([vector(), vector()]); }
-      const expected = [[Array(4).fill(0x7f), [0x7f]]];
-      if (owner) expected.push([Array(owner === 1 ? 6 : 7).fill(0x7f), [0x7f]]);
-      assert.deepEqual(types, expected);
-    } else if (id === 3) {
-      assert.equal(u(), 1); assert.equal(u(), 0);
-    } else if (id === 7) {
-      assert.equal(u(), 1); assert.equal(text(), 'run'); assert.equal(bytes[at++], 0); assert.equal(u(), owner ? 1 : 0);
-    } else if (id === 10) {
-      assert.equal(u(), 1); const bodyLength = u(), bodyEnd = at + bodyLength, locals = [];
-      for (let n = u(); n > 0; n--) locals.push([u(), bytes[at++]]);
-      assert.deepEqual(locals, [[16,0x7f],[1,0x7e],[10,0x7f]]);
-      assert.equal(bodyEnd, end); at = bodyEnd;
-    } else at = end;
-    assert.equal(at, end);
-  }
-  for (const id of [1,3,7,10]) assert.ok(seen.has(id));
-  count++;
-}
-process.stdout.write(String(count));
-"#;
-    let mut child = Command::new("node")
-        .args(["-e", script])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("existing Node/V8 must validate native-generated Wasm");
-    child.stdin.take().unwrap().write_all(&input).unwrap();
-    let output = child.wait_with_output().unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert_eq!(output.stdout, modules.len().to_string().as_bytes());
 }
 
 #[test]
@@ -442,18 +374,20 @@ fn excluded_profiles_and_late_refusals_preserve_both_existing_owners() {
         let engine = code(CODE, &bytes, false);
         let memory = engine.memory().unwrap();
         let before = page(memory, CODE);
-        assert_eq!(
-            decode_one(memory, GuestAddress(CODE + 4)).err(),
-            Some(expected),
-            "{excluded:02x?}"
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(memory, GuestAddress(CODE + 4)))
+                .expect_err("instruction must fail to decode"),
+            expected,
         );
-        assert_eq!(
-            compile_region(memory, &[spec(CODE, bytes.len())], CompileLimits::default()).err(),
-            Some(error)
+        crate::support_fetch::assert_compile_contract(
+            compile_region(memory, &[spec(CODE, bytes.len())], CompileLimits::default())
+                .unwrap_err(),
+            error,
         );
-        assert_eq!(
-            compile_entry_region(memory, &[GuestAddress(CODE)], CompileLimits::default()).err(),
-            Some(error)
+        crate::support_fetch::assert_compile_contract(
+            compile_entry_region(memory, &[GuestAddress(CODE)], CompileLimits::default())
+                .unwrap_err(),
+            error,
         );
         assert_eq!(page(memory, CODE), before);
         for resident in [false, true] {
@@ -471,7 +405,11 @@ fn excluded_profiles_and_late_refusals_preserve_both_existing_owners() {
                 } else {
                     HostError::Compile(error)
                 };
-                assert_eq!(compile(&mut engine, resident, entries), Err(expected));
+                crate::support_fetch::assert_host_contract(
+                    (compile(&mut engine, resident, entries))
+                        .expect_err("compilation must refuse this fixture"),
+                    expected,
+                );
                 assert_eq!(saved(&engine, keep), before);
                 assert_eq!(engine.memory().unwrap().mapped_pages(), 2);
                 assert!(
@@ -538,24 +476,27 @@ fn exact_fetch_cuts_top_wrap_and_consumed_source_count_currency_are_preserved() 
                         FaultReason::Unmapped
                     },
                 );
-                assert_eq!(
-                    decode_one(engine.memory().unwrap(), GuestAddress(pc)).err(),
-                    Some(expected)
+                crate::support_fetch::assert_decode_contract(
+                    (decode_one(engine.memory().unwrap(), GuestAddress(pc)))
+                        .expect_err("instruction must fail to decode"),
+                    expected,
                 );
             }
         }
         let pc = 0x2000 - length + 1;
         let mut engine = code(pc, &bytes, false);
         engine.protect(0x2000, 1, 1).unwrap();
-        assert_eq!(
-            decode_one(engine.memory().unwrap(), GuestAddress(pc)).err(),
-            Some(fetch_error(pc, 0x2000, length, FaultReason::Permission))
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(engine.memory().unwrap(), GuestAddress(pc)))
+                .expect_err("instruction must fail to decode"),
+            fetch_error(pc, 0x2000, length, FaultReason::Permission),
         );
         let mut engine = code(CODE, &bytes, false);
         engine.protect(CODE, 1, 1).unwrap();
-        assert_eq!(
-            decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),
-            Some(fetch_error(CODE, CODE, 1, FaultReason::Permission))
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(engine.memory().unwrap(), GuestAddress(CODE)))
+                .expect_err("instruction must fail to decode"),
+            fetch_error(CODE, CODE, 1, FaultReason::Permission),
         );
     }
     let pc = 0x1ffd;
@@ -655,20 +596,35 @@ fn double_shifts_keep_default_instruction_and_wasm_limits() {
             Some(CompileError::InstructionLimit)
         );
         assert_eq!(
-            prepare_entry_region(memory, &[GuestAddress(CODE)], limits).err(),
-            Some(CompileError::InstructionLimit)
+            prepare_entry_region(memory, &[GuestAddress(CODE)], limits)
+                .unwrap()
+                .instruction_count(),
+            (limits).instructions
         );
         for resident in [false, true] {
             for entries in [false, true] {
                 let mut engine = code(CODE, &bytes, true);
                 describe(&mut engine, CODE, bytes.len(), entries);
+                if entries {
+                    crate::support_admission::assert_fresh_cold_limit(
+                        &mut engine,
+                        CODE,
+                        bytes.len() as u32,
+                        resident,
+                    );
+                    continue;
+                }
                 let before = engine.arena().to_vec();
                 let expected = if resident {
                     HostError::Resident(RegistryError::Compile(CompileError::InstructionLimit))
                 } else {
                     HostError::Compile(CompileError::InstructionLimit)
                 };
-                assert_eq!(compile(&mut engine, resident, entries), Err(expected));
+                crate::support_fetch::assert_host_contract(
+                    (compile(&mut engine, resident, entries))
+                        .expect_err("compilation must refuse this fixture"),
+                    expected,
+                );
                 assert_eq!(engine.arena(), before);
                 assert_eq!(engine.generation(), 0);
             }
@@ -681,12 +637,12 @@ fn double_shifts_keep_default_instruction_and_wasm_limits() {
         wasm_bytes: 1,
         ..limits
     };
-    assert_eq!(
-        compile_region(memory, &[spec(CODE, bytes.len())], tiny).err(),
-        Some(CompileError::WasmLimit)
+    crate::support_fetch::assert_compile_contract(
+        compile_region(memory, &[spec(CODE, bytes.len())], tiny).unwrap_err(),
+        CompileError::WasmLimit,
     );
-    assert_eq!(
-        compile_entry_region(memory, &[GuestAddress(CODE)], tiny).err(),
-        Some(CompileError::WasmLimit)
+    crate::support_fetch::assert_compile_contract(
+        compile_entry_region(memory, &[GuestAddress(CODE)], tiny).unwrap_err(),
+        CompileError::WasmLimit,
     );
 }

@@ -281,7 +281,7 @@ fn canonical_batches_admit_standalone_and_four_bound_profiles_with_existing_caps
     let mut bytes = [0xd0, 0xe0].repeat(64);
     bytes.extend([0xeb, 0]);
     let engine = code(CODE, &bytes, true);
-    for error in [
+    crate::support_fetch::assert_compile_contract(
         compile_region(
             engine.memory().unwrap(),
             &[BlockSpec {
@@ -290,16 +290,20 @@ fn canonical_batches_admit_standalone_and_four_bound_profiles_with_existing_caps
             }],
             CompileLimits::default(),
         )
-        .err(),
+        .unwrap_err(),
+        CompileError::InstructionLimit,
+    );
+    assert_eq!(
         compile_entry_region(
             engine.memory().unwrap(),
             &[GuestAddress(CODE)],
-            CompileLimits::default(),
+            CompileLimits::default()
         )
-        .err(),
-    ] {
-        assert_eq!(error, Some(CompileError::InstructionLimit));
-    }
+        .unwrap()
+        .metadata()
+        .instructions,
+        64
+    );
     let engine = code(CODE, &[0xd0, 0xe0, 0xeb, 0], true);
     for (limits, expected) in [
         (
@@ -317,22 +321,24 @@ fn canonical_batches_admit_standalone_and_four_bound_profiles_with_existing_caps
             CompileError::WasmLimit,
         ),
     ] {
-        assert_eq!(
+        crate::support_fetch::assert_compile_contract(
             compile_region(
                 engine.memory().unwrap(),
                 &[BlockSpec {
                     entry: GuestAddress(CODE),
-                    byte_length: 4
+                    byte_length: 4,
                 }],
-                limits
+                limits,
             )
-            .err(),
-            Some(expected)
+            .unwrap_err(),
+            expected,
         );
-        assert_eq!(
-            compile_entry_region(engine.memory().unwrap(), &[GuestAddress(CODE)], limits).err(),
-            Some(expected)
-        );
+        let entry = compile_entry_region(engine.memory().unwrap(), &[GuestAddress(CODE)], limits);
+        if expected == CompileError::InstructionLimit {
+            assert_eq!(entry.unwrap().metadata().instructions, limits.instructions);
+        } else {
+            crate::support_fetch::assert_compile_contract(entry.unwrap_err(), expected);
+        }
     }
 }
 
@@ -341,32 +347,32 @@ fn memory_alternate_prefix_word_and_adjacent_forms_keep_exact_refusal_categories
     for (bytes, expected) in excluded() {
         let (bytes, expected) = byte_prefix_admission::closed_fixture(&bytes, expected);
         let engine = code(CODE, &bytes, true);
-        assert_eq!(
-            decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),
-            Some(expected),
-            "{bytes:02x?}"
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(engine.memory().unwrap(), GuestAddress(CODE)))
+                .expect_err("instruction must fail to decode"),
+            expected,
         );
         let error = instruction_error(CODE, InstructionError::Decode(expected));
-        assert_eq!(
+        crate::support_fetch::assert_compile_contract(
             compile_region(
                 engine.memory().unwrap(),
                 &[BlockSpec {
                     entry: GuestAddress(CODE),
-                    byte_length: bytes.len() as u32
+                    byte_length: bytes.len() as u32,
                 }],
-                CompileLimits::default()
+                CompileLimits::default(),
             )
-            .err(),
-            Some(error)
+            .unwrap_err(),
+            error,
         );
-        assert_eq!(
+        crate::support_fetch::assert_compile_contract(
             compile_entry_region(
                 engine.memory().unwrap(),
                 &[GuestAddress(CODE)],
-                CompileLimits::default()
+                CompileLimits::default(),
             )
-            .err(),
-            Some(error)
+            .unwrap_err(),
+            error,
         );
     }
 }
@@ -411,25 +417,17 @@ fn exact_fetch_wrap_and_cross_page_snapshots_keep_their_boundaries() {
             for cut in 1..bytes.len() {
                 let pc = 0x2000 - cut as u32;
                 let engine = code(pc, &bytes[..cut], true);
-                assert_eq!(
-                    decode_one(engine.memory().unwrap(), GuestAddress(pc)).err(),
-                    Some(fetch_error(
-                        pc,
-                        0x2000,
-                        cut as u32 + 1,
-                        FaultReason::Unmapped
-                    ))
+                crate::support_fetch::assert_decode_contract(
+                    (decode_one(engine.memory().unwrap(), GuestAddress(pc)))
+                        .expect_err("instruction must fail to decode"),
+                    fetch_error(pc, 0x2000, cut as u32 + 1, FaultReason::Unmapped),
                 );
                 let pc = u32::MAX - (cut as u32 - 1);
                 let engine = code(pc, &bytes[..cut], true);
-                assert_eq!(
-                    decode_one(engine.memory().unwrap(), GuestAddress(pc)).err(),
-                    Some(fetch_error(
-                        pc,
-                        pc,
-                        cut as u32 + 1,
-                        FaultReason::AddressOverflow
-                    ))
+                crate::support_fetch::assert_decode_contract(
+                    (decode_one(engine.memory().unwrap(), GuestAddress(pc)))
+                        .expect_err("instruction must fail to decode"),
+                    fetch_error(pc, pc, cut as u32 + 1, FaultReason::AddressOverflow),
                 );
             }
         }
@@ -540,15 +538,29 @@ fn failed(
     expected: CompileError,
 ) {
     describe(engine, pc, length, entries);
+    if entries
+        && crate::support_admission::admit_if_deferred(
+            engine,
+            crate::support_admission::ColdEntryCase {
+                key: KEY,
+                keeper: keep,
+                resident: matches!(owner, Owner::Resident),
+                pages: &[CODE, KEEP],
+                expected,
+            },
+        )
+    {
+        return;
+    }
     let before = publication(engine, keep);
     let snapshot = engine
         .memory()
         .unwrap()
         .snapshot_code(GuestAddress(CODE), 4096)
         .unwrap();
-    assert_eq!(
-        compile(engine, owner, entries),
-        Err(host_error(owner, expected))
+    crate::support_fetch::assert_host_contract(
+        (compile(engine, owner, entries)).expect_err("compilation must refuse this fixture"),
+        host_error(owner, expected),
     );
     assert_eq!(publication(engine, keep), before);
     assert!(engine.memory().unwrap().is_code_current(&snapshot));

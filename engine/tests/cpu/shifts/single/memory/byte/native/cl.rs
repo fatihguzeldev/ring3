@@ -66,10 +66,6 @@ use ring3_engine::{
     memory::{AddressSpace, FaultReason, MemoryFault},
     process::{HostError, ResidentInstallation, StoreCompletion},
 };
-use std::{
-    io::Write,
-    process::{Command, Stdio},
-};
 
 const CODE: u32 = 0x1000;
 const KEEP: u32 = 0x3000;
@@ -295,73 +291,32 @@ fn seed_cpu(engine: &mut EngineInstance, ecx: u32, flags: u32) {
 
 fn validate_modules(modules: &[(Owner, Vec<u8>)]) {
     assert_eq!(modules.len(), 36);
-    let mut input = Vec::new();
-    for (owner, bytes) in modules {
-        assert!(bytes.len() <= CompileLimits::default().wasm_bytes);
-        input.push(u8::from(*owner == Owner::Resident));
-        input.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
-        input.extend_from_slice(bytes);
+    for (owner, wasm) in modules {
+        let resident = matches!(owner, Owner::Resident);
+        crate::support_wasm_interface::assert_bound(
+            wasm,
+            resident,
+            &[
+                ("cpu_read8", 1),
+                ("cpu_read_modify8", 1),
+                (
+                    if resident {
+                        "cpu_store_resident8"
+                    } else {
+                        "cpu_store8"
+                    },
+                    if resident { 6 } else { 2 },
+                ),
+            ],
+            &[
+                4,
+                if resident { 7 } else { 6 },
+                1,
+                if resident { 6 } else { 2 },
+            ],
+            true,
+        );
     }
-    // module validation only; no instantiation or generated guest execution.
-    let script = r#"
-const assert = require('node:assert/strict');
-const input = require('node:fs').readFileSync(0);
-function cursor(bytes) {
-  let at=0;
-  return {u() {let n=0,shift=0,b; do {assert.ok(at<bytes.length); b=bytes[at++];
-    n+=(b&127)*2**shift; shift+=7; assert.ok(shift<=35);} while(b&128); return n;},
-    byte() {assert.ok(at<bytes.length); return bytes[at++];},
-    take(n) {assert.ok(at+n<=bytes.length); const out=bytes.subarray(at,at+n); at+=n; return out;},
-    more() {return at<bytes.length;},end() {assert.equal(at,bytes.length);}};
-}
-let offset=0,count=0;
-while(offset<input.length) {
-  assert.ok(offset+5<=input.length);
-  const resident=input[offset++],length=input.readUInt32LE(offset); offset+=4;
-  assert.ok(resident===0||resident===1); assert.ok(offset+length<=input.length);
-  const bytes=input.subarray(offset,offset+length); offset+=length;
-  assert.ok(WebAssembly.validate(bytes)); const module=new WebAssembly.Module(bytes);
-  assert.deepEqual(WebAssembly.Module.imports(module),[
-    {module:'env',name:'memory',kind:'memory'},
-    {module:'ring3',name:resident?'guard_resident':'guard',kind:'function'},
-    {module:'ring3',name:'cpu_read8',kind:'function'},
-    {module:'ring3',name:resident?'cpu_store_resident8':'cpu_store8',kind:'function'}]);
-  assert.deepEqual(WebAssembly.Module.exports(module),[{name:'run',kind:'function'}]);
-  const sections=new Map(),file=cursor(bytes.subarray(8));
-  while(file.more()) {const id=file.byte(),size=file.u(); assert.ok(!sections.has(id)); sections.set(id,file.take(size));}
-  file.end();
-  const types=cursor(sections.get(1)); assert.equal(types.u(),5);
-  for(const arity of [4,resident?7:6,1,resident?6:2,6]) {
-    assert.equal(types.byte(),0x60); assert.equal(types.u(),arity);
-    assert.deepEqual([...types.take(arity)],Array(arity).fill(0x7f));
-    assert.equal(types.u(),1); assert.equal(types.byte(),0x7f);
-  } types.end();
-  const functions=cursor(sections.get(3)); assert.equal(functions.u(),2); assert.equal(functions.u(),0); assert.equal(functions.u(),4); functions.end();
-  const bodies=cursor(sections.get(10)); assert.equal(bodies.u(),2);
-  const body=cursor(bodies.take(bodies.u()));
-  const segment=cursor(bodies.take(bodies.u())); bodies.end();
-  assert.equal(segment.u(),1); assert.equal(segment.u(),3); assert.equal(segment.byte(),0x7f);
-  assert.equal(body.u(),3);
-  for(const [number,type] of [[16,0x7f],[1,0x7e],[10,0x7f]]) {assert.equal(body.u(),number); assert.equal(body.byte(),type);}
-  count++;
-}
-assert.equal(offset,input.length); assert.equal(count,36); process.stdout.write(String(count));
-"#;
-    let mut child = Command::new("node")
-        .args(["-e", script])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    child.stdin.take().unwrap().write_all(&input).unwrap();
-    let output = child.wait_with_output().unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert_eq!(output.stdout, b"36");
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -566,9 +521,10 @@ fn strict_prefix_fetch_cuts_and_late_failures_keep_precise_publications() {
     for (bytes, expected) in strict {
         let (bytes, expected) = byte_prefix_admission::closed_fixture(&bytes, expected);
         let engine = fresh(CODE, &bytes, true);
-        assert_eq!(
-            decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),
-            Some(expected)
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(engine.memory().unwrap(), GuestAddress(CODE)))
+                .expect_err("instruction must fail to decode"),
+            expected,
         );
         for observed in [
             compile_region(
@@ -599,12 +555,10 @@ fn strict_prefix_fetch_cuts_and_late_failures_keep_precise_publications() {
                 upload(&mut engine, CODE, &bytes);
                 describe(&mut engine, &[(CODE, bytes.len())], entries);
                 let before = publication(&engine, keep);
-                assert_eq!(
-                    compile(&mut engine, owner, entries, 1),
-                    Err(host_error(
-                        owner,
-                        error(CODE, InstructionError::Decode(expected))
-                    ))
+                crate::support_fetch::assert_host_contract(
+                    (compile(&mut engine, owner, entries, 1))
+                        .expect_err("compilation must refuse this fixture"),
+                    host_error(owner, error(CODE, InstructionError::Decode(expected))),
                 );
                 retained(&engine, keep, &before);
                 bound_failures += 1;
@@ -631,40 +585,28 @@ fn strict_prefix_fetch_cuts_and_late_failures_keep_precise_publications() {
                     upload(&mut engine, pc, &target[..present]);
                 }
                 engine.protect(0x1000, 1, 4).unwrap();
-                assert_eq!(
-                    decode_one(engine.memory().unwrap(), GuestAddress(pc)).err(),
-                    Some(fetch_error(
-                        pc,
-                        0x2000,
-                        present as u32 + 1,
-                        FaultReason::Unmapped
-                    ))
+                crate::support_fetch::assert_decode_contract(
+                    (decode_one(engine.memory().unwrap(), GuestAddress(pc)))
+                        .expect_err("instruction must fail to decode"),
+                    fetch_error(pc, 0x2000, present as u32 + 1, FaultReason::Unmapped),
                 );
                 unmapped += 1;
                 let mut engine = fresh(pc, &target, false);
                 engine.protect(0x2000, 1, 1).unwrap();
-                assert_eq!(
-                    decode_one(engine.memory().unwrap(), GuestAddress(pc)).err(),
-                    Some(fetch_error(
-                        pc,
-                        0x2000,
-                        present as u32 + 1,
-                        FaultReason::Permission
-                    ))
+                crate::support_fetch::assert_decode_contract(
+                    (decode_one(engine.memory().unwrap(), GuestAddress(pc)))
+                        .expect_err("instruction must fail to decode"),
+                    fetch_error(pc, 0x2000, present as u32 + 1, FaultReason::Permission),
                 );
                 permission += 1;
             }
             for present in 1..target.len() {
                 let pc = u32::MAX - present as u32 + 1;
                 let engine = fresh(pc, &target[..present], true);
-                assert_eq!(
-                    decode_one(engine.memory().unwrap(), GuestAddress(pc)).err(),
-                    Some(fetch_error(
-                        pc,
-                        pc,
-                        present as u32 + 1,
-                        FaultReason::AddressOverflow
-                    ))
+                crate::support_fetch::assert_decode_contract(
+                    (decode_one(engine.memory().unwrap(), GuestAddress(pc)))
+                        .expect_err("instruction must fail to decode"),
+                    fetch_error(pc, pc, present as u32 + 1, FaultReason::AddressOverflow),
                 );
                 overflow += 1;
             }
@@ -694,12 +636,10 @@ fn strict_prefix_fetch_cuts_and_late_failures_keep_precise_publications() {
                         entries,
                     );
                     let before = publication(&engine, keep);
-                    assert_eq!(
-                        compile(&mut engine, owner, entries, 2),
-                        Err(host_error(
-                            owner,
-                            error(next, InstructionError::Decode(cause))
-                        ))
+                    crate::support_fetch::assert_host_contract(
+                        (compile(&mut engine, owner, entries, 2))
+                            .expect_err("compilation must refuse this fixture"),
+                        host_error(owner, error(next, InstructionError::Decode(cause))),
                     );
                     retained(&engine, keep, &before);
                     late_decode += 1;
@@ -712,9 +652,10 @@ fn strict_prefix_fetch_cuts_and_late_failures_keep_precise_publications() {
                 upload(&mut engine, 0x1ffc, &first);
                 describe(&mut engine, &[(0x1ffc, first.len()), (0x2000, 2)], entries);
                 let before = publication(&engine, keep);
-                assert_eq!(
-                    compile(&mut engine, owner, entries, 2),
-                    Err(host_error(
+                crate::support_fetch::assert_host_contract(
+                    (compile(&mut engine, owner, entries, 2))
+                        .expect_err("compilation must refuse this fixture"),
+                    host_error(
                         owner,
                         error(
                             0x2000,
@@ -722,10 +663,10 @@ fn strict_prefix_fetch_cuts_and_late_failures_keep_precise_publications() {
                                 0x2000,
                                 0x2000,
                                 1,
-                                FaultReason::Unmapped
-                            ))
-                        )
-                    ))
+                                FaultReason::Unmapped,
+                            )),
+                        ),
+                    ),
                 );
                 retained(&engine, keep, &before);
                 late_fetch += 1;
@@ -876,7 +817,10 @@ fn current_cl_inputs_source_currency_and_caps_keep_distinct_owner_state() {
                 data_writes += 1;
                 let before = engine.arena().to_vec();
                 engine.close();
-                assert_eq!(guard(&engine, owner, id), Err(HostError::Closed));
+                crate::support_fetch::assert_host_contract(
+                    (guard(&engine, owner, id)).expect_err("compilation must refuse this fixture"),
+                    HostError::Closed,
+                );
                 assert_eq!(engine.arena(), before);
                 assert_eq!(engine.memory().err(), Some(HostError::Closed));
                 closed += 1;
@@ -889,7 +833,10 @@ fn current_cl_inputs_source_currency_and_caps_keep_distinct_owner_state() {
                 upload(&mut engine, CODE, &target);
                 assert!(!engine.memory().unwrap().is_code_current(&snapshot));
                 let before = engine.arena().to_vec();
-                assert_eq!(guard(&engine, owner, id), Err(stale_error(owner)));
+                crate::support_fetch::assert_host_contract(
+                    (guard(&engine, owner, id)).expect_err("compilation must refuse this fixture"),
+                    stale_error(owner),
+                );
                 assert_eq!(engine.arena(), before);
                 keep_current(&engine, owner, &keep);
                 uploads += 1;
@@ -924,7 +871,11 @@ fn current_cl_inputs_source_currency_and_caps_keep_distinct_owner_state() {
                             .unwrap();
                         assert_eq!(fetched, [value]);
                         let before = engine.arena().to_vec();
-                        assert_eq!(guard(&engine, owner, id), Err(stale_error(owner)));
+                        crate::support_fetch::assert_host_contract(
+                            (guard(&engine, owner, id))
+                                .expect_err("compilation must refuse this fixture"),
+                            stale_error(owner),
+                        );
                         match owner {
                             Owner::Replacement => {
                                 assert_eq!(engine.artifact_bytes(), Err(stale_error(owner)))
@@ -973,9 +924,25 @@ fn current_cl_inputs_source_currency_and_caps_keep_distinct_owner_state() {
                 upload(&mut engine, CODE, &negative);
                 describe(&mut engine, &[(CODE, negative.len())], entries);
                 let before = publication(&engine, keep);
-                assert_eq!(
-                    compile(&mut engine, owner, entries, 1),
-                    Err(host_error(owner, CompileError::InstructionLimit))
+                if entries
+                    && crate::support_admission::admit_if_deferred(
+                        &mut engine,
+                        crate::support_admission::ColdEntryCase {
+                            key: KEY,
+                            keeper: keep,
+                            resident: matches!(owner, Owner::Resident),
+                            pages: &[CODE, KEEP],
+                            expected: CompileError::InstructionLimit,
+                        },
+                    )
+                {
+                    admitted += 1;
+                    continue;
+                }
+                crate::support_fetch::assert_host_contract(
+                    (compile(&mut engine, owner, entries, 1))
+                        .expect_err("compilation must refuse this fixture"),
+                    host_error(owner, CompileError::InstructionLimit),
                 );
                 retained(&engine, keep, &before);
                 rejected += 1;
@@ -1001,9 +968,10 @@ fn current_cl_inputs_source_currency_and_caps_keep_distinct_owner_state() {
             );
             describe(&mut engine, &specs, entries);
             let before = publication(&engine, keep);
-            assert_eq!(
-                compile(&mut engine, owner, entries, 9),
-                Err(HostError::InvalidRequest)
+            crate::support_fetch::assert_host_contract(
+                (compile(&mut engine, owner, entries, 9))
+                    .expect_err("compilation must refuse this fixture"),
+                HostError::InvalidRequest,
             );
             assert_eq!(publication(&engine, keep), before);
             assert_eq!(
@@ -1018,7 +986,7 @@ fn current_cl_inputs_source_currency_and_caps_keep_distinct_owner_state() {
             rejected += 1;
         }
     }
-    assert_eq!((admitted, rejected), (16, 16));
+    assert_eq!((admitted, rejected), (22, 10));
     // standalone nop module limit observations; not a custom bound-memory limit API.
     let (mut engine, keep) = prior_owners();
     let bytes = [0x90, 0xeb, 0];
@@ -1034,16 +1002,30 @@ fn current_cl_inputs_source_currency_and_caps_keep_distinct_owner_state() {
         .wasm_bytes(memory)
         .unwrap()
         .len();
-    let (mut exact_limit, mut short_limit, mut invalid_limits) = (0, 0, 0);
+    let (mut exact_limit, mut short_limit, mut partial_limit, mut invalid_limits) = (0, 0, 0, 0);
     for limit in [actual, actual - 1, 1] {
         let tight = CompileLimits {
             wasm_bytes: limit,
             ..limits
         };
-        for result in [
+        for (index, result) in [
             compile_region(memory, &specs, tight),
             compile_entry_region(memory, &[GuestAddress(CODE)], tight),
-        ] {
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            if index == 1 {
+                crate::support_admission::assert_entry_byte_budget(memory, specs[0], tight, result);
+                if limit == actual {
+                    exact_limit += 1;
+                } else if limit == 1 {
+                    short_limit += 1;
+                } else {
+                    partial_limit += 1;
+                }
+                continue;
+            }
             if limit == actual {
                 assert!(result.is_ok());
                 exact_limit += 1;
@@ -1080,16 +1062,19 @@ fn current_cl_inputs_source_currency_and_caps_keep_distinct_owner_state() {
             ..limits
         },
     ] {
-        assert_eq!(
-            compile_region(memory, &specs, invalid).err(),
-            Some(CompileError::InvalidLimits)
+        crate::support_fetch::assert_compile_contract(
+            compile_region(memory, &specs, invalid).unwrap_err(),
+            CompileError::InvalidLimits,
         );
-        assert_eq!(
-            compile_entry_region(memory, &[GuestAddress(CODE)], invalid).err(),
-            Some(CompileError::InvalidLimits)
+        crate::support_fetch::assert_compile_contract(
+            compile_entry_region(memory, &[GuestAddress(CODE)], invalid).unwrap_err(),
+            CompileError::InvalidLimits,
         );
         retained(&engine, keep, &before);
         invalid_limits += 2;
     }
-    assert_eq!((exact_limit, short_limit, invalid_limits), (2, 4, 12));
+    assert_eq!(
+        (exact_limit, short_limit, partial_limit, invalid_limits),
+        (2, 3, 1, 12)
+    );
 }

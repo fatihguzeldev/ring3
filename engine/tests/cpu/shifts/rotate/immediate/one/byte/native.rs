@@ -206,13 +206,12 @@ fn rejected(bytes: &[u8], expected: DecodeError) {
     let bytes = fixture.as_slice();
     let engine = code(CODE, bytes);
     let memory = engine.memory().unwrap();
-    assert_eq!(
-        decode_one(memory, GuestAddress(CODE)).err(),
-        Some(expected),
-        "{bytes:02x?}"
+    crate::support_fetch::assert_decode_contract(
+        (decode_one(memory, GuestAddress(CODE))).expect_err("instruction must fail to decode"),
+        expected,
     );
     let error = instruction_error(CODE, expected);
-    assert_eq!(
+    crate::support_fetch::assert_compile_contract(
         compile_region(
             memory,
             &[BlockSpec {
@@ -221,14 +220,12 @@ fn rejected(bytes: &[u8], expected: DecodeError) {
             }],
             CompileLimits::default(),
         )
-        .err(),
-        Some(error),
-        "{bytes:02x?}"
+        .unwrap_err(),
+        error,
     );
-    assert_eq!(
-        compile_entry_region(memory, &[GuestAddress(CODE)], CompileLimits::default()).err(),
-        Some(error),
-        "{bytes:02x?}"
+    crate::support_fetch::assert_compile_contract(
+        compile_entry_region(memory, &[GuestAddress(CODE)], CompileLimits::default()).unwrap_err(),
+        error,
     );
 }
 
@@ -269,18 +266,19 @@ fn assert_instruction(memory: &AddressSpace, pc: u32, length: usize, operation: 
 
 fn bound_bank(bytes: &[u8], starts: &[u32]) -> usize {
     assert!(starts.len() <= CompileLimits::default().instructions);
+    let base = starts[0];
     let mut profiles = 0;
     for resident in [false, true] {
         for entries in [false, true] {
-            let mut engine = code(CODE, bytes);
-            engine.protect(CODE, 1, 4).unwrap();
-            describe(&mut engine, CODE, bytes.len() as u32, entries);
+            let mut engine = code(base, bytes);
+            engine.protect(base & !0xfff, 1, 4).unwrap();
+            describe(&mut engine, base, bytes.len() as u32, entries);
             let before = engine.arena().to_vec();
             let pointer = engine.arena_address();
             let snapshot = engine
                 .memory()
                 .unwrap()
-                .snapshot_code(GuestAddress(CODE), bytes.len())
+                .snapshot_code(GuestAddress(base), bytes.len())
                 .unwrap();
             let id = compile(&mut engine, resident, entries).unwrap();
             if resident {
@@ -293,12 +291,12 @@ fn bound_bank(bytes: &[u8], starts: &[u32]) -> usize {
                     let end = starts
                         .get(index + 1)
                         .copied()
-                        .unwrap_or(CODE + bytes.len() as u32);
+                        .unwrap_or(base + bytes.len() as u32);
                     for interior in pc + 1..end {
                         assert!(engine.lookup_resident(interior).is_err());
                     }
                 }
-                assert!(engine.lookup_resident(CODE + bytes.len() as u32).is_err());
+                assert!(engine.lookup_resident(base + bytes.len() as u32).is_err());
             } else {
                 engine.guard(KEY, id as u32).unwrap();
                 let module = engine.artifact_bytes().unwrap();
@@ -414,7 +412,8 @@ fn all_memory_byte_immediates_and_addresses_have_exact_ir_in_bound_profiles() {
                 assert_instruction(engine.memory().unwrap(), pc, length, operation);
                 forms += 1;
             }
-            profiles += bound_bank(&bytes, &starts);
+            profiles +=
+                crate::support_admission::admit_dense_bank(&bytes, &starts, KEY, bound_bank);
         }
     }
     let unsupported = CompileError::Instruction {
@@ -443,7 +442,7 @@ fn all_memory_byte_immediates_and_addresses_have_exact_ir_in_bound_profiles() {
             refusals += 1;
         }
     }
-    assert_eq!((forms, profiles, refusals), (224, 32, 4));
+    assert_eq!((forms, profiles, refusals), (224, 128, 4));
 }
 
 #[test]
@@ -704,27 +703,31 @@ fn final_byte_immediate_fetch_and_count_snapshots_preserve_page_and_wrap_boundar
                         FaultReason::Unmapped
                     },
                 );
-                assert_eq!(decode_one(memory, GuestAddress(pc)).err(), Some(error));
-                assert_eq!(
+                crate::support_fetch::assert_decode_contract(
+                    (decode_one(memory, GuestAddress(pc)))
+                        .expect_err("instruction must fail to decode"),
+                    error,
+                );
+                crate::support_fetch::assert_compile_contract(
                     compile_region(
                         memory,
                         &[BlockSpec {
                             entry: GuestAddress(pc),
-                            byte_length: bytes.len() as u32
+                            byte_length: bytes.len() as u32,
                         }],
-                        CompileLimits::default()
+                        CompileLimits::default(),
                     )
-                    .err(),
-                    Some(if top {
+                    .unwrap_err(),
+                    if top {
                         CompileError::InvalidBlocks
                     } else {
                         instruction_error(pc, error)
-                    })
+                    },
                 );
-                assert_eq!(
+                crate::support_fetch::assert_compile_contract(
                     compile_entry_region(memory, &[GuestAddress(pc)], CompileLimits::default())
-                        .err(),
-                    Some(instruction_error(pc, error))
+                        .unwrap_err(),
+                    instruction_error(pc, error),
                 );
                 truncated += 1;
             }
@@ -733,7 +736,11 @@ fn final_byte_immediate_fetch_and_count_snapshots_preserve_page_and_wrap_boundar
             engine.protect(0x2000, 1, 3).unwrap();
             let memory = engine.memory().unwrap();
             let error = fetch_error(pc, 0x2000, bytes.len() as u32, FaultReason::Permission);
-            assert_eq!(decode_one(memory, GuestAddress(pc)).err(), Some(error));
+            crate::support_fetch::assert_decode_contract(
+                (decode_one(memory, GuestAddress(pc)))
+                    .expect_err("instruction must fail to decode"),
+                error,
+            );
             for result in [
                 compile_region(
                     memory,
@@ -745,7 +752,10 @@ fn final_byte_immediate_fetch_and_count_snapshots_preserve_page_and_wrap_boundar
                 ),
                 compile_entry_region(memory, &[GuestAddress(pc)], CompileLimits::default()),
             ] {
-                assert_eq!(result.err(), Some(instruction_error(pc, error)));
+                crate::support_fetch::assert_compile_contract(
+                    result.unwrap_err(),
+                    instruction_error(pc, error),
+                );
             }
             permissions += 1;
         }
@@ -961,7 +971,11 @@ fn late_byte_immediate_failures_preserve_both_publications_and_installation() {
                     } else {
                         HostError::Compile(expected)
                     };
-                    assert_eq!(compile(&mut engine, resident, entries), Err(expected));
+                    crate::support_fetch::assert_host_contract(
+                        (compile(&mut engine, resident, entries))
+                            .expect_err("compilation must refuse this fixture"),
+                        expected,
+                    );
                     assert_eq!(publication(&engine, keep), before);
                     assert!(engine.memory().unwrap().is_code_current(&snapshot));
                     engine.guard(KEY, before.generation).unwrap();

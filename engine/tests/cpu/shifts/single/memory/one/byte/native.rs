@@ -15,12 +15,8 @@ use ring3_engine::{
             ir::{EffectiveAddress, Operation, ShiftKind},
         },
     },
-    memory::{Access, FaultReason, GuestAddress, MemoryFault},
+    memory::{Access, FaultReason, GuestAddress},
     process::{EngineInstance, HostError, ResidentInstallation},
-};
-use wasm_encoder::{
-    EntityType, ExportKind, ExportSection, FunctionSection, ImportSection, MemoryType, Module,
-    TypeSection, ValType,
 };
 
 const CODE: u32 = 0x1000;
@@ -142,61 +138,6 @@ fn forms() -> Vec<(Vec<u8>, Operation)> {
     forms
 }
 
-fn declarations(owner: Owner) -> Vec<u8> {
-    let resident = matches!(owner, Owner::Resident);
-    let mut module = Module::new();
-    let mut types = TypeSection::new();
-    types.ty().function([ValType::I32; 4], [ValType::I32]);
-    types.ty().function(
-        std::iter::repeat_n(ValType::I32, if resident { 7 } else { 6 }),
-        [ValType::I32],
-    );
-    types.ty().function([ValType::I32], [ValType::I32]);
-    types.ty().function(
-        std::iter::repeat_n(ValType::I32, if resident { 6 } else { 2 }),
-        [ValType::I32],
-    );
-    types.ty().function([ValType::I32; 6], [ValType::I32]);
-    module.section(&types);
-    let mut imports = ImportSection::new();
-    imports.import(
-        "env",
-        "memory",
-        EntityType::Memory(MemoryType {
-            minimum: 1,
-            maximum: None,
-            memory64: false,
-            shared: false,
-            page_size_log2: None,
-        }),
-    );
-    imports.import(
-        "ring3",
-        if resident { "guard_resident" } else { "guard" },
-        EntityType::Function(1),
-    );
-    imports.import("ring3", "cpu_read8", EntityType::Function(2));
-    imports.import(
-        "ring3",
-        if resident {
-            "cpu_store_resident8"
-        } else {
-            "cpu_store8"
-        },
-        EntityType::Function(3),
-    );
-    module.section(&imports);
-    let mut functions = FunctionSection::new();
-    functions.function(0);
-    functions.function(4);
-    module.section(&functions);
-    let mut exports = ExportSection::new();
-    exports.export("run", ExportKind::Func, 3);
-    module.section(&exports);
-    // this exact prefix covers declarations, not generated instruction bodies.
-    module.finish()
-}
-
 #[test]
 fn three_count_one_families_decode_eight_flat32_address_shapes() {
     let mut engine = code(CODE, &[0x90], false);
@@ -220,51 +161,80 @@ fn bound_profiles_require_narrow_declarations_while_standalone_refuses() {
     }
     starts.push(CODE + bytes.len() as u32);
     bytes.extend([0xeb, 0]);
-    for owner in [Owner::Replacement, Owner::Resident] {
-        for entries in [false, true] {
-            let mut engine = code(CODE, &bytes, true);
-            let snapshot = engine
-                .memory()
-                .unwrap()
-                .snapshot_code(GuestAddress(CODE), bytes.len())
-                .unwrap();
-            describe(&mut engine, CODE, bytes.len(), entries);
-            let before = engine.arena().to_vec();
-            let pointer = engine.arena_address();
-            let id = compile(&mut engine, owner, entries).unwrap();
-            assert_eq!(engine.arena(), before);
-            assert_eq!(engine.arena_address(), pointer);
-            assert_eq!(engine.memory().unwrap().mapped_pages(), 1);
-            assert!(engine.memory().unwrap().is_code_current(&snapshot));
-            assert!(
-                engine
-                    .memory()
-                    .unwrap()
-                    .resolve(GuestAddress(u32::MAX), Access::Read)
-                    .is_err()
-            );
-            let mut fetched = vec![0; bytes.len()];
-            engine
-                .memory()
-                .unwrap()
-                .fetch(GuestAddress(CODE), &mut fetched)
-                .unwrap();
-            assert_eq!(fetched, bytes);
-            guard(&engine, owner, id).unwrap();
-            let artifact = match owner {
-                Owner::Replacement => engine.artifact_bytes().unwrap(),
-                Owner::Resident => {
-                    for &pc in &starts {
-                        assert_eq!(engine.lookup_resident(pc).unwrap().get(), id);
-                    }
-                    assert!(engine.lookup_resident(CODE + 1).is_err());
-                    engine.resident_bytes(id).unwrap()
+    let profiles =
+        crate::support_admission::admit_dense_bank(&bytes, &starts, KEY, |bytes, starts| {
+            let base = starts[0];
+            for owner in [Owner::Replacement, Owner::Resident] {
+                for entries in [false, true] {
+                    let mut engine = code(base, bytes, true);
+                    let snapshot = engine
+                        .memory()
+                        .unwrap()
+                        .snapshot_code(GuestAddress(base), bytes.len())
+                        .unwrap();
+                    describe(&mut engine, base, bytes.len(), entries);
+                    let before = engine.arena().to_vec();
+                    let pointer = engine.arena_address();
+                    let id = compile(&mut engine, owner, entries).unwrap();
+                    assert_eq!(engine.arena(), before);
+                    assert_eq!(engine.arena_address(), pointer);
+                    assert_eq!(engine.memory().unwrap().mapped_pages(), 1);
+                    assert!(engine.memory().unwrap().is_code_current(&snapshot));
+                    assert!(
+                        engine
+                            .memory()
+                            .unwrap()
+                            .resolve(GuestAddress(u32::MAX), Access::Read)
+                            .is_err()
+                    );
+                    let mut fetched = vec![0; bytes.len()];
+                    engine
+                        .memory()
+                        .unwrap()
+                        .fetch(GuestAddress(base), &mut fetched)
+                        .unwrap();
+                    assert_eq!(fetched, bytes);
+                    guard(&engine, owner, id).unwrap();
+                    let artifact = match owner {
+                        Owner::Replacement => engine.artifact_bytes().unwrap(),
+                        Owner::Resident => {
+                            for &pc in starts {
+                                assert_eq!(engine.lookup_resident(pc).unwrap().get(), id);
+                            }
+                            assert!(engine.lookup_resident(base + 1).is_err());
+                            engine.resident_bytes(id).unwrap()
+                        }
+                    };
+                    let resident = matches!(owner, Owner::Resident);
+                    crate::support_wasm_interface::assert_bound(
+                        artifact,
+                        resident,
+                        &[
+                            ("cpu_read8", 1),
+                            ("cpu_read_modify8", 1),
+                            (
+                                if resident {
+                                    "cpu_store_resident8"
+                                } else {
+                                    "cpu_store8"
+                                },
+                                if resident { 6 } else { 2 },
+                            ),
+                        ],
+                        &[
+                            4,
+                            if resident { 7 } else { 6 },
+                            1,
+                            if resident { 6 } else { 2 },
+                        ],
+                        true,
+                    );
+                    assert!(artifact.len() <= CompileLimits::default().wasm_bytes);
                 }
-            };
-            assert!(artifact.starts_with(&declarations(owner)));
-            assert!(artifact.len() <= CompileLimits::default().wasm_bytes);
-        }
-    }
+            }
+            4
+        });
+    assert_eq!(profiles, 12);
     for (_, field) in KINDS {
         let bytes = [0xd0, field << 3 | 3, 0xeb, 0];
         let engine = code(CODE, &bytes, true);
@@ -320,23 +290,23 @@ fn count_prefix_segment_lock_rotate_and_sal_neighbors_keep_exact_decode_refusals
         let (bytes, expected) = byte_prefix_admission::closed_fixture(&bytes, expected);
         let engine = code(CODE, &bytes, true);
         let memory = engine.memory().unwrap();
-        assert_eq!(
-            decode_one(memory, GuestAddress(CODE)).err(),
-            Some(expected),
-            "{bytes:02x?}"
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(memory, GuestAddress(CODE))).expect_err("instruction must fail to decode"),
+            expected,
         );
         let specs = [BlockSpec {
             entry: GuestAddress(CODE),
             byte_length: bytes.len() as u32,
         }];
         let error = instruction_error(CODE, InstructionError::Decode(expected));
-        assert_eq!(
-            compile_region(memory, &specs, CompileLimits::default()).err(),
-            Some(error)
+        crate::support_fetch::assert_compile_contract(
+            compile_region(memory, &specs, CompileLimits::default()).unwrap_err(),
+            error,
         );
-        assert_eq!(
-            compile_entry_region(memory, &[GuestAddress(CODE)], CompileLimits::default()).err(),
-            Some(error)
+        crate::support_fetch::assert_compile_contract(
+            compile_entry_region(memory, &[GuestAddress(CODE)], CompileLimits::default())
+                .unwrap_err(),
+            error,
         );
     }
 }
@@ -410,7 +380,11 @@ fn invalid_second_memory_instruction_preserves_both_published_owners_and_install
                     Owner::Replacement => HostError::Compile(error),
                     Owner::Resident => HostError::Resident(RegistryError::Compile(error)),
                 };
-                assert_eq!(compile(&mut engine, owner, entries), Err(expected));
+                crate::support_fetch::assert_host_contract(
+                    (compile(&mut engine, owner, entries))
+                        .expect_err("compilation must refuse this fixture"),
+                    expected,
+                );
                 assert_eq!(publication(&engine, keep), before);
                 assert!(engine.memory().unwrap().is_code_current(&snapshot));
                 engine.guard(KEY, before.generation).unwrap();
@@ -448,17 +422,13 @@ fn exact_instruction_fetch_stops_at_page_end_and_reports_each_missing_byte_and_w
                 ),
             ] {
                 let engine = code(pc, &bytes[..cut], true);
-                assert_eq!(
-                    decode_one(engine.memory().unwrap(), GuestAddress(pc)).err(),
-                    Some(DecodeError::MemoryFault {
-                        pc: GuestAddress(pc),
-                        fault: MemoryFault {
-                            address: GuestAddress(address),
-                            access: Access::Execute,
-                            reason
-                        },
-                        length: cut as u32 + 1,
-                    })
+                crate::support_fetch::assert_error(
+                    (decode_one(engine.memory().unwrap(), GuestAddress(pc)))
+                        .expect_err("code fetch must fail"),
+                    pc,
+                    address,
+                    reason,
+                    cut as u32 + 1,
                 );
             }
         }

@@ -4,7 +4,6 @@ use std::{
     fs::{self, OpenOptions},
     io::Write,
     path::PathBuf,
-    process::{Command, Stdio},
 };
 
 fn compile_bound(bytes: &[u8]) -> Vec<u8> {
@@ -66,30 +65,7 @@ fn existing_sar_modules_validate_and_optionally_capture() {
         input.extend((module.len() as u32).to_le_bytes());
         input.extend(module);
     }
-    let mut child = Command::new("node")
-        .args(["-e", r#"
-const assert = require('node:assert/strict');
-const input = require('node:fs').readFileSync(0);
-let at = 0;
-for (let count = 0; count < 6; count++) {
-  assert.ok(at + 4 <= input.length);
-  const size = input.readUInt32LE(at); at += 4;
-  assert.ok(size > 8 && at + size <= input.length);
-  const module = new WebAssembly.Module(input.subarray(at, at + size)); at += size;
-  assert.deepEqual(WebAssembly.Module.imports(module), [{module:'env', name:'memory', kind:'memory'},
-    {module:'ring3', name:'guard', kind:'function'}]);
-  assert.deepEqual(WebAssembly.Module.exports(module), [{name:'run', kind:'function'}]);
-}
-assert.equal(at, input.length);
-"#])
-        .stdin(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
-    child.stdin.take().unwrap().write_all(&input).unwrap();
-    let output = child.wait_with_output().unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    crate::support_wasm_interface::assert_packed(&input, 6, false);
 }
 
 use ring3_engine::{
@@ -279,77 +255,7 @@ fn six_profiles_validate_all_sar_families_without_native_guest_execution() {
             input.extend(module);
         }
     }
-    let mut child = Command::new("node")
-        .args([
-            "-e",
-            r#"
-const assert = require('node:assert/strict');
-const input = require('node:fs').readFileSync(0);
-let at = 0;
-for (let profile = 0; profile < 6; profile++) {
-  const mode = input[at++];
-  const length = input.readUInt32LE(at);
-  at += 4;
-  assert.ok(length > 8 && length <= 65536 && at + length <= input.length);
-  const bytes = input.subarray(at, at + length);
-  at += length;
-  const module = new WebAssembly.Module(bytes);
-  const imports = [{module:'env', name:'memory', kind:'memory'}];
-  if (mode !== 0) {
-    imports.push({module:'ring3', name:mode === 2 ? 'guard_resident' : 'guard', kind:'function'});
-  }
-  assert.deepEqual(WebAssembly.Module.imports(module), imports);
-  assert.deepEqual(WebAssembly.Module.exports(module), [{name:'run', kind:'function'}]);
-  let cursor = 8;
-  function leb() {
-    let value = 0;
-    let scale = 1;
-    for (let index = 0; index < 5; index++) {
-      assert.ok(cursor < bytes.length);
-      const byte = bytes[cursor++];
-      value += (byte & 127) * scale;
-      if (!(byte & 128)) return value;
-      scale *= 128;
-    }
-    assert.fail('bounded LEB');
-  }
-  let found = false;
-  while (cursor < bytes.length) {
-    const id = bytes[cursor++];
-    const size = leb();
-    const end = cursor + size;
-    assert.ok(end <= bytes.length);
-    if (id === 10) {
-      assert.equal(leb(), 1);
-      const body = leb();
-      assert.equal(cursor + body, end);
-      assert.equal(leb(), 3);
-      assert.equal(leb(), 16);
-      assert.equal(bytes[cursor++], 127);
-      assert.equal(leb(), 1);
-      assert.equal(bytes[cursor++], 126);
-      assert.equal(leb(), 10);
-      assert.equal(bytes[cursor++], 127);
-      found = true;
-    }
-    cursor = end;
-  }
-  assert.ok(found);
-}
-assert.equal(at, input.length);
-"#,
-        ])
-        .stdin(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    child.stdin.take().unwrap().write_all(&input).unwrap();
-    let output = child.wait_with_output().unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    crate::support_wasm_interface::assert_packed(&input, 6, true);
 }
 
 #[test]
@@ -386,22 +292,22 @@ fn exact_sar_prefix_fetch_top_and_consumed_source_boundaries() {
                 },
                 length: cut as u32 + 1,
             };
-            assert_eq!(decode_one(&code, GuestAddress(pc)).unwrap_err(), expected);
+            crate::support_fetch::assert_decode_contract(
+                decode_one(&code, GuestAddress(pc)).unwrap_err(),
+                expected,
+            );
             code.map_zeroed(
                 PageRange::new(GuestAddress(0x2000), 1).unwrap(),
                 Permissions::READ,
             )
             .unwrap();
-            assert!(matches!(
-                decode_one(&code, GuestAddress(pc)),
-                Err(DecodeError::MemoryFault {
-                    fault: MemoryFault {
-                        reason: FaultReason::Permission,
-                        ..
-                    },
-                    ..
-                })
-            ));
+            crate::support_fetch::assert_error(
+                decode_one(&code, GuestAddress(pc)).unwrap_err(),
+                pc,
+                0x2000,
+                FaultReason::Permission,
+                cut as u32 + 1,
+            );
             let top_pc = u32::MAX - cut as u32 + 1;
             assert!(matches!(
                 decode_one(&memory(top_pc, &bytes[..cut]), GuestAddress(top_pc)),
@@ -441,15 +347,15 @@ fn exact_sar_prefix_fetch_top_and_consumed_source_boundaries() {
                 word_prefix::admitted(&refused);
                 continue;
             }
-            assert_eq!(
+            crate::support_fetch::assert_decode_contract(
                 decode_one(&memory(0x1000, &refused), GuestAddress(0x1000)).unwrap_err(),
-                DecodeError::Unsupported(UnsupportedFeature::Opcode)
+                DecodeError::Unsupported(UnsupportedFeature::Opcode),
             );
         }
         let locked = [vec![0xf0], bytes.clone()].concat();
-        assert_eq!(
+        crate::support_fetch::assert_decode_contract(
             decode_one(&memory(0x1000, &locked), GuestAddress(0x1000)).unwrap_err(),
-            DecodeError::InvalidEncoding
+            DecodeError::InvalidEncoding,
         );
         for prefix in [0x26, 0x2e, 0x36, 0x3e, 0x64, 0x65] {
             let segmented = [vec![prefix], bytes.clone()].concat();
@@ -468,9 +374,22 @@ fn exact_sar_prefix_fetch_top_and_consumed_source_boundaries() {
             if opcode == 0xc1 {
                 refused.push(0xff);
             }
-            assert_eq!(
+            if extension == 6 {
+                let (operation, length) = word_prefix::admitted(&refused);
+                let mut canonical = refused.clone();
+                canonical[2] = (canonical[2] & !0x38) | (4 << 3);
+                assert_eq!(length, refused.len());
+                assert_eq!(
+                    operation,
+                    *decode_one(&memory(0x1000, &canonical), GuestAddress(0x1000))
+                        .unwrap()
+                        .operation(),
+                );
+                continue;
+            }
+            crate::support_fetch::assert_decode_contract(
                 decode_one(&memory(0x1000, &refused), GuestAddress(0x1000)).unwrap_err(),
-                DecodeError::Unsupported(UnsupportedFeature::Opcode)
+                DecodeError::Unsupported(UnsupportedFeature::Opcode),
             );
         }
     }

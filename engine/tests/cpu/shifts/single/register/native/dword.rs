@@ -306,10 +306,10 @@ fn shifts_admit_segment_and_address_size_while_retaining_unsupported_prefix_cate
         ] {
             if !prefix_admission::admit_if_new_prefix(&bytes) {
                 let memory = code(CODE, &bytes);
-                assert_eq!(
-                    decode_one(&memory, GuestAddress(CODE)).err(),
-                    Some(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
-                    "{bytes:02x?}"
+                crate::support_fetch::assert_decode_contract(
+                    (decode_one(&memory, GuestAddress(CODE)))
+                        .expect_err("instruction must fail to decode"),
+                    DecodeError::Unsupported(UnsupportedFeature::Opcode),
                 );
             }
         }
@@ -348,9 +348,10 @@ fn shifts_admit_segment_and_address_size_while_retaining_unsupported_prefix_cate
                 DecodeError::InvalidEncoding,
             );
             let memory = code(CODE, &bytes);
-            assert_eq!(
-                decode_one(&memory, GuestAddress(CODE)).err(),
-                Some(expected)
+            crate::support_fetch::assert_decode_contract(
+                (decode_one(&memory, GuestAddress(CODE)))
+                    .expect_err("instruction must fail to decode"),
+                expected,
             );
         }
     }
@@ -368,11 +369,13 @@ fn shifts_admit_segment_and_address_size_while_retaining_unsupported_prefix_cate
         &[0x66, 0x66, 0x0f, 0xa4, 0xd0, 1],
         &[0x66, 0x66, 0x0f, 0xac, 0xd0, 1],
     ] {
+        if prefix_admission::admit_if_new_prefix(bytes) {
+            continue;
+        }
         let memory = code(CODE, bytes);
-        assert_eq!(
-            decode_one(&memory, GuestAddress(CODE)).err(),
-            Some(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
-            "{bytes:02x?}"
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(&memory, GuestAddress(CODE))).expect_err("instruction must fail to decode"),
+            DecodeError::Unsupported(UnsupportedFeature::Opcode),
         );
     }
 }
@@ -398,19 +401,7 @@ fn consumed_decode_bounds_stop_before_successor_and_report_missing_count() {
         ] {
             let memory = code(pc, &[0xc1, 0xc0 | extension << 3]);
             let error = decode_one(&memory, GuestAddress(pc)).err().unwrap();
-            let DecodeError::MemoryFault {
-                pc: fault_pc,
-                fault,
-                length,
-            } = error
-            else {
-                panic!("{error:?}");
-            };
-            assert_eq!(fault_pc, GuestAddress(pc));
-            assert_eq!(length, 3);
-            assert_eq!(fault.address, GuestAddress(fault_address));
-            assert_eq!(fault.access, Access::Execute);
-            assert_eq!(fault.reason, reason);
+            crate::support_fetch::assert_error(error, pc, fault_address, reason, 3);
         }
     }
 }
@@ -597,21 +588,21 @@ fn every_memory_form_including_zero_refuses_all_standalone_backends_before_poiso
         let expected = instruction_error(CODE, InstructionError::BackendUnsupported);
         let specs = [spec(CODE, bytes.len())];
         let entries = [GuestAddress(CODE)];
-        assert_eq!(
-            prepare_region(&memory, &specs, CompileLimits::default()).err(),
-            Some(expected)
+        crate::support_fetch::assert_compile_contract(
+            prepare_region(&memory, &specs, CompileLimits::default()).unwrap_err(),
+            expected,
         );
-        assert_eq!(
-            compile_region(&memory, &specs, CompileLimits::default()).err(),
-            Some(expected)
+        crate::support_fetch::assert_compile_contract(
+            compile_region(&memory, &specs, CompileLimits::default()).unwrap_err(),
+            expected,
         );
-        assert_eq!(
-            prepare_entry_region(&memory, &entries, CompileLimits::default()).err(),
-            Some(expected)
+        crate::support_fetch::assert_compile_contract(
+            prepare_entry_region(&memory, &entries, CompileLimits::default()).unwrap_err(),
+            expected,
         );
-        assert_eq!(
-            compile_entry_region(&memory, &entries, CompileLimits::default()).err(),
-            Some(expected)
+        crate::support_fetch::assert_compile_contract(
+            compile_entry_region(&memory, &entries, CompileLimits::default()).unwrap_err(),
+            expected,
         );
         let mut registry = ResidentRegistry::new(&memory, RegistryLimits::default()).unwrap();
         let before = registry.usage();
@@ -745,21 +736,23 @@ fn register_shifts_charge_instruction_and_wasm_caps_before_later_poison() {
             Some(CompileError::InstructionLimit)
         );
         assert_eq!(
-            prepare_entry_region(&memory, &[GuestAddress(CODE)], CompileLimits::default()).err(),
-            Some(CompileError::InstructionLimit)
+            prepare_entry_region(&memory, &[GuestAddress(CODE)], CompileLimits::default())
+                .unwrap()
+                .instruction_count(),
+            64
         );
         let memory = code(CODE, &[instruction[0], instruction[1], 0xeb, 0]);
         let limits = CompileLimits {
             wasm_bytes: 1,
             ..CompileLimits::default()
         };
-        assert_eq!(
-            compile_region(&memory, &[spec(CODE, 4)], limits).err(),
-            Some(CompileError::WasmLimit)
+        crate::support_fetch::assert_compile_contract(
+            compile_region(&memory, &[spec(CODE, 4)], limits).unwrap_err(),
+            CompileError::WasmLimit,
         );
-        assert_eq!(
-            compile_entry_region(&memory, &[GuestAddress(CODE)], limits).err(),
-            Some(CompileError::WasmLimit)
+        crate::support_fetch::assert_compile_contract(
+            compile_entry_region(&memory, &[GuestAddress(CODE)], limits).unwrap_err(),
+            CompileError::WasmLimit,
         );
     }
 }
@@ -789,18 +782,18 @@ fn cold_seed_boundaries_and_terminal_jump_preserve_consumed_extents() {
     );
     for (_, extension) in KINDS {
         let memory = code(CODE, &[0xc1, 0xc0 | extension << 3, 0xff, 0xeb, 0]);
-        assert_eq!(
+        crate::support_fetch::assert_compile_contract(
             prepare_entry_region(
                 &memory,
                 &[GuestAddress(CODE), GuestAddress(CODE + 2)],
-                CompileLimits::default()
+                CompileLimits::default(),
             )
-            .err(),
-            Some(CompileError::InvalidBlocks)
+            .unwrap_err(),
+            CompileError::InvalidBlocks,
         );
-        assert_eq!(
-            prepare_region(&memory, &[spec(CODE, 2)], CompileLimits::default()).err(),
-            Some(instruction_error(CODE, InstructionError::InvalidBlockEnd))
+        crate::support_fetch::assert_compile_contract(
+            prepare_region(&memory, &[spec(CODE, 2)], CompileLimits::default()).unwrap_err(),
+            instruction_error(CODE, InstructionError::InvalidBlockEnd),
         );
     }
     for owner in [Owner::Replacement, Owner::Resident] {

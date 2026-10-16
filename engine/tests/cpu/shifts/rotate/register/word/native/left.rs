@@ -1,12 +1,7 @@
 use super::support_prefix_admission as prefix_admission;
 
 use ring3_engine::{abi::arena::TRANSFER_OFFSET, process::EngineInstance};
-use std::{
-    fs::OpenOptions,
-    io::Write,
-    path::PathBuf,
-    process::{Command, Stdio},
-};
+use std::{fs::OpenOptions, io::Write, path::PathBuf};
 
 const PC: u32 = 0x1000;
 const KEY: u64 = 0x726f_6c61_6263_6465;
@@ -63,35 +58,7 @@ fn old_rol_paths_validate_and_optionally_capture_without_guest_execution() {
     for (name, instruction) in cases {
         let engine = compiled(instruction);
         let bytes = engine.artifact_bytes().unwrap();
-        let mut child = Command::new("node")
-            .args([
-                "-e",
-                r#"
-const assert = require('node:assert/strict');
-const bytes = require('node:fs').readFileSync(0);
-assert.ok(WebAssembly.validate(bytes));
-const module = new WebAssembly.Module(bytes);
-assert.deepEqual(WebAssembly.Module.imports(module), [
-    { module: 'env', name: 'memory', kind: 'memory' },
-    { module: 'ring3', name: 'guard', kind: 'function' },
-]);
-assert.deepEqual(WebAssembly.Module.exports(module), [
-    { name: 'run', kind: 'function' },
-]);
-"#,
-            ])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap();
-        child.stdin.take().unwrap().write_all(bytes).unwrap();
-        let result = child.wait_with_output().unwrap();
-        assert!(
-            result.status.success(),
-            "{}",
-            String::from_utf8_lossy(&result.stderr)
-        );
+        crate::support_wasm_interface::assert_bound(bytes, false, &[], &[4, 6], false);
         if let Some(directory) = &directory {
             OpenOptions::new()
                 .write(true)
@@ -265,44 +232,38 @@ fn word_rol_strict_fetch_top_and_consumed_currency_stay_exact() {
                 0xf0 => DecodeError::InvalidEncoding,
                 _ => unsupported,
             };
-            assert_eq!(
+            crate::support_fetch::assert_decode_contract(
                 decode_one(fixture(PC, &bytes).memory().unwrap(), GuestAddress(PC)).unwrap_err(),
                 expected,
-                "{bytes:02x?}"
             );
         }
         let mut memory = instruction.to_vec();
         memory[2] &= 0x3f;
         memory.insert(0, 0x66);
-        assert_eq!(
+        crate::support_fetch::assert_decode_contract(
             decode_one(fixture(PC, &memory).memory().unwrap(), GuestAddress(PC)).unwrap_err(),
-            unsupported
+            unsupported,
         );
         let mut byte = instruction.to_vec();
         byte[1] -= 1;
         if !prefix_admission::admit_if_new_prefix(&byte) {
-            assert_eq!(
+            crate::support_fetch::assert_decode_contract(
                 decode_one(fixture(PC, &byte).memory().unwrap(), GuestAddress(PC)).unwrap_err(),
-                unsupported
+                unsupported,
             );
         }
         for cut in 1..instruction.len() {
             let pc = 0x2000 - cut as u32;
-            assert_eq!(
+            crate::support_fetch::assert_error(
                 decode_one(
                     fixture(pc, &instruction[..cut]).memory().unwrap(),
-                    GuestAddress(pc)
+                    GuestAddress(pc),
                 )
                 .unwrap_err(),
-                DecodeError::MemoryFault {
-                    pc: GuestAddress(pc),
-                    fault: MemoryFault {
-                        address: GuestAddress(0x2000),
-                        access: Access::Execute,
-                        reason: FaultReason::Unmapped,
-                    },
-                    length: cut as u32 + 1
-                }
+                pc,
+                0x2000,
+                FaultReason::Unmapped,
+                cut as u32 + 1,
             );
         }
         let top = u32::MAX - (instruction.len() - 1) as u32;
@@ -338,10 +299,10 @@ fn word_rol_strict_fetch_top_and_consumed_currency_stay_exact() {
             let mut bytes = encoding(opcode, 0xc0 | extension << 3, 1);
             bytes.insert(0, 0x66);
             if !prefix_admission::admit_if_new_prefix(&bytes) {
-                assert_eq!(
+                crate::support_fetch::assert_decode_contract(
                     decode_one(fixture(PC, &bytes).memory().unwrap(), GuestAddress(PC))
                         .unwrap_err(),
-                    unsupported
+                    unsupported,
                 );
             }
         }
@@ -353,72 +314,28 @@ fn word_rol_strict_fetch_top_and_consumed_currency_stay_exact() {
         vec![0x66, 0x66, 0x0f, 0xad, 0xc0],
     ] {
         if !prefix_admission::admit_if_new_prefix(&bytes) {
-            assert_eq!(
+            crate::support_fetch::assert_decode_contract(
                 decode_one(fixture(PC, &bytes).memory().unwrap(), GuestAddress(PC)).unwrap_err(),
-                unsupported
+                unsupported,
             );
         }
     }
 }
 
 fn validate_profile(bytes: &[u8], guard: &str) {
-    let mut child = Command::new("node")
-        .args([
-            "-e",
-            r#"
-const assert = require('node:assert/strict');
-const bytes = require('node:fs').readFileSync(0);
-const guard = process.argv[1];
-const module = new WebAssembly.Module(bytes);
-const imports = [{ module: 'env', name: 'memory', kind: 'memory' }];
-if (guard) imports.push({ module: 'ring3', name: guard, kind: 'function' });
-assert.deepEqual(WebAssembly.Module.imports(module), imports);
-assert.deepEqual(WebAssembly.Module.exports(module), [{ name: 'run', kind: 'function' }]);
-let at = 8;
-let bodies = 0;
-function leb() {
-    let value = 0;
-    let scale = 1;
-    for (let index = 0; index < 5; index++) {
-        assert.ok(at < bytes.length);
-        const byte = bytes[at++];
-        value += (byte & 127) * scale;
-        if (!(byte & 128)) return value;
-        scale *= 128;
+    if guard.is_empty() {
+        crate::support_wasm_interface::assert_interface(bytes, &[], &[4], false);
+    } else {
+        let resident = guard == "guard_detect_resident";
+        assert!(resident || guard == "guard_detect");
+        crate::support_wasm_interface::assert_bound(
+            bytes,
+            resident,
+            &[],
+            &[4, if resident { 7 } else { 6 }],
+            false,
+        );
     }
-    assert.fail('invalid leb');
-}
-while (at < bytes.length) {
-    const tag = bytes[at++];
-    const end = leb() + at;
-    assert.ok(end <= bytes.length);
-    if (tag === 10) {
-        assert.equal(leb(), 1);
-        const body = leb();
-        assert.equal(at + body, end);
-        assert.equal(leb(), 3);
-        assert.deepEqual([leb(), bytes[at++], leb(), bytes[at++], leb(), bytes[at++]], [16, 127, 1, 126, 10, 127]);
-        bodies++;
-    }
-    at = end;
-}
-assert.equal(at, bytes.length);
-assert.equal(bodies, 1);
-"#,
-            guard,
-        ])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    child.stdin.take().unwrap().write_all(bytes).unwrap();
-    let result = child.wait_with_output().unwrap();
-    assert!(
-        result.status.success(),
-        "{}",
-        String::from_utf8_lossy(&result.stderr)
-    );
 }
 
 #[test]
@@ -464,7 +381,14 @@ fn word_rol_six_profiles_caps_and_late_failures_preserve_both_owners() {
             } else {
                 engine.artifact_bytes().unwrap()
             };
-            validate_profile(module, if resident { "guard_resident" } else { "guard" });
+            validate_profile(
+                module,
+                if resident {
+                    "guard_detect_resident"
+                } else {
+                    "guard_detect"
+                },
+            );
             engine.map(0x3000, 1, 7).unwrap();
             upload(&mut engine, 0x3000, &[0x90, 0xeb, 0]);
             describe(&mut engine, 0x3000, 3, false);
@@ -509,7 +433,10 @@ fn word_rol_six_profiles_caps_and_late_failures_preserve_both_owners() {
                     })) => (pc, cause),
                     other => panic!("unexpected failure: {other:?}"),
                 };
-                assert_eq!(observed, (GuestAddress(fault_pc), expected));
+                crate::support_fetch::assert_instruction_contract(
+                    observed,
+                    (GuestAddress(fault_pc), expected),
+                );
                 assert_eq!(engine.arena(), arena);
                 assert_eq!(engine.generation(), generation);
                 assert_eq!(engine.artifact_bytes().unwrap(), old);
@@ -528,6 +455,19 @@ fn word_rol_six_profiles_caps_and_late_failures_preserve_both_owners() {
                 let arena = engine.arena().to_vec();
                 let generation = engine.generation();
                 let old = engine.artifact_bytes().unwrap().to_vec();
+                if nops == 63 && entries {
+                    assert!(crate::support_admission::admit_if_deferred(
+                        &mut engine,
+                        crate::support_admission::ColdEntryCase {
+                            key: KEY,
+                            keeper: keep,
+                            resident,
+                            pages: &[PC, 0x3000],
+                            expected: CompileError::InstructionLimit,
+                        }
+                    ));
+                    continue;
+                }
                 let outcome = bound(&mut engine, resident, entries);
                 if nops == 62 {
                     assert!(outcome.is_ok());

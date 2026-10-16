@@ -61,11 +61,7 @@ use ring3_engine::{
     memory::{AddressSpace, FaultReason, MemoryFault},
     process::{HostError, ResidentInstallation},
 };
-use std::{
-    collections::BTreeSet,
-    io::Write,
-    process::{Command, Stdio},
-};
+use std::collections::BTreeSet;
 
 const CODE: u32 = 0x1000;
 const KEEP: u32 = 0x3000;
@@ -281,61 +277,32 @@ fn page(memory: &AddressSpace, pc: u32) -> Vec<u8> {
 }
 
 fn validate_modules(modules: &[(Owner, Vec<u8>)]) {
-    let mut input = Vec::new();
-    for (owner, bytes) in modules {
-        input.push(u8::from(*owner == Owner::Resident));
-        input.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
-        input.extend_from_slice(bytes);
+    for (owner, wasm) in modules {
+        let resident = matches!(owner, Owner::Resident);
+        crate::support_wasm_interface::assert_bound(
+            wasm,
+            resident,
+            &[
+                ("cpu_read8", 1),
+                ("cpu_read_modify8", 1),
+                (
+                    if resident {
+                        "cpu_store_resident8"
+                    } else {
+                        "cpu_store8"
+                    },
+                    if resident { 6 } else { 2 },
+                ),
+            ],
+            &[
+                4,
+                if resident { 7 } else { 6 },
+                1,
+                if resident { 6 } else { 2 },
+            ],
+            true,
+        );
     }
-    // validation only; no instance or guest execution.
-    let script = r#"
-const assert = require('node:assert/strict'), input = require('node:fs').readFileSync(0);
-function cursor(bytes) {let at=0; return {
-  u() {let n=0,shift=0,b; do {assert.ok(at<bytes.length); b=bytes[at++]; n+=(b&127)*2**shift; shift+=7; assert.ok(shift<=35);} while(b&128); return n;},
-  byte() {assert.ok(at<bytes.length); return bytes[at++];},
-  take(n) {assert.ok(at+n<=bytes.length); const out=bytes.subarray(at,at+n); at+=n; return out;},
-  more() {return at<bytes.length;}, end() {assert.equal(at,bytes.length);}
-};}
-let offset=0,count=0;
-while(offset<input.length) {
-  assert.ok(offset+5<=input.length); const resident=input[offset++],length=input.readUInt32LE(offset); offset+=4;
-  assert.ok(resident===0||resident===1); assert.ok(offset+length<=input.length);
-  const bytes=input.subarray(offset,offset+length); offset+=length; assert.ok(WebAssembly.validate(bytes)); const module=new WebAssembly.Module(bytes);
-  assert.deepEqual(WebAssembly.Module.imports(module),[{module:'env',name:'memory',kind:'memory'},
-    {module:'ring3',name:resident?'guard_resident':'guard',kind:'function'}, {module:'ring3',name:'cpu_read8',kind:'function'},
-    {module:'ring3',name:resident?'cpu_store_resident8':'cpu_store8',kind:'function'}]);
-  assert.deepEqual(WebAssembly.Module.exports(module),[{name:'run',kind:'function'}]);
-  const sections=new Map(), file=cursor(bytes.subarray(8));
-  while(file.more()) {const id=file.byte(),size=file.u(); assert.ok(!sections.has(id)); sections.set(id,file.take(size));} file.end();
-  const types=cursor(sections.get(1)); assert.equal(types.u(),5);
-  for(const arity of [4,resident?7:6,1,resident?6:2,6]) {
-    assert.equal(types.byte(),0x60); assert.equal(types.u(),arity); assert.deepEqual([...types.take(arity)],Array(arity).fill(0x7f));
-    assert.equal(types.u(),1); assert.equal(types.byte(),0x7f);
-  } types.end();
-  const functions=cursor(sections.get(3)); assert.equal(functions.u(),2); assert.equal(functions.u(),0); assert.equal(functions.u(),4); functions.end();
-  const bodies=cursor(sections.get(10)); assert.equal(bodies.u(),2); const body=cursor(bodies.take(bodies.u()));
-  const segment=cursor(bodies.take(bodies.u())); bodies.end();
-  assert.equal(segment.u(),1); assert.equal(segment.u(),3); assert.equal(segment.byte(),0x7f);
-  assert.equal(body.u(),3);
-  for(const [number,type] of [[16,0x7f],[1,0x7e],[10,0x7f]]) {assert.equal(body.u(),number); assert.equal(body.byte(),type);}
-  count++;
-} process.stdout.write(String(count));
-"#;
-    let mut child = Command::new("node")
-        .args(["-e", script])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    child.stdin.take().unwrap().write_all(&input).unwrap();
-    let output = child.wait_with_output().unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert_eq!(output.stdout, modules.len().to_string().as_bytes());
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -510,13 +477,15 @@ fn memory_cl_programs_require_four_checked_bound_profiles_and_refuse_pure() {
             let engine = fresh_code(CODE, &bytes, true);
             let memory = engine.memory().unwrap();
             let rejected = error(CODE, InstructionError::BackendUnsupported);
-            assert_eq!(
-                compile_region(memory, &[spec(CODE, bytes.len())], CompileLimits::default()).err(),
-                Some(rejected)
+            crate::support_fetch::assert_compile_contract(
+                compile_region(memory, &[spec(CODE, bytes.len())], CompileLimits::default())
+                    .unwrap_err(),
+                rejected,
             );
-            assert_eq!(
-                compile_entry_region(memory, &[GuestAddress(CODE)], CompileLimits::default()).err(),
-                Some(rejected)
+            crate::support_fetch::assert_compile_contract(
+                compile_entry_region(memory, &[GuestAddress(CODE)], CompileLimits::default())
+                    .unwrap_err(),
+                rejected,
             );
             pure += 2;
             for owner in [Owner::Replacement, Owner::Resident] {
@@ -627,16 +596,15 @@ fn strict_prefixes_and_late_fetch_faults_preserve_all_prior_publications() {
                 upload(&mut engine, CODE, &bytes);
                 describe(&mut engine, &[(CODE, bytes.len())], entries);
                 let before = publication(&engine, keep);
-                assert_eq!(
-                    decode_one(engine.memory().unwrap(), GuestAddress(pc)).err(),
-                    Some(cause)
+                crate::support_fetch::assert_decode_contract(
+                    (decode_one(engine.memory().unwrap(), GuestAddress(pc)))
+                        .expect_err("instruction must fail to decode"),
+                    cause,
                 );
-                assert_eq!(
-                    compile(&mut engine, owner, entries, 1),
-                    Err(compile_error(
-                        owner,
-                        error(pc, InstructionError::Decode(cause))
-                    ))
+                crate::support_fetch::assert_host_contract(
+                    (compile(&mut engine, owner, entries, 1))
+                        .expect_err("compilation must refuse this fixture"),
+                    compile_error(owner, error(pc, InstructionError::Decode(cause))),
                 );
                 assert_retained(&engine, keep, &before);
                 failures += 1;
@@ -649,9 +617,10 @@ fn strict_prefixes_and_late_fetch_faults_preserve_all_prior_publications() {
             upload(&mut engine, 0x1ffd, &[0xd2, 0x13, 0xd2]);
             describe(&mut engine, &[(0x1ffd, 4)], entries);
             let before = publication(&engine, keep);
-            assert_eq!(
-                compile(&mut engine, owner, entries, 1),
-                Err(compile_error(
+            crate::support_fetch::assert_host_contract(
+                (compile(&mut engine, owner, entries, 1))
+                    .expect_err("compilation must refuse this fixture"),
+                compile_error(
                     owner,
                     error(
                         0x1fff,
@@ -659,10 +628,10 @@ fn strict_prefixes_and_late_fetch_faults_preserve_all_prior_publications() {
                             0x1fff,
                             0x2000,
                             2,
-                            FaultReason::Unmapped
-                        ))
-                    )
-                ))
+                            FaultReason::Unmapped,
+                        )),
+                    ),
+                ),
             );
             assert_retained(&engine, keep, &before);
             failures += 1;
@@ -696,9 +665,10 @@ fn exact_cl_fetch_lengths_and_valid_byte_operand_endpoints_stay_distinct() {
                         0x2000 - present as u32
                     };
                     let engine = fresh_code(pc, &target[..present], true);
-                    assert_eq!(
-                        decode_one(engine.memory().unwrap(), GuestAddress(pc)).err(),
-                        Some(fetch_error(
+                    crate::support_fetch::assert_decode_contract(
+                        (decode_one(engine.memory().unwrap(), GuestAddress(pc)))
+                            .expect_err("instruction must fail to decode"),
+                        fetch_error(
                             pc,
                             if top { pc } else { 0x2000 },
                             present as u32 + 1,
@@ -706,8 +676,8 @@ fn exact_cl_fetch_lengths_and_valid_byte_operand_endpoints_stay_distinct() {
                                 FaultReason::AddressOverflow
                             } else {
                                 FaultReason::Unmapped
-                            }
-                        ))
+                            },
+                        ),
                     );
                     truncated += 1;
                 }
@@ -715,9 +685,10 @@ fn exact_cl_fetch_lengths_and_valid_byte_operand_endpoints_stay_distinct() {
             let pc = 0x2000 - length + 1;
             let mut engine = fresh_code(pc, &target, false);
             engine.protect(0x2000, 1, 1).unwrap();
-            assert_eq!(
-                decode_one(engine.memory().unwrap(), GuestAddress(pc)).err(),
-                Some(fetch_error(pc, 0x2000, length, FaultReason::Permission))
+            crate::support_fetch::assert_decode_contract(
+                (decode_one(engine.memory().unwrap(), GuestAddress(pc)))
+                    .expect_err("instruction must fail to decode"),
+                fetch_error(pc, 0x2000, length, FaultReason::Permission),
             );
             permission += 1;
         }
@@ -818,7 +789,11 @@ fn every_consumed_cl_byte_invalidates_while_data_and_unrelated_code_do_not() {
                             Owner::Resident => HostError::Resident(RegistryError::CodeInvalidated),
                         };
                         assert!(!engine.memory().unwrap().is_code_current(&snapshot));
-                        assert_eq!(guard(&engine, owner, id), Err(expected));
+                        crate::support_fetch::assert_host_contract(
+                            (guard(&engine, owner, id))
+                                .expect_err("compilation must refuse this fixture"),
+                            expected,
+                        );
                         match owner {
                             Owner::Replacement => {
                                 assert_eq!(engine.artifact_bytes(), Err(expected))
@@ -900,16 +875,33 @@ fn current_cl_admission_and_failures_keep_default_limits_and_prior_owner_state()
                 upload(&mut engine, CODE, &rejected);
                 describe(&mut engine, &[(CODE, rejected.len())], entries);
                 let before = publication(&engine, keep);
-                assert_eq!(
-                    compile(&mut engine, owner, entries, 1),
-                    Err(compile_error(owner, CompileError::InstructionLimit))
+                if entries
+                    && crate::support_admission::admit_if_deferred(
+                        &mut engine,
+                        crate::support_admission::ColdEntryCase {
+                            key: KEY,
+                            keeper: keep,
+                            resident: matches!(owner, Owner::Resident),
+                            pages: &[CODE, KEEP],
+                            expected: CompileError::InstructionLimit,
+                        },
+                    )
+                {
+                    admitted_profiles += 1;
+                    continue;
+                }
+
+                crate::support_fetch::assert_host_contract(
+                    (compile(&mut engine, owner, entries, 1))
+                        .expect_err("compilation must refuse this fixture"),
+                    compile_error(owner, CompileError::InstructionLimit),
                 );
                 assert_retained(&engine, keep, &before);
                 rejected_profiles += 1;
             }
         }
     }
-    assert_eq!((admitted_profiles, rejected_profiles), (8, 8));
+    assert_eq!((admitted_profiles, rejected_profiles), (12, 4));
     let (mut engine, keep) = prior_owners();
     let bytes = [0x90, 0xeb, 0];
     upload(&mut engine, CODE, &bytes);
@@ -925,10 +917,23 @@ fn current_cl_admission_and_failures_keep_default_limits_and_prior_owner_state()
             wasm_bytes: limit,
             ..limits
         };
-        for result in [
+        for (index, result) in [
             compile_region(memory, &[spec(CODE, bytes.len())], tight),
             compile_entry_region(memory, &[GuestAddress(CODE)], tight),
-        ] {
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            if index == 1 {
+                crate::support_admission::assert_entry_byte_budget(
+                    memory,
+                    spec(CODE, bytes.len()),
+                    tight,
+                    result,
+                );
+
+                continue;
+            }
             if limit == actual {
                 assert!(result.is_ok());
             } else {
@@ -963,13 +968,13 @@ fn current_cl_admission_and_failures_keep_default_limits_and_prior_owner_state()
             ..limits
         },
     ] {
-        assert_eq!(
-            compile_region(memory, &[spec(CODE, bytes.len())], invalid).err(),
-            Some(CompileError::InvalidLimits)
+        crate::support_fetch::assert_compile_contract(
+            compile_region(memory, &[spec(CODE, bytes.len())], invalid).unwrap_err(),
+            CompileError::InvalidLimits,
         );
-        assert_eq!(
-            compile_entry_region(memory, &[GuestAddress(CODE)], invalid).err(),
-            Some(CompileError::InvalidLimits)
+        crate::support_fetch::assert_compile_contract(
+            compile_entry_region(memory, &[GuestAddress(CODE)], invalid).unwrap_err(),
+            CompileError::InvalidLimits,
         );
         assert_retained(&engine, keep, &before);
     }
@@ -991,9 +996,10 @@ fn current_cl_admission_and_failures_keep_default_limits_and_prior_owner_state()
             );
             describe(&mut engine, &specs, entries);
             let expected = publication(&engine, keep);
-            assert_eq!(
-                compile(&mut engine, owner, entries, 9),
-                Err(HostError::InvalidRequest)
+            crate::support_fetch::assert_host_contract(
+                (compile(&mut engine, owner, entries, 9))
+                    .expect_err("compilation must refuse this fixture"),
+                HostError::InvalidRequest,
             );
             assert_eq!(publication(&engine, keep), expected);
             assert_eq!(

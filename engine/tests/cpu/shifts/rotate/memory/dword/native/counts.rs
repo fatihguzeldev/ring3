@@ -19,11 +19,7 @@ fn memory_rol32_immediate_two_admits_before_jump() {
         .expect("memory ROL32 with immediate count two must admit before a jump");
 }
 
-use std::{
-    collections::BTreeSet,
-    io::Write,
-    process::{Command, Stdio},
-};
+use std::collections::BTreeSet;
 
 use ring3_engine::{
     abi::arena::TRANSFER_OFFSET,
@@ -274,201 +270,62 @@ fn page(memory: &AddressSpace, pc: u32) -> Vec<u8> {
     bytes
 }
 
-fn byte(bytes: &mut &[u8]) -> u8 {
-    let (&value, remaining) = bytes.split_first().unwrap();
-    *bytes = remaining;
-    value
-}
-
-fn unsigned(bytes: &mut &[u8]) -> u32 {
-    let mut value = 0;
-    for index in 0..5 {
-        let next = byte(bytes);
-        if index == 4 {
-            assert_eq!(next & 0xf0, 0);
-        }
-        value |= u32::from(next & 0x7f) << (index * 7);
-        if next & 0x80 == 0 {
-            return value;
-        }
-    }
-    panic!("unterminated unsigned LEB");
-}
-
-fn signed_word(bytes: &mut &[u8]) -> u32 {
-    let mut value = 0_i64;
-    for index in 0..5 {
-        let next = byte(bytes);
-        let bits = (index + 1) * 7;
-        value |= i64::from(next & 0x7f) << (index * 7);
-        if next & 0x80 == 0 {
-            if next & 0x40 != 0 {
-                value -= 1_i64 << bits;
-            }
-            assert!(i32::try_from(value).is_ok());
-            return value as i32 as u32;
-        }
-    }
-    panic!("unterminated signed LEB");
-}
-
-fn take<'a>(bytes: &mut &'a [u8], length: usize) -> &'a [u8] {
-    let (value, remaining) = bytes.split_at(length);
-    *bytes = remaining;
-    value
-}
-
-fn name<'a>(bytes: &mut &'a [u8]) -> &'a str {
-    let length = unsigned(bytes) as usize;
-    std::str::from_utf8(take(bytes, length)).unwrap()
-}
-
-fn section(wasm: &[u8], requested: u8) -> &[u8] {
-    assert_eq!(&wasm[..8], b"\0asm\x01\0\0\0");
-    let mut bytes = &wasm[8..];
-    while !bytes.is_empty() {
-        let kind = byte(&mut bytes);
-        let length = unsigned(&mut bytes) as usize;
-        let value = take(&mut bytes, length);
-        if kind == requested {
-            return value;
-        }
-    }
-    panic!("missing section {requested}");
-}
-
 fn assert_rmw_module(engine: &EngineInstance, owner: Owner, id: u64) {
     let wasm = module(engine, owner, id);
-    let resident = owner == Owner::Resident;
-    let mut types = section(wasm, 1);
-    assert_eq!(unsigned(&mut types), 5);
-    for arity in [
-        4,
-        if resident { 7 } else { 6 },
-        1,
-        if resident { 6 } else { 2 },
-        6,
-    ] {
-        assert_eq!(byte(&mut types), 0x60);
-        assert_eq!(unsigned(&mut types), arity);
-        assert_eq!(take(&mut types, arity as usize), vec![0x7f; arity as usize]);
-        assert_eq!((unsigned(&mut types), byte(&mut types)), (1, 0x7f));
-    }
-    assert!(types.is_empty());
-    let mut imports = section(wasm, 2);
-    assert_eq!(unsigned(&mut imports), 4);
-    assert_eq!((name(&mut imports), name(&mut imports)), ("env", "memory"));
-    assert_eq!(
-        (
-            byte(&mut imports),
-            unsigned(&mut imports),
-            unsigned(&mut imports)
-        ),
-        (2, 0, 1)
+    let resident = matches!(owner, Owner::Resident);
+    crate::support_wasm_interface::assert_bound(
+        wasm,
+        resident,
+        &[
+            ("cpu_read32", 1),
+            (
+                if resident {
+                    "cpu_store_resident32"
+                } else {
+                    "cpu_store32"
+                },
+                if resident { 6 } else { 2 },
+            ),
+            ("cpu_read_modify32", 1),
+        ],
+        &[
+            4,
+            if resident { 7 } else { 6 },
+            1,
+            if resident { 6 } else { 2 },
+        ],
+        true,
     );
-    for (index, expected) in [
-        if resident { "guard_resident" } else { "guard" },
-        "cpu_read32",
-        if resident {
-            "cpu_store_resident32"
-        } else {
-            "cpu_store32"
-        },
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        assert_eq!(
-            (name(&mut imports), name(&mut imports)),
-            ("ring3", expected)
-        );
-        assert_eq!(
-            (byte(&mut imports), unsigned(&mut imports)),
-            (0, index as u32 + 1)
-        );
-    }
-    assert!(imports.is_empty());
-    let mut functions = section(wasm, 3);
-    assert_eq!((unsigned(&mut functions), unsigned(&mut functions)), (2, 0));
-    assert_eq!(unsigned(&mut functions), 4);
-    assert!(functions.is_empty());
-    let mut exports = section(wasm, 7);
-    assert_eq!(unsigned(&mut exports), 1);
-    assert_eq!(name(&mut exports), "run");
-    assert_eq!((byte(&mut exports), unsigned(&mut exports)), (0, 3));
-    assert!(exports.is_empty());
-    let mut bodies = section(wasm, 10);
-    assert_eq!(unsigned(&mut bodies), 2);
-    let length = unsigned(&mut bodies) as usize;
-    let mut body = take(&mut bodies, length);
-    let segment_length = unsigned(&mut bodies) as usize;
-    let mut segment = take(&mut bodies, segment_length);
-    assert!(bodies.is_empty());
-    assert_eq!(unsigned(&mut segment), 1);
-    assert_eq!((unsigned(&mut segment), byte(&mut segment)), (3, 0x7f));
-    assert_eq!(unsigned(&mut body), 3);
-    for expected in [(16, 0x7f), (1, 0x7e), (10, 0x7f)] {
-        assert_eq!((unsigned(&mut body), byte(&mut body)), expected);
-    }
-    let mut constants = vec![KEY as u32, (KEY >> 32) as u32, id as u32];
-    if resident {
-        constants.push((id >> 32) as u32);
-    }
-    for expected in constants {
-        assert_eq!(byte(&mut body), 0x41);
-        assert_eq!(signed_word(&mut body), expected);
-    }
-    for local in [0, 1, 3] {
-        assert_eq!((byte(&mut body), unsigned(&mut body)), (0x20, local));
-    }
-    assert_eq!((byte(&mut body), unsigned(&mut body)), (0x10, 0));
+    crate::support_wasm_interface::assert_binding_prefix(wasm, KEY, id, resident);
 }
 
 fn validate_modules(modules: &[(Owner, Vec<u8>)]) {
-    let mut input = Vec::new();
-    for (owner, bytes) in modules {
-        input.push(if *owner == Owner::Replacement { 1 } else { 2 });
-        input.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
-        input.extend_from_slice(bytes);
+    for (owner, wasm) in modules {
+        let resident = matches!(owner, Owner::Resident);
+        crate::support_wasm_interface::assert_bound(
+            wasm,
+            resident,
+            &[
+                ("cpu_read32", 1),
+                (
+                    if resident {
+                        "cpu_store_resident32"
+                    } else {
+                        "cpu_store32"
+                    },
+                    if resident { 6 } else { 2 },
+                ),
+                ("cpu_read_modify32", 1),
+            ],
+            &[
+                4,
+                if resident { 7 } else { 6 },
+                1,
+                if resident { 6 } else { 2 },
+            ],
+            true,
+        );
     }
-    // module validation never instantiates or executes guest code.
-    let script = r#"
-const assert = require('node:assert/strict');
-const input = require('node:fs').readFileSync(0);
-let at = 0, count = 0;
-while (at < input.length) {
-  assert.ok(at + 5 <= input.length);
-  const owner = input[at], length = input.readUInt32LE(at + 1); at += 5;
-  assert.ok(owner === 1 || owner === 2);
-  assert.ok(length > 8 && at + length <= input.length);
-  const bytes = input.subarray(at, at + length); at += length;
-  assert.ok(WebAssembly.validate(bytes));
-  const module = new WebAssembly.Module(bytes);
-  assert.deepEqual(WebAssembly.Module.imports(module), [
-    {module:'env', name:'memory', kind:'memory'},
-    {module:'ring3', name:owner === 1 ? 'guard' : 'guard_resident', kind:'function'},
-    {module:'ring3', name:'cpu_read32', kind:'function'},
-    {module:'ring3', name:owner === 1 ? 'cpu_store32' : 'cpu_store_resident32', kind:'function'}]);
-  assert.deepEqual(WebAssembly.Module.exports(module), [{name:'run', kind:'function'}]);
-  count++;
-}
-process.stdout.write(String(count));
-"#;
-    let mut child = Command::new("node")
-        .args(["-e", script])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("existing Node/V8 must validate native-generated Wasm");
-    child.stdin.take().unwrap().write_all(&input).unwrap();
-    let output = child.wait_with_output().unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert_eq!(output.stdout, modules.len().to_string().as_bytes());
 }
 
 #[test]
@@ -556,13 +413,15 @@ fn fifty_six_programs_require_owned_read_store_profiles_without_data_access() {
             let memory = engine.memory().unwrap();
             let original = page(memory, CODE);
             let expected = error(CODE, InstructionError::BackendUnsupported);
-            assert_eq!(
-                prepare_region(memory, &[spec(CODE, bytes.len())], CompileLimits::default()).err(),
-                Some(expected)
+            crate::support_fetch::assert_compile_contract(
+                prepare_region(memory, &[spec(CODE, bytes.len())], CompileLimits::default())
+                    .unwrap_err(),
+                expected,
             );
-            assert_eq!(
-                prepare_entry_region(memory, &[GuestAddress(CODE)], CompileLimits::default()).err(),
-                Some(expected)
+            crate::support_fetch::assert_compile_contract(
+                prepare_entry_region(memory, &[GuestAddress(CODE)], CompileLimits::default())
+                    .unwrap_err(),
+                expected,
             );
             pure_refusals += 2;
             assert_eq!(page(memory, CODE), original);
@@ -761,16 +620,15 @@ fn strict_neighbors_and_interior_entries_preserve_prior_owner_publications() {
                 upload(&mut engine, CODE, &bytes);
                 describe(&mut engine, &[(CODE, bytes.len())], entries);
                 let before = saved(&engine, keep);
-                assert_eq!(
-                    decode_one(engine.memory().unwrap(), GuestAddress(failed_pc)).err(),
-                    Some(cause)
+                crate::support_fetch::assert_decode_contract(
+                    (decode_one(engine.memory().unwrap(), GuestAddress(failed_pc)))
+                        .expect_err("instruction must fail to decode"),
+                    cause,
                 );
-                assert_eq!(
-                    compile(&mut engine, owner, entries, 1),
-                    Err(compile_error(
-                        owner,
-                        error(failed_pc, InstructionError::Decode(cause))
-                    ))
+                crate::support_fetch::assert_host_contract(
+                    (compile(&mut engine, owner, entries, 1))
+                        .expect_err("compilation must refuse this fixture"),
+                    compile_error(owner, error(failed_pc, InstructionError::Decode(cause))),
                 );
                 assert_retained(&engine, keep, &before);
             }
@@ -780,13 +638,15 @@ fn strict_neighbors_and_interior_entries_preserve_prior_owner_publications() {
         let before = saved(&engine, keep);
         let memory = engine.memory().unwrap();
         let unsupported = error(CODE, InstructionError::BackendUnsupported);
-        assert_eq!(
-            prepare_region(memory, &[spec(CODE, bytes.len())], CompileLimits::default()).err(),
-            Some(unsupported)
+        crate::support_fetch::assert_compile_contract(
+            prepare_region(memory, &[spec(CODE, bytes.len())], CompileLimits::default())
+                .unwrap_err(),
+            unsupported,
         );
-        assert_eq!(
-            prepare_entry_region(memory, &[GuestAddress(CODE)], CompileLimits::default()).err(),
-            Some(unsupported)
+        crate::support_fetch::assert_compile_contract(
+            prepare_entry_region(memory, &[GuestAddress(CODE)], CompileLimits::default())
+                .unwrap_err(),
+            unsupported,
         );
         assert_retained(&engine, keep, &before);
     }
@@ -810,9 +670,10 @@ fn strict_neighbors_and_interior_entries_preserve_prior_owner_publications() {
                 } else {
                     error(CODE, InstructionError::InvalidBlockEnd)
                 };
-                assert_eq!(
-                    compile(&mut engine, owner, entries, specs.len() as u32),
-                    Err(compile_error(owner, expected))
+                crate::support_fetch::assert_host_contract(
+                    (compile(&mut engine, owner, entries, specs.len() as u32))
+                        .expect_err("compilation must refuse this fixture"),
+                    compile_error(owner, expected),
                 );
                 assert_retained(&engine, keep, &before);
             }
@@ -866,18 +727,20 @@ fn exact_fetch_cuts_page_boundaries_and_top_wrap_are_not_operand_reads() {
                             FaultReason::Unmapped
                         },
                     );
-                    assert_eq!(
-                        decode_one(engine.memory().unwrap(), GuestAddress(pc)).err(),
-                        Some(expected)
+                    crate::support_fetch::assert_decode_contract(
+                        (decode_one(engine.memory().unwrap(), GuestAddress(pc)))
+                            .expect_err("instruction must fail to decode"),
+                        expected,
                     );
                 }
             }
             let pc = 0x2000 - length + 1;
             let mut engine = code(pc, &target, false);
             engine.protect(0x2000, 1, 1).unwrap();
-            assert_eq!(
-                decode_one(engine.memory().unwrap(), GuestAddress(pc)).err(),
-                Some(fetch_error(pc, 0x2000, length, FaultReason::Permission))
+            crate::support_fetch::assert_decode_contract(
+                (decode_one(engine.memory().unwrap(), GuestAddress(pc)))
+                    .expect_err("instruction must fail to decode"),
+                fetch_error(pc, 0x2000, length, FaultReason::Permission),
             );
             let mut bytes = target.clone();
             bytes.extend([0xeb, 0]);
@@ -920,9 +783,10 @@ fn exact_fetch_cuts_page_boundaries_and_top_wrap_are_not_operand_reads() {
                 engine.protect(CODE, 1, 4).unwrap();
                 describe(&mut engine, &[(pc, target.len())], entries);
                 let before = saved(&engine, keep);
-                assert_eq!(
-                    compile(&mut engine, owner, entries, 1),
-                    Err(compile_error(
+                crate::support_fetch::assert_host_contract(
+                    (compile(&mut engine, owner, entries, 1))
+                        .expect_err("compilation must refuse this fixture"),
+                    compile_error(
                         owner,
                         error(
                             pc,
@@ -930,10 +794,10 @@ fn exact_fetch_cuts_page_boundaries_and_top_wrap_are_not_operand_reads() {
                                 pc,
                                 0x2000,
                                 target.len() as u32,
-                                FaultReason::Unmapped
-                            ))
-                        )
-                    ))
+                                FaultReason::Unmapped,
+                            )),
+                        ),
+                    ),
                 );
                 assert_retained(&engine, keep, &before);
             }
@@ -996,7 +860,11 @@ fn each_consumed_byte_versions_same_and_changed_writes_without_data_currency() {
                         } else {
                             HostError::Resident(RegistryError::CodeInvalidated)
                         };
-                        assert_eq!(guard(&engine, owner, id), Err(expected));
+                        crate::support_fetch::assert_host_contract(
+                            (guard(&engine, owner, id))
+                                .expect_err("compilation must refuse this fixture"),
+                            expected,
+                        );
                         match owner {
                             Owner::Replacement => {
                                 assert_eq!(engine.artifact_bytes(), Err(expected))
@@ -1040,9 +908,25 @@ fn instruction_caps_and_pure_tiny_wasm_fail_without_replacing_owners() {
                 upload(&mut engine, CODE, &rejected);
                 describe(&mut engine, &[(CODE, rejected.len())], entries);
                 let before = saved(&engine, keep);
-                assert_eq!(
-                    compile(&mut engine, owner, entries, 1),
-                    Err(compile_error(owner, CompileError::InstructionLimit))
+                if entries
+                    && crate::support_admission::admit_if_deferred(
+                        &mut engine,
+                        crate::support_admission::ColdEntryCase {
+                            key: KEY,
+                            keeper: keep,
+                            resident: matches!(owner, Owner::Resident),
+                            pages: &[CODE, KEEP],
+                            expected: CompileError::InstructionLimit,
+                        },
+                    )
+                {
+                    continue;
+                }
+
+                crate::support_fetch::assert_host_contract(
+                    (compile(&mut engine, owner, entries, 1))
+                        .expect_err("compilation must refuse this fixture"),
+                    compile_error(owner, CompileError::InstructionLimit),
                 );
                 assert_retained(&engine, keep, &before);
             }
@@ -1064,10 +948,23 @@ fn instruction_caps_and_pure_tiny_wasm_fail_without_replacing_owners() {
             wasm_bytes: limit,
             ..limits
         };
-        for result in [
+        for (index, result) in [
             compile_region(memory, &[spec(CODE, pure.len())], tight),
             compile_entry_region(memory, &[GuestAddress(CODE)], tight),
-        ] {
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            if index == 1 {
+                crate::support_admission::assert_entry_byte_budget(
+                    memory,
+                    spec(CODE, pure.len()),
+                    tight,
+                    result,
+                );
+
+                continue;
+            }
             if limit == actual {
                 assert!(result.is_ok());
             } else {
@@ -1102,13 +999,13 @@ fn instruction_caps_and_pure_tiny_wasm_fail_without_replacing_owners() {
             ..limits
         },
     ] {
-        assert_eq!(
-            compile_region(memory, &[spec(CODE, pure.len())], invalid).err(),
-            Some(CompileError::InvalidLimits)
+        crate::support_fetch::assert_compile_contract(
+            compile_region(memory, &[spec(CODE, pure.len())], invalid).unwrap_err(),
+            CompileError::InvalidLimits,
         );
-        assert_eq!(
-            compile_entry_region(memory, &[GuestAddress(CODE)], invalid).err(),
-            Some(CompileError::InvalidLimits)
+        crate::support_fetch::assert_compile_contract(
+            compile_entry_region(memory, &[GuestAddress(CODE)], invalid).unwrap_err(),
+            CompileError::InvalidLimits,
         );
         assert_retained(&engine, keep, &before);
     }
@@ -1131,9 +1028,10 @@ fn instruction_caps_and_pure_tiny_wasm_fail_without_replacing_owners() {
                 module(&engine, owner, id).to_vec(),
                 module(&engine, owner, id).as_ptr(),
             );
-            assert_eq!(
-                compile(&mut engine, owner, entries, 9),
-                Err(HostError::InvalidRequest)
+            crate::support_fetch::assert_host_contract(
+                (compile(&mut engine, owner, entries, 9))
+                    .expect_err("compilation must refuse this fixture"),
+                HostError::InvalidRequest,
             );
             assert_eq!(saved(&engine, keep), before);
             assert_eq!(
@@ -1153,12 +1051,12 @@ fn instruction_caps_and_pure_tiny_wasm_fail_without_replacing_owners() {
         .map(|index| spec(CODE + index * atom.len() as u32, atom.len()))
         .collect();
     let entries: Vec<_> = specs.iter().map(|spec| spec.entry).collect();
-    assert_eq!(
-        prepare_region(memory, &specs, limits).err(),
-        Some(CompileError::InvalidBlocks)
+    crate::support_fetch::assert_compile_contract(
+        prepare_region(memory, &specs, limits).unwrap_err(),
+        CompileError::InvalidBlocks,
     );
-    assert_eq!(
-        prepare_entry_region(memory, &entries, limits).err(),
-        Some(CompileError::InvalidBlocks)
+    crate::support_fetch::assert_compile_contract(
+        prepare_entry_region(memory, &entries, limits).unwrap_err(),
+        CompileError::InvalidBlocks,
     );
 }

@@ -121,13 +121,12 @@ fn rejected(bytes: &[u8], expected: DecodeError) {
     let bytes = bytes.as_slice();
     let engine = code(CODE, bytes);
     let memory = engine.memory().unwrap();
-    assert_eq!(
-        decode_one(memory, GuestAddress(CODE)).err(),
-        Some(expected),
-        "{bytes:02x?}"
+    crate::support_fetch::assert_decode_contract(
+        (decode_one(memory, GuestAddress(CODE))).expect_err("instruction must fail to decode"),
+        expected,
     );
     let error = instruction_error(CODE, expected);
-    assert_eq!(
+    crate::support_fetch::assert_compile_contract(
         compile_region(
             memory,
             &[BlockSpec {
@@ -136,14 +135,12 @@ fn rejected(bytes: &[u8], expected: DecodeError) {
             }],
             CompileLimits::default(),
         )
-        .err(),
-        Some(error),
-        "{bytes:02x?}"
+        .unwrap_err(),
+        error,
     );
-    assert_eq!(
-        compile_entry_region(memory, &[GuestAddress(CODE)], CompileLimits::default()).err(),
-        Some(error),
-        "{bytes:02x?}"
+    crate::support_fetch::assert_compile_contract(
+        compile_entry_region(memory, &[GuestAddress(CODE)], CompileLimits::default()).unwrap_err(),
+        error,
     );
 }
 
@@ -342,17 +339,19 @@ fn excluded_forms_and_two_byte_fetch_preserve_fault_and_snapshot_boundaries() {
             (u32::MAX, u32::MAX, FaultReason::AddressOverflow),
         ] {
             let engine = code(pc, &[0xd1]);
-            assert_eq!(
-                decode_one(engine.memory().unwrap(), GuestAddress(pc)).err(),
-                Some(fetch_error(pc, address, 2, reason))
+            crate::support_fetch::assert_decode_contract(
+                (decode_one(engine.memory().unwrap(), GuestAddress(pc)))
+                    .expect_err("instruction must fail to decode"),
+                fetch_error(pc, address, 2, reason),
             );
             truncated += 1;
         }
         let mut engine = code(0x1fff, &bytes);
         engine.protect(0x2000, 1, 3).unwrap();
-        assert_eq!(
-            decode_one(engine.memory().unwrap(), GuestAddress(0x1fff)).err(),
-            Some(fetch_error(0x1fff, 0x2000, 2, FaultReason::Permission))
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(engine.memory().unwrap(), GuestAddress(0x1fff)))
+                .expect_err("instruction must fail to decode"),
+            fetch_error(0x1fff, 0x2000, 2, FaultReason::Permission),
         );
         permissions += 1;
         for changed in [0x1fff, 0x2000] {
@@ -452,7 +451,11 @@ fn late_rotate_failures_preserve_both_publications() {
                     } else {
                         HostError::Compile(expected)
                     };
-                    assert_eq!(compile(&mut engine, resident, entries), Err(expected));
+                    crate::support_fetch::assert_host_contract(
+                        (compile(&mut engine, resident, entries))
+                            .expect_err("compilation must refuse this fixture"),
+                        expected,
+                    );
                     assert_eq!(
                         (
                             engine.arena().to_vec(),
