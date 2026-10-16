@@ -209,12 +209,9 @@ fn embedded_indirect_call_and_jump_are_terminators_at_their_original_pc() {
     ] {
         let bytes = [0x90, instruction[0], instruction[1], 0x90];
         let mut engine = with_code(&bytes);
-        assert_eq!(
-            compile(&mut engine, 0x1000, 4),
-            Err(HostError::Compile(instruction_error(
-                0x1001,
-                InstructionError::InvalidBlockEnd
-            )))
+        crate::support_fetch::assert_host_contract(
+            (compile(&mut engine, 0x1000, 4)).expect_err("compilation must refuse this fixture"),
+            HostError::Compile(instruction_error(0x1001, InstructionError::InvalidBlockEnd)),
         );
         assert_eq!(engine.generation(), 0);
     }
@@ -255,12 +252,9 @@ fn standalone_retains_call_and_jump_error_priority_asymmetry() {
 fn declared_spans_cannot_cut_indirect_target_encodings() {
     for instruction in [&[0xff, 0xd4][..], &[0xff, 0xe4][..]] {
         let mut engine = with_code(&[0x90, instruction[0], instruction[1]]);
-        assert_eq!(
-            compile(&mut engine, 0x1000, 2),
-            Err(HostError::Compile(instruction_error(
-                0x1001,
-                InstructionError::InvalidBlockEnd
-            )))
+        crate::support_fetch::assert_host_contract(
+            (compile(&mut engine, 0x1000, 2)).expect_err("compilation must refuse this fixture"),
+            HostError::Compile(instruction_error(0x1001, InstructionError::InvalidBlockEnd)),
         );
     }
     for (name, _, instruction) in MEMORY_FORMS {
@@ -374,9 +368,10 @@ fn far_prefixed_and_other_unimplemented_forms_keep_their_precise_errors() {
             engine.guard(KEY, 1).unwrap();
             continue;
         }
-        assert_eq!(
-            compile(&mut engine, 0x1000, bytes.len() as u32),
-            Err(HostError::Compile(instruction_error(0x1001, cause)))
+        crate::support_fetch::assert_host_contract(
+            (compile(&mut engine, 0x1000, bytes.len() as u32))
+                .expect_err("compilation must refuse this fixture"),
+            HostError::Compile(instruction_error(0x1001, cause)),
         );
         assert_eq!(engine.generation(), 0);
     }

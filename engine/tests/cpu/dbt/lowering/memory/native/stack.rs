@@ -247,12 +247,13 @@ fn prefixes_and_far_transfers_keep_decoder_errors_after_a_memory_stack_prefix() 
             engine.guard(KEY, 1).unwrap();
             continue;
         }
-        assert_eq!(
-            compile(&mut engine, 0x1000, bytes.len() as u32),
-            Err(HostError::Compile(instruction_error(
+        crate::support_fetch::assert_host_contract(
+            (compile(&mut engine, 0x1000, bytes.len() as u32))
+                .expect_err("compilation must refuse this fixture"),
+            HostError::Compile(instruction_error(
                 0x1007,
-                InstructionError::Decode(DecodeError::Unsupported(feature))
-            )))
+                InstructionError::Decode(DecodeError::Unsupported(feature)),
+            )),
         );
         assert_eq!(engine.generation(), 0);
     }

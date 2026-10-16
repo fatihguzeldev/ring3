@@ -547,8 +547,8 @@ fn extended_families_decode_and_privileged_or_reserved_forms_stay_explicit() {
     ] {
         let space = code_space(0x1000, bytes, Permissions::EXECUTE);
         crate::support_fetch::assert_decode_contract(
-            (decode_one(&space, GuestAddress(0x1000)).err())
-                .expect("instruction must fail to decode"),
+            (decode_one(&space, GuestAddress(0x1000)))
+                .expect_err("instruction must fail to decode"),
             DecodeError::Unsupported(expected),
         );
     }

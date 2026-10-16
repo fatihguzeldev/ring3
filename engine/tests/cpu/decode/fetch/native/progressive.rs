@@ -41,7 +41,7 @@ fn incomplete_top_dword_move_faults_at_original_pc_despite_mapped_zero_completio
     let pc = GuestAddress(u32::MAX);
     let memory = top_code(pc.0, &[0xb8]);
     crate::support_fetch::assert_error(
-        (decode_one(&memory, pc).err()).expect("code fetch must fail"),
+        (decode_one(&memory, pc)).expect_err("code fetch must fail"),
         pc.0,
         pc.0,
         FaultReason::AddressOverflow,
@@ -54,7 +54,7 @@ fn incomplete_top_word_move_keeps_original_pc_and_progressive_fault_length() {
     let pc = GuestAddress(u32::MAX - 1);
     let memory = top_code(pc.0, &[0x66, 0xb8]);
     crate::support_fetch::assert_error(
-        (decode_one(&memory, pc).err()).expect("code fetch must fail"),
+        (decode_one(&memory, pc)).expect_err("code fetch must fail"),
         pc.0,
         pc.0,
         FaultReason::AddressOverflow,

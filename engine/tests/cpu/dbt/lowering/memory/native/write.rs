@@ -731,14 +731,15 @@ fn failed_decode_after_each_writing_form_retains_artifact_arena_and_generation_u
             instance.upload(0x3000, bad.len() as u32).unwrap();
             describe(&mut instance, 0x3000, bad.len());
             let arena = instance.arena().to_vec();
-            assert_eq!(
-                compile(&mut instance, entries),
-                Err(HostError::Compile(instruction_error(
+            crate::support_fetch::assert_host_contract(
+                (compile(&mut instance, entries))
+                    .expect_err("compilation must refuse this fixture"),
+                HostError::Compile(instruction_error(
                     0x3000 + instruction.len() as u32,
                     InstructionError::Decode(DecodeError::Unsupported(
-                        UnsupportedFeature::Privileged
-                    ))
-                )))
+                        UnsupportedFeature::Privileged,
+                    )),
+                )),
             );
             assert_eq!(instance.arena(), arena);
             assert_eq!(instance.generation(), 1);

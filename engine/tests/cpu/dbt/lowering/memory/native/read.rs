@@ -180,12 +180,13 @@ fn decoder_exclusions_after_a_memory_prefix_remain_rejected_at_their_pc() {
         let mut bytes = vec![0x90, 0x8b, 0x03];
         bytes.extend_from_slice(&instruction);
         upload(&mut engine, 0x1000, &bytes);
-        assert_eq!(
-            compile(&mut engine, 0x1000, bytes.len() as u32),
-            Err(HostError::Compile(CompileError::Instruction {
+        crate::support_fetch::assert_host_contract(
+            (compile(&mut engine, 0x1000, bytes.len() as u32))
+                .expect_err("compilation must refuse this fixture"),
+            HostError::Compile(CompileError::Instruction {
                 pc: GuestAddress(0x1003),
                 cause: InstructionError::Decode(cause),
-            }))
+            }),
         );
         assert_eq!(engine.generation(), 0);
         assert_eq!(engine.artifact_bytes(), Err(HostError::InvalidArtifact));
@@ -229,12 +230,12 @@ fn memory_move_declared_end_must_still_be_an_instruction_boundary() {
     let mut engine = EngineInstance::new(1, KEY).unwrap();
     engine.map(0x1000, 1, 7).unwrap();
     upload(&mut engine, 0x1000, &[0x90, 0xa1, 0x78, 0x56, 0x34, 0x12]);
-    assert_eq!(
-        compile(&mut engine, 0x1000, 5),
-        Err(HostError::Compile(CompileError::Instruction {
+    crate::support_fetch::assert_host_contract(
+        (compile(&mut engine, 0x1000, 5)).expect_err("compilation must refuse this fixture"),
+        HostError::Compile(CompileError::Instruction {
             pc: GuestAddress(0x1001),
             cause: InstructionError::InvalidBlockEnd,
-        }))
+        }),
     );
     assert_eq!(engine.generation(), 0);
 }

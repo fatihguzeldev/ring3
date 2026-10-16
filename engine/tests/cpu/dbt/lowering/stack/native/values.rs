@@ -128,12 +128,9 @@ fn near_ret_cleanup_accepts_unsigned_unaligned_counts_only_at_block_end() {
         let mut engine = with_code(&bytes);
         assert_eq!(compile(&mut engine, 0x1000, 4), Ok(1));
         let artifact = engine.artifact_bytes().unwrap().to_vec();
-        assert_eq!(
-            compile(&mut engine, 0x1000, 5),
-            Err(HostError::Compile(instruction_error(
-                0x1001,
-                InstructionError::InvalidBlockEnd
-            )))
+        crate::support_fetch::assert_host_contract(
+            (compile(&mut engine, 0x1000, 5)).expect_err("compilation must refuse this fixture"),
+            HostError::Compile(instruction_error(0x1001, InstructionError::InvalidBlockEnd)),
         );
         assert_eq!(engine.generation(), 1);
         assert_eq!(engine.artifact_bytes().unwrap(), artifact);
@@ -149,12 +146,10 @@ fn call_and_ret_still_terminate_blocks_after_sequential_push_and_pop() {
         bytes.push(0x90);
         let mut engine = with_code(&bytes);
         assert_eq!(compile(&mut engine, 0x1000, bytes.len() as u32 - 1), Ok(1));
-        assert_eq!(
-            compile(&mut engine, 0x1000, bytes.len() as u32),
-            Err(HostError::Compile(instruction_error(
-                0x1002,
-                InstructionError::InvalidBlockEnd
-            )))
+        crate::support_fetch::assert_host_contract(
+            (compile(&mut engine, 0x1000, bytes.len() as u32))
+                .expect_err("compilation must refuse this fixture"),
+            HostError::Compile(instruction_error(0x1002, InstructionError::InvalidBlockEnd)),
         );
         assert_eq!(engine.generation(), 1);
         engine.guard(KEY, 1).unwrap();
@@ -281,12 +276,13 @@ fn expanded_stack_operations_keep_prefix_and_far_decoder_exclusions() {
             engine.guard(KEY, 1).unwrap();
             continue;
         }
-        assert_eq!(
-            compile(&mut engine, 0x1000, bytes.len() as u32),
-            Err(HostError::Compile(instruction_error(
+        crate::support_fetch::assert_host_contract(
+            (compile(&mut engine, 0x1000, bytes.len() as u32))
+                .expect_err("compilation must refuse this fixture"),
+            HostError::Compile(instruction_error(
                 0x1002,
-                InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode))
-            )))
+                InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
+            )),
         );
         assert_eq!(engine.generation(), 0);
     }
@@ -306,12 +302,10 @@ fn declared_spans_cannot_cut_new_multibyte_stack_instructions() {
         let mut bytes = vec![0x90];
         bytes.extend_from_slice(instruction);
         let mut engine = with_code(&bytes);
-        assert_eq!(
-            compile(&mut engine, 0x1000, bytes.len() as u32 - 1),
-            Err(HostError::Compile(instruction_error(
-                0x1001,
-                InstructionError::InvalidBlockEnd
-            )))
+        crate::support_fetch::assert_host_contract(
+            (compile(&mut engine, 0x1000, bytes.len() as u32 - 1))
+                .expect_err("compilation must refuse this fixture"),
+            HostError::Compile(instruction_error(0x1001, InstructionError::InvalidBlockEnd)),
         );
         assert_eq!(engine.generation(), 0);
     }

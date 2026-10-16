@@ -399,20 +399,21 @@ fn final_complete_lea_stops_at_address_space_end_and_incomplete_lea_keeps_execut
         explicit.wasm_bytes(&memory).unwrap()
     );
     let memory = code(u32::MAX, &[0x8d]);
-    assert_eq!(
-        prepare_entry_region(&memory, &[GuestAddress(u32::MAX)], CompileLimits::default()).err(),
-        Some(CompileError::Instruction {
+    crate::support_fetch::assert_compile_contract(
+        (prepare_entry_region(&memory, &[GuestAddress(u32::MAX)], CompileLimits::default()))
+            .expect_err("code preparation must fail"),
+        CompileError::Instruction {
             pc: GuestAddress(u32::MAX),
             cause: InstructionError::Decode(DecodeError::MemoryFault {
                 pc: GuestAddress(u32::MAX),
                 fault: MemoryFault {
                     address: GuestAddress(u32::MAX),
                     access: Access::Execute,
-                    reason: FaultReason::AddressOverflow
+                    reason: FaultReason::AddressOverflow,
                 },
                 length: 2,
             }),
-        })
+        },
     );
 }
 

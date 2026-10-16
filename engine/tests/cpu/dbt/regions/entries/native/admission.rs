@@ -253,8 +253,8 @@ fn standalone_admission_rejects_decodable_out_of_profile_before_termination() {
 fn decode_faults_retain_exact_pc_execute_address_reason_and_attempted_length() {
     let memory = AddressSpace::new(1).unwrap();
     crate::support_fetch::assert_compile_contract(
-        (prepare_entry_region(&memory, &[GuestAddress(0x1234)], CompileLimits::default()).err())
-            .expect("code preparation must fail"),
+        (prepare_entry_region(&memory, &[GuestAddress(0x1234)], CompileLimits::default()))
+            .expect_err("code preparation must fail"),
         instruction_error(
             0x1234,
             InstructionError::Decode(DecodeError::MemoryFault {
@@ -274,9 +274,8 @@ fn decode_faults_retain_exact_pc_execute_address_reason_and_attempted_length() {
             memory.map_zeroed(range(0x2000, 1), permission).unwrap();
         }
         crate::support_fetch::assert_compile_contract(
-            (prepare_entry_region(&memory, &[GuestAddress(0x1fff)], CompileLimits::default())
-                .err())
-            .expect("code preparation must fail"),
+            (prepare_entry_region(&memory, &[GuestAddress(0x1fff)], CompileLimits::default()))
+                .expect_err("code preparation must fail"),
             instruction_error(
                 0x1fff,
                 InstructionError::Decode(DecodeError::MemoryFault {
@@ -297,8 +296,8 @@ fn decode_faults_retain_exact_pc_execute_address_reason_and_attempted_length() {
     }
     memory.protect(range(0x1000, 1), Permissions::READ).unwrap();
     crate::support_fetch::assert_compile_contract(
-        (prepare_entry_region(&memory, &[GuestAddress(0x1fff)], CompileLimits::default()).err())
-            .expect("code preparation must fail"),
+        (prepare_entry_region(&memory, &[GuestAddress(0x1fff)], CompileLimits::default()))
+            .expect_err("code preparation must fail"),
         instruction_error(
             0x1fff,
             InstructionError::Decode(DecodeError::MemoryFault {
@@ -426,8 +425,8 @@ fn exact_address_space_end_stops_without_wrapping_fetch_to_zero() {
     }
     let memory = code(u32::MAX, &[0xb8]);
     crate::support_fetch::assert_compile_contract(
-        (prepare_entry_region(&memory, &[GuestAddress(u32::MAX)], CompileLimits::default()).err())
-            .expect("code preparation must fail"),
+        (prepare_entry_region(&memory, &[GuestAddress(u32::MAX)], CompileLimits::default()))
+            .expect_err("code preparation must fail"),
         instruction_error(
             u32::MAX,
             InstructionError::Decode(DecodeError::MemoryFault {
