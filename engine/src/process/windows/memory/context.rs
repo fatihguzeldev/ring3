@@ -44,11 +44,36 @@ impl EngineInstance {
             .map_err(HostError::Memory)
     }
     pub(in crate::process) fn free_windows_runtime_bytes(&mut self, pointer: u32) {
+        self.release_windows_runtime_bytes(pointer)
+            .expect("runtime allocation ownership was preflighted");
+    }
+    pub(in crate::process) fn release_windows_runtime_bytes(
+        &mut self,
+        pointer: u32,
+    ) -> Result<(), HostError> {
         let heap = self.process_heap().unwrap();
         self.windows_memory
             .heaps
             .free(heap, 0, pointer)
-            .expect("runtime allocation ownership was preflighted");
+            .map_err(HostError::WindowsMemory)
+    }
+    pub(in crate::process) fn resize_windows_runtime_bytes(
+        &mut self,
+        pointer: u32,
+        size: u32,
+    ) -> Result<u32, HostError> {
+        let heap = self.ensure_process_heap()?;
+        self.windows_memory
+            .heaps
+            .reallocate(
+                &mut self.windows_memory.virtual_memory,
+                self.memory.as_mut().unwrap(),
+                heap,
+                0,
+                pointer,
+                size,
+            )
+            .map_err(HostError::WindowsMemory)
     }
     pub fn configure_windows_memory(&mut self, limits: MemoryLimits32) -> Result<(), HostError> {
         self.memory()?;

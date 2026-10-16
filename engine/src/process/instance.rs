@@ -110,6 +110,7 @@ pub struct EngineInstance {
     pub(in crate::process) dsound: Option<crate::process::windows::dsound::DSoundRuntime32>,
     pub(in crate::process) dinput: Option<crate::process::windows::dinput::DirectInputRuntime32>,
     pub(in crate::process) ole32: Option<crate::process::windows::ole32::Ole32Runtime32>,
+    pub(in crate::process) ole32_task_memory: crate::process::windows::ole32::Ole32TaskMemory32,
     pub(in crate::process) winmm: crate::process::windows::winmm::WinmmRuntime32,
 }
 
@@ -187,6 +188,7 @@ impl EngineInstance {
             dsound: None,
             dinput: None,
             ole32: None,
+            ole32_task_memory: Default::default(),
             winmm: Default::default(),
         })
     }
@@ -229,6 +231,7 @@ impl EngineInstance {
         self.dsound = None;
         self.dinput = None;
         self.ole32 = None;
+        self.ole32_task_memory = Default::default();
         self.winmm = Default::default();
         self.execution_cache = None;
         self.numerical_workspace = Default::default();

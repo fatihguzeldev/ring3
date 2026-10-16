@@ -45,6 +45,11 @@ impl EngineInstance {
             return Err(HostError::Call(CallError::InvalidRequest));
         }
         Self::prepare_completed_call(frame.complete(0))?;
+        if let Some(api) = api.filter(|api| api.is_task_memory()) {
+            let result = self.ole32_task_memory_call(api, frame.arguments())?;
+            self.publish_prepared_call(Self::prepare_completed_call(frame.complete(result))?);
+            return Ok(true);
+        }
         let thread = self.current_windows_thread_id()?;
         let gates = if api == Some(Ole32Api32::CoGetClassObject) {
             Some(self.module_gates()?)
@@ -95,6 +100,9 @@ impl EngineInstance {
                     return Ok(0);
                 }
                 Ole32Api32::CoGetClassObject | Ole32Api32::CoCreateInstance => {}
+                Ole32Api32::CoTaskMemAlloc
+                | Ole32Api32::CoTaskMemRealloc
+                | Ole32Api32::CoTaskMemFree => unreachable!(),
             }
             let memory = self.memory.as_mut().ok_or(HResult32::UNEXPECTED)?;
             let out = args[4];

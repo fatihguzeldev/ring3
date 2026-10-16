@@ -46,6 +46,7 @@ impl EngineInstance {
             user32.terminate_raw_input();
         }
         self.ole32 = None;
+        self.ole32_task_memory = Default::default();
     }
     pub(in crate::process) fn check_media_output_session(&self) -> Result<(), HostError> {
         if self.is_open() {

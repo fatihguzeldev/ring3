@@ -9,9 +9,12 @@ pub enum Ole32Api32 {
     CoGetClassObject = 0x000d_0005,
     CoFreeUnusedLibraries = 0x000d_0006,
     CoFreeUnusedLibrariesEx = 0x000d_0007,
+    CoTaskMemAlloc = 0x000d_0008,
+    CoTaskMemRealloc = 0x000d_0009,
+    CoTaskMemFree = 0x000d_000a,
 }
 impl Ole32Api32 {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 10] = [
         Self::CoInitialize,
         Self::CoInitializeEx,
         Self::CoUninitialize,
@@ -19,6 +22,9 @@ impl Ole32Api32 {
         Self::CoGetClassObject,
         Self::CoFreeUnusedLibraries,
         Self::CoFreeUnusedLibrariesEx,
+        Self::CoTaskMemAlloc,
+        Self::CoTaskMemRealloc,
+        Self::CoTaskMemFree,
     ];
     pub fn from_id(id: u32) -> Option<Self> {
         Self::ALL.into_iter().find(|api| *api as u32 == id)
@@ -35,15 +41,24 @@ impl Ole32Api32 {
             Self::CoGetClassObject => "CoGetClassObject",
             Self::CoFreeUnusedLibraries => "CoFreeUnusedLibraries",
             Self::CoFreeUnusedLibrariesEx => "CoFreeUnusedLibrariesEx",
+            Self::CoTaskMemAlloc => "CoTaskMemAlloc",
+            Self::CoTaskMemRealloc => "CoTaskMemRealloc",
+            Self::CoTaskMemFree => "CoTaskMemFree",
         }
     }
     pub fn stack_words(self) -> u32 {
         match self {
-            Self::CoInitialize => 1,
-            Self::CoInitializeEx | Self::CoFreeUnusedLibrariesEx => 2,
+            Self::CoInitialize | Self::CoTaskMemAlloc | Self::CoTaskMemFree => 1,
+            Self::CoInitializeEx | Self::CoFreeUnusedLibrariesEx | Self::CoTaskMemRealloc => 2,
             Self::CoCreateInstance | Self::CoGetClassObject => 5,
             _ => 0,
         }
+    }
+    pub(crate) fn is_task_memory(self) -> bool {
+        matches!(
+            self,
+            Self::CoTaskMemAlloc | Self::CoTaskMemRealloc | Self::CoTaskMemFree
+        )
     }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
