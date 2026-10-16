@@ -3,11 +3,7 @@ use crate::{
     memory::{Access, AddressSpace, GuestAddress},
 };
 
-const CP1252: [u16; 32] = [
-    0x20ac, 0x81, 0x201a, 0x192, 0x201e, 0x2026, 0x2020, 0x2021, 0x2c6, 0x2030, 0x160, 0x2039,
-    0x152, 0x8d, 0x17d, 0x8f, 0x90, 0x2018, 0x2019, 0x201c, 0x201d, 0x2022, 0x2013, 0x2014, 0x2dc,
-    0x2122, 0x161, 0x203a, 0x153, 0x9d, 0x17e, 0x178,
-];
+
 
 pub(in crate::process::windows::files) fn output(
     memory: &AddressSpace,
@@ -63,11 +59,7 @@ pub(in crate::process::windows::files) fn path(
             u16::from_le_bytes(read(memory, at)?)
         } else {
             let byte = read::<1>(memory, at)?[0];
-            if (0x80..0xa0).contains(&byte) {
-                CP1252[usize::from(byte - 0x80)]
-            } else {
-                u16::from(byte)
-            }
+            crate::windows::text::CodePage32::Windows1252.decode_byte(byte).expect("CP1252 is single-byte")
         };
         if unit == 0 {
             return Ok(units);
@@ -87,17 +79,7 @@ pub(super) fn encoded(units: &[u16], wide: bool, nul: bool) -> Result<Vec<u8>, F
             bytes.extend_from_slice(&unit.to_le_bytes());
         }
     } else {
-        for unit in char::decode_utf16(units.iter().copied()) {
-            let code = unit.map_or(u32::from(b'?'), |unit| unit as u32);
-            bytes.push(if code < 0x80 || (0xa0..=0xff).contains(&code) {
-                code as u8
-            } else {
-                CP1252
-                    .iter()
-                    .position(|&value| u32::from(value) == code)
-                    .map_or(b'?', |index| 0x80 + index as u8)
-            });
-        }
+        bytes.extend(crate::windows::text::CodePage32::Windows1252.encode(units,false).map_err(|_|FileError32::InvalidName)?.0);
     }
     if nul {
         bytes.extend_from_slice(if wide { &[0, 0] } else { &[0] });

@@ -1,4 +1,5 @@
-#![forbid(unsafe_code)]
+mod conversion;
+pub use conversion::ConversionError32;
 
 const CP1252: [u16; 32] = [
     0x20ac, 0x81, 0x201a, 0x192, 0x201e, 0x2026, 0x2020, 0x2021, 0x2c6, 0x2030, 0x160, 0x2039,
@@ -33,6 +34,15 @@ impl CodePage32 {
             _ => None,
         }
     }
+    /// One-byte decoding without allocating; multibyte UTF-8 needs the string decoder.
+    pub fn decode_byte(self, byte: u8) -> Option<u16> {
+        Some(match self {
+            Self::Windows1252 if (0x80..0xa0).contains(&byte) => CP1252[usize::from(byte - 0x80)],
+            Self::Oem437 if byte >= 0x80 => CP437[usize::from(byte - 0x80)],
+            Self::Utf8 if byte >= 0x80 => return None,
+            _ => u16::from(byte),
+        })
+    }
     pub fn decode(self, bytes: &[u8], strict: bool) -> Result<Vec<u16>, TextError32> {
         if self == Self::Utf8 {
             return match std::str::from_utf8(bytes) {
@@ -43,13 +53,7 @@ impl CodePage32 {
         }
         Ok(bytes
             .iter()
-            .map(|&byte| match self {
-                Self::Windows1252 if (0x80..0xa0).contains(&byte) => {
-                    CP1252[usize::from(byte - 0x80)]
-                }
-                Self::Oem437 if byte >= 0x80 => CP437[usize::from(byte - 0x80)],
-                _ => u16::from(byte),
-            })
+            .map(|&byte| self.decode_byte(byte).expect("single-byte code page"))
             .collect())
     }
     pub fn encode(self, units: &[u16], strict: bool) -> Result<(Vec<u8>, bool), TextError32> {

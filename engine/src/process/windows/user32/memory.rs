@@ -1,59 +1,47 @@
 use crate::{
-    memory::{AddressSpace, GuestAddress, PAGE_SIZE, PageInitialization, PageRange, Permissions},
+    memory::{AddressSpace, GuestAddress, PageRange},
     windows::user32::{Message32, Point32, Rect32, User32Error32},
 };
 
 #[derive(Clone, Copy)]
 pub(super) struct Scratch32 {
     pub address: GuestAddress,
-    range: PageRange,
-    identity: u64,
-    mapping: u64,
+    lease: super::super::callbacks::GuestCallbackScratch32,
 }
 
 impl Scratch32 {
+    pub(in crate::process::windows::user32) fn range(self) -> PageRange {
+        self.lease.range()
+    }
+
     pub(super) fn allocate(
         memory: &mut AddressSpace,
         bounds: PageRange,
         bytes: &[u8],
     ) -> Result<Self, User32Error32> {
-        if bytes.len() > PAGE_SIZE as usize {
-            return Err(User32Error32::InvalidRequest);
-        }
-        let range = memory.find_free_range(bounds, 1, PAGE_SIZE)?;
-        let address = GuestAddress(range.first as u32 * PAGE_SIZE);
-        memory.install_pages_with_word_writes(
-            &[PageInitialization {
-                address,
-                permissions: Permissions::READ_WRITE,
-                bytes,
-            }],
-            &[],
-        )?;
+        let lease =
+            super::super::callbacks::GuestCallbackScratch32::allocate(memory, bounds, bytes)
+                .map_err(scratch_error)?;
         Ok(Self {
-            address,
-            range,
-            identity: memory.identity(),
-            mapping: memory
-                .mapping_version_at(address)
-                .expect("installed mapping"),
+            address: lease.address,
+            lease,
         })
     }
 
     pub(super) fn check(self, memory: &AddressSpace) -> Result<(), User32Error32> {
-        if memory.identity() != self.identity
-            || memory.mapping_version_at(self.address)? != self.mapping
-            || memory.permissions_at(self.address)? != Permissions::READ_WRITE
-        {
-            return Err(User32Error32::InvalidRequest);
-        }
-        Ok(())
+        self.lease.check(memory).map_err(scratch_error)
     }
 
     pub(super) fn release(self, memory: &mut AddressSpace) -> Result<(), User32Error32> {
-        self.check(memory)?;
-        memory.unmap_ranges_with_word_writes(&[self.range], &[])?;
-        Ok(())
+        self.lease.release(memory).map_err(scratch_error)
+    }
+}
+
+fn scratch_error(error: crate::memory::MemoryError) -> User32Error32 {
+    if error == crate::memory::MemoryError::InvalidRange {
+        User32Error32::InvalidRequest
+    } else {
+        User32Error32::Memory(error)
     }
 }
 
@@ -120,16 +108,7 @@ pub(super) fn string(
 }
 
 fn ansi(byte: u8) -> u16 {
-    const EXTENDED: [u16; 32] = [
-        0x20ac, 0x81, 0x201a, 0x192, 0x201e, 0x2026, 0x2020, 0x2021, 0x2c6, 0x2030, 0x160, 0x2039,
-        0x152, 0x8d, 0x17d, 0x8f, 0x90, 0x2018, 0x2019, 0x201c, 0x201d, 0x2022, 0x2013, 0x2014,
-        0x2dc, 0x2122, 0x161, 0x203a, 0x153, 0x9d, 0x17e, 0x178,
-    ];
-    if (0x80..=0x9f).contains(&byte) {
-        EXTENDED[(byte - 0x80) as usize]
-    } else {
-        u16::from(byte)
-    }
+    crate::windows::text::CodePage32::Windows1252.decode_byte(byte).expect("CP1252 is single-byte")
 }
 
 pub(super) fn rect(memory: &AddressSpace, address: u32) -> Result<Rect32, User32Error32> {
