@@ -63,7 +63,7 @@ const assert = require('node:assert/strict'), bytes = require('node:fs').readFil
 assert.ok(WebAssembly.validate(bytes));
 const module = new WebAssembly.Module(bytes);
 assert.deepEqual(WebAssembly.Module.imports(module), [{module:'env',name:'memory',kind:'memory'},
-  ...['guard',process.argv[1]].map(name=>({module:'ring3',name,kind:'function'}))]);
+  ...['guard_detect',process.argv[1],'finish_exception_detection'].map(name=>({module:'ring3',name,kind:'function'}))]);
 assert.deepEqual(WebAssembly.Module.exports(module), [{name:'run',kind:'function'}]);
 "#,
                 helper,
@@ -218,17 +218,18 @@ fn typed_two_byte_fetch_faults_and_consumed_code_currency_are_exact() {
             (&second_denied, 0x1fff, 0x2000, FaultReason::Permission, 2),
             (&top, u32::MAX, u32::MAX, FaultReason::AddressOverflow, 2),
         ] {
-            assert_eq!(
-                decode_one(engine.memory().unwrap(), GuestAddress(pc)).err(),
-                Some(DecodeError::MemoryFault {
+            crate::support_fetch::assert_decode_contract(
+                (decode_one(engine.memory().unwrap(), GuestAddress(pc)).err())
+                    .expect("instruction must fail to decode"),
+                DecodeError::MemoryFault {
                     pc: GuestAddress(pc),
                     fault: MemoryFault {
                         address: GuestAddress(address),
                         access: Access::Execute,
-                        reason
+                        reason,
                     },
                     length,
-                })
+                },
             );
         }
     }
@@ -266,13 +267,14 @@ fn prefix_metadata_neighbors_and_both_standalone_refusals() {
                 &[prefix, 0x66, opcode],
             );
         }
-        assert_eq!(
-            decode_one(
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(
                 fixture(PC, &[0xf0, 0x66, opcode]).memory().unwrap(),
-                GuestAddress(PC)
+                GuestAddress(PC),
             )
-            .err(),
-            Some(DecodeError::InvalidEncoding)
+            .err())
+            .expect("instruction must fail to decode"),
+            DecodeError::InvalidEncoding,
         );
         let engine = fixture(PC, &[0x90, 0x66, opcode, 0xeb, 0]);
         let expected = CompileError::Instruction {
@@ -343,35 +345,28 @@ fn four_bound_profiles_validate_read16_locals_and_full_arena_without_guest_execu
             }
         }
     }
-    let mut child = Command::new("node").args(["-e", r#"
-const assert=require('node:assert/strict'),input=require('node:fs').readFileSync(0);
-let at=0,count=0;
-while(at<input.length){const resident=input[at++],size=input.readUInt32LE(at);at+=4;
- const bytes=input.subarray(at,at+size);at+=size;assert.ok(WebAssembly.validate(bytes));
- const module=new WebAssembly.Module(bytes);
- assert.deepEqual(WebAssembly.Module.imports(module),[{module:'env',name:'memory',kind:'memory'},
- ...[resident?'guard_resident':'guard','cpu_read16'].map(name=>({module:'ring3',name,kind:'function'}))]);
- assert.deepEqual(WebAssembly.Module.exports(module),[{name:'run',kind:'function'}]);
- let p=8;const leb=()=>{let n=0,s=0,b;do{b=bytes[p++];n|=(b&127)<<s;s+=7;}while(b&128);return n>>>0;};
- const sections=new Map();while(p<bytes.length){const id=bytes[p++],n=leb();sections.set(id,[p,p+n]);p+=n;}
- assert.deepEqual([...sections.keys()],[1,2,3,7,10]);p=sections.get(1)[0];const types=[];
- for(let i=leb();i>0;i--){assert.equal(bytes[p++],0x60);const n=leb(),params=[...bytes.subarray(p,p+n)];p+=n;const m=leb(),returns=[...bytes.subarray(p,p+m)];p+=m;types.push([params,returns]);}
- assert.deepEqual(types,[[Array(4).fill(127),[127]],[Array(resident?7:6).fill(127),[127]],[[127],[127]],[Array(6).fill(127),[127]]]);
- assert.equal(p,sections.get(1)[1]);
- p=sections.get(3)[0];assert.deepEqual([leb(),leb(),leb()],[2,0,3]);assert.equal(p,sections.get(3)[1]);
- p=sections.get(10)[0];assert.equal(leb(),2);const end=leb()+p,locals=[];for(let n=leb();n>0;n--)locals.push([leb(),bytes[p++]]);
- assert.deepEqual(locals,[[16,127],[1,126],[10,127]]);p=end;const segmentEnd=leb()+p,segmentLocals=[];
- for(let n=leb();n>0;n--)segmentLocals.push([leb(),bytes[p++]]);
- assert.deepEqual(segmentLocals,[[3,127]]);assert.equal(segmentEnd,sections.get(10)[1]);count++;}
-assert.equal(at,input.length);assert.equal(count,8);
-"#]).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
-    child.stdin.take().unwrap().write_all(&input).unwrap();
-    let output = child.wait_with_output().unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    let mut cursor = 0;
+    let mut count = 0;
+    while cursor < input.len() {
+        let resident = match input[cursor] {
+            0 => false,
+            1 => true,
+            other => panic!("invalid owner {other}"),
+        };
+        let size = u32::from_le_bytes(input[cursor + 1..cursor + 5].try_into().unwrap()) as usize;
+        cursor += 5;
+        crate::support_wasm_interface::assert_bound(
+            &input[cursor..cursor + size],
+            resident,
+            &[("cpu_read16", 1)],
+            &[4, if resident { 7 } else { 6 }, 1],
+            true,
+        );
+        cursor += size;
+        count += 1;
+    }
+    assert_eq!(cursor, input.len());
+    assert_eq!(count, 8);
 }
 
 #[test]
@@ -440,13 +435,31 @@ fn late_refusals_caps_and_data_currency_preserve_both_bound_owners() {
                 for (pc, bytes, length, failure) in failures {
                     upload(&mut engine, pc, &bytes);
                     describe(&mut engine, pc, length, entries);
+                    if entries
+                        && crate::support_admission::admit_if_deferred(
+                            &mut engine,
+                            crate::support_admission::ColdEntryCase {
+                                key: KEY,
+                                keeper: keep,
+                                resident,
+                                pages: &[],
+                                expected: failure.clone(),
+                            },
+                        )
+                    {
+                        continue;
+                    }
                     let before = engine.arena().to_vec();
                     let expected = if resident {
                         HostError::Resident(RegistryError::Compile(failure))
                     } else {
                         HostError::Compile(failure)
                     };
-                    assert_eq!(bound(&mut engine, resident, entries), Err(expected));
+                    crate::support_fetch::assert_host_contract(
+                        (bound(&mut engine, resident, entries))
+                            .expect_err("compilation must refuse this fixture"),
+                        expected,
+                    );
                     assert_eq!(engine.arena(), before);
                     assert_eq!(engine.generation(), generation);
                     assert_eq!(engine.artifact_bytes().unwrap(), prior.0);

@@ -52,7 +52,7 @@ fn existing_movsb_movsd_modules_capture_without_guest_execution() {
 const assert = require('node:assert/strict');
 const input = require('node:fs').readFileSync(0);
 let at = 0, count = 0;
-for (const names of [['guard', 'cpu_read8', 'cpu_store8'], ['guard', 'cpu_read32', 'cpu_store32']]) {
+for (const names of [['guard_detect', 'cpu_read8', 'cpu_store8', 'finish_exception_detection'], ['guard_detect', 'cpu_read32', 'cpu_store32', 'finish_exception_detection']]) {
   const size = input.readUInt32LE(at); at += 4;
   assert.ok(size > 0 && at + size <= input.length);
   const module = new WebAssembly.Module(input.subarray(at, at + size)); at += size;
@@ -165,17 +165,17 @@ fn exact_word_decode_fetch_snapshot_and_next_ip_wrap() {
         (&denied_second, 0x1fff, 0x2000, FaultReason::Permission, 2),
         (&top, u32::MAX, u32::MAX, FaultReason::AddressOverflow, 2),
     ] {
-        assert_eq!(
+        crate::support_fetch::assert_decode_contract(
             decode_one(memory, GuestAddress(pc)).unwrap_err(),
             DecodeError::MemoryFault {
                 pc: GuestAddress(pc),
                 fault: MemoryFault {
                     address: GuestAddress(address),
                     access: Access::Execute,
-                    reason
+                    reason,
                 },
                 length,
-            }
+            },
         );
     }
     let mut changed = memory(PC, &[0x66, 0xa5]);
@@ -209,9 +209,9 @@ fn exact_prefix_metadata_neighbors_and_standalone_refusals() {
             &[prefix, 0x66, 0xa5],
         );
     }
-    assert_eq!(
+    crate::support_fetch::assert_decode_contract(
         decode_one(&memory(PC, &[0xf0, 0x66, 0xa5]), GuestAddress(PC)).unwrap_err(),
-        DecodeError::InvalidEncoding
+        DecodeError::InvalidEncoding,
     );
     for (opcode, operation) in [
         (
@@ -298,35 +298,43 @@ fn four_bound_profiles_validate_read16_store16_without_guest_execution() {
             }
         }
     }
-    let mut child = Command::new("node").args(["-e", r#"
-const assert=require('node:assert/strict'),input=require('node:fs').readFileSync(0);
-let at=0,count=0;
-while(at<input.length){const resident=input[at++],size=input.readUInt32LE(at);at+=4;
- const bytes=input.subarray(at,at+size);at+=size;assert.ok(WebAssembly.validate(bytes));
- const module=new WebAssembly.Module(bytes);
- assert.deepEqual(WebAssembly.Module.imports(module),[{module:'env',name:'memory',kind:'memory'},
- ...[resident?'guard_resident':'guard','cpu_read16',resident?'cpu_store_resident16':'cpu_store16'].map(name=>({module:'ring3',name,kind:'function'}))]);
- assert.deepEqual(WebAssembly.Module.exports(module),[{name:'run',kind:'function'}]);
- let p=8;const leb=()=>{let n=0,s=0,b;do{b=bytes[p++];n|=(b&127)<<s;s+=7;}while(b&128);return n>>>0;};
- const sections=new Map();while(p<bytes.length){const id=bytes[p++],n=leb();sections.set(id,[p,p+n]);p+=n;}
- assert.deepEqual([...sections.keys()],[1,2,3,7,10]);p=sections.get(1)[0];const types=[];
- for(let i=leb();i>0;i--){assert.equal(bytes[p++],0x60);const n=leb(),params=[...bytes.subarray(p,p+n)];p+=n;const m=leb(),returns=[...bytes.subarray(p,p+m)];p+=m;types.push([params,returns]);}
- assert.deepEqual(types,[[Array(4).fill(127),[127]],[Array(resident?7:6).fill(127),[127]],[[127],[127]],[Array(resident?6:2).fill(127),[127]],[Array(6).fill(127),[127]]]);
- assert.equal(p,sections.get(1)[1]);
- p=sections.get(3)[0];assert.deepEqual([leb(),leb(),leb()],[2,0,4]);assert.equal(p,sections.get(3)[1]);
- p=sections.get(10)[0];assert.equal(leb(),2);const end=leb()+p,locals=[];for(let n=leb();n>0;n--)locals.push([leb(),bytes[p++]]);
- assert.deepEqual(locals,[[16,127],[1,126],[10,127]]);p=end;const segmentEnd=leb()+p,segmentLocals=[];
- for(let n=leb();n>0;n--)segmentLocals.push([leb(),bytes[p++]]);
- assert.deepEqual(segmentLocals,[[3,127]]);assert.equal(segmentEnd,sections.get(10)[1]);count++;}
-assert.equal(at,input.length);assert.equal(count,4);
-"#]).stdin(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
-    child.stdin.take().unwrap().write_all(&input).unwrap();
-    let output = child.wait_with_output().unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    let mut cursor = 0;
+    let mut count = 0;
+    while cursor < input.len() {
+        let resident = match input[cursor] {
+            0 => false,
+            1 => true,
+            other => panic!("invalid owner {other}"),
+        };
+        let size = u32::from_le_bytes(input[cursor + 1..cursor + 5].try_into().unwrap()) as usize;
+        cursor += 5;
+        crate::support_wasm_interface::assert_bound(
+            &input[cursor..cursor + size],
+            resident,
+            &[
+                ("cpu_read16", 1),
+                (
+                    if resident {
+                        "cpu_store_resident16"
+                    } else {
+                        "cpu_store16"
+                    },
+                    if resident { 6 } else { 2 },
+                ),
+            ],
+            &[
+                4,
+                if resident { 7 } else { 6 },
+                1,
+                if resident { 6 } else { 2 },
+            ],
+            true,
+        );
+        cursor += size;
+        count += 1;
+    }
+    assert_eq!(cursor, input.len());
+    assert_eq!(count, 4);
 }
 
 #[test]

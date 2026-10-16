@@ -93,9 +93,9 @@ fn prefixes_preserve_string_metadata_and_standalone_memory_stays_refused() {
                 &[prefix, opcode],
             );
         }
-        assert_eq!(
+        crate::support_fetch::assert_decode_contract(
             decode_one(&memory(PC, &[0xf0, opcode]), GuestAddress(PC)).unwrap_err(),
-            DecodeError::InvalidEncoding
+            DecodeError::InvalidEncoding,
         );
         let bytes = [0x90, opcode, 0xeb, 0];
         assert!(matches!(
@@ -167,7 +167,7 @@ while (at < input.length) {
   const module = new WebAssembly.Module(bytes);
   const helper = opcode === 0xac ? 'cpu_read8' : resident ? 'cpu_store_resident8' : 'cpu_store8';
   assert.deepEqual(WebAssembly.Module.imports(module), [{module:'env',name:'memory',kind:'memory'},
-    ...[resident ? 'guard_resident' : 'guard', helper].map(name => ({module:'ring3',name,kind:'function'}))]);
+    ...[resident ? 'guard_detect_resident' : 'guard_detect', helper,'finish_exception_detection'].map(name => ({module:'ring3',name,kind:'function'}))]);
   count++;
 }
 assert.equal(count, 8);

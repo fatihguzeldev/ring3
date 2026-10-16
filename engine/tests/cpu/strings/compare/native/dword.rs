@@ -41,10 +41,6 @@ use ring3_engine::{
     memory::{AddressSpace, GuestAddress, PageRange, Permissions},
     process::HostError,
 };
-use std::{
-    io::Write,
-    process::{Command, Stdio},
-};
 
 fn memory(bytes: &[u8], pc: u32) -> AddressSpace {
     let mut memory = AddressSpace::new(1).unwrap();
@@ -143,9 +139,9 @@ fn exact_dword_decode_fetch_prefix_and_standalone_boundaries() {
                 &[prefix, if prefix == 0x66 { opcode - 1 } else { opcode }],
             );
         }
-        assert_eq!(
+        crate::support_fetch::assert_decode_contract(
             decode_one(&memory(&[0xf0, opcode], PC), GuestAddress(PC)).unwrap_err(),
-            DecodeError::InvalidEncoding
+            DecodeError::InvalidEncoding,
         );
         let mut denied = memory(&[opcode], PC);
         denied
@@ -154,22 +150,20 @@ fn exact_dword_decode_fetch_prefix_and_standalone_boundaries() {
                 Permissions::READ,
             )
             .unwrap();
-        assert!(matches!(
-            decode_one(&denied, GuestAddress(PC)),
-            Err(DecodeError::MemoryFault {
-                pc: GuestAddress(PC),
-                length: 1,
-                ..
-            })
-        ));
-        assert!(matches!(
-            decode_one(&AddressSpace::new(1).unwrap(), GuestAddress(PC)),
-            Err(DecodeError::MemoryFault {
-                pc: GuestAddress(PC),
-                length: 1,
-                ..
-            })
-        ));
+        crate::support_fetch::assert_error(
+            decode_one(&denied, GuestAddress(PC)).unwrap_err(),
+            PC,
+            PC,
+            ring3_engine::memory::FaultReason::Permission,
+            1,
+        );
+        crate::support_fetch::assert_error(
+            decode_one(&AddressSpace::new(1).unwrap(), GuestAddress(PC)).unwrap_err(),
+            PC,
+            PC,
+            ring3_engine::memory::FaultReason::Unmapped,
+            1,
+        );
         let bytes = [opcode, 0xeb, 0];
         let memory = memory(&bytes, PC);
         for result in [
@@ -212,41 +206,28 @@ fn all_four_profiles_have_only_guard_read32_and_unchanged_locals_and_arena() {
             }
         }
     }
-    let mut child = Command::new("node").args(["-e", r#"
-const assert=require('node:assert/strict'),input=require('node:fs').readFileSync(0);
-function shape(b,resident) {
-  let at=8,seenTypes=false,seenFunctions=false;
-  function u(){let v=0;for(let i=0;i<5;i++){assert.ok(at<b.length);const x=b[at++];v|=(x&127)<<(i*7);if(!(x&128))return v>>>0;}throw Error('varuint');}
-  while(at<b.length){const id=b[at++],n=u(),end=at+n;assert.ok(end<=b.length);
-    if(id===1){assert.equal(u(),4);for(const arity of [4,resident?7:6,1,6]){
-      assert.equal(b[at++],0x60);assert.equal(u(),arity);assert.deepEqual([...b.subarray(at,at+arity)],Array(arity).fill(127));at+=arity;
-      assert.equal(u(),1);assert.equal(b[at++],127);}assert.equal(at,end);seenTypes=true;}
-    if(id===3){assert.deepEqual([u(),u(),u()],[2,0,3]);assert.equal(at,end);seenFunctions=true;}
-    if(id===10){assert.ok(seenTypes&&seenFunctions);assert.equal(u(),2);const groups=[];
-      for(let functionIndex=0;functionIndex<2;functionIndex++){const body=u(),bodyEnd=at+body,count=u(),locals=[];
-        for(let i=0;i<count;i++)locals.push([u(),b[at++]]);groups.push(locals);assert.ok(at<=bodyEnd);at=bodyEnd;}
-      assert.equal(at,end);return groups;}
-    at=end;
-  }throw Error('missing code');
-}
-let at=0,count=0;
-while(at<input.length) {
-  const resident=input[at++],n=input.readUInt32LE(at);at+=4;const b=input.subarray(at,at+n);at+=n;
-  const m=new WebAssembly.Module(b);
-  assert.deepEqual(WebAssembly.Module.imports(m),[{module:'env',name:'memory',kind:'memory'},
-    ...[resident?'guard_resident':'guard','cpu_read32'].map(name=>({module:'ring3',name,kind:'function'}))]);
-  assert.deepEqual(WebAssembly.Module.exports(m),[{name:'run',kind:'function'}]);
-  assert.deepEqual(shape(b,resident),[[[16,127],[1,126],[10,127]],[[3,127]]]);count++;
-}
-assert.equal(count,8);assert.equal(at,input.length);
-"#]).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
-    child.stdin.take().unwrap().write_all(&input).unwrap();
-    let output = child.wait_with_output().unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    let mut cursor = 0;
+    let mut count = 0;
+    while cursor < input.len() {
+        let resident = match input[cursor] {
+            0 => false,
+            1 => true,
+            other => panic!("invalid owner {other}"),
+        };
+        let size = u32::from_le_bytes(input[cursor + 1..cursor + 5].try_into().unwrap()) as usize;
+        cursor += 5;
+        crate::support_wasm_interface::assert_bound(
+            &input[cursor..cursor + size],
+            resident,
+            &[("cpu_read32", 1)],
+            &[4, if resident { 7 } else { 6 }, 1],
+            true,
+        );
+        cursor += size;
+        count += 1;
+    }
+    assert_eq!(cursor, input.len());
+    assert_eq!(count, 8);
 }
 
 #[test]

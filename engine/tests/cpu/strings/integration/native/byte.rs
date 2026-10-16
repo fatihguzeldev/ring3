@@ -105,9 +105,9 @@ fn string_prefixes_preserve_exact_repeat_width_address_and_segment_metadata() {
     ] {
         check_string_prefix(decode_one(&memory(&bytes), GuestAddress(PC)), &bytes);
     }
-    assert_eq!(
+    crate::support_fetch::assert_decode_contract(
         decode_one(&memory(&[0xf0, 0xa4]), GuestAddress(PC)).unwrap_err(),
-        DecodeError::InvalidEncoding
+        DecodeError::InvalidEncoding,
     );
 }
 
@@ -165,7 +165,7 @@ while (at < input.length) {
   const module = new WebAssembly.Module(bytes);
   assert.deepEqual(WebAssembly.Module.imports(module), [
     {module:'env',name:'memory',kind:'memory'},
-    ...[resident ? 'guard_resident' : 'guard', 'cpu_read8', resident ? 'cpu_store_resident8' : 'cpu_store8']
+    ...[resident ? 'guard_detect_resident' : 'guard_detect', 'cpu_read8', resident ? 'cpu_store_resident8' : 'cpu_store8', 'finish_exception_detection']
       .map(name => ({module:'ring3',name,kind:'function'}))]);
   count++;
 }

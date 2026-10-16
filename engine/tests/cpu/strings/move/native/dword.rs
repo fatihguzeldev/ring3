@@ -29,7 +29,7 @@ use ring3_engine::{
             ir::{AddressSize, Operation, StringKind, StringWidth},
         },
     },
-    memory::{Access, AddressSpace, GuestAddress, PageRange, Permissions},
+    memory::{AddressSpace, GuestAddress, PageRange, Permissions},
     process::HostError,
 };
 use std::{
@@ -78,14 +78,13 @@ fn typed_single_byte_fetch_wrap_and_execute_permission_are_exact() {
         assert!(memory.is_code_current(decoded.code_snapshot()));
     }
     let missing = AddressSpace::new(1).unwrap();
-    assert!(matches!(
-        decode_one(&missing, GuestAddress(PC)),
-        Err(DecodeError::MemoryFault {
-            pc: GuestAddress(PC),
-            length: 1,
-            ..
-        })
-    ));
+    crate::support_fetch::assert_error(
+        decode_one(&missing, GuestAddress(PC)).unwrap_err(),
+        PC,
+        PC,
+        ring3_engine::memory::FaultReason::Unmapped,
+        1,
+    );
     let mut denied = memory(PC, &[0xa5]);
     denied
         .protect(
@@ -93,17 +92,13 @@ fn typed_single_byte_fetch_wrap_and_execute_permission_are_exact() {
             Permissions::READ,
         )
         .unwrap();
-    assert!(matches!(
-        decode_one(&denied, GuestAddress(PC)),
-        Err(DecodeError::MemoryFault {
-            pc: GuestAddress(PC),
-            length: 1,
-            fault: ring3_engine::memory::MemoryFault {
-                access: Access::Execute,
-                ..
-            }
-        })
-    ));
+    crate::support_fetch::assert_error(
+        decode_one(&denied, GuestAddress(PC)).unwrap_err(),
+        PC,
+        PC,
+        ring3_engine::memory::FaultReason::Permission,
+        1,
+    );
     let mut changed = memory(PC, &[0xa5]);
     let decoded = decode_one(&changed, GuestAddress(PC)).unwrap();
     changed
@@ -127,9 +122,9 @@ fn prefix_metadata_and_both_standalone_refusals_are_exact() {
             &[if prefix == 0x66 { 0x67 } else { prefix }, 0xa5],
         );
     }
-    assert_eq!(
+    crate::support_fetch::assert_decode_contract(
         decode_one(&memory(PC, &[0xf0, 0xa5]), GuestAddress(PC)).unwrap_err(),
-        DecodeError::InvalidEncoding
+        DecodeError::InvalidEncoding,
     );
     let code = memory(PC, &[0x90, 0xa5, 0xeb, 0]);
     for error in [
@@ -193,7 +188,7 @@ let at=0,count=0;
 while(at<input.length){const resident=input[at++],size=input.readUInt32LE(at);at+=4;
 const module=new WebAssembly.Module(input.subarray(at,at+size));at+=size;
 assert.deepEqual(WebAssembly.Module.imports(module),[{module:'env',name:'memory',kind:'memory'},
-...[resident?'guard_resident':'guard','cpu_read32',resident?'cpu_store_resident32':'cpu_store32'].map(name=>({module:'ring3',name,kind:'function'}))]);
+...[resident?'guard_detect_resident':'guard_detect','cpu_read32',resident?'cpu_store_resident32':'cpu_store32','finish_exception_detection'].map(name=>({module:'ring3',name,kind:'function'}))]);
 assert.deepEqual(WebAssembly.Module.exports(module),[{name:'run',kind:'function'}]);count++;}
 assert.equal(count,4);
 "#]).stdin(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();

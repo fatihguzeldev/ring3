@@ -89,9 +89,9 @@ fn decode_fetch_and_prefix_metadata_remain_byte_exact() {
                 &[prefix, opcode],
             );
         }
-        assert_eq!(
+        crate::support_fetch::assert_decode_contract(
             decode_one(&memory(&[0xf0, opcode], PC), GuestAddress(PC)).unwrap_err(),
-            DecodeError::InvalidEncoding
+            DecodeError::InvalidEncoding,
         );
         let mut denied = memory(&[opcode], PC);
         denied
@@ -100,14 +100,13 @@ fn decode_fetch_and_prefix_metadata_remain_byte_exact() {
                 Permissions::READ,
             )
             .unwrap();
-        assert!(matches!(
-            decode_one(&denied, GuestAddress(PC)),
-            Err(DecodeError::MemoryFault {
-                pc: GuestAddress(PC),
-                length: 1,
-                ..
-            })
-        ));
+        crate::support_fetch::assert_error(
+            decode_one(&denied, GuestAddress(PC)).unwrap_err(),
+            PC,
+            PC,
+            ring3_engine::memory::FaultReason::Permission,
+            1,
+        );
     }
     for opcode in [0xa6, 0xae] {
         check_string_prefix(
@@ -115,14 +114,13 @@ fn decode_fetch_and_prefix_metadata_remain_byte_exact() {
             &[0x66, opcode],
         );
     }
-    assert!(matches!(
-        decode_one(&AddressSpace::new(1).unwrap(), GuestAddress(PC)),
-        Err(DecodeError::MemoryFault {
-            pc: GuestAddress(PC),
-            length: 1,
-            ..
-        })
-    ));
+    crate::support_fetch::assert_error(
+        decode_one(&AddressSpace::new(1).unwrap(), GuestAddress(PC)).unwrap_err(),
+        PC,
+        PC,
+        ring3_engine::memory::FaultReason::Unmapped,
+        1,
+    );
 }
 
 fn bound_compile(
@@ -198,7 +196,7 @@ while(at<input.length) {
   const resident=input[at++],n=input.readUInt32LE(at); at+=4;
   const module=new WebAssembly.Module(input.subarray(at,at+n)); at+=n;
   assert.deepEqual(WebAssembly.Module.imports(module), [{module:'env',name:'memory',kind:'memory'},
-    ...[resident?'guard_resident':'guard','cpu_read8'].map(name=>({module:'ring3',name,kind:'function'}))]);
+    ...[resident?'guard_detect_resident':'guard_detect','cpu_read8','finish_exception_detection'].map(name=>({module:'ring3',name,kind:'function'}))]);
   assert.deepEqual(WebAssembly.Module.exports(module), [{name:'run',kind:'function'}]); count++;
 }
 assert.equal(count,8);
