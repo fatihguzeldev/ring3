@@ -302,6 +302,8 @@ impl EngineInstance {
         if let Some(receipt) = &activation {
             self.check_activation_thread_exit(receipt)?;
         }
+        self.check_com_thread_exit(&com)?;
+        let memory_version = self.memory.as_ref().unwrap().transaction_version();
         // exact committed ranges are unmapped before infallible kernel-object publication.
         if let Some(prepared) = dinput {
             self.dinput.as_mut().unwrap().commit_thread_exit(self.memory.as_mut().unwrap(), prepared)
@@ -319,6 +321,7 @@ impl EngineInstance {
                 .write_thread_words32(words)
                 .map_err(HostError::Memory)?;
         }
+        let memory_changed = self.memory.as_ref().unwrap().transaction_version() != memory_version;
         self.synchronization
             .as_mut()
             .unwrap()
@@ -359,7 +362,7 @@ impl EngineInstance {
         self.exceptions.retire_thread(id);
         self.nls.retire_thread(id);
         self.commit_activation_thread_exit(activation);
-        self.commit_com_thread_exit(com);
+        self.commit_com_thread_exit_after_memory(com, memory_changed);
         if let Some(runtime) = self.ole32.as_mut() {
             runtime.commit_thread_exit(id);
         }

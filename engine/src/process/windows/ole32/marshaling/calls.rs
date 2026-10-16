@@ -25,7 +25,8 @@ use crate::{
 
 impl EngineInstance {
     pub(in crate::process) fn com_proxy_wait_ready(&self, thread: u32) -> bool {
-        self.com_transfer_work_ready(thread)
+        self.rpc_work_ready(thread)
+            || self.com_transfer_work_ready(thread)
             || self.ole32.as_ref().is_some_and(|runtime| {
                 runtime
                     .marshaling
@@ -45,7 +46,7 @@ impl EngineInstance {
             })
     }
     pub(in crate::process) fn resume_com_proxy_wait(&mut self) -> Result<(), HostError> {
-        if self.resume_com_transfer_work()? {
+        if self.resume_com_transfer_work()? || self.resume_rpc_wait()? {
             return Ok(());
         }
         let Some(pending) = self.pending_call.as_ref() else {
@@ -63,13 +64,14 @@ impl EngineInstance {
         self.advance_com_proxy_call(index)
     }
     pub(in crate::process::windows::ole32) fn com_proxy_owns_token(&self, token: u32) -> bool {
-        self.ole32.as_ref().is_some_and(|runtime| {
-            runtime
-                .marshaling
-                .calls
-                .iter()
-                .any(|call| call.token == token)
-        })
+        self.rpc_owns_token(token)
+            || self.ole32.as_ref().is_some_and(|runtime| {
+                runtime
+                    .marshaling
+                    .calls
+                    .iter()
+                    .any(|call| call.token == token)
+            })
     }
     pub(in crate::process::windows::ole32) fn com_proxy_pending_owners(
         &self,
@@ -77,6 +79,7 @@ impl EngineInstance {
         self.ole32
             .iter()
             .flat_map(|runtime| runtime.marshaling.calls.iter().map(|call| call.owner))
+            .chain(self.rpc_pending_owners())
     }
     pub(in crate::process::windows::ole32) fn try_complete_com_proxy_call(
         &mut self,

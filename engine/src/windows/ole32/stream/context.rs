@@ -29,11 +29,7 @@ impl StreamLimits32 {
     }
 }
 pub(super) enum BufferData32 {
-    Owned {
-        bytes: Vec<u8>,
-        maximum: usize,
-    },
-    #[cfg(test)]
+    Owned { bytes: Vec<u8>, maximum: usize },
     External,
 }
 pub(super) struct Buffer32 {
@@ -127,14 +123,12 @@ impl Buffer32 {
     pub(super) fn bytes(&self) -> (&[u8], usize) {
         match &self.data {
             BufferData32::Owned { bytes, maximum } => (bytes, *maximum),
-            #[cfg(test)]
             BufferData32::External => unreachable!("stream identities retain owned buffers"),
         }
     }
     pub(super) fn bytes_mut(&mut self) -> &mut Vec<u8> {
         match &mut self.data {
             BufferData32::Owned { bytes, .. } => bytes,
-            #[cfg(test)]
             BufferData32::External => unreachable!("stream identities retain owned buffers"),
         }
     }

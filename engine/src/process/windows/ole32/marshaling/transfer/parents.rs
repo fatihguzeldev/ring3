@@ -182,6 +182,7 @@ impl EngineInstance {
                         .ok_or(HostError::Infrastructure)?;
                     self.advance_registered_com_loading(slot)?;
                 }
+                TransferParent32::RpcQuery(id) => self.finish_rpc_query_transfer(id)?,
                 TransferParent32::Proxy(id) => {
                     let slot = self
                         .ole32

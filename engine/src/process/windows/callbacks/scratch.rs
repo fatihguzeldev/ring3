@@ -22,6 +22,28 @@ impl GuestCallbackScratch32 {
         }
         Self::allocate_span(memory, bounds, bytes)
     }
+    pub(in crate::process::windows) fn allocate_zeroed_span(
+        memory: &mut AddressSpace,
+        bounds: PageRange,
+        length: usize,
+    ) -> Result<Self, MemoryError> {
+        if bounds.first == 0 {
+            return Err(MemoryError::InvalidRange);
+        }
+        let pages = u32::try_from(length.max(1).div_ceil(PAGE_SIZE as usize))
+            .map_err(|_| MemoryError::InvalidRange)?;
+        let range = memory.find_free_range(bounds, pages, PAGE_SIZE)?;
+        let address = GuestAddress(range.first as u32 * PAGE_SIZE);
+        memory.map_zeroed(range, Permissions::READ_WRITE)?;
+        Ok(Self {
+            address,
+            range,
+            identity: memory.identity(),
+            mapping: memory
+                .mapping_version_at(address)
+                .expect("installed callback scratch"),
+        })
+    }
     pub(in crate::process::windows) fn allocate_span(
         memory: &mut AddressSpace,
         bounds: PageRange,

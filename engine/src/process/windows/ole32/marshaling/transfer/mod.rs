@@ -13,3 +13,5 @@ pub(in crate::process::windows::ole32) use context::{
     TransferCall32, TransferParent32, TransferPhase32,
 };
 pub(in crate::process::windows::ole32) use teardown::PreparedTransferExit32;
+
+pub(in crate::process::windows::ole32) use requests::TransferRequest32;

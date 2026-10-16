@@ -18,10 +18,23 @@ impl EngineInstance {
         if self.pending_call.is_some() || self.callback.is_some() {
             return Err(HostError::Call(CallError::Busy));
         }
-        self.check_guest_reservation_admission(&[
-            config.objects,
-            super::activation::ActivationRuntime32::scratch_reservation(),
-        ])?;
+        let rpc = super::stream::StreamRuntime32::buffer_reservation();
+        let scratch = super::activation::ActivationRuntime32::scratch_reservation();
+        for range in [rpc, scratch] {
+            if config.objects.first < range.first + range.count
+                && range.first < config.objects.first + config.objects.count
+            {
+                return Err(HostError::InvalidRequest);
+            }
+        }
+        self.check_guest_reservation_admission(&[config.objects, scratch, rpc])?;
+        if self
+            .memory()?
+            .find_unmapped_range(rpc, rpc.count as u32, crate::memory::PAGE_SIZE)
+            .is_err()
+        {
+            return Err(HostError::InvalidRequest);
+        }
         self.ole32 = Some(Ole32Runtime32::new(config).map_err(HostError::Ole32)?);
         Ok(())
     }
@@ -36,6 +49,9 @@ impl EngineInstance {
         id: u32,
         frame: CallFrame32,
     ) -> Result<bool, HostError> {
+        if self.try_complete_com_rpc_call(owner, token, id, frame)? {
+            return Ok(true);
+        }
         if self.try_complete_com_stream_call(owner, token, id, frame)? {
             return Ok(true);
         }

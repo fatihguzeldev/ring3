@@ -21,6 +21,9 @@ pub(crate) struct PreparedGuestRetain32 {
 mod tests;
 
 impl PreparedGuestLifetime32 {
+    pub(crate) fn ranges(&self) -> &[PageRange] {
+        &self.ranges
+    }
     pub(crate) fn destroyed(&self) -> &[ComIdentity32] {
         self.references.destroyed()
     }
@@ -230,6 +233,55 @@ impl GuestComObjects32 {
         Ok(())
     }
 
+    pub(crate) fn commit_lifetime_after_aggregate_unmap(
+        &mut self,
+        memory: &AddressSpace,
+        prepared: PreparedGuestLifetime32,
+        memory_changed: bool,
+    ) -> Vec<ComIdentity32> {
+        assert_eq!(
+            prepared.write_count, 0,
+            "aggregate retirement owns all RAM writes"
+        );
+        assert_eq!(memory.identity(), prepared.memory_identity);
+        assert_eq!(
+            memory.transaction_version(),
+            prepared
+                .memory_version
+                .checked_add(u64::from(memory_changed))
+                .expect("aggregate RAM version was preflighted")
+        );
+        for range in &prepared.ranges {
+            for page in range.indices() {
+                assert!(
+                    memory
+                        .mapping_version_at(GuestAddress(page as u32 * crate::memory::PAGE_SIZE))
+                        .is_err(),
+                    "aggregate retirement unmapped every prepared object range"
+                );
+            }
+        }
+        self.registry
+            .can_commit_owned_reference_changes(&prepared.references)
+            .expect("reference retirement was preflighted before the aggregate RAM commit");
+        self.commit_lifetime_metadata(prepared)
+    }
+    fn commit_lifetime_metadata(
+        &mut self,
+        prepared: PreparedGuestLifetime32,
+    ) -> Vec<ComIdentity32> {
+        let destroyed = self
+            .registry
+            .commit_owned_reference_changes(prepared.references);
+        if !destroyed.is_empty() {
+            self.allocations.retain(|allocation| {
+                destroyed
+                    .binary_search_by_key(&allocation.id, |identity| identity.id)
+                    .is_err()
+            });
+        }
+        destroyed
+    }
     pub(crate) fn commit_lifetime_changes(
         &mut self,
         memory: &mut AddressSpace,
@@ -242,16 +294,6 @@ impl GuestComObjects32 {
         } else if !writes.is_empty() {
             memory.write_words32(writes)?;
         }
-        let destroyed = self
-            .registry
-            .commit_owned_reference_changes(prepared.references);
-        if !destroyed.is_empty() {
-            self.allocations.retain(|allocation| {
-                destroyed
-                    .binary_search_by_key(&allocation.id, |identity| identity.id)
-                    .is_err()
-            });
-        }
-        Ok(destroyed)
+        Ok(self.commit_lifetime_metadata(prepared))
     }
 }

@@ -89,3 +89,6 @@ fn invalid_output_and_server_lock_exhaustion_do_not_publish_or_increment() {
     );
     assert_eq!(runtime.server_locks[6], u32::MAX);
 }
+
+#[path = "tests/configuration.rs"]
+mod configuration;

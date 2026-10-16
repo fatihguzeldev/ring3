@@ -16,7 +16,7 @@ use crate::{
     },
     windows::{
         CallFrame32, CallingConvention32,
-        com::ServerThreadingModel32,
+        com::{InterfaceId, ServerThreadingModel32},
         ole32::{ApartmentId32, Ole32Api32},
     },
 };
@@ -113,6 +113,7 @@ fn engine(source: ApartmentId32, client: ApartmentId32) -> (EngineInstance, u32,
         token: 1,
         frame,
         sender: 1,
+        requested: InterfaceId([0x55; 16]),
         source: execution,
         client,
         execution,
@@ -163,6 +164,7 @@ fn ready_transfer_rejects_remapped_scratch_before_acquiring_a_pointer_or_selecti
         assert!(call.phase == TransferPhase32::QueryMarshal);
         assert_eq!(call.references[1].pointer, 0);
         assert_eq!(call.remote, Remote32::Ready(result));
+        assert_eq!(runtime.rpc.live_brokers(), 0);
         assert_eq!(engine.memory().unwrap().transaction_version(), version);
         assert_eq!(engine.ole32_read_word(scratch + 48).unwrap(), 0xdeadbeef);
         assert_eq!(runtime.activation.pending[0].scratch.address.0, parent);

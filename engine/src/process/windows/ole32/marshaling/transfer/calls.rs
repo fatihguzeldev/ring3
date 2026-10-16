@@ -17,7 +17,13 @@ impl EngineInstance {
         if let Remote32::Ready(result) = call.remote {
             return self.accept_com_transfer_result(index, result);
         }
-
+        if let P::ProxyStub(broker) = call.phase {
+            return if call.abandoned || call.cancelled {
+                self.fail_registered_ps_transfer(index, broker, 0x80010108)
+            } else {
+                self.advance_registered_ps_transfer(index, broker)
+            };
+        }
         if (call.abandoned || call.cancelled)
             && !matches!(call.phase, P::Release(_) | P::DiscardPacket)
         {
@@ -83,7 +89,7 @@ impl EngineInstance {
                 2,
                 call.source,
             ),
-            P::Release(_) | P::Complete => unreachable!(),
+            P::Release(_) | P::ProxyStub(_) | P::Complete => unreachable!(),
         };
         let (sender, continuation) = (call.sender, call.continuation);
         let phase = call.phase;

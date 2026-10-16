@@ -230,3 +230,59 @@ fn extra_unmap_cannot_destroy_a_live_other_com_object_and_version_exhaustion_is_
     assert_eq!(owner.references(pointer), Ok(2));
     assert!(owner.preflight(&memory, pointer).is_ok());
 }
+
+#[test]
+fn aggregate_unmap_retires_com_metadata_after_one_shared_ram_and_word_transaction() {
+    let (mut owner, mut memory, pointer) = fixture();
+    let external = PageRange::new(GuestAddress(0x4000), 1).unwrap();
+    memory
+        .map_zeroed(external, Permissions::READ_WRITE)
+        .unwrap();
+    let receipt = owner
+        .prepare_lifetime_changes(&memory, &[], &[pointer], &[], &[], &[])
+        .unwrap();
+    owner
+        .can_commit_lifetime_changes(&memory, &receipt)
+        .unwrap();
+    let mut ranges = receipt.ranges().to_vec();
+    ranges.push(external);
+    ranges.sort_unstable_by_key(|range| range.first);
+    let version = memory.transaction_version();
+    memory
+        .unmap_ranges_with_word_writes(
+            &ranges,
+            &[WordWrite32 {
+                address: GuestAddress(0x2000),
+                value: 0x11223344,
+            }],
+        )
+        .unwrap();
+    assert_eq!(memory.transaction_version(), version + 1);
+    let destroyed = owner.commit_lifetime_after_aggregate_unmap(&memory, receipt, true);
+    assert_eq!(destroyed.len(), 1);
+    assert!(owner.lookup(pointer).is_err());
+    assert_eq!(memory.transaction_version(), version + 1);
+    let mut value = [0; 4];
+    memory.read(GuestAddress(0x2000), &mut value).unwrap();
+    assert_eq!(u32::from_le_bytes(value), 0x11223344);
+    assert!(memory.mapping_version_at(GuestAddress(0x4000)).is_err());
+}
+
+#[test]
+fn aggregate_reference_only_retirement_keeps_the_surviving_object_without_a_ram_transaction() {
+    let (mut owner, memory, pointer) = fixture();
+    owner.add_ref(&memory, pointer).unwrap();
+    let receipt = owner
+        .prepare_lifetime_changes(&memory, &[], &[pointer], &[], &[], &[])
+        .unwrap();
+    assert!(receipt.ranges().is_empty());
+    owner
+        .can_commit_lifetime_changes(&memory, &receipt)
+        .unwrap();
+    let version = memory.transaction_version();
+    let destroyed = owner.commit_lifetime_after_aggregate_unmap(&memory, receipt, false);
+    assert!(destroyed.is_empty());
+    assert_eq!(owner.references(pointer), Ok(1));
+    owner.preflight(&memory, pointer).unwrap();
+    assert_eq!(memory.transaction_version(), version);
+}

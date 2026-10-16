@@ -3,7 +3,10 @@ use crate::process::{EngineInstance, HostError};
 
 impl EngineInstance {
     pub(in crate::process) fn com_apartment_invocation_eligible(&self, thread: u32) -> bool {
-        if self.com_apartment_host_idle(thread) || self.com_same_thread_context_invocation(thread) {
+        if self.com_apartment_host_idle(thread)
+            || self.rpc_same_thread_invocation(thread)
+            || self.com_same_thread_context_invocation(thread)
+        {
             return true;
         }
         if self
@@ -41,6 +44,9 @@ impl EngineInstance {
     }
 
     pub(in crate::process) fn has_com_apartment_invocation(&self, thread: u32) -> bool {
+        if self.has_rpc_invocation(thread) {
+            return true;
+        }
         self.ole32.as_ref().is_some_and(|runtime| {
             runtime.marshaling.proxies.iter().flatten().any(|proxy| {
                 proxy.execution.thread == thread
@@ -96,6 +102,9 @@ impl EngineInstance {
         sender: u32,
         continuation: u64,
     ) -> Result<ExecutionApartment32, HostError> {
+        if let Some(execution) = self.rpc_invocation_execution(sender, continuation) {
+            return execution;
+        }
         let runtime = self.ole32.as_ref().ok_or(HostError::InvalidRequest)?;
         if let Some(call) = runtime.marshaling.transfers.iter().find(|call| {
             call.sender == sender
@@ -215,7 +224,9 @@ impl EngineInstance {
         result: u32,
     ) -> Result<(), HostError> {
         self.check_com_apartment_invocation(sender, continuation)?;
-
+        if self.complete_rpc_invocation(sender, continuation, result) {
+            return Ok(());
+        }
         if let Some(index) = self
             .ole32
             .as_ref()

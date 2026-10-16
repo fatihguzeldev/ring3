@@ -8,16 +8,18 @@ use crate::{
             ole32::marshaling::{ExecutionApartment32, Remote32},
         },
     },
-    windows::CallFrame32,
+    windows::{CallFrame32, com::InterfaceId},
 };
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(in crate::process::windows::ole32) enum TransferParent32 {
     Activation(u64),
     Proxy(u64),
+    RpcQuery(u64),
 }
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(in crate::process::windows::ole32) enum TransferPhase32 {
     QueryMarshal,
+    ProxyStub(usize),
     Class,
     Size,
     Marshal,
@@ -39,6 +41,7 @@ pub(in crate::process::windows::ole32) struct TransferCall32 {
     pub token: u32,
     pub frame: CallFrame32,
     pub sender: u32,
+    pub requested: InterfaceId,
     pub source: ExecutionApartment32,
     pub client: ExecutionApartment32,
     pub execution: ExecutionApartment32,

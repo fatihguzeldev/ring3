@@ -22,6 +22,10 @@ pub(in crate::process::windows::ole32) struct StreamRuntime32 {
     pub(super) methods: [GuestAddress; 14],
 }
 impl StreamRuntime32 {
+    pub(in crate::process::windows::ole32) fn buffer_reservation() -> crate::memory::PageRange {
+        crate::memory::PageRange::new(GuestAddress(0x67000000), 4096)
+            .expect("bounded in-process RPC buffer reservation")
+    }
     pub(in crate::process::windows::ole32) fn new(objects: usize) -> Result<Self, Ole32Error32> {
         let mut entries = Vec::new();
         entries

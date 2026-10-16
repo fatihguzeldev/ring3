@@ -13,6 +13,7 @@ pub(in crate::process) struct Ole32Runtime32 {
     pub(super) server_locks: [u32; 7],
     pub(super) activation: super::activation::ActivationRuntime32,
     pub(super) streams: super::stream::StreamRuntime32,
+    pub(super) rpc: super::rpc::RpcRuntime32,
     pub(super) marshaling: super::marshaling::MarshalingRuntime32,
 }
 impl Ole32Runtime32 {
@@ -52,6 +53,7 @@ impl Ole32Runtime32 {
             server_locks: [0; 7],
             activation: Default::default(),
             streams: super::stream::StreamRuntime32::new(config.max_objects as usize)?,
+            rpc: super::rpc::RpcRuntime32::new(config.max_objects as usize)?,
             marshaling: super::marshaling::MarshalingRuntime32::new(config.max_objects as usize)?,
         })
     }
@@ -101,7 +103,9 @@ impl Ole32Runtime32 {
     pub(in crate::process) fn guest_reservation(&self) -> crate::memory::PageRange {
         self.com.reservation()
     }
-
+    pub(in crate::process) fn rpc_buffer_reservation(&self) -> crate::memory::PageRange {
+        super::stream::StreamRuntime32::buffer_reservation()
+    }
     pub(in crate::process) fn activation_scratch_reservation(&self) -> crate::memory::PageRange {
         super::activation::ActivationRuntime32::scratch_reservation()
     }

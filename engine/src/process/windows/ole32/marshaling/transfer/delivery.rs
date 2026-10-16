@@ -11,7 +11,9 @@ impl EngineInstance {
     ) -> Result<(), HostError> {
         let call = &self.ole32.as_ref().unwrap().marshaling.transfers[index];
         let phase = call.phase;
-
+        if let P::ProxyStub(broker) = phase {
+            return self.accept_registered_ps_result(index, broker, result);
+        }
         if (call.abandoned || call.cancelled) && !matches!(phase, P::Release(_) | P::DiscardPacket)
         {
             if result & 0x8000_0000 == 0 {
@@ -58,6 +60,19 @@ impl EngineInstance {
             return self.advance_com_transfer(index);
         }
         if result & 0x8000_0000 != 0 {
+            if phase == P::QueryMarshal
+                && result == HResult32::NO_INTERFACE.0
+                && self
+                    .registered_com_proxy_class(call.requested)
+                    .map_err(|_| HostError::InvalidRequest)?
+                    .is_some()
+            {
+                let class = self
+                    .registered_com_proxy_class(call.requested)
+                    .map_err(|_| HostError::InvalidRequest)?
+                    .unwrap();
+                return self.begin_registered_com_transfer(index, class);
+            }
             return self.fail_com_transfer(index, result);
         }
         let scratch = call.scratch().address.0;
@@ -134,7 +149,7 @@ impl EngineInstance {
                 call.result = result;
                 P::Release(0)
             }
-            P::Release(_) | P::DiscardPacket | P::Complete => unreachable!(),
+            P::Release(_) | P::ProxyStub(_) | P::DiscardPacket | P::Complete => unreachable!(),
         };
         let call = &mut self.ole32.as_mut().unwrap().marshaling.transfers[index];
         call.phase = next;

@@ -107,7 +107,9 @@ impl EngineInstance {
                 .iter()
                 .find(|pending| pending.continuation == id)
                 .map(|pending| pending.scratch),
-
+            TransferParent32::RpcQuery(id) => {
+                return self.rpc_parent_scratch(id).ok_or(HostError::Infrastructure);
+            }
             TransferParent32::Proxy(id) => runtime
                 .marshaling
                 .calls
@@ -158,6 +160,7 @@ impl EngineInstance {
                         .activations
                         .retain(|remote| remote.continuation != id);
                 }
+                TransferParent32::RpcQuery(id) => runtime.rpc_retire_abandoned_parent(id),
                 TransferParent32::Proxy(id) => runtime
                     .marshaling
                     .calls

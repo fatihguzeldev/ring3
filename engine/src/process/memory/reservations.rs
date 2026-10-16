@@ -74,6 +74,7 @@ impl EngineInstance {
             [
                 runtime.guest_reservation(),
                 runtime.activation_scratch_reservation(),
+                runtime.rpc_buffer_reservation(),
             ]
         });
         let windows = self

@@ -13,6 +13,7 @@ impl EngineInstance {
                 .iter()
                 .find(|pending| pending.continuation == id)
                 .map(|pending| (pending.owner, pending.token, pending.frame, pending.thread)),
+            TransferParent32::RpcQuery(id) => self.rpc_parent_identity(id),
             TransferParent32::Proxy(id) => runtime
                 .marshaling
                 .calls

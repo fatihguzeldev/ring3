@@ -6,6 +6,7 @@ use crate::{
 
 pub(in crate::process::windows::ole32) struct PreparedComRundown32 {
     rows: Vec<(usize, Rundown32)>,
+    rpc: super::super::rpc::PreparedRpcRundown32,
     next: u64,
     after: u64,
 }
@@ -20,6 +21,7 @@ impl EngineInstance {
         let Some(runtime) = self.ole32.as_ref() else {
             return Ok(PreparedComRundown32 {
                 rows: Vec::new(),
+                rpc: super::super::rpc::PreparedRpcRundown32::empty(0),
                 next: 0,
                 after: 0,
             });
@@ -38,6 +40,7 @@ impl EngineInstance {
         };
         let mut result = PreparedComRundown32 {
             rows: Vec::new(),
+            rpc: super::super::rpc::PreparedRpcRundown32::empty(after),
             next: after,
             after,
         };
@@ -90,6 +93,8 @@ impl EngineInstance {
                 ));
             }
         }
+        result.rpc = self.prepare_rpc_rundown(thread, retiring, result.next)?;
+        result.next = result.rpc.next();
         Ok(result)
     }
 
@@ -111,45 +116,51 @@ impl EngineInstance {
             proxy.disconnected = true;
             proxy.rundown = Some(rundown);
         }
+        self.commit_rpc_rundown(prepared.rpc);
         if let Some(sender) = sender {
             self.wake_com_apartment_sender(sender);
         }
     }
 
     pub(in crate::process::windows::ole32) fn com_rundown_pending(&self, thread: u32) -> bool {
-        self.ole32.as_ref().is_some_and(|runtime| {
-            runtime.marshaling.proxies.iter().flatten().any(|proxy| {
-                proxy
-                    .rundown
-                    .is_some_and(|rundown| rundown.sender == thread)
+        self.rpc_rundown_pending(thread)
+            || self.ole32.as_ref().is_some_and(|runtime| {
+                runtime.marshaling.proxies.iter().flatten().any(|proxy| {
+                    proxy
+                        .rundown
+                        .is_some_and(|rundown| rundown.sender == thread)
+                })
             })
-        })
     }
 
     pub(super) fn com_rundown_work_ready(&self, thread: u32) -> bool {
-        self.ole32.as_ref().is_some_and(|runtime| {
-            runtime
-                .marshaling
-                .proxies
-                .iter()
-                .enumerate()
-                .any(|(index, proxy)| {
-                    proxy.as_ref().is_some_and(|proxy| {
-                        proxy.execution.thread == thread
-                            && proxy
-                                .rundown
-                                .is_some_and(|rundown| rundown.remote != Remote32::Queued)
-                            && !runtime
-                                .marshaling
-                                .calls
-                                .iter()
-                                .any(|call| call.proxy == index)
+        self.rpc_rundown_work_ready()
+            || self.ole32.as_ref().is_some_and(|runtime| {
+                runtime
+                    .marshaling
+                    .proxies
+                    .iter()
+                    .enumerate()
+                    .any(|(index, proxy)| {
+                        proxy.as_ref().is_some_and(|proxy| {
+                            proxy.execution.thread == thread
+                                && proxy
+                                    .rundown
+                                    .is_some_and(|rundown| rundown.remote != Remote32::Queued)
+                                && !runtime
+                                    .marshaling
+                                    .calls
+                                    .iter()
+                                    .any(|call| call.proxy == index)
+                        })
                     })
-                })
-        })
+            })
     }
 
     pub(super) fn service_com_rundown(&mut self) -> Result<(), HostError> {
+        if self.service_rpc_rundown()? {
+            return Ok(());
+        }
         let thread = self.threads.current_id();
         let Some(runtime) = self.ole32.as_ref() else {
             return Ok(());

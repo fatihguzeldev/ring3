@@ -4,7 +4,10 @@ use super::{
 };
 use crate::{
     memory::PageRange,
-    process::{EngineInstance, HostError, windows::ole32::activation::Phase32},
+    process::{
+        EngineInstance, HostError,
+        windows::{objects::PreparedGuestLifetime32, ole32::activation::Phase32},
+    },
     windows::ole32::{ApartmentId32, Ole32Api32},
 };
 
@@ -27,6 +30,8 @@ pub(in crate::process) struct PreparedComThreadExit32 {
     waking: Vec<u32>,
     rundown: super::rundown::PreparedComRundown32,
     transfers: super::transfer::PreparedTransferExit32,
+    rpc: super::super::rpc::PreparedRpcThreadExit32,
+    references: Option<PreparedGuestLifetime32>,
 }
 impl PreparedComThreadExit32 {
     pub(in crate::process) fn ranges(&self) -> &[PageRange] {
@@ -59,6 +64,8 @@ impl EngineInstance {
         let mut result = PreparedComThreadExit32 {
             thread,
             transfers: self.prepare_com_transfer_exit(thread)?,
+            rpc: self.prepare_rpc_thread_exit(thread)?,
+            references: None,
             ranges: Vec::new(),
             actions: Vec::new(),
             waking: Vec::new(),
@@ -73,7 +80,18 @@ impl EngineInstance {
         let Some(runtime) = self.ole32.as_ref() else {
             return Ok(result);
         };
-
+        if !result.rpc.releases().is_empty() {
+            let receipt = runtime
+                .com
+                .prepare_lifetime_changes(self.memory()?, &[], result.rpc.releases(), &[], &[], &[])
+                .map_err(super::super::rpc::com_reference_error)?;
+            result
+                .ranges
+                .try_reserve_exact(receipt.ranges().len())
+                .map_err(|_| HostError::Infrastructure)?;
+            result.ranges.extend_from_slice(receipt.ranges());
+            result.references = Some(receipt);
+        }
         let count = runtime
             .activation
             .pending
@@ -204,7 +222,49 @@ impl EngineInstance {
         Ok(result)
     }
 
+    pub(in crate::process) fn check_com_thread_exit(
+        &self,
+        prepared: &PreparedComThreadExit32,
+    ) -> Result<(), HostError> {
+        if let Some(receipt) = &prepared.references {
+            self.ole32
+                .as_ref()
+                .ok_or(HostError::Infrastructure)?
+                .com
+                .can_commit_lifetime_changes(self.memory()?, receipt)
+                .map_err(super::super::rpc::com_reference_error)?;
+        }
+        Ok(())
+    }
+
+    pub(in crate::process) fn commit_com_thread_exit_after_memory(
+        &mut self,
+        mut prepared: PreparedComThreadExit32,
+        memory_changed: bool,
+    ) {
+        if let Some(receipt) = prepared.references.take() {
+            let runtime = self.ole32.as_mut().unwrap();
+            let destroyed = runtime.com.commit_lifetime_after_aggregate_unmap(
+                self.memory.as_ref().unwrap(),
+                receipt,
+                memory_changed,
+            );
+            runtime.rpc.record_destroyed_identities(&destroyed);
+        }
+        self.commit_com_thread_exit_metadata(prepared);
+    }
+
+    #[cfg(test)]
     pub(in crate::process) fn commit_com_thread_exit(&mut self, prepared: PreparedComThreadExit32) {
+        self.check_com_thread_exit(&prepared).unwrap();
+        assert!(
+            prepared.references.is_none(),
+            "reference retirement uses the aggregate RAM path"
+        );
+        self.commit_com_thread_exit_metadata(prepared);
+    }
+
+    fn commit_com_thread_exit_metadata(&mut self, prepared: PreparedComThreadExit32) {
         let Some(runtime) = self.ole32.as_mut() else {
             return;
         };
@@ -309,6 +369,7 @@ impl EngineInstance {
                 }
             }
         }
+        self.commit_rpc_thread_exit(prepared.rpc);
         self.commit_com_transfer_exit(prepared.transfers);
         self.commit_com_rundown(prepared.rundown);
         self.retire_com_sender_invocations(prepared.thread);

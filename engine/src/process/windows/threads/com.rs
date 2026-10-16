@@ -103,6 +103,22 @@ impl EngineInstance {
             })
     }
 
+    pub(in crate::process) fn active_com_apartment_call(&self, thread: u32) -> Option<(u32, u64)> {
+        let invocation = self
+            .threads
+            .threads
+            .iter()
+            .find(|record| record.id == thread)?
+            .active_invocations
+            .last()?;
+        match invocation.completion {
+            ThreadInvocationCompletion32::Ole32 {
+                sender,
+                continuation,
+            } => Some((sender, continuation)),
+            _ => None,
+        }
+    }
     pub(in crate::process) fn has_active_com_apartment_call(
         &self,
         sender: u32,

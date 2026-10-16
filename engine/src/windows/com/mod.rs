@@ -1,5 +1,6 @@
 mod identity;
 mod registration;
+pub(crate) use registration::registered_proxy;
 pub(crate) use registration::registered_server;
 pub use registration::{InProcessServer32, class_registry_path};
 mod registry;

@@ -38,7 +38,6 @@ impl StreamStore32 {
             },
         })
     }
-    #[cfg(test)]
     pub(crate) fn prepare_external_buffer(
         &self,
         charge: usize,
@@ -75,7 +74,6 @@ impl StreamStore32 {
     ) -> Result<(), StreamError32> {
         self.check_revision(prepared.revision)
     }
-    #[cfg(test)]
     pub(crate) fn commit_external_buffer(&mut self, prepared: PreparedBuffer32) -> BufferId32 {
         self.can_commit_buffer(&prepared)
             .expect("buffer publication was preflighted");
@@ -90,7 +88,6 @@ impl StreamStore32 {
         self.reserved += prepared.buffer.charge;
         self.buffers[prepared.slot] = Some(prepared.buffer);
     }
-    #[cfg(test)]
     pub(crate) fn prepare_release_buffer(
         &self,
         id: BufferId32,
@@ -110,7 +107,6 @@ impl StreamStore32 {
             slot,
         })
     }
-    #[cfg(test)]
     pub(crate) fn commit_release_buffer(&mut self, prepared: PreparedBufferRelease32) {
         self.check_revision(prepared.revision)
             .expect("buffer release was preflighted");
@@ -126,8 +122,55 @@ impl StreamStore32 {
         }
     }
 }
-#[cfg(test)]
 pub(crate) struct PreparedBufferRelease32 {
     revision: u64,
     slot: usize,
+}
+
+pub(crate) struct PreparedBufferBatchRelease32 {
+    revision: u64,
+    slots: Vec<usize>,
+}
+impl StreamStore32 {
+    pub(crate) fn prepare_release_buffers(
+        &self,
+        ids: &[BufferId32],
+    ) -> Result<PreparedBufferBatchRelease32, StreamError32> {
+        if !ids.is_empty() {
+            self.changed()?;
+        }
+        let mut slots = Vec::new();
+        slots
+            .try_reserve_exact(ids.len())
+            .map_err(|_| StreamError32::OutOfMemory)?;
+        for id in ids {
+            let slot = self
+                .buffers
+                .iter()
+                .position(|buffer| {
+                    buffer.as_ref().is_some_and(|buffer| {
+                        buffer.id == *id && matches!(buffer.data, BufferData32::External)
+                    })
+                })
+                .ok_or(StreamError32::InvalidHandle)?;
+            if slots.contains(&slot) {
+                return Err(StreamError32::InvalidParameter);
+            }
+            slots.push(slot);
+        }
+        Ok(PreparedBufferBatchRelease32 {
+            revision: self.revision,
+            slots,
+        })
+    }
+    pub(crate) fn commit_release_buffers(&mut self, prepared: PreparedBufferBatchRelease32) {
+        self.check_revision(prepared.revision)
+            .expect("aggregate buffer release was preflighted");
+        if !prepared.slots.is_empty() {
+            for slot in prepared.slots {
+                self.drop_buffer(slot);
+            }
+            self.revision += 1;
+        }
+    }
 }
