@@ -44,7 +44,7 @@ const assert = require('node:assert/strict'), bytes = require('node:fs').readFil
 assert.ok(WebAssembly.validate(bytes));
 const module = new WebAssembly.Module(bytes);
 assert.deepEqual(WebAssembly.Module.imports(module), [{module:'env',name:'memory',kind:'memory'},
-  ...['guard','cpu_store32'].map(name=>({module:'ring3',name,kind:'function'}))]);
+  ...['guard_detect','cpu_store32','finish_exception_detection'].map(name=>({module:'ring3',name,kind:'function'}))]);
 "#,
         ])
         .stdin(Stdio::piped())
@@ -145,31 +145,23 @@ fn typed_single_byte_fetch_wrap_and_consumed_code_currency_are_exact() {
         );
     }
     let missing = EngineInstance::new(1, KEY).unwrap();
-    assert_eq!(
-        decode_one(missing.memory().unwrap(), GuestAddress(PC)).err(),
-        Some(DecodeError::MemoryFault {
-            pc: GuestAddress(PC),
-            fault: MemoryFault {
-                address: GuestAddress(PC),
-                access: Access::Execute,
-                reason: FaultReason::Unmapped
-            },
-            length: 1,
-        })
+    crate::support_fetch::assert_error(
+        (decode_one(missing.memory().unwrap(), GuestAddress(PC)).err())
+            .expect("code fetch must fail"),
+        PC,
+        PC,
+        FaultReason::Unmapped,
+        1,
     );
     let mut denied = fixture(PC, &[0x9c]);
     denied.protect(PC, 1, 1).unwrap();
-    assert_eq!(
-        decode_one(denied.memory().unwrap(), GuestAddress(PC)).err(),
-        Some(DecodeError::MemoryFault {
-            pc: GuestAddress(PC),
-            fault: MemoryFault {
-                address: GuestAddress(PC),
-                access: Access::Execute,
-                reason: FaultReason::Permission
-            },
-            length: 1,
-        })
+    crate::support_fetch::assert_error(
+        (decode_one(denied.memory().unwrap(), GuestAddress(PC)).err())
+            .expect("code fetch must fail"),
+        PC,
+        PC,
+        FaultReason::Permission,
+        1,
     );
 }
 
@@ -191,31 +183,33 @@ fn strict_prefixes_popfd_and_both_standalone_profiles_stay_refused() {
             prefix_admission::admitted(&[prefix, 0x9c]);
             continue;
         }
-        assert_eq!(
-            decode_one(
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(
                 fixture(
                     PC,
                     &if prefix == 0x66 {
                         vec![prefix, 0x66, 0x9c]
                     } else {
                         vec![prefix, 0x9c]
-                    }
+                    },
                 )
                 .memory()
                 .unwrap(),
-                GuestAddress(PC)
+                GuestAddress(PC),
             )
-            .err(),
-            Some(DecodeError::Unsupported(feature))
+            .err())
+            .expect("instruction must fail to decode"),
+            DecodeError::Unsupported(feature),
         );
     }
-    assert_eq!(
-        decode_one(
+    crate::support_fetch::assert_decode_contract(
+        (decode_one(
             fixture(PC, &[0xf0, 0x9c]).memory().unwrap(),
-            GuestAddress(PC)
+            GuestAddress(PC),
         )
-        .err(),
-        Some(DecodeError::InvalidEncoding)
+        .err())
+        .expect("instruction must fail to decode"),
+        DecodeError::InvalidEncoding,
     );
     assert_eq!(
         decode_one(fixture(PC, &[0x9d]).memory().unwrap(), GuestAddress(PC))
@@ -276,7 +270,7 @@ while(at<input.length){const resident=input[at++],size=input.readUInt32LE(at);at
 const bytes=input.subarray(at,at+size);at+=size;assert.ok(WebAssembly.validate(bytes));
 const module=new WebAssembly.Module(bytes);
 assert.deepEqual(WebAssembly.Module.imports(module),[{module:'env',name:'memory',kind:'memory'},
-... [resident?'guard_resident':'guard',resident?'cpu_store_resident32':'cpu_store32'].map(name=>({module:'ring3',name,kind:'function'}))]);count++;}
+... [resident?'guard_detect_resident':'guard_detect',resident?'cpu_store_resident32':'cpu_store32','finish_exception_detection'].map(name=>({module:'ring3',name,kind:'function'}))]);count++;}
 assert.equal(at,input.length);assert.equal(count,4);
 "#]).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
     child.stdin.take().unwrap().write_all(&input).unwrap();
@@ -355,13 +349,31 @@ fn late_refusals_caps_and_data_currency_preserve_bound_publications() {
             for (pc, bytes, length, failure) in failures {
                 upload(&mut engine, pc, &bytes);
                 describe(&mut engine, pc, length, entries);
+                if entries
+                    && crate::support_admission::admit_if_deferred(
+                        &mut engine,
+                        crate::support_admission::ColdEntryCase {
+                            key: KEY,
+                            keeper: keep,
+                            resident,
+                            pages: &[],
+                            expected: failure.clone(),
+                        },
+                    )
+                {
+                    continue;
+                }
                 let before = engine.arena().to_vec();
                 let expected = if resident {
                     HostError::Resident(RegistryError::Compile(failure))
                 } else {
                     HostError::Compile(failure)
                 };
-                assert_eq!(bound(&mut engine, resident, entries), Err(expected));
+                crate::support_fetch::assert_host_contract(
+                    (bound(&mut engine, resident, entries))
+                        .expect_err("compilation must refuse this fixture"),
+                    expected,
+                );
                 assert_eq!(engine.arena(), before);
                 assert_eq!(engine.generation(), generation);
                 assert_eq!(engine.artifact_bytes().unwrap(), prior.0);

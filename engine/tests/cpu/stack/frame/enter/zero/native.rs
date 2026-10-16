@@ -292,15 +292,14 @@ fn enter_prefixes_allocation_and_five_bit_nesting_are_exact() {
             );
         }
     }
-    assert_eq!(
-        decode_one(
+    crate::support_fetch::assert_decode_contract(
+        (decode_one(
             &code_space(CODE, &[0x66, 0x66, 0xc8, 0, 0, 0]),
-            GuestAddress(CODE)
+            GuestAddress(CODE),
         )
-        .err(),
-        Some(DecodeError::Unsupported(
-            ring3_engine::cpu::UnsupportedFeature::Opcode
-        ))
+        .err())
+        .expect("instruction must fail to decode"),
+        DecodeError::Unsupported(ring3_engine::cpu::UnsupportedFeature::Opcode),
     );
     for (bytes, expected) in [
         (
@@ -411,9 +410,10 @@ fn enter_zero_fetches_exact_four_or_five_bytes_without_wrapping_source() {
         for cut in 1..form.len() {
             let pc = 0x2000 - cut as u32;
             let memory = code_space(pc, &form[..cut]);
-            assert_eq!(
-                decode_one(&memory, GuestAddress(pc)).err(),
-                Some(fetch_error(pc, 0x2000, FaultReason::Unmapped, cut + 1))
+            crate::support_fetch::assert_decode_contract(
+                (decode_one(&memory, GuestAddress(pc)).err())
+                    .expect("instruction must fail to decode"),
+                fetch_error(pc, 0x2000, FaultReason::Unmapped, cut + 1),
             );
             let pc = 0_u32.wrapping_sub(cut as u32);
             let mut memory = code_space(pc, &form[..cut]);
@@ -430,9 +430,10 @@ fn enter_zero_fetches_exact_four_or_five_bytes_without_wrapping_source() {
                     Permissions::EXECUTE,
                 )
                 .unwrap();
-            assert_eq!(
-                decode_one(&memory, GuestAddress(pc)).err(),
-                Some(fetch_error(pc, pc, FaultReason::AddressOverflow, cut + 1))
+            crate::support_fetch::assert_decode_contract(
+                (decode_one(&memory, GuestAddress(pc)).err())
+                    .expect("instruction must fail to decode"),
+                fetch_error(pc, pc, FaultReason::AddressOverflow, cut + 1),
             );
         }
         for pc in [
@@ -454,9 +455,9 @@ fn enter_zero_fetches_exact_four_or_five_bytes_without_wrapping_source() {
                 Permissions::READ,
             )
             .unwrap();
-        assert_eq!(
-            decode_one(&memory, GuestAddress(pc)).err(),
-            Some(fetch_error(pc, 0x2000, FaultReason::Permission, form.len()))
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(&memory, GuestAddress(pc)).err()).expect("instruction must fail to decode"),
+            fetch_error(pc, 0x2000, FaultReason::Permission, form.len()),
         );
         let mut memory = code_space(CODE, form);
         memory
@@ -465,9 +466,10 @@ fn enter_zero_fetches_exact_four_or_five_bytes_without_wrapping_source() {
                 Permissions::READ,
             )
             .unwrap();
-        assert_eq!(
-            decode_one(&memory, GuestAddress(CODE)).err(),
-            Some(fetch_error(CODE, CODE, FaultReason::Permission, 1))
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(&memory, GuestAddress(CODE)).err())
+                .expect("instruction must fail to decode"),
+            fetch_error(CODE, CODE, FaultReason::Permission, 1),
         );
     }
 }
@@ -560,13 +562,14 @@ fn enter_zero_late_refusal_preserves_dirty_full_arena_and_both_existing_owners()
             });
             let before = describe(&mut engine, CODE, refused_length, entries);
             assert_eq!(before.len(), ring3_engine::abi::arena::ARENA_SIZE);
-            assert_eq!(
-                bound_compile(&mut engine, is_resident, entries),
-                Err(if is_resident {
+            crate::support_fetch::assert_host_contract(
+                (bound_compile(&mut engine, is_resident, entries))
+                    .expect_err("compilation must refuse this fixture"),
+                if is_resident {
                     HostError::Resident(RegistryError::Compile(error))
                 } else {
                     HostError::Compile(error)
-                })
+                },
             );
             assert_eq!(engine.arena(), before);
             assert_eq!(engine.artifact_bytes().unwrap(), replacement_bytes);

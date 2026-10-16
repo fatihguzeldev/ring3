@@ -246,10 +246,10 @@ fn pop_all_ignored_address_segment_prefixes_and_family_neighbors_are_exact() {
             continue;
         }
 
-        assert_eq!(
-            decode_one(&code_space(CODE, bytes), GuestAddress(CODE)).err(),
-            Some(opcode),
-            "{bytes:02x?}"
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(&code_space(CODE, bytes), GuestAddress(CODE)).err())
+                .expect("instruction must fail to decode"),
+            opcode,
         );
     }
     for (bytes, expected) in [
@@ -361,23 +361,21 @@ fn pop_all_fetches_exact_one_or_two_bytes_at_page_top_and_execute_boundaries() {
                 Permissions::READ,
             )
             .unwrap();
-        assert_eq!(
-            decode_one(&memory, GuestAddress(CODE)).err(),
-            Some(fetch_error(CODE, CODE, FaultReason::Permission, 1))
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(&memory, GuestAddress(CODE)).err())
+                .expect("instruction must fail to decode"),
+            fetch_error(CODE, CODE, FaultReason::Permission, 1),
         );
     }
-    assert_eq!(
-        decode_one(&code_space(0x1fff, &[0x66]), GuestAddress(0x1fff)).err(),
-        Some(fetch_error(0x1fff, 0x2000, FaultReason::Unmapped, 2))
+    crate::support_fetch::assert_decode_contract(
+        (decode_one(&code_space(0x1fff, &[0x66]), GuestAddress(0x1fff)).err())
+            .expect("instruction must fail to decode"),
+        fetch_error(0x1fff, 0x2000, FaultReason::Unmapped, 2),
     );
-    assert_eq!(
-        decode_one(&code_space(u32::MAX, &[0x66]), GuestAddress(u32::MAX)).err(),
-        Some(fetch_error(
-            u32::MAX,
-            u32::MAX,
-            FaultReason::AddressOverflow,
-            2
-        ))
+    crate::support_fetch::assert_decode_contract(
+        (decode_one(&code_space(u32::MAX, &[0x66]), GuestAddress(u32::MAX)).err())
+            .expect("instruction must fail to decode"),
+        fetch_error(u32::MAX, u32::MAX, FaultReason::AddressOverflow, 2),
     );
     let mut memory = code_space(0x1fff, &[0x66, 0x61]);
     memory
@@ -386,9 +384,9 @@ fn pop_all_fetches_exact_one_or_two_bytes_at_page_top_and_execute_boundaries() {
             Permissions::READ,
         )
         .unwrap();
-    assert_eq!(
-        decode_one(&memory, GuestAddress(0x1fff)).err(),
-        Some(fetch_error(0x1fff, 0x2000, FaultReason::Permission, 2))
+    crate::support_fetch::assert_decode_contract(
+        (decode_one(&memory, GuestAddress(0x1fff)).err()).expect("instruction must fail to decode"),
+        fetch_error(0x1fff, 0x2000, FaultReason::Permission, 2),
     );
 }
 

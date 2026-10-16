@@ -35,10 +35,6 @@ use ring3_engine::{
     memory::{Access, FaultReason, GuestAddress, MemoryFault},
     process::{HostError, ResidentInstallation},
 };
-use wasm_encoder::{
-    EntityType, ExportKind, ExportSection, FunctionSection, ImportSection, MemoryType, Module,
-    TypeSection, ValType,
-};
 
 const CODE: u32 = 0x1000;
 const KEEP: u32 = 0x3000;
@@ -101,90 +97,6 @@ fn instruction_error(pc: u32, cause: InstructionError) -> CompileError {
     }
 }
 
-fn declarations(owner: Owner) -> Vec<u8> {
-    let resident = matches!(owner, Owner::Resident);
-    let mut module = Module::new();
-    let mut types = TypeSection::new();
-    types.ty().function([ValType::I32; 4], [ValType::I32]);
-    types.ty().function(
-        std::iter::repeat_n(ValType::I32, if resident { 7 } else { 6 }),
-        [ValType::I32],
-    );
-    types.ty().function([ValType::I32], [ValType::I32]);
-    types.ty().function([ValType::I32; 6], [ValType::I32]);
-    module.section(&types);
-    let mut imports = ImportSection::new();
-    imports.import(
-        "env",
-        "memory",
-        EntityType::Memory(MemoryType {
-            minimum: 1,
-            maximum: None,
-            memory64: false,
-            shared: false,
-            page_size_log2: None,
-        }),
-    );
-    imports.import(
-        "ring3",
-        if resident { "guard_resident" } else { "guard" },
-        EntityType::Function(1),
-    );
-    imports.import("ring3", "cpu_read32", EntityType::Function(2));
-    module.section(&imports);
-    let mut functions = FunctionSection::new();
-    functions.function(0);
-    functions.function(3);
-    module.section(&functions);
-    let mut exports = ExportSection::new();
-    exports.export("run", ExportKind::Func, 2);
-    module.section(&exports);
-    // this prefix proves exact guard/read32 declarations, not instruction bodies.
-    module.finish()
-}
-
-fn body_locals(wasm: &[u8]) {
-    fn unsigned(bytes: &[u8], cursor: &mut usize) -> usize {
-        let mut value = 0;
-        for shift in (0..35).step_by(7) {
-            let byte = bytes[*cursor];
-            *cursor += 1;
-            assert!(shift < 28 || byte & 0xf0 == 0);
-            value |= usize::from(byte & 0x7f) << shift;
-            if byte & 0x80 == 0 {
-                return value;
-            }
-        }
-        panic!("unterminated u32 LEB128")
-    }
-    let mut cursor = 8;
-    while cursor < wasm.len() {
-        let id = wasm[cursor];
-        cursor += 1;
-        let length = unsigned(wasm, &mut cursor);
-        let end = cursor + length;
-        if id == 10 {
-            assert_eq!(unsigned(wasm, &mut cursor), 2);
-            for expected in [&[(16, 0x7f), (1, 0x7e), (10, 0x7f)][..], &[(3, 0x7f)][..]] {
-                let length = unsigned(wasm, &mut cursor);
-                let body_end = cursor + length;
-                assert_eq!(unsigned(wasm, &mut cursor), expected.len());
-                for &(count, kind) in expected {
-                    assert_eq!(unsigned(wasm, &mut cursor), count);
-                    assert_eq!(wasm[cursor], kind);
-                    cursor += 1;
-                }
-                assert_eq!(wasm[body_end - 1], 0x0b);
-                cursor = body_end;
-            }
-            assert_eq!(cursor, end);
-            return;
-        }
-        cursor = end;
-    }
-    panic!("missing code section")
-}
-
 #[test]
 fn exact_leave_fetches_one_byte_at_page_and_guest_address_ends() {
     for pc in [CODE, 0x1fff, u32::MAX] {
@@ -201,31 +113,23 @@ fn exact_leave_fetches_one_byte_at_page_and_guest_address_ends() {
                 .is_code_current(decoded.code_snapshot())
         );
         engine.protect(pc & !0xfff, 1, 1).unwrap();
-        assert_eq!(
-            decode_one(engine.memory().unwrap(), GuestAddress(pc)).err(),
-            Some(DecodeError::MemoryFault {
-                pc: GuestAddress(pc),
-                fault: MemoryFault {
-                    address: GuestAddress(pc),
-                    access: Access::Execute,
-                    reason: FaultReason::Permission,
-                },
-                length: 1,
-            })
+        crate::support_fetch::assert_error(
+            (decode_one(engine.memory().unwrap(), GuestAddress(pc)).err())
+                .expect("code fetch must fail"),
+            pc,
+            pc,
+            FaultReason::Permission,
+            1,
         );
     }
     let engine = code(0x1fff, &[0xc9], true);
-    assert_eq!(
-        decode_one(engine.memory().unwrap(), GuestAddress(0x2000)).err(),
-        Some(DecodeError::MemoryFault {
-            pc: GuestAddress(0x2000),
-            fault: MemoryFault {
-                address: GuestAddress(0x2000),
-                access: Access::Execute,
-                reason: FaultReason::Unmapped,
-            },
-            length: 1,
-        })
+    crate::support_fetch::assert_error(
+        (decode_one(engine.memory().unwrap(), GuestAddress(0x2000)).err())
+            .expect("code fetch must fail"),
+        0x2000,
+        0x2000,
+        FaultReason::Unmapped,
+        1,
     );
 }
 
@@ -282,8 +186,14 @@ fn four_bound_profiles_keep_leave_sequential_and_require_only_checked_read32() {
                         engine.resident_bytes(id).unwrap()
                     }
                 };
-                assert!(artifact.starts_with(&declarations(owner)));
-                body_locals(artifact);
+                let resident = matches!(owner, Owner::Resident);
+                crate::support_wasm_interface::assert_bound(
+                    artifact,
+                    resident,
+                    &[("cpu_read32", 1)],
+                    &[4, if resident { 7 } else { 6 }, 1],
+                    true,
+                );
             }
         }
     }
@@ -357,10 +267,10 @@ fn standalone_and_prefixed_or_adjacent_forms_keep_explicit_refusals() {
             assert_eq!(engine.arena(), before);
             continue;
         }
-        assert_eq!(
-            decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),
-            Some(expected),
-            "{bytes:02x?}"
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err())
+                .expect("instruction must fail to decode"),
+            expected,
         );
     }
 }
@@ -455,9 +365,10 @@ fn late_refusal_and_missing_next_instruction_preserve_both_published_owners() {
                         }),
                     )
                 };
-                assert_eq!(
-                    compile(&mut engine, owner, entries),
-                    Err(failure(owner, error))
+                crate::support_fetch::assert_host_contract(
+                    (compile(&mut engine, owner, entries))
+                        .expect_err("compilation must refuse this fixture"),
+                    failure(owner, error),
                 );
                 assert_eq!(publication(&engine, keep), before);
                 assert!(engine.memory().unwrap().is_code_current(&snapshot));

@@ -140,7 +140,17 @@ impl Context {
             StoreCompletion::Complete
         );
         let mut expected = before;
-        expected[HELPER_OFFSET..HELPER_OFFSET + 40].copy_from_slice(&packet(fields));
+        let failure_packet = if fields[0] == 1 {
+            assert!(matches!(fields[2], 1 | 2));
+            assert!(matches!(fields[4], 1 | 2));
+            let error_code = 4 | u32::from(fields[2] == 2) | (u32::from(fields[4] == 2) << 1);
+            let mut bytes = packet([9, 0, error_code, fields[3], fields[4], fields[5]]);
+            bytes[4..8].copy_from_slice(&0x0001_000f_u32.to_le_bytes());
+            bytes
+        } else {
+            packet(fields)
+        };
+        expected[HELPER_OFFSET..HELPER_OFFSET + 40].copy_from_slice(&failure_packet);
         assert_eq!(
             self.engine.arena(),
             expected,
