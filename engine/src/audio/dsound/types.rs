@@ -221,14 +221,15 @@ impl BufferDescription {
         if self.flags & Self::HARDWARE != 0 {
             return Err(HResult::CONTROL_UNAVAILABLE);
         }
-        if self.flags & Self::EFFECTS != 0 {
-            return Err(HResult::FX_UNAVAILABLE);
-        }
         if self.flags & Self::PRIMARY != 0 {
             if self.format.is_some()
                 || self.bytes != 0
                 || self.flags
-                    & (Self::FREQUENCY | Self::PAN | Self::NOTIFY | Self::DEFERRED_LOCATION)
+                    & (Self::FREQUENCY
+                        | Self::PAN
+                        | Self::NOTIFY
+                        | Self::DEFERRED_LOCATION
+                        | Self::EFFECTS)
                     != 0
             {
                 return Err(HResult::INVALID_PARAM);
@@ -240,6 +241,12 @@ impl BufferDescription {
                 || !self.bytes.is_multiple_of(format.pcm.frame_bytes())
             {
                 return Err(HResult::INVALID_PARAM);
+            }
+            if self.flags & Self::EFFECTS != 0
+                && u64::from(self.bytes) * 1000
+                    < u64::from(format.pcm.sample_rate) * u64::from(format.pcm.frame_bytes()) * 150
+            {
+                return Err(HResult::BUFFER_TOO_SMALL);
             }
             if version8
                 && self.flags & Self::CONTROL_3D != 0

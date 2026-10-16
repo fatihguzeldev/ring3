@@ -62,3 +62,16 @@ impl Ole32Runtime32 {
         self.com.reservation()
     }
 }
+
+impl crate::process::EngineInstance {
+    pub(in crate::process) fn check_com_thread_initialized(
+        &self,
+        thread: u32,
+    ) -> Result<(), HResult32> {
+        self.ole32
+            .as_ref()
+            .ok_or(HResult32::NOT_INITIALIZED)?
+            .apartments
+            .check(thread)
+    }
+}

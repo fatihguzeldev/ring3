@@ -24,6 +24,9 @@ impl DSoundRuntime32 {
         slot: u8,
         args: &[u32],
     ) -> Result<u32, HResult> {
+        if matches!(slot, 21..=23) {
+            return self.buffer_effects(memory, audio, pointer, slot, args);
+        }
         if slot == 11 {
             return self.lock_buffer(memory, audio, pointer, args);
         }
@@ -179,24 +182,6 @@ impl DSoundRuntime32 {
                 };
                 buffer.native.lost = false;
             }
-            21 => {
-                if buffer.native.description.flags & BufferDescription::EFFECTS == 0 {
-                    return Err(HResult::CONTROL_UNAVAILABLE);
-                }
-                return Err(HResult::FX_UNAVAILABLE);
-            }
-            22 => {
-                if buffer.native.description.flags & BufferDescription::DEFERRED_LOCATION == 0 {
-                    return Err(HResult::INVALID_CALL);
-                }
-                if args[1] & !6 != 0 || args[1] & 2 != 0 {
-                    return Err(HResult::CONTROL_UNAVAILABLE);
-                }
-                if args[2] != 0 {
-                    return Err(HResult::INVALID_PARAM);
-                }
-            }
-            23 => return Err(HResult::OBJECT_NOT_FOUND),
             _ => return Err(HResult::UNSUPPORTED),
         }
         Ok(0)

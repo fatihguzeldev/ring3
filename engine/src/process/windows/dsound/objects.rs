@@ -12,6 +12,7 @@ pub(super) struct Object32 {
 pub(super) enum ObjectKind32 {
     Device(Device32),
     Buffer(Buffer32),
+    Effect(super::effects::EffectObject32),
     CaptureDevice {
         version8: bool,
         initialized: bool,
@@ -28,6 +29,7 @@ pub(super) struct Device32 {
     pub primary: Option<GuestAddress>,
 }
 pub(super) struct Buffer32 {
+    pub effects_generation: u64,
     pub native: Buffer,
     pub device: GuestAddress,
     pub version8: bool,

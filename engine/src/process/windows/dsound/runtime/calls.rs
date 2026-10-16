@@ -59,6 +59,14 @@ impl EngineInstance {
         } else {
             None
         };
+        let com_error = if method.is_some_and(|gate| {
+            gate.interface == crate::audio::dsound::InterfaceKind::Buffer8 && gate.slot == 21
+        }) {
+            self.check_com_thread_initialized(self.current_windows_thread_id()?)
+                .err()
+        } else {
+            None
+        };
         let runtime = self
             .dsound
             .as_mut()
@@ -74,6 +82,9 @@ impl EngineInstance {
             .as_ref()
             .map(super::super::super::user32::User32Context32::windows);
         let outcome = (|| {
+            if let Some(error) = com_error {
+                return Err(crate::audio::dsound::HResult(error.0));
+            }
             if let Some(gates) = &gates {
                 runtime.initialize_methods(gates)?;
             }

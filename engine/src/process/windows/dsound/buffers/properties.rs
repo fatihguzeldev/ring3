@@ -139,6 +139,7 @@ impl DSoundRuntime32 {
             super::super::lifetime::discard(
                 audio,
                 &ObjectKind32::Buffer(super::super::objects::Buffer32 {
+                    effects_generation: 0,
                     native: replacement,
                     device: device_pointer,
                     version8: false,

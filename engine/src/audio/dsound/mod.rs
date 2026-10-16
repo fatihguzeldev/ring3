@@ -2,6 +2,7 @@ mod api;
 mod buffer;
 mod capture;
 mod device;
+pub mod effects;
 mod spatial;
 mod types;
 

@@ -271,6 +271,11 @@ impl DSoundRuntime32 {
                         release.push(buffer.device);
                         changed = true;
                     }
+                    ObjectKind32::Effect(effect) => {
+                        release.try_reserve(1).map_err(|_| HResult::OUT_OF_MEMORY)?;
+                        release.push(effect.buffer);
+                        changed = true;
+                    }
                     ObjectKind32::CaptureBuffer(buffer) => {
                         release.try_reserve(1).map_err(|_| HResult::OUT_OF_MEMORY)?;
                         release.push(buffer.device);

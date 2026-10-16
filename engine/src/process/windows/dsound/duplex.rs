@@ -196,6 +196,7 @@ impl DSoundRuntime32 {
                 memory,
                 audio,
                 ObjectKind32::Buffer(Buffer32 {
+                    effects_generation: 0,
                     native: native.take().unwrap(),
                     device,
                     version8: true,

@@ -108,6 +108,19 @@ impl InterfaceKind {
             }
             Self::CaptureBuffer => &CAPTURE_BUFFER[..12],
             Self::CaptureBuffer8 => CAPTURE_BUFFER,
+            Self::FxI3dl2Reverb => {
+                methods!["QueryInterface":3,"AddRef":1,"Release":1,"SetAllParameters":2,"GetAllParameters":2,"SetPreset":2,"GetPreset":2,"SetQuality":2,"GetQuality":2]
+            }
+            Self::FxChorus
+            | Self::FxCompressor
+            | Self::FxDistortion
+            | Self::FxEcho
+            | Self::FxFlanger
+            | Self::FxGargle
+            | Self::FxParametricEq
+            | Self::FxWavesReverb => {
+                methods!["QueryInterface":3,"AddRef":1,"Release":1,"SetAllParameters":2,"GetAllParameters":2]
+            }
             Self::FullDuplex => methods!["QueryInterface":3,"AddRef":1,"Release":1,"Initialize":9],
         }
     }

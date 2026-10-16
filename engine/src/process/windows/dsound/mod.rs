@@ -7,6 +7,7 @@ mod context;
 mod device;
 mod dispatch;
 mod duplex;
+mod effects;
 mod enumeration;
 mod lifetime;
 mod locks;

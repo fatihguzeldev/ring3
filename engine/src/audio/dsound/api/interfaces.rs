@@ -15,6 +15,15 @@ pub enum InterfaceKind {
     CaptureBuffer8 = 10,
     FullDuplex = 11,
     Unknown = 12,
+    FxChorus = 13,
+    FxCompressor = 14,
+    FxDistortion = 15,
+    FxEcho = 16,
+    FxFlanger = 17,
+    FxGargle = 18,
+    FxParametricEq = 19,
+    FxI3dl2Reverb = 20,
+    FxWavesReverb = 21,
 }
 
 const fn guid(a: u32, b: u16, c: u16, d: [u8; 8]) -> InterfaceId {
@@ -28,7 +37,7 @@ const fn guid(a: u32, b: u16, c: u16, d: [u8; 8]) -> InterfaceId {
 }
 
 impl InterfaceKind {
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 21] = [
         Self::Device,
         Self::Device8,
         Self::Buffer,
@@ -41,11 +50,38 @@ impl InterfaceKind {
         Self::CaptureBuffer8,
         Self::FullDuplex,
         Self::Unknown,
+        Self::FxChorus,
+        Self::FxCompressor,
+        Self::FxDistortion,
+        Self::FxEcho,
+        Self::FxFlanger,
+        Self::FxGargle,
+        Self::FxParametricEq,
+        Self::FxI3dl2Reverb,
+        Self::FxWavesReverb,
     ];
     pub fn from_tag(tag: u8) -> Option<Self> {
         Self::ALL.into_iter().find(|kind| *kind as u8 == tag)
     }
+    pub const fn effect(self) -> Option<crate::audio::effects::EffectKind> {
+        use crate::audio::effects::EffectKind as K;
+        match self {
+            Self::FxChorus => Some(K::Chorus),
+            Self::FxCompressor => Some(K::Compressor),
+            Self::FxDistortion => Some(K::Distortion),
+            Self::FxEcho => Some(K::Echo),
+            Self::FxFlanger => Some(K::Flanger),
+            Self::FxGargle => Some(K::Gargle),
+            Self::FxParametricEq => Some(K::ParametricEq),
+            Self::FxI3dl2Reverb => Some(K::I3dl2Reverb),
+            Self::FxWavesReverb => Some(K::WavesReverb),
+            _ => None,
+        }
+    }
     pub const fn iid(self) -> InterfaceId {
+        if let Some(kind) = self.effect() {
+            return crate::audio::dsound::effects::interface_id(kind);
+        }
         match self {
             Self::Unknown => crate::windows::com::IID_IUNKNOWN,
             Self::Device => guid(
@@ -114,6 +150,20 @@ impl InterfaceKind {
                 0x4216,
                 [0xa4, 0x2e, 0x6c, 0x50, 0x59, 0x6d, 0xdc, 0x1d],
             ),
+            Self::FxChorus
+            | Self::FxCompressor
+            | Self::FxDistortion
+            | Self::FxEcho
+            | Self::FxFlanger
+            | Self::FxGargle
+            | Self::FxParametricEq
+            | Self::FxI3dl2Reverb
+            | Self::FxWavesReverb => {
+                crate::audio::dsound::effects::interface_id(match self.effect() {
+                    Some(kind) => kind,
+                    None => unreachable!(),
+                })
+            }
         }
     }
 }

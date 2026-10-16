@@ -58,7 +58,21 @@ fn literal_wave_format_and_invalid_capabilities_are_not_silent_success() {
             ..desc
         }
         .validate(true),
-        Err(HResult::FX_UNAVAILABLE)
+        Err(HResult::BUFFER_TOO_SMALL)
+    );
+    let effects = BufferDescription {
+        flags: BufferDescription::EFFECTS,
+        bytes: 7200,
+        ..desc
+    };
+    assert_eq!(effects.validate(true), Ok(effects));
+    assert_eq!(
+        BufferDescription {
+            bytes: 7199,
+            ..effects
+        }
+        .validate(true),
+        Err(HResult::BUFFER_TOO_SMALL)
     );
     assert_eq!(
         InterfaceKind::CaptureBuffer8.iid().0[..4],

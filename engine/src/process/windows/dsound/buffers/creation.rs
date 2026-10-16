@@ -79,6 +79,7 @@ impl DSoundRuntime32 {
             memory,
             audio,
             ObjectKind32::Buffer(Buffer32 {
+                effects_generation: 0,
                 native,
                 device: canonical,
                 version8: version8 && !primary,
@@ -135,6 +136,7 @@ impl DSoundRuntime32 {
             memory,
             audio,
             ObjectKind32::Buffer(Buffer32 {
+                effects_generation: 0,
                 native,
                 device: canonical,
                 version8: false,

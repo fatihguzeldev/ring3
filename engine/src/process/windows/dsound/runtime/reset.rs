@@ -76,6 +76,9 @@ impl EngineInstance {
                     let voice = replacement
                         .create_stream_voice(storage)
                         .map_err(audio_error)?;
+                    original
+                        .copy_voice_effects(buffer.native.voice, replacement, voice)
+                        .map_err(audio_error)?;
                     let mut native = buffer.native;
                     native.storage = storage;
                     native.voice = voice;

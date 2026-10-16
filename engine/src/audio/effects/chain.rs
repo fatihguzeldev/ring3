@@ -201,4 +201,28 @@ impl AudioContext {
         Ok(())
     }
 
+    pub(crate) fn copy_voice_effects(
+        &self,
+        source: AudioVoiceId32,
+        replacement: &mut AudioContext,
+        destination: AudioVoiceId32,
+    ) -> Result<(), AudioError32> {
+        let Some(chain) = self.voice_effects(source)? else {
+            return Ok(());
+        };
+        let mut kinds = Vec::new();
+        kinds
+            .try_reserve_exact(chain.len())
+            .map_err(|_| AudioError32::Allocation)?;
+        kinds.extend(chain.effects.iter().map(|effect| effect.parameters.kind()));
+        let mut next = replacement.prepare_voice_effects(destination, &kinds)?;
+        for (old, new) in chain.effects.iter().zip(&mut next.effects) {
+            new.parameters = old.parameters;
+            new.quality = old.quality;
+            new.preset = old.preset;
+            new.update_coefficients();
+        }
+        replacement.commit_voice_effects(destination, next);
+        Ok(())
+    }
 }

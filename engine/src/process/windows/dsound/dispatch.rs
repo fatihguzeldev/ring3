@@ -117,7 +117,10 @@ impl DSoundRuntime32 {
             InterfaceKind::FullDuplex => {
                 self.initialize_full_duplex(memory, audio, windows, pointer, args)
             }
-            InterfaceKind::Unknown => Err(HResult::UNSUPPORTED),
+            interface if interface.effect().is_some() => {
+                self.effect_call(memory, audio, pointer, interface, gate.slot, args)
+            }
+            _ => Err(HResult::UNSUPPORTED),
         }
     }
 }
