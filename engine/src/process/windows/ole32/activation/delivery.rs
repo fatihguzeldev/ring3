@@ -95,15 +95,15 @@ impl EngineInstance {
                     .check_span(GuestAddress(create), 1, Access::Execute)
                     .map_err(HostError::Memory)?;
                 let pending = &self.ole32.as_ref().unwrap().activation.pending[slot];
+                let out = if self.remote_com_activation(continuation) {
+                    pending.scratch.address.0 + 52
+                } else {
+                    pending.out
+                };
                 let request = registered_callback(
                     continuation,
                     create,
-                    &[
-                        factory,
-                        pending.outer,
-                        pending.scratch.address.0 + 32,
-                        pending.out,
-                    ],
+                    &[factory, pending.outer, pending.scratch.address.0 + 32, out],
                 );
                 self.ole32.as_mut().unwrap().activation.pending[slot].phase =
                     Phase32::Create { factory, release };
@@ -123,7 +123,7 @@ impl EngineInstance {
     pub(in crate::process::windows::ole32) fn finish_registered_com_activation(
         &mut self,
         slot: usize,
-        result: u32,
+        mut result: u32,
     ) -> Result<WindowsProviderOutcome32, HostError> {
         let pending = &self.ole32.as_ref().unwrap().activation.pending[slot];
         pending
@@ -133,6 +133,33 @@ impl EngineInstance {
         self.memory()?
             .ensure_transaction_versions(2)
             .map_err(HostError::Memory)?;
+        if result & 0x8000_0000 == 0
+            && let Some(remote) = self
+                .ole32
+                .as_ref()
+                .unwrap()
+                .marshaling
+                .activations
+                .iter()
+                .find(|remote| remote.continuation == pending.continuation)
+        {
+            let execution = remote.execution;
+            let client = remote.client;
+            let server = pending.server;
+            let out = pending.out;
+            let pointer = self.ole32_read_word(pending.scratch.address.0 + 52)?;
+            let requested =
+                super::super::memory::iid(self.memory()?, pending.scratch.address.0 + 32)
+                    .map_err(|_| HostError::InvalidRequest)?;
+            if pointer == 0 {
+                result = HResult32::UNEXPECTED.0;
+            } else {
+                self.publish_standard_com_proxy(
+                    execution, client, server, pointer, requested, out,
+                )?;
+            }
+        }
+        let pending = &self.ole32.as_ref().unwrap().activation.pending[slot];
         if result & 0x8000_0000 != 0 {
             self.memory
                 .as_mut()
@@ -152,6 +179,13 @@ impl EngineInstance {
                 server.threads.retain(|owner| *owner != thread);
             }
         }
+        let continuation = self.ole32.as_ref().unwrap().activation.pending[slot].continuation;
+        self.ole32
+            .as_mut()
+            .unwrap()
+            .marshaling
+            .activations
+            .retain(|remote| remote.continuation != continuation);
         self.ole32
             .as_mut()
             .unwrap()

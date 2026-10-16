@@ -127,18 +127,20 @@ impl SavedThread32 {
         self.activation
             .as_ref()
             .is_some_and(|reply| engine.activation_thread_reply_ready(reply))
-            || self
-                .files
-                .as_ref()
-                .is_some_and(|reply| reply.alertable() && engine.has_pending_thread_apc(thread))
             || engine.registered_com_wait_ready(thread)
+            || engine.com_proxy_wait_ready(thread)
+            || engine.com_abandoned_work_ready(thread)
             || engine.exceptions.thread_unhandled(thread)
+            || engine.winmm.thread_reply_ready(&self.winmm)
             || self
                 .dinput
                 .as_ref()
                 .and_then(|reply| reply.file_request())
                 .is_some_and(|request| engine.provider_file_request_ready(request))
-            || engine.winmm.thread_reply_ready(&self.winmm)
+            || self
+                .files
+                .as_ref()
+                .is_some_and(|reply| reply.alertable() && engine.has_pending_thread_apc(thread))
             || self.event.is_some()
             || self
                 .windows_replies
@@ -248,6 +250,29 @@ fn owner_pin(owner: PendingOwner) -> Option<u64> {
     }
 }
 impl super::ThreadRuntime32 {
+    pub(in crate::process) fn windows_callback_result(
+        &self,
+        thread: u32,
+        provider: crate::process::windows::callbacks::WindowsCallbackProvider32,
+        owner: PendingOwner,
+        token: u32,
+        continuation: u64,
+        frame: crate::windows::CallFrame32,
+    ) -> Option<u32> {
+        let record = self.threads.iter().find(|record| record.id == thread)?;
+        record
+            .saved
+            .iter()
+            .chain(
+                record
+                    .active_invocations
+                    .iter()
+                    .map(|invocation| &invocation.saved),
+            )
+            .flat_map(|saved| &saved.windows_replies)
+            .find_map(|reply| reply.received_result(provider, owner, token, continuation, frame))
+    }
+
     pub(in crate::process) fn execution_pins(&self) -> impl Iterator<Item = u64> + '_ {
         self.threads
             .iter()

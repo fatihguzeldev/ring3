@@ -68,6 +68,7 @@ impl ThreadRuntime32 {
             next_invocation: 0,
             schedule_required: None,
             multimedia_worker: None,
+            com_hosts: Vec::new(),
             fls: fls::FlsRuntime32::new(128, limits.threads)?,
         })
     }
@@ -86,6 +87,7 @@ impl ThreadRuntime32 {
         self.invocations.clear();
         self.schedule_required = None;
         self.multimedia_worker = None;
+        self.com_hosts.clear();
     }
     pub(in crate::process) fn is_last_live(&self) -> bool {
         self.threads
@@ -95,6 +97,7 @@ impl ThreadRuntime32 {
                     && !self
                         .multimedia_worker
                         .is_some_and(|(id, _)| id == thread.id)
+                    && !self.com_hosts.iter().any(|host| host.thread == thread.id)
             })
             .count()
             == 1
@@ -186,6 +189,7 @@ impl ThreadRuntime32 {
         self.tls_allocated.fill(0);
         self.invocations.clear();
         self.schedule_required = None;
+        self.com_hosts.clear();
     }
     pub(in crate::process) fn info(&self, id: u32) -> Result<ThreadInfo32, ThreadError32> {
         let thread = self

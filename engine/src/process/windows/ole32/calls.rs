@@ -54,6 +54,11 @@ impl EngineInstance {
             return Ok(true);
         }
         let thread = self.current_windows_thread_id()?;
+        if let Some(method) = method
+            && self.try_complete_com_proxy_call(owner, token, method, frame)?
+        {
+            return Ok(true);
+        }
         if let Some(api) = api
             && self.try_begin_registered_com_call(owner, token, api, frame)?
         {

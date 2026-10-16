@@ -36,9 +36,17 @@ impl EngineInstance {
         {
             return Ok(false);
         }
-        if runtime.apartments.check(thread).is_err() || runtime.activation.servers.is_empty() {
+        if runtime.apartments.check(thread).is_err() {
             return Ok(false);
         };
+        let has_proxies = runtime.marshaling.proxies.iter().flatten().any(|proxy| {
+            runtime.apartments.identity(thread) == Ok(proxy.client) && proxy.owned != [0; 2]
+        });
+        if runtime.activation.servers.is_empty()
+            && !(api == Ole32Api32::CoUninitialize && has_proxies)
+        {
+            return Ok(false);
+        }
         if api == Ole32Api32::CoFreeUnusedLibrariesEx && frame.arguments()[1] != 0 {
             self.publish_prepared_call(Self::prepare_completed_call(frame.complete(0))?);
             return Ok(true);
@@ -58,6 +66,11 @@ impl EngineInstance {
             .activation
             .prepare()
             .map_err(|_| HostError::Infrastructure)?;
+        let rundown = if api == Ole32Api32::CoUninitialize {
+            Some(self.prepare_com_rundown(thread, false, continuation)?)
+        } else {
+            None
+        };
         let scratch = GuestCallbackScratch32::allocate(
             self.memory.as_mut().unwrap(),
             ActivationRuntime32::scratch_reservation(),
@@ -84,6 +97,9 @@ impl EngineInstance {
         runtime.next = continuation;
         runtime.pending.push(entry);
         let slot = runtime.pending.len() - 1;
+        if let Some(rundown) = rundown {
+            self.commit_com_rundown(rundown);
+        }
         self.advance_registered_com_loading(slot)?;
         Ok(true)
     }

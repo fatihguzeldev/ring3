@@ -11,7 +11,6 @@ use crate::{
     },
     windows::{
         CallFrame32,
-        com::ServerThreadingModel32,
         ole32::{HResult32, IID_ICLASSFACTORY, KnownClass32, Ole32Api32},
     },
 };
@@ -83,11 +82,8 @@ impl EngineInstance {
             self.complete_registered_com_failure(frame, error)?;
             return Ok(true);
         }
-        let resolution = match self.active_com_redirection(class.0)? {
-            Some(server) => Ok(Some(crate::windows::com::InProcessServer32 {
-                path: String::from_utf16(&server.server).map_err(|_| HostError::InvalidRequest)?,
-                threading: server.threading,
-            })),
+        let resolution = match self.com_activation_redirection_server(class)? {
+            Some(server) => Ok(Some(server)),
             None => self.registered_com_server(class),
         };
         let mut server = match resolution {
@@ -103,21 +99,13 @@ impl EngineInstance {
             }
         };
         server.path = self.resolve_module_source_name(&server.path)?;
-        let apartments = &self.ole32.as_ref().unwrap().apartments;
-        let sta = apartments
-            .is_single_threaded(thread)
+        let client = self
+            .ole32
+            .as_ref()
+            .unwrap()
+            .apartments
+            .identity(thread)
             .map_err(|_| HostError::Infrastructure)?;
-        let direct = match server.threading {
-            ServerThreadingModel32::Both => true,
-            ServerThreadingModel32::Neutral => false,
-            ServerThreadingModel32::Apartment => sta,
-            ServerThreadingModel32::Free => !sta,
-            ServerThreadingModel32::MainSta => sta && apartments.main_sta_thread() == Some(thread),
-        };
-        if !direct {
-            self.complete_registered_com_failure(frame, HResult32(0x8001_010e))?;
-            return Ok(true);
-        }
         let continuation = match self.ole32.as_mut().unwrap().activation.prepare() {
             Ok(id) => id,
             Err(error) => {
@@ -126,6 +114,27 @@ impl EngineInstance {
             }
         };
         self.check_windows_callback_capacity()?;
+        self.ole32
+            .as_mut()
+            .unwrap()
+            .marshaling
+            .activations
+            .try_reserve(1)
+            .map_err(|_| HostError::Infrastructure)?;
+        let execution = self.select_com_execution_apartment(thread, server.threading)?;
+        let remote = execution.apartment != client;
+        if remote && api == Ole32Api32::CoCreateInstance && args[1] != 0 {
+            self.complete_registered_com_failure(frame, HResult32::NO_AGGREGATION)?;
+            return Ok(true);
+        }
+        if remote {
+            let gates = self.module_gates()?;
+            self.ole32
+                .as_mut()
+                .unwrap()
+                .initialize_methods(&gates)
+                .map_err(|_| HostError::Infrastructure)?;
+        }
         let mut server_threads = Vec::new();
         server_threads
             .try_reserve_exact(1)
@@ -179,6 +188,19 @@ impl EngineInstance {
         let runtime = &mut self.ole32.as_mut().unwrap().activation;
         runtime.next = continuation;
         runtime.pending.push(pending);
+        if remote {
+            self.ole32.as_mut().unwrap().marshaling.activations.push(
+                super::super::marshaling::RemoteActivation32 {
+                    continuation,
+                    client,
+                    execution,
+                    remote: super::super::marshaling::Remote32::Idle,
+                    next: None,
+                    abandoned: false,
+                    cleanup: None,
+                },
+            );
+        }
         self.advance_registered_com_loading(
             self.ole32.as_ref().unwrap().activation.pending.len() - 1,
         )?;
@@ -200,5 +222,22 @@ impl EngineInstance {
         .unwrap_or(HResult32::POINTER.0);
         self.publish_prepared_call(Self::prepare_completed_call(frame.complete(result))?);
         Ok(())
+    }
+}
+
+impl EngineInstance {
+    pub(in crate::process::windows::ole32) fn com_activation_redirection_server(
+        &self,
+        class: crate::windows::com::InterfaceId,
+    ) -> Result<Option<crate::windows::com::InProcessServer32>, HostError> {
+        self.active_com_redirection(class.0)?
+            .map(|server| {
+                Ok(crate::windows::com::InProcessServer32 {
+                    path: String::from_utf16(&server.server)
+                        .map_err(|_| HostError::InvalidRequest)?,
+                    threading: server.threading,
+                })
+            })
+            .transpose()
     }
 }

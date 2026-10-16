@@ -72,31 +72,17 @@ fn requested_class_factory_interface_is_returned_without_runtime_releasing_it() 
 fn forced_thread_retirement_prepares_only_its_exact_live_activation_scratch() {
     let (mut engine, scratch) = pending(Ole32Api32::CoCreateInstance);
     assert_eq!(
-        engine
-            .ole32
-            .as_ref()
-            .unwrap()
-            .activation_scratch_ranges(engine.memory().unwrap(), 1)
-            .unwrap(),
+        engine.prepare_com_thread_exit(1).unwrap().ranges(),
         [PageRange::new(GuestAddress(scratch), 1).unwrap()]
     );
     assert!(
         engine
-            .ole32
-            .as_ref()
+            .prepare_com_thread_exit(2)
             .unwrap()
-            .activation_scratch_ranges(engine.memory().unwrap(), 2)
-            .unwrap()
+            .ranges()
             .is_empty()
     );
     engine.unmap(scratch, 1).unwrap();
     engine.map(scratch, 1, 3).unwrap();
-    assert!(
-        engine
-            .ole32
-            .as_ref()
-            .unwrap()
-            .activation_scratch_ranges(engine.memory().unwrap(), 1)
-            .is_err()
-    );
+    assert!(engine.prepare_com_thread_exit(1).is_err());
 }

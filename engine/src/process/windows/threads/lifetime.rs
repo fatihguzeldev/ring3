@@ -1,5 +1,5 @@
 use super::*;
-use crate::process::{EngineInstance, HostError};
+use crate::process::{EngineInstance, HostError, windows::ole32::PreparedComThreadExit32};
 
 impl EngineInstance {
     pub(super) fn terminate_windows_thread(&mut self, id: u32, code: u32) -> Result<(), HostError> {
@@ -65,13 +65,7 @@ impl EngineInstance {
             .thread_exit_ranges(self.memory()?, id)
             .map_err(HostError::Nls)?;
         let activation = self.prepare_activation_thread_exit(id)?;
-        let com_ranges = self
-            .ole32
-            .as_ref()
-            .map(|runtime| runtime.activation_scratch_ranges(self.memory().unwrap(), id))
-            .transpose()
-            .map_err(HostError::Memory)?
-            .unwrap_or_default();
+        let com: PreparedComThreadExit32 = self.prepare_com_thread_exit(id)?;
         let capacity = self
             .windows_memory
             .committed_ranges()
@@ -80,7 +74,6 @@ impl EngineInstance {
             .and_then(|count| count.checked_add(extra))
             .and_then(|count| count.checked_add(resource_ranges.len()))
             .and_then(|count| count.checked_add(nls_ranges.len()))
-            .and_then(|count| count.checked_add(com_ranges.len()))
             .and_then(|count| {
                 count.checked_add(
                     activation
@@ -88,6 +81,7 @@ impl EngineInstance {
                         .map_or(0, |receipt| receipt.ranges().len()),
                 )
             })
+            .and_then(|count| count.checked_add(com.ranges().len()))
             .and_then(|count| {
                 count.checked_add(
                     record
@@ -129,10 +123,10 @@ impl EngineInstance {
         }
         ranges.extend(resource_ranges);
         ranges.extend(nls_ranges);
-        ranges.extend(com_ranges);
         if let Some(receipt) = &activation {
             ranges.extend_from_slice(receipt.ranges());
         }
+        ranges.extend_from_slice(com.ranges());
         ranges.sort_unstable_by_key(|range| range.first);
         for pair in ranges.windows(2) {
             if pair[0].first + pair[0].count > pair[1].first {
@@ -365,6 +359,7 @@ impl EngineInstance {
         self.exceptions.retire_thread(id);
         self.nls.retire_thread(id);
         self.commit_activation_thread_exit(activation);
+        self.commit_com_thread_exit(com);
         if let Some(runtime) = self.ole32.as_mut() {
             runtime.commit_thread_exit(id);
         }

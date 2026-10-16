@@ -25,6 +25,9 @@ impl EngineInstance {
             .scratch
             .check(self.memory()?)
             .map_err(HostError::Memory)?;
+        if self.advance_remote_com_activation(slot)? {
+            return Ok(());
+        }
         let pending = &self.ole32.as_ref().unwrap().activation.pending[slot];
         if self
             .loader_initialization_owner()
@@ -107,6 +110,9 @@ impl EngineInstance {
                 self.accept_registered_com_module_result(slot, result)
             }
             Phase32::UnloadNext { after, delay } => {
+                if self.com_rundown_pending(pending.thread) {
+                    return Ok(());
+                }
                 let outcome = self.advance_registered_com_unload(slot, after, delay)?;
                 self.accept_ole32_loader_outcome(outcome)
             }
@@ -204,6 +210,8 @@ impl EngineInstance {
                 let pending = &self.ole32.as_ref().unwrap().activation.pending[slot];
                 let out = if pending.api == Ole32Api32::CoCreateInstance {
                     pending.scratch.address.0 + 48
+                } else if self.remote_com_activation(pending.continuation) {
+                    pending.scratch.address.0 + 52
                 } else {
                     pending.out
                 };
@@ -216,8 +224,13 @@ impl EngineInstance {
                         out,
                     ],
                 );
-                self.park_ole32_callback(request)?;
-                self.ole32.as_mut().unwrap().activation.pending[slot].phase = Phase32::Factory;
+                if self.remote_com_activation(pending.continuation) {
+                    self.ole32.as_mut().unwrap().activation.pending[slot].phase = Phase32::Factory;
+                    self.dispatch_registered_com_callback(slot, request)?;
+                } else {
+                    self.park_ole32_callback(request)?;
+                    self.ole32.as_mut().unwrap().activation.pending[slot].phase = Phase32::Factory;
+                }
                 Ok(())
             }
             (_, ModuleOperation32::InitializationFailed) => self
@@ -341,13 +354,13 @@ impl EngineInstance {
                 .enumerate()
                 .any(|(slot, entry)| {
                     entry.thread == thread
-                        && match entry.phase {
-                            Phase32::Load => runtime.activation.load_ready(slot),
-                            Phase32::Resolve { .. }
-                            | Phase32::UnloadNext { .. }
-                            | Phase32::Finish { .. } => true,
-                            _ => false,
-                        }
+                        && (self.remote_com_activation_ready(entry.continuation)
+                            || match entry.phase {
+                                Phase32::Load => runtime.activation.load_ready(slot),
+                                Phase32::Resolve { .. } | Phase32::Finish { .. } => true,
+                                Phase32::UnloadNext { .. } => !self.com_rundown_pending(thread),
+                                _ => false,
+                            })
                 })
         }) && self
             .loader_initialization_owner()
@@ -381,13 +394,14 @@ impl EngineInstance {
     }
     pub(in crate::process) fn ole32_provider_owns_token(&self, token: u32) -> bool {
         token != 0
-            && self.ole32.as_ref().is_some_and(|runtime| {
-                runtime
-                    .activation
-                    .pending
-                    .iter()
-                    .any(|entry| entry.token == token)
-            })
+            && (self.com_proxy_owns_token(token)
+                || self.ole32.as_ref().is_some_and(|runtime| {
+                    runtime
+                        .activation
+                        .pending
+                        .iter()
+                        .any(|entry| entry.token == token)
+                }))
     }
     pub(in crate::process) fn registered_com_owns_call(
         &self,
@@ -428,6 +442,7 @@ impl EngineInstance {
         self.ole32
             .iter()
             .flat_map(|runtime| runtime.activation.pending.iter().map(|entry| entry.owner))
+            .chain(self.com_proxy_pending_owners())
     }
 }
 
@@ -458,16 +473,18 @@ fn shared_server_lease(
     thread: u32,
     model: crate::windows::com::ServerThreadingModel32,
 ) -> Result<(bool, bool), HostError> {
-    use crate::windows::com::ServerThreadingModel32 as M;
+    use crate::windows::{com::ServerThreadingModel32 as M, ole32::ApartmentId32 as A};
     Ok(match model {
         M::Free => (true, false),
         M::Neutral => (false, true),
-        M::Both => (
-            !apartments
-                .is_single_threaded(thread)
-                .map_err(|_| HostError::InvalidRequest)?,
-            false,
-        ),
+        M::Both => match apartments
+            .identity(thread)
+            .map_err(|_| HostError::InvalidRequest)?
+        {
+            A::Mta => (true, false),
+            A::Neutral => (false, true),
+            A::Sta(_) => (false, false),
+        },
         M::Apartment | M::MainSta => (false, false),
     })
 }

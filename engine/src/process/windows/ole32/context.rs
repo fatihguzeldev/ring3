@@ -12,8 +12,15 @@ pub(in crate::process) struct Ole32Runtime32 {
     pub(super) methods: [GuestAddress; 5],
     pub(super) server_locks: [u32; 7],
     pub(super) activation: super::activation::ActivationRuntime32,
+    pub(super) marshaling: super::marshaling::MarshalingRuntime32,
 }
 impl Ole32Runtime32 {
+    pub(in crate::process) fn com_host_origin(&self, thread: u32, sta: bool) -> Option<u32> {
+        (sta && self.apartments.identity(thread)
+            == Ok(crate::windows::ole32::ApartmentId32::Neutral)
+            && self.apartments.is_single_threaded(thread) == Ok(true))
+        .then_some(thread)
+    }
     pub(in crate::process) fn new(config: Ole32Config32) -> Result<Self, Ole32Error32> {
         if config.max_objects == 0
             || config.max_objects > 65536
@@ -25,8 +32,8 @@ impl Ole32Runtime32 {
         let com = GuestComObjects32::new(
             config.objects,
             config.max_objects as usize,
-            config.max_objects as usize,
-            1,
+            config.max_objects as usize * 2,
+            2,
         )
         .map_err(|_| Ole32Error32::InvalidConfiguration)?;
         let apartments =
@@ -43,6 +50,7 @@ impl Ole32Runtime32 {
             methods: [GuestAddress(0); 5],
             server_locks: [0; 7],
             activation: Default::default(),
+            marshaling: super::marshaling::MarshalingRuntime32::new(config.max_objects as usize)?,
         })
     }
     pub(super) fn initialize_methods(&mut self, gates: &[GateSpec]) -> Result<(), HResult32> {
@@ -73,36 +81,28 @@ impl crate::process::EngineInstance {
 }
 
 impl Ole32Runtime32 {
+    pub(in crate::process) fn check_host_apartment(
+        &self,
+        thread: u32,
+        sta: bool,
+    ) -> Result<(), crate::process::HostError> {
+        self.apartments
+            .check_initialize(thread, 0, if sta { 2 } else { 0 })
+            .map_err(|_| crate::process::HostError::Infrastructure)
+    }
+    pub(in crate::process) fn commit_host_apartment(&mut self, thread: u32, sta: bool) {
+        self.apartments
+            .initialize(thread, 0, if sta { 2 } else { 0 })
+            .expect("host apartment capacity was preflighted before canonical thread publication");
+        self.apartments.mark_host(thread);
+    }
     pub(in crate::process) fn guest_reservation(&self) -> crate::memory::PageRange {
         self.com.reservation()
     }
     pub(in crate::process) fn activation_scratch_reservation(&self) -> crate::memory::PageRange {
         super::activation::ActivationRuntime32::scratch_reservation()
     }
-    pub(in crate::process) fn activation_scratch_ranges(
-        &self,
-        memory: &crate::memory::AddressSpace,
-        thread: u32,
-    ) -> Result<Vec<crate::memory::PageRange>, crate::memory::MemoryError> {
-        let mut ranges = Vec::new();
-        for pending in self
-            .activation
-            .pending
-            .iter()
-            .filter(|pending| pending.thread == thread)
-        {
-            pending.scratch.check(memory)?;
-            ranges
-                .try_reserve(1)
-                .map_err(|_| crate::memory::MemoryError::Allocation)?;
-            ranges.push(pending.scratch.range());
-        }
-        Ok(ranges)
-    }
     pub(in crate::process) fn commit_thread_exit(&mut self, thread: u32) {
-        self.activation
-            .pending
-            .retain(|pending| pending.thread != thread);
         self.apartments.terminate_thread(thread);
     }
 }

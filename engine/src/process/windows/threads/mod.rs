@@ -1,4 +1,5 @@
 mod calls;
+mod com;
 mod context;
 mod cpu_context;
 mod creation;
@@ -58,6 +59,7 @@ pub(in crate::process) struct ThreadRuntime32 {
     next_invocation: u64,
     schedule_required: Option<u32>,
     multimedia_worker: Option<(u32, u32)>,
+    com_hosts: Vec<com::ComHost32>,
     fls: fls::FlsRuntime32,
 }
 

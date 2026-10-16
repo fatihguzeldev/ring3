@@ -58,6 +58,12 @@ impl EngineInstance {
                 |saved| saved.waiting_for_user32(),
             )
             && self.has_pending_thread_invocation(thread.id);
+        let com = self.has_com_apartment_invocation(thread.id)
+            && (self.com_apartment_invocation_eligible(thread.id)
+                || thread
+                    .saved
+                    .as_ref()
+                    .is_some_and(|saved| saved.waiting_for_user32()));
         let current_apc = thread.id == self.threads.current_id()
             && (self
                 .synchronization
@@ -76,6 +82,8 @@ impl EngineInstance {
         });
         initialization
             || messages
+            || com
+            || self.com_abandoned_work_ready(thread.id)
             || current_apc
             || ready
             || self.has_pending_multimedia_callback(thread.id)
@@ -271,12 +279,17 @@ impl EngineInstance {
         })
     }
     fn resume_ready_thread_provider(&mut self) -> Result<(), HostError> {
-        self.resume_registered_com_loader_wait()?;
         if self.active_activation_reply_ready() {
             let wait = self
                 .pending_activation_call()
                 .ok_or(HostError::Infrastructure)?;
             self.resume_activation_call(wait.epoch, wait.token)?;
+        }
+        self.resume_registered_com_loader_wait()?;
+        self.resume_com_proxy_wait()?;
+        self.service_abandoned_com_work()?;
+        if self.winmm.active_thread_reply_ready() {
+            self.resume_winmm_timer_call()?;
         }
         if self
             .dinput
@@ -288,9 +301,6 @@ impl EngineInstance {
                 .pending_dinput_file_token()
                 .ok_or(HostError::Infrastructure)?;
             self.resume_dinput_file_call(self.key(), token)?;
-        }
-        if self.winmm.active_thread_reply_ready() {
-            self.resume_winmm_timer_call()?;
         }
         if let Some(pending) = self.pending_call.as_ref() {
             let (owner, token) = (pending.owner, pending.token);
@@ -337,11 +347,12 @@ impl EngineInstance {
         }
         if self.pending_call.is_none() || self.pending_windows_callback().is_some() {
             let current = self.threads.current_id();
-            let worker_idle = self
+            let worker_idle = (self
                 .threads
                 .multimedia_worker
                 .is_some_and(|(id, _)| id == current)
                 && !self.has_pending_multimedia_callback(current)
+                || self.com_apartment_host(current) && !self.has_com_apartment_invocation(current))
                 && self
                     .threads
                     .threads

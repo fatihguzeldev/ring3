@@ -7,6 +7,7 @@ use crate::{
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::process) enum ThreadInvocationCompletion32 {
     User32 { sender: u32, continuation: u64 },
+    Ole32 { sender: u32, continuation: u64 },
     Apc,
     Initialize,
     Fls { operation: u64 },
@@ -61,6 +62,7 @@ impl EngineInstance {
         if matches!(
             completion,
             ThreadInvocationCompletion32::User32 { .. }
+                | ThreadInvocationCompletion32::Ole32 { .. }
                 | ThreadInvocationCompletion32::MultimediaTimer(_)
         ) {
             self.memory()?
@@ -184,7 +186,8 @@ impl EngineInstance {
             self.threads
                 .invocations
                 .iter()
-                .filter(|invocation| invocation.target == thread)
+                .filter(|invocation| invocation.target == thread
+                    || matches!(invocation.completion, ThreadInvocationCompletion32::Ole32 { sender, .. } if sender == thread))
                 .filter_map(|invocation| invocation.activation)
                 .filter(|&handle| handle != 0),
         );
@@ -254,6 +257,9 @@ impl EngineInstance {
                 && match invocation.completion {
                     ThreadInvocationCompletion32::Apc => alertable,
                     ThreadInvocationCompletion32::User32 { .. } => messages,
+                    ThreadInvocationCompletion32::Ole32 { .. } => {
+                        self.com_apartment_invocation_eligible(current)
+                    }
                     ThreadInvocationCompletion32::MultimediaTimer(_) => {
                         self.threads.threads[thread_index].started
                             && self.threads.threads[thread_index]
@@ -369,6 +375,13 @@ impl EngineInstance {
         )
         .map_err(|_| HostError::Infrastructure)?;
         crate::process::cpu::context::ExtendedCpuState::capture(self.arena())?;
+        if let ThreadInvocationCompletion32::Ole32 {
+            sender,
+            continuation,
+        } = invocation.completion
+        {
+            self.prepare_com_apartment_entry(sender, continuation)?;
+        }
         self.memory()?
             .ensure_transaction_versions(1)
             .map_err(HostError::Memory)?;
@@ -425,6 +438,13 @@ impl EngineInstance {
             ..crate::abi::arena::EXIT_OFFSET + crate::abi::x86::EXIT_SIZE]
             .copy_from_slice(&exit_bytes);
         self.threads.threads[thread_index].state = ThreadState32::Running;
+        if let ThreadInvocationCompletion32::Ole32 {
+            sender,
+            continuation,
+        } = invocation.completion
+        {
+            self.enter_com_apartment_invocation(sender, continuation);
+        }
     }
     pub(super) fn finish_thread_invocation(
         &mut self,
@@ -463,6 +483,13 @@ impl EngineInstance {
                 .check_callback(operation)
                 .map_err(HostError::Thread)?;
         }
+        if let ThreadInvocationCompletion32::Ole32 {
+            sender,
+            continuation,
+        } = completion
+        {
+            self.check_com_apartment_invocation(sender, continuation)?;
+        }
         let result = frame.state().registers[0];
         if let ThreadInvocationCompletion32::MultimediaTimer(identity) = completion {
             self.finish_multimedia_timer_callback(identity)?;
@@ -485,6 +512,15 @@ impl EngineInstance {
             }
         }
         self.commit_activation_scope_exit(activation);
+        if let ThreadInvocationCompletion32::Ole32 {
+            sender,
+            continuation,
+        } = completion
+        {
+            self.leave_com_apartment_invocation(sender, continuation);
+            self.complete_com_apartment_invocation(sender, continuation, result)
+                .expect("COM return identity was preflighted before publication");
+        }
         let _ = self
             .take_windows_thread_context()
             .expect("invocation return context was preflighted");
@@ -513,6 +549,8 @@ impl EngineInstance {
         }
         self.threads.threads[index].state = if self.pending_call.is_some()
             || matches!(completion, ThreadInvocationCompletion32::MultimediaTimer(_))
+            || (matches!(completion, ThreadInvocationCompletion32::Ole32 { .. })
+                && self.com_apartment_host(current))
         {
             ThreadState32::Waiting
         } else {

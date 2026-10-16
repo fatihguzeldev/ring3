@@ -59,6 +59,25 @@ impl WindowsReply32 {
         self.owner == owner && self.token == token
     }
 
+    pub(in crate::process) fn received_result(
+        &self,
+        provider: WindowsCallbackProvider32,
+        owner: PendingOwner,
+        token: u32,
+        continuation: u64,
+        frame: CallFrame32,
+    ) -> Option<u32> {
+        if self.provider == provider
+            && self.matches_call(owner, token)
+            && self.continuation == continuation
+            && self.frame == frame
+            && let ReplyStage32::Received(result) = self.stage
+        {
+            Some(result)
+        } else {
+            None
+        }
+    }
     pub(in crate::process) fn owner(&self) -> PendingOwner {
         self.owner
     }
@@ -93,3 +112,7 @@ fn validate_request(request: WindowsCallback32) -> Result<(), HostError> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "tests/results.rs"]
+mod result_tests;
