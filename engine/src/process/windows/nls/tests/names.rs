@@ -1,5 +1,8 @@
 use super::*;
-use crate::windows::nls::NlsError32;
+use crate::{
+    process::{HostError, WindowsCallbackProvider32, WindowsProviderOutcome32},
+    windows::nls::NlsError32,
+};
 #[test]
 fn locale_name_apis_preserve_default_invariant_neutral_and_alternate_sort_identities() {
     let mut engine = engine();
@@ -79,5 +82,58 @@ fn locale_name_apis_preserve_default_invariant_neutral_and_alternate_sort_identi
     assert_eq!(
         call(&mut engine, NlsApi32::IsValidLocaleName, &[0x10000]),
         0
+    );
+}
+#[test]
+fn locale_enumeration_calls_real_three_argument_callbacks_and_stop_cleans_exact_scratch() {
+    let mut engine = engine();
+    engine
+        .memory
+        .as_mut()
+        .unwrap()
+        .protect(
+            PageRange::new(GuestAddress(0x10000), 1).unwrap(),
+            Permissions::READ_EXECUTE,
+        )
+        .unwrap();
+    let request = match engine
+        .begin_nls_enumeration(&[0x10000, 0x21, 0xabcdef, 0])
+        .unwrap()
+    {
+        WindowsProviderOutcome32::Callback(request) => request,
+        _ => panic!("specific locale inventory"),
+    };
+    assert_eq!(request.provider, WindowsCallbackProvider32::Nls);
+    assert_eq!(request.count, 3);
+    assert_eq!(request.arguments[1], 0x21);
+    assert_eq!(request.arguments[2], 0xabcdef);
+    let first = request.arguments[0];
+    let next = match engine.resume_nls_callback(request.continuation, 1).unwrap() {
+        WindowsProviderOutcome32::Callback(request) => request,
+        _ => panic!("multiple installed locales"),
+    };
+    assert_eq!(next.arguments[0], first);
+    assert_eq!(
+        engine.resume_nls_callback(next.continuation, 0),
+        Ok(WindowsProviderOutcome32::Return(1))
+    );
+    assert!(
+        engine
+            .memory()
+            .unwrap()
+            .permissions_at(GuestAddress(first))
+            .is_err()
+    );
+    assert!(matches!(
+        engine.resume_nls_callback(next.continuation, 1),
+        Err(HostError::Nls(NlsError32::InvalidParameter))
+    ));
+    assert!(matches!(
+        engine.begin_nls_enumeration(&[0x10000, 8, 0, 0]),
+        Err(HostError::Nls(NlsError32::InvalidFlags))
+    ));
+    assert_eq!(
+        engine.begin_nls_enumeration(&[0x10000, 2, 0, 0]),
+        Ok(WindowsProviderOutcome32::Return(1))
     );
 }

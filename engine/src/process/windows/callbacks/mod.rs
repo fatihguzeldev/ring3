@@ -21,6 +21,7 @@ pub enum WindowsCallbackProvider32 {
     DirectInput,
     Files,
     Resources,
+    Nls,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

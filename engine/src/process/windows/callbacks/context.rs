@@ -122,6 +122,15 @@ impl EngineInstance {
         }
         self.park_windows_callback(request)
     }
+    pub(in crate::process) fn park_nls_callback(
+        &mut self,
+        request: WindowsCallback32,
+    ) -> Result<(), HostError> {
+        if request.provider != WindowsCallbackProvider32::Nls {
+            return Err(HostError::InvalidRequest);
+        }
+        self.park_windows_callback(request)
+    }
     fn park_windows_callback(&mut self, request: WindowsCallback32) -> Result<(), HostError> {
         validate_request(request)?;
         self.check_windows_callback_capacity()?;

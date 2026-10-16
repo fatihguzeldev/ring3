@@ -3,6 +3,8 @@ use crate::windows::nls::{NlsError32, NlsProfile32};
 pub(in crate::process) struct NlsRuntime32 {
     pub(super) profile: NlsProfile32,
     pub(super) locales: Vec<(u32, u32, u16)>,
+    pub(super) enumerations: Vec<super::enumeration::Enumeration32>,
+    pub(super) next_enumeration: u64,
     data: Vec<(u32, crate::windows::nls::locales::LocaleData32)>,
 }
 impl NlsRuntime32 {
@@ -92,6 +94,7 @@ impl NlsRuntime32 {
     }
     pub(in crate::process) fn retire_thread(&mut self, thread: u32) {
         self.locales.retain(|entry| entry.0 != thread);
+        self.enumerations.retain(|pending| pending.thread != thread);
     }
 }
 impl crate::process::EngineInstance {
@@ -122,6 +125,8 @@ impl crate::process::EngineInstance {
             profile,
             locales: Vec::new(),
             data: Vec::new(),
+            enumerations: Vec::new(),
+            next_enumeration: 0,
         };
         Ok(())
     }

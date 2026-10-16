@@ -26,6 +26,31 @@ impl EngineInstance {
         self.memory()?
             .ensure_transaction_versions(2)
             .map_err(HostError::Memory)?;
+        if api == NlsApi32::EnumSystemLocalesEx {
+            self.check_windows_callback_capacity()?;
+            self.reserve_windows_reply()?;
+            match self.begin_nls_enumeration(frame.arguments()) {
+                Ok(crate::process::WindowsProviderOutcome32::Callback(request)) => {
+                    self.park_nls_callback(request)?;
+                    return Ok(true);
+                }
+                Ok(crate::process::WindowsProviderOutcome32::Return(value)) => {
+                    self.publish_prepared_call(Self::prepare_completed_call(
+                        frame.complete(value),
+                    )?);
+                    return Ok(true);
+                }
+                Err(HostError::Nls(error)) => {
+                    let thread = self
+                        .current_windows_thread()?
+                        .with_last_error(error.win32());
+                    self.publish_windows_thread(thread)?;
+                    self.publish_prepared_call(Self::prepare_completed_call(frame.complete(0))?);
+                    return Ok(true);
+                }
+                Err(error) => return Err(error),
+            }
+        }
         let (value, error) = match self.execute_nls_call(api, frame.arguments()) {
             Ok(value) => (value, None),
             Err(NlsError32::Memory(error)) => return Err(HostError::Memory(error)),

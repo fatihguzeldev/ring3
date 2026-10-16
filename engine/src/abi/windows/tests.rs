@@ -1,6 +1,34 @@
 use super::*;
 
 #[test]
+fn nls_callback_uses_additive_provider_seven_and_three_literal_arguments() {
+    let record = WindowsCallbackRecord32 {
+        provider: 7,
+        procedure: 0x401000,
+        count: 3,
+        continuation: 0x100000002,
+        arguments: [
+            0x69f00000, 0x21, 0xdeadbeef, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        ],
+    };
+    let mut bytes = [0; WINDOWS_CALLBACK_RECORD_SIZE];
+    encode_windows_callback(Some(record), &mut bytes).unwrap();
+    assert_eq!(&bytes[12..24], &[7, 0, 0, 0, 0, 0x10, 0x40, 0, 3, 0, 0, 0]);
+    assert_eq!(
+        &bytes[24..44],
+        &[
+            2, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0xf0, 0x69, 0x21, 0, 0, 0, 0xef, 0xbe, 0xad, 0xde
+        ]
+    );
+    assert_eq!(decode_windows_callback(&bytes).unwrap(), Some(record));
+    bytes[12] = 8;
+    assert_eq!(
+        decode_windows_callback(&bytes),
+        Err(AbiError::CallbackFrame)
+    );
+}
+
+#[test]
 fn windows_callback_carries_sixteen_arguments_and_rejects_reserved_tail() {
     let record = WindowsCallbackRecord32 {
         provider: 2,
@@ -27,7 +55,7 @@ fn windows_callback_carries_sixteen_arguments_and_rejects_reserved_tail() {
 #[test]
 fn known_callback_providers_keep_the_wire_shape_and_reject_unknown_providers() {
     let mut bytes = [0; WINDOWS_CALLBACK_RECORD_SIZE];
-    for provider in [3, 4, 5, 6] {
+    for provider in [3, 4, 5, 6, 7] {
         let record = WindowsCallbackRecord32 {
             provider,
             procedure: 0x1234,
@@ -37,7 +65,7 @@ fn known_callback_providers_keep_the_wire_shape_and_reject_unknown_providers() {
         };
         encode_windows_callback(Some(record), &mut bytes).unwrap();
         assert_eq!(decode_windows_callback(&bytes), Ok(Some(record)));
-        bytes[12..16].copy_from_slice(&7u32.to_le_bytes());
+        bytes[12..16].copy_from_slice(&8u32.to_le_bytes());
         assert_eq!(
             decode_windows_callback(&bytes),
             Err(AbiError::CallbackFrame)
@@ -73,7 +101,7 @@ fn files_progress_callback_has_literal_provider_and_thirteen_stack_words() {
     );
     assert_eq!(&bytes[84..], &[0; 12]);
     assert_eq!(decode_windows_callback(&bytes), Ok(Some(record)));
-    bytes[12..16].copy_from_slice(&7u32.to_le_bytes());
+    bytes[12..16].copy_from_slice(&8u32.to_le_bytes());
     assert_eq!(
         decode_windows_callback(&bytes),
         Err(AbiError::CallbackFrame)

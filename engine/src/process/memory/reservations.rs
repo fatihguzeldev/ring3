@@ -57,7 +57,7 @@ impl EngineInstance {
         Ok(ranges)
     }
     pub(in crate::process) fn provider_guest_arenas(&self) -> impl Iterator<Item = PageRange> {
-        let mut ranges = [None; 9];
+        let mut ranges = [None; 10];
         let mut index = 0;
         if let Some(runtime) = &self.dsound {
             for range in runtime.guest_reservations() {
@@ -87,7 +87,9 @@ impl EngineInstance {
         }
         if let Some(runtime) = &self.resources {
             ranges[index] = Some(runtime.scratch_reservation());
+            index += 1;
         }
+        ranges[index] = Some(self.nls.scratch_reservation());
         ranges.into_iter().flatten()
     }
     pub(in crate::process) fn check_guest_reservation_admission(

@@ -60,6 +60,10 @@ impl EngineInstance {
             .transpose()
             .map_err(HostError::Resource)?
             .unwrap_or_default();
+        let nls_ranges = self
+            .nls
+            .thread_exit_ranges(self.memory()?, id)
+            .map_err(HostError::Nls)?;
         let capacity = self
             .windows_memory
             .committed_ranges()
@@ -67,6 +71,7 @@ impl EngineInstance {
             .checked_add(scratch)
             .and_then(|count| count.checked_add(extra))
             .and_then(|count| count.checked_add(resource_ranges.len()))
+            .and_then(|count| count.checked_add(nls_ranges.len()))
             .and_then(|count| {
                 count.checked_add(
                     record
@@ -107,6 +112,7 @@ impl EngineInstance {
             ranges.extend(invocation.saved.scratch_ranges());
         }
         ranges.extend(resource_ranges);
+        ranges.extend(nls_ranges);
         ranges.sort_unstable_by_key(|range| range.first);
         for pair in ranges.windows(2) {
             if pair[0].first + pair[0].count > pair[1].first {
