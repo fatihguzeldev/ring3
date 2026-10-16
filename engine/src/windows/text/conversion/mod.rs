@@ -13,10 +13,11 @@ impl CodePage32 {
             Self::Windows1252 => 1252,
             Self::Oem437 => 437,
             Self::Utf8 => 65001,
+            Self::Legacy(id) => id as u32,
         }
     }
     pub fn decode_windows(self, bytes: &[u8], flags: u32) -> Result<Vec<u16>, ConversionError32> {
-        if self == Self::Utf8 {
+        if matches!(self, Self::Utf8 | Self::Legacy(54936)) {
             if flags & !8 != 0 {
                 return Err(ConversionError32::InvalidFlags);
             }
@@ -57,6 +58,9 @@ impl CodePage32 {
             return self
                 .encode(units, flags & 0x80 != 0)
                 .map_err(|_| ConversionError32::NoTranslation);
+        }
+        if let Self::Legacy(id) = self {
+            return super::codepages::legacy::encode_windows(id, units, flags, &[default]);
         }
         if flags & !0x670 != 0
             || flags & 0x30 == 0x30
@@ -102,7 +106,7 @@ impl CodePage32 {
                     .iter()
                     .position(|&unit| u32::from(unit) == code)
                     .map(|index| 0x80 + index as u8),
-                Self::Utf8 => unreachable!(),
+                Self::Utf8 | Self::Legacy(_) => unreachable!(),
             };
             let best = if flags & 0x400 == 0 {
                 if self == Self::Windows1252 {

@@ -47,11 +47,7 @@ impl NlsRuntime32 {
                 if extended {
                     bytes[18..20].copy_from_slice(&0x3fu16.to_le_bytes());
                     bytes[20..24].copy_from_slice(&cp.id().to_le_bytes());
-                    let name = match cp {
-                        CodePage32::Windows1252 => "1252 (ANSI - Latin I)",
-                        CodePage32::Oem437 => "437 (OEM - United States)",
-                        CodePage32::Utf8 => "65001 (Unicode - UTF-8)",
-                    };
+                    let name = cp.name();
                     let units = name.encode_utf16().chain([0]).collect::<Vec<_>>();
                     let encoded = buffers::encoded(&units, wide, self.profile.ansi)?;
                     bytes[24..24 + encoded.len()].copy_from_slice(&encoded);

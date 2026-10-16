@@ -12,3 +12,17 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
+
+Windows character mappings
+
+The text adapter includes Microsoft Windows best-fit mapping facts distributed
+by Unicode (Copyright 1991-2026 Unicode, Inc.). The Unicode License V3 notice
+is included in licenses/unicode.txt; source URLs and hashes are retained beside
+the numeric tables in engine/src/windows/text/codepages/bestfit/tables.rs.
+
+The encoding adapter uses encoding_rs (Copyright Mozilla Foundation),
+licensed here under Apache-2.0, including WHATWG Encoding Standard data.
+The WHATWG BSD notice is included in licenses/whatwg.txt.
+
+OEM character conversion uses oem_cp (Copyright 2020 Tatsunori Uchino),
+under the MIT notice in licenses/oem-cp.txt.
