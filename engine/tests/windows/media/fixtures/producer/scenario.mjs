@@ -1,20 +1,26 @@
+import {activation} from './activation.mjs';
+import {rawInput, rawInputSymbols} from './rawinput.mjs';
 import {builder} from '../../../../support/pe32/image.mjs';
 
 export function image() {
   const b = builder([
     ['kernel32.dll', ['CreateEventA', 'SetEvent', 'ResetEvent', 'WaitForSingleObject', 'CloseHandle', 'ExitProcess']],
-    ['user32.dll', ['RegisterClassA', 'CreateWindowExA', 'GetAsyncKeyState', 'GetKeyState', 'PeekMessageA', 'DestroyWindow']],
+    ['user32.dll', ['RegisterClassA', 'CreateWindowExA', 'GetAsyncKeyState', 'GetKeyState', 'PeekMessageA', 'DestroyWindow', ...rawInputSymbols]],
     ['dsound.dll', ['DirectSoundCreate8', 'DirectSoundEnumerateA', 'DirectSoundCaptureCreate8']],
     ['dinput8.dll', ['DirectInput8Create']],
     ['dinput.dll', ['DirectInputCreateA']],
+    ['ole32.dll', ['CoInitialize', 'CoInitializeEx', 'CoUninitialize', 'CoCreateInstance', 'CoGetClassObject']],
+    ['winmm.dll', ['timeGetTime', 'timeBeginPeriod', 'timeEndPeriod', 'timeGetDevCaps', 'timeGetSystemTime']],
   ]);
   const {allocate, data, string, ref, external} = b;
+  activation(b);
   for (const name of ['window', 'event', 'manual', 'inputEvent', 'sound', 'soundBuffer', 'buffer8', 'notify', 'dinput', 'keyboard', 'pointer1', 'length1', 'pointer2', 'length2', 'playCursor', 'writeCursor']) allocate(name);
   const className = string('className', 'Ring3MediaFixture'), title = string('title', 'authored media');
   const wndclass = data('wndclass', [0, b.callbacks[0].entry, 0, 0, 0x400000, 0, 0, 0, 0, className]);
   allocate('message', Array(7).fill(0));
   external('RegisterClassA', 0x20001, [wndclass], 'atom');
   external('CreateWindowExA', 0x20007, [0, className, title, 0x10000000, 0, 0, 64, 64, 0, 0, 0x400000, 0], 'pointer', 'window');
+  rawInput(b);
   external('CreateEventA', 0x10011, [0, 0, 0, 0], 'pointer', 'event');
   external('WaitForSingleObject', 0x1001a, [ref('event'), 0], 0x102);
   external('CreateEventA', 0x10011, [0, 1, 1, 0], 'pointer', 'manual');

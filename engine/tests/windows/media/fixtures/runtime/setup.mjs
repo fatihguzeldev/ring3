@@ -39,5 +39,8 @@ export function configure({api, request, metadata}) {
   request(state); assert.equal(api.submit_controller_input(Number(mediaEpoch), 0, 192), 0);
   assert.equal(api.register_dinput_module(0x74000000), 0);
   assert.equal(api.register_dinput8_module(0x75000000), 0);
+  assert.equal(api.configure_ole32(0x12000000, 64, 64, 16), 0);
+  assert.equal(api.register_ole32_module(0x76000000), 0);
+  assert.equal(api.register_winmm_module(0x77000000), 0);
   return {now, mediaEpoch};
 }

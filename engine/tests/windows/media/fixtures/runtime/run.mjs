@@ -7,6 +7,8 @@ import {ARENA_SIZE} from '../../../../support/wasm/arena.mjs';
 import {assertEngineExports} from '../../../../support/wasm/exports.mjs';
 import {image} from '../producer/scenario.mjs';
 import {configure} from './setup.mjs';
+import {beforeActivationCall, afterActivationCall} from './activation.mjs';
+import {beforeRawInputCall, afterRawInputCall} from './rawinput.mjs';
 
 const [enginePath, output, root] = process.argv.slice(2);
 assert.ok(enginePath && output && root); mkdirSync(output, {recursive: true});
@@ -32,7 +34,7 @@ function metadata(kind) {
   return {epoch: data.readBigUInt64LE(16), values: Array.from({length: 5}, (_, i) => data.readBigUInt64LE(24 + i * 8))};
 }
 const context = configure({api, request, metadata});
-const guest = image().seal(); writeFileSync(join(output, 'windows-media-authored.exe'), guest.bytes);
+const guest = image().seal(); assert.equal(guest.calls.length, 143); writeFileSync(join(output, 'windows-media-authored.exe'), guest.bytes);
 assert.equal(api.begin_module_input(guest.bytes.length, name('windows-media-authored.exe')), 0);
 for (let offset = 0; offset < guest.bytes.length; offset += 4096) {
   const chunk = guest.bytes.subarray(offset, offset + 4096); request(chunk);
@@ -150,6 +152,8 @@ function wake(call, token) {
   waits.push({hook: call.hook, token, wait: wait.values[1].toString()});
 }
 for (const call of guest.calls) {
+  beforeActivationCall(call, {api, context, pair});
+  beforeRawInputCall(call, input);
   if (call.hook === 'focus') input([[4, 1], [5, 1]]);
   const generated = compile(call), generation = api.generation(); run(generated, call.name, call.id);
   assert.equal(api.capture_windows_call(...key, generation), 0); const token = take(112).readUInt32LE(16);
@@ -173,6 +177,8 @@ for (const call of guest.calls) {
     assert.equal(read(guest.addresses.eventData + 4), 0x80);
   }
   if (call.name === 'EmptyKeyboardData') assert.equal(read(guest.addresses.eventCount), 0);
+  afterActivationCall(call, {guest, read});
+  afterRawInputCall(call, {guest, read});
   calls.push({name: call.name, id: call.id, result, generation});
   writeFileSync(join(output, 'progress.json'), JSON.stringify({calls, runs, callbacks, waits, pcm}, null, 2));
 }

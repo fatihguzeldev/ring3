@@ -79,6 +79,7 @@ export function builder(imports, options = {}) {
   const returnPc = BASE + (configured ? 0x4fe0 : 0x4f80), returnId = 0x5f000002;
   bytes.set([0x0f, 0x0b], file(returnPc - BASE));
   return {allocate, data, string, ref, save, write, copy, external, com, writeLocked, readLocked, addresses, callbacks,
+    emit(...bytes) {code.push(...bytes);},
     seal() {
       code.push(0x0f, 0x0b);
       assert.ok(code.length < 0x3e00 && variable < 0x9000 && constant < 0xe000);
