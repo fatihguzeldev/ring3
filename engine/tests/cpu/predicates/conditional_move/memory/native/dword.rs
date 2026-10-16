@@ -272,9 +272,10 @@ fn prefixes_and_exact_instruction_fetch_keep_fault_boundaries() {
             prefix_admission::admitted(&bytes);
             continue;
         }
-        assert_eq!(
-            decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),
-            Some(expected)
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(engine.memory().unwrap(), GuestAddress(CODE)))
+                .expect_err("instruction must fail to decode"),
+            expected,
         );
     }
     let bytes = [0x0f, 0x44, 0x05, 0, 0x50, 0, 0];
@@ -296,13 +297,21 @@ fn prefixes_and_exact_instruction_fetch_keep_fault_boundaries() {
         );
     }
     let engine = code(0x1ffe, &[0x0f, 0x44]);
-    assert!(
-        matches!(decode_one(engine.memory().unwrap(), GuestAddress(0x1ffe)), Err(DecodeError::MemoryFault { fault, length: 3, .. }) if fault.reason == FaultReason::Unmapped && fault.address == GuestAddress(0x2000))
+    crate::support_fetch::assert_error(
+        decode_one(engine.memory().unwrap(), GuestAddress(0x1ffe)).unwrap_err(),
+        0x1ffe,
+        0x2000,
+        FaultReason::Unmapped,
+        3,
     );
     let mut engine = code(0x1ffc, &bytes);
     engine.protect(0x2000, 1, 3).unwrap();
-    assert!(
-        matches!(decode_one(engine.memory().unwrap(), GuestAddress(0x1ffc)), Err(DecodeError::MemoryFault { fault, length: 5, .. }) if fault.reason == FaultReason::Permission && fault.address == GuestAddress(0x2000))
+    crate::support_fetch::assert_error(
+        decode_one(engine.memory().unwrap(), GuestAddress(0x1ffc)).unwrap_err(),
+        0x1ffc,
+        0x2000,
+        FaultReason::Permission,
+        5,
     );
 }
 

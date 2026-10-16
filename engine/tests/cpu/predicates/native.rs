@@ -1,3 +1,15 @@
+#[path = "../../support/cpu/admission/banks.rs"]
+mod support_memory_banks;
+
+#[path = "../../support/cpu/admission/native.rs"]
+mod support_admission;
+
+#[path = "../../support/cpu/wasm/native.rs"]
+mod support_wasm_interface;
+
+#[path = "../../support/cpu/fetch/native.rs"]
+mod support_fetch;
+
 #[path = "../../support/cpu/prefix/byte.rs"]
 mod support_byte_prefix_admission;
 

@@ -282,10 +282,10 @@ fn memory_targets_prefixes_and_adjacent_operations_fail_closed() {
         let bytes = [0x66, 0x0f, 0x90 + condition, 0x03];
         let (bytes, expected) = byte_prefix_admission::closed_fixture(&bytes, opcode);
         upload(&mut engine, CODE, &bytes);
-        assert_eq!(
-            decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),
-            Some(expected),
-            "{bytes:02x?}"
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(engine.memory().unwrap(), GuestAddress(CODE)))
+                .expect_err("instruction must fail to decode"),
+            expected,
         );
     }
     for (bytes, expected) in [
@@ -306,10 +306,10 @@ fn memory_targets_prefixes_and_adjacent_operations_fail_closed() {
         let (fixture, expected) = byte_prefix_admission::closed_fixture(bytes, expected);
         let bytes = fixture.as_slice();
         upload(&mut engine, CODE, bytes);
-        assert_eq!(
-            decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),
-            Some(expected),
-            "{bytes:02x?}"
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(engine.memory().unwrap(), GuestAddress(CODE)))
+                .expect_err("instruction must fail to decode"),
+            expected,
         );
     }
 }
@@ -342,17 +342,13 @@ fn exact_fetch_spans_truncation_permission_and_address_wrap_keep_categories() {
     for prefix in [&[0x0f][..], &[0x0f, 0x94]] {
         let pc = 0x2000 - prefix.len() as u32;
         let engine = code(pc, prefix, true);
-        assert_eq!(
-            decode_one(engine.memory().unwrap(), GuestAddress(pc)).err(),
-            Some(DecodeError::MemoryFault {
-                pc: GuestAddress(pc),
-                fault: MemoryFault {
-                    address: GuestAddress(0x2000),
-                    access: Access::Execute,
-                    reason: FaultReason::Unmapped
-                },
-                length: prefix.len() as u32 + 1,
-            })
+        crate::support_fetch::assert_error(
+            (decode_one(engine.memory().unwrap(), GuestAddress(pc)))
+                .expect_err("code fetch must fail"),
+            pc,
+            0x2000,
+            FaultReason::Unmapped,
+            prefix.len() as u32 + 1,
         );
     }
     let pc = u32::MAX - 2;
@@ -374,31 +370,22 @@ fn exact_fetch_spans_truncation_permission_and_address_wrap_keep_categories() {
     .unwrap();
     let pc = u32::MAX - 1;
     let engine = code(pc, &[0x0f, 0x94], true);
-    assert_eq!(
-        decode_one(engine.memory().unwrap(), GuestAddress(pc)).err(),
-        Some(DecodeError::MemoryFault {
-            pc: GuestAddress(pc),
-            fault: MemoryFault {
-                address: GuestAddress(pc),
-                access: Access::Execute,
-                reason: FaultReason::AddressOverflow
-            },
-            length: 3,
-        })
+    crate::support_fetch::assert_error(
+        (decode_one(engine.memory().unwrap(), GuestAddress(pc))).expect_err("code fetch must fail"),
+        pc,
+        pc,
+        FaultReason::AddressOverflow,
+        3,
     );
     let mut engine = code(CODE, &[0x0f, 0x94, 0xc0], false);
     engine.protect(CODE, 1, 3).unwrap();
-    assert_eq!(
-        decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),
-        Some(DecodeError::MemoryFault {
-            pc: GuestAddress(CODE),
-            fault: MemoryFault {
-                address: GuestAddress(CODE),
-                access: Access::Execute,
-                reason: FaultReason::Permission
-            },
-            length: 1,
-        })
+    crate::support_fetch::assert_error(
+        (decode_one(engine.memory().unwrap(), GuestAddress(CODE)))
+            .expect_err("code fetch must fail"),
+        CODE,
+        CODE,
+        FaultReason::Permission,
+        1,
     );
 }
 
@@ -466,8 +453,33 @@ fn instruction_cap_and_failed_preparation_preserve_both_published_owners() {
                 upload(&mut engine, pc, bytes);
                 let length = if pc == 0x1ffe { 3 } else { bytes.len() };
                 describe(&mut engine, pc, length, entries);
+                if entries
+                    && matches!(
+                        error,
+                        HostError::Compile(CompileError::InstructionLimit)
+                            | HostError::Resident(RegistryError::Compile(
+                                CompileError::InstructionLimit
+                            ))
+                    )
+                {
+                    assert!(crate::support_admission::admit_if_deferred(
+                        &mut engine,
+                        crate::support_admission::ColdEntryCase {
+                            key: KEY,
+                            keeper: keep,
+                            resident: matches!(owner, Owner::Resident),
+                            pages: &[CODE, KEEP],
+                            expected: CompileError::InstructionLimit
+                        }
+                    ));
+                    continue;
+                }
                 let before = publication(&engine, keep);
-                assert_eq!(compile(&mut engine, owner, entries), Err(error));
+                crate::support_fetch::assert_host_contract(
+                    (compile(&mut engine, owner, entries))
+                        .expect_err("compilation must refuse this fixture"),
+                    error,
+                );
                 assert_eq!(publication(&engine, keep), before);
                 engine.guard(KEY, before.generation).unwrap();
                 engine.guard_resident(KEY, keep).unwrap();

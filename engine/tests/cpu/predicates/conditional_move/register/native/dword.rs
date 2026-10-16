@@ -273,10 +273,9 @@ fn prefixes_and_exact_fetch_boundaries_keep_categories() {
         let mut engine = code(CODE, &bytes, true);
         engine.arena_mut().unwrap()[52..56].copy_from_slice(&2_u32.to_le_bytes());
         let memory = engine.memory().unwrap();
-        assert_eq!(
-            decode_one(memory, GuestAddress(CODE)).err(),
-            Some(expected),
-            "{bytes:02x?}"
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(memory, GuestAddress(CODE))).expect_err("instruction must fail to decode"),
+            expected,
         );
         let error = instruction_error(CODE, InstructionError::Decode(expected));
         assert_eq!(
@@ -344,35 +343,28 @@ fn prefixes_and_exact_fetch_boundaries_keep_categories() {
     for prefix in [&[0x0f][..], &[0x0f, 0x44]] {
         let pc = 0x2000 - prefix.len() as u32;
         let engine = code(pc, prefix, true);
-        assert_eq!(
-            decode_one(engine.memory().unwrap(), GuestAddress(pc)).err(),
-            Some(fetch_error(
-                pc,
-                0x2000,
-                prefix.len() as u32 + 1,
-                FaultReason::Unmapped
-            ))
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(engine.memory().unwrap(), GuestAddress(pc)))
+                .expect_err("instruction must fail to decode"),
+            fetch_error(pc, 0x2000, prefix.len() as u32 + 1, FaultReason::Unmapped),
         );
         failed_fetches += 1;
     }
     let pc = u32::MAX - 1;
     let engine = code(pc, &[0x0f, 0x44], true);
-    assert_eq!(
-        decode_one(engine.memory().unwrap(), GuestAddress(pc)).err(),
-        Some(fetch_error(pc, pc, 3, FaultReason::AddressOverflow))
+    crate::support_fetch::assert_decode_contract(
+        (decode_one(engine.memory().unwrap(), GuestAddress(pc)))
+            .expect_err("instruction must fail to decode"),
+        fetch_error(pc, pc, 3, FaultReason::AddressOverflow),
     );
     failed_fetches += 1;
     for (pc, page, fault_address, length) in [(CODE, CODE, CODE, 1), (0x1ffe, 0x2000, 0x2000, 3)] {
         let mut engine = code(pc, &[0x0f, 0x44, 0xc1], true);
         engine.protect(page, 1, 3).unwrap();
-        assert_eq!(
-            decode_one(engine.memory().unwrap(), GuestAddress(pc)).err(),
-            Some(fetch_error(
-                pc,
-                fault_address,
-                length,
-                FaultReason::Permission
-            ))
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(engine.memory().unwrap(), GuestAddress(pc)))
+                .expect_err("instruction must fail to decode"),
+            fetch_error(pc, fault_address, length, FaultReason::Permission),
         );
         failed_fetches += 1;
     }
@@ -468,7 +460,11 @@ fn late_refusals_preserve_both_publications_and_all_pages() {
                     Owner::Replacement => HostError::Compile(error),
                     Owner::Resident => HostError::Resident(RegistryError::Compile(error)),
                 };
-                assert_eq!(compile(&mut engine, owner, entries), Err(expected));
+                crate::support_fetch::assert_host_contract(
+                    (compile(&mut engine, owner, entries))
+                        .expect_err("compilation must refuse this fixture"),
+                    expected,
+                );
                 assert_eq!(publication(&engine, keep), before);
                 engine.guard(KEY, before.generation).unwrap();
                 engine.guard_resident(KEY, keep).unwrap();

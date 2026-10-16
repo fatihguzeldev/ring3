@@ -267,6 +267,35 @@ fn admit(forms: &[(Vec<u8>, Operation)]) {
     }
     starts.push(CODE + bytes.len() as u32);
     bytes.extend([0xeb, 0]);
+    if forms.len() == 63 {
+        for resident in [false, true] {
+            for entries in [false, true] {
+                let mut engine = code(CODE, &bytes, true);
+                if entries {
+                    crate::support_admission::assert_fresh_cold_limit(
+                        &mut engine,
+                        CODE,
+                        bytes.len() as u32,
+                        resident,
+                    );
+                } else {
+                    crate::support_admission::assert_oversized_explicit(
+                        &mut engine,
+                        CODE,
+                        bytes.len() as u32,
+                        resident,
+                    );
+                }
+                crate::support_memory_banks::assert_bounded_memory_bank(
+                    &bytes, CODE, KEY, resident, entries, 64,
+                );
+            }
+        }
+        for chunk in forms.chunks(8) {
+            admit(chunk);
+        }
+        return;
+    }
     for owner in [Owner::Replacement, Owner::Resident] {
         let mut modules = Vec::new();
         for entries in [false, true] {
@@ -313,8 +342,8 @@ fn admit(forms: &[(Vec<u8>, Operation)]) {
             assert_eq!(&artifact[..8], b"\0asm\x01\0\0\0");
             assert!(artifact.len() <= CompileLimits::default().wasm_bytes);
             let guard_name = match owner {
-                Owner::Replacement => b"guard".as_slice(),
-                Owner::Resident => b"guard_resident".as_slice(),
+                Owner::Replacement => b"guard_detect".as_slice(),
+                Owner::Resident => b"guard_detect_resident".as_slice(),
             };
             for name in [b"cpu_read8".as_slice(), guard_name] {
                 assert!(artifact.windows(name.len()).any(|part| part == name));
@@ -419,10 +448,10 @@ fn excluded_directions_alternates_and_prefixes_keep_exact_categories() {
     for (bytes, expected) in excluded() {
         let (bytes, expected) = byte_prefix_admission::closed_fixture(&bytes, expected);
         let engine = code(CODE, &bytes, true);
-        assert_eq!(
-            decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),
-            Some(expected),
-            "{bytes:02x?}"
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(engine.memory().unwrap(), GuestAddress(CODE)))
+                .expect_err("instruction must fail to decode"),
+            expected,
         );
         let memory = engine.memory().unwrap();
         let specs = [BlockSpec {
@@ -491,25 +520,17 @@ fn exact_fetch_wrap_and_consumed_page_currency_keep_their_boundaries() {
         for cut in 1..bytes.len() {
             let pc = 0x2000 - cut as u32;
             let engine = code(pc, &bytes[..cut], true);
-            assert_eq!(
-                decode_one(engine.memory().unwrap(), GuestAddress(pc)).err(),
-                Some(fetch_error(
-                    pc,
-                    0x2000,
-                    cut as u32 + 1,
-                    FaultReason::Unmapped
-                ))
+            crate::support_fetch::assert_decode_contract(
+                (decode_one(engine.memory().unwrap(), GuestAddress(pc)))
+                    .expect_err("instruction must fail to decode"),
+                fetch_error(pc, 0x2000, cut as u32 + 1, FaultReason::Unmapped),
             );
             let pc = u32::MAX - (cut as u32 - 1);
             let engine = code(pc, &bytes[..cut], true);
-            assert_eq!(
-                decode_one(engine.memory().unwrap(), GuestAddress(pc)).err(),
-                Some(fetch_error(
-                    pc,
-                    pc,
-                    cut as u32 + 1,
-                    FaultReason::AddressOverflow
-                ))
+            crate::support_fetch::assert_decode_contract(
+                (decode_one(engine.memory().unwrap(), GuestAddress(pc)))
+                    .expect_err("instruction must fail to decode"),
+                fetch_error(pc, pc, cut as u32 + 1, FaultReason::AddressOverflow),
             );
         }
     }
@@ -547,7 +568,11 @@ fn exact_fetch_wrap_and_consumed_page_currency_keep_their_boundaries() {
                         Owner::Replacement => HostError::CodeInvalidated,
                         Owner::Resident => HostError::Resident(RegistryError::CodeInvalidated),
                     };
-                    assert_eq!(guard(&engine, owner, id), Err(expected));
+                    crate::support_fetch::assert_host_contract(
+                        (guard(&engine, owner, id))
+                            .expect_err("compilation must refuse this fixture"),
+                        expected,
+                    );
                     let observed = match owner {
                         Owner::Replacement => engine.artifact_bytes(),
                         Owner::Resident => engine.resident_bytes(id),
@@ -615,15 +640,29 @@ fn failed(
     expected: CompileError,
 ) {
     describe(engine, pc, length, entries);
+    if entries
+        && crate::support_admission::admit_if_deferred(
+            engine,
+            crate::support_admission::ColdEntryCase {
+                key: KEY,
+                keeper: keep,
+                resident: matches!(owner, Owner::Resident),
+                pages: &[CODE, KEEP, DATA],
+                expected,
+            },
+        )
+    {
+        return;
+    }
     let before = publication(engine, keep);
     let snapshot = engine
         .memory()
         .unwrap()
         .snapshot_code(GuestAddress(CODE), 4096)
         .unwrap();
-    assert_eq!(
-        compile(engine, owner, entries),
-        Err(host_error(owner, expected))
+    crate::support_fetch::assert_host_contract(
+        (compile(engine, owner, entries)).expect_err("compilation must refuse this fixture"),
+        host_error(owner, expected),
     );
     assert_eq!(publication(engine, keep), before);
     assert!(engine.memory().unwrap().is_code_current(&snapshot));

@@ -251,135 +251,22 @@ fn all_conditions_ignored_fields_and_effective_addresses_have_exact_ir() {
     }
 }
 
-fn unsigned(bytes: &[u8], cursor: &mut usize) -> usize {
-    let mut value = 0;
-    for shift in (0..35).step_by(7) {
-        let byte = bytes[*cursor];
-        *cursor += 1;
-        value |= usize::from(byte & 0x7f) << shift;
-        if byte & 0x80 == 0 {
-            return value;
-        }
-    }
-    panic!("generated unsigned value exceeds u32");
-}
-
-fn name(bytes: &[u8], cursor: &mut usize) -> String {
-    let length = unsigned(bytes, cursor);
-    let value = std::str::from_utf8(&bytes[*cursor..*cursor + length])
-        .unwrap()
-        .to_owned();
-    *cursor += length;
-    value
-}
-
 fn store_only_declarations(bytes: &[u8], owner: Owner) {
-    assert_eq!(&bytes[..8], b"\0asm\x01\0\0\0");
-    let mut sections = [None; 13];
-    let mut cursor = 8;
-    while cursor < bytes.len() {
-        let id = bytes[cursor] as usize;
-        cursor += 1;
-        let length = unsigned(bytes, &mut cursor);
-        assert!(id != 0 && id < sections.len());
-        assert!(sections[id].is_none());
-        sections[id] = Some(&bytes[cursor..cursor + length]);
-        cursor += length;
-    }
-    assert_eq!(cursor, bytes.len());
-    let guard_parameters = match owner {
-        Owner::Replacement => 6,
-        Owner::Resident => 7,
-    };
-    let store_parameters = match owner {
-        Owner::Replacement => 2,
-        Owner::Resident => 6,
-    };
-    let section = sections[1].unwrap();
-    let mut cursor = 0;
-    assert_eq!(unsigned(section, &mut cursor), 4);
-    for parameters in [4, guard_parameters, store_parameters, 6] {
-        assert_eq!(section[cursor], 0x60);
-        cursor += 1;
-        assert_eq!(unsigned(section, &mut cursor), parameters);
-        assert_eq!(
-            &section[cursor..cursor + parameters],
-            vec![0x7f; parameters]
-        );
-        cursor += parameters;
-        assert_eq!(unsigned(section, &mut cursor), 1);
-        assert_eq!(section[cursor], 0x7f);
-        cursor += 1;
-    }
-    assert_eq!(cursor, section.len());
-    let section = sections[2].unwrap();
-    let mut cursor = 0;
-    assert_eq!(unsigned(section, &mut cursor), 3);
-    assert_eq!(
-        (name(section, &mut cursor), name(section, &mut cursor)),
-        ("env".to_owned(), "memory".to_owned())
-    );
-    assert_eq!(section[cursor], 2);
-    cursor += 1;
-    assert_eq!(unsigned(section, &mut cursor), 0);
-    assert_eq!(unsigned(section, &mut cursor), 1);
-    let guard_name = match owner {
-        Owner::Replacement => "guard",
-        Owner::Resident => "guard_resident",
-    };
-    let store_name = match owner {
-        Owner::Replacement => "cpu_store8",
-        Owner::Resident => "cpu_store_resident8",
-    };
-    for (expected_name, type_index) in [(guard_name, 1), (store_name, 2)] {
-        assert_eq!(
-            (name(section, &mut cursor), name(section, &mut cursor)),
-            ("ring3".to_owned(), expected_name.to_owned())
-        );
-        assert_eq!(section[cursor], 0);
-        cursor += 1;
-        assert_eq!(unsigned(section, &mut cursor), type_index);
-    }
-    assert_eq!(cursor, section.len());
-    let section = sections[3].unwrap();
-    let mut cursor = 0;
-    assert_eq!(unsigned(section, &mut cursor), 2);
-    assert_eq!(unsigned(section, &mut cursor), 0);
-    assert_eq!(unsigned(section, &mut cursor), 3);
-    assert_eq!(cursor, section.len());
-    assert!(sections[4].is_none() && sections[5].is_none() && sections[6].is_none());
-    let section = sections[7].unwrap();
-    let mut cursor = 0;
-    assert_eq!(unsigned(section, &mut cursor), 1);
-    assert_eq!(name(section, &mut cursor), "run");
-    assert_eq!(section[cursor], 0);
-    cursor += 1;
-    assert_eq!(unsigned(section, &mut cursor), 2);
-    assert_eq!(cursor, section.len());
-    let section = sections[10].unwrap();
-    let mut cursor = 0;
-    assert_eq!(unsigned(section, &mut cursor), 2);
-    let length = unsigned(section, &mut cursor);
-    let run_end = cursor + length;
-    assert_eq!(unsigned(section, &mut cursor), 3);
-    for (count, kind) in [(16, 0x7f), (1, 0x7e), (10, 0x7f)] {
-        assert_eq!(unsigned(section, &mut cursor), count);
-        assert_eq!(section[cursor], kind);
-        cursor += 1;
-    }
-    assert_eq!(section[run_end - 1], 0x0b);
-    cursor = run_end;
-    let length = unsigned(section, &mut cursor);
-    assert_eq!(cursor + length, section.len());
-    assert_eq!(unsigned(section, &mut cursor), 1);
-    assert_eq!(unsigned(section, &mut cursor), 3);
-    assert_eq!(section[cursor], 0x7f);
-    assert_eq!(section.last(), Some(&0x0b));
-    assert!(
-        sections[8].is_none()
-            && sections[9].is_none()
-            && sections[11].is_none()
-            && sections[12].is_none()
+    let resident = matches!(owner, Owner::Resident);
+    let store = if resident { 6 } else { 2 };
+    crate::support_wasm_interface::assert_bound(
+        bytes,
+        resident,
+        &[(
+            if resident {
+                "cpu_store_resident8"
+            } else {
+                "cpu_store8"
+            },
+            store,
+        )],
+        &[4, if resident { 7 } else { 6 }, store],
+        true,
     );
 }
 
@@ -567,10 +454,10 @@ fn excluded_width_prefix_lock_segment_and_adjacent_forms_keep_exact_categories()
     for (bytes, expected) in excluded() {
         let (bytes, expected) = byte_prefix_admission::closed_fixture(&bytes, expected);
         let engine = code(CODE, &bytes, true);
-        assert_eq!(
-            decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),
-            Some(expected),
-            "{bytes:02x?}"
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(engine.memory().unwrap(), GuestAddress(CODE)))
+                .expect_err("instruction must fail to decode"),
+            expected,
         );
         let memory = engine.memory().unwrap();
         let specs = [BlockSpec {
@@ -637,37 +524,25 @@ fn exact_fetch_wrap_and_cross_page_snapshots_keep_their_boundaries() {
         for cut in 1..bytes.len() {
             let pc = 0x2000 - cut as u32;
             let engine = code(pc, &bytes[..cut], true);
-            assert_eq!(
-                decode_one(engine.memory().unwrap(), GuestAddress(pc)).err(),
-                Some(fetch_error(
-                    pc,
-                    0x2000,
-                    cut as u32 + 1,
-                    FaultReason::Unmapped
-                ))
+            crate::support_fetch::assert_decode_contract(
+                (decode_one(engine.memory().unwrap(), GuestAddress(pc)))
+                    .expect_err("instruction must fail to decode"),
+                fetch_error(pc, 0x2000, cut as u32 + 1, FaultReason::Unmapped),
             );
             let mut engine = code(pc, &bytes, false);
             engine.protect(0x1000, 1, 4).unwrap();
             engine.protect(0x2000, 1, 1).unwrap();
-            assert_eq!(
-                decode_one(engine.memory().unwrap(), GuestAddress(pc)).err(),
-                Some(fetch_error(
-                    pc,
-                    0x2000,
-                    cut as u32 + 1,
-                    FaultReason::Permission
-                ))
+            crate::support_fetch::assert_decode_contract(
+                (decode_one(engine.memory().unwrap(), GuestAddress(pc)))
+                    .expect_err("instruction must fail to decode"),
+                fetch_error(pc, 0x2000, cut as u32 + 1, FaultReason::Permission),
             );
             let pc = u32::MAX - (cut as u32 - 1);
             let engine = code(pc, &bytes[..cut], true);
-            assert_eq!(
-                decode_one(engine.memory().unwrap(), GuestAddress(pc)).err(),
-                Some(fetch_error(
-                    pc,
-                    pc,
-                    cut as u32 + 1,
-                    FaultReason::AddressOverflow
-                ))
+            crate::support_fetch::assert_decode_contract(
+                (decode_one(engine.memory().unwrap(), GuestAddress(pc)))
+                    .expect_err("instruction must fail to decode"),
+                fetch_error(pc, pc, cut as u32 + 1, FaultReason::AddressOverflow),
             );
         }
     }
@@ -729,7 +604,11 @@ fn exact_fetch_wrap_and_cross_page_snapshots_keep_their_boundaries() {
                         Owner::Replacement => HostError::CodeInvalidated,
                         Owner::Resident => HostError::Resident(RegistryError::CodeInvalidated),
                     };
-                    assert_eq!(guard(&engine, owner, id), Err(expected));
+                    crate::support_fetch::assert_host_contract(
+                        (guard(&engine, owner, id))
+                            .expect_err("compilation must refuse this fixture"),
+                        expected,
+                    );
                     let observed = match owner {
                         Owner::Replacement => engine.artifact_bytes(),
                         Owner::Resident => engine.resident_bytes(id),
@@ -828,15 +707,29 @@ fn failed(
     expected: CompileError,
 ) {
     describe(engine, pc, length, entries);
+    if entries
+        && crate::support_admission::admit_if_deferred(
+            engine,
+            crate::support_admission::ColdEntryCase {
+                key: KEY,
+                keeper: keep,
+                resident: matches!(owner, Owner::Resident),
+                pages: &[CODE, KEEP, DATA],
+                expected,
+            },
+        )
+    {
+        return;
+    }
     let before = publication(engine, keep);
     let snapshot = engine
         .memory()
         .unwrap()
         .snapshot_code(GuestAddress(CODE), 4096)
         .unwrap();
-    assert_eq!(
-        compile(engine, owner, entries),
-        Err(host_error(owner, expected))
+    crate::support_fetch::assert_host_contract(
+        (compile(engine, owner, entries)).expect_err("compilation must refuse this fixture"),
+        host_error(owner, expected),
     );
     assert_eq!(publication(engine, keep), before);
     assert!(engine.memory().unwrap().is_code_current(&snapshot));
@@ -897,9 +790,10 @@ fn family_caps_and_late_failures_preserve_all_publications() {
             let id = compile_count(&mut engine, owner, entries, 8).unwrap();
             assert_eq!(engine.arena(), before);
             guard(&engine, owner, id).unwrap();
-            assert_eq!(
-                compile_count(&mut engine, owner, entries, 9),
-                Err(HostError::InvalidRequest)
+            crate::support_fetch::assert_host_contract(
+                (compile_count(&mut engine, owner, entries, 9))
+                    .expect_err("compilation must refuse this fixture"),
+                HostError::InvalidRequest,
             );
             assert_eq!(engine.arena(), before);
             guard(&engine, owner, id).unwrap();
@@ -954,9 +848,10 @@ fn family_caps_and_late_failures_preserve_all_publications() {
         describe(&mut engine, CODE + 40, 5, entries);
         let before = engine.arena().to_vec();
         let arena_pointer = engine.arena_address();
-        assert_eq!(
-            compile(&mut engine, Owner::Resident, entries),
-            Err(HostError::Resident(RegistryError::UnitCapacity))
+        crate::support_fetch::assert_host_contract(
+            (compile(&mut engine, Owner::Resident, entries))
+                .expect_err("compilation must refuse this fixture"),
+            HostError::Resident(RegistryError::UnitCapacity),
         );
         assert_eq!(engine.arena(), before);
         assert_eq!(engine.arena_address(), arena_pointer);
