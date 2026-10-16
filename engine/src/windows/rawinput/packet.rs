@@ -27,7 +27,8 @@ impl RawInputRuntime32 {
         if !matches!(
             kind,
             InputKind::Key { .. } | InputKind::Button { .. } | InputKind::Relative { .. }
-        ) || !physical_focus
+        ) || matches!(kind, InputKind::Button { button, .. } if button >= 5)
+            || !physical_focus
         {
             return Ok(None);
         }
@@ -81,9 +82,6 @@ impl RawInputRuntime32 {
                 );
             }
             InputKind::Button { button, pressed } => {
-                if button >= 5 {
-                    return Ok(None);
-                }
                 let flags = 1u16 << (u16::from(button) * 2 + u16::from(!pressed));
                 bytes[20..22].copy_from_slice(&flags.to_le_bytes());
             }

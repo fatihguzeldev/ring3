@@ -108,6 +108,76 @@ fn packet_capacity_has_no_identity_side_effect_and_focus_cannot_be_granted() {
 }
 
 #[test]
+fn unrepresented_mouse_buttons_do_not_backpressure_a_full_raw_packet_queue() {
+    let mut runtime = registered(1, 2);
+    let packet = runtime
+        .prepare_packet(
+            InputKind::Button {
+                button: 0,
+                pressed: true,
+            },
+            0,
+            false,
+            7,
+            true,
+            |_| Some(3),
+        )
+        .unwrap()
+        .unwrap();
+    let id = packet.packet().id;
+    runtime.commit_packet(packet);
+    for button in 5..8 {
+        assert!(
+            runtime
+                .prepare_packet(
+                    InputKind::Button {
+                        button,
+                        pressed: true,
+                    },
+                    0,
+                    false,
+                    7,
+                    true,
+                    |_| Some(3),
+                )
+                .unwrap()
+                .is_none()
+        );
+    }
+    assert!(matches!(
+        runtime.prepare_packet(
+            InputKind::Button {
+                button: 4,
+                pressed: true,
+            },
+            0,
+            false,
+            7,
+            true,
+            |_| Some(3),
+        ),
+        Err(crate::windows::user32::User32Error32::Win32(1816))
+    ));
+    runtime.retire(&[id]);
+    let packet = runtime
+        .prepare_packet(
+            InputKind::Button {
+                button: 4,
+                pressed: true,
+            },
+            0,
+            false,
+            7,
+            true,
+            |_| Some(3),
+        )
+        .unwrap()
+        .unwrap();
+    assert_eq!(packet.packet().id, id + 4);
+    assert_eq!(&packet.packet().bytes[20..22], &0x100u16.to_le_bytes());
+}
+
+#[test]
 fn another_thread_read_does_not_reclaim_a_parked_background_packet() {
     let mut runtime = RawInputRuntime32::new(4).unwrap();
     let rows = runtime
