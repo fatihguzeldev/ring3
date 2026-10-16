@@ -5,16 +5,17 @@ impl EngineInstance {
     pub(in crate::process) fn finalize_file_process_exit(
         &mut self,
         media_bindings: &[crate::windows::synchronization::EventBinding32],
+        internal_handles: &[u32],
     ) -> Result<bool, HostError> {
         if self.files.is_none() {
             let process = self.current_windows_process_id();
             if let Some(sync) = self.synchronization.as_mut() {
                 let prepared = sync
                     .context()
-                    .prepare_process_exit_with_events(process, media_bindings, &[])
+                    .prepare_process_exit_with_events(process, media_bindings, internal_handles)
                     .map_err(HostError::Synchronization)?;
                 sync.context_mut().commit_signals_and_release(prepared);
-            } else if !media_bindings.is_empty() {
+            } else if !media_bindings.is_empty() || !internal_handles.is_empty() {
                 return Err(HostError::Infrastructure);
             }
             return Ok(true);
@@ -62,9 +63,10 @@ impl EngineInstance {
         bindings.extend_from_slice(media_bindings);
         let mut handles = Vec::new();
         handles
-            .try_reserve_exact(files.events.len())
+            .try_reserve_exact(files.events.len() + internal_handles.len())
             .map_err(|_| HostError::File(FileError32::Allocation))?;
         handles.extend(files.events.iter().map(|(_, handle)| *handle));
+        handles.extend_from_slice(internal_handles);
         let events = if let Some(sync) = self.synchronization.as_ref() {
             Some(
                 sync.context()

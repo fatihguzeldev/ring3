@@ -74,7 +74,11 @@ impl EngineInstance {
                 thread.id,
             )
         });
-        initialization || messages || current_apc || ready
+        initialization
+            || messages
+            || current_apc
+            || ready
+            || self.has_pending_multimedia_callback(thread.id)
     }
     fn next_windows_thread(&self, current: usize, exclude_current: bool) -> Option<usize> {
         let count = self.threads.threads.len();
@@ -116,6 +120,7 @@ impl EngineInstance {
             return Err(HostError::Call(CallError::Cancelled));
         }
         let now = self.cpu_clock.monotonic_bounds()?.1;
+        self.service_multimedia_timers(now)?;
         if self.synchronization.as_ref().is_some_and(|runtime| {
             runtime
                 .context()
@@ -258,6 +263,7 @@ impl EngineInstance {
                     .and_then(|runtime| runtime.context().next_timer_deadline()),
             )
             .chain(self.active_windows_file_deadline())
+            .chain(self.multimedia_timer_deadline())
             .min();
         self.threads.schedule_required = None;
         Ok(ThreadSchedule32::Waiting {
@@ -281,6 +287,9 @@ impl EngineInstance {
                 .pending_dinput_file_token()
                 .ok_or(HostError::Infrastructure)?;
             self.resume_dinput_file_call(self.key(), token)?;
+        }
+        if self.winmm.active_thread_reply_ready() {
+            self.resume_winmm_timer_call()?;
         }
         if let Some(pending) = self.pending_call.as_ref() {
             let (owner, token) = (pending.owner, pending.token);
@@ -327,10 +336,22 @@ impl EngineInstance {
         }
         if self.pending_call.is_none() || self.pending_windows_callback().is_some() {
             let current = self.threads.current_id();
+            let worker_idle = self
+                .threads
+                .multimedia_worker
+                .is_some_and(|(id, _)| id == current)
+                && !self.has_pending_multimedia_callback(current)
+                && self
+                    .threads
+                    .threads
+                    .iter()
+                    .find(|thread| thread.id == current)
+                    .is_some_and(|thread| thread.active_invocations.is_empty());
             if let Some(thread) = self.threads.threads.iter_mut().find(|thread| {
                 thread.id == current
                     && thread.state != ThreadState32::Terminated
                     && thread.suspend_count == 0
+                    && !worker_idle
             }) {
                 thread.state = ThreadState32::Running;
             }

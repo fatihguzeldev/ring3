@@ -368,7 +368,7 @@ impl EngineInstance {
             .try_reserve(media.bindings().len())
             .map_err(|_| HostError::Infrastructure)?;
         bindings.extend_from_slice(media.bindings());
-        if !self.finalize_file_process_exit(&bindings)? {
+        if !self.finalize_file_process_exit(&bindings, media.handles())? {
             self.pending_process_exit = Some(code);
             self.process_exit_owner = Some(self.threads.current_id());
             return Ok(());

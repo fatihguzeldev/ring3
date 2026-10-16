@@ -6,6 +6,7 @@ mod fls;
 mod initialization;
 mod invocation;
 mod lifetime;
+mod multimedia;
 mod saved;
 mod scheduling;
 mod stack;
@@ -56,6 +57,7 @@ pub(in crate::process) struct ThreadRuntime32 {
     invocations: Vec<invocation::ThreadInvocation32>,
     next_invocation: u64,
     schedule_required: Option<u32>,
+    multimedia_worker: Option<(u32, u32)>,
     fls: fls::FlsRuntime32,
 }
 

@@ -1,6 +1,7 @@
 mod calls;
 mod context;
 mod facade;
+mod holds;
 mod lifecycle;
 mod memory;
 pub(in crate::process) mod modules;

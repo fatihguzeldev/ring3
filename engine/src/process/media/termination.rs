@@ -4,10 +4,14 @@ use crate::windows::synchronization::EventBinding32;
 pub(in crate::process) struct PreparedMediaExit32 {
     epoch: u64,
     bindings: Vec<EventBinding32>,
+    handles: Vec<u32>,
 }
 impl PreparedMediaExit32 {
     pub(in crate::process) fn bindings(&self) -> &[EventBinding32] {
         &self.bindings
+    }
+    pub(in crate::process) fn handles(&self) -> &[u32] {
+        &self.handles
     }
 }
 impl EngineInstance {
@@ -15,6 +19,14 @@ impl EngineInstance {
         &mut self,
     ) -> Result<PreparedMediaExit32, HostError> {
         let mut bindings = Vec::new();
+        self.append_multimedia_timer_exit_bindings(&mut bindings)?;
+        let mut handles = Vec::new();
+        if let Some(handle) = self.multimedia_worker_handle() {
+            handles
+                .try_reserve_exact(1)
+                .map_err(|_| HostError::Infrastructure)?;
+            handles.push(handle);
+        }
         if let Some(sound) = &self.dsound {
             sound.append_process_exit_bindings(&mut bindings)?;
         }
@@ -27,6 +39,7 @@ impl EngineInstance {
         Ok(PreparedMediaExit32 {
             epoch: self.media_epoch,
             bindings,
+            handles,
         })
     }
     pub(in crate::process) fn commit_media_process_exit(&mut self, prepared: PreparedMediaExit32) {

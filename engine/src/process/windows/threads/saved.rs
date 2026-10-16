@@ -18,6 +18,7 @@ use crate::{
             registry::RegistryReply32,
             synchronization::SynchronizationThreadReply32,
             user32::User32ThreadReply32,
+            winmm::WinmmThreadReply32,
         },
     },
     windows::ThreadState32,
@@ -43,6 +44,7 @@ pub(super) struct SavedThread32 {
     pub user32: Option<User32ThreadReply32>,
     registry: Option<RegistryReply32>,
     activation: Option<ActivationThreadReply32>,
+    winmm: WinmmThreadReply32,
     #[cfg(any(target_arch = "wasm32", test))]
     detection: Option<Box<[crate::process::cpu::events::detection::DetectionSlot32; 1]>>,
 }
@@ -86,6 +88,7 @@ impl SavedThread32 {
                 .map(|runtime| runtime.empty_thread_reply()),
             registry: None,
             activation: None,
+            winmm: engine.winmm.empty_thread_reply(),
             #[cfg(any(target_arch = "wasm32", test))]
             detection: None,
         }
@@ -134,6 +137,7 @@ impl SavedThread32 {
                 .as_ref()
                 .and_then(|reply| reply.file_request())
                 .is_some_and(|request| engine.provider_file_request_ready(request))
+            || engine.winmm.thread_reply_ready(&self.winmm)
             || self.event.is_some()
             || self
                 .windows_replies
@@ -197,6 +201,7 @@ impl SavedThread32 {
             .into_iter()
             .chain(self.event.as_ref().and_then(|event| owner_pin(event.owner)))
             .chain(self.module_state.execution_pins())
+            .chain(self.winmm.pending_owner().and_then(owner_pin))
             .chain(
                 self.dinput
                     .as_ref()
@@ -269,6 +274,7 @@ impl EngineInstance {
             windows_replies: std::mem::take(&mut self.windows_replies),
             module_reply: self.module_windows_reply.take(),
             module_state: self.take_module_thread_state(),
+            winmm: self.winmm.take_thread_reply(),
             d3d8_reply: self.d3d8_reply.take(),
             d3d8: self
                 .d3d8
@@ -327,6 +333,7 @@ impl EngineInstance {
         self.windows_replies = saved.windows_replies;
         self.module_windows_reply = saved.module_reply;
         self.restore_module_thread_state(saved.module_state);
+        self.winmm.restore_thread_reply(saved.winmm);
         self.d3d8_reply = saved.d3d8_reply;
         if let (Some(runtime), Some(reply)) = (self.d3d8.as_mut(), saved.d3d8) {
             runtime.restore_thread_reply(reply);

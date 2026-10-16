@@ -178,7 +178,8 @@ impl EngineInstance {
                 || self.windows_fls_provider_owns_token(token)
                 || self.dinput_file_provider_owns_token(token)
                 || self.activation_provider_owns_token(token)
-                || self.module_source_provider_owns_token(token))
+                || self.module_source_provider_owns_token(token)
+                || self.winmm_provider_owns_token(token))
     }
 
     pub fn pending_windows_callback(&self) -> Option<WindowsCallback32> {

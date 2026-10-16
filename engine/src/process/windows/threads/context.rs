@@ -67,6 +67,7 @@ impl ThreadRuntime32 {
             invocations,
             next_invocation: 0,
             schedule_required: None,
+            multimedia_worker: None,
             fls: fls::FlsRuntime32::new(128, limits.threads)?,
         })
     }
@@ -84,11 +85,17 @@ impl ThreadRuntime32 {
         }
         self.invocations.clear();
         self.schedule_required = None;
+        self.multimedia_worker = None;
     }
     pub(in crate::process) fn is_last_live(&self) -> bool {
         self.threads
             .iter()
-            .filter(|thread| thread.state != ThreadState32::Terminated)
+            .filter(|thread| {
+                thread.state != ThreadState32::Terminated
+                    && !self
+                        .multimedia_worker
+                        .is_some_and(|(id, _)| id == thread.id)
+            })
             .count()
             == 1
     }

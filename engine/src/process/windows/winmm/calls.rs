@@ -32,6 +32,13 @@ impl EngineInstance {
         Self::prepare_completed_call(frame.complete(0))?;
         let args = frame.arguments();
         let value = match api {
+            WinmmApi32::TimeSetEvent => self.set_multimedia_timer(args)?,
+            WinmmApi32::TimeKillEvent => {
+                let Some(value) = self.kill_multimedia_timer(owner, token, frame)? else {
+                    return Ok(true);
+                };
+                value
+            }
             WinmmApi32::TimeGetTime => self.multimedia_milliseconds()?,
             WinmmApi32::TimeBeginPeriod => self.winmm.periods.begin(args[0]),
             WinmmApi32::TimeEndPeriod => self.winmm.periods.end(args[0]),

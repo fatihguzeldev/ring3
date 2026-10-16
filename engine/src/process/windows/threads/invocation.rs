@@ -10,6 +10,7 @@ pub(in crate::process) enum ThreadInvocationCompletion32 {
     Apc,
     Initialize,
     Fls { operation: u64 },
+    MultimediaTimer(crate::windows::winmm::timers::MultimediaTimerCallback32),
 }
 #[derive(Clone)]
 pub(super) struct ThreadInvocation32 {
@@ -57,7 +58,11 @@ impl EngineInstance {
         if arguments.len() > 16 {
             return Err(HostError::Thread(ThreadError32::InvalidParameter));
         }
-        if matches!(completion, ThreadInvocationCompletion32::User32 { .. }) {
+        if matches!(
+            completion,
+            ThreadInvocationCompletion32::User32 { .. }
+                | ThreadInvocationCompletion32::MultimediaTimer(_)
+        ) {
             self.memory()?
                 .check_span(procedure, 1, Access::Execute)
                 .map_err(HostError::Memory)?;
@@ -249,6 +254,12 @@ impl EngineInstance {
                 && match invocation.completion {
                     ThreadInvocationCompletion32::Apc => alertable,
                     ThreadInvocationCompletion32::User32 { .. } => messages,
+                    ThreadInvocationCompletion32::MultimediaTimer(_) => {
+                        self.threads.threads[thread_index].started
+                            && self.threads.threads[thread_index]
+                                .active_invocations
+                                .is_empty()
+                    }
                     _ => false,
                 }
         }) else {
@@ -453,6 +464,9 @@ impl EngineInstance {
                 .map_err(HostError::Thread)?;
         }
         let result = frame.state().registers[0];
+        if let ThreadInvocationCompletion32::MultimediaTimer(identity) = completion {
+            self.finish_multimedia_timer_callback(identity)?;
+        }
         if let ThreadInvocationCompletion32::User32 {
             sender,
             continuation,
@@ -497,7 +511,9 @@ impl EngineInstance {
             self.advance_windows_fls_operation(operation)?;
             return Ok(());
         }
-        self.threads.threads[index].state = if self.pending_call.is_some() {
+        self.threads.threads[index].state = if self.pending_call.is_some()
+            || matches!(completion, ThreadInvocationCompletion32::MultimediaTimer(_))
+        {
             ThreadState32::Waiting
         } else {
             ThreadState32::Running
