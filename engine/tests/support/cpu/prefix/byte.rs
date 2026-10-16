@@ -3,6 +3,15 @@ use super::support_prefix_admission as prefix_admission;
 use ring3_engine::cpu::x86::decode::DecodeError;
 
 fn newly_admitted(bytes: &[u8]) -> bool {
+    let unprefixed = bytes.strip_prefix(&[0x66]).unwrap_or(bytes);
+    let alias = match unprefixed {
+        [0x82, _, ..] => true,
+        [0xd0 | 0xd1 | 0xd2 | 0xd3 | 0xc0 | 0xc1, modrm, ..] => modrm >> 3 & 7 == 6,
+        _ => false,
+    };
+    if alias || matches!(bytes, [0x66, 0x0f, 0xb7 | 0xbf, _, ..]) {
+        return true;
+    }
     match bytes {
         [
             0xf0,

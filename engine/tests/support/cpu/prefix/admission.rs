@@ -99,6 +99,16 @@ pub fn admitted(instruction: &[u8]) -> (Operation, usize) {
 
 // only known newly legal prefix families select this migration path.
 pub fn admit_if_new_prefix(bytes: &[u8]) -> bool {
+    let operand = bytes.strip_prefix(&[0x66]).unwrap_or(bytes);
+    let legacy_alias = match operand {
+        [0x82, _, ..] => true,
+        [0xd0 | 0xd1 | 0xd2 | 0xd3 | 0xc0 | 0xc1, modrm, ..] => modrm >> 3 & 7 == 6,
+        _ => false,
+    };
+    if legacy_alias || matches!(bytes, [0x66, 0x0f, 0xb7 | 0xbf, _, ..]) {
+        admitted(bytes);
+        return true;
+    }
     let mut changed = false;
     let mut counts = [0_u8; 4];
     let mut opcode_offset = 0;
