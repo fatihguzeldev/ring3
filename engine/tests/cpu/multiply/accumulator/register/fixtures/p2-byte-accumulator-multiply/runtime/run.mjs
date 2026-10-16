@@ -129,7 +129,7 @@ const sourcePaths = [
   'engine/tests/cpu/multiply/accumulator/register/wasm/byte.rs',
   'engine/tests/cpu/multiply/accumulator/register/fixtures/p2-byte-accumulator-multiply/runtime/run.mjs'
 ];
-assert.equal(sourcePaths.length, 63); assert.equal(new Set(sourcePaths).size, 63);
+assert.equal(sourcePaths.length, 84); assert.equal(new Set(sourcePaths).size, 84);
 const pin = path => {const bytes = readFileSync(join(root, path)); return {path, bytes: bytes.length, sha256: hash(bytes)};};
 const sourceIdentities = () => Object.fromEntries(sourcePaths.map(path => {const row = pin(path); return [path, {bytes: row.bytes, sha256: row.sha256}];}));
 const sourcePins = sourceIdentities(), supportPath = 'engine/tests/support/wasm/engine.mjs', supportPin = pin(supportPath);
