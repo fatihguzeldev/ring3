@@ -1,3 +1,4 @@
+import {consumeCpuEvent} from '../../../../../../support/wasm/events.mjs';
 import {ARENA_SIZE} from '../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
@@ -11,7 +12,7 @@ const defaults = [0xf33fffff, 0xf3bfffff, 0xf33fffff, 0xf33fffff, 0xf33fffff, 0]
 const offsets = [28, 32, 36, 40, 44, 56], data = Buffer.from([0, 0, 0, 0, 3, 0, 0, 0, ...Array(24).fill(0x5a)]);
 const counts = {contexts: 0, modules: 0, runs: 0, faults: 0, successes: 0, controls: 0};
 const FP = 4236;
-const paths = ['engine/tests/support/wasm/arena.mjs', 'engine/src/process/cpu/segments.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/mod.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/arithmetic.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/moves.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/exchange.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/predicates.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/shifts.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/control.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/extended.rs', 'engine/src/process/cpu/x87.rs', 'engine/src/cpu/dbt/wasm/instructions/x87.rs', 'engine/src/cpu/x86/segments/cache.rs', 'engine/tests/cpu/x87/segment_access/wasm/cached.rs', 'engine/tests/cpu/x87/segment_access/fixtures/p2-x87-segment-access/runtime/run.mjs'];
+const paths = ['engine/tests/support/wasm/events.mjs', 'engine/tests/support/wasm/arena.mjs', 'engine/src/process/cpu/segments.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/mod.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/arithmetic.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/moves.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/exchange.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/predicates.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/shifts.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/control.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/extended.rs', 'engine/src/process/cpu/x87.rs', 'engine/src/cpu/dbt/wasm/instructions/x87.rs', 'engine/src/cpu/x86/segments/cache.rs', 'engine/tests/cpu/x87/segment_access/wasm/cached.rs', 'engine/tests/cpu/x87/segment_access/fixtures/p2-x87-segment-access/runtime/run.mjs'];
 const pins = () => Object.fromEntries(paths.map(p => [p, createHash('sha256').update(readFileSync(join(root, p))).digest('hex')])), sourcePins = pins();
 const words = values => {const b = Buffer.alloc(values.length * 4); values.forEach((v, i) => b.writeUInt32LE(v >>> 0, i * 4)); return b;};
 function record(magic, fields, version = 1, size = 40) {
@@ -69,6 +70,7 @@ function run(c, fn, row, state) {
   assert.equal(fn.run(c.base, c.base + 56, row.budget ?? 1, c.base + 96), 0, row.name);
   assert.deepEqual(arena(c), expected, `${c.owner}/${c.entries}/${row.name}: complete arena`);
   assert.equal(c.calls.length - at, row.calls ?? 1, row.name);
+  consumeCpuEvent(c, SIZE);
   counts.runs++; counts[row.fault ? 'faults' : 'successes']++;
 }
 const rows = [

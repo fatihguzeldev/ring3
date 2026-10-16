@@ -15,7 +15,7 @@ const engine = readEngine(enginePath),
 const hash = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const paths = ['engine/tests/support/wasm/binding.mjs',
   'engine/src/cpu/x86/decode/profile.rs', 'engine/src/cpu/x86/decode/families.rs',
-  'engine/src/cpu/x86/decode/lower.rs', 'engine/src/cpu/x86/decode/families.rs',
+  'engine/src/cpu/x86/decode/lower.rs', 
   'engine/src/cpu/x86/decode/x87.rs',
   'engine/src/cpu/x86/decode/decoder.rs', 'engine/src/cpu/x86/decode/instruction.rs',
   'engine/src/cpu/x86/x87/execute.rs',
