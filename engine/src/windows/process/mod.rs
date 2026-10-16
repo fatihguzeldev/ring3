@@ -8,4 +8,4 @@ mod runtime;
 pub use api::ProcessApi32;
 pub use environment::{Environment32, ProcessError32};
 pub use launch::ProcessLaunch32;
-pub(crate) use runtime::{PointerCodec32, processor_feature_present};
+pub(crate) use runtime::{COMPUTER_NAME32, PointerCodec32, processor_feature_present};

@@ -96,7 +96,9 @@ impl EngineInstance {
             | GetSystemInfo
             | GetVersion
             | GetVersionExA
-            | GetVersionExW => self.execute_process_identity_call(api, args),
+            | GetVersionExW
+            | GetComputerNameA
+            | GetComputerNameW => self.execute_process_identity_call(api, args),
             GetCommandLineA
             | GetCommandLineW
             | GetEnvironmentVariableA

@@ -25,6 +25,31 @@ impl EngineInstance {
         Self::prepare_completed_call(frame.complete(0))?;
         self.check_windows_thread_write()?;
         let args = frame.arguments();
+        if matches!(api, Api::GetUserNameA | Api::GetUserNameW) {
+            self.memory()?
+                .ensure_transaction_versions(2)
+                .map_err(HostError::Memory)?;
+            let name = self.windows_security.token().user_name();
+            let code_page = self.windows_ansi_code_page();
+            let error = super::super::process::buffers::names::write_name(
+                self.memory.as_mut().unwrap(),
+                name,
+                args[0],
+                args[1],
+                api == Api::GetUserNameW,
+                code_page,
+                super::super::process::buffers::names::NameBuffer32::User,
+            )
+            .map_err(HostError::Memory)?;
+            if let Some(error) = error {
+                let thread = self.current_windows_thread()?.with_last_error(error);
+                self.publish_windows_thread(thread)?;
+            }
+            self.publish_prepared_call(Self::prepare_completed_call(
+                frame.complete(u32::from(error.is_none())),
+            )?);
+            return Ok(true);
+        }
         if api.returns_status() {
             let value = self.execute_security_information(
                 !matches!(api, Api::GetSecurityInfo | Api::SetSecurityInfo),

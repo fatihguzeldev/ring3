@@ -6,6 +6,9 @@ use crate::{
     windows::{CallingConvention32, security::SecurityApi32},
 };
 
+#[path = "tests/identity.rs"]
+mod identity;
+
 #[test]
 fn captured_security_descriptor_validation_and_length_preserve_last_error_on_success() {
     let mut engine = EngineInstance::new(4, 7).unwrap();
@@ -72,7 +75,7 @@ fn captured_security_descriptor_validation_and_length_preserve_last_error_on_suc
     }
 }
 
-fn complete(engine: &mut EngineInstance, id: u32, arguments: &[u32]) -> u32 {
+fn capture(engine: &mut EngineInstance, id: u32, arguments: &[u32]) -> u32 {
     for (index, word) in [0x10000, 2, 0x10000, id].into_iter().enumerate() {
         engine.arena_mut().unwrap()[TRANSFER_OFFSET + index * 4..TRANSFER_OFFSET + index * 4 + 4]
             .copy_from_slice(&word.to_le_bytes());
@@ -98,10 +101,14 @@ fn complete(engine: &mut EngineInstance, id: u32, arguments: &[u32]) -> u32 {
         &mut engine.arena_mut().unwrap()[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE],
     )
     .unwrap();
-    let token = engine
+    engine
         .capture_windows_call(7, engine.generation)
         .unwrap()
-        .token;
+        .token
+}
+
+fn complete(engine: &mut EngineInstance, id: u32, arguments: &[u32]) -> u32 {
+    let token = capture(engine, id, arguments);
     engine
         .complete_windows_call(7, engine.generation, token)
         .unwrap();

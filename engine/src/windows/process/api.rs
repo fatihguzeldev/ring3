@@ -50,4 +50,6 @@ catalog! {
  SetStdHandle=0x000c_0026,"SetStdHandle",2;
  GetHandleInformation=0x000c_0027,"GetHandleInformation",2;
  SetHandleInformation=0x000c_0028,"SetHandleInformation",3;
+ GetComputerNameA=0x000c_0029,"GetComputerNameA",2;
+ GetComputerNameW=0x000c_002a,"GetComputerNameW",2;
 }

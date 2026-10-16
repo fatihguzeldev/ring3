@@ -1,5 +1,7 @@
 use crate::cpu::x86::capabilities::{CPU_ID_LEAVES, NX_ENABLED};
 
+pub(crate) const COMPUTER_NAME32: &str = "RING3";
+
 pub(crate) struct PointerCodec32 {
     cookie: u32,
 }

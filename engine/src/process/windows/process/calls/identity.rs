@@ -13,6 +13,22 @@ impl EngineInstance {
             GetCurrentProcessId => self.process_runtime.launch.process_id,
             GetCurrentThreadId => self.current_windows_thread_id()?,
             GetCurrentThread => u32::MAX - 1,
+            GetComputerNameA | GetComputerNameW => {
+                let error = buffers::names::write_name(
+                    self.memory.as_mut().unwrap(),
+                    crate::windows::process::COMPUTER_NAME32,
+                    args[0],
+                    args[1],
+                    wide,
+                    code_page,
+                    buffers::names::NameBuffer32::Computer,
+                )
+                .map_err(HostError::Memory)?;
+                return Ok(ProcessReply32 {
+                    value: u64::from(error.is_none()),
+                    error,
+                });
+            }
             GetStdHandle | SetStdHandle => {
                 let index = match args[0] {
                     0xffff_fff6 => 0,

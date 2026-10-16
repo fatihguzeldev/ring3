@@ -13,9 +13,11 @@ pub(crate) enum SecurityApi32 {
     GetNamedSecurityInfoW,
     SetNamedSecurityInfoA,
     SetNamedSecurityInfoW,
+    GetUserNameA,
+    GetUserNameW,
 }
 impl SecurityApi32 {
-    pub(crate) const ALL: [Self; 12] = [
+    pub(crate) const ALL: [Self; 14] = [
         Self::GetFileSecurityA,
         Self::GetFileSecurityW,
         Self::SetFileSecurityA,
@@ -28,6 +30,8 @@ impl SecurityApi32 {
         Self::GetNamedSecurityInfoW,
         Self::SetNamedSecurityInfoA,
         Self::SetNamedSecurityInfoW,
+        Self::GetUserNameA,
+        Self::GetUserNameW,
     ];
     pub(crate) fn from_id(id: u32) -> Option<Self> {
         Self::ALL
@@ -51,6 +55,8 @@ impl SecurityApi32 {
             Self::GetNamedSecurityInfoW => "GetNamedSecurityInfoW",
             Self::SetNamedSecurityInfoA => "SetNamedSecurityInfoA",
             Self::SetNamedSecurityInfoW => "SetNamedSecurityInfoW",
+            Self::GetUserNameA => "GetUserNameA",
+            Self::GetUserNameW => "GetUserNameW",
         }
     }
     pub(crate) fn stack_words(self) -> u32 {
@@ -58,11 +64,20 @@ impl SecurityApi32 {
             Self::GetFileSecurityA | Self::GetFileSecurityW => 5,
             Self::SetFileSecurityA | Self::SetFileSecurityW => 3,
             Self::IsValidSecurityDescriptor | Self::GetSecurityDescriptorLength => 1,
+            Self::GetUserNameA | Self::GetUserNameW => 2,
             Self::GetSecurityInfo | Self::GetNamedSecurityInfoA | Self::GetNamedSecurityInfoW => 8,
             Self::SetSecurityInfo | Self::SetNamedSecurityInfoA | Self::SetNamedSecurityInfoW => 7,
         }
     }
     pub(crate) fn returns_status(self) -> bool {
-        self.id() >= Self::GetSecurityInfo.id()
+        matches!(
+            self,
+            Self::GetSecurityInfo
+                | Self::SetSecurityInfo
+                | Self::GetNamedSecurityInfoA
+                | Self::GetNamedSecurityInfoW
+                | Self::SetNamedSecurityInfoA
+                | Self::SetNamedSecurityInfoW
+        )
     }
 }

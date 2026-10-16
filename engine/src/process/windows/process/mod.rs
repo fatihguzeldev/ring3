@@ -1,4 +1,4 @@
-mod buffers;
+pub(in crate::process::windows) mod buffers;
 mod calls;
 mod context;
 mod environment;

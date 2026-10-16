@@ -3,6 +3,8 @@ use crate::{
     windows::{process::ProcessError32, text::CodePage32},
 };
 
+pub(in crate::process::windows) mod names;
+
 pub(super) fn string(
     memory: &AddressSpace,
     pointer: u32,
