@@ -4,6 +4,8 @@ mod movable;
 mod policy;
 mod queries;
 
+pub(crate) use allocation::PreparedHeapAllocation32;
+
 use super::*;
 use crate::memory::{AddressSpace, GuestAddress, PAGE_SIZE, PageRange};
 

@@ -5,6 +5,34 @@ use crate::{
 };
 
 impl EngineInstance {
+    pub(in crate::process) fn prepare_windows_local_initialized(
+        &mut self,
+        size: u32,
+    ) -> Result<crate::windows::memory::PreparedHeapAllocation32, crate::process::HostError> {
+        let heap = self.ensure_process_heap()?;
+        self.windows_memory
+            .heaps
+            .prepare_initialized_allocation(self.memory.as_ref().unwrap(), heap, size)
+            .map_err(crate::process::HostError::WindowsMemory)
+    }
+    pub(in crate::process) fn commit_windows_local_initialized(
+        &mut self,
+        prepared: crate::windows::memory::PreparedHeapAllocation32,
+        bytes: &[u8],
+        writes: &[(GuestAddress, &[u8])],
+    ) -> Result<u32, crate::process::HostError> {
+        self.windows_memory
+            .heaps
+            .commit_initialized_allocation(
+                &mut self.windows_memory.virtual_memory,
+                self.memory.as_mut().unwrap(),
+                prepared,
+                bytes,
+                writes,
+            )
+            .map_err(crate::process::HostError::WindowsMemory)
+    }
+
     pub(super) fn set_heap_information(&mut self, args: &[u32]) -> Result<u32, MemoryError32> {
         match args[1] {
             0 => {

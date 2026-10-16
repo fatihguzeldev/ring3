@@ -1,5 +1,20 @@
 use super::*;
 
+pub(crate) struct PreparedHeapAllocation32 {
+    handle: u32,
+    block: usize,
+    original: Block32,
+    extent: u32,
+    size: u32,
+    identity: u64,
+    version: u64,
+}
+impl PreparedHeapAllocation32 {
+    pub(crate) fn address(&self) -> u32 {
+        self.original.address
+    }
+}
+
 impl HeapManager32 {
     pub(crate) fn allocate_initialized(
         &mut self,
@@ -33,6 +48,23 @@ impl HeapManager32 {
         if flags & !(HEAP_NO_SERIALIZE | HEAP_GENERATE_EXCEPTIONS | HEAP_ZERO_MEMORY) != 0 {
             return Err(MemoryError32::InvalidParameter);
         }
+        let prepared = self.prepare_initialized_allocation(memory, handle, size)?;
+        let mut bytes = if flags & HEAP_ZERO_MEMORY != 0 {
+            buffer(size as usize)?
+        } else {
+            buffer(initial.map_or(0, |bytes| bytes.len()))?
+        };
+        if let Some(initial) = initial {
+            bytes[..initial.len()].copy_from_slice(initial);
+        }
+        self.commit_initialized_allocation(vm, memory, prepared, &bytes, &[])
+    }
+    pub(crate) fn prepare_initialized_allocation(
+        &mut self,
+        memory: &AddressSpace,
+        handle: u32,
+        size: u32,
+    ) -> Result<PreparedHeapAllocation32, MemoryError32> {
         let heap = self.index(handle)?;
         if self.heaps[heap].maximum != 0 && size >= 0x7fff8 {
             return Err(MemoryError32::Capacity);
@@ -56,43 +88,87 @@ impl HeapManager32 {
         if original.extent > extent {
             self.reserve_block(heap)?;
         }
-        let mut bytes = if flags & HEAP_ZERO_MEMORY != 0 {
-            buffer(size as usize)?
-        } else {
-            buffer(initial.map_or(0, |bytes| bytes.len()))?
+        Ok(PreparedHeapAllocation32 {
+            handle,
+            block,
+            original,
+            extent,
+            size,
+            identity: memory.identity(),
+            version: memory.transaction_version(),
+        })
+    }
+    pub(crate) fn commit_initialized_allocation(
+        &mut self,
+        vm: &mut VirtualMemory32,
+        memory: &mut AddressSpace,
+        prepared: PreparedHeapAllocation32,
+        bytes: &[u8],
+        extra_writes: &[(GuestAddress, &[u8])],
+    ) -> Result<u32, MemoryError32> {
+        let heap = self.index(prepared.handle)?;
+        let Some(current) = self.heaps[heap].blocks.get(prepared.block) else {
+            return Err(MemoryError32::InvalidParameter);
         };
-        if let Some(initial) = initial {
-            bytes[..initial.len()].copy_from_slice(initial);
+        if memory.identity() != prepared.identity
+            || memory.transaction_version() != prepared.version
+            || current.address != prepared.original.address
+            || current.extent != prepared.original.extent
+            || current.size.is_some()
+            || bytes.len() > prepared.size as usize
+        {
+            return Err(MemoryError32::InvalidParameter);
         }
-        vm.allocate_with_writes(
-            memory,
-            &[],
-            original.address,
-            extent,
-            MEM_COMMIT,
-            if self.heaps[heap].flags & 0x40000 != 0 {
-                0x40
-            } else {
-                4
-            },
-            &[(GuestAddress(original.address), &bytes)],
-        )?;
-        self.heaps[heap].blocks[block] = Block32 {
-            address: original.address,
-            extent,
-            size: Some(size),
+        let protection = if self.heaps[heap].flags & 0x40000 != 0 {
+            0x40
+        } else {
+            4
         };
-        if original.extent > extent {
+        let initial = (GuestAddress(prepared.original.address), bytes);
+        if extra_writes.is_empty() {
+            vm.allocate_with_writes(
+                memory,
+                &[],
+                prepared.original.address,
+                prepared.extent,
+                MEM_COMMIT,
+                protection,
+                &[initial],
+            )?;
+        } else {
+            let mut writes = Vec::new();
+            writes
+                .try_reserve_exact(extra_writes.len() + 1)
+                .map_err(|_| MemoryError32::Allocation)?;
+            writes.push(initial);
+            writes.extend_from_slice(extra_writes);
+            vm.allocate_with_writes(
+                memory,
+                &[],
+                prepared.original.address,
+                prepared.extent,
+                MEM_COMMIT,
+                protection,
+                &writes,
+            )?;
+        }
+        let original = prepared.original;
+        self.heaps[heap].blocks[prepared.block] = Block32 {
+            address: original.address,
+            extent: prepared.extent,
+            size: Some(prepared.size),
+        };
+        if original.extent > prepared.extent {
             self.heaps[heap].blocks.insert(
-                block + 1,
+                prepared.block + 1,
                 Block32 {
-                    address: original.address + extent,
-                    extent: original.extent - extent,
+                    address: original.address + prepared.extent,
+                    extent: original.extent - prepared.extent,
                     size: None,
                 },
             );
         }
-        self.record_small_allocation(heap, original, extent);
+        self.record_small_allocation(heap, original, prepared.extent);
         Ok(original.address)
     }
     pub(crate) fn reallocate(
@@ -193,5 +269,87 @@ impl HeapManager32 {
         self.free(handle, 0, pointer)
             .expect("reallocation source remains owned until destination publication");
         Ok(new)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn initialized_allocation_and_extra_pointer_publish_in_one_neutral_transaction() {
+        let mut memory = AddressSpace::new(64).unwrap();
+        let mut vm = VirtualMemory32::new(MemoryLimits32::default()).unwrap();
+        let mut heaps = HeapManager32::new(MemoryLimits32::default()).unwrap();
+        let heap = heaps.ensure_default(&mut vm, &mut memory, &[]).unwrap();
+        let before_pages = memory.mapped_pages();
+        let before_version = memory.transaction_version();
+        let before_regions = vm.query(&memory, 0x20000).unwrap();
+        let prepared = heaps
+            .prepare_initialized_allocation(&memory, heap, 8)
+            .unwrap();
+        let address = prepared.address();
+        assert_eq!(
+            heaps.commit_initialized_allocation(
+                &mut vm,
+                &mut memory,
+                prepared,
+                b"payload!",
+                &[(GuestAddress(0xfffffff0), &address.to_le_bytes())]
+            ),
+            Err(MemoryError32::NoAccess)
+        );
+        assert_eq!(memory.mapped_pages(), before_pages);
+        assert_eq!(memory.transaction_version(), before_version);
+        assert_eq!(vm.query(&memory, 0x20000).unwrap(), before_regions);
+        assert_eq!(
+            heaps.size(heap, 0, address),
+            Err(MemoryError32::InvalidParameter)
+        );
+        memory
+            .map_zeroed(
+                PageRange::new(GuestAddress(0x1000), 1).unwrap(),
+                crate::memory::Permissions::READ_WRITE,
+            )
+            .unwrap();
+        let prepared = heaps
+            .prepare_initialized_allocation(&memory, heap, 8)
+            .unwrap();
+        assert_eq!(prepared.address(), address);
+        let pointer = heaps
+            .commit_initialized_allocation(
+                &mut vm,
+                &mut memory,
+                prepared,
+                b"payload!",
+                &[(GuestAddress(0x1000), &address.to_le_bytes())],
+            )
+            .unwrap();
+        let mut bytes = [0; 8];
+        memory.read(GuestAddress(pointer), &mut bytes).unwrap();
+        assert_eq!(&bytes, b"payload!");
+        let mut output = [0; 4];
+        memory.read(GuestAddress(0x1000), &mut output).unwrap();
+        assert_eq!(u32::from_le_bytes(output), pointer);
+        heaps.local_free(pointer).unwrap();
+    }
+    #[test]
+    fn initialized_allocation_rejects_an_exact_stale_memory_owner_before_publication() {
+        let mut memory = AddressSpace::new(64).unwrap();
+        let mut vm = VirtualMemory32::new(MemoryLimits32::default()).unwrap();
+        let mut heaps = HeapManager32::new(MemoryLimits32::default()).unwrap();
+        let heap = heaps.ensure_default(&mut vm, &mut memory, &[]).unwrap();
+        let prepared = heaps
+            .prepare_initialized_allocation(&memory, heap, 4)
+            .unwrap();
+        let pointer = prepared.address();
+        let other = heaps.allocate(&mut vm, &mut memory, heap, 0, 4).unwrap();
+        assert_eq!(pointer, other);
+        heaps.free(heap, 0, other).unwrap();
+        let version = memory.transaction_version();
+        assert_eq!(
+            heaps.commit_initialized_allocation(&mut vm, &mut memory, prepared, b"old!", &[]),
+            Err(MemoryError32::InvalidParameter)
+        );
+        assert_eq!(memory.transaction_version(), version);
     }
 }
