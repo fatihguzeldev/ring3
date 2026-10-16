@@ -178,6 +178,277 @@ static void indexed_ddb_reference(void) {
     printf("]");
 }
 
+struct PaintProbeEvent {
+    LONG stage;
+    UINT message;
+    DWORD thread;
+    BOOL dc;
+    BOOL erase;
+    RECT rect;
+    BOOL query;
+    RECT query_rect;
+};
+
+struct PaintProbeResult {
+    LONG stage;
+    ULONG_PTR result;
+    DWORD error;
+    BOOL dirty;
+    BOOL erase;
+    RECT rect;
+};
+
+static volatile LONG paint_probe_stage;
+static volatile LONG paint_probe_count;
+static struct PaintProbeEvent paint_probe_events[64];
+static struct PaintProbeResult paint_probe_results[7];
+static DWORD paint_probe_owner;
+static DWORD paint_probe_worker;
+static const RECT * volatile paint_probe_query;
+
+static void paint_probe_event(UINT message, HDC dc, const PAINTSTRUCT *paint) {
+    LONG index = InterlockedIncrement(&paint_probe_count) - 1;
+    if (index < 64) {
+        struct PaintProbeEvent *event = &paint_probe_events[index];
+        event->stage = InterlockedCompareExchange(&paint_probe_stage, 0, 0);
+        event->message = message;
+        event->thread = GetCurrentThreadId();
+        event->dc = dc != NULL;
+        if (paint) { event->erase = paint->fErase; event->rect = paint->rcPaint; }
+        const RECT *query = paint_probe_query;
+        if (query) { event->query = TRUE; event->query_rect = *query; }
+    }
+}
+
+static LRESULT CALLBACK paint_probe_proc(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
+    if (message == WM_ERASEBKGND) {
+        paint_probe_event(message, (HDC)wparam, NULL);
+        return 1;
+    }
+    if (message == WM_PAINT) {
+        paint_probe_event(message, NULL, NULL);
+        PAINTSTRUCT paint = {0};
+        HDC dc = BeginPaint(window, &paint);
+        paint_probe_event(WM_PAINT + 0x10000, dc, &paint);
+        if (dc) EndPaint(window, &paint);
+        return 0;
+    }
+    return DefWindowProcA(window, message, wparam, lparam);
+}
+
+static void paint_probe_call(HWND window, LONG stage, unsigned output, BOOL invalidate, BOOL erase) {
+    struct PaintProbeResult *result = &paint_probe_results[output];
+    InterlockedExchange(&paint_probe_stage, stage);
+    result->stage = stage;
+    if (invalidate) { ValidateRect(window, NULL); InvalidateRect(window, NULL, erase); }
+    SetLastError(0xabcdef01);
+    if (stage == 4 || stage == 10) {
+        PAINTSTRUCT paint = {0};
+        HDC dc = BeginPaint(window, &paint);
+        result->result = dc != NULL;
+        result->error = GetLastError();
+        result->erase = paint.fErase;
+        result->rect = paint.rcPaint;
+        if (dc) EndPaint(window, &paint);
+    } else if (stage == 12) {
+        result->result = UpdateWindow(window);
+        result->error = GetLastError();
+    } else {
+        result->rect = (RECT){101,102,103,104};
+        paint_probe_query = &result->rect;
+        result->result = GetUpdateRect(window, &result->rect, TRUE);
+        result->error = GetLastError();
+        paint_probe_query = NULL;
+    }
+    result->dirty = GetUpdateRect(window, NULL, FALSE);
+}
+
+static DWORD WINAPI paint_probe_run(void *argument) {
+    HWND window = (HWND)argument;
+    paint_probe_worker = GetCurrentThreadId();
+    paint_probe_call(window, 10, 4, TRUE, TRUE);
+    paint_probe_call(window, 11, 5, TRUE, TRUE);
+    paint_probe_call(window, 12, 6, TRUE, TRUE);
+    return 0;
+}
+
+static void paint_thread_reference(void) {
+    WNDCLASSA info = {0};
+    info.lpfnWndProc = paint_probe_proc;
+    info.hInstance = GetModuleHandleA(NULL);
+    info.lpszClassName = "ring3-paint-probe";
+    ATOM atom = RegisterClassA(&info);
+    HWND window = atom ? CreateWindowExA(0, info.lpszClassName, "paint", WS_POPUP | WS_VISIBLE,
+        0, 0, 32, 24, NULL, NULL, info.hInstance, NULL) : NULL;
+    paint_probe_owner = GetCurrentThreadId();
+    BOOL complete = FALSE;
+    DWORD wait_error = 0;
+    if (window) {
+        UpdateWindow(window);
+        ValidateRect(window, NULL);
+        memset(paint_probe_events, 0, sizeof(paint_probe_events));
+        InterlockedExchange(&paint_probe_count, 0);
+        paint_probe_call(window, 1, 0, TRUE, FALSE);
+        paint_probe_call(window, 2, 1, TRUE, TRUE);
+        paint_probe_call(window, 3, 2, FALSE, FALSE);
+        paint_probe_call(window, 4, 3, FALSE, FALSE);
+        HANDLE worker = CreateThread(NULL, 0, paint_probe_run, window, 0, NULL);
+        if (worker) {
+            DWORD start = GetTickCount();
+            while (GetTickCount() - start < 5000) {
+                DWORD elapsed = GetTickCount() - start;
+                if (elapsed >= 5000) break;
+                DWORD waited = MsgWaitForMultipleObjects(1, &worker, FALSE, 5000 - elapsed, QS_SENDMESSAGE);
+                if (waited == WAIT_OBJECT_0) { complete = TRUE; break; }
+                if (waited != WAIT_OBJECT_0 + 1) { wait_error = waited == WAIT_FAILED ? GetLastError() : waited; break; }
+                MSG message;
+                // dispatch sent calls without retrieving a queued paint.
+                PeekMessageA(&message, NULL, 0, 0, PM_NOREMOVE | PM_QS_SENDMESSAGE);
+            }
+            if (!complete) {
+                if (!wait_error) wait_error = WAIT_TIMEOUT;
+                fprintf(stderr, "paint worker join failed: %lu\n", wait_error);
+                fflush(stderr);
+                ExitProcess(3);
+            }
+            if (WaitForSingleObject(worker, 0) != WAIT_OBJECT_0) {
+                fputs("paint worker was not joined\n", stderr);
+                fflush(stderr);
+                ExitProcess(4);
+            }
+            CloseHandle(worker);
+        } else {
+            fprintf(stderr, "paint worker creation failed: %lu\n", GetLastError());
+            fflush(stderr);
+            ExitProcess(5);
+        }
+    } else {
+        fprintf(stderr, "paint window creation failed: %lu\n", GetLastError());
+        fflush(stderr);
+        ExitProcess(6);
+    }
+    LONG count = InterlockedCompareExchange(&paint_probe_count, 0, 0);
+    printf(",\"paintThreads\":{\"created\":%u,\"complete\":%u,\"waitError\":%lu,\"owner\":%lu,\"worker\":%lu,\"eventCount\":%ld,\"results\":[",
+        window != NULL, complete, wait_error, paint_probe_owner, paint_probe_worker, count);
+    for (unsigned i = 0; complete && i < 7; ++i) {
+        const struct PaintProbeResult *result = &paint_probe_results[i];
+        printf("%s{\"stage\":%ld,\"result\":%llu,\"error\":%lu,\"dirty\":%u,\"erase\":%u,\"rect\":[%ld,%ld,%ld,%ld]}",
+            i ? "," : "", result->stage, (unsigned long long)result->result, result->error,
+            result->dirty, result->erase, result->rect.left, result->rect.top, result->rect.right, result->rect.bottom);
+    }
+    printf("],\"events\":[");
+    for (LONG i = 0; complete && i < count && i < 64; ++i) {
+        const struct PaintProbeEvent *event = &paint_probe_events[i];
+        printf("%s{\"stage\":%ld,\"message\":%u,\"thread\":%lu,\"isOwner\":%u,\"isWorker\":%u,\"dc\":%u,\"erase\":%u,\"rect\":[%ld,%ld,%ld,%ld],\"query\":%u,\"queryRect\":[%ld,%ld,%ld,%ld]}",
+            i ? "," : "", event->stage, event->message, event->thread,
+            event->thread == paint_probe_owner, event->thread == paint_probe_worker, event->dc,
+            event->erase, event->rect.left, event->rect.top, event->rect.right, event->rect.bottom,
+            event->query, event->query_rect.left, event->query_rect.top, event->query_rect.right, event->query_rect.bottom);
+    }
+    printf("]}");
+    DestroyWindow(window);
+    UnregisterClassA(info.lpszClassName, info.hInstance);
+}
+
+static void stretch_mode_reference(void) {
+    struct MonoInfo { BITMAPINFOHEADER header; RGBQUAD colors[2]; } mono = {0};
+    BITMAPINFO rgb = {0};
+    mono.header.biSize = sizeof(mono.header);
+    mono.header.biWidth = 4; mono.header.biHeight = -1;
+    mono.header.biPlanes = 1; mono.header.biBitCount = 1;
+    mono.colors[1].rgbRed = mono.colors[1].rgbGreen = mono.colors[1].rgbBlue = 255;
+    rgb.bmiHeader.biSize = sizeof(rgb.bmiHeader);
+    rgb.bmiHeader.biWidth = 4; rgb.bmiHeader.biHeight = -4;
+    rgb.bmiHeader.biPlanes = 1; rgb.bmiHeader.biBitCount = 32;
+    printf(",\"stretchModes\":[");
+    for (unsigned type = 0; type < 2; ++type) {
+        for (int mode = 1; mode <= 4; ++mode) {
+            void *source_bits = NULL, *target_bits = NULL;
+            BITMAPINFO *info = type ? &rgb : (BITMAPINFO *)&mono;
+            HBITMAP source = CreateDIBSection(NULL, info, DIB_RGB_COLORS, &source_bits, NULL, 0);
+            HBITMAP target = CreateDIBSection(NULL, info, DIB_RGB_COLORS, &target_bits, NULL, 0);
+            HDC source_dc = CreateCompatibleDC(NULL), target_dc = CreateCompatibleDC(NULL);
+            HGDIOBJ old_source = SelectObject(source_dc, source), old_target = SelectObject(target_dc, target);
+            if (source_bits && target_bits) {
+                if (!type) { memset(source_bits, 0, 4); *(BYTE *)source_bits = 0x50; memset(target_bits, 0x5a, 4); }
+                else {
+                    DWORD *pixels = (DWORD *)source_bits;
+                    const DWORD colors[] = {0xff0000, 0x00ff00, 0x0000ff, 0xffffff};
+                    for (unsigned y = 0; y < 4; ++y)
+                        for (unsigned x = 0; x < 4; ++x) pixels[y * 4 + x] = colors[(x + y) % 4];
+                    memset(target_bits, 0x5a, 64);
+                }
+            }
+            int previous = SetStretchBltMode(target_dc, mode);
+            SetBrushOrgEx(target_dc, 0, 0, NULL);
+            SetLastError(0xabcdef01);
+            BOOL result = StretchBlt(target_dc, 0, 0, type ? 3 : 2, type ? 3 : 1,
+                source_dc, 0, 0, 4, type ? 4 : 1, SRCCOPY);
+            DWORD error = GetLastError();
+            GdiFlush();
+            printf("%s{\"bits\":%u,\"mode\":%d,\"created\":%u,\"selected\":%u,\"previous\":%d,\"result\":%u,\"error\":%lu,\"pixels\":[",
+                type || mode != 1 ? "," : "", type ? 32 : 1, mode,
+                source && target, old_source && old_source != HGDI_ERROR && old_target && old_target != HGDI_ERROR,
+                previous, result, error);
+            unsigned count = type ? 16 : 4;
+            for (unsigned i = 0; i < count; ++i)
+                printf("%s%lu", i ? "," : "", target_bits ? (type ? ((DWORD *)target_bits)[i] : ((BYTE *)target_bits)[i]) : 0);
+            printf("]}");
+            SelectObject(source_dc, old_source); SelectObject(target_dc, old_target);
+            DeleteDC(source_dc); DeleteDC(target_dc); DeleteObject(source); DeleteObject(target);
+        }
+    }
+    printf("]");
+}
+
+static void rotated_font_reference(void) {
+    BITMAPINFO info = {0};
+    info.bmiHeader.biSize = sizeof(info.bmiHeader);
+    info.bmiHeader.biWidth = 128; info.bmiHeader.biHeight = -128;
+    info.bmiHeader.biPlanes = 1; info.bmiHeader.biBitCount = 32;
+    const int angles[] = {0,900,-900,450,3600,0};
+    const int orientations[] = {0,0,-900,450,0,900};
+    printf(",\"rotatedFonts\":[");
+    for (unsigned i = 0; i < sizeof(angles)/sizeof(angles[0]); ++i) {
+        void *bits = NULL;
+        HBITMAP bitmap = CreateDIBSection(NULL, &info, DIB_RGB_COLORS, &bits, NULL, 0);
+        HDC dc = CreateCompatibleDC(NULL);
+        HGDIOBJ old_bitmap = SelectObject(dc, bitmap);
+        HFONT font = CreateFontW(-16, 0, angles[i], orientations[i], FW_NORMAL, FALSE, FALSE, FALSE,
+            ANSI_CHARSET, OUT_TT_PRECIS, CLIP_DEFAULT_PRECIS, NONANTIALIASED_QUALITY, DEFAULT_PITCH, L"Arial");
+        HGDIOBJ old_font = SelectObject(dc, font);
+        if (bits) for (unsigned j = 0; j < 128 * 128; ++j) ((DWORD *)bits)[j] = 0xffffff;
+        SetTextColor(dc, 0); SetBkMode(dc, TRANSPARENT);
+        SetTextAlign(dc, TA_BASELINE | TA_UPDATECP);
+        MoveToEx(dc, 64, 64, NULL);
+        SIZE extent = {0}; POINT position = {0};
+        GetTextExtentPoint32W(dc, L"Mm", 2, &extent);
+        SetLastError(0xabcdef01);
+        BOOL result = TextOutW(dc, 0, 0, L"Mm", 2);
+        DWORD error = GetLastError();
+        GetCurrentPositionEx(dc, &position); GdiFlush();
+        RECT ink = {128,128,0,0}; unsigned count = 0;
+        if (bits) for (int y = 0; y < 128; ++y) for (int x = 0; x < 128; ++x) {
+            if ((((DWORD *)bits)[y * 128 + x] & 0xffffff) != 0xffffff) {
+                if (x < ink.left) ink.left = x; if (y < ink.top) ink.top = y;
+                if (x + 1 > ink.right) ink.right = x + 1; if (y + 1 > ink.bottom) ink.bottom = y + 1;
+                ++count;
+            }
+        }
+        WCHAR face[32] = {0}; GetTextFaceW(dc, 32, face);
+        printf("%s{\"escapement\":%d,\"orientation\":%d,\"created\":%u,\"selected\":%u,\"mode\":%d,\"result\":%u,\"error\":%lu,\"extent\":[%ld,%ld],\"position\":[%ld,%ld],\"ink\":[%ld,%ld,%ld,%ld],\"inkPixels\":%u,\"face\":[",
+            i ? "," : "", angles[i], orientations[i], bitmap && font,
+            old_bitmap && old_bitmap != HGDI_ERROR && old_font && old_font != HGDI_ERROR,
+            GetGraphicsMode(dc), result, error, extent.cx, extent.cy, position.x, position.y,
+            ink.left, ink.top, ink.right, ink.bottom, count);
+        for (unsigned j = 0; face[j]; ++j) printf("%s%u", j ? "," : "", face[j]);
+        printf("]}");
+        SelectObject(dc, old_font); SelectObject(dc, old_bitmap);
+        DeleteObject(font); DeleteDC(dc); DeleteObject(bitmap);
+    }
+    printf("]");
+}
+
 int main(void) {
     const char *classes[] = {"Button", "Edit", "Static", "ListBox", "ScrollBar", "ComboBox"};
     HWND parent = CreateWindowExA(0, "Static", "parent", WS_POPUP, 0, 0, 100, 100, NULL, NULL, NULL, NULL);
@@ -231,6 +502,9 @@ int main(void) {
     logical_palette_reference();
     synthesized_palette_reference();
     indexed_ddb_reference();
+    paint_thread_reference();
+    stretch_mode_reference();
+    rotated_font_reference();
     DestroyWindow(parent);
     puts("}");
     return 0;
