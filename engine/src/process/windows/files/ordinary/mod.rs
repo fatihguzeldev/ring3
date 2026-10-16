@@ -1,3 +1,5 @@
+mod thread;
+pub(in crate::process::windows::files) use thread::OrdinaryThreadReply32;
 pub(super) mod access;
 mod calls;
 mod context;
@@ -9,6 +11,7 @@ mod locks;
 pub(super) mod memory;
 mod paths;
 mod progress;
+pub(in crate::process::windows::files) use progress::PreparedCopyThreadExit32;
 mod search;
 
 pub(super) use context::OrdinaryRuntime32;

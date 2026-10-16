@@ -2,16 +2,26 @@ use super::super::*;
 use crate::process::{EngineInstance, HostError};
 
 impl EngineInstance {
-    pub(in crate::process) fn finalize_file_process_exit(&mut self) -> Result<bool, HostError> {
+    pub(in crate::process) fn finalize_file_process_exit(
+        &mut self,
+        media_bindings: &[crate::windows::synchronization::EventBinding32],
+    ) -> Result<bool, HostError> {
         if self.files.is_none() {
+            if !media_bindings.is_empty() {
+                let sync = self
+                    .synchronization
+                    .as_mut()
+                    .ok_or(HostError::Infrastructure)?;
+                let prepared = sync
+                    .context()
+                    .prepare_event_shutdown(media_bindings, &[])
+                    .map_err(HostError::Synchronization)?;
+                sync.context_mut().commit_event_shutdown(prepared);
+            }
             return Ok(true);
         }
-        let pending = self
-            .pending_call
-            .as_ref()
-            .ok_or(HostError::Infrastructure)?;
-        let (owner, token, frame) = (pending.owner, pending.token, pending.frame);
-        self.checked_pending_call(owner, token)?;
+        let pending = self.pending_call.as_ref().map(|pending|(pending.owner,pending.token,pending.frame));
+        if let Some((owner,token,_))=pending {self.checked_pending_call(owner,token)?;}
         let request = self
             .files
             .as_mut()
@@ -19,13 +29,9 @@ impl EngineInstance {
             .flush_exit_mappings(self.memory.as_ref().ok_or(HostError::Closed)?)
             .map_err(HostError::File)?;
         if let Some(request) = request {
-            self.files.as_mut().unwrap().reply = Some(FileReply32 {
-                owner,
-                token,
-                frame,
-                id: crate::windows::WindowsApi32::ExitProcess.id(),
-                request: Some(request),
-            });
+            if let Some((owner,token,frame))=pending {
+                self.files.as_mut().unwrap().reply = Some(FileReply32 {owner,token,frame,id:crate::windows::WindowsApi32::ExitProcess.id(),request:Some(request)});
+            }
             return Ok(false);
         }
         let files = self.files.as_ref().unwrap();
@@ -36,10 +42,14 @@ impl EngineInstance {
             .mappings
             .prepare_process_exit(self.memory.as_ref().unwrap())
             .map_err(HostError::File)?;
-        let bindings = files
+        let mut bindings = files
             .asynchronous
             .process_exit_bindings()
             .map_err(HostError::File)?;
+        bindings
+            .try_reserve(media_bindings.len())
+            .map_err(|_| HostError::Infrastructure)?;
+        bindings.extend_from_slice(media_bindings);
         let mut handles = Vec::new();
         handles
             .try_reserve_exact(files.events.len())

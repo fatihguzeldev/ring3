@@ -57,6 +57,10 @@ impl FileRuntime32 {
             Err(FileError32::NotFound) => (),
             Err(error) => return Err(error),
         }
+        self.ordinary
+            .copies
+            .try_reserve(1)
+            .map_err(|_| crate::files::FileError32::Allocation)?;
         if self.ordinary.copies.len() == 33 {
             return Err(FileError32::Capacity);
         }

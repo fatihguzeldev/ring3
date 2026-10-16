@@ -67,14 +67,16 @@ impl EngineInstance {
         let reservations = if api
             .is_some_and(|api| matches!(api, FileApi32::MapViewOfFile | FileApi32::MapViewOfFileEx))
         {
-            self.file_mapping_reservations()?
+            self.guest_address_reservations()?
         } else {
             Vec::new()
         };
+        let current_thread = self.current_windows_thread_id()?;
         let files = self
             .files
             .as_mut()
             .ok_or(HostError::File(FileError32::Unsupported))?;
+        files.vfs.set_io_thread(current_thread);
         if files.reply.is_some_and(|reply| {
             reply.owner != owner || reply.token != token || reply.id != id || reply.frame != frame
         }) {
@@ -96,7 +98,9 @@ impl EngineInstance {
             .synchronization
             .as_mut()
             .map(|runtime| runtime.context_mut());
-        let outcome = if let Some(api) = api {
+        let outcome = if matches!(api,Some(FileApi32::SetCurrentDirectoryA|FileApi32::SetCurrentDirectoryW)) && self.process_runtime.startup.is_some() {
+            files.set_process_current_directory(self.memory.as_mut().unwrap(),self.process_runtime.startup.as_mut().unwrap(),args,api==Some(FileApi32::SetCurrentDirectoryW))
+        } else if let Some(api) = api {
             let now = if api == FileApi32::GetOverlappedResultEx {
                 self.cpu_clock.monotonic_bounds()?.1
             } else {
@@ -107,6 +111,7 @@ impl EngineInstance {
                 sync,
                 &reservations,
                 now,
+                current_thread,
                 api,
                 args,
             )
@@ -161,6 +166,7 @@ impl FileRuntime32 {
         mut sync: Option<&mut SynchronizationContext32>,
         reserved: &[PageRange],
         now: u64,
+        thread: u32,
         api: FileApi32,
         args: &[u32],
     ) -> Result<FileCallOutcome32, FileError32> {
@@ -172,7 +178,7 @@ impl FileRuntime32 {
             if self.vfs.open_options(open)?.overlapped {
                 let sync = sync.ok_or(FileError32::Unsupported)?;
                 return self.with_file_event(open, sync, |files, sync, event| {
-                    files.execute_overlapped(memory, sync, 1, event, api, args)
+                    files.execute_overlapped(memory, sync, thread, event, api, args)
                 });
             }
             if args[4] != 0 {
@@ -214,7 +220,7 @@ impl FileRuntime32 {
         if matches!(api, FileApi32::LockFileEx | FileApi32::UnlockFileEx)
             || (0x000a_0088..=0x000a_008b).contains(&api.id())
         {
-            return self.execute_async(memory, sync, 1, now, api, args);
+            return self.execute_async(memory, sync, thread, now, api, args);
         }
         self.execute_ordinary(memory, api, args)
     }

@@ -1,5 +1,6 @@
 mod coherence;
 mod lifetime;
+mod query;
 mod reservations;
 
 use crate::{files::FileError32, process::windows::files::ordinary::FileCallOutcome32};

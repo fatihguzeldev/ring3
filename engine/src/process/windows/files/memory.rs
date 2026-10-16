@@ -5,6 +5,28 @@ use crate::{
 };
 
 impl EngineInstance {
+    pub(in crate::process) fn file_mapping_memory_info(
+        &self,
+        address: u32,
+    ) -> Result<Option<crate::windows::memory::MemoryInfo32>, HostError> {
+        let memory = self.memory()?;
+        Ok(self
+            .files
+            .as_ref()
+            .and_then(|files| files.mappings.memory_info(memory, address)))
+    }
+    pub(in crate::process) fn record_file_mapping_protection(
+        &mut self,
+        range: PageRange,
+        raw: u32,
+    ) {
+        if let Some(files) = self.files.as_mut() {
+            files
+                .mappings
+                .record_protection(self.memory.as_ref().unwrap(), range, raw);
+        }
+    }
+
     pub(in crate::process) fn validate_file_mapping_protection(
         &self,
         range: PageRange,
@@ -55,14 +77,10 @@ impl EngineInstance {
         self.memory()?
             .ensure_transaction_versions(2)
             .map_err(HostError::Memory)?;
-        let permissions = match args[3] {
-            1 => Some(Permissions::NONE),
-            2 => Some(Permissions::READ),
-            4 => Some(Permissions::READ_WRITE),
-            0x10 => Some(Permissions::EXECUTE),
-            0x20 => Some(Permissions::READ_EXECUTE),
-            0x40 => Some(Permissions::ALL),
-            _ => None,
+        let permissions = if matches!(args[3] & !0x100, 8 | 0x80) {
+            None
+        } else {
+            crate::windows::memory::protection(args[3]).ok()
         };
         let result = if args[2] != 0x1000 {
             Err(FileError32::InvalidParameter)

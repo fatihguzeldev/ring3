@@ -1,6 +1,9 @@
 mod calls;
 mod cleanup;
 mod setup;
+mod termination;
+
+pub(in crate::process::windows::files) use termination::PreparedCopyThreadExit32;
 
 use crate::{
     files::{FileId, OpenFileId},

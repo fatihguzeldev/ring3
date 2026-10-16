@@ -16,7 +16,7 @@ pub(in crate::process::windows::files) struct MappingRuntime32 {
     pub(super) limits: MappingLimits32,
     pub(super) bounds: PageRange,
     pub(super) next: u64,
-    pub(super) pending: Option<PendingView32>,
+    pub(in crate::process::windows::files::mapping) pending: Option<PendingView32>,
 }
 pub(super) struct MappingObject32 {
     pub id: u64,
@@ -48,6 +48,8 @@ pub(super) struct MappingView32 {
     pub copy: bool,
     pub range: PageRange,
     pub permissions: crate::memory::Permissions,
+    pub protections: Vec<u32>,
+    pub protection_versions: Vec<u64>,
 }
 impl MappingRuntime32 {
     pub(in crate::process::windows::files) fn new(

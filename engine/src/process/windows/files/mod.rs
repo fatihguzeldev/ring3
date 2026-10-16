@@ -6,6 +6,7 @@ mod lifecycle;
 mod mapping;
 mod memory;
 mod ordinary;
+mod process;
 mod waits;
 
 use crate::{
@@ -15,6 +16,7 @@ use crate::{
     windows::CallFrame32,
 };
 use asynchronous::AsyncRuntime32;
+pub(in crate::process) use asynchronous::FileThreadReply32;
 use handles::{KernelFileHandles32, KernelFileObject32};
 pub use host::{FileInput32, FileMountStart32};
 use mapping::{MappingLimits32, MappingRuntime32};

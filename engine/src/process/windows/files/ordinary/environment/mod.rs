@@ -20,6 +20,10 @@ impl Default for FileEnvironment32 {
     }
 }
 impl FileRuntime32 {
+    pub(in crate::process) fn virtual_system_directory(&self) -> &[u16] {
+        &self.ordinary.environment.system_directory
+    }
+
     #[cfg(test)]
     pub(in crate::process::windows::files) fn file_environment(&self) -> &FileEnvironment32 {
         &self.ordinary.environment

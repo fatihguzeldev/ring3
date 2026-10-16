@@ -193,7 +193,7 @@ impl FileRuntime32 {
             return Ok(false);
         }
         for access in [Access::Read, Access::Write, Access::Execute] {
-            if permissions.allows(access) && !view.permissions.allows(access) {
+            if permissions.without_guard().allows(access) && !view.permissions.allows(access) {
                 return Err(FileError32::AccessDenied);
             }
         }
@@ -291,7 +291,7 @@ impl MappingRuntime32 {
             return Err(FileError32::InvalidAddress);
         }
         for access in [Access::Read, Access::Write, Access::Execute] {
-            if permissions.allows(access) && !view.permissions.allows(access) {
+            if permissions.without_guard().allows(access) && !view.permissions.allows(access) {
                 return Err(FileError32::AccessDenied);
             }
         }

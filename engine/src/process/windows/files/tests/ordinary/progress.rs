@@ -1,4 +1,5 @@
 use super::{returned, support};
+mod termination;
 use crate::{
     files::{FileAccess32, FileError32},
     memory::{GuestAddress, PageRange, Permissions},

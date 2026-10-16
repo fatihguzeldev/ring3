@@ -61,6 +61,16 @@ impl FileRuntime32 {
         let range = self
             .mappings
             .choose_range(memory, reserved, count as u32, base)?;
+        let mut protections = Vec::new();
+        protections
+            .try_reserve_exact(count)
+            .map_err(|_| FileError32::Allocation)?;
+        protections.resize(count, super::query::raw_protection(permissions, copy));
+        let mut protection_versions = Vec::new();
+        protection_versions
+            .try_reserve_exact(count)
+            .map_err(|_| FileError32::Allocation)?;
+        protection_versions.resize(count, 0);
         let mut selected = Vec::new();
         selected
             .try_reserve_exact(count)
@@ -201,6 +211,11 @@ impl FileRuntime32 {
             .map_shared_page_rights(range, &aliases, copy)
             .expect("mapping capacity, guest extent, aliases and version were preflighted");
         let address = range.first as u32 * PAGE_SIZE;
+        for (page, version) in protection_versions.iter_mut().enumerate() {
+            *version = memory
+                .content_version_at(GuestAddress(address + page as u32 * PAGE_SIZE))
+                .unwrap();
+        }
         self.mappings.objects[object_index].references += 1;
         self.mappings.views.push(MappingView32 {
             object: id,
@@ -210,6 +225,8 @@ impl FileRuntime32 {
             copy,
             range,
             permissions,
+            protections,
+            protection_versions,
         });
         Ok(FileCallOutcome32::success(address))
     }

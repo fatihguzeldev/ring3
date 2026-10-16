@@ -1,3 +1,6 @@
+mod termination;
+mod thread;
+pub(in crate::process) use thread::FileThreadReply32;
 mod acceptance;
 mod calls;
 mod completion;

@@ -31,7 +31,7 @@ impl EngineInstance {
             .filter(|reply| reply.token == token)
             .ok_or(HostError::Call(CallError::InvalidToken))?;
         if reply.id == crate::windows::WindowsApi32::ExitProcess.id() {
-            self.publish_process_exit(reply.frame.arguments()[0])?;
+            self.publish_process_exit(self.pending_process_exit.ok_or(HostError::Infrastructure)?)?;
         } else {
             self.try_complete_file_call(reply.owner, token, reply.id, reply.frame)?;
         }

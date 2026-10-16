@@ -2,6 +2,7 @@ mod cancellation;
 mod cleanup;
 mod handles;
 mod memory;
+mod startup;
 mod termination;
 
 use crate::{
