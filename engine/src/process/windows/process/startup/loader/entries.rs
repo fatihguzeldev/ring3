@@ -10,6 +10,7 @@ pub(in crate::process::windows::process::startup) struct LoaderEntry32 {
     pub(in crate::process::windows::process::startup) address: u32,
     pub(in crate::process::windows::process::startup) length: usize,
     pub(in crate::process::windows::process::startup) dll: bool,
+    pub(in crate::process::windows::process::startup) uninitialized: bool,
     pub(in crate::process::windows::process::startup) full_name: std::sync::Arc<[u16]>,
 }
 
@@ -50,7 +51,7 @@ pub(super) fn module_path(
     image_path: &str,
     system_directory: &[u16],
 ) -> Vec<u16> {
-    if !module.is_dll() {
+    if !module.is_dll() && !module.is_uninitialized() {
         return image_path.encode_utf16().collect();
     }
     if let Some(path) = module.file_path() {

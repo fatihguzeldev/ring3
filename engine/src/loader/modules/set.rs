@@ -62,6 +62,7 @@ pub struct LoadedModule32 {
     pub(super) dependencies: Vec<ModuleId32>,
     pub(super) tls: Option<ModuleTls32>,
     pub(super) gates: Vec<GateSpec>,
+    pub(super) uninitialized: bool,
 }
 
 impl LoadedModule32 {
@@ -104,6 +105,10 @@ impl LoadedModule32 {
             ModuleSource32::Guest { image, .. } => image.kind == ImageKind32::Dll,
             ModuleSource32::System(_) => true,
         }
+    }
+
+    pub(crate) fn is_uninitialized(&self) -> bool {
+        self.uninitialized
     }
 
     pub fn is_system(&self) -> bool {

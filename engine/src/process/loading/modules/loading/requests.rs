@@ -26,7 +26,7 @@ impl EngineInstance {
         if self.modules.loaded.iter().len() != 0 {
             return Err(HostError::Module(ModuleError32::Busy));
         }
-        self.load_module_request(name, actual_base, Some(config))
+        self.load_module_request(name, actual_base, Some(config), false)
     }
 
     pub fn load_library_module(
@@ -38,7 +38,21 @@ impl EngineInstance {
         if self.modules.thread.is_none() {
             return Err(HostError::Module(ModuleError32::InvalidRequest));
         }
-        self.load_module_request(name, actual_base, None)
+        self.load_module_request(name, actual_base, None, false)
+    }
+
+    pub(in crate::process) fn load_library_module_flags(
+        &mut self,
+        name: &str,
+        flags: u32,
+    ) -> Result<ModuleOperation32, HostError> {
+        if flags & !1 != 0 {
+            return self.load_resource_only_module(name, flags);
+        }
+        if self.modules.thread.is_none() {
+            return Err(HostError::Module(ModuleError32::InvalidRequest));
+        }
+        self.load_module_request(name, None, None, flags & 1 != 0)
     }
 
     fn load_module_request(
@@ -46,12 +60,13 @@ impl EngineInstance {
         name: &str,
         actual_base: Option<u32>,
         config: Option<ModuleRuntimeConfig32>,
+        no_resolve: bool,
     ) -> Result<ModuleOperation32, HostError> {
         self.memory()?;
         self.guard_detection_material_change()?;
         let before = self.modules.loader_depth;
         self.acquire_loader_thread()?;
-        let result = self.load_module_request_inner(name, actual_base, config);
+        let result = self.load_module_request_inner(name, actual_base, config, no_resolve);
         if !matches!(
             result,
             Ok(ModuleOperation32::Pending(_) | ModuleOperation32::NeedBytes { .. })
@@ -67,6 +82,7 @@ impl EngineInstance {
         name: &str,
         actual_base: Option<u32>,
         config: Option<ModuleRuntimeConfig32>,
+        no_resolve: bool,
     ) -> Result<ModuleOperation32, HostError> {
         self.memory()?;
         self.guard_detection_material_change()?;
@@ -80,6 +96,7 @@ impl EngineInstance {
             name,
             actual_base,
             config,
+            no_resolve,
             paths,
         })
     }

@@ -28,9 +28,24 @@ struct Builder<'a> {
     reserved: &'a [PageRange],
     plan: LoadPlan32,
     resolver: &'a dyn Fn(&str, &str) -> Result<String, ModuleError32>,
+    initialize: bool,
 }
 
 impl ModuleCatalog32 {
+    pub(crate) fn plan_load_image(
+        &self,
+        set: &ModuleSet32,
+        memory: &AddressSpace,
+        request: &str,
+        actual_base: Option<u32>,
+        reserved: &[PageRange],
+    ) -> Result<LoadPlan32, ModuleError32> {
+        let mut builder = Builder::new(self, set, memory, reserved, &default_resolution);
+        builder.initialize = false;
+        builder.plan.root = builder.ensure(&normalize_module_identity(request)?, actual_base)?;
+        builder.finish()
+    }
+
     pub fn plan_load_headers(
         &self,
         set: &ModuleSet32,
@@ -177,6 +192,7 @@ impl<'a> Builder<'a> {
             memory,
             reserved,
             resolver,
+            initialize: true,
             plan: LoadPlan32 {
                 root: ModuleId32::from_sequence(0),
                 memory_identity: memory.identity(),
@@ -249,11 +265,15 @@ impl<'a> Builder<'a> {
             ModuleSource32::Guest { bytes, image, .. } => {
                 let mut prepared = image.prepare_pages(bytes, base)?;
                 prepared.sort_unstable_by_key(|page| page.address.0);
-                let tls = image
-                    .tls
-                    .as_ref()
-                    .map(|info| pages::tls(info, base, &prepared))
-                    .transpose()?;
+                let tls = if self.initialize {
+                    image
+                        .tls
+                        .as_ref()
+                        .map(|info| pages::tls(info, base, &prepared))
+                        .transpose()?
+                } else {
+                    None
+                };
                 (prepared, Vec::new(), tls)
             }
             ModuleSource32::System(module) => {
@@ -281,6 +301,7 @@ impl<'a> Builder<'a> {
             dependencies: Vec::new(),
             tls,
             gates,
+            uninitialized: !self.initialize,
         });
         self.plan.next_id = id.0;
         Ok(id)
@@ -418,7 +439,9 @@ impl<'a> Builder<'a> {
         {
             return Err(ModuleError32::Memory(crate::memory::MemoryError::Capacity));
         }
-        self.plan.initialization_order = initialization_order(&self.plan.additions)?;
+        if self.initialize {
+            self.plan.initialization_order = initialization_order(&self.plan.additions)?;
+        }
         self.plan
             .reservations
             .try_reserve_exact(self.set.modules.len() + self.plan.additions.len())

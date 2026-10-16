@@ -54,6 +54,7 @@ fn stage_loader(
             address,
             length: encoded.len(),
             dll: module.is_dll(),
+            uninitialized: module.is_uninitialized(),
             full_name: full.into(),
         });
     }

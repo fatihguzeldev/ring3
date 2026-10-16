@@ -12,6 +12,7 @@ pub(in crate::process) enum CapturedModuleRequest32 {
         name: String,
         actual_base: Option<u32>,
         config: Option<ModuleRuntimeConfig32>,
+        no_resolve: bool,
         paths: CapturedModulePaths32,
     },
     Export {

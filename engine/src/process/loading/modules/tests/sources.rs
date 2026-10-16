@@ -10,6 +10,7 @@ use crate::{
 mod datafiles;
 mod paths;
 mod security;
+mod unresolved;
 
 fn image(dll: bool, base: u32, import: Option<&str>, manifest: Option<&[u8]>) -> Vec<u8> {
     let imports = import.map(|module| pe::Import {

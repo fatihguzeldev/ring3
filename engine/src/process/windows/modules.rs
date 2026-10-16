@@ -125,7 +125,7 @@ impl EngineInstance {
                     32767,
                 )?;
                 if matches!(api, LoadLibraryExA | LoadLibraryExW) && args[2] != 0 {
-                    self.load_resource_only_module(&name, args[2])
+                    self.load_library_module_flags(&name, args[2])
                 } else {
                     self.load_library_module(&name, None)
                 }

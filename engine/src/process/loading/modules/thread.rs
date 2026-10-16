@@ -217,13 +217,7 @@ impl EngineInstance {
         request: &ModuleRequest32,
     ) -> Result<super::ModuleOperation32, HostError> {
         match request {
-            ModuleRequest32::Load { name, flags } => {
-                if *flags == 0 {
-                    self.load_library_module(name, None)
-                } else {
-                    self.load_resource_only_module(name, *flags)
-                }
-            }
+            ModuleRequest32::Load { name, flags } => self.load_library_module_flags(name, *flags),
             ModuleRequest32::Export { handle, symbol } => {
                 self.resolve_module_export(*handle, symbol)
             }

@@ -109,7 +109,7 @@ impl ProcessStartup32 {
                     value: u32::from_le_bytes(value.try_into().unwrap()),
                 });
             }
-            if !module.is_dll() {
+            if !module.is_dll() || module.is_uninitialized() {
                 for offset in [16, 20] {
                     words.push(WordWrite32 {
                         address: GuestAddress(address + offset),
@@ -122,6 +122,7 @@ impl ProcessStartup32 {
                 address,
                 length: encoded.len(),
                 dll: module.is_dll(),
+                uninitialized: module.is_uninitialized(),
                 full_name: full.into(),
             });
         }
@@ -133,7 +134,7 @@ impl ProcessStartup32 {
         }
         if entries
             .iter()
-            .any(|entry| entry.dll && !initialized.contains(&entry.id))
+            .any(|entry| entry.dll && !entry.uninitialized && !initialized.contains(&entry.id))
         {
             return Err(ProcessError32::InvalidParameter);
         }

@@ -87,6 +87,15 @@ impl ModuleCatalog32 {
         Self::default()
     }
 
+    pub(crate) fn is_dll(&self, name: &str) -> Result<bool, ModuleError32> {
+        Ok(match &*self.source(&normalize_module_identity(name)?)? {
+            ModuleSource32::Guest { image, .. } => {
+                image.kind == crate::loader::pe32::module::ImageKind32::Dll
+            }
+            ModuleSource32::System(_) => true,
+        })
+    }
+
     pub fn is_empty(&self) -> bool {
         self.sources.is_empty()
     }

@@ -42,6 +42,47 @@ impl EngineInstance {
                     }
                 }
             }
+            if let CapturedModuleRequest32::Load {
+                name,
+                actual_base,
+                config: None,
+                no_resolve,
+                ..
+            } = &source.request
+            {
+                if !self.modules.catalog.contains(name) && self.modules.loaded.find(name).is_none()
+                {
+                    source.input = Some(ModuleFileInput32::new(self, name.clone())?);
+                    continue;
+                }
+                let dll = match self.modules.loaded.find(name) {
+                    Some(module) => module.is_dll(),
+                    None => self
+                        .modules
+                        .catalog
+                        .is_dll(name)
+                        .map_err(HostError::Module)?,
+                };
+                if *no_resolve || !dll {
+                    let plan = self
+                        .modules
+                        .catalog
+                        .plan_load_image(
+                            &self.modules.loaded,
+                            self.memory()?,
+                            name,
+                            *actual_base,
+                            &self.guest_address_reservations()?,
+                        )
+                        .map_err(HostError::Module)?;
+                    self.retain_module_plan_sources(source, &plan)?;
+                    return Ok(FileIo32::Ready(ReadyModuleSource32::Image {
+                        plan,
+                        config: None,
+                        completion: LoadCompletion::Library,
+                    }));
+                }
+            }
             if let CapturedModuleRequest32::DataFile { name, layout, .. } = &source.request {
                 let name = name.clone();
                 let layout = *layout;
@@ -98,6 +139,7 @@ impl EngineInstance {
                     actual_base,
                     config,
                     paths,
+                    ..
                 } => (
                     self.probe_captured_module_load(name, *actual_base, *config, paths)?,
                     *config,

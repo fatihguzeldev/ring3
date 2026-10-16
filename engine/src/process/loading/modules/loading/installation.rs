@@ -42,13 +42,13 @@ impl EngineInstance {
             .find(|module| module.id() == root_id)
             .or_else(|| self.modules.loaded.get(root_id))
             .ok_or(HostError::Infrastructure)?;
-        if matches!(completion, LoadCompletion::Library) && root.is_dll() == initial {
+        if matches!(completion, LoadCompletion::Library) && initial && root.is_dll() {
             return Err(HostError::Module(ModuleError32::InvalidModuleKind));
         }
         if plan.additions().is_empty() {
             return match completion {
                 LoadCompletion::Library => {
-                    if !self.modules.attached.contains(&root_id) {
+                    if !self.modules.attached.contains(&root_id) && !root.is_uninitialized() {
                         return Err(HostError::Module(ModuleError32::Busy));
                     }
                     let handle = root.base();
