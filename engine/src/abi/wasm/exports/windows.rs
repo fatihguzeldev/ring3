@@ -4,6 +4,7 @@ mod dsound;
 mod exceptions;
 mod files;
 mod process;
+mod nls;
 mod registry;
 mod synchronization;
 mod threads;
