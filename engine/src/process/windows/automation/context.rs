@@ -10,6 +10,7 @@ pub(super) struct Bstr32 {
 pub(in crate::process) struct AutomationRuntime32 {
     pub(super) limits: AutomationLimits32,
     pub(super) strings: Vec<Bstr32>,
+    pub(super) arrays: Vec<super::arrays::Array32>,
     pub(super) bytes: usize,
 }
 impl Default for AutomationRuntime32 {
@@ -17,6 +18,7 @@ impl Default for AutomationRuntime32 {
         Self {
             limits: AutomationLimits32::default(),
             strings: Vec::new(),
+            arrays: Vec::new(),
             bytes: 0,
         }
     }
@@ -24,11 +26,12 @@ impl Default for AutomationRuntime32 {
 impl AutomationRuntime32 {
     pub(in crate::process) fn terminate(&mut self) {
         self.strings.clear();
+        self.arrays.clear();
         self.bytes = 0;
     }
     pub(super) fn prepare_string(&mut self, bytes: usize, replace: Option<usize>) -> Result<(), E> {
         let old = replace.map_or(0, |i| self.strings[i].bytes);
-        if (replace.is_none() && self.strings.len() >= self.limits.objects)
+        if (replace.is_none() && self.strings.len() + self.arrays.len() >= self.limits.objects)
             || self
                 .bytes
                 .checked_sub(old)
@@ -49,6 +52,7 @@ impl EngineInstance {
             || self.pending_call.is_some()
             || self.callback.is_some()
             || !self.automation.strings.is_empty()
+            || !self.automation.arrays.is_empty()
         {
             return Err(HostError::InvalidRequest);
         }

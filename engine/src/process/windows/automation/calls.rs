@@ -29,8 +29,10 @@ impl EngineInstance {
         self.memory()?
             .ensure_transaction_versions(1)
             .map_err(HostError::Memory)?;
-        let result = if api.is_variant() || api.is_array() {
+        let result = if api.is_variant() {
             Err(HostError::Automation(E::NotImplemented))
+        } else if api.is_array() {
+            self.automation_array_call(api, frame.arguments())
         } else {
             self.automation_string(api, frame.arguments())
         };

@@ -1,3 +1,4 @@
+mod arrays;
 mod calls;
 mod context;
 mod strings;
