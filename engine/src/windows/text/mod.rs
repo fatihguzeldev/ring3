@@ -1,4 +1,5 @@
 mod conversion;
+pub(crate) mod messages;
 pub use conversion::ConversionError32;
 
 mod codepages;
