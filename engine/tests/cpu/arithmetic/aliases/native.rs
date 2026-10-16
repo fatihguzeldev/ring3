@@ -57,9 +57,9 @@ fn already_supported_locked_group1_and_explicit_refusal_boundaries_remain() {
     }
     for bytes in [&[0xf0, 0x82, 0x38, 1][..], &[0xf0, 0xd1, 0x30]] {
         let e = stopped::stopped(bytes, 0x3000);
-        assert_eq!(
+        crate::support_fetch::assert_decode_contract(
             decode_one(e.memory().unwrap(), GuestAddress(0x3000)).unwrap_err(),
-            DecodeError::InvalidEncoding
+            DecodeError::InvalidEncoding,
         );
     }
     for bytes in [
@@ -93,5 +93,58 @@ fn equal_width_word_moves_use_word_ir_and_original_continuations() {
         assert_eq!(actual.next_pc(), GuestAddress(0x3000 + alias.len() as u32));
         assert!(a.memory().unwrap().is_code_current(actual.code_snapshot()));
         stopped::expect_admitted(alias, 0x3000);
+    }
+}
+
+#[test]
+fn group1_byte_alias_preserves_all_modrm_addresses_selectors_and_immediate_bits() {
+    for modrm in 0..=255_u8 {
+        for immediate in [0, 0x80, 0xff] {
+            let mut alias = vec![0x82, modrm];
+            if modrm & 0xc0 != 0xc0 && modrm & 7 == 4 {
+                alias.push(0x8d);
+            }
+            let displacement = match modrm >> 6 {
+                0 if modrm & 7 == 5 || (modrm & 7 == 4) => 4,
+                1 => 1,
+                2 => 4,
+                _ => 0,
+            };
+            alias.extend(std::iter::repeat_n(0x56, displacement));
+            alias.push(immediate);
+            let mut canonical = alias.clone();
+            canonical[0] = 0x80;
+            let a = stopped::stopped(&alias, 0x3000);
+            let c = stopped::stopped(&canonical, 0x3000);
+            let actual = decode_one(a.memory().unwrap(), GuestAddress(0x3000)).unwrap();
+            let expected = decode_one(c.memory().unwrap(), GuestAddress(0x3000)).unwrap();
+            assert_eq!(actual.operation(), expected.operation(), "{alias:02x?}");
+            assert_eq!(actual.length(), expected.length());
+            assert_eq!(actual.next_pc(), expected.next_pc());
+            assert!(a.memory().unwrap().is_code_current(actual.code_snapshot()));
+        }
+    }
+}
+
+#[test]
+fn sal_memory_aliases_preserve_byte_word_and_dword_shift_operations() {
+    for prefix in [&[][..], &[0x66][..]] {
+        for opcode in [0xd0_u8, 0xd2, 0xc0, 0xd1, 0xd3, 0xc1] {
+            let mut alias = prefix.to_vec();
+            alias.extend([opcode, 0x33]);
+            if matches!(opcode, 0xc0 | 0xc1) {
+                alias.push(0xff);
+            }
+            let mut canonical = alias.clone();
+            canonical[prefix.len() + 1] = 0x23;
+            let a = stopped::stopped(&alias, 0x3000);
+            let c = stopped::stopped(&canonical, 0x3000);
+            let actual = decode_one(a.memory().unwrap(), GuestAddress(0x3000)).unwrap();
+            let expected = decode_one(c.memory().unwrap(), GuestAddress(0x3000)).unwrap();
+            assert_eq!(actual.operation(), expected.operation(), "{alias:02x?}");
+            assert_eq!(actual.length(), expected.length());
+            assert_eq!(actual.next_pc(), expected.next_pc());
+            stopped::expect_admitted(&alias, 0x3000);
+        }
     }
 }

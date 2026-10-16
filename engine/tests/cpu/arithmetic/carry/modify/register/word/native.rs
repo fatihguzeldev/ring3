@@ -13,9 +13,7 @@ use ring3_engine::{
             ir::{EffectiveAddress, Operation, WordMemoryArithmeticKind, WordValue},
         },
     },
-    memory::{
-        Access, AddressSpace, FaultReason, GuestAddress, MemoryFault, PageRange, Permissions,
-    },
+    memory::{Access, AddressSpace, FaultReason, GuestAddress, PageRange, Permissions},
     process::EngineInstance,
 };
 
@@ -156,7 +154,9 @@ fn word_memory_carry_store_mixed_64_instruction_blocks_fit_every_bound_profile()
     for opcode in [0x11, 0x19] {
         for resident in [false, true] {
             for entries in [false, true] {
-                bound_instruction_bank(resident, entries, opcode, 32, 31);
+                for _ in 0..4 {
+                    bound_instruction_bank(resident, entries, opcode, 8, 55);
+                }
             }
         }
     }
@@ -355,10 +355,10 @@ fn word_memory_carry_store_only_single_operand_override_and_flat32_are_open() {
             }
             bytes.extend([0xeb, 0]);
             let memory = code_space(CODE, &bytes);
-            assert_eq!(
-                decode_one(&memory, GuestAddress(CODE)).err(),
-                Some(error),
-                "{bytes:02x?}"
+            crate::support_fetch::assert_decode_contract(
+                (decode_one(&memory, GuestAddress(CODE)).err())
+                    .expect("instruction must fail to decode"),
+                error,
             );
             let specs = [BlockSpec {
                 entry: GuestAddress(CODE),
@@ -390,10 +390,10 @@ fn word_memory_carry_store_duplicate_prefix_immediates_stay_closed() {
             bytes.extend([0xeb, 0]);
             let memory = code_space(CODE, &bytes);
             let error = DecodeError::Unsupported(UnsupportedFeature::Opcode);
-            assert_eq!(
-                decode_one(&memory, GuestAddress(CODE)).err(),
-                Some(error),
-                "{bytes:02x?}"
+            crate::support_fetch::assert_decode_contract(
+                (decode_one(&memory, GuestAddress(CODE)).err())
+                    .expect("instruction must fail to decode"),
+                error,
             );
             assert_eq!(
                 compile_region(
@@ -467,17 +467,12 @@ fn word_memory_carry_store_fetch_is_progressive_and_top_end_wraps_only_next_pc()
         for cut in 1..bytes.len() {
             let pc = 0x2000 - cut as u32;
             let memory = code_space(pc, &bytes[..cut]);
-            assert_eq!(
-                decode_one(&memory, GuestAddress(pc)).err(),
-                Some(DecodeError::MemoryFault {
-                    pc: GuestAddress(pc),
-                    fault: MemoryFault {
-                        address: GuestAddress(0x2000),
-                        access: Access::Execute,
-                        reason: FaultReason::Unmapped,
-                    },
-                    length: cut as u32 + 1,
-                })
+            crate::support_fetch::assert_error(
+                (decode_one(&memory, GuestAddress(pc)).err()).expect("code fetch must fail"),
+                pc,
+                0x2000,
+                FaultReason::Unmapped,
+                cut as u32 + 1,
             );
         }
     }

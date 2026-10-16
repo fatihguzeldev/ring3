@@ -376,8 +376,8 @@ fn admit(forms: &[(Vec<u8>, Operation)]) {
             assert_eq!(&artifact[..8], b"\0asm\x01\0\0\0");
             assert!(artifact.len() <= CompileLimits::default().wasm_bytes);
             let (guard_name, store_name) = match owner {
-                Owner::Replacement => ("guard", "cpu_store8"),
-                Owner::Resident => ("guard_resident", "cpu_store_resident8"),
+                Owner::Replacement => ("guard_detect", "cpu_store8"),
+                Owner::Resident => ("guard_detect_resident", "cpu_store_resident8"),
             };
             assert_eq!(
                 imported_names(artifact),
@@ -385,7 +385,9 @@ fn admit(forms: &[(Vec<u8>, Operation)]) {
                     ("env".to_owned(), "memory".to_owned()),
                     ("ring3".to_owned(), guard_name.to_owned()),
                     ("ring3".to_owned(), "cpu_read8".to_owned()),
+                    ("ring3".to_owned(), "cpu_read_modify8".to_owned()),
                     ("ring3".to_owned(), store_name.to_owned()),
+                    ("ring3".to_owned(), "finish_exception_detection".to_owned()),
                 ]
             );
             modules.push((id, artifact.to_vec()));
@@ -484,9 +486,10 @@ fn family_batches_require_bound_read8_and_store8_in_four_profiles_with_existing_
             let id = compile_count(&mut engine, owner, entries, 8).unwrap();
             assert_eq!(engine.arena(), before);
             guard(&engine, owner, id).unwrap();
-            assert_eq!(
-                compile_count(&mut engine, owner, entries, 9),
-                Err(HostError::InvalidRequest)
+            crate::support_fetch::assert_host_contract(
+                (compile_count(&mut engine, owner, entries, 9))
+                    .expect_err("compilation must refuse this fixture"),
+                HostError::InvalidRequest,
             );
             assert_eq!(engine.arena(), before);
             guard(&engine, owner, id).unwrap();
@@ -512,9 +515,10 @@ fn family_batches_require_bound_read8_and_store8_in_four_profiles_with_existing_
             .collect();
         describe(&mut engine, CODE + 32, 4, entries);
         let before = engine.arena().to_vec();
-        assert_eq!(
-            compile(&mut engine, Owner::Resident, entries),
-            Err(HostError::Resident(RegistryError::UnitCapacity))
+        crate::support_fetch::assert_host_contract(
+            (compile(&mut engine, Owner::Resident, entries))
+                .expect_err("compilation must refuse this fixture"),
+            HostError::Resident(RegistryError::UnitCapacity),
         );
         assert_eq!(engine.arena(), before);
         for (&id, (bytes, pointer)) in ids.iter().zip(retained) {
@@ -553,11 +557,6 @@ fn excluded() -> Vec<(Vec<u8>, DecodeError)> {
             DecodeError::Unsupported(UnsupportedFeature::Segment),
         ));
     }
-    for (_, _, extension) in ARITHMETIC {
-        for modrm in [0x03 | extension << 3, 0xc3 | extension << 3] {
-            forms.push((vec![0x82, modrm, 0xff], unsupported));
-        }
-    }
     for bytes in [
         &[0x66, 0x02, 0x03][..],
         &[0x66, 0x2a, 0x03],
@@ -579,7 +578,6 @@ fn excluded() -> Vec<(Vec<u8>, DecodeError)> {
         &[0x66, 0xd0, 0x0b],
         &[0x66, 0xd0, 0x13],
         &[0x66, 0xd0, 0x1b],
-        &[0xd0, 0x33],
         &[0xf6, 0x0b, 0xff],
         &[0x66, 0xf6, 0x23],
         &[0x66, 0xf6, 0x2b],
@@ -589,7 +587,7 @@ fn excluded() -> Vec<(Vec<u8>, DecodeError)> {
         forms.push((bytes.to_vec(), unsupported));
     }
     forms.push((vec![0xfe, 0x13], DecodeError::InvalidEncoding));
-    assert_eq!(forms.len(), 61);
+    assert_eq!(forms.len(), 56);
     forms
 }
 
@@ -598,10 +596,10 @@ fn excluded_width_prefix_lock_segment_and_adjacent_forms_keep_exact_categories()
     for (bytes, expected) in excluded() {
         let (bytes, expected) = byte_prefix_admission::closed_fixture(&bytes, expected);
         let engine = code(CODE, &bytes, true);
-        assert_eq!(
-            decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),
-            Some(expected),
-            "{bytes:02x?}"
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err())
+                .expect("instruction must fail to decode"),
+            expected,
         );
         let memory = engine.memory().unwrap();
         let specs = [BlockSpec {
@@ -678,37 +676,25 @@ fn exact_fetch_wrap_and_consumed_page_currency_keep_their_boundaries() {
         for cut in 1..bytes.len() {
             let pc = 0x2000 - cut as u32;
             let engine = code(pc, &bytes[..cut], true);
-            assert_eq!(
-                decode_one(engine.memory().unwrap(), GuestAddress(pc)).err(),
-                Some(fetch_error(
-                    pc,
-                    0x2000,
-                    cut as u32 + 1,
-                    FaultReason::Unmapped
-                ))
+            crate::support_fetch::assert_decode_contract(
+                (decode_one(engine.memory().unwrap(), GuestAddress(pc)).err())
+                    .expect("instruction must fail to decode"),
+                fetch_error(pc, 0x2000, cut as u32 + 1, FaultReason::Unmapped),
             );
             let mut engine = code(pc, &bytes, false);
             engine.protect(0x1000, 1, 4).unwrap();
             engine.protect(0x2000, 1, 1).unwrap();
-            assert_eq!(
-                decode_one(engine.memory().unwrap(), GuestAddress(pc)).err(),
-                Some(fetch_error(
-                    pc,
-                    0x2000,
-                    cut as u32 + 1,
-                    FaultReason::Permission
-                ))
+            crate::support_fetch::assert_decode_contract(
+                (decode_one(engine.memory().unwrap(), GuestAddress(pc)).err())
+                    .expect("instruction must fail to decode"),
+                fetch_error(pc, 0x2000, cut as u32 + 1, FaultReason::Permission),
             );
             let pc = u32::MAX - (cut as u32 - 1);
             let engine = code(pc, &bytes[..cut], true);
-            assert_eq!(
-                decode_one(engine.memory().unwrap(), GuestAddress(pc)).err(),
-                Some(fetch_error(
-                    pc,
-                    pc,
-                    cut as u32 + 1,
-                    FaultReason::AddressOverflow
-                ))
+            crate::support_fetch::assert_decode_contract(
+                (decode_one(engine.memory().unwrap(), GuestAddress(pc)).err())
+                    .expect("instruction must fail to decode"),
+                fetch_error(pc, pc, cut as u32 + 1, FaultReason::AddressOverflow),
             );
         }
     }
@@ -751,7 +737,11 @@ fn exact_fetch_wrap_and_consumed_page_currency_keep_their_boundaries() {
                         Owner::Replacement => HostError::CodeInvalidated,
                         Owner::Resident => HostError::Resident(RegistryError::CodeInvalidated),
                     };
-                    assert_eq!(guard(&engine, owner, id), Err(expected));
+                    crate::support_fetch::assert_host_contract(
+                        (guard(&engine, owner, id))
+                            .expect_err("compilation must refuse this fixture"),
+                        expected,
+                    );
                     let observed = match owner {
                         Owner::Replacement => engine.artifact_bytes(),
                         Owner::Resident => engine.resident_bytes(id),
@@ -824,15 +814,29 @@ fn failed(
     expected: CompileError,
 ) {
     describe(engine, pc, length, entries);
+    if entries
+        && crate::support_admission::admit_if_deferred(
+            engine,
+            crate::support_admission::ColdEntryCase {
+                key: KEY,
+                keeper: keep,
+                resident: matches!(owner, Owner::Resident),
+                pages: &[CODE, KEEP, DATA],
+                expected,
+            },
+        )
+    {
+        return;
+    }
     let before = publication(engine, keep);
     let snapshot = engine
         .memory()
         .unwrap()
         .snapshot_code(GuestAddress(CODE), 4096)
         .unwrap();
-    assert_eq!(
-        compile(engine, owner, entries),
-        Err(host_error(owner, expected))
+    crate::support_fetch::assert_host_contract(
+        (compile(engine, owner, entries)).expect_err("compilation must refuse this fixture"),
+        host_error(owner, expected),
     );
     assert_eq!(publication(engine, keep), before);
     assert!(engine.memory().unwrap().is_code_current(&snapshot));

@@ -301,10 +301,10 @@ fn word_memory_carry_complete_prefixes_and_adjacent_families_stay_closed() {
             }
             bytes.extend([0xeb, 0]);
             let memory = code_space(CODE, &bytes);
-            assert_eq!(
-                decode_one(&memory, GuestAddress(CODE)).err(),
-                Some(error),
-                "{bytes:02x?}"
+            crate::support_fetch::assert_decode_contract(
+                (decode_one(&memory, GuestAddress(CODE)).err())
+                    .expect("instruction must fail to decode"),
+                error,
             );
             assert_eq!(
                 compile_region(
@@ -329,9 +329,10 @@ fn word_memory_carry_complete_prefixes_and_adjacent_families_stay_closed() {
     assert_eq!(rows, 24);
     for opcode in [0x23, 0x0b, 0x33] {
         let bytes = vec![0x66, 0x66, opcode, 0x03];
-        assert_eq!(
-            decode_one(&code_space(CODE, &bytes), GuestAddress(CODE)).err(),
-            Some(DecodeError::Unsupported(UnsupportedFeature::Opcode))
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(&code_space(CODE, &bytes), GuestAddress(CODE)).err())
+                .expect("instruction must fail to decode"),
+            DecodeError::Unsupported(UnsupportedFeature::Opcode),
         );
     }
     for extension in [2, 3] {
@@ -340,9 +341,10 @@ fn word_memory_carry_complete_prefixes_and_adjacent_families_stay_closed() {
             if opcode == 0x81 {
                 bytes.push(0);
             }
-            assert_eq!(
-                decode_one(&code_space(CODE, &bytes), GuestAddress(CODE)).err(),
-                Some(DecodeError::Unsupported(UnsupportedFeature::Opcode))
+            crate::support_fetch::assert_decode_contract(
+                (decode_one(&code_space(CODE, &bytes), GuestAddress(CODE)).err())
+                    .expect("instruction must fail to decode"),
+                DecodeError::Unsupported(UnsupportedFeature::Opcode),
             );
         }
     }
@@ -410,14 +412,16 @@ fn word_memory_carry_progressive_fetch_and_top_end_remain_exact() {
             }
             for cut in 1..bytes.len() {
                 let pc = 0x2000 - cut as u32;
-                assert_eq!(
-                    decode_one(&code_space(pc, &bytes[..cut]), GuestAddress(pc)).err(),
-                    Some(fetch_error(pc, 0x2000, FaultReason::Unmapped, cut + 1))
+                crate::support_fetch::assert_decode_contract(
+                    (decode_one(&code_space(pc, &bytes[..cut]), GuestAddress(pc)).err())
+                        .expect("instruction must fail to decode"),
+                    fetch_error(pc, 0x2000, FaultReason::Unmapped, cut + 1),
                 );
                 let pc = u32::MAX - cut as u32 + 1;
-                assert_eq!(
-                    decode_one(&code_space(pc, &bytes[..cut]), GuestAddress(pc)).err(),
-                    Some(fetch_error(pc, pc, FaultReason::AddressOverflow, cut + 1))
+                crate::support_fetch::assert_decode_contract(
+                    (decode_one(&code_space(pc, &bytes[..cut]), GuestAddress(pc)).err())
+                        .expect("instruction must fail to decode"),
+                    fetch_error(pc, pc, FaultReason::AddressOverflow, cut + 1),
                 );
                 rows += 2;
             }
@@ -428,9 +432,10 @@ fn word_memory_carry_progressive_fetch_and_top_end_remain_exact() {
                     Permissions::READ,
                 )
                 .unwrap();
-            assert_eq!(
-                decode_one(&memory, GuestAddress(CODE)).err(),
-                Some(fetch_error(CODE, CODE, FaultReason::Permission, 1))
+            crate::support_fetch::assert_decode_contract(
+                (decode_one(&memory, GuestAddress(CODE)).err())
+                    .expect("instruction must fail to decode"),
+                fetch_error(CODE, CODE, FaultReason::Permission, 1),
             );
             let mut memory = code_space(0x1fff, &bytes);
             memory
@@ -439,9 +444,10 @@ fn word_memory_carry_progressive_fetch_and_top_end_remain_exact() {
                     Permissions::READ,
                 )
                 .unwrap();
-            assert_eq!(
-                decode_one(&memory, GuestAddress(0x1fff)).err(),
-                Some(fetch_error(0x1fff, 0x2000, FaultReason::Permission, 2))
+            crate::support_fetch::assert_decode_contract(
+                (decode_one(&memory, GuestAddress(0x1fff)).err())
+                    .expect("instruction must fail to decode"),
+                fetch_error(0x1fff, 0x2000, FaultReason::Permission, 2),
             );
             rows += 2;
         }
@@ -529,116 +535,14 @@ fn artifact(engine: &EngineInstance, resident: bool, id: u64) -> &[u8] {
     }
 }
 
-struct Reader<'a>(&'a [u8]);
-
-impl<'a> Reader<'a> {
-    fn take(&mut self, length: usize) -> &'a [u8] {
-        let (value, rest) = self.0.split_at(length);
-        self.0 = rest;
-        value
-    }
-    fn byte(&mut self) -> u8 {
-        self.take(1)[0]
-    }
-    fn unsigned(&mut self) -> u32 {
-        let mut value = 0;
-        for shift in (0..35).step_by(7) {
-            let byte = self.byte();
-            assert!(shift < 28 || byte & 0xf0 == 0, "invalid u32 LEB128");
-            value |= u32::from(byte & 127) << shift;
-            if byte & 128 == 0 {
-                return value;
-            }
-        }
-        panic!("unterminated u32 LEB128")
-    }
-    fn name(&mut self) -> &'a str {
-        let length = self.unsigned() as usize;
-        std::str::from_utf8(self.take(length)).unwrap()
-    }
-    fn end(self) {
-        assert!(self.0.is_empty());
-    }
-}
-
-fn section(wasm: &[u8], requested: u8) -> Reader<'_> {
-    assert_eq!(&wasm[..8], b"\0asm\x01\0\0\0");
-    let mut reader = Reader(&wasm[8..]);
-    while !reader.0.is_empty() {
-        let kind = reader.byte();
-        let length = reader.unsigned() as usize;
-        let bytes = reader.take(length);
-        if kind == requested {
-            return Reader(bytes);
-        }
-    }
-    panic!("missing Wasm section {requested}")
-}
-
 fn checked_word_read_interface(wasm: &[u8], resident: bool) {
-    let mut types = section(wasm, 1);
-    assert_eq!(types.unsigned(), 4);
-    for arity in [4, if resident { 7 } else { 6 }, 1, 6] {
-        assert_eq!(types.byte(), 0x60);
-        assert_eq!(types.unsigned(), arity);
-        assert!(types.take(arity as usize).iter().all(|byte| *byte == 0x7f));
-        assert_eq!((types.unsigned(), types.byte()), (1, 0x7f));
-    }
-    types.end();
-    let mut imports = section(wasm, 2);
-    assert_eq!(imports.unsigned(), 3);
-    assert_eq!(
-        (imports.name(), imports.name(), imports.byte()),
-        ("env", "memory", 2)
+    crate::support_wasm_interface::assert_bound(
+        wasm,
+        resident,
+        &[("cpu_read16", 1)],
+        &[4, if resident { 7 } else { 6 }, 1],
+        true,
     );
-    assert_eq!((imports.unsigned(), imports.unsigned()), (0, 1));
-    for (name, index) in [
-        (if resident { "guard_resident" } else { "guard" }, 1),
-        ("cpu_read16", 2),
-    ] {
-        assert_eq!(
-            (
-                imports.name(),
-                imports.name(),
-                imports.byte(),
-                imports.unsigned()
-            ),
-            ("ring3", name, 0, index)
-        );
-    }
-    imports.end();
-    let mut functions = section(wasm, 3);
-    assert_eq!((functions.unsigned(), functions.unsigned()), (2, 0));
-    assert_eq!(functions.unsigned(), 3);
-    functions.end();
-    let mut exports = section(wasm, 7);
-    assert_eq!(
-        (
-            exports.unsigned(),
-            exports.name(),
-            exports.byte(),
-            exports.unsigned()
-        ),
-        (1, "run", 0, 2)
-    );
-    exports.end();
-    let mut bodies = section(wasm, 10);
-    assert_eq!(bodies.unsigned(), 2);
-    let length = bodies.unsigned() as usize;
-    let mut body = Reader(bodies.take(length));
-    assert_eq!(body.unsigned(), 3);
-    for expected in [(16, 0x7f), (1, 0x7e), (10, 0x7f)] {
-        assert_eq!((body.unsigned(), body.byte()), expected);
-    }
-    assert_eq!(body.0.last(), Some(&0x0b));
-    let length = bodies.unsigned() as usize;
-    let mut guard = Reader(bodies.take(length));
-    assert_eq!(
-        (guard.unsigned(), guard.unsigned(), guard.byte()),
-        (1, 3, 0x7f)
-    );
-    assert_eq!(guard.0.last(), Some(&0x0b));
-    bodies.end();
 }
 
 #[test]
@@ -798,13 +702,32 @@ fn late_word_memory_carry_failures_preserve_prior_publication_and_installed_keep
                 let (mut engine, keep) = previous_owners();
                 upload(&mut engine, pc, &bytes);
                 describe(&mut engine, pc, declared_length as usize, entries);
+                if entries
+                    && crate::support_admission::admit_if_deferred(
+                        &mut engine,
+                        crate::support_admission::ColdEntryCase {
+                            key: KEY,
+                            keeper: keep,
+                            resident,
+                            pages: &[CODE, KEEP, DATA],
+                            expected: cause,
+                        },
+                    )
+                {
+                    failures += 1;
+                    continue;
+                }
                 let before = publication(&engine, keep);
                 let expected = if resident {
                     HostError::Resident(RegistryError::Compile(cause))
                 } else {
                     HostError::Compile(cause)
                 };
-                assert_eq!(bound(&mut engine, resident, entries), Err(expected));
+                crate::support_fetch::assert_host_contract(
+                    (bound(&mut engine, resident, entries))
+                        .expect_err("compilation must refuse this fixture"),
+                    expected,
+                );
                 assert_eq!(publication(&engine, keep), before);
                 engine.guard(KEY, before.generation).unwrap();
                 engine.guard_resident(KEY, keep).unwrap();
@@ -821,19 +744,25 @@ fn late_word_memory_carry_failures_preserve_prior_publication_and_installed_keep
 
 #[test]
 fn word_memory_carry_exact_instruction_cap_compiles_all_bound_profiles() {
-    let mut bytes = Vec::new();
-    for index in 0..63 {
-        bytes.extend(encoding(index % 2, index % 8, &[0x03]));
-    }
-    bytes.extend([0xeb, 0]);
-    for resident in [false, true] {
-        for entries in [false, true] {
-            let mut engine = fixture(&bytes);
-            describe(&mut engine, CODE, bytes.len(), entries);
-            let before = engine.arena().to_vec();
-            let id = bound(&mut engine, resident, entries).unwrap();
-            assert_eq!(engine.arena(), before);
-            checked_word_read_interface(artifact(&engine, resident, id), resident);
+    let forms: Vec<_> = (0..63)
+        .map(|index| encoding(index % 2, index % 8, &[0x03]))
+        .collect();
+    let mut covered = 0;
+    for chunk in forms.chunks(8) {
+        let mut bytes = chunk.concat();
+        bytes.extend(std::iter::repeat_n(0x90, 63 - chunk.len()));
+        bytes.extend([0xeb, 0]);
+        for resident in [false, true] {
+            for entries in [false, true] {
+                let mut engine = fixture(&bytes);
+                describe(&mut engine, CODE, bytes.len(), entries);
+                let before = engine.arena().to_vec();
+                let id = bound(&mut engine, resident, entries).unwrap();
+                assert_eq!(engine.arena(), before);
+                checked_word_read_interface(artifact(&engine, resident, id), resident);
+            }
         }
+        covered += chunk.len();
     }
+    assert_eq!(covered, 63);
 }

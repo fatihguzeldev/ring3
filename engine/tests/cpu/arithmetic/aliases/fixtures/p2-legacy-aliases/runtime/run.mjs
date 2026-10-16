@@ -1,3 +1,4 @@
+import {pageFaultExit, pageFaultPacket} from '../../../../../../support/wasm/page-fault.mjs';
 import assert from 'node:assert/strict';
 import {readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
@@ -6,7 +7,7 @@ import {pathToFileURL} from 'node:url';
 const [enginePath, output, root] = process.argv.slice(2);
 assert.ok(enginePath && output && root, 'explicit engine, output and source root');
 const supportPath = 'engine/tests/cpu/segments/code/base/fixtures/p2-cs-base/runtime/support.mjs';
-const {harness, PC, SEG, BASES, record, state, registers, exit, hash, words, writeRAM} =
+const {harness, PC, SEG, BASES, record, state, registers, exit, hash, writeRAM} =
   await import(pathToFileURL(join(root, supportPath)));
 const h = await harness(enginePath, output, root);
 const paths = [
@@ -14,10 +15,10 @@ const paths = [
   'engine/src/cpu/x86/decode/aliases/tests/word.rs',
   'engine/src/cpu/x86/decode/mod.rs', 'engine/src/cpu/x86/decode/lower.rs', 'engine/src/cpu/x86/decode/families.rs',
   'engine/src/cpu/x86/decode/integer.rs', 'engine/src/cpu/x86/decode/atomic.rs',
-  'engine/src/cpu/x86/decode/profile.rs', 'engine/src/cpu/x86/decode/families.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/shifts.rs',
+  'engine/src/cpu/x86/decode/profile.rs',  'engine/src/cpu/dbt/wasm/instructions/integer/shifts.rs',
   'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/mod.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/arithmetic.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/moves.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/exchange.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/predicates.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/shifts.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/control.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/extended.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/operands.rs',
   'engine/tests/cpu/arithmetic/native.rs', 'engine/tests/cpu/arithmetic/wasm.rs',
-  'engine/tests/cpu/arithmetic/aliases/native.rs', 'engine/tests/cpu/arithmetic/aliases/wasm.rs',
+  'engine/tests/support/wasm/page-fault.mjs', 'engine/tests/cpu/arithmetic/aliases/native.rs', 'engine/tests/cpu/arithmetic/aliases/wasm.rs',
   'engine/tests/cpu/arithmetic/aliases/fixtures/p2-legacy-aliases/runtime/run.mjs', supportPath,
 ];
 const pins = () => Object.fromEntries(paths.map(path => [path, hash(readFileSync(join(root, path)))]));
@@ -66,8 +67,8 @@ const memoryRows = [
 const faultRows = [
   {label: '82 ADD null DS before page helper', code: '820001', width: 1, set: {0: 0x6000}, context: 'nullDS', reason: 11},
   {label: 'SAL6 word logical SS span before helper', code: '66d13424', width: 2, set: {4: DATA}, context: 'shortSS', reason: 15},
-  {label: '82 ADD read page fault', code: '820001', width: 1, set: {0: 0x6000}, fault: [1, 0x6000, 1], helpers: 'read'},
-  {label: 'SAL6 word write denied after successful read', code: '66d13424', width: 2, set: {4: DATA}, fault: [2, DATA, 2], helpers: 'readStore', readonly: true},
+  {label: '82 ADD modify page fault', code: '820001', width: 1, set: {0: 0x6000}, fault: [1, 0x6000, 1]},
+  {label: 'SAL6 word write authority denied before publication', code: '66d13424', width: 2, set: {4: DATA}, fault: [2, DATA, 2], readonly: true},
 ];
 const strictRows = [
   {label: 'duplicate66 alias remains host refusal', code: '666682c001'},
@@ -105,6 +106,7 @@ function open(resident, entries, row, input) {
   h.put(c, 0, input); return c;
 }
 const readName = row => `cpu_read${row.width * 8}`;
+const modifyName = row => `cpu_read_modify${row.width * 8}`;
 const storeName = (c, row) => `cpu_store${c.resident ? '_resident' : ''}${row.width * 8}`;
 const trace = (name, args) => ({name, args: args.map(v => v >>> 0), status: 0});
 const storeArgs = (c, material, address, value) => [...(c.resident ? material.binding : []), address, value];
@@ -124,27 +126,27 @@ for (const resident of [false, true]) for (const entries of [false, true]) {
   }
   for (const row of memoryRows) {
     const input = seed(row), c = open(resident, entries, row, input);
-    const names = [readName(row), ...(row.stores ? [storeName(c, row)] : [])];
+    const names = [readName(row), ...(row.stores ? [modifyName(row), storeName(c, row)] : [])];
     const material = h.compile(c, 'real memory alias body', [[PC, bytes(row.code).length + 2]], names);
     const want = Buffer.from(input); want.writeUInt32LE(row.flags, 52);
     if (row.afterEax !== undefined) want.writeUInt32LE(row.afterEax, 16);
     want.writeUInt32LE(PC + bytes(row.code).length, 48); exit(want, 1, 1, 6);
     want.set(record('R3MH', 40, [0, row.stores ? 0 : row.value, 0, 0, 0, row.width], 10), 100);
     const wantRAM = h.ram(c); writeRAM(wantRAM, DATA, bytes(row.after));
-    const helpers = [trace(readName(row), [DATA])];
+    const helpers = [trace(row.stores ? modifyName(row) : readName(row), [DATA])];
     if (row.stores) helpers.push(trace(storeName(c, row), storeArgs(c, material ?? {binding: []}, DATA, row.storeValue)));
     invoke(c, material, input, want, {wantRAM, helpers}); h.host(c, 'close');
   }
   for (const row of faultRows) {
     const input = seed(row), c = open(resident, entries, row, input);
-    const names = [readName(row), storeName(c, row)];
+    const names = [readName(row), modifyName(row), storeName(c, row)];
     const material = h.compile(c, 'alias fault authority body', [[PC, bytes(row.code).length + 2]], names);
     const want = exit(Buffer.from(input), row.reason ?? 5, 0, 6), helpers = [];
     if (row.fault) {
-      want.set(record('R3MH', 40, [1, 0, row.fault[0], row.fault[1], row.fault[2], row.width], 10), 100);
-      want.set(words([row.fault[0], row.fault[1], row.fault[2], row.width]), 80);
-      helpers.push(trace(readName(row), [row.helpers === 'read' ? 0x6000 : DATA]));
-      if (row.helpers === 'readStore') helpers.push(trace(storeName(c, row), storeArgs(c, material ?? {binding: []}, DATA, 2)));
+      const fault = {errorCode: row.readonly ? 7 : 6, address: row.fault[1], access: 2, length: row.width};
+      want.set(pageFaultExit({retired: 0, ...fault}), 56);
+      want.set(pageFaultPacket(fault), 100);
+      helpers.push({name: modifyName(row), args: [row.fault[1]], status: 23});
     }
     invoke(c, material, input, want, {helpers}); h.host(c, 'close');
   }
@@ -165,6 +167,6 @@ h.finish([
   'Original17 AMD-defined arithmetic/shift aliases plus two separately qualified equal-width word moves; SALC, TEST/r1 and BSWAP16 remain separate.',
   'Equal-width MOVZX/MOVSX retain original extra opcode byte and continuation, high EAX and all status flags; memory forms perform real CPUread16 with unchanged RAM and literal v10 packets, never NOP or widening.',
   'Whole Rust-produced4796 arena and all mapped RAM are compared; real guards and CPU scalar helpers, literal packets and traces remain enabled.',
-  'Literal GPR/flags/count/width/D16 and nonflat DS, implicit SS, address16 and logical/page/read-before-write fault cases; canonical80 and SHL4 controls retained.',
+  'Literal GPR/flags/count/width/D16 and nonflat DS, implicit SS, address16 and logical/page/modify-authority fault cases; canonical80 and SHL4 controls retained.',
   'Shared unchanged fetch/currentness, RF/budget/cancel and helper protocol proofs are reused; no enabled hardware-vendor or wholeCPU conformance claim.',
 ]);

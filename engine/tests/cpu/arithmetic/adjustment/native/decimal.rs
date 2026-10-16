@@ -345,7 +345,11 @@ fn decimal_adjust_strict_prefixes_and_other_decimal_forms_keep_categories() {
         bytes.extend([0xeb, 0]);
         let mut engine = code(&bytes);
         let memory = engine.memory().unwrap();
-        assert_eq!(decode_one(memory, GuestAddress(CODE)).err(), Some(error));
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(memory, GuestAddress(CODE)).err())
+                .expect("instruction must fail to decode"),
+            error,
+        );
         let expected = instruction_error(CODE, error);
         assert_eq!(
             compile_region(
@@ -366,13 +370,14 @@ fn decimal_adjust_strict_prefixes_and_other_decimal_forms_keep_categories() {
         for resident in [false, true] {
             for entries in [false, true] {
                 describe(&mut engine, CODE, bytes.len() as u32, entries);
-                assert_eq!(
-                    bound_compile(&mut engine, resident, entries),
-                    Err(if resident {
+                crate::support_fetch::assert_host_contract(
+                    (bound_compile(&mut engine, resident, entries))
+                        .expect_err("compilation must refuse this fixture"),
+                    if resident {
                         HostError::Resident(RegistryError::Compile(expected))
                     } else {
                         HostError::Compile(expected)
-                    }),
+                    },
                 );
             }
         }
@@ -405,15 +410,17 @@ fn decimal_adjust_one_byte_fetch_execute_and_top_boundaries_do_not_wrap() {
                 Permissions::READ,
             )
             .unwrap();
-        assert_eq!(
-            decode_one(&denied, GuestAddress(CODE)).err(),
-            Some(fetch_error(CODE, CODE, 1, FaultReason::Permission))
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(&denied, GuestAddress(CODE)).err())
+                .expect("instruction must fail to decode"),
+            fetch_error(CODE, CODE, 1, FaultReason::Permission),
         );
 
         let prefix_end = code_space(0x1fff, &[0x66]);
-        assert_eq!(
-            decode_one(&prefix_end, GuestAddress(0x1fff)).err(),
-            Some(fetch_error(0x1fff, 0x2000, 2, FaultReason::Unmapped))
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(&prefix_end, GuestAddress(0x1fff)).err())
+                .expect("instruction must fail to decode"),
+            fetch_error(0x1fff, 0x2000, 2, FaultReason::Unmapped),
         );
         let mut denied_second = code_space(0x1fff, &[0x66, opcode]);
         denied_second
@@ -422,9 +429,10 @@ fn decimal_adjust_one_byte_fetch_execute_and_top_boundaries_do_not_wrap() {
                 Permissions::READ,
             )
             .unwrap();
-        assert_eq!(
-            decode_one(&denied_second, GuestAddress(0x1fff)).err(),
-            Some(fetch_error(0x1fff, 0x2000, 2, FaultReason::Permission))
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(&denied_second, GuestAddress(0x1fff)).err())
+                .expect("instruction must fail to decode"),
+            fetch_error(0x1fff, 0x2000, 2, FaultReason::Permission),
         );
 
         let mut prefix_top = code_space(u32::MAX, &[0x66]);
@@ -432,20 +440,16 @@ fn decimal_adjust_one_byte_fetch_execute_and_top_boundaries_do_not_wrap() {
         prefix_top.map_zeroed(zero, Permissions::ALL).unwrap();
         prefix_top.write(GuestAddress(0), &[opcode]).unwrap();
         prefix_top.protect(zero, Permissions::EXECUTE).unwrap();
-        assert_eq!(
-            decode_one(&prefix_top, GuestAddress(u32::MAX)).err(),
-            Some(fetch_error(
-                u32::MAX,
-                u32::MAX,
-                2,
-                FaultReason::AddressOverflow
-            ))
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(&prefix_top, GuestAddress(u32::MAX)).err())
+                .expect("instruction must fail to decode"),
+            fetch_error(u32::MAX, u32::MAX, 2, FaultReason::AddressOverflow),
         );
     }
     let missing = AddressSpace::new(1).unwrap();
-    assert_eq!(
-        decode_one(&missing, GuestAddress(CODE)).err(),
-        Some(fetch_error(CODE, CODE, 1, FaultReason::Unmapped))
+    crate::support_fetch::assert_decode_contract(
+        (decode_one(&missing, GuestAddress(CODE)).err()).expect("instruction must fail to decode"),
+        fetch_error(CODE, CODE, 1, FaultReason::Unmapped),
     );
 }
 
@@ -563,13 +567,14 @@ fn decimal_adjust_late_refusal_preserves_dirty_full_arena_and_both_owners() {
             describe(&mut engine, CODE, refusal_length, entries);
             let before = engine.arena().to_vec();
             assert_eq!(before.len(), ring3_engine::abi::arena::ARENA_SIZE);
-            assert_eq!(
-                bound_compile(&mut engine, is_resident, entries),
-                Err(if is_resident {
+            crate::support_fetch::assert_host_contract(
+                (bound_compile(&mut engine, is_resident, entries))
+                    .expect_err("compilation must refuse this fixture"),
+                if is_resident {
                     HostError::Resident(RegistryError::Compile(error))
                 } else {
                     HostError::Compile(error)
-                })
+                },
             );
             assert_eq!(engine.arena(), before);
             assert_eq!(engine.artifact_bytes().unwrap(), replacement_bytes);
@@ -711,9 +716,10 @@ fn immediate_adjust_two_byte_fetch_execute_and_top_boundaries_do_not_wrap() {
                     Permissions::READ,
                 )
                 .unwrap();
-            assert_eq!(
-                decode_one(&denied_first, GuestAddress(0x1fff)).err(),
-                Some(fetch_error(0x1fff, 0x1fff, 1, FaultReason::Permission))
+            crate::support_fetch::assert_decode_contract(
+                (decode_one(&denied_first, GuestAddress(0x1fff)).err())
+                    .expect("instruction must fail to decode"),
+                fetch_error(0x1fff, 0x1fff, 1, FaultReason::Permission),
             );
 
             let mut denied_second = code_space(0x1fff, &[opcode, base]);
@@ -723,9 +729,10 @@ fn immediate_adjust_two_byte_fetch_execute_and_top_boundaries_do_not_wrap() {
                     Permissions::READ,
                 )
                 .unwrap();
-            assert_eq!(
-                decode_one(&denied_second, GuestAddress(0x1fff)).err(),
-                Some(fetch_error(0x1fff, 0x2000, 2, FaultReason::Permission))
+            crate::support_fetch::assert_decode_contract(
+                (decode_one(&denied_second, GuestAddress(0x1fff)).err())
+                    .expect("instruction must fail to decode"),
+                fetch_error(0x1fff, 0x2000, 2, FaultReason::Permission),
             );
 
             let mut incomplete_top = code_space(u32::MAX, &[opcode]);
@@ -735,21 +742,18 @@ fn immediate_adjust_two_byte_fetch_execute_and_top_boundaries_do_not_wrap() {
                 .write(GuestAddress(0), &[base, 0xeb, 0])
                 .unwrap();
             incomplete_top.protect(zero, Permissions::EXECUTE).unwrap();
-            assert_eq!(
-                decode_one(&incomplete_top, GuestAddress(u32::MAX)).err(),
-                Some(fetch_error(
-                    u32::MAX,
-                    u32::MAX,
-                    2,
-                    FaultReason::AddressOverflow,
-                ))
+            crate::support_fetch::assert_decode_contract(
+                (decode_one(&incomplete_top, GuestAddress(u32::MAX)).err())
+                    .expect("instruction must fail to decode"),
+                fetch_error(u32::MAX, u32::MAX, 2, FaultReason::AddressOverflow),
             );
         }
 
         let incomplete_page = code_space(0x1fff, &[opcode]);
-        assert_eq!(
-            decode_one(&incomplete_page, GuestAddress(0x1fff)).err(),
-            Some(fetch_error(0x1fff, 0x2000, 2, FaultReason::Unmapped))
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(&incomplete_page, GuestAddress(0x1fff)).err())
+                .expect("instruction must fail to decode"),
+            fetch_error(0x1fff, 0x2000, 2, FaultReason::Unmapped),
         );
     }
 }

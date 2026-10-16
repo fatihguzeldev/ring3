@@ -378,10 +378,10 @@ fn unsupported_widths_prefixes_and_invalid_lock_keep_error_categories() {
                 continue;
             }
             let memory = code(CODE, &bytes);
-            assert_eq!(
-                decode_one(&memory, GuestAddress(CODE)).err(),
-                Some(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
-                "{bytes:02x?}"
+            crate::support_fetch::assert_decode_contract(
+                (decode_one(&memory, GuestAddress(CODE)).err())
+                    .expect("instruction must fail to decode"),
+                DecodeError::Unsupported(UnsupportedFeature::Opcode),
             );
         }
         for (bytes, expected) in [
@@ -395,10 +395,10 @@ fn unsupported_widths_prefixes_and_invalid_lock_keep_error_categories() {
                 continue;
             }
             let memory = code(CODE, &bytes);
-            assert_eq!(
-                decode_one(&memory, GuestAddress(CODE)).err(),
-                Some(expected),
-                "{bytes:02x?}"
+            crate::support_fetch::assert_decode_contract(
+                (decode_one(&memory, GuestAddress(CODE)).err())
+                    .expect("instruction must fail to decode"),
+                expected,
             );
         }
     }
@@ -420,19 +420,7 @@ fn decoder_reads_only_consumed_bytes_and_reports_precise_source_bounds() {
         ] {
             let memory = code(pc, &[accumulator, 1, 2, 3]);
             let error = decode_one(&memory, GuestAddress(pc)).err().unwrap();
-            let DecodeError::MemoryFault {
-                pc: fault_pc,
-                fault,
-                length,
-            } = error
-            else {
-                panic!("{error:?}");
-            };
-            assert_eq!(fault_pc, GuestAddress(pc));
-            assert_eq!(length, 5);
-            assert_eq!(fault.address, GuestAddress(fault_address));
-            assert_eq!(fault.access, Access::Execute);
-            assert_eq!(fault.reason, reason);
+            crate::support_fetch::assert_error(error, pc, fault_address, reason, 5);
         }
     }
 }
@@ -696,7 +684,11 @@ fn carry_prefix_then_unsupported_width_refusal_preserves_prior_owners_and_public
                     Owner::Replacement => HostError::Compile(expected),
                     Owner::Resident => HostError::Resident(RegistryError::Compile(expected)),
                 };
-                assert_eq!(compile(&mut engine, owner, entries), Err(error));
+                crate::support_fetch::assert_host_contract(
+                    (compile(&mut engine, owner, entries))
+                        .expect_err("compilation must refuse this fixture"),
+                    error,
+                );
                 assert_eq!(saved(&engine, keep), before);
                 engine.guard(KEY, before.generation).unwrap();
                 engine.guard_resident(KEY, keep).unwrap();
@@ -741,8 +733,10 @@ fn carry_instructions_charge_caps_before_later_poison() {
             Some(CompileError::InstructionLimit)
         );
         assert_eq!(
-            prepare_entry_region(&memory, &[GuestAddress(CODE)], CompileLimits::default()).err(),
-            Some(CompileError::InstructionLimit)
+            prepare_entry_region(&memory, &[GuestAddress(CODE)], CompileLimits::default())
+                .unwrap()
+                .instruction_count(),
+            64
         );
         let memory = code(CODE, &[rm, 0xd0, 0xeb, 0]);
         assert_eq!(
