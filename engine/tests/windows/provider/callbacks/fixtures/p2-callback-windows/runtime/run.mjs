@@ -237,7 +237,7 @@ for (const base of [0x400000, 0x500000]) for (const mode of ['home', 'selected']
   execute(path, active, 64, cpu(returnGate, 0x70ffc, RESULT, 0x46, 0x10000000), mode === 'home' ? 8 : 3, bodyCounts[2], mode === 'home' ? RETURN : 0, 3, returnGate);
   assert.equal(read(ctx, 0x70ff8), returnGate, 'genuine RET consumed the committed callback return word');
   if (mode === 'selected') {
-    pure(ctx, () => ctx.api.finish_resident_callback(ctx.low, ctx.high, home.low, home.high, 3), 12, 'finish cannot bypass selected owner');
+    pure(ctx, () => ctx.api.finish_resident_callback(ctx.low, ctx.high, home.low, home.high, 3), 13, 'NeedCode cannot finish the selected callback');
     pure(ctx, () => ctx.api.select_resident_callback_unit(ctx.low, ctx.high, home.low, home.high, 3, home.low, home.high), 0, 'activate immutable home return Gate');
     execute(path, home, 1, cpu(returnGate, 0x70ffc, RESULT, 0x46, 0x10000000), 8, 0, RETURN);
   }
