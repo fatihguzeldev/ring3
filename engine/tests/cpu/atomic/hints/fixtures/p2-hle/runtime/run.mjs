@@ -1,3 +1,4 @@
+import {pageFaultExit, pageFaultPacket} from '../../../../../../support/wasm/page-fault.mjs';
 import assert from 'node:assert/strict';
 import {readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
@@ -6,12 +7,12 @@ import {pathToFileURL} from 'node:url';
 const [enginePath, output, root] = process.argv.slice(2);
 assert.ok(enginePath && output && root, 'explicit selected engine, output and source root');
 const supportPath = 'engine/tests/cpu/segments/code/base/fixtures/p2-cs-base/runtime/support.mjs';
-const {harness, PC, SEG, words, record, state, registers, exit, hash, writeRAM} =
+const {harness, PC, SEG, record, state, registers, exit, hash, writeRAM} =
   await import(pathToFileURL(join(root, supportPath)));
 const h = await harness(enginePath, output, root);
-const paths = [
+const paths = ['engine/tests/support/wasm/page-fault.mjs', 
   'engine/src/cpu/x86/capabilities.rs', 'engine/src/cpu/x86/decode/profile.rs', 'engine/src/cpu/x86/decode/families.rs',
-  'engine/src/cpu/x86/decode/atomic.rs', 'engine/src/cpu/x86/decode/lower.rs', 'engine/src/cpu/x86/decode/families.rs',
+  'engine/src/cpu/x86/decode/atomic.rs', 'engine/src/cpu/x86/decode/lower.rs', 
   'engine/src/cpu/x86/decode/integer.rs', 'engine/src/cpu/x86/decode/operands.rs',
   'engine/src/cpu/x86/decode/execution_faults.rs', 'engine/src/cpu/dbt/wasm/instructions/atomic.rs', 'engine/src/cpu/dbt/wasm/helpers/integer.rs',
   'engine/src/cpu/dbt/wasm/instructions/memory/exchange.rs', 'engine/src/cpu/dbt/wasm/instructions/memory/byte_store.rs',
@@ -135,15 +136,16 @@ for (const resident of [false, true]) for (const entries of [false, true]) {
     const c = open(resident, entries, row.label, row.code, input);
     if (row.pageFault) {
       h.upload(c, 0x5fff, bytes('aabbccdd'));
-      h.host(c, 'protect', [0x6000, 1, 1]); // READ: the RMW read succeeds, then the write is denied.
+      h.host(c, 'protect', [0x6000, 1, 1]); // read-only second page denies the full write span.
     }
     const {name, material} = compile(c, row, input);
     const want = exit(Buffer.from(input), row.pageFault ? 5 : row.reason, 0, 6);
     if (row.pageFault) {
-      want.set(record('R3MH', 40, [1, 0, 2, 0x6000, 2, 4], 10), 100);
-      want.set(words([2, 0x6000, 2, 4]), 80);
+      const fault = {errorCode: 7, address: 0x6000, access: 2, length: 4};
+      want.set(pageFaultExit({retired: 0, ...fault}), 56);
+      want.set(pageFaultPacket(fault), 100);
     }
-    const helpers = row.pageFault && material ? [traced(name, bound(c, material, [row.address, row.value]))] : [];
+    const helpers = row.pageFault && material ? [traced(name, bound(c, material, [row.address, row.value]), 23)] : [];
     invoke(c, row.label, material, {input, want, helpers});
     h.host(c, 'close');
   }

@@ -113,7 +113,7 @@ function faultProof(c,unit){
   const start=DATA-12,frame=Buffer.from(Array.from({length:32},(_,i)=>(i*17+23)&255));frame.writeUInt32LE(0,12);upload(c,start,frame);
   const s=seed(c,p.pc,registers),fault={detail:2,address:DATA,access:2};host(c,'protect',[0x5000,1,1]);
   const at=helperTrace.length;run(c,unit,1,s,'register-ESP-write-permission-no-publication',{reason:5,retired:0,fault,packet:helper(0,fault)});counts.faults++;
-  assert.equal(helperTrace.length-at,1);assert.equal(helperTrace.at(-1).input_value,0x80000000);assert.equal(helperTrace.at(-1).status,0);checkRam(c,start,frame);
+  assert.equal(helperTrace.length-at,1);assert.equal(helperTrace.at(-1).input_value,0x80000000);assert.equal(helperTrace.at(-1).status,23);checkRam(c,start,frame);
   host(c,'protect',[0x5000,1,3]);
   if(c.owner==='replacement')assert.equal(c.api.generation(),unit.generation);
   run(c,unit,1,next(s,p.pc+p.bytes.length,0x486),'same-stopped-ESP-source-protect-only-retry',{packet:helper(0)});counts.repair_only++;

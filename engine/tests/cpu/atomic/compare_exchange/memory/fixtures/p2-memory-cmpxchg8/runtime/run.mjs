@@ -119,7 +119,7 @@ const productPaths = ['engine/src/cpu/x86/ir.rs', 'engine/src/cpu/x86/decode/low
 const productHashes = () => Object.fromEntries(productPaths.map(path => [path, hash(readFileSync(join(root, path)))]));
 const productPins = productHashes();
 const selectedPaths = [...new Set([...sourcePaths, ...productPaths, 'engine/tests/cpu/atomic/compare_exchange/register/native/byte.rs', 'engine/tests/cpu/atomic/native.rs', 'engine/tests/support/cpu/prefix/admission.rs', 'engine/tests/cpu/atomic/compare_exchange/register/native/dword.rs', 'engine/tests/cpu/atomic/exchange/register/native/byte.rs', 'engine/tests/support/cpu/prefix/byte.rs', 'engine/tests/cpu/atomic/fetch_add/memory/native/byte.rs', 'engine/tests/cpu/atomic/compare_exchange/memory/native/dword.rs', 'engine/tests/cpu/atomic/compare_exchange/register/wasm/byte.rs', 'engine/tests/cpu/atomic/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/atomic/compare_exchange/register/fixtures/p2-cmpxchg8/runtime/run.mjs'])];
-assert.equal(selectedPaths.length, 41); assert.equal(new Set(selectedPaths).size, selectedPaths.length);
+assert.equal(selectedPaths.length, 61); assert.equal(new Set(selectedPaths).size, selectedPaths.length);
 const selectedIdentities = () => Object.fromEntries(selectedPaths.map(path => {const bytes = readFileSync(join(root, path)); return [path, {bytes: bytes.length, sha256: hash(bytes)}];}));
 const selectedPins = selectedIdentities();
 
