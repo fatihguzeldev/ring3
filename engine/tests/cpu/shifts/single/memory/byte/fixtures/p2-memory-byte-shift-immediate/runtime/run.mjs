@@ -65,7 +65,7 @@ const sourcePaths = ['engine/tests/support/wasm/binding.mjs','engine/tests/suppo
   "engine/tests/cpu/shifts/single/memory/immediate/one/byte/fixtures/p2-memory-byte-shift-immediate-one/runtime/run.mjs",
   "engine/tests/cpu/shifts/carry_rotate/memory/dword/fixtures/p2-memory-carry-rotate-cl32/runtime/run.mjs", "engine/tests/process/resident/admission/native/control.rs", "engine/tests/process/resident/native.rs", "engine/tests/support/wasm/engine.mjs", "engine/tests/cpu/shifts/single/memory/byte/native/immediate.rs", "engine/tests/cpu/shifts/single/memory/byte/wasm/immediate.rs", "engine/tests/cpu/shifts/single/memory/byte/fixtures/p2-memory-byte-shift-immediate/runtime/run.mjs",
 ];
-assert.equal(sourcePaths.length, 68);
+assert.equal(sourcePaths.length, 84);
 assert.equal(new Set(sourcePaths).size, sourcePaths.length);
 const pinSources = () => Object.fromEntries(sourcePaths.map(path => {
   const bytes = readFileSync(join(root, path));

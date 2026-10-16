@@ -1,3 +1,6 @@
+#[path = "../../support/cpu/capture/banks.rs"]
+mod support_capture_banks;
+
 #[path = "../../support/loader/pe32/image.rs"]
 #[allow(dead_code)]
 mod support_pe32;

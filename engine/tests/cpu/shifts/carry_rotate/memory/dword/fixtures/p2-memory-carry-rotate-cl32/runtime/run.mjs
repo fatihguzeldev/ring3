@@ -150,7 +150,7 @@ const sourcePaths = ['engine/tests/support/wasm/binding.mjs','engine/tests/suppo
   "engine/src/abi/x86/exit.rs",
   "engine/src/abi/wasm/exports/calls.rs", "engine/src/abi/wasm/exports/cpu.rs", "engine/src/abi/wasm/exports/execution.rs", "engine/src/abi/wasm/exports/image.rs", "engine/src/abi/wasm/exports/instance.rs", "engine/src/abi/wasm/exports/memory.rs", "engine/src/abi/wasm/exports/mod.rs",
 ];
-assert.equal(sourcePaths.length, 65);
+assert.equal(sourcePaths.length, 85);
 assert.equal(new Set(sourcePaths).size, sourcePaths.length);
 const pinSources = () =>
   Object.fromEntries(

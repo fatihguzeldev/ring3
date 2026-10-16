@@ -13,6 +13,7 @@ struct LegacyDoubleShiftBank {
     name: &'static str,
     bytes: Vec<u8>,
     standalone: bool,
+    lengths: Vec<usize>,
 }
 
 fn legacy_double_shift_banks() -> [LegacyDoubleShiftBank; 3] {
@@ -68,16 +69,28 @@ fn legacy_double_shift_banks() -> [LegacyDoubleShiftBank; 3] {
             name: "legacy-dword-register-double-shift",
             bytes: registers,
             standalone: true,
+            lengths: std::iter::repeat_n([4, 3, 4, 3], 8)
+                .flatten()
+                .chain([2])
+                .collect(),
         },
         LegacyDoubleShiftBank {
             name: "legacy-dword-memory-double-shift",
             bytes: memory,
             standalone: false,
+            lengths: std::iter::repeat_n([4, 5, 5, 4], 8)
+                .flatten()
+                .chain([2])
+                .collect(),
         },
         LegacyDoubleShiftBank {
             name: "legacy-word-shift-carry",
             bytes: words,
             standalone: true,
+            lengths: (0..8)
+                .flat_map(|alias| [3, 4, 3, if alias % 3 == 1 { 4 } else { 3 }])
+                .chain([2])
+                .collect(),
         },
     ]
 }
@@ -114,89 +127,95 @@ fn capture_legacy_double_shifts_and_word_shift_carry_without_guest_execution() {
     let mut ordinal = 0;
     let mut resident_ids = std::collections::BTreeSet::new();
     for bank in legacy_double_shift_banks() {
-        for owner in ["standalone", "replacement", "resident"] {
-            if owner == "standalone" && !bank.standalone {
-                continue;
-            }
-            for entries in [false, true] {
-                let key = LEGACY_KEY + ordinal;
-                ordinal += 1;
-                let mut engine = legacy_double_shift_engine(&bank.bytes, key, entries);
-                let before = engine.arena().to_vec();
-                let (wasm, receipt) = match owner {
-                    "standalone" => {
-                        let memory = engine.memory().unwrap();
-                        let artifact = if entries {
-                            compile_entry_region(
-                                memory,
-                                &[GuestAddress(LEGACY_CODE)],
-                                CompileLimits::default(),
+        assert_eq!(bank.lengths.len(), 33);
+        for (index, part) in crate::support_capture_banks::bounded_parts(&bank.bytes, &bank.lengths)
+            .into_iter()
+            .enumerate()
+        {
+            for owner in ["standalone", "replacement", "resident"] {
+                if owner == "standalone" && !bank.standalone {
+                    continue;
+                }
+                for entries in [false, true] {
+                    let key = LEGACY_KEY + ordinal;
+                    ordinal += 1;
+                    let mut engine = legacy_double_shift_engine(&part.bytes, key, entries);
+                    let before = engine.arena().to_vec();
+                    let (wasm, receipt) = match owner {
+                        "standalone" => {
+                            let memory = engine.memory().unwrap();
+                            let artifact = if entries {
+                                compile_entry_region(
+                                    memory,
+                                    &[GuestAddress(LEGACY_CODE)],
+                                    CompileLimits::default(),
+                                )
+                            } else {
+                                compile_region(
+                                    memory,
+                                    &[BlockSpec {
+                                        entry: GuestAddress(LEGACY_CODE),
+                                        byte_length: part.bytes.len() as u32,
+                                    }],
+                                    CompileLimits::default(),
+                                )
+                            }
+                            .unwrap();
+                            assert_eq!(artifact.metadata().instructions, part.instructions);
+                            assert_eq!(artifact.metadata().blocks, 1);
+                            (artifact.wasm_bytes(memory).unwrap().to_vec(), 0)
+                        }
+                        "replacement" => {
+                            let generation = if entries {
+                                engine.compile_entries(1, 0)
+                            } else {
+                                engine.compile(1)
+                            }
+                            .unwrap();
+                            assert_eq!(generation, 1);
+                            engine.guard(key, generation).unwrap();
+                            (
+                                engine.artifact_bytes().unwrap().to_vec(),
+                                u64::from(generation),
                             )
-                        } else {
-                            compile_region(
-                                memory,
-                                &[BlockSpec {
-                                    entry: GuestAddress(LEGACY_CODE),
-                                    byte_length: bank.bytes.len() as u32,
-                                }],
-                                CompileLimits::default(),
-                            )
                         }
-                        .unwrap();
-                        assert_eq!(artifact.metadata().instructions, 33);
-                        assert_eq!(artifact.metadata().blocks, 1);
-                        (artifact.wasm_bytes(memory).unwrap().to_vec(), 0)
-                    }
-                    "replacement" => {
-                        let generation = if entries {
-                            engine.compile_entries(1, 0)
-                        } else {
-                            engine.compile(1)
+                        "resident" => {
+                            let id = if entries {
+                                engine.compile_resident_entries(1, 0)
+                            } else {
+                                engine.compile_resident(1)
+                            }
+                            .unwrap()
+                            .get();
+                            assert_ne!(id, 0);
+                            assert!(resident_ids.last().is_none_or(|previous| id > *previous));
+                            assert!(resident_ids.insert(id));
+                            engine.guard_resident(key, id).unwrap();
+                            (engine.resident_bytes(id).unwrap().to_vec(), id)
                         }
-                        .unwrap();
-                        assert_eq!(generation, 1);
-                        engine.guard(key, generation).unwrap();
-                        (
-                            engine.artifact_bytes().unwrap().to_vec(),
-                            u64::from(generation),
-                        )
-                    }
-                    "resident" => {
-                        let id = if entries {
-                            engine.compile_resident_entries(1, 0)
-                        } else {
-                            engine.compile_resident(1)
-                        }
+                        _ => unreachable!(),
+                    };
+                    assert_eq!(engine.generation(), u32::from(owner == "replacement"));
+                    assert_eq!(engine.arena(), before);
+                    assert_eq!(engine.memory().unwrap().mapped_pages(), 1);
+                    let mut code = vec![0; part.bytes.len()];
+                    engine
+                        .memory()
                         .unwrap()
-                        .get();
-                        assert_ne!(id, 0);
-                        assert!(resident_ids.last().is_none_or(|previous| id > *previous));
-                        assert!(resident_ids.insert(id));
-                        engine.guard_resident(key, id).unwrap();
-                        (engine.resident_bytes(id).unwrap().to_vec(), id)
-                    }
-                    _ => unreachable!(),
-                };
-                assert_eq!(engine.generation(), u32::from(owner == "replacement"));
-                assert_eq!(engine.arena(), before);
-                assert_eq!(engine.memory().unwrap().mapped_pages(), 1);
-                let mut code = vec![0; bank.bytes.len()];
-                engine
-                    .memory()
-                    .unwrap()
-                    .fetch(GuestAddress(LEGACY_CODE), &mut code)
-                    .unwrap();
-                assert_eq!(code, bank.bytes);
-                assert_eq!(&wasm[..8], b"\0asm\x01\0\0\0");
-                let profile = if entries { "entry" } else { "explicit" };
-                captures.push((
-                    format!("{}-{owner}-{profile}.wasm", bank.name),
-                    wasm,
-                    format!(
-                        "\"bank\":\"{}\",\"owner\":\"{owner}\",\"entries\":{entries},\"key_hex\":\"{key:016x}\",\"receipt\":{receipt},\"instructions\":33,\"blocks\":1,\"code_length\":{}",
-                        bank.name, bank.bytes.len()
-                    ),
-                ));
+                        .fetch(GuestAddress(LEGACY_CODE), &mut code)
+                        .unwrap();
+                    assert_eq!(code, part.bytes);
+                    assert_eq!(&wasm[..8], b"\0asm\x01\0\0\0");
+                    let profile = if entries { "entry" } else { "explicit" };
+                    captures.push((
+                        format!("{}-part-{index}-{owner}-{profile}.wasm", bank.name),
+                        wasm,
+                        format!(
+                            "\"bank\":\"{}\",\"owner\":\"{owner}\",\"entries\":{entries},\"key_hex\":\"{key:016x}\",\"receipt\":{receipt},\"instructions\":{},\"blocks\":1,\"code_length\":{},\"source_offset\":{},\"source_bytes\":{},\"source_instructions\":{}",
+                            bank.name, part.instructions, part.bytes.len(), part.offset, part.original_bytes, part.original_instructions
+                        ),
+                    ));
+                }
             }
         }
         captures.push((
@@ -205,7 +224,7 @@ fn capture_legacy_double_shifts_and_word_shift_carry_without_guest_execution() {
             "\"kind\":\"x86\",\"instructions\":33,\"blocks\":1".to_owned(),
         ));
     }
-    assert_eq!((ordinal, resident_ids.len(), captures.len()), (16, 6, 19));
+    assert_eq!((ordinal, resident_ids.len(), captures.len()), (80, 30, 83));
     if let Some(directory) = directory {
         let mut files = Vec::new();
         for (name, bytes, metadata) in captures {
@@ -222,7 +241,7 @@ fn capture_legacy_double_shifts_and_word_shift_carry_without_guest_execution() {
             ));
         }
         let manifest = format!(
-            "{{\"schema_version\":1,\"legacy_only\":true,\"modules\":16,\"raw_banks\":3,\"resident_ids_process_global\":true,\"files\":[{}]}}\n",
+            "{{\"schema_version\":2,\"legacy_only\":true,\"modules\":80,\"raw_banks\":3,\"resident_ids_process_global\":true,\"files\":[{}]}}\n",
             files.join(",")
         );
         OpenOptions::new()

@@ -79,7 +79,7 @@ const sourcePaths = ['engine/tests/support/wasm/binding.mjs','engine/tests/suppo
   "rust-toolchain.toml",
   "engine/tests/cpu/shifts/single/memory/byte/native/cl.rs", "engine/tests/cpu/shifts/single/memory/byte/wasm/cl.rs", "engine/tests/cpu/shifts/single/memory/byte/fixtures/p2-memory-byte-shift-cl/runtime/run.mjs"
 ];
-assert.equal(sourcePaths.length, 71);
+assert.equal(sourcePaths.length, 92);
 assert.equal(new Set(sourcePaths).size, sourcePaths.length);
 const pinSources = () => Object.fromEntries(sourcePaths.map(path => {
   const bytes = readFileSync(join(root, path)); return [path, { bytes: bytes.length, sha256: hash(bytes) }];
