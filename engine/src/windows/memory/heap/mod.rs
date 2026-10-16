@@ -1,10 +1,12 @@
 mod allocation;
+mod group;
 mod lifetime;
 mod movable;
 mod policy;
 mod queries;
 
 pub(crate) use allocation::PreparedHeapAllocation32;
+pub(crate) use group::PreparedHeapAllocations32;
 
 use super::*;
 use crate::memory::{AddressSpace, GuestAddress, PAGE_SIZE, PageRange};

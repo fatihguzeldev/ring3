@@ -33,6 +33,35 @@ impl EngineInstance {
             .map_err(crate::process::HostError::WindowsMemory)
     }
 
+    pub(in crate::process) fn prepare_windows_local_initialized_group(
+        &mut self,
+        sizes: &[u32],
+        retire: &[u32],
+    ) -> Result<crate::windows::memory::PreparedHeapAllocations32, crate::process::HostError> {
+        let heap = self.ensure_process_heap()?;
+        self.windows_memory
+            .heaps
+            .prepare_initialized_allocations(self.memory.as_ref().unwrap(), heap, sizes, retire)
+            .map_err(crate::process::HostError::WindowsMemory)
+    }
+    pub(in crate::process) fn commit_windows_local_initialized_group(
+        &mut self,
+        prepared: crate::windows::memory::PreparedHeapAllocations32,
+        payloads: &[&[u8]],
+        writes: &[(GuestAddress, &[u8])],
+    ) -> Result<(), crate::process::HostError> {
+        self.windows_memory
+            .heaps
+            .commit_initialized_allocations(
+                &mut self.windows_memory.virtual_memory,
+                self.memory.as_mut().unwrap(),
+                prepared,
+                payloads,
+                writes,
+            )
+            .map_err(crate::process::HostError::WindowsMemory)
+    }
+
     pub(super) fn set_heap_information(&mut self, args: &[u32]) -> Result<u32, MemoryError32> {
         match args[1] {
             0 => {

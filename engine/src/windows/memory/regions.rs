@@ -1,5 +1,6 @@
 use super::*;
 use crate::memory::{AddressSpace, GuestAddress, PAGE_SIZE, PageRange, PrivatePageChange32};
+mod heap;
 mod stack;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
