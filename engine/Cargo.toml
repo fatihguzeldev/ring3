@@ -20,6 +20,12 @@ unicode-general-category = "=1.1.0"
 unicode-bidi = "=0.3.18"
 icu_collator = "=2.1.1"
 icu_casemap = "=2.1.1"
+icu_calendar = "=2.1.1"
+icu_datetime = "=2.1.1"
+icu_decimal = "=2.1.1"
+icu_experimental = { version = "=0.4.0", default-features = false, features = ["compiled_data"] }
+icu_provider = "=2.3.1"
+writeable = "=0.6.4"
 icu_locale = "=2.1.1"
 lcid = "=0.3.0"
 encoding_rs = { version = "=0.8.35", default-features = false, features = ["alloc"] }

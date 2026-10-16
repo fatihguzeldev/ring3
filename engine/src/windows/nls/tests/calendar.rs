@@ -91,8 +91,81 @@ fn authored_date_time_tokens_quotes_and_bias_are_deterministic() {
         "1:05:07 PM quoted"
     );
     assert_eq!(
-        format_date(time, "yyyy 'unterminated"),
-        Err(NlsError32::InvalidParameter)
+        format_date(time, "yyyy 'unterminated").unwrap(),
+        "2024 unterminated"
     );
     assert_eq!(shift_filetime(0, -1), Err(NlsError32::InvalidParameter));
+}
+
+#[test]
+fn thai_japanese_and_hebrew_calendar_operations_use_portable_calendar_arithmetic() {
+    let time = SystemTime32 {
+        year: 2024,
+        month: 2,
+        day: 29,
+        ..Default::default()
+    };
+    assert_eq!(
+        format_calendar_date(time, "yyyy-MM-dd", 0x41e, 7).unwrap(),
+        "2567-02-29"
+    );
+    assert_eq!(
+        format_calendar_date(time, "gg y年M月d日", 0x411, 3).unwrap(),
+        "令和 6年2月29日"
+    );
+    let (month, _) = calendar_text(0x40d, 8, 33).unwrap();
+    assert_eq!(month, "אלול");
+    assert!(format_calendar_date(time, "yyyy", 0x409, 0xffff).is_err());
+}
+
+#[test]
+fn date_format_ignores_all_time_fields_and_recovers_best_possible_quoted_picture() {
+    let time = SystemTime32 {
+        year: 2024,
+        month: 2,
+        day: 29,
+        hour: 999,
+        minute: 999,
+        second: 999,
+        millisecond: 65535,
+        ..Default::default()
+    };
+    assert_eq!(
+        format_date(time, "dddd, MMMM d, yyyy").unwrap(),
+        "Thursday, February 29, 2024"
+    );
+    assert_eq!(format_date(time, "MMMM ''''yy").unwrap(), "February '24");
+    assert_eq!(format_date(time, "yyyy 'literal").unwrap(), "2024 literal");
+}
+
+#[test]
+fn gregorian_language_variants_share_date_math_but_keep_distinct_month_and_weekday_names() {
+    let time = SystemTime32 {
+        year: 2011,
+        month: 8,
+        day: 7,
+        ..Default::default()
+    };
+    for (calendar, month, weekday) in [
+        (9, "août", "dimanche"),
+        (10, "آب", "الأحد"),
+        (11, "أغسطس", "الأحد"),
+        (12, "أوت", "الأحد"),
+    ] {
+        assert_eq!(
+            format_calendar_date(time, "yyyy-MM-dd", 0x401, calendar).unwrap(),
+            "2011-08-07"
+        );
+        assert_eq!(
+            format_calendar_date(time, "MMMM", 0x401, calendar).unwrap(),
+            month
+        );
+        assert_eq!(
+            format_calendar_date(time, "dddd", 0x401, calendar).unwrap(),
+            weekday
+        );
+        assert_eq!(calendar_text(0x401, calendar, 28).unwrap().0, month);
+        assert_eq!(calendar_text(0x401, calendar, 1).unwrap().1, Some(calendar));
+    }
+    assert_eq!(CalendarId32::from_id(13), Err(NlsError32::InvalidParameter));
 }
