@@ -2,6 +2,7 @@
 #include <windows.h>
 #include <shlwapi.h>
 #include <stdio.h>
+#include <wchar.h>
 
 static int rows;
 static void row(const char *name) {
@@ -10,11 +11,13 @@ static void row(const char *name) {
 }
 static void comparison(const char *name, const WCHAR *left, const WCHAR *right) {
     row(name);
-    printf(",\"userLocale\":%lu,\"threadLocale\":%lu,\"shell\":%d,\"shellPrefix1\":%d,\"userCompare\":%d,\"threadCompare\":%d}",
+    printf(",\"userLocale\":%lu,\"threadLocale\":%lu,\"shell\":%d,\"shellPrefix1\":%d,\"userCompare\":%d,\"threadCompare\":%d,\"threadLinguisticCasing\":%d,\"threadLinguisticIgnoreCase\":%d}",
         (unsigned long)GetUserDefaultLCID(), (unsigned long)GetThreadLocale(),
         StrCmpIW(left,right), StrCmpNIW(left,right,1),
         CompareStringW(LOCALE_USER_DEFAULT,NORM_IGNORECASE,left,-1,right,-1)-CSTR_EQUAL,
-        CompareStringW(GetThreadLocale(),NORM_IGNORECASE,left,-1,right,-1)-CSTR_EQUAL);
+        CompareStringW(GetThreadLocale(),NORM_IGNORECASE,left,-1,right,-1)-CSTR_EQUAL,
+        CompareStringW(GetThreadLocale(),NORM_IGNORECASE|NORM_LINGUISTIC_CASING,left,-1,right,-1)-CSTR_EQUAL,
+        CompareStringW(GetThreadLocale(),LINGUISTIC_IGNORECASE,left,-1,right,-1)-CSTR_EQUAL);
 }
 static void prefixes(void) {
     SYSTEM_INFO info;
@@ -52,8 +55,47 @@ static void prefixes(void) {
     row("negative-count-wide");printf(",\"result\":%d,\"fault\":%lu}",result,(unsigned long)fault);
     VirtualFree(memory,0,MEM_RELEASE);
 }
+static void text(const WCHAR *value) {
+    unsigned i;
+    putchar('[');
+    for (i=0;i<MAX_PATH && value[i];++i) {
+        if (i) putchar(',');
+        printf("%u",(unsigned)value[i]);
+    }
+    putchar(']');
+}
+static void paths(void) {
+    static const WCHAR *inputs[]={L"",L".",L"..",L".\\a",L"..\\a",L"a\\..\\b",L"C:",L"C:foo",L"C:\\",L"C:\\foo\\",L"C:\\foo.bar space",L"\\\\server",L"\\\\server\\share",L"\\\\server\\share\\",L"a/b.txt",L"a..b",L"C:\\folder\\..\\target",L"C:\\..\\target"};
+    static const struct {const WCHAR *directory;const WCHAR *file;} pairs[]={
+        {L"C:\\one",L"\\two"},{L"C:\\one",L"\\\\two"},{L"C:\\one",L"D:\\two"},{L"C:\\one",L"..\\two"},{L"..\\one\\two",L"three"},{L"C:",L"x"},{L"",L"x"},{L"",L"\\x"}
+    };
+    unsigned i;
+    for (i=0;i<sizeof(inputs)/sizeof(inputs[0]);++i) {
+        const WCHAR *input=inputs[i];
+        WCHAR output[MAX_PATH];
+        WCHAR *pointer;
+        BOOL result;
+        row("path");printf(",\"input\":");text(input);
+        printf(",\"nameOffset\":%ld,\"extensionOffset\":%ld,\"root\":%u,\"relative\":%u,\"unc\":%u",(long)(PathFindFileNameW(input)-input),(long)(PathFindExtensionW(input)-input),PathIsRootW(input),PathIsRelativeW(input),PathIsUNCW(input));
+        output[0]=0;result=PathCanonicalizeW(output,input);printf(",\"canonicalOk\":%u,\"canonical\":",result);text(output);
+        wcscpy_s(output,MAX_PATH,input);result=PathRemoveFileSpecW(output);printf(",\"removeFileOk\":%u,\"removeFile\":",result);text(output);
+        wcscpy_s(output,MAX_PATH,input);result=PathStripToRootW(output);printf(",\"stripRootOk\":%u,\"stripRoot\":",result);text(output);
+        wcscpy_s(output,MAX_PATH,input);pointer=PathAddBackslashW(output);printf(",\"addBackslashOffset\":%ld,\"addBackslash\":",pointer?(long)(pointer-output):-1L);text(output);
+        wcscpy_s(output,MAX_PATH,input);pointer=PathRemoveBackslashW(output);printf(",\"removeBackslashOffset\":%ld,\"removeBackslash\":",pointer?(long)(pointer-output):-1L);text(output);
+        putchar('}');
+    }
+    for (i=0;i<sizeof(pairs)/sizeof(pairs[0]);++i) {
+        WCHAR output[MAX_PATH];
+        BOOL appended;
+        WCHAR *combined;
+        row("join");printf(",\"directory\":");text(pairs[i].directory);printf(",\"file\":");text(pairs[i].file);
+        output[0]=0;combined=PathCombineW(output,pairs[i].directory,pairs[i].file);printf(",\"combineOk\":%u,\"combined\":",combined!=NULL);text(output);
+        wcscpy_s(output,MAX_PATH,pairs[i].directory);appended=PathAppendW(output,pairs[i].file);printf(",\"appendOk\":%u,\"appended\":",appended);text(output);putchar('}');
+    }
+}
+
 int main(void) {
-    static const LCID locales[]={0x409,0x41f,0x411};
+    static const LCID locales[]={0x409,0x41f,0x411,0x41d};
     LCID initial=GetThreadLocale();
     unsigned i;
     printf("{\"schema\":1,\"pointerBytes\":%u,\"ansi\":%u,\"rows\":[",(unsigned)sizeof(void *),GetACP());
@@ -61,10 +103,11 @@ int main(void) {
         BOOL changed=SetThreadLocale(locales[i]);
         row("set-thread-locale");printf(",\"requested\":%lu,\"ok\":%u}",(unsigned long)locales[i],changed);
         comparison("umlaut-order",L"b",L"\x00e4");
+        comparison("swedish-order",L"z",L"\x00e4");
         comparison("turkish-dotted",L"i",L"\x0130");
         comparison("turkish-dotless",L"\x0131",L"I");
     }
     SetThreadLocale(initial);
-    prefixes();
+    prefixes(); paths();
     printf("]}\n");return 0;
 }
