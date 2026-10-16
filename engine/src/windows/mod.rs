@@ -36,3 +36,5 @@ pub mod exceptions;
 pub mod nls;
 
 pub mod registry;
+
+pub mod thread;
