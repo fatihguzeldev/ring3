@@ -1,0 +1,58 @@
+LIBRARY msvcrt.dll
+EXPORTS
+malloc
+calloc
+realloc
+free
+fopen
+fclose
+fwrite
+fread
+fseek
+ftell
+fflush
+printf
+fprintf
+sprintf
+_snprintf
+exit
+atexit=MSVCRT_atexit
+_onexit DATA
+_cexit
+__getmainargs
+__p___argc
+__p___argv
+__p__environ
+__p__fmode
+__p__commode
+__set_app_type
+_initterm
+_initterm_e
+_CxxThrowException=__CxxThrowException@8
+__CxxFrameHandler3=__CxxFrameHandler
+"??_7type_info@@6B@"=type_info_vtable DATA
+"??2@YAPAXI@Z"=operator_new
+"??3@YAXPAX@Z"=operator_delete
+
+_setjmp
+_setjmp3
+longjmp
+memcpy
+memmove
+memset
+strlen
+_fpreset
+_amsg_exit
+__setusermatherr
+_acmdln=MSVCRT__acmdln DATA
+__lconv_init
+terminate
+__initenv=MSVCRT___initenv DATA
+__dllonexit
+_lock
+_unlock
+signal
+strncmp
+__iob_func
+vfprintf
+abort

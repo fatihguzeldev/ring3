@@ -110,6 +110,13 @@ pub fn kernel32_module(preferred_base: u32) -> SystemModule32 {
                 ordinal: None,
                 target: SystemExportTarget32::PrivateGate(super::exceptions::EXCEPTION_RETURN_GATE),
             }])
+            .chain([SystemExport32 {
+                name: Some("GetEnvironmentStrings".into()),
+                ordinal: None,
+                target: SystemExportTarget32::Gate(
+                    super::process::ProcessApi32::GetEnvironmentStringsA.id(),
+                ),
+            }])
             .chain(super::resources::kernel32_resource_exports())
             .chain(super::activation::kernel32_activation_exports())
             .collect(),

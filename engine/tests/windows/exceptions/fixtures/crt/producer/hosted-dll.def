@@ -1,0 +1,5 @@
+LIBRARY hosted-dll.dll
+EXPORTS
+dll_value
+dll_child_value
+dll_throw
