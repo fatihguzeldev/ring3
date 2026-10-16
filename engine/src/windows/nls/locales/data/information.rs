@@ -112,11 +112,7 @@ impl LocaleData32 {
             .into(),
             0x6f => self.localized.language()?.to_owned(),
             0x70 => {
-                return number(match self.script.as_str() {
-                    "Arab" | "Hebr" | "Syrc" | "Thaa" | "Nkoo" | "Adlm" | "Rohg" => 1,
-                    "Mong" => 2,
-                    _ => 0,
-                });
+                return number(self.reading_layout());
             }
             0x71 => return number(u32::from(self.region_name.is_empty())),
             0x72 => self.english.display()?.to_owned(),
@@ -231,19 +227,21 @@ impl LocaleData32 {
         Ok((text, None))
     }
     pub fn alternate_calendar_id(&self) -> u32 {
-        if self.region.calendar != 1 {
-            return 1;
-        }
-        match self.identity.language {
-            "ja" => 3,
-            "ko" => 5,
-            "he" => 8,
-            "zh" if self.region_name == "TW" => 4,
-            _ => 0,
-        }
+        super::static_fields::alternate_calendar(
+            self.identity,
+            &self.region_name,
+            self.region.calendar,
+        )
     }
     pub fn calendar_id(&self) -> u32 {
         u32::from(self.region.calendar)
+    }
+    pub fn reading_layout(&self) -> u32 {
+        match self.script.as_str() {
+            "Arab" | "Hebr" | "Syrc" | "Thaa" | "Nkoo" | "Adlm" | "Rohg" => 1,
+            "Mong" => 2,
+            _ => 0,
+        }
     }
     pub fn oem(&self) -> u32 {
         super::static_fields::oem(self.identity.ansi, &self.region_name)

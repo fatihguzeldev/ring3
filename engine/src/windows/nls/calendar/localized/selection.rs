@@ -55,7 +55,7 @@ impl CalendarId32 {
             Self::UmAlQura => 23,
         }
     }
-    pub(super) fn naming_locale(self, locale: u32) -> u32 {
+    pub fn naming_locale(self, locale: u32) -> u32 {
         match self {
             Self::GregorianUs => 0x409,
             Self::GregorianFrench => 0x40c,

@@ -1,5 +1,8 @@
 use super::regions::region_data;
-use crate::windows::nls::{NlsError32, locales::locale_identity};
+use crate::windows::nls::{
+    NlsError32,
+    locales::{LocaleIdentity32, locale_identity},
+};
 
 pub fn locale_number(locale: u32, kind: u32) -> Result<Option<u32>, NlsError32> {
     let identity = locale_identity(locale)?;
@@ -21,19 +24,7 @@ pub fn locale_number(locale: u32, kind: u32) -> Result<Option<u32>, NlsError32> 
         0x1004 => identity.ansi,
         0x1009 => u32::from(region.calendar),
         0x100a => u32::from(region.paper),
-        0x100b => {
-            if region.calendar != 1 {
-                1
-            } else {
-                match identity.language {
-                    "ja" => 3,
-                    "ko" => 5,
-                    "he" => 8,
-                    "zh" if region_name == "TW" => 4,
-                    _ => 0,
-                }
-            }
-        }
+        0x100b => alternate_calendar(identity, region_name, region.calendar),
         0x100c => u32::from(region.first_day),
         0x100d => u32::from(region.first_week),
         0x1010 => 1,
@@ -56,6 +47,25 @@ pub fn locale_number(locale: u32, kind: u32) -> Result<Option<u32>, NlsError32> 
         _ => return Ok(None),
     }))
 }
+pub(super) fn alternate_calendar(identity: LocaleIdentity32, region: &str, calendar: u8) -> u32 {
+    match identity.lcid {
+        0x409 | 0x420 => return 2,
+        0x401 | 0x465 => return 6,
+        0xc01 => return 23,
+        _ => {}
+    }
+    if calendar != 1 {
+        return 1;
+    }
+    match identity.language {
+        "ja" => 3,
+        "ko" => 5,
+        "he" => 8,
+        "zh" if region == "TW" => 4,
+        _ => 0,
+    }
+}
+
 pub fn static_information(
     locale: u32,
     kind: u32,

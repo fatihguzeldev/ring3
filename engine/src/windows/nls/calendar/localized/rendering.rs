@@ -1,3 +1,4 @@
+use super::super::{DateLayout32, layout::DateLayoutWriter32};
 use super::CalendarId32;
 use crate::windows::nls::{
     NlsError32,
@@ -23,6 +24,16 @@ pub fn format_calendar_date(
     locale: u32,
     calendar: u32,
 ) -> Result<String, NlsError32> {
+    format_calendar_date_with_layout(time, pattern, locale, calendar, None)
+}
+
+pub fn format_calendar_date_with_layout(
+    time: SystemTime32,
+    pattern: &str,
+    locale: u32,
+    calendar: u32,
+    layout: Option<DateLayout32>,
+) -> Result<String, NlsError32> {
     let time = SystemTime32 {
         hour: 0,
         minute: 0,
@@ -43,7 +54,11 @@ pub fn format_calendar_date(
         };
     let month = date.month().ordinal;
     let day = date.day_of_month().0;
+    if calendar == CalendarId32::Hebrew && year > 5999 {
+        return Err(NlsError32::InvalidParameter);
+    }
     let mut output = String::new();
+    let mut layout = DateLayoutWriter32::new(pattern, layout)?;
     let mut chars = pattern.chars().peekable();
     let mut quoted = false;
     while let Some(character) = chars.next() {
@@ -52,6 +67,9 @@ pub fn format_calendar_date(
                 output.push('\'');
                 chars.next();
             } else {
+                if !quoted {
+                    layout.mark(output.len());
+                }
                 quoted = !quoted;
             }
             continue;
@@ -64,6 +82,21 @@ pub fn format_calendar_date(
         while chars.peek() == Some(&character) {
             chars.next();
             length += 1;
+        }
+        if matches!(character, 'd' | 'M' | 'y' | 'g') {
+            layout.mark(output.len());
+        }
+        if calendar == CalendarId32::Hebrew {
+            let numeral = match (character, length) {
+                ('d', 1 | 2) => Some(u16::from(day)),
+                ('M', 1 | 2) => Some(u16::from(month)),
+                ('y', _) => Some((year % 1000) as u16),
+                _ => None,
+            };
+            if let Some(numeral) = numeral {
+                super::hebrew::append_number(&mut output, numeral)?;
+                continue;
+            }
         }
         match (character, length) {
             ('d', 1) => output.push_str(&day.to_string()),
@@ -89,7 +122,7 @@ pub fn format_calendar_date(
             _ => output.push_str(&character.to_string().repeat(length)),
         }
     }
-    Ok(output)
+    layout.finish(output)
 }
 
 pub fn calendar_text(
@@ -228,6 +261,9 @@ fn symbol(
     calendar: CalendarId32,
     pattern: &str,
 ) -> Result<String, NlsError32> {
+    if calendar == CalendarId32::Hebrew && pattern == "G" {
+        return Ok("C.E.".to_owned());
+    }
     let locale = calendar.naming_locale(locale);
     let locale: icu_locale::Locale = locale_identity(locale)?
         .language_tag()

@@ -1,5 +1,6 @@
 mod calendar;
 mod conversion;
+mod direction;
 mod international;
 mod locale;
 mod names;

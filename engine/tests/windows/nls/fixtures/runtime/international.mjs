@@ -21,7 +21,18 @@ export function checkInternational(call, a, read, text) {
     'international-calendar-12': 'أوت',
     'international-hebrew': 'אלול',
     'international-invalid-locale': 'אלול',
+    'international-date-ltr': '\u200e2001/\u200e02/\u200e03',
+    'international-date-rtl': '\u200f2001/\u200f02/\u200f03',
+    'international-date-hebrew-numeric': "תשס\"א/ה'/י'",
+    'international-date-hebrew-auto': "\u200fתשס\"א/\u200fה'/\u200fי'",
+    'international-date-embedded-mark': '\u200eA\u200e',
+    'international-urdu-native-name': 'اردو (پاکستان)',
+    'international-urdu-date-auto': '\u200e2001/\u200e02/\u200e03',
   };
+  if (call.hook === 'international-urdu-calendar') {
+    assert.equal(read(a.buffer), 2);
+    return true;
+  }
   if(call.hook==='international-name-codepage'){
     assert.equal(read(a.buffer),932);return true;
   }

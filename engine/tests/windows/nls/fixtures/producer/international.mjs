@@ -11,7 +11,7 @@ export const internationalIds = {
   LocaleNameToLCID: 0x150041,
   EnumSystemLocalesEx: 0x150042,
 };
-export const internationalCallCount = 33;
+export const internationalCallCount = 41;
 
 export function appendInternational(b, call, data, wide) {
   const a = b.addresses;
@@ -58,5 +58,16 @@ export function appendInternational(b, call, data, wide) {
   call('LocaleNameToLCID', [neutralName, 0x08000000], 9);
   call('LCIDToLocaleName', [0x7f, a.buffer, 85, 0], 1, 'international-invariant-name');
   call('EnumSystemLocalesEx', [b.callbacks[0].entry, 0x21, 0xabcdef, 0], 1, 'international-enumeration');
-
+  const nativeDate = b.data('nativeHebrewDate', [0x000207d1, 0x00030000, 0x00050004, 0x00000006]);
+  const directionPicture = wide(b, 'directionPicture', 'yyyy/MM/dd');
+  const hebrewPicture = wide(b, 'hebrewPicture', 'yyyyy/MM/dd');
+  const embeddedMark = wide(b, 'embeddedMark', "'A\u200f'");
+  call('GetDateFormatW', [0x409, 0x10, nativeDate, directionPicture, a.buffer, 128], 14, 'international-date-ltr');
+  call('GetDateFormatW', [0x409, 0x20, nativeDate, directionPicture, a.buffer, 128], 14, 'international-date-rtl');
+  call('GetDateFormatW', [0x40d, 4, nativeDate, hebrewPicture, a.buffer, 128], 12, 'international-date-hebrew-numeric');
+  call('GetDateFormatW', [0x40d, 0x44, nativeDate, hebrewPicture, a.buffer, 128], 15, 'international-date-hebrew-auto');
+  call('GetDateFormatW', [0x40d, 0x40, nativeDate, embeddedMark, a.buffer, 128], 4, 'international-date-embedded-mark');
+  call('GetLocaleInfoW', [0x420, 0x73, a.buffer, 128], 15, 'international-urdu-native-name');
+  call('GetLocaleInfoW', [0x420, 0x2000100b, a.buffer, 2], 2, 'international-urdu-calendar');
+  call('GetDateFormatW', [0x420, 0x44, nativeDate, directionPicture, a.buffer, 128], 14, 'international-urdu-date-auto');
 }

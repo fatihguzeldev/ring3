@@ -5,8 +5,8 @@ use crate::{
     windows::nls::{
         NlsApi32, NlsError32,
         calendar::{
-            SystemTime32, format_calendar_date, format_date_with_names, format_time_with_names,
-            from_filetime, to_filetime,
+            CalendarId32, DateLayout32, SystemTime32, format_calendar_date_with_layout,
+            format_date_with_layout, format_time_with_names, from_filetime, to_filetime,
         },
     },
 };
@@ -120,10 +120,19 @@ impl NlsRuntime32 {
                     {
                         return Err(NlsError32::InvalidFlags);
                     }
+                    if !wide
+                        && flags & 0x30 != 0
+                        && cp
+                            .encode(&[0x200e, 0x200f], false)
+                            .map_err(|_| NlsError32::NoTranslation)?
+                            .1
+                    {
+                        return Err(NlsError32::InvalidFlags);
+                    }
                 } else if flags & !0xc000000f != 0 {
                     return Err(NlsError32::InvalidFlags);
                 }
-                if args[3] != 0 && (flags & 0x80000000 != 0 || date && flags & !0x40000004 != 0) {
+                if args[3] != 0 && (flags & 0x80000000 != 0 || date && flags & !0x40000074 != 0) {
                     return Err(NlsError32::InvalidFlags);
                 }
                 let time = if args[2] == 0 {
@@ -180,13 +189,33 @@ impl NlsRuntime32 {
                 } else {
                     crate::windows::nls::calendar::time_pattern(&pattern, flags)
                 };
+                let layout = if date {
+                    match flags & 0x70 {
+                        0x10 => Some(DateLayout32::LeftToRight),
+                        0x20 => Some(DateLayout32::RightToLeft),
+                        0x40 => {
+                            let naming = CalendarId32::from_id(calendar)?.naming_locale(locale);
+                            let reading_layout = self.data(naming)?.reading_layout();
+                            let hebrew = crate::windows::nls::locales::locale_identity(naming)?
+                                .language
+                                == "he";
+                            Some(DateLayout32::Automatic {
+                                reading_layout,
+                                hebrew,
+                            })
+                        }
+                        _ => None,
+                    }
+                } else {
+                    None
+                };
                 let data = self.data(locale)?;
                 let names = &data.calendar;
                 let text = if date {
                     if calendar != 1 {
-                        format_calendar_date(time, &pattern, locale, calendar)?
+                        format_calendar_date_with_layout(time, &pattern, locale, calendar, layout)?
                     } else {
-                        format_date_with_names(time, &pattern, names)?
+                        format_date_with_layout(time, &pattern, names, layout)?
                     }
                 } else {
                     format_time_with_names(time, &pattern, names)?

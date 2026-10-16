@@ -1,4 +1,4 @@
-use super::{SystemTime32, from_filetime, to_filetime};
+use super::{DateLayout32, SystemTime32, from_filetime, layout::DateLayoutWriter32, to_filetime};
 use crate::windows::nls::NlsError32;
 pub const MONTHS: [&str; 12] = [
     "January",
@@ -32,18 +32,26 @@ pub fn format_date(time: SystemTime32, pattern: &str) -> Result<String, NlsError
         ..time
     };
     let time = from_filetime(to_filetime(time)?)?;
-    format(time, pattern, true, None)
+    format(time, pattern, true, None, None)
 }
 pub fn format_time(time: SystemTime32, pattern: &str) -> Result<String, NlsError32> {
     if time.hour > 23 || time.minute > 59 || time.second > 59 {
         return Err(NlsError32::InvalidParameter);
     }
-    format(time, pattern, false, None)
+    format(time, pattern, false, None, None)
 }
 pub fn format_date_with_names(
     time: SystemTime32,
     pattern: &str,
     names: &crate::windows::nls::locales::CalendarNames32,
+) -> Result<String, NlsError32> {
+    format_date_with_layout(time, pattern, names, None)
+}
+pub fn format_date_with_layout(
+    time: SystemTime32,
+    pattern: &str,
+    names: &crate::windows::nls::locales::CalendarNames32,
+    layout: Option<DateLayout32>,
 ) -> Result<String, NlsError32> {
     let time = SystemTime32 {
         hour: 0,
@@ -53,7 +61,7 @@ pub fn format_date_with_names(
         ..time
     };
     let time = from_filetime(to_filetime(time)?)?;
-    format(time, pattern, true, Some(names))
+    format(time, pattern, true, Some(names), layout)
 }
 pub fn format_time_with_names(
     time: SystemTime32,
@@ -63,15 +71,17 @@ pub fn format_time_with_names(
     if time.hour > 23 || time.minute > 59 || time.second > 59 {
         return Err(NlsError32::InvalidParameter);
     }
-    format(time, pattern, false, Some(names))
+    format(time, pattern, false, Some(names), None)
 }
 fn format(
     time: SystemTime32,
     pattern: &str,
     date: bool,
     names: Option<&crate::windows::nls::locales::CalendarNames32>,
+    layout: Option<DateLayout32>,
 ) -> Result<String, NlsError32> {
     let genitive = date && has_numeric_day(pattern);
+    let mut layout = DateLayoutWriter32::new(pattern, layout)?;
     let mut out = String::new();
     out.try_reserve(pattern.len().saturating_mul(8))
         .map_err(|_| NlsError32::Allocation)?;
@@ -83,6 +93,9 @@ fn format(
                 out.push('\'');
                 chars.next();
             } else {
+                if !quoted {
+                    layout.mark(out.len());
+                }
                 quoted = !quoted;
             }
             continue;
@@ -95,6 +108,9 @@ fn format(
         while chars.peek() == Some(&c) {
             chars.next();
             n += 1;
+        }
+        if date && matches!(c, 'd' | 'M' | 'y' | 'g') {
+            layout.mark(out.len());
         }
         let value = match (date, c, n) {
             (true, 'd', 1) => time.day.to_string(),
@@ -178,7 +194,7 @@ fn format(
         };
         out.push_str(&value);
     }
-    Ok(out)
+    layout.finish(out)
 }
 
 fn has_numeric_day(pattern: &str) -> bool {
