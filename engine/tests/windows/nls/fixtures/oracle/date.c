@@ -34,7 +34,7 @@ int main(void) {
                 probe(locales[locale], LOCALE_NOUSEROVERRIDE | styles[style] | layouts[layout] | DATE_USE_ALT_CALENDAR, 0, NULL);
             }
             for (unsigned pattern = 0; pattern < sizeof(patterns) / sizeof(patterns[0]); ++pattern)
-                probe(locales[locale], LOCALE_NOUSEROVERRIDE | layouts[layout], pattern + 1, patterns[pattern]);
+                probe(locales[locale], layouts[layout], pattern + 1, patterns[pattern]);
         }
     }
     return 0;
