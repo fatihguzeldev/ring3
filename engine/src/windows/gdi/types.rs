@@ -60,6 +60,7 @@ impl Default for GdiLimits32 {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Brush32 {
     Solid(u32),
+    System(u32),
     Null,
     Hatch { style: u32, color: u32 },
 }

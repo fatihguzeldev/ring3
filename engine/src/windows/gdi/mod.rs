@@ -1,5 +1,6 @@
 mod api;
 mod bitmap;
+mod colors;
 mod context;
 mod dc;
 mod fonts;

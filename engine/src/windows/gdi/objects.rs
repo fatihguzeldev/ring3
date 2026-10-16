@@ -8,6 +8,9 @@ impl GdiContext32 {
             .ok_or(GdiError32::InvalidRequest)
     }
     pub fn object(&self, handle: u32) -> Result<GdiObject32, GdiError32> {
+        if let Some(index) = super::colors::system_brush_index(handle) {
+            return Ok(GdiObject32::Brush(Brush32::System(index)));
+        }
         if handle == DEFAULT_BITMAP {
             return Ok(GdiObject32::Bitmap(
                 BitmapLayout32::new(1, 1, 1, false).unwrap(),
@@ -71,6 +74,7 @@ impl GdiContext32 {
     }
     pub fn is_stock(&self, handle: u32) -> bool {
         handle == DEFAULT_BITMAP
+            || super::colors::system_brush_index(handle).is_some()
             || handle
                 .checked_sub(stock_handle(0))
                 .and_then(stock)
