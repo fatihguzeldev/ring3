@@ -11,8 +11,15 @@ static void emit(const char *name, DWORD result, DWORD error, const WCHAR *text)
 static void array(const char *name, DWORD flags, const WCHAR *text, DWORD_PTR *arguments) {
     printf("{\"begin\":\"%s\"}\n", name);
     WCHAR output[256] = {0}; SetLastError(0xabcdef01);
-    DWORD result = FormatMessageW(FORMAT_MESSAGE_FROM_STRING | flags, text, 0, 0, output, 256, (va_list *)arguments);
-    emit(name, result, GetLastError(), output);
+    DWORD result = 0, error = 0, exception = 0;
+    __try {
+        result = FormatMessageW(FORMAT_MESSAGE_FROM_STRING | flags, text, 0, 0, output, 256, (va_list *)arguments);
+        error = GetLastError();
+    } __except(EXCEPTION_EXECUTE_HANDLER) {
+        exception = GetExceptionCode();
+    }
+    if (exception) printf("{\"case\":\"%s\",\"exception\":%lu}\n", name, exception);
+    else emit(name, result, error, output);
 }
 static void variable(const char *name, const WCHAR *text, ...) {
     printf("{\"begin\":\"%s\"}\n", name);
@@ -23,7 +30,8 @@ static void variable(const char *name, const WCHAR *text, ...) {
 int main(void) {
     setvbuf(stdout, NULL, _IONBF, 0);
     array("escapes", 0, L"A\nB\rC\r\nD%nE%rF%tG%%%.%!%b%0tail", NULL);
-    array("ignore", FORMAT_MESSAGE_IGNORE_INSERTS, L"[%1!08x!][%2]%%", (DWORD_PTR *)0xfffffff0);
+    array("ignore", FORMAT_MESSAGE_IGNORE_INSERTS, L"[%1!08x!][%2]%%", NULL);
+    array("ignore-invalid-va", FORMAT_MESSAGE_IGNORE_INSERTS, L"[%1!08x!][%2]%%", (DWORD_PTR *)0xfffffff0);
     array("flatten", 255, L"a\r\nb\nc\rd%nend", NULL);
     array("wrap", 5, L"a bb ccc ddddddd e", NULL);
     DWORD_PTR stars[] = {4, 2, (DWORD_PTR)L"Ned", (DWORD_PTR)L"Sue", 6, (DWORD_PTR)L"Ned"};
