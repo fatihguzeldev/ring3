@@ -305,8 +305,8 @@ fn word_memory_arithmetic_store_complete_prefixes_and_adjacent_families_stay_clo
             bytes.extend([0xeb, 0]);
             let memory = code_space(CODE, &bytes);
             crate::support_fetch::assert_decode_contract(
-                (decode_one(&memory, GuestAddress(CODE)).err())
-                    .expect("instruction must fail to decode"),
+                (decode_one(&memory, GuestAddress(CODE)))
+                    .expect_err("instruction must fail to decode"),
                 error,
             );
             assert_eq!(
@@ -337,8 +337,8 @@ fn word_memory_arithmetic_store_complete_prefixes_and_adjacent_families_stay_clo
                 bytes.push(0);
             }
             crate::support_fetch::assert_decode_contract(
-                (decode_one(&code_space(CODE, &bytes), GuestAddress(CODE)).err())
-                    .expect("instruction must fail to decode"),
+                (decode_one(&code_space(CODE, &bytes), GuestAddress(CODE)))
+                    .expect_err("instruction must fail to decode"),
                 DecodeError::Unsupported(UnsupportedFeature::Opcode),
             );
         }
@@ -456,14 +456,14 @@ fn word_memory_arithmetic_store_progressive_fetch_and_top_end_remain_exact() {
             for cut in 1..bytes.len() {
                 let pc = 0x2000 - cut as u32;
                 crate::support_fetch::assert_decode_contract(
-                    (decode_one(&code_space(pc, &bytes[..cut]), GuestAddress(pc)).err())
-                        .expect("instruction must fail to decode"),
+                    (decode_one(&code_space(pc, &bytes[..cut]), GuestAddress(pc)))
+                        .expect_err("instruction must fail to decode"),
                     fetch_error(pc, 0x2000, FaultReason::Unmapped, cut + 1),
                 );
                 let pc = u32::MAX - cut as u32 + 1;
                 crate::support_fetch::assert_decode_contract(
-                    (decode_one(&code_space(pc, &bytes[..cut]), GuestAddress(pc)).err())
-                        .expect("instruction must fail to decode"),
+                    (decode_one(&code_space(pc, &bytes[..cut]), GuestAddress(pc)))
+                        .expect_err("instruction must fail to decode"),
                     fetch_error(pc, pc, FaultReason::AddressOverflow, cut + 1),
                 );
                 rows += 2;
@@ -476,8 +476,8 @@ fn word_memory_arithmetic_store_progressive_fetch_and_top_end_remain_exact() {
                 )
                 .unwrap();
             crate::support_fetch::assert_decode_contract(
-                (decode_one(&memory, GuestAddress(CODE)).err())
-                    .expect("instruction must fail to decode"),
+                (decode_one(&memory, GuestAddress(CODE)))
+                    .expect_err("instruction must fail to decode"),
                 fetch_error(CODE, CODE, FaultReason::Permission, 1),
             );
             let mut memory = code_space(0x1fff, &bytes);
@@ -488,8 +488,8 @@ fn word_memory_arithmetic_store_progressive_fetch_and_top_end_remain_exact() {
                 )
                 .unwrap();
             crate::support_fetch::assert_decode_contract(
-                (decode_one(&memory, GuestAddress(0x1fff)).err())
-                    .expect("instruction must fail to decode"),
+                (decode_one(&memory, GuestAddress(0x1fff)))
+                    .expect_err("instruction must fail to decode"),
                 fetch_error(0x1fff, 0x2000, FaultReason::Permission, 2),
             );
             rows += 2;

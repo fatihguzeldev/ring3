@@ -602,8 +602,8 @@ fn excluded_width_prefix_lock_segment_and_adjacent_forms_keep_exact_categories()
         let (bytes, expected) = byte_prefix_admission::closed_fixture(&bytes, expected);
         let engine = code(CODE, &bytes, true);
         crate::support_fetch::assert_decode_contract(
-            (decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err())
-                .expect("instruction must fail to decode"),
+            (decode_one(engine.memory().unwrap(), GuestAddress(CODE)))
+                .expect_err("instruction must fail to decode"),
             expected,
         );
         let memory = engine.memory().unwrap();
@@ -682,23 +682,23 @@ fn exact_fetch_wrap_and_consumed_page_currency_keep_their_boundaries() {
             let pc = 0x2000 - cut as u32;
             let engine = code(pc, &bytes[..cut], true);
             crate::support_fetch::assert_decode_contract(
-                (decode_one(engine.memory().unwrap(), GuestAddress(pc)).err())
-                    .expect("instruction must fail to decode"),
+                (decode_one(engine.memory().unwrap(), GuestAddress(pc)))
+                    .expect_err("instruction must fail to decode"),
                 fetch_error(pc, 0x2000, cut as u32 + 1, FaultReason::Unmapped),
             );
             let mut engine = code(pc, &bytes, false);
             engine.protect(0x1000, 1, 4).unwrap();
             engine.protect(0x2000, 1, 1).unwrap();
             crate::support_fetch::assert_decode_contract(
-                (decode_one(engine.memory().unwrap(), GuestAddress(pc)).err())
-                    .expect("instruction must fail to decode"),
+                (decode_one(engine.memory().unwrap(), GuestAddress(pc)))
+                    .expect_err("instruction must fail to decode"),
                 fetch_error(pc, 0x2000, cut as u32 + 1, FaultReason::Permission),
             );
             let pc = u32::MAX - (cut as u32 - 1);
             let engine = code(pc, &bytes[..cut], true);
             crate::support_fetch::assert_decode_contract(
-                (decode_one(engine.memory().unwrap(), GuestAddress(pc)).err())
-                    .expect("instruction must fail to decode"),
+                (decode_one(engine.memory().unwrap(), GuestAddress(pc)))
+                    .expect_err("instruction must fail to decode"),
                 fetch_error(pc, pc, cut as u32 + 1, FaultReason::AddressOverflow),
             );
         }

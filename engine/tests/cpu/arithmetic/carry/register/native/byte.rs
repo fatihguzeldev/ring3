@@ -335,8 +335,8 @@ fn memory_alternate_prefix_word_and_adjacent_forms_keep_exact_refusal_categories
         let (bytes, expected) = byte_prefix_admission::closed_fixture(&bytes, expected);
         let engine = code(CODE, &bytes, true);
         crate::support_fetch::assert_decode_contract(
-            (decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err())
-                .expect("instruction must fail to decode"),
+            (decode_one(engine.memory().unwrap(), GuestAddress(CODE)))
+                .expect_err("instruction must fail to decode"),
             expected,
         );
         let error = instruction_error(CODE, InstructionError::Decode(expected));
@@ -388,8 +388,8 @@ fn exact_fetch_wrap_and_cross_page_snapshots_keep_their_boundaries() {
             let pc = 0x2000 - truncated.len() as u32;
             let engine = code(pc, truncated, true);
             crate::support_fetch::assert_error(
-                (decode_one(engine.memory().unwrap(), GuestAddress(pc)).err())
-                    .expect("code fetch must fail"),
+                (decode_one(engine.memory().unwrap(), GuestAddress(pc)))
+                    .expect_err("code fetch must fail"),
                 pc,
                 0x2000,
                 FaultReason::Unmapped,
@@ -405,8 +405,8 @@ fn exact_fetch_wrap_and_cross_page_snapshots_keep_their_boundaries() {
         );
         let engine = code(u32::MAX, &[al], true);
         crate::support_fetch::assert_error(
-            (decode_one(engine.memory().unwrap(), GuestAddress(u32::MAX)).err())
-                .expect("code fetch must fail"),
+            (decode_one(engine.memory().unwrap(), GuestAddress(u32::MAX)))
+                .expect_err("code fetch must fail"),
             u32::MAX,
             u32::MAX,
             FaultReason::AddressOverflow,

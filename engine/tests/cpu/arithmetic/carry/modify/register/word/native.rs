@@ -356,8 +356,8 @@ fn word_memory_carry_store_only_single_operand_override_and_flat32_are_open() {
             bytes.extend([0xeb, 0]);
             let memory = code_space(CODE, &bytes);
             crate::support_fetch::assert_decode_contract(
-                (decode_one(&memory, GuestAddress(CODE)).err())
-                    .expect("instruction must fail to decode"),
+                (decode_one(&memory, GuestAddress(CODE)))
+                    .expect_err("instruction must fail to decode"),
                 error,
             );
             let specs = [BlockSpec {
@@ -391,8 +391,8 @@ fn word_memory_carry_store_duplicate_prefix_immediates_stay_closed() {
             let memory = code_space(CODE, &bytes);
             let error = DecodeError::Unsupported(UnsupportedFeature::Opcode);
             crate::support_fetch::assert_decode_contract(
-                (decode_one(&memory, GuestAddress(CODE)).err())
-                    .expect("instruction must fail to decode"),
+                (decode_one(&memory, GuestAddress(CODE)))
+                    .expect_err("instruction must fail to decode"),
                 error,
             );
             assert_eq!(
@@ -468,7 +468,7 @@ fn word_memory_carry_store_fetch_is_progressive_and_top_end_wraps_only_next_pc()
             let pc = 0x2000 - cut as u32;
             let memory = code_space(pc, &bytes[..cut]);
             crate::support_fetch::assert_error(
-                (decode_one(&memory, GuestAddress(pc)).err()).expect("code fetch must fail"),
+                (decode_one(&memory, GuestAddress(pc))).expect_err("code fetch must fail"),
                 pc,
                 0x2000,
                 FaultReason::Unmapped,

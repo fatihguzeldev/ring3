@@ -379,8 +379,8 @@ fn unsupported_widths_prefixes_and_invalid_lock_keep_error_categories() {
             }
             let memory = code(CODE, &bytes);
             crate::support_fetch::assert_decode_contract(
-                (decode_one(&memory, GuestAddress(CODE)).err())
-                    .expect("instruction must fail to decode"),
+                (decode_one(&memory, GuestAddress(CODE)))
+                    .expect_err("instruction must fail to decode"),
                 DecodeError::Unsupported(UnsupportedFeature::Opcode),
             );
         }
@@ -396,8 +396,8 @@ fn unsupported_widths_prefixes_and_invalid_lock_keep_error_categories() {
             }
             let memory = code(CODE, &bytes);
             crate::support_fetch::assert_decode_contract(
-                (decode_one(&memory, GuestAddress(CODE)).err())
-                    .expect("instruction must fail to decode"),
+                (decode_one(&memory, GuestAddress(CODE)))
+                    .expect_err("instruction must fail to decode"),
                 expected,
             );
         }

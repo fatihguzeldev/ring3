@@ -346,8 +346,7 @@ fn decimal_adjust_strict_prefixes_and_other_decimal_forms_keep_categories() {
         let mut engine = code(&bytes);
         let memory = engine.memory().unwrap();
         crate::support_fetch::assert_decode_contract(
-            (decode_one(memory, GuestAddress(CODE)).err())
-                .expect("instruction must fail to decode"),
+            (decode_one(memory, GuestAddress(CODE))).expect_err("instruction must fail to decode"),
             error,
         );
         let expected = instruction_error(CODE, error);
@@ -411,15 +410,14 @@ fn decimal_adjust_one_byte_fetch_execute_and_top_boundaries_do_not_wrap() {
             )
             .unwrap();
         crate::support_fetch::assert_decode_contract(
-            (decode_one(&denied, GuestAddress(CODE)).err())
-                .expect("instruction must fail to decode"),
+            (decode_one(&denied, GuestAddress(CODE))).expect_err("instruction must fail to decode"),
             fetch_error(CODE, CODE, 1, FaultReason::Permission),
         );
 
         let prefix_end = code_space(0x1fff, &[0x66]);
         crate::support_fetch::assert_decode_contract(
-            (decode_one(&prefix_end, GuestAddress(0x1fff)).err())
-                .expect("instruction must fail to decode"),
+            (decode_one(&prefix_end, GuestAddress(0x1fff)))
+                .expect_err("instruction must fail to decode"),
             fetch_error(0x1fff, 0x2000, 2, FaultReason::Unmapped),
         );
         let mut denied_second = code_space(0x1fff, &[0x66, opcode]);
@@ -430,8 +428,8 @@ fn decimal_adjust_one_byte_fetch_execute_and_top_boundaries_do_not_wrap() {
             )
             .unwrap();
         crate::support_fetch::assert_decode_contract(
-            (decode_one(&denied_second, GuestAddress(0x1fff)).err())
-                .expect("instruction must fail to decode"),
+            (decode_one(&denied_second, GuestAddress(0x1fff)))
+                .expect_err("instruction must fail to decode"),
             fetch_error(0x1fff, 0x2000, 2, FaultReason::Permission),
         );
 
@@ -441,14 +439,14 @@ fn decimal_adjust_one_byte_fetch_execute_and_top_boundaries_do_not_wrap() {
         prefix_top.write(GuestAddress(0), &[opcode]).unwrap();
         prefix_top.protect(zero, Permissions::EXECUTE).unwrap();
         crate::support_fetch::assert_decode_contract(
-            (decode_one(&prefix_top, GuestAddress(u32::MAX)).err())
-                .expect("instruction must fail to decode"),
+            (decode_one(&prefix_top, GuestAddress(u32::MAX)))
+                .expect_err("instruction must fail to decode"),
             fetch_error(u32::MAX, u32::MAX, 2, FaultReason::AddressOverflow),
         );
     }
     let missing = AddressSpace::new(1).unwrap();
     crate::support_fetch::assert_decode_contract(
-        (decode_one(&missing, GuestAddress(CODE)).err()).expect("instruction must fail to decode"),
+        (decode_one(&missing, GuestAddress(CODE))).expect_err("instruction must fail to decode"),
         fetch_error(CODE, CODE, 1, FaultReason::Unmapped),
     );
 }
@@ -717,8 +715,8 @@ fn immediate_adjust_two_byte_fetch_execute_and_top_boundaries_do_not_wrap() {
                 )
                 .unwrap();
             crate::support_fetch::assert_decode_contract(
-                (decode_one(&denied_first, GuestAddress(0x1fff)).err())
-                    .expect("instruction must fail to decode"),
+                (decode_one(&denied_first, GuestAddress(0x1fff)))
+                    .expect_err("instruction must fail to decode"),
                 fetch_error(0x1fff, 0x1fff, 1, FaultReason::Permission),
             );
 
@@ -730,8 +728,8 @@ fn immediate_adjust_two_byte_fetch_execute_and_top_boundaries_do_not_wrap() {
                 )
                 .unwrap();
             crate::support_fetch::assert_decode_contract(
-                (decode_one(&denied_second, GuestAddress(0x1fff)).err())
-                    .expect("instruction must fail to decode"),
+                (decode_one(&denied_second, GuestAddress(0x1fff)))
+                    .expect_err("instruction must fail to decode"),
                 fetch_error(0x1fff, 0x2000, 2, FaultReason::Permission),
             );
 
@@ -743,16 +741,16 @@ fn immediate_adjust_two_byte_fetch_execute_and_top_boundaries_do_not_wrap() {
                 .unwrap();
             incomplete_top.protect(zero, Permissions::EXECUTE).unwrap();
             crate::support_fetch::assert_decode_contract(
-                (decode_one(&incomplete_top, GuestAddress(u32::MAX)).err())
-                    .expect("instruction must fail to decode"),
+                (decode_one(&incomplete_top, GuestAddress(u32::MAX)))
+                    .expect_err("instruction must fail to decode"),
                 fetch_error(u32::MAX, u32::MAX, 2, FaultReason::AddressOverflow),
             );
         }
 
         let incomplete_page = code_space(0x1fff, &[opcode]);
         crate::support_fetch::assert_decode_contract(
-            (decode_one(&incomplete_page, GuestAddress(0x1fff)).err())
-                .expect("instruction must fail to decode"),
+            (decode_one(&incomplete_page, GuestAddress(0x1fff)))
+                .expect_err("instruction must fail to decode"),
             fetch_error(0x1fff, 0x2000, 2, FaultReason::Unmapped),
         );
     }
