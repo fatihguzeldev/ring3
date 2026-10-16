@@ -75,9 +75,9 @@ fn arpl_lock_prefix_is_invalid_for_register_and_memory_destinations() {
         memory
             .write(GuestAddress(0x1000), &[0xf0, 0x63, modrm])
             .unwrap();
-        assert_eq!(
+        crate::support_fetch::assert_decode_contract(
             decode_one(&memory, GuestAddress(0x1000)).unwrap_err(),
-            DecodeError::InvalidEncoding
+            DecodeError::InvalidEncoding,
         );
     }
 }

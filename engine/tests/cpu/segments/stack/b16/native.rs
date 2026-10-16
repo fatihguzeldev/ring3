@@ -266,13 +266,7 @@ fn mixed_enter32_b16_uses_full_frame_value_active_parent_offsets_and_wrapped_all
 }
 #[test]
 fn mixed_enter_final_probe_fault_keeps_all_arena_and_ram_owners_atomic() {
-    use ring3_engine::{
-        abi::{
-            arena::HELPER_OFFSET,
-            cpu_helper::{CpuMemoryError, encode_cpu_result},
-        },
-        memory::{Access, FaultReason, MemoryError, MemoryFault},
-    };
+    use ring3_engine::abi::arena::HELPER_OFFSET;
     for resident in [false, true] {
         let (mut engine, id) = bound(resident);
         engine.map(0x6000, 1, 3).unwrap();
@@ -284,18 +278,11 @@ fn mixed_enter_final_probe_fault_keeps_all_arena_and_ram_owners_atomic() {
             execute(&mut engine, id, StackFrameKind::Enter32, 8, 0),
             Ok(StoreCompletion::Complete)
         );
-        let mut packet = [0; 40];
-        encode_cpu_result(
-            4,
-            0,
-            Err(CpuMemoryError::Memory(MemoryError::Fault(MemoryFault {
-                address: GuestAddress(0x5ff8),
-                access: Access::Write,
-                reason: FaultReason::Unmapped,
-            }))),
-            &mut packet,
-        )
-        .unwrap();
+        let mut packet = [0_u8; 40];
+        packet[..16].copy_from_slice(b"R3MH\x0f\0\x01\0\x28\0\0\0\0\0\0\0");
+        for (index, value) in [9_u32, 0, 6, 0x5ff8, 2, 4].into_iter().enumerate() {
+            packet[16 + index * 4..20 + index * 4].copy_from_slice(&value.to_le_bytes());
+        }
         let mut expected = before;
         expected[HELPER_OFFSET..HELPER_OFFSET + 40].copy_from_slice(&packet);
         assert_eq!(engine.arena(), expected);

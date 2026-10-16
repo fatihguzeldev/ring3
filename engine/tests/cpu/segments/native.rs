@@ -1,3 +1,6 @@
+#[path = "../../support/cpu/fetch/native.rs"]
+mod support_fetch;
+
 #[path = "selectors/privilege/native.rs"]
 mod cpu_arpl;
 #[path = "selectors/verify/native.rs"]

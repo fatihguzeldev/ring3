@@ -101,7 +101,10 @@ fn split_linear_instruction_compiles_and_snapshots_both_physical_halves_in_all_p
                 upload(&mut e, 0x1ffd, &[0xb8]);
                 assert_eq!(guard(&e, resident, token), Ok(()));
                 upload(&mut e, address, &[if address == 0 { 0x34 } else { 0xb8 }]);
-                assert_eq!(guard(&e, resident, token), Err(stale(resident)));
+                crate::support_fetch::assert_host_contract(
+                    (guard(&e, resident, token)).expect_err("compilation must refuse this fixture"),
+                    stale(resident),
+                );
             }
         }
     }
@@ -119,7 +122,10 @@ fn wrapped_gate_compiles_and_keeps_each_source_page_currentness() {
                 let token = compile(&mut e, resident, entries, true).unwrap();
                 assert_eq!(guard(&e, resident, token), Ok(()));
                 upload(&mut e, address, &[if address == 0 { 0x0b } else { 0x0f }]);
-                assert_eq!(guard(&e, resident, token), Err(stale(resident)));
+                crate::support_fetch::assert_host_contract(
+                    (guard(&e, resident, token)).expect_err("compilation must refuse this fixture"),
+                    stale(resident),
+                );
             }
         }
     }
@@ -139,7 +145,7 @@ fn wrapped_tail_missing_or_nonexecute_is_typed_low_linear_fault_with_atomic_admi
                 let before = e.arena().to_vec();
                 let generation = e.generation();
                 let error = compile(&mut e, resident, entries, false).unwrap_err();
-                assert_eq!(
+                crate::support_fetch::assert_compile_contract(
                     cause(error),
                     CompileError::Instruction {
                         pc: GuestAddress(0x1fff),
@@ -153,10 +159,10 @@ fn wrapped_tail_missing_or_nonexecute_is_typed_low_linear_fault_with_atomic_admi
                                     FaultReason::Permission
                                 } else {
                                     FaultReason::Unmapped
-                                }
+                                },
                             },
-                        })
-                    }
+                        }),
+                    },
                 );
                 assert_eq!(e.arena(), before);
                 assert_eq!(e.generation(), generation);

@@ -11,7 +11,7 @@ use ring3_engine::{
         SegmentCache, SegmentContext, SegmentDescriptorRecord, SegmentDescriptorTable,
         SegmentLoadFailure, SegmentRegister, SegmentState, StackFrameKind,
     },
-    memory::{FaultReason, GuestAddress, MemoryError},
+    memory::GuestAddress,
     process::{EngineInstance, StoreCompletion},
 };
 
@@ -212,18 +212,13 @@ fn translated_late_page_fault_and_logical_ss_fault_leave_all_ram_and_registers_u
         let before = engine.arena().to_vec();
         let before_ram = ram(&engine, 0x8000, 128);
         execute(&mut engine, id, StackFrameKind::PushAll32, 0, 0);
-        let error = MemoryError::Fault(ring3_engine::memory::MemoryFault {
-            address: GuestAddress(0x7ffc),
-            access: ring3_engine::memory::Access::Write,
-            reason: FaultReason::Unmapped,
-        });
-        assert!(
-            matches!(error, MemoryError::Fault(fault) if fault.address == GuestAddress(0x7ffc)
-            && fault.reason == FaultReason::Unmapped)
-        );
+        let mut paging = [0_u8; 40];
+        paging[..16].copy_from_slice(b"R3MH\x0f\0\x01\0\x28\0\0\0\0\0\0\0");
+        for (index, value) in [9_u32, 0, 6, 0x7ffc, 2, 4].into_iter().enumerate() {
+            paging[16 + index * 4..20 + index * 4].copy_from_slice(&value.to_le_bytes());
+        }
         let mut expected = before;
-        expected[HELPER_OFFSET..HELPER_OFFSET + 40]
-            .copy_from_slice(&packet(4, Err(CpuMemoryError::Memory(error))));
+        expected[HELPER_OFFSET..HELPER_OFFSET + 40].copy_from_slice(&paging);
         assert_eq!(engine.arena(), expected);
         assert_eq!(ram(&engine, 0x8000, 128), before_ram);
         let mut context = engine.segment_context().unwrap();

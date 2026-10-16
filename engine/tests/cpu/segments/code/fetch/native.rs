@@ -223,9 +223,9 @@ fn repaired_synthetic_pc_can_compile_material_code_and_resident_routing_selects_
             assert_eq!(engine.lookup_resident(0x2000).unwrap().get(), next);
             guard(&engine, resident, old).unwrap();
         } else {
-            assert_eq!(
-                guard(&engine, resident, old),
-                Err(HostError::InvalidArtifact)
+            crate::support_fetch::assert_host_contract(
+                (guard(&engine, resident, old)).expect_err("compilation must refuse this fixture"),
+                HostError::InvalidArtifact,
             );
         }
     }
