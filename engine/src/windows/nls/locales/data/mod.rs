@@ -4,6 +4,7 @@ mod calendar;
 mod decimal;
 mod information;
 mod names;
+mod provider;
 mod regions;
 use super::{LocaleIdentity32, locale_identity};
 use crate::windows::nls::NlsError32;
@@ -12,6 +13,7 @@ pub(in crate::windows::nls) use calendar::windows_pattern;
 use decimal::DecimalData32;
 use names::Names32;
 use regions::{RegionData32, region_data};
+use std::sync::OnceLock;
 
 #[derive(Debug)]
 pub struct LocaleData32 {
@@ -23,9 +25,10 @@ pub struct LocaleData32 {
     english: Names32,
     native: Names32,
     pub calendar: CalendarNames32,
-    decimal: DecimalData32,
-    english_currency: String,
-    native_currency: String,
+    locale: icu_locale::Locale,
+    decimal: OnceLock<DecimalData32>,
+    english_currency: OnceLock<String>,
+    native_currency: OnceLock<String>,
 }
 impl LocaleData32 {
     pub fn new(lcid: u32, display_lcid: u32) -> Result<Self, NlsError32> {
@@ -68,13 +71,47 @@ impl LocaleData32 {
             region_name,
             script,
             region,
-            localized: Names32::new(&locale, &display)?,
-            english: Names32::new(&locale, &english)?,
-            native: Names32::new(&locale, &locale)?,
+            localized: Names32::new(&locale, &display),
+            english: Names32::new(&locale, &english),
+            native: Names32::new(&locale, &locale),
             calendar,
-            decimal: DecimalData32::new(&locale, region.currency)?,
-            english_currency: decimal::currency_name(&english, region.currency)?,
-            native_currency: decimal::currency_name(&locale, region.currency)?,
+            locale,
+            decimal: OnceLock::new(),
+            english_currency: OnceLock::new(),
+            native_currency: OnceLock::new(),
         })
     }
+    fn decimal(&self) -> Result<&DecimalData32, NlsError32> {
+        cached(&self.decimal, || {
+            DecimalData32::new(&self.locale, self.region.currency)
+        })
+    }
+    fn currency_name(&self, english: bool) -> Result<&str, NlsError32> {
+        let slot = if english {
+            &self.english_currency
+        } else {
+            &self.native_currency
+        };
+        cached(slot, || {
+            let locale = if english {
+                "en".parse().unwrap()
+            } else {
+                self.locale.clone()
+            };
+            decimal::currency_name(&locale, self.region.currency)
+        })
+        .map(String::as_str)
+    }
+}
+
+fn cached<T>(
+    slot: &OnceLock<T>,
+    create: impl FnOnce() -> Result<T, NlsError32>,
+) -> Result<&T, NlsError32> {
+    if let Some(value) = slot.get() {
+        return Ok(value);
+    }
+    let value = create()?;
+    let _ = slot.set(value);
+    Ok(slot.get().expect("successful locale facet publication"))
 }

@@ -137,3 +137,36 @@ fn locale_enumeration_calls_real_three_argument_callbacks_and_stop_cleans_exact_
         Ok(WindowsProviderOutcome32::Return(1))
     );
 }
+
+#[test]
+fn urdu_language_and_display_queries_use_real_names_without_unused_variant_data() {
+    let mut engine = engine();
+    for (kind, pieces) in [
+        (4, ["اردو", ""]),
+        (0x1001, ["Urdu", ""]),
+        (0x73, ["اردو", "پاکستان"]),
+        (0x72, ["Urdu", "Pakistan"]),
+        (2, ["Urdu", "Pakistan"]),
+    ] {
+        let length = call(
+            &mut engine,
+            NlsApi32::GetLocaleInfoW,
+            &[0x420, kind, 0x11000, 128],
+        );
+        let mut bytes = vec![0; length as usize * 2];
+        engine
+            .memory()
+            .unwrap()
+            .read(GuestAddress(0x11000), &mut bytes)
+            .unwrap();
+        let units = bytes
+            .chunks_exact(2)
+            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+            .collect::<Vec<_>>();
+        assert_eq!(units.last(), Some(&0));
+        let text = String::from_utf16(&units[..units.len() - 1]).unwrap();
+        for piece in pieces {
+            assert!(text.contains(piece), "{kind:#x}: {text}");
+        }
+    }
+}

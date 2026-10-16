@@ -12,34 +12,38 @@ impl LocaleData32 {
         }
         let mut numeric = None;
         let c = &self.calendar;
-        let d = &self.decimal;
         let text = match kind {
             1 | 9 => {
                 numeric = Some(self.identity.lcid & 0xffff);
                 format!("{:04x}", self.identity.lcid & 0xffff)
             }
-            2 => self.localized.display.clone(),
+            2 => self.localized.display()?.to_owned(),
             3 => self.identity.windows_three_letter.into(),
-            4 => self.native.language.clone(),
+            4 => self.native.language()?.to_owned(),
             5 | 0xa => return number(self.region.dialing),
-            6 => self.localized.region.clone(),
+            6 => self.localized.region()?.to_owned(),
             7 => self.region.alpha3.into(),
-            8 => self.native.region.clone(),
+            8 => self.native.region()?.to_owned(),
             0xb => return number(self.oem()),
-            0xc => if d.decimal == "," { ";" } else { "," }.into(),
+            0xc => if self.decimal()?.decimal == "," {
+                ";"
+            } else {
+                ","
+            }
+            .into(),
             0xd => return number(u32::from(!self.region.metric)),
-            0xe | 0x16 => d.decimal.clone(),
-            0xf | 0x17 => d.group.clone(),
-            0x10 | 0x18 => d.grouping.clone(),
+            0xe | 0x16 => self.decimal()?.decimal.clone(),
+            0xf | 0x17 => self.decimal()?.group.clone(),
+            0x10 | 0x18 => self.decimal()?.grouping.clone(),
             0x11 => return number(2),
             0x12 => return number(1),
-            0x13 => d.digits.clone(),
-            0x14 => d.currency.clone(),
+            0x13 => self.decimal()?.digits.clone(),
+            0x14 => self.decimal()?.currency.clone(),
             0x15 => self.region.currency.into(),
             0x19 | 0x1a => return number(u32::from(self.region.currency_digits)),
-            0x1b => return number(d.currency_order),
+            0x1b => return number(self.decimal()?.currency_order),
             0x1c => {
-                return number(match d.currency_order {
+                return number(match self.decimal()?.currency_order {
                     0 => 1,
                     1 => 5,
                     2 => 9,
@@ -74,10 +78,12 @@ impl LocaleData32 {
             })[(kind - 0x44) as usize]
                 .clone(),
             0x50 => String::new(),
-            0x51 => d.negative.clone(),
+            0x51 => self.decimal()?.negative.clone(),
             0x52 | 0x53 => return number(1),
-            0x54 | 0x56 => return number(u32::from(matches!(d.currency_order, 0 | 2))),
-            0x55 | 0x57 => return number(u32::from(d.currency_order >= 2)),
+            0x54 | 0x56 => {
+                return number(u32::from(matches!(self.decimal()?.currency_order, 0 | 2)));
+            }
+            0x55 | 0x57 => return number(u32::from(self.decimal()?.currency_order >= 2)),
             0x59 => self.identity.language.into(),
             0x5a => self.region_name.clone(),
             0x5c => self.identity.windows_name().into(),
@@ -90,7 +96,7 @@ impl LocaleData32 {
             0x68 => self.region.alpha3.into(),
             0x69 => "NaN".into(),
             0x6a => "∞".into(),
-            0x6b => format!("{}∞", d.negative),
+            0x6b => format!("{}∞", self.decimal()?.negative),
             0x6c => match self.script.as_str() {
                 "Jpan" => "Hani;Hira;Kana;".into(),
                 "Kore" => "Hani;Hang;".into(),
@@ -104,7 +110,7 @@ impl LocaleData32 {
                 self.identity.name
             }
             .into(),
-            0x6f => self.localized.language.clone(),
+            0x6f => self.localized.language()?.to_owned(),
             0x70 => {
                 return number(match self.script.as_str() {
                     "Arab" | "Hebr" | "Syrc" | "Thaa" | "Nkoo" | "Adlm" | "Rohg" => 1,
@@ -113,8 +119,8 @@ impl LocaleData32 {
                 });
             }
             0x71 => return number(u32::from(self.region_name.is_empty())),
-            0x72 => self.english.display.clone(),
-            0x73 => self.native.display.clone(),
+            0x72 => self.english.display()?.to_owned(),
+            0x73 => self.native.display()?.to_owned(),
             0x78 => c.month_day.clone(),
             0x79 => crate::windows::nls::calendar::time_pattern(&c.time, 2),
             0x7a => self.identity.windows_three_letter.into(),
@@ -129,14 +135,14 @@ impl LocaleData32 {
                 .rsplit_once('-')
                 .map_or("", |value| value.0)
                 .into(),
-            0x1001 => self.english.language.clone(),
-            0x1002 => self.english.region.clone(),
+            0x1001 => self.english.language()?.to_owned(),
+            0x1002 => self.english.region()?.to_owned(),
             0x1003 => c.time.clone(),
             0x1004 => return number(self.identity.ansi),
             0x1005 => return number(u32::from(c.time.trim_start().starts_with("tt"))),
             0x1006 => c.year_month.clone(),
-            0x1007 => self.english_currency.clone(),
-            0x1008 => self.native_currency.clone(),
+            0x1007 => self.currency_name(true)?.to_owned(),
+            0x1008 => self.currency_name(false)?.to_owned(),
             0x1009 => return number(u32::from(self.region.calendar)),
             0x100e | 0x100f => String::new(),
             0x100a => return number(u32::from(self.region.paper)),
