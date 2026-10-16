@@ -52,6 +52,10 @@ impl CpuClock {
         self.observe(now_ns)
     }
 
+    pub(in crate::process) fn frequency(&self) -> Result<u64, HostError> {
+        self.state.as_ref().map(|state| state.frequency_hz).ok_or(HostError::Infrastructure)
+    }
+
     pub(in crate::process) fn timestamp(&self) -> Result<u64, HostError> {
         self.state
             .as_ref()

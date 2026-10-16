@@ -18,6 +18,7 @@ use crate::{
     },
 };
 
+mod accounting;
 mod paging;
 mod restart;
 pub(in crate::process) mod site;
@@ -41,6 +42,26 @@ pub(in crate::process) enum DetectionSlot32 {
         page_fault: Option<VerifiedPageFault32>,
     },
     Ready(ConsumedDetection32),
+    Returned(ReturnedDetection32),
+}
+
+pub(in crate::process) struct ReturnedDetection32 {
+    epoch: u64,
+    owner: PendingOwner,
+    callback_token: Option<u32>,
+    state: [u8; STATE_SIZE],
+    exit: [u8; EXIT_SIZE],
+    extended: ExtendedCpuState,
+    work: [u8; WORK_SIZE],
+}
+
+impl ReturnedDetection32 {
+    fn matches(&self, arena: &[u8]) -> bool {
+        arena[STATE_OFFSET..STATE_OFFSET + STATE_SIZE] == self.state
+            && arena[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE] == self.exit
+            && self.extended.matches(arena)
+            && arena[WORK_OFFSET..WORK_OFFSET + WORK_SIZE] == self.work
+    }
 }
 
 /// one opaque sealed snapshot, movable only by consume; no duplicate compiled-material ownership.
@@ -56,6 +77,8 @@ pub(in crate::process) struct ConsumedDetection32 {
     extended: ExtendedCpuState,
     work: [u8; WORK_SIZE],
     retired: u32,
+    privileged_instruction: bool,
+    guard_page: Option<crate::memory::GuardPage32>,
 }
 
 impl ConsumedDetection32 {
@@ -64,6 +87,8 @@ impl ConsumedDetection32 {
             decode_current_segment_context, decode_simd, decode_x87, decode_ymm,
         };
         crate::process::CpuEvent32 {
+            owner: self.owner,
+            callback_token: self.callback_token,
             epoch: self.epoch,
             origin: match self.event {
                 DetectedEvent32::Exception(origin) => Some(origin),
@@ -96,6 +121,8 @@ impl ConsumedDetection32 {
             .unwrap(),
             ymm: decode_ymm(&self.extended.upper).unwrap(),
             work_consumed: header::read_u32(&self.work, 16),
+            privileged_instruction: self.privileged_instruction,
+            guard_page: self.guard_page,
         }
     }
     #[cfg(test)]
@@ -305,6 +332,39 @@ impl EngineInstance {
         ) {
             return Err(HostError::Call(CallError::InvalidStop));
         }
+        let privileged_instruction = if matches!(
+            event,
+            DetectedEvent32::Exception(EventOrigin32::Exception(
+                ExceptionCause32::GeneralProtection(_)
+            ))
+        ) {
+            let artifact = match owner {
+                PendingOwner::Replacement(_) => {
+                    self.artifact.as_ref().ok_or(HostError::InvalidArtifact)?
+                }
+                PendingOwner::Resident(id) | PendingOwner::ResidentCallback { unit_id: id, .. } => {
+                    self.resident
+                        .as_ref()
+                        .ok_or(HostError::InvalidArtifact)?
+                        .get_retained_raw(self.memory()?, id)
+                        .map_err(HostError::Resident)?
+                }
+            };
+            artifact.is_privileged_instruction_at(input.eip)
+        } else {
+            false
+        };
+        let guard_page = match event {
+            DetectedEvent32::MemoryFailure { fault, .. }
+                if fault.reason == crate::memory::FaultReason::Permission =>
+            {
+                self.memory()?.guard_page(fault.address)
+            }
+            DetectedEvent32::Exception(EventOrigin32::Exception(ExceptionCause32::PageFault(
+                fault,
+            ))) => self.memory()?.guard_page(fault.linear()),
+            _ => None,
+        };
         let record = ConsumedDetection32 {
             epoch,
             owner,
@@ -317,6 +377,8 @@ impl EngineInstance {
             extended,
             work,
             retired: exit.retired,
+            privileged_instruction,
+            guard_page,
         };
         self.exception_detection.as_mut().unwrap()[0] = DetectionSlot32::Ready(record);
         Ok(())
@@ -343,7 +405,7 @@ impl EngineInstance {
         if exit.reason != ExitReason::NeedCode {
             return Err(HostError::Call(CallError::InvalidStop));
         }
-        ExtendedCpuState::capture(arena)?;
+        let extended = ExtendedCpuState::capture(arena)?;
         let work = &arena[WORK_OFFSET..WORK_OFFSET + WORK_SIZE];
         header::validate(work, *b"R3WK", WORK_SIZE)
             .map_err(|_| HostError::Call(CallError::InvalidStop))?;
@@ -351,7 +413,20 @@ impl EngineInstance {
             return Err(HostError::Call(CallError::InvalidStop));
         }
         // cr2 and its occurrence sequence describe the real native access observation.
-        self.exception_detection.as_mut().unwrap()[0] = DetectionSlot32::Idle;
+        let returned = ReturnedDetection32 {
+            epoch,
+            owner,
+            callback_token,
+            state: arena[STATE_OFFSET..STATE_OFFSET + STATE_SIZE]
+                .try_into()
+                .unwrap(),
+            exit: arena[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE]
+                .try_into()
+                .unwrap(),
+            extended,
+            work: work.try_into().unwrap(),
+        };
+        self.exception_detection.as_mut().unwrap()[0] = DetectionSlot32::Returned(returned);
         Ok(())
     }
 

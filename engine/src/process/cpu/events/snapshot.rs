@@ -21,6 +21,8 @@ pub struct CpuInstructionSite32 {
 
 /// immutable cpu output for an os exception or service provider; not a resume token.
 pub struct CpuEvent32 {
+    pub(in crate::process) owner: crate::process::calls::call::PendingOwner,
+    pub(in crate::process) callback_token: Option<u32>,
     pub epoch: u64,
     pub origin: Option<EventOrigin32>,
     pub instruction: Option<CpuInstructionSite32>,
@@ -32,10 +34,16 @@ pub struct CpuEvent32 {
     pub segments: SegmentContext,
     pub ymm: YmmUpperState,
     pub work_consumed: u32,
+    pub(in crate::process) privileged_instruction: bool,
+    pub(in crate::process) guard_page: Option<crate::memory::GuardPage32>,
 }
 
 impl CpuEvent32 {
-    #[cfg(any(target_arch = "wasm32", test))]
+    /// class of the admitted instruction that produced this sealed event, independent of later code writes.
+    pub fn is_privileged_instruction(&self) -> bool {
+        self.privileged_instruction
+    }
+
     pub(in crate::process) fn matches_context(&self, arena: &[u8]) -> bool {
         use crate::abi::{arena::*, x86::*};
         decode_state(&arena[STATE_OFFSET..STATE_OFFSET + STATE_SIZE]) == Ok(self.state)
@@ -64,6 +72,33 @@ impl CpuEvent32 {
 }
 
 impl EngineInstance {
+    /// validates a trusted host's post-return duration claim before another execution entry.
+    pub(in crate::process) fn validate_execution_return_epoch(
+        &self,
+        epoch: u64,
+    ) -> Result<crate::process::calls::call::PendingOwner, HostError> {
+        self.memory()?;
+        #[cfg(any(target_arch = "wasm32", test))]
+        {
+            self.validate_detected_return_epoch(epoch)
+        }
+        #[cfg(not(any(target_arch = "wasm32", test)))]
+        {
+            let event = self
+                .cpu_event
+                .as_ref()
+                .filter(|event| event.epoch == epoch && epoch != 0)
+                .ok_or(HostError::Call(crate::process::CallError::InvalidToken))?;
+            if !event.matches_context(self.arena()) {
+                return Err(HostError::Call(crate::process::CallError::StateChanged));
+            }
+            if self.callback.as_ref().map(|callback| callback.token()) != event.callback_token {
+                return Err(HostError::Call(crate::process::CallError::InvalidToken));
+            }
+            Ok(event.owner)
+        }
+    }
+
     /// takes the last validated stop once, before the next execution entry replaces it.
     pub fn take_cpu_event32(&mut self) -> Result<Option<CpuEvent32>, HostError> {
         self.memory()?;
