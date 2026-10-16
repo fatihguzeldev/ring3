@@ -51,3 +51,5 @@ pub mod activation;
 pub mod gdi;
 
 pub mod version;
+
+pub mod shell;
