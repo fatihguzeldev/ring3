@@ -3,6 +3,8 @@
 mod interface;
 #[path = "reader.rs"]
 mod reader;
+#[path = "validation.rs"]
+mod validation;
 
 pub fn assert_bound(
     wasm: &[u8],

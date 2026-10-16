@@ -1,22 +1,5 @@
 use super::reader::{Reader, section};
-use std::{
-    io::Write,
-    process::{Command, Stdio},
-};
-
-pub fn validate(wasm: &[u8]) {
-    let mut child = Command::new("node")
-        .args(["-e", "const b=require('node:fs').readFileSync(0);if(!WebAssembly.validate(b))process.exit(1);new WebAssembly.Module(b);"])
-        .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped())
-        .spawn().unwrap();
-    child.stdin.take().unwrap().write_all(wasm).unwrap();
-    let result = child.wait_with_output().unwrap();
-    assert!(
-        result.status.success(),
-        "{}",
-        String::from_utf8_lossy(&result.stderr)
-    );
-}
+use super::validation::validate;
 
 pub fn assert_packed(input: &[u8], count: usize, profiled: bool) {
     let mut input = Reader(input);
