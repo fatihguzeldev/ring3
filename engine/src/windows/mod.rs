@@ -32,3 +32,5 @@ pub mod winmm;
 pub mod memory;
 
 pub mod exceptions;
+
+pub mod nls;
