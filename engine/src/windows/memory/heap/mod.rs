@@ -4,12 +4,14 @@ mod lifetime;
 mod movable;
 mod policy;
 mod queries;
+mod retirement;
 
 #[cfg(test)]
 mod identities;
 
 pub(crate) use allocation::PreparedHeapAllocation32;
 pub(crate) use group::PreparedHeapAllocations32;
+pub(crate) use retirement::PreparedHeapRetirement32;
 
 use super::*;
 use crate::memory::{AddressSpace, GuestAddress, PAGE_SIZE, PageRange};

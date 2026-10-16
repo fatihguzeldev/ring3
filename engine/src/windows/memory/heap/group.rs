@@ -216,7 +216,7 @@ impl HeapManager32 {
         Ok(())
     }
 }
-fn coalesce_blocks(blocks: &mut Vec<Block32>) {
+pub(super) fn coalesce_blocks(blocks: &mut Vec<Block32>) {
     let mut count = 0usize;
     for position in 0..blocks.len() {
         let block = blocks[position];

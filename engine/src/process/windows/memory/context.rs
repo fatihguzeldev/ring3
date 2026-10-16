@@ -2,6 +2,34 @@ use super::*;
 use crate::process::{EngineInstance, HostError};
 
 impl EngineInstance {
+    pub(in crate::process) fn prepare_windows_runtime_retirement(
+        &self,
+        owned: &[(u32, u64)],
+    ) -> Result<Option<crate::windows::memory::PreparedHeapRetirement32>, HostError> {
+        if owned.is_empty() {
+            return Ok(None);
+        }
+        let heap = self
+            .process_heap()
+            .ok_or(HostError::WindowsMemory(MemoryError32::InvalidHandle))?;
+        self.windows_memory
+            .heaps
+            .prepare_retirement(heap, owned)
+            .map(Some)
+            .map_err(HostError::WindowsMemory)
+    }
+
+    pub(in crate::process) fn commit_windows_runtime_retirement_after_memory(
+        &mut self,
+        prepared: Option<crate::windows::memory::PreparedHeapRetirement32>,
+    ) {
+        if let Some(prepared) = prepared {
+            self.windows_memory
+                .heaps
+                .commit_retirement_after_memory(prepared);
+        }
+    }
+
     pub(in crate::process) fn windows_runtime_allocation_identity(
         &self,
         pointer: u32,
