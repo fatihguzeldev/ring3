@@ -1,4 +1,4 @@
-import {pageFaultExit} from '../../../../../../../support/wasm/page-fault.mjs';
+import {pageFaultExit, pageFaultPacket} from '../../../../../../../support/wasm/page-fault.mjs';
 import {generatedImports, attachDetectionApi} from '../../../../../../../support/wasm/binding.mjs';
 import {createArena} from '../../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
@@ -39,7 +39,7 @@ const exit = (reason, retired, detail = 0, address = 0, access = 0, length = 0, 
       })
     : record('R3EX', 40, [reason, retired, detail, address, access, length], version);
 const helper=(value,detail=0,address=0)=>record('R3MH',40,detail?[1,0,detail,address,1,1]:[0,value,0,0,0,1],2);
-const cpuHelper=(value,detail=0,address=0)=>record('R3MH',40,detail?[1,0,detail,address,1,1]:[0,value,0,0,0,1],10);
+const cpuHelper=(value,detail=0,address=0)=>detail?pageFaultPacket({errorCode:4|Number(detail===2),address,access:1,length:1}):record('R3MH',40,[0,value,0,0,0,1],10);
 function initial(){const b=createArena(SIZE);b.set(state({registers:Array(8).fill(0),pc:0,flags:2}));b.set(record('R3EX',40,[1,0,0,0,0,0]),56);b.set(record('R3MH',40),100);const fp=record('R3FP',128);fp.writeUInt16LE(0x37f,16);fp.writeUInt16LE(0xffff,20);b.set(fp,FP);return b;}
 function opaqueFpu(seed){const b=record('R3FP',128);b.writeUInt16LE(0x27f,16);b.writeUInt16LE(0x81a5,18);b.writeUInt16LE(0x55aa,20);b.writeUInt16LE(0x7ff,22);b.writeUInt32LE(0xf1234567,24);b.writeUInt32LE(0xfedcba98,28);b.writeUInt16LE(0xf135,32);b.writeUInt16LE(0xe246,34);b.set(Buffer.from(Array.from({length:80},(_,i)=>(i*73+seed*29+17)&255)),40);return b;}
 function observed(ctx){return Buffer.from(new Uint8Array(ctx.memory.buffer,ctx.base,SIZE));}
@@ -68,7 +68,7 @@ function compile(ctx){
 function seed(ctx,pc,base,al,flags=2){ctx.cpu={registers:[(0xa53c7b00|al)>>>0,0x1234807f,0x23457f80,base>>>0,0x4567ff00,0x56789abc,0x6789abcd,0x789abcde],pc,flags};input(ctx,0,state(ctx.cpu));input(ctx,56,exit(3,0));input(ctx,96,words([0]));}
 function run(ctx,unit,label,budget,next,reason=1,retired=1,nextHelper,status=0,fault,pointers){
   check(ctx,'before generated');const before=observed(ctx),index=rows.length;
-  if(status===0){ctx.expected.set(state(next));ctx.expected.set(exit(reason,retired,fault?.detail,fault?.address,fault?1:0,fault?1:0,6),56);if(nextHelper)ctx.expected.set(nextHelper,100);}
+  if(status===0){ctx.expected.set(state(next));ctx.expected.set(reason===5?pageFaultExit({retired,errorCode:4|(fault.detail===2?1:0),address:fault.address,access:1,length:1}):exit(reason,retired,fault?.detail,fault?.address,fault?1:0,fault?1:0,6),56);if(nextHelper)ctx.expected.set(reason===5?pageFaultPacket({errorCode:4|(fault.detail===2?1:0),address:fault.address,access:1,length:1}):nextHelper,100);}
   assert.equal(unit.run(...(pointers??[ctx.base,ctx.base+56,budget,ctx.base+96])),status);check(ctx,'after generated');
   const after=observed(ctx);rows.push({profile:ctx.profile,label,budget,status,reason,retired,frame:index*2,pointers:pointers??null});frames.push(before,after);events.push({profile:ctx.profile,kind:'run',row:index});counts.generated_calls++;counts.retired+=status===0?retired:0;if(status===0)ctx.cpu=next;return {before,after};
 }
