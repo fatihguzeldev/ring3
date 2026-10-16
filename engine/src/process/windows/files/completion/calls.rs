@@ -15,8 +15,10 @@ impl FileRuntime32 {
         handle: u32,
     ) -> Result<CompletionTarget32, FileError32> {
         let target = self.handles.io_target(handle)?;
-        let CompletionTarget32::File(open) = target;
-        let overlapped = self.vfs.open_options(open)?.overlapped;
+        let overlapped = match target {
+            CompletionTarget32::File(open) => self.vfs.open_options(open)?.overlapped,
+            CompletionTarget32::Null(id) => self.null_devices.overlapped(id)?,
+        };
         if !overlapped {
             return Err(FileError32::InvalidParameter);
         }

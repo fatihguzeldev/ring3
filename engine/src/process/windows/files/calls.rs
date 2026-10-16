@@ -14,6 +14,7 @@ struct FileExecutionContext32<'a> {
     thread: u32,
     security: &'a crate::windows::security::SecurityRuntime32,
     threads: &'a crate::process::windows::threads::ThreadRuntime32,
+    console_attached: bool,
 }
 
 impl EngineInstance {
@@ -184,6 +185,7 @@ impl EngineInstance {
                     thread: current_thread,
                     security: &self.windows_security,
                     threads: &self.threads,
+                    console_attached: self.console.attached(),
                 },
                 api,
                 args,
@@ -266,7 +268,41 @@ impl FileRuntime32 {
             thread,
             security,
             threads,
+            console_attached,
         } = context;
+        if matches!(api, FileApi32::CreateFileA | FileApi32::CreateFileW) {
+            let path = ordinary::memory::path(
+                memory,
+                args[0],
+                api == FileApi32::CreateFileW,
+                self.ordinary.ansi,
+            )?;
+            if let Some(device) = crate::windows::files::devices::device_name(&path) {
+                return self.open_device(memory, device, args, console_attached);
+            }
+        }
+        if args.first().is_some_and(|handle| {
+            matches!(
+                self.handles.object(*handle),
+                Ok(handles::KernelFileObject32::Null(_))
+            )
+        }) {
+            if matches!(api, FileApi32::ReadFile | FileApi32::WriteFile) {
+                return self.transfer_null_device(memory, sync, api, args);
+            }
+            if matches!(
+                api,
+                FileApi32::GetFileType
+                    | FileApi32::GetFileSize
+                    | FileApi32::GetFileSizeEx
+                    | FileApi32::SetFilePointer
+                    | FileApi32::SetFilePointerEx
+                    | FileApi32::SetEndOfFile
+                    | FileApi32::FlushFileBuffers
+            ) {
+                return self.null_metadata(memory, api, args);
+            }
+        }
         if (0x000a_0090..=0x000a_0094).contains(&api.id()) {
             return self.execute_completion_api(memory, threads, now, thread, api, args);
         }

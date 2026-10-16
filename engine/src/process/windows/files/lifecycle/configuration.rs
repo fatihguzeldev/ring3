@@ -30,6 +30,10 @@ impl EngineInstance {
                 4096,
             )
             .map_err(HostError::File)?,
+            null_devices: crate::windows::files::devices::NullDevices32::new(
+                config.handles as usize,
+            )
+            .map_err(HostError::File)?,
             completion_wait: None,
             reply: None,
             events: Vec::new(),

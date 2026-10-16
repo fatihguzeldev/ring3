@@ -7,6 +7,7 @@ pub(super) enum KernelFileObject32 {
     File(OpenFileId),
     Mapping(u64),
     CompletionPort(crate::windows::files::completion::CompletionPortId32),
+    Null(crate::windows::files::devices::DeviceDescriptionId32),
     Find(u64),
 }
 #[derive(Clone, Copy)]
@@ -126,8 +127,28 @@ impl KernelFileHandles32 {
             KernelFileObject32::File(open) => Ok(
                 crate::windows::files::completion::CompletionTarget32::File(open),
             ),
+            KernelFileObject32::Null(id) => Ok(
+                crate::windows::files::completion::CompletionTarget32::Null(id),
+            ),
             _ => Err(FileError32::InvalidHandle),
         }
+    }
+    pub(super) fn io_count(
+        &self,
+        target: crate::windows::files::completion::CompletionTarget32,
+    ) -> usize {
+        let object = match target {
+            crate::windows::files::completion::CompletionTarget32::Null(id) => {
+                KernelFileObject32::Null(id)
+            }
+            crate::windows::files::completion::CompletionTarget32::File(open) => {
+                KernelFileObject32::File(open)
+            }
+        };
+        self.entries
+            .iter()
+            .filter(|entry| entry.object == object)
+            .count()
     }
     pub(super) fn file_count(&self, open: OpenFileId) -> usize {
         self.entries

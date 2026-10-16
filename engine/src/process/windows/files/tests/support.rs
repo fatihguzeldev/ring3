@@ -38,6 +38,7 @@ pub(in crate::process::windows::files) fn runtime()
                 16, 64, 16, 4096,
             )
             .unwrap(),
+            null_devices: crate::windows::files::devices::NullDevices32::new(64).unwrap(),
             completion_wait: None,
             reply: None,
             events: Vec::new(),

@@ -43,8 +43,14 @@ impl FileRuntime32 {
         &self,
         target: crate::windows::files::completion::CompletionTarget32,
     ) -> Result<(), FileError32> {
-        let crate::windows::files::completion::CompletionTarget32::File(open) = target;
-        self.vfs.open_info(open)?;
+        match target {
+            crate::windows::files::completion::CompletionTarget32::Null(id) => {
+                self.null_devices.overlapped(id)?;
+            }
+            crate::windows::files::completion::CompletionTarget32::File(open) => {
+                self.vfs.open_info(open)?;
+            }
+        }
         Ok(())
     }
     #[cfg(test)]

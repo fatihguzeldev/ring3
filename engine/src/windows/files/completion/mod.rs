@@ -23,6 +23,7 @@ pub(crate) struct CompletionPortId32(pub u64);
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CompletionTarget32 {
     File(OpenFileId),
+    Null(crate::windows::files::devices::DeviceDescriptionId32),
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct CompletionPacket32 {

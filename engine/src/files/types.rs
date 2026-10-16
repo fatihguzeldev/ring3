@@ -35,6 +35,7 @@ pub const ATTR_NORMAL: u32 = 0x80;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FileError32 {
     InvalidLimits,
+    InvalidFunction,
     InvalidHandle,
     NoAccess,
     InvalidAddress,
@@ -73,6 +74,7 @@ pub enum FileError32 {
 impl FileError32 {
     pub fn win32(self) -> u32 {
         match self {
+            Self::InvalidFunction => 1,
             Self::LockViolation => 33,
             Self::UserMappedFile => 1224,
             Self::InvalidAddress => 487,

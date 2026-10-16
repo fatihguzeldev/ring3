@@ -10,6 +10,9 @@ pub(crate) enum PreparedConsoleControl32 {
     Remove(usize),
 }
 impl ConsoleControl32 {
+    pub(crate) const fn attached(&self) -> bool {
+        false
+    }
     pub(crate) const fn new() -> Self {
         Self {
             handlers: [0; 64],
