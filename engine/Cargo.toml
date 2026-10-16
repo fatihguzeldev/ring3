@@ -343,6 +343,10 @@ name = "windows_exceptions_wasm"
 path = "tests/windows/exceptions/wasm.rs"
 
 [[test]]
+name = "windows_crt_wasm"
+path = "tests/windows/crt/wasm.rs"
+
+[[test]]
 name = "windows_threads_wasm"
 path = "tests/windows/threads/wasm.rs"
 

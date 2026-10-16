@@ -1,5 +1,6 @@
 import argparse
 import hashlib
+import importlib.util
 import json
 from pathlib import Path
 import shutil
@@ -9,7 +10,6 @@ import tarfile
 import configuration as config
 import headers
 import linking
-import pe
 
 def digest(path):
     hash = hashlib.sha256()
@@ -37,6 +37,11 @@ def main():
     work = output / "build"
     work.mkdir()
     here = Path(__file__).resolve().parent
+    repository = here.parents[5]
+    inspection_path = repository / "engine/tests/support/pe32/inspection.py"
+    spec = importlib.util.spec_from_file_location("pe_inspection", inspection_path)
+    inspection = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(inspection)
     commands = []
     def run(command, cwd=None):
         commands.append({"argv": command, "cwd": str(cwd or work)})
@@ -61,7 +66,7 @@ def main():
     asm = [str(toolchain / "bin/clang"), "-target", "i686-w64-windows-gnu", "-c", "-x", "assembler-with-cpp", "-D_M_IX86", "-I" + str(work / "generated"), "-I" + str(source / "sdk/include/asm")]
     asm_objects = {name: compile(asm, source / name, name) for name in config.ASM_UNITS}
     objects += list(asm_objects.values())
-    # LLVM's COFF assembler rejects MASM's inferred PUSH-immediate relocation.
+    # llvm's coff assembler rejects masm's inferred PUSH-immediate relocation.
     seh = (source / "sdk/lib/pseh/i386/seh.s").read_text()
     assert seh.count("push offset _unwind_handler") == 1
     adapted = work / "generated/seh.s"
@@ -91,12 +96,12 @@ def main():
     inventory = {}
     for name in ["msvcrt.dll", "hosted.exe", "hosted-dll.dll"]:
         shutil.copyfile(work / name, artifacts / name)
-        inventory[name] = pe.inspect(artifacts / name)
+        inventory[name] = inspection.inspect(artifacts / name)
     assert inventory["hosted.exe"]["tlsDirectory"] != 0
     assert inventory["hosted-dll.dll"]["tlsDirectory"] != 0
     for name in ["hosted.exe", "hosted-dll.dll"]:
         assert set(inventory[name]["imports"]["msvcrt.dll"]) <= set(inventory["msvcrt.dll"]["exports"])
-    receipt = {"sourceCommit": config.COMMIT, "sourceUrl": "https://codeload.github.com/reactos/reactos/tar.gz/" + config.COMMIT, "toolchainUrl": "https://github.com/mstorsjo/llvm-mingw/releases/download/20261006/" + config.TOOLCHAIN + ".tar.xz", "licenses": ["ReactOS original CRT files retain LGPL/GPL notices in pinned source", "MinGW hosted startup is public domain", "selected vcruntime helpers are MIT or CC0 as declared by their original source", "LLVM-MinGW distribution retains its bundled licenses"], "producerSources": {path.name: digest(path) for path in here.iterdir() if path.suffix in [".py", ".cpp", ".def"]}, "sourceArchiveSha256": config.SOURCE_SHA, "toolchainArchiveSha256": config.TOOLCHAIN_SHA, "toolchain": config.TOOLCHAIN, "compiler": subprocess.check_output([str(toolchain / "bin/clang"), "--version"], text=True), "sourceUnits": source_hashes, "authoredSources": {name: digest(here / name) for name in ["hosted.cpp", "hosted-dll.cpp"]}, "offsets": constants, "artifacts": inventory, "expectedFile": "C:\\Temp\\hosted.txt", "expectedBytes": "MDLCaTYbJEFAGX", "expectedExit": 0, "threadOracle": {"childReturn": 42, "primaryTls": 71, "childTls": 23, "dllPrimaryTls": 29, "dllChildTls": 41, "attach": "a", "allocationIo": "T", "flsDestructor": "Y", "detach": "b", "joined": "J"}, "profile": {"crt": "unmodified ReactOS CRT source with function-section GC and explicit public export selection", "startup": "original ReactOS MinGW hosted EXE/DLL startup with MSVC compiler EH and original pseudo-relocator", "compatibility": ["compiler-generated XDK headers and i386 field offsets", "original vtable macro metadata emitted in GAS syntax", "one PUSH relocation emitted with exact32-bit opcode", "exact COFF C++/stdcall import metadata", "compiler TLS offset from original TEB layout"], "limits": ["no proprietary DLL input", "no CRT stub imports", "no whole-CRT or arbitrary-C++ compatibility claim", "no browser SDK claim"]}}
+    receipt = {"sourceCommit": config.COMMIT, "sourceUrl": "https://codeload.github.com/reactos/reactos/tar.gz/" + config.COMMIT, "toolchainUrl": "https://github.com/mstorsjo/llvm-mingw/releases/download/20261006/" + config.TOOLCHAIN + ".tar.xz", "licenses": ["ReactOS original CRT files retain LGPL/GPL notices in pinned source", "MinGW hosted startup is public domain", "selected vcruntime helpers are MIT or CC0 as declared by their original source", "LLVM-MinGW distribution retains its bundled licenses"], "producerDirectory": str(here.relative_to(repository)), "inspectionSource": str(inspection_path.relative_to(repository)), "inspectionSha256": digest(inspection_path), "producerSources": {path.name: digest(path) for path in here.iterdir() if path.suffix in [".py", ".cpp", ".def"]}, "sourceArchiveSha256": config.SOURCE_SHA, "toolchainArchiveSha256": config.TOOLCHAIN_SHA, "toolchain": config.TOOLCHAIN, "compiler": subprocess.check_output([str(toolchain / "bin/clang"), "--version"], text=True), "sourceUnits": source_hashes, "authoredSources": {name: digest(here / name) for name in ["hosted.cpp", "hosted-dll.cpp"]}, "offsets": constants, "artifacts": inventory, "expectedFile": "C:\\Temp\\hosted.txt", "expectedBytes": "MDLCaTYbJEFAGX", "expectedExit": 0, "threadOracle": {"childReturn": 42, "primaryTls": 71, "childTls": 23, "dllPrimaryTls": 29, "dllChildTls": 41, "attach": "a", "allocationIo": "T", "flsDestructor": "Y", "detach": "b", "joined": "J"}, "profile": {"crt": "unmodified ReactOS CRT source with function-section GC and explicit public export selection", "startup": "original ReactOS MinGW hosted EXE/DLL startup with MSVC compiler EH and original pseudo-relocator", "compatibility": ["compiler-generated XDK headers and i386 field offsets", "original vtable macro metadata emitted in GAS syntax", "one PUSH relocation emitted with exact32-bit opcode", "exact COFF C++/stdcall import metadata", "compiler TLS offset from original TEB layout"], "limits": ["no proprietary DLL input", "no CRT stub imports", "no whole-CRT or arbitrary-C++ compatibility claim", "no browser SDK claim"]}}
     (artifacts / "provenance.json").write_text(json.dumps(receipt, indent=2) + "\n")
     (work / "commands.json").write_text(json.dumps(commands, indent=2) + "\n")
     print(json.dumps({"artifacts": str(artifacts), "hashes": {name: value["sha256"] for name, value in inventory.items()}}))

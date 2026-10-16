@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {mkdirSync, readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
-import {ARENA_SIZE} from '../../../../../support/wasm/arena.mjs';
-import {assertEngineExports} from '../../../../../support/wasm/exports.mjs';
-import {cache, pair} from '../../../../../support/wasm/cache.mjs';
+import {ARENA_SIZE} from '../../../../support/wasm/arena.mjs';
+import {assertEngineExports} from '../../../../support/wasm/exports.mjs';
+import {cache, pair} from '../../../../support/wasm/cache.mjs';
 
 const [enginePath, output, root] = process.argv.slice(2);
 const artifacts = process.env.RING3_OSS_CRT_FIXTURE_DIR;
@@ -14,8 +14,9 @@ const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const provenance = JSON.parse(readFileSync(join(artifacts, 'provenance.json')));
 assert.equal(provenance.sourceCommit, '51bfc7037359b594876a349b46b992e363e79838');
 for (const [name, expected] of Object.entries(provenance.producerSources)) {
-  assert.equal(hash(readFileSync(join(root, 'engine/tests/windows/exceptions/fixtures/crt/producer', name))), expected, name);
+  assert.equal(hash(readFileSync(join(root, provenance.producerDirectory, name))), expected, name);
 }
+assert.equal(hash(readFileSync(join(root, provenance.inspectionSource))), provenance.inspectionSha256);
 const engineBytes = readFileSync(enginePath), engineHash = hash(engineBytes);
 assert.equal(engineHash, process.env.RING3_ENGINE_SHA256);
 const engineModule = new WebAssembly.Module(engineBytes);
