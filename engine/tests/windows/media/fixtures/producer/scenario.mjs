@@ -1,4 +1,4 @@
-import {captureEffects} from './capture_effects.mjs';
+import {captureEffects} from './capture/effects.mjs';
 import {effects} from './effects.mjs';
 import {haptics} from './haptics.mjs';
 import {activation} from './activation.mjs';

@@ -7,7 +7,7 @@ import {ARENA_SIZE} from '../../../../support/wasm/arena.mjs';
 import {assertEngineExports} from '../../../../support/wasm/exports.mjs';
 import {image} from '../producer/scenario.mjs';
 import {configure} from './setup.mjs';
-import {afterCaptureEffectCall} from './capture_effects.mjs';
+import {afterCaptureEffectCall} from './capture/effects.mjs';
 import {afterEffectCall} from './effects.mjs';
 import {afterHapticCall,inspectForceFileCallback} from './haptics.mjs';
 import {beforeActivationCall, afterActivationCall} from './activation.mjs';

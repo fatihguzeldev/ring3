@@ -7,7 +7,7 @@ impl LocaleData32 {
         if genitive && !matches!(kind, 0x38..=0x4f | 0x100e | 0x100f) {
             return Err(NlsError32::InvalidFlags);
         }
-        if let Some(value) = super::static_fields::static_information(self.identity.lcid, kind)? {
+        if let Some(value) = super::fields::static_information(self.identity.lcid, kind)? {
             return Ok(value);
         }
         let mut numeric = None;
@@ -227,11 +227,7 @@ impl LocaleData32 {
         Ok((text, None))
     }
     pub fn alternate_calendar_id(&self) -> u32 {
-        super::static_fields::alternate_calendar(
-            self.identity,
-            &self.region_name,
-            self.region.calendar,
-        )
+        super::fields::alternate_calendar(self.identity, &self.region_name, self.region.calendar)
     }
     pub fn calendar_id(&self) -> u32 {
         u32::from(self.region.calendar)
@@ -244,7 +240,7 @@ impl LocaleData32 {
         }
     }
     pub fn oem(&self) -> u32 {
-        super::static_fields::oem(self.identity.ansi, &self.region_name)
+        super::fields::oem(self.identity.ansi, &self.region_name)
     }
 }
 fn number(value: u32) -> Result<(String, Option<u32>), NlsError32> {

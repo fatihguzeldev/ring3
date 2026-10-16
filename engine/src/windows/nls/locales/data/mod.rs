@@ -1,5 +1,5 @@
-mod static_fields;
-pub use static_fields::{locale_number, static_information};
+mod fields;
+pub use fields::{locale_number, static_information};
 mod calendar;
 mod decimal;
 mod information;

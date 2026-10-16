@@ -1,5 +1,5 @@
 mod activation;
-mod capture_effects;
+mod capture;
 mod effects;
 mod lifetime;
 mod locks;

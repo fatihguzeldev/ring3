@@ -7,7 +7,7 @@ import {ARENA_SIZE} from '../../../../support/wasm/arena.mjs';
 import {assertEngineExports} from '../../../../support/wasm/exports.mjs';
 import {cache, pair} from '../../../../support/wasm/cache.mjs';
 import {configure} from './setup.mjs';
-import {verifyApartmentLog} from './apartment_oracles.mjs';
+import {verifyApartmentLog} from './apartments/oracles.mjs';
 
 const [enginePath, output, root] = process.argv.slice(2);
 const artifacts = process.env.RING3_COM_APARTMENTS_FIXTURE_DIR;

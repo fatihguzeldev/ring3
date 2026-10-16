@@ -7,8 +7,8 @@ import {ARENA_SIZE} from '../../../../support/wasm/arena.mjs';
 import {assertEngineExports} from '../../../../support/wasm/exports.mjs';
 import {cache, pair} from '../../../../support/wasm/cache.mjs';
 import {configure} from './setup.mjs';
-import {verifyMarshalingLog} from './marshaling_oracles.mjs';
-import {verifyRpcLog} from './rpc_oracles.mjs';
+import {verifyMarshalingLog} from './marshaling/oracles.mjs';
+import {verifyRpcLog} from './rpc/oracles.mjs';
 
 const [enginePath, output, root] = process.argv.slice(2);
 const artifacts = process.env.RING3_COM_MARSHAL_FIXTURE_DIR;

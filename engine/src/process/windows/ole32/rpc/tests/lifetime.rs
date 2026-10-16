@@ -484,5 +484,5 @@ fn abandoned_query_release_failure_keeps_its_native_reference_and_retry_phase() 
     assert_eq!(engine.memory().unwrap().transaction_version(), version);
 }
 
-mod packet_death;
+mod packet;
 mod ready;

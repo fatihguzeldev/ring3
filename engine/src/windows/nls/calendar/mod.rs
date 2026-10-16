@@ -1,5 +1,5 @@
-mod time_pattern;
-pub use time_pattern::time_pattern;
+mod time;
+pub use time::time_pattern;
 mod layout;
 pub use layout::DateLayout32;
 mod localized;

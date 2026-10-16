@@ -1,6 +1,6 @@
 use super::*;
 use crate::{
-    memory::{Access, GuestAddress, WordWrite32},
+    memory::{GuestAddress, WordWrite32},
     process::EngineInstance,
 };
 
@@ -75,19 +75,5 @@ impl EngineInstance {
             return Err(MemoryError32::InsufficientBuffer);
         }
         Ok(1)
-    }
-    pub(super) fn initialize_slist_head(&mut self, pointer: u32) -> Result<u32, MemoryError32> {
-        if !pointer.is_multiple_of(8) {
-            return Err(MemoryError32::InvalidParameter);
-        }
-        self.memory
-            .as_ref()
-            .unwrap()
-            .check_span(GuestAddress(pointer), 8, Access::Write)?;
-        self.memory
-            .as_mut()
-            .unwrap()
-            .write(GuestAddress(pointer), &[0; 8])?;
-        Ok(0)
     }
 }
