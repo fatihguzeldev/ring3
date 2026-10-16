@@ -90,6 +90,9 @@ impl SavedThread32 {
     pub(super) fn files_reply(&self) -> Option<&FileThreadReply32> {
         self.files.as_ref()
     }
+    pub(super) fn dinput_reply(&self) -> Option<&DirectInputThreadReply32> {
+        self.dinput.as_ref()
+    }
     pub(super) fn check_scratch(
         &self,
         memory: &crate::memory::AddressSpace,

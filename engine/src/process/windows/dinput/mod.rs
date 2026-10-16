@@ -4,6 +4,7 @@ mod activation;
 mod context;
 mod devices;
 mod dispatch;
+mod effects;
 mod enumeration;
 mod lifetime;
 mod memory;

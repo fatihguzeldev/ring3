@@ -77,7 +77,7 @@ impl DirectInputRuntime32 {
         let mut result = bytes(size as usize)?;
         for (index, value) in [
             size,
-            5,
+            5 | if device.haptics.is_some() { 0xff00 } else { 0 },
             self.device_type(
                 device.kind,
                 self.object(pointer)?.interface.generation() == 8,
@@ -90,6 +90,11 @@ impl DirectInputRuntime32 {
         .enumerate()
         {
             put(&mut result, index * 4, value);
+        }
+        if size == 44 && device.haptics.is_some() {
+            put(&mut result, 24, 1000);
+            put(&mut result, 28, 1);
+            put(&mut result, 40, 0x10000);
         }
         memory.write(GuestAddress(address), &result)?;
         Ok(0)
@@ -111,16 +116,27 @@ impl DirectInputRuntime32 {
         result[20..36].copy_from_slice(&self.device_guid(kind, true));
         put(&mut result, 36, self.device_type(kind, version8));
         let name = self.device_name(kind);
+        let ansi = if wide {
+            None
+        } else {
+            Some(super::names::ansi_name(&name, self.ansi, 259)?)
+        };
         for at in [40, 40 + 260 * if wide { 2 } else { 1 }] {
-            for (index, unit) in name.iter().take(259).enumerate() {
-                if wide {
+            if let Some(ansi) = &ansi {
+                result[at..at + ansi.len()].copy_from_slice(ansi);
+            } else {
+                for (index, unit) in name.iter().take(259).enumerate() {
                     result[at + index * 2..at + index * 2 + 2].copy_from_slice(&unit.to_le_bytes());
-                } else {
-                    result[at + index] = u8::try_from(*unit).unwrap_or(b'?');
                 }
             }
         }
         if size > minimum {
+            if matches!(kind,DeviceKind32::Controller(slot) if self.haptic_capabilities[slot as usize].is_some())
+            {
+                result[minimum..minimum + 16].copy_from_slice(&[
+                    0x52, 0x33, 0x46, 0x46, 0x08, 0, 0x40, 0x40, 0x80, 0, 0, 0, 0, 0, 0, 1,
+                ]);
+            }
             let usage = match kind {
                 DeviceKind32::Keyboard => 6,
                 DeviceKind32::Mouse => 2,
@@ -180,6 +196,17 @@ impl DirectInputRuntime32 {
             24,
             object.object_type(device.native.relative()),
         );
+        let actuator = matches!(object,DeviceObject32::Axis{index,aspect:0} if device.haptics.as_ref().is_some_and(|haptics|index<haptics.capabilities().axes));
+        let trigger = matches!(object, DeviceObject32::Button(_)) && device.haptics.is_some();
+        let aspect = match object {
+            DeviceObject32::Axis { aspect, .. } => u32::from(aspect + 1) * 0x100,
+            _ => 0,
+        };
+        put(
+            &mut result,
+            28,
+            aspect | u32::from(actuator) | (u32::from(trigger) * 2),
+        );
         let (name, _usage_page, _usage) = match object {
             DeviceObject32::Key(scan) => (crate::input::keyboard::key_name(scan), 7, 0),
             DeviceObject32::Button(index) => (format!("Button {}", index + 1), 9, index + 1),
@@ -193,14 +220,20 @@ impl DirectInputRuntime32 {
             ),
             DeviceObject32::Pov(index) => (format!("POV {}", index + 1), 1, 0x39),
         };
-        for (index, unit) in name.encode_utf16().take(259).enumerate() {
-            if interface.wide() {
+        if interface.wide() {
+            for (index, unit) in name.encode_utf16().take(259).enumerate() {
                 result[32 + index * 2..34 + index * 2].copy_from_slice(&unit.to_le_bytes());
-            } else {
-                result[32 + index] = u8::try_from(unit).unwrap_or(b'?');
             }
+        } else {
+            let units = name.encode_utf16().collect::<Vec<_>>();
+            let ansi = super::names::ansi_name(&units, self.ansi, 259)?;
+            result[32..32 + ansi.len()].copy_from_slice(&ansi);
         }
         if size > minimum {
+            if actuator {
+                put(&mut result, minimum, 10000);
+                put(&mut result, minimum + 4, 1);
+            }
             let (usage_page, usage) = crate::input::dinput::format::object_usage(object);
             result[minimum + 12..minimum + 14].copy_from_slice(&usage_page.to_le_bytes());
             result[minimum + 14..minimum + 16].copy_from_slice(&usage.to_le_bytes());

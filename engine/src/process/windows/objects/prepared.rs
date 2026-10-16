@@ -13,6 +13,10 @@ pub(crate) struct PreparedGuestLifetime32 {
     write_count: usize,
 }
 
+pub(crate) struct PreparedGuestRetain32 {
+    references: OwnedReferenceChanges32,
+}
+
 #[cfg(test)]
 mod tests;
 
@@ -23,6 +27,33 @@ impl PreparedGuestLifetime32 {
 }
 
 impl GuestComObjects32 {
+    pub(crate) fn prepare_retain_changes(
+        &self,
+        memory: &AddressSpace,
+        retain: &[GuestAddress],
+    ) -> Result<PreparedGuestRetain32, GuestComError32> {
+        let references = self.prepare_reference_receipt(memory, retain, &[], &[], &[])?;
+        Ok(PreparedGuestRetain32 { references })
+    }
+
+    pub(crate) fn can_commit_retain_changes(
+        &self,
+        prepared: &PreparedGuestRetain32,
+    ) -> Result<(), GuestComError32> {
+        Ok(self
+            .registry
+            .can_commit_owned_reference_changes(&prepared.references)?)
+    }
+
+    pub(crate) fn commit_retain_changes(&mut self, prepared: PreparedGuestRetain32) {
+        self.can_commit_retain_changes(&prepared)
+            .expect("retains were preflighted before disjoint RAM publication");
+        let destroyed = self
+            .registry
+            .commit_owned_reference_changes(prepared.references);
+        assert!(destroyed.is_empty());
+    }
+
     pub(crate) fn prepare_lifetime_changes(
         &self,
         memory: &AddressSpace,

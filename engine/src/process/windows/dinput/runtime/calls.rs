@@ -61,10 +61,14 @@ impl EngineInstance {
         } else {
             None
         };
+        let now = self.cpu_clock.monotonic_bounds()?.1;
+        let ansi = self.windows_ansi_code_page();
         let runtime = self
             .dinput
             .as_mut()
             .ok_or(HostError::DirectInput(DirectInputError32::NotConfigured))?;
+        runtime.now = now;
+        runtime.ansi = ansi;
         if let Some(factory) = factory {
             runtime
                 .initialize_methods(gates.as_deref().unwrap(), factory == FactoryGate::Create8)

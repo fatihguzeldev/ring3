@@ -6,4 +6,6 @@ mod support;
 
 mod enumeration;
 
+mod haptics;
+mod names;
 mod reset;

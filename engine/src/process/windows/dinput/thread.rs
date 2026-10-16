@@ -1,4 +1,5 @@
 use super::{DirectInputRuntime32, enumeration::PendingEnumeration32};
+mod termination;
 pub(in crate::process) struct DirectInputThreadReply32 {
     pending: Vec<PendingEnumeration32>,
 }
@@ -30,9 +31,7 @@ impl DirectInputRuntime32 {
         memory: &crate::memory::AddressSpace,
     ) -> Result<(), crate::process::HostError> {
         for pending in &reply.pending {
-            if pending.memory != memory.identity()
-                || memory.mapping_version_at(pending.scratch) != Ok(pending.mapping)
-            {
+            if pending.check_mapping(memory).is_err() {
                 return Err(crate::process::HostError::Thread(
                     crate::windows::thread::ThreadError32::Stale,
                 ));
@@ -45,9 +44,7 @@ impl DirectInputRuntime32 {
         memory: &crate::memory::AddressSpace,
     ) -> Result<(), crate::process::HostError> {
         for pending in &self.pending {
-            if pending.memory != memory.identity()
-                || memory.mapping_version_at(pending.scratch) != Ok(pending.mapping)
-            {
+            if pending.check_mapping(memory).is_err() {
                 return Err(crate::process::HostError::Thread(
                     crate::windows::thread::ThreadError32::Stale,
                 ));

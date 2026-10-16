@@ -12,6 +12,7 @@ pub(super) struct Object32 {
 pub(super) enum ObjectKind32 {
     Input,
     Device(OwnedDevice32),
+    Effect { device: GuestAddress, id: u64 },
 }
 pub(super) struct Device32 {
     pub native: DirectInputDevice32,
@@ -19,6 +20,7 @@ pub(super) struct Device32 {
     pub notification: Option<EventBinding32>,
     pub kind: DeviceKind32,
     pub transfer: Vec<u8>,
+    pub haptics: Option<crate::input::dinput::haptics::EffectDevice32>,
 }
 
 impl ObjectKind32 {

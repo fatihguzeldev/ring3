@@ -76,6 +76,12 @@ impl DirectInputRuntime32 {
         };
         let version = self.object(parent)?.version;
         let native = DirectInputDevice32::new(description, self.config.max_buffer_events as usize)?;
+        let haptics = match kind {
+            DeviceKind32::Controller(slot) => self.haptic_capabilities[slot as usize]
+                .map(crate::input::dinput::haptics::EffectDevice32::new)
+                .transpose()?,
+            _ => None,
+        };
         let canonical = self.object(parent)?.pointer;
         self.publish(
             memory,
@@ -87,6 +93,7 @@ impl DirectInputRuntime32 {
                 notification: None,
                 kind,
                 transfer: Vec::new(),
+                haptics,
             })?,
             out,
             Some(canonical),
@@ -109,7 +116,7 @@ impl DirectInputRuntime32 {
         }
         let mut rows = Vec::new();
         rows.try_reserve_exact(10).map_err(|_| H::OUT_OF_MEMORY)?;
-        if flags & 0x100 == 0 {
+        {
             for kind in std::iter::once(DeviceKind32::Keyboard)
                 .chain(std::iter::once(DeviceKind32::Mouse))
                 .chain(
@@ -125,6 +132,11 @@ impl DirectInputRuntime32 {
             {
                 if flags & 1 != 0
                     && matches!(kind,DeviceKind32::Controller(slot) if !source.snapshot().controllers[usize::from(slot)].connected)
+                {
+                    continue;
+                }
+                if flags & 0x100 != 0
+                    && !matches!(kind,DeviceKind32::Controller(slot) if self.haptic_capabilities[slot as usize].is_some())
                 {
                     continue;
                 }

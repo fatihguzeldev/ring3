@@ -50,7 +50,16 @@ impl DirectInputRuntime32 {
                 2 if how == 0 && value <= 1 => {
                     self.device_mut(pointer)?.native.set_axis_mode(value == 1)?
                 }
-                7 if how == 0 => self.device_mut(pointer)?.native.set_gain(value)?,
+                7 if how == 0 => {
+                    self.force_device_mut(pointer)?.set_gain(value)?;
+                    self.device_mut(pointer)?
+                        .native
+                        .set_gain(value)
+                        .expect("force gain was validated");
+                }
+                9 if how == 0 && value <= 1 => {
+                    self.force_device_mut(pointer)?.set_autocenter(value != 0)
+                }
                 4 | 5 | 6 | 10 => {
                     let index = match selected {
                         None => None,
@@ -155,7 +164,13 @@ impl DirectInputRuntime32 {
                     _ => unreachable!(),
                 }
             }
-            7 if how == 0 => put(&mut result, 16, device.native.gain()),
+            7 if how == 0 => put(&mut result, 16, self.force_device(pointer)?.gain()),
+            8 if how == 0 => put(&mut result, 16, self.force_device(pointer)?.load()),
+            9 if how == 0 => put(
+                &mut result,
+                16,
+                u32::from(self.force_device(pointer)?.autocenter()),
+            ),
             13 | 14 => {
                 let name = self.device_name(device.kind);
                 for (index, unit) in name.into_iter().take(259).enumerate() {

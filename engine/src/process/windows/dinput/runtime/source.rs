@@ -61,6 +61,12 @@ impl EngineInstance {
         for record in runtime.records.iter_mut().flatten() {
             if let ObjectKind32::Device(device) = &mut record.kind {
                 device.native.synchronize(source, active, clock_origin);
+                if device.native.acquisition()
+                    != crate::input::dinput::device::Acquisition32::Acquired
+                    && let Some(haptics) = &mut device.haptics
+                {
+                    haptics.lose_acquisition();
+                }
             }
         }
         if let Some(signals) = signals {

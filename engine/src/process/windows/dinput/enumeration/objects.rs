@@ -14,7 +14,7 @@ impl DirectInputRuntime32 {
         context: u32,
         flags: u32,
     ) -> Result<WindowsProviderOutcome32, H> {
-        if flags & !0x00ff_ff1f != 0 {
+        if flags & !0x03ff_ff1f != 0 {
             return Err(H::INVALID_PARAM);
         }
         let mut rows = Vec::new();
@@ -22,7 +22,15 @@ impl DirectInputRuntime32 {
         rows.try_reserve_exact(device.native.description.objects().count())
             .map_err(|_| H::OUT_OF_MEMORY)?;
         for object in device.native.description.objects() {
-            if flags == 0 || object.object_type(device.native.relative()) & flags & 255 != 0 {
+            let actuator = matches!(object,crate::input::dinput::format::DeviceObject32::Axis{index,aspect:0} if device.haptics.as_ref().is_some_and(|haptics|index<haptics.capabilities().axes));
+            let trigger = matches!(
+                object,
+                crate::input::dinput::format::DeviceObject32::Button(_)
+            ) && device.haptics.is_some();
+            if (flags & 255 == 0 || object.object_type(device.native.relative()) & flags & 255 != 0)
+                && (flags & 0x01000000 == 0 || actuator)
+                && (flags & 0x02000000 == 0 || trigger)
+            {
                 rows.push(self.object_bytes(
                     pointer,
                     object,

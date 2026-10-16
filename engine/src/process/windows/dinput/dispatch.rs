@@ -31,6 +31,7 @@ impl DirectInputRuntime32 {
                     InterfaceKind32::from_iid(iid)
                         .filter(|kind| {
                             !kind.device()
+                                && !kind.effect()
                                 && (kind.generation() == 8) == (gate == FactoryGate::Create8)
                         })
                         .ok_or(H::NO_INTERFACE)?,
@@ -84,7 +85,21 @@ impl DirectInputRuntime32 {
             }
             _ => {}
         }
+        if gate.interface.effect() {
+            return self
+                .effect_call(memory, pointer, gate.slot, args)
+                .map(WindowsProviderOutcome32::Return);
+        }
         if gate.interface.device() {
+            if matches!(gate.slot, 19 | 23) {
+                return self.enumerate_effects(
+                    memory,
+                    pointer,
+                    gate.interface,
+                    args,
+                    gate.slot == 23,
+                );
+            }
             if gate.slot == 4 {
                 return self.enum_objects(
                     memory,

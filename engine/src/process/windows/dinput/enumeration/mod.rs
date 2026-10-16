@@ -1,5 +1,6 @@
 mod callbacks;
 mod devices;
+mod mapping;
 mod objects;
 mod semantics;
 use crate::{
@@ -12,6 +13,7 @@ pub(super) struct PendingEnumeration32 {
     pub context: u32,
     pub interface: InterfaceKind32,
     pub rows: Vec<Vec<u8>>,
+    pub effects: Option<Vec<GuestAddress>>,
     pub cursor: usize,
     pub scratch: GuestAddress,
     pub range: PageRange,

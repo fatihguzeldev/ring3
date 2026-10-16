@@ -2,7 +2,8 @@ use super::super::super::DirectInputRuntime32;
 use super::decoding::read_action_map;
 use crate::{
     input::dinput::{
-        DeviceKind32, DirectInputResult32 as H, InterfaceKind32, actions::build_actions,
+        DeviceKind32, DirectInputResult32 as H, InterfaceKind32,
+        actions::{build_actions_with_haptics, force_object},
         format::DataFormat32,
     },
     memory::{AddressSpace, GuestAddress},
@@ -28,8 +29,19 @@ impl DirectInputRuntime32 {
         let kind = self.device(pointer)?.kind;
         let instance = self.device_guid(kind, false);
         let description = self.device(pointer)?.native.description;
+        let haptics = self
+            .device(pointer)?
+            .haptics
+            .as_ref()
+            .map(|force| force.capabilities());
         if !set {
-            let mapped = build_actions(description, instance, &mut map.actions, args[3] & 1 != 0)?;
+            let mapped = build_actions_with_haptics(
+                description,
+                instance,
+                &mut map.actions,
+                args[3] & 1 != 0,
+                haptics,
+            )?;
             let encoded = map.encoded_actions()?;
             memory.write_spans(&[
                 (GuestAddress(map.action_address), &encoded),
@@ -42,7 +54,7 @@ impl DirectInputRuntime32 {
             .try_reserve_exact(map.actions.len())
             .map_err(|_| H::OUT_OF_MEMORY)?;
         for (index, action) in map.actions.iter().enumerate() {
-            if action.instance != instance || action.flags & 5 != 0 {
+            if action.instance != instance || action.flags & 4 != 0 {
                 continue;
             }
             let object = description
@@ -53,6 +65,9 @@ impl DirectInputRuntime32 {
                             != 0
                 })
                 .ok_or(H::OBJECT_NOT_FOUND)?;
+            if action.flags & 1 != 0 && !force_object(object, haptics) {
+                return Err(H::OBJECT_NOT_FOUND);
+            }
             bindings.push((index as u32 * 4, object, action.app_data));
         }
         let format = DataFormat32::from_actions(

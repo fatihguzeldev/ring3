@@ -22,7 +22,9 @@ impl DirectInputRuntime32 {
             }
         } else {
             InterfaceKind32::from_iid(iid)
-                .filter(|kind| !kind.device() && (kind.generation() == 8) == version8)
+                .filter(|kind| {
+                    !kind.device() && !kind.effect() && (kind.generation() == 8) == version8
+                })
                 .ok_or(H::NO_INTERFACE)?
         };
         self.initialize_methods(gates, version8)?;

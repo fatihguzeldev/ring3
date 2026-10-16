@@ -42,6 +42,7 @@ impl DirectInputRuntime32 {
             context,
             interface,
             rows,
+            effects: None,
             cursor: 0,
             scratch: address,
             range,
@@ -59,7 +60,10 @@ impl DirectInputRuntime32 {
     ) -> WindowsProviderOutcome32 {
         let pending = self.pending.last().unwrap();
         let mut arguments = [0; 16];
-        arguments[0] = pending.scratch.0;
+        arguments[0] = pending
+            .effects
+            .as_ref()
+            .map_or(pending.scratch.0, |effects| effects[pending.cursor].0);
         arguments[1] = pending.context;
         let count = if let Some(semantics) = &pending.semantics {
             arguments[1] = semantics.current.unwrap().0;
@@ -90,18 +94,9 @@ impl DirectInputRuntime32 {
             .last()
             .filter(|pending| pending.token == token)
             .ok_or(super::super::DirectInputError32::InvalidToken)?;
-        if memory.identity() != pending.memory
-            || memory
-                .mapping_version_at(pending.scratch)
-                .map_err(super::super::DirectInputError32::Memory)?
-                != pending.mapping
-            || memory
-                .permissions_at(pending.scratch)
-                .map_err(super::super::DirectInputError32::Memory)?
-                != Permissions::READ_WRITE
-        {
-            return Err(super::super::DirectInputError32::InvalidRequest);
-        }
+        pending
+            .check_mapping(memory)
+            .map_err(|_| super::super::DirectInputError32::InvalidRequest)?;
         if !pending.resuming {
             let next = if result == 0 || pending.cursor + 1 == pending.rows.len() {
                 None
@@ -114,6 +109,17 @@ impl DirectInputRuntime32 {
         }
         let pending = self.pending.last().unwrap();
         let finished = pending.next_row.is_none();
+        if finished && let Some(original) = &pending.effects {
+            let mut retained = Vec::new();
+            retained
+                .try_reserve_exact(original.len())
+                .map_err(|_| super::super::DirectInputError32::Allocation)?;
+            retained.extend_from_slice(original);
+            self.release_effect_enumeration(memory, sync, &retained, pending.range)
+                .map_err(|_| super::super::DirectInputError32::InvalidRequest)?;
+            self.pending.pop();
+            return Ok(WindowsProviderOutcome32::Return(0));
+        }
         if let Some(pointer) = pending
             .semantics
             .as_ref()

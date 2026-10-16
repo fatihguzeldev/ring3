@@ -1,6 +1,7 @@
 pub(super) mod actions;
 mod format;
 mod information;
+mod names;
 mod properties;
 mod reading;
 use super::DirectInputRuntime32;
@@ -46,7 +47,14 @@ impl DirectInputRuntime32 {
                 }
                 Ok(self.device_mut(pointer)?.native.acquire(source, active)?.0)
             }
-            8 => Ok(self.device_mut(pointer)?.native.unacquire().0),
+            8 => {
+                let device = self.device_mut(pointer)?;
+                let result = device.native.unacquire().0;
+                if let Some(haptics) = &mut device.haptics {
+                    haptics.lose_acquisition();
+                }
+                Ok(result)
+            }
             9 => self.get_state(memory, pointer, args[1], args[2]),
             10 => self.get_data(memory, pointer, args, interface),
             11 => self.set_format(memory, pointer, args[1]),
@@ -74,10 +82,7 @@ impl DirectInputRuntime32 {
                 if args[1] != 0 {
                     let windows = windows.ok_or(H::HANDLE)?;
                     let handle = WindowHandle32::try_from(args[1]).map_err(|_| H::HANDLE)?;
-                    let record = windows.get(handle).map_err(|_| H::HANDLE)?;
-                    if record.description.thread_id != 1 {
-                        return Err(H::HANDLE);
-                    }
+                    windows.get(handle).map_err(|_| H::HANDLE)?;
                 }
                 self.device_mut(pointer)?.native.set_cooperative(level)?;
                 Ok(0)
@@ -86,25 +91,31 @@ impl DirectInputRuntime32 {
             15 => self.device_info(memory, pointer, args[1], interface),
             16 => Err(H::UNSUPPORTED),
             17 => {
-                if args[1] == 0 || args[2] == 0 {
-                    Err(H::INVALID_PARAM)
-                } else {
-                    Ok(0)
+                super::dispatch::validate_initialization(interface, args[1], args[2])?;
+                let device = self.device(pointer)?;
+                device.native.check_unacquired()?;
+                let guid = super::memory::read::<16>(memory, args[3])?;
+                if guid != self.device_guid(device.kind, false) {
+                    return Err(H::DEVICE_NOT_REGISTERED);
                 }
+                Ok(1)
             }
-            18 => {
-                super::memory::output(memory, args[3], 4)?;
-                memory.write_words32(&[super::memory::word(args[3], 0)])?;
-                Err(H::UNSUPPORTED)
-            }
-            19 | 23 => {
-                if args[1] == 0 || args[3] & !0x0000_ffff != 0 {
-                    return Err(H::INVALID_PARAM);
-                }
+            18 => self.create_effect(memory, pointer, args),
+            20 => self.effect_information(memory, pointer, interface, args),
+            21 => {
+                let state = self.force_device(pointer)?.state(self.now);
+                super::memory::output(memory, args[1], 4)?;
+                memory.write_words32(&[super::memory::word(args[1], state)])?;
                 Ok(0)
             }
-            20 => Err(H::OBJECT_NOT_FOUND),
-            21 | 22 | 24 | 26 | 27 | 28 | 31 => Err(H::UNSUPPORTED),
+            22 => {
+                let exclusive = self.force_exclusive(pointer)?;
+                let now = self.now;
+                self.force_device_mut(pointer)?
+                    .command(args[1], exclusive, now)?;
+                Ok(0)
+            }
+            24 | 26 | 27 | 28 | 31 => Err(H::UNSUPPORTED),
             25 => {
                 self.device(pointer)?.native.check_acquired()?;
                 Ok(0)

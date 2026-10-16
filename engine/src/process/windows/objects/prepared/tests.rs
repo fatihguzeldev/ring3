@@ -43,6 +43,27 @@ fn fixture() -> (GuestComObjects32, AddressSpace, GuestAddress) {
 }
 
 #[test]
+fn prepared_retains_survive_disjoint_scratch_mapping_and_refuse_counter_changes() {
+    let (mut owner, mut memory, pointer) = fixture();
+    let prepared = owner.prepare_retain_changes(&memory, &[pointer]).unwrap();
+    memory
+        .map_zeroed(
+            PageRange::new(GuestAddress(0x4000), 1).unwrap(),
+            Permissions::READ_WRITE,
+        )
+        .unwrap();
+    owner.can_commit_retain_changes(&prepared).unwrap();
+    let version = memory.transaction_version();
+    owner.commit_retain_changes(prepared);
+    assert_eq!(owner.references(pointer), Ok(2));
+    assert_eq!(memory.transaction_version(), version);
+    let stale = owner.prepare_retain_changes(&memory, &[pointer]).unwrap();
+    owner.add_ref(&memory, pointer).unwrap();
+    assert!(owner.can_commit_retain_changes(&stale).is_err());
+    assert_eq!(owner.references(pointer), Ok(3));
+}
+
+#[test]
 fn owned_receipt_rejects_counter_changes_before_any_ram_or_identity_publication() {
     let (mut owner, mut memory, pointer) = fixture();
     let prepared = owner

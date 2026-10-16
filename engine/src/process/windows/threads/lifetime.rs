@@ -231,6 +231,50 @@ impl EngineInstance {
             bindings.extend_from_slice(files.bindings());
         }
         let words = files.as_ref().map_or(&[][..], |files| files.words());
+        let mut saved_dinput = Vec::new();
+        saved_dinput
+            .try_reserve_exact(record.active_invocations.len() + 1)
+            .map_err(|_| HostError::Thread(ThreadError32::Allocation))?;
+        saved_dinput.extend(
+            record
+                .saved
+                .iter()
+                .chain(
+                    record
+                        .active_invocations
+                        .iter()
+                        .map(|invocation| &invocation.saved),
+                )
+                .filter_map(|saved| saved.dinput_reply()),
+        );
+        let dinput = self
+            .dinput
+            .as_ref()
+            .map(|runtime| {
+                runtime.prepare_thread_exit(
+                    self.memory().unwrap(),
+                    &saved_dinput,
+                    id == self.threads.current_id(),
+                    &ranges,
+                    words,
+                )
+            })
+            .transpose()
+            .map_err(|error| {
+                HostError::DirectInput(
+                    if error == crate::input::dinput::DirectInputResult32::OUT_OF_MEMORY {
+                        crate::process::windows::dinput::DirectInputError32::Allocation
+                    } else {
+                        crate::process::windows::dinput::DirectInputError32::InvalidRequest
+                    },
+                )
+            })?;
+        if let Some(prepared) = &dinput {
+            bindings
+                .try_reserve_exact(prepared.bindings().len())
+                .map_err(|_| HostError::Thread(ThreadError32::Allocation))?;
+            bindings.extend_from_slice(prepared.bindings());
+        }
         let sync = self
             .synchronization()?
             .prepare_thread_exit_with_events(
@@ -242,7 +286,10 @@ impl EngineInstance {
             )
             .map_err(HostError::Synchronization)?;
         // exact committed ranges are unmapped before infallible kernel-object publication.
-        if !ranges.is_empty() {
+        if let Some(prepared) = dinput {
+            self.dinput.as_mut().unwrap().commit_thread_exit(self.memory.as_mut().unwrap(), prepared)
+                .expect("DI COM and aggregate RAM retirement were preflighted under unchanged ownership");
+        } else if !ranges.is_empty() {
             self.memory
                 .as_mut()
                 .unwrap()

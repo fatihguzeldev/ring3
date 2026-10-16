@@ -52,7 +52,12 @@ impl DirectInputRuntime32 {
             {
                 continue;
             }
-            if args[5] & 0x6100 != 0
+            let haptics = match kind {
+                DeviceKind32::Controller(slot) => self.haptic_capabilities[slot as usize],
+                _ => None,
+            };
+            if args[5] & 0x6000 != 0
+                || args[5] & 0x100 != 0 && haptics.is_none()
                 || args[5] & 0x1000 != 0 && self.owned_devices[super::device_index(kind)]
             {
                 continue;
@@ -73,7 +78,7 @@ impl DirectInputRuntime32 {
             let mut priorities = 0;
             let instance = self.device_guid(kind, false);
             for action in &map.actions {
-                if action.flags & 5 != 0 {
+                if action.flags & 4 != 0 || action.flags & 1 != 0 && haptics.is_none() {
                     continue;
                 }
                 let matches = if action.flags & 2 != 0 {
@@ -84,9 +89,14 @@ impl DirectInputRuntime32 {
                                     & action.object_id
                                     & 255
                                     != 0
+                                && (action.flags & 1 == 0
+                                    || crate::input::dinput::actions::force_object(object, haptics))
                         })
                 } else {
-                    default_object(description, action.semantic).is_some()
+                    default_object(description, action.semantic).is_some_and(|object| {
+                        action.flags & 1 == 0
+                            || crate::input::dinput::actions::force_object(object, haptics)
+                    })
                 };
                 if matches {
                     priorities |= if action.semantic & 0x4000 == 0 { 1 } else { 2 };

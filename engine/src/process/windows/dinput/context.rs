@@ -20,6 +20,10 @@ pub(in crate::process) struct DirectInputRuntime32 {
     pub(super) owned_devices: [bool; 10],
     pub(super) pending: Vec<super::enumeration::PendingEnumeration32>,
     pub(super) sequence: u64,
+    pub(super) now: u64,
+    pub(super) ansi: crate::windows::text::CodePage32,
+    pub(super) haptic_capabilities:
+        [Option<crate::input::dinput::haptics::HapticCapabilities32>; 8],
     pub(super) signals: Vec<crate::windows::synchronization::EventBinding32>,
 }
 impl DirectInputRuntime32 {
@@ -42,7 +46,7 @@ impl DirectInputRuntime32 {
             config.objects,
             config.max_objects as usize,
             config.max_objects as usize * 6,
-            16,
+            InterfaceKind32::ALL.len(),
         )
         .map_err(|_| DirectInputError32::InvalidConfiguration)?;
         let mut records = Vec::new();
@@ -52,9 +56,9 @@ impl DirectInputRuntime32 {
         records.resize_with(config.max_objects as usize, || None);
         let mut methods = Vec::new();
         methods
-            .try_reserve_exact(16)
+            .try_reserve_exact(InterfaceKind32::ALL.len())
             .map_err(|_| DirectInputError32::Allocation)?;
-        methods.resize_with(16, Vec::new);
+        methods.resize_with(InterfaceKind32::ALL.len(), Vec::new);
         let mut pending = Vec::new();
         pending
             .try_reserve_exact(33)
@@ -73,6 +77,9 @@ impl DirectInputRuntime32 {
             owned_devices: [false; 10],
             pending,
             sequence: 0,
+            now: 0,
+            ansi: crate::windows::text::CodePage32::default(),
+            haptic_capabilities: [None; 8],
             signals,
         })
     }
@@ -170,6 +177,9 @@ impl DirectInputRuntime32 {
         for record in self.records.iter_mut().flatten() {
             if let ObjectKind32::Device(device) = &mut record.kind {
                 device.native.epoch_changed();
+                if let Some(haptics) = &mut device.haptics {
+                    haptics.lose_acquisition();
+                }
             }
         }
     }

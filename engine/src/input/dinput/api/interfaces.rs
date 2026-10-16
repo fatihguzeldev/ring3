@@ -21,6 +21,8 @@ pub enum InterfaceKind32 {
     Device7W = 14,
     Device8A = 15,
     Device8W = 16,
+    EffectLegacy = 17,
+    Effect8 = 18,
 }
 impl TryFrom<u32> for InterfaceKind32 {
     type Error = DirectInputResult32;
@@ -32,7 +34,7 @@ impl TryFrom<u32> for InterfaceKind32 {
     }
 }
 impl InterfaceKind32 {
-    pub const ALL: [Self; 16] = [
+    pub const ALL: [Self; 18] = [
         Self::Input1A,
         Self::Input1W,
         Self::Input2A,
@@ -49,6 +51,8 @@ impl InterfaceKind32 {
         Self::Device7W,
         Self::Device8A,
         Self::Device8W,
+        Self::EffectLegacy,
+        Self::Effect8,
     ];
     pub fn iid(self) -> InterfaceId {
         InterfaceId(match self {
@@ -112,6 +116,10 @@ impl InterfaceKind32 {
                 0x80, 0x10, 0xd4, 0x54, 0x15, 0xdc, 0x33, 0x48, 0xa4, 0x1b, 0x74, 0x8f, 0x73, 0xa3,
                 0x81, 0x79,
             ],
+            Self::EffectLegacy | Self::Effect8 => [
+                0xc0, 0xf7, 0xe1, 0xe7, 0xd2, 0x88, 0xd0, 0x11, 0x9a, 0xd0, 0, 0xa0, 0xc9, 0xa0,
+                0x6e, 0x35,
+            ],
             Self::Device8W => [
                 0x81, 0x10, 0xd4, 0x54, 0x15, 0xdc, 0x33, 0x48, 0xa4, 0x1b, 0x74, 0x8f, 0x73, 0xa3,
                 0x81, 0x79,
@@ -125,13 +133,17 @@ impl InterfaceKind32 {
         (self as u8).is_multiple_of(2)
     }
     pub fn device(self) -> bool {
-        self as u8 >= 9
+        matches!(self as u8, 9..=16)
+    }
+    pub fn effect(self) -> bool {
+        matches!(self, Self::EffectLegacy | Self::Effect8)
     }
     pub fn generation(self) -> u8 {
         match self as u8 {
             1 | 2 | 9 | 10 => 1,
             3 | 4 | 11 | 12 => 2,
             5 | 6 | 13 | 14 => 7,
+            17 => 7,
             _ => 8,
         }
     }
@@ -139,6 +151,9 @@ impl InterfaceKind32 {
         Self::try_from(u32::from(self as u8) + 8).unwrap()
     }
     pub fn words(self) -> &'static [u8] {
+        if self.effect() {
+            return &[3, 1, 1, 4, 2, 3, 3, 3, 1, 2, 1, 1, 2];
+        }
         if !self.device() {
             match self.generation() {
                 1 => &[3, 1, 1, 4, 5, 2, 3, 3],
@@ -164,6 +179,9 @@ impl InterfaceKind32 {
         }
     }
     pub fn compatible(self, other: Self) -> bool {
+        if self.effect() || other.effect() {
+            return self == other;
+        }
         self.device() == other.device() && (self.generation() == 8) == (other.generation() == 8)
     }
 }
