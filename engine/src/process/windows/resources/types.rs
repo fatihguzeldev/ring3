@@ -20,6 +20,7 @@ pub enum ResourceError32 {
     Busy,
     Capacity,
     Allocation,
+    Win32(u32),
     Memory(MemoryError),
     Pe(loader::ResourceError32),
 }
@@ -29,6 +30,7 @@ impl ResourceError32 {
             Self::InvalidHandle => 6,
             Self::Memory(_) => 998,
             Self::Pe(error) => error.win32(),
+            Self::Win32(error) => error,
             Self::Capacity | Self::Allocation => 8,
             Self::NotConfigured | Self::AlreadyConfigured | Self::Busy => 170,
             _ => 87,

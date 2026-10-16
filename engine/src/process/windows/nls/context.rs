@@ -98,6 +98,12 @@ impl NlsRuntime32 {
     }
 }
 impl crate::process::EngineInstance {
+    pub(in crate::process) fn windows_user_locale(&self) -> u32 {
+        self.nls.profile.locale
+    }
+    pub(in crate::process) fn windows_thread_locale(&self) -> u32 {
+        self.nls.locale(self.threads.current_id())
+    }
     pub(in crate::process) fn windows_ansi_code_page(&self) -> crate::windows::text::CodePage32 {
         self.nls.profile.ansi
     }

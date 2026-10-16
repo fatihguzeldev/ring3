@@ -1,5 +1,6 @@
 mod datafiles;
 mod enumeration;
+mod formatting;
 mod lookup;
 use super::*;
 use crate::{

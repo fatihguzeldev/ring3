@@ -1,6 +1,7 @@
 mod calls;
 mod context;
 mod enumeration;
+mod formatting;
 mod lifecycle;
 mod lookup;
 mod memory;

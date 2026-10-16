@@ -66,6 +66,9 @@ impl EngineInstance {
         Ok(true)
     }
     pub(super) fn resource_call(&mut self, api: Api, args: &[u32]) -> Result<Outcome, E> {
+        if api.is_message() {
+            return self.resource_message(api, args);
+        }
         self.resources.as_ref().ok_or(E::NotConfigured)?;
         if api.is_enumeration() {
             return self.begin_resource_enumeration(api, args);

@@ -26,6 +26,7 @@ resource_apis! {
     EnumResourceLanguagesExA=0x00130013=>7,EnumResourceLanguagesExW=0x00130014=>7,
     LoadStringA=0x00130015=>4,LoadStringW=0x00130016=>4,
     UnlockResource=0x00130017=>1,
+    FormatMessageA=0x00130018=>7,FormatMessageW=0x00130019=>7,
 }
 impl ResourceApi32 {
     pub fn wide(self) -> bool {
@@ -36,6 +37,9 @@ impl ResourceApi32 {
     }
     pub fn is_string(self) -> bool {
         matches!(self, Self::LoadStringA | Self::LoadStringW)
+    }
+    pub fn is_message(self) -> bool {
+        matches!(self, Self::FormatMessageA | Self::FormatMessageW)
     }
 }
 fn export(api: ResourceApi32) -> SystemExport32 {
