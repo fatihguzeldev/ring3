@@ -30,6 +30,7 @@ impl User32Context32 {
             .map_err(|_| User32Error32::Allocation)?;
         Ok(Self {
             state,
+            builtin_procedures: None,
             layouts: Vec::new(),
             process_layout: None,
             scratch_bounds,
@@ -148,11 +149,16 @@ impl User32Context32 {
             DispatchMessageA | DispatchMessageW => self.dispatch_message(args[0], memory, context),
             PostMessageA | PostMessageW => self.post_message(args, context),
             PostQuitMessage => self.post_quit(args[0], context),
-            DefWindowProcA | DefWindowProcW => self.def_window_proc(args, memory, context),
+            DefWindowProcA | DefWindowProcW => {
+                self.def_window_proc_encoded(args, api.wide(), memory, context)
+            }
             GetWindowLongA | GetWindowLongW => self.get_window_long(args),
             SetWindowLongA | SetWindowLongW => self.set_window_long(args, memory, context),
             CallWindowProcA | CallWindowProcW => self.call_window_proc(args),
-            SendMessageA | SendMessageW => self.send_message(args, context),
+            SendMessageA | SendMessageW | GetWindowTextA | GetWindowTextW
+            | GetWindowTextLengthA | GetWindowTextLengthW | SetWindowTextA | SetWindowTextW => {
+                self.send_message(&api.sent_message(args).unwrap(), context)
+            }
             MsgWaitForMultipleObjects | MsgWaitForMultipleObjectsEx | WaitMessage => {
                 Err(User32Error32::InvalidRequest)
             }
@@ -161,13 +167,7 @@ impl User32Context32 {
         let outcome = match result {
             Err(User32Error32::Win32(error)) => {
                 self.last_error = Some(error);
-                Ok(User32Outcome32::Return(
-                    if matches!(api, GetMessageA | GetMessageW) {
-                        u32::MAX
-                    } else {
-                        0
-                    },
-                ))
+                Ok(User32Outcome32::Return(api.failure_value()))
             }
             Err(User32Error32::Window(error)) => {
                 self.last_error = Some(match error {
@@ -179,17 +179,11 @@ impl User32Context32 {
                     | WindowError32::Exhausted => 8,
                     _ => 87,
                 });
-                Ok(User32Outcome32::Return(
-                    if matches!(api, GetMessageA | GetMessageW) {
-                        u32::MAX
-                    } else {
-                        0
-                    },
-                ))
+                Ok(User32Outcome32::Return(api.failure_value()))
             }
             Err(User32Error32::Capacity) => {
                 self.last_error = Some(8);
-                Ok(User32Outcome32::Return(0))
+                Ok(User32Outcome32::Return(api.failure_value()))
             }
             result => result,
         };

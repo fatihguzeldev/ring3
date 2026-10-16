@@ -8,15 +8,26 @@ fn user32_catalog_resolves_explicit_stdcall_gates_without_id_or_symbol_aliases()
         + crate::windows::resources::user32_resource_exports().len()
         + crate::windows::rawinput::raw_input_exports().count()
         + crate::windows::gdi::user32_gdi_exports().count();
-    assert_eq!(module.exports.len(), named);
+    assert_eq!(module.exports.len(), named + 2);
     let mut names = std::collections::BTreeSet::new();
     let mut gates = std::collections::BTreeSet::new();
     for export in &module.exports {
-        assert!(names.insert(export.name.as_deref().unwrap()));
-        let SystemExportTarget32::Gate(gate) = &export.target else {
-            panic!("user32 exports must be explicit gates");
-        };
-        assert!(gates.insert(*gate));
+        match &export.target {
+            SystemExportTarget32::Gate(gate) => {
+                assert!(names.insert(export.name.as_deref().unwrap()));
+                assert!(gates.insert(*gate));
+            }
+            SystemExportTarget32::PrivateGate(gate) => {
+                assert!(export.name.is_none() && export.ordinal.is_none());
+                assert!(matches!(
+                    *gate,
+                    crate::windows::controls::BUILTIN_PROC_A
+                        | crate::windows::controls::BUILTIN_PROC_W
+                ));
+                assert!(gates.insert(*gate));
+            }
+            _ => panic!("user32 exports must be explicit gates"),
+        }
     }
     let extensions = [
         ("RegisterRawInputDevices", 0x0014_0001),
@@ -30,7 +41,7 @@ fn user32_catalog_resolves_explicit_stdcall_gates_without_id_or_symbol_aliases()
         ("LoadStringA", 0x0013_0015),
         ("LoadStringW", 0x0013_0016),
     ];
-    assert_eq!(User32Api32::catalog().count() + extensions.len(), 105);
+    assert_eq!(User32Api32::catalog().count(), 101);
     for (name, gate) in extensions {
         assert!(module.exports.iter().any(|export| {
             export.name.as_deref() == Some(name)
@@ -55,7 +66,7 @@ fn user32_catalog_resolves_explicit_stdcall_gates_without_id_or_symbol_aliases()
         None
     );
     assert_eq!(User32Api32::resolve("user32.dll", "createwindowexa"), None);
-    assert_eq!(User32Api32::from_id(0x20060), None);
+    assert_eq!(User32Api32::from_id(0x20066), None);
     assert_eq!(User32Api32::CreateWindowExW.stack_words(), 12);
 }
 

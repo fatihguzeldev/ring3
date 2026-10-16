@@ -5,6 +5,7 @@ mod activation;
 mod callback;
 mod classes;
 mod context;
+mod controls;
 mod destruction;
 mod input;
 mod lifecycle;
@@ -58,6 +59,7 @@ pub(crate) enum User32Outcome32 {
 
 pub(crate) struct User32Context32 {
     state: User32State32,
+    builtin_procedures: Option<[crate::memory::GuestAddress; 2]>,
     layouts: Vec<threads::ThreadLayout32>,
     process_layout: Option<(u64, crate::input::keyboard::KeyboardLayout32)>,
     scratch_bounds: PageRange,

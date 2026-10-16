@@ -114,9 +114,39 @@ api_catalog! {
     MessageBoxW=0x0002_005d,4;
     MessageBoxIndirectA=0x0002_005e,1;
     MessageBoxIndirectW=0x0002_005f,1;
+    GetWindowTextA=0x0002_0060,3;
+    GetWindowTextW=0x0002_0061,3;
+    GetWindowTextLengthA=0x0002_0062,1;
+    GetWindowTextLengthW=0x0002_0063,1;
+    SetWindowTextA=0x0002_0064,2;
+    SetWindowTextW=0x0002_0065,2;
 }
 
 impl User32Api32 {
+    pub(crate) fn failure_value(self) -> u32 {
+        if matches!(
+                self,
+                Self::GetMessageA
+                    | Self::GetMessageW
+                    | Self::MsgWaitForMultipleObjects
+                    | Self::MsgWaitForMultipleObjectsEx
+            )
+        {
+            u32::MAX
+        } else {
+            0
+        }
+    }
+    pub(crate) fn sent_message(self, args: &[u32]) -> Option<[u32; 4]> {
+        use User32Api32::*;
+        Some(match self {
+            SendMessageA | SendMessageW => [args[0], args[1], args[2], args[3]],
+            GetWindowTextA | GetWindowTextW => [args[0], 0x0d, args[2], args[1]],
+            GetWindowTextLengthA | GetWindowTextLengthW => [args[0], 0x0e, 0, 0],
+            SetWindowTextA | SetWindowTextW => [args[0], 0x0c, 0, args[1]],
+            _ => return None,
+        })
+    }
     pub fn id(self) -> u32 {
         self as u32
     }
@@ -147,6 +177,7 @@ pub fn user32_module(preferred_base: u32) -> SystemModule32 {
             .chain(crate::windows::resources::user32_resource_exports())
             .chain(crate::windows::rawinput::raw_input_exports())
             .chain(crate::windows::gdi::user32_gdi_exports())
+            .chain(crate::windows::controls::builtin_exports())
             .collect(),
     }
 }

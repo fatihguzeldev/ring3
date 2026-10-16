@@ -117,24 +117,26 @@ impl EngineInstance {
         if self.checked_pending_call(owner, token)?.frame != frame {
             return Err(HostError::InvalidRequest);
         }
+        self.bind_user32_builtin_classes()?;
         self.refresh_user32_input()?;
         self.reserve_windows_reply()?;
         self.check_windows_thread_write()?;
         Self::prepare_completed_call(frame.complete(0))?;
         let call_context = self.user32_call_context()?;
-        let message_phase = matches!(
-            api,
-            User32Api32::SendMessageA
-                | User32Api32::SendMessageW
-                | User32Api32::GetMessageA
-                | User32Api32::GetMessageW
-                | User32Api32::PeekMessageA
-                | User32Api32::PeekMessageW
-                | User32Api32::MessageBoxA
-                | User32Api32::MessageBoxW
-                | User32Api32::MessageBoxIndirectA
-                | User32Api32::MessageBoxIndirectW
-        );
+        let message_phase = api.sent_message(frame.arguments()).is_some()
+            || matches!(
+                api,
+                User32Api32::SendMessageA
+                    | User32Api32::SendMessageW
+                    | User32Api32::GetMessageA
+                    | User32Api32::GetMessageW
+                    | User32Api32::PeekMessageA
+                    | User32Api32::PeekMessageW
+                    | User32Api32::MessageBoxA
+                    | User32Api32::MessageBoxW
+                    | User32Api32::MessageBoxIndirectA
+                    | User32Api32::MessageBoxIndirectW
+            );
         if message_phase {
             self.check_thread_message_dispatch(call_context.thread_id)?;
         }
@@ -269,17 +271,11 @@ impl EngineInstance {
             Ok(outcome) => outcome,
             Err(User32Error32::Win32(error)) => {
                 context.last_error = Some(error);
-                super::User32Outcome32::Return(
-                    if matches!(api, User32Api32::GetMessageA | User32Api32::GetMessageW) {
-                        u32::MAX
-                    } else {
-                        0
-                    },
-                )
+                super::User32Outcome32::Return(api.failure_value())
             }
             Err(User32Error32::Capacity) => {
                 context.last_error = Some(8);
-                super::User32Outcome32::Return(0)
+                super::User32Outcome32::Return(api.failure_value())
             }
             Err(error) => return Err(HostError::User32(error)),
         };

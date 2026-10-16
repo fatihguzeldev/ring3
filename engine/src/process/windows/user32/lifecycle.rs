@@ -34,6 +34,12 @@ impl User32Context32 {
             class.unicode,
             class.extra_bytes,
         );
+        let (procedure, unicode) = if self.state.standard_kind(class.atom).is_some() {
+            let procedures = self.builtin_procedures.ok_or(User32Error32::Win32(1407))?;
+            (procedures[usize::from(api.wide())], api.wide())
+        } else {
+            (procedure, unicode)
+        };
         if unicode != api.wide() {
             return Err(User32Error32::Win32(50));
         }
@@ -59,9 +65,11 @@ impl User32Context32 {
         if args[9] != 0 && args[3] & 0x4000_0000 == 0 {
             return Err(User32Error32::Win32(50));
         }
-        if args[2] != 0 {
-            memory::string(memory, args[2], api.wide(), 32_767, context.ansi)?;
-        }
+        let caption = if args[2] != 0 {
+            memory::string(memory, args[2], api.wide(), 32_767, context.ansi)?
+        } else {
+            Vec::new()
+        };
         let special = args[3] & 0xc000_0000 != 0;
         let (x, y) = if args[4] == 0x8000_0000 {
             (0, 0)
@@ -141,6 +149,9 @@ impl User32Context32 {
         };
         let published = self.state.publish_window(description, data, extra);
         debug_assert_eq!(handle, published);
+        self.state
+            .set_text(handle, caption)
+            .expect("new window owns its caption slot");
         self.start(Continuation32::Create {
             window: handle,
             thread: context.thread_id,
@@ -323,6 +334,19 @@ impl User32Context32 {
         self.state.update(data)?;
         self.state.move_children(window, child_delta);
         Ok(())
+    }
+
+    pub(super) fn def_window_proc_encoded(
+        &mut self,
+        args: &[u32],
+        wide: bool,
+        memory: &mut AddressSpace,
+        context: User32CallContext32,
+    ) -> Result<User32Outcome32, User32Error32> {
+        if let Some(outcome) = self.window_text_message(args, wide, memory, context)? {
+            return Ok(outcome);
+        }
+        self.def_window_proc(args, memory, context)
     }
 
     pub(super) fn def_window_proc(

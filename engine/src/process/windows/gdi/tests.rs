@@ -344,3 +344,5 @@ mod colors;
 mod caps;
 
 mod bitfields;
+
+mod controls;

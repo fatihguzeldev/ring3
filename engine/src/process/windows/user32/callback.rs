@@ -36,6 +36,7 @@ pub(super) enum PositionStage32 {
 
 #[derive(Clone, Copy)]
 pub(super) enum Continuation32 {
+    ControlPaint(super::controls::painting::ControlPaint32),
     Paint {
         window: WindowHandle32,
         output: super::gdi::PaintOutput32,
@@ -114,6 +115,7 @@ impl User32Context32 {
             .cloned()
             .ok_or(User32Error32::InvalidToken)?;
         let (procedure, arguments) = match pending.continuation {
+            Continuation32::ControlPaint(paint) => self.control_paint_callback(paint)?,
             Continuation32::Paint { window, dc, .. } => (
                 self.windows().get(window)?.description.procedure,
                 [window.get(), 0x14, dc, 0],
@@ -243,6 +245,7 @@ impl User32Context32 {
             .cloned()
             .ok_or(User32Error32::InvalidToken)?;
         match pending.continuation {
+            Continuation32::ControlPaint(_) => Err(User32Error32::InvalidRequest),
             Continuation32::Paint { window, output, dc } => {
                 self.windows().get(window)?;
                 output.complete(memory, result != 0)?;

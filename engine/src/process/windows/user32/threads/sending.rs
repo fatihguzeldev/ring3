@@ -18,13 +18,12 @@ impl EngineInstance {
         frame: &CallFrame32,
         context: User32CallContext32,
     ) -> Result<Option<(PreparedThreadInvocation32, u64)>, HostError> {
-        if !matches!(api, User32Api32::SendMessageA | User32Api32::SendMessageW) {
+        let Some(args) = api.sent_message(frame.arguments()) else {
             return Ok(None);
-        }
+        };
         if frame.convention() != api.convention() || frame.stack_words() != api.stack_words() {
             return Err(HostError::User32(User32Error32::InvalidRequest));
         }
-        let args = frame.arguments();
         if args[1] > 0xffff {
             return Ok(None);
         }
@@ -43,7 +42,7 @@ impl EngineInstance {
         let prepared = self.prepare_thread_invocation(
             window.description.thread_id,
             GuestAddress(window.description.procedure.0),
-            &args[..4],
+            &args,
             ThreadInvocationCompletion32::User32 {
                 sender: context.thread_id,
                 continuation,
@@ -58,7 +57,8 @@ impl User32Context32 {
             pending.token == continuation
                 && matches!(
                     pending.continuation,
-                    Continuation32::Retrieve { .. } | Continuation32::MessageWait { .. }
+                    Continuation32::Retrieve { .. }
+                        | Continuation32::MessageWait { .. }
                 )
         })
     }

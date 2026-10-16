@@ -69,13 +69,12 @@ impl EngineInstance {
                     None
                 };
                 let context = self.user32.as_mut().ok_or(HostError::InvalidRequest)?;
-                let outcome = context
-                    .complete(
-                        reply.continuation,
-                        result,
-                        self.memory.as_mut().ok_or(HostError::Closed)?,
-                    )
-                    .map_err(HostError::User32)?;
+                let outcome = context.complete_with_gdi(
+                    reply.continuation,
+                    result,
+                    self.memory.as_mut().ok_or(HostError::Closed)?,
+                    self.gdi.as_mut(),
+                )?;
                 let error = context.take_last_error();
                 let actual = (
                     context.windows().focus().is_some(),

@@ -1,7 +1,8 @@
 use super::{Message32, Point32, User32Error32, User32Limits32, WindowClass32, WindowData32};
 use crate::windows::window::{WindowContext32, WindowDescription32, WindowHandle32};
-
+mod classes;
 mod paint;
+mod text;
 
 struct WindowSlot32 {
     data: WindowData32,
@@ -9,6 +10,8 @@ struct WindowSlot32 {
     update: crate::windows::gdi::Region32,
     erase: bool,
     paint_seen: bool,
+    text: Vec<u16>,
+    control: crate::windows::controls::ControlState32,
 }
 
 pub(crate) struct User32State32 {
@@ -18,6 +21,8 @@ pub(crate) struct User32State32 {
     slots: Vec<WindowSlot32>,
     queue: super::queue::MessageQueue32,
     next_atom: u16,
+    standard_atoms: [u16; 6],
+    system_atoms: Vec<u16>,
 }
 
 impl User32State32 {
@@ -42,6 +47,8 @@ impl User32State32 {
             slots,
             queue,
             next_atom: 0xc000,
+            standard_atoms: [0; 6],
+            system_atoms: Vec::new(),
         })
     }
 
@@ -68,7 +75,13 @@ impl User32State32 {
         }) {
             return Err(User32Error32::Win32(1410));
         }
-        if self.classes.len() == self.limits.classes {
+        if self
+            .classes
+            .iter()
+            .filter(|class| !self.is_system_class(class.atom))
+            .count()
+            == self.limits.classes
+        {
             return Err(User32Error32::Capacity);
         }
         let next = self
@@ -89,6 +102,12 @@ impl User32State32 {
     ) -> Result<&WindowClass32, User32Error32> {
         self.classes
             .iter()
+            .filter(|class| class.instance == instance)
+            .chain(
+                self.classes
+                    .iter()
+                    .filter(|class| class.instance != instance && class.style & 0x4000 != 0),
+            )
             .find(|class| {
                 (class.instance == instance || class.style & 0x4000 != 0)
                     && atom
@@ -112,6 +131,9 @@ impl User32State32 {
                         .map_or_else(|| names_equal(&class.name, name), |atom| class.atom == atom)
             })
             .ok_or(User32Error32::Win32(1411))?;
+        if self.is_system_class(self.classes[index].atom) {
+            return Err(User32Error32::Win32(1411));
+        }
         if self
             .slots
             .iter()
@@ -145,6 +167,8 @@ impl User32State32 {
         self.slots.push(WindowSlot32 {
             data,
             extra,
+            text: Vec::new(),
+            control: Default::default(),
             update: crate::windows::gdi::Region32::rectangle(super::Rect32 {
                 left: 0,
                 top: 0,
