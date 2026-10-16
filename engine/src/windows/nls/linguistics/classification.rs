@@ -12,6 +12,9 @@ fn punctuation(c: G) -> bool {
             | G::OtherPunctuation
     )
 }
+fn flag(value: bool, bit: u16) -> u16 {
+    u16::from(value) * bit
+}
 pub fn character_types(units: &[u16], kind: u32) -> Result<Vec<u16>, NlsError32> {
     if !(1..=3).contains(&kind) {
         return Err(NlsError32::InvalidFlags);
@@ -25,11 +28,11 @@ pub fn character_types(units: &[u16], kind: u32) -> Result<Vec<u16>, NlsError32>
         let alpha = value.is_some_and(char::is_alphabetic);
         let bits = match kind {
             1 => {
-                u16::from(c == G::UppercaseLetter)
-                    | u16::from(c == G::LowercaseLetter) * 2
-                    | u16::from(c == G::DecimalNumber) * 4
-                    | u16::from(value.is_some_and(char::is_whitespace)) * 8
-                    | u16::from(
+                flag(c == G::UppercaseLetter, 1)
+                    | flag(c == G::LowercaseLetter, 2)
+                    | flag(c == G::DecimalNumber, 4)
+                    | flag(value.is_some_and(char::is_whitespace), 8)
+                    | flag(
                         punctuation(c)
                             || matches!(
                                 c,
@@ -38,12 +41,13 @@ pub fn character_types(units: &[u16], kind: u32) -> Result<Vec<u16>, NlsError32>
                                     | G::ModifierSymbol
                                     | G::OtherSymbol
                             ),
-                    ) * 0x10
-                    | u16::from(c == G::Control) * 0x20
-                    | u16::from(c == G::SpaceSeparator || unit == 9) * 0x40
-                    | u16::from(value.is_some_and(|c| c.is_ascii_hexdigit())) * 0x80
-                    | u16::from(alpha) * 0x100
-                    | u16::from(c != G::Unassigned && c != G::Surrogate) * 0x200
+                        0x10,
+                    )
+                    | flag(c == G::Control, 0x20)
+                    | flag(c == G::SpaceSeparator || unit == 9, 0x40)
+                    | flag(value.is_some_and(|c| c.is_ascii_hexdigit()), 0x80)
+                    | flag(alpha, 0x100)
+                    | flag(c != G::Unassigned && c != G::Surrogate, 0x200)
             }
             2 => value.map_or(0, |value| match unicode_bidi::bidi_class(value) {
                 unicode_bidi::BidiClass::L => 1,
@@ -60,23 +64,26 @@ pub fn character_types(units: &[u16], kind: u32) -> Result<Vec<u16>, NlsError32>
                 _ => 0,
             }),
             _ => {
-                u16::from(c == G::NonspacingMark)
-                    | u16::from(matches!(c, G::NonspacingMark | G::SpacingMark)) * 2
-                    | u16::from(c == G::SpacingMark) * 4
-                    | u16::from(matches!(
-                        c,
-                        G::CurrencySymbol | G::MathSymbol | G::ModifierSymbol | G::OtherSymbol
-                    )) * 8
-                    | u16::from((0x30a0..=0x30ff).contains(&unit)) * 0x10
-                    | u16::from((0x3040..=0x309f).contains(&unit)) * 0x20
-                    | u16::from((0xff61..=0xffdc).contains(&unit)) * 0x40
-                    | u16::from((0xff01..=0xff60).contains(&unit)) * 0x80
-                    | u16::from((0x3400..=0x9fff).contains(&unit)) * 0x100
-                    | u16::from(unit == 0x640) * 0x200
-                    | u16::from(matches!(unit, 0x2d | 0x3d | 0xaa | 0xba | 0x640)) * 0x400
-                    | u16::from((0xd800..=0xdbff).contains(&unit)) * 0x800
-                    | u16::from((0xdc00..=0xdfff).contains(&unit)) * 0x1000
-                    | u16::from(alpha) * 0x8000
+                flag(c == G::NonspacingMark, 1)
+                    | flag(matches!(c, G::NonspacingMark | G::SpacingMark), 2)
+                    | flag(c == G::SpacingMark, 4)
+                    | flag(
+                        matches!(
+                            c,
+                            G::CurrencySymbol | G::MathSymbol | G::ModifierSymbol | G::OtherSymbol
+                        ),
+                        8,
+                    )
+                    | flag((0x30a0..=0x30ff).contains(&unit), 0x10)
+                    | flag((0x3040..=0x309f).contains(&unit), 0x20)
+                    | flag((0xff61..=0xffdc).contains(&unit), 0x40)
+                    | flag((0xff01..=0xff60).contains(&unit), 0x80)
+                    | flag((0x3400..=0x9fff).contains(&unit), 0x100)
+                    | flag(unit == 0x640, 0x200)
+                    | flag(matches!(unit, 0x2d | 0x3d | 0xaa | 0xba | 0x640), 0x400)
+                    | flag((0xd800..=0xdbff).contains(&unit), 0x800)
+                    | flag((0xdc00..=0xdfff).contains(&unit), 0x1000)
+                    | flag(alpha, 0x8000)
             }
         };
         out.push(bits);

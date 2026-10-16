@@ -73,7 +73,7 @@ fn format(time: SystemTime32, pattern: &str, date: bool) -> Result<String, NlsEr
             (true, 'g', _) => "A.D.".into(),
             (false, 'H', 1) => time.hour.to_string(),
             (false, 'H', _) => format!("{:02}", time.hour),
-            (false, 'h', 1) => (if time.hour % 12 == 0 {
+            (false, 'h', 1) => (if time.hour.is_multiple_of(12) {
                 12
             } else {
                 time.hour % 12
@@ -81,7 +81,7 @@ fn format(time: SystemTime32, pattern: &str, date: bool) -> Result<String, NlsEr
             .to_string(),
             (false, 'h', _) => format!(
                 "{:02}",
-                if time.hour % 12 == 0 {
+                if time.hour.is_multiple_of(12) {
                     12
                 } else {
                     time.hour % 12
