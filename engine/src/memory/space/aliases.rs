@@ -290,10 +290,20 @@ impl AddressSpace {
         pages: &[(&SharedPages, usize, Permissions)],
         copy_on_write: bool,
     ) -> Result<(), MemoryError> {
+        self.map_shared_page_rights_with_word_writes(range, pages, copy_on_write, &[])
+    }
+
+    pub(crate) fn map_shared_page_rights_with_word_writes(
+        &mut self,
+        range: PageRange,
+        pages: &[(&SharedPages, usize, Permissions)],
+        copy_on_write: bool,
+        words: &[WordWrite32],
+    ) -> Result<(), MemoryError> {
         if range.count != pages.len() {
             return Err(MemoryError::InvalidRange);
         }
-        for (page, (owner, index, _)) in range.indices().zip(pages) {
+        for (page, (owner, index, permissions)) in range.indices().zip(pages) {
             self.validate_shared(owner)?;
             let slot = *owner.slots.get(*index).ok_or(MemoryError::InvalidRange)?;
             if self.mappings[page] != 0 {
@@ -304,6 +314,20 @@ impl AddressSpace {
             if self.references[slot as usize] > u32::MAX - GUEST_PAGES as u32 {
                 return Err(MemoryError::Capacity);
             }
+            if permissions.allows(Access::Execute)
+                && self.executable_views[slot as usize] > u32::MAX - GUEST_PAGES as u32
+            {
+                return Err(MemoryError::Capacity);
+            }
+        }
+        let mut previous_end = 0;
+        for word in words {
+            let start = u64::from(word.address.0);
+            if start < previous_end {
+                return Err(MemoryError::InvalidRange);
+            }
+            self.check_access(word.address, 4, Access::Write)?;
+            previous_end = start + 4;
         }
         if copy_on_write {
             if range.count > self.free.len() {
@@ -330,6 +354,9 @@ impl AddressSpace {
                 self.references[private as usize] = 1;
                 self.private_slots.as_mut().unwrap()[page] = private + 1;
             }
+        }
+        for word in words {
+            self.copy_in_validated(word.address, &word.value.to_le_bytes(), version);
         }
         Ok(())
     }

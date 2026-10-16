@@ -1,5 +1,53 @@
 use super::*;
 
+#[test]
+fn alias_mapping_and_pointer_output_share_one_transaction_and_failed_output_is_neutral() {
+    let mut memory = AddressSpace::new(4).unwrap();
+    let pages = memory.allocate_shared_pages(1, &[7]).unwrap();
+    memory
+        .map_zeroed(range(0x1000, 1), Permissions::READ_WRITE)
+        .unwrap();
+    let version = memory.transaction_version();
+    let mapped = memory.mapped_pages();
+    assert!(
+        memory
+            .map_shared_page_rights_with_word_writes(
+                range(0x5000, 1),
+                &[(&pages, 0, Permissions::READ_WRITE)],
+                true,
+                &[WordWrite32 {
+                    address: GuestAddress(0xdead0000),
+                    value: 0x5004
+                }],
+            )
+            .is_err()
+    );
+    assert_eq!(memory.transaction_version(), version);
+    assert_eq!(memory.mapped_pages(), mapped);
+    assert!(memory.private_slots.is_none());
+    memory
+        .map_shared_page_rights_with_word_writes(
+            range(0x5000, 1),
+            &[(&pages, 0, Permissions::READ_WRITE)],
+            true,
+            &[WordWrite32 {
+                address: GuestAddress(0x1000),
+                value: 0x5004,
+            }],
+        )
+        .unwrap();
+    assert_eq!(memory.transaction_version(), version + 1);
+    let mut pointer = [0; 4];
+    memory.read(GuestAddress(0x1000), &mut pointer).unwrap();
+    assert_eq!(u32::from_le_bytes(pointer), 0x5004);
+    let mut byte = [0];
+    memory.read(GuestAddress(0x5000), &mut byte).unwrap();
+    assert_eq!(byte, [7]);
+    memory.write(GuestAddress(0x5000), &[9]).unwrap();
+    memory.read_shared_pages(&pages, 0, &mut byte).unwrap();
+    assert_eq!(byte, [7]);
+}
+
 fn range(address: u32, count: u32) -> PageRange {
     PageRange::new(GuestAddress(address), count).unwrap()
 }
