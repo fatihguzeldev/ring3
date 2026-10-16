@@ -21,7 +21,7 @@ export function image({international=false}={}){
   call('MultiByteToWideChar',[65001,8,invalid,1,a.buffer,32],0,'invalid-utf8');
   call('WideCharToMultiByte',[1252,0,substitute,2,a.buffer,32,0,a.used],2,'bestfit');
   call('WideCharToMultiByte',[1252,0x400,substitute,2,a.buffer,32,0,a.used],2,'substitute');
-  call('LCMapStringW',[0x409,0x200,upper,0xffffffff,a.buffer,32],8,'uppercase');
+  call('LCMapStringW',[0x409,0x200,upper,0xffffffff,a.buffer,32],7,'uppercase');
   call('CompareStringW',[0x409,3,accented,0xffffffff,plain,0xffffffff],2);
   call('GetStringTypeW',[1,accented,1,a.buffer],1,'classification');
   call('GetLocaleInfoW',[0x400,0x20001004,a.buffer,2],2,'locale-number');

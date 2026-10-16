@@ -75,7 +75,7 @@ case'utf8':assert.equal(read(a.buffer+64),0x9ff0a9c3);assert.equal(read(a.buffer
 case'invalid-utf8':assert.equal(read(a.buffer),0xd83d00e9,'failed strict conversion preserves output');break;
 case'bestfit':assert.equal(read(a.buffer)&0xffff,0x3841);assert.equal(read(a.used),0);break;
 case'substitute':assert.equal(read(a.buffer)&0xffff,0x3f3f);assert.equal(read(a.used),1);break;
-case'uppercase':assert.equal(text(a.buffer,true),'STRASSE');break;
+case'uppercase':assert.equal(text(a.buffer,true),'STRAßE');break;
 case'classification':assert.equal(read(a.buffer)&0x101,0x101);break;
 case'locale-number':assert.equal(read(a.buffer),international?1254:1252);break;
 // unconfigured launch identity is derived from the authored root module name.

@@ -17,27 +17,14 @@ pub fn map_string_for_locale(
         return Err(NlsError32::InvalidFlags);
     }
     let mut out = Vec::new();
-    out.try_reserve(units.len().saturating_mul(3))
+    out.try_reserve(units.len().saturating_mul(2))
         .map_err(|_| NlsError32::Allocation)?;
-    let locale: icu_locale::Locale = super::super::locales::locale_identity(locale)?
-        .language_tag()
-        .parse()
-        .map_err(|_| NlsError32::InvalidParameter)?;
+    let identity = super::super::locales::locale_identity(locale)?;
+    let linguistic = flags & 0x0100_0000 != 0;
+    let turkic = linguistic && matches!(identity.language, "tr" | "az");
     let mapper = icu_casemap::CaseMapper::new();
-    let mut run = String::new();
-    let flush = |run: &mut String, out: &mut Vec<u16>| {
-        if upper {
-            out.extend(mapper.uppercase_to_string(run, &locale.id).encode_utf16());
-        } else if lower {
-            out.extend(mapper.lowercase_to_string(run, &locale.id).encode_utf16());
-        } else {
-            out.extend(run.encode_utf16());
-        }
-        run.clear();
-    };
     for c in char::decode_utf16(units.iter().copied()) {
         let Ok(mut c) = c else {
-            flush(&mut run, &mut out);
             out.push(c.unwrap_err().unpaired_surrogate());
             continue;
         };
@@ -47,9 +34,23 @@ pub fn map_string_for_locale(
         if flags & 0x200000 != 0 && (0x3041..=0x3096).contains(&(c as u32)) {
             c = char::from_u32(c as u32 + 0x60).unwrap();
         }
-        run.push(c);
+        // windows maps each scalar without expanding or contextual casing.
+        // its default filesystem mode preserves the dotted/dotless I pair.
+        if (upper || lower) && (linguistic || !matches!(c, 'İ' | 'ı')) {
+            c = if upper {
+                if turkic && c == 'i' {
+                    'İ'
+                } else {
+                    mapper.simple_uppercase(c)
+                }
+            } else if turkic && c == 'I' {
+                'ı'
+            } else {
+                mapper.simple_lowercase(c)
+            };
+        }
+        out.extend_from_slice(c.encode_utf16(&mut [0; 2]));
     }
-    flush(&mut run, &mut out);
     if flags & 0xc00000 != 0 {
         super::width::map(&out, flags & 0x800000 != 0)
     } else {

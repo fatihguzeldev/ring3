@@ -70,7 +70,7 @@ fn linguistic_keys_and_comparisons_share_unicode_collation_and_character_data() 
         character_types(&[0x5d0, 0x627, 0x661], 2).unwrap(),
         [2, 2, 6]
     );
-    assert_eq!(map_string(&text("straße"), 0x200).unwrap(), text("STRASSE"));
+    assert_eq!(map_string(&text("straße"), 0x200).unwrap(), text("STRAßE"));
     assert_eq!(character_types(&[65], 0), Err(NlsError32::InvalidFlags));
 }
 
@@ -106,7 +106,7 @@ fn locale_specific_case_and_collation_cover_turkish_and_swedish() {
     );
     assert_eq!(
         map_string_for_locale(&units("ΟΣ"), 0x100, 0x408).unwrap(),
-        units("ος")
+        units("οσ")
     );
     assert_eq!(
         compare_for_locale(&units("I"), &units("ı"), 1, 0x41f).unwrap(),
