@@ -1,6 +1,8 @@
 use crate::{
-    loader::{DataFileLayout32, ModuleError32},
-    process::{EngineInstance, HostError, ModuleOperation32},
+    loader::{DataFileLayout32, DataFilePlan32, ModuleError32},
+    process::{
+        EngineInstance, HostError, ModuleOperation32, loading::modules::CapturedModuleRequest32,
+    },
 };
 fn layout(flags: u32) -> Result<DataFileLayout32, ModuleError32> {
     if flags & !0x62 != 0 || flags & 0x62 == 0 || flags & 0x42 == 0x42 {
@@ -27,39 +29,49 @@ impl EngineInstance {
         if self.modules.thread.is_none() {
             return Err(HostError::Module(ModuleError32::InvalidRequest));
         }
+        let before = self.modules.loader_depth;
         self.acquire_loader_thread()?;
         let result = (|| {
             if self.call_cancelled() {
                 return Err(HostError::Call(crate::process::CallError::Cancelled));
             }
-            let reserved = self.guest_address_reservations()?;
-            self.modules
-                .datafiles
-                .try_reserve(1)
-                .map_err(|_| HostError::Module(ModuleError32::Allocation))?;
-            let plan = self
-                .modules
-                .catalog
-                .plan_datafile(
-                    &self.modules.loaded,
-                    self.memory()?,
-                    name,
-                    layout,
-                    &reserved,
-                )
-                .map_err(HostError::Module)?;
-            let handle = plan.handle();
-            let module = plan
-                .install(
-                    self.memory.as_mut().ok_or(HostError::Closed)?,
-                    &mut self.modules.loaded,
-                )
-                .map_err(HostError::Module)?;
-            self.modules.datafiles.push(module);
-            Ok(ModuleOperation32::Loaded { handle })
+            self.check_module_execution_admission()?;
+            let paths = self.capture_module_paths(None)?;
+            let name = self.resolve_module_source_captured(name, &paths)?;
+            self.begin_module_source_request(CapturedModuleRequest32::DataFile {
+                name,
+                layout,
+                paths,
+            })
         })();
-        self.release_loader_thread();
+        if !matches!(
+            result,
+            Ok(ModuleOperation32::Pending(_) | ModuleOperation32::NeedBytes { .. })
+        ) && self.modules.loader_depth > before
+        {
+            self.release_loader_thread();
+        }
         result
+    }
+
+    pub(in crate::process::loading::modules) fn install_datafile_plan(
+        &mut self,
+        plan: DataFilePlan32,
+    ) -> Result<ModuleOperation32, HostError> {
+        self.modules
+            .datafiles
+            .try_reserve(1)
+            .map_err(|_| HostError::Module(ModuleError32::Allocation))?;
+        let handle = plan.handle();
+        let module = plan
+            .install(
+                self.memory.as_mut().ok_or(HostError::Closed)?,
+                &mut self.modules.loaded,
+            )
+            .map_err(HostError::Module)?;
+        self.modules.datafiles.push(module);
+        self.release_loader_thread();
+        Ok(ModuleOperation32::Loaded { handle })
     }
     pub fn free_resource_only_module(
         &mut self,

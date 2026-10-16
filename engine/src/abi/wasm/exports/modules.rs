@@ -12,6 +12,8 @@ export_process_calls! {
     detach_modules_for_exit();
     module_initializer();
     finish_module_initializer(token_low: u32, token_high: u32);
+    pending_module_source();
+    resume_module_source(epoch_low: u32, epoch_high: u32, token_low: u32, token_high: u32);
     abort_module_operation();
     module_handle(name_length: u32);
     module_gates();

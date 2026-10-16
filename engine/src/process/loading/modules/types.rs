@@ -38,8 +38,15 @@ pub struct ModuleInitializer32 {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ModuleOperation32 {
     Pending(ModuleInitializer32),
-    Loaded { handle: u32 },
+    NeedBytes {
+        request: crate::files::FileReadRequest32,
+    },
+    Loaded {
+        handle: u32,
+    },
     Released,
-    ExportResolved { address: u32 },
+    ExportResolved {
+        address: u32,
+    },
     InitializationFailed,
 }

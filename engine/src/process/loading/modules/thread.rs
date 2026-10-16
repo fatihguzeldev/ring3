@@ -4,15 +4,22 @@ use crate::process::{EngineInstance, HostError};
 pub(in crate::process) struct ModuleThreadState32 {
     operations: Vec<ModuleOperation>,
     waiting_request: Option<ModuleRequest32>,
+    source: Option<super::source::PendingModuleLoad32>,
 }
 impl ModuleThreadState32 {
     pub(in crate::process) fn execution_pins(&self) -> impl Iterator<Item = u64> + '_ {
         super::callback::operation_execution_pins(&self.operations)
     }
+    pub(in crate::process) fn source_ready(&self, engine: &EngineInstance) -> bool {
+        self.source
+            .as_ref()
+            .is_some_and(|source| source.ready(engine))
+    }
     pub(in crate::process) fn empty() -> Self {
         Self {
             operations: Vec::new(),
             waiting_request: None,
+            source: None,
         }
     }
 }
@@ -21,6 +28,7 @@ impl EngineInstance {
         ModuleThreadState32 {
             operations: std::mem::take(&mut self.modules.operations),
             waiting_request: self.modules.waiting_request.take(),
+            source: self.modules.source.take(),
         }
     }
     pub(in crate::process) fn restore_module_thread_state(&mut self, state: ModuleThreadState32) {
@@ -31,6 +39,8 @@ impl EngineInstance {
         self.modules.operations = state.operations;
         assert!(self.modules.waiting_request.is_none());
         self.modules.waiting_request = state.waiting_request;
+        assert!(self.modules.source.is_none());
+        self.modules.source = state.source;
     }
     pub(in crate::process) fn loader_initialization_owner(&self) -> Option<u32> {
         self.modules.loader_owner

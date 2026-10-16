@@ -73,6 +73,42 @@ impl CreateWork32 {
             policy_loaded: false,
         }
     }
+    pub(in crate::process::windows::activation) fn from_manifest(
+        bytes: &[u8],
+        path: Vec<u16>,
+        resource: ResourceIdentifier32,
+        application_directory: Vec<u16>,
+        process_default: bool,
+        language: u16,
+        limits: ActivationConfig32,
+    ) -> Result<Self, HostError> {
+        let specification = CreateSource32 {
+            source: Some(path.clone()),
+            resource: Some(resource.clone()),
+            module: None,
+            language,
+            assembly_directory: None,
+            application: Some(application_directory.clone()),
+            process_default,
+        };
+        let mut work = Self::new(specification);
+        work.directory = directory(&path);
+        work.application_directory = application_directory;
+        work.initialized = true;
+        work.accept(
+            bytes,
+            path,
+            None,
+            ManifestProvenance32 {
+                modified: 0,
+                resource: Some(resource),
+                directory: None,
+                language: None,
+            },
+            limits,
+        )?;
+        Ok(work)
+    }
     pub(in crate::process::windows::activation) fn poll(
         &mut self,
         engine: &mut EngineInstance,

@@ -2,6 +2,8 @@
 
 mod gates;
 mod operation;
+mod source;
+pub use source::{MODULE_SOURCE_RECORD_SIZE, ModuleSourceRecord32, encode_module_source};
 
 pub use gates::{
     MODULE_GATE_PAGE_HEADER_SIZE, MODULE_GATES_HEADER_SIZE, encode_module_gate_page,

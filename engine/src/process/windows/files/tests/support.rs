@@ -11,6 +11,12 @@ use crate::{
     windows::synchronization::{SynchronizationContext32, SynchronizationLimits32},
 };
 
+impl FileRuntime32 {
+    pub(in crate::process) fn vfs_for_test(&mut self) -> &mut Vfs32 {
+        &mut self.vfs
+    }
+}
+
 pub(in crate::process::windows::files) fn runtime()
 -> (FileRuntime32, AddressSpace, SynchronizationContext32) {
     let mut memory = AddressSpace::new(128).unwrap();

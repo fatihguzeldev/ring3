@@ -110,6 +110,27 @@ impl FileRuntime32 {
 }
 
 impl EngineInstance {
+    pub(in crate::process) fn provider_file_version(
+        &self,
+        lease: ProviderFile32,
+    ) -> Result<crate::files::FileContentVersion32, HostError> {
+        let thread = self.current_windows_thread_id()?;
+        let files = self.files.as_ref().ok_or(HostError::InvalidRequest)?;
+        files
+            .check_provider_file(lease, thread)
+            .map_err(HostError::File)?;
+        let file = files.vfs.open_info(lease.open).map_err(HostError::File)?.id;
+        files.vfs.content_version(file).map_err(HostError::File)
+    }
+
+    pub(in crate::process) fn provider_path_version(
+        &self,
+        path: &[u16],
+    ) -> Result<crate::files::FileContentVersion32, HostError> {
+        let files = self.files.as_ref().ok_or(HostError::InvalidRequest)?;
+        let file = files.vfs.path_info(path).map_err(HostError::File)?.id;
+        files.vfs.content_version(file).map_err(HostError::File)
+    }
     pub(in crate::process) fn find_provider_paths(
         &self,
         pattern: &[u16],

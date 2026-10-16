@@ -28,7 +28,6 @@ impl FileRuntime32 {
         &self.ordinary.environment.windows_directory
     }
 
-    #[cfg(test)]
     pub(in crate::process::windows::files) fn file_environment(&self) -> &FileEnvironment32 {
         &self.ordinary.environment
     }

@@ -1,11 +1,8 @@
-use super::super::{
-    ModuleOperation32, ModuleRuntimeConfig32, initialization::LoadCompletion, tls::InitialThreadTls,
-};
+use super::super::{CapturedModuleRequest32, ModuleOperation32, ModuleRuntimeConfig32};
 use crate::{
     abi::x86::decode_state,
     cpu::x86::State32,
     loader::ModuleError32,
-    memory::{GuestAddress, PageRange},
     process::{EngineInstance, HostError},
 };
 
@@ -55,8 +52,10 @@ impl EngineInstance {
         let before = self.modules.loader_depth;
         self.acquire_loader_thread()?;
         let result = self.load_module_request_inner(name, actual_base, config);
-        if !matches!(result, Ok(ModuleOperation32::Pending(_)))
-            && self.modules.loader_depth > before
+        if !matches!(
+            result,
+            Ok(ModuleOperation32::Pending(_) | ModuleOperation32::NeedBytes { .. })
+        ) && self.modules.loader_depth > before
         {
             self.release_loader_thread();
         }
@@ -75,47 +74,14 @@ impl EngineInstance {
             return Err(HostError::Call(crate::process::CallError::Cancelled));
         }
         self.check_module_execution_admission()?;
-        let mut reservations = self.guest_address_reservations()?;
-        if let Some(config) = config {
-            let slots = self
-                .modules
-                .catalog
-                .limits()
-                .modules
-                .min(self.memory()?.capacity_pages() as usize) as u32;
-            let thread = InitialThreadTls::new(config, slots).map_err(HostError::Module)?;
-            for (start, end) in thread.reservations() {
-                let range = PageRange::new(
-                    GuestAddress(start as u32),
-                    ((end - start) / u64::from(crate::memory::PAGE_SIZE)) as u32,
-                )
-                .map_err(HostError::Memory)?;
-                if self
-                    .provider_guest_arenas()
-                    .any(|old| crate::process::memory::reservations::overlaps(old, range))
-                {
-                    return Err(HostError::Module(ModuleError32::AddressConflict));
-                }
-                reservations.push(range);
-            }
-        }
-        let plan = self
-            .modules
-            .catalog
-            .plan_load_with_runtime_dependencies(
-                &self.modules.loaded,
-                self.memory()?,
-                name,
-                actual_base,
-                &reservations,
-                if config.is_some() && self.modules.windows_runtime {
-                    &["ntdll.dll"]
-                } else {
-                    &[]
-                },
-            )
-            .map_err(HostError::Module)?;
-        self.install_module_plan(plan, config, LoadCompletion::Library)
+        let paths = self.capture_module_paths(config.is_some().then_some(name))?;
+        let name = self.resolve_module_source_captured(name, &paths)?;
+        self.begin_module_source_request(CapturedModuleRequest32::Load {
+            name,
+            actual_base,
+            config,
+            paths,
+        })
     }
 
     pub fn resolve_module_export(
@@ -128,8 +94,10 @@ impl EngineInstance {
         let before = self.modules.loader_depth;
         self.acquire_loader_thread()?;
         let result = self.resolve_module_export_inner(handle, symbol);
-        if !matches!(result, Ok(ModuleOperation32::Pending(_)))
-            && self.modules.loader_depth > before
+        if !matches!(
+            result,
+            Ok(ModuleOperation32::Pending(_) | ModuleOperation32::NeedBytes { .. })
+        ) && self.modules.loader_depth > before
         {
             self.release_loader_thread();
         }
@@ -164,18 +132,11 @@ impl EngineInstance {
                 address: resolved.address().0,
             });
         }
-        let reservations = self.guest_address_reservations()?;
-        let (plan, resolved) = self
-            .modules
-            .catalog
-            .plan_export_live_with_reservations(
-                &self.modules.loaded,
-                self.memory()?,
-                id,
-                symbol,
-                &reservations,
-            )
-            .map_err(HostError::Module)?;
-        self.install_module_plan(plan, None, LoadCompletion::Export(resolved.address().0))
+        let paths = self.capture_module_paths(None)?;
+        self.begin_module_source_request(CapturedModuleRequest32::Export {
+            handle,
+            symbol: symbol.clone(),
+            paths,
+        })
     }
 }

@@ -52,3 +52,39 @@ fn invalid_activation_cookie_and_read_only_section_output_preserve_stack_and_ref
     );
     assert_eq!(engine.memory().unwrap().transaction_version(), before);
 }
+
+#[test]
+fn captured_module_lookup_remains_frozen_after_live_stack_switch_zombify_and_release() {
+    let (mut engine, _) = engine(2);
+    let handle = create(&mut engine);
+    engine
+        .activation_call(1, Api::ActivateActCtx, &[handle, OUTPUT])
+        .unwrap();
+    let cookie = word(&engine, OUTPUT);
+    let snapshot = engine.capture_module_activation().unwrap();
+    let expected = engine
+        .active_dll_redirection(&"private.dll".encode_utf16().collect::<Vec<_>>())
+        .unwrap();
+    engine
+        .activation_call(1, Api::ZombifyActCtx, &[handle])
+        .unwrap();
+    engine
+        .activation_call(1, Api::DeactivateActCtx, &[0, cookie])
+        .unwrap();
+    engine
+        .activation_call(1, Api::ReleaseActCtx, &[handle])
+        .unwrap();
+    engine
+        .activation_call(1, Api::ActivateActCtx, &[0, OUTPUT])
+        .unwrap();
+    assert!(
+        engine
+            .active_dll_redirection(&"private.dll".encode_utf16().collect::<Vec<_>>())
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(
+        snapshot.dll_redirection(&"PRIVATE.DLL".encode_utf16().collect::<Vec<_>>()),
+        expected
+    );
+}

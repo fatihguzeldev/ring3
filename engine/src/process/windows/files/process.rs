@@ -5,6 +5,51 @@ use crate::{
     windows::process::ProcessError32,
 };
 impl EngineInstance {
+    pub(in crate::process) fn module_source_file_exists(&self, path: &[u16]) -> bool {
+        self.files.as_ref().is_some_and(|files| {
+            files
+                .vfs
+                .path_info(path)
+                .is_ok_and(|info| info.attributes & 0x10 == 0)
+        })
+    }
+    pub(in crate::process) fn capture_module_file_paths(
+        &self,
+    ) -> crate::files::path::FilePathScope32 {
+        self.files.as_ref().map_or_else(
+            || {
+                crate::files::path::FilePathScope32::from_directory(
+                    self.process_launch_directory()
+                        .unwrap_or("C:\\game")
+                        .encode_utf16()
+                        .collect(),
+                )
+            },
+            |files| files.vfs.capture_path_scope(),
+        )
+    }
+    pub(in crate::process) fn module_file_search_directories(&self) -> Vec<Vec<u16>> {
+        if let Some(files) = &self.files {
+            let environment = files.file_environment();
+            let mut paths = vec![
+                environment.system_directory.clone(),
+                environment.windows_directory.clone(),
+                files.vfs.current_directory().to_vec(),
+            ];
+            paths.extend(environment.search_path.iter().cloned());
+            paths
+        } else {
+            vec![
+                "C:\\Windows\\System32".encode_utf16().collect(),
+                "C:\\Windows".encode_utf16().collect(),
+                self.process_launch_directory()
+                    .unwrap_or("C:\\game")
+                    .encode_utf16()
+                    .collect(),
+            ]
+        }
+    }
+
     pub(in crate::process) fn apply_launch_file_directory(
         &mut self,
         value: &str,

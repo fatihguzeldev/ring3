@@ -4,6 +4,48 @@ use crate::{
 };
 
 impl EngineInstance {
+    pub(in crate::process) fn planned_module_file_name(
+        &self,
+        module: &crate::loader::LoadedModule32,
+        initial_root: Option<&crate::loader::LoadedModule32>,
+    ) -> Result<Vec<u16>, HostError> {
+        let image_path = if let Some(startup) = &self.process_runtime.startup {
+            startup.image_path.clone()
+        } else if self.process_runtime.configured {
+            self.process_runtime.launch.image_path.clone()
+        } else if let Some(root) = initial_root {
+            root.file_path()
+                .map_or_else(|| format!("C:\\game\\{}", root.identity()), str::to_owned)
+        } else {
+            self.process_runtime.launch.image_path.clone()
+        };
+        let default_system = "C:\\Windows\\System32".encode_utf16().collect::<Vec<_>>();
+        let system_directory = self
+            .files
+            .as_ref()
+            .map_or(default_system.as_slice(), |files| {
+                files.virtual_system_directory()
+            });
+        Ok(super::entries::module_path(
+            module,
+            &image_path,
+            system_directory,
+        ))
+    }
+
+    pub(in crate::process) fn module_application_directory(&self) -> Vec<u16> {
+        let path = self
+            .process_runtime
+            .startup
+            .as_ref()
+            .map_or(self.process_runtime.launch.image_path.as_str(), |startup| {
+                startup.image_path.as_str()
+            });
+        path.rsplit_once(['\\', '/'])
+            .map_or_else(Vec::new, |(directory, _)| {
+                directory.encode_utf16().collect()
+            })
+    }
     pub(in crate::process) fn resource_module_file_name(
         &self,
         handle: u32,

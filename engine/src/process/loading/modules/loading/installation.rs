@@ -27,11 +27,12 @@ use crate::{
 };
 
 impl EngineInstance {
-    pub(super) fn install_module_plan(
+    pub(in crate::process::loading::modules) fn install_module_plan_ready(
         &mut self,
         mut plan: LoadPlan32,
         config: Option<ModuleRuntimeConfig32>,
         completion: LoadCompletion,
+        activation_work: &[crate::process::windows::activation::modules::ModuleActivationWork32],
     ) -> Result<ModuleOperation32, HostError> {
         let initial = config.is_some();
         let root_id = plan.root();
@@ -265,6 +266,7 @@ impl EngineInstance {
                 .try_reserve(new_tls.len())
                 .map_err(|_| HostError::Module(ModuleError32::Allocation))?;
         }
+        let activation = self.stage_module_activation(&mut plan, activation_work)?;
         let loaded = plan
             .install_with_writes(
                 self.memory.as_mut().ok_or(HostError::Closed)?,
@@ -272,6 +274,7 @@ impl EngineInstance {
                 &writes,
             )
             .map_err(HostError::Module)?;
+        self.commit_module_activation(activation);
         self.commit_secondary_static_tls(secondary_tls);
         self.commit_process_loader_change(loader_change);
         if let Some(startup) = prepared_startup {

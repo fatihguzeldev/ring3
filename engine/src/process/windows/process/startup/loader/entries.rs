@@ -19,7 +19,7 @@ pub(super) fn entry_bytes(
     full_name: &[u16],
 ) -> Result<Vec<u8>, ProcessError32> {
     let full = wide_bytes(full_name)?;
-    let base = wide_bytes(&module.identity().encode_utf16().collect::<Vec<_>>())?;
+    let base = wide_bytes(&module.base_name().encode_utf16().collect::<Vec<_>>())?;
     let length = (64 + full.len() + base.len()).div_ceil(4) * 4;
     let mut bytes = Vec::new();
     bytes
@@ -53,14 +53,13 @@ pub(super) fn module_path(
     if !module.is_dll() {
         return image_path.encode_utf16().collect();
     }
+    if let Some(path) = module.file_path() {
+        return path.encode_utf16().collect();
+    }
     let mut path = if module.is_system() {
         system_directory.to_vec()
     } else {
-        image_path
-            .rsplit_once(['\\', '/'])
-            .map_or_else(Vec::new, |(directory, _)| {
-                directory.encode_utf16().collect()
-            })
+        return guest_library_path(module.identity(), image_path);
     };
     if !path.is_empty() && !path.last().is_some_and(|unit| matches!(*unit, 47 | 92)) {
         path.push(92);

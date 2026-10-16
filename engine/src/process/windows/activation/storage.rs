@@ -80,6 +80,52 @@ impl PreparedContextStorage32 {
             bytes,
         })
     }
+    pub(super) fn stage(
+        mut self,
+        memory: &AddressSpace,
+        bounds: PageRange,
+        plan: &mut crate::loader::LoadPlan32,
+    ) -> Result<ContextStorage32, E> {
+        if let Some(range) = self.storage.range {
+            let end = bounds.first + bounds.count;
+            let mut start = bounds.first;
+            let selected = loop {
+                let search = PageRange::new(
+                    GuestAddress(
+                        (start * PAGE_SIZE as usize)
+                            .try_into()
+                            .map_err(|_| E::NotEnoughMemory)?,
+                    ),
+                    (end - start).try_into().map_err(|_| E::NotEnoughMemory)?,
+                )
+                .map_err(|_| E::NotEnoughMemory)?;
+                let candidate = memory
+                    .find_free_range(
+                        search,
+                        range.count.try_into().map_err(|_| E::NotEnoughMemory)?,
+                        PAGE_SIZE,
+                    )
+                    .map_err(|_| E::NotEnoughMemory)?;
+                if !plan.intersects_staged_range(candidate) {
+                    break candidate;
+                }
+                start = candidate.first + 1;
+                if start >= end {
+                    return Err(E::NotEnoughMemory);
+                }
+            };
+            self.storage.range = Some(selected);
+            for (index, bytes) in self.bytes.chunks(PAGE_SIZE as usize).enumerate() {
+                plan.add_page(
+                    GuestAddress((selected.first + index) as u32 * PAGE_SIZE),
+                    Permissions::READ,
+                    bytes,
+                )
+                .map_err(|_| E::NotEnoughMemory)?;
+            }
+        }
+        Ok(self.storage)
+    }
     pub(super) fn publish(mut self, memory: &mut AddressSpace) -> Result<ContextStorage32, E> {
         if memory.identity() != self.storage.identity {
             return Err(E::Stale);
@@ -107,6 +153,16 @@ impl PreparedContextStorage32 {
     }
 }
 impl ContextStorage32 {
+    pub(super) fn adopt_mapping(&mut self, memory: &AddressSpace) {
+        assert_eq!(memory.identity(), self.identity);
+        if let Some(range) = self.range {
+            self.mapping = memory
+                .mapping_version_at(GuestAddress(range.first as u32 * PAGE_SIZE))
+                .expect("module activation sections installed in the same RAM transaction");
+        }
+        self.check(memory)
+            .expect("module activation mapping publication is coherent");
+    }
     pub(super) fn check(&self, memory: &AddressSpace) -> Result<(), E> {
         if memory.identity() != self.identity {
             return Err(E::Stale);

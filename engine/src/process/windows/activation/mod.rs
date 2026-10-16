@@ -3,6 +3,7 @@ mod context;
 mod facade;
 mod lifecycle;
 mod memory;
+pub(in crate::process) mod modules;
 mod publication;
 mod query;
 mod sources;

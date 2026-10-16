@@ -4,6 +4,12 @@ mod initialization;
 mod input;
 mod lifetime;
 mod loading;
+mod source;
+pub(in crate::process) use loading::ModulePlanProbe32;
+pub(in crate::process) use source::CapturedModuleRequest32;
+pub use source::ModuleSourceWait32;
+mod paths;
+pub(in crate::process) use paths::CapturedModulePaths32;
 mod thread;
 mod tls;
 pub(in crate::process) use thread::{ModuleRequest32, ModuleThreadState32};
@@ -34,6 +40,9 @@ pub(in crate::process) struct ModuleProcess32 {
     thread: Option<InitialThreadTls>,
     operations: Vec<ModuleOperation>,
     next_initializer: u64,
+    source: Option<source::PendingModuleLoad32>,
+    next_source: u64,
+    vfs_sources: Vec<source::ModuleVfsSource32>,
     loader_owner: Option<u32>,
     loader_depth: u32,
     waiting_request: Option<thread::ModuleRequest32>,

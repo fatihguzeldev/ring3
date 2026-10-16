@@ -68,7 +68,7 @@ pub fn decode_module(input: &[u8]) -> Result<ModuleRecord32, AbiError> {
 }
 
 fn validate(record: &ModuleRecord32) -> Result<(), AbiError> {
-    if record.outcome > 5 {
+    if record.outcome > 6 {
         return Err(AbiError::Module);
     }
     if record.outcome == 1 {
@@ -80,6 +80,17 @@ fn validate(record: &ModuleRecord32) -> Result<(), AbiError> {
             || record.reason > 1
             || !(1..=2).contains(&record.kind)
         {
+            return Err(AbiError::Module);
+        }
+    } else if record.outcome == 6 {
+        let expected = ModuleRecord32 {
+            outcome: 6,
+            value: record.value,
+            token: record.token,
+            module: record.module,
+            ..Default::default()
+        };
+        if *record != expected || record.value == 0 || record.token == 0 || record.module == 0 {
             return Err(AbiError::Module);
         }
     } else {

@@ -264,7 +264,7 @@ impl EngineInstance {
         self.modules.windows_runtime = true;
     }
     pub(in crate::process) fn has_active_module_operation(&self) -> bool {
-        !self.modules.operations.is_empty()
+        !self.modules.operations.is_empty() || self.modules.source.is_some()
     }
 
     pub fn configure_module_limits(
@@ -329,7 +329,7 @@ impl EngineInstance {
         self.memory()?;
         let module = match name {
             Some(name) => {
-                crate::loader::normalize_module_name(name).map_err(HostError::Module)?;
+                crate::loader::normalize_module_identity(name).map_err(HostError::Module)?;
                 self.modules.loaded.find(name)
             }
             None => self

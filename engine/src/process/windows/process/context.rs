@@ -100,6 +100,9 @@ impl crate::process::EngineInstance {
         (self.process_runtime.configured || self.process_runtime.startup.is_some())
             .then_some(self.process_runtime.launch.current_directory.as_str())
     }
+    pub(in crate::process) fn process_path_environment(&self) -> Option<&str> {
+        self.process_runtime.environment.get("PATH")
+    }
     pub(in crate::process) fn current_windows_thread_id(
         &self,
     ) -> Result<u32, crate::process::HostError> {

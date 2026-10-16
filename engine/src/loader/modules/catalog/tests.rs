@@ -174,3 +174,91 @@ fn replacement_is_atomic_and_waits_for_every_loaded_or_prepared_source_owner() {
     assert!(catalog.is_empty());
     assert_eq!(catalog.remaining_source_bytes(), old.len());
 }
+
+#[test]
+fn refreshed_resource_snapshots_keep_their_source_budget_until_last_owner_releases() {
+    use crate::{
+        loader::{DataFileLayout32, ModuleSet32},
+        memory::AddressSpace,
+    };
+    let mut old = pe::image(true, 0x600000, &[], &[]);
+    old[0x201] = 0x11;
+    let mut new = old.clone();
+    new[0x201] = 0x22;
+    let mut catalog = ModuleCatalog32::with_limits(ModuleLimits32 {
+        source_bytes: old.len() * 2,
+        ..Default::default()
+    })
+    .unwrap();
+    let mut memory = AddressSpace::new(16).unwrap();
+    let mut modules = ModuleSet32::new();
+    catalog.add_guest("resource.dll", &old).unwrap();
+    let retained = catalog
+        .plan_datafile(
+            &modules,
+            &memory,
+            "resource.dll",
+            DataFileLayout32::File,
+            &[],
+        )
+        .unwrap()
+        .install(&mut memory, &mut modules)
+        .unwrap();
+    catalog.retire_guest_snapshot("resource.dll").unwrap();
+    assert_eq!(catalog.remaining_source_bytes(), old.len());
+    assert_eq!(
+        catalog.add_system_group(vec![SystemModule32 {
+            name: "invalid.dll".into(),
+            preferred_base: 0,
+            exports: Vec::new(),
+        }]),
+        Err(ModuleError32::InvalidSystemExport)
+    );
+    assert_eq!(catalog.remaining_source_bytes(), old.len());
+    catalog
+        .add_system_group(vec![SystemModule32 {
+            name: "provider.dll".into(),
+            preferred_base: 0x70000000,
+            exports: Vec::new(),
+        }])
+        .unwrap();
+    assert_eq!(catalog.remaining_source_bytes(), old.len());
+    retained.check(&memory).unwrap();
+    catalog.add_guest("resource.dll", &new).unwrap();
+    let current = catalog
+        .plan_datafile(
+            &modules,
+            &memory,
+            "resource.dll",
+            DataFileLayout32::File,
+            &[retained.reservation()],
+        )
+        .unwrap()
+        .install(&mut memory, &mut modules)
+        .unwrap();
+    assert_eq!(catalog.remaining_source_bytes(), 0);
+    let version = memory.transaction_version();
+    assert_eq!(
+        catalog.add_guest("extra.dll", &old),
+        Err(ModuleError32::Capacity)
+    );
+    assert_eq!(
+        catalog.remove_guest("resource.dll"),
+        Err(ModuleError32::ModuleInUse)
+    );
+    assert_eq!(memory.transaction_version(), version);
+    let mut byte = [0];
+    for (module, expected) in [(&retained, 0x11), (&current, 0x22)] {
+        memory
+            .read(GuestAddress(module.base() + 0x201), &mut byte)
+            .unwrap();
+        assert_eq!(byte, [expected]);
+        module.check(&memory).unwrap();
+    }
+    retained.unload(&mut memory, &mut modules).unwrap();
+    drop(retained);
+    assert_eq!(catalog.remaining_source_bytes(), old.len());
+    catalog.add_guest("extra.dll", &old).unwrap();
+    assert_eq!(catalog.remaining_source_bytes(), 0);
+    current.check(&memory).unwrap();
+}

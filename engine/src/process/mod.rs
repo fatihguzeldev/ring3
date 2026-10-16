@@ -18,6 +18,7 @@ pub use execution::installation::ResidentInstallation;
 pub use instance::{EngineInstance, HostError, StoreCompletion};
 pub use loading::modules::{
     ModuleInitializer32, ModuleInitializerKind32, ModuleOperation32, ModuleRuntimeConfig32,
+    ModuleSourceWait32,
 };
 pub use media::{MediaConfig, MediaError};
 pub use windows::callbacks::{

@@ -204,6 +204,12 @@ pub struct FileInfo32 {
     pub delete_pending: bool,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FileContentVersion32 {
+    pub epoch: u64,
+    pub file: FileId,
+    pub revision: u64,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AssetRef32 {
     pub id: u64,
     pub length: u64,

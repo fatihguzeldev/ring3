@@ -47,6 +47,11 @@ impl SavedModuleContext {
         })
     }
 
+    pub(super) fn matches(&self, arena: &[u8]) -> bool {
+        arena[STATE_OFFSET..STATE_OFFSET + STATE_SIZE] == self.state
+            && arena[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE] == self.exit
+            && self.extended.matches(arena)
+    }
     pub fn state(&self) -> Result<State32, HostError> {
         decode_state(&self.state).map_err(|_| HostError::Infrastructure)
     }

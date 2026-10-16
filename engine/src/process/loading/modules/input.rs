@@ -1,6 +1,6 @@
 use crate::{
     abi::arena::TRANSFER_SIZE,
-    loader::{ModuleError32, normalize_module_name},
+    loader::{ModuleError32, normalize_module_identity},
     process::{EngineInstance, HostError},
 };
 
@@ -19,15 +19,19 @@ impl EngineInstance {
         if total == 0 || total as usize > self.modules.catalog.remaining_source_bytes() {
             return Err(HostError::Module(ModuleError32::Capacity));
         }
-        let name = normalize_module_name(name).map_err(HostError::Module)?;
-        if self.modules.catalog.contains(&name) {
+        let normalized = normalize_module_identity(name).map_err(HostError::Module)?;
+        if self.modules.catalog.contains(&normalized) {
             return Err(HostError::Module(ModuleError32::DuplicateModule));
         }
         let mut bytes = Vec::new();
         bytes
             .try_reserve_exact(total as usize)
             .map_err(|_| HostError::Module(ModuleError32::Allocation))?;
-        self.modules.input = Some(ModuleInput32 { name, total, bytes });
+        self.modules.input = Some(ModuleInput32 {
+            name: name.to_owned(),
+            total,
+            bytes,
+        });
         Ok(())
     }
 
@@ -80,6 +84,7 @@ impl EngineInstance {
     fn module_input_guard(&self) -> Result<(), HostError> {
         self.memory()?;
         if !self.modules.operations.is_empty()
+            || self.modules.source.is_some()
             || self.pending_call.is_some()
             || self.callback.is_some()
         {

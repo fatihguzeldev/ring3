@@ -6,6 +6,8 @@ use crate::{
     memory::GuestAddress,
 };
 
+mod retirement;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SystemExportTarget32 {
     Gate(u32),
@@ -77,6 +79,7 @@ pub struct ModuleCatalog32 {
     pub(super) sources: Vec<Arc<ModuleSource32>>,
     pub(super) limits: ModuleLimits32,
     source_bytes: usize,
+    retired: Vec<(std::sync::Weak<ModuleSource32>, usize)>,
 }
 
 impl ModuleCatalog32 {
@@ -106,6 +109,7 @@ impl ModuleCatalog32 {
             sources: Vec::new(),
             limits,
             source_bytes: 0,
+            retired: Vec::new(),
         })
     }
 
@@ -114,10 +118,13 @@ impl ModuleCatalog32 {
     }
 
     pub fn remaining_source_bytes(&self) -> usize {
-        self.limits.source_bytes.saturating_sub(self.source_bytes)
+        self.limits
+            .source_bytes
+            .saturating_sub(self.source_bytes - self.released_source_bytes())
     }
 
     pub fn add_guest(&mut self, name: &str, bytes: &[u8]) -> Result<(), ModuleError32> {
+        self.collect_retired_sources();
         let path = super::identity::module_source_path(name)?;
         let name = self.available_name(name)?;
         let source_bytes = self
@@ -148,6 +155,7 @@ impl ModuleCatalog32 {
     }
 
     pub fn replace_guest(&mut self, name: &str, bytes: &[u8]) -> Result<(), ModuleError32> {
+        self.collect_retired_sources();
         let name = normalize_module_identity(name)?;
         let slot = self
             .sources
@@ -189,6 +197,7 @@ impl ModuleCatalog32 {
     }
 
     pub fn remove_guest(&mut self, name: &str) -> Result<(), ModuleError32> {
+        self.collect_retired_sources();
         let name = normalize_module_identity(name)?;
         let slot = self
             .sources
@@ -219,10 +228,16 @@ impl ModuleCatalog32 {
             .try_reserve_exact(capacity)
             .map_err(|_| ModuleError32::Allocation)?;
         sources.extend(self.sources.iter().cloned());
+        let mut retired = Vec::new();
+        retired
+            .try_reserve_exact(self.retired.len())
+            .map_err(|_| ModuleError32::Allocation)?;
+        retired.extend(self.retired.iter().cloned());
         let mut candidate = Self {
             sources,
             limits: self.limits,
             source_bytes: self.source_bytes,
+            retired,
         };
         for module in modules {
             candidate.add_system(module)?;

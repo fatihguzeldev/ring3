@@ -62,6 +62,8 @@ impl EngineInstance {
         let launch = &self.process_runtime.launch;
         let image_path = if self.process_runtime.configured {
             launch.image_path.clone()
+        } else if root_name.contains('\\') {
+            root_name.to_owned()
         } else {
             format!("C:\\game\\{root_name}")
         };

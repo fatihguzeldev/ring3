@@ -31,7 +31,7 @@ impl EngineInstance {
         if self.call_cancelled() {
             return Err(HostError::Call(crate::process::CallError::Cancelled));
         }
-        if !self.modules.operations.is_empty() {
+        if !self.modules.operations.is_empty() || self.modules.source.is_some() {
             return Err(HostError::Module(ModuleError32::Busy));
         }
         self.check_module_execution_admission()?;
@@ -102,7 +102,7 @@ impl EngineInstance {
         if self.call_cancelled() {
             return Err(HostError::Call(crate::process::CallError::Cancelled));
         }
-        if !self.modules.operations.is_empty() {
+        if !self.modules.operations.is_empty() || self.modules.source.is_some() {
             return Err(HostError::Module(ModuleError32::Busy));
         }
         self.check_module_execution_admission()?;
@@ -237,6 +237,12 @@ impl EngineInstance {
                 .map_err(|_| HostError::Module(ModuleError32::Allocation))?;
             writes.extend_from_slice(change.words());
         }
+        let activation = self.prepare_module_activation_retirement(ids, initial)?;
+        if let Some(activation) = &activation {
+            for &range in activation.ranges() {
+                plan.add_range(range).map_err(HostError::Module)?;
+            }
+        }
         writes.sort_unstable_by_key(|write| write.address.0);
         let empty_memory = initial
             .then(|| self.windows_memory.empty_same_limits())
@@ -248,6 +254,7 @@ impl EngineInstance {
             &writes,
         )
         .map_err(HostError::Module)?;
+        self.commit_module_activation_retirement(activation);
         self.commit_secondary_static_tls(secondary_tls);
         self.commit_process_loader_change(loader_change);
         self.modules.remove_records(ids);

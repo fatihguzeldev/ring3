@@ -246,6 +246,13 @@ fn operation_record(
             },
             ..Default::default()
         },
+        Some(ModuleOperation32::NeedBytes { request }) => ModuleRecord32 {
+            outcome: 6,
+            value: request.length,
+            token: request.request,
+            module: request.file.0,
+            ..Default::default()
+        },
         Some(ModuleOperation32::Loaded { handle }) => ModuleRecord32 {
             outcome: 2,
             value: handle,
@@ -271,4 +278,39 @@ fn operation_record(
             [TRANSFER_OFFSET..TRANSFER_OFFSET + modules::MODULE_RECORD_SIZE],
     )
     .map_err(|_| HostError::Infrastructure)
+}
+
+pub(crate) fn pending_module_source() -> u32 {
+    mutate(|instance| {
+        instance.memory()?;
+        let record = instance
+            .pending_module_source()
+            .map(|wait| modules::ModuleSourceRecord32 {
+                epoch: wait.epoch,
+                token: wait.token,
+                thread: wait.thread,
+                ready: wait.ready,
+                request: wait.request,
+            });
+        modules::encode_module_source(
+            record,
+            &mut instance.arena.as_mut().get_mut()
+                [TRANSFER_OFFSET..TRANSFER_OFFSET + modules::MODULE_SOURCE_RECORD_SIZE],
+        )
+        .map_err(|_| HostError::Infrastructure)
+    })
+}
+pub(crate) fn resume_module_source(
+    epoch_low: u32,
+    epoch_high: u32,
+    token_low: u32,
+    token_high: u32,
+) -> u32 {
+    mutate(|instance| {
+        let operation = instance.resume_module_source(
+            u64::from(epoch_low) | u64::from(epoch_high) << 32,
+            u64::from(token_low) | u64::from(token_high) << 32,
+        )?;
+        operation_record(instance, Some(operation))
+    })
 }

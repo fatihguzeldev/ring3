@@ -5,6 +5,16 @@ use crate::files::{
 };
 
 impl Vfs32 {
+    pub(crate) fn content_version(
+        &self,
+        file: FileId,
+    ) -> Result<FileContentVersion32, FileError32> {
+        Ok(FileContentVersion32 {
+            epoch: self.epoch,
+            file,
+            revision: self.node(file)?.content_revision,
+        })
+    }
     pub(crate) fn change_time(&self, file: FileId) -> Result<u64, FileError32> {
         Ok(self.node(file)?.changed)
     }

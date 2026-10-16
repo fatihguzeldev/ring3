@@ -48,3 +48,25 @@ fn dos_wildcards_distinguish_extension_and_optional_question_mark() {
     assert!(matches(&units("a?.txt"), &units("ab.txt")));
     assert!(!matches(&units("a?.txt"), &units("abc.txt")));
 }
+
+#[test]
+fn captured_paths_keep_current_and_per_drive_directories_after_live_changes() {
+    let mut vfs = crate::files::Vfs32::new(7, crate::files::FileLimits32::default()).unwrap();
+    vfs.cwd = units(r"C:\before");
+    vfs.drive_dirs[3] = Some(units(r"D:\old"));
+    let captured = vfs.capture_path_scope();
+    vfs.cwd = units(r"C:\after");
+    vfs.drive_dirs[3] = Some(units(r"D:\new"));
+    assert_eq!(
+        captured.normalize(&units("module.dll")).unwrap(),
+        units(r"C:\before\module.dll")
+    );
+    assert_eq!(
+        captured.normalize(&units("D:module.dll")).unwrap(),
+        units(r"D:\old\module.dll")
+    );
+    assert_eq!(
+        vfs.full_path(&units("D:module.dll")).unwrap(),
+        units(r"D:\new\module.dll")
+    );
+}
