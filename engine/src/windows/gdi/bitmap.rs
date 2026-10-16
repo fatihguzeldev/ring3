@@ -46,6 +46,19 @@ impl BitmapLayout32 {
             (self.height - y - 1) as usize
         }) * self.stride as usize
     }
+    pub(crate) fn pixel_span(self, x: u32, y: u32) -> Result<(usize, usize, u32), GdiError32> {
+        if x >= self.width || y >= self.height {
+            return Err(GdiError32::InvalidRequest);
+        }
+        let (byte, count, local_x) = match self.bits_per_pixel {
+            1 => (x as usize / 8, 1, x % 8),
+            4 => (x as usize / 2, 1, x % 2),
+            8 => (x as usize, 1, 0),
+            bits @ (16 | 24 | 32) => (x as usize * usize::from(bits) / 8, usize::from(bits) / 8, 0),
+            _ => return Err(GdiError32::InvalidRequest),
+        };
+        Ok((self.row(y) + byte, count, local_x))
+    }
     pub fn read_pixel(self, bytes: &[u8], palette: &[u32], x: u32, y: u32) -> u32 {
         let row = self.row(y);
         match self.bits_per_pixel {
@@ -67,9 +80,10 @@ impl BitmapLayout32 {
             16 => {
                 let at = row + x as usize * 2;
                 let value = u16::from_le_bytes([bytes[at], bytes[at + 1]]);
-                u32::from((value >> 10) & 31) * 255 / 31
-                    | ((u32::from((value >> 5) & 31) * 255 / 31) << 8)
-                    | ((u32::from(value & 31) * 255 / 31) << 16)
+                let expand = |value: u16| u32::from((value << 3) | (value >> 2));
+                expand((value >> 10) & 31)
+                    | (expand((value >> 5) & 31) << 8)
+                    | (expand(value & 31) << 16)
             }
             24 | 32 => {
                 let at = row + x as usize * (self.bits_per_pixel as usize / 8);
@@ -111,9 +125,8 @@ impl BitmapLayout32 {
             }
             8 => bytes[row + x as usize] = index(),
             16 => {
-                let value = ((color & 255) * 31 / 255) << 10
-                    | (((color >> 8) & 255) * 31 / 255) << 5
-                    | (((color >> 16) & 255) * 31 / 255);
+                let value =
+                    ((color >> 3) & 31) << 10 | ((color >> 11) & 31) << 5 | ((color >> 19) & 31);
                 let at = row + x as usize * 2;
                 bytes[at..at + 2].copy_from_slice(&(value as u16).to_le_bytes());
             }

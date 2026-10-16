@@ -141,3 +141,5 @@ fn complex_regions_preserve_holes_offsets_and_disjoint_boolean_results() {
     assert!(ring.offset(5, -3).unwrap().contains(Point32 { x: 6, y: 0 }));
     assert_eq!(inner.combine(&ring, 1).unwrap().complexity(), 1);
 }
+
+mod color;
