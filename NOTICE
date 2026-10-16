@@ -53,3 +53,14 @@ choices and additional notices are retained in licenses/naga-validation.txt.
 
 The manifest adapter uses roxmltree under Apache-2.0; see LICENSE.
 Its memchr dependency uses the MIT notice in licenses/memchr.txt.
+
+GDI font shaping and rasterization
+
+The font adapter uses fontdue, rustybuzz, ttf-parser, bytemuck and the
+unicode-bidi-mirroring, unicode-ccc, unicode-properties and unicode-script
+crates under their MIT license terms. Their copyright and permission notices,
+including fontdue upstream notices, are retained in licenses/fonts.txt.
+
+Bundled Noto Sans and Noto Sans Mono fonts are Copyright Google LLC and
+licensed under the SIL Open Font License, Version 1.1. Their exact source
+revision, hashes and license are retained in engine/assets/fonts.
