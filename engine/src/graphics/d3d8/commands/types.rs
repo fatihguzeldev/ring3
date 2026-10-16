@@ -1,4 +1,8 @@
 use super::super::{
+    patch::{
+        domain::DomainMesh,
+        program::{InputPlan, SurfaceProgram},
+    },
     resources::{Format, Rect, ResourceDesc, SubresourceInfo, SurfaceRef},
     shader::{Declaration, Program},
     state::{PipelineState, TEXTURE_STAGES, VERTEX_STREAMS},
@@ -178,6 +182,26 @@ pub struct Draw<'a> {
     pub data: DrawData<'a>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PatchSource<'a> {
+    Cached {
+        identity: u64,
+    },
+    Inline {
+        program: &'a SurfaceProgram,
+        inputs: &'a InputPlan,
+        streams: &'a [Option<StreamResource>; VERTEX_STREAMS],
+    },
+}
+
+pub struct PatchDraw<'a> {
+    pub pipeline: PipelineId,
+    pub bindings: DrawBindings,
+    pub targets: Targets,
+    pub domain: u64,
+    pub source: PatchSource<'a>,
+}
+
 pub struct Upload<'a> {
     pub resource: ResourceVersion,
     pub subresource: u32,
@@ -279,6 +303,25 @@ pub struct ReadbackLayout {
 }
 
 pub enum Command<'a> {
+    PatchKernel,
+    DefinePatch {
+        identity: u64,
+        vertex_shader: u32,
+        program: &'a SurfaceProgram,
+        inputs: &'a InputPlan,
+        streams: &'a [Option<StreamResource>; VERTEX_STREAMS],
+    },
+    DefinePatchDomain {
+        identity: u64,
+        mesh: &'a DomainMesh,
+    },
+    DrawPatch(&'a PatchDraw<'a>),
+    DeletePatch {
+        identity: u64,
+    },
+    DeletePatchDomain {
+        identity: u64,
+    },
     CreateResource {
         id: ResourceId,
         desc: ResourceDesc,

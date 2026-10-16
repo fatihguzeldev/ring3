@@ -53,6 +53,46 @@ pub fn append_command(
 
 fn encode(output: &mut Encoder<'_>, command: &Command<'_>) -> Result<u16, CodecError> {
     Ok(match command {
+        Command::PatchKernel => {
+            output.u32(crate::graphics::d3d8::patch::kernel::VERSION)?;
+            output.count(crate::graphics::d3d8::patch::kernel::SOURCE.len())?;
+            output.bytes(crate::graphics::d3d8::patch::kernel::SOURCE.as_bytes())?;
+            21
+        }
+        Command::DefinePatch {
+            identity,
+            vertex_shader,
+            program,
+            inputs,
+            streams,
+        } => {
+            if *identity == 0 || *vertex_shader == 0 {
+                return Err(CodecError::Identity);
+            }
+            output.u64(*identity)?;
+            output.u32(*vertex_shader)?;
+            super::patch::geometry(output, program, inputs, streams)?;
+            22
+        }
+        Command::DefinePatchDomain { identity, mesh } => {
+            super::patch::domain(output, *identity, mesh)?;
+            23
+        }
+        Command::DrawPatch(draw) => {
+            super::patch::draw(output, draw)?;
+            24
+        }
+        Command::DeletePatch { identity } | Command::DeletePatchDomain { identity } => {
+            if *identity == 0 {
+                return Err(CodecError::Identity);
+            }
+            output.u64(*identity)?;
+            if matches!(command, Command::DeletePatch { .. }) {
+                25
+            } else {
+                26
+            }
+        }
         Command::CreateResource {
             id,
             desc,
@@ -477,7 +517,7 @@ fn draw(output: &mut Encoder<'_>, draw: &Draw<'_>) -> Result<(), CodecError> {
     Ok(())
 }
 
-fn draw_bindings(
+pub(super) fn draw_bindings(
     output: &mut Encoder<'_>,
     bindings: &crate::graphics::d3d8::commands::DrawBindings,
 ) -> Result<(), CodecError> {

@@ -1,4 +1,5 @@
 mod packet;
+mod patch;
 mod payload;
 mod pipeline;
 mod readback;

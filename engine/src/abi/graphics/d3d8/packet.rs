@@ -202,7 +202,7 @@ fn fragment_at(bytes: &[u8], offset: usize) -> Result<(Fragment<'_>, usize), Cod
 }
 
 fn validate(fragment: Fragment<'_>) -> Result<(), CodecError> {
-    if !(1..=20).contains(&fragment.opcode)
+    if !(1..=26).contains(&fragment.opcode)
         || fragment.flags & !(FIRST_FRAGMENT | LAST_FRAGMENT) != 0
     {
         return Err(CodecError::InvalidCommand);

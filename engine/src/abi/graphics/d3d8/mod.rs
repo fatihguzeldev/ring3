@@ -1,6 +1,7 @@
 mod command;
 mod encoder;
 mod packet;
+mod patch;
 mod pipeline;
 mod readback;
 mod shader;
