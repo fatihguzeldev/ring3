@@ -80,9 +80,14 @@ impl DSoundRuntime32 {
             _ => {}
         }
         match gate.interface {
-            InterfaceKind::Device | InterfaceKind::Device8 => {
-                self.device_call(memory, audio, windows, pointer, gate.slot, args)
-            }
+            InterfaceKind::Device | InterfaceKind::Device8 => self.device_call(
+                memory,
+                audio,
+                super::device::DeviceEnvironment32 { sync, windows },
+                pointer,
+                gate.slot,
+                args,
+            ),
             InterfaceKind::Buffer | InterfaceKind::Buffer8 => {
                 self.buffer_call(memory, audio, sync, pointer, gate.slot, args)
             }

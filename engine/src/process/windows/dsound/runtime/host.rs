@@ -238,63 +238,47 @@ impl EngineInstance {
             .as_ref()
             .map(crate::process::windows::user32::User32Context32::windows);
         let physical = media.input.source().snapshot().focused;
-        for object in runtime.records.iter().flatten() {
-            if let ObjectKind32::Device(device) = &object.kind {
-                let mut candidate = device.native;
-                candidate.window_alive = windows.is_some_and(|windows| {
-                    WindowHandle32::try_from(candidate.window)
-                        .is_ok_and(|window| windows.get(window).is_ok())
-                });
-                candidate.focused = physical
-                    && windows.is_some_and(|windows| {
-                        windows
-                            .active()
-                            .is_some_and(|window| window.get() == candidate.window)
-                    });
-                if (candidate.focused, candidate.window_alive)
-                    != (device.native.focused, device.native.window_alive)
-                {
-                    for buffer in runtime.records.iter().flatten() {
-                        if let ObjectKind32::Buffer(buffer) = &buffer.kind
-                            && buffer.device == object.pointer
-                        {
-                            media
-                                .audio
-                                .can_set_voice_controls(
-                                    buffer.native.voice,
-                                    buffer.native.controls(&candidate),
-                                )
-                                .map_err(|value| error(value.into()))?;
-                        }
-                    }
-                }
-            }
-        }
-        for index in 0..runtime.records.len() {
-            let Some(object) = runtime.records[index].as_mut() else {
-                continue;
-            };
-            let ObjectKind32::Device(device) = &mut object.kind else {
-                continue;
-            };
-            let old = (device.native.focused, device.native.window_alive);
-            device.native.window_alive = windows.is_some_and(|windows| {
-                WindowHandle32::try_from(device.native.window)
+        let next = |device: crate::audio::dsound::Device| {
+            let mut candidate = device;
+            candidate.window_alive = windows.is_some_and(|windows| {
+                WindowHandle32::try_from(candidate.window)
                     .is_ok_and(|window| windows.get(window).is_ok())
             });
-            device.native.focused = physical
+            candidate.focused = physical
                 && windows.is_some_and(|windows| {
                     windows
                         .active()
-                        .is_some_and(|window| window.get() == device.native.window)
+                        .is_some_and(|window| window.get() == candidate.window)
                 });
-            let pointer = object.pointer;
-            if old != (device.native.focused, device.native.window_alive) {
-                runtime
-                    .apply_device_controls(&mut media.audio, pointer)
-                    .map_err(error)?;
+            candidate
+        };
+        if !runtime.records.iter().flatten().any(|object|matches!(&object.kind,ObjectKind32::Device(device) if {
+            let candidate=next(device.native);
+            (candidate.focused,candidate.window_alive)!=(device.native.focused,device.native.window_alive)
+        })) {return Ok(())}
+        let mut changes = Vec::new();
+        changes
+            .try_reserve_exact(runtime.records.len())
+            .map_err(|_| HostError::DSound(DSoundError32::Allocation))?;
+        for (index, object) in runtime.records.iter().enumerate() {
+            if let Some(object) = object
+                && let ObjectKind32::Device(device) = &object.kind
+            {
+                let candidate = next(device.native);
+                if (candidate.focused, candidate.window_alive)
+                    != (device.native.focused, device.native.window_alive)
+                {
+                    changes.push((index, candidate))
+                }
             }
         }
+        runtime
+            .publish_focus_changes(
+                &mut media.audio,
+                self.synchronization.as_mut().map(|sync| sync.context_mut()),
+                &changes,
+            )
+            .map_err(error)?;
         Ok(())
     }
 }

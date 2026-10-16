@@ -128,6 +128,9 @@ impl DSoundRuntime32 {
         }
         let old = buffer.native;
         let state = audio.voice_state(old.voice)?;
+        if device.native.cooperative_level == 4 && state.playing {
+            return Err(HResult::INVALID_CALL);
+        }
         let mut description = device.native;
         description.format = format;
         let mut replacement = Buffer::create(audio, &description, old.description)?;

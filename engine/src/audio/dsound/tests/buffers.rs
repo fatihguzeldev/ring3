@@ -76,13 +76,11 @@ fn literal_wave_format_and_invalid_capabilities_are_not_silent_success() {
 }
 
 #[test]
-fn emulated_primary_cannot_claim_write_primary_or_lock_hardware_memory() {
+fn virtual_primary_requires_write_primary_for_direct_sample_access() {
     let mut audio = audio();
     let mut device = Device::new(true, 48_000);
-    assert_eq!(
-        device.set_cooperative_level(1, 4),
-        Err(HResult::UNSUPPORTED)
-    );
+    device.set_cooperative_level(1, 4).unwrap();
+    assert_eq!(device.caps()[1] & 0x20, 0);
     device.set_cooperative_level(1, 2).unwrap();
     let primary = Buffer::create(
         &mut audio,
@@ -98,6 +96,18 @@ fn emulated_primary_cannot_claim_write_primary_or_lock_hardware_memory() {
     assert_eq!(
         primary.lock_span(&audio, 0, 4, 0, false),
         Err(HResult::INVALID_CALL)
+    );
+    assert_eq!(
+        primary.lock_primary_span(&audio, &device, 0, 4, 0, false),
+        Err(HResult::PRIORITY_LEVEL)
+    );
+    device.set_cooperative_level(1, 4).unwrap();
+    assert_eq!(
+        primary
+            .lock_primary_span(&audio, &device, 0, 4, 0, false)
+            .unwrap()
+            .first,
+        4
     );
 }
 

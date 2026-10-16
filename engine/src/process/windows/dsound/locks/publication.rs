@@ -33,10 +33,20 @@ impl DSoundRuntime32 {
         let slot = self.slot(pointer)?;
         let (span, data, capture) = match &self.records[slot].as_ref().unwrap().kind {
             ObjectKind32::Buffer(buffer) => {
-                let span =
+                let span = if buffer.native.primary {
+                    buffer.native.lock_primary_span(
+                        audio,
+                        &self.device(buffer.device)?.native,
+                        args[1],
+                        args[2],
+                        args[7],
+                        args[5] != 0,
+                    )?
+                } else {
                     buffer
                         .native
-                        .lock_span(audio, args[1], args[2], args[7], args[5] != 0)?;
+                        .lock_span(audio, args[1], args[2], args[7], args[5] != 0)?
+                };
                 (
                     span,
                     audio
@@ -127,6 +137,12 @@ impl DSoundRuntime32 {
         let original = lock.original.as_deref();
         let second_at = lock.span.first as usize;
         let slot = self.slot(pointer)?;
+        if let ObjectKind32::Buffer(buffer) = &self.records[slot].as_ref().unwrap().kind
+            && buffer.native.primary
+            && self.device(buffer.device)?.native.cooperative_level != 4
+        {
+            return Err(HResult::PRIORITY_LEVEL);
+        }
         match &mut self.records[slot].as_mut().unwrap().kind {
             ObjectKind32::Buffer(buffer) => {
                 if buffer.native.lost {

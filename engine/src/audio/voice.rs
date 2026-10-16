@@ -135,6 +135,17 @@ impl AudioContext {
             .ok_or(AudioError32::Exhausted)?;
         Ok(())
     }
+    pub fn stop_primary_stream(&mut self, id: AudioVoiceId32) -> Result<(), AudioError32> {
+        self.can_stop_stream(id)?;
+        let voice = self.voice_mut(id)?;
+        voice.revision += 1;
+        voice.playing = false;
+        voice.producing = false;
+        voice.position = 0;
+        voice.produced_position = 0;
+        Ok(())
+    }
+
     pub fn seek(&mut self, id: AudioVoiceId32, frame: u32) -> Result<(), AudioError32> {
         self.ready()?;
         self.seek_stream(id, frame)

@@ -13,6 +13,7 @@ mod locks;
 mod memory;
 mod notifications;
 mod objects;
+mod primary;
 mod runtime;
 mod spatial;
 mod termination;

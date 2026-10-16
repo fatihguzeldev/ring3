@@ -99,12 +99,18 @@ impl Buffer {
                 ],
             }
         };
-        let master = attenuation(device.volume);
+        let master = if self.primary {
+            1.0
+        } else {
+            attenuation(device.volume)
+        };
         for gain in &mut controls.gains {
             *gain *= master;
             if device.cooperative_level == 0
                 || !device.window_alive
                 || !device.focused && self.description.flags & 0xc000 == 0
+                || self.primary && device.cooperative_level != 4
+                || !self.primary && device.cooperative_level == 4
             {
                 *gain = 0.0;
             }
@@ -149,10 +155,35 @@ impl Buffer {
         flags: u32,
         wrap: bool,
     ) -> Result<LockSpan, HResult> {
+        self.checked_lock_span(audio, offset, length, flags, wrap, false)
+    }
+    pub fn lock_primary_span(
+        &self,
+        audio: &AudioContext,
+        device: &Device,
+        offset: u32,
+        length: u32,
+        flags: u32,
+        wrap: bool,
+    ) -> Result<LockSpan, HResult> {
+        if !self.primary || device.cooperative_level != 4 {
+            return Err(HResult::PRIORITY_LEVEL);
+        }
+        self.checked_lock_span(audio, offset, length, flags, wrap, true)
+    }
+    fn checked_lock_span(
+        &self,
+        audio: &AudioContext,
+        offset: u32,
+        length: u32,
+        flags: u32,
+        wrap: bool,
+        primary_access: bool,
+    ) -> Result<LockSpan, HResult> {
         if self.lost {
             return Err(HResult::BUFFER_LOST);
         }
-        if self.primary {
+        if self.primary && !primary_access {
             return Err(HResult::INVALID_CALL);
         }
         if flags & !3 != 0 {

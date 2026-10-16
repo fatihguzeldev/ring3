@@ -89,6 +89,9 @@ impl DSoundRuntime32 {
             10 => return Err(HResult::ALREADY_INITIALIZED),
             12 => {
                 let native = buffer.native;
+                if !native.primary && self.device(buffer.device)?.native.cooperative_level == 4 {
+                    return Err(HResult::PRIORITY_LEVEL);
+                }
                 native.validate_play(args[1], args[2], args[3])?;
                 if native.distance_stops_playback(&self.device(buffer.device)?.native) {
                     let playing = audio.voice_state(native.voice)?.playing;
@@ -133,6 +136,8 @@ impl DSoundRuntime32 {
             }
             18 => {
                 let voice = buffer.native.voice;
+                let primary = buffer.native.primary
+                    && self.device(buffer.device)?.native.cooperative_level == 4;
                 let playing = audio.voice_state(voice)?.playing;
                 let prepared = if playing {
                     let signals = self.stop_signals(pointer)?;
@@ -149,13 +154,22 @@ impl DSoundRuntime32 {
                 } else {
                     None
                 };
-                audio.stop_stream(voice)?;
+                if primary {
+                    audio.stop_primary_stream(voice)?;
+                } else {
+                    audio.stop_stream(voice)?;
+                }
                 if let Some(prepared) = prepared {
                     sync.unwrap().commit_signals(prepared);
                 }
             }
             20 => {
                 if self.playback_lost {
+                    return Err(HResult::OTHER_APP_PRIORITY);
+                }
+                let owner = buffer.device;
+                if buffer.native.primary&&self.device(owner)?.native.cooperative_level==4&&!self.device(owner)?.native.focused
+                    ||self.records.iter().flatten().any(|record|matches!(&record.kind,ObjectKind32::Device(device) if record.pointer!=owner&&device.native.cooperative_level==4&&device.native.focused&&device.native.window_alive)) {
                     return Err(HResult::OTHER_APP_PRIORITY);
                 }
                 let index = self.slot(pointer)?;

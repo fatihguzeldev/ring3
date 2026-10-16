@@ -42,9 +42,6 @@ impl Device {
         if window == 0 || !(1..=4).contains(&level) {
             return Err(HResult::INVALID_PARAM);
         }
-        if level == 4 {
-            return Err(HResult::UNSUPPORTED);
-        }
         self.window = window;
         self.cooperative_level = level;
         Ok(())
@@ -63,7 +60,7 @@ impl Device {
     pub fn caps(&self) -> [u32; 24] {
         let mut caps = [0; 24];
         caps[0] = 96;
-        caps[1] = 0xf3f;
+        caps[1] = 0xf1f;
         caps[2] = 100;
         caps[3] = 200_000;
         caps[4] = 1;

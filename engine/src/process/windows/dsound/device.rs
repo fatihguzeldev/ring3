@@ -19,6 +19,10 @@ pub(super) const PLAYBACK_GUID: [u8; 16] = [
 pub(super) const CAPTURE_GUID: [u8; 16] = [
     0x52, 0x33, 0x41, 0x55, 0x44, 0x49, 0x4f, 0x32, 0x92, 0x10, 0x40, 0x10, 0x15, 0, 0, 2,
 ];
+pub(super) struct DeviceEnvironment32<'a> {
+    pub sync: Option<&'a mut crate::windows::synchronization::SynchronizationContext32>,
+    pub windows: Option<&'a WindowContext32>,
+}
 impl DSoundRuntime32 {
     pub(in crate::process::windows::dsound) fn create_device(
         &mut self,
@@ -82,11 +86,12 @@ impl DSoundRuntime32 {
         &mut self,
         memory: &mut AddressSpace,
         audio: &mut AudioContext,
-        windows: Option<&WindowContext32>,
+        environment: DeviceEnvironment32<'_>,
         pointer: GuestAddress,
         slot: u8,
         args: &[u32],
     ) -> Result<u32, HResult> {
+        let DeviceEnvironment32 { sync, windows } = environment;
         match slot {
             3 => self.create_buffer(memory, audio, pointer, args[1], args[2], args[3]),
             4 => {
@@ -105,14 +110,7 @@ impl DSoundRuntime32 {
                     .ok_or(HResult::INVALID_PARAM)?
                     .get(window)
                     .map_err(|_| HResult::INVALID_PARAM)?;
-                let index = self.slot(pointer)?;
-                let ObjectKind32::Device(device) = &mut self.records[index].as_mut().unwrap().kind
-                else {
-                    return Err(HResult::INVALID_PARAM);
-                };
-                device.native.set_cooperative_level(args[1], args[2])?;
-                let canonical = self.records[index].as_ref().unwrap().pointer;
-                self.apply_device_controls(audio, canonical)?;
+                self.set_cooperative_level(audio, sync, pointer, args[1], args[2])?;
                 Ok(0)
             }
             7 => Ok(0),
