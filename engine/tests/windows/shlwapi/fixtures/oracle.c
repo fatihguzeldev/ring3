@@ -19,6 +19,32 @@ static void comparison(const char *name, const WCHAR *left, const WCHAR *right) 
         CompareStringW(GetThreadLocale(),NORM_IGNORECASE|NORM_LINGUISTIC_CASING,left,-1,right,-1)-CSTR_EQUAL,
         CompareStringW(GetThreadLocale(),LINGUISTIC_IGNORECASE,left,-1,right,-1)-CSTR_EQUAL);
 }
+static void casing(void) {
+    static const WCHAR values[] = { L'I', L'i', 0x0130, 0x0131 };
+    unsigned i, j;
+    for (i = 0; i < 4; ++i) {
+        WCHAR input[] = { values[i], 0 };
+        WCHAR upper[8] = { 0 }, lower[8] = { 0 }, linguistic_upper[8] = { 0 }, linguistic_lower[8] = { 0 };
+        int u = LCMapStringW(GetThreadLocale(), LCMAP_UPPERCASE, input, -1, upper, 8);
+        int l = LCMapStringW(GetThreadLocale(), LCMAP_LOWERCASE, input, -1, lower, 8);
+        int lu = LCMapStringW(GetThreadLocale(), LCMAP_UPPERCASE | LCMAP_LINGUISTIC_CASING, input, -1, linguistic_upper, 8);
+        int ll = LCMapStringW(GetThreadLocale(), LCMAP_LOWERCASE | LCMAP_LINGUISTIC_CASING, input, -1, linguistic_lower, 8);
+        row("casing-map");
+        printf(",\"threadLocale\":%lu,\"input\":%u,\"upperCount\":%d,\"upper\":%u,\"lowerCount\":%d,\"lower\":%u,\"linguisticUpperCount\":%d,\"linguisticUpper\":%u,\"linguisticLowerCount\":%d,\"linguisticLower\":%u}",
+            (unsigned long)GetThreadLocale(), values[i], u, upper[0], l, lower[0], lu, linguistic_upper[0], ll, linguistic_lower[0]);
+        for (j = 0; j < 4; ++j) {
+            WCHAR right[] = { values[j], 0 };
+            row("casing-compare");
+            printf(",\"threadLocale\":%lu,\"left\":%u,\"right\":%u,\"sensitive\":%d,\"ignore\":%d,\"linguisticIgnore\":%d,\"linguisticCasing\":%d,\"bothLinguistic\":%d}",
+                (unsigned long)GetThreadLocale(), values[i], values[j],
+                CompareStringW(GetThreadLocale(), 0, input, -1, right, -1)-CSTR_EQUAL,
+                CompareStringW(GetThreadLocale(), NORM_IGNORECASE, input, -1, right, -1)-CSTR_EQUAL,
+                CompareStringW(GetThreadLocale(), LINGUISTIC_IGNORECASE, input, -1, right, -1)-CSTR_EQUAL,
+                CompareStringW(GetThreadLocale(), NORM_IGNORECASE | NORM_LINGUISTIC_CASING, input, -1, right, -1)-CSTR_EQUAL,
+                CompareStringW(GetThreadLocale(), LINGUISTIC_IGNORECASE | NORM_LINGUISTIC_CASING, input, -1, right, -1)-CSTR_EQUAL);
+        }
+    }
+}
 static void prefixes(void) {
     SYSTEM_INFO info;
     BYTE *memory;
@@ -106,6 +132,7 @@ int main(void) {
         comparison("swedish-order",L"z",L"\x00e4");
         comparison("turkish-dotted",L"i",L"\x0130");
         comparison("turkish-dotless",L"\x0131",L"I");
+        casing();
     }
     SetThreadLocale(initial);
     prefixes(); paths();
