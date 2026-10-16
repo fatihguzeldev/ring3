@@ -146,9 +146,9 @@ fn existing_wait_retains_pending_exception_synchronization() {
 #[test]
 fn lock_and_removed_coprocessor_neighbors_are_not_new_nops() {
     for opcode in OPCODES {
-        assert_eq!(
+        crate::support_fetch::assert_decode_contract(
             decode_one(&code(&[0xf0, 0xdb, opcode]), GuestAddress(PC)).unwrap_err(),
-            DecodeError::InvalidEncoding
+            DecodeError::InvalidEncoding,
         );
     }
     for bytes in [[0xdb, 0xe5], [0xd9, 0xd1]] {

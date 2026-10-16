@@ -114,8 +114,8 @@ fn exact_leave_fetches_one_byte_at_page_and_guest_address_ends() {
         );
         engine.protect(pc & !0xfff, 1, 1).unwrap();
         crate::support_fetch::assert_error(
-            (decode_one(engine.memory().unwrap(), GuestAddress(pc)).err())
-                .expect("code fetch must fail"),
+            (decode_one(engine.memory().unwrap(), GuestAddress(pc)))
+                .expect_err("code fetch must fail"),
             pc,
             pc,
             FaultReason::Permission,
@@ -124,8 +124,8 @@ fn exact_leave_fetches_one_byte_at_page_and_guest_address_ends() {
     }
     let engine = code(0x1fff, &[0xc9], true);
     crate::support_fetch::assert_error(
-        (decode_one(engine.memory().unwrap(), GuestAddress(0x2000)).err())
-            .expect("code fetch must fail"),
+        (decode_one(engine.memory().unwrap(), GuestAddress(0x2000)))
+            .expect_err("code fetch must fail"),
         0x2000,
         0x2000,
         FaultReason::Unmapped,
@@ -268,8 +268,8 @@ fn standalone_and_prefixed_or_adjacent_forms_keep_explicit_refusals() {
             continue;
         }
         crate::support_fetch::assert_decode_contract(
-            (decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err())
-                .expect("instruction must fail to decode"),
+            (decode_one(engine.memory().unwrap(), GuestAddress(CODE)))
+                .expect_err("instruction must fail to decode"),
             expected,
         );
     }

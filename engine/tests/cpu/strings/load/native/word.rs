@@ -188,8 +188,8 @@ fn typed_two_byte_fetch_wrap_faults_and_consumed_code_currency_are_exact() {
         (&top, u32::MAX, u32::MAX, FaultReason::AddressOverflow, 2),
     ] {
         crate::support_fetch::assert_decode_contract(
-            (decode_one(engine.memory().unwrap(), GuestAddress(pc)).err())
-                .expect("instruction must fail to decode"),
+            (decode_one(engine.memory().unwrap(), GuestAddress(pc)))
+                .expect_err("instruction must fail to decode"),
             DecodeError::MemoryFault {
                 pc: GuestAddress(pc),
                 fault: MemoryFault {
@@ -245,9 +245,8 @@ fn exact_word_prefix_metadata_neighbors_and_standalone_refusals() {
         (decode_one(
             fixture(PC, &[0xf0, 0x66, 0xad]).memory().unwrap(),
             GuestAddress(PC),
-        )
-        .err())
-        .expect("instruction must fail to decode"),
+        ))
+        .expect_err("instruction must fail to decode"),
         DecodeError::InvalidEncoding,
     );
     for (opcode, operation) in [
@@ -416,7 +415,7 @@ fn late_refusals_caps_and_data_currency_preserve_bound_publications() {
                             keeper: keep,
                             resident,
                             pages: &[],
-                            expected: failure.clone(),
+                            expected: failure,
                         },
                     )
                 {

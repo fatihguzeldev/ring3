@@ -296,9 +296,8 @@ fn enter_prefixes_allocation_and_five_bit_nesting_are_exact() {
         (decode_one(
             &code_space(CODE, &[0x66, 0x66, 0xc8, 0, 0, 0]),
             GuestAddress(CODE),
-        )
-        .err())
-        .expect("instruction must fail to decode"),
+        ))
+        .expect_err("instruction must fail to decode"),
         DecodeError::Unsupported(ring3_engine::cpu::UnsupportedFeature::Opcode),
     );
     for (bytes, expected) in [
@@ -411,8 +410,8 @@ fn enter_zero_fetches_exact_four_or_five_bytes_without_wrapping_source() {
             let pc = 0x2000 - cut as u32;
             let memory = code_space(pc, &form[..cut]);
             crate::support_fetch::assert_decode_contract(
-                (decode_one(&memory, GuestAddress(pc)).err())
-                    .expect("instruction must fail to decode"),
+                (decode_one(&memory, GuestAddress(pc)))
+                    .expect_err("instruction must fail to decode"),
                 fetch_error(pc, 0x2000, FaultReason::Unmapped, cut + 1),
             );
             let pc = 0_u32.wrapping_sub(cut as u32);
@@ -431,8 +430,8 @@ fn enter_zero_fetches_exact_four_or_five_bytes_without_wrapping_source() {
                 )
                 .unwrap();
             crate::support_fetch::assert_decode_contract(
-                (decode_one(&memory, GuestAddress(pc)).err())
-                    .expect("instruction must fail to decode"),
+                (decode_one(&memory, GuestAddress(pc)))
+                    .expect_err("instruction must fail to decode"),
                 fetch_error(pc, pc, FaultReason::AddressOverflow, cut + 1),
             );
         }
@@ -456,7 +455,7 @@ fn enter_zero_fetches_exact_four_or_five_bytes_without_wrapping_source() {
             )
             .unwrap();
         crate::support_fetch::assert_decode_contract(
-            (decode_one(&memory, GuestAddress(pc)).err()).expect("instruction must fail to decode"),
+            (decode_one(&memory, GuestAddress(pc))).expect_err("instruction must fail to decode"),
             fetch_error(pc, 0x2000, FaultReason::Permission, form.len()),
         );
         let mut memory = code_space(CODE, form);
@@ -467,8 +466,7 @@ fn enter_zero_fetches_exact_four_or_five_bytes_without_wrapping_source() {
             )
             .unwrap();
         crate::support_fetch::assert_decode_contract(
-            (decode_one(&memory, GuestAddress(CODE)).err())
-                .expect("instruction must fail to decode"),
+            (decode_one(&memory, GuestAddress(CODE))).expect_err("instruction must fail to decode"),
             fetch_error(CODE, CODE, FaultReason::Permission, 1),
         );
     }

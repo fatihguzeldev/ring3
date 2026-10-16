@@ -377,8 +377,8 @@ fn word_stack_prefix_lock_and_closed_stack_neighbors_remain_precise() {
                     continue;
                 }
                 crate::support_fetch::assert_decode_contract(
-                    (decode_one(&code_space(CODE, &prefixed), GuestAddress(CODE)).err())
-                        .expect("instruction must fail to decode"),
+                    (decode_one(&code_space(CODE, &prefixed), GuestAddress(CODE)))
+                        .expect_err("instruction must fail to decode"),
                     expected,
                 );
             }
@@ -428,8 +428,8 @@ fn word_stack_prefix_lock_and_closed_stack_neighbors_remain_precise() {
 
         if !word_prefix::admit_if_new_prefix(bytes) {
             crate::support_fetch::assert_decode_contract(
-                (decode_one(&code_space(CODE, bytes), GuestAddress(CODE)).err())
-                    .expect("instruction must fail to decode"),
+                (decode_one(&code_space(CODE, bytes), GuestAddress(CODE)))
+                    .expect_err("instruction must fail to decode"),
                 unsupported,
             );
         }
@@ -463,8 +463,8 @@ fn word_stack_prefix_lock_and_closed_stack_neighbors_remain_precise() {
         &[0x66, 0x8f, 0x0b],
     ] {
         crate::support_fetch::assert_decode_contract(
-            (decode_one(&code_space(CODE, bytes), GuestAddress(CODE)).err())
-                .expect("instruction must fail to decode"),
+            (decode_one(&code_space(CODE, bytes), GuestAddress(CODE)))
+                .expect_err("instruction must fail to decode"),
             DecodeError::InvalidEncoding,
         );
     }
@@ -695,14 +695,14 @@ fn word_stack_fetch_checks_two_to_eight_byte_page_top_and_execute_boundaries() {
         for cut in 1..bytes.len() {
             let pc = 0x2000 - cut as u32;
             crate::support_fetch::assert_decode_contract(
-                (decode_one(&code_space(pc, &bytes[..cut]), GuestAddress(pc)).err())
-                    .expect("instruction must fail to decode"),
+                (decode_one(&code_space(pc, &bytes[..cut]), GuestAddress(pc)))
+                    .expect_err("instruction must fail to decode"),
                 fetch_error(pc, 0x2000, FaultReason::Unmapped, cut + 1),
             );
             let top = u32::MAX - cut as u32 + 1;
             crate::support_fetch::assert_decode_contract(
-                (decode_one(&code_space(top, &bytes[..cut]), GuestAddress(top)).err())
-                    .expect("instruction must fail to decode"),
+                (decode_one(&code_space(top, &bytes[..cut]), GuestAddress(top)))
+                    .expect_err("instruction must fail to decode"),
                 fetch_error(top, top, FaultReason::AddressOverflow, cut + 1),
             );
         }
@@ -715,7 +715,7 @@ fn word_stack_fetch_checks_two_to_eight_byte_page_top_and_execute_boundaries() {
             )
             .unwrap();
         crate::support_fetch::assert_decode_contract(
-            (decode_one(&memory, GuestAddress(pc)).err()).expect("instruction must fail to decode"),
+            (decode_one(&memory, GuestAddress(pc))).expect_err("instruction must fail to decode"),
             fetch_error(pc, 0x2000, FaultReason::Permission, bytes.len()),
         );
         let mut memory = code_space(CODE, &bytes);
@@ -726,8 +726,7 @@ fn word_stack_fetch_checks_two_to_eight_byte_page_top_and_execute_boundaries() {
             )
             .unwrap();
         crate::support_fetch::assert_decode_contract(
-            (decode_one(&memory, GuestAddress(CODE)).err())
-                .expect("instruction must fail to decode"),
+            (decode_one(&memory, GuestAddress(CODE))).expect_err("instruction must fail to decode"),
             fetch_error(CODE, CODE, FaultReason::Permission, 1),
         );
     }

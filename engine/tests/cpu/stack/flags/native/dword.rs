@@ -146,8 +146,8 @@ fn typed_single_byte_fetch_wrap_and_consumed_code_currency_are_exact() {
     }
     let missing = EngineInstance::new(1, KEY).unwrap();
     crate::support_fetch::assert_error(
-        (decode_one(missing.memory().unwrap(), GuestAddress(PC)).err())
-            .expect("code fetch must fail"),
+        (decode_one(missing.memory().unwrap(), GuestAddress(PC)))
+            .expect_err("code fetch must fail"),
         PC,
         PC,
         FaultReason::Unmapped,
@@ -156,8 +156,7 @@ fn typed_single_byte_fetch_wrap_and_consumed_code_currency_are_exact() {
     let mut denied = fixture(PC, &[0x9c]);
     denied.protect(PC, 1, 1).unwrap();
     crate::support_fetch::assert_error(
-        (decode_one(denied.memory().unwrap(), GuestAddress(PC)).err())
-            .expect("code fetch must fail"),
+        (decode_one(denied.memory().unwrap(), GuestAddress(PC))).expect_err("code fetch must fail"),
         PC,
         PC,
         FaultReason::Permission,
@@ -196,9 +195,8 @@ fn strict_prefixes_popfd_and_both_standalone_profiles_stay_refused() {
                 .memory()
                 .unwrap(),
                 GuestAddress(PC),
-            )
-            .err())
-            .expect("instruction must fail to decode"),
+            ))
+            .expect_err("instruction must fail to decode"),
             DecodeError::Unsupported(feature),
         );
     }
@@ -206,9 +204,8 @@ fn strict_prefixes_popfd_and_both_standalone_profiles_stay_refused() {
         (decode_one(
             fixture(PC, &[0xf0, 0x9c]).memory().unwrap(),
             GuestAddress(PC),
-        )
-        .err())
-        .expect("instruction must fail to decode"),
+        ))
+        .expect_err("instruction must fail to decode"),
         DecodeError::InvalidEncoding,
     );
     assert_eq!(
@@ -357,7 +354,7 @@ fn late_refusals_caps_and_data_currency_preserve_bound_publications() {
                             keeper: keep,
                             resident,
                             pages: &[],
-                            expected: failure.clone(),
+                            expected: failure,
                         },
                     )
                 {
