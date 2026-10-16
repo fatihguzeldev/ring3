@@ -21,9 +21,9 @@ impl Default for NlsProfile32 {
 }
 impl NlsProfile32 {
     pub fn validate(self) -> Result<(), NlsError32> {
-        if self.locale != 0x409
-            || self.ansi != CodePage32::Windows1252
-            || self.oem != CodePage32::Oem437
+        if super::locales::locale_identity(self.locale).is_err()
+            || CodePage32::from_id(self.ansi.id()) != Some(self.ansi)
+            || CodePage32::from_id(self.oem.id()) != Some(self.oem)
             || !(-1440..=1440).contains(&self.time_zone_bias_minutes)
             || !(1..=4 * 1024 * 1024).contains(&self.max_text_units)
         {
@@ -32,10 +32,12 @@ impl NlsProfile32 {
         Ok(())
     }
     pub fn locale(self, value: u32) -> Result<u32, NlsError32> {
-        match value {
-            0 | 0x400 | 0x800 | 0x409 | 0x7f => Ok(if value == 0x7f { 0x7f } else { self.locale }),
-            _ => Err(NlsError32::InvalidParameter),
-        }
+        let locale = match value {
+            0 | 0x400 | 0x800 => self.locale,
+            _ => value,
+        };
+        super::locales::locale_identity(locale)?;
+        Ok(locale)
     }
     pub fn code_page(self, value: u32) -> Result<CodePage32, NlsError32> {
         match value {

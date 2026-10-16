@@ -94,3 +94,30 @@ fn kana_width_mapping_handles_voiced_pairs_and_keeps_other_compatibility_charact
         std::cmp::Ordering::Equal
     );
 }
+
+#[test]
+fn locale_specific_case_and_collation_cover_turkish_and_swedish() {
+    use crate::windows::nls::linguistics::{compare_for_locale, map_string_for_locale};
+    use std::cmp::Ordering;
+    let units = |text: &str| text.encode_utf16().collect::<Vec<_>>();
+    assert_eq!(
+        map_string_for_locale(&units("iıIİ"), 0x01000200, 0x41f).unwrap(),
+        units("İIIİ")
+    );
+    assert_eq!(
+        map_string_for_locale(&units("ΟΣ"), 0x100, 0x408).unwrap(),
+        units("ος")
+    );
+    assert_eq!(
+        compare_for_locale(&units("I"), &units("ı"), 1, 0x41f).unwrap(),
+        Ordering::Equal
+    );
+    assert_eq!(
+        compare_for_locale(&units("z"), &units("ä"), 0, 0x41d).unwrap(),
+        Ordering::Less
+    );
+    assert_eq!(
+        compare_for_locale(&units("z"), &units("ä"), 0, 0x407).unwrap(),
+        Ordering::Greater
+    );
+}

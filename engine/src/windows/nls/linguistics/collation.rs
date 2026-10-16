@@ -7,7 +7,7 @@ use icu_collator::{
 use std::cmp::Ordering;
 use unicode_general_category::{GeneralCategory as G, get_general_category};
 const FLAGS: u32 = 0x0803_103f;
-fn collator(flags: u32) -> Result<CollatorBorrowed<'static>, NlsError32> {
+fn collator(flags: u32, locale: u32) -> Result<CollatorBorrowed<'static>, NlsError32> {
     if flags & !FLAGS != 0 {
         return Err(NlsError32::InvalidFlags);
     }
@@ -35,7 +35,11 @@ fn collator(flags: u32) -> Result<CollatorBorrowed<'static>, NlsError32> {
     } else {
         AlternateHandling::NonIgnorable
     });
-    let mut preferences = CollatorPreferences::default();
+    let locale: icu_locale::Locale = super::super::locales::locale_identity(locale)?
+        .language_tag()
+        .parse()
+        .map_err(|_| NlsError32::InvalidParameter)?;
+    let mut preferences: CollatorPreferences = locale.into();
     preferences.numeric_ordering = Some(if flags & 8 != 0 {
         CollationNumericOrdering::True
     } else {
@@ -81,14 +85,19 @@ fn prepared(units: &[u16], flags: u32) -> Result<Vec<u16>, NlsError32> {
     }
     Ok(output)
 }
-pub fn compare(left: &[u16], right: &[u16], flags: u32) -> Result<Ordering, NlsError32> {
-    let collator = collator(flags)?;
+pub fn compare_for_locale(
+    left: &[u16],
+    right: &[u16],
+    flags: u32,
+    locale: u32,
+) -> Result<Ordering, NlsError32> {
+    let collator = collator(flags, locale)?;
     let left = prepared(left, flags)?;
     let right = prepared(right, flags)?;
     Ok(collator.compare_utf16(&left, &right))
 }
-pub fn sort_key(units: &[u16], flags: u32) -> Result<Vec<u8>, NlsError32> {
-    let collator = collator(flags)?;
+pub fn sort_key_for_locale(units: &[u16], flags: u32, locale: u32) -> Result<Vec<u8>, NlsError32> {
+    let collator = collator(flags, locale)?;
     let units = prepared(units, flags)?;
     let capacity = units
         .len()
@@ -106,4 +115,11 @@ pub fn sort_key(units: &[u16], flags: u32) -> Result<Vec<u8>, NlsError32> {
     output.truncate(written);
     output.push(0);
     Ok(output)
+}
+
+pub fn compare(left: &[u16], right: &[u16], flags: u32) -> Result<Ordering, NlsError32> {
+    compare_for_locale(left, right, flags, 0x409)
+}
+pub fn sort_key(units: &[u16], flags: u32) -> Result<Vec<u8>, NlsError32> {
+    sort_key_for_locale(units, flags, 0x409)
 }

@@ -26,3 +26,7 @@ The WHATWG BSD notice is included in licenses/whatwg.txt.
 
 OEM character conversion uses oem_cp (Copyright 2020 Tatsunori Uchino),
 under the MIT notice in licenses/oem-cp.txt.
+
+LCID lookup uses lcid (Copyright 2021 Toby Fleming), licensed here under
+Apache-2.0. ICU4X data and software use Unicode License V3; see
+licenses/unicode.txt.
