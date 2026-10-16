@@ -9,16 +9,19 @@ static void emit(const char *name, DWORD result, DWORD error, const WCHAR *text)
     puts("]}");
 }
 static void array(const char *name, DWORD flags, const WCHAR *text, DWORD_PTR *arguments) {
+    printf("{\"begin\":\"%s\"}\n", name);
     WCHAR output[256] = {0}; SetLastError(0xabcdef01);
     DWORD result = FormatMessageW(FORMAT_MESSAGE_FROM_STRING | flags, text, 0, 0, output, 256, (va_list *)arguments);
     emit(name, result, GetLastError(), output);
 }
 static void variable(const char *name, const WCHAR *text, ...) {
+    printf("{\"begin\":\"%s\"}\n", name);
     WCHAR output[256] = {0}; va_list arguments; va_start(arguments, text); SetLastError(0xabcdef01);
     DWORD result = FormatMessageW(FORMAT_MESSAGE_FROM_STRING, text, 0, 0, output, 256, &arguments);
     emit(name, result, GetLastError(), output); va_end(arguments);
 }
 int main(void) {
+    setvbuf(stdout, NULL, _IONBF, 0);
     array("escapes", 0, L"A\nB\rC\r\nD%nE%rF%tG%%%.%!%b%0tail", NULL);
     array("ignore", FORMAT_MESSAGE_IGNORE_INSERTS, L"[%1!08x!][%2]%%", (DWORD_PTR *)0xfffffff0);
     array("flatten", 255, L"a\r\nb\nc\rd%nend", NULL);
