@@ -1,4 +1,5 @@
 mod calls;
+mod information;
 
 use crate::files::{FileError32, OpenFileId};
 
@@ -16,14 +17,8 @@ struct Entry32 {
     value: u32,
     object: KernelFileObject32,
     access: u32,
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "inheritance metadata is retained while child process creation is unsupported"
-        )
-    )]
     inherit: bool,
+    protected: bool,
 }
 
 pub(super) struct KernelFileHandles32 {
@@ -120,6 +115,7 @@ impl KernelFileHandles32 {
             object,
             access: prepared.access,
             inherit: prepared.inherit,
+            protected: false,
         });
         prepared.value
     }

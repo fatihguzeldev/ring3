@@ -13,6 +13,9 @@ impl FileRuntime32 {
         sync: Option<&mut SynchronizationContext32>,
         handle: u32,
     ) -> Result<FileCallOutcome32, FileError32> {
+        if self.handles.flags(handle)? & 2 != 0 {
+            return Err(FileError32::InvalidHandle);
+        }
         match self.handles.object(handle)? {
             KernelFileObject32::File(open) => {
                 let last = self.handles.file_count(open) == 1;
@@ -189,7 +192,7 @@ impl FileRuntime32 {
                 .map_err(|_| FileError32::NoAccess)?;
         }
         self.handles.commit(prepared, object);
-        if args[6] & 1 != 0 {
+        if args[6] & 1 != 0 && self.handles.flags(args[1])? & 2 == 0 {
             self.close_kernel_handle(memory, sync.take(), args[1])?;
         }
         Ok(FileCallOutcome32::success(1))

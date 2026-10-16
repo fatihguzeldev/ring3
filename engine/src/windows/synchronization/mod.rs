@@ -22,3 +22,5 @@ pub use waits::{PreparedSignals32, WaitHandles32};
 
 #[cfg(test)]
 mod tests;
+
+mod handles;

@@ -286,6 +286,7 @@ impl SynchronizationContext32 {
             event: slot,
             access,
             inherit,
+            protected: false,
         };
         Ok((
             PreparedObjectHandle32 {
@@ -330,6 +331,7 @@ impl SynchronizationContext32 {
                 event: slot,
                 access,
                 inherit,
+                protected: false,
             },
         })
     }

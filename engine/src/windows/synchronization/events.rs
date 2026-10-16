@@ -99,6 +99,7 @@ impl SynchronizationContext32 {
                 return Err(Error::InvalidHandle);
             }
             let mut prepared = self.prepare_duplicate(handle, 0, false, true, true, false)?;
+            prepared.close = true;
             prepared.revision = self.revision + index as u64;
             prepared.next_revision = prepared.revision + 1;
             closes.push(prepared);
@@ -179,6 +180,7 @@ impl SynchronizationContext32 {
             event: slot,
             access: EVENT_ALL_ACCESS,
             inherit,
+            protected: false,
         });
         self.next_handle = value;
         self.revision = revision;
@@ -209,6 +211,7 @@ impl SynchronizationContext32 {
             event: slot,
             access,
             inherit,
+            protected: false,
         });
         self.objects[slot].as_mut().unwrap().handles += 1;
         self.next_handle = value;
@@ -227,6 +230,9 @@ impl SynchronizationContext32 {
         Ok(self.handles[self.handle_index(handle, 0)?].inherit)
     }
     pub fn close_handle(&mut self, handle: u32) -> Result<(), Error> {
+        if self.handle_flags(handle)? & 2 != 0 {
+            return Err(Error::InvalidHandle);
+        }
         let index = self.handle_index(handle, 0)?;
         let revision = self.next_revision()?;
         self.close_validated(index);
@@ -279,6 +285,7 @@ impl SynchronizationContext32 {
                 event: source_handle.event,
                 access,
                 inherit,
+                protected: false,
             })
         } else {
             if !close_source {
@@ -292,7 +299,7 @@ impl SynchronizationContext32 {
             next_revision: self.next_revision()?,
             source,
             duplicate,
-            close: close_source,
+            close: close_source && !source_handle.protected,
         })
     }
     pub fn commit_duplicate(&mut self, prepared: PreparedDuplicate32) {

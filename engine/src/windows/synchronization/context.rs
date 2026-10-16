@@ -48,6 +48,7 @@ pub(super) struct Handle32 {
     pub event: usize,
     pub access: u32,
     pub inherit: bool,
+    pub protected: bool,
 }
 #[derive(Clone, Copy)]
 pub(super) struct Binding32 {

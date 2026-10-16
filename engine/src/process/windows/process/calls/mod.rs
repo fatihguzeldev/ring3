@@ -1,4 +1,5 @@
 mod environment;
+mod handles;
 mod identity;
 mod modules;
 mod time;
@@ -77,6 +78,9 @@ impl EngineInstance {
     ) -> Result<ProcessReply32, HostError> {
         use ProcessApi32::*;
         match api {
+            GetHandleInformation | SetHandleInformation => {
+                self.execute_handle_information(api, args)
+            }
             GetCurrentProcessId
             | GetCurrentThreadId
             | GetCurrentThread

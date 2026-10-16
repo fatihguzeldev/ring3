@@ -48,4 +48,6 @@ catalog! {
  GetModuleHandleExW=0x000c_0024,"GetModuleHandleExW",3;
  GetStdHandle=0x000c_0025,"GetStdHandle",1;
  SetStdHandle=0x000c_0026,"SetStdHandle",2;
+ GetHandleInformation=0x000c_0027,"GetHandleInformation",2;
+ SetHandleInformation=0x000c_0028,"SetHandleInformation",3;
 }
