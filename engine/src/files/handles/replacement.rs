@@ -62,6 +62,7 @@ impl Vfs32 {
             asset: None,
             visible: 0,
             pages,
+            allocation: 0,
         };
         node.size = bytes.len() as u64;
         node.dirty = true;

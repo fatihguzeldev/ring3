@@ -87,6 +87,7 @@ impl Vfs32 {
             node.descriptions = 0;
             if delete {
                 node.delete_pending = true;
+                node.delete_requested = true;
                 self.unlink(file);
             }
             self.collect(file);

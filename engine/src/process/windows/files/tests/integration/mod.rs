@@ -1,6 +1,7 @@
 mod cancellation;
 mod cleanup;
 mod handles;
+mod information;
 mod memory;
 mod pseudo;
 mod startup;

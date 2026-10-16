@@ -15,6 +15,9 @@ impl FileRuntime32 {
         if matches!(api, FileApi32::CreateFileA | FileApi32::CreateFileW) {
             return self.open_file_with_security(memory, api, args, security.token());
         }
+        if api == FileApi32::SetFileInformationByHandle {
+            return self.set_file_information(memory, args, security.token());
+        }
         self.check_ordinary_security(memory, api, args, security.token())?;
         if matches!(
             api,
@@ -87,6 +90,11 @@ impl FileRuntime32 {
             }
             SearchPathA | SearchPathW => self.search_path(memory, api, args),
             GetFileInformationByHandleEx => self.file_information_ex(memory, args),
+            SetFileInformationByHandle => self.set_file_information(
+                memory,
+                args,
+                &crate::windows::security::Token32::virtual_process(),
+            ),
             GetFinalPathNameByHandleA | GetFinalPathNameByHandleW => {
                 self.final_file_path(memory, api, args)
             }

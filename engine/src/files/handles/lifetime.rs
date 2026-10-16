@@ -79,11 +79,15 @@ impl Vfs32 {
             .position(|o| o.as_ref().is_some_and(|o| o.id == id))
             .unwrap();
         self.opens[index] = None;
+        let marked = self
+            .opens
+            .iter()
+            .flatten()
+            .any(|open| open.file == file && open.disposition_delete);
         let node = self.node_mut(file).unwrap();
         node.descriptions -= 1;
-        if delete {
-            node.delete_pending = true;
-        }
+        node.delete_requested |= delete;
+        node.delete_pending = node.delete_requested || marked;
         if unlink {
             self.unlink(file);
         }

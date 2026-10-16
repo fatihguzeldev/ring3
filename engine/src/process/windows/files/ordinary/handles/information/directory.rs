@@ -9,24 +9,13 @@ use crate::{
 
 pub(in crate::process::windows::files::ordinary) struct DirectoryQuery32 {
     pub open: OpenFileId,
-    entries: Vec<(DirectoryEntry32, u64)>,
+    entries: Vec<(DirectoryEntry32, u64, u64)>,
     cursor: usize,
-}
-fn allocation(entry: &DirectoryEntry32) -> Result<u64, FileError32> {
-    if entry.info.attributes & ATTR_DIRECTORY != 0 {
-        Ok(0)
-    } else {
-        entry
-            .info
-            .size
-            .checked_add(65535)
-            .map(|size| size & !65535)
-            .ok_or(FileError32::InvalidParameter)
-    }
 }
 fn record(
     entry: &DirectoryEntry32,
     changed: u64,
+    allocation: u64,
     class: u32,
     index: u32,
 ) -> Result<Vec<u8>, FileError32> {
@@ -55,7 +44,7 @@ fn record(
         bytes[8 + index * 8..16 + index * 8].copy_from_slice(&time.to_le_bytes());
     }
     bytes[40..48].copy_from_slice(&entry.info.size.to_le_bytes());
-    bytes[48..56].copy_from_slice(&allocation(entry)?.to_le_bytes());
+    bytes[48..56].copy_from_slice(&allocation.to_le_bytes());
     bytes[56..60].copy_from_slice(&entry.info.attributes.to_le_bytes());
     bytes[60..64].copy_from_slice(&((entry.name.len() * 2) as u32).to_le_bytes());
     if matches!(class, 10 | 11) {
@@ -105,7 +94,8 @@ impl FileRuntime32 {
                 .map_err(|_| FileError32::Allocation)?;
             for entry in entries {
                 let changed = self.vfs.change_time(entry.info.id)?;
-                snapshot.push((entry, changed));
+                let allocation = self.vfs.allocation_size(entry.info.id)?;
+                snapshot.push((entry, changed, allocation));
             }
             Some(DirectoryQuery32 {
                 open,
@@ -124,8 +114,14 @@ impl FileRuntime32 {
         let mut bytes = Vec::new();
         let mut count = 0usize;
         let mut previous = None;
-        for (entry, changed) in &query.entries[query.cursor..] {
-            let next = record(entry, *changed, args[1], (query.cursor + count) as u32)?;
+        for (entry, changed, allocation) in &query.entries[query.cursor..] {
+            let next = record(
+                entry,
+                *changed,
+                *allocation,
+                args[1],
+                (query.cursor + count) as u32,
+            )?;
             let start = (bytes.len() + 7) & !7;
             if start + next.len() > args[3] as usize {
                 break;

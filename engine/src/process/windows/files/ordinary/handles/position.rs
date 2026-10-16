@@ -94,7 +94,7 @@ impl FileRuntime32 {
                 if size < self.mappings.minimum_file_size(file) {
                     return Err(FileError32::UserMappedFile);
                 }
-                let prepared = self.vfs.prepare_resize(file, size)?;
+                let prepared = self.vfs.prepare_resize_open(open, size)?;
                 prepared.validate(&self.vfs)?;
                 self.vfs.commit_resize(prepared);
                 Ok(FileCallOutcome32::success(1))

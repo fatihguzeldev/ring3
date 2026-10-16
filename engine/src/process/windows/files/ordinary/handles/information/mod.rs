@@ -2,6 +2,7 @@ mod directory;
 mod encoding;
 pub(in crate::process::windows::files::ordinary) use directory::DirectoryQuery32;
 mod names;
+mod setting;
 
 use super::super::{FileCallOutcome32, memory};
 use crate::{
@@ -21,14 +22,7 @@ impl FileRuntime32 {
         }
         let open = self.handles.file(args[0])?;
         let info = self.vfs.open_info(open)?;
-        let allocation = if info.attributes & ATTR_DIRECTORY != 0 {
-            0
-        } else {
-            info.size
-                .checked_add(65535)
-                .ok_or(FileError32::InvalidParameter)?
-                & !65535
-        };
+        let allocation = self.vfs.allocation_size(info.id)?;
         let bytes = match args[1] {
             0 => encoding::basic(info, self.vfs.change_time(info.id)?),
             1 => encoding::standard(info, allocation),

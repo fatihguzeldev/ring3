@@ -330,10 +330,14 @@ impl Vfs32 {
             return 0;
         }
         let now = self.now;
-        let suppress = prepared
+        let (suppress_write, suppress_change) = prepared
             .cursor
-            .and_then(|(o, _)| self.open(o).ok().map(|o| o.suppress_write))
-            .unwrap_or(false);
+            .and_then(|(o, _)| {
+                self.open(o)
+                    .ok()
+                    .map(|o| (o.suppress_write, o.suppress_change))
+            })
+            .unwrap_or((false, false));
         let mut additional = 0;
         {
             let node = self.node_mut(prepared.file).unwrap();
@@ -353,9 +357,11 @@ impl Vfs32 {
             node.size = prepared.size;
             node.content_revision = prepared.content_revision;
             node.dirty = true;
-            node.changed = now;
+            if !suppress_change {
+                node.changed = now;
+            }
             node.attributes = (node.attributes & !ATTR_NORMAL) | ATTR_ARCHIVE;
-            if !suppress {
+            if !suppress_write {
                 node.times.written = now;
             }
         }

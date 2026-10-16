@@ -44,6 +44,7 @@ impl Vfs32 {
             size: 0,
             linked: true,
             delete_pending: false,
+            delete_requested: false,
             descriptions: 0,
             content_revision: 1,
             dirty: true,

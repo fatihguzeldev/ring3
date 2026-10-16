@@ -15,6 +15,7 @@ impl Vfs32 {
             Operation32::Delete { file, immediate } => {
                 let node = self.node_mut(file).unwrap();
                 node.delete_pending = true;
+                node.delete_requested = true;
                 node.changed = now;
                 if immediate {
                     self.unlink(file);
@@ -140,6 +141,47 @@ impl Vfs32 {
                 let description = self.open_mut(open).unwrap();
                 description.suppress_access = access;
                 description.suppress_write = write;
+            }
+            Operation32::Basic {
+                file,
+                open,
+                times,
+                attributes,
+                suppress,
+            } => {
+                let node = self.node_mut(file).unwrap();
+                for (target, time) in [
+                    (&mut node.times.created, times[0]),
+                    (&mut node.times.accessed, times[1]),
+                    (&mut node.times.written, times[2]),
+                    (&mut node.changed, times[3]),
+                ] {
+                    if time != 0 && time <= i64::MAX as u64 {
+                        *target = time;
+                    }
+                }
+                if let Some(attributes) = attributes {
+                    node.attributes = attributes;
+                }
+                node.dirty = true;
+                let open = self.open_mut(open).unwrap();
+                [
+                    open.suppress_access,
+                    open.suppress_write,
+                    open.suppress_change,
+                ] = suppress;
+            }
+            Operation32::Disposition { open, delete } => {
+                let description = self.open_mut(open).unwrap();
+                description.disposition_delete = delete;
+                let file = description.file;
+                let marked = self
+                    .opens
+                    .iter()
+                    .flatten()
+                    .any(|open| open.file == file && open.disposition_delete);
+                let node = self.node_mut(file).unwrap();
+                node.delete_pending = node.delete_requested || marked;
             }
             Operation32::Directory {
                 directory,

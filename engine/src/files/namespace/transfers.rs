@@ -7,6 +7,28 @@ impl Vfs32 {
         target: &[u16],
         replace: bool,
     ) -> Result<PreparedNamespace32, FileError32> {
+        self.prepare_move_except(source, target, replace, None)
+    }
+    pub(crate) fn prepare_handle_rename(
+        &self,
+        open: OpenFileId,
+        target: &[u16],
+        replace: bool,
+    ) -> Result<PreparedNamespace32, FileError32> {
+        let description = self.open(open)?;
+        if !description.options.access.contains(FileAccess32::DELETE) {
+            return Err(FileError32::AccessDenied);
+        }
+        let source = self.file_path(description.file)?;
+        self.prepare_move_except(&source, target, replace, Some(open))
+    }
+    fn prepare_move_except(
+        &self,
+        source: &[u16],
+        target: &[u16],
+        replace: bool,
+        except: Option<OpenFileId>,
+    ) -> Result<PreparedNamespace32, FileError32> {
         let source = self.full_path(source)?;
         let target = self.full_path(target)?;
         let source_key = path::fold(&source);
@@ -25,7 +47,7 @@ impl Vfs32 {
             return Err(FileError32::AccessDenied);
         }
         self.check_parent(&target)?;
-        self.check_sharing(file, FileAccess32::DELETE, FileShare32::ALL)?;
+        self.check_sharing_except(file, FileAccess32::DELETE, FileShare32::ALL, except)?;
         let replaced = match self.lookup(&target) {
             Ok(id) if id == file => None,
             Ok(id) => {
@@ -167,6 +189,7 @@ impl Vfs32 {
             size: original.size,
             linked: true,
             delete_pending: false,
+            delete_requested: false,
             descriptions,
             content_revision,
             dirty: true,
@@ -211,6 +234,7 @@ impl Vfs32 {
             size: original.size,
             linked: destination.linked,
             delete_pending: destination.delete_pending,
+            delete_requested: destination.delete_requested,
             descriptions: destination.descriptions,
             content_revision,
             dirty: true,

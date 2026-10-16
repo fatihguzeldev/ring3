@@ -20,33 +20,65 @@ impl Vfs32 {
             next,
             file,
             size,
+            open: None,
             content_revision: node
                 .content_revision
                 .checked_add(1)
                 .ok_or(FileError32::Exhausted)?,
         })
     }
+    pub(crate) fn prepare_resize_open(
+        &self,
+        open: OpenFileId,
+        size: u64,
+    ) -> Result<PreparedResize32, FileError32> {
+        let description = self.open(open)?;
+        if !description.options.access.contains(FileAccess32::WRITE) {
+            return Err(FileError32::AccessDenied);
+        }
+        let mut prepared = self.prepare_resize(description.file, size)?;
+        prepared.open = Some(open);
+        Ok(prepared)
+    }
     pub(crate) fn commit_resize(&mut self, prepared: PreparedResize32) {
         prepared
             .validate(self)
             .expect("prepared file resize authority");
         let now = self.now;
+        let (suppress_write, suppress_change) = prepared
+            .open
+            .map(|open| {
+                self.open(open)
+                    .map(|description| (description.suppress_write, description.suppress_change))
+                    .unwrap()
+            })
+            .unwrap_or((false, false));
         let node = self.node_mut(prepared.file).unwrap();
         let old = node.content.pages.len();
-        node.content.pages.retain(|p| p.offset < prepared.size);
-        if let Some(page) = node.content.pages.last_mut()
-            && page.offset < prepared.size
-            && prepared.size - page.offset < FILE_PAGE_BYTES as u64
-        {
-            page.bytes[(prepared.size - page.offset) as usize..].fill(0);
+        let retained_extent = prepared.size.max(node.content.allocation);
+        node.content
+            .pages
+            .retain(|page| page.offset < retained_extent);
+        if prepared.size < node.size {
+            for page in &mut node.content.pages {
+                let start = prepared
+                    .size
+                    .saturating_sub(page.offset)
+                    .min(FILE_PAGE_BYTES as u64) as usize;
+                page.bytes[start..].fill(0);
+            }
         }
         let removed = old - node.content.pages.len();
         node.size = prepared.size;
         node.content.visible = node.content.visible.min(prepared.size);
         node.content_revision = prepared.content_revision;
         node.dirty = true;
-        node.times.written = now;
-        node.changed = now;
+        if !suppress_write {
+            node.times.written = now;
+        }
+        if !suppress_change {
+            node.changed = now;
+        }
         node.attributes = (node.attributes & !ATTR_NORMAL) | ATTR_ARCHIVE;
         self.overlay_pages -= removed;
         self.cache.invalidate(prepared.file);

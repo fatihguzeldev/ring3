@@ -1,5 +1,7 @@
+mod basic;
 mod deletion;
 mod directories;
+mod disposition;
 mod metadata;
 mod publication;
 mod replacement;
@@ -53,6 +55,17 @@ enum Operation32 {
         accessed: Option<u64>,
         written: Option<u64>,
         open: (OpenFileId, bool, bool),
+    },
+    Basic {
+        file: FileId,
+        open: OpenFileId,
+        times: [u64; 4],
+        attributes: Option<u32>,
+        suppress: [bool; 3],
+    },
+    Disposition {
+        open: OpenFileId,
+        delete: bool,
     },
     Directory {
         directory: Vec<u16>,

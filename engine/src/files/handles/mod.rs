@@ -25,6 +25,8 @@ pub(super) struct Open32 {
     pub options: FileOpenOptions32,
     pub suppress_access: bool,
     pub suppress_write: bool,
+    pub suppress_change: bool,
+    pub disposition_delete: bool,
     pub opened_path: Vec<u16>,
     pub maximum_allowed: bool,
     pub section: Option<FileSection32>,

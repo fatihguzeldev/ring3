@@ -1,3 +1,4 @@
+mod allocation;
 mod positioning;
 mod provider;
 mod reading;
@@ -50,6 +51,7 @@ pub(crate) struct PreparedResize32 {
     file: FileId,
     size: u64,
     content_revision: u64,
+    open: Option<OpenFileId>,
 }
 impl PreparedResize32 {
     pub(crate) fn validate(&self, vfs: &Vfs32) -> Result<(), FileError32> {

@@ -13,6 +13,7 @@ pub(super) struct Content32 {
     pub asset: Option<AssetRef32>,
     pub visible: u64,
     pub pages: Vec<OwnedPage32>,
+    pub allocation: u64,
 }
 #[derive(Clone, Debug)]
 pub(super) struct Node32 {
@@ -23,6 +24,7 @@ pub(super) struct Node32 {
     pub size: u64,
     pub linked: bool,
     pub delete_pending: bool,
+    pub delete_requested: bool,
     pub descriptions: u32,
     pub content_revision: u64,
     pub dirty: bool,
@@ -72,6 +74,7 @@ impl Content32 {
             asset: self.asset,
             visible: self.visible,
             pages,
+            allocation: self.allocation,
         })
     }
 }

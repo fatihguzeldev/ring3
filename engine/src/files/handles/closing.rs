@@ -82,7 +82,7 @@ impl Vfs32 {
         Ok(())
     }
     pub(super) fn deletes_on_close(&self, open: &Open32) -> Result<bool, FileError32> {
-        Ok(open.options.delete_on_close
+        Ok((open.options.delete_on_close || open.disposition_delete)
             && (!self.node(open.file)?.directory() || self.directory_empty(open.file)?))
     }
     pub(in crate::files) fn directory_empty(&self, file: FileId) -> Result<bool, FileError32> {

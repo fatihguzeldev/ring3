@@ -42,10 +42,24 @@ impl Vfs32 {
         access: FileAccess32,
         share: FileShare32,
     ) -> Result<(), FileError32> {
+        self.check_sharing_except(file, access, share, None)
+    }
+    pub(in crate::files) fn check_sharing_except(
+        &self,
+        file: FileId,
+        access: FileAccess32,
+        share: FileShare32,
+        except: Option<OpenFileId>,
+    ) -> Result<(), FileError32> {
         if access.contains(FileAccess32::DELETE) && self.lookup(&self.cwd) == Ok(file) {
             return Err(FileError32::SharingViolation);
         }
-        for open in self.opens.iter().flatten().filter(|o| o.file == file) {
+        for open in self
+            .opens
+            .iter()
+            .flatten()
+            .filter(|o| o.file == file && Some(o.id) != except)
+        {
             if access_mask(access) & !open.options.share.0 != 0
                 || access_mask(open.options.access) & !share.0 != 0
             {

@@ -144,6 +144,7 @@ file_apis! {
     GetWindowsDirectoryW = 0xb0, 2;
     GetSystemDirectoryA = 0xb1, 2;
     GetSystemDirectoryW = 0xb2, 2;
+    SetFileInformationByHandle = 0xb3, 4;
 }
 
 impl FileApi32 {
