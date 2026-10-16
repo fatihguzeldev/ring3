@@ -6,7 +6,11 @@ use crate::{
     windows::files::FileApi32,
 };
 
-fn encode(entry: &DirectoryEntry32, wide: bool) -> Result<Vec<u8>, FileError32> {
+fn encode(
+    entry: &DirectoryEntry32,
+    wide: bool,
+    cp: crate::windows::text::CodePage32,
+) -> Result<Vec<u8>, FileError32> {
     let size = if wide { 592 } else { 320 };
     let mut bytes = Vec::new();
     bytes
@@ -14,7 +18,7 @@ fn encode(entry: &DirectoryEntry32, wide: bool) -> Result<Vec<u8>, FileError32> 
         .map_err(|_| FileError32::Allocation)?;
     bytes.resize(size, 0);
     bytes[..36].copy_from_slice(&metadata::attributes(entry.info));
-    let name = memory::encoded(&entry.name, wide, true)?;
+    let name = memory::encoded(&entry.name, wide, true, cp)?;
     if name.len() > 260 * if wide { 2 } else { 1 } {
         return Err(FileError32::InvalidName);
     }
@@ -89,7 +93,7 @@ impl FileRuntime32 {
                 .entries
                 .get(find.cursor)
                 .ok_or(FileError32::NoMoreFiles)?;
-            let bytes = encode(entry, wide)?;
+            let bytes = encode(entry, wide, self.ordinary.ansi)?;
             memory::output(memory, args[1], size)?;
             memory
                 .write(GuestAddress(args[1]), &bytes)
@@ -112,7 +116,7 @@ impl FileRuntime32 {
             .checked_add(1)
             .ok_or(FileError32::Exhausted)?;
         let handle = self.handles.prepare(0, false)?;
-        let path = memory::path(memory, args[0], wide)?;
+        let path = memory::path(memory, args[0], wide, self.ordinary.ansi)?;
         let mut entries = self.vfs.find(&path)?;
         if extended && args[3] == 1 {
             entries.retain(|entry| entry.info.attributes & ATTR_DIRECTORY != 0);
@@ -125,7 +129,7 @@ impl FileRuntime32 {
             entries.retain(|entry| case_sensitive_match(pattern, &entry.name));
         }
         let first = entries.first().ok_or(FileError32::NotFound)?;
-        let bytes = encode(first, wide)?;
+        let bytes = encode(first, wide, self.ordinary.ansi)?;
         memory
             .write(GuestAddress(output), &bytes)
             .map_err(|_| FileError32::NoAccess)?;

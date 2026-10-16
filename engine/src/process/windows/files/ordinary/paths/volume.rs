@@ -19,7 +19,7 @@ impl FileRuntime32 {
             return Ok(FileCallOutcome32::success(4));
         }
         if matches!(api, GetLogicalDriveStringsA | GetLogicalDriveStringsW) {
-            let bytes = memory::encoded(&[67, 58, 92, 0], wide, true)?;
+            let bytes = memory::encoded(&[67, 58, 92, 0], wide, true, self.ordinary.ansi)?;
             if args[0] < 5 {
                 return Ok(FileCallOutcome32::success(5));
             }
@@ -32,7 +32,7 @@ impl FileRuntime32 {
         let path = if args[0] == 0 {
             self.vfs.current_directory().to_vec()
         } else {
-            memory::path(memory, args[0], wide)?
+            memory::path(memory, args[0], wide, self.ordinary.ansi)?
         };
         let absolute = self.vfs.full_path(&path)?;
         if !absolute.starts_with(&[67, 58, 92]) {
@@ -82,8 +82,13 @@ impl FileRuntime32 {
                 .write_spans(&spans[..count])
                 .map_err(|_| FileError32::NoAccess)?;
         } else if matches!(api, GetVolumeInformationA | GetVolumeInformationW) {
-            let name = memory::encoded(&[82, 105, 110, 103, 51], wide, true)?;
-            let filesystem = memory::encoded(&[82, 73, 78, 71, 51, 70, 83], wide, true)?;
+            let name = memory::encoded(&[82, 105, 110, 103, 51], wide, true, self.ordinary.ansi)?;
+            let filesystem = memory::encoded(
+                &[82, 73, 78, 71, 51, 70, 83],
+                wide,
+                true,
+                self.ordinary.ansi,
+            )?;
             if args[1] != 0 && args[2] < 6 || args[6] != 0 && args[7] < 8 {
                 return Ok(FileCallOutcome32::error(0, 234));
             }

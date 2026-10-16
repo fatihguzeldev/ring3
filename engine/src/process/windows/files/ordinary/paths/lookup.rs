@@ -14,9 +14,9 @@ impl FileRuntime32 {
         args: &[u32],
     ) -> Result<FileCallOutcome32, FileError32> {
         let wide = api == FileApi32::SearchPathW;
-        let mut name = memory::path(memory, args[1], wide)?;
+        let mut name = memory::path(memory, args[1], wide, self.ordinary.ansi)?;
         if args[2] != 0 {
-            let extension = memory::path(memory, args[2], wide)?;
+            let extension = memory::path(memory, args[2], wide, self.ordinary.ansi)?;
             if !extension.is_empty() && extension[0] != 46 {
                 return Err(FileError32::InvalidParameter);
             }
@@ -33,7 +33,7 @@ impl FileRuntime32 {
         let directories = if name.iter().any(|unit| matches!(*unit, 47 | 58 | 92)) {
             vec![Vec::new()]
         } else if args[0] != 0 {
-            memory::path(memory, args[0], wide)?
+            memory::path(memory, args[0], wide, self.ordinary.ansi)?
                 .split(|unit| *unit == 59)
                 .map(<[u16]>::to_vec)
                 .collect()
@@ -68,7 +68,7 @@ impl FileRuntime32 {
             }
         }
         let path = found.ok_or(FileError32::NotFound)?;
-        let bytes = memory::encoded(&path, wide, true)?;
+        let bytes = memory::encoded(&path, wide, true, self.ordinary.ansi)?;
         let length = bytes.len() / if wide { 2 } else { 1 };
         if (args[3] as usize) < length {
             return Ok(FileCallOutcome32::success(length as u32));
@@ -79,7 +79,9 @@ impl FileRuntime32 {
             .rposition(|unit| *unit == 92)
             .map_or(0, |index| index + 1);
         let part = args[4]
-            .checked_add(memory::encoded(&path[..index], wide, false)?.len() as u32)
+            .checked_add(
+                memory::encoded(&path[..index], wide, false, self.ordinary.ansi)?.len() as u32,
+            )
             .ok_or(FileError32::NoAccess)?
             .to_le_bytes();
         if args[5] != 0 {

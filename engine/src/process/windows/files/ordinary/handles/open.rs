@@ -17,7 +17,12 @@ impl FileRuntime32 {
         api: FileApi32,
         args: &[u32],
     ) -> Result<FileCallOutcome32, FileError32> {
-        let path = memory::path(memory, args[0], api == FileApi32::CreateFileW)?;
+        let path = memory::path(
+            memory,
+            args[0],
+            api == FileApi32::CreateFileW,
+            self.ordinary.ansi,
+        )?;
         let access = desired_access(args[1])?;
         if args[2] & !7 != 0 || args[5] & !0xffb0_ffff != 0 {
             return Err(FileError32::InvalidParameter);

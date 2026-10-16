@@ -35,7 +35,12 @@ impl FileRuntime32 {
             .try_reserve(path.len())
             .map_err(|_| FileError32::Allocation)?;
         result.extend_from_slice(if args[3] & 7 == 4 { &path[2..] } else { &path });
-        let bytes = memory::encoded(&result, api == FileApi32::GetFinalPathNameByHandleW, true)?;
+        let bytes = memory::encoded(
+            &result,
+            api == FileApi32::GetFinalPathNameByHandleW,
+            true,
+            self.ordinary.ansi,
+        )?;
         let units = bytes.len()
             / if api == FileApi32::GetFinalPathNameByHandleW {
                 2

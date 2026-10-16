@@ -19,7 +19,7 @@ impl FileRuntime32 {
             api,
             GetFileAttributesA | GetFileAttributesW | GetFileAttributesExA | GetFileAttributesExW
         ) {
-            let path = memory::path(memory, args[0], wide)?;
+            let path = memory::path(memory, args[0], wide, self.ordinary.ansi)?;
             let info = self.vfs.path_info(&path)?;
             if matches!(api, GetFileAttributesA | GetFileAttributesW) {
                 return Ok(FileCallOutcome32::success(info.attributes));
@@ -40,7 +40,7 @@ impl FileRuntime32 {
                 (self.vfs.current_directory().to_vec(), args[0], args[1], 0)
             }
             GetFullPathNameA | GetFullPathNameW => {
-                let input = memory::path(memory, args[0], wide)?;
+                let input = memory::path(memory, args[0], wide, self.ordinary.ansi)?;
                 directory_input = input.last().is_some_and(|unit| matches!(*unit, 47 | 92));
                 let mut path = self.vfs.full_path(&input)?;
                 if directory_input && path.last() != Some(&92) {
@@ -49,13 +49,13 @@ impl FileRuntime32 {
                 (path, args[1], args[2], args[3])
             }
             GetLongPathNameA | GetLongPathNameW | GetShortPathNameA | GetShortPathNameW => {
-                let input = memory::path(memory, args[0], wide)?;
+                let input = memory::path(memory, args[0], wide, self.ordinary.ansi)?;
                 let info = self.vfs.path_info(&input)?;
                 (self.vfs.file_path(info.id)?, args[2], args[1], 0)
             }
             _ => return Err(FileError32::Unsupported),
         };
-        let encoded = memory::encoded(&path, wide, true)?;
+        let encoded = memory::encoded(&path, wide, true, self.ordinary.ansi)?;
         let units = (encoded.len() / if wide { 2 } else { 1 }) as u32;
         if capacity < units {
             return Ok(FileCallOutcome32::success(units));
@@ -71,7 +71,10 @@ impl FileRuntime32 {
                 0
             } else {
                 address
-                    .checked_add(memory::encoded(&path[..index], wide, false)?.len() as u32)
+                    .checked_add(
+                        memory::encoded(&path[..index], wide, false, self.ordinary.ansi)?.len()
+                            as u32,
+                    )
                     .ok_or(FileError32::NoAccess)?
             }
         } else {

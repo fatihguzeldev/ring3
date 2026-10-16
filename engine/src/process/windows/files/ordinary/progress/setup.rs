@@ -28,8 +28,8 @@ impl FileRuntime32 {
         if args[4] != 0 && memory::dword(memory, args[4])? != 0 {
             return Ok(FileCallOutcome32::error(0, 1235));
         }
-        let source = memory::path(memory, args[0], wide)?;
-        let destination = memory::path(memory, args[1], wide)?;
+        let source = memory::path(memory, args[0], wide, self.ordinary.ansi)?;
+        let destination = memory::path(memory, args[1], wide, self.ordinary.ansi)?;
         let info = self.vfs.path_info(&source)?;
         if info.attributes & ATTR_DIRECTORY != 0 {
             return Err(FileError32::AccessDenied);

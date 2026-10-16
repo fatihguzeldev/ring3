@@ -41,35 +41,59 @@ pub(in crate::process::windows::files) fn path(
     memory: &AddressSpace,
     address: u32,
     wide: bool,
+    cp: crate::windows::text::CodePage32,
 ) -> Result<Vec<u16>, FileError32> {
     if address == 0 {
         return Err(FileError32::InvalidParameter);
     }
     let mut units = Vec::new();
-    units
-        .try_reserve(260)
-        .map_err(|_| FileError32::Allocation)?;
-    for index in 0..32_768u32 {
+    let mut bytes = Vec::new();
+    let maximum = 32767usize;
+    let raw_maximum = maximum
+        * if wide {
+            1
+        } else {
+            cp.maximum_char_size() as usize
+        };
+    for index in 0..=raw_maximum {
         let at = address
-            .checked_add(index * if wide { 2 } else { 1 })
+            .checked_add(index as u32 * if wide { 2 } else { 1 })
             .ok_or(FileError32::NoAccess)?;
-        let unit = if wide {
-            u16::from_le_bytes(read(memory, at)?)
+        if wide {
+            let unit = u16::from_le_bytes(read(memory, at)?);
+            if unit == 0 {
+                return if units.len() <= maximum {
+                    Ok(units)
+                } else {
+                    Err(FileError32::InvalidName)
+                };
+            }
+            units.try_reserve(1).map_err(|_| FileError32::Allocation)?;
+            units.push(unit);
         } else {
             let byte = read::<1>(memory, at)?[0];
-            crate::windows::text::CodePage32::Windows1252
-                .decode_byte(byte)
-                .expect("CP1252 is single-byte")
-        };
-        if unit == 0 {
-            return Ok(units);
+            if byte == 0 {
+                let units = cp
+                    .decode(&bytes, false)
+                    .map_err(|_| FileError32::InvalidName)?;
+                return if units.len() <= maximum {
+                    Ok(units)
+                } else {
+                    Err(FileError32::InvalidName)
+                };
+            }
+            bytes.try_reserve(1).map_err(|_| FileError32::Allocation)?;
+            bytes.push(byte);
         }
-        units.try_reserve(1).map_err(|_| FileError32::Allocation)?;
-        units.push(unit);
     }
     Err(FileError32::InvalidName)
 }
-pub(super) fn encoded(units: &[u16], wide: bool, nul: bool) -> Result<Vec<u8>, FileError32> {
+pub(in crate::process::windows::files) fn encoded(
+    units: &[u16],
+    wide: bool,
+    nul: bool,
+    cp: crate::windows::text::CodePage32,
+) -> Result<Vec<u8>, FileError32> {
     let mut bytes = Vec::new();
     bytes
         .try_reserve_exact((units.len() + usize::from(nul)) * if wide { 2 } else { 1 })
@@ -80,8 +104,7 @@ pub(super) fn encoded(units: &[u16], wide: bool, nul: bool) -> Result<Vec<u8>, F
         }
     } else {
         bytes.extend(
-            crate::windows::text::CodePage32::Windows1252
-                .encode(units, false)
+            cp.encode(units, false)
                 .map_err(|_| FileError32::InvalidName)?
                 .0,
         );
@@ -122,17 +145,23 @@ mod tests {
             .write(GuestAddress(0x1000), &[b'C', b':', b'\\', 0x80, 0x9c, 0])
             .unwrap();
         assert_eq!(
-            path(&memory, 0x1000, false).unwrap(),
+            path(&memory, 0x1000, false, Default::default()).unwrap(),
             [67, 58, 92, 0x20ac, 0x153]
         );
         assert_eq!(
-            encoded(&[0x20ac, 0x153], false, true).unwrap(),
+            encoded(&[0x20ac, 0x153], false, true, Default::default()).unwrap(),
             [0x80, 0x9c, 0]
         );
         memory
             .write(GuestAddress(0x1000), &[0, 0xd8, 0, 0])
             .unwrap();
-        assert_eq!(path(&memory, 0x1000, true).unwrap(), [0xd800]);
-        assert_eq!(encoded(&[0xd800], true, true).unwrap(), [0, 0xd8, 0, 0]);
+        assert_eq!(
+            path(&memory, 0x1000, true, Default::default()).unwrap(),
+            [0xd800]
+        );
+        assert_eq!(
+            encoded(&[0xd800], true, true, Default::default()).unwrap(),
+            [0, 0xd8, 0, 0]
+        );
     }
 }

@@ -37,7 +37,7 @@ impl FileRuntime32 {
         args: &[u32],
         wide: bool,
     ) -> Result<FileCallOutcome32, FileError32> {
-        let path = ordinary::memory::path(memory, args[0], wide)?;
+        let path = ordinary::memory::path(memory, args[0], wide, self.ordinary.ansi)?;
         let absolute = self.vfs.full_path(&path)?;
         let prepared = self.vfs.prepare_current_directory(&absolute)?;
         prepared.validate(&self.vfs)?;

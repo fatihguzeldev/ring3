@@ -63,7 +63,12 @@ impl FileRuntime32 {
         let name = if args[5] == 0 {
             None
         } else {
-            Some(mapping_name(guest::path(memory, args[5], wide)?)?)
+            Some(mapping_name(guest::path(
+                memory,
+                args[5],
+                wide,
+                self.ordinary.ansi,
+            )?)?)
         };
         let protection = MappingProtection32::parse(args[2], args[0] == u32::MAX)?;
         if let Some(index) = name.as_ref().and_then(|name| {
@@ -203,7 +208,7 @@ impl FileRuntime32 {
         args: &[u32],
         wide: bool,
     ) -> Result<FileCallOutcome32, FileError32> {
-        let name = mapping_name(guest::path(memory, args[2], wide)?)?;
+        let name = mapping_name(guest::path(memory, args[2], wide, self.ordinary.ansi)?)?;
         let index = self
             .mappings
             .objects

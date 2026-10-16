@@ -15,7 +15,7 @@ impl FileRuntime32 {
     ) -> Result<FileCallOutcome32, FileError32> {
         use FileApi32::*;
         let wide = api.name().ends_with('W');
-        let source = memory::path(memory, args[0], wide)?;
+        let source = memory::path(memory, args[0], wide, self.ordinary.ansi)?;
         let prepared = match api {
             CreateDirectoryA | CreateDirectoryW => {
                 memory::inherit(memory, args[1])?;
@@ -27,7 +27,7 @@ impl FileRuntime32 {
                 if template.attributes & ATTR_DIRECTORY == 0 {
                     return Err(FileError32::NotDirectory);
                 }
-                let target = memory::path(memory, args[1], wide)?;
+                let target = memory::path(memory, args[1], wide, self.ordinary.ansi)?;
                 self.vfs
                     .prepare_create_directory(&target, template.attributes)?
             }
@@ -38,9 +38,9 @@ impl FileRuntime32 {
                 if args[3] & 1 != 0 {
                     return Err(FileError32::Unsupported);
                 }
-                let replacement = memory::path(memory, args[1], wide)?;
+                let replacement = memory::path(memory, args[1], wide, self.ordinary.ansi)?;
                 let backup = if args[2] != 0 {
-                    Some(memory::path(memory, args[2], wide)?)
+                    Some(memory::path(memory, args[2], wide, self.ordinary.ansi)?)
                 } else {
                     None
                 };
@@ -80,7 +80,7 @@ impl FileRuntime32 {
                         },
                     )?;
                 }
-                let target = memory::path(memory, args[1], wide)?;
+                let target = memory::path(memory, args[1], wide, self.ordinary.ansi)?;
                 let source_info = self.vfs.path_info(&source)?;
                 self.check_copy_file_lock(source_info.id, source_info.size, false)?;
                 if let Ok(info) = self.vfs.path_info(&target) {
@@ -124,7 +124,7 @@ impl FileRuntime32 {
                 if args[1] == 0 {
                     return Err(FileError32::InvalidParameter);
                 }
-                let target = memory::path(memory, args[1], wide)?;
+                let target = memory::path(memory, args[1], wide, self.ordinary.ansi)?;
                 self.vfs.prepare_move(&source, &target, flags & 1 != 0)?
             }
             _ => return Err(FileError32::Unsupported),

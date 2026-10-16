@@ -122,10 +122,12 @@ impl EngineInstance {
         } else {
             ([0; 7], None)
         };
+        let ansi = self.windows_ansi_code_page();
         let files = self
             .files
             .as_mut()
             .ok_or(HostError::File(FileError32::Unsupported))?;
+        files.ordinary.ansi = ansi;
         files.vfs.set_io_thread(current_thread);
         if files.reply.is_some_and(|reply| {
             reply.owner != owner || reply.token != token || reply.id != id || reply.frame != frame
@@ -274,7 +276,12 @@ impl FileRuntime32 {
                 args[2]
             };
             if address != 0 {
-                let name = ordinary::memory::path(memory, address, api.name().ends_with('W'))?;
+                let name = ordinary::memory::path(
+                    memory,
+                    address,
+                    api.name().ends_with('W'),
+                    self.ordinary.ansi,
+                )?;
                 if let Some(sync) = sync.as_deref_mut() {
                     match sync.has_named_event(&name) {
                         Ok(true) => return Err(FileError32::InvalidHandle),

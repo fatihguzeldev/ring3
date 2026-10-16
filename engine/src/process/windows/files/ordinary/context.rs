@@ -8,6 +8,7 @@ pub(super) struct Find32 {
 }
 
 pub(in crate::process::windows::files) struct OrdinaryRuntime32 {
+    pub(in crate::process::windows::files) ansi: crate::windows::text::CodePage32,
     pub(super) finds: Vec<Find32>,
     pub(super) find_limit: usize,
     pub(super) sequence: u64,
@@ -53,6 +54,7 @@ impl OrdinaryRuntime32 {
             .try_reserve_exact(max_finds)
             .map_err(|_| FileError32::Allocation)?;
         Ok(Self {
+            ansi: Default::default(),
             finds,
             find_limit: max_finds,
             sequence: 0,

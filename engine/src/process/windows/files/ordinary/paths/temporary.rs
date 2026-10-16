@@ -19,7 +19,7 @@ impl FileRuntime32 {
             if path.last() != Some(&92) {
                 path.push(92);
             }
-            let bytes = memory::encoded(&path, wide, true)?;
+            let bytes = memory::encoded(&path, wide, true, self.ordinary.ansi)?;
             let length = bytes.len() / if wide { 2 } else { 1 };
             if (args[0] as usize) < length {
                 return Ok(FileCallOutcome32::success(length as u32));
@@ -30,11 +30,11 @@ impl FileRuntime32 {
                 .map_err(|_| FileError32::NoAccess)?;
             return Ok(FileCallOutcome32::success(length as u32 - 1));
         }
-        let directory = memory::path(memory, args[0], wide)?;
+        let directory = memory::path(memory, args[0], wide, self.ordinary.ansi)?;
         if directory.len() > 246 {
             return Ok(FileCallOutcome32::error(0, 111));
         }
-        let prefix = memory::path(memory, args[1], wide)?;
+        let prefix = memory::path(memory, args[1], wide, self.ordinary.ansi)?;
         if self.vfs.path_info(&directory)?.attributes & ATTR_DIRECTORY == 0 {
             return Err(FileError32::NotDirectory);
         }
@@ -59,7 +59,7 @@ impl FileRuntime32 {
                 }));
             }
             candidate.extend([46, 84, 77, 80]);
-            let bytes = memory::encoded(&candidate, wide, true)?;
+            let bytes = memory::encoded(&candidate, wide, true, self.ordinary.ansi)?;
             if bytes.len() / if wide { 2 } else { 1 } > 260 {
                 return Ok(FileCallOutcome32::error(0, 111));
             }
