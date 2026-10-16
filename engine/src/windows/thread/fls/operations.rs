@@ -2,7 +2,7 @@ use super::*;
 
 impl FlsContext32 {
     fn begin(&mut self, owner: u32, kind: OperationKind32) -> Result<u64, ThreadError32> {
-        self.row_index(owner)?;
+        Self::check_thread(owner)?;
         if self.operations.len() == 32 {
             return Err(ThreadError32::Capacity);
         }
@@ -28,14 +28,14 @@ impl FlsContext32 {
         Ok(id)
     }
     pub(crate) fn begin_exit(&mut self, thread: u32) -> Result<Option<u64>, ThreadError32> {
-        let row = self.row_index(thread)?;
-        if self.rows[row].is_none() {
-            return Ok(None);
-        }
+        Self::check_thread(thread)?;
         if let Some(operation) = self.operations.iter().find(
             |operation| matches!(operation.kind, OperationKind32::Exit(owner) if owner == thread),
         ) {
             return Ok(Some(operation.id));
+        }
+        if self.row_index(thread).is_none() {
+            return Ok(None);
         }
         self.begin(thread, OperationKind32::Exit(thread)).map(Some)
     }
@@ -49,11 +49,16 @@ impl FlsContext32 {
             return Err(ThreadError32::Busy);
         }
         let (thread, index, complete) = match operation.kind {
-            OperationKind32::Free(index) => (
-                operation.cursor as u32 + 1,
-                index,
-                operation.cursor == self.rows.len(),
-            ),
+            OperationKind32::Free(index) => {
+                let thread = self
+                    .rows
+                    .iter()
+                    .flatten()
+                    .map(|row| row.thread)
+                    .filter(|thread| *thread > operation.cursor as u32)
+                    .min();
+                (thread.unwrap_or(0), index, thread.is_none())
+            }
             OperationKind32::Exit(thread) => (
                 thread,
                 operation.cursor as u32 + 1,
@@ -99,21 +104,26 @@ impl FlsContext32 {
                 OperationKind32::Free(slot) => {
                     self.slots[slot as usize] = None;
                     for row in self.rows.iter_mut().flatten() {
-                        row[slot as usize] = 0;
+                        row.values[slot as usize] = 0;
                     }
+                    self.prune_empty_rows();
                 }
                 OperationKind32::Exit(thread) => {
-                    self.rows[thread as usize - 1] = None;
+                    if let Some(row) = self.row_index(thread) {
+                        self.rows[row] = None;
+                    }
                 }
             }
             self.operations.swap_remove(index);
         } else if step.procedure != 0 {
             self.operations[index].active = Some(step);
         } else {
-            if let Some(row) = self.rows[step.thread as usize - 1].as_mut() {
-                row[step.index as usize] = 0;
-            }
-            self.operations[index].cursor += 1;
+            self.clear_value(step.thread, step.index);
+            let operation = &mut self.operations[index];
+            operation.cursor = match operation.kind {
+                OperationKind32::Free(_) => step.thread as usize,
+                OperationKind32::Exit(_) => operation.cursor + 1,
+            };
         }
     }
     pub(crate) fn check_callback(&self, id: u64) -> Result<FlsStep32, ThreadError32> {
@@ -127,15 +137,16 @@ impl FlsContext32 {
         let step = self
             .check_callback(id)
             .expect("exact FLS callback completion was preflighted");
-        if let Some(row) = self.rows[step.thread as usize - 1].as_mut() {
-            row[step.index as usize] = 0;
-        }
+        self.clear_value(step.thread, step.index);
         let operation = self
             .operations
             .iter_mut()
             .find(|operation| operation.id == id)
             .unwrap();
         operation.active = None;
-        operation.cursor += 1;
+        operation.cursor = match operation.kind {
+            OperationKind32::Free(_) => step.thread as usize,
+            OperationKind32::Exit(_) => operation.cursor + 1,
+        };
     }
 }

@@ -25,14 +25,17 @@ impl FlsContext32 {
             next: 0,
         })
     }
-    pub(super) fn row_index(&self, thread: u32) -> Result<usize, ThreadError32> {
-        let index = thread
-            .checked_sub(1)
-            .ok_or(ThreadError32::InvalidParameter)? as usize;
-        if index >= self.rows.len() {
-            return Err(ThreadError32::InvalidParameter);
+    pub(super) fn check_thread(thread: u32) -> Result<(), ThreadError32> {
+        if thread == 0 {
+            Err(ThreadError32::InvalidParameter)
+        } else {
+            Ok(())
         }
-        Ok(index)
+    }
+    pub(super) fn row_index(&self, thread: u32) -> Option<usize> {
+        self.rows
+            .iter()
+            .position(|row| row.as_ref().is_some_and(|row| row.thread == thread))
     }
     pub(super) fn index(&self, index: u32) -> Result<usize, ThreadError32> {
         if index == 0 || index as usize >= self.slots.len() {
@@ -41,17 +44,43 @@ impl FlsContext32 {
         Ok(index as usize)
     }
     fn ensure_row(&mut self, thread: u32) -> Result<usize, ThreadError32> {
-        let index = self.row_index(thread)?;
-        if self.rows[index].is_none() {
-            let mut row = Vec::new();
-            row.try_reserve_exact(self.slots.len())
-                .map_err(|_| ThreadError32::Allocation)?;
-            row.resize(self.slots.len(), 0);
-            self.rows[index] = Some(row);
+        if let Some(index) = self.row_index(thread) {
+            return Ok(index);
         }
+        let index = self
+            .rows
+            .iter()
+            .position(Option::is_none)
+            .ok_or(ThreadError32::Capacity)?;
+        let mut values = Vec::new();
+        values
+            .try_reserve_exact(self.slots.len())
+            .map_err(|_| ThreadError32::Allocation)?;
+        values.resize(self.slots.len(), 0);
+        self.rows[index] = Some(Row32 { thread, values });
         Ok(index)
     }
+    pub(super) fn prune_empty_rows(&mut self) {
+        for row in &mut self.rows {
+            if row
+                .as_ref()
+                .is_some_and(|row| row.values.iter().all(|value| *value == 0))
+            {
+                *row = None;
+            }
+        }
+    }
+    pub(super) fn clear_value(&mut self, thread: u32, index: u32) {
+        if let Some(slot) = self.row_index(thread) {
+            let row = self.rows[slot].as_mut().unwrap();
+            row.values[index as usize] = 0;
+            if row.values.iter().all(|value| *value == 0) {
+                self.rows[slot] = None;
+            }
+        }
+    }
     pub(crate) fn allocate(&mut self, thread: u32, callback: u32) -> Result<u32, ThreadError32> {
+        Self::check_thread(thread)?;
         let index = self
             .slots
             .iter()
@@ -60,10 +89,10 @@ impl FlsContext32 {
             .find(|(_, slot)| slot.is_none())
             .map(|(index, _)| index)
             .ok_or(ThreadError32::Capacity)?;
-        self.ensure_row(thread)?;
         for row in self.rows.iter_mut().flatten() {
-            row[index] = 0;
+            row.values[index] = 0;
         }
+        self.prune_empty_rows();
         self.slots[index] = Some(Slot32 {
             callback,
             freeing: false,
@@ -72,26 +101,29 @@ impl FlsContext32 {
     }
     pub(crate) fn get(&self, thread: u32, index: u32) -> Result<u32, ThreadError32> {
         let index = self.index(index)?;
-        let row = self.row_index(thread)?;
-        Ok(self.rows[row].as_ref().map_or(0, |row| row[index]))
+        Self::check_thread(thread)?;
+        Ok(self
+            .row_index(thread)
+            .map_or(0, |row| self.rows[row].as_ref().unwrap().values[index]))
     }
     pub(crate) fn set(&mut self, thread: u32, index: u32, value: u32) -> Result<(), ThreadError32> {
         let index = self.index(index)?;
+        Self::check_thread(thread)?;
+        if value == 0 {
+            self.clear_value(thread, index as u32);
+            return Ok(());
+        }
         let row = self.ensure_row(thread)?;
-        self.rows[row].as_mut().unwrap()[index] = value;
+        self.rows[row].as_mut().unwrap().values[index] = value;
         Ok(())
     }
     pub(crate) fn is_empty(&self) -> bool {
         self.slots.iter().all(Option::is_none)
             && self.operations.is_empty()
-            && self
-                .rows
-                .iter()
-                .flatten()
-                .all(|row| row.iter().all(|&value| value == 0))
+            && self.rows.iter().all(Option::is_none)
     }
     pub(crate) fn retire_thread(&mut self, thread: u32) {
-        if let Ok(index) = self.row_index(thread) {
+        if let Some(index) = self.row_index(thread) {
             self.rows[index] = None;
         }
         for operation in self

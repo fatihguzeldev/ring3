@@ -81,3 +81,117 @@ fn forced_retirement_releases_only_its_owned_callback_operations_without_running
     assert_eq!(context.get(2, index), Ok(22));
     assert!(context.begin_free(2, index).is_ok());
 }
+
+#[test]
+fn bounded_rows_follow_monotonic_thread_ids_without_allocating_empty_thread_values() {
+    let mut context = FlsContext32::new(4, 4).unwrap();
+    let index = context.allocate(1, 0x401000).unwrap();
+    for thread in [2, 3, 4, 5, 100_000, u32::MAX] {
+        assert_eq!(context.get(thread, index), Ok(0));
+        assert_eq!(context.begin_exit(thread), Ok(None));
+        assert_eq!(context.set(thread, index, 0), Ok(()));
+        assert_eq!(context.rows.iter().flatten().count(), 0);
+        context.set(thread, index, thread).unwrap();
+        let operation = context.begin_exit(thread).unwrap().unwrap();
+        let step = next_callback(&mut context, operation).unwrap();
+        assert_eq!((step.thread, step.value), (thread, thread));
+        context.complete_callback(operation);
+        assert_eq!(next_callback(&mut context, operation), None);
+        assert_eq!(context.rows.iter().flatten().count(), 0);
+        assert_eq!(context.rows.len(), 4);
+    }
+    assert_eq!(context.get(0, index), Err(ThreadError32::InvalidParameter));
+    assert_eq!(context.begin_exit(0), Err(ThreadError32::InvalidParameter));
+}
+
+#[test]
+fn occupied_row_capacity_is_neutral_and_zero_or_retirement_releases_only_its_owner() {
+    let mut context = FlsContext32::new(4, 4).unwrap();
+    let index = context.allocate(1, 0x401000).unwrap();
+    for thread in [11, 55, 777, u32::MAX] {
+        context.set(thread, index, thread).unwrap();
+    }
+    assert_eq!(context.get(100_000, index), Ok(0));
+    assert_eq!(context.begin_exit(100_000), Ok(None));
+    assert_eq!(context.set(100_000, index, 0), Ok(()));
+    assert_eq!(context.set(100_000, index, 9), Err(ThreadError32::Capacity));
+    assert_eq!(context.rows.iter().flatten().count(), 4);
+    for thread in [11, 55, 777, u32::MAX] {
+        assert_eq!(context.get(thread, index), Ok(thread));
+    }
+    assert_eq!(context.allocate(100_000, 0), Ok(2));
+    assert_eq!(context.rows.iter().flatten().count(), 4);
+    context.set(55, index, 0).unwrap();
+    context.set(100_000, index, 9).unwrap();
+    context.retire_thread(u32::MAX);
+    context.set(2_000_000, index, 17).unwrap();
+    assert_eq!(context.get(55, index), Ok(0));
+    assert_eq!(context.get(u32::MAX, index), Ok(0));
+    assert_eq!(context.get(11, index), Ok(11));
+    assert_eq!(context.get(777, index), Ok(777));
+    assert_eq!(context.get(100_000, index), Ok(9));
+    assert_eq!(context.get(2_000_000, index), Ok(17));
+    assert_eq!(context.rows.len(), 4);
+}
+
+#[test]
+fn free_callbacks_use_actual_thread_ids_after_row_reuse_and_preserve_other_indices() {
+    let mut context = FlsContext32::new(4, 4).unwrap();
+    let index = context.allocate(1, 0x401000).unwrap();
+    let other = context.allocate(1, 0).unwrap();
+    for thread in [u32::MAX, 7, 80] {
+        context.set(thread, index, thread).unwrap();
+    }
+    context.set(80, other, 777).unwrap();
+    context.retire_thread(7);
+    context.set(500, index, 500).unwrap();
+    let operation = context.begin_free(1, index).unwrap();
+    for thread in [80, 500, u32::MAX] {
+        let step = next_callback(&mut context, operation).unwrap();
+        assert_eq!((step.thread, step.value), (thread, thread));
+        context.complete_callback(operation);
+    }
+    assert_eq!(next_callback(&mut context, operation), None);
+    assert_eq!(context.get(80, other), Ok(777));
+    assert_eq!(context.rows.iter().flatten().count(), 1);
+    assert_eq!(context.allocate(100_000, 0), Ok(index));
+    assert_eq!(context.get(500, index), Ok(0));
+    assert_eq!(context.get(u32::MAX, index), Ok(0));
+}
+
+#[test]
+fn callback_completion_does_not_clear_a_new_thread_reusing_the_retired_rows_storage() {
+    let mut context = FlsContext32::new(4, 2).unwrap();
+    let index = context.allocate(1, 0x401000).unwrap();
+    context.set(100, index, 10).unwrap();
+    context.set(200, index, 20).unwrap();
+    let operation = context.begin_free(9, index).unwrap();
+    assert_eq!(next_callback(&mut context, operation).unwrap().thread, 100);
+    context.retire_thread(100);
+    context.set(300, index, 30).unwrap();
+    context.complete_callback(operation);
+    assert_eq!(context.get(300, index), Ok(30));
+    for (thread, value) in [(200, 20), (300, 30)] {
+        let step = next_callback(&mut context, operation).unwrap();
+        assert_eq!((step.thread, step.value), (thread, value));
+        context.complete_callback(operation);
+    }
+    assert_eq!(next_callback(&mut context, operation), None);
+    assert_eq!(context.rows.iter().flatten().count(), 0);
+}
+
+#[test]
+fn zeroing_the_last_value_preserves_the_active_exit_callback_operation() {
+    let mut context = FlsContext32::new(4, 4).unwrap();
+    let index = context.allocate(1, 0x401000).unwrap();
+    context.set(100_000, index, 17).unwrap();
+    let operation = context.begin_exit(100_000).unwrap().unwrap();
+    let step = next_callback(&mut context, operation).unwrap();
+    context.set(100_000, index, 0).unwrap();
+    assert_eq!(context.rows.iter().flatten().count(), 0);
+    assert_eq!(context.begin_exit(100_000), Ok(Some(operation)));
+    assert_eq!(context.check_callback(operation), Ok(step));
+    context.complete_callback(operation);
+    assert_eq!(next_callback(&mut context, operation), None);
+    assert_eq!(context.begin_exit(100_000), Ok(None));
+}
