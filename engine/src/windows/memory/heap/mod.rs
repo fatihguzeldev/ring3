@@ -5,6 +5,9 @@ mod movable;
 mod policy;
 mod queries;
 
+#[cfg(test)]
+mod identities;
+
 pub(crate) use allocation::PreparedHeapAllocation32;
 pub(crate) use group::PreparedHeapAllocations32;
 
@@ -16,6 +19,7 @@ struct Block32 {
     address: u32,
     extent: u32,
     size: Option<u32>,
+    allocation: u64,
 }
 struct Heap32 {
     handle: u32,
@@ -37,6 +41,7 @@ pub(crate) struct HeapManager32 {
     default: Option<u32>,
     limits: MemoryLimits32,
     next_movable: u32,
+    next_allocation: u64,
     terminate_on_corruption: bool,
 }
 impl HeapManager32 {
@@ -59,6 +64,7 @@ impl HeapManager32 {
             default: None,
             limits,
             next_movable: 0x0100_0002,
+            next_allocation: 0,
             terminate_on_corruption: false,
         })
     }

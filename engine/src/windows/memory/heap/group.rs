@@ -12,6 +12,8 @@ pub(crate) struct PreparedHeapAllocations32 {
     small: bool,
     identity: u64,
     version: u64,
+    previous_allocation: u64,
+    next_allocation: u64,
 }
 impl PreparedHeapAllocations32 {
     pub(crate) fn addresses(&self) -> &[u32] {
@@ -28,6 +30,10 @@ impl HeapManager32 {
     ) -> Result<PreparedHeapAllocations32, MemoryError32> {
         let heap = self.index(handle)?;
         let source = &self.heaps[heap];
+        let next_allocation = self
+            .next_allocation
+            .checked_add(sizes.len() as u64)
+            .ok_or(MemoryError32::Capacity)?;
         if sizes.len() > self.limits.blocks || retire.len() > source.blocks.len() {
             return Err(MemoryError32::Capacity);
         }
@@ -58,6 +64,7 @@ impl HeapManager32 {
                 crate::memory::Access::Write,
             )?;
             candidate[block].size = None;
+            candidate[block].allocation = 0;
         }
         coalesce_blocks(&mut candidate);
         let mut addresses = Vec::new();
@@ -73,7 +80,7 @@ impl HeapManager32 {
         extents
             .try_reserve_exact(sizes.len())
             .map_err(|_| MemoryError32::Allocation)?;
-        for &size in sizes {
+        for (ordinal, &size) in sizes.iter().enumerate() {
             if source.maximum != 0 && size >= 0x7fff8 {
                 return Err(MemoryError32::Capacity);
             }
@@ -90,6 +97,7 @@ impl HeapManager32 {
                 address: old.address,
                 extent,
                 size: Some(size),
+                allocation: self.next_allocation + ordinal as u64 + 1,
             };
             if old.extent > extent {
                 candidate.insert(
@@ -98,6 +106,7 @@ impl HeapManager32 {
                         address: old.address + extent,
                         extent: old.extent - extent,
                         size: None,
+                        allocation: 0,
                     },
                 );
             }
@@ -129,6 +138,8 @@ impl HeapManager32 {
             small: source.small.is_some(),
             identity: memory.identity(),
             version: memory.transaction_version(),
+            previous_allocation: self.next_allocation,
+            next_allocation,
         })
     }
     pub(crate) fn commit_initialized_allocations(
@@ -143,12 +154,14 @@ impl HeapManager32 {
         let source = &self.heaps[heap];
         if memory.identity() != prepared.identity
             || memory.transaction_version() != prepared.version
+            || self.next_allocation != prepared.previous_allocation
             || source.blocks.len() != prepared.original.len()
-            || source
-                .blocks
-                .iter()
-                .zip(&prepared.original)
-                .any(|(a, b)| a.address != b.address || a.extent != b.extent || a.size != b.size)
+            || source.blocks.iter().zip(&prepared.original).any(|(a, b)| {
+                a.address != b.address
+                    || a.extent != b.extent
+                    || a.size != b.size
+                    || a.allocation != b.allocation
+            })
             || source.flags != prepared.flags
             || source.maximum != prepared.maximum
             || source.small.is_some() != prepared.small
@@ -198,6 +211,7 @@ impl HeapManager32 {
             &writes,
         )?;
         self.heaps[heap].blocks = prepared.candidate;
+        self.next_allocation = prepared.next_allocation;
         self.rebuild_small_blocks(heap);
         Ok(())
     }

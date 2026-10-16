@@ -6,6 +6,7 @@ pub(crate) struct PreparedHeapAllocation32 {
     original: Block32,
     extent: u32,
     size: u32,
+    allocation: u64,
     identity: u64,
     version: u64,
 }
@@ -66,6 +67,10 @@ impl HeapManager32 {
         size: u32,
     ) -> Result<PreparedHeapAllocation32, MemoryError32> {
         let heap = self.index(handle)?;
+        let allocation = self
+            .next_allocation
+            .checked_add(1)
+            .ok_or(MemoryError32::Capacity)?;
         if self.heaps[heap].maximum != 0 && size >= 0x7fff8 {
             return Err(MemoryError32::Capacity);
         }
@@ -94,6 +99,7 @@ impl HeapManager32 {
             original,
             extent,
             size,
+            allocation,
             identity: memory.identity(),
             version: memory.transaction_version(),
         })
@@ -112,6 +118,7 @@ impl HeapManager32 {
         };
         if memory.identity() != prepared.identity
             || memory.transaction_version() != prepared.version
+            || self.next_allocation.checked_add(1) != Some(prepared.allocation)
             || current.address != prepared.original.address
             || current.extent != prepared.original.extent
             || current.size.is_some()
@@ -153,10 +160,12 @@ impl HeapManager32 {
             )?;
         }
         let original = prepared.original;
+        self.next_allocation = prepared.allocation;
         self.heaps[heap].blocks[prepared.block] = Block32 {
             address: original.address,
             extent: prepared.extent,
             size: Some(prepared.size),
+            allocation: prepared.allocation,
         };
         if original.extent > prepared.extent {
             self.heaps[heap].blocks.insert(
@@ -165,6 +174,7 @@ impl HeapManager32 {
                     address: original.address + prepared.extent,
                     extent: original.extent - prepared.extent,
                     size: None,
+                    allocation: 0,
                 },
             );
         }
@@ -204,6 +214,10 @@ impl HeapManager32 {
             .filter(|block| block.size.is_none());
         let available = old.extent + adjacent.map_or(0, |block| block.extent);
         if extent <= available {
+            let allocation = self
+                .next_allocation
+                .checked_add(1)
+                .ok_or(MemoryError32::Capacity)?;
             if extent < old.extent {
                 self.reserve_block(heap)?;
             }
@@ -235,10 +249,12 @@ impl HeapManager32 {
             if adjacent.is_some() {
                 self.heaps[heap].blocks.remove(block + 1);
             }
+            self.next_allocation = allocation;
             self.heaps[heap].blocks[block] = Block32 {
                 address: pointer,
                 extent,
                 size: Some(size),
+                allocation,
             };
             if extent < available {
                 self.heaps[heap].blocks.insert(
@@ -247,6 +263,7 @@ impl HeapManager32 {
                         address: pointer + extent,
                         extent: available - extent,
                         size: None,
+                        allocation: 0,
                     },
                 );
             }

@@ -1,6 +1,20 @@
 use super::*;
 
 impl HeapManager32 {
+    pub(crate) fn allocation_identity(
+        &self,
+        handle: u32,
+        pointer: u32,
+    ) -> Result<u64, MemoryError32> {
+        let heap = self.index(handle)?;
+        let block = self.block(heap, pointer)?;
+        let allocation = self.heaps[heap].blocks[block].allocation;
+        if allocation == 0 {
+            return Err(MemoryError32::InvalidParameter);
+        }
+        Ok(allocation)
+    }
+
     pub(crate) fn size(&self, handle: u32, flags: u32, pointer: u32) -> Result<u32, MemoryError32> {
         if flags & !HEAP_NO_SERIALIZE != 0 {
             return Err(MemoryError32::InvalidParameter);
