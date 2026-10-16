@@ -1,4 +1,5 @@
 mod buffer;
+pub mod capture_effects;
 pub mod dsound;
 pub mod effects;
 mod mixing;
@@ -23,6 +24,7 @@ pub struct AudioContext {
     voices: Vec<VoiceSlot>,
     buffer_bytes: u32,
     effect_bytes: u32,
+    capture_reference: Option<capture_effects::PreparedCaptureReference>,
     output: Vec<f32>,
     wide_output: Vec<f64>,
     spans: Vec<VoiceSpan>,
@@ -50,6 +52,7 @@ impl AudioContext {
             voices: allocated(config.max_voices as usize, VoiceSlot::default)?,
             buffer_bytes: 0,
             effect_bytes: 0,
+            capture_reference: None,
             output: allocated(config.render_frames as usize * 2, || 0.0)?,
             wide_output: Vec::new(),
             spans: allocated(config.max_voices as usize, VoiceSpan::default)?,
@@ -90,6 +93,7 @@ impl AudioContext {
         self.epoch = new_epoch;
         self.buffer_bytes = 0;
         self.effect_bytes = 0;
+        self.capture_reference = None;
         self.sequence = 0;
         self.submitted_frames = 0;
         self.consumed_frames = 0;
@@ -107,6 +111,7 @@ impl AudioContext {
         self.spans.fill(VoiceSpan::default());
         self.buffer_bytes = 0;
         self.effect_bytes = 0;
+        self.capture_reference = None;
     }
 
     fn ready(&self) -> Result<(), AudioError32> {

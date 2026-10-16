@@ -1,6 +1,7 @@
 pub(crate) mod aes;
 pub(crate) mod extended;
 pub(crate) mod ieee;
+pub(crate) mod spectral;
 mod integer;
 mod workspace;
 

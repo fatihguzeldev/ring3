@@ -41,3 +41,5 @@ tables in engine/src/windows/nls/locales/data/regions.rs.
 Country dialing codes are derived from libphonenumber v9.0.17 metadata.
 Copyright (C) 2009 The Libphonenumber Authors. Licensed under Apache-2.0;
 see LICENSE. Ring3 retains only region/dialing facts in its typed table.
+
+RustFFT is licensed here under Apache-2.0; see LICENSE.

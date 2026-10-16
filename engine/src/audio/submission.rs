@@ -85,6 +85,9 @@ impl AudioContext {
             }
         }
         self.sequence = sequence;
+        if let Some(reference) = &mut self.capture_reference {
+            reference.append(id.first_frame, &self.output[..length]);
+        }
         self.submitted_frames = submitted;
         self.pending = Some(PendingSubmission { id, consumed: 0 });
         Ok(id)
