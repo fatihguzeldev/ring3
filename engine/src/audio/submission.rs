@@ -43,12 +43,13 @@ impl AudioContext {
         let wide = self.voices.iter().any(|slot| {
             slot.voice.as_ref().is_some_and(|voice| {
                 voice.producing
-                    && self.buffers[voice.buffer.slot as usize]
-                        .buffer
-                        .as_ref()
-                        .unwrap()
-                        .encoding
-                        == SampleEncoding32::Float
+                    && (voice.effects.is_some()
+                        || self.buffers[voice.buffer.slot as usize]
+                            .buffer
+                            .as_ref()
+                            .unwrap()
+                            .encoding
+                            == SampleEncoding32::Float)
             })
         });
         if wide {
@@ -264,13 +265,31 @@ fn render<S: MixSample>(
             } else {
                 at
             };
-            for channel in 0..2 {
-                output[frame as usize * 2 + channel].accumulate(
-                    buffer.sample(at, channel),
-                    buffer.sample(next, channel),
-                    source as u32,
-                    voice.controls.gains[channel],
-                );
+            if let Some(effects) = &mut voice.effects {
+                let fraction = f64::from(source as u32) / 4_294_967_296.0;
+                let input = core::array::from_fn(|channel| {
+                    let first = f64::from(buffer.sample(at, channel));
+                    let next = f64::from(buffer.sample(next, channel));
+                    (first + (next - first) * fraction) as f32
+                });
+                let processed = effects.process(input);
+                for channel in 0..2 {
+                    output[frame as usize * 2 + channel].accumulate(
+                        processed[channel],
+                        processed[channel],
+                        0,
+                        voice.controls.gains[channel],
+                    );
+                }
+            } else {
+                for channel in 0..2 {
+                    output[frame as usize * 2 + channel].accumulate(
+                        buffer.sample(at, channel),
+                        buffer.sample(next, channel),
+                        source as u32,
+                        voice.controls.gains[channel],
+                    );
+                }
             }
             count += 1;
             source += voice.step;

@@ -94,7 +94,11 @@ impl AudioContext {
         let total = self
             .buffer_bytes
             .checked_add(byte_length)
-            .filter(|total| *total <= self.config.max_buffer_bytes)
+            .filter(|total| {
+                total
+                    .checked_add(self.effect_bytes)
+                    .is_some_and(|all| all <= self.config.max_buffer_bytes)
+            })
             .ok_or(AudioError32::Capacity)?;
         let (index, generation) = self
             .buffers

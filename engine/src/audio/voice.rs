@@ -19,6 +19,7 @@ pub(super) struct Voice {
     pub revision: u64,
     pub controls: AudioVoiceControls32,
     pub step: u64,
+    pub effects: Option<super::effects::EffectChain>,
 }
 
 impl AudioContext {
@@ -48,6 +49,7 @@ impl AudioContext {
             .ok_or(AudioError32::Capacity)?;
         self.voices[index].voice = Some(Voice {
             buffer,
+            effects: None,
             position: 0,
             produced_position: 0,
             playing: false,
@@ -74,7 +76,12 @@ impl AudioContext {
     }
 
     pub fn release_stream_voice(&mut self, id: AudioVoiceId32) -> Result<(), AudioError32> {
-        self.voice(id)?;
+        let bytes = self
+            .voice(id)?
+            .effects
+            .as_ref()
+            .map_or(0, |chain| chain.bytes);
+        self.effect_bytes -= bytes;
         self.voices[id.slot as usize].voice = None;
         Ok(())
     }
@@ -128,7 +135,6 @@ impl AudioContext {
             .ok_or(AudioError32::Exhausted)?;
         Ok(())
     }
-
     pub fn seek(&mut self, id: AudioVoiceId32, frame: u32) -> Result<(), AudioError32> {
         self.ready()?;
         self.seek_stream(id, frame)
@@ -208,7 +214,7 @@ impl AudioContext {
             .ok_or(AudioError32::InvalidVoice)
     }
 
-    fn voice_mut(&mut self, id: AudioVoiceId32) -> Result<&mut Voice, AudioError32> {
+    pub(super) fn voice_mut(&mut self, id: AudioVoiceId32) -> Result<&mut Voice, AudioError32> {
         self.voice(id)?;
         Ok(self.voices[id.slot as usize].voice.as_mut().unwrap())
     }

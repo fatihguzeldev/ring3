@@ -1,5 +1,6 @@
 mod buffer;
 pub mod dsound;
+pub mod effects;
 mod mixing;
 mod submission;
 mod types;
@@ -21,6 +22,7 @@ pub struct AudioContext {
     buffers: Vec<BufferSlot>,
     voices: Vec<VoiceSlot>,
     buffer_bytes: u32,
+    effect_bytes: u32,
     output: Vec<f32>,
     wide_output: Vec<f64>,
     spans: Vec<VoiceSpan>,
@@ -47,6 +49,7 @@ impl AudioContext {
             buffers: allocated(config.max_buffers as usize, BufferSlot::default)?,
             voices: allocated(config.max_voices as usize, VoiceSlot::default)?,
             buffer_bytes: 0,
+            effect_bytes: 0,
             output: allocated(config.render_frames as usize * 2, || 0.0)?,
             wide_output: Vec::new(),
             spans: allocated(config.max_voices as usize, VoiceSpan::default)?,
@@ -86,6 +89,7 @@ impl AudioContext {
         self.pending = None;
         self.epoch = new_epoch;
         self.buffer_bytes = 0;
+        self.effect_bytes = 0;
         self.sequence = 0;
         self.submitted_frames = 0;
         self.consumed_frames = 0;
@@ -102,6 +106,7 @@ impl AudioContext {
         }
         self.spans.fill(VoiceSpan::default());
         self.buffer_bytes = 0;
+        self.effect_bytes = 0;
     }
 
     fn ready(&self) -> Result<(), AudioError32> {
