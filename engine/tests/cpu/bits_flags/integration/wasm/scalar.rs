@@ -20,7 +20,8 @@ fn run_fixture(script: &str) {
     let engine = crate::support_wasm::selected_engine(root);
     assert!(engine.is_file(), "build the integrated engine Wasm first");
     let output = root.join("target/p2-scalar-bits-fixtures").join(format!(
-        "wasm-{}-{}",
+        "wasm-{}-{}-{}",
+        script.trim_end_matches(".mjs"),
         std::process::id(),
         SystemTime::now()
             .duration_since(UNIX_EPOCH)

@@ -1,3 +1,6 @@
+import {attachDetectionApi, generatedImports} from '../../../../../../support/wasm/binding.mjs';
+import {pageFaultExit, pageFaultPacket} from '../../../../../../support/wasm/page-fault.mjs';
+import {consumeCpuEvent} from '../../../../../../support/wasm/events.mjs';
 import {ARENA_SIZE} from '../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
@@ -7,7 +10,7 @@ import {readEngine} from '../../../../../../support/wasm/engine.mjs';
 
 const [enginePath, output, root] = process.argv.slice(2);
 const engine = readEngine(enginePath), PC = 0x1000, DATA = 0x5000, SIZE = ARENA_SIZE;
-const sourcePaths = [
+const sourcePaths = ['engine/tests/support/wasm/binding.mjs', 'engine/tests/support/wasm/page-fault.mjs', 'engine/tests/support/wasm/events.mjs', 
   'engine/src/cpu/x86/bits.rs',
   'engine/src/cpu/x86/ir.rs',
   'engine/src/cpu/x86/decode/scalar_bits.rs',
@@ -67,6 +70,8 @@ function seed(c, source = 0, address = DATA + 7) {
 function open(owner, entries) {
   const instance = new WebAssembly.Instance(engine.module, {}), c = {owner, entries, api: {}, memory: instance.exports.memory};
   for (const name of ['open', 'close', 'arena_ptr', 'map', 'unmap', 'protect', 'upload', 'read8', 'compile', 'compile_entries', 'compile_resident', 'compile_resident_entries', 'discard_unacknowledged_resident', 'generation', 'module_ptr', 'module_len', 'guard', 'guard_resident', 'read16', 'read32', 'store16', 'store32', 'store_resident16', 'store_resident32']) c.api[name] = instance.exports['ring3_abi_v1_' + name];
+  attachDetectionApi(c.api, instance.exports);
+  c.api.take_cpu_event = instance.exports.ring3_abi_v1_take_cpu_event;
   c.keyLow = ++counts.contexts;
   for(const name of ["read16", "read32", "read8", "store16", "store32", "store_resident16", "store_resident32"]) {c.api["cpu_"+name]=instance.exports["ring3_abi_v1_cpu_"+name];assert.equal(c.api["cpu_"+name]?.length,name.startsWith("read")?1:name.includes("resident")?6:2,"cpu_"+name);}
  assert.equal(c.api.open(8, c.keyLow, 0x43524332), 0); c.base = c.api.arena_ptr() >>> 0;
@@ -86,8 +91,7 @@ function compile(c, instruction, memoryName) {
   if (c.owner === 'resident') c.previousResident = [b.readUInt32LE(148), b.readUInt32LE(152)];
   const length = c.owner === 'resident' ? b.readUInt32LE(160) : c.api.module_len() >>> 0;
   const bytes = Buffer.from(new Uint8Array(c.memory.buffer, pointer, length)), module = new WebAssembly.Module(bytes);
-  const expected = [{module: 'env', name: 'memory', kind: 'memory'}, {module: 'ring3', name: c.owner === 'resident' ? 'guard_resident' : 'guard', kind: 'function'}];
-  if (memoryName) expected.push({module: 'ring3', name: memoryName, kind: 'function'});
+  const expected = generatedImports({resident: c.owner === 'resident', helpers: memoryName ? [memoryName] : []});
   assert.deepEqual(WebAssembly.Module.imports(module), expected, 'register forms have no memory helper import; each memory form has its one required helper');
   writeFileSync(join(output, `module-${++counts.modules}.wasm`), bytes, {flag: 'wx'});
   const run = new WebAssembly.Instance(module, {env: {memory: c.memory}, ring3: c.api}).exports.run;
@@ -96,10 +100,11 @@ function compile(c, instruction, memoryName) {
 }
 function run(c, fn, state, {budget = 1, reason = 1, retired = 1, helper, fault, exitVersion = fn.exitVersion} = {}) {
   const expected = arena(c); expected.set(cpuRecord(state));
-  expected.set(record('R3EX', 40, [reason, retired, fault?.detail ?? 0, fault?.address ?? 0, fault?.access ?? 0, fault?.length ?? 0], exitVersion), 56);
-  if (helper) expected.set(record('R3MH', 40, helper.fields, helper.version), 100);
+  const paging = reason === 5 && fault.detail <= 2 ? {errorCode: 4 | (fault.access === 2 ? 2 : 0) | (fault.detail === 2 ? 1 : 0), address: fault.address, access: fault.access, length: fault.length} : null;
+  expected.set(paging ? pageFaultExit({retired, ...paging}) : record('R3EX', 40, [reason, retired, fault?.detail ?? 0, fault?.address ?? 0, fault?.access ?? 0, fault?.length ?? 0], exitVersion), 56);
+  if (helper) expected.set(paging ? pageFaultPacket(paging) : record('R3MH', 40, helper.fields, helper.version), 100);
   assert.equal(fn(c.base, c.base + 56, budget, c.base + 96), 0);
-  assert.deepEqual(arena(c), expected, 'complete CPU, exit, helper and unrelated numeric-state preservation'); counts.runs++;
+  assert.deepEqual(arena(c), expected, 'complete CPU, exit, helper and unrelated numeric-state preservation'); consumeCpuEvent(c, SIZE); counts.runs++;
 }
 
 const VALUES = [0, 1, 2, 0x7fffffff, 0x80000000, 0xffffffff, 0x12345678, 0xdeadbeef];

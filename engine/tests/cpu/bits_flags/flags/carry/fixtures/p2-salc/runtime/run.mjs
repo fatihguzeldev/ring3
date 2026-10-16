@@ -11,7 +11,7 @@ const own = 'engine/tests/cpu/bits_flags/flags/carry/';
 const paths = [own + 'wasm.rs', own + 'native.rs', own + 'fixtures/p2-salc/runtime/run.mjs',
   'engine/tests/cpu/bits_flags/wasm.rs', 'engine/tests/cpu/bits_flags/native.rs',
   'engine/src/cpu/x86/ir.rs', 'engine/src/cpu/x86/decode/lower.rs', 'engine/src/cpu/x86/decode/families.rs',
-  'engine/src/cpu/x86/decode/lower/tests/salc.rs', 'engine/src/cpu/x86/decode/profile.rs', 'engine/src/cpu/x86/decode/families.rs',
+  'engine/src/cpu/x86/decode/lower/tests/salc.rs', 'engine/src/cpu/x86/decode/profile.rs', 
   'engine/src/cpu/x86/decode/decoder.rs', 'engine/src/cpu/x86/decode/instruction.rs', 'engine/src/cpu/x86/decode/execution_faults.rs',
   'engine/src/cpu/x86/capabilities.rs', 'engine/src/cpu/x86/environment.rs',
   'engine/src/cpu/dbt/region.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/mod.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/arithmetic.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/moves.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/exchange.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/predicates.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/shifts.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/control.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/extended.rs',
@@ -88,11 +88,17 @@ for (const resident of [false, true]) for (const entries of [false, true]) {
   {
     const c = open(resident, entries, 'missing/nonEXEC/EXEC single opcode repair'); bootstrap(c, 0x2000);
     strict(c, 'missing SALC opcode remains a neutral strict fetch refusal', 0x2000, 3, 10);
-    stopped(c, 'missing SALC opcode remains a neutral stopped fetch refusal', 10);
+    plannedCompiles++; plannedInvocations++; invoked++;
+    const fetchMaterial = h.fetchFault(c, 'missing SALC opcode executes a precise fetch fault',
+      {pc: 0x2000, length: 1, address: 0x2000, errorCode: 20});
     h.host(c, 'map', [0x2000, 1, 7]); c.pages.push(0x2000); c.pages.sort((a, b) => a - b);
     h.upload(c, 0x2000, bytes('d6ebfe')); h.host(c, 'protect', [0x2000, 1, 1]);
-    stopped(c, 'READ without EXECUTE cannot classify SALC', 10);
-    h.host(c, 'protect', [0x2000, 1, 7]); const material = stopped(c, 'EXECUTE repair captures real SALC source');
+    plannedInvocations++; invoked++;
+    h.fetchFault(c, 'READ without EXECUTE cannot classify SALC',
+      {pc: 0x2000, length: 1, address: 0x2000, errorCode: 21, material: fetchMaterial});
+    h.host(c, 'protect', [0x2000, 1, 7]);
+    plannedInvocations++; invoked++; if (!resident) plannedCompiles++;
+    h.reachNeedCode(c); const material = stopped(c, 'EXECUTE repair captures real SALC source');
     const input = seed(0x2000); invoke(c, 'repaired SALC uses the actual one-byte source', material, input,
       expected(input, {pc: 0x2001, eax: 0xa1b2c300})); h.host(c, 'close');
   }
@@ -111,8 +117,8 @@ for (const resident of [false, true]) for (const entries of [false, true]) {
     h.host(c, 'close');
   }
 }
-assert.equal(contexts, 36); assert.equal(plannedCompiles, 68); assert.equal(plannedRefusals, 24);
-assert.equal(plannedInvocations, 44); assert.deepEqual(pins(), sourcePins, 'retained literal oracle and source pins');
+assert.equal(contexts, 36); assert.equal(plannedCompiles, 66); assert.equal(plannedRefusals, 16);
+assert.equal(plannedInvocations, 56); assert.deepEqual(pins(), sourcePins, 'retained literal oracle and source pins');
 writeFileSync(join(output, 'salc-counts.json'), JSON.stringify({contexts, plannedCompiles, plannedRefusals,
   plannedInvocations, invoked, totalRowsPlanned: plannedCompiles + plannedInvocations,
   selected: selected.map(row => row.label), sourcePins}, null, 2) + '\n');
