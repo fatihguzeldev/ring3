@@ -1,0 +1,111 @@
+mod publication;
+mod snapshot;
+
+use crate::windows::automation::{ArrayLayout32, AutomationError32 as E, AutomationLimits32};
+
+#[derive(Clone, Copy)]
+enum Place32 {
+    Root(usize),
+    Block { index: usize, offset: usize },
+}
+
+struct Fixup32 {
+    place: Place32,
+    block: usize,
+    addend: u32,
+    original: [u8; 4],
+}
+
+struct ArrayCopy32 {
+    block: usize,
+    layout: ArrayLayout32,
+}
+
+pub(in crate::process::windows::automation) struct OwnedValuePlan32 {
+    root: Vec<u8>,
+    blocks: Vec<Vec<u8>>,
+    fixups: Vec<Fixup32>,
+    strings: Vec<usize>,
+    arrays: Vec<ArrayCopy32>,
+    retire: Vec<u32>,
+    retire_identities: Vec<(u32, u64)>,
+    retired_strings: usize,
+    retired_arrays: usize,
+    freed: usize,
+    bytes: usize,
+}
+
+impl OwnedValuePlan32 {
+    fn new(root: &[u8]) -> Result<Self, E> {
+        let mut bytes = Vec::new();
+        bytes
+            .try_reserve_exact(root.len())
+            .map_err(|_| E::Allocation)?;
+        bytes.extend_from_slice(root);
+        Ok(Self {
+            root: bytes,
+            blocks: Vec::new(),
+            fixups: Vec::new(),
+            strings: Vec::new(),
+            arrays: Vec::new(),
+            retire: Vec::new(),
+            retire_identities: Vec::new(),
+            retired_strings: 0,
+            retired_arrays: 0,
+            freed: 0,
+            bytes: 0,
+        })
+    }
+
+    fn reserve_block(&mut self, size: usize, limits: AutomationLimits32) -> Result<usize, E> {
+        if self.blocks.len() >= limits.objects {
+            return Err(E::Capacity);
+        }
+        self.bytes = self
+            .bytes
+            .checked_add(size)
+            .filter(|&n| n <= limits.bytes)
+            .ok_or(E::Capacity)?;
+        self.blocks.try_reserve(1).map_err(|_| E::Allocation)?;
+        let mut bytes = Vec::new();
+        bytes.try_reserve_exact(size).map_err(|_| E::Allocation)?;
+        bytes.resize(size, 0);
+        let index = self.blocks.len();
+        self.blocks.push(bytes);
+        Ok(index)
+    }
+
+    fn fixup(&mut self, place: Place32, block: usize, addend: u32) -> Result<(), E> {
+        self.fixups.try_reserve(1).map_err(|_| E::Allocation)?;
+        let (bytes, offset) = match place {
+            Place32::Root(offset) => (&self.root, offset),
+            Place32::Block { index, offset } => (&self.blocks[index], offset),
+        };
+        let original = bytes[offset..offset + 4].try_into().unwrap();
+        self.fixups.push(Fixup32 {
+            place,
+            block,
+            addend,
+            original,
+        });
+        Ok(())
+    }
+
+    fn retire_block(
+        &mut self,
+        pointer: u32,
+        bytes: usize,
+        limits: AutomationLimits32,
+    ) -> Result<(), E> {
+        if self.retire.contains(&pointer) {
+            return Err(E::InvalidParameter);
+        }
+        if self.retire.len() >= limits.objects.saturating_mul(2) {
+            return Err(E::Capacity);
+        }
+        self.retire.try_reserve(1).map_err(|_| E::Allocation)?;
+        self.retire.push(pointer);
+        self.freed = self.freed.checked_add(bytes).ok_or(E::Capacity)?;
+        Ok(())
+    }
+}

@@ -98,6 +98,29 @@ impl NlsRuntime32 {
     }
 }
 impl crate::process::EngineInstance {
+    pub(in crate::process) fn windows_locale_information(
+        &mut self,
+        locale: u32,
+        kind: u32,
+    ) -> Result<(String, Option<u32>), crate::process::HostError> {
+        self.memory()?;
+        let locale = self
+            .nls
+            .profile
+            .locale(locale)
+            .map_err(crate::process::HostError::Nls)?;
+        if let Some(value) = crate::windows::nls::locales::static_information(locale, kind)
+            .map_err(crate::process::HostError::Nls)?
+        {
+            return Ok(value);
+        }
+        self.nls
+            .data(locale)
+            .map_err(crate::process::HostError::Nls)?
+            .information(kind)
+            .map_err(crate::process::HostError::Nls)
+    }
+
     pub(in crate::process) fn windows_user_locale(&self) -> u32 {
         self.nls.profile.locale
     }
