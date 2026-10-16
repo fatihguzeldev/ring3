@@ -9,6 +9,8 @@
 _Static_assert(sizeof(void *) == 4, "this oracle requires a native 32-bit build");
 _Static_assert(sizeof(DIEFFECT) == 56, "literal pe32 effect layout");
 
+static int inspect_only;
+
 static BOOL CALLBACK inspect_effect(const DIFILEEFFECT *file, void *context) {
     const DIEFFECT *effect = file->lpDiEffect;
     unsigned *count = context;
@@ -22,11 +24,16 @@ static BOOL CALLBACK inspect_effect(const DIFILEEFFECT *file, void *context) {
         printf("custom channels=%lu period=%lu samples=%lu values=",
                (unsigned long)custom->cChannels, (unsigned long)custom->dwSamplePeriod,
                (unsigned long)custom->cSamples);
-        if (custom->cSamples <= 8 && custom->rglForceData) {
+        if (!inspect_only && custom->cSamples <= 8 && custom->rglForceData) {
             for (DWORD i = 0; i < custom->cSamples; ++i)
                 printf("%s%ld", i ? "," : "", (long)custom->rglForceData[i]);
         }
-        puts("");
+        MEMORY_BASIC_INFORMATION region = {0};
+        SIZE_T queried = VirtualQuery(custom->rglForceData, &region, sizeof(region));
+        printf(" pointer=%08lx mode=%s queried=%lu state=%08lx protection=%08lx\n",
+               (unsigned long)(uintptr_t)custom->rglForceData,
+               inspect_only ? "fresh" : "writer", (unsigned long)queried,
+               (unsigned long)region.State, (unsigned long)region.Protect);
     }
     return DIENUM_CONTINUE;
 }
@@ -69,7 +76,7 @@ static void probe(IDirectInputDevice8A *device, GUID kind, void *payload,
         dump_file(path);
     }
 }
-int main(void) {
+int main(int argc, char **argv) {
     HMODULE module = LoadLibraryA("dinput8.dll");
     if (!module) return 2;
     typedef HRESULT (WINAPI *Create8)(HINSTANCE, DWORD, REFIID, void **, void *);
@@ -83,6 +90,19 @@ int main(void) {
     result = input->lpVtbl->CreateDevice(input, &GUID_SysKeyboard, &device, NULL);
     printf("device hr=%08lx\n", (unsigned long)result);
     if (FAILED(result)) {input->lpVtbl->Release(input); return 5;}
+    if (argc == 2 && strcmp(argv[1], "--inspect-existing") == 0) {
+        const char *paths[] = {"ring3-authored-constant.ffe", "ring3-authored-custom.ffe", "ring3-authored-custom-mono.ffe"};
+        inspect_only = 1;
+        for (unsigned index = 0; index < sizeof(paths) / sizeof(paths[0]); ++index) {
+            unsigned count = 0;
+            result = device->lpVtbl->EnumEffectsInFile(device, paths[index], inspect_effect, &count, 0);
+            printf("freshread %s hr=%08lx callbacks=%u\n", paths[index], (unsigned long)result, count);
+        }
+        device->lpVtbl->Release(device);
+        input->lpVtbl->Release(input);
+        FreeLibrary(module);
+        return 0;
+    }
     DICONSTANTFORCE constant = {4000};
     LONG samples[8] = {1000, -1000, 2000, -2000, 3000, -3000, 4000, -4000};
     DICUSTOMFORCE custom = {2, 1000, 8, samples};

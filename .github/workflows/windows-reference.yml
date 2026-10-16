@@ -42,6 +42,8 @@ jobs:
         shell: pwsh
         run: |
           ./force.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./force.exe --inspect-existing
           exit $LASTEXITCODE
       - name: Record native NLS date behavior
         if: always()
