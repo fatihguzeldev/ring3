@@ -20,6 +20,7 @@ assert.ok(artifacts, 'select the source-built authored freestanding COM fixture'
 mkdirSync(output, {recursive: true});
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const provenance = JSON.parse(readFileSync(join(artifacts, 'provenance.json')));
+if (process.env.RING3_COM_REQUIRE_STREAM_COPY === '1') assert.equal(provenance.streamCopyProof, true);
 for (const [name, expected] of Object.entries(provenance.producerSources)) {
   assert.equal(hash(readFileSync(join(root, provenance.producerDirectory, name))), expected, name);
 }
@@ -85,6 +86,29 @@ function beginReadyCallback() {
 function progress(error) {
   writeFileSync(join(output, 'progress.json'), JSON.stringify({engineHash, ...code.stats(), calls, initializers, currentThread, schedules, callbacks: [...callbackStacks].map(([thread, stack]) => ({thread, stack: stack.map(value => ({...value, home: value.home.toString()}))})), callbackHistory, recent, error: error?.stack}, (_key, value) => typeof value === 'bigint' ? value.toString() : value, 2));
 }
+function retainGuestLog() {
+  for (let index = 0; index < 512; index++) {
+    ok('file_overlay_entry', ...pair(fileEpoch), index); const header = take(96);
+    if (!header.readBigUInt64LE(16)) break;
+    const path = take(96 + header.readUInt32LE(56) * 2).subarray(96).toString('utf16le');
+    if (path.toLowerCase() !== provenance.expectedFile.toLowerCase()) continue;
+    assert.equal(header.readUInt32LE(52), 1);
+    const length = Number(header.readBigUInt64LE(40)); assert.ok(length > 0 && length <= 65536);
+    const parts = [];
+    for (let at = 0; at < length; at += 4000) {
+      const count = Math.min(4000, length - at);
+      ok('read_file_overlay', ...pair(fileEpoch), ...pair(header.readBigUInt64LE(32)), ...pair(header.readBigUInt64LE(24)), at, 0, count);
+      parts.push(take(32 + count).subarray(32));
+    }
+    const bytes = Buffer.concat(parts);
+    writeFileSync(join(output, 'guest-log.bin'), bytes);
+    const rows = [];
+    for (let at = 0; at + 16 <= bytes.length; at += 16) rows.push({event: String.fromCharCode(bytes.readUInt32LE(at)), thread: bytes.readUInt32LE(at + 4), role: bytes.readUInt32LE(at + 8), value: bytes.readUInt32LE(at + 12)});
+    writeFileSync(join(output, 'guest-log.json'), JSON.stringify(rows, null, 2));
+    return {bytes, path};
+  }
+  return undefined;
+}
 try {
   for (let iteration = 0; iteration < 200000 && !exited; iteration++) {
     if (needsSchedule || api.pending_windows_thread_schedule()) {
@@ -133,31 +157,15 @@ try {
   }
   assert.ok(exited, 'bounded authored client reaches its own success ExitProcess');
   assert.ok([...callbackStacks.values()].every(stack => stack.length === 0)); assert.ok(totalRetired > 0);
-  let rows;
-  let found;
-  for (let index = 0; index < 512; index++) {
-    ok('file_overlay_entry', ...pair(fileEpoch), index); const header = take(96);
-    if (!header.readBigUInt64LE(16)) break;
-    const path = take(96 + header.readUInt32LE(56) * 2).subarray(96).toString('utf16le');
-    if (path.toLowerCase() === provenance.expectedFile.toLowerCase()) {
-      assert.equal(header.readUInt32LE(52), 1);
-      const length = Number(header.readBigUInt64LE(40)); assert.ok(length > 0 && length <= 65536);
-      const parts = [];
-      for (let at = 0; at < length; at += 4000) {
-        const count = Math.min(4000, length - at);
-        ok('read_file_overlay', ...pair(fileEpoch), ...pair(header.readBigUInt64LE(32)), ...pair(header.readBigUInt64LE(24)), at, 0, count);
-        parts.push(take(32 + count).subarray(32));
-      }
-      const bytes = Buffer.concat(parts);
-      writeFileSync(join(output, 'guest-log.bin'), bytes);
-      rows = (profile === 'rpc' ? verifyRpcLog : verifyMarshalingLog)(bytes); found = path;
-      writeFileSync(join(output, 'guest-log.json'), JSON.stringify(rows, null, 2));
-    }
-  }
-  assert.ok(found, 'guest-written DLL/factory/object lifecycle log survives normal process exit');
+  const log = retainGuestLog();
+  assert.ok(log, 'guest-written DLL/factory/object lifecycle log survives normal process exit');
+  const rows = profile === 'rpc' ? verifyRpcLog(log.bytes) : verifyMarshalingLog(log.bytes, provenance.streamCopyProof === true);
   const paths = execFileSync('rg', ['--files', 'engine/src', 'engine/tests/windows/com'], {cwd: root, encoding: 'utf8'}).trim().split('\n').concat(['engine/tests/support/wasm/cache.mjs', provenance.inspectionSource]).sort();
   writeFileSync(join(output, 'source-sha256.json'), JSON.stringify(Object.fromEntries(paths.map(path => [path, hash(readFileSync(join(root, path)))])), null, 2));
   const receipt = {engineHash, artifacts: provenance.artifacts, ...code.stats(), totalRetired, calls, initializers, callbackHistory, schedules, rows, generatedDigest: code.finish(), claim: profile === 'rpc' ? 'self-authored freestanding PE32 registered IPSFactoryBuffer proxy/stub executes real IRpcChannelBuffer calls and source-apartment IRpcStubBuffer::Invoke, preserving opaque guest-owned method bytes, HRESULT and native reference lifetime; no engine-generated NDR or external Windows compatibility claim' : 'self-authored freestanding PE32 client and DLLs execute real cross-apartment custom IMarshal, opaque guest-written packet, nested CoCreateInstance in client apartment, IStream clone/cursors and failed unmarshal packet/reference cleanup through generated Wasm; no general registered NDR or Windows claim'};
   writeFileSync(join(output, 'receipt.json'), JSON.stringify(receipt, null, 2));
   console.log(JSON.stringify({engineHash, calls: calls.length, callbacks: callbackHistory.length, initializers: initializers.length, ...code.stats(), totalRetired, schedules, rows}));
-} catch (error) {progress(error); throw error;}
+} catch (error) {
+  if (get(72) === 9) { try { retainGuestLog(); } catch {} }
+  progress(error); throw error;
+}

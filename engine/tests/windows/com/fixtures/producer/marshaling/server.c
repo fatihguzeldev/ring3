@@ -43,6 +43,9 @@ static HRESULT WINAPI marshal_size(IMarshal *self,REFIID iid,void *pointer,DWORD
     require((same(iid,&value_iid)||same(iid,&fail_iid))&&pointer==object(self)&&context==MSHCTX_INPROC&&!reserved&&flags==MSHLFLAGS_NORMAL&&out,227);
     *out=8;record('s',ROLE,*out);return S_OK;
 }
+#ifdef STREAM_COPY_PROOF
+#include "stream.h"
+#endif
 static HRESULT WINAPI marshal_write(IMarshal *self,IStream *stream,REFIID iid,void *pointer,DWORD context,void *reserved,DWORD flags) {
     require(!ROLE&&GetCurrentThreadId()==object(self)->owner,228);
     require((same(iid,&value_iid)||same(iid,&fail_iid))&&pointer==object(self)&&context==MSHCTX_INPROC&&!reserved&&flags==MSHLFLAGS_NORMAL&&stream,229);
@@ -56,6 +59,9 @@ static HRESULT WINAPI marshal_write(IMarshal *self,IStream *stream,REFIID iid,vo
     IStream_Release(clone);
     require(IStream_Seek(stream,zero,STREAM_SEEK_CUR,&at)==S_OK&&at.QuadPart==8,235);
     require(IStream_Stat(stream,&stat,STATFLAG_NONAME)==S_OK&&stat.cbSize.QuadPart==8,236);
+#ifdef STREAM_COPY_PROOF
+    prove_stream_copy(stream,packet);
+#endif
     require(IStream_Commit(stream,STGC_DEFAULT)==S_OK,237);record('w',ROLE,packet[1]);return S_OK;
 }
 static HRESULT WINAPI unmarshal(IMarshal *self,IStream *stream,REFIID iid,void **out) {

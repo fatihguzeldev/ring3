@@ -103,13 +103,28 @@ fn run_marshaling_fixture(profile: &str) {
             .as_nanos()
     ));
     fs::create_dir_all(&output).unwrap();
-    let result = std::process::Command::new("node")
+    let mut command = std::process::Command::new("node");
+    if profile == "stream-copy" {
+        let producer = std::env::var("RING3_COM_STREAM_COPY_FIXTURE_DIR")
+            .expect("select the source-built application stream CopyTo fixture");
+        command
+            .env("RING3_COM_MARSHAL_FIXTURE_DIR", producer)
+            .env("RING3_COM_REQUIRE_STREAM_COPY", "1");
+    }
+    let result = command
         .arg(root.join("engine/tests/windows/com/fixtures/runtime/marshaling.mjs"))
         .arg(engine)
         .arg(&output)
         .arg(root)
         .env("RING3_ENGINE_SHA256", expected)
-        .env("RING3_COM_MARSHAL_PROFILE", profile)
+        .env(
+            "RING3_COM_MARSHAL_PROFILE",
+            if profile == "stream-copy" {
+                "custom"
+            } else {
+                profile
+            },
+        )
         .output()
         .expect("run authored marshaling fixture with node");
     fs::write(output.join("node.stdout.log"), &result.stdout).unwrap();
@@ -131,4 +146,9 @@ fn authored_custom_imarshal_transfers_opaque_state_with_real_guest_stream_method
 #[test]
 fn authored_registered_proxy_stub_uses_real_guest_rpc_channels_and_balanced_native_lifetimes() {
     run_marshaling_fixture("rpc");
+}
+
+#[test]
+fn authored_stream_copyto_executes_application_write_with_partial_results_and_balanced_lifetime() {
+    run_marshaling_fixture("stream-copy");
 }

@@ -14,6 +14,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--toolchain', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--stream-copy', action='store_true')
     args = parser.parse_args()
     toolchain = args.toolchain.resolve()
     output = args.output.resolve()
@@ -27,6 +28,8 @@ def main():
     compiler, linker = toolchain / 'bin/clang', toolchain / 'bin/lld-link'
     libraries = toolchain / 'i686-w64-mingw32/lib'
     common = [compiler, '-target', 'i686-w64-windows-gnu', '-c', '-Oz', '-ffreestanding', '-fno-builtin', '-fno-stack-protector', '-fno-unwind-tables', '-fno-asynchronous-unwind-tables', '-mno-sse', '-mno-sse2']
+    if args.stream_copy:
+        common.append('-DSTREAM_COPY_PROOF=1')
     commands = []
 
     def run(command):
@@ -52,6 +55,7 @@ def main():
         assert artifact['machine'] == 0x14c, name
         assert set(module.lower() for module in artifact['imports']) <= {'kernel32.dll', 'ole32.dll', 'advapi32.dll'}, artifact['imports']
     provenance = {
+        'streamCopyProof': args.stream_copy,
         'producerSources': {path.name: digest(path) for path in here.iterdir() if path.suffix in ['.c', '.h', '.py']},
         'producerDirectory': str(here.relative_to(repository)),
         'inspectionSource': str(inspection_path.relative_to(repository)),

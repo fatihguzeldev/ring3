@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 
-export function verifyMarshalingLog(bytes) {
+export function verifyMarshalingLog(bytes, streamCopy = false) {
   assert.equal(bytes.length % 16, 0);
   const rows = [];
   for (let at = 0; at < bytes.length; at += 16) rows.push({event: String.fromCharCode(bytes.readUInt32LE(at)), thread: bytes.readUInt32LE(at + 4), role: bytes.readUInt32LE(at + 8), value: bytes.readUInt32LE(at + 12)});
@@ -32,6 +32,12 @@ export function verifyMarshalingLog(bytes) {
     const unload = rows.findIndex(row => row.role === role && row.event === 'U' && row.value === 0);
     const detach = rows.findIndex(row => row.role === role && row.event === 'D');
     assert.ok(unload >= 0 && detach > unload, 'actual zero-live reference check precedes actual DLL detach');
+  }
+  if (streamCopy) {
+    const writes = rows.filter(row => row.event === 'k');
+    assert.deepEqual(writes.map(row => row.value), [0x808, 0x1000803, 0x2000802, 0x808, 0x1000803, 0x2000802]);
+    assert.ok(writes.every(row => row.role === 0 && row.thread === source[0].thread), 'actual application Write runs in the original source apartment');
+    assert.deepEqual(rows.filter(row => row.event === 'h').map(row => row.value), [0, 0x80030070, 0x80004005, 0, 0x80030070, 0x80004005]);
   }
   assert.equal(rows.at(-1).event, 'e');
   assert.ok(rows.every(row => row.thread > 0));
