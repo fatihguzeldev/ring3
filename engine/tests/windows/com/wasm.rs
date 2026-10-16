@@ -110,6 +110,10 @@ fn run_marshaling_fixture(profile: &str) {
         command
             .env("RING3_COM_MARSHAL_FIXTURE_DIR", producer)
             .env("RING3_COM_REQUIRE_STREAM_COPY", "1");
+    } else if profile == "rpc"
+        && let Some(producer) = std::env::var_os("RING3_COM_RPC_FIXTURE_DIR")
+    {
+        command.env("RING3_COM_MARSHAL_FIXTURE_DIR", producer);
     }
     let result = command
         .arg(root.join("engine/tests/windows/com/fixtures/runtime/marshaling.mjs"))
