@@ -57,19 +57,7 @@ fn assert_decode_fault(
     reason: FaultReason,
 ) {
     let error = decode_one(space, GuestAddress(pc)).err().unwrap();
-    let DecodeError::MemoryFault {
-        pc: instruction_pc,
-        fault,
-        length,
-    } = error
-    else {
-        panic!("expected instruction fetch fault, got {error:?}");
-    };
-    assert_eq!(instruction_pc.0, pc);
-    assert_eq!(fault.address.0, address);
-    assert_eq!(fault.access, Access::Execute);
-    assert_eq!(fault.reason, reason);
-    assert_eq!(length, span);
+    crate::support_fetch::assert_error(error, pc, address, reason, span);
 }
 
 #[test]
@@ -552,15 +540,16 @@ fn extended_families_decode_and_privileged_or_reserved_forms_stay_explicit() {
             source_segment: None,
         },
     );
+    assert_decodes(&[0xf3, 0xc3], Operation::Return { stack_adjust: 0 });
     for (bytes, expected) in [
         (&[0xf4][..], UnsupportedFeature::Privileged),
-        (&[0xf3, 0xc3][..], UnsupportedFeature::Opcode),
         (&[0xf3, 0xf3, 0x90][..], UnsupportedFeature::Opcode),
     ] {
         let space = code_space(0x1000, bytes, Permissions::EXECUTE);
-        assert_eq!(
-            decode_one(&space, GuestAddress(0x1000)).err(),
-            Some(DecodeError::Unsupported(expected))
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(&space, GuestAddress(0x1000)).err())
+                .expect("instruction must fail to decode"),
+            DecodeError::Unsupported(expected),
         );
     }
 }

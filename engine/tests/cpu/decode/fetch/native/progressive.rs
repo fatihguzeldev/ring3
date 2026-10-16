@@ -1,12 +1,10 @@
 use ring3_engine::{
     cpu::x86::{
         Register32,
-        decode::{DecodeError, decode_one},
+        decode::decode_one,
         ir::{Operation, WordValue},
     },
-    memory::{
-        Access, AddressSpace, FaultReason, GuestAddress, MemoryFault, PageRange, Permissions,
-    },
+    memory::{AddressSpace, FaultReason, GuestAddress, PageRange, Permissions},
 };
 
 fn top_code(pc: u32, bytes: &[u8]) -> AddressSpace {
@@ -42,17 +40,12 @@ fn top_code(pc: u32, bytes: &[u8]) -> AddressSpace {
 fn incomplete_top_dword_move_faults_at_original_pc_despite_mapped_zero_completion() {
     let pc = GuestAddress(u32::MAX);
     let memory = top_code(pc.0, &[0xb8]);
-    assert_eq!(
-        decode_one(&memory, pc).err(),
-        Some(DecodeError::MemoryFault {
-            pc,
-            fault: MemoryFault {
-                address: pc,
-                access: Access::Execute,
-                reason: FaultReason::AddressOverflow,
-            },
-            length: 2,
-        })
+    crate::support_fetch::assert_error(
+        (decode_one(&memory, pc).err()).expect("code fetch must fail"),
+        pc.0,
+        pc.0,
+        FaultReason::AddressOverflow,
+        2,
     );
 }
 
@@ -60,17 +53,12 @@ fn incomplete_top_dword_move_faults_at_original_pc_despite_mapped_zero_completio
 fn incomplete_top_word_move_keeps_original_pc_and_progressive_fault_length() {
     let pc = GuestAddress(u32::MAX - 1);
     let memory = top_code(pc.0, &[0x66, 0xb8]);
-    assert_eq!(
-        decode_one(&memory, pc).err(),
-        Some(DecodeError::MemoryFault {
-            pc,
-            fault: MemoryFault {
-                address: pc,
-                access: Access::Execute,
-                reason: FaultReason::AddressOverflow,
-            },
-            length: 3,
-        })
+    crate::support_fetch::assert_error(
+        (decode_one(&memory, pc).err()).expect("code fetch must fail"),
+        pc.0,
+        pc.0,
+        FaultReason::AddressOverflow,
+        3,
     );
 }
 
