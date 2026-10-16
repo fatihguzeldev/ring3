@@ -143,3 +143,24 @@ fn complex_regions_preserve_holes_offsets_and_disjoint_boolean_results() {
 }
 
 mod color;
+
+#[test]
+fn explicit_555_masks_preserve_the_native_truncation_and_bit_replication_contract() {
+    let rgb = BitmapLayout32::new(1, -1, 16, true).unwrap();
+    let fields = rgb.with_masks([0x7c00, 0x03e0, 0x001f]).unwrap();
+    for value in 0..=255 {
+        let color = value | value << 8 | value << 16;
+        let mut rgb_bytes = [0; 4];
+        let mut fields_bytes = [0; 4];
+        rgb.write_pixel(&mut rgb_bytes, &[], 0, 0, color);
+        fields.write_pixel(&mut fields_bytes, &[], 0, 0, color);
+        assert_eq!(fields_bytes, rgb_bytes);
+        assert_eq!(
+            fields.read_pixel(&fields_bytes, &[], 0, 0),
+            rgb.read_pixel(&rgb_bytes, &[], 0, 0)
+        );
+    }
+    assert_eq!(fields.color_masks(), [0x7c00, 0x03e0, 0x001f]);
+    assert_eq!(fields.compression(), 3);
+    assert_eq!(rgb.compression(), 0);
+}

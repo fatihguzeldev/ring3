@@ -8,6 +8,7 @@ pub struct BitmapLayout32 {
     pub stride: u32,
     pub top_down: bool,
     pub dib: bool,
+    pub masks: Option<[u32; 3]>,
 }
 pub type BitmapPalette32 = Vec<u32>;
 impl BitmapLayout32 {
@@ -31,9 +32,42 @@ impl BitmapLayout32 {
             stride,
             top_down: !dib || height < 0,
             dib,
+            masks: None,
         };
         result.byte_len()?;
         Ok(result)
+    }
+    pub fn with_masks(mut self, masks: [u32; 3]) -> Result<Self, GdiError32> {
+        if !matches!(self.bits_per_pixel, 16 | 32) {
+            return Err(GdiError32::InvalidRequest);
+        }
+        let allowed = u32::MAX >> (32 - self.bits_per_pixel);
+        let mut used = 0;
+        for mask in masks {
+            if mask == 0 {
+                return Err(GdiError32::InvalidRequest);
+            }
+            let normalized = mask >> mask.trailing_zeros();
+            if mask & !allowed != 0
+                || mask & used != 0
+                || normalized & normalized.wrapping_add(1) != 0
+            {
+                return Err(GdiError32::InvalidRequest);
+            }
+            used |= mask;
+        }
+        self.masks = Some(masks);
+        Ok(self)
+    }
+    pub fn color_masks(self) -> [u32; 3] {
+        self.masks.unwrap_or(match self.bits_per_pixel {
+            16 => [0x7c00, 0x03e0, 0x001f],
+            24 | 32 => [0xff0000, 0x00ff00, 0x0000ff],
+            _ => [0; 3],
+        })
+    }
+    pub fn compression(self) -> u32 {
+        if self.masks.is_some() { 3 } else { 0 }
     }
     pub fn byte_len(self) -> Result<usize, GdiError32> {
         usize::try_from(u64::from(self.stride) * u64::from(self.height))
@@ -61,6 +95,21 @@ impl BitmapLayout32 {
     }
     pub fn read_pixel(self, bytes: &[u8], palette: &[u32], x: u32, y: u32) -> u32 {
         let row = self.row(y);
+        if let Some(masks) = self.masks {
+            let at = row + x as usize * usize::from(self.bits_per_pixel) / 8;
+            let value = if self.bits_per_pixel == 16 {
+                u32::from(u16::from_le_bytes(bytes[at..at + 2].try_into().unwrap()))
+            } else {
+                u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap())
+            };
+            return masks
+                .into_iter()
+                .enumerate()
+                .fold(0, |color, (channel, mask)| {
+                    let component = (value & mask) >> mask.trailing_zeros();
+                    color | resize_component(component, mask.count_ones(), 8) << (channel * 8)
+                });
+        }
         match self.bits_per_pixel {
             1 => palette
                 .get(((bytes[row + x as usize / 8] >> (7 - x % 8)) & 1) as usize)
@@ -96,6 +145,20 @@ impl BitmapLayout32 {
     }
     pub fn write_pixel(self, bytes: &mut [u8], palette: &[u32], x: u32, y: u32, color: u32) {
         let row = self.row(y);
+        if let Some(masks) = self.masks {
+            let at = row + x as usize * usize::from(self.bits_per_pixel) / 8;
+            let value = masks
+                .into_iter()
+                .enumerate()
+                .fold(0, |value, (channel, mask)| {
+                    let component = (color >> (channel * 8)) & 255;
+                    value
+                        | resize_component(component, 8, mask.count_ones()) << mask.trailing_zeros()
+                });
+            let count = usize::from(self.bits_per_pixel) / 8;
+            bytes[at..at + count].copy_from_slice(&value.to_le_bytes()[..count]);
+            return;
+        }
         let index = || {
             palette
                 .iter()
@@ -141,4 +204,18 @@ impl BitmapLayout32 {
             _ => unreachable!(),
         }
     }
+}
+
+fn resize_component(value: u32, source_bits: u32, target_bits: u32) -> u32 {
+    if source_bits >= target_bits {
+        return value >> (source_bits - target_bits);
+    }
+    let mut output = value;
+    let mut count = source_bits;
+    while count < target_bits {
+        let next = source_bits.min(target_bits - count);
+        output = (output << next) | (value >> (source_bits - next));
+        count += next;
+    }
+    output
 }
