@@ -7,6 +7,9 @@ use crate::{
     },
 };
 
+const NO_DEBUG_INFO: u32 = 0x0100_0000;
+const FORCE_DEBUG_INFO: u32 = 0x1000_0000;
+
 pub(super) struct CriticalSection32 {
     address: GuestAddress,
     handle: u32,
@@ -38,10 +41,10 @@ impl EngineInstance {
             } else {
                 0
             };
-            if flags & !0x0100_0000 != 0 {
+            if flags & !(NO_DEBUG_INFO | FORCE_DEBUG_INFO) != 0 {
                 return Err(HostError::Synchronization(Error::InvalidWait));
             }
-            self.initialize_critical(address, flags != 0)?;
+            self.initialize_critical(address, flags & NO_DEBUG_INFO != 0)?;
             return ready(u32::from(api != Api::InitializeCriticalSection));
         }
         let index = self.check_critical(address)?;

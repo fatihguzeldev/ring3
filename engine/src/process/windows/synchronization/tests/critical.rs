@@ -167,3 +167,95 @@ fn critical_initialization_faults_and_remapped_structs_do_not_publish_or_reuse_a
     ));
     assert_eq!(engine.synchronization().unwrap().revision(), revision);
 }
+
+#[test]
+fn captured_force_debug_critical_initialization_supplies_writable_crt_spare_and_owned_cleanup() {
+    use crate::{
+        abi::{arena::*, x86::*},
+        cpu::{ExecutionExit, ExitReason, x86::State32},
+        windows::CallingConvention32,
+    };
+
+    let mut engine = engine();
+    const CODE: u32 = 0x20000;
+    const STACK: u32 = CS + 0x800;
+    engine.map(CODE, 1, 7).unwrap();
+    engine
+        .memory
+        .as_mut()
+        .unwrap()
+        .write(GuestAddress(CODE), &[0x0f, 0x0b])
+        .unwrap();
+    engine.protect(CODE, 1, 5).unwrap();
+    let api = Api::InitializeCriticalSectionEx;
+    for (index, word) in [CODE, 2, CODE, api.id()].into_iter().enumerate() {
+        engine.arena_mut().unwrap()[TRANSFER_OFFSET + index * 4..TRANSFER_OFFSET + index * 4 + 4]
+            .copy_from_slice(&word.to_le_bytes());
+    }
+    engine.compile_with_gates(1, 1).unwrap();
+    for (index, word) in [CODE + 2, CS, 0, 0x1000_0000].into_iter().enumerate() {
+        engine.write32(STACK + index as u32 * 4, word).unwrap();
+    }
+    let mut state = State32 {
+        eip: CODE,
+        ..Default::default()
+    };
+    state.registers[4] = STACK;
+    encode_state_current(&state, &mut engine.arena_mut().unwrap()[..STATE_SIZE]).unwrap();
+    encode_exit_v3(
+        &ExecutionExit {
+            retired: 0,
+            reason: ExitReason::Gate { id: api.id() },
+        },
+        &mut engine.arena_mut().unwrap()[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE],
+    )
+    .unwrap();
+    let token = engine
+        .capture_call(31, engine.generation, CallingConvention32::Stdcall, 3)
+        .unwrap()
+        .token;
+    engine
+        .complete_windows_call(31, engine.generation, token)
+        .unwrap();
+    assert_eq!(
+        decode_state(&engine.arena()[..STATE_SIZE])
+            .unwrap()
+            .registers[0],
+        1
+    );
+    let debug = read(&engine, 0);
+    assert_ne!(debug, 0);
+    assert_ne!(debug, u32::MAX);
+    engine.write32(debug + 24, 0x4352_544c).unwrap();
+    let mut debug_bytes = [0; 32];
+    engine
+        .memory()
+        .unwrap()
+        .read(GuestAddress(debug), &mut debug_bytes)
+        .unwrap();
+    assert_eq!(
+        u32::from_le_bytes(debug_bytes[4..8].try_into().unwrap()),
+        CS
+    );
+    assert_eq!(
+        u32::from_le_bytes(debug_bytes[24..28].try_into().unwrap()),
+        0x4352_544c
+    );
+    engine
+        .execute_critical_call(Api::DeleteCriticalSection, &[CS])
+        .unwrap();
+    assert!(engine.check_windows_runtime_bytes(debug, 32).is_err());
+
+    let revision = engine.synchronization().unwrap().revision();
+    let memory_version = engine.memory().unwrap().transaction_version();
+    assert!(matches!(
+        engine.execute_critical_call(Api::InitializeCriticalSectionEx, &[CS, 0, 0x8000_0000]),
+        Err(HostError::Synchronization(Error::InvalidWait))
+    ));
+    assert_eq!(engine.synchronization().unwrap().revision(), revision);
+    assert_eq!(
+        engine.memory().unwrap().transaction_version(),
+        memory_version
+    );
+    assert_eq!(read(&engine, 0), 0);
+}
