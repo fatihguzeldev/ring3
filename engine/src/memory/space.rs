@@ -5,6 +5,7 @@ mod cpu;
 mod guard;
 mod mapping;
 mod paging;
+mod service;
 mod windows;
 
 pub(crate) use aliases::SharedPages;
@@ -29,6 +30,7 @@ pub struct AddressSpace {
     version: u64,
     code_validation_version: u64,
     versions: Box<[PageVersion]>,
+    service_guard: service::GuardService32,
 }
 
 impl AddressSpace {
@@ -118,6 +120,7 @@ impl AddressSpace {
             version: 0,
             code_validation_version: 0,
             versions,
+            service_guard: Default::default(),
         })
     }
 
@@ -538,6 +541,9 @@ impl AddressSpace {
         }
         let slot = mapping as usize - 1;
         if !self.permissions[page].allows(access) {
+            if self.permissions[page].is_guarded() {
+                self.record_guard_service_fault(address);
+            }
             return Err(fault(address, access, FaultReason::Permission));
         }
         Ok(slot)
