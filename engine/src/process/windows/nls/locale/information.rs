@@ -38,21 +38,44 @@ impl NlsRuntime32 {
                 Ok(u32::from(self.profile.locale(args[0]).is_ok()))
             }
             GetLocaleInfoA | GetLocaleInfoW | GetCalendarInfoA | GetCalendarInfoW => {
-                self.profile.locale(args[0])?;
+                let locale = self.profile.locale(args[0])?;
                 let calendar = matches!(api, GetCalendarInfoA | GetCalendarInfoW);
                 let wide = api.name().ends_with('W');
                 let base = usize::from(calendar);
-                if calendar && args[1] != 1 {
-                    return Err(NlsError32::InvalidParameter);
-                }
                 let kind = args[1 + base];
-                if kind & 0x1fff0000 != 0 {
+                if kind & 0x0fff0000 != 0 {
                     return Err(NlsError32::InvalidFlags);
                 }
+                if kind & 0x10000000 != 0
+                    && !(if calendar {
+                        matches!(kind & 0xffff, 21..=46)
+                    } else {
+                        matches!(kind & 0xffff, 0x38..=0x4f | 0x100e | 0x100f)
+                    })
+                {
+                    return Err(NlsError32::InvalidFlags);
+                }
+                if !calendar
+                    && kind & 0x20000000 != 0
+                    && let Some(value) = crate::windows::nls::locales::locale_number(locale, kind)?
+                {
+                    return buffers::output(
+                        memory,
+                        args[2],
+                        args[3] as i32,
+                        &value.to_le_bytes(),
+                        if wide { 2 } else { 1 },
+                    );
+                }
                 let (text, numeric) = if calendar {
-                    super::data::calendar(kind & 0xffff)?
+                    self.data(locale)?
+                        .calendar_information(args[1], kind & 0x1000ffff)?
+                } else if let Some(value) =
+                    crate::windows::nls::locales::static_information(locale, kind & 0x1000ffff)?
+                {
+                    value
                 } else {
-                    super::data::value(kind & 0xffff)?
+                    self.data(locale)?.information(kind & 0x1000ffff)?
                 };
                 if kind & 0x20000000 != 0 {
                     let value = numeric.ok_or(NlsError32::InvalidFlags)?;
@@ -75,7 +98,7 @@ impl NlsRuntime32 {
                     return Err(NlsError32::InvalidParameter);
                 }
                 let units = text.encode_utf16().chain([0]).collect::<Vec<_>>();
-                let bytes = buffers::encoded(&units, wide, self.profile.ansi)?;
+                let bytes = buffers::encoded(&units, wide, self.locale_code_page(locale, kind)?)?;
                 buffers::output(
                     memory,
                     args[2 + base],

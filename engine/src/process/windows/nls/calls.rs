@@ -46,13 +46,19 @@ impl EngineInstance {
     ) -> Result<u32, NlsError32> {
         use NlsApi32::*;
         match api {
-            MultiByteToWideChar | WideCharToMultiByte => {
-                self.nls.convert(self.memory.as_mut().unwrap(), api, args)
-            }
+            MultiByteToWideChar | WideCharToMultiByte => self.nls.convert(
+                self.memory.as_mut().unwrap(),
+                api,
+                self.threads.current_id(),
+                args,
+            ),
             GetACP | GetOEMCP | IsValidCodePage | GetCPInfo | GetCPInfoExA | GetCPInfoExW
-            | IsDBCSLeadByte | IsDBCSLeadByteEx => {
-                self.nls.codepages(self.memory.as_mut().unwrap(), api, args)
-            }
+            | IsDBCSLeadByte | IsDBCSLeadByteEx => self.nls.codepages(
+                self.memory.as_mut().unwrap(),
+                api,
+                self.threads.current_id(),
+                args,
+            ),
             LCMapStringA | LCMapStringW | CompareStringA | CompareStringW
             | CompareStringOrdinal | GetStringTypeA | GetStringTypeW | GetStringTypeExA
             | GetStringTypeExW | LstrlenA | LstrlenW | LstrcmpA | LstrcmpW | LstrcmpiA

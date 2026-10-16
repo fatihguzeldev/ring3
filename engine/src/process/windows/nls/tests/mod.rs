@@ -1,5 +1,6 @@
 mod calendar;
 mod conversion;
+mod international;
 mod locale;
 use crate::{
     memory::{AddressSpace, GuestAddress, PageRange, Permissions},

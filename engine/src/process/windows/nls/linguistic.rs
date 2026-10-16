@@ -19,15 +19,16 @@ impl NlsRuntime32 {
         let limit = self.profile.max_text_units;
         match api {
             LCMapStringA | LCMapStringW => {
-                self.profile.locale(args[0])?;
+                let locale = self.profile.locale(args[0])?;
+                let cp = self.locale_code_page(locale, args[1])?;
                 let source = buffers::units(memory, args[2], args[3] as i32, wide, cp, limit)?;
-                let flags = args[1];
+                let flags = args[1] & !0x40000000;
                 if flags & 0x400 != 0 {
                     if flags & (0x300 | 0xf00000) != 0 {
                         return Err(NlsError32::InvalidFlags);
                     }
                     let input = source.strip_suffix(&[0]).unwrap_or(&source);
-                    let mut key = linguistics::sort_key(input, flags & !0xc00)?;
+                    let mut key = linguistics::sort_key_for_locale(input, flags & !0xc00, locale)?;
                     if flags & 0x800 != 0 {
                         for pair in key.chunks_exact_mut(2) {
                             pair.swap(0, 1);
@@ -38,10 +39,10 @@ impl NlsRuntime32 {
                 if flags & 0x800 != 0 {
                     return Err(NlsError32::InvalidFlags);
                 }
-                if args[2] == args[4] && flags & !0x08000300 != 0 {
+                if args[2] == args[4] && flags & !0x09000300 != 0 {
                     return Err(NlsError32::InvalidParameter);
                 }
-                let units = linguistics::map_string(&source, flags)?;
+                let units = linguistics::map_string_for_locale(&source, flags, locale)?;
                 let output = buffers::encoded(&units, wide, cp)?;
                 buffers::output(
                     memory,
@@ -52,7 +53,8 @@ impl NlsRuntime32 {
                 )
             }
             CompareStringA | CompareStringW => {
-                self.profile.locale(args[0])?;
+                let locale = self.profile.locale(args[0])?;
+                let cp = self.locale_code_page(locale, args[1])?;
                 let read = |address, count: u32| {
                     if count == 0 {
                         Ok(Vec::new())
@@ -72,7 +74,8 @@ impl NlsRuntime32 {
                 } else {
                     &right
                 };
-                let order = linguistics::compare(left, right, args[1])?;
+                let order =
+                    linguistics::compare_for_locale(left, right, args[1] & !0x40000000, locale)?;
                 Ok((order as i32 + 2) as u32)
             }
             CompareStringOrdinal => {
@@ -106,6 +109,11 @@ impl NlsRuntime32 {
                 if !no_locale {
                     self.profile.locale(args[0])?;
                 }
+                let cp = if no_locale {
+                    cp
+                } else {
+                    self.locale_code_page(self.profile.locale(args[0])?, 0)?
+                };
                 let kind = args[base];
                 let count = args[base + 2] as i32;
                 let count = if count < 0 { -1 } else { count };
@@ -132,10 +140,12 @@ impl NlsRuntime32 {
                 let left = buffers::units(memory, args[0], -1, wide, cp, limit)?;
                 let right = buffers::units(memory, args[1], -1, wide, cp, limit)?;
                 let flags = u32::from(matches!(api, LstrcmpiA | LstrcmpiW));
-                Ok(
-                    linguistics::compare(&left[..left.len() - 1], &right[..right.len() - 1], flags)?
-                        as i32 as u32,
-                )
+                Ok(linguistics::compare_for_locale(
+                    &left[..left.len() - 1],
+                    &right[..right.len() - 1],
+                    flags,
+                    self.profile.locale,
+                )? as i32 as u32)
             }
             LstrcpyA | LstrcpyW | LstrcpynA | LstrcpynW | LstrcatA | LstrcatW => {
                 let width = if wide { 2 } else { 1 };

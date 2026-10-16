@@ -1,30 +1,28 @@
 use super::super::{NlsRuntime32, buffers};
 use crate::{
     memory::{AddressSpace, GuestAddress},
-    windows::{
-        nls::{NlsApi32, NlsError32},
-        text::CodePage32,
-    },
+    windows::nls::{NlsApi32, NlsError32},
 };
 impl NlsRuntime32 {
     pub(in crate::process::windows::nls) fn codepages(
         &self,
         memory: &mut AddressSpace,
         api: NlsApi32,
+        thread: u32,
         args: &[u32],
     ) -> Result<u32, NlsError32> {
         use NlsApi32::*;
         match api {
             GetACP => Ok(self.profile.ansi.id()),
             GetOEMCP => Ok(self.profile.oem.id()),
-            IsValidCodePage => Ok(u32::from(self.profile.code_page(args[0]).is_ok())),
-            IsDBCSLeadByte => Ok(0),
+            IsValidCodePage => Ok(u32::from(self.code_page(args[0], thread).is_ok())),
+            IsDBCSLeadByte => Ok(u32::from(self.profile.ansi.is_lead_byte(args[0] as u8))),
             IsDBCSLeadByteEx => {
-                self.profile.code_page(args[0])?;
-                Ok(0)
+                let cp = self.code_page(args[0], thread)?;
+                Ok(u32::from(cp.is_lead_byte(args[1] as u8)))
             }
             GetCPInfo | GetCPInfoExA | GetCPInfoExW => {
-                let cp = self.profile.code_page(args[0])?;
+                let cp = self.code_page(args[0], thread)?;
                 let extended = api != GetCPInfo;
                 let wide = api == GetCPInfoExW;
                 if extended && args[1] != 0 {
@@ -40,9 +38,8 @@ impl NlsRuntime32 {
                         284
                     }
                 ];
-                bytes[..4].copy_from_slice(
-                    &(if cp == CodePage32::Utf8 { 4u32 } else { 1 }).to_le_bytes(),
-                );
+                bytes[..4].copy_from_slice(&cp.maximum_char_size().to_le_bytes());
+                bytes[6..18].copy_from_slice(&cp.lead_bytes());
                 bytes[4] = b'?';
                 if extended {
                     bytes[18..20].copy_from_slice(&0x3fu16.to_le_bytes());

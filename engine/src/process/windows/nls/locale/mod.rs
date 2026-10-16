@@ -1,2 +1,1 @@
-mod data;
 mod information;

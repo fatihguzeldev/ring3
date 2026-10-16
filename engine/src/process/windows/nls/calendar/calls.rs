@@ -4,12 +4,15 @@ use crate::{
     memory::{AddressSpace, GuestAddress},
     windows::nls::{
         NlsApi32, NlsError32,
-        calendar::{SystemTime32, format_date, format_time, from_filetime, to_filetime},
+        calendar::{
+            SystemTime32, format_calendar_date, format_date_with_names, format_time_with_names,
+            from_filetime, to_filetime,
+        },
     },
 };
 impl NlsRuntime32 {
     pub(in crate::process::windows::nls) fn calendar(
-        &self,
+        &mut self,
         memory: &mut AddressSpace,
         api: NlsApi32,
         args: &[u32],
@@ -104,18 +107,23 @@ impl NlsRuntime32 {
                 return Ok(1);
             }
             GetDateFormatA | GetDateFormatW | GetTimeFormatA | GetTimeFormatW => {
-                self.profile.locale(args[0])?;
+                let locale = self.profile.locale(args[0])?;
+                let cp = self.locale_code_page(locale, args[1])?;
                 let wide = api.name().ends_with('W');
                 let date = matches!(api, GetDateFormatA | GetDateFormatW);
                 let flags = args[1];
                 if date {
-                    if flags & !0x800000ff != 0 || flags & 7 != 0 && (flags & 7).count_ones() != 1 {
+                    if flags & !0xc00000ff != 0
+                        || (flags & 0x8b).count_ones() > 1
+                        || flags & 0x30 == 0x30
+                        || flags & 0x40 != 0 && flags & 0x30 != 0
+                    {
                         return Err(NlsError32::InvalidFlags);
                     }
-                } else if flags & !0x8000000f != 0 {
+                } else if flags & !0xc000000f != 0 {
                     return Err(NlsError32::InvalidFlags);
                 }
-                if args[3] != 0 && flags & !0x80000000 != 0 {
+                if args[3] != 0 && (flags & 0x80000000 != 0 || date && flags & !0x40000004 != 0) {
                     return Err(NlsError32::InvalidFlags);
                 }
                 let time = if args[2] == 0 {
@@ -123,75 +131,68 @@ impl NlsRuntime32 {
                 } else {
                     read_time(memory, args[2])?
                 };
-                let pattern = if args[3] == 0 {
+                let (default_calendar, alternate_calendar) = {
+                    let data = self.data(locale)?;
+                    (data.calendar_id(), data.alternate_calendar_id())
+                };
+                let calendar = if date && flags & 4 != 0 && alternate_calendar != 0 {
+                    alternate_calendar
+                } else {
+                    default_calendar
+                };
+                let pattern = if args[3] == 0 && date && calendar != default_calendar {
+                    if flags & 0x80 != 0 {
+                        crate::windows::nls::calendar::calendar_month_day_pattern(locale, calendar)?
+                    } else {
+                        let (short, long, year_month) =
+                            crate::windows::nls::calendar::calendar_patterns(locale, calendar)?;
+                        if flags & 2 != 0 {
+                            long
+                        } else if flags & 8 != 0 {
+                            year_month
+                        } else {
+                            short
+                        }
+                    }
+                } else if args[3] == 0 {
+                    let names = &self.data(locale)?.calendar;
                     if date {
                         if flags & 2 != 0 {
-                            "dddd, MMMM d, yyyy"
+                            names.long_date.clone()
                         } else if flags & 8 != 0 {
-                            "MMMM yyyy"
+                            names.year_month.clone()
+                        } else if flags & 0x80 != 0 {
+                            names.month_day.clone()
                         } else {
-                            "M/d/yyyy"
+                            names.short_date.clone()
                         }
-                    } else if flags & 8 != 0 {
-                        "HH:mm:ss"
                     } else {
-                        "h:mm:ss tt"
+                        names.time.clone()
                     }
-                    .into()
                 } else {
-                    let units = buffers::units(
-                        memory,
-                        args[3],
-                        -1,
-                        wide,
-                        self.profile.ansi,
-                        self.profile.max_text_units,
-                    )?;
+                    let units =
+                        buffers::units(memory, args[3], -1, wide, cp, self.profile.max_text_units)?;
                     String::from_utf16(&units[..units.len() - 1])
                         .map_err(|_| NlsError32::NoTranslation)?
                 };
-                let mut text = if date {
-                    format_date(time, &pattern)?
+                let pattern = if date {
+                    pattern
                 } else {
-                    format_time(time, &pattern)?
+                    crate::windows::nls::calendar::time_pattern(&pattern, flags)
                 };
-                if !date && args[3] == 0 {
-                    if flags & 1 != 0 {
-                        text = if flags & 8 != 0 {
-                            format!("{:02}", time.hour)
-                        } else {
-                            format!(
-                                "{} {}",
-                                if time.hour % 12 == 0 {
-                                    12
-                                } else {
-                                    time.hour % 12
-                                },
-                                if time.hour < 12 { "AM" } else { "PM" }
-                            )
-                        };
-                    } else if flags & 2 != 0 {
-                        text = if flags & 8 != 0 {
-                            format!("{:02}:{:02}", time.hour, time.minute)
-                        } else {
-                            format!(
-                                "{}:{:02} {}",
-                                if time.hour % 12 == 0 {
-                                    12
-                                } else {
-                                    time.hour % 12
-                                },
-                                time.minute,
-                                if time.hour < 12 { "AM" } else { "PM" }
-                            )
-                        };
+                let data = self.data(locale)?;
+                let names = &data.calendar;
+                let text = if date {
+                    if calendar != 1 {
+                        format_calendar_date(time, &pattern, locale, calendar)?
+                    } else {
+                        format_date_with_names(time, &pattern, names)?
                     }
-                    if flags & 4 != 0 {
-                        text = text.replace(" AM", "").replace(" PM", "");
-                    }
-                }
+                } else {
+                    format_time_with_names(time, &pattern, names)?
+                };
                 let units = text.encode_utf16().chain([0]).collect::<Vec<_>>();
-                let bytes = buffers::encoded(&units, wide, self.profile.ansi)?;
+                let bytes = buffers::encoded(&units, wide, cp)?;
                 return buffers::output(
                     memory,
                     args[4],
