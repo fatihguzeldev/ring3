@@ -180,6 +180,7 @@ impl FileRuntime32 {
             buffer: GuestAddress(args[1]),
             length: args[2],
             overlapped: Some(overlapped),
+            count_pointer: None,
             offset,
             kind: data.map_or(AsyncKind32::Read, AsyncKind32::Write),
             events: bindings,

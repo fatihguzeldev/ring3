@@ -6,13 +6,15 @@ pub(in crate::process) struct FileThreadReply32 {
     interrupted: bool,
     blocking: Option<u64>,
     completion: Option<super::super::completion::CompletionWait32>,
+    pipe: Option<super::super::pipes::PipeWait32>,
     mapping: super::super::mapping::MappingThreadReply32,
     ordinary: super::super::ordinary::OrdinaryThreadReply32,
 }
-struct FileReadiness32 {
+struct FileReadiness32<'a> {
     wait: Option<(u64, u64)>,
     blocking: Option<u64>,
     completion: Option<super::super::completion::CompletionWait32>,
+    pipe: Option<&'a super::super::pipes::PipeWait32>,
 }
 impl FileRuntime32 {
     pub(in crate::process) fn thread_reply_ready(
@@ -28,6 +30,7 @@ impl FileRuntime32 {
                     wait: reply.wait,
                     blocking: reply.blocking,
                     completion: reply.completion,
+                    pipe: reply.pipe.as_ref(),
                 },
                 now,
                 runnable,
@@ -46,6 +49,7 @@ impl FileRuntime32 {
                     wait: self.asynchronous.wait,
                     blocking: self.asynchronous.blocking,
                     completion: self.completion_wait,
+                    pipe: self.pipe_wait.as_ref(),
                 },
                 now,
                 runnable,
@@ -55,7 +59,7 @@ impl FileRuntime32 {
     fn file_reply_ready(
         &self,
         pending: FileReply32,
-        state: FileReadiness32,
+        state: FileReadiness32<'_>,
         now: u64,
         runnable: impl Fn(u32) -> bool,
     ) -> bool {
@@ -63,9 +67,13 @@ impl FileRuntime32 {
             wait,
             blocking,
             completion,
+            pipe,
         } = state;
         if let Some(id) = blocking {
             return self.blocking_lock_ready(id);
+        }
+        if let Some(wait) = pipe {
+            return self.pipe_wait_ready(wait, now);
         }
         if let Some(wait) = completion {
             return wait.interrupted
@@ -105,6 +113,7 @@ impl FileRuntime32 {
             interrupted: false,
             blocking: None,
             completion: None,
+            pipe: None,
             mapping: self.mappings.empty_thread_reply(),
             ordinary: self.ordinary.empty_thread_reply(),
         }
@@ -116,6 +125,7 @@ impl FileRuntime32 {
             interrupted: std::mem::take(&mut self.asynchronous.interrupted),
             blocking: self.asynchronous.blocking.take(),
             completion: self.completion_wait.take(),
+            pipe: self.pipe_wait.take(),
             mapping: self.mappings.take_thread_reply(),
             ordinary: self.ordinary.take_thread_reply(),
         }
@@ -130,6 +140,8 @@ impl FileRuntime32 {
         self.asynchronous.blocking = reply.blocking;
         assert!(self.completion_wait.is_none());
         self.completion_wait = reply.completion;
+        assert!(self.pipe_wait.is_none());
+        self.pipe_wait = reply.pipe;
         self.mappings.restore_thread_reply(reply.mapping);
         self.ordinary.restore_thread_reply(reply.ordinary);
     }
@@ -151,6 +163,7 @@ impl FileThreadReply32 {
             .map(|(_, deadline)| deadline)
             .into_iter()
             .chain(self.completion.and_then(|wait| wait.deadline))
+            .chain(self.pipe.as_ref().and_then(|wait| wait.deadline()))
             .min()
     }
     pub(in crate::process::windows::files) fn ordinary_reply(

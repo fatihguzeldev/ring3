@@ -21,6 +21,7 @@ pub(in crate::process::windows::files) struct AsyncOperation32 {
     pub buffer: GuestAddress,
     pub length: u32,
     pub overlapped: Option<GuestAddress>,
+    pub count_pointer: Option<GuestAddress>,
     pub offset: u64,
     pub kind: AsyncKind32,
     pub events: Vec<EventBinding32>,
@@ -32,32 +33,59 @@ pub(in crate::process::windows::files) struct AsyncOperation32 {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::process::windows::files) enum AsyncTarget32 {
     File { open: OpenFileId, file: FileId },
+    Pipe(crate::windows::files::pipes::PipeEndpointId32),
 }
 impl AsyncTarget32 {
     pub(in crate::process::windows::files) fn open(self) -> Option<OpenFileId> {
-        let Self::File { open, .. } = self;
-        Some(open)
+        if let Self::File { open, .. } = self {
+            Some(open)
+        } else {
+            None
+        }
     }
     pub(in crate::process::windows::files) fn file(self) -> Option<(OpenFileId, FileId)> {
-        let Self::File { open, file } = self;
-        Some((open, file))
+        if let Self::File { open, file } = self {
+            Some((open, file))
+        } else {
+            None
+        }
     }
     pub(in crate::process::windows::files) fn description(
         self,
     ) -> crate::windows::files::completion::CompletionTarget32 {
-        let Self::File { open, .. } = self;
-        crate::windows::files::completion::CompletionTarget32::File(open)
+        match self {
+            Self::File { open, .. } => {
+                crate::windows::files::completion::CompletionTarget32::File(open)
+            }
+            Self::Pipe(pipe) => crate::windows::files::completion::CompletionTarget32::Pipe(pipe),
+        }
     }
 }
 pub(in crate::process::windows::files) enum AsyncKind32 {
     Read,
     Write(Vec<u8>),
     Lock(AsyncLock32),
+    Connect,
+    Transact {
+        input: Vec<u8>,
+        sent: bool,
+        close: bool,
+    },
 }
 impl AsyncOperation32 {
+    pub(in crate::process::windows::files) fn pipe_release_count(&self) -> u32 {
+        if matches!(self.kind, AsyncKind32::Transact { close: true, .. }) {
+            2
+        } else {
+            1
+        }
+    }
     pub(in crate::process::windows::files) fn write_data(&self) -> Option<&[u8]> {
         match &self.kind {
             AsyncKind32::Write(bytes) => Some(bytes),
+            AsyncKind32::Transact {
+                input, sent: false, ..
+            } => Some(input),
             _ => None,
         }
     }
@@ -70,7 +98,7 @@ impl AsyncOperation32 {
     }
     pub(in crate::process::windows::files) fn take_data(&mut self) -> Option<Vec<u8>> {
         match std::mem::replace(&mut self.kind, AsyncKind32::Read) {
-            AsyncKind32::Write(bytes) => Some(bytes),
+            AsyncKind32::Write(bytes) | AsyncKind32::Transact { input: bytes, .. } => Some(bytes),
             _ => None,
         }
     }

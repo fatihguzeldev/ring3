@@ -17,6 +17,7 @@ impl FileRuntime32 {
         let target = self.handles.io_target(handle)?;
         let overlapped = match target {
             CompletionTarget32::File(open) => self.vfs.open_options(open)?.overlapped,
+            CompletionTarget32::Pipe(pipe) => self.pipes.options(pipe)?.overlapped,
             CompletionTarget32::Null(id) => self.null_devices.overlapped(id)?,
         };
         if !overlapped {

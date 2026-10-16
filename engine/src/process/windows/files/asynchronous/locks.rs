@@ -258,6 +258,7 @@ impl FileRuntime32 {
             buffer: GuestAddress(0),
             length: 0,
             overlapped: Some(overlapped),
+            count_pointer: None,
             offset,
             kind: AsyncKind32::Lock(AsyncLock32 { length, exclusive }),
             events,

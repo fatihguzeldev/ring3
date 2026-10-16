@@ -28,6 +28,13 @@ impl FileRuntime32 {
             if operation.status != AsyncStatus32::Pending {
                 continue;
             }
+            if matches!(operation.target, AsyncTarget32::Pipe(_)) {
+                if self.pipe_operation_ready(candidate) {
+                    index = Some(candidate);
+                    break;
+                }
+                continue;
+            }
             if let Some(lock) = operation.lock().filter(|_| !operation.cancel) {
                 match self.prepare_file_lock(
                     operation
@@ -57,6 +64,12 @@ impl FileRuntime32 {
         let Some(index) = index else {
             return Ok(AsyncProgress32::Idle);
         };
+        if matches!(
+            self.asynchronous.operations[index].target,
+            AsyncTarget32::Pipe(_)
+        ) {
+            return self.progress_pipe_operation(memory, sync, index);
+        }
         let operation = &self.asynchronous.operations[index];
         let (open, file) = operation.target.file().ok_or(FileError32::Unsupported)?;
         let overlapped = operation.overlapped.ok_or(FileError32::InvalidParameter)?;

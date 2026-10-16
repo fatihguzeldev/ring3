@@ -35,6 +35,16 @@ impl EngineInstance {
             )
             .map_err(HostError::File)?,
             completion_wait: None,
+            pipe_wait: None,
+            pipes: crate::windows::files::pipes::PipeContext32::new(
+                crate::windows::files::pipes::PipeLimits32 {
+                    instances: config.operations.min(config.handles as usize),
+                    endpoints: config.handles as usize,
+                    bytes: config.operation_bytes.min(64 * 1024 * 1024),
+                    messages: config.operations,
+                },
+            )
+            .map_err(HostError::File)?,
             reply: None,
             events: Vec::new(),
             host_input: Default::default(),

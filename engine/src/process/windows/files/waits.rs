@@ -50,6 +50,9 @@ impl FileRuntime32 {
             crate::windows::files::completion::CompletionTarget32::File(open) => {
                 self.vfs.open_info(open)?;
             }
+            crate::windows::files::completion::CompletionTarget32::Pipe(pipe) => {
+                self.pipes.options(pipe)?;
+            }
         }
         Ok(())
     }

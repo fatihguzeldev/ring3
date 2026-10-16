@@ -45,6 +45,35 @@ impl FileRuntime32 {
                     self.events.remove(event.unwrap());
                 }
             }
+            KernelFileObject32::Pipe(pipe) => {
+                let target = crate::windows::files::completion::CompletionTarget32::Pipe(pipe);
+                let last = self.handles.io_count(target) == 1;
+                let event = if last {
+                    self.events.iter().position(|(id, _)| *id == target)
+                } else {
+                    None
+                };
+                let close = event
+                    .map(|index| {
+                        sync.as_deref()
+                            .ok_or(FileError32::Unsupported)?
+                            .prepare_close_handles(&[self.events[index].1])
+                            .map_err(|_| FileError32::Exhausted)
+                    })
+                    .transpose()?;
+                self.pipes.release(pipe)?;
+                if last {
+                    self.asynchronous.cancel_description(target);
+                }
+                self.handles.remove(handle)?;
+                if let Some(close) = close {
+                    sync.unwrap().commit_close_handles(close);
+                    self.events.remove(event.unwrap());
+                }
+                if self.pipes.options(pipe).is_err() {
+                    self.completion.release_target(target);
+                }
+            }
             KernelFileObject32::Null(id) => {
                 let target = crate::windows::files::completion::CompletionTarget32::Null(id);
                 let event = if self.handles.io_count(target) == 1 {
@@ -148,6 +177,7 @@ impl FileRuntime32 {
         let prepared = self.handles.prepare(access, args[5] != 0)?;
         match object {
             KernelFileObject32::File(open) => self.vfs.retain_open(open)?,
+            KernelFileObject32::Pipe(pipe) => self.pipes.retain(pipe)?,
             KernelFileObject32::Null(id) => self.null_devices.retain(id)?,
             KernelFileObject32::Mapping(id) => self.mappings.retain(id)?,
             KernelFileObject32::Find(_) => return Err(FileError32::InvalidHandle),

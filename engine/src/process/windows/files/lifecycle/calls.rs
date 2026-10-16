@@ -68,11 +68,15 @@ impl EngineInstance {
                 self.synchronization.as_mut().map(|sync| sync.context_mut()),
             )
             .map_err(HostError::File)?;
+        runtime
+            .cancel_pipe_wait(self.synchronization.as_mut().map(|sync| sync.context_mut()))
+            .map_err(HostError::File)?;
         runtime.mappings.cancel_pending();
         runtime.asynchronous.cancel_wait();
         if let Some(wait) = runtime.completion_wait.take() {
             runtime.completion.cancel_wait_for(wait.thread, wait.port);
         }
+        runtime.pipe_wait = None;
         runtime.reply = None;
         self.abandon_call(key, token)
     }

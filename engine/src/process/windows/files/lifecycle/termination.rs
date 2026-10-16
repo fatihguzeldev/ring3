@@ -94,8 +94,10 @@ impl EngineInstance {
         files.vfs.commit_process_exit(native);
         files.asynchronous.commit_process_exit();
         files.completion.clear();
+        files.pipes.clear();
         files.null_devices.clear();
         files.completion_wait = None;
+        files.pipe_wait = None;
         files.ordinary.terminate();
         files.handles.commit_process_exit();
         files.events.clear();

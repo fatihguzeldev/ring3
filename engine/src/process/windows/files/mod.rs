@@ -8,6 +8,7 @@ mod lifecycle;
 mod mapping;
 mod memory;
 mod ordinary;
+mod pipes;
 mod process;
 mod security;
 mod waits;
@@ -65,8 +66,10 @@ pub(in crate::process) struct FileRuntime32 {
     mappings: MappingRuntime32,
     asynchronous: AsyncRuntime32,
     completion: crate::windows::files::completion::CompletionContext32,
+    pipes: crate::windows::files::pipes::PipeContext32,
     null_devices: crate::windows::files::devices::NullDevices32,
     completion_wait: Option<completion::CompletionWait32>,
+    pipe_wait: Option<pipes::PipeWait32>,
     reply: Option<FileReply32>,
     events: Vec<(crate::windows::files::completion::CompletionTarget32, u32)>,
     host_input: host::HostFileInput32,

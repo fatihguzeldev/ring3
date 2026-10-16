@@ -37,6 +37,7 @@ impl EngineInstance {
             .map(|(_, deadline)| deadline)
             .into_iter()
             .chain(files.completion_wait.and_then(|wait| wait.deadline))
+            .chain(files.pipe_wait.as_ref().and_then(|wait| wait.deadline()))
             .min()
     }
 }

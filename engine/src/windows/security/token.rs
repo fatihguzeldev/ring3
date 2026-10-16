@@ -14,6 +14,9 @@ pub struct Token32 {
     restore_privilege: bool,
 }
 impl Token32 {
+    pub(crate) fn user_name(&self) -> &'static str {
+        "ring3"
+    }
     pub fn virtual_process() -> Self {
         let mut groups = [None; 16];
         for (slot, sid) in groups.iter_mut().zip([

@@ -40,6 +40,16 @@ pub(in crate::process::windows::files) fn runtime()
             .unwrap(),
             null_devices: crate::windows::files::devices::NullDevices32::new(64).unwrap(),
             completion_wait: None,
+            pipe_wait: None,
+            pipes: crate::windows::files::pipes::PipeContext32::new(
+                crate::windows::files::pipes::PipeLimits32 {
+                    instances: 16,
+                    endpoints: 64,
+                    bytes: 1024 * 1024,
+                    messages: 16,
+                },
+            )
+            .unwrap(),
             reply: None,
             events: Vec::new(),
             host_input: Default::default(),

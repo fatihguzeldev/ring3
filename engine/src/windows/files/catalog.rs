@@ -125,6 +125,21 @@ file_apis! {
     GetQueuedCompletionStatus = 0x92, 5;
     GetQueuedCompletionStatusEx = 0x93, 6;
     SetFileCompletionNotificationModes = 0x94, 2;
+    CreatePipe = 0xa0, 4;
+    CreateNamedPipeA = 0xa1, 8;
+    CreateNamedPipeW = 0xa2, 8;
+    ConnectNamedPipe = 0xa3, 2;
+    DisconnectNamedPipe = 0xa4, 1;
+    PeekNamedPipe = 0xa5, 6;
+    GetNamedPipeInfo = 0xa6, 5;
+    SetNamedPipeHandleState = 0xa7, 4;
+    GetNamedPipeHandleStateA = 0xa8, 7;
+    GetNamedPipeHandleStateW = 0xa9, 7;
+    WaitNamedPipeA = 0xaa, 2;
+    WaitNamedPipeW = 0xab, 2;
+    TransactNamedPipe = 0xac, 7;
+    CallNamedPipeA = 0xad, 7;
+    CallNamedPipeW = 0xae, 7;
 }
 
 impl FileApi32 {
@@ -132,6 +147,8 @@ impl FileApi32 {
         match self {
             Self::CreateFileA
             | Self::CreateFileW
+            | Self::CreateNamedPipeA
+            | Self::CreateNamedPipeW
             | Self::FindFirstFileA
             | Self::FindFirstFileW
             | Self::FindFirstFileExA

@@ -13,6 +13,7 @@ pub(in crate::process) struct PreparedFileThreadExit32 {
     bindings: Vec<EventBinding32>,
     copy: super::super::ordinary::PreparedCopyThreadExit32,
     completion: Option<crate::windows::files::completion::PreparedCompletionPosts32>,
+    pipes: Vec<(crate::windows::files::pipes::PipeEndpointId32, u32)>,
 }
 impl PreparedFileThreadExit32 {
     pub(in crate::process) fn words(&self) -> &[WordWrite32] {
@@ -57,6 +58,10 @@ impl FileRuntime32 {
             .try_reserve_exact(count)
             .map_err(|_| FileError32::Allocation)?;
         let mut closes: Vec<(OpenFileId, u32)> = Vec::new();
+        let mut pipes: Vec<(crate::windows::files::pipes::PipeEndpointId32, u32)> = Vec::new();
+        pipes
+            .try_reserve_exact(count)
+            .map_err(|_| FileError32::Allocation)?;
         closes
             .try_reserve_exact(count)
             .map_err(|_| FileError32::Allocation)?;
@@ -86,11 +91,27 @@ impl FileRuntime32 {
                 completion.push(packet);
             }
             bindings.extend_from_slice(&operation.events);
-            let super::context::AsyncTarget32::File { open, .. } = operation.target;
-            if let Some((_, count)) = closes.iter_mut().find(|(candidate, _)| *candidate == open) {
-                *count = count.checked_add(1).ok_or(FileError32::Exhausted)?;
-            } else {
-                closes.push((open, 1));
+            match operation.target {
+                super::context::AsyncTarget32::File { open, .. } => {
+                    if let Some((_, count)) =
+                        closes.iter_mut().find(|(candidate, _)| *candidate == open)
+                    {
+                        *count = count.checked_add(1).ok_or(FileError32::Exhausted)?;
+                    } else {
+                        closes.push((open, 1));
+                    }
+                }
+                super::context::AsyncTarget32::Pipe(pipe) => {
+                    if let Some((_, count)) =
+                        pipes.iter_mut().find(|(candidate, _)| *candidate == pipe)
+                    {
+                        *count = count
+                            .checked_add(operation.pipe_release_count())
+                            .ok_or(FileError32::Exhausted)?;
+                    } else {
+                        pipes.push((pipe, operation.pipe_release_count()));
+                    }
+                }
             }
             let Some(overlapped) = operation.overlapped else {
                 continue;
@@ -145,6 +166,7 @@ impl FileRuntime32 {
         }
         self.vfs.check_close_open_group(&closes, 0, &[])?;
         let completion = self.completion.prepare_posts(&completion)?;
+        self.pipes.check_release_many(&pipes, 0)?;
         Ok(PreparedFileThreadExit32 {
             operations,
             active,
@@ -153,6 +175,7 @@ impl FileRuntime32 {
             bindings,
             copy,
             completion,
+            pipes,
         })
     }
     pub(in crate::process) fn commit_thread_exit(
@@ -162,6 +185,7 @@ impl FileRuntime32 {
     ) {
         assert_eq!(self.vfs.revision(), prepared.revision);
         if prepared.active {
+            self.pipe_wait = None;
             self.asynchronous.blocking = None;
         }
         self.completion.commit_posts(prepared.completion);
@@ -174,15 +198,19 @@ impl FileRuntime32 {
                 .unwrap();
             let operation = &self.asynchronous.operations[index];
             assert_eq!(operation.status, AsyncStatus32::Pending);
-            let super::context::AsyncTarget32::File { open, .. } = operation.target;
-            self.vfs.cancel_operation_io(id);
-            self.vfs
-                .close_open(open)
-                .expect("thread file source release was preflighted");
-            if self.vfs.open_info(open).is_err() {
-                self.release_file_locks(open);
+            match operation.target {
+                super::context::AsyncTarget32::File { open, .. } => {
+                    self.vfs.cancel_operation_io(id);
+                    self.vfs
+                        .close_open(open)
+                        .expect("thread file source release was preflighted");
+                    if self.vfs.open_info(open).is_err() {
+                        self.release_file_locks(open);
+                    }
+                    self.retire_completion_file(open);
+                }
+                super::context::AsyncTarget32::Pipe(_) => {}
             }
-            self.retire_completion_file(open);
             let operation = &mut self.asynchronous.operations[index];
             operation.events.clear();
             if let Some(bytes) = operation.take_data() {
@@ -193,6 +221,18 @@ impl FileRuntime32 {
                 error: 995,
                 bytes: 0,
             };
+        }
+        for (pipe, count) in prepared.pipes {
+            for _ in 0..count {
+                self.pipes
+                    .release(pipe)
+                    .expect("thread pipe source release was preflighted");
+            }
+            if self.pipes.options(pipe).is_err() {
+                self.completion.release_target(
+                    crate::windows::files::completion::CompletionTarget32::Pipe(pipe),
+                );
+            }
         }
         self.commit_copy_thread_exit(prepared.copy);
         self.vfs.cancel_guest_thread_io(thread);

@@ -9,8 +9,9 @@ mod context;
 mod locks;
 mod positioned;
 
+pub(super) use acceptance::capture_mappings;
 pub(super) use completion::status;
-pub(super) use context::AsyncOperation32;
+pub(super) use context::{AsyncKind32, AsyncOperation32, AsyncStatus32, AsyncTarget32};
 pub(super) use context::{AsyncProgress32, AsyncRuntime32};
 
 #[cfg(test)]

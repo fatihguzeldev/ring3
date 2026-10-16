@@ -7,6 +7,7 @@ pub(super) enum KernelFileObject32 {
     File(OpenFileId),
     Mapping(u64),
     CompletionPort(crate::windows::files::completion::CompletionPortId32),
+    Pipe(crate::windows::files::pipes::PipeEndpointId32),
     Null(crate::windows::files::devices::DeviceDescriptionId32),
     Find(u64),
 }
@@ -77,6 +78,18 @@ impl KernelFileHandles32 {
             .try_reserve(additional)
             .map_err(|_| FileError32::Allocation)
     }
+    pub(super) fn prepare_pair(
+        &mut self,
+        access: [u32; 2],
+        inherit: bool,
+    ) -> Result<[PreparedKernelHandle32; 2], FileError32> {
+        self.ensure_capacity(2)?;
+        Ok(std::array::from_fn(|index| PreparedKernelHandle32 {
+            value: self.next + index as u32 * 4,
+            access: access[index],
+            inherit,
+        }))
+    }
     pub(super) fn prepare(
         &mut self,
         access: u32,
@@ -127,6 +140,9 @@ impl KernelFileHandles32 {
             KernelFileObject32::File(open) => Ok(
                 crate::windows::files::completion::CompletionTarget32::File(open),
             ),
+            KernelFileObject32::Pipe(pipe) => Ok(
+                crate::windows::files::completion::CompletionTarget32::Pipe(pipe),
+            ),
             KernelFileObject32::Null(id) => Ok(
                 crate::windows::files::completion::CompletionTarget32::Null(id),
             ),
@@ -143,6 +159,9 @@ impl KernelFileHandles32 {
             }
             crate::windows::files::completion::CompletionTarget32::File(open) => {
                 KernelFileObject32::File(open)
+            }
+            crate::windows::files::completion::CompletionTarget32::Pipe(pipe) => {
+                KernelFileObject32::Pipe(pipe)
             }
         };
         self.entries

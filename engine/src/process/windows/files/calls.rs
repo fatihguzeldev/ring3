@@ -35,6 +35,7 @@ impl EngineInstance {
     pub(in crate::process) fn commit_guard_service_file_reply(&mut self) {
         let files = self.files.as_mut().unwrap();
         files.reply = None;
+        files.pipe_wait = None;
     }
     pub(in crate::process) fn try_complete_file_call(
         &mut self,
@@ -171,6 +172,10 @@ impl EngineInstance {
                 FileApi32::GetOverlappedResultEx
                     | FileApi32::GetQueuedCompletionStatus
                     | FileApi32::GetQueuedCompletionStatusEx
+                    | FileApi32::WaitNamedPipeA
+                    | FileApi32::WaitNamedPipeW
+                    | FileApi32::CallNamedPipeA
+                    | FileApi32::CallNamedPipeW
             ) {
                 self.cpu_clock.monotonic_bounds()?.1
             } else {
@@ -202,7 +207,12 @@ impl EngineInstance {
         };
         let outcome = match outcome {
             Ok(outcome) => outcome,
-            Err(error) if self.files.as_ref().unwrap().asynchronous.blocking.is_some() => {
+            Err(error)
+                if matches!(
+                    self.files.as_ref().unwrap().pipe_wait,
+                    Some(pipes::PipeWait32::Operation(_))
+                ) || self.files.as_ref().unwrap().asynchronous.blocking.is_some() =>
+            {
                 self.files.as_mut().unwrap().reply = Some(FileReply32 {
                     owner,
                     token,
@@ -270,6 +280,19 @@ impl FileRuntime32 {
             threads,
             console_attached,
         } = context;
+        if (0x000a_00a0..=0x000a_00ae).contains(&api.id()) {
+            return self.execute_pipe_api(
+                memory,
+                sync,
+                crate::process::windows::files::pipes::PipeCallContext32 {
+                    thread,
+                    now,
+                    token: security.token(),
+                },
+                api,
+                args,
+            );
+        }
         if matches!(api, FileApi32::CreateFileA | FileApi32::CreateFileW) {
             let path = ordinary::memory::path(
                 memory,
@@ -279,6 +302,9 @@ impl FileRuntime32 {
             )?;
             if let Some(device) = crate::windows::files::devices::device_name(&path) {
                 return self.open_device(memory, device, args, console_attached);
+            }
+            if crate::windows::files::pipes::pipe_name(&path)?.is_some() {
+                return self.open_pipe_client(memory, &path, args, security.token());
             }
         }
         if args.first().is_some_and(|handle| {
@@ -302,6 +328,47 @@ impl FileRuntime32 {
             ) {
                 return self.null_metadata(memory, api, args);
             }
+        }
+        if matches!(
+            api,
+            FileApi32::ReadFile
+                | FileApi32::WriteFile
+                | FileApi32::GetFileType
+                | FileApi32::FlushFileBuffers
+        ) && matches!(
+            self.handles.object(args[0]),
+            Ok(handles::KernelFileObject32::Pipe(_))
+        ) {
+            if matches!(api, FileApi32::GetFileType | FileApi32::FlushFileBuffers) {
+                return self.pipe_metadata(memory, api, args);
+            }
+            if let Some(sync) = sync {
+                let target = self.handles.io_target(args[0])?;
+                return self.with_io_event(target, sync, |files, sync, _event| {
+                    files.execute_pipe_api(
+                        memory,
+                        Some(sync),
+                        crate::process::windows::files::pipes::PipeCallContext32 {
+                            thread,
+                            now,
+                            token: security.token(),
+                        },
+                        api,
+                        args,
+                    )
+                });
+            }
+            return self.execute_pipe_api(
+                memory,
+                None,
+                crate::process::windows::files::pipes::PipeCallContext32 {
+                    thread,
+                    now,
+                    token: security.token(),
+                },
+                api,
+                args,
+            );
         }
         if (0x000a_0090..=0x000a_0094).contains(&api.id()) {
             return self.execute_completion_api(memory, threads, now, thread, api, args);

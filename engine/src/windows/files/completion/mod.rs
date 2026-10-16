@@ -1,7 +1,10 @@
 mod context;
 mod queues;
 
-use crate::files::{FileError32, OpenFileId};
+use crate::{
+    files::{FileError32, OpenFileId},
+    windows::files::pipes::PipeEndpointId32,
+};
 pub(crate) use context::CompletionContext32;
 
 pub(crate) fn completion_access(raw: u32) -> Result<u32, FileError32> {
@@ -23,6 +26,7 @@ pub(crate) struct CompletionPortId32(pub u64);
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CompletionTarget32 {
     File(OpenFileId),
+    Pipe(PipeEndpointId32),
     Null(crate::windows::files::devices::DeviceDescriptionId32),
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
