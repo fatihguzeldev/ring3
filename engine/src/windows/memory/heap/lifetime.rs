@@ -26,9 +26,6 @@ impl HeapManager32 {
         if flags & !(HEAP_NO_SERIALIZE | HEAP_GENERATE_EXCEPTIONS | 0x40000) != 0 {
             return Err(MemoryError32::InvalidParameter);
         }
-        if flags & HEAP_GENERATE_EXCEPTIONS != 0 {
-            return Err(MemoryError32::Unsupported);
-        }
         if self.heaps.len() >= self.limits.heaps {
             return Err(MemoryError32::Capacity);
         }

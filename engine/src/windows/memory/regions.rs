@@ -1,5 +1,6 @@
 use super::*;
 use crate::memory::{AddressSpace, GuestAddress, PAGE_SIZE, PageRange, PrivatePageChange32};
+mod stack;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Committed32 {
@@ -95,7 +96,7 @@ impl VirtualMemory32 {
         }
         if flags & !(MEM_RESERVE | MEM_COMMIT | MEM_TOP_DOWN) != 0
             || flags & (MEM_RESERVE | MEM_COMMIT) == 0
-            || matches!(protect, 8 | 0x80)
+            || matches!(protect & !PAGE_GUARD, 8 | 0x80)
         {
             return Err(MemoryError32::InvalidParameter);
         }
@@ -225,6 +226,37 @@ impl VirtualMemory32 {
         self.regions[index].committed = committed;
         Ok(start(range))
     }
+    pub(crate) fn install_thread_pages(
+        &mut self,
+        memory: &mut AddressSpace,
+        base: u32,
+        pages: &[crate::memory::PageInitialization<'_>],
+        words: &[crate::memory::WordWrite32],
+    ) -> Result<(), MemoryError32> {
+        let index = self.region(base).ok_or(MemoryError32::InvalidAddress)?;
+        if start(self.regions[index].range) != base || !self.regions[index].committed.is_empty() {
+            return Err(MemoryError32::InvalidAddress);
+        }
+        let mut committed = Vec::new();
+        committed
+            .try_reserve_exact(pages.len())
+            .map_err(|_| MemoryError32::Allocation)?;
+        for page in pages {
+            let range = PageRange::new(page.address, 1)?;
+            if !contains(self.regions[index].range, range) {
+                return Err(MemoryError32::InvalidAddress);
+            }
+            committed.push(Committed32 {
+                range,
+                protection: protection_value(page.permissions),
+            });
+        }
+        normalize(&mut committed);
+        self.check_fragments(committed.len(), 0)?;
+        memory.install_pages_with_word_writes(pages, words)?;
+        self.regions[index].committed = committed;
+        Ok(())
+    }
     pub(crate) fn free(
         &mut self,
         memory: &mut AddressSpace,
@@ -290,7 +322,7 @@ impl VirtualMemory32 {
             return Err(MemoryError32::InvalidAddress);
         }
         let permissions = protection(protect)?;
-        if matches!(protect, 8 | 0x80) {
+        if matches!(protect & !PAGE_GUARD, 8 | 0x80) {
             return Err(MemoryError32::InvalidParameter);
         }
         let old = protection_value(memory.permissions_at(GuestAddress(start(range)))?);

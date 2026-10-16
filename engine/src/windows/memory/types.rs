@@ -12,6 +12,7 @@ pub const HEAP_NO_SERIALIZE: u32 = 1;
 pub const HEAP_GENERATE_EXCEPTIONS: u32 = 4;
 pub const HEAP_ZERO_MEMORY: u32 = 8;
 pub const HEAP_REALLOC_IN_PLACE_ONLY: u32 = 0x10;
+pub const PAGE_GUARD: u32 = 0x100;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MemoryLimits32 {
@@ -111,7 +112,7 @@ impl MemoryInfo32 {
     }
 }
 pub(crate) fn protection(value: u32) -> Result<Permissions, MemoryError32> {
-    Ok(match value {
+    let permissions = match value & !PAGE_GUARD {
         1 => Permissions::NONE,
         2 => Permissions::READ,
         4 | 8 => Permissions::READ_WRITE,
@@ -119,22 +120,28 @@ pub(crate) fn protection(value: u32) -> Result<Permissions, MemoryError32> {
         0x20 => Permissions::READ_EXECUTE,
         0x40 | 0x80 => Permissions::ALL,
         _ => {
-            return Err(if value & 0x100 != 0 {
-                MemoryError32::Unsupported
-            } else {
-                MemoryError32::InvalidParameter
-            });
+            return Err(MemoryError32::InvalidParameter);
         }
-    })
+    };
+    if value & PAGE_GUARD != 0 {
+        if permissions == Permissions::NONE {
+            return Err(MemoryError32::InvalidParameter);
+        }
+        Ok(permissions.with_guard())
+    } else {
+        Ok(permissions)
+    }
 }
 pub(crate) fn protection_value(value: Permissions) -> u32 {
-    match value {
-        Permissions::NONE => 1,
-        Permissions::READ => 2,
-        Permissions::READ_WRITE => 4,
-        Permissions::EXECUTE => 0x10,
-        Permissions::READ_EXECUTE => 0x20,
-        Permissions::ALL => 0x40,
-        _ => 1,
-    }
+    let guard = if value.is_guarded() { PAGE_GUARD } else { 0 };
+    guard
+        | match value.without_guard() {
+            Permissions::NONE => 1,
+            Permissions::READ => 2,
+            Permissions::READ_WRITE => 4,
+            Permissions::EXECUTE => 0x10,
+            Permissions::READ_EXECUTE => 0x20,
+            Permissions::ALL => 0x40,
+            _ => 1,
+        }
 }

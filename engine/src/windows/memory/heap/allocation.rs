@@ -23,9 +23,6 @@ impl HeapManager32 {
         if flags & !(HEAP_NO_SERIALIZE | HEAP_GENERATE_EXCEPTIONS | HEAP_ZERO_MEMORY) != 0 {
             return Err(MemoryError32::InvalidParameter);
         }
-        if flags & HEAP_GENERATE_EXCEPTIONS != 0 {
-            return Err(MemoryError32::Unsupported);
-        }
         let heap = self.index(handle)?;
         if self.heaps[heap].maximum != 0 && size >= 0x7fff8 {
             return Err(MemoryError32::Capacity);
@@ -98,9 +95,6 @@ impl HeapManager32 {
             != 0
         {
             return Err(MemoryError32::InvalidParameter);
-        }
-        if flags & HEAP_GENERATE_EXCEPTIONS != 0 {
-            return Err(MemoryError32::Unsupported);
         }
         let heap = self.index(handle)?;
         let block = self.block(heap, pointer)?;

@@ -60,6 +60,14 @@ impl HeapManager32 {
     pub(crate) fn handles(&self) -> impl Iterator<Item = u32> + '_ {
         self.heaps.iter().map(|heap| heap.handle)
     }
+    pub(crate) fn generates_exceptions(&self, handle: u32, flags: u32) -> bool {
+        let inherited = self
+            .heaps
+            .iter()
+            .find(|heap| heap.handle == handle)
+            .map_or(0, |heap| heap.flags);
+        (flags | inherited) & HEAP_GENERATE_EXCEPTIONS != 0
+    }
     fn index(&self, handle: u32) -> Result<usize, MemoryError32> {
         self.heaps
             .iter()

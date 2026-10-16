@@ -1,3 +1,4 @@
+mod guard;
 mod heap;
 mod regions;
 
