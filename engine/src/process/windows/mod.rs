@@ -10,6 +10,7 @@ pub(super) mod dsound;
 pub(super) mod files;
 pub(super) mod modules;
 pub(super) mod objects;
+pub(super) mod service;
 mod strings;
 pub(super) mod synchronization;
 mod thread;

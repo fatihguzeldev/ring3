@@ -12,37 +12,90 @@ pub struct WindowsGateInfo32 {
 }
 
 pub fn windows_gate_info(id: u32) -> Option<WindowsGateInfo32> {
-    if let Some(api)=crate::windows::rawinput::RawInputApi32::from_id(id) {return Some(WindowsGateInfo32{convention:crate::windows::CallingConvention32::Stdcall,stack_words:api.stack_words()});}
-    if let Some(api)=crate::windows::resources::ResourceApi32::from_id(id) {return Some(WindowsGateInfo32{convention:crate::windows::CallingConvention32::Stdcall,stack_words:api.stack_words()});}
-    if let Some(api)=crate::windows::exceptions::ExceptionApi32::from_id(id) {return Some(WindowsGateInfo32{convention:api.convention(),stack_words:api.stack_words()});}
-    if let Some(api)=crate::windows::nls::NlsApi32::from_id(id) {return Some(WindowsGateInfo32{convention:crate::windows::CallingConvention32::Stdcall,stack_words:api.stack_words()});}
-    if matches!(id, 0x000f_fffe | 0x000f_ffff) { return Some(WindowsGateInfo32 { convention: crate::windows::CallingConvention32::Stdcall, stack_words: 0 }); }
+    if let Some(api) = crate::windows::rawinput::RawInputApi32::from_id(id) {
+        return Some(WindowsGateInfo32 {
+            convention: crate::windows::CallingConvention32::Stdcall,
+            stack_words: api.stack_words(),
+        });
+    }
+    if let Some(api) = crate::windows::resources::ResourceApi32::from_id(id) {
+        return Some(WindowsGateInfo32 {
+            convention: crate::windows::CallingConvention32::Stdcall,
+            stack_words: api.stack_words(),
+        });
+    }
+    if let Some(api) = crate::windows::exceptions::ExceptionApi32::from_id(id) {
+        return Some(WindowsGateInfo32 {
+            convention: api.convention(),
+            stack_words: api.stack_words(),
+        });
+    }
+    if let Some(api) = crate::windows::nls::NlsApi32::from_id(id) {
+        return Some(WindowsGateInfo32 {
+            convention: crate::windows::CallingConvention32::Stdcall,
+            stack_words: api.stack_words(),
+        });
+    }
+    if matches!(id, 0x000f_fffe | 0x000f_ffff) {
+        return Some(WindowsGateInfo32 {
+            convention: crate::windows::CallingConvention32::Stdcall,
+            stack_words: 0,
+        });
+    }
     if let Some(api) = WindowsApi32::from_id(id) {
         return Some(WindowsGateInfo32 {
             convention: api.convention(),
             stack_words: api.stack_words(),
         });
     }
-    if let Some(words) = crate::windows::ole32::Ole32Api32::from_id(id).map(|api| api.stack_words())
-        .or_else(|| crate::windows::ole32::FactoryMethod32::from_id(id).map(|api| api.stack_words()))
+    if let Some(words) = crate::windows::ole32::Ole32Api32::from_id(id)
+        .map(|api| api.stack_words())
+        .or_else(|| {
+            crate::windows::ole32::FactoryMethod32::from_id(id).map(|api| api.stack_words())
+        })
         .or_else(|| crate::windows::winmm::WinmmApi32::from_id(id).map(|api| api.stack_words()))
     {
-        return Some(WindowsGateInfo32 { convention: crate::windows::CallingConvention32::Stdcall, stack_words: words });
+        return Some(WindowsGateInfo32 {
+            convention: crate::windows::CallingConvention32::Stdcall,
+            stack_words: words,
+        });
     }
-    if let Some(api) = crate::windows::thread::ThreadApi32::from_id(id).filter(|api|crate::windows::thread::ThreadApi32::core_apis().contains(api)) {
-        return Some(WindowsGateInfo32 {convention:crate::windows::CallingConvention32::Stdcall,stack_words:api.stack_words()});
+    if let Some(api) = crate::windows::thread::ThreadApi32::from_id(id)
+        .filter(|api| crate::windows::thread::ThreadApi32::core_apis().contains(api))
+    {
+        return Some(WindowsGateInfo32 {
+            convention: crate::windows::CallingConvention32::Stdcall,
+            stack_words: api.stack_words(),
+        });
     }
     if let Some(api) = crate::windows::registry::Advapi32Api32::from_id(id) {
-        return Some(WindowsGateInfo32 {convention:crate::windows::CallingConvention32::Stdcall,stack_words:api.stack_words()});
+        return Some(WindowsGateInfo32 {
+            convention: crate::windows::CallingConvention32::Stdcall,
+            stack_words: api.stack_words(),
+        });
     }
-    if let Some(api) = crate::windows::synchronization::SynchronizationApi32::from_id(id).filter(|api|crate::windows::synchronization::SynchronizationApi32::object_apis().contains(api) || *api==crate::windows::synchronization::SynchronizationApi32::QueueUserAPC) {
-        return Some(WindowsGateInfo32 {convention:crate::windows::CallingConvention32::Stdcall,stack_words:api.stack_words()});
+    if let Some(api) =
+        crate::windows::synchronization::SynchronizationApi32::from_id(id).filter(|api| {
+            crate::windows::synchronization::SynchronizationApi32::object_apis().contains(api)
+                || *api == crate::windows::synchronization::SynchronizationApi32::QueueUserAPC
+        })
+    {
+        return Some(WindowsGateInfo32 {
+            convention: crate::windows::CallingConvention32::Stdcall,
+            stack_words: api.stack_words(),
+        });
     }
     if let Some(api) = crate::windows::process::ProcessApi32::from_id(id) {
-        return Some(WindowsGateInfo32 { convention: crate::windows::CallingConvention32::Stdcall, stack_words: api.stack_words() });
+        return Some(WindowsGateInfo32 {
+            convention: crate::windows::CallingConvention32::Stdcall,
+            stack_words: api.stack_words(),
+        });
     }
     if let Some(api) = crate::windows::memory::MemoryApi32::from_id(id) {
-        return Some(WindowsGateInfo32 { convention: crate::windows::CallingConvention32::Stdcall, stack_words: api.stack_words() });
+        return Some(WindowsGateInfo32 {
+            convention: crate::windows::CallingConvention32::Stdcall,
+            stack_words: api.stack_words(),
+        });
     }
     if let Some(api) = crate::windows::files::FileApi32::from_id(id) {
         return Some(WindowsGateInfo32 {
@@ -176,6 +229,26 @@ impl EngineInstance {
     ) -> Result<(), HostError> {
         let pending = self.checked_pending_call(owner, token)?;
         let frame = pending.frame;
+        let exit = decode_exit(&pending.exit).map_err(|_| HostError::Infrastructure)?;
+        let ExitReason::Gate { id } = exit.reason else {
+            return Err(HostError::Call(CallError::InvalidStop));
+        };
+        let info = windows_gate_info(id).ok_or(HostError::Call(CallError::InvalidRequest))?;
+        if frame.convention() != info.convention || frame.stack_words() != info.stack_words {
+            return Err(HostError::Call(CallError::InvalidRequest));
+        }
+        self.execute_guarded_windows_service(owner, token, id, frame, |engine| {
+            engine.dispatch_windows_call_frame(owner, token)
+        })
+    }
+
+    fn dispatch_windows_call_frame(
+        &mut self,
+        owner: PendingOwner,
+        token: u32,
+    ) -> Result<(), HostError> {
+        let pending = self.checked_pending_call(owner, token)?;
+        let frame = pending.frame;
         let saved_exit = pending.exit;
         if self.retry_module_windows_call(owner, token)? {
             return Ok(());
@@ -188,10 +261,10 @@ impl EngineInstance {
         let ExitReason::Gate { id } = exit.reason else {
             return Err(HostError::Infrastructure);
         };
-        if self.try_complete_raw_input_call(owner,token,id,frame)?
-            || self.try_complete_resource_call(owner,token,id,frame)?
-            || self.try_complete_exception_call(owner,token,id,frame)?
-            || self.try_complete_nls_call(owner,token,id,frame)?
+        if self.try_complete_raw_input_call(owner, token, id, frame)?
+            || self.try_complete_resource_call(owner, token, id, frame)?
+            || self.try_complete_exception_call(owner, token, id, frame)?
+            || self.try_complete_nls_call(owner, token, id, frame)?
             || self.try_complete_thread_call(owner, token, id, frame)?
             || self.try_complete_registry_call(owner, token, id, frame)?
             || self.try_complete_ole32_call(owner, token, id, frame)?

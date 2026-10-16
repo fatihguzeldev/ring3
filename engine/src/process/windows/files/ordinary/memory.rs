@@ -3,8 +3,6 @@ use crate::{
     memory::{Access, AddressSpace, GuestAddress},
 };
 
-
-
 pub(in crate::process::windows::files) fn output(
     memory: &AddressSpace,
     address: u32,
@@ -59,7 +57,9 @@ pub(in crate::process::windows::files) fn path(
             u16::from_le_bytes(read(memory, at)?)
         } else {
             let byte = read::<1>(memory, at)?[0];
-            crate::windows::text::CodePage32::Windows1252.decode_byte(byte).expect("CP1252 is single-byte")
+            crate::windows::text::CodePage32::Windows1252
+                .decode_byte(byte)
+                .expect("CP1252 is single-byte")
         };
         if unit == 0 {
             return Ok(units);
@@ -79,7 +79,12 @@ pub(super) fn encoded(units: &[u16], wide: bool, nul: bool) -> Result<Vec<u8>, F
             bytes.extend_from_slice(&unit.to_le_bytes());
         }
     } else {
-        bytes.extend(crate::windows::text::CodePage32::Windows1252.encode(units,false).map_err(|_|FileError32::InvalidName)?.0);
+        bytes.extend(
+            crate::windows::text::CodePage32::Windows1252
+                .encode(units, false)
+                .map_err(|_| FileError32::InvalidName)?
+                .0,
+        );
     }
     if nul {
         bytes.extend_from_slice(if wide { &[0, 0] } else { &[0] });

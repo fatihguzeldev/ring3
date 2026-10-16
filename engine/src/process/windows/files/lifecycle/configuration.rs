@@ -38,10 +38,20 @@ impl EngineInstance {
                 )
                 .map_err(HostError::File)?;
         }
-        if let Some(value)=self.process_launch_directory() {
-            let directory=value.encode_utf16().collect::<Vec<_>>();
-            runtime.vfs.mount_directory(&directory,crate::files::ATTR_DIRECTORY,crate::files::FileTimes32::default()).map_err(HostError::File)?;
-            let prepared=runtime.vfs.prepare_current_directory(&directory).map_err(HostError::File)?;
+        if let Some(value) = self.process_launch_directory() {
+            let directory = value.encode_utf16().collect::<Vec<_>>();
+            runtime
+                .vfs
+                .mount_directory(
+                    &directory,
+                    crate::files::ATTR_DIRECTORY,
+                    crate::files::FileTimes32::default(),
+                )
+                .map_err(HostError::File)?;
+            let prepared = runtime
+                .vfs
+                .prepare_current_directory(&directory)
+                .map_err(HostError::File)?;
             prepared.validate(&runtime.vfs).map_err(HostError::File)?;
             runtime.vfs.commit_namespace(prepared);
         }

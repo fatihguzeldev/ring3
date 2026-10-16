@@ -291,6 +291,12 @@ impl EngineInstance {
     }
 
     fn publish_module_windows_reply(&mut self, reply: ModuleWindowsReply) -> Result<(), HostError> {
+        self.execute_pending_guarded_service(reply.owner, reply.token, |engine| {
+            engine.advance_module_windows_reply(reply)
+        })
+    }
+
+    fn advance_module_windows_reply(&mut self, reply: ModuleWindowsReply) -> Result<(), HostError> {
         let pending = self.checked_pending_call(reply.owner, reply.token)?;
         let exit = decode_exit(&pending.exit).map_err(|_| HostError::Infrastructure)?;
         let ExitReason::Gate { id } = exit.reason else {

@@ -31,6 +31,9 @@ impl EngineInstance {
         &mut self,
         thread: ThreadState32,
     ) -> Result<(), HostError> {
+        if self.defer_guard_service_thread(thread) {
+            return Ok(());
+        }
         if let Some(teb) = self.module_teb_address() {
             let address = GuestAddress(teb + 0x34);
             let mut current = [0; 4];

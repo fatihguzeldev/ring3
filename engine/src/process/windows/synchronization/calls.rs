@@ -152,6 +152,35 @@ impl EngineInstance {
         Ok(true)
     }
     pub(in crate::process) fn finish_synchronization_reply(&mut self) -> Result<(), HostError> {
+        let reply = self
+            .synchronization
+            .as_ref()
+            .and_then(|runtime| runtime.reply)
+            .ok_or(HostError::Call(CallError::InvalidToken))?;
+        self.execute_pending_guarded_service(reply.owner, reply.token, |engine| {
+            engine.advance_synchronization_reply()
+        })
+    }
+    pub(in crate::process) fn check_guard_service_wait_reply(
+        &self,
+        owner: PendingOwner,
+        token: u32,
+    ) -> Result<(), HostError> {
+        if self
+            .synchronization
+            .as_ref()
+            .and_then(|runtime| runtime.reply)
+            .is_none_or(|reply| reply.owner != owner || reply.token != token)
+        {
+            return Err(HostError::Call(CallError::StateChanged));
+        }
+        Ok(())
+    }
+    pub(in crate::process) fn commit_guard_service_wait_reply(&mut self) {
+        self.synchronization.as_mut().unwrap().reply = None;
+    }
+
+    fn advance_synchronization_reply(&mut self) -> Result<(), HostError> {
         let mut reply = self
             .synchronization
             .as_ref()
@@ -206,7 +235,11 @@ impl EngineInstance {
             self.publish_windows_thread(thread)?;
         }
         self.publish_prepared_call(prepared);
-        self.synchronization.as_mut().unwrap().reply = None;
+        if !self.defer_guard_service_cleanup(
+            crate::process::windows::service::WindowsServiceCleanup32::Wait,
+        ) {
+            self.synchronization.as_mut().unwrap().reply = None;
+        }
         Ok(())
     }
     fn execute_synchronization_call(
@@ -274,29 +307,27 @@ impl EngineInstance {
                 .map_err(HostError::Synchronization)?;
                 success(1, None)
             }
-            DuplicateHandle => self.duplicate_event_call(args),
+            DuplicateHandle => self.duplicate_windows_handle_call(args),
             WaitForSingleObject | WaitForSingleObjectEx => {
                 let mut handles = [args[0]];
                 self.with_kernel_wait_handles(&mut handles, |engine, handles| {
-                    engine
-                        .synchronization_mut()?
-                        .wait(
+                    engine.with_windows_wait_objects(handles, |context| {
+                        context.wait(
                             handles,
                             WaitMode32::Any,
                             args[1],
                             api == WaitForSingleObjectEx && args[2] != 0,
                             None,
                         )
-                        .map_err(HostError::Synchronization)
+                    })
                 })
             }
             WaitForMultipleObjects | WaitForMultipleObjectsEx => {
                 let (mut handles, count) = decoding::handles(self.memory()?, args[1], args[0])?;
                 let original = handles;
                 self.with_kernel_wait_handles(&mut handles[..count], |engine, handles| {
-                    engine
-                        .synchronization_mut()?
-                        .wait_projected(
+                    engine.with_windows_wait_objects(handles, |context| {
+                        context.wait_projected(
                             crate::windows::synchronization::WaitHandles32 {
                                 original: &original[..count],
                                 projected: handles,
@@ -310,7 +341,7 @@ impl EngineInstance {
                             api == WaitForMultipleObjectsEx && args[4] != 0,
                             None,
                         )
-                        .map_err(HostError::Synchronization)
+                    })
                 })
             }
             Sleep | SleepEx => self
@@ -329,101 +360,13 @@ impl EngineInstance {
                     .map_err(HostError::Synchronization)?;
                 let mut handles = [args[1]];
                 self.with_kernel_wait_handles(&mut handles, |engine, handles| {
-                    engine
-                        .synchronization_mut()?
-                        .signal_and_wait(args[0], handles[0], args[2], args[3] != 0)
-                        .map_err(HostError::Synchronization)
+                    engine.with_windows_wait_objects(handles, |context| {
+                        context.signal_and_wait(args[0], handles[0], args[2], args[3] != 0)
+                    })
                 })
             }
             _ => Err(HostError::InvalidRequest),
         }
-    }
-    fn duplicate_event_call(&mut self, args: &[u32]) -> Result<WaitOutcome32, HostError> {
-        self.validate_windows_process_handle(args[0], 0x40)
-            .map_err(HostError::Synchronization)?;
-        if !(args[2] == 0 && args[6] & 1 != 0) {
-            self.validate_windows_process_handle(args[2], 0x40)
-                .map_err(HostError::Synchronization)?;
-        }
-        if args[6] & !3 != 0 {
-            return Err(HostError::Synchronization(Error::InvalidWait));
-        }
-        let target = args[2] != 0;
-        if target {
-            decoding::check_output(self.memory()?, args[3])?;
-        }
-        if matches!(args[1], u32::MAX | 0xffff_fffe) {
-            if !target {
-                return Ok(WaitOutcome32::Ready(WaitResult32 {
-                    value: 1,
-                    last_error: None,
-                }));
-            }
-            let access = if args[6] & 2 != 0 {
-                0x001f_ffff
-            } else {
-                args[4]
-            };
-            let prepared = if args[1] == u32::MAX {
-                self.synchronization()?.prepare_process_handle(
-                    self.current_windows_process_id(),
-                    access,
-                    args[5] != 0,
-                )
-            } else {
-                self.synchronization()?.prepare_open_thread(
-                    self.current_windows_thread_id()?,
-                    access,
-                    args[5] != 0,
-                    false,
-                )
-            }
-            .map_err(HostError::Synchronization)?;
-            if args[3] != 0 {
-                self.memory
-                    .as_mut()
-                    .unwrap()
-                    .write(GuestAddress(args[3]), &prepared.handle().to_le_bytes())
-                    .map_err(HostError::Memory)?;
-            }
-            self.synchronization_mut()?.commit_object_handle(prepared);
-            return Ok(WaitOutcome32::Ready(WaitResult32 {
-                value: 1,
-                last_error: None,
-            }));
-        }
-        let prepared = self.synchronization()?.prepare_duplicate(
-            args[1],
-            args[4],
-            args[5] != 0,
-            args[6] & 2 != 0,
-            args[6] & 1 != 0,
-            target,
-        );
-        let prepared = match prepared {
-            Ok(prepared) => prepared,
-            Err(error) => {
-                if args[6] & 1 != 0 {
-                    let _ = self.synchronization_mut()?.close_handle(args[1]);
-                }
-                return Err(HostError::Synchronization(error));
-            }
-        };
-        if target && args[3] != 0 {
-            self.memory
-                .as_mut()
-                .ok_or(HostError::Closed)?
-                .write(
-                    GuestAddress(args[3]),
-                    &prepared.handle().unwrap().to_le_bytes(),
-                )
-                .map_err(HostError::Memory)?;
-        }
-        self.synchronization_mut()?.commit_duplicate(prepared);
-        Ok(WaitOutcome32::Ready(WaitResult32 {
-            value: 1,
-            last_error: None,
-        }))
     }
     fn execute_message_wait(&mut self, id: u32, args: &[u32]) -> Result<WaitOutcome32, HostError> {
         self.refresh_user32_input()?;
@@ -445,9 +388,8 @@ impl EngineInstance {
                 .as_ref()
                 .ok_or(HostError::Synchronization(Error::Unsupported))?
                 .wait_queue_status(engine.current_windows_thread_id()?);
-            engine
-                .synchronization_mut()?
-                .wait_with_messages_projected(
+            engine.with_windows_wait_objects(handles, |context| {
+                context.wait_with_messages_projected(
                     crate::windows::synchronization::WaitHandles32 {
                         original: &original[..count],
                         projected: handles,
@@ -465,7 +407,7 @@ impl EngineInstance {
                     },
                     queue,
                 )
-                .map_err(HostError::Synchronization)
+            })
         })?;
         let thread = self.current_windows_thread_id()?;
         self.user32

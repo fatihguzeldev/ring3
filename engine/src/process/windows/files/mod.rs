@@ -17,7 +17,7 @@ use crate::{
 };
 use asynchronous::AsyncRuntime32;
 pub(in crate::process) use asynchronous::FileThreadReply32;
-use handles::{KernelFileHandles32, KernelFileObject32};
+use handles::KernelFileHandles32;
 pub use host::{FileInput32, FileMountStart32};
 use mapping::{MappingLimits32, MappingRuntime32};
 pub(in crate::process) use ordinary::FileCallOutcome32;

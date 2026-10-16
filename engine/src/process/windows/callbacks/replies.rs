@@ -38,6 +38,16 @@ impl EngineInstance {
             .windows_replies
             .last()
             .ok_or(HostError::Call(CallError::InvalidToken))?;
+        self.execute_pending_guarded_service(reply.owner, reply.token, |engine| {
+            engine.advance_windows_reply()
+        })
+    }
+
+    fn advance_windows_reply(&mut self) -> Result<(), HostError> {
+        let reply = *self
+            .windows_replies
+            .last()
+            .ok_or(HostError::Call(CallError::InvalidToken))?;
         self.checked_pending_call(reply.owner, reply.token)?;
         let ReplyStage32::Received(result) = reply.stage else {
             return Err(HostError::Call(CallError::InvalidToken));
@@ -194,7 +204,11 @@ impl EngineInstance {
             self.publish_windows_thread(thread)?;
         }
         self.publish_prepared_call(prepared);
-        self.windows_replies.pop();
+        if !self.defer_guard_service_cleanup(
+            crate::process::windows::service::WindowsServiceCleanup32::Callback,
+        ) {
+            self.windows_replies.pop();
+        }
         Ok(())
     }
 
@@ -238,6 +252,19 @@ impl EngineInstance {
     }
 
     pub fn resume_user32_wait(&mut self, key: u64, continuation: u64) -> Result<(), HostError> {
+        if key != self.key {
+            return Err(HostError::InvalidArtifact);
+        }
+        let reply = *self
+            .windows_replies
+            .last()
+            .ok_or(HostError::Call(CallError::InvalidToken))?;
+        self.execute_pending_guarded_service(reply.owner, reply.token, |engine| {
+            engine.advance_user32_wait(key, continuation)
+        })
+    }
+
+    fn advance_user32_wait(&mut self, key: u64, continuation: u64) -> Result<(), HostError> {
         if key != self.key {
             return Err(HostError::InvalidArtifact);
         }

@@ -33,7 +33,10 @@ impl EngineInstance {
         if reply.id == crate::windows::WindowsApi32::ExitProcess.id() {
             self.publish_process_exit(self.pending_process_exit.ok_or(HostError::Infrastructure)?)?;
         } else {
-            self.try_complete_file_call(reply.owner, token, reply.id, reply.frame)?;
+            self.execute_pending_guarded_service(reply.owner, token, |engine| {
+                engine.try_complete_file_call(reply.owner, token, reply.id, reply.frame)?;
+                Ok(())
+            })?;
         }
         Ok(())
     }

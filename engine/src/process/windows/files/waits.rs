@@ -108,6 +108,9 @@ impl EngineInstance {
         let mut missing = [None; 64];
         let mut count = 0;
         for &handle in handles.iter() {
+            if matches!(handle, u32::MAX | 0xffff_fffe) {
+                continue;
+            }
             if handle < 0x8000_0000 {
                 sync.validate_wait_handle(handle)
                     .map_err(HostError::Synchronization)?;
@@ -156,7 +159,7 @@ impl EngineInstance {
                 .map_err(|_| HostError::Synchronization(SynchronizationError32::Allocation))?;
         }
         for handle in handles {
-            if *handle < 0x8000_0000 {
+            if *handle < 0x8000_0000 || matches!(*handle, u32::MAX | 0xffff_fffe) {
                 continue;
             }
             let files = self.files.as_mut().unwrap();

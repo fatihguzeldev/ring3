@@ -468,7 +468,10 @@ impl EngineInstance {
         })
     }
 
-    pub(in crate::process) fn publish_prepared_call(&mut self, mut prepared: PreparedCall32) {
+    pub(in crate::process) fn publish_prepared_call(&mut self, prepared: PreparedCall32) {
+        let Some(mut prepared) = self.defer_guard_service_call(prepared) else {
+            return;
+        };
         if let Some(pending) = &self.pending_call {
             pending.extended.restore_state_metadata(&mut prepared.state);
         }
