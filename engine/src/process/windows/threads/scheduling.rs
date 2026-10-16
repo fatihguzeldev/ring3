@@ -280,6 +280,11 @@ impl EngineInstance {
         })
     }
     fn resume_ready_thread_provider(&mut self) -> Result<(), HostError> {
+        if self.active_version_reply_ready() {
+            let wait = self.pending_version_call()?.ok_or(HostError::Infrastructure)?;
+            self.resume_version_call(wait.key, wait.token)?;
+        }
+
         if self.active_activation_reply_ready() {
             let wait = self
                 .pending_activation_call()

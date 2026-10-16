@@ -7,6 +7,7 @@ use crate::{
 };
 
 mod activation;
+mod version;
 mod callbacks;
 mod configuration;
 mod d3d8;
@@ -23,6 +24,7 @@ mod threads;
 mod user32;
 
 pub(crate) use activation::*;
+pub(crate) use version::*;
 pub(crate) use callbacks::*;
 pub(crate) use configuration::*;
 pub(crate) use d3d8::*;

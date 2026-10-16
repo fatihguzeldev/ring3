@@ -35,6 +35,9 @@ impl EngineInstance {
         for value in self.ole32_pending_owners() {
             owner(&mut pins, value);
         }
+        if let Some(value) = self.version.pending_owner() {
+            owner(&mut pins, value);
+        }
         if let Some(value) = self.winmm.pending_owner() {
             owner(&mut pins, value);
         }

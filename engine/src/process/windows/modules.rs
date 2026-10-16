@@ -414,6 +414,7 @@ impl EngineInstance {
         if let Some(resources) = self.resources.as_mut() {
             resources.commit_process_exit();
         }
+        self.version.terminate();
         self.nls.commit_process_exit();
         self.retire_activation_process();
         self.exceptions.deliveries_clear_process_exit();

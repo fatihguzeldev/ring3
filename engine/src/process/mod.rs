@@ -61,3 +61,5 @@ pub use windows::resources::{ResourceConfig32, ResourceError32};
 
 pub use windows::activation::{ActivationConfig32, ActivationError32, ActivationWait32};
 pub use windows::nls::{NlsError32, NlsProfile32};
+
+pub use windows::version::PendingVersionCall32;

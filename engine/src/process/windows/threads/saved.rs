@@ -19,6 +19,7 @@ use crate::{
             synchronization::SynchronizationThreadReply32,
             user32::User32ThreadReply32,
             winmm::WinmmThreadReply32,
+            version::VersionThreadReply32,
         },
     },
     windows::ThreadState32,
@@ -44,6 +45,7 @@ pub(super) struct SavedThread32 {
     pub user32: Option<User32ThreadReply32>,
     registry: Option<RegistryReply32>,
     activation: Option<ActivationThreadReply32>,
+    version: Option<VersionThreadReply32>,
     winmm: WinmmThreadReply32,
     #[cfg(any(target_arch = "wasm32", test))]
     detection: Option<Box<[crate::process::cpu::events::detection::DetectionSlot32; 1]>>,
@@ -88,6 +90,7 @@ impl SavedThread32 {
                 .map(|runtime| runtime.empty_thread_reply()),
             registry: None,
             activation: None,
+            version: None,
             winmm: engine.winmm.empty_thread_reply(),
             #[cfg(any(target_arch = "wasm32", test))]
             detection: None,
@@ -124,7 +127,8 @@ impl SavedThread32 {
             ))
     }
     pub(super) fn ready(&self, engine: &EngineInstance, now: u64, thread: u32) -> bool {
-        self.activation
+        self.version.as_ref().is_some_and(|reply| engine.version_thread_reply_ready(reply))
+            || self.activation
             .as_ref()
             .is_some_and(|reply| engine.activation_thread_reply_ready(reply))
             || engine.registered_com_wait_ready(thread)
@@ -301,6 +305,7 @@ impl EngineInstance {
             module_reply: self.module_windows_reply.take(),
             module_state: self.take_module_thread_state(),
             winmm: self.winmm.take_thread_reply(),
+            version: self.version.take_thread_reply(),
             d3d8_reply: self.d3d8_reply.take(),
             d3d8: self
                 .d3d8
@@ -360,6 +365,7 @@ impl EngineInstance {
         self.module_windows_reply = saved.module_reply;
         self.restore_module_thread_state(saved.module_state);
         self.winmm.restore_thread_reply(saved.winmm);
+        self.version.restore_thread_reply(saved.version);
         self.d3d8_reply = saved.d3d8_reply;
         if let (Some(runtime), Some(reply)) = (self.d3d8.as_mut(), saved.d3d8) {
             runtime.restore_thread_reply(reply);

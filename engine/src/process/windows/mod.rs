@@ -36,3 +36,5 @@ pub(super) mod resources;
 pub(super) mod console;
 pub(super) mod native;
 pub(super) mod security;
+
+pub(super) mod version;

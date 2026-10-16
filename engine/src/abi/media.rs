@@ -25,6 +25,7 @@ pub enum MediaRecordKind {
     WindowsInputDelivery = 20,
     DInputHaptics = 21,
     ActivationWait = 22,
+    VersionWait = 23,
 }
 
 // r3mr v1: kind at 6, byte size at 8, reserved zero at 12, epoch at 16, five u64 values at 24.

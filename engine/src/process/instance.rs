@@ -43,6 +43,7 @@ pub enum HostError {
     Nls(crate::windows::nls::NlsError32),
     Resource(crate::process::windows::resources::ResourceError32),
     Activation(crate::windows::activation::ActivationError32),
+    Version(crate::windows::version::VersionError32),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -64,6 +65,7 @@ pub struct EngineInstance {
     pub(in crate::process) activation:
         Option<crate::process::windows::activation::ActivationRuntime32>,
     pub(in crate::process) exceptions: crate::process::windows::exceptions::ExceptionRuntime32,
+    pub(in crate::process) version: crate::process::windows::version::VersionRuntime32,
     pub(in crate::process) nls: crate::process::windows::nls::NlsRuntime32,
     pub(in crate::process) registry: Option<crate::process::windows::registry::RegistryRuntime32>,
     pub(in crate::process) files: Option<crate::process::windows::files::FileRuntime32>,
@@ -145,6 +147,7 @@ impl EngineInstance {
             registry: None,
             exceptions: crate::process::windows::exceptions::ExceptionRuntime32::new()
                 .map_err(HostError::Exception)?,
+            version: Default::default(),
             nls: Default::default(),
             files: None,
             memory: Some(memory),
@@ -241,6 +244,7 @@ impl EngineInstance {
         self.registry = None;
         self.exceptions = crate::process::windows::exceptions::ExceptionRuntime32::new()
             .expect("default exception handler limit");
+        self.version = Default::default();
         self.nls = Default::default();
         self.files = None;
         self.d3d8 = None;
