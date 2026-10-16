@@ -65,10 +65,7 @@ impl EngineInstance {
         let exit = decode_exit(&self.arena()[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE])
             .map_err(|_| HostError::Call(CallError::InvalidStop))?;
         if exit.reason != ExitReason::NeedCode
-            || !(target.contains_instruction(state.eip)
-                || self
-                    .module_gate_at(state.eip)
-                    .is_some_and(|gate| target.matches_gate(gate.entry.0, gate.id))
+            || !(self.compiled_callback_entry(target, state.eip)
                 || (state.eip == record.return_pc
                     && target.matches_gate(state.eip, record.return_id)))
         {
@@ -237,7 +234,7 @@ impl EngineInstance {
         if !outer_unit.matches_gate(callback.outer.frame.state().eip, outer_gate_id) {
             return Err(HostError::Call(CallError::InvalidStop));
         }
-        if !callback_unit.contains_instruction(record.entry_pc)
+        if !self.compiled_callback_entry(callback_unit, record.entry_pc)
             || !(callback_unit.matches_gate(record.return_pc, record.return_id)
                 || self.is_canonical_callback_return(record.return_pc, record.return_id))
             || record.return_id == outer_gate_id
@@ -361,7 +358,7 @@ impl EngineInstance {
             return Err(HostError::Call(CallError::InvalidStop));
         }
         let callback_unit = self.guard_resident_unit(key, callback_id)?;
-        if !callback_unit.contains_instruction(entry_pc)
+        if !self.compiled_callback_entry(callback_unit, entry_pc)
             || !(callback_unit.matches_gate(return_pc, return_id)
                 || self.is_canonical_callback_return(return_pc, return_id))
             || return_id == outer_gate_id

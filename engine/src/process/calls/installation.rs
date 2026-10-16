@@ -42,7 +42,7 @@ impl EngineInstance {
             .unwrap()
             .authorized_resident_record()
             .unwrap();
-        if unit_id == record.outer_unit_id || !target.contains_instruction(pc) {
+        if unit_id == record.outer_unit_id || !self.compiled_callback_entry(target, pc) {
             return Err(HostError::InvalidRequest);
         }
         self.acknowledge_resident_slot(unit_id, slot)

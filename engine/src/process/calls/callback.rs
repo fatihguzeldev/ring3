@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+mod entry;
+
 use crate::process::{
     CallError, EngineInstance, HostError,
     calls::call::{PendingCall, PendingOwner},
@@ -205,7 +207,7 @@ impl EngineInstance {
         let ExitReason::Gate { id: outer_id } = outer_exit.reason else {
             return Err(call_error(CallError::InvalidStop));
         };
-        if !artifact.contains_instruction(entry_pc)
+        if !self.compiled_callback_entry(artifact, entry_pc)
             || !artifact.matches_gate(return_pc, return_id)
             || return_id == outer_id
         {

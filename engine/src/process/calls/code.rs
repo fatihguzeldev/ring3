@@ -133,7 +133,11 @@ impl EngineInstance {
         }
         let next_generation = self.next_artifact_generation()?;
         let artifact = self.prepare_artifact(count, gate_count, next_generation, format)?;
-        replacement_admission(&artifact, callback, stopped.eip)?;
+        replacement_admission(
+            &artifact,
+            callback,
+            self.compiled_callback_entry(&artifact, stopped.eip),
+        )?;
         let record = CallbackRecord32 {
             generation: next_generation,
             phase: 1,
@@ -173,7 +177,11 @@ impl EngineInstance {
             .artifact
             .wasm_bytes(self.memory()?)
             .map_err(|_| HostError::CodeInvalidated)?;
-        replacement_admission(&prepared.artifact, callback, prepared.pc)?;
+        replacement_admission(
+            &prepared.artifact,
+            callback,
+            self.compiled_callback_entry(&prepared.artifact, prepared.pc),
+        )?;
 
         if prepared.record.generation != self.next_artifact_generation()? {
             return Err(HostError::InvalidArtifact);
@@ -220,7 +228,7 @@ impl EngineInstance {
 fn replacement_admission(
     artifact: &CompiledRegion,
     callback: &SuspendedCallback,
-    pc: u32,
+    entry_admitted: bool,
 ) -> Result<(), HostError> {
     let record = callback.replacement_record()?;
     if callback.outer.owner != PendingOwner::Replacement(record.generation) {
@@ -231,7 +239,7 @@ fn replacement_admission(
     let ExitReason::Gate { id } = outer_exit.reason else {
         return Err(HostError::Call(CallError::InvalidStop));
     };
-    if !artifact.contains_instruction(pc)
+    if !entry_admitted
         || !artifact.matches_gate(record.return_pc, record.return_id)
         || !artifact.matches_gate(callback.outer.frame.state().eip, id)
     {
