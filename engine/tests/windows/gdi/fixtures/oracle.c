@@ -2,6 +2,7 @@
 #include <windows.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 static void failed_dib(const char *name, BITMAPINFO *info, HANDLE section, DWORD offset, int comma) {
     void *bits = (void *)(ULONG_PTR)0x12345678;
@@ -89,6 +90,61 @@ static void logical_palette_reference(void) {
     SelectPalette(dc, old_palette, FALSE); DeleteDC(dc); DeleteObject(palette);
 }
 
+static void synthesized_palette_reference(void) {
+    DWORD input[2] = {0, 0xffffff};
+    HBITMAP bitmap = CreateBitmap(2, 1, 1, 32, input);
+    HDC dc = CreateCompatibleDC(NULL);
+    const WORD depths[] = {1, 4, 8};
+    printf(",\"synthesizedPalette\":[");
+    for (unsigned usage = 0; usage <= 1; ++usage) {
+        for (unsigned i = 0; i < 3; ++i) {
+            struct OutputInfo { BITMAPINFOHEADER header; BYTE table[1024]; } info;
+            memset(&info, 0x5a, sizeof(info));
+            memset(&info.header, 0, sizeof(info.header));
+            info.header.biSize = sizeof(info.header);
+            info.header.biWidth = 2; info.header.biHeight = -1;
+            info.header.biPlanes = 1; info.header.biBitCount = depths[i];
+            BYTE pixels[4] = {0x5a,0x5a,0x5a,0x5a};
+            SetLastError(0xabcdef01);
+            int count = GetDIBits(dc, bitmap, 0, 1, pixels, (BITMAPINFO *)&info, usage);
+            DWORD error = GetLastError();
+            printf("%s{\"bits\":%u,\"usage\":%u,\"lines\":%d,\"error\":%lu,\"used\":%lu,\"imageBytes\":%lu,\"pixels\":[%u,%u,%u,%u],\"table\":[",
+                usage || i ? "," : "", depths[i], usage, count, error, info.header.biClrUsed,
+                info.header.biSizeImage, pixels[0], pixels[1], pixels[2], pixels[3]);
+            unsigned entries = 1u << depths[i];
+            for (unsigned j = 0; j < entries; ++j) {
+                unsigned long value;
+                if (usage == DIB_PAL_COLORS) { WORD word; memcpy(&word, info.table + j * 2, 2); value = word; }
+                else { DWORD word; memcpy(&word, info.table + j * 4, 4); value = word; }
+                printf("%s%lu", j ? "," : "", value);
+            }
+            printf("]}");
+        }
+    }
+    printf("]");
+    PALETTEENTRY defaults[20] = {{0}};
+    UINT default_count = GetPaletteEntries((HPALETTE)GetStockObject(DEFAULT_PALETTE), 0, 20, defaults);
+    printf(",\"defaultPalette\":{\"count\":%u,\"entries\":[", default_count);
+    for (unsigned i = 0; i < default_count; ++i) {
+        DWORD value; memcpy(&value, &defaults[i], 4);
+        printf("%s%lu", i ? "," : "", value);
+    }
+    printf("]},\"paletteLimits\":[");
+    const unsigned sizes[] = {0,1,256,1024,1025};
+    for (unsigned i = 0; i < sizeof(sizes)/sizeof(sizes[0]); ++i) {
+        LOGPALETTE *logical = (LOGPALETTE *)calloc(1, 4 + sizes[i] * sizeof(PALETTEENTRY));
+        logical->palVersion = 0x300; logical->palNumEntries = (WORD)sizes[i];
+        SetLastError(0xabcdef01);
+        HPALETTE palette = CreatePalette(logical);
+        DWORD error = GetLastError();
+        printf("%s{\"entries\":%u,\"created\":%u,\"error\":%lu}", i ? "," : "", sizes[i], palette != NULL, error);
+        if (palette) DeleteObject(palette);
+        free(logical);
+    }
+    printf("]");
+    DeleteDC(dc); DeleteObject(bitmap);
+}
+
 int main(void) {
     const char *classes[] = {"Button", "Edit", "Static", "ListBox", "ScrollBar", "ComboBox"};
     HWND parent = CreateWindowExA(0, "Static", "parent", WS_POPUP, 0, 0, 100, 100, NULL, NULL, NULL, NULL);
@@ -140,6 +196,7 @@ int main(void) {
     system_brush_reference();
     bitmap_masks_reference();
     logical_palette_reference();
+    synthesized_palette_reference();
     DestroyWindow(parent);
     puts("}");
     return 0;
