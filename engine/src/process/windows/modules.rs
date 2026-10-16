@@ -17,6 +17,12 @@ pub(in crate::process) struct ModuleWindowsReply {
     token: u32,
     initializer_token: Option<u64>,
     operation: Option<ModuleOperation32>,
+    sink: ModuleReplySink32,
+}
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ModuleReplySink32 {
+    Windows,
+    Ole32,
 }
 impl ModuleWindowsReply {
     pub(in crate::process) fn waiting_loader(&self) -> bool {
@@ -102,6 +108,7 @@ impl EngineInstance {
                 token: pending.token,
                 initializer_token: None,
                 operation: None,
+                sink: ModuleReplySink32::Windows,
             };
             self.park_module_request(request)?;
             self.module_windows_reply = Some(reply);
@@ -265,6 +272,20 @@ impl EngineInstance {
         let Some(pending) = self.pending_call.as_ref() else {
             return Ok(());
         };
+        if self.registered_com_owns_call(pending.owner, pending.token) {
+            if self.module_windows_reply.is_some() {
+                return Err(HostError::Call(CallError::Busy));
+            }
+            let reply = ModuleWindowsReply {
+                owner: pending.owner,
+                token: pending.token,
+                initializer_token,
+                operation: Some(operation),
+                sink: ModuleReplySink32::Ole32,
+            };
+            self.module_windows_reply = Some(reply);
+            return self.publish_module_windows_reply(reply);
+        }
         let exit = decode_exit(&pending.exit).map_err(|_| HostError::Infrastructure)?;
         let ExitReason::Gate { id } = exit.reason else {
             return Ok(());
@@ -294,6 +315,7 @@ impl EngineInstance {
             token: pending.token,
             initializer_token,
             operation: Some(operation),
+            sink: ModuleReplySink32::Windows,
         };
         self.module_windows_reply = Some(reply);
         self.publish_module_windows_reply(reply)
@@ -307,6 +329,21 @@ impl EngineInstance {
 
     fn advance_module_windows_reply(&mut self, reply: ModuleWindowsReply) -> Result<(), HostError> {
         let pending = self.checked_pending_call(reply.owner, reply.token)?;
+        if reply.sink == ModuleReplySink32::Ole32 {
+            let operation = reply.operation.ok_or(HostError::Call(CallError::Busy))?;
+            if !self.complete_registered_com_module_operation(operation)? {
+                return Err(HostError::Infrastructure);
+            }
+            if self.module_windows_reply.is_some_and(|current| {
+                current.owner == reply.owner
+                    && current.token == reply.token
+                    && current.initializer_token == reply.initializer_token
+                    && current.sink == ModuleReplySink32::Ole32
+            }) {
+                self.module_windows_reply = None;
+            }
+            return Ok(());
+        }
         let exit = decode_exit(&pending.exit).map_err(|_| HostError::Infrastructure)?;
         let ExitReason::Gate { id } = exit.reason else {
             return Err(HostError::Infrastructure);
@@ -491,6 +528,9 @@ impl EngineInstance {
         &mut self,
         error: HostError,
     ) -> Result<bool, HostError> {
+        if self.fail_registered_com_module_source(error)? {
+            return Ok(true);
+        }
         let Some(pending) = &self.pending_call else {
             return Ok(false);
         };

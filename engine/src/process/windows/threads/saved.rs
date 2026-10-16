@@ -131,6 +131,7 @@ impl SavedThread32 {
                 .files
                 .as_ref()
                 .is_some_and(|reply| reply.alertable() && engine.has_pending_thread_apc(thread))
+            || engine.registered_com_wait_ready(thread)
             || engine.exceptions.thread_unhandled(thread)
             || self
                 .dinput

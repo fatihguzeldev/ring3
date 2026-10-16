@@ -67,6 +67,25 @@ pub(super) fn operation_execution_pins(
     })
 }
 impl ModuleProcess32 {
+    pub(in crate::process) fn parked_call(&self) -> Option<(PendingOwner, u32)> {
+        self.operations
+            .last()?
+            .outer
+            .as_ref()
+            .map(|outer| (outer.owner, outer.token))
+    }
+    pub(in crate::process) fn has_parked_windows_reply(
+        &self,
+        provider: crate::process::windows::callbacks::WindowsCallbackProvider32,
+    ) -> bool {
+        self.operations.last().is_some_and(|operation| {
+            operation.outer.as_ref().is_some_and(|outer| {
+                operation.execution.replies.last().is_some_and(|reply| {
+                    reply.provider() == provider && reply.matches_call(outer.owner, outer.token)
+                })
+            })
+        })
+    }
     pub(in crate::process) fn execution_pins(&self) -> impl Iterator<Item = u64> + '_ {
         operation_execution_pins(&self.operations)
     }

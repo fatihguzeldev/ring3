@@ -5,13 +5,53 @@ struct Apartment32 {
     thread: u32,
     single_threaded: bool,
     references: u32,
+    internal: bool,
 }
 
 pub struct Apartments32 {
     entries: Vec<Apartment32>,
     maximum: usize,
+    main_sta: Option<u32>,
 }
 impl Apartments32 {
+    pub(crate) fn has_other_user_mta(&self, thread: u32) -> bool {
+        self.entries.iter().any(|entry| {
+            entry.thread != thread
+                && !entry.single_threaded
+                && !entry.internal
+                && entry.references != 0
+        })
+    }
+    pub(crate) fn has_other_user(&self, thread: u32) -> bool {
+        self.entries
+            .iter()
+            .any(|entry| entry.thread != thread && !entry.internal && entry.references != 0)
+    }
+    #[cfg(test)]
+    pub(crate) fn mark_host(&mut self, thread: u32) {
+        self.entries
+            .iter_mut()
+            .find(|entry| entry.thread == thread)
+            .expect("canonical host apartment was initialized")
+            .internal = true;
+    }
+    pub fn is_single_threaded(&self, thread: u32) -> Result<bool, HResult32> {
+        self.entries
+            .iter()
+            .find(|entry| entry.thread == thread)
+            .map(|entry| entry.single_threaded)
+            .ok_or(HResult32::NOT_INITIALIZED)
+    }
+    pub fn main_sta_thread(&self) -> Option<u32> {
+        self.main_sta
+            .filter(|thread| self.entries.iter().any(|entry| entry.thread == *thread))
+    }
+    pub fn initialization_count(&self, thread: u32) -> u32 {
+        self.entries
+            .iter()
+            .find(|entry| entry.thread == thread)
+            .map_or(0, |entry| entry.references)
+    }
     pub fn new(maximum: usize) -> Result<Self, HResult32> {
         if maximum == 0 || maximum > 65536 {
             return Err(HResult32::INVALID_ARGUMENT);
@@ -20,7 +60,11 @@ impl Apartments32 {
         entries
             .try_reserve_exact(maximum)
             .map_err(|_| HResult32::OUT_OF_MEMORY)?;
-        Ok(Self { entries, maximum })
+        Ok(Self {
+            entries,
+            maximum,
+            main_sta: None,
+        })
     }
     pub fn initialize(
         &mut self,
@@ -49,7 +93,11 @@ impl Apartments32 {
             thread,
             single_threaded,
             references: 1,
+            internal: false,
         });
+        if single_threaded && self.main_sta_thread().is_none() {
+            self.main_sta = Some(thread);
+        }
         Ok(HResult32::OK)
     }
     pub fn uninitialize(&mut self, thread: u32) {

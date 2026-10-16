@@ -131,6 +131,15 @@ impl EngineInstance {
         }
         self.park_windows_callback(request)
     }
+    pub(in crate::process) fn park_ole32_callback(
+        &mut self,
+        request: WindowsCallback32,
+    ) -> Result<(), HostError> {
+        if request.provider != WindowsCallbackProvider32::Ole32 {
+            return Err(HostError::InvalidRequest);
+        }
+        self.park_windows_callback(request)
+    }
     fn park_windows_callback(&mut self, request: WindowsCallback32) -> Result<(), HostError> {
         validate_request(request)?;
         self.check_windows_callback_capacity()?;
@@ -178,6 +187,7 @@ impl EngineInstance {
                 || self.windows_fls_provider_owns_token(token)
                 || self.dinput_file_provider_owns_token(token)
                 || self.activation_provider_owns_token(token)
+                || self.ole32_provider_owns_token(token)
                 || self.module_source_provider_owns_token(token)
                 || self.winmm_provider_owns_token(token))
     }

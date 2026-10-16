@@ -1,4 +1,4 @@
-use super::memory::failure;
+use super::super::memory::failure;
 use crate::{
     process::EngineInstance,
     windows::{
@@ -7,7 +7,7 @@ use crate::{
     },
 };
 impl EngineInstance {
-    pub(super) fn activate_known_com_class(
+    pub(in crate::process::windows::ole32) fn activate_known_com_class(
         &mut self,
         class: KnownClass32,
         iid: InterfaceId,

@@ -22,6 +22,7 @@ pub enum WindowsCallbackProvider32 {
     Files,
     Resources,
     Nls,
+    Ole32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -51,6 +52,9 @@ pub(in crate::process) struct WindowsReply32 {
     activation: Option<crate::windows::activation::ActivationScope32>,
 }
 impl WindowsReply32 {
+    pub(in crate::process) fn provider(&self) -> WindowsCallbackProvider32 {
+        self.provider
+    }
     pub(in crate::process) fn matches_call(&self, owner: PendingOwner, token: u32) -> bool {
         self.owner == owner && self.token == token
     }

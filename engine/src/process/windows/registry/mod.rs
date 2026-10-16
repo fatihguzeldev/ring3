@@ -1,4 +1,5 @@
 mod calls;
+mod com;
 mod context;
 mod enumeration;
 mod host;

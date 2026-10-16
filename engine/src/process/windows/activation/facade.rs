@@ -4,11 +4,9 @@ use crate::{
     windows::activation::ActivationError32 as E,
 };
 
-#[cfg(test)]
 use crate::windows::activation::ComRedirection32;
 
 impl EngineInstance {
-    #[cfg(test)]
     pub(in crate::process) fn active_com_redirection(
         &self,
         clsid: [u8; 16],

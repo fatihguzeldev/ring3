@@ -11,6 +11,7 @@ pub(in crate::process) struct Ole32Runtime32 {
     pub(super) factories: Vec<Option<KnownClass32>>,
     pub(super) methods: [GuestAddress; 5],
     pub(super) server_locks: [u32; 7],
+    pub(super) activation: super::activation::ActivationRuntime32,
 }
 impl Ole32Runtime32 {
     pub(in crate::process) fn new(config: Ole32Config32) -> Result<Self, Ole32Error32> {
@@ -41,6 +42,7 @@ impl Ole32Runtime32 {
             factories,
             methods: [GuestAddress(0); 5],
             server_locks: [0; 7],
+            activation: Default::default(),
         })
     }
     pub(super) fn initialize_methods(&mut self, gates: &[GateSpec]) -> Result<(), HResult32> {
@@ -57,12 +59,6 @@ impl Ole32Runtime32 {
     }
 }
 
-impl Ole32Runtime32 {
-    pub(in crate::process) fn guest_reservation(&self) -> crate::memory::PageRange {
-        self.com.reservation()
-    }
-}
-
 impl crate::process::EngineInstance {
     pub(in crate::process) fn check_com_thread_initialized(
         &self,
@@ -73,5 +69,40 @@ impl crate::process::EngineInstance {
             .ok_or(HResult32::NOT_INITIALIZED)?
             .apartments
             .check(thread)
+    }
+}
+
+impl Ole32Runtime32 {
+    pub(in crate::process) fn guest_reservation(&self) -> crate::memory::PageRange {
+        self.com.reservation()
+    }
+    pub(in crate::process) fn activation_scratch_reservation(&self) -> crate::memory::PageRange {
+        super::activation::ActivationRuntime32::scratch_reservation()
+    }
+    pub(in crate::process) fn activation_scratch_ranges(
+        &self,
+        memory: &crate::memory::AddressSpace,
+        thread: u32,
+    ) -> Result<Vec<crate::memory::PageRange>, crate::memory::MemoryError> {
+        let mut ranges = Vec::new();
+        for pending in self
+            .activation
+            .pending
+            .iter()
+            .filter(|pending| pending.thread == thread)
+        {
+            pending.scratch.check(memory)?;
+            ranges
+                .try_reserve(1)
+                .map_err(|_| crate::memory::MemoryError::Allocation)?;
+            ranges.push(pending.scratch.range());
+        }
+        Ok(ranges)
+    }
+    pub(in crate::process) fn commit_thread_exit(&mut self, thread: u32) {
+        self.activation
+            .pending
+            .retain(|pending| pending.thread != thread);
+        self.apartments.terminate_thread(thread);
     }
 }

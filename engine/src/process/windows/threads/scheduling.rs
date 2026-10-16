@@ -271,6 +271,7 @@ impl EngineInstance {
         })
     }
     fn resume_ready_thread_provider(&mut self) -> Result<(), HostError> {
+        self.resume_registered_com_loader_wait()?;
         if self.active_activation_reply_ready() {
             let wait = self
                 .pending_activation_call()

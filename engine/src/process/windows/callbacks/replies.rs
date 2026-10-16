@@ -144,6 +144,11 @@ impl EngineInstance {
                     }
                 }
             }
+            WindowsCallbackProvider32::Ole32 => {
+                let outcome = self.resume_ole32_callback(reply.continuation, result)?;
+                self.accept_ole32_loader_outcome(outcome)?;
+                return Ok(());
+            }
             WindowsCallbackProvider32::D3D8
             | WindowsCallbackProvider32::DirectSound
             | WindowsCallbackProvider32::DirectInput
@@ -158,6 +163,7 @@ impl EngineInstance {
                     WindowsCallbackProvider32::DirectInput => {
                         self.resume_dinput_callback(reply.continuation, result)?
                     }
+                    WindowsCallbackProvider32::Ole32 => unreachable!(),
                     WindowsCallbackProvider32::Nls => {
                         self.resume_nls_callback(reply.continuation, result)?
                     }
@@ -193,6 +199,64 @@ impl EngineInstance {
         Ok(())
     }
 
+    pub(in crate::process) fn accept_ole32_loader_outcome(
+        &mut self,
+        outcome: crate::process::windows::ole32::Ole32CallbackOutcome32,
+    ) -> Result<(), HostError> {
+        use crate::process::windows::ole32::Ole32CallbackOutcome32 as O;
+        if matches!(outcome, O::LoaderPending) && self.pending_call.is_none() {
+            return if self
+                .modules
+                .has_parked_windows_reply(WindowsCallbackProvider32::Ole32)
+                || self
+                    .modules
+                    .parked_call()
+                    .is_some_and(|(owner, token)| self.ole32_owns_loader_call(owner, token))
+            {
+                Ok(())
+            } else {
+                Err(HostError::Infrastructure)
+            };
+        }
+        let pending = self
+            .pending_call
+            .as_ref()
+            .ok_or(HostError::Infrastructure)?;
+        let existing = self.windows_replies.last().is_some_and(|reply| {
+            reply.provider == WindowsCallbackProvider32::Ole32
+                && reply.matches_call(pending.owner, pending.token)
+        });
+        if existing {
+            let reply = self.windows_replies.last_mut().unwrap();
+            reply.stage = match outcome {
+                O::Complete(result) => ReplyStage32::Complete(result),
+                O::Callback(request) => {
+                    validate_request(request)?;
+                    if request.provider != WindowsCallbackProvider32::Ole32 {
+                        return Err(HostError::Infrastructure);
+                    };
+                    reply.continuation = request.continuation;
+                    ReplyStage32::Ready(request)
+                }
+                O::LoaderPending => ReplyStage32::Wait,
+            };
+            if matches!(reply.stage, ReplyStage32::Complete(_)) {
+                self.publish_windows_reply()?;
+            }
+        } else {
+            match outcome {
+                O::Complete(result) => {
+                    let frame = pending.frame;
+                    self.publish_prepared_call(Self::prepare_completed_call(
+                        frame.complete(result),
+                    )?);
+                }
+                O::Callback(request) => self.park_ole32_callback(request)?,
+                O::LoaderPending => {}
+            }
+        }
+        Ok(())
+    }
     fn publish_windows_reply(&mut self) -> Result<(), HostError> {
         let reply = *self
             .windows_replies

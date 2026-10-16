@@ -27,6 +27,14 @@ impl EngineInstance {
             _ => return Err(HostError::Call(CallError::InvalidRequest)),
         };
         self.checked_pending_call(reply.owner, reply.token)?;
+        if reply.provider == super::WindowsCallbackProvider32::Ole32 {
+            self.check_registered_com_callback(
+                reply.owner,
+                reply.token,
+                reply.frame,
+                reply.continuation,
+            )?;
+        }
         let activation = self.prepare_activation_entry(None)?;
         let record = self.begin_provider_resident_callback(
             key,
@@ -88,6 +96,14 @@ impl EngineInstance {
             return Err(HostError::Call(CallError::InvalidToken));
         }
         self.checked_pending_call(reply.owner, reply.token)?;
+        if reply.provider == super::WindowsCallbackProvider32::Ole32 {
+            self.check_registered_com_callback(
+                reply.owner,
+                reply.token,
+                reply.frame,
+                reply.continuation,
+            )?;
+        }
         let activation = self.prepare_activation_entry(None)?;
         let record = self.begin_provider_callback(
             key,

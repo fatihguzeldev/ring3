@@ -18,7 +18,10 @@ impl EngineInstance {
         if self.pending_call.is_some() || self.callback.is_some() {
             return Err(HostError::Call(CallError::Busy));
         }
-        self.check_guest_reservation_admission(&[config.objects])?;
+        self.check_guest_reservation_admission(&[
+            config.objects,
+            super::activation::ActivationRuntime32::scratch_reservation(),
+        ])?;
         self.ole32 = Some(Ole32Runtime32::new(config).map_err(HostError::Ole32)?);
         Ok(())
     }
@@ -51,6 +54,11 @@ impl EngineInstance {
             return Ok(true);
         }
         let thread = self.current_windows_thread_id()?;
+        if let Some(api) = api
+            && self.try_begin_registered_com_call(owner, token, api, frame)?
+        {
+            return Ok(true);
+        }
         let gates = if api == Some(Ole32Api32::CoGetClassObject) {
             Some(self.module_gates()?)
         } else {

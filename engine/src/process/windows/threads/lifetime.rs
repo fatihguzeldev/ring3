@@ -65,6 +65,13 @@ impl EngineInstance {
             .thread_exit_ranges(self.memory()?, id)
             .map_err(HostError::Nls)?;
         let activation = self.prepare_activation_thread_exit(id)?;
+        let com_ranges = self
+            .ole32
+            .as_ref()
+            .map(|runtime| runtime.activation_scratch_ranges(self.memory().unwrap(), id))
+            .transpose()
+            .map_err(HostError::Memory)?
+            .unwrap_or_default();
         let capacity = self
             .windows_memory
             .committed_ranges()
@@ -73,6 +80,7 @@ impl EngineInstance {
             .and_then(|count| count.checked_add(extra))
             .and_then(|count| count.checked_add(resource_ranges.len()))
             .and_then(|count| count.checked_add(nls_ranges.len()))
+            .and_then(|count| count.checked_add(com_ranges.len()))
             .and_then(|count| {
                 count.checked_add(
                     activation
@@ -121,6 +129,7 @@ impl EngineInstance {
         }
         ranges.extend(resource_ranges);
         ranges.extend(nls_ranges);
+        ranges.extend(com_ranges);
         if let Some(receipt) = &activation {
             ranges.extend_from_slice(receipt.ranges());
         }
@@ -356,6 +365,9 @@ impl EngineInstance {
         self.exceptions.retire_thread(id);
         self.nls.retire_thread(id);
         self.commit_activation_thread_exit(activation);
+        if let Some(runtime) = self.ole32.as_mut() {
+            runtime.commit_thread_exit(id);
+        }
         if let Some(registry) = self.registry.as_mut() {
             registry.commit_thread_exit(id);
         }

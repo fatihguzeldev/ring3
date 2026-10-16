@@ -101,6 +101,13 @@ impl EngineInstance {
         })
     }
 
+    pub(in crate::process) fn resolve_module_source_name(
+        &self,
+        request: &str,
+    ) -> Result<String, HostError> {
+        let paths = self.capture_module_paths(None)?;
+        self.resolve_module_source_captured(request, &paths)
+    }
     pub(in crate::process) fn resolve_module_source_captured(
         &self,
         request: &str,

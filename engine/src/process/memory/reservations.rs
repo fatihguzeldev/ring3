@@ -57,44 +57,37 @@ impl EngineInstance {
         Ok(ranges)
     }
     pub(in crate::process) fn provider_guest_arenas(&self) -> impl Iterator<Item = PageRange> {
-        let mut ranges = [None; 11];
-        let mut index = 0;
-        if let Some(runtime) = &self.dsound {
-            for range in runtime.guest_reservations() {
-                ranges[index] = Some(range);
-                index += 1;
-            }
-        }
-        if let Some(runtime) = &self.dinput {
-            for range in runtime.guest_reservations() {
-                ranges[index] = Some(range);
-                index += 1;
-            }
-        }
-        if let Some(runtime) = &self.d3d8 {
-            for range in runtime.guest_reservations() {
-                ranges[index] = Some(range);
-                index += 1;
-            }
-        }
-        if let Some(runtime) = &self.ole32 {
-            ranges[index] = Some(runtime.guest_reservation());
-            index += 1;
-        }
-        if let Some(runtime) = &self.user32 {
-            ranges[index] = Some(runtime.scratch_reservation());
-            index += 1;
-        }
-        if let Some(runtime) = &self.resources {
-            ranges[index] = Some(runtime.scratch_reservation());
-            index += 1;
-        }
-        ranges[index] = Some(self.nls.scratch_reservation());
-        index += 1;
-        if let Some(runtime) = &self.activation {
-            ranges[index] = Some(runtime.reservation());
-        }
-        ranges.into_iter().flatten()
+        let media = self
+            .dsound
+            .iter()
+            .flat_map(|runtime| runtime.guest_reservations())
+            .chain(
+                self.dinput
+                    .iter()
+                    .flat_map(|runtime| runtime.guest_reservations()),
+            );
+        let graphics = self
+            .d3d8
+            .iter()
+            .flat_map(|runtime| runtime.guest_reservations());
+        let com = self.ole32.iter().flat_map(|runtime| {
+            [
+                runtime.guest_reservation(),
+                runtime.activation_scratch_reservation(),
+            ]
+        });
+        let windows = self
+            .user32
+            .iter()
+            .map(|runtime| runtime.scratch_reservation())
+            .chain(
+                self.resources
+                    .iter()
+                    .map(|runtime| runtime.scratch_reservation()),
+            )
+            .chain(core::iter::once(self.nls.scratch_reservation()))
+            .chain(self.activation.iter().map(|runtime| runtime.reservation()));
+        media.chain(graphics).chain(com).chain(windows)
     }
     pub(in crate::process) fn check_guest_reservation_admission(
         &self,

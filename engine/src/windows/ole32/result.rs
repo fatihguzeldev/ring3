@@ -13,4 +13,6 @@ impl HResult32 {
     pub const CLASS_NOT_REGISTERED: Self = Self(0x8004_0154);
     pub const CLASS_NOT_AVAILABLE: Self = Self(0x8004_0111);
     pub const NO_AGGREGATION: Self = Self(0x8004_0110);
+    pub const DLL_NOT_FOUND: Self = Self(0x8004_01f8);
+    pub const ERROR_IN_DLL: Self = Self(0x8004_01f9);
 }
