@@ -31,3 +31,5 @@ pub(super) mod exceptions;
 pub(super) mod nls;
 
 pub(super) mod resources;
+
+pub(super) mod console;

@@ -41,3 +41,5 @@ pub mod nls;
 pub mod resources;
 
 pub mod rawinput;
+
+pub mod console;

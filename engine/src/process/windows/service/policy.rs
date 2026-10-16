@@ -17,6 +17,9 @@ impl GuardFailure32 {
                 last_error: Some(998),
             })
         };
+        if crate::windows::console::ConsoleApi32::from_id(id).is_some() {
+            return noaccess(0);
+        }
         if let Some(api) = FileApi32::from_id(id) {
             return noaccess(api.failure_value());
         }
