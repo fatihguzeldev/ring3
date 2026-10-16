@@ -5,6 +5,28 @@ use crate::{
 };
 
 impl FileRuntime32 {
+    pub(in crate::process::windows::files) fn execute_ordinary_with_security(
+        &mut self,
+        memory: &mut AddressSpace,
+        security: &crate::windows::security::SecurityRuntime32,
+        api: FileApi32,
+        args: &[u32],
+    ) -> Result<FileCallOutcome32, FileError32> {
+        if matches!(api, FileApi32::CreateFileA | FileApi32::CreateFileW) {
+            return self.open_file_with_security(memory, api, args, security.token());
+        }
+        self.check_ordinary_security(memory, api, args, security.token())?;
+        if matches!(
+            api,
+            FileApi32::CreateDirectoryA
+                | FileApi32::CreateDirectoryW
+                | FileApi32::CreateDirectoryExA
+                | FileApi32::CreateDirectoryExW
+        ) {
+            return self.create_directory_with_security(memory, api, args, security.token());
+        }
+        self.execute_ordinary(memory, api, args)
+    }
     pub(in crate::process::windows::files) fn execute_ordinary(
         &mut self,
         memory: &mut AddressSpace,

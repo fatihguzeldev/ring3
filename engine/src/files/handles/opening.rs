@@ -117,6 +117,12 @@ impl Vfs32 {
                     content_revision: 1,
                     dirty: true,
                     content: Content32::default(),
+                    security: self.inherited_file_security(
+                        &absolute,
+                        None,
+                        &crate::windows::security::Token32::virtual_process(),
+                        false,
+                    )?,
                 },
                 NamespaceEntry32 {
                     key: path::fold(&absolute),
@@ -136,6 +142,7 @@ impl Vfs32 {
             suppress_access: false,
             suppress_write: false,
             opened_path,
+            maximum_allowed: false,
         };
         Ok(PreparedOpen32 {
             epoch: self.epoch,
@@ -150,7 +157,45 @@ impl Vfs32 {
             created,
             truncate,
             content_revision,
+            granted_access: super::super::security::windows_access(options.access),
         })
+    }
+    pub(crate) fn prepare_open_with_security(
+        &mut self,
+        input: &[u16],
+        mut options: FileOpenOptions32,
+        desired: u32,
+        token: &crate::windows::security::Token32,
+        explicit: Option<crate::windows::security::SecurityDescriptor32>,
+    ) -> Result<PreparedOpen32, FileError32> {
+        use crate::windows::security::FILE_GENERIC_MAPPING;
+        let absolute = self.full_path(input)?;
+        let granted = if let Ok(file) = self.lookup(&absolute) {
+            self.node(file)?
+                .security
+                .check_access(token, desired, FILE_GENERIC_MAPPING)?
+        } else {
+            let parent = self.node(self.lookup(path::parent(&absolute)?)?)?;
+            parent
+                .security
+                .check_access(token, 2, FILE_GENERIC_MAPPING)?;
+            if desired & 0x01000000 != 0 {
+                token.check_security_privilege()?;
+            }
+            if desired & 0x02000000 != 0 {
+                FILE_GENERIC_MAPPING.all | (desired & 0x01000000)
+            } else {
+                FILE_GENERIC_MAPPING.map(desired)
+            }
+        };
+        options.access = FileAccess32::from_windows(granted);
+        let mut prepared = self.prepare_open(input, options)?;
+        if let Some((node, _)) = &mut prepared.created {
+            node.security = self.inherited_file_security(&absolute, explicit, token, false)?;
+        }
+        prepared.granted_access = granted;
+        prepared.open.maximum_allowed = desired & 0x0200_0000 != 0;
+        Ok(prepared)
     }
     pub(crate) fn commit_open(&mut self, prepared: PreparedOpen32) -> FileOpenResult32 {
         prepared

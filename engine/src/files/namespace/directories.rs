@@ -1,6 +1,22 @@
 use super::*;
 
 impl Vfs32 {
+    pub(crate) fn prepare_create_directory_with_security(
+        &self,
+        input: &[u16],
+        attributes: u32,
+        token: &crate::windows::security::Token32,
+        explicit: Option<crate::windows::security::SecurityDescriptor32>,
+    ) -> Result<PreparedNamespace32, FileError32> {
+        self.check_parent_access(input, 4, token)?;
+        let absolute = self.full_path(input)?;
+        let mut prepared = self.prepare_create_directory(input, attributes)?;
+        let Operation32::Create(node, _) = &mut prepared.operation else {
+            unreachable!()
+        };
+        node.security = self.inherited_file_security(&absolute, explicit, token, true)?;
+        Ok(prepared)
+    }
     pub(crate) fn prepare_create_directory(
         &self,
         input: &[u16],
@@ -32,6 +48,12 @@ impl Vfs32 {
             content_revision: 1,
             dirty: true,
             content: Content32::default(),
+            security: self.inherited_file_security(
+                &absolute,
+                None,
+                &crate::windows::security::Token32::virtual_process(),
+                true,
+            )?,
         };
         let entry = NamespaceEntry32 {
             key: path::fold(&absolute),

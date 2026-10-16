@@ -23,6 +23,7 @@ pub(super) struct Open32 {
     pub suppress_access: bool,
     pub suppress_write: bool,
     pub opened_path: Vec<u16>,
+    pub maximum_allowed: bool,
 }
 #[derive(Debug)]
 pub(crate) struct PreparedOpen32 {
@@ -34,10 +35,11 @@ pub(crate) struct PreparedOpen32 {
     created: Option<(Node32, NamespaceEntry32)>,
     truncate: bool,
     content_revision: u64,
+    granted_access: u32,
 }
 impl PreparedOpen32 {
-    pub(crate) fn result(&self) -> FileOpenResult32 {
-        self.result
+    pub(crate) fn granted_access(&self) -> u32 {
+        self.granted_access
     }
     pub(crate) fn validate(&self, vfs: &Vfs32) -> Result<(), FileError32> {
         vfs.validate(self.epoch, self.revision)

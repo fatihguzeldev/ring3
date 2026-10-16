@@ -1,8 +1,4 @@
-use super::{
-    FileCallOutcome32,
-    access::{desired_access, desired_handle_access},
-    memory,
-};
+use super::{FileCallOutcome32, access::desired_access, memory};
 use crate::{
     files::{ATTR_NORMAL, FileDisposition32, FileError32, FileOpenOptions32, FileShare32},
     memory::AddressSpace,
@@ -16,6 +12,20 @@ impl FileRuntime32 {
         memory: &AddressSpace,
         api: FileApi32,
         args: &[u32],
+    ) -> Result<FileCallOutcome32, FileError32> {
+        self.open_file_with_security(
+            memory,
+            api,
+            args,
+            &crate::windows::security::Token32::virtual_process(),
+        )
+    }
+    pub(in crate::process::windows::files) fn open_file_with_security(
+        &mut self,
+        memory: &AddressSpace,
+        api: FileApi32,
+        args: &[u32],
+        token: &crate::windows::security::Token32,
     ) -> Result<FileCallOutcome32, FileError32> {
         let path = memory::path(
             memory,
@@ -57,10 +67,12 @@ impl FileRuntime32 {
         {
             return Err(FileError32::UserMappedFile);
         }
-        let handle = self
-            .handles
-            .prepare(desired_handle_access(args[1])?, inherit)?;
-        let prepared = self.vfs.prepare_open(
+        let descriptor = if self.vfs.path_info(&path).is_err() {
+            crate::process::windows::security::memory::attributes_descriptor(memory, args[3])?
+        } else {
+            None
+        };
+        let prepared = self.vfs.prepare_open_with_security(
             &path,
             FileOpenOptions32 {
                 access,
@@ -72,14 +84,15 @@ impl FileRuntime32 {
                 overlapped: args[5] & 0x4000_0000 != 0,
                 no_buffering: args[5] & 0x2000_0000 != 0,
             },
+            args[1],
+            token,
+            descriptor,
         )?;
-        let result = prepared.result();
-        if !result.existed
-            && args[3] != 0
-            && memory::dword(memory, args[3].checked_add(4).ok_or(FileError32::NoAccess)?)? != 0
-        {
-            return Err(FileError32::Unsupported);
-        }
+        let grant = prepared.granted_access();
+        let handle = self.handles.prepare(
+            crate::files::FileAccess32::from_windows(grant).0 | (grant & 0x0010_0000),
+            inherit,
+        )?;
         prepared.validate(&self.vfs)?;
         let opened = self.vfs.commit_open(prepared);
         let handle = self

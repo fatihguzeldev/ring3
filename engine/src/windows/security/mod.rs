@@ -1,11 +1,14 @@
 mod access;
+mod api;
 mod descriptor;
 mod sid;
 mod token;
 
 pub use access::{FILE_GENERIC_MAPPING, GenericMapping32};
+pub(crate) use api::SecurityApi32;
 pub use descriptor::{AccessAce32, Acl32, Dacl32, SecurityDescriptor32};
 pub use sid::Sid32;
+pub(crate) use token::SecurityRuntime32;
 pub use token::{Token32, TokenGroup32};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

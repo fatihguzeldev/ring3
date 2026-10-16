@@ -12,6 +12,7 @@ struct FileExecutionContext32<'a> {
     reserved: &'a [PageRange],
     now: u64,
     thread: u32,
+    security: &'a crate::windows::security::SecurityRuntime32,
 }
 
 impl EngineInstance {
@@ -174,6 +175,7 @@ impl EngineInstance {
                     reserved: &reservations,
                     now,
                     thread: current_thread,
+                    security: &self.windows_security,
                 },
                 api,
                 args,
@@ -244,11 +246,12 @@ impl FileRuntime32 {
             reserved,
             now,
             thread,
+            security,
         } = context;
         if matches!(api, FileApi32::ReadFile | FileApi32::WriteFile) {
             let open = match self.handles.file(args[0]) {
                 Ok(open) => open,
-                Err(_) => return self.execute_ordinary(memory, api, args),
+                Err(_) => return self.execute_ordinary_with_security(memory, security, api, args),
             };
             if self.vfs.open_options(open)?.overlapped {
                 let sync = sync.ok_or(FileError32::Unsupported)?;
@@ -302,6 +305,6 @@ impl FileRuntime32 {
         {
             return self.execute_async(memory, sync, thread, now, api, args);
         }
-        self.execute_ordinary(memory, api, args)
+        self.execute_ordinary_with_security(memory, security, api, args)
     }
 }

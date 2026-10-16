@@ -168,6 +168,7 @@ impl Vfs32 {
             content_revision,
             dirty: true,
             content,
+            security: original.security.snapshot()?,
         };
         Ok(FileIo32::Ready(
             self.namespace_receipt(Operation32::Copy { node, entry })?,
@@ -211,6 +212,7 @@ impl Vfs32 {
             content_revision,
             dirty: true,
             content,
+            security: original.security.snapshot()?,
         };
         self.namespace_receipt(Operation32::Copy { node, entry: None })
     }

@@ -87,7 +87,7 @@ impl Vfs32 {
             .next_file
             .checked_add(paths.len() as u64)
             .ok_or(FileError32::Exhausted)?;
-        let mut prepared = Vec::new();
+        let mut prepared: Vec<(Node32, NamespaceEntry32)> = Vec::new();
         prepared
             .try_reserve_exact(paths.len())
             .map_err(|_| FileError32::Allocation)?;
@@ -96,6 +96,20 @@ impl Vfs32 {
             let source = if final_node { asset } else { None };
             let size = source.map_or(0, |a| a.length);
             let id = FileId(self.next_file + index as u64);
+            let token = crate::windows::security::Token32::virtual_process();
+            let security = if let Some((parent, _)) = prepared.last() {
+                crate::windows::security::SecurityDescriptor32::inherited(
+                    &parent.security,
+                    None,
+                    &token,
+                    source.is_none(),
+                    crate::windows::security::FILE_GENERIC_MAPPING,
+                )?
+            } else if path::root_len(&path)? == path.len() {
+                crate::windows::security::SecurityDescriptor32::for_token(&token)?
+            } else {
+                self.inherited_file_security(&path, None, &token, source.is_none())?
+            };
             prepared.push((
                 Node32 {
                     id,
@@ -117,6 +131,7 @@ impl Vfs32 {
                         visible: size,
                         pages: Vec::new(),
                     },
+                    security,
                 },
                 NamespaceEntry32 {
                     key: path::fold(&path),

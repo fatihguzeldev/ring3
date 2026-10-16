@@ -2,6 +2,21 @@ use super::*;
 use crate::process::{EngineInstance, HostError};
 
 impl EngineInstance {
+    pub(in crate::process) fn allocate_windows_runtime_initialized(
+        &mut self,
+        bytes: &[u8],
+    ) -> Result<u32, HostError> {
+        let heap = self.ensure_process_heap()?;
+        self.windows_memory
+            .heaps
+            .allocate_initialized(
+                &mut self.windows_memory.virtual_memory,
+                self.memory.as_mut().unwrap(),
+                heap,
+                bytes,
+            )
+            .map_err(HostError::WindowsMemory)
+    }
     pub(in crate::process) fn allocate_windows_runtime_bytes(
         &mut self,
         size: u32,

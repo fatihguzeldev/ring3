@@ -59,3 +59,20 @@ impl Token32 {
         }
     }
 }
+
+#[derive(Clone, Debug)]
+pub(crate) struct SecurityRuntime32 {
+    token: Token32,
+}
+impl Default for SecurityRuntime32 {
+    fn default() -> Self {
+        Self {
+            token: Token32::virtual_process(),
+        }
+    }
+}
+impl SecurityRuntime32 {
+    pub(crate) fn token(&self) -> &Token32 {
+        &self.token
+    }
+}

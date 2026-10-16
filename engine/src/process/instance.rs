@@ -106,6 +106,7 @@ pub struct EngineInstance {
     pub(in crate::process) windows_replies: Vec<crate::process::windows::callbacks::WindowsReply32>,
     pub(in crate::process) segment_descriptors: crate::cpu::x86::SegmentDescriptorTable,
     pub(in crate::process) windows_memory: crate::process::windows::memory::WindowsMemoryRuntime32,
+    pub(in crate::process) windows_security: crate::windows::security::SecurityRuntime32,
     pub(in crate::process) media: Option<crate::process::media::MediaContexts>,
     pub(in crate::process) media_epoch: u64,
     pub(in crate::process) windows_input_delivery_error: Option<HostError>,
@@ -135,6 +136,7 @@ impl EngineInstance {
         Ok(Self {
             console: crate::windows::console::ConsoleControl32::new(),
             native_diagnostics: Default::default(),
+            windows_security: Default::default(),
             resources: None,
             registry: None,
             exceptions: crate::process::windows::exceptions::ExceptionRuntime32::new()
@@ -225,6 +227,7 @@ impl EngineInstance {
     pub fn close(&mut self) {
         self.console = crate::windows::console::ConsoleControl32::new();
         self.native_diagnostics = Default::default();
+        self.windows_security = Default::default();
         self.windows_service = None;
         if let Some(memory) = self.memory.as_ref() {
             memory.end_guard_service();

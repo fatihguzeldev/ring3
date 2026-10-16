@@ -6,6 +6,7 @@ mod handles;
 mod io;
 mod namespace;
 pub(crate) mod path;
+mod security;
 mod tree;
 mod types;
 

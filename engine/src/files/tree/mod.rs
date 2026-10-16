@@ -27,6 +27,7 @@ pub(super) struct Node32 {
     pub content_revision: u64,
     pub dirty: bool,
     pub content: Content32,
+    pub security: crate::windows::security::SecurityDescriptor32,
 }
 impl Node32 {
     pub fn info(&self) -> FileInfo32 {

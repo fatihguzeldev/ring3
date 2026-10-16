@@ -80,6 +80,9 @@ impl Vfs32 {
             content_revision: 1,
             dirty: false,
             content: Content32::default(),
+            security: crate::windows::security::SecurityDescriptor32::for_token(
+                &crate::windows::security::Token32::virtual_process(),
+            )?,
         }));
         entries.push(NamespaceEntry32 {
             key: root.clone(),

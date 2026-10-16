@@ -1,6 +1,16 @@
 use super::*;
 
 impl HeapManager32 {
+    pub(crate) fn allocate_initialized(
+        &mut self,
+        vm: &mut VirtualMemory32,
+        memory: &mut AddressSpace,
+        handle: u32,
+        bytes: &[u8],
+    ) -> Result<u32, MemoryError32> {
+        let size = u32::try_from(bytes.len()).map_err(|_| MemoryError32::Capacity)?;
+        self.allocate_bytes(vm, memory, handle, 0, size, Some(bytes))
+    }
     pub(crate) fn allocate(
         &mut self,
         vm: &mut VirtualMemory32,

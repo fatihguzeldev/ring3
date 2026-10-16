@@ -45,6 +45,12 @@ pub enum FileError32 {
     InvalidParameter,
     InvalidName,
     AccessDenied,
+    InvalidSid,
+    InvalidAcl,
+    InvalidSecurityDescriptor,
+    PrivilegeNotHeld,
+    InvalidOwner,
+    InvalidPrimaryGroup,
     NotFound,
     PathNotFound,
     SharingViolation,
@@ -74,6 +80,12 @@ impl FileError32 {
             Self::FileInvalid => 1006,
             Self::InvalidHandle | Self::Stale => 6,
             Self::NoAccess => 998,
+            Self::InvalidSid => 1337,
+            Self::InvalidAcl => 1336,
+            Self::InvalidSecurityDescriptor => 1338,
+            Self::PrivilegeNotHeld => 1314,
+            Self::InvalidOwner => 1307,
+            Self::InvalidPrimaryGroup => 1308,
             Self::InvalidLimits | Self::InvalidParameter => 87,
             Self::InvalidName => 123,
             Self::AccessDenied | Self::DeletePending => 5,
@@ -105,7 +117,10 @@ impl FileAccess32 {
     pub const READ_ATTRIBUTES: Self = Self(16);
     pub const WRITE_ATTRIBUTES: Self = Self(32);
     pub const EXECUTE: Self = Self(64);
-    pub const ALL: Self = Self(127);
+    pub const READ_CONTROL: Self = Self(128);
+    pub const WRITE_DAC: Self = Self(256);
+    pub const WRITE_OWNER: Self = Self(512);
+    pub const ALL: Self = Self(1023);
     pub fn contains(self, other: Self) -> bool {
         self.0 & other.0 == other.0
     }

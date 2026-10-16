@@ -243,6 +243,15 @@ pub fn advapi32_module(preferred_base: u32) -> SystemModule32 {
                 ordinal: None,
                 target: SystemExportTarget32::Gate(api.id()),
             })
+            .chain(
+                crate::windows::security::SecurityApi32::ALL
+                    .into_iter()
+                    .map(|api| SystemExport32 {
+                        name: Some(api.name().into()),
+                        ordinal: None,
+                        target: SystemExportTarget32::Gate(api.id()),
+                    }),
+            )
             .collect(),
     }
 }
