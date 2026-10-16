@@ -26,7 +26,7 @@ impl EngineInstance {
         if self.modules.loaded.iter().len() != 0 {
             return Err(HostError::Module(ModuleError32::Busy));
         }
-        self.load_module_request(name, actual_base, Some(config), false)
+        self.load_module_request(name, actual_base, Some(config), false, false)
     }
 
     pub fn load_library_module(
@@ -38,7 +38,7 @@ impl EngineInstance {
         if self.modules.thread.is_none() {
             return Err(HostError::Module(ModuleError32::InvalidRequest));
         }
-        self.load_module_request(name, actual_base, None, false)
+        self.load_module_request(name, actual_base, None, false, false)
     }
 
     pub(in crate::process) fn load_library_module_flags(
@@ -46,13 +46,13 @@ impl EngineInstance {
         name: &str,
         flags: u32,
     ) -> Result<ModuleOperation32, HostError> {
-        if flags & !1 != 0 {
+        if flags & !9 != 0 {
             return self.load_resource_only_module(name, flags);
         }
         if self.modules.thread.is_none() {
             return Err(HostError::Module(ModuleError32::InvalidRequest));
         }
-        self.load_module_request(name, None, None, flags & 1 != 0)
+        self.load_module_request(name, None, None, flags & 1 != 0, flags & 8 != 0)
     }
 
     fn load_module_request(
@@ -61,12 +61,13 @@ impl EngineInstance {
         actual_base: Option<u32>,
         config: Option<ModuleRuntimeConfig32>,
         no_resolve: bool,
+        altered: bool,
     ) -> Result<ModuleOperation32, HostError> {
         self.memory()?;
         self.guard_detection_material_change()?;
         let before = self.modules.loader_depth;
         self.acquire_loader_thread()?;
-        let result = self.load_module_request_inner(name, actual_base, config, no_resolve);
+        let result = self.load_module_request_inner(name, actual_base, config, no_resolve, altered);
         if !matches!(
             result,
             Ok(ModuleOperation32::Pending(_) | ModuleOperation32::NeedBytes { .. })
@@ -83,6 +84,7 @@ impl EngineInstance {
         actual_base: Option<u32>,
         config: Option<ModuleRuntimeConfig32>,
         no_resolve: bool,
+        altered: bool,
     ) -> Result<ModuleOperation32, HostError> {
         self.memory()?;
         self.guard_detection_material_change()?;
@@ -90,7 +92,7 @@ impl EngineInstance {
             return Err(HostError::Call(crate::process::CallError::Cancelled));
         }
         self.check_module_execution_admission()?;
-        let paths = self.capture_module_paths(config.is_some().then_some(name))?;
+        let paths = self.capture_module_paths((config.is_some() || altered).then_some(name))?;
         let name = self.resolve_module_source_captured(name, &paths)?;
         self.begin_module_source_request(CapturedModuleRequest32::Load {
             name,

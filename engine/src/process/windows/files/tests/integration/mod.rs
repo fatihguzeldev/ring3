@@ -1,7 +1,8 @@
 mod cancellation;
 mod cleanup;
-mod handles;
+mod dll_directory;
 mod flags;
+mod handles;
 mod information;
 mod memory;
 mod pseudo;

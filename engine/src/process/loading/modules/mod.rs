@@ -48,4 +48,5 @@ pub(in crate::process) struct ModuleProcess32 {
     loader_depth: u32,
     waiting_request: Option<thread::ModuleRequest32>,
     windows_runtime: bool,
+    dll_directory: Option<Vec<u16>>,
 }

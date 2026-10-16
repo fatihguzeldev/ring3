@@ -83,6 +83,10 @@ impl ThreadState32 {
             | WindowsApi32::LoadLibraryExW
             | WindowsApi32::GetProcAddress
             | WindowsApi32::FreeLibrary
+            | WindowsApi32::SetDllDirectoryA
+            | WindowsApi32::SetDllDirectoryW
+            | WindowsApi32::GetDllDirectoryA
+            | WindowsApi32::GetDllDirectoryW
             | WindowsApi32::GetModuleHandleW => return Err(FrameError::InvalidRequest),
             WindowsApi32::GetLastError => (WindowsOutcome32::Return(self.last_error), self),
             WindowsApi32::GetCurrentProcess => (WindowsOutcome32::Return(u32::MAX), self),

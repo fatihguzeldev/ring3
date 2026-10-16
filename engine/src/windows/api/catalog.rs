@@ -35,6 +35,10 @@ pub enum WindowsApi32 {
     Sleep = 0x0001_001e,
     SleepEx = 0x0001_001f,
     SignalObjectAndWait = 0x0001_0020,
+    SetDllDirectoryA = 0x0001_0021,
+    SetDllDirectoryW = 0x0001_0022,
+    GetDllDirectoryA = 0x0001_0023,
+    GetDllDirectoryW = 0x0001_0024,
 }
 
 #[derive(Clone, Copy)]
@@ -59,7 +63,7 @@ struct ApiDefinition {
     introduced: ProviderProfile,
 }
 
-const APIS: [ApiDefinition; 32] = [
+const APIS: [ApiDefinition; 36] = [
     ApiDefinition {
         api: WindowsApi32::GetLastError,
         name: "GetLastError",
@@ -252,6 +256,30 @@ const APIS: [ApiDefinition; 32] = [
         stack_words: 4,
         introduced: ProviderProfile::Synchronization,
     },
+    ApiDefinition {
+        api: WindowsApi32::SetDllDirectoryA,
+        name: "SetDllDirectoryA",
+        stack_words: 1,
+        introduced: ProviderProfile::Modules,
+    },
+    ApiDefinition {
+        api: WindowsApi32::SetDllDirectoryW,
+        name: "SetDllDirectoryW",
+        stack_words: 1,
+        introduced: ProviderProfile::Modules,
+    },
+    ApiDefinition {
+        api: WindowsApi32::GetDllDirectoryA,
+        name: "GetDllDirectoryA",
+        stack_words: 2,
+        introduced: ProviderProfile::Modules,
+    },
+    ApiDefinition {
+        api: WindowsApi32::GetDllDirectoryW,
+        name: "GetDllDirectoryW",
+        stack_words: 2,
+        introduced: ProviderProfile::Modules,
+    },
 ];
 
 impl WindowsApi32 {
@@ -322,6 +350,10 @@ impl WindowsApi32 {
             Self::Sleep => 29,
             Self::SleepEx => 30,
             Self::SignalObjectAndWait => 31,
+            Self::SetDllDirectoryA => 32,
+            Self::SetDllDirectoryW => 33,
+            Self::GetDllDirectoryA => 34,
+            Self::GetDllDirectoryW => 35,
         }
     }
 

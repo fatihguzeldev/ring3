@@ -28,25 +28,42 @@ impl EngineInstance {
             |files| files.vfs.capture_path_scope(),
         )
     }
-    pub(in crate::process) fn module_file_search_directories(&self) -> Vec<Vec<u16>> {
+    pub(in crate::process) fn module_file_search_directories(
+        &self,
+        include_current: bool,
+    ) -> Vec<Vec<u16>> {
         if let Some(files) = &self.files {
             let environment = files.file_environment();
+            let mut system16 = environment.windows_directory.clone();
+            if system16.last() != Some(&92) {
+                system16.push(92);
+            }
+            system16.extend("System".encode_utf16());
             let mut paths = vec![
                 environment.system_directory.clone(),
+                system16,
                 environment.windows_directory.clone(),
-                files.vfs.current_directory().to_vec(),
             ];
+            if include_current {
+                paths.push(files.vfs.current_directory().to_vec());
+            }
             paths.extend(environment.search_path.iter().cloned());
             paths
         } else {
-            vec![
+            let mut paths = vec![
                 "C:\\Windows\\System32".encode_utf16().collect(),
+                "C:\\Windows\\System".encode_utf16().collect(),
                 "C:\\Windows".encode_utf16().collect(),
-                self.process_launch_directory()
-                    .unwrap_or("C:\\game")
-                    .encode_utf16()
-                    .collect(),
-            ]
+            ];
+            if include_current {
+                paths.push(
+                    self.process_launch_directory()
+                        .unwrap_or("C:\\game")
+                        .encode_utf16()
+                        .collect(),
+                );
+            }
+            paths
         }
     }
 

@@ -1,3 +1,5 @@
+mod altered;
+mod directory;
 use super::*;
 
 #[test]

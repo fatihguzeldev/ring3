@@ -10,6 +10,7 @@ use crate::{
 };
 
 use crate::process::calls::call::PendingOwner;
+mod directory;
 
 #[derive(Clone, Copy)]
 pub(in crate::process) struct ModuleWindowsReply {
@@ -64,6 +65,10 @@ impl EngineInstance {
                 | GetProcAddress
                 | FreeLibrary
                 | GetModuleHandleW
+                | SetDllDirectoryA
+                | SetDllDirectoryW
+                | GetDllDirectoryA
+                | GetDllDirectoryW
         ) && !(general && matches!(api, GetModuleHandleA | ExitProcess))
         {
             return Ok(false);
@@ -75,6 +80,13 @@ impl EngineInstance {
             self.check_windows_thread_write()?;
         }
         let args = frame.arguments();
+        if matches!(
+            api,
+            SetDllDirectoryA | SetDllDirectoryW | GetDllDirectoryA | GetDllDirectoryW
+        ) {
+            self.complete_module_directory_api(api, frame)?;
+            return Ok(true);
+        }
         if api == ExitProcess && !self.advance_windows_fls_process_exit()? {
             return Ok(true);
         }
@@ -411,6 +423,9 @@ impl EngineInstance {
             return Ok(());
         }
         self.commit_media_process_exit(media);
+        if let Some(gdi) = self.gdi.as_mut() {
+            gdi.retire_process();
+        }
         if let Some(resources) = self.resources.as_mut() {
             resources.commit_process_exit();
         }

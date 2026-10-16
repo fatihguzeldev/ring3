@@ -52,6 +52,14 @@ impl CapturedModulePaths32 {
 }
 
 impl EngineInstance {
+    pub(in crate::process) fn module_dll_directory(&self) -> Option<&[u16]> {
+        self.modules.dll_directory.as_deref()
+    }
+
+    pub(in crate::process) fn set_module_dll_directory(&mut self, directory: Option<Vec<u16>>) {
+        self.modules.dll_directory = directory;
+    }
+
     pub(in crate::process) fn capture_module_paths(
         &self,
         initial_root: Option<&str>,
@@ -75,8 +83,14 @@ impl EngineInstance {
                 &application
             })
             .map_err(HostError::File)?;
-        let mut directories = self.module_file_search_directories();
+        let mut directories =
+            self.module_file_search_directories(self.modules.dll_directory.is_none());
         let system = directories.first().cloned().unwrap_or_default();
+        if let Some(directory) = &self.modules.dll_directory
+            && !directory.is_empty()
+        {
+            directories.insert(0, directory.clone());
+        }
         directories.insert(0, application.clone());
         if let Some(path) = self.process_path_environment() {
             for (index, directory) in path.split(';').filter(|part| !part.is_empty()).enumerate() {
