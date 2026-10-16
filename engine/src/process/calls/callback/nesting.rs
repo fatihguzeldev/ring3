@@ -3,7 +3,7 @@ use crate::windows::CallingConvention32;
 
 const KEY: u64 = 91;
 
-fn stop(engine: &mut EngineInstance, pc: u32, gate: u32, esp: u32, eax: u32) {
+pub(super) fn stop(engine: &mut EngineInstance, pc: u32, gate: u32, esp: u32, eax: u32) {
     let state = crate::cpu::x86::State32 {
         eip: pc,
         registers: [eax, 0x1234, 0x2345, 0x3456, esp, 0x5678, 0x6789, 0x789a],

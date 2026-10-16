@@ -66,8 +66,7 @@ impl EngineInstance {
             .map_err(|_| HostError::Call(CallError::InvalidStop))?;
         if exit.reason != ExitReason::NeedCode
             || !(target.contains_instruction(state.eip)
-                || (target_id == home_id
-                    && state.eip == record.return_pc
+                || (state.eip == record.return_pc
                     && target.matches_gate(state.eip, record.return_id)))
         {
             return Err(HostError::Call(CallError::InvalidStop));
@@ -113,7 +112,7 @@ impl EngineInstance {
         callback_id: u64,
         token: u32,
     ) -> Result<ResidentCallbackResult32, HostError> {
-        let callback_unit = self.guard_resident_unit(key, callback_id)?;
+        self.guard_resident_unit(key, callback_id)?;
         let callback = self
             .callback
             .as_ref()
@@ -130,9 +129,10 @@ impl EngineInstance {
             return Err(HostError::Call(CallError::InvalidToken));
         }
         self.guard_resident_unit(key, record.outer_unit_id)?;
-        if self.pending_call.is_some() || !authorized || active_unit_id != callback_id {
+        if self.pending_call.is_some() || !authorized {
             return Err(HostError::Call(CallError::Busy));
         }
+        let callback_unit = self.guard_resident_unit(key, active_unit_id)?;
         ExtendedCpuState::capture(self.arena())?;
         let state = decode_state(&self.arena()[STATE_OFFSET..STATE_OFFSET + STATE_SIZE])
             .map_err(|_| HostError::Call(CallError::InvalidStop))?;
@@ -235,7 +235,8 @@ impl EngineInstance {
             return Err(HostError::Call(CallError::InvalidStop));
         }
         if !callback_unit.contains_instruction(record.entry_pc)
-            || !callback_unit.matches_gate(record.return_pc, record.return_id)
+            || !(callback_unit.matches_gate(record.return_pc, record.return_id)
+                || self.is_canonical_callback_return(record.return_pc, record.return_id))
             || record.return_id == outer_gate_id
         {
             return Err(HostError::Call(CallError::InvalidRequest));
@@ -358,7 +359,8 @@ impl EngineInstance {
         }
         let callback_unit = self.guard_resident_unit(key, callback_id)?;
         if !callback_unit.contains_instruction(entry_pc)
-            || !callback_unit.matches_gate(return_pc, return_id)
+            || !(callback_unit.matches_gate(return_pc, return_id)
+                || self.is_canonical_callback_return(return_pc, return_id))
             || return_id == outer_gate_id
         {
             return Err(HostError::Call(CallError::InvalidRequest));
@@ -475,11 +477,20 @@ impl EngineInstance {
         self.require_flat_windows_segments()?;
         Ok(())
     }
+
+    fn is_canonical_callback_return(&self, pc: u32, id: u32) -> bool {
+        id == crate::process::windows::threads::INVOCATION_RETURN_ID
+            && self.module_gate_at(pc).is_some_and(|gate| gate.id == id)
+    }
 }
 
 #[cfg(test)]
 #[path = "callback/nesting.rs"]
 mod nesting;
+
+#[cfg(test)]
+#[path = "callback/cache.rs"]
+mod cache;
 
 #[cfg(test)]
 mod tests {
