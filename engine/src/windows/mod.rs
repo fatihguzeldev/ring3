@@ -34,3 +34,5 @@ pub mod memory;
 pub mod exceptions;
 
 pub mod nls;
+
+pub mod registry;
