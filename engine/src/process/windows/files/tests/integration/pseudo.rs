@@ -123,6 +123,80 @@ fn park_child_resident_wait(engine: &mut EngineInstance) -> u64 {
     unit
 }
 
+fn wait_all(engine: &mut EngineInstance, handles: &[u32]) -> u32 {
+    let bytes: Vec<u8> = handles
+        .iter()
+        .flat_map(|handle| handle.to_le_bytes())
+        .collect();
+    engine
+        .memory
+        .as_mut()
+        .unwrap()
+        .write(GuestAddress(0x1400), &bytes)
+        .unwrap();
+    complete(
+        engine,
+        Api::WaitForMultipleObjects.id(),
+        &[handles.len() as u32, 0x1400, 1, 0],
+    )
+}
+
+#[test]
+fn direct_pseudo_waits_bind_current_identity_without_entering_the_file_handle_namespace() {
+    let mut engine = thread_engine();
+    for pseudo in [u32::MAX, u32::MAX - 1] {
+        assert_eq!(
+            complete(&mut engine, Api::WaitForSingleObject.id(), &[pseudo, 0]),
+            WAIT_TIMEOUT
+        );
+    }
+    let process = duplicate(&mut engine, u32::MAX, 0, 0, 2);
+    let parent = duplicate(&mut engine, u32::MAX - 1, 0, 0, 2);
+    let revision = engine.synchronization().unwrap().revision();
+    assert_eq!(wait_all(&mut engine, &[process, u32::MAX]), u32::MAX);
+    assert_eq!(engine.windows_thread.last_error(), 87);
+    assert_eq!(engine.synchronization().unwrap().revision(), revision);
+    let child = complete(
+        &mut engine,
+        ThreadApi32::CreateThread.id(),
+        &[0, 0, CODE, 0, 0, 0],
+    );
+    assert_ne!(child, 0);
+    assert_eq!(
+        engine.schedule_windows_thread().unwrap(),
+        ThreadSchedule32::Running { thread: 2 }
+    );
+    assert_eq!(wait_all(&mut engine, &[parent, u32::MAX - 1]), WAIT_TIMEOUT);
+    let revision = engine.synchronization().unwrap().revision();
+    assert_eq!(wait_all(&mut engine, &[child, u32::MAX - 1]), u32::MAX);
+    assert_eq!(engine.windows_thread.last_error(), 87);
+    assert_eq!(engine.synchronization().unwrap().revision(), revision);
+    assert_eq!(
+        complete(
+            &mut engine,
+            ThreadApi32::TerminateThread.id(),
+            &[parent, 29]
+        ),
+        1
+    );
+    assert_eq!(
+        complete(&mut engine, Api::WaitForSingleObject.id(), &[parent, 0]),
+        0
+    );
+    assert_eq!(
+        complete(
+            &mut engine,
+            Api::WaitForSingleObject.id(),
+            &[u32::MAX - 1, 0]
+        ),
+        WAIT_TIMEOUT
+    );
+    assert_eq!(
+        complete(&mut engine, Api::WaitForSingleObject.id(), &[u32::MAX, 0]),
+        WAIT_TIMEOUT
+    );
+}
+
 #[test]
 fn current_thread_pseudo_duplicate_is_a_real_shared_sync_object_with_files_configured() {
     let mut engine = thread_engine();
@@ -213,6 +287,63 @@ fn pseudo_duplicate_output_failure_publishes_no_primary_thread_object_or_handle(
             &[alias, 0x1300]
         ),
         1
+    );
+}
+
+#[test]
+fn duplicate_close_source_retires_sync_handle_after_target_process_validation_fails() {
+    let mut engine = engine();
+    let narrow = duplicate(&mut engine, u32::MAX, 0x0010_0000, 0, 0);
+    for (target, error) in [(0x55, 6), (narrow, 5)] {
+        let event = complete(&mut engine, Api::CreateEventW.id(), &[0, 0, 0, 0]);
+        engine
+            .memory
+            .as_mut()
+            .unwrap()
+            .write(GuestAddress(0x1200), &0xccccccccu32.to_le_bytes())
+            .unwrap();
+        assert_eq!(
+            complete(
+                &mut engine,
+                Api::DuplicateHandle.id(),
+                &[u32::MAX, event, target, 0x1200, 0, 0, 3]
+            ),
+            0
+        );
+        assert_eq!(engine.windows_thread.last_error(), error);
+        assert_eq!(support::dword(engine.memory().unwrap(), 0x1200), 0xcccccccc);
+        assert_eq!(
+            complete(&mut engine, Api::WaitForSingleObject.id(), &[event, 0]),
+            u32::MAX
+        );
+        assert_eq!(engine.windows_thread.last_error(), 6);
+    }
+    let event = complete(&mut engine, Api::CreateEventW.id(), &[0, 0, 0, 0]);
+    assert_eq!(
+        complete(
+            &mut engine,
+            Api::DuplicateHandle.id(),
+            &[narrow, event, u32::MAX, 0x1200, 0, 0, 3]
+        ),
+        0
+    );
+    assert_eq!(engine.windows_thread.last_error(), 5);
+    assert_eq!(
+        complete(&mut engine, Api::WaitForSingleObject.id(), &[event, 0]),
+        WAIT_TIMEOUT
+    );
+    assert_eq!(
+        complete(
+            &mut engine,
+            Api::DuplicateHandle.id(),
+            &[u32::MAX, event, 0x55, 0x1200, 0, 0, 2]
+        ),
+        0
+    );
+    assert_eq!(engine.windows_thread.last_error(), 6);
+    assert_eq!(
+        complete(&mut engine, Api::WaitForSingleObject.id(), &[event, 0]),
+        WAIT_TIMEOUT
     );
 }
 

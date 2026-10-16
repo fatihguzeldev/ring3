@@ -41,6 +41,7 @@ pub enum MemoryError32 {
     InvalidParameter,
     InvalidAddress,
     InvalidHandle,
+    AccessDenied,
     NoAccess,
     Capacity,
     Allocation,
@@ -56,6 +57,7 @@ impl MemoryError32 {
         match self {
             Self::InvalidAddress => 487,
             Self::InvalidHandle => 6,
+            Self::AccessDenied => 5,
             Self::NoAccess => 998,
             Self::Capacity | Self::Allocation | Self::Exhausted => 8,
             Self::Unsupported => 50,
