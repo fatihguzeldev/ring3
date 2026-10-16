@@ -4,17 +4,18 @@
 _Static_assert(sizeof(void *) == 4, "this oracle requires a native 32-bit build");
 _Static_assert(sizeof(WCHAR) == 2, "the oracle records UTF-16 code units");
 
-static void probe(LCID locale, DWORD flags, unsigned pattern, const WCHAR *format) {
-    const SYSTEMTIME date = {2001, 2, 0, 3, 4, 5, 6, 0};
+static void probe_at(LCID locale, DWORD flags, unsigned pattern, const WCHAR *format,
+                     const SYSTEMTIME *date) {
     WCHAR output[512] = {0};
     SetLastError(0);
-    int required = GetDateFormatW(locale, flags, &date, format, NULL, 0);
+    int required = GetDateFormatW(locale, flags, date, format, NULL, 0);
     DWORD required_error = GetLastError();
     SetLastError(0);
-    int length = GetDateFormatW(locale, flags, &date, format, output, 512);
+    int length = GetDateFormatW(locale, flags, date, format, output, 512);
     DWORD error = GetLastError();
-    printf("RING3_NLS {\"lcid\":%lu,\"flags\":%lu,\"pattern\":%u,\"required\":%d,\"requiredError\":%lu,\"length\":%d,\"error\":%lu,\"units\":[",
-           (unsigned long)locale, (unsigned long)flags, pattern, required,
+    printf("RING3_NLS {\"lcid\":%lu,\"flags\":%lu,\"pattern\":%u,\"year\":%u,\"month\":%u,\"day\":%u,\"required\":%d,\"requiredError\":%lu,\"length\":%d,\"error\":%lu,\"units\":[",
+           (unsigned long)locale, (unsigned long)flags, pattern,
+           (unsigned)date->wYear, (unsigned)date->wMonth, (unsigned)date->wDay, required,
            (unsigned long)required_error, length, (unsigned long)error);
     if (length > 0 && length <= 512) {
         for (int index = 0; index < length - 1; ++index)
@@ -41,11 +42,12 @@ static void probe(LCID locale, DWORD flags, unsigned pattern, const WCHAR *forma
     BOOL called = !format || format_length > 0;
     char bytes[512] = {0};
     SetLastError(0);
-    length = called ? GetDateFormatA(locale, flags, &date,
+    length = called ? GetDateFormatA(locale, flags, date,
         format ? narrow_format : NULL, bytes, sizeof(bytes)) : 0;
     error = GetLastError();
-    printf("RING3_NLS_ANSI {\"lcid\":%lu,\"flags\":%lu,\"pattern\":%u,\"codePage\":%u,\"called\":%s,\"formatLength\":%d,\"formatError\":%lu,\"formatUsedDefault\":%s,\"length\":%d,\"error\":%lu,\"formatBytes\":[",
-           (unsigned long)locale, (unsigned long)flags, pattern, code_page,
+    printf("RING3_NLS_ANSI {\"lcid\":%lu,\"flags\":%lu,\"pattern\":%u,\"year\":%u,\"month\":%u,\"day\":%u,\"codePage\":%u,\"called\":%s,\"formatLength\":%d,\"formatError\":%lu,\"formatUsedDefault\":%s,\"length\":%d,\"error\":%lu,\"formatBytes\":[",
+           (unsigned long)locale, (unsigned long)flags, pattern,
+           (unsigned)date->wYear, (unsigned)date->wMonth, (unsigned)date->wDay, code_page,
            called ? "true" : "false", format_length, (unsigned long)format_error,
            format_used_default ? "true" : "false", length, (unsigned long)error);
     for (int index = 0; index < format_length - 1; ++index)
@@ -56,6 +58,10 @@ static void probe(LCID locale, DWORD flags, unsigned pattern, const WCHAR *forma
             printf("%s%u", index ? "," : "", (unsigned)(unsigned char)bytes[index]);
     }
     puts("]}");
+}
+static void probe(LCID locale, DWORD flags, unsigned pattern, const WCHAR *format) {
+    const SYSTEMTIME date = {2001, 2, 0, 3, 4, 5, 6, 0};
+    probe_at(locale, flags, pattern, format, &date);
 }
 static void metadata(LCID locale, CALID calendar, DWORD kind) {
     WCHAR output[512] = {0};
@@ -92,7 +98,46 @@ static void direction_cases(void) {
             for (unsigned pattern = 0; pattern < sizeof(patterns) / sizeof(patterns[0]); ++pattern) {
                 probe(locales[locale], calendar, 0x101 + pattern, patterns[pattern]);
                 probe(locales[locale], calendar | DATE_AUTOLAYOUT, 0x101 + pattern, patterns[pattern]);
+                if ((locales[locale] == 0x045a || locales[locale] == 0x0465)
+                        && (pattern == 0 || pattern == 4)) {
+                    probe(locales[locale], calendar | DATE_LTRREADING, 0x101 + pattern, patterns[pattern]);
+                    probe(locales[locale], calendar | DATE_RTLREADING, 0x101 + pattern, patterns[pattern]);
+                }
             }
+        }
+        if (locales[locale] == 0x0409 || locales[locale] == 0x0401 || locales[locale] == 0x040d) {
+            probe(locales[locale], LOCALE_USE_CP_ACP | DATE_LTRREADING, 0x201, L"yyyy/MM/dd");
+            probe(locales[locale], LOCALE_USE_CP_ACP | DATE_RTLREADING, 0x201, L"yyyy/MM/dd");
+        }
+    }
+}
+static void hebrew_cases(void) {
+    const SYSTEMTIME dates[] = {
+        {1601, 1, 0, 1, 0, 0, 0, 0},
+        {1700, 1, 0, 1, 0, 0, 0, 0},
+        {1900, 1, 0, 1, 0, 0, 0, 0},
+        {2000, 1, 0, 1, 0, 0, 0, 0},
+        {2001, 2, 0, 3, 0, 0, 0, 0},
+        {2024, 2, 0, 10, 0, 0, 0, 0},
+        {2024, 3, 0, 11, 0, 0, 0, 0},
+        {2024, 4, 0, 23, 0, 0, 0, 0},
+        {2024, 4, 0, 24, 0, 0, 0, 0},
+        {2025, 3, 0, 1, 0, 0, 0, 0},
+        {2239, 9, 0, 30, 0, 0, 0, 0},
+        {2240, 1, 0, 1, 0, 0, 0, 0},
+        {9999, 12, 0, 31, 0, 0, 0, 0}
+    };
+    const WCHAR *patterns[] = {
+        L"y", L"yy", L"yyy", L"yyyy", L"yyyyy",
+        L"M", L"MM", L"MMM", L"MMMM",
+        L"d", L"dd", L"ddd", L"dddd", L"g", L"gg"
+    };
+    for (unsigned date = 0; date < sizeof(dates) / sizeof(dates[0]); ++date) {
+        for (unsigned pattern = 0; pattern < sizeof(patterns) / sizeof(patterns[0]); ++pattern) {
+            probe_at(0x040d, DATE_USE_ALT_CALENDAR, 0x301 + pattern,
+                     patterns[pattern], &dates[date]);
+            probe_at(0x040d, DATE_USE_ALT_CALENDAR | DATE_AUTOLAYOUT, 0x301 + pattern,
+                     patterns[pattern], &dates[date]);
         }
     }
 }
@@ -119,5 +164,6 @@ int main(void) {
         }
     }
     direction_cases();
+    hebrew_cases();
     return 0;
 }
