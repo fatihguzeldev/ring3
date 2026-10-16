@@ -9,6 +9,8 @@ pub struct PreparedIoSignals32 {
     close: Option<super::PreparedCloseHandles32>,
 }
 
+pub struct PreparedTimerEvent32(PreparedIoSignals32);
+
 pub struct PreparedEventBindings32 {
     epoch: u64,
     revision: u64,
@@ -23,6 +25,47 @@ impl PreparedEventBindings32 {
     }
 }
 impl SynchronizationContext32 {
+    pub fn prepare_timer_event(
+        &self,
+        binding: EventBinding32,
+        occurrences: u64,
+        pulse: bool,
+        release: bool,
+    ) -> Result<PreparedTimerEvent32, Error> {
+        let slot = self.validate_binding(binding)?;
+        let mut signals = self.signal_plan(self.now, None)?;
+        if pulse {
+            let count = occurrences.min(self.waits.len() as u64 + 1);
+            for _ in 0..count {
+                super::context::set(&mut signals.signaled, slot, true);
+                self.resolve_waiters(&mut signals)?;
+                super::context::set(&mut signals.signaled, slot, false);
+            }
+        } else {
+            self.prepare_occurrence(&mut signals, binding, occurrences)?;
+        }
+        let release = if release {
+            let mut receipt = self.prepare_event_bindings(&[], &[binding])?;
+            receipt.revision = receipt.next_revision;
+            receipt.next_revision = receipt
+                .next_revision
+                .checked_add(1)
+                .ok_or(Error::Exhausted)?;
+            Some(receipt)
+        } else {
+            None
+        };
+        Ok(PreparedTimerEvent32(PreparedIoSignals32 {
+            signals,
+            release,
+            close: None,
+        }))
+    }
+
+    pub fn commit_timer_event(&mut self, prepared: PreparedTimerEvent32) {
+        self.commit_signals_and_release(prepared.0);
+    }
+
     pub fn prepare_thread_exit_with_signals(
         &self,
         thread: u32,

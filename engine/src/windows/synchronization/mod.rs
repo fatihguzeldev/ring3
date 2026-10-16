@@ -8,7 +8,7 @@ mod types;
 mod waits;
 
 pub use api::SynchronizationApi32;
-pub use bindings::{PreparedEventBindings32, PreparedIoSignals32};
+pub use bindings::{PreparedEventBindings32, PreparedIoSignals32, PreparedTimerEvent32};
 pub use context::SynchronizationContext32;
 pub use events::{PreparedCloseHandles32, PreparedDuplicate32, PreparedEventShutdown32};
 pub use objects::{PreparedMutexRelease32, PreparedObjectHandle32};

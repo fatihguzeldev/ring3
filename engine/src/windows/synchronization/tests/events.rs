@@ -1,6 +1,63 @@
 use super::*;
 
 #[test]
+fn timer_pulse_wakes_current_waiters_without_leaving_a_signal_for_late_waiters() {
+    let mut context = context();
+    let handle = context.create_event(false, false, false, None).unwrap().0;
+    let binding = context.retain_event(handle).unwrap();
+    let first = match context
+        .wait(&[handle], WaitMode32::Any, INFINITE, false, None)
+        .unwrap()
+    {
+        WaitOutcome32::Pending(token) => token,
+        other => panic!("expected parked waiter, got {other:?}"),
+    };
+    let prepared = context
+        .prepare_timer_event(binding, u64::MAX, true, true)
+        .unwrap();
+    context.commit_timer_event(prepared);
+    assert_eq!(context.take_wait(first).unwrap().unwrap().value, 0);
+    assert_eq!(
+        context.validate_event_binding(binding),
+        Err(SynchronizationError32::Stale)
+    );
+    assert!(!context.event_is_signaled(handle).unwrap());
+    assert_eq!(
+        ready(
+            context
+                .wait(&[handle], WaitMode32::Any, 0, false, None)
+                .unwrap()
+        ),
+        WAIT_TIMEOUT
+    );
+}
+
+#[test]
+fn one_shot_timer_signal_preflights_binding_retirement_before_waking_any_waiter() {
+    let mut context = context();
+    let handle = context.create_event(true, false, false, None).unwrap().0;
+    let binding = context.retain_event(handle).unwrap();
+    let revision = context.revision();
+    context.set_revision_for_test(u64::MAX - 1);
+    assert!(matches!(
+        context.prepare_timer_event(binding, 1, false, true),
+        Err(SynchronizationError32::Exhausted)
+    ));
+    assert!(!context.event_is_signaled(handle).unwrap());
+    context.validate_event_binding(binding).unwrap();
+    context.set_revision_for_test(revision);
+    let prepared = context
+        .prepare_timer_event(binding, 1, false, true)
+        .unwrap();
+    context.commit_timer_event(prepared);
+    assert!(context.event_is_signaled(handle).unwrap());
+    assert_eq!(
+        context.validate_event_binding(binding),
+        Err(SynchronizationError32::Stale)
+    );
+}
+
+#[test]
 fn event_shutdown_preflights_binding_release_and_hidden_handle_close_together() {
     let mut context = context();
     let external = context.create_event(true, false, false, None).unwrap().0;
