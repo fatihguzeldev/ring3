@@ -72,7 +72,7 @@ impl PreparedSeek32 {
     }
 }
 pub(super) struct WriteStage32 {
-    pub owner: u64,
+    pub owner: FileIoOwner32,
     pub file: FileId,
     pub revision: u64,
     pub spans: Vec<(u64, Vec<u8>)>,

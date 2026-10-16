@@ -1,4 +1,4 @@
-use crate::files::{FileError32, FileId, FileReadRequest32};
+use crate::files::{FileError32, FileId, FileIoOwner32, FileReadRequest32};
 
 pub(in crate::files) struct CachePage32 {
     pub request: FileReadRequest32,
@@ -8,7 +8,7 @@ pub(in crate::files) struct CachePage32 {
     pub age: u64,
 }
 pub(in crate::files) struct ReadStage32 {
-    pub owner: u64,
+    pub owner: FileIoOwner32,
     pub file: FileId,
     pub revision: u64,
     pub offset: u64,
@@ -16,6 +16,8 @@ pub(in crate::files) struct ReadStage32 {
     pub bytes: Vec<u8>,
     pub filled: usize,
     pub waiting: Option<FileReadRequest32>,
+    pub waiting_count: usize,
+    pub completed_request: Option<FileReadRequest32>,
 }
 pub(in crate::files) struct ContentCache32 {
     pub pages: Vec<CachePage32>,
@@ -150,6 +152,21 @@ impl ContentCache32 {
                 page.supplied += 1;
             }
             page.bytes[position] = byte;
+        }
+        if page.supplied == page.request.length as usize {
+            for stage in &mut self.stages {
+                if stage.waiting == Some(request) {
+                    let position = stage.offset + stage.filled as u64;
+                    let within = (position - request.offset) as usize;
+                    let count = stage.waiting_count;
+                    stage.bytes[stage.filled..stage.filled + count]
+                        .copy_from_slice(&page.bytes[within..within + count]);
+                    stage.filled += count;
+                    stage.waiting = None;
+                    stage.waiting_count = 0;
+                    stage.completed_request = Some(request);
+                }
+            }
         }
         Ok(())
     }

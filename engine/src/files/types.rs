@@ -225,3 +225,10 @@ pub struct FileVolume32 {
     pub free_bytes: u64,
     pub max_component: u32,
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FileIoOwner32 {
+    GuestThread(u32),
+    AsyncOperation(u64),
+    HostExport,
+}

@@ -54,6 +54,35 @@ fn progressive_read_exceeds_single_page_cache_without_refetch_loop() {
     assert_eq!(requests, 4);
 }
 #[test]
+fn supplied_original_asset_does_not_restore_a_truncated_then_regrown_tail() {
+    let mut vfs = vfs();
+    let file = vfs
+        .mount_asset(
+            &utf16("C:\\truncated"),
+            AssetRef32 {
+                id: 99,
+                length: 100,
+            },
+            ATTR_NORMAL,
+            FileTimes32::default(),
+        )
+        .unwrap();
+    let shrink = vfs.prepare_resize(file, 3).unwrap();
+    vfs.commit_resize(shrink);
+    let grow = vfs.prepare_resize(file, 8).unwrap();
+    vfs.commit_resize(grow);
+    let FileIo32::NeedBytes(request) = vfs.prepare_read_at(file, 0, 8).unwrap() else {
+        panic!()
+    };
+    assert!(!vfs.request_ready(request));
+    vfs.supply_bytes(request, 0, &[42; 100]).unwrap();
+    assert!(vfs.request_ready(request));
+    let FileIo32::Ready(read) = vfs.prepare_read_at(file, 0, 8).unwrap() else {
+        panic!()
+    };
+    assert_eq!(read.bytes(), &[42, 42, 42, 0, 0, 0, 0, 0]);
+}
+#[test]
 fn supply_cancel_partial_overlay_and_shrink_grow_preserve_authority() {
     let mut vfs = vfs();
     let file = vfs
@@ -257,4 +286,101 @@ fn large_immutable_asset_small_reads_and_operation_cleanup_are_bounded() {
             .collect::<Vec<_>>()
     );
     assert!(vfs.cache.stages.is_empty());
+}
+
+#[test]
+fn guest_thread_async_and_host_fetch_domains_do_not_share_cancel_authority() {
+    let mut vfs = vfs();
+    let file = vfs
+        .mount_asset(
+            &utf16("C:\\thread-source"),
+            AssetRef32 {
+                id: 19,
+                length: 200,
+            },
+            ATTR_NORMAL,
+            FileTimes32::default(),
+        )
+        .unwrap();
+    vfs.set_io_thread(1);
+    let FileIo32::NeedBytes(first) = vfs.prepare_read_at(file, 0, 200).unwrap() else {
+        panic!()
+    };
+    vfs.set_io_thread(2);
+    let FileIo32::NeedBytes(second) = vfs.prepare_read_at(file, 0, 200).unwrap() else {
+        panic!()
+    };
+    let FileIo32::NeedBytes(asynchronous) = vfs.prepare_read_at_for(1, file, 0, 200).unwrap()
+    else {
+        panic!()
+    };
+    assert_ne!(first.request, second.request);
+    assert_ne!(first.request, asynchronous.request);
+    vfs.cancel_guest_thread_io(1);
+    assert_eq!(vfs.supply_bytes(first, 0, &[1]), Err(FileError32::Stale));
+    fill(&mut vfs, second);
+    fill(&mut vfs, asynchronous);
+    assert!(matches!(
+        vfs.prepare_read_at(file, 0, 200).unwrap(),
+        FileIo32::Ready(_)
+    ));
+    assert!(matches!(
+        vfs.prepare_read_at_for(1, file, 0, 200).unwrap(),
+        FileIo32::Ready(_)
+    ));
+}
+
+#[test]
+fn supplied_thread_progress_survives_single_page_cache_eviction_without_refetching() {
+    let mut vfs = Vfs32::new(
+        7,
+        FileLimits32 {
+            cache_pages: 1,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let first = vfs
+        .mount_asset(
+            &utf16("C:\\first-thread"),
+            AssetRef32 {
+                id: 81,
+                length: 200,
+            },
+            ATTR_NORMAL,
+            FileTimes32::default(),
+        )
+        .unwrap();
+    let second = vfs
+        .mount_asset(
+            &utf16("C:\\second-thread"),
+            AssetRef32 {
+                id: 82,
+                length: 200,
+            },
+            ATTR_NORMAL,
+            FileTimes32::default(),
+        )
+        .unwrap();
+    vfs.set_io_thread(1);
+    let FileIo32::NeedBytes(one) = vfs.prepare_read_at(first, 0, 200).unwrap() else {
+        panic!()
+    };
+    fill(&mut vfs, one);
+    vfs.set_io_thread(2);
+    let FileIo32::NeedBytes(two) = vfs.prepare_read_at(second, 0, 200).unwrap() else {
+        panic!()
+    };
+    fill(&mut vfs, two);
+    vfs.set_io_thread(1);
+    let FileIo32::Ready(one) = vfs.prepare_read_at(first, 0, 200).unwrap() else {
+        panic!("host-accepted bytes were already staged")
+    };
+    assert_eq!(one.bytes().len(), 200);
+    vfs.set_io_thread(2);
+    assert!(matches!(
+        vfs.prepare_read_at(second, 0, 200).unwrap(),
+        FileIo32::Ready(_)
+    ));
+    assert!(vfs.pending_request().is_none());
 }

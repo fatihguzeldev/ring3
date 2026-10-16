@@ -22,6 +22,7 @@ pub(crate) struct Vfs32 {
     pub(super) overlay_pages: usize,
     pub(super) deleted: Vec<NamespaceEntry32>,
     pub(super) flushed_revision: u64,
+    pub(super) io_thread: u32,
     pub(super) pending_writes: Vec<super::io::WriteStage32>,
 }
 impl Vfs32 {
@@ -105,7 +106,11 @@ impl Vfs32 {
             deleted,
             flushed_revision: 0,
             pending_writes,
+            io_thread: 0,
         })
+    }
+    pub(crate) fn set_io_thread(&mut self, thread: u32) {
+        self.io_thread = thread;
     }
     pub(crate) fn epoch(&self) -> u64 {
         self.epoch

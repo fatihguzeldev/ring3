@@ -67,7 +67,12 @@ impl Vfs32 {
         if revision != self.revision {
             return Err(FileError32::Stale);
         }
-        self.read_at_owned(u64::MAX, file, offset, length)
+        self.read_at_owned(
+            crate::files::FileIoOwner32::HostExport,
+            file,
+            offset,
+            length,
+        )
     }
     pub(crate) fn acknowledge_overlay(
         &mut self,

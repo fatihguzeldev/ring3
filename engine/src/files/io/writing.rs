@@ -84,18 +84,22 @@ impl Vfs32 {
         if operation == 0 || operation == u64::MAX {
             return Err(FileError32::InvalidParameter);
         }
-        self.writes_at_owned(operation, file, &[(offset, bytes)])
+        self.writes_at_owned(
+            FileIoOwner32::AsyncOperation(operation),
+            file,
+            &[(offset, bytes)],
+        )
     }
     pub(crate) fn prepare_writes_at(
         &mut self,
         file: FileId,
         spans: &[(u64, &[u8])],
     ) -> Result<FileIo32<PreparedWrite32>, FileError32> {
-        self.writes_at_owned(0, file, spans)
+        self.writes_at_owned(FileIoOwner32::GuestThread(self.io_thread), file, spans)
     }
     fn writes_at_owned(
         &mut self,
-        owner: u64,
+        owner: FileIoOwner32,
         file: FileId,
         spans: &[(u64, &[u8])],
     ) -> Result<FileIo32<PreparedWrite32>, FileError32> {

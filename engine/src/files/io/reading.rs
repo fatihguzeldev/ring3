@@ -37,7 +37,12 @@ impl Vfs32 {
         offset: u64,
         length: usize,
     ) -> Result<FileIo32<PreparedRead32>, FileError32> {
-        self.read_at_owned(0, file, offset, length)
+        self.read_at_owned(
+            FileIoOwner32::GuestThread(self.io_thread),
+            file,
+            offset,
+            length,
+        )
     }
     pub(crate) fn prepare_read_at_for(
         &mut self,
@@ -49,11 +54,16 @@ impl Vfs32 {
         if operation == 0 || operation == u64::MAX {
             return Err(FileError32::InvalidParameter);
         }
-        self.read_at_owned(operation, file, offset, length)
+        self.read_at_owned(
+            FileIoOwner32::AsyncOperation(operation),
+            file,
+            offset,
+            length,
+        )
     }
     pub(in crate::files) fn read_at_owned(
         &mut self,
-        owner: u64,
+        owner: FileIoOwner32,
         file: FileId,
         offset: u64,
         length: usize,
@@ -104,6 +114,8 @@ impl Vfs32 {
                 bytes,
                 filled: 0,
                 waiting: None,
+                waiting_count: 0,
+                completed_request: None,
             }
         };
         while stage.filled < stage.length {
@@ -141,6 +153,8 @@ impl Vfs32 {
                         self.limits.requests,
                     )?;
                     stage.waiting = Some(request);
+                    stage.waiting_count = count;
+                    stage.completed_request = None;
                     self.cache.stages.push(stage);
                     return Ok(FileIo32::NeedBytes(request));
                 }

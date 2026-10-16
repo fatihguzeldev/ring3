@@ -93,7 +93,9 @@ impl Vfs32 {
         }
         self.revision = prepared.next;
         self.pending_writes.clear();
-        self.cache.stages.retain(|stage| stage.owner == u64::MAX);
+        self.cache
+            .stages
+            .retain(|stage| stage.owner == FileIoOwner32::HostExport);
         let stages = &self.cache.stages;
         self.cache.pages.retain(|page| {
             page.supplied == page.request.length as usize
