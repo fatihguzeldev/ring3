@@ -37,7 +37,9 @@ impl EngineInstance {
                     } else {
                         0
                     })
-                    .is_none_or(|handle| *handle < 0x8000_0000))
+                    .is_none_or(|handle| {
+                        *handle < 0x8000_0000 || matches!(*handle, u32::MAX | 0xffff_fffe)
+                    }))
         {
             return Ok(false);
         }
@@ -72,6 +74,31 @@ impl EngineInstance {
             Vec::new()
         };
         let current_thread = self.current_windows_thread_id()?;
+        let (duplicate_args, process_error) = if kernel == Some(WindowsApi32::DuplicateHandle) {
+            let mut args = *<&[u32; 7]>::try_from(frame.arguments()).unwrap();
+            let source = self.validate_windows_process_handle(args[0], 0x40);
+            let target = if args[2] == 0 && args[6] & 1 != 0 {
+                Ok(())
+            } else {
+                self.validate_windows_process_handle(args[2], 0x40)
+            };
+            if source.is_ok() {
+                args[0] = u32::MAX;
+            }
+            if target.is_ok() && args[2] != 0 {
+                args[2] = u32::MAX;
+            }
+            let error = source.and(target).err().map(|error| {
+                if error == crate::windows::synchronization::SynchronizationError32::AccessDenied {
+                    FileError32::AccessDenied
+                } else {
+                    FileError32::InvalidHandle
+                }
+            });
+            (args, error)
+        } else {
+            ([0; 7], None)
+        };
         let files = self
             .files
             .as_mut()
@@ -98,8 +125,17 @@ impl EngineInstance {
             .synchronization
             .as_mut()
             .map(|runtime| runtime.context_mut());
-        let outcome = if matches!(api,Some(FileApi32::SetCurrentDirectoryA|FileApi32::SetCurrentDirectoryW)) && self.process_runtime.startup.is_some() {
-            files.set_process_current_directory(self.memory.as_mut().unwrap(),self.process_runtime.startup.as_mut().unwrap(),args,api==Some(FileApi32::SetCurrentDirectoryW))
+        let outcome = if matches!(
+            api,
+            Some(FileApi32::SetCurrentDirectoryA | FileApi32::SetCurrentDirectoryW)
+        ) && self.process_runtime.startup.is_some()
+        {
+            files.set_process_current_directory(
+                self.memory.as_mut().unwrap(),
+                self.process_runtime.startup.as_mut().unwrap(),
+                args,
+                api == Some(FileApi32::SetCurrentDirectoryW),
+            )
         } else if let Some(api) = api {
             let now = if api == FileApi32::GetOverlappedResultEx {
                 self.cpu_clock.monotonic_bounds()?.1
@@ -118,7 +154,12 @@ impl EngineInstance {
         } else if kernel == Some(WindowsApi32::CloseHandle) {
             files.close_kernel_handle(self.memory.as_mut().unwrap(), sync, args[0])
         } else {
-            files.duplicate_kernel_handle(self.memory.as_mut().unwrap(), sync, args)
+            files.duplicate_kernel_handle(
+                self.memory.as_mut().unwrap(),
+                sync,
+                &duplicate_args,
+                process_error,
+            )
         };
         let outcome = match outcome {
             Ok(outcome) => outcome,
@@ -275,8 +316,13 @@ impl FileRuntime32 {
         memory: &mut AddressSpace,
         mut sync: Option<&mut SynchronizationContext32>,
         args: &[u32],
+        process_error: Option<FileError32>,
     ) -> Result<FileCallOutcome32, FileError32> {
-        let result = self.duplicate_kernel_handle_inner(memory, sync.as_deref_mut(), args);
+        let result = if let Some(error) = process_error {
+            Err(error)
+        } else {
+            self.duplicate_kernel_handle_inner(memory, sync.as_deref_mut(), args)
+        };
         if result.is_err()
             && args[6] & 1 != 0
             && args[0] == u32::MAX

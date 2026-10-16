@@ -4,6 +4,7 @@ mod calls;
 mod clock;
 mod critical;
 mod decoding;
+mod handles;
 mod lifecycle;
 mod objects;
 mod timers;

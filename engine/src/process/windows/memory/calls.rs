@@ -125,9 +125,19 @@ impl EngineInstance {
         use MemoryApi32::*;
         match api {
             VirtualAllocEx | VirtualFreeEx | VirtualProtectEx | VirtualQueryEx => {
-                if args[0] != u32::MAX {
-                    return Err(MemoryError32::InvalidHandle);
-                }
+                self.validate_windows_process_handle(
+                    args[0],
+                    if api == VirtualQueryEx { 0x400 } else { 8 },
+                )
+                .map_err(|error| {
+                    if error
+                        == crate::windows::synchronization::SynchronizationError32::AccessDenied
+                    {
+                        MemoryError32::AccessDenied
+                    } else {
+                        MemoryError32::InvalidHandle
+                    }
+                })?;
                 match api {
                     VirtualAllocEx => self.memory_allocate(&args[1..]),
                     VirtualFreeEx => self.memory_free(&args[1..]),

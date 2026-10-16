@@ -30,6 +30,9 @@ impl WindowsProcessRuntime32 {
     }
 }
 impl crate::process::EngineInstance {
+    pub(in crate::process) fn current_windows_process_id(&self) -> u32 {
+        self.process_runtime.launch.process_id
+    }
     pub(in crate::process) fn process_creation_filetime(
         &self,
     ) -> Result<u64, crate::process::HostError> {

@@ -200,4 +200,45 @@ impl SynchronizationContext32 {
         self.commit_signals(prepared);
         Ok(())
     }
+    pub(in crate::windows::synchronization) fn prepare_process_exit(
+        &self,
+        process: u32,
+    ) -> Result<PreparedSignals32, Error> {
+        let mut prepared = self.signal_plan_typed(self.now, None)?;
+        for (slot, kind) in &mut prepared.objects {
+            match *kind {
+                ObjectKind32::Process { id, .. } if id == process => {
+                    *kind = ObjectKind32::Process {
+                        id,
+                        terminated: true,
+                    };
+                    set(&mut prepared.signaled, *slot, true);
+                }
+                ObjectKind32::Thread { id, .. } => {
+                    *kind = ObjectKind32::Thread {
+                        id,
+                        terminated: true,
+                    };
+                    set(&mut prepared.signaled, *slot, true);
+                }
+                ObjectKind32::Mutex { owner, .. } if owner != 0 => {
+                    *kind = ObjectKind32::Mutex {
+                        owner: 0,
+                        depth: 0,
+                        abandoned: true,
+                    };
+                    set(&mut prepared.signaled, *slot, true);
+                }
+                ObjectKind32::Timer { .. } => {
+                    if let ObjectKind32::Timer { due, queued, .. } = kind {
+                        *due = None;
+                        *queued = false;
+                    }
+                }
+                _ => {}
+            }
+        }
+        self.resolve_waiters(&mut prepared)?;
+        Ok(prepared)
+    }
 }

@@ -217,8 +217,11 @@ impl EngineInstance {
             }
             IsDebuggerPresent => 0,
             CheckRemoteDebuggerPresent => {
-                if args[0] != u32::MAX {
-                    return Err(guest(ProcessError32::InvalidParameter));
+                if let Err(error) = self.validate_windows_process_handle(args[0], 0x400) {
+                    return Ok(ProcessReply32 {
+                        value: 0,
+                        error: Some(error.win32()),
+                    });
                 }
                 buffers::write(self.memory.as_mut().unwrap(), args[1], &0u32.to_le_bytes())
                     .map_err(guest)?;

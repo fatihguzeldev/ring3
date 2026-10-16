@@ -27,6 +27,10 @@ pub(super) enum ObjectKind32 {
         id: u32,
         terminated: bool,
     },
+    Process {
+        id: u32,
+        terminated: bool,
+    },
     Timer {
         due: Option<u64>,
         period: u64,
@@ -216,6 +220,9 @@ impl SynchronizationContext32 {
                     && !matches!(
                         object.kind,
                         ObjectKind32::Thread {
+                            terminated: false,
+                            ..
+                        } | ObjectKind32::Process {
                             terminated: false,
                             ..
                         }

@@ -260,6 +260,9 @@ impl EngineInstance {
                 success(handle, None)
             }
             SetEvent | ResetEvent | PulseEvent | CloseHandle => {
+                if api == CloseHandle && matches!(args[0], u32::MAX | 0xffff_fffe) {
+                    return success(1, None);
+                }
                 let context = self.synchronization_mut()?;
                 match api {
                     SetEvent => context.set_event(args[0]),
@@ -336,8 +339,11 @@ impl EngineInstance {
         }
     }
     fn duplicate_event_call(&mut self, args: &[u32]) -> Result<WaitOutcome32, HostError> {
-        if args[0] != u32::MAX || args[2] != u32::MAX && !(args[2] == 0 && args[6] & 1 != 0) {
-            return Err(HostError::Synchronization(Error::InvalidHandle));
+        self.validate_windows_process_handle(args[0], 0x40)
+            .map_err(HostError::Synchronization)?;
+        if !(args[2] == 0 && args[6] & 1 != 0) {
+            self.validate_windows_process_handle(args[2], 0x40)
+                .map_err(HostError::Synchronization)?;
         }
         if args[6] & !3 != 0 {
             return Err(HostError::Synchronization(Error::InvalidWait));
@@ -345,6 +351,46 @@ impl EngineInstance {
         let target = args[2] != 0;
         if target {
             decoding::check_output(self.memory()?, args[3])?;
+        }
+        if matches!(args[1], u32::MAX | 0xffff_fffe) {
+            if !target {
+                return Ok(WaitOutcome32::Ready(WaitResult32 {
+                    value: 1,
+                    last_error: None,
+                }));
+            }
+            let access = if args[6] & 2 != 0 {
+                0x001f_ffff
+            } else {
+                args[4]
+            };
+            let prepared = if args[1] == u32::MAX {
+                self.synchronization()?.prepare_process_handle(
+                    self.current_windows_process_id(),
+                    access,
+                    args[5] != 0,
+                )
+            } else {
+                self.synchronization()?.prepare_open_thread(
+                    self.current_windows_thread_id()?,
+                    access,
+                    args[5] != 0,
+                    false,
+                )
+            }
+            .map_err(HostError::Synchronization)?;
+            if args[3] != 0 {
+                self.memory
+                    .as_mut()
+                    .unwrap()
+                    .write(GuestAddress(args[3]), &prepared.handle().to_le_bytes())
+                    .map_err(HostError::Memory)?;
+            }
+            self.synchronization_mut()?.commit_object_handle(prepared);
+            return Ok(WaitOutcome32::Ready(WaitResult32 {
+                value: 1,
+                last_error: None,
+            }));
         }
         let prepared = self.synchronization()?.prepare_duplicate(
             args[1],

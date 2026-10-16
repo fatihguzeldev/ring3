@@ -69,6 +69,26 @@ pub(super) fn object_access(
             }
         }
         ObjectKind32::Thread { .. } => thread_access(access),
+        ObjectKind32::Process { .. } => process_access(access),
+    }
+}
+
+pub(super) fn process_access(access: u32) -> Result<u32, SynchronizationError32> {
+    let mut mapped = access & 0x0fff_ffff;
+    for (generic, rights) in [
+        (0x1000_0000, 0x001f_ffff),
+        (0x8000_0000, 0x0002_0410),
+        (0x4000_0000, 0x0002_03eb),
+        (0x2000_0000, 0x0012_0000),
+    ] {
+        if access & generic != 0 {
+            mapped |= rights;
+        }
+    }
+    if mapped & !0x001f_ffff != 0 {
+        Err(SynchronizationError32::AccessDenied)
+    } else {
+        Ok(mapped)
     }
 }
 

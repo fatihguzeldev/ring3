@@ -97,5 +97,7 @@ pub(super) fn check_output(memory: &AddressSpace, output: u32) -> Result<(), Hos
     Ok(())
 }
 fn ansi(byte: u8) -> u16 {
-    crate::windows::text::CodePage32::Windows1252.decode_byte(byte).expect("CP1252 is single-byte")
+    crate::windows::text::CodePage32::Windows1252
+        .decode_byte(byte)
+        .expect("CP1252 is single-byte")
 }

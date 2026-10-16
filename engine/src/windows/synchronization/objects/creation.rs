@@ -165,6 +165,43 @@ impl SynchronizationContext32 {
             _ => Err(Error::InvalidHandle),
         }
     }
+    pub fn prepare_process_handle(
+        &self,
+        process: u32,
+        access: u32,
+        inherit: bool,
+    ) -> Result<PreparedObjectHandle32, Error> {
+        if process == 0 {
+            return Err(Error::InvalidHandle);
+        }
+        let access = super::process_access(access)?;
+        if let Some(slot) = self.objects.iter().position(|object| {
+            object.as_ref().is_some_and(
+                |object| matches!(object.kind, ObjectKind32::Process{id,..} if id == process),
+            )
+        }) {
+            return self.prepare_existing_object(slot, access, inherit);
+        }
+        Ok(self
+            .prepare_object(
+                ObjectKind32::Process {
+                    id: process,
+                    terminated: false,
+                },
+                true,
+                inherit,
+                None,
+                access,
+            )?
+            .0)
+    }
+    pub fn validate_process_access(&self, handle: u32, access: u32) -> Result<u32, Error> {
+        let slot = self.handles[self.handle_index(handle, access)?].event;
+        match self.objects[slot].as_ref().unwrap().kind {
+            ObjectKind32::Process { id, .. } => Ok(id),
+            _ => Err(Error::InvalidHandle),
+        }
+    }
     pub fn open_thread(&mut self, thread: u32, access: u32, inherit: bool) -> Result<u32, Error> {
         let slot = self
             .objects
@@ -192,7 +229,8 @@ impl SynchronizationContext32 {
                 ObjectKind32::Timer { .. } => false,
                 ObjectKind32::Mutex { owner, .. } => owner == 0,
                 ObjectKind32::Semaphore { count, .. } => count != 0,
-                ObjectKind32::Thread { terminated, .. } => terminated,
+                ObjectKind32::Thread { terminated, .. }
+                | ObjectKind32::Process { terminated, .. } => terminated,
             };
             set(&mut self.signaled, prepared.slot, signaled);
             self.objects[prepared.slot] = Some(object);

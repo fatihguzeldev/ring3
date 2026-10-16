@@ -808,7 +808,9 @@ impl SynchronizationContext32 {
                     ObjectKind32::Semaphore { count, maximum };
                 set(&mut prepared.signaled, signal, true);
             }
-            ObjectKind32::Thread { .. } | ObjectKind32::Timer { .. } => {
+            ObjectKind32::Thread { .. }
+            | ObjectKind32::Process { .. }
+            | ObjectKind32::Timer { .. } => {
                 return Err(Error::InvalidHandle);
             }
         }
@@ -889,7 +891,9 @@ impl SynchronizationContext32 {
         let ready = |slot: usize| match self.projected_kind(prepared, slot) {
             ObjectKind32::Mutex { owner, .. } => owner == 0 || owner == wait.thread,
             ObjectKind32::Semaphore { count, .. } => count != 0,
-            ObjectKind32::Thread { terminated, .. } => terminated,
+            ObjectKind32::Thread { terminated, .. } | ObjectKind32::Process { terminated, .. } => {
+                terminated
+            }
             ObjectKind32::Event | ObjectKind32::Timer { .. } => bit(&prepared.signaled, slot),
         };
         let selected = if wait.mode == WaitMode32::All {
@@ -943,7 +947,7 @@ impl SynchronizationContext32 {
                         set(&mut prepared.signaled, slot, false);
                     }
                 }
-                ObjectKind32::Thread { .. } => {}
+                ObjectKind32::Thread { .. } | ObjectKind32::Process { .. } => {}
             }
         }
         Ok(Some(WaitResult32 {

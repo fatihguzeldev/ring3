@@ -7,21 +7,25 @@ impl EngineInstance {
         media_bindings: &[crate::windows::synchronization::EventBinding32],
     ) -> Result<bool, HostError> {
         if self.files.is_none() {
-            if !media_bindings.is_empty() {
-                let sync = self
-                    .synchronization
-                    .as_mut()
-                    .ok_or(HostError::Infrastructure)?;
+            let process = self.current_windows_process_id();
+            if let Some(sync) = self.synchronization.as_mut() {
                 let prepared = sync
                     .context()
-                    .prepare_event_shutdown(media_bindings, &[])
+                    .prepare_process_exit_with_events(process, media_bindings, &[])
                     .map_err(HostError::Synchronization)?;
-                sync.context_mut().commit_event_shutdown(prepared);
+                sync.context_mut().commit_signals_and_release(prepared);
+            } else if !media_bindings.is_empty() {
+                return Err(HostError::Infrastructure);
             }
             return Ok(true);
         }
-        let pending = self.pending_call.as_ref().map(|pending|(pending.owner,pending.token,pending.frame));
-        if let Some((owner,token,_))=pending {self.checked_pending_call(owner,token)?;}
+        let pending = self
+            .pending_call
+            .as_ref()
+            .map(|pending| (pending.owner, pending.token, pending.frame));
+        if let Some((owner, token, _)) = pending {
+            self.checked_pending_call(owner, token)?;
+        }
         let request = self
             .files
             .as_mut()
@@ -29,8 +33,14 @@ impl EngineInstance {
             .flush_exit_mappings(self.memory.as_ref().ok_or(HostError::Closed)?)
             .map_err(HostError::File)?;
         if let Some(request) = request {
-            if let Some((owner,token,frame))=pending {
-                self.files.as_mut().unwrap().reply = Some(FileReply32 {owner,token,frame,id:crate::windows::WindowsApi32::ExitProcess.id(),request:Some(request)});
+            if let Some((owner, token, frame)) = pending {
+                self.files.as_mut().unwrap().reply = Some(FileReply32 {
+                    owner,
+                    token,
+                    frame,
+                    id: crate::windows::WindowsApi32::ExitProcess.id(),
+                    request: Some(request),
+                });
             }
             return Ok(false);
         }
@@ -55,17 +65,20 @@ impl EngineInstance {
             .try_reserve_exact(files.events.len())
             .map_err(|_| HostError::File(FileError32::Allocation))?;
         handles.extend(files.events.iter().map(|(_, handle)| *handle));
-        let events = if bindings.is_empty() && handles.is_empty() {
-            None
-        } else {
+        let events = if let Some(sync) = self.synchronization.as_ref() {
             Some(
-                self.synchronization
-                    .as_ref()
-                    .ok_or(HostError::File(FileError32::Unsupported))?
-                    .context()
-                    .prepare_event_shutdown(&bindings, &handles)
+                sync.context()
+                    .prepare_process_exit_with_events(
+                        self.current_windows_process_id(),
+                        &bindings,
+                        &handles,
+                    )
                     .map_err(HostError::Synchronization)?,
             )
+        } else if bindings.is_empty() && handles.is_empty() {
+            None
+        } else {
+            return Err(HostError::File(FileError32::Unsupported));
         };
         let files = self.files.as_mut().unwrap();
         files
@@ -76,7 +89,7 @@ impl EngineInstance {
                 .as_mut()
                 .unwrap()
                 .context_mut()
-                .commit_event_shutdown(events);
+                .commit_signals_and_release(events);
         }
         files.vfs.commit_process_exit(native);
         files.asynchronous.commit_process_exit();

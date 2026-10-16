@@ -36,7 +36,24 @@ impl SynchronizationContext32 {
         bindings: &[EventBinding32],
         handles: &[u32],
     ) -> Result<PreparedIoSignals32, Error> {
-        let mut signals = self.prepare_thread_exit(thread)?;
+        let signals = self.prepare_thread_exit(thread)?;
+        self.prepare_exit_events(signals, bindings, handles)
+    }
+    pub fn prepare_process_exit_with_events(
+        &self,
+        process: u32,
+        bindings: &[EventBinding32],
+        handles: &[u32],
+    ) -> Result<PreparedIoSignals32, Error> {
+        let signals = self.prepare_process_exit(process)?;
+        self.prepare_exit_events(signals, bindings, handles)
+    }
+    fn prepare_exit_events(
+        &self,
+        mut signals: super::PreparedSignals32,
+        bindings: &[EventBinding32],
+        handles: &[u32],
+    ) -> Result<PreparedIoSignals32, Error> {
         for binding in bindings {
             self.prepare_occurrence(&mut signals, *binding, 1)?;
         }
