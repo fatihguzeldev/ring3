@@ -81,7 +81,7 @@ fn advertised_abi_layout_has_no_d3d9_tail_or_fabricated_whql_certification() {
         &caps[47..],
         &[16, 255, 0xfffe0101, 96, 0xffff0104, 8.0f32.to_bits()]
     );
-    assert_eq!(caps[7] & 0x01e0_0000, 0); // optional patch hardware is not advertised.
+    assert_eq!(caps[7] & 0x01e0_0000, 0x0060_0000);
     let identifier = profile.identifier();
     assert_eq!(ADAPTER_IDENTIFIER_BYTES, 1068);
     assert_eq!(&identifier[..11], b"ring3.d3d8\0");

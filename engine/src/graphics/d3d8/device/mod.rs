@@ -1,6 +1,7 @@
 mod context;
 mod draw;
 mod lifetime;
+mod patches;
 mod pipeline;
 mod preparation;
 mod presentation;

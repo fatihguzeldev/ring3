@@ -127,6 +127,7 @@ fn start_graphics_image(image: &[u8]) {
                     bytes: 0x100000,
                 },
                 state_blocks: 32,
+                patches: 256,
                 readbacks: 16,
             },
         })

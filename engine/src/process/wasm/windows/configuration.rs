@@ -93,6 +93,7 @@ fn decode(bytes: &[u8]) -> Result<D3D8Config32, HostError> {
                 bytes: words[16],
             },
             state_blocks: words[17],
+            patches: 256,
             readbacks: words[18],
         },
     })

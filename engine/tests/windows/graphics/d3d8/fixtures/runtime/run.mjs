@@ -240,11 +240,34 @@ assert.equal(read(guest.addresses.small), 0xdddddddd, 'too-small shader output p
 assert.ok(callbacks.some(item => item.message === 0x81), 'WM_NCCREATE executes authored WndProc');
 assert.ok(callbacks.some(item => item.message === 1), 'WM_CREATE executes authored WndProc');
 assert.ok(fragmentedCommands > 0, 'bounded packets fragment logical state snapshots'); assert.equal(fragments.size, 0);
-for (const opcode of [1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14]) assert.ok(commands.some(item => item.opcode === opcode), `semantic command ${opcode} emitted`);
+for (const opcode of [1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 21, 22, 23, 24, 25, 26]) assert.ok(commands.some(item => item.opcode === opcode), `semantic command ${opcode} emitted`);
 assert.equal(commands.filter(item => item.opcode === 8).length, 2, 'fixed-function and programmable draws each submit exactly once');
 const logical = opcode => commands.filter(item => item.opcode === opcode).map(item => Buffer.from(item.payload, 'hex'));
 assert.equal(logical(13).filter(payload => payload.readUInt32LE(8) === 3).length, 1, 'device removal is submitted exactly once');
 assert.equal(commands.at(-1).opcode, 13, 'final removal follows all queued graphics work');
+assert.equal(logical(21).length, 1, 'engine-owned patch capture/evaluation kernel is defined once');
+assert.equal(logical(22).length, 1, 'one cached compiled control net is defined');
+assert.equal(logical(23).length, 2, 'triangle and render-state rectangle domain meshes are explicit and reused');
+assert.equal(logical(24).length, 3, 'dynamic triangle and cached rectangle draws consume evaluated domain meshes');
+assert.equal(logical(25).length, 1, 'cached patch is deleted exactly once');
+assert.equal(logical(26).length, 1, 'superseded domain storage is disposed in order');
+const kernel = logical(21)[0];
+assert.equal(kernel.readUInt32LE(0), 1); assert.equal(kernel.readUInt32LE(4), kernel.length - 8);
+assert.match(kernel.subarray(8).toString('utf8'), /fn capture/); assert.match(kernel.subarray(8).toString('utf8'), /fn evaluate/);
+const patchDefinition = logical(22)[0], patchIdentity = patchDefinition.readBigUInt64LE(0);
+assert.ok(patchIdentity > 0n); assert.equal(patchDefinition.readUInt32LE(12), 0, 'tensor polynomial program');
+assert.equal(patchDefinition.readUInt32LE(24), 1, 'linear degree');
+assert.equal(patchDefinition.readFloatLE(44), 1); assert.equal(patchDefinition.readFloatLE(48), -1);
+assert.equal(logical(25)[0].readBigUInt64LE(0), patchIdentity);
+for (const payload of logical(24).slice(1)) {
+  assert.equal(payload.readUInt32LE(payload.length - 12), 0, 'cached source discriminant');
+  assert.equal(payload.readBigUInt64LE(payload.length - 8), patchIdentity);
+}
+for (const payload of logical(23)) {
+  const vertices = payload.readUInt32LE(32), indices = payload.readUInt32LE(36);
+  assert.equal(payload.length, 40 + vertices * 8 + indices * 4); assert.ok(vertices > 3 && indices >= 9 && indices % 3 === 0);
+  for (let at = 40 + vertices * 8; at < payload.length; at += 4) assert.ok(payload.readUInt32LE(at) < vertices);
+}
 const draws = logical(8);
 assert.deepEqual(draws.map(draw => draw.readBigUInt64LE(32)), [3n, 4n], 'clear and each accepted draw advance the target exactly once across packet retries');
 assert.equal(logical(9)[0].readBigUInt64LE(16), 2n, 'clear pins its output content version');

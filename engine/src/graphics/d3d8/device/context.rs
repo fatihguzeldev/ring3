@@ -35,6 +35,12 @@ pub struct Device {
     pub(super) recorded_fvf: Option<Option<Arc<Fvf>>>,
     pub(super) recorded_pixel: Option<Option<Arc<PixelShader>>>,
     pub(super) blocks: Vec<CapturedBlock>,
+    pub(super) patches: Vec<super::patches::CachedPatch>,
+    pub(super) patch_sequence: u64,
+    pub(super) patch_workspace: Option<super::super::patch::domain::DomainMesh>,
+    pub(super) patch_domain: Option<(super::super::patch::domain::DomainKey, u64)>,
+    pub(super) patch_domain_sequence: u64,
+    pub(super) patch_kernel: bool,
     pub(super) retired_shaders: Vec<RetiredShader>,
     pub(super) block_sequence: u32,
     pub(super) block_revision: u64,
@@ -93,6 +99,8 @@ impl Device {
             || limits.state_blocks > 4096
             || limits.readbacks == 0
             || limits.readbacks > 1024
+            || limits.patches == 0
+            || limits.patches > 4096
         {
             return Err(DeviceError::InvalidCall);
         }
@@ -166,6 +174,10 @@ impl Device {
         blocks
             .try_reserve_exact(limits.state_blocks as usize)
             .map_err(|_| DeviceError::Allocation)?;
+        let mut patches = Vec::new();
+        patches
+            .try_reserve_exact(limits.patches as usize)
+            .map_err(|_| DeviceError::Allocation)?;
         let mut readbacks = Vec::new();
         readbacks
             .try_reserve_exact(limits.readbacks as usize)
@@ -206,6 +218,12 @@ impl Device {
             recorded_fvf: None,
             recorded_pixel: None,
             blocks,
+            patches,
+            patch_sequence: 0,
+            patch_workspace: None,
+            patch_domain: None,
+            patch_domain_sequence: 0,
+            patch_kernel: false,
             retired_shaders,
             block_sequence: 0,
             block_revision: 0,

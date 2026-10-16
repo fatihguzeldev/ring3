@@ -52,6 +52,7 @@ pub struct DeviceLimits {
     pub commands: CommandLimits,
     pub shaders: ShaderLimits,
     pub state_blocks: u32,
+    pub patches: u32,
     pub readbacks: u32,
 }
 
@@ -67,6 +68,7 @@ impl Default for DeviceLimits {
             commands: graphics.into(),
             shaders: ShaderLimits::default(),
             state_blocks: 256,
+            patches: 256,
             readbacks: 64,
         }
     }

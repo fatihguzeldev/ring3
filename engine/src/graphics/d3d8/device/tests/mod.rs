@@ -8,6 +8,7 @@ use super::*;
 
 mod drawing;
 mod lifetime;
+mod patches;
 mod retention;
 mod transfers;
 

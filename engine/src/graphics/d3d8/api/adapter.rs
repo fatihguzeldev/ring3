@@ -177,7 +177,7 @@ impl AdapterProfile32 {
         caps[4] = 0x20;
         caps[5] = self.presentation_intervals;
         caps[6] = 3;
-        caps[7] = 0x0019_1ff0; // ordinary draw + hardware vertex processing; no patch caps.
+        caps[7] = 0x0079_1ff0; // ordinary drawing plus rectangular, triangular and quintic patches.
         caps[8] = 0x0ff6;
         caps[9] = 0x0077_7199;
         caps[10] = 0xff;

@@ -104,7 +104,7 @@ pub(super) fn stage_defaults(stage: usize) -> [u32; STAGE_COUNT] {
 
 pub(super) fn vertex_render(state: usize) -> bool {
     matches!(state, 9 | 22 | 28 | 29 | 34..=38 | 48 | 136..=137 | 139..=143
-        | 145..=148 | 151..=163 | 166..=167 | 170 | 172..=173)
+        | 145..=148 | 151..=164 | 166..=167 | 170 | 172..=173)
 }
 
 pub(super) fn pixel_render(state: usize) -> bool {

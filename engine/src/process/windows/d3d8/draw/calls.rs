@@ -1,4 +1,4 @@
-use super::super::memory::read_bytes;
+use super::super::memory::{read_bytes, read_words};
 use super::super::{D3D8Runtime32, DispatchError32};
 use super::decoding::{clear_rectangles, vertex_bytes};
 use crate::{
@@ -9,6 +9,7 @@ use crate::{
             TextureBinding,
         },
         device::DeviceError,
+        patch::{Basis, Degree, PatchInfo, RectPatchInfo, Segments, TriPatchInfo},
         resources::{BufferKind, Format, ResourceDesc},
     },
     memory::{AddressSpace, GuestAddress},
@@ -149,8 +150,51 @@ impl D3D8Runtime32 {
                     return Err(DispatchError32::Readback { id });
                 }
             }
-            94 | 95 => self.device(pointer)?.draw_patch()?,
-            96 => self.device(pointer)?.delete_patch(args[1])?,
+            94 | 95 => {
+                let triangular = slot == 95;
+                let info = if args[3] == 0 {
+                    None
+                } else if triangular {
+                    let words = read_words::<4>(memory, args[3])?;
+                    Some(PatchInfo::Triangle(TriPatchInfo {
+                        start: words[0],
+                        vertices: words[1],
+                        basis: Basis::try_from(words[2]).map_err(|_| HResult::INVALID_CALL)?,
+                        degree: Degree::try_from(words[3]).map_err(|_| HResult::INVALID_CALL)?,
+                    }))
+                } else {
+                    let words = read_words::<7>(memory, args[3])?;
+                    Some(PatchInfo::Rectangle(RectPatchInfo {
+                        start_width: words[0],
+                        start_height: words[1],
+                        width: words[2],
+                        height: words[3],
+                        stride: words[4],
+                        basis: Basis::try_from(words[5]).map_err(|_| HResult::INVALID_CALL)?,
+                        degree: Degree::try_from(words[6]).map_err(|_| HResult::INVALID_CALL)?,
+                    }))
+                };
+                let segments = if args[2] == 0 {
+                    None
+                } else {
+                    let words = if triangular {
+                        let words = read_words::<3>(memory, args[2])?;
+                        [words[0], words[1], words[2], 0]
+                    } else {
+                        read_words::<4>(memory, args[2])?
+                    };
+                    Some(
+                        Segments::new(&words[..if triangular { 3 } else { 4 }])
+                            .map_err(|_| HResult::INVALID_CALL)?,
+                    )
+                };
+                let bindings = self.draw_bindings(pointer, info.is_some(), false)?;
+                self.device_mut(pointer)?
+                    .draw_patch(args[1], triangular, info, segments, bindings)?;
+            }
+            96 => {
+                self.device_mut(pointer)?.delete_patch(args[1])?;
+            }
             _ => return Ok(None),
         }
         Ok(Some(0))

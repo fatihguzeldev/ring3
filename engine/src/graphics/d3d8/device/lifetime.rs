@@ -124,7 +124,13 @@ impl Device {
         }));
         let mut commands = Vec::new();
         commands
-            .try_reserve_exact(old.len() + resources.ids().len() + 1)
+            .try_reserve_exact(
+                old.len()
+                    + resources.ids().len()
+                    + self.patches.len()
+                    + usize::from(self.patch_domain.is_some())
+                    + 1,
+            )
             .map_err(|_| DeviceError::Allocation)?;
         for id in old {
             commands.push(Command::DestroyResource(self.resource_version(id)?));
@@ -135,6 +141,14 @@ impl Device {
                 desc: resources.desc(index),
                 subresources: resources.infos(index),
             });
+        }
+        for patch in &self.patches {
+            commands.push(Command::DeletePatch {
+                identity: patch.identity,
+            });
+        }
+        if let Some((_, identity)) = self.patch_domain {
+            commands.push(Command::DeletePatchDomain { identity });
         }
         commands.push(Command::Reset(Reset {
             generation,
@@ -198,6 +212,8 @@ impl Device {
         self.recorded_fvf = None;
         self.recorded_pixel = None;
         self.blocks.clear();
+        self.patches.clear();
+        self.patch_domain = None;
         self.readbacks.clear();
         self.emitted_pipeline = None;
         self.presented = None;
@@ -331,14 +347,5 @@ impl Device {
         let progress = self.queue.commit(prepared.commands)?;
         self.status = DeviceStatus::Removed;
         Ok(Outcome::new((), progress))
-    }
-
-    pub fn draw_patch(&self) -> Result<(), DeviceError> {
-        self.available()?;
-        Err(DeviceError::NotAvailable)
-    }
-    pub fn delete_patch(&self, _handle: u32) -> Result<(), DeviceError> {
-        self.available()?;
-        Err(DeviceError::InvalidCall)
     }
 }
