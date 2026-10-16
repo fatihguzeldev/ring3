@@ -24,12 +24,14 @@ pub enum ResourceError32 {
     TypeNotFound,
     NameNotFound,
     LanguageNotFound,
+    MissingFileRange { offset: u64, length: u32 },
     Memory(MemoryError),
 }
 impl ResourceError32 {
     pub fn win32(self) -> u32 {
         match self {
             Self::Malformed => 13,
+            Self::MissingFileRange { .. } => 13,
             Self::Capacity | Self::Allocation => 8,
             Self::TypeNotFound => 1813,
             Self::NameNotFound => 1814,

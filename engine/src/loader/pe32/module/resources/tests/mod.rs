@@ -1,3 +1,4 @@
+mod file;
 mod lookup;
 mod strings;
 use super::*;

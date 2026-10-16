@@ -3,14 +3,19 @@ use crate::{
     loader::{Directory32, ParserLimits32},
     memory::{Access, AddressSpace, GuestAddress},
 };
+pub trait ResourceImageRead32 {
+    fn read_image(&self, rva: u32, output: &mut [u8]) -> Result<(), E>;
+}
 pub struct PeResources32<'a> {
-    pub(super) memory: &'a AddressSpace,
+    pub(super) memory: Option<&'a AddressSpace>,
     pub(super) base: u32,
     pub(super) image_size: u32,
     pub(super) directory: Directory32,
     pub(super) entries: usize,
     pub(super) strings: usize,
     datafile: Option<&'a crate::loader::DataFileModule32>,
+    file: Option<super::file::FileResourceSource32<'a>>,
+    image: Option<&'a dyn ResourceImageRead32>,
 }
 impl<'a> PeResources32<'a> {
     pub fn new(
@@ -28,13 +33,15 @@ impl<'a> PeResources32<'a> {
             return Err(E::Malformed);
         }
         let reader = Self {
-            memory,
+            memory: Some(memory),
             base,
             image_size,
             directory,
             entries: limits.metadata_entries,
             strings: limits.string_bytes,
             datafile: None,
+            file: None,
+            image: None,
         };
         reader.image_span(directory.rva, directory.size)?;
         Ok(reader)
@@ -52,23 +59,35 @@ impl<'a> PeResources32<'a> {
             return Err(E::Malformed);
         }
         let reader = Self {
-            memory,
+            memory: Some(memory),
             base: module.base(),
             image_size: module.image_size(),
             directory,
             entries: limits.metadata_entries,
             strings: limits.string_bytes,
             datafile: Some(module),
+            file: None,
+            image: None,
         };
         reader.image_span(directory.rva, 16)?;
         Ok(reader)
     }
     pub fn address(&self, rva: u32, length: u32) -> Result<GuestAddress, E> {
+        if self.file.is_some() || self.image.is_some() {
+            return Err(E::Malformed);
+        }
         self.image_span(rva, length)
     }
     pub(super) fn image_span(&self, rva: u32, length: u32) -> Result<GuestAddress, E> {
         if u64::from(rva) + u64::from(length) > u64::from(self.image_size) {
             return Err(E::Malformed);
+        }
+        if self.image.is_some() {
+            return Ok(GuestAddress(rva));
+        }
+        if let Some(file) = &self.file {
+            file.metadata.range(rva, length)?;
+            return Ok(GuestAddress(rva));
         }
         let address = if let Some(module) = self.datafile {
             module.address(rva, length).map_err(|_| E::Malformed)?
@@ -77,6 +96,7 @@ impl<'a> PeResources32<'a> {
         };
         if length != 0 {
             self.memory
+                .unwrap()
                 .check_span(address, length as usize, Access::Read)?;
         }
         Ok(address)
@@ -92,8 +112,68 @@ impl<'a> PeResources32<'a> {
     pub(super) fn read<const N: usize>(&self, rva: u32) -> Result<[u8; N], E> {
         let address = self.image_span(rva, N as u32)?;
         let mut bytes = [0; N];
-        self.memory.read(address, &mut bytes)?;
+        if let Some(image) = self.image {
+            image.read_image(rva, &mut bytes)?;
+        } else if let Some(file) = &self.file {
+            file.read(rva, &mut bytes)?;
+        } else {
+            self.memory.unwrap().read(address, &mut bytes)?;
+        }
         Ok(bytes)
+    }
+
+    pub fn from_image_source(
+        source: &'a dyn ResourceImageRead32,
+        image_size: u32,
+        directory: Directory32,
+        limits: ParserLimits32,
+    ) -> Result<Self, E> {
+        if image_size == 0
+            || directory.size < 16
+            || u64::from(directory.rva) + u64::from(directory.size) > u64::from(image_size)
+        {
+            return Err(E::Malformed);
+        }
+        Ok(Self {
+            memory: None,
+            base: 0,
+            image_size,
+            directory,
+            entries: limits.metadata_entries,
+            strings: limits.string_bytes,
+            datafile: None,
+            file: None,
+            image: Some(source),
+        })
+    }
+    pub fn from_file_parts(
+        metadata: &'a super::PeResourceFile32,
+        spans: &'a [super::ResourceFileSpan32],
+        limits: ParserLimits32,
+    ) -> Result<Self, E> {
+        let reader = Self {
+            memory: None,
+            base: 0,
+            image_size: metadata.image_size,
+            directory: metadata.directory,
+            entries: limits.metadata_entries,
+            strings: limits.string_bytes,
+            datafile: None,
+            file: Some(super::file::FileResourceSource32 { metadata, spans }),
+            image: None,
+        };
+        reader.image_span(metadata.directory.rva, 16)?;
+        Ok(reader)
+    }
+    pub fn file_range(
+        &self,
+        location: super::ResourceLocation32,
+    ) -> Result<super::ResourceFileRange32, E> {
+        self.file
+            .as_ref()
+            .ok_or(E::Malformed)?
+            .metadata
+            .range(location.data_rva, location.size)
     }
 
     pub(super) fn half(&self, rva: u32) -> Result<u16, E> {

@@ -40,5 +40,6 @@ pub enum LoadError {
 }
 
 pub use pe32::module::{
-    PeResources32, ResourceError32, ResourceIdentifier32, ResourceLocation32, ResourceString32,
+    PeResourceFile32, PeResources32, ResourceError32, ResourceFileRange32, ResourceFileSpan32,
+    ResourceIdentifier32, ResourceImageRead32, ResourceLocation32, ResourceString32,
 };
