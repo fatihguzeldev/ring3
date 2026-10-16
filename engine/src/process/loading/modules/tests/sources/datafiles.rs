@@ -1,6 +1,8 @@
 use super::*;
 use crate::files::FileError32;
 
+mod altered;
+
 #[test]
 fn lazy_resource_only_sources_use_the_same_wait_owner_and_keep_tagged_mapping_identity() {
     let mut bytes = image(true, 0x600000, None, None);

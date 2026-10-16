@@ -5,7 +5,7 @@ use crate::{
     },
 };
 fn layout(flags: u32) -> Result<DataFileLayout32, ModuleError32> {
-    if flags & !0x62 != 0 || flags & 0x62 == 0 || flags & 0x42 == 0x42 {
+    if flags & !0x6a != 0 || flags & 0x62 == 0 || flags & 0x42 == 0x42 {
         return Err(ModuleError32::InvalidRequest);
     }
     Ok(if flags & 0x20 != 0 {
@@ -36,7 +36,7 @@ impl EngineInstance {
                 return Err(HostError::Call(crate::process::CallError::Cancelled));
             }
             self.check_module_execution_admission()?;
-            let paths = self.capture_module_paths(None)?;
+            let paths = self.capture_module_paths((flags & 8 != 0).then_some(name))?;
             let name = self.resolve_module_source_captured(name, &paths)?;
             self.begin_module_source_request(CapturedModuleRequest32::DataFile {
                 name,
