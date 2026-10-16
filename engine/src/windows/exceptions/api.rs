@@ -76,3 +76,20 @@ impl ExceptionApi32 {
         }
     }
 }
+
+pub fn ntdll_module(preferred_base: u32) -> crate::loader::SystemModule32 {
+    use crate::loader::{SystemExport32, SystemExportTarget32, SystemModule32};
+    SystemModule32 {
+        name: "ntdll.dll".into(),
+        preferred_base,
+        exports: ExceptionApi32::NTDLL
+            .iter()
+            .copied()
+            .map(|api| SystemExport32 {
+                name: Some(api.name().into()),
+                ordinal: None,
+                target: SystemExportTarget32::Gate(api.id()),
+            })
+            .collect(),
+    }
+}

@@ -144,6 +144,29 @@ impl ModuleCatalog32 {
         Ok(())
     }
 
+    /// Register a provider and its facade dependencies without partial admission.
+    pub fn add_system_group(&mut self, modules: Vec<SystemModule32>) -> Result<(), ModuleError32> {
+        let capacity = self
+            .sources
+            .len()
+            .checked_add(modules.len())
+            .ok_or(ModuleError32::Capacity)?;
+        let mut sources = Vec::new();
+        sources
+            .try_reserve_exact(capacity)
+            .map_err(|_| ModuleError32::Allocation)?;
+        sources.extend(self.sources.iter().cloned());
+        let mut candidate = Self {
+            sources,
+            limits: self.limits,
+            source_bytes: self.source_bytes,
+        };
+        for module in modules {
+            candidate.add_system(module)?;
+        }
+        *self = candidate;
+        Ok(())
+    }
     pub fn add_system(&mut self, mut module: SystemModule32) -> Result<(), ModuleError32> {
         module.name = self.available_name(&module.name)?;
         if module.preferred_base == 0 || !module.preferred_base.is_multiple_of(65536) {
@@ -209,3 +232,6 @@ impl ModuleCatalog32 {
         Ok(name)
     }
 }
+
+#[cfg(test)]
+mod tests;
