@@ -139,16 +139,15 @@ fn rep_return_keeps_duplicate_lock_far_and_iret_boundaries() {
         &[0xf3, 0xca, 0, 0],
         &[0xf3, 0xcf],
     ] {
-        assert_eq!(
+        crate::support_fetch::assert_decode_contract(
             decode_one(&code(PC, bytes), GuestAddress(PC)).unwrap_err(),
             DecodeError::Unsupported(UnsupportedFeature::Opcode),
-            "{bytes:02x?}"
         );
     }
     for bytes in [&[0xf0, 0xf3, 0xc3][..], &[0xf3, 0xf0, 0xc2, 0, 0]] {
-        assert_eq!(
+        crate::support_fetch::assert_decode_contract(
             decode_one(&code(PC, bytes), GuestAddress(PC)).unwrap_err(),
-            DecodeError::InvalidEncoding
+            DecodeError::InvalidEncoding,
         );
     }
 }

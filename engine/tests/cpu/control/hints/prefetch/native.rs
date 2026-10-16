@@ -295,9 +295,10 @@ fn unsupported_neighbors_invalid_lock_prefix_refusals_and_full_fetch_stay_separa
     }
     for selector in [0x00, 0x08, 0x10, 0x18, 0x20, 0x28, 0x30, 0x38] {
         let mut engine = stopped(&[0xf0, 0x0f, 0x0d, selector], 0x3000);
-        assert_eq!(
-            decode_one(engine.memory().unwrap(), GuestAddress(0x3000)).err(),
-            Some(DecodeError::InvalidEncoding)
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(engine.memory().unwrap(), GuestAddress(0x3000)))
+                .expect_err("instruction must fail to decode"),
+            DecodeError::InvalidEncoding,
         );
         assert_eq!(engine.compile_stopped_entry(KEY, 1), Ok(2));
         let bytes = [0x0f, 0x0d, selector | 5, 0, 0, 0];

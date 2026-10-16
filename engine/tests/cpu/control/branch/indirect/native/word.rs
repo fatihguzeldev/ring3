@@ -393,18 +393,19 @@ fn word_indirect_jump_prefixes_lock_and_adjacent_ff_groups_remain_precise() {
                 [vec![prefix], form.to_vec()].concat(),
                 [vec![0x66, prefix], form[1..].to_vec()].concat(),
             ] {
-                assert_eq!(
-                    decode_one(&code_space(CODE, &bytes), GuestAddress(CODE)).err(),
-                    Some(expected),
-                    "{bytes:02x?}"
+                crate::support_fetch::assert_decode_contract(
+                    (decode_one(&code_space(CODE, &bytes), GuestAddress(CODE)))
+                        .expect_err("instruction must fail to decode"),
+                    expected,
                 );
             }
         }
     }
     for bytes in [&[0x66, 0x66, 0xff, 0xd0][..], &[0x66, 0x66, 0xff, 0x13]] {
-        assert_eq!(
-            decode_one(&code_space(CODE, bytes), GuestAddress(CODE)).err(),
-            Some(unsupported)
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(&code_space(CODE, bytes), GuestAddress(CODE)))
+                .expect_err("instruction must fail to decode"),
+            unsupported,
         );
     }
     let bytes = [0x66, 0xff, 0x1b];
@@ -452,9 +453,10 @@ fn word_indirect_jump_prefixes_lock_and_adjacent_ff_groups_remain_precise() {
         &[0x66, 0xff, 0xf8],
         &[0x66, 0xff, 0x3b],
     ] {
-        assert_eq!(
-            decode_one(&code_space(CODE, bytes), GuestAddress(CODE)).err(),
-            Some(DecodeError::InvalidEncoding)
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(&code_space(CODE, bytes), GuestAddress(CODE)))
+                .expect_err("instruction must fail to decode"),
+            DecodeError::InvalidEncoding,
         );
     }
     for bytes in [

@@ -75,9 +75,9 @@ fn ignored_single_prefixes_and_invalid_neighbors_keep_the_existing_profile() {
             assert_eq!(decoded.length(), 4);
         }
         let locked = [0xf0, 0x0f, opcode, 0xc0];
-        assert_eq!(
+        crate::support_fetch::assert_decode_contract(
             decode_one(&executable(0x1000, &locked), GuestAddress(0x1000)).unwrap_err(),
-            DecodeError::InvalidEncoding
+            DecodeError::InvalidEncoding,
         );
         for prefix in [[0x66, 0x66], [0xf2, 0xf3]] {
             let bytes = [prefix.as_slice(), &[0x0f, opcode, 0xc0]].concat();

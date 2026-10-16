@@ -384,10 +384,10 @@ fn word_near_control_keeps_prefix_refusals_and_typed_far_boundaries() {
                     word_prefix::admitted(&bytes);
                     continue;
                 }
-                assert_eq!(
-                    decode_one(&code_space(CODE, &bytes), GuestAddress(CODE)).err(),
-                    Some(expected),
-                    "{bytes:02x?}"
+                crate::support_fetch::assert_decode_contract(
+                    (decode_one(&code_space(CODE, &bytes), GuestAddress(CODE)))
+                        .expect_err("instruction must fail to decode"),
+                    expected,
                 );
             }
         }
@@ -399,10 +399,10 @@ fn word_near_control_keeps_prefix_refusals_and_typed_far_boundaries() {
         &[0x66, 0x66, 0xe9, 0, 0],
         &[0x66, 0x66, 0x0f, 0x84, 0, 0],
     ] {
-        assert_eq!(
-            decode_one(&code_space(CODE, bytes), GuestAddress(CODE)).err(),
-            Some(opcode),
-            "{bytes:02x?}"
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(&code_space(CODE, bytes), GuestAddress(CODE)))
+                .expect_err("instruction must fail to decode"),
+            opcode,
         );
     }
 }

@@ -297,7 +297,10 @@ fn privilege_changing_gate_call_remains_neutral_missing_tss_boundary() {
     install(&mut b, gate(12, 0x48, 0x2000, 3, true, 31));
     let before = b.engine.arena().to_vec();
     let stack = ram(&b.engine, 0x7000);
-    assert_eq!(call(&mut b, 0, 0), Err(HostError::InvalidRequest));
+    crate::support_fetch::assert_host_contract(
+        (call(&mut b, 0, 0)).expect_err("compilation must refuse this fixture"),
+        HostError::InvalidRequest,
+    );
     assert_eq!(b.engine.arena(), before);
     assert_eq!(ram(&b.engine, 0x7000), stack);
 }
@@ -307,7 +310,10 @@ fn task_gate_outer_admission_remains_neutral_and_separate() {
     install(&mut b, gate(5, 0x48, 0, 3, true, 0));
     let before = b.engine.arena().to_vec();
     let stack = ram(&b.engine, 0x7000);
-    assert_eq!(jump(&mut b, 0, 0), Err(HostError::InvalidRequest));
+    crate::support_fetch::assert_host_contract(
+        (jump(&mut b, 0, 0)).expect_err("compilation must refuse this fixture"),
+        HostError::InvalidRequest,
+    );
     assert_eq!(b.engine.arena(), before);
     assert_eq!(ram(&b.engine, 0x7000), stack);
 }

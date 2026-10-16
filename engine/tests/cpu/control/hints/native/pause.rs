@@ -171,10 +171,10 @@ fn pause_exact_grammar_keeps_prefix_and_instruction_neighbors_closed() {
         };
         let (bytes, expected) =
             prefix_admission::refusal_after_prefix_admission(bytes.to_vec(), expected);
-        assert_eq!(
-            decode_one(&code_space(CODE, &bytes), GuestAddress(CODE)).err(),
-            Some(expected),
-            "{bytes:02x?}"
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(&code_space(CODE, &bytes), GuestAddress(CODE)))
+                .expect_err("instruction must fail to decode"),
+            expected,
         );
     }
     for bytes in [
@@ -188,10 +188,10 @@ fn pause_exact_grammar_keeps_prefix_and_instruction_neighbors_closed() {
             bytes.to_vec(),
             DecodeError::Unsupported(UnsupportedFeature::Opcode),
         );
-        assert_eq!(
-            decode_one(&code_space(CODE, &bytes), GuestAddress(CODE)).err(),
-            Some(expected),
-            "{bytes:02x?}"
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(&code_space(CODE, &bytes), GuestAddress(CODE)))
+                .expect_err("instruction must fail to decode"),
+            expected,
         );
     }
     assert!(matches!(
@@ -391,13 +391,14 @@ fn pause_late_refusal_preserves_dirty_full_arena_and_both_owners() {
             describe(&mut engine, CODE, 4, entries);
             let before = engine.arena().to_vec();
             assert_eq!(before.len(), ring3_engine::abi::arena::ARENA_SIZE);
-            assert_eq!(
-                bound_compile(&mut engine, is_resident, entries),
-                Err(if is_resident {
+            crate::support_fetch::assert_host_contract(
+                (bound_compile(&mut engine, is_resident, entries))
+                    .expect_err("compilation must refuse this fixture"),
+                if is_resident {
                     HostError::Resident(RegistryError::Compile(error))
                 } else {
                     HostError::Compile(error)
-                })
+                },
             );
             assert_eq!(engine.arena(), before);
             assert_eq!(engine.artifact_bytes().unwrap(), replacement_bytes);

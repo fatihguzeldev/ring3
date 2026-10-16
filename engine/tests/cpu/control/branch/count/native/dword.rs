@@ -168,14 +168,14 @@ fn typed_rel8_targets_prefixes_and_fetch_boundaries_are_exact() {
                 prefix_admission::admitted(&[prefix, opcode, 0]);
                 continue;
             }
-            assert_eq!(
+            crate::support_fetch::assert_decode_contract(
                 decode_one(&code(&[prefix, opcode, 0], PC), GuestAddress(PC)).unwrap_err(),
-                DecodeError::Unsupported(feature)
+                DecodeError::Unsupported(feature),
             );
         }
-        assert_eq!(
+        crate::support_fetch::assert_decode_contract(
             decode_one(&code(&[0xf0, opcode, 0], PC), GuestAddress(PC)).unwrap_err(),
-            DecodeError::InvalidEncoding
+            DecodeError::InvalidEncoding,
         );
         let mut memory = code(&[opcode], 0x1fff);
         fetch::assert_error(

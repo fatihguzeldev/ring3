@@ -81,8 +81,8 @@ fn int1_remains_distinct_from_software_int1_and_illegal_lock() {
             .operation(),
         &Operation::SoftwareInterrupt { vector: 1 }
     );
-    assert_eq!(
+    crate::support_fetch::assert_decode_contract(
         decode_one(&code(&[0xf0, 0xf1]), GuestAddress(0x1000)).unwrap_err(),
-        DecodeError::InvalidEncoding
+        DecodeError::InvalidEncoding,
     );
 }

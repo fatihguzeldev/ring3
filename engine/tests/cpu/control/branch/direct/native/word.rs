@@ -271,10 +271,10 @@ fn word_jump_prefix_aliases_and_other_word_jump_families_remain_closed() {
                 word_prefix::admitted(&bytes);
                 continue;
             }
-            assert_eq!(
-                decode_one(&code_space(CODE, &bytes), GuestAddress(CODE)).err(),
-                Some(expected),
-                "{bytes:02x?}"
+            crate::support_fetch::assert_decode_contract(
+                (decode_one(&code_space(CODE, &bytes), GuestAddress(CODE)))
+                    .expect_err("instruction must fail to decode"),
+                expected,
             );
         }
     }
@@ -307,10 +307,10 @@ fn word_jump_prefix_aliases_and_other_word_jump_families_remain_closed() {
         &[0x66, 0x66, 0xff, 0xe0],
         &[0x66, 0x66, 0xff, 0x23],
     ] {
-        assert_eq!(
-            decode_one(&code_space(CODE, bytes), GuestAddress(CODE)).err(),
-            Some(opcode),
-            "{bytes:02x?}"
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(&code_space(CODE, bytes), GuestAddress(CODE)))
+                .expect_err("instruction must fail to decode"),
+            opcode,
         );
     }
 }
@@ -717,10 +717,10 @@ fn word_jcc_strict_prefixes_short_count_neighbors_and_payloads_stay_distinct() {
                     word_prefix::admitted(&bytes);
                     continue;
                 }
-                assert_eq!(
-                    decode_one(&code_space(CODE, &bytes), GuestAddress(CODE)).err(),
-                    Some(expected),
-                    "{bytes:02x?}"
+                crate::support_fetch::assert_decode_contract(
+                    (decode_one(&code_space(CODE, &bytes), GuestAddress(CODE)))
+                        .expect_err("instruction must fail to decode"),
+                    expected,
                 );
             }
         }

@@ -93,20 +93,19 @@ fn compiler_alignment_exception_keeps_other_duplicate_and_reserved_prefix_bounda
         &[0xf2, 0x66, 0x66, 0x0f, 0x1f, 0],
         &[0xf3, 0x66, 0x66, 0x0f, 0x1f, 0],
     ] {
-        assert_eq!(
+        crate::support_fetch::assert_decode_contract(
             decode_one(&memory(0x1000, bytes), GuestAddress(0x1000)).unwrap_err(),
             DecodeError::Unsupported(UnsupportedFeature::Opcode),
-            "{bytes:02x?}"
         );
     }
     let locked = [vec![0xf0], compiler_nop(11)].concat();
-    assert_eq!(
+    crate::support_fetch::assert_decode_contract(
         decode_one(&memory(0x1000, &locked), GuestAddress(0x1000)).unwrap_err(),
-        DecodeError::InvalidEncoding
+        DecodeError::InvalidEncoding,
     );
     let overlong = [vec![0x66], compiler_nop(15)].concat();
-    assert_eq!(
+    crate::support_fetch::assert_decode_contract(
         decode_one(&memory(0x1000, &overlong), GuestAddress(0x1000)).unwrap_err(),
-        DecodeError::InvalidEncoding
+        DecodeError::InvalidEncoding,
     );
 }

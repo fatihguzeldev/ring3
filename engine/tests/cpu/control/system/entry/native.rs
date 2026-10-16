@@ -112,9 +112,9 @@ fn sysenter_fetch_and_reserved_prefix_failures_precede_entry_admission() {
             Err(DecodeError::Unsupported(_))
         ));
     }
-    assert_eq!(
+    crate::support_fetch::assert_decode_contract(
         decode_one(&memory(0x1000, &[0xf0, 0x0f, 0x34]), GuestAddress(0x1000)).unwrap_err(),
-        DecodeError::InvalidEncoding
+        DecodeError::InvalidEncoding,
     );
     assert!(matches!(
         decode_one(&memory(0x1000, &[0x0f, 0x35]), GuestAddress(0x1000)),

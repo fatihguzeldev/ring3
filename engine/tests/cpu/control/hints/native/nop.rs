@@ -218,10 +218,10 @@ fn alignment_nop_exact_grammar_keeps_prefix_segment_and_payload_neighbors_closed
                 } else {
                     (prefixed, expected)
                 };
-            assert_eq!(
-                decode_one(&code_space(CODE, &prefixed), GuestAddress(CODE)).err(),
-                Some(expected),
-                "{prefixed:02x?}"
+            crate::support_fetch::assert_decode_contract(
+                (decode_one(&code_space(CODE, &prefixed), GuestAddress(CODE)))
+                    .expect_err("instruction must fail to decode"),
+                expected,
             );
         }
         for changed in [
@@ -235,10 +235,10 @@ fn alignment_nop_exact_grammar_keeps_prefix_segment_and_payload_neighbors_closed
                 (Operation::Nop, neighbor.len())
             );
             let (neighbor, expected) = prefix_admission::malformed_fixture(neighbor.len());
-            assert_eq!(
-                decode_one(&code_space(CODE, &neighbor), GuestAddress(CODE)).err(),
-                Some(expected),
-                "{neighbor:02x?}"
+            crate::support_fetch::assert_decode_contract(
+                (decode_one(&code_space(CODE, &neighbor), GuestAddress(CODE)))
+                    .expect_err("instruction must fail to decode"),
+                expected,
             );
         }
     }
@@ -251,10 +251,10 @@ fn alignment_nop_exact_grammar_keeps_prefix_segment_and_payload_neighbors_closed
     ] {
         prefix_admission::admitted(bytes);
         let (bytes, expected) = prefix_admission::malformed_fixture(bytes.len());
-        assert_eq!(
-            decode_one(&code_space(CODE, &bytes), GuestAddress(CODE)).err(),
-            Some(expected),
-            "{bytes:02x?}"
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(&code_space(CODE, &bytes), GuestAddress(CODE)))
+                .expect_err("instruction must fail to decode"),
+            expected,
         );
     }
     for bytes in [
@@ -484,13 +484,14 @@ fn alignment_nop_late_refusal_preserves_dirty_full_arena_and_both_owners() {
             describe(&mut engine, CODE, refused_length, entries);
             let before = engine.arena().to_vec();
             assert_eq!(before.len(), ring3_engine::abi::arena::ARENA_SIZE);
-            assert_eq!(
-                bound_compile(&mut engine, is_resident, entries),
-                Err(if is_resident {
+            crate::support_fetch::assert_host_contract(
+                (bound_compile(&mut engine, is_resident, entries))
+                    .expect_err("compilation must refuse this fixture"),
+                if is_resident {
                     HostError::Resident(RegistryError::Compile(error))
                 } else {
                     HostError::Compile(error)
-                })
+                },
             );
             assert_eq!(engine.arena(), before);
             assert_eq!(engine.artifact_bytes().unwrap(), replacement_bytes);
@@ -549,14 +550,16 @@ fn endbranch_identity_requires_f3_and_lock_remains_invalid() {
             assert!(!matches!(decoded.code(), Code::Endbr32 | Code::Endbr64));
         }
         let repeated = [0xf3, 0xf3, 0x0f, 0x1e, final_byte];
-        assert_eq!(
-            decode_one(&code_space(CODE, &repeated), GuestAddress(CODE)).err(),
-            Some(DecodeError::Unsupported(UnsupportedFeature::Opcode))
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(&code_space(CODE, &repeated), GuestAddress(CODE)))
+                .expect_err("instruction must fail to decode"),
+            DecodeError::Unsupported(UnsupportedFeature::Opcode),
         );
         let locked = [0xf0, 0xf3, 0x0f, 0x1e, final_byte];
-        assert_eq!(
-            decode_one(&code_space(CODE, &locked), GuestAddress(CODE)).err(),
-            Some(DecodeError::InvalidEncoding)
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(&code_space(CODE, &locked), GuestAddress(CODE)))
+                .expect_err("instruction must fail to decode"),
+            DecodeError::InvalidEncoding,
         );
     }
 }

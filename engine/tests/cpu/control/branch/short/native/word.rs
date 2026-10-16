@@ -255,18 +255,18 @@ fn existing_short_dword_and_invalid_prefix_controls_remain_exact() {
                 super::support_word_prefix::admitted(&bytes);
                 continue;
             }
-            assert_eq!(
+            crate::support_fetch::assert_decode_contract(
                 decode_one(&code(0x1000, &bytes), GuestAddress(0x1000)).unwrap_err(),
-                DecodeError::Unsupported(UnsupportedFeature::Opcode)
+                DecodeError::Unsupported(UnsupportedFeature::Opcode),
             );
         }
-        assert_eq!(
+        crate::support_fetch::assert_decode_contract(
             decode_one(
                 &code(0x1000, &[0xf0, 0x66, opcode, 0]),
-                GuestAddress(0x1000)
+                GuestAddress(0x1000),
             )
             .unwrap_err(),
-            DecodeError::InvalidEncoding
+            DecodeError::InvalidEncoding,
         );
     }
 }
