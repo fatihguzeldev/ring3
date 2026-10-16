@@ -100,7 +100,7 @@ pub(super) fn mutate(operation: impl FnOnce(&mut EngineInstance) -> Result<(), H
 
 pub(super) fn status(error: HostError) -> u32 {
     match error {
-        HostError::Version(_) | HostError::Shlwapi(_) => 7,
+        HostError::Version(_) | HostError::Shlwapi(_) | HostError::Shell(_) => 7,
         HostError::Activation(error) => match error {
             crate::windows::activation::ActivationError32::NotEnoughMemory => 9,
             crate::windows::activation::ActivationError32::Busy => 12,

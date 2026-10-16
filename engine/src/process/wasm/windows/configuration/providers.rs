@@ -42,3 +42,14 @@ pub(crate) fn register_version_module(base: u32) -> u32 {
 pub(crate) fn register_shlwapi_module(base: u32) -> u32 {
     mutate(|instance| instance.register_shlwapi_module(base))
 }
+pub(crate) fn register_shell32_module(base: u32) -> u32 {
+    mutate(|instance| instance.register_shell32_module(base))
+}
+pub(crate) fn configure_shell_folder(kind: u32, length: u32) -> u32 {
+    mutate(|instance| {
+        let input = super::super::input(instance, length)?;
+        if input.len() % 2 != 0 { return Err(HostError::InvalidRequest); }
+        let path = input.chunks_exact(2).map(|bytes| u16::from_le_bytes(bytes.try_into().unwrap())).collect::<Vec<_>>();
+        instance.configure_shell_folder(kind, path)
+    })
+}

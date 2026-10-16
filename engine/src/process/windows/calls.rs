@@ -12,6 +12,9 @@ pub struct WindowsGateInfo32 {
 }
 
 pub fn windows_gate_info(id: u32) -> Option<WindowsGateInfo32> {
+    if let Some(api) = crate::windows::shell::ShellApi32::from_id(id) {
+        return Some(WindowsGateInfo32 { convention: api.convention(), stack_words: api.stack_words() });
+    }
     if let Some(api) = crate::windows::version::VersionApi32::from_id(id) {
         return Some(WindowsGateInfo32 { convention: api.convention(), stack_words: api.stack_words() });
     }
@@ -295,7 +298,8 @@ impl EngineInstance {
         let ExitReason::Gate { id } = exit.reason else {
             return Err(HostError::Infrastructure);
         };
-        if self.try_complete_version_call(owner, token, id, frame)?
+        if self.try_complete_shell_call(owner, token, id, frame)?
+            || self.try_complete_version_call(owner, token, id, frame)?
             || self.try_complete_shlwapi_call(owner, token, id, frame)?
             || self.try_complete_console_call(owner, token, id, frame)?
             || self.try_complete_native_call(owner, token, id, frame)?

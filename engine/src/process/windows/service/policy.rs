@@ -17,6 +17,11 @@ impl GuardFailure32 {
                 last_error: Some(998),
             })
         };
+        if let Some(api) = crate::windows::shell::ShellApi32::from_id(id) {
+            return if matches!(api, crate::windows::shell::ShellApi32::SHGetFolderPathA | crate::windows::shell::ShellApi32::SHGetFolderPathW) {
+                Some(Self { value: 0x8007_03e6, last_error: None })
+            } else { noaccess(0) };
+        }
         if crate::windows::version::VersionApi32::from_id(id).is_some()
             || crate::windows::shlwapi::ShlwapiApi32::from_id(id).is_some()
         { return noaccess(0); }
