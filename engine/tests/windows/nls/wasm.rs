@@ -3,6 +3,13 @@ mod support_wasm;
 use std::{fs, path::Path, time::SystemTime};
 #[test]
 fn authored_pe_nls_and_startup_environment_execute_through_generated_wasm() {
+    run("engine/tests/windows/nls/fixtures/runtime/run.mjs");
+}
+#[test]
+fn authored_pe_international_profile_codepages_calendars_and_collation_execute_through_wasm() {
+    run("engine/tests/windows/nls/fixtures/runtime/run-international.mjs");
+}
+fn run(runner: &str) {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
     let engine = support_wasm::selected_engine(root);
     let expected = std::env::var("RING3_ENGINE_SHA256").expect("select the exact engine SHA-256");
@@ -15,13 +22,7 @@ fn authored_pe_nls_and_startup_environment_execute_through_generated_wasm() {
             .as_nanos()
     ));
     fs::create_dir_all(&output).unwrap();
-    let result = support_wasm::run_node(
-        root,
-        "engine/tests/windows/nls/fixtures/runtime/run.mjs",
-        Path::new(&engine),
-        &output,
-        Some(&expected),
-    );
+    let result = support_wasm::run_node(root, runner, Path::new(&engine), &output, Some(&expected));
     fs::write(output.join("node.stdout.log"), &result.stdout).unwrap();
     fs::write(output.join("node.stderr.log"), &result.stderr).unwrap();
     assert!(

@@ -1,9 +1,11 @@
 import {builder} from '../../../../support/pe32/image.mjs';
+import {appendInternational, internationalIds} from './international.mjs';
 function data(b,name,bytes) {const padded=Buffer.alloc(Math.ceil(bytes.length/4)*4);bytes.copy(padded);return b.data(name,Array.from({length:padded.length/4},(_,i)=>padded.readUInt32LE(i*4)));}
 const wide=(b,name,text)=>data(b,name,Buffer.from(text+'\0','utf16le'));
-export function image(){
+export function image({international=false}={}){
   const ids={GetACP:0x150001,GetOEMCP:0x150002,IsValidCodePage:0x150003,GetCPInfoExW:0x150006,MultiByteToWideChar:0x150007,WideCharToMultiByte:0x150008,LCMapStringW:0x15000a,CompareStringW:0x15000c,GetStringTypeW:0x15000f,GetLocaleInfoW:0x150013,GetSystemTime:0x15001d,SystemTimeToFileTime:0x15001f,FileTimeToSystemTime:0x150020,GetDateFormatW:0x15002a,GetTimeFormatW:0x15002c,GetCommandLineA:0xc0004,GetCommandLineW:0xc0005,GetEnvironmentVariableW:0xc0007,SetEnvironmentVariableW:0xc0009,ExpandEnvironmentStringsW:0xc000b,GetSystemTimeAsFileTime:0xc0014,ExitProcess:0x10003};
-  const b=builder([['kernel32.dll',Object.keys(ids)]]);const call=(name,args,expected,hook,output)=>b.external(name,ids[name],args,expected,output,hook);
+  if(international)Object.assign(ids,internationalIds);
+  const b=builder([['kernel32.dll',Object.keys(ids)]],international?{callbacks:[{words:3,result:0,record:'locales'}]}:{});const call=(name,args,expected,hook,output)=>b.external(name,ids[name],args,expected,output,hook);
   for(const name of ['commandA','commandW','used','converted','clockLow'])b.allocate(name);
   b.allocate('buffer',Array(160).fill(0xcccccccc));b.allocate('calendar',Array(8).fill(0));b.allocate('filetime',Array(2).fill(0));
   const a=b.addresses;
@@ -11,7 +13,7 @@ export function image(){
   const substitute=wide(b,'substitute','Ā∞');const upper=wide(b,'upper','straße');const accented=wide(b,'accented','É');const plain=wide(b,'plain','e');
   const environment=wide(b,'environment','RING3_NLS');const value=wide(b,'value','€é');const expand=wide(b,'expand','[%RING3_NLS%]');
   const date=b.data('date',[0x000207e8,0x001d0000,0x0005000d,0x00000008]);
-  call('GetACP',[],1252);call('GetOEMCP',[],437);call('IsValidCodePage',[65001],1);call('IsValidCodePage',[932],0);
+  call('GetACP',[],international?1254:1252);call('GetOEMCP',[],international?857:437);call('IsValidCodePage',[65001],1);call('IsValidCodePage',[932],1);call('IsValidCodePage',[99999],0);
   call('GetCPInfoExW',[65001,0,a.buffer],1,'cpinfo');
   call('MultiByteToWideChar',[65001,8,utf8,0xffffffff,0,0],4);
   call('MultiByteToWideChar',[65001,8,utf8,6,a.buffer,3],3,'utf16');
@@ -28,5 +30,17 @@ export function image(){
   call('GetSystemTimeAsFileTime',[a.filetime],0,'system-filetime');call('GetSystemTime',[a.calendar],0,'system-time');
   call('SystemTimeToFileTime',[date,a.filetime],1,'leap-filetime');call('FileTimeToSystemTime',[a.filetime,a.calendar],1,'leap-roundtrip');
   call('GetDateFormatW',[0x409,0,date,0,a.buffer,64],10,'date-format');call('GetTimeFormatW',[0x409,0,date,0,a.buffer,64],11,'time-format');
-  call('ExitProcess',[0],'exit');return b.seal();
+  if(international){b.allocate('localeCallbackName',[0,0,0]);appendInternational(b,call,data,wide);}
+  call('ExitProcess',[0],'exit');
+  const guest=b.seal();
+  if(international){
+    const callback=guest.callbacks[0],at=0x200+callback.entry-0x401000;
+    const code=[...guest.bytes.subarray(at,at+callback.length-8)];
+    const word=value=>{const out=Buffer.alloc(4);out.writeUInt32LE(value);return [...out];};
+    code.push(0x8b,0x44,0x24,4);
+    for(let index=0;index<3;index++)code.push(0x8b,0x48,index*4,0x89,0x0d,...word(a.localeCallbackName+index*4));
+    code.push(...guest.bytes.subarray(at+callback.length-8,at+callback.length));
+    guest.bytes.set(code,at);callback.length=code.length;
+  }
+  return guest;
 }
