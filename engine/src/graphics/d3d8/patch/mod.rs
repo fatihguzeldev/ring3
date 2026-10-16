@@ -1,5 +1,6 @@
 pub mod domain;
 mod geometry;
+pub mod kernel;
 pub mod program;
 
 pub use geometry::{Basis, Degree, PatchInfo, RectPatchInfo, TriPatchInfo};

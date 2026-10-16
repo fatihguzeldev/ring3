@@ -43,3 +43,10 @@ Copyright (C) 2009 The Libphonenumber Authors. Licensed under Apache-2.0;
 see LICENSE. Ring3 retains only region/dialing facts in its typed table.
 
 RustFFT is licensed here under Apache-2.0; see LICENSE.
+
+WGSL validation
+
+Naga and Naga Types (Copyright 2025 The gfx-rs developers) are used only
+for development-time validation of the engine-owned patch WGSL kernel.
+They are licensed here under Apache-2.0; see LICENSE. Dependency license
+choices and additional notices are retained in licenses/naga-validation.txt.
