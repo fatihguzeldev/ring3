@@ -1,5 +1,8 @@
 mod manifest;
 mod policy;
+mod scopes;
+mod sections;
+mod stack;
 
 use super::*;
 use crate::windows::activation::manifest::Manifest32;
@@ -32,4 +35,14 @@ fn graph(name: &str) -> ActivationGraph32 {
         ActivationConfig32::default(),
     )
     .unwrap()
+}
+fn create(contexts: &mut ActivationContexts32, name: &str, process_default: bool) -> u32 {
+    let prepared = contexts
+        .prepare_create(graph(name), process_default)
+        .unwrap();
+    contexts.commit_create(prepared)
+}
+fn activate(contexts: &mut ActivationContexts32, thread: u32, handle: u32) -> u32 {
+    let prepared = contexts.prepare_activate(thread, handle).unwrap();
+    contexts.commit_activate(prepared)
 }

@@ -112,3 +112,14 @@ impl ActivationError32 {
         }
     }
 }
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ComRedirection32 {
+    pub context: u32,
+    pub assembly_roster: u32,
+    pub clsid: [u8; 16],
+    pub server: Vec<u16>,
+    pub threading: crate::windows::com::ServerThreadingModel32,
+    pub progid: Option<Vec<u16>>,
+    pub typelib: Option<[u8; 16]>,
+}

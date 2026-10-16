@@ -125,3 +125,17 @@ impl ActivationGraph32 {
 pub(super) fn key(value: &str) -> Vec<u16> {
     ordinal_key(&value.encode_utf16().collect::<Vec<_>>())
 }
+pub(super) fn file_path(directory: &[u16], name: &str) -> Vec<u16> {
+    let mut path = directory.to_vec();
+    if !path.ends_with(&[u16::from(b'\\')]) {
+        path.push(u16::from(b'\\'));
+    }
+    path.extend(name.encode_utf16().map(|unit| {
+        if unit == u16::from(b'/') {
+            u16::from(b'\\')
+        } else {
+            unit
+        }
+    }));
+    path
+}
