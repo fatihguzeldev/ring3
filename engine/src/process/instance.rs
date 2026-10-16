@@ -44,6 +44,7 @@ pub enum HostError {
     Resource(crate::process::windows::resources::ResourceError32),
     Activation(crate::windows::activation::ActivationError32),
     Version(crate::windows::version::VersionError32),
+    Shlwapi(crate::windows::shlwapi::ShlwapiError32),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -38,3 +38,5 @@ pub(super) mod native;
 pub(super) mod security;
 
 pub(super) mod version;
+
+pub(super) mod shlwapi;

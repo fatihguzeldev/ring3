@@ -39,3 +39,6 @@ pub(crate) fn configure_resources(
 pub(crate) fn register_version_module(base: u32) -> u32 {
     mutate(|instance| instance.register_version_module(base))
 }
+pub(crate) fn register_shlwapi_module(base: u32) -> u32 {
+    mutate(|instance| instance.register_shlwapi_module(base))
+}
