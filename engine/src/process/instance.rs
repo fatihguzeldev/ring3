@@ -50,14 +50,18 @@ pub enum StoreCompletion {
     CodeInvalidated,
 }
 
+// Keep scalar memory and arena access at a fixed, small offset as Windows
+// services grow. The default Rust layout placed the arena beyond ARM64's
+// immediate load range in the generated Wasm hot path.
+#[repr(C)]
 pub struct EngineInstance {
+    pub(in crate::process) memory: Option<AddressSpace>,
+    pub(in crate::process) arena: Pin<Box<[u8]>>,
     pub(in crate::process) resources: Option<crate::process::windows::resources::ResourceRuntime32>,
     pub(in crate::process) exceptions: crate::process::windows::exceptions::ExceptionRuntime32,
     pub(in crate::process) nls: crate::process::windows::nls::NlsRuntime32,
     pub(in crate::process) registry: Option<crate::process::windows::registry::RegistryRuntime32>,
     pub(in crate::process) files: Option<crate::process::windows::files::FileRuntime32>,
-    pub(in crate::process) memory: Option<AddressSpace>,
-    pub(in crate::process) arena: Pin<Box<[u8]>>,
     pub(in crate::process) artifact: Option<CompiledRegion>,
     pub(in crate::process) dispatcher: Option<Vec<u8>>,
     pub(in crate::process) resident: Option<ResidentRegistry>,
