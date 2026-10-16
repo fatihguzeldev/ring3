@@ -23,6 +23,7 @@ impl EngineInstance {
         {
             return Err(HostError::User32(User32Error32::Busy));
         }
+        self.check_guest_reservation_admission(&[scratch_bounds])?;
         let mut context =
             User32Context32::new(limits, scratch_bounds).map_err(HostError::User32)?;
         if let Some(media) = self.media.as_ref() {
@@ -60,11 +61,18 @@ impl EngineInstance {
 
     pub fn post_user32_message(&mut self, mut message: Message32) -> Result<(), HostError> {
         self.memory()?;
-        let queue = self.prepare_user32_queue_change()?;
-        let context = self.user32.as_mut().ok_or(HostError::InvalidRequest)?;
-        if message.thread_id != 1 || message.message > 0xffff {
+        if message.thread_id == 0 || message.message > 0xffff {
             return Err(HostError::InvalidRequest);
         }
+        let thread = self
+            .threads
+            .info(message.thread_id)
+            .map_err(HostError::Thread)?;
+        if thread.state == crate::windows::thread::ThreadState32::Terminated {
+            return Err(HostError::InvalidRequest);
+        }
+        let queue = self.prepare_user32_queue_change_for(message.thread_id)?;
+        let context = self.user32.as_mut().ok_or(HostError::InvalidRequest)?;
         if message.window != 0 {
             let handle = crate::windows::window::WindowHandle32::try_from(message.window)
                 .map_err(|error| HostError::User32(error.into()))?;
@@ -114,6 +122,45 @@ impl EngineInstance {
         self.check_windows_thread_write()?;
         Self::prepare_completed_call(frame.complete(0))?;
         let call_context = self.user32_call_context()?;
+        let message_phase = matches!(
+            api,
+            User32Api32::SendMessageA
+                | User32Api32::SendMessageW
+                | User32Api32::GetMessageA
+                | User32Api32::GetMessageW
+                | User32Api32::PeekMessageA
+                | User32Api32::PeekMessageW
+        );
+        if message_phase {
+            self.check_thread_message_dispatch(call_context.thread_id)?;
+        }
+        let (remote, remote_error) =
+            match self.prepare_user32_remote_call(api, &frame, call_context) {
+                Ok(value) => (value, None),
+                Err(HostError::Thread(error)) => (
+                    None,
+                    Some(
+                        if matches!(
+                            error,
+                            crate::windows::thread::ThreadError32::InvalidHandle
+                                | crate::windows::thread::ThreadError32::Stale
+                        ) {
+                            1400
+                        } else {
+                            error.win32()
+                        },
+                    ),
+                ),
+                Err(error) => return Err(error),
+            };
+        let defer = matches!(
+            api,
+            User32Api32::GetMessageA
+                | User32Api32::GetMessageW
+                | User32Api32::PeekMessageA
+                | User32Api32::PeekMessageW
+        ) && self.has_pending_thread_invocation(call_context.thread_id);
+
         let flags = self
             .user32
             .as_ref()
@@ -139,6 +186,18 @@ impl EngineInstance {
         } else {
             None
         };
+        let queue_thread = if matches!(api, User32Api32::PostMessageA | User32Api32::PostMessageW) {
+            frame
+                .arguments()
+                .first()
+                .and_then(|&raw| crate::windows::window::WindowHandle32::try_from(raw).ok())
+                .and_then(|window| self.user32.as_ref()?.windows().get(window).ok())
+                .map_or(call_context.thread_id, |window| {
+                    window.description.thread_id
+                })
+        } else {
+            call_context.thread_id
+        };
         let queue = if matches!(
             api,
             User32Api32::PeekMessageA
@@ -152,7 +211,7 @@ impl EngineInstance {
                 | User32Api32::GetQueueStatus
                 | User32Api32::GetInputState
         ) {
-            self.prepare_user32_queue_change()?
+            self.prepare_user32_queue_change_for(queue_thread)?
         } else {
             None
         };
@@ -160,19 +219,49 @@ impl EngineInstance {
             .user32
             .as_mut()
             .ok_or(HostError::User32(User32Error32::InvalidRequest))?;
-        let outcome = context
-            .prepare(
+        let result = if let Some(error) = remote_error {
+            context.last_error = Some(error);
+            Ok(super::User32Outcome32::Return(0))
+        } else if defer {
+            context.defer_retrieval(api, &frame, call_context)
+        } else {
+            context.prepare(
                 api,
                 &frame,
                 self.memory.as_mut().ok_or(HostError::Closed)?,
                 call_context,
             )
-            .map_err(HostError::User32)?;
+        };
+        let outcome = match result {
+            Ok(outcome) => outcome,
+            Err(User32Error32::Win32(error)) => {
+                context.last_error = Some(error);
+                super::User32Outcome32::Return(
+                    if matches!(api, User32Api32::GetMessageA | User32Api32::GetMessageW) {
+                        u32::MAX
+                    } else {
+                        0
+                    },
+                )
+            }
+            Err(User32Error32::Capacity) => {
+                context.last_error = Some(8);
+                super::User32Outcome32::Return(0)
+            }
+            Err(error) => return Err(HostError::User32(error)),
+        };
         let error = context.take_last_error();
         let actual = (
             context.windows().focus().is_some(),
             context.windows().capture().is_some(),
         );
+        if let Some((prepared, continuation)) = remote {
+            assert_eq!(outcome, super::User32Outcome32::Wait { continuation });
+            self.commit_thread_invocation(prepared);
+        }
+        if message_phase {
+            self.commit_thread_message_dispatch(call_context.thread_id, error.is_none());
+        }
         self.commit_windows_input_flags(if flags == Some(actual) { input } else { None });
         if matches!(api, User32Api32::SetCursorPos | User32Api32::ClipCursor)
             && outcome == super::User32Outcome32::Return(1)
@@ -199,7 +288,7 @@ impl EngineInstance {
             .monotonic_bounds()
             .map_or(0, |(origin, now)| ((now - origin) / 1_000_000) as u32);
         Ok(User32CallContext32 {
-            thread_id: 1,
+            thread_id: self.current_windows_thread_id()?,
             instance: self.image.map_or(0, |image| image.image_base),
             time_ms,
             ..context.runtime_input

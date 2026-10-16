@@ -5,8 +5,8 @@ use crate::{
 };
 
 pub(in crate::process) struct PreparedUser32Queue32 {
-    epoch: u64,
-    revision: u64,
+    signals: crate::windows::synchronization::PreparedSignals32,
+    thread: u32,
 }
 
 impl EngineInstance {
@@ -51,6 +51,7 @@ impl EngineInstance {
         };
         let was_exclusive = context.input.mouse_exclusive;
         context.state.discard_input_messages();
+        context.raw_input.reset_packets();
         context
             .input
             .attach(media.input.source().tail(), media.input.source().snapshot());
@@ -68,11 +69,18 @@ impl EngineInstance {
                 cursor: context.input.cursor_handle,
             });
         }
+        context.reset_thread_layout_delivery();
         for value in &mut context.input.queued {
             *value &= 1;
         }
         context.input.focus = context.windows().focus().map_or(0, WindowHandle32::get);
         context.input.capture = context.windows().capture().map_or(0, WindowHandle32::get);
+        if let Ok(window) = WindowHandle32::try_from(context.input.focus)
+            .and_then(|handle| context.windows().get(handle))
+        {
+            context.input.delivery_layout =
+                context.delivered_thread_layout(window.description.thread_id);
+        }
     }
     pub(in crate::process) fn refresh_user32_input(&mut self) -> Result<(), HostError> {
         if let (Some(user32), Some(media)) = (self.user32.as_mut(), self.media.as_ref()) {
@@ -113,26 +121,31 @@ impl EngineInstance {
 
     pub(in crate::process) fn user32_translation_settings(
         &self,
-    ) -> Option<(crate::input::keyboard::KeyboardLayout32, bool)> {
-        self.user32
-            .as_ref()
-            .map(|context| (context.input.layout, context.input.swapped))
+    ) -> Option<(crate::input::keyboard::KeyboardLayout32, bool, u64)> {
+        self.user32.as_ref().map(|context| {
+            (
+                context.input.layout,
+                context.input.swapped,
+                context.process_layout.map_or(0, |policy| policy.0),
+            )
+        })
     }
     pub(in crate::process) fn commit_user32_translation_event(
         &mut self,
         prepared: Option<PreparedSourceWindow32>,
-        previous: Option<(crate::input::keyboard::KeyboardLayout32, bool)>,
+        previous: Option<(crate::input::keyboard::KeyboardLayout32, bool, u64)>,
     ) {
         let actual = self.user32_translation_settings();
         if actual != previous
-            && let (Some(prepared), Some((layout, swapped))) = (prepared, actual)
+            && let (Some(prepared), Some((layout, swapped, revision))) = (prepared, actual)
         {
-            self.media
-                .as_mut()
-                .unwrap()
-                .input
-                .source_mut()
-                .commit_translation_policy(prepared, layout, swapped);
+            let thread = self.threads.current_id();
+            let source = self.media.as_mut().unwrap().input.source_mut();
+            if previous.is_some_and(|previous| previous.2 != revision) {
+                source.commit_process_translation_policy(prepared, layout, swapped);
+            } else {
+                source.commit_thread_translation_policy(prepared, thread, layout, swapped);
+            }
         }
     }
     pub(in crate::process) fn commit_user32_cursor_event(
@@ -190,18 +203,22 @@ impl EngineInstance {
     pub(in crate::process) fn prepare_user32_queue_change(
         &self,
     ) -> Result<Option<PreparedUser32Queue32>, HostError> {
+        self.prepare_user32_queue_change_for(self.current_windows_thread_id()?)
+    }
+    pub(in crate::process) fn prepare_user32_queue_change_for(
+        &self,
+        thread: u32,
+    ) -> Result<Option<PreparedUser32Queue32>, HostError> {
         let (Some(context), Some(sync)) = (self.user32.as_ref(), self.synchronization.as_ref())
         else {
             return Ok(None);
         };
-        let (current, new, generation) = context.wait_queue_status();
-        sync.context()
-            .prepare_messages(current, new, generation)
+        let (_, _, generation) = context.wait_queue_status(thread);
+        let signals = sync
+            .context()
+            .prepare_messages_for_thread(thread, u32::MAX, u32::MAX, generation)
             .map_err(HostError::Synchronization)?;
-        Ok(Some(PreparedUser32Queue32 {
-            epoch: sync.context().epoch(),
-            revision: sync.context().revision(),
-        }))
+        Ok(Some(PreparedUser32Queue32 { signals, thread }))
     }
 
     pub(in crate::process) fn commit_user32_queue_change(
@@ -211,13 +228,19 @@ impl EngineInstance {
         let Some(prepared) = prepared else {
             return;
         };
-        let (current, new, generation) = self.user32.as_ref().unwrap().wait_queue_status();
+        let (current, new, generation) = self
+            .user32
+            .as_ref()
+            .unwrap()
+            .wait_queue_status(prepared.thread);
         let sync = self.synchronization.as_mut().unwrap().context_mut();
-        assert_eq!(
-            (sync.epoch(), sync.revision()),
-            (prepared.epoch, prepared.revision)
+        let receipt = sync.refresh_prepared_messages_for_thread(
+            prepared.signals,
+            prepared.thread,
+            current,
+            new,
+            generation,
         );
-        let receipt=sync.prepare_messages(current,new,generation).expect("queue generation and synchronization revision were preflighted under exclusive ownership");
         sync.commit_signals(receipt);
     }
 }

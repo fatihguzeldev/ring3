@@ -49,6 +49,16 @@ impl User32Context32 {
             if remove && let Some(keyboard) = self.state.remove_message(index) {
                 self.input.queued = keyboard.state;
             }
+            if remove {
+                self.raw_input.mark_delivered(
+                    context.thread_id,
+                    if message.message == 0xff {
+                        message.lparam
+                    } else {
+                        0
+                    },
+                );
+            }
             return Ok(User32Outcome32::Return(if blocking {
                 u32::from(message.message != 0x0012)
             } else {
@@ -78,6 +88,37 @@ impl User32Context32 {
             .last()
             .filter(|pending| pending.token == token)
             .ok_or(User32Error32::InvalidToken)?;
+        if let Continuation32::Retrieve {
+            api,
+            arguments,
+            thread,
+        } = pending.continuation
+        {
+            self.pending.pop();
+            let outcome = self.prepare_arguments(
+                api,
+                &arguments[..api.stack_words() as usize],
+                memory,
+                User32CallContext32 {
+                    thread_id: thread,
+                    ..Default::default()
+                },
+            );
+            if outcome.is_err() {
+                self.pending.push(pending);
+            }
+            return outcome;
+        }
+        if let Continuation32::RemoteCall { ready, .. } = pending.continuation {
+            return if let Some(value) = ready {
+                self.pending.pop();
+                Ok(User32Outcome32::Return(value))
+            } else {
+                Ok(User32Outcome32::Wait {
+                    continuation: token,
+                })
+            };
+        }
         let Continuation32::MessageWait {
             thread,
             output,
@@ -111,6 +152,14 @@ impl User32Context32 {
             if let Some(keyboard) = self.state.remove_message(index) {
                 self.input.queued = keyboard.state;
             }
+            self.raw_input.mark_delivered(
+                thread,
+                if message.message == 0xff {
+                    message.lparam
+                } else {
+                    0
+                },
+            );
             self.pending.pop();
             Ok(User32Outcome32::Return(u32::from(
                 message.message != 0x0012,
@@ -228,9 +277,16 @@ impl User32Context32 {
         if args[0] == 0xffff {
             return Err(User32Error32::Win32(50));
         }
-        let handle = self.owned(args[0], context.thread_id)?;
+        if args[1] > 0xffff {
+            return Err(User32Error32::Win32(87));
+        }
+        let handle = WindowHandle32::try_from(args[0])?;
+        let record = self.windows().get(handle)?;
+        if record.description.thread_id != context.thread_id {
+            return self.start(Continuation32::RemoteCall { ready: None });
+        }
         self.start(Continuation32::Call {
-            procedure: self.windows().get(handle)?.description.procedure,
+            procedure: record.description.procedure,
             arguments: [args[0], args[1], args[2], args[3]],
         })
     }

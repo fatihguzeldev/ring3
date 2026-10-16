@@ -8,7 +8,9 @@ mod lifecycle;
 mod memory;
 mod messages;
 mod properties;
+mod rawinput;
 mod runtime;
+mod threads;
 
 use crate::{
     memory::{GuestAddress, PageRange},
@@ -19,6 +21,7 @@ use crate::{
 };
 use callback::Pending32;
 pub use input::User32CursorRequest32;
+pub(in crate::process) use threads::{PreparedUser32Sent32, User32ThreadReply32};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct User32CallContext32 {
@@ -47,6 +50,8 @@ pub(crate) enum User32Outcome32 {
 
 pub(crate) struct User32Context32 {
     state: User32State32,
+    layouts: Vec<threads::ThreadLayout32>,
+    process_layout: Option<(u64, crate::input::keyboard::KeyboardLayout32)>,
     scratch_bounds: PageRange,
     pending: Vec<Pending32>,
     continuation_limit: usize,
@@ -54,6 +59,7 @@ pub(crate) struct User32Context32 {
     last_error: Option<u32>,
     runtime_input: User32CallContext32,
     input: input::User32Input32,
+    raw_input: crate::windows::rawinput::RawInputRuntime32,
     destructions: Vec<destruction::DestroyPlan32>,
 }
 

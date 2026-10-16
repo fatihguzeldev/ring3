@@ -39,6 +39,14 @@ pub(super) enum Continuation32 {
     Destroy {
         plan: u64,
     },
+    Retrieve {
+        api: crate::windows::user32::User32Api32,
+        arguments: [u32; 5],
+        thread: u32,
+    },
+    RemoteCall {
+        ready: Option<u32>,
+    },
     Call {
         procedure: GuestAddress,
         arguments: [u32; 4],
@@ -151,7 +159,9 @@ impl User32Context32 {
                     [window.get(), message, wparam, lparam],
                 )
             }
-            Continuation32::MessageWait { .. } => {
+            Continuation32::Retrieve { .. }
+            | Continuation32::RemoteCall { .. }
+            | Continuation32::MessageWait { .. } => {
                 return Ok(User32Outcome32::Wait {
                     continuation: pending.token,
                 });
@@ -393,7 +403,9 @@ impl User32Context32 {
                 };
                 self.next_outcome()
             }
-            Continuation32::MessageWait { .. } => Err(User32Error32::InvalidToken),
+            Continuation32::Retrieve { .. }
+            | Continuation32::RemoteCall { .. }
+            | Continuation32::MessageWait { .. } => Err(User32Error32::InvalidToken),
         }
     }
 

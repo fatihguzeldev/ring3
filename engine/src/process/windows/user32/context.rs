@@ -1,7 +1,6 @@
 use super::{
     User32CallContext32, User32Context32, User32Outcome32,
     callback::{Continuation32, Pending32},
-    raw,
 };
 use crate::{
     memory::{AddressSpace, PageRange},
@@ -31,6 +30,8 @@ impl User32Context32 {
             .map_err(|_| User32Error32::Allocation)?;
         Ok(Self {
             state,
+            layouts: Vec::new(),
+            process_layout: None,
             scratch_bounds,
             pending,
             continuation_limit: limits.continuations,
@@ -38,8 +39,13 @@ impl User32Context32 {
             last_error: None,
             runtime_input: User32CallContext32::default(),
             input: super::input::User32Input32::default(),
+            raw_input: crate::windows::rawinput::RawInputRuntime32::new(limits.messages)?,
             destructions,
         })
+    }
+
+    pub(in crate::process) fn scratch_reservation(&self) -> PageRange {
+        self.scratch_bounds
     }
 
     pub(crate) fn windows(&self) -> &WindowContext32 {
@@ -52,10 +58,7 @@ impl User32Context32 {
             .is_some_and(|data| {
                 !data.destroying
                     && data.style & 0x4000_0000 == 0
-                    && self
-                        .windows()
-                        .get(data.handle)
-                        .is_ok_and(|record| record.description.thread_id == 1)
+                    && self.windows().get(data.handle).is_ok()
             })
     }
     pub(in crate::process) fn source_cursor(&self) -> Option<crate::input::source::InputCursor32> {
@@ -64,8 +67,8 @@ impl User32Context32 {
     pub(crate) fn take_last_error(&mut self) -> Option<u32> {
         self.last_error.take()
     }
-    pub(in crate::process) fn wait_queue_status(&self) -> (u32, u32, u64) {
-        self.state.queue_status(1)
+    pub(in crate::process) fn wait_queue_status(&self, thread: u32) -> (u32, u32, u64) {
+        self.state.queue_status(thread)
     }
 
     pub(crate) fn prepare(
@@ -95,6 +98,9 @@ impl User32Context32 {
         if args.len() != api.stack_words() as usize {
             return Err(User32Error32::InvalidRequest);
         }
+        self.prepare_thread_slots()?;
+        self.prepare_thread_layout(context.thread_id)?;
+        self.runtime_input.thread_id = context.thread_id;
         use User32Api32::*;
         let result = match api {
             RegisterClassA | RegisterClassW | RegisterClassExA | RegisterClassExW => {
@@ -111,8 +117,12 @@ impl User32Context32 {
                     .ok()
                     .is_some_and(|handle| self.windows().get(handle).is_ok()),
             ))),
-            GetFocus => Ok(User32Outcome32::Return(raw(self.windows().focus()))),
-            GetCapture => Ok(User32Outcome32::Return(raw(self.windows().capture()))),
+            GetFocus => Ok(User32Outcome32::Return(
+                self.owned_input_window(self.windows().focus(), context.thread_id),
+            )),
+            GetCapture => Ok(User32Outcome32::Return(
+                self.owned_input_window(self.windows().capture(), context.thread_id),
+            )),
             SetFocus | SetCapture | ReleaseCapture => self.set_focus_capture(api, args, context),
             ShowWindow => self.show_window(args, context),
             MoveWindow | SetWindowPos => self.move_window(api, args, memory, context),
@@ -133,7 +143,7 @@ impl User32Context32 {
             }
             _ => self.input_query(api, args, memory, context),
         };
-        match result {
+        let outcome = match result {
             Err(User32Error32::Win32(error)) => {
                 self.last_error = Some(error);
                 Ok(User32Outcome32::Return(
@@ -167,7 +177,21 @@ impl User32Context32 {
                 Ok(User32Outcome32::Return(0))
             }
             result => result,
+        };
+        if outcome.is_ok() {
+            self.record_thread_layout(context.thread_id);
         }
+        outcome
+    }
+
+    fn owned_input_window(&self, window: Option<WindowHandle32>, thread: u32) -> u32 {
+        window
+            .filter(|&window| {
+                self.windows()
+                    .get(window)
+                    .is_ok_and(|record| record.description.thread_id == thread)
+            })
+            .map_or(0, WindowHandle32::get)
     }
 
     pub(super) fn owned(

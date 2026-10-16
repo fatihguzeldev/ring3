@@ -37,6 +37,23 @@ pub(super) struct DestroyPlan32 {
     scratch: Option<Scratch32>,
 }
 
+impl DestroyPlan32 {
+    pub(in crate::process::windows::user32) fn check_scratch(
+        &self,
+        memory: &AddressSpace,
+    ) -> Result<(), User32Error32> {
+        if let Some(scratch) = self.scratch {
+            scratch.check(memory)?;
+        }
+        Ok(())
+    }
+    pub(in crate::process::windows::user32) fn scratch_range(
+        &self,
+    ) -> Option<crate::memory::PageRange> {
+        self.scratch.map(Scratch32::range)
+    }
+}
+
 impl User32Context32 {
     pub(super) fn pending_destroy_contains(&self, window: WindowHandle32) -> bool {
         self.destructions
@@ -260,6 +277,7 @@ impl User32Context32 {
                 }
                 Step32::Remove(_) => {
                     self.state.remove_delivered(thread, window)?;
+                    self.raw_input.retire_window(window.get());
                     None
                 }
             };

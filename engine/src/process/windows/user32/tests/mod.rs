@@ -4,6 +4,7 @@ mod input;
 mod lifecycle;
 mod messages;
 mod runtime;
+mod threads;
 
 use super::*;
 use crate::{
@@ -11,7 +12,8 @@ use crate::{
     windows::user32::{User32Api32, User32Error32, User32Limits32},
 };
 
-fn fixture() -> (User32Context32, AddressSpace, User32CallContext32) {
+pub(in crate::process::windows::user32) fn fixture()
+-> (User32Context32, AddressSpace, User32CallContext32) {
     let mut memory = AddressSpace::new(16).unwrap();
     memory
         .map_zeroed(
@@ -40,7 +42,7 @@ fn fixture() -> (User32Context32, AddressSpace, User32CallContext32) {
     )
 }
 
-fn register(
+pub(in crate::process::windows::user32) fn register(
     context: &mut User32Context32,
     memory: &mut AddressSpace,
     call: User32CallContext32,
@@ -64,7 +66,7 @@ fn register(
     atom
 }
 
-fn create(
+pub(in crate::process::windows::user32) fn create(
     context: &mut User32Context32,
     memory: &mut AddressSpace,
     call: User32CallContext32,

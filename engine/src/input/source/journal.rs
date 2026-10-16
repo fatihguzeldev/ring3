@@ -150,6 +150,46 @@ impl InputSource32 {
             SourceKind32::TranslationPolicy { layout, swapped },
         );
     }
+    pub fn commit_process_translation_policy(
+        &mut self,
+        prepared: PreparedSourceWindow32,
+        layout: crate::input::keyboard::KeyboardLayout32,
+        swapped: bool,
+    ) {
+        assert!(
+            self.epoch == prepared.epoch
+                && self.sequence == prepared.sequence
+                && self.timestamp_ns == prepared.previous_timestamp,
+            "prepared source owner changed"
+        );
+        self.push(
+            prepared.timestamp,
+            SourceKind32::ProcessTranslationPolicy { layout, swapped },
+        );
+    }
+    pub fn commit_thread_translation_policy(
+        &mut self,
+        prepared: PreparedSourceWindow32,
+        thread: u32,
+        layout: crate::input::keyboard::KeyboardLayout32,
+        swapped: bool,
+    ) {
+        assert!(
+            thread != 0
+                && self.epoch == prepared.epoch
+                && self.sequence == prepared.sequence
+                && self.timestamp_ns == prepared.previous_timestamp,
+            "prepared source owner changed"
+        );
+        self.push(
+            prepared.timestamp,
+            SourceKind32::ThreadTranslationPolicy {
+                thread,
+                layout,
+                swapped,
+            },
+        );
+    }
     pub fn commit_cursor_policy(
         &mut self,
         prepared: PreparedSourceWindow32,

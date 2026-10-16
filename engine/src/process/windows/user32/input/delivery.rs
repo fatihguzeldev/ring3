@@ -14,8 +14,10 @@ use crate::{
 
 pub(super) struct InputDelivery32 {
     input: User32Input32,
-    messages: [(Message32, Option<QueuedKey32>); 3],
+    messages: [(Message32, Option<QueuedKey32>); 4],
     count: usize,
+    layout: Option<(u32, crate::input::keyboard::KeyboardLayout32)>,
+    raw: Option<crate::windows::rawinput::PreparedRawPacket32>,
 }
 
 impl EngineInstance {
@@ -54,21 +56,34 @@ impl EngineInstance {
             let delivery = context
                 .prepare_input(records[0], origin)
                 .map_err(HostError::User32)?;
-            let mut messages = [Message32::default(); 3];
+            let mut messages = [Message32::default(); 4];
             for (index, (message, _)) in delivery.messages[..delivery.count].iter().enumerate() {
                 messages[index] = *message;
             }
-            let (current, fresh, generation) = context
-                .state
-                .project_input_messages(1, &messages[..delivery.count])
-                .map_err(HostError::User32)?;
+            let mut rows = [(0, 0, 0, 0); 4];
+            let mut row_count = 0;
+            for message in &messages[..delivery.count] {
+                if rows[..row_count]
+                    .iter()
+                    .any(|row| row.0 == message.thread_id)
+                {
+                    continue;
+                }
+                let (current, fresh, generation) = context
+                    .state
+                    .project_input_messages(message.thread_id, &messages[..delivery.count])
+                    .map_err(HostError::User32)?;
+                rows[row_count] = (message.thread_id, current, fresh, generation);
+                row_count += 1;
+            }
             let prepared = self
                 .synchronization
                 .as_ref()
+                .filter(|_| row_count != 0)
                 .map(|runtime| {
                     runtime
                         .context()
-                        .prepare_messages(current, fresh, generation)
+                        .prepare_messages_for_threads(&rows[..row_count])
                 })
                 .transpose()
                 .map_err(HostError::Synchronization)?;
@@ -93,8 +108,9 @@ impl User32Context32 {
         origin: u64,
     ) -> Result<InputDelivery32, User32Error32> {
         let mut input = self.input;
-        let mut messages = [(Message32::default(), None); 3];
+        let mut messages = [(Message32::default(), None); 4];
         let mut count = 0;
+        let mut layout = None;
         let time_ms = (event.timestamp_ns.saturating_sub(origin) / 1_000_000) as u32;
         let mut push = |window, message, wparam, lparam, point, key| {
             messages[count] = (
@@ -131,6 +147,12 @@ impl User32Context32 {
             SourceKind32::Window { focus, capture } => {
                 input.focus = focus;
                 input.capture = capture;
+                if let Ok(window) =
+                    WindowHandle32::try_from(focus).and_then(|handle| self.windows().get(handle))
+                {
+                    input.delivery_layout =
+                        self.delivered_thread_layout(window.description.thread_id);
+                }
             }
             SourceKind32::Policy {
                 mouse_exclusive,
@@ -180,9 +202,42 @@ impl User32Context32 {
                     );
                 }
             }
-            SourceKind32::TranslationPolicy { layout, swapped } => {
-                input.delivery_layout = layout;
+            SourceKind32::ProcessTranslationPolicy {
+                layout: value,
+                swapped,
+            } => {
+                layout = Some((0, value));
+                input.delivery_layout = value;
                 input.delivery_swapped = swapped;
+            }
+            SourceKind32::ThreadTranslationPolicy {
+                thread,
+                layout: value,
+                swapped,
+            } => {
+                layout = Some((thread, value));
+                input.delivery_swapped = swapped;
+                if WindowHandle32::try_from(input.focus)
+                    .ok()
+                    .and_then(|window| self.windows().get(window).ok())
+                    .is_some_and(|window| window.description.thread_id == thread)
+                {
+                    input.delivery_layout = value;
+                }
+            }
+            SourceKind32::TranslationPolicy {
+                layout: value,
+                swapped,
+            } => {
+                input.delivery_layout = value;
+                input.delivery_swapped = swapped;
+                if let Some(thread) = WindowHandle32::try_from(input.focus)
+                    .ok()
+                    .and_then(|handle| self.windows().get(handle).ok())
+                    .map(|window| window.description.thread_id)
+                {
+                    layout = Some((thread, value));
+                }
             }
             SourceKind32::Physical(InputKind::Key { code, pressed }) => {
                 let key = keyboard::virtual_key_for_layout(input.delivery_layout, code);
@@ -364,23 +419,101 @@ impl User32Context32 {
             }
             SourceKind32::Controller { .. } | SourceKind32::Connection { .. } => {}
         }
+        if matches!(event.kind, SourceKind32::Physical(InputKind::Key { .. }))
+            && self.raw_input.no_legacy(true)
+            || matches!(
+                event.kind,
+                SourceKind32::Physical(InputKind::Button { .. } | InputKind::Relative { .. })
+                    | SourceKind32::Cursor { .. }
+                    | SourceKind32::CursorPolicy { .. }
+            ) && self.raw_input.no_legacy(false)
+        {
+            count = 0;
+        }
+        let raw = if let SourceKind32::Physical(kind) = event.kind {
+            let key = if let InputKind::Key { code, .. } = kind {
+                match keyboard::virtual_key_for_layout(input.delivery_layout, code) {
+                    0 => 255,
+                    0xa0 | 0xa1 => 0x10,
+                    0xa2 | 0xa3 => 0x11,
+                    0xa4 | 0xa5 => 0x12,
+                    key => u16::from(key),
+                }
+            } else {
+                0
+            };
+            self.raw_input.prepare_packet(
+                kind,
+                key,
+                input.asynchronous[0x12] & 0x80 != 0 || matches!(key, 0x12 | 0x79),
+                input.focus,
+                input.physical_focus,
+                |raw| {
+                    WindowHandle32::try_from(raw)
+                        .ok()
+                        .and_then(|handle| self.state.record(handle).ok())
+                        .filter(|data| !data.destroying)
+                        .and_then(|data| self.windows().get(data.handle).ok())
+                        .map(|window| window.description.thread_id)
+                },
+            )?
+        } else {
+            None
+        };
+        if let Some(raw) = &raw {
+            let packet = raw.packet();
+            messages.copy_within(0..count, 1);
+            messages[0] = (
+                Message32 {
+                    window: packet.window,
+                    message: 0xff,
+                    wparam: u32::from(packet.bytes[12]),
+                    lparam: packet.id,
+                    time_ms,
+                    point: input.point,
+                    thread_id: packet.thread,
+                },
+                None,
+            );
+            count += 1;
+        }
         self.state.can_post(count)?;
         Ok(InputDelivery32 {
             input,
             messages,
             count,
+            layout,
+            raw,
         })
     }
 
     pub(super) fn commit_input(&mut self, delivery: InputDelivery32) {
+        if let Some(raw) = delivery.raw {
+            self.raw_input.commit_packet(raw);
+        }
+        if let Some((thread, layout)) = delivery.layout {
+            if thread == 0 {
+                for value in &mut self.layouts {
+                    value.delivery = layout;
+                }
+            } else {
+                self.commit_thread_layout_delivery(thread, layout);
+            }
+        }
         let mut keyboard = delivery.input.asynchronous;
         if delivery.input.delivery_swapped {
             keyboard.swap(1, 2);
         }
         for &(message, key) in &delivery.messages[..delivery.count] {
-            self.state
-                .post_input(message, key, keyboard)
-                .expect("input delivery was preflighted");
+            if message.message == 0xff {
+                self.state
+                    .post_raw_input(message)
+                    .expect("raw input delivery was preflighted");
+            } else {
+                self.state
+                    .post_input(message, key, keyboard)
+                    .expect("input delivery was preflighted");
+            }
         }
         self.runtime_input.cursor = delivery.input.query_point;
         self.input = delivery.input;

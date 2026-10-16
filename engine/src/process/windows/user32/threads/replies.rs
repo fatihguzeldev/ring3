@@ -1,0 +1,231 @@
+use super::super::{User32Context32, callback::Pending32, destruction::DestroyPlan32};
+use crate::{
+    input::keyboard::KeyboardLayout32,
+    windows::user32::{Message32, User32Error32},
+};
+
+struct ThreadInput32 {
+    queued: [u8; 256],
+    message: Message32,
+    dead: Option<char>,
+    extra_info: u32,
+    layout: KeyboardLayout32,
+    layout_revision: u64,
+    show_count: i32,
+}
+pub(in crate::process) struct User32ThreadReply32 {
+    pending: Vec<Pending32>,
+    destructions: Vec<DestroyPlan32>,
+    last_error: Option<u32>,
+    input: ThreadInput32,
+}
+impl User32Context32 {
+    pub(in crate::process) fn thread_reply_ready(&self, reply: &User32ThreadReply32) -> bool {
+        self.pending_wait_ready(reply.pending.last())
+    }
+    pub(in crate::process) fn active_thread_wait_ready(&self) -> bool {
+        self.pending_wait_ready(self.pending.last())
+    }
+    fn pending_wait_ready(&self, pending: Option<&Pending32>) -> bool {
+        let Some(pending) = pending else {
+            return false;
+        };
+        match pending.continuation {
+            super::super::callback::Continuation32::RemoteCall { ready, .. } => ready.is_some(),
+            super::super::callback::Continuation32::Retrieve { .. } => true,
+            super::super::callback::Continuation32::MessageWait {
+                thread,
+                window,
+                min,
+                max,
+                ..
+            } => match self.state.find_message(thread, window, min, max) {
+                Ok(message) => message.is_some(),
+                Err(_) => true,
+            },
+            _ => false,
+        }
+    }
+    pub(in crate::process) fn check_thread_scratch(
+        &self,
+        memory: &crate::memory::AddressSpace,
+    ) -> Result<(), User32Error32> {
+        check_scratch(&self.pending, &self.destructions, memory)
+    }
+    pub(in crate::process) fn thread_scratch_ranges(
+        &self,
+    ) -> impl Iterator<Item = crate::memory::PageRange> + '_ {
+        self.pending
+            .iter()
+            .filter_map(|pending| match pending.continuation {
+                super::super::callback::Continuation32::Create { scratch, .. }
+                | super::super::callback::Continuation32::Position { scratch, .. }
+                | super::super::callback::Continuation32::Style { scratch, .. } => {
+                    Some(scratch.range())
+                }
+                _ => None,
+            })
+            .chain(
+                self.destructions
+                    .iter()
+                    .filter_map(DestroyPlan32::scratch_range),
+            )
+    }
+    pub(in crate::process) fn empty_thread_reply(&self) -> User32ThreadReply32 {
+        User32ThreadReply32 {
+            pending: Vec::new(),
+            destructions: Vec::new(),
+            last_error: None,
+            input: ThreadInput32 {
+                queued: [0; 256],
+                message: Message32::default(),
+                dead: None,
+                extra_info: 0,
+                layout: self.input.layout,
+                layout_revision: self.process_layout.map_or(0, |policy| policy.0),
+                show_count: 0,
+            },
+        }
+    }
+    pub(in crate::process) fn take_thread_reply(&mut self) -> User32ThreadReply32 {
+        User32ThreadReply32 {
+            pending: std::mem::take(&mut self.pending),
+            destructions: std::mem::take(&mut self.destructions),
+            last_error: self.last_error.take(),
+            input: ThreadInput32 {
+                queued: self.input.queued,
+                message: self.input.message,
+                dead: self.input.dead,
+                extra_info: self.input.extra_info,
+                layout: self.input.layout,
+                layout_revision: self.process_layout.map_or(0, |policy| policy.0),
+                show_count: self.input.show_count,
+            },
+        }
+    }
+    pub(in crate::process) fn restore_thread_reply(&mut self, reply: User32ThreadReply32) {
+        assert!(
+            self.pending.is_empty() && self.destructions.is_empty(),
+            "active USER32 continuation was parked before restoring another thread"
+        );
+        let layout = self.resolve_thread_layout(&reply);
+        self.pending = reply.pending;
+        self.destructions = reply.destructions;
+        self.last_error = reply.last_error;
+        self.input.queued = reply.input.queued;
+        self.input.message = reply.input.message;
+        self.input.dead = reply.input.dead;
+        self.input.extra_info = reply.input.extra_info;
+        self.input.layout = layout;
+        if self.input.layout != reply.input.layout {
+            self.input.dead = None;
+        }
+        self.input.show_count = reply.input.show_count;
+    }
+    pub(in crate::process::windows::user32) fn prepare_thread_slots(
+        &mut self,
+    ) -> Result<(), User32Error32> {
+        if self.pending.capacity() < self.continuation_limit {
+            self.pending
+                .try_reserve_exact(self.continuation_limit - self.pending.len())
+                .map_err(|_| User32Error32::Allocation)?;
+        }
+        if self.destructions.capacity() < self.continuation_limit {
+            self.destructions
+                .try_reserve_exact(self.continuation_limit - self.destructions.len())
+                .map_err(|_| User32Error32::Allocation)?;
+        }
+        Ok(())
+    }
+}
+
+impl User32ThreadReply32 {
+    pub(in crate::process) fn check_thread_scratch(
+        &self,
+        memory: &crate::memory::AddressSpace,
+    ) -> Result<(), User32Error32> {
+        check_scratch(&self.pending, &self.destructions, memory)
+    }
+    pub(super) fn layout_revision(&self) -> u64 {
+        self.input.layout_revision
+    }
+    pub(super) fn layout(&self) -> KeyboardLayout32 {
+        self.input.layout
+    }
+    pub(in crate::process) fn scratch_ranges(
+        &self,
+    ) -> impl Iterator<Item = crate::memory::PageRange> + '_ {
+        self.pending
+            .iter()
+            .filter_map(|pending| match pending.continuation {
+                super::super::callback::Continuation32::Create { scratch, .. }
+                | super::super::callback::Continuation32::Position { scratch, .. }
+                | super::super::callback::Continuation32::Style { scratch, .. } => {
+                    Some(scratch.range())
+                }
+                _ => None,
+            })
+            .chain(
+                self.destructions
+                    .iter()
+                    .filter_map(DestroyPlan32::scratch_range),
+            )
+    }
+
+    pub(in crate::process) fn check_remote_result(
+        &self,
+        continuation: u64,
+    ) -> Result<(), User32Error32> {
+        let pending = self
+            .pending
+            .iter()
+            .find(|pending| pending.token == continuation)
+            .ok_or(User32Error32::InvalidToken)?;
+        match pending.continuation {
+            super::super::callback::Continuation32::RemoteCall { ready: None, .. } => Ok(()),
+            _ => Err(User32Error32::InvalidToken),
+        }
+    }
+    pub(in crate::process) fn accept_remote_result(
+        &mut self,
+        continuation: u64,
+        value: u32,
+    ) -> Result<(), User32Error32> {
+        let pending = self
+            .pending
+            .iter_mut()
+            .find(|pending| pending.token == continuation)
+            .ok_or(User32Error32::InvalidToken)?;
+        let super::super::callback::Continuation32::RemoteCall { ready, .. } =
+            &mut pending.continuation
+        else {
+            return Err(User32Error32::InvalidToken);
+        };
+        if ready.is_some() {
+            return Err(User32Error32::InvalidToken);
+        }
+        *ready = Some(value);
+        Ok(())
+    }
+}
+
+fn check_scratch(
+    pending: &[Pending32],
+    destructions: &[DestroyPlan32],
+    memory: &crate::memory::AddressSpace,
+) -> Result<(), User32Error32> {
+    for pending in pending {
+        match pending.continuation {
+            super::super::callback::Continuation32::Create { scratch, .. }
+            | super::super::callback::Continuation32::Position { scratch, .. }
+            | super::super::callback::Continuation32::Style { scratch, .. } => {
+                scratch.check(memory)?
+            }
+            _ => {}
+        }
+    }
+    for plan in destructions {
+        plan.check_scratch(memory)?;
+    }
+    Ok(())
+}

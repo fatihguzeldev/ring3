@@ -195,8 +195,8 @@ impl User32Context32 {
         });
     }
 
-    pub(in crate::process) fn observe_wait_queue(&mut self, mask: u32) {
-        self.state.observe_queue(1, mask);
+    pub(in crate::process) fn observe_wait_queue(&mut self, thread: u32, mask: u32) {
+        self.state.observe_queue(thread, mask);
     }
 }
 

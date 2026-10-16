@@ -65,12 +65,7 @@ impl User32Context32 {
                     keyboard::map_virtual_key_for_layout(layout, args[0], args[1])
                 }
             }
-            GetKeyboardLayout => {
-                if args[0] > 1 {
-                    return Err(User32Error32::Win32(87));
-                }
-                self.input.layout.handle()
-            }
+            GetKeyboardLayout => self.queried_thread_layout(args[0]),
             GetKeyboardLayoutList => {
                 let layouts = [KeyboardLayout32::Us, KeyboardLayout32::TurkishQ];
                 let count = self.input.loaded.iter().filter(|&&loaded| loaded).count();
@@ -113,12 +108,7 @@ impl User32Context32 {
                     return Err(User32Error32::Win32(6));
                 }
                 let previous = self.input.layout.handle();
-                self.input.layout = next;
-                if self.input.cursor.is_none() {
-                    self.input.delivery_layout = next;
-                }
-                self.input.dead = None;
-                previous
+                return self.activate_layout(next, args[1] & 0x100 != 0, previous);
             }
             LoadKeyboardLayoutA | LoadKeyboardLayoutW => {
                 if args[1] & !0x11b != 0 {
@@ -141,14 +131,16 @@ impl User32Context32 {
                 }
                 let layout =
                     KeyboardLayout32::from_handle(value).ok_or(User32Error32::Win32(50))?;
-                self.input.loaded[layout_index(layout)] = true;
-                if args[1] & 1 != 0 {
-                    self.input.layout = layout;
-                    if self.input.cursor.is_none() {
-                        self.input.delivery_layout = layout;
-                    }
-                    self.input.dead = None;
+                if args[1] & 0x100 != 0 && args[1] & 1 == 0 {
+                    return Err(User32Error32::Win32(87));
                 }
+                if args[1] & 9 != 0 {
+                    let outcome =
+                        self.activate_layout(layout, args[1] & 0x100 != 0, layout.handle())?;
+                    self.input.loaded[layout_index(layout)] = true;
+                    return Ok(outcome);
+                }
+                self.input.loaded[layout_index(layout)] = true;
                 layout.handle()
             }
             UnloadKeyboardLayout => {

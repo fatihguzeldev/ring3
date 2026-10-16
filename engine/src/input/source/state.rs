@@ -62,6 +62,15 @@ impl Default for SourceSnapshot32 {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SourceKind32 {
+    ProcessTranslationPolicy {
+        layout: crate::input::keyboard::KeyboardLayout32,
+        swapped: bool,
+    },
+    ThreadTranslationPolicy {
+        thread: u32,
+        layout: crate::input::keyboard::KeyboardLayout32,
+        swapped: bool,
+    },
     TranslationPolicy {
         layout: crate::input::keyboard::KeyboardLayout32,
         swapped: bool,
