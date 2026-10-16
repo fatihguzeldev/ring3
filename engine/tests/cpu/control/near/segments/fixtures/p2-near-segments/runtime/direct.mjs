@@ -1,3 +1,5 @@
+import {consumeCpuEvent} from '../../../../../../../support/wasm/events.mjs';
+import {pageFaultExit, pageFaultPacket} from '../../../../../../../support/wasm/page-fault.mjs';
 import assert from 'node:assert/strict';
 import {readFileSync, writeFileSync, mkdirSync} from 'node:fs';
 import {createHash} from 'node:crypto';
@@ -13,6 +15,7 @@ assert.equal(initial.length, 4796, 'complete existing arena, including companion
 const PC = 0x1000, STACK = 0x7800, POINTER = 0x5010, SEG = 4524, KEY_HIGH = 0x4e454152;
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const sourcePaths = [
+  'engine/tests/support/wasm/events.mjs', 'engine/tests/support/wasm/page-fault.mjs',
   "engine/src/abi/arena.rs",
   "engine/src/abi/x86/state.rs",
   "engine/src/abi/x86/segments.rs",
@@ -101,7 +104,7 @@ for (const resident of [false, true]) for (const entries of [false, true]) for (
   const generated = Buffer.from(new Uint8Array(memory.buffer, address, length));
   const module = new WebAssembly.Module(generated), calls = [];
   const ring3 = Object.fromEntries(WebAssembly.Module.imports(module).filter(item => item.kind === 'function').map(item => [item.name, (...args) => {
-    const status = api[item.name](...args); calls.push({name: item.name, args: args.map(value => value >>> 0), status}); return status;
+    const status = api[item.name](...args); calls.push({name: item.name, args: args.map(value => typeof value === 'bigint' ? value.toString(10) : value >>> 0), status: typeof status === 'bigint' ? status.toString(10) : status}); return status;
   }]));
   const run = new WebAssembly.Instance(module, {env: {memory}, ring3}).exports.run;
   put(0, initial);
@@ -148,9 +151,26 @@ for (const resident of [false, true]) for (const entries of [false, true]) for (
   check(after.readUInt32LE(48) === want.readUInt32LE(48), 'original/committed EIP');
   check(after.subarray(16, 48).equals(want.subarray(16, 48)), 'all GPRs including ESP/ECX');
   check(after.readUInt32LE(52) === want.readUInt32LE(52), 'flags');
-  const actualHelpers = calls.filter(call => !call.name.startsWith('guard')).map(call => call.name);
+  const actualHelpers = calls.filter(call => !call.name.startsWith('guard') && call.name !== 'finish_exception_detection').map(call => call.name);
   check(JSON.stringify(actualHelpers) === JSON.stringify(helpers), 'exact real helper schedule');
   for (const [address, bytes] of ramBefore) check(readRAM(address).equals(bytes), `exact RAM page ${address.toString(16)}`);
+  let opcodeIndex = 0;
+  while ([0x26, 0x2e, 0x36, 0x3e, 0x64, 0x65, 0x66, 0x67].includes(row.code[opcodeIndex])) opcodeIndex++;
+  const opcode = row.code[opcodeIndex], word = row.code.subarray(0, opcodeIndex).includes(0x66);
+  const declaredHelpers = [...helpers];
+  if (opcode === 0xe8 || opcode === 0xff && (row.code[opcodeIndex + 1] >> 3 & 7) === 2) declaredHelpers.push(resident ? `cpu_store_resident${word ? 16 : 32}` : `cpu_store${word ? 16 : 32}`);
+  const importNames = WebAssembly.Module.imports(module).map(item => `${item.module}:${item.name}:${item.kind}`).sort();
+  const guardName = resident ? 'guard_detect_resident' : 'guard_detect';
+  assert.deepEqual(importNames, ['env:memory:memory', `ring3:${guardName}:function`, ...[...new Set([...declaredHelpers, 'finish_exception_detection'])].map(name => `ring3:${name}:function`)].sort(), 'exact generated helper inventory');
+  const finalizers = calls.filter(call => call.name === 'finish_exception_detection'), expectedEvent = want.readUInt32LE(72) !== 1;
+  check(finalizers.length === Number(expectedEvent), 'exact stop finalization count');
+  if (expectedEvent) {
+    const guard = calls.find(call => call.name === guardName), finalizer = finalizers[0];
+    check(guard && BigInt(guard.status) > 0n && finalizer && finalizer.args[0] === guard.status, 'exact detection epoch ownership');
+    check(finalizer?.status === 0 && JSON.stringify(finalizer.args.slice(1)) === JSON.stringify([72, 80, 84, 88, 92].map(at => want.readUInt32LE(at)).concat([0, 0, 0, 0, 0, 0])), 'literal fault metadata with no restart site');
+  }
+  if (errors.length === 0) consumeCpuEvent({api, memory, base}, initial.length);
+
   const actual = {reason: after.readUInt32LE(72), retired: after.readUInt32LE(76), detail: after.readUInt32LE(80), pc: after.readUInt32LE(48), ecx: after.readUInt32LE(20), esp: after.readUInt32LE(32)};
   observations.push({name: row.name, profile, kind: success ? 'control' : 'semantic', passed: errors.length === 0, expected: {reason: success ? 1 : 11, retired: success ? 1 : 0}, actual, errors, calls, module_sha256: hash(generated), ...(id ? {resident_id: id} : {})});
   if (errors.length) {writeFileSync(join(output, `${key}-before.bin`), before); writeFileSync(join(output, `${key}-after.bin`), after); writeFileSync(join(output, `${key}-want.bin`), want);}

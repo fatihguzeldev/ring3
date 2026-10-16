@@ -14,7 +14,7 @@ const own = 'engine/tests/cpu/control/exceptions/availability/optional/';
 const paths = [
   'engine/src/cpu/x86/capabilities.rs', 'engine/src/cpu/x86/environment.rs',
   'engine/src/cpu/x86/decode/execution_faults.rs', 'engine/src/cpu/x86/decode/execution_faults/optional.rs',
-  'engine/src/cpu/x86/decode/profile.rs', 'engine/src/cpu/x86/decode/families.rs', 'engine/src/cpu/x86/decode/lower.rs', 'engine/src/cpu/x86/decode/families.rs',
+  'engine/src/cpu/x86/decode/profile.rs', 'engine/src/cpu/x86/decode/families.rs', 'engine/src/cpu/x86/decode/lower.rs', 
   'engine/src/cpu/x86/decode/mod.rs', 'engine/src/cpu/x86/decode/mpx.rs',
   'engine/src/cpu/x86/decode/mpx/tests.rs', 'engine/src/cpu/x86/decode/execution_faults/tests/tsxldtrk.rs',
   'engine/src/cpu/x86/decode/decoder.rs', 'engine/src/cpu/x86/decode/instruction.rs', 'engine/src/cpu/x86/decode/simd.rs',
@@ -141,12 +141,12 @@ for (const resident of [false, true]) for (const entries of [false, true]) {
     const c = open(resident, entries, `${row.code} final-byte repair`);
     h.upload(c, target, code.subarray(0, -1)); bootstrap(c, target);
     strict(c, 'truncated exact Code strict fetch remains a host preparation error', target, code.length, 10);
-    stopped(c, 'missing final byte prevents classification and publication', 10);
+    const fetchMaterial = h.fetchFault(c, 'missing final byte prevents classification and publication', {pc: target, length: code.length, address: 0x2000, errorCode: 20});
     h.host(c, 'map', [0x2000, 1, 7]); c.pages.push(0x2000); c.pages.sort((a, b) => a - b);
     h.upload(c, 0x2000, Buffer.concat([code.subarray(-1), bytes('ebfe')]));
     h.host(c, 'protect', [0x2000, 1, 1]);
-    stopped(c, 'READ without EXECUTE still prevents classification and publication', 10);
-    h.host(c, 'protect', [0x2000, 1, 7]);
+    h.fetchFault(c, 'READ without EXECUTE still prevents classification and publication', {pc: target, length: code.length, address: 0x2000, errorCode: 21, material: fetchMaterial});
+    h.host(c, 'protect', [0x2000, 1, 7]); h.reachNeedCode(c);
     const material = stopped(c, 'only executable fullfetch repair admits exact outcome');
     const input = seed(target), retired = row.reason === 20 ? 0 : 1;
     invoke(c, 'repaired full instruction has exact UD or NOP without operand access', material,
@@ -156,6 +156,13 @@ for (const resident of [false, true]) for (const entries of [false, true]) {
   for (const row of [...refusals, ...invalidLocks]) {
     const code = bytes(row.hex), target = 0x1100, c = open(resident, entries, row.label);
     h.upload(c, target, code); bootstrap(c, target);
+    if (row.hex === 'cd80') {
+      const material = strict(c, 'original INT80 bytes bind the application interrupt instruction', target, code.length, 0);
+      const input = seed(target), want = expected(input, 11, 0); want.set(record('R3EX', 40, [11, 0, 0x402, 0, 0, 0], 6), 56);
+      invoke(c, 'INT80 retains precise GP(IDT vector80), original PC and all operands', material, input, want, {budget: 2});
+      h.host(c, 'close'); continue;
+    }
+
     strict(c, row.label + ': strict refuses', target, code.length, 10);
     const invalid = invalidLocks.includes(row), material = stopped(c,
       row.label + ': execution distinguishes invalid encoding from profile refusal', invalid ? 0 : 10);
@@ -247,12 +254,12 @@ for (const resident of [false, true]) for (const entries of [false, true]) {
     const c = open(resident, entries, `${row.code} complete-fetch repair`);
     h.upload(c, target, code.subarray(0, -1)); bootstrap(c, target);
     strict(c, 'missing final opcode or ModRM byte prevents strict preparation', target, code.length, 10);
-    stopped(c, 'missing final byte prevents UD/NOP classification and publication', 10);
+    const fetchMaterial = h.fetchFault(c, 'missing final byte prevents UD/NOP classification and publication', {pc: target, length: code.length, address: 0x2000, errorCode: 20});
     h.host(c, 'map', [0x2000, 1, 7]); c.pages.push(0x2000); c.pages.sort((a, b) => a - b);
     h.upload(c, 0x2000, Buffer.concat([code.subarray(-1), bytes('ebfe')]));
     h.host(c, 'protect', [0x2000, 1, 1]);
-    stopped(c, 'final byte readable without execute permission still prevents classification', 10);
-    h.host(c, 'protect', [0x2000, 1, 7]);
+    h.fetchFault(c, 'final byte readable without execute permission still prevents classification', {pc: target, length: code.length, address: 0x2000, errorCode: 21, material: fetchMaterial});
+    h.host(c, 'protect', [0x2000, 1, 7]); h.reachNeedCode(c);
     const material = stopped(c, 'executable final-byte repair admits exact absent-feature result');
     const input = seed(target, {shadow: 1}), retired = row.reason === 20 ? 0 : 1;
     invoke(c, 'fullfetch repair selects exact TSXLDTRK UD or canonical MPX NOP', material,
@@ -306,7 +313,7 @@ for (const resident of [false, true]) for (const entries of [false, true]) {
     query('after'); h.host(c, 'close');
   }
 }
-assert.equal(originalPlanned, 432, 'all original optional module invocations remain');
+assert.equal(originalPlanned, 436, 'all original optional module invocations remain');
 assert.equal(planned - originalPlanned, 628, 'finite four-profile TSXLDTRK/MPX extension with four selected compatibility migrations');
 assert.deepEqual(pins(), sourcePins, 'optional primary-backed oracles and all current execution sources stay pinned');
 writeFileSync(join(output, 'optional-counts.json'), JSON.stringify({planned_module_invocations: planned,

@@ -88,11 +88,11 @@ for (const resident of [false, true]) for (const entries of [false, true]) {
     const c = open(resident, entries, 'trailing 3DNow opcode / FMA4 is4 fetch repair');
     h.upload(c, target, code.subarray(0, -1)); bootstrap(c, target);
     strict(c, 'missing final byte remains strict fetch refusal', target, code.length, 10);
-    stopped(c, 'absent feature cannot classify incomplete executable source', 10);
+    const fetchMaterial = h.fetchFault(c, 'absent feature cannot classify incomplete executable source', {pc: target, length: code.length, address: 0x2000, errorCode: 20});
     h.host(c, 'map', [0x2000, 1, 7]); c.pages.push(0x2000); c.pages.sort((a, b) => a - b);
     h.upload(c, 0x2000, code.subarray(-1)); h.host(c, 'protect', [0x2000, 1, 1]);
-    stopped(c, 'READ without EXECUTE cannot classify missing family/immediate byte', 10);
-    h.host(c, 'protect', [0x2000, 1, 7]); const material = stopped(c, 'complete executable repair selects exact absence UD');
+    h.fetchFault(c, 'READ without EXECUTE cannot classify missing family/immediate byte', {pc: target, length: code.length, address: 0x2000, errorCode: 21, material: fetchMaterial});
+    h.host(c, 'protect', [0x2000, 1, 7]); h.reachNeedCode(c); const material = stopped(c, 'complete executable repair selects exact absence UD');
     const input = seed(target);
     invoke(c, 'repaired instruction never reaches numeric/operand execution or TF', material,
       input, expected(input, 20, 0), {budget: 2}); h.host(c, 'close');

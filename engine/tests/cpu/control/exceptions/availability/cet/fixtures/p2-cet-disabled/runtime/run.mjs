@@ -84,11 +84,11 @@ for (const resident of [false, true]) for (const entries of [false, true]) {
     const c = open(resident, entries, 'RSTORSSP final displacement repair');
     h.upload(c, target, code.subarray(0, -1)); bootstrap(c, target);
     strict(c, 'missing final displacement remains strict fetch refusal', target, code.length, 10);
-    stopped(c, 'CET0 cannot classify incomplete executable source', 10);
+    const fetchMaterial = h.fetchFault(c, 'CET0 cannot classify incomplete executable source', {pc: target, length: code.length, address: 0x2000, errorCode: 20});
     h.host(c, 'map', [0x2000, 1, 7]); c.pages.push(0x2000); c.pages.sort((a, b) => a - b);
     h.upload(c, 0x2000, code.subarray(-1)); h.host(c, 'protect', [0x2000, 1, 1]);
-    stopped(c, 'READ without EXECUTE still cannot classify CET0', 10);
-    h.host(c, 'protect', [0x2000, 1, 7]); const material = stopped(c, 'complete executable repair selects CET0 UD');
+    h.fetchFault(c, 'READ without EXECUTE still cannot classify CET0', {pc: target, length: code.length, address: 0x2000, errorCode: 21, material: fetchMaterial});
+    h.host(c, 'protect', [0x2000, 1, 7]); h.reachNeedCode(c); const material = stopped(c, 'complete executable repair selects CET0 UD');
     const input = seed(target);
     invoke(c, 'repaired RSTORSSP UD precedes null DS/unmapped unaligned token and TF', material,
       input, expected(input, 20, 0), {budget: 2}); h.host(c, 'close');

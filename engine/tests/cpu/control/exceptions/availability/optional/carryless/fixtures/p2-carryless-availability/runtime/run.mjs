@@ -84,11 +84,11 @@ for (const resident of [false, true]) for (const entries of [false, true]) {
     const c = open(resident, entries, 'VPCLMUL final immediate fetch repair');
     h.upload(c, target, code.subarray(0, -1)); bootstrap(c, target);
     strict(c, 'strict truncated immediate refuses neutrally', target, code.length, 10);
-    stopped(c, 'missing final immediate prevents feature classification', 10);
+    const fetchMaterial = h.fetchFault(c, 'missing final immediate prevents feature classification', {pc: target, length: code.length, address: 0x2000, errorCode: 20});
     h.host(c, 'map', [0x2000, 1, 7]); c.pages.push(0x2000); c.pages.sort((a, b) => a - b);
     h.upload(c, 0x2000, Buffer.concat([code.subarray(-1), bytes('ebfe')]));
-    h.host(c, 'protect', [0x2000, 1, 1]); stopped(c, 'readable but non-executable immediate still prevents classification', 10);
-    h.host(c, 'protect', [0x2000, 1, 7]); const material = stopped(c, 'executable complete immediate repair captures exact absence UD');
+    h.host(c, 'protect', [0x2000, 1, 1]); h.fetchFault(c, 'readable but non-executable immediate still prevents classification', {pc: target, length: code.length, address: 0x2000, errorCode: 21, material: fetchMaterial});
+    h.host(c, 'protect', [0x2000, 1, 7]); h.reachNeedCode(c); const material = stopped(c, 'executable complete immediate repair captures exact absence UD');
     const input = seed(target); invoke(c, 'repaired complete Code reaches only the absent-facility fault', material,
       input, expected(input, 20, 0), {budget: 2}); h.host(c, 'close');
   }
@@ -108,11 +108,18 @@ for (const resident of [false, true]) for (const entries of [false, true]) {
       input, want, {budget: 1, helpers: [{name: helper, args, status: 0}]}); h.host(c, 'close');
   }
   for (const row of [
-    {hex: 'cd80', label: 'unselected INT80 neutral refusal', invalid: false},
+    {hex: 'cd80', label: 'INT80 precise denied application vector', invalid: false},
     {hex: 'f0c4e37d44c100', label: 'illegal LOCK VPCLMUL decoder UD', invalid: true},
   ]) {
     const code = bytes(row.hex), target = 0x1100, c = open(resident, entries, row.label);
     h.upload(c, target, code); bootstrap(c, target);
+    if (row.hex === 'cd80') {
+      const material = strict(c, 'original INT80 bytes bind the application interrupt instruction', target, code.length, 0);
+      const input = seed(target), want = expected(input, 11, 0); want.set(record('R3EX', 40, [11, 0, 0x402, 0, 0, 0], 6), 56);
+      invoke(c, 'INT80 retains precise GP(IDT vector80), original PC and all operands', material, input, want, {budget: 2});
+      h.host(c, 'close'); continue;
+    }
+
     strict(c, 'strict prefix/neighbor refusal retained', target, code.length, 10);
     const material = stopped(c, row.label, row.invalid ? 0 : 10);
     if (row.invalid) {const input = seed(target); invoke(c, 'decoder-invalid outcome remains existing UD', material,
@@ -120,10 +127,10 @@ for (const resident of [false, true]) for (const entries of [false, true]) {
     h.host(c, 'close');
   }
 }
-assert.equal(planned, 40, 'bounded VPCLMUL module invocations');
+assert.equal(planned, 44, 'bounded VPCLMUL module invocations');
 assert.deepEqual(pins(), sourcePins);
 writeFileSync(join(output, 'carryless-counts.json'), JSON.stringify({planned, invoked, exactCode: 'VEX_Vpclmulqdq_ymm_ymm_ymmm256_imm8',
-  contextsPlanned: 24, compileObservationsPlanned: 72, totalRowsPlanned: 112, sourcePins}, null, 2) + '\n');
+  contextsPlanned: 24, originalCompileObservationPlan: 72, originalRowPlan: 112, sourcePins}, null, 2) + '\n');
 h.finish([
   'exact VEX256 VPCLMUL Code with CPUID7.0.ECX10 absent reaches UD; no enabled256 semantic policy is selected',
   'both conflicting Intel enabled-form interpretations require the same UD in this absent-feature environment',

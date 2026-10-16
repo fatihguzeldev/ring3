@@ -1,3 +1,4 @@
+import {pageFaultExit, pageFaultPacket} from '../../../../../../../support/wasm/page-fault.mjs';
 import assert from 'node:assert/strict';
 import {join} from 'node:path';
 import {readFileSync} from 'node:fs';
@@ -5,6 +6,7 @@ import {readEngine,PC,TARGET,POINTER,SEG,STACK,counts,observations,words,packet,
 assert.ok(process.env.RING3_ENGINE_SHA256, 'select an explicit engine SHA-256');
 const [enginePath,output,root]=process.argv.slice(2),engine=readEngine(enginePath);
 const sources=[
+  'engine/tests/support/wasm/page-fault.mjs',
   "engine/src/cpu/x86/mod.rs",
   "engine/src/cpu/x86/segments.rs",
   "engine/src/process/memory/address_space.rs",
@@ -101,7 +103,7 @@ function proof(c,label,{raw=descriptor(),selector=0x43,target=TARGET,esp=STACK,f
    helpers.push('cpu_read');args.push([address,c.word?4:6,1]);
    if(!readFault)want.set(ptr,140);
   }
-  if(readFault){want.set(packet('R3MH',40,[1,0,readFault.detail,readFault.address,1,ptr.length],7),100);exit(want,5,0,readFault.detail,readFault.address,1,ptr.length);}
+  if(readFault){const fault={errorCode:readFault.detail===1?4:5,address:readFault.address,access:1,length:ptr.length};want.set(pageFaultPacket(fault),100);want.set(pageFaultExit({retired:0,...fault}),56);}
   else {
    helpers.push(c.helper);args.push([...c.binding,ip,selector,Number(c.word),pc+c.bytes.length,esp]);
    if(reply){want.set(reply.packet,100);exit(want,reply.reason??7,0,reply.detail??2,reply.address??0,reply.access??0,reply.length??0);}
@@ -114,7 +116,8 @@ function proof(c,label,{raw=descriptor(),selector=0x43,target=TARGET,esp=STACK,f
      writeExpected(ram,(esp-slot)>>>0,words([input.readUInt16LE(SEG+18)]).subarray(0,slot));
      writeExpected(ram,(esp-2*slot)>>>0,words([c.word?(pc+c.bytes.length)&65535:pc+c.bytes.length]).subarray(0,slot));
      exit(want,flags&0x100?16:smc?6:budget>1?3:1,1);
-    } else exit(want,status===1?5:status===7?15:status===6?14:11,0,detail,at,status===1?2:0,status===1?slot:0);
+    } else if(status===1){const fault={errorCode:detail===1?6:7,address:at,access:2,length:slot};want.set(pageFaultPacket(fault),100);want.set(pageFaultExit({retired:0,...fault}),56);}
+    else exit(want,status===7?15:status===6?14:11,0,detail,at,0,0);
    }
   }
  }

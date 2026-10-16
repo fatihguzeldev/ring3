@@ -1,3 +1,4 @@
+import {pageFaultExit, pageFaultPacket} from '../../../../../../../support/wasm/page-fault.mjs';
 import assert from 'node:assert/strict';
 import {readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
@@ -5,7 +6,8 @@ import {harness, PC, SEG, BASES, words, record, state, registers, exit, descript
 
 const [enginePath, output, root] = process.argv.slice(2);
 assert.ok(enginePath && output && root, 'explicit engine, output and root');
-const paths = ['engine/src/abi/far.rs', 'engine/src/abi/cpu_helper.rs',
+const paths = [
+  'engine/tests/support/wasm/page-fault.mjs','engine/src/abi/far.rs', 'engine/src/abi/cpu_helper.rs',
   'engine/src/cpu/x86/segments/transfers.rs', 'engine/src/cpu/x86/segments/transfers/gates.rs',
   'engine/src/cpu/dbt/wasm/helpers/result.rs', 'engine/src/cpu/dbt/wasm/instructions/far/gate.rs',
   'engine/src/process/cpu/far/call.rs', 'engine/src/cpu/dbt/wasm/instructions/stack/pointer.rs',
@@ -13,7 +15,7 @@ const paths = ['engine/src/abi/far.rs', 'engine/src/abi/cpu_helper.rs',
   'engine/tests/cpu/control/far/gates/fixtures/p2-call-gates/runtime/run.mjs'];
 const pins = () => Object.fromEntries(paths.map(path => [path, hash(readFileSync(join(root, path)))]));
 const sourcePins = pins(), h = await harness(enginePath, output, root);
-const call = (name, args, status = 0) => ({name, args: args.map(value => value >>> 0), status});
+const call = (name, args, status = 0) => ({name, args: args.map(value => typeof value === 'bigint' ? value.toString(10) : value >>> 0), status: typeof status === 'bigint' ? status.toString(10) : status});
 const helper = (c, operation) => `${operation}${c.resident ? '_resident' : ''}`;
 const bound = (c, material, args) => [...(c.resident ? material.binding : []), ...args];
 function gate(kind, selector, target, {dpl = 3, present = true, count = 31, reserved = 0} = {}) {
@@ -78,7 +80,7 @@ function protocolMaterial(c, original, selected, mutate, returnedStatus) {
   const imports = WebAssembly.Module.imports(module);
   const ring3 = Object.fromEntries(imports.filter(imp => imp.kind === 'function').map(imp => [imp.name, (...args) => {
     const status = c.api[imp.name](...args);
-    c.calls.push({name: imp.name, args: args.map(value => value >>> 0), status});
+    c.calls.push({name: imp.name, args: args.map(value => typeof value === 'bigint' ? value.toString(10) : value >>> 0), status: typeof status === 'bigint' ? status.toString(10) : status});
     if (imp.name === selected) {const bytes = h.arena(c); mutate(bytes); h.put(c, 0, bytes);}
     return imp.name === selected ? returnedStatus ?? status : status;
   }]));
@@ -165,10 +167,10 @@ for (const resident of [false, true]) for (const entries of [false, true]) {
             row.version === 7 ? 0 : op === 'call' ? slot : 0], row.version ?? 9);
           want.set(packet, 100); exit(want, row.status === 1 ? 5 : row.status + 8, 0, 6);
           want.writeUInt32LE(row.detail, 80);
-          if (row.status === 1) {want.writeUInt32LE(row.address, 84); want.writeUInt32LE(row.access, 88); want.writeUInt32LE(slot, 92);}
+          if (row.status === 1) {const fault = {errorCode: row.detail === 1 ? 6 : 7, address: row.address, access: 2, length: slot}; want.set(pageFaultPacket(fault), 100); want.set(pageFaultExit({retired: 0, ...fault}), 56);}
         }
         h.observe(c, `${op}: ${row.label}`, {input, want, helpers: [expectedCall(c, material, name, op, true, offset, returned, regs[4])
-          ].map(helperCall => ({...helperCall, status: row.hostStatus ?? 0}))});
+          ].map(helperCall => ({...helperCall, status: row.hostStatus ?? (row.status === 1 ? 23 : 0)}))});
       }
     } else h.skip(c, `gate ${op} fault execution`, `gate ${op} fault capture`);
     h.host(c, 'close');

@@ -12,7 +12,7 @@ const own = 'engine/tests/cpu/control/hints/prefetch/';
 const paths = [
   'engine/src/cpu/x86/capabilities.rs', 'engine/src/cpu/x86/capabilities/native.rs',
   'engine/src/cpu/x86/environment.rs', 'engine/src/cpu/x86/decode/decoder.rs', 'engine/src/cpu/x86/decode/instruction.rs',
-  'engine/src/cpu/x86/decode/profile.rs', 'engine/src/cpu/x86/decode/families.rs', 'engine/src/cpu/x86/decode/lower.rs', 'engine/src/cpu/x86/decode/families.rs',
+  'engine/src/cpu/x86/decode/profile.rs', 'engine/src/cpu/x86/decode/families.rs', 'engine/src/cpu/x86/decode/lower.rs', 
   'engine/src/cpu/x86/decode/execution_faults.rs', 'engine/src/cpu/dbt/wasm/emitter/mod.rs', 'engine/src/cpu/dbt/wasm/emitter/module.rs', 'engine/src/cpu/dbt/wasm/emitter/body.rs', 'engine/src/cpu/dbt/wasm/requirements.rs', 'engine/src/cpu/dbt/wasm/imports/wiring.rs',
   'engine/src/cpu/dbt/wasm/abi.rs', 'engine/src/cpu/dbt/wasm/code_fetch.rs',
   'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/mod.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/arithmetic.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/moves.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/exchange.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/predicates.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/shifts.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/control.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/extended.rs', 'engine/src/process/execution/stopped.rs',
@@ -156,11 +156,11 @@ for (const resident of [false, true]) for (const entries of [false, true]) {
     const c = open(resident, entries, 'absent-WT1 alias/final-byte fetch repair');
     h.upload(c, target, code.subarray(0, -1)); bootstrap(c, target);
     strict(c, 'missing final byte prevents alias strict classification', target, code.length, 10);
-    stopped(c, 'missing final byte prevents alias execution preparation', 10);
+    const fetchMaterial = h.fetchFault(c, 'missing final byte prevents alias execution preparation', {pc: target, length: code.length, address: 0x2000, errorCode: 20});
     h.host(c, 'map', [0x2000, 1, 7]); c.pages.push(0x2000); c.pages.sort((a, b) => a - b);
     h.upload(c, 0x2000, Buffer.concat([code.subarray(-1), bytes('ebfe')]));
-    h.host(c, 'protect', [0x2000, 1, 1]); stopped(c, 'READ without EXECUTE cannot classify alias', 10);
-    h.host(c, 'protect', [0x2000, 1, 7]); const material = stopped(c, 'full executable repair admits exact alias');
+    h.host(c, 'protect', [0x2000, 1, 1]); h.fetchFault(c, 'READ without EXECUTE cannot classify alias', {pc: target, length: code.length, address: 0x2000, errorCode: 21, material: fetchMaterial});
+    h.host(c, 'protect', [0x2000, 1, 7]); h.reachNeedCode(c); const material = stopped(c, 'full executable repair admits exact alias');
     const input = seed(target, {flags: FLAGS | RF | TF});
     invoke(c, 'repaired alias retires without access to absolute unmapped operand', material,
       input, expected(input, 16, 1, target + code.length), {budget: 2}); h.host(c, 'close');
@@ -207,11 +207,11 @@ for (const resident of [false, true]) for (const entries of [false, true]) {
       const c = open(resident, entries, `${family.name}/final-byte fetch repair`);
       h.upload(c, target, code.subarray(0, -1)); bootstrap(c, target);
       strict(c, 'missing final byte prevents strict classification', target, code.length, 10);
-      stopped(c, 'missing final byte prevents execution preparation', 10);
+      const fetchMaterial = h.fetchFault(c, 'missing final byte prevents execution preparation', {pc: target, length: code.length, address: 0x2000, errorCode: 20});
       h.host(c, 'map', [0x2000, 1, 7]); c.pages.push(0x2000); c.pages.sort((a, b) => a - b);
       h.upload(c, 0x2000, Buffer.concat([code.subarray(-1), bytes('ebfe')]));
-      h.host(c, 'protect', [0x2000, 1, 1]); stopped(c, 'READ without EXECUTE cannot classify hint', 10);
-      h.host(c, 'protect', [0x2000, 1, 7]); const material = stopped(c, 'full executable repair admits exact hint');
+      h.host(c, 'protect', [0x2000, 1, 1]); h.fetchFault(c, 'READ without EXECUTE cannot classify hint', {pc: target, length: code.length, address: 0x2000, errorCode: 21, material: fetchMaterial});
+      h.host(c, 'protect', [0x2000, 1, 7]); h.reachNeedCode(c); const material = stopped(c, 'full executable repair admits exact hint');
       const input = seed(target, {flags: FLAGS | RF | TF});
       invoke(c, 'repaired hint retires with no access to absolute unmapped operand', material,
         input, expected(input, 16, 1, target + code.length), {budget: 2}); h.host(c, 'close');
@@ -230,7 +230,7 @@ for (const resident of [false, true]) for (const entries of [false, true]) {
     const queries = [
       {leaf: 0, subleaf: 0, output: [13, 0x676e6952, 0x20656e69, 0x676e4533]},
       {leaf: 7, subleaf: 0, output: [0, 0x128, 0x400000, 0]},
-      {leaf: 0x80000001, subleaf: 0xffffffff, output: [0, 0, 0x120, 0x08000000]},
+      {leaf: 0x80000001, subleaf: 0xffffffff, output: [0, 0, 0x120, 0x08100000]},
     ];
     function query(phase) {
       // resident units retain distinct entry ownership across the two observations.

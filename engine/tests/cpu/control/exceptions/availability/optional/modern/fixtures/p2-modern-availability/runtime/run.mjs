@@ -93,21 +93,28 @@ for (const resident of [false, true]) for (const entries of [false, true]) {
     const code = bytes('c4e379dec100'), target = 0x1ffb, c = open(resident, entries, 'SM3 final immediate repair');
     h.upload(c, target, code.subarray(0, -1)); bootstrap(c, target);
     strict(c, 'strict final-immediate fetch remains a neutral refusal', target, code.length, 10);
-    stopped(c, 'missing immediate cannot classify absence', 10);
+    const fetchMaterial = h.fetchFault(c, 'missing immediate cannot classify absence', {pc: target, length: code.length, address: 0x2000, errorCode: 20});
     h.host(c, 'map', [0x2000, 1, 7]); c.pages.push(0x2000); c.pages.sort((a, b) => a - b);
     h.upload(c, 0x2000, code.subarray(-1)); h.host(c, 'protect', [0x2000, 1, 1]);
-    stopped(c, 'READ without EXECUTE still cannot classify SM3', 10);
-    h.host(c, 'protect', [0x2000, 1, 7]); const material = stopped(c, 'full executable immediate selects absence UD');
+    h.fetchFault(c, 'READ without EXECUTE still cannot classify SM3', {pc: target, length: code.length, address: 0x2000, errorCode: 21, material: fetchMaterial});
+    h.host(c, 'protect', [0x2000, 1, 7]); h.reachNeedCode(c); const material = stopped(c, 'full executable immediate selects absence UD');
     const input = seed(target); invoke(c, 'complete SM3 faults before vector, flags or operand effects', material,
       input, expected(input, 20, 0), {budget: 2}); h.host(c, 'close');
   }
   for (const row of [
     {hex: 'f2f20f38fc08', label: 'duplicate RAO mandatory prefix remains refused'},
-    {hex: 'cd80', label: 'unselected INT80 remains refused'},
+    {hex: 'cd80', label: 'INT80 precise denied application vector'},
     {hex: 'f0c4e27950c1', label: 'invalid LOCK VNNI remains decoder UD', invalid: true},
   ]) {
     const code = bytes(row.hex), target = 0x1100, c = open(resident, entries, row.label);
     h.upload(c, target, code); bootstrap(c, target);
+    if (row.hex === 'cd80') {
+      const material = strict(c, 'original INT80 bytes bind the application interrupt instruction', target, code.length, 0);
+      const input = seed(target), want = expected(input, 11, 0); want.set(record('R3EX', 40, [11, 0, 0x402, 0, 0, 0], 6), 56);
+      invoke(c, 'INT80 retains precise GP(IDT vector80), original PC and all operands', material, input, want, {budget: 2});
+      h.host(c, 'close'); continue;
+    }
+
     strict(c, 'strict prefix or neighbor refusal retained', target, code.length, 10);
     const material = stopped(c, row.label, row.invalid ? 0 : 10);
     if (row.invalid) {const input = seed(target); invoke(c, 'invalid LOCK keeps existing UD outcome', material,
@@ -127,9 +134,9 @@ for (const resident of [false, true]) for (const entries of [false, true]) {
       input, want, {budget: 1, helpers: [{name: helper, args, status: 0}]}); h.host(c, 'close');
   }
 }
-assert.equal(contexts, 64); assert.equal(planned, 116); assert.deepEqual(pins(), sourcePins);
+assert.equal(contexts, 64); assert.equal(planned, 120); assert.deepEqual(pins(), sourcePins);
 writeFileSync(join(output, 'modern-counts.json'), JSON.stringify({contexts, planned, invoked, selectedTags: selected.map(row => row.tag),
-  compileObservationsPlanned: 192, totalRowsPlanned: 308, sourcePins}, null, 2) + '\n');
+  originalCompileObservationPlan: 192, originalRowPlan: 308, sourcePins}, null, 2) + '\n');
 h.finish([
   'exact nine primary-qualified absent feature tags only, with all64 mode32 Codes selected by source-local tests and metadata census',
   'four real replacement/resident by extent/entry profiles; literal full4796 arena, every mapped RAM page, real guard/helper packets and retirement',

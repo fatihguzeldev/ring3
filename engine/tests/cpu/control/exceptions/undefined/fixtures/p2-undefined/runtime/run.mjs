@@ -66,7 +66,7 @@ function compile(c, row) {
     generatedImports({resident: c.resident, helpers: []}).map(item => `${item.module}:${item.name}:${item.kind}`).sort(), `${row.name}: no operand helper or segment import`);
   assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
   let guards = 0;
-  const ring3 = {[guard]: (...args) => {guards++; return c.api[guard](...args);}};
+  const ring3 = {finish_exception_detection: c.api.finish_exception_detection, [guard]: (...args) => {guards++; return c.api[guard](...args);}};
   return {run: new WebAssembly.Instance(module, {env: {memory: c.memory}, ring3}).exports.run, pc, guards: () => guards};
 }
 function ram(c) {

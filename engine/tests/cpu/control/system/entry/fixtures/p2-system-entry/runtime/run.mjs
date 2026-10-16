@@ -109,7 +109,7 @@ for (const resident of [false, true]) for (const entries of [false, true]) for (
         }
         calls.push(finish(index + 1, 24, form.detail, original, site));
       }
-      h.observe(c, label, {input, want, material, budget: options.budget ?? 1, helpers: calls});
+      h.observe(c, label, {input, want, material, budget: options.budget ?? 1, helpers: calls, consumeEvent: false});
       if (!stopped && !denied) {
         handoff(c, label, form.vector, original, !checkedChangedContext, site); checkedChangedContext = true;
       }

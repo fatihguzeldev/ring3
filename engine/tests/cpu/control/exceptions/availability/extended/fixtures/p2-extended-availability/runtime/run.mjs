@@ -97,11 +97,11 @@ for (const resident of [false, true]) for (const entries of [false, true]) {
     const c = open(resident, entries, `${row.code} final-byte repair`);
     h.upload(c, target, code.subarray(0, -1)); bootstrap(c, target);
     strict(c, 'incomplete exact Code strict preparation refuses neutrally', target, code.length, 10);
-    stopped(c, 'missing final byte prevents absence classification', 10);
+    const fetchMaterial = h.fetchFault(c, 'missing final byte prevents absence classification', {pc: target, length: code.length, address: 0x2000, errorCode: 20});
     h.host(c, 'map', [0x2000, 1, 7]); c.pages.push(0x2000); c.pages.sort((a, b) => a - b);
     h.upload(c, 0x2000, Buffer.concat([code.subarray(-1), bytes('ebfe')]));
-    h.host(c, 'protect', [0x2000, 1, 1]); stopped(c, 'READ without EXECUTE still prevents absence classification', 10);
-    h.host(c, 'protect', [0x2000, 1, 7]); const material = stopped(c, 'full executable repair captures exact UD');
+    h.host(c, 'protect', [0x2000, 1, 1]); h.fetchFault(c, 'READ without EXECUTE still prevents absence classification', {pc: target, length: code.length, address: 0x2000, errorCode: 21, material: fetchMaterial});
+    h.host(c, 'protect', [0x2000, 1, 7]); h.reachNeedCode(c); const material = stopped(c, 'full executable repair captures exact UD');
     const input = seed(target); invoke(c, 'repaired Code faults without touching any operand', material,
       input, expected(input, 20, 0), {budget: 2}); h.host(c, 'close');
   }
@@ -140,7 +140,7 @@ for (const resident of [false, true]) for (const entries of [false, true]) {
 assert.equal(planned, 128, 'finite planned module invocations across four profiles');
 assert.deepEqual(pins(), sourcePins);
 writeFileSync(join(output, 'extended-counts.json'), JSON.stringify({planned, invoked, exactCodes: exact.map(row => row.code),
-  contextsPlanned: 64, compileObservationsPlanned: 176, totalRowsPlanned: 304, sourcePins}, null, 2) + '\n');
+  contextsPlanned: 64, originalCompileObservationPlan: 176, originalRowPlan: 304, sourcePins}, null, 2) + '\n');
 h.finish([
   'exact six-Code absence cut only: two supervisor XSAVE forms and four VEX256 VAES forms; no facility activated',
   'four replacement/resident by extent/entry profiles use real guard/helper exports and independent full4796 arena/every mapped RAM page oracles',

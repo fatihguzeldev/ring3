@@ -107,11 +107,11 @@ for (const resident of [false, true]) for (const entries of [false, true]) {
     const code = bytes(row.hex), target = 0x2000 - code.length + 1, c = open(resident, entries, row.code + ' fullfetch');
     h.upload(c, target, code.subarray(0, -1)); bootstrap(c, target);
     h.compile(c, 'strict fullfetch lacks final byte', [[target, code.length]], [], {expectedStatus: 10});
-    stopped(c, 'missing final byte prevents state fault classification', 10);
+    const fetchMaterial = h.fetchFault(c, 'missing final byte prevents state fault classification', {pc: target, length: code.length, address: 0x2000, errorCode: 20});
     h.host(c, 'map', [0x2000, 1, 7]); c.pages.push(0x2000); c.pages.sort((a, b) => a - b);
     h.upload(c, 0x2000, code.subarray(-1)); h.host(c, 'protect', [0x2000, 1, 1]);
-    stopped(c, 'READ without EXECUTE cannot classify state fault', 10);
-    h.host(c, 'protect', [0x2000, 1, 7]);
+    h.fetchFault(c, 'READ without EXECUTE cannot classify state fault', {pc: target, length: code.length, address: 0x2000, errorCode: 21, material: fetchMaterial});
+    h.host(c, 'protect', [0x2000, 1, 7]); h.reachNeedCode(c);
     const material = stopped(c, 'executable final-byte repair captures real UD'), input = seed(target);
     invoke(c, `${row.code}: complete executable instruction selects UD`, material, input, expected(input, 20, 0), {budget: 2});
     h.host(c, 'close');

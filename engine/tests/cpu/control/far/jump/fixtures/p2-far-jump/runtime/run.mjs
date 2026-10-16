@@ -1,3 +1,4 @@
+import {consumeCpuEvent} from '../../../../../../../support/wasm/events.mjs';
 import {attachDetectionApi, generatedImports} from '../../../../../../../support/wasm/binding.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
@@ -13,7 +14,7 @@ const [enginePath, output, root, mode] = process.argv.slice(2), engine = readEng
 const PC = 0x1000, TARGET = 0x2000, POINTER = 0x5010, SEG = 4524, KEY_HIGH = 0x464152;
 const counts = {contexts: 0, modules: 0, runs: 0, success: 0, faults: 0, refusals: 0, controls: 0};
 const observations = [];
-const sources = [
+const sources = ['engine/tests/support/wasm/events.mjs', 
   'engine/tests/support/wasm/binding.mjs',
   "engine/src/abi/wasm/exports/calls.rs",
   "engine/src/abi/wasm/exports/execution.rs",
@@ -257,6 +258,7 @@ function execute(c, label, expected, {address = POINTER, sourceSegment, logical 
   const expectedCalls = !helper ? 0 : faultRead ? 1 : c.source === 'immediate' ? 1 : 2;
   assert.equal(c.calls.filter(([name]) => !name.startsWith('guard') && name !== 'finish_exception_detection').length, expectedCalls, `${label}: exact helper schedule`);
   if (helper && c.source !== 'immediate') assert.deepEqual(c.calls.find(([name]) => name === 'cpu_read')[1], [address, c.word ? 4 : 6, 1], `${label}: exact pointer width/alignment`);
+  consumeCpuEvent(c, ARENA_SIZE);
   counts.runs++; if (success) counts.success++; else if (expected.host && helper) counts.refusals++; else if (reason >= 5) counts.faults++; else counts.controls++;
   observations.push({label, reason, retired, detail, calls: c.calls.filter(([name]) => !name.startsWith('guard') && name !== 'finish_exception_detection').map(([name]) => name)});
 }

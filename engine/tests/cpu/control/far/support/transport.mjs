@@ -1,3 +1,4 @@
+import {consumeCpuEvent} from '../../../../support/wasm/events.mjs';
 import {attachDetectionApi, generatedImports} from '../../../../support/wasm/binding.mjs';
 import assert from 'node:assert/strict';
 import {readFileSync,writeFileSync} from 'node:fs';
@@ -141,11 +142,12 @@ export function run(c,label,input,want,ram,{budget=1,helpers,argumentsList}={}){
  const actual=c.calls.filter(([name])=>!name.startsWith('guard')&&name!=='finish_exception_detection');
  assert.deepEqual(actual.map(([name])=>name),helpers,`${label}: exact helper schedule`);
  if(argumentsList)assert.deepEqual(actual.map(([,args])=>args.map(value=>value>>>0)),argumentsList.map(args=>args.map(value=>value>>>0)),`${label}: exact helper arguments`);
+ consumeCpuEvent(c, ARENA_SIZE);
  counts.runs++;const reason=want.readUInt32LE(72),retired=want.readUInt32LE(76);
  if(retired)counts.success++;else if(reason===7)counts.refusals++;else if(reason>=5)counts.faults++;else counts.controls++;
  observations.push({label,reason,retired,helpers});
 }
 export function exit(want,reason,retired=0,detail=0,address=0,access=0,length=0){want.set(packet('R3EX',40,[reason,retired,detail,address,access,length],reason>=16?7:6),56);}
 export function publishCode(want,raw,selector,target){const state=decodeSegments(want.subarray(SEG));state.selectors[1]=(selector&0xfffc)|3;state.caches[1]=cache(raw);state.bases[1]=raw.base;publishSegments(want,state);want.writeUInt32LE(target>>>0,48);}
-export function pins(root,paths){assert.equal(new Set(paths).size,paths.length,'no duplicate literal source pins');return Object.fromEntries(paths.map(path=>[path,createHash('sha256').update(readFileSync(join(root,path))).digest('hex')]));}
+export function pins(root,paths){const sources=[...paths,'engine/tests/support/wasm/events.mjs'];assert.equal(new Set(sources).size,sources.length,'no duplicate literal source pins');return Object.fromEntries(sources.map(path=>[path,createHash('sha256').update(readFileSync(join(root,path))).digest('hex')]));}
 export function finish(output,engine,sourcePins,limits){writeFileSync(join(output,'result.json'),JSON.stringify({status:'ok',engine_sha256:engine.sha256,source_pins:sourcePins,counts,limits},null,2)+'\n');writeFileSync(join(output,'observations.json'),JSON.stringify(observations,null,2)+'\n');console.log(JSON.stringify({status:'ok',...counts,output}));}

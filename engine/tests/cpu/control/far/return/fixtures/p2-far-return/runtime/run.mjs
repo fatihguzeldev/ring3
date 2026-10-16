@@ -1,8 +1,10 @@
+import {pageFaultExit, pageFaultPacket} from '../../../../../../../support/wasm/page-fault.mjs';
 import assert from 'node:assert/strict';
 import {readEngine,PC,TARGET,POINTER,SEG,STACK,counts,observations,words,packet,arena,put,host,upload,configure,map,snapshotRAM,open,descriptor,cache,decodeSegments,compile,seed,run,exit,publishCode,pins,finish} from '../../../../support/transport.mjs';
 assert.ok(process.env.RING3_ENGINE_SHA256, 'select an explicit engine SHA-256');
 const [enginePath,output,root]=process.argv.slice(2),engine=readEngine(enginePath);
 const sources=[
+  'engine/tests/support/wasm/page-fault.mjs',
   "engine/src/cpu/x86/mod.rs",
   "engine/src/cpu/x86/segments.rs",
   "engine/src/process/memory/address_space.rs",
@@ -15,7 +17,7 @@ const sources=[
   "engine/src/cpu/x86/segments/cache.rs",
   "engine/src/cpu/x86/decode/far.rs",
   "engine/src/cpu/x86/decode/profile.rs", "engine/src/cpu/x86/decode/families.rs",
-  "engine/src/cpu/x86/decode/lower.rs", "engine/src/cpu/x86/decode/families.rs",
+  "engine/src/cpu/x86/decode/lower.rs", 
   "engine/src/cpu/x86/ir.rs",
   "engine/src/cpu/dbt/region.rs",
   "engine/src/cpu/dbt/wasm/instructions/far.rs",
@@ -74,7 +76,7 @@ function proof(c,label,{raw=descriptor(),selector=0x43,target=0xabcd2345,esp=STA
    if(readFault?.index===index)break;
    want.set(data,140);
   }
-  if(readFault){want.set(packet('R3MH',40,[1,0,readFault.detail,readFault.address,1,slot],7),100);exit(want,5,0,readFault.detail,readFault.address,1,slot);}
+  if(readFault){const fault={errorCode:readFault.detail===1?4:5,address:readFault.address,access:1,length:slot};want.set(pageFaultPacket(fault),100);want.set(pageFaultExit({retired:0,...fault}),56);}
   else {
    helpers.push(c.helper);args.push([...c.binding,ip,selector,Number(c.word)]);
    if(reply){want.set(reply.packet,100);exit(want,reply.reason??7,0,reply.detail??2);}

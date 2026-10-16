@@ -11,7 +11,7 @@ const h = await harness(enginePath, output, root);
 const own = 'engine/tests/cpu/control/exceptions/availability/optional/';
 const paths = ['engine/src/cpu/x86/capabilities.rs', 'engine/src/cpu/x86/decode/mpx.rs',
   'engine/src/cpu/x86/decode/mpx/tests.rs', 'engine/src/cpu/x86/decode/profile.rs', 'engine/src/cpu/x86/decode/families.rs',
-  'engine/src/cpu/x86/decode/lower.rs', 'engine/src/cpu/x86/decode/families.rs', 'engine/src/cpu/x86/decode/decoder.rs', 'engine/src/cpu/x86/decode/instruction.rs',
+  'engine/src/cpu/x86/decode/lower.rs',  'engine/src/cpu/x86/decode/decoder.rs', 'engine/src/cpu/x86/decode/instruction.rs',
   'engine/src/cpu/dbt/wasm/code_fetch/hoist.rs', 'engine/src/cpu/dbt/wasm/abi.rs',
   own + 'wasm.rs', own + 'fixtures/p2-optional-availability/runtime/disabled-mpx.mjs', supportPath];
 const pins = () => Object.fromEntries(paths.map(path => [path, hash(readFileSync(join(root, path)))]));
@@ -101,24 +101,30 @@ for (const resident of [false, true]) for (const entries of [false, true]) {
     const target = 0x2000 - code.length + 1, c = open(resident, entries, `D${default32 ? 32 : 16} consumed displacement repair`);
     h.upload(c, target, code.subarray(0, -1)); bootstrap(c, target, default32);
     strict(c, 'missing final displacement prevents strict NOP capture', target, code.length, 10);
-    stopped(c, 'stopped capture cannot classify incomplete displacement', 10);
+    const fetchMaterial = h.fetchFault(c, 'stopped capture cannot classify incomplete displacement', {pc: target, length: code.length, address: 0x2000, errorCode: 20});
     h.host(c, 'map', [0x2000, 1, 7]); c.pages.push(0x2000); c.pages.sort((a, b) => a - b);
     h.upload(c, 0x2000, Buffer.concat([code.subarray(-1), bytes('ebfe')])); h.host(c, 'protect', [0x2000, 1, 1]);
-    stopped(c, 'READ without EXECUTE on final displacement remains neutral', 10);
-    h.host(c, 'protect', [0x2000, 1, 7]); const material = stopped(c, 'only full executable displacement repair captures NOP');
+    h.fetchFault(c, 'READ without EXECUTE on final displacement remains neutral', {pc: target, length: code.length, address: 0x2000, errorCode: 21, material: fetchMaterial});
+    h.host(c, 'protect', [0x2000, 1, 7]); h.reachNeedCode(c); const material = stopped(c, 'only full executable displacement repair captures NOP');
     const input = seed(target, {default32, flags: FLAGS | RF | TF});
     observe(c, 'repaired source retires one no-operand NOP at original logical PC', material,
       input, expected(input, 16, 1, target + code.length), {budget: 2}); h.host(c, 'close');
   }
   for (const row of [
     {label: 'duplicate66 host refusal', hex: '66660f1a00', default32: false},
-    {label: 'neighbor0F19 host refusal', hex: '660f19c1', default32: true},
-    {label: 'neighbor0F1C host refusal', hex: '660f1cc1', default32: false},
+    {label: 'original neighbor0F19 is a defined NOP', hex: '660f19c1', default32: true, compatible: true},
+    {label: 'original neighbor0F1C is a defined NOP', hex: '660f1cc1', default32: false, compatible: true},
     {label: 'LOCK memory MPX is existing UD', hex: 'f0660f1b00', default32: false, invalid: true},
     {label: 'LOCK memory MPX is existing UD', hex: 'f0660f1b00', default32: true, invalid: true},
   ]) {
     const code = bytes(row.hex), target = 0x1100, c = open(resident, entries, row.label);
-    h.upload(c, target, code); bootstrap(c, target, row.default32);
+    h.upload(c, target, row.compatible ? Buffer.concat([code, bytes('ebfe')]) : code); bootstrap(c, target, row.default32);
+    if (row.compatible) {
+      const material = strict(c, row.label, target, code.length + 2, 0), input = seed(target, {...row, flags: FLAGS | RF | TF});
+      observe(c, 'original neighbor bytes retire without operand access before TF', material, input, expected(input, 16, 1, target + code.length), {budget: 2});
+      h.host(c, 'close'); continue;
+    }
+
     strict(c, row.label + ': strict refusal retains existing authority', target, code.length, 10);
     const material = stopped(c, row.label + ': stopped policy remains distinct', row.invalid ? 0 : 10);
     if (row.invalid) {

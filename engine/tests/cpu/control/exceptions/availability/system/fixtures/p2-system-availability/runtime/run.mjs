@@ -112,11 +112,11 @@ for (const resident of [false, true]) for (const entries of [false, true]) {
     const code = bytes(row.hex), target = 0x2000 - code.length + 1, c = open(resident, entries, row.label);
     h.upload(c, target, code.subarray(0, -1)); bootstrap(c, target);
     strict(c, 'missing final byte remains a neutral strict fetch refusal', target, code.length, 10);
-    stopped(c, 'incomplete executable source cannot classify the selected fault', 10);
+    const fetchMaterial = h.fetchFault(c, 'incomplete executable source cannot classify the selected fault', {pc: target, length: code.length, address: 0x2000, errorCode: 20});
     h.host(c, 'map', [0x2000, 1, 7]); c.pages.push(0x2000); c.pages.sort((a, b) => a - b);
     h.upload(c, 0x2000, code.subarray(-1)); h.host(c, 'protect', [0x2000, 1, 1]);
-    stopped(c, 'READ without EXECUTE still cannot classify the final byte', 10);
-    h.host(c, 'protect', [0x2000, 1, 7]); const material = stopped(c, 'full executable repair captures the selected fault');
+    h.fetchFault(c, 'READ without EXECUTE still cannot classify the final byte', {pc: target, length: code.length, address: 0x2000, errorCode: 21, material: fetchMaterial});
+    h.host(c, 'protect', [0x2000, 1, 7]); h.reachNeedCode(c); const material = stopped(c, 'full executable repair captures the selected fault');
     const input = seed(target);
     invoke(c, `${row.label}: repair preserves UD versus GP0 and all operand state`, material, input,
       expected(input, row.reason, 0), {budget: 2}); h.host(c, 'close');
@@ -137,10 +137,10 @@ for (const resident of [false, true]) for (const entries of [false, true]) {
     h.host(c, 'close');
   }
 }
-assert.equal(contexts, 84); assert.equal(plannedCompiles, 268); assert.equal(plannedRefusals, 108);
+assert.equal(contexts, 84); assert.equal(plannedCompiles, 252); assert.equal(plannedRefusals, 92);
 assert.equal(plannedInvocations, 160); assert.deepEqual(pins(), sourcePins);
 writeFileSync(join(output, 'system-availability-counts.json'), JSON.stringify({contexts, plannedCompiles, plannedRefusals,
-  plannedInvocations, invoked, totalRowsPlanned: plannedCompiles + plannedInvocations,
+  plannedInvocations, invoked, localCompileAndInvocationRows: plannedCompiles + plannedInvocations,
   selectedCodes: selected.map(row => row.code), sourcePins}, null, 2) + '\n');
 h.finish([
   'nine original qualified protected16/32 Codes plus prior INVPCID/ENQCMD/S/HRESET and two MCOMMIT/WRMSRNS discriminators; WBNOINVD remains fallback GP0',

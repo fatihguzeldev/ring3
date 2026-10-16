@@ -12,7 +12,7 @@ const paths = ['engine/src/cpu/x86/environment.rs', 'engine/src/cpu/x86/capabili
   'engine/src/cpu/x86/decode/execution_faults.rs', 'engine/src/cpu/x86/decode/execution_faults/optional.rs',
   'engine/src/cpu/x86/decode/execution_faults/optional/amd.rs',
   'engine/src/cpu/x86/decode/execution_faults/optional/amd/tests/scalar.rs', 'engine/src/cpu/x86/decode/decoder.rs', 'engine/src/cpu/x86/decode/instruction.rs',
-  'engine/src/cpu/x86/decode/profile.rs', 'engine/src/cpu/x86/decode/families.rs', 'engine/src/cpu/x86/decode/lower.rs', 'engine/src/cpu/x86/decode/families.rs',
+  'engine/src/cpu/x86/decode/profile.rs', 'engine/src/cpu/x86/decode/families.rs', 'engine/src/cpu/x86/decode/lower.rs', 
   'engine/src/cpu/x86/decode/profile/tests/prefetch/instruction.rs',
   'engine/src/cpu/dbt/wasm/instructions/control_instructions.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/mod.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/arithmetic.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/moves.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/exchange.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/predicates.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/shifts.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/control.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/extended.rs',
   'engine/src/process/execution/stopped.rs', 'engine/tests/cpu/control/native.rs', 'engine/tests/cpu/control/wasm.rs',
@@ -104,12 +104,12 @@ for (const resident of [false, true]) for (const entries of [false, true]) {
     const c = open(resident, entries, row.label);
     h.upload(c, target, code.subarray(0, -1)); bootstrap(c, target);
     strict(c, 'missing final instruction byte remains strict fetch refusal', target, code.length, 10);
-    stopped(c, 'no unavailable or NOP classification before complete executable fetch', 10);
+    const fetchMaterial = h.fetchFault(c, 'no unavailable or NOP classification before complete executable fetch', {pc: target, length: code.length, address: 0x2000, errorCode: 20});
     h.host(c, 'map', [0x2000, 1, 7]); c.pages.push(0x2000); c.pages.sort((a, b) => a - b);
     h.upload(c, 0x2000, Buffer.concat([code.subarray(-1), row.nop ? bytes('ebfe') : Buffer.alloc(0)]));
     h.host(c, 'protect', [0x2000, 1, 1]);
-    stopped(c, 'READ-only final byte cannot be consumed as executable source', 10);
-    h.host(c, 'protect', [0x2000, 1, 7]);
+    h.fetchFault(c, 'READ-only final byte cannot be consumed as executable source', {pc: target, length: code.length, address: 0x2000, errorCode: 21, material: fetchMaterial});
+    h.host(c, 'protect', [0x2000, 1, 7]); h.reachNeedCode(c);
     const material = stopped(c, 'exact executable repair selects only the declared UD/NOP rule'), input = seed(target);
     invoke(c, 'complete source repair preserves all operands, AC and RAM', material, input,
       expected(input, row.nop ? 16 : 20, row.nop ? 1 : 0, target + (row.nop ? code.length : 0)), {budget: 2});
