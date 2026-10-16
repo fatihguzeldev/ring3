@@ -82,6 +82,7 @@ struct Delivery32 {
     handlers: Vec<HandlerId32>,
     cursor: usize,
     chain: u32,
+    nested_boundary: Option<u32>,
     visited: Vec<u32>,
     stack_low: u32,
     stack_high: u32,

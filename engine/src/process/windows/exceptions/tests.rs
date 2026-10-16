@@ -232,3 +232,6 @@ mod review;
 
 #[path = "tests/context.rs"]
 mod context;
+
+#[path = "tests/dispatch/mod.rs"]
+mod dispatch;

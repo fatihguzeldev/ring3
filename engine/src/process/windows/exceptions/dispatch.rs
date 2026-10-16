@@ -93,6 +93,10 @@ impl EngineInstance {
                     count += 1;
                 }
                 let record_bytes = delivery.record.bytes();
+                if initial.is_none() {
+                    spans[count] = (GuestAddress(delivery.record_address), &record_bytes);
+                    count += 1;
+                }
                 if initial.is_some()
                     && let Some(address) = delivery.record_output
                 {
@@ -187,6 +191,11 @@ impl EngineInstance {
         let active = delivery
             .active
             .ok_or(HostError::Exception(ExceptionError32::Stale))?;
+        delivery.record = self.read_exception_record(delivery.record_address)?;
+        if delivery.nested_boundary == Some(active.establisher) {
+            delivery.record.flags &= !0x10;
+            delivery.nested_boundary = None;
+        }
         if delivery.filter_return {
             let mut state = delivery.original;
             state.state.registers[0] = result;
@@ -207,7 +216,17 @@ impl EngineInstance {
             },
             ExceptionPhase32::Structured => match result {
                 0 => true,
-                1 | 2 => false,
+                1 => false,
+                2 => {
+                    let (boundary, _) = self.exception_dispatcher_registration(delivery, active)?;
+                    delivery.nested_boundary = Some(
+                        delivery
+                            .nested_boundary
+                            .map_or(boundary, |old| old.max(boundary)),
+                    );
+                    delivery.record.flags |= 0x10;
+                    false
+                }
                 _ => return Err(HostError::Exception(ExceptionError32::InvalidDisposition)),
             },
             ExceptionPhase32::Continue => match result {
@@ -219,10 +238,12 @@ impl EngineInstance {
                 _ => return Err(HostError::Exception(ExceptionError32::InvalidDisposition)),
             },
             ExceptionPhase32::Unwind => {
-                if result != 1 {
-                    return Err(HostError::Exception(ExceptionError32::InvalidDisposition));
-                }
-                delivery.chain_write = Some(active.next);
+                let next = match result {
+                    1 => active.next,
+                    3 => self.exception_dispatcher_registration(delivery, active)?.1,
+                    _ => return Err(HostError::Exception(ExceptionError32::InvalidDisposition)),
+                };
+                delivery.chain_write = Some(next);
                 false
             }
             ExceptionPhase32::Unhandled | ExceptionPhase32::Resumed => {
@@ -246,7 +267,7 @@ impl EngineInstance {
             ExceptionPhase32::Structured | ExceptionPhase32::Unwind
         ) {
             delivery.visited.push(active.establisher);
-            delivery.chain = active.next;
+            delivery.chain = delivery.chain_write.unwrap_or(active.next);
         } else if delivery.phase == ExceptionPhase32::Filter {
             delivery.phase = ExceptionPhase32::Unhandled;
         }

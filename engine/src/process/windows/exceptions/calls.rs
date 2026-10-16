@@ -207,15 +207,17 @@ impl EngineInstance {
         }
         Ok(true)
     }
-    fn read_exception_record(&self, address: u32) -> Result<ExceptionRecord32, HostError> {
+    pub(super) fn read_exception_record(
+        &self,
+        address: u32,
+    ) -> Result<ExceptionRecord32, HostError> {
         let mut bytes = [0; 80];
         self.memory()?
             .read(GuestAddress(address), &mut bytes)
             .map_err(HostError::Memory)?;
-        let words: Vec<u32> = bytes
-            .chunks_exact(4)
-            .map(|bytes| u32::from_le_bytes(bytes.try_into().unwrap()))
-            .collect();
+        let words: [u32; 20] = std::array::from_fn(|index| {
+            u32::from_le_bytes(bytes[index * 4..index * 4 + 4].try_into().unwrap())
+        });
         let count = words[4];
         if count > 15 {
             return Err(HostError::Exception(ExceptionError32::InvalidParameter));

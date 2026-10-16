@@ -251,6 +251,7 @@ impl EngineInstance {
             handlers,
             cursor: 0,
             chain,
+            nested_boundary: None,
             visited: Vec::new(),
             stack_low,
             stack_high,
@@ -389,6 +390,8 @@ impl EngineInstance {
             delivery.visited.len(),
             delivery.active,
             delivery.chain_write,
+            delivery.record,
+            delivery.nested_boundary,
         );
         let mut delivery = self.exceptions.deliveries.remove(index);
         let outcome = self.complete_exception_handler(&mut delivery, result);
@@ -406,6 +409,8 @@ impl EngineInstance {
                     _,
                     delivery.active,
                     delivery.chain_write,
+                    delivery.record,
+                    delivery.nested_boundary,
                 ) = before;
                 delivery.visited.truncate(before.3);
                 delivery.handlers = handlers;
