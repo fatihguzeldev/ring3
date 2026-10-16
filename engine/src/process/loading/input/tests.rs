@@ -527,7 +527,7 @@ fn cleanup_preserves_current_stale_code_owners_and_generation_after_unmap() {
     let current_bytes = engine.resident_bytes(current.get()).unwrap().to_vec();
     let current_pointer = engine.resident_bytes(current.get()).unwrap().as_ptr();
     let registry = format!("{:?}", engine.resident);
-    let installations = engine.resident_installations;
+    let installations = engine.resident_installations.clone();
     let stale_error = Err(HostError::Resident(RegistryError::CodeInvalidated));
     assert_eq!(engine.guard_resident(KEY, stale.get()), stale_error);
     assert_eq!(engine.begin_image_input(0), Err(HostError::InvalidRequest));
@@ -806,11 +806,11 @@ fn v5_refusal_preserves_exact_input_allocation_identity_and_all_existing_owners(
         assert_eq!(staged.as_ref().unwrap().total, 1536);
         assert_eq!(staged.as_ref().unwrap().bytes, bytes[..length]);
         assert!(staged.as_ref().unwrap().capacity >= 1536);
-        assert!(engine.virtual_allocations.is_empty());
+        assert!(engine.windows_memory.is_empty());
         assert_eq!(engine.load_pe32_linked_v5_input_at(BASE, GATE), Err(error));
         assert_eq!(input(&engine), staged);
         assert_eq!(owners(&engine), before);
-        assert!(engine.virtual_allocations.is_empty());
+        assert!(engine.windows_memory.is_empty());
         if mode == 6 {
             let mut word = [0; 4];
             engine
@@ -823,7 +823,7 @@ fn v5_refusal_preserves_exact_input_allocation_identity_and_all_existing_owners(
         engine.abort_image_input().unwrap();
         assert!(engine.image_input.is_none());
         assert_eq!(owners(&engine), before);
-        assert!(engine.virtual_allocations.is_empty());
+        assert!(engine.windows_memory.is_empty());
     }
 }
 
@@ -869,7 +869,7 @@ fn v5_success_after_old_profile_and_gate_refusals_consumes_only_input_and_publis
     );
     assert_eq!(engine.memory().unwrap().mapped_pages(), 4);
     assert_eq!(engine.image, Some(linked.image));
-    assert!(engine.virtual_allocations.is_empty());
+    assert!(engine.windows_memory.is_empty());
     let mut data = bytes[0x400..0x600].to_vec();
     put32(&mut data, 0x80, GATE + 80);
     let mut actual_data = vec![0; 512];

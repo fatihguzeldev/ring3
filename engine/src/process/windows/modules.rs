@@ -16,12 +16,21 @@ pub(in crate::process) struct ModuleWindowsReply {
     owner: PendingOwner,
     token: u32,
     initializer_token: Option<u64>,
-    operation: ModuleOperation32,
+    operation: Option<ModuleOperation32>,
+}
+impl ModuleWindowsReply {
+    pub(in crate::process) fn waiting_loader(&self)->bool {self.operation.is_none()}
+    pub(in crate::process) fn owner(&self) -> PendingOwner {
+        self.owner
+    }
 }
 
 impl EngineInstance {
     pub fn register_kernel32_module(&mut self, preferred_base: u32) -> Result<(), HostError> {
-        self.register_system_module(crate::windows::kernel32_module(preferred_base))
+        let kernel=crate::windows::kernel32_module(preferred_base);
+        if self.has_registered_module("ntdll.dll") {self.register_system_module(kernel)} else {
+            self.register_system_module_group(vec![kernel,crate::windows::exceptions::ntdll_module(0x77f00000)])
+        }
     }
 
     pub(super) fn complete_module_api(
@@ -51,8 +60,43 @@ impl EngineInstance {
             self.check_windows_thread_write()?;
         }
         let args = frame.arguments();
+        if matches!(
+            api,
+            LoadLibraryA
+                | LoadLibraryW
+                | LoadLibraryExA
+                | LoadLibraryExW
+                | GetProcAddress
+                | FreeLibrary
+                | ExitProcess
+        ) && self
+            .loader_initialization_owner()
+            .is_some_and(|owner| Some(owner) != self.current_windows_thread_id().ok())
+        {
+            let request = match self.prepare_windows_module_request(api, frame) {
+                Ok(request) => request,
+                Err(error) => {
+                    let code = module_api_error(error)?;
+                    self.complete_module_api_return(frame, 0, Some(code))?;
+                    return Ok(true);
+                }
+            };
+            let pending = self
+                .pending_call
+                .as_ref()
+                .ok_or(HostError::Infrastructure)?;
+            let reply = ModuleWindowsReply {
+                owner: pending.owner,
+                token: pending.token,
+                initializer_token: None,
+                operation: None,
+            };
+            self.park_module_request(request)?;
+            self.module_windows_reply = Some(reply);
+            return Ok(true);
+        }
         let result = (|| match api {
-            LoadLibraryExA | LoadLibraryExW if args[1] != 0 || args[2] != 0 => {
+            LoadLibraryExA | LoadLibraryExW if args[1] != 0 => {
                 Err(HostError::Module(ModuleError32::InvalidRequest))
             }
             LoadLibraryA | LoadLibraryW | LoadLibraryExA | LoadLibraryExW => {
@@ -61,7 +105,9 @@ impl EngineInstance {
                     matches!(api, LoadLibraryW | LoadLibraryExW),
                     255,
                 )?;
-                self.load_library_module(&name, None)
+                if matches!(api, LoadLibraryExA | LoadLibraryExW) && args[2] != 0 {
+                    self.load_resource_only_module(&name,args[2])
+                } else {self.load_library_module(&name, None)}
             }
             GetModuleHandleA | GetModuleHandleW => {
                 let name = if args[0] == 0 {
@@ -82,12 +128,15 @@ impl EngineInstance {
                 };
                 self.resolve_module_export(args[0], &symbol)
             }
-            FreeLibrary => self.free_library_module(args[0]),
+            FreeLibrary => if args[0] & 3 != 0 {self.free_resource_only_module(args[0])} else {self.free_library_module(args[0])},
             ExitProcess => self.detach_modules_for_exit(),
             _ => unreachable!(),
         })();
         match result {
-            Ok(operation) => self.complete_module_windows_operation(operation)?,
+            Ok(operation) => {
+                if api==WindowsApi32::ExitProcess {self.process_exit_owner=Some(self.threads.current_id());}
+                self.complete_module_windows_operation(operation)?
+            },
             Err(error) => {
                 if api == WindowsApi32::ExitProcess {
                     return Err(error);
@@ -126,7 +175,7 @@ impl EngineInstance {
         }
         self.guard_detection_material_change()?;
         self.publish_module_windows_reply(reply)?;
-        Ok(Some(reply.operation))
+        Ok(Some(reply.operation.ok_or(HostError::Infrastructure)?))
     }
 
     pub(super) fn retry_module_windows_call(
@@ -140,7 +189,35 @@ impl EngineInstance {
         if reply.owner != owner || reply.token != token {
             return Err(HostError::Call(CallError::InvalidToken));
         }
-        self.publish_module_windows_reply(reply)?;
+        if reply.operation.is_none() {
+            if self
+                .loader_initialization_owner()
+                .is_some_and(|owner| Some(owner) != self.current_windows_thread_id().ok())
+            {
+                return Ok(true);
+            }
+            let request = self
+                .take_module_request()
+                .ok_or(HostError::Infrastructure)?;
+            self.module_windows_reply = None;
+            let frame = self.checked_pending_call(owner, token)?.frame;
+            match self.execute_module_request(&request) {
+                Ok(operation) => {
+                    if matches!(request,crate::process::loading::modules::ModuleRequest32::Shutdown){self.process_exit_owner=Some(self.threads.current_id());}
+                    self.complete_module_windows_operation(operation)?
+                },
+                Err(error) => match module_api_error(error) {
+                    Ok(code) => self.complete_module_api_return(frame, 0, Some(code))?,
+                    Err(error) => {
+                        self.park_module_request(request)?;
+                        self.module_windows_reply = Some(reply);
+                        return Err(error);
+                    }
+                },
+            }
+        } else {
+            self.publish_module_windows_reply(reply)?;
+        }
         Ok(true)
     }
 
@@ -183,7 +260,7 @@ impl EngineInstance {
             owner: pending.owner,
             token: pending.token,
             initializer_token,
-            operation,
+            operation: Some(operation),
         };
         self.module_windows_reply = Some(reply);
         self.publish_module_windows_reply(reply)
@@ -196,7 +273,7 @@ impl EngineInstance {
             return Err(HostError::Infrastructure);
         };
         let api = WindowsApi32::from_id(id).ok_or(HostError::Infrastructure)?;
-        let operation = reply.operation;
+        let operation = reply.operation.ok_or(HostError::Call(CallError::Busy))?;
         let frame = pending.frame;
         if api == WindowsApi32::ExitProcess && operation == ModuleOperation32::Released {
             return self.publish_process_exit(frame.arguments()[0]);
@@ -224,10 +301,8 @@ impl EngineInstance {
         Ok(())
     }
 
-    pub(super) fn publish_process_exit(&mut self, code: u32) -> Result<(), HostError> {
-        if !self.finalize_file_process_exit()? {
-            return Ok(());
-        }
+    pub(in crate::process) fn publish_process_exit(&mut self, code: u32) -> Result<(), HostError> {
+        if self.pending_process_exit.is_some_and(|pending|pending!=code){return Err(HostError::Call(CallError::Busy));}
         let mut bytes = [0; EXIT_SIZE];
         encode_exit_v4(
             &ExecutionExit {
@@ -237,8 +312,30 @@ impl EngineInstance {
             &mut bytes,
         )
         .map_err(|_| HostError::Infrastructure)?;
+        let media = self.prepare_media_process_exit()?;
+        let mut bindings = self
+            .registry
+            .as_ref()
+            .map(|registry| registry.process_exit_bindings())
+            .transpose()
+            .map_err(HostError::Registry)?
+            .unwrap_or_default();
+        bindings
+            .try_reserve(media.bindings().len())
+            .map_err(|_| HostError::Infrastructure)?;
+        bindings.extend_from_slice(media.bindings());
+        if !self.finalize_file_process_exit(&bindings)? {
+            self.pending_process_exit=Some(code);self.process_exit_owner=Some(self.threads.current_id());return Ok(());
+        }
+        self.commit_media_process_exit(media);
+        if let Some(resources)=self.resources.as_mut(){resources.commit_process_exit();}
+        self.exceptions.deliveries_clear_process_exit();
+        if let Some(registry) = self.registry.as_mut() {
+            registry.commit_process_exit();
+        }
         self.arena.as_mut().get_mut()[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE].copy_from_slice(&bytes);
         self.exit_code = Some(code);
+        self.pending_process_exit=None;
         self.pending_call = None;
         self.module_windows_reply = None;
         self.callback = None;
@@ -266,5 +363,59 @@ fn module_api_error(error: HostError) -> Result<u32, HostError> {
         }),
         HostError::Memory(crate::memory::MemoryError::Fault(_)) => Ok(998),
         other => Err(other),
+    }
+}
+
+impl EngineInstance {
+    fn prepare_windows_module_request(
+        &self,
+        api: WindowsApi32,
+        frame: CallFrame32,
+    ) -> Result<crate::process::loading::modules::ModuleRequest32, HostError> {
+        use crate::process::loading::modules::ModuleRequest32;
+        use WindowsApi32::*;
+        let args = frame.arguments();
+        Ok(match api {
+            LoadLibraryA | LoadLibraryW | LoadLibraryExA | LoadLibraryExW => {
+                if matches!(api, LoadLibraryExA | LoadLibraryExW) && args[1] != 0
+                {
+                    return Err(HostError::Module(ModuleError32::InvalidRequest));
+                }
+                ModuleRequest32::Load {
+                    flags: if matches!(api,LoadLibraryExA|LoadLibraryExW){args[2]}else{0},
+                    name: self.windows_string(
+                        args[0],
+                        matches!(api, LoadLibraryW | LoadLibraryExW),
+                        255,
+                    )?,
+                }
+            }
+            GetProcAddress => ModuleRequest32::Export {
+                handle: args[0],
+                symbol: if args[1] <= u16::MAX as u32 {
+                    ImportSymbol32::Ordinal(args[1] as u16)
+                } else {
+                    ImportSymbol32::Name(self.windows_string(args[1], false, 4096)?)
+                },
+            },
+            FreeLibrary => ModuleRequest32::Free { handle: args[0] },
+            ExitProcess => ModuleRequest32::Shutdown,
+            _ => return Err(HostError::Infrastructure),
+        })
+    }
+    pub(in crate::process) fn module_loader_wait_ready(&self) -> bool {
+        self.module_windows_reply
+            .is_some_and(|reply| reply.operation.is_none())
+            && self
+                .loader_initialization_owner()
+                .is_none_or(|owner| Some(owner) == self.current_windows_thread_id().ok())
+    }
+}
+
+impl EngineInstance {
+    pub(in crate::process) fn resume_module_loader_wait(&mut self)->Result<bool,HostError> {
+        if !self.module_loader_wait_ready(){return Ok(false);}
+        let reply=self.module_windows_reply.ok_or(HostError::Infrastructure)?;
+        self.retry_module_windows_call(reply.owner,reply.token)
     }
 }

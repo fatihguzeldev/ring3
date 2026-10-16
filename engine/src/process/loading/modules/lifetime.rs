@@ -133,6 +133,8 @@ impl ModuleProcess32 {
         self.references
             .retain(|reference| !ids.contains(&reference.id));
         self.attached.retain(|id| !ids.contains(id));
+        self.thread_notifications_disabled
+            .retain(|id| !ids.contains(id));
         if let Some(thread) = self.thread.as_mut() {
             thread
                 .allocations
@@ -194,8 +196,14 @@ impl EngineInstance {
             .map_err(HostError::Module)
     }
 
+    pub fn current_teb_address(&self) -> Option<u32> {
+        self.threads
+            .current_teb()
+            .or_else(|| self.modules.thread.as_ref().map(|thread| thread.teb()))
+    }
+
     pub fn module_teb_address(&self) -> Option<u32> {
-        self.modules.thread.as_ref().map(|thread| thread.teb())
+        self.current_teb_address()
     }
 
     pub fn module_handle(&self, name: Option<&str>) -> Result<Option<u32>, HostError> {
@@ -233,6 +241,25 @@ impl EngineInstance {
             .map_err(HostError::Module)
     }
 
+    pub(in crate::process) fn loaded_windows_modules(
+        &self,
+    ) -> impl ExactSizeIterator<Item = &crate::loader::LoadedModule32> {
+        self.modules.loaded.iter()
+    }
+
+    pub(in crate::process) fn module_gate_at(&self, pc: u32) -> Option<crate::cpu::dbt::GateSpec> {
+        self.modules.loaded.gate(GuestAddress(pc)).or_else(|| {
+            self.modules
+                .thread
+                .as_ref()
+                .filter(|thread| thread.return_pc() == pc)
+                .map(|_| crate::cpu::dbt::GateSpec {
+                    entry: GuestAddress(pc),
+                    id: super::initialization::INITIALIZER_RETURN_ID,
+                })
+        })
+    }
+
     pub fn module_gates(&self) -> Result<Vec<crate::cpu::dbt::GateSpec>, HostError> {
         self.memory()?;
         let mut gates = Vec::new();
@@ -266,65 +293,32 @@ impl EngineInstance {
         })
     }
 
-    pub(in crate::process) fn file_mapping_reservations(
-        &self,
-    ) -> Result<Vec<PageRange>, HostError> {
-        let mut ranges = Vec::new();
-        ranges
-            .try_reserve_exact(
-                self.virtual_allocations.len() + self.modules.loaded.iter().count() + 3,
-            )
-            .map_err(|_| HostError::Memory(crate::memory::MemoryError::Allocation))?;
-        ranges.extend_from_slice(&self.virtual_allocations);
-        for module in self.modules.loaded.iter() {
-            ranges.push(
-                PageRange::new(
-                    crate::memory::GuestAddress(module.base()),
-                    module.image_size().div_ceil(crate::memory::PAGE_SIZE),
-                )
-                .map_err(HostError::Memory)?,
-            );
-        }
-        if let Some(image) = self.image {
-            ranges.push(
-                PageRange::new(
-                    crate::memory::GuestAddress(image.image_base),
-                    image.image_size.div_ceil(crate::memory::PAGE_SIZE),
-                )
-                .map_err(HostError::Memory)?,
-            );
-        }
-        if let Some(thread) = &self.modules.thread {
-            for (start, end) in thread.reservations() {
-                ranges.push(
-                    PageRange::new(
-                        crate::memory::GuestAddress(start as u32),
-                        ((end - start) / u64::from(crate::memory::PAGE_SIZE)) as u32,
-                    )
-                    .map_err(HostError::Memory)?,
-                );
-            }
-        }
-        Ok(ranges)
+    pub(in crate::process) fn initial_thread_reservations(&self) -> Option<[(u64, u64); 2]> {
+        self.modules
+            .thread
+            .as_ref()
+            .map(|thread| thread.reservations())
     }
-    pub(in crate::process) fn module_reservation_end(&self, range: PageRange) -> Option<u64> {
-        let start = range.first as u64 * u64::from(crate::memory::PAGE_SIZE);
-        let end = start + range.count as u64 * u64::from(crate::memory::PAGE_SIZE);
-        let mut overlapping_end = None;
-        for module in self.modules.loaded.iter() {
-            let module_start = u64::from(module.base());
-            let module_end = module_start + u64::from(module.image_size());
-            if start < module_end && module_start < end {
-                overlapping_end = Some(overlapping_end.unwrap_or(0).max(module_end));
-            }
+}
+
+impl EngineInstance {
+    pub(in crate::process) fn has_registered_module(&self, name: &str) -> bool {
+        self.modules.catalog.contains(name)
+    }
+    pub(in crate::process) fn register_system_module_group(
+        &mut self,
+        modules: Vec<SystemModule32>,
+    ) -> Result<(), HostError> {
+        self.memory()?;
+        if !self.modules.operations.is_empty()
+            || self.pending_call.is_some()
+            || self.callback.is_some()
+        {
+            return Err(HostError::Module(ModuleError32::Busy));
         }
-        if let Some(thread) = &self.modules.thread {
-            for (reserved_start, reserved_end) in thread.reservations() {
-                if start < reserved_end && reserved_start < end {
-                    overlapping_end = Some(overlapping_end.unwrap_or(0).max(reserved_end));
-                }
-            }
-        }
-        overlapping_end
+        self.modules
+            .catalog
+            .add_system_group(modules)
+            .map_err(HostError::Module)
     }
 }

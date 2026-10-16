@@ -6,7 +6,7 @@ use crate::{
 
 const TLS_POOL_BYTES: u32 = 16 * 1024 * 1024;
 
-pub(super) struct TlsAllocation {
+pub(in crate::process) struct TlsAllocation {
     pub module: ModuleId32,
     pub slot: u32,
     pub range: PageRange,
@@ -20,6 +20,9 @@ pub(super) struct InitialThreadTls {
 }
 
 impl InitialThreadTls {
+    pub fn slot_capacity(&self) -> u32 {
+        self.slots
+    }
     pub fn new(config: ModuleRuntimeConfig32, slots: u32) -> Result<Self, ModuleError32> {
         if slots == 0 {
             return Err(ModuleError32::Capacity);
@@ -203,6 +206,14 @@ impl InitialThreadTls {
         Ok((allocations, writes))
     }
 
+    pub fn allocation_bounds(&self) -> PageRange {
+        PageRange::new(
+            GuestAddress(self.config.runtime_base + (2 + self.array_pages) * PAGE_SIZE),
+            TLS_POOL_BYTES / PAGE_SIZE - 2 - self.array_pages,
+        )
+        .expect("validated TLS pool")
+    }
+
     pub fn runtime_pages(&self) -> u32 {
         2 + self.array_pages
     }
@@ -223,5 +234,13 @@ impl InitialThreadTls {
         );
         writes.sort_unstable_by_key(|write| write.address.0);
         Ok(writes)
+    }
+}
+impl crate::process::EngineInstance {
+    pub(in crate::process) fn windows_static_tls_capacity(&self) -> u32 {
+        self.modules
+            .thread
+            .as_ref()
+            .map_or(1, InitialThreadTls::slot_capacity)
     }
 }

@@ -156,6 +156,7 @@ pub(super) struct ModuleOperation {
     pub active: Option<ModuleInitializer32>,
     pub saved: SavedModuleContext,
     pub outer: Option<PendingCall>,
+    pub execution: super::callback::ParkedModuleExecution32,
     pub initial_before: Option<InitialModuleContext>,
     pub last_returned: u64,
 }

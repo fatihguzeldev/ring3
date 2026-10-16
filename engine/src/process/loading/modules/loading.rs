@@ -33,7 +33,10 @@ impl EngineInstance {
         actual_base: Option<u32>,
         config: ModuleRuntimeConfig32,
     ) -> Result<ModuleOperation32, HostError> {
-        self.image_capacity()?;
+        self.module_process_capacity()?;
+        if self.launch_input_pending() {
+            return Err(HostError::Module(ModuleError32::Busy));
+        }
         if decode_state(&self.arena()[..56]).map_err(|_| HostError::Infrastructure)?
             != State32::default()
             || !crate::process::cpu::context::ExtendedCpuState::initial()?.matches(self.arena())
@@ -66,16 +69,62 @@ impl EngineInstance {
     ) -> Result<ModuleOperation32, HostError> {
         self.memory()?;
         self.guard_detection_material_change()?;
+        let before = self.modules.loader_depth;
+        self.acquire_loader_thread()?;
+        let result = self.load_module_request_inner(name, actual_base, config);
+        if !matches!(result, Ok(ModuleOperation32::Pending(_)))
+            && self.modules.loader_depth > before
+        {
+            self.release_loader_thread();
+        }
+        result
+    }
+    fn load_module_request_inner(
+        &mut self,
+        name: &str,
+        actual_base: Option<u32>,
+        config: Option<ModuleRuntimeConfig32>,
+    ) -> Result<ModuleOperation32, HostError> {
+        self.memory()?;
+        self.guard_detection_material_change()?;
         if self.call_cancelled() {
             return Err(HostError::Call(crate::process::CallError::Cancelled));
         }
-        if self.callback.is_some() {
-            return Err(HostError::Module(ModuleError32::Busy));
+        self.check_module_execution_admission()?;
+        let mut reservations = self.guest_address_reservations()?;
+        if let Some(config) = config {
+            let slots = self
+                .modules
+                .catalog
+                .limits()
+                .modules
+                .min(self.memory()?.capacity_pages() as usize) as u32;
+            let thread = InitialThreadTls::new(config, slots).map_err(HostError::Module)?;
+            for (start, end) in thread.reservations() {
+                let range = PageRange::new(
+                    GuestAddress(start as u32),
+                    ((end - start) / u64::from(crate::memory::PAGE_SIZE)) as u32,
+                )
+                .map_err(HostError::Memory)?;
+                if self
+                    .provider_guest_arenas()
+                    .any(|old| crate::process::memory::reservations::overlaps(old, range))
+                {
+                    return Err(HostError::Module(ModuleError32::AddressConflict));
+                }
+                reservations.push(range);
+            }
         }
         let plan = self
             .modules
             .catalog
-            .plan_load(&self.modules.loaded, self.memory()?, name, actual_base)
+            .plan_load_with_reservations(
+                &self.modules.loaded,
+                self.memory()?,
+                name,
+                actual_base,
+                &reservations,
+            )
             .map_err(HostError::Module)?;
         self.install_module_plan(plan, config, LoadCompletion::Library)
     }
@@ -87,12 +136,27 @@ impl EngineInstance {
     ) -> Result<ModuleOperation32, HostError> {
         self.memory()?;
         self.guard_detection_material_change()?;
+        let before = self.modules.loader_depth;
+        self.acquire_loader_thread()?;
+        let result = self.resolve_module_export_inner(handle, symbol);
+        if !matches!(result, Ok(ModuleOperation32::Pending(_)))
+            && self.modules.loader_depth > before
+        {
+            self.release_loader_thread();
+        }
+        result
+    }
+    pub fn resolve_module_export_inner(
+        &mut self,
+        handle: u32,
+        symbol: &crate::loader::ImportSymbol32,
+    ) -> Result<ModuleOperation32, HostError> {
+        self.memory()?;
+        self.guard_detection_material_change()?;
         if self.call_cancelled() {
             return Err(HostError::Call(crate::process::CallError::Cancelled));
         }
-        if self.callback.is_some() {
-            return Err(HostError::Module(ModuleError32::Busy));
-        }
+        self.check_module_execution_admission()?;
         let id = self
             .modules
             .loaded
@@ -110,10 +174,17 @@ impl EngineInstance {
                 address: resolved.address().0,
             });
         }
+        let reservations = self.guest_address_reservations()?;
         let (plan, resolved) = self
             .modules
             .catalog
-            .plan_export_live(&self.modules.loaded, self.memory()?, id, symbol)
+            .plan_export_live_with_reservations(
+                &self.modules.loaded,
+                self.memory()?,
+                id,
+                symbol,
+                &reservations,
+            )
             .map_err(HostError::Module)?;
         self.install_module_plan(plan, None, LoadCompletion::Export(resolved.address().0))
     }
@@ -157,6 +228,8 @@ impl EngineInstance {
                 }
             };
         }
+        let startup_image_base = root.base();
+        let startup_image_name = root.identity().to_owned();
         let initial_before = initial
             .then(|| InitialModuleContext::capture(self))
             .transpose()?;
@@ -222,10 +295,93 @@ impl EngineInstance {
                 .copy_from_slice(&bases);
             thread.stage_runtime(&mut plan).map_err(HostError::Module)?;
         }
+        let prepared_startup = if initial {
+            Some(self.stage_process_startup(
+                &mut plan,
+                thread.teb(),
+                thread.reservations(),
+                startup_image_base,
+                &startup_image_name,
+            )?)
+        } else {
+            None
+        };
+        let prepared_memory = if let Some(startup) = &prepared_startup {
+            let mut reservations = self.guest_address_reservations()?;
+            reservations.push(startup.range);
+            for module in plan.additions() {
+                reservations.push(
+                    PageRange::new(
+                        GuestAddress(module.base()),
+                        module.image_size().div_ceil(crate::memory::PAGE_SIZE),
+                    )
+                    .map_err(HostError::Memory)?,
+                );
+            }
+            for (start, end) in thread.reservations() {
+                reservations.push(
+                    PageRange::new(
+                        GuestAddress(start as u32),
+                        ((end - start) / u64::from(crate::memory::PAGE_SIZE)) as u32,
+                    )
+                    .map_err(HostError::Memory)?,
+                );
+            }
+            let candidate = self
+                .windows_memory
+                .prepare_initial_heap(self.memory.as_mut().unwrap(), &reservations)
+                .map_err(HostError::WindowsMemory)?;
+            plan.stage_write(
+                GuestAddress(startup.peb + 0x18),
+                &candidate
+                    .default_heap()
+                    .ok_or(HostError::Infrastructure)?
+                    .to_le_bytes(),
+            )
+            .map_err(HostError::Module)?;
+            Some(candidate)
+        } else {
+            None
+        };
+        let prepared_primary = if initial {
+            Some(
+                self.threads
+                    .prepare_primary_thread(
+                        thread.teb(),
+                        PageRange::new(
+                            GuestAddress(thread.config.stack_base),
+                            thread.config.stack_pages,
+                        )
+                        .map_err(HostError::Memory)?,
+                    )
+                    .map_err(HostError::Thread)?,
+            )
+        } else {
+            None
+        };
         let saved = SavedModuleContext::capture(&ready_arena)?;
+        let primary_created = if prepared_primary.is_some() {
+            Some(self.process_creation_filetime()?)
+        } else {
+            None
+        };
         let (new_tls, mut writes) = thread
             .stage_modules(&mut plan, self.memory()?, initial)
             .map_err(HostError::Module)?;
+        let secondary_tls =
+            self.prepare_secondary_static_tls(&mut plan, &new_tls, thread.allocation_bounds())?;
+        writes
+            .try_reserve_exact(secondary_tls.words().len())
+            .map_err(|_| HostError::Module(ModuleError32::Allocation))?;
+        writes.extend_from_slice(secondary_tls.words());
+        let loader_change =
+            self.prepare_process_loader_change(plan.additions(), plan.initialization_order(), &[])?;
+        if let Some(change) = &loader_change {
+            writes
+                .try_reserve_exact(change.words().len())
+                .map_err(|_| HostError::Module(ModuleError32::Allocation))?;
+            writes.extend_from_slice(change.words());
+        }
         let mut steps =
             load_steps(plan.initialization_order(), initial).map_err(HostError::Module)?;
         if initial {
@@ -278,6 +434,19 @@ impl EngineInstance {
                 &writes,
             )
             .map_err(HostError::Module)?;
+        self.commit_secondary_static_tls(secondary_tls);
+        self.commit_process_loader_change(loader_change);
+        if let Some(startup) = prepared_startup {
+            self.process_runtime.startup = Some(startup);
+        }
+        if let Some(memory) = prepared_memory {
+            self.windows_memory = memory;
+        }
+        if let Some(primary) = prepared_primary {
+            self.threads.commit_primary_thread(primary);
+            self.threads
+                .record_primary_creation(primary_created.unwrap());
+        }
         for id in &loaded.new_ids {
             self.modules.references.push(ModuleReference {
                 id: *id,
@@ -324,6 +493,7 @@ impl EngineInstance {
             steps,
             active: None,
             saved,
+            execution: self.park_module_execution(),
             outer: self.pending_call.take(),
             initial_before,
             last_returned: 0,
@@ -343,12 +513,29 @@ impl EngineInstance {
     pub fn free_library_module(&mut self, handle: u32) -> Result<ModuleOperation32, HostError> {
         self.memory()?;
         self.guard_detection_material_change()?;
+        let before = self.modules.loader_depth;
+        self.acquire_loader_thread()?;
+        let result = self.free_library_module_inner(handle);
+        if !matches!(result, Ok(ModuleOperation32::Pending(_)))
+            && self.modules.loader_depth > before
+        {
+            self.release_loader_thread();
+        }
+        result
+    }
+    pub fn free_library_module_inner(
+        &mut self,
+        handle: u32,
+    ) -> Result<ModuleOperation32, HostError> {
+        self.memory()?;
+        self.guard_detection_material_change()?;
         if self.call_cancelled() {
             return Err(HostError::Call(crate::process::CallError::Cancelled));
         }
-        if !self.modules.operations.is_empty() || self.callback.is_some() {
+        if !self.modules.operations.is_empty() {
             return Err(HostError::Module(ModuleError32::Busy));
         }
+        self.check_module_execution_admission()?;
         let root = self
             .modules
             .loaded
@@ -380,6 +567,7 @@ impl EngineInstance {
             steps,
             active: None,
             saved,
+            execution: self.park_module_execution(),
             outer: self.pending_call.take(),
             initial_before: None,
             last_returned: 0,
@@ -390,12 +578,26 @@ impl EngineInstance {
     pub fn detach_modules_for_exit(&mut self) -> Result<ModuleOperation32, HostError> {
         self.memory()?;
         self.guard_detection_material_change()?;
+        let before = self.modules.loader_depth;
+        self.acquire_loader_thread()?;
+        let result = self.detach_modules_for_exit_inner();
+        if !matches!(result, Ok(ModuleOperation32::Pending(_)))
+            && self.modules.loader_depth > before
+        {
+            self.release_loader_thread();
+        }
+        result
+    }
+    pub fn detach_modules_for_exit_inner(&mut self) -> Result<ModuleOperation32, HostError> {
+        self.memory()?;
+        self.guard_detection_material_change()?;
         if self.call_cancelled() {
             return Err(HostError::Call(crate::process::CallError::Cancelled));
         }
-        if !self.modules.operations.is_empty() || self.callback.is_some() {
+        if !self.modules.operations.is_empty() {
             return Err(HostError::Module(ModuleError32::Busy));
         }
+        self.check_module_execution_admission()?;
         let mut ids = Vec::new();
         ids.try_reserve_exact(self.modules.attached.len())
             .map_err(|_| HostError::Module(ModuleError32::Allocation))?;
@@ -423,6 +625,7 @@ impl EngineInstance {
             steps,
             active: None,
             saved: SavedModuleContext::capture(self.arena())?,
+            execution: self.park_module_execution(),
             outer: self.pending_call.take(),
             initial_before: None,
             last_returned: 0,
@@ -445,6 +648,7 @@ impl EngineInstance {
             let operation = self.modules.operations.pop().unwrap();
             operation.saved.restore(self.arena.as_mut().get_mut());
             self.pending_call = operation.outer;
+            operation.execution.restore(self);
         }
         result
     }
@@ -597,6 +801,8 @@ impl EngineInstance {
                     operation.saved.restore(self.arena.as_mut().get_mut());
                 }
                 self.pending_call = operation.outer;
+                operation.execution.restore(self);
+                self.release_loader_thread();
                 self.complete_module_windows_initializer(result, operation.last_returned)?;
                 Ok(result)
             }
@@ -634,7 +840,13 @@ impl EngineInstance {
             plan.add_range(allocation.range)
                 .map_err(HostError::Module)?;
         }
-        let writes = if initial {
+        let mut writes = if initial {
+            if let Some(range) = self.process_runtime.reservation() {
+                plan.add_range(range).map_err(HostError::Module)?;
+            }
+            for range in self.windows_memory.committed_ranges() {
+                plan.add_range(range).map_err(HostError::Module)?;
+            }
             plan.add_range(
                 PageRange::new(GuestAddress(thread.teb()), thread.runtime_pages())
                     .map_err(HostError::Memory)?,
@@ -652,15 +864,45 @@ impl EngineInstance {
         } else {
             thread.clear_writes(ids).map_err(HostError::Module)?
         };
+        let secondary_tls = self.prepare_secondary_tls_unload(ids)?;
+        for &range in secondary_tls.ranges() {
+            plan.add_range(range).map_err(HostError::Module)?;
+        }
+        writes
+            .try_reserve_exact(secondary_tls.words().len())
+            .map_err(|_| HostError::Module(ModuleError32::Allocation))?;
+        writes.extend_from_slice(secondary_tls.words());
+        let loader_change = if initial {
+            None
+        } else {
+            self.prepare_process_loader_change(&[], &[], ids)?
+        };
+        if let Some(change) = &loader_change {
+            writes
+                .try_reserve_exact(change.words().len())
+                .map_err(|_| HostError::Module(ModuleError32::Allocation))?;
+            writes.extend_from_slice(change.words());
+        }
+        writes.sort_unstable_by_key(|write| write.address.0);
+        let empty_memory = initial
+            .then(|| self.windows_memory.empty_same_limits())
+            .transpose()
+            .map_err(HostError::WindowsMemory)?;
         plan.unmap_with_writes(
             self.memory.as_mut().ok_or(HostError::Closed)?,
             &mut self.modules.loaded,
             &writes,
         )
         .map_err(HostError::Module)?;
+        self.commit_secondary_static_tls(secondary_tls);
+        self.commit_process_loader_change(loader_change);
         self.modules.remove_records(ids);
         if initial {
             self.modules.thread = None;
+            self.threads.reset_primary_thread();
+            self.process_runtime.startup = None;
+            self.windows_memory =
+                empty_memory.expect("initial rollback prepared empty Windows memory");
         }
         Ok(())
     }

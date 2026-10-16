@@ -362,3 +362,16 @@ fn private_start_latch_survives_manual_restore_and_unmap_and_closed_still_wins()
     assert!(engine.resident.is_none());
     assert!(engine.resident_installations.iter().all(Option::is_none));
 }
+
+#[test]
+fn staged_launch_cannot_be_stranded_by_the_legacy_loaded_image_start() {
+    let mut engine=fixture(8);
+    engine.begin_process_launch_input(56).unwrap();
+    let arena=engine.arena().to_vec();let version=engine.memory().unwrap().transaction_version();
+    assert_eq!(engine.start_loaded_image(STACK,2),Err(HostError::InvalidRequest));
+    assert_eq!(engine.arena(),arena);
+    assert_eq!(engine.memory().unwrap().transaction_version(),version);
+    assert!(!engine.image_started);
+    engine.abort_process_launch_input().unwrap();
+    engine.start_loaded_image(STACK,2).unwrap();
+}
