@@ -1,28 +1,42 @@
 use crate::{
-    files::FileIo32,
+    files::{FileContentVersion32, FileIo32, FileSection32},
     loader::ModuleError32,
     process::{EngineInstance, HostError, windows::files::ProviderFile32},
 };
 pub(super) struct ModuleFileInput32 {
     pub(super) lease: ProviderFile32,
     pub(super) name: String,
+    version: FileContentVersion32,
     length: usize,
     bytes: Vec<u8>,
 }
 impl ModuleFileInput32 {
-    pub(super) fn new(engine: &mut EngineInstance, name: String) -> Result<Self, HostError> {
+    pub(super) fn new(
+        engine: &mut EngineInstance,
+        name: String,
+        section: FileSection32,
+    ) -> Result<Self, HostError> {
         if engine.files.is_none() {
             return Err(HostError::Module(ModuleError32::MissingModule));
         }
-        let lease = engine.open_module_source_file(&name.encode_utf16().collect::<Vec<_>>())?;
+        let lease =
+            engine.open_module_source_file(&name.encode_utf16().collect::<Vec<_>>(), section)?;
+        let version = engine.provider_file_version(lease)?;
         Ok(Self {
             lease,
             name,
+            version,
             length: 0,
             bytes: Vec::new(),
         })
     }
+    pub(super) fn is_current(&self, engine: &EngineInstance) -> bool {
+        engine.module_source_file_current(self.lease, self.version)
+    }
     pub(super) fn poll(&mut self, engine: &mut EngineInstance) -> Result<FileIo32<()>, HostError> {
+        if !self.is_current(engine) {
+            return Err(HostError::Module(ModuleError32::StalePlan));
+        }
         if self.length == 0 {
             let length = engine.provider_file_size(self.lease)?;
             if length == 0

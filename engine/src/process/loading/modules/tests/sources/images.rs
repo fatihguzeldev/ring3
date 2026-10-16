@@ -1,3 +1,4 @@
+mod shared;
 use super::*;
 use crate::files::{FileAccess32, FileDisposition32, FileError32, FileOpenOptions32, FileShare32};
 

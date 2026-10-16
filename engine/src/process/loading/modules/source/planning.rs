@@ -52,7 +52,11 @@ impl EngineInstance {
             {
                 if !self.modules.catalog.contains(name) && self.modules.loaded.find(name).is_none()
                 {
-                    source.input = Some(ModuleFileInput32::new(self, name.clone())?);
+                    source.input = Some(ModuleFileInput32::new(
+                        self,
+                        name.clone(),
+                        source.request.file_section(),
+                    )?);
                     continue;
                 }
                 let dll = match self.modules.loaded.find(name) {
@@ -87,7 +91,11 @@ impl EngineInstance {
                 let name = name.clone();
                 let layout = *layout;
                 if !self.modules.catalog.contains(&name) {
-                    source.input = Some(ModuleFileInput32::new(self, name)?);
+                    source.input = Some(ModuleFileInput32::new(
+                        self,
+                        name,
+                        source.request.file_section(),
+                    )?);
                     continue;
                 }
                 self.retain_module_source(source, &name)?;
@@ -119,7 +127,11 @@ impl EngineInstance {
                     match self.probe_captured_module_headers(name, base, config, source.paths())? {
                         ModulePlanProbe32::Ready(plan) => plan,
                         ModulePlanProbe32::Missing(name) => {
-                            source.input = Some(ModuleFileInput32::new(self, name)?);
+                            source.input = Some(ModuleFileInput32::new(
+                                self,
+                                name,
+                                source.request.file_section(),
+                            )?);
                             continue;
                         }
                         ModulePlanProbe32::Manifest(_) => return Err(HostError::Infrastructure),
@@ -171,7 +183,11 @@ impl EngineInstance {
             let plan = match probe {
                 ModulePlanProbe32::Ready(plan) => plan,
                 ModulePlanProbe32::Missing(name) => {
-                    source.input = Some(ModuleFileInput32::new(self, name)?);
+                    source.input = Some(ModuleFileInput32::new(
+                        self,
+                        name,
+                        source.request.file_section(),
+                    )?);
                     continue;
                 }
                 ModulePlanProbe32::Manifest(name) => {

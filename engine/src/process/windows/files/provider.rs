@@ -1,6 +1,8 @@
 use super::*;
 use crate::{
-    files::{FileAccess32, FileDisposition32, FileIo32, FileOpenOptions32, FileShare32},
+    files::{
+        FileAccess32, FileDisposition32, FileIo32, FileOpenOptions32, FileSection32, FileShare32,
+    },
     process::{EngineInstance, HostError},
 };
 
@@ -115,7 +117,17 @@ impl FileRuntime32 {
 }
 
 impl EngineInstance {
-
+    pub(in crate::process) fn provider_path_info(
+        &self,
+        path: &[u16],
+    ) -> Result<FileInfo32, HostError> {
+        let files = self.files_storage()?;
+        files
+            .vfs
+            .check_path_access(path, 0x80, self.windows_security.token())
+            .map_err(HostError::File)?;
+        files.vfs.path_info(path).map_err(HostError::File)
+    }
 
     pub(in crate::process) fn provider_file_version(
         &self,
@@ -187,6 +199,7 @@ impl EngineInstance {
     pub(in crate::process) fn open_module_source_file(
         &mut self,
         path: &[u16],
+        section: FileSection32,
     ) -> Result<ProviderFile32, HostError> {
         let thread = self.current_windows_thread_id()?;
         self.memory()?;
@@ -196,12 +209,28 @@ impl EngineInstance {
             .open_provider_file(
                 path,
                 false,
-                FileShare32(FileShare32::READ.0 | FileShare32::DELETE.0),
+                section.share(),
                 thread,
                 self.windows_security.token(),
             )
             .map_err(HostError::File)
     }
+    pub(in crate::process) fn module_source_file_current(
+        &self,
+        lease: ProviderFile32,
+        version: crate::files::FileContentVersion32,
+    ) -> bool {
+        self.files.as_ref().is_some_and(|files| {
+            lease.epoch == files.vfs.epoch()
+                && files.provider.leases.contains(&lease)
+                && files
+                    .vfs
+                    .file_for_open(lease.open)
+                    .and_then(|file| files.vfs.content_version(file))
+                    == Ok(version)
+        })
+    }
+
     pub(in crate::process) fn provider_file_size(
         &self,
         lease: ProviderFile32,
@@ -350,5 +379,25 @@ impl EngineInstance {
         self.files
             .as_ref()
             .is_some_and(|files| files.vfs.request_ready(request))
+    }
+}
+
+impl EngineInstance {
+    pub(in crate::process) fn provider_create_directories(
+        &mut self,
+        path: &[u16],
+    ) -> Result<(), HostError> {
+        self.memory()?;
+        let files = self
+            .files
+            .as_mut()
+            .ok_or(HostError::File(FileError32::Unsupported))?;
+        let prepared = files
+            .vfs
+            .prepare_directory_tree(path, self.windows_security.token())
+            .map_err(HostError::File)?;
+        prepared.validate(&files.vfs).map_err(HostError::File)?;
+        files.vfs.commit_directory_tree(prepared);
+        Ok(())
     }
 }

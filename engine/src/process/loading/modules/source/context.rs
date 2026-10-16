@@ -2,7 +2,7 @@ use super::super::{
     CapturedModulePaths32, ModuleRuntimeConfig32, initialization::SavedModuleContext,
 };
 use crate::{
-    files::FileReadRequest32,
+    files::{FileReadRequest32, FileSection32},
     loader::{DataFileLayout32, ImportSymbol32},
     process::{HostError, windows::activation::modules::ModuleActivationWork32},
 };
@@ -58,5 +58,23 @@ impl PendingModuleLoad32 {
     }
     pub(in crate::process) fn owns_token(&self, token: u32) -> bool {
         self.call_token == Some(token)
+    }
+}
+
+pub(super) fn resource_file_section(flags: u32) -> FileSection32 {
+    if flags & 0x20 != 0 {
+        FileSection32::Image
+    } else if flags & 0x40 != 0 {
+        FileSection32::ExclusiveData
+    } else {
+        FileSection32::SharedData
+    }
+}
+impl CapturedModuleRequest32 {
+    pub(super) fn file_section(&self) -> FileSection32 {
+        match self {
+            Self::DataFile { flags, .. } => resource_file_section(*flags),
+            _ => FileSection32::Image,
+        }
     }
 }

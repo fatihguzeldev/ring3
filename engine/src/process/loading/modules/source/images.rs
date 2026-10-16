@@ -58,13 +58,7 @@ impl EngineInstance {
         self.prepare_owned_image_files(&[(
             ImageOwner32::Resource(handle),
             source.lease,
-            if flags & 0x20 != 0 {
-                FileSection32::Image
-            } else if flags & 0x40 != 0 {
-                FileSection32::ExclusiveData
-            } else {
-                FileSection32::SharedData
-            },
+            super::context::resource_file_section(flags),
         )])
     }
     fn prepare_owned_image_files(

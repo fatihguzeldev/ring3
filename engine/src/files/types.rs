@@ -280,7 +280,7 @@ pub(crate) enum FileSection32 {
     SharedData,
 }
 impl FileSection32 {
-    pub(in crate::files) fn share(self) -> FileShare32 {
+    pub(crate) fn share(self) -> FileShare32 {
         if self == Self::SharedData {
             FileShare32::ALL
         } else {
