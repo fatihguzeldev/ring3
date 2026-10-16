@@ -1,4 +1,4 @@
-use super::context::{Event32, Handle32, set};
+use super::context::{Handle32, Object32, ObjectKind32, set};
 use super::types::WaitResult32;
 use super::{
     EVENT_ALL_ACCESS, EVENT_MODIFY_STATE, SynchronizationContext32,
@@ -21,6 +21,18 @@ pub struct PreparedEventShutdown32 {
     handles: PreparedCloseHandles32,
 }
 
+impl PreparedCloseHandles32 {
+    pub(super) fn shift_revisions(&mut self, offset: u64) -> Result<(), Error> {
+        for close in &mut self.closes {
+            close.revision = close.revision.checked_add(offset).ok_or(Error::Exhausted)?;
+            close.next_revision = close
+                .next_revision
+                .checked_add(offset)
+                .ok_or(Error::Exhausted)?;
+        }
+        Ok(())
+    }
+}
 impl PreparedDuplicate32 {
     pub fn handle(&self) -> Option<u32> {
         self.duplicate.map(|handle| handle.value)
@@ -51,7 +63,7 @@ impl SynchronizationContext32 {
         self.handle_index(handle, super::SYNCHRONIZE).map(|_| ())
     }
     pub fn ensure_unnamed_event_capacity(&self, count: usize) -> Result<(), Error> {
-        if self.events.iter().filter(|event| event.is_none()).count() < count
+        if self.objects.iter().filter(|event| event.is_none()).count() < count
             || self
                 .handles
                 .len()
@@ -101,7 +113,7 @@ impl SynchronizationContext32 {
     pub fn has_named_event(&self, name: &[u16]) -> Result<bool, Error> {
         let name = normalize_name(name)?;
         Ok(self
-            .events
+            .objects
             .iter()
             .flatten()
             .any(|event| event.name.as_deref() == Some(name)))
@@ -117,17 +129,23 @@ impl SynchronizationContext32 {
         let value = self.handle_value()?;
         let revision = self.next_revision()?;
         let existing = name.as_ref().and_then(|name| {
-            self.events.iter().position(|event| {
+            self.objects.iter().position(|event| {
                 event
                     .as_ref()
                     .is_some_and(|event| event.name.as_deref() == Some(*name))
             })
         });
         let (slot, existed) = if let Some(slot) = existing {
+            if !matches!(
+                self.objects[slot].as_ref().unwrap().kind,
+                ObjectKind32::Event
+            ) {
+                return Err(Error::InvalidHandle);
+            }
             (slot, true)
         } else {
             let slot = self
-                .events
+                .objects
                 .iter()
                 .position(Option::is_none)
                 .ok_or(Error::Capacity)?;
@@ -142,18 +160,19 @@ impl SynchronizationContext32 {
                     Ok::<_, Error>(owned)
                 })
                 .transpose()?;
-            self.events[slot] = Some(Event32 {
+            self.objects[slot] = Some(Object32 {
                 id,
                 name: owned_name,
                 manual,
                 handles: 0,
                 bindings: 0,
+                kind: ObjectKind32::Event,
             });
             self.next_object = id;
             set(&mut self.signaled, slot, initial);
             (slot, false)
         };
-        self.events[slot].as_mut().unwrap().handles += 1;
+        self.objects[slot].as_mut().unwrap().handles += 1;
         self.handles.push(Handle32 {
             value,
             event: slot,
@@ -168,7 +187,7 @@ impl SynchronizationContext32 {
         let access = event_access(access)?;
         let name = normalize_name(name)?;
         let slot = self
-            .events
+            .objects
             .iter()
             .position(|event| {
                 event
@@ -176,6 +195,12 @@ impl SynchronizationContext32 {
                     .is_some_and(|event| event.name.as_deref() == Some(name))
             })
             .ok_or(Error::NotFound)?;
+        if !matches!(
+            self.objects[slot].as_ref().unwrap().kind,
+            ObjectKind32::Event
+        ) {
+            return Err(Error::InvalidHandle);
+        }
         let value = self.handle_value()?;
         let revision = self.next_revision()?;
         self.handles.push(Handle32 {
@@ -184,13 +209,14 @@ impl SynchronizationContext32 {
             access,
             inherit,
         });
-        self.events[slot].as_mut().unwrap().handles += 1;
+        self.objects[slot].as_mut().unwrap().handles += 1;
         self.next_handle = value;
         self.revision = revision;
         Ok(value)
     }
     pub fn event_is_signaled(&self, handle: u32) -> Result<bool, Error> {
         let index = self.handle_index(handle, 0)?;
+        self.require_event(self.handles[index].event)?;
         Ok(super::context::bit(
             &self.signaled,
             self.handles[index].event,
@@ -216,7 +242,7 @@ impl SynchronizationContext32 {
                 });
             }
         }
-        self.events[handle.event].as_mut().unwrap().handles -= 1;
+        self.objects[handle.event].as_mut().unwrap().handles -= 1;
         self.reclaim_event(handle.event);
     }
     pub fn prepare_duplicate(
@@ -229,10 +255,19 @@ impl SynchronizationContext32 {
         target: bool,
     ) -> Result<PreparedDuplicate32, Error> {
         let source_handle = self.handles[self.handle_index(source, 0)?];
+        if target
+            && matches!(
+                self.objects[source_handle.event].as_ref().unwrap().kind,
+                ObjectKind32::Thread { .. }
+            )
+            && self.thread_handle_count() >= self.thread_handle_limit
+        {
+            return Err(Error::Capacity);
+        }
         let access = if same_access {
             source_handle.access
         } else {
-            event_access(desired_access)?
+            super::objects::object_access(source_handle.event, self, desired_access)?
         };
         if access & !source_handle.access != 0 {
             return Err(Error::AccessDenied);
@@ -265,7 +300,7 @@ impl SynchronizationContext32 {
             (prepared.epoch, prepared.revision)
         );
         if let Some(handle) = prepared.duplicate {
-            self.events[handle.event].as_mut().unwrap().handles += 1;
+            self.objects[handle.event].as_mut().unwrap().handles += 1;
             self.handles.push(handle);
             self.next_handle = handle.value;
         }
@@ -277,12 +312,14 @@ impl SynchronizationContext32 {
     pub fn set_event(&mut self, handle: u32) -> Result<(), Error> {
         let index = self.handle_index(handle, EVENT_MODIFY_STATE)?;
         let slot = self.handles[index].event;
+        self.require_event(slot)?;
         let prepared = self.prepare_signal_slots(&[slot], &[], self.now, None)?;
         self.commit_signals(prepared);
         Ok(())
     }
     pub fn reset_event(&mut self, handle: u32) -> Result<(), Error> {
         let index = self.handle_index(handle, EVENT_MODIFY_STATE)?;
+        self.require_event(self.handles[index].event)?;
         let revision = self.next_revision()?;
         set(&mut self.signaled, self.handles[index].event, false);
         self.revision = revision;
@@ -291,12 +328,13 @@ impl SynchronizationContext32 {
     pub fn pulse_event(&mut self, handle: u32) -> Result<(), Error> {
         let index = self.handle_index(handle, EVENT_MODIFY_STATE)?;
         let slot = self.handles[index].event;
+        self.require_event(slot)?;
         let prepared = self.prepare_signal_slots(&[slot], &[slot], self.now, None)?;
         self.commit_signals(prepared);
         Ok(())
     }
 }
-fn event_access(access: u32) -> Result<u32, Error> {
+pub(super) fn event_access(access: u32) -> Result<u32, Error> {
     let mut mapped = access & 0x0fff_ffff;
     if access & 0x8000_0000 != 0 {
         mapped |= 0x0002_0001;
@@ -315,7 +353,7 @@ fn event_access(access: u32) -> Result<u32, Error> {
     }
     Ok(mapped)
 }
-fn normalize_name(name: &[u16]) -> Result<&[u16], Error> {
+pub(super) fn normalize_name(name: &[u16]) -> Result<&[u16], Error> {
     if name.is_empty() || name.len() > 260 || name.contains(&0) {
         return Err(Error::InvalidName);
     }

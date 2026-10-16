@@ -323,12 +323,114 @@ fn message_wait_observes_new_messages_once_and_inputavailable_sees_old_queue_ent
         context.wait_with_messages(&[], WaitMode32::Any, INFINITE, false, message, (1, 1, 2)),
         Err(SynchronizationError32::Exhausted)
     );
-    assert_eq!(
-        (
-            context.queue_current,
-            context.queue_new,
-            context.queue_generation
-        ),
-        (1, 0, 1)
+    assert_eq!(context.queue_state(1), (1, 0, 1));
+}
+
+#[test]
+fn message_waits_and_new_message_observation_are_owned_by_the_waiting_thread() {
+    let mut context = context();
+    let message = MessageWait32 {
+        mask: 8,
+        input_available: false,
+    };
+    context.set_current_thread(1).unwrap();
+    let first = pending(
+        context
+            .wait(&[], WaitMode32::Any, INFINITE, false, Some(message))
+            .unwrap(),
     );
+    context.set_current_thread(2).unwrap();
+    let second = pending(
+        context
+            .wait(&[], WaitMode32::Any, INFINITE, false, Some(message))
+            .unwrap(),
+    );
+    let prepared = context
+        .prepare_messages_for_threads(&[(1, 8, 8, 100), (2, 0, 0, 1)])
+        .unwrap();
+    context.commit_signals(prepared);
+    assert!(context.wait_status(first).unwrap().is_some());
+    assert_eq!(context.wait_status(second).unwrap(), None);
+    context.take_wait_observing_messages(first).unwrap();
+    assert_eq!(context.queue_state(1), (8, 0, 100));
+    assert_eq!(context.queue_state(2), (0, 0, 1));
+    context.observe_messages_for_thread(2, 8, 8, 2).unwrap();
+    assert!(
+        context
+            .take_wait_observing_messages(second)
+            .unwrap()
+            .is_some()
+    );
+    assert_eq!(context.queue_state(2), (8, 0, 2));
+}
+
+#[test]
+fn composite_message_projection_failure_preserves_every_thread_and_pending_wait() {
+    let mut context = context();
+    context.observe_messages_for_thread(1, 0, 0, 5).unwrap();
+    context.observe_messages_for_thread(2, 0, 0, 9).unwrap();
+    let revision = context.revision();
+    assert!(matches!(
+        context.prepare_messages_for_threads(&[(1, 8, 8, 6), (2, 8, 8, 8)]),
+        Err(SynchronizationError32::Stale)
+    ));
+    assert_eq!(context.revision(), revision);
+    assert_eq!(context.queue_state(1), (0, 0, 5));
+    assert_eq!(context.queue_state(2), (0, 0, 9));
+    assert!(matches!(
+        context.prepare_messages_for_threads(&[(1, 8, 8, 6), (1, 8, 8, 6)]),
+        Err(SynchronizationError32::InvalidWait)
+    ));
+    let prepared = context
+        .prepare_messages_for_thread(2, u32::MAX, u32::MAX, 9)
+        .unwrap();
+    let prepared = context.refresh_prepared_messages_for_thread(prepared, 2, 0, 0, 10);
+    context.commit_signals(prepared);
+    assert_eq!(context.queue_state(2), (0, 0, 10));
+}
+
+#[test]
+fn queued_apc_interrupts_only_alertable_waits_without_consuming_a_signaled_auto_event() {
+    let mut context = context();
+    let (event, _) = context.create_event(false, false, false, None).unwrap();
+    context.set_current_thread(1).unwrap();
+    let alertable = pending(
+        context
+            .wait(&[event], WaitMode32::Any, INFINITE, true, None)
+            .unwrap(),
+    );
+    context.set_current_thread(2).unwrap();
+    let ordinary = pending(
+        context
+            .wait(&[event], WaitMode32::Any, INFINITE, false, None)
+            .unwrap(),
+    );
+    let receipt = context.prepare_apc_state(1, true).unwrap();
+    context.commit_signals(receipt);
+    assert_eq!(context.wait_status(alertable).unwrap().unwrap().value, 0xc0);
+    assert_eq!(context.wait_status(ordinary).unwrap(), None);
+    context.cancel_wait(ordinary).unwrap();
+    context.take_wait(alertable).unwrap();
+    context.set_event(event).unwrap();
+    context.set_current_thread(1).unwrap();
+    assert_eq!(
+        ready(
+            context
+                .wait(&[event], WaitMode32::Any, 0, true, None)
+                .unwrap()
+        ),
+        0xc0
+    );
+    assert!(context.event_is_signaled(event).unwrap());
+    let receipt = context.prepare_apc_state(1, false).unwrap();
+    context.commit_signals(receipt);
+    assert_eq!(
+        ready(
+            context
+                .wait(&[event], WaitMode32::Any, 0, true, None)
+                .unwrap()
+        ),
+        0
+    );
+    assert!(!context.event_is_signaled(event).unwrap());
 }

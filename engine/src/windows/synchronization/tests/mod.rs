@@ -1,4 +1,6 @@
 mod events;
+mod objects;
+mod timers;
 mod waits;
 
 use super::*;

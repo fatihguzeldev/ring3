@@ -5,7 +5,8 @@ use super::{
 
 pub struct PreparedIoSignals32 {
     signals: super::PreparedSignals32,
-    release: PreparedEventBindings32,
+    release: Option<PreparedEventBindings32>,
+    close: Option<super::PreparedCloseHandles32>,
 }
 
 pub struct PreparedEventBindings32 {
@@ -22,22 +23,79 @@ impl PreparedEventBindings32 {
     }
 }
 impl SynchronizationContext32 {
+    pub fn prepare_thread_exit_with_signals(
+        &self,
+        thread: u32,
+        bindings: &[EventBinding32],
+    ) -> Result<PreparedIoSignals32, Error> {
+        self.prepare_thread_exit_with_events(thread, bindings, &[])
+    }
+    pub fn prepare_thread_exit_with_events(
+        &self,
+        thread: u32,
+        bindings: &[EventBinding32],
+        handles: &[u32],
+    ) -> Result<PreparedIoSignals32, Error> {
+        let mut signals = self.prepare_thread_exit(thread)?;
+        for binding in bindings {
+            self.prepare_occurrence(&mut signals, *binding, 1)?;
+        }
+        let release = if bindings.is_empty() {
+            None
+        } else {
+            let mut release = self.prepare_event_bindings(&[], bindings)?;
+            release.revision = release.next_revision;
+            release.next_revision = release
+                .next_revision
+                .checked_add(1)
+                .ok_or(Error::Exhausted)?;
+            Some(release)
+        };
+        let close = if handles.is_empty() {
+            None
+        } else {
+            let mut close = self.prepare_close_handles(handles)?;
+            close.shift_revisions(1 + u64::from(release.is_some()))?;
+            Some(close)
+        };
+        Ok(PreparedIoSignals32 {
+            signals,
+            release,
+            close,
+        })
+    }
     pub fn prepare_signals_and_release(
         &self,
         bindings: &[EventBinding32],
     ) -> Result<PreparedIoSignals32, Error> {
         let signals = self.prepare_signals(bindings)?;
+        if bindings.is_empty() {
+            return Ok(PreparedIoSignals32 {
+                signals,
+                release: None,
+                close: None,
+            });
+        }
         let mut release = self.prepare_event_bindings(&[], bindings)?;
         release.revision = release.next_revision;
         release.next_revision = release
             .next_revision
             .checked_add(1)
             .ok_or(Error::Exhausted)?;
-        Ok(PreparedIoSignals32 { signals, release })
+        Ok(PreparedIoSignals32 {
+            signals,
+            release: Some(release),
+            close: None,
+        })
     }
     pub fn commit_signals_and_release(&mut self, prepared: PreparedIoSignals32) {
         self.commit_signals(prepared.signals);
-        self.commit_event_bindings(prepared.release);
+        if let Some(release) = prepared.release {
+            self.commit_event_bindings(release);
+        }
+        if let Some(close) = prepared.close {
+            self.commit_close_handles(close);
+        }
     }
     pub fn prepare_event_bindings(
         &self,
@@ -84,11 +142,12 @@ impl SynchronizationContext32 {
             .map(|(slot, _)| slot);
         for (index, handle) in handles.iter().enumerate() {
             let event = self.handles[self.handle_index(*handle, EVENT_MODIFY_STATE)?].event;
+            self.require_event(event)?;
             bindings.push(EventBinding32 {
                 epoch: self.epoch,
                 id: self.next_binding + index as u64 + 1,
                 slot: slots.next().unwrap(),
-                object: self.events[event].as_ref().unwrap().id,
+                object: self.objects[event].as_ref().unwrap().id,
                 event,
             });
         }
@@ -114,6 +173,7 @@ impl SynchronizationContext32 {
             .map_err(|_| Error::Allocation)?;
         for handle in reset {
             let event = self.handles[self.handle_index(*handle, EVENT_MODIFY_STATE)?].event;
+            self.require_event(event)?;
             if !prepared.reset.contains(&event) {
                 prepared.reset.push(event);
             }
@@ -130,7 +190,7 @@ impl SynchronizationContext32 {
         );
         for old in &prepared.release {
             self.bindings[old.slot] = None;
-            self.events[old.event].as_mut().unwrap().bindings -= 1;
+            self.objects[old.event].as_mut().unwrap().bindings -= 1;
         }
         for binding in &prepared.bindings {
             self.bindings[binding.slot] = Some(Binding32 {
@@ -138,7 +198,7 @@ impl SynchronizationContext32 {
                 event: binding.event,
                 object: binding.object,
             });
-            self.events[binding.event].as_mut().unwrap().bindings += 1;
+            self.objects[binding.event].as_mut().unwrap().bindings += 1;
             self.next_binding = binding.id;
         }
         for event in &prepared.reset {
@@ -174,7 +234,7 @@ impl SynchronizationContext32 {
         if record.id != binding.id
             || record.object != binding.object
             || record.event != binding.event
-            || self.events[binding.event]
+            || self.objects[binding.event]
                 .as_ref()
                 .is_none_or(|event| event.id != binding.object)
         {

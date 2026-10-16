@@ -43,6 +43,8 @@ pub enum SynchronizationError32 {
     DeadlineOverflow,
     Unsupported,
     Busy,
+    NotOwner,
+    TooManyPosts,
 }
 impl SynchronizationError32 {
     pub fn win32(self) -> u32 {
@@ -54,6 +56,8 @@ impl SynchronizationError32 {
             Self::Capacity | Self::Allocation | Self::Exhausted => 8,
             Self::Unsupported => 50,
             Self::Busy => 170,
+            Self::NotOwner => 288,
+            Self::TooManyPosts => 298,
             _ => 87,
         }
     }
