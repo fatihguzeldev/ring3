@@ -32,7 +32,7 @@ fn captured_activation_creation_guard_failure_keeps_invalid_handle_and_exact_tok
         assert_eq!(engine.pending_call.as_ref().unwrap().token, token);
         assert_eq!(word(&engine, DATA + 0x3000), 0xfeed_face);
 
-        // the guarded TEB fails admission before Activation publishes a result.
+        // the guarded TEB fails admission before activation publishes a result.
         // this exercises the captured call's cold failure convention, unlike
         // an ACTCTX read failure handled directly by the activation provider.
         engine
@@ -51,7 +51,7 @@ fn captured_activation_creation_guard_failure_keeps_invalid_handle_and_exact_tok
         );
         assert_eq!(word(&engine, DATA + 0x3000), 0xfeed_face);
 
-        // repair the input to a readable, invalid structure. Reusing the old
+        // repair the input to a readable, invalid structure. reusing the old
         // token must retain the accepted 998 result instead of executing it.
         engine
             .memory
