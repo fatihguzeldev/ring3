@@ -141,6 +141,23 @@ static void hebrew_cases(void) {
         }
     }
 }
+static void hebrew_direction_classes(void) {
+    const LCID locales[] = {0x040d, 0x0409};
+    const WCHAR *patterns[] = {
+        L"'\x05b0'", L"'\x05be'", L"'\x05c0'", L"'\x05c3'",
+        L"'\x05f3'", L"'\xfb2a'", L"'\x07c0'", L"'\x200f'",
+        L"'\x200e'", L"'A\x05b0'", L"'\x05d0\x05b0'", L"'\x0627\x05b0'"
+    };
+    for (unsigned locale = 0; locale < sizeof(locales) / sizeof(locales[0]); ++locale) {
+        for (unsigned alternate = 0; alternate < 2; ++alternate) {
+            DWORD calendar = alternate ? DATE_USE_ALT_CALENDAR : 0;
+            for (unsigned pattern = 0; pattern < sizeof(patterns) / sizeof(patterns[0]); ++pattern) {
+                probe(locales[locale], calendar, 0x401 + pattern, patterns[pattern]);
+                probe(locales[locale], calendar | DATE_AUTOLAYOUT, 0x401 + pattern, patterns[pattern]);
+            }
+        }
+    }
+}
 int main(void) {
     const LCID locales[] = {0x0409, 0x0401, 0x0c01, 0x040d, 0x0429, 0x0420, 0x0411, 0x007f};
     const DWORD layouts[] = {0, DATE_LTRREADING, DATE_RTLREADING, DATE_AUTOLAYOUT};
@@ -165,5 +182,6 @@ int main(void) {
     }
     direction_cases();
     hebrew_cases();
+    hebrew_direction_classes();
     return 0;
 }
