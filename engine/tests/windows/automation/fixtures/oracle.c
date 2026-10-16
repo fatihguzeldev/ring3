@@ -419,9 +419,61 @@ static void boolean_numeric_and_null_strings(void) {
     }
 }
 
+static void numeric_text_boundaries_and_dates(void) {
+    static const double numbers[] = {
+        -0.0, 0.0001, 0.00001, 0.000001, 0.0000001, 0.00000001,
+        -0.0001, -0.00001, -0.000001, -0.0000001, -0.00000001,
+        999999, 1000000, 10000000, 999999999999999.0, 1000000000000000.0,
+        9.999999499999999e-5, 9.999999999999995e-5
+    };
+    static const DATE dates[] = { 0, 1.5, -1.25, 36925.0, 36925.54309027778 };
+    static const WCHAR *date_text[] = {
+        L"2/3/2001", L"03.02.2001", L"2001-02-03", L"1:02:03 PM",
+        L"12:00 AM", L"invalid"
+    };
+    static const LCID locales[] = { 0x409, 0x407 };
+    unsigned index, single, locale;
+    for (index = 0; index < sizeof(numbers) / sizeof(numbers[0]); ++index) {
+        for (single = 0; single < 2; ++single) {
+            VARIANT source, destination;
+            HRESULT result;
+            char name[64];
+            VariantInit(&source); VariantInit(&destination);
+            if (single) { V_VT(&source) = VT_R4; V_R4(&source) = (FLOAT)numbers[index]; }
+            else { V_VT(&source) = VT_R8; V_R8(&source) = numbers[index]; }
+            result = VariantChangeTypeEx(&destination, &source, 0x409, 0, VT_BSTR);
+            sprintf_s(name, sizeof(name), "numeric-text-boundary-%u-%u", index, single);
+            variant_result(name, result, &destination); VariantClear(&destination);
+        }
+    }
+    for (locale = 0; locale < sizeof(locales) / sizeof(locales[0]); ++locale) {
+        for (index = 0; index < sizeof(dates) / sizeof(dates[0]); ++index) {
+            VARIANT source, destination;
+            HRESULT result;
+            char name[64];
+            VariantInit(&source); VariantInit(&destination);
+            V_VT(&source) = VT_DATE; V_DATE(&source) = dates[index];
+            result = VariantChangeTypeEx(&destination, &source, locales[locale], 0, VT_BSTR);
+            sprintf_s(name, sizeof(name), "date-to-text-%u-%u", locale, index);
+            variant_result(name, result, &destination); VariantClear(&destination);
+        }
+        for (index = 0; index < sizeof(date_text) / sizeof(date_text[0]); ++index) {
+            VARIANT source, destination;
+            HRESULT result;
+            char name[64];
+            VariantInit(&source); VariantInit(&destination);
+            V_VT(&source) = VT_BSTR; V_BSTR(&source) = SysAllocString(date_text[index]);
+            result = VariantChangeTypeEx(&destination, &source, locales[locale], 0, VT_DATE);
+            sprintf_s(name, sizeof(name), "text-to-date-%u-%u", locale, index);
+            variant_result(name, result, &destination);
+            VariantClear(&source); VariantClear(&destination);
+        }
+    }
+}
+
 int main(void) {
     printf("{\"schema\":1,\"pointerBytes\":%u,\"variantBytes\":%u,\"rows\":[", (unsigned)sizeof(void *), (unsigned)sizeof(VARIANT));
-    strings(); variants(); arrays(); references(); ordinals(); numeric_precision(); boolean_numeric_and_null_strings();
+    strings(); variants(); arrays(); references(); ordinals(); numeric_precision(); boolean_numeric_and_null_strings(); numeric_text_boundaries_and_dates();
     printf("]}\n");
     return 0;
 }

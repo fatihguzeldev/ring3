@@ -41,6 +41,15 @@ int main(void) {
     variable("integer64", L"%1!I64x!/%2!d!/%3!d!", (unsigned __int64)0x1122334455667788, -7, 11, 22);
     DWORD_PTR integers[] = {(DWORD_PTR)-7, 0x1a, 8, (DWORD_PTR)L"Ned"};
     array("integer-flags", FORMAT_MESSAGE_ARGUMENT_ARRAY, L"%1!+06d!/%2!#08x!/%3!u!/%4!.2s!", integers);
+    DWORD_PTR pointers[] = {0x1abc, 0};
+    array("pointer-and-null", FORMAT_MESSAGE_ARGUMENT_ARRAY, L"%1!p!/%1!#p!/[%2!s!]", pointers);
+    DWORD_PTR characters[] = {'A', 0xe9};
+    array("character-widths", FORMAT_MESSAGE_ARGUMENT_ARRAY, L"%1!c!/%2!hc!/%2!C!", characters);
+    DWORD_PTR string_widths[] = {(DWORD_PTR)"a\xe9", (DWORD_PTR)L"a\xe9"};
+    array("string-widths", FORMAT_MESSAGE_ARGUMENT_ARRAY, L"%1!hs!/%1!S!/%2!ls!", string_widths);
+    DWORD_PTR invalid_string[] = {0xfffffff0};
+    array("zero-precision", FORMAT_MESSAGE_ARGUMENT_ARRAY, L"[%1!.0s!]", invalid_string);
+    array("ignore-unterminated-spec", FORMAT_MESSAGE_IGNORE_INSERTS, L"[%1!foo", NULL);
     WCHAR output[4] = {0x1234, 0x2345, 0x3456, 0x4567}; SetLastError(0);
     DWORD result = FormatMessageW(FORMAT_MESSAGE_FROM_STRING, L"1234", 0, 0, output, 3, NULL);
     printf("{\"case\":\"small\",\"result\":%lu,\"error\":%lu,\"units\":[%u,%u,%u,%u]}\n", result, GetLastError(), output[0], output[1], output[2], output[3]);
