@@ -75,12 +75,29 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cmd /c "`"$environment`" && cl /nologo /std:c11 /W4 /D_CRT_SECURE_NO_WARNINGS engine\tests\loader\modules\fixtures\oracle\files.c /Fe:image-files.exe"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cmd /c "`"$environment`" && cl /nologo /std:c11 /W4 engine\tests\windows\automation\fixtures\oracle.c /Fe:automation.exe /link oleaut32.lib"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cmd /c "`"$environment`" && cl /nologo /std:c11 /W4 engine\tests\windows\provider\handles\fixtures\oracle.c /Fe:handles.exe"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cmd /c "`"$environment`" && cl /nologo /std:c11 /W4 /D_CRT_SECURE_NO_WARNINGS engine\tests\loader\modules\fixtures\oracle\replace.c /Fe:image-replace.exe"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $os = Get-CimInstance Win32_OperatingSystem
           Write-Output "RING3_WINDOWS version=$($os.Version) build=$($os.BuildNumber) source=$env:GITHUB_SHA"
-          Get-FileHash ring3-reference.dll,image-files.exe -Algorithm SHA256 | Format-Table -AutoSize
+          Get-FileHash ring3-reference.dll,image-files.exe,automation.exe,handles.exe,image-replace.exe -Algorithm SHA256 | Format-Table -AutoSize
       - name: Record native image mapping and file ownership
         if: inputs.profile == 'foundations'
         shell: pwsh
         run: |
           ./image-files.exe ./ring3-reference.dll
+          exit $LASTEXITCODE
+
+      - name: Record native Automation and handle behavior
+        if: inputs.profile == 'foundations'
+        shell: pwsh
+        run: |
+          ./automation.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./handles.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./image-replace.exe ./ring3-reference.dll
           exit $LASTEXITCODE
