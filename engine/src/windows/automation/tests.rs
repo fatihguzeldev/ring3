@@ -11,7 +11,7 @@ fn binary_bstr_prefix_preserves_embedded_nulls_and_odd_byte_lengths() {
     );
     assert_eq!(bstr_bytes(&[1; 4], 9), Err(AutomationError32::Capacity));
     assert_eq!(Oleaut32Api32::SysReAllocStringLen.stack_words(), 3);
-    assert_eq!(Oleaut32Api32::from_id(0x00200019), None);
+    assert_eq!(Oleaut32Api32::from_id(0x0020001f), None);
 }
 #[test]
 fn automation_limits_and_error_receipts_are_literal_and_bounded() {
@@ -38,6 +38,15 @@ fn bstr_export_ordinals_match_the_authored_x86_windows_reference() {
             .collect::<Vec<_>>(),
         [2, 4, 150, 3, 5, 6, 7, 149]
     );
+    assert_eq!(
+        module.exports[24..]
+            .iter()
+            .map(|export| export.ordinal.unwrap())
+            .collect::<Vec<_>>(),
+        [8, 9, 10, 11, 12, 147]
+    );
+    assert_eq!(Oleaut32Api32::VariantInit.stack_words(), 1);
+    assert_eq!(Oleaut32Api32::VariantChangeTypeEx.stack_words(), 5);
 }
 
 #[test]

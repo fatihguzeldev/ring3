@@ -2,6 +2,7 @@ mod arrays;
 mod catalog;
 mod strings;
 mod types;
+pub(crate) mod variants;
 
 pub(crate) use arrays::{ArrayBound32, ArrayLayout32};
 pub use catalog::{Oleaut32Api32, oleaut32_module};

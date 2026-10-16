@@ -29,6 +29,12 @@ pub enum Oleaut32Api32 {
     SafeArrayCopy = 0x0020_0016,
     SafeArrayRedim = 0x0020_0017,
     SafeArrayGetVartype = 0x0020_0018,
+    VariantInit = 0x0020_0019,
+    VariantClear = 0x0020_001a,
+    VariantCopy = 0x0020_001b,
+    VariantCopyInd = 0x0020_001c,
+    VariantChangeType = 0x0020_001d,
+    VariantChangeTypeEx = 0x0020_001e,
 }
 impl Oleaut32Api32 {
     pub const ALL: &'static [Self] = &[
@@ -56,6 +62,12 @@ impl Oleaut32Api32 {
         Self::SafeArrayCopy,
         Self::SafeArrayRedim,
         Self::SafeArrayGetVartype,
+        Self::VariantInit,
+        Self::VariantClear,
+        Self::VariantCopy,
+        Self::VariantCopyInd,
+        Self::VariantChangeType,
+        Self::VariantChangeTypeEx,
     ];
     pub fn from_id(id: u32) -> Option<Self> {
         Self::ALL
@@ -94,6 +106,12 @@ impl Oleaut32Api32 {
             Self::SafeArrayCopy => "SafeArrayCopy",
             Self::SafeArrayRedim => "SafeArrayRedim",
             Self::SafeArrayGetVartype => "SafeArrayGetVartype",
+            Self::VariantInit => "VariantInit",
+            Self::VariantClear => "VariantClear",
+            Self::VariantCopy => "VariantCopy",
+            Self::VariantCopyInd => "VariantCopyInd",
+            Self::VariantChangeType => "VariantChangeType",
+            Self::VariantChangeTypeEx => "VariantChangeTypeEx",
         }
     }
     pub fn stack_words(self) -> u32 {
@@ -122,6 +140,10 @@ impl Oleaut32Api32 {
             Self::SafeArrayCopy => 2,
             Self::SafeArrayRedim => 2,
             Self::SafeArrayGetVartype => 2,
+            Self::VariantInit | Self::VariantClear => 1,
+            Self::VariantCopy | Self::VariantCopyInd => 2,
+            Self::VariantChangeType => 4,
+            Self::VariantChangeTypeEx => 5,
         }
     }
     pub fn ordinal(self) -> u16 {
@@ -150,19 +172,29 @@ impl Oleaut32Api32 {
             Self::SafeArrayCopy => 27,
             Self::SafeArrayRedim => 40,
             Self::SafeArrayGetVartype => 77,
+            Self::VariantInit => 8,
+            Self::VariantClear => 9,
+            Self::VariantCopy => 10,
+            Self::VariantCopyInd => 11,
+            Self::VariantChangeType => 12,
+            Self::VariantChangeTypeEx => 147,
         }
     }
     pub(crate) fn is_array(self) -> bool {
-        self.id() >= Self::SafeArrayCreate.id()
+        (Self::SafeArrayCreate.id()..=Self::SafeArrayGetVartype.id()).contains(&self.id())
+    }
+    pub(crate) fn is_variant(self) -> bool {
+        self.id() >= Self::VariantInit.id()
     }
     pub(crate) fn returns_hresult(self) -> bool {
-        self.is_array()
+        (self.is_array() || self.is_variant())
             && !matches!(
                 self,
                 Self::SafeArrayCreate
                     | Self::SafeArrayCreateVector
                     | Self::SafeArrayGetDim
                     | Self::SafeArrayGetElemsize
+                    | Self::VariantInit
             )
     }
 }
