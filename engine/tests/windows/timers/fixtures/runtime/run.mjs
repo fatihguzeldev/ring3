@@ -169,6 +169,9 @@ for (let iteration = 0; iteration < 64 && !exited; iteration++) {
   const token = take(112).readUInt32LE(16);
   if (unit.expected === 'exit') finalOracles();
   assert.equal(api.complete_resident_windows_call(...key, owner.low, owner.high, token), 0, unit.name);
+  if (unit.name === 'multimedia-context') {
+    assert.equal(get(16), unit.expected, unit.name);
+  }
   executed.add(unit.start);
   calls.push({name: unit.name, thread: unit.thread, token});
   if (unit.expected === 'exit') {
