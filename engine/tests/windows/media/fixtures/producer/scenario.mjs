@@ -1,5 +1,6 @@
 import {captureEffects} from './capture_effects.mjs';
 import {effects} from './effects.mjs';
+import {haptics} from './haptics.mjs';
 import {activation} from './activation.mjs';
 import {rawInput, rawInputSymbols} from './rawinput.mjs';
 import {builder} from '../../../../support/pe32/image.mjs';
@@ -84,6 +85,7 @@ export function image() {
   b.com('ReleaseLegacyInput', 'legacyInput', 0x90100, 2);
   external('DirectInput8Create', 0x80001, [0x400000, 0x800, iidInput8, b.addresses.dinput, 0]);
   b.com('EnumInputDevices', 'dinput', 0x90700, 4, [0, b.callbacks[1].entry, 0, 0]);
+  haptics(b);
   b.com('CreateKeyboard', 'dinput', 0x90700, 3, [keyboardGuid, b.addresses.keyboard, 0]);
   b.com('SetKeyboardFormat', 'keyboard', 0x90f00, 11, [keyFormat]);
   b.com('SetKeyboardBufferSize', 'keyboard', 0x90f00, 6, [1, bufferProperty]);

@@ -37,6 +37,10 @@ export function configure({api, request, metadata}) {
   state[176] = 8; const invalidState = Buffer.from(state); invalidState.writeInt32LE(1, 40); request(invalidState);
   assert.equal(api.submit_controller_input(Number(mediaEpoch), 0, 192), 7, 'disabled controller objects remain neutral');
   request(state); assert.equal(api.submit_controller_input(Number(mediaEpoch), 0, 192), 0);
+  assert.equal(api.configure_controller_haptics(Number(mediaEpoch & 0xffffffffn),Number(mediaEpoch >> 32n),0,2,8),0);
+  const files=Buffer.alloc(80);files.write('R3FC');files.writeUInt16LE(1,4);files.writeUInt16LE(1,6);files.writeUInt32LE(80,8);
+  [64,64,8,8,8,16*1024*1024,64,8,8,16,8,16*1024*1024,0x40000000,0x1000].forEach((value,i)=>files.writeUInt32LE(value,16+i*4));
+  request(files);assert.equal(api.configure_files(80),0);
   assert.equal(api.register_dinput_module(0x74000000), 0);
   assert.equal(api.register_dinput8_module(0x75000000), 0);
   assert.equal(api.configure_ole32(0x12000000, 64, 64, 16), 0);

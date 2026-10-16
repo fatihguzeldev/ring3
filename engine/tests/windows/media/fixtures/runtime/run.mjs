@@ -9,6 +9,7 @@ import {image} from '../producer/scenario.mjs';
 import {configure} from './setup.mjs';
 import {afterCaptureEffectCall} from './capture_effects.mjs';
 import {afterEffectCall} from './effects.mjs';
+import {afterHapticCall,inspectForceFileCallback} from './haptics.mjs';
 import {beforeActivationCall, afterActivationCall} from './activation.mjs';
 import {beforeRawInputCall, afterRawInputCall} from './rawinput.mjs';
 
@@ -36,7 +37,7 @@ function metadata(kind) {
   return {epoch: data.readBigUInt64LE(16), values: Array.from({length: 5}, (_, i) => data.readBigUInt64LE(24 + i * 8))};
 }
 const context = configure({api, request, metadata});
-const guest = image().seal(); assert.equal(guest.calls.length, 177); writeFileSync(join(output, 'windows-media-authored.exe'), guest.bytes);
+const guest = image().seal(); assert.equal(guest.calls.length, 196); writeFileSync(join(output, 'windows-media-authored.exe'), guest.bytes);
 assert.equal(api.begin_module_input(guest.bytes.length, name('windows-media-authored.exe')), 0);
 for (let offset = 0; offset < guest.bytes.length; offset += 4096) {
   const chunk = guest.bytes.subarray(offset, offset + 4096); request(chunk);
@@ -99,6 +100,7 @@ function finishCallbacks(generated, generation) {
     assert.equal(api.pending_windows_callback(), 0); const request = take(96);
     const provider = request.readUInt32LE(12); if (!provider) return;
     assert.ok([1, 3, 4].includes(provider)); assert.ok(guest.callbacks.some(({entry}) => entry === request.readUInt32LE(16)));
+    inspectForceFileCallback(request,{read,guest});
     assert.equal(api.begin_windows_callback(...key, generation, guest.returnPc, guest.returnId), 0);
     const token = take(64).readUInt32LE(16); run(generated, `callback-${provider}`, guest.returnId);
     assert.equal(api.finish_windows_callback(...key, generation, token), 0);
@@ -181,6 +183,7 @@ for (const call of guest.calls) {
   if (call.name === 'EmptyKeyboardData') assert.equal(read(guest.addresses.eventCount), 0);
   afterCaptureEffectCall(call,{api,guest,read,pair,metadata,take,request,measurements,memory});
   afterEffectCall(call,{api,guest,read,pair,metadata,take,pcm});
+  afterHapticCall(call,{api,context,pair,metadata,take,read,guest});
   afterActivationCall(call, {guest, read});
   afterRawInputCall(call, {guest, read});
   calls.push({name: call.name, id: call.id, result, generation});

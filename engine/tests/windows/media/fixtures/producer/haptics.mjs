@@ -1,0 +1,38 @@
+export function haptics(b) {
+  const {allocate,data,string,ref}=b;
+  for(const name of ['forceDevice','forceEffect','forceStatus','forceGuid','ffeReadEffect']) allocate(name,Array(name==='forceGuid'?4:1).fill(0));
+  const instance=data('forceInstance',[0x01010101,0x01010101,0x01010101,0x01010101]);
+  const objects=data('forceObjects',[0,0,2,0,0,4,0x102,0]);
+  const format=data('forceFormat',[24,16,1,8,2,objects]);
+  const autocenter=data('forceAutocenter',[20,16,0,0,0]);
+  const kind=data('forceConstant',[0x13541c20,0x11d08e33,0xa000d09a,0x356ea0c9]);
+  const axes=data('forceAxes',[2,0x102]),direction=data('forceDirection',[1,0]),payload=data('forcePayload',[4000]);
+  const definition=data('forceDefinition',[56,0x11,10000,0,10000,0xffffffff,0,2,axes,direction,0,4,payload,0]);
+  const file=data('forceFileEntry',[284,0x13541c20,0x11d08e33,0xa000d09a,0x356ea0c9,definition,...Array(65).fill(0)]);
+  b.write(file+24,0x68747561);b.write(file+28,0x6465726f);
+  const filename=string('forceFilename','C:\\authored.ffe');
+  const customSamples=data('forceCustomSamples',[4000,0,-2000,0,1000,0,0,0]);
+  const customPayload=data('forceCustomPayload',[2,1000,8,customSamples]);
+  const customDefinition=data('forceCustomDefinition',[56,0x11,10000,0,10000,0xffffffff,0,2,axes,direction,0,16,customPayload,0]);
+  const customFile=data('forceCustomFileEntry',[284,0x13541c2b,0x11d08e33,0xa000d09a,0x356ea0c9,customDefinition,...Array(65).fill(0)]);
+  const customFilename=string('forceCustomFilename','C:\\authored-custom.ffe');
+  b.com('CreateForceDevice','dinput',0x90700,3,[instance,b.addresses.forceDevice,0]);
+  b.com('SetForceFormat','forceDevice',0x90f00,11,[format]);
+  b.com('DisableAutocenter','forceDevice',0x90f00,6,[9,autocenter]);
+  b.com('SetForceCooperativeLevel','forceDevice',0x90f00,13,[ref('window'),9]);
+  b.com('AcquireForceDevice','forceDevice',0x90f00,7);
+  b.com('CreateConstantForce','forceDevice',0x90f00,18,[kind,definition,b.addresses.forceEffect,0]);
+  b.com('ConstantForceGuid','forceEffect',0x91200,4,[b.addresses.forceGuid]);
+  b.com('StartConstantForce','forceEffect',0x91200,7,[1,0],0,'force-frame');
+  b.com('ConstantForceStatus','forceEffect',0x91200,9,[b.addresses.forceStatus]);
+  b.com('WriteForceFile','forceDevice',0x90f00,28,[filename,1,file,0]);
+  b.com('EnumForceFile','forceDevice',0x90f00,27,[filename,b.callbacks[1].entry,0xface,0],0,'force-file');
+  b.com('WriteCustomForceFile','forceDevice',0x90f00,28,[customFilename,1,customFile,0]);
+  b.com('EnumCustomForceFile','forceDevice',0x90f00,27,[customFilename,b.callbacks[1].entry,0xcafe,0],0,'custom-force-file');
+  b.com('StopConstantForce','forceEffect',0x91200,8);
+  b.com('UnloadConstantForce','forceEffect',0x91200,11);
+  b.com('UndownloadedForceStart','forceEffect',0x91200,7,[1,0x80000000],0x80040203);
+  b.com('ReleaseForceEffect','forceEffect',0x91200,2);
+  b.com('UnacquireForceDevice','forceDevice',0x90f00,8);
+  b.com('ReleaseForceDevice','forceDevice',0x90f00,2);
+}
