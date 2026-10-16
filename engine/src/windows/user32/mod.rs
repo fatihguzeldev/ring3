@@ -18,3 +18,4 @@ pub use types::{
 mod tests;
 
 pub(crate) mod menus;
+pub(crate) mod accelerators;
