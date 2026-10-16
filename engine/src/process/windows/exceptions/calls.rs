@@ -31,6 +31,13 @@ impl EngineInstance {
         let args = frame.arguments();
         use ExceptionApi32::*;
         match api {
+            DebugBreak => {
+                let mut original = self.windows_context_state()?;
+                original.state = frame.complete(frame.state().registers[0]);
+                let record = ExceptionRecord32::new(0x80000003, 0, frame.state().eip, &[])
+                    .map_err(HostError::Exception)?;
+                self.begin_exception_delivery(record, original, owner, None, None, None)?;
+            }
             RaiseException => {
                 if args[1] & !1 != 0 || args[2] > 15 {
                     return Err(HostError::Exception(ExceptionError32::InvalidParameter));

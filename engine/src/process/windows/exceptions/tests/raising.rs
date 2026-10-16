@@ -339,3 +339,38 @@ fn rtlunwind_handlers_receive_the_original_supplied_exception_record() {
     );
     assert_eq!(engine.read_exception_record(address).unwrap().flags, 2);
 }
+
+#[test]
+fn debugbreak_delivers_a_real_breakpoint_and_resumes_the_actual_caller() {
+    let mut engine = engine();
+    engine
+        .exceptions
+        .handlers
+        .add(false, true, 0x401000)
+        .unwrap();
+    captured_call(&mut engine, ExceptionApi32::DebugBreak.id(), &[]);
+    let dispatch = engine.pending_windows_exception().unwrap();
+    assert_eq!(dispatch.phase, ExceptionPhase32::Vectored);
+    let record = engine.read_exception_record(dispatch.record).unwrap();
+    assert_eq!(record.code, 0x80000003);
+    assert_eq!(record.flags, 0);
+    assert_eq!(
+        record.address,
+        engine
+            .loaded_windows_modules()
+            .flat_map(|module| module.gates())
+            .find(|gate| gate.id == ExceptionApi32::DebugBreak.id())
+            .unwrap()
+            .entry
+            .0
+    );
+    returned(&mut engine, dispatch, u32::MAX, false);
+    assert_eq!(
+        engine
+            .finish_windows_exception_handler(77, dispatch.id)
+            .unwrap(),
+        None
+    );
+    assert_eq!(engine.windows_context_state().unwrap().state.eip, 0x401010);
+    assert!(engine.pending_call.is_none());
+}

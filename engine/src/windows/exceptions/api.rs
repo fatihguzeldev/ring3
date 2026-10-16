@@ -14,6 +14,7 @@ pub enum ExceptionApi32 {
     NtContinue,
     RtlRaiseException,
     NtRaiseException,
+    DebugBreak,
 }
 pub const EXCEPTION_RETURN_GATE: u32 = 0x00121000;
 pub const EXCEPTION_NESTED_GATE: u32 = 0x00121001;
@@ -27,6 +28,7 @@ impl ExceptionApi32 {
         Self::SetUnhandledExceptionFilter,
         Self::UnhandledExceptionFilter,
         Self::RaiseException,
+        Self::DebugBreak,
         Self::RtlUnwind,
         Self::RtlCaptureContext,
         Self::RtlRestoreContext,
@@ -71,10 +73,12 @@ impl ExceptionApi32 {
             Self::NtContinue => "NtContinue",
             Self::RtlRaiseException => "RtlRaiseException",
             Self::NtRaiseException => "NtRaiseException",
+            Self::DebugBreak => "DebugBreak",
         }
     }
     pub fn stack_words(self) -> u32 {
         match self {
+            Self::DebugBreak => 0,
             Self::AddVectoredExceptionHandler
             | Self::AddVectoredContinueHandler
             | Self::RtlRestoreContext
