@@ -212,7 +212,20 @@ fn nested_captured_load_finishes_inner_reply_then_restores_outer_initializer() {
         text(&mut f, TEXT, "helper.dll", false);
         let (outer_token, outer_state, outer_before) =
             capture(&mut f, WindowsApi32::LoadLibraryA, &[TEXT]);
+        let outer_generation = f.generation;
         complete(&mut f, outer_token).unwrap();
+        if matches!(owner, Owner::Replacement) {
+            assert_eq!(
+                f.engine.generation(),
+                0,
+                "outer artifact is parked by the initializer"
+            );
+            compile_initializer_gates(&mut f);
+            assert!(
+                f.generation > outer_generation,
+                "nested code gets its own process-wide generation"
+            );
+        }
         let outer = f.engine.module_initializer().unwrap().unwrap();
         text(&mut f, TEXT + 0x40, "nested.dll", false);
         let outer_frame = [
@@ -260,6 +273,12 @@ fn nested_captured_load_finishes_inner_reply_then_restores_outer_initializer() {
         assert!(complete(&mut f, inner_token).is_err());
         return_initializer(&mut f, outer, 1);
         f.engine.finish_module_initializer(outer.token).unwrap();
+        assert_eq!(
+            f.engine.generation(),
+            outer_generation,
+            "outer artifact authority is restored"
+        );
+        f.generation = outer_generation;
         let mut expected = expected_return(
             outer_before,
             outer_state,

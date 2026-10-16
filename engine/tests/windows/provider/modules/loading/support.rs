@@ -81,6 +81,28 @@ pub fn fixture(owner: Owner, forwarder: bool) -> Fixture {
             .unwrap(),
         ModuleOperation32::Loaded { handle: MAIN }
     );
+    let gate_count = describe_kernel_gates(&mut engine);
+    let resident = engine
+        .compile_resident_with_gates(gate_count, gate_count)
+        .unwrap()
+        .get();
+    let generation = engine.compile_with_gates(gate_count, gate_count).unwrap();
+    Fixture {
+        engine,
+        owner,
+        generation,
+        resident,
+    }
+}
+
+pub fn compile_initializer_gates(f: &mut Fixture) {
+    if matches!(f.owner, Owner::Replacement) {
+        let count = describe_kernel_gates(&mut f.engine);
+        f.generation = f.engine.compile_with_gates(count, count).unwrap();
+    }
+}
+
+fn describe_kernel_gates(engine: &mut EngineInstance) -> u32 {
     let apis = [
         WindowsApi32::GetLastError,
         WindowsApi32::GetModuleHandleA,
@@ -107,19 +129,7 @@ pub fn fixture(owner: Owner, forwarder: bool) -> Fixture {
         let offset = TRANSFER_OFFSET + index * 4;
         engine.arena_mut().unwrap()[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
     }
-    let resident = engine
-        .compile_resident_with_gates(gates.len() as u32, gates.len() as u32)
-        .unwrap()
-        .get();
-    let generation = engine
-        .compile_with_gates(gates.len() as u32, gates.len() as u32)
-        .unwrap();
-    Fixture {
-        engine,
-        owner,
-        generation,
-        resident,
-    }
+    gates.len() as u32
 }
 
 pub fn text(f: &mut Fixture, address: u32, value: &str, wide: bool) {

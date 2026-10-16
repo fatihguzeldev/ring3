@@ -892,33 +892,34 @@ fn captured_arguments_and_return_frames_ignore_public_ram_and_receipt_tampering(
 }
 
 #[test]
+fn callback_vm_calls_consume_win32_arguments_and_accept_reserve_commit_and_guard() {
+    for (arguments, result, error, pages) in [
+        ([1, 1, 0x3000, 4], 0, 487, 9),
+        ([0, 0, 0x3000, 4], 0, 87, 9),
+        ([0, 65_537, 0x3000, 4], 0, 8, 9),
+        ([0, 1, 0x1000, 4], 0x1000_0000, LAST_ERROR, 10),
+        ([0, 1, 0x3000, 0x120], 0x1000_0000, LAST_ERROR, 10),
+    ] {
+        let mut f = fixture(12, true, true);
+        invoke(&mut f, WindowsApi32::SetLastError, &[LAST_ERROR], SENTINEL);
+        let (inner, state) = capture(
+            &mut f,
+            WindowsApi32::VirtualAlloc,
+            CallingConvention32::Stdcall,
+            &arguments,
+        );
+        completed(&mut f, inner, state, result);
+        assert_eq!(f.engine.memory().unwrap().mapped_pages(), pages);
+        invoke(&mut f, WindowsApi32::GetLastError, &[], error);
+        reject(&mut f, HostError::Call(CallError::InvalidToken), |f| {
+            complete(f, inner)
+        });
+    }
+}
+
+#[test]
 fn invalid_provider_shapes_and_callback_exit_process_refuse_before_effects() {
     for (api, convention, arguments) in [
-        (
-            WindowsApi32::VirtualAlloc,
-            CallingConvention32::Stdcall,
-            vec![1, 1, 0x3000, 4],
-        ),
-        (
-            WindowsApi32::VirtualAlloc,
-            CallingConvention32::Stdcall,
-            vec![0, 0, 0x3000, 4],
-        ),
-        (
-            WindowsApi32::VirtualAlloc,
-            CallingConvention32::Stdcall,
-            vec![0, 65537, 0x3000, 4],
-        ),
-        (
-            WindowsApi32::VirtualAlloc,
-            CallingConvention32::Stdcall,
-            vec![0, 1, 0x1000, 4],
-        ),
-        (
-            WindowsApi32::VirtualAlloc,
-            CallingConvention32::Stdcall,
-            vec![0, 1, 0x3000, 0x120],
-        ),
         (
             WindowsApi32::VirtualAlloc,
             CallingConvention32::Stdcall,

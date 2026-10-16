@@ -82,13 +82,14 @@ fn capture(
 
 fn complete(
     engine: &mut EngineInstance,
-    owner: Owner,
-    unit: u64,
+    authority: (Owner, u64),
     token: u32,
     state: State32,
     result: u32,
     count: u32,
+    output: Option<u32>,
 ) {
+    let (owner, unit) = authority;
     let mut expected = engine.arena().to_vec();
     let mut next = state;
     next.registers[0] = result;
@@ -108,7 +109,7 @@ fn complete(
         Owner::Resident => engine.complete_resident_windows_call(KEY, unit, token),
     };
     assert_eq!(actual, Ok(()));
-    assert_eq!(engine.arena(), expected);
+    assert_eq!(engine.arena(), expected, "output pointer {output:#x?}");
 }
 
 #[test]
@@ -134,7 +135,7 @@ fn virtual_protect_changes_an_owned_rw_page_to_rx_and_reports_old_mode() {
             Owner::Resident => engine.compile_resident_with_gates(2, 2).unwrap().get(),
         };
         let (token, state) = capture(&mut engine, owner, unit, ALLOC, [0, 4096, 0x3000, 4]);
-        complete(&mut engine, owner, unit, token, state, WINDOW, 4);
+        complete(&mut engine, (owner, unit), token, state, WINDOW, 4, None);
         engine.write32(OUTPUT, 0xfeed_cafe).unwrap();
         let (token, state) = capture(
             &mut engine,
@@ -143,7 +144,7 @@ fn virtual_protect_changes_an_owned_rw_page_to_rx_and_reports_old_mode() {
             PROTECT,
             [WINDOW, 4096, 0x20, OUTPUT],
         );
-        complete(&mut engine, owner, unit, token, state, 1, 4);
+        complete(&mut engine, (owner, unit), token, state, 1, 4, None);
         let memory = engine.memory().unwrap();
         let mut old = [0; 4];
         memory.read(GuestAddress(OUTPUT), &mut old).unwrap();
@@ -164,6 +165,7 @@ struct Fixture {
     generation: u32,
     resident: u64,
     keeper: u64,
+    output: Option<u32>,
 }
 
 impl Fixture {
@@ -203,6 +205,7 @@ impl Fixture {
             generation,
             resident,
             keeper,
+            output: None,
         }
     }
 
@@ -234,12 +237,12 @@ impl Fixture {
         let unit = self.unit();
         complete(
             &mut self.engine,
-            self.owner,
-            unit,
+            (self.owner, unit),
             token,
             state,
             result,
             count,
+            self.output,
         );
     }
 
@@ -459,33 +462,62 @@ fn partial_and_mixed_page_changes_report_only_the_first_old_mode() {
 }
 
 #[test]
-fn unsupported_shapes_overlap_and_old_modes_leave_the_call_retryable() {
+fn invalid_protect_arguments_are_consumed_without_changing_memory_or_artifacts() {
     for owner in [Owner::Replacement, Owner::Resident] {
-        let mut f = Fixture::new(owner, 6);
-        f.allocate(8192, 4, WINDOW);
-        f.set_error(0xf123_4567);
-        for args in [
-            [WINDOW, 0, 4, OUTPUT],
-            [WINDOW, 65_537, 4, OUTPUT],
-            [u32::MAX, 2, 4, OUTPUT],
-            [WINDOW, 1, 0x140, OUTPUT],
-            [WINDOW, 1, 3, OUTPUT],
-            [WINDOW + 127, 1, 4, WINDOW],
-            [WINDOW + 127, 1, 4, WINDOW + 4095],
-            [WINDOW + 127, 1, 4, WINDOW - 3],
-            [CODE + 127, 1, 4, CODE],
+        for (args, error) in [
+            ([WINDOW, 0, 4, OUTPUT], 87),
+            ([WINDOW, 65_537, 4, OUTPUT], 487),
+            ([u32::MAX, 2, 4, OUTPUT], 87),
+            ([WINDOW, 1, 3, OUTPUT], 87),
+            ([WINDOW + 127, 1, 4, WINDOW - 3], 998),
+            ([CODE + 127, 1, 4, CODE], 487),
         ] {
-            let (token, _) = f.capture(PROTECT, args);
-            reject(&mut f, token, HostError::Call(CallError::InvalidRequest));
-            reject(&mut f, token, HostError::Call(CallError::InvalidRequest));
-            f.engine.abandon_call(KEY, token).unwrap();
-            f.invoke(GET, [0; 4], 0xf123_4567);
+            let mut f = Fixture::new(owner, 6);
+            f.allocate(8192, 4, WINDOW);
+            f.set_error(0xf123_4567);
+            let (token, state) = f.capture(PROTECT, args);
+            let before = saved(&f);
+            f.completed(token, state, 0, 4);
+            let after = saved(&f);
+            assert_eq!(after.ram, before.ram);
+            assert_eq!(after.access, before.access);
+            assert_eq!(after.modules, before.modules);
+            assert_eq!(after.mapped, before.mapped);
+            reject(&mut f, token, HostError::Call(CallError::InvalidToken));
+            f.invoke(GET, [0; 4], error);
         }
         for bits in [2, 6] {
+            let mut f = Fixture::new(owner, 6);
+            f.allocate(8192, 4, WINDOW);
             f.engine.protect(WINDOW, 1, bits).unwrap();
-            let (token, _) = f.capture(PROTECT, [WINDOW, 1, 4, 0]);
-            reject(&mut f, token, HostError::Call(CallError::InvalidRequest));
-            f.engine.abandon_call(KEY, token).unwrap();
+            let (token, state) = f.capture(PROTECT, [WINDOW, 1, 4, 0]);
+            let before = saved(&f);
+            f.completed(token, state, 0, 4);
+            let after = saved(&f);
+            assert_eq!(after.ram, before.ram);
+            assert_eq!(after.access, before.access);
+            f.invoke(GET, [0; 4], 998);
+        }
+    }
+}
+
+#[test]
+fn guarded_protection_and_output_aliases_use_atomic_full_vm_semantics() {
+    for owner in [Owner::Replacement, Owner::Resident] {
+        for (address, protection, output) in [
+            (WINDOW, 0x140, OUTPUT),
+            (WINDOW + 127, 4, WINDOW),
+            (WINDOW + 127, 4, WINDOW + 4095),
+        ] {
+            let mut f = Fixture::new(owner, 6);
+            f.allocate(8192, 4, WINDOW);
+            f.set_error(0xf123_4567);
+            let (token, state) = f.capture(PROTECT, [address, 1, protection, output]);
+            f.completed(token, state, 1, 4);
+            assert_eq!(word(&f.engine, output), 4);
+            f.invoke(PROTECT, [WINDOW, 1, 4, OUTPUT], 1);
+            assert_eq!(word(&f.engine, OUTPUT), protection);
+            f.current();
             f.invoke(GET, [0; 4], 0xf123_4567);
         }
     }
@@ -496,6 +528,7 @@ fn invalid_outputs_complete_false_without_partial_writes_or_protection() {
     for owner in [Owner::Replacement, Owner::Resident] {
         for output in [0, u32::MAX - 1, 0xb000, 0x9ffe, 0xa000] {
             let mut f = Fixture::new(owner, 6);
+            f.output = Some(output);
             f.allocate(4096, 4, WINDOW);
             if output == 0xa000 {
                 f.engine.map(0xa000, 1, 1).unwrap();
@@ -518,13 +551,13 @@ fn invalid_outputs_complete_false_without_partial_writes_or_protection() {
 }
 
 #[test]
-fn nonowned_and_adjacent_allocations_fail_before_null_output() {
+fn invalid_targets_and_null_outputs_are_distinct_failure_neutral_errors() {
     for owner in [Owner::Replacement, Owner::Resident] {
         let mut f = Fixture::new(owner, 36);
         f.allocate(65_536, 4, WINDOW);
         f.allocate(65_536, 4, WINDOW + 0x10000);
         for (address, size) in [(CODE, 1), (WINDOW + 65_535, 2), (WINDOW + 0x20000, 1)] {
-            let (token, state) = f.capture(PROTECT, [address, size, 0x20, 0]);
+            let (token, state) = f.capture(PROTECT, [address, size, 0x20, OUTPUT]);
             let before = saved(&f);
             f.completed(token, state, 0, 4);
             let after = saved(&f);
@@ -542,6 +575,14 @@ fn nonowned_and_adjacent_allocations_fail_before_null_output() {
                 );
             }
             f.invoke(GET, [0; 4], 487);
+            let (token, state) = f.capture(PROTECT, [address, size, 0x20, 0]);
+            let before = saved(&f);
+            f.completed(token, state, 0, 4);
+            let after = saved(&f);
+            assert_eq!(after.ram, before.ram);
+            assert_eq!(after.access, before.access);
+            assert_eq!(after.modules, before.modules);
+            f.invoke(GET, [0; 4], 998);
         }
     }
 }

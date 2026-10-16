@@ -383,7 +383,13 @@ fn unknown_interior_foreign_and_released_addresses_are_consumed_false_returns() 
         f.engine.write32(foreign, 0x2468_ace0).unwrap();
         let data = ram(&f.engine, WINDOW, 8192).unwrap();
         let units = retained(&f);
-        for address in [0, WINDOW + 1, WINDOW + 4096, MAIN, foreign] {
+        for (address, error) in [
+            (0, 487),
+            (WINDOW + 1, 87),
+            (WINDOW + 4096, 87),
+            (MAIN, 487),
+            (foreign, 487),
+        ] {
             let (token, state) = capture(&mut f, owner, FREE, 3, [address, 0, 0x8000, 0]);
             completed(&mut f, owner, token, state, 0, 3);
             assert_eq!(f.engine.memory().unwrap().mapped_pages(), 6);
@@ -397,7 +403,7 @@ fn unknown_interior_foreign_and_released_addresses_are_consumed_false_returns() 
                 complete(&mut f, owner, token),
                 Err(HostError::Call(CallError::InvalidToken))
             );
-            last_error_value(&mut f, owner, 487);
+            last_error_value(&mut f, owner, error);
         }
         let (token, state) = capture(&mut f, owner, FREE, 3, [WINDOW, 0, 0x8000, 0]);
         completed(&mut f, owner, token, state, 1, 3);
@@ -415,15 +421,39 @@ fn unknown_interior_foreign_and_released_addresses_are_consumed_false_returns() 
 }
 
 #[test]
+fn invalid_release_parameters_are_consumed_without_unmapping_the_reservation() {
+    for owner in [Owner::Replacement, Owner::Resident] {
+        for args in [
+            [WINDOW, 1, 0x8000, 0],
+            [WINDOW, 0, 0x2000, 0],
+            [WINDOW, 0, 0x8001, 0],
+        ] {
+            let mut f = fixture();
+            let (token, state) = capture(&mut f, owner, ALLOC, 4, [0, 4097, 0x3000, 4]);
+            completed(&mut f, owner, token, state, WINDOW, 4);
+            let data = ram(&f.engine, WINDOW, 8192).unwrap();
+            let units = retained(&f);
+            let (token, state) = capture(&mut f, owner, FREE, 3, args);
+            completed(&mut f, owner, token, state, 0, 3);
+            assert_eq!(f.engine.memory().unwrap().mapped_pages(), 5);
+            assert_eq!(ram(&f.engine, WINDOW, 8192).unwrap(), data);
+            assert_eq!(retained(&f), units);
+            last_error_value(&mut f, owner, 87);
+            assert_eq!(
+                complete(&mut f, owner, token),
+                Err(HostError::Call(CallError::InvalidToken))
+            );
+        }
+    }
+}
+
+#[test]
 fn unsupported_shapes_and_authority_guards_keep_release_retryable_and_arguments_frozen() {
     for owner in [Owner::Replacement, Owner::Resident] {
         let mut f = fixture();
         let (token, state) = capture(&mut f, owner, ALLOC, 4, [0, 4097, 0x3000, 4]);
         completed(&mut f, owner, token, state, WINDOW, 4);
         for (convention, count, args) in [
-            (CallingConvention32::Stdcall, 3, [WINDOW, 1, 0x8000, 0]),
-            (CallingConvention32::Stdcall, 3, [WINDOW, 0, 0x2000, 0]),
-            (CallingConvention32::Stdcall, 3, [WINDOW, 0, 0x8001, 0]),
             (CallingConvention32::Cdecl, 3, [WINDOW, 0, 0x8000, 0]),
             (CallingConvention32::Stdcall, 2, [WINDOW, 0, 0x8000, 0]),
             (CallingConvention32::Stdcall, 4, [WINDOW, 0, 0x8000, 0]),

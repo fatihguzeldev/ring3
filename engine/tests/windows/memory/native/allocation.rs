@@ -531,22 +531,19 @@ fn capacity_failure_is_an_ordinary_consumed_null_return_and_isolates_last_error(
 }
 
 #[test]
-fn unsupported_requests_keep_the_captured_token_retryable_without_allocation() {
+fn invalid_win32_arguments_are_consumed_and_valid_abi_shapes_remain_retryable() {
     for owner in [Owner::Replacement, Owner::Resident] {
-        let mut f = fixture(8);
-        set_error(&mut f, owner, 0xf123_4567);
-        for arguments in [
-            [1, 1, 0x3000, 4],
-            [0, 0, 0x3000, 4],
-            [0, 65_537, 0x3000, 4],
-            [0, u32::MAX, 0x3000, 4],
-            [0, 1, 0x1000, 4],
-            [0, 1, 0x2000, 4],
-            [0, 1, 0x3001, 4],
-            [0, 1, 0x3000, 0],
-            [0, 1, 0x3000, 0x140],
+        for (arguments, error) in [
+            ([1, 1, 0x3000, 4], 487),
+            ([0, 0, 0x3000, 4], 87),
+            ([0, 65_537, 0x3000, 4], 8),
+            ([0, u32::MAX, 0x3000, 4], 8),
+            ([0, 1, 0x3001, 4], 87),
+            ([0, 1, 0x3000, 0], 87),
         ] {
-            let (token, _) = capture(
+            let mut f = fixture(8);
+            set_error(&mut f, owner, 0xf123_4567);
+            let (token, state) = capture(
                 &mut f,
                 owner,
                 ALLOC,
@@ -554,23 +551,20 @@ fn unsupported_requests_keep_the_captured_token_retryable_without_allocation() {
                 4,
                 arguments,
             );
-            reject(&mut f, HostError::Call(CallError::InvalidRequest), |f| {
+            let before = saved(&f);
+            completed(&mut f, owner, token, state, 0, 4);
+            let after = saved(&f);
+            assert_eq!(after.ram, before.ram);
+            assert_eq!(after.pages, before.pages);
+            assert_eq!(after.artifact, before.artifact);
+            assert_eq!(after.units, before.units);
+            reject(&mut f, HostError::Call(CallError::InvalidToken), |f| {
                 complete(f, owner, token)
             });
-            // generic recovery consumes the same pending record without invoking allocation.
-            match owner {
-                Owner::Replacement => f
-                    .engine
-                    .complete_call(KEY, f.generation, token, 0xfeed_face),
-                Owner::Resident => {
-                    f.engine
-                        .complete_resident_call(KEY, f.resident, token, 0xfeed_face)
-                }
-            }
-            .unwrap();
-            assert_eq!(f.engine.memory().unwrap().mapped_pages(), 3);
-            last_error(&mut f, owner, 0xf123_4567);
+            last_error(&mut f, owner, error);
         }
+        let mut f = fixture(8);
+        set_error(&mut f, owner, 0xf123_4567);
         for (convention, count) in [
             (CallingConvention32::Cdecl, 4),
             (CallingConvention32::Thiscall, 4),
@@ -584,6 +578,41 @@ fn unsupported_requests_keep_the_captured_token_retryable_without_allocation() {
             f.engine.abandon_call(KEY, token).unwrap();
         }
         last_error(&mut f, owner, 0xf123_4567);
+    }
+}
+
+#[test]
+fn reservation_commit_large_and_guard_requests_use_the_full_windows_vm_contract() {
+    for owner in [Owner::Replacement, Owner::Resident] {
+        for (size, flags, protection, pages) in [
+            (1, 0x1000, 4, 1),
+            (1, 0x2000, 4, 0),
+            (65_537, 0x3000, 4, 17),
+            (1, 0x3000, 0x140, 1),
+        ] {
+            let mut f = fixture(24);
+            set_error(&mut f, owner, 0xf123_4567);
+            let (token, state) = capture(
+                &mut f,
+                owner,
+                ALLOC,
+                CallingConvention32::Stdcall,
+                4,
+                [0, size, flags, protection],
+            );
+            completed(&mut f, owner, token, state, WINDOW, 4);
+            assert_eq!(f.engine.memory().unwrap().mapped_pages(), 3 + pages);
+            last_error(&mut f, owner, 0xf123_4567);
+            if pages == 0 {
+                assert!(
+                    f.engine
+                        .memory()
+                        .unwrap()
+                        .read(GuestAddress(WINDOW), &mut [0; 1])
+                        .is_err()
+                );
+            }
+        }
     }
 }
 
