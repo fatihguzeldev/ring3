@@ -243,6 +243,9 @@ impl EngineInstance {
         if self.has_active_module_operation() {
             return Ok(false);
         }
+        if !self.advance_windows_fls_process_exit()? {
+            return Ok(false);
+        }
         if !self.modules.attached.is_empty()
             && matches!(
                 self.detach_modules_for_exit()?,

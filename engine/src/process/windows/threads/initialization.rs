@@ -10,6 +10,7 @@ pub(super) struct ThreadInitialization32 {
     reason: u32,
     exit_code: u32,
     loader_owned: bool,
+    prepared: bool,
     pub(super) active: Option<u64>,
 }
 impl EngineInstance {
@@ -26,15 +27,15 @@ impl EngineInstance {
             .as_ref()
             .is_some_and(|phase| phase.reason == 2)
         {
-            let calls = self.windows_thread_initializers(3)?;
             let owned = self.threads.threads[index]
                 .lifecycle
                 .as_ref()
                 .unwrap()
                 .loader_owned;
             self.threads.threads[index].lifecycle = Some(ThreadInitialization32 {
-                calls: calls.into(),
+                calls: VecDeque::new(),
                 reason: 3,
+                prepared: false,
                 exit_code: code,
                 loader_owned: owned,
                 active: None,
@@ -65,6 +66,11 @@ impl EngineInstance {
         {
             return Ok(false);
         }
+        if self.threads.threads[index].exit_requested.is_some()
+            && !self.advance_windows_fls_thread_exit()?
+        {
+            return Ok(true);
+        }
         if self.threads.threads[index].lifecycle.is_none()
             && (!self.threads.threads[index].started
                 || self.threads.threads[index].exit_requested.is_some())
@@ -85,6 +91,7 @@ impl EngineInstance {
             self.threads.threads[index].lifecycle = Some(ThreadInitialization32 {
                 calls: calls.into(),
                 reason,
+                prepared: true,
                 exit_code: self.threads.threads[index].exit_requested.unwrap_or(0),
                 loader_owned: true,
                 active: None,
@@ -101,6 +108,16 @@ impl EngineInstance {
                 .as_mut()
                 .unwrap()
                 .loader_owned = true;
+        }
+        if self.threads.threads[index]
+            .lifecycle
+            .as_ref()
+            .is_some_and(|phase| !phase.prepared)
+        {
+            let calls = self.windows_thread_initializers(3)?;
+            let phase = self.threads.threads[index].lifecycle.as_mut().unwrap();
+            phase.calls = calls.into();
+            phase.prepared = true;
         }
         let Some(initialization) = self.threads.threads[index].lifecycle.as_ref() else {
             return Ok(false);

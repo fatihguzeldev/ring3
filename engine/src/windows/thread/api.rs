@@ -19,9 +19,13 @@ pub enum ThreadApi32 {
     GetThreadTimes,
     GetThreadContext,
     SetThreadContext,
+    FlsAlloc,
+    FlsFree,
+    FlsGetValue,
+    FlsSetValue,
 }
 impl ThreadApi32 {
-    pub const ALL: [Self; 18] = [
+    pub const ALL: [Self; 22] = [
         Self::CreateThread,
         Self::OpenThread,
         Self::ExitThread,
@@ -40,6 +44,10 @@ impl ThreadApi32 {
         Self::GetThreadTimes,
         Self::GetThreadContext,
         Self::SetThreadContext,
+        Self::FlsAlloc,
+        Self::FlsFree,
+        Self::FlsGetValue,
+        Self::FlsSetValue,
     ];
     pub fn core_apis() -> &'static [Self] {
         &Self::ALL[..]
@@ -75,6 +83,10 @@ impl ThreadApi32 {
             Self::GetThreadTimes => "GetThreadTimes",
             Self::GetThreadContext => "GetThreadContext",
             Self::SetThreadContext => "SetThreadContext",
+            Self::FlsAlloc => "FlsAlloc",
+            Self::FlsFree => "FlsFree",
+            Self::FlsGetValue => "FlsGetValue",
+            Self::FlsSetValue => "FlsSetValue",
         }
     }
     pub fn stack_words(self) -> u32 {
@@ -87,11 +99,15 @@ impl ThreadApi32 {
             | Self::TlsFree
             | Self::TlsGetValue
             | Self::DisableThreadLibraryCalls
-            | Self::GetThreadPriority => 1,
+            | Self::GetThreadPriority
+            | Self::FlsAlloc
+            | Self::FlsFree
+            | Self::FlsGetValue => 1,
             Self::GetExitCodeThread
             | Self::TerminateThread
             | Self::TlsSetValue
-            | Self::SetThreadPriority => 2,
+            | Self::SetThreadPriority
+            | Self::FlsSetValue => 2,
             Self::GetThreadContext | Self::SetThreadContext => 2,
             Self::SwitchToThread | Self::TlsAlloc => 0,
             Self::GetThreadTimes => 5,

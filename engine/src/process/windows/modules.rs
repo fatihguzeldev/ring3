@@ -69,6 +69,9 @@ impl EngineInstance {
             self.check_windows_thread_write()?;
         }
         let args = frame.arguments();
+        if api == ExitProcess && !self.advance_windows_fls_process_exit()? {
+            return Ok(true);
+        }
         if matches!(
             api,
             LoadLibraryA

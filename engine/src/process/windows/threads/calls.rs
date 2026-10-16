@@ -8,6 +8,15 @@ use crate::{
 
 impl EngineInstance {
     fn schedule_after_windows_thread_completion(&mut self) -> Result<(), HostError> {
+        if self.pending_call.is_none()
+            && self.threads.threads.iter().any(|thread| {
+                thread.id == self.threads.current_id()
+                    && thread.state != crate::windows::thread::ThreadState32::Terminated
+                    && !thread.active_invocations.is_empty()
+            })
+        {
+            return Ok(());
+        }
         if self.windows_service.is_some() {
             self.threads.schedule_required = Some(self.threads.current_id());
         } else {
@@ -35,6 +44,16 @@ impl EngineInstance {
             || frame.stack_words() != api.map_or(0, ThreadApi32::stack_words)
         {
             return Err(HostError::Call(CallError::InvalidRequest));
+        }
+        if let Some(
+            api @ (ThreadApi32::FlsAlloc
+            | ThreadApi32::FlsFree
+            | ThreadApi32::FlsGetValue
+            | ThreadApi32::FlsSetValue),
+        ) = api
+        {
+            self.complete_windows_fls_call(owner, token, api, frame)?;
+            return Ok(true);
         }
         if id == super::INVOCATION_RETURN_ID {
             self.finish_thread_invocation(frame)?;
@@ -130,7 +149,7 @@ impl EngineInstance {
                 | SetThreadPriority
                 | GetThreadTimes => self.execute_thread_utility(api, args),
                 GetThreadContext | SetThreadContext => self.execute_thread_context(api, args),
-                ExitThread => unreachable!(),
+                ExitThread | FlsAlloc | FlsFree | FlsGetValue | FlsSetValue => unreachable!(),
             }
         })();
         if result.is_ok()

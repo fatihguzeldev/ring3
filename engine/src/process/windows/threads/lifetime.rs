@@ -285,6 +285,7 @@ impl EngineInstance {
         if let Some(resources) = self.resources.as_mut() {
             resources.commit_thread_exit(id);
         }
+        self.threads.fls.retire_thread(id);
         self.exceptions.retire_thread(id);
         self.nls.retire_thread(id);
         if let Some(registry) = self.registry.as_mut() {

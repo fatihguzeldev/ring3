@@ -67,10 +67,12 @@ impl ThreadRuntime32 {
             invocations,
             next_invocation: 0,
             schedule_required: None,
+            fls: fls::FlsRuntime32::new(128, limits.threads)?,
         })
     }
     pub(in crate::process) fn retire_process_threads(&mut self, code: u32) {
         for thread in &mut self.threads {
+            self.fls.retire_thread(thread.id);
             if thread.state != ThreadState32::Terminated {
                 thread.exit_code = code;
             }
@@ -134,6 +136,9 @@ impl ThreadRuntime32 {
         primary.stack = Some(prepared.stack);
     }
     pub(in crate::process) fn reset_primary_thread(&mut self) {
+        for thread in &self.threads {
+            self.fls.retire_thread(thread.id);
+        }
         self.threads.truncate(1);
         if let Some(primary) = self.threads.first_mut() {
             primary.teb = None;

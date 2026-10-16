@@ -9,6 +9,7 @@ pub(in crate::process) enum ThreadInvocationCompletion32 {
     User32 { sender: u32, continuation: u64 },
     Apc,
     Initialize,
+    Fls { operation: u64 },
 }
 #[derive(Clone, Copy)]
 pub(super) struct ThreadInvocation32 {
@@ -369,6 +370,13 @@ impl EngineInstance {
         {
             return Err(HostError::Thread(ThreadError32::Stale));
         }
+        if let ThreadInvocationCompletion32::Fls { operation } = completion {
+            self.threads
+                .fls
+                .context
+                .check_callback(operation)
+                .map_err(HostError::Thread)?;
+        }
         let result = frame.state().registers[0];
         if let ThreadInvocationCompletion32::User32 {
             sender,
@@ -407,6 +415,11 @@ impl EngineInstance {
                 .as_mut()
                 .unwrap()
                 .active = None;
+        }
+        if let ThreadInvocationCompletion32::Fls { operation } = completion {
+            self.threads.fls.context.complete_callback(operation);
+            self.advance_windows_fls_operation(operation)?;
+            return Ok(());
         }
         self.threads.threads[index].state = if self.pending_call.is_some() {
             ThreadState32::Waiting

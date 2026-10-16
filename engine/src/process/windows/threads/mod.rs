@@ -2,6 +2,7 @@ mod calls;
 mod context;
 mod cpu_context;
 mod creation;
+mod fls;
 mod initialization;
 mod invocation;
 mod lifetime;
@@ -55,6 +56,7 @@ pub(in crate::process) struct ThreadRuntime32 {
     invocations: Vec<invocation::ThreadInvocation32>,
     next_invocation: u64,
     schedule_required: Option<u32>,
+    fls: fls::FlsRuntime32,
 }
 
 #[cfg(test)]
