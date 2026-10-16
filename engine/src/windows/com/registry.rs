@@ -46,14 +46,29 @@ impl PreparedRegistration32<'_> {
         let mut previous = None;
         for binding in &object.interfaces {
             if previous != Some(binding.address) {
-                registry.pointers.push(Pointer {
+                let pointer = Pointer {
                     address: binding.address,
                     slot,
-                });
+                };
+                if registry
+                    .pointers
+                    .last()
+                    .is_some_and(|last| last.address.0 > pointer.address.0)
+                {
+                    let index = registry
+                        .pointers
+                        .binary_search_by_key(&pointer.address.0, |entry| entry.address.0)
+                        .expect_err("reclaimed storage has no live interface binding");
+                    registry.pointers.insert(index, pointer);
+                } else {
+                    registry.pointers.push(pointer);
+                }
                 previous = Some(binding.address);
             }
         }
-        registry.highest_address = object.interfaces.last().unwrap().address.0;
+        registry.highest_address = registry
+            .highest_address
+            .max(object.interfaces.last().unwrap().address.0);
         registry.objects[slot] = Some(object);
         registry.interfaces = interfaces;
         registry.next_id = next_id;
@@ -137,6 +152,29 @@ impl ComRegistry32 {
         initial: ReferenceState32,
         retain: &[GuestAddress],
     ) -> Result<PreparedRegistration32<'_>, ComError32> {
+        self.prepare_registration_in_storage(payload, bindings, initial, retain, false)
+    }
+
+    /// engine-owned storage may be reused after its previous identity was retired.
+    /// the public registration contract remains monotonic.
+    pub(crate) fn prepare_reusable_registration_with_lifetime(
+        &mut self,
+        payload: u64,
+        bindings: &[InterfaceBinding32],
+        initial: ReferenceState32,
+        retain: &[GuestAddress],
+    ) -> Result<PreparedRegistration32<'_>, ComError32> {
+        self.prepare_registration_in_storage(payload, bindings, initial, retain, true)
+    }
+
+    fn prepare_registration_in_storage(
+        &mut self,
+        payload: u64,
+        bindings: &[InterfaceBinding32],
+        initial: ReferenceState32,
+        retain: &[GuestAddress],
+        reusable: bool,
+    ) -> Result<PreparedRegistration32<'_>, ComError32> {
         if initial.references == 0 && initial.holds == 0 {
             return Err(ComError32::InvalidBinding);
         }
@@ -157,10 +195,16 @@ impl ComRegistry32 {
                 return Err(ComError32::InvalidBinding);
             }
         }
-        if bindings
-            .iter()
-            .any(|binding| binding.address.0 <= self.highest_address)
-        {
+        let reused = bindings.iter().any(|binding| {
+            if reusable {
+                self.pointers
+                    .binary_search_by_key(&binding.address.0, |entry| entry.address.0)
+                    .is_ok()
+            } else {
+                binding.address.0 <= self.highest_address
+            }
+        });
+        if reused {
             return Err(ComError32::PointerReuse);
         }
         let interfaces = self

@@ -1,5 +1,5 @@
 use super::{GuestComError32, GuestComObjects32, InterfaceLayout32};
-use crate::memory::{AddressSpace, GuestAddress, PAGE_SIZE, PageRange, Permissions};
+use crate::memory::{AddressSpace, GuestAddress, MemoryError, PAGE_SIZE, PageRange, Permissions};
 use crate::windows::com::ComRegistry32;
 
 impl GuestComObjects32 {
@@ -54,14 +54,53 @@ impl GuestComObjects32 {
     ) -> Result<PageRange, GuestComError32> {
         self.check_memory(memory)?;
         let end = self.bounds.first + self.bounds.count;
-        if self.next_page >= end {
-            return Err(GuestComError32::Capacity);
+        if self.next_page < end {
+            let tail = PageRange {
+                first: self.next_page,
+                count: end - self.next_page,
+            };
+            match self.find_reclaimed_range(memory, tail, count) {
+                Ok(range) => return Ok(range),
+                Err(GuestComError32::Memory(MemoryError::Capacity)) => {}
+                Err(error) => return Err(error),
+            }
         }
-        let bounds = PageRange::new(
-            GuestAddress((self.next_page as u64 * u64::from(PAGE_SIZE)) as u32),
-            (end - self.next_page) as u32,
-        )?;
-        Ok(memory.find_free_range(bounds, count, PAGE_SIZE)?)
+        self.find_reclaimed_range(memory, self.bounds, count)
+    }
+
+    fn find_reclaimed_range(
+        &self,
+        memory: &AddressSpace,
+        mut bounds: PageRange,
+        count: u32,
+    ) -> Result<PageRange, GuestComError32> {
+        let end = bounds.first + bounds.count;
+        while bounds.count >= count as usize {
+            let range = memory.find_free_range(bounds, count, PAGE_SIZE)?;
+            // a host-unmapped live object or cached vtable still belongs to this owner.
+            // only successful lifetime retirement makes its address reusable.
+            let retained_end = self
+                .allocations
+                .iter()
+                .filter(|allocation| {
+                    allocation.range.first < range.first + range.count
+                        && range.first < allocation.range.first + allocation.range.count
+                })
+                .map(|allocation| allocation.range.first + allocation.range.count)
+                .chain(self.vtables.iter().filter_map(|table| {
+                    let page = table.address.0 as usize / PAGE_SIZE as usize;
+                    (range.first <= page && page < range.first + range.count).then_some(page + 1)
+                }))
+                .max();
+            let Some(first) = retained_end else {
+                return Ok(range);
+            };
+            bounds = PageRange {
+                first,
+                count: end - first,
+            };
+        }
+        Err(MemoryError::Capacity.into())
     }
 
     pub(super) fn check_memory(&self, memory: &AddressSpace) -> Result<(), GuestComError32> {

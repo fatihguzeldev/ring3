@@ -4,6 +4,9 @@ use crate::{
     windows::com::{IID_IUNKNOWN, ReleaseOutcome32},
 };
 
+#[path = "tests/reclamation.rs"]
+mod reclamation;
+
 const IA: InterfaceId = InterfaceId([1; 16]);
 const IB: InterfaceId = InterfaceId([2; 16]);
 const METHODS: [GuestAddress; 3] = [

@@ -189,7 +189,7 @@ impl GuestComObjects32 {
         publication_words.sort_unstable_by_key(|word| word.address.0);
         let prepared = self
             .registry
-            .prepare_registration_with_lifetime(payload, &bindings, initial, retain)?;
+            .prepare_reusable_registration_with_lifetime(payload, &bindings, initial, retain)?;
         memory.install_pages_with_word_writes(&initialized, &publication_words)?;
         let mapping_version = memory.transaction_version();
         let identity = prepared.publish();

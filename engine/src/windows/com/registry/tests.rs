@@ -186,6 +186,88 @@ fn released_slots_are_reusable_without_reviving_old_guest_addresses_or_ids() {
 }
 
 #[test]
+fn private_reclaimed_storage_preserves_sorted_live_aliases_and_rejects_old_identity_receipts() {
+    let mut registry = ComRegistry32::new(3, 8).unwrap();
+    let first = registry
+        .register(1, &[binding(IA, 0x3000), binding(IB, 0x3004)])
+        .unwrap();
+    let stale = registry
+        .prepare_owned_reference_changes(&[GuestAddress(0x3000)], &[], &[], &[])
+        .unwrap();
+    let keeper = registry.register(2, &[binding(IA, 0x4000)]).unwrap();
+    registry.release(GuestAddress(0x3000)).unwrap();
+    let initial = ReferenceState32 {
+        references: 1,
+        holds: 0,
+    };
+    let replacement = registry
+        .prepare_reusable_registration_with_lifetime(
+            3,
+            &[
+                binding(IA, 0x3004),
+                binding(IB, 0x3000),
+                binding(IC, 0x3000),
+            ],
+            initial,
+            &[],
+        )
+        .unwrap()
+        .publish();
+    assert_eq!(replacement.id.get(), keeper.get() + 1);
+    assert_ne!(replacement.id, first);
+    assert_eq!(replacement.identity_pointer, GuestAddress(0x3004));
+    for address in [0x3000, 0x3004] {
+        assert_eq!(registry.lookup(GuestAddress(address)), Ok(replacement));
+        assert_eq!(
+            registry.query_target(GuestAddress(address), IID_IUNKNOWN),
+            Ok(GuestAddress(0x3004))
+        );
+    }
+    assert_eq!(registry.lookup(GuestAddress(0x4000)).unwrap().id, keeper);
+    assert_eq!(
+        registry.can_commit_owned_reference_changes(&stale),
+        Err(ComError32::InvalidPointer)
+    );
+    assert_eq!(
+        registry.register(4, &[binding(IA, 0x3500)]),
+        Err(ComError32::PointerReuse)
+    );
+    assert!(matches!(
+        registry.prepare_reusable_registration_with_lifetime(
+            4,
+            &[binding(IA, 0x3000)],
+            initial,
+            &[GuestAddress(0x4000)]
+        ),
+        Err(ComError32::PointerReuse)
+    ));
+    assert_eq!(registry.references(GuestAddress(0x4000)), Ok(1));
+    {
+        let _unpublished = registry
+            .prepare_reusable_registration_with_lifetime(
+                4,
+                &[binding(IA, 0x2000)],
+                initial,
+                &[GuestAddress(0x4000)],
+            )
+            .unwrap();
+    }
+    assert_eq!(registry.live_objects(), 2);
+    assert_eq!(registry.references(GuestAddress(0x4000)), Ok(1));
+    assert_eq!(
+        registry.lookup(GuestAddress(0x2000)),
+        Err(ComError32::InvalidPointer)
+    );
+    let next = registry
+        .prepare_reusable_registration_with_lifetime(5, &[binding(IA, 0x2000)], initial, &[])
+        .unwrap()
+        .publish();
+    assert_eq!(next.id.get(), replacement.id.get() + 1);
+    assert_eq!(registry.lookup(GuestAddress(0x2000)), Ok(next));
+    assert_eq!(registry.lookup(GuestAddress(0x4000)).unwrap().id, keeper);
+}
+
+#[test]
 fn aggregate_alias_deltas_check_final_counts_without_intermediate_overflow() {
     let mut registry = ComRegistry32::new(1, 2).unwrap();
     let id = registry
