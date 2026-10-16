@@ -27,6 +27,8 @@ icu_experimental = { version = "=0.4.0", default-features = false, features = ["
 icu_provider = "=2.3.1"
 writeable = "=0.6.4"
 rustfft = "=6.4.1"
+fontdue = { version = "=0.9.4", default-features = false, features = ["std"] }
+rustybuzz = "=0.20.1"
 roxmltree = { version = "=0.21.1", default-features = false, features = ["std"] }
 icu_locale = "=2.1.1"
 lcid = "=0.3.0"

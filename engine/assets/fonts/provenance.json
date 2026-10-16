@@ -1,0 +1,45 @@
+{
+  "repository": "https://github.com/notofonts/noto-fonts",
+  "commit": "ffebf8c1ee449e544955a7e813c54f9b73848eac",
+  "license": "SIL Open Font License 1.1",
+  "files": {
+    "NotoSans-Regular.ttf": {
+      "sourcePath": "hinted/ttf/NotoSans/NotoSans-Regular.ttf",
+      "url": "https://raw.githubusercontent.com/notofonts/noto-fonts/ffebf8c1ee449e544955a7e813c54f9b73848eac/hinted/ttf/NotoSans/NotoSans-Regular.ttf",
+      "sha256": "b85c38ecea8a7cfb39c24e395a4007474fa5a4fc864f6ee33309eb4948d232d5",
+      "bytes": 569208,
+      "names": {
+        "0": "Copyright 2015-2021 Google LLC. All Rights Reserved.",
+        "1": "Noto Sans",
+        "2": "Regular",
+        "4": "Noto Sans Regular",
+        "5": "Version 2.008; ttfautohint (v1.8) -l 8 -r 50 -G 200 -x 14 -D latn -f none -a qsq -X \"\"",
+        "6": "NotoSans-Regular",
+        "13": "This Font Software is licensed under the SIL Open Font License, Version 1.1. This Font Software is distributed on an \"AS IS\" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the SIL Open Font License for the specific language, permissions and limitations governing your use of this Font Software.",
+        "14": "http://scripts.sil.org/OFL"
+      }
+    },
+    "NotoSansMono-Regular.ttf": {
+      "sourcePath": "hinted/ttf/NotoSansMono/NotoSansMono-Regular.ttf",
+      "url": "https://raw.githubusercontent.com/notofonts/noto-fonts/ffebf8c1ee449e544955a7e813c54f9b73848eac/hinted/ttf/NotoSansMono/NotoSansMono-Regular.ttf",
+      "sha256": "d9e2b23d19f8230be7146f409a52b1d23117e635e28f2e2892cf91b7382f325b",
+      "bytes": 512836,
+      "names": {
+        "0": "Copyright 2015-2021 Google LLC. All Rights Reserved.",
+        "1": "Noto Sans Mono",
+        "2": "Regular",
+        "4": "Noto Sans Mono Regular",
+        "5": "Version 2.007; ttfautohint (v1.8) -l 8 -r 50 -G 200 -x 14 -D latn -f none -a qsq -X \"\"",
+        "6": "NotoSansMono-Regular",
+        "13": "This Font Software is licensed under the SIL Open Font License, Version 1.1. This Font Software is distributed on an \"AS IS\" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the SIL Open Font License for the specific language, permissions and limitations governing your use of this Font Software.",
+        "14": "http://scripts.sil.org/OFL"
+      }
+    },
+    "OFL.txt": {
+      "sourcePath": "LICENSE",
+      "url": "https://raw.githubusercontent.com/notofonts/noto-fonts/ffebf8c1ee449e544955a7e813c54f9b73848eac/LICENSE",
+      "sha256": "0dab92d0544f7b233403f14b84a663bdbfa746982eda629e7f4f9ffe1b036feb",
+      "bytes": 4377
+    }
+  }
+}

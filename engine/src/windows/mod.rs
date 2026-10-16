@@ -47,3 +47,5 @@ pub mod native;
 pub(crate) mod security;
 
 pub mod activation;
+
+pub mod gdi;
