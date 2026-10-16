@@ -40,7 +40,7 @@ use ring3_engine::{
             ir::{DivideKind, EffectiveAddress, Operation},
         },
     },
-    memory::{Access, FaultReason, GuestAddress, MemoryFault},
+    memory::{FaultReason, GuestAddress},
     process::HostError,
 };
 
@@ -188,9 +188,10 @@ fn strict_neighbors_and_operand_fetch_keep_categories_and_exact_faults() {
                 prefix_admission::admitted(&bytes);
                 continue;
             }
-            assert_eq!(
-                decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),
-                Some(wanted)
+            crate::support_fetch::assert_decode_contract(
+                (decode_one(engine.memory().unwrap(), GuestAddress(CODE)))
+                    .expect_err("instruction must fail to decode"),
+                wanted,
             );
         }
         for tail in [
@@ -223,26 +224,23 @@ fn strict_neighbors_and_operand_fetch_keep_categories_and_exact_faults() {
             }
             let pc = 0x2000 - missing.len() as u32;
             let engine = fixture(pc, missing);
-            assert_eq!(
-                decode_one(engine.memory().unwrap(), GuestAddress(pc)).err(),
-                Some(DecodeError::MemoryFault {
-                    pc: GuestAddress(pc),
-                    fault: MemoryFault {
-                        address: GuestAddress(0x2000),
-                        access: Access::Execute,
-                        reason: FaultReason::Unmapped
-                    },
-                    length: bytes.len() as u32,
-                })
+            crate::support_fetch::assert_error(
+                (decode_one(engine.memory().unwrap(), GuestAddress(pc)))
+                    .expect_err("code fetch must fail"),
+                pc,
+                0x2000,
+                FaultReason::Unmapped,
+                bytes.len() as u32,
             );
         }
     }
     for bytes in [&[0x66, 0xf6, 0x33][..], &[0x66, 0xf6, 0x3b]] {
         let engine = fixture(CODE, bytes);
         if !prefix_admission::admit_if_new_prefix(bytes) {
-            assert_eq!(
-                decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),
-                Some(DecodeError::Unsupported(UnsupportedFeature::Opcode))
+            crate::support_fetch::assert_decode_contract(
+                (decode_one(engine.memory().unwrap(), GuestAddress(CODE)))
+                    .expect_err("instruction must fail to decode"),
+                DecodeError::Unsupported(UnsupportedFeature::Opcode),
             );
         }
     }

@@ -223,9 +223,10 @@ fn all_register_division_forms_compile_in_six_profiles_and_exclusions_stay_stric
         engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + bytes.len()]
             .copy_from_slice(bytes);
         engine.upload(CODE, bytes.len() as u32).unwrap();
-        assert_eq!(
-            decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),
-            Some(DecodeError::Unsupported(UnsupportedFeature::Opcode))
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(engine.memory().unwrap(), GuestAddress(CODE)))
+                .expect_err("instruction must fail to decode"),
+            DecodeError::Unsupported(UnsupportedFeature::Opcode),
         );
     }
 }

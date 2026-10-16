@@ -177,10 +177,10 @@ fn strict_exclusions_and_two_byte_fetch_preserve_fault_and_wrap_boundaries() {
                 exclusions += 1;
                 continue;
             }
-            assert_eq!(
-                decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),
-                Some(expected),
-                "{prefix:02x} f7 {base:02x}"
+            crate::support_fetch::assert_decode_contract(
+                (decode_one(engine.memory().unwrap(), GuestAddress(CODE)))
+                    .expect_err("instruction must fail to decode"),
+                expected,
             );
             exclusions += 1;
         }
@@ -199,10 +199,10 @@ fn strict_exclusions_and_two_byte_fetch_preserve_fault_and_wrap_boundaries() {
             bytes.insert(0, 0x66);
             let engine = code(CODE, &bytes);
             if !prefix_admission::admit_if_new_prefix(&bytes) {
-                assert_eq!(
-                    decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),
-                    Some(opcode),
-                    "{bytes:02x?}"
+                crate::support_fetch::assert_decode_contract(
+                    (decode_one(engine.memory().unwrap(), GuestAddress(CODE)))
+                        .expect_err("instruction must fail to decode"),
+                    opcode,
                 );
             }
             exclusions += 1;
@@ -250,9 +250,10 @@ fn strict_exclusions_and_two_byte_fetch_preserve_fault_and_wrap_boundaries() {
         }
         let mut engine = code(0x1fff, &[0xf7, base]);
         engine.protect(0x2000, 1, 3).unwrap();
-        assert_eq!(
-            decode_one(engine.memory().unwrap(), GuestAddress(0x1fff)).err(),
-            Some(fetch_error(0x1fff, 0x2000, 2, FaultReason::Permission))
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(engine.memory().unwrap(), GuestAddress(0x1fff)))
+                .expect_err("instruction must fail to decode"),
+            fetch_error(0x1fff, 0x2000, 2, FaultReason::Permission),
         );
         for changed in [0x1fff, 0x2000] {
             let mut engine = code(0x1fff, &[0xf7, base]);
@@ -280,10 +281,10 @@ fn strict_exclusions_and_two_byte_fetch_preserve_fault_and_wrap_boundaries() {
     ] {
         let engine = code(CODE, bytes);
         if !prefix_admission::admit_if_new_prefix(bytes) {
-            assert_eq!(
-                decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),
-                Some(opcode),
-                "{bytes:02x?}"
+            crate::support_fetch::assert_decode_contract(
+                (decode_one(engine.memory().unwrap(), GuestAddress(CODE)))
+                    .expect_err("instruction must fail to decode"),
+                opcode,
             );
         }
         exclusions += 1;
@@ -294,9 +295,10 @@ fn strict_exclusions_and_two_byte_fetch_preserve_fault_and_wrap_boundaries() {
         (u32::MAX, u32::MAX, FaultReason::AddressOverflow),
     ] {
         let engine = code(pc, &[0xf7]);
-        assert_eq!(
-            decode_one(engine.memory().unwrap(), GuestAddress(pc)).err(),
-            Some(fetch_error(pc, address, 2, reason))
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(engine.memory().unwrap(), GuestAddress(pc)))
+                .expect_err("instruction must fail to decode"),
+            fetch_error(pc, address, 2, reason),
         );
     }
 }
@@ -350,7 +352,11 @@ fn late_accumulator_multiply_failures_preserve_both_publications() {
                     } else {
                         HostError::Compile(expected)
                     };
-                    assert_eq!(compile(&mut engine, resident, entries), Err(expected));
+                    crate::support_fetch::assert_host_contract(
+                        (compile(&mut engine, resident, entries))
+                            .expect_err("compilation must refuse this fixture"),
+                        expected,
+                    );
                     assert_eq!(
                         (
                             engine.arena().to_vec(),

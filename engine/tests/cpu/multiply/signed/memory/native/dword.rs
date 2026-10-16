@@ -141,73 +141,14 @@ fn instruction_error(pc: u32, cause: InstructionError) -> CompileError {
     }
 }
 
-fn u32_leb(bytes: &mut &[u8]) -> u32 {
-    let mut value = 0;
-    for shift in (0..35).step_by(7) {
-        let (&byte, remaining) = bytes.split_first().unwrap();
-        *bytes = remaining;
-        value |= u32::from(byte & 0x7f) << shift;
-        if byte & 0x80 == 0 {
-            return value;
-        }
-    }
-    panic!("invalid unsigned LEB128");
-}
-
-fn name<'a>(bytes: &mut &'a [u8]) -> &'a str {
-    let length = u32_leb(bytes) as usize;
-    let (value, remaining) = bytes.split_at(length);
-    *bytes = remaining;
-    std::str::from_utf8(value).unwrap()
-}
-
-fn imports(wasm: &[u8]) -> Vec<(String, String)> {
-    assert_eq!(&wasm[..8], b"\0asm\x01\0\0\0");
-    let mut bytes = &wasm[8..];
-    while !bytes.is_empty() {
-        let (&kind, remaining) = bytes.split_first().unwrap();
-        bytes = remaining;
-        let length = u32_leb(&mut bytes) as usize;
-        let (mut section, remaining) = bytes.split_at(length);
-        bytes = remaining;
-        if kind != 2 {
-            continue;
-        }
-        let count = u32_leb(&mut section);
-        let mut names = Vec::new();
-        for _ in 0..count {
-            names.push((name(&mut section).to_owned(), name(&mut section).to_owned()));
-            let (&kind, remaining) = section.split_first().unwrap();
-            section = remaining;
-            match kind {
-                0 => {
-                    u32_leb(&mut section);
-                }
-                2 => {
-                    assert_eq!(u32_leb(&mut section), 0);
-                    assert_eq!(u32_leb(&mut section), 1);
-                }
-                _ => panic!("unexpected import kind {kind}"),
-            }
-        }
-        assert!(section.is_empty());
-        return names;
-    }
-    panic!("missing Wasm import section");
-}
-
 fn assert_read_only_imports(engine: &EngineInstance, owner: Owner, id: u64) {
-    let guard = match owner {
-        Owner::Replacement => "guard",
-        Owner::Resident => "guard_resident",
-    };
-    assert_eq!(
-        imports(module(engine, owner, id)),
-        vec![
-            ("env".to_owned(), "memory".to_owned()),
-            ("ring3".to_owned(), guard.to_owned()),
-            ("ring3".to_owned(), "cpu_read32".to_owned()),
-        ]
+    let resident = matches!(owner, Owner::Resident);
+    crate::support_wasm_interface::assert_bound(
+        module(engine, owner, id),
+        resident,
+        &[("cpu_read32", 1)],
+        &[4, if resident { 7 } else { 6 }, 1],
+        true,
     );
 }
 
@@ -449,9 +390,10 @@ fn missing_last_operand_byte_reports_execute_fault_before_publication() {
                 describe(&mut engine, &[(pc, instruction.len())], entries);
                 let before = engine.arena().to_vec();
                 let arena_pointer = engine.arena_address();
-                assert_eq!(
-                    compile(&mut engine, owner, entries, 1),
-                    Err(compile_error(owner, error))
+                crate::support_fetch::assert_host_contract(
+                    (compile(&mut engine, owner, entries, 1))
+                        .expect_err("compilation must refuse this fixture"),
+                    compile_error(owner, error),
                 );
                 assert_eq!(engine.arena(), before);
                 assert_eq!(engine.arena_address(), arena_pointer);
@@ -489,9 +431,10 @@ fn seeds_and_explicit_extents_cannot_split_a_memory_operand() {
                     instruction_error(CODE, InstructionError::InvalidBlockEnd)
                 };
                 let before = engine.arena().to_vec();
-                assert_eq!(
-                    compile(&mut engine, owner, entries, count),
-                    Err(compile_error(owner, expected))
+                crate::support_fetch::assert_host_contract(
+                    (compile(&mut engine, owner, entries, count))
+                        .expect_err("compilation must refuse this fixture"),
+                    compile_error(owner, expected),
                 );
                 assert_eq!(engine.arena(), before);
                 assert_eq!(engine.generation(), 0);
@@ -566,7 +509,24 @@ fn prior_owners(bytes: &[u8]) -> (EngineInstance, u64) {
 #[test]
 fn public_default_limit_accepts_sixty_four_and_precedes_later_poison() {
     for instruction in FORMS {
-        let mut valid = instruction.repeat(63);
+        let mut original = instruction.repeat(63);
+        original.extend([0xeb, 0]);
+        for resident in [false, true] {
+            let mut oversized = code(CODE, &original, true);
+            crate::support_admission::assert_oversized_explicit(
+                &mut oversized,
+                CODE,
+                original.len() as u32,
+                resident,
+            );
+            for entries in [false, true] {
+                crate::support_memory_banks::assert_bounded_memory_bank(
+                    &original, CODE, KEY, resident, entries, 64,
+                );
+            }
+        }
+        let mut valid = instruction.repeat(7);
+        valid.extend(std::iter::repeat_n(0x90, 56));
         valid.extend([0xeb, 0]);
         let mut invalid = instruction.repeat(64);
         invalid.extend([0xf0, 0x90]);
@@ -594,10 +554,25 @@ fn public_default_limit_accepts_sixty_four_and_precedes_later_poison() {
                     .unwrap();
                 upload(&mut engine, CODE, &invalid);
                 describe(&mut engine, &[(CODE, invalid.len())], entries);
+                if entries {
+                    assert!(crate::support_admission::admit_if_deferred(
+                        &mut engine,
+                        crate::support_admission::ColdEntryCase {
+                            key: KEY,
+                            keeper: keep,
+                            resident: matches!(owner, Owner::Resident),
+                            pages: &[CODE, KEEP, DATA],
+                            expected: CompileError::InstructionLimit,
+                        },
+                    ));
+                    assert!(engine.memory().unwrap().is_code_current(&snapshot));
+                    continue;
+                }
                 let before = saved(&engine, keep);
-                assert_eq!(
-                    compile(&mut engine, owner, entries, 1),
-                    Err(compile_error(owner, CompileError::InstructionLimit))
+                crate::support_fetch::assert_host_contract(
+                    (compile(&mut engine, owner, entries, 1))
+                        .expect_err("compilation must refuse this fixture"),
+                    compile_error(owner, CompileError::InstructionLimit),
                 );
                 assert_eq!(saved(&engine, keep), before);
                 assert!(engine.memory().unwrap().is_code_current(&snapshot));
@@ -641,7 +616,11 @@ fn data_changes_preserve_code_but_consumed_operand_bytes_invalidate_owner() {
                         Owner::Replacement => HostError::CodeInvalidated,
                         Owner::Resident => HostError::Resident(RegistryError::CodeInvalidated),
                     };
-                    assert_eq!(guard(&engine, owner, id), Err(expected));
+                    crate::support_fetch::assert_host_contract(
+                        (guard(&engine, owner, id))
+                            .expect_err("compilation must refuse this fixture"),
+                        expected,
+                    );
                     match owner {
                         Owner::Replacement => assert_eq!(engine.artifact_bytes(), Err(expected)),
                         Owner::Resident => assert_eq!(engine.resident_bytes(id), Err(expected)),
@@ -679,9 +658,10 @@ fn admitted_memory_prefix_then_malformed_tail_preserves_prior_owners_and_publica
                     CODE + 3 + instruction.len() as u32,
                     InstructionError::Decode(DecodeError::InvalidEncoding),
                 );
-                assert_eq!(
-                    compile(&mut engine, owner, entries, 1),
-                    Err(compile_error(owner, error))
+                crate::support_fetch::assert_host_contract(
+                    (compile(&mut engine, owner, entries, 1))
+                        .expect_err("compilation must refuse this fixture"),
+                    compile_error(owner, error),
                 );
                 assert_eq!(saved(&engine, keep), before);
                 assert!(engine.memory().unwrap().is_code_current(&keep_snapshot));

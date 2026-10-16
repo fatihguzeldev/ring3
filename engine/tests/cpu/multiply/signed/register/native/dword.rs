@@ -255,10 +255,9 @@ fn word_byte_implicit_wide_forms_and_prefixes_keep_existing_error_categories() {
             continue;
         }
         let memory = code(CODE, bytes);
-        assert_eq!(
-            decode_one(&memory, GuestAddress(CODE)).err(),
-            Some(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
-            "{bytes:02x?}"
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(&memory, GuestAddress(CODE))).expect_err("instruction must fail to decode"),
+            DecodeError::Unsupported(UnsupportedFeature::Opcode),
         );
     }
     for (bytes, expected) in [
@@ -272,9 +271,9 @@ fn word_byte_implicit_wide_forms_and_prefixes_keep_existing_error_categories() {
             continue;
         }
         let memory = code(CODE, bytes);
-        assert_eq!(
-            decode_one(&memory, GuestAddress(CODE)).err(),
-            Some(expected)
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(&memory, GuestAddress(CODE))).expect_err("instruction must fail to decode"),
+            expected,
         );
     }
 }
@@ -302,25 +301,16 @@ fn decoder_consumes_exact_extent_and_reports_missing_modrm_or_immediate() {
             } as u32;
             let memory = code(pc, missing);
             let error = decode_one(&memory, GuestAddress(pc)).err().unwrap();
-            let DecodeError::MemoryFault {
-                pc: fault_pc,
-                fault,
-                length,
-            } = error
-            else {
-                panic!("{error:?}");
-            };
-            assert_eq!(fault_pc, GuestAddress(pc));
-            assert_eq!(length as usize, bytes.len());
-            assert_eq!(fault.access, Access::Execute);
-            assert_eq!(fault.address, GuestAddress(if top { pc } else { 0x2000 }));
-            assert_eq!(
-                fault.reason,
+            crate::support_fetch::assert_error(
+                error,
+                pc,
+                if top { pc } else { 0x2000 },
                 if top {
                     FaultReason::AddressOverflow
                 } else {
                     FaultReason::Unmapped
-                }
+                },
+                bytes.len() as u32,
             );
         }
     }
@@ -647,8 +637,10 @@ fn multiplies_charge_instruction_and_wasm_caps_before_later_poison() {
             Some(CompileError::InstructionLimit)
         );
         assert_eq!(
-            prepare_entry_region(&memory, &[GuestAddress(CODE)], CompileLimits::default()).err(),
-            Some(CompileError::InstructionLimit)
+            prepare_entry_region(&memory, &[GuestAddress(CODE)], CompileLimits::default())
+                .unwrap()
+                .instruction_count(),
+            64
         );
         let mut bytes = instruction;
         bytes.extend_from_slice(&[0xeb, 0]);

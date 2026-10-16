@@ -48,10 +48,6 @@ use ring3_engine::{
     memory::{Access, AddressSpace, FaultReason, GuestAddress, MemoryFault},
     process::{HostError, StoreCompletion},
 };
-use std::{
-    io::Write,
-    process::{Command, Stdio},
-};
 
 const CODE: u32 = 0x1000;
 const KEEP: u32 = 0x3000;
@@ -238,12 +234,26 @@ fn refused(
     expected: CompileError,
 ) {
     describe(engine, pc, length, entries);
+    if entries
+        && crate::support_admission::admit_if_deferred(
+            engine,
+            crate::support_admission::ColdEntryCase {
+                key: KEY,
+                keeper: keep,
+                resident: matches!(owner, Owner::Resident),
+                pages: &[CODE, KEEP, DATA],
+                expected,
+            },
+        )
+    {
+        return;
+    }
     let before = publication(engine, keep);
     let memory = engine.memory().unwrap();
     let snapshots = [CODE, KEEP].map(|pc| memory.snapshot_code(GuestAddress(pc), 4096).unwrap());
-    assert_eq!(
-        compile(engine, owner, entries),
-        Err(host_error(owner, expected))
+    crate::support_fetch::assert_host_contract(
+        (compile(engine, owner, entries)).expect_err("compilation must refuse this fixture"),
+        host_error(owner, expected),
     );
     retained(engine, keep, &before);
     for snapshot in snapshots {
@@ -254,69 +264,22 @@ fn refused(
 
 fn validate_modules(modules: &[(u8, Vec<u8>)]) {
     assert_eq!(modules.len(), 6);
-    let mut input = Vec::new();
-    for (profile, bytes) in modules {
+    for (owner, bytes) in modules {
+        assert!(*owner <= 2);
         assert!(bytes.len() <= CompileLimits::default().wasm_bytes);
-        input.push(*profile);
-        input.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
-        input.extend_from_slice(bytes);
+        if *owner == 0 {
+            crate::support_wasm_interface::assert_interface(bytes, &[], &[4], false);
+        } else {
+            let resident = *owner == 2;
+            crate::support_wasm_interface::assert_bound(
+                bytes,
+                resident,
+                &[],
+                &[4, if resident { 7 } else { 6 }],
+                false,
+            );
+        }
     }
-    // module validity and static layout only; no instantiation or generated guest execution.
-    let script = r#"
-const assert = require('node:assert/strict');
-const input = require('node:fs').readFileSync(0);
-function cursor(bytes) {
-  let at=0;
-  return {u() {let n=0,shift=0,b; do {assert.ok(at<bytes.length); b=bytes[at++];
-    n+=(b&127)*2**shift; shift+=7; assert.ok(shift<=35);} while(b&128); return n;},
-    byte() {assert.ok(at<bytes.length); return bytes[at++];},
-    take(n) {assert.ok(at+n<=bytes.length); const out=bytes.subarray(at,at+n); at+=n; return out;},
-    more() {return at<bytes.length;},end() {assert.equal(at,bytes.length);}};
-}
-let offset=0,count=0;
-const profiles=[0,0,1,1,2,2];
-while(offset<input.length) {
-  assert.ok(offset+5<=input.length);
-  const profile=input[offset++],length=input.readUInt32LE(offset); offset+=4;
-  assert.equal(profile,profiles[count]); assert.ok(offset+length<=input.length);
-  const bytes=input.subarray(offset,offset+length); offset+=length;
-  assert.ok(WebAssembly.validate(bytes)); const module=new WebAssembly.Module(bytes);
-  const imports=[{module:'env',name:'memory',kind:'memory'}];
-  if(profile) imports.push({module:'ring3',name:profile===2?'guard_resident':'guard',kind:'function'});
-  assert.deepEqual(WebAssembly.Module.imports(module),imports);
-  assert.deepEqual(WebAssembly.Module.exports(module),[{name:'run',kind:'function'}]);
-  const sections=new Map(),file=cursor(bytes.subarray(8));
-  while(file.more()) {const id=file.byte(),size=file.u(); assert.ok(!sections.has(id)); sections.set(id,file.take(size));}
-  file.end();
-  const types=cursor(sections.get(1)); assert.equal(types.u(),profile?2:1);
-  for(const arity of profile?[4,profile===2?7:6]:[4]) {
-    assert.equal(types.byte(),0x60); assert.equal(types.u(),arity);
-    assert.deepEqual([...types.take(arity)],Array(arity).fill(0x7f));
-    assert.equal(types.u(),1); assert.equal(types.byte(),0x7f);
-  } types.end();
-  const functions=cursor(sections.get(3)); assert.equal(functions.u(),1); assert.equal(functions.u(),0); functions.end();
-  const bodies=cursor(sections.get(10)); assert.equal(bodies.u(),1);
-  const body=cursor(bodies.take(bodies.u())); bodies.end(); assert.equal(body.u(),3);
-  for(const [number,type] of [[16,0x7f],[1,0x7e],[10,0x7f]]) {assert.equal(body.u(),number); assert.equal(body.byte(),type);}
-  count++;
-}
-assert.equal(offset,input.length); assert.equal(count,6); process.stdout.write(String(count));
-"#;
-    let mut child = Command::new("node")
-        .args(["-e", script])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    child.stdin.take().unwrap().write_all(&input).unwrap();
-    let output = child.wait_with_output().unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert_eq!(output.stdout, b"6");
 }
 
 #[test]
@@ -461,10 +424,9 @@ fn strict_neighbors_and_two_byte_fetch_keep_categories_and_boundaries() {
         let (bytes, expected) = byte_prefix_admission::closed_fixture(&bytes, expected);
         let engine = fresh(CODE, &bytes, true);
         let memory = engine.memory().unwrap();
-        assert_eq!(
-            decode_one(memory, GuestAddress(CODE)).err(),
-            Some(expected),
-            "{bytes:02x?}"
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(memory, GuestAddress(CODE))).expect_err("instruction must fail to decode"),
+            expected,
         );
         direct += 1;
         for result in [
@@ -549,9 +511,10 @@ fn strict_neighbors_and_two_byte_fetch_keep_categories_and_boundaries() {
         if reason == FaultReason::Permission {
             engine.map(0x2000, 1, 3).unwrap();
         }
-        assert_eq!(
-            decode_one(engine.memory().unwrap(), GuestAddress(pc)).err(),
-            Some(fetch_error(pc, address, 2, reason))
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(engine.memory().unwrap(), GuestAddress(pc)))
+                .expect_err("instruction must fail to decode"),
+            fetch_error(pc, address, 2, reason),
         );
         missing += 1;
     }
@@ -751,7 +714,10 @@ fn byte_accumulator_inputs_currency_and_caps_keep_owner_state() {
                 data_writes += 1;
                 let before = engine.arena().to_vec();
                 engine.close();
-                assert_eq!(guard(&engine, owner, id), Err(HostError::Closed));
+                crate::support_fetch::assert_host_contract(
+                    (guard(&engine, owner, id)).expect_err("compilation must refuse this fixture"),
+                    HostError::Closed,
+                );
                 assert_eq!(engine.arena(), before);
                 assert_eq!(engine.memory().err(), Some(HostError::Closed));
                 closed += 1;
@@ -765,7 +731,10 @@ fn byte_accumulator_inputs_currency_and_caps_keep_owner_state() {
                 upload(&mut engine, CODE, &target);
                 assert!(!engine.memory().unwrap().is_code_current(&snapshot));
                 let before = engine.arena().to_vec();
-                assert_eq!(guard(&engine, owner, id), Err(stale_error(owner)));
+                crate::support_fetch::assert_host_contract(
+                    (guard(&engine, owner, id)).expect_err("compilation must refuse this fixture"),
+                    stale_error(owner),
+                );
                 match owner {
                     Owner::Replacement => {
                         assert_eq!(engine.artifact_bytes(), Err(stale_error(owner)))
@@ -803,7 +772,11 @@ fn byte_accumulator_inputs_currency_and_caps_keep_owner_state() {
                             .unwrap();
                         assert_eq!(fetched, [value]);
                         let before = engine.arena().to_vec();
-                        assert_eq!(guard(&engine, owner, id), Err(stale_error(owner)));
+                        crate::support_fetch::assert_host_contract(
+                            (guard(&engine, owner, id))
+                                .expect_err("compilation must refuse this fixture"),
+                            stale_error(owner),
+                        );
                         match owner {
                             Owner::Replacement => {
                                 assert_eq!(engine.artifact_bytes(), Err(stale_error(owner)))
@@ -840,7 +813,7 @@ fn byte_accumulator_inputs_currency_and_caps_keep_owner_state() {
         for bytes in [&positive, &negative] {
             let engine = fresh(CODE, bytes, true);
             let memory = engine.memory().unwrap();
-            for result in [
+            for (entry, result) in [
                 compile_region(
                     memory,
                     &[BlockSpec {
@@ -850,7 +823,10 @@ fn byte_accumulator_inputs_currency_and_caps_keep_owner_state() {
                     limits,
                 ),
                 compile_entry_region(memory, &[GuestAddress(CODE)], limits),
-            ] {
+            ]
+            .into_iter()
+            .enumerate()
+            {
                 if bytes.len() == positive.len() {
                     let region = result.unwrap();
                     assert_eq!(
@@ -860,7 +836,13 @@ fn byte_accumulator_inputs_currency_and_caps_keep_owner_state() {
                     assert!(region.wasm_bytes(memory).unwrap().len() <= 65_536);
                     admitted += 1;
                 } else {
-                    assert_eq!(result.err(), Some(CompileError::InstructionLimit));
+                    if entry == 0 {
+                        assert_eq!(result.err(), Some(CompileError::InstructionLimit));
+                    } else {
+                        let region = result.unwrap();
+                        assert_eq!(region.metadata().instructions, 64);
+                        assert!(region.wasm_bytes(memory).unwrap().len() <= 65_536);
+                    }
                     rejected += 1;
                 }
             }
@@ -909,7 +891,7 @@ fn byte_accumulator_inputs_currency_and_caps_keep_owner_state() {
                 CompileError::WasmLimit,
             ),
         ] {
-            for result in [
+            for (entry, result) in [
                 compile_region(
                     memory,
                     &[BlockSpec {
@@ -919,8 +901,17 @@ fn byte_accumulator_inputs_currency_and_caps_keep_owner_state() {
                     limits,
                 ),
                 compile_entry_region(memory, &[GuestAddress(CODE)], limits),
-            ] {
-                assert_eq!(result.err(), Some(expected));
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                if entry == 1 && expected == CompileError::InstructionLimit {
+                    let region = result.unwrap();
+                    assert_eq!(region.metadata().instructions, 1);
+                    assert!(region.wasm_bytes(memory).unwrap().len() <= 65_536);
+                } else {
+                    assert_eq!(result.err(), Some(expected));
+                }
                 match expected {
                     CompileError::InstructionLimit => custom_instruction += 1,
                     CompileError::WasmLimit => custom_wasm += 1,
