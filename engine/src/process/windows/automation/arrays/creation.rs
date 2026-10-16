@@ -46,7 +46,7 @@ impl EngineInstance {
         }
         let layout = ArrayLayout32::new(args[0] as u16, &bounds, vector, self.automation.limits)
             .map_err(HostError::Automation)?;
-        if layout.owns_elements() {
+        if layout.owns_elements() && layout.vartype != 8 {
             return Err(HostError::Automation(E::NotImplemented));
         }
         self.allocate_automation_array(layout, None, None)

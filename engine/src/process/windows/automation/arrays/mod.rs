@@ -1,6 +1,9 @@
 mod calls;
 mod creation;
 mod data;
+#[cfg(test)]
+mod string_tests;
+mod strings;
 
 use crate::windows::automation::ArrayLayout32;
 pub(super) struct Array32 {

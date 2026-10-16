@@ -18,7 +18,7 @@ impl EngineInstance {
         {
             return Err(HostError::Automation(E::InvalidParameter));
         }
-        if array.layout.owns_elements() {
+        if array.layout.owns_elements() && array.layout.vartype != 8 {
             return Err(HostError::Automation(E::NotImplemented));
         }
         let dimensions = array.layout.bounds.len();
@@ -37,6 +37,14 @@ impl EngineInstance {
             .layout
             .offset(&indices[..dimensions])
             .map_err(HostError::Automation)?;
+        if array.layout.vartype == 8 {
+            return self.bstr_array_element(
+                index,
+                offset,
+                args[2],
+                api == Api::SafeArrayGetElement,
+            );
+        }
         let element = array
             .data
             .checked_add(offset as u32)

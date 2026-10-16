@@ -82,11 +82,21 @@ impl EngineInstance {
             SafeArrayGetElement | SafeArrayPutElement => {
                 self.automation_array_element(index, api, args)
             }
+            SafeArrayCopy if array.layout.vartype == 8 => self.copy_bstr_array(index, args[1]),
             SafeArrayCopy => self.copy_automation_array(index, args[1]),
+            SafeArrayRedim if array.layout.vartype == 8 => {
+                if locks != 0 {
+                    return Err(HostError::Automation(E::ArrayLocked));
+                }
+                self.redim_bstr_array(index, args[1])
+            }
             SafeArrayRedim => self.redim_automation_array(index, locks, args[1]),
             SafeArrayDestroy => {
                 if locks != 0 {
                     return Err(HostError::Automation(E::ArrayLocked));
+                }
+                if array.layout.vartype == 8 {
+                    return self.destroy_bstr_array(index);
                 }
                 if array.layout.owns_elements() {
                     return Err(HostError::Automation(E::NotImplemented));
