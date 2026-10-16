@@ -330,7 +330,22 @@ impl AddressSpace {
         &mut self,
         spans: &[(GuestAddress, &[u8])],
     ) -> Result<(), MemoryError> {
-        if spans.len() > 5 {
+        self.write_bounded_spans::<5>(spans)
+    }
+
+    #[cold]
+    pub(crate) fn write_scatter(
+        &mut self,
+        spans: &[(GuestAddress, &[u8])],
+    ) -> Result<(), MemoryError> {
+        self.write_bounded_spans::<8>(spans)
+    }
+
+    fn write_bounded_spans<const LIMIT: usize>(
+        &mut self,
+        spans: &[(GuestAddress, &[u8])],
+    ) -> Result<(), MemoryError> {
+        if spans.len() > LIMIT {
             return Err(MemoryError::InvalidRange);
         }
         for &(address, bytes) in spans {
