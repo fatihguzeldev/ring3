@@ -80,6 +80,15 @@ impl GdiRuntime32 {
         memory: &mut AddressSpace,
         args: &[u32],
     ) -> Result<u32, GdiError32> {
+        if let Ok(entries) = self.model.palette_entries(args[0]) {
+            if args[2] == 0 {
+                return Ok(2);
+            }
+            let bytes = (entries.len() as u16).to_le_bytes();
+            let count = (args[1] as usize).min(bytes.len());
+            memory.write(GuestAddress(args[2]), &bytes[..count])?;
+            return Ok(count as u32);
+        }
         let object = self.model.object(args[0])?;
         let words: Vec<u32> = match object {
             GdiObject32::Pen(pen) => vec![pen.style, pen.width as u32, 0, pen.color],

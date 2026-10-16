@@ -5,6 +5,7 @@ mod context;
 mod dc;
 mod fonts;
 mod objects;
+mod palette;
 mod raster;
 mod region;
 mod types;
@@ -15,6 +16,7 @@ pub use context::{GdiContext32, PreparedGdiObject32};
 pub use fonts::{
     FontDatabase32, FontMetrics32, GlyphRaster32, LogicalFont32, ShapedGlyph32, ShapedText32,
 };
+pub use palette::{LogicalPalette32, nearest_palette_index32, synthesized_palette32};
 pub use raster::{raster_operation32, raster_uses_source32};
 pub use region::Region32;
 pub use types::{

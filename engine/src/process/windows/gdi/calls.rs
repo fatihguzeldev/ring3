@@ -167,6 +167,14 @@ impl GdiRuntime32 {
             GetSysColorBrush => {
                 Ok(crate::windows::gdi::GdiContext32::system_brush(args[0]).unwrap_or(0))
             }
+            CreatePalette
+            | SelectPalette
+            | GetPaletteEntries
+            | SetPaletteEntries
+            | ResizePalette
+            | GetNearestPaletteIndex
+            | RealizePalette
+            | GetSystemPaletteEntries => self.palette_call(memory, api, args),
             CreateCompatibleDC => self.memory_dc(args[0], thread),
             CreateDCA | CreateDCW => {
                 let driver = if args[0] == 0 { args[1] } else { args[0] };

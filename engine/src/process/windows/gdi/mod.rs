@@ -7,6 +7,7 @@ mod fonts;
 mod memory;
 mod objects;
 mod paint;
+mod palette;
 mod raster;
 mod regions;
 mod runtime;

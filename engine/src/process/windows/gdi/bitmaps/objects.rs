@@ -3,6 +3,7 @@ use super::super::{
     memory,
     storage::{Storage32, SurfaceKey32},
 };
+use super::{color_to_quad, quad_to_color};
 use crate::{
     memory::{
         Access, AddressSpace, GuestAddress, PAGE_SIZE, PageInitialization, Permissions, WordWrite32,
@@ -85,7 +86,7 @@ impl GdiRuntime32 {
         args: &[u32],
     ) -> Result<u32, GdiError32> {
         memory.check_span(GuestAddress(args[3]), 4, Access::Write)?;
-        let (layout, colors) = dib_info(memory, args[1], args[2])?;
+        let (layout, colors) = self.read_dib_info(memory, args[1], args[2], args[0])?;
         if args[4] != 0 {
             return Err(GdiError32::Unsupported);
         }
@@ -202,67 +203,6 @@ impl GdiRuntime32 {
         Ok(count as u32)
     }
 }
-pub(in crate::process::windows::gdi) fn dib_info(
-    memory: &AddressSpace,
-    address: u32,
-    usage: u32,
-) -> Result<(BitmapLayout32, Vec<u32>), GdiError32> {
-    if usage != 0 {
-        return Err(GdiError32::Unsupported);
-    }
-    let header: [u32; 10] = memory::words(memory, address)?;
-    if header[0] < 40 || header[0] > 124 || header[3] & 0xffff != 1 {
-        return Err(GdiError32::InvalidRequest);
-    }
-    if !matches!(header[4], 0 | 3) {
-        return Err(GdiError32::Unsupported);
-    }
-    let bits = (header[3] >> 16) as u16;
-    let mut layout = BitmapLayout32::new(header[1] as i32, header[2] as i32, bits, true)?;
-    let mut table_offset = header[0];
-    if header[4] == 3 {
-        if header[0] != 40 && header[0] < 52 {
-            return Err(GdiError32::InvalidRequest);
-        }
-        let masks = memory::words(
-            memory,
-            address.checked_add(40).ok_or(GdiError32::InvalidRequest)?,
-        )?;
-        layout = layout.with_masks(masks)?;
-        if header[0] == 40 {
-            table_offset += 12;
-        }
-    }
-    let count = if bits <= 8 {
-        if header[8] == 0 {
-            1u32 << bits
-        } else {
-            header[8]
-        }
-    } else {
-        header[8]
-    };
-    if count > 256 || (bits <= 8 && count > 1u32 << bits) {
-        return Err(GdiError32::InvalidRequest);
-    }
-    let mut colors = Vec::new();
-    colors
-        .try_reserve_exact(count as usize)
-        .map_err(|_| GdiError32::Allocation)?;
-    if count != 0 {
-        let mut bytes = memory::zeroes(count as usize * 4)?;
-        memory.read(
-            GuestAddress(
-                address
-                    .checked_add(table_offset)
-                    .ok_or(GdiError32::InvalidRequest)?,
-            ),
-            &mut bytes,
-        )?;
-        colors.extend(bytes.chunks_exact(4).map(quad_to_color));
-    }
-    Ok((layout, colors))
-}
 pub(in crate::process::windows::gdi) fn bounds(
     layout: BitmapLayout32,
 ) -> crate::windows::user32::Rect32 {
@@ -272,10 +212,4 @@ pub(in crate::process::windows::gdi) fn bounds(
         right: layout.width as i32,
         bottom: layout.height as i32,
     }
-}
-pub(in crate::process::windows::gdi) fn quad_to_color(bytes: &[u8]) -> u32 {
-    u32::from(bytes[2]) | u32::from(bytes[1]) << 8 | u32::from(bytes[0]) << 16
-}
-pub(in crate::process::windows::gdi) fn color_to_quad(color: u32) -> [u8; 4] {
-    [(color >> 16) as u8, (color >> 8) as u8, color as u8, 0]
 }

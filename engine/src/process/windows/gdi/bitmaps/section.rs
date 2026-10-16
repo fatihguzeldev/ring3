@@ -1,5 +1,4 @@
 use super::super::{
-    bitmaps::dib_info,
     context::GdiRuntime32,
     storage::{Storage32, SurfaceKey32},
 };
@@ -127,7 +126,11 @@ impl EngineInstance {
         let memory = self.memory.as_mut().unwrap();
         memory.check_span(GuestAddress(args[3]), 4, Access::Write)?;
         memory.ensure_transaction_versions(2)?;
-        let (layout, colors) = dib_info(memory, args[1], args[2])?;
+        let (layout, colors) = self
+            .gdi
+            .as_ref()
+            .ok_or(GdiError32::InvalidConfig)?
+            .read_dib_info(memory, args[1], args[2], args[0])?;
         let gdi = self.gdi.as_mut().ok_or(GdiError32::InvalidConfig)?;
         let prepared = gdi.model.prepare_object(GdiObject32::Bitmap(layout))?;
         let mut surface =

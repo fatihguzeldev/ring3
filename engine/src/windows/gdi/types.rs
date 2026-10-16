@@ -79,13 +79,14 @@ pub enum GdiObject32 {
     StockFont(u32),
     Font(super::LogicalFont32),
     StockPalette,
+    Palette(super::LogicalPalette32),
 }
 impl GdiObject32 {
     pub fn object_type(&self) -> u32 {
         match self {
             Self::Pen(_) => 1,
             Self::Brush(_) => 2,
-            Self::StockPalette => 5,
+            Self::StockPalette | Self::Palette(_) => 5,
             Self::StockFont(_) | Self::Font(_) => 6,
             Self::Bitmap(_) => 7,
             Self::Region(_) => 8,

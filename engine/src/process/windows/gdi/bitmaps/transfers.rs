@@ -1,5 +1,5 @@
 use super::super::{
-    bitmaps::{bounds, color_to_quad, dib_info},
+    bitmaps::{bounds, color_to_quad, dib_layout},
     context::GdiRuntime32,
     memory,
     raster::{BlitImage32, BlitRequest32},
@@ -22,14 +22,18 @@ impl GdiRuntime32 {
         if args[0] != 0 {
             self.model.dc_kind(args[0])?;
         }
+        if args[6] > 1 {
+            return Err(GdiError32::InvalidRequest);
+        }
         self.model.check_delete_object(args[1])?;
         let index = self.surface_index(SurfaceKey32::Bitmap(args[1]))?;
         let source_layout = self.surfaces[index].layout;
         let mut header: [u32; 10] = memory::words(memory, args[5])?;
-        if header[0] < 40 || header[0] > 124 || args[6] != 0 {
+        if header[0] < 40 || header[0] > 124 {
             return Err(GdiError32::InvalidRequest);
         }
-        if api == GdiApi32::GetDIBits && (args[4] == 0 || header[3] >> 16 == 0) {
+        let get = api == GdiApi32::GetDIBits;
+        if get && (args[4] == 0 || header[3] >> 16 == 0) {
             let header_only = header[3] >> 16 == 0;
             header[1] = source_layout.width;
             header[2] = source_layout.height;
@@ -52,26 +56,61 @@ impl GdiRuntime32 {
                     header,
                     source_layout,
                     &self.surfaces[index].palette,
+                    args[6],
                 )?;
                 memory.write(GuestAddress(args[5]), &info)?;
             }
             return Ok(source_layout.height);
         }
-        let (layout, colors) = dib_info(memory, args[5], args[6])?;
+        let (layout, colors) = if get {
+            header[8] = 0;
+            let layout = dib_layout(memory, args[5], header)?.layout;
+            let mut colors = if args[6] == 0 {
+                crate::windows::gdi::synthesized_palette32(layout.bits_per_pixel)?
+            } else {
+                Vec::new()
+            };
+            if layout.bits_per_pixel <= 8
+                && (args[6] == 1 || layout.bits_per_pixel == source_layout.bits_per_pixel)
+            {
+                let entries = if args[6] == 1 {
+                    self.selected_palette(args[0])?
+                } else {
+                    &self.surfaces[index].palette
+                };
+                let count = 1usize << layout.bits_per_pixel;
+                colors
+                    .try_reserve_exact(count.saturating_sub(colors.len()))
+                    .map_err(|_| GdiError32::Allocation)?;
+                colors.resize(count, 0);
+                let copied = count.min(entries.len());
+                for (output, entry) in colors[..copied].iter_mut().zip(entries) {
+                    *output = entry & 0xffffff;
+                }
+            }
+            (layout, colors)
+        } else {
+            self.read_dib_info(memory, args[5], args[6], args[0])?
+        };
         if layout.width != source_layout.width {
             return Err(GdiError32::InvalidRequest);
         }
+        header[5] = layout.byte_len()? as u32;
         let start = args[2].min(source_layout.height);
         let count = args[3].min(source_layout.height - start).min(layout.height);
         let partial = BitmapLayout32 {
             height: count.max(1),
             ..layout
         };
-        let mut transfer = memory::zeroes(count as usize * layout.stride as usize)?;
+        let length = count as usize * layout.stride as usize;
+        if length > self.config.bitmap_bytes {
+            return Err(GdiError32::Capacity);
+        }
+        let mut transfer = memory::zeroes(length)?;
         let mut pixels = self.surfaces[index]
             .storage
             .read(memory, source_layout.byte_len()?)?;
-        if api == GdiApi32::GetDIBits {
+        if get {
             for row in 0..count {
                 for x in 0..layout.width {
                     let y = if layout.top_down {
@@ -94,8 +133,7 @@ impl GdiRuntime32 {
                     );
                 }
             }
-            header[5] = layout.byte_len()? as u32;
-            let info = dib_description(memory, args[5], header, layout, &colors)?;
+            let info = dib_description(memory, args[5], header, layout, &colors, args[6])?;
             memory.write_spans(&[
                 (GuestAddress(args[4]), &transfer),
                 (GuestAddress(args[5]), &info),
@@ -146,7 +184,7 @@ impl GdiRuntime32 {
         } else {
             (args[9], args[10], args[11])
         };
-        let (layout, palette) = dib_info(memory, info, usage)?;
+        let (layout, palette) = self.read_dib_info(memory, info, usage, args[0])?;
         if layout.byte_len()? > self.config.bitmap_bytes {
             return Err(GdiError32::Capacity);
         }
@@ -239,6 +277,7 @@ fn dib_description(
     header: [u32; 10],
     layout: BitmapLayout32,
     colors: &[u32],
+    usage: u32,
 ) -> Result<Vec<u8>, GdiError32> {
     if layout.masks.is_some() && header[0] != 40 && header[0] < 52 {
         return Err(GdiError32::InvalidRequest);
@@ -249,7 +288,8 @@ fn dib_description(
         } else {
             0
         };
-    let mut info = memory::zeroes(table_offset + colors.len() * 4)?;
+    let entry_size = if usage == 1 { 2 } else { 4 };
+    let mut info = memory::zeroes(table_offset + colors.len() * entry_size)?;
     memory.read(GuestAddress(address), &mut info[..header[0] as usize])?;
     for (word, value) in info[..40].chunks_exact_mut(4).zip(header) {
         word.copy_from_slice(&value.to_le_bytes());
@@ -259,8 +299,14 @@ fn dib_description(
             word.copy_from_slice(&value.to_le_bytes());
         }
     }
-    for (part, color) in info[table_offset..].chunks_exact_mut(4).zip(colors) {
-        part.copy_from_slice(&color_to_quad(*color));
+    if usage == 1 {
+        for (index, part) in info[table_offset..].chunks_exact_mut(2).enumerate() {
+            part.copy_from_slice(&(index as u16).to_le_bytes());
+        }
+    } else {
+        for (part, color) in info[table_offset..].chunks_exact_mut(4).zip(colors) {
+            part.copy_from_slice(&color_to_quad(*color));
+        }
     }
     Ok(info)
 }

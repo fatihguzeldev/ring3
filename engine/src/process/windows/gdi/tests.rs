@@ -338,6 +338,7 @@ mod raster;
 
 mod section;
 
+mod controls;
 
 mod colors;
 
@@ -345,4 +346,4 @@ mod caps;
 
 mod bitfields;
 
-mod controls;
+mod palette;

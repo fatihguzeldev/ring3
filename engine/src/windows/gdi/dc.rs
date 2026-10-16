@@ -28,7 +28,9 @@ impl GdiContext32 {
             GdiObject32::Brush(_) => current.state.brush,
             GdiObject32::Pen(_) => current.state.pen,
             GdiObject32::StockFont(_) | GdiObject32::Font(_) => current.state.font,
-            GdiObject32::StockPalette => return Err(GdiError32::InvalidRequest),
+            GdiObject32::StockPalette | GdiObject32::Palette(_) => {
+                return Err(GdiError32::InvalidRequest);
+            }
             GdiObject32::Bitmap(_) => {
                 if !matches!(current.kind, DcKind32::Memory { .. }) {
                     return Err(GdiError32::InvalidRequest);
@@ -59,7 +61,7 @@ impl GdiContext32 {
             GdiObject32::StockFont(_) | GdiObject32::Font(_) => state.font = object,
             GdiObject32::Bitmap(_) => state.bitmap = object,
             GdiObject32::Region(region) => state.clip = Some(region),
-            GdiObject32::StockPalette => unreachable!(),
+            GdiObject32::StockPalette | GdiObject32::Palette(_) => unreachable!(),
         }
         Ok(previous)
     }

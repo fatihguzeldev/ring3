@@ -108,7 +108,11 @@ impl GdiRuntime32 {
     ) -> Result<Surface32, GdiError32> {
         let length = layout.byte_len()?;
         if self.surfaces.len() == self.config.objects + self.config.dcs
-            || length > self.config.bitmap_bytes - self.bytes
+            || length
+                > self
+                    .config
+                    .bitmap_bytes
+                    .saturating_sub(self.bytes + self.model.palette_bytes())
         {
             return Err(GdiError32::Capacity);
         }

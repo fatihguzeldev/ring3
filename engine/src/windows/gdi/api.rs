@@ -47,6 +47,8 @@ gdi_apis! {
     GetTextAlign,1; SetTextAlign,2; GetTextCharacterExtra,1; SetTextCharacterExtra,2; SetTextJustification,3;
     DrawTextA,5; DrawTextW,5; DrawTextExA,6; DrawTextExW,6;
     GetSysColor,1; GetSysColorBrush,1;
+    CreatePalette,1; SelectPalette,3; GetPaletteEntries,4; SetPaletteEntries,4;
+    ResizePalette,2; GetNearestPaletteIndex,2; RealizePalette,1; GetSystemPaletteEntries,4;
 }
 impl GdiApi32 {
     pub fn user32(self) -> bool {
@@ -84,6 +86,8 @@ impl GdiApi32 {
             self,
             Self::GetGlyphIndicesA
                 | Self::GetGlyphIndicesW
+                | Self::RealizePalette
+                | Self::GetNearestPaletteIndex
                 | Self::SetTextAlign
                 | Self::GetTextAlign
                 | Self::GetPixel
