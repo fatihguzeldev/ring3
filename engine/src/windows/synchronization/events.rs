@@ -166,6 +166,7 @@ impl SynchronizationContext32 {
                 manual,
                 handles: 0,
                 bindings: 0,
+                pseudo_only: false,
                 kind: ObjectKind32::Event,
             });
             self.next_object = id;

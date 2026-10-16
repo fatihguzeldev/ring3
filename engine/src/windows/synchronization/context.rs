@@ -9,6 +9,7 @@ pub(super) struct Object32 {
     pub manual: bool,
     pub handles: u32,
     pub bindings: u32,
+    pub pseudo_only: bool,
     pub kind: ObjectKind32,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -66,6 +67,7 @@ pub(super) struct Wait32 {
     pub message: Option<MessageWait32>,
     pub result: Option<WaitResult32>,
     pub thread: u32,
+    pub pseudo_objects: [Option<usize>; 2],
 }
 
 #[derive(Clone, Copy, Default)]
@@ -95,6 +97,7 @@ pub struct SynchronizationContext32 {
     pub(super) apcs: Vec<u32>,
     pub(super) current_thread: u32,
     pub(super) typed_objects: usize,
+    pub(super) pseudo_wait_slots: [Option<usize>; 2],
 }
 impl SynchronizationContext32 {
     #[cfg(test)]
@@ -140,6 +143,7 @@ impl SynchronizationContext32 {
             apcs,
             current_thread: 1,
             typed_objects: 0,
+            pseudo_wait_slots: [None; 2],
         })
     }
     pub fn epoch(&self) -> u64 {
@@ -167,6 +171,7 @@ impl SynchronizationContext32 {
         self.apcs.clear();
         self.current_thread = 1;
         self.typed_objects = 0;
+        self.pseudo_wait_slots = [None; 2];
         Ok(())
     }
     pub fn queue_state(&self, thread: u32) -> (u32, u32, u64) {
@@ -217,16 +222,17 @@ impl SynchronizationContext32 {
             .is_some_and(|event| event.handles == 0 && event.bindings == 0)
             && self.objects[slot].as_ref().is_some_and(|object| {
                 !matches!(object.kind,ObjectKind32::Mutex {owner,..} if owner!=0)
-                    && !matches!(
-                        object.kind,
-                        ObjectKind32::Thread {
-                            terminated: false,
-                            ..
-                        } | ObjectKind32::Process {
-                            terminated: false,
-                            ..
-                        }
-                    )
+                    && (object.pseudo_only
+                        || !matches!(
+                            object.kind,
+                            ObjectKind32::Thread {
+                                terminated: false,
+                                ..
+                            } | ObjectKind32::Process {
+                                terminated: false,
+                                ..
+                            }
+                        ))
             })
         {
             if self.objects[slot]

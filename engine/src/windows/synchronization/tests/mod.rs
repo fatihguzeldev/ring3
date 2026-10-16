@@ -1,5 +1,6 @@
 mod events;
 mod objects;
+mod pseudo;
 mod timers;
 mod waits;
 

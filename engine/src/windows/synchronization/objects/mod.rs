@@ -1,5 +1,6 @@
 mod creation;
 mod mutations;
+mod pseudo;
 
 use super::{
     context::{Handle32, Object32, ObjectKind32, set},

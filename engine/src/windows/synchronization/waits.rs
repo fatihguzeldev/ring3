@@ -249,11 +249,6 @@ impl SynchronizationContext32 {
             (prepared.epoch, prepared.revision)
         );
         if let Some(thread) = prepared.cancel_thread {
-            for wait in &mut self.waits {
-                if wait.as_ref().is_some_and(|wait| wait.thread == thread) {
-                    *wait = None;
-                }
-            }
             self.queues.retain(|queue| queue.thread != thread);
             self.apcs.retain(|id| *id != thread);
         }
@@ -281,6 +276,17 @@ impl SynchronizationContext32 {
         for (slot, kind) in prepared.objects {
             self.objects[slot].as_mut().unwrap().kind = kind;
             self.reclaim_event(slot);
+        }
+        if let Some(thread) = prepared.cancel_thread {
+            for slot in 0..self.waits.len() {
+                if self.waits[slot]
+                    .as_ref()
+                    .is_some_and(|wait| wait.thread == thread)
+                {
+                    let wait = self.waits[slot].take().unwrap();
+                    self.release_wait_objects(wait);
+                }
+            }
         }
         self.now = prepared.now;
         for (slot, result) in prepared
@@ -748,9 +754,14 @@ impl SynchronizationContext32 {
             message,
             result: None,
             thread: self.current_thread,
+            pseudo_objects: self.pseudo_wait_slots,
         };
         for (index, handle) in handles.iter().enumerate() {
-            let event = self.handles[self.handle_index(*handle, SYNCHRONIZE)?].event;
+            let event = match *handle {
+                u32::MAX => self.pseudo_wait_slots[0].ok_or(Error::InvalidHandle)?,
+                0xffff_fffe => self.pseudo_wait_slots[1].ok_or(Error::InvalidHandle)?,
+                _ => self.handles[self.handle_index(*handle, SYNCHRONIZE)?].event,
+            };
             if original[..index].contains(&original[index])
                 || mode == WaitMode32::All && wait.events[..index].contains(&event)
             {
@@ -973,10 +984,10 @@ impl SynchronizationContext32 {
         let thread = wait.thread;
         let mask = wait.message.map_or(0, |message| message.mask);
         let result = self.take_wait(token)?;
-        if result.is_some() {
-            if let Some(queue) = self.queues.iter_mut().find(|queue| queue.thread == thread) {
-                queue.new &= !mask;
-            }
+        if result.is_some()
+            && let Some(queue) = self.queues.iter_mut().find(|queue| queue.thread == thread)
+        {
+            queue.new &= !mask;
         }
         Ok(result)
     }
@@ -984,7 +995,8 @@ impl SynchronizationContext32 {
         let result = self.wait_record(token)?.result;
         if result.is_some() {
             let revision = self.next_revision()?;
-            self.waits[token.slot] = None;
+            let wait = self.waits[token.slot].take().unwrap();
+            self.release_wait_objects(wait);
             self.revision = revision;
         }
         Ok(result)
@@ -992,7 +1004,8 @@ impl SynchronizationContext32 {
     pub fn cancel_wait(&mut self, token: WaitToken32) -> Result<(), Error> {
         self.wait_record(token)?;
         let revision = self.next_revision()?;
-        self.waits[token.slot] = None;
+        let wait = self.waits[token.slot].take().unwrap();
+        self.release_wait_objects(wait);
         self.revision = revision;
         Ok(())
     }

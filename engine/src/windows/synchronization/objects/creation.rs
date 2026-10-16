@@ -235,7 +235,9 @@ impl SynchronizationContext32 {
             set(&mut self.signaled, prepared.slot, signaled);
             self.objects[prepared.slot] = Some(object);
         }
-        self.objects[prepared.slot].as_mut().unwrap().handles += 1;
+        let object = self.objects[prepared.slot].as_mut().unwrap();
+        object.pseudo_only = false;
+        object.handles += 1;
         self.next_handle = prepared.handle.value;
         self.handles.push(prepared.handle);
         self.revision = prepared.next_revision;
@@ -297,6 +299,7 @@ impl SynchronizationContext32 {
                     manual,
                     handles: 0,
                     bindings: 0,
+                    pseudo_only: false,
                     kind,
                 }),
                 handle,

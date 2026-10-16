@@ -151,14 +151,11 @@ impl SynchronizationContext32 {
                     continue;
                 }
                 set(&mut plan.signaled, *slot, true);
-                *due = if *period == 0 {
-                    None
-                } else {
-                    ((now - expiration) / *period)
-                        .checked_add(1)
-                        .and_then(|count| count.checked_mul(*period))
-                        .and_then(|delta| expiration.checked_add(delta))
-                };
+                *due = (now - expiration)
+                    .checked_div(*period)
+                    .and_then(|count| count.checked_add(1))
+                    .and_then(|count| count.checked_mul(*period))
+                    .and_then(|delta| expiration.checked_add(delta));
                 if *procedure != 0 && !*queued {
                     plan.timer_apcs.push(TimerApc32 {
                         object: self.objects[*slot].as_ref().unwrap().id,
