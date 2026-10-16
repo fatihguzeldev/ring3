@@ -33,7 +33,7 @@ impl User32Context32 {
         }
         let class = WindowClass32 {
             atom: 0,
-            name: memory::string(memory, values[9], api.wide(), 255)?,
+            name: memory::string(memory, values[9], api.wide(), 255, context.ansi)?,
             instance: if values[4] == 0 {
                 context.instance
             } else {
@@ -56,7 +56,7 @@ impl User32Context32 {
         memory: &AddressSpace,
         context: User32CallContext32,
     ) -> Result<User32Outcome32, User32Error32> {
-        let (name, atom) = class_name(memory, args[0], api.wide())?;
+        let (name, atom) = class_name(memory, args[0], api.wide(), context.ansi)?;
         self.state.unregister_class(
             if args[1] == 0 {
                 context.instance
@@ -74,6 +74,7 @@ pub(super) fn class_name(
     memory: &AddressSpace,
     address: u32,
     wide: bool,
+    code_page: crate::windows::text::CodePage32,
 ) -> Result<(Vec<u16>, Option<u16>), User32Error32> {
     if address <= 0xffff {
         if address == 0 {
@@ -81,6 +82,6 @@ pub(super) fn class_name(
         }
         Ok((Vec::new(), Some(address as u16)))
     } else {
-        Ok((memory::string(memory, address, wide, 255)?, None))
+        Ok((memory::string(memory, address, wide, 255, code_page)?, None))
     }
 }

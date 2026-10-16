@@ -28,6 +28,7 @@ pub(crate) struct User32CallContext32 {
     pub thread_id: u32,
     pub instance: u32,
     pub time_ms: u32,
+    pub ansi: crate::windows::text::CodePage32,
     pub cursor: Point32,
     pub shift: bool,
     pub caps_lock: bool,

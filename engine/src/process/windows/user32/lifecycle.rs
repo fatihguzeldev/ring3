@@ -21,7 +21,7 @@ impl User32Context32 {
         context: User32CallContext32,
     ) -> Result<User32Outcome32, User32Error32> {
         self.check_continuation()?;
-        let (name, atom) = class_name(memory, args[1], api.wide())?;
+        let (name, atom) = class_name(memory, args[1], api.wide(), context.ansi)?;
         let instance = if args[10] == 0 {
             context.instance
         } else {
@@ -60,7 +60,7 @@ impl User32Context32 {
             return Err(User32Error32::Win32(50));
         }
         if args[2] != 0 {
-            memory::string(memory, args[2], api.wide(), 32_767)?;
+            memory::string(memory, args[2], api.wide(), 32_767, context.ansi)?;
         }
         let special = args[3] & 0xc000_0000 != 0;
         let (x, y) = if args[4] == 0x8000_0000 {

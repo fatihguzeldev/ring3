@@ -291,6 +291,7 @@ impl EngineInstance {
             thread_id: self.current_windows_thread_id()?,
             instance: self.image.map_or(0, |image| image.image_base),
             time_ms,
+            ansi: self.windows_ansi_code_page(),
             ..context.runtime_input
         })
     }

@@ -4,6 +4,7 @@ mod input;
 mod lifecycle;
 mod messages;
 mod runtime;
+mod text;
 mod threads;
 
 use super::*;

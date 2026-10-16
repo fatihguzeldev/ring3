@@ -70,47 +70,55 @@ pub(super) fn string(
     address: u32,
     wide: bool,
     limit: usize,
+    code_page: crate::windows::text::CodePage32,
 ) -> Result<Vec<u16>, User32Error32> {
     if address == 0 {
         return Err(User32Error32::Win32(87));
     }
-    let mut output = Vec::new();
-    output
-        .try_reserve_exact(limit.min(256))
-        .map_err(|_| User32Error32::Allocation)?;
-    for index in 0..=limit {
-        let at = address
-            .checked_add(index as u32 * if wide { 2 } else { 1 })
-            .ok_or(User32Error32::Win32(87))?;
-        let unit = if wide {
-            let mut bytes = [0; 2];
-            memory.read(GuestAddress(at), &mut bytes)?;
-            u16::from_le_bytes(bytes)
+    let byte_limit = limit
+        .checked_mul(if wide {
+            2
         } else {
-            let mut byte = [0];
-            memory.read(GuestAddress(at), &mut byte)?;
-            ansi(byte[0])
-        };
-        if unit == 0 {
-            return Ok(output);
+            code_page.maximum_char_size() as usize
+        })
+        .ok_or(User32Error32::Win32(87))?;
+    let mut bytes = Vec::new();
+    bytes
+        .try_reserve_exact(byte_limit.min(512))
+        .map_err(|_| User32Error32::Allocation)?;
+    let step = if wide { 2 } else { 1 };
+    for offset in (0..=byte_limit).step_by(step) {
+        let at = address
+            .checked_add(u32::try_from(offset).map_err(|_| User32Error32::Win32(87))?)
+            .ok_or(User32Error32::Win32(87))?;
+        let mut unit = [0; 2];
+        memory.read(GuestAddress(at), &mut unit[..step])?;
+        if unit[..step].iter().all(|&value| value == 0) {
+            let output = if wide {
+                bytes
+                    .chunks_exact(2)
+                    .map(|value| u16::from_le_bytes([value[0], value[1]]))
+                    .collect()
+            } else {
+                code_page
+                    .decode(&bytes, false)
+                    .map_err(|_| User32Error32::Win32(1113))?
+            };
+            return if output.len() <= limit {
+                Ok(output)
+            } else {
+                Err(User32Error32::Win32(87))
+            };
         }
-        if index == limit {
+        if offset == byte_limit {
             return Err(User32Error32::Win32(87));
         }
-        if output.len() == output.capacity() {
-            output
-                .try_reserve(output.capacity().max(1).min(limit - output.len()))
-                .map_err(|_| User32Error32::Allocation)?;
-        }
-        output.push(unit);
+        bytes
+            .try_reserve(step)
+            .map_err(|_| User32Error32::Allocation)?;
+        bytes.extend_from_slice(&unit[..step]);
     }
     unreachable!()
-}
-
-fn ansi(byte: u8) -> u16 {
-    crate::windows::text::CodePage32::Windows1252
-        .decode_byte(byte)
-        .expect("CP1252 is single-byte")
 }
 
 pub(super) fn rect(memory: &AddressSpace, address: u32) -> Result<Rect32, User32Error32> {

@@ -114,7 +114,7 @@ impl User32Context32 {
                 if args[1] & !0x11b != 0 {
                     return Err(User32Error32::Win32(50));
                 }
-                let name = memory::string(memory, args[0], api.wide(), 8)?;
+                let name = memory::string(memory, args[0], api.wide(), 8, context.ansi)?;
                 if name.len() != 8 {
                     return Err(User32Error32::Win32(87));
                 }
