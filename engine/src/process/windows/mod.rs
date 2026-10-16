@@ -42,3 +42,5 @@ pub(super) mod version;
 pub(super) mod shlwapi;
 pub(super) mod shell;
 pub(super) mod gdi;
+
+pub(super) mod automation;

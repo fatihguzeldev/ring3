@@ -27,6 +27,9 @@ pub fn windows_gate_info(id: u32) -> Option<WindowsGateInfo32> {
             stack_words: api.stack_words(),
         });
     }
+    if let Some(api) = crate::windows::automation::Oleaut32Api32::from_id(id) {
+        return Some(WindowsGateInfo32 { convention: api.convention(), stack_words: api.stack_words() });
+    }
     if let Some(api) = crate::windows::shell::ShellApi32::from_id(id) {
         return Some(WindowsGateInfo32 { convention: api.convention(), stack_words: api.stack_words() });
     }
@@ -315,6 +318,7 @@ impl EngineInstance {
         };
         if self.try_complete_builtin_control_call(owner, token, id, frame)?
             || self.try_complete_gdi_call(owner, token, id, frame)?
+            || self.try_complete_automation_call(owner, token, id, frame)?
             || self.try_complete_shell_call(owner, token, id, frame)?
             || self.try_complete_version_call(owner, token, id, frame)?
             || self.try_complete_shlwapi_call(owner, token, id, frame)?

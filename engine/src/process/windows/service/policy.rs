@@ -20,6 +20,11 @@ impl GuardFailure32 {
         if let Some(api) = crate::windows::gdi::GdiApi32::from_id(id) {
             return noaccess(api.failure_value());
         }
+        if let Some(api) = crate::windows::automation::Oleaut32Api32::from_id(id) {
+            return if api.returns_hresult() {
+                Some(Self { value: 0x8007_03e6, last_error: None })
+            } else { noaccess(0) };
+        }
         if let Some(api) = crate::windows::shell::ShellApi32::from_id(id) {
             return if matches!(api, crate::windows::shell::ShellApi32::SHGetFolderPathA | crate::windows::shell::ShellApi32::SHGetFolderPathW) {
                 Some(Self { value: 0x8007_03e6, last_error: None })

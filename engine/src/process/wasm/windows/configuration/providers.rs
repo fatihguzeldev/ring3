@@ -45,6 +45,14 @@ pub(crate) fn register_shlwapi_module(base: u32) -> u32 {
 pub(crate) fn register_shell32_module(base: u32) -> u32 {
     mutate(|instance| instance.register_shell32_module(base))
 }
+pub(crate) fn register_oleaut32_module(base: u32) -> u32 {
+    mutate(|instance| instance.register_oleaut32_module(base))
+}
+pub(crate) fn configure_automation(objects: u32, bytes: u32, dimensions: u32, nesting: u32) -> u32 {
+    mutate(|instance| instance.configure_automation(crate::windows::automation::AutomationLimits32 {
+        objects: objects as usize, bytes: bytes as usize, dimensions: dimensions as usize, nesting: nesting as usize,
+    }))
+}
 pub(crate) fn configure_shell_folder(kind: u32, length: u32) -> u32 {
     mutate(|instance| {
         let input = super::super::input(instance, length)?;

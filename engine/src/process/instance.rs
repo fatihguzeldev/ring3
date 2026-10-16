@@ -47,6 +47,7 @@ pub enum HostError {
     Shlwapi(crate::windows::shlwapi::ShlwapiError32),
     Shell(crate::windows::shell::ShellError32),
     Gdi(crate::windows::gdi::GdiError32),
+    Automation(crate::windows::automation::AutomationError32),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -69,6 +70,7 @@ pub struct EngineInstance {
         Option<crate::process::windows::activation::ActivationRuntime32>,
     pub(in crate::process) exceptions: crate::process::windows::exceptions::ExceptionRuntime32,
     pub(in crate::process) gdi: Option<crate::process::windows::gdi::GdiRuntime32>,
+    pub(in crate::process) automation: crate::process::windows::automation::AutomationRuntime32,
     pub(in crate::process) shell: crate::process::windows::shell::ShellRuntime32,
     pub(in crate::process) version: crate::process::windows::version::VersionRuntime32,
     pub(in crate::process) nls: crate::process::windows::nls::NlsRuntime32,
@@ -153,6 +155,7 @@ impl EngineInstance {
             exceptions: crate::process::windows::exceptions::ExceptionRuntime32::new()
                 .map_err(HostError::Exception)?,
             gdi: None,
+            automation: Default::default(),
             shell: Default::default(),
             version: Default::default(),
             nls: Default::default(),
@@ -252,6 +255,7 @@ impl EngineInstance {
         self.exceptions = crate::process::windows::exceptions::ExceptionRuntime32::new()
             .expect("default exception handler limit");
         self.gdi = None;
+        self.automation = Default::default();
         self.shell = Default::default();
         self.version = Default::default();
         self.nls = Default::default();

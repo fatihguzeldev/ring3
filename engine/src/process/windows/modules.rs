@@ -439,6 +439,7 @@ impl EngineInstance {
         if let Some(gdi) = self.gdi.as_mut() {
             gdi.retire_process();
         }
+        self.automation.terminate();
         if let Some(resources) = self.resources.as_mut() {
             resources.commit_process_exit();
         }

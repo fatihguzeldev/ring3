@@ -105,7 +105,7 @@ pub(super) fn status(error: HostError) -> u32 {
             crate::windows::gdi::GdiError32::Capacity => 18,
             _ => 7,
         },
-        HostError::Version(_) | HostError::Shlwapi(_) | HostError::Shell(_) => 7,
+        HostError::Version(_) | HostError::Shlwapi(_) | HostError::Shell(_) | HostError::Automation(_) => 7,
         HostError::Activation(error) => match error {
             crate::windows::activation::ActivationError32::NotEnoughMemory => 9,
             crate::windows::activation::ActivationError32::Busy => 12,
