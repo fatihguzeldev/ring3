@@ -114,3 +114,63 @@ fn header_plan_exposes_root_before_missing_imports_without_installing_partial_me
     assert_eq!(memory.mapped_pages(), 0);
     assert_eq!(memory.transaction_version(), version);
 }
+
+#[test]
+fn replacement_is_atomic_and_waits_for_every_loaded_or_prepared_source_owner() {
+    use crate::{loader::ModuleSet32, memory::AddressSpace};
+    let old = pe::image(true, 0x600000, &[], &[]);
+    let new = pe::image(true, 0x800000, &[], &[]);
+    let mut catalog = ModuleCatalog32::with_limits(ModuleLimits32 {
+        source_bytes: old.len(),
+        ..Default::default()
+    })
+    .unwrap();
+    catalog.add_guest(r"C:\game\Plugin.dll", &old).unwrap();
+    let mut memory = AddressSpace::new(16).unwrap();
+    let mut modules = ModuleSet32::new();
+    let prepared = catalog
+        .plan_load(&modules, &memory, r"C:\game\Plugin.dll", None)
+        .unwrap();
+    assert_eq!(
+        catalog.replace_guest(r"C:\game\plugin.dll", &new),
+        Err(ModuleError32::ModuleInUse)
+    );
+    assert_eq!(
+        catalog.remove_guest(r"C:\game\plugin.dll"),
+        Err(ModuleError32::ModuleInUse)
+    );
+    drop(prepared);
+    assert!(matches!(
+        catalog.replace_guest(r"C:\game\plugin.dll", &[0]),
+        Err(ModuleError32::Pe(_))
+    ));
+    assert_eq!(catalog.remaining_source_bytes(), 0);
+    let mut oversized = new.clone();
+    oversized.push(0);
+    assert_eq!(
+        catalog.replace_guest(r"C:\game\plugin.dll", &oversized),
+        Err(ModuleError32::Capacity)
+    );
+    catalog.replace_guest(r"C:\game\plugin.dll", &new).unwrap();
+    let installed = catalog
+        .plan_load(&modules, &memory, r"C:\game\plugin.dll", None)
+        .unwrap()
+        .install(&mut memory, &mut modules)
+        .unwrap();
+    let module = modules.get(installed.root).unwrap();
+    assert_eq!(module.base(), 0x800000);
+    assert_eq!(module.file_path(), Some(r"C:\game\Plugin.dll"));
+    assert_eq!(
+        catalog.replace_guest(r"C:\game\plugin.dll", &old),
+        Err(ModuleError32::ModuleInUse)
+    );
+    modules
+        .plan_unload(&memory, &[installed.root])
+        .unwrap()
+        .unmap(&mut memory, &mut modules)
+        .unwrap();
+    catalog.replace_guest(r"C:\game\plugin.dll", &old).unwrap();
+    catalog.remove_guest(r"C:\game\plugin.dll").unwrap();
+    assert!(catalog.is_empty());
+    assert_eq!(catalog.remaining_source_bytes(), old.len());
+}

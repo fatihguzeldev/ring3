@@ -147,6 +147,66 @@ impl ModuleCatalog32 {
         Ok(())
     }
 
+    pub fn replace_guest(&mut self, name: &str, bytes: &[u8]) -> Result<(), ModuleError32> {
+        let name = normalize_module_identity(name)?;
+        let slot = self
+            .sources
+            .iter()
+            .position(|source| source.name() == name)
+            .ok_or(ModuleError32::MissingModule)?;
+        let source = &self.sources[slot];
+        let ModuleSource32::Guest {
+            bytes: old, path, ..
+        } = &**source
+        else {
+            return Err(ModuleError32::InvalidModuleKind);
+        };
+        if Arc::strong_count(source) != 1 {
+            return Err(ModuleError32::ModuleInUse);
+        }
+        let source_bytes = (self.source_bytes - old.len())
+            .checked_add(bytes.len())
+            .ok_or(ModuleError32::Capacity)?;
+        if source_bytes > self.limits.source_bytes {
+            return Err(ModuleError32::Capacity);
+        }
+        let image = parse_module_with_limits(bytes, self.limits.parser)?;
+        let mut owned = Vec::new();
+        owned
+            .try_reserve_exact(bytes.len())
+            .map_err(|_| ModuleError32::Allocation)?;
+        owned.extend_from_slice(bytes);
+        let replacement = Arc::new(ModuleSource32::Guest {
+            name,
+            path: path.clone(),
+            bytes: owned.into_boxed_slice(),
+            image,
+            parser_limits: self.limits.parser,
+        });
+        self.sources[slot] = replacement;
+        self.source_bytes = source_bytes;
+        Ok(())
+    }
+
+    pub fn remove_guest(&mut self, name: &str) -> Result<(), ModuleError32> {
+        let name = normalize_module_identity(name)?;
+        let slot = self
+            .sources
+            .iter()
+            .position(|source| source.name() == name)
+            .ok_or(ModuleError32::MissingModule)?;
+        let source = &self.sources[slot];
+        let ModuleSource32::Guest { bytes, .. } = &**source else {
+            return Err(ModuleError32::InvalidModuleKind);
+        };
+        if Arc::strong_count(source) != 1 {
+            return Err(ModuleError32::ModuleInUse);
+        }
+        self.source_bytes -= bytes.len();
+        self.sources.remove(slot);
+        Ok(())
+    }
+
     /// Register a provider and its facade dependencies without partial admission.
     pub fn add_system_group(&mut self, modules: Vec<SystemModule32>) -> Result<(), ModuleError32> {
         let capacity = self
