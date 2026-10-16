@@ -22,7 +22,7 @@ writeFileSync(join(output, "engine.wasm"), engine.bytes, {flag: "wx"});
 const hash = bytes => createHash("sha256").update(bytes).digest("hex");
 const frames = [], phases = [], modules = [], inputs = [], hosts = [], initialFrames = [];
 const paths = [
-  "engine/tests/cpu/batches/word/wasm/rotate.rs", "engine/tests/cpu/batches/wasm.rs", "engine/tests/support/wasm.rs", "engine/tests/cpu/batches/wasm.rs", "engine/tests/support/wasm.rs",
+  "engine/tests/cpu/batches/word/wasm/rotate.rs", "engine/tests/cpu/batches/wasm.rs", "engine/tests/support/wasm.rs",  
   "engine/tests/cpu/batches/word/fixtures/p2-cpu-parallel-word-rotate/runtime/run.mjs",
   "engine/tests/support/wasm/engine.mjs", 'engine/tests/support/wasm/binding.mjs',
 ];

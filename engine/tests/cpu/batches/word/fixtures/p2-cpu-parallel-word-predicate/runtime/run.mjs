@@ -16,7 +16,7 @@ assert.equal(program.length, 38);
 assert.deepEqual(program, readFileSync(join(output, "word-predicate.x86")), "independent Rust/JS literal bank");
 writeFileSync(join(output, "engine.wasm"), engine.bytes, {flag: "wx"});
 const hash = bytes => createHash("sha256").update(bytes).digest("hex"), frames = [], phases = [], modules = [], inputs = [], hosts = [], initialFrames = [];
-const paths = ["engine/tests/cpu/batches/word/wasm/predicate.rs", "engine/tests/cpu/batches/wasm.rs", "engine/tests/support/wasm.rs", "engine/tests/cpu/batches/wasm.rs", "engine/tests/support/wasm.rs", "engine/tests/cpu/batches/word/fixtures/p2-cpu-parallel-word-predicate/runtime/run.mjs", "engine/tests/support/wasm/engine.mjs", 'engine/tests/support/wasm/binding.mjs'];
+const paths = ["engine/tests/cpu/batches/word/wasm/predicate.rs", "engine/tests/cpu/batches/wasm.rs", "engine/tests/support/wasm.rs",   "engine/tests/cpu/batches/word/fixtures/p2-cpu-parallel-word-predicate/runtime/run.mjs", "engine/tests/support/wasm/engine.mjs", 'engine/tests/support/wasm/binding.mjs'];
 const sourcePins = () => Object.fromEntries(paths.map(path => [path, hash(readFileSync(join(root, path)))])), beforeSources = sourcePins();
 function record(magic, size, fields = [], version = 1) {
   const bytes = Buffer.alloc(size); bytes.write(magic); bytes.writeUInt16LE(version, 4);
