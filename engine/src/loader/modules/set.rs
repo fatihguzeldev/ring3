@@ -138,6 +138,13 @@ impl LoadedModule32 {
         }
     }
 
+    pub fn resource_directory(&self) -> Option<crate::loader::Directory32> {
+        match &*self.source {
+            ModuleSource32::Guest { image, .. } => image.resource_directory(),
+            ModuleSource32::System(_) => None,
+        }
+    }
+
     pub fn load_config(&self) -> Option<&LoadConfig32> {
         match &*self.source {
             ModuleSource32::Guest { image, .. } => image.load_config.as_ref(),
@@ -159,6 +166,7 @@ pub struct ModuleSet32 {
     pub(super) modules: Vec<LoadedModule32>,
     pub(super) revision: u64,
     pub(super) next_id: u64,
+    pub(super) datafile_count: usize,
     pub(super) root: Option<ModuleId32>,
     pub(super) forwarder_limit: usize,
 }
@@ -170,6 +178,7 @@ impl Default for ModuleSet32 {
             modules: Vec::new(),
             revision: 0,
             next_id: 0,
+            datafile_count: 0,
             root: None,
             forwarder_limit: super::ModuleLimits32::default().forwarder_depth,
         }

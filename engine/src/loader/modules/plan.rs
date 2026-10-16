@@ -1,6 +1,7 @@
 mod graph;
 mod pages;
 mod unload;
+pub(super) use graph::placement::place;
 
 use std::sync::Arc;
 
@@ -102,6 +103,14 @@ impl LoadPlan32 {
         let end = start + u64::from(length);
         self.reservations.iter().any(|(base, size)| {
             start < u64::from(*base) + u64::from(*size) && u64::from(*base) < end
+        })
+    }
+
+    /// Includes runtime and TLS pages staged alongside image pages.
+    pub fn intersects_staged_range(&self, range: crate::memory::PageRange) -> bool {
+        self.pages.iter().any(|page| {
+            let index = (page.address.0 / crate::memory::PAGE_SIZE) as usize;
+            range.first <= index && index < range.first + range.count
         })
     }
 

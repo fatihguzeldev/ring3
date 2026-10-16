@@ -145,3 +145,9 @@ pub(crate) struct PreparedPe32 {
     pub(super) relocs_stripped: bool,
     pub(super) source_length: usize,
 }
+
+impl PreparedPe32 {
+    pub(crate) fn resource_directory(&self) -> Option<Directory32> {
+        self.directories[2]
+    }
+}

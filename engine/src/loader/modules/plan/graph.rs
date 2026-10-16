@@ -1,4 +1,4 @@
-mod placement;
+pub(super) mod placement;
 mod system;
 
 use std::sync::Arc;
@@ -14,13 +14,14 @@ use crate::{
         },
         pe32::module::ImportSymbol32,
     },
-    memory::{AddressSpace, GuestAddress},
+    memory::{AddressSpace, GuestAddress, PageRange},
 };
 
 struct Builder<'a> {
     catalog: &'a ModuleCatalog32,
     set: &'a ModuleSet32,
     memory: &'a AddressSpace,
+    reserved: &'a [PageRange],
     plan: LoadPlan32,
 }
 
@@ -32,8 +33,19 @@ impl ModuleCatalog32 {
         request: &str,
         actual_base: Option<u32>,
     ) -> Result<LoadPlan32, ModuleError32> {
+        self.plan_load_with_reservations(set, memory, request, actual_base, &[])
+    }
+
+    pub fn plan_load_with_reservations(
+        &self,
+        set: &ModuleSet32,
+        memory: &AddressSpace,
+        request: &str,
+        actual_base: Option<u32>,
+        reserved: &[PageRange],
+    ) -> Result<LoadPlan32, ModuleError32> {
         let name = normalize_module_name(request)?;
-        let mut builder = Builder::new(self, set, memory);
+        let mut builder = Builder::new(self, set, memory, reserved);
         builder.plan.root = builder.ensure(&name, actual_base)?;
         builder.bind_imports()?;
         builder.finish()
@@ -46,8 +58,18 @@ impl ModuleCatalog32 {
         module: ModuleId32,
         symbol: &ImportSymbol32,
     ) -> Result<(LoadPlan32, ResolvedExport32), ModuleError32> {
+        self.plan_export_live_with_reservations(set, memory, module, symbol, &[])
+    }
+    pub fn plan_export_live_with_reservations(
+        &self,
+        set: &ModuleSet32,
+        memory: &AddressSpace,
+        module: ModuleId32,
+        symbol: &ImportSymbol32,
+        reserved: &[PageRange],
+    ) -> Result<(LoadPlan32, ResolvedExport32), ModuleError32> {
         set.get(module).ok_or(ModuleError32::NotFound)?;
-        let mut builder = Builder::new(self, set, memory);
+        let mut builder = Builder::new(self, set, memory, reserved);
         builder.plan.root = module;
         let result = builder.resolve(module, symbol, module)?;
         builder.bind_imports()?;
@@ -56,11 +78,17 @@ impl ModuleCatalog32 {
 }
 
 impl<'a> Builder<'a> {
-    fn new(catalog: &'a ModuleCatalog32, set: &'a ModuleSet32, memory: &'a AddressSpace) -> Self {
+    fn new(
+        catalog: &'a ModuleCatalog32,
+        set: &'a ModuleSet32,
+        memory: &'a AddressSpace,
+        reserved: &'a [PageRange],
+    ) -> Self {
         Self {
             catalog,
             set,
             memory,
+            reserved,
             plan: LoadPlan32 {
                 root: ModuleId32::from_sequence(0),
                 memory_identity: memory.identity(),
@@ -94,7 +122,9 @@ impl<'a> Builder<'a> {
             }
             return Ok(module.id);
         }
-        if self.set.modules.len() + self.plan.additions.len() >= self.catalog.limits.modules {
+        if self.set.modules.len() + self.set.datafile_count + self.plan.additions.len()
+            >= self.catalog.limits.modules
+        {
             return Err(ModuleError32::Capacity);
         }
         let source = self.catalog.source(name)?;
@@ -116,6 +146,7 @@ impl<'a> Builder<'a> {
             self.memory,
             self.set,
             &self.plan.additions,
+            self.reserved,
             preferred,
             image_size,
             actual_base,

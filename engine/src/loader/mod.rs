@@ -20,9 +20,10 @@ pub use linking::{
 };
 pub(crate) use linking::{LinkedMetadata32, LoadedLinkedImage32, load_linked_profile};
 pub use modules::{
-    LoadPlan32, LoadedModule32, ModuleCatalog32, ModuleError32, ModuleId32, ModuleLimits32,
-    ModuleLoad32, ModuleSet32, ModuleTls32, ResolvedExport32, SystemExport32, SystemExportTarget32,
-    SystemModule32, UnloadPlan32, normalize_module_name,
+    DataFileLayout32, DataFileModule32, DataFilePlan32, LoadPlan32, LoadedModule32,
+    ModuleCatalog32, ModuleError32, ModuleId32, ModuleLimits32, ModuleLoad32, ModuleSet32,
+    ModuleTls32, ResolvedExport32, SystemExport32, SystemExportTarget32, SystemModule32,
+    UnloadPlan32, normalize_module_name,
 };
 pub use pe32::module::{
     Directory32, ImageKind32, ImportSymbol32, LoadConfig32, ParserLimits32, PreparedImagePage32,
@@ -37,3 +38,7 @@ pub enum LoadError {
     Capacity,
     Memory(MemoryError),
 }
+
+pub use pe32::module::{
+    PeResources32, ResourceError32, ResourceIdentifier32, ResourceLocation32, ResourceString32,
+};

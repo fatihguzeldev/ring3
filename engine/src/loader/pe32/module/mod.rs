@@ -1,3 +1,7 @@
+mod resources;
+pub use resources::{
+    PeResources32, ResourceError32, ResourceIdentifier32, ResourceLocation32, ResourceString32,
+};
 mod config;
 mod exports;
 mod headers;
