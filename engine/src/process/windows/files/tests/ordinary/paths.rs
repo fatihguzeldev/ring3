@@ -6,6 +6,81 @@ use crate::{
 };
 
 #[test]
+fn configured_system_directories_use_win32_argument_order_and_bounded_outputs() {
+    let (mut runtime, mut memory, _) = runtime();
+    let mut environment = crate::process::windows::files::FileEnvironment32::default();
+    environment.windows_directory = "C:\\Profile\\Windows".encode_utf16().collect();
+    environment.system_directory = "C:\\Profile\\System32".encode_utf16().collect();
+    runtime.set_file_environment(environment).unwrap();
+    for (id, name, expected, wide) in [
+        (
+            0x000a_00af,
+            "GetWindowsDirectoryA",
+            "C:\\Profile\\Windows",
+            false,
+        ),
+        (
+            0x000a_00b0,
+            "GetWindowsDirectoryW",
+            "C:\\Profile\\Windows",
+            true,
+        ),
+        (
+            0x000a_00b1,
+            "GetSystemDirectoryA",
+            "C:\\Profile\\System32",
+            false,
+        ),
+        (
+            0x000a_00b2,
+            "GetSystemDirectoryW",
+            "C:\\Profile\\System32",
+            true,
+        ),
+    ] {
+        let api = Api::from_id(id).expect("system directory service is exported");
+        assert_eq!(api.name(), name);
+        memory.write(GuestAddress(0x1800), &[0x5a; 64]).unwrap();
+        let needed = expected.len() as u32 + 1;
+        assert_eq!(
+            returned(
+                runtime
+                    .execute_ordinary(&mut memory, api, &[0x1800, needed - 1])
+                    .unwrap()
+            )
+            .0,
+            needed
+        );
+        assert_eq!(read::<64>(&memory, 0x1800), [0x5a; 64]);
+        assert_eq!(
+            returned(
+                runtime
+                    .execute_ordinary(&mut memory, api, &[0x1800, needed])
+                    .unwrap()
+            )
+            .0,
+            needed - 1
+        );
+        let expected_bytes: Vec<u8> = if wide {
+            expected
+                .encode_utf16()
+                .chain([0])
+                .flat_map(u16::to_le_bytes)
+                .collect()
+        } else {
+            expected.bytes().chain([0]).collect()
+        };
+        let mut actual = vec![0; expected_bytes.len()];
+        memory.read(GuestAddress(0x1800), &mut actual).unwrap();
+        assert_eq!(actual, expected_bytes);
+        assert_eq!(
+            runtime.execute_ordinary(&mut memory, api, &[0x6000, needed]),
+            Err(FileError32::NoAccess)
+        );
+    }
+}
+
+#[test]
 fn full_path_required_size_includes_nul_and_file_part_uses_utf16_byte_address() {
     let (mut runtime, mut memory, _) = runtime();
     path(&mut memory, 0x1200, "foo\\..\\bar");

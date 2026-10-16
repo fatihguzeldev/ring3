@@ -36,6 +36,18 @@ impl FileRuntime32 {
         }
         let mut directory_input = false;
         let (path, capacity, address, part) = match api {
+            GetWindowsDirectoryA | GetWindowsDirectoryW => (
+                self.virtual_windows_directory().to_vec(),
+                args[1],
+                args[0],
+                0,
+            ),
+            GetSystemDirectoryA | GetSystemDirectoryW => (
+                self.virtual_system_directory().to_vec(),
+                args[1],
+                args[0],
+                0,
+            ),
             GetCurrentDirectoryA | GetCurrentDirectoryW => {
                 (self.vfs.current_directory().to_vec(), args[0], args[1], 0)
             }

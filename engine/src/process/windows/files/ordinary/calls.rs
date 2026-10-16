@@ -78,7 +78,10 @@ impl FileRuntime32 {
             GetFileAttributesA | GetFileAttributesW | GetFileAttributesExA
             | GetFileAttributesExW | GetCurrentDirectoryA | GetCurrentDirectoryW
             | GetFullPathNameA | GetFullPathNameW | GetLongPathNameA | GetLongPathNameW
-            | GetShortPathNameA | GetShortPathNameW => self.query_path(memory, api, args),
+            | GetShortPathNameA | GetShortPathNameW | GetWindowsDirectoryA
+            | GetWindowsDirectoryW | GetSystemDirectoryA | GetSystemDirectoryW => {
+                self.query_path(memory, api, args)
+            }
             GetTempPathA | GetTempPathW | GetTempFileNameA | GetTempFileNameW => {
                 self.temporary_path(memory, api, args)
             }

@@ -140,6 +140,10 @@ file_apis! {
     TransactNamedPipe = 0xac, 7;
     CallNamedPipeA = 0xad, 7;
     CallNamedPipeW = 0xae, 7;
+    GetWindowsDirectoryA = 0xaf, 2;
+    GetWindowsDirectoryW = 0xb0, 2;
+    GetSystemDirectoryA = 0xb1, 2;
+    GetSystemDirectoryW = 0xb2, 2;
 }
 
 impl FileApi32 {
