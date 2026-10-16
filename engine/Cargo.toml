@@ -15,7 +15,6 @@ rustc_apfloat = "=0.2.3"
 astro-float-num = { version = "=0.3.7", default-features = false, features = ["std"] }
 iced-x86 = { version = "=1.21.0", default-features = false, features = ["std", "decoder", "instr_info"] }
 wasm-encoder = { version = "=0.259.0", default-features = false, features = ["std"] }
-
 unicode-normalization = "=0.1.25"
 unicode-general-category = "=1.1.0"
 unicode-bidi = "=0.3.18"
@@ -310,3 +309,23 @@ path = "tests/windows/media/wasm.rs"
 [[test]]
 name = "windows_files_wasm"
 path = "tests/windows/files/wasm.rs"
+
+[[test]]
+name = "windows_registry_wasm"
+path = "tests/windows/registry/wasm.rs"
+
+[[test]]
+name="windows_nls_wasm"
+path="tests/windows/nls/wasm.rs"
+
+[[test]]
+name="windows_resources_wasm"
+path="tests/windows/resources/wasm.rs"
+
+[[test]]
+name = "windows_exceptions_wasm"
+path = "tests/windows/exceptions/wasm.rs"
+
+[[test]]
+name = "windows_threads_wasm"
+path = "tests/windows/threads/wasm.rs"
