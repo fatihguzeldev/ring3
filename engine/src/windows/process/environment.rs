@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProcessError32 {
     InvalidParameter,
+    InvalidHandle,
     Capacity,
     Allocation,
     NoAccess,
@@ -12,6 +13,7 @@ impl ProcessError32 {
     pub fn win32(self) -> u32 {
         match self {
             Self::InvalidParameter => 87,
+            Self::InvalidHandle => 6,
             Self::Capacity | Self::Allocation => 8,
             Self::NoAccess => 998,
             Self::NotFound => 203,
