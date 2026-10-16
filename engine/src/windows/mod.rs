@@ -49,3 +49,5 @@ pub(crate) mod security;
 pub mod activation;
 
 pub mod gdi;
+
+pub mod version;
