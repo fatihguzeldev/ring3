@@ -1,6 +1,7 @@
 mod allocation;
 mod lifetime;
 mod movable;
+mod policy;
 mod queries;
 
 use super::*;
@@ -18,6 +19,7 @@ struct Heap32 {
     flags: u32,
     blocks: Vec<Block32>,
     locks: u32,
+    small: Option<policy::SmallBlocks32>,
 }
 struct Movable32 {
     handle: u32,
@@ -31,6 +33,7 @@ pub(crate) struct HeapManager32 {
     default: Option<u32>,
     limits: MemoryLimits32,
     next_movable: u32,
+    terminate_on_corruption: bool,
 }
 impl HeapManager32 {
     pub(crate) fn new(limits: MemoryLimits32) -> Result<Self, MemoryError32> {
@@ -52,6 +55,7 @@ impl HeapManager32 {
             default: None,
             limits,
             next_movable: 0x0100_0002,
+            terminate_on_corruption: false,
         })
     }
     pub(crate) fn default_heap(&self) -> Option<u32> {
@@ -80,7 +84,7 @@ impl HeapManager32 {
             .binary_search_by_key(&pointer, |block| block.address)
             .ok()
             .filter(|&index| self.heaps[heap].blocks[index].size.is_some())
-            .ok_or(MemoryError32::InvalidParameter)
+            .ok_or_else(|| self.invalid_block(heap, pointer))
     }
     fn reserve_block(&mut self, heap: usize) -> Result<(), MemoryError32> {
         if self
@@ -110,6 +114,7 @@ impl HeapManager32 {
             }
         }
         blocks.truncate(count);
+        self.rebuild_small_blocks(heap);
     }
     pub(crate) fn revoke(&mut self, range: PageRange) {
         self.heaps.retain(|heap| {

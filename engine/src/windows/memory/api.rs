@@ -35,9 +35,12 @@ pub enum MemoryApi32 {
     VirtualFreeEx,
     VirtualProtectEx,
     VirtualQueryEx,
+    HeapSetInformation,
+    HeapQueryInformation,
+    InitializeSListHead,
 }
 impl MemoryApi32 {
-    pub const ALL: [Self; 34] = [
+    pub const ALL: [Self; 37] = [
         Self::GetProcessHeap,
         Self::HeapCreate,
         Self::HeapDestroy,
@@ -72,6 +75,9 @@ impl MemoryApi32 {
         Self::VirtualFreeEx,
         Self::VirtualProtectEx,
         Self::VirtualQueryEx,
+        Self::HeapSetInformation,
+        Self::HeapQueryInformation,
+        Self::InitializeSListHead,
     ];
     pub fn from_id(id: u32) -> Option<Self> {
         Self::ALL
@@ -117,6 +123,9 @@ impl MemoryApi32 {
             Self::VirtualFreeEx => "VirtualFreeEx",
             Self::VirtualProtectEx => "VirtualProtectEx",
             Self::VirtualQueryEx => "VirtualQueryEx",
+            Self::HeapSetInformation => "HeapSetInformation",
+            Self::HeapQueryInformation => "HeapQueryInformation",
+            Self::InitializeSListHead => "InitializeSListHead",
         }
     }
     pub fn stack_words(self) -> u32 {
@@ -136,7 +145,8 @@ impl MemoryApi32 {
             | Self::GlobalUnlock
             | Self::GlobalSize
             | Self::GlobalFlags
-            | Self::GlobalHandle => 1,
+            | Self::GlobalHandle
+            | Self::InitializeSListHead => 1,
             Self::HeapWalk
             | Self::GetProcessHeaps
             | Self::HeapCompact
@@ -150,8 +160,11 @@ impl MemoryApi32 {
             | Self::LocalReAlloc
             | Self::GlobalReAlloc
             | Self::VirtualQuery => 3,
-            Self::HeapReAlloc | Self::VirtualFreeEx | Self::VirtualQueryEx => 4,
-            Self::VirtualAllocEx | Self::VirtualProtectEx => 5,
+            Self::HeapReAlloc
+            | Self::VirtualFreeEx
+            | Self::VirtualQueryEx
+            | Self::HeapSetInformation => 4,
+            Self::VirtualAllocEx | Self::VirtualProtectEx | Self::HeapQueryInformation => 5,
         }
     }
 }

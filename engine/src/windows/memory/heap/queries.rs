@@ -20,17 +20,25 @@ impl HeapManager32 {
         }
         let heap = self.index(handle)?;
         if pointer != 0 {
-            return Ok(self.block(heap, pointer).is_ok());
+            return match self.block(heap, pointer) {
+                Ok(_) => Ok(true),
+                Err(MemoryError32::HeapCorruption) => Err(MemoryError32::HeapCorruption),
+                Err(_) => Ok(false),
+            };
         }
         let mut next = handle;
-        Ok(self.heaps[heap].blocks.iter().all(|block| {
+        let valid = self.heaps[heap].blocks.iter().all(|block| {
             let valid = block.address == next
                 && block.extent != 0
                 && block.extent.is_multiple_of(8)
                 && block.size.is_none_or(|size| size <= block.extent);
             next = block.address.saturating_add(block.extent);
             valid
-        }))
+        });
+        if !valid && self.terminate_on_corruption {
+            return Err(MemoryError32::HeapCorruption);
+        }
+        Ok(valid)
     }
     pub(crate) fn lock(&mut self, handle: u32, unlock: bool) -> Result<(), MemoryError32> {
         let heap = self.index(handle)?;

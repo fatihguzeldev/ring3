@@ -51,6 +51,8 @@ pub enum MemoryError32 {
     NoMoreItems,
     NotLocked,
     Discarded,
+    HeapCorruption,
+    InsufficientBuffer,
 }
 impl MemoryError32 {
     pub fn win32(self) -> u32 {
@@ -65,6 +67,7 @@ impl MemoryError32 {
             Self::NoMoreItems => 259,
             Self::NotLocked => 158,
             Self::Discarded => 157,
+            Self::InsufficientBuffer => 122,
             _ => 87,
         }
     }

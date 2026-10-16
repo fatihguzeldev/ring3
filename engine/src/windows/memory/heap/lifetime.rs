@@ -84,6 +84,7 @@ impl HeapManager32 {
             flags,
             blocks,
             locks: 0,
+            small: None,
         });
         Ok(handle)
     }

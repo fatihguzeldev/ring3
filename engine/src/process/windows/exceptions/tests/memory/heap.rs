@@ -94,3 +94,32 @@ fn failed_heap_exception_preflight_keeps_original_captured_call_and_ram() {
     assert_eq!(engine.memory().unwrap().transaction_version(), version);
     assert_eq!(engine.current_windows_thread().unwrap().last_error(), 0x55);
 }
+
+#[test]
+fn enabled_heap_corruption_is_terminal_and_bypasses_registered_exception_handlers() {
+    let mut engine = engine();
+    let heap = call(&mut engine, MemoryApi32::GetProcessHeap, &[]).unwrap();
+    let pointer = call(&mut engine, MemoryApi32::HeapAlloc, &[heap, 0, 16]).unwrap();
+    call(&mut engine, MemoryApi32::HeapSetInformation, &[0, 1, 0, 0]).unwrap();
+    call(&mut engine, MemoryApi32::HeapFree, &[heap, 0, pointer]).unwrap();
+    engine
+        .exceptions
+        .handlers
+        .add(false, true, 0x401000)
+        .unwrap();
+    last_error(&mut engine);
+    call(&mut engine, MemoryApi32::HeapFree, &[heap, 0, pointer]).unwrap();
+    let dispatch = engine.pending_windows_exception().unwrap();
+    assert_eq!(
+        dispatch.phase,
+        crate::process::windows::exceptions::ExceptionPhase32::Unhandled
+    );
+    assert_eq!(dispatch.procedure, 0);
+    assert_eq!(dispatch.code, 0xc0000374);
+    assert_eq!(engine.current_windows_thread().unwrap().last_error(), 0x55);
+    assert!(engine.pending_call.is_none());
+    engine
+        .terminate_windows_exception(KEY, dispatch.id)
+        .unwrap();
+    assert_eq!(engine.exit_code, Some(0xc0000374));
+}

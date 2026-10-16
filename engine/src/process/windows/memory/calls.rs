@@ -57,6 +57,10 @@ impl EngineInstance {
                 _ => unreachable!(),
             }
         };
+        if result == Err(MemoryError32::HeapCorruption) {
+            self.begin_windows_heap_corruption(owner, frame)?;
+            return Ok(true);
+        }
         if matches!(api, Some(MemoryApi32::HeapAlloc | MemoryApi32::HeapReAlloc))
             && self
                 .windows_memory
@@ -146,6 +150,9 @@ impl EngineInstance {
                 }
             }
             VirtualQuery => self.memory_query(args),
+            HeapSetInformation => self.set_heap_information(args),
+            HeapQueryInformation => self.query_heap_information(args),
+            InitializeSListHead => self.initialize_slist_head(args[0]),
             GetProcessHeap => self.ensure_process_heap().map_err(|error| match error {
                 HostError::WindowsMemory(error) => error,
                 _ => MemoryError32::Allocation,

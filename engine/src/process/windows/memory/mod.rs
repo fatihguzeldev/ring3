@@ -1,5 +1,6 @@
 mod calls;
 mod context;
+mod heap_information;
 mod virtual_calls;
 
 use crate::{

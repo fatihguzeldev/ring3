@@ -27,14 +27,20 @@ impl HeapManager32 {
         if self.heaps[heap].maximum != 0 && size >= 0x7fff8 {
             return Err(MemoryError32::Capacity);
         }
-        let extent = checked_size(size)?;
+        let extent = self.extent(heap, size)?;
         let block = self.heaps[heap]
-            .blocks
-            .iter()
-            .enumerate()
-            .filter(|(_, block)| block.size.is_none() && block.extent >= extent)
-            .min_by_key(|(_, block)| block.extent)
-            .map(|(index, _)| index)
+            .small
+            .as_ref()
+            .and_then(|small| small.find(extent, &self.heaps[heap].blocks))
+            .or_else(|| {
+                self.heaps[heap]
+                    .blocks
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, block)| block.size.is_none() && block.extent >= extent)
+                    .min_by_key(|(_, block)| block.extent)
+                    .map(|(index, _)| index)
+            })
             .ok_or(MemoryError32::Capacity)?;
         let original = self.heaps[heap].blocks[block];
         if original.extent > extent {
@@ -76,6 +82,7 @@ impl HeapManager32 {
                 },
             );
         }
+        self.record_small_allocation(heap, original, extent);
         Ok(original.address)
     }
     pub(crate) fn reallocate(
@@ -103,7 +110,7 @@ impl HeapManager32 {
         }
         let old = self.heaps[heap].blocks[block];
         let old_size = old.size.unwrap();
-        let extent = checked_size(size)?;
+        let extent = self.extent(heap, size)?;
         let adjacent = self.heaps[heap]
             .blocks
             .get(block + 1)
