@@ -5,7 +5,7 @@ import {pathToFileURL} from 'node:url';
 const [enginePath, output, root] = process.argv.slice(2);
 assert.ok(enginePath && output && root);
 const support = 'engine/tests/cpu/segments/code/base/fixtures/p2-cs-base/runtime/support.mjs';
-const {harness, state, exit, record, hash} = await import(pathToFileURL(join(root, support)));
+const {harness, state, exit, record, hash, words} = await import(pathToFileURL(join(root, support)));
 const h = await harness(enginePath, output, root);
 const owner = 'engine/tests/cpu/dbt/regions/capacity/fixtures/p2-module-capacity/runtime/run.mjs';
 const pins = Object.fromEntries([owner, 'engine/src/cpu/dbt/cold.rs', 'engine/src/cpu/dbt/artifact.rs', 'engine/src/cpu/dbt/resident.rs'].map(path => [path, hash(readFileSync(join(root, path)))]));
@@ -46,6 +46,21 @@ function controls(c, material, pc, word) {
     expected(input, 16, 1, pc + (word ? 3 : 1), word ? 0x12340007 : 0x12340000, 2 | TF, word ? 2 : 0),
     {budget: 2, helpers: word ? [{name: 'cpu_read16', args: [0x5000], status: 0}] : []});
 }
+function readCalls(count) {
+  return Array.from({length: count}, () => ({name: 'cpu_read16', args: [0x5000], status: 0}));
+}
+function addSevenFlags(before) {
+  const result = (before + 7) & 0xffff;
+  let ones = 0; for (let value = result & 255; value; value >>>= 1) ones += value & 1;
+  return 2 | (ones % 2 === 0 ? 4 : 0) | ((before ^ 7 ^ result) & 16)
+    | (result === 0 ? 64 : 0) | (result & 0x8000 ? 128 : 0)
+    | (before + 7 > 0xffff ? 1 : 0) | ((~(before ^ 7) & (before ^ result) & 0x8000) ? 0x800 : 0);
+}
+function retire(c, material) {
+  if (!c.resident) return;
+  h.put(c, 96, words([0]));
+  h.host(c, 'discard_unacknowledged_resident', material.binding);
+}
 function strictWhole(c, pc, length) {
   const entries = c.entries; c.entries = false;
   h.compile(c, 'explicit whole unit still refuses instead of silently truncating', [[pc, length]], [], {expectedStatus: 10});
@@ -61,7 +76,9 @@ for (const resident of [false, true]) for (const stopped of [false, true]) {
     controls(c, first, 0x1fc0, false);
     const input = seed(0x1fc0), want = expected(input, 3, 64, 0x2000);
     invoke(c, '64 NOPs retire then exact fallthrough NeedCode', first, input, want, {budget: 129});
-    h.compile(c, 'missing continuation still refuses neutrally', [], [], {stopped: true, expectedStatus: 10});
+    const entries = c.entries; c.entries = false;
+    h.compile(c, 'explicit missing continuation refuses neutrally before source repair', [[0x2000, 1]], [], {expectedStatus: 10});
+    c.entries = entries;
     h.host(c, 'map', [0x2000, 1, 7]); c.pages.push(0x2000); c.pages.sort((a, b) => a - b);
     h.upload(c, 0x2000, Buffer.concat([Buffer.alloc(64, 0x90), jump(0x2040, 0x4000)]));
     invoke(c, 'mapping/uploading only an unfetched page preserves the held prefix', first, input, want, {budget: 129, kind: 'currentness-control'});
@@ -79,17 +96,34 @@ for (const resident of [false, true]) for (const stopped of [false, true]) {
     h.upload(c, 0x3000, Buffer.concat([...Array(63).fill(body), jump(0x30bd, 0x4000)]));
     h.upload(c, 0x4000, Buffer.from('ebfe', 'hex')); h.upload(c, 0x5000, Buffer.from([7, 0]));
     begin(c, 0x3000, stopped); strictWhole(c, 0x3000, 194);
-    const first = capture(c, 'byte-budget retry retains a literal45-word-read prefix', 0x3000, ['cpu_read16'], stopped);
-    if (!first) { h.skip(c, 'word-read remainder', 'first automatic byte capture'); h.host(c, 'close'); continue; }
-    assert.ok(first.length <= 65536);
-    controls(c, first, 0x3000, true);
+    let material = capture(c, 'automatic byte-bounded capture admits at least eight original reads', 0x3000, ['cpu_read16'], stopped);
+    if (!material) { h.skip(c, 'word-read remainder', 'first automatic byte capture'); h.host(c, 'close'); continue; }
+    assert.ok(material.length <= 65536);
+    controls(c, material, 0x3000, true);
     const input = seed(0x3000);
-    invoke(c, '45 reads update AX and flags then stop at the exact original fallthrough', first, input,
-      expected(input, 3, 45, 0x3087, 0x1234013b, 2, 2), {budget: 100, helpers: Array.from({length: 45}, () => ({name: 'cpu_read16', args: [0x5000], status: 0}))});
-    const tail = capture(c, 'real NeedCode captures remaining18 operations and original branch', 0x3087, ['cpu_read16'], true);
-    const next = seed(0x3087, 0x1234013b, 2 | RF);
-    invoke(c, 'remaining18 reads plus branch finish all63 original operations once', tail, next,
-      expected(next, 3, 19, 0x4000, 0x123401b9, 2, 2), {budget: 100, helpers: Array.from({length: 18}, () => ({name: 'cpu_read16', args: [0x5000], status: 0}))});
+    invoke(c, 'eight original reads retire under budget before the automatic prefix ends', material, input,
+      expected(input, 1, 8, 0x3018, 0x12340038, addSevenFlags(7 * 7), 2),
+      {budget: 8, helpers: readCalls(8)});
+    retire(c, material);
+    let consumed = 8;
+    while (consumed < 63) {
+      const count = Math.min(8, 63 - consumed), final = consumed + count === 63;
+      const pc = 0x3000 + consumed * 3, length = count * 3 + (final ? 5 : 0);
+      const entries = c.entries; c.entries = false;
+      material = h.compile(c, `bounded continuation preserves original reads ${consumed + 1}..${consumed + count}`,
+        [[pc, length]], ['cpu_read16']);
+      c.entries = entries;
+      if (!material) { h.skip(c, 'remaining original word reads', 'bounded continuation admission'); break; }
+      assert.ok(material.length <= 65536);
+      const next = seed(pc, 0x12340000 + consumed * 7, 2 | RF);
+      invoke(c, final ? 'last seven reads and original branch finish all63 operations once' : 'eight reads stop at their exact original fallthrough',
+        material, next, expected(next, 3, count + Number(final), final ? 0x4000 : pc + count * 3,
+          0x12340000 + (consumed + count) * 7, addSevenFlags((consumed + count - 1) * 7), 2),
+        {budget: 100, helpers: readCalls(count)});
+      consumed += count;
+      retire(c, material);
+    }
+    assert.equal(consumed, 63, 'all original reads execute in contiguous bounded pieces');
     h.host(c, 'close');
   }
 }
@@ -97,7 +131,7 @@ for (const [path, pin] of Object.entries(pins)) assert.equal(hash(readFileSync(j
 h.finish([
   'four automatic entry/stopped by replacement/resident profiles; explicit whole extents retain their original typed resource refusal',
   'instruction65 is initially unmapped; complete real continuation repair proves capture ends before it and preserves held-prefix physical identity',
-  'literal45+18 memory-read retirement, AX/FLAGS, R3MHv10 and R3EXv6; no production module metadata supplies the oracle',
+  'all63 original word reads and the original branch execute in contiguous pieces of at most eight reads, with exact AX/FLAGS, R3MHv10 and R3EXv6',
   'real guards/helpers, full arena and every mapped RAM page; RF/TF and zero-budget/cancel before instruction begin',
   'bounded datawrap selected-codegen prefix oracle; no general performance, full family or interpreter claim',
 ]);
