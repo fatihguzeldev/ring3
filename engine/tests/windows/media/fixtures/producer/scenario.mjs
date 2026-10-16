@@ -1,3 +1,5 @@
+import {captureEffects} from './capture_effects.mjs';
+import {effects} from './effects.mjs';
 import {activation} from './activation.mjs';
 import {rawInput, rawInputSymbols} from './rawinput.mjs';
 import {builder} from '../../../../support/pe32/image.mjs';
@@ -6,7 +8,7 @@ export function image() {
   const b = builder([
     ['kernel32.dll', ['CreateEventA', 'SetEvent', 'ResetEvent', 'WaitForSingleObject', 'CloseHandle', 'ExitProcess']],
     ['user32.dll', ['RegisterClassA', 'CreateWindowExA', 'GetAsyncKeyState', 'GetKeyState', 'PeekMessageA', 'DestroyWindow', ...rawInputSymbols]],
-    ['dsound.dll', ['DirectSoundCreate8', 'DirectSoundEnumerateA', 'DirectSoundCaptureCreate8']],
+    ['dsound.dll', ['DirectSoundCreate8', 'DirectSoundEnumerateA', 'DirectSoundCaptureCreate8', 'DirectSoundFullDuplexCreate']],
     ['dinput8.dll', ['DirectInput8Create']],
     ['dinput.dll', ['DirectInputCreateA']],
     ['ole32.dll', ['CoInitialize', 'CoInitializeEx', 'CoUninitialize', 'CoCreateInstance', 'CoGetClassObject']],
@@ -50,6 +52,7 @@ export function image() {
   external('WaitForSingleObject', 0x1001a, [ref('event'), 0xffffffff], 0, undefined, 'audio-notification');
   b.com('SoundPosition', 'buffer8', 0x70400, 4, [b.addresses.playCursor, b.addresses.writeCursor]);
   b.com('StopSound', 'buffer8', 0x70400, 18);
+  effects(b);
   external('DirectSoundEnumerateA', 0x60003, [b.callbacks[0].entry, 0]);
   for (const name of ['capture', 'captureBuffer', 'capture8', 'captureNotify', 'capturedWord']) allocate(name);
   const captureDesc = data('captureDesc', [28, 0, 4, 0, format, 0, 0]);
@@ -69,6 +72,7 @@ export function image() {
   b.com('ReleaseCapture8', 'capture8', 0x70a00, 2, [], 1);
   b.com('ReleaseCaptureBuffer', 'captureBuffer', 0x70a00, 2);
   b.com('ReleaseCapture', 'capture', 0x70800, 2);
+  captureEffects(b);
   const iidInput8 = data('iidInput8', [0xbf798030, 0x4da2483a, 0x645d99aa, 0x009736ed]);
   const keyboardGuid = data('keyboardGuid', [0x6f1d2b61, 0x11cfd5a0, 0x4544c7bf, 0x00005453]);
   const objects = data('keyObjects', [0, 3, 0x1e04, 0, 0, 6, 0x3004, 0]);

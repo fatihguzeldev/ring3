@@ -7,6 +7,8 @@ import {ARENA_SIZE} from '../../../../support/wasm/arena.mjs';
 import {assertEngineExports} from '../../../../support/wasm/exports.mjs';
 import {image} from '../producer/scenario.mjs';
 import {configure} from './setup.mjs';
+import {afterCaptureEffectCall} from './capture_effects.mjs';
+import {afterEffectCall} from './effects.mjs';
 import {beforeActivationCall, afterActivationCall} from './activation.mjs';
 import {beforeRawInputCall, afterRawInputCall} from './rawinput.mjs';
 
@@ -34,7 +36,7 @@ function metadata(kind) {
   return {epoch: data.readBigUInt64LE(16), values: Array.from({length: 5}, (_, i) => data.readBigUInt64LE(24 + i * 8))};
 }
 const context = configure({api, request, metadata});
-const guest = image().seal(); assert.equal(guest.calls.length, 143); writeFileSync(join(output, 'windows-media-authored.exe'), guest.bytes);
+const guest = image().seal(); assert.equal(guest.calls.length, 177); writeFileSync(join(output, 'windows-media-authored.exe'), guest.bytes);
 assert.equal(api.begin_module_input(guest.bytes.length, name('windows-media-authored.exe')), 0);
 for (let offset = 0; offset < guest.bytes.length; offset += 4096) {
   const chunk = guest.bytes.subarray(offset, offset + 4096); request(chunk);
@@ -57,7 +59,7 @@ const gates = new Map(gateRows);
 assert.equal(gates.size, gateRows.length, 'public, COM and initializer gate IDs are distinct');
 assert.equal(new Set(gateRows.map(([, entry]) => entry)).size, gateRows.length);
 writeFileSync(join(output, 'gates.json'), JSON.stringify(gateRows));
-const runs = [], calls = [], callbacks = [], waits = [], pcm = [];
+const runs = [], calls = [], callbacks = [], waits = [], pcm = [], measurements = [];
 let inputSequence = 0n;
 function input(events) {
   const batch = Buffer.alloc(32 + 32 * events.length); batch.write('R3IB'); batch.writeUInt16LE(1, 4); batch.writeUInt16LE(32, 6);
@@ -177,6 +179,8 @@ for (const call of guest.calls) {
     assert.equal(read(guest.addresses.eventData + 4), 0x80);
   }
   if (call.name === 'EmptyKeyboardData') assert.equal(read(guest.addresses.eventCount), 0);
+  afterCaptureEffectCall(call,{api,guest,read,pair,metadata,take,request,measurements,memory});
+  afterEffectCall(call,{api,guest,read,pair,metadata,take,pcm});
   afterActivationCall(call, {guest, read});
   afterRawInputCall(call, {guest, read});
   calls.push({name: call.name, id: call.id, result, generation});
@@ -184,7 +188,7 @@ for (const call of guest.calls) {
 }
 const sourcePaths = execFileSync('rg', ['--files', 'engine/src', 'engine/tests/windows/media'], {cwd: root, encoding: 'utf8'}).trim().split('\n').sort();
 writeFileSync(join(output, 'source-sha256.json'), JSON.stringify(Object.fromEntries(sourcePaths.map(path => [path, hash(readFileSync(join(root, path)))])), null, 2));
-const receipt = {engineHash, guestHash: hash(guest.bytes), calls, runs, callbacks, waits, pcm,
+const receipt = {engineHash, guestHash: hash(guest.bytes), calls, runs, callbacks, waits, pcm, measurements,
   claim: 'authored PE32/generated Wasm prove engine PCM, input and wait semantics; host input is synthetic and PCM is inspected rather than played by a browser'};
 writeFileSync(join(output, 'receipt.json'), JSON.stringify(receipt, null, 2));
 console.log(JSON.stringify({engineHash, guestCalls: calls.length, guestRuns: runs.length, callbacks: callbacks.length, waits: waits.length, pcmPackets: pcm.length}));
