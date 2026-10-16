@@ -430,6 +430,14 @@ impl User32Context32 {
         {
             count = 0;
         }
+        let mut retained = 0;
+        for index in 0..count {
+            if !self.dialog_blocks_window(messages[index].0.window) {
+                messages[retained] = messages[index];
+                retained += 1;
+            }
+        }
+        count = retained;
         let raw = if let SourceKind32::Physical(kind) = event.kind {
             let key = if let InputKind::Key { code, .. } = kind {
                 match keyboard::virtual_key_for_layout(input.delivery_layout, code) {

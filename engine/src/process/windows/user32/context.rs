@@ -42,6 +42,7 @@ impl User32Context32 {
             raw_input: crate::windows::rawinput::RawInputRuntime32::new(limits.messages)?,
             destructions,
             timers: super::timers::TimerState32::new(limits.messages, limits.windows)?,
+            dialogs: Vec::new(),
             provenance: super::messages::MessageProvenance32::new(limits.messages)?,
             call_activation: Default::default(),
             activation_capture_limit: limits

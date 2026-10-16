@@ -35,6 +35,13 @@ impl EngineInstance {
                 reply.continuation,
             )?;
         }
+        if reply.provider == super::WindowsCallbackProvider32::User32 {
+            self.user32
+                .as_ref()
+                .ok_or(HostError::InvalidRequest)?
+                .check_callback_scratch(reply.continuation, self.memory()?)
+                .map_err(HostError::User32)?;
+        }
         self.collect_activation_captures()?;
         let capture = (reply.provider == super::WindowsCallbackProvider32::User32)
             .then(|| {
@@ -115,6 +122,13 @@ impl EngineInstance {
                 reply.frame,
                 reply.continuation,
             )?;
+        }
+        if reply.provider == super::WindowsCallbackProvider32::User32 {
+            self.user32
+                .as_ref()
+                .ok_or(HostError::InvalidRequest)?
+                .check_callback_scratch(reply.continuation, self.memory()?)
+                .map_err(HostError::User32)?;
         }
         self.collect_activation_captures()?;
         let capture = (reply.provider == super::WindowsCallbackProvider32::User32)

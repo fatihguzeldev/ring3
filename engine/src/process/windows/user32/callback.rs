@@ -36,6 +36,18 @@ pub(super) enum PositionStage32 {
 
 #[derive(Clone, Copy)]
 pub(super) enum Continuation32 {
+    Dialog {
+        id: u64,
+    },
+    DialogHelp {
+        id: u64,
+        scratch: Scratch32,
+    },
+    DialogRemoteHelp {
+        id: u64,
+        scratch: Scratch32,
+        ready: Option<u32>,
+    },
     Show(super::activation::Show32),
     Destroy {
         plan: u64,
@@ -97,6 +109,12 @@ impl User32Context32 {
             .cloned()
             .ok_or(User32Error32::InvalidToken)?;
         let (procedure, arguments) = match pending.continuation {
+            Continuation32::Dialog { .. } | Continuation32::DialogRemoteHelp { .. } => {
+                return Ok(User32Outcome32::Wait {
+                    continuation: pending.token,
+                });
+            }
+            Continuation32::DialogHelp { .. } => return Err(User32Error32::InvalidToken),
             Continuation32::Show(show) => return self.show_outcome(show),
             Continuation32::Destroy { plan } => return self.destroy_outcome(plan),
             Continuation32::Call {
@@ -196,6 +214,7 @@ impl User32Context32 {
             ),
         };
         Ok(User32Outcome32::Callback(User32Callback32 {
+            count: 4,
             procedure,
             arguments,
             continuation: pending.token,
@@ -215,6 +234,12 @@ impl User32Context32 {
             .cloned()
             .ok_or(User32Error32::InvalidToken)?;
         match pending.continuation {
+            Continuation32::Dialog { .. } | Continuation32::DialogRemoteHelp { .. } => {
+                Err(User32Error32::InvalidToken)
+            }
+            Continuation32::DialogHelp { id, scratch } => {
+                self.complete_dialog_help(id, scratch, memory)
+            }
             Continuation32::Show(show) => self.complete_show(show),
             Continuation32::Destroy { plan } => self.complete_destroy(plan, memory),
             Continuation32::Timer { .. } => {

@@ -396,6 +396,24 @@ impl EngineInstance {
 }
 
 impl super::ThreadRecord32 {
+    pub(super) fn check_remote_scratch(
+        &self,
+        continuation: u64,
+        memory: &crate::memory::AddressSpace,
+    ) -> Result<(), crate::windows::user32::User32Error32> {
+        let reply = self
+            .saved
+            .iter()
+            .chain(
+                self.active_invocations
+                    .iter()
+                    .map(|invocation| &invocation.saved),
+            )
+            .filter_map(|saved| saved.user32.as_ref())
+            .find(|reply| reply.check_remote_result(continuation).is_ok())
+            .ok_or(crate::windows::user32::User32Error32::InvalidToken)?;
+        reply.check_remote_scratch(continuation, memory)
+    }
     pub(super) fn check_remote_result(
         &self,
         continuation: u64,
@@ -429,5 +447,21 @@ impl super::ThreadRecord32 {
             .find(|reply| reply.check_remote_result(continuation).is_ok())
             .ok_or(crate::windows::user32::User32Error32::InvalidToken)?;
         reply.accept_remote_result(continuation, result)
+    }
+}
+
+impl super::ThreadRuntime32 {
+    pub(super) fn check_user32_remote_scratch(
+        &self,
+        sender: u32,
+        continuation: u64,
+        memory: &crate::memory::AddressSpace,
+    ) -> Result<(), crate::windows::user32::User32Error32> {
+        let sender = self
+            .threads
+            .iter()
+            .find(|thread| thread.id == sender && thread.state != super::ThreadState32::Terminated)
+            .ok_or(crate::windows::user32::User32Error32::InvalidToken)?;
+        sender.check_remote_scratch(continuation, memory)
     }
 }

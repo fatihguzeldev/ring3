@@ -350,6 +350,15 @@ impl EngineInstance {
             .iter()
             .position(|thread| thread.id == current)
             .unwrap();
+        if let ThreadInvocationCompletion32::User32 {
+            sender,
+            continuation,
+        } = invocation.completion
+        {
+            self.threads
+                .check_user32_remote_scratch(sender, continuation, self.memory()?)
+                .map_err(HostError::User32)?;
+        }
         if self.threads.threads[thread_index].active_invocations.len() == 32 {
             return Err(HostError::Thread(ThreadError32::Capacity));
         }

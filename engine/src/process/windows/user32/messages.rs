@@ -118,6 +118,12 @@ impl User32Context32 {
             .filter(|pending| pending.token == token)
             .cloned()
             .ok_or(User32Error32::InvalidToken)?;
+        if let Continuation32::Dialog { id } = pending.continuation {
+            return self.resume_dialog(id, memory);
+        }
+        if let Continuation32::DialogRemoteHelp { id, scratch, ready } = pending.continuation {
+            return self.resume_remote_dialog_help(id, scratch, ready, memory);
+        }
         if let Continuation32::Retrieve {
             api,
             arguments,

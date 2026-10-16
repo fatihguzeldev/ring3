@@ -361,6 +361,7 @@ impl EngineInstance {
         }
         self.check_windows_thread_write()?;
         self.refresh_user32_input()?;
+        self.dispatch_user32_dialog_remote_help(continuation)?;
         let queue = self.prepare_user32_queue_change()?;
         let context = self.user32.as_mut().ok_or(HostError::InvalidRequest)?;
         let outcome = context
@@ -403,7 +404,7 @@ impl EngineInstance {
                 let request = WindowsCallback32 {
                     procedure: callback.procedure,
                     arguments,
-                    count: 4,
+                    count: callback.count,
                     continuation: callback.continuation,
                     provider: WindowsCallbackProvider32::User32,
                 };

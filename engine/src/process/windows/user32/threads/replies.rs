@@ -31,7 +31,11 @@ impl User32Context32 {
             return false;
         };
         match pending.continuation {
-            super::super::callback::Continuation32::RemoteCall { ready, .. } => ready.is_some(),
+            super::super::callback::Continuation32::Dialog { id } => self.dialog_ready(id),
+            super::super::callback::Continuation32::RemoteCall { ready, .. }
+            | super::super::callback::Continuation32::DialogRemoteHelp { ready, .. } => {
+                ready.is_some()
+            }
             super::super::callback::Continuation32::Retrieve { .. } => true,
             super::super::callback::Continuation32::MessageWait {
                 thread,
@@ -54,13 +58,29 @@ impl User32Context32 {
     ) -> Result<(), User32Error32> {
         check_scratch(&self.pending, &self.destructions, memory)
     }
+    pub(in crate::process) fn check_callback_scratch(
+        &self,
+        continuation: u64,
+        memory: &crate::memory::AddressSpace,
+    ) -> Result<(), User32Error32> {
+        if self
+            .pending
+            .last()
+            .is_none_or(|pending| pending.token != continuation)
+        {
+            return Err(User32Error32::InvalidToken);
+        }
+        self.check_thread_scratch(memory)
+    }
     pub(in crate::process) fn thread_scratch_ranges(
         &self,
     ) -> impl Iterator<Item = crate::memory::PageRange> + '_ {
         self.pending
             .iter()
             .filter_map(|pending| match pending.continuation {
-                super::super::callback::Continuation32::Create { scratch, .. }
+                super::super::callback::Continuation32::DialogHelp { scratch, .. }
+                | super::super::callback::Continuation32::DialogRemoteHelp { scratch, .. }
+                | super::super::callback::Continuation32::Create { scratch, .. }
                 | super::super::callback::Continuation32::Position { scratch, .. }
                 | super::super::callback::Continuation32::Style { scratch, .. } => {
                     Some(scratch.range())
@@ -160,7 +180,9 @@ impl User32ThreadReply32 {
         self.pending
             .iter()
             .filter_map(|pending| match pending.continuation {
-                super::super::callback::Continuation32::Create { scratch, .. }
+                super::super::callback::Continuation32::DialogHelp { scratch, .. }
+                | super::super::callback::Continuation32::DialogRemoteHelp { scratch, .. }
+                | super::super::callback::Continuation32::Create { scratch, .. }
                 | super::super::callback::Continuation32::Position { scratch, .. }
                 | super::super::callback::Continuation32::Style { scratch, .. } => {
                     Some(scratch.range())
@@ -184,9 +206,30 @@ impl User32ThreadReply32 {
             .find(|pending| pending.token == continuation)
             .ok_or(User32Error32::InvalidToken)?;
         match pending.continuation {
-            super::super::callback::Continuation32::RemoteCall { ready: None, .. } => Ok(()),
+            super::super::callback::Continuation32::RemoteCall { ready: None, .. }
+            | super::super::callback::Continuation32::DialogRemoteHelp { ready: None, .. } => {
+                Ok(())
+            }
             _ => Err(User32Error32::InvalidToken),
         }
+    }
+    pub(in crate::process) fn check_remote_scratch(
+        &self,
+        continuation: u64,
+        memory: &crate::memory::AddressSpace,
+    ) -> Result<(), User32Error32> {
+        self.check_remote_result(continuation)?;
+        let pending = self
+            .pending
+            .iter()
+            .find(|pending| pending.token == continuation)
+            .unwrap();
+        if let super::super::callback::Continuation32::DialogRemoteHelp { scratch, .. } =
+            pending.continuation
+        {
+            scratch.check(memory)?;
+        }
+        Ok(())
     }
     pub(in crate::process) fn accept_remote_result(
         &mut self,
@@ -199,7 +242,8 @@ impl User32ThreadReply32 {
             .find(|pending| pending.token == continuation)
             .ok_or(User32Error32::InvalidToken)?;
         let ready = match &mut pending.continuation {
-            super::super::callback::Continuation32::RemoteCall { ready, .. } => ready,
+            super::super::callback::Continuation32::RemoteCall { ready, .. }
+            | super::super::callback::Continuation32::DialogRemoteHelp { ready, .. } => ready,
             _ => return Err(User32Error32::InvalidToken),
         };
         if ready.is_some() {
@@ -217,7 +261,9 @@ fn check_scratch(
 ) -> Result<(), User32Error32> {
     for pending in pending {
         match pending.continuation {
-            super::super::callback::Continuation32::Create { scratch, .. }
+            super::super::callback::Continuation32::DialogHelp { scratch, .. }
+            | super::super::callback::Continuation32::DialogRemoteHelp { scratch, .. }
+            | super::super::callback::Continuation32::Create { scratch, .. }
             | super::super::callback::Continuation32::Position { scratch, .. }
             | super::super::callback::Continuation32::Style { scratch, .. } => {
                 scratch.check(memory)?

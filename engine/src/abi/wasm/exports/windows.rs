@@ -11,6 +11,10 @@ mod synchronization;
 mod threads;
 
 export_process_calls! {
+    pending_user32_dialog(index:u32);
+    read_user32_dialog_text(epoch_low:u32,epoch_high:u32,id_low:u32,id_high:u32,field:u32,offset:u32,units:u32);
+    complete_user32_dialog(epoch_low:u32,epoch_high:u32,id_low:u32,id_high:u32,button:u32,error:u32);
+    request_user32_dialog_help(epoch_low:u32,epoch_high:u32,id_low:u32,id_high:u32);
     configure_user32(classes:u32,windows:u32,messages:u32,continuations:u32,scratch_base:u32,scratch_pages:u32);
     register_user32_module(base:u32);
     set_user32_keyboard_state(flags:u32);

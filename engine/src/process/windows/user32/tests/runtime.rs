@@ -632,3 +632,121 @@ fn visible_creation_reuses_activation_callbacks_and_focus_receipt_after_scratch_
     assert!(engine.windows_replies.is_empty());
     assert!(engine.pending_call.is_none());
 }
+
+#[test]
+fn ready_dialog_help_rejects_replacement_scratch_before_either_callback_entry() {
+    for resident in [false, true] {
+        let (mut engine, _, callback_unit, _) = engine();
+        let call_pc = CALL_PC + 0x30;
+        let api = User32Api32::MessageBoxIndirectW;
+        let params = [40, 0, 0, 0, 0, 0x4000, 0, 0, CALLBACK_PC, 0]
+            .into_iter()
+            .flat_map(u32::to_le_bytes)
+            .collect::<Vec<_>>();
+        engine
+            .memory
+            .as_mut()
+            .unwrap()
+            .write(GuestAddress(0x10000), &params)
+            .unwrap();
+        let values = if resident {
+            vec![call_pc, 2, call_pc, api.id()]
+        } else {
+            vec![
+                call_pc,
+                2,
+                CALLBACK_PC,
+                1,
+                RETURN_PC,
+                2,
+                call_pc,
+                api.id(),
+                RETURN_PC,
+                RETURN_ID,
+            ]
+        };
+        for (index, value) in values.iter().enumerate() {
+            engine.arena_mut().unwrap()
+                [TRANSFER_OFFSET + index * 4..TRANSFER_OFFSET + index * 4 + 4]
+                .copy_from_slice(&value.to_le_bytes());
+        }
+        let owner = if resident {
+            engine.compile_resident_with_gates(1, 1).unwrap().get()
+        } else {
+            u64::from(engine.compile_with_gates(3, 2).unwrap())
+        };
+        engine
+            .memory
+            .as_mut()
+            .unwrap()
+            .write(GuestAddress(STACK), &[0, 0, 0, 0, 0, 0, 1, 0])
+            .unwrap();
+        stop(&mut engine, call_pc, api.id(), STACK, 0);
+        let token = if resident {
+            engine
+                .capture_resident_call(KEY, owner, crate::windows::CallingConvention32::Stdcall, 1)
+                .unwrap()
+                .token
+        } else {
+            engine
+                .capture_call(
+                    KEY,
+                    owner as u32,
+                    crate::windows::CallingConvention32::Stdcall,
+                    1,
+                )
+                .unwrap()
+                .token
+        };
+        if resident {
+            engine
+                .complete_resident_windows_call(KEY, owner, token)
+                .unwrap();
+        } else {
+            engine
+                .complete_windows_call(KEY, owner as u32, token)
+                .unwrap();
+        }
+        let request = engine.user32_dialog_request(0).unwrap().unwrap();
+        let (epoch, id) = (request.epoch, request.id);
+        engine.request_user32_dialog_help(epoch, id).unwrap();
+        let continuation = engine.waiting_user32_message().unwrap();
+        engine.resume_user32_wait(KEY, continuation).unwrap();
+        let request = engine.pending_windows_callback().unwrap();
+        assert_eq!(request.count, 1);
+        assert_eq!(request.procedure.0, CALLBACK_PC);
+        let scratch = PageRange::new(GuestAddress(request.arguments[0]), 1).unwrap();
+        engine.memory.as_mut().unwrap().unmap(scratch).unwrap();
+        engine
+            .memory
+            .as_mut()
+            .unwrap()
+            .map_zeroed(scratch, Permissions::READ_WRITE)
+            .unwrap();
+        engine
+            .memory
+            .as_mut()
+            .unwrap()
+            .write(GuestAddress(request.arguments[0]), &[0xa5; 28])
+            .unwrap();
+        let arena = engine.arena().to_vec();
+        let memory_version = engine.memory().unwrap().transaction_version();
+        let error = if resident {
+            engine
+                .begin_windows_resident_callback(KEY, callback_unit, RETURN_PC, RETURN_ID)
+                .unwrap_err()
+        } else {
+            engine
+                .begin_windows_callback(KEY, owner as u32, RETURN_PC, RETURN_ID)
+                .unwrap_err()
+        };
+        assert_eq!(error, HostError::User32(User32Error32::InvalidRequest));
+        assert_eq!(engine.arena(), arena);
+        assert_eq!(
+            engine.memory().unwrap().transaction_version(),
+            memory_version
+        );
+        assert_eq!(engine.pending_windows_callback(), Some(request));
+        assert!(engine.pending_call.is_some());
+    }
+}

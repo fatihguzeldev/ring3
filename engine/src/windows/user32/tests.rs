@@ -4,7 +4,7 @@ use crate::{loader::SystemExportTarget32, memory::GuestAddress, windows::Calling
 #[test]
 fn user32_catalog_resolves_explicit_stdcall_gates_without_id_or_symbol_aliases() {
     let module = user32_module(0x70000000);
-    assert_eq!(module.exports.len(), 101);
+    assert_eq!(module.exports.len(), 105);
     let mut names = std::collections::BTreeSet::new();
     let mut gates = std::collections::BTreeSet::new();
     for export in &module.exports {
@@ -26,7 +26,7 @@ fn user32_catalog_resolves_explicit_stdcall_gates_without_id_or_symbol_aliases()
         ("LoadStringA", 0x0013_0015),
         ("LoadStringW", 0x0013_0016),
     ];
-    assert_eq!(User32Api32::catalog().count() + extensions.len(), 101);
+    assert_eq!(User32Api32::catalog().count() + extensions.len(), 105);
     for (name, gate) in extensions {
         assert!(module.exports.iter().any(|export| {
             export.name.as_deref() == Some(name)

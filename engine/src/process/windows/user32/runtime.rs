@@ -130,6 +130,10 @@ impl EngineInstance {
                 | User32Api32::GetMessageW
                 | User32Api32::PeekMessageA
                 | User32Api32::PeekMessageW
+                | User32Api32::MessageBoxA
+                | User32Api32::MessageBoxW
+                | User32Api32::MessageBoxIndirectA
+                | User32Api32::MessageBoxIndirectW
         );
         if message_phase {
             self.check_thread_message_dispatch(call_context.thread_id)?;
@@ -215,6 +219,17 @@ impl EngineInstance {
         } else {
             None
         };
+        let dialog = if matches!(
+            api,
+            User32Api32::MessageBoxA
+                | User32Api32::MessageBoxW
+                | User32Api32::MessageBoxIndirectA
+                | User32Api32::MessageBoxIndirectW
+        ) {
+            Some(self.prepare_user32_dialog(api, frame.arguments(), call_context))
+        } else {
+            None
+        };
         let activation = if matches!(
             api,
             User32Api32::PostMessageA | User32Api32::PostMessageW | User32Api32::SetTimer
@@ -230,7 +245,13 @@ impl EngineInstance {
         context.call_activation = activation
             .as_ref()
             .map_or_else(Default::default, |capture| capture.token());
-        let result = if let Some(error) = remote_error {
+        let result = if let Some(dialog) = dialog {
+            match dialog {
+                Ok(dialog) => context.begin_dialog(dialog),
+                Err(HostError::User32(error)) => Err(error),
+                Err(error) => return Err(error),
+            }
+        } else if let Some(error) = remote_error {
             context.last_error = Some(error);
             Ok(super::User32Outcome32::Return(0))
         } else if defer {

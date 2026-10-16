@@ -110,6 +110,10 @@ api_catalog! {
     WaitMessage = 0x0002_0059, 0;
     SetTimer = 0x0002_005a, 4;
     KillTimer = 0x0002_005b, 2;
+    MessageBoxA=0x0002_005c,4;
+    MessageBoxW=0x0002_005d,4;
+    MessageBoxIndirectA=0x0002_005e,1;
+    MessageBoxIndirectW=0x0002_005f,1;
 }
 
 impl User32Api32 {

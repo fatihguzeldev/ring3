@@ -187,6 +187,7 @@ impl User32Context32 {
             .ok_or(User32Error32::InvalidToken)?;
         let event = plan.event.ok_or(User32Error32::InvalidToken)?;
         Ok(User32Outcome32::Callback(User32Callback32 {
+            count: 4,
             procedure: event.procedure,
             arguments: [
                 event.window.get(),
@@ -281,6 +282,11 @@ impl User32Context32 {
                     self.raw_input.retire_window(window.get());
                     self.timers.retire_window(window.get());
                     self.provenance.retire_window(window.get());
+                    for dialog in &mut self.dialogs {
+                        if dialog.owner == window.get() && dialog.result.is_none() {
+                            dialog.result = Some((0, 1400));
+                        }
+                    }
                     None
                 }
             };

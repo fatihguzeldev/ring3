@@ -1,3 +1,5 @@
+mod dialogs;
+pub use dialogs::{User32DialogIcon32, User32DialogRequest32};
 mod activation;
 mod callback;
 mod classes;
@@ -43,6 +45,7 @@ pub(crate) struct User32Callback32 {
     pub procedure: GuestAddress,
     pub arguments: [u32; 4],
     pub continuation: u64,
+    pub count: u32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -66,6 +69,7 @@ pub(crate) struct User32Context32 {
     raw_input: crate::windows::rawinput::RawInputRuntime32,
     destructions: Vec<destruction::DestroyPlan32>,
     timers: timers::TimerState32,
+    dialogs: Vec<dialogs::Dialog32>,
     call_activation: crate::windows::activation::CapturedActivation32,
     activation_capture_limit: usize,
     provenance: messages::MessageProvenance32,

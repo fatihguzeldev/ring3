@@ -1,4 +1,5 @@
 use super::{AbiError, header};
+pub mod dialogs;
 
 pub const WINDOWS_CALLBACK_RECORD_SIZE: usize = 96;
 

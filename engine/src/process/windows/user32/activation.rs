@@ -139,6 +139,7 @@ impl User32Context32 {
             ),
         };
         Ok(User32Outcome32::Callback(User32Callback32 {
+            count: 4,
             procedure: self.windows().get(window)?.description.procedure,
             arguments: [window.get(), message, wparam, lparam],
             continuation: self.pending.last().unwrap().token,

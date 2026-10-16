@@ -10,6 +10,7 @@ mod activation;
 mod callbacks;
 mod configuration;
 mod d3d8;
+mod dialogs;
 mod dinput;
 mod dsound;
 mod exceptions;

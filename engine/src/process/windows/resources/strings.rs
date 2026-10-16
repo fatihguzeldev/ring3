@@ -6,6 +6,50 @@ use crate::{
     windows::{resources::ResourceApi32 as Api, text::CodePage32},
 };
 impl EngineInstance {
+    pub(in crate::process) fn resource_string_units(
+        &self,
+        module_handle: u32,
+        id: u32,
+        language: u16,
+    ) -> Result<Vec<u16>, crate::process::HostError> {
+        let result = (|| {
+            let module = self.resource_module(module_handle)?;
+            let preferred = if language == 0 {
+                self.current_thread_ui_language()
+            } else {
+                language
+            };
+            let mut reader = self.resource_reader(module)?;
+            let location = reader.find_languages(
+                &Identifier::Id(6),
+                &Identifier::Id((id >> 4) + 1),
+                &[preferred, preferred & 0x3ff, 0, 0x409, 9],
+                true,
+            )?;
+            let string = reader.string_table(location, id & 15)?;
+            let address = reader.address(string.data_rva, string.units * 2)?;
+            let mut bytes = Vec::new();
+            bytes
+                .try_reserve_exact(string.units as usize * 2)
+                .map_err(|_| E::Allocation)?;
+            bytes.resize(string.units as usize * 2, 0);
+            self.memory
+                .as_ref()
+                .ok_or(E::NotConfigured)?
+                .read(address, &mut bytes)?;
+            let mut units = Vec::new();
+            units
+                .try_reserve_exact(string.units as usize)
+                .map_err(|_| E::Allocation)?;
+            units.extend(
+                bytes
+                    .chunks_exact(2)
+                    .map(|pair| u16::from_le_bytes([pair[0], pair[1]])),
+            );
+            Ok::<_, E>(units)
+        })();
+        result.map_err(crate::process::HostError::Resource)
+    }
     pub(super) fn resource_string(&mut self, api: Api, args: &[u32]) -> Result<u32, E> {
         if (args[3] as i32) < 0 || api == Api::LoadStringA && args[3] == 0 {
             return Err(E::InvalidParameter);
