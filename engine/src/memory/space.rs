@@ -2,11 +2,13 @@ mod aliases;
 mod atomic;
 mod code_fetch;
 mod cpu;
+mod guard;
 mod mapping;
 mod paging;
 mod windows;
 
 pub(crate) use aliases::SharedPages;
+pub(crate) use guard::GuardPage32;
 pub(crate) use mapping::PageInitialization;
 pub(crate) use windows::PrivatePageChange32;
 
@@ -226,6 +228,17 @@ impl AddressSpace {
             });
         }
         Ok(self.mapping_versions[page])
+    }
+
+    pub(crate) fn content_version_at(&self, address: GuestAddress) -> Result<u64, MemoryError> {
+        let page = (address.0 / PAGE_SIZE) as usize;
+        let mapping = self.mappings[page];
+        if mapping == 0 {
+            return Err(MemoryError::NotMapped {
+                address: page_address(page),
+            });
+        }
+        Ok(self.versions[mapping as usize - 1].content)
     }
 
     pub(crate) fn protect_with_word_write32(

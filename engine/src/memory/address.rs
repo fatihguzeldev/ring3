@@ -41,6 +41,23 @@ impl Permissions {
         }
     }
 
+    pub(crate) const fn with_guard(self) -> Self {
+        // guarded pages deny all three ordinary access bits without changing the access hot path.
+        Self((self.without_guard().0 << 4) | 8)
+    }
+
+    pub(crate) const fn is_guarded(self) -> bool {
+        self.0 & 8 != 0
+    }
+
+    pub(crate) const fn without_guard(self) -> Self {
+        if self.is_guarded() {
+            Self((self.0 >> 4) & 7)
+        } else {
+            self
+        }
+    }
+
     pub(crate) fn allows(self, access: Access) -> bool {
         self.0
             & match access {
