@@ -66,10 +66,18 @@ impl Win32Context32 {
         Ok(result)
     }
     pub fn requested_eip(&self, base: &ContextState32) -> u32 {
-        if self.selected(1) { self.word(184) } else { base.state.eip }
+        if self.selected(1) {
+            self.word(184)
+        } else {
+            base.state.eip
+        }
     }
     pub fn requested_debug_registers(&self, base: &ContextState32) -> [u32; 6] {
-        if self.selected(0x10) { std::array::from_fn(|index| self.word(4 + index * 4)) } else { base.debug }
+        if self.selected(0x10) {
+            std::array::from_fn(|index| self.word(4 + index * 4))
+        } else {
+            base.debug
+        }
     }
     pub fn requested_selectors(&self, base: &ContextState32) -> [u16; 6] {
         let mut selectors = base.segments.state.selectors;

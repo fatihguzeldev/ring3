@@ -29,7 +29,9 @@ impl EngineInstance {
         base: &ContextState32,
     ) -> Result<ContextState32, HostError> {
         // The fixed CPL3 execution profile has no hardware debug-register bank.
-        if context.requested_debug_registers(base) != [0; 6] { return Err(invalid()); }
+        if context.requested_debug_registers(base) != [0; 6] {
+            return Err(invalid());
+        }
         let mut segments = base.segments;
         for (index, selector) in context.requested_selectors(base).into_iter().enumerate() {
             if selector == segments.state.selectors[index] {
@@ -66,7 +68,9 @@ impl EngineInstance {
         &mut self,
         state: &ContextState32,
     ) -> Result<(), HostError> {
-        if state.debug != [0; 6] { return Err(invalid()); }
+        if state.debug != [0; 6] {
+            return Err(invalid());
+        }
         let mut integer = [0; STATE_SIZE];
         let mut x87 = [0; X87_SIZE];
         let mut simd = [0; SIMD_SIZE];
