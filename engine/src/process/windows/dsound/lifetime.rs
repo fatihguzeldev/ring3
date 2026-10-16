@@ -87,7 +87,14 @@ impl DSoundRuntime32 {
             Ok((slot, pointer)) => {
                 self.records[slot] = Some(Object32 {
                     pointer,
-                    counts: [1, 0, 0, 0],
+                    counts: if publication
+                        .output
+                        .is_some_and(|(_, interface)| interface == InterfaceKind::Unknown)
+                    {
+                        [0, 1, 0, 0]
+                    } else {
+                        [1, 0, 0, 0]
+                    },
                     kind,
                 });
                 Ok(pointer)
@@ -144,6 +151,16 @@ impl DSoundRuntime32 {
         let requested = InterfaceKind::ALL
             .into_iter()
             .find(|kind| kind.iid() == iid);
+        if let ObjectKind32::FullDuplex { device, capture } = &self.object(pointer)?.kind {
+            let delegated = match requested {
+                Some(InterfaceKind::Device | InterfaceKind::Device8) => *device,
+                Some(InterfaceKind::Capture) => *capture,
+                _ => None,
+            };
+            if let Some(parent) = delegated {
+                return self.acquire(memory, parent, out, requested.unwrap());
+            }
+        }
         let target = requested.and_then(|kind| {
             self.target(memory, pointer, kind)
                 .ok()
@@ -261,7 +278,8 @@ impl DSoundRuntime32 {
                     }
                     ObjectKind32::FullDuplex { device, capture } => {
                         release.try_reserve(2).map_err(|_| HResult::OUT_OF_MEMORY)?;
-                        release.extend([*device, *capture]);
+                        release.extend(device.iter().copied());
+                        release.extend(capture.iter().copied());
                         changed = true;
                     }
                     _ => {}

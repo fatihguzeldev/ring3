@@ -89,6 +89,18 @@ impl AudioContext {
         Ok(())
     }
 
+    /// process ownership ends while the exact already submitted pcm remains drainable.
+    pub(crate) fn terminate_process(&mut self) {
+        for slot in &mut self.voices {
+            slot.voice = None;
+        }
+        for slot in &mut self.buffers {
+            slot.buffer = None;
+        }
+        self.spans.fill(VoiceSpan::default());
+        self.buffer_bytes = 0;
+    }
+
     fn ready(&self) -> Result<(), AudioError32> {
         if self.pending.is_some() {
             return Err(AudioError32::Busy);

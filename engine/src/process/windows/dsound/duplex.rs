@@ -21,7 +21,36 @@ impl DSoundRuntime32 {
         windows: Option<&WindowContext32>,
         args: &[u32],
     ) -> Result<u32, HResult> {
-        for address in &args[6..9] {
+        self.create_full_duplex_inner(memory, audio, windows, args, None)
+    }
+    pub(in crate::process::windows::dsound) fn initialize_full_duplex(
+        &mut self,
+        memory: &mut AddressSpace,
+        audio: &mut AudioContext,
+        windows: Option<&WindowContext32>,
+        pointer: GuestAddress,
+        args: &[u32],
+    ) -> Result<u32, HResult> {
+        let ObjectKind32::FullDuplex { device, .. } = &self.object(pointer)?.kind else {
+            return Err(HResult::INVALID_PARAM);
+        };
+        if device.is_some() {
+            return Err(HResult::ALREADY_INITIALIZED);
+        }
+        let arguments = [
+            args[1], args[2], args[3], args[4], args[5], args[6], 0, args[7], args[8], 0,
+        ];
+        self.create_full_duplex_inner(memory, audio, windows, &arguments, Some(pointer))
+    }
+    fn create_full_duplex_inner(
+        &mut self,
+        memory: &mut AddressSpace,
+        audio: &mut AudioContext,
+        windows: Option<&WindowContext32>,
+        args: &[u32],
+        existing: Option<GuestAddress>,
+    ) -> Result<u32, HResult> {
+        for address in &args[if existing.is_some() { 7 } else { 6 }..9] {
             output(memory, *address, 4)?;
         }
         if args[9] != 0 {
@@ -105,7 +134,7 @@ impl DSoundRuntime32 {
             .iter()
             .filter(|record| record.is_none())
             .count()
-            < 5
+            < if existing.is_some() { 4 } else { 5 }
             || memory.transaction_version().checked_add(11).is_none()
         {
             return Err(HResult::OUT_OF_MEMORY);
@@ -123,6 +152,7 @@ impl DSoundRuntime32 {
                 memory,
                 audio,
                 ObjectKind32::Device(Device32 {
+                    initialized: true,
                     native: device,
                     primary: None,
                 }),
@@ -136,7 +166,10 @@ impl DSoundRuntime32 {
             let input = self.publish_object(
                 memory,
                 audio,
-                ObjectKind32::CaptureDevice { version8: true },
+                ObjectKind32::CaptureDevice {
+                    version8: true,
+                    initialized: true,
+                },
                 Publication32 {
                     interfaces: &[InterfaceKind::Capture],
                     output: None,
@@ -195,25 +228,26 @@ impl DSoundRuntime32 {
                 },
             )?;
             created.push(record);
-            let duplex = self.publish_object(
-                memory,
-                audio,
-                ObjectKind32::FullDuplex {
-                    device,
-                    capture: input,
-                },
-                Publication32 {
-                    interfaces: &[InterfaceKind::FullDuplex],
-                    output: None,
-                    retain: &[],
-                },
-            )?;
-            created.push(duplex);
+            let duplex = if let Some(pointer) = existing {
+                pointer
+            } else {
+                let duplex = self.publish_object(
+                    memory,
+                    audio,
+                    ObjectKind32::FullDuplex {
+                        device: Some(device),
+                        capture: Some(input),
+                    },
+                    Publication32 {
+                        interfaces: &[InterfaceKind::FullDuplex],
+                        output: None,
+                        retain: &[],
+                    },
+                )?;
+                created.push(duplex);
+                duplex
+            };
             let mut writes = [
-                word(
-                    args[6],
-                    self.target(memory, duplex, InterfaceKind::FullDuplex)?.0,
-                ),
                 word(
                     args[7],
                     self.target(memory, record, InterfaceKind::CaptureBuffer8)?
@@ -223,9 +257,21 @@ impl DSoundRuntime32 {
                     args[8],
                     self.target(memory, render, InterfaceKind::Buffer8)?.0,
                 ),
+                word(
+                    if existing.is_none() { args[6] } else { args[7] },
+                    self.target(memory, duplex, InterfaceKind::FullDuplex)?.0,
+                ),
             ];
-            writes.sort_unstable_by_key(|write| write.address.0);
-            memory.write_words32(&writes)?;
+            let count = if existing.is_none() { 3 } else { 2 };
+            writes[..count].sort_unstable_by_key(|write| write.address.0);
+            memory.write_words32(&writes[..count])?;
+            if existing.is_some() {
+                let slot = self.slot(duplex)?;
+                self.records[slot].as_mut().unwrap().kind = ObjectKind32::FullDuplex {
+                    device: Some(device),
+                    capture: Some(input),
+                };
+            }
             Ok(creation_result)
         })();
         if result.is_err() {

@@ -15,6 +15,7 @@ impl EngineInstance {
         if self.pending_call.is_some() || self.callback.is_some() {
             return Err(HostError::Call(CallError::Busy));
         }
+        self.check_guest_reservation_admission(&[config.objects, config.locks])?;
         self.dsound = Some(DSoundRuntime32::new(config).map_err(HostError::DSound)?);
         Ok(())
     }

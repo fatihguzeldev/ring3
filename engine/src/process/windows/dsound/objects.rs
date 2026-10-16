@@ -14,14 +14,16 @@ pub(super) enum ObjectKind32 {
     Buffer(Buffer32),
     CaptureDevice {
         version8: bool,
+        initialized: bool,
     },
     CaptureBuffer(CaptureBuffer32),
     FullDuplex {
-        device: GuestAddress,
-        capture: GuestAddress,
+        device: Option<GuestAddress>,
+        capture: Option<GuestAddress>,
     },
 }
 pub(super) struct Device32 {
+    pub initialized: bool,
     pub native: Device,
     pub primary: Option<GuestAddress>,
 }

@@ -1,4 +1,4 @@
-use super::{DSoundRuntime32, lifetime::group};
+use super::{DSoundRuntime32, lifetime::group, objects::ObjectKind32};
 use crate::{
     audio::{
         AudioContext,
@@ -70,6 +70,15 @@ impl DSoundRuntime32 {
             2 => return self.release(memory, audio, sync, pointer, gate.interface),
             _ => {}
         }
+        match &self.object(pointer)?.kind {
+            ObjectKind32::Device(device) if !device.initialized && gate.slot != 10 => {
+                return Err(HResult::UNINITIALIZED);
+            }
+            ObjectKind32::CaptureDevice {
+                initialized: false, ..
+            } if gate.slot != 5 => return Err(HResult::UNINITIALIZED),
+            _ => {}
+        }
         match gate.interface {
             InterfaceKind::Device | InterfaceKind::Device8 => {
                 self.device_call(memory, audio, windows, pointer, gate.slot, args)
@@ -100,7 +109,9 @@ impl DSoundRuntime32 {
             InterfaceKind::CaptureBuffer | InterfaceKind::CaptureBuffer8 => {
                 self.capture_buffer_call(memory, audio, sync, pointer, gate.slot, args)
             }
-            InterfaceKind::FullDuplex => Err(HResult::ALREADY_INITIALIZED),
+            InterfaceKind::FullDuplex => {
+                self.initialize_full_duplex(memory, audio, windows, pointer, args)
+            }
             InterfaceKind::Unknown => Err(HResult::UNSUPPORTED),
         }
     }

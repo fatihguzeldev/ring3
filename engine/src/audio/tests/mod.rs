@@ -1,5 +1,6 @@
 mod resampling;
 mod streaming;
+mod termination;
 
 use super::*;
 

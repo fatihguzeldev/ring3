@@ -21,7 +21,7 @@ impl DSoundRuntime32 {
         slot: u8,
         args: &[u32],
     ) -> Result<u32, HResult> {
-        let ObjectKind32::CaptureDevice { version8 } = &self.object(pointer)?.kind else {
+        let ObjectKind32::CaptureDevice { version8, .. } = &self.object(pointer)?.kind else {
             return Err(HResult::INVALID_PARAM);
         };
         let version8 = *version8;
@@ -100,7 +100,7 @@ impl DSoundRuntime32 {
                 write_words(memory, args[1], &[16, 32, 0xffff, 2])?;
                 Ok(0)
             }
-            5 => Err(HResult::ALREADY_INITIALIZED),
+            5 => self.initialize_device(memory, pointer, args[1], true),
             _ => Err(HResult::UNSUPPORTED),
         }
     }

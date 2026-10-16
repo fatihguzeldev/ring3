@@ -155,3 +155,9 @@ impl From<crate::memory::MemoryError> for HResult {
         Self::INVALID_PARAM
     }
 }
+
+impl DSoundRuntime32 {
+    pub(in crate::process) fn guest_reservations(&self) -> [crate::memory::PageRange; 2] {
+        [self.config.objects, self.config.locks]
+    }
+}

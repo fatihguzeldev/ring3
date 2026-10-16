@@ -41,9 +41,13 @@ impl DSoundRuntime32 {
         }
         let version8 = matches!(gate, FactoryGate::Create8 | FactoryGate::CaptureCreate8);
         let kind = if capture {
-            ObjectKind32::CaptureDevice { version8 }
+            ObjectKind32::CaptureDevice {
+                version8,
+                initialized: true,
+            }
         } else {
             ObjectKind32::Device(Device32 {
+                initialized: true,
                 native: Device::new(version8, audio.config().sample_rate),
                 primary: None,
             })
@@ -134,7 +138,7 @@ impl DSoundRuntime32 {
                 device.native.speaker_config = args[1];
                 Ok(0)
             }
-            10 => Err(HResult::ALREADY_INITIALIZED),
+            10 => self.initialize_device(memory, pointer, args[1], false),
             11 => {
                 write_words(memory, args[1], &[1])?;
                 Ok(0)

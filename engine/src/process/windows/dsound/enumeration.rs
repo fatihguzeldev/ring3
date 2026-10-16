@@ -48,6 +48,9 @@ impl DSoundRuntime32 {
         if self.enumerations.len() == 33 {
             return Err(HResult::OUT_OF_MEMORY);
         }
+        self.enumerations
+            .try_reserve(1)
+            .map_err(|_| HResult::OUT_OF_MEMORY)?;
         let id = self.sequence.checked_add(1).ok_or(HResult::INVALID_CALL)?;
         self.enumeration_page(memory)?;
         let pending = PendingEnumeration32 {

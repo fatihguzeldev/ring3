@@ -1,3 +1,6 @@
+mod thread;
+pub(in crate::process) use thread::DSoundThreadReply32;
+mod activation;
 mod buffers;
 mod capture;
 mod context;
@@ -12,6 +15,7 @@ mod notifications;
 mod objects;
 mod runtime;
 mod spatial;
+mod termination;
 mod types;
 
 pub(in crate::process) use context::DSoundRuntime32;

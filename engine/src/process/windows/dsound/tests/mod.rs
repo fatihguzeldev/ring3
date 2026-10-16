@@ -1,3 +1,4 @@
+mod activation;
 mod lifetime;
 mod locks;
 mod notifications;
