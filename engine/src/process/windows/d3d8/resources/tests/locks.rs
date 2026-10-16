@@ -1,4 +1,5 @@
 use super::*;
+use crate::memory::AddressSpace;
 use crate::{
     graphics::d3d8::{api::HResult, resources::SurfaceRef},
     process::windows::d3d8::DispatchError32,
@@ -155,7 +156,7 @@ fn last_unlock_preflights_unmap_and_failed_publication_preserves_the_live_lock()
 }
 
 #[test]
-fn buffer_lock_publication_failure_is_neutral_and_unlock_reclaims_without_address_reuse() {
+fn buffer_lock_publication_failure_is_neutral_and_reused_addresses_have_fresh_witnesses() {
     let (mut runtime, mut memory, device) = runtime();
     runtime
         .device_resource_call(&mut memory, device, 23, &[device.0, 16, 0, 0, 2, DATA])
@@ -190,6 +191,7 @@ fn buffer_lock_publication_failure_is_neutral_and_unlock_reclaims_without_addres
         )
         .unwrap();
     let first = read(&memory, DATA + 4);
+    let first_mapping = memory.mapping_version_at(GuestAddress(first)).unwrap();
     memory.write(GuestAddress(first), &[7, 8, 9]).unwrap();
     runtime
         .resource_call(
@@ -219,7 +221,9 @@ fn buffer_lock_publication_failure_is_neutral_and_unlock_reclaims_without_addres
             &[buffer.0, 0, 1, DATA + 4, 0],
         )
         .unwrap();
-    assert!(read(&memory, DATA + 4) > first);
+    let second = read(&memory, DATA + 4);
+    assert_eq!(second + 1, first);
+    assert!(memory.mapping_version_at(GuestAddress(second)).unwrap() > first_mapping);
     let version = runtime
         .device(device)
         .unwrap()
@@ -301,5 +305,107 @@ fn gpu_written_lock_requests_real_readback_before_exposing_guest_memory() {
             .resources()
             .is_locked(surface.resource)
             .unwrap()
+    );
+}
+
+#[test]
+fn repeated_guest_locks_reuse_free_staging_while_held_locks_and_failed_publication_stay_valid() {
+    use crate::memory::{PAGE_SIZE, PageRange};
+    let (mut runtime, mut memory, device) = runtime();
+    let bounds = PageRange::new(GuestAddress(0x20000000), 2).unwrap();
+    runtime.config.locks = bounds;
+    runtime.locks = super::super::super::locks::LockRegistry32::new(bounds, 16).unwrap();
+    let mut buffers = Vec::new();
+    for output in [DATA, DATA + 4] {
+        runtime
+            .device_resource_call(&mut memory, device, 23, &[device.0, 16, 0, 0, 2, output])
+            .unwrap();
+        buffers.push(GuestAddress(read(&memory, output)));
+    }
+    let lock = |runtime: &mut super::super::super::D3D8Runtime32,
+                memory: &mut AddressSpace,
+                buffer: GuestAddress,
+                output: u32| {
+        runtime.resource_call(
+            memory,
+            buffer,
+            InterfaceKind::VertexBuffer,
+            11,
+            &[buffer.0, 0, 16, output, 0],
+        )
+    };
+    lock(&mut runtime, &mut memory, buffers[0], DATA + 8).unwrap();
+    let held = read(&memory, DATA + 8);
+    let stream = runtime.resource(buffers[1], device).unwrap();
+    for value in 1..=16 {
+        lock(&mut runtime, &mut memory, buffers[1], DATA + 12).unwrap();
+        let pointer = read(&memory, DATA + 12);
+        assert_eq!(pointer, held + PAGE_SIZE);
+        memory.write(GuestAddress(pointer), &[value; 16]).unwrap();
+        runtime
+            .resource_call(
+                &mut memory,
+                buffers[1],
+                InterfaceKind::VertexBuffer,
+                12,
+                &[buffers[1].0],
+            )
+            .unwrap();
+        assert_eq!(
+            runtime
+                .device(device)
+                .unwrap()
+                .resources()
+                .bytes(stream)
+                .unwrap(),
+            &[value; 16]
+        );
+        assert!(
+            runtime
+                .locks
+                .contains_resource(runtime.resource(buffers[0], device).unwrap().resource)
+        );
+        assert!(memory.read(GuestAddress(held), &mut [0; 16]).is_ok());
+    }
+    let version = memory.transaction_version();
+    let output = read(&memory, DATA + 12);
+    let mapped = memory.mapped_pages();
+    memory.exhaust_versions_for_test();
+    assert!(lock(&mut runtime, &mut memory, buffers[1], DATA + 12).is_err());
+    assert_eq!(read(&memory, DATA + 12), output);
+    assert_eq!(memory.mapped_pages(), mapped);
+    assert!(
+        !runtime
+            .device(device)
+            .unwrap()
+            .resources()
+            .is_locked(stream.resource)
+            .unwrap()
+    );
+    memory.restore_version_for_test(version);
+    lock(&mut runtime, &mut memory, buffers[1], DATA + 12).unwrap();
+    runtime
+        .resource_call(
+            &mut memory,
+            buffers[1],
+            InterfaceKind::VertexBuffer,
+            12,
+            &[buffers[1].0],
+        )
+        .unwrap();
+    runtime
+        .resource_call(
+            &mut memory,
+            buffers[0],
+            InterfaceKind::VertexBuffer,
+            12,
+            &[buffers[0].0],
+        )
+        .unwrap();
+    assert!(!runtime.locks.contains_resource(stream.resource));
+    assert!(
+        !runtime
+            .locks
+            .contains_resource(runtime.resource(buffers[0], device).unwrap().resource)
     );
 }

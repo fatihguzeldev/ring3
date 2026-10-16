@@ -17,7 +17,6 @@ pub(super) struct GuestLock32 {
 
 pub(super) struct LockRegistry32 {
     range: PageRange,
-    next_page: usize,
     memory_identity: Option<u64>,
     entries: Vec<GuestLock32>,
     limit: usize,
@@ -62,7 +61,7 @@ impl LockRegistry32 {
         }
         ranges.sort_unstable_by_key(|range| range.first);
         ranges.dedup();
-        tokens.sort_unstable_by_key(|(_, token)| *token);
+        tokens.sort_unstable_by_key(|&(resource, token)| lock_identity(resource, token));
         Ok(PreparedLockDisposal32 { ranges, tokens })
     }
 
@@ -70,7 +69,10 @@ impl LockRegistry32 {
         self.entries.retain(|entry| {
             prepared
                 .tokens
-                .binary_search_by_key(&entry.info.token, |(_, token)| *token)
+                .binary_search_by_key(
+                    &lock_identity(entry.resource, entry.info.token),
+                    |&(resource, token)| lock_identity(resource, token),
+                )
                 .is_err()
         });
     }
@@ -83,7 +85,6 @@ impl LockRegistry32 {
         entries.try_reserve_exact(limit as usize).map_err(|_| ())?;
         Ok(Self {
             range,
-            next_page: range.first,
             memory_identity: None,
             entries,
             limit: limit as usize,
@@ -109,3 +110,10 @@ impl LockRegistry32 {
         .map_err(Into::into)
     }
 }
+
+fn lock_identity(resource: ResourceId, token: u64) -> (u64, u32, u32, u64) {
+    (resource.epoch, resource.slot, resource.generation, token)
+}
+
+#[cfg(test)]
+mod tests;

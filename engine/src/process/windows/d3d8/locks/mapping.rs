@@ -1,10 +1,7 @@
 use super::{super::DispatchError32, GuestLock32, LockRegistry32};
 use crate::{
     graphics::d3d8::api::HResult,
-    memory::{
-        AddressSpace, GuestAddress, PAGE_SIZE, PageInitialization, PageRange, Permissions,
-        WordWrite32,
-    },
+    memory::{AddressSpace, GuestAddress, PAGE_SIZE, PageInitialization, Permissions, WordWrite32},
 };
 
 impl LockRegistry32 {
@@ -53,13 +50,10 @@ impl LockRegistry32 {
             return Ok(());
         }
         let count = bytes.len().div_ceil(PAGE_SIZE as usize);
-        let end = self
-            .next_page
-            .checked_add(count)
-            .filter(|end| *end <= self.range.first + self.range.count)
-            .ok_or(HResult::OUT_OF_MEMORY)?;
-        let address = GuestAddress((self.next_page * PAGE_SIZE as usize) as u32);
-        let range = PageRange::new(address, count as u32)?;
+        let range = memory
+            .find_unmapped_range(self.range, count as u32, PAGE_SIZE)
+            .map_err(publication_error)?;
+        let address = GuestAddress((range.first * PAGE_SIZE as usize) as u32);
         let mut pages = Vec::new();
         pages
             .try_reserve_exact(count)
@@ -103,12 +97,7 @@ impl LockRegistry32 {
         };
         memory
             .install_pages_with_word_writes(&pages, &words[..count])
-            .map_err(|error| match error {
-                crate::memory::MemoryError::Capacity | crate::memory::MemoryError::Allocation => {
-                    DispatchError32::Api(HResult::OUT_OF_MEMORY)
-                }
-                error => error.into(),
-            })?;
+            .map_err(publication_error)?;
         self.entries.push(GuestLock32 {
             resource,
             info,
@@ -116,7 +105,6 @@ impl LockRegistry32 {
             mapping: memory.transaction_version(),
             data_offset,
         });
-        self.next_page = end;
         self.memory_identity = Some(memory.identity());
         Ok(())
     }
@@ -138,5 +126,14 @@ impl LockRegistry32 {
             }
         }
         Ok(())
+    }
+}
+
+fn publication_error(error: crate::memory::MemoryError) -> DispatchError32 {
+    match error {
+        crate::memory::MemoryError::Capacity | crate::memory::MemoryError::Allocation => {
+            HResult::OUT_OF_MEMORY.into()
+        }
+        error => error.into(),
     }
 }
