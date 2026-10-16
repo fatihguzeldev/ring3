@@ -74,3 +74,106 @@ fn bad_string_output_is_neutral_and_old_resource_identity_does_not_alias_reloade
     let new = value(&mut engine, Api::FindResourceW, &[0x500000, 7, 10]).unwrap();
     assert_ne!(new, old);
 }
+
+fn captured_resource_call(engine: &mut EngineInstance, api: Api, args: &[u32]) -> u32 {
+    use crate::{
+        abi::{arena::*, x86::*},
+        cpu::{ExecutionExit, ExitReason, x86::State32},
+    };
+    const CODE: u32 = 0x70000;
+    const STACK: u32 = 0x71000;
+    for (index, word) in [CODE, 2, CODE, api.id()].iter().enumerate() {
+        engine.arena_mut().unwrap()[TRANSFER_OFFSET + index * 4..TRANSFER_OFFSET + index * 4 + 4]
+            .copy_from_slice(&word.to_le_bytes());
+    }
+    let generation = engine.compile_with_gates(1, 1).unwrap();
+    for (index, word) in std::iter::once(CODE + 0x80)
+        .chain(args.iter().copied())
+        .enumerate()
+    {
+        engine
+            .memory
+            .as_mut()
+            .unwrap()
+            .write(GuestAddress(STACK + index as u32 * 4), &word.to_le_bytes())
+            .unwrap();
+    }
+    let mut state = State32 {
+        eip: CODE,
+        ..Default::default()
+    };
+    state.registers[4] = STACK;
+    encode_state_current(
+        &state,
+        &mut engine.arena_mut().unwrap()[STATE_OFFSET..STATE_OFFSET + STATE_SIZE],
+    )
+    .unwrap();
+    encode_exit_v3(
+        &ExecutionExit {
+            retired: 0,
+            reason: ExitReason::Gate { id: api.id() },
+        },
+        &mut engine.arena_mut().unwrap()[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE],
+    )
+    .unwrap();
+    let token = engine.capture_windows_call(7, generation).unwrap().token;
+    engine.complete_windows_call(7, generation, token).unwrap();
+    assert!(engine.pending_call.is_none());
+    let state = decode_state(&engine.arena()[STATE_OFFSET..STATE_OFFSET + STATE_SIZE]).unwrap();
+    assert_eq!(
+        (state.eip, state.registers[4]),
+        (CODE + 0x80, STACK + 4 + args.len() as u32 * 4)
+    );
+    state.registers[0]
+}
+
+#[test]
+fn captured_loadstring_ansi_uses_configured_page_for_authored_unicode_resource() {
+    use crate::{
+        memory::Permissions,
+        windows::{nls::NlsProfile32, text::CodePage32},
+    };
+    let mut bytes = image(BASE, false, false);
+    bytes[0x502..0x504].copy_from_slice(&0x0131u16.to_le_bytes());
+    let mut engine = engine_with_image(
+        bytes,
+        8,
+        NlsProfile32 {
+            locale: 0x41f,
+            ansi: CodePage32::from_id(1254).unwrap(),
+            oem: CodePage32::from_id(857).unwrap(),
+            ..Default::default()
+        },
+    );
+    engine
+        .memory
+        .as_mut()
+        .unwrap()
+        .map_zeroed(
+            PageRange::new(GuestAddress(0x70000), 2).unwrap(),
+            Permissions::ALL,
+        )
+        .unwrap();
+    engine
+        .memory
+        .as_mut()
+        .unwrap()
+        .write(GuestAddress(0x70000), &[0x0f, 0x0b])
+        .unwrap();
+    assert_eq!(
+        captured_resource_call(&mut engine, Api::LoadStringW, &[0, 0, BASE + 0x2300, 16]),
+        5
+    );
+    assert_eq!(
+        read::<12>(&engine, BASE + 0x2300),
+        [0x31, 0x01, b'e', 0, b'l', 0, b'l', 0, b'o', 0, 0, 0]
+    );
+    assert_eq!(
+        captured_resource_call(&mut engine, Api::LoadStringA, &[0, 0, BASE + 0x2300, 16]),
+        5
+    );
+    assert_eq!(
+        read::<6>(&engine, BASE + 0x2300),
+        [0xfd, b'e', b'l', b'l', b'o', 0]
+    );
+}

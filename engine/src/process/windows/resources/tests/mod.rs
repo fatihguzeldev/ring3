@@ -103,7 +103,15 @@ pub(in crate::process::windows) fn register(engine: &mut EngineInstance, name: &
     engine.commit_module_input().unwrap();
 }
 pub(in crate::process::windows) fn engine(named: bool, max_handles: u32) -> EngineInstance {
+    engine_with_image(image(BASE, false, named), max_handles, Default::default())
+}
+fn engine_with_image(
+    bytes: Vec<u8>,
+    max_handles: u32,
+    profile: crate::windows::nls::NlsProfile32,
+) -> EngineInstance {
     let mut engine = EngineInstance::new(128, 7).unwrap();
+    engine.configure_nls(profile).unwrap();
     engine
         .configure_resources(ResourceConfig32 {
             scratch: PageRange::new(GuestAddress(0x16000000), 64).unwrap(),
@@ -112,7 +120,7 @@ pub(in crate::process::windows) fn engine(named: bool, max_handles: u32) -> Engi
             max_enum_bytes: 1024 * 1024,
         })
         .unwrap();
-    register(&mut engine, "resources.exe", &image(BASE, false, named));
+    register(&mut engine, "resources.exe", &bytes);
     assert!(matches!(
         engine.start_module_process("resources.exe", None, ModuleRuntimeConfig32::default()),
         Ok(ModuleOperation32::Loaded { handle: BASE })

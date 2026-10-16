@@ -372,3 +372,68 @@ fn captured_waitmessage_wakes_once_and_msgwait_inputavailable_observes_old_messa
         0
     );
 }
+
+#[test]
+fn captured_ansi_event_name_matches_unicode_object_under_configured_dbcs() {
+    use crate::windows::{nls::NlsProfile32, text::CodePage32};
+    let mut engine = fixture();
+    engine
+        .configure_nls(NlsProfile32 {
+            locale: 0x411,
+            ansi: CodePage32::from_id(932).unwrap(),
+            oem: CodePage32::from_id(932).unwrap(),
+            ..Default::default()
+        })
+        .unwrap();
+    engine
+        .memory
+        .as_mut()
+        .unwrap()
+        .write(
+            GuestAddress(OUTPUT + 0x100),
+            &[0x83, 0x65, 0x83, 0x58, 0x83, 0x67, 0],
+        )
+        .unwrap();
+    let name = "テスト\0"
+        .encode_utf16()
+        .flat_map(u16::to_le_bytes)
+        .collect::<Vec<_>>();
+    engine
+        .memory
+        .as_mut()
+        .unwrap()
+        .write(GuestAddress(OUTPUT + 0x200), &name)
+        .unwrap();
+    let original = call(
+        &mut engine,
+        WindowsApi32::CreateEventA,
+        &[0, 0, 0, OUTPUT + 0x100],
+    );
+    assert_ne!(original, 0);
+    let unicode = call(
+        &mut engine,
+        WindowsApi32::OpenEventW,
+        &[EVENT_ALL_ACCESS, 0, OUTPUT + 0x200],
+    );
+    assert_ne!(unicode, 0);
+    assert_ne!(unicode, original);
+    assert_eq!(call(&mut engine, WindowsApi32::SetEvent, &[original]), 1);
+    assert_eq!(
+        call(
+            &mut engine,
+            WindowsApi32::WaitForSingleObject,
+            &[unicode, 0]
+        ),
+        0
+    );
+    assert_eq!(
+        call(
+            &mut engine,
+            WindowsApi32::WaitForSingleObject,
+            &[original, 0]
+        ),
+        WAIT_TIMEOUT
+    );
+    assert_eq!(call(&mut engine, WindowsApi32::CloseHandle, &[unicode]), 1);
+    assert_eq!(call(&mut engine, WindowsApi32::CloseHandle, &[original]), 1);
+}

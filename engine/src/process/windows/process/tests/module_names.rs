@@ -7,7 +7,13 @@ use crate::{
 };
 const BUFFER: u32 = 0x30000;
 pub(super) fn engine() -> (EngineInstance, u32) {
+    engine_with_profile(Default::default())
+}
+pub(super) fn engine_with_profile(
+    profile: crate::windows::nls::NlsProfile32,
+) -> (EngineInstance, u32) {
     let mut engine = EngineInstance::new(128, 7).unwrap();
+    engine.configure_nls(profile).unwrap();
     engine.configure_cpu_clock(1_000_000_000, 0).unwrap();
     engine.configure_files(FileConfig32::default()).unwrap();
     engine.register_guest_module("main.exe", &image()).unwrap();
