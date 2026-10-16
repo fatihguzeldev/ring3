@@ -44,3 +44,7 @@ pub fn encode_media_record(
         chunk.copy_from_slice(&value.to_le_bytes());
     }
 }
+
+#[cfg(test)]
+#[path = "media/tests.rs"]
+mod tests;

@@ -4,7 +4,7 @@ import {join} from 'node:path';
 import {ARENA_SIZE} from '../../../../support/wasm/arena.mjs';
 import {assertEngineExports} from '../../../../support/wasm/exports.mjs';
 
-export function host(enginePath, root, output, guest) {
+export function host(enginePath, root, output, guest, options = {}) {
   const engine = new WebAssembly.Module(readFileSync(enginePath));
   assertEngineExports(engine, root);
   const instance = new WebAssembly.Instance(engine, {}), memory = instance.exports.memory;
@@ -34,6 +34,7 @@ export function host(enginePath, root, output, guest) {
   assert.equal(api.configure_threads(4, 16, 16, 4, 256), 0);
   assert.equal(api.configure_module_limits(8, 0x100000, 16, 65536, 0x100000), 0);
   assert.equal(api.register_kernel32_module(0x70000000), 0);
+  options.configure?.({api, name, request});
   assert.equal(api.begin_module_input(guest.bytes.length, name('threads-authored.exe')), 0);
   for (let offset = 0; offset < guest.bytes.length; offset += 4096) {
     const chunk = guest.bytes.subarray(offset, offset + 4096);
@@ -95,7 +96,7 @@ export function host(enginePath, root, output, guest) {
       [{entry: target, length: 2}], [{entry: target, id: segment.id}]);
     gateOwners.set(segment.id, {...owner, target});
   }
-  assert.equal(gateOwners.size, 23);
+  assert.equal(gateOwners.size, options.gateOwners ?? 23);
   const units = guest.segments.map((segment, index) => ({
     ...segment,
     ...compile(`code-${index + 1}`, [{entry: segment.start, length: segment.limit - segment.start}], []),
@@ -131,5 +132,5 @@ export function host(enginePath, root, output, guest) {
     }
     assert.fail(`${unit.name}: bounded guest execution`);
   }
-  return {api, key, get, take, read, units, runs, durations, run};
+  return {api, key, get, take, read, units, runs, durations, run, compile};
 }

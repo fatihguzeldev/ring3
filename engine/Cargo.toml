@@ -349,3 +349,15 @@ path = "tests/windows/threads/wasm.rs"
 [[test]]
 name = "windows_com_activation_wasm"
 path = "tests/windows/com/wasm.rs"
+
+[[test]]
+name = "windows_timers_wasm"
+path = "tests/windows/timers/wasm.rs"
+
+[[test]]
+name = "windows_activation_wasm"
+path = "tests/windows/activation/wasm.rs"
+
+[[test]]
+name = "windows_dialogs_wasm"
+path = "tests/windows/dialogs/wasm.rs"
