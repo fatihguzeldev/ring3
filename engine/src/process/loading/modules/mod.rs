@@ -43,6 +43,7 @@ pub(in crate::process) struct ModuleProcess32 {
     source: Option<source::PendingModuleLoad32>,
     next_source: u64,
     vfs_sources: Vec<source::ModuleVfsSource32>,
+    image_sources: Vec<source::ModuleImageSource32>,
     loader_owner: Option<u32>,
     loader_depth: u32,
     waiting_request: Option<thread::ModuleRequest32>,

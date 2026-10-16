@@ -33,6 +33,9 @@ impl Vfs32 {
                     return Err(FileError32::AlreadyExists);
                 }
                 let target_node = self.node(id)?;
+                if self.has_file_section(id) {
+                    return Err(FileError32::AccessDenied);
+                }
                 if node.directory()
                     || target_node.directory()
                     || target_node.attributes & ATTR_READONLY != 0

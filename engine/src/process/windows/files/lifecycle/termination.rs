@@ -105,6 +105,7 @@ impl EngineInstance {
         files.events.clear();
         files.provider.clear();
         files.reply = None;
+        self.retire_module_image_files_for_process_exit();
         Ok(true)
     }
 }

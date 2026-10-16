@@ -55,6 +55,9 @@ impl Vfs32 {
                 if node.directory() || node.delete_pending || node.attributes & ATTR_READONLY != 0 {
                     return Err(FileError32::AccessDenied);
                 }
+                if self.has_file_section(id) {
+                    return Err(FileError32::UnableToRemoveReplaced);
+                }
                 self.check_sharing(id, FileAccess32::DELETE, FileShare32::ALL)?;
                 discard_backup = Some(id);
             }

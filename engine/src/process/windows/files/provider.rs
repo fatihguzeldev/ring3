@@ -6,13 +6,13 @@ use crate::{
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::process) struct ProviderFile32 {
-    epoch: u64,
-    open: OpenFileId,
+    pub(super) epoch: u64,
+    pub(super) open: OpenFileId,
     thread: u32,
 }
 
 pub(super) struct ProviderFiles32 {
-    leases: Vec<ProviderFile32>,
+    pub(super) leases: Vec<ProviderFile32>,
     limit: usize,
 }
 
@@ -35,7 +35,11 @@ impl ProviderFiles32 {
 }
 
 impl FileRuntime32 {
-    fn check_provider_file(&self, lease: ProviderFile32, thread: u32) -> Result<(), FileError32> {
+    pub(super) fn check_provider_file(
+        &self,
+        lease: ProviderFile32,
+        thread: u32,
+    ) -> Result<(), FileError32> {
         if lease.epoch != self.vfs.epoch() || lease.thread != thread {
             return Err(FileError32::Stale);
         }
@@ -49,6 +53,7 @@ impl FileRuntime32 {
         &mut self,
         path: &[u16],
         write: bool,
+        share: FileShare32,
         thread: u32,
         token: &crate::windows::security::Token32,
     ) -> Result<ProviderFile32, FileError32> {
@@ -71,7 +76,7 @@ impl FileRuntime32 {
             } else {
                 FileAccess32::READ
             },
-            share: FileShare32::READ,
+            share,
             disposition: if write {
                 FileDisposition32::CreateAlways
             } else {
@@ -110,6 +115,8 @@ impl FileRuntime32 {
 }
 
 impl EngineInstance {
+
+
     pub(in crate::process) fn provider_file_version(
         &self,
         lease: ProviderFile32,
@@ -168,7 +175,31 @@ impl EngineInstance {
         self.files
             .as_mut()
             .ok_or(HostError::File(FileError32::Unsupported))?
-            .open_provider_file(path, write, thread, self.windows_security.token())
+            .open_provider_file(
+                path,
+                write,
+                FileShare32::READ,
+                thread,
+                self.windows_security.token(),
+            )
+            .map_err(HostError::File)
+    }
+    pub(in crate::process) fn open_module_source_file(
+        &mut self,
+        path: &[u16],
+    ) -> Result<ProviderFile32, HostError> {
+        let thread = self.current_windows_thread_id()?;
+        self.memory()?;
+        self.files
+            .as_mut()
+            .ok_or(HostError::File(FileError32::Unsupported))?
+            .open_provider_file(
+                path,
+                false,
+                FileShare32(FileShare32::READ.0 | FileShare32::DELETE.0),
+                thread,
+                self.windows_security.token(),
+            )
             .map_err(HostError::File)
     }
     pub(in crate::process) fn provider_file_size(

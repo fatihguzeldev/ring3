@@ -104,6 +104,9 @@ impl Vfs32 {
         spans: &[(u64, &[u8])],
     ) -> Result<FileIo32<PreparedWrite32>, FileError32> {
         let node = self.node(file)?;
+        if self.has_read_only_section(file) {
+            return Err(FileError32::SharingViolation);
+        }
         if node.directory() {
             return Err(FileError32::AccessDenied);
         }

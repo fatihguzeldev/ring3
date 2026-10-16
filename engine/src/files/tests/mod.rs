@@ -1,4 +1,5 @@
 use super::*;
+mod images;
 mod io;
 mod lifetime;
 mod namespace;

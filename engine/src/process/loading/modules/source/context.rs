@@ -23,6 +23,7 @@ pub(in crate::process) enum CapturedModuleRequest32 {
     DataFile {
         name: String,
         layout: DataFileLayout32,
+        flags: u32,
         paths: CapturedModulePaths32,
     },
 }

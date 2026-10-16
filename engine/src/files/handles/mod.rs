@@ -1,10 +1,12 @@
 mod closing;
 mod context;
+mod images;
 mod lifetime;
 mod opening;
 mod replacement;
 mod termination;
 
+pub(crate) use images::PreparedImageOpens32;
 pub(crate) use termination::PreparedFileExit32;
 
 use super::{
@@ -25,6 +27,7 @@ pub(super) struct Open32 {
     pub suppress_write: bool,
     pub opened_path: Vec<u16>,
     pub maximum_allowed: bool,
+    pub section: Option<FileSection32>,
 }
 #[derive(Debug)]
 pub(crate) struct PreparedOpen32 {

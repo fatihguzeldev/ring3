@@ -1,6 +1,8 @@
 mod acquisition;
 mod context;
 mod facade;
+mod images;
+pub(super) use images::{ModuleImageSource32, PreparedModuleImageFiles32};
 mod leases;
 mod planning;
 mod progress;

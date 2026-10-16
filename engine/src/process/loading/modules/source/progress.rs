@@ -78,14 +78,32 @@ impl EngineInstance {
                             plan,
                             config,
                             completion,
-                        } => self.install_module_plan_ready(
-                            plan,
-                            config,
-                            completion,
-                            source.works.as_ref().unwrap(),
-                        )?,
-                        ReadyModuleSource32::DataFile(plan) => self.install_datafile_plan(plan)?,
+                        } => {
+                            let images = self.prepare_module_image_files(&plan, &source.leases)?;
+                            self.install_module_plan_ready(
+                                plan,
+                                config,
+                                completion,
+                                source.works.as_ref().unwrap(),
+                                images,
+                            )?
+                        }
+                        ReadyModuleSource32::DataFile(plan) => {
+                            let CapturedModuleRequest32::DataFile { name, flags, .. } =
+                                &source.request
+                            else {
+                                unreachable!()
+                            };
+                            let images = self.prepare_resource_image_files(
+                                plan.handle(),
+                                name,
+                                *flags,
+                                &source.leases,
+                            )?;
+                            self.install_datafile_plan(plan, images)?
+                        }
                     };
+                    content_leases.retain(|lease| !self.module_source_is_image(*lease));
                     self.commit_close_provider_files(&content_leases);
                     Ok(result)
                 })();

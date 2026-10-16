@@ -244,6 +244,7 @@ impl EngineInstance {
             }
         }
         writes.sort_unstable_by_key(|write| write.address.0);
+        let image_files = self.prepare_module_image_release(ids)?;
         let empty_memory = initial
             .then(|| self.windows_memory.empty_same_limits())
             .transpose()
@@ -254,6 +255,7 @@ impl EngineInstance {
             &writes,
         )
         .map_err(HostError::Module)?;
+        self.commit_module_image_release(&image_files);
         self.commit_module_activation_retirement(activation);
         self.commit_secondary_static_tls(secondary_tls);
         self.commit_process_loader_change(loader_change);

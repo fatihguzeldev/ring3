@@ -14,7 +14,7 @@ impl ModuleFileInput32 {
         if engine.files.is_none() {
             return Err(HostError::Module(ModuleError32::MissingModule));
         }
-        let lease = engine.open_provider_file(&name.encode_utf16().collect::<Vec<_>>(), false)?;
+        let lease = engine.open_module_source_file(&name.encode_utf16().collect::<Vec<_>>())?;
         Ok(Self {
             lease,
             name,

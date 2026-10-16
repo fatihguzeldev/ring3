@@ -33,6 +33,7 @@ impl EngineInstance {
         config: Option<ModuleRuntimeConfig32>,
         completion: LoadCompletion,
         activation_work: &[crate::process::windows::activation::modules::ModuleActivationWork32],
+        image_files: Option<super::super::source::PreparedModuleImageFiles32>,
     ) -> Result<ModuleOperation32, HostError> {
         let initial = config.is_some();
         let root_id = plan.root();
@@ -274,6 +275,7 @@ impl EngineInstance {
                 &writes,
             )
             .map_err(HostError::Module)?;
+        self.commit_module_image_files(image_files);
         self.commit_module_activation(activation);
         self.commit_secondary_static_tls(secondary_tls);
         self.commit_process_loader_change(loader_change);

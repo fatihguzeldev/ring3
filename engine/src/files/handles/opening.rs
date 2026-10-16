@@ -29,6 +29,9 @@ impl Vfs32 {
         let mut truncate = false;
         let (file, content_revision) = if let Some(file) = existing {
             let node = self.node(file)?;
+            if options.delete_on_close && self.has_file_section(file) {
+                return Err(FileError32::AccessDenied);
+            }
             if node.delete_pending {
                 return Err(FileError32::DeletePending);
             }
@@ -143,6 +146,7 @@ impl Vfs32 {
             suppress_write: false,
             opened_path,
             maximum_allowed: false,
+            section: None,
         };
         Ok(PreparedOpen32 {
             epoch: self.epoch,

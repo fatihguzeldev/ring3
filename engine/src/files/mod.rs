@@ -11,7 +11,7 @@ mod tree;
 mod types;
 
 pub(crate) use context::Vfs32;
-pub(crate) use handles::PreparedFileExit32;
+pub(crate) use handles::{PreparedFileExit32, PreparedImageOpens32};
 pub(crate) use io::PreparedRead32;
 pub use types::*;
 

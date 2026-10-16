@@ -41,6 +41,7 @@ impl EngineInstance {
             self.begin_module_source_request(CapturedModuleRequest32::DataFile {
                 name,
                 layout,
+                flags,
                 paths,
             })
         })();
@@ -57,6 +58,7 @@ impl EngineInstance {
     pub(in crate::process::loading::modules) fn install_datafile_plan(
         &mut self,
         plan: DataFilePlan32,
+        images: Option<super::super::source::PreparedModuleImageFiles32>,
     ) -> Result<ModuleOperation32, HostError> {
         self.modules
             .datafiles
@@ -69,6 +71,7 @@ impl EngineInstance {
                 &mut self.modules.loaded,
             )
             .map_err(HostError::Module)?;
+        self.commit_module_image_files(images);
         self.modules.datafiles.push(module);
         self.release_loader_thread();
         Ok(ModuleOperation32::Loaded { handle })
@@ -87,12 +90,14 @@ impl EngineInstance {
             .ok_or(HostError::Module(ModuleError32::InvalidHandle))?;
         self.acquire_loader_thread()?;
         let result = (|| {
+            let images = self.prepare_resource_image_release(handle)?;
             self.modules.datafiles[index]
                 .unload(
                     self.memory.as_mut().ok_or(HostError::Closed)?,
                     &mut self.modules.loaded,
                 )
                 .map_err(HostError::Module)?;
+            self.commit_module_image_release(&images);
             self.modules.datafiles.remove(index);
             Ok(ModuleOperation32::Released)
         })();

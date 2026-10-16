@@ -13,6 +13,9 @@ impl Vfs32 {
         file: FileId,
     ) -> Result<PreparedNamespace32, FileError32> {
         let node = self.node(file)?;
+        if self.has_file_section(file) {
+            return Err(FileError32::AccessDenied);
+        }
         if (node.attributes & ATTR_READONLY != 0 && !node.directory()) || node.delete_pending {
             return Err(FileError32::AccessDenied);
         }

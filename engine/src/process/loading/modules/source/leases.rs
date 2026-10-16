@@ -37,7 +37,7 @@ impl EngineInstance {
             .leases
             .try_reserve(1)
             .map_err(|_| HostError::Module(ModuleError32::Allocation))?;
-        let lease = self.open_provider_file(&name.encode_utf16().collect::<Vec<_>>(), false)?;
+        let lease = self.open_module_source_file(&name.encode_utf16().collect::<Vec<_>>())?;
         source.leases.push(ModuleSourceLease32 {
             identity: name,
             lease,

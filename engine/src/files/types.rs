@@ -50,6 +50,7 @@ pub enum FileError32 {
     NoData,
     MoreData,
     UserMappedFile,
+    UnableToRemoveReplaced,
     InvalidParameter,
     InvalidName,
     AccessDenied,
@@ -91,6 +92,7 @@ impl FileError32 {
             Self::NoData => 232,
             Self::MoreData => 234,
             Self::UserMappedFile => 1224,
+            Self::UnableToRemoveReplaced => 1175,
             Self::InvalidAddress => 487,
             Self::MappedAlignment => 1132,
             Self::FileInvalid => 1006,
@@ -269,4 +271,20 @@ pub(crate) enum FileIoOwner32 {
     AsyncOperation(u64),
     ProviderFile(OpenFileId),
     HostExport,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FileSection32 {
+    Image,
+    ExclusiveData,
+    SharedData,
+}
+impl FileSection32 {
+    pub(in crate::files) fn share(self) -> FileShare32 {
+        if self == Self::SharedData {
+            FileShare32::ALL
+        } else {
+            FileShare32(FileShare32::READ.0 | FileShare32::DELETE.0)
+        }
+    }
 }

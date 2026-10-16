@@ -8,6 +8,7 @@ use crate::{
 };
 
 mod datafiles;
+mod images;
 mod paths;
 mod security;
 mod unresolved;
@@ -276,8 +277,18 @@ fn lazy_vfs_dll_keeps_loaded_identity_then_refreshes_exact_content_version_after
     assert_eq!((handle, waits), (0x600000, 1));
     let path = r"C:\app\plugin.dll".encode_utf16().collect::<Vec<_>>();
     let version = engine.provider_path_version(&path).unwrap();
-    engine.replace_provider_file(&path, &new).unwrap();
-    assert_ne!(engine.provider_path_version(&path).unwrap(), version);
+    assert_eq!(
+        engine.replace_provider_file(&path, &new),
+        Err(HostError::File(crate::files::FileError32::SharingViolation))
+    );
+    assert_eq!(engine.provider_path_version(&path).unwrap(), version);
+    let mut loaded_base = [0; 4];
+    engine
+        .memory()
+        .unwrap()
+        .read(GuestAddress(0x6000b4), &mut loaded_base)
+        .unwrap();
+    assert_eq!(u32::from_le_bytes(loaded_base), 0x600000);
     assert_eq!(
         engine
             .load_library_module(r"C:\app\plugin.dll", None)
@@ -285,7 +296,13 @@ fn lazy_vfs_dll_keeps_loaded_identity_then_refreshes_exact_content_version_after
         ModuleOperation32::Loaded { handle: 0x600000 }
     );
     engine.free_library_module(0x600000).unwrap();
+    assert_eq!(
+        engine.replace_provider_file(&path, &new),
+        Err(HostError::File(crate::files::FileError32::SharingViolation))
+    );
     engine.free_library_module(0x600000).unwrap();
+    engine.replace_provider_file(&path, &new).unwrap();
+    assert_ne!(engine.provider_path_version(&path).unwrap(), version);
     assert_eq!(
         engine
             .load_library_module(r"C:\app\plugin.dll", None)
@@ -293,6 +310,11 @@ fn lazy_vfs_dll_keeps_loaded_identity_then_refreshes_exact_content_version_after
         ModuleOperation32::Loaded { handle: 0x800000 }
     );
     assert!(engine.pending_module_source().is_none());
+    assert_eq!(
+        engine.open_provider_file(&path, true),
+        Err(HostError::File(crate::files::FileError32::SharingViolation))
+    );
+    engine.free_library_module(0x800000).unwrap();
     let writable = engine.open_provider_file(&path, true).unwrap();
     engine.close_provider_file(writable).unwrap();
 }

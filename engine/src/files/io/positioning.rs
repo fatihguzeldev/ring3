@@ -7,6 +7,9 @@ impl Vfs32 {
         size: u64,
     ) -> Result<PreparedResize32, FileError32> {
         let node = self.node(file)?;
+        if self.has_read_only_section(file) {
+            return Err(FileError32::SharingViolation);
+        }
         if node.directory() {
             return Err(FileError32::AccessDenied);
         }
