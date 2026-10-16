@@ -161,6 +161,7 @@ impl AddressSpace {
             self.mappings[page] = slot + 1;
             self.permissions[page] = permissions;
             self.mapping_versions[page] = version;
+            self.record_mapping_incarnation(page, version);
             if copy_on_write {
                 let private = self.free.pop().unwrap();
                 self.references[private as usize] = 1;
@@ -323,6 +324,7 @@ impl AddressSpace {
             self.mappings[page] = slot + 1;
             self.permissions[page] = *permissions;
             self.mapping_versions[page] = version;
+            self.record_mapping_incarnation(page, version);
             if copy_on_write {
                 let private = self.free.pop().unwrap();
                 self.references[private as usize] = 1;
@@ -402,6 +404,7 @@ impl AddressSpace {
             u32::from(self.permissions[page].allows(Access::Execute));
         self.release_slot(slot);
         self.mappings[page] = 0;
+        self.record_mapping_incarnation(page, 0);
         self.permissions[page] = Permissions::NONE;
         if let Some(private) = self.private_slots.as_mut() {
             let slot = std::mem::take(&mut private[page]);

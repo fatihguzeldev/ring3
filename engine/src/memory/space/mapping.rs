@@ -53,6 +53,7 @@ impl AddressSpace {
             let guest_page = (page.address.0 / PAGE_SIZE) as usize;
             self.permissions[guest_page] = page.permissions;
             self.mapping_versions[guest_page] = version;
+            self.record_mapping_incarnation(guest_page, version);
             self.references[slot] = 1;
             self.executable_views[slot] = u32::from(page.permissions.allows(Access::Execute));
             self.versions[slot] = PageVersion {

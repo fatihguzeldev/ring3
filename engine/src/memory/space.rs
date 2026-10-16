@@ -3,6 +3,7 @@ mod atomic;
 mod code_fetch;
 mod cpu;
 mod guard;
+mod incarnations;
 mod mapping;
 mod paging;
 mod service;
@@ -22,6 +23,7 @@ pub struct AddressSpace {
     mappings: Box<[u32]>,
     permissions: Box<[Permissions]>,
     mapping_versions: Box<[u64]>,
+    mapping_incarnations: Vec<(usize, u64)>,
     references: Box<[u32]>,
     executable_views: Box<[u32]>,
     private_slots: Option<Box<[u32]>>,
@@ -112,6 +114,7 @@ impl AddressSpace {
             mappings,
             permissions,
             mapping_versions,
+            mapping_incarnations: Vec::new(),
             references,
             executable_views,
             private_slots: None,
@@ -185,6 +188,7 @@ impl AddressSpace {
             self.backing[offset..offset + PAGE_SIZE as usize].fill(0);
             self.permissions[page] = permissions;
             self.mapping_versions[page] = version;
+            self.record_mapping_incarnation(page, version);
             self.references[slot as usize] = 1;
             self.executable_views[slot as usize] = u32::from(permissions.allows(Access::Execute));
             self.versions[slot as usize] = PageVersion {

@@ -223,6 +223,7 @@ impl AddressSpace {
                 self.mappings[page] = slot as u32 + 1;
                 self.permissions[page] = permissions;
                 self.mapping_versions[page] = version;
+                self.record_mapping_incarnation(page, version);
                 self.references[slot] = 1;
                 self.executable_views[slot] = u32::from(permissions.allows(Access::Execute));
                 self.versions[slot] = PageVersion {
