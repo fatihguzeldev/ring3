@@ -1,3 +1,4 @@
+import {pageFaultExit, pageFaultPacket} from '../../../../../../../../support/wasm/page-fault.mjs';
 import assert from 'node:assert/strict';
 import {harness,PC,state,record,exit,words} from '../../../../fixtures/p2-data-linear-wrap/runtime/support.mjs';
 const[enginePath,output,root]=process.argv.slice(2);assert.ok(enginePath&&output&&root);
@@ -16,8 +17,8 @@ for(const resident of [false,true])for(const entries of [false,true])for(const p
   if(!material){h.skip(c,label+' packet authority','compound-stack material');continue;}
   const input=state(h.arena(c),context),want=Buffer.from(input),detail=flat||!push?1:2,address=flat?(push?0x502a:0x500e):push?0xfffffffe:0,access=push?2:1;
   // generated marshalling is architectural scratch; failed helpers preserve those staged input registers.
-  want.set(words(regs),140);want.set(record('R3MH',40,[1,0,detail,address,access,4],7),100);exit(want,5,0,6,[detail,address,access,4]);
-  const helpers=[{name,args:[...(resident?material.binding:[]),control],status:0}];
+  const fault={errorCode:(access===2?6:4)+(detail===2?1:0),address,access,length:4};want.set(words(regs),140);want.set(pageFaultPacket(fault),100);want.set(pageFaultExit({retired:0,...fault}),56);
+  const helpers=[{name,args:[...(resident?material.binding:[]),control],status:23}];
   h.observe(c,label+' remains guest memory fault without publication',{input,want,helpers});h.host(c,'close');
 }
 }catch(error){h.failure('compound-stack fault witness setup',error);}

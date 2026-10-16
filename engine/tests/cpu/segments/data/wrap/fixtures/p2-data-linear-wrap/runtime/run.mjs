@@ -1,3 +1,4 @@
+import {pageFaultExit, pageFaultPacket} from '../../../../../../../support/wasm/page-fault.mjs';
 import assert from 'node:assert/strict';
 import {mkdirSync} from 'node:fs';
 import {harness,PC,SEG,BASES,state,registers,record,exit,writeRAM} from './support.mjs';
@@ -18,7 +19,7 @@ for(const id of ['mov32-store','push32-B32'])for(const [label,patch]of [['low-un
 CASES.push({...find('mov16-load'),id:'mov16-load:low-unmapped',low:null,fault:[1,0,1]},{...find('mov16-store'),id:'mov16-store:low-write-denied',low:1,fault:[2,0,2]});
 const ATOMIC=[{id:'xchg8',hex:'86050f000000',width:1,offset:15,kind:'modify'},{id:'xchg16',hex:'6687050f000000',width:2,offset:15,kind:'modify'},{id:'xchg32',hex:'87050e000000',width:4,offset:14,kind:'modify'}];
 CASES.push(...ATOMIC);
-for(const[label,patch]of [['low-read-denied',{low:2,fault:[2,0,1]}],['low-write-denied',{low:1,fault:[2,0,2]}],['read-frontier-precedes-high-write-denial',{high:1,low:2,fault:[2,0,1]}]])CASES.push({...ATOMIC[2],...patch,id:'xchg32:'+label});
+for(const[label,patch]of [['low-read-denied',{low:2,fault:[2,0,1]}],['low-write-denied',{low:1,fault:[2,0,2]}],['first-high-write-denial-precedes-later-read-denial',{high:1,low:2,fault:[2,0xfffffffe,2]}]])CASES.push({...ATOMIC[2],...patch,id:'xchg32:'+label});
 for(const id of ['mov32-load','pop32-B16'])for(const key of ['base','D16'])for(const fault of [false,true])CASES.push({...find(id),id:id+':late-'+key+(fault?'-fault':'-success'),key,...(fault?{low:null,fault:[1,0,1]}:{})});
 for(const source of [find('mov32-store'),find('push32-B16'),ATOMIC[2]]){
   for(const key of ['base','D16'])CASES.push({...source,id:source.id+':stateful-'+key,key});
@@ -50,13 +51,14 @@ for(const resident of [false,true])for(const entries of [false,true])for(const s
   let helpers=[];
   if(spec.logical)exit(want,spec.stack?15:11,0,6);
   else{
-    const fields=spec.fault?[1,0,spec.fault[0],spec.fault[1],spec.fault[2],spec.width]:[0,spec.kind==='store'?0:value,0,0,0,spec.width];want.set(record('R3MH',40,fields,10),100);
-    helpers=[{name,args:[...(spec.kind!=='load'&&resident?material.binding:[]),address,...(spec.kind==='load'?[]:[source])],status:spec.smc?11:0}];
+    const fault=spec.fault?{errorCode:(spec.kind==='modify'?6:spec.fault[2]===2?6:4)+(spec.fault[0]===2?1:0),address:spec.fault[1],access:spec.kind==='modify'?2:spec.fault[2],length:spec.width}:null;
+    want.set(fault?pageFaultPacket(fault):record('R3MH',40,[0,spec.kind==='store'?0:value,0,0,0,spec.width],10),100);
+    helpers=[{name,args:[...(spec.kind!=='load'&&resident?material.binding:[]),address,...(spec.kind==='load'?[]:[source])],status:fault?23:spec.smc?11:0}];
     const stateful=spec.kind!=='load',commit=!spec.fault&&(!spec.key||stateful);
     if(commit){if(spec.kind!=='store')want.writeUInt32LE(merge(value,input.readUInt32LE(16),spec.width),16);if(spec.stack)want.writeUInt32LE((spec.bits===16?0xabcd0000:0)+spec.nextSP,32);want.writeUInt32LE(PC+instruction.length,48);}
     if(!spec.fault&&stateful){const bytes=Buffer.alloc(spec.width);if(spec.width===4)bytes.writeUInt32LE(source);else if(spec.width===2)bytes.writeUInt16LE(source);else bytes[0]=source;writeRAM(wantRAM,address,bytes);}
     if(spec.key){editKey(want,spec.key);c.afterHelper={name,run:()=>{const live=h.arena(c);editKey(live,spec.key);h.put(c,0,live);}};exit(want,3,commit?1:0,6);}
-    else if(spec.fault)exit(want,5,0,6,[spec.fault[0],spec.fault[1],spec.fault[2],spec.width]);
+    else if(fault)want.set(pageFaultExit({retired:0,...fault}),56);
     else exit(want,spec.smc?6:1,1,6);
   }
   h.observe(c,'literal CPU bus '+spec.id,{input,want,wantRAM,helpers,budget:spec.key&&spec.kind!=='load'?2:1});
@@ -65,7 +67,7 @@ for(const resident of [false,true])for(const entries of [false,true])for(const s
 }
 }catch(error){h.failure('scalar wrap fixture setup',error);}
 h.finish([
-  'Explicit CPU-only scalar v10 imports and existing R3EXv6, no change to old diagnostic APIs/packets. Selected engine/source build receipt is required.',
+  'Explicit CPU-only scalar v10 success, typed page-fault v15 and precise R3EXv12, no change to old diagnostic APIs/packets. Selected engine/source build receipt is required.',
   'Logical segment bounds are checked before translated pages. Valid logical bytes wrap modulo32; faults name actual high/low pages, never fabricated linear AddressOverflow.',
   'All mapped RAM starts from independent a5/literal uploads and all arena bytes/GPRs/flags/ESP/numeric/context/helper fields are checked. Real imports only, exact traces retained.',
   'Stateful late-key rows use budget2 so the next safepoint admits the post-retirement key check; unchanged budget-before-key priority is preserved. Late-key hooks call the real read/store/atomic export first, then apply a valid CSbase/D edit. Reads return NeedCode without consuming value/fault or GPR/ESP; stateful writes commit before rerouting.',

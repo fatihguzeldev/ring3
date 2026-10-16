@@ -1,3 +1,4 @@
+import {pageFaultExit, pageFaultPacket} from '../../../../../../../../support/wasm/page-fault.mjs';
 import assert from 'node:assert/strict';
 import {harness,PC,state,registers,record,exit} from '../../../../fixtures/p2-data-linear-wrap/runtime/support.mjs';
 const[enginePath,output,root]=process.argv.slice(2);assert.ok(enginePath&&output&&root);
@@ -15,9 +16,9 @@ for(const resident of [false,true])for(const entries of [false,true])for(const l
   if(!material){h.skip(c,'locked compare-exchange exit capability','new CPU compare import');continue;}
   const input=state(h.arena(c),context),want=Buffer.from(input);
   if(logical)exit(want,11,0,6);
-  else{want.set(record('R3MH',40,[1,0,1,0xfffffffe,1,4],10),100);exit(want,5,0,6,[1,0xfffffffe,1,4]);}
-  const helpers=logical?[]:[{name,args:[...(resident?material.binding:[]),0xfffffffe,0xdeadbeef,0x23456789],status:0}];
-  h.observe(c,logical?'unchanged GP0 priority control':'legitimate high-page fault requires R3EXv6',{input,want,helpers});h.host(c,'close');
+  else{const fault={errorCode:6,address:0xfffffffe,access:2,length:4};want.set(pageFaultPacket(fault),100);want.set(pageFaultExit({retired:0,...fault}),56);}
+  const helpers=logical?[]:[{name,args:[...(resident?material.binding:[]),0xfffffffe,0xdeadbeef,0x23456789],status:23}];
+  h.observe(c,logical?'unchanged GP0 priority control':'legitimate RMW high-page fault requires write-intent R3EXv12',{input,want,helpers});h.host(c,'close');
 }
 }catch(error){h.failure('CMPXCHG exit witness setup',error);}
 h.finish([

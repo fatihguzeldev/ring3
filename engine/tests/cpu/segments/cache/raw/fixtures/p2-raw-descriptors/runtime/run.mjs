@@ -1,3 +1,4 @@
+import {consumeCpuEvent} from '../../../../../../../support/wasm/events.mjs';
 import {generatedImports, attachDetectionApi} from '../../../../../../../support/wasm/binding.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
@@ -11,7 +12,7 @@ const {functions, sourcePaths: exportSources} = assertEngineExports(engine.modul
 assert.equal(functions.find(row => row.name === 'ring3_abi_v1_configure_segment_descriptor_raw').arity, 3);
 const SIZE = 4612, SEG = 4524, PC = 0x1000, keyHigh = 0x524157;
 const counts = {contexts: 0, modules: 0, runs: 0, loads: 0, queries: 0, controls: 0};
-const sourcePaths = [...new Set([...exportSources, 'engine/tests/support/wasm/engine.mjs', 'engine/tests/support/wasm/binding.mjs',
+const sourcePaths = ['engine/tests/support/wasm/events.mjs', ...new Set([...exportSources, 'engine/tests/support/wasm/engine.mjs', 'engine/tests/support/wasm/binding.mjs',
   'engine/src/cpu/x86/segments/descriptor_record.rs', 'engine/src/cpu/x86/segments/descriptors.rs',
   'engine/src/cpu/x86/segments/cache.rs', 'engine/src/abi/x86/segments.rs', 'engine/src/process/cpu/segments.rs',
   'engine/src/process/wasm/cpu.rs', 'engine/src/process/wasm/mod.rs', 'engine/src/cpu/dbt/wasm/instructions/segments.rs', 'engine/src/cpu/dbt/wasm/instructions/segments/context.rs',
@@ -71,7 +72,7 @@ function runLoad(c, fn, selector, {bits, base = 0, status = 0, reason = 1} = {})
   expected.set(packet([status, base, success ? 0 : 0x40, 0, 0, 0]), 100);
   if (success) expected.set(loaded(c, bits, base), SEG);
   assert.equal(fn.run(c.base, c.base + 56, 1, c.base + 96), 0);
-  assert.deepEqual(arena(c), expected, 'raw load publishes only exact CPU, exit, packet and loaded cache'); counts.runs++; counts.loads++;
+  assert.deepEqual(arena(c), expected, 'raw load publishes only exact CPU, exit, packet and loaded cache'); consumeCpuEvent(c, SIZE); counts.runs++; counts.loads++;
 }
 function verify(c, fn, selector, success) {
   const s = seed(c, selector), expected = arena(c), flags = ((s.flags & ~0x40) | (success ? 0x40 : 0)) >>> 0;
@@ -91,7 +92,7 @@ for (const owner of ['replacement', 'resident']) for (const entries of [false, t
   }
   fn = compile(c, [0x8e, 0xd0], 'segment_load'); configure(c, 0xffff, 0x00407200);
   const s = seed(c, 0x43), expected = arena(c); expected.set(record('R3EX', 40, [15, 0, 0x40, 0, 0, 0], 6), 56); expected.set(packet([7, 0, 0x40, 0, 0, 0]), 100);
-  assert.equal(fn.run(c.base, c.base + 56, 1, c.base + 96), 0); assert.deepEqual(arena(c), expected); counts.runs++; counts.loads++;
+  assert.equal(fn.run(c.base, c.base + 56, 1, c.base + 96), 0); assert.deepEqual(arena(c), expected); consumeCpuEvent(c, SIZE); counts.runs++; counts.loads++;
   for (const [target, low, high] of [[4, 0xffff, 0x0060f200]]) {
     configure(c, low, high); const before = arena(c);
     assert.notEqual(c.api[c.id ? 'segment_load_resident' : 'segment_load'](...c.binding, target, 0x43), 0);

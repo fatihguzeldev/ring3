@@ -1,3 +1,5 @@
+import {pageFaultExit, pageFaultPacket} from '../../../../../../../support/wasm/page-fault.mjs';
+import {consumeCpuEvent} from '../../../../../../../support/wasm/events.mjs';
 import {generatedImports, attachDetectionApi} from '../../../../../../../support/wasm/binding.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
@@ -8,7 +10,7 @@ import {readEngine} from '../../../../../../../support/wasm/engine.mjs';
 const [enginePath, output, root] = process.argv.slice(2), engine = readEngine(enginePath);
 const PC = 0x1000, SEG = 4524, SIZE = 4612, keyHigh = 0x565252;
 const counts = {contexts: 0, modules: 0, runs: 0, registers: 0, memory: 0, faults: 0, controls: 0};
-const paths = [
+const paths = ['engine/tests/support/wasm/page-fault.mjs', 'engine/tests/support/wasm/events.mjs', 
   'engine/src/cpu/x86/segments/descriptors.rs', 'engine/src/cpu/x86/decode/segment_queries.rs', 'engine/src/cpu/x86/decode/decoder.rs', 'engine/src/cpu/x86/decode/instruction.rs',
   'engine/src/cpu/x86/ir.rs', 'engine/src/cpu/dbt/region.rs', 'engine/src/cpu/dbt/wasm/imports/mod.rs', 'engine/src/cpu/dbt/wasm/imports/binding.rs', 'engine/src/cpu/dbt/wasm/imports/context.rs', 'engine/src/cpu/dbt/wasm/imports/needs.rs', 'engine/src/cpu/dbt/wasm/helpers/protocol.rs', 'engine/src/cpu/dbt/wasm/instructions/memory/mod.rs', 'engine/src/cpu/dbt/wasm/instructions/memory/address.rs', 'engine/src/cpu/dbt/wasm/instructions/memory/scalar.rs', 'engine/src/cpu/dbt/wasm/instructions/memory/stack.rs', 'engine/src/cpu/dbt/wasm/instructions/memory/narrow.rs',
   'engine/src/cpu/dbt/wasm/instructions/segments.rs', 'engine/src/cpu/dbt/wasm/instructions/segment_queries.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/mod.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/arithmetic.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/moves.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/exchange.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/predicates.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/shifts.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/control.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/extended.rs',
@@ -65,24 +67,26 @@ function compile(c, instruction, write, memory = false) {
 }
 function execute(c, fn, s, {success, selector, budget = 1, reason = 1, retired = 1, calls, packet, fault = [0, 0, 0, 0]} = {}) {
   const before = arena(c), expected = Buffer.from(before), at = c.calls.length;
+  const paging = reason === 5 && fault[0] <= 2 ? {errorCode: 4 | (fault[2] === 2 ? 2 : 0) | (fault[0] === 2 ? 1 : 0), address: fault[1], access: fault[2], length: fault[3]} : null;
   const n = {...s, r: [...s.r], pc: retired ? PC + fn.instructionLength : PC,
     flags: success === undefined ? s.flags : ((s.flags & ~0x40) | (success ? 0x40 : 0)) >>> 0};
-  expected.set(cpu(n)); expected.set(record('R3EX', 40, [reason, retired, ...fault], reason === 16 ? 7 : 6), 56);
+  expected.set(cpu(n)); expected.set(paging ? pageFaultExit({retired, ...paging}) : record('R3EX', 40, [reason, retired, ...fault], reason === 16 ? 7 : 6), 56);
   const completed = success !== undefined;
   if (completed) {
     expected.set(record('R3MH', 40, [0, 0, 0, 0, 0, 0], 7), 100);
     expected.set(words([selector, n.flags, s.r[0], s.r[2], s.r[3], s.r[1]]), 140);
-  } else if (packet) expected.set(record('R3MH', 40, packet, 10), 100);
+  } else if (packet) expected.set(paging ? pageFaultPacket(paging) : record('R3MH', 40, packet, 10), 100);
   assert.equal(fn.run(c.base, c.base + 56, budget, c.base + 96), 0);
   assert.deepEqual(arena(c), expected, `whole arena write=${fn.write} selector=${selector} reason=${reason}`);
   const observed = c.calls.slice(at); assert.equal(observed.length, calls ?? (completed ? fn.memory ? 2 : 1 : 0));
   for (const call of observed) {
-    assert.equal(call.status, 0);
+    assert.equal(call.status, paging ? 23 : 0);
     if (call.name !== 'cpu_read16') {
       assert.deepEqual(call.args.slice(-2), [0x30001 + Number(fn.write), 0]);
       assert.deepEqual(call.input, words([selector, s.flags, s.r[0], s.r[2], s.r[3], s.r[1]]));
     }
   }
+  consumeCpuEvent(c, SIZE);
   counts.runs++;
 }
 // Independent access matrix in ABI-kind order: readonly/writable data, execute-only/readable nonconforming,

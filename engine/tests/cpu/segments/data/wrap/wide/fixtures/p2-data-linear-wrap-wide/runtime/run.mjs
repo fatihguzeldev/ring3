@@ -1,3 +1,4 @@
+import {pageFaultExit, pageFaultPacket} from '../../../../../../../../support/wasm/page-fault.mjs';
 import assert from 'node:assert/strict';
 import {mkdirSync} from 'node:fs';
 import {harness,PC,BASES,state,registers,words,record,exit,writeRAM} from './support.mjs';
@@ -7,8 +8,9 @@ const FP=4236,SV=4364,XMM=4396,YU=4612,ONE=Buffer.from('0000000000000080ff3f','h
 const VECTOR=Buffer.from('101112131415161718191a1b1c1d1e1f','hex'),OLD=Buffer.from('a0a1a2a3a4a5a6a7a8a9aaabacadaeaf','hex');
 function uploadLinear(c,start,bytes){const first=Math.min(bytes.length,0x100000000-start);h.upload(c,start,bytes.subarray(0,first));if(first<bytes.length)h.upload(c,0,bytes.subarray(first));}
 function canonical(c,context={}){const input=state(h.arena(c),context);input.set(h.initial.subarray(FP,SV+160),FP);input.set(h.initial.subarray(YU,YU+144),YU);return input;}
-function packet(want,length,{value=0,fault,exception}={}){want.set(record('R3MH',40,fault?[1,0,...fault,length]:exception?[...exception,length]:[0,value,0,0,0,length],7),100);}
-function step(input,length,{fault,reason=1,retired=1,detail=0}={}){const want=Buffer.from(input);if(retired)want.writeUInt32LE(PC+length,48);if(fault)exit(want,5,0,6,fault);else exit(want,reason,retired,6,[detail,0,0,0]);return want;}
+function pageFault([detail,address,access],length){return{errorCode:(access===2?6:4)+(detail===2?1:0),address,access,length};}
+function packet(want,length,{value=0,fault,exception}={}){want.set(fault?pageFaultPacket(pageFault(fault,length)):record('R3MH',40,exception?[...exception,length]:[0,value,0,0,0,length],7),100);}
+function step(input,length,{fault,reason=1,retired=1,detail=0}={}){const want=Buffer.from(input);if(retired)want.writeUInt32LE(PC+length,48);if(fault)want.set(pageFaultExit({retired:0,...pageFault(fault,fault[3])}),56);else exit(want,reason,retired,6,[detail,0,0,0]);return want;}
 function bound(c,material,name,args,status=0){return{name,args:[...(c.resident?material.binding:[]),...args],status};}
 function suffix(c,name){return c.resident?name+'_resident':name;}
 function open(resident,entries,label,{low=3,high=3,smc=false}={}){return h.open(resident,entries,label,[[PC],...(high===null?[]:[[0xfffff000]]),...(low===null?[]:[[0]])]);}
@@ -58,7 +60,7 @@ for(const resident of [false,true])for(const entries of [false,true]){
   const input=seed(),want=step(input,4,{reason:late?3:1,retired:fault||late?0:1,fault:fault?[variant==='load-unmapped'?1:2,0,load?1:2,16]:undefined}),wantRAM=h.literalRAM(c);
   if(!load)want.set(VECTOR,140);if(load&&!fault){want.set(VECTOR,140);if(!late)want.set(VECTOR,XMM);}packet(want,16,{fault:fault?[variant==='load-unmapped'?1:2,0,load?1:2]:undefined});
   if(!load&&!fault)writeRAM(wantRAM,0xfffffff8,VECTOR);if(late){want.writeUInt32LE(2,52);want.writeUInt32LE(0,12);key(want);hook(c,name);}
-  h.observe(c,'MOVDQU '+variant+' exact vector/packet/RAM',{input,want,wantRAM,helpers:[load?{name,args:[0xfffffff8,16,1],status:0}:bound(c,m,name,[0xfffffff8,16,1])]});h.host(c,'close');
+  h.observe(c,'MOVDQU '+variant+' exact vector/packet/RAM',{input,want,wantRAM,helpers:[load?{name,args:[0xfffffff8,16,1],status:fault?23:0}:bound(c,m,name,[0xfffffff8,16,1],fault?23:0)]});h.host(c,'close');
  }
  // x87 value1 has exact80-bit representation; pendingMF precedes operand authority and RF consumption.
  for(const variant of ['load','store','load-unmapped','store-readonly','pending']){
@@ -71,7 +73,7 @@ for(const resident of [false,true])for(const entries of [false,true]){
   if(pending){want.writeUInt16LE(0x8081,FP+18);packet(want,10,{exception:[4,0,0x8081,0,0]});}
   else if(fault)packet(want,10,{fault:[load?1:2,0,load?1:2]});
   else{want.writeUInt16LE(load?0x3800:0x800,FP+18);want.writeUInt16LE(load?0x3fff:0xffff,FP+20);want.writeUInt16LE(opcode,FP+22);want.writeUInt32LE(PC,FP+24);want.writeUInt32LE(0xb,FP+28);want.writeUInt16LE(0x1b,FP+32);want.writeUInt16LE(0x23,FP+34);if(load)want.set(ONE,FP+110);else writeRAM(wantRAM,0xfffffffb,ONE);packet(want,10,{value:2});}
-  h.observe(c,'x87 '+variant+' exact state/priority',{input,want,wantRAM,helpers:[bound(c,m,name,[op,0xfffffffb,pending?0x10002:2,PC,opcode,0x401])]});h.host(c,'close');
+  h.observe(c,'x87 '+variant+' exact state/priority',{input,want,wantRAM,helpers:[bound(c,m,name,[op,0xfffffffb,pending?0x10002:2,PC,opcode,0x401],fault?23:0)]});h.host(c,'close');
  }
  // legacy FXSAVE preflights512 and writes464; FXRSTOR reads512 and leaves YMM upper state intact.
  for(const variant of ['save','save-readonly','restore','restore-unmapped','save-writeonly']){
@@ -81,8 +83,8 @@ for(const resident of [false,true])for(const entries of [false,true]){
   const regs=[...registers];regs[0]=0x100;const context={regs,dsBase:0xfffffe00,dsLimit:0x3ff},seed=()=>{const input=canonical(c,context);if(!save)input.set(OLD,XMM);return input;};
   const execute=suffix(c,'simd_execute'),write=suffix(c,'cpu_fxsave'),imports=save?[execute,write]:['cpu_read',execute];h.put(c,0,seed());const m=compile(c,'FX '+variant,save?'0fae00':'0fae08',imports,options);if(!m){skip(c,variant);continue;}
   const input=seed(),want=step(input,3,{fault:fault?[variant==='restore-unmapped'?1:2,0,save?2:1,512]:undefined,retired:fault?0:1}),wantRAM=h.literalRAM(c),helpers=[];
-  if(save){const staged=Buffer.from(input.subarray(140,652));image.copy(staged,0,0,464);want.set(staged,140);want.set(words([0,2]),652);packet(want,512,{fault:fault?[2,0,2]:undefined});helpers.push(bound(c,m,execute,[0x13400b,0x1918,0,0,0,2]),bound(c,m,write,[0xffffff00]));if(!fault)writeRAM(wantRAM,0xffffff00,image.subarray(0,464));}
-  else{helpers.push({name:'cpu_read',args:[0xffffff00,512,16],status:0});if(fault)packet(want,512,{fault:[1,0,1]});else{want.set(image,140);want.set(words([0,2]),652);want.writeUInt32LE(0x5f80,SV+16);want.set(image.subarray(160,288),XMM);packet(want,0);helpers.push(bound(c,m,execute,[0x13400c,0x1819,0,0,0,2]));}}
+  if(save){const staged=Buffer.from(input.subarray(140,652));image.copy(staged,0,0,464);want.set(staged,140);want.set(words([0,2]),652);packet(want,512,{fault:fault?[2,0,2]:undefined});helpers.push(bound(c,m,execute,[0x13400b,0x1918,0,0,0,2]),bound(c,m,write,[0xffffff00],fault?23:0));if(!fault)writeRAM(wantRAM,0xffffff00,image.subarray(0,464));}
+  else{helpers.push({name:'cpu_read',args:[0xffffff00,512,16],status:fault?23:0});if(fault)packet(want,512,{fault:[1,0,1]});else{want.set(image,140);want.set(words([0,2]),652);want.writeUInt32LE(0x5f80,SV+16);want.set(image.subarray(160,288),XMM);packet(want,0);helpers.push(bound(c,m,execute,[0x13400c,0x1819,0,0,0,2]));}}
   h.observe(c,'FX '+variant+' exact512/464 contract',{input,want,wantRAM,helpers});h.host(c,'close');
  }
  // legacy MASKMOV keeps whole logical span authority and selected physical paging policies separate.
@@ -92,7 +94,7 @@ for(const resident of [false,true])for(const entries of [false,true]){
   const context={regs,dsBase:0xfffffff0,dsLimit:zero?0:logical?0x10:0xff},seed=()=>{const input=canonical(c,context);input.set(VECTOR,XMM);const bits=Buffer.alloc(16);for(let i=0;i<16;i++)if(mask&(1<<i))bits[i]=0x80;input.set(bits,XMM+16);return input;};
   const execute=suffix(c,'simd_execute'),write=suffix(c,'cpu_mask_write');h.put(c,0,seed());const m=compile(c,'MASKMOVDQU '+variant,'660ff7c1',[execute,write],options);if(!m){skip(c,variant);continue;}
   const input=seed(),want=step(input,4,{fault:fault?[2,0,2,16]:undefined,reason:logical?11:1,retired:fault||logical?0:1}),wantRAM=h.literalRAM(c);want.set(VECTOR,140);want.set(words([mask,2]),652);packet(want,logical?0:16,{fault:fault?[2,0,2]:undefined});
-  const helpers=[bound(c,m,execute,[0x2a40d,0x908,0,0,0,2])];if(!logical)helpers.push(bound(c,m,write,[0xfffffff8,16,mask]));if(!fault&&!logical)for(let i=0;i<16;i++)if(mask&(1<<i))writeRAM(wantRAM,(0xfffffff8+i)>>>0,VECTOR.subarray(i,i+1));
+  const helpers=[bound(c,m,execute,[0x2a40d,0x908,0,0,0,2])];if(!logical)helpers.push(bound(c,m,write,[0xfffffff8,16,mask],fault?23:0));if(!fault&&!logical)for(let i=0;i<16;i++)if(mask&(1<<i))writeRAM(wantRAM,(0xfffffff8+i)>>>0,VECTOR.subarray(i,i+1));
   h.observe(c,'MASKMOVDQU '+variant+' exact selected policy',{input,want,wantRAM,helpers});h.host(c,'close');
  }
  // the new explicit query bank still uses one exact6-byte bulk store under CPU translation.
@@ -100,7 +102,7 @@ for(const resident of [false,true])for(const entries of [false,true]){
   const options={low:fault?1:3},c=open(resident,entries,'SGDT6 '+(fault?'latePermission':'wrapped'),options),bank=record('R3SY',36);bank.writeUInt32LE(1,12);bank.writeUInt32LE(0x12345678,16);bank.writeUInt16LE(0x2345,24);h.put(c,140,bank);h.request(c,'explicit GDTR readback authority before material','configure_system_register_bank');
   const regs=[...registers];regs[0]=0xc;const context={regs,dsBase:0xfffffff0,dsLimit:0xff};h.put(c,0,canonical(c,context));const name=suffix(c,'cpu_write'),m=compile(c,'SGDT6 exact wrapped bulk store','0f0100',[name],options);if(!m){skip(c,'SGDT6');continue;}
   const input=canonical(c,context),want=step(input,3,{fault:fault?[2,0,2,6]:undefined,retired:fault?0:1}),wantRAM=h.literalRAM(c),bytes=Buffer.from('452378563412','hex');want.set(bytes,140);packet(want,6,{fault:fault?[2,0,2]:undefined});if(!fault)writeRAM(wantRAM,0xfffffffc,bytes);
-  h.observe(c,'SGDT6 exact one-write transaction',{input,want,wantRAM,helpers:[bound(c,m,name,[0xfffffffc,6,1])]});h.host(c,'close');
+  h.observe(c,'SGDT6 exact one-write transaction',{input,want,wantRAM,helpers:[bound(c,m,name,[0xfffffffc,6,1],fault?23:0)]});h.host(c,'close');
  }
 }
 }catch(error){h.failure('wide wrap fixture setup',error);}

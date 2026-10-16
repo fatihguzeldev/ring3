@@ -3,6 +3,8 @@ import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {pathToFileURL} from 'node:url';
+import {consumeCpuEvent} from '../../../../../../../support/wasm/events.mjs';
+import {pageFaultExit, pageFaultPacket} from '../../../../../../../support/wasm/page-fault.mjs';
 
 export const SIZE = 4796, SEG = 4524, BASES = 4756, PC = 0x1000, KEY_HIGH = 0x43534241;
 export const hash = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -45,6 +47,7 @@ export async function harness(enginePath, output, root) {
   const engine = readEngine(enginePath), initial = readFileSync(join(output, 'initial-arena.bin'));
   assert.equal(initial.length, SIZE, 'Rust-produced complete arena');
   const paths = [
+    'engine/tests/support/wasm/events.mjs', 'engine/tests/support/wasm/page-fault.mjs',
     'engine/src/abi/arena.rs', 'engine/src/abi/x86/state.rs', 'engine/src/abi/x86/segments.rs',
     'engine/src/abi/x86/exit.rs', 'engine/src/abi/memory_helper.rs', 'engine/src/cpu/x86/decode/fetch.rs',
     'engine/src/cpu/x86/decode/decoder.rs', 'engine/src/cpu/x86/decode/instruction.rs', 'engine/src/cpu/x86/decode/mod.rs', 'engine/src/cpu/dbt/region.rs',
@@ -136,7 +139,7 @@ export async function harness(enginePath, output, root) {
     const imports = WebAssembly.Module.imports(module), guard = c.resident ? 'guard_detect_resident' : 'guard_detect';
     const helpers = [...new Set([...expectedHelpers, 'finish_exception_detection'])];
     assert.deepEqual(imports.map(imp => `${imp.module}:${imp.name}:${imp.kind}`).sort(),
-      ['env:memory:memory', `ring3:${guard}:function`, ...helpers.map(name => `ring3:${name}:function`)].sort(), 'only the real declared helpers and guard');
+      ['env:memory:memory', `ring3:${guard}:function`, ...helpers.map(name => `ring3:${name}:function`)].sort(), `${label}: only the real declared helpers and guard`);
     const ring3 = Object.fromEntries(imports.filter(imp => imp.kind === 'function').map(imp => [imp.name, (...args) => {
       if (c.hook?.name === imp.name) {const hook = c.hook; c.hook = null; hook.run();}
       const status = c.api[imp.name](...args);
@@ -168,9 +171,10 @@ export async function harness(enginePath, output, root) {
     const afterRAM = ram(c); checkRAM(afterRAM, beforeRAM, errors);
     const row = receipt(c, label, before, after, want, beforeRAM, afterRAM, beforeRAM, errors,
       {kind: 'compile', expected_status: expectedStatus, status, classification: status === expectedStatus ? 'executed-host-contract' : 'compile-admission-or-capability', name, args});
-    return status === 0 && expectedStatus === 0 ? capture(c, label, helpers) : null;
+    if (status !== 0 || expectedStatus !== 0) return null;
+    const material = capture(c, label, helpers); material.spans = spans.map(span => [...span]); return material;
   }
-  function observe(c, label, {input = arena(c), want, wantRAM, budget = 1, material = c.material, status = 0, helpers = [], kind = 'semantic'} = {}) {
+  function observe(c, label, {input = arena(c), want, wantRAM, budget = 1, material = c.material, status = 0, helpers = [], kind = 'semantic', consumeEvent = true} = {}) {
     put(c, 0, input); const before = arena(c), beforeRAM = ram(c), desiredRAM = wantRAM ?? cloneRAM(beforeRAM), start = c.calls.length;
     const actualStatus = material.run(c.base, c.base + 56, budget, c.base + 96), after = arena(c), calls = c.calls.slice(start), errors = [];
     if (actualStatus !== status) errors.push(`run transport ${actualStatus}, expected ${status}`);
@@ -185,20 +189,41 @@ export async function harness(enginePath, output, root) {
       try {
         assert.equal(detector.length, Number(isEvent), 'exact application stop finalization count');
         if (isEvent) {
-          assert.ok(![16, 17, 18].includes(reason), 'instruction traps require an explicit restart oracle');
+          assert.ok(![17, 18, 24].includes(reason), 'instruction traps require an explicit restart oracle');
           const guard = calls.find(call => call.name.startsWith('guard_detect'));
           assert.ok(guard && BigInt(guard.status) > 0n, 'real bound entry lease');
           assert.equal(BigInt(detector[0].args[0]), BigInt(guard.status), 'detector consumes the same entry epoch');
           assert.equal(detector[0].status, 0, 'application event accepted');
-          assert.deepEqual(detector[0].args.slice(1), [72, 80, 84, 88, 92].map(at => want.readUInt32LE(at)).concat([0, 0, 0, 0, 0, 0]), 'exact fault and empty restart fields');
+          assert.deepEqual(detector[0].args.slice(1), [72, 80, 84, 88, 92].map(at => want.readUInt32LE(at)).concat([reason === 16 ? 2 : 0, 0, 0, 0, 0, 0]), 'exact fault/debug origin and empty restart fields');
         }
       } catch (error) {errors.push(`application detector: ${error.message}`);}
     }
     const afterRAM = ram(c); checkRAM(afterRAM, desiredRAM, errors);
+    if (errors.length === 0 && status === 0) {
+      if (want.readUInt32LE(72) === 3 && input.readUInt32LE(48) === PC && want.readUInt32LE(48) !== PC) c.bootstrap = {material, input: Buffer.from(input), want: Buffer.from(want), budget};
+      if (consumeEvent) consumeCpuEvent(c, SIZE);
+    }
     return receipt(c, label, before, after, want, beforeRAM, afterRAM, desiredRAM, errors,
       {kind, status: actualStatus, expected_status: status, classification: actualStatus === 2 ? 'runtime-record-admission' : 'executed-module',
         expected_exit: {reason: want.readUInt32LE(72), retired: want.readUInt32LE(76), eip: want.readUInt32LE(48), flags: want.readUInt32LE(52)},
         actual_exit: {reason: after.readUInt32LE(72), retired: after.readUInt32LE(76), eip: after.readUInt32LE(48), flags: after.readUInt32LE(52)}, calls});
+  }
+  function reachNeedCode(c) {
+    assert.ok(c.bootstrap, 'retained actual branch reaches NeedCode after executable source repair');
+    const bootstrap = c.bootstrap;
+    const material = c.resident ? bootstrap.material : compile(c, 'fresh replacement binding for original bootstrap bytes', bootstrap.material.spans, bootstrap.material.helpers);
+    assert.ok(material, 'original branch remains compilable after executable repair');
+    observe(c, 'original branch re-enters canonical NeedCode after fetch repair', {...bootstrap, material});
+  }
+  function fetchFault(c, label, {pc, length, address, errorCode, material} = {}) {
+    const helper = c.resident ? 'cpu_fetch_fault_resident' : 'cpu_fetch_fault';
+    const captured = material ?? compile(c, label + ': capture executable fetch fault', [], [helper], {stopped: true});
+    assert.ok(captured, label + ': actual runtime fault material');
+    const input = arena(c), want = Buffer.from(input), fault = {errorCode, address, access: 3, length};
+    want.set(pageFaultExit({retired: 0, ...fault}), 56); want.set(pageFaultPacket(fault), 100);
+    observe(c, label + ': precise fetch fault precedes instruction classification', {material: captured, input, want,
+      helpers: [{name: helper, args: [...captured.binding, pc, length], status: 23}]});
+    return captured;
   }
   function lookup(c, label, input, pc, material, status = material ? 0 : 17) {
     put(c, 0, input); const before = arena(c), beforeRAM = ram(c), want = Buffer.from(before), errors = [];
@@ -222,5 +247,5 @@ export async function harness(enginePath, output, root) {
     console.log(JSON.stringify({status: result.status, counts, contexts: contexts.length, modules: modules.length, output}));
     process.exitCode = result.status === 'PASS' ? 0 : 1;
   }
-  return {initial, engine, open, put, arena, host, upload, ram, compile, observe, lookup, skip, finish};
+  return {initial, engine, open, put, arena, host, upload, ram, compile, observe, fetchFault, reachNeedCode, lookup, skip, finish};
 }

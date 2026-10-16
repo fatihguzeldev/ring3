@@ -1,3 +1,4 @@
+import {consumeCpuEvent} from '../../../../../../../../support/wasm/events.mjs';
 import {detectionGuardName, generatedImports} from '../../../../../../../../support/wasm/binding.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
@@ -50,6 +51,7 @@ export async function harness(enginePath, output, root) {
   const {assertEngineExports} = await import(pathToFileURL(join(root, 'engine/tests/support/wasm/exports.mjs')));
   const declarations = assertEngineExports(engine.module,root);
   const paths = [
+    'engine/tests/support/wasm/events.mjs', 'engine/tests/support/wasm/page-fault.mjs',
     "engine/src/abi/arena.rs",
     "engine/src/abi/cpu_helper.rs",
     "engine/src/abi/memory_helper/cpu.rs",
@@ -196,10 +198,10 @@ export async function harness(enginePath, output, root) {
     const reason = want.readUInt32LE(72), event = reason === 3 || reason === 5 || reason >= 10 && reason <= 24;
     if (helpers.some(call => call.name === 'finish_exception_detection')) return [guard, ...helpers];
     if (!event) return [guard, ...helpers];
-    assert.ok(![16, 17, 18, 24].includes(reason), 'instruction traps require explicit original-site metadata');
+    assert.ok(![17, 18, 24].includes(reason), 'instruction traps require explicit original-site metadata');
     const fields = [72, 80, 84, 88, 92].map(offset => want.readUInt32LE(offset));
     return [guard, ...helpers, {name: 'finish_exception_detection',
-      args: [epoch, ...fields, 0, 0, 0, 0, 0, 0], status: 0}];
+      args: [epoch, ...fields, reason === 16 ? 2 : 0, 0, 0, 0, 0, 0], status: 0}];
   }
   function observe(c, label, {input = arena(c), want, wantRAM, budget = 1, material = c.material, status = 0, helpers = [], kind = 'semantic'} = {}) {
     put(c, 0, input); const before = arena(c), beforeRAM = ram(c), desiredRAM = wantRAM ?? literalRAM(c), start = c.calls.length;
@@ -210,6 +212,7 @@ export async function harness(enginePath, output, root) {
     const expected = expectedCalls(c, material, status, want, helpers);
     if (JSON.stringify(calls) !== JSON.stringify(expected)) errors.push('exact real entry epoch/helper/finalizer trace');
     const afterRAM = ram(c); checkRAM(afterRAM, desiredRAM, errors); c.expectedRAM = cloneRAM(desiredRAM);
+    if (errors.length === 0 && status === 0) consumeCpuEvent(c, SIZE);
     return receipt(c, label, before, after, want, beforeRAM, afterRAM, desiredRAM, errors,
       {kind, status: actualStatus, expected_status: status, classification: actualStatus === 2 ? 'runtime-record-admission' : 'executed-module', expected_calls: expected,
         expected_exit: {reason: want.readUInt32LE(72), retired: want.readUInt32LE(76), eip: want.readUInt32LE(48), flags: want.readUInt32LE(52)},

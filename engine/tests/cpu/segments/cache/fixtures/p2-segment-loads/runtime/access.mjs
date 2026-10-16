@@ -1,3 +1,4 @@
+import {consumeCpuEvent} from '../../../../../../support/wasm/events.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
@@ -9,7 +10,7 @@ const PC = 0x1000, SEG = 4524, SIZE = 4796, keyHigh = 0x5350414e;
 const defaults = [0xf33fffff, 0xf3bfffff, 0xf33fffff, 0xf33fffff, 0xf33fffff, 0];
 const offsets = [28, 32, 36, 40, 44, 56], data = Buffer.from([0, 0, 0, 0, 3, 0, 0, 0, ...Array(24).fill(0x5a)]);
 const counts = {contexts: 0, modules: 0, runs: 0, faults: 0, successes: 0, controls: 0};
-const paths = ['engine/src/cpu/x86/ir.rs', 'engine/src/cpu/x86/segments/cache.rs',
+const paths = ['engine/tests/support/wasm/events.mjs', 'engine/src/cpu/x86/ir.rs', 'engine/src/cpu/x86/segments/cache.rs',
   'engine/src/cpu/dbt/wasm/instructions/segments/access.rs', 'engine/src/cpu/dbt/wasm/instructions/segments.rs',
   'engine/src/cpu/dbt/wasm/imports/mod.rs', 'engine/src/cpu/dbt/wasm/imports/binding.rs', 'engine/src/cpu/dbt/wasm/imports/context.rs', 'engine/src/cpu/dbt/wasm/imports/needs.rs', 'engine/src/cpu/dbt/wasm/helpers/protocol.rs', 'engine/src/cpu/dbt/wasm/instructions/memory/mod.rs', 'engine/src/cpu/dbt/wasm/instructions/memory/address.rs', 'engine/src/cpu/dbt/wasm/instructions/memory/scalar.rs', 'engine/src/cpu/dbt/wasm/instructions/memory/stack.rs', 'engine/src/cpu/dbt/wasm/instructions/strings.rs',
   'engine/src/cpu/dbt/wasm/instructions/simd.rs', 'engine/src/cpu/dbt/wasm/instructions/simd/direct.rs',
@@ -86,6 +87,7 @@ function run(c, fn, row, state) {
   if (row.memoryByte) assert.equal(byte(c, ...row.memoryByte), row.memoryByte[1], row.name);
   if (row.memoryWord) assert.equal(word(c, row.memoryWord[0]), row.memoryWord[1], row.name);
   if (row.smc) {const saved = arena(c); assert.equal(fn.run(c.base, c.base + 56, 1, c.base + 96), 4); assert.deepEqual(arena(c), saved); c.stale = true; counts.controls++;}
+  consumeCpuEvent(c, SIZE);
   counts.runs++; counts[row.fault ? 'faults' : 'successes']++;
 }
 
