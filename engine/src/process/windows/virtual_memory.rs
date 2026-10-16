@@ -1,7 +1,10 @@
-use crate::process::{EngineInstance, HostError};
 use crate::{
-    memory::{GuestAddress, MemoryError, PAGE_SIZE, PageRange, Permissions, WordWrite32},
-    windows::{CallFrame32, ThreadState32},
+    memory::{GuestAddress, PageRange, Permissions},
+    process::{EngineInstance, HostError},
+    windows::{
+        CallFrame32, ThreadState32,
+        memory::{MemoryError32, protection_value},
+    },
 };
 
 impl EngineInstance {
@@ -12,94 +15,22 @@ impl EngineInstance {
         size: u32,
         permissions: Permissions,
     ) -> Result<(), HostError> {
-        let mut lower = 0x1000_0000_u64;
-        let planned = loop {
-            if lower >= 0x7000_0000 {
-                break Err(MemoryError::Capacity);
-            }
-            let bounds = PageRange::new(
-                GuestAddress(lower as u32),
-                ((0x7000_0000 - lower) / u64::from(PAGE_SIZE)) as u32,
-            )
-            .map_err(HostError::Memory)?;
-            let range =
-                match self
-                    .memory()?
-                    .find_free_range(bounds, size.div_ceil(PAGE_SIZE), 65536)
-                {
-                    Ok(range) => range,
-                    Err(error) => break Err(error),
-                };
-            let start = range.first as u64 * u64::from(PAGE_SIZE);
-            let end = start + range.count as u64 * u64::from(PAGE_SIZE);
-            let mut reserved_end = self.module_reservation_end(range);
-            if let Some(image) = self.image {
-                let image_start = u64::from(image.image_base);
-                let image_end = image_start + u64::from(image.image_size);
-                if start < image_end && image_start < end {
-                    reserved_end = Some(reserved_end.unwrap_or(0).max(image_end));
-                }
-            }
-            match reserved_end {
-                None => break Ok(range),
-                Some(end) => lower = end.div_ceil(65536) * 65536,
-            }
-        };
-        let range = match planned {
-            Ok(range) => range,
-            Err(MemoryError::Capacity) => {
-                let prepared = Self::prepare_completed_call(frame.complete(0))?;
-                self.publish_windows_thread(thread.allocation_failed())?;
-                self.publish_prepared_call(prepared);
-                return Ok(());
-            }
-            Err(error) => return Err(HostError::Memory(error)),
-        };
-        let address = range.first as u32 * PAGE_SIZE;
-        let prepared = Self::prepare_completed_call(frame.complete(address))?;
-        self.virtual_allocations
-            .try_reserve(1)
-            .map_err(|_| HostError::Memory(MemoryError::Allocation))?;
-        self.memory
-            .as_mut()
-            .ok_or(HostError::Closed)?
-            .map_zeroed(range, permissions)
-            .map_err(HostError::Memory)?;
-        self.virtual_allocations.push(range);
-        self.publish_prepared_call(prepared);
-        self.windows_thread = thread;
-        Ok(())
+        Self::prepare_completed_call(frame.complete(0))?;
+        self.check_windows_thread_write()?;
+        let result = self.memory_allocate(&[0, size, 0x3000, protection_value(permissions)]);
+        self.publish_legacy_virtual_result(frame, thread, result)
     }
-
     pub(in crate::process) fn complete_virtual_free(
         &mut self,
         frame: CallFrame32,
         thread: ThreadState32,
         address: u32,
     ) -> Result<(), HostError> {
-        let Some(index) = self
-            .virtual_allocations
-            .iter()
-            .position(|range| range.first as u32 * PAGE_SIZE == address)
-        else {
-            let prepared = Self::prepare_completed_call(frame.complete(0))?;
-            self.publish_windows_thread(thread.release_failed())?;
-            self.publish_prepared_call(prepared);
-            return Ok(());
-        };
-        let range = self.virtual_allocations[index];
-        let prepared = Self::prepare_completed_call(frame.complete(1))?;
-        self.memory
-            .as_mut()
-            .ok_or(HostError::Closed)?
-            .unmap(range)
-            .map_err(HostError::Memory)?;
-        self.virtual_allocations.remove(index);
-        self.publish_prepared_call(prepared);
-        self.windows_thread = thread;
-        Ok(())
+        Self::prepare_completed_call(frame.complete(0))?;
+        self.check_windows_thread_write()?;
+        let result = self.memory_free(&[address, 0, 0x8000]);
+        self.publish_legacy_virtual_result(frame, thread, result)
     }
-
     pub(in crate::process) fn complete_virtual_protect(
         &mut self,
         frame: CallFrame32,
@@ -108,82 +39,38 @@ impl EngineInstance {
         permissions: Permissions,
         old_output: GuestAddress,
     ) -> Result<(), HostError> {
-        let success = Self::prepare_completed_call(frame.complete(1))?;
-        let failure = Self::prepare_completed_call(frame.complete(0))?;
-        let mapped = match self.validate_file_mapping_protection(range, permissions) {
-            Ok(mapped) => mapped,
-            Err(error) => {
-                self.publish_windows_thread(thread.protection_failed(
-                    if error == crate::files::FileError32::AccessDenied {
-                        87
-                    } else {
-                        error.win32()
-                    },
-                ))?;
-                self.publish_prepared_call(failure);
-                return Ok(());
+        Self::prepare_completed_call(frame.complete(0))?;
+        self.check_windows_thread_write()?;
+        let result = self.memory_protect(&[
+            range.first as u32 * crate::memory::PAGE_SIZE,
+            range.count as u32 * crate::memory::PAGE_SIZE,
+            protection_value(permissions),
+            old_output.0,
+        ]);
+        self.publish_legacy_virtual_result(frame, thread, result)
+    }
+    fn publish_legacy_virtual_result(
+        &mut self,
+        frame: CallFrame32,
+        thread: ThreadState32,
+        result: Result<u32, MemoryError32>,
+    ) -> Result<(), HostError> {
+        let (value, thread) = match result {
+            Ok(value) => (value, thread),
+            Err(MemoryError32::Exhausted) => {
+                return Err(HostError::Memory(
+                    crate::memory::MemoryError::VersionExhausted,
+                ));
             }
+            Err(error) => (0, thread.with_last_error(error.win32())),
         };
-        if !mapped
-            && !self.module_image_contains_range(range)
-            && !self.virtual_allocations.iter().any(|allocation| {
-                range.first >= allocation.first
-                    && range.first + range.count <= allocation.first + allocation.count
-            })
-        {
-            self.publish_windows_thread(thread.protection_failed(487))?;
-            self.publish_prepared_call(failure);
-            return Ok(());
-        }
-        let old = self
-            .memory()?
-            .permissions_at(GuestAddress(range.first as u32 * PAGE_SIZE))
-            .map_err(HostError::Memory)?;
-        let value = match old {
-            Permissions::NONE => 1,
-            Permissions::READ => 2,
-            Permissions::READ_WRITE => 4,
-            Permissions::EXECUTE => 0x10,
-            Permissions::READ_EXECUTE => 0x20,
-            Permissions::ALL => 0x40,
-            _ => return Err(HostError::Call(crate::process::CallError::InvalidRequest)),
-        };
-        if old_output.0 == 0 {
-            self.publish_windows_thread(thread.protection_failed(998))?;
-            self.publish_prepared_call(failure);
-            return Ok(());
-        }
-        let result = self
-            .memory
-            .as_mut()
-            .ok_or(HostError::Closed)?
-            .protect_with_word_write32(
-                range,
-                permissions,
-                WordWrite32 {
-                    address: old_output,
-                    value,
-                },
-            );
-        match result {
-            Ok(()) => {
-                self.publish_prepared_call(success);
-                self.windows_thread = thread;
-            }
-            Err(MemoryError::Fault(_)) => {
-                self.publish_windows_thread(thread.protection_failed(998))?;
-                self.publish_prepared_call(failure);
-            }
-            Err(error) => return Err(HostError::Memory(error)),
-        }
+        let prepared = Self::prepare_completed_call(frame.complete(value))?;
+        self.publish_windows_thread(thread)?;
+        self.publish_prepared_call(prepared);
         Ok(())
     }
-
     pub(in crate::process) fn revoke_virtual_allocations(&mut self, range: PageRange) {
-        self.virtual_allocations.retain(|allocation| {
-            allocation.first >= range.first + range.count
-                || range.first >= allocation.first + allocation.count
-        });
+        self.windows_memory.revoke(range);
     }
 }
 

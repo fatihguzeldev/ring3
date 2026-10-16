@@ -6,3 +6,5 @@ pub(super) mod scalar;
 pub(super) mod span;
 
 pub(in crate::process) mod paging;
+
+pub(in crate::process) mod reservations;

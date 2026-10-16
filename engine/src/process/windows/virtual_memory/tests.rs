@@ -235,7 +235,7 @@ fn saved(f: &Fixture) -> Saved {
         arena_pointer: engine.arena_address(),
         call: pending(engine),
         token: engine.call_token,
-        rows: engine.virtual_allocations.clone(),
+        rows: engine.windows_memory.reservations().collect::<Vec<_>>(),
         identity: memory.identity(),
         pages: memory.mapped_pages(),
         ram: PAGES
@@ -354,7 +354,10 @@ fn protection_internal_encoding_and_version_failures_preserve_every_published_ow
                     .unwrap();
                 assert_eq!(old, 0x40_u32.to_le_bytes());
                 assert!(f.engine.pending_call.is_none());
-                assert_eq!(f.engine.virtual_allocations, before.rows);
+                assert_eq!(
+                    f.engine.windows_memory.reservations().collect::<Vec<_>>(),
+                    before.rows
+                );
                 assert_eq!(f.engine.memory().unwrap().mapped_pages(), 5);
                 assert_eq!(last_error(&f.engine), 8);
             }
@@ -409,7 +412,7 @@ fn release_internal_encoding_and_version_failures_preserve_every_published_owner
             )
             .unwrap();
             complete(&mut f.engine, token).unwrap();
-            assert!(f.engine.virtual_allocations.is_empty());
+            assert!(f.engine.windows_memory.is_empty());
             assert_eq!(f.engine.memory().unwrap().mapped_pages(), 3);
             assert!(f.engine.pending_call.is_none());
             assert_eq!(last_error(&f.engine), 8);
@@ -463,7 +466,7 @@ fn private_return_can_complete_after_releasing_current_code_or_captured_stack() 
             }
         );
         assert!(f.engine.pending_call.is_none());
-        assert!(f.engine.virtual_allocations.is_empty());
+        assert!(f.engine.windows_memory.is_empty());
         assert_eq!(f.engine.memory().unwrap().mapped_pages(), 3);
         assert!(matches!(
             f.engine
@@ -494,7 +497,10 @@ fn failed_host_unmap_keeps_rows_and_partial_success_revokes_only_overlap() {
     assert_eq!(allocate(&mut f.engine, 1), other);
     let first = PageRange::new(GuestAddress(BASE), 2).unwrap();
     let second = PageRange::new(GuestAddress(other), 1).unwrap();
-    assert_eq!(f.engine.virtual_allocations, vec![first, second]);
+    assert_eq!(
+        f.engine.windows_memory.reservations().collect::<Vec<_>>(),
+        vec![first, second]
+    );
     f.engine.protect(BASE, 2, 7).unwrap();
     f.engine.protect(other, 1, 7).unwrap();
     f.engine.write32(BASE, 0x1357_9bdf).unwrap();
@@ -510,18 +516,27 @@ fn failed_host_unmap_keeps_rows_and_partial_success_revokes_only_overlap() {
         }))
     );
     assert_eq!(f.engine.arena(), arena);
-    assert_eq!(f.engine.virtual_allocations, vec![first, second]);
+    assert_eq!(
+        f.engine.windows_memory.reservations().collect::<Vec<_>>(),
+        vec![first, second]
+    );
     assert_eq!(f.engine.memory().unwrap().identity(), identity);
     assert_eq!(f.engine.memory().unwrap().mapped_pages(), 6);
     assert!(f.engine.memory().unwrap().is_code_current(&version));
     assert!(f.engine.memory().unwrap().is_code_current(&other_version));
     f.engine.unmap(BASE + 4096, 1).unwrap();
-    assert_eq!(f.engine.virtual_allocations, vec![second]);
+    assert_eq!(
+        f.engine.windows_memory.reservations().collect::<Vec<_>>(),
+        vec![second]
+    );
     f.engine.map(BASE + 4096, 1, 7).unwrap();
     f.engine.write32(BASE + 4096, 0x2468_ace0).unwrap();
     assert_eq!(release(&mut f.engine, BASE), 0);
     assert_eq!(last_error(&f.engine), 487);
-    assert_eq!(f.engine.virtual_allocations, vec![second]);
+    assert_eq!(
+        f.engine.windows_memory.reservations().collect::<Vec<_>>(),
+        vec![second]
+    );
     let memory = f.engine.memory().unwrap();
     for (address, value) in [(BASE, 0x1357_9bdf_u32), (BASE + 4096, 0x2468_ace0)] {
         let mut bytes = [0; 4];
@@ -530,19 +545,16 @@ fn failed_host_unmap_keeps_rows_and_partial_success_revokes_only_overlap() {
     }
     assert!(memory.is_code_current(&other_version));
     assert_eq!(release(&mut f.engine, other), 1);
-    assert!(f.engine.virtual_allocations.is_empty());
+    assert!(f.engine.windows_memory.is_empty());
     assert_eq!(last_error(&f.engine), 487);
 }
 
 #[test]
-fn terminal_retains_allocation_rows_and_buffer_until_close_drops_both() {
+fn terminal_retains_virtual_reservations_until_session_close() {
     let mut f = fixture();
     assert_eq!(allocate(&mut f.engine, 4097), BASE);
-    let rows = f.engine.virtual_allocations.clone();
-    let pointer = f.engine.virtual_allocations.as_ptr();
-    let capacity = f.engine.virtual_allocations.capacity();
+    let rows = f.engine.windows_memory.reservations().collect::<Vec<_>>();
     let identity = f.engine.memory().unwrap().identity();
-    assert!(capacity > 0);
     let (token, _) = capture(
         &mut f.engine,
         CODE + 32,
@@ -551,17 +563,17 @@ fn terminal_retains_allocation_rows_and_buffer_until_close_drops_both() {
         &[u32::MAX],
     );
     complete(&mut f.engine, token).unwrap();
-    assert_eq!(f.engine.virtual_allocations, rows);
-    assert_eq!(f.engine.virtual_allocations.as_ptr(), pointer);
-    assert_eq!(f.engine.virtual_allocations.capacity(), capacity);
+    assert_eq!(
+        f.engine.windows_memory.reservations().collect::<Vec<_>>(),
+        rows
+    );
     assert_eq!(f.engine.memory.as_ref().unwrap().identity(), identity);
     assert_eq!(f.engine.memory.as_ref().unwrap().mapped_pages(), 5);
     assert!(matches!(f.engine.memory(), Err(HostError::ProcessExited)));
     assert_eq!(f.engine.exit_code, Some(u32::MAX));
     assert!(f.engine.pending_call.is_none());
     f.engine.close();
-    assert!(f.engine.virtual_allocations.is_empty());
-    assert_eq!(f.engine.virtual_allocations.capacity(), 0);
+    assert!(f.engine.windows_memory.is_empty());
     assert!(f.engine.memory.is_none());
 }
 
@@ -571,17 +583,23 @@ fn pristine_image_admission_checks_empty_ledger_before_loader_or_memory_replacem
     let identity = engine.memory().unwrap().identity();
     let arena = engine.arena().to_vec();
     let row = PageRange::new(GuestAddress(BASE), 1).unwrap();
-    // isolated defensive invariant injection; ordinary allocations also map pages.
-    engine.virtual_allocations.push(row);
+    // A real reserve-only region occupies guest VA without consuming resident pages.
+    engine
+        .windows_memory
+        .reserve_for_test(engine.memory.as_mut().unwrap(), row)
+        .unwrap();
     assert_eq!(engine.image_capacity(), Err(HostError::InvalidRequest));
     assert_eq!(engine.load_pe32(b"bad"), Err(HostError::InvalidRequest));
     assert_eq!(engine.begin_image_input(1), Err(HostError::InvalidRequest));
-    assert_eq!(engine.virtual_allocations, vec![row]);
+    assert_eq!(
+        engine.windows_memory.reservations().collect::<Vec<_>>(),
+        vec![row]
+    );
     assert_eq!(engine.memory().unwrap().identity(), identity);
     assert_eq!(engine.memory().unwrap().mapped_pages(), 0);
     assert_eq!(engine.arena(), arena);
     assert!(engine.image_input.is_none());
-    engine.virtual_allocations.clear();
+    engine.windows_memory.revoke(row);
     assert_eq!(engine.image_capacity(), Ok(1));
     assert_eq!(
         engine.load_pe32(b"bad"),
