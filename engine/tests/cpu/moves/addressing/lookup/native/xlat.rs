@@ -25,10 +25,6 @@ use ring3_engine::{
     },
     memory::{AddressSpace, GuestAddress, PageRange, Permissions},
 };
-use std::{
-    io::Write,
-    process::{Command, Stdio},
-};
 
 fn memory(pc: u32, bytes: &[u8]) -> AddressSpace {
     let mut memory = AddressSpace::new(1).unwrap();
@@ -137,7 +133,7 @@ fn describe(engine: &mut EngineInstance, length: usize, entries: bool) {
 
 #[test]
 fn all_four_bound_profiles_validate_only_guard_and_read8_without_data_access() {
-    let mut input = Vec::new();
+    let mut count = 0;
     for resident in [false, true] {
         for entries in [false, true] {
             let mut engine = code(&[0xd7, 0xeb, 0]);
@@ -147,30 +143,17 @@ fn all_four_bound_profiles_validate_only_guard_and_read8_without_data_access() {
             assert_eq!(engine.arena(), before);
             assert_eq!(engine.memory().unwrap().mapped_pages(), 1);
             let bytes = module(&engine, id);
-            input.push(u8::from(resident));
-            input.extend((bytes.len() as u32).to_le_bytes());
-            input.extend(bytes);
+            crate::support_wasm_interface::assert_bound(
+                &bytes,
+                resident,
+                &[("cpu_read8", 1)],
+                &[4, if resident { 7 } else { 6 }, 1],
+                true,
+            );
+            count += 1;
         }
     }
-    let mut child = Command::new("node").args(["-e", r#"
-const assert=require('node:assert/strict'), b=require('node:fs').readFileSync(0); let at=0,count=0;
-while(at<b.length){const resident=b[at++],n=b.readUInt32LE(at);at+=4;
- const module=new WebAssembly.Module(b.subarray(at,at+n));at+=n;
- assert.deepEqual(WebAssembly.Module.imports(module),[{module:'env',name:'memory',kind:'memory'},
- ...[resident?'guard_resident':'guard','cpu_read8'].map(name=>({module:'ring3',name,kind:'function'}))]);
- assert.deepEqual(WebAssembly.Module.exports(module),[{name:'run',kind:'function'}]);
- const run=new WebAssembly.Instance(module,{env:{memory:new WebAssembly.Memory({initial:1})},
- ring3:{guard(){return 0;},guard_resident(){return 0;},cpu_read8(){return 0;}}}).exports.run;
- assert.equal(run.length,4);count++;
-}assert.equal(count,4);
-"#]).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
-    child.stdin.take().unwrap().write_all(&input).unwrap();
-    let result = child.wait_with_output().unwrap();
-    assert!(
-        result.status.success(),
-        "{}",
-        String::from_utf8_lossy(&result.stderr)
-    );
+    assert_eq!(count, 4);
 }
 
 #[test]

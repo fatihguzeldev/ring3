@@ -12,7 +12,7 @@ use ring3_engine::{
             ir::{ByteRegister, ByteValue, EffectiveAddress, Operation},
         },
     },
-    memory::{Access, FaultReason, GuestAddress, MemoryFault},
+    memory::{Access, FaultReason, GuestAddress},
     process::{EngineInstance, HostError},
 };
 
@@ -186,33 +186,7 @@ fn compile_error(resident: bool, error: CompileError) -> HostError {
         HostError::Compile(error)
     }
 }
-fn unsigned(bytes: &mut &[u8]) -> u32 {
-    let mut value = 0;
-    for shift in (0..35).step_by(7) {
-        let next = bytes[0];
-        *bytes = &bytes[1..];
-        value |= u32::from(next & 0x7f) << shift;
-        if next & 0x80 == 0 {
-            return value;
-        }
-    }
-    panic!("unterminated unsigned LEB");
-}
-fn section(wasm: &[u8], kind: u8) -> &[u8] {
-    assert_eq!(&wasm[..8], b"\0asm\x01\0\0\0");
-    let mut remaining = &wasm[8..];
-    while !remaining.is_empty() {
-        let id = remaining[0];
-        remaining = &remaining[1..];
-        let length = unsigned(&mut remaining) as usize;
-        let (payload, rest) = remaining.split_at(length);
-        remaining = rest;
-        if id == kind {
-            return payload;
-        }
-    }
-    panic!("missing section {kind}");
-}
+
 fn assert_module(wasm: &[u8], resident: bool, opcode: u8) {
     let helper = if opcode == 0xa0 {
         "cpu_read8"
@@ -221,56 +195,20 @@ fn assert_module(wasm: &[u8], resident: bool, opcode: u8) {
     } else {
         "cpu_store8"
     };
-    let mut types = vec![4];
-    for arity in [
-        4,
-        if resident { 7 } else { 6 },
-        if opcode == 0xa0 {
-            1
-        } else if resident {
-            6
-        } else {
-            2
-        },
-        6,
-    ] {
-        types.extend([0x60, arity]);
-        types.extend(std::iter::repeat_n(0x7f, arity as usize));
-        types.extend([1, 0x7f]);
-    }
-    assert_eq!(section(wasm, 1), types);
-    let mut imports = vec![3];
-    for (namespace, name, tail) in [
-        ("env", "memory", &[2, 0, 1][..]),
-        (
-            "ring3",
-            if resident { "guard_resident" } else { "guard" },
-            &[0, 1][..],
-        ),
-        ("ring3", helper, &[0, 2][..]),
-    ] {
-        for text in [namespace, name] {
-            imports.push(text.len() as u8);
-            imports.extend(text.bytes());
-        }
-        imports.extend(tail);
-    }
-    assert_eq!(section(wasm, 2), imports);
-    assert_eq!(section(wasm, 3), [2, 0, 3]);
-    assert_eq!(section(wasm, 7), [1, 3, b'r', b'u', b'n', 0, 2]);
-    let mut bodies = section(wasm, 10);
-    assert_eq!(unsigned(&mut bodies), 2);
-    let length = unsigned(&mut bodies) as usize;
-    let (body, remaining) = bodies.split_at(length);
-    assert_eq!(&body[..7], &[3, 16, 0x7f, 1, 0x7e, 10, 0x7f]);
-    assert_eq!(body.last(), Some(&0x0b));
-    bodies = remaining;
-    let length = unsigned(&mut bodies) as usize;
-    assert_eq!(bodies.len(), length);
-    assert_eq!(&bodies[..3], &[1, 3, 0x7f]);
-    assert_eq!(bodies.last(), Some(&0x0b));
-    assert!(bodies.len() > 3);
-    assert!(wasm.len() <= 65_536);
+    let parameters = if opcode == 0xa0 {
+        1
+    } else if resident {
+        6
+    } else {
+        2
+    };
+    crate::support_wasm_interface::assert_bound(
+        wasm,
+        resident,
+        &[(helper, parameters)],
+        &[4, if resident { 7 } else { 6 }, parameters],
+        true,
+    );
 }
 
 #[test]
@@ -287,9 +225,10 @@ fn five_byte_fetch_and_consumed_page_currency_keep_exact_boundaries() {
             };
             let (excluded, expected) = byte_prefix_admission::closed_fixture(&excluded, expected);
             let engine = code_at(CODE, &excluded);
-            assert_eq!(
-                decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),
-                Some(expected)
+            crate::support_fetch::assert_decode_contract(
+                (decode_one(engine.memory().unwrap(), GuestAddress(CODE)))
+                    .expect_err("instruction must fail to decode"),
+                expected,
             );
         }
         for cut in 1..5 {
@@ -308,21 +247,17 @@ fn five_byte_fetch_and_consumed_page_currency_keep_exact_boundaries() {
                     engine.map(0x2000, 1, 3).unwrap();
                 }
                 let before = engine.arena().to_vec();
-                assert_eq!(
-                    decode_one(engine.memory().unwrap(), GuestAddress(pc)).err(),
-                    Some(DecodeError::MemoryFault {
-                        pc: GuestAddress(pc),
-                        fault: MemoryFault {
-                            address: GuestAddress(if reason == FaultReason::AddressOverflow {
-                                pc
-                            } else {
-                                0x2000
-                            }),
-                            access: Access::Execute,
-                            reason
-                        },
-                        length: cut as u32 + 1
-                    })
+                crate::support_fetch::assert_error(
+                    (decode_one(engine.memory().unwrap(), GuestAddress(pc)))
+                        .expect_err("code fetch must fail"),
+                    pc,
+                    if reason == FaultReason::AddressOverflow {
+                        pc
+                    } else {
+                        0x2000
+                    },
+                    reason,
+                    cut as u32 + 1,
                 );
                 assert_eq!(engine.arena(), before);
             }
@@ -368,13 +303,14 @@ fn five_byte_fetch_and_consumed_page_currency_keep_exact_boundaries() {
                         .is_code_current(decoded.code_snapshot())
                 );
                 assert!(!engine.memory().unwrap().is_code_current(&snapshot));
-                assert_eq!(
-                    guard(&engine, resident, id),
-                    Err(if resident {
+                crate::support_fetch::assert_host_contract(
+                    (guard(&engine, resident, id))
+                        .expect_err("compilation must refuse this fixture"),
+                    if resident {
                         HostError::Resident(RegistryError::CodeInvalidated)
                     } else {
                         HostError::CodeInvalidated
-                    })
+                    },
                 );
             }
         }
@@ -479,9 +415,24 @@ fn helper_bindings_caps_and_failed_publication_preserve_existing_owners() {
                     upload(&mut engine, CODE, &input);
                     describe(&mut engine, CODE, input.len(), entries);
                     let before = saved(&engine, keeper);
-                    assert_eq!(
-                        publish(&mut engine, resident, entries),
-                        Err(compile_error(resident, expected))
+                    if entries
+                        && crate::support_admission::admit_if_deferred(
+                            &mut engine,
+                            crate::support_admission::ColdEntryCase {
+                                key: KEY,
+                                keeper,
+                                resident,
+                                pages: &[CODE, KEEP, DATA],
+                                expected,
+                            },
+                        )
+                    {
+                        continue;
+                    }
+                    crate::support_fetch::assert_host_contract(
+                        (publish(&mut engine, resident, entries))
+                            .expect_err("compilation must refuse this fixture"),
+                        compile_error(resident, expected),
                     );
                     assert_eq!(saved(&engine, keeper), before);
                     engine.guard(KEY, before.generation).unwrap();

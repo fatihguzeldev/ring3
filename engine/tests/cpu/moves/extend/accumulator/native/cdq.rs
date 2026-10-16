@@ -165,9 +165,10 @@ fn strict_prefixes_and_single_byte_fetch_preserve_fault_and_wrap_boundaries() {
             prefix_admission::admitted(&bytes);
             continue;
         }
-        assert_eq!(
-            decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),
-            Some(expected)
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(engine.memory().unwrap(), GuestAddress(CODE)))
+                .expect_err("instruction must fail to decode"),
+            expected,
         );
     }
     for pc in [0x1fff, u32::MAX] {
@@ -208,16 +209,18 @@ fn strict_prefixes_and_single_byte_fetch_preserve_fault_and_wrap_boundaries() {
         (u32::MAX, u32::MAX, FaultReason::AddressOverflow),
     ] {
         let engine = code(pc, &[0x66]);
-        assert_eq!(
-            decode_one(engine.memory().unwrap(), GuestAddress(pc)).err(),
-            Some(fetch_error(pc, address, 2, reason))
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(engine.memory().unwrap(), GuestAddress(pc)))
+                .expect_err("instruction must fail to decode"),
+            fetch_error(pc, address, 2, reason),
         );
     }
     let mut engine = code(CODE, &[0x99]);
     engine.protect(CODE, 1, 3).unwrap();
-    assert_eq!(
-        decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),
-        Some(fetch_error(CODE, CODE, 1, FaultReason::Permission))
+    crate::support_fetch::assert_decode_contract(
+        (decode_one(engine.memory().unwrap(), GuestAddress(CODE)))
+            .expect_err("instruction must fail to decode"),
+        fetch_error(CODE, CODE, 1, FaultReason::Permission),
     );
 }
 
@@ -268,7 +271,11 @@ fn late_cdq_failures_preserve_replacement_and_resident_publications() {
                 } else {
                     HostError::Compile(expected)
                 };
-                assert_eq!(compile(&mut engine, resident, entries), Err(expected));
+                crate::support_fetch::assert_host_contract(
+                    (compile(&mut engine, resident, entries))
+                        .expect_err("compilation must refuse this fixture"),
+                    expected,
+                );
                 assert_eq!(
                     (
                         engine.arena().to_vec(),

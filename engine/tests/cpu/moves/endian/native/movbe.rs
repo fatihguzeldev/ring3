@@ -49,9 +49,10 @@ fn movbe_load_and_store_keep_width_and_require_one_memory_operand() {
             );
             *bytes.last_mut().unwrap() = 0xc3;
             memory.write(GuestAddress(0x1000), &bytes).unwrap();
-            assert_eq!(
-                decode_one(&memory, GuestAddress(0x1000)).err(),
-                Some(DecodeError::InvalidEncoding)
+            crate::support_fetch::assert_decode_contract(
+                (decode_one(&memory, GuestAddress(0x1000)))
+                    .expect_err("instruction must fail to decode"),
+                DecodeError::InvalidEncoding,
             );
         }
     }

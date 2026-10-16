@@ -179,131 +179,40 @@ fn code(bytes: &[u8]) -> EngineInstance {
     engine
 }
 
-struct Reader<'a>(&'a [u8]);
-
-impl<'a> Reader<'a> {
-    fn byte(&mut self) -> u8 {
-        self.take(1)[0]
-    }
-
-    fn unsigned(&mut self) -> u32 {
-        let mut value = 0;
-        for shift in (0..35).step_by(7) {
-            let byte = self.byte();
-            assert!(shift < 28 || byte & 0xf0 == 0, "invalid u32 LEB128");
-            value |= u32::from(byte & 0x7f) << shift;
-            if byte & 0x80 == 0 {
-                return value;
-            }
-        }
-        panic!("unterminated u32 LEB128");
-    }
-
-    fn take(&mut self, length: usize) -> &'a [u8] {
-        let (value, rest) = self.0.split_at(length);
-        self.0 = rest;
-        value
-    }
-
-    fn name(&mut self) -> &'a str {
-        let length = self.unsigned() as usize;
-        std::str::from_utf8(self.take(length)).unwrap()
-    }
-
-    fn end(self) {
-        assert!(self.0.is_empty(), "unexpected section tail");
-    }
-}
-
-fn section(wasm: &[u8], requested: u8) -> Reader<'_> {
-    assert_eq!(&wasm[..8], b"\0asm\x01\0\0\0");
-    let mut reader = Reader(&wasm[8..]);
-    while !reader.0.is_empty() {
-        let kind = reader.byte();
-        let length = reader.unsigned() as usize;
-        let value = reader.take(length);
-        if kind == requested {
-            return Reader(value);
-        }
-    }
-    panic!("missing section {requested}");
-}
-
 fn assert_imports(wasm: &[u8], owner: Owner, helpers: &[&str]) {
     let resident = matches!(owner, Owner::Resident);
-    let has_read = helpers.iter().any(|name| name.starts_with("read"));
-    let has_store = helpers.iter().any(|name| name.starts_with("store"));
+    let store = if resident { 6 } else { 2 };
     let mut arities = vec![4, if resident { 7 } else { 6 }];
-    if has_read {
+    if helpers.iter().any(|name| name.starts_with("cpu_read")) {
         arities.push(1);
     }
-    if has_store {
-        arities.push(if resident { 6 } else { 2 });
+    if helpers.iter().any(|name| name.starts_with("cpu_store")) {
+        arities.push(store);
     }
-    let segment_type = arities.len() as u32;
-    arities.push(6);
-    let mut types = section(wasm, 1);
-    assert_eq!(types.unsigned() as usize, arities.len());
-    for arity in arities {
-        assert_eq!(types.byte(), 0x60);
-        assert_eq!(types.unsigned(), arity);
-        assert_eq!(types.take(arity as usize), vec![0x7f; arity as usize]);
-        assert_eq!((types.unsigned(), types.byte()), (1, 0x7f));
-    }
-    types.end();
-    let mut imports = section(wasm, 2);
-    assert_eq!(imports.unsigned() as usize, helpers.len() + 2);
-    assert_eq!(
-        (imports.name(), imports.name(), imports.byte()),
-        ("env", "memory", 2)
-    );
-    assert_eq!((imports.unsigned(), imports.unsigned()), (0, 1));
-    assert_eq!(imports.name(), "ring3");
-    assert_eq!(
-        imports.name(),
-        if resident { "guard_resident" } else { "guard" }
-    );
-    assert_eq!((imports.byte(), imports.unsigned()), (0, 1));
-    for helper in helpers {
-        let expected = if resident && helper.starts_with("store") {
-            helper.replacen("store", "store_resident", 1)
-        } else {
-            (*helper).to_owned()
-        };
-        assert_eq!(
-            (imports.name(), imports.name()),
-            ("ring3", expected.as_str())
-        );
-        let index = if helper.starts_with("read") || !has_read {
-            2
-        } else {
-            3
-        };
-        assert_eq!((imports.byte(), imports.unsigned()), (0, index));
-    }
-    imports.end();
-    let mut functions = section(wasm, 3);
-    assert_eq!((functions.unsigned(), functions.unsigned()), (2, 0));
-    assert_eq!(functions.unsigned(), segment_type);
-    functions.end();
-    let mut exports = section(wasm, 7);
-    assert_eq!(exports.unsigned(), 1);
-    assert_eq!((exports.name(), exports.byte()), ("run", 0));
-    assert_eq!(exports.unsigned() as usize, helpers.len() + 1);
-    exports.end();
-    let mut bodies = section(wasm, 10);
-    assert_eq!(bodies.unsigned(), 2);
-    for declarations in [&[(16, 0x7f), (1, 0x7e), (10, 0x7f)][..], &[(3, 0x7f)][..]] {
-        let length = bodies.unsigned() as usize;
-        let mut body = Reader(bodies.take(length));
-        assert_eq!(body.0.last(), Some(&0x0b));
-        assert_eq!(body.unsigned() as usize, declarations.len());
-        for &(count, kind) in declarations {
-            assert_eq!((body.unsigned(), body.byte()), (count, kind));
-        }
-        assert!(!body.0.is_empty());
-    }
-    bodies.end();
+    let owned: Vec<_> = helpers
+        .iter()
+        .map(|name| {
+            if resident {
+                name.replacen("cpu_store", "cpu_store_resident", 1)
+            } else {
+                (*name).to_owned()
+            }
+        })
+        .collect();
+    let imports: Vec<_> = owned
+        .iter()
+        .map(|name| {
+            (
+                name.as_str(),
+                if name.starts_with("cpu_read") {
+                    1
+                } else {
+                    store
+                },
+            )
+        })
+        .collect();
+    crate::support_wasm_interface::assert_bound(wasm, resident, &imports, &arities, true);
 }
 
 #[test]
@@ -517,10 +426,24 @@ fn late_decode_fetch_and_instruction_cap_failures_preserve_arena_and_prior_owner
                     };
                     upload(&mut engine, pc, &bytes);
                     describe(&mut engine, pc, span, entries);
+                    if entries && error == CompileError::InstructionLimit {
+                        assert!(crate::support_admission::admit_if_deferred(
+                            &mut engine,
+                            crate::support_admission::ColdEntryCase {
+                                key: KEY,
+                                keeper: keep,
+                                resident: matches!(owner, Owner::Resident),
+                                pages: &[CODE, KEEP],
+                                expected: error
+                            }
+                        ));
+                        continue;
+                    }
                     let before = saved(&engine, keep);
-                    assert_eq!(
-                        compile(&mut engine, owner, entries),
-                        Err(compile_error(owner, error))
+                    crate::support_fetch::assert_host_contract(
+                        (compile(&mut engine, owner, entries))
+                            .expect_err("compilation must refuse this fixture"),
+                        compile_error(owner, error),
                     );
                     assert_eq!(saved(&engine, keep), before);
                     engine.guard(KEY, before.generation).unwrap();

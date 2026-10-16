@@ -243,10 +243,9 @@ fn complete_prefix_and_adjacent_forms_preserve_precise_refusal_categories() {
             return;
         }
         memory.write(GuestAddress(CODE), bytes).unwrap();
-        assert_eq!(
-            decode_one(&memory, GuestAddress(CODE)).err(),
-            Some(expected),
-            "{bytes:02x?}"
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(&memory, GuestAddress(CODE))).expect_err("instruction must fail to decode"),
+            expected,
         );
     };
     for bytes in [
@@ -336,15 +335,17 @@ fn exact_instruction_fetch_crossings_truncations_and_top_span_faults() {
         for cut in 1..bytes.len() {
             let pc = 0x2000 - cut as u32;
             let memory = code_space(pc, &bytes[..cut]);
-            assert_eq!(
-                decode_one(&memory, GuestAddress(pc)).err(),
-                Some(fetch_error(pc, 0x2000, FaultReason::Unmapped, cut + 1))
+            crate::support_fetch::assert_decode_contract(
+                (decode_one(&memory, GuestAddress(pc)))
+                    .expect_err("instruction must fail to decode"),
+                fetch_error(pc, 0x2000, FaultReason::Unmapped, cut + 1),
             );
             let top = u32::MAX - cut as u32 + 1;
             let memory = code_space(top, &bytes[..cut]);
-            assert_eq!(
-                decode_one(&memory, GuestAddress(top)).err(),
-                Some(fetch_error(top, top, FaultReason::AddressOverflow, cut + 1))
+            crate::support_fetch::assert_decode_contract(
+                (decode_one(&memory, GuestAddress(top)))
+                    .expect_err("instruction must fail to decode"),
+                fetch_error(top, top, FaultReason::AddressOverflow, cut + 1),
             );
         }
         let mut memory = code_space(CODE, &bytes);
@@ -354,9 +355,9 @@ fn exact_instruction_fetch_crossings_truncations_and_top_span_faults() {
                 Permissions::READ,
             )
             .unwrap();
-        assert_eq!(
-            decode_one(&memory, GuestAddress(CODE)).err(),
-            Some(fetch_error(CODE, CODE, FaultReason::Permission, 1))
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(&memory, GuestAddress(CODE))).expect_err("instruction must fail to decode"),
+            fetch_error(CODE, CODE, FaultReason::Permission, 1),
         );
         let mut memory = code_space(0x1fff, &bytes);
         memory
@@ -365,9 +366,10 @@ fn exact_instruction_fetch_crossings_truncations_and_top_span_faults() {
                 Permissions::READ,
             )
             .unwrap();
-        assert_eq!(
-            decode_one(&memory, GuestAddress(0x1fff)).err(),
-            Some(fetch_error(0x1fff, 0x2000, FaultReason::Permission, 2))
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(&memory, GuestAddress(0x1fff)))
+                .expect_err("instruction must fail to decode"),
+            fetch_error(0x1fff, 0x2000, FaultReason::Permission, 2),
         );
     }
 }

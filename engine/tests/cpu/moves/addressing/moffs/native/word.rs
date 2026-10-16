@@ -230,19 +230,19 @@ fn word_moffs_prefixes_lock_and_ignored_byte_width_neighbors_stay_precise() {
                     word_prefix::admitted(&prefixed);
                     continue;
                 }
-                assert_eq!(
-                    decode_one(&code_space(CODE, &prefixed), GuestAddress(CODE)).err(),
-                    Some(expected),
-                    "{prefixed:02x?}"
+                crate::support_fetch::assert_decode_contract(
+                    (decode_one(&code_space(CODE, &prefixed), GuestAddress(CODE)))
+                        .expect_err("instruction must fail to decode"),
+                    expected,
                 );
             }
         }
         let bytes = encoding(opcode - 1, 0xf3f0_6766);
         if !word_prefix::admit_if_new_prefix(&bytes) {
-            assert_eq!(
-                decode_one(&code_space(CODE, &bytes), GuestAddress(CODE)).err(),
-                Some(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
-                "{bytes:02x?}"
+            crate::support_fetch::assert_decode_contract(
+                (decode_one(&code_space(CODE, &bytes), GuestAddress(CODE)))
+                    .expect_err("instruction must fail to decode"),
+                DecodeError::Unsupported(UnsupportedFeature::Opcode),
             );
         }
     }
@@ -408,14 +408,16 @@ fn word_moffs_fetch_checks_all_six_byte_page_top_and_execute_boundaries() {
         }
         for cut in 1..bytes.len() {
             let pc = 0x2000 - cut as u32;
-            assert_eq!(
-                decode_one(&code_space(pc, &bytes[..cut]), GuestAddress(pc)).err(),
-                Some(fetch_error(pc, 0x2000, FaultReason::Unmapped, cut + 1))
+            crate::support_fetch::assert_decode_contract(
+                (decode_one(&code_space(pc, &bytes[..cut]), GuestAddress(pc)))
+                    .expect_err("instruction must fail to decode"),
+                fetch_error(pc, 0x2000, FaultReason::Unmapped, cut + 1),
             );
             let top = u32::MAX - cut as u32 + 1;
-            assert_eq!(
-                decode_one(&code_space(top, &bytes[..cut]), GuestAddress(top)).err(),
-                Some(fetch_error(top, top, FaultReason::AddressOverflow, cut + 1))
+            crate::support_fetch::assert_decode_contract(
+                (decode_one(&code_space(top, &bytes[..cut]), GuestAddress(top)))
+                    .expect_err("instruction must fail to decode"),
+                fetch_error(top, top, FaultReason::AddressOverflow, cut + 1),
             );
         }
         let pc = 0x1ffb;
@@ -426,9 +428,9 @@ fn word_moffs_fetch_checks_all_six_byte_page_top_and_execute_boundaries() {
                 Permissions::READ,
             )
             .unwrap();
-        assert_eq!(
-            decode_one(&memory, GuestAddress(pc)).err(),
-            Some(fetch_error(pc, 0x2000, FaultReason::Permission, 6))
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(&memory, GuestAddress(pc))).expect_err("instruction must fail to decode"),
+            fetch_error(pc, 0x2000, FaultReason::Permission, 6),
         );
         let mut memory = code_space(CODE, &bytes);
         memory
@@ -437,9 +439,9 @@ fn word_moffs_fetch_checks_all_six_byte_page_top_and_execute_boundaries() {
                 Permissions::READ,
             )
             .unwrap();
-        assert_eq!(
-            decode_one(&memory, GuestAddress(CODE)).err(),
-            Some(fetch_error(CODE, CODE, FaultReason::Permission, 1))
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(&memory, GuestAddress(CODE))).expect_err("instruction must fail to decode"),
+            fetch_error(CODE, CODE, FaultReason::Permission, 1),
         );
     }
 }

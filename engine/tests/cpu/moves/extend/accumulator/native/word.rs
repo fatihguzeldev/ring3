@@ -236,10 +236,10 @@ fn word_accumulator_extend_strict_prefixes_and_dword_neighbors_keep_categories()
                     word_prefix::admitted(&bytes);
                     continue;
                 }
-                assert_eq!(
-                    decode_one(&code_space(CODE, &bytes), GuestAddress(CODE)).err(),
-                    Some(expected),
-                    "{bytes:02x?}"
+                crate::support_fetch::assert_decode_contract(
+                    (decode_one(&code_space(CODE, &bytes), GuestAddress(CODE)))
+                        .expect_err("instruction must fail to decode"),
+                    expected,
                 );
             }
         }
@@ -299,9 +299,10 @@ fn word_accumulator_extend_two_byte_fetch_preserves_page_top_and_execute_boundar
             (u32::MAX, u32::MAX, FaultReason::AddressOverflow),
         ] {
             let memory = code_space(pc, &[0x66]);
-            assert_eq!(
-                decode_one(&memory, GuestAddress(pc)).err(),
-                Some(fetch_error(pc, address, reason, 2))
+            crate::support_fetch::assert_decode_contract(
+                (decode_one(&memory, GuestAddress(pc)))
+                    .expect_err("instruction must fail to decode"),
+                fetch_error(pc, address, reason, 2),
             );
         }
         let mut memory = code_space(0x1fff, &bytes);
@@ -311,9 +312,10 @@ fn word_accumulator_extend_two_byte_fetch_preserves_page_top_and_execute_boundar
                 Permissions::READ,
             )
             .unwrap();
-        assert_eq!(
-            decode_one(&memory, GuestAddress(0x1fff)).err(),
-            Some(fetch_error(0x1fff, 0x2000, FaultReason::Permission, 2))
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(&memory, GuestAddress(0x1fff)))
+                .expect_err("instruction must fail to decode"),
+            fetch_error(0x1fff, 0x2000, FaultReason::Permission, 2),
         );
         let mut memory = code_space(CODE, &bytes);
         memory
@@ -322,9 +324,9 @@ fn word_accumulator_extend_two_byte_fetch_preserves_page_top_and_execute_boundar
                 Permissions::READ,
             )
             .unwrap();
-        assert_eq!(
-            decode_one(&memory, GuestAddress(CODE)).err(),
-            Some(fetch_error(CODE, CODE, FaultReason::Permission, 1))
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(&memory, GuestAddress(CODE))).expect_err("instruction must fail to decode"),
+            fetch_error(CODE, CODE, FaultReason::Permission, 1),
         );
     }
 }

@@ -32,12 +32,7 @@ fn word_register_move_8b_admits_in_bound_engine() {
     engine.compile(1).expect("word register 8b must compile");
 }
 
-use std::{
-    fs::OpenOptions,
-    io::Write,
-    path::PathBuf,
-    process::{Command, Stdio},
-};
+use std::{fs::OpenOptions, io::Write, path::PathBuf};
 
 #[test]
 fn old_byte_dword_transfers_and_word_extensions_validate_and_capture_without_guest_execution() {
@@ -71,30 +66,7 @@ fn old_byte_dword_transfers_and_word_extensions_validate_and_capture_without_gue
             .copy_from_slice(&[PC.to_le_bytes(), (code.len() as u32).to_le_bytes()].concat());
         engine.compile(1).unwrap();
         let bytes = engine.artifact_bytes().unwrap();
-        let mut child = Command::new("node")
-            .args([
-                "-e",
-                r#"
-const assert = require('node:assert/strict'), bytes = require('node:fs').readFileSync(0);
-assert.ok(WebAssembly.validate(bytes));
-const module = new WebAssembly.Module(bytes);
-assert.deepEqual(WebAssembly.Module.imports(module), [{module:'env',name:'memory',kind:'memory'},
-  {module:'ring3',name:'guard',kind:'function'}]);
-assert.deepEqual(WebAssembly.Module.exports(module), [{name:'run',kind:'function'}]);
-"#,
-            ])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap();
-        child.stdin.take().unwrap().write_all(bytes).unwrap();
-        let result = child.wait_with_output().unwrap();
-        assert!(
-            result.status.success(),
-            "{}",
-            String::from_utf8_lossy(&result.stderr)
-        );
+        crate::support_wasm_interface::assert_bound(bytes, false, &[], &[4, 6], false);
         if let Some(directory) = &directory {
             OpenOptions::new()
                 .write(true)
@@ -284,35 +256,13 @@ fn all_register_pairs_in_both_directions_have_exact_ir_and_six_pure_module_profi
                         .resolve(GuestAddress(0x5000), Access::Read)
                         .is_err()
                 );
-                input.push(profile);
+                input.push(profile / 2);
                 input.extend((module.len() as u32).to_le_bytes());
                 input.extend(module);
             }
         }
     }
-    let mut child = Command::new("node").args(["-e", r#"
-const assert=require('node:assert/strict'),input=require('node:fs').readFileSync(0);let at=0,count=0;
-while(at<input.length){const profile=input[at++],size=input.readUInt32LE(at);at+=4;const bytes=input.subarray(at,at+size);at+=size;
- assert.ok(WebAssembly.validate(bytes));const module=new WebAssembly.Module(bytes);
- assert.deepEqual(WebAssembly.Module.imports(module),[{module:'env',name:'memory',kind:'memory'},
- ...(profile<2?[]:[{module:'ring3',name:profile>=4?'guard_resident':'guard',kind:'function'}])]);
- assert.deepEqual(WebAssembly.Module.exports(module),[{name:'run',kind:'function'}]);
- let p=8;const leb=()=>{let n=0,s=0,b;do{b=bytes[p++];n|=(b&127)<<s;s+=7;}while(b&128);return n>>>0;};
- const sections=new Map();while(p<bytes.length){const id=bytes[p++],n=leb();sections.set(id,[p,p+n]);p+=n;}
- assert.deepEqual([...sections.keys()],[1,2,3,7,10]);p=sections.get(1)[0];const types=[];
- for(let i=leb();i>0;i--){assert.equal(bytes[p++],0x60);const n=leb(),params=[...bytes.subarray(p,p+n)];p+=n;const m=leb(),returns=[...bytes.subarray(p,p+m)];p+=m;types.push([params,returns]);}
- assert.deepEqual(types,[[Array(4).fill(127),[127]],...(profile<2?[]:[[Array(profile>=4?7:6).fill(127),[127]]])]);
- p=sections.get(10)[0];assert.equal(leb(),1);const end=leb()+p,locals=[];for(let n=leb();n>0;n--)locals.push([leb(),bytes[p++]]);
- assert.deepEqual(locals,[[16,127],[1,126],[10,127]]);assert.equal(end,sections.get(10)[1]);count++;}
-assert.equal(at,input.length);assert.equal(count,24);
-"#]).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
-    child.stdin.take().unwrap().write_all(&input).unwrap();
-    let output = child.wait_with_output().unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    crate::support_wasm_interface::assert_packed(&input, 24, true);
 }
 
 #[test]
@@ -331,21 +281,22 @@ fn strict_prefix_byte_memory_and_address_neighbors_keep_current_categories() {
             if word_prefix::admit_if_new_prefix(&bytes) {
                 continue;
             }
-            assert_eq!(
-                decode_one(fixture(PC, &bytes).memory().unwrap(), GuestAddress(PC)).err(),
-                Some(DecodeError::Unsupported(UnsupportedFeature::Opcode))
+            crate::support_fetch::assert_decode_contract(
+                (decode_one(fixture(PC, &bytes).memory().unwrap(), GuestAddress(PC)))
+                    .expect_err("instruction must fail to decode"),
+                DecodeError::Unsupported(UnsupportedFeature::Opcode),
             );
         }
         for prefix in [0x26, 0x2e, 0x36, 0x3e, 0x64, 0x65] {
             word_prefix::admitted(&[prefix, 0x66, opcode, 0xc3]);
         }
-        assert_eq!(
-            decode_one(
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(
                 fixture(PC, &[0xf0, 0x66, opcode, 0xc3]).memory().unwrap(),
-                GuestAddress(PC)
-            )
-            .err(),
-            Some(DecodeError::InvalidEncoding)
+                GuestAddress(PC),
+            ))
+            .expect_err("instruction must fail to decode"),
+            DecodeError::InvalidEncoding,
         );
     }
     for opcode in [0x88, 0x8a] {
@@ -422,17 +373,18 @@ fn three_consumed_bytes_cross_pages_and_top_fetch_faults_track_exact_currency() 
                 3,
             ),
         ] {
-            assert_eq!(
-                decode_one(engine.memory().unwrap(), GuestAddress(pc)).err(),
-                Some(DecodeError::MemoryFault {
+            crate::support_fetch::assert_decode_contract(
+                (decode_one(engine.memory().unwrap(), GuestAddress(pc)))
+                    .expect_err("instruction must fail to decode"),
+                DecodeError::MemoryFault {
                     pc: GuestAddress(pc),
                     fault: MemoryFault {
                         address: GuestAddress(address),
                         access: Access::Execute,
-                        reason
+                        reason,
                     },
-                    length
-                })
+                    length,
+                },
             );
         }
     }
@@ -517,13 +469,30 @@ fn late_bad_decode_fetch_caps_and_data_changes_preserve_both_bound_owners() {
                         }],
                         entries,
                     );
+                    if entries && failure == CompileError::InstructionLimit {
+                        assert!(crate::support_admission::admit_if_deferred(
+                            &mut engine,
+                            crate::support_admission::ColdEntryCase {
+                                key: KEY,
+                                keeper: keep,
+                                resident,
+                                pages: &[PC, KEEP],
+                                expected: failure
+                            }
+                        ));
+                        continue;
+                    }
                     let before = engine.arena().to_vec();
                     let expected = if resident {
                         HostError::Resident(RegistryError::Compile(failure))
                     } else {
                         HostError::Compile(failure)
                     };
-                    assert_eq!(bound(&mut engine, resident, entries, 1), Err(expected));
+                    crate::support_fetch::assert_host_contract(
+                        (bound(&mut engine, resident, entries, 1))
+                            .expect_err("compilation must refuse this fixture"),
+                        expected,
+                    );
                     assert_eq!(engine.arena(), before);
                     assert_eq!(engine.generation(), generation);
                     assert_eq!(engine.artifact_bytes().unwrap(), prior.0);

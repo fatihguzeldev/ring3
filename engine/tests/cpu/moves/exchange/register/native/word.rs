@@ -269,10 +269,10 @@ fn word_register_exchange_prefixes_memory_lock_and_multibyte_nop_stay_precise() 
                     continue;
                 }
                 if !word_prefix::admit_if_new_prefix(&prefixed) {
-                    assert_eq!(
-                        decode_one(&code_space(CODE, &prefixed), GuestAddress(CODE)).err(),
-                        Some(expected),
-                        "{prefixed:02x?}"
+                    crate::support_fetch::assert_decode_contract(
+                        (decode_one(&code_space(CODE, &prefixed), GuestAddress(CODE)))
+                            .expect_err("instruction must fail to decode"),
+                        expected,
                     );
                 }
             }
@@ -314,10 +314,10 @@ fn word_register_exchange_prefixes_memory_lock_and_multibyte_nop_stay_precise() 
         &[0x66, 0x0f, 0x1f, 0x44, 0x00, 1],
     ] {
         if !word_prefix::admit_if_new_prefix(bytes) {
-            assert_eq!(
-                decode_one(&code_space(CODE, bytes), GuestAddress(CODE)).err(),
-                Some(unsupported),
-                "{bytes:02x?}"
+            crate::support_fetch::assert_decode_contract(
+                (decode_one(&code_space(CODE, bytes), GuestAddress(CODE)))
+                    .expect_err("instruction must fail to decode"),
+                unsupported,
             );
         }
     }
@@ -402,14 +402,16 @@ fn word_register_exchange_fetch_checks_two_and_three_byte_page_top_execute_bound
         }
         for cut in 1..bytes.len() {
             let pc = 0x2000 - cut as u32;
-            assert_eq!(
-                decode_one(&code_space(pc, &bytes[..cut]), GuestAddress(pc)).err(),
-                Some(fetch_error(pc, 0x2000, FaultReason::Unmapped, cut + 1))
+            crate::support_fetch::assert_decode_contract(
+                (decode_one(&code_space(pc, &bytes[..cut]), GuestAddress(pc)))
+                    .expect_err("instruction must fail to decode"),
+                fetch_error(pc, 0x2000, FaultReason::Unmapped, cut + 1),
             );
             let top = u32::MAX - cut as u32 + 1;
-            assert_eq!(
-                decode_one(&code_space(top, &bytes[..cut]), GuestAddress(top)).err(),
-                Some(fetch_error(top, top, FaultReason::AddressOverflow, cut + 1))
+            crate::support_fetch::assert_decode_contract(
+                (decode_one(&code_space(top, &bytes[..cut]), GuestAddress(top)))
+                    .expect_err("instruction must fail to decode"),
+                fetch_error(top, top, FaultReason::AddressOverflow, cut + 1),
             );
         }
         let pc = 0x2000 - bytes.len() as u32 + 1;
@@ -420,14 +422,9 @@ fn word_register_exchange_fetch_checks_two_and_three_byte_page_top_execute_bound
                 Permissions::READ,
             )
             .unwrap();
-        assert_eq!(
-            decode_one(&memory, GuestAddress(pc)).err(),
-            Some(fetch_error(
-                pc,
-                0x2000,
-                FaultReason::Permission,
-                bytes.len()
-            ))
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(&memory, GuestAddress(pc))).expect_err("instruction must fail to decode"),
+            fetch_error(pc, 0x2000, FaultReason::Permission, bytes.len()),
         );
         let mut memory = code_space(CODE, &bytes);
         memory
@@ -436,9 +433,9 @@ fn word_register_exchange_fetch_checks_two_and_three_byte_page_top_execute_bound
                 Permissions::READ,
             )
             .unwrap();
-        assert_eq!(
-            decode_one(&memory, GuestAddress(CODE)).err(),
-            Some(fetch_error(CODE, CODE, FaultReason::Permission, 1))
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(&memory, GuestAddress(CODE))).expect_err("instruction must fail to decode"),
+            fetch_error(CODE, CODE, FaultReason::Permission, 1),
         );
     }
 }

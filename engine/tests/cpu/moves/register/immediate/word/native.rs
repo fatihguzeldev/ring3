@@ -4,12 +4,7 @@ use ring3_engine::{
     memory::{Access, GuestAddress},
     process::EngineInstance,
 };
-use std::{
-    fs::OpenOptions,
-    io::Write,
-    path::PathBuf,
-    process::{Command, Stdio},
-};
+use std::{fs::OpenOptions, io::Write, path::PathBuf};
 
 fn compile_bound(bytes: &[u8]) -> Vec<u8> {
     let mut engine = EngineInstance::new(1, 0x574d_494d_4d45_4449).unwrap();
@@ -77,35 +72,32 @@ fn existing_immediate_and_word_string_modules_validate_and_optionally_capture() 
         input.extend((module.len() as u32).to_le_bytes());
         input.extend(module);
     }
-    let mut child = Command::new("node")
-        .args(["-e", r#"
-const assert = require('node:assert/strict');
-const input = require('node:fs').readFileSync(0);
-let at = 0, count = 0;
-for (const names of [[], [], [], [], ['cpu_read16'], ['cpu_store16']]) {
-  const size = input.readUInt32LE(at); at += 4;
-  assert.ok(size > 8 && at + size <= input.length);
-  const module = new WebAssembly.Module(input.subarray(at, at + size)); at += size;
-  assert.deepEqual(WebAssembly.Module.imports(module), [{module: 'env', name: 'memory', kind: 'memory'},
-    ...['guard', ...names].map(name => ({module: 'ring3', name, kind: 'function'}))]);
-  assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
-  count++;
+    let mut at = 0;
+    for helpers in [
+        vec![],
+        vec![],
+        vec![],
+        vec![],
+        vec![("cpu_read16", 1)],
+        vec![("cpu_store16", 2)],
+    ] {
+        let length = u32::from_le_bytes(input[at..at + 4].try_into().unwrap()) as usize;
+        at += 4;
+        let mut arities = vec![4, 6];
+        if let Some((_, arity)) = helpers.first() {
+            arities.push(*arity);
+        }
+        crate::support_wasm_interface::assert_bound(
+            &input[at..at + length],
+            false,
+            &helpers,
+            &arities,
+            !helpers.is_empty(),
+        );
+        at += length;
+    }
+    assert_eq!(at, input.len());
 }
-assert.equal(count, 6); assert.equal(at, input.length);
-"#])
-        .stdin(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    child.stdin.take().unwrap().write_all(&input).unwrap();
-    let output = child.wait_with_output().unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-}
-
 use ring3_engine::{
     cpu::{
         UnsupportedFeature,
@@ -194,60 +186,21 @@ fn artifact(engine: &EngineInstance, resident: bool, id: u64) -> Vec<u8> {
 }
 
 fn validate_pure_modules(rows: &[(u8, Vec<u8>)]) {
-    let mut input = Vec::new();
-    for (mode, bytes) in rows {
-        input.push(*mode);
-        input.extend((bytes.len() as u32).to_le_bytes());
-        input.extend(bytes);
+    assert_eq!(rows.len(), 6);
+    for (owner, bytes) in rows {
+        assert!(*owner <= 2);
+        if *owner == 0 {
+            crate::support_wasm_interface::assert_interface(bytes, &[], &[4], false);
+        } else {
+            crate::support_wasm_interface::assert_bound(
+                bytes,
+                *owner == 2,
+                &[],
+                &[4, if *owner == 2 { 7 } else { 6 }],
+                false,
+            );
+        }
     }
-    let mut child = Command::new("node").args(["-e", r#"
-const assert = require('node:assert/strict');
-const input = require('node:fs').readFileSync(0);
-let at = 0, modules = 0;
-function u(reader) {
-  let n = 0, shift = 0;
-  for (;;) {assert.ok(reader.at < reader.bytes.length && shift <= 28);
-    const b = reader.bytes[reader.at++]; n += (b & 127) * 2 ** shift;
-    if (!(b & 128)) return n; shift += 7;}
-}
-function one(r) {assert.ok(r.at < r.bytes.length); return r.bytes[r.at++];}
-for (;;) {
-  if (at === input.length) break;
-  const mode = input[at++], length = input.readUInt32LE(at); at += 4;
-  assert.ok([0, 1, 2].includes(mode) && length > 8 && length <= 65536 && at + length <= input.length);
-  const bytes = input.subarray(at, at + length); at += length;
-  const module = new WebAssembly.Module(bytes), guard = mode === 2 ? 'guard_resident' : 'guard';
-  assert.deepEqual(WebAssembly.Module.imports(module), [{module: 'env', name: 'memory', kind: 'memory'},
-    ...(mode ? [{module: 'ring3', name: guard, kind: 'function'}] : [])]);
-  assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
-  const r = {bytes, at: 8}, sections = new Map();
-  while (r.at < bytes.length) {const id = one(r), size = u(r); assert.ok(r.at + size <= bytes.length && !sections.has(id));
-    sections.set(id, bytes.subarray(r.at, r.at + size)); r.at += size;}
-  assert.deepEqual([...sections.keys()], [1, 2, 3, 7, 10]);
-  const types = {bytes: sections.get(1), at: 0}; assert.equal(u(types), mode ? 2 : 1);
-  for (const arity of mode ? [4, mode === 2 ? 7 : 6] : [4]) {
-    assert.equal(one(types), 0x60); assert.equal(u(types), arity);
-    for (let i = 0; i < arity; i++) assert.equal(one(types), 0x7f);
-    assert.equal(u(types), 1); assert.equal(one(types), 0x7f);
-  }
-  assert.equal(types.at, types.bytes.length);
-  const code = {bytes: sections.get(10), at: 0}; assert.equal(u(code), 1);
-  const size = u(code); assert.equal(code.at + size, code.bytes.length);
-  const body = {bytes: code.bytes.subarray(code.at), at: 0}; assert.equal(u(body), 3);
-  assert.equal(u(body), 16); assert.equal(one(body), 0x7f);
-  assert.equal(u(body), 1); assert.equal(one(body), 0x7e);
-  assert.equal(u(body), 10); assert.equal(one(body), 0x7f);
-  assert.ok(body.at < body.bytes.length); modules++;
-}
-assert.equal(modules, 6); assert.equal(at, input.length);
-"#]).stdin(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
-    child.stdin.take().unwrap().write_all(&input).unwrap();
-    let output = child.wait_with_output().unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
 }
 
 #[test]
@@ -353,31 +306,25 @@ fn exact_immediate_prefix_fetch_and_consumed_currency_boundaries() {
         }
         for cut in 1..bytes.len() {
             let mut code = memory(0x2000 - cut as u32, &bytes[..cut]);
-            assert!(matches!(
-                decode_one(&code, GuestAddress(0x2000 - cut as u32)),
-                Err(DecodeError::MemoryFault {
-                    fault: MemoryFault {
-                        reason: FaultReason::Unmapped,
-                        ..
-                    },
-                    ..
-                })
-            ));
+            crate::support_fetch::assert_error(
+                decode_one(&code, GuestAddress(0x2000 - cut as u32)).unwrap_err(),
+                0x2000 - cut as u32,
+                0x2000,
+                FaultReason::Unmapped,
+                cut as u32 + 1,
+            );
             code.map_zeroed(
                 PageRange::new(GuestAddress(0x2000), 1).unwrap(),
                 Permissions::READ,
             )
             .unwrap();
-            assert!(matches!(
-                decode_one(&code, GuestAddress(0x2000 - cut as u32)),
-                Err(DecodeError::MemoryFault {
-                    fault: MemoryFault {
-                        reason: FaultReason::Permission,
-                        ..
-                    },
-                    ..
-                })
-            ));
+            crate::support_fetch::assert_error(
+                decode_one(&code, GuestAddress(0x2000 - cut as u32)).unwrap_err(),
+                0x2000 - cut as u32,
+                0x2000,
+                FaultReason::Permission,
+                cut as u32 + 1,
+            );
         }
         let top = memory(u32::MAX, &[0x66]);
         assert!(matches!(
@@ -396,15 +343,15 @@ fn exact_immediate_prefix_fetch_and_consumed_currency_boundaries() {
                 continue;
             }
             let code = memory(PC, &[vec![prefix], bytes.clone()].concat());
-            assert_eq!(
+            crate::support_fetch::assert_decode_contract(
                 decode_one(&code, GuestAddress(PC)).unwrap_err(),
-                DecodeError::Unsupported(UnsupportedFeature::Opcode)
+                DecodeError::Unsupported(UnsupportedFeature::Opcode),
             );
         }
         let locked = memory(PC, &[vec![0xf0], bytes.clone()].concat());
-        assert_eq!(
+        crate::support_fetch::assert_decode_contract(
             decode_one(&locked, GuestAddress(PC)).unwrap_err(),
-            DecodeError::InvalidEncoding
+            DecodeError::InvalidEncoding,
         );
         for prefix in [0x26, 0x2e, 0x36, 0x3e, 0x64, 0x65] {
             word_prefix::admitted(&[vec![prefix], bytes.clone()].concat());
