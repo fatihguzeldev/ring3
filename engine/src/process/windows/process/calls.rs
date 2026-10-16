@@ -76,10 +76,78 @@ impl EngineInstance {
             GetCurrentProcessId => self.process_runtime.launch.process_id,
             GetCurrentThreadId => self.current_windows_thread_id()?,
             GetCurrentThread => u32::MAX - 1,
+            GetStdHandle | SetStdHandle => {
+                let index = match args[0] {
+                    0xffff_fff6 => 0,
+                    0xffff_fff5 => 1,
+                    0xffff_fff4 => 2,
+                    _ => {
+                        return Ok(ProcessReply32 {
+                            value: if api == GetStdHandle {
+                                u64::from(u32::MAX)
+                            } else {
+                                0
+                            },
+                            error: Some(87),
+                        });
+                    }
+                };
+                if api == GetStdHandle {
+                    self.process_standard_handles()?[index]
+                } else {
+                    if let Some(startup) = self.process_runtime.startup.as_ref() {
+                        buffers::write(
+                            self.memory.as_mut().unwrap(),
+                            startup.peb + 0x118 + index as u32 * 4,
+                            &args[1].to_le_bytes(),
+                        )
+                        .map_err(guest)?;
+                    }
+                    self.process_runtime.standard_handles[index] = args[1];
+                    1
+                }
+            }
             EncodePointer => crate::windows::process::PointerCodec32::new(self.key).encode(args[0]),
             DecodePointer => crate::windows::process::PointerCodec32::new(self.key).decode(args[0]),
             IsProcessorFeaturePresent => {
                 u32::from(crate::windows::process::processor_feature_present(args[0]))
+            }
+            GetModuleHandleExA | GetModuleHandleExW => {
+                buffers::write(self.memory.as_mut().unwrap(), args[2], &0u32.to_le_bytes())
+                    .map_err(guest)?;
+                if args[0] & !7 != 0 || args[0] & 3 == 3 {
+                    return Err(guest(ProcessError32::InvalidParameter));
+                }
+                let name = if args[0] & 4 == 0 && args[1] != 0 {
+                    Some(buffers::string(self.memory()?, args[1], wide).map_err(guest)?)
+                } else {
+                    None
+                };
+                let prepared = self.prepare_module_handle_reference(
+                    name.as_deref(),
+                    (args[0] & 4 != 0).then_some(crate::memory::GuestAddress(args[1])),
+                    args[0],
+                );
+                let Some((handle, prepared)) = (match prepared {
+                    Ok(prepared) => prepared,
+                    Err(HostError::Module(crate::loader::ModuleError32::ReferenceExhausted)) => {
+                        return Err(guest(ProcessError32::Capacity));
+                    }
+                    Err(error) => return Err(error),
+                }) else {
+                    return Ok(ProcessReply32 {
+                        value: 0,
+                        error: Some(126),
+                    });
+                };
+                buffers::write(
+                    self.memory.as_mut().unwrap(),
+                    args[2],
+                    &handle.to_le_bytes(),
+                )
+                .map_err(guest)?;
+                self.commit_module_handle_reference(prepared);
+                1
             }
             GetCommandLineA | GetCommandLineW => {
                 self.process_runtime
@@ -143,22 +211,28 @@ impl EngineInstance {
                 .map_err(guest)?;
                 length as u32
             }
-            GetEnvironmentStringsW => {
+            GetEnvironmentStringsA | GetEnvironmentStringsW => {
+                let code_page = self.windows_oem_code_page();
                 let runtime = &mut self.process_runtime;
                 let startup = runtime
                     .startup
                     .as_mut()
                     .ok_or(guest(ProcessError32::InvalidParameter))?;
                 startup
-                    .environment_snapshot(self.memory.as_mut().unwrap(), &runtime.environment)
+                    .environment_snapshot(
+                        self.memory.as_mut().unwrap(),
+                        &runtime.environment,
+                        wide,
+                        code_page,
+                    )
                     .map_err(guest)?
             }
-            FreeEnvironmentStringsW => {
+            FreeEnvironmentStringsA | FreeEnvironmentStringsW => {
                 self.process_runtime
                     .startup
                     .as_mut()
                     .ok_or(guest(ProcessError32::InvalidParameter))?
-                    .free_environment_snapshot(args[0])
+                    .free_environment_snapshot(args[0], wide)
                     .map_err(guest)?;
                 1
             }
@@ -188,6 +262,10 @@ impl EngineInstance {
             GetStartupInfoA | GetStartupInfoW => {
                 let mut bytes = [0; 68];
                 bytes[..4].copy_from_slice(&68u32.to_le_bytes());
+                for (index, handle) in self.process_standard_handles()?.iter().enumerate() {
+                    bytes[56 + index * 4..60 + index * 4].copy_from_slice(&handle.to_le_bytes());
+                }
+                bytes[44..48].copy_from_slice(&self.process_runtime.startup_flags.to_le_bytes());
                 buffers::write(self.memory.as_mut().unwrap(), args[0], &bytes).map_err(guest)?;
                 0
             }

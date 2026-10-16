@@ -1,19 +1,37 @@
 use super::{buffers, startup::ProcessStartup32};
 use crate::{
     memory::{AddressSpace, GuestAddress},
-    windows::process::{Environment32, ProcessError32},
+    windows::{
+        process::{Environment32, ProcessError32},
+        text::CodePage32,
+    },
 };
+
+pub(super) struct EnvironmentSnapshot32 {
+    address: u32,
+    length: usize,
+    wide: bool,
+}
 impl ProcessStartup32 {
     pub(super) fn environment_snapshot(
         &mut self,
         memory: &mut AddressSpace,
         environment: &Environment32,
+        wide: bool,
+        code_page: CodePage32,
     ) -> Result<u32, ProcessError32> {
-        let bytes = environment
-            .block()
-            .into_iter()
-            .flat_map(u16::to_le_bytes)
-            .collect::<Vec<_>>();
+        let units = environment.block();
+        let bytes = if wide {
+            units
+                .into_iter()
+                .flat_map(u16::to_le_bytes)
+                .collect::<Vec<_>>()
+        } else {
+            code_page
+                .encode(&units, false)
+                .map_err(|_| ProcessError32::InvalidParameter)?
+                .0
+        };
         let mut arena = self.prepare_arena()?;
         let address = arena.allocate(bytes.len(), 2)?;
         self.environment_blocks
@@ -21,18 +39,26 @@ impl ProcessStartup32 {
             .map_err(|_| ProcessError32::Allocation)?;
         buffers::write(memory, address, &bytes)?;
         self.commit_arena(arena);
-        self.environment_blocks.push((address, bytes.len()));
+        self.environment_blocks.push(EnvironmentSnapshot32 {
+            address,
+            length: bytes.len(),
+            wide,
+        });
         Ok(address)
     }
-    pub(super) fn free_environment_snapshot(&mut self, address: u32) -> Result<(), ProcessError32> {
+    pub(super) fn free_environment_snapshot(
+        &mut self,
+        address: u32,
+        wide: bool,
+    ) -> Result<(), ProcessError32> {
         let index = self
             .environment_blocks
             .iter()
-            .position(|(pointer, _)| *pointer == address)
+            .position(|block| block.address == address && block.wide == wide)
             .ok_or(ProcessError32::InvalidParameter)?;
         let mut arena = self.prepare_arena()?;
-        let (pointer, length) = self.environment_blocks[index];
-        arena.release(pointer, length)?;
+        let block = &self.environment_blocks[index];
+        arena.release(block.address, block.length)?;
         self.environment_blocks.remove(index);
         self.commit_arena(arena);
         Ok(())

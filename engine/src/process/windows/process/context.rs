@@ -9,6 +9,8 @@ pub(in crate::process) struct WindowsProcessRuntime32 {
     pub(super) launch: ProcessLaunch32,
     pub(super) environment: Environment32,
     pub(in crate::process) startup: Option<super::startup::ProcessStartup32>,
+    pub(super) standard_handles: [u32; 3],
+    pub(super) startup_flags: u32,
 }
 impl WindowsProcessRuntime32 {
     pub(in crate::process) fn new(launch: ProcessLaunch32) -> Result<Self, ProcessError32> {
@@ -23,6 +25,8 @@ impl WindowsProcessRuntime32 {
             launch,
             environment,
             startup: None,
+            standard_handles: [0; 3],
+            startup_flags: 0,
         })
     }
     pub(in crate::process) fn reservation(&self) -> Option<PageRange> {
@@ -30,6 +34,34 @@ impl WindowsProcessRuntime32 {
     }
 }
 impl crate::process::EngineInstance {
+    pub(super) fn process_standard_handles(&self) -> Result<[u32; 3], crate::process::HostError> {
+        let Some(startup) = self.process_runtime.startup.as_ref() else {
+            return Ok(self.process_runtime.standard_handles);
+        };
+        let mut bytes = [0; 12];
+        self.memory()?
+            .read(crate::memory::GuestAddress(startup.peb + 0x118), &mut bytes)
+            .map_err(|_| crate::process::HostError::WindowsProcess(ProcessError32::NoAccess))?;
+        Ok(core::array::from_fn(|index| {
+            u32::from_le_bytes(bytes[index * 4..index * 4 + 4].try_into().unwrap())
+        }))
+    }
+    pub fn configure_process_standard_handles(
+        &mut self,
+        handles: [u32; 3],
+    ) -> Result<(), crate::process::HostError> {
+        self.memory()?;
+        if self.image_started
+            || self.process_runtime.startup.is_some()
+            || self.pending_call.is_some()
+            || self.callback.is_some()
+        {
+            return Err(crate::process::HostError::InvalidRequest);
+        }
+        self.process_runtime.standard_handles = handles;
+        self.process_runtime.startup_flags |= 0x100;
+        Ok(())
+    }
     pub(in crate::process) fn current_windows_process_id(&self) -> u32 {
         self.process_runtime.launch.process_id
     }
@@ -57,6 +89,8 @@ impl crate::process::EngineInstance {
         }
         let mut candidate =
             WindowsProcessRuntime32::new(launch).map_err(HostError::WindowsProcess)?;
+        candidate.standard_handles = self.process_runtime.standard_handles;
+        candidate.startup_flags = self.process_runtime.startup_flags;
         self.apply_launch_file_directory(&candidate.launch.current_directory)?;
         candidate.configured = true;
         self.process_runtime = candidate;

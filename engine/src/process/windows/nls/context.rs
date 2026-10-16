@@ -69,3 +69,9 @@ impl crate::process::EngineInstance {
         Ok(())
     }
 }
+
+impl crate::process::EngineInstance {
+    pub(in crate::process) fn windows_oem_code_page(&self) -> crate::windows::text::CodePage32 {
+        self.nls.profile.oem
+    }
+}

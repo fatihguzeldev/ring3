@@ -24,6 +24,8 @@ catalog! {
  ExpandEnvironmentStringsW=0x000c_000b,"ExpandEnvironmentStringsW",3;
  GetEnvironmentStringsW=0x000c_000c,"GetEnvironmentStringsW",0;
  FreeEnvironmentStringsW=0x000c_000d,"FreeEnvironmentStringsW",1;
+ GetEnvironmentStringsA=0x000c_000e,"GetEnvironmentStringsA",0;
+ FreeEnvironmentStringsA=0x000c_000f,"FreeEnvironmentStringsA",1;
  QueryPerformanceCounter=0x000c_0010,"QueryPerformanceCounter",1;
  QueryPerformanceFrequency=0x000c_0011,"QueryPerformanceFrequency",1;
  GetTickCount=0x000c_0012,"GetTickCount",0;
@@ -42,4 +44,8 @@ catalog! {
  EncodePointer=0x000c_0020,"EncodePointer",1;
  DecodePointer=0x000c_0021,"DecodePointer",1;
  IsProcessorFeaturePresent=0x000c_0022,"IsProcessorFeaturePresent",1;
+ GetModuleHandleExA=0x000c_0023,"GetModuleHandleExA",3;
+ GetModuleHandleExW=0x000c_0024,"GetModuleHandleExW",3;
+ GetStdHandle=0x000c_0025,"GetStdHandle",1;
+ SetStdHandle=0x000c_0026,"SetStdHandle",2;
 }

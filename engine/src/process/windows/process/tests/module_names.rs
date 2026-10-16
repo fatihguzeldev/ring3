@@ -6,7 +6,7 @@ use crate::{
     process::{FileConfig32, FileEnvironment32, ModuleOperation32, ModuleRuntimeConfig32},
 };
 const BUFFER: u32 = 0x30000;
-fn engine() -> (EngineInstance, u32) {
+pub(super) fn engine() -> (EngineInstance, u32) {
     let mut engine = EngineInstance::new(128, 7).unwrap();
     engine.configure_cpu_clock(1_000_000_000, 0).unwrap();
     engine.configure_files(FileConfig32::default()).unwrap();

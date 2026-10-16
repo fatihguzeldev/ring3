@@ -110,10 +110,14 @@ impl EngineInstance {
         bytes.word(0x100, 0x100);
         bytes.word(0x104, 0x100);
         bytes.word(0x108, 1);
+        for (index, handle) in self.process_runtime.standard_handles.iter().enumerate() {
+            bytes.word(0x118 + index * 4, *handle);
+        }
         bytes.unicode(0x124, cwd);
         bytes.unicode(0x138, image);
         bytes.unicode(0x140, command);
         bytes.word(0x148, environment);
+        bytes.word(0x190, self.process_runtime.startup_flags);
         bytes.word(0x200, 0x30);
         bytes.bytes[0x204] = 1;
         let (loader_entries, loader_initialization) = self.stage_process_loader(

@@ -13,7 +13,7 @@ pub(in crate::process) struct ProcessStartup32 {
     pub(super) command_line: [u32; 2],
     pub(super) image_path: String,
     bump: usize,
-    pub(super) environment_blocks: Vec<(u32, usize)>,
+    pub(super) environment_blocks: Vec<super::environment::EnvironmentSnapshot32>,
     pub(super) current_environment: (u32, usize),
     free_blocks: Vec<(usize, usize)>,
     allocation_revision: u64,

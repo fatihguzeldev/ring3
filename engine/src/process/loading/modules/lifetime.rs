@@ -11,6 +11,77 @@ pub(super) struct ModuleReference {
     pub pinned: bool,
 }
 
+pub(in crate::process) struct PreparedModuleReference32 {
+    id: ModuleId32,
+    explicit: u32,
+    pinned: bool,
+    next_explicit: u32,
+    next_pinned: bool,
+}
+
+impl EngineInstance {
+    pub(in crate::process) fn prepare_module_handle_reference(
+        &self,
+        name: Option<&str>,
+        address: Option<GuestAddress>,
+        flags: u32,
+    ) -> Result<Option<(u32, PreparedModuleReference32)>, HostError> {
+        let module = if let Some(address) = address {
+            self.modules.loaded.containing(address)
+        } else if let Some(name) = name {
+            self.modules.loaded.find(name)
+        } else {
+            self.modules
+                .loaded
+                .root()
+                .and_then(|id| self.modules.loaded.get(id))
+        };
+        let Some(module) = module else {
+            return Ok(None);
+        };
+        let reference = self
+            .modules
+            .reference(module.id())
+            .map_err(HostError::Module)?;
+        let next_explicit = if flags & 2 == 0 {
+            reference
+                .explicit
+                .checked_add(1)
+                .ok_or(HostError::Module(ModuleError32::ReferenceExhausted))?
+        } else {
+            reference.explicit
+        };
+        Ok(Some((
+            module.base(),
+            PreparedModuleReference32 {
+                id: reference.id,
+                explicit: reference.explicit,
+                pinned: reference.pinned,
+                next_explicit,
+                next_pinned: reference.pinned || flags & 1 != 0,
+            },
+        )))
+    }
+
+    pub(in crate::process) fn commit_module_handle_reference(
+        &mut self,
+        prepared: PreparedModuleReference32,
+    ) {
+        let reference = self
+            .modules
+            .references
+            .iter_mut()
+            .find(|reference| reference.id == prepared.id)
+            .expect("module reference was prepared before output publication");
+        assert_eq!(
+            (reference.explicit, reference.pinned),
+            (prepared.explicit, prepared.pinned)
+        );
+        reference.explicit = prepared.next_explicit;
+        reference.pinned = prepared.next_pinned;
+    }
+}
+
 impl ModuleProcess32 {
     pub(super) fn reference(&self, id: ModuleId32) -> Result<&ModuleReference, ModuleError32> {
         self.references

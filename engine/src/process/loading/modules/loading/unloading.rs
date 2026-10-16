@@ -42,6 +42,14 @@ impl EngineInstance {
             .find(|module| module.base() == handle)
             .ok_or(HostError::Module(ModuleError32::InvalidHandle))?
             .id();
+        if self
+            .modules
+            .reference(root)
+            .map_err(HostError::Module)?
+            .pinned
+        {
+            return Ok(ModuleOperation32::Released);
+        }
         let ids = self
             .modules
             .unreachable_after_release(root)
