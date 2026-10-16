@@ -74,7 +74,11 @@ impl ExceptionRecord32 {
                 status & 0x40 != 0,
             ),
             ExitReason::SimdFloatingPoint { mxcsr } => floating(mxcsr, (mxcsr >> 7) & 0x3f, false),
-            ExitReason::GeneralProtection { .. } => 0xc0000005,
+            ExitReason::GeneralProtection { .. } => {
+                count = 2;
+                information[1] = u32::MAX;
+                0xc0000005
+            }
             ExitReason::DeviceNotAvailable
             | ExitReason::InvalidTss { .. }
             | ExitReason::SegmentNotPresent { .. } => 0xc0000096,

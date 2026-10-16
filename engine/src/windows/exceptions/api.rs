@@ -47,6 +47,13 @@ impl ExceptionApi32 {
     pub fn id(self) -> u32 {
         self as u32
     }
+    pub fn convention(self) -> crate::windows::CallingConvention32 {
+        if self == Self::RtlRestoreContext {
+            crate::windows::CallingConvention32::Cdecl
+        } else {
+            crate::windows::CallingConvention32::Stdcall
+        }
+    }
     pub fn name(self) -> &'static str {
         match self {
             Self::AddVectoredExceptionHandler => "AddVectoredExceptionHandler",
