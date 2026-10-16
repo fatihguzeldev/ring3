@@ -21,6 +21,7 @@ pub fn prepare_entry_region(
         DecodePolicy::Strict,
         None,
         crate::cpu::x86::decode::DecodeAuthority::default(),
+        &|_| false,
     )
 }
 
@@ -41,6 +42,7 @@ pub(super) fn prepare_embedded_entry_region(
         DecodePolicy::Strict,
         cs,
         authority,
+        &|_| false,
     )
 }
 
@@ -62,6 +64,17 @@ pub(super) fn prepare_runtime_entry(
     cs: Option<CodeFetchContext>,
     authority: crate::cpu::x86::decode::DecodeAuthority,
 ) -> Result<PreparedRegion, CompileError> {
+    prepare_runtime_entry_until(memory, entry, limits, cs, authority, &|_| false)
+}
+
+pub(super) fn prepare_runtime_entry_until(
+    memory: &AddressSpace,
+    entry: GuestAddress,
+    limits: CompileLimits,
+    cs: Option<CodeFetchContext>,
+    authority: crate::cpu::x86::decode::DecodeAuthority,
+    joins: &dyn Fn(GuestAddress) -> bool,
+) -> Result<PreparedRegion, CompileError> {
     prepare(
         memory,
         &[entry],
@@ -71,6 +84,7 @@ pub(super) fn prepare_runtime_entry(
         DecodePolicy::Execution,
         cs,
         authority,
+        joins,
     )
 }
 
@@ -84,6 +98,7 @@ fn prepare(
     decode_policy: DecodePolicy,
     cs: Option<CodeFetchContext>,
     authority: crate::cpu::x86::decode::DecodeAuthority,
+    joins: &dyn Fn(GuestAddress) -> bool,
 ) -> Result<PreparedRegion, CompileError> {
     region::validate_limits(limits)?;
     if entries.is_empty() || entries.len() > limits.blocks {
@@ -142,6 +157,9 @@ fn prepare(
                 break;
             }
             let pc = GuestAddress(cursor as u32);
+            if cursor != start && joins(pc) {
+                break;
+            }
             let decoded = crate::cpu::x86::decode::decode_for_compilation(
                 memory,
                 pc,

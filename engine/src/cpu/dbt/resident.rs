@@ -266,7 +266,14 @@ impl ResidentRegistry {
         let prepared = if let Some(gate) = gate {
             prepare_resident_entry_region(memory, &[entry], limits, &[gate], Some(cs), authority)
         } else {
-            super::cold::prepare_runtime_entry(memory, entry, limits, Some(cs), authority)
+            super::cold::prepare_runtime_entry_until(
+                memory,
+                entry,
+                limits,
+                Some(cs),
+                authority,
+                &|pc| self.lookup_bound(memory, pc, cs).is_ok(),
+            )
         }
         .map_err(RegistryError::Compile)?;
         let id = allocate_id(&NEXT_UNIT_ID)?;
@@ -942,3 +949,7 @@ mod synthetic_key_tests {
 #[cfg(test)]
 #[path = "resident/tests/paging.rs"]
 mod paging_tests;
+
+#[cfg(test)]
+#[path = "resident/tests/cache/joins.rs"]
+mod cache_join_tests;

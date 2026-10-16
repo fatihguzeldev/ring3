@@ -174,3 +174,71 @@ fn parked_call_owner_is_pinned_and_all_pinned_cache_rejects_admission_without_mu
     );
     assert_eq!(single.cache_usage().unwrap(), before);
 }
+
+#[test]
+fn cache_prefix_joins_installed_tail_and_smc_recompiles_page_dependents() {
+    let mut engine = fixture_units(4);
+    engine
+        .memory
+        .as_mut()
+        .unwrap()
+        .write(GuestAddress(0x1000), &[0x08, 0xcd, 0x90, 0x90, 0xc3])
+        .unwrap();
+    let tail = install(&mut engine, 0x1002);
+    let prefix = install(&mut engine, 0x1000);
+    assert_ne!(prefix.unit_id, tail.unit_id);
+    let region = engine
+        .resident
+        .as_ref()
+        .unwrap()
+        .get_raw(engine.memory.as_ref().unwrap(), prefix.unit_id)
+        .unwrap();
+    assert_eq!(region.metadata().instructions, 1);
+    assert!(!region.contains_executable(0x1002));
+    let joined = engine.prepare_cache_entry(KEY, 0x1002).unwrap();
+    assert_eq!(
+        (joined.kind, joined.unit_id, joined.slot),
+        (CacheRequestKind32::Hit, tail.unit_id, tail.slot)
+    );
+    engine
+        .memory
+        .as_mut()
+        .unwrap()
+        .write(GuestAddress(0x1002), &[0x40])
+        .unwrap();
+    assert_eq!(
+        engine.lookup_installed_resident(KEY, 0x1000),
+        Err(HostError::Resident(
+            crate::cpu::dbt::RegistryError::CodeInvalidated
+        ))
+    );
+    let replacement = install(&mut engine, 0x1002);
+    assert_ne!(replacement.unit_id, tail.unit_id);
+    assert_eq!(
+        engine
+            .lookup_installed_resident(KEY, 0x1002)
+            .unwrap()
+            .unit_id,
+        replacement.unit_id
+    );
+    let new_prefix = install(&mut engine, 0x1000);
+    assert_ne!(new_prefix.unit_id, prefix.unit_id);
+    assert_eq!(
+        engine
+            .resident
+            .as_ref()
+            .unwrap()
+            .get_raw(engine.memory.as_ref().unwrap(), new_prefix.unit_id)
+            .unwrap()
+            .metadata()
+            .instructions,
+        1
+    );
+    assert_eq!(
+        engine
+            .lookup_installed_resident(KEY, 0x1000)
+            .unwrap()
+            .unit_id,
+        new_prefix.unit_id
+    );
+}
