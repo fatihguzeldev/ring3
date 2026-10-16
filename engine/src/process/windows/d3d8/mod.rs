@@ -1,3 +1,5 @@
+mod thread;
+pub(in crate::process) use thread::D3D8ThreadReply32;
 mod bindings;
 mod context;
 mod dispatch;
@@ -14,6 +16,7 @@ mod resources;
 mod runtime;
 mod shaders;
 mod state;
+mod termination;
 mod transfers;
 mod transport;
 mod types;

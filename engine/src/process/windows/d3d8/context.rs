@@ -154,3 +154,9 @@ impl D3D8Runtime32 {
         }
     }
 }
+
+impl D3D8Runtime32 {
+    pub(in crate::process) fn guest_reservations(&self) -> [crate::memory::PageRange; 2] {
+        [self.config.objects, self.config.locks]
+    }
+}

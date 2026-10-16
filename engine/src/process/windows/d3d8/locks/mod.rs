@@ -29,6 +29,10 @@ pub(super) struct PreparedLockDisposal32 {
 }
 
 impl LockRegistry32 {
+    pub(super) fn terminate_process(&mut self) {
+        self.entries.clear();
+    }
+
     pub(super) fn prepare_disposal(
         &self,
         memory: &AddressSpace,

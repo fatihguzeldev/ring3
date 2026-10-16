@@ -30,6 +30,19 @@ pub(super) enum ReplyKind32 {
     LockReadback(ReadbackId),
     Ready(u32),
 }
+impl D3D8Reply32 {
+    pub(in crate::process) fn ready(&self, runtime: &D3D8Runtime32) -> bool {
+        let device = runtime.device_by_epoch(self.epoch).ok();
+        match self.kind {
+            ReplyKind32::Ready(_) => true,
+            ReplyKind32::Retry | ReplyKind32::Drain(_) => device
+                .is_none_or(|device| !device.queue().is_draining() && !device.queue().is_sealed()),
+            ReplyKind32::Readback(id) | ReplyKind32::LockReadback(id) => {
+                device.is_none_or(|device| device.pending_readback(id).is_none())
+            }
+        }
+    }
+}
 
 impl EngineInstance {
     pub(in crate::process) fn d3d8_provider_owns_token(&self, token: u32) -> bool {
@@ -43,6 +56,7 @@ impl EngineInstance {
         if self.pending_call.is_some() || self.callback.is_some() {
             return Err(HostError::Call(CallError::Busy));
         }
+        self.check_guest_reservation_admission(&[config.objects, config.locks])?;
         self.d3d8 = Some(D3D8Runtime32::new(config).map_err(HostError::D3D8)?);
         Ok(())
     }

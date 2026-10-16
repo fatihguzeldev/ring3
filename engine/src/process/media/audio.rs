@@ -3,7 +3,12 @@ use crate::audio::{AudioBufferId32, AudioContext, AudioSubmission32, AudioVoiceI
 
 impl EngineInstance {
     pub fn audio(&self) -> Result<&AudioContext, HostError> {
-        Ok(&self.media_contexts()?.audio)
+        self.check_media_output_session()?;
+        Ok(&self
+            .media
+            .as_ref()
+            .ok_or(HostError::Media(MediaError::NotConfigured))?
+            .audio)
     }
 
     pub fn audio_create_buffer(
@@ -87,8 +92,12 @@ impl EngineInstance {
         submission: AudioSubmission32,
         cumulative_consumed_frames: u32,
     ) -> Result<(), HostError> {
-        self.media_contexts()?;
-        let audio = &self.media.as_ref().unwrap().audio;
+        self.check_media_output_session()?;
+        let audio = &self
+            .media
+            .as_ref()
+            .ok_or(HostError::Media(MediaError::NotConfigured))?
+            .audio;
         let signals = if let Some(sound) = &mut self.dsound {
             let occurrences = sound
                 .prepare_audio_signals(audio, submission, cumulative_consumed_frames)

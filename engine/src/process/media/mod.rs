@@ -1,3 +1,4 @@
+mod termination;
 use super::{EngineInstance, HostError};
 use crate::{
     audio::{AudioConfig32, AudioContext, AudioError32},

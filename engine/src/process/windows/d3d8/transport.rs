@@ -57,7 +57,7 @@ impl D3D8Runtime32 {
 
 impl EngineInstance {
     pub fn d3d8_device(&self, index: usize) -> Result<Option<D3D8DeviceInfo32>, HostError> {
-        self.memory()?;
+        self.check_media_output_session()?;
         let runtime = self
             .d3d8
             .as_ref()
@@ -87,7 +87,7 @@ impl EngineInstance {
         }))
     }
     pub fn d3d8_seal_batch(&mut self, epoch: u64) -> Result<Option<BatchId>, HostError> {
-        self.memory()?;
+        self.check_media_output_session()?;
         let runtime = self
             .d3d8
             .as_mut()
@@ -117,7 +117,7 @@ impl EngineInstance {
         Ok(batch)
     }
     pub fn d3d8_batch_info(&self, epoch: u64) -> Result<Option<(BatchId, usize)>, HostError> {
-        self.memory()?;
+        self.check_media_output_session()?;
         Ok(self
             .d3d8
             .as_ref()
@@ -134,7 +134,7 @@ impl EngineInstance {
         offset: u32,
         output: &mut [u8],
     ) -> Result<usize, HostError> {
-        self.memory()?;
+        self.check_media_output_session()?;
         self.d3d8
             .as_ref()
             .ok_or(HostError::D3D8(D3D8Error32::NotConfigured))?
@@ -145,7 +145,7 @@ impl EngineInstance {
             .map_err(|error| device_error(DeviceError::Command(error)))
     }
     pub fn d3d8_acknowledge_batch(&mut self, id: BatchId) -> Result<Progress, HostError> {
-        self.memory()?;
+        self.check_media_output_session()?;
         self.d3d8
             .as_mut()
             .ok_or(HostError::D3D8(D3D8Error32::NotConfigured))?
