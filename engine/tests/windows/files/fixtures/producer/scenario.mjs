@@ -1,3 +1,4 @@
+import {appendEndpoints, endpointGates, endpointSymbols} from './endpoints.mjs';
 import {builder} from '../../../../support/pe32/image.mjs';
 
 export function image() {
@@ -8,12 +9,14 @@ export function image() {
     'DuplicateHandle', 'CreateFileMappingA', 'MapViewOfFile',
     'FlushViewOfFile', 'UnmapViewOfFile', 'CreateEventA', 'WaitForSingleObject',
     'GetOverlappedResult', 'CancelIoEx', 'CopyFileExA', 'ExitProcess',
+    ...endpointSymbols,
   ];
   const b = builder([['kernel32.dll', symbols]], {
     callbacks: [{words: 13, result: 0, record: 'copyProgress'}],
   });
   const {allocate, data, string, ref, external} = b;
   const gate = {
+    ...endpointGates,
     CreateFileA: 0xa0001,
     ReadFile: 0xa0003,
     WriteFile: 0xa0004,
@@ -114,6 +117,7 @@ export function image() {
   call('GetLastError', [], 995);
   call('CloseHandle', [ref('async')]);
   call('CloseHandle', [ref('event')]);
+  appendEndpoints(b, call);
   allocate('exitScratch');
   allocate('exitAsset');
   allocate('exitMapping');

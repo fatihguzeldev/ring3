@@ -270,11 +270,40 @@ for (const call of guest.calls) {
     assert.equal(read(guest.addresses.buffer + 4), 0x90abcdef);
     assert.equal(read(guest.addresses.count), 8);
   }
+  if (call.hook === 'anonymous-read' || call.hook === 'null-eof') {
+    assert.equal(read(guest.addresses.endpointBuffer), 0x64636261);
+    assert.equal(read(guest.addresses.endpointBuffer + 4) & 255, 0x65);
+    assert.equal(read(guest.addresses.count), call.hook === 'null-eof' ? 0 : 5);
+  }
+  if (call.hook === 'null-write') assert.equal(read(guest.addresses.count), 8);
+  if (call.hook === 'pipe-partial-read') {
+    assert.equal(read(guest.addresses.endpointBuffer) & 0xffff, 0x6261);
+    assert.equal(read(guest.addresses.count), 2);
+  }
+  if (call.hook === 'pipe-peek' || call.hook === 'pipe-remaining-read') {
+    assert.equal(read(guest.addresses.endpointBuffer) & 0xffffff, 0x656463);
+    assert.equal(read(guest.addresses.count), 3);
+    if (call.hook === 'pipe-peek') {
+      assert.equal(read(guest.addresses.packetCount), 3);
+      assert.equal(read(guest.addresses.packetKey), 0);
+    }
+  }
+  if (['pipe-connect-packet', 'pipe-partial-packet', 'pipe-remaining-packet', 'pipe-broken-packet'].includes(call.hook)) {
+    const counts = {'pipe-connect-packet': 0, 'pipe-partial-packet': 2, 'pipe-remaining-packet': 3, 'pipe-broken-packet': 0};
+    assert.equal(read(guest.addresses.packetCount), counts[call.hook]);
+    assert.equal(read(guest.addresses.packetKey), 0x53594e43);
+    assert.equal(read(guest.addresses.packetOverlapped), guest.addresses.pipeOverlap);
+  }
+  if (call.hook === 'posted-completion') {
+    assert.equal(read(guest.addresses.packetCount), 19);
+    assert.equal(read(guest.addresses.packetKey), 0xabc);
+    assert.equal(read(guest.addresses.packetOverlapped), 0x7777);
+  }
   calls.push({name: call.name, id: call.id, result, generation});
   writeFileSync(join(output, 'progress.json'), JSON.stringify({calls, runs, waits, callbacks}, null, 2));
 }
 
-assert.equal(calls.length, 53);
+assert.equal(calls.length, 96);
 const overlays = [];
 for (let index = 0; index < 32; index++) {
   assert.equal(api.file_overlay_entry(...pair(files.epoch), index), 0);
@@ -305,6 +334,7 @@ for (let index = 0; index < 32; index++) {
     assert.equal(data.readUInt32LE(36), 0x08070605);
   }
 }
+assert.ok(!overlays.some(item => /(?:nul|conout\$|authored-ring3)/i.test(item.path)), 'devices and pipes never become overlay files');
 assert.ok(overlays.some(item => item.path.toLowerCase() === 'c:\\saves\\renamed.dat'), 'save exported with rename');
 assert.ok(overlays.some(item => item.path.toLowerCase() === 'c:\\saves\\copied.dat' && item.size === '8'), 'callback copy exported as real destination');
 assert.ok(overlays.some(item => item.path.toLowerCase() === 'c:\\assets\\data.bin' && item.kind === 1), 'exit retains flushed asset export');
@@ -319,7 +349,7 @@ const receipt = {
   waits,
   callbacks,
   overlays,
-  claim: 'authored PE32/generated Wasm validate engine asset IO including 4 GiB metadata, coherent mapping/COW, save export, overlapped cancellation and real guest copy progress callbacks and exit-owned file/mapping finalization; browser persistence is outside this fixture',
+  claim: 'authored PE32/generated Wasm validate engine asset IO including 4 GiB metadata, coherent mapping/COW, save export, overlapped cancellation and real guest copy progress callbacks and exit-owned file/mapping finalization, anonymous/named pipe aliases and partial-message EOF, IOCP packets, NUL discard and headless console refusal; browser persistence is outside this fixture',
 };
 writeFileSync(join(output, 'receipt.json'), JSON.stringify(receipt, null, 2));
 console.log(JSON.stringify({
