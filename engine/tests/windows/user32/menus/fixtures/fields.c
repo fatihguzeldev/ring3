@@ -71,6 +71,75 @@ static void owner_data(void) {
     DestroyMenu(menu);
 }
 
+static HANDLE window_ready;
+static HWND remote_window;
+static DWORD owner_thread;
+static volatile LONG command_on_owner;
+
+static LRESULT CALLBACK remote_procedure(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
+    if (message == WM_COMMAND && LOWORD(wparam) == 37) {
+        InterlockedExchange(&command_on_owner, GetCurrentThreadId() == owner_thread);
+        return 0;
+    }
+    return DefWindowProcW(window, message, wparam, lparam);
+}
+
+static DWORD WINAPI window_thread(void *parameter) {
+    (void)parameter;
+    owner_thread = GetCurrentThreadId();
+    WNDCLASSW type;
+    memset(&type, 0, sizeof(type));
+    type.lpfnWndProc = remote_procedure;
+    type.hInstance = GetModuleHandleW(NULL);
+    type.lpszClassName = L"ring3-menu-cross-thread";
+    RegisterClassW(&type);
+    remote_window = CreateWindowW(type.lpszClassName, L"menu", WS_OVERLAPPEDWINDOW,
+                                  0, 0, 100, 100, NULL, NULL, type.hInstance, NULL);
+    SetEvent(window_ready);
+    MSG message;
+    while (GetMessageW(&message, NULL, 0, 0) > 0) DispatchMessageW(&message);
+    DestroyWindow(remote_window);
+    return 0;
+}
+
+static int cross_thread(void) {
+    window_ready = CreateEventW(NULL, TRUE, FALSE, NULL);
+    if (!window_ready) return 1;
+    HANDLE thread = CreateThread(NULL, 0, window_thread, NULL, 0, NULL);
+    if (!thread) { CloseHandle(window_ready); return 1; }
+    if (WaitForSingleObject(window_ready, 5000) != WAIT_OBJECT_0 || !remote_window) {
+        puts("{\"operation\":\"menu-cross-thread-setup\",\"failed\":true}");
+        if (owner_thread) PostThreadMessageW(owner_thread, WM_QUIT, 0, 0);
+        WaitForSingleObject(thread, 5000);
+        CloseHandle(thread);
+        CloseHandle(window_ready);
+        return 1;
+    }
+    HMENU menu = CreateMenu();
+    AppendMenuW(menu, MF_STRING, 37, L"cross");
+    SetLastError(0);
+    BOOL installed = SetMenu(remote_window, menu);
+    DWORD error = GetLastError();
+    BOOL queried = GetMenu(remote_window) == menu;
+    ACCEL entry = { FVIRTKEY, 'A', 37 };
+    HACCEL table = CreateAcceleratorTableW(&entry, 1);
+    MSG message;
+    memset(&message, 0, sizeof(message));
+    message.hwnd = remote_window;
+    message.message = WM_KEYDOWN;
+    message.wParam = 'A';
+    int translated = TranslateAcceleratorW(remote_window, table, &message);
+    printf("{\"operation\":\"menu-cross-thread\",\"set\":%d,\"error\":%lu,\"get\":%d,\"translate\":%d,\"commandOwner\":%ld}\n",
+           !!installed, (unsigned long)error, !!queried, translated, command_on_owner);
+    DestroyAcceleratorTable(table);
+    PostThreadMessageW(owner_thread, WM_QUIT, 0, 0);
+    DWORD stopped = WaitForSingleObject(thread, 5000);
+    CloseHandle(thread);
+    CloseHandle(window_ready);
+    if (!installed) DestroyMenu(menu);
+    return stopped == WAIT_OBJECT_0 ? 0 : 1;
+}
+
 int main(void) {
     for (unsigned mode = 0; mode != 4; ++mode) {
         insertion(mode, 0); insertion(mode, 1); insertion(mode, 99); insertion(mode, 0xffffffffu);
@@ -78,5 +147,5 @@ int main(void) {
     state(MF_GRAYED); state(MF_DISABLED); state(MF_MENUBARBREAK); state(MF_MENUBREAK);
     information(0); information(1); information(3); information(16);
     owner_data();
-    return 0;
+    return cross_thread();
 }
