@@ -1,4 +1,5 @@
 use super::{AudioContext, AudioError32, AudioSubmission32, AudioVoiceId32, AudioVoiceProgress32};
+use super::{SampleEncoding32, buffer::BufferSlot, mixing::MixSample, voice::VoiceSlot};
 
 #[derive(Clone, Copy, Default)]
 pub(super) struct VoiceSpan {
@@ -38,65 +39,49 @@ impl AudioContext {
             first_frame: self.submitted_frames,
             frames,
         };
-        self.output[..frames as usize * 2].fill(0.0);
-        self.spans.fill(VoiceSpan::default());
-        for (index, slot) in self.voices.iter_mut().enumerate() {
-            let Some(voice) = slot.voice.as_mut().filter(|voice| voice.producing) else {
-                continue;
-            };
-            let buffer = self.buffers[voice.buffer.slot as usize]
-                .buffer
-                .as_ref()
-                .unwrap();
-            let source_frames = buffer.frames();
-            let limit = u64::from(source_frames) << 32;
-            let first = voice.produced_position;
-            let mut source = first;
-            let mut count = 0;
-            let mut ended = false;
-            for frame in 0..frames {
-                let at = (source >> 32) as u32;
-                let next = if at + 1 < source_frames {
-                    at + 1
-                } else if voice.looping {
-                    0
-                } else {
-                    at
-                };
-                let fraction = (source as u32) as f32 / 4_294_967_296.0;
-                for channel in 0..2 {
-                    let a = buffer.sample(at, channel);
-                    let value = a + (buffer.sample(next, channel) - a) * fraction;
-                    self.output[frame as usize * 2 + channel] +=
-                        value * voice.controls.gains[channel];
-                }
-                count += 1;
-                source += voice.step;
-                if source >= limit {
-                    if voice.looping {
-                        source %= limit;
-                    } else {
-                        source = 0;
-                        ended = true;
-                        break;
-                    }
-                }
+        let length = frames as usize * 2;
+        let wide = self.voices.iter().any(|slot| {
+            slot.voice.as_ref().is_some_and(|voice| {
+                voice.producing
+                    && self.buffers[voice.buffer.slot as usize]
+                        .buffer
+                        .as_ref()
+                        .unwrap()
+                        .encoding
+                        == SampleEncoding32::Float
+            })
+        });
+        if wide {
+            if self.wide_output.len() < length {
+                self.wide_output
+                    .try_reserve_exact(length - self.wide_output.len())
+                    .map_err(|_| AudioError32::Allocation)?;
+                self.wide_output.resize(length, 0.0);
             }
-            voice.produced_position = source;
-            voice.producing = !ended;
-            self.spans[index] = VoiceSpan {
-                first,
-                step: voice.step,
-                source_frames,
-                frames: count,
-                ended,
-                looping: voice.looping,
-                generation: slot.generation,
-                revision: voice.revision,
-            };
-        }
-        for sample in &mut self.output[..frames as usize * 2] {
-            *sample = sample.clamp(-1.0, 1.0);
+            render(
+                &self.buffers,
+                &mut self.voices,
+                &mut self.spans,
+                &mut self.wide_output[..length],
+                frames,
+            );
+            for (output, sample) in self.output[..length]
+                .iter_mut()
+                .zip(&self.wide_output[..length])
+            {
+                *output = sample.clipped();
+            }
+        } else {
+            render(
+                &self.buffers,
+                &mut self.voices,
+                &mut self.spans,
+                &mut self.output[..length],
+                frames,
+            );
+            for sample in &mut self.output[..length] {
+                *sample = sample.clipped();
+            }
         }
         self.sequence = sequence;
         self.submitted_frames = submitted;
@@ -247,6 +232,70 @@ impl AudioContext {
             .as_ref()
             .filter(|pending| pending.id == id)
             .ok_or(AudioError32::InvalidSubmission)
+    }
+}
+
+fn render<S: MixSample>(
+    buffers: &[BufferSlot],
+    voices: &mut [VoiceSlot],
+    spans: &mut [VoiceSpan],
+    output: &mut [S],
+    frames: u32,
+) {
+    output.fill(S::SILENCE);
+    spans.fill(VoiceSpan::default());
+    for (index, slot) in voices.iter_mut().enumerate() {
+        let Some(voice) = slot.voice.as_mut().filter(|voice| voice.producing) else {
+            continue;
+        };
+        let buffer = buffers[voice.buffer.slot as usize].buffer.as_ref().unwrap();
+        let source_frames = buffer.frames();
+        let limit = u64::from(source_frames) << 32;
+        let first = voice.produced_position;
+        let mut source = first;
+        let mut count = 0;
+        let mut ended = false;
+        for frame in 0..frames {
+            let at = (source >> 32) as u32;
+            let next = if at + 1 < source_frames {
+                at + 1
+            } else if voice.looping {
+                0
+            } else {
+                at
+            };
+            for channel in 0..2 {
+                output[frame as usize * 2 + channel].accumulate(
+                    buffer.sample(at, channel),
+                    buffer.sample(next, channel),
+                    source as u32,
+                    voice.controls.gains[channel],
+                );
+            }
+            count += 1;
+            source += voice.step;
+            if source >= limit {
+                if voice.looping {
+                    source %= limit;
+                } else {
+                    source = 0;
+                    ended = true;
+                    break;
+                }
+            }
+        }
+        voice.produced_position = source;
+        voice.producing = !ended;
+        spans[index] = VoiceSpan {
+            first,
+            step: voice.step,
+            source_frames,
+            frames: count,
+            ended,
+            looping: voice.looping,
+            generation: slot.generation,
+            revision: voice.revision,
+        };
     }
 }
 

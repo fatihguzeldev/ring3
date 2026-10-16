@@ -1,5 +1,6 @@
 mod buffer;
 pub mod dsound;
+mod mixing;
 mod submission;
 mod types;
 mod voice;
@@ -21,6 +22,7 @@ pub struct AudioContext {
     voices: Vec<VoiceSlot>,
     buffer_bytes: u32,
     output: Vec<f32>,
+    wide_output: Vec<f64>,
     spans: Vec<VoiceSpan>,
     pending: Option<PendingSubmission>,
     sequence: u64,
@@ -46,6 +48,7 @@ impl AudioContext {
             voices: allocated(config.max_voices as usize, VoiceSlot::default)?,
             buffer_bytes: 0,
             output: allocated(config.render_frames as usize * 2, || 0.0)?,
+            wide_output: Vec::new(),
             spans: allocated(config.max_voices as usize, VoiceSpan::default)?,
             pending: None,
             sequence: 0,
