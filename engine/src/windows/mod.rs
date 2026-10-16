@@ -43,3 +43,4 @@ pub mod resources;
 pub mod rawinput;
 
 pub mod console;
+pub mod native;

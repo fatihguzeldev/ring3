@@ -12,6 +12,12 @@ pub struct WindowsGateInfo32 {
 }
 
 pub fn windows_gate_info(id: u32) -> Option<WindowsGateInfo32> {
+    if let Some(api) = crate::windows::native::NativeApi32::from_id(id) {
+        return Some(WindowsGateInfo32 {
+            convention: crate::windows::CallingConvention32::Stdcall,
+            stack_words: api.stack_words(),
+        });
+    }
     if let Some(api) = crate::windows::console::ConsoleApi32::from_id(id) {
         return Some(WindowsGateInfo32 {
             convention: crate::windows::CallingConvention32::Stdcall,
@@ -268,6 +274,7 @@ impl EngineInstance {
             return Err(HostError::Infrastructure);
         };
         if self.try_complete_console_call(owner, token, id, frame)?
+            || self.try_complete_native_call(owner, token, id, frame)?
             || self.try_complete_raw_input_call(owner, token, id, frame)?
             || self.try_complete_resource_call(owner, token, id, frame)?
             || self.try_complete_exception_call(owner, token, id, frame)?

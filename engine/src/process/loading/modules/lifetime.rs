@@ -19,7 +19,52 @@ pub(in crate::process) struct PreparedModuleReference32 {
     next_pinned: bool,
 }
 
+fn native_reference_counts(
+    explicit: u32,
+    pinned: bool,
+    pin: bool,
+) -> Result<(u32, bool), ModuleError32> {
+    if pinned || pin {
+        Ok((explicit, true))
+    } else {
+        Ok((
+            explicit
+                .checked_add(1)
+                .ok_or(ModuleError32::ReferenceExhausted)?,
+            false,
+        ))
+    }
+}
+
 impl EngineInstance {
+    pub(in crate::process) fn prepare_native_module_reference(
+        &self,
+        base: u32,
+        pin: bool,
+    ) -> Result<Option<PreparedModuleReference32>, HostError> {
+        let Some(module) = self
+            .modules
+            .loaded
+            .iter()
+            .find(|module| module.base() == base)
+        else {
+            return Ok(None);
+        };
+        let reference = self
+            .modules
+            .reference(module.id())
+            .map_err(HostError::Module)?;
+        let (next_explicit, next_pinned) =
+            native_reference_counts(reference.explicit, reference.pinned, pin)
+                .map_err(HostError::Module)?;
+        Ok(Some(PreparedModuleReference32 {
+            id: reference.id,
+            explicit: reference.explicit,
+            pinned: reference.pinned,
+            next_explicit,
+            next_pinned,
+        }))
+    }
     pub(in crate::process) fn prepare_module_handle_reference(
         &self,
         name: Option<&str>,
@@ -394,5 +439,30 @@ impl EngineInstance {
             .catalog
             .add_system_group(modules)
             .map_err(HostError::Module)
+    }
+}
+
+#[cfg(test)]
+mod native_reference_tests {
+    use super::*;
+    #[test]
+    fn native_pinning_is_idempotent_even_at_the_last_ordinary_reference() {
+        assert_eq!(
+            native_reference_counts(u32::MAX, false, true),
+            Ok((u32::MAX, true))
+        );
+        assert_eq!(
+            native_reference_counts(u32::MAX, true, false),
+            Ok((u32::MAX, true))
+        );
+        assert_eq!(
+            native_reference_counts(u32::MAX, true, true),
+            Ok((u32::MAX, true))
+        );
+        assert_eq!(
+            native_reference_counts(u32::MAX, false, false),
+            Err(ModuleError32::ReferenceExhausted)
+        );
+        assert_eq!(native_reference_counts(7, false, false), Ok((8, false)));
     }
 }

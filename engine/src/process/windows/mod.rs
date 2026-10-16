@@ -33,3 +33,4 @@ pub(super) mod nls;
 pub(super) mod resources;
 
 pub(super) mod console;
+pub(super) mod native;

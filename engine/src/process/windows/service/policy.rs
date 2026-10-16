@@ -20,6 +20,12 @@ impl GuardFailure32 {
         if crate::windows::console::ConsoleApi32::from_id(id).is_some() {
             return noaccess(0);
         }
+        if crate::windows::native::NativeApi32::from_id(id).is_some() {
+            return Some(Self {
+                value: 0xc0000005,
+                last_error: None,
+            });
+        }
         if let Some(api) = FileApi32::from_id(id) {
             return noaccess(api.failure_value());
         }
