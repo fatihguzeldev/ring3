@@ -14,13 +14,26 @@ impl FileRuntime32 {
     ) -> Result<AsyncProgress32, FileError32> {
         let mut lock_receipt = None;
         let mut index = None;
-        for (candidate, operation) in self.asynchronous.operations.iter().enumerate() {
+        let priority = self.asynchronous.blocking.and_then(|id| {
+            self.asynchronous
+                .operations
+                .iter()
+                .position(|op| op.id == id)
+        });
+        for candidate in priority
+            .into_iter()
+            .chain((0..self.asynchronous.operations.len()).filter(|index| Some(*index) != priority))
+        {
+            let operation = &self.asynchronous.operations[candidate];
             if operation.status != AsyncStatus32::Pending {
                 continue;
             }
-            if let Some(lock) = operation.lock.filter(|_| !operation.cancel) {
+            if let Some(lock) = operation.lock().filter(|_| !operation.cancel) {
                 match self.prepare_file_lock(
-                    operation.open,
+                    operation
+                        .target
+                        .open()
+                        .ok_or(FileError32::InvalidParameter)?,
                     operation.offset,
                     lock.length,
                     lock.exclusive,
@@ -45,13 +58,15 @@ impl FileRuntime32 {
             return Ok(AsyncProgress32::Idle);
         };
         let operation = &self.asynchronous.operations[index];
+        let (open, file) = operation.target.file().ok_or(FileError32::Unsupported)?;
+        let overlapped = operation.overlapped.ok_or(FileError32::InvalidParameter)?;
         for &(address, version) in &operation.mappings {
             if memory.mapping_version_at(address) != Ok(version) {
                 return Err(FileError32::NoAccess);
             }
         }
         let offset = if operation.offset == u64::MAX {
-            self.vfs.info(operation.file)?.size
+            self.vfs.info(file)?.size
         } else {
             operation.offset
         };
@@ -61,18 +76,18 @@ impl FileRuntime32 {
         let mut count = 0;
         if error == 0
             && lock_receipt.is_none()
-            && let Some(lock) = operation.lock
+            && let Some(lock) = operation.lock()
         {
             error = self
-                .prepare_file_lock(operation.open, offset, lock.length, lock.exclusive)
+                .prepare_file_lock(open, offset, lock.length, lock.exclusive)
                 .err()
                 .unwrap()
                 .win32();
         }
         if error == 0
-            && operation.lock.is_none()
+            && operation.lock().is_none()
             && let Err(failure) = super::positioned::check_alignment(
-                self.vfs.open_options(operation.open)?.no_buffering,
+                self.vfs.open_options(open)?.no_buffering,
                 operation.buffer.0,
                 operation.length,
                 offset,
@@ -81,21 +96,21 @@ impl FileRuntime32 {
             error = failure.win32();
         }
         if error == 0
-            && operation.lock.is_none()
+            && operation.lock().is_none()
             && let Err(failure) = self.check_file_lock(
-                operation.open,
+                open,
                 offset,
                 u64::from(operation.length),
-                operation.write.is_some(),
+                operation.write_data().is_some(),
             )
         {
             error = failure.win32();
         }
-        if error == 0 && operation.lock.is_none() {
-            if let Some(data) = &operation.write {
+        if error == 0 && operation.lock().is_none() {
+            if let Some(data) = operation.write_data() {
                 match self
                     .vfs
-                    .prepare_write_at_for(operation.id, operation.file, offset, data)
+                    .prepare_write_at_for(operation.id, file, offset, data)
                 {
                     Ok(FileIo32::Ready(prepared)) => {
                         prepared.validate(&self.vfs)?;
@@ -110,7 +125,7 @@ impl FileRuntime32 {
             } else {
                 match self.vfs.prepare_read_at_for(
                     operation.id,
-                    operation.file,
+                    file,
                     offset,
                     operation.length as usize,
                 ) {
@@ -131,8 +146,9 @@ impl FileRuntime32 {
             }
         }
         self.vfs
-            .check_close_open_after_mutations(operation.open, u64::from(write.is_some()))?;
+            .check_close_open_after_mutations(open, u64::from(write.is_some()))?;
         let sync = sync.ok_or(FileError32::Unsupported)?;
+        let completion = self.prepare_io_completion(operation, error, count)?;
         let signals = sync
             .prepare_signals_and_release(&operation.events)
             .map_err(super::synchronization_error)?;
@@ -144,7 +160,7 @@ impl FileRuntime32 {
             .map_err(|_| FileError32::Exhausted)?;
         let data = read.as_ref().map_or(&[][..], |read| read.bytes());
         memory
-            .write_spans(&[(operation.overlapped, &completed), (operation.buffer, data)])
+            .write_spans(&[(overlapped, &completed), (operation.buffer, data)])
             .map_err(|_| FileError32::NoAccess)?;
         if let Some(write) = write {
             self.vfs.commit_write(write);
@@ -154,7 +170,9 @@ impl FileRuntime32 {
         }
         self.vfs.cancel_operation_io(operation.id);
         sync.commit_signals_and_release(signals);
-        let open = operation.open;
+        if let Some(completion) = completion {
+            self.completion.commit_post(completion);
+        }
         if let Some(prepared) = lock_receipt.filter(|_| error == 0) {
             self.commit_file_lock(prepared);
         }
@@ -164,10 +182,11 @@ impl FileRuntime32 {
         if self.vfs.open_info(open).is_err() {
             self.release_file_locks(open);
         }
+        self.retire_completion_file(open);
 
         let operation = &mut self.asynchronous.operations[index];
         operation.events.clear();
-        if let Some(data) = operation.write.take() {
+        if let Some(data) = operation.take_data() {
             self.asynchronous.retained_bytes -= data.len();
         }
         operation.status = AsyncStatus32::Complete {
@@ -176,13 +195,13 @@ impl FileRuntime32 {
         };
         Ok(AsyncProgress32::Completed {
             id: operation.id,
-            open: operation.open,
+            target: operation.target.description(),
             error,
             bytes: count,
         })
     }
 }
-pub(super) fn status(error: u32) -> u32 {
+pub(in crate::process::windows::files) fn status(error: u32) -> u32 {
     match error {
         0 => 0,
         2 => 0xc000_0034,
@@ -195,7 +214,14 @@ pub(super) fn status(error: u32) -> u32 {
         38 => 0xc000_0011,
         50 => 0xc000_00bb,
         87 => 0xc000_000d,
+        109 => 0xc000_014b,
         112 => 0xc000_007f,
+        230 => 0xc000_00ad,
+        231 => 0xc000_00ae,
+        232 => 0xc000_00b1,
+        233 => 0xc000_00b0,
+        234 => 0x8000_0005,
+        536 => 0xc000_00b3,
         995 => 0xc000_0120,
         998 => 0xc000_0005,
         _ => 0xc000_0001,
@@ -215,7 +241,14 @@ pub(super) fn status_error(status: u32) -> u32 {
         0xc000_0011 => 38,
         0xc000_00bb => 50,
         0xc000_000d => 87,
+        0xc000_014b => 109,
         0xc000_007f => 112,
+        0xc000_00ad => 230,
+        0xc000_00ae => 231,
+        0xc000_00b1 => 232,
+        0xc000_00b0 => 233,
+        0x8000_0005 => 234,
+        0xc000_00b3 => 536,
         0xc000_0120 => 995,
         0xc000_0005 => 998,
         _ => 31,

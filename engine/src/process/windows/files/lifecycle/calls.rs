@@ -62,8 +62,17 @@ impl EngineInstance {
             }
         }
         let runtime = self.files.as_mut().unwrap();
+        runtime
+            .cancel_blocking_file_wait(
+                self.memory.as_mut().unwrap(),
+                self.synchronization.as_mut().map(|sync| sync.context_mut()),
+            )
+            .map_err(HostError::File)?;
         runtime.mappings.cancel_pending();
         runtime.asynchronous.cancel_wait();
+        if let Some(wait) = runtime.completion_wait.take() {
+            runtime.completion.cancel_wait_for(wait.thread, wait.port);
+        }
         runtime.reply = None;
         self.abandon_call(key, token)
     }

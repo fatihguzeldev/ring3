@@ -115,7 +115,10 @@ impl SavedThread32 {
             ))
     }
     pub(super) fn ready(&self, engine: &EngineInstance, now: u64, thread: u32) -> bool {
-        engine.exceptions.thread_unhandled(thread)
+        self.files
+            .as_ref()
+            .is_some_and(|reply| reply.alertable() && engine.has_pending_thread_apc(thread))
+            || engine.exceptions.thread_unhandled(thread)
             || self.event.is_some()
             || self
                 .windows_replies
@@ -125,7 +128,9 @@ impl SavedThread32 {
                 .files
                 .as_ref()
                 .zip(engine.files.as_ref())
-                .is_some_and(|(reply, runtime)| runtime.thread_reply_ready(reply, now))
+                .is_some_and(|(reply, runtime)| {
+                    runtime.thread_reply_ready(reply, now, |id| engine.threads.is_runnable(id))
+                })
             || self
                 .d3d8_reply
                 .as_ref()

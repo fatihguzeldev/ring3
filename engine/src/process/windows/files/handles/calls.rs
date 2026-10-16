@@ -17,7 +17,9 @@ impl FileRuntime32 {
             KernelFileObject32::File(open) => {
                 let last = self.handles.file_count(open) == 1;
                 let event = if last {
-                    self.events.iter().position(|(id, _)| *id == open)
+                    self.events.iter().position(|(id, _)| {
+                        *id == crate::windows::files::completion::CompletionTarget32::File(open)
+                    })
                 } else {
                     None
                 };
@@ -36,6 +38,7 @@ impl FileRuntime32 {
                     self.asynchronous.cancel_open(open);
                     self.release_file_locks(open);
                 }
+                self.retire_completion_file(open);
                 self.handles.remove(handle)?;
                 if let Some(prepared) = prepared {
                     sync.unwrap().commit_duplicate(prepared);
@@ -50,6 +53,10 @@ impl FileRuntime32 {
                 self.handles.remove(handle)?;
             }
             KernelFileObject32::Find(_) => return Err(FileError32::InvalidHandle),
+            KernelFileObject32::CompletionPort(port) => {
+                self.completion.release(port)?;
+                self.handles.remove(handle)?;
+            }
         }
         Ok(FileCallOutcome32::success(1))
     }
@@ -101,6 +108,8 @@ impl FileRuntime32 {
         let object = self.handles.object(args[1])?;
         let access = if args[6] & 2 != 0 {
             self.handles.access(args[1])?
+        } else if matches!(object, KernelFileObject32::CompletionPort(_)) {
+            crate::windows::files::completion::completion_access(args[4])?
         } else if matches!(object, KernelFileObject32::Mapping(_)) {
             args[4]
         } else {
@@ -114,6 +123,7 @@ impl FileRuntime32 {
             KernelFileObject32::File(open) => self.vfs.retain_open(open)?,
             KernelFileObject32::Mapping(id) => self.mappings.retain(id)?,
             KernelFileObject32::Find(_) => return Err(FileError32::InvalidHandle),
+            KernelFileObject32::CompletionPort(port) => self.completion.retain(port)?,
         }
         if args[3] != 0 {
             memory

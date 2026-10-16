@@ -10,7 +10,12 @@ use crate::{
 };
 
 const KEY: u64 = 83;
-fn capture(engine: &mut EngineInstance, id: u32, args: &[u32], returned: bool) -> (u32, u32) {
+pub(super) fn capture(
+    engine: &mut EngineInstance,
+    id: u32,
+    args: &[u32],
+    returned: bool,
+) -> (u32, u32) {
     let pc = engine
         .module_gates()
         .unwrap()
@@ -67,7 +72,7 @@ fn capture(engine: &mut EngineInstance, id: u32, args: &[u32], returned: bool) -
         .token;
     (generation, token)
 }
-fn call(engine: &mut EngineInstance, id: u32, args: &[u32]) -> u32 {
+pub(super) fn call(engine: &mut EngineInstance, id: u32, args: &[u32]) -> u32 {
     let (generation, token) = capture(engine, id, args, false);
     engine
         .complete_windows_call(KEY, generation, token)

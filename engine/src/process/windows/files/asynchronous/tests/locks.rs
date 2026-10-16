@@ -64,3 +64,61 @@ fn pending_lock_waits_for_conflict_release_then_signals_and_can_be_unlocked() {
         (1, None)
     );
 }
+
+#[test]
+fn synchronous_contended_lock_retains_exact_request_across_thread_switch_and_ram_rewrite() {
+    let (mut files, mut memory, mut sync, file, _, _) = setup();
+    let owner = files.handles.file(file).unwrap();
+    let lock = files.prepare_file_lock(owner, 0, 2, true).unwrap();
+    files.commit_file_lock(lock);
+    let other = open_options(
+        &mut files,
+        "C:\\async.bin",
+        FileOpenOptions32 {
+            access: FileAccess32::ALL,
+            disposition: FileDisposition32::OpenExisting,
+            ..Default::default()
+        },
+    );
+    assert!(matches!(
+        files
+            .execute_lock_ex(
+                &mut memory,
+                Some(&mut sync),
+                2,
+                Api::LockFileEx,
+                &[other, 2, 0, 2, 0, 0x1100]
+            )
+            .unwrap(),
+        crate::process::windows::files::FileCallOutcome32::Pending
+    ));
+    let id = files.asynchronous.blocking.unwrap();
+    assert!(!files.blocking_lock_ready(id));
+    let saved = files.take_thread_reply();
+    files.unlock_file_range(owner, 0, 2).unwrap();
+    memory
+        .write(crate::memory::GuestAddress(0x1108), &400u32.to_le_bytes())
+        .unwrap();
+    assert!(files.blocking_lock_ready(id));
+    files.restore_thread_reply(saved);
+    assert_eq!(
+        result(
+            files
+                .execute_lock_ex(
+                    &mut memory,
+                    Some(&mut sync),
+                    2,
+                    Api::LockFileEx,
+                    &[other, 2, 0, 2, 0, 0x1100]
+                )
+                .unwrap()
+        ),
+        (1, None)
+    );
+    assert_eq!(
+        files.check_file_lock(owner, 0, 2, false),
+        Err(crate::files::FileError32::LockViolation)
+    );
+    assert!(files.check_file_lock(owner, 400, 2, false).is_ok());
+    assert!(files.asynchronous.blocking.is_none());
+}

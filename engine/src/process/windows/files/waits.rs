@@ -11,37 +11,74 @@ impl FileRuntime32 {
         sync: &mut SynchronizationContext32,
         operation: impl FnOnce(&mut Self, &mut SynchronizationContext32, u32) -> Result<T, FileError32>,
     ) -> Result<T, FileError32> {
-        let existing = self.events.iter().any(|(id, _)| *id == open);
+        self.with_io_event(
+            crate::windows::files::completion::CompletionTarget32::File(open),
+            sync,
+            operation,
+        )
+    }
+    pub(in crate::process::windows::files) fn with_io_event<T>(
+        &mut self,
+        target: crate::windows::files::completion::CompletionTarget32,
+        sync: &mut SynchronizationContext32,
+        operation: impl FnOnce(&mut Self, &mut SynchronizationContext32, u32) -> Result<T, FileError32>,
+    ) -> Result<T, FileError32> {
+        let existing = self.events.iter().any(|(id, _)| *id == target);
         if !existing {
             sync.revision()
                 .checked_add(2)
                 .ok_or(FileError32::Exhausted)?;
         }
-        let event = self.file_event(open, sync)?;
+        let event = self.io_event(target, sync)?;
+        let next_operation = self.asynchronous.next;
         let result = operation(self, sync, event);
-        if result.is_err() && !existing {
+        if result.is_err() && !existing && self.asynchronous.next == next_operation {
             sync.close_handle(event)
-                .expect("new private file event rollback revision was preflighted");
-            self.events.retain(|(id, _)| *id != open);
+                .expect("new private I/O event rollback revision was preflighted");
+            self.events.retain(|(id, _)| *id != target);
         }
         result
     }
+    pub(super) fn validate_io_description(
+        &self,
+        target: crate::windows::files::completion::CompletionTarget32,
+    ) -> Result<(), FileError32> {
+        let crate::windows::files::completion::CompletionTarget32::File(open) = target;
+        self.vfs.open_info(open)?;
+        Ok(())
+    }
+    #[cfg(test)]
     pub(super) fn file_event(
         &mut self,
         open: OpenFileId,
         sync: &mut SynchronizationContext32,
     ) -> Result<u32, FileError32> {
-        if let Some((_, handle)) = self.events.iter().find(|(id, _)| *id == open) {
+        self.io_event(
+            crate::windows::files::completion::CompletionTarget32::File(open),
+            sync,
+        )
+    }
+    pub(super) fn io_event(
+        &mut self,
+        target: crate::windows::files::completion::CompletionTarget32,
+        sync: &mut SynchronizationContext32,
+    ) -> Result<u32, FileError32> {
+        if let Some((_, handle)) = self.events.iter().find(|(id, _)| *id == target) {
             return Ok(*handle);
         }
-        self.vfs.open_info(open)?;
+        self.validate_io_description(target)?;
         self.events
             .try_reserve(1)
             .map_err(|_| FileError32::Allocation)?;
         let (event, _) = sync
-            .create_event(true, self.asynchronous.is_file_signaled(open), false, None)
+            .create_event(
+                true,
+                self.asynchronous.is_description_signaled(target),
+                false,
+                None,
+            )
             .map_err(sync_error)?;
-        self.events.push((open, event));
+        self.events.push((target, event));
         Ok(event)
     }
 }
@@ -119,9 +156,9 @@ impl EngineInstance {
             let files = self.files.as_ref().ok_or(HostError::Synchronization(
                 SynchronizationError32::InvalidHandle,
             ))?;
-            let open = files
+            let target = files
                 .handles
-                .file(handle)
+                .io_target(handle)
                 .map_err(|_| HostError::Synchronization(SynchronizationError32::InvalidHandle))?;
             if files
                 .handles
@@ -135,13 +172,12 @@ impl EngineInstance {
                 ));
             }
             files
-                .vfs
-                .open_info(open)
+                .validate_io_description(target)
                 .map_err(|error| HostError::Synchronization(file_wait_error(error)))?;
-            if !files.events.iter().any(|(id, _)| *id == open)
-                && !missing[..count].contains(&Some(open))
+            if !files.events.iter().any(|(id, _)| *id == target)
+                && !missing[..count].contains(&Some(target))
             {
-                missing[count] = Some(open);
+                missing[count] = Some(target);
                 count += 1;
             }
         }
@@ -163,10 +199,10 @@ impl EngineInstance {
                 continue;
             }
             let files = self.files.as_mut().unwrap();
-            let open = files.handles.file(*handle).unwrap();
+            let target = files.handles.io_target(*handle).unwrap();
             let sync = self.synchronization.as_mut().unwrap().context_mut();
             *handle = files
-                .file_event(open, sync)
+                .io_event(target, sync)
                 .map_err(|error| HostError::Synchronization(file_wait_error(error)))?;
         }
         Ok(())
@@ -194,7 +230,7 @@ fn file_wait_error(error: FileError32) -> SynchronizationError32 {
 
 pub(in crate::process) struct PreparedFileEventCleanup32 {
     opens: Vec<OpenFileId>,
-    events: Vec<(OpenFileId, u32)>,
+    events: Vec<(crate::windows::files::completion::CompletionTarget32, u32)>,
     close: Option<crate::windows::synchronization::PreparedCloseHandles32>,
 }
 impl FileRuntime32 {
@@ -221,7 +257,9 @@ impl FileRuntime32 {
                 continue;
             }
             opens.push(open);
-            if let Some(&(id, event)) = self.events.iter().find(|(id, _)| *id == open) {
+            if let Some(&(id, event)) = self.events.iter().find(|(id, _)| {
+                *id == crate::windows::files::completion::CompletionTarget32::File(open)
+            }) {
                 events.push((id, event));
                 handles.push(event);
             }

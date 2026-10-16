@@ -13,6 +13,7 @@ struct FileExecutionContext32<'a> {
     now: u64,
     thread: u32,
     security: &'a crate::windows::security::SecurityRuntime32,
+    threads: &'a crate::process::windows::threads::ThreadRuntime32,
 }
 
 impl EngineInstance {
@@ -31,7 +32,8 @@ impl EngineInstance {
         Ok(())
     }
     pub(in crate::process) fn commit_guard_service_file_reply(&mut self) {
-        self.files.as_mut().unwrap().reply = None;
+        let files = self.files.as_mut().unwrap();
+        files.reply = None;
     }
     pub(in crate::process) fn try_complete_file_call(
         &mut self,
@@ -163,7 +165,12 @@ impl EngineInstance {
                 api == Some(FileApi32::SetCurrentDirectoryW),
             )
         } else if let Some(api) = api {
-            let now = if api == FileApi32::GetOverlappedResultEx {
+            let now = if matches!(
+                api,
+                FileApi32::GetOverlappedResultEx
+                    | FileApi32::GetQueuedCompletionStatus
+                    | FileApi32::GetQueuedCompletionStatusEx
+            ) {
                 self.cpu_clock.monotonic_bounds()?.1
             } else {
                 0
@@ -176,6 +183,7 @@ impl EngineInstance {
                     now,
                     thread: current_thread,
                     security: &self.windows_security,
+                    threads: &self.threads,
                 },
                 api,
                 args,
@@ -192,6 +200,16 @@ impl EngineInstance {
         };
         let outcome = match outcome {
             Ok(outcome) => outcome,
+            Err(error) if self.files.as_ref().unwrap().asynchronous.blocking.is_some() => {
+                self.files.as_mut().unwrap().reply = Some(FileReply32 {
+                    owner,
+                    token,
+                    frame,
+                    id,
+                    request: None,
+                });
+                return Err(HostError::File(error));
+            }
             Err(error) => FileCallOutcome32::Return {
                 value: api.map_or(0, |api| api.failure_value()),
                 last_error: Some(error.win32()),
@@ -247,7 +265,11 @@ impl FileRuntime32 {
             now,
             thread,
             security,
+            threads,
         } = context;
+        if (0x000a_0090..=0x000a_0094).contains(&api.id()) {
+            return self.execute_completion_api(memory, threads, now, thread, api, args);
+        }
         if matches!(api, FileApi32::ReadFile | FileApi32::WriteFile) {
             let open = match self.handles.file(args[0]) {
                 Ok(open) => open,
@@ -255,6 +277,13 @@ impl FileRuntime32 {
             };
             if self.vfs.open_options(open)?.overlapped {
                 let sync = sync.ok_or(FileError32::Unsupported)?;
+                if self.completion.modes(
+                    crate::windows::files::completion::CompletionTarget32::File(open),
+                ) & 2
+                    != 0
+                {
+                    return self.execute_overlapped(memory, sync, thread, 0, api, args);
+                }
                 return self.with_file_event(open, sync, |files, sync, event| {
                     files.execute_overlapped(memory, sync, thread, event, api, args)
                 });

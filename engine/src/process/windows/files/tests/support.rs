@@ -34,6 +34,11 @@ pub(in crate::process::windows::files) fn runtime()
             )
             .unwrap(),
             asynchronous: AsyncRuntime32::new(16, 1024 * 1024).unwrap(),
+            completion: crate::windows::files::completion::CompletionContext32::new(
+                16, 64, 16, 4096,
+            )
+            .unwrap(),
+            completion_wait: None,
             reply: None,
             events: Vec::new(),
             host_input: Default::default(),

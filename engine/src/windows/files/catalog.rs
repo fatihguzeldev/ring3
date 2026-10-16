@@ -120,6 +120,11 @@ file_apis! {
     GetOverlappedResultEx = 0x89, 5;
     CancelIo = 0x8a, 1;
     CancelIoEx = 0x8b, 2;
+    CreateIoCompletionPort = 0x90, 4;
+    PostQueuedCompletionStatus = 0x91, 4;
+    GetQueuedCompletionStatus = 0x92, 5;
+    GetQueuedCompletionStatusEx = 0x93, 6;
+    SetFileCompletionNotificationModes = 0x94, 2;
 }
 
 impl FileApi32 {

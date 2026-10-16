@@ -65,8 +65,14 @@ fn saved_copy_cleanup_preserves_other_thread_and_duplicate_owned_handles() {
     assert_eq!(runtime.handles.file(duplicate), Ok(destination));
     assert_eq!(support::file_bytes(&mut runtime, duplicate), b"");
     assert_eq!(runtime.check_unlock_file_range(destination, 0, 1), Ok(()));
-    assert!(runtime.events.contains(&(destination, destination_event)));
-    assert!(!runtime.events.contains(&(source, source_event)));
+    assert!(runtime.events.contains(&(
+        crate::windows::files::completion::CompletionTarget32::File(destination),
+        destination_event
+    )));
+    assert!(!runtime.events.contains(&(
+        crate::windows::files::completion::CompletionTarget32::File(source),
+        source_event
+    )));
     assert!(sync.validate_wait_handle(source_event).is_err());
     assert!(sync.validate_wait_handle(destination_event).is_ok());
     assert!(runtime.pending_copy_closes(other.continuation).is_ok());

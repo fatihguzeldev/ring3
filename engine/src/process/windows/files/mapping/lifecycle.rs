@@ -59,6 +59,7 @@ impl FileRuntime32 {
             let object = self.mappings.objects.remove(index);
             if let Some(open) = object.source {
                 self.vfs.close_open(open)?;
+                self.retire_completion_file(open);
             }
         } else {
             self.mappings.objects[index].references -= 1;

@@ -126,12 +126,16 @@ impl FileRuntime32 {
             )?;
         }
         let event = u32::from_le_bytes(bytes[16..20].try_into().unwrap()) & !1;
-        let handles = [file_event, event];
-        let handles = if event == 0 {
-            &handles[..1]
-        } else {
-            &handles[..]
-        };
+        let mut handles = [0; 2];
+        let mut handle_count = 0;
+        for handle in [file_event, event]
+            .into_iter()
+            .filter(|handle| *handle != 0)
+        {
+            handles[handle_count] = handle;
+            handle_count += 1;
+        }
+        let handles = &handles[..handle_count];
         let release = old.map_or(&[][..], |index| {
             self.asynchronous.operations[index].events.as_slice()
         });
@@ -171,24 +175,23 @@ impl FileRuntime32 {
         self.asynchronous.retained_bytes = retained;
         self.asynchronous.operations.push(AsyncOperation32 {
             id,
-            open,
-            file,
+            target: AsyncTarget32::File { open, file },
             thread,
             buffer: GuestAddress(args[1]),
             length: args[2],
-            overlapped,
+            overlapped: Some(overlapped),
             offset,
-            write: data,
+            kind: data.map_or(AsyncKind32::Read, AsyncKind32::Write),
             events: bindings,
             status: AsyncStatus32::Pending,
             cancel: false,
             mappings,
-            lock: None,
+            skip_port: u32::from_le_bytes(bytes[16..20].try_into().unwrap()) & 1 != 0,
         });
         Ok(FileCallOutcome32::error(0, 997))
     }
 }
-pub(super) fn capture_mappings(
+pub(in crate::process::windows::files) fn capture_mappings(
     memory: &AddressSpace,
     address: GuestAddress,
     length: usize,

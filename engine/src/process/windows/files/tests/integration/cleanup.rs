@@ -167,7 +167,10 @@ fn callback_cleanup_keeps_hidden_event_when_guest_retained_a_duplicate_temp_hand
     let files = engine.files.as_ref().unwrap();
     assert_eq!(files.handles.file_count(source), 1);
     assert_eq!(files.events.len(), 1);
-    assert_eq!(files.events[0].0, source);
+    assert_eq!(
+        files.events[0].0,
+        crate::windows::files::completion::CompletionTarget32::File(source)
+    );
     assert!(
         engine
             .synchronization()

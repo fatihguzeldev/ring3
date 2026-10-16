@@ -5,36 +5,83 @@ use crate::{
 };
 
 pub(in crate::process::windows::files) struct AsyncRuntime32 {
-    pub(super) operations: Vec<AsyncOperation32>,
-    pub(super) max_operations: usize,
-    pub(super) max_bytes: usize,
-    pub(super) retained_bytes: usize,
-    pub(super) next: u64,
-    pub(super) wait: Option<(u64, u64)>,
+    pub(in crate::process::windows::files) operations: Vec<AsyncOperation32>,
+    pub(in crate::process::windows::files) max_operations: usize,
+    pub(in crate::process::windows::files) max_bytes: usize,
+    pub(in crate::process::windows::files) retained_bytes: usize,
+    pub(in crate::process::windows::files) next: u64,
+    pub(in crate::process::windows::files) wait: Option<(u64, u64)>,
+    pub(in crate::process::windows::files) interrupted: bool,
+    pub(in crate::process::windows::files) blocking: Option<u64>,
 }
-pub(super) struct AsyncOperation32 {
+pub(in crate::process::windows::files) struct AsyncOperation32 {
     pub id: u64,
-    pub open: OpenFileId,
-    pub file: FileId,
+    pub target: AsyncTarget32,
     pub thread: u32,
     pub buffer: GuestAddress,
     pub length: u32,
-    pub overlapped: GuestAddress,
+    pub overlapped: Option<GuestAddress>,
     pub offset: u64,
-    pub write: Option<Vec<u8>>,
+    pub kind: AsyncKind32,
     pub events: Vec<EventBinding32>,
     pub status: AsyncStatus32,
     pub cancel: bool,
     pub mappings: Vec<(GuestAddress, u64)>,
-    pub lock: Option<AsyncLock32>,
+    pub skip_port: bool,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::process::windows::files) enum AsyncTarget32 {
+    File { open: OpenFileId, file: FileId },
+}
+impl AsyncTarget32 {
+    pub(in crate::process::windows::files) fn open(self) -> Option<OpenFileId> {
+        let Self::File { open, .. } = self;
+        Some(open)
+    }
+    pub(in crate::process::windows::files) fn file(self) -> Option<(OpenFileId, FileId)> {
+        let Self::File { open, file } = self;
+        Some((open, file))
+    }
+    pub(in crate::process::windows::files) fn description(
+        self,
+    ) -> crate::windows::files::completion::CompletionTarget32 {
+        let Self::File { open, .. } = self;
+        crate::windows::files::completion::CompletionTarget32::File(open)
+    }
+}
+pub(in crate::process::windows::files) enum AsyncKind32 {
+    Read,
+    Write(Vec<u8>),
+    Lock(AsyncLock32),
+}
+impl AsyncOperation32 {
+    pub(in crate::process::windows::files) fn write_data(&self) -> Option<&[u8]> {
+        match &self.kind {
+            AsyncKind32::Write(bytes) => Some(bytes),
+            _ => None,
+        }
+    }
+    pub(in crate::process::windows::files) fn lock(&self) -> Option<AsyncLock32> {
+        if let AsyncKind32::Lock(lock) = self.kind {
+            Some(lock)
+        } else {
+            None
+        }
+    }
+    pub(in crate::process::windows::files) fn take_data(&mut self) -> Option<Vec<u8>> {
+        match std::mem::replace(&mut self.kind, AsyncKind32::Read) {
+            AsyncKind32::Write(bytes) => Some(bytes),
+            _ => None,
+        }
+    }
 }
 #[derive(Clone, Copy)]
-pub(super) struct AsyncLock32 {
+pub(in crate::process::windows::files) struct AsyncLock32 {
     pub length: u64,
     pub exclusive: bool,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum AsyncStatus32 {
+pub(in crate::process::windows::files) enum AsyncStatus32 {
     Pending,
     Complete { error: u32, bytes: u32 },
 }
@@ -43,7 +90,7 @@ pub(in crate::process) enum AsyncProgress32 {
     Idle,
     Completed {
         id: u64,
-        open: OpenFileId,
+        target: crate::windows::files::completion::CompletionTarget32,
         error: u32,
         bytes: u32,
     },
@@ -68,17 +115,32 @@ impl AsyncRuntime32 {
             retained_bytes: 0,
             next: 1,
             wait: None,
+            interrupted: false,
+            blocking: None,
         })
     }
     pub(super) fn find(&self, open: OpenFileId, overlapped: GuestAddress) -> Option<usize> {
-        self.operations
-            .iter()
-            .position(|operation| operation.open == open && operation.overlapped == overlapped)
+        self.find_description(
+            crate::windows::files::completion::CompletionTarget32::File(open),
+            overlapped,
+        )
     }
-    pub(in crate::process::windows::files) fn is_file_signaled(&self, open: OpenFileId) -> bool {
+    pub(in crate::process::windows::files) fn find_description(
+        &self,
+        target: crate::windows::files::completion::CompletionTarget32,
+        overlapped: GuestAddress,
+    ) -> Option<usize> {
+        self.operations.iter().position(|operation| {
+            operation.target.description() == target && operation.overlapped == Some(overlapped)
+        })
+    }
+    pub(in crate::process::windows::files) fn is_description_signaled(
+        &self,
+        target: crate::windows::files::completion::CompletionTarget32,
+    ) -> bool {
         self.operations
             .iter()
-            .filter(|op| op.open == open)
+            .filter(|op| op.target.description() == target)
             .max_by_key(|op| op.id)
             .is_none_or(|op| matches!(op.status, AsyncStatus32::Complete { .. }))
     }
@@ -86,8 +148,18 @@ impl AsyncRuntime32 {
 
 impl AsyncRuntime32 {
     pub(in crate::process::windows::files) fn cancel_open(&mut self, open: OpenFileId) {
+        self.cancel_description(crate::windows::files::completion::CompletionTarget32::File(
+            open,
+        ));
+    }
+    pub(in crate::process::windows::files) fn cancel_description(
+        &mut self,
+        target: crate::windows::files::completion::CompletionTarget32,
+    ) {
         for operation in &mut self.operations {
-            if operation.open == open && operation.status == AsyncStatus32::Pending {
+            if operation.target.description() == target
+                && operation.status == AsyncStatus32::Pending
+            {
                 operation.cancel = true;
             }
         }
@@ -119,8 +191,11 @@ impl AsyncRuntime32 {
         self.operations.clear();
         self.retained_bytes = 0;
         self.wait = None;
+        self.interrupted = false;
+        self.blocking = None;
     }
     pub(in crate::process::windows::files) fn cancel_wait(&mut self) {
         self.wait = None;
+        self.interrupted = false;
     }
 }

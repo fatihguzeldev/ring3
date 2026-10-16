@@ -2,18 +2,21 @@ mod termination;
 mod thread;
 pub(in crate::process) use thread::FileThreadReply32;
 mod acceptance;
+mod blocking;
 mod calls;
 mod completion;
 mod context;
 mod locks;
 mod positioned;
 
+pub(super) use completion::status;
+pub(super) use context::AsyncOperation32;
 pub(super) use context::{AsyncProgress32, AsyncRuntime32};
 
 #[cfg(test)]
 mod tests;
 
-fn synchronization_error(
+pub(in crate::process::windows::files) fn synchronization_error(
     error: crate::windows::synchronization::SynchronizationError32,
 ) -> crate::files::FileError32 {
     use crate::{

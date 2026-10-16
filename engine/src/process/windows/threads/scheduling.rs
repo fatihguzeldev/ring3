@@ -59,10 +59,11 @@ impl EngineInstance {
             )
             && self.has_pending_thread_invocation(thread.id);
         let current_apc = thread.id == self.threads.current_id()
-            && self
+            && (self
                 .synchronization
                 .as_ref()
                 .is_some_and(|runtime| runtime.active_alertable())
+                || self.windows_file_wait_alertable())
             && self.has_pending_thread_apc(thread.id);
         let ready = thread.saved.as_ref().is_some_and(|saved| {
             saved.ready(
@@ -256,6 +257,7 @@ impl EngineInstance {
                     .as_ref()
                     .and_then(|runtime| runtime.context().next_timer_deadline()),
             )
+            .chain(self.active_windows_file_deadline())
             .min();
         self.threads.schedule_required = None;
         Ok(ThreadSchedule32::Waiting {
@@ -268,11 +270,9 @@ impl EngineInstance {
             self.retry_windows_callback_reply(owner, token)?;
         }
         let now = self.cpu_clock.monotonic_bounds()?.1;
-        if self
-            .files
-            .as_ref()
-            .is_some_and(|runtime| runtime.active_thread_reply_ready(now))
-        {
+        if self.files.as_ref().is_some_and(|runtime| {
+            runtime.active_thread_reply_ready(now, |id| self.threads.is_runnable(id))
+        }) {
             let wait = self.pending_file_call().ok_or(HostError::Infrastructure)?;
             self.resume_file_call(self.key(), wait.token)?;
         }

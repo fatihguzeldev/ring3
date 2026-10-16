@@ -7,10 +7,12 @@ use crate::{
 };
 pub(in crate::process) struct PreparedFileThreadExit32 {
     operations: Vec<u64>,
+    active: bool,
     revision: u64,
     words: Vec<WordWrite32>,
     bindings: Vec<EventBinding32>,
     copy: super::super::ordinary::PreparedCopyThreadExit32,
+    completion: Option<crate::windows::files::completion::PreparedCompletionPosts32>,
 }
 impl PreparedFileThreadExit32 {
     pub(in crate::process) fn words(&self) -> &[WordWrite32] {
@@ -50,6 +52,10 @@ impl FileRuntime32 {
         operations
             .try_reserve_exact(count)
             .map_err(|_| FileError32::Allocation)?;
+        let mut completion = Vec::new();
+        completion
+            .try_reserve_exact(count)
+            .map_err(|_| FileError32::Allocation)?;
         let mut closes: Vec<(OpenFileId, u32)> = Vec::new();
         closes
             .try_reserve_exact(count)
@@ -76,17 +82,22 @@ impl FileRuntime32 {
                 continue;
             }
             operations.push(operation.id);
+            if let Some(packet) = self.io_completion_packet(operation, 995, 0) {
+                completion.push(packet);
+            }
             bindings.extend_from_slice(&operation.events);
-            if let Some((_, count)) = closes.iter_mut().find(|(open, _)| *open == operation.open) {
+            let super::context::AsyncTarget32::File { open, .. } = operation.target;
+            if let Some((_, count)) = closes.iter_mut().find(|(candidate, _)| *candidate == open) {
                 *count = count.checked_add(1).ok_or(FileError32::Exhausted)?;
             } else {
-                closes.try_reserve(1).map_err(|_| FileError32::Allocation)?;
-                closes.push((operation.open, 1));
+                closes.push((open, 1));
             }
+            let Some(overlapped) = operation.overlapped else {
+                continue;
+            };
             for (offset, value) in [(0, status(995)), (4, 0)] {
                 let address = GuestAddress(
-                    operation
-                        .overlapped
+                    overlapped
                         .0
                         .checked_add(offset)
                         .ok_or(FileError32::NoAccess)?,
@@ -133,12 +144,15 @@ impl FileRuntime32 {
             }
         }
         self.vfs.check_close_open_group(&closes, 0, &[])?;
+        let completion = self.completion.prepare_posts(&completion)?;
         Ok(PreparedFileThreadExit32 {
             operations,
+            active,
             revision: self.vfs.revision(),
             words,
             bindings,
             copy,
+            completion,
         })
     }
     pub(in crate::process) fn commit_thread_exit(
@@ -147,6 +161,10 @@ impl FileRuntime32 {
         prepared: PreparedFileThreadExit32,
     ) {
         assert_eq!(self.vfs.revision(), prepared.revision);
+        if prepared.active {
+            self.asynchronous.blocking = None;
+        }
+        self.completion.commit_posts(prepared.completion);
         for id in prepared.operations {
             let index = self
                 .asynchronous
@@ -156,17 +174,18 @@ impl FileRuntime32 {
                 .unwrap();
             let operation = &self.asynchronous.operations[index];
             assert_eq!(operation.status, AsyncStatus32::Pending);
-            let open = operation.open;
+            let super::context::AsyncTarget32::File { open, .. } = operation.target;
             self.vfs.cancel_operation_io(id);
             self.vfs
                 .close_open(open)
-                .expect("all thread-operation source references were preflighted together");
+                .expect("thread file source release was preflighted");
             if self.vfs.open_info(open).is_err() {
                 self.release_file_locks(open);
             }
+            self.retire_completion_file(open);
             let operation = &mut self.asynchronous.operations[index];
             operation.events.clear();
-            if let Some(bytes) = operation.write.take() {
+            if let Some(bytes) = operation.take_data() {
                 self.asynchronous.retained_bytes -= bytes.len();
             }
             operation.cancel = true;
@@ -177,5 +196,12 @@ impl FileRuntime32 {
         }
         self.commit_copy_thread_exit(prepared.copy);
         self.vfs.cancel_guest_thread_io(thread);
+        self.completion.retire_thread(thread);
+        if self
+            .completion_wait
+            .is_some_and(|wait| wait.thread == thread)
+        {
+            self.completion_wait = None;
+        }
     }
 }

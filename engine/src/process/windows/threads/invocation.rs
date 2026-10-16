@@ -175,6 +175,7 @@ impl EngineInstance {
             .synchronization
             .as_ref()
             .is_some_and(|runtime| runtime.active_alertable())
+            || self.windows_file_wait_alertable()
             || (!self.threads.threads[thread_index].entered
                 && self.threads.threads[thread_index].started
                 && self.threads.threads[thread_index].lifecycle.is_none());
@@ -322,6 +323,9 @@ impl EngineInstance {
             .unwrap()
             .write_words32(frame.writes())
             .expect("invocation stack writes preflighted before CPU publication");
+        if invocation.completion == ThreadInvocationCompletion32::Apc {
+            self.commit_windows_file_wait_apc();
+        }
         let saved = self
             .take_windows_thread_context()
             .expect("validated thread CPU state is unchanged by stack writes");

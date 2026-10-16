@@ -95,6 +95,16 @@ impl ThreadRuntime32 {
     pub(in crate::process) fn current_id(&self) -> u32 {
         self.current
     }
+    pub(in crate::process) fn is_runnable(&self, id: u32) -> bool {
+        self.threads.iter().any(|thread| {
+            thread.id == id
+                && thread.suspend_count == 0
+                && matches!(
+                    thread.state,
+                    ThreadState32::Running | ThreadState32::Runnable
+                )
+        })
+    }
     pub(in crate::process) fn handle_limit(&self) -> usize {
         self.limits.handles as usize
     }

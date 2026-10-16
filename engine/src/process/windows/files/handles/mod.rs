@@ -6,6 +6,7 @@ use crate::files::{FileError32, OpenFileId};
 pub(super) enum KernelFileObject32 {
     File(OpenFileId),
     Mapping(u64),
+    CompletionPort(crate::windows::files::completion::CompletionPortId32),
     Find(u64),
 }
 #[derive(Clone, Copy)]
@@ -114,6 +115,17 @@ impl KernelFileHandles32 {
     pub(super) fn file(&self, handle: u32) -> Result<OpenFileId, FileError32> {
         match self.object(handle)? {
             KernelFileObject32::File(open) => Ok(open),
+            _ => Err(FileError32::InvalidHandle),
+        }
+    }
+    pub(super) fn io_target(
+        &self,
+        handle: u32,
+    ) -> Result<crate::windows::files::completion::CompletionTarget32, FileError32> {
+        match self.object(handle)? {
+            KernelFileObject32::File(open) => Ok(
+                crate::windows::files::completion::CompletionTarget32::File(open),
+            ),
             _ => Err(FileError32::InvalidHandle),
         }
     }

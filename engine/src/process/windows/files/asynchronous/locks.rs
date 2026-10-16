@@ -9,6 +9,17 @@ use crate::{
     windows::{files::FileApi32, synchronization::SynchronizationContext32},
 };
 
+struct PendingLock32 {
+    thread: u32,
+    open: crate::files::OpenFileId,
+    file_event: u32,
+    overlap: u32,
+    offset: u64,
+    length: u64,
+    exclusive: bool,
+    event: u32,
+    skip_port: bool,
+}
 impl FileRuntime32 {
     pub(in crate::process::windows::files) fn execute_lock_ex(
         &mut self,
@@ -19,6 +30,27 @@ impl FileRuntime32 {
         args: &[u32],
     ) -> Result<FileCallOutcome32, FileError32> {
         let lock = api == FileApi32::LockFileEx;
+        if lock && let Some(id) = self.asynchronous.blocking {
+            self.progress_io(memory, sync)?;
+            let operation = self
+                .asynchronous
+                .operations
+                .iter()
+                .find(|op| op.id == id)
+                .ok_or(FileError32::InvalidHandle)?;
+            return Ok(match operation.status {
+                AsyncStatus32::Pending => FileCallOutcome32::Pending,
+                AsyncStatus32::Complete { error: 0, .. } => {
+                    self.asynchronous.blocking = None;
+                    FileCallOutcome32::success(1)
+                }
+                AsyncStatus32::Complete { error, .. } => {
+                    self.asynchronous.blocking = None;
+                    FileCallOutcome32::error(0, error)
+                }
+            });
+        }
+
         let open = self.handles.file(args[0])?;
         if self.handles.access(args[0])? & (FileAccess32::READ.0 | FileAccess32::WRITE.0) == 0 {
             return Err(FileError32::AccessDenied);
@@ -37,45 +69,88 @@ impl FileRuntime32 {
             return Err(FileError32::InvalidParameter);
         }
         let event = u32::from_le_bytes(raw[16..20].try_into().unwrap()) & !1;
+        let skip_port = u32::from_le_bytes(raw[16..20].try_into().unwrap()) & 1 != 0;
+        let target = crate::windows::files::completion::CompletionTarget32::File(open);
+        let modes = self.completion.modes(target);
         let sync = sync.ok_or(FileError32::Unsupported)?;
         let mut lock_receipt = None;
         if lock {
             match self.prepare_file_lock(open, offset, length, args[1] & 2 != 0) {
                 Ok(prepared) => lock_receipt = Some(prepared),
                 Err(FileError32::LockViolation) if args[1] & 1 == 0 => {
+                    let mut pending =
+                        |files: &mut Self, sync: &mut SynchronizationContext32, file_event| {
+                            files.accept_pending_lock(
+                                memory,
+                                sync,
+                                PendingLock32 {
+                                    thread,
+                                    open,
+                                    file_event,
+                                    overlap,
+                                    offset,
+                                    length,
+                                    exclusive: args[1] & 2 != 0,
+                                    event,
+                                    skip_port,
+                                },
+                            )
+                        };
+                    let result = if modes & 2 == 0 {
+                        self.with_file_event(open, sync, pending)?
+                    } else {
+                        pending(self, sync, 0)?
+                    };
                     if !self.vfs.open_options(open)?.overlapped {
+                        self.asynchronous.blocking = Some(self.asynchronous.next - 1);
                         return Ok(FileCallOutcome32::Pending);
                     }
-                    return self.with_file_event(open, sync, |files, sync, file_event| {
-                        files.accept_pending_lock(
-                            memory,
-                            sync,
-                            thread,
-                            open,
-                            file_event,
-                            overlap,
-                            offset,
-                            length,
-                            args[1] & 2 != 0,
-                            event,
-                        )
-                    });
+                    return Ok(result);
                 }
                 Err(error) => return Err(error),
             }
         } else {
             self.check_unlock_file_range(open, offset, length)?;
         }
-        self.with_file_event(open, sync, |files, sync, file_event| {
-            let events = [file_event, event];
-            let events = if event == 0 {
-                &events[..1]
-            } else {
-                &events[..]
-            };
+        let complete = |files: &mut Self, sync: &mut SynchronizationContext32, file_event| {
+            let mut events = [0; 2];
+            let mut count = 0;
+            for handle in [file_event, event]
+                .into_iter()
+                .filter(|handle| *handle != 0)
+            {
+                events[count] = handle;
+                count += 1;
+            }
+            let events = &events[..count];
+            let completion =
+                if lock && !skip_port && modes & 1 == 0 && files.vfs.open_options(open)?.overlapped
+                {
+                    files
+                        .completion
+                        .association(target)
+                        .map(|(port, key, _)| {
+                            files.completion.prepare_post(
+                                port,
+                                crate::windows::files::completion::CompletionPacket32 {
+                                    key,
+                                    overlapped: overlap,
+                                    bytes: 0,
+                                    status: 0,
+                                    error: 0,
+                                },
+                            )
+                        })
+                        .transpose()?
+                } else {
+                    None
+                };
             let signals = sync
                 .prepare_signal_handles(events)
                 .map_err(super::synchronization_error)?;
+            memory
+                .ensure_transaction_versions(1)
+                .map_err(|_| FileError32::Exhausted)?;
             memory
                 .write(GuestAddress(overlap), &[0; 8])
                 .map_err(|_| FileError32::NoAccess)?;
@@ -87,23 +162,34 @@ impl FileRuntime32 {
                     .expect("unlock range was checked before completion publication");
             }
             sync.commit_signals(signals);
+            if let Some(completion) = completion {
+                files.completion.commit_post(completion);
+            }
             Ok(FileCallOutcome32::success(1))
-        })
+        };
+        if modes & 2 == 0 {
+            self.with_file_event(open, sync, complete)
+        } else {
+            complete(self, sync, 0)
+        }
     }
-    #[allow(clippy::too_many_arguments)]
     fn accept_pending_lock(
         &mut self,
         memory: &mut AddressSpace,
         sync: &mut SynchronizationContext32,
-        thread: u32,
-        open: crate::files::OpenFileId,
-        file_event: u32,
-        overlap: u32,
-        offset: u64,
-        length: u64,
-        exclusive: bool,
-        event: u32,
+        request: PendingLock32,
     ) -> Result<FileCallOutcome32, FileError32> {
+        let PendingLock32 {
+            thread,
+            open,
+            file_event,
+            overlap,
+            offset,
+            length,
+            exclusive,
+            event,
+            skip_port,
+        } = request;
         let overlapped = GuestAddress(overlap);
         if self
             .asynchronous
@@ -135,12 +221,16 @@ impl FileRuntime32 {
         let file = self.vfs.file_for_open(open)?;
         let mut mappings = Vec::new();
         capture_mappings(memory, overlapped, 8, &mut mappings)?;
-        let handles = [file_event, event];
-        let handles = if event == 0 {
-            &handles[..1]
-        } else {
-            &handles[..]
-        };
+        let mut handles = [0; 2];
+        let mut count = 0;
+        for handle in [file_event, event]
+            .into_iter()
+            .filter(|handle| *handle != 0)
+        {
+            handles[count] = handle;
+            count += 1;
+        }
+        let handles = &handles[..count];
         let release = old.map_or(&[][..], |index| {
             self.asynchronous.operations[index].events.as_slice()
         });
@@ -163,19 +253,18 @@ impl FileRuntime32 {
         self.asynchronous.next = next;
         self.asynchronous.operations.push(AsyncOperation32 {
             id,
-            open,
-            file,
+            target: AsyncTarget32::File { open, file },
             thread,
             buffer: GuestAddress(0),
             length: 0,
-            overlapped,
+            overlapped: Some(overlapped),
             offset,
-            write: None,
+            kind: AsyncKind32::Lock(AsyncLock32 { length, exclusive }),
             events,
             status: AsyncStatus32::Pending,
             cancel: false,
             mappings,
-            lock: Some(AsyncLock32 { length, exclusive }),
+            skip_port,
         });
         Ok(FileCallOutcome32::error(0, 997))
     }

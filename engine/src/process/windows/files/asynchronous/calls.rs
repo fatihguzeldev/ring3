@@ -22,16 +22,21 @@ impl FileRuntime32 {
         if matches!(api, FileApi32::LockFileEx | FileApi32::UnlockFileEx) {
             return self.execute_lock_ex(memory, sync, thread, api, args);
         }
-        let open = self.handles.file(args[0])?;
+        let target = self.handles.io_target(args[0])?;
+        if api == FileApi32::GetOverlappedResultEx && self.asynchronous.interrupted {
+            self.asynchronous.interrupted = false;
+            self.asynchronous.wait = None;
+            return Ok(FileCallOutcome32::error(0, 192));
+        }
         if matches!(api, FileApi32::CancelIo | FileApi32::CancelIoEx) {
             let mut found = false;
             for operation in &mut self.asynchronous.operations {
-                if operation.open == open
+                if operation.target.description() == target
                     && operation.status == AsyncStatus32::Pending
                     && (if api == FileApi32::CancelIo {
                         operation.thread == thread
                     } else {
-                        args[1] == 0 || operation.overlapped.0 == args[1]
+                        args[1] == 0 || operation.overlapped == Some(GuestAddress(args[1]))
                     })
                 {
                     operation.cancel = true;
@@ -55,7 +60,7 @@ impl FileRuntime32 {
         let raw = guest::read::<8>(memory, args[1])?;
         let cached = self
             .asynchronous
-            .find(open, overlap)
+            .find_description(target, overlap)
             .map(|index| &self.asynchronous.operations[index]);
         let (pending, error, count, id) = match cached {
             Some(operation) => match operation.status {

@@ -1,5 +1,6 @@
 mod asynchronous;
 mod calls;
+mod completion;
 mod handles;
 mod host;
 mod lifecycle;
@@ -62,8 +63,10 @@ pub(in crate::process) struct FileRuntime32 {
     ordinary: OrdinaryRuntime32,
     mappings: MappingRuntime32,
     asynchronous: AsyncRuntime32,
+    completion: crate::windows::files::completion::CompletionContext32,
+    completion_wait: Option<completion::CompletionWait32>,
     reply: Option<FileReply32>,
-    events: Vec<(OpenFileId, u32)>,
+    events: Vec<(crate::windows::files::completion::CompletionTarget32, u32)>,
     host_input: host::HostFileInput32,
 }
 #[derive(Clone, Copy)]

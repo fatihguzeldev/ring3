@@ -23,6 +23,14 @@ impl EngineInstance {
             .map_err(HostError::File)?,
             asynchronous: AsyncRuntime32::new(config.operations, config.operation_bytes)
                 .map_err(HostError::File)?,
+            completion: crate::windows::files::completion::CompletionContext32::new(
+                config.operations.min(config.handles as usize),
+                config.handles as usize,
+                config.operations,
+                4096,
+            )
+            .map_err(HostError::File)?,
+            completion_wait: None,
             reply: None,
             events: Vec::new(),
             host_input: Default::default(),

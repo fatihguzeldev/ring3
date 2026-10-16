@@ -6,3 +6,5 @@ mod static_tls;
 mod timers;
 mod tls;
 mod utilities;
+
+mod completion;

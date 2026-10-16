@@ -8,7 +8,7 @@ pub(in crate::process::windows::files) struct PreparedCopyThreadExit32 {
     copies: Vec<PendingCopy32>,
     closes: Vec<(OpenFileId, u32)>,
     final_numeric: Vec<OpenFileId>,
-    events: Vec<(OpenFileId, u32)>,
+    events: Vec<(crate::windows::files::completion::CompletionTarget32, u32)>,
     event_handles: Vec<u32>,
     active: bool,
 }
@@ -101,7 +101,9 @@ impl FileRuntime32 {
                 continue;
             }
             final_numeric.push(open);
-            if let Some(&(id, handle)) = self.events.iter().find(|(id, _)| *id == open) {
+            if let Some(&(id, handle)) = self.events.iter().find(|(id, _)| {
+                *id == crate::windows::files::completion::CompletionTarget32::File(open)
+            }) {
                 events.push((id, handle));
                 event_handles.push(handle);
             }
