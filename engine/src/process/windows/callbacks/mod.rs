@@ -1,3 +1,5 @@
+mod scratch;
+pub(in crate::process::windows) use scratch::GuestCallbackScratch32;
 mod context;
 mod execution;
 mod replies;
@@ -18,6 +20,7 @@ pub enum WindowsCallbackProvider32 {
     DirectSound,
     DirectInput,
     Files,
+    Resources,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -44,6 +47,21 @@ pub(in crate::process) struct WindowsReply32 {
     continuation: u64,
     last_error: Option<u32>,
     stage: ReplyStage32,
+}
+impl WindowsReply32 {
+    pub(in crate::process) fn owner(&self) -> PendingOwner {
+        self.owner
+    }
+    pub(in crate::process) fn ready(&self) -> bool {
+        matches!(
+            self.stage,
+            ReplyStage32::Ready(_) | ReplyStage32::Received(_) | ReplyStage32::Complete(_)
+        )
+    }
+    pub(in crate::process) fn waiting_for_user32(&self) -> bool {
+        self.provider == WindowsCallbackProvider32::User32
+            && matches!(self.stage, ReplyStage32::Wait)
+    }
 }
 
 #[derive(Clone, Copy)]

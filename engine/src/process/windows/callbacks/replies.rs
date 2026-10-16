@@ -111,6 +111,29 @@ impl EngineInstance {
                     _ => return Err(HostError::Infrastructure),
                 }
             }
+            WindowsCallbackProvider32::Resources => {
+                let outcome = self.resume_resource_callback(reply.continuation, result)?;
+                let last = self.windows_replies.last_mut().unwrap();
+                match outcome {
+                    crate::process::windows::resources::ResourceCallOutcome32::Return {
+                        value,
+                        last_error,
+                    } => {
+                        last.last_error = last_error;
+                        last.stage = ReplyStage32::Complete(value);
+                    }
+                    crate::process::windows::resources::ResourceCallOutcome32::Callback(
+                        request,
+                    ) => {
+                        validate_request(request)?;
+                        if request.provider != reply.provider {
+                            return Err(HostError::Infrastructure);
+                        }
+                        last.continuation = request.continuation;
+                        last.stage = ReplyStage32::Ready(request);
+                    }
+                }
+            }
             WindowsCallbackProvider32::D3D8
             | WindowsCallbackProvider32::DirectSound
             | WindowsCallbackProvider32::DirectInput => {
@@ -124,7 +147,9 @@ impl EngineInstance {
                     WindowsCallbackProvider32::DirectInput => {
                         self.resume_dinput_callback(reply.continuation, result)?
                     }
-                    WindowsCallbackProvider32::User32 | WindowsCallbackProvider32::Files => {
+                    WindowsCallbackProvider32::User32
+                    | WindowsCallbackProvider32::Files
+                    | WindowsCallbackProvider32::Resources => {
                         unreachable!()
                     }
                 };
@@ -227,6 +252,16 @@ impl EngineInstance {
             return Err(HostError::Call(CallError::InvalidToken));
         }
         self.checked_pending_call(reply.owner, reply.token)?;
+        let thread = self.current_windows_thread_id()?;
+        if self
+            .user32
+            .as_ref()
+            .is_some_and(|context| context.waiting_retrieval(continuation))
+            && self.has_pending_thread_invocation(thread)
+        {
+            self.set_thread_message_dispatch(thread, true)?;
+            return Err(HostError::Call(CallError::Busy));
+        }
         self.check_windows_thread_write()?;
         self.refresh_user32_input()?;
         let queue = self.prepare_user32_queue_change()?;

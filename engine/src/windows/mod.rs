@@ -22,23 +22,22 @@ pub use modules::kernel32_module;
 
 pub mod files;
 
-pub mod text;
-
-pub mod process;
-
 pub mod ole32;
 pub mod winmm;
 
+pub mod process;
+
+pub mod text;
+
 pub mod memory;
 
+pub mod thread;
+
+pub mod registry;
 pub mod exceptions;
 
 pub mod nls;
 
-pub mod registry;
-
-pub mod thread;
+pub mod resources;
 
 pub mod rawinput;
-
-pub mod resources;

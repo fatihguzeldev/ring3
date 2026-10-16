@@ -9,7 +9,7 @@ use crate::process::execution::installation::{RESIDENT_INSTALLATION_SLOTS, Resid
 use crate::{
     abi::arena::{self, ARENA_SIZE},
     cpu::dbt::{CompileError, CompiledRegion, RegistryError, ResidentRegistry, emit_dispatcher},
-    memory::{AddressSpace, MemoryError, PageRange},
+    memory::{AddressSpace, MemoryError},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -34,6 +34,14 @@ pub enum HostError {
     DSound(crate::process::windows::dsound::DSoundError32),
     DirectInput(crate::process::windows::dinput::DirectInputError32),
     File(crate::files::FileError32),
+    Ole32(crate::process::windows::ole32::Ole32Error32),
+    WindowsProcess(crate::windows::process::ProcessError32),
+    WindowsMemory(crate::windows::memory::MemoryError32),
+    Thread(crate::windows::thread::ThreadError32),
+    Registry(crate::windows::registry::RegistryError32),
+    Exception(crate::windows::exceptions::ExceptionError32),
+    Nls(crate::windows::nls::NlsError32),
+    Resource(crate::process::windows::resources::ResourceError32),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -43,6 +51,10 @@ pub enum StoreCompletion {
 }
 
 pub struct EngineInstance {
+    pub(in crate::process) resources:Option<crate::process::windows::resources::ResourceRuntime32>,
+    pub(in crate::process) exceptions:crate::process::windows::exceptions::ExceptionRuntime32,
+    pub(in crate::process) nls:crate::process::windows::nls::NlsRuntime32,
+    pub(in crate::process) registry: Option<crate::process::windows::registry::RegistryRuntime32>,
     pub(in crate::process) files: Option<crate::process::windows::files::FileRuntime32>,
     pub(in crate::process) memory: Option<AddressSpace>,
     pub(in crate::process) arena: Pin<Box<[u8]>>,
@@ -50,9 +62,11 @@ pub struct EngineInstance {
     pub(in crate::process) dispatcher: Option<Vec<u8>>,
     pub(in crate::process) resident: Option<ResidentRegistry>,
     pub(in crate::process) resident_installations:
-        [Option<ResidentInstallation>; RESIDENT_INSTALLATION_SLOTS],
+        Vec<Option<ResidentInstallation>>,
+    pub(in crate::process) execution_cache: Option<crate::process::execution::cache::ExecutionCache32>,
     pub(in crate::process) key: u64,
     pub(in crate::process) generation: u32,
+    pub(in crate::process) generation_issuer: u32,
     pub(in crate::process) pending_call: Option<PendingCall>,
     pub(in crate::process) module_windows_reply:
         Option<crate::process::windows::modules::ModuleWindowsReply>,
@@ -74,11 +88,15 @@ pub struct EngineInstance {
     pub(in crate::process) image_input: Option<crate::process::loading::input::ImageInput>,
     pub(in crate::process) image_started: bool,
     pub(in crate::process) exit_code: Option<u32>,
+    pub(in crate::process) pending_process_exit:Option<u32>,
+    pub(in crate::process) process_exit_owner:Option<u32>,
+    pub(in crate::process) threads: crate::process::windows::threads::ThreadRuntime32,
+    pub(in crate::process) process_runtime: crate::process::windows::process::WindowsProcessRuntime32,
     pub(in crate::process) windows_thread: crate::windows::ThreadState32,
     pub(in crate::process) user32: Option<crate::process::windows::user32::User32Context32>,
     pub(in crate::process) windows_replies: Vec<crate::process::windows::callbacks::WindowsReply32>,
     pub(in crate::process) segment_descriptors: crate::cpu::x86::SegmentDescriptorTable,
-    pub(in crate::process) virtual_allocations: Vec<PageRange>,
+    pub(in crate::process) windows_memory: crate::process::windows::memory::WindowsMemoryRuntime32,
     pub(in crate::process) media: Option<crate::process::media::MediaContexts>,
     pub(in crate::process) media_epoch: u64,
     pub(in crate::process) windows_input_delivery_error: Option<HostError>,
@@ -88,6 +106,8 @@ pub struct EngineInstance {
         Option<crate::process::windows::synchronization::SynchronizationRuntime32>,
     pub(in crate::process) dsound: Option<crate::process::windows::dsound::DSoundRuntime32>,
     pub(in crate::process) dinput: Option<crate::process::windows::dinput::DirectInputRuntime32>,
+    pub(in crate::process) ole32: Option<crate::process::windows::ole32::Ole32Runtime32>,
+    pub(in crate::process) winmm: crate::process::windows::winmm::WinmmRuntime32,
 }
 
 impl EngineInstance {
@@ -103,15 +123,21 @@ impl EngineInstance {
         arena.resize(ARENA_SIZE, 0);
         arena::initialize(&mut arena).map_err(|_| HostError::Infrastructure)?;
         Ok(Self {
+            resources:None,
+            registry: None,
+            exceptions:crate::process::windows::exceptions::ExceptionRuntime32::new().map_err(HostError::Exception)?,
+            nls:Default::default(),
             files: None,
             memory: Some(memory),
             arena: Box::into_pin(arena.into_boxed_slice()),
             artifact: None,
             dispatcher: Some(emit_dispatcher(key)),
             resident: None,
-            resident_installations: [None; RESIDENT_INSTALLATION_SLOTS],
+            resident_installations: vec![None; RESIDENT_INSTALLATION_SLOTS],
+            execution_cache: None,
             key,
             generation: 0,
+            generation_issuer: 0,
             pending_call: None,
             module_windows_reply: None,
             callback: None,
@@ -131,11 +157,15 @@ impl EngineInstance {
             image_input: None,
             image_started: false,
             exit_code: None,
+            pending_process_exit:None,
+            process_exit_owner:None,
+            threads: crate::process::windows::threads::ThreadRuntime32::new(Default::default()).map_err(HostError::Thread)?,
+            process_runtime: crate::process::windows::process::WindowsProcessRuntime32::new(Default::default()).map_err(HostError::WindowsProcess)?,
             windows_thread: crate::windows::ThreadState32::default(),
             user32: None,
             windows_replies: Vec::new(),
             segment_descriptors: crate::cpu::x86::SegmentDescriptorTable::default(),
-            virtual_allocations: Vec::new(),
+            windows_memory: crate::process::windows::memory::WindowsMemoryRuntime32::new(Default::default()).map_err(HostError::WindowsMemory)?,
             media: None,
             media_epoch: 0,
             windows_input_delivery_error: None,
@@ -144,6 +174,8 @@ impl EngineInstance {
             synchronization: None,
             dsound: None,
             dinput: None,
+            ole32: None,
+            winmm: Default::default(),
         })
     }
 
@@ -169,12 +201,19 @@ impl EngineInstance {
     }
 
     pub fn close(&mut self) {
+        self.resources=None;
+        self.registry = None;
+        self.exceptions=crate::process::windows::exceptions::ExceptionRuntime32::new().expect("default exception handler limit");
+        self.nls=Default::default();
         self.files = None;
         self.d3d8 = None;
         self.d3d8_reply = None;
         self.synchronization = None;
         self.dsound = None;
         self.dinput = None;
+        self.ole32 = None;
+        self.winmm = Default::default();
+        self.execution_cache = None;
         self.numerical_workspace = Default::default();
         self.media = None;
         self.windows_input_delivery_error = None;
@@ -197,8 +236,10 @@ impl EngineInstance {
         self.artifact = None;
         self.dispatcher = None;
         self.resident = None;
-        self.resident_installations = [None; RESIDENT_INSTALLATION_SLOTS];
+        self.resident_installations.clear();
         self.memory = None;
-        self.virtual_allocations = Vec::new();
+        self.windows_memory = crate::process::windows::memory::WindowsMemoryRuntime32::new(Default::default()).expect("default Windows memory limits are valid");
+        self.process_runtime.startup = None;
+        self.threads.reset_primary_thread();
     }
 }

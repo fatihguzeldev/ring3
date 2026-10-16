@@ -41,19 +41,14 @@ impl ThreadState32 {
         Self { last_error }
     }
 
-    pub(crate) fn allocation_failed(mut self) -> Self {
-        self.last_error = 8;
-        self
+    #[cfg(test)]
+    pub(crate) fn allocation_failed(self) -> Self {
+        self.with_last_error(8)
     }
 
-    pub(crate) fn release_failed(mut self) -> Self {
-        self.last_error = 487;
-        self
-    }
-
-    pub(crate) fn protection_failed(mut self, error: u32) -> Self {
-        self.last_error = error;
-        self
+    #[cfg(test)]
+    pub(crate) fn protection_failed(self, error: u32) -> Self {
+        self.with_last_error(error)
     }
 
     pub(crate) fn prepare(

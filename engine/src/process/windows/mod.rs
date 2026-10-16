@@ -14,3 +14,19 @@ mod strings;
 pub(super) mod synchronization;
 mod thread;
 pub(super) mod user32;
+
+pub(super) mod ole32;
+pub(super) mod winmm;
+
+pub(super) mod process;
+
+pub(super) mod memory;
+
+pub(super) mod threads;
+
+pub(super) mod registry;
+
+pub(super) mod exceptions;
+pub(super) mod nls;
+
+pub(super) mod resources;

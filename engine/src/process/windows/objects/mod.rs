@@ -84,3 +84,5 @@ impl From<MemoryError> for GuestComError32 {
 
 #[cfg(test)]
 mod tests;
+
+impl GuestComObjects32 {pub(in crate::process) fn reservation(&self)->PageRange {self.bounds}}

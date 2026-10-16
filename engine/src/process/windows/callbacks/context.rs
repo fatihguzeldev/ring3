@@ -44,7 +44,8 @@ impl EngineInstance {
     }
 
     pub(in crate::process::windows) fn reserve_windows_reply(&mut self) -> Result<(), HostError> {
-        if self.windows_replies.len() >= MAX_REPLIES {
+        let retained = self.modules.parked_windows_reply_count();
+        if self.windows_replies.len() + retained >= MAX_REPLIES {
             return Err(HostError::Call(CallError::Busy));
         }
         self.windows_replies
@@ -54,7 +55,8 @@ impl EngineInstance {
 
     pub(in crate::process) fn check_windows_callback_capacity(&mut self) -> Result<(), HostError> {
         self.memory()?;
-        if self.windows_replies.len() >= MAX_REPLIES - 1 {
+        if self.windows_replies.len() + self.modules.parked_windows_reply_count() >= MAX_REPLIES - 1
+        {
             return Err(HostError::Call(CallError::Busy));
         }
         self.reserve_windows_reply()
@@ -111,6 +113,15 @@ impl EngineInstance {
         }
         self.park_windows_callback(request)
     }
+    pub(in crate::process) fn park_resource_callback(
+        &mut self,
+        request: WindowsCallback32,
+    ) -> Result<(), HostError> {
+        if request.provider != WindowsCallbackProvider32::Resources {
+            return Err(HostError::InvalidRequest);
+        }
+        self.park_windows_callback(request)
+    }
     fn park_windows_callback(&mut self, request: WindowsCallback32) -> Result<(), HostError> {
         validate_request(request)?;
         self.check_windows_callback_capacity()?;
@@ -152,7 +163,8 @@ impl EngineInstance {
                 .iter()
                 .any(|reply| reply.token == token)
                 || self.synchronization_provider_owns_token(token)
-                || self.files_provider_owns_token(token))
+                || self.files_provider_owns_token(token)
+                || self.registry_provider_owns_token(token))
     }
 
     pub fn pending_windows_callback(&self) -> Option<WindowsCallback32> {
