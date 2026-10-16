@@ -16,11 +16,13 @@ impl User32Context32 {
             api,
             User32Api32::RegisterClassExA | User32Api32::RegisterClassExW
         );
+        let mut small_icon = 0;
         let values = if extended {
             let input: [u32; 12] = memory::words(memory, address)?;
             if input[0] != 48 {
                 return Err(User32Error32::Win32(87));
             }
+            small_icon = input[11];
             [
                 input[1], input[2], input[3], input[4], input[5], input[6], input[7], input[8],
                 input[9], input[10],
@@ -31,6 +33,7 @@ impl User32Context32 {
         if values[2] != 0 || values[3] > 4096 || values[1] == 0 {
             return Err(User32Error32::Win32(87));
         }
+        let (menu_name, menu_id) = if values[8] == 0 { (Vec::new(), None) } else { class_name(memory, values[8], api.wide(), context.ansi)? };
         let class = WindowClass32 {
             atom: 0,
             name: memory::string(memory, values[9], api.wide(), 255, context.ansi)?,
@@ -43,6 +46,12 @@ impl User32Context32 {
             unicode: api.wide(),
             style: values[0],
             extra_bytes: values[3],
+            background_brush: values[7],
+            icon: values[5],
+            small_icon,
+            cursor: values[6],
+            menu_name,
+            menu_id,
         };
         Ok(User32Outcome32::Return(u32::from(
             self.state.register_class(class)?,

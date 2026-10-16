@@ -61,6 +61,31 @@ pub struct WindowClass32 {
     pub unicode: bool,
     pub style: u32,
     pub extra_bytes: u32,
+    pub background_brush: u32,
+    pub icon: u32,
+    pub small_icon: u32,
+    pub cursor: u32,
+    pub menu_name: Vec<u16>,
+    pub menu_id: Option<u16>,
+}
+impl Default for WindowClass32 {
+    fn default() -> Self {
+        Self {
+            atom: 0,
+            name: Vec::new(),
+            instance: 0,
+            procedure: GuestAddress(0),
+            unicode: false,
+            style: 0,
+            extra_bytes: 0,
+            background_brush: 0,
+            icon: 0,
+            small_icon: 0,
+            cursor: 0,
+            menu_name: Vec::new(),
+            menu_id: None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

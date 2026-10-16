@@ -66,6 +66,7 @@ fn class_identity_is_case_insensitive_instance_scoped_and_never_reuses_retired_a
         unicode: true,
         style: 0,
         extra_bytes: 0,
+        ..Default::default()
     };
     let atom = state.register_class(class(1)).unwrap();
     assert_eq!(

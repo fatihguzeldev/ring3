@@ -546,6 +546,7 @@ fn visible_creation_reuses_activation_callbacks_and_focus_receipt_after_scratch_
             unicode: false,
             style: 0,
             extra_bytes: 0,
+            ..Default::default()
         })
         .unwrap();
     let pc = CALL_PC + 0x40;
