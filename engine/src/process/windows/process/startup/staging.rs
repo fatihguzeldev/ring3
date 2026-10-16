@@ -3,7 +3,7 @@ use crate::{
     loader::LoadPlan32,
     memory::{GuestAddress, PAGE_SIZE, PageRange, Permissions},
     process::{EngineInstance, HostError},
-    windows::{process::ProcessError32, text::CodePage32},
+    windows::process::ProcessError32,
 };
 
 impl EngineInstance {
@@ -88,7 +88,8 @@ impl EngineInstance {
         let cwd = bytes
             .wide_units(&cwd_units)
             .map_err(HostError::WindowsProcess)?;
-        let mut ansi = CodePage32::Windows1252
+        let mut ansi = self
+            .windows_ansi_code_page()
             .encode(&command_line.encode_utf16().collect::<Vec<_>>(), false)
             .map_err(|_| HostError::WindowsProcess(ProcessError32::InvalidParameter))?
             .0;

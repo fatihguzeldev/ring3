@@ -13,7 +13,12 @@ enum Argument32 {
     Value(u32),
     Offset(u32),
 }
-fn identifier(value: &Identifier, wide: bool, bytes: &mut Vec<u8>) -> Result<Argument32, E> {
+fn identifier(
+    value: &Identifier,
+    wide: bool,
+    code_page: CodePage32,
+    bytes: &mut Vec<u8>,
+) -> Result<Argument32, E> {
     match value {
         Identifier::Id(id) => {
             if *id <= u32::from(u16::MAX) {
@@ -33,7 +38,7 @@ fn identifier(value: &Identifier, wide: bool, bytes: &mut Vec<u8>) -> Result<Arg
                 }
                 bytes.extend_from_slice(&[0, 0]);
             } else {
-                let encoded = CodePage32::Windows1252
+                let encoded = code_page
                     .encode(name, false)
                     .map_err(|_| E::InvalidParameter)?
                     .0;
@@ -62,7 +67,7 @@ impl PendingEnum32 {
                 let EnumerationItem32::Identifier(value) = &self.items[index] else {
                     unreachable!()
                 };
-                fields[1] = identifier(value, self.wide, &mut bytes)?;
+                fields[1] = identifier(value, self.wide, self.code_page, &mut bytes)?;
                 fields[2] = Argument32::Value(self.parameter);
                 3
             }
@@ -70,9 +75,13 @@ impl PendingEnum32 {
                 let EnumerationItem32::Identifier(value) = &self.items[index] else {
                     unreachable!()
                 };
-                fields[1] =
-                    identifier(self.resource_type.as_ref().unwrap(), self.wide, &mut bytes)?;
-                fields[2] = identifier(value, self.wide, &mut bytes)?;
+                fields[1] = identifier(
+                    self.resource_type.as_ref().unwrap(),
+                    self.wide,
+                    self.code_page,
+                    &mut bytes,
+                )?;
+                fields[2] = identifier(value, self.wide, self.code_page, &mut bytes)?;
                 fields[3] = Argument32::Value(self.parameter);
                 4
             }
@@ -80,10 +89,18 @@ impl PendingEnum32 {
                 let EnumerationItem32::Language(value) = self.items[index] else {
                     unreachable!()
                 };
-                fields[1] =
-                    identifier(self.resource_type.as_ref().unwrap(), self.wide, &mut bytes)?;
-                fields[2] =
-                    identifier(self.resource_name.as_ref().unwrap(), self.wide, &mut bytes)?;
+                fields[1] = identifier(
+                    self.resource_type.as_ref().unwrap(),
+                    self.wide,
+                    self.code_page,
+                    &mut bytes,
+                )?;
+                fields[2] = identifier(
+                    self.resource_name.as_ref().unwrap(),
+                    self.wide,
+                    self.code_page,
+                    &mut bytes,
+                )?;
                 fields[3] = Argument32::Value(u32::from(value));
                 fields[4] = Argument32::Value(self.parameter);
                 5

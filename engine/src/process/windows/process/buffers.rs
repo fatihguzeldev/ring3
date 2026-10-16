@@ -7,6 +7,7 @@ pub(super) fn string(
     memory: &AddressSpace,
     pointer: u32,
     wide: bool,
+    code_page: CodePage32,
 ) -> Result<String, ProcessError32> {
     if pointer == 0 {
         return Err(ProcessError32::InvalidParameter);
@@ -27,7 +28,7 @@ pub(super) fn string(
                     .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
                     .collect::<Vec<_>>()
             } else {
-                CodePage32::Windows1252
+                code_page
                     .decode(&bytes, false)
                     .map_err(|_| ProcessError32::InvalidParameter)?
             };
@@ -37,12 +38,12 @@ pub(super) fn string(
     }
     Err(ProcessError32::InvalidParameter)
 }
-pub(super) fn encoded(value: &str, wide: bool) -> Vec<u8> {
+pub(super) fn encoded(value: &str, wide: bool, code_page: CodePage32) -> Vec<u8> {
     let units = value.encode_utf16().collect::<Vec<_>>();
     if wide {
         units.into_iter().flat_map(u16::to_le_bytes).collect()
     } else {
-        CodePage32::Windows1252
+        code_page
             .encode(&units, false)
             .expect("replacement conversion always succeeds")
             .0
@@ -69,8 +70,9 @@ pub(super) fn counted(
     capacity: u32,
     value: &str,
     wide: bool,
+    code_page: CodePage32,
 ) -> Result<u32, ProcessError32> {
-    let mut bytes = encoded(value, wide);
+    let mut bytes = encoded(value, wide, code_page);
     let width = if wide { 2 } else { 1 };
     let count = bytes.len() / width;
     if capacity as usize <= count {

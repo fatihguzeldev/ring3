@@ -11,8 +11,18 @@ impl EngineInstance {
             | Api::FindResourceExW => {
                 let extended = matches!(api, Api::FindResourceExA | Api::FindResourceExW);
                 let mem = self.memory.as_ref().ok_or(E::NotConfigured)?;
-                let kind = memory::identifier(mem, args[if extended { 1 } else { 2 }], api.wide())?;
-                let name = memory::identifier(mem, args[if extended { 2 } else { 1 }], api.wide())?;
+                let kind = memory::identifier(
+                    mem,
+                    args[if extended { 1 } else { 2 }],
+                    api.wide(),
+                    self.windows_ansi_code_page(),
+                )?;
+                let name = memory::identifier(
+                    mem,
+                    args[if extended { 2 } else { 1 }],
+                    api.wide(),
+                    self.windows_ansi_code_page(),
+                )?;
                 let mut reader = self.resource_reader(module)?;
                 let location = if extended && args[3] as u16 != 0 {
                     reader.find_exact(&kind, &name, args[3] as u16)?

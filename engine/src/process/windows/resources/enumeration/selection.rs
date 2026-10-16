@@ -56,10 +56,20 @@ impl EngineInstance {
         let resource_type = if matches!(kind, Enumeration32::Types) {
             None
         } else {
-            Some(memory::identifier(memory, args[1], api.wide())?)
+            Some(memory::identifier(
+                memory,
+                args[1],
+                api.wide(),
+                self.windows_ansi_code_page(),
+            )?)
         };
         let resource_name = if matches!(kind, Enumeration32::Languages) {
-            Some(memory::identifier(memory, args[2], api.wide())?)
+            Some(memory::identifier(
+                memory,
+                args[2],
+                api.wide(),
+                self.windows_ansi_code_page(),
+            )?)
         } else {
             None
         };

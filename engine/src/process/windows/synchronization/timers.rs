@@ -55,6 +55,7 @@ impl EngineInstance {
                         self.memory()?,
                         args[2],
                         api == Api::CreateWaitableTimerW,
+                        self.windows_ansi_code_page(),
                     )?)
                 };
                 let (prepared, existed) = self
@@ -73,7 +74,12 @@ impl EngineInstance {
                 ready(handle, Some(error))
             }
             Api::OpenWaitableTimerA | Api::OpenWaitableTimerW => {
-                let name = decoding::name(self.memory()?, args[2], api == Api::OpenWaitableTimerW)?;
+                let name = decoding::name(
+                    self.memory()?,
+                    args[2],
+                    api == Api::OpenWaitableTimerW,
+                    self.windows_ansi_code_page(),
+                )?;
                 let handle = self
                     .synchronization_mut()?
                     .open_timer(args[0], args[1] != 0, &name)

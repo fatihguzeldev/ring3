@@ -261,6 +261,7 @@ impl EngineInstance {
                         self.memory()?,
                         args[3],
                         api == CreateEventW,
+                        self.windows_ansi_code_page(),
                     )?)
                 };
                 if let Some(name) = name.as_deref()
@@ -280,7 +281,12 @@ impl EngineInstance {
                 if args[2] == 0 {
                     return Err(HostError::Synchronization(Error::InvalidName));
                 }
-                let name = decoding::name(self.memory()?, args[2], api == OpenEventW)?;
+                let name = decoding::name(
+                    self.memory()?,
+                    args[2],
+                    api == OpenEventW,
+                    self.windows_ansi_code_page(),
+                )?;
                 if self
                     .file_mapping_name_conflict(&name)
                     .map_err(HostError::Synchronization)?

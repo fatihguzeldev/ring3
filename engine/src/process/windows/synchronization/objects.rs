@@ -39,7 +39,12 @@ impl EngineInstance {
                 let name = if name_address == 0 {
                     None
                 } else {
-                    Some(decoding::name(self.memory()?, name_address, wide)?)
+                    Some(decoding::name(
+                        self.memory()?,
+                        name_address,
+                        wide,
+                        self.windows_ansi_code_page(),
+                    )?)
                 };
                 let context = self.synchronization.as_ref().unwrap().context();
                 let (prepared, existed) = if mutex {
@@ -74,6 +79,7 @@ impl EngineInstance {
                     self.memory()?,
                     args[2],
                     matches!(api, Api::OpenMutexW | Api::OpenSemaphoreW),
+                    self.windows_ansi_code_page(),
                 )?;
                 let context = self.synchronization.as_mut().unwrap().context_mut();
                 let handle = if matches!(api, Api::OpenMutexA | Api::OpenMutexW) {

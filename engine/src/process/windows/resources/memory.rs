@@ -4,7 +4,12 @@ use crate::{
     memory::{Access, AddressSpace, GuestAddress},
     windows::text::CodePage32,
 };
-pub(super) fn identifier(memory: &AddressSpace, pointer: u32, wide: bool) -> Result<Identifier, E> {
+pub(super) fn identifier(
+    memory: &AddressSpace,
+    pointer: u32,
+    wide: bool,
+    code_page: CodePage32,
+) -> Result<Identifier, E> {
     if pointer <= u32::from(u16::MAX) {
         return Ok(Identifier::Id(pointer));
     }
@@ -25,7 +30,7 @@ pub(super) fn identifier(memory: &AddressSpace, pointer: u32, wide: bool) -> Res
         };
         if value == 0 {
             if !wide {
-                units = CodePage32::Windows1252
+                units = code_page
                     .decode(&ansi, false)
                     .map_err(|_| E::InvalidParameter)?;
             }
@@ -66,4 +71,41 @@ pub(super) fn output(memory: &AddressSpace, pointer: u32, length: usize) -> Resu
     }
     memory.check_span(GuestAddress(pointer), length, Access::Write)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::memory::{PageRange, Permissions};
+
+    #[test]
+    fn resource_names_use_configured_dbcs_and_preserve_integer_identifiers() {
+        let mut memory = AddressSpace::new(2).unwrap();
+        memory
+            .map_zeroed(
+                PageRange::new(GuestAddress(0x10000), 1).unwrap(),
+                Permissions::READ_WRITE,
+            )
+            .unwrap();
+        memory
+            .write(
+                GuestAddress(0x10000),
+                &[0x83, 0x65, 0x83, 0x58, 0x83, 0x67, 0],
+            )
+            .unwrap();
+        let page = CodePage32::from_id(932).unwrap();
+        assert_eq!(
+            identifier(&memory, 0x10000, false, page).unwrap(),
+            Identifier::Name("テスト".encode_utf16().collect())
+        );
+        assert_eq!(
+            identifier(&memory, 123, false, page).unwrap(),
+            Identifier::Id(123)
+        );
+        memory.write(GuestAddress(0x10000), b"#456\0").unwrap();
+        assert_eq!(
+            identifier(&memory, 0x10000, false, page).unwrap(),
+            Identifier::Id(456)
+        );
+    }
 }

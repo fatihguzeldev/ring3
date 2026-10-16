@@ -24,6 +24,7 @@ pub(in crate::process::windows::resources) struct PendingEnum32 {
     pub items: Vec<EnumerationItem32>,
     pub index: usize,
     pub wide: bool,
+    pub code_page: crate::windows::text::CodePage32,
     pub procedure: GuestAddress,
     pub parameter: u32,
     pub scratch: Option<GuestCallbackScratch32>,

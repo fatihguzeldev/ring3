@@ -1,9 +1,7 @@
 use super::{ResourceError32 as E, memory};
 use crate::{
-    loader::ResourceIdentifier32 as Identifier,
-    memory::GuestAddress,
-    process::EngineInstance,
-    windows::{resources::ResourceApi32 as Api, text::CodePage32},
+    loader::ResourceIdentifier32 as Identifier, memory::GuestAddress, process::EngineInstance,
+    windows::resources::ResourceApi32 as Api,
 };
 impl EngineInstance {
     pub(in crate::process) fn resource_string_units(
@@ -65,6 +63,7 @@ impl EngineInstance {
         )?;
         let string = reader.string_table(location, args[1] & 15)?;
         let address = reader.address(string.data_rva, string.units * 2)?.0;
+        let code_page = self.windows_ansi_code_page();
         let mem = self.memory.as_mut().ok_or(E::NotConfigured)?;
         if args[3] == 0 {
             memory::output(mem, args[2], 4)?;
@@ -93,7 +92,7 @@ impl EngineInstance {
                 .chunks_exact(2)
                 .map(|bytes| u16::from_le_bytes(bytes.try_into().unwrap()))
                 .collect::<Vec<_>>();
-            let mut bytes = CodePage32::Windows1252
+            let mut bytes = code_page
                 .encode(&units, false)
                 .map_err(|_| E::InvalidParameter)?
                 .0;

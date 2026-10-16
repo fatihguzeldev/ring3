@@ -18,6 +18,7 @@ impl EngineInstance {
         let thread = self
             .current_windows_thread_id()
             .map_err(|_| E::InvalidParameter)?;
+        let code_page = self.windows_ansi_code_page();
         let runtime = self.resources.as_mut().ok_or(E::NotConfigured)?;
         let slot = runtime
             .pending
@@ -39,6 +40,7 @@ impl EngineInstance {
             items: selection.items,
             index: 0,
             wide: api.wide(),
+            code_page,
             procedure: GuestAddress(selection.procedure),
             parameter: selection.parameter,
             scratch: None,
