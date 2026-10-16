@@ -1,4 +1,4 @@
-use super::{
+use crate::windows::registry::{
     Registry32, RegistryChange32, RegistryChangeId32, RegistryChangeKind32 as Kind,
     RegistryError32 as E, RegistryValue32,
 };

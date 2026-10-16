@@ -1,4 +1,4 @@
-use super::{
+use crate::windows::registry::{
     PreparedRegistry32, Registry32, RegistryError32 as E, RegistryView32, model::Value32,
     prepared::Action32,
 };

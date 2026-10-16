@@ -3,15 +3,14 @@ mod compound;
 mod context;
 mod copy;
 mod deletion;
-mod export;
 mod model;
-mod mutations;
 mod notifications;
 mod overrides;
 mod path;
+mod persistence;
 mod prepared;
 mod queries;
-mod seed;
+mod transaction;
 mod types;
 pub use catalog::{Advapi32Api32, advapi32_module};
 pub use types::{
@@ -26,7 +25,7 @@ pub use model::{
 
 pub use prepared::PreparedRegistry32;
 
-pub use seed::RegistrySeed32;
+pub use persistence::RegistrySeed32;
 #[cfg(test)]
 mod tests;
 
