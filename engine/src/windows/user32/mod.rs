@@ -3,6 +3,8 @@ mod queue;
 mod state;
 mod types;
 
+pub(crate) mod dialogs;
+
 pub use api::{User32Api32, user32_module};
 pub(crate) use queue::{PreparedSentChange32, QueuedKey32, QueuedKeyboard32};
 pub(crate) use state::User32State32;
