@@ -57,3 +57,5 @@ pub mod shell;
 pub mod automation;
 
 pub mod shlwapi;
+
+pub(crate) mod controls;
