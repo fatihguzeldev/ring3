@@ -43,6 +43,14 @@ impl EngineInstance {
         if output == 0 {
             return Err(MemoryError32::NoAccess);
         }
+        self.memory
+            .as_ref()
+            .ok_or(MemoryError32::InvalidHandle)?
+            .check_span(GuestAddress(output), 4, Access::Write)
+            .map_err(|error| match error {
+                crate::memory::MemoryError::InvalidRange => MemoryError32::NoAccess,
+                error => error.into(),
+            })?;
         if self
             .windows_memory
             .virtual_memory
@@ -69,9 +77,11 @@ impl EngineInstance {
                     MemoryError32::InvalidAddress
                 }
             })?;
-        let resource = self.validate_resource_mapping_protection(range,permissions.without_guard())
-            .map_err(|_|MemoryError32::InvalidParameter)?;
-        if !mapped && !resource
+        let resource = self
+            .validate_resource_mapping_protection(range, permissions.without_guard())
+            .map_err(|_| MemoryError32::InvalidParameter)?;
+        if !mapped
+            && !resource
             && !self.module_image_contains_range(range)
             && !self.image.is_some_and(|image| {
                 address >= image.image_base
@@ -110,7 +120,9 @@ impl EngineInstance {
         if mapped {
             self.record_file_mapping_protection(range, protect);
         }
-        if resource {self.commit_resource_mapping_protection(range);}
+        if resource {
+            self.commit_resource_mapping_protection(range);
+        }
         Ok(1)
     }
     pub(super) fn memory_query(&mut self, args: &[u32]) -> Result<u32, MemoryError32> {
@@ -172,13 +184,22 @@ impl EngineInstance {
                 }
             }
         }
-        if let Some((base,extent,layout))=self.resource_mapping_info(args[0]).map_err(|_|MemoryError32::InvalidAddress)? {
-            info.allocation_base=base;
-            info.allocation_protection=2;
-            info.kind=match layout {crate::loader::DataFileLayout32::File=>0x40000,crate::loader::DataFileLayout32::Image=>0x1000000};
-            if info.state!=MEM_COMMIT {info.state=crate::windows::memory::MEM_RESERVE;info.protection=0;}
-            info.base=info.base.max(base);
-            info.size=info.size.min(base+extent-info.base);
+        if let Some((base, extent, layout)) = self
+            .resource_mapping_info(args[0])
+            .map_err(|_| MemoryError32::InvalidAddress)?
+        {
+            info.allocation_base = base;
+            info.allocation_protection = 2;
+            info.kind = match layout {
+                crate::loader::DataFileLayout32::File => 0x40000,
+                crate::loader::DataFileLayout32::Image => 0x1000000,
+            };
+            if info.state != MEM_COMMIT {
+                info.state = crate::windows::memory::MEM_RESERVE;
+                info.protection = 0;
+            }
+            info.base = info.base.max(base);
+            info.size = info.size.min(base + extent - info.base);
         }
         self.memory
             .as_mut()
