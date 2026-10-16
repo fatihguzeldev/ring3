@@ -81,16 +81,16 @@ fn reserved_encoding_is_rejected_before_the_public_capability_gate() {
     for (opcode, _) in FORMS {
         for prefix in [0x66, 0xf0, 0xf2, 0xf3] {
             let bytes = [prefix, 0xc4, 0xe2, 0x7d, opcode, 0xcb];
-            assert_eq!(
+            crate::support_fetch::assert_decode_contract(
                 decode_one(&code(&bytes), GuestAddress(0x1000)).unwrap_err(),
-                DecodeError::InvalidEncoding
+                DecodeError::InvalidEncoding,
             );
         }
         for reserved in 0..15 {
             let bytes = [0xc4, 0xe2, 5 | reserved << 3, opcode, 0xcb];
-            assert_eq!(
+            crate::support_fetch::assert_decode_contract(
                 decode_one(&code(&bytes), GuestAddress(0x1000)).unwrap_err(),
-                DecodeError::InvalidEncoding
+                DecodeError::InvalidEncoding,
             );
         }
     }

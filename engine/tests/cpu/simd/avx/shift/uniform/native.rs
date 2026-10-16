@@ -688,17 +688,17 @@ fn reserved_prefixes_and_immediate_memory_forms_remain_invalid() {
         for prefix in [0x66, 0xf0, 0xf2, 0xf3] {
             let mut bytes = vec![prefix];
             bytes.extend(encoding(form, (1, 2, 3), 1, true, false, false));
-            assert_eq!(
+            crate::support_fetch::assert_decode_contract(
                 decode_one(&code(&bytes), GuestAddress(0x1000)).unwrap_err(),
-                DecodeError::InvalidEncoding
+                DecodeError::InvalidEncoding,
             );
         }
         if form.immediate() {
             let mut bytes = encoding(form, (1, 2, 0), 1, false, false, false);
             bytes[4] = form.group << 3;
-            assert_eq!(
+            crate::support_fetch::assert_decode_contract(
                 decode_one(&code(&bytes), GuestAddress(0x1000)).unwrap_err(),
-                DecodeError::InvalidEncoding
+                DecodeError::InvalidEncoding,
             );
         }
     }

@@ -84,9 +84,9 @@ fn every_immediate_and_address_size_override_is_admitted() {
 fn forbidden_prefixes_remain_strict_encoding_errors() {
     for prefix in [0x66, 0xf0, 0xf2, 0xf3] {
         let bytes = [prefix, 0xc4, 0xe2, 0x79, 0x13, 0xcb];
-        assert_eq!(
+        crate::support_fetch::assert_decode_contract(
             decode_one(&code(&bytes), GuestAddress(0x1000)).unwrap_err(),
-            DecodeError::InvalidEncoding
+            DecodeError::InvalidEncoding,
         );
     }
 }

@@ -109,9 +109,9 @@ fn reserved_prefixes_are_rejected_before_uniform_capability_admission() {
         for prefix in [0x66, 0xf0, 0xf2, 0xf3] {
             let mut bytes = vec![prefix];
             bytes.extend(encoding(form, true, false, false));
-            assert_eq!(
+            crate::support_fetch::assert_decode_contract(
                 decode_one(&code(&bytes), GuestAddress(0x1000)).unwrap_err(),
-                DecodeError::InvalidEncoding
+                DecodeError::InvalidEncoding,
             );
         }
     }

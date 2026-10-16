@@ -311,17 +311,17 @@ fn whole_vector_encodings_keep_indices_data_and_immediate_roles_distinct() {
         for changed in [bytes[2] ^ 0x80, bytes[2] & !4] {
             let mut invalid = bytes.clone();
             invalid[2] = changed;
-            assert_eq!(
+            crate::support_fetch::assert_decode_contract(
                 decode_one(&code(&invalid), GuestAddress(0x1000)).unwrap_err(),
-                DecodeError::InvalidEncoding
+                DecodeError::InvalidEncoding,
             );
         }
         if form.immediate {
             let mut invalid = bytes.clone();
             invalid[2] &= !8;
-            assert_eq!(
+            crate::support_fetch::assert_decode_contract(
                 decode_one(&code(&invalid), GuestAddress(0x1000)).unwrap_err(),
-                DecodeError::InvalidEncoding
+                DecodeError::InvalidEncoding,
             );
         }
         let other = Form {
@@ -516,9 +516,9 @@ fn forbidden_legacy_prefixes_remain_invalid() {
         for prefix in [0x66, 0xf0, 0xf2, 0xf3] {
             let mut bytes = vec![prefix];
             bytes.extend(encoding(form, (1, 2, 3), 0x1b, false));
-            assert_eq!(
+            crate::support_fetch::assert_decode_contract(
                 decode_one(&code(&bytes), GuestAddress(0x1000)).unwrap_err(),
-                DecodeError::InvalidEncoding
+                DecodeError::InvalidEncoding,
             );
         }
     }

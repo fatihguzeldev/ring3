@@ -536,19 +536,17 @@ fn reserved_vvvv_and_forbidden_legacy_prefixes_stay_encoding_errors() {
                 for prefix in [0x66, 0xf0, 0xf2, 0xf3] {
                     let mut bytes = vec![prefix];
                     bytes.extend(&valid);
-                    assert_eq!(
+                    crate::support_fetch::assert_decode_contract(
                         decode_one(&code(&bytes), GuestAddress(0x1000)).unwrap_err(),
                         DecodeError::InvalidEncoding,
-                        "{bytes:02x?}"
                     );
                 }
                 for reserved in 0..15 {
                     let mut bytes = valid.clone();
                     bytes[2] = (bytes[2] & !0x78) | reserved << 3;
-                    assert_eq!(
+                    crate::support_fetch::assert_decode_contract(
                         decode_one(&code(&bytes), GuestAddress(0x1000)).unwrap_err(),
                         DecodeError::InvalidEncoding,
-                        "{bytes:02x?}"
                     );
                 }
             }
@@ -574,9 +572,10 @@ fn malformed_wide_descriptors_refuse_without_consuming_metadata_or_state() {
             for resident in [None, Some(id)] {
                 seed(&mut engine, form.from, 0x61);
                 let before = engine.arena().to_vec();
-                assert_eq!(
-                    invoke(&mut engine, resident, form, true, operands, immediate),
-                    Err(HostError::InvalidRequest)
+                crate::support_fetch::assert_host_contract(
+                    (invoke(&mut engine, resident, form, true, operands, immediate))
+                        .expect_err("compilation must refuse this fixture"),
+                    HostError::InvalidRequest,
                 );
                 assert_eq!(engine.arena(), before);
                 assert_eq!(ram(&engine), before_ram);

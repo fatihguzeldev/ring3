@@ -59,15 +59,15 @@ fn forbidden_prefixes_and_register_substitutions_stay_invalid_before_the_gate() 
         for control in [0x69, 0x6d, 0xe9, 0xed] {
             for prefix in [0xf0, 0x66, 0xf2, 0xf3] {
                 let bytes = [prefix, 0xc4, 0xe2, control, opcode, 0x08];
-                assert_eq!(
+                crate::support_fetch::assert_decode_contract(
                     decode_one(&code(&bytes), GuestAddress(0x1000)).unwrap_err(),
-                    DecodeError::InvalidEncoding
+                    DecodeError::InvalidEncoding,
                 );
             }
             let bytes = [0xc4, 0xe2, control, opcode, 0xcb];
-            assert_eq!(
+            crate::support_fetch::assert_decode_contract(
                 decode_one(&code(&bytes), GuestAddress(0x1000)).unwrap_err(),
-                DecodeError::InvalidEncoding
+                DecodeError::InvalidEncoding,
             );
         }
     }
@@ -84,9 +84,9 @@ fn shared_float_encodings_remain_available_with_their_original_w0_rule() {
             assert!(memory.is_code_current(decoded.code_snapshot()));
             let mut invalid = bytes;
             invalid[2] |= 0x80;
-            assert_eq!(
+            crate::support_fetch::assert_decode_contract(
                 decode_one(&code(&invalid), GuestAddress(0x1000)).unwrap_err(),
-                DecodeError::InvalidEncoding
+                DecodeError::InvalidEncoding,
             );
         }
     }

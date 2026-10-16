@@ -232,27 +232,27 @@ fn malformed_encoding_is_rejected_before_the_lane_capability_gate() {
         for prefix in [0x66, 0xf0, 0xf2, 0xf3] {
             let mut bytes = vec![prefix];
             bytes.extend(&valid);
-            assert_eq!(
+            crate::support_fetch::assert_decode_contract(
                 decode_one(&code(&bytes), GuestAddress(0x1000)).unwrap_err(),
-                DecodeError::InvalidEncoding
+                DecodeError::InvalidEncoding,
             );
         }
         if form.unary() {
             for reserved in 0..15 {
                 let mut bytes = valid.clone();
                 bytes[2] = bytes[2] & !0x78 | reserved << 3;
-                assert_eq!(
+                crate::support_fetch::assert_decode_contract(
                     decode_one(&code(&bytes), GuestAddress(0x1000)).unwrap_err(),
-                    DecodeError::InvalidEncoding
+                    DecodeError::InvalidEncoding,
                 );
             }
         }
         if form.kind == 31 {
             let mut bytes = valid.clone();
             bytes[2] |= 0x80;
-            assert_eq!(
+            crate::support_fetch::assert_decode_contract(
                 decode_one(&code(&bytes), GuestAddress(0x1000)).unwrap_err(),
-                DecodeError::InvalidEncoding
+                DecodeError::InvalidEncoding,
             );
         }
     }

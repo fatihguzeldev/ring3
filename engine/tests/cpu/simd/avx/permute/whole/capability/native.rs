@@ -80,25 +80,25 @@ fn wrong_w_l_and_reserved_immediate_vvvv_refuse_before_private_gate() {
         for changed in [bytes[2] ^ 0x80, bytes[2] & !4] {
             let mut invalid = bytes.clone();
             invalid[2] = changed;
-            assert_eq!(
+            crate::support_fetch::assert_decode_contract(
                 decode_one(&code(&invalid), GuestAddress(0x1000)).unwrap_err(),
-                DecodeError::InvalidEncoding
+                DecodeError::InvalidEncoding,
             );
         }
         if form.3 {
             let mut invalid = bytes.clone();
             invalid[2] &= !8;
-            assert_eq!(
+            crate::support_fetch::assert_decode_contract(
                 decode_one(&code(&invalid), GuestAddress(0x1000)).unwrap_err(),
-                DecodeError::InvalidEncoding
+                DecodeError::InvalidEncoding,
             );
         }
         for prefix in [0x66, 0xf0, 0xf2, 0xf3] {
             let mut invalid = vec![prefix];
             invalid.extend(&bytes);
-            assert_eq!(
+            crate::support_fetch::assert_decode_contract(
                 decode_one(&code(&invalid), GuestAddress(0x1000)).unwrap_err(),
-                DecodeError::InvalidEncoding
+                DecodeError::InvalidEncoding,
             );
         }
     }

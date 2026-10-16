@@ -54,9 +54,9 @@ fn all_fused_orders_shapes_and_memory_operands_admit_without_fetching_data() {
 fn forbidden_fused_legacy_prefixes_remain_encoding_errors() {
     for prefix in [0x66, 0xf0, 0xf2, 0xf3] {
         let bytes = [prefix, 0xc4, 0xe2, 0x69, 0x98, 0xcb];
-        assert_eq!(
+        crate::support_fetch::assert_decode_contract(
             decode_one(&code(&bytes), GuestAddress(0x1000)).unwrap_err(),
-            DecodeError::InvalidEncoding
+            DecodeError::InvalidEncoding,
         );
     }
 }

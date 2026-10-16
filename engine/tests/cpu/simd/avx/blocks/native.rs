@@ -174,10 +174,9 @@ fn reserved_encodings_stay_invalid() {
             invalid.push(register_source);
         }
         for bytes in invalid {
-            assert_eq!(
+            crate::support_fetch::assert_decode_contract(
                 decode_one(&executable(&bytes), GuestAddress(0x1000)).unwrap_err(),
                 DecodeError::InvalidEncoding,
-                "{bytes:02x?}"
             );
         }
     }

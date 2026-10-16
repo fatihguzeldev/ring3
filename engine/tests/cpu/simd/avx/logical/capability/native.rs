@@ -57,10 +57,9 @@ fn invalid_prefixes_are_rejected_before_the_capability_gate() {
     for (integer, _) in OPCODES {
         for prefix in [0x66, 0xf0, 0xf2, 0xf3] {
             let bytes = [prefix, 0xc4, 0xe1, 0x6d, integer, 0xcb];
-            assert_eq!(
+            crate::support_fetch::assert_decode_contract(
                 decode_one(&code(&bytes), GuestAddress(0x1000)).unwrap_err(),
                 DecodeError::InvalidEncoding,
-                "{bytes:02x?}"
             );
         }
     }

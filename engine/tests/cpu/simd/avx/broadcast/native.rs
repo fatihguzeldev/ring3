@@ -533,9 +533,10 @@ fn old_helper_memory_policy_and_raw_literals_remain_neutral() {
             7 | 1 << 12 | 1 << 3,
         ] {
             let before = engine.arena().to_vec();
-            assert_eq!(
-                invoke(&mut engine, kind, operands),
-                Err(HostError::InvalidRequest)
+            crate::support_fetch::assert_host_contract(
+                (invoke(&mut engine, kind, operands))
+                    .expect_err("compilation must refuse this fixture"),
+                HostError::InvalidRequest,
             );
             assert_eq!(engine.arena(), before);
             assert_eq!(ram(&engine), before_ram);

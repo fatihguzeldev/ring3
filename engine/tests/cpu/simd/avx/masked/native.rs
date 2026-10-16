@@ -165,15 +165,15 @@ fn invalid_prefixes_and_register_memory_substitutions_remain_encoding_errors() {
         let bytes = encoding(form, 2, 1, &[0], false);
         for prefix in [0xf0, 0x66, 0xf2, 0xf3] {
             let bytes = [&[prefix][..], &bytes].concat();
-            assert_eq!(
+            crate::support_fetch::assert_decode_contract(
                 decode_one(&code(&bytes), GuestAddress(0x1000)).unwrap_err(),
-                DecodeError::InvalidEncoding
+                DecodeError::InvalidEncoding,
             );
         }
         let bytes = encoding(form, 2, 1, &[0xc0], false);
-        assert_eq!(
+        crate::support_fetch::assert_decode_contract(
             decode_one(&code(&bytes), GuestAddress(0x1000)).unwrap_err(),
-            DecodeError::InvalidEncoding
+            DecodeError::InvalidEncoding,
         );
     }
 }
@@ -184,9 +184,9 @@ fn existing_float_forms_remain_admitted_with_strict_w0() {
         operation(&encoding(form, 7, 7, &[0], true));
         let mut w1 = encoding(form, 2, 1, &[0], true);
         w1[2] |= 0x80;
-        assert_eq!(
+        crate::support_fetch::assert_decode_contract(
             decode_one(&code(&w1), GuestAddress(0x1000)).unwrap_err(),
-            DecodeError::InvalidEncoding
+            DecodeError::InvalidEncoding,
         );
     }
 }

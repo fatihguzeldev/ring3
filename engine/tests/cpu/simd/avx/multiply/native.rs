@@ -477,9 +477,10 @@ fn original_xmm_helpers_retain_exact_result_upper_zero_and_full_frame() {
         assert_eq!(ram(&engine), before_ram);
     }
     let before = engine.arena().to_vec();
-    assert_eq!(
-        invoke(&mut engine, 0x91, 1 | (2 << 3) | (3 << 6), false),
-        Err(HostError::InvalidRequest)
+    crate::support_fetch::assert_host_contract(
+        (invoke(&mut engine, 0x91, 1 | (2 << 3) | (3 << 6), false))
+            .expect_err("compilation must refuse this fixture"),
+        HostError::InvalidRequest,
     );
     assert_eq!(engine.arena(), before);
     assert_eq!(ram(&engine), before_ram);

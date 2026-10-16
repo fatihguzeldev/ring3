@@ -74,9 +74,9 @@ fn every_gather_code_binds_while_existing_avx_loads_remain_available() {
     }
     for (control, sib) in [(0x71, 0x10), (0x61, 0x08), (0x61, 0x18)] {
         let bytes = [0xc4, 0xe2, control, 0x90, 0x0c, sib];
-        assert_eq!(
+        crate::support_fetch::assert_decode_contract(
             decode_one(&code(&bytes), GuestAddress(0x1000)).unwrap_err(),
-            DecodeError::InvalidEncoding
+            DecodeError::InvalidEncoding,
         );
     }
 }

@@ -506,19 +506,17 @@ pub fn malformed_controls(forms: &[Form]) {
         for prefix in [0x66, 0xf0, 0xf2, 0xf3] {
             let mut bytes = vec![prefix];
             bytes.extend(encoding(form, 1, 2, 3, true, false, false));
-            assert_eq!(
+            crate::support_fetch::assert_decode_contract(
                 decode_one(&code(&bytes), GuestAddress(0x1000)).unwrap_err(),
                 DecodeError::InvalidEncoding,
-                "{bytes:02x?}"
             );
         }
         if form.unary {
             let mut bytes = encoding(form, 1, 0, 3, true, false, false);
             bytes[2] &= !8;
-            assert_eq!(
+            crate::support_fetch::assert_decode_contract(
                 decode_one(&code(&bytes), GuestAddress(0x1000)).unwrap_err(),
                 DecodeError::InvalidEncoding,
-                "reserved vvvv {bytes:02x?}"
             );
         }
         let mut invalid = vec![

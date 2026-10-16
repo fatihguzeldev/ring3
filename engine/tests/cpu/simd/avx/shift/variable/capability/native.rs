@@ -70,9 +70,9 @@ fn forbidden_prefixes_refuse_before_element_capability_gating() {
         for l in [0, 4] {
             for prefix in [0x66, 0xf0, 0xf2, 0xf3] {
                 let bytes = [prefix, 0xc4, 0xe2, 0x69 | w | l, opcode, 0xcb];
-                assert_eq!(
+                crate::support_fetch::assert_decode_contract(
                     decode_one(&code(&bytes), GuestAddress(0x1000)).unwrap_err(),
-                    DecodeError::InvalidEncoding
+                    DecodeError::InvalidEncoding,
                 );
             }
         }

@@ -358,9 +358,9 @@ fn prefix_and_unassigned_unary_width_refusals_are_precise_and_neutral() {
     for prefix in [0x66, 0xf0, 0xf2, 0xf3] {
         let mut bytes = vec![prefix];
         bytes.extend(encoding(true, (1, 2, 3), 8, false, false));
-        assert_eq!(
+        crate::support_fetch::assert_decode_contract(
             decode_one(&code(&bytes), GuestAddress(0x1000)).unwrap_err(),
-            DecodeError::InvalidEncoding
+            DecodeError::InvalidEncoding,
         );
     }
     for (descriptor, operands, immediate) in [

@@ -527,9 +527,10 @@ fn malformed_and_unknown_requests_keep_the_complete_arena_and_ram_unchanged() {
         let mut malformed = before.clone();
         malformed[TRANSFER_OFFSET + offset] = value;
         install(&mut engine, &malformed);
-        assert_eq!(
-            invoke(&mut engine, GEOMETRY[0], 0),
-            Err(HostError::InvalidRequest)
+        crate::support_fetch::assert_host_contract(
+            (invoke(&mut engine, GEOMETRY[0], 0))
+                .expect_err("compilation must refuse this fixture"),
+            HostError::InvalidRequest,
         );
         assert_eq!(engine.arena(), malformed);
         assert_eq!(ram(&engine), before_ram);

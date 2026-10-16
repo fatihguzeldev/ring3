@@ -39,16 +39,16 @@ fn integer_alias_bindings_match_floating_after_strict_encoding_checks() {
             assert_eq!(integer.operation(), alias.operation());
             let mut invalid = bytes;
             invalid[2] |= 0x80;
-            assert_eq!(
+            crate::support_fetch::assert_decode_contract(
                 decode_one(&code(&invalid), GuestAddress(0x1000)).unwrap_err(),
-                DecodeError::InvalidEncoding
+                DecodeError::InvalidEncoding,
             );
             for prefix in [0x66, 0xf0, 0xf2, 0xf3] {
                 let mut invalid = vec![prefix];
                 invalid.extend(bytes);
-                assert_eq!(
+                crate::support_fetch::assert_decode_contract(
                     decode_one(&code(&invalid), GuestAddress(0x1000)).unwrap_err(),
-                    DecodeError::InvalidEncoding
+                    DecodeError::InvalidEncoding,
                 );
             }
         }

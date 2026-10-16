@@ -322,10 +322,9 @@ fn forbidden_legacy_prefixes_stay_encoding_errors() {
     for (map, opcode, _, _, _) in FORMS {
         for prefix in [0x66, 0xf0, 0xf2, 0xf3] {
             let bytes = [prefix, 0xc4, 0xe0 | map, 0x6d, opcode, 0xcb];
-            assert_eq!(
+            crate::support_fetch::assert_decode_contract(
                 decode_one(&code(&bytes), GuestAddress(0x1000)).unwrap_err(),
                 DecodeError::InvalidEncoding,
-                "{bytes:02x?}",
             );
         }
     }

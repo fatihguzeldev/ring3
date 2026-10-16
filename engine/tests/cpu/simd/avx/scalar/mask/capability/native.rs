@@ -53,24 +53,24 @@ fn malformed_mask_encoding_precedes_the_public_capability_refusal() {
         let valid = [0xc4, 0xe1, width, 0xd7, 0xc1];
         for prefix in [0x66, 0xf0, 0xf2, 0xf3] {
             let bytes = [prefix, valid[0], valid[1], valid[2], valid[3], valid[4]];
-            assert_eq!(
+            crate::support_fetch::assert_decode_contract(
                 decode_one(&code(&bytes), GuestAddress(0x1000)).unwrap_err(),
-                DecodeError::InvalidEncoding
+                DecodeError::InvalidEncoding,
             );
         }
         for reserved in 0..15 {
             let mut bytes = valid;
             bytes[2] = bytes[2] & !0x78 | reserved << 3;
-            assert_eq!(
+            crate::support_fetch::assert_decode_contract(
                 decode_one(&code(&bytes), GuestAddress(0x1000)).unwrap_err(),
-                DecodeError::InvalidEncoding
+                DecodeError::InvalidEncoding,
             );
         }
         let mut memory = valid;
         memory[4] = 0;
-        assert_eq!(
+        crate::support_fetch::assert_decode_contract(
             decode_one(&code(&memory), GuestAddress(0x1000)).unwrap_err(),
-            DecodeError::InvalidEncoding
+            DecodeError::InvalidEncoding,
         );
     }
 }

@@ -346,23 +346,23 @@ fn memory_only_reserved_vvvv_and_legacy_prefix_rules_remain_strict() {
             for prefix in [0x66, 0xf0, 0xf2, 0xf3] {
                 let mut bytes = vec![prefix];
                 bytes.extend(&valid);
-                assert_eq!(
+                crate::support_fetch::assert_decode_contract(
                     decode_one(&code(&bytes), GuestAddress(0x1000)).unwrap_err(),
-                    DecodeError::InvalidEncoding
+                    DecodeError::InvalidEncoding,
                 );
             }
             for reserved in 0..15 {
                 let mut bytes = valid.clone();
                 bytes[2] = bytes[2] & !0x78 | (reserved << 3);
-                assert_eq!(
+                crate::support_fetch::assert_decode_contract(
                     decode_one(&code(&bytes), GuestAddress(0x1000)).unwrap_err(),
-                    DecodeError::InvalidEncoding
+                    DecodeError::InvalidEncoding,
                 );
             }
             let register = encoding(0, wide, w, &[0xc1], &[]);
-            assert_eq!(
+            crate::support_fetch::assert_decode_contract(
                 decode_one(&code(&register), GuestAddress(0x1000)).unwrap_err(),
-                DecodeError::InvalidEncoding
+                DecodeError::InvalidEncoding,
             );
         }
     }

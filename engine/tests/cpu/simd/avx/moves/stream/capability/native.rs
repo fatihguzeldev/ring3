@@ -51,24 +51,24 @@ fn stream_memory_only_and_reserved_encoding_rules_precede_the_gate() {
         let valid = [0xc4, 0xe2, control, 0x2a, 0x08];
         for prefix in [0x66, 0xf0, 0xf2, 0xf3] {
             let bytes = [prefix, valid[0], valid[1], valid[2], valid[3], valid[4]];
-            assert_eq!(
+            crate::support_fetch::assert_decode_contract(
                 decode_one(&code(&bytes), GuestAddress(0x1000)).unwrap_err(),
-                DecodeError::InvalidEncoding
+                DecodeError::InvalidEncoding,
             );
         }
         for reserved in 0..15 {
             let mut bytes = valid;
             bytes[2] = bytes[2] & !0x78 | reserved << 3;
-            assert_eq!(
+            crate::support_fetch::assert_decode_contract(
                 decode_one(&code(&bytes), GuestAddress(0x1000)).unwrap_err(),
-                DecodeError::InvalidEncoding
+                DecodeError::InvalidEncoding,
             );
         }
         let mut register = valid;
         register[4] = 0xcb;
-        assert_eq!(
+        crate::support_fetch::assert_decode_contract(
             decode_one(&code(&register), GuestAddress(0x1000)).unwrap_err(),
-            DecodeError::InvalidEncoding
+            DecodeError::InvalidEncoding,
         );
     }
 }

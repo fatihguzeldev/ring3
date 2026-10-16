@@ -212,9 +212,9 @@ fn vpblendd_encodings_match_existing_raw_vblendps_operations() {
                     assert_eq!(operation, decoded(&floating));
                     let mut wrong_w = bytes;
                     wrong_w[2] |= 0x80;
-                    assert_eq!(
+                    crate::support_fetch::assert_decode_contract(
                         decode_one(&code(&wrong_w), GuestAddress(0x1000)).unwrap_err(),
-                        DecodeError::InvalidEncoding
+                        DecodeError::InvalidEncoding,
                     );
                 }
             }
@@ -330,9 +330,9 @@ fn forbidden_prefixes_and_malformed_shared_slots_remain_neutral() {
         for prefix in [0x66, 0xf0, 0xf2, 0xf3] {
             let mut bytes = vec![prefix];
             bytes.extend(encoding(wide, (1, 2, 3), 0x55, false));
-            assert_eq!(
+            crate::support_fetch::assert_decode_contract(
                 decode_one(&code(&bytes), GuestAddress(0x1000)).unwrap_err(),
-                DecodeError::InvalidEncoding
+                DecodeError::InvalidEncoding,
             );
         }
         for operands in [1 << 9, 1 << 13, 1 << 12 | 1 << 6] {
