@@ -60,6 +60,7 @@ impl EngineInstance {
                 count: 3,
                 completion: ThreadInvocationCompletion32::Apc,
                 timer: Some(timer),
+                activation: None,
             });
         }
         Ok(PreparedThreadTimers32 { invocations, next })

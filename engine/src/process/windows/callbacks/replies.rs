@@ -232,6 +232,7 @@ impl EngineInstance {
             continuation: 0,
             last_error: None,
             stage: ReplyStage32::Complete(0),
+            activation: None,
         });
         self.accept_user32_outcome(outcome, error)?;
         if self

@@ -11,7 +11,7 @@ pub(in crate::process) enum ThreadInvocationCompletion32 {
     Initialize,
     Fls { operation: u64 },
 }
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(super) struct ThreadInvocation32 {
     pub id: u64,
     pub target: u32,
@@ -20,11 +20,13 @@ pub(super) struct ThreadInvocation32 {
     pub count: usize,
     pub completion: ThreadInvocationCompletion32,
     pub timer: Option<crate::windows::synchronization::TimerApc32>,
+    pub activation: Option<u32>,
 }
 pub(in crate::process) struct PreparedThreadInvocation32 {
     invocation: ThreadInvocation32,
     signals: Option<crate::windows::synchronization::PreparedSignals32>,
     sent: Option<crate::process::windows::user32::PreparedUser32Sent32>,
+    activation: Option<crate::process::windows::activation::PreparedActivationCapture32>,
 }
 impl EngineInstance {
     pub(in crate::process) fn prepare_thread_invocation(
@@ -33,6 +35,19 @@ impl EngineInstance {
         procedure: GuestAddress,
         arguments: &[u32],
         completion: ThreadInvocationCompletion32,
+    ) -> Result<PreparedThreadInvocation32, HostError> {
+        self.prepare_thread_invocation_with_activation(
+            target, procedure, arguments, completion, None, false,
+        )
+    }
+    pub(in crate::process) fn prepare_thread_invocation_with_activation(
+        &self,
+        target: u32,
+        procedure: GuestAddress,
+        arguments: &[u32],
+        completion: ThreadInvocationCompletion32,
+        activation: Option<u32>,
+        owned: bool,
     ) -> Result<PreparedThreadInvocation32, HostError> {
         self.memory()?;
         let thread = self.threads.info(target).map_err(HostError::Thread)?;
@@ -79,7 +94,18 @@ impl EngineInstance {
             .ok_or(HostError::Thread(ThreadError32::Exhausted))?;
         let mut args = [0; 16];
         args[..arguments.len()].copy_from_slice(arguments);
+        let captured = activation;
+        let activation = if owned {
+            None
+        } else {
+            Some(if let Some(handle) = captured {
+                self.prepare_activation_capture_handle(handle)?
+            } else {
+                self.prepare_activation_capture()?
+            })
+        };
         Ok(PreparedThreadInvocation32 {
+            activation,
             signals,
             sent,
             invocation: ThreadInvocation32 {
@@ -90,6 +116,7 @@ impl EngineInstance {
                 count: arguments.len(),
                 completion,
                 timer: None,
+                activation: if owned { captured } else { None },
             },
         })
     }
@@ -97,7 +124,7 @@ impl EngineInstance {
         &mut self,
         prepared: PreparedThreadInvocation32,
     ) -> u64 {
-        let invocation = prepared.invocation;
+        let mut invocation = prepared.invocation;
         assert_eq!(
             self.threads.next_invocation.checked_add(1),
             Some(invocation.id)
@@ -117,9 +144,13 @@ impl EngineInstance {
         if let Some(sent) = prepared.sent {
             self.user32.as_mut().unwrap().commit_sent_change(sent);
         }
+        if let Some(activation) = prepared.activation {
+            invocation.activation = Some(self.commit_activation_capture(activation));
+        }
         self.threads.next_invocation = invocation.id;
+        let id = invocation.id;
         self.threads.invocations.push(invocation);
-        invocation.id
+        id
     }
     fn prepare_thread_sent_queue(
         &self,
@@ -129,6 +160,38 @@ impl EngineInstance {
         self.synchronization()?
             .prepare_messages_for_thread(sent.thread(), current, new, generation)
             .map_err(HostError::Synchronization)
+    }
+    pub(in crate::process) fn thread_invocation_activation_holds(
+        &self,
+        thread: u32,
+    ) -> Result<Vec<u32>, HostError> {
+        let record = self
+            .threads
+            .threads
+            .iter()
+            .find(|record| record.id == thread)
+            .ok_or(HostError::Thread(ThreadError32::InvalidHandle))?;
+        let mut holds = Vec::new();
+        holds
+            .try_reserve_exact(self.threads.invocations.len() + record.active_invocations.len())
+            .map_err(|_| HostError::Thread(ThreadError32::Allocation))?;
+        holds.extend(
+            self.threads
+                .invocations
+                .iter()
+                .filter(|invocation| invocation.target == thread)
+                .filter_map(|invocation| invocation.activation)
+                .filter(|&handle| handle != 0),
+        );
+        holds.extend(
+            record
+                .active_invocations
+                .iter()
+                .filter_map(|invocation| invocation.activation)
+                .map(crate::windows::activation::ActivationScope32::retained_handle)
+                .filter(|&handle| handle != 0),
+        );
+        Ok(holds)
     }
     pub(in crate::process) fn has_pending_thread_invocation(&self, thread: u32) -> bool {
         self.threads.invocations.iter().any(|invocation| {
@@ -145,6 +208,7 @@ pub(super) struct ActiveThreadInvocation32 {
     pub id: u64,
     pub return_esp: u32,
     pub completion: ThreadInvocationCompletion32,
+    pub activation: Option<crate::windows::activation::ActivationScope32>,
     pub saved: super::saved::SavedThread32,
 }
 pub(in crate::process) struct PreparedThreadApc32 {
@@ -158,6 +222,7 @@ struct PreparedInvocationEntry32 {
     frame: crate::windows::CallbackFrame32,
     state: [u8; crate::abi::x86::STATE_SIZE],
     exit: [u8; crate::abi::x86::EXIT_SIZE],
+    activation: Option<crate::process::windows::activation::PreparedActivationEntry32>,
 }
 
 impl EngineInstance {
@@ -189,7 +254,7 @@ impl EngineInstance {
         }) else {
             return Ok(false);
         };
-        let invocation = self.threads.invocations[queue_index];
+        let invocation = self.threads.invocations[queue_index].clone();
         let sent = if matches!(
             invocation.completion,
             ThreadInvocationCompletion32::User32 { .. }
@@ -215,7 +280,7 @@ impl EngineInstance {
                         && item.target == current
                         && item.completion == ThreadInvocationCompletion32::Apc
                 });
-            Some(self.prepare_invocation_apc_state(invocation, remains)?)
+            Some(self.prepare_invocation_apc_state(&invocation, remains)?)
         } else if let Some(sent) = sent.as_ref() {
             Some(self.prepare_thread_sent_queue(sent)?)
         } else {
@@ -301,7 +366,9 @@ impl EngineInstance {
                 .check_span(word.address, 4, Access::Write)
                 .map_err(HostError::Memory)?;
         }
+        let activation = self.prepare_activation_entry(invocation.activation)?;
         Ok(PreparedInvocationEntry32 {
+            activation,
             invocation,
             thread_index,
             frame,
@@ -316,6 +383,7 @@ impl EngineInstance {
             frame,
             state: state_bytes,
             exit: exit_bytes,
+            activation,
         } = prepared;
         assert_eq!(self.threads.current_id(), invocation.target);
         self.memory
@@ -326,6 +394,7 @@ impl EngineInstance {
         if invocation.completion == ThreadInvocationCompletion32::Apc {
             self.commit_windows_file_wait_apc();
         }
+        let activation = self.commit_activation_entry(activation);
         let saved = self
             .take_windows_thread_context()
             .expect("validated thread CPU state is unchanged by stack writes");
@@ -335,6 +404,7 @@ impl EngineInstance {
                 id: invocation.id,
                 return_esp: frame.return_esp(),
                 completion: invocation.completion,
+                activation,
                 saved,
             });
         self.arena.as_mut().get_mut()[crate::abi::arena::STATE_OFFSET
@@ -365,6 +435,7 @@ impl EngineInstance {
         }
         crate::process::cpu::context::ExtendedCpuState::capture(self.arena())?;
         let completion = active.completion;
+        let activation = self.prepare_activation_scope_exit(active.activation)?;
         if completion == ThreadInvocationCompletion32::Initialize
             && self.threads.threads[index]
                 .lifecycle
@@ -399,6 +470,7 @@ impl EngineInstance {
                 sender.state = ThreadState32::Runnable;
             }
         }
+        self.commit_activation_scope_exit(activation);
         let _ = self
             .take_windows_thread_context()
             .expect("invocation return context was preflighted");
@@ -457,9 +529,11 @@ impl EngineInstance {
                     && invocation.completion == ThreadInvocationCompletion32::Apc
             });
         let signals =
-            self.prepare_invocation_apc_state(self.threads.invocations[queue_index], remains)?;
-        let entry =
-            self.prepare_invocation_entry(self.threads.invocations[queue_index], candidate.state)?;
+            self.prepare_invocation_apc_state(&self.threads.invocations[queue_index], remains)?;
+        let entry = self.prepare_invocation_entry(
+            self.threads.invocations[queue_index].clone(),
+            candidate.state,
+        )?;
         Ok(Some(PreparedThreadApc32 {
             entry,
             queue_index,
@@ -493,7 +567,7 @@ impl EngineInstance {
     }
     fn prepare_invocation_apc_state(
         &self,
-        invocation: ThreadInvocation32,
+        invocation: &ThreadInvocation32,
         remaining: bool,
     ) -> Result<crate::windows::synchronization::PreparedSignals32, HostError> {
         let context = self.synchronization()?;

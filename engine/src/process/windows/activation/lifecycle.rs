@@ -58,9 +58,10 @@ impl EngineInstance {
         let Some(runtime) = &self.activation else {
             return Ok(None);
         };
+        let captures = self.thread_invocation_activation_holds(thread)?;
         let native = runtime
             .native
-            .prepare_thread_retirement(thread, Vec::new())
+            .prepare_thread_retirement(thread, captures)
             .map_err(HostError::Activation)?;
         let ranges = runtime
             .disposal_ranges(self.memory()?, native.disposed())

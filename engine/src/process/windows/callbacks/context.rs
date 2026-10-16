@@ -157,6 +157,7 @@ impl EngineInstance {
             continuation: request.continuation,
             last_error: None,
             stage: ReplyStage32::Ready(request),
+            activation: None,
         });
         Ok(())
     }

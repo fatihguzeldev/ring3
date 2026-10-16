@@ -48,6 +48,7 @@ pub(in crate::process) struct WindowsReply32 {
     continuation: u64,
     last_error: Option<u32>,
     stage: ReplyStage32,
+    activation: Option<crate::windows::activation::ActivationScope32>,
 }
 impl WindowsReply32 {
     pub(in crate::process) fn matches_call(&self, owner: PendingOwner, token: u32) -> bool {

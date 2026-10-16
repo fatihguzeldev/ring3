@@ -27,6 +27,7 @@ impl EngineInstance {
             _ => return Err(HostError::Call(CallError::InvalidRequest)),
         };
         self.checked_pending_call(reply.owner, reply.token)?;
+        let activation = self.prepare_activation_entry(None)?;
         let record = self.begin_provider_resident_callback(
             key,
             outer_id,
@@ -37,6 +38,8 @@ impl EngineInstance {
             return_id,
             &request.arguments[..request.count as usize],
         )?;
+        let activation = self.commit_activation_entry(activation);
+        self.windows_replies.last_mut().unwrap().activation = activation;
         self.windows_replies.last_mut().unwrap().stage = ReplyStage32::Resident {
             callback_id,
             token: record.token,
@@ -58,7 +61,10 @@ impl EngineInstance {
         {
             return Err(HostError::Call(CallError::InvalidToken));
         }
+        let activation = self.prepare_activation_scope_exit(reply.activation)?;
         let result = self.finish_provider_resident_callback(key, callback_id, token)?;
+        self.commit_activation_scope_exit(activation);
+        self.windows_replies.last_mut().unwrap().activation = None;
         self.windows_replies.last_mut().unwrap().stage = ReplyStage32::Received(result.result);
         self.resume_windows_reply()?;
         Ok(result)
@@ -82,6 +88,7 @@ impl EngineInstance {
             return Err(HostError::Call(CallError::InvalidToken));
         }
         self.checked_pending_call(reply.owner, reply.token)?;
+        let activation = self.prepare_activation_entry(None)?;
         let record = self.begin_provider_callback(
             key,
             generation,
@@ -91,6 +98,8 @@ impl EngineInstance {
             return_id,
             &request.arguments[..request.count as usize],
         )?;
+        let activation = self.commit_activation_entry(activation);
+        self.windows_replies.last_mut().unwrap().activation = activation;
         self.windows_replies.last_mut().unwrap().stage = ReplyStage32::Replacement {
             generation,
             token: record.token,
@@ -112,7 +121,10 @@ impl EngineInstance {
         {
             return Err(HostError::Call(CallError::InvalidToken));
         }
+        let activation = self.prepare_activation_scope_exit(reply.activation)?;
         let result = self.finish_provider_callback(key, generation, token)?;
+        self.commit_activation_scope_exit(activation);
+        self.windows_replies.last_mut().unwrap().activation = None;
         self.windows_replies.last_mut().unwrap().stage = ReplyStage32::Received(result.result);
         self.resume_windows_reply()?;
         Ok(result)

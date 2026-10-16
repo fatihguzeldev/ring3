@@ -138,6 +138,7 @@ impl EngineInstance {
                 count: 3,
                 completion: ThreadInvocationCompletion32::Initialize,
                 timer: None,
+                activation: None,
             });
             if let Err(error) = result {
                 self.release_idle_loader_thread();

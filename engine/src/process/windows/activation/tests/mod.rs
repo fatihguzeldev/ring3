@@ -106,3 +106,4 @@ fn create(engine: &mut EngineInstance) -> u32 {
     assert!(work.leases.is_empty());
     engine.publish_activation_context(&work).unwrap()
 }
+mod invocation_scopes;
