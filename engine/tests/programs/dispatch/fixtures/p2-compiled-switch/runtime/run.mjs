@@ -1,3 +1,4 @@
+import {pageFaultExit, pageFaultPacket} from '../../../../../support/wasm/page-fault.mjs';
 import {attachDetectionApi, generatedImports} from '../../../../../support/wasm/binding.mjs';
 import assert from 'node:assert/strict';
 import {ARENA_SIZE} from '../../../../../support/wasm/arena.mjs';
@@ -17,7 +18,7 @@ const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const artifacts = {}, contexts = [], modules = [], observations = [], helperTrace = [], diagnostics = [];
 function save(name, bytes) { writeFileSync(join(output, name), bytes, {flag: 'wx'}); artifacts[name] = {bytes: bytes.length, sha256: hash(bytes)}; }
 const dir = 'engine/tests/programs/dispatch/fixtures/p2-compiled-switch';
-const paths = ['engine/tests/support/wasm/binding.mjs',...execFileSync('rg', ['--files', 'engine/src'], {cwd: root, encoding: 'utf8'}).trim().split('\n'),
+const paths = ['engine/tests/support/wasm/page-fault.mjs', 'engine/tests/support/wasm/binding.mjs',...execFileSync('rg', ['--files', 'engine/src'], {cwd: root, encoding: 'utf8'}).trim().split('\n'),
   'Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml', 'rust-toolchain.toml', 'engine/tests/support/loader/pe32/image.rs',
   'engine/tests/programs/dispatch/support/switch.rs', 'engine/tests/programs/dispatch/native/switch.rs', 'engine/tests/programs/native.rs', 'engine/tests/programs/dispatch/support/switch.rs', 'engine/tests/support/loader/pe32/image.rs', 'engine/tests/programs/native.rs', 'engine/tests/programs/dispatch/wasm/switch.rs', 'engine/tests/programs/wasm.rs', 'engine/tests/programs/dispatch/support/switch.rs', 'engine/tests/support/loader/pe32/image.rs', 'engine/tests/support/wasm.rs', 'engine/tests/programs/wasm.rs', 'engine/tests/support/wasm.rs',
   'engine/tests/support/wasm/engine.mjs', ...readdirSync(join(root, dir), {withFileTypes: true}).filter(x => x.isFile()).map(x => `${dir}/${x.name}`)].sort();
@@ -59,7 +60,7 @@ function record(magic, length, fields, version = 1) { const b = Buffer.alloc(len
 const stateBytes = s => record('R3ST', 56, [...s.registers, s.pc, s.flags]);
 const exitBytes = s => record('R3EX', 40, [s.reason, s.retired, s.detail ?? 0, s.address ?? 0, s.access ?? 0, s.length ?? 0], s.version);
 const helperBytes = (value = 0, address = null) => record('R3MH', 40, address === null ? [0, value, 0, 0, 0, 0] : [1, 0, 2, address, 1, 4]);
-const cpuHelperBytes = (value = 0, address = null) => record('R3MH', 40, address === null ? [0, value, 0, 0, 0, 4] : [1, 0, 2, address, 1, 4], 10);
+const cpuHelperBytes = (value = 0, address = null) => address === null ? record('R3MH', 40, [0, value, 0, 0, 0, 4], 10) : pageFaultPacket({errorCode: 5, address, access: 1, length: 4});
 const installBytes = u => record('R3IN', 32, [u.low, u.high, u.slot, 0]);
 function arena(e) { return Buffer.from(new Uint8Array(e.memory.buffer, e.base, SIZE)); }
 function cpu(e) { const b = arena(e); return {registers: Array.from({length: 8}, (_, i) => b.readUInt32LE(16 + i * 4)), pc: b.readUInt32LE(48), flags: b.readUInt32LE(52)}; }
@@ -100,7 +101,7 @@ function fresh(owner, address) {
   save(`${e.label}-start.bin`, arena(e)); return e;
 }
 function compile(e, name, pcs, gates, instructions) {
-  assert.ok(pcs.length > 0 && pcs.length <= 8 && instructions + gates.length <= 64); assert.ok(++e.captures <= (e.table ? 3 : 7));
+  assert.ok(pcs.length > 0 && pcs.length <= 8 && instructions + gates.length <= 64); assert.ok(++e.captures <= (e.table ? 4 : 7));
   transfer(e, words([...pcs, ...gates.flat()])); api(e, e.table ? 'compile_resident_entries' : 'compile_entries', [pcs.length, gates.length], e.table ? [[TRANSFER, TRANSFER + 24]] : []);
   const r = arena(e).subarray(TRANSFER, TRANSFER + 24), u = {name, slot: e.units.length, pcs, instructions, version: 6};
   if (e.table) {assert.equal(r.readUInt32LE(0), 1); assert.equal(r.readUInt32LE(4), 24); [u.low, u.high, u.pointer, u.length] = [8, 12, 16, 20].map(at => r.readUInt32LE(at));}
@@ -114,7 +115,7 @@ function compile(e, name, pcs, gates, instructions) {
     assert.equal(args[name === 'cpu_store_resident32' ? 4 : 0] >>> 0, step[1]);
     if (name !== 'cpu_read32') assert.equal(args.at(-1) >>> 0, step[2]);
     if (name === 'cpu_store_resident32') assert.deepEqual(args.slice(0, 4).map(x => x >>> 0), [e.low, e.high, u.low, u.high]);
-    const before = arena(e), status = e.api[name](...args), after = arena(e); assert.equal(status, 0); unchanged(before, after, [[100, 140]], 'canonical helper');
+    const before = arena(e), status = e.api[name](...args), after = arena(e); assert.equal(status, step[3] ? 23 : 0); unchanged(before, after, [[100, 140]], 'canonical helper');
     assert.deepEqual(after.subarray(100, 140), cpuHelperBytes(name === 'cpu_read32' ? step[2] : 0, step[3] ? step[1] : null));
     helperTrace.push({context: e.label, call: e.runs + 1, unit: name, module: u.name, address: step[1], value: step[2], fault: !!step[3], status, helper_hex: after.subarray(100, 140).toString('hex')});
     if (name === 'cpu_read32') e.reads++; else e.stores++; return status;
@@ -126,11 +127,11 @@ function compile(e, name, pcs, gates, instructions) {
 }
 function run(e, u, label, budget, next, retired, steps = [], reason = 1, fields = {}) {
   const before = arena(e), expected = Buffer.from(before), packet = {version: u.version, reason, retired, ...fields};
-  expected.set(stateBytes(next)); expected.set(exitBytes(packet), 56);
+  expected.set(stateBytes(next)); expected.set(reason === 23 ? pageFaultExit({retired, errorCode: fields.detail, address: fields.address, access: fields.access, length: fields.length}) : exitBytes(packet), 56);
   if (steps.length) {const last = steps.at(-1); expected.set(cpuHelperBytes(last[0] === 'read' ? last[2] : 0, last[3] ? last[1] : null), 100);}
   if (e.table && budget && !before.readUInt32LE(96)) expected.set(installBytes(u), TRANSFER);
-  e.steps = [...steps]; const status = (e.table ? e.dispatcher : u.run)(e.base, e.base + 56, budget, e.base + 96); assert.equal(status, 0, label); assert.equal(e.steps.length, 0, label);
-  assert.deepEqual(arena(e), expected, `${e.label}/${label}: full4612`); e.runs++; e.retired += retired;
+  e.steps = [...steps]; const status = (e.table ? e.dispatcher : u.run)(e.base, e.base + 56, budget, e.base + 96); assert.equal(status, 0, label); assert.equal(e.steps.length, 0, JSON.stringify({label, context: e.label, stop: stop(e), cpu: cpu(e), pendingHelpers: e.steps}));
+  assert.deepEqual(arena(e), expected, `${e.label}/${label}: full arena`); e.runs++; e.retired += retired;
   const file = `${e.label}-${String(e.runs).padStart(2, '0')}-${label}.bin`; save(file, arena(e));
   observations.push({context: e.label, label, module: u.name, budget, expected: {status: 0, ...packet, pc: next.pc, flags: next.flags, registers: next.registers},
     observed: {status, ...stop(e), pc: cpu(e).pc, flags: cpu(e).flags, registers: cpu(e).registers}, arena: file, helper_calls: steps.length});
@@ -150,10 +151,11 @@ function finish(e, u) {
 const bodyOffsets = [27, 43, 32, 37, 51, 51], bodyInstructions = [2, 2, 2, 3, 1, 1];
 for (const address of [0x400000, 0x500000]) for (const owner of ['replacement', 'resident']) {
   const e = fresh(owner, address), mainRows = spec.main_entries.map(offset => e.main + offset), gate = [[e.gate, 0x10003]];
-  let caller, prefix, body;
-  if (e.table) {caller = compile(e, 'live-caller', [...mainRows, e.gate], gate, 55); prefix = compile(e, 'dispatch-prefix', [e.kernel, e.kernel + 20], [], 8);}
+  let caller, callerTail, prefix, body;
+  if (e.table) {caller = compile(e, 'live-caller-head', mainRows.slice(0, 4), [], 33); callerTail = compile(e, 'live-caller-tail', [...mainRows.slice(4), e.gate], gate, 22); prefix = compile(e, 'dispatch-prefix', [e.kernel, e.kernel + 20], [], 8);}
   else caller = prefix = compile(e, 'first-caller-and-prefix', [mainRows[0], e.kernel, e.kernel + 20], [], 17);
   for (const [index, row] of cases.entries()) {
+    if (e.table && index === 4) caller = callerTail;
     const start = cpu(e), registers = [...start.registers];
     if (!index) {registers[0] = row.salt; registers[3] = 0xbbbb0001; registers[5] = 0xbbbb0002; registers[6] = 0xbbbb0003; registers[7] = e.state;}
     else registers[1] = row.before;
@@ -174,7 +176,7 @@ for (const address of [0x400000, 0x500000]) for (const owner of ['replacement', 
     if (!index) {
       api(e, 'protect', [e.tableAddress, 1, 0]); guard(e, prefix);
       for (const label of ['table-read-fault', 'unchanged-table-read-fault']) {
-        run(e, prefix, label, 1, cpu(e), 0, [['read', e.tableAddress, 0, true]], 5, {detail: 2, address: e.tableAddress, access: 1, length: 4});
+        run(e, prefix, label, 1, cpu(e), 0, [['read', e.tableAddress, 0, true]], 23, {version: 12, detail: 5, address: e.tableAddress, access: 1, length: 4});
         read(e, e.state, row.before); read(e, e.output, 0); read(e, e.output + 4, 0);
       }
       run(e, prefix, 'stopped-zero-budget', 0, cpu(e), 0, [], 1, {version: e.table ? 3 : prefix.version});
@@ -206,11 +208,11 @@ for (const address of [0x400000, 0x500000]) for (const owner of ['replacement', 
 assert.deepEqual(sources(), pins);
 const counts = {contexts: contexts.length, modules: modules.length, runs: contexts.reduce((n, e) => n + e.runs, 0), retired: contexts.reduce((n, e) => n + e.retired, 0),
   helper_calls: helperTrace.length, read32: contexts.reduce((n, e) => n + e.reads, 0), store32: contexts.reduce((n, e) => n + e.stores, 0), provider_completions: contexts.length, table_faults: helperTrace.filter(e => e.fault).length};
-assert.deepEqual(counts, {contexts: 4, modules: 22, runs: 108, retired: 544, helper_calls: 396, read32: 196, store32: 200, provider_completions: 4, table_faults: 8});
+assert.deepEqual(counts, {contexts: 4, modules: 24, runs: 108, retired: 544, helper_calls: 396, read32: 196, store32: 200, provider_completions: 4, table_faults: 8});
 const result = {status: 'ok', engine_sha256: engine.sha256, source_pins: pins, counts, contexts: contexts.map(({label, owner, address, captures, runs, retired, reads, stores, diagnostics}) => ({label, owner, address, captures, runs, retired, reads, stores, diagnostics})), modules, observations, helper_trace: helperTrace, diagnostics, artifacts,
   limits: ['fixed compiler function and readonly table; original DIR32-linked bytes and all cases/defaults at two bases and both bound owners; no generic linker/compiler claim',
     'replacement selected-path captures use original bytes; native full8block kernel admission proves all four bound profiles; resident split captures expose real cold table-selected transfer',
-    'full4612 including dirtyFP compared per generated call; selected state/output/stack/table/canaries only, not whole RAM; forwarded canonical helpers separate from public diagnostics',
+    'full arena including dirtyFP compared per generated call; selected state/output/stack/table/canaries only, not whole RAM; forwarded canonical helpers separate from public diagnostics',
     'image-table permissions are explicit host-only fault controls; protect-only repair retains CPU and captured code identity; fault neutrality applies to the stopped JMP, not the whole C function',
-    'seven finite replacement compilations and three resident children plus dispatcher; unchanged8blocks/64instructions/65536bytes/8resident slots; no product/API/ABI/performance claim']};
+    'seven finite replacement compilations and four resident children plus dispatcher; unchanged8blocks/64instructions/65536bytes/8resident slots; no product/API/ABI/performance claim']};
 writeFileSync(join(output, 'result.json'), JSON.stringify(result, null, 2), {flag: 'wx'}); console.log(JSON.stringify({status: 'ok', ...counts, output}));

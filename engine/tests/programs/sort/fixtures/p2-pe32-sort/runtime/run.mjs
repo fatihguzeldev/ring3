@@ -1,3 +1,4 @@
+import {pageFaultExit, pageFaultPacket} from '../../../../../support/wasm/page-fault.mjs';
 import {attachDetectionApi} from '../../../../../support/wasm/binding.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
@@ -25,13 +26,13 @@ const SIZE = 4796, TRANSFER = 140, BASE = spec.actual_base, TEXT = BASE + spec.t
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const artifacts = {}, contexts = [];
 const save = (name, bytes) => { writeFileSync(join(output, name), bytes, {flag: 'wx'}); artifacts[name] = {bytes: Buffer.byteLength(bytes), sha256: hash(bytes)}; };
-const sourcePaths = ['engine/tests/support/wasm/binding.mjs', ...execFileSync('rg', ['--files', 'engine/src'], {cwd: root, encoding: 'utf8'}).trim().split('\n'), 'Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml', 'engine/tests/support/loader/pe32/image.rs', 'engine/tests/programs/sort/support/pe32.rs', 'engine/tests/programs/sort/native.rs', 'engine/tests/programs/native.rs', 'engine/tests/programs/sort/wasm.rs', 'engine/tests/programs/wasm.rs', 'engine/tests/support/wasm/engine.mjs', ...['runtime/oracle.mjs', 'runtime/oracle.test.mjs', 'runtime/run.mjs'].map(p => `engine/tests/programs/sort/fixtures/p2-pe32-sort/${p}`)].sort();
+const sourcePaths = ['engine/tests/support/wasm/page-fault.mjs', 'engine/tests/support/wasm/binding.mjs', ...execFileSync('rg', ['--files', 'engine/src'], {cwd: root, encoding: 'utf8'}).trim().split('\n'), 'Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml', 'engine/tests/support/loader/pe32/image.rs', 'engine/tests/programs/sort/support/pe32.rs', 'engine/tests/programs/sort/native.rs', 'engine/tests/programs/native.rs', 'engine/tests/programs/sort/wasm.rs', 'engine/tests/programs/wasm.rs', 'engine/tests/support/wasm/engine.mjs', ...['runtime/oracle.mjs', 'runtime/oracle.test.mjs', 'runtime/run.mjs'].map(p => `engine/tests/programs/sort/fixtures/p2-pe32-sort/${p}`)].sort();
 const sourceMap = () => Object.fromEntries(sourcePaths.map(p => { const b = readFileSync(join(root, p)); return [p, {bytes: b.length, sha256: hash(b)}]; }));
 const sourcesBefore = sourceMap();
 save('sources-before.json', JSON.stringify(sourcesBefore, null, 2));
 assert.deepEqual(image.subarray(spec.text_raw, spec.text_raw + spec.program_hex.length / 2), Buffer.from(spec.program_hex, 'hex'));
 assert.equal(image.length, 2560);
-const names = ['guard', 'guard_resident', 'guard_detect', 'guard_detect_resident', 'finish_exception_detection', 'open', 'close', 'arena_ptr', 'begin_image_input', 'append_image_input', 'load_pe32_linked_v5_input_at', 'start_loaded_image', 'dispatcher_module', 'guard_dispatch_entry', 'find_installed_resident', 'compile_resident_entries', 'acknowledge_resident_installation',  'read32', 'store_resident32', 'capture_resident_call', 'complete_resident_windows_call', 'upload', 'protect', 'retire_stale_resident', 'cpu_read32', 'cpu_store_resident32'];
+const names = ['guard', 'guard_resident', 'guard_detect', 'guard_detect_resident', 'finish_exception_detection', 'open', 'close', 'arena_ptr', 'begin_image_input', 'append_image_input', 'load_pe32_linked_v5_input_at', 'start_loaded_image', 'dispatcher_module', 'guard_dispatch_entry', 'find_installed_resident', 'compile_resident_entries', 'acknowledge_resident_installation',  'read32', 'store_resident32', 'capture_resident_call', 'complete_resident_windows_call', 'upload', 'protect', 'retire_stale_resident', 'cpu_read32', 'cpu_read_modify32', 'cpu_store_resident32'];
 function refresh(e) { e.view = new DataView(e.memory.buffer); return e.view; }
 function arena(e) { return Buffer.from(e.memory.buffer, e.base, SIZE).subarray().map(x => x); }
 function cpu(e) { return arena(e).subarray(0, 56); }
@@ -91,7 +92,7 @@ function compile(e, group, observedPc) {
   work(e, 'resident_table_set', () => e.table.set(unit.slot, unit.run));
   status(e, 'resident_ack', () => e.api.acknowledge_resident_installation(e.low, e.high, unit.low, unit.high, unit.slot), 0, [[TRANSFER, TRANSFER + 32]]);
   assert.ok(unit.slot < 8); assert.equal(e.table.get(unit.slot), unit.run); assert.equal(unit.run.length, 4);
-  const allowedImports = ['guard_detect_resident', 'cpu_read32', 'cpu_store_resident32'];
+  const allowedImports = ['guard_detect_resident', 'finish_exception_detection', 'cpu_read32', 'cpu_read_modify32', 'cpu_store_resident32'];
   assert.ok(unit.imports.every(x => (x.module === 'env' && x.name === 'memory' && x.kind === 'memory') || (x.module === 'ring3' && allowedImports.includes(x.name) && x.kind === 'function')));
   save(`${e.label}-unit-${unit.low}-${unit.name}.wasm`, unit.bytes);
   e.units.push(unit); e.groups.set(group.name, unit); e.cold.push({pc: observedPc, name: group.name, entries: group.entries, id: [unit.low, unit.high], slot: unit.slot, bytes: unit.length, sha256: hash(unit.bytes)});
@@ -151,7 +152,7 @@ function runProgram(e, options = {}) {
     const stop = dispatch(e, Math.min(chunk, globalBudget - e.retired));
     if (stop.reason === 3) { const pc = readCpu(e).pc, group = e.plan.find(g => g.entries.includes(pc)); assert.ok(group, `undeclared cold PC ${pc.toString(16)}`); compile(e, group, pc); continue; }
     if (stop.reason === 1) { assert.ok(options.split); continue; }
-    if (stop.reason === 5 && options.fault) { options.fault(e, stop); continue; }
+    if (stop.reason === 23 && options.fault) { options.fault(e, stop); continue; }
     assert.equal(stop.reason, 8, JSON.stringify({stop, cpu: readCpu(e)}));
     const frame = capture(e, stop);
     save(`${e.label}-call-${e.captures}.bin`, frame.record);
@@ -215,7 +216,9 @@ if (campaign === 'first') {
     afterAllocate(e) { if (e.allocations === 1) status(e, 'fault_control', () => e.api.protect(e.allocation, 1, 1)); },
     fault(e, first) {
       assert.ok(!faulted); faulted = true;
-      assert.deepEqual(first, {version: 6, reason: 5, retired: 12, detail: 2, address: e.allocation, access: 2, length: 4});
+      assert.deepEqual(first, {version: 12, reason: 23, retired: 12, detail: 7, address: e.allocation, access: 2, length: 4});
+      assert.deepEqual(arena(e).subarray(56, 96), pageFaultExit({retired: 12, errorCode: 7, address: e.allocation, access: 2, length: 4}));
+      assert.deepEqual(arena(e).subarray(100, 140), pageFaultPacket({errorCode: 7, address: e.allocation, access: 2, length: 4}));
       assert.equal(e.retired, 19);
       const stopped = readCpu(e); assert.equal(stopped.pc, TEXT + 0x121); assert.equal(stopped.registers[0], expected.input[0]); assert.equal(stopped.registers[1], 256); assert.equal(stopped.registers[6], e.allocation); assert.equal(stopped.flags, 2);
       const before = arena(e), again = dispatch(e, 2_000_000 - e.retired), after = arena(e), wanted = Buffer.from(before); wanted.writeUInt32LE(0, 76);

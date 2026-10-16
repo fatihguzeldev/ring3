@@ -353,7 +353,7 @@ fn typed_compiler_dispatch_and_cdecl_caller_keep_the_original_cfg() {
 }
 
 #[test]
-fn four_bound_profiles_admit_separate_default_sized_caller_and_compiler_units() {
+fn four_bound_profiles_admit_complete_caller_and_compiler_across_bounded_units() {
     let fixture = pe::fixture();
     for profile in 0..4 {
         let (mut engine, metadata) = loaded(pe::ACTUAL_BASE);
@@ -369,7 +369,8 @@ fn four_bound_profiles_admit_separate_default_sized_caller_and_compiler_units() 
         let entries = profile % 2 != 0;
         let mut retained = Vec::new();
         for (slot, (rva, offsets)) in [
-            (pe::MAIN_RVA, fixture.main_entries.as_slice()),
+            (pe::MAIN_RVA, &fixture.main_entries[..4]),
+            (pe::MAIN_RVA, &fixture.main_entries[4..]),
             (pe::KERNEL_RVA, pe::KERNEL_ENTRIES.as_slice()),
         ]
         .into_iter()
@@ -377,7 +378,7 @@ fn four_bound_profiles_admit_separate_default_sized_caller_and_compiler_units() 
         {
             let decoded = blocks(engine.memory().unwrap(), pe::ACTUAL_BASE, rva, offsets);
             let mut specs = specs(&decoded);
-            let gates = if slot == 0 {
+            let gates = if slot == 1 {
                 vec![(metadata.gates[0].entry.0, metadata.gates[0].id)]
             } else {
                 vec![]

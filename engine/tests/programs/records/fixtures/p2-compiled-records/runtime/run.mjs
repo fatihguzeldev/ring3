@@ -1,3 +1,4 @@
+import {pageFaultExit, pageFaultPacket} from '../../../../../support/wasm/page-fault.mjs';
 import {attachDetectionApi} from '../../../../../support/wasm/binding.mjs';
 import {ARENA_SIZE} from '../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
@@ -16,7 +17,7 @@ const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const artifacts = {}, contexts = [], observations = [], helperTrace = [];
 function save(name, bytes) { writeFileSync(join(output, name), bytes, {flag: 'wx'}); artifacts[name] = {bytes: Buffer.byteLength(bytes), sha256: hash(bytes)}; }
 const fixtureDir = 'engine/tests/programs/records/fixtures/p2-compiled-records';
-const sourcePaths = ['engine/tests/support/wasm/binding.mjs', ...execFileSync('rg', ['--files', 'engine/src'], {cwd: root, encoding: 'utf8'}).trim().split('\n'), 'Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml', 'engine/tests/support/loader/pe32/image.rs', 'engine/tests/programs/sort/support/pe32.rs', 'engine/tests/programs/records/support/compiled.rs', 'engine/tests/programs/records/native/compiled.rs', 'engine/tests/programs/native.rs', 'engine/tests/programs/records/wasm/compiled.rs', 'engine/tests/programs/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/support/wasm/engine.mjs', ...readdirSync(join(root, fixtureDir), {withFileTypes: true}).filter(entry => entry.isFile()).map(entry => `${fixtureDir}/${entry.name}`)].sort();
+const sourcePaths = ['engine/tests/support/wasm/page-fault.mjs', 'engine/tests/support/wasm/binding.mjs', ...execFileSync('rg', ['--files', 'engine/src'], {cwd: root, encoding: 'utf8'}).trim().split('\n'), 'Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml', 'engine/tests/support/loader/pe32/image.rs', 'engine/tests/programs/sort/support/pe32.rs', 'engine/tests/programs/records/support/compiled.rs', 'engine/tests/programs/records/native/compiled.rs', 'engine/tests/programs/native.rs', 'engine/tests/programs/records/wasm/compiled.rs', 'engine/tests/programs/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/support/wasm/engine.mjs', ...readdirSync(join(root, fixtureDir), {withFileTypes: true}).filter(entry => entry.isFile()).map(entry => `${fixtureDir}/${entry.name}`)].sort();
 const sourceMap = () => Object.fromEntries(sourcePaths.map(path => { const bytes = readFileSync(join(root, path)); return [path, {bytes: bytes.length, sha256: hash(bytes)}]; }));
 const sourcesBefore = sourceMap();
 
@@ -191,12 +192,11 @@ function complete(e, frame, terminal = false) {
 
 function faultRepair(e, first) {
   assert.equal(e.mode, 'fault'); assert.ok(!e.faulted); e.faulted = true;
-  assert.deepEqual(first, {version: 6, reason: 5, retired: 11, detail: 2, address: e.allocation, access: 1, length: 1});
+  assert.deepEqual(first, {version: 12, reason: 23, retired: 11, detail: 5, address: e.allocation, access: 1, length: 1});
   assert.equal(e.retired, 216); const stopped = cpu(e);
   assert.equal(stopped.pc, e.text + e.spec.kernel_offset + 0x19);
   const before = arena(e), helper = before.subarray(100, 140);
-  assert.equal(helper.readUInt32LE(4), 0x1000a);
-  assert.deepEqual(Array.from({length: 6}, (_, i) => helper.readUInt32LE(16 + 4 * i)), [1, 0, 2, e.allocation, 1, 1]);
+  assert.deepEqual(helper, pageFaultPacket({errorCode: 5, address: e.allocation, access: 1, length: 1}));
   const retry = dispatch(e, 65536), wanted = Buffer.from(before); wanted.writeUInt32LE(0, 76);
   assert.deepEqual(retry, {...first, retired: 0}); assert.deepEqual(arena(e), wanted, 'unchanged fault retry only clears retired'); assert.deepEqual(cpu(e), stopped);
   save(`${e.label}-read-fault-first.bin`, before); save(`${e.label}-read-fault-retry.bin`, arena(e));
@@ -221,7 +221,7 @@ function runProgram(e) {
       }
       compile(e, group, pc); continue;
     }
-    if (stop.reason === 5) { faultRepair(e, stop); continue; }
+    if (stop.reason === 23) { faultRepair(e, stop); continue; }
     assert.equal(stop.reason, 8, JSON.stringify({stop, cpu: cpu(e)}));
     const frame = capture(e, stop);
     if (stop.detail === 0x10005) {
@@ -277,6 +277,6 @@ const expectedCounts = {contexts: 7, modules: 28, runs: 1737, retired: 2650, gue
 assert.deepEqual(counts, expectedCounts);
 const sourcesAfter = sourceMap(); assert.deepEqual(sourcesAfter, sourcesBefore);
 for (const e of contexts) status(e, 'close engine', () => e.api.close());
-const result = {status: 'PASS', engine_sha256: engine.sha256, engine_bytes: engine.bytes.length, command: process.argv, tools: {node: process.version, v8: process.versions.v8, platform: process.platform, arch: process.arch}, counts, expected_counts: expectedCounts, oracle: Object.fromEntries([...fixtures].map(([count, f]) => [count, f.checksum])), observations, helper_trace: helperTrace, contexts: contexts.map(e => ({label: e.label, count: e.spec.count, mode: e.mode, pe_sha256: hash(e.fixture.image), allocation: e.allocation, retired: e.retired, runs: e.runs, captures: e.captures, completions: e.completions, diagnostic_reads: e.diagnosticReads, cdecl_entry: e.abiEntry, cdecl_return: e.abiReturn, controls: e.controls, units: e.units.map(({run, ...unit}) => unit), final: e.final})), sources_before: sourcesBefore, sources_after: sourcesAfter, artifacts, claim_ceiling: 'one compiler-produced scalar leaf in an authored relocated PE; seven finite actual contexts, selected source/record/stack/canary RAM, full4612 unaffected-byte and dirtyFP assertions; no CPU reseed after startup, arbitrary compiler/Windows/browser/game compatibility or performance claim'};
+const result = {status: 'PASS', engine_sha256: engine.sha256, engine_bytes: engine.bytes.length, command: process.argv, tools: {node: process.version, v8: process.versions.v8, platform: process.platform, arch: process.arch}, counts, expected_counts: expectedCounts, oracle: Object.fromEntries([...fixtures].map(([count, f]) => [count, f.checksum])), observations, helper_trace: helperTrace, contexts: contexts.map(e => ({label: e.label, count: e.spec.count, mode: e.mode, pe_sha256: hash(e.fixture.image), allocation: e.allocation, retired: e.retired, runs: e.runs, captures: e.captures, completions: e.completions, diagnostic_reads: e.diagnosticReads, cdecl_entry: e.abiEntry, cdecl_return: e.abiReturn, controls: e.controls, units: e.units.map(({run, ...unit}) => unit), final: e.final})), sources_before: sourcesBefore, sources_after: sourcesAfter, artifacts, claim_ceiling: 'one compiler-produced scalar leaf in an authored relocated PE; seven finite actual contexts, selected source/record/stack/canary RAM, full arena unaffected-byte and dirtyFP assertions; no CPU reseed after startup, arbitrary compiler/Windows/browser/game compatibility or performance claim'};
 save('result.json', JSON.stringify(result, null, 2));
 console.log(JSON.stringify({status: result.status, ...result.counts, output}));

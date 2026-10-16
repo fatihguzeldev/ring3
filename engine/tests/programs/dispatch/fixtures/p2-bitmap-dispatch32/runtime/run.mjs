@@ -1,3 +1,4 @@
+import {pageFaultExit, pageFaultPacket} from '../../../../../support/wasm/page-fault.mjs';
 import {attachDetectionApi, generatedImports} from '../../../../../support/wasm/binding.mjs';
 import {ARENA_SIZE} from '../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
@@ -11,7 +12,7 @@ assert.ok(enginePath&&output&&root);
 const engine=readEngine(enginePath),initial=readFileSync(join(output,'initial-arena.bin'));
 const hash=b=>createHash('sha256').update(b).digest('hex');
 assert.equal(initial.length,SIZE);assert.equal(engine.sha256,hash(engine.bytes));
-const sourcePaths=['engine/tests/support/wasm/binding.mjs', 'engine/src/cpu/x86/ir.rs','engine/src/cpu/x86/decode/profile.rs', 'engine/src/cpu/x86/decode/families.rs','engine/src/cpu/x86/decode/integer.rs',
+const sourcePaths=['engine/tests/support/wasm/page-fault.mjs', 'engine/tests/support/wasm/binding.mjs', 'engine/src/cpu/x86/ir.rs','engine/src/cpu/x86/decode/profile.rs', 'engine/src/cpu/x86/decode/families.rs','engine/src/cpu/x86/decode/integer.rs',
   'engine/src/cpu/dbt/region.rs','engine/src/cpu/dbt/wasm/instructions/integer/arithmetic.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/bits.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/carry_rotates.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/decimal.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/mod.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/arithmetic.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/moves.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/exchange.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/predicates.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/shifts.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/control.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/dispatch/extended.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/flags.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/mod.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/multiply_divide.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/operands.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/rotates.rs', 'engine/src/cpu/dbt/wasm/instructions/integer/shifts.rs','engine/src/cpu/dbt/wasm/imports/mod.rs', 'engine/src/cpu/dbt/wasm/imports/binding.rs', 'engine/src/cpu/dbt/wasm/imports/context.rs', 'engine/src/cpu/dbt/wasm/imports/needs.rs', 'engine/src/cpu/dbt/wasm/helpers/protocol.rs', 'engine/src/cpu/dbt/wasm/instructions/memory/mod.rs', 'engine/src/cpu/dbt/wasm/instructions/memory/address.rs', 'engine/src/cpu/dbt/wasm/instructions/memory/scalar.rs', 'engine/src/cpu/dbt/wasm/instructions/memory/stack.rs',
   'engine/src/cpu/dbt/wasm/emitter/mod.rs', 'engine/src/cpu/dbt/wasm/emitter/module.rs', 'engine/src/cpu/dbt/wasm/emitter/body.rs', 'engine/src/cpu/dbt/wasm/requirements.rs', 'engine/src/cpu/dbt/wasm/imports/wiring.rs','engine/src/cpu/dbt/wasm/locals.rs','engine/src/memory/space.rs', 'engine/src/memory/space/atomic.rs',
   'engine/src/process/instance.rs', 'engine/src/process/execution/compiled.rs', 'engine/src/process/execution/authority.rs', 'engine/src/process/memory/address_space.rs', 'engine/src/process/memory/scalar.rs', 'engine/src/process/memory/scalar/tests.rs', 'engine/src/process/execution/mod.rs', 'engine/src/process/memory/mod.rs', 'engine/src/process/mod.rs','engine/src/process/wasm/mod.rs', 'engine/src/process/wasm/loading.rs', 'engine/src/abi/image.rs', 'engine/src/process/wasm/execution.rs', 'engine/src/abi/execution.rs', 'engine/src/process/wasm/calls.rs', 'engine/src/process/wasm/memory.rs', 'engine/src/process/wasm/cpu.rs','engine/src/process/execution/resident.rs',
@@ -27,8 +28,8 @@ function record(magic,version,size,fields){const b=Buffer.alloc(size);b.write(ma
 const state=s=>record('R3ST',1,56,[...s.registers,s.pc,s.flags]);
 const exit=(reason,retired,{detail=0,address=0,access=0}={})=>record('R3EX',2,40,[reason,retired,detail,address,access,access?4:0]);
 const helper=(value=0,{detail=0,address=0,access=0}={})=>record('R3MH',1,40,[access?1:0,value,detail,address,access,access?4:0]);
-const cpuHelper=(value=0,{detail=0,address=0,access=0}={})=>record('R3MH',10,40,[access?1:0,value,detail,address,access,4]);
-const cpuExit=(reason,retired,{detail=0,address=0,access=0}={})=>record('R3EX',6,40,[reason,retired,detail,address,access,access?4:0]);;
+const cpuHelper=(value=0,{detail=0,address=0,access=0}={})=>access ? pageFaultPacket({errorCode: detail, address, access, length: 4}) : record('R3MH',10,40,[0,value,0,0,0,4]);
+const cpuExit=(reason,retired,{detail=0,address=0,access=0}={})=>reason === 23 ? pageFaultExit({retired, errorCode: detail, address, access, length: 4}) : record('R3EX',6,40,[reason,retired,detail,address,access,access?4:0]);
 const parents=()=>Array.from({length:8},(_,i)=>(0xa100+i)*65536+0x1234+i);
 const countZero=value=>{if(value===0)return 32;let bit=0;while((BigInt(value)&(1n<<BigInt(bit)))===0n)bit++;return bit;};
 const countFlags=(value,result)=>0x402|(value===0?1:0)|(result===0?0x40:0);
@@ -50,7 +51,7 @@ const arities={guard_detect: 6, guard_detect_resident: 7, finish_exception_detec
 const arena=c=>Buffer.from(new Uint8Array(c.memory.buffer,c.base,SIZE));
 const cpu=c=>{const a=arena(c);return{registers:Array.from({length:8},(_,i)=>a.readUInt32LE(16+4*i)),pc:a.readUInt32LE(48),flags:a.readUInt32LE(52)};};
 function input(c,offset,bytes){const expected=arena(c);expected.set(bytes,offset);new Uint8Array(c.memory.buffer).set(bytes,c.base+offset);assert.deepEqual(arena(c),expected);}
-function host(c,name,args,span){const expected=arena(c);assert.equal(c.api[name](...args),0,name);if(span)expected.set(arena(c).subarray(...span),span[0]);assert.deepEqual(arena(c),expected,'host full4612 '+name);}
+function host(c,name,args,span){const expected=arena(c);assert.equal(c.api[name](...args),0,name);if(span)expected.set(arena(c).subarray(...span),span[0]);assert.deepEqual(arena(c),expected,'host full arena '+name);}
 function upload(c,address,bytes){input(c,140,bytes);host(c,'upload',[address,bytes.length]);}
 function seed(c,pc,registers){const s={registers:[...registers],pc,flags:0xcd7};input(c,0,Buffer.concat([state(s),exit(1,0),word(0),helper(0xad)]));return s;}
 function name(c,kind){return kind==='cpu_store32'&&c.owner==='resident'?'cpu_store_resident32':kind;}
@@ -80,19 +81,19 @@ function compile(c,title,blocks,kinds){
 }
 function run(c,unit,budget,s,label,{reason=1,retired=budget,packet,fault={}}={}){
   const expected=arena(c),at=helperTrace.length;expected.set(state(s));expected.set(cpuExit(reason,retired,fault),56);if(packet)expected.set(packet,100);
-  const status=unit.run(c.base,c.base+56,budget,c.base+96);assert.equal(status,0,label);assert.deepEqual(arena(c),expected,'full4612 '+label);const a=arena(c);
+  const status=unit.run(c.base,c.base+56,budget,c.base+96);assert.equal(status,0,label);assert.deepEqual(arena(c),expected,'full arena '+label);const a=arena(c);
   observations.push({context:c.id,module:unit.name,label,budget,observed_status:status,observed_reason:a.readUInt32LE(72),observed_retired:a.readUInt32LE(76),observed_cpu:cpu(c),exit_hex:a.subarray(56,96).toString('hex'),helper_calls:helperTrace.length-at,helper_hex:a.subarray(100,140).toString('hex')});counts.runs++;counts.retired+=retired;
 }
-function checkRam(c,address,expected){for(let i=0;i<expected.length;i+=4){const before=arena(c),value=expected.readUInt32LE(i);assert.equal(c.api.read32(address+i),0);before.set(helper(value),100);assert.deepEqual(arena(c),before,'diagnostic full4612');diagnostics.push({context:c.id,address:address+i,value});}}
+function checkRam(c,address,expected){for(let i=0;i<expected.length;i+=4){const before=arena(c),value=expected.readUInt32LE(i);assert.equal(c.api.read32(address+i),0);before.set(helper(value),100);assert.deepEqual(arena(c),before,'diagnostic full arena');diagnostics.push({context:c.id,address:address+i,value});}}
 function frame(c,value){const bytes=Buffer.from(Array.from({length:32},(_,i)=>(i*17+23)&255));bytes.writeUInt32LE(value>>>0,12);upload(c,DATA-12,bytes);return bytes;}
-function assertRead(c,value,fault={}){const e=helperTrace.at(-1);assert.equal(e.name,'cpu_read32');assert.equal(e.address,DATA);assert.equal(e.input_value,null);assert.equal(e.status,0);assert.equal(e.helper_hex,cpuHelper(value,fault).toString('hex'));}
+function assertRead(c,value,fault={}){const e=helperTrace.at(-1);assert.equal(e.name,'cpu_read32');assert.equal(e.address,DATA);assert.equal(e.input_value,null);assert.equal(e.status,fault.access?23:0);assert.equal(e.helper_hex,cpuHelper(value,fault).toString('hex'));}
 function probeProof(c,unit){
   for(const value of[0,...Array.from({length:32},(_,i)=>2**i)]){const registers=parents();registers[0]=value;const s=seed(c,0x1000,registers),result=countZero(value),at=helperTrace.length;
     run(c,unit,1,next(s,0x1004,countFlags(value,result),{0:result}),'register-self-alias-'+value.toString(16));assert.equal(helperTrace.length,at);counts.register_probes++;}
   for(const value of[0,1,0x80000000,0x80400010]){const bytes=frame(c,value),registers=parents();registers[0]=DATA;registers[1]=4;const s=seed(c,0x1010,registers),result=countZero(value);
     run(c,unit,1,next(s,0x1016,countFlags(value,result),{0:result}),'memory-destination-ea-alias-'+value.toString(16),{packet:cpuHelper(value)});assertRead(c,value);checkRam(c,DATA-12,bytes);counts.memory_probes++;}
-  const bytes=frame(c,0x100),registers=parents();registers[0]=DATA;registers[1]=4;host(c,'protect',[0x5000,1,0]);const s=seed(c,0x1010,registers),fault={detail:2,address:DATA,access:1};
-  run(c,unit,1,s,'memory-read-permission-stops-before-publication',{reason:5,retired:0,packet:cpuHelper(0,fault),fault});assertRead(c,0,fault);counts.read_faults++;
+  const bytes=frame(c,0x100),registers=parents();registers[0]=DATA;registers[1]=4;host(c,'protect',[0x5000,1,0]);const s=seed(c,0x1010,registers),fault={detail:5,address:DATA,access:1};
+  run(c,unit,1,s,'memory-read-permission-stops-before-publication',{reason:23,retired:0,packet:cpuHelper(0,fault),fault});assertRead(c,0,fault);counts.read_faults++;
   const before=arena(c),stopped=cpu(c);host(c,'protect',[0x5000,1,3]);assert.deepEqual(arena(c),before);assert.deepEqual(cpu(c),stopped);
   run(c,unit,1,next(s,0x1016,0x402,{0:8}),'memory-protect-only-same-input-retry',{packet:cpuHelper(0x100)});assertRead(c,0x100);checkRam(c,DATA-12,bytes);counts.repair_only++;
   repairs.push({context:c.id,kind:'ReadPermission-to-RW',address:DATA,value:0x100,input_cpu:stopped,repair:'protect only; no CPU input/upload/remap/recapture',module:unit.name});
@@ -135,6 +136,6 @@ assert.deepEqual(counts,{contexts:4,modules:8,runs:172,retired:408,helper_calls:
 const result={engine:{path:enginePath,sha256:engine.sha256,bytes:engine.bytes.length},source_pins:sourcesBefore,initial_arena_sha256:hash(initial),counts,contexts,modules,observations,helper_trace:helperTrace,public_diagnostics:diagnostics,repairs,
   compiler:{text_hex:kernel.toString('hex'),text_sha256:hash(kernel),calls:12,caller_hex:Buffer.concat(caller.map(b=>b.bytes)).toString('hex'),combined_blocks:8,combined_instructions:37},
   limits:{blocks:8,instructions:64,module_bytes:65536,captures_per_context:6,mapped_pages:12},
-  verification_ceiling:'per-run full4612 CPU/exit/helper/dirtyFP asserted;16original return/final milestone arenas plus4final arenas persisted;selected32Bmemory probe frames/64Boriginal data/64Bstack only,no wholeRAM;diagnostics are expectedvalues asserted against actual canonical packets, not separately persisted raw packets;no generic model or physical parser added',
+  verification_ceiling:'per-run full arena CPU/exit/helper/dirtyFP asserted;16original return/final milestone arenas plus4final arenas persisted;selected32Bmemory probe frames/64Boriginal data/64Bstack only,no wholeRAM;diagnostics are expectedvalues asserted against actual canonical packets, not separately persisted raw packets;no generic model or physical parser added',
   claim:'exact software DWORD TZCNT reg/mem and one guarded whole40B original bitmap consumer, zeroFLAGS proven by direct probes;no BSFalias,CPUID/BMI1bundle,broaderREP,concurrency,performance or generalcompiler compatibility claim'};
 assert.deepEqual(Object.keys(result.engine),['path','sha256','bytes']);writeFileSync(join(output,'result.json'),JSON.stringify(result,null,2)+'\n',{flag:'wx'});console.log(JSON.stringify({output,counts,result:join(output,'result.json')}));
