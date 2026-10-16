@@ -1,3 +1,5 @@
+mod cache;
+
 export_process_calls! {
     compile(count: u32);
     generation();

@@ -50,3 +50,5 @@ pub fn encode_resident_module(
 
 #[cfg(test)]
 mod tests;
+
+pub mod cache;

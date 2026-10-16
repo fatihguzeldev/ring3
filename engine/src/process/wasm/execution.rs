@@ -1,3 +1,6 @@
+mod cache;
+pub(crate) use cache::*;
+
 use super::{REGISTRY, inspect, mutate, status};
 use crate::abi::arena::{CANCEL_OFFSET, EXIT_OFFSET, STATE_OFFSET, TRANSFER_OFFSET};
 use crate::abi::execution::{

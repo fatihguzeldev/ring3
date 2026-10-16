@@ -12,6 +12,7 @@ pub mod image;
 pub mod media;
 pub mod memory_helper;
 pub mod modules;
+pub mod registry;
 pub mod resident_callback;
 #[cfg(target_arch = "wasm32")]
 mod wasm;

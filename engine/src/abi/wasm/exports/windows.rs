@@ -1,6 +1,11 @@
+mod activation;
+mod process;
 mod dinput;
 mod dsound;
 mod files;
+mod exceptions;
+mod registry;
+mod threads;
 mod synchronization;
 
 export_process_calls! {
