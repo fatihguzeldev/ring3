@@ -17,6 +17,7 @@ mod types;
 pub(in crate::process::windows) mod windows;
 
 pub(in crate::process) use context::GdiRuntime32;
+pub(in crate::process) use raster::canvas::{CanvasText32, GdiCanvas32};
 pub use types::{GdiConfig32, GdiFrame32};
 
 #[cfg(test)]

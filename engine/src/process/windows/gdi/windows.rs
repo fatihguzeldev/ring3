@@ -22,7 +22,7 @@ impl GdiRuntime32 {
         self.publish_surface(surface);
         Ok(handle)
     }
-    pub(super) fn acquire_dc(
+    pub(in crate::process) fn acquire_dc(
         &mut self,
         window: GdiWindow32,
         thread: u32,
@@ -89,6 +89,14 @@ impl GdiRuntime32 {
             self.model.bind_display_dc(handle, window.window, thread)?;
             Ok(handle)
         }
+    }
+    pub(in crate::process) fn release_window_dc(
+        &mut self,
+        window: u32,
+        dc: u32,
+        thread: u32,
+    ) -> Result<bool, GdiError32> {
+        self.model.release_dc(window, dc, thread)
     }
     pub(super) fn screen_dc(&mut self) -> Result<u32, GdiError32> {
         let prepared = self.model.prepare_dc(DcKind32::Screen)?;

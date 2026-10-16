@@ -10,35 +10,72 @@ use crate::{
     },
 };
 
-pub(super) struct Canvas32 {
+pub(in crate::process) struct GdiCanvas32 {
     prepared: Option<TextPixels32>,
     dc: u32,
+    owner: CanvasOwner32,
 }
-impl Canvas32 {
-    pub(super) fn new(
+struct CanvasOwner32 {
+    identity: u64,
+    memory_version: u64,
+    surface_id: u64,
+    surface_revision: u64,
+    key: super::super::storage::SurfaceKey32,
+    layout: crate::windows::gdi::BitmapLayout32,
+    colors: Vec<u32>,
+    logical_palette: Vec<u32>,
+    dc_kind: crate::windows::gdi::DcKind32,
+    state: crate::windows::gdi::DcState32,
+}
+impl GdiCanvas32 {
+    pub(in crate::process) fn new(
         gdi: &GdiRuntime32,
         memory: &AddressSpace,
         dc: u32,
     ) -> Result<Self, GdiError32> {
         let index = gdi.dc_surface(dc)?;
         let surface = &gdi.surfaces[index];
+        let state = gdi.model.state(dc)?.clone();
+        let mut colors = Vec::new();
+        colors
+            .try_reserve_exact(surface.palette.len())
+            .map_err(|_| GdiError32::Allocation)?;
+        colors.extend_from_slice(&surface.palette);
+        let selected = gdi.model.palette_entries(state.palette)?;
+        let mut logical_palette = Vec::new();
+        logical_palette
+            .try_reserve_exact(selected.len())
+            .map_err(|_| GdiError32::Allocation)?;
+        logical_palette.extend_from_slice(selected);
         Ok(Self {
             dc,
+            owner: CanvasOwner32 {
+                identity: memory.identity(),
+                memory_version: memory.transaction_version(),
+                surface_id: surface.id,
+                surface_revision: surface.revision,
+                key: surface.key,
+                layout: surface.layout,
+                colors,
+                logical_palette,
+                dc_kind: gdi.model.dc_kind(dc)?,
+                state: state.clone(),
+            },
             prepared: Some(TextPixels32 {
                 index,
                 pixels: surface.storage.read(memory, surface.layout.byte_len()?)?,
                 damage: Rect32::default(),
-                state: gdi.model.state(dc)?.clone(),
+                state,
             }),
         })
     }
-    pub(super) fn dc(&self) -> u32 {
+    pub(in crate::process) fn dc(&self) -> u32 {
         self.dc
     }
-    pub(super) fn set_background_color(&mut self, color: u32) {
+    pub(in crate::process) fn set_background_color(&mut self, color: u32) {
         self.prepared.as_mut().unwrap().state.background_color = color;
     }
-    pub(super) fn fill(&mut self, gdi: &GdiRuntime32, rect: Rect32, color: u32) {
+    pub(in crate::process) fn fill(&mut self, gdi: &GdiRuntime32, rect: Rect32, color: u32) {
         let prepared = self.prepared.as_mut().unwrap();
         let surface = &gdi.surfaces[prepared.index];
         let rect = intersect(rect, super::super::bitmaps::bounds(surface.layout));
@@ -68,7 +105,13 @@ impl Canvas32 {
             }
         }
     }
-    pub(super) fn frame(&mut self, gdi: &GdiRuntime32, rect: Rect32, top: u32, bottom: u32) {
+    pub(in crate::process) fn frame(
+        &mut self,
+        gdi: &GdiRuntime32,
+        rect: Rect32,
+        top: u32,
+        bottom: u32,
+    ) {
         if rect.left >= rect.right || rect.top >= rect.bottom {
             return;
         }
@@ -105,7 +148,7 @@ impl Canvas32 {
             bottom,
         );
     }
-    pub(super) fn focus(&mut self, gdi: &GdiRuntime32, rect: Rect32, color: u32) {
+    pub(in crate::process) fn focus(&mut self, gdi: &GdiRuntime32, rect: Rect32, color: u32) {
         if rect.left >= rect.right || rect.top >= rect.bottom {
             return;
         }
@@ -154,7 +197,7 @@ impl Canvas32 {
             );
         }
     }
-    pub(super) fn background(
+    pub(in crate::process) fn background(
         &mut self,
         gdi: &GdiRuntime32,
         rect: Rect32,
@@ -194,11 +237,11 @@ impl Canvas32 {
         }
         Ok(())
     }
-    pub(super) fn text(
+    pub(in crate::process) fn text(
         &mut self,
         gdi: &GdiRuntime32,
         memory: &AddressSpace,
-        text: ControlText32<'_>,
+        text: CanvasText32<'_>,
     ) -> Result<(), GdiError32> {
         if text.units.is_empty() {
             return Ok(());
@@ -249,11 +292,11 @@ impl Canvas32 {
         }
         Ok(())
     }
-    pub(super) fn finish(self) -> TextPixels32 {
+    fn finish(self) -> TextPixels32 {
         self.prepared.unwrap()
     }
 }
-pub(super) fn inset(rect: Rect32, amount: i32) -> Rect32 {
+pub(in crate::process) fn inset(rect: Rect32, amount: i32) -> Rect32 {
     Rect32 {
         left: (rect.left + amount).min(rect.right),
         top: (rect.top + amount).min(rect.bottom),
@@ -282,7 +325,7 @@ fn union(a: Rect32, b: Rect32) -> Rect32 {
     }
 }
 
-pub(super) struct ControlText32<'a> {
+pub(in crate::process) struct CanvasText32<'a> {
     pub units: &'a [u16],
     pub bounds: Rect32,
     pub color: u32,
@@ -291,4 +334,47 @@ pub(super) struct ControlText32<'a> {
     pub middle: bool,
     pub mnemonic: bool,
     pub multiline: bool,
+}
+
+impl GdiRuntime32 {
+    pub(in crate::process) fn begin_canvas(
+        &self,
+        memory: &AddressSpace,
+        dc: u32,
+    ) -> Result<GdiCanvas32, GdiError32> {
+        GdiCanvas32::new(self, memory, dc)
+    }
+    pub(in crate::process) fn publish_canvas(
+        &mut self,
+        memory: &mut AddressSpace,
+        canvas: GdiCanvas32,
+    ) -> Result<(), GdiError32> {
+        let prepared = canvas.prepared.as_ref().ok_or(GdiError32::InvalidRequest)?;
+        let owner = &canvas.owner;
+        let surface = self
+            .surfaces
+            .get(prepared.index)
+            .ok_or(GdiError32::InvalidRequest)?;
+        if memory.identity() != owner.identity
+            || memory.transaction_version() != owner.memory_version
+            || self.dc_surface(canvas.dc)? != prepared.index
+            || self.model.dc_kind(canvas.dc)? != owner.dc_kind
+            || self.model.state(canvas.dc)? != &owner.state
+            || self.model.palette_entries(owner.state.palette)? != owner.logical_palette
+            || surface.id != owner.surface_id
+            || surface.revision != owner.surface_revision
+            || surface.key != owner.key
+            || surface.layout != owner.layout
+            || surface.palette != owner.colors
+        {
+            return Err(GdiError32::InvalidRequest);
+        }
+        let prepared = canvas.finish();
+        if prepared.damage.left < prepared.damage.right
+            && prepared.damage.top < prepared.damage.bottom
+        {
+            self.commit_pixels(memory, prepared.index, prepared.pixels, prepared.damage)?;
+        }
+        Ok(())
+    }
 }

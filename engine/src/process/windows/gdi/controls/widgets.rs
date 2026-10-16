@@ -1,8 +1,6 @@
 use super::super::context::GdiRuntime32;
-use super::{
-    ControlVisual32,
-    canvas::{Canvas32, ControlText32, inset},
-};
+use super::super::{CanvasText32, GdiCanvas32, raster::canvas::inset};
+use super::ControlVisual32;
 use crate::{
     memory::AddressSpace,
     windows::{controls::ControlKind32, gdi::GdiError32, user32::Rect32},
@@ -11,7 +9,7 @@ use crate::{
 pub(super) fn paint(
     gdi: &GdiRuntime32,
     memory: &AddressSpace,
-    canvas: &mut Canvas32,
+    canvas: &mut GdiCanvas32,
     dc: u32,
     visual: &ControlVisual32<'_>,
     bounds: Rect32,
@@ -39,8 +37,8 @@ pub(super) fn paint(
         }
     }
 }
-fn text<'a>(units: &'a [u16], bounds: Rect32, color: u32) -> ControlText32<'a> {
-    ControlText32 {
+fn text<'a>(units: &'a [u16], bounds: Rect32, color: u32) -> CanvasText32<'a> {
+    CanvasText32 {
         units,
         bounds,
         color,
@@ -54,7 +52,7 @@ fn text<'a>(units: &'a [u16], bounds: Rect32, color: u32) -> ControlText32<'a> {
 fn button(
     gdi: &GdiRuntime32,
     memory: &AddressSpace,
-    canvas: &mut Canvas32,
+    canvas: &mut GdiCanvas32,
     visual: &ControlVisual32<'_>,
     bounds: Rect32,
     color: u32,
@@ -196,7 +194,7 @@ fn button(
 fn edit(
     gdi: &GdiRuntime32,
     memory: &AddressSpace,
-    canvas: &mut Canvas32,
+    canvas: &mut GdiCanvas32,
     dc: u32,
     visual: &ControlVisual32<'_>,
     bounds: Rect32,
@@ -298,7 +296,7 @@ fn edit(
 fn static_control(
     gdi: &GdiRuntime32,
     memory: &AddressSpace,
-    canvas: &mut Canvas32,
+    canvas: &mut GdiCanvas32,
     visual: &ControlVisual32<'_>,
     bounds: Rect32,
     color: u32,
@@ -370,7 +368,7 @@ fn static_control(
 fn list(
     gdi: &GdiRuntime32,
     memory: &AddressSpace,
-    canvas: &mut Canvas32,
+    canvas: &mut GdiCanvas32,
     dc: u32,
     visual: &ControlVisual32<'_>,
     bounds: Rect32,
@@ -419,7 +417,7 @@ fn list(
 fn combo(
     gdi: &GdiRuntime32,
     memory: &AddressSpace,
-    canvas: &mut Canvas32,
+    canvas: &mut GdiCanvas32,
     dc: u32,
     visual: &ControlVisual32<'_>,
     bounds: Rect32,
@@ -502,7 +500,7 @@ fn combo(
 }
 fn scrollbar(
     gdi: &GdiRuntime32,
-    canvas: &mut Canvas32,
+    canvas: &mut GdiCanvas32,
     visual: &ControlVisual32<'_>,
     bounds: Rect32,
 ) {

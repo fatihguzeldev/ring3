@@ -347,3 +347,5 @@ mod caps;
 mod bitfields;
 
 mod palette;
+
+mod canvas;

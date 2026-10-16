@@ -1,3 +1,4 @@
+pub(in crate::process::windows::gdi) mod canvas;
 mod drawing;
 mod pixels;
 

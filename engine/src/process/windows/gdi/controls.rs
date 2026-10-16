@@ -1,4 +1,3 @@
-mod canvas;
 mod widgets;
 use super::{context::GdiRuntime32, windows::GdiWindow32};
 use crate::{
@@ -9,7 +8,6 @@ use crate::{
         user32::Rect32,
     },
 };
-use canvas::Canvas32;
 
 pub(in crate::process) struct ControlVisual32<'a> {
     pub kind: ControlKind32,
@@ -110,7 +108,7 @@ impl GdiRuntime32 {
         thread: u32,
     ) -> Result<(), GdiError32> {
         self.check_control_dc(dc, window, thread)?;
-        assert!(self.model.release_dc(window, dc, thread)?);
+        assert!(self.release_window_dc(window, dc, thread)?);
         Ok(())
     }
     pub(in crate::process) fn render_control(
@@ -121,7 +119,7 @@ impl GdiRuntime32 {
         brush: u32,
     ) -> Result<(), GdiError32> {
         self.check_control_visual(visual)?;
-        let mut canvas = Canvas32::new(self, memory, dc)?;
+        let mut canvas = self.begin_canvas(memory, dc)?;
         let index = self.dc_surface(dc)?;
         let bounds = super::bitmaps::bounds(self.surfaces[index].layout);
         let push_button = visual.kind == ControlKind32::Button
@@ -146,11 +144,7 @@ impl GdiRuntime32 {
             canvas.background(self, bounds, brush)?;
         }
         widgets::paint(self, memory, &mut canvas, dc, visual, bounds)?;
-        let pixels = canvas.finish();
-        if pixels.damage.left < pixels.damage.right && pixels.damage.top < pixels.damage.bottom {
-            self.commit_pixels(memory, pixels.index, pixels.pixels, pixels.damage)?;
-        }
-        Ok(())
+        self.publish_canvas(memory, canvas)
     }
     pub(in crate::process) fn check_control_erase_dc(&self, dc: u32) -> Result<(), GdiError32> {
         self.dc_surface(dc)?;
@@ -164,7 +158,7 @@ impl GdiRuntime32 {
         bounds: Rect32,
         brush: u32,
     ) -> Result<(), GdiError32> {
-        let mut canvas = Canvas32::new(self, memory, dc)?;
+        let mut canvas = self.begin_canvas(memory, dc)?;
         if brush != 0 {
             canvas.background(self, bounds, brush)?;
         } else {
@@ -181,10 +175,6 @@ impl GdiRuntime32 {
                 },
             );
         }
-        let pixels = canvas.finish();
-        if pixels.damage.left < pixels.damage.right && pixels.damage.top < pixels.damage.bottom {
-            self.commit_pixels(memory, pixels.index, pixels.pixels, pixels.damage)?;
-        }
-        Ok(())
+        self.publish_canvas(memory, canvas)
     }
 }
