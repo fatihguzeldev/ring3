@@ -22,6 +22,13 @@ impl Vfs32 {
             .ok_or(FileError32::NotFound)
     }
     pub(crate) fn find(&self, input: &[u16]) -> Result<Vec<DirectoryEntry32>, FileError32> {
+        self.find_limited(input, self.limits.nodes)
+    }
+    pub(in crate::files) fn find_limited(
+        &self,
+        input: &[u16],
+        limit: usize,
+    ) -> Result<Vec<DirectoryEntry32>, FileError32> {
         let absolute = self.normalize(input, true)?;
         let parent = path::parent(&absolute)?;
         let directory = self.lookup(parent)?;
@@ -36,6 +43,9 @@ impl Vfs32 {
                 && path::matches(pattern, path::name(&entry.path))
                 && !self.node(entry.file)?.delete_pending
             {
+                if result.len() >= limit {
+                    return Err(FileError32::Capacity);
+                }
                 result.try_reserve(1).map_err(|_| FileError32::Allocation)?;
                 result.push(DirectoryEntry32 {
                     name: path::name(&entry.path).to_vec(),

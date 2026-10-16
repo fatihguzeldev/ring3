@@ -372,6 +372,7 @@ impl EngineInstance {
             resources.commit_process_exit();
         }
         self.nls.commit_process_exit();
+        self.retire_activation_process();
         self.exceptions.deliveries_clear_process_exit();
         self.threads.retire_process_threads(code);
         if let Some(registry) = self.registry.as_mut() {

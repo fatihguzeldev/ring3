@@ -174,7 +174,8 @@ impl EngineInstance {
                 || self.synchronization_provider_owns_token(token)
                 || self.files_provider_owns_token(token)
                 || self.registry_provider_owns_token(token)
-                || self.windows_fls_provider_owns_token(token))
+                || self.windows_fls_provider_owns_token(token)
+                || self.activation_provider_owns_token(token))
     }
 
     pub fn pending_windows_callback(&self) -> Option<WindowsCallback32> {

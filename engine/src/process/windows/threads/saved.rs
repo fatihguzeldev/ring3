@@ -8,6 +8,7 @@ use crate::{
         },
         cpu::context::ExtendedCpuState,
         windows::{
+            activation::ActivationThreadReply32,
             callbacks::WindowsReply32,
             d3d8::{D3D8Reply32, D3D8ThreadReply32},
             dinput::DirectInputThreadReply32,
@@ -41,6 +42,7 @@ pub(super) struct SavedThread32 {
     synchronization: Option<SynchronizationThreadReply32>,
     pub user32: Option<User32ThreadReply32>,
     registry: Option<RegistryReply32>,
+    activation: Option<ActivationThreadReply32>,
     #[cfg(any(target_arch = "wasm32", test))]
     detection: Option<Box<[crate::process::cpu::events::detection::DetectionSlot32; 1]>>,
 }
@@ -83,6 +85,7 @@ impl SavedThread32 {
                 .as_ref()
                 .map(|runtime| runtime.empty_thread_reply()),
             registry: None,
+            activation: None,
             #[cfg(any(target_arch = "wasm32", test))]
             detection: None,
         }
@@ -118,9 +121,13 @@ impl SavedThread32 {
             ))
     }
     pub(super) fn ready(&self, engine: &EngineInstance, now: u64, thread: u32) -> bool {
-        self.files
+        self.activation
             .as_ref()
-            .is_some_and(|reply| reply.alertable() && engine.has_pending_thread_apc(thread))
+            .is_some_and(|reply| engine.activation_thread_reply_ready(reply))
+            || self
+                .files
+                .as_ref()
+                .is_some_and(|reply| reply.alertable() && engine.has_pending_thread_apc(thread))
             || engine.exceptions.thread_unhandled(thread)
             || self.event.is_some()
             || self
@@ -279,6 +286,10 @@ impl EngineInstance {
                 .registry
                 .as_mut()
                 .and_then(|runtime| runtime.take_thread_reply(self.threads.current_id())),
+            activation: self
+                .activation
+                .as_mut()
+                .and_then(|runtime| runtime.take_thread_reply()),
             #[cfg(any(target_arch = "wasm32", test))]
             detection: self.exception_detection.take(),
         })
@@ -328,6 +339,9 @@ impl EngineInstance {
             runtime
                 .restore_thread_reply(saved.registry)
                 .expect("active registry reply was parked before thread restore");
+        }
+        if let Some(runtime) = self.activation.as_mut() {
+            runtime.restore_thread_reply(saved.activation);
         }
         #[cfg(any(target_arch = "wasm32", test))]
         {

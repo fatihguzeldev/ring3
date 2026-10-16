@@ -8,7 +8,7 @@ use crate::{
     windows::resources::ResourceApi32 as Api,
 };
 const BASE: u32 = 0x400000;
-fn image(base: u32, dll: bool, named: bool) -> Vec<u8> {
+pub(in crate::process::windows) fn image(base: u32, dll: bool, named: bool) -> Vec<u8> {
     fn half(bytes: &mut [u8], at: usize, value: u16) {
         bytes[at..at + 2].copy_from_slice(&value.to_le_bytes());
     }
@@ -93,7 +93,7 @@ fn image(base: u32, dll: bool, named: bool) -> Vec<u8> {
     data[0x180..0x184].copy_from_slice(&[0x11, 0x22, 0x33, 0x44]);
     bytes
 }
-fn register(engine: &mut EngineInstance, name: &str, bytes: &[u8]) {
+pub(in crate::process::windows) fn register(engine: &mut EngineInstance, name: &str, bytes: &[u8]) {
     engine.begin_module_input(bytes.len() as u32, name).unwrap();
     for (index, chunk) in bytes.chunks(4096).enumerate() {
         engine
@@ -102,7 +102,7 @@ fn register(engine: &mut EngineInstance, name: &str, bytes: &[u8]) {
     }
     engine.commit_module_input().unwrap();
 }
-fn engine(named: bool, max_handles: u32) -> EngineInstance {
+pub(in crate::process::windows) fn engine(named: bool, max_handles: u32) -> EngineInstance {
     let mut engine = EngineInstance::new(128, 7).unwrap();
     engine
         .configure_resources(ResourceConfig32 {

@@ -53,6 +53,7 @@ pub(in crate::process::windows::files) fn runtime()
             reply: None,
             events: Vec::new(),
             host_input: Default::default(),
+            provider: super::super::provider::ProviderFiles32::new(16),
         },
         memory,
         SynchronizationContext32::new(7, SynchronizationLimits32::default(), 0).unwrap(),

@@ -64,6 +64,7 @@ impl EngineInstance {
             .nls
             .thread_exit_ranges(self.memory()?, id)
             .map_err(HostError::Nls)?;
+        let activation = self.prepare_activation_thread_exit(id)?;
         let capacity = self
             .windows_memory
             .committed_ranges()
@@ -72,6 +73,13 @@ impl EngineInstance {
             .and_then(|count| count.checked_add(extra))
             .and_then(|count| count.checked_add(resource_ranges.len()))
             .and_then(|count| count.checked_add(nls_ranges.len()))
+            .and_then(|count| {
+                count.checked_add(
+                    activation
+                        .as_ref()
+                        .map_or(0, |receipt| receipt.ranges().len()),
+                )
+            })
             .and_then(|count| {
                 count.checked_add(
                     record
@@ -113,6 +121,9 @@ impl EngineInstance {
         }
         ranges.extend(resource_ranges);
         ranges.extend(nls_ranges);
+        if let Some(receipt) = &activation {
+            ranges.extend_from_slice(receipt.ranges());
+        }
         ranges.sort_unstable_by_key(|range| range.first);
         for pair in ranges.windows(2) {
             if pair[0].first + pair[0].count > pair[1].first {
@@ -285,6 +296,9 @@ impl EngineInstance {
                     .map_or(&[][..], |files| files.event_handles()),
             )
             .map_err(HostError::Synchronization)?;
+        if let Some(receipt) = &activation {
+            self.check_activation_thread_exit(receipt)?;
+        }
         // exact committed ranges are unmapped before infallible kernel-object publication.
         if let Some(prepared) = dinput {
             self.dinput.as_mut().unwrap().commit_thread_exit(self.memory.as_mut().unwrap(), prepared)
@@ -341,6 +355,7 @@ impl EngineInstance {
         self.threads.fls.retire_thread(id);
         self.exceptions.retire_thread(id);
         self.nls.retire_thread(id);
+        self.commit_activation_thread_exit(activation);
         if let Some(registry) = self.registry.as_mut() {
             registry.commit_thread_exit(id);
         }

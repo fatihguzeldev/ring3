@@ -265,6 +265,12 @@ impl EngineInstance {
         })
     }
     fn resume_ready_thread_provider(&mut self) -> Result<(), HostError> {
+        if self.active_activation_reply_ready() {
+            let wait = self
+                .pending_activation_call()
+                .ok_or(HostError::Infrastructure)?;
+            self.resume_activation_call(wait.epoch, wait.token)?;
+        }
         if let Some(pending) = self.pending_call.as_ref() {
             let (owner, token) = (pending.owner, pending.token);
             self.retry_windows_callback_reply(owner, token)?;

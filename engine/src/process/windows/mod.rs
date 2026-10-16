@@ -3,6 +3,7 @@
 pub(super) mod calls;
 pub(super) mod virtual_memory;
 
+pub(super) mod activation;
 pub(super) mod callbacks;
 pub(super) mod d3d8;
 pub(super) mod dinput;

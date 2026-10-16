@@ -164,6 +164,10 @@ impl FileRuntime32 {
                 closes.push((open, count));
             }
         }
+        for open in self.provider.thread_opens(thread) {
+            closes.try_reserve(1).map_err(|_| FileError32::Allocation)?;
+            closes.push((open, 1));
+        }
         self.vfs.check_close_open_group(&closes, 0, &[])?;
         let completion = self.completion.prepare_posts(&completion)?;
         self.pipes.check_release_many(&pipes, 0)?;
@@ -235,6 +239,7 @@ impl FileRuntime32 {
             }
         }
         self.commit_copy_thread_exit(prepared.copy);
+        self.retire_provider_thread_files(thread);
         self.vfs.cancel_guest_thread_io(thread);
         self.completion.retire_thread(thread);
         if self

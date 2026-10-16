@@ -1,4 +1,4 @@
-use super::input;
+use super::super::input;
 use crate::{
     graphics::{
         GraphicsLimits,

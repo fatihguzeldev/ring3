@@ -261,5 +261,6 @@ pub struct FileVolume32 {
 pub(crate) enum FileIoOwner32 {
     GuestThread(u32),
     AsyncOperation(u64),
+    ProviderFile(OpenFileId),
     HostExport,
 }

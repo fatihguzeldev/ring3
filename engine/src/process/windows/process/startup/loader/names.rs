@@ -4,6 +4,28 @@ use crate::{
 };
 
 impl EngineInstance {
+    pub(in crate::process) fn resource_module_file_name(
+        &self,
+        handle: u32,
+    ) -> Result<Vec<u16>, HostError> {
+        if handle & 3 == 0 {
+            return self.virtual_module_file_name_units(handle);
+        }
+        let module = self
+            .resource_only_modules()
+            .find(|module| module.handle() == handle)
+            .ok_or(HostError::WindowsProcess(ProcessError32::InvalidHandle))?;
+        module.check(self.memory()?).map_err(HostError::Module)?;
+        let startup = self
+            .process_runtime
+            .startup
+            .as_ref()
+            .ok_or(HostError::WindowsProcess(ProcessError32::InvalidParameter))?;
+        Ok(super::entries::guest_library_path(
+            module.identity(),
+            &startup.image_path,
+        ))
+    }
     pub(in crate::process) fn virtual_module_file_name(
         &self,
         handle: u32,

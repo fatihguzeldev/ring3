@@ -42,6 +42,7 @@ pub enum HostError {
     Exception(crate::windows::exceptions::ExceptionError32),
     Nls(crate::windows::nls::NlsError32),
     Resource(crate::process::windows::resources::ResourceError32),
+    Activation(crate::windows::activation::ActivationError32),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -60,6 +61,8 @@ pub struct EngineInstance {
     pub(in crate::process) console: crate::windows::console::ConsoleControl32,
     pub(in crate::process) native_diagnostics: crate::windows::native::NativeDiagnostics32,
     pub(in crate::process) resources: Option<crate::process::windows::resources::ResourceRuntime32>,
+    pub(in crate::process) activation:
+        Option<crate::process::windows::activation::ActivationRuntime32>,
     pub(in crate::process) exceptions: crate::process::windows::exceptions::ExceptionRuntime32,
     pub(in crate::process) nls: crate::process::windows::nls::NlsRuntime32,
     pub(in crate::process) registry: Option<crate::process::windows::registry::RegistryRuntime32>,
@@ -136,6 +139,7 @@ impl EngineInstance {
         Ok(Self {
             console: crate::windows::console::ConsoleControl32::new(),
             native_diagnostics: Default::default(),
+            activation: None,
             windows_security: Default::default(),
             resources: None,
             registry: None,
@@ -227,6 +231,7 @@ impl EngineInstance {
     pub fn close(&mut self) {
         self.console = crate::windows::console::ConsoleControl32::new();
         self.native_diagnostics = Default::default();
+        self.activation = None;
         self.windows_security = Default::default();
         self.windows_service = None;
         if let Some(memory) = self.memory.as_ref() {

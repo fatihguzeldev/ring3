@@ -101,6 +101,7 @@ impl EngineInstance {
         files.ordinary.terminate();
         files.handles.commit_process_exit();
         files.events.clear();
+        files.provider.clear();
         files.reply = None;
         Ok(true)
     }

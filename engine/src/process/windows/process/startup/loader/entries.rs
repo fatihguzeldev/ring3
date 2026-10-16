@@ -68,3 +68,18 @@ pub(super) fn module_path(
     path.extend(module.identity().encode_utf16());
     path
 }
+pub(super) fn guest_library_path(identity: &str, image_path: &str) -> Vec<u16> {
+    if identity.contains('\\') {
+        return identity.encode_utf16().collect();
+    }
+    let mut path = image_path
+        .rsplit_once(['\\', '/'])
+        .map_or_else(Vec::new, |(directory, _)| {
+            directory.encode_utf16().collect()
+        });
+    if !path.is_empty() && !path.last().is_some_and(|unit| matches!(*unit, 47 | 92)) {
+        path.push(92);
+    }
+    path.extend(identity.encode_utf16());
+    path
+}

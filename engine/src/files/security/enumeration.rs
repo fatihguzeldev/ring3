@@ -1,8 +1,17 @@
 use crate::{
-    files::{FileError32, Vfs32, path},
+    files::{DirectoryEntry32, FileError32, Vfs32, path},
     windows::security::{FILE_GENERIC_MAPPING, Token32},
 };
 impl Vfs32 {
+    pub(crate) fn find_with_security(
+        &self,
+        pattern: &[u16],
+        limit: usize,
+        token: &Token32,
+    ) -> Result<Vec<DirectoryEntry32>, FileError32> {
+        self.check_find_access(pattern, token)?;
+        self.find_limited(pattern, limit)
+    }
     pub(crate) fn check_find_access(
         &self,
         pattern: &[u16],

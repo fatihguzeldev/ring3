@@ -71,6 +71,7 @@ impl EngineInstance {
             return Err(HostError::Thread(ThreadError32::Capacity));
         }
         let id = self.threads.next_id;
+        let activation = self.prepare_activation_thread(self.threads.current_id(), id)?;
         let created_filetime = self.windows_filetime()?;
         let next = id
             .checked_add(1)
@@ -381,6 +382,7 @@ impl EngineInstance {
                 context_override: None,
             });
             self.threads.next_id = next;
+            self.commit_activation_thread(activation);
             Ok(handle)
         })();
         if result.is_err() {

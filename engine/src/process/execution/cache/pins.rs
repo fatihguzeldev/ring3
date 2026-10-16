@@ -20,7 +20,7 @@ impl EngineInstance {
         let saved = self.threads.execution_pins().count()
             + self.exceptions.execution_pins().count()
             + self.modules.execution_pins().count();
-        let capacity = (depth * 4 + self.windows_replies.len() + 4)
+        let capacity = (depth * 4 + self.windows_replies.len() + 5)
             .checked_add(saved)
             .ok_or(HostError::Resident(
                 crate::cpu::dbt::RegistryError::Allocation,
@@ -62,6 +62,13 @@ impl EngineInstance {
         pins.extend(self.modules.execution_pins());
         if let Some(registry) = &self.registry
             && let Some(value) = registry.pending_owner()
+        {
+            owner(&mut pins, value);
+        }
+        if let Some(value) = self
+            .activation
+            .as_ref()
+            .and_then(|runtime| runtime.pending_owner())
         {
             owner(&mut pins, value);
         }

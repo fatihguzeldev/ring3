@@ -48,6 +48,7 @@ impl EngineInstance {
             reply: None,
             events: Vec::new(),
             host_input: Default::default(),
+            provider: super::super::provider::ProviderFiles32::new(config.operations),
         };
         for directory in ["C:\\Windows\\System32", "C:\\Temp"] {
             let path: Vec<u16> = directory.encode_utf16().collect();

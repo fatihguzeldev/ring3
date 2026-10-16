@@ -17,7 +17,7 @@ impl Vfs32 {
     pub(crate) fn cancel_guest_thread_io(&mut self, thread: u32) {
         self.cancel_owned_io(FileIoOwner32::GuestThread(thread));
     }
-    fn cancel_owned_io(&mut self, operation: FileIoOwner32) {
+    pub(super) fn cancel_owned_io(&mut self, operation: FileIoOwner32) {
         let reads = &self.cache.stages;
         let writes = &self.pending_writes;
         self.cache.pages.retain(|p| {

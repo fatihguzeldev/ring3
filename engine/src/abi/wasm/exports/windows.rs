@@ -1,10 +1,11 @@
 mod activation;
+mod configuration;
 mod dinput;
 mod dsound;
 mod exceptions;
 mod files;
-mod process;
 mod nls;
+mod process;
 mod registry;
 mod synchronization;
 mod threads;

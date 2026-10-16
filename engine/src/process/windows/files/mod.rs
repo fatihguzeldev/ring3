@@ -10,6 +10,7 @@ mod memory;
 mod ordinary;
 mod pipes;
 mod process;
+mod provider;
 mod security;
 mod waits;
 
@@ -27,6 +28,7 @@ use mapping::{MappingLimits32, MappingRuntime32};
 pub(in crate::process) use ordinary::FileCallOutcome32;
 pub use ordinary::FileEnvironment32;
 use ordinary::OrdinaryRuntime32;
+pub(in crate::process) use provider::ProviderFile32;
 
 pub use crate::files::{
     AssetRef32, FileId, FileInfo32, FileReadRequest32, FileTimes32, OverlayEntry32, OverlayKind32,
@@ -73,6 +75,7 @@ pub(in crate::process) struct FileRuntime32 {
     reply: Option<FileReply32>,
     events: Vec<(crate::windows::files::completion::CompletionTarget32, u32)>,
     host_input: host::HostFileInput32,
+    provider: provider::ProviderFiles32,
 }
 #[derive(Clone, Copy)]
 struct FileReply32 {
