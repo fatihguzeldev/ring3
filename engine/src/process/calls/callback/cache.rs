@@ -91,6 +91,17 @@ fn cached_callback_returns_through_a_separate_exact_runtime_gate_unit() {
     engine
         .authorize_resident_callback(KEY, home, callback.token)
         .unwrap();
+    let service_gate = gates
+        .iter()
+        .find(|gate| gate.id == ThreadApi32::TlsGetValue.id())
+        .unwrap();
+    let service = install(&mut engine, service_gate.entry.0);
+    let mut state = crate::abi::x86::decode_state(&engine.arena()[..STATE_SIZE]).unwrap();
+    state.eip = service_gate.entry.0;
+    encode_state(&state, &mut engine.arena_mut().unwrap()[..STATE_SIZE]).unwrap();
+    engine
+        .select_resident_callback_unit(KEY, home, callback.token, service)
+        .unwrap();
     let tail = install(&mut engine, return_pc);
     let mut state = crate::abi::x86::decode_state(&engine.arena()[..STATE_SIZE]).unwrap();
     state.eip = return_pc;

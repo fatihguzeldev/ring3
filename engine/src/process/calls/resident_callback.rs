@@ -66,6 +66,9 @@ impl EngineInstance {
             .map_err(|_| HostError::Call(CallError::InvalidStop))?;
         if exit.reason != ExitReason::NeedCode
             || !(target.contains_instruction(state.eip)
+                || self
+                    .module_gate_at(state.eip)
+                    .is_some_and(|gate| target.matches_gate(gate.entry.0, gate.id))
                 || (state.eip == record.return_pc
                     && target.matches_gate(state.eip, record.return_id)))
         {
