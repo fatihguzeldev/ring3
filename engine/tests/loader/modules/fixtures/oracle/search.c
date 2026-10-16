@@ -17,7 +17,7 @@ static void query(unsigned mode, unsigned phase, DWORD capacity) {
     }
     puts("]}");
 }
-int main(void) {
+int wmain(int argc, WCHAR **argv) {
     WCHAR original[32768], temporary[32768];
     if (!GetCurrentDirectoryW(32768, original) || !GetTempPathW(32768, temporary)) return 1;
     const WCHAR *paths[] = {NULL, L"", L"C:\\ring3-dll-directory-not-created", L"relative", L".", L"relative\\..\\child"};
@@ -35,5 +35,21 @@ int main(void) {
     }
     SetDllDirectoryW(NULL);
     SetCurrentDirectoryW(original);
+    if (argc > 1) {
+        WCHAR full[32768];
+        if (!GetFullPathNameW(argv[1], 32768, full, NULL)) return 4;
+        SetLastError(0);
+        HMODULE module = LoadLibraryExW(full, NULL, LOAD_LIBRARY_AS_DATAFILE | LOAD_WITH_ALTERED_SEARCH_PATH);
+        DWORD error = GetLastError();
+        printf("{\"operation\":\"dll-altered-datafile\",\"flags\":10,\"ok\":%d,\"error\":%lu,\"handleBits\":%u}\n",
+               module != NULL, (unsigned long)error, (unsigned)((UINT_PTR)module & 3));
+        if (module) {
+            SetLastError(0);
+            BOOL released = FreeLibrary(module);
+            printf("{\"operation\":\"dll-altered-datafile-free\",\"ok\":%d,\"error\":%lu}\n",
+                   !!released, (unsigned long)GetLastError());
+            if (!released) return 5;
+        }
+    }
     return 0;
 }

@@ -4,6 +4,7 @@
 #include <oleauto.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 static int row_count;
 static void row(const char *name) {
@@ -117,6 +118,43 @@ static void variants(void) {
     result = VariantClear(&source);
     variant_result("clear-i4", result, &source);
     VariantClear(&destination);
+}
+static BOOL CALLBACK localized_boolean_locale(LPWSTR name) {
+    LCID locale = (LCID)wcstoul(name, NULL, 16);
+    unsigned truth;
+    for (truth = 0; truth < 2; ++truth) {
+        VARIANT source, result;
+        HRESULT status;
+        VariantInit(&source); VariantInit(&result);
+        V_VT(&source) = VT_BOOL; V_BOOL(&source) = truth ? VARIANT_TRUE : VARIANT_FALSE;
+        status = VariantChangeTypeEx(&result, &source, locale, VARIANT_LOCALBOOL, VT_BSTR);
+        row("localized-boolean");
+        printf(",\"locale\":%lu,\"truth\":%u,\"hr\":%lu,\"text\":", (unsigned long)locale, truth, (unsigned long)status);
+        if (SUCCEEDED(status)) raw(V_BSTR(&result), SysStringByteLen(V_BSTR(&result))); else printf("null");
+        putchar('}'); VariantClear(&result);
+    }
+    return TRUE;
+}
+static void numeric_precision(void) {
+    static const double values[] = { 0, 0.1, 1.1, 1.2345678901234567, 1e-28, 1e-29, 7.9228162514264338e28, 1e29, -1.5, -0.00005, 922337203685477.5 };
+    static const VARTYPE targets[] = { VT_DECIMAL, VT_CY, VT_BSTR };
+    unsigned i, kind, target;
+    for (i = 0; i < sizeof(values)/sizeof(values[0]); ++i) {
+        for (kind = 0; kind < 2; ++kind) {
+            for (target = 0; target < sizeof(targets)/sizeof(targets[0]); ++target) {
+                VARIANT source, destination;
+                HRESULT result;
+                char name[64];
+                VariantInit(&source); VariantInit(&destination);
+                if (kind) { V_VT(&source) = VT_R4; V_R4(&source) = (FLOAT)values[i]; }
+                else { V_VT(&source) = VT_R8; V_R8(&source) = values[i]; }
+                result = VariantChangeTypeEx(&destination, &source, 0x409, 0, targets[target]);
+                sprintf_s(name, sizeof(name), "precision-%u-%u-%u", i, kind, targets[target]);
+                variant_result(name, result, &destination); VariantClear(&destination);
+            }
+        }
+    }
+    EnumSystemLocalesW(localized_boolean_locale, LCID_INSTALLED);
 }
 static void descriptor(const char *name, SAFEARRAY *array) {
     UINT i;
@@ -296,9 +334,94 @@ static void ordinals(void) {
     }
 }
 
+static void boolean_numeric_and_null_strings(void) {
+    static const SHORT booleans[] = { 0, -1, 1, 2, -2, -32768, 32767 };
+    static const VARTYPE targets[] = {
+        VT_I1, VT_UI1, VT_I2, VT_UI2, VT_I4, VT_UI4, VT_I8, VT_UI8,
+        VT_INT, VT_UINT, VT_R4, VT_R8, VT_CY, VT_DECIMAL
+    };
+    const WCHAR embedded[] = { 'a', 0, 'z' };
+    const char odd[] = { (char)0xab, (char)0xcd, (char)0xef };
+    unsigned i, target;
+    for (i = 0; i < sizeof(booleans) / sizeof(booleans[0]); ++i) {
+        for (target = 0; target < sizeof(targets) / sizeof(targets[0]); ++target) {
+            VARIANT source, destination;
+            HRESULT result;
+            VariantInit(&source); VariantInit(&destination);
+            V_VT(&source) = VT_BOOL; V_BOOL(&source) = booleans[i];
+            result = VariantChangeTypeEx(&destination, &source, 0x409, 0, targets[target]);
+            row("boolean-to-number");
+            printf(",\"source\":%d,\"target\":%u,\"hr\":%lu,\"vt\":%u,\"value\":",
+                (int)booleans[i], (unsigned)targets[target], (unsigned long)result, V_VT(&destination));
+            raw(&destination, sizeof(destination)); putchar('}');
+            VariantClear(&destination);
+        }
+    }
+    for (i = 0; i < 4; ++i) {
+        BSTR value = NULL;
+        VARIANT source, destination, indirect;
+        SAFEARRAY *array, *copy = NULL;
+        BSTR element = NULL;
+        LONG index = 0;
+        HRESULT result;
+        char name[64];
+        if (i == 1) value = SysAllocStringLen(NULL, 0);
+        if (i == 2) value = SysAllocStringLen(embedded, 3);
+        if (i == 3) value = SysAllocStringByteLen(odd, 3);
+        sprintf_s(name, sizeof(name), "copy-bstr-source-%u", i);
+        bstr(name, value);
+        VariantInit(&source); VariantInit(&destination); VariantInit(&indirect);
+        V_VT(&source) = VT_BSTR; V_BSTR(&source) = value;
+        result = VariantCopy(&destination, &source);
+        sprintf_s(name, sizeof(name), "copy-null-empty-bstr-%u", i);
+        variant_result(name, result, &destination); VariantClear(&destination);
+        V_VT(&indirect) = VT_BSTR | VT_BYREF; V_BYREF(&indirect) = &value;
+        result = VariantCopyInd(&destination, &indirect);
+        sprintf_s(name, sizeof(name), "copyind-null-empty-bstr-%u", i);
+        variant_result(name, result, &destination); VariantClear(&destination);
+
+        array = SafeArrayCreateVector(VT_BSTR, 0, 1);
+        if (array) {
+            result = SafeArrayGetElement(array, &index, &element);
+            sprintf_s(name, sizeof(name), "fresh-bstr-array-get-%u", i);
+            row(name); printf(",\"hr\":%lu,\"present\":%u}", (unsigned long)result, element != NULL);
+            if (SUCCEEDED(result)) SysFreeString(element);
+            element = NULL;
+            result = SafeArrayPutElement(array, &index, value);
+            sprintf_s(name, sizeof(name), "null-empty-bstr-array-put-%u", i);
+            row(name); printf(",\"hr\":%lu,\"storedPresent\":%u}", (unsigned long)result, ((BSTR *)array->pvData)[0] != NULL);
+            VariantClear(&source); value = NULL;
+            result = SafeArrayGetElement(array, &index, &element);
+            sprintf_s(name, sizeof(name), "null-empty-bstr-array-get-%u", i);
+            row(name);
+            printf(",\"hr\":%lu,\"present\":%u,\"bytes\":%u,\"payload\":",
+                (unsigned long)result, element != NULL, SysStringByteLen(element));
+            raw(element, SysStringByteLen(element)); putchar('}');
+            if (SUCCEEDED(result)) SysFreeString(element);
+            element = NULL;
+            result = SafeArrayCopy(array, &copy);
+            sprintf_s(name, sizeof(name), "null-empty-bstr-array-copy-%u", i);
+            row(name);
+            printf(",\"hr\":%lu,\"present\":%u,\"storedPresent\":%u}",
+                (unsigned long)result, copy != NULL, copy != NULL && ((BSTR *)copy->pvData)[0] != NULL);
+            SafeArrayDestroy(array);
+            if (copy) {
+                result = SafeArrayGetElement(copy, &index, &element);
+                sprintf_s(name, sizeof(name), "null-empty-bstr-array-copy-get-%u", i);
+                row(name);
+                printf(",\"hr\":%lu,\"present\":%u,\"bytes\":%u,\"payload\":",
+                    (unsigned long)result, element != NULL, SysStringByteLen(element));
+                raw(element, SysStringByteLen(element)); putchar('}');
+                if (SUCCEEDED(result)) SysFreeString(element);
+                SafeArrayDestroy(copy);
+            }
+        } else VariantClear(&source);
+    }
+}
+
 int main(void) {
     printf("{\"schema\":1,\"pointerBytes\":%u,\"variantBytes\":%u,\"rows\":[", (unsigned)sizeof(void *), (unsigned)sizeof(VARIANT));
-    strings(); variants(); arrays(); references(); ordinals();
+    strings(); variants(); arrays(); references(); ordinals(); numeric_precision(); boolean_numeric_and_null_strings();
     printf("]}\n");
     return 0;
 }

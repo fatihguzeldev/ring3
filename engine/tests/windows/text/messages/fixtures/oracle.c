@@ -31,17 +31,18 @@ int main(void) {
     setvbuf(stdout, NULL, _IONBF, 0);
     array("escapes", 0, L"A\nB\rC\r\nD%nE%rF%tG%%%.%!%b%0tail", NULL);
     array("ignore", FORMAT_MESSAGE_IGNORE_INSERTS, L"[%1!08x!][%2]%%", NULL);
+    array("ignore-escapes", FORMAT_MESSAGE_IGNORE_INSERTS, L"A%nB%rC%tD%%E%0tail", NULL);
     array("ignore-invalid-va", FORMAT_MESSAGE_IGNORE_INSERTS, L"[%1!08x!][%2]%%", (DWORD_PTR *)0xfffffff0);
     array("flatten", 255, L"a\r\nb\nc\rd%nend", NULL);
     array("wrap", 5, L"a bb ccc ddddddd e", NULL);
     DWORD_PTR stars[] = {4, 2, (DWORD_PTR)L"Ned", (DWORD_PTR)L"Sue", 6, (DWORD_PTR)L"Ned"};
     array("array-stars", FORMAT_MESSAGE_ARGUMENT_ARRAY, L"%1!*.*s!/%4/%5!*s!", stars);
     variable("variable-stars", L"%1!*.*s!/%3/%4!*s!", 4, 2, L"Ned", L"Sue", 6, L"Ned");
-    variable("integer64", L"%1!I64x!/%3!d!", (unsigned __int64)0x1122334455667788, -7);
+    variable("integer64", L"%1!I64x!/%2!d!/%3!d!", (unsigned __int64)0x1122334455667788, -7, 11, 22);
     DWORD_PTR integers[] = {(DWORD_PTR)-7, 0x1a, 8, (DWORD_PTR)L"Ned"};
     array("integer-flags", FORMAT_MESSAGE_ARGUMENT_ARRAY, L"%1!+06d!/%2!#08x!/%3!u!/%4!.2s!", integers);
     WCHAR output[4] = {0x1234, 0x2345, 0x3456, 0x4567}; SetLastError(0);
     DWORD result = FormatMessageW(FORMAT_MESSAGE_FROM_STRING, L"1234", 0, 0, output, 3, NULL);
-    printf("{\"case\":\"small\",\"result\":%lu,\"error\":%lu,\"first\":%u}\n", result, GetLastError(), output[0]);
+    printf("{\"case\":\"small\",\"result\":%lu,\"error\":%lu,\"units\":[%u,%u,%u,%u]}\n", result, GetLastError(), output[0], output[1], output[2], output[3]);
     return 0;
 }

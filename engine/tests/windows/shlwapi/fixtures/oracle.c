@@ -45,6 +45,27 @@ static void casing(void) {
         }
     }
 }
+static void text(const WCHAR *value);
+static void casing_text(void) {
+    static const WCHAR *inputs[] = {
+        L"stra\x00df" L"e", L"\x039f\x03a3", L"\x039f\x03a3I", L"\x0130\x03a3",
+        L"a\x00dfi\x0131I\x0130", L"\xfb03", L"I\x0307", L"I\x0301"
+    };
+    static const DWORD flags[] = { LCMAP_LOWERCASE, LCMAP_UPPERCASE,
+        LCMAP_LOWERCASE | LCMAP_LINGUISTIC_CASING, LCMAP_UPPERCASE | LCMAP_LINGUISTIC_CASING };
+    unsigned i,j;
+    for (i=0;i<sizeof(inputs)/sizeof(inputs[0]);++i) {
+        for (j=0;j<sizeof(flags)/sizeof(flags[0]);++j) {
+            WCHAR output[64]={0};
+            int count=LCMapStringW(GetThreadLocale(),flags[j],inputs[i],-1,output,64);
+            DWORD error=count ? 0 : GetLastError();
+            row("casing-text");
+            printf(",\"threadLocale\":%lu,\"flags\":%lu,\"count\":%d,\"error\":%lu,\"input\":",
+                (unsigned long)GetThreadLocale(),(unsigned long)flags[j],count,(unsigned long)error);
+            text(inputs[i]); printf(",\"output\":"); text(output); putchar('}');
+        }
+    }
+}
 static void prefixes(void) {
     SYSTEM_INFO info;
     BYTE *memory;
@@ -133,6 +154,7 @@ int main(void) {
         comparison("turkish-dotted",L"i",L"\x0130");
         comparison("turkish-dotless",L"\x0131",L"I");
         casing();
+        casing_text();
     }
     SetThreadLocale(initial);
     prefixes(); paths();
