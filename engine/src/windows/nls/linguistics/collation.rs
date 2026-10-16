@@ -7,7 +7,28 @@ use icu_collator::{
 use std::cmp::Ordering;
 use unicode_general_category::{GeneralCategory as G, get_general_category};
 const FLAGS: u32 = 0x0803_103f;
-fn collator(flags: u32, locale: u32) -> Result<CollatorBorrowed<'static>, NlsError32> {
+enum Collation32 {
+    Baked(CollatorBorrowed<'static>),
+    FileSystem(Collator),
+}
+impl Collation32 {
+    fn compare(&self, left: &[u16], right: &[u16]) -> Ordering {
+        match self {
+            Self::Baked(collator) => collator.compare_utf16(left, right),
+            Self::FileSystem(collator) => collator.as_borrowed().compare_utf16(left, right),
+        }
+    }
+    fn sort_key(&self, units: &[u16], output: &mut [u8]) -> Result<usize, NlsError32> {
+        match self {
+            Self::Baked(collator) => collator.write_sort_key_utf16_to(units, output),
+            Self::FileSystem(collator) => collator
+                .as_borrowed()
+                .write_sort_key_utf16_to(units, output),
+        }
+        .map_err(|_| NlsError32::Capacity)
+    }
+}
+fn collator(flags: u32, locale: u32) -> Result<Collation32, NlsError32> {
     if flags & !FLAGS != 0 {
         return Err(NlsError32::InvalidFlags);
     }
@@ -35,7 +56,9 @@ fn collator(flags: u32, locale: u32) -> Result<CollatorBorrowed<'static>, NlsErr
     } else {
         AlternateHandling::NonIgnorable
     });
-    let locale: icu_locale::Locale = super::super::locales::locale_identity(locale)?
+    let identity = super::super::locales::locale_identity(locale)?;
+    let filesystem_casing = flags & 0x08000000 == 0 && matches!(identity.language, "tr" | "az");
+    let locale: icu_locale::Locale = identity
         .language_tag()
         .parse()
         .map_err(|_| NlsError32::InvalidParameter)?;
@@ -45,7 +68,19 @@ fn collator(flags: u32, locale: u32) -> Result<CollatorBorrowed<'static>, NlsErr
     } else {
         CollationNumericOrdering::False
     });
-    Collator::try_new(preferences, options).map_err(|_| NlsError32::Unsupported)
+    if filesystem_casing {
+        Collator::try_new_unstable(
+            &super::provider::FileSystemCollationProvider32,
+            preferences,
+            options,
+        )
+        .map(Collation32::FileSystem)
+        .map_err(|_| NlsError32::Unsupported)
+    } else {
+        Collator::try_new(preferences, options)
+            .map(Collation32::Baked)
+            .map_err(|_| NlsError32::Unsupported)
+    }
 }
 fn prepared(units: &[u16], flags: u32) -> Result<Vec<u16>, NlsError32> {
     let mut output = Vec::new();
@@ -94,7 +129,7 @@ pub fn compare_for_locale(
     let collator = collator(flags, locale)?;
     let left = prepared(left, flags)?;
     let right = prepared(right, flags)?;
-    Ok(collator.compare_utf16(&left, &right))
+    Ok(collator.compare(&left, &right))
 }
 pub fn sort_key_for_locale(units: &[u16], flags: u32, locale: u32) -> Result<Vec<u8>, NlsError32> {
     let collator = collator(flags, locale)?;
@@ -109,9 +144,7 @@ pub fn sort_key_for_locale(units: &[u16], flags: u32, locale: u32) -> Result<Vec
         .try_reserve_exact(capacity)
         .map_err(|_| NlsError32::Allocation)?;
     output.resize(capacity, 0);
-    let written = collator
-        .write_sort_key_utf16_to(&units, &mut output[..])
-        .map_err(|_| NlsError32::Capacity)?;
+    let written = collator.sort_key(&units, &mut output[..])?;
     output.truncate(written);
     output.push(0);
     Ok(output)

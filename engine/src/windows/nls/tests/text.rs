@@ -110,6 +110,10 @@ fn locale_specific_case_and_collation_cover_turkish_and_swedish() {
     );
     assert_eq!(
         compare_for_locale(&units("I"), &units("ı"), 1, 0x41f).unwrap(),
+        Ordering::Less
+    );
+    assert_eq!(
+        compare_for_locale(&units("I"), &units("ı"), 0x08000001, 0x41f).unwrap(),
         Ordering::Equal
     );
     assert_eq!(

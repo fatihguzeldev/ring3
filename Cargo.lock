@@ -846,6 +846,7 @@ dependencies = [
  "icu_decimal",
  "icu_experimental",
  "icu_locale",
+ "icu_normalizer",
  "icu_provider",
  "lcid",
  "naga",

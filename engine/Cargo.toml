@@ -19,6 +19,7 @@ unicode-normalization = "=0.1.25"
 unicode-general-category = "=1.1.0"
 unicode-bidi = "=0.3.18"
 icu_collator = "=2.1.1"
+icu_normalizer = { version = "=2.1.1", default-features = false, features = ["compiled_data"] }
 icu_casemap = "=2.1.1"
 icu_calendar = "=2.1.1"
 icu_datetime = "=2.1.1"
