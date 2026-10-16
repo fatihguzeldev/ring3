@@ -49,6 +49,10 @@ pub(in crate::process) struct WindowsReply32 {
     stage: ReplyStage32,
 }
 impl WindowsReply32 {
+    pub(in crate::process) fn matches_call(&self, owner: PendingOwner, token: u32) -> bool {
+        self.owner == owner && self.token == token
+    }
+
     pub(in crate::process) fn owner(&self) -> PendingOwner {
         self.owner
     }

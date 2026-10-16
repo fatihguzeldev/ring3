@@ -93,11 +93,11 @@ impl EngineInstance {
                     count += 1;
                 }
                 let record_bytes = delivery.record.bytes();
-                if initial.is_some() {
-                    if let Some(address) = delivery.record_output {
-                        spans[count] = (GuestAddress(address), record_bytes.as_slice());
-                        count += 1;
-                    }
+                if initial.is_some()
+                    && let Some(address) = delivery.record_output
+                {
+                    spans[count] = (GuestAddress(address), record_bytes.as_slice());
+                    count += 1;
                 }
                 let chain_word = delivery.chain_write.unwrap_or(0).to_le_bytes();
                 if delivery.chain_write.is_some() {

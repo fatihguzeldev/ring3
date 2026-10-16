@@ -59,19 +59,19 @@ impl HeapManager32 {
             if flags & 0x40000 != 0 { 0x40 } else { 4 },
         )?;
         // initial commit is prepared before the reservation is exposed as a heap handle.
-        if initial != 0 {
-            if let Err(error) = vm.allocate(
+        if initial != 0
+            && let Err(error) = vm.allocate(
                 memory,
                 external,
                 handle,
                 initial,
                 MEM_COMMIT,
                 if flags & 0x40000 != 0 { 0x40 } else { 4 },
-            ) {
-                vm.free(memory, handle, 0, MEM_RELEASE)
-                    .expect("uncommitted heap reservation rollback cannot fail");
-                return Err(error);
-            }
+            )
+        {
+            vm.free(memory, handle, 0, MEM_RELEASE)
+                .expect("uncommitted heap reservation rollback cannot fail");
+            return Err(error);
         }
         blocks.push(Block32 {
             address: handle,

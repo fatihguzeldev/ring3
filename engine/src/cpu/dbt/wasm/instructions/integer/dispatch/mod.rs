@@ -76,8 +76,7 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
             }
         }
     }
-    let store;
-    match *instruction.operation() {
+    let store = match *instruction.operation() {
         Operation::SoftwareInterrupt { vector } => {
             crate::cpu::dbt::wasm::instructions::software_interrupts::instruction(
                 code,
@@ -120,7 +119,7 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
             strings::instruction(code, instruction, imports, exit_depth);
             return;
         }
-        Operation::Nop => store = false,
+        Operation::Nop => false,
         Operation::FarCall { .. }
         | Operation::FarReturn { .. }
         | Operation::InterruptReturn { .. }
@@ -146,9 +145,7 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
         | Operation::Leave
         | Operation::LeaveWord
         | Operation::Return { .. }
-        | Operation::ReturnWord { .. } => {
-            store = control::emit(code, instruction, imports, exit_depth)
-        }
+        | Operation::ReturnWord { .. } => control::emit(code, instruction, imports, exit_depth),
         Operation::SignExtendAccumulatorWord
         | Operation::SignExtendHighWord
         | Operation::SignExtendHigh
@@ -191,7 +188,7 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
         | Operation::ByteDivideAccumulator { .. }
         | Operation::ReadByteDivideAccumulator { .. }
         | Operation::ReadDivideAccumulator { .. } => {
-            store = arithmetic::emit(code, instruction, imports, exit_depth)
+            arithmetic::emit(code, instruction, imports, exit_depth)
         }
         Operation::MoveByteSwap { .. }
         | Operation::TranslateByteAddress { .. }
@@ -209,7 +206,7 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
         | Operation::Extend { .. }
         | Operation::ByteSwap { .. }
         | Operation::Lea { .. }
-        | Operation::LeaWord { .. } => store = moves::emit(code, instruction, imports, exit_depth),
+        | Operation::LeaWord { .. } => moves::emit(code, instruction, imports, exit_depth),
         Operation::AtomicMemory { .. }
         | Operation::CompareExchange8B { .. }
         | Operation::ExchangeWord { .. }
@@ -235,9 +232,7 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
         | Operation::CompareExchangeByte { .. }
         | Operation::LockedMemoryCompareExchangeByte { .. }
         | Operation::MemoryCompareExchangeByte { .. }
-        | Operation::ExchangeByte { .. } => {
-            store = exchange::emit(code, instruction, imports, exit_depth)
-        }
+        | Operation::ExchangeByte { .. } => exchange::emit(code, instruction, imports, exit_depth),
         Operation::CompareWord { .. }
         | Operation::TestWord { .. }
         | Operation::MemoryCompareWord { .. }
@@ -273,7 +268,7 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
         | Operation::BitScanWord { .. }
         | Operation::ReadBitScan { .. }
         | Operation::ReadBitScanWord { .. } => {
-            store = predicates::emit(code, instruction, imports, exit_depth)
+            predicates::emit(code, instruction, imports, exit_depth)
         }
         Operation::RotateWord { .. }
         | Operation::MemoryRotateWord { .. }
@@ -310,9 +305,7 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
         | Operation::MemoryRotateThroughCarryOne { .. }
         | Operation::MemoryRotateThroughCarryImmediate { .. }
         | Operation::MemoryRotateThroughCarryCl { .. }
-        | Operation::MemoryRotateOne { .. } => {
-            store = shifts::emit(code, instruction, imports, exit_depth)
-        }
+        | Operation::MemoryRotateOne { .. } => shifts::emit(code, instruction, imports, exit_depth),
         Operation::QuerySegment { .. }
         | Operation::VerifySegment { .. }
         | Operation::XState(..)
@@ -339,10 +332,8 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
         | Operation::Direction { .. }
         | Operation::CpuId
         | Operation::ReadProcessorId { .. }
-        | Operation::VirtualTimestamp => {
-            store = extended::emit(code, instruction, imports, exit_depth)
-        }
-    }
+        | Operation::VirtualTimestamp => extended::emit(code, instruction, imports, exit_depth),
+    };
     if !matches!(
         instruction.operation(),
         Operation::FarJump { .. }

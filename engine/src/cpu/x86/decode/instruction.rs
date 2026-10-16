@@ -10,6 +10,13 @@ pub(crate) struct DecodedOperation {
     next_pc: GuestAddress,
     operation: Operation,
     segment_accesses: u8,
+    #[cfg_attr(
+        not(any(target_arch = "wasm32", test)),
+        expect(
+            dead_code,
+            reason = "generated exception detection is enabled for wasm32"
+        )
+    )]
     privileged_instruction: bool,
 }
 
@@ -50,6 +57,13 @@ impl DecodedOperation {
     pub(crate) fn segment_accesses(&self) -> u8 {
         self.segment_accesses
     }
+    #[cfg_attr(
+        not(any(target_arch = "wasm32", test)),
+        expect(
+            dead_code,
+            reason = "generated exception detection is enabled for wasm32"
+        )
+    )]
     pub(crate) fn is_privileged_instruction(&self) -> bool {
         self.privileged_instruction
     }

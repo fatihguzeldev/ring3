@@ -9,29 +9,29 @@ use crate::{
 mod activation;
 mod callbacks;
 mod configuration;
-mod process;
 mod d3d8;
 mod dinput;
 mod dsound;
-mod files;
 mod exceptions;
+mod files;
+mod process;
 mod registry;
-mod threads;
 mod synchronization;
+mod threads;
 mod user32;
 
 pub(crate) use activation::*;
 pub(crate) use callbacks::*;
 pub(crate) use configuration::*;
-pub(crate) use process::*;
 pub(crate) use d3d8::*;
 pub(crate) use dinput::*;
 pub(crate) use dsound::*;
-pub(crate) use files::*;
 pub(crate) use exceptions::*;
+pub(crate) use files::*;
+pub(crate) use process::*;
 pub(crate) use registry::*;
-pub(crate) use threads::*;
 pub(crate) use synchronization::*;
+pub(crate) use threads::*;
 pub(crate) use user32::*;
 
 fn wide(low: u32, high: u32) -> u64 {

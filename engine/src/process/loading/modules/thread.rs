@@ -131,19 +131,19 @@ impl EngineInstance {
                     return Err(HostError::Module(ModuleError32::Capacity));
                 }
             }
-            if module.is_dll() {
-                if let Some(entry) = module.entry() {
-                    memory
-                        .check_span(entry, 1, Access::Execute)
-                        .map_err(HostError::Memory)?;
-                    if calls.len() >= limit {
-                        return Err(HostError::Module(ModuleError32::Capacity));
-                    }
-                    calls
-                        .try_reserve(1)
-                        .map_err(|_| HostError::Infrastructure)?;
-                    calls.push((entry, args));
+            if module.is_dll()
+                && let Some(entry) = module.entry()
+            {
+                memory
+                    .check_span(entry, 1, Access::Execute)
+                    .map_err(HostError::Memory)?;
+                if calls.len() >= limit {
+                    return Err(HostError::Module(ModuleError32::Capacity));
                 }
+                calls
+                    .try_reserve(1)
+                    .map_err(|_| HostError::Infrastructure)?;
+                calls.push((entry, args));
             }
         }
         Ok(calls)
@@ -243,13 +243,13 @@ impl EngineInstance {
         if self.has_active_module_operation() {
             return Ok(false);
         }
-        if !self.modules.attached.is_empty() {
-            if matches!(
+        if !self.modules.attached.is_empty()
+            && matches!(
                 self.detach_modules_for_exit()?,
                 super::ModuleOperation32::Pending(_)
-            ) {
-                return Ok(false);
-            }
+            )
+        {
+            return Ok(false);
         }
         self.publish_process_exit(code)?;
         Ok(self.exit_code.is_some())

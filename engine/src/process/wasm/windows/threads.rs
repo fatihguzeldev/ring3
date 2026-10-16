@@ -26,9 +26,15 @@ pub(crate) fn schedule_windows_thread() -> u32 {
         let output = &mut instance.arena.as_mut().get_mut()[TRANSFER_OFFSET..TRANSFER_OFFSET + 40];
         header::write(output, *b"R3TS");
         match value {
-            ThreadSchedule32::CpuEvent {thread}=>{header::write_u32(output,12,5);header::write_u32(output,16,thread);}
-            ThreadSchedule32::WindowsCallback { thread } => {header::write_u32(output,12,4);header::write_u32(output,16,thread);}
-        ThreadSchedule32::Running { thread } => {
+            ThreadSchedule32::CpuEvent { thread } => {
+                header::write_u32(output, 12, 5);
+                header::write_u32(output, 16, thread);
+            }
+            ThreadSchedule32::WindowsCallback { thread } => {
+                header::write_u32(output, 12, 4);
+                header::write_u32(output, 16, thread);
+            }
+            ThreadSchedule32::Running { thread } => {
                 header::write_u32(output, 12, 1);
                 header::write_u32(output, 16, thread);
             }
@@ -48,6 +54,14 @@ pub(crate) fn schedule_windows_thread() -> u32 {
     })
 }
 
-pub(crate) fn report_windows_thread_execution(el:u32,eh:u32,dl:u32,dh:u32)->u32 {mutate(|instance|instance.report_windows_thread_execution(super::wide(el,eh),super::wide(dl,dh)))}
+pub(crate) fn report_windows_thread_execution(el: u32, eh: u32, dl: u32, dh: u32) -> u32 {
+    mutate(|instance| {
+        instance.report_windows_thread_execution(super::wide(el, eh), super::wide(dl, dh))
+    })
+}
 
-pub(crate) fn pending_windows_thread_schedule()->u32 {crate::process::wasm::inspect(|instance|instance.pending_windows_thread_schedule().unwrap_or(0))}
+pub(crate) fn pending_windows_thread_schedule() -> u32 {
+    crate::process::wasm::inspect(|instance| {
+        instance.pending_windows_thread_schedule().unwrap_or(0)
+    })
+}

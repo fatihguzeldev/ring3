@@ -57,14 +57,12 @@ impl EngineInstance {
             if let Some(config) = module
                 .load_config()
                 .filter(|config| !config.seh_handlers.is_empty())
-            {
-                if config
+                && config
                     .seh_handlers
                     .binary_search(&(handler - module.base()))
                     .is_err()
-                {
-                    return Err(invalid());
-                }
+            {
+                return Err(invalid());
             }
         }
         Ok(Some((frame, next, handler)))

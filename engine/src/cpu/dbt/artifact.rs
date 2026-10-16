@@ -93,6 +93,13 @@ impl CompiledRegion {
     }
 
     /// immutable decode provenance, including after a consumed entry changes its own source.
+    #[cfg_attr(
+        not(any(target_arch = "wasm32", test)),
+        expect(
+            dead_code,
+            reason = "generated exception detection is enabled for wasm32"
+        )
+    )]
     pub(crate) fn is_privileged_instruction_at(&self, pc: u32) -> bool {
         self.prepared.blocks.iter().any(|block| {
             block.instructions.iter().any(|instruction| {

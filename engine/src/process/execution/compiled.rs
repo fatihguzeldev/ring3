@@ -55,8 +55,11 @@ impl EngineInstance {
         Ok(generation)
     }
 
-    pub(in crate::process) fn next_artifact_generation(&self)->Result<u32,HostError> {
-        self.generation.max(self.generation_issuer).checked_add(1).ok_or(HostError::GenerationExhausted)
+    pub(in crate::process) fn next_artifact_generation(&self) -> Result<u32, HostError> {
+        self.generation
+            .max(self.generation_issuer)
+            .checked_add(1)
+            .ok_or(HostError::GenerationExhausted)
     }
 
     pub(in crate::process) fn check_region_counts(

@@ -57,4 +57,8 @@ impl Ole32Runtime32 {
     }
 }
 
-impl Ole32Runtime32 {pub(in crate::process) fn guest_reservation(&self)->crate::memory::PageRange {self.com.reservation()}}
+impl Ole32Runtime32 {
+    pub(in crate::process) fn guest_reservation(&self) -> crate::memory::PageRange {
+        self.com.reservation()
+    }
+}

@@ -175,7 +175,9 @@ impl EngineInstance {
             .map_err(|_| HostError::CodeInvalidated)?;
         replacement_admission(&prepared.artifact, callback, prepared.pc)?;
 
-        if prepared.record.generation != self.next_artifact_generation()? {return Err(HostError::InvalidArtifact);}
+        if prepared.record.generation != self.next_artifact_generation()? {
+            return Err(HostError::InvalidArtifact);
+        }
         // every fallible check precedes the artifact and continuation publication.
         let generation = prepared.record.generation;
         self.artifact = Some(prepared.artifact);

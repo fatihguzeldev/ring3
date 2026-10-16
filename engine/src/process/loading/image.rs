@@ -250,17 +250,20 @@ impl EngineInstance {
     pub(in crate::process) fn image_capacity(&self) -> Result<u32, HostError> {
         self.initial_image_capacity(false)
     }
-    pub(in crate::process) fn module_process_capacity(&self)->Result<u32,HostError> {
+    pub(in crate::process) fn module_process_capacity(&self) -> Result<u32, HostError> {
         self.initial_image_capacity(true)
     }
-    fn initial_image_capacity(&self,retain_empty_registry:bool)->Result<u32,HostError> {
+    fn initial_image_capacity(&self, retain_empty_registry: bool) -> Result<u32, HostError> {
         let memory = self.memory()?;
         if memory.mapped_pages() != 0
             || !self.windows_memory.is_empty()
             || self.image.is_some()
             || self.generation != 0
             || self.artifact.is_some()
-            || self.resident.as_ref().is_some_and(|registry|!retain_empty_registry||registry.usage().units!=0)
+            || self
+                .resident
+                .as_ref()
+                .is_some_and(|registry| !retain_empty_registry || registry.usage().units != 0)
             || self.resident_installations.iter().any(Option::is_some)
             || self.pending_call.is_some()
             || self.callback.is_some()
@@ -319,14 +322,15 @@ mod tests {
     }
 
     #[test]
-    fn empty_configured_execution_survives_in_place_module_start_but_cannot_follow_flat_memory_replacement() {
-        let mut instance=EngineInstance::new(8,7).unwrap();
-        let identity=instance.memory().unwrap().identity();
+    fn empty_configured_execution_survives_in_place_module_start_but_cannot_follow_flat_memory_replacement()
+     {
+        let mut instance = EngineInstance::new(8, 7).unwrap();
+        let identity = instance.memory().unwrap().identity();
         instance.configure_execution(Default::default()).unwrap();
-        assert_eq!(instance.module_process_capacity(),Ok(8));
-        assert_eq!(instance.image_capacity(),Err(HostError::InvalidRequest));
-        assert_eq!(instance.memory().unwrap().identity(),identity);
-        assert_eq!(instance.execution_config().unwrap().unwrap().units,256);
+        assert_eq!(instance.module_process_capacity(), Ok(8));
+        assert_eq!(instance.image_capacity(), Err(HostError::InvalidRequest));
+        assert_eq!(instance.memory().unwrap().identity(), identity);
+        assert_eq!(instance.execution_config().unwrap().unwrap().units, 256);
     }
 
     #[test]

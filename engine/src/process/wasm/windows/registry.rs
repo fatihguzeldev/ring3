@@ -50,6 +50,10 @@ pub(crate) fn registry_change(index: u32) -> u32 {
         Ok(())
     })
 }
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the versioned wasm32 ABI carries three full-width identities as explicit low/high words plus part and offset"
+)]
 pub(crate) fn registry_read_change_text(
     el: u32,
     eh: u32,

@@ -47,10 +47,10 @@ impl EngineInstance {
             if thread.state == ThreadState32::Terminated {
                 continue;
             }
-            if let Some(teb) = thread.teb {
-                if let Some(address) = tls_address(self.memory()?, teb, index)? {
-                    writes.push(WordWrite32 { address, value: 0 });
-                }
+            if let Some(teb) = thread.teb
+                && let Some(address) = tls_address(self.memory()?, teb, index)?
+            {
+                writes.push(WordWrite32 { address, value: 0 });
             }
         }
         self.memory

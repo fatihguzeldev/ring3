@@ -60,10 +60,10 @@ impl EngineInstance {
         pins.extend(self.threads.execution_pins());
         pins.extend(self.exceptions.execution_pins());
         pins.extend(self.modules.execution_pins());
-        if let Some(registry) = &self.registry {
-            if let Some(value) = registry.pending_owner() {
-                owner(&mut pins, value);
-            }
+        if let Some(registry) = &self.registry
+            && let Some(value) = registry.pending_owner()
+        {
+            owner(&mut pins, value);
         }
         pins.sort_unstable();
         pins.dedup();

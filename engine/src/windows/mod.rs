@@ -33,8 +33,8 @@ pub mod memory;
 
 pub mod thread;
 
-pub mod registry;
 pub mod exceptions;
+pub mod registry;
 
 pub mod nls;
 

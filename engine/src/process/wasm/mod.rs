@@ -100,20 +100,55 @@ pub(super) fn mutate(operation: impl FnOnce(&mut EngineInstance) -> Result<(), H
 
 pub(super) fn status(error: HostError) -> u32 {
     match error {
-        HostError::Resource(error)=>match error {crate::process::ResourceError32::Allocation=>9,_=>7},
-        HostError::Exception(error)=>match error {crate::windows::exceptions::ExceptionError32::Allocation|crate::windows::exceptions::ExceptionError32::Exhausted=>9,crate::windows::exceptions::ExceptionError32::Busy=>12,crate::windows::exceptions::ExceptionError32::Stale=>40,_=>7},
-        HostError::Nls(error)=>match error {crate::windows::nls::NlsError32::Allocation=>9,crate::windows::nls::NlsError32::Capacity=>18,_=>7},
-        HostError::Registry(error) => match error {crate::windows::registry::RegistryError32::NotEnoughMemory=>9,crate::windows::registry::RegistryError32::Busy=>12,crate::windows::registry::RegistryError32::StaleReceipt=>40,_=>7},
-        HostError::Thread(error) => match error {crate::windows::thread::ThreadError32::Capacity=>18,crate::windows::thread::ThreadError32::Allocation|crate::windows::thread::ThreadError32::Exhausted=>9,crate::windows::thread::ThreadError32::Busy=>12,crate::windows::thread::ThreadError32::Unsupported=>20,_=>7},
+        HostError::Resource(error) => match error {
+            crate::process::ResourceError32::Allocation => 9,
+            _ => 7,
+        },
+        HostError::Exception(error) => match error {
+            crate::windows::exceptions::ExceptionError32::Allocation
+            | crate::windows::exceptions::ExceptionError32::Exhausted => 9,
+            crate::windows::exceptions::ExceptionError32::Busy => 12,
+            crate::windows::exceptions::ExceptionError32::Stale => 40,
+            _ => 7,
+        },
+        HostError::Nls(error) => match error {
+            crate::windows::nls::NlsError32::Allocation => 9,
+            crate::windows::nls::NlsError32::Capacity => 18,
+            _ => 7,
+        },
+        HostError::Registry(error) => match error {
+            crate::windows::registry::RegistryError32::NotEnoughMemory => 9,
+            crate::windows::registry::RegistryError32::Busy => 12,
+            crate::windows::registry::RegistryError32::StaleReceipt => 40,
+            _ => 7,
+        },
+        HostError::Thread(error) => match error {
+            crate::windows::thread::ThreadError32::Capacity => 18,
+            crate::windows::thread::ThreadError32::Allocation
+            | crate::windows::thread::ThreadError32::Exhausted => 9,
+            crate::windows::thread::ThreadError32::Busy => 12,
+            crate::windows::thread::ThreadError32::Unsupported => 20,
+            _ => 7,
+        },
         HostError::WindowsMemory(error) => match error {
             crate::windows::memory::MemoryError32::Capacity => 18,
-            crate::windows::memory::MemoryError32::Allocation | crate::windows::memory::MemoryError32::Exhausted => 9,
+            crate::windows::memory::MemoryError32::Allocation
+            | crate::windows::memory::MemoryError32::Exhausted => 9,
             crate::windows::memory::MemoryError32::Busy => 12,
             crate::windows::memory::MemoryError32::Unsupported => 20,
             _ => 7,
         },
-        HostError::WindowsProcess(error) => match error {crate::windows::process::ProcessError32::Capacity=>18,crate::windows::process::ProcessError32::Allocation=>9,crate::windows::process::ProcessError32::NoAccess=>8,_=>7},
-        HostError::Ole32(error) => match error {crate::process::Ole32Error32::Allocation=>9,crate::process::Ole32Error32::Busy=>12,_=>7},
+        HostError::WindowsProcess(error) => match error {
+            crate::windows::process::ProcessError32::Capacity => 18,
+            crate::windows::process::ProcessError32::Allocation => 9,
+            crate::windows::process::ProcessError32::NoAccess => 8,
+            _ => 7,
+        },
+        HostError::Ole32(error) => match error {
+            crate::process::Ole32Error32::Allocation => 9,
+            crate::process::Ole32Error32::Busy => 12,
+            _ => 7,
+        },
         HostError::File(error) => match error {
             crate::files::FileError32::Stale => 40,
             crate::files::FileError32::Capacity => 18,
@@ -317,14 +352,15 @@ pub(crate) use loading::{
 
 mod execution;
 pub(crate) use execution::{
-    configure_execution,prepare_cache_entry,pending_cache_request,prepare_cache_promotion,acknowledge_cache_eviction,install_cached_entry,cancel_cache_request,cache_usage,
-    acknowledge_resident_callback_installation, acknowledge_resident_installation, compile,
-    compile_entries, compile_resident, compile_resident_callback_unit, compile_resident_entries,
+    acknowledge_cache_eviction, acknowledge_resident_callback_installation,
+    acknowledge_resident_installation, cache_usage, cancel_cache_request, compile, compile_entries,
+    compile_resident, compile_resident_callback_unit, compile_resident_entries,
     compile_resident_with_gates, compile_stopped_entry, compile_stopped_resident_entry,
-    compile_with_gates, discard_installed_resident, discard_unacknowledged_resident,
-    dispatcher_module, find_installed_resident, find_resident, generation, guard,
-    guard_dispatch_entry, guard_resident, module_len, module_ptr, resident_module,
-    retire_stale_resident,
+    compile_with_gates, configure_execution, discard_installed_resident,
+    discard_unacknowledged_resident, dispatcher_module, find_installed_resident, find_resident,
+    generation, guard, guard_dispatch_entry, guard_resident, install_cached_entry, module_len,
+    module_ptr, pending_cache_request, prepare_cache_entry, prepare_cache_promotion,
+    resident_module, retire_stale_resident,
 };
 
 mod calls;

@@ -17,11 +17,7 @@ pub(super) struct Selection32 {
     pub parameter: u32,
 }
 impl EngineInstance {
-    pub(super) fn select_resources(
-        &self,
-        api: Api,
-        args: &[u32],
-    ) -> Result<Selection32, E> {
+    pub(super) fn select_resources(&self, api: Api, args: &[u32]) -> Result<Selection32, E> {
         let module = self.resource_module(args[0])?;
         let memory = self.memory.as_ref().ok_or(E::NotConfigured)?;
         let (kind, callback_index, extended) = match api {

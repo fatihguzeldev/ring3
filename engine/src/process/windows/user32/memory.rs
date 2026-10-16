@@ -108,7 +108,9 @@ pub(super) fn string(
 }
 
 fn ansi(byte: u8) -> u16 {
-    crate::windows::text::CodePage32::Windows1252.decode_byte(byte).expect("CP1252 is single-byte")
+    crate::windows::text::CodePage32::Windows1252
+        .decode_byte(byte)
+        .expect("CP1252 is single-byte")
 }
 
 pub(super) fn rect(memory: &AddressSpace, address: u32) -> Result<Rect32, User32Error32> {

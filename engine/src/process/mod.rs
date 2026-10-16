@@ -43,16 +43,19 @@ pub use windows::ole32::{Ole32Config32, Ole32Error32};
 
 pub use windows::process::{ProcessError32, ProcessLaunch32};
 
-pub use crate::windows::memory::{MemoryLimits32, MemoryError32, MemoryInfo32};
+pub use crate::windows::memory::{MemoryError32, MemoryInfo32, MemoryLimits32};
 
 pub use execution::cache::{CacheRequest32, CacheRequestKind32, CacheUsage32};
 
-pub use crate::windows::thread::{ThreadLimits32, ThreadError32, ThreadInfo32, ThreadSchedule32};
+pub use crate::windows::thread::{ThreadError32, ThreadInfo32, ThreadLimits32, ThreadSchedule32};
 
-pub use windows::registry::{RegistryInput32, RegistryChange32, RegistryChangeId32, RegistryConfig32, RegistryError32, RegistryLimits32, RegistrySeed32, RegistryView32, RegistryWait32};
+pub use windows::registry::{
+    RegistryChange32, RegistryChangeId32, RegistryConfig32, RegistryError32, RegistryInput32,
+    RegistryLimits32, RegistrySeed32, RegistryView32, RegistryWait32,
+};
 
-pub use windows::exceptions::{ExceptionDispatch32,ExceptionPhase32};
+pub use windows::exceptions::{ExceptionDispatch32, ExceptionPhase32};
 
-pub use windows::resources::{ResourceConfig32,ResourceError32};
+pub use windows::resources::{ResourceConfig32, ResourceError32};
 
-pub use windows::nls::{NlsError32,NlsProfile32};
+pub use windows::nls::{NlsError32, NlsProfile32};

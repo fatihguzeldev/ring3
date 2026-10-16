@@ -374,19 +374,17 @@ impl EngineInstance {
             sender,
             continuation,
         } = completion
-        {
-            if let Some(sender) = self
+            && let Some(sender) = self
                 .threads
                 .threads
                 .iter_mut()
                 .find(|thread| thread.id == sender && thread.state != ThreadState32::Terminated)
-            {
-                sender
-                    .accept_remote_result(continuation, result)
-                    .map_err(HostError::User32)?;
-                if sender.suspend_count == 0 {
-                    sender.state = ThreadState32::Runnable;
-                }
+        {
+            sender
+                .accept_remote_result(continuation, result)
+                .map_err(HostError::User32)?;
+            if sender.suspend_count == 0 {
+                sender.state = ThreadState32::Runnable;
             }
         }
         let _ = self

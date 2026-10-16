@@ -69,6 +69,10 @@ impl VirtualMemory32 {
     ) -> Result<u32, MemoryError32> {
         self.allocate_with_writes(memory, external, address, size, flags, protect, &[])
     }
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "one atomic VM transaction combines the allocation shape, external reservations and parallel guest writes"
+    )]
     pub(crate) fn allocate_with_writes(
         &mut self,
         memory: &mut AddressSpace,

@@ -16,7 +16,9 @@ use crate::{
 impl EngineInstance {
     pub fn start_loaded_image(&mut self, stack_base: u32, pages: u32) -> Result<(), HostError> {
         self.memory()?;
-        if self.launch_input_pending() {return Err(HostError::InvalidRequest);}
+        if self.launch_input_pending() {
+            return Err(HostError::InvalidRequest);
+        }
         if self.pending_call.is_some() || self.callback.is_some() {
             return Err(HostError::Call(CallError::Busy));
         }

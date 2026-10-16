@@ -24,7 +24,8 @@ fn packet(instance: &mut EngineInstance, value: Option<ExceptionDispatch32>) {
 }
 pub(crate) fn dispatch_windows_exception(kl: u32, kh: u32, el: u32, eh: u32) -> u32 {
     mutate(|instance| {
-        let value = instance.dispatch_windows_exception(super::wide(kl, kh), super::wide(el, eh))?;
+        let value =
+            instance.dispatch_windows_exception(super::wide(kl, kh), super::wide(el, eh))?;
         packet(instance, Some(value));
         Ok(())
     })
@@ -66,4 +67,8 @@ pub(crate) fn register_ntdll_module(base: u32) -> u32 {
     mutate(|instance| instance.register_ntdll_module(base))
 }
 
-pub(crate) fn terminate_windows_exception(kl:u32,kh:u32,il:u32,ih:u32)->u32 {mutate(|instance|instance.terminate_windows_exception(super::wide(kl,kh),super::wide(il,ih)))}
+pub(crate) fn terminate_windows_exception(kl: u32, kh: u32, il: u32, ih: u32) -> u32 {
+    mutate(|instance| {
+        instance.terminate_windows_exception(super::wide(kl, kh), super::wide(il, ih))
+    })
+}

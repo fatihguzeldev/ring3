@@ -214,11 +214,9 @@ impl EngineInstance {
                     self.threads.schedule_required = None;
                     return Ok(ThreadSchedule32::Running { thread: current });
                 }
-                if self.exit_code.is_some() {
+                if let Some(code) = self.exit_code {
                     self.threads.schedule_required = None;
-                    return Ok(ThreadSchedule32::Exited {
-                        code: self.exit_code.unwrap(),
-                    });
+                    return Ok(ThreadSchedule32::Exited { code });
                 }
                 if self.threads.threads[index].state != ThreadState32::Terminated {
                     self.threads.threads[index].state = ThreadState32::Waiting;
@@ -406,18 +404,17 @@ impl EngineInstance {
             .as_ref()
             .is_some_and(|context| context.active_thread_wait_ready())
             && !self.has_pending_thread_invocation(self.threads.current_id())
+            && let Some(continuation) = self.waiting_user32_message()
         {
-            if let Some(continuation) = self.waiting_user32_message() {
-                self.resume_user32_wait(self.key(), continuation)?;
-                let current = self.threads.current_id();
-                if self.pending_call.is_none() {
-                    self.threads
-                        .threads
-                        .iter_mut()
-                        .find(|thread| thread.id == current)
-                        .unwrap()
-                        .state = ThreadState32::Running;
-                }
+            self.resume_user32_wait(self.key(), continuation)?;
+            let current = self.threads.current_id();
+            if self.pending_call.is_none() {
+                self.threads
+                    .threads
+                    .iter_mut()
+                    .find(|thread| thread.id == current)
+                    .unwrap()
+                    .state = ThreadState32::Running;
             }
         }
         Ok(())
@@ -436,10 +433,9 @@ impl EngineInstance {
                 .threads
                 .iter_mut()
                 .find(|thread| thread.id == current)
+                && thread.state == ThreadState32::Waiting
             {
-                if thread.state == ThreadState32::Waiting {
-                    thread.state = ThreadState32::Running;
-                }
+                thread.state = ThreadState32::Running;
             }
         }
         Ok(())

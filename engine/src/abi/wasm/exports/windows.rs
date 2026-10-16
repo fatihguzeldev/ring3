@@ -1,12 +1,12 @@
 mod activation;
-mod process;
 mod dinput;
 mod dsound;
-mod files;
 mod exceptions;
+mod files;
+mod process;
 mod registry;
-mod threads;
 mod synchronization;
+mod threads;
 
 export_process_calls! {
     configure_user32(classes:u32,windows:u32,messages:u32,continuations:u32,scratch_base:u32,scratch_pages:u32);

@@ -265,8 +265,10 @@ impl EngineInstance {
             page_bytes[end.0][end.1 + 4..end.1 + 8].copy_from_slice(&args[3].to_le_bytes());
             let mut arena = [0; ARENA_SIZE];
             crate::abi::arena::initialize(&mut arena).map_err(|_| HostError::Infrastructure)?;
-            let mut state = State32::default();
-            state.eip = args[2];
+            let mut state = State32 {
+                eip: args[2],
+                ..State32::default()
+            };
             state.registers[4] = stack_end - 12;
             encode_state_current(
                 &state,

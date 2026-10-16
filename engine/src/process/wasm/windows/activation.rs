@@ -19,6 +19,19 @@ pub(crate) fn register_winmm_module(base: u32) -> u32 {
     mutate(|instance| instance.register_winmm_module(base))
 }
 
-pub(crate) fn configure_resources(base:u32,pages:u32,max_handles:u32,max_callbacks:u32,max_enum_bytes:u32)->u32 {
-    mutate(|instance|instance.configure_resources(crate::process::ResourceConfig32{scratch:PageRange::new(GuestAddress(base),pages).map_err(HostError::Memory)?,max_handles,max_callbacks,max_enum_bytes}))
+pub(crate) fn configure_resources(
+    base: u32,
+    pages: u32,
+    max_handles: u32,
+    max_callbacks: u32,
+    max_enum_bytes: u32,
+) -> u32 {
+    mutate(|instance| {
+        instance.configure_resources(crate::process::ResourceConfig32 {
+            scratch: PageRange::new(GuestAddress(base), pages).map_err(HostError::Memory)?,
+            max_handles,
+            max_callbacks,
+            max_enum_bytes,
+        })
+    })
 }
