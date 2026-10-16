@@ -62,13 +62,18 @@ pub fn kernel32_module(preferred_base: u32) -> SystemModule32 {
                     }),
             )
             .chain(
-                [0x000f_fffe, 0x000f_ffff]
-                    .into_iter()
-                    .map(|id| SystemExport32 {
-                        name: None,
-                        ordinal: None,
-                        target: SystemExportTarget32::PrivateGate(id),
-                    }),
+                [
+                    0x000f_fffe,
+                    0x000f_ffff,
+                    super::exceptions::EXCEPTION_NESTED_GATE,
+                    super::exceptions::EXCEPTION_UNWIND_GATE,
+                ]
+                .into_iter()
+                .map(|id| SystemExport32 {
+                    name: None,
+                    ordinal: None,
+                    target: SystemExportTarget32::PrivateGate(id),
+                }),
             )
             .chain(
                 super::exceptions::ExceptionApi32::KERNEL32

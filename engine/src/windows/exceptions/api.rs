@@ -16,6 +16,8 @@ pub enum ExceptionApi32 {
     NtRaiseException,
 }
 pub const EXCEPTION_RETURN_GATE: u32 = 0x00121000;
+pub const EXCEPTION_NESTED_GATE: u32 = 0x00121001;
+pub const EXCEPTION_UNWIND_GATE: u32 = 0x00121002;
 impl ExceptionApi32 {
     pub const KERNEL32: &'static [Self] = &[
         Self::AddVectoredExceptionHandler,

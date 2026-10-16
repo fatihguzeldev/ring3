@@ -274,3 +274,68 @@ fn terminal_unhandled_without_pending_call_finalizes_files_and_rejects_wrong_or_
     assert!(deleted);
     assert!(engine.terminate_windows_exception(77, dispatch.id).is_err());
 }
+
+#[test]
+fn rtlunwind_preserves_the_supplied_record_identity_and_publishes_unwind_flags() {
+    let mut engine = engine();
+    let (_, first, _) = super::chain(&mut engine);
+    let record_address = 0x7f003d00;
+    let record = ExceptionRecord32::new(0xe0712345, 0, 0x401020, &[17]).unwrap();
+    engine
+        .memory
+        .as_mut()
+        .unwrap()
+        .write(GuestAddress(record_address), &record.bytes())
+        .unwrap();
+    captured_call(
+        &mut engine,
+        ExceptionApi32::RtlUnwind.id(),
+        &[first, 0, record_address, 42],
+    );
+    assert!(engine.pending_windows_exception().is_none());
+    let mut bytes = [0; 80];
+    engine
+        .memory()
+        .unwrap()
+        .read(GuestAddress(record_address), &mut bytes)
+        .unwrap();
+    assert_eq!(
+        u32::from_le_bytes(bytes[..4].try_into().unwrap()),
+        record.code
+    );
+    assert_eq!(u32::from_le_bytes(bytes[4..8].try_into().unwrap()), 2);
+    assert_eq!(
+        engine.windows_context_state().unwrap().state.registers[0],
+        42
+    );
+}
+
+#[test]
+fn rtlunwind_handlers_receive_the_original_supplied_exception_record() {
+    let mut engine = engine();
+    let (_, _, target) = super::chain(&mut engine);
+    let address = 0x7f003d00;
+    let record = ExceptionRecord32::new(0xe0712345, 0, 0x401020, &[17]).unwrap();
+    engine
+        .memory
+        .as_mut()
+        .unwrap()
+        .write(GuestAddress(address), &record.bytes())
+        .unwrap();
+    captured_call(
+        &mut engine,
+        ExceptionApi32::RtlUnwind.id(),
+        &[target, 0, address, 42],
+    );
+    let dispatch = engine.pending_windows_exception().unwrap();
+    assert_eq!(dispatch.record, address);
+    assert_eq!(engine.read_exception_record(address).unwrap().flags, 2);
+    returned(&mut engine, dispatch, 1, true);
+    assert_eq!(
+        engine
+            .finish_windows_exception_handler(77, dispatch.id)
+            .unwrap(),
+        None
+    );
+    assert_eq!(engine.read_exception_record(address).unwrap().flags, 2);
+}

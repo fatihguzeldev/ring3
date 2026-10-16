@@ -4,6 +4,7 @@ mod context;
 mod cpu;
 mod delivery;
 mod dispatch;
+mod registration;
 mod termination;
 
 use crate::{
@@ -83,6 +84,7 @@ struct Delivery32 {
     cursor: usize,
     chain: u32,
     nested_boundary: Option<u32>,
+    abandoned: Vec<u64>,
     visited: Vec<u32>,
     stack_low: u32,
     stack_high: u32,
@@ -113,6 +115,7 @@ struct ActiveHandler32 {
     return_esp: u32,
     establisher: u32,
     next: u32,
+    registration: Option<registration::HandlerRegistration32>,
 }
 #[derive(Clone, Copy)]
 pub(in crate::process) struct Unwind32 {

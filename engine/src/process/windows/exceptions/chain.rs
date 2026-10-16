@@ -48,7 +48,7 @@ impl EngineInstance {
         }
         Ok(Some((frame, next, handler)))
     }
-    fn exception_registration(
+    pub(super) fn exception_registration(
         &self,
         delivery: &Delivery32,
         frame: u32,

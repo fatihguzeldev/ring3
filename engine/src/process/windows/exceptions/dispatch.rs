@@ -41,6 +41,9 @@ impl EngineInstance {
                     {
                         return self.finish_exception_unwind(delivery, initial);
                     }
+                    if self.advance_nested_exception_registration(delivery)? {
+                        continue;
+                    }
                     self.exception_chain_entry(delivery)?
                         .map(|(frame, next, procedure)| (procedure, frame, next, true))
                 }
@@ -82,17 +85,31 @@ impl EngineInstance {
                 for (word, write) in words.chunks_exact_mut(4).zip(frame.writes()) {
                     word.copy_from_slice(&write.value.to_le_bytes());
                 }
-                let mut spans = [(GuestAddress(0), &[][..]); 5];
+                let registration = if cdecl {
+                    Some(self.prepare_exception_registration(delivery, establisher)?)
+                } else {
+                    None
+                };
+                let record_bytes = delivery.record.bytes();
+                let registration_bytes = registration.map(|registration| registration.bytes());
+                let mut payload = [0u8; 832];
+                if let Some(initial) = initial {
+                    payload.copy_from_slice(initial);
+                    payload[..80].copy_from_slice(&record_bytes);
+                    if let Some(bytes) = &registration_bytes {
+                        payload[808..820].copy_from_slice(bytes);
+                    }
+                }
+                let mut spans = [(GuestAddress(0), &[][..]); 7];
                 spans[0] = (
                     frame.writes()[0].address,
                     &words[..frame.writes().len() * 4],
                 );
                 let mut count = 1;
-                if let Some(bytes) = initial {
-                    spans[count] = (GuestAddress(delivery.record_address), bytes);
+                if initial.is_some() {
+                    spans[count] = (GuestAddress(delivery.stack), &payload);
                     count += 1;
                 }
-                let record_bytes = delivery.record.bytes();
                 if initial.is_none() {
                     spans[count] = (GuestAddress(delivery.record_address), &record_bytes);
                     count += 1;
@@ -103,8 +120,17 @@ impl EngineInstance {
                     spans[count] = (GuestAddress(address), record_bytes.as_slice());
                     count += 1;
                 }
-                let chain_word = delivery.chain_write.unwrap_or(0).to_le_bytes();
-                if delivery.chain_write.is_some() {
+                if initial.is_none()
+                    && let (Some(registration), Some(bytes)) = (registration, &registration_bytes)
+                {
+                    spans[count] = (GuestAddress(registration.address), bytes);
+                    count += 1;
+                }
+                let chain = registration
+                    .map(|registration| registration.address)
+                    .or(delivery.chain_write);
+                let chain_word = chain.unwrap_or(0).to_le_bytes();
+                if chain.is_some() {
                     spans[count] = (
                         GuestAddress(
                             self.current_teb_address()
@@ -135,6 +161,7 @@ impl EngineInstance {
                     return_esp: frame.return_esp() - if cdecl { args.len() as u32 * 4 } else { 0 },
                     establisher,
                     next,
+                    registration,
                 });
                 self.publish_prepared_call(prepared);
                 return Ok(());
@@ -150,10 +177,13 @@ impl EngineInstance {
                 _ => {
                     delivery.phase = ExceptionPhase32::Unhandled;
                     delivery.active = None;
+                    if initial.is_none() {
+                        self.publish_exception_chain_return(delivery)?;
+                    }
                     if let Some(bytes) = initial {
                         let record = delivery.record.bytes();
                         let mut spans = [(GuestAddress(0), &[][..]); 3];
-                        spans[0] = (GuestAddress(delivery.record_address), bytes);
+                        spans[0] = (GuestAddress(delivery.stack), bytes);
                         let mut count = 1;
                         if let Some(address) = delivery.record_output {
                             spans[count] = (GuestAddress(address), &record);
@@ -191,6 +221,9 @@ impl EngineInstance {
         let active = delivery
             .active
             .ok_or(HostError::Exception(ExceptionError32::Stale))?;
+        if let Some(registration) = active.registration {
+            self.restore_exception_registration(delivery, registration)?;
+        }
         delivery.record = self.read_exception_record(delivery.record_address)?;
         if delivery.nested_boundary == Some(active.establisher) {
             delivery.record.flags &= !0x10;
@@ -267,7 +300,11 @@ impl EngineInstance {
             ExceptionPhase32::Structured | ExceptionPhase32::Unwind
         ) {
             delivery.visited.push(active.establisher);
-            delivery.chain = delivery.chain_write.unwrap_or(active.next);
+            delivery.chain = if delivery.phase == ExceptionPhase32::Unwind {
+                delivery.chain_write.unwrap_or(active.next)
+            } else {
+                active.next
+            };
         } else if delivery.phase == ExceptionPhase32::Filter {
             delivery.phase = ExceptionPhase32::Unhandled;
         }
@@ -284,6 +321,7 @@ impl EngineInstance {
             .map_err(|_| HostError::Exception(ExceptionError32::InvalidContext))?;
         let state = self.apply_windows_context(&context, &delivery.original)?;
         let prepared = Self::prepare_completed_call(state.state)?;
+        self.publish_exception_chain_return(delivery)?;
         delivery.extended.restore(self.arena.as_mut().get_mut());
         self.publish_windows_context(&state)?;
         self.publish_prepared_call(prepared);
@@ -311,21 +349,37 @@ impl EngineInstance {
             .map_err(|_| HostError::Exception(ExceptionError32::InvalidContext))?;
         let state = self.apply_windows_context(&context, &delivery.original)?;
         let prepared = Self::prepare_completed_call(state.state)?;
-        if let Some(next) = delivery.chain_write {
-            let teb = self
-                .current_teb_address()
-                .ok_or(HostError::Infrastructure)?;
-            self.memory
-                .as_mut()
-                .unwrap()
-                .write_spans(&[(GuestAddress(teb), &next.to_le_bytes())])
-                .map_err(HostError::Memory)?;
-        }
+        self.publish_exception_chain_return(delivery)?;
         delivery.extended.restore(self.arena.as_mut().get_mut());
         self.publish_windows_context(&state)?;
         self.publish_prepared_call(prepared);
         delivery.chain_write = None;
         delivery.phase = ExceptionPhase32::Resumed;
+        Ok(())
+    }
+    fn publish_exception_chain_return(
+        &mut self,
+        delivery: &mut Delivery32,
+    ) -> Result<(), HostError> {
+        if delivery.chain_write.is_some() || delivery.record_output.is_some() {
+            let record = delivery.record.bytes();
+            let chain = delivery.chain_write.unwrap_or(0).to_le_bytes();
+            let mut spans = [(GuestAddress(delivery.record_address), record.as_slice()); 2];
+            let mut count = 1;
+            if delivery.chain_write.is_some() {
+                let teb = self
+                    .current_teb_address()
+                    .ok_or(HostError::Infrastructure)?;
+                spans[count] = (GuestAddress(teb), chain.as_slice());
+                count += 1;
+            }
+            self.memory
+                .as_mut()
+                .unwrap()
+                .write_spans(&spans[..count])
+                .map_err(HostError::Memory)?;
+            delivery.chain_write = None;
+        }
         Ok(())
     }
 }

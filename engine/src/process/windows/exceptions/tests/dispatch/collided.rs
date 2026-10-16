@@ -45,6 +45,8 @@ fn malformed_collision_is_neutral_and_the_same_handler_return_can_be_repaired() 
         let (dispatch, frames) = unwind(&mut engine);
         dispatcher(&mut engine, bad);
         returned(&mut engine, dispatch, 3, true);
+        let head = word(&engine, 0x7e000000);
+        assert_eq!(word(&engine, head), frames[0]);
         let arena = engine.arena().to_vec();
         let version = engine.memory().unwrap().transaction_version();
         let pending = engine.pending_windows_exception();
@@ -56,7 +58,7 @@ fn malformed_collision_is_neutral_and_the_same_handler_return_can_be_repaired() 
         assert_eq!(engine.arena(), arena);
         assert_eq!(engine.memory().unwrap().transaction_version(), version);
         assert_eq!(engine.pending_windows_exception(), pending);
-        assert_eq!(word(&engine, 0x7e000000), frames[0]);
+        assert_eq!(word(&engine, 0x7e000000), head);
         dispatcher(&mut engine, frames[1]);
         assert_eq!(
             engine
@@ -66,4 +68,49 @@ fn malformed_collision_is_neutral_and_the_same_handler_return_can_be_repaired() 
         );
         assert_eq!(word(&engine, 0x7e000000), frames[2]);
     }
+}
+
+#[test]
+fn unwind_inside_an_unwind_handler_collides_at_its_wrapper_and_retires_only_that_parent() {
+    let mut engine = engine();
+    let (parent, frames) = unwind(&mut engine);
+    let current = engine.windows_context_state().unwrap();
+    let child = engine
+        .begin_exception_delivery(
+            ExceptionRecord32::new(0xc0000027, 2, current.state.eip, &[]).unwrap(),
+            current,
+            PendingOwner::Replacement(0),
+            None,
+            Some(Unwind32 {
+                target: frames[2],
+                return_value: 0x27182818,
+            }),
+            None,
+        )
+        .unwrap();
+    assert_eq!(child.procedure, 0x401001);
+    assert!(
+        engine
+            .exceptions
+            .deliveries
+            .iter()
+            .all(|delivery| delivery.id != parent.id)
+    );
+    returned(&mut engine, child, 1, true);
+    assert_eq!(
+        engine
+            .finish_windows_exception_handler(77, child.id)
+            .unwrap(),
+        None
+    );
+    assert_eq!(word(&engine, 0x7e000000), frames[2]);
+    assert_eq!(
+        engine.windows_context_state().unwrap().state.registers[0],
+        0x27182818
+    );
+    assert!(
+        engine
+            .finish_windows_exception_handler(77, parent.id)
+            .is_err()
+    );
 }

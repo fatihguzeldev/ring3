@@ -160,18 +160,21 @@ impl EngineInstance {
         if let Some(unwind) = unwind {
             original.state.registers[0] = unwind.return_value;
         }
-        let record_output = self
-            .pending_call
-            .as_ref()
-            .filter(|pending| {
-                decode_exit(&pending.exit).is_ok_and(|exit| {
-                    exit.reason
-                        == crate::cpu::ExitReason::Gate {
-                            id: crate::windows::exceptions::ExceptionApi32::RtlRaiseException.id(),
-                        }
-                })
-            })
-            .map(|pending| pending.frame.arguments()[0]);
+        let record_output = self.pending_call.as_ref().and_then(|pending| {
+            let crate::cpu::ExitReason::Gate { id } = decode_exit(&pending.exit).ok()?.reason
+            else {
+                return None;
+            };
+            use crate::windows::exceptions::ExceptionApi32;
+            let arguments = pending.frame.arguments();
+            if id == ExceptionApi32::RtlRaiseException.id() {
+                Some(arguments[0])
+            } else if id == ExceptionApi32::RtlUnwind.id() && arguments[2] != 0 {
+                Some(arguments[2])
+            } else {
+                None
+            }
+        });
         if self.exceptions.deliveries.len() >= 64 {
             return Err(HostError::Exception(ExceptionError32::Capacity));
         }
@@ -252,10 +255,15 @@ impl EngineInstance {
             cursor: 0,
             chain,
             nested_boundary: None,
+            abandoned: Vec::new(),
             visited: Vec::new(),
             stack_low,
             stack_high,
-            record_address: stack,
+            record_address: if unwind.is_some() {
+                record_output.unwrap_or(stack)
+            } else {
+                stack
+            },
             context_address: stack + 80,
             pointers_address: stack + 796,
             dispatcher_address: stack + 804,
@@ -269,6 +277,10 @@ impl EngineInstance {
             initial_page_change,
             initial_stack_limit: stack_overflow.as_ref().map(|receipt| receipt.limit()),
         };
+        delivery
+            .abandoned
+            .try_reserve_exact(64)
+            .map_err(|_| HostError::Infrastructure)?;
         delivery
             .visited
             .try_reserve_exact(4096)
@@ -299,6 +311,7 @@ impl EngineInstance {
         if let Some(receipt) = stack_overflow {
             self.threads.commit_stack_overflow(receipt);
         }
+        self.commit_abandoned_exception_deliveries(&delivery, None);
         if delivery.phase == ExceptionPhase32::Resumed {
             return Ok(ExceptionDispatch32 {
                 id,
@@ -392,13 +405,18 @@ impl EngineInstance {
             delivery.chain_write,
             delivery.record,
             delivery.nested_boundary,
+            delivery.abandoned.len(),
         );
         let mut delivery = self.exceptions.deliveries.remove(index);
         let outcome = self.complete_exception_handler(&mut delivery, result);
         match outcome {
-            Ok(true) => Ok(None),
+            Ok(true) => {
+                self.commit_abandoned_exception_deliveries(&delivery, None);
+                Ok(None)
+            }
             Ok(false) => {
-                self.exceptions.deliveries.insert(index, delivery);
+                let index = self.commit_abandoned_exception_deliveries(&delivery, Some(index));
+                self.exceptions.deliveries.insert(index.unwrap(), delivery);
                 Ok(self.pending_windows_exception())
             }
             Err(error) => {
@@ -411,8 +429,10 @@ impl EngineInstance {
                     delivery.chain_write,
                     delivery.record,
                     delivery.nested_boundary,
+                    _,
                 ) = before;
                 delivery.visited.truncate(before.3);
+                delivery.abandoned.truncate(before.8);
                 delivery.handlers = handlers;
                 self.exceptions.deliveries.insert(index, delivery);
                 Err(error)
