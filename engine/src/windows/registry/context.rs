@@ -140,7 +140,9 @@ impl Registry32 {
         self.prepared_handle(&mut prepared, target, view, rights)?;
         Ok(prepared)
     }
-    pub fn limits(&self) -> super::RegistryLimits32 { self.config.limits }
+    pub fn limits(&self) -> super::RegistryLimits32 {
+        self.config.limits
+    }
     pub fn epoch(&self) -> u64 {
         self.epoch
     }
