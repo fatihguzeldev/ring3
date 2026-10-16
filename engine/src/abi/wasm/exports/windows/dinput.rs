@@ -1,4 +1,6 @@
 export_process_calls! {
+    resume_dinput_file_call(low:u32,high:u32,token:u32);
+    cancel_dinput_file_call(low:u32,high:u32,token:u32);
     configure_controller_haptics(epoch_low:u32,epoch_high:u32,slot:u32,axes:u32,max_effects:u32);
     render_dinput_haptics(epoch_low:u32,epoch_high:u32,slot:u32,time_low:u32,time_high:u32);
     pending_dinput_haptics(slot:u32);

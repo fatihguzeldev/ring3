@@ -14,6 +14,7 @@ pub(super) struct PendingEnumeration32 {
     pub interface: InterfaceKind32,
     pub rows: Vec<Vec<u8>>,
     pub effects: Option<Vec<GuestAddress>>,
+    pub fixups: Option<Vec<Vec<usize>>>,
     pub cursor: usize,
     pub scratch: GuestAddress,
     pub range: PageRange,

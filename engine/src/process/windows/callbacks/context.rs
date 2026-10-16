@@ -175,6 +175,7 @@ impl EngineInstance {
                 || self.files_provider_owns_token(token)
                 || self.registry_provider_owns_token(token)
                 || self.windows_fls_provider_owns_token(token)
+                || self.dinput_file_provider_owns_token(token)
                 || self.activation_provider_owns_token(token))
     }
 

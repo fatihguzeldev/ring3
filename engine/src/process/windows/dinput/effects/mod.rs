@@ -2,6 +2,7 @@ mod calls;
 mod creation;
 mod decoding;
 mod enumeration;
+pub(super) mod files;
 mod parameters;
 
 use super::DirectInputRuntime32;

@@ -1,8 +1,10 @@
 mod configuration;
+mod files;
 mod haptics;
 mod input;
 
 pub(crate) use configuration::*;
+pub(crate) use files::*;
 pub(crate) use haptics::*;
 pub(crate) use input::*;
 

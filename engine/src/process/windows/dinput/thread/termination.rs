@@ -59,6 +59,7 @@ impl DirectInputRuntime32 {
         self.commit_releases(memory, prepared.release)?;
         if prepared.active {
             self.pending.clear();
+            self.file_call = None;
         }
         Ok(())
     }

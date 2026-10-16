@@ -129,6 +129,11 @@ impl SavedThread32 {
                 .as_ref()
                 .is_some_and(|reply| reply.alertable() && engine.has_pending_thread_apc(thread))
             || engine.exceptions.thread_unhandled(thread)
+            || self
+                .dinput
+                .as_ref()
+                .and_then(|reply| reply.file_request())
+                .is_some_and(|request| engine.provider_file_request_ready(request))
             || self.event.is_some()
             || self
                 .windows_replies
@@ -191,6 +196,12 @@ impl SavedThread32 {
             .into_iter()
             .chain(self.event.as_ref().and_then(|event| owner_pin(event.owner)))
             .chain(self.module_state.execution_pins())
+            .chain(
+                self.dinput
+                    .as_ref()
+                    .and_then(|reply| reply.file_owner())
+                    .and_then(owner_pin),
+            )
             .chain(
                 self.module_reply
                     .as_ref()

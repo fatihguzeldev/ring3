@@ -14,6 +14,17 @@ impl DirectInputRuntime32 {
         interface: InterfaceKind32,
         rows: Vec<Vec<u8>>,
     ) -> Result<WindowsProviderOutcome32, H> {
+        self.start_relocated_enumeration(memory, procedure, context, interface, rows, None)
+    }
+    pub(in crate::process::windows::dinput) fn start_relocated_enumeration(
+        &mut self,
+        memory: &mut AddressSpace,
+        procedure: u32,
+        context: u32,
+        interface: InterfaceKind32,
+        rows: Vec<Vec<u8>>,
+        fixups: Option<Vec<Vec<usize>>>,
+    ) -> Result<WindowsProviderOutcome32, H> {
         if procedure == 0 {
             return Err(H::INVALID_PARAM);
         }
@@ -26,16 +37,35 @@ impl DirectInputRuntime32 {
         }
         self.pending.try_reserve(1).map_err(|_| H::OUT_OF_MEMORY)?;
         let token = self.sequence.checked_add(1).ok_or(H::OUT_OF_MEMORY)?;
-        let range = memory.find_free_range(self.config.scratch, 1, PAGE_SIZE)?;
+        if fixups
+            .as_ref()
+            .is_some_and(|fixups| fixups.len() != rows.len())
+        {
+            return Err(H::INVALID_PARAM);
+        }
+        let length = rows.iter().map(Vec::len).max().unwrap().max(1);
+        let count =
+            u32::try_from(length.div_ceil(PAGE_SIZE as usize)).map_err(|_| H::OUT_OF_MEMORY)?;
+        let range = memory.find_free_range(self.config.scratch, count, PAGE_SIZE)?;
         let address = GuestAddress(range.first as u32 * PAGE_SIZE);
-        memory.install_pages_with_word_writes(
-            &[PageInitialization {
-                address,
-                permissions: Permissions::READ_WRITE,
-                bytes: &rows[0],
-            }],
-            &[],
+        let first = super::mapping::relocated(
+            &rows[0],
+            fixups.as_ref().map(|fixups| &fixups[0][..]),
+            address.0,
         )?;
+        let mut pages = Vec::new();
+        pages
+            .try_reserve_exact(count as usize)
+            .map_err(|_| H::OUT_OF_MEMORY)?;
+        for index in 0..count as usize {
+            let at = index * PAGE_SIZE as usize;
+            pages.push(PageInitialization {
+                address: GuestAddress(address.0 + index as u32 * PAGE_SIZE),
+                permissions: Permissions::READ_WRITE,
+                bytes: &first[at.min(first.len())..(at + PAGE_SIZE as usize).min(first.len())],
+            });
+        }
+        memory.install_pages_with_word_writes(&pages, &[])?;
         self.pending.push(PendingEnumeration32 {
             token,
             procedure: GuestAddress(procedure),
@@ -43,6 +73,7 @@ impl DirectInputRuntime32 {
             interface,
             rows,
             effects: None,
+            fixups,
             cursor: 0,
             scratch: address,
             range,
@@ -151,8 +182,14 @@ impl DirectInputRuntime32 {
             self.pending.pop();
             return Ok(WindowsProviderOutcome32::Return(0));
         };
+        let row = super::mapping::relocated(
+            &pending.rows[next],
+            pending.fixups.as_ref().map(|fixups| &fixups[next][..]),
+            pending.scratch.0,
+        )
+        .map_err(|_| super::super::DirectInputError32::Allocation)?;
         memory
-            .write(pending.scratch, &pending.rows[next])
+            .write(pending.scratch, &row)
             .map_err(super::super::DirectInputError32::Memory)?;
         self.pending.last_mut().unwrap().cursor = next;
         self.prepare_semantic_device(memory)

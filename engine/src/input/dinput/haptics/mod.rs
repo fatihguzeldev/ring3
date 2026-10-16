@@ -1,6 +1,7 @@
 mod coordinates;
 mod device;
 mod evaluation;
+pub mod files;
 mod types;
 
 pub use device::{EffectDevice32, PreparedEffect32};

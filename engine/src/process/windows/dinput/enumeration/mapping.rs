@@ -23,3 +23,20 @@ impl PendingEnumeration32 {
         Ok(())
     }
 }
+pub(in crate::process::windows::dinput) fn relocated(
+    row: &[u8],
+    fixups: Option<&[usize]>,
+    base: u32,
+) -> Result<Vec<u8>, H> {
+    let mut bytes = super::super::memory::bytes(row.len())?;
+    bytes.copy_from_slice(row);
+    for &at in fixups.unwrap_or(&[]) {
+        let word = bytes
+            .get_mut(at..at.checked_add(4).ok_or(H::INVALID_PARAM)?)
+            .ok_or(H::INVALID_PARAM)?;
+        let offset = u32::from_le_bytes(word.try_into().unwrap());
+        let pointer = base.checked_add(offset).ok_or(H::INVALID_PARAM)?;
+        word.copy_from_slice(&pointer.to_le_bytes());
+    }
+    Ok(bytes)
+}

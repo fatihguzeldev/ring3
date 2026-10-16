@@ -1,0 +1,20 @@
+{
+  "producer": "self-authored PE32 DirectInput WriteEffectToFile oracle; Windows 10.0.20348",
+  "run": "https://github.com/fatihguzel/ring3/actions/runs/38919142440",
+  "oracle_source": "engine/tests/windows/media/fixtures/oracle/force.c",
+  "files": [
+    {
+      "file": "windows-custom-stereo.ffe",
+      "sha256": "7994b891dd14cd78029112a667cbcfb70b3f2ce24829b284859df330847a30ed",
+      "bytes": 236
+    },
+    {
+      "file": "windows-custom-mono.ffe",
+      "sha256": "ad12a50329003c8c3f683c8349b89468ea750252455d3902c42f7d80597f2597",
+      "bytes": 236
+    }
+  ],
+  "observation": "The final data chunk is exactly 16 raw DICUSTOMFORCE bytes. The sample pointer survives enumeration unchanged in a fresh process; samples are not embedded, dereferenced or relocated by file loading. These are self-authored data files, not Windows binaries.",
+  "oracle_source_sha256": "90607fcf6f5ff5573f86f15d579475d3f6cbd12b6dee80f7339a7dd6beee0e9f",
+  "oracle_source_revision": "d8767524"
+}

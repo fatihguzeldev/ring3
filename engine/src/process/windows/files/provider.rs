@@ -237,6 +237,44 @@ impl EngineInstance {
             .leases
             .retain(|lease| !leases.contains(lease));
     }
+    pub(in crate::process) fn replace_provider_file(
+        &mut self,
+        path: &[u16],
+        bytes: &[u8],
+    ) -> Result<usize, HostError> {
+        self.memory()?;
+        let files = self
+            .files
+            .as_mut()
+            .ok_or(HostError::File(FileError32::Unsupported))?;
+        if let Ok(info) = files.vfs.path_info(path)
+            && files.mappings.minimum_file_size(info.id) > 0
+        {
+            return Err(HostError::File(FileError32::UserMappedFile));
+        }
+        files
+            .vfs
+            .replace_provider_file(path, bytes, self.windows_security.token())
+            .map_err(HostError::File)
+    }
+    pub(in crate::process) fn close_provider_file(
+        &mut self,
+        lease: ProviderFile32,
+    ) -> Result<(), HostError> {
+        let thread = self.current_windows_thread_id()?;
+        let files = self.files_mut()?;
+        files
+            .check_provider_file(lease, thread)
+            .map_err(HostError::File)?;
+        files
+            .vfs
+            .check_close_open(lease.open)
+            .map_err(HostError::File)?;
+        files.vfs.close_open(lease.open).map_err(HostError::File)?;
+        files.vfs.cancel_provider_file_io(lease.open);
+        files.provider.leases.retain(|value| *value != lease);
+        Ok(())
+    }
     pub(in crate::process) fn read_provider_file(
         &mut self,
         lease: ProviderFile32,

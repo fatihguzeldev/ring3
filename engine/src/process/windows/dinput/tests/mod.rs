@@ -9,3 +9,5 @@ mod enumeration;
 mod haptics;
 mod names;
 mod reset;
+
+mod effect_files;

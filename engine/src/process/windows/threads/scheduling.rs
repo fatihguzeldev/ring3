@@ -271,6 +271,17 @@ impl EngineInstance {
                 .ok_or(HostError::Infrastructure)?;
             self.resume_activation_call(wait.epoch, wait.token)?;
         }
+        if self
+            .dinput
+            .as_ref()
+            .and_then(|runtime| runtime.active_file_request())
+            .is_some_and(|request| self.provider_file_request_ready(request))
+        {
+            let token = self
+                .pending_dinput_file_token()
+                .ok_or(HostError::Infrastructure)?;
+            self.resume_dinput_file_call(self.key(), token)?;
+        }
         if let Some(pending) = self.pending_call.as_ref() {
             let (owner, token) = (pending.owner, pending.token);
             self.retry_windows_callback_reply(owner, token)?;

@@ -45,6 +45,11 @@ impl EngineInstance {
             self.publish_prepared_call(prepared);
             return Ok(true);
         }
+        if let Some(gate) = method
+            && self.try_complete_dinput_file_call(owner, token, gate, frame)?
+        {
+            return Ok(true);
+        }
         let gates = if factory.is_some() {
             Some(self.module_gates()?)
         } else {

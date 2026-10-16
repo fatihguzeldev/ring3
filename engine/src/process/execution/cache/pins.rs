@@ -20,7 +20,7 @@ impl EngineInstance {
         let saved = self.threads.execution_pins().count()
             + self.exceptions.execution_pins().count()
             + self.modules.execution_pins().count();
-        let capacity = (depth * 4 + self.windows_replies.len() + 5)
+        let capacity = (depth * 4 + self.windows_replies.len() + 6)
             .checked_add(saved)
             .ok_or(HostError::Resident(
                 crate::cpu::dbt::RegistryError::Allocation,
@@ -30,6 +30,13 @@ impl EngineInstance {
             .map_err(|_| HostError::Resident(crate::cpu::dbt::RegistryError::Allocation))?;
         if let Some(call) = &self.pending_call {
             owner(&mut pins, call.owner);
+        }
+        if let Some(value) = self
+            .dinput
+            .as_ref()
+            .and_then(|runtime| runtime.pending_file_owner())
+        {
+            owner(&mut pins, value);
         }
         if let Some(event) = &self.cpu_event {
             owner(&mut pins, event.owner);
