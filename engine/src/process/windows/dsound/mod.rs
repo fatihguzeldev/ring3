@@ -3,6 +3,7 @@ pub(in crate::process) use thread::DSoundThreadReply32;
 mod activation;
 mod buffers;
 mod capture;
+mod capture_effects;
 mod context;
 mod device;
 mod dispatch;

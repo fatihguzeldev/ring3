@@ -122,6 +122,12 @@ impl InterfaceKind {
                 methods!["QueryInterface":3,"AddRef":1,"Release":1,"SetAllParameters":2,"GetAllParameters":2]
             }
             Self::FullDuplex => methods!["QueryInterface":3,"AddRef":1,"Release":1,"Initialize":9],
+            Self::CaptureFxAec => {
+                methods!["QueryInterface":3,"AddRef":1,"Release":1,"SetAllParameters":2,"GetAllParameters":2,"GetStatus":2,"Reset":1]
+            }
+            Self::CaptureFxNoise => {
+                methods!["QueryInterface":3,"AddRef":1,"Release":1,"SetAllParameters":2,"GetAllParameters":2,"Reset":1]
+            }
         }
     }
 }

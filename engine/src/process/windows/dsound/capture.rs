@@ -38,28 +38,11 @@ impl DSoundRuntime32 {
                 if !matches!(header[0], 20 | 28) || header[3] != 0 {
                     return Err(HResult::INVALID_PARAM);
                 }
-                if header[0] == 28 {
-                    let effects = words::<2>(
-                        memory,
-                        args[1].checked_add(20).ok_or(HResult::INVALID_PARAM)?,
-                    )?;
-                    if effects[0] != 0 {
-                        return Err(HResult::FX_UNAVAILABLE);
-                    }
-                }
                 let format = wave(memory, header[4])?;
-                let retained = self
-                    .records
-                    .iter()
-                    .flatten()
-                    .map(|object| {
-                        if let ObjectKind32::CaptureBuffer(buffer) = &object.kind {
-                            buffer.native.bytes().len() as u32
-                        } else {
-                            0
-                        }
-                    })
-                    .sum::<u32>();
+                let effects = self
+                    .prepare_capture_effects(memory, args[1], format, version8, false, header[2])?;
+                let retained = self.capture_allocation_bytes()
+                    + effects.as_ref().map_or(0, |effects| effects.bytes());
                 let budget = self
                     .config
                     .max_capture_bytes
@@ -84,6 +67,9 @@ impl DSoundRuntime32 {
                         device,
                         version8,
                         notifications: Vec::new(),
+                        effects,
+                        reference: None,
+                        reference_origin: 0,
                     }),
                     Publication32 {
                         interfaces,
@@ -118,6 +104,12 @@ impl DSoundRuntime32 {
         }
         if slot == 11 {
             return self.unlock_buffer(memory, audio, pointer, args);
+        }
+        if slot == 12 {
+            return self.capture_effect_path(memory, audio, pointer, args);
+        }
+        if slot == 13 {
+            return self.capture_effect_status(memory, pointer, args);
         }
         let index = self.slot(pointer)?;
         let ObjectKind32::CaptureBuffer(buffer) = &self.records[index].as_ref().unwrap().kind
@@ -176,7 +168,14 @@ impl DSoundRuntime32 {
                 else {
                     unreachable!()
                 };
+                let was_active = buffer.native.status() & 1 != 0;
                 buffer.native.start(args[1])?;
+                if !was_active {
+                    buffer.reference_origin = audio.state().consumed_frames;
+                    if let Some(effects) = &mut buffer.effects {
+                        effects.reset()
+                    }
+                }
             }
             10 => {
                 let playing = buffer.native.status() & 1 != 0;
@@ -203,12 +202,6 @@ impl DSoundRuntime32 {
                 buffer.native.stop()?;
                 if let Some(prepared) = prepared {
                     sync.unwrap().commit_signals(prepared);
-                }
-            }
-            12 => return Err(HResult::OBJECT_NOT_FOUND),
-            13 => {
-                if args[1] != 0 {
-                    return Err(HResult::INVALID_PARAM);
                 }
             }
             _ => return Err(HResult::UNSUPPORTED),

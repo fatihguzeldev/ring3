@@ -21,6 +21,8 @@ pub(in crate::process) struct DSoundRuntime32 {
     pub(super) sequence: u64,
     pub(super) signals: Vec<(crate::windows::synchronization::EventBinding32, u64)>,
     pub(super) playback_lost: bool,
+    pub(super) capture_aec: crate::audio::capture_effects::AecParameters,
+    pub(super) capture_noise: bool,
 }
 impl DSoundRuntime32 {
     pub(in crate::process) fn new(config: DSoundConfig32) -> Result<Self, DSoundError32> {
@@ -68,6 +70,8 @@ impl DSoundRuntime32 {
             sequence: 0,
             signals,
             playback_lost: false,
+            capture_aec: Default::default(),
+            capture_noise: true,
         })
     }
     pub(in crate::process::windows::dsound) fn initialize_methods(

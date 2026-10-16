@@ -32,6 +32,10 @@ impl EngineInstance {
             return Ok(prepared);
         };
         let original = self.audio()?;
+        if runtime.records.iter().flatten().any(|object|matches!(&object.kind,ObjectKind32::CaptureBuffer(buffer) if buffer.effects.is_some()&&buffer.reference.is_some())) {
+            let reference=replacement.prepare_capture_reference().map_err(audio_error)?;
+            replacement.commit_capture_reference(reference);
+        }
         prepared
             .buffers
             .try_reserve_exact(runtime.records.len())
@@ -178,6 +182,10 @@ impl EngineInstance {
                 .native
                 .invalidate()
                 .expect("capture reset was preflighted");
+            buffer.reference_origin = 0;
+            if let Some(effects) = &mut buffer.effects {
+                effects.reset()
+            }
         }
     }
 }

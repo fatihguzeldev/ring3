@@ -13,6 +13,10 @@ pub(super) enum ObjectKind32 {
     Device(Device32),
     Buffer(Buffer32),
     Effect(super::effects::EffectObject32),
+    CaptureEffect {
+        buffer: GuestAddress,
+        kind: crate::audio::capture_effects::CaptureEffectKind,
+    },
     CaptureDevice {
         version8: bool,
         initialized: bool,
@@ -40,6 +44,9 @@ pub(super) struct CaptureBuffer32 {
     pub device: GuestAddress,
     pub version8: bool,
     pub notifications: Vec<Notification32>,
+    pub effects: Option<crate::audio::capture_effects::CaptureProcessor>,
+    pub reference: Option<GuestAddress>,
+    pub reference_origin: u64,
 }
 #[derive(Clone, Copy)]
 pub(super) struct Notification32 {

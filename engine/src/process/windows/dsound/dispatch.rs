@@ -120,6 +120,9 @@ impl DSoundRuntime32 {
             interface if interface.effect().is_some() => {
                 self.effect_call(memory, audio, pointer, interface, gate.slot, args)
             }
+            interface if interface.capture_effect().is_some() => {
+                self.capture_effect_call(memory, pointer, interface, gate.slot, args)
+            }
             _ => Err(HResult::UNSUPPORTED),
         }
     }

@@ -276,9 +276,15 @@ impl DSoundRuntime32 {
                         release.push(effect.buffer);
                         changed = true;
                     }
-                    ObjectKind32::CaptureBuffer(buffer) => {
+                    ObjectKind32::CaptureEffect { buffer, .. } => {
                         release.try_reserve(1).map_err(|_| HResult::OUT_OF_MEMORY)?;
+                        release.push(*buffer);
+                        changed = true;
+                    }
+                    ObjectKind32::CaptureBuffer(buffer) => {
+                        release.try_reserve(2).map_err(|_| HResult::OUT_OF_MEMORY)?;
                         release.push(buffer.device);
+                        release.extend(buffer.reference);
                         changed = true;
                     }
                     ObjectKind32::FullDuplex { device, capture } => {
@@ -369,6 +375,7 @@ impl DSoundRuntime32 {
             }
             discard(audio, &object.kind);
         }
+        if !self.records.iter().flatten().any(|object|matches!(&object.kind,ObjectKind32::CaptureBuffer(buffer) if buffer.effects.is_some())) {audio.release_capture_reference();}
         Ok(0)
     }
 }

@@ -98,28 +98,11 @@ impl DSoundRuntime32 {
         if !matches!(capture[0], 20 | 28) || capture[3] != 0 {
             return Err(HResult::INVALID_PARAM);
         }
-        if capture[0] == 28
-            && words::<2>(
-                memory,
-                args[2].checked_add(20).ok_or(HResult::INVALID_PARAM)?,
-            )?[0]
-                != 0
-        {
-            return Err(HResult::FX_UNAVAILABLE);
-        }
         let format = wave(memory, capture[4])?;
-        let allocated = self
-            .records
-            .iter()
-            .flatten()
-            .map(|object| {
-                if let ObjectKind32::CaptureBuffer(buffer) = &object.kind {
-                    buffer.native.bytes().len() as u32
-                } else {
-                    0
-                }
-            })
-            .sum::<u32>();
+        let effects =
+            self.prepare_capture_effects(memory, args[2], format, true, true, capture[2])?;
+        let allocated =
+            self.capture_allocation_bytes() + effects.as_ref().map_or(0, |effects| effects.bytes());
         let capture = CaptureRing::new(
             format,
             capture[2],
@@ -145,8 +128,21 @@ impl DSoundRuntime32 {
             .map_err(|_| HResult::OUT_OF_MEMORY)?;
         let native = Buffer::create(audio, &device, description)?;
         native.apply_controls(audio, &device)?;
+        let reference = if effects.is_some() {
+            match audio.prepare_capture_reference() {
+                Ok(reference) => reference,
+                Err(error) => {
+                    audio.release_stream_voice(native.voice).unwrap();
+                    audio.release_stream_buffer(native.storage).unwrap();
+                    return Err(error.into());
+                }
+            }
+        } else {
+            None
+        };
         let mut native = Some(native);
         let mut capture = Some(capture);
+        let mut effects = effects;
         let result = (|| {
             let device = self.publish_object(
                 memory,
@@ -209,6 +205,8 @@ impl DSoundRuntime32 {
                 },
             )?;
             created.push(render);
+            let reference_object = effects.as_ref().map(|_| render);
+            let retained = [input, render];
             let record = self.publish_object(
                 memory,
                 audio,
@@ -217,6 +215,9 @@ impl DSoundRuntime32 {
                     device: input,
                     version8: true,
                     notifications: Vec::new(),
+                    effects: effects.take(),
+                    reference: reference_object,
+                    reference_origin: 0,
                 }),
                 Publication32 {
                     interfaces: &[
@@ -225,7 +226,7 @@ impl DSoundRuntime32 {
                         InterfaceKind::Notify,
                     ],
                     output: None,
-                    retain: &[input],
+                    retain: &retained[..if reference_object.is_some() { 2 } else { 1 }],
                 },
             )?;
             created.push(record);
@@ -281,6 +282,8 @@ impl DSoundRuntime32 {
                 audio.release_stream_buffer(native.storage).unwrap();
             }
             self.rollback_duplex(memory, audio, &created);
+        } else {
+            audio.commit_capture_reference(reference);
         }
         result
     }
@@ -301,6 +304,9 @@ impl DSoundRuntime32 {
                 }
                 ObjectKind32::CaptureBuffer(buffer) => {
                     self.com.release(memory, buffer.device).unwrap();
+                    if let Some(reference) = buffer.reference {
+                        self.com.release(memory, reference).unwrap();
+                    }
                 }
                 ObjectKind32::FullDuplex { .. } => {}
                 _ => {}

@@ -64,6 +64,17 @@ impl EngineInstance {
             .native
             .prepare_write(request, self.media_epoch, request.object, bytes)
             .map_err(error)?;
+        let mut processed = buffer.prepare_capture_bytes(bytes).map_err(error)?;
+        let audio = &self.media.as_ref().unwrap().audio;
+        let playing = buffer
+            .reference
+            .and_then(|pointer| runtime.object(pointer).ok())
+            .is_some_and(|object| match &object.kind {
+                ObjectKind32::Buffer(buffer) => audio
+                    .voice_state(buffer.native.voice)
+                    .is_ok_and(|voice| voice.playing),
+                _ => false,
+            });
         let progress = buffer.native.progress(prepared);
         runtime.signals.clear();
         for notification in &buffer.notifications {
@@ -90,6 +101,19 @@ impl EngineInstance {
             &mut runtime.records[index].as_mut().unwrap().kind
         else {
             unreachable!()
+        };
+        let bytes = if let Some(processed) = &mut processed {
+            buffer.process_capture(
+                audio,
+                request.first_frame,
+                processed,
+                runtime.capture_aec,
+                runtime.capture_noise,
+                playing,
+            );
+            &processed[..]
+        } else {
+            bytes
         };
         buffer.native.commit_write(prepared, bytes);
         if let Some(signals) = signals {
@@ -147,6 +171,9 @@ impl EngineInstance {
                         .native
                         .invalidate()
                         .expect("capture loss was preflighted");
+                    if let Some(effects) = &mut buffer.effects {
+                        effects.reset()
+                    }
                 }
             }
         }
