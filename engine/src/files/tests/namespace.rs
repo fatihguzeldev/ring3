@@ -1,4 +1,59 @@
 use super::*;
+
+#[test]
+fn recursive_directory_tree_capacity_failure_and_stale_plans_publish_no_partial_paths() {
+    let token = crate::windows::security::Token32::virtual_process();
+    let mut vfs = Vfs32::new(
+        1,
+        FileLimits32 {
+            nodes: 3,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let before = vfs.revision();
+    assert!(matches!(
+        vfs.prepare_directory_tree(&utf16(r"C:\a\b\c"), &token),
+        Err(FileError32::Capacity)
+    ));
+    assert_eq!(vfs.revision(), before);
+    assert!(vfs.path_info(&utf16(r"C:\a")).is_err());
+    let prepared = vfs
+        .prepare_directory_tree(&utf16(r"C:\a\b"), &token)
+        .unwrap();
+    assert!(vfs.path_info(&utf16(r"C:\a")).is_err());
+    vfs.mount_directory(&utf16(r"C:\other"), ATTR_DIRECTORY, Default::default())
+        .unwrap();
+    assert_eq!(prepared.validate(&vfs), Err(FileError32::Stale));
+    assert!(vfs.path_info(&utf16(r"C:\a")).is_err());
+}
+
+#[test]
+fn recursive_directory_tree_commits_the_whole_chain_under_one_revision() {
+    let token = crate::windows::security::Token32::virtual_process();
+    let mut vfs = vfs();
+    let before = vfs.revision();
+    let prepared = vfs
+        .prepare_directory_tree(&utf16(r"C:\profile\save\slot"), &token)
+        .unwrap();
+    assert_eq!(vfs.revision(), before);
+    for path in [r"C:\profile", r"C:\profile\save", r"C:\profile\save\slot"] {
+        assert!(vfs.path_info(&utf16(path)).is_err());
+    }
+    vfs.commit_directory_tree(prepared);
+    assert_eq!(vfs.revision(), before + 1);
+    for path in [r"C:\profile", r"C:\profile\save", r"C:\profile\save\slot"] {
+        assert_ne!(
+            vfs.path_info(&utf16(path)).unwrap().attributes & ATTR_DIRECTORY,
+            0
+        );
+    }
+    let prepared = vfs
+        .prepare_directory_tree(&utf16(r"C:\profile\save\slot"), &token)
+        .unwrap();
+    vfs.commit_directory_tree(prepared);
+    assert_eq!(vfs.revision(), before + 1);
+}
 #[test]
 fn mounted_parents_case_and_utf16_identity_are_preserved() {
     let mut vfs = vfs();
