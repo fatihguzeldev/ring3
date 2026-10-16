@@ -27,6 +27,11 @@ impl EngineInstance {
                 .calls
                 .iter()
                 .any(|call| call.thread == thread && call.remote == Remote32::Queued)
+                || runtime
+                    .marshaling
+                    .transfers
+                    .iter()
+                    .any(|call| call.sender == thread && call.remote == Remote32::Queued)
                 || runtime.marshaling.proxies.iter().flatten().any(|proxy| {
                     proxy.rundown.is_some_and(|rundown| {
                         rundown.sender == thread && rundown.remote == Remote32::Queued
@@ -49,12 +54,23 @@ impl EngineInstance {
                 .calls
                 .iter()
                 .any(|call| call.execution.thread == thread && call.remote == Remote32::Queued)
+                || runtime
+                    .marshaling
+                    .transfers
+                    .iter()
+                    .any(|call| call.execution.thread == thread && call.remote == Remote32::Queued)
         })
     }
 
     fn com_same_thread_context_invocation(&self, thread: u32) -> bool {
         self.ole32.as_ref().is_some_and(|runtime| {
-            runtime.marshaling.activations.iter().any(|remote| {
+            runtime.marshaling.transfers.iter().any(|call| {
+                call.sender == thread
+                    && call.execution.thread == thread
+                    && call.remote == Remote32::Queued
+                    && (call.execution.apartment == crate::windows::ole32::ApartmentId32::Neutral
+                        || runtime.apartments.identity(thread) == Ok(call.execution.apartment))
+            }) || runtime.marshaling.activations.iter().any(|remote| {
                 remote.execution.thread == thread
                     && remote.execution.apartment == crate::windows::ole32::ApartmentId32::Neutral
                     && remote.remote == Remote32::Queued
@@ -81,6 +97,17 @@ impl EngineInstance {
         continuation: u64,
     ) -> Result<ExecutionApartment32, HostError> {
         let runtime = self.ole32.as_ref().ok_or(HostError::InvalidRequest)?;
+        if let Some(call) = runtime.marshaling.transfers.iter().find(|call| {
+            call.sender == sender
+                && call.continuation == continuation
+                && call.remote == Remote32::Queued
+        }) {
+            self.validate_com_transfer_identity(call)?;
+            if let Some(scratch) = call.scratch {
+                scratch.check(self.memory()?).map_err(HostError::Memory)?;
+            }
+            return Ok(call.execution);
+        }
         if let Some(remote) =
             runtime.marshaling.activations.iter().find(|remote| {
                 remote.continuation == continuation && remote.remote == Remote32::Queued
@@ -188,6 +215,28 @@ impl EngineInstance {
         result: u32,
     ) -> Result<(), HostError> {
         self.check_com_apartment_invocation(sender, continuation)?;
+
+        if let Some(index) = self
+            .ole32
+            .as_ref()
+            .unwrap()
+            .marshaling
+            .transfers
+            .iter()
+            .position(|call| {
+                call.sender == sender
+                    && call.continuation == continuation
+                    && call.remote == Remote32::Queued
+            })
+        {
+            let call = &mut self.ole32.as_mut().unwrap().marshaling.transfers[index];
+            if let super::transfer::TransferPhase32::Release(next) = call.phase {
+                call.references[next].pointer = 0;
+            }
+            call.remote = Remote32::Ready(result);
+            self.wake_com_apartment_sender(sender);
+            return Ok(());
+        }
         if let Some(proxy) = self
             .ole32
             .as_mut()

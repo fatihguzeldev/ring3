@@ -17,7 +17,8 @@ fn activation_cleanup_ready(remote: &super::RemoteActivation32, thread: u32) -> 
 
 impl EngineInstance {
     pub(in crate::process) fn com_abandoned_work_ready(&self, thread: u32) -> bool {
-        self.com_rundown_work_ready(thread)
+        self.abandoned_com_transfer_ready()
+            || self.com_rundown_work_ready(thread)
             || self.ole32.as_ref().is_some_and(|runtime| {
                 runtime
                     .marshaling
@@ -34,6 +35,9 @@ impl EngineInstance {
     }
 
     pub(in crate::process) fn service_abandoned_com_work(&mut self) -> Result<(), HostError> {
+        if self.service_abandoned_com_transfer()? {
+            return Ok(());
+        }
         let thread = self.threads.current_id();
         let Some(runtime) = self.ole32.as_ref() else {
             return Ok(());

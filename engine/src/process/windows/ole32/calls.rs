@@ -36,6 +36,9 @@ impl EngineInstance {
         id: u32,
         frame: CallFrame32,
     ) -> Result<bool, HostError> {
+        if self.try_complete_com_stream_call(owner, token, id, frame)? {
+            return Ok(true);
+        }
         let api = Ole32Api32::from_id(id);
         let method = FactoryMethod32::from_id(id);
         if api.is_none() && method.is_none() {

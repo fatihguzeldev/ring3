@@ -96,6 +96,15 @@ pub fn ole32_module(preferred_base: u32) -> SystemModule32 {
         ordinal: None,
         target: SystemExportTarget32::PrivateGate(FactoryMethod32(slot).id()),
     }));
+    exports.extend(
+        super::StreamMethod32::ALL
+            .into_iter()
+            .map(|method| SystemExport32 {
+                name: None,
+                ordinal: None,
+                target: SystemExportTarget32::PrivateGate(method.id()),
+            }),
+    );
     SystemModule32 {
         name: "ole32.dll".into(),
         preferred_base,

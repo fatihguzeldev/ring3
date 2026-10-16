@@ -88,66 +88,6 @@ fn registry_string(bytes: &[u8]) -> Result<String, HResult32> {
     String::from_utf16(&units).map_err(|_| HResult32::CLASS_NOT_REGISTERED)
 }
 
-pub(crate) fn registered_proxy(
-    registry: &Registry32,
-    iid: InterfaceId,
-) -> Result<Option<InterfaceId>, HResult32> {
-    let class = class_registry_path(iid);
-    let guid = class
-        .strip_prefix("CLSID\\")
-        .unwrap()
-        .strip_suffix("\\InprocServer32")
-        .unwrap();
-    let path: Vec<u16> = format!("Interface\\{guid}\\ProxyStubClsid32")
-        .encode_utf16()
-        .collect();
-    let value = match registry.query_subkey_value(0x8000_0000, &path, 0, &[]) {
-        Ok(value) => value,
-        Err(crate::windows::registry::RegistryError32::FileNotFound) => return Ok(None),
-        Err(_) => return Err(HResult32::NO_INTERFACE),
-    };
-    if value.kind != 1 {
-        return Err(HResult32::NO_INTERFACE);
-    }
-    let text = registry_string(value.bytes)?;
-    let bytes = text.as_bytes();
-    if bytes.len() != 38
-        || bytes[0] != b'{'
-        || bytes[37] != b'}'
-        || [9, 14, 19, 24]
-            .into_iter()
-            .any(|index| bytes[index] != b'-')
-    {
-        return Err(HResult32::NO_INTERFACE);
-    }
-    let mut network = [0u8; 16];
-    for (byte, index) in network
-        .iter_mut()
-        .zip([1, 3, 5, 7, 10, 12, 15, 17, 20, 22, 25, 27, 29, 31, 33, 35])
-    {
-        let nibble = |value: u8| -> Option<u8> {
-            match value {
-                b'0'..=b'9' => Some(value - b'0'),
-                b'a'..=b'f' => Some(value - b'a' + 10),
-                b'A'..=b'F' => Some(value - b'A' + 10),
-                _ => None,
-            }
-        };
-        *byte = nibble(bytes[index])
-            .zip(nibble(bytes[index + 1]))
-            .map(|(high, low)| high * 16 + low)
-            .ok_or(HResult32::NO_INTERFACE)?;
-    }
-    let mut wire = [0u8; 16];
-    for (out, index) in wire
-        .iter_mut()
-        .zip([3, 2, 1, 0, 5, 4, 7, 6, 8, 9, 10, 11, 12, 13, 14, 15])
-    {
-        *out = network[index];
-    }
-    Ok(Some(InterfaceId(wire)))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

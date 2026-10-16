@@ -126,6 +126,9 @@ impl EngineInstance {
         mut result: u32,
     ) -> Result<WindowsProviderOutcome32, HostError> {
         let pending = &self.ole32.as_ref().unwrap().activation.pending[slot];
+        self.check_com_transfer_parent(
+            super::super::marshaling::transfer::TransferParent32::Activation(pending.continuation),
+        )?;
         pending
             .scratch
             .check(self.memory()?)
@@ -151,7 +154,20 @@ impl EngineInstance {
             let requested =
                 super::super::memory::iid(self.memory()?, pending.scratch.address.0 + 32)
                     .map_err(|_| HostError::InvalidRequest)?;
-            if pointer == 0 {
+            if let Some((transfer_result, pointer)) = self.com_transfer_result(
+                super::super::marshaling::transfer::TransferParent32::Activation(
+                    pending.continuation,
+                ),
+            ) {
+                result = transfer_result;
+                if result & 0x8000_0000 == 0 {
+                    self.memory
+                        .as_mut()
+                        .unwrap()
+                        .write(GuestAddress(out), &pointer.to_le_bytes())
+                        .map_err(HostError::Memory)?;
+                }
+            } else if pointer == 0 {
                 result = HResult32::UNEXPECTED.0;
             } else {
                 self.publish_standard_com_proxy(
@@ -180,6 +196,10 @@ impl EngineInstance {
             }
         }
         let continuation = self.ole32.as_ref().unwrap().activation.pending[slot].continuation;
+        let parent = super::super::marshaling::transfer::TransferParent32::Activation(continuation);
+        if self.com_transfer_result(parent).is_some() {
+            self.finish_com_transfer_metadata(parent);
+        }
         self.ole32
             .as_mut()
             .unwrap()

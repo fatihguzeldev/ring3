@@ -50,8 +50,8 @@ pub(super) enum ProxyPhase32 {
     Create { requested: InterfaceId },
     Lock,
     Release { next: usize },
-    Discard { result: u32, pointer: u32 },
     Publish { result: u32 },
+    Transfer { result: u32 },
 }
 
 pub(super) struct ProxyCall32 {
@@ -75,6 +75,7 @@ pub(in crate::process::windows::ole32) struct MarshalingRuntime32 {
     pub proxies: Vec<Option<Proxy32>>,
     pub(super) calls: Vec<ProxyCall32>,
     pub activations: Vec<RemoteActivation32>,
+    pub transfers: Vec<super::transfer::TransferCall32>,
 }
 
 pub(in crate::process::windows::ole32) struct RemoteActivation32 {
@@ -111,10 +112,15 @@ impl MarshalingRuntime32 {
             .try_reserve_exact(objects)
             .map_err(|_| super::super::Ole32Error32::Allocation)?;
         proxies.resize_with(objects, || None);
+        let mut activations = Vec::new();
+        activations
+            .try_reserve_exact(64)
+            .map_err(|_| super::super::Ole32Error32::Allocation)?;
         Ok(Self {
             proxies,
             calls: Vec::new(),
-            activations: Vec::new(),
+            activations,
+            transfers: Vec::new(),
         })
     }
 }

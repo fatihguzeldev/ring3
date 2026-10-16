@@ -57,6 +57,11 @@ impl EngineInstance {
         &self,
         continuation: u64,
     ) -> bool {
+        if let Some(ready) = self
+            .com_transfer_parent_ready(super::transfer::TransferParent32::Activation(continuation))
+        {
+            return ready;
+        }
         self.ole32.as_ref().is_some_and(|runtime| {
             runtime.marshaling.activations.iter().any(|remote| {
                 remote.continuation == continuation
@@ -138,6 +143,9 @@ impl EngineInstance {
         else {
             return Ok(false);
         };
+        if self.advance_com_activation_transfer(slot, result)? {
+            return Ok(true);
+        }
         match self.resume_ole32_callback(continuation, result)? {
             Ole32CallbackOutcome32::Complete(result) => {
                 self.publish_prepared_call(Self::prepare_completed_call(frame.complete(result))?);

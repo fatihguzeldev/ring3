@@ -25,20 +25,29 @@ use crate::{
 
 impl EngineInstance {
     pub(in crate::process) fn com_proxy_wait_ready(&self, thread: u32) -> bool {
-        self.ole32.as_ref().is_some_and(|runtime| {
-            runtime
-                .marshaling
-                .calls
-                .iter()
-                .enumerate()
-                .any(|(index, call)| {
-                    call.thread == thread
-                        && self.proxy_call_first(index)
-                        && call.remote != Remote32::Queued
-                })
-        })
+        self.com_transfer_work_ready(thread)
+            || self.ole32.as_ref().is_some_and(|runtime| {
+                runtime
+                    .marshaling
+                    .calls
+                    .iter()
+                    .enumerate()
+                    .any(|(index, call)| {
+                        call.thread == thread
+                            && self.proxy_call_first(index)
+                            && call.remote != Remote32::Queued
+                            && self
+                                .com_transfer_parent_ready(
+                                    super::transfer::TransferParent32::Proxy(call.continuation),
+                                )
+                                .unwrap_or(true)
+                    })
+            })
     }
     pub(in crate::process) fn resume_com_proxy_wait(&mut self) -> Result<(), HostError> {
+        if self.resume_com_transfer_work()? {
+            return Ok(());
+        }
         let Some(pending) = self.pending_call.as_ref() else {
             return Ok(());
         };
@@ -325,6 +334,12 @@ impl EngineInstance {
         &mut self,
         index: usize,
     ) -> Result<(), HostError> {
+        if matches!(
+            self.ole32.as_ref().unwrap().marshaling.calls[index].phase,
+            ProxyPhase32::Transfer { .. }
+        ) {
+            return self.finish_com_proxy_transfer(index);
+        }
         if !self.proxy_call_first(index) {
             return Ok(());
         }
@@ -374,8 +389,7 @@ impl EngineInstance {
                 };
                 (object, 2, [object, 0, 0, 0], 1)
             }
-            ProxyPhase32::Discard { pointer, .. } => (pointer, 2, [pointer, 0, 0, 0], 1),
-            ProxyPhase32::Publish { .. } => unreachable!(),
+            ProxyPhase32::Publish { .. } | ProxyPhase32::Transfer { .. } => unreachable!(),
         };
         let (target, sender, continuation) =
             (call.execution.thread, call.thread, call.continuation);
@@ -410,17 +424,7 @@ impl EngineInstance {
                         result: HResult32::UNEXPECTED.0,
                     }
                 } else if requested != IID_IUNKNOWN && requested != IID_ICLASSFACTORY {
-                    if self
-                        .registered_com_proxy_class(requested)
-                        .map_err(|_| HostError::InvalidRequest)?
-                        .is_some()
-                    {
-                        return Err(HostError::Infrastructure);
-                    }
-                    ProxyPhase32::Discard {
-                        result: HResult32::NO_INTERFACE.0,
-                        pointer,
-                    }
+                    return self.begin_com_proxy_transfer(index, result, pointer, requested);
                 } else if matches!(phase, ProxyPhase32::Query { .. }) {
                     self.memory()?
                         .ensure_transaction_versions(2)
@@ -453,8 +457,8 @@ impl EngineInstance {
                 ProxyPhase32::Release { next: 1 }
             }
             ProxyPhase32::Release { .. } => ProxyPhase32::Publish { result: 0 },
-            ProxyPhase32::Discard { result, .. } => ProxyPhase32::Publish { result },
             ProxyPhase32::Publish { .. } => return self.finish_com_proxy_call(index),
+            ProxyPhase32::Transfer { .. } => return self.finish_com_proxy_transfer(index),
             _ => ProxyPhase32::Publish { result },
         };
         let call = &mut self.ole32.as_mut().unwrap().marshaling.calls[index];

@@ -6,6 +6,7 @@ mod invocation;
 mod lifetime;
 mod proxy;
 mod rundown;
+pub(in crate::process::windows::ole32) mod transfer;
 
 pub(super) use context::RemoteActivation32;
 pub(super) use context::{ExecutionApartment32, MarshalingRuntime32, Remote32};

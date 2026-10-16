@@ -12,6 +12,7 @@ pub(in crate::process) struct Ole32Runtime32 {
     pub(super) methods: [GuestAddress; 5],
     pub(super) server_locks: [u32; 7],
     pub(super) activation: super::activation::ActivationRuntime32,
+    pub(super) streams: super::stream::StreamRuntime32,
     pub(super) marshaling: super::marshaling::MarshalingRuntime32,
 }
 impl Ole32Runtime32 {
@@ -32,8 +33,8 @@ impl Ole32Runtime32 {
         let com = GuestComObjects32::new(
             config.objects,
             config.max_objects as usize,
-            config.max_objects as usize * 2,
-            2,
+            config.max_objects as usize * 3,
+            7,
         )
         .map_err(|_| Ole32Error32::InvalidConfiguration)?;
         let apartments =
@@ -50,6 +51,7 @@ impl Ole32Runtime32 {
             methods: [GuestAddress(0); 5],
             server_locks: [0; 7],
             activation: Default::default(),
+            streams: super::stream::StreamRuntime32::new(config.max_objects as usize)?,
             marshaling: super::marshaling::MarshalingRuntime32::new(config.max_objects as usize)?,
         })
     }
@@ -99,6 +101,7 @@ impl Ole32Runtime32 {
     pub(in crate::process) fn guest_reservation(&self) -> crate::memory::PageRange {
         self.com.reservation()
     }
+
     pub(in crate::process) fn activation_scratch_reservation(&self) -> crate::memory::PageRange {
         super::activation::ActivationRuntime32::scratch_reservation()
     }

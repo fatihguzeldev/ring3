@@ -26,6 +26,7 @@ pub(in crate::process) struct PreparedComThreadExit32 {
     actions: Vec<ExitAction32>,
     waking: Vec<u32>,
     rundown: super::rundown::PreparedComRundown32,
+    transfers: super::transfer::PreparedTransferExit32,
 }
 impl PreparedComThreadExit32 {
     pub(in crate::process) fn ranges(&self) -> &[PageRange] {
@@ -57,6 +58,7 @@ impl EngineInstance {
     ) -> Result<PreparedComThreadExit32, HostError> {
         let mut result = PreparedComThreadExit32 {
             thread,
+            transfers: self.prepare_com_transfer_exit(thread)?,
             ranges: Vec::new(),
             actions: Vec::new(),
             waking: Vec::new(),
@@ -92,6 +94,14 @@ impl EngineInstance {
             .try_reserve_exact(count)
             .map_err(|_| HostError::Infrastructure)?;
         for (slot, pending) in runtime.activation.pending.iter().enumerate() {
+            if self
+                .com_transfer_index(super::transfer::TransferParent32::Activation(
+                    pending.continuation,
+                ))
+                .is_some()
+            {
+                continue;
+            }
             let remote = runtime
                 .marshaling
                 .activations
@@ -145,6 +155,12 @@ impl EngineInstance {
             }
         }
         for (index, call) in runtime.marshaling.calls.iter().enumerate() {
+            if self
+                .com_transfer_index(super::transfer::TransferParent32::Proxy(call.continuation))
+                .is_some()
+            {
+                continue;
+            }
             if call.thread == thread {
                 call.scratch
                     .check(self.memory()?)
@@ -293,6 +309,7 @@ impl EngineInstance {
                 }
             }
         }
+        self.commit_com_transfer_exit(prepared.transfers);
         self.commit_com_rundown(prepared.rundown);
         self.retire_com_sender_invocations(prepared.thread);
         for thread in prepared.waking {

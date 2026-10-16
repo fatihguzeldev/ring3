@@ -5,6 +5,7 @@ mod context;
 mod factory;
 mod marshaling;
 mod memory;
+mod stream;
 #[cfg(test)]
 mod tests;
 mod types;

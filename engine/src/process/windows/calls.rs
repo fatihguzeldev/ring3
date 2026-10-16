@@ -77,6 +77,7 @@ pub fn windows_gate_info(id: u32) -> Option<WindowsGateInfo32> {
         .or_else(|| {
             crate::windows::ole32::FactoryMethod32::from_id(id).map(|api| api.stack_words())
         })
+        .or_else(|| crate::windows::ole32::StreamMethod32::from_id(id).map(|api| api.stack_words()))
         .or_else(|| crate::windows::winmm::WinmmApi32::from_id(id).map(|api| api.stack_words()))
     {
         return Some(WindowsGateInfo32 {

@@ -7,14 +7,6 @@ use crate::{
 };
 
 impl EngineInstance {
-    pub(in crate::process::windows) fn registered_com_proxy_class(
-        &self,
-        iid: InterfaceId,
-    ) -> Result<Option<InterfaceId>, HResult32> {
-        self.registry.as_ref().map_or(Ok(None), |runtime| {
-            crate::windows::com::registered_proxy(&runtime.native, iid)
-        })
-    }
     pub(in crate::process::windows) fn registered_com_server(
         &self,
         class: InterfaceId,
