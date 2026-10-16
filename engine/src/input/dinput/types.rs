@@ -76,4 +76,11 @@ impl DirectInputResult32 {
     pub const DEVICE_NOT_REGISTERED: Self = Self(0x8004_0154);
     pub const NO_AGGREGATION: Self = Self(0x8004_0110);
     pub const HANDLE: Self = Self(0x8007_0006);
+    pub const DEVICE_FULL: Self = Self(0x8004_0201);
+    pub const MORE_DATA: Self = Self(0x8004_0202);
+    pub const NOT_DOWNLOADED: Self = Self(0x8004_0203);
+    pub const HAS_EFFECTS: Self = Self(0x8004_0204);
+    pub const NOT_EXCLUSIVE: Self = Self(0x8004_0205);
+    pub const INCOMPLETE_EFFECT: Self = Self(0x8004_0206);
+    pub const EFFECT_PLAYING: Self = Self(0x8004_0208);
 }

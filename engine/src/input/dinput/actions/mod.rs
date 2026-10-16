@@ -51,12 +51,21 @@ pub fn build_actions(
     actions: &mut [Action32],
     preserve: bool,
 ) -> Result<usize, DirectInputResult32> {
+    build_actions_with_haptics(description, instance, actions, preserve, None)
+}
+pub fn build_actions_with_haptics(
+    description: DeviceDescription32,
+    instance: [u8; 16],
+    actions: &mut [Action32],
+    preserve: bool,
+    haptics: Option<super::haptics::HapticCapabilities32>,
+) -> Result<usize, DirectInputResult32> {
     if actions.iter().any(|action| action.flags & !31 != 0) {
         return Err(DirectInputResult32::INVALID_PARAM);
     }
     let mut mapped = 0;
     for action in actions {
-        if action.flags & 4 != 0 || action.flags & 1 != 0 {
+        if action.flags & 4 != 0 || action.flags & 1 != 0 && haptics.is_none() {
             action.how = 0;
             continue;
         }
@@ -71,11 +80,15 @@ pub fn build_actions(
                         & 255
                         != 0
             });
-            action.how = if object.is_some() { 2 } else { 0x8000_0000 };
-            mapped += usize::from(object.is_some());
+            let valid =
+                object.is_some_and(|object| action.flags & 1 == 0 || force_object(object, haptics));
+            action.how = if valid { 2 } else { 0x8000_0000 };
+            mapped += usize::from(valid);
             continue;
         }
-        if let Some(object) = default_object(description, action.semantic) {
+        if let Some(object) = default_object(description, action.semantic)
+            .filter(|object| action.flags & 1 == 0 || force_object(*object, haptics))
+        {
             action.instance = instance;
             action.object_id = object.object_type(matches!(description.kind, DeviceKind32::Mouse));
             action.how = 0x20;
@@ -87,6 +100,16 @@ pub fn build_actions(
         }
     }
     Ok(mapped)
+}
+pub fn force_object(
+    object: DeviceObject32,
+    haptics: Option<super::haptics::HapticCapabilities32>,
+) -> bool {
+    haptics.is_some_and(|capabilities| match object {
+        DeviceObject32::Axis { index, aspect: 0 } => index < capabilities.axes,
+        DeviceObject32::Button(_) => true,
+        _ => false,
+    })
 }
 #[cfg(test)]
 mod tests {
@@ -108,5 +131,47 @@ mod tests {
             default_object(DeviceDescription32::mouse(), 0x8100_041e),
             None
         );
+    }
+    #[test]
+    fn force_actions_require_provisioned_actuators_and_keep_ordinary_action_mapping_separate() {
+        let description = DeviceDescription32 {
+            kind: DeviceKind32::Controller(0),
+            axes: 2,
+            povs: 1,
+            buttons: 2,
+        };
+        let action = |semantic| Action32 {
+            app_data: 0,
+            semantic,
+            flags: 1,
+            name: 0,
+            instance: [0; 16],
+            object_id: 0,
+            how: 0,
+        };
+        let original = [
+            action(0x01008200),
+            action(0x01010200),
+            action(0x01000401),
+            action(0x01000601),
+        ];
+        let mut actions = original;
+        assert_eq!(
+            build_actions(description, [1; 16], &mut actions, false).unwrap(),
+            0
+        );
+        let caps = super::super::haptics::HapticCapabilities32 {
+            axes: 1,
+            max_effects: 8,
+        };
+        let mut actions = original;
+        assert_eq!(
+            build_actions_with_haptics(description, [1; 16], &mut actions, false, Some(caps))
+                .unwrap(),
+            2
+        );
+        assert_eq!(actions.map(|action| action.how), [0x20, 0, 0x20, 0]);
+        assert_eq!(actions[0].object_id, 2);
+        assert_eq!(actions[2].object_id, 4);
     }
 }
