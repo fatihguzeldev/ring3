@@ -68,3 +68,17 @@ fn predefined_override_pins_identity_after_numeric_handle_close_and_restores_def
         Some(RegistryError32::FileNotFound)
     );
 }
+
+#[test]
+fn audit_prepared_registry_change_cannot_cross_a_session_with_the_same_revision() {
+    let mut first = Registry32::new(7, RegistryConfig32::default()).unwrap();
+    let second = Registry32::new(8, RegistryConfig32::default()).unwrap();
+    assert_eq!(first.revision(), second.revision());
+    let prepared = first.prepare_create(0x80000001, &units("Software\\Foreign"), 0xf003f, &[], false, 100, true).unwrap();
+    assert_eq!(second.can_commit(&prepared), Err(RegistryError32::StaleReceipt));
+    assert_eq!(second.change_count(), 0);
+    assert_eq!(second.revision(), first.revision());
+    assert_eq!(first.can_commit(&prepared), Ok(()));
+    let handle = first.commit(prepared);
+    assert!(first.query_info(handle).is_ok());
+}

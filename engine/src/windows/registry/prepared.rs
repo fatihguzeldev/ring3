@@ -11,6 +11,7 @@ pub(super) enum Action32 {
     ReplaceValues(Id, Vec<Value32>, u64),
 }
 pub struct PreparedRegistry32 {
+    pub(super) epoch: u64,
     pub(super) revision: u64,
     pub(super) actions: Vec<Action32>,
     pub(super) changes: Vec<Change32>,
@@ -36,6 +37,7 @@ impl Registry32 {
     pub(super) fn preparation(&self) -> Result<PreparedRegistry32, E> {
         self.revision.checked_add(1).ok_or(E::NotEnoughMemory)?;
         Ok(PreparedRegistry32 {
+            epoch: self.epoch,
             revision: self.revision,
             actions: Vec::new(),
             changes: Vec::new(),
@@ -51,13 +53,14 @@ impl Registry32 {
         })
     }
     pub fn can_commit(&self, prepared: &PreparedRegistry32) -> Result<(), E> {
-        if self.revision != prepared.revision {
+        if self.epoch != prepared.epoch || self.revision != prepared.revision {
             Err(E::StaleReceipt)
         } else {
             Ok(())
         }
     }
     pub fn commit(&mut self, prepared: PreparedRegistry32) -> u32 {
+        assert_eq!(self.epoch, prepared.epoch);
         assert_eq!(self.revision, prepared.revision);
         for action in prepared.actions {
             match action {
