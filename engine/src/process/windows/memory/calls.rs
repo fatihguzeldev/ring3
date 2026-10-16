@@ -19,6 +19,7 @@ impl EngineInstance {
                 WindowsApi32::VirtualAlloc
                     | WindowsApi32::VirtualFree
                     | WindowsApi32::VirtualProtect
+                    | WindowsApi32::FlushInstructionCache
             )
         });
         let api = MemoryApi32::from_id(id);
@@ -54,6 +55,9 @@ impl EngineInstance {
                 WindowsApi32::VirtualAlloc => self.memory_allocate(frame.arguments()),
                 WindowsApi32::VirtualFree => self.memory_free(frame.arguments()),
                 WindowsApi32::VirtualProtect => self.memory_protect(frame.arguments()),
+                WindowsApi32::FlushInstructionCache => {
+                    self.flush_windows_instruction_cache(frame.arguments())
+                }
                 _ => unreachable!(),
             }
         };
@@ -297,5 +301,23 @@ fn heap_exception_code(error: MemoryError32) -> Option<u32> {
         | MemoryError32::InvalidHandle
         | MemoryError32::NoAccess => Some(0xc0000005),
         _ => None,
+    }
+}
+
+impl EngineInstance {
+    fn flush_windows_instruction_cache(&self, args: &[u32]) -> Result<u32, MemoryError32> {
+        self.validate_windows_process_handle(args[0], 0)
+            .map_err(|error| {
+                if error == crate::windows::synchronization::SynchronizationError32::AccessDenied {
+                    MemoryError32::AccessDenied
+                } else {
+                    MemoryError32::InvalidHandle
+                }
+            })?;
+        if args[1] != 0 && u64::from(args[1]) + u64::from(args[2]) > 1 << 32 {
+            return Err(MemoryError32::InvalidParameter);
+        }
+        // stores already invalidate translated code through the canonical page versions.
+        Ok(1)
     }
 }
