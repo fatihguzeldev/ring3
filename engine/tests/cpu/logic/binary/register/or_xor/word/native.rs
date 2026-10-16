@@ -1,11 +1,6 @@
 use super::support_word_prefix as word_prefix;
 use ring3_engine::{abi::arena::TRANSFER_OFFSET, process::EngineInstance};
-use std::{
-    fs::OpenOptions,
-    io::Write,
-    path::PathBuf,
-    process::{Command, Stdio},
-};
+use std::{fs::OpenOptions, io::Write, path::PathBuf};
 
 fn compile_bound(bytes: &[u8]) -> Vec<u8> {
     let mut engine = EngineInstance::new(1, 0x574f_5244_4f52_584f).unwrap();
@@ -95,29 +90,7 @@ fn existing_or_xor_modules_validate_and_optionally_capture() {
         input.extend((module.len() as u32).to_le_bytes());
         input.extend(module);
     }
-    let mut child = Command::new("node")
-        .args(["-e", r#"
-const assert = require('node:assert/strict');
-const input = require('node:fs').readFileSync(0);
-let at = 0;
-for (let count = 0; count < 4; count++) {
-  const size = input.readUInt32LE(at); at += 4;
-  assert.ok(size > 8 && at + size <= input.length);
-  const module = new WebAssembly.Module(input.subarray(at, at + size)); at += size;
-  assert.deepEqual(WebAssembly.Module.imports(module), [{module:'env', name:'memory', kind:'memory'},
-    {module:'ring3', name:'guard', kind:'function'}]);
-  assert.deepEqual(WebAssembly.Module.exports(module), [{name:'run', kind:'function'}]);
-}
-assert.equal(at, input.length);
-"#])
-        .stdin(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
-    child.stdin.take().unwrap().write_all(&input).unwrap();
-    let output = child.wait_with_output().unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    crate::support_wasm_interface::assert_packed(&input, 4, false);
 }
 
 use ring3_engine::{
@@ -375,26 +348,7 @@ fn six_profiles_validate_pure_word_or_xor_without_native_cpu_publication() {
             input.extend(bytes);
         }
     }
-    let mut child = Command::new("node").args(["-e", r#"
-const assert=require('node:assert/strict'),b=require('node:fs').readFileSync(0);let at=0;
-for(let i=0;i<6;i++) {const mode=b[at++],n=b.readUInt32LE(at);at+=4;
-  assert.ok(n>8&&n<=65536&&at+n<=b.length);const bytes=b.subarray(at,at+n);at+=n;
-  const m=new WebAssembly.Module(bytes);assert.deepEqual(WebAssembly.Module.imports(m),[{module:'env',name:'memory',kind:'memory'},
-    ...(mode?[{module:'ring3',name:mode===2?'guard_resident':'guard',kind:'function'}]:[])]);
-  assert.deepEqual(WebAssembly.Module.exports(m),[{name:'run',kind:'function'}]);
-  let p=8;function leb(){let v=0,s=1;for(let j=0;j<5;j++){assert.ok(p<bytes.length);const x=bytes[p++];v+=(x&127)*s;if(!(x&128))return v;s*=128;}assert.fail('bounded LEB');}
-  let found=false;while(p<bytes.length){const id=bytes[p++],size=leb(),end=p+size;assert.ok(end<=bytes.length);
-    if(id===10){assert.equal(leb(),1);const body=leb();assert.equal(p+body,end);assert.equal(leb(),3);assert.equal(leb(),16);assert.equal(bytes[p++],127);assert.equal(leb(),1);assert.equal(bytes[p++],126);assert.equal(leb(),10);assert.equal(bytes[p++],127);found=true;}
-    p=end;}assert.ok(found);
-}assert.equal(at,b.length);
-"#]).stdin(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
-    child.stdin.take().unwrap().write_all(&input).unwrap();
-    let output = child.wait_with_output().unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    crate::support_wasm_interface::assert_packed(&input, 6, true);
 }
 
 #[test]
@@ -431,55 +385,47 @@ fn exact_or_xor_prefix_fetch_and_consumed_source_currency() {
         }
         for cut in 1..length {
             let mut code = memory(0x2000 - cut, &bytes[..cut as usize]);
-            assert_eq!(
+            crate::support_fetch::assert_error(
                 decode_one(&code, GuestAddress(0x2000 - cut)).unwrap_err(),
-                DecodeError::MemoryFault {
-                    pc: GuestAddress(0x2000 - cut),
-                    fault: MemoryFault {
-                        address: GuestAddress(0x2000),
-                        access: Access::Execute,
-                        reason: FaultReason::Unmapped
-                    },
-                    length: cut + 1
-                }
+                0x2000 - cut,
+                0x2000,
+                FaultReason::Unmapped,
+                cut + 1,
             );
             code.map_zeroed(
                 PageRange::new(GuestAddress(0x2000), 1).unwrap(),
                 Permissions::READ,
             )
             .unwrap();
-            assert!(matches!(
-                decode_one(&code, GuestAddress(0x2000 - cut)),
-                Err(DecodeError::MemoryFault {
-                    fault: MemoryFault {
-                        reason: FaultReason::Permission,
-                        ..
-                    },
-                    ..
-                })
-            ));
+            crate::support_fetch::assert_error(
+                decode_one(&code, GuestAddress(0x2000 - cut)).unwrap_err(),
+                0x2000 - cut,
+                0x2000,
+                FaultReason::Permission,
+                cut + 1,
+            );
         }
         for prefix in [0x66, 0x67, 0xf2, 0xf3] {
             if matches!(prefix, 0x67) {
                 word_prefix::admitted(&[vec![prefix], bytes.clone()].concat());
                 continue;
             }
-            assert_eq!(
+            crate::support_fetch::assert_decode_contract(
                 decode_one(
                     &memory(0x1000, &[vec![prefix], bytes.clone()].concat()),
-                    GuestAddress(0x1000)
+                    GuestAddress(0x1000),
                 )
                 .unwrap_err(),
-                DecodeError::Unsupported(UnsupportedFeature::Opcode)
+                DecodeError::Unsupported(UnsupportedFeature::Opcode),
             );
         }
-        assert_eq!(
+        crate::support_fetch::assert_decode_contract(
             decode_one(
                 &memory(0x1000, &[vec![0xf0], bytes.clone()].concat()),
-                GuestAddress(0x1000)
+                GuestAddress(0x1000),
             )
             .unwrap_err(),
-            DecodeError::InvalidEncoding
+            DecodeError::InvalidEncoding,
         );
         for prefix in [0x26, 0x2e, 0x36, 0x3e, 0x64, 0x65] {
             word_prefix::admitted(&[vec![prefix], bytes.clone()].concat());
@@ -498,9 +444,9 @@ fn exact_or_xor_prefix_fetch_and_consumed_source_currency() {
         ]);
     }
     for bytes in excluded {
-        assert_eq!(
+        crate::support_fetch::assert_decode_contract(
             decode_one(&memory(0x1000, &bytes), GuestAddress(0x1000)).unwrap_err(),
-            DecodeError::Unsupported(UnsupportedFeature::Opcode)
+            DecodeError::Unsupported(UnsupportedFeature::Opcode),
         );
     }
     assert!(matches!(

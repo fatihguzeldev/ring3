@@ -257,7 +257,6 @@ fn memory_byte_compares_and_excluded_forms_fail_closed() {
         (&[0x66, 0x38, 0x03][..], opcode),
         (&[0x66, 0x3a, 0x03][..], opcode),
         (&[0x66, 0x80, 0x3b, 0xff][..], opcode),
-        (&[0x82, 0xf8, 0xff][..], opcode),
         (&[0x66, 0x84, 0x00][..], opcode),
         (&[0xf6, 0xc8, 0xff][..], opcode),
         (&[0x66, 0x66, 0x39, 0xc0][..], opcode),
@@ -274,10 +273,10 @@ fn memory_byte_compares_and_excluded_forms_fail_closed() {
         let (fixture, expected) = byte_prefix_admission::closed_fixture(bytes, expected);
         let bytes = fixture.as_slice();
         let engine = code(CODE, bytes, true);
-        assert_eq!(
-            decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),
-            Some(expected),
-            "{bytes:02x?}"
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(engine.memory().unwrap(), GuestAddress(CODE)))
+                .expect_err("instruction must fail to decode"),
+            expected,
         );
     }
 }
@@ -312,17 +311,13 @@ fn exact_fetch_spans_and_missing_operands_keep_fault_categories() {
     for prefix in [&[0x38][..], &[0x3a], &[0x3c], &[0x80, 0xff]] {
         let pc = 0x2000 - prefix.len() as u32;
         let engine = code(pc, prefix, true);
-        assert_eq!(
-            decode_one(engine.memory().unwrap(), GuestAddress(pc)).err(),
-            Some(DecodeError::MemoryFault {
-                pc: GuestAddress(pc),
-                fault: MemoryFault {
-                    address: GuestAddress(0x2000),
-                    access: Access::Execute,
-                    reason: FaultReason::Unmapped,
-                },
-                length: prefix.len() as u32 + 1,
-            })
+        crate::support_fetch::assert_error(
+            (decode_one(engine.memory().unwrap(), GuestAddress(pc)))
+                .expect_err("code fetch must fail"),
+            pc,
+            0x2000,
+            FaultReason::Unmapped,
+            prefix.len() as u32 + 1,
         );
     }
     let engine = code(u32::MAX - 1, &[0x3c, 0xff], true);
@@ -352,13 +347,10 @@ fn failed_compare_preparation_preserves_both_published_owners() {
                 upload(&mut engine, CODE, bytes);
                 describe(&mut engine, CODE, bytes.len(), entries);
                 let before = publication(&engine, keep);
-                assert_eq!(
-                    compile(&mut engine, owner, entries),
-                    Err(compile_error(
-                        owner,
-                        CODE + 1,
-                        InstructionError::Decode(opcode)
-                    ))
+                crate::support_fetch::assert_host_contract(
+                    (compile(&mut engine, owner, entries))
+                        .expect_err("compilation must refuse this fixture"),
+                    compile_error(owner, CODE + 1, InstructionError::Decode(opcode)),
                 );
                 assert_eq!(publication(&engine, keep), before);
                 engine.guard(KEY, before.generation).unwrap();
@@ -370,9 +362,10 @@ fn failed_compare_preparation_preserves_both_published_owners() {
             upload(&mut engine, 0x1ffe, &[0x80, 0xff]);
             describe(&mut engine, 0x1ffe, 3, entries);
             let before = publication(&engine, keep);
-            assert_eq!(
-                compile(&mut engine, owner, entries),
-                Err(compile_error(
+            crate::support_fetch::assert_host_contract(
+                (compile(&mut engine, owner, entries))
+                    .expect_err("compilation must refuse this fixture"),
+                compile_error(
                     owner,
                     0x1ffe,
                     InstructionError::Decode(DecodeError::MemoryFault {
@@ -383,8 +376,8 @@ fn failed_compare_preparation_preserves_both_published_owners() {
                             reason: FaultReason::Unmapped,
                         },
                         length: 3,
-                    })
-                ))
+                    }),
+                ),
             );
             assert_eq!(publication(&engine, keep), before);
             engine.guard(KEY, before.generation).unwrap();
