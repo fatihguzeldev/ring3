@@ -2,6 +2,14 @@ name: Windows reference behavior
 
 on:
   workflow_dispatch:
+    inputs:
+      profile:
+        description: Reference programs to run
+        type: choice
+        default: media-nls
+        options:
+          - media-nls
+          - foundations
 
 permissions:
   contents: read
@@ -24,6 +32,7 @@ jobs:
           git checkout --detach FETCH_HEAD
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Compile the original PE32 reference programs
+        if: inputs.profile != 'foundations'
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -39,6 +48,7 @@ jobs:
           Write-Output "RING3_WINDOWS version=$($os.Version) build=$($os.BuildNumber) source=$env:GITHUB_SHA"
           Get-FileHash force.exe,date.exe -Algorithm SHA256 | Format-Table -AutoSize
       - name: Record native DirectInput file behavior
+        if: inputs.profile != 'foundations'
         shell: pwsh
         run: |
           ./force.exe
@@ -46,9 +56,31 @@ jobs:
           ./force.exe --inspect-existing
           exit $LASTEXITCODE
       - name: Record native NLS date behavior
-        if: always()
+        if: always() && inputs.profile != 'foundations'
         shell: pwsh
         run: |
           if (-not (Test-Path ./date.exe)) { throw 'The reference program did not compile' }
           ./date.exe
+          exit $LASTEXITCODE
+      - name: Compile the original image ownership reference
+        if: inputs.profile == 'foundations'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $finder = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
+          $installation = & $finder -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $installation) { throw 'The Microsoft x86 C compiler is unavailable' }
+          $environment = Join-Path $installation 'VC/Auxiliary/Build/vcvars32.bat'
+          cmd /c "`"$environment`" && cl /nologo /LD /W4 engine\tests\loader\modules\fixtures\oracle\library.c /link /OUT:ring3-reference.dll /ALIGN:8192"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cmd /c "`"$environment`" && cl /nologo /std:c11 /W4 /D_CRT_SECURE_NO_WARNINGS engine\tests\loader\modules\fixtures\oracle\files.c /Fe:image-files.exe"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $os = Get-CimInstance Win32_OperatingSystem
+          Write-Output "RING3_WINDOWS version=$($os.Version) build=$($os.BuildNumber) source=$env:GITHUB_SHA"
+          Get-FileHash ring3-reference.dll,image-files.exe -Algorithm SHA256 | Format-Table -AutoSize
+      - name: Record native image mapping and file ownership
+        if: inputs.profile == 'foundations'
+        shell: pwsh
+        run: |
+          ./image-files.exe ./ring3-reference.dll
           exit $LASTEXITCODE
