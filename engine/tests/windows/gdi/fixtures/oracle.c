@@ -145,6 +145,39 @@ static void synthesized_palette_reference(void) {
     DeleteDC(dc); DeleteObject(bitmap);
 }
 
+static void indexed_ddb_reference(void) {
+    const WORD depths[] = {4, 8};
+    printf(",\"indexedDdb\":[");
+    for (unsigned i = 0; i < 2; ++i) {
+        BYTE input[4] = {0,0,0,0};
+        if (depths[i] == 4) input[0] = 0x12;
+        else { input[0] = 1; input[1] = 2; }
+        HBITMAP bitmap = CreateBitmap(2, 1, 1, depths[i], input);
+        HDC dc = CreateCompatibleDC(NULL);
+        HGDIOBJ previous = SelectObject(dc, bitmap);
+        COLORREF first = GetPixel(dc, 0, 0), second = GetPixel(dc, 1, 0);
+        SelectObject(dc, previous);
+        struct IndexedDdbInfo { BITMAPINFOHEADER header; RGBQUAD table[256]; } info = {0};
+        info.header.biSize = sizeof(info.header);
+        info.header.biWidth = 2; info.header.biHeight = -1;
+        info.header.biPlanes = 1; info.header.biBitCount = depths[i];
+        BYTE pixels[4] = {0x5a,0x5a,0x5a,0x5a};
+        SetLastError(0xabcdef01);
+        int count = GetDIBits(dc, bitmap, 0, 1, pixels, (BITMAPINFO *)&info, DIB_RGB_COLORS);
+        DWORD error = GetLastError();
+        printf("%s{\"bits\":%u,\"created\":%u,\"pixelColors\":[%lu,%lu],\"lines\":%d,\"error\":%lu,\"used\":%lu,\"pixels\":[%u,%u,%u,%u],\"table\":[",
+            i ? "," : "", depths[i], bitmap != NULL, first, second, count, error,
+            info.header.biClrUsed, pixels[0], pixels[1], pixels[2], pixels[3]);
+        for (unsigned j = 0; j < 1u << depths[i]; ++j) {
+            DWORD value; memcpy(&value, &info.table[j], sizeof(value));
+            printf("%s%lu", j ? "," : "", value);
+        }
+        printf("]}");
+        DeleteDC(dc); if (bitmap) DeleteObject(bitmap);
+    }
+    printf("]");
+}
+
 int main(void) {
     const char *classes[] = {"Button", "Edit", "Static", "ListBox", "ScrollBar", "ComboBox"};
     HWND parent = CreateWindowExA(0, "Static", "parent", WS_POPUP, 0, 0, 100, 100, NULL, NULL, NULL, NULL);
@@ -197,6 +230,7 @@ int main(void) {
     bitmap_masks_reference();
     logical_palette_reference();
     synthesized_palette_reference();
+    indexed_ddb_reference();
     DestroyWindow(parent);
     puts("}");
     return 0;
