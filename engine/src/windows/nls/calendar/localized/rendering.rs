@@ -42,6 +42,31 @@ pub fn format_calendar_date_with_layout(
         ..time
     };
     let time = from_filetime(to_filetime(time)?)?;
+    render_calendar_date(time, pattern, locale, calendar, layout)
+}
+
+pub(crate) fn format_civil_calendar_date(
+    time: SystemTime32,
+    pattern: &str,
+    locale: u32,
+    calendar: u32,
+) -> Result<String, NlsError32> {
+    render_calendar_date(
+        super::super::civil::validated(time)?,
+        pattern,
+        locale,
+        calendar,
+        None,
+    )
+}
+
+fn render_calendar_date(
+    time: SystemTime32,
+    pattern: &str,
+    locale: u32,
+    calendar: u32,
+    layout: Option<DateLayout32>,
+) -> Result<String, NlsError32> {
     let calendar = CalendarId32::from_id(calendar)?;
     let gregorian = Date::try_new_gregorian(i32::from(time.year), time.month as u8, time.day as u8)
         .map_err(|_| NlsError32::InvalidParameter)?;

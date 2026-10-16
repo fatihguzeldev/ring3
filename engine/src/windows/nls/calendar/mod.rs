@@ -8,6 +8,10 @@ pub use localized::{
     format_calendar_date, format_calendar_date_with_layout,
 };
 mod arithmetic;
+mod civil;
+pub(crate) use civil::{calendar_to_gregorian, calendar_year, full_year_pattern};
+pub(crate) use formatting::format_civil_date_with_names;
+pub(crate) use localized::format_civil_calendar_date;
 mod formatting;
 pub use arithmetic::{SystemTime32, from_filetime, shift_filetime, to_filetime};
 pub use formatting::{

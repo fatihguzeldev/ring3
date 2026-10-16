@@ -65,7 +65,7 @@ impl CalendarId32 {
             _ => locale,
         }
     }
-    pub(super) fn calendar(self) -> AnyCalendar {
+    pub(in crate::windows::nls::calendar) fn calendar(self) -> AnyCalendar {
         AnyCalendar::new(match self {
             Self::Gregorian
             | Self::GregorianUs

@@ -73,6 +73,19 @@ pub fn format_time_with_names(
     }
     format(time, pattern, false, Some(names), None)
 }
+pub(crate) fn format_civil_date_with_names(
+    time: SystemTime32,
+    pattern: &str,
+    names: &crate::windows::nls::locales::CalendarNames32,
+) -> Result<String, NlsError32> {
+    format(
+        super::civil::validated(time)?,
+        pattern,
+        true,
+        Some(names),
+        None,
+    )
+}
 fn format(
     time: SystemTime32,
     pattern: &str,
