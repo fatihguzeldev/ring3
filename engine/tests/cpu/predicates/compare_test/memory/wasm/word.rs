@@ -14,6 +14,7 @@ struct LegacyPredicateBank {
     bytes: Vec<u8>,
     instructions: usize,
     standalone: bool,
+    lengths: Vec<usize>,
 }
 
 fn legacy_predicate_banks() -> [LegacyPredicateBank; 3] {
@@ -66,18 +67,30 @@ fn legacy_predicate_banks() -> [LegacyPredicateBank; 3] {
             bytes: registers,
             instructions: 51,
             standalone: true,
+            lengths: std::iter::repeat_n([3, 3, 5, 4, 3, 5], 8)
+                .flatten()
+                .chain([4, 4, 2])
+                .collect(),
         },
         LegacyPredicateBank {
             name: "legacy-dword-memory-predicate",
             bytes: memory,
             instructions: 49,
             standalone: false,
+            lengths: std::iter::repeat_n([2, 3, 6, 4, 3, 6], 8)
+                .flatten()
+                .chain([2])
+                .collect(),
         },
         LegacyPredicateBank {
             name: "legacy-word-memory-cmov",
             bytes: conditional,
             instructions: 33,
             standalone: false,
+            lengths: std::iter::repeat_n(4, 16)
+                .chain(std::iter::repeat_n(6, 16))
+                .chain([2])
+                .collect(),
         },
     ]
 }
@@ -112,86 +125,92 @@ fn capture_legacy_predicates_and_memory_conditional_moves_without_guest_executio
     let mut captures = Vec::new();
     let mut ordinal = 0;
     for bank in legacy_predicate_banks() {
-        for resident in [false, true] {
-            for entries in [false, true] {
-                let key = LEGACY_KEY + ordinal;
-                ordinal += 1;
-                let mut engine = legacy_predicate_engine(&bank.bytes, key, entries);
-                let before = engine.arena().to_vec();
-                let wasm = if resident {
-                    let id = if entries {
-                        engine.compile_resident_entries(1, 0)
+        assert_eq!(bank.lengths.len(), bank.instructions);
+        for (index, part) in crate::support_capture_banks::bounded_parts(&bank.bytes, &bank.lengths)
+            .into_iter()
+            .enumerate()
+        {
+            for resident in [false, true] {
+                for entries in [false, true] {
+                    let key = LEGACY_KEY + ordinal;
+                    ordinal += 1;
+                    let mut engine = legacy_predicate_engine(&part.bytes, key, entries);
+                    let before = engine.arena().to_vec();
+                    let wasm = if resident {
+                        let id = if entries {
+                            engine.compile_resident_entries(1, 0)
+                        } else {
+                            engine.compile_resident(1)
+                        }
+                        .unwrap()
+                        .get();
+                        engine.guard_resident(key, id).unwrap();
+                        assert_eq!(engine.generation(), 0);
+                        engine.resident_bytes(id).unwrap().to_vec()
                     } else {
-                        engine.compile_resident(1)
-                    }
-                    .unwrap()
-                    .get();
-                    engine.guard_resident(key, id).unwrap();
-                    assert_eq!(engine.generation(), 0);
-                    engine.resident_bytes(id).unwrap().to_vec()
-                } else {
-                    let generation = if entries {
-                        engine.compile_entries(1, 0)
+                        let generation = if entries {
+                            engine.compile_entries(1, 0)
+                        } else {
+                            engine.compile(1)
+                        }
+                        .unwrap();
+                        assert_eq!(generation, 1);
+                        engine.guard(key, generation).unwrap();
+                        engine.artifact_bytes().unwrap().to_vec()
+                    };
+                    assert_eq!(engine.arena(), before);
+                    assert_eq!(&wasm[..8], b"\0asm\x01\0\0\0");
+                    let owner = if resident { "resident" } else { "replacement" };
+                    let profile = if entries { "entry" } else { "explicit" };
+                    captures.push((
+                        format!("{}-part-{index}-{owner}-{profile}.wasm", bank.name),
+                        wasm,
+                        format!(
+                            "\"bank\":\"{}\",\"owner\":\"{owner}\",\"entries\":{entries},\"key_hex\":\"{key:016x}\",\"instructions\":{},\"source_offset\":{},\"source_bytes\":{},\"source_instructions\":{}",
+                            bank.name, part.instructions, part.offset, part.original_bytes, part.original_instructions
+                        ),
+                    ));
+                }
+            }
+            if bank.standalone {
+                for entries in [false, true] {
+                    let key = LEGACY_KEY + ordinal;
+                    ordinal += 1;
+                    let engine = legacy_predicate_engine(&part.bytes, key, entries);
+                    let before = engine.arena().to_vec();
+                    let memory = engine.memory().unwrap();
+                    let artifact = if entries {
+                        compile_entry_region(
+                            memory,
+                            &[GuestAddress(LEGACY_CODE)],
+                            CompileLimits::default(),
+                        )
                     } else {
-                        engine.compile(1)
+                        compile_region(
+                            memory,
+                            &[BlockSpec {
+                                entry: GuestAddress(LEGACY_CODE),
+                                byte_length: part.bytes.len() as u32,
+                            }],
+                            CompileLimits::default(),
+                        )
                     }
                     .unwrap();
-                    assert_eq!(generation, 1);
-                    engine.guard(key, generation).unwrap();
-                    engine.artifact_bytes().unwrap().to_vec()
-                };
-                assert_eq!(engine.arena(), before);
-                assert_eq!(&wasm[..8], b"\0asm\x01\0\0\0");
-                let owner = if resident { "resident" } else { "replacement" };
-                let profile = if entries { "entry" } else { "explicit" };
-                captures.push((
-                    format!("{}-{owner}-{profile}.wasm", bank.name),
-                    wasm,
-                    format!(
-                        "\"bank\":\"{}\",\"owner\":\"{owner}\",\"entries\":{entries},\"key_hex\":\"{key:016x}\",\"instructions\":{}",
-                        bank.name, bank.instructions
-                    ),
-                ));
-            }
-        }
-        if bank.standalone {
-            for entries in [false, true] {
-                let key = LEGACY_KEY + ordinal;
-                ordinal += 1;
-                let engine = legacy_predicate_engine(&bank.bytes, key, entries);
-                let before = engine.arena().to_vec();
-                let memory = engine.memory().unwrap();
-                let artifact = if entries {
-                    compile_entry_region(
-                        memory,
-                        &[GuestAddress(LEGACY_CODE)],
-                        CompileLimits::default(),
-                    )
-                } else {
-                    compile_region(
-                        memory,
-                        &[BlockSpec {
-                            entry: GuestAddress(LEGACY_CODE),
-                            byte_length: bank.bytes.len() as u32,
-                        }],
-                        CompileLimits::default(),
-                    )
+                    assert_eq!(artifact.metadata().instructions, part.instructions);
+                    assert_eq!(artifact.metadata().blocks, 1);
+                    let wasm = artifact.wasm_bytes(memory).unwrap().to_vec();
+                    assert_eq!(engine.arena(), before);
+                    assert_eq!(&wasm[..8], b"\0asm\x01\0\0\0");
+                    let profile = if entries { "entry" } else { "explicit" };
+                    captures.push((
+                        format!("{}-part-{index}-standalone-{profile}.wasm", bank.name),
+                        wasm,
+                        format!(
+                            "\"bank\":\"{}\",\"owner\":\"standalone\",\"entries\":{entries},\"key_hex\":\"{key:016x}\",\"instructions\":{},\"source_offset\":{},\"source_bytes\":{},\"source_instructions\":{}",
+                            bank.name, part.instructions, part.offset, part.original_bytes, part.original_instructions
+                        ),
+                    ));
                 }
-                .unwrap();
-                assert_eq!(artifact.metadata().instructions, bank.instructions);
-                assert_eq!(artifact.metadata().blocks, 1);
-                let wasm = artifact.wasm_bytes(memory).unwrap().to_vec();
-                assert_eq!(engine.arena(), before);
-                assert_eq!(&wasm[..8], b"\0asm\x01\0\0\0");
-                let profile = if entries { "entry" } else { "explicit" };
-                captures.push((
-                    format!("{}-standalone-{profile}.wasm", bank.name),
-                    wasm,
-                    format!(
-                        "\"bank\":\"{}\",\"owner\":\"standalone\",\"entries\":{entries},\"key_hex\":\"{key:016x}\",\"instructions\":{}",
-                        bank.name, bank.instructions
-                    ),
-                ));
             }
         }
         captures.push((
@@ -200,7 +219,7 @@ fn capture_legacy_predicates_and_memory_conditional_moves_without_guest_executio
             format!("\"kind\":\"x86\",\"instructions\":{}", bank.instructions),
         ));
     }
-    assert_eq!((ordinal, captures.len()), (14, 17));
+    assert_eq!((ordinal, captures.len()), (90, 93));
     if let Some(directory) = directory {
         let mut files = Vec::new();
         for (name, bytes, metadata) in captures {
@@ -217,7 +236,7 @@ fn capture_legacy_predicates_and_memory_conditional_moves_without_guest_executio
             ));
         }
         let manifest = format!(
-            "{{\"schema_version\":1,\"legacy_only\":true,\"modules\":14,\"raw_banks\":3,\"files\":[{}]}}\n",
+            "{{\"schema_version\":2,\"legacy_only\":true,\"modules\":90,\"raw_banks\":3,\"files\":[{}]}}\n",
             files.join(",")
         );
         OpenOptions::new()

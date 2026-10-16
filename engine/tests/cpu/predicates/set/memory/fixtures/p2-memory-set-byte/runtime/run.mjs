@@ -1,4 +1,4 @@
-import {pageFaultExit} from '../../../../../../../support/wasm/page-fault.mjs';
+import {pageFaultExit, pageFaultPacket} from '../../../../../../../support/wasm/page-fault.mjs';
 import {detectionGuardName, generatedImports, attachDetectionApi} from '../../../../../../../support/wasm/binding.mjs';
 import {ARENA_SIZE} from '../../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
@@ -103,7 +103,7 @@ const counts = {contexts: 0, runs: 0, retired: 0, canonical_cases: 0, ignored_ca
   helper_calls: 0, diagnostic_read8: 0, diagnostic_fault_read8: 0, diagnostic_read32: 0, public_guard_controls: 0, selected_ranges: 0, whole_pages: 0};
 const arities = {open: 3, close: 0, arena_ptr: 0, map: 3, protect: 3, upload: 2, read8: 1, read32: 1,
   compile: 1, compile_entries: 2, compile_resident: 1, compile_resident_entries: 2,
-  generation: 0, module_ptr: 0, module_len: 0, guard: 6, guard_resident: 7, store8: 2, store_resident8: 6, cpu_read8: 1, cpu_store8: 2, cpu_store_resident8: 6};
+  discard_unacknowledged_resident: 4, generation: 0, module_ptr: 0, module_len: 0, guard: 6, guard_resident: 7, store8: 2, store_resident8: 6, cpu_read8: 1, cpu_store8: 2, cpu_store_resident8: 6};
 const irrelevantSeeds = [0, 0x10, 0x400, 0x410];
 const initialRegisters = [0x1234807f, 0x23457f80, 0x34560f10, 0x4567ff00, 0x56789abc, 0x6789abcd, 0x789abcde, 0x89abcdef];
 const anchors = [[0x802, 2], [2, 0x802], [3, 2], [2, 3], [0x42, 2], [2, 0x42], [3, 2], [2, 3],
@@ -160,6 +160,28 @@ for (let start = 0; start < 128; start += 43) batch(ignoredForms.slice(start, st
 for (let start = 0; start < 128; start += 43) batch(eaForms.slice(start, start + 43), 0x8400 + Math.floor(start / 43) * 0x400, 'ea');
 assert.equal(batches.length, 7);
 
+// retain the original authored banks above; bounded captures copy every form unchanged.
+const captureBanks = batches.flatMap(original => {
+  const result = [];
+  for (let offset = 0; offset < original.forms.length; offset += 8) {
+    const forms = original.forms.slice(offset, offset + 8).map(form => ({...form}));
+    const index = result.length;
+    result.push({original: original.index, first: offset === 0, forms, index});
+  }
+  return result;
+});
+for (const [index, bank] of captureBanks.entries()) {
+  bank.index = index;
+  bank.pc = 0x8000 + index * 0x100;
+  let pc = bank.pc;
+  for (const form of bank.forms) {form.pc = pc; pc += form.bytes.length;}
+  bank.code = Buffer.from([...bank.forms.flatMap(form => form.bytes), 0xeb, 0, 0x0f, 0x0b]);
+  assert.ok(bank.code.length <= 0x100 && bank.forms.length <= 8);
+
+}
+assert.equal(captureBanks.length, 38);
+assert.deepEqual(captureBanks.flatMap(bank => bank.forms.map(form => form.bytes)), batches.flatMap(bank => bank.forms.map(form => form.bytes)), 'all original encodings occur once in order');
+
 const liveCode = readFileSync(join(output, 'live.x86'));
 assert.deepEqual(liveCode, Buffer.from('38c8be0f4000000f90060f90c38a06eb000f0b', 'hex'));
 const smcCodes = new Map();
@@ -189,7 +211,7 @@ const exit = (reason, retired, version = 2, fault = null) =>
         [reason, retired, fault?.reason ?? 0, fault?.address ?? 0, fault ? 2 : 0, fault ? 1 : 0],
         version
       );
-const storePacket = fault => record('R3MH', 40, fault ? [1, 0, fault.reason, fault.address, 2, 1] : [0, 0, 0, 0, 0, 1], 10);
+const storePacket = fault => fault ? pageFaultPacket({errorCode: 6 | Number(fault.reason === 2), address: fault.address, access: 2, length: 1}) : record('R3MH', 40, [0, 0, 0, 0, 0, 1], 10);
 const readPacket = value => record('R3MH', 40, [0, value, 0, 0, 0, 1], 2);
 const cpuReadPacket = value => record('R3MH', 40, [0, value, 0, 0, 0, 1], 10);
 const arena = c => Buffer.from(new Uint8Array(c.memory.buffer, c.base, SIZE));
@@ -325,32 +347,43 @@ function microCase(c, unit, form, registers, flags, initialByte, group) {
   counts[group + '_cases']++;
 }
 for (const owner of ['replacement', 'resident']) for (const entries of [false, true]) {
-  const c = fresh(owner, entries, 'finite conditions/ignored bits/EAs'), code = Buffer.alloc(4096, 0xcc);
-  for (const item of batches) code.set(item.code, item.pc - 0x8000);
-  map(c, 0x8000, code, 7);
+  const c = fresh(owner, entries, 'finite conditions/ignored bits/EAs'), code = Buffer.alloc(3 * 4096, 0xcc);
+  for (const item of captureBanks) code.set(item.code, item.pc - 0x8000);
+  for (let offset = 0; offset < code.length; offset += 4096) map(c, 0x8000 + offset, code.subarray(offset, offset + 4096), 7);
   for (const address of [0x3000, 0xfffff000]) map(c, address, Buffer.from(Array.from({length: 4096}, (_, i) => i % 251 + 1)));
   let first, last;
   for (const item of batches) {
-    const unit = compile(c, item.group, [{pc: item.pc, length: item.code.length - 2}], item.forms.length + 1);
-    first ??= unit; last = unit; pages(c, item.index, 'before group');
-    for (const form of item.forms) {
-      const registers = [...initialRegisters];
-      if (form.values) for (const [index, value] of Object.entries(form.values)) registers[Number(index)] = value;
-      else registers[6] = form.address;
-      if (item.group === 'canonical') {
-        for (let relevant = 0; relevant < 32; relevant++) for (const irrelevant of irrelevantSeeds) {
-          const f = canonicalFlags(relevant, irrelevant), original = [0, 1, 0xa5][(relevant + irrelevantSeeds.indexOf(irrelevant) + form.condition) % 3];
-          microCase(c, unit, form, registers, f, original, 'canonical');
-        }
-      } else for (const truth of [1, 0]) {
-        const f = anchors[form.condition][truth ? 0 : 1] + (form.ignored % 2 ? 0x410 : 0x10);
-        microCase(c, unit, form, registers, f, truth ? 0 : 1, item.group);
+    pages(c, item.index, 'before group');
+    for (const bank of captureBanks.filter(bank => bank.original === item.index)) {
+      if (owner === 'resident' && last && last !== first) {
+        host(c, 'discard_unacknowledged_resident', [c.low, c.high, last.low, last.high]);
+        c.resident--;
       }
+      const unit = compile(c, `${item.group}-${bank.index}`, [{pc: bank.pc, length: bank.code.length - 2}], bank.forms.length + 1);
+      first ??= unit; last = unit;
+      assert.ok(c.resident <= 2, 'only the held first and current units remain live');
+      for (const form of bank.forms) {
+        const registers = [...initialRegisters];
+        if (form.values) for (const [index, value] of Object.entries(form.values)) registers[Number(index)] = value;
+        else registers[6] = form.address;
+        if (item.group === 'canonical') {
+          for (let relevant = 0; relevant < 32; relevant++) for (const irrelevant of irrelevantSeeds) {
+            const f = canonicalFlags(relevant, irrelevant), original = [0, 1, 0xa5][(relevant + irrelevantSeeds.indexOf(irrelevant) + form.condition) % 3];
+            microCase(c, unit, form, registers, f, original, 'canonical');
+          }
+        } else for (const truth of [1, 0]) {
+          const f = anchors[form.condition][truth ? 0 : 1] + (form.ignored % 2 ? 0x410 : 0x10);
+          microCase(c, unit, form, registers, f, truth ? 0 : 1, item.group);
+        }
+      }
+      if (bank.first) {
+        seed(c, bank.pc); run(c, unit, 0, cpu(c), 'zero before store', {retired: 0});
+        input(c, 96, words([1])); run(c, unit, 1, cpu(c), 'cancel before store', {reason: 2, retired: 0});
+        run(c, unit, 0, cpu(c), 'cancel precedes zero', {reason: 2, retired: 0}); input(c, 96, words([0])); counts.controls += 3;
+      }
+      guard(c, unit);
     }
-    seed(c, item.pc); run(c, unit, 0, cpu(c), 'zero before store', {retired: 0});
-    input(c, 96, words([1])); run(c, unit, 1, cpu(c), 'cancel before store', {reason: 2, retired: 0});
-    run(c, unit, 0, cpu(c), 'cancel precedes zero', {reason: 2, retired: 0}); input(c, 96, words([0])); counts.controls += 3;
-    guard(c, unit); pages(c, item.index, 'after group');
+    pages(c, item.index, 'after group');
   }
   seed(c, batches[0].pc);
   run(c, first, 0, cpu(c), 'retained first owner before any source mutation', owner === 'replacement' ? {status: 3, retired: 0} : {retired: 0});
@@ -363,7 +396,7 @@ for (const owner of ['replacement', 'resident']) for (const entries of [false, t
   guardProbe(c, last, 'zero generation or wrong resident id high', 3, owner === 'resident' ? {highId: last.high + 1} : {id: 0});
   guardProbe(c, last, 'current malformed guard pointer', 1, {pointer: 0xffffffff});
   run(c, last, 1, cpu(c), 'current owner rejects malformed pointers before store', {status: 1, pointers: [0xffffffff, 0xffffffff, 1, 0xffffffff]});
-  upload(c, batches[6].pc, batches[6].code.subarray(0, 1)); input(c, 96, words([1]));
+  upload(c, captureBanks.at(-1).pc, captureBanks.at(-1).code.subarray(0, 1)); input(c, 96, words([1]));
   guardProbe(c, last, 'same-byte source mutation before guard pointer validation', 4, {pointer: 0xffffffff});
   run(c, last, 0, cpu(c), 'same-byte source input stale before cancel/budget/pointers', {status: 4, pointers: [0xffffffff, 0xffffffff, 0, 0xffffffff]});
   close(c); run(c, last, 0, cpu(c), 'closed owner before malformed pointers', {status: 5, pointers: [0xffffffff, 0xffffffff, 0, 0xffffffff]}); counts.controls += 5;
@@ -432,12 +465,12 @@ function smcPath(owner, entries, truth, same) {
 }
 for (const owner of ['replacement', 'resident']) for (const entries of [false, true]) for (const truth of [1, 0]) for (const same of [1, 0]) smcPath(owner, entries, truth, same);
 assert.equal(rows.length, 10240); assert.equal(counts.canonical_cases, 8192); assert.equal(counts.ignored_cases, 1024); assert.equal(counts.ea_cases, 1024);
-assert.equal(counts.contexts, 28); assert.equal(modules.length, 84);
+assert.equal(counts.contexts, 28); assert.equal(modules.length, 208);
 assert.equal(counts.live_paths, 8); assert.equal(counts.live_faults, 32); assert.equal(counts.repair_phases, 16);
 assert.equal(counts.smc_paths, 16); assert.equal(counts.identity_smc, 8);
 assert.equal(counts.runs, 10640); assert.equal(counts.retired, 10368); assert.equal(counts.helper_calls, 10304);
 assert.equal(counts.diagnostic_fault_read8, 4); assert.equal(counts.public_guard_controls, 24); assert.equal(counts.controls, 280);
-assert.equal(counts.selected_ranges, 10280); assert.equal(counts.whole_pages, 256);
+assert.equal(counts.selected_ranges, 10280); assert.equal(counts.whole_pages, 368);
 assert.equal(counts.diagnostic_read8, counts.selected_ranges * 32); assert.equal(counts.diagnostic_read32, counts.whole_pages * 1024);
 const pe = runPeProof({engine, output, initial});
 assert.deepEqual(sources(), sourcePins); assert.equal(hash(readFileSync(enginePath)), engine.sha256);
@@ -450,7 +483,7 @@ const result = {status: 'ok', engine_sha256: engine.sha256, source_pins: sourceP
     'complete arena asserted after each generated run before diagnostics, including dirtyFP128; saved rows are selected observations rather than raw full-arena dumps',
     '32-byte selected RAM range after each semantic row; whole declared pages only at group/live/SMC boundaries, not per-row whole guest memory',
     'actual forwarded guest memory helper chronology/status/packets is separate from public read8/read32 diagnostics; guards are canonical and not instrumented',
-    'seven micro bank captures use resident7 of unchanged8slots; max8blocks/64instructions/65536Wasm unchanged; replacement banks compiled and exercised sequentially',
+    'the seven original byte banks remain exact;38 bounded captures retain every original encoding once; at most2 live resident units of unchanged8slots, max8blocks/64instructions/65536Wasm unchanged',
     'live repair scope is map-zero/protect-only; changed-RAM false overwrites are covered in finite rows, not a separate live host RAM edit',
     'false stores need Write permission; live map/protect-only repairs retain stopped CPU/FLAGS and do not replay CMP/MOV; true/false and same/changed SMC commit before6, reject4, resume current successor',
     'routine fixture requires frozen authored bytes and engine capabilities, no clang/LLVM execution; historical assembly encoding proof remains separate',
