@@ -45,3 +45,5 @@ pub mod rawinput;
 pub mod console;
 pub mod native;
 pub mod security;
+
+pub mod activation;

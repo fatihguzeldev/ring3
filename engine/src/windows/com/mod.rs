@@ -7,3 +7,6 @@ pub use identity::{
 };
 pub use registry::ComRegistry32;
 pub(crate) use registry::OwnedReferenceChanges32;
+
+mod threading;
+pub use threading::ServerThreadingModel32;

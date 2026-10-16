@@ -50,3 +50,6 @@ Naga and Naga Types (Copyright 2025 The gfx-rs developers) are used only
 for development-time validation of the engine-owned patch WGSL kernel.
 They are licensed here under Apache-2.0; see LICENSE. Dependency license
 choices and additional notices are retained in licenses/naga-validation.txt.
+
+The manifest adapter uses roxmltree under Apache-2.0; see LICENSE.
+Its memchr dependency uses the MIT notice in licenses/memchr.txt.
