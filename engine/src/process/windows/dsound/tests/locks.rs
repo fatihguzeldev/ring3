@@ -138,3 +138,85 @@ fn capture_unlock_preserves_new_host_pcm_while_publishing_changed_guest_bytes() 
     assert_eq!(buffer.native.position(), 0);
     assert!(runtime.locks.entries.is_empty());
 }
+
+#[test]
+fn streaming_locks_recycle_unmapped_ranges_without_overlapping_a_held_lock() {
+    use crate::memory::{PAGE_SIZE, PageRange};
+    let (mut runtime, mut memory, mut audio, device) = context();
+    let bounds = PageRange::new(GuestAddress(0x40000000), 2).unwrap();
+    runtime.config.locks = bounds;
+    runtime.locks = super::super::locks::LockRegistry32::new(bounds, 16).unwrap();
+    let held = buffer(&mut runtime, &mut memory, &mut audio, device, 0);
+    let stream = buffer(&mut runtime, &mut memory, &mut audio, device, 0);
+    fn lock(
+        runtime: &mut super::super::DSoundRuntime32,
+        memory: &mut crate::memory::AddressSpace,
+        audio: &crate::audio::AudioContext,
+        pointer: GuestAddress,
+    ) -> Result<u32, HResult> {
+        runtime.lock_buffer(
+            memory,
+            audio,
+            pointer,
+            &[
+                pointer.0,
+                0,
+                4,
+                DATA + 20,
+                DATA + 24,
+                DATA + 28,
+                DATA + 32,
+                0,
+            ],
+        )
+    }
+    lock(&mut runtime, &mut memory, &audio, held).unwrap();
+    let held_pointer = read(&memory, DATA + 20);
+    let mut mapping = 0;
+    for _ in 0..16 {
+        lock(&mut runtime, &mut memory, &audio, stream).unwrap();
+        let pointer = read(&memory, DATA + 20);
+        assert_eq!(pointer, held_pointer + PAGE_SIZE);
+        let next = memory.mapping_version_at(GuestAddress(pointer)).unwrap();
+        assert!(next > mapping);
+        mapping = next;
+        runtime
+            .unlock_buffer(
+                &mut memory,
+                &mut audio,
+                stream,
+                &[stream.0, pointer, 4, 0, 0],
+            )
+            .unwrap();
+        assert_eq!(runtime.locks.entries.len(), 1);
+        assert!(memory.read(GuestAddress(held_pointer), &mut [0; 4]).is_ok());
+    }
+    let version = memory.transaction_version();
+    let output = read(&memory, DATA + 20);
+    let mapped = memory.mapped_pages();
+    memory.exhaust_versions_for_test();
+    assert!(lock(&mut runtime, &mut memory, &audio, stream).is_err());
+    assert_eq!(read(&memory, DATA + 20), output);
+    assert_eq!(memory.mapped_pages(), mapped);
+    assert_eq!(runtime.locks.entries.len(), 1);
+    memory.restore_version_for_test(version);
+    lock(&mut runtime, &mut memory, &audio, stream).unwrap();
+    let pointer = read(&memory, DATA + 20);
+    runtime
+        .unlock_buffer(
+            &mut memory,
+            &mut audio,
+            stream,
+            &[stream.0, pointer, 4, 0, 0],
+        )
+        .unwrap();
+    runtime
+        .unlock_buffer(
+            &mut memory,
+            &mut audio,
+            held,
+            &[held.0, held_pointer, 4, 0, 0],
+        )
+        .unwrap();
+    assert!(runtime.locks.entries.is_empty());
+}

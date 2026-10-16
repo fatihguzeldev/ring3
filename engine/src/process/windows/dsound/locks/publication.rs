@@ -59,7 +59,8 @@ impl DSoundRuntime32 {
             .map_err(|_| HResult::OUT_OF_MEMORY)?;
         staging.extend_from_slice(&data[span.offset as usize..(span.offset + span.first) as usize]);
         staging.extend_from_slice(&data[..span.second as usize]);
-        let first = (self.locks.next * PAGE_SIZE as usize) as u32;
+        let range = self.locks.available_range(memory, staging.len())?;
+        let first = (range.first * PAGE_SIZE as usize) as u32;
         let second = if span.second == 0 {
             0
         } else {
@@ -75,8 +76,12 @@ impl DSoundRuntime32 {
         ];
         let count = if args[5] == 0 { 2 } else { 4 };
         words[..count].sort_unstable_by_key(|word| word.address.0);
-        self.locks
-            .install(memory, &staging, &words[..count], |range, mapping| Lock32 {
+        self.locks.install(
+            memory,
+            range,
+            &staging,
+            &words[..count],
+            |range, mapping| Lock32 {
                 object: object.id,
                 span,
                 range,
@@ -84,7 +89,8 @@ impl DSoundRuntime32 {
                 first,
                 second,
                 original: None,
-            })?;
+            },
+        )?;
         if capture {
             self.locks.entries.last_mut().unwrap().original = Some(staging);
         }

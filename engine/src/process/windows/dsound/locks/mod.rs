@@ -14,7 +14,6 @@ pub(super) struct Lock32 {
 }
 pub(super) struct LockRegistry32 {
     pub range: PageRange,
-    pub next: usize,
     pub entries: Vec<Lock32>,
     pub memory: Option<u64>,
     pub limit: usize,
@@ -30,7 +29,6 @@ impl LockRegistry32 {
             .map_err(|_| super::DSoundError32::Allocation)?;
         Ok(Self {
             range,
-            next: range.first,
             entries,
             memory: None,
             limit: limit as usize,

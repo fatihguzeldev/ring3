@@ -8,9 +8,24 @@ use crate::{
 };
 
 impl LockRegistry32 {
+    pub(in crate::process::windows::dsound) fn available_range(
+        &self,
+        memory: &AddressSpace,
+        byte_length: usize,
+    ) -> Result<PageRange, HResult> {
+        if self.memory.is_some_and(|id| id != memory.identity()) {
+            return Err(HResult::INVALID_CALL);
+        }
+        let pages = byte_length.max(1).div_ceil(PAGE_SIZE as usize);
+        memory
+            .find_unmapped_range(self.range, pages as u32, PAGE_SIZE)
+            .map_err(Into::into)
+    }
+
     pub(in crate::process::windows::dsound) fn install(
         &mut self,
         memory: &mut AddressSpace,
+        range: PageRange,
         bytes: &[u8],
         words: &[WordWrite32],
         lock: impl FnOnce(PageRange, u64) -> Lock32,
@@ -20,13 +35,13 @@ impl LockRegistry32 {
             return Err(HResult::INVALID_CALL);
         }
         let count = bytes.len().max(1).div_ceil(PAGE_SIZE as usize);
-        let end = self
-            .next
-            .checked_add(count)
-            .filter(|end| *end <= self.range.first + self.range.count)
-            .ok_or(HResult::OUT_OF_MEMORY)?;
-        let start = GuestAddress((self.next * PAGE_SIZE as usize) as u32);
-        let range = PageRange::new(start, count as u32)?;
+        if range.count != count
+            || range.first < self.range.first
+            || range.first + range.count > self.range.first + self.range.count
+        {
+            return Err(HResult::INVALID_PARAM);
+        }
+        let start = GuestAddress((range.first * PAGE_SIZE as usize) as u32);
         let mut pages = Vec::new();
         pages
             .try_reserve_exact(count)
@@ -41,7 +56,6 @@ impl LockRegistry32 {
         }
         memory.install_pages_with_word_writes(&pages, words)?;
         self.entries.push(lock(range, memory.transaction_version()));
-        self.next = end;
         self.memory = Some(memory.identity());
         Ok(())
     }
@@ -68,13 +82,11 @@ impl LockRegistry32 {
         memory: &mut AddressSpace,
         bytes: &[u8],
     ) -> Result<(GuestAddress, u64), HResult> {
-        if bytes.len() > PAGE_SIZE as usize
-            || self.next == self.range.first + self.range.count
-            || self.memory.is_some_and(|id| id != memory.identity())
-        {
+        if bytes.len() > PAGE_SIZE as usize {
             return Err(HResult::OUT_OF_MEMORY);
         }
-        let address = GuestAddress((self.next * PAGE_SIZE as usize) as u32);
+        let range = self.available_range(memory, bytes.len())?;
+        let address = GuestAddress((range.first * PAGE_SIZE as usize) as u32);
         memory.install_pages_with_word_writes(
             &[PageInitialization {
                 address,
@@ -83,7 +95,6 @@ impl LockRegistry32 {
             }],
             &[],
         )?;
-        self.next += 1;
         self.memory = Some(memory.identity());
         Ok((address, memory.transaction_version()))
     }
