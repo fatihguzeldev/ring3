@@ -53,3 +53,5 @@ pub mod gdi;
 pub mod version;
 
 pub mod shell;
+
+pub mod automation;
