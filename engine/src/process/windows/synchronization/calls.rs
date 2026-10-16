@@ -5,8 +5,8 @@ use crate::{
     windows::{
         CallFrame32, CallingConvention32, WindowsApi32,
         synchronization::{
-            MessageWait32, SynchronizationError32 as Error, WAIT_FAILED, WaitMode32, WaitOutcome32,
-            WaitResult32,
+            MessageWait32, SynchronizationApi32, SynchronizationError32 as Error, WAIT_FAILED,
+            WaitMode32, WaitOutcome32, WaitResult32,
         },
     },
 };
@@ -22,7 +22,11 @@ impl EngineInstance {
         let kernel =
             WindowsApi32::from_id(id).filter(|api| (0x0001_0011..=0x0001_0020).contains(&api.id()));
         let message_wait = matches!(id, 0x0002_0029 | 0x0002_002a | 0x0002_0059);
-        if kernel.is_none() && !message_wait {
+        let object = SynchronizationApi32::from_id(id).filter(|api| {
+            SynchronizationApi32::object_apis().contains(api)
+                || *api == SynchronizationApi32::QueueUserAPC
+        });
+        if kernel.is_none() && !message_wait && object.is_none() {
             return Ok(false);
         }
         self.validate_windows_provider_owner(owner)?;
@@ -47,22 +51,70 @@ impl EngineInstance {
         Self::prepare_completed_call(frame.complete(0))?;
         self.check_windows_thread_write()?;
         let (_, now) = self.cpu_clock.monotonic_bounds()?;
+        let thread = self.current_windows_thread_id()?;
         self.synchronization_mut()?
-            .observe_time(now)
+            .set_current_thread(thread)
             .map_err(HostError::Synchronization)?;
-        let outcome = if let Some(api) = kernel {
+        if self.synchronization()?.now_ns() != now
+            || self
+                .synchronization()?
+                .next_timer_deadline()
+                .is_some_and(|due| due <= now)
+        {
+            let clock = self.prepare_synchronization_clock(now)?;
+            self.commit_synchronization_clock(clock);
+        }
+        let outcome = if let Some(api) = object {
+            self.execute_object_synchronization_call(api, frame.arguments())
+        } else if let Some(api) = kernel {
             self.execute_synchronization_call(api, frame.arguments())
         } else {
             self.execute_message_wait(id, frame.arguments())
         };
+        if object == Some(SynchronizationApi32::InitializeCriticalSection)
+            && matches!(
+                &outcome,
+                Err(HostError::Synchronization(
+                    Error::Capacity | Error::Allocation
+                )) | Err(HostError::WindowsMemory(
+                    crate::windows::memory::MemoryError32::Capacity
+                        | crate::windows::memory::MemoryError32::Allocation
+                ))
+            )
+        {
+            let mut original = self.windows_context_state()?;
+            original.state = frame.complete(0);
+            let record = crate::windows::exceptions::ExceptionRecord32::new(
+                0xc000_0017,
+                0,
+                original.state.eip,
+                &[],
+            )
+            .map_err(HostError::Exception)?;
+            self.begin_exception_delivery(record, original, owner, None, None, None)?;
+            return Ok(true);
+        }
         let outcome = match outcome {
             Ok(outcome) => outcome,
+            Err(HostError::Thread(error)) => WaitOutcome32::Ready(WaitResult32 {
+                value: 0,
+                last_error: Some(error.win32()),
+            }),
             Err(HostError::Synchronization(error)) => WaitOutcome32::Ready(WaitResult32 {
                 value: if id != 0x0002_0059 && (kernel.is_some_and(is_wait) || message_wait) {
                     WAIT_FAILED
                 } else {
                     0
                 },
+                last_error: Some(error.win32()),
+            }),
+            Err(HostError::WindowsMemory(crate::windows::memory::MemoryError32::Exhausted)) => {
+                return Err(HostError::Memory(
+                    crate::memory::MemoryError::VersionExhausted,
+                ));
+            }
+            Err(HostError::WindowsMemory(error)) => WaitOutcome32::Ready(WaitResult32 {
+                value: 0,
                 last_error: Some(error.win32()),
             }),
             Err(error) => return Err(error),
@@ -80,7 +132,7 @@ impl EngineInstance {
                     .wait_details(wait)
                     .unwrap()
             })
-            .unwrap_or((None, false, None));
+            .unwrap_or((None, call_alertable(kernel, id, frame.arguments()), None));
         self.synchronization.as_mut().unwrap().reply = Some(Reply32 {
             owner,
             token,
@@ -91,18 +143,31 @@ impl EngineInstance {
             alertable,
             wake_mask: message.map_or(0, |message| message.mask),
             boolean_result: id == 0x0002_0059,
+            critical: object
+                .filter(|api| *api == SynchronizationApi32::EnterCriticalSection)
+                .filter(|_| wait.is_some())
+                .map(|_| GuestAddress(frame.arguments()[0])),
         });
         self.finish_synchronization_reply()?;
         Ok(true)
     }
-    pub(super) fn finish_synchronization_reply(&mut self) -> Result<(), HostError> {
+    pub(in crate::process) fn finish_synchronization_reply(&mut self) -> Result<(), HostError> {
         let mut reply = self
             .synchronization
             .as_ref()
             .and_then(|runtime| runtime.reply)
             .ok_or(HostError::Call(CallError::InvalidToken))?;
         self.checked_pending_call(reply.owner, reply.token)?;
+        if reply.alertable && self.has_pending_thread_apc(self.threads.current_id()) {
+            return Ok(());
+        }
         if reply.result.is_none() {
+            if let Some(address) = reply.critical {
+                self.check_critical(address)?;
+                self.memory()?
+                    .ensure_transaction_versions(1)
+                    .map_err(HostError::Memory)?;
+            }
             let wait = reply.wait.ok_or(HostError::Infrastructure)?;
             let result = self
                 .synchronization
@@ -117,10 +182,17 @@ impl EngineInstance {
             if reply.wake_mask != 0
                 && let Some(context) = self.user32.as_mut()
             {
-                context.observe_wait_queue(reply.wake_mask);
+                context.observe_wait_queue(self.threads.current_id(), reply.wake_mask);
             }
             reply.result = Some(result);
             self.synchronization.as_mut().unwrap().reply = Some(reply);
+        }
+        if let Some(address) = reply.critical {
+            self.check_critical(address)?;
+            self.memory()?
+                .ensure_transaction_versions(1)
+                .map_err(HostError::Memory)?;
+            self.publish_critical_state(address);
         }
         let result = reply.result.unwrap();
         let value = if reply.boolean_result {
@@ -326,7 +398,7 @@ impl EngineInstance {
                 .user32
                 .as_ref()
                 .ok_or(HostError::Synchronization(Error::Unsupported))?
-                .wait_queue_status();
+                .wait_queue_status(engine.current_windows_thread_id()?);
             engine
                 .synchronization_mut()?
                 .wait_with_messages_projected(
@@ -349,7 +421,11 @@ impl EngineInstance {
                 )
                 .map_err(HostError::Synchronization)
         })?;
-        self.user32.as_mut().unwrap().observe_wait_queue(mask);
+        let thread = self.current_windows_thread_id()?;
+        self.user32
+            .as_mut()
+            .unwrap()
+            .observe_wait_queue(thread, mask);
         Ok(result)
     }
 }
@@ -362,4 +438,14 @@ fn is_wait(api: WindowsApi32) -> bool {
             | WindowsApi32::WaitForMultipleObjectsEx
             | WindowsApi32::SignalObjectAndWait
     )
+}
+
+fn call_alertable(api: Option<WindowsApi32>, id: u32, args: &[u32]) -> bool {
+    match api {
+        Some(WindowsApi32::WaitForSingleObjectEx) => args[2] != 0,
+        Some(WindowsApi32::WaitForMultipleObjectsEx) => args[4] != 0,
+        Some(WindowsApi32::SleepEx) => args[1] != 0,
+        Some(WindowsApi32::SignalObjectAndWait) => args[3] != 0,
+        _ => id == 0x0002_002a && args[4] & 2 != 0,
+    }
 }

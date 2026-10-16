@@ -2,8 +2,7 @@ use super::{SynchronizationRuntime32, WindowsWait32};
 use crate::{
     process::{CallError, EngineInstance, HostError},
     windows::synchronization::{
-        PreparedSignals32, SynchronizationContext32, SynchronizationError32 as Error,
-        SynchronizationLimits32,
+        SynchronizationContext32, SynchronizationError32 as Error, SynchronizationLimits32,
     },
 };
 
@@ -28,11 +27,19 @@ impl EngineInstance {
         }
         let (_, now) = self.cpu_clock.monotonic_bounds()?;
         let epoch = crate::process::media::next_session()?;
-        let context = SynchronizationContext32::new(epoch, limits, now)
+        let mut context = SynchronizationContext32::new(epoch, limits, now)
             .map_err(HostError::Synchronization)?;
+        context
+            .set_thread_handle_limit(self.threads.handle_limit())
+            .map_err(HostError::Synchronization)?;
+        let mut critical = Vec::new();
+        critical
+            .try_reserve_exact(limits.events as usize)
+            .map_err(|_| HostError::Synchronization(Error::Allocation))?;
         self.synchronization = Some(SynchronizationRuntime32 {
             context,
             reply: None,
+            critical,
         });
         Ok(())
     }
@@ -78,32 +85,6 @@ impl EngineInstance {
             .reset_event(handle)
             .map_err(HostError::Synchronization)
     }
-    pub(in crate::process) fn prepare_synchronization_clock(
-        &self,
-        now_ns: u64,
-    ) -> Result<Option<PreparedSignals32>, HostError> {
-        self.synchronization
-            .as_ref()
-            .map(|runtime| {
-                runtime
-                    .context
-                    .prepare_time(now_ns)
-                    .map_err(HostError::Synchronization)
-            })
-            .transpose()
-    }
-    pub(in crate::process) fn commit_synchronization_clock(
-        &mut self,
-        prepared: Option<PreparedSignals32>,
-    ) {
-        if let Some(prepared) = prepared {
-            self.synchronization
-                .as_mut()
-                .unwrap()
-                .context
-                .commit_signals(prepared);
-        }
-    }
     pub fn pending_windows_wait(&self) -> Option<WindowsWait32> {
         let runtime = self.synchronization.as_ref()?;
         let reply = runtime.reply?;
@@ -132,6 +113,9 @@ impl EngineInstance {
             .filter(|reply| reply.token == token && reply.wait.is_some())
             .ok_or(HostError::Call(CallError::InvalidToken))?;
         self.checked_pending_call(reply.owner, token)?;
+        if reply.alertable && self.has_pending_thread_apc(self.threads.current_id()) {
+            return Err(HostError::Call(CallError::Busy));
+        }
         if reply.result.is_none()
             && self
                 .synchronization

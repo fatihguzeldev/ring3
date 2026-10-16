@@ -1,6 +1,12 @@
+mod thread;
+pub(in crate::process) use thread::SynchronizationThreadReply32;
 mod calls;
+mod clock;
+mod critical;
 mod decoding;
 mod lifecycle;
+mod objects;
+mod timers;
 
 use crate::{
     process::calls::call::PendingOwner,
@@ -13,6 +19,7 @@ use crate::{
 pub(in crate::process) struct SynchronizationRuntime32 {
     context: SynchronizationContext32,
     reply: Option<Reply32>,
+    critical: Vec<critical::CriticalSection32>,
 }
 #[derive(Clone, Copy)]
 struct Reply32 {
@@ -25,6 +32,7 @@ struct Reply32 {
     alertable: bool,
     wake_mask: u32,
     boolean_result: bool,
+    critical: Option<crate::memory::GuestAddress>,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WindowsWait32 {
