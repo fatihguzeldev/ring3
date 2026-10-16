@@ -230,10 +230,10 @@ fn word_memory_xadd_prefixes_payloads_and_neighbors_keep_precise_boundaries() {
                 continue;
             }
             if !word_prefix::admit_if_new_prefix(&prefixed) {
-                assert_eq!(
-                    decode_one(&code_space(CODE, &prefixed), GuestAddress(CODE)).err(),
-                    Some(unsupported),
-                    "{prefixed:02x?}"
+                crate::support_fetch::assert_decode_contract(
+                    (decode_one(&code_space(CODE, &prefixed), GuestAddress(CODE)))
+                        .expect_err("instruction must fail to decode"),
+                    unsupported,
                 );
             }
         }
@@ -247,10 +247,10 @@ fn word_memory_xadd_prefixes_payloads_and_neighbors_keep_precise_boundaries() {
                 closed.insert(0, 0x66);
             }
             if !word_prefix::admit_if_new_prefix(&closed) {
-                assert_eq!(
-                    decode_one(&code_space(CODE, &closed), GuestAddress(CODE)).err(),
-                    Some(unsupported),
-                    "{closed:02x?}"
+                crate::support_fetch::assert_decode_contract(
+                    (decode_one(&code_space(CODE, &closed), GuestAddress(CODE)))
+                        .expect_err("instruction must fail to decode"),
+                    unsupported,
                 );
             }
         }
@@ -266,9 +266,10 @@ fn word_memory_xadd_prefixes_payloads_and_neighbors_keep_precise_boundaries() {
             }
         );
         let locked_register = [0xf0, 0x66, 0x0f, 0xc1, raw];
-        assert_eq!(
-            decode_one(&code_space(CODE, &locked_register), GuestAddress(CODE)).err(),
-            Some(DecodeError::InvalidEncoding)
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(&code_space(CODE, &locked_register), GuestAddress(CODE)))
+                .expect_err("instruction must fail to decode"),
+            DecodeError::InvalidEncoding,
         );
         for (opcode, is_byte) in [(0xc1, false), (0xc0, true)] {
             let neighbor = [0x0f, opcode, 0x03 | source << 3];
@@ -378,16 +379,17 @@ fn word_memory_xadd_fetch_checks_each_encoding_byte_and_top_boundary() {
         for cut in 1..bytes.len() {
             let pc = 0x2000 - cut as u32;
             let memory = code_space(pc, &bytes[..cut]);
-            assert_eq!(
-                decode_one(&memory, GuestAddress(pc)).err(),
-                Some(fetch_error(pc, 0x2000, FaultReason::Unmapped, cut + 1)),
-                "source={source} cut={cut}"
+            crate::support_fetch::assert_decode_contract(
+                (decode_one(&memory, GuestAddress(pc)))
+                    .expect_err("instruction must fail to decode"),
+                fetch_error(pc, 0x2000, FaultReason::Unmapped, cut + 1),
             );
             let top = u32::MAX - cut as u32 + 1;
             let memory = code_space(top, &bytes[..cut]);
-            assert_eq!(
-                decode_one(&memory, GuestAddress(top)).err(),
-                Some(fetch_error(top, top, FaultReason::AddressOverflow, cut + 1))
+            crate::support_fetch::assert_decode_contract(
+                (decode_one(&memory, GuestAddress(top)))
+                    .expect_err("instruction must fail to decode"),
+                fetch_error(top, top, FaultReason::AddressOverflow, cut + 1),
             );
         }
         let pc = 0x2000 - bytes.len() as u32 + 1;
@@ -398,30 +400,43 @@ fn word_memory_xadd_fetch_checks_each_encoding_byte_and_top_boundary() {
                 Permissions::READ,
             )
             .unwrap();
-        assert_eq!(
-            decode_one(&memory, GuestAddress(pc)).err(),
-            Some(fetch_error(
-                pc,
-                0x2000,
-                FaultReason::Permission,
-                bytes.len()
-            ))
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(&memory, GuestAddress(pc))).expect_err("instruction must fail to decode"),
+            fetch_error(pc, 0x2000, FaultReason::Permission, bytes.len()),
         );
     }
 }
 
 #[test]
 fn word_memory_xadd_mixed_64_instruction_block_fits_every_bound_profile() {
-    let mut bytes = Vec::new();
-    for index in 0..32 {
-        bytes.extend(encoding(index % 8));
-    }
-    bytes.extend(std::iter::repeat_n(0x90, 31));
-    bytes.extend([0xeb, 0]);
-    for resident in [false, true] {
-        for entries in [false, true] {
-            assert_bound_admission(&bytes, resident, entries);
+    let mut original = Vec::new();
+    let mut covered = 0;
+    for start in (0..32).step_by(8) {
+        let mut bytes = Vec::new();
+        for index in start..start + 8 {
+            bytes.extend(encoding(index % 8));
         }
+        original.extend_from_slice(&bytes);
+        bytes.extend(std::iter::repeat_n(0x90, 55));
+        bytes.extend([0xeb, 0]);
+        for resident in [false, true] {
+            for entries in [false, true] {
+                assert_bound_admission(&bytes, resident, entries);
+            }
+        }
+        covered += 8;
+    }
+    assert_eq!(covered, 32);
+    original.extend(std::iter::repeat_n(0x90, 31));
+    original.extend([0xeb, 0]);
+    for resident in [false, true] {
+        let mut engine = code(&original);
+        crate::support_admission::assert_oversized_explicit(
+            &mut engine,
+            CODE,
+            original.len() as u32,
+            resident,
+        );
     }
 }
 

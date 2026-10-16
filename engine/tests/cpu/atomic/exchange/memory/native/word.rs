@@ -238,66 +238,25 @@ fn assert_operation(bytes: &[u8], source: Register32, address: EffectiveAddress)
     assert_eq!(engine.arena(), before);
 }
 
-fn unsigned(bytes: &mut &[u8]) -> u32 {
-    let mut value = 0;
-    for shift in (0..35).step_by(7) {
-        let (&byte, remaining) = bytes.split_first().unwrap();
-        *bytes = remaining;
-        value |= u32::from(byte & 0x7f) << shift;
-        if byte & 0x80 == 0 {
-            return value;
-        }
-    }
-    panic!("unterminated unsigned LEB");
-}
-
-fn take<'a>(bytes: &mut &'a [u8], length: usize) -> &'a [u8] {
-    let (value, remaining) = bytes.split_at(length);
-    *bytes = remaining;
-    value
-}
-
-fn name<'a>(bytes: &mut &'a [u8]) -> &'a str {
-    let length = unsigned(bytes) as usize;
-    std::str::from_utf8(take(bytes, length)).unwrap()
-}
-
 fn assert_exchange_imports(wasm: &[u8], resident: bool) {
-    assert_eq!(&wasm[..8], b"\0asm\x01\0\0\0");
-    let mut sections = &wasm[8..];
-    while !sections.is_empty() {
-        let kind = take(&mut sections, 1)[0];
-        let length = unsigned(&mut sections) as usize;
-        let mut section = take(&mut sections, length);
-        if kind != 2 {
-            continue;
-        }
-        assert_eq!(unsigned(&mut section), 3);
-        assert_eq!((name(&mut section), name(&mut section)), ("env", "memory"));
-        assert_eq!(take(&mut section, 1), &[2]);
-        assert_eq!((unsigned(&mut section), unsigned(&mut section)), (0, 1));
-        for (index, expected) in [
-            if resident { "guard_resident" } else { "guard" },
+    crate::support_wasm_interface::assert_bound(
+        wasm,
+        resident,
+        &[(
             if resident {
                 "cpu_exchange_resident16"
             } else {
                 "cpu_exchange16"
             },
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            assert_eq!(
-                (name(&mut section), name(&mut section)),
-                ("ring3", expected)
-            );
-            assert_eq!(take(&mut section, 1), &[0]);
-            assert_eq!(unsigned(&mut section), index as u32 + 1);
-        }
-        assert!(section.is_empty());
-        return;
-    }
-    panic!("missing import section");
+            if resident { 6 } else { 2 },
+        )],
+        &[
+            4,
+            if resident { 7 } else { 6 },
+            if resident { 6 } else { 2 },
+        ],
+        true,
+    );
 }
 
 #[test]
@@ -349,96 +308,42 @@ fn memory_xchg16_mixed_dword_byte_word_imports_share_the_existing_store_type() {
             } else {
                 engine.artifact_bytes().unwrap()
             };
-            let mut sections = &module[8..];
-            let mut seen = [false; 4];
-            while !sections.is_empty() {
-                let kind = take(&mut sections, 1)[0];
-                let length = unsigned(&mut sections) as usize;
-                let mut section = take(&mut sections, length);
-                if kind == 1 {
-                    assert_eq!(unsigned(&mut section), 4);
-                    for parameters in [
-                        4,
-                        if resident { 7 } else { 6 },
+            crate::support_wasm_interface::assert_bound(
+                module,
+                resident,
+                &[
+                    (
+                        if resident {
+                            "cpu_exchange_resident32"
+                        } else {
+                            "cpu_exchange32"
+                        },
                         if resident { 6 } else { 2 },
-                        6,
-                    ] {
-                        assert_eq!(take(&mut section, 1), &[0x60]);
-                        assert_eq!(unsigned(&mut section), parameters);
-                        assert_eq!(
-                            take(&mut section, parameters as usize),
-                            vec![0x7f; parameters as usize]
-                        );
-                        assert_eq!(unsigned(&mut section), 1);
-                        assert_eq!(take(&mut section, 1), &[0x7f]);
-                    }
-                    assert!(section.is_empty());
-                    seen[0] = true;
-                } else if kind == 2 {
-                    assert_eq!(unsigned(&mut section), 5);
-                    assert_eq!((name(&mut section), name(&mut section)), ("env", "memory"));
-                    assert_eq!(take(&mut section, 1), &[2]);
-                    assert_eq!((unsigned(&mut section), unsigned(&mut section)), (0, 1));
-                    for (expected, type_index) in [
-                        (if resident { "guard_resident" } else { "guard" }, 1),
-                        (
-                            if resident {
-                                "cpu_exchange_resident32"
-                            } else {
-                                "cpu_exchange32"
-                            },
-                            2,
-                        ),
-                        (
-                            if resident {
-                                "cpu_exchange_resident8"
-                            } else {
-                                "cpu_exchange8"
-                            },
-                            2,
-                        ),
-                        (
-                            if resident {
-                                "cpu_exchange_resident16"
-                            } else {
-                                "cpu_exchange16"
-                            },
-                            2,
-                        ),
-                    ] {
-                        assert_eq!(
-                            (name(&mut section), name(&mut section)),
-                            ("ring3", expected)
-                        );
-                        assert_eq!(take(&mut section, 1), &[0]);
-                        assert_eq!(unsigned(&mut section), type_index);
-                    }
-                    assert!(section.is_empty());
-                    seen[1] = true;
-                } else if kind == 3 {
-                    assert_eq!(unsigned(&mut section), 2);
-                    assert_eq!(unsigned(&mut section), 0);
-                    assert_eq!(unsigned(&mut section), 3);
-                    assert!(section.is_empty());
-                    seen[2] = true;
-                } else if kind == 10 {
-                    assert_eq!(unsigned(&mut section), 2);
-                    for declarations in [&[(16, 0x7f), (1, 0x7e), (10, 0x7f)][..], &[(3, 0x7f)][..]]
-                    {
-                        let length = unsigned(&mut section) as usize;
-                        let mut body = take(&mut section, length);
-                        assert_eq!(body.last(), Some(&0x0b));
-                        assert_eq!(unsigned(&mut body) as usize, declarations.len());
-                        for &(count, kind) in declarations {
-                            assert_eq!((unsigned(&mut body), take(&mut body, 1)[0]), (count, kind));
-                        }
-                        assert!(!body.is_empty());
-                    }
-                    assert!(section.is_empty());
-                    seen[3] = true;
-                }
-            }
-            assert_eq!(seen, [true; 4]);
+                    ),
+                    (
+                        if resident {
+                            "cpu_exchange_resident8"
+                        } else {
+                            "cpu_exchange8"
+                        },
+                        if resident { 6 } else { 2 },
+                    ),
+                    (
+                        if resident {
+                            "cpu_exchange_resident16"
+                        } else {
+                            "cpu_exchange16"
+                        },
+                        if resident { 6 } else { 2 },
+                    ),
+                ],
+                &[
+                    4,
+                    if resident { 7 } else { 6 },
+                    if resident { 6 } else { 2 },
+                ],
+                true,
+            );
             assert_eq!(engine.arena(), before);
         }
     }
@@ -538,23 +443,24 @@ fn memory_xchg16_exact_prefix_width_and_lock_boundaries_preserve_categories() {
         let mut program = bytes.clone();
         program.extend([0xeb, 0]);
         let mut engine = code(&program);
-        assert_eq!(
-            decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),
-            Some(*expected),
-            "{bytes:02x?}"
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(engine.memory().unwrap(), GuestAddress(CODE)))
+                .expect_err("instruction must fail to decode"),
+            *expected,
         );
         for resident in [false, true] {
             for entries in [false, true] {
                 describe(&mut engine, CODE, program.len(), entries);
                 let before = engine.arena().to_vec();
                 let error = instruction_error(CODE, InstructionError::Decode(*expected));
-                assert_eq!(
-                    compile(&mut engine, resident, entries),
-                    Err(if resident {
+                crate::support_fetch::assert_host_contract(
+                    (compile(&mut engine, resident, entries))
+                        .expect_err("compilation must refuse this fixture"),
+                    if resident {
                         HostError::Resident(RegistryError::Compile(error))
                     } else {
                         HostError::Compile(error)
-                    })
+                    },
                 );
                 assert_eq!(engine.arena(), before);
                 assert_eq!(engine.generation(), 0);
@@ -653,9 +559,10 @@ fn memory_xchg16_progressive_fetch_and_final_address_never_read_guest_operands()
                 if top {
                     engine.map(0, 1, 4).unwrap();
                 }
-                assert_eq!(
-                    decode_one(engine.memory().unwrap(), GuestAddress(pc)).err(),
-                    Some(fetch_error(
+                crate::support_fetch::assert_decode_contract(
+                    (decode_one(engine.memory().unwrap(), GuestAddress(pc)))
+                        .expect_err("instruction must fail to decode"),
+                    fetch_error(
                         pc,
                         if top { pc } else { 0x2000 },
                         cut + 1,
@@ -664,7 +571,7 @@ fn memory_xchg16_progressive_fetch_and_final_address_never_read_guest_operands()
                         } else {
                             FaultReason::Unmapped
                         },
-                    ))
+                    ),
                 );
                 cuts += 1;
             }
@@ -673,15 +580,17 @@ fn memory_xchg16_progressive_fetch_and_final_address_never_read_guest_operands()
     assert_eq!(cuts, 18);
     let mut first = code_at(CODE, &longest, true);
     first.protect(CODE, 1, 3).unwrap();
-    assert_eq!(
-        decode_one(first.memory().unwrap(), GuestAddress(CODE)).err(),
-        Some(fetch_error(CODE, CODE, 1, FaultReason::Permission))
+    crate::support_fetch::assert_decode_contract(
+        (decode_one(first.memory().unwrap(), GuestAddress(CODE)))
+            .expect_err("instruction must fail to decode"),
+        fetch_error(CODE, CODE, 1, FaultReason::Permission),
     );
     let mut second = code_at(0x1fff, &longest, true);
     second.protect(0x2000, 1, 3).unwrap();
-    assert_eq!(
-        decode_one(second.memory().unwrap(), GuestAddress(0x1fff)).err(),
-        Some(fetch_error(0x1fff, 0x2000, 2, FaultReason::Permission))
+    crate::support_fetch::assert_decode_contract(
+        (decode_one(second.memory().unwrap(), GuestAddress(0x1fff)))
+            .expect_err("instruction must fail to decode"),
+        fetch_error(0x1fff, 0x2000, 2, FaultReason::Permission),
     );
 }
 
@@ -745,14 +654,24 @@ fn memory_xchg16_mixed_sixty_four_instructions_and_existing_limits_are_exact() {
             assert_eq!(engine.arena(), before);
             let mut engine = code(&too_many);
             describe(&mut engine, CODE, too_many.len(), entries);
+            if entries {
+                crate::support_admission::assert_fresh_cold_limit(
+                    &mut engine,
+                    CODE,
+                    too_many.len() as u32,
+                    resident,
+                );
+                continue;
+            }
             let before = engine.arena().to_vec();
-            assert_eq!(
-                compile(&mut engine, resident, entries),
-                Err(if resident {
+            crate::support_fetch::assert_host_contract(
+                (compile(&mut engine, resident, entries))
+                    .expect_err("compilation must refuse this fixture"),
+                if resident {
                     HostError::Resident(RegistryError::Compile(CompileError::InstructionLimit))
                 } else {
                     HostError::Compile(CompileError::InstructionLimit)
-                })
+                },
             );
             assert_eq!(engine.arena(), before);
             assert_eq!(engine.generation(), 0);
@@ -795,13 +714,14 @@ fn memory_xchg16_late_refusal_keeps_dirty_full_arena_and_both_existing_owners() 
             describe(&mut engine, CODE, 10, entries);
             let before = engine.arena().to_vec();
             assert_eq!(before.len(), ring3_engine::abi::arena::ARENA_SIZE);
-            assert_eq!(
-                compile(&mut engine, is_resident, entries),
-                Err(if is_resident {
+            crate::support_fetch::assert_host_contract(
+                (compile(&mut engine, is_resident, entries))
+                    .expect_err("compilation must refuse this fixture"),
+                if is_resident {
                     HostError::Resident(RegistryError::Compile(error))
                 } else {
                     HostError::Compile(error)
-                })
+                },
             );
             assert_eq!(engine.arena(), before);
             assert_eq!(engine.arena_address(), arena_pointer);

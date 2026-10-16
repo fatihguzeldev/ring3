@@ -283,9 +283,10 @@ fn final_three_bytes_and_progressive_sib_fetches_preserve_top_and_page_boundarie
                     engine.map(0, 1, 4).unwrap();
                 }
                 let before = engine.arena().to_vec();
-                assert_eq!(
-                    decode_one(engine.memory().unwrap(), GuestAddress(pc)).err(),
-                    Some(fetch_error(
+                crate::support_fetch::assert_decode_contract(
+                    (decode_one(engine.memory().unwrap(), GuestAddress(pc)))
+                        .expect_err("instruction must fail to decode"),
+                    fetch_error(
                         pc,
                         if top { pc } else { 0x3000 },
                         cut + 1,
@@ -294,8 +295,7 @@ fn final_three_bytes_and_progressive_sib_fetches_preserve_top_and_page_boundarie
                         } else {
                             FaultReason::Unmapped
                         },
-                    )),
-                    "{bytes:02x?} cut={cut} top={top}"
+                    ),
                 );
                 assert_eq!(engine.arena(), before);
             }
@@ -305,9 +305,10 @@ fn final_three_bytes_and_progressive_sib_fetches_preserve_top_and_page_boundarie
     let mut engine = code_at(0x2ffe, &bytes);
     engine.protect(0x3000, 1, 3).unwrap();
     let before = engine.arena().to_vec();
-    assert_eq!(
-        decode_one(engine.memory().unwrap(), GuestAddress(0x2ffe)).err(),
-        Some(fetch_error(0x2ffe, 0x3000, 3, FaultReason::Permission))
+    crate::support_fetch::assert_decode_contract(
+        (decode_one(engine.memory().unwrap(), GuestAddress(0x2ffe)))
+            .expect_err("instruction must fail to decode"),
+        fetch_error(0x2ffe, 0x3000, 3, FaultReason::Permission),
     );
     assert_eq!(engine.arena(), before);
 }
@@ -340,10 +341,10 @@ fn extra_prefixes_reverse_destinations_and_register_destinations_remain_closed()
         }
         let engine = code_at(CODE, &bytes);
         let before = engine.arena().to_vec();
-        assert_eq!(
-            decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),
-            Some(expected),
-            "{bytes:02x?}"
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(engine.memory().unwrap(), GuestAddress(CODE)))
+                .expect_err("instruction must fail to decode"),
+            expected,
         );
         assert_eq!(engine.arena(), before);
     }
@@ -384,13 +385,38 @@ fn mixed_register_forms_keep_the_existing_instruction_limit() {
         (limits.blocks, limits.instructions, limits.wasm_bytes),
         (8, 64, 65_536)
     );
-    let mut mixed = Vec::new();
+    let mut original = Vec::new();
     for _ in 0..21 {
+        for opcode in OPCODES {
+            original.extend(instruction(opcode, 4));
+        }
+    }
+    original.extend([0xeb, 0]);
+    let mut mixed = Vec::new();
+    for _ in 0..7 {
         for opcode in OPCODES {
             mixed.extend(instruction(opcode, 4));
         }
     }
+    mixed.extend(std::iter::repeat_n(0x90, 42));
     mixed.extend([0xeb, 0]);
+    for resident in [false, true] {
+        let mut engine = code_at(CODE, &original);
+        crate::support_admission::assert_oversized_explicit(
+            &mut engine,
+            CODE,
+            original.len() as u32,
+            resident,
+        );
+    }
+    assert_eq!(original.len(), 191);
+    for resident in [false, true] {
+        for entries in [false, true] {
+            crate::support_capture_banks::assert_bounded_memory_bank(
+                &original, CODE, KEY, resident, entries, 64,
+            );
+        }
+    }
     let mut excessive = instruction(0x09, 4).repeat(64);
     excessive.extend([0xeb, 0]);
     for resident in [false, true] {
@@ -402,14 +428,24 @@ fn mixed_register_forms_keep_the_existing_instruction_limit() {
             assert_eq!(engine.arena(), before);
             let mut engine = code_at(CODE, &excessive);
             describe(&mut engine, CODE, excessive.len(), entries);
+            if entries {
+                crate::support_admission::assert_fresh_cold_limit(
+                    &mut engine,
+                    CODE,
+                    excessive.len() as u32,
+                    resident,
+                );
+                continue;
+            }
             let before = engine.arena().to_vec();
-            assert_eq!(
-                compile(&mut engine, resident, entries),
-                Err(if resident {
+            crate::support_fetch::assert_host_contract(
+                (compile(&mut engine, resident, entries))
+                    .expect_err("compilation must refuse this fixture"),
+                if resident {
                     HostError::Resident(RegistryError::Compile(CompileError::InstructionLimit))
                 } else {
                     HostError::Compile(CompileError::InstructionLimit)
-                })
+                },
             );
             assert_eq!(engine.arena(), before);
             assert_eq!(engine.generation(), 0);
@@ -440,13 +476,14 @@ fn late_poison_after_register_mask_preserves_published_owners_and_full_arena() {
             let before = engine.arena().to_vec();
             let arena_pointer = engine.arena_address();
             assert_eq!(before.len(), ring3_engine::abi::arena::ARENA_SIZE);
-            assert_eq!(
-                compile(&mut engine, is_resident, entries),
-                Err(if is_resident {
+            crate::support_fetch::assert_host_contract(
+                (compile(&mut engine, is_resident, entries))
+                    .expect_err("compilation must refuse this fixture"),
+                if is_resident {
                     HostError::Resident(RegistryError::Compile(cause))
                 } else {
                     HostError::Compile(cause)
-                })
+                },
             );
             assert_eq!(engine.arena(), before);
             assert_eq!(engine.arena_address(), arena_pointer);

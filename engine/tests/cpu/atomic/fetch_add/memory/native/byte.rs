@@ -160,66 +160,30 @@ fn forms() -> Vec<(Vec<u8>, ByteRegister, EffectiveAddress)> {
     forms
 }
 
-fn unsigned(bytes: &mut &[u8]) -> u32 {
-    let mut value = 0;
-    for shift in (0..35).step_by(7) {
-        let (&byte, remaining) = bytes.split_first().unwrap();
-        *bytes = remaining;
-        value |= u32::from(byte & 0x7f) << shift;
-        if byte & 0x80 == 0 {
-            return value;
-        }
-    }
-    panic!("unterminated unsigned LEB");
-}
-
-fn take<'a>(bytes: &mut &'a [u8], length: usize) -> &'a [u8] {
-    let (value, remaining) = bytes.split_at(length);
-    *bytes = remaining;
-    value
-}
-
-fn name<'a>(bytes: &mut &'a [u8]) -> &'a str {
-    let length = unsigned(bytes) as usize;
-    std::str::from_utf8(take(bytes, length)).unwrap()
-}
-
 fn assert_imports(wasm: &[u8], resident: bool) {
-    assert_eq!(&wasm[..8], b"\0asm\x01\0\0\0");
-    let mut sections = &wasm[8..];
-    loop {
-        let kind = take(&mut sections, 1)[0];
-        let length = unsigned(&mut sections) as usize;
-        let mut section = take(&mut sections, length);
-        if kind != 2 {
-            continue;
-        }
-        assert_eq!(unsigned(&mut section), 4);
-        assert_eq!((name(&mut section), name(&mut section)), ("env", "memory"));
-        assert_eq!(take(&mut section, 1), &[2]);
-        assert_eq!((unsigned(&mut section), unsigned(&mut section)), (0, 1));
-        for (index, expected) in [
-            if resident { "guard_resident" } else { "guard" },
-            "cpu_read8",
-            if resident {
-                "cpu_store_resident8"
-            } else {
-                "cpu_store8"
-            },
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            assert_eq!(
-                (name(&mut section), name(&mut section)),
-                ("ring3", expected)
-            );
-            assert_eq!(take(&mut section, 1), &[0]);
-            assert_eq!(unsigned(&mut section), index as u32 + 1);
-        }
-        assert!(section.is_empty());
-        return;
-    }
+    crate::support_wasm_interface::assert_bound(
+        wasm,
+        resident,
+        &[
+            ("cpu_read8", 1),
+            ("cpu_read_modify8", 1),
+            (
+                if resident {
+                    "cpu_store_resident8"
+                } else {
+                    "cpu_store8"
+                },
+                if resident { 6 } else { 2 },
+            ),
+        ],
+        &[
+            4,
+            if resident { 7 } else { 6 },
+            1,
+            if resident { 6 } else { 2 },
+        ],
+        true,
+    );
 }
 
 #[test]
@@ -351,9 +315,10 @@ fn consumed_byte_instruction_keeps_exact_fetch_and_page_currency() {
             0x2000 - missing.len() as u32
         };
         let engine = code(pc, missing);
-        assert_eq!(
-            decode_one(engine.memory().unwrap(), GuestAddress(pc)).err(),
-            Some(fetch_error(
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(engine.memory().unwrap(), GuestAddress(pc)))
+                .expect_err("instruction must fail to decode"),
+            fetch_error(
                 pc,
                 if top { pc } else { 0x2000 },
                 bytes.len() as u32,
@@ -362,7 +327,7 @@ fn consumed_byte_instruction_keeps_exact_fetch_and_page_currency() {
                 } else {
                     FaultReason::Unmapped
                 },
-            ))
+            ),
         );
     }
     for changed in [0x1fff, 0x2000] {
@@ -405,9 +370,10 @@ fn consumed_byte_instruction_keeps_exact_fetch_and_page_currency() {
     }
     let mut engine = code(0x1fff, &bytes);
     engine.protect(0x2000, 1, 3).unwrap();
-    assert_eq!(
-        decode_one(engine.memory().unwrap(), GuestAddress(0x1fff)).err(),
-        Some(fetch_error(0x1fff, 0x2000, 2, FaultReason::Permission))
+    crate::support_fetch::assert_decode_contract(
+        (decode_one(engine.memory().unwrap(), GuestAddress(0x1fff)))
+            .expect_err("instruction must fail to decode"),
+        fetch_error(0x1fff, 0x2000, 2, FaultReason::Permission),
     );
 }
 
@@ -439,10 +405,10 @@ fn word_prefix_and_other_memory_exchange_refusals_keep_inputs_unchanged() {
             continue;
         }
         let mut engine = code(CODE, &bytes);
-        assert_eq!(
-            decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),
-            Some(expected),
-            "{bytes:02x?}"
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(engine.memory().unwrap(), GuestAddress(CODE)))
+                .expect_err("instruction must fail to decode"),
+            expected,
         );
         let error = CompileError::Instruction {
             pc: GuestAddress(CODE),
@@ -482,13 +448,26 @@ fn memory_xadd8_keeps_existing_default_and_instruction_limits() {
         for entries in [false, true] {
             let mut engine = code(CODE, &bytes);
             describe(&mut engine, CODE, bytes.len() as u32, entries);
+            if entries {
+                crate::support_admission::assert_fresh_cold_limit(
+                    &mut engine,
+                    CODE,
+                    bytes.len() as u32,
+                    resident,
+                );
+                continue;
+            }
             let before = engine.arena().to_vec();
             let expected = if resident {
                 HostError::Resident(RegistryError::Compile(CompileError::InstructionLimit))
             } else {
                 HostError::Compile(CompileError::InstructionLimit)
             };
-            assert_eq!(compile(&mut engine, resident, entries), Err(expected));
+            crate::support_fetch::assert_host_contract(
+                (compile(&mut engine, resident, entries))
+                    .expect_err("compilation must refuse this fixture"),
+                expected,
+            );
             assert_eq!(engine.arena(), before);
             assert_eq!(engine.generation(), 0);
         }

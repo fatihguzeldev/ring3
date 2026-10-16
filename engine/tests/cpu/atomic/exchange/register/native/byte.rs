@@ -233,9 +233,31 @@ fn six_failures(
     bases: &[u32],
 ) -> usize {
     let entry = instruction_error(pc, error);
+    let bound_entry = match error {
+        DecodeError::MemoryFault {
+            pc,
+            fault:
+                MemoryFault {
+                    access: Access::Execute,
+                    reason: FaultReason::AddressOverflow,
+                    ..
+                },
+            length,
+        } => {
+            assert!(u64::from(pc.0) + u64::from(length) > 1_u64 << 32);
+            instruction_error(
+                pc.0,
+                DecodeError::CodeSegment {
+                    pc,
+                    attempted_length: length.try_into().unwrap(),
+                },
+            )
+        }
+        _ => entry,
+    };
     let before = inputs(engine, bases);
     let memory = engine.memory().unwrap();
-    assert_eq!(
+    crate::support_fetch::assert_compile_contract(
         compile_region(
             memory,
             &[BlockSpec {
@@ -244,12 +266,12 @@ fn six_failures(
             }],
             CompileLimits::default(),
         )
-        .err(),
-        Some(explicit)
+        .unwrap_err(),
+        explicit,
     );
-    assert_eq!(
-        compile_entry_region(memory, &[GuestAddress(pc)], CompileLimits::default()).err(),
-        Some(entry)
+    crate::support_fetch::assert_compile_contract(
+        compile_entry_region(memory, &[GuestAddress(pc)], CompileLimits::default()).unwrap_err(),
+        entry,
     );
     assert_eq!(inputs(engine, bases), before);
     for owner in [Owner::Replacement, Owner::Resident] {
@@ -257,9 +279,10 @@ fn six_failures(
             describe(engine, pc, length, entries);
             let before = inputs(engine, bases);
             let generation = engine.generation();
-            assert_eq!(
-                compile(engine, owner, entries),
-                Err(host_error(owner, if entries { entry } else { explicit }))
+            crate::support_fetch::assert_host_contract(
+                (compile(engine, owner, entries))
+                    .expect_err("compilation must refuse this fixture"),
+                host_error(owner, if entries { bound_entry } else { explicit }),
             );
             assert_eq!(inputs(engine, bases), before);
             assert_eq!(engine.generation(), generation);
@@ -275,10 +298,10 @@ fn rejected(bytes: &[u8], error: DecodeError) -> usize {
     let bytes = bytes.as_slice();
     let mut engine = code(CODE, bytes);
     unmapped_data(&engine);
-    assert_eq!(
-        decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),
-        Some(error),
-        "{bytes:02x?}"
+    crate::support_fetch::assert_decode_contract(
+        (decode_one(engine.memory().unwrap(), GuestAddress(CODE)))
+            .expect_err("instruction must fail to decode"),
+        error,
     );
     six_failures(
         &mut engine,
@@ -704,9 +727,10 @@ fn exact_two_byte_fetch_cuts_permissions_and_top_extent_are_preserved() {
                     FaultReason::Unmapped
                 },
             );
-            assert_eq!(
-                decode_one(engine.memory().unwrap(), GuestAddress(pc)).err(),
-                Some(error)
+            crate::support_fetch::assert_decode_contract(
+                (decode_one(engine.memory().unwrap(), GuestAddress(pc)))
+                    .expect_err("instruction must fail to decode"),
+                error,
             );
             compiler_errors += six_failures(
                 &mut engine,
@@ -725,9 +749,10 @@ fn exact_two_byte_fetch_cuts_permissions_and_top_extent_are_preserved() {
         let mut engine = code(0x1fff, &bytes);
         engine.protect(0x2000, 1, 3).unwrap();
         let error = fetch_error(0x1fff, 0x2000, 2, FaultReason::Permission);
-        assert_eq!(
-            decode_one(engine.memory().unwrap(), GuestAddress(0x1fff)).err(),
-            Some(error)
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(engine.memory().unwrap(), GuestAddress(0x1fff)))
+                .expect_err("instruction must fail to decode"),
+            error,
         );
         compiler_errors += six_failures(
             &mut engine,
@@ -756,9 +781,10 @@ fn exact_two_byte_fetch_cuts_permissions_and_top_extent_are_preserved() {
                 FaultReason::Unmapped
             },
         );
-        assert_eq!(
-            decode_one(engine.memory().unwrap(), GuestAddress(pc)).err(),
-            Some(error)
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(engine.memory().unwrap(), GuestAddress(pc)))
+                .expect_err("instruction must fail to decode"),
+            error,
         );
         compiler_errors += six_failures(
             &mut engine,
@@ -1043,9 +1069,10 @@ fn twenty_four_late_failures_preserve_complete_two_owner_publication_and_install
                     );
                     engine.guard(KEY, generation).unwrap();
                     engine.guard_resident(KEY, resident).unwrap();
-                    assert_eq!(
-                        compile(&mut engine, owner, entries),
-                        Err(host_error(owner, expected))
+                    crate::support_fetch::assert_host_contract(
+                        (compile(&mut engine, owner, entries))
+                            .expect_err("compilation must refuse this fixture"),
+                        host_error(owner, expected),
                     );
                     assert_eq!(publication(&engine, resident), before);
                     assert!(engine.memory().unwrap().is_code_current(&snapshot));

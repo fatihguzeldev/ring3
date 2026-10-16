@@ -279,114 +279,67 @@ fn locked_xadd32_prefix_bytes_inside_sib_and_displacement_are_payload() {
     }
 }
 
-fn unsigned(bytes: &mut &[u8]) -> u32 {
-    let mut value = 0;
-    for shift in (0..35).step_by(7) {
-        let (&byte, rest) = bytes.split_first().unwrap();
-        *bytes = rest;
-        value |= u32::from(byte & 0x7f) << shift;
-        if byte & 0x80 == 0 {
-            return value;
-        }
-    }
-    panic!("unterminated unsigned LEB");
-}
-
-fn take<'a>(bytes: &mut &'a [u8], length: usize) -> &'a [u8] {
-    let (value, rest) = bytes.split_at(length);
-    *bytes = rest;
-    value
-}
-
-fn name<'a>(bytes: &mut &'a [u8]) -> &'a str {
-    let length = unsigned(bytes) as usize;
-    std::str::from_utf8(take(bytes, length)).unwrap()
-}
-
 fn assert_imports(wasm: &[u8], expected: &[(&str, usize)], type_parameters: &[usize]) {
-    assert_eq!(&wasm[..8], b"\0asm\x01\0\0\0");
-    let mut sections = &wasm[8..];
-    let mut types = Vec::new();
-    let mut imported = Vec::new();
-    let mut exported = false;
-    let mut internal_functions = false;
-    let mut code_bodies = false;
-    while !sections.is_empty() {
-        let kind = take(&mut sections, 1)[0];
-        let length = unsigned(&mut sections) as usize;
-        let mut section = take(&mut sections, length);
-        match kind {
-            1 => {
-                let count = unsigned(&mut section);
-                for _ in 0..count {
-                    assert_eq!(take(&mut section, 1), &[0x60]);
-                    let parameters = unsigned(&mut section) as usize;
-                    assert!(
-                        take(&mut section, parameters)
-                            .iter()
-                            .all(|&value| value == 0x7f)
-                    );
-                    assert_eq!(
-                        (unsigned(&mut section), take(&mut section, 1)),
-                        (1, &[0x7f][..])
-                    );
-                    types.push(parameters);
-                }
-            }
-            2 => {
-                assert_eq!(unsigned(&mut section) as usize, expected.len() + 1);
-                assert_eq!((name(&mut section), name(&mut section)), ("env", "memory"));
-                assert_eq!(take(&mut section, 1), &[2]);
-                assert_eq!((unsigned(&mut section), unsigned(&mut section)), (0, 1));
-                for &(expected_name, parameters) in expected {
-                    assert_eq!(
-                        (name(&mut section), name(&mut section)),
-                        ("ring3", expected_name)
-                    );
-                    assert_eq!(take(&mut section, 1), &[0]);
-                    let index = unsigned(&mut section) as usize;
-                    assert_eq!(types[index], parameters);
-                    imported.push(expected_name);
-                }
-            }
-            3 => {
-                assert_eq!(unsigned(&mut section), 2);
-                assert_eq!(unsigned(&mut section), 0);
-                assert_eq!(unsigned(&mut section) as usize, type_parameters.len());
-                internal_functions = true;
-            }
-            10 => {
-                assert_eq!(unsigned(&mut section), 2);
-                for declarations in [&[(16, 0x7f), (1, 0x7e), (10, 0x7f)][..], &[(3, 0x7f)][..]] {
-                    let length = unsigned(&mut section) as usize;
-                    let mut body = take(&mut section, length);
-                    assert_eq!(body.last(), Some(&0x0b));
-                    assert_eq!(unsigned(&mut body) as usize, declarations.len());
-                    for &(count, kind) in declarations {
-                        assert_eq!((unsigned(&mut body), take(&mut body, 1)[0]), (count, kind));
-                    }
-                    assert!(!body.is_empty());
-                }
-                code_bodies = true;
-            }
-            7 => {
-                assert_eq!(unsigned(&mut section), 1);
-                assert_eq!(name(&mut section), "run");
-                assert_eq!(take(&mut section, 1), &[0]);
-                assert_eq!(unsigned(&mut section) as usize, expected.len());
-                exported = true;
-            }
-            _ => continue,
-        }
-        assert!(section.is_empty());
+    let resident = expected[0].0 == "guard_detect_resident";
+    assert_eq!(
+        expected[0],
+        (
+            if resident {
+                "guard_detect_resident"
+            } else {
+                "guard_detect"
+            },
+            if resident { 7 } else { 6 }
+        )
+    );
+    let mut helpers = expected[1..].to_vec();
+    let modifiers: Vec<_> = [
+        (
+            "cpu_read8",
+            "cpu_store8",
+            "cpu_store_resident8",
+            "cpu_read_modify8",
+        ),
+        (
+            "cpu_read16",
+            "cpu_store16",
+            "cpu_store_resident16",
+            "cpu_read_modify16",
+        ),
+        (
+            "cpu_read32",
+            "cpu_store32",
+            "cpu_store_resident32",
+            "cpu_read_modify32",
+        ),
+    ]
+    .into_iter()
+    .filter_map(|(read, store, resident_store, modify)| {
+        (helpers.iter().any(|(name, _)| *name == read)
+            && helpers
+                .iter()
+                .any(|(name, _)| *name == store || *name == resident_store))
+        .then_some((modify, 1))
+    })
+    .collect();
+    if !modifiers.is_empty() {
+        let at = helpers
+            .iter()
+            .rposition(|(name, _)| {
+                matches!(
+                    *name,
+                    "cpu_read32"
+                        | "cpu_read8"
+                        | "cpu_read16"
+                        | "cpu_store32"
+                        | "cpu_store_resident32"
+                )
+            })
+            .unwrap()
+            + 1;
+        helpers.splice(at..at, modifiers);
     }
-    let mut complete_types = type_parameters.to_vec();
-    complete_types.push(6);
-    assert_eq!(types, complete_types);
-    assert_eq!(imported.len(), expected.len());
-    assert!(exported);
-    assert!(internal_functions);
-    assert!(code_bodies);
+    crate::support_wasm_interface::assert_bound(wasm, resident, &helpers, type_parameters, true);
 }
 
 #[test]
@@ -406,7 +359,11 @@ fn locked_xadd32_only_its_two_or_six_word_helper_is_imported() {
                 module,
                 &[
                     (
-                        if resident { "guard_resident" } else { "guard" },
+                        if resident {
+                            "guard_detect_resident"
+                        } else {
+                            "guard_detect"
+                        },
                         if resident { 7 } else { 6 },
                     ),
                     (
@@ -451,7 +408,14 @@ fn locked_xadd32_mixed_old_two_or_six_types_and_cas_three_or_seven_remain_distin
                 let guard = if resident { 7 } else { 6 };
                 let store = if resident { 6 } else { 2 };
                 let compare = if resident { 7 } else { 3 };
-                let mut expected = vec![(if resident { "guard_resident" } else { "guard" }, guard)];
+                let mut expected = vec![(
+                    if resident {
+                        "guard_detect_resident"
+                    } else {
+                        "guard_detect"
+                    },
+                    guard,
+                )];
                 let mut types = vec![4, guard];
                 if with_old {
                     expected.extend([
@@ -558,10 +522,10 @@ fn locked_xadd32_strict_prefixes_widths_registers_and_neighbors_stay_closed() {
         }
         let engine = code(&bytes);
         let before = engine.arena().to_vec();
-        assert_eq!(
-            decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),
-            Some(expected),
-            "{bytes:02x?}"
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(engine.memory().unwrap(), GuestAddress(CODE)))
+                .expect_err("instruction must fail to decode"),
+            expected,
         );
         assert_eq!(engine.arena(), before);
         let mut bank = bytes.clone();
@@ -702,9 +666,10 @@ fn locked_xadd32_progressive_fetch_uses_execute_only_and_never_wraps() {
                 if top {
                     engine.map(0, 1, 4).unwrap();
                 }
-                assert_eq!(
-                    decode_one(engine.memory().unwrap(), GuestAddress(pc)).err(),
-                    Some(fetch_error(
+                crate::support_fetch::assert_decode_contract(
+                    (decode_one(engine.memory().unwrap(), GuestAddress(pc)))
+                        .expect_err("instruction must fail to decode"),
+                    fetch_error(
                         pc,
                         if top { pc } else { 0x2000 },
                         cut + 1,
@@ -712,8 +677,8 @@ fn locked_xadd32_progressive_fetch_uses_execute_only_and_never_wraps() {
                             FaultReason::AddressOverflow
                         } else {
                             FaultReason::Unmapped
-                        }
-                    ))
+                        },
+                    ),
                 );
                 cuts += 1;
             }
@@ -722,15 +687,17 @@ fn locked_xadd32_progressive_fetch_uses_execute_only_and_never_wraps() {
     assert_eq!(cuts, 22);
     let mut first = code(&longest);
     first.protect(CODE, 1, 3).unwrap();
-    assert_eq!(
-        decode_one(first.memory().unwrap(), GuestAddress(CODE)).err(),
-        Some(fetch_error(CODE, CODE, 1, FaultReason::Permission))
+    crate::support_fetch::assert_decode_contract(
+        (decode_one(first.memory().unwrap(), GuestAddress(CODE)))
+            .expect_err("instruction must fail to decode"),
+        fetch_error(CODE, CODE, 1, FaultReason::Permission),
     );
     let mut second = code_at(0x1fff, &longest, true);
     second.protect(0x2000, 1, 3).unwrap();
-    assert_eq!(
-        decode_one(second.memory().unwrap(), GuestAddress(0x1fff)).err(),
-        Some(fetch_error(0x1fff, 0x2000, 2, FaultReason::Permission))
+    crate::support_fetch::assert_decode_contract(
+        (decode_one(second.memory().unwrap(), GuestAddress(0x1fff)))
+            .expect_err("instruction must fail to decode"),
+        fetch_error(0x1fff, 0x2000, 2, FaultReason::Permission),
     );
 }
 
@@ -783,8 +750,28 @@ fn locked_xadd32_mixed_sixty_four_instructions_and_existing_limits_are_exact() {
         (limits.blocks, limits.instructions, limits.wasm_bytes),
         (8, 64, 65_536)
     );
-    let mut mixed = [0xf0, 0x0f, 0xc1, 0x0b, 0x0f, 0xc1, 0x0b, 0x0f, 0xc1, 0xc8].repeat(21);
+    let mut original = [0xf0, 0x0f, 0xc1, 0x0b, 0x0f, 0xc1, 0x0b, 0x0f, 0xc1, 0xc8].repeat(21);
+    original.extend([0xeb, 0]);
+    let mut mixed = [0xf0, 0x0f, 0xc1, 0x0b, 0x0f, 0xc1, 0x0b, 0x0f, 0xc1, 0xc8].repeat(7);
+    mixed.extend(std::iter::repeat_n(0x90, 42));
     mixed.extend([0xeb, 0]);
+    for resident in [false, true] {
+        let mut engine = code(&original);
+        crate::support_admission::assert_oversized_explicit(
+            &mut engine,
+            CODE,
+            original.len() as u32,
+            resident,
+        );
+    }
+    assert_eq!(original.len(), 212);
+    for resident in [false, true] {
+        for entries in [false, true] {
+            crate::support_capture_banks::assert_bounded_memory_bank(
+                &original, CODE, KEY, resident, entries, 64,
+            );
+        }
+    }
     let mut too_many = BASE.repeat(64);
     too_many.extend([0xeb, 0]);
     for resident in [false, true] {
@@ -796,14 +783,24 @@ fn locked_xadd32_mixed_sixty_four_instructions_and_existing_limits_are_exact() {
             assert_eq!(engine.arena(), before);
             let mut engine = code(&too_many);
             describe(&mut engine, CODE, too_many.len(), entries);
+            if entries {
+                crate::support_admission::assert_fresh_cold_limit(
+                    &mut engine,
+                    CODE,
+                    too_many.len() as u32,
+                    resident,
+                );
+                continue;
+            }
             let before = engine.arena().to_vec();
-            assert_eq!(
-                compile(&mut engine, resident, entries),
-                Err(if resident {
+            crate::support_fetch::assert_host_contract(
+                (compile(&mut engine, resident, entries))
+                    .expect_err("compilation must refuse this fixture"),
+                if resident {
                     HostError::Resident(RegistryError::Compile(CompileError::InstructionLimit))
                 } else {
                     HostError::Compile(CompileError::InstructionLimit)
-                })
+                },
             );
             assert_eq!(engine.arena(), before);
             assert_eq!(engine.generation(), 0);

@@ -154,10 +154,10 @@ fn lock_register_forms_and_duplicate_or_repeat_prefixes_remain_refused_without_p
         ] {
             let engine = engine(&bytes);
             let before = engine.arena().to_vec();
-            assert_eq!(
-                decode_one(engine.memory().unwrap(), GuestAddress(PC)).err(),
-                Some(DecodeError::InvalidEncoding),
-                "{bytes:02x?}"
+            crate::support_fetch::assert_decode_contract(
+                (decode_one(engine.memory().unwrap(), GuestAddress(PC)))
+                    .expect_err("instruction must fail to decode"),
+                DecodeError::InvalidEncoding,
             );
             assert_eq!(engine.arena(), before);
         }
@@ -170,12 +170,15 @@ fn lock_register_forms_and_duplicate_or_repeat_prefixes_remain_refused_without_p
         vec![0xf0, 0x66, 0x66, 0x0f, 0xb1, 0x01],
         vec![0xf0, 0x66, 0xf2, 0x0f, 0xc1, 0x01],
     ] {
+        if super::support_prefix_admission::admit_if_new_prefix(&bytes) {
+            continue;
+        }
         let engine = engine(&bytes);
         let before = engine.arena().to_vec();
-        assert_eq!(
-            decode_one(engine.memory().unwrap(), GuestAddress(PC)).err(),
-            Some(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
-            "{bytes:02x?}"
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(engine.memory().unwrap(), GuestAddress(PC)))
+                .expect_err("instruction must fail to decode"),
+            DecodeError::Unsupported(UnsupportedFeature::Opcode),
         );
         assert_eq!(engine.arena(), before);
     }

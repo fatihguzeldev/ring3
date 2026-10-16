@@ -354,9 +354,10 @@ fn strict_categories_fetch_wrap_and_fixed32_adjacency_remain_exact() {
             continue;
         }
         let direct = code(CODE, instruction, true);
-        assert_eq!(
-            decode_one(direct.memory().unwrap(), GuestAddress(CODE)).err(),
-            Some(error)
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(direct.memory().unwrap(), GuestAddress(CODE)))
+                .expect_err("instruction must fail to decode"),
+            error,
         );
         let mut program = instruction.to_vec();
         program.extend_from_slice(&[0xeb, 0]);
@@ -533,9 +534,10 @@ fn strict_categories_fetch_wrap_and_fixed32_adjacency_remain_exact() {
             fetch_error(0x1fff, 0x2000, 2, FaultReason::Permission),
         ),
     ] {
-        assert_eq!(
-            decode_one(engine.memory().unwrap(), GuestAddress(pc)).err(),
-            Some(expected)
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(engine.memory().unwrap(), GuestAddress(pc)))
+                .expect_err("instruction must fail to decode"),
+            expected,
         );
         fetch_rows += 1;
     }
@@ -636,7 +638,11 @@ fn late_decode_failures_preserve_both_publications_and_all_mapped_pages() {
                     Owner::Replacement => HostError::Compile(compile_error),
                     Owner::Resident => HostError::Resident(RegistryError::Compile(compile_error)),
                 };
-                assert_eq!(compile(&mut engine, owner, entries), Err(expected));
+                crate::support_fetch::assert_host_contract(
+                    (compile(&mut engine, owner, entries))
+                        .expect_err("compilation must refuse this fixture"),
+                    expected,
+                );
                 assert_eq!(publication(&engine, keep), before);
                 engine.guard(KEY, before.generation).unwrap();
                 engine.guard_resident(KEY, keep).unwrap();

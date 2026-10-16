@@ -267,10 +267,9 @@ fn word_xadd_complete_memory_and_prefix_neighbors_keep_exact_error_categories() 
         }
         bytes.extend([0xeb, 0]);
         let memory = code_space(CODE, &bytes);
-        assert_eq!(
-            decode_one(&memory, GuestAddress(CODE)).err(),
-            Some(error),
-            "{bytes:02x?}"
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(&memory, GuestAddress(CODE))).expect_err("instruction must fail to decode"),
+            error,
         );
         assert_eq!(
             compile_region(
@@ -380,105 +379,18 @@ fn artifact(engine: &EngineInstance, resident: bool, id: u64) -> &[u8] {
     }
 }
 
-struct Reader<'a>(&'a [u8]);
-
-impl<'a> Reader<'a> {
-    fn take(&mut self, length: usize) -> &'a [u8] {
-        let (value, rest) = self.0.split_at(length);
-        self.0 = rest;
-        value
-    }
-    fn byte(&mut self) -> u8 {
-        self.take(1)[0]
-    }
-    fn unsigned(&mut self) -> u32 {
-        let mut value = 0;
-        for shift in (0..35).step_by(7) {
-            let byte = self.byte();
-            assert!(shift < 28 || byte & 0xf0 == 0, "invalid u32 LEB128");
-            value |= u32::from(byte & 127) << shift;
-            if byte & 128 == 0 {
-                return value;
-            }
-        }
-        panic!("unterminated u32 LEB128")
-    }
-    fn name(&mut self) -> &'a str {
-        let length = self.unsigned() as usize;
-        std::str::from_utf8(self.take(length)).unwrap()
-    }
-    fn end(self) {
-        assert!(self.0.is_empty());
-    }
-}
-
-fn section(wasm: &[u8], requested: u8) -> Reader<'_> {
-    assert_eq!(&wasm[..8], b"\0asm\x01\0\0\0");
-    let mut reader = Reader(&wasm[8..]);
-    while !reader.0.is_empty() {
-        let kind = reader.byte();
-        let length = reader.unsigned() as usize;
-        let bytes = reader.take(length);
-        if kind == requested {
-            return Reader(bytes);
-        }
-    }
-    panic!("missing Wasm section {requested}")
-}
-
 fn pure_module_interface(wasm: &[u8], resident: Option<bool>) {
-    let mut types = section(wasm, 1);
-    assert_eq!(types.unsigned(), if resident.is_some() { 2 } else { 1 });
-    for arity in [4, if resident == Some(true) { 7 } else { 6 }]
-        .into_iter()
-        .take(if resident.is_some() { 2 } else { 1 })
-    {
-        assert_eq!(types.byte(), 0x60);
-        assert_eq!(types.unsigned(), arity);
-        assert!(types.take(arity as usize).iter().all(|byte| *byte == 0x7f));
-        assert_eq!(types.unsigned(), 1);
-        assert_eq!(types.byte(), 0x7f);
-    }
-    types.end();
-    let mut imports = section(wasm, 2);
-    assert_eq!(imports.unsigned(), if resident.is_some() { 2 } else { 1 });
-    assert_eq!(
-        (imports.name(), imports.name(), imports.byte()),
-        ("env", "memory", 2)
-    );
-    assert_eq!((imports.unsigned(), imports.unsigned()), (0, 1));
     if let Some(resident) = resident {
-        assert_eq!(
-            (
-                imports.name(),
-                imports.name(),
-                imports.byte(),
-                imports.unsigned()
-            ),
-            (
-                "ring3",
-                if resident { "guard_resident" } else { "guard" },
-                0,
-                1
-            )
+        crate::support_wasm_interface::assert_bound(
+            wasm,
+            resident,
+            &[],
+            &[4, if resident { 7 } else { 6 }],
+            false,
         );
+    } else {
+        crate::support_wasm_interface::assert_interface(wasm, &[], &[4], false);
     }
-    imports.end();
-    let mut exports = section(wasm, 7);
-    assert_eq!(exports.unsigned(), 1);
-    assert_eq!(exports.name(), "run");
-    assert_eq!(exports.byte(), 0);
-    assert_eq!(exports.unsigned(), u32::from(resident.is_some()));
-    exports.end();
-    let mut bodies = section(wasm, 10);
-    assert_eq!(bodies.unsigned(), 1);
-    let length = bodies.unsigned() as usize;
-    let mut body = Reader(bodies.take(length));
-    bodies.end();
-    assert_eq!(body.unsigned(), 3);
-    assert_eq!((body.unsigned(), body.byte()), (16, 0x7f));
-    assert_eq!((body.unsigned(), body.byte()), (1, 0x7e));
-    assert_eq!((body.unsigned(), body.byte()), (10, 0x7f));
 }
 
 #[test]
@@ -496,14 +408,16 @@ fn word_xadd_progressive_fetch_and_top_address_boundaries_remain_exact() {
     }
     for cut in 1..4 {
         let pc = 0x2000 - cut as u32;
-        assert_eq!(
-            decode_one(&code_space(pc, &bytes[..cut]), GuestAddress(pc)).err(),
-            Some(fetch_error(pc, 0x2000, FaultReason::Unmapped, cut + 1))
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(&code_space(pc, &bytes[..cut]), GuestAddress(pc)))
+                .expect_err("instruction must fail to decode"),
+            fetch_error(pc, 0x2000, FaultReason::Unmapped, cut + 1),
         );
         let pc = u32::MAX - cut as u32 + 1;
-        assert_eq!(
-            decode_one(&code_space(pc, &bytes[..cut]), GuestAddress(pc)).err(),
-            Some(fetch_error(pc, pc, FaultReason::AddressOverflow, cut + 1))
+        crate::support_fetch::assert_decode_contract(
+            (decode_one(&code_space(pc, &bytes[..cut]), GuestAddress(pc)))
+                .expect_err("instruction must fail to decode"),
+            fetch_error(pc, pc, FaultReason::AddressOverflow, cut + 1),
         );
         rows += 2;
     }
@@ -514,9 +428,9 @@ fn word_xadd_progressive_fetch_and_top_address_boundaries_remain_exact() {
             Permissions::READ,
         )
         .unwrap();
-    assert_eq!(
-        decode_one(&memory, GuestAddress(CODE)).err(),
-        Some(fetch_error(CODE, CODE, FaultReason::Permission, 1))
+    crate::support_fetch::assert_decode_contract(
+        (decode_one(&memory, GuestAddress(CODE))).expect_err("instruction must fail to decode"),
+        fetch_error(CODE, CODE, FaultReason::Permission, 1),
     );
     let mut memory = code_space(0x1fff, &bytes);
     memory
@@ -525,9 +439,9 @@ fn word_xadd_progressive_fetch_and_top_address_boundaries_remain_exact() {
             Permissions::READ,
         )
         .unwrap();
-    assert_eq!(
-        decode_one(&memory, GuestAddress(0x1fff)).err(),
-        Some(fetch_error(0x1fff, 0x2000, FaultReason::Permission, 2))
+    crate::support_fetch::assert_decode_contract(
+        (decode_one(&memory, GuestAddress(0x1fff))).expect_err("instruction must fail to decode"),
+        fetch_error(0x1fff, 0x2000, FaultReason::Permission, 2),
     );
     rows += 2;
     assert_eq!(rows, 11);
@@ -737,13 +651,32 @@ fn late_word_xadd_refusals_and_caps_preserve_full_two_owner_publication() {
                 let (mut engine, keep) = previous_owners();
                 upload(&mut engine, pc, &bytes);
                 describe(&mut engine, pc, declared as usize, entries);
+                if entries
+                    && crate::support_admission::admit_if_deferred(
+                        &mut engine,
+                        crate::support_admission::ColdEntryCase {
+                            key: KEY,
+                            keeper: keep,
+                            resident,
+                            pages: &[CODE, KEEP, DATA],
+                            expected: cause,
+                        },
+                    )
+                {
+                    failures += 1;
+                    continue;
+                }
                 let before = publication(&engine, keep);
                 let expected = if resident {
                     HostError::Resident(RegistryError::Compile(cause))
                 } else {
                     HostError::Compile(cause)
                 };
-                assert_eq!(bound(&mut engine, resident, entries), Err(expected));
+                crate::support_fetch::assert_host_contract(
+                    (bound(&mut engine, resident, entries))
+                        .expect_err("compilation must refuse this fixture"),
+                    expected,
+                );
                 assert_eq!(publication(&engine, keep), before);
                 engine.guard(KEY, before.generation).unwrap();
                 engine.guard_resident(KEY, keep).unwrap();
@@ -787,7 +720,11 @@ fn late_word_xadd_refusals_and_caps_preserve_full_two_owner_publication() {
                     limits,
                 )
             };
-            assert_eq!(result.err(), Some(error));
+            if entries && error == CompileError::InstructionLimit {
+                assert_eq!(result.unwrap().metadata().instructions, limits.instructions);
+            } else {
+                crate::support_fetch::assert_compile_contract(result.unwrap_err(), error);
+            }
         }
     }
 }

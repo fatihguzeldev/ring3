@@ -68,12 +68,8 @@ use ring3_engine::{
             ir::{BitIndex, BitTestKind, EffectiveAddress, Operation},
         },
     },
-    memory::{Access, FaultReason, GuestAddress, MemoryFault},
+    memory::{FaultReason, GuestAddress},
     process::HostError,
-};
-use std::{
-    io::Write,
-    process::{Command, Stdio},
 };
 const CODE: u32 = 0x1000;
 const KEEP: u32 = 0x3000;
@@ -170,7 +166,7 @@ fn forms() -> Vec<(Vec<u8>, EffectiveAddress)> {
 
 #[test]
 fn typed_aliases_imports_and_four_bound_profiles_are_exact() {
-    let mut modules = Vec::new();
+    let mut modules = 0;
     let mut typed = 0;
     for kind in KINDS {
         let mut rows = Vec::new();
@@ -206,7 +202,7 @@ fn typed_aliases_imports_and_four_bound_profiles_are_exact() {
         }
         bytes.extend([0xeb, 0]);
         let engine = fixture(CODE, &bytes);
-        for (pc, length, address, index) in expected {
+        for &(pc, length, address, index) in &expected {
             let decoded = decode_one(engine.memory().unwrap(), GuestAddress(pc)).unwrap();
             assert_eq!(
                 decoded.operation(),
@@ -254,45 +250,72 @@ fn typed_aliases_imports_and_four_bound_profiles_are_exact() {
             refused
         );
         for resident in [false, true] {
-            for entries in [false, true] {
-                let mut engine = fixture(CODE, &bytes);
-                descriptor(&mut engine, CODE, bytes.len(), entries);
-                let before = engine.arena().to_vec();
-                let id = bound(&mut engine, resident, entries).unwrap();
-                assert_eq!(engine.arena(), before);
-                let generated = if resident {
-                    engine.resident_bytes(id).unwrap()
-                } else {
-                    engine.artifact_bytes().unwrap()
-                };
-                modules.push(u8::from(resident));
-                modules.extend((generated.len() as u32).to_le_bytes());
-                modules.extend(generated);
-            }
+            let mut oversized = fixture(CODE, &bytes);
+            crate::support_admission::assert_oversized_explicit(
+                &mut oversized,
+                CODE,
+                bytes.len() as u32,
+                resident,
+            );
         }
+        let mut covered = 0;
+        for group in expected.chunks(8) {
+            let pc = group[0].0;
+            let &(last, length, _, _) = group.last().unwrap();
+            let start = (pc - CODE) as usize;
+            let end = (last - CODE) as usize + length;
+            let mut chunk = bytes[start..end].to_vec();
+            chunk.extend([0xeb, 0]);
+            assert_eq!(&chunk[..chunk.len() - 2], &bytes[start..end]);
+            for resident in [false, true] {
+                for entries in [false, true] {
+                    let mut engine = fixture(pc, &chunk);
+                    descriptor(&mut engine, pc, chunk.len(), entries);
+                    let before = engine.arena().to_vec();
+                    let id = bound(&mut engine, resident, entries).unwrap();
+                    assert_eq!(engine.arena(), before);
+                    let generated = if resident {
+                        engine.resident_bytes(id).unwrap()
+                    } else {
+                        engine.artifact_bytes().unwrap()
+                    };
+                    crate::support_wasm_interface::assert_bound(
+                        generated,
+                        resident,
+                        &[
+                            ("cpu_read32", 1),
+                            (
+                                if resident {
+                                    "cpu_store_resident32"
+                                } else {
+                                    "cpu_store32"
+                                },
+                                if resident { 6 } else { 2 },
+                            ),
+                            ("cpu_read_modify32", 1),
+                        ],
+                        &[
+                            4,
+                            if resident { 7 } else { 6 },
+                            1,
+                            if resident { 6 } else { 2 },
+                        ],
+                        true,
+                    );
+                    if resident {
+                        for &(pc, _, _, _) in group {
+                            assert_eq!(engine.lookup_resident(pc).unwrap().get(), id);
+                        }
+                    }
+                    modules += 1;
+                }
+            }
+            covered += end - start;
+        }
+        assert_eq!(covered, bytes.len() - 2);
     }
     assert_eq!(typed, 78);
-    let mut child=Command::new("node").args(["-e",r#"
-const a=require('node:assert/strict'),b=require('node:fs').readFileSync(0);let at=0,n=0;
-function u(p){let x=0,s=0,v;do{v=b[p.i++];x|=(v&127)<<s;s+=7;}while(v&128);return x>>>0;}
-while(at<b.length){const resident=b[at++],size=b.readUInt32LE(at);at+=4;const end=at+size;
-a.ok(WebAssembly.validate(b.subarray(at,end)));const m=new WebAssembly.Module(b.subarray(at,end));
-a.deepEqual(WebAssembly.Module.imports(m),[{module:'env',name:'memory',kind:'memory'},
-...[resident?'guard_resident':'guard','cpu_read32',resident?'cpu_store_resident32':'cpu_store32'].map(name=>({module:'ring3',name,kind:'function'}))]);
-a.deepEqual(WebAssembly.Module.exports(m),[{name:'run',kind:'function'}]);
-const p={i:at+8};let found=0;while(p.i<end){const id=b[p.i++],stop=u(p)+p.i;
-if(id===1){const arities=[4,resident?7:6,1,resident?6:2,6];a.equal(u(p),arities.length);for(const arity of arities){a.equal(b[p.i++],96);a.equal(u(p),arity);for(let i=0;i<arity;i++)a.equal(b[p.i++],127);a.equal(u(p),1);a.equal(b[p.i++],127);}a.equal(p.i,stop);found|=1;}
-if(id===3){a.equal(u(p),2);a.equal(u(p),0);a.equal(u(p),4);a.equal(p.i,stop);found|=2;}
-if(id===10){a.equal(u(p),2);for(const expected of [[[16,127],[1,126],[10,127]],[[3,127]]]){const length=u(p),bodyEnd=p.i+length,c=u(p),locals=[];for(let i=0;i<c;i++)locals.push([u(p),b[p.i++]]);a.deepEqual(locals,expected);a.equal(b[bodyEnd-1],11);a.ok(p.i<bodyEnd);p.i=bodyEnd;}a.equal(p.i,stop);found|=4;}p.i=stop;}
-a.equal(found,7);at=end;n++;}a.equal(n,12);
-"#]).stdin(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
-    child.stdin.take().unwrap().write_all(&modules).unwrap();
-    let output = child.wait_with_output().unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    assert_eq!(modules, 48);
 }
 
 #[test]
@@ -325,10 +348,10 @@ fn strict_neighbors_fetch_wrap_and_source_currency_are_exact() {
                 if prefix_admission::admit_if_new_prefix(&bytes) {
                     continue;
                 }
-                assert_eq!(
+                crate::support_fetch::assert_decode_contract(
                     decode_one(fixture(CODE, &bytes).memory().unwrap(), GuestAddress(CODE))
                         .unwrap_err(),
-                    DecodeError::Unsupported(feature)
+                    DecodeError::Unsupported(feature),
                 );
             }
             for (tail, _) in forms()
@@ -358,17 +381,12 @@ fn strict_neighbors_fetch_wrap_and_source_currency_are_exact() {
                         if reason == FaultReason::Permission {
                             engine.map(0x2000, 1, 3).unwrap();
                         }
-                        assert_eq!(
+                        crate::support_fetch::assert_error(
                             decode_one(engine.memory().unwrap(), GuestAddress(pc)).unwrap_err(),
-                            DecodeError::MemoryFault {
-                                pc: GuestAddress(pc),
-                                fault: MemoryFault {
-                                    address: GuestAddress(0x2000),
-                                    access: Access::Execute,
-                                    reason
-                                },
-                                length: length as u32 + 1
-                            }
+                            pc,
+                            0x2000,
+                            reason,
+                            length as u32 + 1,
                         );
                     }
                 }
@@ -438,7 +456,11 @@ fn caps_and_late_failures_preserve_bound_owners_and_full_arena() {
                     } else {
                         HostError::Compile(failure)
                     };
-                    assert_eq!(bound(&mut engine, resident, entries), Err(expected));
+                    crate::support_fetch::assert_host_contract(
+                        (bound(&mut engine, resident, entries))
+                            .expect_err("compilation must refuse this fixture"),
+                        expected,
+                    );
                     assert_eq!(engine.arena(), before);
                     assert_eq!(engine.generation(), generation);
                     assert_eq!(engine.artifact_bytes().unwrap(), prior.0);
