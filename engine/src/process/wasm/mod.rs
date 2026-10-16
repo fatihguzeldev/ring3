@@ -342,8 +342,8 @@ pub(crate) use modules::{
     abort_module_input, abort_module_operation, append_module_input, begin_module_input,
     commit_module_input, configure_module_limits, detach_modules_for_exit,
     finish_module_initializer, free_library_module, load_library_module, module_gates,
-    module_gates_page, module_handle, module_initializer, module_teb, register_kernel32_module,
-    resolve_module_export, start_module_process,
+    module_gates_page, module_handle, module_initializer, module_teb, pending_module_source,
+    register_kernel32_module, resolve_module_export, resume_module_source, start_module_process,
 };
 
 mod loading;

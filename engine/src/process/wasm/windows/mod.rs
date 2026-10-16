@@ -26,6 +26,7 @@ pub(crate) use activation::*;
 pub(crate) use callbacks::*;
 pub(crate) use configuration::*;
 pub(crate) use d3d8::*;
+pub(crate) use dialogs::*;
 pub(crate) use dinput::*;
 pub(crate) use dsound::*;
 pub(crate) use exceptions::*;
