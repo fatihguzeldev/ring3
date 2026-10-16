@@ -3,6 +3,7 @@ import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {existsSync, readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
+import {attachDetectionApi, generatedImports} from '../../../../tests/support/wasm/binding.mjs';
 
 const [enginePath, probePath, outputDir, root] = process.argv.slice(2);
 assert.ok(root, 'expected actual engine, helper probe, output directory and repo root');
@@ -49,6 +50,7 @@ function fresh() {
     assert.equal(typeof value, 'function', `actual export ${name}`);
     return [name, value];
   }));
+  attachDetectionApi(api, instance.exports);
   const memory = instance.exports.memory;
   assert.ok(memory instanceof WebAssembly.Memory, 'engine owns actual exported memory');
   const key = 0xfedcba9800000000n + ++keys;
@@ -98,11 +100,11 @@ function installed(engine) {
   const bytes = engine.bytes.slice(pointer, pointer + length);
   assert.ok(WebAssembly.validate(bytes), 'engine-generated module validation');
   const module = new WebAssembly.Module(bytes);
-  assert.deepEqual(imports(module), [
-    {module: 'env', name: 'memory', kind: 'memory'},
-    {module: 'ring3', name: 'guard', kind: 'function'},
-  ], 'generated module direct engine guard import');
-  const instance = new WebAssembly.Instance(module, {env: {memory: engine.memory}, ring3: {guard: engine.api.guard}});
+  assert.deepEqual(imports(module), generatedImports().sort((a, b) => `${a.module}.${a.name}`.localeCompare(`${b.module}.${b.name}`)), 'generated module direct engine detection imports');
+  const instance = new WebAssembly.Instance(module, {env: {memory: engine.memory}, ring3: {
+    guard_detect: engine.api.guard_detect,
+    finish_exception_detection: engine.api.finish_exception_detection,
+  }});
   const generation = engine.api.generation() >>> 0;
   assert.ok(generation > 0);
   modules++;
@@ -382,7 +384,10 @@ open(second);
 setup(second);
 const secondChild = compile(second);
 assert.notEqual(second.key, engine.key, 'host assigns distinct nonzero keys');
-const rebound = new WebAssembly.Instance(old.module, {env: {memory: second.memory}, ring3: {guard: second.api.guard}});
+const rebound = new WebAssembly.Instance(old.module, {env: {memory: second.memory}, ring3: {
+  guard_detect: second.api.guard_detect,
+  finish_exception_detection: second.api.finish_exception_detection,
+}});
 rejected(second, {run: rebound.exports.run}, 3, 'cross-instance same-generation wrong key', true);
 assert.equal(secondChild.generation, old.generation, 'cross-instance rejection is not a generation difference');
 

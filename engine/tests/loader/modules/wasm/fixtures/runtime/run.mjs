@@ -182,6 +182,7 @@ missingHelper.write('R3MH'); missingHelper.writeUInt16LE(1, 4); missingHelper.wr
 beforeMissing.set(missingHelper, 100);
 assert.equal(api.read32(0x30002904), 0); assert.deepEqual(arena(), beforeMissing, 'failed module removed with exact host-read fault and no other arena effect');
 // the process is now driven only by guest code and normal provider completion.
+let forwardedTarget;
 for (let limit = 0; limit < 30; limit++) {
   const step = execute();
   if (step.reason === 3) continue;
@@ -199,8 +200,13 @@ for (let limit = 0; limit < 30; limit++) {
       assert.equal(api.module_handle(name('dynamic.dll')), 0); assert.equal(record().value, 0, 'forwarded target remains unloaded before GetProcAddress');
     }
     if (step.detail === 0x1000e) {
-      actual.set('dynamic.dll', 0x10010000);
-      assert.equal(pending.entry, 0x10011060, 'GetProcAddress demand-loads and relocates the forwarded target');
+      assert.equal(api.module_handle(name('dynamic.dll')), 0);
+      const dynamicBase = record().value;
+      assert.equal(dynamicBase & 0xffff, 0, 'canonical relocated module uses allocation granularity');
+      assert.ok(dynamicBase >= 0x14010000, 'dynamic module avoids the dependency and reserved process heap');
+      actual.set('dynamic.dll', dynamicBase);
+      forwardedTarget = dynamicBase + 0x1000;
+      assert.equal(pending.entry, dynamicBase + 0x1060, 'GetProcAddress demand-loads and initializes the canonical forwarded target');
     }
     finishInitializers(pending);
   }
@@ -216,7 +222,7 @@ for (let limit = 0; limit < 30; limit++) {
 }
 assert.deepEqual(providerLog, [0x1000a, 0x1000e, 0x1000f, 0x10003]);
 assert.equal(read(0x402900), 42); assert.equal(read(0x40290c), 42); assert.equal(read(0x402910), 77); assert.equal(read(0x402914), 1);
-assert.equal(read(0x402b80), 0x10011000, 'guest delay helper publishes resolved target');
+assert.equal(read(0x402b80), forwardedTarget, 'guest delay helper publishes the canonical resolved target');
 assert.equal(read(0x10002908), 0); assert.equal(read(0x10002904), 0, 'process exit executed dependency detach');
 assert.equal(get(72), 9); assert.equal(get(80), 0);
 assert.equal(initializerLog.filter(item => item.kind === 1 && item.reason === 1).length, 3);

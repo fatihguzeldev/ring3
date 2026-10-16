@@ -17,8 +17,8 @@ const ownSources = [
   'engine/tests/process/callbacks/resident/fixtures/p2-resident-callback-installation/runtime/run.mjs',
 ];
 const sourcePaths = ['engine/tests/support/wasm/binding.mjs', ...new Set([
-  ...execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard',
-    'Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml', 'engine/src'], {cwd: root, encoding: 'utf8'}).trim().split('\n'),
+  'Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml',
+  ...execFileSync('rg', ['--files', 'engine/src'], {cwd: root, encoding: 'utf8'}).trim().split('\n'),
   ...ownSources,
 ])].sort();
 const sourceBytes = Object.fromEntries(sourcePaths.map(path => [path, readFileSync(join(root, path))]));
