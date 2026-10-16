@@ -1,0 +1,52 @@
+name: Windows reference behavior
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  reference:
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - name: Read the exact public source revision
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git init .
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git remote add origin https://github.com/fatihguzeldev/ring3.git
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git fetch --depth=1 origin $env:GITHUB_SHA
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git checkout --detach FETCH_HEAD
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Compile the original PE32 reference programs
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $finder = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
+          $installation = & $finder -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $installation) { throw 'The Microsoft x86 C compiler is unavailable' }
+          $environment = Join-Path $installation 'VC/Auxiliary/Build/vcvars32.bat'
+          cmd /c "`"$environment`" && cl /nologo /std:c11 /W4 /D_CRT_SECURE_NO_WARNINGS engine\tests\windows\media\fixtures\oracle\force.c /Fe:force.exe"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cmd /c "`"$environment`" && cl /nologo /std:c11 /W4 engine\tests\windows\nls\fixtures\oracle\date.c /Fe:date.exe"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $os = Get-CimInstance Win32_OperatingSystem
+          Write-Output "RING3_WINDOWS version=$($os.Version) build=$($os.BuildNumber) source=$env:GITHUB_SHA"
+          Get-FileHash force.exe,date.exe -Algorithm SHA256 | Format-Table -AutoSize
+      - name: Record native DirectInput file behavior
+        shell: pwsh
+        run: |
+          ./force.exe
+          exit $LASTEXITCODE
+      - name: Record native NLS date behavior
+        if: always()
+        shell: pwsh
+        run: |
+          if (-not (Test-Path ./date.exe)) { throw 'The reference program did not compile' }
+          ./date.exe
+          exit $LASTEXITCODE
