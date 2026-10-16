@@ -15,6 +15,7 @@ use crate::{
 const KEY: u64 = 0x5132;
 const ENTRY: u32 = 0x70000;
 const RETURN: u32 = 0x70010;
+const WAIT: u32 = 0x70030;
 pub(super) const SLEEP: u32 = 0x70020;
 pub(super) fn engine() -> (EngineInstance, u64) {
     let mut engine = EngineInstance::new(64, KEY).unwrap();
@@ -42,6 +43,12 @@ pub(super) fn engine() -> (EngineInstance, u64) {
         .unwrap()
         .write(GuestAddress(SLEEP), &[0x0f, 0x0b])
         .unwrap();
+    engine
+        .memory
+        .as_mut()
+        .unwrap()
+        .write(GuestAddress(WAIT), &[0x0f, 0x0b])
+        .unwrap();
     let primary = engine
         .threads
         .prepare_primary_thread(0x10000, PageRange::new(GuestAddress(0x11000), 1).unwrap())
@@ -54,16 +61,20 @@ pub(super) fn engine() -> (EngineInstance, u64) {
         2,
         SLEEP,
         2,
+        WAIT,
+        2,
         RETURN,
         super::super::THREAD_RETURN_ID,
         SLEEP,
         crate::windows::WindowsApi32::Sleep.id(),
+        WAIT,
+        crate::windows::WindowsApi32::WaitForSingleObject.id(),
     ];
     for (index, value) in values.iter().enumerate() {
         engine.arena_mut().unwrap()[TRANSFER_OFFSET + index * 4..TRANSFER_OFFSET + index * 4 + 4]
             .copy_from_slice(&value.to_le_bytes());
     }
-    let unit = engine.compile_resident_with_gates(3, 2).unwrap().get();
+    let unit = engine.compile_resident_with_gates(4, 3).unwrap().get();
     let mut state = State32 {
         eip: ENTRY,
         ..Default::default()
@@ -147,6 +158,11 @@ fn child_thread_has_distinct_teb_tls_and_real_return_signals_shared_wait_object(
             .unwrap()
             .is_some()
     );
+    assert_eq!(engine.pending_windows_thread_schedule(), Some(2));
+    assert_eq!(
+        engine.schedule_windows_thread().unwrap(),
+        ThreadSchedule32::Running { thread: 1 }
+    );
     assert_eq!(engine.threads.current_id(), 1);
     assert_eq!(engine.get_windows_tls(tls).unwrap(), 0x1111);
     assert!(
@@ -192,5 +208,99 @@ fn invalid_thread_output_does_not_publish_handle_reservation_or_child_and_suspen
             .unwrap()
             .validate_thread_access(handle, 1)
             .is_ok()
+    );
+}
+
+#[test]
+fn captured_child_return_ends_its_service_scope_before_resuming_the_parent_wait() {
+    let (mut engine, unit) = engine();
+    let child = engine
+        .create_windows_thread_at_gate(&[0, 0, ENTRY, 0, 0, 0], RETURN)
+        .unwrap();
+    let mut parent = State32 {
+        eip: WAIT,
+        ..Default::default()
+    };
+    parent.registers[4] = 0x11e00;
+    for (index, word) in [ENTRY, child, INFINITE].iter().enumerate() {
+        engine
+            .memory
+            .as_mut()
+            .unwrap()
+            .write(
+                GuestAddress(parent.registers[4] + index as u32 * 4),
+                &word.to_le_bytes(),
+            )
+            .unwrap();
+    }
+    encode_state_current(&parent, &mut engine.arena_mut().unwrap()[..STATE_SIZE]).unwrap();
+    encode_exit_v3(
+        &ExecutionExit {
+            retired: 0,
+            reason: ExitReason::Gate {
+                id: crate::windows::WindowsApi32::WaitForSingleObject.id(),
+            },
+        },
+        &mut engine.arena_mut().unwrap()[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE],
+    )
+    .unwrap();
+    let wait = engine
+        .capture_resident_call(KEY, unit, CallingConvention32::Stdcall, 2)
+        .unwrap();
+    engine
+        .complete_resident_windows_call(KEY, unit, wait.token)
+        .unwrap();
+    assert_eq!(
+        engine.schedule_windows_thread().unwrap(),
+        ThreadSchedule32::Running { thread: 2 }
+    );
+    let child = engine.windows_thread_info(2).unwrap();
+    let mut returned = State32 {
+        eip: RETURN,
+        ..Default::default()
+    };
+    returned.registers[0] = 37;
+    returned.registers[4] = child.stack_base + child.stack_pages * 4096 - 4;
+    encode_state_current(&returned, &mut engine.arena_mut().unwrap()[..STATE_SIZE]).unwrap();
+    encode_exit_v3(
+        &ExecutionExit {
+            retired: 0,
+            reason: ExitReason::Gate {
+                id: super::super::THREAD_RETURN_ID,
+            },
+        },
+        &mut engine.arena_mut().unwrap()[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE],
+    )
+    .unwrap();
+    let call = engine
+        .capture_resident_call(KEY, unit, CallingConvention32::Stdcall, 0)
+        .unwrap();
+    engine
+        .complete_resident_windows_call(KEY, unit, call.token)
+        .unwrap();
+    assert_eq!(engine.threads.current_id(), 2);
+    assert!(engine.windows_service.is_none());
+    assert_eq!(engine.pending_windows_thread_schedule(), Some(2));
+    assert!(matches!(
+        engine.guard_dispatch_entry(KEY),
+        Err(crate::process::HostError::Call(
+            crate::process::CallError::Busy
+        ))
+    ));
+    assert_eq!(
+        engine.schedule_windows_thread().unwrap(),
+        ThreadSchedule32::Running { thread: 1 }
+    );
+    assert!(engine.pending_call.is_none());
+    assert!(engine.pending_windows_wait().is_none());
+    let completed = crate::abi::x86::decode_state(&engine.arena()[..STATE_SIZE]).unwrap();
+    assert_eq!(completed.eip, ENTRY);
+    assert_eq!(completed.registers[0], 0);
+    assert_eq!(completed.registers[4], parent.registers[4] + 12);
+    assert_eq!(engine.windows_thread_info(2).unwrap().exit_code, 37);
+    assert!(
+        engine
+            .complete_resident_windows_call(KEY, unit, wait.token)
+            .is_err()
     );
 }

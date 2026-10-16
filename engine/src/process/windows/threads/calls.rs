@@ -7,6 +7,15 @@ use crate::{
 };
 
 impl EngineInstance {
+    fn schedule_after_windows_thread_completion(&mut self) -> Result<(), HostError> {
+        if self.windows_service.is_some() {
+            self.threads.schedule_required = Some(self.threads.current_id());
+        } else {
+            let _ = self.schedule_windows_thread()?;
+        }
+        Ok(())
+    }
+
     pub(in crate::process) fn try_complete_thread_call(
         &mut self,
         owner: PendingOwner,
@@ -52,7 +61,7 @@ impl EngineInstance {
             };
             self.request_windows_thread_exit(code)?;
             if self.exit_code.is_none() {
-                let _ = self.schedule_windows_thread()?;
+                self.schedule_after_windows_thread_completion()?;
             }
             return Ok(true);
         }
@@ -131,7 +140,7 @@ impl EngineInstance {
                 .is_ok_and(|info| info.state == crate::windows::thread::ThreadState32::Terminated)
         {
             if self.exit_code.is_none() {
-                let _ = self.schedule_windows_thread()?;
+                self.schedule_after_windows_thread_completion()?;
             }
             return Ok(true);
         }
