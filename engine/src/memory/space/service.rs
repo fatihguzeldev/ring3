@@ -41,6 +41,8 @@ impl AddressSpace {
         recorded
     }
 
+    #[cold]
+    #[inline(never)]
     pub(super) fn record_guard_service_fault(&self, address: GuestAddress) {
         if self.service_guard.state.load(Ordering::Acquire) != 1 {
             return;

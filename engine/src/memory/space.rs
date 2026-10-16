@@ -529,6 +529,7 @@ impl AddressSpace {
         Ok(())
     }
 
+    #[inline]
     fn access_slot(
         &self,
         page: usize,
