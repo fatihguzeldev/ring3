@@ -42,7 +42,7 @@ impl FontDatabase32 {
                 unit += character.len_utf16();
             }
             let (pixels, x_scale) = self.scale(font)?;
-            let face = rustybuzz::Face::from_slice(&self.face(font).bytes, 0)
+            let face = rustybuzz::Face::from_slice(&self.face(font).bytes, self.face(font).index)
                 .ok_or(GdiError32::InvalidRequest)?;
             let scale = pixels / face.units_per_em() as f32;
             let bidi = unicode_bidi::BidiInfo::new(

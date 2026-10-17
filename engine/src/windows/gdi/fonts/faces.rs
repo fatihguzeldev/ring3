@@ -18,21 +18,22 @@ pub(super) struct FontDesign32 {
 }
 pub(super) struct FontFace32 {
     pub bytes: Arc<[u8]>,
+    pub index: u32,
     pub raster: fontdue::Font,
     pub name: Vec<u16>,
     pub design: FontDesign32,
 }
 pub struct FontDatabase32 {
     pub(super) faces: Vec<Arc<FontFace32>>,
-    pub(super) resources: Vec<(u32, Arc<FontFace32>)>,
+    pub(super) resources: Vec<(u32, Vec<Arc<FontFace32>>)>,
     next_resource: u32,
     byte_limit: usize,
     bytes: usize,
 }
 static BUILTIN: OnceLock<Result<[Arc<FontFace32>; 2], GdiError32>> = OnceLock::new();
-fn parse(bytes: &[u8]) -> Result<Arc<FontFace32>, GdiError32> {
-    let face =
-        rustybuzz::ttf_parser::Face::parse(bytes, 0).map_err(|_| GdiError32::InvalidRequest)?;
+fn parse(bytes: Arc<[u8]>, index: u32) -> Result<Arc<FontFace32>, GdiError32> {
+    let face = rustybuzz::ttf_parser::Face::parse(&bytes, index)
+        .map_err(|_| GdiError32::InvalidRequest)?;
     if face.number_of_glyphs() == 0 || face.units_per_em() == 0 {
         return Err(GdiError32::InvalidRequest);
     }
@@ -114,10 +115,17 @@ fn parse(bytes: &[u8]) -> Result<Arc<FontFace32>, GdiError32> {
     if design.ascent + design.descent <= 0.0 || design.average <= 0.0 {
         return Err(GdiError32::InvalidRequest);
     }
-    let raster = fontdue::Font::from_bytes(bytes, fontdue::FontSettings::default())
-        .map_err(|_| GdiError32::InvalidRequest)?;
+    let raster = fontdue::Font::from_bytes(
+        bytes.as_ref(),
+        fontdue::FontSettings {
+            collection_index: index,
+            ..Default::default()
+        },
+    )
+    .map_err(|_| GdiError32::InvalidRequest)?;
     Ok(Arc::new(FontFace32 {
-        bytes: Arc::from(bytes),
+        bytes,
+        index,
         raster,
         name: name.encode_utf16().collect(),
         design,
@@ -131,12 +139,20 @@ impl FontDatabase32 {
         let builtin = BUILTIN
             .get_or_init(|| {
                 Ok([
-                    parse(include_bytes!(
-                        "../../../../assets/fonts/NotoSans-Regular.ttf"
-                    ))?,
-                    parse(include_bytes!(
-                        "../../../../assets/fonts/NotoSansMono-Regular.ttf"
-                    ))?,
+                    parse(
+                        Arc::from(
+                            include_bytes!("../../../../assets/fonts/NotoSans-Regular.ttf")
+                                .as_slice(),
+                        ),
+                        0,
+                    )?,
+                    parse(
+                        Arc::from(
+                            include_bytes!("../../../../assets/fonts/NotoSansMono-Regular.ttf")
+                                .as_slice(),
+                        ),
+                        0,
+                    )?,
                 ])
             })
             .as_ref()
@@ -150,23 +166,37 @@ impl FontDatabase32 {
         })
     }
     pub fn add_memory_font(&mut self, bytes: &[u8]) -> Result<u32, GdiError32> {
-        if bytes.len() > self.byte_limit - self.bytes || self.resources.len() == 256 {
+        let count = rustybuzz::ttf_parser::fonts_in_collection(bytes).unwrap_or(1) as usize;
+        if count == 0 {
+            return Err(GdiError32::InvalidRequest);
+        }
+        if bytes.len() > self.byte_limit - self.bytes
+            || self.resources.len() == 256
+            || count > 256usize.saturating_sub(self.faces.len() - 2)
+        {
             return Err(GdiError32::Capacity);
         }
         let next = self
             .next_resource
             .checked_add(1)
             .ok_or(GdiError32::Exhausted)?;
+        let source: Arc<[u8]> = Arc::from(bytes);
+        let mut added = Vec::new();
+        added
+            .try_reserve_exact(count)
+            .map_err(|_| GdiError32::Allocation)?;
+        for index in 0..count {
+            added.push(parse(source.clone(), index as u32)?);
+        }
         self.resources
             .try_reserve(1)
             .map_err(|_| GdiError32::Allocation)?;
         self.faces
-            .try_reserve(1)
+            .try_reserve(count)
             .map_err(|_| GdiError32::Allocation)?;
-        let face = parse(bytes)?;
         let id = self.next_resource;
-        self.resources.push((id, face.clone()));
-        self.faces.push(face);
+        self.faces.extend(added.iter().cloned());
+        self.resources.push((id, added));
         self.bytes += bytes.len();
         self.next_resource = next;
         Ok(id)
@@ -177,9 +207,10 @@ impl FontDatabase32 {
             .iter()
             .position(|entry| entry.0 == id)
             .ok_or(GdiError32::InvalidHandle)?;
-        let (_, face) = self.resources.remove(index);
-        self.bytes -= face.bytes.len();
-        self.faces.retain(|entry| !Arc::ptr_eq(entry, &face));
+        let (_, faces) = self.resources.remove(index);
+        self.bytes -= faces[0].bytes.len();
+        self.faces
+            .retain(|entry| !faces.iter().any(|face| Arc::ptr_eq(entry, face)));
         Ok(())
     }
     pub(super) fn face(&self, font: &LogicalFont32) -> &FontFace32 {

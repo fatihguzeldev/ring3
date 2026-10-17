@@ -77,3 +77,5 @@ fn memory_font_registration_is_bounded_and_removed_faces_revert_to_configured_fa
 }
 
 mod metadata;
+
+mod collection;
