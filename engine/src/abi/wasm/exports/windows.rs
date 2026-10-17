@@ -18,6 +18,7 @@ export_process_calls! {
     request_user32_dialog_help(epoch_low:u32,epoch_high:u32,id_low:u32,id_high:u32);
     configure_user32(classes:u32,windows:u32,messages:u32,continuations:u32,scratch_base:u32,scratch_pages:u32);
     register_user32_module(base:u32);
+    user32_window_info(window:u32);
     set_user32_keyboard_state(flags:u32);
     post_user32_message(window:u32,message:u32,wparam:u32,lparam:u32,time_ms:u32,x:u32,y:u32);
     submit_ime_composition(window:u32,length:u32);

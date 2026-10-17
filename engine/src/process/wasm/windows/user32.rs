@@ -29,6 +29,21 @@ pub(crate) fn configure_user32(
 pub(crate) fn register_user32_module(base: u32) -> u32 {
     mutate(|instance| instance.register_user32_module(base))
 }
+pub(crate) fn user32_window_info(window: u32) -> u32 {
+    use crate::abi::{
+        arena::TRANSFER_OFFSET,
+        windows::user32::{USER32_WINDOW_INFO_SIZE, encode_user32_window_info},
+    };
+    mutate(|instance| {
+        let info = instance.user32_window_info(window)?;
+        let mut bytes = [0; USER32_WINDOW_INFO_SIZE];
+        encode_user32_window_info(info, &mut bytes).map_err(|_| HostError::Infrastructure)?;
+        instance.arena.as_mut().get_mut()
+            [TRANSFER_OFFSET..TRANSFER_OFFSET + USER32_WINDOW_INFO_SIZE]
+            .copy_from_slice(&bytes);
+        Ok(())
+    })
+}
 pub(crate) fn set_user32_keyboard_state(flags: u32) -> u32 {
     mutate(|instance| {
         if flags & !7 != 0 {

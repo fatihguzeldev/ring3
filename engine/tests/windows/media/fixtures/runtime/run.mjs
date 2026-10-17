@@ -12,6 +12,7 @@ import {afterEffectCall} from './effects.mjs';
 import {afterHapticCall,inspectForceFileCallback} from './haptics.mjs';
 import {beforeActivationCall, afterActivationCall} from './activation.mjs';
 import {beforeRawInputCall, afterRawInputCall} from './rawinput.mjs';
+import {createdWindow, unconfiguredWindowQuery, windowInfo} from './presentation.mjs';
 
 const [enginePath, output, root] = process.argv.slice(2);
 assert.ok(enginePath && output && root); mkdirSync(output, {recursive: true});
@@ -31,12 +32,16 @@ const request = value => {assert.ok(value.length <= 4096); bytes().set(value, ba
 const name = value => {const data = Buffer.from(value); request(data); return data.length;};
 const pair = value => [Number(value & 0xffffffffn), Number(value >> 32n)];
 const read = address => {assert.equal(api.read32(address >>> 0), 0); assert.equal(get(116), 0); return get(120);};
+const presentation = {api, bytes, base, take};
+unconfiguredWindowQuery(presentation);
 function metadata(kind) {
   const data = take(64); assert.equal(data.subarray(0, 4).toString(), 'R3MR');
   assert.equal(data.readUInt16LE(6), kind); assert.equal(data.readUInt32LE(8), 64); assert.equal(data.readUInt32LE(12), 0);
   return {epoch: data.readBigUInt64LE(16), values: Array.from({length: 5}, (_, i) => data.readBigUInt64LE(24 + i * 8))};
 }
 const context = configure({api, request, metadata});
+assert.equal(windowInfo(presentation, 0), undefined);
+assert.equal(windowInfo(presentation, 0xffffffff), undefined);
 const guest = image().seal(); assert.equal(guest.calls.length, 196); writeFileSync(join(output, 'windows-media-authored.exe'), guest.bytes);
 assert.equal(api.begin_module_input(guest.bytes.length, name('windows-media-authored.exe')), 0);
 for (let offset = 0; offset < guest.bytes.length; offset += 4096) {
@@ -62,6 +67,7 @@ assert.equal(new Set(gateRows.map(([, entry]) => entry)).size, gateRows.length);
 writeFileSync(join(output, 'gates.json'), JSON.stringify(gateRows));
 const runs = [], calls = [], callbacks = [], waits = [], pcm = [], measurements = [];
 let inputSequence = 0n;
+let presentedWindow;
 function input(events) {
   const batch = Buffer.alloc(32 + 32 * events.length); batch.write('R3IB'); batch.writeUInt16LE(1, 4); batch.writeUInt16LE(32, 6);
   batch.writeBigUInt64LE(context.mediaEpoch, 8); batch.writeBigUInt64LE(++inputSequence, 16); batch.writeUInt32LE(events.length, 24);
@@ -172,6 +178,11 @@ for (const call of guest.calls) {
   else if (call.expected === 'exit') assert.equal(get(72), 9);
   else if (typeof call.expected === 'object') assert.equal(result & call.expected.mask, call.expected.value, `${call.name}: low return bits`);
   else assert.equal(result, call.expected, `${call.name}: result`);
+  if (call.name === 'CreateWindowExA') {
+    presentedWindow = result;
+    createdWindow(presentation, result);
+  }
+  if (call.name === 'DestroyWindow') assert.equal(windowInfo(presentation, presentedWindow), undefined);
   if (call.name === 'KeyboardState') assert.equal(read(guest.addresses.keyState), 0x80000000, 'custom offset3 observes physical A');
   if (call.name === 'QueryBuffer8') assert.equal(read(guest.addresses.soundBuffer), read(guest.addresses.buffer8), 'Buffer and Buffer8 alias the native shared pointer');
   if (call.name === 'QueryCapture8') assert.equal(read(guest.addresses.captureBuffer), read(guest.addresses.capture8), 'CaptureBuffer and CaptureBuffer8 share pointer');

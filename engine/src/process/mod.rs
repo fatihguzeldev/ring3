@@ -32,6 +32,7 @@ pub use windows::dsound::{DSoundConfig32, DSoundError32};
 pub use windows::synchronization::WindowsWait32;
 pub use windows::user32::{
     PendingUser32ImageCall32, User32CursorRequest32, User32DialogIcon32, User32DialogRequest32,
+    User32WindowInfo32,
 };
 
 pub use windows::files::{

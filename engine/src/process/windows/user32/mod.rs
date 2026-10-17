@@ -23,6 +23,7 @@ mod memory;
 mod menus;
 mod messages;
 mod properties;
+mod presentation;
 mod rawinput;
 mod runtime;
 mod system_colors;
@@ -40,6 +41,7 @@ use crate::{
 };
 use callback::Pending32;
 pub use input::User32CursorRequest32;
+pub use presentation::User32WindowInfo32;
 pub(in crate::process) use threads::{PreparedUser32Sent32, User32ThreadReply32};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
