@@ -46,6 +46,7 @@ pub(super) enum Continuation32 {
     Header(super::common::header::notifications::HeaderCall32),
     ListView(super::common::listview::changes::ListViewCall32),
     Numeric(super::common::numeric::NumericCall32),
+    Animation(super::common::animate::AnimationCall32),
     StatusDraw(super::common::status::owner::StatusDraw32),
     FileDialog(super::file_dialogs::FileDialogCall32),
     FilePrompt(super::file_dialogs::FilePrompt32),
@@ -162,6 +163,7 @@ impl User32Context32 {
             | Continuation32::TooltipText(_)
             | Continuation32::TooltipRelay(_)
             | Continuation32::TooltipTrack(_)
+            | Continuation32::Animation(_)
             | Continuation32::Numeric(_)
             | Continuation32::ListView(_)
             | Continuation32::Header(_)
@@ -401,6 +403,9 @@ impl User32Context32 {
         if let Some(outcome) = self.retry_tooltip_relay_completion(token) {
             return Ok(outcome);
         }
+        if let Some(outcome) = self.retry_animation_completion(token) {
+            return Ok(outcome);
+        }
         if let Some(outcome) = self.retry_numeric_completion(token) {
             return Ok(outcome);
         }
@@ -431,6 +436,7 @@ impl User32Context32 {
         let outcome = self.complete_tooltip_text_child(token, outcome, memory)?;
         let outcome = self.complete_tab_tooltip_child(token, outcome)?;
         let outcome = self.complete_tooltip_relay_child(token, outcome)?;
+        let outcome = self.complete_animation_child(token, outcome)?;
         let outcome = self.complete_numeric_child(token, outcome)?;
         let outcome = self.complete_header_child(token, outcome)?;
         let outcome = self.complete_listview_child(token, outcome)?;
@@ -461,6 +467,7 @@ impl User32Context32 {
             | Continuation32::TooltipText(_)
             | Continuation32::TooltipRelay(_)
             | Continuation32::TooltipTrack(_)
+            | Continuation32::Animation(_)
             | Continuation32::Numeric(_)
             | Continuation32::ListView(_)
             | Continuation32::Header(_)

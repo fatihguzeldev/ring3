@@ -145,6 +145,9 @@ impl User32Context32 {
             .filter(|pending| pending.token == token)
             .cloned()
             .ok_or(User32Error32::InvalidToken)?;
+        if let Continuation32::Animation(_) = pending.continuation {
+            return self.resume_animation(token, memory);
+        }
         if let Continuation32::Numeric(_) = pending.continuation {
             return self.resume_numeric(token, memory);
         }

@@ -398,6 +398,8 @@ mod toolbar;
 #[path = "numeric.rs"]
 mod numeric;
 
+#[path = "animate.rs"]
+mod animate;
 
 #[test]
 fn captured_legacy_initializer_uses_the_void_gate_and_can_be_called_again() {

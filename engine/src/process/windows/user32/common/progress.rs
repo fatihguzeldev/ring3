@@ -27,6 +27,9 @@ impl User32Context32 {
             CommonControlState32::ListView(_) => {
                 return self.listview_control_message(args, wide, ram, gdi, call);
             }
+            CommonControlState32::Animate(_) => {
+                return self.animate_control_message(args, ram, gdi, call);
+            }
             CommonControlState32::Toolbar(_) => {
                 return self.toolbar_control_message(args, wide, ram, gdi, call);
             }

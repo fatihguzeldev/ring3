@@ -47,6 +47,7 @@ impl User32Context32 {
             super::super::callback::Continuation32::MenuBar(_) => true,
             super::super::callback::Continuation32::TooltipTrack(_) => true,
             super::super::callback::Continuation32::TooltipRelay(_) => true,
+            super::super::callback::Continuation32::Animation(call) => call.ready(self),
             super::super::callback::Continuation32::Numeric(_) => true,
             super::super::callback::Continuation32::TooltipText(_) => true,
             super::super::callback::Continuation32::TabTooltip(_) => true,

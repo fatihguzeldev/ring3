@@ -1,3 +1,4 @@
+pub(super) mod animate;
 pub(super) mod header;
 mod hotkey;
 pub(super) mod layout;
@@ -30,12 +31,12 @@ impl EngineInstance {
         if size != 8 {
             return Ok(User32Outcome32::Return(0));
         }
-        if flags & 0xffff & !0x7d != 0 {
+        if flags & 0xffff & !0xfd != 0 {
             return Err(HostError::User32(
                 crate::windows::user32::User32Error32::Win32(50),
             ));
         }
-        if flags & 0x7d == 0 {
+        if flags & 0xfd == 0 {
             return Ok(User32Outcome32::Return(1));
         }
         self.bind_common_control_classes(flags)?;
@@ -88,6 +89,10 @@ impl EngineInstance {
     ) -> Result<User32Outcome32, HostError> {
         let call = self.user32_call_context()?;
         let queue = self.prepare_user32_queue_change_for(call.thread_id)?;
+        if let Some(outcome) = self.begin_common_animation_open(args, call, wide)? {
+            self.commit_user32_queue_change(queue);
+            return Ok(outcome);
+        }
         let result = self
             .user32
             .as_mut()

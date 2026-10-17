@@ -98,6 +98,9 @@ impl User32Context32 {
         if self.status_draw_wait(token) {
             return self.pending_status_draw_message(token);
         }
+        if self.animation_wait(token).is_some() {
+            return self.pending_animation_message(token);
+        }
         if self.numeric_wait(token) {
             return self.pending_numeric_message(token);
         }
@@ -156,6 +159,7 @@ impl User32Context32 {
                         | Continuation32::TooltipText(_)
                         | Continuation32::TooltipRelay(_)
                         | Continuation32::TooltipTrack(_)
+                        | Continuation32::Animation(_)
                         | Continuation32::Numeric(_)
                         | Continuation32::ListView(_)
                         | Continuation32::Header(_)

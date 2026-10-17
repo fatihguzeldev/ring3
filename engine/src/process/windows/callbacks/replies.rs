@@ -388,8 +388,9 @@ impl EngineInstance {
         };
         let colors = self.advance_system_colors_repaint(continuation)?;
         let clipboard = self.finish_clipboard_wait(continuation)?;
+        let animation = self.finish_animation_wait(continuation)?;
         let send = self.prepare_user32_wait_send(continuation)?;
-        let queue = if send.is_some() || clipboard || colors {
+        let queue = if send.is_some() || clipboard || colors || animation {
             None
         } else {
             self.prepare_user32_queue_change()?

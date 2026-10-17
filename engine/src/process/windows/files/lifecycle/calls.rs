@@ -30,6 +30,9 @@ impl EngineInstance {
             .and_then(|runtime| runtime.reply)
             .filter(|reply| reply.token == token)
             .ok_or(HostError::Call(CallError::InvalidToken))?;
+        if self.resume_animation_file_wait(reply.owner, token, reply.frame)? {
+            return Ok(());
+        }
         if matches!(
             crate::windows::user32::User32Api32::from_id(reply.id),
             Some(
@@ -66,6 +69,9 @@ impl EngineInstance {
             .filter(|reply| reply.token == token)
             .ok_or(HostError::Call(CallError::InvalidToken))?;
         self.checked_pending_call(reply.owner, token)?;
+        if self.animation_file_waiting() {
+            return Err(HostError::Call(CallError::Busy));
+        }
         if matches!(
             crate::windows::user32::User32Api32::from_id(reply.id),
             Some(
