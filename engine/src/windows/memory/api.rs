@@ -38,9 +38,18 @@ pub enum MemoryApi32 {
     HeapSetInformation,
     HeapQueryInformation,
     InitializeSListHead,
+    IsBadCodePtr,
+    IsBadReadPtr,
+    IsBadWritePtr,
+    IsBadStringPtrA,
+    IsBadStringPtrW,
+    InterlockedIncrement,
+    InterlockedDecrement,
+    InterlockedExchange,
+    GlobalMemoryStatus,
 }
 impl MemoryApi32 {
-    pub const ALL: [Self; 37] = [
+    pub const ALL: [Self; 46] = [
         Self::GetProcessHeap,
         Self::HeapCreate,
         Self::HeapDestroy,
@@ -78,6 +87,15 @@ impl MemoryApi32 {
         Self::HeapSetInformation,
         Self::HeapQueryInformation,
         Self::InitializeSListHead,
+        Self::IsBadCodePtr,
+        Self::IsBadReadPtr,
+        Self::IsBadWritePtr,
+        Self::IsBadStringPtrA,
+        Self::IsBadStringPtrW,
+        Self::InterlockedIncrement,
+        Self::InterlockedDecrement,
+        Self::InterlockedExchange,
+        Self::GlobalMemoryStatus,
     ];
     pub fn from_id(id: u32) -> Option<Self> {
         Self::ALL
@@ -126,11 +144,29 @@ impl MemoryApi32 {
             Self::HeapSetInformation => "HeapSetInformation",
             Self::HeapQueryInformation => "HeapQueryInformation",
             Self::InitializeSListHead => "InitializeSListHead",
+            Self::IsBadCodePtr => "IsBadCodePtr",
+            Self::IsBadReadPtr => "IsBadReadPtr",
+            Self::IsBadWritePtr => "IsBadWritePtr",
+            Self::IsBadStringPtrA => "IsBadStringPtrA",
+            Self::IsBadStringPtrW => "IsBadStringPtrW",
+            Self::InterlockedIncrement => "InterlockedIncrement",
+            Self::InterlockedDecrement => "InterlockedDecrement",
+            Self::InterlockedExchange => "InterlockedExchange",
+            Self::GlobalMemoryStatus => "GlobalMemoryStatus",
         }
     }
     pub fn stack_words(self) -> u32 {
         match self {
             Self::GetProcessHeap => 0,
+            Self::IsBadCodePtr
+            | Self::InterlockedIncrement
+            | Self::InterlockedDecrement
+            | Self::GlobalMemoryStatus => 1,
+            Self::IsBadReadPtr
+            | Self::IsBadWritePtr
+            | Self::IsBadStringPtrA
+            | Self::IsBadStringPtrW
+            | Self::InterlockedExchange => 2,
             Self::HeapDestroy
             | Self::HeapLock
             | Self::HeapUnlock

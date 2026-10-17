@@ -121,6 +121,20 @@ impl EngineInstance {
             }
         };
         let prepared = Self::prepare_completed_call(frame.complete(value))?;
+        let thread = if error.is_none()
+            && matches!(
+                api,
+                Some(
+                    MemoryApi32::InterlockedIncrement
+                        | MemoryApi32::InterlockedDecrement
+                        | MemoryApi32::InterlockedExchange
+                        | MemoryApi32::GlobalMemoryStatus
+                )
+            ) {
+            self.current_windows_thread()?
+        } else {
+            thread
+        };
         self.publish_windows_thread(error.map_or(thread, |error| thread.with_last_error(error)))?;
         self.publish_prepared_call(prepared);
         Ok(true)
@@ -132,6 +146,13 @@ impl EngineInstance {
     ) -> Result<u32, MemoryError32> {
         use MemoryApi32::*;
         match api {
+            IsBadCodePtr | IsBadReadPtr | IsBadWritePtr | IsBadStringPtrA | IsBadStringPtrW => {
+                self.memory_probe(api, args)
+            }
+            InterlockedIncrement | InterlockedDecrement | InterlockedExchange => {
+                self.memory_interlocked(api, args)
+            }
+            GlobalMemoryStatus => self.global_memory_status(args[0]),
             VirtualAllocEx | VirtualFreeEx | VirtualProtectEx | VirtualQueryEx => {
                 self.validate_windows_process_handle(
                     args[0],
@@ -288,14 +309,15 @@ impl EngineInstance {
                     .local_unlock(args[0], api == GlobalUnlock)?,
             )),
             LocalSize => self.windows_memory.heaps.local_size(args[0]),
-            GlobalSize => self
-                .windows_memory
-                .heaps
-                .local_size(args[0])
-                .map_err(|error| match error {
-                    MemoryError32::InvalidParameter => MemoryError32::InvalidHandle,
-                    error => error,
-                }),
+            GlobalSize => {
+                self.windows_memory
+                    .heaps
+                    .local_size(args[0])
+                    .map_err(|error| match error {
+                        MemoryError32::InvalidParameter => MemoryError32::InvalidHandle,
+                        error => error,
+                    })
+            }
             LocalFlags | GlobalFlags => self.windows_memory.heaps.local_flags(args[0]),
             LocalHandle | GlobalHandle => self.windows_memory.heaps.local_handle(args[0]),
         }

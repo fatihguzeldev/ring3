@@ -3,6 +3,9 @@ mod context;
 mod globals;
 mod heap;
 mod lists;
+mod probes;
+mod atomic;
+mod status;
 mod virtual_calls;
 
 use crate::{

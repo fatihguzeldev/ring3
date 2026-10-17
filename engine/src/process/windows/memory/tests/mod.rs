@@ -3,6 +3,9 @@ mod calls;
 mod policy;
 mod query;
 mod instructions;
+mod probes;
+mod atomic;
+mod status;
 
 use crate::{
     abi::{

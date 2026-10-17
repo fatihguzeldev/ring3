@@ -135,6 +135,13 @@ impl AddressSpace {
         self.capacity_pages() - self.free.len() as u32
     }
 
+    pub(crate) fn unmapped_pages_in(&self, range: PageRange) -> u32 {
+        self.mappings[range.indices()]
+            .iter()
+            .filter(|&&mapping| mapping == 0)
+            .count() as u32
+    }
+
     /// finds an unmapped fit without changing mappings or consuming versions.
     pub fn find_free_range(
         &self,
