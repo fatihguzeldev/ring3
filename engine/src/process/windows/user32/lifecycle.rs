@@ -58,6 +58,11 @@ impl User32Context32 {
             if kind == crate::windows::comctl32::CommonControlKind32::Tab && args[3] & 0x6080 != 0 {
                 return Err(User32Error32::Win32(50));
             }
+            if kind == crate::windows::comctl32::CommonControlKind32::Tooltip
+                && args[3] & 0x0000_ffcc != 0
+            {
+                return Err(User32Error32::Win32(50));
+            }
             let procedures = self.common_procedures.ok_or(User32Error32::Win32(1407))?;
             if kind == crate::windows::comctl32::CommonControlKind32::Progress && args[3] & 8 != 0 {
                 return Err(User32Error32::Win32(50));

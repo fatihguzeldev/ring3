@@ -71,6 +71,11 @@ impl User32Context32 {
                 .resume_status_draw(token, ram, gdi.ok_or(E::Win32(50))?)
                 .map_err(super::super::super::common::status::owner::user32_error);
         }
+        if self.tooltip_tracking_wait(token) {
+            return self
+                .resume_tooltip_tracking(token, ram, gdi.ok_or(E::Win32(50))?)
+                .map_err(super::super::super::common::status::owner::user32_error);
+        }
         if self.menu_bar_wait(token).is_some() {
             return self.resume_menu_bar(token, ram, gdi.ok_or(E::Win32(50))?);
         }

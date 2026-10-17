@@ -4,10 +4,17 @@ pub(crate) enum CommonControlKind32 {
     Status,
     Tab,
     Hotkey,
+    Tooltip,
 }
 
 impl CommonControlKind32 {
-    pub(crate) const ALL: [Self; 4] = [Self::Progress, Self::Status, Self::Tab, Self::Hotkey];
+    pub(crate) const ALL: [Self; 5] = [
+        Self::Progress,
+        Self::Status,
+        Self::Tab,
+        Self::Hotkey,
+        Self::Tooltip,
+    ];
 
     pub(crate) fn name(self) -> &'static str {
         match self {
@@ -15,6 +22,7 @@ impl CommonControlKind32 {
             Self::Status => "msctls_statusbar32",
             Self::Tab => "SysTabControl32",
             Self::Hotkey => "msctls_hotkey32",
+            Self::Tooltip => "tooltips_class32",
         }
     }
 
@@ -24,6 +32,7 @@ impl CommonControlKind32 {
             Self::Status => 4,
             Self::Tab => 8,
             Self::Hotkey => 0x40,
+            Self::Tooltip => 0x0e,
         }
     }
 }
@@ -34,6 +43,7 @@ pub(crate) enum CommonControlState32 {
     Status(super::status::Status32),
     Tab(super::tab::Tab32),
     Hotkey(super::hotkey::Hotkey32),
+    Tooltip(super::tooltip::Tooltip32),
 }
 
 impl CommonControlState32 {
@@ -43,6 +53,7 @@ impl CommonControlState32 {
             CommonControlKind32::Status => Self::Status(Default::default()),
             CommonControlKind32::Tab => Self::Tab(Default::default()),
             CommonControlKind32::Hotkey => Self::Hotkey(Default::default()),
+            CommonControlKind32::Tooltip => Self::Tooltip(Default::default()),
         }
     }
 }

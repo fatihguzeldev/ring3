@@ -85,6 +85,20 @@ impl GdiCanvas32 {
             }),
         })
     }
+    pub(in crate::process) fn measure_text(
+        &self,
+        gdi: &GdiRuntime32,
+        units: &[u16],
+    ) -> Result<crate::windows::gdi::ShapedText32, GdiError32> {
+        gdi.measure_text_for_state(
+            &self
+                .prepared
+                .as_ref()
+                .ok_or(GdiError32::InvalidRequest)?
+                .state,
+            units,
+        )
+    }
     pub(in crate::process) fn dc(&self) -> u32 {
         self.dc
     }
