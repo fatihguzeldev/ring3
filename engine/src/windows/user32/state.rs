@@ -532,6 +532,10 @@ impl User32State32 {
     pub(crate) fn queue_without_input(&self, thread: u32) -> (u32, u32, u64) {
         self.with_paint_status(thread, self.queue.project_without_input(thread))
     }
+    pub(crate) fn input_message_threads(&self) -> impl Iterator<Item = u32> + '_ {
+        self.queue.input_threads()
+    }
+
     pub(crate) fn remove_message(&mut self, index: usize) -> Option<super::QueuedKeyboard32> {
         self.queue.remove(index)
     }

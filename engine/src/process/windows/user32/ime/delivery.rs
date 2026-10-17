@@ -23,7 +23,9 @@ impl EngineInstance {
             .get(window)
             .map_err(|e| HostError::User32(e.into()))?;
         let thread = record.description.thread_id;
-        if context.windows().focus() != Some(window) || !record.description.enabled {
+        if !matches!(event, Event::Cancel)
+            && (context.windows().focus() != Some(window) || !record.description.enabled)
+        {
             return Err(HostError::InvalidRequest);
         }
         if self.threads.info(thread).map_err(HostError::Thread)?.state
@@ -122,6 +124,10 @@ fn ime_error(error: ImmError32) -> HostError {
         _ => Error::Win32(87),
     })
 }
+
+#[cfg(test)]
+#[path = "../../service/tests/support.rs"]
+mod support;
 
 #[cfg(test)]
 mod tests {
@@ -361,5 +367,210 @@ mod tests {
             .set_focus(1, None)
             .unwrap();
         assert!(engine.submit_ime_composition(window, Event::Begin).is_err());
+    }
+    #[test]
+    fn exact_composition_owner_can_cancel_after_focus_loss_with_queue_failure_neutrality() {
+        let (mut engine, window) = fixture();
+        engine.submit_ime_composition(window, Event::Begin).unwrap();
+        drain(&mut engine);
+        engine
+            .submit_ime_composition(
+                window,
+                Event::Update(InputComposition32 {
+                    text: vec![65],
+                    cursor: 1,
+                    ..Default::default()
+                }),
+            )
+            .unwrap();
+        drain(&mut engine);
+        let call = crate::process::windows::user32::User32CallContext32 {
+            thread_id: 1,
+            instance: 0x400000,
+            ..Default::default()
+        };
+        let context = engine.user32.as_mut().unwrap();
+        let atom = context.state.record(window).unwrap().class_atom;
+        let other = WindowHandle32::try_from(super::super::super::tests::create(
+            context,
+            engine.memory.as_mut().unwrap(),
+            call,
+            u32::from(atom),
+        ))
+        .unwrap();
+        context
+            .state
+            .windows_mut()
+            .set_focus(1, Some(other))
+            .unwrap();
+        let mut description = context.windows().get(window).unwrap().description;
+        description.enabled = false;
+        context
+            .state
+            .windows_mut()
+            .update_description(window, description)
+            .unwrap();
+        let handle = context.ime.window_context(window.get(), 1).unwrap();
+        assert!(matches!(
+            engine.submit_ime_composition(other, Event::Cancel),
+            Err(HostError::InvalidRequest)
+        ));
+        assert!(matches!(
+            engine.submit_ime_composition(window, Event::Update(InputComposition32::default())),
+            Err(HostError::InvalidRequest)
+        ));
+        let context = engine.user32.as_mut().unwrap();
+        for _ in 0..8 {
+            context
+                .state
+                .post(Message32 {
+                    thread_id: 1,
+                    message: 0x400,
+                    ..Default::default()
+                })
+                .unwrap();
+        }
+        assert!(
+            engine
+                .submit_ime_composition(window, Event::Cancel)
+                .is_err()
+        );
+        let context = engine.user32.as_mut().unwrap();
+        assert_eq!(
+            context.ime.context(handle).unwrap().composing_window,
+            Some(window.get())
+        );
+        assert_eq!(context.ime.context(handle).unwrap().composition.text, [65]);
+        for _ in 0..2 {
+            let (at, _) = context
+                .state
+                .find_message(1, 0, 0x400, 0x400)
+                .unwrap()
+                .unwrap();
+            context.state.remove_message(at);
+        }
+        engine
+            .submit_ime_composition(window, Event::Cancel)
+            .unwrap();
+        assert_eq!(drain(&mut engine), [(0x10f, 0), (0x10e, 0)]);
+        let context = engine.user32.as_ref().unwrap();
+        assert_eq!(context.ime.context(handle).unwrap().composing_window, None);
+        assert_eq!(
+            context.ime.context(handle).unwrap().composition,
+            InputComposition32::default()
+        );
+        engine.submit_ime_composition(other, Event::Begin).unwrap();
+        assert_eq!(drain(&mut engine), [(0x10d, 0)]);
+    }
+    #[test]
+    fn media_reset_projects_nonprimary_ime_queue_once_and_failed_preflight_retains_its_owner() {
+        use crate::windows::thread::{ThreadApi32, ThreadState32};
+        let mut engine = super::support::engine();
+        engine.configure_media(Default::default()).unwrap();
+        engine
+            .configure_synchronization(Default::default())
+            .unwrap();
+        let handle = super::support::call(
+            &mut engine,
+            ThreadApi32::CreateThread.id(),
+            &[0, 0, 0x401000, 0, 4, super::support::DATA],
+        );
+        assert_ne!(handle, 0);
+        let thread = super::support::word(&engine, super::support::DATA);
+        assert_ne!(thread, 1);
+        assert_eq!(
+            engine.windows_thread_info(thread).unwrap().state,
+            ThreadState32::Suspended
+        );
+        let (mut context, mut ram, mut call) = super::super::super::tests::fixture();
+        call.thread_id = thread;
+        let atom = super::super::super::tests::register(&mut context, &mut ram, call);
+        let window = WindowHandle32::try_from(super::super::super::tests::create(
+            &mut context,
+            &mut ram,
+            call,
+            atom,
+        ))
+        .unwrap();
+        context
+            .state
+            .windows_mut()
+            .set_focus(thread, Some(window))
+            .unwrap();
+        engine.user32 = Some(context);
+        let queue = engine.prepare_user32_queue_change_for(1).unwrap();
+        engine
+            .user32
+            .as_mut()
+            .unwrap()
+            .state
+            .post(Message32 {
+                thread_id: 1,
+                message: 0x400,
+                ..Default::default()
+            })
+            .unwrap();
+        engine.commit_user32_queue_change(queue);
+        let primary = engine.synchronization().unwrap().queue_state(1);
+        engine.submit_ime_composition(window, Event::Begin).unwrap();
+        let input = engine
+            .user32
+            .as_mut()
+            .unwrap()
+            .ime
+            .window_context(window.get(), thread)
+            .unwrap();
+        let before = engine.synchronization().unwrap().queue_state(thread);
+        assert_ne!(before.0 & 0x108, 0);
+        let revision = engine.synchronization().unwrap().revision();
+        let epoch = engine.media_epoch().unwrap();
+        engine
+            .synchronization_mut()
+            .unwrap()
+            .set_revision_for_test(u64::MAX);
+        assert!(matches!(
+            engine.reset_media(),
+            Err(HostError::Synchronization(
+                crate::windows::synchronization::SynchronizationError32::Exhausted
+            ))
+        ));
+        assert_eq!(engine.media_epoch().unwrap(), epoch);
+        assert_eq!(
+            engine.synchronization().unwrap().queue_state(thread),
+            before
+        );
+        let context = engine.user32.as_ref().unwrap();
+        assert_eq!(
+            context.ime.context(input).unwrap().composing_window,
+            Some(window.get())
+        );
+        assert!(
+            context
+                .state
+                .find_message(thread, 0, 0x10d, 0x10f)
+                .unwrap()
+                .is_some()
+        );
+        engine
+            .synchronization_mut()
+            .unwrap()
+            .set_revision_for_test(revision);
+        engine.reset_media().unwrap();
+        assert_eq!(engine.synchronization().unwrap().revision(), revision + 1);
+        assert_eq!(engine.synchronization().unwrap().queue_state(thread).0, 0);
+        assert_eq!(engine.synchronization().unwrap().queue_state(1), primary);
+        let context = engine.user32.as_ref().unwrap();
+        assert!(
+            context
+                .state
+                .find_message(thread, 0, 0x10d, 0x10f)
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(context.ime.context(input).unwrap().composing_window, None);
+        assert_eq!(
+            context.ime.context(input).unwrap().composition,
+            InputComposition32::default()
+        );
     }
 }

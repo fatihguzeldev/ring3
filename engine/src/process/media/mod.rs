@@ -82,18 +82,13 @@ impl EngineInstance {
         self.initialize_windows_input(&mut replacement.input, now_ns)?;
         let sound = self.prepare_dsound_media_reset(&mut replacement.audio)?;
         let input = self.prepare_dinput_media_reset()?;
-        let queue = self.prepare_user32_media_reset()?;
-        let queue = if self.synchronization.is_some() {
-            queue
-        } else {
-            None
-        };
+        let rows = self.prepare_user32_media_reset()?;
         let count = sound
             .notifications()
             .len()
             .checked_add(input.notifications().len())
             .ok_or(HostError::Infrastructure)?;
-        let signals = if count == 0 && queue.is_none() {
+        let signals = if count == 0 && rows.is_empty() {
             None
         } else {
             let mut occurrences = Vec::new();
@@ -104,7 +99,7 @@ impl EngineInstance {
             occurrences.extend_from_slice(input.notifications());
             Some(
                 self.synchronization()?
-                    .prepare_signal_occurrences_with_messages(&occurrences, queue)
+                    .prepare_signal_occurrences_with_message_rows(&occurrences, &rows)
                     .map_err(HostError::Synchronization)?,
             )
         };

@@ -188,6 +188,13 @@ impl MessageQueue32 {
     pub(crate) fn discard_input(&mut self) {
         self.posted.retain(|slot| !slot.input);
     }
+    pub(crate) fn input_threads(&self) -> impl Iterator<Item = u32> + '_ {
+        self.posted
+            .iter()
+            .filter(|slot| slot.input)
+            .map(|slot| slot.message.thread_id)
+    }
+
     pub(crate) fn project_without_input(&self, thread: u32) -> (u32, u32, u64) {
         let (mut current, mut fresh) = self.sent_status(thread);
         for slot in self

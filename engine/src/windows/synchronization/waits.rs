@@ -61,16 +61,26 @@ impl SynchronizationContext32 {
         occurrences: &[(EventBinding32, u64)],
         queue: Option<(u32, u32, u64)>,
     ) -> Result<PreparedSignals32, Error> {
-        if queue
-            .is_some_and(|(_, _, generation)| generation < self.queue_state(self.current_thread).2)
-        {
-            return Err(Error::Stale);
+        if let Some((current, new, generation)) = queue {
+            self.prepare_signal_occurrences_with_message_rows(
+                occurrences,
+                &[(self.current_thread, current, new, generation)],
+            )
+        } else {
+            self.prepare_signal_occurrences_with_message_rows(occurrences, &[])
         }
-        let mut prepared = self.signal_plan(self.now, queue)?;
+    }
+    pub fn prepare_signal_occurrences_with_message_rows(
+        &self,
+        occurrences: &[(EventBinding32, u64)],
+        rows: &[(u32, u32, u32, u64)],
+    ) -> Result<PreparedSignals32, Error> {
+        let mut prepared = self.signal_plan(self.now, None)?;
+        self.project_message_rows(&mut prepared, rows)?;
         for &(binding, count) in occurrences {
             self.prepare_occurrence(&mut prepared, binding, count)?;
         }
-        if occurrences.is_empty() {
+        if occurrences.is_empty() || !rows.is_empty() {
             self.resolve_waiters(&mut prepared)?;
         }
         Ok(prepared)

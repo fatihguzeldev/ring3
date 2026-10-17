@@ -434,3 +434,69 @@ fn queued_apc_interrupts_only_alertable_waits_without_consuming_a_signaled_auto_
     );
     assert!(!context.event_is_signaled(event).unwrap());
 }
+
+#[test]
+fn signal_occurrences_and_all_thread_queue_rows_publish_in_one_prepared_revision() {
+    let mut context = context();
+    let (event, _) = context.create_event(true, false, false, None).unwrap();
+    let binding = context.retain_event(event).unwrap();
+    let initial = context
+        .prepare_messages_for_threads(&[(1, 8, 8, 7), (2, 8, 8, 7)])
+        .unwrap();
+    context.commit_signals(initial);
+    let revision = context.revision();
+    assert!(matches!(
+        context.prepare_signal_occurrences_with_message_rows(
+            &[(binding, 1)],
+            &[(1, 0, 0, 7), (2, 0, 0, 6)]
+        ),
+        Err(SynchronizationError32::Stale)
+    ));
+    assert_eq!(context.revision(), revision);
+    assert!(!context.event_is_signaled(event).unwrap());
+    assert_eq!(context.queue_state(1), (8, 8, 7));
+    assert_eq!(context.queue_state(2), (8, 8, 7));
+    let prepared = context
+        .prepare_signal_occurrences_with_message_rows(
+            &[(binding, 1)],
+            &[(1, 0, 0, 7), (2, 0, 0, 7)],
+        )
+        .unwrap();
+    assert!(!context.event_is_signaled(event).unwrap());
+    context.commit_signals(prepared);
+    assert_eq!(context.revision(), revision + 1);
+    assert!(context.event_is_signaled(event).unwrap());
+    assert_eq!(context.queue_state(1), (0, 0, 7));
+    assert_eq!(context.queue_state(2), (0, 0, 7));
+}
+
+#[test]
+fn queue_rows_resolve_waiters_even_when_all_event_occurrence_counts_are_zero() {
+    let mut context = context();
+    let (event, _) = context.create_event(true, false, false, None).unwrap();
+    let binding = context.retain_event(event).unwrap();
+    context.set_current_thread(2).unwrap();
+    let wait = pending(
+        context
+            .wait(
+                &[],
+                WaitMode32::Any,
+                INFINITE,
+                false,
+                Some(MessageWait32 {
+                    mask: 8,
+                    input_available: true,
+                }),
+            )
+            .unwrap(),
+    );
+    let revision = context.revision();
+    let prepared = context
+        .prepare_signal_occurrences_with_message_rows(&[(binding, 0)], &[(2, 8, 8, 1)])
+        .unwrap();
+    assert_eq!(context.wait_status(wait).unwrap(), None);
+    context.commit_signals(prepared);
+    assert_eq!(context.revision(), revision + 1);
+    assert_eq!(context.wait_status(wait).unwrap().unwrap().value, 0);
+    assert!(!context.event_is_signaled(event).unwrap());
+}

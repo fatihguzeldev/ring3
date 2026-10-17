@@ -34,16 +34,33 @@ impl EngineInstance {
     }
     pub(in crate::process) fn prepare_user32_media_reset(
         &self,
-    ) -> Result<Option<(u32, u32, u64)>, HostError> {
+    ) -> Result<Vec<(u32, u32, u32, u64)>, HostError> {
         let Some(context) = self.user32.as_ref() else {
-            return Ok(None);
+            return Ok(Vec::new());
         };
         if context.input.mouse_exclusive && context.input.cursor_revision == u64::MAX {
             return Err(HostError::User32(
                 crate::windows::user32::User32Error32::Capacity,
             ));
         }
-        Ok(Some(context.state.queue_without_input(1)))
+        let mut rows = Vec::new();
+        if self.synchronization.is_none() {
+            return Ok(rows);
+        }
+        let threads = context.state.input_message_threads();
+        rows.try_reserve_exact(threads.size_hint().1.unwrap_or(0))
+            .map_err(|_| HostError::Infrastructure)?;
+        rows.extend(threads.map(|thread| (thread, 0, 0, 0)));
+        rows.sort_unstable_by_key(|row| row.0);
+        rows.dedup_by_key(|row| row.0);
+        for (thread, current, fresh, generation) in &mut rows {
+            let projected = context.state.queue_without_input(*thread);
+            let timers = context.timers.status_at(*thread, context.timers.now);
+            *current = projected.0 | timers.0;
+            *fresh = projected.1 | timers.1;
+            *generation = projected.2;
+        }
+        Ok(rows)
     }
     pub(in crate::process) fn commit_user32_media_reset(&mut self) {
         let (Some(context), Some(media)) = (self.user32.as_mut(), self.media.as_ref()) else {
