@@ -1,8 +1,8 @@
-use super::{super::GdiError32, FontDatabase32, FontMetrics32, LogicalFont32};
-impl FontDatabase32 {
+use super::{super::GdiError32, FontMetrics32, LogicalFont32, faces::FontFace32};
+impl FontFace32 {
     pub(super) fn scale(&self, font: &LogicalFont32) -> Result<(f32, f32), GdiError32> {
         font.check()?;
-        let face = &self.face(font).design;
+        let face = &self.design;
         let units = face.units;
         let height = if font.height == 0 { 16 } else { font.height };
         let pixel_em = if height < 0 {
@@ -20,7 +20,7 @@ impl FontDatabase32 {
     }
     pub fn metrics(&self, font: &LogicalFont32) -> Result<FontMetrics32, GdiError32> {
         let (pixels, x_scale) = self.scale(font)?;
-        let face = &self.face(font).design;
+        let face = &self.design;
         let scale = pixels / face.units;
         let ascent = (face.ascent * scale).round() as i32;
         let descent = (face.descent * scale).round() as i32;
@@ -49,15 +49,10 @@ impl FontDatabase32 {
         })
     }
     pub fn advance(&self, font: &LogicalFont32, glyph: u16) -> Result<f32, GdiError32> {
-        if glyph >= self.glyph_count(font) {
+        if glyph >= self.raster.glyph_count() {
             return Err(GdiError32::InvalidRequest);
         }
         let (pixels, x_scale) = self.scale(font)?;
-        Ok(self
-            .face(font)
-            .raster
-            .metrics_indexed(glyph, pixels)
-            .advance_width
-            * x_scale)
+        Ok(self.raster.metrics_indexed(glyph, pixels).advance_width * x_scale)
     }
 }

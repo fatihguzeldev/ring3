@@ -76,12 +76,74 @@ impl GdiContext32 {
             GdiObject32::Image(_) => return Err(GdiError32::InvalidHandle),
             GdiObject32::Brush(_) => state.brush = object,
             GdiObject32::Pen(_) => state.pen = object,
-            GdiObject32::StockFont(_) | GdiObject32::Font(_) => state.font = object,
+            GdiObject32::StockFont(_) | GdiObject32::Font(_) => {
+                state.font = object;
+                state.font_realization = None;
+            }
             GdiObject32::Bitmap(_) => state.bitmap = object,
             GdiObject32::Region(region) => state.clip = Some(region),
             GdiObject32::StockPalette | GdiObject32::Palette(_) => unreachable!(),
         }
         Ok(previous)
+    }
+    pub(crate) fn font_metric_snapshot(
+        &self,
+        handle: u32,
+    ) -> Result<Option<super::ResolvedFont32>, GdiError32> {
+        match self.object(handle)? {
+            GdiObject32::StockFont(_) => Ok(None),
+            GdiObject32::Font(_) => Ok(self
+                .objects
+                .iter()
+                .find(|entry| entry.handle == handle)
+                .unwrap()
+                .font_metrics
+                .clone()),
+            _ => Err(GdiError32::InvalidHandle),
+        }
+    }
+    pub(crate) fn bind_font_metric_snapshot(
+        &mut self,
+        handle: u32,
+        proposed: super::ResolvedFont32,
+    ) -> Result<(), GdiError32> {
+        let logical = match self.object(handle)? {
+            GdiObject32::StockFont(_) => return Ok(()),
+            GdiObject32::Font(font) => font,
+            _ => return Err(GdiError32::InvalidHandle),
+        };
+        if &logical != proposed.descriptor() {
+            return Err(GdiError32::InvalidRequest);
+        }
+        let index = self
+            .objects
+            .iter()
+            .position(|entry| entry.handle == handle)
+            .unwrap();
+        if self.objects[index].font_metrics.is_some() {
+            return Ok(());
+        }
+        let shared = self.objects.iter().find_map(|entry| {
+            matches!(&entry.object, GdiObject32::Font(font) if font == &logical)
+                .then(|| entry.font_metrics.clone())
+                .flatten()
+        });
+        self.objects[index].font_metrics = Some(shared.unwrap_or(proposed));
+        Ok(())
+    }
+    pub(crate) fn restored_dc_state(&self, dc: u32, saved: i32) -> Result<DcState32, GdiError32> {
+        let dc = self.dc(dc)?;
+        let index = if saved > 0 {
+            i64::from(saved) - 1
+        } else if saved < 0 {
+            dc.saved.len() as i64 + i64::from(saved)
+        } else {
+            return Err(GdiError32::InvalidRequest);
+        };
+        dc.saved
+            .get(usize::try_from(index).map_err(|_| GdiError32::InvalidRequest)?)
+            .cloned()
+            .ok_or(GdiError32::InvalidRequest)
     }
     pub fn save_dc(&mut self, dc: u32) -> Result<u32, GdiError32> {
         let index = self

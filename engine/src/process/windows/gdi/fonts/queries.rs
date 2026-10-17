@@ -13,10 +13,8 @@ impl GdiRuntime32 {
         units: &[u16],
     ) -> Result<ShapedText32, GdiError32> {
         let state = self.model.state(dc)?;
-        let font = self.logical_font(state.font)?;
-        let mut result = self
-            .fonts
-            .shape(&font, units, false, state.text_align & 0x100 != 0)?;
+        let selected = self.resolved_dc_metrics(dc)?;
+        let mut result = selected.shape(units, false, state.text_align & 0x100 != 0)?;
         apply_spacing(&mut result, state, units);
         if !result.advance.is_finite() || result.advance.abs() > i32::MAX as f32 {
             return Err(GdiError32::InvalidRequest);
@@ -32,7 +30,7 @@ impl GdiRuntime32 {
     ) -> Result<u32, GdiError32> {
         use GdiApi32::*;
         let state = self.model.state(args[0])?;
-        let font = self.logical_font(state.font)?;
+        let selected = self.resolved_dc_font(args[0])?;
         let wide = matches!(
             api,
             GetTextMetricsW
@@ -45,12 +43,13 @@ impl GdiRuntime32 {
         );
         match api {
             GetTextMetricsA | GetTextMetricsW => {
-                let bytes = metric_bytes(self.fonts.metrics(&font)?, wide, cp)?;
+                let bytes = metric_bytes(self.resolved_dc_metrics(args[0])?.metrics()?, wide, cp)?;
                 memory.write(GuestAddress(args[1]), &bytes)?;
                 Ok(1)
             }
             GetTextFaceA | GetTextFaceW => {
-                let mut bytes = memory::encode(self.fonts.face_name(&font), wide, cp)?;
+                let current = self.fonts.resolve(self.logical_font(state.font)?)?;
+                let mut bytes = memory::encode(current.face_name(), wide, cp)?;
                 let width = if wide { 2 } else { 1 };
                 let required = bytes.len() / width + 1;
                 if args[2] == 0 {
@@ -124,12 +123,10 @@ impl GdiRuntime32 {
                             .and_then(Result::ok)
                             .unwrap_or('\u{fffd}')
                     };
-                    let glyph = self.fonts.glyph_index(&font, character);
-                    let advance = self.fonts.advance(&font, glyph)?.round() as i32;
+                    let glyph = selected.glyph_index(character);
+                    let advance = selected.advance(glyph)?.round() as i32;
                     if matches!(api, GetCharABCWidthsA | GetCharABCWidthsW) {
-                        let raster =
-                            self.fonts
-                                .rasterize(&font, glyph, self.config.bitmap_bytes)?;
+                        let raster = selected.rasterize(glyph, self.config.bitmap_bytes)?;
                         for word in [
                             raster.left,
                             raster.width as i32,
@@ -154,9 +151,8 @@ impl GdiRuntime32 {
                     .try_reserve_exact(units.len() * 2)
                     .map_err(|_| GdiError32::Allocation)?;
                 for unit in units.iter().copied() {
-                    let glyph = self
-                        .fonts
-                        .glyph_index(&font, char::from_u32(u32::from(unit)).unwrap_or('\u{fffd}'));
+                    let glyph =
+                        selected.glyph_index(char::from_u32(u32::from(unit)).unwrap_or('\u{fffd}'));
                     indices.extend_from_slice(
                         &(if glyph == 0 && args[4] & 1 != 0 {
                             u16::MAX

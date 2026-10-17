@@ -71,10 +71,14 @@ impl GdiRuntime32 {
         } else {
             font
         };
-        self.logical_font(font)?;
+        let realization = self.fonts.resolve(self.logical_font(font)?)?;
         let dc = self.acquire_dc(window, window.thread)?;
         let mut state = self.model.state(dc).expect("accepted control DC").clone();
         state.font = font;
+        self.model
+            .bind_font_metric_snapshot(font, realization.clone())
+            .expect("control font was validated before dc acquisition");
+        state.font_realization = Some(realization);
         state.clip = Some(region);
         state.background_color = if matches!(
             kind,

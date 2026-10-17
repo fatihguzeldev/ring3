@@ -1,5 +1,5 @@
 use super::{super::GdiError32, LogicalFont32};
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, OnceLock, Weak};
 
 pub(super) struct FontDesign32 {
     pub units: f32,
@@ -24,14 +24,16 @@ pub(super) struct FontFace32 {
     pub design: FontDesign32,
 }
 pub struct FontDatabase32 {
+    pub(super) identity: Arc<()>,
     pub(super) faces: Vec<Arc<FontFace32>>,
-    pub(super) resources: Vec<(u32, Vec<Arc<FontFace32>>)>,
-    next_resource: u32,
-    byte_limit: usize,
-    bytes: usize,
+    pub(super) resources: Vec<super::sources::FontResource32>,
+    pub(super) retired: Vec<(u32, Weak<[u8]>, usize)>,
+    pub(super) next_resource: u32,
+    pub(super) byte_limit: usize,
+    pub(super) bytes: usize,
 }
 static BUILTIN: OnceLock<Result<[Arc<FontFace32>; 2], GdiError32>> = OnceLock::new();
-fn parse(bytes: Arc<[u8]>, index: u32) -> Result<Arc<FontFace32>, GdiError32> {
+pub(super) fn parse(bytes: Arc<[u8]>, index: u32) -> Result<Arc<FontFace32>, GdiError32> {
     let face = rustybuzz::ttf_parser::Face::parse(&bytes, index)
         .map_err(|_| GdiError32::InvalidRequest)?;
     if face.number_of_glyphs() == 0 || face.units_per_em() == 0 {
@@ -158,62 +160,19 @@ impl FontDatabase32 {
             .as_ref()
             .map_err(|error| *error)?;
         Ok(Self {
+            identity: Arc::new(()),
             faces: builtin.to_vec(),
             resources: Vec::new(),
+            retired: Vec::new(),
             next_resource: 1,
             byte_limit,
             bytes: 1_082_044,
         })
     }
-    pub fn add_memory_font(&mut self, bytes: &[u8]) -> Result<u32, GdiError32> {
-        let count = rustybuzz::ttf_parser::fonts_in_collection(bytes).unwrap_or(1) as usize;
-        if count == 0 {
-            return Err(GdiError32::InvalidRequest);
-        }
-        if bytes.len() > self.byte_limit - self.bytes
-            || self.resources.len() == 256
-            || count > 256usize.saturating_sub(self.faces.len() - 2)
-        {
-            return Err(GdiError32::Capacity);
-        }
-        let next = self
-            .next_resource
-            .checked_add(1)
-            .ok_or(GdiError32::Exhausted)?;
-        let source: Arc<[u8]> = Arc::from(bytes);
-        let mut added = Vec::new();
-        added
-            .try_reserve_exact(count)
-            .map_err(|_| GdiError32::Allocation)?;
-        for index in 0..count {
-            added.push(parse(source.clone(), index as u32)?);
-        }
-        self.resources
-            .try_reserve(1)
-            .map_err(|_| GdiError32::Allocation)?;
-        self.faces
-            .try_reserve(count)
-            .map_err(|_| GdiError32::Allocation)?;
-        let id = self.next_resource;
-        self.faces.extend(added.iter().cloned());
-        self.resources.push((id, added));
-        self.bytes += bytes.len();
-        self.next_resource = next;
-        Ok(id)
-    }
-    pub fn remove_memory_font(&mut self, id: u32) -> Result<(), GdiError32> {
-        let index = self
-            .resources
-            .iter()
-            .position(|entry| entry.0 == id)
-            .ok_or(GdiError32::InvalidHandle)?;
-        let (_, faces) = self.resources.remove(index);
-        self.bytes -= faces[0].bytes.len();
-        self.faces
-            .retain(|entry| !faces.iter().any(|face| Arc::ptr_eq(entry, face)));
-        Ok(())
-    }
     pub(super) fn face(&self, font: &LogicalFont32) -> &FontFace32 {
+        self.face_arc(font)
+    }
+    pub(super) fn face_arc(&self, font: &LogicalFont32) -> &Arc<FontFace32> {
         let requested = String::from_utf16_lossy(&font.face);
         self.faces
             .iter()

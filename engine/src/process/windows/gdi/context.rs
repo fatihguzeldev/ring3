@@ -78,6 +78,7 @@ impl GdiRuntime32 {
     }
     pub(in crate::process) fn retire_process(&mut self) {
         self.model.clear();
+        self.fonts.retire_process_resources();
         self.surfaces.clear();
         self.paints.clear();
         self.bytes = 0;

@@ -392,3 +392,7 @@ fn drawtext_prefix_only_emits_visible_mnemonic_underline_without_glyph_or_backgr
 }
 
 mod rotation;
+
+mod resources;
+
+mod realization;

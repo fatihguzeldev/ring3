@@ -7,6 +7,7 @@ pub(super) const fn stock_handle(index: u32) -> u32 {
 pub(super) struct ObjectEntry32 {
     pub handle: u32,
     pub object: GdiObject32,
+    pub font_metrics: Option<super::ResolvedFont32>,
 }
 pub(super) struct Dc32 {
     pub handle: u32,
@@ -147,6 +148,7 @@ impl GdiContext32 {
             PreparedPayload32::Object(object) => self.objects.push(ObjectEntry32 {
                 handle: prepared.handle,
                 object,
+                font_metrics: None,
             }),
             PreparedPayload32::Dc(dc) => self.dcs.push(dc),
         }

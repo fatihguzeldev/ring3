@@ -30,8 +30,7 @@ impl GdiRuntime32 {
             return Err(GdiError32::InvalidRequest);
         }
         let state = self.model.state(dc)?;
-        let font = self.logical_font(state.font)?;
-        let metrics = self.fonts.metrics(&font)?;
+        let metrics = self.resolved_dc_metrics(dc)?.metrics()?;
         let line_height = metrics
             .height
             .checked_add(if flags & 0x200 != 0 {

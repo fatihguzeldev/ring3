@@ -203,8 +203,8 @@ impl GdiRuntime32 {
                 Ok(1)
             }
             SaveDC => self.model.save_dc(args[0]),
-            RestoreDC => self.model.restore_dc(args[0], args[1] as i32).map(|()| 1),
-            SelectObject => self.model.select_object(args[0], args[1]),
+            RestoreDC => self.restore_gdi_dc(args[0], args[1] as i32).map(|()| 1),
+            SelectObject => self.select_gdi_object(args[0], args[1]),
             GetCurrentObject => {
                 let state = self.model.state(args[0])?;
                 match args[1] {

@@ -48,22 +48,19 @@ impl GdiRuntime32 {
         mut state: DcState32,
         seed: Option<TextPixels32>,
     ) -> Result<TextPixels32, GdiError32> {
-        let font = self.logical_font(state.font)?;
+        let selected = self.resolved_dc_font(request.dc)?;
+        let font = selected.descriptor();
         let direct = request.options & (16 | 4096) != 0;
         let converted;
         let units = if request.options & 4096 != 0 && request.options & 16 == 0 {
             converted = char::decode_utf16(request.units.iter().copied())
-                .map(|character| {
-                    self.fonts
-                        .glyph_index(&font, character.unwrap_or('\u{fffd}'))
-                })
+                .map(|character| selected.glyph_index(character.unwrap_or('\u{fffd}')))
                 .collect::<Vec<_>>();
             converted.as_slice()
         } else {
             request.units
         };
-        let mut shaped = self.fonts.shape(
-            &font,
+        let mut shaped = selected.shape(
             units,
             direct,
             request.options & 128 != 0 || state.text_align & 256 != 0,
@@ -198,8 +195,7 @@ impl GdiRuntime32 {
                 if let Some(position) = cache.iter().position(|entry| entry.0 == glyph.glyph) {
                     position
                 } else {
-                    let raster = self.fonts.rasterize(
-                        &font,
+                    let raster = selected.rasterize(
                         glyph.glyph,
                         self.config.bitmap_bytes.saturating_sub(raster_bytes),
                     )?;

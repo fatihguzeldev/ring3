@@ -79,3 +79,14 @@ fn memory_font_registration_is_bounded_and_removed_faces_revert_to_configured_fa
 mod metadata;
 
 mod collection;
+
+mod resources;
+mod source;
+
+pub(crate) fn private_source() -> Vec<u8> {
+    source::private_mono()
+}
+
+pub(crate) fn private_named_source(name: &str) -> Vec<u8> {
+    source::private_named(name)
+}

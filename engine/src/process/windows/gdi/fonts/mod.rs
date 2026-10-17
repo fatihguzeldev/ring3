@@ -30,6 +30,59 @@ impl GdiRuntime32 {
             _ => Err(GdiError32::InvalidHandle),
         }
     }
+    pub(super) fn resolved_dc_font(
+        &self,
+        dc: u32,
+    ) -> Result<crate::windows::gdi::ResolvedFont32, GdiError32> {
+        let state = self.model.state(dc)?;
+        if let Some(font) = &state.font_realization {
+            return Ok(font.clone());
+        }
+        self.fonts.resolve(self.logical_font(state.font)?)
+    }
+    pub(super) fn resolved_dc_metrics(
+        &self,
+        dc: u32,
+    ) -> Result<crate::windows::gdi::ResolvedFont32, GdiError32> {
+        self.model
+            .font_metric_snapshot(self.model.state(dc)?.font)?
+            .map_or_else(|| self.resolved_dc_font(dc), Ok)
+    }
+    pub(super) fn restore_gdi_dc(&mut self, dc: u32, saved: i32) -> Result<(), GdiError32> {
+        let mut state = self.model.restored_dc_state(dc, saved)?;
+        let physical = self.fonts.resolve(self.logical_font(state.font)?)?;
+        self.model
+            .bind_font_metric_snapshot(state.font, physical.clone())?;
+        state.font_realization = Some(physical);
+        self.model
+            .restore_dc(dc, saved)
+            .expect("exact saved dc state was preflighted");
+        self.model
+            .set_state(dc, state)
+            .expect("restored dc remains current");
+        Ok(())
+    }
+    pub(super) fn select_gdi_object(&mut self, dc: u32, handle: u32) -> Result<u32, GdiError32> {
+        let previous = self.model.check_select(dc, handle)?;
+        if previous == handle {
+            return Ok(previous);
+        }
+        if matches!(
+            self.model.object(handle)?,
+            GdiObject32::Font(_) | GdiObject32::StockFont(_)
+        ) {
+            let resolved = self.fonts.resolve(self.logical_font(handle)?)?;
+            self.model
+                .bind_font_metric_snapshot(handle, resolved.clone())?;
+            let mut state = self.model.state(dc)?.clone();
+            state.font = handle;
+            state.font_realization = Some(resolved);
+            self.model.set_state(dc, state)?;
+            Ok(previous)
+        } else {
+            self.model.select_object(dc, handle)
+        }
+    }
     pub(super) fn create_font(
         &mut self,
         memory: &AddressSpace,

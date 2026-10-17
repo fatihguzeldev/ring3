@@ -1,7 +1,7 @@
 use super::{
-    super::GdiError32, FontDatabase32, GlyphRaster32, LogicalFont32, ShapedGlyph32, ShapedText32,
+    super::GdiError32, GlyphRaster32, LogicalFont32, ShapedGlyph32, ShapedText32, faces::FontFace32,
 };
-impl FontDatabase32 {
+impl FontFace32 {
     pub fn shape(
         &self,
         font: &LogicalFont32,
@@ -42,7 +42,7 @@ impl FontDatabase32 {
                 unit += character.len_utf16();
             }
             let (pixels, x_scale) = self.scale(font)?;
-            let face = rustybuzz::Face::from_slice(&self.face(font).bytes, self.face(font).index)
+            let face = rustybuzz::Face::from_slice(&self.bytes, self.index)
                 .ok_or(GdiError32::InvalidRequest)?;
             let scale = pixels / face.units_per_em() as f32;
             let bidi = unicode_bidi::BidiInfo::new(
@@ -104,11 +104,11 @@ impl FontDatabase32 {
         glyph: u16,
         budget: usize,
     ) -> Result<GlyphRaster32, GdiError32> {
-        if glyph >= self.glyph_count(font) {
+        if glyph >= self.raster.glyph_count() {
             return Err(GdiError32::InvalidRequest);
         }
         let (pixels, scale) = self.scale(font)?;
-        let source = self.face(font).raster.metrics_indexed(glyph, pixels);
+        let source = self.raster.metrics_indexed(glyph, pixels);
         let bold = if font.weight >= 600 {
             (pixels / 32.0).ceil() as usize
         } else {
@@ -135,7 +135,7 @@ impl FontDatabase32 {
         {
             return Err(GdiError32::Capacity);
         }
-        let (_, coverage) = self.face(font).raster.rasterize_indexed(glyph, pixels);
+        let (_, coverage) = self.raster.rasterize_indexed(glyph, pixels);
         let mut result = Vec::new();
         result
             .try_reserve_exact(size)
