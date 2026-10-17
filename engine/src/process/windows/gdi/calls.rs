@@ -322,6 +322,8 @@ impl GdiRuntime32 {
             GetDIBits | SetDIBits => self.dib_transfer(memory, api, args),
             GetDIBColorTable | SetDIBColorTable => self.dib_colors(memory, api, args),
             GdiFlush => Ok(1),
+            AlphaBlend | TransparentBlt => self.msimg_bitmap_call(memory, api, args),
+            GradientFill => self.gradient_call(memory, args),
             BitBlt | StretchBlt | PatBlt => self.blit(memory, api, args),
             StretchDIBits | SetDIBitsToDevice => self.draw_dib(memory, api, args),
             GetPixel | SetPixel | SetPixelV => self.pixel(memory, api, args),

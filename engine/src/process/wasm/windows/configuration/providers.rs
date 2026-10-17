@@ -42,6 +42,9 @@ pub(crate) fn register_version_module(base: u32) -> u32 {
 pub(crate) fn register_shlwapi_module(base: u32) -> u32 {
     mutate(|instance| instance.register_shlwapi_module(base))
 }
+pub(crate) fn register_msimg32_module(base: u32) -> u32 {
+    mutate(|instance| instance.register_msimg32_module(base))
+}
 pub(crate) fn register_shell32_module(base: u32) -> u32 {
     mutate(|instance| instance.register_shell32_module(base))
 }

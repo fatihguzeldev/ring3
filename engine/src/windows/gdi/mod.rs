@@ -10,7 +10,7 @@ mod raster;
 mod region;
 mod types;
 
-pub use api::{GdiApi32, gdi32_module, user32_gdi_exports};
+pub use api::{GdiApi32, gdi32_module, msimg32_module, user32_gdi_exports};
 pub use bitmap::{BitmapLayout32, BitmapPalette32};
 pub(crate) use bitmap::{DibHeader32, decode_dib_header};
 pub use context::{GdiContext32, PreparedGdiObject32};

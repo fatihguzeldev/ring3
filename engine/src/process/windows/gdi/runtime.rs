@@ -23,6 +23,9 @@ impl EngineInstance {
     pub fn register_gdi32_module(&mut self, base: u32) -> Result<(), HostError> {
         self.register_system_module(crate::windows::gdi::gdi32_module(base))
     }
+    pub fn register_msimg32_module(&mut self, base: u32) -> Result<(), HostError> {
+        self.register_system_module(crate::windows::gdi::msimg32_module(base))
+    }
     pub fn pending_gdi_frame(&self, index: u32) -> Result<Option<GdiFrame32>, HostError> {
         self.memory()?;
         Ok(self

@@ -355,3 +355,5 @@ mod images;
 mod visibility;
 
 mod stretch;
+
+mod msimg;

@@ -1,3 +1,5 @@
+pub(in crate::process::windows::gdi) mod bitmap;
+pub(in crate::process::windows::gdi) mod gradient;
 mod images;
 
 use super::super::{
@@ -17,6 +19,12 @@ pub(in crate::process) struct GdiCanvas32 {
     dc: u32,
     owner: CanvasOwner32,
     images: Vec<super::super::images::ImageOwner32>,
+    sources: Vec<CanvasSource32>,
+}
+struct CanvasSource32 {
+    dc: u32,
+    index: usize,
+    owner: CanvasOwner32,
 }
 struct CanvasOwner32 {
     identity: u64,
@@ -53,6 +61,7 @@ impl GdiCanvas32 {
         Ok(Self {
             dc,
             images: Vec::new(),
+            sources: Vec::new(),
             owner: CanvasOwner32 {
                 identity: memory.identity(),
                 memory_version: memory.transaction_version(),
@@ -354,24 +363,11 @@ impl GdiRuntime32 {
         canvas: GdiCanvas32,
     ) -> Result<(), GdiError32> {
         let prepared = canvas.prepared.as_ref().ok_or(GdiError32::InvalidRequest)?;
-        let owner = &canvas.owner;
-        let surface = self
-            .surfaces
-            .get(prepared.index)
-            .ok_or(GdiError32::InvalidRequest)?;
-        if memory.identity() != owner.identity
-            || memory.transaction_version() != owner.memory_version
-            || self.dc_surface(canvas.dc)? != prepared.index
-            || self.model.dc_kind(canvas.dc)? != owner.dc_kind
-            || self.model.state(canvas.dc)? != &owner.state
-            || self.model.palette_entries(owner.state.palette)? != owner.logical_palette
-            || surface.id != owner.surface_id
-            || surface.revision != owner.surface_revision
-            || surface.key != owner.key
-            || surface.layout != owner.layout
-            || surface.palette != owner.colors
-        {
-            return Err(GdiError32::InvalidRequest);
+        canvas
+            .owner
+            .check(self, memory, canvas.dc, prepared.index)?;
+        for source in &canvas.sources {
+            source.owner.check(self, memory, source.dc, source.index)?;
         }
         for source in &canvas.images {
             self.check_image_owner(*source)?;
@@ -383,5 +379,32 @@ impl GdiRuntime32 {
             self.commit_pixels(memory, prepared.index, prepared.pixels, prepared.damage)?;
         }
         Ok(())
+    }
+}
+
+impl CanvasOwner32 {
+    fn check(
+        &self,
+        gdi: &GdiRuntime32,
+        memory: &AddressSpace,
+        dc: u32,
+        index: usize,
+    ) -> Result<(), GdiError32> {
+        let surface = gdi.surfaces.get(index).ok_or(GdiError32::InvalidRequest)?;
+        if memory.identity() != self.identity
+            || memory.transaction_version() != self.memory_version
+            || gdi.dc_surface(dc)? != index
+            || gdi.model.dc_kind(dc)? != self.dc_kind
+            || gdi.model.state(dc)? != &self.state
+            || gdi.model.palette_entries(self.state.palette)? != self.logical_palette
+            || surface.id != self.surface_id
+            || surface.revision != self.surface_revision
+            || surface.key != self.key
+            || surface.layout != self.layout
+            || surface.palette != self.colors
+        {
+            return Err(GdiError32::InvalidRequest);
+        }
+        surface.storage.check(memory)
     }
 }

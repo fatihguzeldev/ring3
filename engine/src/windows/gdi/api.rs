@@ -54,8 +54,15 @@ gdi_apis! {
     EnumFontFamiliesExA,5; EnumFontFamiliesExW,5;
     AddFontResourceA,1; AddFontResourceW,1; RemoveFontResourceA,1; RemoveFontResourceW,1;
     AddFontResourceExA,3; AddFontResourceExW,3; RemoveFontResourceExA,3; RemoveFontResourceExW,3;
+    AlphaBlend,11; TransparentBlt,11; GradientFill,6;
 }
 impl GdiApi32 {
+    pub fn msimg(self) -> bool {
+        matches!(
+            self,
+            Self::AlphaBlend | Self::TransparentBlt | Self::GradientFill
+        )
+    }
     pub fn font_enumeration(self) -> bool {
         matches!(
             self,
@@ -156,7 +163,7 @@ pub fn gdi32_module(preferred_base: u32) -> SystemModule32 {
         exports: GdiApi32::ALL
             .iter()
             .copied()
-            .filter(|api| !api.user32())
+            .filter(|api| !api.user32() && !api.msimg())
             .map(export)
             .collect(),
     }
@@ -167,4 +174,17 @@ pub fn user32_gdi_exports() -> impl Iterator<Item = SystemExport32> {
         .copied()
         .filter(|api| api.user32())
         .map(export)
+}
+
+pub fn msimg32_module(preferred_base: u32) -> SystemModule32 {
+    SystemModule32 {
+        name: "msimg32.dll".into(),
+        preferred_base,
+        exports: GdiApi32::ALL
+            .iter()
+            .copied()
+            .filter(|api| api.msimg())
+            .map(export)
+            .collect(),
+    }
 }

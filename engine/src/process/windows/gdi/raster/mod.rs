@@ -5,3 +5,5 @@ mod pixels;
 pub(super) use drawing::{BlitImage32, BlitRequest32};
 
 mod stretch;
+
+mod msimg;
