@@ -3,6 +3,7 @@ use super::*;
 mod collided;
 mod lifetime;
 mod nested;
+mod relink;
 
 fn chain(engine: &mut EngineInstance) -> (ContextState32, [u32; 3]) {
     let mut original = engine.windows_context_state().unwrap();

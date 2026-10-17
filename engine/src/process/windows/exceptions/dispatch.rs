@@ -163,6 +163,7 @@ impl EngineInstance {
                     next,
                     registration,
                     registration_popped: false,
+                    registration_relink: None,
                 });
                 self.publish_prepared_call(prepared);
                 return Ok(());
@@ -224,7 +225,7 @@ impl EngineInstance {
             .ok_or(HostError::Exception(ExceptionError32::Stale))?;
         if let Some(registration) = active.registration {
             if active.registration_popped {
-                self.check_exception_registration(registration)?;
+                self.restore_popped_exception_registration(delivery, active, registration)?;
             } else {
                 self.restore_exception_registration(delivery, registration)?;
             }

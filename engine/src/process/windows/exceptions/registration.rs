@@ -13,7 +13,15 @@ pub(super) struct HandlerRegistration32 {
     establisher: u32,
     unwind: bool,
 }
+#[derive(Clone, Copy)]
+pub(super) struct PoppedRegistration32 {
+    parent: u64,
+    registration: HandlerRegistration32,
+}
 impl HandlerRegistration32 {
+    fn with_previous(self, previous: u32) -> Self {
+        Self { previous, ..self }
+    }
     pub(super) fn bytes(self) -> [u8; 12] {
         let mut bytes = [0; 12];
         for (index, word) in [self.previous, self.handler, self.establisher]
@@ -107,26 +115,65 @@ impl EngineInstance {
         Ok(())
     }
 
+    pub(super) fn restore_popped_exception_registration(
+        &self,
+        delivery: &mut Delivery32,
+        active: ActiveHandler32,
+        registration: HandlerRegistration32,
+    ) -> Result<(), HostError> {
+        let mut bytes = [0; 4];
+        self.memory()?
+            .read(
+                GuestAddress(
+                    self.current_teb_address()
+                        .ok_or(HostError::Infrastructure)?,
+                ),
+                &mut bytes,
+            )
+            .map_err(HostError::Memory)?;
+        if u32::from_le_bytes(bytes) == registration.address {
+            let previous = active
+                .registration_relink
+                .ok_or(HostError::Exception(ExceptionError32::InvalidChain))?;
+            self.check_exception_registration(registration.with_previous(previous))?;
+            // the MSCRT runtime can relink the dispatcher marker after a completed i386 unwind.
+            // pop its authorized current link before publishing another handler.
+            delivery.chain_write = Some(previous);
+        } else {
+            self.check_exception_registration(registration)?;
+        }
+        Ok(())
+    }
+
     pub(super) fn advance_nested_exception_registration(
         &self,
         delivery: &mut Delivery32,
     ) -> Result<bool, HostError> {
-        let Some((parent, registration)) = self
+        let Some((parent, active, registration)) = self
             .exceptions
             .deliveries
             .iter()
             .rev()
             .filter(|parent| parent.thread == delivery.thread)
             .filter_map(|parent| {
-                parent
-                    .active
-                    .filter(|active| !active.registration_popped)
-                    .and_then(|active| active.registration)
-                    .map(|registration| (parent.id, registration))
+                parent.active.and_then(|active| {
+                    active
+                        .registration
+                        .map(|registration| (parent.id, active, registration))
+                })
             })
-            .find(|(_, registration)| registration.address == delivery.chain)
+            .find(|(_, _, registration)| registration.address == delivery.chain)
         else {
             return Ok(false);
+        };
+        let registration = if active.registration_popped {
+            registration.with_previous(
+                active
+                    .registration_relink
+                    .ok_or(HostError::Exception(ExceptionError32::InvalidChain))?,
+            )
+        } else {
+            registration
         };
         self.check_exception_registration(registration)?;
         if delivery.visited.len() >= 4096 || delivery.visited.contains(&registration.address) {
@@ -134,8 +181,11 @@ impl EngineInstance {
         }
         delivery.visited.push(registration.address);
         if delivery.phase == ExceptionPhase32::Unwind {
-            if !delivery.popped.contains(&parent) {
-                delivery.popped.push(parent);
+            if !delivery.popped.iter().any(|popped| popped.parent == parent) {
+                delivery.popped.push(PoppedRegistration32 {
+                    parent,
+                    registration,
+                });
             }
             let next = if registration.unwind {
                 if delivery.unwind.is_some_and(|unwind| {
@@ -170,10 +220,16 @@ impl EngineInstance {
         // i386 RtlUnwind changes the registration chain, then resumes its call site.
         // the handler that invoked it can still return through its checked receipt.
         for parent in &mut self.exceptions.deliveries {
-            if delivery.popped.contains(&parent.id)
+            if let Some(popped) = delivery
+                .popped
+                .iter()
+                .find(|popped| popped.parent == parent.id)
                 && let Some(active) = &mut parent.active
             {
+                active.registration = Some(popped.registration);
                 active.registration_popped = true;
+                active.registration_relink =
+                    (delivery.phase == ExceptionPhase32::Resumed).then_some(delivery.chain);
             }
         }
     }

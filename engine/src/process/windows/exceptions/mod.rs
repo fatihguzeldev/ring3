@@ -84,7 +84,7 @@ struct Delivery32 {
     cursor: usize,
     chain: u32,
     nested_boundary: Option<u32>,
-    popped: Vec<u64>,
+    popped: Vec<registration::PoppedRegistration32>,
     visited: Vec<u32>,
     stack_low: u32,
     stack_high: u32,
@@ -117,6 +117,7 @@ struct ActiveHandler32 {
     next: u32,
     registration: Option<registration::HandlerRegistration32>,
     registration_popped: bool,
+    registration_relink: Option<u32>,
 }
 
 impl Delivery32 {
