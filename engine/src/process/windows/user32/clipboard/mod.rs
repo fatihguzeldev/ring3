@@ -10,6 +10,7 @@ use crate::windows::user32::clipboard::ClipboardOwner32;
 pub(super) enum Intent32 {
     Empty(ClipboardOwner32),
     Get(u32),
+    Set { format: u32, handle: u32 },
 }
 
 #[derive(Clone, Copy)]
@@ -21,6 +22,7 @@ pub(super) struct ClipboardCall32 {
     pub completed: Option<u64>,
     pub dispatched: bool,
     pub ready: Option<(u32, Option<u32>)>,
+    pub bytes_wait: bool,
 }
 
 pub(super) fn owns_render(pending: &[Pending32], child: u64, window: u32, format: u32) -> bool {

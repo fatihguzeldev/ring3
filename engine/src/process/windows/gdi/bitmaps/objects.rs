@@ -173,6 +173,11 @@ impl GdiRuntime32 {
         args: &[u32],
     ) -> Result<u32, GdiError32> {
         let index = self.dc_surface(args[0])?;
+        if api == GdiApi32::SetDIBColorTable {
+            if let SurfaceKey32::Bitmap(handle) = self.surfaces[index].key {
+                self.model.check_write_object(handle)?;
+            }
+        }
         let surface = &mut self.surfaces[index];
         if !surface.layout.dib || surface.layout.bits_per_pixel > 8 {
             return Ok(0);

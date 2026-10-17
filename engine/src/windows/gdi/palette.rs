@@ -78,6 +78,7 @@ impl GdiContext32 {
         }
     }
     pub fn palette_mut(&mut self, handle: u32) -> Result<&mut LogicalPalette32, GdiError32> {
+        self.check_write_object(handle)?;
         let index = self
             .objects
             .binary_search_by_key(&handle, |entry| entry.handle)

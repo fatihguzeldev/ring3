@@ -1,5 +1,6 @@
 mod bitmaps;
 mod calls;
+mod clipboard;
 mod colors;
 mod context;
 pub(in crate::process) mod controls;

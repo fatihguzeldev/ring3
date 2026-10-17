@@ -18,6 +18,14 @@ impl EngineInstance {
         else {
             return Ok(0);
         };
+        if let Some(object) = content.gdi() {
+            self.gdi
+                .as_ref()
+                .ok_or(HostError::InvalidRequest)?
+                .check_clipboard_object(self.memory.as_ref().ok_or(HostError::Closed)?, object)
+                .map_err(HostError::Gdi)?;
+            return Ok(object.handle());
+        }
         if let Some(memory) = content.memory() {
             self.check_windows_global_memory(memory)?;
             return Ok(memory.handle);

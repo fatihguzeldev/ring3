@@ -12,6 +12,7 @@ pub(crate) use crate::windows::memory::GlobalMemory32 as ClipboardMemory32;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ClipboardContent32 {
     Memory(ClipboardMemory32),
+    Gdi(crate::windows::gdi::GdiClipboardObject32),
     Delayed,
     Synthesized {
         source: u32,
@@ -287,6 +288,13 @@ impl ClipboardEntry32 {
 }
 
 impl ClipboardContent32 {
+    pub(crate) fn gdi(self) -> Option<crate::windows::gdi::GdiClipboardObject32> {
+        if let Self::Gdi(object) = self {
+            Some(object)
+        } else {
+            None
+        }
+    }
     pub(crate) fn memory(self) -> Option<ClipboardMemory32> {
         match self {
             Self::Memory(memory)

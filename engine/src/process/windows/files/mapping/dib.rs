@@ -1,3 +1,4 @@
+mod retirement;
 use super::{context::MappingViewPurpose32, views::MapViewRequest32};
 use crate::{
     files::FileError32,

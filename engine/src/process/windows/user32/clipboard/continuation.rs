@@ -26,6 +26,7 @@ impl User32Context32 {
             completed: None,
             dispatched: false,
             ready: None,
+            bytes_wait: false,
         }))
     }
 
@@ -133,5 +134,28 @@ impl User32Context32 {
             unreachable!()
         };
         call.ready = Some((value, error));
+    }
+}
+
+impl User32Context32 {
+    pub(super) fn set_clipboard_bytes_wait(&mut self, token: u64, value: bool) {
+        let pending = self
+            .pending
+            .last_mut()
+            .filter(|pending| pending.token == token)
+            .expect("checked clipboard parent");
+        let Continuation32::Clipboard(call) = &mut pending.continuation else {
+            unreachable!()
+        };
+        call.bytes_wait = value;
+    }
+}
+
+impl User32Context32 {
+    pub(super) fn current_clipboard_continuation(&self) -> Option<u64> {
+        self.pending
+            .last()
+            .filter(|pending| matches!(pending.continuation, Continuation32::Clipboard(_)))
+            .map(|pending| pending.token)
     }
 }

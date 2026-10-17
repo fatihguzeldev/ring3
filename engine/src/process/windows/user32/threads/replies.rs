@@ -43,6 +43,7 @@ impl User32Context32 {
             | super::super::callback::Continuation32::DialogRemoteHelp { ready, .. } => {
                 ready.is_some()
             }
+            super::super::callback::Continuation32::Clipboard(call) => !call.bytes_wait,
             super::super::callback::Continuation32::MenuBar(_) => true,
             super::super::callback::Continuation32::TabSelection(_) => true,
             super::super::callback::Continuation32::StatusDraw(_) => true,
@@ -52,7 +53,6 @@ impl User32Context32 {
             super::super::callback::Continuation32::FilePrompt(_)
             | super::super::callback::Continuation32::Retrieve { .. }
             | super::super::callback::Continuation32::Accelerator(_)
-            | super::super::callback::Continuation32::Clipboard(_)
             | super::super::callback::Continuation32::SystemColors(_)
             | super::super::callback::Continuation32::UiState(_)
             | super::super::callback::Continuation32::SentPaint(_) => true,

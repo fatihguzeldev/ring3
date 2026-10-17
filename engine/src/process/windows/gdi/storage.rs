@@ -192,6 +192,9 @@ impl GdiRuntime32 {
         damage: Rect32,
         spans: &[(GuestAddress, &[u8])],
     ) -> Result<(), GdiError32> {
+        if let SurfaceKey32::Bitmap(handle) = self.surfaces[index].key {
+            self.model.check_write_object(handle)?;
+        }
         let surface = &mut self.surfaces[index];
         let revision = surface
             .revision

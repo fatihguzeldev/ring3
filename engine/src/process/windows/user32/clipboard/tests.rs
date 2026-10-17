@@ -86,7 +86,7 @@ fn stop(engine: &mut EngineInstance, pc: u32, id: u32, value: u32) {
     .unwrap();
 }
 
-fn begin(engine: &mut EngineInstance, id: u32, args: &[u32]) -> u32 {
+fn capture_only(engine: &mut EngineInstance, id: u32, args: &[u32]) -> u32 {
     let pc = CODE;
     let descriptors: Vec<u8> = [
         CODE, 2, PROCEDURE, 1, RETURN, 2, CODE, id, RETURN, RETURN_ID,
@@ -117,6 +117,10 @@ fn begin(engine: &mut EngineInstance, id: u32, args: &[u32]) -> u32 {
         )
         .unwrap()
         .token;
+    token
+}
+fn begin(engine: &mut EngineInstance, id: u32, args: &[u32]) -> u32 {
+    let token = capture_only(engine, id, args);
     engine
         .complete_windows_call(KEY, engine.generation, token)
         .unwrap();
@@ -368,3 +372,5 @@ fn delayed_rendering_requires_the_actual_owned_callback_and_returns_its_material
     );
     assert!(!engine.current_clipboard_renderer(13));
 }
+
+mod graphics;

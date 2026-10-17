@@ -5,6 +5,8 @@ mod context;
 mod dc;
 mod fonts;
 mod objects;
+mod ownership;
+pub(crate) use ownership::GdiClipboardObject32;
 mod palette;
 mod raster;
 mod region;

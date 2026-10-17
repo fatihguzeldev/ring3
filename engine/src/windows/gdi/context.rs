@@ -8,6 +8,7 @@ pub(super) struct ObjectEntry32 {
     pub handle: u32,
     pub object: GdiObject32,
     pub font_metrics: Option<super::ResolvedFont32>,
+    pub owner: super::ownership::ObjectOwner32,
 }
 pub(super) struct Dc32 {
     pub handle: u32,
@@ -149,6 +150,7 @@ impl GdiContext32 {
                 handle: prepared.handle,
                 object,
                 font_metrics: None,
+                owner: super::ownership::ObjectOwner32::Application,
             }),
             PreparedPayload32::Dc(dc) => self.dcs.push(dc),
         }

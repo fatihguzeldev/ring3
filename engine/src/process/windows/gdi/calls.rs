@@ -49,6 +49,16 @@ impl EngineInstance {
             return Err(HostError::Call(CallError::InvalidRequest));
         }
         self.check_windows_thread_write()?;
+        if let Some(files) = self.files.as_ref() {
+            files.check_gdi_file_call(owner, token, id, frame)?;
+        }
+        if let Some(request) = self.collect_retired_clipboard_graphics()? {
+            self.files
+                .as_mut()
+                .ok_or(HostError::Infrastructure)?
+                .park_gdi_file_call(owner, token, id, frame, request);
+            return Ok(true);
+        }
         Self::prepare_completed_call(frame.complete(0))?;
         let thread = self.current_windows_thread_id()?;
         let context = self.user32.as_ref();
@@ -140,6 +150,9 @@ impl EngineInstance {
             ),
         };
         let prepared = self.prepare_gdi_result(api, frame, value, error)?;
+        if let Some(files) = self.files.as_mut() {
+            files.finish_gdi_file_call();
+        }
         self.publish_prepared_call(prepared);
         Ok(true)
     }

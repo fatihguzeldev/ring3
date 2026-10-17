@@ -41,3 +41,19 @@ impl FileRuntime32 {
         self.reply = None;
     }
 }
+
+impl FileRuntime32 {
+    pub(in crate::process) fn gdi_file_request_ready(
+        &self,
+        owner: PendingOwner,
+        token: u32,
+    ) -> Result<bool, HostError> {
+        let reply = self
+            .reply
+            .filter(|reply| (reply.owner, reply.token) == (owner, token))
+            .ok_or(HostError::Call(CallError::InvalidToken))?;
+        Ok(reply
+            .request
+            .is_none_or(|request| self.vfs.request_ready(request)))
+    }
+}

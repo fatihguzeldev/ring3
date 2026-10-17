@@ -14,6 +14,11 @@ impl GdiRuntime32 {
         args: &[u32],
     ) -> Result<u32, GdiError32> {
         let index = self.dc_surface(args[0])?;
+        if api != GdiApi32::GetPixel {
+            if let super::super::storage::SurfaceKey32::Bitmap(handle) = self.surfaces[index].key {
+                self.model.check_write_object(handle)?;
+            }
+        }
         let surface = &mut self.surfaces[index];
         let state = self.model.state(args[0])?;
         let point = state.device_point(Point32 {

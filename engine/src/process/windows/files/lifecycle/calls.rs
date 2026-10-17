@@ -30,6 +30,16 @@ impl EngineInstance {
             .and_then(|runtime| runtime.reply)
             .filter(|reply| reply.token == token)
             .ok_or(HostError::Call(CallError::InvalidToken))?;
+        if matches!(
+            crate::windows::user32::User32Api32::from_id(reply.id),
+            Some(
+                crate::windows::user32::User32Api32::SetClipboardData
+                    | crate::windows::user32::User32Api32::EmptyClipboard
+            )
+        ) && self.resume_clipboard_file_wait(reply.owner, token, reply.frame)?
+        {
+            return Ok(());
+        }
         if reply.id == crate::windows::WindowsApi32::ExitProcess.id() {
             self.publish_process_exit(self.pending_process_exit.ok_or(HostError::Infrastructure)?)?;
         } else {
@@ -56,6 +66,15 @@ impl EngineInstance {
             .filter(|reply| reply.token == token)
             .ok_or(HostError::Call(CallError::InvalidToken))?;
         self.checked_pending_call(reply.owner, token)?;
+        if matches!(
+            crate::windows::user32::User32Api32::from_id(reply.id),
+            Some(
+                crate::windows::user32::User32Api32::SetClipboardData
+                    | crate::windows::user32::User32Api32::EmptyClipboard
+            )
+        ) {
+            return Err(HostError::Call(CallError::Busy));
+        }
         if reply.id == crate::windows::WindowsApi32::ExitProcess.id() {
             return Err(HostError::Call(CallError::Busy));
         }

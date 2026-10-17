@@ -59,23 +59,11 @@ impl GdiContext32 {
     }
     pub fn check_delete_object(&self, handle: u32) -> Result<(), GdiError32> {
         self.object(handle)?;
+        self.check_write_object(handle)?;
         if self.is_stock(handle) {
             return Ok(());
         }
-        if self.dcs.iter().any(|dc| {
-            core::iter::once(&dc.state)
-                .chain(dc.saved.iter())
-                .any(|state| {
-                    [
-                        state.bitmap,
-                        state.brush,
-                        state.pen,
-                        state.font,
-                        state.palette,
-                    ]
-                    .contains(&handle)
-                })
-        }) {
+        if self.object_selected(handle) {
             return Err(GdiError32::SelectedObject);
         }
         Ok(())
