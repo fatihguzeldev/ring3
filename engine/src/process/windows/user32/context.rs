@@ -31,6 +31,7 @@ impl User32Context32 {
         Ok(Self {
             state,
             menus: crate::windows::user32::menus::MenuStore32::new(Default::default())?,
+            accelerators: crate::windows::user32::accelerators::AcceleratorStore32::new(256, 4096)?,
             builtin_procedures: None,
             layouts: Vec::new(),
             process_layout: None,
@@ -151,6 +152,13 @@ impl User32Context32 {
             | SetMenuItemInfoA | SetMenuItemInfoW | InsertMenuItemA | InsertMenuItemW => {
                 self.menu_call(api, args, memory, context)
             }
+            CreateAcceleratorTableA
+            | CreateAcceleratorTableW
+            | CopyAcceleratorTableA
+            | CopyAcceleratorTableW
+            | DestroyAcceleratorTable
+            | TranslateAcceleratorA
+            | TranslateAcceleratorW => self.accelerator_call(api, args, memory, context),
             DestroyWindow => self.destroy_window(args[0], context),
             GetClientRect | GetWindowRect => self.get_rect(api, args, memory),
             IsWindow => Ok(User32Outcome32::Return(u32::from(

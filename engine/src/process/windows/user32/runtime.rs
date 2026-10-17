@@ -129,6 +129,8 @@ impl EngineInstance {
                 api,
                 User32Api32::SendMessageA
                     | User32Api32::SendMessageW
+                    | User32Api32::TranslateAcceleratorA
+                    | User32Api32::TranslateAcceleratorW
                     | User32Api32::GetMessageA
                     | User32Api32::GetMessageW
                     | User32Api32::PeekMessageA
@@ -250,6 +252,8 @@ impl EngineInstance {
                 | User32Api32::LoadMenuW
                 | User32Api32::LoadMenuIndirectA
                 | User32Api32::LoadMenuIndirectW
+                | User32Api32::LoadAcceleratorsA
+                | User32Api32::LoadAcceleratorsW
         ) {
             Some(self.prepare_user32_menu_resource(api, frame.arguments()))
         } else {
@@ -291,6 +295,10 @@ impl EngineInstance {
                 Ok(PreparedResource32::Menu(template)) => {
                     context.menus.load(template).map(|menu| menu.get())
                 }
+                Ok(PreparedResource32::Accelerator(entries, origin)) => context
+                    .accelerators
+                    .create(entries, Some(origin))
+                    .map(|table| table.get()),
                 Err(HostError::User32(error)) => Err(error),
                 Err(HostError::Resource(error)) => Err(User32Error32::Win32(error.win32())),
                 Err(error) => return Err(error),

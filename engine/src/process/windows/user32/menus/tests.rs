@@ -117,6 +117,33 @@ fn captured_menu_tree_queries_and_remove_delete_use_actual_handles_and_lifetimes
     assert_eq!(call(&mut engine, 0x0002_007a, &[parent]), Ok(0));
 }
 
+#[test]
+fn captured_accelerator_create_copy_and_destroy_preserve_literal_six_byte_entries() {
+    let mut engine = engine();
+    let entries = [0x41, 0xaa, 65, 0, 7, 0, 0, 0xbb, 0xe9, 0, 9, 0];
+    engine
+        .memory
+        .as_mut()
+        .unwrap()
+        .write(GuestAddress(0x10400), &entries)
+        .unwrap();
+    let table = call(&mut engine, 0x0002_00a7, &[0x10400, 2]).unwrap();
+    assert_ne!(table, 0);
+    assert_eq!(call(&mut engine, 0x0002_00a9, &[table, 0, 0]), Ok(2));
+    assert_eq!(call(&mut engine, 0x0002_00a9, &[table, 0x10600, 1]), Ok(1));
+    let mut copied = [0; 6];
+    engine
+        .memory
+        .as_ref()
+        .unwrap()
+        .read(GuestAddress(0x10600), &mut copied)
+        .unwrap();
+    assert_eq!(copied, [0x41, 0, 65, 0, 7, 0]);
+    assert_eq!(call(&mut engine, 0x0002_00aa, &[table]), Ok(1));
+    assert_eq!(call(&mut engine, 0x0002_00a9, &[table, 0, 0]), Ok(0));
+    assert_eq!(call(&mut engine, 0x0002_00aa, &[table]), Ok(0));
+}
+
 #[path = "tests/fields.rs"]
 mod fields;
 #[path = "tests/lifetime.rs"]

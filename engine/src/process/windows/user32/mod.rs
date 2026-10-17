@@ -1,6 +1,7 @@
 mod dialogs;
 mod gdi;
 pub use dialogs::{User32DialogIcon32, User32DialogRequest32};
+mod accelerators;
 mod activation;
 mod callback;
 mod classes;
@@ -61,6 +62,7 @@ pub(crate) enum User32Outcome32 {
 pub(crate) struct User32Context32 {
     state: User32State32,
     menus: crate::windows::user32::menus::MenuStore32,
+    accelerators: crate::windows::user32::accelerators::AcceleratorStore32,
     builtin_procedures: Option<[crate::memory::GuestAddress; 2]>,
     layouts: Vec<threads::ThreadLayout32>,
     process_layout: Option<(u64, crate::input::keyboard::KeyboardLayout32)>,

@@ -36,6 +36,7 @@ pub(super) enum PositionStage32 {
 
 #[derive(Clone, Copy)]
 pub(super) enum Continuation32 {
+    Accelerator(super::accelerators::Dispatch32),
     ResourceDialog {
         plan: u64,
         scratch: Scratch32,
@@ -127,7 +128,7 @@ impl User32Context32 {
             .cloned()
             .ok_or(User32Error32::InvalidToken)?;
         let (procedure, arguments) = match pending.continuation {
-            Continuation32::ResourceDialog { .. } => {
+            Continuation32::ResourceDialog { .. } | Continuation32::Accelerator(_) => {
                 return Ok(User32Outcome32::Wait {
                     continuation: pending.token,
                 });
@@ -264,8 +265,12 @@ impl User32Context32 {
         if let Some(outcome) = self.retry_resource_dialog_completion(token, memory) {
             return outcome;
         }
+        if let Some(outcome) = self.retry_accelerator_completion(token) {
+            return Ok(outcome);
+        }
         let outcome = self.complete_step(token, result, memory)?;
-        self.complete_resource_dialog_child(token, outcome, memory)
+        let outcome = self.complete_resource_dialog_child(token, outcome, memory)?;
+        self.complete_accelerator_child(token, outcome)
     }
 
     fn complete_step(
@@ -281,7 +286,9 @@ impl User32Context32 {
             .cloned()
             .ok_or(User32Error32::InvalidToken)?;
         match pending.continuation {
-            Continuation32::ResourceDialog { .. } => Err(User32Error32::InvalidToken),
+            Continuation32::ResourceDialog { .. } | Continuation32::Accelerator(_) => {
+                Err(User32Error32::InvalidToken)
+            }
             Continuation32::ResourceProcedure {
                 window,
                 arguments,

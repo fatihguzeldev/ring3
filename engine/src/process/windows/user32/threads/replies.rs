@@ -39,7 +39,8 @@ impl User32Context32 {
             | super::super::callback::Continuation32::DialogRemoteHelp { ready, .. } => {
                 ready.is_some()
             }
-            super::super::callback::Continuation32::Retrieve { .. } => true,
+            super::super::callback::Continuation32::Retrieve { .. }
+            | super::super::callback::Continuation32::Accelerator(_) => true,
             super::super::callback::Continuation32::MessageWait {
                 thread,
                 window,

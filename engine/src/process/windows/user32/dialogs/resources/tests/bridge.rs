@@ -93,6 +93,7 @@ fn begin(engine: &mut EngineInstance, modal: bool) -> u32 {
             Api::from_id(gate.id),
             Some(Api::DefDlgProcW | Api::DefWindowProcW)
         ) || gate.id == crate::windows::controls::BUILTIN_PROC_W
+            || gate.id == crate::process::windows::threads::INVOCATION_RETURN_ID
     }) {
         blocks.push((gate.entry.0, 2));
         gates.push((gate.entry.0, gate.id));
@@ -298,4 +299,139 @@ fn modal_message_wait_accepts_real_cross_thread_send_before_posted_message_retri
     )
     .unwrap();
     assert_eq!(&frame[1..], &[root, 0x400, 3, 4]);
+}
+
+#[test]
+fn cross_thread_accelerator_command_returns_only_after_the_real_owner_invocation() {
+    let mut engine = engine();
+    call(
+        &mut engine,
+        crate::windows::thread::ThreadApi32::CreateThread.id(),
+        &[0, 0, CODE + 0x100, 0, 0, 0],
+    )
+    .unwrap();
+    write_template(&mut engine);
+    begin(&mut engine, true);
+    let root = reach_init(&mut engine);
+    complete_callback(&mut engine, 0).unwrap();
+    for _ in 0..64 {
+        let Some(request) = engine.pending_windows_callback() else {
+            break;
+        };
+        complete_callback(&mut engine, u32::from(request.arguments[1] == 0x81)).unwrap();
+    }
+    assert!(engine.waiting_user32_message().is_some());
+    assert_eq!(
+        engine.schedule_windows_thread().unwrap(),
+        ThreadSchedule32::Running { thread: 2 }
+    );
+    engine
+        .memory
+        .as_mut()
+        .unwrap()
+        .write(GuestAddress(DATA + 0x400), &[1, 0, 65, 0, 37, 0])
+        .unwrap();
+    call(
+        &mut engine,
+        Api::CreateAcceleratorTableW.id(),
+        &[DATA + 0x400, 1],
+    )
+    .unwrap();
+    let table = crate::abi::x86::decode_state(&engine.arena()[..STATE_SIZE])
+        .unwrap()
+        .registers[0];
+    let message: Vec<u8> = [root, 0x100, 65, 0, 0, 0, 0]
+        .into_iter()
+        .flat_map(u32::to_le_bytes)
+        .collect();
+    engine
+        .memory
+        .as_mut()
+        .unwrap()
+        .write(GuestAddress(DATA + 0x500), &message)
+        .unwrap();
+    call(
+        &mut engine,
+        Api::TranslateAcceleratorW.id(),
+        &[root, table, DATA + 0x500],
+    )
+    .unwrap();
+    let outer = engine.pending_call.as_ref().unwrap().token;
+    let outer_frame = engine.pending_call.as_ref().unwrap().frame;
+    let wait = engine.waiting_user32_message().unwrap();
+    engine.resume_user32_wait(KEY, wait).unwrap();
+    assert_eq!(engine.pending_call.as_ref().unwrap().token, outer);
+    assert_eq!(engine.pending_call.as_ref().unwrap().frame, outer_frame);
+    assert!(engine.has_pending_thread_invocation(1));
+    assert_eq!(
+        engine.schedule_windows_thread().unwrap(),
+        ThreadSchedule32::Running { thread: 1 }
+    );
+    let mut state = crate::abi::x86::decode_state(&engine.arena()[..STATE_SIZE]).unwrap();
+    let frame = crate::process::windows::user32::memory::words::<5>(
+        engine.memory.as_ref().unwrap(),
+        state.registers[4],
+    )
+    .unwrap();
+    assert_eq!(&frame[1..], &[root, 0x111, 0x10025, 0]);
+    assert!(!engine.has_pending_thread_invocation(1));
+    state.eip = frame[0];
+    state.registers[0] = 0xdeadbeef;
+    state.registers[4] += 20;
+    for (index, word) in [
+        frame[0],
+        2,
+        frame[0],
+        crate::process::windows::threads::INVOCATION_RETURN_ID,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        engine.arena_mut().unwrap()[TRANSFER_OFFSET + index * 4..TRANSFER_OFFSET + index * 4 + 4]
+            .copy_from_slice(&word.to_le_bytes());
+    }
+    engine.compile_with_gates(1, 1).unwrap();
+    encode_state_current(&state, &mut engine.arena_mut().unwrap()[..STATE_SIZE]).unwrap();
+    encode_exit_v3(
+        &ExecutionExit {
+            retired: 0,
+            reason: ExitReason::Gate {
+                id: crate::process::windows::threads::INVOCATION_RETURN_ID,
+            },
+        },
+        &mut engine.arena_mut().unwrap()[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE],
+    )
+    .unwrap();
+    let returned = engine
+        .capture_call(KEY, engine.generation, CallingConvention32::Stdcall, 0)
+        .unwrap();
+    engine
+        .complete_windows_call(KEY, engine.generation, returned.token)
+        .unwrap();
+    assert_eq!(
+        engine.schedule_windows_thread().unwrap(),
+        ThreadSchedule32::Running { thread: 2 }
+    );
+    if let Some(pending) = engine.pending_call.as_ref() {
+        assert_eq!(pending.token, outer);
+        assert_eq!(pending.frame, outer_frame);
+    }
+    for _ in 0..4 {
+        let Some(wait) = engine.waiting_user32_message() else {
+            break;
+        };
+        engine.resume_user32_wait(KEY, wait).unwrap();
+    }
+    assert!(engine.pending_call.is_none());
+    assert_eq!(
+        crate::abi::x86::decode_state(&engine.arena()[..STATE_SIZE])
+            .unwrap()
+            .registers[0],
+        1
+    );
+    assert!(!engine.has_pending_thread_invocation(1));
+    assert_eq!(
+        engine.user32.as_ref().unwrap().wait_queue_status(1).0 & 0x40,
+        0
+    );
 }

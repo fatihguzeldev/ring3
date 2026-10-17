@@ -12,6 +12,45 @@ use crate::{
     },
 };
 impl EngineInstance {
+    pub(in crate::process) fn prepare_user32_wait_send(
+        &self,
+        token: u64,
+    ) -> Result<Option<(Option<PreparedThreadInvocation32>, u64)>, HostError> {
+        let context = self.user32.as_ref().ok_or(HostError::InvalidRequest)?;
+        let Some(args) = context
+            .pending_user32_wait_send_message(token)
+            .map_err(HostError::User32)?
+        else {
+            return Ok(None);
+        };
+        let sender = self.current_windows_thread_id()?;
+        let child = context.check_continuation().map_err(HostError::User32)?;
+        let window = WindowHandle32::try_from(args[0])
+            .map_err(User32Error32::from)
+            .map_err(HostError::User32)?;
+        let record = context
+            .windows()
+            .get(window)
+            .map_err(User32Error32::from)
+            .map_err(HostError::User32)?;
+        let prepared = if record.description.thread_id != sender {
+            Some(self.prepare_thread_invocation(
+                record.description.thread_id,
+                record.description.procedure,
+                &args,
+                ThreadInvocationCompletion32::User32 {
+                    sender,
+                    continuation: child,
+                },
+            )?)
+        } else {
+            None
+        };
+        Ok(Some((prepared, child)))
+    }
+}
+
+impl EngineInstance {
     pub(in crate::process::windows::user32) fn prepare_user32_remote_call(
         &mut self,
         api: User32Api32,
@@ -52,12 +91,20 @@ impl EngineInstance {
     }
 }
 impl User32Context32 {
+    pub(in crate::process) fn pending_user32_wait_send_message(
+        &self,
+        token: u64,
+    ) -> Result<Option<[u32; 4]>, User32Error32> {
+        self.pending_accelerator_message(token)
+    }
+
     pub(in crate::process) fn waiting_retrieval(&self, continuation: u64) -> bool {
         self.pending.last().is_some_and(|pending| {
             pending.token == continuation
                 && matches!(
                     pending.continuation,
                     Continuation32::ResourceDialog { .. }
+                        | Continuation32::Accelerator(_)
                         | Continuation32::Retrieve { .. }
                         | Continuation32::MessageWait { .. }
                 )

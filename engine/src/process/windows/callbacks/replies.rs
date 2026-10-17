@@ -381,7 +381,12 @@ impl EngineInstance {
         } else {
             None
         };
-        let queue = self.prepare_user32_queue_change()?;
+        let send = self.prepare_user32_wait_send(continuation)?;
+        let queue = if send.is_some() {
+            None
+        } else {
+            self.prepare_user32_queue_change()?
+        };
         let context = self.user32.as_mut().ok_or(HostError::InvalidRequest)?;
         let outcome = context
             .resume_wait(continuation, self.memory.as_mut().ok_or(HostError::Closed)?)
@@ -393,6 +398,21 @@ impl EngineInstance {
         );
         self.commit_windows_input_flags(if flags == Some(actual) { input } else { None });
         self.commit_user32_window_event(window_event, window_ids);
+        if let Some((prepared, child)) = send {
+            if let Some(prepared) = prepared {
+                assert_eq!(
+                    outcome,
+                    User32Outcome32::Wait {
+                        continuation: child
+                    }
+                );
+                self.commit_thread_invocation(prepared);
+            } else {
+                assert!(
+                    matches!(outcome, User32Outcome32::Callback(callback) if callback.continuation == child)
+                );
+            }
+        }
         self.commit_user32_queue_change(queue);
         self.accept_user32_outcome(outcome, error)?;
         if self

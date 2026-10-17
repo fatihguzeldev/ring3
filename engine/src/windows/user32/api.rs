@@ -171,6 +171,15 @@ api_catalog! {
     LoadMenuIndirectW=0x0002_0097,1;
     GetMenuContextHelpId=0x0002_0098,1;
     SetMenuContextHelpId=0x0002_0099,2;
+    CreateAcceleratorTableA=0x0002_00a6,2;
+    CreateAcceleratorTableW=0x0002_00a7,2;
+    CopyAcceleratorTableA=0x0002_00a8,3;
+    CopyAcceleratorTableW=0x0002_00a9,3;
+    DestroyAcceleratorTable=0x0002_00aa,1;
+    LoadAcceleratorsA=0x0002_00ab,2;
+    LoadAcceleratorsW=0x0002_00ac,2;
+    TranslateAcceleratorA=0x0002_00ad,3;
+    TranslateAcceleratorW=0x0002_00ae,3;
 }
 
 impl User32Api32 {
