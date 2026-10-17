@@ -289,4 +289,5 @@ fn captured_control_color_return_is_sealed_across_teb_fault_and_paints_exactly_o
     assert_eq!(frame(&engine, child).revision, before + 1);
 }
 
+mod images;
 mod raster;

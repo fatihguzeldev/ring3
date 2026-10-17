@@ -20,6 +20,7 @@ pub(in crate::process) struct GdiCanvas32 {
     dc: u32,
     owner: CanvasOwner32,
     images: Vec<super::super::images::ImageOwner32>,
+    bitmaps: Vec<bitmap::CanvasBitmap32>,
     sources: Vec<CanvasSource32>,
     fonts: Vec<u32>,
 }
@@ -63,6 +64,7 @@ impl GdiCanvas32 {
         Ok(Self {
             dc,
             images: Vec::new(),
+            bitmaps: Vec::new(),
             sources: Vec::new(),
             fonts: Vec::new(),
             owner: CanvasOwner32 {
@@ -461,6 +463,9 @@ impl GdiRuntime32 {
             .check(self, memory, canvas.dc, prepared.index)?;
         for source in &canvas.sources {
             source.owner.check(self, memory, source.dc, source.index)?;
+        }
+        for source in &canvas.bitmaps {
+            source.check(self, memory)?;
         }
         for source in &canvas.images {
             self.check_image_owner(*source)?;

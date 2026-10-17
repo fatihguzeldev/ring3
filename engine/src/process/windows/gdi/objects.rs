@@ -72,7 +72,7 @@ impl GdiRuntime32 {
         let prepared = self.model.prepare_object(object)?;
         Ok(self.model.commit_new(prepared))
     }
-    pub(super) fn delete_object(
+    pub(in crate::process) fn delete_object(
         &mut self,
         memory: &mut AddressSpace,
         handle: u32,

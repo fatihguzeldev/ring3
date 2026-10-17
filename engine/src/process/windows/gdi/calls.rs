@@ -52,6 +52,7 @@ impl EngineInstance {
         if let Some(files) = self.files.as_ref() {
             files.check_gdi_file_call(owner, token, id, frame)?;
         }
+        self.collect_retired_static_control_images()?;
         if let Some(request) = self.collect_retired_clipboard_graphics()? {
             self.files
                 .as_mut()

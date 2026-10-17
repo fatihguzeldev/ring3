@@ -24,6 +24,7 @@ pub(super) struct ImageRecord32 {
     pub handle: u32,
     pub kind: ImageKind32,
     pub shared: bool,
+    pub retiring: bool,
     pub origin: Option<ImageOrigin32>,
 }
 
@@ -36,6 +37,7 @@ pub(super) enum ImageOrigin32 {
 #[derive(Default)]
 pub(in crate::process::windows::user32) struct ImageRuntime32 {
     records: Vec<ImageRecord32>,
+    retirements: usize,
     pub(super) reply: Option<ImageReply32>,
 }
 
@@ -116,16 +118,49 @@ impl ImageRuntime32 {
             .find(|record| record.handle == handle && record.kind == kind)
             .ok_or(E::Win32(6))
     }
+    pub(super) fn defer_retirement(&mut self, handle: u32, kind: ImageKind32) {
+        let record = self
+            .records
+            .iter_mut()
+            .find(|record| record.handle == handle && record.kind == kind)
+            .expect("owned image retirement retains its canonical registry record");
+        if !record.retiring {
+            record.retiring = true;
+            self.retirements += 1;
+        }
+    }
+    pub(super) fn pending_retirement_count(&self) -> usize {
+        self.retirements
+    }
+    pub(super) fn pending_retirement(
+        &self,
+    ) -> impl Iterator<Item = crate::windows::controls::ControlImage32> + '_ {
+        self.records
+            .iter()
+            .filter(|record| record.retiring)
+            .map(|record| crate::windows::controls::ControlImage32 {
+                kind: record.kind,
+                handle: record.handle,
+            })
+    }
     pub(super) fn publish(&mut self, record: ImageRecord32) {
         assert!(self.records.len() < self.records.capacity());
         assert!(self.records.iter().all(|old| old.handle != record.handle));
         self.records.push(record);
     }
     pub(super) fn retire(&mut self, handle: u32) {
-        self.records.retain(|record| record.handle != handle);
+        if let Some(index) = self
+            .records
+            .iter()
+            .position(|record| record.handle == handle)
+        {
+            self.retirements -= usize::from(self.records[index].retiring);
+            self.records.remove(index);
+        }
     }
     pub(super) fn prune(&mut self, mut current: impl FnMut(&ImageRecord32) -> bool) {
         self.records.retain(|record| current(record));
+        self.retirements = self.records.iter().filter(|record| record.retiring).count();
     }
     pub(in crate::process::windows::user32) fn retire_thread(&mut self, thread: u32) {
         if self
@@ -138,6 +173,7 @@ impl ImageRuntime32 {
     }
     pub(in crate::process::windows::user32) fn clear(&mut self) {
         self.records.clear();
+        self.retirements = 0;
         self.reply = None;
     }
 }

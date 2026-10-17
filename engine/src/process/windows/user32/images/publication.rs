@@ -96,6 +96,7 @@ impl EngineInstance {
             images.retire(old);
         }
         images.publish(ImageRecord32 {
+            retiring: false,
             handle,
             kind: request.kind,
             shared: request.shared() && !request.from_file(),

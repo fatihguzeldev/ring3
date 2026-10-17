@@ -1,3 +1,4 @@
+mod images;
 mod input;
 pub(in crate::process::windows::user32) use input::{Close32, Dropdown32, Focus32};
 mod messages;
@@ -66,18 +67,38 @@ impl EngineInstance {
         let outcome = if matches!(frame.arguments()[1], 0x0f | 0x14) {
             self.execute_builtin_control_paint(frame.arguments())
         } else {
-            self.execute_builtin_control_message(frame.arguments(), id == BUILTIN_PROC_W, call)
+            match self.execute_static_image_message(frame.arguments(), id == BUILTIN_PROC_W, call) {
+                Ok(Some(outcome)) => Ok(outcome),
+                Ok(None) => self.execute_builtin_control_message(
+                    frame.arguments(),
+                    id == BUILTIN_PROC_W,
+                    call,
+                ),
+                Err(error) => Err(error),
+            }
         };
         let (outcome, error) = match outcome {
             Ok(outcome) => (outcome, None),
-            Err(HostError::User32(crate::windows::user32::User32Error32::Win32(error))) => {
-                (User32Outcome32::Return(0), Some(error))
-            }
+            Err(HostError::User32(crate::windows::user32::User32Error32::Win32(error))) => (
+                User32Outcome32::Return(if frame.arguments()[1] == 1 {
+                    u32::MAX
+                } else {
+                    0
+                }),
+                Some(error),
+            ),
             Err(HostError::Gdi(crate::windows::gdi::GdiError32::Memory(
                 error @ (crate::memory::MemoryError::Allocation
                 | crate::memory::MemoryError::VersionExhausted),
             ))) => return Err(HostError::Memory(error)),
-            Err(HostError::Gdi(error)) => (User32Outcome32::Return(0), Some(error.win32())),
+            Err(HostError::Gdi(error)) => (
+                User32Outcome32::Return(if frame.arguments()[1] == 1 {
+                    u32::MAX
+                } else {
+                    0
+                }),
+                Some(error.win32()),
+            ),
             Err(error) => return Err(error),
         };
         self.publish_user32_result(owner, token, frame, outcome, error)?;

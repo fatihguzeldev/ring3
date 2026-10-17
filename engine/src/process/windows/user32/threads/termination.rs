@@ -1,9 +1,19 @@
 use super::super::User32Context32;
-use crate::windows::user32::User32Error32;
+use crate::windows::{controls::ControlImage32, user32::User32Error32};
 
 pub(in crate::process) struct PreparedUser32ThreadExit32 {
     thread: u32,
     menus: crate::windows::user32::menus::PreparedMenuRetirement32,
+    images: Vec<ControlImage32>,
+}
+impl PreparedUser32ThreadExit32 {
+    pub(in crate::process) fn images(&self) -> &[ControlImage32] {
+        &self.images
+    }
+
+    pub(in crate::process) fn take_images(&mut self) -> Vec<ControlImage32> {
+        core::mem::take(&mut self.images)
+    }
 }
 impl User32Context32 {
     pub(in crate::process) fn prepare_thread_termination(
@@ -16,7 +26,23 @@ impl User32Context32 {
         let menus = self
             .menus
             .prepare_retirement(self.state.attached_menus(thread))?;
-        Ok(PreparedUser32ThreadExit32 { thread, menus })
+        let mut images = Vec::new();
+        images
+            .try_reserve_exact(self.windows().live_windows())
+            .map_err(|_| User32Error32::Allocation)?;
+        for window in self.state.all_windows() {
+            if self.windows().get(window)?.description.thread_id == thread {
+                let control = self.state.control_state(window)?;
+                if let Some(image) = control.image.filter(|_| control.image_owned) {
+                    images.push(image);
+                }
+            }
+        }
+        Ok(PreparedUser32ThreadExit32 {
+            thread,
+            menus,
+            images,
+        })
     }
     pub(in crate::process) fn commit_thread_termination(
         &mut self,

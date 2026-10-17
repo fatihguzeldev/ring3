@@ -7,6 +7,7 @@ use super::{
 use crate::{
     memory::{AddressSpace, PAGE_SIZE},
     windows::{
+        controls::{ControlKind32, static_image_kind},
         user32::{Point32, Rect32, User32Api32, User32Error32, WindowData32},
         window::{WindowDescription32, WindowHandle32, WindowMessage32},
     },
@@ -138,7 +139,14 @@ impl User32Context32 {
         {
             return Err(User32Error32::Win32(1401));
         }
-        let caption = if args[2] != 0 {
+        let image_control = self.state.standard_kind(class_atom) == Some(ControlKind32::Static)
+            && static_image_kind(args[3]).is_some();
+        if self.state.standard_kind(class_atom) == Some(ControlKind32::Static) && args[3] & 31 == 15
+        {
+            return Err(User32Error32::Win32(50));
+        }
+        // image-control titles name resources; an ordinal is not a readable string pointer.
+        let caption = if args[2] != 0 && !image_control {
             memory::string(memory, args[2], api.wide(), 32_767, context.ansi)?
         } else {
             Vec::new()

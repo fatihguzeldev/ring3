@@ -89,7 +89,8 @@ impl EngineInstance {
         self.publish_prepared_call(Self::prepare_completed_call(frame.complete(value))?);
         Ok(true)
     }
-    fn prune_user32_images(&mut self) -> Result<(), HostError> {
+    pub(super) fn prune_user32_images(&mut self) -> Result<(), HostError> {
+        self.collect_retired_static_control_images()?;
         let memory = self.memory.as_ref().ok_or(HostError::Closed)?;
         let Some(gdi) = self.gdi.as_ref() else {
             return Ok(());

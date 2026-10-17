@@ -7,6 +7,7 @@ use super::*;
 use crate::{
     memory::AddressSpace,
     windows::{
+        controls::{ControlKind32, static_image_kind},
         user32::{Point32, Rect32},
         window::WindowHandle32,
     },
@@ -122,7 +123,15 @@ impl User32Context32 {
             right: x.checked_add(width).ok_or(User32Error32::Win32(87))?,
             bottom: y.checked_add(height).ok_or(User32Error32::Win32(87))?,
         };
-        let caption = if values[9] == 0 {
+        let image_control = self.state.standard_kind(data.class_atom)
+            == Some(ControlKind32::Static)
+            && static_image_kind(values[8]).is_some();
+        if self.state.standard_kind(data.class_atom) == Some(ControlKind32::Static)
+            && values[8] & 31 == 15
+        {
+            return Err(User32Error32::Win32(50));
+        }
+        let caption = if values[9] == 0 || image_control {
             Vec::new()
         } else {
             memory::string(

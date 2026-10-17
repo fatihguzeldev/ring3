@@ -180,6 +180,7 @@ impl EngineInstance {
             images.retire(old);
         }
         images.publish(ImageRecord32 {
+            retiring: false,
             handle,
             kind,
             shared: false,

@@ -302,6 +302,7 @@ fn static_control(
     color: u32,
 ) -> Result<(), GdiError32> {
     match visual.style & 31 {
+        3 | 14 => super::images::paint(gdi, memory, canvas, visual, bounds)?,
         4..=6 => canvas.fill(
             gdi,
             bounds,

@@ -218,6 +218,9 @@ impl EngineInstance {
             .map(|context| context.prepare_thread_termination(id))
             .transpose()
             .map_err(HostError::User32)?;
+        if let Some(prepared) = &user32 {
+            self.prepare_static_control_thread_retirement(prepared.images(), id)?;
+        }
         let mut saved_files = Vec::new();
         saved_files
             .try_reserve_exact(record.active_invocations.len() + 1)
@@ -361,12 +364,16 @@ impl EngineInstance {
             .unwrap()
             .context_mut()
             .commit_signals_and_release(sync);
-        if let Some(prepared) = user32 {
+        let static_images = if let Some(mut prepared) = user32 {
+            let images = prepared.take_images();
             self.user32
                 .as_mut()
                 .unwrap()
                 .commit_thread_termination(prepared);
-        }
+            images
+        } else {
+            Vec::new()
+        };
         self.commit_windows_input_flags(input);
         self.commit_user32_window_event(window_event, old_windows);
         for (sender, continuation) in remote {
@@ -405,6 +412,7 @@ impl EngineInstance {
                     .expect("dialog fonts retain their canonical GDI object identity");
             }
         }
+        self.commit_static_control_thread_retirement(static_images);
         self.commit_activation_thread_exit(activation);
         self.commit_com_thread_exit_after_memory(com, memory_changed);
         if let Some(runtime) = self.ole32.as_mut() {

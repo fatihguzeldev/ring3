@@ -214,3 +214,130 @@ pub(super) fn write_alpha(layout: BitmapLayout32, bytes: &mut [u8], x: u32, y: u
         bytes[layout.row(y) + x as usize * 4 + 3] = alpha;
     }
 }
+
+pub(super) struct CanvasBitmap32 {
+    handle: u32,
+    id: u64,
+    revision: u64,
+    layout: BitmapLayout32,
+    palette: Vec<u32>,
+}
+impl CanvasBitmap32 {
+    pub(super) fn check(
+        &self,
+        gdi: &GdiRuntime32,
+        memory: &AddressSpace,
+    ) -> Result<(), GdiError32> {
+        gdi.bitmap_info(memory, self.handle)?;
+        let index = gdi.surface_index(super::super::super::storage::SurfaceKey32::Bitmap(
+            self.handle,
+        ))?;
+        let source = &gdi.surfaces[index];
+        if source.id != self.id
+            || source.revision != self.revision
+            || source.layout != self.layout
+            || source.palette != self.palette
+        {
+            return Err(GdiError32::InvalidRequest);
+        }
+        Ok(())
+    }
+}
+impl GdiCanvas32 {
+    pub(in crate::process::windows::gdi) fn bitmap(
+        &mut self,
+        gdi: &GdiRuntime32,
+        memory: &AddressSpace,
+        handle: u32,
+        destination: Rect32,
+        centered_background: bool,
+    ) -> Result<(), GdiError32> {
+        let prepared = self.prepared.as_ref().ok_or(GdiError32::InvalidRequest)?;
+        self.owner.check(gdi, memory, self.dc, prepared.index)?;
+        gdi.bitmap_info(memory, handle)?;
+        let source_index =
+            gdi.surface_index(super::super::super::storage::SurfaceKey32::Bitmap(handle))?;
+        let source = &gdi.surfaces[source_index];
+        let pixels = source.storage.read(memory, source.layout.byte_len()?)?;
+        if self.bitmaps.len() >= gdi.config.objects {
+            return Err(GdiError32::Capacity);
+        }
+        self.bitmaps
+            .try_reserve(1)
+            .map_err(|_| GdiError32::Allocation)?;
+        let mut palette = Vec::new();
+        palette
+            .try_reserve_exact(source.palette.len())
+            .map_err(|_| GdiError32::Allocation)?;
+        palette.extend_from_slice(&source.palette);
+        let witness = CanvasBitmap32 {
+            handle,
+            id: source.id,
+            revision: source.revision,
+            layout: source.layout,
+            palette,
+        };
+        let bounds = super::super::super::bitmaps::bounds(self.owner.layout);
+        if centered_background {
+            self.fill(
+                gdi,
+                bounds,
+                source.layout.read_pixel(&pixels, &source.palette, 0, 0),
+            );
+        }
+        if empty(destination) {
+            self.bitmaps.push(witness);
+            return Ok(());
+        }
+        let destination = device_area(&self.prepared.as_ref().unwrap().state, destination)?;
+        let area = intersect(destination, bounds);
+        let prepared = self.prepared.as_mut().unwrap();
+        for y in area.top..area.bottom {
+            for x in area.left..area.right {
+                if !prepared.state.accepts(Point32 { x, y }, bounds) {
+                    continue;
+                }
+                let sx = sample(
+                    x,
+                    destination.left,
+                    destination.right,
+                    0,
+                    source.layout.width as i32,
+                ) as u32;
+                let sy = sample(
+                    y,
+                    destination.top,
+                    destination.bottom,
+                    0,
+                    source.layout.height as i32,
+                ) as u32;
+                let color = source.layout.read_pixel(&pixels, &source.palette, sx, sy);
+                self.owner.layout.write_pixel(
+                    &mut prepared.pixels,
+                    &self.owner.colors,
+                    x as u32,
+                    y as u32,
+                    color,
+                );
+                write_alpha(
+                    self.owner.layout,
+                    &mut prepared.pixels,
+                    x as u32,
+                    y as u32,
+                    0,
+                );
+                prepared.damage = union(
+                    prepared.damage,
+                    Rect32 {
+                        left: x,
+                        top: y,
+                        right: x + 1,
+                        bottom: y + 1,
+                    },
+                );
+            }
+        }
+        self.bitmaps.push(witness);
+        Ok(())
+    }
+}

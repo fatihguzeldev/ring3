@@ -1,3 +1,4 @@
+mod controls;
 mod files;
 mod lifecycle;
 mod rendering;
@@ -18,7 +19,7 @@ use crate::{
 };
 const BASE: u32 = 0x400000;
 const DATA: u32 = 0x11000;
-fn word(bytes: &mut [u8], at: usize, value: u32) {
+pub(in crate::process::windows::user32) fn word(bytes: &mut [u8], at: usize, value: u32) {
     bytes[at..at + 4].copy_from_slice(&value.to_le_bytes());
 }
 fn half(bytes: &mut [u8], at: usize, value: u16) {
@@ -45,7 +46,7 @@ fn dib(alpha: bool, cursor: bool) -> Vec<u8> {
     bytes[start + 60] = 0xc0;
     bytes
 }
-fn resource_image(alpha: bool) -> Vec<u8> {
+pub(in crate::process::windows::user32) fn resource_image(alpha: bool) -> Vec<u8> {
     let mut image = resources::image(BASE, false, false);
     word(&mut image, 0x98 + 116, 0x400);
     let bytes = &mut image[0x400..];
@@ -98,7 +99,10 @@ fn resource_image(alpha: bool) -> Vec<u8> {
     image
 }
 fn fixture(alpha: bool) -> EngineInstance {
-    let mut engine = resources::engine_with_image(resource_image(alpha), 16, Default::default());
+    fixture_image(resource_image(alpha))
+}
+pub(in crate::process::windows::user32) fn fixture_image(image: Vec<u8>) -> EngineInstance {
+    let mut engine = resources::engine_with_image(image, 16, Default::default());
     engine.map(0x10000, 2, 7).unwrap();
     engine
         .memory

@@ -1,3 +1,4 @@
+mod images;
 mod widgets;
 use super::{context::GdiRuntime32, windows::GdiWindow32};
 use crate::{
@@ -60,7 +61,7 @@ impl GdiRuntime32 {
                 return Err(GdiError32::Unsupported);
             }
             ControlKind32::Static
-                if matches!(visual.style & 31, 3 | 10 | 13 | 14 | 15)
+                if matches!(visual.style & 31, 10 | 13 | 15)
                     || visual.style & 31 > 18
                     || visual.style & 0xc000 != 0 =>
             {

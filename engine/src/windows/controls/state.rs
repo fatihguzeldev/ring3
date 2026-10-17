@@ -1,6 +1,8 @@
 use crate::windows::user32::User32Error32;
 #[derive(Default)]
 pub(crate) struct ControlState32 {
+    pub image: Option<super::ControlImage32>,
+    pub image_owned: bool,
     pub font: u32,
     pub check: u32,
     pub pressed: bool,
