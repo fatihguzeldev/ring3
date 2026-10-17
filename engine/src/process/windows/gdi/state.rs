@@ -31,9 +31,6 @@ impl GdiRuntime32 {
         {
             return Err(GdiError32::InvalidRequest);
         }
-        if api == GdiApi32::SetStretchBltMode && args[1] == 4 {
-            return Err(GdiError32::Unsupported);
-        }
         let slot = match api {
             GdiApi32::SetTextColor | GdiApi32::GetTextColor => &mut state.text_color,
             GdiApi32::SetBkColor | GdiApi32::GetBkColor => &mut state.background_color,

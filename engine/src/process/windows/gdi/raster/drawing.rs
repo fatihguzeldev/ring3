@@ -228,34 +228,49 @@ impl GdiRuntime32 {
                     continue;
                 }
                 let mut source_color = 0;
-                if let Some(BlitImage32 {
-                    layout,
-                    palette,
-                    pixels: bytes,
-                    start: from,
-                    end: to,
-                    background,
-                }) = source.as_ref()
-                {
-                    let sx = scale_pixel(x, origin.x, end.x, from.x, to.x)?;
-                    let sy = scale_pixel(y, origin.y, end.y, from.y, to.y)?;
-                    if sx < 0 || sy < 0 || sx as u32 >= layout.width || sy as u32 >= layout.height {
+                if let Some(image) = source.as_ref() {
+                    let layout = image.layout;
+                    let palette = &image.palette;
+                    let Some(color) = super::stretch::sample(
+                        image,
+                        point,
+                        origin,
+                        end,
+                        state.stretch_mode,
+                        (state.stretch_mode == 4 && target_layout.bits_per_pixel != 1)
+                            .then_some((state.text_color, state.background_color)),
+                    )?
+                    else {
                         continue;
-                    }
-                    source_color = layout.read_pixel(bytes, palette, sx as u32, sy as u32);
-                    if layout.bits_per_pixel == 1 && target_layout.bits_per_pixel != 1 {
+                    };
+                    source_color = color;
+                    if layout.bits_per_pixel == 1
+                        && target_layout.bits_per_pixel != 1
+                        && state.stretch_mode != 4
+                    {
                         source_color = if source_color == palette.first().copied().unwrap_or(0) {
                             state.text_color
                         } else {
                             state.background_color
                         };
-                    } else if target_layout.bits_per_pixel == 1 && layout.bits_per_pixel != 1 {
-                        source_color = if source_color == *background {
+                    } else if target_layout.bits_per_pixel == 1
+                        && layout.bits_per_pixel != 1
+                        && state.stretch_mode != 4
+                    {
+                        source_color = if source_color & 0xffffff == image.background {
                             0x00ff_ffff
                         } else {
                             0
                         };
                     }
+                }
+                if state.stretch_mode == 4 && target_layout.bits_per_pixel <= 8 {
+                    source_color = super::stretch::quantized(
+                        source_color,
+                        &self.surfaces[target].palette,
+                        point,
+                        state.brush_origin,
+                    );
                 }
                 let destination = target_layout.read_pixel(
                     &pixels,
@@ -271,6 +286,16 @@ impl GdiRuntime32 {
                     y as u32,
                     color,
                 );
+                if rop & 0x00ff_0000 == 0x00cc_0000
+                    && target_layout.bits_per_pixel == 32
+                    && target_layout.masks.is_none()
+                    && source.as_ref().is_some_and(|image| {
+                        image.layout.bits_per_pixel == 32 && image.layout.masks.is_none()
+                    })
+                {
+                    pixels[target_layout.row(y as u32) + x as usize * 4 + 3] =
+                        (source_color >> 24) as u8;
+                }
             }
         }
         if area.left < area.right && area.top < area.bottom {
@@ -472,31 +497,6 @@ pub(in crate::process::windows::gdi) fn intersect(a: Rect32, b: Rect32) -> Rect3
         right: a.right.min(b.right),
         bottom: a.bottom.min(b.bottom),
     }
-}
-fn scale_pixel(
-    value: i32,
-    first: i32,
-    last: i32,
-    source: i32,
-    end: i32,
-) -> Result<i32, GdiError32> {
-    let extent = i64::from(last) - i64::from(first);
-    if extent == 0 {
-        return Err(GdiError32::InvalidRequest);
-    }
-    let index = if extent > 0 {
-        i64::from(value) - i64::from(first)
-    } else {
-        i64::from(first) - i64::from(value) - 1
-    };
-    let source_extent = i64::from(end) - i64::from(source);
-    let offset = index * source_extent.abs() / extent.abs();
-    i32::try_from(if source_extent >= 0 {
-        i64::from(source) + offset
-    } else {
-        i64::from(source) - offset - 1
-    })
-    .map_err(|_| GdiError32::InvalidRequest)
 }
 fn binary_rop(mode: u32, pen: u32, destination: u32) -> u32 {
     let mut result = 0;

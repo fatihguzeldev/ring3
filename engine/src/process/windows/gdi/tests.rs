@@ -353,3 +353,5 @@ mod canvas;
 mod images;
 
 mod visibility;
+
+mod stretch;
