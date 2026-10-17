@@ -1,3 +1,5 @@
+#[path = "tests/classes.rs"]
+mod classes;
 use crate::{
     abi::{
         arena::{EXIT_OFFSET, TRANSFER_OFFSET},

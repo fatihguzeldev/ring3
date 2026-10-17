@@ -20,7 +20,21 @@ impl User32Context32 {
         memory: &mut AddressSpace,
         context: User32CallContext32,
     ) -> Result<User32Outcome32, User32Error32> {
+        self.create_window_with_class_menu(api, args, memory, context, None)
+    }
+
+    pub(super) fn create_window_with_class_menu(
+        &mut self,
+        api: User32Api32,
+        args: &[u32],
+        memory: &mut AddressSpace,
+        context: User32CallContext32,
+        template: Option<crate::windows::user32::menus::MenuTemplate32>,
+    ) -> Result<User32Outcome32, User32Error32> {
         self.check_continuation()?;
+        if template.is_some() && (args[9] != 0 || args[3] & 0x4000_0000 != 0) {
+            return Err(User32Error32::InvalidRequest);
+        }
         let (name, atom) = class_name(memory, args[1], api.wide(), context.ansi)?;
         let instance = if args[10] == 0 {
             context.instance
@@ -112,6 +126,12 @@ impl User32Context32 {
             enabled: args[3] & 0x0800_0000 == 0,
         };
         let handle = self.state.check_create(description)?;
+        let prepared_menu = template
+            .map(|template| self.menus.prepare_load(template))
+            .transpose()?;
+        let menu = prepared_menu
+            .as_ref()
+            .map_or(args[9], |prepared| prepared.root().get());
         let mut extra = Vec::new();
         extra
             .try_reserve_exact(extra_bytes as usize)
@@ -122,7 +142,7 @@ impl User32Context32 {
         for (index, value) in [
             args[11],
             instance,
-            args[9],
+            menu,
             super::raw(parent),
             height as u32,
             width as u32,
@@ -151,7 +171,7 @@ impl User32Context32 {
             ex_style: args[0],
             user_data: 0,
             parent,
-            menu: args[9],
+            menu,
             outer,
             client_origin: Point32 {
                 x: screen_x,
@@ -160,6 +180,9 @@ impl User32Context32 {
             unicode,
             destroying: false,
         };
+        if let Some(prepared) = prepared_menu {
+            self.menus.commit_load(prepared);
+        }
         let published = self.state.publish_window(description, data, extra);
         debug_assert_eq!(handle, published);
         self.state

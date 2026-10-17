@@ -272,6 +272,14 @@ impl EngineInstance {
         } else {
             None
         };
+        let class_menu = if matches!(
+            api,
+            User32Api32::CreateWindowExA | User32Api32::CreateWindowExW
+        ) {
+            Some(self.prepare_user32_class_menu(api, frame.arguments(), call_context))
+        } else {
+            None
+        };
         let resource_font = resource_creation
             .as_ref()
             .and_then(|result| result.as_ref().ok())
@@ -358,6 +366,19 @@ impl EngineInstance {
                 Err(error) => return Err(error),
             };
             value.map(super::User32Outcome32::Return)
+        } else if let Some(class_menu) = class_menu {
+            match class_menu {
+                Ok(template) => context.create_window_with_class_menu(
+                    api,
+                    frame.arguments(),
+                    self.memory.as_mut().ok_or(HostError::Closed)?,
+                    call_context,
+                    template,
+                ),
+                Err(HostError::User32(error)) => Err(error),
+                Err(HostError::Resource(error)) => Err(User32Error32::Win32(error.win32())),
+                Err(error) => return Err(error),
+            }
         } else if let Some(dialog) = dialog {
             match dialog {
                 Ok(dialog) => context.begin_dialog(dialog),
