@@ -10,6 +10,7 @@ pub(crate) mod tab;
 pub(crate) mod toolbar;
 pub(crate) mod tooltip;
 pub(crate) mod trackbar;
+pub(crate) mod treeview;
 pub(crate) mod updown;
 
 pub(crate) use api::{COMMON_PROC_A, COMMON_PROC_W, TOOLTIP_RELAY_PROC};
