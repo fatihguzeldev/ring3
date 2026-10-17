@@ -197,7 +197,7 @@ impl EngineInstance {
         Ok(())
     }
 
-    fn retire_variant_tree(
+    pub(super) fn retire_variant_tree(
         &self,
         plan: &mut OwnedValuePlan32,
         value: Variant32,
@@ -304,7 +304,16 @@ impl EngineInstance {
                 .checked_add(self.automation.arrays.len())
                 .and_then(|count| count.checked_sub(plan.retired_strings))
                 .and_then(|count| count.checked_sub(plan.retired_arrays))
-                .and_then(|count| count.checked_add(plan.blocks.len()))
+                .and_then(|count| {
+                    count.checked_add(
+                        plan.blocks.len()
+                            - usize::from(
+                                plan.redim
+                                    .as_ref()
+                                    .is_some_and(|redim| redim.block.is_some()),
+                            ),
+                    )
+                })
                 .is_none_or(|count| count > self.automation.limits.objects)
         {
             return Err(HostError::Automation(E::Capacity));

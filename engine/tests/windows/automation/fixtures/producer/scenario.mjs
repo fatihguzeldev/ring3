@@ -8,7 +8,7 @@ const invokeEntries = [0x404a00, 0x404b00, 0x404c00];
 export function image() {
   const b = builder([
     ['kernel32.dll', ['ExitProcess']],
-    ['oleaut32.dll', ['VariantCopy', 'VariantCopyInd', 'VariantClear', 'VariantChangeTypeEx']],
+    ['oleaut32.dll', ['VariantCopy', 'VariantCopyInd', 'VariantClear', 'VariantChangeTypeEx', 'SysAllocStringLen', 'SafeArrayCreateVector', 'SafeArrayGetElement', 'SafeArrayPutElement', 'SafeArrayCopy', 'SafeArrayRedim', 'SafeArrayDestroy']],
   ], {callbacks: [{words: 1}, {words: 1}]});
   const table = b.data('table', [queryEntry, addEntry, releaseEntry]);
   const first = b.allocate('first', [table, 1, 0, 0, 0, 0]);
@@ -25,6 +25,14 @@ export function image() {
     const object = b.allocate(name, [table, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
     b.allocate(`${name}Source`, [9, 0, object, 0]);
   }
+  const arrayObject = b.allocate('arrayObject', [table, 1, 0, 0, 0, 0]);
+  b.allocate('arrayOwner', [13, 0, arrayObject, 0]);
+  for (const name of ['array', 'arrayCopy', 'element', 'variantArray', 'variantCopy']) b.allocate(name);
+  b.allocate('arrayReturned', [13, 0, 0, 0]);
+  b.allocate('stringSource', [8, 0, 0, 0]);
+  b.allocate('variantReturned', [0xa5a5a5a5, 0xa5a5a5a5, 0xa5a5a5a5, 0xa5a5a5a5]);
+  const indexZero = b.data('indexZero', [0]), indexOne = b.data('indexOne', [1]);
+  const reducedBound = b.data('reducedBound', [1, 7]), embedded = b.data('embedded', [0x61, 0x7a]);
   const rows = [];
   const call = (name, id, args, expected = 0, hook) => {
     b.external(name, id, args, expected, undefined, hook); rows.push(args.length);
@@ -51,6 +59,30 @@ export function image() {
   call('VariantClear', 0x20001a, [a.numericSource]);
   call('VariantClear', 0x20001a, [a.failureSource]);
   call('VariantClear', 0x20001a, [a.conversionSource]);
+  const arrayCall = (name, id, args, expected, hook, output) => {
+    b.external(name, id, args, expected, output, hook); rows.push(args.length);
+  };
+  arrayCall('SafeArrayCreateVector', 0x20000a, [13, 0, 2], 'pointer', 'array-created', 'array');
+  call('SafeArrayPutElement', 0x200015, [b.ref('array'), indexZero, arrayObject], 0, 'array-put-zero');
+  call('SafeArrayPutElement', 0x200015, [b.ref('array'), indexOne, arrayObject], 0, 'array-put-one');
+  call('SafeArrayGetElement', 0x200014, [b.ref('array'), indexZero, a.element], 0, 'array-get');
+  b.copy(a.arrayReturned + 8, a.element);
+  call('VariantClear', 0x20001a, [a.arrayReturned], 0, 'array-release-get');
+  call('SafeArrayCopy', 0x200016, [b.ref('array'), a.arrayCopy], 0, 'array-copy');
+  call('SafeArrayRedim', 0x200017, [b.ref('array'), reducedBound], 0, 'array-redim');
+  call('SafeArrayDestroy', 0x20000b, [b.ref('arrayCopy')], 0, 'array-destroy-copy');
+  call('SafeArrayDestroy', 0x20000b, [b.ref('array')], 0, 'array-destroy');
+  call('VariantClear', 0x20001a, [a.arrayOwner], 0, 'array-owner-release');
+  arrayCall('SysAllocStringLen', 0x200002, [embedded, 3], 'pointer', 'variant-string-created');
+  b.save(a.stringSource + 8);
+  arrayCall('SafeArrayCreateVector', 0x20000a, [12, 0, 1], 'pointer', 'variant-array-created', 'variantArray');
+  call('SafeArrayPutElement', 0x200015, [b.ref('variantArray'), indexZero, a.stringSource], 0, 'variant-array-put');
+  call('VariantClear', 0x20001a, [a.stringSource], 0, 'variant-source-clear');
+  call('SafeArrayGetElement', 0x200014, [b.ref('variantArray'), indexZero, a.variantReturned], 0, 'variant-array-get');
+  call('SafeArrayCopy', 0x200016, [b.ref('variantArray'), a.variantCopy], 0, 'variant-array-copy');
+  call('SafeArrayDestroy', 0x20000b, [b.ref('variantArray')], 0, 'variant-array-destroy');
+  call('SafeArrayDestroy', 0x20000b, [b.ref('variantCopy')], 0, 'variant-copy-destroy');
+  call('VariantClear', 0x20001a, [a.variantReturned], 0, 'variant-result-clear');
   call('ExitProcess', 0x10003, [0], 'exit');
   const guest = b.seal();
   assert.ok(guest.calls.at(-1).end < 0x3d00, 'authored main does not overlap interface methods');

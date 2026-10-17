@@ -40,7 +40,18 @@ impl EngineInstance {
                 Err(error) => Err(error),
             }
         } else if api.is_array() {
-            self.automation_array_call(api, frame.arguments())
+            match self.automation_owned_array_outcome(owner, token, frame, api) {
+                Ok(Some(super::super::callbacks::WindowsProviderOutcome32::Callback(request))) => {
+                    self.park_automation_callback(request)?;
+                    return Ok(true);
+                }
+                Ok(Some(super::super::callbacks::WindowsProviderOutcome32::Return(value))) => {
+                    Ok(value)
+                }
+                Ok(None) => self.automation_array_call(api, frame.arguments()),
+                Err(error) if self.automation_provider_owns_token(token) => return Err(error),
+                Err(error) => Err(error),
+            }
         } else {
             self.automation_string(api, frame.arguments())
         };

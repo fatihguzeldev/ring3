@@ -30,7 +30,12 @@ impl EngineInstance {
             return Err(HostError::Call(CallError::StateChanged));
         };
         if !matches!(action, Action32::Compensate | Action32::ReleaseTemporary) {
-            work.output.check(self.memory()?)?;
+            if let Some(output) = &work.output {
+                output.check(self.memory()?)?;
+            }
+            if let Some(loan) = &work.array {
+                self.check_automation_array_loan(loan)?;
+            }
             self.check_retained_variant_allocations(&work.plan)?;
         }
         work.objects.check(self.memory()?, call.object)?;

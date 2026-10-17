@@ -67,6 +67,8 @@ impl EngineInstance {
             .map_err(HostError::Nls)?;
         let activation = self.prepare_activation_thread_exit(id)?;
         let com: PreparedComThreadExit32 = self.prepare_com_thread_exit(id)?;
+        let automation_arrays: crate::process::windows::automation::PreparedAutomationArrays32 =
+            self.prepare_automation_array_retirement(Some(id))?;
         let automation_allocations = self.automation_thread_temporary_allocations(id)?;
         let automation_retirement =
             self.prepare_windows_runtime_retirement(&automation_allocations)?;
@@ -250,7 +252,21 @@ impl EngineInstance {
                 .map_err(|_| HostError::Thread(ThreadError32::Allocation))?;
             bindings.extend_from_slice(files.bindings());
         }
-        let words = files.as_ref().map_or(&[][..], |files| files.words());
+        let file_words = files.as_ref().map_or(&[][..], |files| files.words());
+        let mut merged_words = Vec::new();
+        merged_words
+            .try_reserve_exact(file_words.len() + automation_arrays.words().len())
+            .map_err(|_| HostError::Thread(ThreadError32::Allocation))?;
+        merged_words.extend_from_slice(file_words);
+        merged_words.extend_from_slice(automation_arrays.words());
+        merged_words.sort_unstable_by_key(|word| word.address.0);
+        if merged_words
+            .windows(2)
+            .any(|pair| u64::from(pair[0].address.0) + 4 > u64::from(pair[1].address.0))
+        {
+            return Err(HostError::Thread(ThreadError32::Stale));
+        }
+        let words = merged_words.as_slice();
         let mut saved_dinput = Vec::new();
         saved_dinput
             .try_reserve_exact(record.active_invocations.len() + 1)
@@ -327,6 +343,7 @@ impl EngineInstance {
                 .write_thread_words32(words)
                 .map_err(HostError::Memory)?;
         }
+        self.commit_automation_array_retirement(automation_arrays);
         self.commit_windows_runtime_retirement_after_memory(automation_retirement);
         self.commit_automation_temporary_retirement(&automation_allocations);
         let memory_changed = self.memory.as_ref().unwrap().transaction_version() != memory_version;

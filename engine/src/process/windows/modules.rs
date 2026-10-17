@@ -425,6 +425,8 @@ impl EngineInstance {
         extra_ranges.extend(self.automation_process_scratch_ranges());
         extra_ranges.sort_unstable_by_key(|range| range.first);
         let media = self.prepare_media_process_exit()?;
+        let automation_arrays: crate::process::windows::automation::PreparedAutomationArrays32 =
+            self.prepare_automation_array_retirement(None)?;
         let automation_allocations = self.automation_process_temporary_allocations()?;
         let automation_retirement =
             self.prepare_windows_runtime_retirement(&automation_allocations)?;
@@ -439,11 +441,17 @@ impl EngineInstance {
             .try_reserve(media.bindings().len())
             .map_err(|_| HostError::Infrastructure)?;
         bindings.extend_from_slice(media.bindings());
-        if !self.finalize_file_process_exit(&bindings, media.handles(), &extra_ranges)? {
+        if !self.finalize_file_process_exit(
+            &bindings,
+            media.handles(),
+            &extra_ranges,
+            automation_arrays.words(),
+        )? {
             self.pending_process_exit = Some(code);
             self.process_exit_owner = Some(self.threads.current_id());
             return Ok(());
         }
+        self.commit_automation_array_retirement(automation_arrays);
         self.commit_windows_runtime_retirement_after_memory(automation_retirement);
         self.commit_automation_temporary_retirement(&automation_allocations);
         self.commit_media_process_exit(media);

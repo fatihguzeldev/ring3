@@ -1,3 +1,4 @@
+mod arrays;
 mod publication;
 mod snapshot;
 
@@ -23,6 +24,12 @@ struct ArrayCopy32 {
     block: usize,
     layout: ArrayLayout32,
 }
+struct Redim32 {
+    descriptor: u32,
+    layout: ArrayLayout32,
+    block: Option<usize>,
+}
+
 struct RetiredArray32 {
     pointer: u32,
     vartype: u16,
@@ -31,6 +38,8 @@ struct RetiredArray32 {
 
 pub(in crate::process::windows::automation) struct OwnedValuePlan32 {
     root: Vec<u8>,
+    output: std::ops::Range<usize>,
+    redim: Option<Redim32>,
     blocks: Vec<Vec<u8>>,
     fixups: Vec<Fixup32>,
     strings: Vec<usize>,
@@ -56,6 +65,8 @@ impl OwnedValuePlan32 {
         bytes.extend_from_slice(root);
         Ok(Self {
             root: bytes,
+            output: 0..root.len(),
+            redim: None,
             blocks: Vec::new(),
             fixups: Vec::new(),
             strings: Vec::new(),
@@ -73,6 +84,12 @@ impl OwnedValuePlan32 {
         })
     }
 
+    pub(in crate::process::windows::automation) fn pointer_output(&mut self) {
+        self.output = 8..12;
+    }
+    pub(in crate::process::windows::automation) fn output_length(&self) -> usize {
+        self.output.len()
+    }
     pub(in crate::process::windows::automation) fn source(&self) -> Variant32 {
         self.source
     }

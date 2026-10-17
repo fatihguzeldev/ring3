@@ -291,6 +291,8 @@ impl EngineInstance {
             data,
             allocation_bytes: size,
             separate_data: false,
+            borrows: 0,
+            exclusive: false,
             layout,
         });
         Ok(0)

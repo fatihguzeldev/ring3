@@ -126,7 +126,8 @@ impl EngineInstance {
             thread: self.current_windows_thread_id()?,
             continuation,
             destination,
-            output,
+            output: Some(output),
+            array: None,
             plan,
             acquire: ReferenceCursor32::default(),
             release: ReferenceCursor32::default(),
@@ -163,6 +164,71 @@ impl EngineInstance {
             return Err(invalid_state());
         }
         Ok(Some(work.continuation))
+    }
+    pub(in crate::process::windows::automation) fn start_automation_array_reference(
+        &mut self,
+        owner: PendingOwner,
+        token: u32,
+        frame: CallFrame32,
+        destination: Option<u32>,
+        mut plan: OwnedValuePlan32,
+        loan: crate::process::windows::automation::arrays::ArrayLoan32,
+    ) -> Result<WindowsProviderOutcome32, HostError> {
+        let objects = preflight_references(self, &plan)?;
+        self.preflight_retained_variant_plan(&plan)?;
+        let Some(objects) = objects else {
+            self.publish_automation_array_value(destination, &mut plan, None)?;
+            return Ok(WindowsProviderOutcome32::Return(0));
+        };
+        self.check_windows_callback_capacity()?;
+        self.validate_new_windows_reply(owner, token)?;
+        if self.automation.references.len() >= self.windows_callback_work_capacity() {
+            return Err(HostError::Automation(E::Capacity));
+        }
+        self.automation
+            .references
+            .try_reserve(1)
+            .map_err(|_| HostError::Automation(E::Allocation))?;
+        let continuation = self
+            .automation
+            .next_reference
+            .checked_add(1)
+            .ok_or(HostError::Automation(E::Capacity))?;
+        let thread = self.current_windows_thread_id()?;
+        let output = if let Some(destination) = destination.filter(|_| plan.output_length() <= 16) {
+            Some(OutputWitness32::prepare(
+                self.memory.as_mut().ok_or(HostError::Closed)?,
+                destination,
+                plan.output_length(),
+            )?)
+        } else {
+            None
+        };
+        self.commit_automation_array_loan(&loan)?;
+        self.automation.next_reference = continuation;
+        self.automation.references.push(ReferenceWork32 {
+            owner,
+            token,
+            frame,
+            thread,
+            continuation,
+            destination: destination.unwrap_or(0),
+            output,
+            array: Some(loan),
+            plan,
+            acquire: ReferenceCursor32::default(),
+            release: ReferenceCursor32::default(),
+            rollback: ReferenceCursor32::default(),
+            acquired: 0,
+            rollback_remaining: 0,
+            query_owned: None,
+            failure: None,
+            objects,
+            stage: Stage32::Acquire,
+            scratch: None,
+            invoke: None,
+        });
+        self.advance_automation_reference(continuation)
     }
 }
 

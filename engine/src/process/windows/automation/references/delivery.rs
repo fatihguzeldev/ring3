@@ -31,7 +31,7 @@ impl EngineInstance {
         self.advance_automation_reference(continuation)
     }
 
-    pub(super) fn advance_automation_reference(
+    pub(in crate::process::windows::automation) fn advance_automation_reference(
         &mut self,
         continuation: u64,
     ) -> Result<WindowsProviderOutcome32, HostError> {
@@ -265,6 +265,7 @@ impl EngineInstance {
                             work.stage = Stage32::ReleaseTemporaries;
                         } else {
                             retire_scratch(self, work)?;
+                            release_array_loan(self, work)?;
                             work.stage = Stage32::Failed(work.failure.ok_or_else(invalid_state)?);
                         }
                         continue;
@@ -279,7 +280,20 @@ impl EngineInstance {
                         continue;
                     }
                     retire_scratch(self, work)?;
-                    self.publish_retained_variant_plan(work.destination, &mut work.plan)?;
+                    let unlock = work
+                        .array
+                        .as_ref()
+                        .map(|loan| self.automation_array_unlock_word(loan))
+                        .transpose()?
+                        .flatten();
+                    self.publish_automation_array_value(
+                        (work.destination != 0).then_some(work.destination),
+                        &mut work.plan,
+                        unlock,
+                    )?;
+                    if let Some(loan) = work.array.take() {
+                        self.commit_automation_array_unlock(loan);
+                    }
                     if let Some(invoke) = &mut work.invoke {
                         invoke.forget_temporaries();
                     }
@@ -311,9 +325,14 @@ fn retire_scratch(
 fn check_output(engine: &EngineInstance, work: &mut ReferenceWork32) -> Result<bool, HostError> {
     match work
         .output
-        .check(engine.memory()?)
+        .as_ref()
+        .map_or(Ok(()), |output| output.check(engine.memory()?))
         .and_then(|()| engine.check_retained_variant_allocations(&work.plan))
-    {
+        .and_then(|()| {
+            work.array.as_ref().map_or(Ok(()), |loan| {
+                engine.check_automation_array_loan(loan).map(|_| ())
+            })
+        }) {
         Ok(()) => Ok(true),
         Err(error @ HostError::Call(crate::process::CallError::StateChanged)) => {
             work.failure = Some(error);
@@ -324,4 +343,23 @@ fn check_output(engine: &EngineInstance, work: &mut ReferenceWork32) -> Result<b
         }
         Err(error) => Err(error),
     }
+}
+
+fn release_array_loan(
+    engine: &mut EngineInstance,
+    work: &mut ReferenceWork32,
+) -> Result<(), HostError> {
+    if let Some(loan) = &work.array {
+        if let Some(word) = engine.automation_array_unlock_word(loan)? {
+            engine
+                .memory
+                .as_mut()
+                .ok_or(HostError::Closed)?
+                .write_words32(&[word])
+                .map_err(HostError::Memory)?;
+        }
+        let loan = work.array.take().unwrap();
+        engine.commit_automation_array_unlock(loan);
+    }
+    Ok(())
 }

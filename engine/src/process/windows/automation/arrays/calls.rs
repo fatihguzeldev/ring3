@@ -23,6 +23,18 @@ impl EngineInstance {
         }
         let (index, locks) = self.automation_array_index(args[0])?;
         let array = &self.automation.arrays[index];
+        if array.exclusive
+            && !matches!(
+                api,
+                SafeArrayGetDim
+                    | SafeArrayGetElemsize
+                    | SafeArrayGetVartype
+                    | SafeArrayGetLBound
+                    | SafeArrayGetUBound
+            )
+        {
+            return Err(HostError::Automation(E::ArrayLocked));
+        }
         match api {
             SafeArrayGetDim => Ok(array.layout.bounds.len() as u32),
             SafeArrayGetElemsize => Ok(array.layout.element_bytes as u32),
@@ -56,6 +68,9 @@ impl EngineInstance {
                     return Err(HostError::Automation(E::InvalidParameter));
                 }
                 let acquire = matches!(api, SafeArrayLock | SafeArrayAccessData);
+                if !acquire && locks <= array.borrows {
+                    return Err(HostError::Automation(E::Unexpected));
+                }
                 let next = if acquire {
                     locks.checked_add(1)
                 } else {
