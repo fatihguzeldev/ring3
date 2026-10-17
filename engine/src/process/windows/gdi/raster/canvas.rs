@@ -1,4 +1,5 @@
 pub(in crate::process::windows::gdi) mod bitmap;
+pub(in crate::process::windows::gdi) mod decoration;
 pub(in crate::process::windows::gdi) mod gradient;
 mod images;
 
@@ -362,6 +363,14 @@ impl GdiRuntime32 {
         memory: &mut AddressSpace,
         canvas: GdiCanvas32,
     ) -> Result<(), GdiError32> {
+        self.publish_canvas_outputs(memory, canvas, &[])
+    }
+    pub(in crate::process::windows::gdi) fn publish_canvas_outputs(
+        &mut self,
+        memory: &mut AddressSpace,
+        canvas: GdiCanvas32,
+        spans: &[(crate::memory::GuestAddress, &[u8])],
+    ) -> Result<(), GdiError32> {
         let prepared = canvas.prepared.as_ref().ok_or(GdiError32::InvalidRequest)?;
         canvas
             .owner
@@ -376,7 +385,15 @@ impl GdiRuntime32 {
         if prepared.damage.left < prepared.damage.right
             && prepared.damage.top < prepared.damage.bottom
         {
-            self.commit_pixels(memory, prepared.index, prepared.pixels, prepared.damage)?;
+            self.commit_pixels_with_spans(
+                memory,
+                prepared.index,
+                prepared.pixels,
+                prepared.damage,
+                spans,
+            )?;
+        } else if !spans.is_empty() {
+            memory.write_spans(spans)?;
         }
         Ok(())
     }

@@ -293,6 +293,7 @@ impl GdiRuntime32 {
             | GetTextCharacterExtra
             | SetTextCharacterExtra
             | SetTextJustification => self.text_call(memory, api, args, ansi),
+            DrawEdge | DrawFrameControl => self.decoration_call(memory, api, args),
             ExtCreatePen => self.ext_create_pen(memory, args),
             CreatePen | CreatePenIndirect | CreateSolidBrush | CreateHatchBrush
             | CreatePatternBrush | CreateBrushIndirect => self.create_object(memory, api, args),

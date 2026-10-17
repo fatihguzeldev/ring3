@@ -363,3 +363,5 @@ mod patterns;
 mod dc;
 
 mod pens;
+
+mod decoration;
