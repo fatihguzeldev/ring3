@@ -61,3 +61,5 @@ pub mod shlwapi;
 pub(crate) mod controls;
 
 pub mod comctl32;
+
+pub mod commdlg;
