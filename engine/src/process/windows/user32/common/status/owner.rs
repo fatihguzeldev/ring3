@@ -310,12 +310,3 @@ impl User32Context32 {
         })
     }
 }
-
-pub(in crate::process::windows::user32) fn user32_error(error: HostError) -> E {
-    match error {
-        HostError::User32(error) => error,
-        HostError::Memory(error) => E::Memory(error),
-        HostError::Gdi(error) => crate::process::windows::user32::menus::gdi_error(error),
-        _ => E::InvalidRequest,
-    }
-}
