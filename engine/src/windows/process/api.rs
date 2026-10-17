@@ -52,4 +52,20 @@ catalog! {
  SetHandleInformation=0x000c_0028,"SetHandleInformation",3;
  GetComputerNameA=0x000c_0029,"GetComputerNameA",2;
  GetComputerNameW=0x000c_002a,"GetComputerNameW",2;
+ CreateProcessA=0x000c_002b,"CreateProcessA",10;
+ CreateProcessW=0x000c_002c,"CreateProcessW",10;
+ GetExitCodeProcess=0x000c_002d,"GetExitCodeProcess",2;
+ GetPriorityClass=0x000c_002e,"GetPriorityClass",1;
+ SetPriorityClass=0x000c_002f,"SetPriorityClass",2;
+ GetProcessVersion=0x000c_0030,"GetProcessVersion",1;
+ TerminateProcess=0x000c_0031,"TerminateProcess",2;
+ SetHandleCount=0x000c_0032,"SetHandleCount",1;
+ SetLocalTime=0x000c_0033,"SetLocalTime",1;
+ Beep=0x000c_0034,"Beep",2;
+ OutputDebugStringA=0x000c_0035,"OutputDebugStringA",1;
+ MulDiv=0x000c_0036,"MulDiv",3;
+ GlobalAddAtomA=0x000c_0037,"GlobalAddAtomA",1;
+ GlobalFindAtomA=0x000c_0038,"GlobalFindAtomA",1;
+ GlobalDeleteAtom=0x000c_0039,"GlobalDeleteAtom",1;
+ GlobalGetAtomNameA=0x000c_003a,"GlobalGetAtomNameA",3;
 }

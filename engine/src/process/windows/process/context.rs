@@ -11,6 +11,8 @@ pub(in crate::process) struct WindowsProcessRuntime32 {
     pub(in crate::process) startup: Option<super::startup::ProcessStartup32>,
     pub(super) standard_handles: [u32; 3],
     pub(super) startup_flags: u32,
+    pub(super) priority_class: u32,
+    pub(super) atoms: super::atoms::AtomTable32,
 }
 impl WindowsProcessRuntime32 {
     pub(in crate::process) fn new(launch: ProcessLaunch32) -> Result<Self, ProcessError32> {
@@ -27,6 +29,8 @@ impl WindowsProcessRuntime32 {
             startup: None,
             standard_handles: [0; 3],
             startup_flags: 0,
+            priority_class: 0x20,
+            atoms: Default::default(),
         })
     }
     pub(in crate::process) fn reservation(&self) -> Option<PageRange> {

@@ -2,6 +2,8 @@ use super::*;
 mod environment;
 mod handles;
 mod modules;
+mod atoms;
+mod lifecycle;
 
 fn api(name: &str) -> ProcessApi32 {
     ProcessApi32::ALL

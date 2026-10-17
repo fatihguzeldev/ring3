@@ -1,7 +1,10 @@
+mod atoms;
 mod environment;
 mod handles;
 mod identity;
+mod lifecycle;
 mod modules;
+mod numeric;
 mod time;
 
 use super::buffers;
@@ -51,6 +54,18 @@ impl EngineInstance {
         self.memory()?
             .ensure_transaction_versions(2)
             .map_err(HostError::Memory)?;
+        if api == ProcessApi32::TerminateProcess {
+            if let Err(error) = self.validate_windows_process_handle(frame.arguments()[0], 1) {
+                self.publish_windows_thread(
+                    self.current_windows_thread()?
+                        .with_last_error(error.win32()),
+                )?;
+                self.publish_prepared_call(Self::prepare_completed_call(frame.complete(0))?);
+            } else {
+                self.publish_process_exit(frame.arguments()[1])?;
+            }
+            return Ok(true);
+        }
         let result = match self.execute_process_call(api, frame.arguments()) {
             Ok(result) => result,
             Err(HostError::WindowsProcess(error)) => ProcessReply32 {
@@ -78,6 +93,15 @@ impl EngineInstance {
     ) -> Result<ProcessReply32, HostError> {
         use ProcessApi32::*;
         match api {
+            MulDiv => Ok(numeric::mul_div(args[0] as i32, args[1] as i32, args[2] as i32).into()),
+            GlobalAddAtomA | GlobalFindAtomA | GlobalDeleteAtom | GlobalGetAtomNameA => {
+                self.execute_process_atom_call(api, args)
+            }
+            CreateProcessA | CreateProcessW | GetExitCodeProcess | GetPriorityClass
+            | SetPriorityClass | GetProcessVersion | TerminateProcess | SetHandleCount
+            | SetLocalTime | Beep | OutputDebugStringA => {
+                self.execute_process_lifecycle_call(api, args)
+            }
             GetHandleInformation | SetHandleInformation => {
                 self.execute_handle_information(api, args)
             }
