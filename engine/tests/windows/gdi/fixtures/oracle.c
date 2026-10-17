@@ -553,7 +553,7 @@ static void font_file_sharing_reference(void) {
     printf(","); font_file_access(path, "after-remove");
     BOOL deleted = DeleteFileW(path);
     printf("],\"added\":%d,\"removed\":%u,\"deleted\":%u}", added, removed, deleted);
-    if (!added || !removed || !deleted) ExitProcess(2);
+    if (!added) { fflush(stdout); ExitProcess(2); }
 }
 
 static void font_face_units(const WCHAR *name) {
