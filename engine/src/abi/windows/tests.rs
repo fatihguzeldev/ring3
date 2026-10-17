@@ -21,7 +21,7 @@ fn nls_callback_uses_additive_provider_seven_and_three_literal_arguments() {
         ]
     );
     assert_eq!(decode_windows_callback(&bytes).unwrap(), Some(record));
-    bytes[12] = 10;
+    bytes[12..16].copy_from_slice(&u32::MAX.to_le_bytes());
     assert_eq!(
         decode_windows_callback(&bytes),
         Err(AbiError::CallbackFrame)
