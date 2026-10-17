@@ -14,7 +14,17 @@ const CODE: u32 = 0x70000;
 const STACK: u32 = 0x11f00;
 
 fn engine() -> EngineInstance {
-    let (context, memory, _) = crate::process::windows::user32::tests::fixture();
+    let (_, memory, _) = crate::process::windows::user32::tests::fixture();
+    let context = crate::process::windows::user32::User32Context32::new(
+        crate::windows::user32::User32Limits32 {
+            classes: 4,
+            windows: 8,
+            messages: 8,
+            continuations: 32,
+        },
+        crate::memory::PageRange::new(GuestAddress(0x40000), 8).unwrap(),
+    )
+    .unwrap();
     let mut engine = EngineInstance::new(16, KEY).unwrap();
     engine.memory = Some(memory);
     engine.user32 = Some(context);
@@ -148,3 +158,119 @@ fn captured_accelerator_create_copy_and_destroy_preserve_literal_six_byte_entrie
 mod fields;
 #[path = "tests/lifetime.rs"]
 mod lifetime;
+
+fn attach_menu(engine: &mut EngineInstance, window: u32, menu: u32) {
+    use crate::process::windows::user32::{User32CallContext32, User32Outcome32};
+    use crate::windows::{user32::User32Api32 as Api, window::WindowHandle32};
+    if engine.gdi.is_none() {
+        engine
+            .configure_gdi(crate::process::GdiConfig32 {
+                bitmap_base: 0x100000,
+                bitmap_pages: 32,
+                screen_width: 640,
+                screen_height: 480,
+                ..Default::default()
+            })
+            .unwrap();
+    }
+    let window = WindowHandle32::try_from(window).unwrap();
+    let record = engine
+        .user32
+        .as_ref()
+        .unwrap()
+        .windows()
+        .get(window)
+        .unwrap();
+    let call = User32CallContext32 {
+        thread_id: record.description.thread_id,
+        instance: engine
+            .user32
+            .as_ref()
+            .unwrap()
+            .state
+            .record(window)
+            .unwrap()
+            .instance,
+        ..Default::default()
+    };
+    let outcome = engine
+        .user32
+        .as_mut()
+        .unwrap()
+        .prepare_arguments(
+            Api::SetMenu,
+            &[window.get(), menu],
+            engine.memory.as_mut().unwrap(),
+            call,
+        )
+        .unwrap();
+    fn finish(
+        engine: &mut EngineInstance,
+        mut outcome: User32Outcome32,
+        call: User32CallContext32,
+        window: WindowHandle32,
+        budget: &mut usize,
+    ) -> u32 {
+        loop {
+            assert!(*budget > 0, "menu callbacks must terminate");
+            *budget -= 1;
+            outcome = match outcome {
+                User32Outcome32::Return(value) => return value,
+                User32Outcome32::Wait { continuation } => engine
+                    .user32
+                    .as_mut()
+                    .unwrap()
+                    .resume_wait_with_gdi(
+                        continuation,
+                        engine.memory.as_mut().unwrap(),
+                        engine.gdi.as_mut(),
+                    )
+                    .unwrap(),
+                User32Outcome32::Callback(callback) => {
+                    assert_eq!(callback.arguments[0], window.get());
+                    assert!(matches!(
+                        callback.arguments[1],
+                        0x46 | 0x83 | 0x85 | 0x47 | 3 | 5
+                    ));
+                    assert_eq!(
+                        engine
+                            .user32
+                            .as_ref()
+                            .unwrap()
+                            .windows()
+                            .get(window)
+                            .unwrap()
+                            .description
+                            .thread_id,
+                        call.thread_id
+                    );
+                    let nested = engine
+                        .user32
+                        .as_mut()
+                        .unwrap()
+                        .prepare_arguments(
+                            Api::DefWindowProcA,
+                            &callback.arguments,
+                            engine.memory.as_mut().unwrap(),
+                            call,
+                        )
+                        .unwrap();
+                    let value = finish(engine, nested, call, window, budget);
+                    engine
+                        .user32
+                        .as_mut()
+                        .unwrap()
+                        .complete_with_gdi(
+                            callback.continuation,
+                            value,
+                            engine.memory.as_mut().unwrap(),
+                            engine.gdi.as_mut(),
+                        )
+                        .unwrap()
+                }
+            };
+        }
+    }
+    assert_eq!(finish(engine, outcome, call, window, &mut 128), 1);
+    assert!(engine.user32.as_ref().unwrap().pending.is_empty());
+}

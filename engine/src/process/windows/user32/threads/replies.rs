@@ -43,6 +43,7 @@ impl User32Context32 {
             | super::super::callback::Continuation32::DialogRemoteHelp { ready, .. } => {
                 ready.is_some()
             }
+            super::super::callback::Continuation32::MenuBar(_) => true,
             super::super::callback::Continuation32::Retrieve { .. }
             | super::super::callback::Continuation32::Accelerator(_)
             | super::super::callback::Continuation32::Clipboard(_)
@@ -117,6 +118,9 @@ impl User32Context32 {
                 | super::super::callback::Continuation32::Position { scratch, .. }
                 | super::super::callback::Continuation32::Style { scratch, .. } => {
                     Some(scratch.range())
+                }
+                super::super::callback::Continuation32::MenuBar(call) => {
+                    Some(call.scratch().range())
                 }
                 _ => None,
             })
@@ -239,6 +243,9 @@ impl User32ThreadReply32 {
                 | super::super::callback::Continuation32::Style { scratch, .. } => {
                     Some(scratch.range())
                 }
+                super::super::callback::Continuation32::MenuBar(call) => {
+                    Some(call.scratch().range())
+                }
                 _ => None,
             })
             .chain(
@@ -321,6 +328,7 @@ fn check_scratch(
             super::super::callback::Continuation32::SentPaint(paint) => {
                 paint.check_output(memory)?
             }
+            super::super::callback::Continuation32::MenuBar(call) => call.check(memory)?,
             _ => {}
         }
     }
@@ -342,6 +350,9 @@ fn check_owned_scratch(
             | super::super::callback::Continuation32::Position { scratch, .. }
             | super::super::callback::Continuation32::Style { scratch, .. } => {
                 scratch.check(memory)?
+            }
+            super::super::callback::Continuation32::MenuBar(call) => {
+                call.scratch().check(memory)?
             }
             _ => {}
         }

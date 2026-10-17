@@ -174,6 +174,8 @@ api_catalog! {
     TrackPopupMenu=0x0002_00a0,7;
     TrackPopupMenuEx=0x0002_00a1,6;
     EndMenu=0x0002_00a2,0;
+    DrawMenuBar=0x0002_00a3,1;
+    GetMenuItemRect=0x0002_00a4,4;
     CreateAcceleratorTableA=0x0002_00a6,2;
     CreateAcceleratorTableW=0x0002_00a7,2;
     CopyAcceleratorTableA=0x0002_00a8,3;

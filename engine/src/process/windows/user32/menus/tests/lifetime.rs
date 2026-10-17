@@ -29,8 +29,8 @@ fn destroying_a_window_retires_the_current_attached_tree_and_preserves_the_repla
         &[current, 0x10, submenu, 0],
     )
     .unwrap();
-    call(&mut engine, Api::SetMenu.id(), &[window, replaced]).unwrap();
-    call(&mut engine, Api::SetMenu.id(), &[window, current]).unwrap();
+    attach_menu(&mut engine, window, replaced);
+    attach_menu(&mut engine, window, current);
     let context = engine.user32.as_mut().unwrap();
     let ram = engine.memory.as_mut().unwrap();
     let mut outcome = context
@@ -72,8 +72,8 @@ fn forced_thread_retirement_only_retires_that_threads_current_attached_menu_unio
     let second = window(&mut engine, 2);
     let first_menu = call(&mut engine, Api::CreateMenu.id(), &[]).unwrap();
     let second_menu = call(&mut engine, Api::CreateMenu.id(), &[]).unwrap();
-    call(&mut engine, Api::SetMenu.id(), &[first, first_menu]).unwrap();
-    call(&mut engine, Api::SetMenu.id(), &[second, second_menu]).unwrap();
+    attach_menu(&mut engine, first, first_menu);
+    attach_menu(&mut engine, second, second_menu);
     let context = engine.user32.as_mut().unwrap();
     let prepared = context.prepare_thread_termination(1).unwrap();
     assert!(

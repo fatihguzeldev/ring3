@@ -108,32 +108,3 @@ fn native_owner_draw_payload_is_opaque_item_data_and_never_a_text_pointer() {
         (0x100, 0x12345678, 0, 0)
     );
 }
-
-#[test]
-fn native_menu_attachment_queries_use_the_window_owner_without_requiring_the_caller_thread() {
-    let mut engine = engine();
-    let context = crate::process::windows::user32::User32CallContext32 {
-        thread_id: 7,
-        instance: 0x400000,
-        ..Default::default()
-    };
-    let window = {
-        let user32 = engine.user32.as_mut().unwrap();
-        let memory = engine.memory.as_mut().unwrap();
-        let atom = crate::process::windows::user32::tests::register(user32, memory, context);
-        crate::process::windows::user32::tests::create(user32, memory, context, atom)
-    };
-    let menu = call(&mut engine, 0x0002_0077, &[]).unwrap();
-    assert_eq!(call(&mut engine, 0x0002_007c, &[window, menu]), Ok(1));
-    assert_eq!(call(&mut engine, 0x0002_007b, &[window]), Ok(menu));
-    assert_eq!(
-        engine
-            .user32_windows()
-            .unwrap()
-            .get(crate::windows::window::WindowHandle32::try_from(window).unwrap())
-            .unwrap()
-            .description
-            .thread_id,
-        7
-    );
-}

@@ -3,7 +3,9 @@ use crate::windows::window::{WindowContext32, WindowDescription32, WindowHandle3
 mod classes;
 mod colors;
 mod dialogs;
+mod menu_layout;
 mod menus;
+pub(crate) use menu_layout::{MenuBarCache32, MenuOwnerSize32};
 mod paint;
 mod text;
 mod ui;
@@ -19,6 +21,7 @@ struct WindowSlot32 {
     dialog: Option<super::dialogs::WindowDialog32>,
     context_help: u32,
     ui_state: u32,
+    menu_bar: Option<MenuBarCache32>,
 }
 
 pub(crate) struct User32State32 {
@@ -179,6 +182,7 @@ impl User32State32 {
             dialog: None,
             context_help: 0,
             ui_state: 0,
+            menu_bar: None,
             update: crate::windows::gdi::Region32::rectangle(super::Rect32 {
                 left: 0,
                 top: 0,

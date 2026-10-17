@@ -1,19 +1,19 @@
 use crate::windows::user32::{Point32, Rect32, User32Error32 as E};
 
 #[derive(Clone, Copy, Debug)]
-pub(super) struct ItemSize32 {
+pub(crate) struct ItemSize32 {
     pub width: i32,
     pub height: i32,
     pub kind: u32,
 }
 
-pub(super) struct MenuLayout32 {
+pub(crate) struct MenuLayout32 {
     pub items: Vec<Rect32>,
     pub extent: Point32,
 }
 
 impl MenuLayout32 {
-    pub(super) fn bar(items: &[ItemSize32], width: i32) -> Result<Self, E> {
+    pub(crate) fn bar(items: &[ItemSize32], width: i32) -> Result<Self, E> {
         if width <= 0 || items.len() > 4096 {
             return Err(E::Win32(87));
         }
@@ -52,7 +52,7 @@ impl MenuLayout32 {
         })
     }
 
-    pub(super) fn popup(items: &[ItemSize32], border: i32) -> Result<Self, E> {
+    pub(crate) fn popup(items: &[ItemSize32], border: i32) -> Result<Self, E> {
         if !(0..=16).contains(&border) || items.len() > 4096 {
             return Err(E::Win32(87));
         }
@@ -93,7 +93,7 @@ impl MenuLayout32 {
         })
     }
 
-    pub(super) fn item_at(&self, point: Point32) -> Option<usize> {
+    pub(crate) fn item_at(&self, point: Point32) -> Option<usize> {
         self.items.iter().position(|rect| {
             point.x >= rect.left
                 && point.x < rect.right
@@ -102,7 +102,7 @@ impl MenuLayout32 {
         })
     }
 
-    pub(super) fn screen_item(&self, index: usize, origin: Point32) -> Result<Rect32, E> {
+    pub(crate) fn screen_item(&self, index: usize, origin: Point32) -> Result<Rect32, E> {
         let rect = self.items.get(index).copied().ok_or(E::Win32(1456))?;
         Ok(Rect32 {
             left: rect.left.checked_add(origin.x).ok_or(E::Capacity)?,
@@ -152,7 +152,7 @@ fn finish_popup_column(column: &mut [Rect32], width: i32) -> Result<(), E> {
     Ok(())
 }
 
-pub(super) fn popup_origin(
+pub(crate) fn popup_origin(
     anchor: Point32,
     extent: Point32,
     desktop: Rect32,

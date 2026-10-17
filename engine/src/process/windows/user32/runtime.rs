@@ -138,6 +138,8 @@ impl EngineInstance {
                 api,
                 User32Api32::SendMessageA
                     | User32Api32::SendMessageW
+                    | User32Api32::SetMenu
+                    | User32Api32::DrawMenuBar
                     | User32Api32::TranslateAcceleratorA
                     | User32Api32::TranslateAcceleratorW
                     | User32Api32::TrackPopupMenu

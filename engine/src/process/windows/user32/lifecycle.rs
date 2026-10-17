@@ -68,8 +68,15 @@ impl User32Context32 {
         if args[3] & 0x4000_0000 != 0 && parent.is_none() {
             return Err(User32Error32::Win32(1406));
         }
-        if args[9] != 0 && args[3] & 0x4000_0000 == 0 {
-            return Err(User32Error32::Win32(50));
+        if args[9] != 0
+            && args[3] & 0x4000_0000 == 0
+            && !self
+                .menus
+                .contains(crate::windows::user32::menus::MenuHandle32::try_from(
+                    args[9],
+                )?)
+        {
+            return Err(User32Error32::Win32(1401));
         }
         let caption = if args[2] != 0 {
             memory::string(memory, args[2], api.wide(), 32_767, context.ansi)?
@@ -342,6 +349,31 @@ impl User32Context32 {
         Ok(())
     }
 
+    pub(super) fn default_client_rect(
+        &self,
+        handle: WindowHandle32,
+        mut rect: Rect32,
+    ) -> Result<Rect32, User32Error32> {
+        let data = self.state.record(handle)?;
+        let border = if data.style & 0x0004_0000 != 0 {
+            8
+        } else if data.style & 0x0080_0000 != 0 {
+            1
+        } else {
+            0
+        };
+        let caption = if data.style & 0x00c0_0000 == 0x00c0_0000 {
+            23
+        } else {
+            0
+        };
+        rect.left = rect.left.saturating_add(border).min(rect.right);
+        rect.right = rect.right.saturating_sub(border).max(rect.left);
+        rect.top = rect.top.saturating_add(border + caption).min(rect.bottom);
+        rect.bottom = rect.bottom.saturating_sub(border).max(rect.top);
+        Ok(rect)
+    }
+
     pub(super) fn def_window_proc_encoded(
         &mut self,
         args: &[u32],
@@ -361,6 +393,9 @@ impl User32Context32 {
         memory: &mut AddressSpace,
         context: User32CallContext32,
     ) -> Result<User32Outcome32, User32Error32> {
+        if let Some(outcome) = self.begin_menu_bar_default(args, memory, context)? {
+            return Ok(outcome);
+        }
         if let Some(outcome) = self.ui_message(args, context)? {
             return Ok(outcome);
         }
@@ -412,7 +447,9 @@ impl User32Context32 {
             }
             let mut events = [None; 6];
             let mut index = 0;
-            if flags & 0x0002 == 0 {
+            let move_mask = if flags & 0x20 != 0 { 0x1000 } else { 2 };
+            let size_mask = if flags & 0x20 != 0 { 0x800 } else { 1 };
+            if flags & move_mask == 0 {
                 events[index] = Some(WindowMessage32 {
                     window,
                     procedure: record.description.procedure,
@@ -422,7 +459,7 @@ impl User32Context32 {
                 });
                 index += 1;
             }
-            if flags & 0x0001 == 0 {
+            if flags & size_mask == 0 {
                 events[index] = Some(WindowMessage32 {
                     window,
                     procedure: record.description.procedure,
@@ -436,24 +473,7 @@ impl User32Context32 {
         }
         if args[1] == 0x0083 {
             let handle = WindowHandle32::try_from(args[0])?;
-            let data = self.state.record(handle)?;
-            let mut rect = memory::rect(memory, args[3])?;
-            let border = if data.style & 0x0004_0000 != 0 {
-                8
-            } else if data.style & 0x0080_0000 != 0 {
-                1
-            } else {
-                0
-            };
-            let caption = if data.style & 0x00c0_0000 == 0x00c0_0000 {
-                23
-            } else {
-                0
-            };
-            rect.left = rect.left.saturating_add(border).min(rect.right);
-            rect.right = rect.right.saturating_sub(border).max(rect.left);
-            rect.top = rect.top.saturating_add(border + caption).min(rect.bottom);
-            rect.bottom = rect.bottom.saturating_sub(border).max(rect.top);
+            let rect = self.default_client_rect(handle, memory::rect(memory, args[3])?)?;
             memory::write_rect(memory, args[3], rect)?;
         }
         Ok(User32Outcome32::Return(0))

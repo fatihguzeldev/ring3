@@ -132,7 +132,8 @@ impl User32Context32 {
         let outcome = self.complete_clipboard_child(token, outcome)?;
         let outcome = self.complete_sent_paint_child(token, outcome)?;
         let outcome = self.complete_system_colors_child(token, outcome)?;
-        self.complete_ui_child(token, outcome)
+        let outcome = self.complete_ui_child(token, outcome)?;
+        self.complete_menu_bar_child(token, outcome)
     }
 
     fn resume_wait_step(

@@ -150,13 +150,12 @@ impl User32Context32 {
             TrackPopupMenu | TrackPopupMenuEx => self.begin_popup_menu(api, args, memory, context),
             EndMenu => self.end_popup_menu(context.thread_id),
             CreateMenu | CreatePopupMenu | DestroyMenu | IsMenu | GetMenu | SetMenu
-            | GetMenuItemCount | GetMenuItemID | GetSubMenu | AppendMenuA | AppendMenuW
-            | InsertMenuA | InsertMenuW | ModifyMenuA | ModifyMenuW | RemoveMenu | DeleteMenu
-            | EnableMenuItem | CheckMenuItem | GetMenuState | GetMenuStringA | GetMenuStringW
-            | GetMenuContextHelpId | SetMenuContextHelpId | GetMenuItemInfoA | GetMenuItemInfoW
-            | SetMenuItemInfoA | SetMenuItemInfoW | InsertMenuItemA | InsertMenuItemW => {
-                self.menu_call(api, args, memory, context)
-            }
+            | DrawMenuBar | GetMenuItemRect | GetMenuItemCount | GetMenuItemID | GetSubMenu
+            | AppendMenuA | AppendMenuW | InsertMenuA | InsertMenuW | ModifyMenuA | ModifyMenuW
+            | RemoveMenu | DeleteMenu | EnableMenuItem | CheckMenuItem | GetMenuState
+            | GetMenuStringA | GetMenuStringW | GetMenuContextHelpId | SetMenuContextHelpId
+            | GetMenuItemInfoA | GetMenuItemInfoW | SetMenuItemInfoA | SetMenuItemInfoW
+            | InsertMenuItemA | InsertMenuItemW => self.menu_call(api, args, memory, context),
             CreateAcceleratorTableA
             | CreateAcceleratorTableW
             | CopyAcceleratorTableA

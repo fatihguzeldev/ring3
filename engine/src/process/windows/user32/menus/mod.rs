@@ -1,4 +1,4 @@
-mod layout;
+pub(super) mod bar;
 mod popup;
 mod visual;
 pub(super) use popup::PopupContext32;
@@ -23,6 +23,17 @@ impl User32Context32 {
         call: User32CallContext32,
     ) -> Result<User32Outcome32, E> {
         use Api::*;
+        if matches!(api, SetMenu | DrawMenuBar) {
+            return self.begin_menu_bar_frame(
+                args[0],
+                (api == SetMenu).then(|| args[1]),
+                ram,
+                call,
+            );
+        }
+        if api == GetMenuItemRect {
+            return self.menu_item_rect(args, ram);
+        }
         let value = match api {
             CreateMenu | CreatePopupMenu => self.menus.create(api == CreatePopupMenu)?.get(),
             DestroyMenu => {
@@ -58,23 +69,14 @@ impl User32Context32 {
                 }
                 1
             }
-            GetMenu | SetMenu => {
+            GetMenu => {
                 let window = crate::windows::window::WindowHandle32::try_from(args[0])?;
                 self.windows().get(window)?;
-                let mut data = self.state.record(window)?;
+                let data = self.state.record(window)?;
                 if data.style & 0x4000_0000 != 0 {
                     return Err(E::Win32(87));
                 }
-                if api == GetMenu {
-                    data.menu
-                } else {
-                    if args[1] != 0 && !self.menus.contains(MenuHandle32::try_from(args[1])?) {
-                        return Err(E::Win32(1401));
-                    }
-                    data.menu = args[1];
-                    self.state.update(data)?;
-                    1
-                }
+                data.menu
             }
             GetMenuContextHelpId => self.menus.help(MenuHandle32::try_from(args[0])?)?,
             SetMenuContextHelpId => {

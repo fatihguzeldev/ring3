@@ -1,4 +1,4 @@
-use super::layout::{ItemSize32, MenuLayout32};
+use crate::windows::user32::menus::{ItemSize32, MenuLayout32};
 use crate::{
     memory::AddressSpace,
     process::windows::gdi::{CanvasText32, GdiCanvas32, GdiRuntime32},
@@ -8,12 +8,7 @@ use crate::{
     },
 };
 
-#[derive(Clone, Copy)]
-pub(super) struct OwnerSize32 {
-    pub revision: u64,
-    pub width: i32,
-    pub height: i32,
-}
+pub(super) use crate::windows::user32::MenuOwnerSize32 as OwnerSize32;
 
 pub(super) struct MenuVisual32 {
     pub layout: MenuLayout32,
@@ -34,9 +29,21 @@ impl MenuVisual32 {
         owned: &[Option<OwnerSize32>],
     ) -> Result<Self, E> {
         let metrics = gdi.measure_text(dc, &[]).map_err(gdi_error)?.metrics;
-        let padding = (metrics.average_width / 2).max(2);
+        let padding = if popup {
+            (metrics.average_width / 2).max(2)
+        } else {
+            gdi.dialog_base_units(&gdi.system_font().map_err(gdi_error)?)
+                .map_err(gdi_error)?
+                .x
+        };
         let gutter = metrics.height.max(1);
-        let row_height = metrics.height.checked_add(4).ok_or(E::Capacity)?;
+        let row_height = if popup {
+            metrics.height.checked_add(4).ok_or(E::Capacity)?
+        } else {
+            metrics
+                .height
+                .max(crate::windows::user32::MenuMetrics32::menu_height() - 1)
+        };
         let count = menus.count(handle)?;
         let mut sizes = Vec::new();
         sizes.try_reserve_exact(count).map_err(|_| E::Allocation)?;
@@ -104,6 +111,32 @@ impl MenuVisual32 {
         })
     }
 
+    pub(super) fn draw(
+        &self,
+        gdi: &GdiRuntime32,
+        memory: &AddressSpace,
+        canvas: &mut GdiCanvas32,
+        menus: &MenuStore32,
+        paint: MenuPaint32,
+    ) -> Result<(), E> {
+        MenuVisualRef32 {
+            layout: &self.layout,
+            popup: self.popup,
+            gutter: self.gutter,
+            padding: self.padding,
+        }
+        .draw(gdi, memory, canvas, menus, paint)
+    }
+}
+
+pub(super) struct MenuVisualRef32<'a> {
+    pub layout: &'a MenuLayout32,
+    pub popup: bool,
+    pub gutter: i32,
+    pub padding: i32,
+}
+
+impl MenuVisualRef32<'_> {
     pub(super) fn draw(
         &self,
         gdi: &GdiRuntime32,

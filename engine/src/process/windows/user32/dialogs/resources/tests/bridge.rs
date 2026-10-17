@@ -463,3 +463,6 @@ fn cross_thread_accelerator_command_returns_only_after_the_real_owner_invocation
 
 #[path = "bridge/queue.rs"]
 mod queue;
+
+#[path = "../../../menus/tests/attachment.rs"]
+mod menu_attachment;

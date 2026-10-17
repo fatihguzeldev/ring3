@@ -9,6 +9,31 @@ use crate::{
 };
 
 impl User32Context32 {
+    pub(in crate::process::windows::user32) fn popup_menu_item_rect(
+        &self,
+        menu: crate::windows::user32::menus::MenuHandle32,
+        index: usize,
+    ) -> Result<crate::windows::user32::Rect32, E> {
+        self.menu_popups
+            .plans
+            .iter()
+            .find_map(|plan| {
+                plan.windows.iter().find_map(|popup| {
+                    if popup.menu != menu {
+                        return None;
+                    }
+                    self.windows().get(popup.handle?).ok()?;
+                    popup
+                        .visual
+                        .as_ref()?
+                        .layout
+                        .screen_item(index, popup.origin)
+                        .ok()
+                })
+            })
+            .ok_or(E::Win32(1401))
+    }
+
     pub(in crate::process) fn preview_menu_wait_input_flags(
         &self,
         token: u64,
@@ -36,6 +61,9 @@ impl User32Context32 {
             .is_some_and(|pending| {
                 matches!(pending.continuation, Continuation32::MenuPopup { .. })
             });
+        if self.menu_bar_wait(token).is_some() {
+            return self.resume_menu_bar(token, ram, gdi.ok_or(E::Win32(50))?);
+        }
         if popup {
             self.resume_popup_menu(token, ram, gdi)
         } else {

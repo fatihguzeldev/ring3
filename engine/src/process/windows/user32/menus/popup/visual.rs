@@ -1,7 +1,4 @@
-use super::super::{
-    layout::popup_origin,
-    visual::{MenuPaint32, MenuVisual32, gdi_error},
-};
+use super::super::visual::{MenuPaint32, MenuVisual32, gdi_error};
 use super::types::Stage32;
 use crate::{
     memory::AddressSpace,
@@ -11,7 +8,7 @@ use crate::{
     },
     windows::{
         gdi::Region32,
-        user32::{Point32, User32Api32 as Api, User32Error32 as E},
+        user32::{Point32, User32Api32 as Api, User32Error32 as E, menus::popup_origin},
     },
 };
 
