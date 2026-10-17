@@ -348,6 +348,11 @@ impl ResidentRegistry {
     }
 
     fn publish(&mut self, id: UnitId, region: CompiledRegion, wasm_bytes: usize) {
+        debug_assert!(
+            self.entries
+                .last()
+                .is_none_or(|unit| unit.id.get() < id.get())
+        );
         // the reserved vector makes publication infallible after the id claim.
         self.entries.push(ResidentUnit { id, region });
         self.wasm_bytes = wasm_bytes;
@@ -368,11 +373,8 @@ impl ResidentRegistry {
         id: u64,
     ) -> Result<&CompiledRegion, RegistryError> {
         self.check_memory(memory)?;
-        self.entries
-            .iter()
-            .find(|unit| unit.id.get() == id)
-            .map(|unit| &unit.region)
-            .ok_or(RegistryError::InvalidUnit)
+        let index = self.unit_index(id)?;
+        Ok(&self.entries[index].region)
     }
 
     pub(crate) fn discard_quiescent_raw(
@@ -381,21 +383,13 @@ impl ResidentRegistry {
         id: u64,
     ) -> Result<(), RegistryError> {
         self.check_memory(memory)?;
-        let index = self
-            .entries
-            .iter()
-            .position(|unit| unit.id.get() == id)
-            .ok_or(RegistryError::InvalidUnit)?;
+        let index = self.unit_index(id)?;
         self.remove_unit(index)
     }
 
     pub fn get(&self, memory: &AddressSpace, id: UnitId) -> Result<&CompiledRegion, RegistryError> {
         self.check_memory(memory)?;
-        let unit = self
-            .entries
-            .iter()
-            .find(|unit| unit.id == id)
-            .ok_or(RegistryError::InvalidUnit)?;
+        let unit = &self.entries[self.unit_index(id.get())?];
         unit.region
             .wasm_bytes(memory)
             .map_err(|ArtifactError::CodeInvalidated| RegistryError::CodeInvalidated)?;
@@ -484,16 +478,19 @@ impl ResidentRegistry {
         id: u64,
     ) -> Result<(), RegistryError> {
         self.check_memory(memory)?;
-        let index = self
-            .entries
-            .iter()
-            .position(|unit| unit.id.get() == id)
-            .ok_or(RegistryError::InvalidUnit)?;
+        let index = self.unit_index(id)?;
         self.entries[index]
             .region
             .wasm_bytes(memory)
             .map_err(|ArtifactError::CodeInvalidated| RegistryError::CodeInvalidated)?;
         self.remove_unit(index)
+    }
+
+    fn unit_index(&self, id: u64) -> Result<usize, RegistryError> {
+        // ids increase at publication, and retirement preserves the retained vector order.
+        self.entries
+            .binary_search_by_key(&id, |unit| unit.id.get())
+            .map_err(|_| RegistryError::InvalidUnit)
     }
 
     fn remove_unit(&mut self, index: usize) -> Result<(), RegistryError> {
@@ -525,11 +522,7 @@ impl ResidentRegistry {
 
     fn stale_index(&self, memory: &AddressSpace, id: u64) -> Result<usize, RegistryError> {
         self.check_memory(memory)?;
-        let index = self
-            .entries
-            .iter()
-            .position(|unit| unit.id.get() == id)
-            .ok_or(RegistryError::InvalidUnit)?;
+        let index = self.unit_index(id)?;
         match self.entries[index].region.wasm_bytes(memory) {
             Ok(_) => Err(RegistryError::CurrentUnit),
             Err(ArtifactError::CodeInvalidated) => Ok(index),
@@ -551,6 +544,10 @@ mod resident_entries_tests;
 #[cfg(test)]
 #[path = "resident/tests/retirement.rs"]
 mod resident_retirement_tests;
+
+#[cfg(test)]
+#[path = "resident/tests/identities.rs"]
+mod resident_identity_tests;
 
 fn allocate_id(counter: &AtomicU64) -> Result<UnitId, RegistryError> {
     counter
