@@ -23,8 +23,14 @@ impl GdiRuntime32 {
         dc: u32,
         units: &[u16],
     ) -> Result<ShapedText32, GdiError32> {
-        let state = self.model.state(dc)?;
-        let selected = self.resolved_dc_metrics(dc)?;
+        self.measure_text_for_state(self.model.state(dc)?, units)
+    }
+    pub(in crate::process::windows::gdi) fn measure_text_for_state(
+        &self,
+        state: &DcState32,
+        units: &[u16],
+    ) -> Result<ShapedText32, GdiError32> {
+        let selected = self.resolved_state_metrics(state)?;
         let mut result = selected.shape(units, false, state.text_align & 0x100 != 0)?;
         apply_spacing(&mut result, state, units);
         if !result.advance.is_finite() || result.advance.abs() > i32::MAX as f32 {

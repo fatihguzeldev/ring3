@@ -48,7 +48,7 @@ impl GdiRuntime32 {
         mut state: DcState32,
         seed: Option<TextPixels32>,
     ) -> Result<TextPixels32, GdiError32> {
-        let selected = self.resolved_dc_font(request.dc)?;
+        let selected = self.resolved_state_font(&state)?;
         let font = selected.descriptor();
         let direct = request.options & (16 | 4096) != 0;
         let converted;

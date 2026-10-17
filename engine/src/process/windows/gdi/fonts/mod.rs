@@ -37,7 +37,12 @@ impl GdiRuntime32 {
         &self,
         dc: u32,
     ) -> Result<crate::windows::gdi::ResolvedFont32, GdiError32> {
-        let state = self.model.state(dc)?;
+        self.resolved_state_font(self.model.state(dc)?)
+    }
+    pub(in crate::process::windows::gdi) fn resolved_state_font(
+        &self,
+        state: &crate::windows::gdi::DcState32,
+    ) -> Result<crate::windows::gdi::ResolvedFont32, GdiError32> {
         if let Some(font) = &state.font_realization {
             return Ok(font.clone());
         }
@@ -47,9 +52,15 @@ impl GdiRuntime32 {
         &self,
         dc: u32,
     ) -> Result<crate::windows::gdi::ResolvedFont32, GdiError32> {
+        self.resolved_state_metrics(self.model.state(dc)?)
+    }
+    pub(in crate::process::windows::gdi) fn resolved_state_metrics(
+        &self,
+        state: &crate::windows::gdi::DcState32,
+    ) -> Result<crate::windows::gdi::ResolvedFont32, GdiError32> {
         self.model
-            .font_metric_snapshot(self.model.state(dc)?.font)?
-            .map_or_else(|| self.resolved_dc_font(dc), Ok)
+            .font_metric_snapshot(state.font)?
+            .map_or_else(|| self.resolved_state_font(state), Ok)
     }
     pub(super) fn restore_gdi_dc(&mut self, dc: u32, saved: i32) -> Result<(), GdiError32> {
         let mut state = self.model.restored_dc_state(dc, saved)?;

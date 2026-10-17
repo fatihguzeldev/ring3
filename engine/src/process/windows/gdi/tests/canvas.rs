@@ -196,3 +196,6 @@ fn stale_canvas_rejects_ram_dc_and_palette_changes_without_overwriting_current_p
         assert_eq!(current, bytes);
     }
 }
+
+#[path = "canvas/style.rs"]
+mod style;

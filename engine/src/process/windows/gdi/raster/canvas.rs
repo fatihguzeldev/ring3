@@ -21,6 +21,7 @@ pub(in crate::process) struct GdiCanvas32 {
     owner: CanvasOwner32,
     images: Vec<super::super::images::ImageOwner32>,
     sources: Vec<CanvasSource32>,
+    fonts: Vec<u32>,
 }
 struct CanvasSource32 {
     dc: u32,
@@ -63,6 +64,7 @@ impl GdiCanvas32 {
             dc,
             images: Vec::new(),
             sources: Vec::new(),
+            fonts: Vec::new(),
             owner: CanvasOwner32 {
                 identity: memory.identity(),
                 memory_version: memory.transaction_version(),
@@ -85,6 +87,64 @@ impl GdiCanvas32 {
     }
     pub(in crate::process) fn dc(&self) -> u32 {
         self.dc
+    }
+    pub(in crate::process) fn device_rect(&self, rect: Rect32) -> Result<Rect32, GdiError32> {
+        let state = &self
+            .prepared
+            .as_ref()
+            .ok_or(GdiError32::InvalidRequest)?
+            .state;
+        let first = state.device_point(Point32 {
+            x: rect.left,
+            y: rect.top,
+        })?;
+        let last = state.device_point(Point32 {
+            x: rect.right,
+            y: rect.bottom,
+        })?;
+        Ok(Rect32 {
+            left: first.x.min(last.x),
+            top: first.y.min(last.y),
+            right: first.x.max(last.x),
+            bottom: first.y.max(last.y),
+        })
+    }
+    pub(in crate::process) fn with_text_style<T>(
+        &mut self,
+        gdi: &GdiRuntime32,
+        font: u32,
+        rtl: bool,
+        clip: Option<Rect32>,
+        draw: impl FnOnce(&mut Self) -> Result<T, GdiError32>,
+    ) -> Result<T, GdiError32> {
+        let physical = gdi.fonts.resolve(gdi.logical_font(font)?)?;
+        let original = self
+            .prepared
+            .as_ref()
+            .ok_or(GdiError32::InvalidRequest)?
+            .state
+            .clone();
+        let mut state = original.clone();
+        state.font = font;
+        state.font_realization = Some(physical);
+        state.text_align = u32::from(rtl) * 256;
+        if let Some(rectangle) = clip {
+            let region = crate::windows::gdi::Region32::rectangle(rectangle);
+            state.clip = Some(match &state.clip {
+                Some(previous) => previous.combine(&region, 1)?,
+                None => region,
+            });
+        }
+        self.fonts
+            .try_reserve(1)
+            .map_err(|_| GdiError32::Allocation)?;
+        self.fonts.push(font);
+        self.prepared.as_mut().unwrap().state = state;
+        let result = draw(self);
+        if let Some(prepared) = self.prepared.as_mut() {
+            prepared.state = original;
+        }
+        result
     }
     pub(in crate::process) fn set_background_color(&mut self, color: u32) {
         self.prepared.as_mut().unwrap().state.background_color = color;
@@ -263,7 +323,17 @@ impl GdiCanvas32 {
         let flags = text.horizontal
             | if text.multiline { 16 } else { 32 }
             | if text.mnemonic { 0 } else { 0x800 };
-        let paragraph = gdi.prepare_paragraph(self.dc, text.units, text.bounds, flags, 8)?;
+        let paragraph = gdi.prepare_paragraph_for_state(
+            &self
+                .prepared
+                .as_ref()
+                .ok_or(GdiError32::InvalidRequest)?
+                .state,
+            text.units,
+            text.bounds,
+            flags,
+            8,
+        )?;
         let mut y = if text.middle {
             text.bounds.top + (text.bounds.bottom - text.bounds.top - paragraph.height) / 2
         } else {
@@ -281,7 +351,7 @@ impl GdiCanvas32 {
             if let Some(color) = text.background {
                 state.background_color = color;
             }
-            state.text_align = 0;
+            state.text_align &= 256;
             self.prepared = Some(gdi.prepare_text_from(
                 memory,
                 TextRequest32 {
@@ -380,6 +450,9 @@ impl GdiRuntime32 {
         }
         for source in &canvas.images {
             self.check_image_owner(*source)?;
+        }
+        for font in &canvas.fonts {
+            self.logical_font(*font)?;
         }
         let prepared = canvas.finish();
         if prepared.damage.left < prepared.damage.right

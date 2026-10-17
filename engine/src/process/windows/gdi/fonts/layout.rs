@@ -22,6 +22,16 @@ impl GdiRuntime32 {
         flags: u32,
         tab_length: usize,
     ) -> Result<Paragraph32, GdiError32> {
+        self.prepare_paragraph_for_state(self.model.state(dc)?, units, rectangle, flags, tab_length)
+    }
+    pub(in crate::process::windows::gdi) fn prepare_paragraph_for_state(
+        &self,
+        state: &crate::windows::gdi::DcState32,
+        units: &[u16],
+        rectangle: Rect32,
+        flags: u32,
+        tab_length: usize,
+    ) -> Result<Paragraph32, GdiError32> {
         if flags & !(0x000f_ffff | 0x100000 | 0x200000) != 0
             || units.len() > 8192
             || tab_length == 0
@@ -29,7 +39,7 @@ impl GdiRuntime32 {
         {
             return Err(GdiError32::InvalidRequest);
         }
-        let metrics = self.resolved_dc_metrics(dc)?.metrics()?;
+        let metrics = self.resolved_state_metrics(state)?.metrics()?;
         let line_height = metrics
             .height
             .checked_add(if flags & 0x200 != 0 {
@@ -93,9 +103,13 @@ impl GdiRuntime32 {
                 let mut stop = end;
                 if flags & 0x10 != 0
                     && !single
-                    && self.measure_text(dc, &processed[at..end])?.advance.round() as i32 > width
+                    && self
+                        .measure_text_for_state(state, &processed[at..end])?
+                        .advance
+                        .round() as i32
+                        > width
                 {
-                    stop = largest_prefix(self, dc, &processed, at, end, width)?;
+                    stop = largest_prefix(self, state, &processed, at, end, width)?;
                     if let Some(space) = processed[at..stop]
                         .iter()
                         .rposition(|unit| matches!(*unit, 9 | 32))
@@ -127,13 +141,17 @@ impl GdiRuntime32 {
                     .map(|position| position - at)
                     .collect::<Vec<_>>();
                 if flags & (0x4000 | 0x8000 | 0x40000) != 0
-                    && self.measure_text(dc, &line_units)?.advance.round() as i32 > width
+                    && self
+                        .measure_text_for_state(state, &line_units)?
+                        .advance
+                        .round() as i32
+                        > width
                 {
-                    ellipsize(self, dc, &mut line_units, width, flags)?;
+                    ellipsize(self, state, &mut line_units, width, flags)?;
                     underlines.retain(|index| *index < line_units.len());
                 }
                 let advances = if flags & 0x40 != 0 {
-                    expand_tabs(self, dc, &mut line_units, tab_length)?
+                    expand_tabs(self, state, &mut line_units, tab_length)?
                 } else {
                     None
                 };
@@ -143,7 +161,9 @@ impl GdiRuntime32 {
                         .try_fold(0i32, |total, advance| total.checked_add(advance.0))
                         .ok_or(GdiError32::InvalidRequest)?
                 } else {
-                    self.measure_text(dc, &line_units)?.advance.round() as i32
+                    self.measure_text_for_state(state, &line_units)?
+                        .advance
+                        .round() as i32
                 };
                 lines.try_reserve(1).map_err(|_| GdiError32::Allocation)?;
                 lines.push(TextLine32 {
@@ -195,7 +215,7 @@ fn next_character(units: &[u16], at: usize, end: usize) -> usize {
 }
 fn largest_prefix(
     runtime: &GdiRuntime32,
-    dc: u32,
+    state: &crate::windows::gdi::DcState32,
     units: &[u16],
     start: usize,
     end: usize,
@@ -215,7 +235,7 @@ fn largest_prefix(
     while low < high {
         let mid = (low + high) / 2;
         if runtime
-            .measure_text(dc, &units[start..positions[mid]])?
+            .measure_text_for_state(state, &units[start..positions[mid]])?
             .advance
             .round() as i32
             <= width
@@ -229,7 +249,7 @@ fn largest_prefix(
 }
 fn expand_tabs(
     runtime: &GdiRuntime32,
-    dc: u32,
+    state: &crate::windows::gdi::DcState32,
     units: &mut [u16],
     tab_length: usize,
 ) -> Result<Option<Vec<(i32, i32)>>, GdiError32> {
@@ -242,7 +262,7 @@ fn expand_tabs(
             *unit = 32;
         }
     }
-    let measured = runtime.measure_text(dc, units)?;
+    let measured = runtime.measure_text_for_state(state, units)?;
     let stop = measured
         .metrics
         .average_width
@@ -279,13 +299,17 @@ fn expand_tabs(
 
 fn ellipsize(
     runtime: &GdiRuntime32,
-    dc: u32,
+    state: &crate::windows::gdi::DcState32,
     units: &mut Vec<u16>,
     width: i32,
     flags: u32,
 ) -> Result<(), GdiError32> {
     let ellipsis = [46u16; 3];
-    let remaining = width - runtime.measure_text(dc, &ellipsis)?.advance.round() as i32;
+    let remaining = width
+        - runtime
+            .measure_text_for_state(state, &ellipsis)?
+            .advance
+            .round() as i32;
     if remaining <= 0 {
         *units = ellipsis.to_vec();
         return Ok(());
@@ -293,10 +317,13 @@ fn ellipsize(
     if flags & 0x4000 != 0 {
         if let Some(separator) = units.iter().rposition(|unit| matches!(*unit, 47 | 92)) {
             let suffix = units[separator..].to_vec();
-            let tail_width = runtime.measure_text(dc, &suffix)?.advance.round() as i32;
+            let tail_width = runtime
+                .measure_text_for_state(state, &suffix)?
+                .advance
+                .round() as i32;
             if tail_width <= remaining {
                 let stop =
-                    largest_prefix(runtime, dc, units, 0, separator, remaining - tail_width)?;
+                    largest_prefix(runtime, state, units, 0, separator, remaining - tail_width)?;
                 units.truncate(stop);
                 units.extend_from_slice(&ellipsis);
                 units.extend(suffix);
@@ -304,7 +331,7 @@ fn ellipsize(
             }
         }
     }
-    let mut stop = largest_prefix(runtime, dc, units, 0, units.len(), remaining)?;
+    let mut stop = largest_prefix(runtime, state, units, 0, units.len(), remaining)?;
     if flags & 0x40000 != 0 {
         stop = units[..stop]
             .iter()
