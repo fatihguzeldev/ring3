@@ -2,6 +2,7 @@ mod api;
 mod classes;
 pub(crate) mod header;
 pub(crate) mod hotkey;
+pub(crate) mod listview;
 pub(crate) mod progress;
 pub(crate) mod status;
 pub(crate) mod tab;
