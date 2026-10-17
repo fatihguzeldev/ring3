@@ -7,6 +7,7 @@ use super::super::{
     shader::{Declaration, Program},
     state::{PipelineState, TEXTURE_STAGES, VERTEX_STREAMS},
 };
+use crate::abi::graphics::d3d8::{BATCH_HEADER_SIZE, FRAGMENT_HEADER_SIZE};
 use crate::graphics::{GraphicsLimits, ResourceId};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -29,6 +30,19 @@ pub enum CommandError {
 pub struct CommandLimits {
     pub batch_bytes: u32,
     pub pending_bytes: u32,
+}
+
+impl CommandLimits {
+    pub(in crate::graphics::d3d8) fn validate(self) -> Result<(), CommandError> {
+        if self.batch_bytes as usize <= BATCH_HEADER_SIZE + FRAGMENT_HEADER_SIZE
+            || self.batch_bytes > GraphicsLimits::MAX_BATCH_BYTES
+            || self.pending_bytes == 0
+            || self.pending_bytes > GraphicsLimits::MAX_RESOURCE_BYTES + 4 * 1024 * 1024
+        {
+            return Err(CommandError::InvalidLimits);
+        }
+        Ok(())
+    }
 }
 
 impl From<GraphicsLimits> for CommandLimits {

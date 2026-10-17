@@ -10,6 +10,19 @@ pub struct ShaderLimits {
     pub bytes: u32,
 }
 
+impl ShaderLimits {
+    pub(in crate::graphics::d3d8) fn validate(self) -> Result<(), RegistryError> {
+        if self.objects == 0
+            || self.objects > 4096
+            || self.bytes == 0
+            || self.bytes > 64 * 1024 * 1024
+        {
+            return Err(RegistryError::InvalidLimits);
+        }
+        Ok(())
+    }
+}
+
 impl Default for ShaderLimits {
     fn default() -> Self {
         Self {

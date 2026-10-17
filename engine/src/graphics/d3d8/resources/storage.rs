@@ -45,15 +45,24 @@ pub struct ResourceStore {
 }
 
 impl ResourceStore {
-    pub fn new(epoch: u64, limits: GraphicsLimits) -> Result<Self, ResourceError> {
-        if epoch == 0
-            || limits.resources == 0
+    pub(in crate::graphics::d3d8) fn validate_limits(
+        limits: GraphicsLimits,
+    ) -> Result<(), ResourceError> {
+        if limits.resources == 0
             || limits.resources > GraphicsLimits::MAX_RESOURCES
             || limits.resource_bytes == 0
             || limits.resource_bytes > GraphicsLimits::MAX_RESOURCE_BYTES
         {
             return Err(ResourceError::InvalidCall);
         }
+        Ok(())
+    }
+
+    pub fn new(epoch: u64, limits: GraphicsLimits) -> Result<Self, ResourceError> {
+        if epoch == 0 {
+            return Err(ResourceError::InvalidCall);
+        }
+        Self::validate_limits(limits)?;
         let mut slots = Vec::new();
         slots
             .try_reserve_exact(limits.resources as usize)

@@ -1,6 +1,6 @@
 use super::super::{
     commands::{CommandError, CommandLimits, Progress},
-    resources::{Format, ResourceError},
+    resources::{Format, ResourceError, ResourceStore},
     shader::registry::{RegistryError, ShaderLimits},
     state::StateError,
 };
@@ -54,6 +54,24 @@ pub struct DeviceLimits {
     pub state_blocks: u32,
     pub patches: u32,
     pub readbacks: u32,
+}
+
+impl DeviceLimits {
+    pub(crate) fn validate(self) -> Result<(), DeviceError> {
+        if self.state_blocks == 0
+            || self.state_blocks > 4096
+            || self.readbacks == 0
+            || self.readbacks > 1024
+            || self.patches == 0
+            || self.patches > 4096
+        {
+            return Err(DeviceError::InvalidCall);
+        }
+        ResourceStore::validate_limits(self.graphics)?;
+        self.commands.validate()?;
+        self.shaders.validate()?;
+        Ok(())
+    }
 }
 
 impl Default for DeviceLimits {

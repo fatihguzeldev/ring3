@@ -57,13 +57,7 @@ impl ShaderRegistry {
         self.next_sequence = value;
     }
     pub fn new(limits: ShaderLimits) -> Result<Self, RegistryError> {
-        if limits.objects == 0
-            || limits.objects > 4096
-            || limits.bytes == 0
-            || limits.bytes > 64 * 1024 * 1024
-        {
-            return Err(RegistryError::InvalidLimits);
-        }
+        limits.validate()?;
         let mut entries = Vec::new();
         entries
             .try_reserve_exact(limits.objects as usize)

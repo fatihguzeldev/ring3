@@ -4,7 +4,7 @@ use crate::{
         self as codec, BATCH_HEADER_SIZE, BatchHeader, CodecError, FIRST_FRAGMENT,
         FRAGMENT_HEADER_SIZE, Fragment, LAST_FRAGMENT,
     },
-    graphics::{BatchId, GraphicsLimits},
+    graphics::BatchId,
 };
 
 struct PreparedCommand {
@@ -48,13 +48,7 @@ impl CommandQueue {
         if epoch == 0 {
             return Err(CommandError::InvalidEpoch);
         }
-        if limits.batch_bytes as usize <= BATCH_HEADER_SIZE + FRAGMENT_HEADER_SIZE
-            || limits.batch_bytes > GraphicsLimits::MAX_BATCH_BYTES
-            || limits.pending_bytes == 0
-            || limits.pending_bytes > GraphicsLimits::MAX_RESOURCE_BYTES + 4 * 1024 * 1024
-        {
-            return Err(CommandError::InvalidLimits);
-        }
+        limits.validate()?;
         let mut bytes = Vec::new();
         bytes
             .try_reserve_exact(limits.batch_bytes as usize)

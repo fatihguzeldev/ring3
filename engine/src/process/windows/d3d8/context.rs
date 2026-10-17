@@ -30,6 +30,10 @@ impl D3D8Runtime32 {
             .adapter
             .validate()
             .map_err(|_| D3D8Error32::InvalidConfiguration)?;
+        config
+            .device
+            .validate()
+            .map_err(|_| D3D8Error32::InvalidConfiguration)?;
         if config.adapter.read_scanline {
             return Err(D3D8Error32::InvalidConfiguration);
         }

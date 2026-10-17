@@ -95,15 +95,7 @@ impl Device {
         limits: DeviceLimits,
     ) -> Result<Self, DeviceError> {
         description.validate()?;
-        if limits.state_blocks == 0
-            || limits.state_blocks > 4096
-            || limits.readbacks == 0
-            || limits.readbacks > 1024
-            || limits.patches == 0
-            || limits.patches > 4096
-        {
-            return Err(DeviceError::InvalidCall);
-        }
+        limits.validate()?;
         let mut resources = ResourceStore::new(epoch, limits.graphics)?;
         let mut back_buffers = Vec::new();
         back_buffers
