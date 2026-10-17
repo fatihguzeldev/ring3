@@ -52,6 +52,7 @@ impl HeapManager32 {
                 pointer,
                 locks: 0,
                 discardable: flags & 0x1000 != 0,
+                transferred: false,
             });
             Ok(handle)
         } else {
@@ -71,6 +72,9 @@ impl HeapManager32 {
         }
         let heap = self.default.ok_or(MemoryError32::InvalidHandle)?;
         let moving = self.movable.iter().position(|block| block.handle == handle);
+        if moving.is_some_and(|index| self.movable[index].transferred) {
+            return Err(MemoryError32::InvalidHandle);
+        }
         if flags & 0x80 != 0 {
             if flags & 0x40 != 0 {
                 return Err(MemoryError32::InvalidParameter);
@@ -100,6 +104,7 @@ impl HeapManager32 {
                 pointer: handle,
                 locks: 0,
                 discardable: flags & 0x1000 != 0,
+                transferred: false,
             });
             return Ok(movable);
         }
@@ -161,6 +166,9 @@ impl HeapManager32 {
         }
         let heap = self.default.ok_or(MemoryError32::InvalidHandle)?;
         if let Some(index) = self.movable.iter().position(|block| block.handle == handle) {
+            if self.movable[index].transferred {
+                return Err(MemoryError32::InvalidHandle);
+            }
             let pointer = self.movable[index].pointer;
             if pointer != 0 {
                 self.free(heap, 0, pointer)?;

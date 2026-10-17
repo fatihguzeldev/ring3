@@ -5,6 +5,7 @@ mod movable;
 mod policy;
 mod queries;
 mod retirement;
+mod transferred;
 
 #[cfg(test)]
 mod identities;
@@ -12,6 +13,7 @@ mod identities;
 pub(crate) use allocation::PreparedHeapAllocation32;
 pub(crate) use group::PreparedHeapAllocations32;
 pub(crate) use retirement::PreparedHeapRetirement32;
+pub(crate) use transferred::{GlobalMemory32, PreparedGlobalMemory32, PreparedGlobalRetirement32};
 
 use super::*;
 use crate::memory::{AddressSpace, GuestAddress, PAGE_SIZE, PageRange};
@@ -36,6 +38,7 @@ struct Movable32 {
     pointer: u32,
     locks: u16,
     discardable: bool,
+    transferred: bool,
 }
 pub(crate) struct HeapManager32 {
     heaps: Vec<Heap32>,

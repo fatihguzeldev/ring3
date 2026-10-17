@@ -1,5 +1,6 @@
 mod calls;
 mod context;
+mod globals;
 mod heap;
 mod lists;
 mod virtual_calls;

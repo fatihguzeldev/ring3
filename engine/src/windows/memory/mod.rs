@@ -5,7 +5,8 @@ mod types;
 
 pub use api::MemoryApi32;
 pub(crate) use heap::{
-    HeapManager32, PreparedHeapAllocation32, PreparedHeapAllocations32, PreparedHeapRetirement32,
+    GlobalMemory32, HeapManager32, PreparedGlobalMemory32, PreparedGlobalRetirement32,
+    PreparedHeapAllocation32, PreparedHeapAllocations32, PreparedHeapRetirement32,
 };
 pub(crate) use regions::VirtualMemory32;
 pub(crate) use regions::span;
