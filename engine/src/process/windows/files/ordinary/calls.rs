@@ -12,6 +12,15 @@ impl FileRuntime32 {
         api: FileApi32,
         args: &[u32],
     ) -> Result<FileCallOutcome32, FileError32> {
+        if matches!(
+            api,
+            FileApi32::GetPrivateProfileIntA
+                | FileApi32::GetPrivateProfileStringA
+                | FileApi32::GetProfileIntA
+                | FileApi32::WritePrivateProfileStringA
+        ) {
+            return self.profile_call(memory, security.token(), api, args);
+        }
         if matches!(api, FileApi32::CreateFileA | FileApi32::CreateFileW) {
             return self.open_file_with_security(memory, api, args, security.token());
         }

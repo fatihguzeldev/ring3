@@ -11,6 +11,7 @@ mod locks;
 pub(super) mod memory;
 mod paths;
 mod progress;
+mod profile;
 pub(in crate::process::windows::files) use progress::PreparedCopyThreadExit32;
 mod search;
 

@@ -145,6 +145,10 @@ file_apis! {
     GetSystemDirectoryA = 0xb1, 2;
     GetSystemDirectoryW = 0xb2, 2;
     SetFileInformationByHandle = 0xb3, 4;
+    GetPrivateProfileIntA = 0xb4, 4;
+    GetPrivateProfileStringA = 0xb5, 6;
+    GetProfileIntA = 0xb6, 3;
+    WritePrivateProfileStringA = 0xb7, 4;
 }
 
 impl FileApi32 {
