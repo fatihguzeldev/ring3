@@ -287,7 +287,15 @@ impl EngineInstance {
                     .heaps
                     .local_unlock(args[0], api == GlobalUnlock)?,
             )),
-            LocalSize | GlobalSize => self.windows_memory.heaps.local_size(args[0]),
+            LocalSize => self.windows_memory.heaps.local_size(args[0]),
+            GlobalSize => self
+                .windows_memory
+                .heaps
+                .local_size(args[0])
+                .map_err(|error| match error {
+                    MemoryError32::InvalidParameter => MemoryError32::InvalidHandle,
+                    error => error,
+                }),
             LocalFlags | GlobalFlags => self.windows_memory.heaps.local_flags(args[0]),
             LocalHandle | GlobalHandle => self.windows_memory.heaps.local_handle(args[0]),
         }

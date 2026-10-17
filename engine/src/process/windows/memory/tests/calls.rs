@@ -60,6 +60,17 @@ fn captured_heap_and_general_virtual_memory_calls_share_the_real_kernel32_author
 }
 
 #[test]
+fn global_size_reports_native_invalid_handle_after_movable_allocation_retirement() {
+    let mut engine = engine();
+    let handle = call(&mut engine, MemoryApi32::GlobalAlloc.id(), &[2, 8]);
+    assert_ne!(handle, 0);
+    assert_eq!(call(&mut engine, MemoryApi32::GlobalSize.id(), &[handle]), 8);
+    assert_eq!(call(&mut engine, MemoryApi32::GlobalFree.id(), &[handle]), 0);
+    assert_eq!(call(&mut engine, MemoryApi32::GlobalSize.id(), &[handle]), 0);
+    assert_eq!(engine.windows_thread.last_error(), 6);
+}
+
+#[test]
 fn explicit_process_ex_memory_calls_reject_foreign_authority_without_allocating() {
     let mut engine = engine();
     assert_eq!(
