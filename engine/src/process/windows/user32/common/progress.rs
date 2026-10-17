@@ -27,6 +27,9 @@ impl User32Context32 {
             CommonControlState32::Tooltip(_) => {
                 return self.tooltip_control_message(args, wide, ram, gdi, call);
             }
+            CommonControlState32::Header(_) => {
+                return self.header_control_message(args, wide, ram, gdi, call);
+            }
             CommonControlState32::Tab(_) => {
                 return self.tab_control_message(args, wide, ram, gdi, call);
             }

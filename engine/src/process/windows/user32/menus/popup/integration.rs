@@ -38,6 +38,9 @@ impl User32Context32 {
         &self,
         token: u64,
     ) -> Result<Option<(bool, bool)>, E> {
+        if let Some(flags) = self.preview_header_input_flags(token)? {
+            return Ok(Some(flags));
+        }
         if let Some(flags) = self.preview_tab_selection_input_flags(token)? {
             return Ok(Some(flags));
         }

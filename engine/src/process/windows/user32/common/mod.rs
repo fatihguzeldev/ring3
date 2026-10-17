@@ -1,3 +1,4 @@
+pub(super) mod header;
 mod hotkey;
 pub(super) mod layout;
 mod painting;

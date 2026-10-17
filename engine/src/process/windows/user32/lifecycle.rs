@@ -55,6 +55,11 @@ impl User32Context32 {
                 .ok_or(User32Error32::Win32(1407))?;
             (procedures[usize::from(api.wide())], api.wide())
         } else if let Some(kind) = self.state.common_kind(class.atom) {
+            if kind == crate::windows::comctl32::CommonControlKind32::Header
+                && args[3] & 0x1f44 != 0
+            {
+                return Err(User32Error32::Win32(50));
+            }
             if kind == crate::windows::comctl32::CommonControlKind32::Tab && args[3] & 0x6080 != 0 {
                 return Err(User32Error32::Win32(50));
             }

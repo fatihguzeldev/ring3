@@ -320,3 +320,6 @@ mod hotkey;
 
 #[path = "tooltip.rs"]
 mod tooltip;
+
+#[path = "header.rs"]
+mod header;

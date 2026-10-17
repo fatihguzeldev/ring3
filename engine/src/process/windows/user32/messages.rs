@@ -139,6 +139,7 @@ impl User32Context32 {
         let outcome = self.complete_menu_bar_child(token, outcome)?;
         let outcome = self.complete_common_layout_child(token, outcome)?;
         let outcome = self.complete_tooltip_child(token, outcome)?;
+        let outcome = self.complete_header_child(token, outcome)?;
         let outcome = self.complete_tab_selection_child(token, outcome)?;
         self.complete_status_draw_child(token, outcome)
     }
@@ -154,6 +155,9 @@ impl User32Context32 {
             .filter(|pending| pending.token == token)
             .cloned()
             .ok_or(User32Error32::InvalidToken)?;
+        if let Continuation32::Header(_) = pending.continuation {
+            return self.resume_header_call(token, memory);
+        }
         if let Continuation32::TabSelection(_) = pending.continuation {
             return self.resume_tab_selection(token, memory);
         }
