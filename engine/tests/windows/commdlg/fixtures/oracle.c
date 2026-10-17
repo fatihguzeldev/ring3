@@ -10,7 +10,7 @@
 struct probe {
     const char *name;
     BOOL wide, cancel, veto, timeout;
-    HWND root;
+    HWND root, edit;
     void *ofn;
     const WCHAR *chosen_w;
     const char *chosen_a;
@@ -19,6 +19,7 @@ struct probe {
     WORD observed_file, observed_extension;
     UINT control_edit, control_ok, control_cancel;
     UINT edit_candidates, edit_id, edit_parent_id, admitted;
+    UINT init_done, folder_done, action_posted, button_ready, activated, clicks;
 };
 
 static int rows;
@@ -88,6 +89,7 @@ static BOOL admit_filename(struct probe *p) {
     EnumChildWindows(p->root, filename_edit, (LPARAM)&search);
     p->edit_candidates = search.count;
     if (search.count != 1 || !search.edit) return FALSE;
+    p->edit = search.edit;
     p->edit_id = (UINT)GetDlgCtrlID(search.edit);
     p->edit_parent_id = (UINT)GetDlgCtrlID(GetParent(search.edit));
     if (p->wide) {
@@ -99,6 +101,27 @@ static BOOL admit_filename(struct probe *p) {
     }
     p->admitted = 1;
     return TRUE;
+}
+
+static BOOL click_ok(struct probe *p) {
+    HWND button = GetDlgItem(p->root, IDOK);
+    HWND control = p->edit;
+    WCHAR class_name[32];
+    if (!button || !IsWindow(button)) return FALSE;
+    if (control) {
+        while (GetParent(control) && GetParent(control) != p->root) control = GetParent(control);
+        if (!GetClassNameW(control, class_name, 32)) return FALSE;
+        SendMessageW(p->root, WM_COMMAND,
+            MAKEWPARAM(GetDlgCtrlID(control), !lstrcmpiW(class_name, L"Edit") ? EN_CHANGE : CBN_EDITCHANGE),
+            (LPARAM)control);
+    }
+    p->button_ready = IsWindowEnabled(button) && IsWindowVisible(button);
+    SetActiveWindow(p->root);
+    p->activated = GetActiveWindow() == p->root;
+    if (!p->button_ready || !p->activated) return FALSE;
+    SetFocus(button);
+    ++p->clicks;
+    return PostMessageW(button, BM_CLICK, 0, 0);
 }
 
 static void CALLBACK timeout(HWND unused_window, UINT message, UINT_PTR id, DWORD tick) {
@@ -124,11 +147,22 @@ static UINT_PTR hook(HWND window, UINT message, LPARAM parameter, BOOL wide) {
         return 0;
     }
     p = (struct probe *)GetWindowLongPtrW(window, GWLP_USERDATA);
-    if (!p || message != WM_NOTIFY) return 0;
+    if (!p) return 0;
+    if (message == WM_APP + 0x21) {
+        if (!admit_filename(p) || !click_ok(p)) PostMessageW(p->root, WM_COMMAND, IDCANCEL, 0);
+        return 0;
+    }
+    if (message == WM_APP + 0x22) {
+        if (!click_ok(p)) PostMessageW(p->root, WM_COMMAND, IDCANCEL, 0);
+        return 0;
+    }
+    if (message != WM_NOTIFY) return 0;
     if (p->count < 64) p->events[p->count++] = ((NMHDR *)parameter)->code;
-    if (((NMHDR *)parameter)->code == CDN_INITDONE && !p->cancel) {
-        if (admit_filename(p)) PostMessageW(p->root, WM_COMMAND, IDOK, 0);
-        else PostMessageW(p->root, WM_COMMAND, IDCANCEL, 0);
+    if (((NMHDR *)parameter)->code == CDN_INITDONE) p->init_done = 1;
+    if (((NMHDR *)parameter)->code == CDN_FOLDERCHANGE) p->folder_done = 1;
+    if (p->init_done && p->folder_done && !p->cancel && !p->action_posted) {
+        p->action_posted = 1;
+        PostMessageW(window, WM_APP + 0x21, 0, 0);
     }
     if (((NMHDR *)parameter)->code == CDN_FILEOK) {
         ++p->file_ok;
@@ -147,7 +181,7 @@ static UINT_PTR hook(HWND window, UINT message, LPARAM parameter, BOOL wide) {
         }
         if (p->veto && p->file_ok == 1) {
             SetWindowLongPtrW(window, DWLP_MSGRESULT, 1);
-            PostMessageW(p->root, WM_COMMAND, IDOK, 0);
+            PostMessageW(window, WM_APP + 0x22, 0, 0);
             return 1;
         }
     }
@@ -177,8 +211,10 @@ static void describe_probe(struct probe *p, BOOL ok, DWORD error, DWORD last_err
         if (i) putchar(',');
         printf("%u", p->events[i]);
     }
-    printf("],\"editCandidates\":%u,\"editId\":%u,\"editParentId\":%u,\"admitted\":%u",
-        p->edit_candidates, p->edit_id, p->edit_parent_id, p->admitted);
+    printf("],\"editCandidates\":%u,\"editId\":%u,\"editParentId\":%u,\"admitted\":%u,"
+        "\"buttonReady\":%u,\"activated\":%u,\"clicks\":%u,\"ready\":[%u,%u]",
+        p->edit_candidates, p->edit_id, p->edit_parent_id, p->admitted,
+        p->button_ready, p->activated, p->clicks, p->init_done, p->folder_done);
 }
 
 static void dialog_w(const char *name, BOOL save, const WCHAR *chosen, DWORD flags,
@@ -222,7 +258,7 @@ static void dialog_w(const char *name, BOOL save, const WCHAR *chosen, DWORD fla
     printf(",\"cwdAfter\":"); wide_units(after, MAX_PATH);
     putchar('}');
     SetCurrentDirectoryW(before);
-    if (p.timeout || (!p.cancel && !p.admitted)) ExitProcess(2);
+    if (p.timeout || (!p.cancel && (!p.admitted || !p.button_ready || !p.activated))) ExitProcess(2);
 }
 
 static void dialog_a(const char *name, BOOL save, const char *chosen, DWORD flags, DWORD capacity) {
@@ -253,7 +289,7 @@ static void dialog_a(const char *name, BOOL save, const char *chosen, DWORD flag
     printf(",\"flags\":%lu,\"filter\":%lu,\"offsets\":[%u,%u],\"requiredWord\":%u,\"file\":",
         ofn.Flags, ofn.nFilterIndex, ofn.nFileOffset, ofn.nFileExtension, *(WORD *)file);
     narrow_units(file, 512); printf(",\"title\":"); narrow_units(title, 512); putchar('}');
-    if (p.timeout || (!p.cancel && !p.admitted)) ExitProcess(2);
+    if (p.timeout || (!p.cancel && (!p.admitted || !p.button_ready || !p.activated))) ExitProcess(2);
 }
 
 struct thread_errors { DWORD before, after; };
