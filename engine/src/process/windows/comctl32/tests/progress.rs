@@ -329,3 +329,16 @@ mod toolbar;
 
 #[path = "numeric.rs"]
 mod numeric;
+
+#[test]
+fn captured_legacy_initializer_uses_the_void_gate_and_can_be_called_again() {
+    let (mut engine, _, _, _, _, _) = fixture();
+    for _ in 0..2 {
+        capture(
+            &mut engine,
+            CommonControlsApi32::InitCommonControls.id(),
+            &[],
+        );
+        assert!(engine.pending_call.is_none());
+    }
+}

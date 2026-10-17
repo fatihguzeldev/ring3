@@ -40,6 +40,9 @@ impl EngineInstance {
         self.check_windows_thread_write()?;
         Self::prepare_completed_call(frame.complete(0))?;
         let result = match api {
+            Some(CommonControlsApi32::InitCommonControls) => self
+                .bind_common_control_classes(0xff)
+                .map(|()| super::super::user32::User32Outcome32::Return(0)),
             Some(CommonControlsApi32::InitCommonControlsEx) => {
                 self.initialize_common_controls(frame.arguments()[0])
             }

@@ -10,6 +10,7 @@ pub(crate) const TOOLTIP_RELAY_PROC: u32 = 0x0022_ff03;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u32)]
 pub enum CommonControlsApi32 {
+    InitCommonControls = 0x0022_0001,
     InitCommonControlsEx = 0x0022_0002,
     CreateStatusWindowA = 0x0022_0003,
     CreateStatusWindowW = 0x0022_0004,
@@ -17,6 +18,7 @@ pub enum CommonControlsApi32 {
 
 impl CommonControlsApi32 {
     pub const ALL: &'static [Self] = &[
+        Self::InitCommonControls,
         Self::InitCommonControlsEx,
         Self::CreateStatusWindowA,
         Self::CreateStatusWindowW,
@@ -32,6 +34,7 @@ impl CommonControlsApi32 {
 
     pub const fn name(self) -> &'static str {
         match self {
+            Self::InitCommonControls => "InitCommonControls",
             Self::InitCommonControlsEx => "InitCommonControlsEx",
             Self::CreateStatusWindowA => "CreateStatusWindowA",
             Self::CreateStatusWindowW => "CreateStatusWindowW",
@@ -40,6 +43,7 @@ impl CommonControlsApi32 {
 
     pub const fn stack_words(self) -> u32 {
         match self {
+            Self::InitCommonControls => 0,
             Self::InitCommonControlsEx => 1,
             Self::CreateStatusWindowA | Self::CreateStatusWindowW => 4,
         }

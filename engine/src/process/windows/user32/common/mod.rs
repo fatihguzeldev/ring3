@@ -41,7 +41,10 @@ impl EngineInstance {
         Ok(User32Outcome32::Return(1))
     }
 
-    pub(super) fn bind_common_control_classes(&mut self, flags: u32) -> Result<(), HostError> {
+    pub(in crate::process::windows) fn bind_common_control_classes(
+        &mut self,
+        flags: u32,
+    ) -> Result<(), HostError> {
         let mut procedures = [GuestAddress(0); 2];
         for gate in self
             .loaded_windows_modules()
