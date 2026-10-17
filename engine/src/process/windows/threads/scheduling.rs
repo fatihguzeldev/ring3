@@ -71,15 +71,25 @@ impl EngineInstance {
                 .is_some_and(|runtime| runtime.active_alertable())
                 || self.windows_file_wait_alertable())
             && self.has_pending_thread_apc(thread.id);
-        let ready = thread.saved.as_ref().is_some_and(|saved| {
-            saved.ready(
-                self,
-                self.synchronization
-                    .as_ref()
-                    .map_or(0, |runtime| runtime.context().now_ns()),
-                thread.id,
-            )
-        });
+        let ready = thread.saved.as_ref().map_or_else(
+            || {
+                thread.id == self.threads.current_id()
+                    && self.waiting_user32_message().is_some()
+                    && self
+                        .user32
+                        .as_ref()
+                        .is_some_and(|context| context.active_thread_wait_ready())
+            },
+            |saved| {
+                saved.ready(
+                    self,
+                    self.synchronization
+                        .as_ref()
+                        .map_or(0, |runtime| runtime.context().now_ns()),
+                    thread.id,
+                )
+            },
+        );
         initialization
             || messages
             || com
@@ -284,7 +294,9 @@ impl EngineInstance {
             self.resume_user32_image_call(self.key(), token)?;
         }
         if self.active_version_reply_ready() {
-            let wait = self.pending_version_call()?.ok_or(HostError::Infrastructure)?;
+            let wait = self
+                .pending_version_call()?
+                .ok_or(HostError::Infrastructure)?;
             self.resume_version_call(wait.key, wait.token)?;
         }
 

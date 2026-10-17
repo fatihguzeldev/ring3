@@ -168,3 +168,70 @@ fn modal_dead_key_translation_retains_one_message_without_splitting_the_queue_pr
             .is_none()
     );
 }
+
+#[test]
+fn current_modal_wait_dispatches_the_last_dequeued_message_without_a_saved_thread_context() {
+    let mut engine = engine();
+    write_template(&mut engine);
+    let token = begin(&mut engine, true);
+    let root = reach_init(&mut engine);
+    complete_callback(&mut engine, 0).unwrap();
+    let mut settled = false;
+    for _ in 0..128 {
+        if let Some(request) = engine.pending_windows_callback() {
+            complete_callback(&mut engine, u32::from(request.arguments[1] == 0x81)).unwrap();
+        } else if engine.user32.as_ref().unwrap().active_thread_wait_ready() {
+            let continuation = engine.waiting_user32_message().unwrap();
+            engine.resume_user32_wait(KEY, continuation).unwrap();
+        } else {
+            settled = true;
+            break;
+        }
+    }
+    assert!(
+        settled,
+        "the real modal window reaches an empty message wait"
+    );
+    assert_eq!(
+        engine.schedule_windows_thread().unwrap(),
+        ThreadSchedule32::Waiting { deadline_ns: None }
+    );
+    assert_eq!(
+        engine.windows_thread_info(1).unwrap().state,
+        ThreadState32::Waiting
+    );
+    let frame = engine.pending_call.as_ref().unwrap().frame;
+    engine
+        .post_user32_message(Message32 {
+            thread_id: 1,
+            window: root,
+            message: 0x111,
+            wparam: 1,
+            ..Default::default()
+        })
+        .unwrap();
+    projection(&engine, "before scheduling the last posted command");
+    assert_eq!(
+        engine.schedule_windows_thread().unwrap(),
+        ThreadSchedule32::WindowsCallback { thread: 1 }
+    );
+    assert_eq!(engine.pending_call.as_ref().unwrap().token, token);
+    assert_eq!(engine.pending_call.as_ref().unwrap().frame, frame);
+    let request = engine.pending_windows_callback().unwrap();
+    assert_eq!(request.count, 4);
+    assert_eq!(&request.arguments[..4], &[root, 0x111, 1, 0]);
+    assert!(
+        engine
+            .user32
+            .as_ref()
+            .unwrap()
+            .state
+            .find_message(1, root, 0x111, 0x111)
+            .unwrap()
+            .is_none()
+    );
+    projection(
+        &engine,
+        "the retained dispatch and message removal have one queue projection",
+    );
+}
