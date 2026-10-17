@@ -6,6 +6,7 @@ mod progress;
 pub(super) mod status;
 pub(super) mod tab;
 pub(super) mod tooltip;
+mod toolbar;
 
 use super::{User32Outcome32, memory};
 use crate::{

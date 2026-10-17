@@ -68,6 +68,11 @@ impl User32Context32 {
             {
                 return Err(User32Error32::Win32(50));
             }
+            if kind == crate::windows::comctl32::CommonControlKind32::Toolbar
+                && args[3] & (0x100 | 0x200 | 0x400 | 0x2000 | 0x4000 | 0x8000 | 0x80) != 0
+            {
+                return Err(User32Error32::Win32(50));
+            }
             let procedures = self.common_procedures.ok_or(User32Error32::Win32(1407))?;
             if kind == crate::windows::comctl32::CommonControlKind32::Progress && args[3] & 8 != 0 {
                 return Err(User32Error32::Win32(50));

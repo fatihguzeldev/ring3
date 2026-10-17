@@ -323,3 +323,6 @@ mod tooltip;
 
 #[path = "header.rs"]
 mod header;
+
+#[path = "toolbar.rs"]
+mod toolbar;

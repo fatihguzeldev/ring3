@@ -24,6 +24,9 @@ impl User32Context32 {
             .map_err(HostError::User32)?;
         let before = match self.state.common_state(window).map_err(HostError::User32)? {
             CommonControlState32::Progress(progress) => *progress,
+            CommonControlState32::Toolbar(_) => {
+                return self.toolbar_control_message(args, wide, ram, gdi, call);
+            }
             CommonControlState32::Tooltip(_) => {
                 return self.tooltip_control_message(args, wide, ram, gdi, call);
             }

@@ -75,6 +75,7 @@ impl User32State32 {
                     CommonControlKind32::Header => 0x400b,
                     CommonControlKind32::Hotkey => 0x4000,
                     CommonControlKind32::Tooltip => 0x4008,
+                    CommonControlKind32::Toolbar => 0x400b,
                 },
                 extra_bytes: 4,
                 ..Default::default()

@@ -86,6 +86,27 @@ impl User32Context32 {
         {
             return Ok(User32Outcome32::Return(0));
         }
+        self.begin_common_layout_position(
+            [
+                window.get(),
+                0,
+                x as u32,
+                y as u32,
+                width,
+                height as u32,
+                0x14,
+            ],
+            ram,
+            call,
+        )
+    }
+
+    pub(super) fn begin_common_layout_position(
+        &mut self,
+        arguments: [u32; 7],
+        ram: &mut AddressSpace,
+        call: User32CallContext32,
+    ) -> Result<User32Outcome32, HostError> {
         self.prepare_thread_slots().map_err(HostError::User32)?;
         if self.pending.len() + 2 > self.continuation_limit {
             return Err(HostError::User32(E::Capacity));
@@ -94,20 +115,7 @@ impl User32Context32 {
             .checked_add(2)
             .ok_or(HostError::User32(E::Capacity))?;
         let position = self
-            .prepare_window_position(
-                User32Api32::SetWindowPos,
-                &[
-                    window.get(),
-                    0,
-                    x as u32,
-                    y as u32,
-                    width,
-                    height as u32,
-                    0x14,
-                ],
-                ram,
-                call,
-            )
+            .prepare_window_position(User32Api32::SetWindowPos, &arguments, ram, call)
             .map_err(HostError::User32)?;
         let User32Outcome32::Wait {
             continuation: parent,
