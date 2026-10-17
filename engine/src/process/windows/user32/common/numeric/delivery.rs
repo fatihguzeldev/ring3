@@ -1,5 +1,11 @@
 use super::*;
 impl User32Context32 {
+    fn updown_list_buddy(&self, buddy: WindowHandle32) -> Result<bool, E> {
+        Ok(self
+            .state
+            .standard_kind(self.state.record(buddy)?.class_atom)
+            == Some(crate::windows::controls::ControlKind32::ListBox))
+    }
     fn numeric_scroll(&self, call: NumericCall32, end: bool) -> Result<Option<[u32; 4]>, E> {
         let Some(parent) = call
             .parent
@@ -76,6 +82,22 @@ impl User32Context32 {
                 let Some(buddy) = self.updown_buddy(call.window)? else {
                     return Ok(None);
                 };
+                if call.buddy_list {
+                    return Ok(Some([
+                        buddy.get(),
+                        if matches!(call.stage, Stage32::ReadBuddy) {
+                            0x188
+                        } else {
+                            0x186
+                        },
+                        if matches!(call.stage, Stage32::ReadBuddy) {
+                            0
+                        } else {
+                            self.updown(call.window)?.position as u32
+                        },
+                        0,
+                    ]));
+                }
                 Ok(Some([
                     buddy.get(),
                     if matches!(call.stage, Stage32::ReadBuddy) {
@@ -121,7 +143,12 @@ impl User32Context32 {
                 }
             }
             Child32::Capture => Stage32::Arm,
-            Child32::ReadBuddy => Stage32::Parsed,
+            Child32::ReadBuddy => {
+                if call.buddy_list {
+                    call.buddy_selection = result as i32;
+                }
+                Stage32::Parsed
+            }
             Child32::Notify if result != 0 => Stage32::Finish,
             Child32::Notify => Stage32::Apply,
             Child32::Buddy => {
@@ -170,6 +197,10 @@ impl User32Context32 {
             return Ok(false);
         };
         call.buddy_wide = self.state.record(buddy)?.unicode;
+        call.buddy_list = self.updown_list_buddy(buddy)?;
+        if call.buddy_list {
+            return Ok(true);
+        }
         let value = self.updown(call.window)?;
         let text = value.format(value.position, style & 0x80 == 0);
         let (bytes, _) = memory::encoded_text(64, &text, call.buddy_wide, call.call)?;
@@ -287,7 +318,10 @@ impl User32Context32 {
                     {
                         let buddy = self.updown_buddy(call.window)?.unwrap();
                         call.buddy_wide = self.state.record(buddy)?.unicode;
-                        ram.write(GuestAddress(call.scratch.address.0 + 64), &[0; 128])?;
+                        call.buddy_list = self.updown_list_buddy(buddy)?;
+                        if !call.buddy_list {
+                            ram.write(GuestAddress(call.scratch.address.0 + 64), &[0; 128])?;
+                        }
                         call.stage = Stage32::ReadBuddy;
                     }
                     NumericAction32::Read { .. } => call.stage = Stage32::Finish,
@@ -350,16 +384,27 @@ impl User32Context32 {
                 Self::after_numeric_child(&mut call, kind, 0);
             }
             Stage32::Parsed => {
-                let text = memory::string(
-                    ram,
-                    call.scratch.address.0 + 64,
-                    call.buddy_wide,
-                    63,
-                    call.call.ansi,
-                )?;
-                match self.updown(call.window)?.parse(&text) {
-                    Some(value) => call.start = value,
-                    None => call.error = true,
+                if call.buddy_list {
+                    let value = self.updown(call.window)?;
+                    if call.buddy_selection >= 0
+                        && value.clamp(i64::from(call.buddy_selection)) == call.buddy_selection
+                    {
+                        call.start = call.buddy_selection;
+                    } else {
+                        call.error = true;
+                    }
+                } else {
+                    let text = memory::string(
+                        ram,
+                        call.scratch.address.0 + 64,
+                        call.buddy_wide,
+                        63,
+                        call.call.ansi,
+                    )?;
+                    match self.updown(call.window)?.parse(&text) {
+                        Some(value) => call.start = value,
+                        None => call.error = true,
+                    }
                 }
                 call.stage = if matches!(call.action, NumericAction32::Read { .. }) {
                     Stage32::Finish
@@ -412,9 +457,12 @@ impl User32Context32 {
                         if call.buddy_text {
                             let buddy = self.updown_buddy(call.window)?.unwrap();
                             call.buddy_wide = self.state.record(buddy)?.unicode;
-                            let (bytes, _) =
-                                memory::encoded_text(64, &text, call.buddy_wide, call.call)?;
-                            ram.write(GuestAddress(call.scratch.address.0 + 64), &bytes)?;
+                            call.buddy_list = self.updown_list_buddy(buddy)?;
+                            if !call.buddy_list {
+                                let (bytes, _) =
+                                    memory::encoded_text(64, &text, call.buddy_wide, call.call)?;
+                                ram.write(GuestAddress(call.scratch.address.0 + 64), &bytes)?;
+                            }
                         }
                         let value = self.updown_mut(call.window)?;
                         if let Some((a, b)) = range {
@@ -442,11 +490,14 @@ impl User32Context32 {
                             call.buddy_text = style & 2 != 0;
                             if call.buddy_text {
                                 call.buddy_wide = self.state.record(buddy)?.unicode;
+                                call.buddy_list = self.updown_list_buddy(buddy)?;
                                 let value = self.updown(call.window)?;
                                 let text = value.format(value.position, style & 0x80 == 0);
                                 let (bytes, _) =
                                     memory::encoded_text(64, &text, call.buddy_wide, call.call)?;
-                                ram.write(GuestAddress(call.scratch.address.0 + 64), &bytes)?;
+                                if !call.buddy_list {
+                                    ram.write(GuestAddress(call.scratch.address.0 + 64), &bytes)?;
+                                }
                             }
                         }
                         self.updown_mut(call.window)?.buddy = buddy;

@@ -676,3 +676,159 @@ fn captured_updown_range_output_fault_is_atomic_and_invalid_acceleration_preserv
     assert_eq!(words::<1>(&engine, 0x12520), [(-500i32) as u32]);
     assert_eq!(words::<1>(&engine, 0x14000), [700]);
 }
+
+#[test]
+fn captured_updown_listbox_buddy_reads_and_sets_selection_without_replacing_caption() {
+    let (mut engine, callback, common, procedure, _, parent) = fixture();
+    let buddy = create(
+        &mut engine,
+        callback,
+        common,
+        procedure,
+        parent,
+        "ListBox",
+        0,
+        64,
+        48,
+        98,
+    );
+    for (index, text) in ["zero", "one", "two"].into_iter().enumerate() {
+        engine
+            .memory
+            .as_mut()
+            .unwrap()
+            .write(
+                GuestAddress(0x12600),
+                &text
+                    .encode_utf16()
+                    .chain([0])
+                    .flat_map(u16::to_le_bytes)
+                    .collect::<Vec<_>>(),
+            )
+            .unwrap();
+        assert_eq!(
+            send(
+                &mut engine,
+                callback,
+                common,
+                procedure,
+                buddy,
+                [0x180, 0, 0x12600]
+            ),
+            index as u32
+        );
+    }
+    let spin = create(
+        &mut engine,
+        callback,
+        common,
+        procedure,
+        parent,
+        "msctls_updown32",
+        2,
+        18,
+        32,
+        99,
+    );
+    send(
+        &mut engine,
+        callback,
+        common,
+        procedure,
+        spin,
+        [0x46f, 0, 2],
+    );
+    assert_eq!(
+        send(
+            &mut engine,
+            callback,
+            common,
+            procedure,
+            spin,
+            [0x469, buddy, 0]
+        ),
+        0
+    );
+    assert_eq!(
+        send(
+            &mut engine,
+            callback,
+            common,
+            procedure,
+            buddy,
+            [0x188, 0, 0]
+        ),
+        0
+    );
+    assert_eq!(
+        send(
+            &mut engine,
+            callback,
+            common,
+            procedure,
+            spin,
+            [0x471, 0, 1]
+        ),
+        0
+    );
+    assert_eq!(
+        send(
+            &mut engine,
+            callback,
+            common,
+            procedure,
+            buddy,
+            [0x188, 0, 0]
+        ),
+        1
+    );
+    assert_eq!(
+        send(
+            &mut engine,
+            callback,
+            common,
+            procedure,
+            buddy,
+            [0x186, 2, 0]
+        ),
+        2
+    );
+    assert_eq!(
+        send(
+            &mut engine,
+            callback,
+            common,
+            procedure,
+            spin,
+            [0x472, 0, 0x12580]
+        ),
+        2
+    );
+    assert_eq!(words::<1>(&engine, 0x12580), [0]);
+    send(
+        &mut engine,
+        callback,
+        common,
+        procedure,
+        buddy,
+        [0x186, u32::MAX, 0],
+    );
+    assert_eq!(
+        send(
+            &mut engine,
+            callback,
+            common,
+            procedure,
+            spin,
+            [0x472, 0, 0x12580]
+        ),
+        2
+    );
+    assert_eq!(words::<1>(&engine, 0x12580), [1]);
+    capture(
+        &mut engine,
+        User32Api32::GetWindowTextLengthW.id(),
+        &[buddy],
+    );
+    assert_eq!(eax(&engine), 0);
+}
