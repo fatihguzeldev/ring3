@@ -176,7 +176,7 @@ impl User32Context32 {
                         self.resource_dialogs.plans[index].stage = Stage32::Restore;
                         continue;
                     }
-                    if !self.resource_dialog_ready(token) {
+                    if admitted.is_none() || !self.resource_dialog_ready(token) {
                         return Ok(User32Outcome32::Wait {
                             continuation: token,
                         });
@@ -194,6 +194,12 @@ impl User32Context32 {
                     )?
                 }
                 Stage32::Dispatch => {
+                    if admitted != Some(Stage32::Dispatch) {
+                        return Ok(User32Outcome32::Wait {
+                            continuation: token,
+                        });
+                    }
+                    self.check_message_dispatch(scratch.address.0, ram, context)?;
                     self.translate_message(scratch.address.0, ram, context)?;
                     self.dispatch_message(scratch.address.0, ram, context)?
                 }
@@ -277,7 +283,11 @@ impl User32Context32 {
             let plan = &self.resource_dialogs.plans[index];
             matches!(
                 plan.stage,
-                Stage32::Focus | Stage32::Destroy | Stage32::RestoreFocus
+                Stage32::Focus
+                    | Stage32::Destroy
+                    | Stage32::RestoreFocus
+                    | Stage32::Retrieve
+                    | Stage32::Dispatch
             ) || plan.windows.first().is_none_or(|&window| {
                 self.state.dialog(window).is_err()
                     || self

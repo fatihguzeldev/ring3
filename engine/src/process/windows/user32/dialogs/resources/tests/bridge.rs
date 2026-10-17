@@ -408,9 +408,34 @@ fn cross_thread_accelerator_command_returns_only_after_the_real_owner_invocation
     engine
         .complete_windows_call(KEY, engine.generation, returned.token)
         .unwrap();
-    assert_eq!(
-        engine.schedule_windows_thread().unwrap(),
-        ThreadSchedule32::Running { thread: 2 }
+    let mut resumed_sender = false;
+    for _ in 0..16 {
+        match engine.schedule_windows_thread().unwrap() {
+            ThreadSchedule32::Running { thread: 2 } => {
+                resumed_sender = true;
+                break;
+            }
+            ThreadSchedule32::WindowsCallback { thread: 1 } => {
+                let request = engine.pending_windows_callback().unwrap();
+                assert_eq!(
+                    request.arguments[1], 0x0f,
+                    "only pending modal paint may precede sender resumption"
+                );
+                let window = WindowHandle32::try_from(request.arguments[0]).unwrap();
+                let context = engine.user32.as_ref().unwrap();
+                let child = context
+                    .state
+                    .dialog_item(WindowHandle32::try_from(root).unwrap(), 100)
+                    .unwrap();
+                assert!(window.get() == root || Some(window) == child);
+                complete_callback(&mut engine, 0).unwrap();
+            }
+            other => panic!("unexpected schedule after the accepted owner command: {other:?}"),
+        }
+    }
+    assert!(
+        resumed_sender,
+        "the completed owner invocation makes its exact sender runnable"
     );
     if let Some(pending) = engine.pending_call.as_ref() {
         assert_eq!(pending.token, outer);
@@ -435,3 +460,6 @@ fn cross_thread_accelerator_command_returns_only_after_the_real_owner_invocation
         0
     );
 }
+
+#[path = "bridge/queue.rs"]
+mod queue;

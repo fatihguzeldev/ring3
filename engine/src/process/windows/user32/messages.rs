@@ -285,13 +285,29 @@ impl User32Context32 {
         }
     }
 
+    pub(in crate::process::windows::user32) fn check_message_dispatch(
+        &self,
+        address: u32,
+        memory: &AddressSpace,
+        context: User32CallContext32,
+    ) -> Result<Message32, User32Error32> {
+        let message = memory::message(memory, address)?;
+        if message.message == 0x0113 && message.lparam != 0 {
+            self.check_continuation()?;
+        } else if message.window != 0 {
+            self.owned(message.window, context.thread_id)?;
+            self.check_continuation()?;
+        }
+        Ok(message)
+    }
+
     pub(super) fn dispatch_message(
         &mut self,
         address: u32,
         memory: &AddressSpace,
         context: User32CallContext32,
     ) -> Result<User32Outcome32, User32Error32> {
-        let message = memory::message(memory, address)?;
+        let message = self.check_message_dispatch(address, memory, context)?;
         if message.message == 0x0113 && message.lparam != 0 {
             return self.start_message_callback(
                 Continuation32::Timer {
