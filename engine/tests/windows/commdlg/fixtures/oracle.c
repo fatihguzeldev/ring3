@@ -15,11 +15,14 @@ struct probe {
     const WCHAR *chosen_w;
     const char *chosen_a;
     UINT initialized, file_ok, same_ofn, events[64], count;
+    UINT cancel_posted;
     DWORD observed_flags;
     WORD observed_file, observed_extension;
     UINT control_edit, control_ok, control_cancel;
     UINT edit_candidates, edit_id, edit_parent_id, admitted;
     UINT init_done, folder_done, action_posted, button_ready, activated, clicks;
+    UINT_PTR action_timer;
+    BOOL after_veto;
 };
 
 static int rows;
@@ -131,7 +134,8 @@ static BOOL click_ok(struct probe *p) {
     SetFocus(button);
     ++p->clicks;
     stage(p->name, "post-button-click", p->clicks);
-    return PostMessageW(button, BM_CLICK, 0, 0);
+    SendMessageW(button, BM_CLICK, 0, 0);
+    return TRUE;
 }
 
 static void CALLBACK timeout(HWND unused_window, UINT message, UINT_PTR id, DWORD tick) {
@@ -139,6 +143,25 @@ static void CALLBACK timeout(HWND unused_window, UINT message, UINT_PTR id, DWOR
     KillTimer(NULL, id);
     if (active) { active->timeout = TRUE; stage(active->name, "watchdog", tick); }
     EnumThreadWindows(GetCurrentThreadId(), cancel_window, 0);
+}
+
+static void CALLBACK action_timer(HWND unused_window, UINT message, UINT_PTR id, DWORD tick) {
+    struct probe *p = active;
+    (void)unused_window; (void)message; (void)tick;
+    KillTimer(NULL, id);
+    if (!p || p->action_timer != id) return;
+    p->action_timer = 0;
+    stage(p->name, p->after_veto ? "action-after-veto" : "action-initial", id);
+    if ((!p->after_veto && !admit_filename(p)) || !click_ok(p))
+        PostMessageW(p->root, WM_COMMAND, IDCANCEL, 0);
+}
+
+static BOOL schedule_action(struct probe *p, BOOL after_veto) {
+    if (p->action_timer) return FALSE;
+    p->after_veto = after_veto;
+    p->action_timer = SetTimer(NULL, 0, 1, action_timer);
+    stage(p->name, "schedule-action", (DWORD)p->action_timer);
+    return p->action_timer != 0;
 }
 
 static UINT_PTR hook(HWND window, UINT message, LPARAM parameter, BOOL wide) {
@@ -154,29 +177,22 @@ static UINT_PTR hook(HWND window, UINT message, LPARAM parameter, BOOL wide) {
         p->control_edit = GetDlgItem(p->root, edt1) != NULL;
         p->control_ok = GetDlgItem(p->root, IDOK) != NULL;
         p->control_cancel = GetDlgItem(p->root, IDCANCEL) != NULL;
-        if (p->cancel) PostMessageW(p->root, WM_COMMAND, IDCANCEL, 0);
+        if (p->cancel) {
+            p->cancel_posted = PostMessageW(p->root, WM_COMMAND, IDCANCEL, 0) != 0;
+            stage(p->name, "post-cancel", p->cancel_posted);
+        }
         return 0;
     }
     p = (struct probe *)GetWindowLongPtrW(window, GWLP_USERDATA);
     if (!p) return 0;
-    if (message == WM_APP + 0x21) {
-        stage(p->name, "action-initial", 0);
-        if (!admit_filename(p) || !click_ok(p)) PostMessageW(p->root, WM_COMMAND, IDCANCEL, 0);
-        return 0;
-    }
-    if (message == WM_APP + 0x22) {
-        stage(p->name, "action-after-veto", 0);
-        if (!click_ok(p)) PostMessageW(p->root, WM_COMMAND, IDCANCEL, 0);
-        return 0;
-    }
     if (message != WM_NOTIFY) return 0;
     if (p->count < 64) p->events[p->count++] = ((NMHDR *)parameter)->code;
     stage(p->name, "notify", ((NMHDR *)parameter)->code);
     if (((NMHDR *)parameter)->code == CDN_INITDONE) p->init_done = 1;
     if (((NMHDR *)parameter)->code == CDN_FOLDERCHANGE) p->folder_done = 1;
-    if (p->init_done && p->folder_done && !p->cancel && !p->action_posted) {
+    if (((NMHDR *)parameter)->code == CDN_INITDONE && !p->cancel && !p->action_posted) {
         p->action_posted = 1;
-        PostMessageW(window, WM_APP + 0x21, 0, 0);
+        if (!schedule_action(p, FALSE)) PostMessageW(p->root, WM_COMMAND, IDCANCEL, 0);
     }
     if (((NMHDR *)parameter)->code == CDN_FILEOK) {
         ++p->file_ok;
@@ -195,7 +211,7 @@ static UINT_PTR hook(HWND window, UINT message, LPARAM parameter, BOOL wide) {
         }
         if (p->veto && p->file_ok == 1) {
             SetWindowLongPtrW(window, DWLP_MSGRESULT, 1);
-            PostMessageW(window, WM_APP + 0x22, 0, 0);
+            if (!schedule_action(p, TRUE)) PostMessageW(p->root, WM_COMMAND, IDCANCEL, 0);
             return 1;
         }
     }
@@ -226,9 +242,9 @@ static void describe_probe(struct probe *p, BOOL ok, DWORD error, DWORD last_err
         printf("%u", p->events[i]);
     }
     printf("],\"editCandidates\":%u,\"editId\":%u,\"editParentId\":%u,\"admitted\":%u,"
-        "\"buttonReady\":%u,\"activated\":%u,\"clicks\":%u,\"ready\":[%u,%u]",
+        "\"buttonReady\":%u,\"activated\":%u,\"clicks\":%u,\"ready\":[%u,%u],\"cancelPosted\":%u",
         p->edit_candidates, p->edit_id, p->edit_parent_id, p->admitted,
-        p->button_ready, p->activated, p->clicks, p->init_done, p->folder_done);
+        p->button_ready, p->activated, p->clicks, p->init_done, p->folder_done, p->cancel_posted);
 }
 
 static void dialog_w(const char *name, BOOL save, const WCHAR *chosen, DWORD flags,
@@ -256,7 +272,7 @@ static void dialog_w(const char *name, BOOL save, const WCHAR *chosen, DWORD fla
     ofn.lpfnHook = hook_w; ofn.lCustData = (LPARAM)&p;
     GetCurrentDirectoryW(MAX_PATH, before);
     active = &p;
-    timer = SetTimer(NULL, 0, 4000, timeout);
+    timer = SetTimer(NULL, 0, 20000, timeout);
     if (!timer) ExitProcess(2);
     SetLastError(0x12345678);
     stage(name, "enter-wide-api", size);
@@ -264,7 +280,8 @@ static void dialog_w(const char *name, BOOL save, const WCHAR *chosen, DWORD fla
     last_error = GetLastError(); error = CommDlgExtendedError();
     stage(name, "api-return", ok != 0);
     stage(name, "extended-error", error);
-    KillTimer(NULL, timer); active = NULL;
+    KillTimer(NULL, timer);
+    if (p.action_timer) { KillTimer(NULL, p.action_timer); p.action_timer = 0; } active = NULL;
     GetCurrentDirectoryW(MAX_PATH, after);
     describe_probe(&p, ok, error, last_error);
     printf(",\"flags\":%lu,\"filter\":%lu,\"offsets\":[%u,%u],\"requiredWord\":%u,\"file\":",
@@ -299,7 +316,7 @@ static void dialog_a(const char *name, BOOL save, const char *chosen, DWORD flag
     ofn.lpstrFileTitle = title; ofn.nMaxFileTitle = 512;
     ofn.lpstrDefExt = "txt"; ofn.Flags = flags | OFN_EXPLORER | OFN_ENABLEHOOK;
     ofn.lpfnHook = hook_a; ofn.lCustData = (LPARAM)&p;
-    active = &p; timer = SetTimer(NULL, 0, 4000, timeout);
+    active = &p; timer = SetTimer(NULL, 0, 20000, timeout);
     if (!timer) ExitProcess(2);
     SetLastError(0x12345678);
     stage(name, "enter-ansi-api", sizeof(ofn));
@@ -307,7 +324,8 @@ static void dialog_a(const char *name, BOOL save, const char *chosen, DWORD flag
     last_error = GetLastError(); error = CommDlgExtendedError();
     stage(name, "api-return", ok != 0);
     stage(name, "extended-error", error);
-    KillTimer(NULL, timer); active = NULL;
+    KillTimer(NULL, timer);
+    if (p.action_timer) { KillTimer(NULL, p.action_timer); p.action_timer = 0; } active = NULL;
     describe_probe(&p, ok, error, last_error);
     printf(",\"flags\":%lu,\"filter\":%lu,\"offsets\":[%u,%u],\"requiredWord\":%u,\"file\":",
         ofn.Flags, ofn.nFilterIndex, ofn.nFileOffset, ofn.nFileExtension, *(WORD *)file);
