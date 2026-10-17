@@ -26,10 +26,17 @@ impl EngineInstance {
         self.memory()?
             .ensure_transaction_versions(2)
             .map_err(HostError::Memory)?;
-        if api == NlsApi32::EnumSystemLocalesEx {
+        if matches!(
+            api,
+            NlsApi32::EnumSystemLocalesEx | NlsApi32::EnumSystemLocalesA
+        ) {
             self.check_windows_callback_capacity()?;
             self.reserve_windows_reply()?;
-            match self.begin_nls_enumeration(frame.arguments()) {
+            match if api == NlsApi32::EnumSystemLocalesA {
+                self.begin_nls_legacy_enumeration(frame.arguments())
+            } else {
+                self.begin_nls_enumeration(frame.arguments())
+            } {
                 Ok(crate::process::WindowsProviderOutcome32::Callback(request)) => {
                     self.park_nls_callback(request)?;
                     return Ok(true);

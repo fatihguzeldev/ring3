@@ -30,5 +30,5 @@ catalog! {
  LstrcpyA=53,2,"lstrcpyA"; LstrcpyW=54,2,"lstrcpyW"; LstrcpynA=55,3,"lstrcpynA"; LstrcpynW=56,3,"lstrcpynW"; LstrcatA=57,2,"lstrcatA"; LstrcatW=58,2,"lstrcatW";
  IsDBCSLeadByte=59,1,"IsDBCSLeadByte"; IsDBCSLeadByteEx=60,2,"IsDBCSLeadByteEx";
  GetLocaleInfoEx=61,4,"GetLocaleInfoEx"; GetUserDefaultLocaleName=62,2,"GetUserDefaultLocaleName";
- IsValidLocaleName=63,1,"IsValidLocaleName"; LCIDToLocaleName=64,4,"LCIDToLocaleName"; LocaleNameToLCID=65,2,"LocaleNameToLCID"; EnumSystemLocalesEx=66,4,"EnumSystemLocalesEx";
+ IsValidLocaleName=63,1,"IsValidLocaleName"; LCIDToLocaleName=64,4,"LCIDToLocaleName"; LocaleNameToLCID=65,2,"LocaleNameToLCID"; EnumSystemLocalesEx=66,4,"EnumSystemLocalesEx"; EnumSystemLocalesA=67,2,"EnumSystemLocalesA";
 }

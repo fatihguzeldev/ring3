@@ -170,3 +170,37 @@ fn urdu_language_and_display_queries_use_real_names_without_unused_variant_data(
         }
     }
 }
+
+#[test]
+fn legacy_locale_enumeration_delivers_ansi_lcids_and_releases_callback_scratch() {
+    use crate::process::windows::callbacks::WindowsProviderOutcome32;
+    let mut engine = engine();
+    engine
+        .memory
+        .as_mut()
+        .unwrap()
+        .protect(
+            PageRange::new(GuestAddress(0x10000), 1).unwrap(),
+            Permissions::READ_EXECUTE,
+        )
+        .unwrap();
+    let request = match engine.begin_nls_legacy_enumeration(&[0x10000, 0]).unwrap() {
+        WindowsProviderOutcome32::Callback(request) => request,
+        _ => panic!("installed locales"),
+    };
+    assert_eq!(request.count, 1);
+    let bytes = read::<9>(&engine, request.arguments[0]);
+    assert_eq!(bytes[8], 0);
+    assert!(bytes[..8].iter().all(u8::is_ascii_hexdigit));
+    assert_eq!(
+        engine.resume_nls_callback(request.continuation, 0),
+        Ok(WindowsProviderOutcome32::Return(1))
+    );
+    assert!(
+        engine
+            .memory()
+            .unwrap()
+            .permissions_at(GuestAddress(request.arguments[0]))
+            .is_err()
+    );
+}

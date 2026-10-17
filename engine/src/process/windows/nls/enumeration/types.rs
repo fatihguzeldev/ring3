@@ -13,12 +13,16 @@ pub(in crate::process::windows::nls) struct Enumeration32 {
     pub thread: u32,
     pub procedure: GuestAddress,
     pub parameter: u32,
+    pub legacy: bool,
     pub items: Vec<u32>,
     pub index: usize,
     pub scratch: GuestCallbackScratch32,
 }
 impl Enumeration32 {
-    pub(super) fn bytes(locale: u32) -> Result<Vec<u8>, NlsError32> {
+    pub(super) fn bytes(locale: u32, legacy: bool) -> Result<Vec<u8>, NlsError32> {
+        if legacy {
+            return Ok(format!("{locale:08x}\0").into_bytes());
+        }
         Ok(locale_identity(locale)?
             .windows_name()
             .encode_utf16()
@@ -40,7 +44,7 @@ impl Enumeration32 {
         WindowsCallback32 {
             procedure: self.procedure,
             arguments,
-            count: 3,
+            count: if self.legacy { 1 } else { 3 },
             continuation: self.continuation,
             provider: WindowsCallbackProvider32::Nls,
         }

@@ -15,6 +15,36 @@ impl EngineInstance {
         &mut self,
         args: &[u32],
     ) -> Result<WindowsProviderOutcome32, HostError> {
+        self.begin_nls_enumeration_format(args, false)
+    }
+    pub(in crate::process::windows::nls) fn begin_nls_legacy_enumeration(
+        &mut self,
+        args: &[u32],
+    ) -> Result<WindowsProviderOutcome32, HostError> {
+        if !matches!(args[1] & !4, 0 | 1 | 2) || args[1] & !7 != 0 {
+            return Err(HostError::Nls(NlsError32::InvalidFlags));
+        }
+        self.begin_nls_enumeration_format(
+            &[
+                args[0],
+                if args[1] == 4 {
+                    4
+                } else if args[1] & 4 != 0 {
+                    5
+                } else {
+                    1
+                },
+                0,
+                0,
+            ],
+            true,
+        )
+    }
+    fn begin_nls_enumeration_format(
+        &mut self,
+        args: &[u32],
+        legacy: bool,
+    ) -> Result<WindowsProviderOutcome32, HostError> {
         let failure = |error| HostError::Nls(error);
         if args[0] == 0 || args[3] != 0 {
             return Err(failure(NlsError32::InvalidParameter));
@@ -63,7 +93,7 @@ impl EngineInstance {
             .enumerations
             .try_reserve(1)
             .map_err(|_| failure(NlsError32::Allocation))?;
-        let bytes = Enumeration32::bytes(items[0]).map_err(failure)?;
+        let bytes = Enumeration32::bytes(items[0], legacy).map_err(failure)?;
         let scratch = GuestCallbackScratch32::allocate(
             self.memory.as_mut().unwrap(),
             self.nls.scratch_reservation(),
@@ -75,6 +105,7 @@ impl EngineInstance {
             thread,
             procedure: GuestAddress(args[0]),
             parameter: args[2],
+            legacy,
             items,
             index: 0,
             scratch,
@@ -110,8 +141,8 @@ impl EngineInstance {
             self.nls.enumerations.swap_remove(slot);
             return Ok(WindowsProviderOutcome32::Return(1));
         }
-        let bytes =
-            Enumeration32::bytes(pending.items[pending.index + 1]).map_err(HostError::Nls)?;
+        let bytes = Enumeration32::bytes(pending.items[pending.index + 1], pending.legacy)
+            .map_err(HostError::Nls)?;
         self.memory
             .as_mut()
             .unwrap()
