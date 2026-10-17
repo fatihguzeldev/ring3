@@ -15,6 +15,7 @@ pub(in crate::process::windows::user32) struct QueryPaint32 {
     thread: u32,
     rectangle: Rect32,
     output: Option<PaintOutput32>,
+    default_paint: bool,
 }
 impl QueryPaint32 {
     pub(in crate::process::windows::user32) fn check_output(
@@ -51,6 +52,25 @@ impl User32Context32 {
             thread,
             rectangle,
             output,
+            default_paint: false,
+        }))
+    }
+    pub(in crate::process) fn gdi_begin_default_paint_erase(
+        &mut self,
+        window: WindowHandle32,
+        dc: u32,
+        thread: u32,
+    ) -> Result<User32Outcome32, User32Error32> {
+        // validating before the callback preserves new invalidation requested by guest erase code.
+        self.state
+            .set_update_region(window, crate::windows::gdi::Region32::default(), false)?;
+        self.start(super::Continuation32::QueryPaint(QueryPaint32 {
+            window,
+            dc,
+            thread,
+            rectangle: Rect32::default(),
+            output: None,
+            default_paint: true,
         }))
     }
     pub(in crate::process::windows::user32) fn complete_query_paint(
@@ -79,9 +99,11 @@ impl User32Context32 {
                 .map_err(HostError::Memory)?;
         }
         gdi.commit_query_erase_finish(finish);
-        self.state
-            .finish_background_erase(paint.window, result != 0);
+        if !paint.default_paint {
+            self.state
+                .finish_background_erase(paint.window, result != 0);
+        }
         self.pending.pop();
-        Ok(User32Outcome32::Return(1))
+        Ok(User32Outcome32::Return(u32::from(!paint.default_paint)))
     }
 }

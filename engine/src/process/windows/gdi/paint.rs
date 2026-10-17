@@ -97,6 +97,23 @@ impl EngineInstance {
         api: GdiApi32,
         frame: CallFrame32,
     ) -> Result<bool, HostError> {
+        self.complete_paint_call(owner, token, Some(api), frame)
+    }
+    pub(super) fn complete_default_window_paint(
+        &mut self,
+        owner: PendingOwner,
+        token: u32,
+        frame: CallFrame32,
+    ) -> Result<bool, HostError> {
+        self.complete_paint_call(owner, token, None, frame)
+    }
+    fn complete_paint_call(
+        &mut self,
+        owner: PendingOwner,
+        token: u32,
+        api: Option<GdiApi32>,
+        frame: CallFrame32,
+    ) -> Result<bool, HostError> {
         self.validate_new_windows_reply(owner, token)?;
         self.reserve_windows_reply()?;
         let thread = self.current_windows_thread_id()?;
@@ -124,7 +141,11 @@ impl EngineInstance {
             }
         };
         let queue = self.prepare_user32_queue_change_for(projection.thread)?;
-        let result = self.execute_gdi_paint(api, args, projection, thread);
+        let result = if let Some(api) = api {
+            self.execute_gdi_paint(api, args, projection, thread)
+        } else {
+            self.execute_default_window_paint(projection, thread)
+        };
         match result {
             Ok(outcome) => {
                 self.commit_user32_queue_change(queue);
@@ -152,6 +173,50 @@ impl EngineInstance {
             Err(error) => return Err(error),
         }
         Ok(true)
+    }
+    fn execute_default_window_paint(
+        &mut self,
+        window: GdiWindow32,
+        thread: u32,
+    ) -> Result<super::super::user32::User32Outcome32, HostError> {
+        use super::super::user32::User32Outcome32 as Outcome;
+        if window.thread != thread {
+            return Err(HostError::User32(
+                crate::windows::user32::User32Error32::Win32(5),
+            ));
+        }
+        let handle =
+            WindowHandle32::try_from(window.window).map_err(|_| HostError::InvalidRequest)?;
+        let (region, erase) = self
+            .user32
+            .as_ref()
+            .unwrap()
+            .gdi_update_region(handle)
+            .map_err(HostError::User32)?;
+        self.user32
+            .as_mut()
+            .unwrap()
+            .gdi_check_begin_paint(handle, erase, thread)
+            .map_err(HostError::User32)?;
+        if !erase || region.complexity() == 1 {
+            self.user32
+                .as_mut()
+                .unwrap()
+                .gdi_set_update_region(handle, Region32::default(), false)
+                .map_err(HostError::User32)?;
+            return Ok(Outcome::Return(0));
+        }
+        let dc = self
+            .gdi
+            .as_mut()
+            .ok_or(HostError::InvalidRequest)?
+            .begin_query_erase(window, thread, region)
+            .map_err(HostError::Gdi)?;
+        self.user32
+            .as_mut()
+            .unwrap()
+            .gdi_begin_default_paint_erase(handle, dc, thread)
+            .map_err(HostError::User32)
     }
     fn execute_gdi_paint(
         &mut self,

@@ -237,7 +237,14 @@ impl EngineInstance {
                 | User32Api32::PostQuitMessage
                 | User32Api32::GetQueueStatus
                 | User32Api32::GetInputState
-        ) {
+        ) || matches!(
+            api,
+            User32Api32::DefWindowProcA
+                | User32Api32::DefWindowProcW
+                | User32Api32::DefDlgProcA
+                | User32Api32::DefDlgProcW
+        ) && frame.arguments()[1] == 0x000f
+        {
             self.prepare_user32_queue_change_for(queue_thread)?
         } else {
             None

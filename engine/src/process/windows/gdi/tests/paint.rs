@@ -1,3 +1,4 @@
+mod defaults;
 use super::memory;
 use crate::{
     abi::{arena::*, x86::*},
@@ -133,14 +134,18 @@ pub(super) fn fixture_with_startup_and_gdi_bytes(
     startup: bool,
     bitmap_bytes: usize,
 ) -> (EngineInstance, u64, u32) {
-    fixture_configured(startup, false, bitmap_bytes)
+    fixture_configured(startup, None, bitmap_bytes)
 }
 fn fixture_with_nested_create(startup: bool, nested: bool) -> (EngineInstance, u64, u32) {
-    fixture_configured(startup, nested, 65_536)
+    fixture_configured(
+        startup,
+        nested.then_some(User32Api32::CreateWindowExA),
+        65_536,
+    )
 }
 fn fixture_configured(
     startup: bool,
-    nested: bool,
+    nested: Option<User32Api32>,
     bitmap_bytes: usize,
 ) -> (EngineInstance, u64, u32) {
     let mut engine = EngineInstance::new(if startup { 256 } else { 32 }, KEY).unwrap();
@@ -207,7 +212,7 @@ fn fixture_configured(
         .write(GuestAddress(RETURN), &[0x0f, 0x0b])
         .unwrap();
     engine.protect(PC, 1, 5).unwrap();
-    let callback = if nested {
+    let callback = if let Some(api) = nested {
         unit(
             &mut engine,
             &[
@@ -220,7 +225,7 @@ fn fixture_configured(
                 RETURN,
                 RETURN_ID,
                 0x10030,
-                User32Api32::CreateWindowExA.id(),
+                api.id(),
             ],
             3,
             2,

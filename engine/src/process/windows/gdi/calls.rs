@@ -24,10 +24,12 @@ impl EngineInstance {
         frame: CallFrame32,
     ) -> Result<bool, HostError> {
         let api = GdiApi32::from_id(id);
-        let erase = matches!(
+        let default = matches!(
             User32Api32::from_id(id),
             Some(User32Api32::DefWindowProcA | User32Api32::DefWindowProcW)
-        ) && frame.arguments().get(1) == Some(&0x14);
+        );
+        let erase = default && frame.arguments().get(1) == Some(&0x14);
+        let paint = default && frame.arguments().get(1) == Some(&0x0f);
         if let Some(api) = api
             && api.font_file_resource()
         {
@@ -38,7 +40,7 @@ impl EngineInstance {
         {
             return self.complete_gdi_font_enumeration(owner, token, api, frame);
         }
-        if api.is_none() && !erase {
+        if api.is_none() && !erase && !paint {
             return Ok(false);
         }
         self.validate_windows_provider_owner(owner)?;
@@ -72,6 +74,9 @@ impl EngineInstance {
                         .is_ok()
                 })
             });
+        }
+        if paint {
+            return self.complete_default_window_paint(owner, token, frame);
         }
         if let Some(api) = api
             && matches!(

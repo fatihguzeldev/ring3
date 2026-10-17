@@ -88,6 +88,13 @@ impl User32Context32 {
     ) -> Result<User32Outcome32, E> {
         let window = self.owned(args[0], context.thread_id)?;
         match args[1] {
+            0x0f | 0x14 => {
+                let defaults = self.resource_dialogs.defaults.ok_or(E::InvalidRequest)?;
+                self.start(Continuation32::Call {
+                    procedure: defaults[usize::from(wide)],
+                    arguments: [args[0], args[1], args[2], args[3]],
+                })
+            }
             0x31 => Ok(User32Outcome32::Return(self.state.dialog(window)?.font)),
             0x30 | 0x110 => Ok(User32Outcome32::Return(0)),
             _ => self.def_window_proc_encoded(args, wide, ram, context),
