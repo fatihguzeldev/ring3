@@ -25,6 +25,11 @@ struct probe {
 static int rows;
 static struct probe *active;
 
+static void stage(const char *name, const char *point, DWORD value) {
+    fprintf(stderr, "COMDLG_STAGE %s %s %lu\n", name, point, value);
+    fflush(stderr);
+}
+
 static void row(const char *name) {
     if (rows++) putchar(',');
     printf("{\"case\":\"%s\"", name);
@@ -88,6 +93,7 @@ static BOOL admit_filename(struct probe *p) {
     search.root = p->root;
     EnumChildWindows(p->root, filename_edit, (LPARAM)&search);
     p->edit_candidates = search.count;
+    stage(p->name, "edit-candidates", search.count);
     if (search.count != 1 || !search.edit) return FALSE;
     p->edit = search.edit;
     p->edit_id = (UINT)GetDlgCtrlID(search.edit);
@@ -100,6 +106,7 @@ static BOOL admit_filename(struct probe *p) {
         if (!accepted || !GetWindowTextA(search.edit, narrow, 512) || lstrcmpA(narrow, p->chosen_a)) return FALSE;
     }
     p->admitted = 1;
+    stage(p->name, "edit-admitted", p->edit_id);
     return TRUE;
 }
 
@@ -118,16 +125,19 @@ static BOOL click_ok(struct probe *p) {
     p->button_ready = IsWindowEnabled(button) && IsWindowVisible(button);
     SetActiveWindow(p->root);
     p->activated = GetActiveWindow() == p->root;
+    stage(p->name, "button-ready", p->button_ready);
+    stage(p->name, "active", p->activated);
     if (!p->button_ready || !p->activated) return FALSE;
     SetFocus(button);
     ++p->clicks;
+    stage(p->name, "post-button-click", p->clicks);
     return PostMessageW(button, BM_CLICK, 0, 0);
 }
 
 static void CALLBACK timeout(HWND unused_window, UINT message, UINT_PTR id, DWORD tick) {
     (void)unused_window; (void)message; (void)tick;
     KillTimer(NULL, id);
-    if (active) active->timeout = TRUE;
+    if (active) { active->timeout = TRUE; stage(active->name, "watchdog", tick); }
     EnumThreadWindows(GetCurrentThreadId(), cancel_window, 0);
 }
 
@@ -138,6 +148,7 @@ static UINT_PTR hook(HWND window, UINT message, LPARAM parameter, BOOL wide) {
         else p = (struct probe *)((OPENFILENAMEA *)parameter)->lCustData;
         SetWindowLongPtrW(window, GWLP_USERDATA, (LONG_PTR)p);
         ++p->initialized;
+        stage(p->name, "init-dialog", p->initialized);
         p->same_ofn += (void *)parameter == p->ofn;
         p->root = GetParent(window);
         p->control_edit = GetDlgItem(p->root, edt1) != NULL;
@@ -149,15 +160,18 @@ static UINT_PTR hook(HWND window, UINT message, LPARAM parameter, BOOL wide) {
     p = (struct probe *)GetWindowLongPtrW(window, GWLP_USERDATA);
     if (!p) return 0;
     if (message == WM_APP + 0x21) {
+        stage(p->name, "action-initial", 0);
         if (!admit_filename(p) || !click_ok(p)) PostMessageW(p->root, WM_COMMAND, IDCANCEL, 0);
         return 0;
     }
     if (message == WM_APP + 0x22) {
+        stage(p->name, "action-after-veto", 0);
         if (!click_ok(p)) PostMessageW(p->root, WM_COMMAND, IDCANCEL, 0);
         return 0;
     }
     if (message != WM_NOTIFY) return 0;
     if (p->count < 64) p->events[p->count++] = ((NMHDR *)parameter)->code;
+    stage(p->name, "notify", ((NMHDR *)parameter)->code);
     if (((NMHDR *)parameter)->code == CDN_INITDONE) p->init_done = 1;
     if (((NMHDR *)parameter)->code == CDN_FOLDERCHANGE) p->folder_done = 1;
     if (p->init_done && p->folder_done && !p->cancel && !p->action_posted) {
@@ -245,8 +259,11 @@ static void dialog_w(const char *name, BOOL save, const WCHAR *chosen, DWORD fla
     timer = SetTimer(NULL, 0, 4000, timeout);
     if (!timer) ExitProcess(2);
     SetLastError(0x12345678);
+    stage(name, "enter-wide-api", size);
     ok = save ? GetSaveFileNameW(&ofn) : GetOpenFileNameW(&ofn);
     last_error = GetLastError(); error = CommDlgExtendedError();
+    stage(name, "api-return", ok != 0);
+    stage(name, "extended-error", error);
     KillTimer(NULL, timer); active = NULL;
     GetCurrentDirectoryW(MAX_PATH, after);
     describe_probe(&p, ok, error, last_error);
@@ -258,7 +275,10 @@ static void dialog_w(const char *name, BOOL save, const WCHAR *chosen, DWORD fla
     printf(",\"cwdAfter\":"); wide_units(after, MAX_PATH);
     putchar('}');
     SetCurrentDirectoryW(before);
-    if (p.timeout || (!p.cancel && (!p.admitted || !p.button_ready || !p.activated))) ExitProcess(2);
+    fflush(stdout);
+    if (p.timeout || (!p.cancel && (!p.admitted || !p.button_ready || !p.activated))) {
+        stage(name, "fail-closed", p.timeout); ExitProcess(2);
+    }
 }
 
 static void dialog_a(const char *name, BOOL save, const char *chosen, DWORD flags, DWORD capacity) {
@@ -282,14 +302,20 @@ static void dialog_a(const char *name, BOOL save, const char *chosen, DWORD flag
     active = &p; timer = SetTimer(NULL, 0, 4000, timeout);
     if (!timer) ExitProcess(2);
     SetLastError(0x12345678);
+    stage(name, "enter-ansi-api", sizeof(ofn));
     ok = save ? GetSaveFileNameA(&ofn) : GetOpenFileNameA(&ofn);
     last_error = GetLastError(); error = CommDlgExtendedError();
+    stage(name, "api-return", ok != 0);
+    stage(name, "extended-error", error);
     KillTimer(NULL, timer); active = NULL;
     describe_probe(&p, ok, error, last_error);
     printf(",\"flags\":%lu,\"filter\":%lu,\"offsets\":[%u,%u],\"requiredWord\":%u,\"file\":",
         ofn.Flags, ofn.nFilterIndex, ofn.nFileOffset, ofn.nFileExtension, *(WORD *)file);
     narrow_units(file, 512); printf(",\"title\":"); narrow_units(title, 512); putchar('}');
-    if (p.timeout || (!p.cancel && (!p.admitted || !p.button_ready || !p.activated))) ExitProcess(2);
+    fflush(stdout);
+    if (p.timeout || (!p.cancel && (!p.admitted || !p.button_ready || !p.activated))) {
+        stage(name, "fail-closed", p.timeout); ExitProcess(2);
+    }
 }
 
 struct thread_errors { DWORD before, after; };
@@ -312,6 +338,7 @@ int main(void) {
     struct thread_errors thread_error;
     DWORD main_before, main_after;
     int capacity;
+    stage("main", "start", sizeof(void *));
     if (!GetTempPathW(MAX_PATH, temporary) || !GetTempFileNameW(temporary, L"r3d", 0, directory)) return 2;
     if (!DeleteFileW(directory) || !CreateDirectoryW(directory, NULL)) return 2;
     lstrcpyW(existing, directory); lstrcatW(existing, L"\\present.txt");
@@ -324,13 +351,18 @@ int main(void) {
         (unsigned)offsetof(OPENFILENAMEW, lpstrFile), (unsigned)offsetof(OPENFILENAMEW, nFileOffset),
         (unsigned)offsetof(OPENFILENAMEW, lpfnHook), (unsigned)offsetof(OPENFILENAMEW, pvReserved),
         (unsigned)OPENFILENAME_SIZE_VERSION_400W);
+    stage("main", "temporary-ready", 0);
     memset(&invalid, 0, sizeof(invalid));
     SetLastError(0x12345678);
     { BOOL ok = GetOpenFileNameW(&invalid); DWORD last = GetLastError();
       row("invalid-size-zero"); printf(",\"ok\":%u,\"extended\":%lu,\"lastError\":%lu}", ok != 0, CommDlgExtendedError(), last); }
     main_before = CommDlgExtendedError();
+    stage("thread-error-owner", "enter-worker", main_before);
     thread = CreateThread(NULL, 0, invalid_size_in_thread, &thread_error, 0, NULL);
-    if (!thread || WaitForSingleObject(thread, 5000) != WAIT_OBJECT_0) return 2;
+    if (!thread) { stage("thread-error-owner", "create-failed", GetLastError()); return 2; }
+    { DWORD wait = WaitForSingleObject(thread, 5000);
+      stage("thread-error-owner", "worker-wait", wait);
+      if (wait != WAIT_OBJECT_0) return 2; }
     CloseHandle(thread); main_after = CommDlgExtendedError();
     row("thread-error-owner"); printf(",\"mainBefore\":%lu,\"workerBefore\":%lu,\"workerAfter\":%lu,\"mainAfter\":%lu}", main_before, thread_error.before, thread_error.after, main_after);
     dialog_w("cancel-modern", FALSE, existing, 0, 512, TRUE, FALSE, sizeof(OPENFILENAMEW));
@@ -357,6 +389,8 @@ int main(void) {
         narrow_units(narrow, 12); putchar('}');
     }
     printf("]}\n");
+    fflush(stdout);
+    stage("main", "cases-complete", rows);
     SetCurrentDirectoryW(original);
     if (!DeleteFileW(existing) || !RemoveDirectoryW(directory)) return 2;
     return 0;
