@@ -48,6 +48,7 @@ impl GdiRuntime32 {
                 GdiObject32::Pen(Pen32 {
                     style,
                     width: width.abs().max(1),
+                    extended: None,
                     color: color & 0x00ff_ffff,
                 })
             }
@@ -101,7 +102,29 @@ impl GdiRuntime32 {
         }
         let object = self.model.object(args[0])?;
         let words: Vec<u32> = match object {
-            GdiObject32::Pen(pen) => vec![pen.style, pen.width as u32, 0, pen.color],
+            GdiObject32::Pen(pen) => {
+                if let Some(extended) = pen.extended {
+                    let (style, color, hatch) = match extended.brush {
+                        Brush32::Solid(color) => (0, color, 0),
+                        Brush32::Null => (1, 0, 0),
+                        Brush32::Hatch { style, color } => (2, color, style),
+                        Brush32::Pattern { bitmap, .. } => (3, 0, bitmap),
+                        Brush32::System(index) => (0, self.system_color(index), 0),
+                    };
+                    let mut words = vec![
+                        pen.style,
+                        pen.width as u32,
+                        style,
+                        color,
+                        hatch,
+                        extended.count,
+                    ];
+                    words.extend_from_slice(&extended.entries[..extended.count as usize]);
+                    words
+                } else {
+                    vec![pen.style, pen.width as u32, 0, pen.color]
+                }
+            }
             GdiObject32::Brush(brush) => match brush {
                 Brush32::System(index) => vec![0, self.system_color(index), 0],
                 Brush32::Solid(color) => vec![0, color, 0],

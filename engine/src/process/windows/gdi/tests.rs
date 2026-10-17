@@ -361,3 +361,5 @@ mod msimg;
 mod patterns;
 
 mod dc;
+
+mod pens;

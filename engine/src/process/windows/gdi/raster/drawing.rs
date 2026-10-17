@@ -82,6 +82,15 @@ impl GdiRuntime32 {
         let GdiObject32::Brush(brush) = self.model.object(handle)? else {
             return Err(GdiError32::InvalidHandle);
         };
+        self.brush_value(state, handle, brush, point)
+    }
+    pub(in crate::process::windows::gdi) fn brush_value(
+        &self,
+        state: &DcState32,
+        handle: u32,
+        brush: Brush32,
+        point: Point32,
+    ) -> Result<Option<u32>, GdiError32> {
         Ok(match brush {
             Brush32::Solid(color) => Some(color),
             Brush32::System(index) => Some(self.system_color(index)),
@@ -371,7 +380,7 @@ impl GdiRuntime32 {
             let GdiObject32::Pen(pen) = self.model.object(state.pen)? else {
                 return Err(GdiError32::InvalidHandle);
             };
-            if !matches!(pen.style, 0 | 5 | 6) {
+            if !matches!(pen.style & 15, 0 | 5 | 6) || pen.extended.is_some() && pen.width > 1 {
                 return Err(GdiError32::Unsupported);
             }
             Some(pen)
@@ -400,19 +409,14 @@ impl GdiRuntime32 {
                         y as u32,
                     ))
                 } else if let Some(pen) = pen
-                    && pen.style != 5
+                    && pen.style & 15 != 5
                     && (x - rect.left < pen.width
                         || rect.right - x <= pen.width
                         || y - rect.top < pen.width
                         || rect.bottom - y <= pen.width)
                 {
-                    Some(
-                        if state.pen == crate::windows::gdi::GdiContext32::stock_object(19)? {
-                            state.dc_pen_color
-                        } else {
-                            pen.color
-                        },
-                    )
+                    self.pen_color(&state, state.pen, pen, point)?
+                        .or(self.brush(&state, brush, point)?)
                 } else {
                     self.brush(&state, brush, point)?
                 };
@@ -443,74 +447,6 @@ impl GdiRuntime32 {
         }
         Ok(1)
     }
-    pub(in crate::process::windows::gdi) fn line(
-        &mut self,
-        memory: &mut AddressSpace,
-        args: &[u32],
-    ) -> Result<u32, GdiError32> {
-        let index = self.dc_surface(args[0])?;
-        let layout = self.surfaces[index].layout;
-        let mut state = self.model.state(args[0])?.clone();
-        let end_logical = Point32 {
-            x: args[1] as i32,
-            y: args[2] as i32,
-        };
-        let mut point = state.device_point(state.current_position)?;
-        let end = state.device_point(end_logical)?;
-        let GdiObject32::Pen(pen) = self.model.object(state.pen)? else {
-            return Err(GdiError32::InvalidHandle);
-        };
-        if !matches!(pen.style, 0 | 5) || pen.width != 1 {
-            return Err(GdiError32::Unsupported);
-        }
-        let dx = (i64::from(end.x) - i64::from(point.x)).abs();
-        let dy = (i64::from(end.y) - i64::from(point.y)).abs();
-        if dx.max(dy) > 1_048_576 {
-            return Err(GdiError32::Capacity);
-        }
-        let mut pixels = self.surfaces[index]
-            .storage
-            .read(memory, layout.byte_len()?)?;
-        let mut error = dx - dy;
-        let sx = if point.x < end.x { 1 } else { -1 };
-        let sy = if point.y < end.y { 1 } else { -1 };
-        let color = if state.pen == crate::windows::gdi::GdiContext32::stock_object(19)? {
-            state.dc_pen_color
-        } else {
-            pen.color
-        };
-        while point != end {
-            if pen.style != 5 && state.accepts(point, bounds(layout)) {
-                let old = layout.read_pixel(
-                    &pixels,
-                    &self.surfaces[index].palette,
-                    point.x as u32,
-                    point.y as u32,
-                );
-                let value = binary_rop(state.rop2, color, old);
-                layout.write_pixel(
-                    &mut pixels,
-                    &self.surfaces[index].palette,
-                    point.x as u32,
-                    point.y as u32,
-                    value,
-                );
-            }
-            let twice = 2 * error;
-            if twice > -dy {
-                error -= dy;
-                point.x += sx;
-            }
-            if twice < dx {
-                error += dx;
-                point.y += sy;
-            }
-        }
-        self.commit_pixels(memory, index, pixels, bounds(layout))?;
-        state.current_position = end_logical;
-        self.model.set_state(args[0], state)?;
-        Ok(1)
-    }
 }
 pub(in crate::process::windows::gdi) fn intersect(a: Rect32, b: Rect32) -> Rect32 {
     Rect32 {
@@ -520,7 +456,7 @@ pub(in crate::process::windows::gdi) fn intersect(a: Rect32, b: Rect32) -> Rect3
         bottom: a.bottom.min(b.bottom),
     }
 }
-fn binary_rop(mode: u32, pen: u32, destination: u32) -> u32 {
+pub(in crate::process::windows::gdi) fn binary_rop(mode: u32, pen: u32, destination: u32) -> u32 {
     let mut result = 0;
     let table = mode - 1;
     for index in 0..4 {

@@ -22,8 +22,8 @@ pub use palette::{LogicalPalette32, nearest_palette_index32, synthesized_palette
 pub use raster::{raster_operation32, raster_uses_source32};
 pub use region::Region32;
 pub use types::{
-    Brush32, DcKind32, DcState32, GdiError32, GdiImageKind32, GdiImageObject32, GdiLimits32,
-    GdiObject32, GdiWindow32, Pen32,
+    Brush32, DcKind32, DcState32, ExtendedPen32, GdiError32, GdiImageKind32, GdiImageObject32,
+    GdiLimits32, GdiObject32, GdiWindow32, Pen32,
 };
 
 #[cfg(test)]

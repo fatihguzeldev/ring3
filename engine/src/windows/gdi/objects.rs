@@ -125,6 +125,7 @@ fn stock(index: u32) -> Option<GdiObject32> {
         6..=8 => GdiObject32::Pen(Pen32 {
             style: if index == 8 { 5 } else { 0 },
             width: 1,
+            extended: None,
             color: if index == 6 { 0x00ff_ffff } else { 0 },
         }),
         10..=14 | 16..=17 => GdiObject32::StockFont(index),
@@ -133,6 +134,7 @@ fn stock(index: u32) -> Option<GdiObject32> {
         19 => GdiObject32::Pen(Pen32 {
             style: 0,
             width: 1,
+            extended: None,
             color: 0,
         }),
         _ => return None,

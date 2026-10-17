@@ -11,6 +11,7 @@ mod objects;
 mod paint;
 mod palette;
 mod patterns;
+mod pens;
 mod raster;
 mod regions;
 mod runtime;

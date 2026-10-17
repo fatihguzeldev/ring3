@@ -70,6 +70,13 @@ pub struct Pen32 {
     pub style: u32,
     pub width: i32,
     pub color: u32,
+    pub extended: Option<ExtendedPen32>,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ExtendedPen32 {
+    pub brush: Brush32,
+    pub entries: [u32; 16],
+    pub count: u32,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GdiImageKind32 {
@@ -101,7 +108,13 @@ impl GdiObject32 {
     pub fn object_type(&self) -> u32 {
         match self {
             Self::Image(_) => 0,
-            Self::Pen(_) => 1,
+            Self::Pen(pen) => {
+                if pen.extended.is_some() {
+                    11
+                } else {
+                    1
+                }
+            }
             Self::Brush(_) => 2,
             Self::StockPalette | Self::Palette(_) => 5,
             Self::StockFont(_) | Self::Font(_) => 6,

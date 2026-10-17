@@ -16,14 +16,28 @@ impl GdiRuntime32 {
         let GdiObject32::Bitmap(layout) = self.model.object(bitmap)? else {
             return Err(GdiError32::InvalidHandle);
         };
-        let source = &self.surfaces[self.surface_index(SurfaceKey32::Bitmap(bitmap))?];
-        source.storage.check(memory)?;
         let object = self
             .model
             .prepare_object(GdiObject32::Brush(Brush32::Pattern {
                 bitmap,
                 monochrome: layout.bits_per_pixel == 1,
             }))?;
+        let surface = self.prepare_pattern_surface(memory, bitmap, object.handle())?;
+        let handle = self.model.commit_new(object);
+        self.publish_surface(surface);
+        Ok(handle)
+    }
+    pub(in crate::process::windows::gdi) fn prepare_pattern_surface(
+        &self,
+        memory: &AddressSpace,
+        bitmap: u32,
+        handle: u32,
+    ) -> Result<super::storage::Surface32, GdiError32> {
+        let GdiObject32::Bitmap(layout) = self.model.object(bitmap)? else {
+            return Err(GdiError32::InvalidHandle);
+        };
+        let source = &self.surfaces[self.surface_index(SurfaceKey32::Bitmap(bitmap))?];
+        source.storage.check(memory)?;
         let mut colors = Vec::new();
         colors
             .try_reserve_exact(source.palette.len())
@@ -31,10 +45,8 @@ impl GdiRuntime32 {
         colors.extend_from_slice(&source.palette);
         let pixels = source.storage.read(memory, layout.byte_len()?)?;
         let mut surface =
-            self.prepare_surface(SurfaceKey32::PatternBrush(object.handle()), layout, colors)?;
+            self.prepare_surface(SurfaceKey32::PatternBrush(handle), layout, colors)?;
         surface.storage = Storage32::Owned(pixels);
-        let handle = self.model.commit_new(object);
-        self.publish_surface(surface);
-        Ok(handle)
+        Ok(surface)
     }
 }
