@@ -2,6 +2,7 @@
 // directed bounds rounded to extended80, rather than one CPU's internal pi approximation.
 // all operations stay in integer/arbitrary precision form; no host float conversion is used.
 use astro_float_num::{BigFloat, Consts, RoundingMode as R, Sign, WORD_BIT_SIZE};
+use core::cmp::Ordering;
 
 use super::value::{self, Ext80, Kind, Rounded};
 use crate::math::{NumericalError, OVERFLOW, PRECISION, UNDERFLOW, ZERO_DIVIDE};
@@ -20,6 +21,11 @@ pub(crate) enum Function {
 struct Interval {
     low: BigFloat,
     high: BigFloat,
+}
+
+fn compare(left: &BigFloat, right: &BigFloat) -> Option<Ordering> {
+    // Astro returns a signed difference, whose magnitude need not be one.
+    left.cmp(right).map(|difference| difference.cmp(&0))
 }
 
 impl Interval {
@@ -61,13 +67,13 @@ impl Interval {
                 }
                 if low
                     .as_ref()
-                    .is_none_or(|old: &BigFloat| down.cmp(old) == Some(-1))
+                    .is_none_or(|old: &BigFloat| compare(&down, old) == Some(Ordering::Less))
                 {
                     low = Some(down);
                 }
                 if high
                     .as_ref()
-                    .is_none_or(|old: &BigFloat| up.cmp(old) == Some(1))
+                    .is_none_or(|old: &BigFloat| compare(&up, old) == Some(Ordering::Greater))
                 {
                     high = Some(up);
                 }
@@ -436,18 +442,18 @@ pub(crate) fn evaluate(
             {
                 exact.set_exponent(exponent - 24576);
             }
-            let equal_bounds = result.low.cmp(&result.high) == Some(0);
+            let equal_bounds = compare(&result.low, &result.high) == Some(Ordering::Equal);
             if !equal_bounds
-                && exact.cmp(&result.low) != Some(-1)
-                && exact.cmp(&result.high) != Some(1)
+                && compare(&exact, &result.low) != Some(Ordering::Less)
+                && compare(&exact, &result.high) != Some(Ordering::Greater)
             {
                 continue;
             }
-            let inexact = !equal_bounds || exact.cmp(&result.low) != Some(0);
+            let inexact = !equal_bounds || compare(&exact, &result.low) != Some(Ordering::Equal);
             let incremented = if low.value.negative() {
-                exact.cmp(&result.low) == Some(-1)
+                compare(&exact, &result.low) == Some(Ordering::Less)
             } else {
-                exact.cmp(&result.high) == Some(1)
+                compare(&exact, &result.high) == Some(Ordering::Greater)
             };
             return Ok(Rounded {
                 value: low.value,
@@ -462,6 +468,74 @@ pub(crate) fn evaluate(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn logarithm_of_captured_crt_operands_rounds_to_the_certified_extended_value() {
+        // Exact binary operands from an independently captured FYL2X invocation.
+        // A 200-digit decimal ln(x)/ln(2) oracle gives
+        // -6.16287596889526391591269920335118052568243687297727427312833195894...
+        let x = Ext80::from_parts(false, 0x3ff8, 0xc0c0_c200_0000_0000);
+        let y = Ext80::from_parts(false, 0x3ffe, 0xf627_6300_0000_0000);
+        for result_negative in [false, true] {
+            for (mode, incremented) in [
+                (0, false),
+                (1, result_negative),
+                (2, !result_negative),
+                (3, false),
+            ] {
+                let result = evaluate(
+                    Function::Log2Multiply,
+                    x,
+                    if result_negative { y } else { y.negated() },
+                    0x007f | (mode << 10),
+                    &mut Default::default(),
+                )
+                .expect("finite positive logarithm must produce a certified extended result");
+                assert_eq!(
+                    result.value,
+                    Ext80::from_parts(
+                        result_negative,
+                        0x4001,
+                        0xc536_47a9_f6b3_fe23 + u64::from(incremented)
+                    )
+                );
+                assert_eq!(result.exceptions, PRECISION);
+                assert_eq!(result.incremented, incremented);
+            }
+        }
+    }
+
+    #[test]
+    fn arbitrary_signed_comparisons_preserve_ordering_and_interval_extrema() {
+        let three = BigFloat::from_u64(3, 256);
+        let two = BigFloat::from_u64(2, 256);
+        assert!(three.cmp(&two).unwrap() > 1);
+        assert_eq!(compare(&three, &two), Some(Ordering::Greater));
+        assert_eq!(compare(&two, &three), Some(Ordering::Less));
+        assert_eq!(compare(&three, &three), Some(Ordering::Equal));
+        assert_eq!(
+            compare(&astro_float_num::INF_NEG, &astro_float_num::INF_POS),
+            Some(Ordering::Less)
+        );
+        assert_eq!(compare(&astro_float_num::NAN, &three), None);
+        for (left, right) in [([2, 3], [4, 5]), ([-3, -2], [-5, -4])] {
+            let interval = |[low, high]: [i64; 2]| Interval {
+                low: to_big(Ext80::from_i64(low), 256),
+                high: to_big(Ext80::from_i64(high), 256),
+            };
+            let result = interval(left)
+                .combine(&interval(right), 256, false)
+                .unwrap();
+            assert_eq!(
+                compare(&result.low, &BigFloat::from_u64(8, 256)),
+                Some(Ordering::Equal)
+            );
+            assert_eq!(
+                compare(&result.high, &BigFloat::from_u64(15, 256)),
+                Some(Ordering::Equal)
+            );
+        }
+    }
 
     #[test]
     fn reused_constants_preserve_rounding_exceptions_and_numerical_failures() {

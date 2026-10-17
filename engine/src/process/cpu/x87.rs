@@ -212,6 +212,53 @@ mod tests {
         engine
     }
 
+    #[test]
+    fn fyl2x_captured_single_precision_control_completes_through_an_authorized_helper() {
+        let mut engine = engine();
+        let mut observed = X87State {
+            control: 0x007f,
+            status: 0x3020,
+            tag: 0x0fff,
+            opcode: 0x0502,
+            instruction_pointer: 0x7802c309,
+            data_pointer: 0x7e0ffca0,
+            code_selector: 0x1b,
+            data_selector: 0x23,
+            ..X87State::default()
+        };
+        observed.registers[5] = [0, 0, 0, 0, 0, 0, 0, 0x80, 0xff, 0x3f];
+        observed.registers[6] = [0, 0, 0, 0, 0, 0xc2, 0xc0, 0xc0, 0xf8, 0x3f];
+        observed.registers[7] = [0, 0, 0, 0, 0, 0x63, 0x27, 0xf6, 0xfe, 0x3f];
+        encode_x87(
+            &observed,
+            &mut engine.arena.as_mut().get_mut()[X87_OFFSET..X87_OFFSET + X87_SIZE],
+        )
+        .unwrap();
+        engine
+            .guard_material(engine.key, engine.generation())
+            .unwrap();
+        let before = engine.arena().to_vec();
+        let version = engine.memory().unwrap().transaction_version();
+        let result = engine.x87_op(34, 0, 0x46, 0x78028f76, 0x1f1, 1);
+        if result.is_err() {
+            assert_eq!(engine.arena(), before);
+            assert_eq!(engine.memory().unwrap().transaction_version(), version);
+        }
+        assert_eq!(result, Ok(StoreCompletion::Complete));
+        let actual = decode_x87(&engine.arena()[X87_OFFSET..X87_OFFSET + X87_SIZE]).unwrap();
+        assert_eq!(actual.control, observed.control);
+        assert_eq!(actual.top(), 7);
+        assert_eq!(actual.status, 0x3820);
+        assert_eq!(
+            actual.stack(0).unwrap(),
+            crate::cpu::x86::Ext80([0x23, 0xfe, 0xb3, 0xf6, 0xa9, 0x47, 0x36, 0xc5, 0x01, 0xc0,])
+        );
+        assert!(actual.stack(1).is_none());
+        assert_eq!(actual.instruction_pointer, 0x78028f76);
+        assert_eq!(actual.opcode, 0x1f1);
+        assert_eq!(engine.memory().unwrap().transaction_version(), version);
+    }
+
     fn cache(engine: &mut EngineInstance, segment: SegmentRegister, bits: u32) {
         let mut context = engine.segment_context().unwrap();
         context.caches[segment.index()] = SegmentCache::from_bits(bits).unwrap();
