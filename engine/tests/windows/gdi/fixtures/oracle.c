@@ -525,6 +525,37 @@ static void font_resource_reference(void) {
 }
 
 
+static void font_file_access(const WCHAR *path, const char *stage) {
+    const DWORD accesses[] = {GENERIC_READ, GENERIC_WRITE, DELETE};
+    printf("{\"stage\":\"%s\",\"access\":[", stage);
+    for (unsigned i = 0; i < 3; ++i) {
+        SetLastError(0);
+        HANDLE file = CreateFileW(path, accesses[i], FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+        DWORD error = GetLastError();
+        printf("%s{\"mask\":%lu,\"opened\":%u,\"error\":%lu}", i ? "," : "", accesses[i], file != INVALID_HANDLE_VALUE, error);
+        if (file != INVALID_HANDLE_VALUE) CloseHandle(file);
+    }
+    printf("]}");
+}
+
+static void font_file_sharing_reference(void) {
+    WCHAR directory[MAX_PATH], path[MAX_PATH];
+    if (!GetTempPathW(MAX_PATH, directory) || !GetTempFileNameW(directory, L"r3f", 0, path)
+        || lstrlenW(path) > MAX_PATH - 5 || !DeleteFileW(path)) ExitProcess(2);
+    lstrcatW(path, L".ttf");
+    if (!CopyFileW(L"engine\\assets\\fonts\\NotoSans-Regular.ttf", path, TRUE)) ExitProcess(2);
+    printf(",\"fontFileSharing\":{\"states\":[");
+    font_file_access(path, "before-add");
+    int added = AddFontResourceExW(path, FR_PRIVATE, NULL);
+    printf(","); font_file_access(path, "after-add");
+    BOOL removed = added ? RemoveFontResourceExW(path, FR_PRIVATE, NULL) : FALSE;
+    printf(","); font_file_access(path, "after-remove");
+    BOOL deleted = DeleteFileW(path);
+    printf("],\"added\":%d,\"removed\":%u,\"deleted\":%u}", added, removed, deleted);
+    if (!added || !removed || !deleted) ExitProcess(2);
+}
+
 static void font_face_units(const WCHAR *name) {
     printf("[");
     for (unsigned i = 0; i < LF_FACESIZE && name[i]; ++i) printf("%s%u", i ? "," : "", name[i]);
@@ -775,6 +806,7 @@ int main(void) {
     font_resource_reference();
     font_lifetime_reference();
     font_scope_reference();
+    font_file_sharing_reference();
     msimg_reference();
     DestroyWindow(parent);
     puts("}");
