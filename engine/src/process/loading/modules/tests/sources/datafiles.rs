@@ -98,7 +98,7 @@ fn resource_only_reload_refreshes_changed_vfs_bytes_without_changing_existing_ma
 }
 
 #[test]
-fn lazy_resource_byte_wait_retains_its_read_grant_and_blocks_content_replacement() {
+fn lazy_exclusive_datafile_wait_retains_its_read_grant_through_mapping_retirement() {
     let mut bytes = image(true, 0x600000, None, None);
     bytes[0x201] = 0x31;
     let assets = [(r"C:\app\resources.dll", bytes.as_slice())];
@@ -110,7 +110,7 @@ fn lazy_resource_byte_wait_retains_its_read_grant_and_blocks_content_replacement
         .start_module_process(r"C:\app\main.exe", None, Default::default())
         .unwrap();
     let first = engine
-        .load_resource_only_module(r"C:\app\resources.dll", 2)
+        .load_resource_only_module(r"C:\app\resources.dll", 0x40)
         .unwrap();
     let ModuleOperation32::NeedBytes { request } = first else {
         panic!("resource source wait")
@@ -131,10 +131,10 @@ fn lazy_resource_byte_wait_retains_its_read_grant_and_blocks_content_replacement
     let (handle, waits) = finish(&mut engine, first, &assets);
     assert_eq!(waits, 1);
     assert_eq!(
-        engine.replace_provider_file(&path, &replacement).unwrap(),
-        replacement.len()
+        engine.replace_provider_file(&path, &replacement),
+        Err(HostError::File(FileError32::SharingViolation))
     );
-    assert_ne!(engine.provider_path_version(&path).unwrap(), version);
+    assert_eq!(engine.provider_path_version(&path).unwrap(), version);
     let mut byte = [0];
     engine
         .memory()
@@ -143,6 +143,8 @@ fn lazy_resource_byte_wait_retains_its_read_grant_and_blocks_content_replacement
         .unwrap();
     assert_eq!(byte, [0x31]);
     engine.free_resource_only_module(handle).unwrap();
+    assert_eq!(engine.replace_provider_file(&path, &replacement).unwrap(), replacement.len());
+    assert_ne!(engine.provider_path_version(&path).unwrap(), version);
 }
 
 #[test]
