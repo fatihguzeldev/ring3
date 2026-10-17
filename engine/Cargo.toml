@@ -50,6 +50,10 @@ path = "tests/windows/foundations/wasm.rs"
 name = "windows_user32_clipboard_wasm"
 path = "tests/windows/user32/clipboard/wasm.rs"
 
+[[test]]
+name = "windows_user32_dialogs_wasm"
+path = "tests/windows/user32/dialogs/wasm.rs"
+
 [lints.clippy]
 all = "warn"
 
