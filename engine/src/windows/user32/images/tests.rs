@@ -1,3 +1,4 @@
+use super::files::BitmapFile32;
 use super::*;
 use crate::windows::user32::User32Error32 as E;
 
