@@ -6,6 +6,7 @@ pub(crate) mod progress;
 pub(crate) mod status;
 pub(crate) mod tab;
 pub(crate) mod tooltip;
+pub(crate) mod toolbar;
 
 pub(crate) use api::{COMMON_PROC_A, COMMON_PROC_W, TOOLTIP_RELAY_PROC};
 pub use api::{CommonControlsApi32, comctl32_module};
