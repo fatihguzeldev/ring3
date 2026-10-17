@@ -121,6 +121,7 @@ impl EngineInstance {
             return Err(HostError::InvalidRequest);
         }
         self.bind_user32_builtin_classes()?;
+        self.bind_named_common_control_class(api, frame.arguments())?;
         if matches!(
             api,
             User32Api32::TrackPopupMenu | User32Api32::TrackPopupMenuEx

@@ -2,6 +2,7 @@ pub(super) mod layout;
 mod painting;
 mod progress;
 pub(super) mod status;
+mod tab;
 
 use super::{User32Outcome32, memory};
 use crate::{
@@ -89,5 +90,43 @@ impl EngineInstance {
             )?;
         self.commit_user32_queue_change(queue);
         Ok(result)
+    }
+}
+
+impl EngineInstance {
+    pub(in crate::process::windows::user32) fn bind_named_common_control_class(
+        &mut self,
+        api: crate::windows::user32::User32Api32,
+        args: &[u32],
+    ) -> Result<(), HostError> {
+        use crate::windows::{comctl32::CommonControlKind32, user32::User32Api32 as Api};
+        if !matches!(api, Api::CreateWindowExA | Api::CreateWindowExW)
+            || args[1] < 0x10000
+            || !self
+                .loaded_windows_modules()
+                .flat_map(|module| module.gates())
+                .any(|gate| gate.id == COMMON_PROC_W)
+        {
+            return Ok(());
+        }
+        let name = memory::string(
+            self.memory()?,
+            args[1],
+            api.wide(),
+            256,
+            self.windows_ansi_code_page(),
+        )
+        .map_err(HostError::User32)?;
+        if let Some(kind) = CommonControlKind32::ALL.into_iter().find(|kind| {
+            name.len() == kind.name().len()
+                && name
+                    .iter()
+                    .copied()
+                    .zip(kind.name().bytes())
+                    .all(|(unit, byte)| unit <= 127 && (unit as u8).eq_ignore_ascii_case(&byte))
+        }) {
+            self.bind_common_control_classes(kind.flags())?;
+        }
+        Ok(())
     }
 }

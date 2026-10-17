@@ -298,3 +298,6 @@ fn captured_common_progress_colors_and_position_publish_real_bounded_gdi_pixels(
 
 #[path = "status.rs"]
 mod status;
+
+#[path = "tab.rs"]
+mod tab;

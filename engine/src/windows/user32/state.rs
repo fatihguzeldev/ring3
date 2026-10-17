@@ -7,10 +7,10 @@ mod dialogs;
 mod menu_layout;
 mod menus;
 pub(crate) use menu_layout::{MenuBarCache32, MenuOwnerSize32};
+mod controls;
 mod paint;
 mod text;
 mod ui;
-mod controls;
 
 struct WindowSlot32 {
     data: WindowData32,
@@ -35,7 +35,7 @@ pub(crate) struct User32State32 {
     queue: super::queue::MessageQueue32,
     next_atom: u16,
     standard_atoms: [u16; 6],
-    common_atoms: [u16; 2],
+    common_atoms: [u16; crate::windows::comctl32::CommonControlKind32::ALL.len()],
     system_atoms: Vec<u16>,
 }
 
@@ -62,7 +62,7 @@ impl User32State32 {
             queue,
             next_atom: 0xc000,
             standard_atoms: [0; 6],
-            common_atoms: [0; 2],
+            common_atoms: [0; crate::windows::comctl32::CommonControlKind32::ALL.len()],
             system_atoms: Vec::new(),
         })
     }
