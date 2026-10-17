@@ -18,6 +18,7 @@ struct probe {
     DWORD observed_flags;
     WORD observed_file, observed_extension;
     UINT control_edit, control_ok, control_cancel;
+    UINT edit_candidates, edit_id, edit_parent_id, admitted;
 };
 
 static int rows;
@@ -58,6 +59,48 @@ static BOOL CALLBACK cancel_window(HWND window, LPARAM unused) {
     return TRUE;
 }
 
+struct edit_search { HWND root, edit; UINT count; };
+static BOOL CALLBACK filename_edit(HWND window, LPARAM data) {
+    struct edit_search *search = (struct edit_search *)data;
+    WCHAR class_name[32];
+    HWND ancestor;
+    UINT depth;
+    if (!GetClassNameW(window, class_name, 32) || lstrcmpiW(class_name, L"Edit")) return TRUE;
+    ancestor = window;
+    for (depth = 0; ancestor && ancestor != search->root && depth < 32; ++depth) {
+        int id = GetDlgCtrlID(ancestor);
+        if (id == edt1 || id == cmb13) {
+            search->edit = window;
+            ++search->count;
+            return TRUE;
+        }
+        ancestor = GetParent(ancestor);
+    }
+    return TRUE;
+}
+static BOOL admit_filename(struct probe *p) {
+    struct edit_search search;
+    WCHAR wide[512];
+    char narrow[512];
+    BOOL accepted;
+    memset(&search, 0, sizeof(search));
+    search.root = p->root;
+    EnumChildWindows(p->root, filename_edit, (LPARAM)&search);
+    p->edit_candidates = search.count;
+    if (search.count != 1 || !search.edit) return FALSE;
+    p->edit_id = (UINT)GetDlgCtrlID(search.edit);
+    p->edit_parent_id = (UINT)GetDlgCtrlID(GetParent(search.edit));
+    if (p->wide) {
+        accepted = SetWindowTextW(search.edit, p->chosen_w);
+        if (!accepted || !GetWindowTextW(search.edit, wide, 512) || lstrcmpW(wide, p->chosen_w)) return FALSE;
+    } else {
+        accepted = SetWindowTextA(search.edit, p->chosen_a);
+        if (!accepted || !GetWindowTextA(search.edit, narrow, 512) || lstrcmpA(narrow, p->chosen_a)) return FALSE;
+    }
+    p->admitted = 1;
+    return TRUE;
+}
+
 static void CALLBACK timeout(HWND unused_window, UINT message, UINT_PTR id, DWORD tick) {
     (void)unused_window; (void)message; (void)tick;
     KillTimer(NULL, id);
@@ -84,11 +127,8 @@ static UINT_PTR hook(HWND window, UINT message, LPARAM parameter, BOOL wide) {
     if (!p || message != WM_NOTIFY) return 0;
     if (p->count < 64) p->events[p->count++] = ((NMHDR *)parameter)->code;
     if (((NMHDR *)parameter)->code == CDN_INITDONE && !p->cancel) {
-        if (wide)
-            SendMessageW(p->root, CDM_SETCONTROLTEXT, edt1, (LPARAM)p->chosen_w);
-        else
-            SendMessageA(p->root, CDM_SETCONTROLTEXT, edt1, (LPARAM)p->chosen_a);
-        PostMessageW(p->root, WM_COMMAND, IDOK, 0);
+        if (admit_filename(p)) PostMessageW(p->root, WM_COMMAND, IDOK, 0);
+        else PostMessageW(p->root, WM_COMMAND, IDCANCEL, 0);
     }
     if (((NMHDR *)parameter)->code == CDN_FILEOK) {
         ++p->file_ok;
@@ -137,7 +177,8 @@ static void describe_probe(struct probe *p, BOOL ok, DWORD error, DWORD last_err
         if (i) putchar(',');
         printf("%u", p->events[i]);
     }
-    putchar(']');
+    printf("],\"editCandidates\":%u,\"editId\":%u,\"editParentId\":%u,\"admitted\":%u",
+        p->edit_candidates, p->edit_id, p->edit_parent_id, p->admitted);
 }
 
 static void dialog_w(const char *name, BOOL save, const WCHAR *chosen, DWORD flags,
@@ -155,6 +196,7 @@ static void dialog_w(const char *name, BOOL save, const WCHAR *chosen, DWORD fla
     memset(title, 0xcc, sizeof(title));
     p.name = name; p.wide = TRUE; p.cancel = cancel; p.veto = veto;
     p.ofn = &ofn; p.chosen_w = chosen;
+    if (!cancel && capacity > (DWORD)lstrlenW(chosen)) lstrcpyW(file, chosen);
     ofn.lStructSize = size;
     ofn.lpstrFilter = filter; ofn.nFilterIndex = 1;
     ofn.lpstrFile = file; ofn.nMaxFile = capacity;
@@ -180,7 +222,7 @@ static void dialog_w(const char *name, BOOL save, const WCHAR *chosen, DWORD fla
     printf(",\"cwdAfter\":"); wide_units(after, MAX_PATH);
     putchar('}');
     SetCurrentDirectoryW(before);
-    if (p.timeout) ExitProcess(2);
+    if (p.timeout || (!p.cancel && !p.admitted)) ExitProcess(2);
 }
 
 static void dialog_a(const char *name, BOOL save, const char *chosen, DWORD flags, DWORD capacity) {
@@ -195,6 +237,7 @@ static void dialog_a(const char *name, BOOL save, const char *chosen, DWORD flag
     memset(file, 0xcc, sizeof(file)); file[0] = 0;
     memset(title, 0xcc, sizeof(title));
     p.name = name; p.ofn = &ofn; p.chosen_a = chosen;
+    if (capacity > (DWORD)lstrlenA(chosen)) lstrcpyA(file, chosen);
     ofn.lStructSize = sizeof(ofn); ofn.lpstrFilter = filter; ofn.nFilterIndex = 1;
     ofn.lpstrFile = file; ofn.nMaxFile = capacity;
     ofn.lpstrFileTitle = title; ofn.nMaxFileTitle = 512;
@@ -210,7 +253,7 @@ static void dialog_a(const char *name, BOOL save, const char *chosen, DWORD flag
     printf(",\"flags\":%lu,\"filter\":%lu,\"offsets\":[%u,%u],\"requiredWord\":%u,\"file\":",
         ofn.Flags, ofn.nFilterIndex, ofn.nFileOffset, ofn.nFileExtension, *(WORD *)file);
     narrow_units(file, 512); printf(",\"title\":"); narrow_units(title, 512); putchar('}');
-    if (p.timeout) ExitProcess(2);
+    if (p.timeout || (!p.cancel && !p.admitted)) ExitProcess(2);
 }
 
 struct thread_errors { DWORD before, after; };
