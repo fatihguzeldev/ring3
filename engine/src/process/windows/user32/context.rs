@@ -30,6 +30,7 @@ impl User32Context32 {
             .map_err(|_| User32Error32::Allocation)?;
         Ok(Self {
             state,
+            menus: crate::windows::user32::menus::MenuStore32::new(Default::default())?,
             builtin_procedures: None,
             layouts: Vec::new(),
             process_layout: None,
@@ -142,6 +143,14 @@ impl User32Context32 {
                 context,
                 self.resource_dialogs.system_base,
             ),
+            CreateMenu | CreatePopupMenu | DestroyMenu | IsMenu | GetMenu | SetMenu
+            | GetMenuItemCount | GetMenuItemID | GetSubMenu | AppendMenuA | AppendMenuW
+            | InsertMenuA | InsertMenuW | ModifyMenuA | ModifyMenuW | RemoveMenu | DeleteMenu
+            | EnableMenuItem | CheckMenuItem | GetMenuState | GetMenuStringA | GetMenuStringW
+            | GetMenuContextHelpId | SetMenuContextHelpId | GetMenuItemInfoA | GetMenuItemInfoW
+            | SetMenuItemInfoA | SetMenuItemInfoW | InsertMenuItemA | InsertMenuItemW => {
+                self.menu_call(api, args, memory, context)
+            }
             DestroyWindow => self.destroy_window(args[0], context),
             GetClientRect | GetWindowRect => self.get_rect(api, args, memory),
             IsWindow => Ok(User32Outcome32::Return(u32::from(

@@ -312,7 +312,7 @@ impl User32Context32 {
                     return Ok(User32Outcome32::Return(u32::MAX));
                 };
                 if message == 0x189 {
-                    super::text::encode_text(ram, args[3], 32768, text, wide, call)?
+                    super::super::memory::encode_text(ram, args[3], 32768, text, wide, call)?
                 } else if wide {
                     text.len() as u32
                 } else {

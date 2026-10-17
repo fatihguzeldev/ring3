@@ -137,6 +137,40 @@ api_catalog! {
     GetDialogBaseUnits=0x0002_0074,0;
     GetWindowContextHelpId=0x0002_0075,1;
     SetWindowContextHelpId=0x0002_0076,2;
+    CreateMenu=0x0002_0077,0;
+    CreatePopupMenu=0x0002_0078,0;
+    DestroyMenu=0x0002_0079,1;
+    IsMenu=0x0002_007a,1;
+    GetMenu=0x0002_007b,1;
+    SetMenu=0x0002_007c,2;
+    GetMenuItemCount=0x0002_007d,1;
+    GetMenuItemID=0x0002_007e,2;
+    GetSubMenu=0x0002_007f,2;
+    AppendMenuA=0x0002_0080,4;
+    AppendMenuW=0x0002_0081,4;
+    InsertMenuA=0x0002_0082,5;
+    InsertMenuW=0x0002_0083,5;
+    ModifyMenuA=0x0002_0084,5;
+    ModifyMenuW=0x0002_0085,5;
+    RemoveMenu=0x0002_0086,3;
+    DeleteMenu=0x0002_0087,3;
+    EnableMenuItem=0x0002_0088,3;
+    CheckMenuItem=0x0002_0089,3;
+    GetMenuState=0x0002_008b,3;
+    GetMenuStringA=0x0002_008c,5;
+    GetMenuStringW=0x0002_008d,5;
+    GetMenuItemInfoA=0x0002_008e,4;
+    GetMenuItemInfoW=0x0002_008f,4;
+    SetMenuItemInfoA=0x0002_0090,4;
+    SetMenuItemInfoW=0x0002_0091,4;
+    InsertMenuItemA=0x0002_0092,4;
+    InsertMenuItemW=0x0002_0093,4;
+    LoadMenuA=0x0002_0094,2;
+    LoadMenuW=0x0002_0095,2;
+    LoadMenuIndirectA=0x0002_0096,1;
+    LoadMenuIndirectW=0x0002_0097,1;
+    GetMenuContextHelpId=0x0002_0098,1;
+    SetMenuContextHelpId=0x0002_0099,2;
 }
 
 impl User32Api32 {
@@ -179,6 +213,11 @@ impl User32Api32 {
                     | Self::GetMessageW
                     | Self::MsgWaitForMultipleObjects
                     | Self::MsgWaitForMultipleObjectsEx
+                    | Self::GetMenuItemCount
+                    | Self::GetMenuItemID
+                    | Self::EnableMenuItem
+                    | Self::CheckMenuItem
+                    | Self::GetMenuState
             )
         {
             u32::MAX

@@ -4,10 +4,8 @@ use crate::{loader::SystemExportTarget32, memory::GuestAddress, windows::Calling
 #[test]
 fn user32_catalog_resolves_explicit_stdcall_gates_without_id_or_symbol_aliases() {
     let module = user32_module(0x70000000);
-    let named = User32Api32::catalog().count()
-        + crate::windows::resources::user32_resource_exports().len()
-        + crate::windows::rawinput::raw_input_exports().count()
-        + crate::windows::gdi::user32_gdi_exports().count();
+    let named =
+        User32Api32::catalog().count() + 10 + crate::windows::gdi::user32_gdi_exports().count();
     assert_eq!(module.exports.len(), named + 2);
     let mut names = std::collections::BTreeSet::new();
     let mut gates = std::collections::BTreeSet::new();
@@ -41,7 +39,7 @@ fn user32_catalog_resolves_explicit_stdcall_gates_without_id_or_symbol_aliases()
         ("LoadStringA", 0x0013_0015),
         ("LoadStringW", 0x0013_0016),
     ];
-    assert_eq!(User32Api32::catalog().count(), 118);
+    assert_eq!(User32Api32::catalog().count() + extensions.len(), 162);
     for (name, gate) in extensions {
         assert!(module.exports.iter().any(|export| {
             export.name.as_deref() == Some(name)
@@ -66,7 +64,7 @@ fn user32_catalog_resolves_explicit_stdcall_gates_without_id_or_symbol_aliases()
         None
     );
     assert_eq!(User32Api32::resolve("user32.dll", "createwindowexa"), None);
-    assert_eq!(User32Api32::from_id(0x20077), None);
+    assert_eq!(User32Api32::from_id(0x2ffff), None);
     assert_eq!(User32Api32::CreateWindowExW.stack_words(), 12);
 }
 

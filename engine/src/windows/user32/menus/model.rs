@@ -1,5 +1,7 @@
 use super::{MenuHandle32, MenuItem32, MenuLimits32, template::Template32, types::Menu32};
 use crate::windows::user32::User32Error32 as E;
+mod lifetime;
+pub(crate) use lifetime::PreparedMenuRetirement32;
 
 pub(crate) struct MenuStore32 {
     limits: MenuLimits32,
@@ -178,6 +180,16 @@ impl MenuStore32 {
     ) -> Result<&MenuItem32, E> {
         let (menu, item) = self.find(handle, key, position)?;
         Ok(&self.menus[menu].items[item])
+    }
+
+    pub(crate) fn location(
+        &self,
+        handle: MenuHandle32,
+        key: u32,
+        position: bool,
+    ) -> Result<(MenuHandle32, usize), E> {
+        let (menu, item) = self.find(handle, key, position)?;
+        Ok((self.menus[menu].handle, item))
     }
 
     pub(crate) fn insert(

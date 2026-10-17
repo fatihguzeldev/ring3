@@ -244,6 +244,17 @@ impl EngineInstance {
             let base = gdi.dialog_base_units(&font).map_err(HostError::Gdi)?;
             self.user32.as_mut().unwrap().resource_dialogs.system_base = base;
         }
+        let resource_menu = if matches!(
+            api,
+            User32Api32::LoadMenuA
+                | User32Api32::LoadMenuW
+                | User32Api32::LoadMenuIndirectA
+                | User32Api32::LoadMenuIndirectW
+        ) {
+            Some(self.prepare_user32_menu_resource(api, frame.arguments()))
+        } else {
+            None
+        };
         let resource_font = resource_creation
             .as_ref()
             .and_then(|result| result.as_ref().ok())
@@ -274,6 +285,17 @@ impl EngineInstance {
                 Err(HostError::Gdi(error)) => Err(User32Error32::Win32(error.win32())),
                 Err(error) => return Err(error),
             }
+        } else if let Some(resource) = resource_menu {
+            use super::menus::PreparedResource32;
+            let value = match resource {
+                Ok(PreparedResource32::Menu(template)) => {
+                    context.menus.load(template).map(|menu| menu.get())
+                }
+                Err(HostError::User32(error)) => Err(error),
+                Err(HostError::Resource(error)) => Err(User32Error32::Win32(error.win32())),
+                Err(error) => return Err(error),
+            };
+            value.map(super::User32Outcome32::Return)
         } else if let Some(dialog) = dialog {
             match dialog {
                 Ok(dialog) => context.begin_dialog(dialog),

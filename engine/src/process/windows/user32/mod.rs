@@ -10,6 +10,7 @@ mod destruction;
 mod input;
 mod lifecycle;
 mod memory;
+mod menus;
 mod messages;
 mod properties;
 mod rawinput;
@@ -59,6 +60,7 @@ pub(crate) enum User32Outcome32 {
 
 pub(crate) struct User32Context32 {
     state: User32State32,
+    menus: crate::windows::user32::menus::MenuStore32,
     builtin_procedures: Option<[crate::memory::GuestAddress; 2]>,
     layouts: Vec<threads::ThreadLayout32>,
     process_layout: Option<(u64, crate::input::keyboard::KeyboardLayout32)>,
@@ -85,3 +87,7 @@ fn raw(handle: Option<WindowHandle32>) -> u32 {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+#[path = "menus/tests.rs"]
+mod menu_tests;

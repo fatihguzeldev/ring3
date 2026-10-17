@@ -1,7 +1,9 @@
+mod output;
 use crate::{
     memory::{AddressSpace, GuestAddress, PageRange},
     windows::user32::{Message32, Point32, Rect32, User32Error32},
 };
+pub(super) use output::{encode_text, encoded_text};
 
 #[derive(Clone, Copy)]
 pub(super) struct Scratch32 {

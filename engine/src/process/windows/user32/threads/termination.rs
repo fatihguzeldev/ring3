@@ -3,6 +3,7 @@ use crate::windows::user32::User32Error32;
 
 pub(in crate::process) struct PreparedUser32ThreadExit32 {
     thread: u32,
+    menus: crate::windows::user32::menus::PreparedMenuRetirement32,
 }
 impl User32Context32 {
     pub(in crate::process) fn prepare_thread_termination(
@@ -12,13 +13,17 @@ impl User32Context32 {
         if thread == 0 {
             return Err(User32Error32::InvalidRequest);
         }
-        Ok(PreparedUser32ThreadExit32 { thread })
+        let menus = self
+            .menus
+            .prepare_retirement(self.state.attached_menus(thread))?;
+        Ok(PreparedUser32ThreadExit32 { thread, menus })
     }
     pub(in crate::process) fn commit_thread_termination(
         &mut self,
         prepared: PreparedUser32ThreadExit32,
     ) {
         let thread = prepared.thread;
+        self.menus.commit_retirement(prepared.menus);
         let state = &self.state;
         self.raw_input.retire_registrations(|raw| {
             crate::windows::window::WindowHandle32::try_from(raw)

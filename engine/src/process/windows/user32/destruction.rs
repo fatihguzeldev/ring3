@@ -278,7 +278,15 @@ impl User32Context32 {
                     }
                 }
                 Step32::Remove(_) => {
+                    let data = self.state.record(window)?;
+                    let menu = (data.style & 0x4000_0000 == 0)
+                        .then(|| {
+                            crate::windows::user32::menus::MenuHandle32::try_from(data.menu).ok()
+                        })
+                        .flatten();
+                    let menus = self.menus.prepare_retirement(menu)?;
                     self.state.remove_delivered(thread, window)?;
+                    self.menus.commit_retirement(menus);
                     self.raw_input.retire_window(window.get());
                     self.timers.retire_window(window.get());
                     self.provenance.retire_window(window.get());
