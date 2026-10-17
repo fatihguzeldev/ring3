@@ -272,8 +272,9 @@ impl User32Context32 {
                 0x147 => 0x188,
                 0x146 => 0x18b,
                 0x149 => 0x18a,
-                0x158 => 0x199,
-                0x150 => 0x19a,
+                0x150 => 0x199, // CB_GETITEMDATA -> LB_GETITEMDATA
+                0x151 => 0x19a, // CB_SETITEMDATA -> LB_SETITEMDATA
+                0x158 => 0x1a2, // CB_FINDSTRINGEXACT -> LB_FINDSTRINGEXACT
                 value => value,
             }
         } else {
@@ -451,6 +452,47 @@ impl User32Context32 {
                 }
             }
             0x18b => self.state.control(window)?.items.len() as u32,
+            0x1a2 => {
+                if args[3] == 0 {
+                    return Ok(User32Outcome32::Return(u32::MAX));
+                }
+                let text = memory::string(ram, args[3], wide, 32767, call.ansi)?;
+                let items = &self.state.control_state(window)?.items;
+                let count = items.len();
+                if text.is_empty()
+                    || count == 0
+                    || (args[2] != u32::MAX && args[2] as usize >= count)
+                {
+                    return Ok(User32Outcome32::Return(u32::MAX));
+                }
+                let first = if args[2] == u32::MAX {
+                    0
+                } else {
+                    (args[2] as usize + 1) % count
+                };
+                let mut found = u32::MAX;
+                for offset in 0..count {
+                    let index = (first + offset) % count;
+                    if crate::windows::nls::linguistics::compare(
+                        &items[index],
+                        &text,
+                        0x1001, // NORM_IGNORECASE | SORT_STRINGSORT keeps punctuation significant.
+                    )
+                    .map_err(|error| match error {
+                        crate::windows::nls::NlsError32::Allocation => User32Error32::Allocation,
+                        crate::windows::nls::NlsError32::Memory(error) => {
+                            User32Error32::Memory(error)
+                        }
+                        error => User32Error32::Win32(error.win32()),
+                    })?
+                    .is_eq()
+                    {
+                        found = index as u32;
+                        break;
+                    }
+                }
+                found
+            }
             0x199 => self
                 .state
                 .control(window)?

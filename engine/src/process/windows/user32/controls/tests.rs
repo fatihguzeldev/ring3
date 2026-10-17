@@ -4,6 +4,8 @@ use crate::process::windows::user32::{
 };
 use crate::{memory::GuestAddress, windows::controls::ControlKind32};
 
+mod combo;
+
 impl super::super::User32Context32 {
     pub(in crate::process) fn standard_control_gate(
         &self,
