@@ -118,6 +118,12 @@ impl EngineInstance {
             return Err(HostError::InvalidRequest);
         }
         self.bind_user32_builtin_classes()?;
+        if matches!(
+            api,
+            User32Api32::TrackPopupMenu | User32Api32::TrackPopupMenuEx
+        ) {
+            self.bind_popup_class()?;
+        }
         self.refresh_user32_input()?;
         self.reserve_windows_reply()?;
         self.check_windows_thread_write()?;
@@ -131,6 +137,8 @@ impl EngineInstance {
                     | User32Api32::SendMessageW
                     | User32Api32::TranslateAcceleratorA
                     | User32Api32::TranslateAcceleratorW
+                    | User32Api32::TrackPopupMenu
+                    | User32Api32::TrackPopupMenuEx
                     | User32Api32::GetMessageA
                     | User32Api32::GetMessageW
                     | User32Api32::PeekMessageA
@@ -271,6 +279,26 @@ impl EngineInstance {
         } else {
             None
         };
+        let popup_system = if matches!(
+            api,
+            User32Api32::DefWindowProcA | User32Api32::DefWindowProcW
+        ) {
+            if let Some(gdi) = self.gdi.as_mut() {
+                self.user32
+                    .as_mut()
+                    .ok_or(HostError::InvalidRequest)?
+                    .popup_system_message(
+                        api,
+                        frame.arguments(),
+                        self.memory.as_mut().ok_or(HostError::Closed)?,
+                        gdi,
+                    )
+            } else {
+                None
+            }
+        } else {
+            None
+        };
         let clipboard = if api.clipboard() {
             if frame.convention() != api.convention() || frame.stack_words() != api.stack_words() {
                 return Err(HostError::User32(User32Error32::InvalidRequest));
@@ -286,7 +314,9 @@ impl EngineInstance {
         context.call_activation = activation
             .as_ref()
             .map_or_else(Default::default, |capture| capture.token());
-        let result = if let Some(result) = clipboard {
+        let result = if let Some(result) = popup_system {
+            result
+        } else if let Some(result) = clipboard {
             match result {
                 Ok(value) => Ok(value),
                 Err(HostError::User32(error)) => Err(error),

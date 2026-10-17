@@ -1,3 +1,7 @@
+mod layout;
+mod popup;
+mod visual;
+pub(super) use popup::PopupContext32;
 mod information;
 mod legacy;
 mod queries;

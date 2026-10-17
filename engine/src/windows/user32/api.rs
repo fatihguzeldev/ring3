@@ -171,6 +171,9 @@ api_catalog! {
     LoadMenuIndirectW=0x0002_0097,1;
     GetMenuContextHelpId=0x0002_0098,1;
     SetMenuContextHelpId=0x0002_0099,2;
+    TrackPopupMenu=0x0002_00a0,7;
+    TrackPopupMenuEx=0x0002_00a1,6;
+    EndMenu=0x0002_00a2,0;
     CreateAcceleratorTableA=0x0002_00a6,2;
     CreateAcceleratorTableW=0x0002_00a7,2;
     CopyAcceleratorTableA=0x0002_00a8,3;

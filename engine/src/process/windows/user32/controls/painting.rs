@@ -163,6 +163,17 @@ impl User32Context32 {
         memory: &mut AddressSpace,
         gdi: Option<&mut GdiRuntime32>,
     ) -> Result<User32Outcome32, HostError> {
+        let outcome = self.complete_with_gdi_step(token, result, memory, gdi)?;
+        self.complete_popup_child(token, outcome)
+            .map_err(HostError::User32)
+    }
+    fn complete_with_gdi_step(
+        &mut self,
+        token: u64,
+        result: u32,
+        memory: &mut AddressSpace,
+        gdi: Option<&mut GdiRuntime32>,
+    ) -> Result<User32Outcome32, HostError> {
         if let Some(paint) = self
             .pending
             .last()

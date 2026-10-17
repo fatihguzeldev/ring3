@@ -101,6 +101,12 @@ impl User32Context32 {
         if self.sent_paint_wait(token).is_some() {
             return self.pending_sent_paint_message(token);
         }
+        if matches!(
+            self.pending.last().map(|pending| pending.continuation),
+            Some(Continuation32::MenuPopup { .. })
+        ) {
+            return self.pending_popup_message(token);
+        }
         self.pending_accelerator_message(token)
     }
 
@@ -110,6 +116,7 @@ impl User32Context32 {
                 && matches!(
                     pending.continuation,
                     Continuation32::ResourceDialog { .. }
+                        | Continuation32::MenuPopup { .. }
                         | Continuation32::Accelerator(_)
                         | Continuation32::Clipboard(_)
                         | Continuation32::SentPaint(_)

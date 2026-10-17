@@ -369,7 +369,7 @@ impl EngineInstance {
             .user32
             .as_ref()
             .ok_or(HostError::InvalidRequest)?
-            .preview_resource_dialog_wait_input_flags(continuation)
+            .preview_menu_wait_input_flags(continuation)
             .map_err(HostError::User32)?;
         let input = flags
             .map(|(focused, captured)| self.prepare_windows_input_flags(focused, captured))
@@ -390,7 +390,11 @@ impl EngineInstance {
         };
         let context = self.user32.as_mut().ok_or(HostError::InvalidRequest)?;
         let outcome = context
-            .resume_wait(continuation, self.memory.as_mut().ok_or(HostError::Closed)?)
+            .resume_wait_with_gdi(
+                continuation,
+                self.memory.as_mut().ok_or(HostError::Closed)?,
+                self.gdi.as_mut(),
+            )
             .map_err(HostError::User32)?;
         let error = context.take_last_error();
         let actual = (

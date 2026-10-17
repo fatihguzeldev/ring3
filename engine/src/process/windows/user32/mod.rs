@@ -63,6 +63,7 @@ pub(crate) enum User32Outcome32 {
 pub(crate) struct User32Context32 {
     state: User32State32,
     menus: crate::windows::user32::menus::MenuStore32,
+    menu_popups: menus::PopupContext32,
     clipboard: crate::windows::user32::clipboard::ClipboardState32,
     accelerators: crate::windows::user32::accelerators::AcceleratorStore32,
     builtin_procedures: Option<[crate::memory::GuestAddress; 2]>,

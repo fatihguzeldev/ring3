@@ -36,6 +36,10 @@ pub(super) enum PositionStage32 {
 
 #[derive(Clone, Copy)]
 pub(super) enum Continuation32 {
+    MenuPopup {
+        plan: u64,
+        scratch: Scratch32,
+    },
     Accelerator(super::accelerators::Dispatch32),
     Clipboard(super::clipboard::ClipboardCall32),
     ResourceDialog {
@@ -132,6 +136,7 @@ impl User32Context32 {
             .ok_or(User32Error32::InvalidToken)?;
         let (procedure, arguments) = match pending.continuation {
             Continuation32::ResourceDialog { .. }
+            | Continuation32::MenuPopup { .. }
             | Continuation32::Accelerator(_)
             | Continuation32::Clipboard(_)
             | Continuation32::SentPaint(_) => {
@@ -272,6 +277,9 @@ impl User32Context32 {
         memory: &mut AddressSpace,
     ) -> Result<User32Outcome32, User32Error32> {
         self.check_resource_dialog_scratch(memory)?;
+        if let Some(outcome) = self.retry_popup_completion(token) {
+            return outcome;
+        }
         if let Some(outcome) = self.retry_resource_dialog_completion(token, memory) {
             return outcome;
         }
@@ -288,7 +296,8 @@ impl User32Context32 {
         let outcome = self.complete_resource_dialog_child(token, outcome, memory)?;
         let outcome = self.complete_accelerator_child(token, outcome)?;
         let outcome = self.complete_clipboard_child(token, outcome)?;
-        self.complete_sent_paint_child(token, outcome)
+        let outcome = self.complete_sent_paint_child(token, outcome)?;
+        self.complete_popup_child(token, outcome)
     }
 
     fn complete_step(
@@ -305,6 +314,7 @@ impl User32Context32 {
             .ok_or(User32Error32::InvalidToken)?;
         match pending.continuation {
             Continuation32::ResourceDialog { .. }
+            | Continuation32::MenuPopup { .. }
             | Continuation32::Accelerator(_)
             | Continuation32::Clipboard(_)
             | Continuation32::SentPaint(_) => Err(User32Error32::InvalidToken),

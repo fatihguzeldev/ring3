@@ -35,6 +35,9 @@ impl User32Context32 {
                 self.resource_dialog_ready(plan)
             }
             super::super::callback::Continuation32::Dialog { id } => self.dialog_ready(id),
+            super::super::callback::Continuation32::MenuPopup { plan, .. } => {
+                self.popup_ready(plan)
+            }
             super::super::callback::Continuation32::RemoteCall { ready, .. }
             | super::super::callback::Continuation32::DialogRemoteHelp { ready, .. } => {
                 ready.is_some()
@@ -105,6 +108,7 @@ impl User32Context32 {
             .filter_map(|pending| match pending.continuation {
                 super::super::callback::Continuation32::DialogHelp { scratch, .. }
                 | super::super::callback::Continuation32::ResourceDialog { scratch, .. }
+                | super::super::callback::Continuation32::MenuPopup { scratch, .. }
                 | super::super::callback::Continuation32::DialogRemoteHelp { scratch, .. }
                 | super::super::callback::Continuation32::Create { scratch, .. }
                 | super::super::callback::Continuation32::Position { scratch, .. }
@@ -217,6 +221,7 @@ impl User32ThreadReply32 {
             .filter_map(|pending| match pending.continuation {
                 super::super::callback::Continuation32::DialogHelp { scratch, .. }
                 | super::super::callback::Continuation32::ResourceDialog { scratch, .. }
+                | super::super::callback::Continuation32::MenuPopup { scratch, .. }
                 | super::super::callback::Continuation32::DialogRemoteHelp { scratch, .. }
                 | super::super::callback::Continuation32::Create { scratch, .. }
                 | super::super::callback::Continuation32::Position { scratch, .. }
@@ -320,6 +325,7 @@ fn check_owned_scratch(
         match pending.continuation {
             super::super::callback::Continuation32::DialogHelp { scratch, .. }
             | super::super::callback::Continuation32::ResourceDialog { scratch, .. }
+            | super::super::callback::Continuation32::MenuPopup { scratch, .. }
             | super::super::callback::Continuation32::DialogRemoteHelp { scratch, .. }
             | super::super::callback::Continuation32::Create { scratch, .. }
             | super::super::callback::Continuation32::Position { scratch, .. }

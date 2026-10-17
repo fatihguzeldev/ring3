@@ -31,6 +31,7 @@ impl User32Context32 {
         Ok(Self {
             state,
             menus: crate::windows::user32::menus::MenuStore32::new(Default::default())?,
+            menu_popups: super::menus::PopupContext32::new(limits.continuations as usize)?,
             clipboard: Default::default(),
             accelerators: crate::windows::user32::accelerators::AcceleratorStore32::new(256, 4096)?,
             builtin_procedures: None,
@@ -145,6 +146,8 @@ impl User32Context32 {
                 context,
                 self.resource_dialogs.system_base,
             ),
+            TrackPopupMenu | TrackPopupMenuEx => self.begin_popup_menu(api, args, memory, context),
+            EndMenu => self.end_popup_menu(context.thread_id),
             CreateMenu | CreatePopupMenu | DestroyMenu | IsMenu | GetMenu | SetMenu
             | GetMenuItemCount | GetMenuItemID | GetSubMenu | AppendMenuA | AppendMenuW
             | InsertMenuA | InsertMenuW | ModifyMenuA | ModifyMenuW | RemoveMenu | DeleteMenu
