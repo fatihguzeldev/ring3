@@ -39,7 +39,7 @@ fn user32_catalog_resolves_explicit_stdcall_gates_without_id_or_symbol_aliases()
         ("LoadStringA", 0x0013_0015),
         ("LoadStringW", 0x0013_0016),
     ];
-    assert_eq!(User32Api32::catalog().count() + extensions.len(), 206);
+    assert_eq!(User32Api32::catalog().count() + extensions.len(), 208);
     for (name, gate) in extensions {
         assert!(module.exports.iter().any(|export| {
             export.name.as_deref() == Some(name)
@@ -125,5 +125,5 @@ fn image_calls_have_exact_stdcall_arities_inside_the_unique_user32_catalog() {
         assert!(api.image());
     }
     assert!(!User32Api32::SetCursor.image());
-    assert_eq!(User32Api32::from_id(0x0002_00ce), None);
+    assert_eq!(User32Api32::from_id(0x0002_00d0), None);
 }

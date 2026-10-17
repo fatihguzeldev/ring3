@@ -22,11 +22,14 @@ impl User32Context32 {
             if lease
                 .window
                 .is_some_and(|window| self.windows().get(window).is_ok())
-                || self
-                    .resource_dialogs
-                    .plans
-                    .iter()
-                    .any(|plan| plan.font == lease.font)
+                || self.resource_dialogs.plans.iter().any(|plan| {
+                    plan.font == lease.font
+                        || plan
+                            .prepared
+                            .windows
+                            .iter()
+                            .any(|window| window.font == lease.font)
+                })
             {
                 at += 1;
                 continue;

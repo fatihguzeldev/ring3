@@ -88,6 +88,11 @@ impl EngineInstance {
                         last_error = error.win32();
                         User32Outcome32::Return(0)
                     }
+                    Err(HostError::Comdlg(E::Dialog(error))) => {
+                        self.comdlg.commit_error(prepared, error as u32);
+                        last_error = 87;
+                        User32Outcome32::Return(0)
+                    }
                     Err(error) => return Err(error),
                 },
                 Err(E::Dialog(error)) => {

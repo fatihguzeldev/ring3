@@ -88,10 +88,9 @@ impl User32Context32 {
             }
             let outcome = match stage {
                 Stage32::Create(at) => {
-                    let parent = if at == 0 {
-                        super::super::super::raw(plan.owner)
-                    } else {
-                        super::super::super::raw(root)
+                    let parent = match plan.prepared.windows[at].parent {
+                        None => super::super::super::raw(plan.owner),
+                        Some(index) => plan.windows.get(index).ok_or(E::InvalidToken)?.get(),
                     };
                     let args = plan.prepared.windows[at].arguments(
                         scratch.address.0,
@@ -105,9 +104,15 @@ impl User32Context32 {
                     };
                     self.create_window(api, &args, ram, context)?
                 }
-                Stage32::Font(at) => {
-                    self.send_message(&[plan.windows[at].get(), 0x30, plan.font, 0], context)?
-                }
+                Stage32::Font(at) => self.send_message(
+                    &[
+                        plan.windows[at].get(),
+                        0x30,
+                        plan.prepared.windows[at].font,
+                        0,
+                    ],
+                    context,
+                )?,
                 Stage32::Disable => {
                     if !plan.modal || !plan.owner_enabled || plan.owner_disabled {
                         self.resource_dialogs.plans[index].stage = Stage32::Initialize;

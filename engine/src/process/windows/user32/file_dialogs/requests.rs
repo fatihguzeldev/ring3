@@ -30,13 +30,16 @@ impl EngineInstance {
         }
         let token = user32.check_continuation().map_err(HostError::User32)?;
         // unsupported flags are rejected before any window, output or directory publication.
-        if request.input.flags & (0x40 | 0x80 | 0x10 | 0x8000 | 0x400000) != 0
-            || request.input.flag(0x20 | 0x200) && !request.input.flag(0x80000)
+        if request.input.flags & (0x10 | 0x8000 | 0x400000) != 0
+            || request.input.flag(0x200) && !request.input.flag(0x80000)
             || api.save() && request.input.flag(0x200)
             || request.input.flags_ex != 0
         {
             return Err(HostError::User32(E::Win32(50)));
         }
+        let explorer =
+            request.input.flag(0x80000) || !request.input.flag(0x20 | 0x40 | 0x80 | 0x200);
+        let custom = self.common_dialog_template(&request)?;
         let directory = self.initial_common_dialog_directory(&request)?;
         let entries =
             self.common_dialog_entries(&directory, &request, request.input.filter_index)?;
@@ -58,15 +61,41 @@ impl EngineInstance {
         } else {
             request.title.clone()
         };
+        let hook = request.input.flag(0x20) && request.input.hook != 0;
+        let default = template::template(
+            title,
+            api.save(),
+            !request.input.flag(4),
+            explorer && hook && custom.is_none(),
+            request.input.flag(0x200),
+        );
+        let (dialog, child) = if explorer {
+            (default, custom)
+        } else {
+            (custom.unwrap_or(default), None)
+        };
+        let legacy_messages = if !explorer && hook {
+            let state = &mut self.user32.as_mut().unwrap().state;
+            Some([
+                state
+                    .register_message("commdlg_FileNameOK".encode_utf16().collect())
+                    .map_err(HostError::User32)?,
+                state
+                    .register_message("commdlg_LBSelChangedNotify".encode_utf16().collect())
+                    .map_err(HostError::User32)?,
+            ])
+        } else {
+            None
+        };
         let creation = self.prepare_internal_dialog(
             InternalDialog32 {
-                template: template::template(
-                    title,
-                    api.save(),
-                    !request.input.flag(4),
-                    request.input.flag(0x20) && request.input.hook != 0,
-                    request.input.flag(0x200),
-                ),
+                template: dialog,
+                child,
+                instance: if request.input.flag(0x80) {
+                    0
+                } else {
+                    request.input.instance
+                },
                 owner: request.input.owner,
                 procedure: GuestAddress(procedure.0),
                 parameter: request.pointer,
@@ -88,6 +117,9 @@ impl EngineInstance {
             root: None,
             save: api.save(),
             initialized: false,
+            explorer,
+            procedure,
+            legacy_messages,
             published_error: None,
             selection: None,
             directory,
@@ -95,6 +127,7 @@ impl EngineInstance {
             filter_index: request.input.filter_index,
             request,
         };
+        let fonts = creation.internal_fonts();
         let user32 = self.user32.as_mut().unwrap();
         // the preallocated plan and resource dialog share the canonical modal continuation token.
         user32.file_dialogs.plans.push(plan);
@@ -102,6 +135,13 @@ impl EngineInstance {
             user32.begin_resource_dialog(creation, self.memory.as_mut().ok_or(HostError::Closed)?);
         if outcome.is_err() {
             user32.file_dialogs.retire(token);
+            for font in fonts.into_iter().filter(|font| *font != 0) {
+                self.gdi
+                    .as_mut()
+                    .unwrap()
+                    .retire_dialog_font(font)
+                    .map_err(HostError::Gdi)?;
+            }
         }
         outcome.map_err(HostError::User32)
     }

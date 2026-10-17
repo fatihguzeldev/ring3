@@ -1,4 +1,5 @@
 use super::*;
+use super::callbacks::HookStage32;
 use crate::{
     memory::{GuestAddress, PageRange, Permissions},
     process::{
@@ -943,4 +944,385 @@ fn multiselect_queries_follow_same_canonical_items_and_fault_before_guest_index_
         .read(GuestAddress(OFN + 0x800), &mut bytes)
         .unwrap();
     assert_eq!(bytes, [0, 0, 0, 0, 2, 0, 0, 0]);
+}
+
+fn common_template_bytes(template: &crate::windows::user32::dialogs::DialogTemplate32) -> Vec<u8> {
+    use crate::windows::user32::dialogs::DialogName32;
+    fn word(bytes: &mut Vec<u8>, value: u16) {
+        bytes.extend_from_slice(&value.to_le_bytes());
+    }
+    fn dword(bytes: &mut Vec<u8>, value: u32) {
+        bytes.extend_from_slice(&value.to_le_bytes());
+    }
+    fn text(bytes: &mut Vec<u8>, value: &[u16]) {
+        for unit in value.iter().copied().chain(std::iter::once(0)) {
+            word(bytes, unit);
+        }
+    }
+    fn name(bytes: &mut Vec<u8>, value: &DialogName32) {
+        match value {
+            DialogName32::Empty => word(bytes, 0),
+            DialogName32::Ordinal(id) => {
+                word(bytes, 0xffff);
+                word(bytes, *id);
+            }
+            DialogName32::Text(value) => text(bytes, value),
+        }
+    }
+    let mut bytes = Vec::new();
+    dword(&mut bytes, template.style);
+    dword(&mut bytes, template.ex_style);
+    word(&mut bytes, template.items.len() as u16);
+    for unit in [
+        template.units.x,
+        template.units.y,
+        template.units.width,
+        template.units.height,
+    ] {
+        word(&mut bytes, unit as u16);
+    }
+    name(&mut bytes, &template.menu);
+    name(&mut bytes, &template.class);
+    text(&mut bytes, &template.title);
+    if let Some(font) = &template.font {
+        word(&mut bytes, font.points);
+        text(&mut bytes, &font.face);
+    }
+    for item in &template.items {
+        bytes.resize(bytes.len().next_multiple_of(4), 0);
+        dword(&mut bytes, item.style);
+        dword(&mut bytes, item.ex_style);
+        for unit in [
+            item.units.x,
+            item.units.y,
+            item.units.width,
+            item.units.height,
+        ] {
+            word(&mut bytes, unit as u16);
+        }
+        word(&mut bytes, item.id as u16);
+        name(&mut bytes, &item.class);
+        name(&mut bytes, &item.title);
+        word(&mut bytes, 0);
+    }
+    bytes
+}
+
+#[test]
+fn explorer_custom_template_has_its_own_real_parent_and_font_after_input_block_changes() {
+    use crate::windows::user32::dialogs::{DialogFont32, DialogName32};
+    let mut engine = engine();
+    request(&mut engine, true);
+    let mut custom = template::template(
+        "Custom options".encode_utf16().collect(),
+        false,
+        false,
+        false,
+        false,
+    );
+    custom.items.truncate(1);
+    custom.items[0].id = 900;
+    custom.items[0].title = DialogName32::Text("Frozen option".encode_utf16().collect());
+    custom.style |= 0x40;
+    custom.font = Some(DialogFont32 {
+        points: 9,
+        weight: 400,
+        italic: false,
+        charset: 1,
+        face: "Arial".encode_utf16().collect(),
+    });
+    let bytes = common_template_bytes(&custom);
+    let block = engine.allocate_windows_runtime_initialized(&bytes).unwrap();
+    engine
+        .memory
+        .as_mut()
+        .unwrap()
+        .write(GuestAddress(OFN + 8), &block.to_le_bytes())
+        .unwrap();
+    engine
+        .memory
+        .as_mut()
+        .unwrap()
+        .write(GuestAddress(OFN + 52), &0x810a0u32.to_le_bytes())
+        .unwrap();
+    call(&mut engine, 0x00210002, &[OFN]).unwrap();
+    engine
+        .memory
+        .as_mut()
+        .unwrap()
+        .write(GuestAddress(block), &[0xff; 32])
+        .unwrap();
+    let mut events = Vec::new();
+    let outcome = pending(&engine);
+    settle(&mut engine, outcome, &mut events).unwrap();
+    let context = engine.user32.as_ref().unwrap();
+    let root = context.file_dialogs.plans[0].root.unwrap();
+    let child = context.file_dialog_control(root, template::HOOK).unwrap();
+    let option = context.state.dialog_item(child, 900).unwrap().unwrap();
+    assert_eq!(context.state.record(option).unwrap().parent, Some(child));
+    assert!(context.state.dialog_item(root, 900).unwrap().is_none());
+    assert_eq!(
+        context.state.text(option).unwrap(),
+        "Frozen option".encode_utf16().collect::<Vec<_>>()
+    );
+    let font = context.state.dialog(child).unwrap().font;
+    assert_ne!(font, 0);
+    assert_eq!(context.state.control_state(option).unwrap().font, font);
+    assert_eq!(
+        events,
+        [
+            (child.get(), 0x110),
+            (child.get(), (-601i32) as u32),
+            (child.get(), (-603i32) as u32)
+        ]
+    );
+    assert!(context.file_dialog_control(root, template::NAME).is_ok());
+}
+
+#[test]
+fn old_style_hook_can_consume_raw_root_messages_and_zero_result_runs_the_same_default_message() {
+    let mut engine = engine();
+    request(&mut engine, true);
+    engine
+        .memory
+        .as_mut()
+        .unwrap()
+        .write(GuestAddress(OFN + 52), &0x1020u32.to_le_bytes())
+        .unwrap();
+    call(&mut engine, 0x00210002, &[OFN]).unwrap();
+    let mut events = Vec::new();
+    let outcome = pending(&engine);
+    settle(&mut engine, outcome, &mut events).unwrap();
+    let context = engine.user32.as_ref().unwrap();
+    let plan = &context.file_dialogs.plans[0];
+    let root = plan.root.unwrap();
+    let token = plan.token;
+    assert_eq!(events, [(root.get(), 0x110)]);
+    assert!(
+        context
+            .state
+            .dialog_item(root, template::HOOK)
+            .unwrap()
+            .is_none()
+    );
+    let arguments = [root.get(), 0x111, 2, 0];
+    let User32Outcome32::Callback(callback) = engine
+        .execute_common_file_dialog_procedure(&arguments, true)
+        .unwrap()
+    else {
+        panic!("real legacy hook");
+    };
+    assert_eq!(callback.procedure.0, HOOK);
+    assert_eq!(callback.arguments, arguments);
+    let User32Outcome32::Callback(nested) = engine
+        .execute_common_file_dialog_procedure(&[root.get(), 0x8001, 0, 0], true)
+        .unwrap()
+    else {
+        panic!("reentrant old-style hook is separately owned");
+    };
+    assert_ne!(nested.continuation, callback.continuation);
+    assert_eq!(nested.arguments, [root.get(), 0x8001, 0, 0]);
+    assert_eq!(
+        engine
+            .user32
+            .as_mut()
+            .unwrap()
+            .complete(nested.continuation, 1, engine.memory.as_mut().unwrap())
+            .unwrap(),
+        User32Outcome32::Return(1)
+    );
+    let outcome = engine
+        .user32
+        .as_mut()
+        .unwrap()
+        .complete(callback.continuation, 1, engine.memory.as_mut().unwrap())
+        .unwrap();
+    assert_eq!(outcome, User32Outcome32::Return(1));
+    assert!(
+        engine
+            .user32
+            .as_ref()
+            .unwrap()
+            .state
+            .dialog(root)
+            .unwrap()
+            .ended
+            .is_none()
+    );
+    let User32Outcome32::Callback(callback) = engine
+        .execute_common_file_dialog_procedure(&arguments, true)
+        .unwrap()
+    else {
+        panic!("same legacy message");
+    };
+    let outcome = engine
+        .user32
+        .as_mut()
+        .unwrap()
+        .complete(callback.continuation, 0, engine.memory.as_mut().unwrap())
+        .unwrap();
+    let User32Outcome32::Callback(resume) = outcome else {
+        panic!("default procedure runs only after accepted zero result");
+    };
+    assert_ne!(resume.procedure.0, HOOK);
+    assert_eq!(resume.arguments, arguments);
+    assert_eq!(
+        settle(&mut engine, User32Outcome32::Callback(resume), &mut events).unwrap(),
+        1
+    );
+    let context = engine.user32.as_ref().unwrap();
+    assert_eq!(context.file_dialogs.plans[0].token, token);
+    assert_eq!(context.state.dialog(root).unwrap().ended, Some(0));
+}
+
+#[test]
+fn legacy_fileok_registered_identity_uses_hook_return_without_explorer_dwl_result() {
+    let mut engine = engine();
+    request(&mut engine, true);
+    let template = template::template(
+        "Legacy template".encode_utf16().collect(),
+        false,
+        true,
+        false,
+        false,
+    );
+    let block = engine
+        .allocate_windows_runtime_initialized(&common_template_bytes(&template))
+        .unwrap();
+    engine
+        .memory
+        .as_mut()
+        .unwrap()
+        .write(GuestAddress(OFN + 8), &block.to_le_bytes())
+        .unwrap();
+    engine
+        .memory
+        .as_mut()
+        .unwrap()
+        .write(GuestAddress(OFN + 52), &0x10a0u32.to_le_bytes())
+        .unwrap();
+    call(&mut engine, 0x00210002, &[OFN]).unwrap();
+    let mut events = Vec::new();
+    let outcome = pending(&engine);
+    settle(&mut engine, outcome, &mut events).unwrap();
+    let context = engine.user32.as_ref().unwrap();
+    let plan = &context.file_dialogs.plans[0];
+    let (root, token, message) = (
+        plan.root.unwrap(),
+        plan.token,
+        plan.legacy_messages.unwrap()[0],
+    );
+    assert!(message >= 0xc000);
+    assert_eq!(
+        context.state.text(root).unwrap(),
+        "Legacy template".encode_utf16().collect::<Vec<_>>()
+    );
+    let outcome = engine
+        .user32
+        .as_mut()
+        .unwrap()
+        .file_dialog_hook(token, HookStage32::FileOk, engine.memory.as_mut().unwrap())
+        .unwrap();
+    let User32Outcome32::Callback(callback) = outcome else {
+        panic!("legacy FILEOKSTRING");
+    };
+    assert_eq!(callback.arguments, [root.get(), message, 0, OFN]);
+    assert_eq!(
+        engine
+            .user32
+            .as_ref()
+            .unwrap()
+            .state
+            .extra(root, 0)
+            .unwrap(),
+        0
+    );
+    engine
+        .user32
+        .as_mut()
+        .unwrap()
+        .complete(callback.continuation, 1, engine.memory.as_mut().unwrap())
+        .unwrap();
+    assert!(
+        engine
+            .user32
+            .as_ref()
+            .unwrap()
+            .state
+            .dialog(root)
+            .unwrap()
+            .ended
+            .is_none()
+    );
+    let outcome = engine
+        .user32
+        .as_mut()
+        .unwrap()
+        .file_dialog_hook(token, HookStage32::FileOk, engine.memory.as_mut().unwrap())
+        .unwrap();
+    let User32Outcome32::Callback(callback) = outcome else {
+        panic!("retry FILEOKSTRING");
+    };
+    engine
+        .user32
+        .as_mut()
+        .unwrap()
+        .complete(callback.continuation, 0, engine.memory.as_mut().unwrap())
+        .unwrap();
+    assert_eq!(
+        engine
+            .user32
+            .as_ref()
+            .unwrap()
+            .state
+            .dialog(root)
+            .unwrap()
+            .ended,
+        Some(1)
+    );
+}
+
+#[test]
+fn captured_registered_messages_use_same_ansi_unicode_name_and_do_not_share_class_atom_issuer() {
+    let mut engine = engine();
+    let name = "commdlg_FileNameOK\0";
+    let wide = name
+        .encode_utf16()
+        .flat_map(u16::to_le_bytes)
+        .collect::<Vec<_>>();
+    engine
+        .memory
+        .as_mut()
+        .unwrap()
+        .write(GuestAddress(OFN), &wide)
+        .unwrap();
+    call(&mut engine, 0x000200cf, &[OFN]).unwrap();
+    let wide = crate::abi::x86::decode_state(&engine.arena()[..crate::abi::x86::STATE_SIZE])
+        .unwrap()
+        .registers[0];
+    engine
+        .memory
+        .as_mut()
+        .unwrap()
+        .write(GuestAddress(OFN), name.as_bytes())
+        .unwrap();
+    call(&mut engine, 0x000200ce, &[OFN]).unwrap();
+    let ansi = crate::abi::x86::decode_state(&engine.arena()[..crate::abi::x86::STATE_SIZE])
+        .unwrap()
+        .registers[0];
+    assert_eq!(wide, ansi);
+    assert!((0xc000..=0xffff).contains(&wide));
+    let state = &mut engine.user32.as_mut().unwrap().state;
+    assert_ne!(
+        state
+            .register_message("another message".encode_utf16().collect())
+            .unwrap(),
+        wide
+    );
+    assert_eq!(
+        state
+            .register_message("commdlg_FileNameOK".encode_utf16().collect())
+            .unwrap(),
+        wide
+    );
 }

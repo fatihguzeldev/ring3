@@ -15,6 +15,14 @@ pub(super) enum HookStage32 {
     Selection,
     Filter,
     FileOk,
+    Message {
+        arguments: [u32; 4],
+        procedure: GuestAddress,
+    },
+    ResumeMessage {
+        arguments: [u32; 4],
+        procedure: GuestAddress,
+    },
 }
 #[derive(Clone, Copy)]
 pub(in crate::process::windows::user32) struct FileDialogCall32 {
@@ -31,12 +39,15 @@ impl User32Context32 {
         stage: HookStage32,
         memory: &mut AddressSpace,
     ) -> Result<User32Outcome32, E> {
-        if self.pending.last().is_some_and(|pending| matches!(pending.continuation,Continuation32::FileDialog(call) if call.plan == plan)) {
+        if self.pending.last().is_some_and(|pending| matches!(pending.continuation,Continuation32::FileDialog(call) if call.plan == plan && !matches!(call.stage,HookStage32::ResumeMessage { .. }) && (!call.issued || call.result.is_some()))) {
             return self.advance_file_dialog_hook(memory);
         }
         let index = self.file_dialogs.index(plan)?;
         let entry = &self.file_dialogs.plans[index];
         let root = entry.root.ok_or(E::InvalidToken)?;
+        if !entry.explorer && matches!(stage, HookStage32::Initialized | HookStage32::Folder) {
+            return Ok(User32Outcome32::Return(1));
+        }
         if !entry.request.input.flag(0x20) || entry.request.input.hook == 0 {
             if matches!(stage, HookStage32::FileOk) {
                 self.end_file_dialog(root, 1)?;
@@ -95,9 +106,19 @@ impl User32Context32 {
         self.check_file_dialog_output(call, memory)?;
         let plan = &self.file_dialogs.plans[self.file_dialogs.index(call.plan)?];
         let root = plan.root.ok_or(E::InvalidToken)?;
-        let hook = self.file_dialog_control(root, template::HOOK)?;
+        let hook = if plan.explorer {
+            self.file_dialog_control(root, template::HOOK)?
+        } else {
+            root
+        };
         self.state.extra(hook, 0)?;
-        let scratch = if matches!(call.stage, HookStage32::Initialize) {
+        let scratch = if !plan.explorer
+            || matches!(
+                call.stage,
+                HookStage32::Initialize
+                    | HookStage32::Message { .. }
+                    | HookStage32::ResumeMessage { .. }
+            ) {
             None
         } else {
             let code = match call.stage {
@@ -106,7 +127,9 @@ impl User32Context32 {
                 HookStage32::Selection => -602,
                 HookStage32::Filter => -607,
                 HookStage32::FileOk => -606,
-                HookStage32::Initialize => unreachable!(),
+                HookStage32::Initialize
+                | HookStage32::Message { .. }
+                | HookStage32::ResumeMessage { .. } => unreachable!(),
             };
             let mut bytes = [0; 20];
             for (index, word) in [root.get(), 0, code as u32, plan.request.pointer, 0]
@@ -151,8 +174,56 @@ impl User32Context32 {
     ) -> Result<(GuestAddress, [u32; 4]), E> {
         let plan = &self.file_dialogs.plans[self.file_dialogs.index(call.plan)?];
         let root = plan.root.ok_or(E::InvalidToken)?;
-        let hook = self.file_dialog_control(root, template::HOOK)?;
-        let arguments = if matches!(call.stage, HookStage32::Initialize) {
+        let hook = if plan.explorer {
+            self.file_dialog_control(root, template::HOOK)?
+        } else {
+            root
+        };
+        if let HookStage32::ResumeMessage {
+            arguments,
+            procedure,
+        } = call.stage
+        {
+            return Ok((procedure, arguments));
+        }
+        if let HookStage32::Message { arguments, .. } = call.stage {
+            return Ok((GuestAddress(plan.request.input.hook), arguments));
+        }
+        let arguments = if !plan.explorer {
+            let messages = plan.legacy_messages.ok_or(E::InvalidToken)?;
+            match call.stage {
+                HookStage32::Initialize => [root.get(), 0x110, 0, plan.request.pointer],
+                HookStage32::FileOk => [root.get(), messages[0], 0, plan.request.pointer],
+                HookStage32::Selection | HookStage32::Filter => {
+                    let id = if matches!(call.stage, HookStage32::Filter) {
+                        template::FILTER
+                    } else {
+                        template::FILES
+                    };
+                    let window = self.file_dialog_control(root, id)?;
+                    let state = self.state.control_state(window)?;
+                    let index = state.selected.map_or(u32::MAX, |index| index as u32);
+                    let change = if plan.request.input.flag(0x200) {
+                        if state.selected.is_some_and(|index| {
+                            state.selected_items.get(index).copied().unwrap_or(false)
+                        }) {
+                            2
+                        } else {
+                            1
+                        }
+                    } else {
+                        0
+                    };
+                    [
+                        root.get(),
+                        messages[1],
+                        id,
+                        (index & 0xffff) | (change << 16),
+                    ]
+                }
+                _ => return Err(E::InvalidToken),
+            }
+        } else if matches!(call.stage, HookStage32::Initialize) {
             [hook.get(), 0x110, 0, plan.request.pointer]
         } else {
             [
@@ -199,26 +270,51 @@ impl User32Context32 {
                 self.pending.pop();
                 return Ok(User32Outcome32::Return(1));
             }
-            let hook = self.file_dialog_control(root, template::HOOK)?;
+            let hook = if plan.explorer {
+                self.file_dialog_control(root, template::HOOK)?
+            } else {
+                root
+            };
             if !call.issued {
                 call = self.prepare_file_hook(call, memory)?;
                 self.pending.last_mut().unwrap().continuation = Continuation32::FileDialog(call);
                 return self.next_outcome();
             }
             let result = call.result.ok_or(E::InvalidToken)?;
+            if let HookStage32::ResumeMessage { .. } = call.stage {
+                self.pending.pop();
+                return Ok(User32Outcome32::Return(result));
+            }
+            if let HookStage32::Message {
+                arguments,
+                procedure,
+            } = call.stage
+            {
+                if result != 0 {
+                    self.pending.pop();
+                    return Ok(User32Outcome32::Return(result));
+                }
+                call.stage = HookStage32::ResumeMessage {
+                    arguments,
+                    procedure,
+                };
+                call.result = None;
+                self.pending.last_mut().unwrap().continuation = Continuation32::FileDialog(call);
+                return self.next_outcome();
+            }
             if let Some(scratch) = call.scratch {
                 scratch.check(memory)?;
             }
             let veto = matches!(call.stage, HookStage32::FileOk)
                 && result != 0
-                && self.state.extra(hook, 0)? != 0;
+                && (!plan.explorer || self.state.extra(hook, 0)? != 0);
             // a sealed hook result survives a failed scratch release and is never executed twice.
             if let Some(scratch) = call.scratch {
                 scratch.release(memory)?;
             }
             let next = match call.stage {
-                HookStage32::Initialize => Some(HookStage32::Initialized),
-                HookStage32::Initialized => Some(HookStage32::Folder),
+                HookStage32::Initialize if plan.explorer => Some(HookStage32::Initialized),
+                HookStage32::Initialized if plan.explorer => Some(HookStage32::Folder),
                 _ => None,
             };
             if let Some(stage) = next {

@@ -34,7 +34,13 @@ impl User32Context32 {
         if self.pending.len() + 2 > self.continuation_limit
             || self.resource_dialogs.plans.len() == self.resource_dialogs.limit
             || self.next_token.checked_add(2).is_none()
-            || (font != 0 && self.resource_dialogs.fonts.len() == self.state.window_limit())
+            || self.resource_dialogs.fonts.len()
+                + prepared
+                    .windows
+                    .iter()
+                    .filter(|window| window.dialog_base.is_some() && window.font != 0)
+                    .count()
+                > self.state.window_limit()
         {
             return Err(E::Capacity);
         }
@@ -95,10 +101,21 @@ impl User32Context32 {
             result: if modal { u32::MAX } else { 0 },
         };
         self.resource_dialogs.plans.push(plan);
-        if font != 0 {
-            self.resource_dialogs
-                .fonts
-                .push(super::types::FontLease32 { window: None, font });
+        let fonts = self
+            .resource_dialogs
+            .plans
+            .last()
+            .unwrap()
+            .prepared
+            .windows
+            .iter()
+            .filter(|window| window.dialog_base.is_some() && window.font != 0);
+        let font_count = fonts.clone().count();
+        for window in fonts {
+            self.resource_dialogs.fonts.push(super::types::FontLease32 {
+                window: None,
+                font: window.font,
+            });
         }
         self.next_token = token;
         self.pending.push(Pending32 {
@@ -121,9 +138,9 @@ impl User32Context32 {
             Err(error) => {
                 self.pending.pop();
                 self.resource_dialogs.plans.pop();
-                if font != 0 {
-                    self.resource_dialogs.fonts.pop();
-                }
+                self.resource_dialogs
+                    .fonts
+                    .truncate(self.resource_dialogs.fonts.len() - font_count);
                 scratch.release(memory)?;
                 Err(error)
             }
@@ -220,29 +237,34 @@ impl User32Context32 {
                     entry.windows.push(window);
                     self.state
                         .set_window_context_help(window, entry.prepared.windows[at].help)?;
-                    if at == 0 {
+                    if let Some(base) = entry.prepared.windows[at].dialog_base {
+                        let base = if at == 0 { entry.prepared.base } else { base };
+                        let window_font = entry.prepared.windows[at].font;
                         self.state.set_dialog(
                             window,
                             WindowDialog32 {
-                                base: entry.prepared.base,
-                                font: entry.font,
-                                modal: entry.modal,
+                                base,
+                                font: window_font,
+                                modal: at == 0 && entry.modal,
                                 ended: None,
                             },
                         )?;
-                        self.state.set_extra(window, 4, entry.procedure.0)?;
-                        if entry.font != 0 {
+                        if at == 0 {
+                            self.state.set_extra(window, 4, entry.procedure.0)?;
+                            self.file_dialogs.bind_root(entry.token, window);
+                        }
+                        if window_font != 0 {
                             self.resource_dialogs
                                 .fonts
                                 .iter_mut()
-                                .find(|lease| lease.font == entry.font)
+                                .find(|lease| lease.font == window_font && lease.window.is_none())
                                 .expect("accepted dialog retains its prepared template font")
                                 .window = Some(window);
                         }
                     }
                     entry.stage = if at + 1 < entry.prepared.windows.len() {
                         Stage32::Create(at + 1)
-                    } else if entry.font != 0 {
+                    } else if entry.prepared.windows.iter().any(|window| window.font != 0) {
                         Stage32::Font(0)
                     } else {
                         Stage32::Disable

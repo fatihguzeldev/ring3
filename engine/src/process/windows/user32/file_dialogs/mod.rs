@@ -1,5 +1,6 @@
 mod callbacks;
 mod controls;
+mod customization;
 mod messages;
 mod multiple;
 mod paths;
@@ -38,6 +39,9 @@ pub(super) struct FileDialog32 {
     request: CapturedFileDialog32,
     save: bool,
     initialized: bool,
+    explorer: bool,
+    procedure: crate::memory::GuestAddress,
+    legacy_messages: Option<[u32; 2]>,
     published_error: Option<u32>,
     selection: Option<Selection32>,
     directory: Vec<u16>,
@@ -54,6 +58,12 @@ impl FileDialogs32 {
         let mut plans = Vec::new();
         plans.try_reserve_exact(limit).map_err(|_| E::Allocation)?;
         Ok(Self { plans, limit })
+    }
+    pub(super) fn bind_root(&mut self, token: u64, root: WindowHandle32) {
+        if let Some(plan) = self.plans.iter_mut().find(|plan| plan.token == token) {
+            debug_assert!(plan.root.is_none() || plan.root == Some(root));
+            plan.root = Some(root);
+        }
     }
     pub(super) fn retire_thread(&mut self, thread: u32) {
         self.plans.retain(|plan| plan.thread != thread);

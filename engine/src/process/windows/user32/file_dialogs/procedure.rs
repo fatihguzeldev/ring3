@@ -51,22 +51,25 @@ impl EngineInstance {
                 .populate_file_dialog(token)
                 .map_err(HostError::User32)?;
             let plan = &context.file_dialogs.plans[index];
-            if plan.request.input.flag(0x20) && plan.request.input.hook != 0 {
+            if plan.explorer && plan.request.input.flag(0x20) && plan.request.input.hook != 0 {
                 let hook = context
                     .file_dialog_control(root, template::HOOK)
                     .map_err(HostError::User32)?;
-                context
-                    .state
-                    .set_dialog(
-                        hook,
-                        WindowDialog32 {
-                            base: context.state.dialog(root).map_err(HostError::User32)?.base,
-                            font: context.state.dialog(root).map_err(HostError::User32)?.font,
-                            modal: false,
-                            ended: None,
-                        },
-                    )
-                    .map_err(HostError::User32)?;
+                if context.state.dialog(hook).is_err() {
+                    let dialog = context.state.dialog(root).map_err(HostError::User32)?;
+                    context
+                        .state
+                        .set_dialog(
+                            hook,
+                            WindowDialog32 {
+                                base: dialog.base,
+                                font: dialog.font,
+                                modal: false,
+                                ended: None,
+                            },
+                        )
+                        .map_err(HostError::User32)?;
+                }
                 context
                     .state
                     .set_extra(hook, 4, plan.request.input.hook)
@@ -86,6 +89,28 @@ impl EngineInstance {
             .window(root)
             .map_err(HostError::User32)?;
         let token = context.file_dialogs.plans[index].token;
+        let plan = &context.file_dialogs.plans[index];
+        let resumed = context.pending.last().is_some_and(|pending| matches!(pending.continuation,super::super::callback::Continuation32::FileDialog(call) if call.plan == token && matches!(call.stage,HookStage32::ResumeMessage { arguments,.. } if arguments.as_slice() == args)));
+        if !plan.explorer
+            && plan.request.input.flag(0x20)
+            && plan.request.input.hook != 0
+            && !resumed
+        {
+            let procedure = plan.procedure;
+            return self
+                .user32
+                .as_mut()
+                .unwrap()
+                .file_dialog_hook(
+                    token,
+                    HookStage32::Message {
+                        arguments: args.try_into().map_err(|_| HostError::InvalidRequest)?,
+                        procedure,
+                    },
+                    self.memory.as_mut().unwrap(),
+                )
+                .map_err(HostError::User32);
+        }
         if let Some(outcome) = self
             .user32
             .as_mut()
@@ -182,7 +207,8 @@ impl EngineInstance {
                             .enumerate()
                             .filter(|(item_index, selected)| {
                                 **selected
-                                    && !context.file_dialogs.plans[index].entries[*item_index].directory
+                                    && !context.file_dialogs.plans[index].entries[*item_index]
+                                        .directory
                             })
                             .map(|(item_index, _)| {
                                 context.file_dialogs.plans[index].entries[item_index]

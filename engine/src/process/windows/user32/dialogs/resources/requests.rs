@@ -15,12 +15,26 @@ pub(in crate::process::windows::user32) struct Creation32 {
     pub(super) foreign_owner: bool,
 }
 
+impl Creation32 {
+    pub(in crate::process::windows::user32) fn internal_fonts(&self) -> [u32; 2] {
+        let mut fonts = self
+            .prepared
+            .windows
+            .iter()
+            .filter(|window| window.dialog_base.is_some())
+            .map(|window| window.font);
+        [fonts.next().unwrap_or(0), fonts.next().unwrap_or(0)]
+    }
+}
+
 pub(in crate::process::windows::user32) struct InternalDialog32 {
     pub template: DialogTemplate32,
     pub owner: u32,
     pub procedure: GuestAddress,
     pub parameter: u32,
     pub wide: bool,
+    pub child: Option<DialogTemplate32>,
+    pub instance: u32,
 }
 
 impl EngineInstance {
@@ -83,13 +97,56 @@ impl EngineInstance {
                 .map_err(HostError::User32)?;
         }
         let args = [
-            context.instance,
+            if input.instance == 0 {
+                context.instance
+            } else {
+                input.instance
+            },
             0,
             input.owner,
             input.procedure.0,
             input.parameter,
         ];
-        self.prepare_dialog_template(input.template, args, input.wide, true, context, true)
+        if input.child.is_some() && input.template.font.is_some() {
+            return Err(HostError::User32(E::Win32(50)));
+        }
+        let mut creation =
+            self.prepare_dialog_template(input.template, args, input.wide, true, context, true)?;
+        if let Some(template) = input.child {
+            let limit = self.user32.as_ref().unwrap().scratch_bounds.count * 4096;
+            let gdi = self.gdi.as_ref().ok_or(HostError::InvalidRequest)?;
+            let logical = template
+                .font
+                .as_ref()
+                .map(|font| logical_font(font, gdi.display_dpi()))
+                .transpose()
+                .map_err(HostError::User32)?;
+            let fallback = gdi.system_font().map_err(HostError::Gdi)?;
+            let base = gdi
+                .dialog_base_units(logical.as_ref().unwrap_or(&fallback))
+                .map_err(HostError::Gdi)?;
+            let child = Prepared32::new(template, base, input.wide, context.ansi, limit)
+                .map_err(HostError::User32)?;
+            let first = creation.prepared.windows.len();
+            creation
+                .prepared
+                .append_child(child, 0x04a0, limit)
+                .map_err(HostError::User32)?;
+            let font = logical
+                .map(|font| {
+                    self.gdi
+                        .as_mut()
+                        .unwrap()
+                        .create_logical_font(font)
+                        .map_err(HostError::Gdi)
+                })
+                .transpose()?
+                .unwrap_or(0);
+            for window in &mut creation.prepared.windows[first..] {
+                window.font = font;
+            }
+        }
+        Ok(creation)
     }
 
     fn prepare_dialog_template(
@@ -116,7 +173,7 @@ impl EngineInstance {
             gdi.system_font().map_err(HostError::Gdi)?
         };
         let base = gdi.dialog_base_units(&logical).map_err(HostError::Gdi)?;
-        let prepared = Prepared32::new(template, base, wide, context.ansi, limit)
+        let mut prepared = Prepared32::new(template, base, wide, context.ansi, limit)
             .map_err(HostError::User32)?;
         let font = font
             .map(|font| {
@@ -128,6 +185,7 @@ impl EngineInstance {
             })
             .transpose()?
             .unwrap_or(0);
+        prepared.set_font(font);
         Ok(Creation32 {
             prepared,
             args,

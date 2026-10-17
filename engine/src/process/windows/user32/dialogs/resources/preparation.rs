@@ -34,6 +34,9 @@ pub(super) struct Window32 {
     height: i32,
     pub id: u32,
     pub help: u32,
+    pub parent: Option<usize>,
+    pub font: u32,
+    pub dialog_base: Option<Point32>,
 }
 
 impl Window32 {
@@ -104,6 +107,9 @@ impl Prepared32 {
             height,
             id: 0,
             help: template.help,
+            parent: None,
+            font: 0,
+            dialog_base: Some(base),
         });
         for item in template.items {
             let (position, width, height) = pixels(item.units, base)?;
@@ -124,6 +130,9 @@ impl Prepared32 {
                 height,
                 id: item.id,
                 help: item.help,
+                parent: Some(0),
+                font: 0,
+                dialog_base: None,
             });
         }
         Ok(Self {
@@ -132,6 +141,51 @@ impl Prepared32 {
             base,
             visible,
         })
+    }
+    pub(super) fn set_font(&mut self, font: u32) {
+        for window in &mut self.windows {
+            window.font = font;
+        }
+    }
+    pub(super) fn append_child(&mut self, mut child: Self, id: u32, limit: usize) -> Result<(), E> {
+        let offset = u32::try_from(self.bytes.len()).map_err(|_| E::Capacity)?;
+        let length = self
+            .bytes
+            .len()
+            .checked_add(child.bytes.len())
+            .filter(|length| *length <= limit)
+            .ok_or(E::Capacity)?;
+        let first = self.windows.len();
+        self.bytes
+            .try_reserve_exact(length - self.bytes.len())
+            .map_err(|_| E::Allocation)?;
+        self.windows
+            .try_reserve_exact(child.windows.len())
+            .map_err(|_| E::Allocation)?;
+        for window in &mut child.windows {
+            for pointer in [&mut window.class, &mut window.title, &mut window.creation] {
+                if let Pointer32::Offset(value) = pointer {
+                    *value = value.checked_add(offset).ok_or(E::Capacity)?;
+                }
+            }
+            window.parent = Some(window.parent.map_or(0, |index| first + index));
+        }
+        let custom = &mut child.windows[0];
+        custom.id = id;
+        custom.style |= 0x5000_0000;
+        custom.position = Point32 {
+            x: 0,
+            y: self.windows[0].height,
+        };
+        let height = self.windows[0]
+            .height
+            .checked_add(custom.height)
+            .ok_or(E::Capacity)?;
+        self.windows[0].width = self.windows[0].width.max(custom.width);
+        self.windows[0].height = height;
+        self.bytes.append(&mut child.bytes);
+        self.windows.append(&mut child.windows);
+        Ok(())
     }
 }
 

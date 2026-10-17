@@ -215,6 +215,8 @@ api_catalog! {
     LoadCursorA=0x0002_00cb,2;
     LoadCursorW=0x0002_00cc,2;
     SetSysColors=0x0002_00cd,3;
+    RegisterWindowMessageA=0x0002_00ce,1;
+    RegisterWindowMessageW=0x0002_00cf,1;
 }
 
 impl User32Api32 {

@@ -130,6 +130,12 @@ impl User32Context32 {
         self.runtime_input.thread_id = context.thread_id;
         use User32Api32::*;
         let result = match api {
+            RegisterWindowMessageA | RegisterWindowMessageW => {
+                let name = super::memory::string(memory, args[0], api.wide(), 32767, context.ansi)?;
+                self.state
+                    .register_message(name)
+                    .map(User32Outcome32::Return)
+            }
             RegisterClassA | RegisterClassW | RegisterClassExA | RegisterClassExW => {
                 self.register_class(api, args[0], memory, context)
             }

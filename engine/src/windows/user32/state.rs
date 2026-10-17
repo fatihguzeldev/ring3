@@ -37,6 +37,8 @@ pub(crate) struct User32State32 {
     standard_atoms: [u16; 6],
     common_atoms: [u16; crate::windows::comctl32::CommonControlKind32::ALL.len()],
     system_atoms: Vec<u16>,
+    registered_messages: Vec<Vec<u16>>,
+    registered_message_units: usize,
 }
 
 impl User32State32 {
@@ -64,7 +66,37 @@ impl User32State32 {
             standard_atoms: [0; 6],
             common_atoms: [0; crate::windows::comctl32::CommonControlKind32::ALL.len()],
             system_atoms: Vec::new(),
+            registered_messages: Vec::new(),
+            registered_message_units: 0,
         })
+    }
+
+    pub(crate) fn register_message(&mut self, name: Vec<u16>) -> Result<u32, User32Error32> {
+        if name.is_empty() || name.contains(&0) {
+            return Err(User32Error32::Win32(87));
+        }
+        if let Some(index) = self
+            .registered_messages
+            .iter()
+            .position(|current| names_equal(current, &name))
+        {
+            return Ok(0xc000 + index as u32);
+        }
+        let units = self
+            .registered_message_units
+            .checked_add(name.len())
+            .filter(|units| *units <= 1 << 19)
+            .ok_or(User32Error32::Capacity)?;
+        if self.registered_messages.len() == 0x4000 {
+            return Err(User32Error32::Capacity);
+        }
+        self.registered_messages
+            .try_reserve(1)
+            .map_err(|_| User32Error32::Allocation)?;
+        let message = 0xc000 + self.registered_messages.len() as u32;
+        self.registered_messages.push(name);
+        self.registered_message_units = units;
+        Ok(message)
     }
 
     pub(crate) fn windows(&self) -> &WindowContext32 {
