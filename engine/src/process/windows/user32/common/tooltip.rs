@@ -1,4 +1,5 @@
 mod painting;
+pub(in crate::process::windows::user32) mod relay;
 pub(in crate::process::windows::user32) mod tracking;
 use super::super::{User32CallContext32, User32Context32, User32Outcome32, memory};
 use crate::{
@@ -78,7 +79,38 @@ impl User32Context32 {
                     call.thread_id,
                 );
             }
-            0x14 => 1,
+            0x14 => {
+                if args[2] == 0 {
+                    return Ok(User32Outcome32::Return(0));
+                }
+                let gdi = gdi.ok_or(HostError::InvalidRequest)?;
+                let tip = self.tooltip(window).map_err(HostError::User32)?;
+                let color = if tip.background == 0xff000000 {
+                    gdi.system_color(24)
+                } else {
+                    tip.background
+                };
+                let extent = self
+                    .windows()
+                    .get(window)
+                    .map_err(E::from)
+                    .map_err(HostError::User32)?
+                    .description
+                    .extent;
+                let mut canvas = gdi.begin_canvas(ram, args[2]).map_err(HostError::Gdi)?;
+                canvas.fill(
+                    gdi,
+                    Rect32 {
+                        left: 0,
+                        top: 0,
+                        right: extent.width as i32,
+                        bottom: extent.height as i32,
+                    },
+                    color,
+                );
+                gdi.publish_canvas(ram, canvas).map_err(HostError::Gdi)?;
+                1
+            }
             0x30 => {
                 if args[2] != 0 {
                     gdi.as_ref()
@@ -97,25 +129,29 @@ impl User32Context32 {
             }
             0x31 => self.tooltip(window).map_err(HostError::User32)?.font,
             0x401 => {
-                if args[2] == 0
-                    && self
-                        .tooltip(window)
-                        .map_err(HostError::User32)?
-                        .active
-                        .is_some()
-                {
-                    let outcome = self.begin_tooltip_tracking(
+                let active = self.tooltip(window).map_err(HostError::User32)?.active;
+                let outcome = if args[2] == 0 && active.is_some() {
+                    self.begin_tooltip_tracking(
                         window,
                         None,
                         ram,
                         gdi.ok_or(HostError::InvalidRequest)?,
                         call,
-                    )?;
-                    self.tooltip_mut(window).map_err(HostError::User32)?.enabled = false;
-                    return Ok(outcome);
+                    )?
+                } else {
+                    User32Outcome32::Return(0)
+                };
+                if args[2] == 0 {
+                    self.timers.kill(call.thread_id, window.get(), 1);
                 }
-                self.tooltip_mut(window).map_err(HostError::User32)?.enabled = args[2] != 0;
-                0
+                let tip = self.tooltip_mut(window).expect("same tooltip");
+                tip.enabled = args[2] != 0;
+                if !tip.enabled {
+                    tip.hover = None;
+                    tip.automatic = false;
+                    tip.suppressed = false;
+                }
+                return Ok(outcome);
             }
             0x404 | 0x432 | 0x409 | 0x436 | 0x40c | 0x439 => {
                 let Some((index, tool, adding)) = self
@@ -164,13 +200,23 @@ impl User32Context32 {
                         gdi.ok_or(HostError::InvalidRequest)?,
                         call,
                     )?;
+                    if self.tooltip(window).expect("same tooltip").hover
+                        == Some(self.tooltip(window).expect("same tooltip").tools[index].key)
+                    {
+                        self.timers.kill(call.thread_id, window.get(), 1);
+                    }
                     self.tooltip_mut(window)
-                        .map_err(HostError::User32)?
+                        .expect("same tooltip")
                         .remove(index);
                     return Ok(outcome);
                 }
+                if self.tooltip(window).expect("same tooltip").hover
+                    == Some(self.tooltip(window).expect("same tooltip").tools[index].key)
+                {
+                    self.timers.kill(call.thread_id, window.get(), 1);
+                }
                 self.tooltip_mut(window)
-                    .map_err(HostError::User32)?
+                    .expect("same tooltip")
                     .remove(index);
                 0
             }
@@ -195,13 +241,19 @@ impl User32Context32 {
                 } else {
                     None
                 };
-                return self.begin_tooltip_tracking(
+                let outcome = self.begin_tooltip_tracking(
                     window,
                     target,
                     ram,
                     gdi.ok_or(HostError::InvalidRequest)?,
                     call,
-                );
+                )?;
+                self.timers.kill(call.thread_id, window.get(), 1);
+                let tip = self.tooltip_mut(window).expect("same tooltip");
+                tip.hover = None;
+                tip.automatic = false;
+                tip.suppressed = false;
+                return Ok(outcome);
             }
             0x412 => {
                 let point = Point32 {
@@ -231,7 +283,25 @@ impl User32Context32 {
                     call,
                 );
             }
-            0x407 | 0x113 => return Err(HostError::User32(E::Win32(50))),
+            0x407 => {
+                let message = memory::message(ram, args[3]).map_err(HostError::User32)?;
+                return self.relay_tooltip_event(
+                    window,
+                    message,
+                    ram,
+                    gdi.ok_or(HostError::InvalidRequest)?,
+                    call,
+                );
+            }
+            0x113 => {
+                return self.tooltip_timer(
+                    window,
+                    args[2],
+                    ram,
+                    gdi.ok_or(HostError::InvalidRequest)?,
+                    call,
+                );
+            }
             0x41c => {
                 return self.begin_tooltip_tracking(
                     window,
@@ -385,7 +455,7 @@ impl User32Context32 {
         if info.size == 48 && words[11] != 0 {
             return Err(E::Win32(87));
         }
-        if words[1] & !0xa7 != 0 || words[8] != 0 || words[9] == u32::MAX {
+        if words[1] & !0xb7 != 0 || words[8] != 0 || words[9] == u32::MAX {
             return Err(E::Win32(50));
         }
         if words[1] & 0x20 != 0 && words[1] & 0x80 == 0 {

@@ -46,6 +46,7 @@ impl User32Context32 {
             super::super::callback::Continuation32::Clipboard(call) => !call.bytes_wait,
             super::super::callback::Continuation32::MenuBar(_) => true,
             super::super::callback::Continuation32::TooltipTrack(_) => true,
+            super::super::callback::Continuation32::TooltipRelay(_) => true,
             super::super::callback::Continuation32::Header(_) => true,
             super::super::callback::Continuation32::TabSelection(_) => true,
             super::super::callback::Continuation32::StatusDraw(_) => true,

@@ -187,7 +187,16 @@ fn captured_tooltip_static_tracking_emits_real_notifications_and_paints_owned_te
         .unwrap();
     let mut pixels = Vec::new();
     for offset in (0..frame.bytes).step_by(4096) {
-        pixels.extend_from_slice(engine.read_gdi_frame(frame.id, frame.revision, offset, (frame.bytes - offset).min(4096)).unwrap());
+        pixels.extend_from_slice(
+            engine
+                .read_gdi_frame(
+                    frame.id,
+                    frame.revision,
+                    offset,
+                    (frame.bytes - offset).min(4096),
+                )
+                .unwrap(),
+        );
     }
     assert!(
         pixels
@@ -364,3 +373,6 @@ fn captured_tooltip_getinfo_unmapped_text_preserves_header_and_retry_token() {
         [0x0077006f, 0x0065006e, 0x00000064]
     );
 }
+
+#[path = "tooltip/automatic.rs"]
+mod automatic;

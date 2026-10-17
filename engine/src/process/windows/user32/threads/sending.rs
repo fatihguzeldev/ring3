@@ -34,7 +34,7 @@ impl EngineInstance {
             .map_err(User32Error32::from)
             .map_err(HostError::User32)?;
         let prepared = if record.description.thread_id != sender {
-            Some(self.prepare_thread_invocation(
+            Some(self.prepare_user32_message_invocation(
                 record.description.thread_id,
                 record.description.procedure,
                 &args,
@@ -78,7 +78,7 @@ impl EngineInstance {
         let Ok(continuation) = self.user32.as_ref().unwrap().check_continuation() else {
             return Ok(None);
         };
-        let prepared = self.prepare_thread_invocation(
+        let prepared = self.prepare_user32_message_invocation(
             window.description.thread_id,
             GuestAddress(window.description.procedure.0),
             &args,
@@ -143,6 +143,7 @@ impl User32Context32 {
                         | Continuation32::MenuPopup { .. }
                         | Continuation32::MenuBar(_)
                         | Continuation32::CommonLayout(_)
+                        | Continuation32::TooltipRelay(_)
                         | Continuation32::TooltipTrack(_)
                         | Continuation32::Header(_)
                         | Continuation32::TabSelection(_)

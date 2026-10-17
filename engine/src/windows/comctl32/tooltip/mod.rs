@@ -15,6 +15,9 @@ pub(crate) struct Tool32 {
 pub(crate) struct Tooltip32 {
     pub tools: Vec<Tool32>,
     pub active: Option<u64>,
+    pub hover: Option<u64>,
+    pub automatic: bool,
+    pub suppressed: bool,
     pub enabled: bool,
     pub point: Point32,
     pub font: u32,
@@ -30,6 +33,9 @@ impl Default for Tooltip32 {
         Self {
             tools: Vec::new(),
             active: None,
+            hover: None,
+            automatic: false,
+            suppressed: false,
             enabled: true,
             point: Point32::default(),
             font: 0,
@@ -83,6 +89,11 @@ impl Tooltip32 {
         let tool = self.tools.remove(index);
         if self.active == Some(tool.key) {
             self.active = None;
+            self.automatic = false;
+        }
+        if self.hover == Some(tool.key) {
+            self.hover = None;
+            self.suppressed = false;
         }
     }
 }

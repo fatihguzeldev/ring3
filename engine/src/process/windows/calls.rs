@@ -12,6 +12,10 @@ pub struct WindowsGateInfo32 {
 }
 
 pub fn windows_gate_info(id: u32) -> Option<WindowsGateInfo32> {
+    if id == crate::windows::comctl32::TOOLTIP_RELAY_PROC {
+        return Some(WindowsGateInfo32 { convention: crate::windows::CallingConvention32::Stdcall, stack_words: 5 });
+    }
+
     if let Some(api) = crate::windows::imm32::ImmApi32::from_id(id) {
         return Some(WindowsGateInfo32 {
             convention: crate::windows::CallingConvention32::Stdcall,

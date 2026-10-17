@@ -5,6 +5,7 @@ use crate::{
 
 pub(crate) const COMMON_PROC_A: u32 = 0x0022_ff01;
 pub(crate) const COMMON_PROC_W: u32 = 0x0022_ff02;
+pub(crate) const TOOLTIP_RELAY_PROC: u32 = 0x0022_ff03;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u32)]
@@ -59,7 +60,7 @@ pub fn comctl32_module(preferred_base: u32) -> SystemModule32 {
         })
         .collect();
     exports.extend(
-        [COMMON_PROC_A, COMMON_PROC_W]
+        [COMMON_PROC_A, COMMON_PROC_W, TOOLTIP_RELAY_PROC]
             .into_iter()
             .map(|id| SystemExport32 {
                 name: None,

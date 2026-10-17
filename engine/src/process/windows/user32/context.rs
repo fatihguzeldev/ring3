@@ -46,8 +46,12 @@ impl User32Context32 {
             runtime_input: User32CallContext32::default(),
             input: super::input::User32Input32::default(),
             images: Default::default(),
-            ime: crate::windows::imm32::InputContexts32::new(256, limits.windows, crate::windows::imm32::MAX_COMPOSITION_UNITS)
-                .map_err(|_| User32Error32::InvalidLimits)?,
+            ime: crate::windows::imm32::InputContexts32::new(
+                256,
+                limits.windows,
+                crate::windows::imm32::MAX_COMPOSITION_UNITS,
+            )
+            .map_err(|_| User32Error32::InvalidLimits)?,
             raw_input: crate::windows::rawinput::RawInputRuntime32::new(limits.messages)?,
             destructions,
             timers: super::timers::TimerState32::new(limits.messages, limits.windows)?,
@@ -277,6 +281,19 @@ impl User32Context32 {
         &mut self,
         continuation: Continuation32,
     ) -> Result<User32Outcome32, User32Error32> {
+        let continuation = if let Continuation32::Call {
+            procedure,
+            arguments,
+        } = continuation
+        {
+            if let Some(plan) = self.tooltip_subclass_call(procedure, arguments)? {
+                Continuation32::TooltipRelay(plan)
+            } else {
+                continuation
+            }
+        } else {
+            continuation
+        };
         let token = self.check_continuation()?;
         self.next_token = token;
         self.pending.push(Pending32 {

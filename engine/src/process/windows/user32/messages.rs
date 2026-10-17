@@ -130,18 +130,7 @@ impl User32Context32 {
             return outcome;
         }
         let outcome = self.resume_wait_step(token, memory)?;
-        let outcome = self.complete_resource_dialog_child(token, outcome, memory)?;
-        let outcome = self.complete_accelerator_child(token, outcome)?;
-        let outcome = self.complete_clipboard_child(token, outcome)?;
-        let outcome = self.complete_sent_paint_child(token, outcome)?;
-        let outcome = self.complete_system_colors_child(token, outcome)?;
-        let outcome = self.complete_ui_child(token, outcome)?;
-        let outcome = self.complete_menu_bar_child(token, outcome)?;
-        let outcome = self.complete_common_layout_child(token, outcome)?;
-        let outcome = self.complete_tooltip_child(token, outcome)?;
-        let outcome = self.complete_header_child(token, outcome)?;
-        let outcome = self.complete_tab_selection_child(token, outcome)?;
-        self.complete_status_draw_child(token, outcome)
+        self.complete_user32_child(token, outcome, memory)
     }
 
     fn resume_wait_step(

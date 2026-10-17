@@ -2,6 +2,16 @@ use super::*;
 use crate::windows::comctl32::{CommonControlKind32, CommonControlState32};
 
 impl User32State32 {
+    pub(crate) fn common_windows(
+        &self,
+        kind: CommonControlKind32,
+    ) -> impl Iterator<Item = WindowHandle32> + '_ {
+        self.slots
+            .iter()
+            .filter(move |slot| self.common_kind(slot.data.class_atom) == Some(kind))
+            .map(|slot| slot.data.handle)
+    }
+
     pub(crate) fn common_kind(&self, atom: u16) -> Option<CommonControlKind32> {
         (atom != 0)
             .then(|| self.common_atoms.iter().position(|&entry| entry == atom))

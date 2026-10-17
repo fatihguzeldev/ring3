@@ -2,7 +2,7 @@ use crate::{
     process::{CallError, EngineInstance, HostError, calls::call::PendingOwner},
     windows::{
         CallFrame32, CallingConvention32,
-        comctl32::{COMMON_PROC_A, COMMON_PROC_W, CommonControlsApi32},
+        comctl32::{COMMON_PROC_A, COMMON_PROC_W, CommonControlsApi32, TOOLTIP_RELAY_PROC},
         gdi::GdiError32,
         user32::User32Error32,
     },
@@ -21,13 +21,17 @@ impl EngineInstance {
         frame: CallFrame32,
     ) -> Result<bool, HostError> {
         let api = CommonControlsApi32::from_id(id);
-        if api.is_none() && !matches!(id, COMMON_PROC_A | COMMON_PROC_W) {
+        if api.is_none() && !matches!(id, COMMON_PROC_A | COMMON_PROC_W | TOOLTIP_RELAY_PROC) {
             return Ok(false);
         }
         self.validate_windows_provider_owner(owner)?;
         self.checked_pending_call(owner, token)?;
         if frame.convention() != CallingConvention32::Stdcall
-            || frame.stack_words() != api.map_or(4, CommonControlsApi32::stack_words)
+            || frame.stack_words()
+                != api.map_or(
+                    if id == TOOLTIP_RELAY_PROC { 5 } else { 4 },
+                    CommonControlsApi32::stack_words,
+                )
         {
             return Err(HostError::Call(CallError::InvalidRequest));
         }
@@ -43,6 +47,7 @@ impl EngineInstance {
                 frame.arguments(),
                 api == CommonControlsApi32::CreateStatusWindowW,
             ),
+            None if id == TOOLTIP_RELAY_PROC => self.execute_tooltip_foreign_relay(&frame),
             None => self.execute_common_control_procedure(frame.arguments(), id == COMMON_PROC_W),
         };
         let (outcome, error) = match result {

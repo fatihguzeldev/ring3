@@ -71,6 +71,32 @@ impl TimerState32 {
             tick: 0,
         })
     }
+    pub(in crate::process::windows::user32) fn check_window_set(
+        &self,
+        thread: u32,
+        window: u32,
+        id: u32,
+        delay: u32,
+        now: u64,
+    ) -> Result<(), User32Error32> {
+        if window == 0 {
+            return Err(User32Error32::InvalidRequest);
+        }
+        let interval = u64::from(delay.clamp(10, 0x7fff_ffff)) * 1_000_000;
+        self.now
+            .max(now)
+            .checked_add(interval)
+            .ok_or(User32Error32::Capacity)?;
+        if !self
+            .timers
+            .iter()
+            .any(|timer| timer.thread == thread && timer.window == window && timer.id == id)
+            && self.timers.len() == self.limit
+        {
+            return Err(User32Error32::Win32(1450));
+        }
+        Ok(())
+    }
     pub(in crate::process::windows::user32) fn set(
         &mut self,
         registration: TimerSet32,

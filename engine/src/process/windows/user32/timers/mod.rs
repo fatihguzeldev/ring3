@@ -5,7 +5,7 @@ pub(super) use delivery::TimerMessageQuery32;
 mod state;
 use super::{User32CallContext32, User32Context32, User32Outcome32};
 use crate::windows::user32::User32Error32;
-pub(super) use state::TimerState32;
+pub(super) use state::{TimerSet32, TimerState32};
 
 impl User32Context32 {
     pub(super) fn set_timer(

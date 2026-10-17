@@ -74,10 +74,17 @@ impl User32Context32 {
                 .resume_status_draw(token, ram, gdi.ok_or(E::Win32(50))?)
                 .map_err(super::super::super::common::status::owner::user32_error);
         }
+        if self.tooltip_relay_wait(token) {
+            let outcome = self
+                .resume_tooltip_relay(token, ram, gdi.ok_or(E::Win32(50))?)
+                .map_err(super::super::super::common::status::owner::user32_error)?;
+            return self.complete_user32_child(token, outcome, ram);
+        }
         if self.tooltip_tracking_wait(token) {
-            return self
+            let outcome = self
                 .resume_tooltip_tracking(token, ram, gdi.ok_or(E::Win32(50))?)
-                .map_err(super::super::super::common::status::owner::user32_error);
+                .map_err(super::super::super::common::status::owner::user32_error)?;
+            return self.complete_user32_child(token, outcome, ram);
         }
         if self.menu_bar_wait(token).is_some() {
             return self.resume_menu_bar(token, ram, gdi.ok_or(E::Win32(50))?);
@@ -85,8 +92,7 @@ impl User32Context32 {
         if popup {
             self.resume_popup_menu(token, ram, gdi)
         } else {
-            let outcome = self.resume_wait(token, ram)?;
-            self.complete_popup_child(token, outcome)
+            self.resume_wait(token, ram)
         }
     }
 

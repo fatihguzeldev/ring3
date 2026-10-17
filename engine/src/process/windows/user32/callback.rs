@@ -38,6 +38,7 @@ pub(super) enum PositionStage32 {
 pub(super) enum Continuation32 {
     MenuBar(super::menus::bar::MenuBar32),
     CommonLayout(super::common::layout::CommonLayout32),
+    TooltipRelay(super::common::tooltip::relay::TooltipRelay32),
     TooltipTrack(super::common::tooltip::tracking::TooltipTrack32),
     TabSelection(super::common::tab::input::TabSelect32),
     Header(super::common::header::notifications::HeaderCall32),
@@ -153,6 +154,7 @@ impl User32Context32 {
             | Continuation32::MenuPopup { .. }
             | Continuation32::MenuBar(_)
             | Continuation32::CommonLayout(_)
+            | Continuation32::TooltipRelay(_)
             | Continuation32::TooltipTrack(_)
             | Continuation32::Header(_)
             | Continuation32::TabSelection(_)
@@ -385,7 +387,18 @@ impl User32Context32 {
         if let Some(outcome) = self.retry_header_completion(token) {
             return Ok(outcome);
         }
+        if let Some(outcome) = self.retry_tooltip_relay_completion(token) {
+            return Ok(outcome);
+        }
         let outcome = self.complete_step(token, result, memory)?;
+        self.complete_user32_child(token, outcome, memory)
+    }
+    pub(in crate::process::windows::user32) fn complete_user32_child(
+        &mut self,
+        token: u64,
+        outcome: User32Outcome32,
+        memory: &mut AddressSpace,
+    ) -> Result<User32Outcome32, User32Error32> {
         let outcome = self.complete_resource_dialog_child(token, outcome, memory)?;
         let outcome = self.complete_accelerator_child(token, outcome)?;
         let outcome = self.complete_clipboard_child(token, outcome)?;
@@ -395,6 +408,7 @@ impl User32Context32 {
         let outcome = self.complete_menu_bar_child(token, outcome)?;
         let outcome = self.complete_common_layout_child(token, outcome)?;
         let outcome = self.complete_tooltip_child(token, outcome)?;
+        let outcome = self.complete_tooltip_relay_child(token, outcome)?;
         let outcome = self.complete_header_child(token, outcome)?;
         let outcome = self.complete_tab_selection_child(token, outcome)?;
         let outcome = self.complete_status_draw_child(token, outcome)?;
@@ -419,6 +433,7 @@ impl User32Context32 {
             | Continuation32::MenuPopup { .. }
             | Continuation32::MenuBar(_)
             | Continuation32::CommonLayout(_)
+            | Continuation32::TooltipRelay(_)
             | Continuation32::TooltipTrack(_)
             | Continuation32::Header(_)
             | Continuation32::TabSelection(_)

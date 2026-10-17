@@ -222,6 +222,7 @@ impl EngineInstance {
 pub(super) struct ActiveThreadInvocation32 {
     pub id: u64,
     pub return_esp: u32,
+    pub user32_message: Option<(GuestAddress, [u32; 5])>,
     pub completion: ThreadInvocationCompletion32,
     pub activation: Option<crate::windows::activation::ActivationScope32>,
     pub _activation_capture: Option<crate::windows::activation::CapturedActivation32>,
@@ -448,6 +449,20 @@ impl EngineInstance {
             .push(ActiveThreadInvocation32 {
                 id: invocation.id,
                 return_esp: frame.return_esp(),
+                user32_message: if matches!(
+                    invocation.completion,
+                    ThreadInvocationCompletion32::User32 { .. }
+                ) && invocation.count == 5
+                {
+                    Some((
+                        invocation.procedure,
+                        invocation.arguments[..5]
+                            .try_into()
+                            .expect("exact helper arguments"),
+                    ))
+                } else {
+                    None
+                },
                 completion: invocation.completion,
                 activation,
                 _activation_capture: invocation.managed,
@@ -687,5 +702,47 @@ impl EngineInstance {
                 .and_then(|saved| saved.user32.as_ref())
                 .is_some_and(|reply| reply.owns_clipboard_render(continuation, window, format))
         })
+    }
+}
+
+impl EngineInstance {
+    pub(in crate::process) fn check_tooltip_dispatch_invocation(
+        &self,
+        frame: &crate::windows::CallFrame32,
+    ) -> Result<(), HostError> {
+        let current = self.threads.current_id();
+        let active = self
+            .threads
+            .threads
+            .iter()
+            .find(|record| record.id == current)
+            .and_then(|record| record.active_invocations.last())
+            .ok_or(HostError::InvalidRequest)?;
+        let ThreadInvocationCompletion32::User32 {
+            sender,
+            continuation,
+        } = active.completion
+        else {
+            return Err(HostError::InvalidRequest);
+        };
+        let Some((procedure, arguments)) = active.user32_message else {
+            return Err(HostError::InvalidRequest);
+        };
+        if frame.arguments() != arguments
+            || frame.state().eip != procedure.0
+            || frame.state().registers[4].checked_add(24) != Some(active.return_esp)
+            || !self
+                .loaded_windows_modules()
+                .flat_map(|module| module.gates())
+                .any(|gate| {
+                    gate.id == crate::windows::comctl32::TOOLTIP_RELAY_PROC
+                        && gate.entry == procedure
+                })
+        {
+            return Err(HostError::InvalidRequest);
+        }
+        self.threads
+            .check_user32_remote_scratch(sender, continuation, self.memory()?)
+            .map_err(HostError::User32)
     }
 }
