@@ -129,7 +129,20 @@ fn fixture() -> (EngineInstance, u64, u32) {
 pub(super) fn fixture_with_startup(startup: bool) -> (EngineInstance, u64, u32) {
     fixture_with_nested_create(startup, false)
 }
+pub(super) fn fixture_with_startup_and_gdi_bytes(
+    startup: bool,
+    bitmap_bytes: usize,
+) -> (EngineInstance, u64, u32) {
+    fixture_configured(startup, false, bitmap_bytes)
+}
 fn fixture_with_nested_create(startup: bool, nested: bool) -> (EngineInstance, u64, u32) {
+    fixture_configured(startup, nested, 65_536)
+}
+fn fixture_configured(
+    startup: bool,
+    nested: bool,
+    bitmap_bytes: usize,
+) -> (EngineInstance, u64, u32) {
     let mut engine = EngineInstance::new(if startup { 256 } else { 32 }, KEY).unwrap();
     engine
         .configure_execution(crate::process::ExecutionConfig32 {
@@ -154,7 +167,7 @@ fn fixture_with_nested_create(startup: bool, nested: bool) -> (EngineInstance, u
         .configure_gdi(GdiConfig32 {
             bitmap_base: 0x20000,
             bitmap_pages: 8,
-            bitmap_bytes: 65_536,
+            bitmap_bytes,
             screen_width: 8,
             screen_height: 6,
             ..Default::default()

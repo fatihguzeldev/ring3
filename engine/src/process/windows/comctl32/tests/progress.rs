@@ -41,6 +41,17 @@ fn callback_returning(
     procedure: u32,
     observe: &mut impl FnMut(&mut EngineInstance, &[u32]) -> Option<u32>,
 ) {
+    callback_servicing(engine, parent, common, procedure, observe, &mut |_| {});
+}
+
+fn callback_servicing(
+    engine: &mut EngineInstance,
+    parent: u64,
+    common: u64,
+    procedure: u32,
+    observe: &mut impl FnMut(&mut EngineInstance, &[u32]) -> Option<u32>,
+    service: &mut impl FnMut(&mut EngineInstance),
+) {
     let request = engine.pending_windows_callback().unwrap();
     if request.procedure.0 == PROC {
         let return_esp = engine
@@ -80,7 +91,17 @@ fn callback_returning(
             .unwrap();
         return;
     }
-    assert_eq!(request.procedure.0, procedure);
+    let gate = if request.procedure.0 == procedure {
+        COMMON_PROC_W
+    } else {
+        let entry = request.procedure;
+        let gate = engine
+            .loaded_windows_modules()
+            .flat_map(|module| module.gates())
+            .find(|gate| gate.entry == entry && gate.id == crate::windows::controls::BUILTIN_PROC_W)
+            .expect("test callback is a current canonical builtin procedure");
+        gate.id
+    };
     let return_esp = engine
         .pending_call
         .as_ref()
@@ -97,7 +118,7 @@ fn callback_returning(
     encode_exit_v3(
         &ExecutionExit {
             retired: 0,
-            reason: ExitReason::Gate { id: COMMON_PROC_W },
+            reason: ExitReason::Gate { id: gate },
         },
         &mut engine.arena_mut().unwrap()[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE],
     )
@@ -110,11 +131,12 @@ fn callback_returning(
         .complete_active_resident_callback_windows_call(KEY, common, record.token, token)
         .unwrap();
     for _ in 0..64 {
+        service(engine);
         if engine.pending_call.is_none() {
             break;
         }
         if engine.pending_windows_callback().is_some() {
-            callback_returning(engine, parent, common, procedure, observe);
+            callback_servicing(engine, parent, common, procedure, observe, service);
         } else if let Some(wait) = engine.waiting_user32_message() {
             engine.resume_user32_wait(KEY, wait).unwrap();
         } else {
@@ -140,7 +162,10 @@ fn callback_returning(
 }
 
 fn fixture() -> (EngineInstance, u64, u64, u32, u32, u32) {
-    let (mut engine, parent, window) = fixture_with_startup(true);
+    fixture_with_gdi_bytes(65_536)
+}
+fn fixture_with_gdi_bytes(bitmap_bytes: usize) -> (EngineInstance, u64, u64, u32, u32, u32) {
+    let (mut engine, parent, window) = fixture_with_startup_and_gdi_bytes(true, bitmap_bytes);
     engine.register_comctl32_module(0x72000000).unwrap();
     engine.load_library_module("comctl32.dll", None).unwrap();
     engine
@@ -162,20 +187,31 @@ fn fixture() -> (EngineInstance, u64, u64, u32, u32, u32) {
         .unwrap()
         .entry
         .0;
+    let builtin = engine
+        .loaded_windows_modules()
+        .flat_map(|module| module.gates())
+        .find(|gate| gate.id == crate::windows::controls::BUILTIN_PROC_W)
+        .unwrap()
+        .entry
+        .0;
     let common = unit(
         &mut engine,
         &[
             procedure,
             2,
+            builtin,
+            2,
             COMMON_RETURN,
             2,
             procedure,
             COMMON_PROC_W,
+            builtin,
+            crate::windows::controls::BUILTIN_PROC_W,
             COMMON_RETURN,
             RETURN_ID,
         ],
-        2,
-        2,
+        3,
+        3,
     );
     engine
         .memory
@@ -361,6 +397,7 @@ mod toolbar;
 
 #[path = "numeric.rs"]
 mod numeric;
+
 
 #[test]
 fn captured_legacy_initializer_uses_the_void_gate_and_can_be_called_again() {
