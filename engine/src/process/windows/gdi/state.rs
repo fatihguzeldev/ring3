@@ -22,14 +22,23 @@ impl GdiRuntime32 {
                 | GdiApi32::SetROP2
                 | GdiApi32::SetStretchBltMode
                 | GdiApi32::SetMapMode
+                | GdiApi32::SetPolyFillMode
+                | GdiApi32::SetArcDirection
+                | GdiApi32::SetMapperFlags
         );
         if setting
             && ((api == GdiApi32::SetBkMode && !(1..=2).contains(&args[1]))
                 || (api == GdiApi32::SetROP2 && !(1..=16).contains(&args[1]))
                 || (api == GdiApi32::SetStretchBltMode && !matches!(args[1], 1 | 2 | 3 | 4))
-                || (api == GdiApi32::SetMapMode && !(1..=8).contains(&args[1])))
+                || (api == GdiApi32::SetMapMode && !(1..=8).contains(&args[1]))
+                || (matches!(api, GdiApi32::SetPolyFillMode | GdiApi32::SetArcDirection)
+                    && !(1..=2).contains(&args[1]))
+                || (api == GdiApi32::SetMapperFlags && args[1] & !1 != 0))
         {
             return Err(GdiError32::InvalidRequest);
+        }
+        if api == GdiApi32::SetMapperFlags && args[1] == 1 {
+            return Err(GdiError32::Unsupported);
         }
         let slot = match api {
             GdiApi32::SetTextColor | GdiApi32::GetTextColor => &mut state.text_color,
@@ -40,6 +49,9 @@ impl GdiRuntime32 {
             GdiApi32::SetROP2 | GdiApi32::GetROP2 => &mut state.rop2,
             GdiApi32::SetStretchBltMode | GdiApi32::GetStretchBltMode => &mut state.stretch_mode,
             GdiApi32::SetMapMode | GdiApi32::GetMapMode => &mut state.map_mode,
+            GdiApi32::SetPolyFillMode | GdiApi32::GetPolyFillMode => &mut state.poly_fill_mode,
+            GdiApi32::SetArcDirection => &mut state.arc_direction,
+            GdiApi32::SetMapperFlags => &mut state.mapper_flags,
             _ => return Err(GdiError32::InvalidRequest),
         };
         let previous = *slot;
@@ -165,6 +177,44 @@ impl GdiRuntime32 {
             point[4..].copy_from_slice(&output.y.to_le_bytes());
         }
         memory.write(GuestAddress(args[1]), &bytes)?;
+        Ok(1)
+    }
+    pub(super) fn scale_extents(
+        &mut self,
+        memory: &mut AddressSpace,
+        api: GdiApi32,
+        args: &[u32],
+    ) -> Result<u32, GdiError32> {
+        let mut state = self.model.state(args[0])?.clone();
+        let slot = if api == GdiApi32::ScaleWindowExtEx {
+            &mut state.window_extent
+        } else {
+            &mut state.viewport_extent
+        };
+        let previous = *slot;
+        if args[5] != 0 {
+            memory::write_point(memory, args[5], previous)?;
+        }
+        if matches!(state.map_mode, 7 | 8) {
+            let scale = |extent: i32, numerator: u32, denominator: u32| {
+                let product = i64::from(extent) * i64::from(numerator as i32);
+                let divisor = i64::from(denominator as i32);
+                if divisor == 0 || numerator == 0 {
+                    return Err(GdiError32::InvalidRequest);
+                }
+                let value =
+                    i32::try_from(product / divisor).map_err(|_| GdiError32::InvalidRequest)?;
+                Ok(if value == 0 { 1 } else { value })
+            };
+            *slot = Point32 {
+                x: scale(previous.x, args[1], args[2])?,
+                y: scale(previous.y, args[3], args[4])?,
+            };
+            if state.map_mode == 7 {
+                normalize_isotropic(&mut state)?;
+            }
+        }
+        self.model.set_state(args[0], state)?;
         Ok(1)
     }
     pub(super) fn device_caps(&self, dc: u32, index: u32) -> Result<u32, GdiError32> {

@@ -115,7 +115,8 @@ impl GdiRuntime32 {
                 memory.write_spans(&spans)?;
                 Ok(1)
             }
-            GetCharWidth32A | GetCharWidth32W | GetCharABCWidthsA | GetCharABCWidthsW => {
+            GetCharWidthA | GetCharWidth32A | GetCharWidth32W | GetCharABCWidthsA
+            | GetCharABCWidthsW => {
                 if args[2] < args[1] || args[2] - args[1] >= 8192 || args[2] > 0xffff {
                     return Err(GdiError32::InvalidRequest);
                 }

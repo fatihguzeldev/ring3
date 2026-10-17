@@ -56,6 +56,12 @@ gdi_apis! {
     AddFontResourceExA,3; AddFontResourceExW,3; RemoveFontResourceExA,3; RemoveFontResourceExW,3;
     AlphaBlend,11; TransparentBlt,11; GradientFill,6;
     CreatePatternBrush,1; GetDCEx,3; ExtCreatePen,5; DrawEdge,4; DrawFrameControl,4; CreateDIBPatternBrushPt,2; CreateDIBPatternBrush,2;
+    AbortDoc,1; ArcTo,9; CloseMetaFile,1; CopyMetaFileA,2; CreateMetaFileA,1; DeleteMetaFile,1;
+    EndDoc,1; EndPage,1; EnumMetaFile,4; Escape,5; GetCharWidthA,4; GetCurrentPositionEx,2;
+    GetNearestColor,2; GetPolyFillMode,1; OffsetClipRgn,3; PlayMetaFile,2; PlayMetaFileRecord,4;
+    PolyBezierTo,3; PolyDraw,4; PolylineTo,3; ScaleViewportExtEx,6; ScaleWindowExtEx,6;
+    SelectClipPath,2; SetAbortProc,2; SetArcDirection,2; SetColorAdjustment,2; SetMapperFlags,2;
+    SetPolyFillMode,2; StartDocA,2; StartPage,1; UnrealizeObject,1;
 }
 impl GdiApi32 {
     pub fn msimg(self) -> bool {
@@ -131,6 +137,8 @@ impl GdiApi32 {
         if matches!(
             self,
             Self::GetGlyphIndicesA
+                | Self::GetNearestColor
+                | Self::SetMapperFlags
                 | Self::GetGlyphIndicesW
                 | Self::RealizePalette
                 | Self::GetNearestPaletteIndex

@@ -291,6 +291,7 @@ impl GdiRuntime32 {
             | GetTextExtentExPointA
             | GetTextExtentExPointW
             | GetCharWidth32A
+            | GetCharWidthA
             | GetCharWidth32W
             | GetCharABCWidthsA
             | GetCharABCWidthsW
@@ -359,6 +360,21 @@ impl GdiRuntime32 {
             | GetROP2 | SetStretchBltMode | GetStretchBltMode | SetMapMode | GetMapMode => {
                 self.scalar_state(api, args)
             }
+            GetPolyFillMode | SetPolyFillMode | SetArcDirection | SetMapperFlags => {
+                self.scalar_state(api, args)
+            }
+            GetCurrentPositionEx => {
+                memory::write_point(memory, args[1], self.model.state(args[0])?.current_position)?;
+                Ok(1)
+            }
+            ScaleWindowExtEx | ScaleViewportExtEx => self.scale_extents(memory, api, args),
+            GetNearestColor => self.nearest_color(args[0], args[1]),
+            UnrealizeObject => self.unrealize_object(args[0]),
+            PolylineTo => self.polyline_to(memory, args),
+            AbortDoc | ArcTo | CloseMetaFile | CopyMetaFileA | CreateMetaFileA | DeleteMetaFile
+            | EndDoc | EndPage | EnumMetaFile | Escape | PlayMetaFile | PlayMetaFileRecord
+            | PolyBezierTo | PolyDraw | SelectClipPath | SetAbortProc | SetColorAdjustment
+            | StartDocA | StartPage => self.unavailable_capability(api, args),
             SetWindowOrgEx | GetWindowOrgEx | SetViewportOrgEx | GetViewportOrgEx
             | SetWindowExtEx | GetWindowExtEx | SetViewportExtEx | GetViewportExtEx
             | OffsetWindowOrgEx | OffsetViewportOrgEx | SetBrushOrgEx | GetBrushOrgEx
@@ -376,7 +392,9 @@ impl GdiRuntime32 {
             | RectInRegion
             | GetRegionData => self.region_call(memory, api, args),
             SelectClipRgn | ExtSelectClipRgn | IntersectClipRect | ExcludeClipRect | GetClipBox
-            | GetClipRgn | PtVisible | RectVisible => self.clipping(memory, api, args),
+            | GetClipRgn | PtVisible | RectVisible | OffsetClipRgn => {
+                self.clipping(memory, api, args)
+            }
             ReleaseDC => self
                 .model
                 .release_dc(args[0], args[1], thread)

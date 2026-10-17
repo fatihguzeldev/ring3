@@ -1,5 +1,6 @@
 mod bitmaps;
 mod calls;
+mod capabilities;
 mod clipboard;
 mod colors;
 mod context;

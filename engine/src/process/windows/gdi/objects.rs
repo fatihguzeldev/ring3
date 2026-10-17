@@ -4,6 +4,15 @@ use crate::{
     windows::gdi::{Brush32, GdiApi32, GdiError32, GdiObject32, Pen32},
 };
 impl GdiRuntime32 {
+    pub(super) fn unrealize_object(&self, handle: u32) -> Result<u32, GdiError32> {
+        match self.model.object(handle)? {
+            GdiObject32::Brush(_) | GdiObject32::Palette(_) | GdiObject32::StockPalette => {
+                // palette realization is absent on this true-color display; brush palettes are captured on selection.
+                Ok(1)
+            }
+            _ => Err(GdiError32::InvalidHandle),
+        }
+    }
     pub(super) fn create_object(
         &mut self,
         memory: &AddressSpace,

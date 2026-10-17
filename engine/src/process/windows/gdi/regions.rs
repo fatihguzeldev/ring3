@@ -134,6 +134,26 @@ impl GdiRuntime32 {
         let state = self.model.state(args[0])?;
         let bounds = state.drawable_bounds(bounds);
         match api {
+            GdiApi32::OffsetClipRgn => {
+                let Some(clip) = state.clip.as_ref() else {
+                    return Ok(1);
+                };
+                let origin = state.device_point(Point32::default())?;
+                let offset = state.device_point(Point32 {
+                    x: args[1] as i32,
+                    y: args[2] as i32,
+                })?;
+                let dx = offset
+                    .x
+                    .checked_sub(origin.x)
+                    .ok_or(GdiError32::InvalidRequest)?;
+                let dy = offset
+                    .y
+                    .checked_sub(origin.y)
+                    .ok_or(GdiError32::InvalidRequest)?;
+                let next = clip.offset(dx, dy)?;
+                self.model.set_clip(args[0], Some(next))
+            }
             GdiApi32::GetClipBox => {
                 let visible = state
                     .visible_region

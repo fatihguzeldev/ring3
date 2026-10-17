@@ -176,3 +176,44 @@ fn malformed_extended_pen_and_line_output_fault_leave_issuer_pixels_and_current_
     assert_eq!(runtime.model.state(dc).unwrap().current_position.x, 2);
     assert_eq!(pixel(&mut runtime, &mut ram, dc, 0, 0), 0x123456);
 }
+#[test]
+fn polylineto_draws_consecutive_segments_and_validates_all_input_before_moving() {
+    use super::{call, dib, fixture, memory};
+    use crate::windows::gdi::{GdiApi32 as Api, GdiError32};
+    let (mut runtime, mut ram) = fixture();
+    let dc = call(&mut runtime, &mut ram, Api::CreateCompatibleDC, &[0]).unwrap();
+    let (bitmap, _) = dib(&mut runtime, &mut ram, -2);
+    call(&mut runtime, &mut ram, Api::SelectObject, &[dc, bitmap]).unwrap();
+    let pen = call(&mut runtime, &mut ram, Api::CreatePen, &[0, 1, 0x123456]).unwrap();
+    call(&mut runtime, &mut ram, Api::SelectObject, &[dc, pen]).unwrap();
+    memory::write_words(&mut ram, 0x10100, &[2, 0, 2, 1]).unwrap();
+    assert_eq!(
+        call(&mut runtime, &mut ram, Api::PolylineTo, &[dc, 0x10100, 2]),
+        Ok(1)
+    );
+    for (x, y) in [(0, 0), (1, 0), (2, 0)] {
+        assert_eq!(
+            call(&mut runtime, &mut ram, Api::GetPixel, &[dc, x, y]),
+            Ok(0x123456)
+        );
+    }
+    assert_eq!(
+        call(&mut runtime, &mut ram, Api::GetPixel, &[dc, 2, 1]),
+        Ok(0)
+    );
+    call(
+        &mut runtime,
+        &mut ram,
+        Api::GetCurrentPositionEx,
+        &[dc, 0x10180],
+    )
+    .unwrap();
+    assert_eq!(memory::words::<2>(&ram, 0x10180).unwrap(), [2, 1]);
+    let before = runtime.model.state(dc).unwrap().clone();
+    assert!(call(&mut runtime, &mut ram, Api::PolylineTo, &[dc, 0x11ffc, 2]).is_err());
+    assert_eq!(runtime.model.state(dc).unwrap(), &before);
+    assert_eq!(
+        call(&mut runtime, &mut ram, Api::PolylineTo, &[dc, 0x10100, 0]),
+        Err(GdiError32::InvalidRequest)
+    );
+}
