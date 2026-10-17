@@ -116,11 +116,6 @@ impl EngineInstance {
         let mut path = FilePathScope32::from_directory(plan.directory.clone())
             .normalize(text)
             .map_err(HostError::File)?;
-        if plan.request.input.flag(0x80000) && text.starts_with(&[34]) {
-            return Err(HostError::User32(
-                crate::windows::user32::User32Error32::Win32(50),
-            ));
-        }
         let file = path
             .iter()
             .rposition(|&unit| unit == 92)

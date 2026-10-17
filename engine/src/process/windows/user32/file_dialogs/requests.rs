@@ -30,8 +30,9 @@ impl EngineInstance {
         }
         let token = user32.check_continuation().map_err(HostError::User32)?;
         // unsupported flags are rejected before any window, output or directory publication.
-        if request.input.flags & (0x40 | 0x80 | 0x10 | 0x200 | 0x8000 | 0x400000) != 0
-            || request.input.flag(0x20) && !request.input.flag(0x80000)
+        if request.input.flags & (0x40 | 0x80 | 0x10 | 0x8000 | 0x400000) != 0
+            || request.input.flag(0x20 | 0x200) && !request.input.flag(0x80000)
+            || api.save() && request.input.flag(0x200)
             || request.input.flags_ex != 0
         {
             return Err(HostError::User32(E::Win32(50)));
@@ -64,6 +65,7 @@ impl EngineInstance {
                     api.save(),
                     !request.input.flag(4),
                     request.input.flag(0x20) && request.input.hook != 0,
+                    request.input.flag(0x200),
                 ),
                 owner: request.input.owner,
                 procedure: GuestAddress(procedure.0),

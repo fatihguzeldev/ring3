@@ -15,8 +15,39 @@ impl CapturedFileDialog32 {
         filter: u32,
         readonly: bool,
     ) -> Result<u32, E> {
+        self.publish_selection(
+            memory,
+            FileSelection32::single(path, self.wide, self.ansi, 1 << 20)?,
+            Some(path),
+            filter,
+            readonly,
+        )
+    }
+    pub(in crate::process::windows) fn publish_multiple(
+        &self,
+        memory: &mut AddressSpace,
+        directory: &[u16],
+        names: &[Vec<u16>],
+        filter: u32,
+        readonly: bool,
+    ) -> Result<u32, E> {
+        self.publish_selection(
+            memory,
+            FileSelection32::multiple(directory, names, self.wide, self.ansi, 1 << 20)?,
+            None,
+            filter,
+            readonly,
+        )
+    }
+    fn publish_selection(
+        &self,
+        memory: &mut AddressSpace,
+        selected: FileSelection32,
+        path: Option<&[u16]>,
+        filter: u32,
+        readonly: bool,
+    ) -> Result<u32, E> {
         self.outputs.check(memory)?;
-        let selected = FileSelection32::single(path, self.wide, self.ansi, 1 << 20)?;
         let too_small = selected.units > self.input.file_capacity;
         let required = u16::try_from(selected.units)
             .map_err(|_| E::Capacity)?
@@ -28,7 +59,11 @@ impl CapturedFileDialog32 {
         info[8..10].copy_from_slice(&selected.file_offset.to_le_bytes());
         info[10..12].copy_from_slice(&selected.extension_offset.to_le_bytes());
         let mut title = Vec::new();
-        if self.input.file_title != 0 && self.input.title_capacity > 0 && !too_small {
+        if let Some(path) = path
+            && self.input.file_title != 0
+            && self.input.title_capacity > 0
+            && !too_small
+        {
             let at = path
                 .iter()
                 .rposition(|&unit| unit == 92)

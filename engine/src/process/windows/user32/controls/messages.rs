@@ -279,6 +279,8 @@ impl User32Context32 {
         } else {
             args[1]
         };
+        let multiple =
+            kind == ControlKind32::ListBox && self.state.record(window)?.style & (8 | 0x800) != 0;
         let value = match message {
             0x180 | 0x181 => {
                 let text = memory::string(ram, args[3], wide, 32767, call.ansi)?;
@@ -301,10 +303,15 @@ impl User32Context32 {
                 let state = self.state.control(window)?;
                 state.items.clear();
                 state.item_data.clear();
+                state.selected_items.clear();
                 state.selected = None;
+                state.anchor = None;
                 0
             }
             0x186 => {
+                if multiple {
+                    return Ok(User32Outcome32::Return(u32::MAX));
+                }
                 let state = self.state.control(window)?;
                 state.selected = if args[2] as usize >= state.items.len() {
                     None
@@ -313,6 +320,114 @@ impl User32Context32 {
                 };
                 state.selected.map_or(u32::MAX, |value| value as u32)
             }
+            0x185 | 0x183 | 0x19b => {
+                if !multiple {
+                    return Ok(User32Outcome32::Return(u32::MAX));
+                }
+                let state = self.state.control_state(window)?;
+                let count = state.items.len();
+                let (first, last, set) = if message == 0x185 {
+                    if args[3] == u32::MAX {
+                        (0, count.saturating_sub(1), args[2] != 0)
+                    } else {
+                        (args[3] as usize, args[3] as usize, args[2] != 0)
+                    }
+                } else if message == 0x183 {
+                    (
+                        args[2].min(args[3]) as usize,
+                        args[2].max(args[3]) as usize,
+                        args[2] <= args[3],
+                    )
+                } else {
+                    (
+                        (args[3] & 0xffff) as usize,
+                        (args[3] >> 16) as usize,
+                        args[2] != 0,
+                    )
+                };
+                if count == 0 {
+                    return Ok(User32Outcome32::Return(if args[3] == u32::MAX {
+                        0
+                    } else {
+                        u32::MAX
+                    }));
+                }
+                if first > last || last >= count {
+                    return Ok(User32Outcome32::Return(u32::MAX));
+                }
+                self.state.check_control_changes(1)?;
+                self.state.control(window)?.selected_items[first..=last].fill(set);
+                self.state.invalidate_control(window)?;
+                0
+            }
+            0x187 => {
+                let state = self.state.control_state(window)?;
+                if multiple {
+                    state
+                        .selected_items
+                        .get(args[2] as usize)
+                        .map_or(u32::MAX, |value| u32::from(*value))
+                } else if args[2] as usize >= state.items.len() {
+                    u32::MAX
+                } else {
+                    u32::from(state.selected == Some(args[2] as usize))
+                }
+            }
+            0x190 => {
+                if !multiple {
+                    u32::MAX
+                } else {
+                    self.state
+                        .control_state(window)?
+                        .selected_items
+                        .iter()
+                        .filter(|value| **value)
+                        .count() as u32
+                }
+            }
+            0x191 => {
+                if !multiple {
+                    return Ok(User32Outcome32::Return(u32::MAX));
+                }
+                let state = self.state.control_state(window)?;
+                let count = (args[2] as usize).min(state.items.len());
+                let mut bytes = Vec::new();
+                bytes
+                    .try_reserve_exact(count * 4)
+                    .map_err(|_| User32Error32::Allocation)?;
+                for (index, selected) in state.selected_items.iter().enumerate() {
+                    if *selected && bytes.len() / 4 < count {
+                        bytes.extend_from_slice(&(index as u32).to_le_bytes());
+                    }
+                }
+                if !bytes.is_empty() {
+                    ram.write(crate::memory::GuestAddress(args[3]), &bytes)?;
+                }
+                (bytes.len() / 4) as u32
+            }
+            0x19c | 0x19e => {
+                let state = self.state.control(window)?;
+                if args[2] as usize >= state.items.len() {
+                    u32::MAX
+                } else {
+                    if message == 0x19c {
+                        state.anchor = Some(args[2] as usize);
+                    } else {
+                        state.selected = Some(args[2] as usize);
+                    }
+                    0
+                }
+            }
+            0x19d => self
+                .state
+                .control_state(window)?
+                .anchor
+                .map_or(u32::MAX, |value| value as u32),
+            0x19f => self
+                .state
+                .control_state(window)?
+                .selected
+                .map_or(0, |value| value as u32),
             0x188 => self
                 .state
                 .control(window)?

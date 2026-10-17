@@ -177,9 +177,8 @@ impl User32Context32 {
             return Ok(());
         }
         let selection = entry.selection.as_ref().ok_or(E::InvalidToken)?;
-        let error = entry
-            .request
-            .publish(ram, &selection.path, entry.filter_index, selection.readonly)
+        let error = selection
+            .publish(&entry.request, ram, entry.filter_index)
             .map_err(|error| match error {
                 crate::windows::commdlg::ComdlgError32::Memory(error) => E::Memory(error),
                 crate::windows::commdlg::ComdlgError32::Allocation => E::Allocation,

@@ -66,9 +66,7 @@ impl GdiRuntime32 {
             {
                 return Err(GdiError32::Unsupported);
             }
-            ControlKind32::ListBox
-                if visual.style & (8 | 0x10 | 0x20 | 0x80 | 0x200 | 0x800 | 0x2000) != 0 =>
-            {
+            ControlKind32::ListBox if visual.style & (0x10 | 0x20 | 0x80 | 0x200 | 0x2000) != 0 => {
                 return Err(GdiError32::Unsupported);
             }
             ControlKind32::ComboBox if visual.style & (0x10 | 0x20) != 0 => {

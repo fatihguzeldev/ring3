@@ -171,6 +171,48 @@ impl EngineInstance {
                     let edit = context
                         .file_dialog_control(root, template::NAME)
                         .map_err(HostError::User32)?;
+                    let name = if context.file_dialogs.plans[index].request.input.flag(0x200) {
+                        let state = context
+                            .state
+                            .control_state(files)
+                            .map_err(HostError::User32)?;
+                        let names: Vec<&[u16]> = state
+                            .selected_items
+                            .iter()
+                            .enumerate()
+                            .filter(|(item_index, selected)| {
+                                **selected
+                                    && !context.file_dialogs.plans[index].entries[*item_index].directory
+                            })
+                            .map(|(item_index, _)| {
+                                context.file_dialogs.plans[index].entries[item_index]
+                                    .name
+                                    .as_slice()
+                            })
+                            .collect();
+                        if names.len() > 1 {
+                            let mut text = Vec::new();
+                            let length = names
+                                .iter()
+                                .try_fold(0usize, |total, name| total.checked_add(name.len() + 3))
+                                .ok_or(HostError::User32(E::Capacity))?;
+                            text.try_reserve_exact(length)
+                                .map_err(|_| HostError::User32(E::Allocation))?;
+                            for name in names {
+                                if !text.is_empty() {
+                                    text.push(32);
+                                }
+                                text.push(34);
+                                text.extend_from_slice(name);
+                                text.push(34);
+                            }
+                            text
+                        } else {
+                            name
+                        }
+                    } else {
+                        name
+                    };
                     context
                         .state
                         .set_text(edit, name)
@@ -241,13 +283,20 @@ impl EngineInstance {
         let edit = context
             .file_dialog_control(root, template::NAME)
             .map_err(HostError::User32)?;
-        let text = context
+        let mut text = context
             .state
             .text(edit)
             .map_err(HostError::User32)?
             .to_vec();
         if text.is_empty() {
             return Ok(User32Outcome32::Return(1));
+        }
+        if plan.request.input.flag(0x200) && text.first() == Some(&34) {
+            let mut names = super::multiple::quoted_names(&text).map_err(HostError::User32)?;
+            if names.len() > 1 {
+                return self.accept_common_dialog_multiple(token, &text);
+            }
+            text = names.pop().ok_or(HostError::User32(E::Win32(87)))?;
         }
         let raw = match crate::files::path::FilePathScope32::from_directory(plan.directory.clone())
             .normalize(&text)
@@ -320,7 +369,11 @@ impl EngineInstance {
         } else {
             None
         };
-        let selection = Selection32 { path, readonly };
+        let selection = Selection32 {
+            path,
+            readonly,
+            additional: Vec::new(),
+        };
         if let Some(kind) = prompt {
             return self
                 .user32
@@ -341,6 +394,68 @@ impl EngineInstance {
             .map_err(HostError::Comdlg)?;
         self.user32.as_mut().unwrap().file_dialogs.plans[index].selection = Some(selection);
         self.user32.as_mut().unwrap().file_dialogs.plans[index].published_error = Some(error);
+        self.set_common_dialog_error(error)?;
+        self.user32
+            .as_mut()
+            .unwrap()
+            .file_dialog_hook(token, HookStage32::FileOk, self.memory.as_mut().unwrap())
+            .map_err(HostError::User32)
+    }
+    fn accept_common_dialog_multiple(
+        &mut self,
+        token: u64,
+        text: &[u16],
+    ) -> Result<User32Outcome32, HostError> {
+        let names = super::multiple::quoted_names(text).map_err(HostError::User32)?;
+        if names.len() < 2 {
+            return Err(HostError::User32(E::Win32(87)));
+        }
+        let mut paths = Vec::new();
+        paths
+            .try_reserve_exact(names.len())
+            .map_err(|_| HostError::User32(E::Allocation))?;
+        for name in names {
+            paths.push(self.common_dialog_selection(token, &name)?);
+        }
+        for path in &paths {
+            self.provider_path_info(path)?;
+        }
+        let context = self.user32.as_ref().unwrap();
+        let index = context
+            .file_dialogs
+            .index(token)
+            .map_err(HostError::User32)?;
+        let plan = &context.file_dialogs.plans[index];
+        let root = plan.root.ok_or(HostError::User32(E::InvalidToken))?;
+        let readonly = context
+            .state
+            .dialog_item(root, template::READ_ONLY)
+            .map_err(HostError::User32)?
+            .map(|window| {
+                context
+                    .state
+                    .control_state(window)
+                    .map(|state| state.check != 0)
+            })
+            .transpose()
+            .map_err(HostError::User32)?
+            .unwrap_or(plan.request.input.flag(1));
+        let path = paths.remove(0);
+        let selection = Selection32 {
+            path,
+            readonly,
+            additional: paths,
+        };
+        let error = selection
+            .publish(
+                &plan.request,
+                self.memory.as_mut().unwrap(),
+                plan.filter_index,
+            )
+            .map_err(HostError::Comdlg)?;
+        let plan = &mut self.user32.as_mut().unwrap().file_dialogs.plans[index];
+        plan.selection = Some(selection);
+        plan.published_error = Some(error);
         self.set_common_dialog_error(error)?;
         self.user32
             .as_mut()

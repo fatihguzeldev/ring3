@@ -1,6 +1,7 @@
 mod callbacks;
 mod controls;
 mod messages;
+mod multiple;
 mod paths;
 mod procedure;
 mod prompts;
@@ -23,6 +24,7 @@ pub(super) struct FileEntry32 {
 pub(super) struct Selection32 {
     path: Vec<u16>,
     readonly: bool,
+    additional: Vec<Vec<u16>>,
 }
 
 pub(super) struct FileDialog32 {

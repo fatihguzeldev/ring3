@@ -40,7 +40,12 @@ impl User32Context32 {
         if height <= 0 && matches!(args[1], 0x201..=0x203 | 0x100) {
             return Err(E::Win32(50));
         }
+        let multiple = data.style & (8 | 0x800) != 0;
+        let extended = data.style & 0x800 != 0;
         let mut selected = state.selected;
+        let mut anchor = state.anchor;
+        let mut drag_select = state.drag_select;
+        let mut selection = None;
         let mut mouse = state.mouse_down;
         let focus = None;
         let mut capture = None;
@@ -60,14 +65,29 @@ impl User32Context32 {
         };
         match args[1] {
             0x201 | 0x203 if description.enabled => {
-                if data.style & (8 | 0x800) != 0 {
-                    return Err(E::Win32(50));
-                }
-
                 capture = Some(Some(window));
                 mouse = true;
                 if let Some(row) = row {
                     selected = Some(row);
+                    if multiple {
+                        let first = if extended && call.shift {
+                            anchor.unwrap_or(row)
+                        } else {
+                            row
+                        };
+                        let mode = if !extended || call.control && !call.shift {
+                            2
+                        } else if call.control {
+                            1
+                        } else {
+                            0
+                        };
+                        selection = Some((first.min(row), first.max(row), mode));
+                        if !call.shift {
+                            anchor = Some(row);
+                        }
+                        drag_select = mode != 2 || !state.selected_items[row];
+                    }
                 }
                 if args[1] == 0x203 {
                     codes[0] = 2;
@@ -77,6 +97,18 @@ impl User32Context32 {
             0x200 if mouse && self.windows().capture() == Some(window) => {
                 if let Some(row) = row {
                     selected = Some(row);
+                    if multiple {
+                        let first = anchor.unwrap_or(row);
+                        selection = Some(if extended {
+                            (
+                                first.min(row),
+                                first.max(row),
+                                if call.control { 1 } else { 0 },
+                            )
+                        } else {
+                            (row, row, if drag_select { 1 } else { 3 })
+                        });
+                    }
                 }
             }
             0x202 if mouse => {
@@ -87,18 +119,40 @@ impl User32Context32 {
                 notify = data.style & 1 != 0 && selected.is_some();
                 codes[0] = 1;
             }
-            0x100 if description.enabled && matches!(args[2], 0x21..=0x28) => {
-                if data.style & (8 | 0x800) != 0 {
-                    return Err(E::Win32(50));
-                }
+            0x100 if description.enabled && matches!(args[2], 0x20..=0x28) => {
                 selected = key_selection(
                     state.selected,
                     state.items.len(),
                     args[2],
                     ((description.extent.height as i32 - 2) / height.max(1)).max(1) as usize,
                 );
+                if multiple && let Some(row) = selected {
+                    if args[2] == 0x20 {
+                        selection = Some((row, row, 2));
+                        anchor = Some(row);
+                    } else if extended && (!call.control || call.shift) {
+                        let first = if call.shift {
+                            anchor.or(state.selected).unwrap_or(row)
+                        } else {
+                            row
+                        };
+                        selection = Some((
+                            first.min(row),
+                            first.max(row),
+                            if call.control { 1 } else { 0 },
+                        ));
+                        if !call.shift {
+                            anchor = Some(row);
+                        }
+                    }
+                }
                 codes[0] = 1;
-                notify = selected != state.selected && data.style & 1 != 0;
+                notify = data.style & 1 != 0
+                    && if multiple {
+                        selection.is_some()
+                    } else {
+                        selected != state.selected
+                    };
             }
             7 | 8 => {
                 codes[0] = if args[1] == 7 { 4 } else { 5 };
@@ -123,6 +177,20 @@ impl User32Context32 {
         let events = self.commit_control_transition(window, call.thread_id, focus, capture, codes);
         let state = self.state.control(window).expect("list checked");
         state.selected = selected;
+        state.anchor = anchor;
+        state.drag_select = drag_select;
+        if let Some((first, last, mode)) = selection {
+            for (index, value) in state.selected_items.iter_mut().enumerate() {
+                let inside = (first..=last).contains(&index);
+                match mode {
+                    0 => *value = inside,
+                    1 if inside => *value = true,
+                    2 if inside => *value = !*value,
+                    3 if inside => *value = false,
+                    _ => {}
+                }
+            }
+        }
         state.mouse_down = mouse;
         if height > 0 {
             state.item_height = height;

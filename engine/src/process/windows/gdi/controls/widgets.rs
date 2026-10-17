@@ -391,7 +391,16 @@ fn list(
             bottom: (top + height).min(area.bottom),
             ..area
         };
-        let selected = visual.control.selected == Some(index);
+        let selected = if visual.style & (8 | 0x800) != 0 {
+            visual
+                .control
+                .selected_items
+                .get(index)
+                .copied()
+                .unwrap_or(false)
+        } else {
+            visual.control.selected == Some(index)
+        };
         if selected {
             canvas.fill(gdi, row, gdi.system_color(13));
         }

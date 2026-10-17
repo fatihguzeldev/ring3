@@ -40,7 +40,6 @@ impl FileSelection32 {
         })
     }
 
-    #[cfg(test)]
     pub(crate) fn multiple(
         directory: &[u16],
         names: &[Vec<u16>],

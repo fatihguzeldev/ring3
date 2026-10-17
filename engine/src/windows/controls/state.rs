@@ -19,6 +19,9 @@ pub(crate) struct ControlState32 {
     pub limit: usize,
     pub items: Vec<Vec<u16>>,
     pub selected: Option<usize>,
+    pub selected_items: Vec<bool>,
+    pub anchor: Option<usize>,
+    pub drag_select: bool,
     pub item_data: Vec<u32>,
     pub scroll: (i32, i32, i32, u32),
 }
@@ -33,11 +36,20 @@ impl ControlState32 {
         self.item_data
             .try_reserve(1)
             .map_err(|_| User32Error32::Allocation)?;
+        self.selected_items
+            .try_reserve(1)
+            .map_err(|_| User32Error32::Allocation)?;
         self.items.insert(index, value);
+        self.selected_items.insert(index, false);
         self.item_data.insert(index, 0);
         if let Some(selected) = self.selected.as_mut() {
             if *selected >= index {
                 *selected += 1;
+            }
+        }
+        if let Some(anchor) = self.anchor.as_mut() {
+            if *anchor >= index {
+                *anchor += 1;
             }
         }
         Ok(index)
@@ -48,6 +60,12 @@ impl ControlState32 {
         }
         self.items.remove(index);
         self.item_data.remove(index);
+        self.selected_items.remove(index);
+        self.anchor = match self.anchor {
+            Some(anchor) if anchor == index => None,
+            Some(anchor) if anchor > index => Some(anchor - 1),
+            value => value,
+        };
         self.selected = match self.selected {
             Some(selected) if selected == index => None,
             Some(selected) if selected > index => Some(selected - 1),

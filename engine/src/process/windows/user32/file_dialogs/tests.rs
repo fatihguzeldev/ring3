@@ -721,3 +721,226 @@ fn save_nochangedir_finishes_real_modal_destruction_before_atomic_cwd_restore_an
             .is_empty()
     );
 }
+
+fn multiple_dialog() -> (EngineInstance, u64, WindowHandle32, Vec<(u32, u32)>) {
+    let mut engine = engine();
+    request(&mut engine, true);
+    engine
+        .replace_provider_file(
+            &r"C:\second name.txt".encode_utf16().collect::<Vec<_>>(),
+            b"second input",
+        )
+        .unwrap();
+    engine
+        .replace_provider_file(
+            &r"C:\third.txt".encode_utf16().collect::<Vec<_>>(),
+            b"third input",
+        )
+        .unwrap();
+    engine
+        .memory
+        .as_mut()
+        .unwrap()
+        .write(GuestAddress(OFN + 52), &0x81220u32.to_le_bytes())
+        .unwrap();
+    call(&mut engine, 0x00210002, &[OFN]).unwrap();
+    let outcome = pending(&engine);
+    let mut events = Vec::new();
+    assert_eq!(settle(&mut engine, outcome, &mut events).unwrap(), u32::MAX);
+    let context = engine.user32.as_ref().unwrap();
+    let plan = &context.file_dialogs.plans[0];
+    let (token, root) = (plan.token, plan.root.unwrap());
+    (engine, token, root, events)
+}
+
+#[test]
+fn explorer_multi_selection_uses_physical_control_masks_and_atomic_double_nul_file_output() {
+    let (mut engine, token, root, mut events) = multiple_dialog();
+    let files = engine
+        .user32
+        .as_ref()
+        .unwrap()
+        .file_dialog_control(root, template::FILES)
+        .unwrap();
+    let font = engine
+        .user32
+        .as_ref()
+        .unwrap()
+        .state
+        .control_state(files)
+        .unwrap()
+        .font;
+    let height = engine
+        .gdi
+        .as_ref()
+        .unwrap()
+        .control_input_metrics(font, None)
+        .unwrap()
+        .0;
+    let state = engine
+        .user32
+        .as_ref()
+        .unwrap()
+        .state
+        .control_state(files)
+        .unwrap();
+    let rows = ["file.txt", "second name.txt"].map(|name| {
+        let expected = name.encode_utf16().collect::<Vec<_>>();
+        state
+            .items
+            .iter()
+            .position(|item| item == &expected)
+            .expect("literal mounted fixture file in actual ListBox")
+    });
+    assert!(rows[0] < rows[1]);
+    for (row, control) in [(rows[0], false), (rows[1], true)] {
+        engine
+            .set_user32_keyboard_state(false, control, false)
+            .unwrap();
+        let position = 3u32 | (((row as i32 * height + 2) as u32) << 16);
+        for message in [0x201, 0x202] {
+            let context = engine.user32_call_context().unwrap();
+            let outcome = engine
+                .execute_builtin_control_message(
+                    &[files.get(), message, 0, position],
+                    true,
+                    context,
+                )
+                .unwrap();
+            settle(&mut engine, outcome, &mut events).unwrap();
+        }
+    }
+    let context = engine.user32_call_context().unwrap();
+    let count = engine
+        .execute_builtin_control_message(&[files.get(), 0x190, 0, 0], true, context)
+        .unwrap();
+    assert_eq!(count, User32Outcome32::Return(2));
+    let edit = engine
+        .user32
+        .as_ref()
+        .unwrap()
+        .file_dialog_control(root, template::NAME)
+        .unwrap();
+    assert_eq!(
+        engine.user32.as_ref().unwrap().state.text(edit).unwrap(),
+        "\"file.txt\" \"second name.txt\""
+            .encode_utf16()
+            .collect::<Vec<_>>(),
+        "actual guest-hook events {events:?}"
+    );
+    let version = engine.memory.as_ref().unwrap().transaction_version();
+    let output = PageRange::new(GuestAddress(OFN), 1).unwrap();
+    engine
+        .memory
+        .as_mut()
+        .unwrap()
+        .protect(output, Permissions::READ)
+        .unwrap();
+    assert!(matches!(
+        engine.execute_common_file_dialog_procedure(&[root.get(), 0x111, 1, 0], true),
+        Err(HostError::Comdlg(
+            crate::windows::commdlg::ComdlgError32::Memory(_)
+        ))
+    ));
+    assert_eq!(
+        engine.user32.as_ref().unwrap().file_dialogs.plans[0].token,
+        token
+    );
+    assert!(
+        engine.user32.as_ref().unwrap().file_dialogs.plans[0]
+            .published_error
+            .is_none()
+    );
+    assert!(engine.memory.as_ref().unwrap().transaction_version() > version);
+    let version = engine.memory.as_ref().unwrap().transaction_version();
+    assert!(
+        engine
+            .execute_common_file_dialog_procedure(&[root.get(), 0x111, 1, 0], true)
+            .is_err()
+    );
+    assert_eq!(
+        engine.memory.as_ref().unwrap().transaction_version(),
+        version
+    );
+    engine
+        .memory
+        .as_mut()
+        .unwrap()
+        .protect(output, Permissions::READ_WRITE)
+        .unwrap();
+    let outcome = engine
+        .execute_common_file_dialog_procedure(&[root.get(), 0x111, 1, 0], true)
+        .unwrap();
+    let User32Outcome32::Callback(callback) = outcome else {
+        panic!("real FILEOK hook");
+    };
+    let expected = "C:\\\0file.txt\0second name.txt\0\0"
+        .encode_utf16()
+        .flat_map(u16::to_le_bytes)
+        .collect::<Vec<_>>();
+    let mut bytes = vec![0; expected.len()];
+    engine
+        .memory
+        .as_ref()
+        .unwrap()
+        .read(GuestAddress(FILE), &mut bytes)
+        .unwrap();
+    assert_eq!(bytes, expected);
+    let mut offsets = [0; 4];
+    engine
+        .memory
+        .as_ref()
+        .unwrap()
+        .read(GuestAddress(OFN + 56), &mut offsets)
+        .unwrap();
+    assert_eq!(offsets, [4, 0, 0, 0]);
+    assert_eq!(callback.arguments[1], 0x4e);
+    let plan = &engine.user32.as_ref().unwrap().file_dialogs.plans[0];
+    assert_eq!(plan.selection.as_ref().unwrap().additional.len(), 1);
+}
+
+#[test]
+fn multiselect_queries_follow_same_canonical_items_and_fault_before_guest_index_publication() {
+    let (mut engine, _, root, _) = multiple_dialog();
+    let files = engine
+        .user32
+        .as_ref()
+        .unwrap()
+        .file_dialog_control(root, template::FILES)
+        .unwrap();
+    for index in [0, 2] {
+        let context = engine.user32_call_context().unwrap();
+        assert_eq!(
+            engine
+                .execute_builtin_control_message(&[files.get(), 0x185, 1, index], true, context)
+                .unwrap(),
+            User32Outcome32::Return(0)
+        );
+    }
+    let context = engine.user32_call_context().unwrap();
+    let version = engine.memory.as_ref().unwrap().transaction_version();
+    assert!(
+        engine
+            .execute_builtin_control_message(&[files.get(), 0x191, 3, 0x6ffffffe], true, context)
+            .is_err()
+    );
+    assert_eq!(
+        engine.memory.as_ref().unwrap().transaction_version(),
+        version
+    );
+    let context = engine.user32_call_context().unwrap();
+    assert_eq!(
+        engine
+            .execute_builtin_control_message(&[files.get(), 0x191, 3, OFN + 0x800], true, context)
+            .unwrap(),
+        User32Outcome32::Return(2)
+    );
+    let mut bytes = [0; 8];
+    engine
+        .memory
+        .as_ref()
+        .unwrap()
+        .read(GuestAddress(OFN + 0x800), &mut bytes)
+        .unwrap();
+    assert_eq!(bytes, [0, 0, 0, 0, 2, 0, 0, 0]);
+}
