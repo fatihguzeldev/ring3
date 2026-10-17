@@ -2,6 +2,11 @@ use super::*;
 fn tool() -> Tool32 {
     Tool32 {
         key: 0,
+        revision: 1,
+        callback: false,
+        callback_owner: 0,
+        tab_owner: 0,
+        tab_key: 0,
         window: 7,
         id: 8,
         flags: 0xa0,

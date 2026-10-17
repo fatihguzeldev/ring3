@@ -43,9 +43,41 @@ fn callback_returning(
 ) {
     let request = engine.pending_windows_callback().unwrap();
     if request.procedure.0 == PROC {
+        let return_esp = engine
+            .pending_call
+            .as_ref()
+            .unwrap()
+            .frame
+            .state()
+            .registers[4];
+        let record = engine
+            .begin_windows_resident_callback(KEY, parent, RETURN, RETURN_ID)
+            .unwrap();
+        engine
+            .authorize_resident_callback(KEY, parent, record.token)
+            .unwrap();
+        assert_eq!(
+            decode_state(&engine.arena()[..STATE_SIZE]).unwrap().eip,
+            PROC
+        );
         let result = observe(engine, &request.arguments[..request.count as usize])
             .unwrap_or(u32::from(request.arguments[1] == 0x81));
-        finish(engine, parent, result);
+        let mut state = decode_state(&engine.arena()[..STATE_SIZE]).unwrap();
+        state.eip = RETURN;
+        state.registers[0] = result;
+        state.registers[4] = return_esp;
+        encode_state_current(&state, &mut engine.arena_mut().unwrap()[..STATE_SIZE]).unwrap();
+        encode_exit_v3(
+            &ExecutionExit {
+                retired: 0,
+                reason: ExitReason::Gate { id: RETURN_ID },
+            },
+            &mut engine.arena_mut().unwrap()[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE],
+        )
+        .unwrap();
+        engine
+            .finish_windows_resident_callback(KEY, parent, record.token)
+            .unwrap();
         return;
     }
     assert_eq!(request.procedure.0, procedure);

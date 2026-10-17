@@ -52,16 +52,17 @@ impl User32Context32 {
             .map(|tool| tool.key))
     }
     fn tooltip_subclasses(&self, tooltip: WindowHandle32, source: u32) -> bool {
-        self.tooltip(tooltip).is_ok_and(|tip| {
-            tip.tools.iter().any(|tool| {
-                tool.flags & 0x10 != 0
-                    && if tool.flags & 1 != 0 {
-                        tool.id == source
-                    } else {
-                        tool.window == source
-                    }
+        self.tab_tooltip_window(source) == Some(tooltip)
+            || self.tooltip(tooltip).is_ok_and(|tip| {
+                tip.tools.iter().any(|tool| {
+                    tool.flags & 0x10 != 0
+                        && if tool.flags & 1 != 0 {
+                            tool.id == source
+                        } else {
+                            tool.window == source
+                        }
+                })
             })
-        })
     }
     pub(in crate::process::windows::user32) fn has_tooltip_subclass(
         &self,
@@ -69,10 +70,11 @@ impl User32Context32 {
         message: u32,
     ) -> bool {
         mouse_message(message)
-            && self
-                .state
-                .common_windows(CommonControlKind32::Tooltip)
-                .any(|tip| self.tooltip_subclasses(tip, source))
+            && (self.tab_tooltip_window(source).is_some()
+                || self
+                    .state
+                    .common_windows(CommonControlKind32::Tooltip)
+                    .any(|tip| self.tooltip_subclasses(tip, source)))
     }
     fn tooltip_set_delay(&mut self, window: WindowHandle32, delay: u32, call: User32CallContext32) {
         self.timers
@@ -100,6 +102,7 @@ impl User32Context32 {
         }
         self.owned(message.window, call.thread_id)
             .map_err(HostError::User32)?;
+        self.sync_tab_tooltip(window, message.window, ram, gdi, call.thread_id)?;
         let target = self
             .tooltip_hit(window, message)
             .map_err(HostError::User32)?;

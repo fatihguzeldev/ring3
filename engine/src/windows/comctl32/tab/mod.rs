@@ -35,6 +35,8 @@ pub(crate) struct Tab32 {
     pub item_size: Option<(i32, i32)>,
     pub min_width: i32,
     pub extended: u32,
+    pub tooltip: u32,
+    pub tooltip_owned: bool,
 }
 impl Default for Tab32 {
     fn default() -> Self {
@@ -50,6 +52,8 @@ impl Default for Tab32 {
             item_size: None,
             min_width: -1,
             extended: 0,
+            tooltip: 0,
+            tooltip_owned: false,
         }
     }
 }

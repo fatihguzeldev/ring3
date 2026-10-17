@@ -376,3 +376,6 @@ fn captured_tooltip_getinfo_unmapped_text_preserves_header_and_retry_token() {
 
 #[path = "tooltip/automatic.rs"]
 mod automatic;
+
+#[path = "tooltip/tab.rs"]
+mod tab;

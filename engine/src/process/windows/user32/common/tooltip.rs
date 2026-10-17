@@ -1,5 +1,6 @@
 mod painting;
 pub(in crate::process::windows::user32) mod relay;
+pub(in crate::process::windows::user32) mod text;
 pub(in crate::process::windows::user32) mod tracking;
 use super::super::{User32CallContext32, User32Context32, User32Outcome32, memory};
 use crate::{
@@ -18,6 +19,7 @@ use crate::{
 enum TrackingChange32<'a> {
     Text(&'a Tool32),
     Position(Point32),
+    Resolved(Point32),
 }
 struct ToolInfo32 {
     size: usize,
@@ -455,7 +457,7 @@ impl User32Context32 {
         if info.size == 48 && words[11] != 0 {
             return Err(E::Win32(87));
         }
-        if words[1] & !0xb7 != 0 || words[8] != 0 || words[9] == u32::MAX {
+        if words[1] & !0xb7 != 0 || words[8] != 0 {
             return Err(E::Win32(50));
         }
         if words[1] & 0x20 != 0 && words[1] & 0x80 == 0 {
@@ -467,7 +469,7 @@ impl User32Context32 {
         if words[1] & 1 != 0 {
             self.owned(words[3], call.thread_id)?;
         }
-        let text = if words[9] == 0 {
+        let text = if matches!(words[9], 0 | u32::MAX) {
             Vec::new()
         } else {
             memory::string(
@@ -479,6 +481,16 @@ impl User32Context32 {
             )?
         };
         let tool = Tool32 {
+            revision: index.map_or(Ok(1), |index| {
+                self.tooltip(window).unwrap().tools[index]
+                    .revision
+                    .checked_add(1)
+                    .ok_or(E::Capacity)
+            })?,
+            callback: words[9] == u32::MAX,
+            callback_owner: 0,
+            tab_owner: 0,
+            tab_key: 0,
             key: index.map_or(0, |index| self.tooltip(window).unwrap().tools[index].key),
             window: words[2],
             id: words[3],
@@ -521,6 +533,9 @@ impl User32Context32 {
         };
         let output = memory::words::<1>(ram, args[3].checked_add(36).ok_or(E::Win32(87))?)?[0];
         let wide = matches!(args[1], 0x435 | 0x438 | 0x43a | 0x43b);
+        if tool.callback && output != 0 {
+            return Err(E::Win32(50));
+        }
         let text = if output != 0 {
             memory::encoded_text(
                 if matches!(args[1], 0x40b | 0x438) && args[2] != 0 {

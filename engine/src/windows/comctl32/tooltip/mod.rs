@@ -10,6 +10,11 @@ pub(crate) struct Tool32 {
     pub rect: Rect32,
     pub data: u32,
     pub text: Vec<u16>,
+    pub revision: u64,
+    pub callback: bool,
+    pub callback_owner: u32,
+    pub tab_owner: u32,
+    pub tab_key: u64,
 }
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct Tooltip32 {
@@ -79,6 +84,20 @@ impl Tooltip32 {
             self.tools.try_reserve(1).map_err(|_| E::Allocation)?;
         }
         Ok(())
+    }
+    pub(crate) fn prepare_keys(&self, count: usize) -> Result<(), E> {
+        self.next_key
+            .checked_add(count as u64)
+            .ok_or(E::Capacity)
+            .map(|_| ())
+    }
+    pub(crate) fn issue_key(&mut self) -> u64 {
+        let key = self.next_key;
+        self.next_key = self
+            .next_key
+            .checked_add(1)
+            .expect("tool keys were preflighted");
+        key
     }
     pub(crate) fn insert(&mut self, mut tool: Tool32) {
         tool.key = self.next_key;

@@ -6,13 +6,13 @@ use crate::{
         user32::{Point32, Rect32},
     },
 };
-struct Layout32 {
-    items: Vec<Rect32>,
+pub(super) struct Layout32 {
+    pub(super) items: Vec<Rect32>,
     rows: u32,
     height: i32,
 }
 impl User32Context32 {
-    fn tab_layout(
+    pub(in crate::process::windows::user32::common::tab) fn tab_layout(
         &self,
         window: WindowHandle32,
         _ram: &AddressSpace,

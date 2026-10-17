@@ -48,6 +48,8 @@ impl User32Context32 {
             super::super::callback::Continuation32::TooltipTrack(_) => true,
             super::super::callback::Continuation32::TooltipRelay(_) => true,
             super::super::callback::Continuation32::Numeric(_) => true,
+            super::super::callback::Continuation32::TooltipText(_) => true,
+            super::super::callback::Continuation32::TabTooltip(_) => true,
             super::super::callback::Continuation32::Header(_) => true,
             super::super::callback::Continuation32::TabSelection(_) => true,
             super::super::callback::Continuation32::StatusDraw(_) => true,
@@ -148,6 +150,9 @@ impl User32Context32 {
                     Some(call.scratch().range())
                 }
                 super::super::callback::Continuation32::TabSelection(call) => {
+                    Some(call.scratch().range())
+                }
+                super::super::callback::Continuation32::TooltipText(call) => {
                     Some(call.scratch().range())
                 }
                 super::super::callback::Continuation32::TooltipTrack(call) => {
@@ -292,6 +297,9 @@ impl User32ThreadReply32 {
                 super::super::callback::Continuation32::TabSelection(call) => {
                     Some(call.scratch().range())
                 }
+                super::super::callback::Continuation32::TooltipText(call) => {
+                    Some(call.scratch().range())
+                }
                 super::super::callback::Continuation32::TooltipTrack(call) => {
                     call.scratch().map(|scratch| scratch.range())
                 }
@@ -391,6 +399,9 @@ fn check_scratch(
             super::super::callback::Continuation32::TabSelection(call) => {
                 call.scratch().check(memory)?
             }
+            super::super::callback::Continuation32::TooltipText(call) => {
+                call.scratch().check(memory)?;
+            }
             super::super::callback::Continuation32::TooltipTrack(call) => {
                 if let Some(scratch) = call.scratch() {
                     scratch.check(memory)?;
@@ -433,6 +444,9 @@ fn check_owned_scratch(
             super::super::callback::Continuation32::Header(call) => call.scratch().check(memory)?,
             super::super::callback::Continuation32::TabSelection(call) => {
                 call.scratch().check(memory)?
+            }
+            super::super::callback::Continuation32::TooltipText(call) => {
+                call.scratch().check(memory)?;
             }
             super::super::callback::Continuation32::TooltipTrack(call) => {
                 if let Some(scratch) = call.scratch() {

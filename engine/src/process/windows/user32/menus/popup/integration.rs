@@ -77,6 +77,16 @@ impl User32Context32 {
                 .resume_status_draw(token, ram, gdi.ok_or(E::Win32(50))?)
                 .map_err(super::super::super::common::status::owner::user32_error);
         }
+        if self.tab_tooltip_wait(token) {
+            let outcome = self.resume_tab_tooltip(token, ram)?;
+            return self.complete_user32_child(token, outcome, ram);
+        }
+        if self.tooltip_text_wait(token) {
+            let outcome = self
+                .resume_tooltip_text(token, ram, gdi.ok_or(E::Win32(50))?)
+                .map_err(super::super::super::common::status::owner::user32_error)?;
+            return self.complete_user32_child(token, outcome, ram);
+        }
         if self.tooltip_relay_wait(token) {
             let outcome = self
                 .resume_tooltip_relay(token, ram, gdi.ok_or(E::Win32(50))?)

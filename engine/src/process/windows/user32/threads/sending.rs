@@ -107,6 +107,9 @@ impl User32Context32 {
         if self.tab_selection_wait(token) {
             return self.pending_tab_selection_message(token);
         }
+        if self.tooltip_text_wait(token) {
+            return self.pending_tooltip_text_message(token);
+        }
         if self.tooltip_tracking_wait(token) {
             return self.pending_tooltip_message(token);
         }
@@ -146,6 +149,8 @@ impl User32Context32 {
                         | Continuation32::MenuPopup { .. }
                         | Continuation32::MenuBar(_)
                         | Continuation32::CommonLayout(_)
+                        | Continuation32::TabTooltip(_)
+                        | Continuation32::TooltipText(_)
                         | Continuation32::TooltipRelay(_)
                         | Continuation32::TooltipTrack(_)
                         | Continuation32::Numeric(_)

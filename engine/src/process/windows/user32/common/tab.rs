@@ -1,5 +1,6 @@
 pub(in crate::process::windows::user32) mod input;
 mod painting;
+pub(in crate::process::windows::user32) mod tooltip;
 use super::super::{User32CallContext32, User32Context32, User32Outcome32, memory};
 use crate::{
     memory::{AddressSpace, GuestAddress},
@@ -64,7 +65,17 @@ impl User32Context32 {
                 self.tab_mut(window).map_err(HostError::User32)?.unicode = wide;
                 1
             }
+            1 if self.state.record(window).map_err(HostError::User32)?.style & 0x4000 != 0 => {
+                return self
+                    .begin_tab_tooltip(window, true, call)
+                    .map_err(HostError::User32);
+            }
             1 => 0,
+            2 if self.tab(window).map_err(HostError::User32)?.tooltip_owned => {
+                return self
+                    .begin_tab_tooltip(window, false, call)
+                    .map_err(HostError::User32);
+            }
             0x0f | 0x318 => {
                 return self.paint_tab(
                     window,
@@ -200,11 +211,10 @@ impl User32Context32 {
                 self.tab_changed(window);
                 0
             }
-            0x132d => 0,
+            0x132d => self.tab(window).map_err(HostError::User32)?.tooltip,
             0x132e => {
-                if args[2] != 0 {
-                    return Err(HostError::User32(E::Win32(50)));
-                }
+                self.set_tab_tooltip(window, args[2], call)
+                    .map_err(HostError::User32)?;
                 0
             }
             0x132f => self.tab(window).map_err(HostError::User32)?.focused as u32,

@@ -92,7 +92,7 @@ impl User32Context32 {
             _ => None,
         };
         let point = match change {
-            Some(TrackingChange32::Position(point)) => point,
+            Some(TrackingChange32::Position(point) | TrackingChange32::Resolved(point)) => point,
             _ => tip.point,
         };
         let tool = override_tool.or_else(|| {
@@ -102,15 +102,33 @@ impl User32Context32 {
                 tip.current()
             }
         });
-        let Some(tool) = tool else {
-            return Ok(User32Outcome32::Return(0));
-        };
-        let id = tool.id;
-        let owner = WindowHandle32::try_from(tool.window)
-            .ok()
+        if let Some(tool) = tool
+            && target.is_some()
+            && tool.callback
+            && !matches!(change, Some(TrackingChange32::Resolved(_)))
+            && (notify || matches!(change, Some(TrackingChange32::Text(_))))
+        {
+            let source = super::text::TextTool32 {
+                key: tool.key,
+                revision: tool.revision,
+                owner: if tool.callback_owner == 0 {
+                    tool.window
+                } else {
+                    tool.callback_owner
+                },
+                id: tool.id,
+                flags: tool.flags,
+                data: tool.data,
+            };
+            return self.begin_tooltip_text(window, source, ram, call, point);
+        }
+        let id = tool.map_or(0, |tool| tool.id);
+        let owner = tool
+            .and_then(|tool| WindowHandle32::try_from(tool.window).ok())
             .filter(|&owner| self.windows().get(owner).is_ok());
         let mut rect = self.state.record(window).map_err(HostError::User32)?.outer;
         let position = if target.is_some() {
+            let tool = tool.ok_or(HostError::User32(E::InvalidRequest))?;
             let (width, height) = self.tooltip_extent(window, tool, ram, gdi, call.thread_id)?;
             let x = point.x
                 - if tool.flags & 2 != 0 {
