@@ -6,6 +6,7 @@ mod dialogs;
 mod menus;
 mod paint;
 mod text;
+mod ui;
 
 struct WindowSlot32 {
     data: WindowData32,
@@ -17,6 +18,7 @@ struct WindowSlot32 {
     control: crate::windows::controls::ControlState32,
     dialog: Option<super::dialogs::WindowDialog32>,
     context_help: u32,
+    ui_state: u32,
 }
 
 pub(crate) struct User32State32 {
@@ -176,6 +178,7 @@ impl User32State32 {
             control: Default::default(),
             dialog: None,
             context_help: 0,
+            ui_state: 0,
             update: crate::windows::gdi::Region32::rectangle(super::Rect32 {
                 left: 0,
                 top: 0,

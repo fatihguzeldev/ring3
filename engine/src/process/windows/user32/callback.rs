@@ -43,6 +43,7 @@ pub(super) enum Continuation32 {
     Accelerator(super::accelerators::Dispatch32),
     Clipboard(super::clipboard::ClipboardCall32),
     SystemColors(super::system_colors::ColorChange32),
+    UiState(super::ui::UiChange32),
     ResourceDialog {
         plan: u64,
         scratch: Scratch32,
@@ -141,6 +142,7 @@ impl User32Context32 {
             | Continuation32::Accelerator(_)
             | Continuation32::Clipboard(_)
             | Continuation32::SystemColors(_)
+            | Continuation32::UiState(_)
             | Continuation32::SentPaint(_) => {
                 return Ok(User32Outcome32::Wait {
                     continuation: pending.token,
@@ -288,6 +290,9 @@ impl User32Context32 {
         if let Some(outcome) = self.retry_clipboard_completion(token) {
             return Ok(outcome);
         }
+        if let Some(outcome) = self.retry_ui_completion(token) {
+            return Ok(outcome);
+        }
         if let Some(outcome) = self.retry_system_colors_completion(token) {
             return Ok(outcome);
         }
@@ -303,6 +308,7 @@ impl User32Context32 {
         let outcome = self.complete_clipboard_child(token, outcome)?;
         let outcome = self.complete_sent_paint_child(token, outcome)?;
         let outcome = self.complete_system_colors_child(token, outcome)?;
+        let outcome = self.complete_ui_child(token, outcome)?;
         self.complete_popup_child(token, outcome)
     }
 
@@ -324,6 +330,7 @@ impl User32Context32 {
             | Continuation32::Accelerator(_)
             | Continuation32::Clipboard(_)
             | Continuation32::SystemColors(_)
+            | Continuation32::UiState(_)
             | Continuation32::SentPaint(_) => Err(User32Error32::InvalidToken),
             Continuation32::ResourceProcedure {
                 window,

@@ -47,6 +47,7 @@ impl User32Context32 {
             | super::super::callback::Continuation32::Accelerator(_)
             | super::super::callback::Continuation32::Clipboard(_)
             | super::super::callback::Continuation32::SystemColors(_)
+            | super::super::callback::Continuation32::UiState(_)
             | super::super::callback::Continuation32::SentPaint(_) => true,
             super::super::callback::Continuation32::MessageWait {
                 thread,

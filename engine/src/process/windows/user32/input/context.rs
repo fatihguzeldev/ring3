@@ -42,6 +42,7 @@ pub(in crate::process::windows::user32) struct User32Input32 {
     pub message: Message32,
     pub extra_info: u32,
     pub last_click: Option<(u32, u8, Point32, u32)>,
+    pub last_ui_keyboard: bool,
 }
 
 impl Default for User32Input32 {
@@ -86,6 +87,7 @@ impl Default for User32Input32 {
             message: Message32::default(),
             extra_info: 0,
             last_click: None,
+            last_ui_keyboard: false,
         }
     }
 }

@@ -131,6 +131,13 @@ impl User32Context32 {
             count += 1;
         };
         match event.kind {
+            SourceKind32::Physical(InputKind::Key { .. }) => input.last_ui_keyboard = true,
+            SourceKind32::Physical(InputKind::Button { .. } | InputKind::Relative { .. }) => {
+                input.last_ui_keyboard = false;
+            }
+            _ => {}
+        }
+        match event.kind {
             SourceKind32::Physical(InputKind::Focus { focused }) => {
                 input.physical_focus = focused;
                 if !focused {

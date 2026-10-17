@@ -361,6 +361,9 @@ impl User32Context32 {
         memory: &mut AddressSpace,
         context: User32CallContext32,
     ) -> Result<User32Outcome32, User32Error32> {
+        if let Some(outcome) = self.ui_message(args, context)? {
+            return Ok(outcome);
+        }
         if args[1] == 0xff {
             self.default_raw_input(args[0], context.thread_id, args[3])?;
             return Ok(User32Outcome32::Return(0));

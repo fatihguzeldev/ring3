@@ -131,7 +131,8 @@ impl User32Context32 {
         let outcome = self.complete_accelerator_child(token, outcome)?;
         let outcome = self.complete_clipboard_child(token, outcome)?;
         let outcome = self.complete_sent_paint_child(token, outcome)?;
-        self.complete_system_colors_child(token, outcome)
+        let outcome = self.complete_system_colors_child(token, outcome)?;
+        self.complete_ui_child(token, outcome)
     }
 
     fn resume_wait_step(
@@ -145,6 +146,9 @@ impl User32Context32 {
             .filter(|pending| pending.token == token)
             .cloned()
             .ok_or(User32Error32::InvalidToken)?;
+        if let Continuation32::UiState(_) = pending.continuation {
+            return self.resume_ui_change(token);
+        }
         if let Continuation32::SystemColors(_) = pending.continuation {
             return self.resume_system_colors(token);
         }
