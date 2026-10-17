@@ -351,3 +351,5 @@ mod palette;
 mod canvas;
 
 mod images;
+
+mod visibility;

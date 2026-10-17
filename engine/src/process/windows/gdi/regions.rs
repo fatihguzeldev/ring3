@@ -132,6 +132,7 @@ impl GdiRuntime32 {
         let index = self.dc_surface(args[0])?;
         let bounds = super::bitmaps::bounds(self.surfaces[index].layout);
         let state = self.model.state(args[0])?;
+        let bounds = state.drawable_bounds(bounds);
         match api {
             GdiApi32::GetClipBox => {
                 let region = state

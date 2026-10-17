@@ -22,6 +22,22 @@ impl GdiContext32 {
         self.dcs[index].state = state;
         Ok(())
     }
+    pub fn set_display_visibility(
+        &mut self,
+        window: u32,
+        window_dc: bool,
+        bounds: crate::windows::user32::Rect32,
+    ) {
+        for dc in &mut self.dcs {
+            if !matches!(dc.kind, DcKind32::Display { window: owner, window_dc: whole, .. } if owner == window && whole == window_dc)
+            {
+                continue;
+            }
+            for state in core::iter::once(&mut dc.state).chain(&mut dc.saved) {
+                state.visible_bounds = Some(bounds);
+            }
+        }
+    }
     pub fn check_select(&self, dc: u32, object: u32) -> Result<u32, GdiError32> {
         let current = self.dc(dc)?;
         Ok(match self.object(object)? {

@@ -150,6 +150,7 @@ pub struct DcState32 {
     pub brush_origin: Point32,
     pub current_position: Point32,
     pub clip: Option<super::Region32>,
+    pub visible_bounds: Option<Rect32>,
 }
 impl Default for DcState32 {
     fn default() -> Self {
@@ -178,6 +179,7 @@ impl Default for DcState32 {
             brush_origin: Point32::default(),
             current_position: Point32::default(),
             clip: None,
+            visible_bounds: None,
         }
     }
 }
@@ -200,7 +202,24 @@ impl DcState32 {
             self.window_extent,
         )
     }
+    pub fn drawable_bounds(&self, bounds: Rect32) -> Rect32 {
+        let Some(visible) = self.visible_bounds else {
+            return bounds;
+        };
+        let result = Rect32 {
+            left: bounds.left.max(visible.left),
+            top: bounds.top.max(visible.top),
+            right: bounds.right.min(visible.right),
+            bottom: bounds.bottom.min(visible.bottom),
+        };
+        if result.left >= result.right || result.top >= result.bottom {
+            Rect32::default()
+        } else {
+            result
+        }
+    }
     pub fn accepts(&self, point: Point32, bounds: Rect32) -> bool {
+        let bounds = self.drawable_bounds(bounds);
         point.x >= bounds.left
             && point.x < bounds.right
             && point.y >= bounds.top

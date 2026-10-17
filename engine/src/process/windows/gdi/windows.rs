@@ -45,6 +45,12 @@ impl GdiRuntime32 {
         } else {
             None
         };
+        let visible = crate::windows::user32::Rect32 {
+            left: 0,
+            top: 0,
+            right: i32::try_from(window.width).map_err(|_| GdiError32::Capacity)?,
+            bottom: i32::try_from(window.height).map_err(|_| GdiError32::Capacity)?,
+        };
         let layout = BitmapLayout32::new(
             window.width.max(1) as i32,
             window.height.max(1) as i32,
@@ -82,13 +88,16 @@ impl GdiRuntime32 {
             let surface = self.prepare_surface(key, layout, Vec::new())?;
             self.publish_surface(surface);
         }
-        if let Some(prepared) = prepared {
-            Ok(self.model.commit_new(prepared))
+        let handle = if let Some(prepared) = prepared {
+            self.model.commit_new(prepared)
         } else {
             let handle = persistent.unwrap();
             self.model.bind_display_dc(handle, window.window, thread)?;
-            Ok(handle)
-        }
+            handle
+        };
+        self.model
+            .set_display_visibility(window.window, window.whole, visible);
+        Ok(handle)
     }
     pub(in crate::process) fn release_window_dc(
         &mut self,
