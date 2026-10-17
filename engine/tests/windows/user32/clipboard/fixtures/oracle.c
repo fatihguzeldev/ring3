@@ -117,6 +117,15 @@ static void query_reference(HWND window) {
     EmptyClipboard(); CloseClipboard();
 }
 
+static void retired_global_reference(void) {
+    HGLOBAL block = GlobalAlloc(GMEM_MOVEABLE, 8);
+    if (!block || GlobalFree(block)) ExitProcess(2);
+    SetLastError(0xabcdef01);
+    SIZE_T size = GlobalSize(block);
+    DWORD error = GetLastError();
+    query_row("size-freed-movable", size, error);
+}
+
 int main(void) {
     WNDCLASSW type;
     memset(&type, 0, sizeof(type));
@@ -152,6 +161,7 @@ int main(void) {
     BOOL second = CloseClipboard(); DWORD close_error = GetLastError();
     printf("{\"operation\":\"clipboard-close\",\"first\":%d,\"second\":%d,\"error\":%lu}\n", !!first, !!second, close_error);
     query_reference(window);
+    retired_global_reference();
     DestroyWindow(window);
     return 0;
 }
