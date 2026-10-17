@@ -66,12 +66,16 @@ pub(super) fn parse(bytes: &[u8], budget: &mut ParseBudget) -> Result<PreparedPe
         return Err(LoadError::Malformed);
     }
     let preferred_base = u32(bytes, optional + 28)?;
-    let image_size = u32(bytes, optional + 56)?;
+    let image_size = align(
+        u64::from(u32(bytes, optional + 56)?),
+        section_alignment.max(4096),
+    )
+    .try_into()
+    .map_err(|_| LoadError::Malformed)?;
     let header_size = u32(bytes, optional + 60)?;
     if preferred_base == 0
         || !preferred_base.is_multiple_of(65536)
         || image_size == 0
-        || !image_size.is_multiple_of(section_alignment)
         || u64::from(preferred_base) + u64::from(image_size) > 1 << 32
         || header_size == 0
         || !header_size.is_multiple_of(file_alignment)

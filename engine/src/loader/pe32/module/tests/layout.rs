@@ -34,6 +34,50 @@ fn mapped_zero_fill_and_final_section_permissions_do_not_depend_on_source_paddin
 }
 
 #[test]
+fn image_size_rounds_to_mapping_alignment_without_rewriting_guest_headers() {
+    for (small, alignment, declared, expected) in [
+        (false, 0x1000, 0x2401, 0x3000),
+        (false, 0x2000, 0x4401, 0x6000),
+        (true, 0x200, 0x601, 0x1000),
+    ] {
+        let mut bytes = pe::image(false, small);
+        pe::put32(&mut bytes, pe::OPTIONAL + 32, alignment);
+        pe::put32(&mut bytes, pe::OPTIONAL + 56, declared);
+        if alignment == 0x2000 {
+            pe::put32(&mut bytes, pe::OPTIONAL + 16, 0x2000);
+            for (index, rva) in [(0, 0x2000), (1, 0x4000)] {
+                pe::put32(&mut bytes, pe::OPTIONAL + 224 + index * 40 + 12, rva);
+            }
+        }
+        let image = parse_module(&bytes).unwrap();
+        assert_eq!(image.image_size, expected);
+        let pages = image.prepare_pages(&bytes, pe::BASE).unwrap();
+        assert_eq!(
+            &pages[0].bytes[pe::OPTIONAL + 56..pe::OPTIONAL + 60],
+            &declared.to_le_bytes(),
+        );
+        assert!(
+            pages
+                .iter()
+                .all(|page| page.address.0 < pe::BASE + expected)
+        );
+    }
+}
+
+#[test]
+fn image_size_rounding_rejects_zero_overflow_and_sections_outside_the_rounded_size() {
+    for declared in [0, 0x1001, 0x2000, u32::MAX] {
+        let mut bytes = pe::image(false, false);
+        pe::put32(&mut bytes, pe::OPTIONAL + 56, declared);
+        assert_eq!(parse_module(&bytes).err(), Some(LoadError::Malformed));
+    }
+    let mut bytes = pe::image(false, false);
+    pe::put32(&mut bytes, pe::OPTIONAL + 28, 0xffff_0000);
+    pe::put32(&mut bytes, pe::OPTIONAL + 56, 0x1_0001);
+    assert_eq!(parse_module(&bytes).err(), Some(LoadError::Malformed));
+}
+
+#[test]
 fn overlapping_logical_sections_and_inconsistent_small_alignment_fail_closed() {
     let mut bytes = pe::image(false, true);
     pe::put32(&mut bytes, pe::OPTIONAL + 224 + 40 + 12, 0x200);
