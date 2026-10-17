@@ -1,4 +1,6 @@
+mod header;
 use super::GdiError32;
+pub(crate) use header::{DibHeader32, decode_dib_header};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BitmapLayout32 {

@@ -70,8 +70,23 @@ pub struct Pen32 {
     pub width: i32,
     pub color: u32,
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GdiImageKind32 {
+    Icon,
+    Cursor,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GdiImageObject32 {
+    pub kind: GdiImageKind32,
+    pub width: u32,
+    pub height: u32,
+    pub hotspot: Point32,
+    pub monochrome: bool,
+    pub alpha: bool,
+}
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum GdiObject32 {
+    Image(GdiImageObject32),
     Brush(Brush32),
     Pen(Pen32),
     Bitmap(super::BitmapLayout32),
@@ -84,6 +99,7 @@ pub enum GdiObject32 {
 impl GdiObject32 {
     pub fn object_type(&self) -> u32 {
         match self {
+            Self::Image(_) => 0,
             Self::Pen(_) => 1,
             Self::Brush(_) => 2,
             Self::StockPalette | Self::Palette(_) => 5,

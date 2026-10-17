@@ -26,6 +26,7 @@ enum PreparedPayload32 {
 }
 pub struct PreparedGdiObject32 {
     handle: u32,
+    retire: Option<u32>,
     payload: PreparedPayload32,
 }
 impl PreparedGdiObject32 {
@@ -63,11 +64,22 @@ impl GdiContext32 {
         }
     }
     pub fn prepare_object(&self, object: GdiObject32) -> Result<PreparedGdiObject32, GdiError32> {
-        if self.objects.len() == self.limits.objects {
+        self.prepare_object_replacing(object, None)
+    }
+    pub(crate) fn prepare_object_replacing(
+        &self,
+        object: GdiObject32,
+        retire: Option<u32>,
+    ) -> Result<PreparedGdiObject32, GdiError32> {
+        if let Some(handle) = retire {
+            self.check_object_retirement(handle)?;
+        }
+        if self.objects.len() - usize::from(retire.is_some()) == self.limits.objects {
             return Err(GdiError32::Capacity);
         }
         Ok(PreparedGdiObject32 {
             handle: self.next_handle()?,
+            retire,
             payload: PreparedPayload32::Object(object),
         })
     }
@@ -82,6 +94,7 @@ impl GdiContext32 {
             .map_err(|_| GdiError32::Allocation)?;
         Ok(PreparedGdiObject32 {
             handle,
+            retire: None,
             payload: PreparedPayload32::Dc(Dc32 {
                 handle,
                 kind,
@@ -90,8 +103,46 @@ impl GdiContext32 {
             }),
         })
     }
+    fn check_object_retirement(&self, handle: u32) -> Result<(), GdiError32> {
+        if self.is_stock(handle) {
+            return Err(GdiError32::InvalidHandle);
+        }
+        if self.image_object(handle).is_ok() {
+            return Ok(());
+        }
+        self.check_delete_object(handle)
+    }
+    pub(crate) fn check_prepared_new(
+        &self,
+        prepared: &PreparedGdiObject32,
+    ) -> Result<(), GdiError32> {
+        if self.next_handle()? != prepared.handle {
+            return Err(GdiError32::InvalidRequest);
+        }
+        if let Some(handle) = prepared.retire {
+            self.check_object_retirement(handle)?;
+        }
+        let capacity = match prepared.payload {
+            PreparedPayload32::Object(_) => {
+                self.objects.len() - usize::from(prepared.retire.is_some()) < self.limits.objects
+            }
+            PreparedPayload32::Dc(_) => self.dcs.len() < self.limits.dcs,
+        };
+        if !capacity {
+            return Err(GdiError32::Capacity);
+        }
+        Ok(())
+    }
     pub fn commit_new(&mut self, prepared: PreparedGdiObject32) -> u32 {
-        assert_eq!(self.next_handle(), Ok(prepared.handle));
+        self.check_prepared_new(&prepared)
+            .expect("prepared GDI object authority");
+        if let Some(handle) = prepared.retire {
+            let index = self
+                .objects
+                .binary_search_by_key(&handle, |entry| entry.handle)
+                .unwrap();
+            self.objects.remove(index);
+        }
         match prepared.payload {
             PreparedPayload32::Object(object) => self.objects.push(ObjectEntry32 {
                 handle: prepared.handle,

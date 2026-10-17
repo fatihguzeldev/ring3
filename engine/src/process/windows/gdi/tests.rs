@@ -285,7 +285,7 @@ fn display_pixels_damage_and_exact_revision_ack_are_observable_without_a_browser
     assert!(runtime.frame(0).is_none());
 }
 
-mod captured;
+pub(super) mod captured;
 
 mod paint;
 
@@ -349,3 +349,5 @@ mod bitfields;
 mod palette;
 
 mod canvas;
+
+mod images;

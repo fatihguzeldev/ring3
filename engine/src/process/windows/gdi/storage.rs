@@ -10,6 +10,8 @@ use crate::{
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum SurfaceKey32 {
     Bitmap(u32),
+    ImageMask(u32),
+    ImageColor(u32),
     Default(u32),
     Window { window: u32, whole: bool },
 }
@@ -99,6 +101,24 @@ pub(super) struct Surface32 {
     pub palette: Vec<u32>,
     pub storage: Storage32,
 }
+impl Surface32 {
+    pub(super) fn new(
+        key: SurfaceKey32,
+        id: u64,
+        layout: BitmapLayout32,
+        palette: Vec<u32>,
+    ) -> Result<Self, GdiError32> {
+        Ok(Self {
+            key,
+            id,
+            revision: 1,
+            damage: Rect32::default(),
+            layout,
+            palette,
+            storage: Storage32::Owned(super::memory::zeroes(layout.byte_len()?)?),
+        })
+    }
+}
 impl GdiRuntime32 {
     pub(super) fn prepare_surface(
         &self,
@@ -119,15 +139,7 @@ impl GdiRuntime32 {
         self.next_surface
             .checked_add(1)
             .ok_or(GdiError32::Exhausted)?;
-        Ok(Surface32 {
-            key,
-            id: self.next_surface,
-            revision: 1,
-            damage: Rect32::default(),
-            layout,
-            palette,
-            storage: Storage32::Owned(super::memory::zeroes(length)?),
-        })
+        Surface32::new(key, self.next_surface, layout, palette)
     }
     pub(super) fn publish_surface(&mut self, surface: Surface32) {
         self.next_surface += 1;

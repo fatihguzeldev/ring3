@@ -6,7 +6,14 @@ use crate::{
     windows::{CallingConvention32, gdi::GdiApi32},
 };
 fn call(engine: &mut EngineInstance, api: GdiApi32, args: &[u32]) -> u32 {
-    for (index, word) in [0x10000u32, 2, 0x10000, api.id()].iter().enumerate() {
+    call_id(engine, api.id(), args)
+}
+pub(in crate::process::windows) fn call_id(
+    engine: &mut EngineInstance,
+    id: u32,
+    args: &[u32],
+) -> u32 {
+    for (index, word) in [0x10000u32, 2, 0x10000, id].iter().enumerate() {
         engine.arena_mut().unwrap()[TRANSFER_OFFSET + index * 4..TRANSFER_OFFSET + index * 4 + 4]
             .copy_from_slice(&word.to_le_bytes());
     }
@@ -30,7 +37,7 @@ fn call(engine: &mut EngineInstance, api: GdiApi32, args: &[u32]) -> u32 {
     encode_exit_v3(
         &ExecutionExit {
             retired: 0,
-            reason: ExitReason::Gate { id: api.id() },
+            reason: ExitReason::Gate { id },
         },
         &mut engine.arena_mut().unwrap()[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE],
     )

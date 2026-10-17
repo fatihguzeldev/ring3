@@ -25,7 +25,27 @@ impl GdiContext32 {
             .binary_search_by_key(&handle, |entry| entry.handle)
             .ok()
             .map(|index| self.objects[index].object.clone())
+            .filter(|object| !matches!(object, GdiObject32::Image(_)))
             .ok_or(GdiError32::InvalidHandle)
+    }
+    pub(crate) fn image_object(&self, handle: u32) -> Result<super::GdiImageObject32, GdiError32> {
+        let index = self
+            .objects
+            .binary_search_by_key(&handle, |entry| entry.handle)
+            .map_err(|_| GdiError32::InvalidHandle)?;
+        let GdiObject32::Image(image) = self.objects[index].object else {
+            return Err(GdiError32::InvalidHandle);
+        };
+        Ok(image)
+    }
+    pub(crate) fn delete_image_object(&mut self, handle: u32) -> Result<(), GdiError32> {
+        self.image_object(handle)?;
+        let index = self
+            .objects
+            .binary_search_by_key(&handle, |entry| entry.handle)
+            .unwrap();
+        self.objects.remove(index);
+        Ok(())
     }
     pub fn object_type(&self, handle: u32) -> Result<u32, GdiError32> {
         if let Ok(dc) = self.dc(handle) {

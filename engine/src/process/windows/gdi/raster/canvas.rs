@@ -1,3 +1,5 @@
+mod images;
+
 use super::super::{
     context::GdiRuntime32,
     fonts::rendering::{TextPixels32, TextRequest32},
@@ -14,6 +16,7 @@ pub(in crate::process) struct GdiCanvas32 {
     prepared: Option<TextPixels32>,
     dc: u32,
     owner: CanvasOwner32,
+    images: Vec<super::super::images::ImageOwner32>,
 }
 struct CanvasOwner32 {
     identity: u64,
@@ -49,6 +52,7 @@ impl GdiCanvas32 {
         logical_palette.extend_from_slice(selected);
         Ok(Self {
             dc,
+            images: Vec::new(),
             owner: CanvasOwner32 {
                 identity: memory.identity(),
                 memory_version: memory.transaction_version(),
@@ -368,6 +372,9 @@ impl GdiRuntime32 {
             || surface.palette != owner.colors
         {
             return Err(GdiError32::InvalidRequest);
+        }
+        for source in &canvas.images {
+            self.check_image_owner(*source)?;
         }
         let prepared = canvas.finish();
         if prepared.damage.left < prepared.damage.right

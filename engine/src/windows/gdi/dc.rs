@@ -25,6 +25,7 @@ impl GdiContext32 {
     pub fn check_select(&self, dc: u32, object: u32) -> Result<u32, GdiError32> {
         let current = self.dc(dc)?;
         Ok(match self.object(object)? {
+            GdiObject32::Image(_) => return Err(GdiError32::InvalidHandle),
             GdiObject32::Brush(_) => current.state.brush,
             GdiObject32::Pen(_) => current.state.pen,
             GdiObject32::StockFont(_) | GdiObject32::Font(_) => current.state.font,
@@ -56,6 +57,7 @@ impl GdiContext32 {
         let index = self.dcs.binary_search_by_key(&dc, |dc| dc.handle).unwrap();
         let state = &mut self.dcs[index].state;
         match object_type {
+            GdiObject32::Image(_) => return Err(GdiError32::InvalidHandle),
             GdiObject32::Brush(_) => state.brush = object,
             GdiObject32::Pen(_) => state.pen = object,
             GdiObject32::StockFont(_) | GdiObject32::Font(_) => state.font = object,
