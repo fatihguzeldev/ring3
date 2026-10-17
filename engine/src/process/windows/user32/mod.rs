@@ -9,7 +9,9 @@ mod clipboard;
 mod context;
 mod controls;
 mod destruction;
+mod images;
 mod input;
+pub use images::PendingUser32ImageCall32;
 mod lifecycle;
 mod memory;
 mod menus;
@@ -77,6 +79,7 @@ pub(crate) struct User32Context32 {
     last_error: Option<u32>,
     runtime_input: User32CallContext32,
     input: input::User32Input32,
+    images: images::ImageRuntime32,
     raw_input: crate::windows::rawinput::RawInputRuntime32,
     destructions: Vec<destruction::DestroyPlan32>,
     timers: timers::TimerState32,

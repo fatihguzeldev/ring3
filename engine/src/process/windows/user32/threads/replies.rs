@@ -14,6 +14,7 @@ struct ThreadInput32 {
     show_count: i32,
 }
 pub(in crate::process) struct User32ThreadReply32 {
+    image: Option<super::super::images::ImageReply32>,
     pending: Vec<Pending32>,
     destructions: Vec<DestroyPlan32>,
     last_error: Option<u32>,
@@ -126,6 +127,7 @@ impl User32Context32 {
     }
     pub(in crate::process) fn empty_thread_reply(&self) -> User32ThreadReply32 {
         User32ThreadReply32 {
+            image: None,
             pending: Vec::new(),
             destructions: Vec::new(),
             last_error: None,
@@ -142,6 +144,7 @@ impl User32Context32 {
     }
     pub(in crate::process) fn take_thread_reply(&mut self) -> User32ThreadReply32 {
         User32ThreadReply32 {
+            image: self.images.take_reply(),
             pending: std::mem::take(&mut self.pending),
             destructions: std::mem::take(&mut self.destructions),
             last_error: self.last_error.take(),
@@ -162,6 +165,7 @@ impl User32Context32 {
             "active USER32 continuation was parked before restoring another thread"
         );
         let layout = self.resolve_thread_layout(&reply);
+        self.images.restore_reply(reply.image);
         self.pending = reply.pending;
         self.destructions = reply.destructions;
         self.last_error = reply.last_error;
@@ -193,6 +197,11 @@ impl User32Context32 {
 }
 
 impl User32ThreadReply32 {
+    pub(in crate::process::windows::user32) fn image_reply(
+        &self,
+    ) -> Option<&super::super::images::ImageReply32> {
+        self.image.as_ref()
+    }
     pub(in crate::process) fn owns_clipboard_render(
         &self,
         child: u64,

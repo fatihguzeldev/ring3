@@ -30,7 +30,9 @@ pub use windows::d3d8::{D3D8Config32, D3D8DeviceInfo32, D3D8Error32};
 pub use windows::dinput::{DirectInputConfig32, DirectInputError32};
 pub use windows::dsound::{DSoundConfig32, DSoundError32};
 pub use windows::synchronization::WindowsWait32;
-pub use windows::user32::{User32CursorRequest32, User32DialogIcon32, User32DialogRequest32};
+pub use windows::user32::{
+    PendingUser32ImageCall32, User32CursorRequest32, User32DialogIcon32, User32DialogRequest32,
+};
 
 pub use windows::files::{
     AssetRef32, FileConfig32, FileId, FileInfo32, FileProgress32, FileReadRequest32, FileTimes32,

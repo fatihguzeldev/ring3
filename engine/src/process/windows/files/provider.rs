@@ -356,6 +356,14 @@ impl EngineInstance {
         files.provider.leases.retain(|value| *value != lease);
         Ok(())
     }
+    pub(in crate::process) fn provider_file_read_limit(&self) -> Result<usize, HostError> {
+        self.memory()?;
+        self.files
+            .as_ref()
+            .map(|files| files.vfs.max_io_bytes())
+            .ok_or(HostError::File(FileError32::Unsupported))
+    }
+
     pub(in crate::process) fn read_provider_file(
         &mut self,
         lease: ProviderFile32,

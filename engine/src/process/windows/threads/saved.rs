@@ -178,8 +178,7 @@ impl SavedThread32 {
             || self
                 .user32
                 .as_ref()
-                .zip(engine.user32.as_ref())
-                .is_some_and(|(reply, context)| context.thread_reply_ready(reply))
+                .is_some_and(|reply| engine.user32_thread_reply_ready(reply))
             || self.module_state.source_ready(engine)
             || self.module_reply.as_ref().is_some_and(|reply| {
                 reply.waiting_loader()

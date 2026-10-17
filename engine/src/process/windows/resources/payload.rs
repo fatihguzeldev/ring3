@@ -7,10 +7,20 @@ use crate::{
 pub(in crate::process::windows) struct ResourcePayload32 {
     pub module: ModuleId32,
     pub entry: u32,
+    pub language: u16,
     pub bytes: Vec<u8>,
 }
 
 impl EngineInstance {
+    pub(in crate::process::windows) fn resource_module_identity(
+        &self,
+        handle: u32,
+    ) -> Result<ModuleId32, HostError> {
+        self.resource_module(handle)
+            .map(|module| module.id)
+            .map_err(HostError::Resource)
+    }
+
     pub(in crate::process::windows) fn user32_resource_bytes(
         &self,
         instance: u32,
@@ -31,13 +41,7 @@ impl EngineInstance {
         wide: bool,
         max_bytes: usize,
     ) -> Result<ResourcePayload32, HostError> {
-        let name = super::memory::identifier(
-            self.memory.as_ref().ok_or(HostError::Closed)?,
-            name_address,
-            wide,
-            self.windows_ansi_code_page(),
-        )
-        .map_err(HostError::Resource)?;
+        let name = self.user32_resource_identifier(name_address, wide)?;
         self.resource_data_payload(
             instance,
             &ResourceIdentifier32::Id(u32::from(kind)),
@@ -45,6 +49,32 @@ impl EngineInstance {
             0,
             max_bytes,
         )
+    }
+
+    pub(in crate::process::windows) fn user32_resource_identifier(
+        &self,
+        address: u32,
+        wide: bool,
+    ) -> Result<ResourceIdentifier32, HostError> {
+        super::memory::identifier(
+            self.memory.as_ref().ok_or(HostError::Closed)?,
+            address,
+            wide,
+            self.windows_ansi_code_page(),
+        )
+        .map_err(HostError::Resource)
+    }
+
+    pub(in crate::process::windows) fn resource_payload_for_module(
+        &self,
+        id: ModuleId32,
+        kind: &ResourceIdentifier32,
+        name: &ResourceIdentifier32,
+        language: u16,
+        max_bytes: usize,
+    ) -> Result<ResourcePayload32, HostError> {
+        let module = self.resource_module_id(id).map_err(HostError::Resource)?;
+        self.resource_module_payload(module, kind, name, language, max_bytes)
     }
 
     pub(in crate::process) fn resource_data_bytes(
@@ -59,7 +89,7 @@ impl EngineInstance {
             .map(|payload| payload.bytes)
     }
 
-    fn resource_data_payload(
+    pub(in crate::process::windows) fn resource_data_payload(
         &self,
         handle: u32,
         kind: &ResourceIdentifier32,
@@ -67,15 +97,27 @@ impl EngineInstance {
         language: u16,
         max_bytes: usize,
     ) -> Result<ResourcePayload32, HostError> {
+        let module = self.resource_module(handle).map_err(HostError::Resource)?;
+        let preferred = if language == 0 {
+            self.current_thread_ui_language()
+        } else {
+            language
+        };
+        self.resource_module_payload(module, kind, name, preferred, max_bytes)
+    }
+
+    fn resource_module_payload(
+        &self,
+        module: super::context::ModuleResource32,
+        kind: &ResourceIdentifier32,
+        name: &ResourceIdentifier32,
+        language: u16,
+        max_bytes: usize,
+    ) -> Result<ResourcePayload32, HostError> {
         let result = (|| {
-            let module = self.resource_module(handle)?;
-            let preferred = if language == 0 {
-                self.current_thread_ui_language()
-            } else {
-                language
-            };
+            let preferred = language;
             let mut reader = self.resource_reader(module)?;
-            let location = reader.find_languages(
+            let (location, language) = reader.find_languages_with_language(
                 kind,
                 name,
                 &[preferred, preferred & 0x3ff, 0, 0x409, 9],
@@ -97,6 +139,7 @@ impl EngineInstance {
             Ok::<_, E>(ResourcePayload32 {
                 module: module.id,
                 entry: location.entry_rva,
+                language,
                 bytes,
             })
         })();

@@ -199,10 +199,26 @@ api_catalog! {
     GetOpenClipboardWindow=0x0002_00bd,0;
     GetClipboardSequenceNumber=0x0002_00be,0;
     GetPriorityClipboardFormat=0x0002_00bf,2;
+    LoadBitmapA=0x0002_00c0,2;
+    LoadBitmapW=0x0002_00c1,2;
+    LoadImageA=0x0002_00c2,6;
+    LoadImageW=0x0002_00c3,6;
+    CopyImage=0x0002_00c4,5;
+    DestroyIcon=0x0002_00c5,1;
+    DestroyCursor=0x0002_00c6,1;
+    DrawIcon=0x0002_00c7,4;
+    DrawIconEx=0x0002_00c8,9;
+    LoadIconA=0x0002_00c9,2;
+    LoadIconW=0x0002_00ca,2;
+    LoadCursorA=0x0002_00cb,2;
+    LoadCursorW=0x0002_00cc,2;
     SetSysColors=0x0002_00cd,3;
 }
 
 impl User32Api32 {
+    pub(crate) fn image(self) -> bool {
+        (0x0002_00c0..=0x0002_00cc).contains(&self.id())
+    }
     pub(crate) fn clipboard(self) -> bool {
         (0x0002_00b0..=0x0002_00bf).contains(&self.id())
     }

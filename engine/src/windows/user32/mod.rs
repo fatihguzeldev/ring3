@@ -1,3 +1,4 @@
+pub(crate) mod images;
 mod api;
 pub(crate) mod clipboard;
 mod colors;

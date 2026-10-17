@@ -129,3 +129,32 @@ fn named_entries_use_counted_utf16_case_sensitive_order_and_bounded_limits() {
     .unwrap();
     assert_eq!(reader.types(), Err(ResourceError32::Capacity));
 }
+
+#[test]
+fn selected_language_is_returned_for_explicit_and_first_available_fallbacks() {
+    let mut memory = memory();
+    let kind = ResourceIdentifier32::Id(10);
+    let name = ResourceIdentifier32::Id(7);
+    let (location, language) = reader(&memory)
+        .find_languages_with_language(&kind, &name, &[0x411, 0x409], true)
+        .unwrap();
+    assert_eq!(language, 0x409);
+    assert_eq!(location.entry_rva, 0x10c0);
+    let (fallback, language) = reader(&memory)
+        .find_languages_with_language(&kind, &name, &[0x411], true)
+        .unwrap();
+    assert_eq!((fallback, language), (location, 0x409));
+    assert_eq!(
+        reader(&memory)
+            .find_languages(&kind, &name, &[0x411], true)
+            .unwrap(),
+        location
+    );
+    memory
+        .write(GuestAddress(BASE + 0x10a0), &0u32.to_le_bytes())
+        .unwrap();
+    let (neutral, language) = reader(&memory)
+        .find_languages_with_language(&kind, &name, &[0, 0x409], true)
+        .unwrap();
+    assert_eq!((neutral, language), (location, 0));
+}

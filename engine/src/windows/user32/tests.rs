@@ -39,7 +39,7 @@ fn user32_catalog_resolves_explicit_stdcall_gates_without_id_or_symbol_aliases()
         ("LoadStringA", 0x0013_0015),
         ("LoadStringW", 0x0013_0016),
     ];
-    assert_eq!(User32Api32::catalog().count() + extensions.len(), 191);
+    assert_eq!(User32Api32::catalog().count() + extensions.len(), 204);
     for (name, gate) in extensions {
         assert!(module.exports.iter().any(|export| {
             export.name.as_deref() == Some(name)
@@ -99,4 +99,31 @@ fn class_identity_is_case_insensitive_instance_scoped_and_never_reuses_retired_a
     state.unregister_class(1, &[], Some(atom)).unwrap();
     let next = state.register_class(class(1)).unwrap();
     assert!(next > other);
+}
+
+#[test]
+fn image_calls_have_exact_stdcall_arities_inside_the_unique_user32_catalog() {
+    for (api, id, words) in [
+        (User32Api32::LoadBitmapA, 0xc0, 2),
+        (User32Api32::LoadBitmapW, 0xc1, 2),
+        (User32Api32::LoadImageA, 0xc2, 6),
+        (User32Api32::LoadImageW, 0xc3, 6),
+        (User32Api32::CopyImage, 0xc4, 5),
+        (User32Api32::DestroyIcon, 0xc5, 1),
+        (User32Api32::DestroyCursor, 0xc6, 1),
+        (User32Api32::DrawIcon, 0xc7, 4),
+        (User32Api32::DrawIconEx, 0xc8, 9),
+        (User32Api32::LoadIconA, 0xc9, 2),
+        (User32Api32::LoadIconW, 0xca, 2),
+        (User32Api32::LoadCursorA, 0xcb, 2),
+        (User32Api32::LoadCursorW, 0xcc, 2),
+    ] {
+        assert_eq!(api.id(), 0x0002_0000 | id);
+        assert_eq!(api.stack_words(), words);
+        assert_eq!(api.convention(), CallingConvention32::Stdcall);
+        assert_eq!(User32Api32::resolve("user32.dll", api.name()), Some(api));
+        assert!(api.image());
+    }
+    assert!(!User32Api32::SetCursor.image());
+    assert_eq!(User32Api32::from_id(0x0002_00ce), None);
 }

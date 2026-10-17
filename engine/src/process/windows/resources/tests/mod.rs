@@ -2,6 +2,7 @@ mod datafiles;
 mod enumeration;
 mod formatting;
 mod lookup;
+mod payload;
 use super::*;
 use crate::{
     memory::{GuestAddress, PageRange},
@@ -106,7 +107,7 @@ pub(in crate::process::windows) fn register(engine: &mut EngineInstance, name: &
 pub(in crate::process::windows) fn engine(named: bool, max_handles: u32) -> EngineInstance {
     engine_with_image(image(BASE, false, named), max_handles, Default::default())
 }
-fn engine_with_image(
+pub(in crate::process::windows) fn engine_with_image(
     bytes: Vec<u8>,
     max_handles: u32,
     profile: crate::windows::nls::NlsProfile32,

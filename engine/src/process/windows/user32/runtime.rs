@@ -112,6 +112,9 @@ impl EngineInstance {
         let Some(api) = User32Api32::from_id(id) else {
             return Ok(false);
         };
+        if self.try_complete_user32_image_call(owner, token, id, frame)? {
+            return Ok(true);
+        }
         self.validate_windows_provider_owner(owner)?;
         self.validate_new_windows_reply(owner, token)?;
         if self.checked_pending_call(owner, token)?.frame != frame {

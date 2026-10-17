@@ -173,6 +173,16 @@ impl User32Context32 {
         Ok(User32Outcome32::Return(value))
     }
 
+    pub(in crate::process::windows::user32) fn replace_image_cursor(
+        &mut self,
+        handle: u32,
+    ) -> Result<u32, User32Error32> {
+        let revision = self.cursor_request_revision()?;
+        let previous = self.input.cursor_handle;
+        self.input.cursor_handle = handle;
+        self.publish_cursor_request(revision, 8);
+        Ok(previous)
+    }
     fn cursor_request_revision(&self) -> Result<u64, User32Error32> {
         self.input
             .cursor_revision

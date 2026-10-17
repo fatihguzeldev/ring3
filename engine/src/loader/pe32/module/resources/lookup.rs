@@ -57,6 +57,16 @@ impl PeResources32<'_> {
         languages: &[u16],
         first_available: bool,
     ) -> Result<ResourceLocation32, E> {
+        self.find_languages_with_language(kind, name, languages, first_available)
+            .map(|(location, _)| location)
+    }
+    pub fn find_languages_with_language(
+        &mut self,
+        kind: &ResourceIdentifier32,
+        name: &ResourceIdentifier32,
+        languages: &[u16],
+        first_available: bool,
+    ) -> Result<(ResourceLocation32, u16), E> {
         let table = self.name_table(kind, name)?;
         for &language in languages {
             if let Some(entry) =
@@ -65,7 +75,10 @@ impl PeResources32<'_> {
                 if entry.target & 0x80000000 != 0 {
                     return Err(E::Malformed);
                 }
-                return self.location(self.directory_span(entry.target, 16)?);
+                return Ok((
+                    self.location(self.directory_span(entry.target, 16)?)?,
+                    language,
+                ));
             }
         }
         if first_available && table.ids != 0 {
@@ -73,7 +86,10 @@ impl PeResources32<'_> {
             if entry.target & 0x80000000 != 0 || entry.name > u32::from(u16::MAX) {
                 return Err(E::Malformed);
             }
-            return self.location(self.directory_span(entry.target, 16)?);
+            return Ok((
+                self.location(self.directory_span(entry.target, 16)?)?,
+                entry.name as u16,
+            ));
         }
         Err(E::LanguageNotFound)
     }
