@@ -9,12 +9,14 @@ pub(super) struct FontResource32 {
     pub id: u32,
     pub faces: Vec<Arc<FontFace32>>,
     pub enumerable: bool,
+    memory: bool,
 }
 pub struct PreparedFontSource32 {
     identity: Arc<()>,
     id: u32,
     faces: Vec<Arc<FontFace32>>,
     enumerable: bool,
+    memory: bool,
     size: usize,
 }
 impl PreparedFontSource32 {
@@ -82,6 +84,7 @@ impl FontDatabase32 {
             id: self.next_resource,
             faces,
             enumerable,
+            memory: true,
             size: bytes.len(),
         })
     }
@@ -107,6 +110,7 @@ impl FontDatabase32 {
             id: prepared.id,
             faces: prepared.faces,
             enumerable: prepared.enumerable,
+            memory: prepared.memory,
         });
         prepared.id
     }
@@ -114,11 +118,26 @@ impl FontDatabase32 {
         let prepared = self.prepare_font_source(bytes, false)?;
         Ok(self.commit_font_source(prepared))
     }
+    pub(crate) fn prepare_file_font_source(
+        &mut self,
+        bytes: &[u8],
+        enumerable: bool,
+    ) -> Result<PreparedFontSource32, GdiError32> {
+        let mut prepared = self.prepare_font_source(bytes, enumerable)?;
+        prepared.memory = false;
+        Ok(prepared)
+    }
     pub fn remove_memory_font(&mut self, id: u32) -> Result<(), GdiError32> {
+        self.remove_source(id, true)
+    }
+    pub(crate) fn remove_file_font(&mut self, id: u32) -> Result<(), GdiError32> {
+        self.remove_source(id, false)
+    }
+    fn remove_source(&mut self, id: u32, memory: bool) -> Result<(), GdiError32> {
         let index = self
             .resources
             .iter()
-            .position(|entry| entry.id == id)
+            .position(|entry| entry.id == id && entry.memory == memory)
             .ok_or(GdiError32::InvalidHandle)?;
         self.retired
             .try_reserve(1)

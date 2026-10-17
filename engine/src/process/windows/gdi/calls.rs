@@ -11,9 +11,10 @@ use crate::{
 
 impl EngineInstance {
     pub(in crate::process) fn gdi_font_provider_owns_token(&self, token: u32) -> bool {
-        self.gdi
-            .as_ref()
-            .is_some_and(|gdi| gdi.font_enumerations.iter().any(|call| call.token == token))
+        self.gdi.as_ref().is_some_and(|gdi| {
+            gdi.font_enumerations.iter().any(|call| call.token == token)
+                || gdi.font_file_calls.iter().any(|call| call.token == token)
+        })
     }
     pub(in crate::process) fn try_complete_gdi_call(
         &mut self,
@@ -27,6 +28,11 @@ impl EngineInstance {
             User32Api32::from_id(id),
             Some(User32Api32::DefWindowProcA | User32Api32::DefWindowProcW)
         ) && frame.arguments().get(1) == Some(&0x14);
+        if let Some(api) = api
+            && api.font_file_resource()
+        {
+            return self.complete_gdi_file_font(owner, token, api, frame);
+        }
         if let Some(api) = api
             && api.font_enumeration()
         {
@@ -183,6 +189,14 @@ impl GdiRuntime32 {
             AddFontMemResourceEx | RemoveFontMemResourceEx => {
                 self.memory_font_resource(memory, api, args)
             }
+            AddFontResourceA
+            | AddFontResourceW
+            | RemoveFontResourceA
+            | RemoveFontResourceW
+            | AddFontResourceExA
+            | AddFontResourceExW
+            | RemoveFontResourceExA
+            | RemoveFontResourceExW => Err(GdiError32::InvalidRequest),
             EnumFontsA | EnumFontsW | EnumFontFamiliesA | EnumFontFamiliesW
             | EnumFontFamiliesExA | EnumFontFamiliesExW => Err(GdiError32::InvalidRequest),
             GetSysColor => Ok(self.system_color(args[0])),

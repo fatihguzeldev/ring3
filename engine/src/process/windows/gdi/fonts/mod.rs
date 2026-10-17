@@ -1,6 +1,7 @@
 mod calls;
 mod dialog;
 pub(super) mod enumeration;
+pub(super) mod files;
 mod layout;
 mod memory;
 mod paragraph;

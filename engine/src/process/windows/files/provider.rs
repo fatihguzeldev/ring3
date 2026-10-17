@@ -10,7 +10,13 @@ use crate::{
 pub(in crate::process) struct ProviderFile32 {
     pub(super) epoch: u64,
     pub(super) open: OpenFileId,
-    thread: u32,
+    owner: ProviderFileOwner32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ProviderFileOwner32 {
+    Thread(u32),
+    ProcessFont,
 }
 
 pub(super) struct ProviderFiles32 {
@@ -28,7 +34,7 @@ impl ProviderFiles32 {
     pub(super) fn thread_opens(&self, thread: u32) -> impl Iterator<Item = OpenFileId> + '_ {
         self.leases
             .iter()
-            .filter(move |lease| lease.thread == thread)
+            .filter(move |lease| lease.owner == ProviderFileOwner32::Thread(thread))
             .map(|lease| lease.open)
     }
     pub(super) fn clear(&mut self) {
@@ -42,7 +48,7 @@ impl FileRuntime32 {
         lease: ProviderFile32,
         thread: u32,
     ) -> Result<(), FileError32> {
-        if lease.epoch != self.vfs.epoch() || lease.thread != thread {
+        if lease.epoch != self.vfs.epoch() || lease.owner != ProviderFileOwner32::Thread(thread) {
             return Err(FileError32::Stale);
         }
         if !self.provider.leases.contains(&lease) {
@@ -95,7 +101,7 @@ impl FileRuntime32 {
         let lease = ProviderFile32 {
             epoch: self.vfs.epoch(),
             open: result.open,
-            thread,
+            owner: ProviderFileOwner32::Thread(thread),
         };
         self.provider.leases.push(lease);
         Ok(lease)
@@ -105,18 +111,102 @@ impl FileRuntime32 {
             .provider
             .leases
             .iter()
-            .filter(|lease| lease.thread == thread)
+            .filter(|lease| lease.owner == ProviderFileOwner32::Thread(thread))
         {
             self.vfs.cancel_provider_file_io(lease.open);
             self.vfs
                 .close_open(lease.open)
                 .expect("provider file closes were preflighted with thread exit");
         }
-        self.provider.leases.retain(|lease| lease.thread != thread);
+        self.provider
+            .leases
+            .retain(|lease| lease.owner != ProviderFileOwner32::Thread(thread));
     }
 }
 
 impl EngineInstance {
+    pub(in crate::process) fn open_font_source_file(
+        &mut self,
+        path: &[u16],
+    ) -> Result<ProviderFile32, HostError> {
+        self.collect_gdi_font_file_holds()?;
+        let thread = self.current_windows_thread_id()?;
+        self.memory()?;
+        self.files
+            .as_mut()
+            .ok_or(HostError::File(FileError32::Unsupported))?
+            .open_provider_file(
+                path,
+                false,
+                FileShare32(FileShare32::READ.0 | FileShare32::DELETE.0),
+                thread,
+                self.windows_security.token(),
+            )
+            .map_err(HostError::File)
+    }
+
+    pub(in crate::process) fn commit_font_source_file_hold(
+        &mut self,
+        lease: ProviderFile32,
+    ) -> ProviderFile32 {
+        let files = self
+            .files
+            .as_mut()
+            .expect("font source has a canonical filesystem");
+        let current = files
+            .provider
+            .leases
+            .iter_mut()
+            .find(|entry| **entry == lease)
+            .expect("font publication preflighted its exact loading lease");
+        assert!(matches!(current.owner, ProviderFileOwner32::Thread(_)));
+        current.owner = ProviderFileOwner32::ProcessFont;
+        *current
+    }
+
+    pub(in crate::process) fn check_close_font_source_files(
+        &self,
+        leases: &[ProviderFile32],
+    ) -> Result<(), HostError> {
+        if leases.is_empty() {
+            return Ok(());
+        }
+        let files = self.files_storage()?;
+        if leases.len() > files.provider.limit {
+            return Err(HostError::File(FileError32::InvalidParameter));
+        }
+        let mut closes = Vec::new();
+        closes
+            .try_reserve_exact(leases.len())
+            .map_err(|_| HostError::Infrastructure)?;
+        for (index, &lease) in leases.iter().enumerate() {
+            if leases[..index].contains(&lease) {
+                return Err(HostError::File(FileError32::InvalidParameter));
+            }
+            if lease.epoch != files.vfs.epoch() || lease.owner != ProviderFileOwner32::ProcessFont {
+                return Err(HostError::File(FileError32::Stale));
+            }
+            if !files.provider.leases.contains(&lease) {
+                return Err(HostError::File(FileError32::InvalidHandle));
+            }
+            files.vfs.open_info(lease.open).map_err(HostError::File)?;
+            closes.push((lease.open, 1));
+        }
+        files
+            .vfs
+            .check_close_open_group(&closes, 0, &[])
+            .map_err(HostError::File)
+    }
+
+    pub(in crate::process) fn provider_full_path(
+        &self,
+        path: &[u16],
+    ) -> Result<Vec<u16>, HostError> {
+        self.files_storage()?
+            .vfs
+            .full_path(path)
+            .map_err(HostError::File)
+    }
     pub(in crate::process) fn provider_path_info(
         &self,
         path: &[u16],
@@ -182,6 +272,7 @@ impl EngineInstance {
         path: &[u16],
         write: bool,
     ) -> Result<ProviderFile32, HostError> {
+        self.collect_gdi_font_file_holds()?;
         let thread = self.current_windows_thread_id()?;
         self.memory()?;
         self.files
@@ -201,6 +292,7 @@ impl EngineInstance {
         path: &[u16],
         section: FileSection32,
     ) -> Result<ProviderFile32, HostError> {
+        self.collect_gdi_font_file_holds()?;
         let thread = self.current_windows_thread_id()?;
         self.memory()?;
         self.files
@@ -323,6 +415,7 @@ impl EngineInstance {
         path: &[u16],
         bytes: &[u8],
     ) -> Result<usize, HostError> {
+        self.collect_gdi_font_file_holds()?;
         self.memory()?;
         let files = self
             .files

@@ -38,6 +38,100 @@ fn path() -> Vec<u16> {
 }
 
 #[test]
+fn font_source_process_hold_keeps_canonical_share_grant_across_loading_thread_retirement() {
+    use crate::files::{FileAccess32, FileOpenOptions32};
+    let mut engine = engine(4, 8);
+    let other = engine.open_provider_file(&path(), false).unwrap();
+    let loading = engine.open_font_source_file(&path()).unwrap();
+    engine.check_close_provider_files(&[loading]).unwrap();
+    let held = engine.commit_font_source_file_hold(loading);
+    assert_ne!(held, loading);
+    assert_eq!(
+        engine.provider_file_size(held),
+        Err(HostError::File(FileError32::Stale))
+    );
+    engine.check_close_provider_files(&[other]).unwrap();
+    let thread = engine.current_windows_thread_id().unwrap();
+    engine
+        .files
+        .as_mut()
+        .unwrap()
+        .retire_provider_thread_files(thread);
+    assert!(engine.provider_file_size(other).is_err());
+    engine.check_close_font_source_files(&[held]).unwrap();
+    let files = engine.files.as_mut().unwrap();
+    for access in [FileAccess32::READ, FileAccess32::DELETE] {
+        let prepared = files
+            .vfs
+            .prepare_open(
+                &path(),
+                FileOpenOptions32 {
+                    access,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        prepared.validate(&files.vfs).unwrap();
+        let open = files.vfs.commit_open(prepared).open;
+        files.vfs.close_open(open).unwrap();
+    }
+    assert!(matches!(
+        files.vfs.prepare_open(
+            &path(),
+            FileOpenOptions32 {
+                access: FileAccess32::WRITE,
+                ..Default::default()
+            }
+        ),
+        Err(FileError32::SharingViolation)
+    ));
+    engine.commit_close_provider_files(&[held]);
+    let files = engine.files.as_mut().unwrap();
+    let prepared = files
+        .vfs
+        .prepare_open(
+            &path(),
+            FileOpenOptions32 {
+                access: FileAccess32::WRITE,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let open = files.vfs.commit_open(prepared).open;
+    files.vfs.close_open(open).unwrap();
+}
+
+#[test]
+fn font_source_initial_open_rejects_existing_writer_without_lease_or_revision_publication() {
+    use crate::files::{FileAccess32, FileOpenOptions32};
+    let mut engine = engine(4, 8);
+    let files = engine.files.as_mut().unwrap();
+    let prepared = files
+        .vfs
+        .prepare_open(
+            &path(),
+            FileOpenOptions32 {
+                access: FileAccess32::WRITE,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let open = files.vfs.commit_open(prepared).open;
+    let revision = files.vfs.revision();
+    let count = files.provider.leases.len();
+    assert_eq!(
+        engine.open_font_source_file(&path()),
+        Err(HostError::File(FileError32::SharingViolation))
+    );
+    let files = engine.files.as_mut().unwrap();
+    assert_eq!(files.provider.leases.len(), count);
+    assert_eq!(files.vfs.revision(), revision);
+    files.vfs.close_open(open).unwrap();
+    let loading = engine.open_font_source_file(&path()).unwrap();
+    engine.close_provider_file(loading).unwrap();
+}
+
+#[test]
 fn provider_acl_changes_reject_new_reads_and_atomic_replacements_but_preserve_existing_grants() {
     use crate::windows::security::{Acl32, Dacl32};
     let mut engine = engine(4, 8);

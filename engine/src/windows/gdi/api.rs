@@ -52,6 +52,8 @@ gdi_apis! {
     AddFontMemResourceEx,4; RemoveFontMemResourceEx,1;
     EnumFontsA,4; EnumFontsW,4; EnumFontFamiliesA,4; EnumFontFamiliesW,4;
     EnumFontFamiliesExA,5; EnumFontFamiliesExW,5;
+    AddFontResourceA,1; AddFontResourceW,1; RemoveFontResourceA,1; RemoveFontResourceW,1;
+    AddFontResourceExA,3; AddFontResourceExW,3; RemoveFontResourceExA,3; RemoveFontResourceExW,3;
 }
 impl GdiApi32 {
     pub fn font_enumeration(self) -> bool {
@@ -63,6 +65,19 @@ impl GdiApi32 {
                 | Self::EnumFontFamiliesW
                 | Self::EnumFontFamiliesExA
                 | Self::EnumFontFamiliesExW
+        )
+    }
+    pub fn font_file_resource(self) -> bool {
+        matches!(
+            self,
+            Self::AddFontResourceA
+                | Self::AddFontResourceW
+                | Self::RemoveFontResourceA
+                | Self::RemoveFontResourceW
+                | Self::AddFontResourceExA
+                | Self::AddFontResourceExW
+                | Self::RemoveFontResourceExA
+                | Self::RemoveFontResourceExW
         )
     }
     pub fn font_memory_resource(self) -> bool {

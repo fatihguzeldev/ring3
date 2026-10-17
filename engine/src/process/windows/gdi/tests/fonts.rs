@@ -398,4 +398,6 @@ mod resources;
 mod enumeration;
 mod memory;
 
+mod files;
+
 mod realization;

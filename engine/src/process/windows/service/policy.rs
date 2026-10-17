@@ -18,7 +18,7 @@ impl GuardFailure32 {
             })
         };
         if let Some(api) = crate::windows::gdi::GdiApi32::from_id(id) {
-            return if api.font_enumeration() || api.font_memory_resource() {
+            return if api.font_enumeration() || api.font_memory_resource() || api.font_file_resource() {
                 Some(Self {
                     value: 0,
                     last_error: None,

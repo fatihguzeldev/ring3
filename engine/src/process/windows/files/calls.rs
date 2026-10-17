@@ -79,6 +79,7 @@ impl EngineInstance {
         {
             return Err(HostError::Call(CallError::InvalidRequest));
         }
+        self.collect_gdi_font_file_holds()?;
         if api.is_some_and(|api| {
             matches!(
                 api,

@@ -59,6 +59,7 @@ impl EngineInstance {
         if reply.id == crate::windows::WindowsApi32::ExitProcess.id() {
             return Err(HostError::Call(CallError::Busy));
         }
+        let font_source = self.check_cancel_gdi_font_file(reply.owner, token)?;
         if let Some(request) = reply.request {
             match self.files.as_mut().unwrap().vfs.cancel_request(request) {
                 Ok(()) | Err(FileError32::Stale) => {}
@@ -82,6 +83,7 @@ impl EngineInstance {
         }
         runtime.pipe_wait = None;
         runtime.reply = None;
+        self.commit_cancel_gdi_font_file(font_source);
         self.abandon_call(key, token)
     }
 }

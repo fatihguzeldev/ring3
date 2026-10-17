@@ -15,6 +15,8 @@ pub(in crate::process) struct GdiRuntime32 {
     pub(super) fonts: crate::windows::gdi::FontDatabase32,
     pub(super) font_enumerations: Vec<super::fonts::enumeration::FontEnumerationCall32>,
     pub(super) next_font_enumeration: u64,
+    pub(super) font_file_calls: Vec<super::fonts::files::FileFontCall32>,
+    pub(super) font_file_sources: Vec<super::fonts::files::FileFontSource32>,
     pub(super) paints: Vec<super::paint::PaintLease32>,
 }
 impl GdiRuntime32 {
@@ -57,6 +59,8 @@ impl GdiRuntime32 {
             paints,
             font_enumerations: Vec::new(),
             next_font_enumeration: 0,
+            font_file_calls: Vec::new(),
+            font_file_sources: Vec::new(),
             fonts: crate::windows::gdi::FontDatabase32::new(16 << 20)?,
         })
     }
@@ -91,6 +95,8 @@ impl GdiRuntime32 {
     pub(in crate::process) fn retire_process(&mut self) {
         self.model.clear();
         self.font_enumerations.clear();
+        self.font_file_calls.clear();
+        self.font_file_sources.clear();
         self.fonts.retire_process_resources();
         self.surfaces.clear();
         self.paints.clear();
@@ -98,6 +104,7 @@ impl GdiRuntime32 {
     }
     pub(in crate::process) fn retire_thread(&mut self, thread: u32) {
         self.model.retire_thread(thread);
+        self.font_file_calls.retain(|call| call.thread != thread);
         self.font_enumerations.retain(|call| call.thread != thread);
         self.paints.retain(|paint| paint.thread != thread);
         self.prune_defaults();
