@@ -184,7 +184,7 @@ pub fn windows_gate_info(id: u32) -> Option<WindowsGateInfo32> {
     }
     if let Some(api) = crate::windows::user32::User32Api32::from_id(id) {
         return Some(WindowsGateInfo32 {
-            convention: crate::windows::CallingConvention32::Stdcall,
+            convention: api.convention(),
             stack_words: api.stack_words(),
         });
     }

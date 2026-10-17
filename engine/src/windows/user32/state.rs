@@ -613,3 +613,22 @@ impl User32State32 {
         self.next_tree_item += 1;
     }
 }
+
+impl User32State32 {
+    pub(crate) fn all_windows(&self) -> impl DoubleEndedIterator<Item = WindowHandle32> + '_ {
+        self.slots
+            .iter()
+            .filter(|slot| !slot.data.destroying)
+            .map(|slot| slot.data.handle)
+    }
+}
+
+impl User32State32 {
+    pub(crate) fn is_descendant_window(
+        &self,
+        window: WindowHandle32,
+        parent: WindowHandle32,
+    ) -> bool {
+        self.is_descendant(window.get(), parent.get())
+    }
+}

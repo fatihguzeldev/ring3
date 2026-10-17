@@ -129,6 +129,9 @@ impl EngineInstance {
             self.bind_popup_class()?;
         }
         self.refresh_user32_input()?;
+        if api == User32Api32::GetDesktopWindow {
+            self.bind_user32_desktop()?;
+        }
         self.reserve_windows_reply()?;
         self.check_windows_thread_write()?;
         Self::prepare_completed_call(frame.complete(0))?;
@@ -230,6 +233,7 @@ impl EngineInstance {
                 | User32Api32::TranslateMessage
                 | User32Api32::PostMessageA
                 | User32Api32::PostMessageW
+                | User32Api32::PostThreadMessageA
                 | User32Api32::PostQuitMessage
                 | User32Api32::GetQueueStatus
                 | User32Api32::GetInputState
@@ -287,7 +291,10 @@ impl EngineInstance {
             .map(|creation| creation.font);
         let activation = if matches!(
             api,
-            User32Api32::PostMessageA | User32Api32::PostMessageW | User32Api32::SetTimer
+            User32Api32::PostMessageA
+                | User32Api32::PostMessageW
+                | User32Api32::PostThreadMessageA
+                | User32Api32::SetTimer
         ) {
             Some(self.prepare_managed_activation_capture()?)
         } else {
@@ -325,6 +332,18 @@ impl EngineInstance {
         } else {
             None
         };
+        let property_key = if matches!(
+            api,
+            User32Api32::SetPropA | User32Api32::GetPropA | User32Api32::RemovePropA
+        ) && frame.arguments()[1] <= 0xffff
+        {
+            Some(
+                self.windows_global_atom_name(frame.arguments()[1] as u16)
+                    .ok_or(User32Error32::Win32(87)),
+            )
+        } else {
+            None
+        };
         let context = self
             .user32
             .as_mut()
@@ -332,7 +351,16 @@ impl EngineInstance {
         context.call_activation = activation
             .as_ref()
             .map_or_else(Default::default, |capture| capture.token());
-        let result = if let Some(result) = popup_system {
+        let result = if let Some(key) = property_key {
+            key.and_then(|key| {
+                context.window_property(
+                    api,
+                    frame.arguments()[0],
+                    key,
+                    frame.arguments().get(2).copied().unwrap_or(0),
+                )
+            })
+        } else if let Some(result) = popup_system {
             result
         } else if let Some(result) = frontend {
             match result {
@@ -466,6 +494,7 @@ impl EngineInstance {
             .map_or(0, |(origin, now)| ((now - origin) / 1_000_000) as u32);
         Ok(User32CallContext32 {
             thread_id: self.current_windows_thread_id()?,
+            process_id: self.current_windows_process_id(),
             instance: self.image.map_or(0, |image| image.image_base),
             time_ms,
             now_ns: self.cpu_clock.monotonic_bounds().map_or(0, |(_, now)| now),

@@ -10,11 +10,13 @@ mod clipboard;
 mod common;
 mod context;
 mod controls;
+mod desktop;
 mod destruction;
 mod images;
 mod ime;
 mod input;
 pub use images::PendingUser32ImageCall32;
+mod compatibility;
 mod lifecycle;
 mod memory;
 mod menus;
@@ -42,6 +44,7 @@ pub(in crate::process) use threads::{PreparedUser32Sent32, User32ThreadReply32};
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct User32CallContext32 {
     pub thread_id: u32,
+    pub process_id: u32,
     pub instance: u32,
     pub time_ms: u32,
     pub now_ns: u64,
@@ -95,6 +98,7 @@ pub(crate) struct User32Context32 {
     call_activation: crate::windows::activation::CapturedActivation32,
     activation_capture_limit: usize,
     provenance: messages::MessageProvenance32,
+    compatibility: compatibility::Compatibility32,
 }
 
 fn raw(handle: Option<WindowHandle32>) -> u32 {

@@ -30,6 +30,7 @@ impl User32Context32 {
             .map_err(|_| User32Error32::Allocation)?;
         Ok(Self {
             state,
+            compatibility: Default::default(),
             menus: crate::windows::user32::menus::MenuStore32::new(Default::default())?,
             menu_popups: super::menus::PopupContext32::new(limits.continuations as usize)?,
             clipboard: Default::default(),
@@ -114,6 +115,18 @@ impl User32Context32 {
             || context.thread_id == 0
         {
             return Err(User32Error32::InvalidRequest);
+        }
+        if api == User32Api32::WsprintfA {
+            let arguments = frame.state().registers[crate::cpu::x86::Register32::Esp.index()]
+                .checked_add(12)
+                .ok_or(User32Error32::Win32(87))?;
+            return self.format_user_string(
+                frame.arguments()[0],
+                frame.arguments()[1],
+                arguments,
+                memory,
+                context.ansi,
+            );
         }
         self.prepare_arguments(api, frame.arguments(), memory, context)
     }
@@ -215,6 +228,7 @@ impl User32Context32 {
             MsgWaitForMultipleObjects | MsgWaitForMultipleObjectsEx | WaitMessage => {
                 Err(User32Error32::InvalidRequest)
             }
+            _ if api.id() >= 0x0002_00d0 => self.compatibility_call(api, args, memory, context),
             _ => self.input_query(api, args, memory, context),
         };
         let outcome = match result {

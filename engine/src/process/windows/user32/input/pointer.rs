@@ -241,6 +241,9 @@ impl EngineInstance {
         let source = self.prepare_user32_window_event()?;
         let context = self.user32.as_mut().ok_or(HostError::InvalidRequest)?;
         let old = context.input.query_point;
+        context
+            .update_desktop_bounds(bounds)
+            .map_err(HostError::User32)?;
         context.input.desktop = bounds;
         context.input.query_point = context.input.clip_point(old);
         context.runtime_input.cursor = context.input.query_point;

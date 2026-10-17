@@ -2,7 +2,7 @@ use super::*;
 use crate::{loader::SystemExportTarget32, memory::GuestAddress, windows::CallingConvention32};
 
 #[test]
-fn user32_catalog_resolves_explicit_stdcall_gates_without_id_or_symbol_aliases() {
+fn user32_catalog_resolves_explicit_calling_convention_gates_without_id_or_symbol_aliases() {
     let module = user32_module(0x70000000);
     let named =
         User32Api32::catalog().count() + 10 + crate::windows::gdi::user32_gdi_exports().count();
@@ -39,7 +39,7 @@ fn user32_catalog_resolves_explicit_stdcall_gates_without_id_or_symbol_aliases()
         ("LoadStringA", 0x0013_0015),
         ("LoadStringW", 0x0013_0016),
     ];
-    assert_eq!(User32Api32::catalog().count() + extensions.len(), 208);
+    assert_eq!(User32Api32::catalog().count() + extensions.len(), 300);
     for (name, gate) in extensions {
         assert!(module.exports.iter().any(|export| {
             export.name.as_deref() == Some(name)
@@ -49,7 +49,14 @@ fn user32_catalog_resolves_explicit_stdcall_gates_without_id_or_symbol_aliases()
     for api in User32Api32::catalog() {
         assert_eq!(User32Api32::from_id(api.id()), Some(api));
         assert_eq!(User32Api32::resolve("USER32.DLL", api.name()), Some(api));
-        assert_eq!(api.convention(), CallingConvention32::Stdcall);
+        assert_eq!(
+            api.convention(),
+            if api == User32Api32::WsprintfA {
+                CallingConvention32::Cdecl
+            } else {
+                CallingConvention32::Stdcall
+            }
+        );
         assert_eq!(api.id() & 0xffff0000, 0x00020000);
         assert!(
             module
@@ -125,5 +132,5 @@ fn image_calls_have_exact_stdcall_arities_inside_the_unique_user32_catalog() {
         assert!(api.image());
     }
     assert!(!User32Api32::SetCursor.image());
-    assert_eq!(User32Api32::from_id(0x0002_00d0), None);
+    assert_eq!(User32Api32::from_id(0x0002_ffff), None);
 }

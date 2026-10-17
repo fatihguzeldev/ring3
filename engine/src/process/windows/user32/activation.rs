@@ -285,3 +285,40 @@ impl User32Context32 {
         Ok(User32Outcome32::Return(show.result))
     }
 }
+
+impl User32Context32 {
+    pub(super) fn set_active_window(
+        &mut self,
+        target: Option<WindowHandle32>,
+        context: User32CallContext32,
+    ) -> Result<User32Outcome32, User32Error32> {
+        self.check_continuation()?;
+        if let Some(target) = target {
+            self.owned(target.get(), context.thread_id)?;
+            let record = self.windows().get(target)?;
+            if !record.description.visible
+                || !record.description.enabled
+                || self.state.record(target)?.destroying
+            {
+                return Err(User32Error32::Win32(50));
+            }
+        }
+        let previous = self.windows().active();
+        if previous == target {
+            return Ok(User32Outcome32::Return(super::raw(previous)));
+        }
+        let window = target.or(previous).ok_or(User32Error32::InvalidRequest)?;
+        let show = Show32 {
+            window,
+            thread: context.thread_id,
+            result: super::raw(previous),
+            visible: self.windows().get(window)?.description.visible,
+            activate: true,
+            previous,
+            target,
+            stage: ShowStage32::Show,
+        };
+        self.start(Continuation32::Show(show))?;
+        self.advance_show_activation(show)
+    }
+}

@@ -11,7 +11,7 @@ macro_rules! api_catalog {
 
         impl User32Api32 {
             pub fn from_id(id: u32) -> Option<Self> { match id { $( $id => Some(Self::$variant), )+ _ => None } }
-            pub fn name(self) -> &'static str { match self { $( Self::$variant => stringify!($variant), )+ } }
+            pub fn name(self) -> &'static str { let name = match self { $( Self::$variant => stringify!($variant), )+ }; match name { "WsprintfA" => "wsprintfA", "WvsprintfA" => "wvsprintfA", _ => name } }
             pub fn stack_words(self) -> u32 { match self { $( Self::$variant => $words, )+ } }
             pub fn catalog() -> impl ExactSizeIterator<Item = Self> { [$( Self::$variant, )+].into_iter() }
         }
@@ -217,6 +217,98 @@ api_catalog! {
     SetSysColors=0x0002_00cd,3;
     RegisterWindowMessageA=0x0002_00ce,1;
     RegisterWindowMessageW=0x0002_00cf,1;
+    AdjustWindowRectEx=0x0002_00d0,4;
+    BeginDeferWindowPos=0x0002_00d1,1;
+    BringWindowToTop=0x0002_00d2,1;
+    CallNextHookEx=0x0002_00d3,4;
+    CharNextA=0x0002_00d4,1;
+    CharToOemA=0x0002_00d5,2;
+    CharUpperA=0x0002_00d6,1;
+    CheckDlgButton=0x0002_00d7,3;
+    CheckRadioButton=0x0002_00d8,4;
+    CopyRect=0x0002_00d9,2;
+    DefFrameProcA=0x0002_00da,5;
+    DefMDIChildProcA=0x0002_00db,4;
+    DeferWindowPos=0x0002_00dc,8;
+    DrawFocusRect=0x0002_00dd,2;
+    EnableWindow=0x0002_00de,2;
+    EndDeferWindowPos=0x0002_00df,1;
+    EnumChildWindows=0x0002_00e0,3;
+    EqualRect=0x0002_00e1,2;
+    FindWindowA=0x0002_00e2,2;
+    GetClassInfoA=0x0002_00e3,3;
+    GetClassLongA=0x0002_00e4,2;
+    GetClassNameA=0x0002_00e5,3;
+    GetDesktopWindow=0x0002_00e6,0;
+    GetDlgItemInt=0x0002_00e7,4;
+    GetDlgItemTextA=0x0002_00e8,4;
+    GetLastActivePopup=0x0002_00e9,1;
+    GetMenuCheckMarkDimensions=0x0002_00ea,0;
+    GetNextDlgGroupItem=0x0002_00eb,3;
+    GetNextDlgTabItem=0x0002_00ec,3;
+    GetParent=0x0002_00ed,1;
+    GetPropA=0x0002_00ee,2;
+    GetScrollInfo=0x0002_00ef,3;
+    GetScrollPos=0x0002_00f0,2;
+    GetScrollRange=0x0002_00f1,4;
+    GetSystemMenu=0x0002_00f2,2;
+    GetTabbedTextExtentA=0x0002_00f3,5;
+    GetTopWindow=0x0002_00f4,1;
+    GetWindow=0x0002_00f5,2;
+    GetWindowPlacement=0x0002_00f6,2;
+    GetWindowThreadProcessId=0x0002_00f7,2;
+    GrayStringA=0x0002_00f8,9;
+    InSendMessage=0x0002_00f9,0;
+    InflateRect=0x0002_00fa,3;
+    IntersectRect=0x0002_00fb,3;
+    InvalidateRgn=0x0002_00fc,3;
+    IsChild=0x0002_00fd,2;
+    IsDialogMessageA=0x0002_00fe,2;
+    IsDlgButtonChecked=0x0002_00ff,2;
+    IsIconic=0x0002_0100,1;
+    IsRectEmpty=0x0002_0101,1;
+    IsWindowEnabled=0x0002_0102,1;
+    IsWindowVisible=0x0002_0103,1;
+    IsZoomed=0x0002_0104,1;
+    LockWindowUpdate=0x0002_0105,1;
+    MapWindowPoints=0x0002_0106,4;
+    MessageBeep=0x0002_0107,1;
+    OemToCharA=0x0002_0108,2;
+    OffsetRect=0x0002_0109,3;
+    PostThreadMessageA=0x0002_010a,4;
+    PtInRect=0x0002_010b,3;
+    RedrawWindow=0x0002_010c,4;
+    RemovePropA=0x0002_010d,2;
+    ReuseDDElParam=0x0002_010e,5;
+    ScrollWindow=0x0002_010f,5;
+    ScrollWindowEx=0x0002_0110,8;
+    SendDlgItemMessageA=0x0002_0111,5;
+    SetActiveWindow=0x0002_0112,1;
+    SetDlgItemInt=0x0002_0113,4;
+    SetDlgItemTextA=0x0002_0114,3;
+    SetForegroundWindow=0x0002_0115,1;
+    SetMenuItemBitmaps=0x0002_0116,5;
+    SetParent=0x0002_0117,2;
+    SetPropA=0x0002_0118,3;
+    SetRect=0x0002_0119,5;
+    SetRectEmpty=0x0002_011a,1;
+    SetScrollInfo=0x0002_011b,4;
+    SetScrollPos=0x0002_011c,4;
+    SetScrollRange=0x0002_011d,5;
+    SetWindowPlacement=0x0002_011e,2;
+    SetWindowsHookExA=0x0002_011f,4;
+    ShowOwnedPopups=0x0002_0120,2;
+    ShowScrollBar=0x0002_0121,3;
+    SystemParametersInfoA=0x0002_0122,4;
+    TabbedTextOutA=0x0002_0123,8;
+    TranslateMDISysAccel=0x0002_0124,2;
+    UnhookWindowsHookEx=0x0002_0125,1;
+    UnionRect=0x0002_0126,3;
+    UnpackDDElParam=0x0002_0127,4;
+    WinHelpA=0x0002_0128,4;
+    WindowFromPoint=0x0002_0129,2;
+    WsprintfA=0x0002_012a,2;
+    WvsprintfA=0x0002_012b,3;
 }
 
 impl User32Api32 {
@@ -291,7 +383,11 @@ impl User32Api32 {
         self as u32
     }
     pub fn convention(self) -> CallingConvention32 {
-        CallingConvention32::Stdcall
+        if self == Self::WsprintfA {
+            CallingConvention32::Cdecl
+        } else {
+            CallingConvention32::Stdcall
+        }
     }
     pub fn resolve(module: &str, symbol: &str) -> Option<Self> {
         if !module.eq_ignore_ascii_case("user32.dll") {

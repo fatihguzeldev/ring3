@@ -286,6 +286,7 @@ impl User32Context32 {
                         .flatten();
                     let menus = self.menus.prepare_retirement(menu)?;
                     self.state.remove_delivered(thread, window)?;
+                    self.compatibility.retire_window(window.get());
                     self.menus.commit_retirement(menus);
                     self.clipboard.retire_window(window);
                     self.ime.retire_window(window.get());
