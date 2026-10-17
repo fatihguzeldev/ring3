@@ -5,7 +5,7 @@ use super::{
     memory::{self, Scratch32},
 };
 use crate::{
-    memory::AddressSpace,
+    memory::{AddressSpace, PAGE_SIZE},
     windows::{
         user32::{Point32, Rect32, User32Api32, User32Error32, WindowData32},
         window::{WindowDescription32, WindowHandle32, WindowMessage32},
@@ -32,6 +32,9 @@ impl User32Context32 {
         template: Option<crate::windows::user32::menus::MenuTemplate32>,
     ) -> Result<User32Outcome32, User32Error32> {
         self.check_continuation()?;
+        if api.wide() && self.hooks.first_for_thread(context.thread_id) {
+            return Err(User32Error32::Win32(50));
+        }
         if template.is_some() && (args[9] != 0 || args[3] & 0x4000_0000 != 0) {
             return Err(User32Error32::InvalidRequest);
         }
@@ -181,7 +184,7 @@ impl User32Context32 {
             .map_err(|_| User32Error32::Allocation)?;
         extra.resize(extra_bytes as usize, 0);
         let extra = extra.into_boxed_slice();
-        let mut bytes = [0; 64];
+        let mut bytes = [0; 72];
         for (index, value) in [
             args[11],
             instance,
@@ -205,7 +208,12 @@ impl User32Context32 {
         {
             bytes[index * 4..index * 4 + 4].copy_from_slice(&value.to_le_bytes());
         }
-        let scratch = Scratch32::allocate(memory, self.scratch_bounds, &bytes)?;
+        let scratch_range = memory.find_free_range(self.scratch_bounds, 1, PAGE_SIZE)?;
+        bytes[64..68].copy_from_slice(&(scratch_range.first as u32 * PAGE_SIZE).to_le_bytes());
+        let scratch = Scratch32::allocate(memory, scratch_range, &bytes)?;
+        let stage = self
+            .creation_hook(context.thread_id, handle, scratch)
+            .map_or(CreateStage32::NonClientCreate, CreateStage32::Hook);
         let data = WindowData32 {
             handle,
             class_atom,
@@ -235,7 +243,7 @@ impl User32Context32 {
             window: handle,
             thread: context.thread_id,
             scratch,
-            stage: CreateStage32::NonClientCreate,
+            stage,
             visible: args[3] & 0x1000_0000 != 0,
         })
     }

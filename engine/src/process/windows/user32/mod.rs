@@ -12,6 +12,7 @@ mod context;
 mod controls;
 mod desktop;
 mod destruction;
+mod hooks;
 mod images;
 mod ime;
 mod input;
@@ -72,6 +73,7 @@ pub(crate) enum User32Outcome32 {
 
 pub(crate) struct User32Context32 {
     state: User32State32,
+    hooks: hooks::Hooks32,
     menus: crate::windows::user32::menus::MenuStore32,
     menu_popups: menus::PopupContext32,
     clipboard: crate::windows::user32::clipboard::ClipboardState32,

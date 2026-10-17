@@ -19,6 +19,7 @@ pub(super) struct Pending32 {
 
 #[derive(Clone, Copy)]
 pub(super) enum CreateStage32 {
+    Hook(super::hooks::HookCall32),
     NonClientCreate,
     NonClientSize,
     Create,
@@ -36,6 +37,7 @@ pub(super) enum PositionStage32 {
 
 #[derive(Clone, Copy)]
 pub(super) enum Continuation32 {
+    Hook(super::hooks::HookCall32),
     MenuBar(super::menus::bar::MenuBar32),
     CommonLayout(super::common::layout::CommonLayout32),
     TabTooltip(super::common::tab::tooltip::TabTooltip32),
@@ -180,6 +182,7 @@ impl User32Context32 {
                     continuation: pending.token,
                 });
             }
+            Continuation32::Hook(call) => return self.hook_outcome(call, pending.token),
             Continuation32::ResourceProcedure {
                 procedure,
                 arguments,
@@ -282,9 +285,13 @@ impl User32Context32 {
                 stage,
                 ..
             } => {
+                if let CreateStage32::Hook(call) = stage {
+                    return self.hook_outcome(call, pending.token);
+                }
                 let record = self.windows().get(window)?;
                 let position = self.state.client_position(window)?;
                 let (message, wparam, lparam) = match stage {
+                    CreateStage32::Hook(_) => unreachable!(),
                     CreateStage32::NonClientCreate => (0x0081, 0, scratch.address.0),
                     CreateStage32::NonClientSize => (0x0083, 0, scratch.address.0 + 48),
                     CreateStage32::Create => (0x0001, 0, scratch.address.0),
@@ -518,7 +525,7 @@ impl User32Context32 {
                 self.pending.pop();
                 Ok(User32Outcome32::Return(0))
             }
-            Continuation32::Call { .. } => {
+            Continuation32::Call { .. } | Continuation32::Hook(_) => {
                 self.pending.pop();
                 Ok(User32Outcome32::Return(result))
             }
@@ -544,7 +551,7 @@ impl User32Context32 {
                 thread,
                 scratch,
                 stage,
-                visible,
+                mut visible,
             } => {
                 scratch.check(memory)?;
                 if self.windows().get(window).is_err() {
@@ -553,6 +560,23 @@ impl User32Context32 {
                     return Ok(User32Outcome32::Return(0));
                 }
                 match stage {
+                    CreateStage32::Hook(_) if result != 0 => {
+                        return self.fail_creation(window, thread, scratch, false);
+                    }
+                    CreateStage32::Hook(_) => {
+                        if let Err(error) =
+                            self.apply_creation_hook(window, thread, scratch, memory)
+                        {
+                            let error = match error {
+                                User32Error32::Win32(value) => value,
+                                _ => 87,
+                            };
+                            let outcome = self.fail_creation(window, thread, scratch, false)?;
+                            self.last_error = Some(error);
+                            return Ok(outcome);
+                        }
+                        visible = self.state.record(window)?.style & 0x1000_0000 != 0;
+                    }
                     CreateStage32::NonClientCreate if result == 0 => {
                         return self.fail_creation(window, thread, scratch, false);
                     }
@@ -593,6 +617,7 @@ impl User32Context32 {
                     _ => {}
                 }
                 let next = match stage {
+                    CreateStage32::Hook(_) => CreateStage32::NonClientCreate,
                     CreateStage32::NonClientCreate => CreateStage32::NonClientSize,
                     CreateStage32::NonClientSize => CreateStage32::Create,
                     CreateStage32::Create => CreateStage32::Size,

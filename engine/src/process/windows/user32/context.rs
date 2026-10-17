@@ -30,6 +30,7 @@ impl User32Context32 {
             .map_err(|_| User32Error32::Allocation)?;
         Ok(Self {
             state,
+            hooks: Default::default(),
             compatibility: Default::default(),
             menus: crate::windows::user32::menus::MenuStore32::new(Default::default())?,
             menu_popups: super::menus::PopupContext32::new(limits.continuations as usize)?,
@@ -145,6 +146,7 @@ impl User32Context32 {
         self.prepare_thread_slots()?;
         self.prepare_thread_layout(context.thread_id)?;
         self.runtime_input.thread_id = context.thread_id;
+        self.runtime_input.ansi = context.ansi;
         use User32Api32::*;
         let result = match api {
             RegisterWindowMessageA | RegisterWindowMessageW => {
@@ -227,6 +229,9 @@ impl User32Context32 {
             }
             MsgWaitForMultipleObjects | MsgWaitForMultipleObjectsEx | WaitMessage => {
                 Err(User32Error32::InvalidRequest)
+            }
+            SetWindowsHookExA | UnhookWindowsHookEx | CallNextHookEx => {
+                self.hook_call(api, args, memory, context)
             }
             _ if api.id() >= 0x0002_00d0 => self.compatibility_call(api, args, memory, context),
             _ => self.input_query(api, args, memory, context),

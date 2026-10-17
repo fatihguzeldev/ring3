@@ -72,7 +72,7 @@ fn unavailable_facilities_fail_explicitly_instead_of_claiming_success() {
             &mut m,
             c,
             User32Api32::SetWindowsHookExA,
-            &[5, 0x80000, 0, 7]
+            &[13, 0x80000, 0, 0]
         ),
         0
     );

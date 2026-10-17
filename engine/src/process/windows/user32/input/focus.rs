@@ -137,10 +137,13 @@ impl User32Context32 {
         else {
             return None;
         };
-        if !matches!(
-            (stage, result),
-            (CreateStage32::NonClientCreate, 0) | (CreateStage32::Create, u32::MAX)
-        ) {
+        let rejected = match stage {
+            CreateStage32::Hook(_) => result != 0,
+            CreateStage32::NonClientCreate => result == 0,
+            CreateStage32::Create => result == u32::MAX,
+            _ => false,
+        };
+        if !rejected {
             return None;
         }
         self.preview_destroy_flags(window.get(), thread)

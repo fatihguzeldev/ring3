@@ -59,12 +59,12 @@ impl User32Context32 {
                 m.write(GuestAddress(a[2]), &bytes)?;
                 1
             }
-            UnhookWindowsHookEx => return Err(User32Error32::Win32(1404)),
-            SetWindowsHookExA | CallNextHookEx | WinHelpA | GetSystemMenu | SetMenuItemBitmaps
-            | BeginDeferWindowPos | DeferWindowPos | EndDeferWindowPos | DrawFocusRect
-            | GrayStringA | GetTabbedTextExtentA | TabbedTextOutA | ScrollWindow
-            | ScrollWindowEx | InvalidateRgn | RedrawWindow | MessageBeep | UnpackDDElParam
-            | ReuseDDElParam => return Err(User32Error32::Win32(120)),
+            WinHelpA | GetSystemMenu | SetMenuItemBitmaps | BeginDeferWindowPos
+            | DeferWindowPos | EndDeferWindowPos | DrawFocusRect | GrayStringA
+            | GetTabbedTextExtentA | TabbedTextOutA | ScrollWindow | ScrollWindowEx
+            | InvalidateRgn | RedrawWindow | MessageBeep | UnpackDDElParam | ReuseDDElParam => {
+                return Err(User32Error32::Win32(120));
+            }
             _ => return Err(User32Error32::Win32(120)),
         };
         Ok(User32Outcome32::Return(value))
