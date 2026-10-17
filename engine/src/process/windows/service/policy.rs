@@ -40,6 +40,7 @@ impl GuardFailure32 {
         if crate::windows::version::VersionApi32::from_id(id).is_some()
             || crate::windows::shlwapi::ShlwapiApi32::from_id(id).is_some()
         { return noaccess(0); }
+        if id >> 16 == 0x22 { return noaccess(0); }
         if let Some(api) = crate::windows::activation::ActivationApi32::from_id(id) {
             return noaccess(api.failure_value());
         }

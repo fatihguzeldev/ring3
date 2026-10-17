@@ -816,3 +816,6 @@ fn forced_paint_retirement_preflights_real_nested_create_scratch_before_one_ram_
 }
 
 mod sending;
+
+#[path = "../../comctl32/tests/progress.rs"]
+mod common_controls;

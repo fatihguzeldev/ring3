@@ -37,6 +37,7 @@ pub(super) enum PositionStage32 {
 #[derive(Clone, Copy)]
 pub(super) enum Continuation32 {
     MenuBar(super::menus::bar::MenuBar32),
+    CommonLayout(super::common::layout::CommonLayout32),
     MenuPopup {
         plan: u64,
         scratch: Scratch32,
@@ -144,6 +145,7 @@ impl User32Context32 {
             Continuation32::ResourceDialog { .. }
             | Continuation32::MenuPopup { .. }
             | Continuation32::MenuBar(_)
+            | Continuation32::CommonLayout(_)
             | Continuation32::Accelerator(_)
             | Continuation32::Clipboard(_)
             | Continuation32::SystemColors(_)
@@ -356,6 +358,9 @@ impl User32Context32 {
         if let Some(outcome) = self.retry_accelerator_completion(token) {
             return Ok(outcome);
         }
+        if let Some(outcome) = self.retry_common_layout_completion(token) {
+            return Ok(outcome);
+        }
         let outcome = self.complete_step(token, result, memory)?;
         let outcome = self.complete_resource_dialog_child(token, outcome, memory)?;
         let outcome = self.complete_accelerator_child(token, outcome)?;
@@ -364,6 +369,7 @@ impl User32Context32 {
         let outcome = self.complete_system_colors_child(token, outcome)?;
         let outcome = self.complete_ui_child(token, outcome)?;
         let outcome = self.complete_menu_bar_child(token, outcome)?;
+        let outcome = self.complete_common_layout_child(token, outcome)?;
         self.complete_popup_child(token, outcome)
     }
 
@@ -383,6 +389,7 @@ impl User32Context32 {
             Continuation32::ResourceDialog { .. }
             | Continuation32::MenuPopup { .. }
             | Continuation32::MenuBar(_)
+            | Continuation32::CommonLayout(_)
             | Continuation32::Accelerator(_)
             | Continuation32::Clipboard(_)
             | Continuation32::SystemColors(_)

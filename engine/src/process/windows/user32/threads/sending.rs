@@ -127,6 +127,7 @@ impl User32Context32 {
                     Continuation32::ResourceDialog { .. }
                         | Continuation32::MenuPopup { .. }
                         | Continuation32::MenuBar(_)
+                        | Continuation32::CommonLayout(_)
                         | Continuation32::Accelerator(_)
                         | Continuation32::Clipboard(_)
                         | Continuation32::SystemColors(_)

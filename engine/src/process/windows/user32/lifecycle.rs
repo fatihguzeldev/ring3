@@ -54,6 +54,12 @@ impl User32Context32 {
                 .procedures
                 .ok_or(User32Error32::Win32(1407))?;
             (procedures[usize::from(api.wide())], api.wide())
+        } else if self.state.common_kind(class.atom).is_some() {
+            let procedures = self.common_procedures.ok_or(User32Error32::Win32(1407))?;
+            if args[3] & 8 != 0 {
+                return Err(User32Error32::Win32(50));
+            }
+            (procedures[usize::from(api.wide())], api.wide())
         } else if self.state.standard_kind(class.atom).is_some() {
             let procedures = self.builtin_procedures.ok_or(User32Error32::Win32(1407))?;
             (procedures[usize::from(api.wide())], api.wide())
@@ -257,6 +263,17 @@ impl User32Context32 {
         memory: &mut AddressSpace,
         context: User32CallContext32,
     ) -> Result<User32Outcome32, User32Error32> {
+        let continuation = self.prepare_window_position(api, args, memory, context)?;
+        self.start(continuation)
+    }
+
+    pub(super) fn prepare_window_position(
+        &mut self,
+        api: User32Api32,
+        args: &[u32],
+        memory: &mut AddressSpace,
+        context: User32CallContext32,
+    ) -> Result<Continuation32, User32Error32> {
         self.check_continuation()?;
         let window = self.owned(args[0], context.thread_id)?;
         let data = self.state.record(window)?;
@@ -295,7 +312,7 @@ impl User32Context32 {
         } else {
             PositionStage32::Changing
         };
-        self.start(Continuation32::Position {
+        Ok(Continuation32::Position {
             window,
             scratch,
             stage,

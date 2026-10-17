@@ -64,3 +64,7 @@ pub(crate) fn configure_shell_folder(kind: u32, length: u32) -> u32 {
         instance.configure_shell_folder(kind, path)
     })
 }
+
+pub(crate) fn register_comctl32_module(base: u32) -> u32 {
+    mutate(|instance| instance.register_comctl32_module(base))
+}

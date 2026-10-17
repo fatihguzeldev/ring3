@@ -6,6 +6,7 @@ mod activation;
 mod callback;
 mod classes;
 mod clipboard;
+mod common;
 mod context;
 mod controls;
 mod destruction;
@@ -71,6 +72,7 @@ pub(crate) struct User32Context32 {
     clipboard: crate::windows::user32::clipboard::ClipboardState32,
     accelerators: crate::windows::user32::accelerators::AcceleratorStore32,
     builtin_procedures: Option<[crate::memory::GuestAddress; 2]>,
+    common_procedures: Option<[crate::memory::GuestAddress; 2]>,
     layouts: Vec<threads::ThreadLayout32>,
     process_layout: Option<(u64, crate::input::keyboard::KeyboardLayout32)>,
     scratch_bounds: PageRange,

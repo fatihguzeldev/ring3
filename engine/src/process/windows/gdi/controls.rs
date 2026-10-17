@@ -93,6 +93,23 @@ impl GdiRuntime32 {
         font: u32,
         kind: ControlKind32,
     ) -> Result<u32, GdiError32> {
+        let background = if matches!(
+            kind,
+            ControlKind32::Edit | ControlKind32::ListBox | ControlKind32::ComboBox
+        ) {
+            self.system_color(5)
+        } else {
+            self.system_color(15)
+        };
+        self.begin_window_paint_dc(window, region, font, background)
+    }
+    pub(in crate::process) fn begin_window_paint_dc(
+        &mut self,
+        window: GdiWindow32,
+        region: Region32,
+        font: u32,
+        background: u32,
+    ) -> Result<u32, GdiError32> {
         if window.class_style & (0x20 | 0x40) != 0 {
             return Err(GdiError32::InvalidRequest);
         }
@@ -103,24 +120,21 @@ impl GdiRuntime32 {
         };
         let realization = self.fonts.resolve(self.logical_font(font)?)?;
         let dc = self.acquire_dc(window, window.thread)?;
-        let mut state = self.model.state(dc).expect("accepted control DC").clone();
+        let mut state = self
+            .model
+            .state(dc)
+            .expect("accepted window paint dc")
+            .clone();
         state.font = font;
         self.model
             .bind_font_metric_snapshot(font, realization.clone())
-            .expect("control font was validated before dc acquisition");
+            .expect("paint font was validated before dc acquisition");
         state.font_realization = Some(realization);
         state.clip = Some(region);
-        state.background_color = if matches!(
-            kind,
-            ControlKind32::Edit | ControlKind32::ListBox | ControlKind32::ComboBox
-        ) {
-            self.system_color(5)
-        } else {
-            self.system_color(15)
-        };
+        state.background_color = background;
         self.model
             .set_state(dc, state)
-            .expect("accepted control DC");
+            .expect("accepted window paint dc");
         Ok(dc)
     }
     pub(in crate::process) fn check_control_dc(

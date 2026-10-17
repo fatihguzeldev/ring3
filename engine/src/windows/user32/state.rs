@@ -2,6 +2,7 @@ use super::{Message32, Point32, User32Error32, User32Limits32, WindowClass32, Wi
 use crate::windows::window::{WindowContext32, WindowDescription32, WindowHandle32};
 mod classes;
 mod colors;
+mod common;
 mod dialogs;
 mod menu_layout;
 mod menus;
@@ -22,6 +23,7 @@ struct WindowSlot32 {
     dialog: Option<super::dialogs::WindowDialog32>,
     context_help: u32,
     ui_state: u32,
+    common: Option<crate::windows::comctl32::CommonControlState32>,
     menu_bar: Option<MenuBarCache32>,
 }
 
@@ -33,6 +35,7 @@ pub(crate) struct User32State32 {
     queue: super::queue::MessageQueue32,
     next_atom: u16,
     standard_atoms: [u16; 6],
+    common_atoms: [u16; 2],
     system_atoms: Vec<u16>,
 }
 
@@ -59,6 +62,7 @@ impl User32State32 {
             queue,
             next_atom: 0xc000,
             standard_atoms: [0; 6],
+            common_atoms: [0; 2],
             system_atoms: Vec::new(),
         })
     }
@@ -183,6 +187,9 @@ impl User32State32 {
             dialog: None,
             context_help: 0,
             ui_state: 0,
+            common: self
+                .common_kind(data.class_atom)
+                .map(crate::windows::comctl32::CommonControlState32::new),
             menu_bar: None,
             update: crate::windows::gdi::Region32::rectangle(super::Rect32 {
                 left: 0,
@@ -195,6 +202,28 @@ impl User32State32 {
         });
         self.queue.commit_external_change();
         handle
+    }
+
+    pub(crate) fn window_visible(&self, mut window: WindowHandle32) -> bool {
+        for _ in 0..=self.slots.len() {
+            let Ok(record) = self.windows.get(window) else {
+                return false;
+            };
+            if !record.description.visible {
+                return false;
+            }
+            let Ok(data) = self.record(window) else {
+                return false;
+            };
+            if data.style & 0x40000000 == 0 {
+                return true;
+            }
+            let Some(parent) = data.parent else {
+                return false;
+            };
+            window = parent;
+        }
+        false
     }
 
     pub(crate) fn top_level(

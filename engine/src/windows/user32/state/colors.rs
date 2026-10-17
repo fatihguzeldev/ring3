@@ -20,33 +20,11 @@ impl User32State32 {
             .find(|slot| {
                 !slot.data.destroying
                     && if repaint {
-                        self.color_window_visible(slot.data.handle)
+                        self.window_visible(slot.data.handle)
                     } else {
                         slot.data.style & 0x40000000 == 0
                     }
             })
             .map(|slot| slot.data.handle)
-    }
-
-    fn color_window_visible(&self, mut window: WindowHandle32) -> bool {
-        for _ in 0..=self.slots.len() {
-            let Ok(record) = self.windows.get(window) else {
-                return false;
-            };
-            if !record.description.visible {
-                return false;
-            }
-            let Ok(data) = self.record(window) else {
-                return false;
-            };
-            if data.style & 0x40000000 == 0 {
-                return true;
-            }
-            let Some(parent) = data.parent else {
-                return false;
-            };
-            window = parent;
-        }
-        false
     }
 }

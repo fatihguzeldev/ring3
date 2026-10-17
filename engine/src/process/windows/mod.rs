@@ -44,3 +44,5 @@ pub(super) mod shell;
 pub(super) mod gdi;
 
 pub(super) mod automation;
+
+pub(super) mod comctl32;

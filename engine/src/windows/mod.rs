@@ -59,3 +59,5 @@ pub mod automation;
 pub mod shlwapi;
 
 pub(crate) mod controls;
+
+pub mod comctl32;

@@ -44,6 +44,9 @@ impl User32Context32 {
                 ready.is_some()
             }
             super::super::callback::Continuation32::MenuBar(_) => true,
+            super::super::callback::Continuation32::CommonLayout(call) => {
+                call.child.is_none() && call.completed.is_some()
+            }
             super::super::callback::Continuation32::Retrieve { .. }
             | super::super::callback::Continuation32::Accelerator(_)
             | super::super::callback::Continuation32::Clipboard(_)

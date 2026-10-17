@@ -7,6 +7,17 @@ use crate::{
     },
 };
 impl GdiRuntime32 {
+    pub(in crate::process) fn font_metrics(
+        &self,
+        handle: u32,
+    ) -> Result<FontMetrics32, GdiError32> {
+        let descriptor = self.logical_font(handle)?;
+        self.model
+            .font_metric_snapshot(handle)?
+            .map_or_else(|| self.fonts.resolve(descriptor), Ok)?
+            .metrics()
+    }
+
     pub(in crate::process) fn measure_text(
         &self,
         dc: u32,
