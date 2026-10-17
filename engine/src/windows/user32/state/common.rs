@@ -69,6 +69,7 @@ impl User32State32 {
                 instance,
                 unicode: true,
                 style: match kind {
+                    CommonControlKind32::ListView => 0x4009,
                     CommonControlKind32::Progress => 0x4003,
                     CommonControlKind32::Status => 0x4009,
                     CommonControlKind32::Tab => 0x400b,

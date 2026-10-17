@@ -44,6 +44,7 @@ pub(super) enum Continuation32 {
     TooltipTrack(super::common::tooltip::tracking::TooltipTrack32),
     TabSelection(super::common::tab::input::TabSelect32),
     Header(super::common::header::notifications::HeaderCall32),
+    ListView(super::common::listview::changes::ListViewCall32),
     Numeric(super::common::numeric::NumericCall32),
     StatusDraw(super::common::status::owner::StatusDraw32),
     FileDialog(super::file_dialogs::FileDialogCall32),
@@ -162,6 +163,7 @@ impl User32Context32 {
             | Continuation32::TooltipRelay(_)
             | Continuation32::TooltipTrack(_)
             | Continuation32::Numeric(_)
+            | Continuation32::ListView(_)
             | Continuation32::Header(_)
             | Continuation32::TabSelection(_)
             | Continuation32::StatusDraw(_)
@@ -390,6 +392,9 @@ impl User32Context32 {
         if let Some(outcome) = self.retry_tooltip_completion(token) {
             return Ok(outcome);
         }
+        if let Some(outcome) = self.retry_listview_completion(token) {
+            return Ok(outcome);
+        }
         if let Some(outcome) = self.retry_header_completion(token) {
             return Ok(outcome);
         }
@@ -428,6 +433,7 @@ impl User32Context32 {
         let outcome = self.complete_tooltip_relay_child(token, outcome)?;
         let outcome = self.complete_numeric_child(token, outcome)?;
         let outcome = self.complete_header_child(token, outcome)?;
+        let outcome = self.complete_listview_child(token, outcome)?;
         let outcome = self.complete_tab_selection_child(token, outcome)?;
         let outcome = self.complete_status_draw_child(token, outcome)?;
         self.complete_popup_child(token, outcome)
@@ -456,6 +462,7 @@ impl User32Context32 {
             | Continuation32::TooltipRelay(_)
             | Continuation32::TooltipTrack(_)
             | Continuation32::Numeric(_)
+            | Continuation32::ListView(_)
             | Continuation32::Header(_)
             | Continuation32::TabSelection(_)
             | Continuation32::StatusDraw(_)

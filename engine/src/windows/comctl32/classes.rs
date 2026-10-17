@@ -9,10 +9,11 @@ pub(crate) enum CommonControlKind32 {
     Toolbar,
     Trackbar,
     UpDown,
+    ListView,
 }
 
 impl CommonControlKind32 {
-    pub(crate) const ALL: [Self; 9] = [
+    pub(crate) const ALL: [Self; 10] = [
         Self::Progress,
         Self::Status,
         Self::Tab,
@@ -22,10 +23,12 @@ impl CommonControlKind32 {
         Self::Toolbar,
         Self::Trackbar,
         Self::UpDown,
+        Self::ListView,
     ];
 
     pub(crate) fn name(self) -> &'static str {
         match self {
+            Self::ListView => "SysListView32",
             Self::Progress => "msctls_progress32",
             Self::Status => "msctls_statusbar32",
             Self::Tab => "SysTabControl32",
@@ -40,6 +43,7 @@ impl CommonControlKind32 {
 
     pub(crate) fn flags(self) -> u32 {
         match self {
+            Self::ListView => 1,
             Self::Progress => 0x20,
             Self::Status => 4,
             Self::Tab => 8,
@@ -64,11 +68,13 @@ pub(crate) enum CommonControlState32 {
     Hotkey(super::hotkey::Hotkey32),
     Tooltip(super::tooltip::Tooltip32),
     Toolbar(super::toolbar::Toolbar32),
+    ListView(super::listview::ListView32),
 }
 
 impl CommonControlState32 {
     pub(crate) fn new(kind: CommonControlKind32) -> Self {
         match kind {
+            CommonControlKind32::ListView => Self::ListView(Default::default()),
             CommonControlKind32::Progress => Self::Progress(Default::default()),
             CommonControlKind32::Status => Self::Status(Default::default()),
             CommonControlKind32::Tab => Self::Tab(Default::default()),

@@ -411,3 +411,6 @@ fn captured_legacy_initializer_uses_the_void_gate_and_can_be_called_again() {
         assert!(engine.pending_call.is_none());
     }
 }
+
+#[path = "listview.rs"]
+mod listview;

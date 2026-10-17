@@ -1,6 +1,7 @@
 pub(super) mod header;
 mod hotkey;
 pub(super) mod layout;
+pub(super) mod listview;
 pub(super) mod numeric;
 mod painting;
 mod progress;
@@ -29,12 +30,12 @@ impl EngineInstance {
         if size != 8 {
             return Ok(User32Outcome32::Return(0));
         }
-        if flags & 0xffff & !0x7c != 0 {
+        if flags & 0xffff & !0x7d != 0 {
             return Err(HostError::User32(
                 crate::windows::user32::User32Error32::Win32(50),
             ));
         }
-        if flags & 0x7c == 0 {
+        if flags & 0x7d == 0 {
             return Ok(User32Outcome32::Return(1));
         }
         self.bind_common_control_classes(flags)?;

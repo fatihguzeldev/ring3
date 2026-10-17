@@ -13,6 +13,9 @@ impl User32Context32 {
         if let Some(flags) = self.preview_numeric_input_flags(token)? {
             return Ok(Some(flags));
         }
+        if let Some(flags) = self.preview_listview_input_flags(token)? {
+            return Ok(Some(flags));
+        }
         if let Some(flags) = self.preview_header_input_flags(token)? {
             return Ok(Some(flags));
         }
@@ -80,7 +83,6 @@ impl User32Context32 {
             self.resume_wait(token, ram)
         }
     }
-
 }
 
 fn user32_error(error: HostError) -> E {
