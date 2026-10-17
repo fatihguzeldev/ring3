@@ -11,6 +11,7 @@ on:
           - media-nls
           - foundations
           - common-dialogs
+          - common-controls
           - gdi
 
 permissions:
@@ -188,6 +189,26 @@ jobs:
           Write-Output "RING3_WINDOWS version=$($os.Version) build=$($os.BuildNumber) source=$env:GITHUB_SHA"
           Get-FileHash commdlg-reference.exe -Algorithm SHA256 | Format-Table -AutoSize
           ./commdlg-reference.exe
+          exit $LASTEXITCODE
+      - name: Compile and record native common control behavior
+        if: inputs.profile == 'common-controls'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $finder = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
+          $installation = & $finder -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $installation) { throw 'The Microsoft x86 C compiler is unavailable' }
+          $environment = Join-Path $installation 'VC/Auxiliary/Build/vcvars32.bat'
+          cmd /c "`"$environment`" && cl /nologo /std:c11 /W4 engine\tests\windows\comctl32\fixtures\progress.c /Fe:progress-reference.exe /link user32.lib comctl32.lib"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cmd /c "`"$environment`" && cl /nologo /std:c11 /W4 engine\tests\windows\comctl32\fixtures\registration.c /Fe:control-registration-reference.exe /link user32.lib"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $os = Get-CimInstance Win32_OperatingSystem
+          Write-Output "RING3_WINDOWS version=$($os.Version) build=$($os.BuildNumber) source=$env:GITHUB_SHA"
+          Get-FileHash progress-reference.exe,control-registration-reference.exe -Algorithm SHA256 | Format-Table -AutoSize
+          ./progress-reference.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./control-registration-reference.exe
           exit $LASTEXITCODE
       - name: Compile and record native GDI behavior
         if: inputs.profile == 'gdi'
