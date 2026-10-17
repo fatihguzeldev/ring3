@@ -1,4 +1,5 @@
 mod api;
+pub(crate) mod clipboard;
 mod colors;
 mod queue;
 mod state;

@@ -271,6 +271,14 @@ impl EngineInstance {
         } else {
             None
         };
+        let clipboard = if api.clipboard() {
+            if frame.convention() != api.convention() || frame.stack_words() != api.stack_words() {
+                return Err(HostError::User32(User32Error32::InvalidRequest));
+            }
+            Some(self.execute_clipboard_call(api, frame.arguments(), call_context))
+        } else {
+            None
+        };
         let context = self
             .user32
             .as_mut()
@@ -278,7 +286,14 @@ impl EngineInstance {
         context.call_activation = activation
             .as_ref()
             .map_or_else(Default::default, |capture| capture.token());
-        let result = if let Some(creation) = resource_creation {
+        let result = if let Some(result) = clipboard {
+            match result {
+                Ok(value) => Ok(value),
+                Err(HostError::User32(error)) => Err(error),
+                Err(HostError::WindowsMemory(error)) => Err(User32Error32::Win32(error.win32())),
+                Err(error) => return Err(error),
+            }
+        } else if let Some(creation) = resource_creation {
             match creation {
                 Ok(creation) => context.begin_resource_dialog(
                     creation,

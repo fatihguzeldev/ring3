@@ -381,8 +381,9 @@ impl EngineInstance {
         } else {
             None
         };
+        let clipboard = self.finish_clipboard_wait(continuation)?;
         let send = self.prepare_user32_wait_send(continuation)?;
-        let queue = if send.is_some() {
+        let queue = if send.is_some() || clipboard {
             None
         } else {
             self.prepare_user32_queue_change()?

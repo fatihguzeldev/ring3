@@ -40,7 +40,8 @@ impl User32Context32 {
                 ready.is_some()
             }
             super::super::callback::Continuation32::Retrieve { .. }
-            | super::super::callback::Continuation32::Accelerator(_) => true,
+            | super::super::callback::Continuation32::Accelerator(_)
+            | super::super::callback::Continuation32::Clipboard(_) => true,
             super::super::callback::Continuation32::MessageWait {
                 thread,
                 window,
@@ -180,6 +181,15 @@ impl User32Context32 {
 }
 
 impl User32ThreadReply32 {
+    pub(in crate::process) fn owns_clipboard_render(
+        &self,
+        child: u64,
+        window: u32,
+        format: u32,
+    ) -> bool {
+        super::super::clipboard::owns_render(&self.pending, child, window, format)
+    }
+
     pub(in crate::process) fn check_thread_scratch(
         &self,
         memory: &crate::memory::AddressSpace,

@@ -180,9 +180,28 @@ api_catalog! {
     LoadAcceleratorsW=0x0002_00ac,2;
     TranslateAcceleratorA=0x0002_00ad,3;
     TranslateAcceleratorW=0x0002_00ae,3;
+    OpenClipboard=0x0002_00b0,1;
+    CloseClipboard=0x0002_00b1,0;
+    EmptyClipboard=0x0002_00b2,0;
+    GetClipboardData=0x0002_00b3,1;
+    SetClipboardData=0x0002_00b4,2;
+    IsClipboardFormatAvailable=0x0002_00b5,1;
+    CountClipboardFormats=0x0002_00b6,0;
+    EnumClipboardFormats=0x0002_00b7,1;
+    RegisterClipboardFormatA=0x0002_00b8,1;
+    RegisterClipboardFormatW=0x0002_00b9,1;
+    GetClipboardFormatNameA=0x0002_00ba,3;
+    GetClipboardFormatNameW=0x0002_00bb,3;
+    GetClipboardOwner=0x0002_00bc,0;
+    GetOpenClipboardWindow=0x0002_00bd,0;
+    GetClipboardSequenceNumber=0x0002_00be,0;
+    GetPriorityClipboardFormat=0x0002_00bf,2;
 }
 
 impl User32Api32 {
+    pub(crate) fn clipboard(self) -> bool {
+        (0x0002_00b0..=0x0002_00bf).contains(&self.id())
+    }
     pub(crate) fn dialog_template(self) -> bool {
         matches!(
             self,

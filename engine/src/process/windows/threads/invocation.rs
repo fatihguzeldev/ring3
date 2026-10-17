@@ -660,3 +660,32 @@ impl EngineInstance {
         .map_err(HostError::Synchronization)
     }
 }
+
+impl EngineInstance {
+    pub(in crate::process) fn foreign_clipboard_renderer(&self, window: u32, format: u32) -> bool {
+        let Some(receiver) = self
+            .threads
+            .threads
+            .iter()
+            .find(|record| record.id == self.threads.current_id())
+        else {
+            return false;
+        };
+        receiver.active_invocations.iter().any(|invocation| {
+            let ThreadInvocationCompletion32::User32 {
+                sender,
+                continuation,
+            } = invocation.completion
+            else {
+                return false;
+            };
+            self.threads
+                .threads
+                .iter()
+                .find(|record| record.id == sender)
+                .and_then(|record| record.saved.as_ref())
+                .and_then(|saved| saved.user32.as_ref())
+                .is_some_and(|reply| reply.owns_clipboard_render(continuation, window, format))
+        })
+    }
+}

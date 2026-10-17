@@ -5,6 +5,7 @@ mod accelerators;
 mod activation;
 mod callback;
 mod classes;
+mod clipboard;
 mod context;
 mod controls;
 mod destruction;
@@ -62,6 +63,7 @@ pub(crate) enum User32Outcome32 {
 pub(crate) struct User32Context32 {
     state: User32State32,
     menus: crate::windows::user32::menus::MenuStore32,
+    clipboard: crate::windows::user32::clipboard::ClipboardState32,
     accelerators: crate::windows::user32::accelerators::AcceleratorStore32,
     builtin_procedures: Option<[crate::memory::GuestAddress; 2]>,
     layouts: Vec<threads::ThreadLayout32>,

@@ -31,6 +31,7 @@ impl User32Context32 {
         Ok(Self {
             state,
             menus: crate::windows::user32::menus::MenuStore32::new(Default::default())?,
+            clipboard: Default::default(),
             accelerators: crate::windows::user32::accelerators::AcceleratorStore32::new(256, 4096)?,
             builtin_procedures: None,
             layouts: Vec::new(),

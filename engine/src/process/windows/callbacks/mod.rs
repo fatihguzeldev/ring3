@@ -88,6 +88,9 @@ impl WindowsReply32 {
             ReplyStage32::Ready(_) | ReplyStage32::Received(_) | ReplyStage32::Complete(_)
         )
     }
+    pub(in crate::process) fn active_user32_callback(&self, callback: u32) -> Option<u64> {
+        (self.provider == WindowsCallbackProvider32::User32 && matches!(self.stage, ReplyStage32::Resident { token, .. } | ReplyStage32::Replacement { token, .. } if token == callback)).then_some(self.continuation)
+    }
     pub(in crate::process) fn waiting_for_user32(&self) -> bool {
         self.provider == WindowsCallbackProvider32::User32
             && matches!(self.stage, ReplyStage32::Wait)

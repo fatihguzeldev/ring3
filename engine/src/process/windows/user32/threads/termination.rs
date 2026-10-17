@@ -32,6 +32,7 @@ impl User32Context32 {
                 .is_some_and(|window| window.description.thread_id == thread)
         });
         self.raw_input.retire_thread(thread);
+        self.clipboard.retire_thread(thread);
         self.state.retire_thread(thread);
         self.timers.retire_thread(thread);
         self.provenance.retire_thread(thread);

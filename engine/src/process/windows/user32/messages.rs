@@ -128,7 +128,8 @@ impl User32Context32 {
     ) -> Result<User32Outcome32, User32Error32> {
         let outcome = self.resume_wait_step(token, memory)?;
         let outcome = self.complete_resource_dialog_child(token, outcome, memory)?;
-        self.complete_accelerator_child(token, outcome)
+        let outcome = self.complete_accelerator_child(token, outcome)?;
+        self.complete_clipboard_child(token, outcome)
     }
 
     fn resume_wait_step(
@@ -142,6 +143,9 @@ impl User32Context32 {
             .filter(|pending| pending.token == token)
             .cloned()
             .ok_or(User32Error32::InvalidToken)?;
+        if let Continuation32::Clipboard(_) = pending.continuation {
+            return self.resume_clipboard(token);
+        }
         if let Continuation32::Accelerator(_) = pending.continuation {
             return self.resume_accelerator(token);
         }

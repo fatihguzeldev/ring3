@@ -95,6 +95,9 @@ impl User32Context32 {
         &self,
         token: u64,
     ) -> Result<Option<[u32; 4]>, User32Error32> {
+        if self.clipboard_wait(token).is_some() {
+            return Ok(self.pending_clipboard_message(token));
+        }
         self.pending_accelerator_message(token)
     }
 
@@ -105,6 +108,7 @@ impl User32Context32 {
                     pending.continuation,
                     Continuation32::ResourceDialog { .. }
                         | Continuation32::Accelerator(_)
+                        | Continuation32::Clipboard(_)
                         | Continuation32::Retrieve { .. }
                         | Continuation32::MessageWait { .. }
                 )

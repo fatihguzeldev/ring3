@@ -287,6 +287,7 @@ impl User32Context32 {
                     let menus = self.menus.prepare_retirement(menu)?;
                     self.state.remove_delivered(thread, window)?;
                     self.menus.commit_retirement(menus);
+                    self.clipboard.retire_window(window);
                     self.raw_input.retire_window(window.get());
                     self.timers.retire_window(window.get());
                     self.provenance.retire_window(window.get());
