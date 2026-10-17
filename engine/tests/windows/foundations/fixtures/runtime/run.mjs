@@ -12,13 +12,19 @@ const engineHash = hash(readFileSync(enginePath));
 assert.equal(engineHash, process.env.RING3_ENGINE_SHA256);
 const guest = image();
 writeFileSync(join(output, 'foundations-authored.exe'), guest.bytes);
-const engine = host(enginePath, root, output, guest, {gateOwners: new Set(guest.calls.map(call => call.id)).size, configure({api}) {
+const gateCount = new Set(guest.calls.map(call => call.id)).size;
+const engine = host(enginePath, root, output, guest, {modules: 13, residentSlots: guest.calls.length + gateCount, gateOwners: gateCount, configure({api}) {
+  assert.equal(api.configure_user32(16, 16, 32, 32, 0x2b000000, 16), 0);
   assert.equal(api.configure_gdi(64, 16, 16, 65536, 0x2c000000, 16, 16, 16), 0);
   assert.equal(api.register_user32_module(0x72000000), 0);
   assert.equal(api.register_gdi32_module(0x73000000), 0);
   assert.equal(api.register_oleaut32_module(0x74000000), 0);
   assert.equal(api.register_shlwapi_module(0x75000000), 0);
   assert.equal(api.register_shell32_module(0x76000000), 0);
+  assert.equal(api.register_msimg32_module(0x77000000), 0);
+  assert.equal(api.register_imm32_module(0x78000000), 0);
+  assert.equal(api.register_comctl32_module(0x79000000), 0);
+  assert.equal(api.register_commdlg32_module(0x7a000000), 0);
 }});
 const {api, key, get, take, read} = engine;
 const pair = value => [Number(value & 0xffffffffn), Number(value >> 32n)];
@@ -33,6 +39,9 @@ for (const unit of engine.units) {
   } else if (unit.expected === 'nonzero') assert.notEqual(get(16), 0, unit.name);
   else assert.equal(get(16), unit.expected, unit.name);
   if (unit.name === 'CreateDIBSection') dibPointer = read(guest.addresses.bits);
+  if (unit.hook === 'file-title') assert.deepEqual([0,4,8].map(offset => read(guest.addresses.title_output + offset)), [0x00650064,0x006f006d,0]);
+  if (unit.hook === 'ime-conversion') assert.deepEqual([read(guest.addresses.conversion), read(guest.addresses.sentence)], [1,8]);
+  if (unit.hook === 'ime-form') assert.deepEqual(Array.from({length:7}, (_, index) => read(guest.addresses.composition_output + index*4)), [2,11,17,2,3,97,63]);
   if (unit.hook === 'message') {
     const pointer = read(guest.addresses.message);
     assert.notEqual(pointer, 0);
@@ -71,6 +80,7 @@ assert.ok(dibPointer >= 0x2c000000 && dibPointer < 0x2c010000);
 assert.equal(api.read32(dibPointer), 0); assert.notEqual(get(116), 0, 'process exit unmaps the still-live DIB');
 assert.equal(api.pending_gdi_frame(0), 21, 'frame transport closes after process exit');
 const receipt = {engineHash, guestHash: hash(guest.bytes), frames, calls: guest.calls.length,
-  dibPointer, runs: engine.runs, claim: 'authored PE32 executes actual generated Wasm across USER32/GDI fonts/frame transport, BSTR, bounded ANSI comparison, shell heap ownership, ANSI/UTF16 message formatting with LocalFree and short-buffer LastError, and process exit with a live DIB'};
+  modules: 13, residentSlots: guest.calls.length + gateCount, dibPointer, runs: engine.runs,
+  claim: 'authored PE32 executes generated Wasm across USER32/GDI fonts and frames, MSIMG transparency, COMCTL progress registration, COMDLG title and per-thread error, live IMM context/preferences, BSTR, comparison, shell heap ownership, message formatting and live-DIB process retirement; native control callbacks and browser input remain separate evidence'};
 writeFileSync(join(output, 'receipt.json'), JSON.stringify(receipt, null, 2));
 console.log(JSON.stringify({engineHash, frames, calls: guest.calls.length, dibPointer}));

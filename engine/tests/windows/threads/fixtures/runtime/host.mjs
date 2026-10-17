@@ -29,10 +29,10 @@ export function host(enginePath, root, output, guest, options = {}) {
     return get(120);
   };
   assert.equal(api.configure_cpu_clock(1_000_000_000, 0, 0, 0), 0);
-  assert.equal(api.configure_execution(64, 8 * 1024 * 1024, 1), 0);
+  assert.equal(api.configure_execution(options.residentSlots ?? 64, 8 * 1024 * 1024, 1), 0);
   assert.equal(api.configure_synchronization(32, 64, 64, 16), 0);
   assert.equal(api.configure_threads(4, 16, 16, 4, 256), 0);
-  assert.equal(api.configure_module_limits(8, 0x100000, 16, 65536, 0x100000), 0);
+  assert.equal(api.configure_module_limits(options.modules ?? 8, 0x100000, 16, 65536, 0x100000), 0);
   assert.equal(api.register_kernel32_module(0x70000000), 0);
   options.configure?.({api, name, request});
   assert.equal(api.begin_module_input(guest.bytes.length, name('threads-authored.exe')), 0);

@@ -8,8 +8,14 @@ export function image() {
     ['oleaut32.dll', ['SysAllocStringLen', 'SysStringLen', 'SysStringByteLen', 'SysFreeString']],
     ['shlwapi.dll', ['StrCmpNIA']],
     ['shell32.dll', ['CommandLineToArgvW']],
+    ['msimg32.dll', ['TransparentBlt']],
+    ['imm32.dll', ['ImmCreateContext', 'ImmDestroyContext', 'ImmSetOpenStatus', 'ImmGetOpenStatus', 'ImmGetConversionStatus', 'ImmSetCompositionWindow', 'ImmGetCompositionWindow', 'ImmGetCompositionStringW']],
+    ['comctl32.dll', ['InitCommonControlsEx']],
+    ['comdlg32.dll', ['CommDlgExtendedError', 'GetFileTitleW']],
   ]);
-  for (const name of ['dc', 'bstr', 'argv', 'argc', 'dib', 'bits', 'message']) b.allocate(name);
+  for (const name of ['dc', 'bstr', 'argv', 'argc', 'dib', 'bits', 'message', 'imc', 'conversion', 'sentence']) b.allocate(name);
+  b.allocate('composition_output', Array(7).fill(0));
+  b.allocate('title_output', Array(8).fill(0));
   b.allocate('extent', [0, 0]);
   b.allocate('message_buffer', Array(16).fill(0));
   const utf16 = (name, value) => {
@@ -22,6 +28,9 @@ export function image() {
   const command = utf16('command', 'program "a b" "" x');
   const message = utf16('message_source', 'hello %1!u!');
   const short = utf16('short_source', '1234');
+  const title = utf16('file_title_source', 'C:\\demo');
+  const composition = b.data('composition_form', [2, 11, 17, 2, 3, 97, 63]);
+  const commonControls = b.data('common_controls', [8, 0x20]);
   const ansi = b.data('ansi_source', [0xe9636163, 0]);
   const formatArgs = b.data('format_arguments', [7]);
   const shortOutput = b.data('short_output', [0x23451234, 0x45673456]);
@@ -36,9 +45,23 @@ export function image() {
   call('SetTextColor', 0x1a0029, [b.ref('dc'), 0xffffff], 0);
   call('GetTextExtentPoint32W', 0x1a0070, [b.ref('dc'), text, 1, b.addresses.extent], 1);
   call('TextOutW', 0x1a007a, [b.ref('dc'), 2, 1, text, 1], 1, undefined, 'text');
+  call('TransparentBlt', 0x1a00a1, [b.ref('dc'), 3, 2, 1, 1, b.ref('dc'), 1, 2, 1, 1, 0x112234], 1);
+  call('GetPixel', 0x1a0023, [b.ref('dc'), 3, 2], 0x112233);
   call('CreateDIBSection', 0x1a0016, [0, info, 0, b.addresses.bits, 0, 0], 'nonzero', 'dib');
   b.writeLocked(b.addresses.bits, [0x00aabbcc]);
   call('ReleaseDC', 0x1a005c, [0, b.ref('dc')], 1);
+  call('InitCommonControlsEx', 0x220002, [commonControls], 1);
+  call('CommDlgExtendedError', 0x210005, [], 0);
+  call('GetFileTitleW', 0x210007, [title, b.addresses.title_output, 16], 0, undefined, 'file-title');
+  call('ImmCreateContext', 0x230001, [], 'nonzero', 'imc');
+  call('ImmGetOpenStatus', 0x230006, [b.ref('imc')], 0);
+  call('ImmSetOpenStatus', 0x230007, [b.ref('imc'), 1], 1);
+  call('ImmGetOpenStatus', 0x230006, [b.ref('imc')], 1);
+  call('ImmGetConversionStatus', 0x230008, [b.ref('imc'), b.addresses.conversion, b.addresses.sentence], 1, undefined, 'ime-conversion');
+  call('ImmSetCompositionWindow', 0x23000b, [b.ref('imc'), composition], 1);
+  call('ImmGetCompositionWindow', 0x23000a, [b.ref('imc'), b.addresses.composition_output], 1, undefined, 'ime-form');
+  call('ImmGetCompositionStringW', 0x230013, [b.ref('imc'), 8, 0, 0], 0);
+  call('ImmDestroyContext', 0x230002, [b.ref('imc')], 1);
   call('SysAllocStringLen', 0x200002, [embedded, 3], 'nonzero', 'bstr');
   call('SysStringLen', 0x200007, [b.ref('bstr')], 3);
   call('SysStringByteLen', 0x200008, [b.ref('bstr')], 6);
