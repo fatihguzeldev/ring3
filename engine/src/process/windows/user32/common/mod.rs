@@ -11,6 +11,7 @@ pub(super) mod tab;
 mod toolbar;
 pub(super) mod tooltip;
 pub(super) mod trackbar;
+pub(super) mod treeview;
 pub(super) mod updown;
 
 use super::{User32Outcome32, memory};
@@ -31,12 +32,12 @@ impl EngineInstance {
         if size != 8 {
             return Ok(User32Outcome32::Return(0));
         }
-        if flags & 0xffff & !0xfd != 0 {
+        if flags & 0xffff & !0xff != 0 {
             return Err(HostError::User32(
                 crate::windows::user32::User32Error32::Win32(50),
             ));
         }
-        if flags & 0xfd == 0 {
+        if flags & 0xff == 0 {
             return Ok(User32Outcome32::Return(1));
         }
         self.bind_common_control_classes(flags)?;

@@ -10,6 +10,9 @@ impl User32Context32 {
         &self,
         token: u64,
     ) -> Result<Option<(bool, bool)>, E> {
+        if let Some(flags) = self.preview_tree_input_flags(token)? {
+            return Ok(Some(flags));
+        }
         if let Some(flags) = self.preview_numeric_input_flags(token)? {
             return Ok(Some(flags));
         }
@@ -51,6 +54,11 @@ impl User32Context32 {
             return self
                 .resume_status_draw(token, ram, gdi.ok_or(E::Win32(50))?)
                 .map_err(user32_error);
+        }
+        if self.tree_change_wait(token) {
+            let outcome =
+                self.resume_tree_change(token, ram, gdi.as_deref().ok_or(E::Win32(50))?)?;
+            return self.complete_user32_child(token, outcome, ram);
         }
         if self.tab_tooltip_wait(token) {
             let outcome = self.resume_tab_tooltip(token, ram)?;

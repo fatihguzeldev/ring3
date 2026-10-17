@@ -416,3 +416,6 @@ fn captured_legacy_initializer_uses_the_void_gate_and_can_be_called_again() {
 
 #[path = "listview.rs"]
 mod listview;
+
+#[path = "treeview.rs"]
+mod treeview;

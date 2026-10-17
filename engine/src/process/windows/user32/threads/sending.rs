@@ -110,6 +110,9 @@ impl User32Context32 {
         if self.header_wait(token) {
             return self.pending_header_message(token);
         }
+        if self.tree_change_wait(token) {
+            return self.pending_tree_message(token);
+        }
         if self.tab_selection_wait(token) {
             return self.pending_tab_selection_message(token);
         }
@@ -164,6 +167,7 @@ impl User32Context32 {
                         | Continuation32::ListView(_)
                         | Continuation32::Header(_)
                         | Continuation32::TabSelection(_)
+                        | Continuation32::TreeView(_)
                         | Continuation32::StatusDraw(_)
                         | Continuation32::Accelerator(_)
                         | Continuation32::Clipboard(_)

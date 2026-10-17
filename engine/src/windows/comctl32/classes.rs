@@ -11,10 +11,11 @@ pub(crate) enum CommonControlKind32 {
     UpDown,
     ListView,
     Animate,
+    TreeView,
 }
 
 impl CommonControlKind32 {
-    pub(crate) const ALL: [Self; 11] = [
+    pub(crate) const ALL: [Self; 12] = [
         Self::Progress,
         Self::Status,
         Self::Tab,
@@ -26,10 +27,12 @@ impl CommonControlKind32 {
         Self::UpDown,
         Self::ListView,
         Self::Animate,
+        Self::TreeView,
     ];
 
     pub(crate) fn name(self) -> &'static str {
         match self {
+            Self::TreeView => "SysTreeView32",
             Self::ListView => "SysListView32",
             Self::Progress => "msctls_progress32",
             Self::Status => "msctls_statusbar32",
@@ -46,6 +49,7 @@ impl CommonControlKind32 {
 
     pub(crate) fn flags(self) -> u32 {
         match self {
+            Self::TreeView => 2,
             Self::ListView => 1,
             Self::Progress => 0x20,
             Self::Status => 4,
@@ -74,11 +78,13 @@ pub(crate) enum CommonControlState32 {
     Tooltip(super::tooltip::Tooltip32),
     Toolbar(super::toolbar::Toolbar32),
     ListView(super::listview::ListView32),
+    TreeView(super::treeview::TreeView32),
 }
 
 impl CommonControlState32 {
     pub(crate) fn new(kind: CommonControlKind32) -> Self {
         match kind {
+            CommonControlKind32::TreeView => Self::TreeView(Default::default()),
             CommonControlKind32::ListView => Self::ListView(Default::default()),
             CommonControlKind32::Progress => Self::Progress(Default::default()),
             CommonControlKind32::Status => Self::Status(Default::default()),

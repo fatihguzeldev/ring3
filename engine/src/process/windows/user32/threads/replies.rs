@@ -54,6 +54,7 @@ impl User32Context32 {
             super::super::callback::Continuation32::Header(_) => true,
             super::super::callback::Continuation32::ListView(_) => true,
             super::super::callback::Continuation32::TabSelection(_) => true,
+            super::super::callback::Continuation32::TreeView(_) => true,
             super::super::callback::Continuation32::StatusDraw(_) => true,
             super::super::callback::Continuation32::CommonLayout(call) => {
                 call.child.is_none() && call.completed.is_some()
@@ -155,6 +156,9 @@ impl User32Context32 {
                     call.scratch().map(|scratch| scratch.range())
                 }
                 super::super::callback::Continuation32::TabSelection(call) => {
+                    Some(call.scratch().range())
+                }
+                super::super::callback::Continuation32::TreeView(call) => {
                     Some(call.scratch().range())
                 }
                 super::super::callback::Continuation32::TooltipText(call) => {
@@ -305,6 +309,9 @@ impl User32ThreadReply32 {
                 super::super::callback::Continuation32::TabSelection(call) => {
                     Some(call.scratch().range())
                 }
+                super::super::callback::Continuation32::TreeView(call) => {
+                    Some(call.scratch().range())
+                }
                 super::super::callback::Continuation32::TooltipText(call) => {
                     Some(call.scratch().range())
                 }
@@ -412,6 +419,9 @@ fn check_scratch(
             super::super::callback::Continuation32::TabSelection(call) => {
                 call.scratch().check(memory)?
             }
+            super::super::callback::Continuation32::TreeView(call) => {
+                call.scratch().check(memory)?
+            }
             super::super::callback::Continuation32::TooltipText(call) => {
                 call.scratch().check(memory)?;
             }
@@ -461,6 +471,9 @@ fn check_owned_scratch(
                 }
             }
             super::super::callback::Continuation32::TabSelection(call) => {
+                call.scratch().check(memory)?
+            }
+            super::super::callback::Continuation32::TreeView(call) => {
                 call.scratch().check(memory)?
             }
             super::super::callback::Continuation32::TooltipText(call) => {

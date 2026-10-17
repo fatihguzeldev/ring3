@@ -43,6 +43,7 @@ pub(super) enum Continuation32 {
     TooltipRelay(super::common::tooltip::relay::TooltipRelay32),
     TooltipTrack(super::common::tooltip::tracking::TooltipTrack32),
     TabSelection(super::common::tab::input::TabSelect32),
+    TreeView(super::common::treeview::changes::TreeChange32),
     Header(super::common::header::notifications::HeaderCall32),
     ListView(super::common::listview::changes::ListViewCall32),
     Numeric(super::common::numeric::NumericCall32),
@@ -168,6 +169,7 @@ impl User32Context32 {
             | Continuation32::ListView(_)
             | Continuation32::Header(_)
             | Continuation32::TabSelection(_)
+            | Continuation32::TreeView(_)
             | Continuation32::StatusDraw(_)
             | Continuation32::Accelerator(_)
             | Continuation32::Clipboard(_)
@@ -388,6 +390,9 @@ impl User32Context32 {
         if let Some(outcome) = self.retry_status_draw_completion(token) {
             return Ok(outcome);
         }
+        if let Some(outcome) = self.retry_tree_completion(token) {
+            return Ok(outcome);
+        }
         if let Some(outcome) = self.retry_tab_selection_completion(token) {
             return Ok(outcome);
         }
@@ -440,6 +445,7 @@ impl User32Context32 {
         let outcome = self.complete_numeric_child(token, outcome)?;
         let outcome = self.complete_header_child(token, outcome)?;
         let outcome = self.complete_listview_child(token, outcome)?;
+        let outcome = self.complete_tree_child(token, outcome)?;
         let outcome = self.complete_tab_selection_child(token, outcome)?;
         let outcome = self.complete_status_draw_child(token, outcome)?;
         self.complete_popup_child(token, outcome)
@@ -472,6 +478,7 @@ impl User32Context32 {
             | Continuation32::ListView(_)
             | Continuation32::Header(_)
             | Continuation32::TabSelection(_)
+            | Continuation32::TreeView(_)
             | Continuation32::StatusDraw(_)
             | Continuation32::Accelerator(_)
             | Continuation32::Clipboard(_)

@@ -8,10 +8,10 @@ mod menu_layout;
 mod menus;
 pub(crate) use menu_layout::{MenuBarCache32, MenuOwnerSize32};
 mod controls;
+mod ime;
 mod paint;
 mod text;
 mod ui;
-mod ime;
 
 struct WindowSlot32 {
     data: WindowData32,
@@ -36,6 +36,7 @@ pub(crate) struct User32State32 {
     slots: Vec<WindowSlot32>,
     queue: super::queue::MessageQueue32,
     next_atom: u16,
+    next_tree_item: u32,
     standard_atoms: [u16; 6],
     common_atoms: [u16; crate::windows::comctl32::CommonControlKind32::ALL.len()],
     system_atoms: Vec<u16>,
@@ -65,6 +66,7 @@ impl User32State32 {
             slots,
             queue,
             next_atom: 0xc000,
+            next_tree_item: 1,
             standard_atoms: [0; 6],
             common_atoms: [0; crate::windows::comctl32::CommonControlKind32::ALL.len()],
             system_atoms: Vec::new(),
@@ -595,4 +597,19 @@ fn shifted_data(mut data: WindowData32, delta: (i64, i64)) -> Result<WindowData3
     data.client_origin.x = shift(data.client_origin.x, delta.0)?;
     data.client_origin.y = shift(data.client_origin.y, delta.1)?;
     Ok(data)
+}
+
+impl User32State32 {
+    pub(crate) fn prepare_tree_item_handle(&self) -> Result<u32, User32Error32> {
+        if self.next_tree_item == 0
+            || self.next_tree_item >= crate::windows::comctl32::treeview::ROOT
+        {
+            return Err(User32Error32::Capacity);
+        }
+        Ok(self.next_tree_item)
+    }
+    pub(crate) fn commit_tree_item_handle(&mut self, handle: u32) {
+        assert_eq!(handle, self.next_tree_item);
+        self.next_tree_item += 1;
+    }
 }
