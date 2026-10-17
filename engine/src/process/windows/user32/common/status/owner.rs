@@ -121,7 +121,7 @@ impl User32Context32 {
         match call.stage {
             Stage32::Paint => {
                 self.state.check_paint_change().map_err(HostError::User32)?;
-                self.render_status_text(call.window, ram, gdi, call.call.thread_id)?;
+                self.render_status_text_to(call.window, 0, ram, gdi, call.call.thread_id)?;
                 self.state
                     .set_update_region(call.window, Region32::default(), false)
                     .expect("status paint was preflighted");

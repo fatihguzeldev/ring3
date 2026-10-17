@@ -9,6 +9,7 @@ pub(crate) struct StatusPart32 {
     pub right: i32,
     pub kind: u32,
     pub data: u32,
+    pub icon: u32,
     pub text: Vec<u16>,
 }
 impl Default for StatusPart32 {
@@ -17,6 +18,7 @@ impl Default for StatusPart32 {
             right: -1,
             kind: 0,
             data: 0,
+            icon: 0,
             text: Vec::new(),
         }
     }

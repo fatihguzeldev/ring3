@@ -14,6 +14,7 @@ use crate::{
         window::WindowHandle32,
     },
 };
+use painting::StatusPaint32;
 
 impl EngineInstance {
     pub(in crate::process::windows) fn create_status_window(
@@ -155,8 +156,17 @@ impl User32Context32 {
                     None,
                 );
             }
-            0x0f => {
-                return self.paint_status(window, ram, gdi.ok_or(HostError::InvalidRequest)?, call);
+            0x0f | 0x318 => {
+                return self.paint_status(
+                    StatusPaint32 {
+                        window,
+                        external: args[2],
+                        print: args[1] == 0x318,
+                        call,
+                    },
+                    ram,
+                    gdi.ok_or(HostError::InvalidRequest)?,
+                );
             }
             0x14 => 1,
             0x30 => {
@@ -296,9 +306,6 @@ impl User32Context32 {
                 {
                     return Ok(User32Outcome32::Return(0));
                 }
-                if kind & 0x400 != 0 {
-                    return Err(HostError::User32(E::Win32(50)));
-                }
                 let owner = kind & 0x1000 != 0;
                 if owner && part == 0xff {
                     return Ok(User32Outcome32::Return(0));
@@ -416,7 +423,51 @@ impl User32Context32 {
                         part.kind << 16
                     }
             }
-            0x318 | 0x40f..=0x414 => return Err(HostError::User32(E::Win32(50))),
+            0x40f => {
+                let index = if args[2] == u32::MAX {
+                    0xff
+                } else {
+                    args[2] as usize
+                };
+                if self
+                    .status(window)
+                    .map_err(HostError::User32)?
+                    .text_part(index)
+                    .is_none()
+                {
+                    return Ok(User32Outcome32::Return(0));
+                }
+                if args[3] != 0 {
+                    let image = gdi
+                        .as_ref()
+                        .ok_or(HostError::InvalidRequest)?
+                        .image_info(args[3])
+                        .map_err(HostError::Gdi)?;
+                    if image.kind != crate::windows::gdi::GdiImageKind32::Icon {
+                        return Err(HostError::User32(E::Win32(6)));
+                    }
+                }
+                self.state.check_paint_change().map_err(HostError::User32)?;
+                self.status_mut(window)
+                    .map_err(HostError::User32)?
+                    .text_part_mut(index)
+                    .unwrap()
+                    .icon = args[3];
+                self.status_changed(window);
+                1
+            }
+            0x414 => {
+                let index = if args[2] == u32::MAX {
+                    0xff
+                } else {
+                    args[2] as usize
+                };
+                self.status(window)
+                    .map_err(HostError::User32)?
+                    .text_part(index)
+                    .map_or(0, |part| part.icon)
+            }
+            0x410..=0x413 => return Err(HostError::User32(E::Win32(50))),
             _ => {
                 return self
                     .def_window_proc(args, ram, call)

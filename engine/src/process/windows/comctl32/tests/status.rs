@@ -356,3 +356,202 @@ fn captured_status_ownerdraw_uses_parent_callback_real_dc_and_owned_drawitem_scr
         0xdeadbeef
     );
 }
+
+fn gdi_call(engine: &mut EngineInstance, api: GdiApi32, args: &[u32]) -> u32 {
+    capture(engine, api.id(), args);
+    eax(engine)
+}
+#[test]
+fn captured_status_print_uses_its_font_and_caller_mapping_without_changing_borrowed_dc() {
+    let (mut engine, parent_callback, common, procedure, _, parent) = fixture();
+    let window = status(&mut engine, parent_callback, common, procedure, parent);
+    assert_eq!(
+        send(
+            &mut engine,
+            parent_callback,
+            common,
+            procedure,
+            window,
+            [0x2001, 0, 0x00335577]
+        ),
+        0xff000000
+    );
+    let dc = gdi_call(&mut engine, GdiApi32::CreateCompatibleDC, &[0]);
+    assert_ne!(dc, 0);
+    let bitmap = gdi_call(&mut engine, GdiApi32::CreateBitmap, &[40, 40, 1, 32, 0]);
+    assert_ne!(bitmap, 0);
+    let old = gdi_call(&mut engine, GdiApi32::SelectObject, &[dc, bitmap]);
+    assert_eq!(
+        gdi_call(&mut engine, GdiApi32::SetViewportOrgEx, &[dc, 3, 4, 0]),
+        1
+    );
+    let font = gdi_call(&mut engine, GdiApi32::GetCurrentObject, &[dc, 6]);
+    let before = engine
+        .user32
+        .as_ref()
+        .unwrap()
+        .gdi_update_region(WindowHandle32::try_from(window).unwrap())
+        .unwrap();
+    assert_eq!(
+        send(
+            &mut engine,
+            parent_callback,
+            common,
+            procedure,
+            window,
+            [0x318, dc, 4]
+        ),
+        0
+    );
+    assert_eq!(
+        gdi_call(&mut engine, GdiApi32::GetPixel, &[dc, 6, 0]),
+        0x00335577
+    );
+    assert_eq!(
+        gdi_call(&mut engine, GdiApi32::GetCurrentObject, &[dc, 6]),
+        font
+    );
+    assert_eq!(
+        gdi_call(&mut engine, GdiApi32::GetViewportOrgEx, &[dc, 0x12500]),
+        1
+    );
+    assert_eq!(words::<2>(&engine, 0x12500), [3, 4]);
+    assert_eq!(
+        engine
+            .user32
+            .as_ref()
+            .unwrap()
+            .gdi_update_region(WindowHandle32::try_from(window).unwrap())
+            .unwrap(),
+        before
+    );
+    assert_eq!(
+        gdi_call(&mut engine, GdiApi32::SelectObject, &[dc, old]),
+        bitmap
+    );
+    assert_eq!(gdi_call(&mut engine, GdiApi32::DeleteObject, &[bitmap]), 1);
+    assert_eq!(gdi_call(&mut engine, GdiApi32::DeleteDC, &[dc]), 1);
+}
+#[test]
+fn captured_status_icons_use_real_image_planes_and_remain_borrowed_after_window_destruction() {
+    let (mut engine, parent_callback, common, procedure, _, parent) = fixture();
+    let window = status(&mut engine, parent_callback, common, procedure, parent);
+    capture(&mut engine, User32Api32::LoadIconW.id(), &[0, 32512]);
+    let icon = eax(&engine);
+    assert_ne!(icon, 0);
+    assert_eq!(
+        send(
+            &mut engine,
+            parent_callback,
+            common,
+            procedure,
+            window,
+            [0x40b, 0x100, 0]
+        ),
+        1
+    );
+    assert_eq!(
+        send(
+            &mut engine,
+            parent_callback,
+            common,
+            procedure,
+            window,
+            [0x40f, 0, icon]
+        ),
+        1
+    );
+    assert_eq!(
+        send(
+            &mut engine,
+            parent_callback,
+            common,
+            procedure,
+            window,
+            [0x414, 0, 0]
+        ),
+        icon
+    );
+    assert_eq!(
+        send(
+            &mut engine,
+            parent_callback,
+            common,
+            procedure,
+            window,
+            [0x0f, 0, 0]
+        ),
+        0
+    );
+    let frame = (0..16)
+        .find_map(|index| {
+            engine
+                .pending_gdi_frame(index)
+                .unwrap()
+                .filter(|frame| frame.window == window)
+        })
+        .unwrap();
+    let pixels = engine
+        .read_gdi_frame(frame.id, frame.revision, 0, frame.bytes)
+        .unwrap();
+    assert!(
+        pixels
+            .chunks_exact(4)
+            .any(|pixel| pixel[0] != pixel[1] || pixel[1] != pixel[2]),
+        "the real authored application icon contributes colored pixels"
+    );
+    capture(&mut engine, User32Api32::DestroyWindow.id(), &[window]);
+    callbacks(&mut engine, parent_callback, common, procedure);
+    assert_eq!(eax(&engine), 1);
+    assert!(engine.gdi.as_ref().unwrap().image_info(icon).is_ok());
+}
+#[test]
+fn captured_status_rtl_text_is_retained_and_painted_with_the_actual_canvas_direction() {
+    let (mut engine, parent_callback, common, procedure, _, parent) = fixture();
+    let window = status(&mut engine, parent_callback, common, procedure, parent);
+    engine
+        .memory
+        .as_mut()
+        .unwrap()
+        .write(
+            GuestAddress(0x12400),
+            &[0x0645u16, 0x0631, 0x062d, 0]
+                .into_iter()
+                .flat_map(u16::to_le_bytes)
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
+    assert_eq!(
+        send(
+            &mut engine,
+            parent_callback,
+            common,
+            procedure,
+            window,
+            [0x40b, 0x400, 0x12400]
+        ),
+        1
+    );
+    assert_eq!(
+        send(
+            &mut engine,
+            parent_callback,
+            common,
+            procedure,
+            window,
+            [0x40c, 0, 0]
+        ),
+        0x04000003
+    );
+    assert_eq!(
+        send(
+            &mut engine,
+            parent_callback,
+            common,
+            procedure,
+            window,
+            [0x0f, 0, 0]
+        ),
+        0
+    );
+}
