@@ -189,6 +189,20 @@ fn legacy_locale_enumeration_delivers_ansi_lcids_and_releases_callback_scratch()
         _ => panic!("installed locales"),
     };
     assert_eq!(request.count, 1);
+    assert_eq!(request.arguments[1..], [0; 15]);
+    let record = crate::abi::windows::WindowsCallbackRecord32 {
+        provider: request.provider as u32,
+        procedure: request.procedure.0,
+        count: request.count,
+        continuation: request.continuation,
+        arguments: request.arguments,
+    };
+    let mut encoded = [0; crate::abi::windows::WINDOWS_CALLBACK_RECORD_SIZE];
+    crate::abi::windows::encode_windows_callback(Some(record), &mut encoded).unwrap();
+    assert_eq!(
+        crate::abi::windows::decode_windows_callback(&encoded),
+        Ok(Some(record))
+    );
     let bytes = read::<9>(&engine, request.arguments[0]);
     assert_eq!(bytes[8], 0);
     assert!(bytes[..8].iter().all(u8::is_ascii_hexdigit));

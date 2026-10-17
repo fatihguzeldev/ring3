@@ -40,7 +40,11 @@ impl Enumeration32 {
                 0x20
             };
         let mut arguments = [0; 16];
-        arguments[..3].copy_from_slice(&[self.scratch.address.0, flags, self.parameter]);
+        arguments[0] = self.scratch.address.0;
+        if !self.legacy {
+            arguments[1] = flags;
+            arguments[2] = self.parameter;
+        }
         WindowsCallback32 {
             procedure: self.procedure,
             arguments,
