@@ -424,6 +424,9 @@ impl User32Context32 {
         memory: &mut AddressSpace,
         context: User32CallContext32,
     ) -> Result<User32Outcome32, User32Error32> {
+        if let Some(outcome) = self.ime_control_message(args, wide, memory, context)? {
+            return Ok(outcome);
+        }
         if let Some(outcome) = self.window_text_message(args, wide, memory, context)? {
             return Ok(outcome);
         }

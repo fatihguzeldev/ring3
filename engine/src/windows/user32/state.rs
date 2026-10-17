@@ -11,6 +11,7 @@ mod controls;
 mod paint;
 mod text;
 mod ui;
+mod ime;
 
 struct WindowSlot32 {
     data: WindowData32,
@@ -25,6 +26,7 @@ struct WindowSlot32 {
     ui_state: u32,
     common: Option<crate::windows::comctl32::CommonControlState32>,
     menu_bar: Option<MenuBarCache32>,
+    ime_window: bool,
 }
 
 pub(crate) struct User32State32 {
@@ -223,6 +225,7 @@ impl User32State32 {
                 .common_kind(data.class_atom)
                 .map(crate::windows::comctl32::CommonControlState32::new),
             menu_bar: None,
+            ime_window: false,
             update: crate::windows::gdi::Region32::rectangle(super::Rect32 {
                 left: 0,
                 top: 0,

@@ -22,6 +22,7 @@ pub enum ImmApi32 {
     ImmSetCompositionFontW,
     ImmGetCompositionStringA,
     ImmGetCompositionStringW,
+    ImmGetDefaultIMEWnd,
 }
 impl ImmApi32 {
     pub const ALL: &'static [Self] = &[
@@ -44,6 +45,7 @@ impl ImmApi32 {
         Self::ImmSetCompositionFontW,
         Self::ImmGetCompositionStringA,
         Self::ImmGetCompositionStringW,
+        Self::ImmGetDefaultIMEWnd,
     ];
     pub fn from_id(id: u32) -> Option<Self> {
         Self::ALL
@@ -65,7 +67,10 @@ impl ImmApi32 {
             | Self::ImmSetCompositionFontA
             | Self::ImmSetCompositionFontW => 2,
             Self::ImmCreateContext => 0,
-            Self::ImmDestroyContext | Self::ImmGetContext | Self::ImmGetOpenStatus => 1,
+            Self::ImmDestroyContext
+            | Self::ImmGetContext
+            | Self::ImmGetOpenStatus
+            | Self::ImmGetDefaultIMEWnd => 1,
             Self::ImmAssociateContext | Self::ImmReleaseContext | Self::ImmSetOpenStatus => 2,
             Self::ImmGetConversionStatus | Self::ImmSetConversionStatus => 3,
         }
@@ -82,6 +87,7 @@ impl ImmApi32 {
             Self::ImmSetCompositionFontW => "ImmSetCompositionFontW",
             Self::ImmGetCompositionStringA => "ImmGetCompositionStringA",
             Self::ImmGetCompositionStringW => "ImmGetCompositionStringW",
+            Self::ImmGetDefaultIMEWnd => "ImmGetDefaultIMEWnd",
             Self::ImmCreateContext => "ImmCreateContext",
             Self::ImmDestroyContext => "ImmDestroyContext",
             Self::ImmAssociateContext => "ImmAssociateContext",

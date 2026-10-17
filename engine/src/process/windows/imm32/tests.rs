@@ -22,6 +22,75 @@ fn fixture() -> EngineInstance {
 }
 
 #[test]
+fn default_ime_window_is_a_real_thread_owned_hwnd_and_control_commands_use_the_same_context() {
+    use crate::windows::{user32::User32Api32 as User, window::WindowHandle32};
+    let mut e = fixture();
+    e.register_user32_module(0x7500_0000).unwrap();
+    e.load_library_module("user32.dll", None).unwrap();
+    let window = call(&mut e, Api::ImmGetDefaultIMEWnd.id(), &[0]);
+    assert_ne!(window, 0);
+    assert_eq!(
+        call(&mut e, Api::ImmGetDefaultIMEWnd.id(), &[window]),
+        window
+    );
+    assert_eq!(call(&mut e, Api::ImmGetDefaultIMEWnd.id(), &[u32::MAX]), 0);
+    let hwnd = WindowHandle32::try_from(window).unwrap();
+    let description = e.user32_windows().unwrap().get(hwnd).unwrap().description;
+    assert_eq!(description.thread_id, 1);
+    assert!(!description.visible);
+    let form = [2u32, 11, 17, 1, 2, 31, 41];
+    put(
+        &mut e,
+        DATA,
+        &form
+            .into_iter()
+            .flat_map(u32::to_le_bytes)
+            .collect::<Vec<_>>(),
+    );
+    assert_eq!(
+        call(
+            &mut e,
+            User::DefWindowProcW.id(),
+            &[window, 0x283, 12, DATA]
+        ),
+        0
+    );
+    assert_eq!(
+        call(
+            &mut e,
+            User::DefWindowProcW.id(),
+            &[window, 0x283, 11, DATA + 64]
+        ),
+        0
+    );
+    for (index, value) in form.into_iter().enumerate() {
+        assert_eq!(word(&e, DATA + 64 + index as u32 * 4), value);
+    }
+    let input = call(&mut e, Api::ImmGetContext.id(), &[window]);
+    assert_eq!(
+        call(
+            &mut e,
+            Api::ImmGetCompositionWindow.id(),
+            &[input, DATA + 128]
+        ),
+        1
+    );
+    for (index, value) in form.into_iter().enumerate() {
+        assert_eq!(word(&e, DATA + 128 + index as u32 * 4), value);
+    }
+    put(&mut e, DATA + 160, &[0xcc; 28]);
+    assert_eq!(
+        call(
+            &mut e,
+            User::DefWindowProcW.id(),
+            &[window, 0x283, 0xffff, DATA + 160]
+        ),
+        1
+    );
+    assert_eq!(word(&e, DATA + 160), 0xcccc_cccc);
+}
+
+#[test]
 fn captured_context_status_and_composition_preferences_roundtrip_through_exact_public_gates() {
     let mut e = fixture();
     let handle = call(&mut e, Api::ImmCreateContext.id(), &[]);

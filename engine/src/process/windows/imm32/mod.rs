@@ -33,6 +33,11 @@ impl EngineInstance {
             .ensure_transaction_versions(2)
             .map_err(HostError::Memory)?;
         let thread = self.current_windows_thread_id()?;
+        if api == ImmApi32::ImmGetDefaultIMEWnd {
+            let value = self.default_ime_window(frame.arguments()[0], thread)?;
+            self.publish_prepared_call(Self::prepare_completed_call(frame.complete(value))?);
+            return Ok(true);
+        }
         let code_page = self.windows_ansi_code_page();
         let context = self.user32.as_mut().ok_or(HostError::InvalidRequest)?;
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
