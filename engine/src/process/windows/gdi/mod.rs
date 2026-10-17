@@ -9,6 +9,7 @@ mod memory;
 mod objects;
 mod paint;
 mod palette;
+mod patterns;
 mod raster;
 mod regions;
 mod runtime;

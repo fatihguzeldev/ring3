@@ -1,3 +1,4 @@
+use super::super::storage::{Storage32, SurfaceKey32};
 use super::super::{bitmaps::bounds, context::GdiRuntime32, memory};
 use crate::{
     memory::AddressSpace,
@@ -85,6 +86,27 @@ impl GdiRuntime32 {
             Brush32::Solid(color) => Some(color),
             Brush32::System(index) => Some(self.system_color(index)),
             Brush32::Null => None,
+            Brush32::Pattern { monochrome, .. } => {
+                let surface =
+                    &self.surfaces[self.surface_index(SurfaceKey32::PatternBrush(handle))?];
+                let Storage32::Owned(pixels) = &surface.storage else {
+                    return Err(GdiError32::InvalidRequest);
+                };
+                let x = (i64::from(point.x) - i64::from(state.brush_origin.x))
+                    .rem_euclid(i64::from(surface.layout.width)) as u32;
+                let y = (i64::from(point.y) - i64::from(state.brush_origin.y))
+                    .rem_euclid(i64::from(surface.layout.height)) as u32;
+                Some(if monochrome {
+                    let bit = pixels[surface.layout.row(y) + x as usize / 8] >> (7 - x % 8) & 1;
+                    if bit == 0 {
+                        state.text_color
+                    } else {
+                        state.background_color
+                    }
+                } else {
+                    surface.layout.read_pixel(pixels, &surface.palette, x, y)
+                })
+            }
             Brush32::Hatch { style, color } => {
                 let x = (i64::from(point.x) - i64::from(state.brush_origin.x)).rem_euclid(8);
                 let y = (i64::from(point.y) - i64::from(state.brush_origin.y)).rem_euclid(8);

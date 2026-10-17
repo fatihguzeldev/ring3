@@ -61,6 +61,7 @@ impl Default for GdiLimits32 {
 pub enum Brush32 {
     Solid(u32),
     System(u32),
+    Pattern { bitmap: u32, monochrome: bool },
     Null,
     Hatch { style: u32, color: u32 },
 }

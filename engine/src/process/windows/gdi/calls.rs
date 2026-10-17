@@ -292,7 +292,7 @@ impl GdiRuntime32 {
             | SetTextCharacterExtra
             | SetTextJustification => self.text_call(memory, api, args, ansi),
             CreatePen | CreatePenIndirect | CreateSolidBrush | CreateHatchBrush
-            | CreateBrushIndirect => self.create_object(memory, api, args),
+            | CreatePatternBrush | CreateBrushIndirect => self.create_object(memory, api, args),
             CreateBitmap => {
                 if args[2] != 1 || args[3] > u16::MAX as u32 {
                     return Err(GdiError32::Unsupported);

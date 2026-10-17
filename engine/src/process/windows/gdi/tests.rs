@@ -357,3 +357,5 @@ mod visibility;
 mod stretch;
 
 mod msimg;
+
+mod patterns;

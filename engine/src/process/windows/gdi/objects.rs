@@ -10,6 +10,9 @@ impl GdiRuntime32 {
         api: GdiApi32,
         args: &[u32],
     ) -> Result<u32, GdiError32> {
+        if api == GdiApi32::CreatePatternBrush {
+            return self.create_pattern_brush(memory, args[0]);
+        }
         let object = match api {
             GdiApi32::CreateSolidBrush => GdiObject32::Brush(Brush32::Solid(args[0] & 0x00ff_ffff)),
             GdiApi32::CreateHatchBrush if args[0] <= 5 => GdiObject32::Brush(Brush32::Hatch {
@@ -19,6 +22,9 @@ impl GdiRuntime32 {
             GdiApi32::CreateHatchBrush => return Err(GdiError32::InvalidRequest),
             GdiApi32::CreateBrushIndirect => {
                 let [style, color, hatch] = memory::words(memory, args[0])?;
+                if style == 3 {
+                    return self.create_pattern_brush(memory, hatch);
+                }
                 GdiObject32::Brush(match style {
                     0 => Brush32::Solid(color & 0x00ff_ffff),
                     1 => Brush32::Null,
@@ -72,6 +78,10 @@ impl GdiRuntime32 {
             let surface = self.surfaces.remove(index);
             self.bytes -= surface.layout.byte_len()?;
         }
+        if let Ok(index) = self.surface_index(SurfaceKey32::PatternBrush(handle)) {
+            let surface = self.surfaces.remove(index);
+            self.bytes -= surface.layout.byte_len()?;
+        }
         self.model.delete_object(handle)?;
         Ok(1)
     }
@@ -96,6 +106,7 @@ impl GdiRuntime32 {
                 Brush32::System(index) => vec![0, self.system_color(index), 0],
                 Brush32::Solid(color) => vec![0, color, 0],
                 Brush32::Null => vec![1, 0, 0],
+                Brush32::Pattern { bitmap, .. } => vec![3, 0, bitmap],
                 Brush32::Hatch { style, color } => vec![2, color, style],
             },
             GdiObject32::Bitmap(layout) => {

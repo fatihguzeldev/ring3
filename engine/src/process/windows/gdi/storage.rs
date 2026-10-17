@@ -10,6 +10,7 @@ use crate::{
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum SurfaceKey32 {
     Bitmap(u32),
+    PatternBrush(u32),
     ImageMask(u32),
     ImageColor(u32),
     Default(u32),
