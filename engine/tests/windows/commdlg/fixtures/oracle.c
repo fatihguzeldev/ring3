@@ -190,7 +190,7 @@ static UINT_PTR hook(HWND window, UINT message, LPARAM parameter, BOOL wide) {
     stage(p->name, "notify", ((NMHDR *)parameter)->code);
     if (((NMHDR *)parameter)->code == CDN_INITDONE) p->init_done = 1;
     if (((NMHDR *)parameter)->code == CDN_FOLDERCHANGE) p->folder_done = 1;
-    if (((NMHDR *)parameter)->code == CDN_INITDONE && !p->cancel && !p->action_posted) {
+    if (p->init_done && p->folder_done && !p->cancel && !p->action_posted) {
         p->action_posted = 1;
         if (!schedule_action(p, FALSE)) PostMessageW(p->root, WM_COMMAND, IDCANCEL, 0);
     }
