@@ -204,12 +204,16 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cmd /c "`"$environment`" && cl /nologo /std:c11 /W4 engine\tests\windows\comctl32\fixtures\registration.c /Fe:control-registration-reference.exe /link user32.lib"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cmd /c "`"$environment`" && cl /nologo /std:c11 /W4 engine\tests\windows\controls\fixtures\input.c /Fe:control-input-reference.exe /link user32.lib gdi32.lib"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $os = Get-CimInstance Win32_OperatingSystem
           Write-Output "RING3_WINDOWS version=$($os.Version) build=$($os.BuildNumber) source=$env:GITHUB_SHA"
-          Get-FileHash progress-reference.exe,control-registration-reference.exe -Algorithm SHA256 | Format-Table -AutoSize
+          Get-FileHash progress-reference.exe,control-registration-reference.exe,control-input-reference.exe -Algorithm SHA256 | Format-Table -AutoSize
           ./progress-reference.exe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           ./control-registration-reference.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./control-input-reference.exe
           exit $LASTEXITCODE
       - name: Compile and record native input method contexts
         if: inputs.profile == 'ime'

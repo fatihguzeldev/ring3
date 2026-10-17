@@ -9,13 +9,14 @@ typedef BOOL (WINAPI *init_ex)(const INITCOMMONCONTROLSEX *);
 static void row(const char *phase, const wchar_t *name) {
     WNDCLASSW type;
     MEMORY_BASIC_INFORMATION page;
+    BOOL loaded_before_query = GetModuleHandleW(L"comctl32.dll") != NULL;
     memset(&type, 0, sizeof(type));
     SetLastError(0);
     BOOL found = GetClassInfoW(NULL, name, &type);
     DWORD error = GetLastError();
     SIZE_T queried = found ? VirtualQuery((LPCVOID)type.lpfnWndProc, &page, sizeof(page)) : 0;
-    printf("{\"operation\":\"comctl-registration\",\"phase\":\"%s\",\"loaded\":%d,\"found\":%d,\"error\":%lu,\"procedureMapped\":%d,\"classStyle\":%u,\"windowExtra\":%d}\n",
-           phase, GetModuleHandleW(L"comctl32.dll") != NULL, found, (unsigned long)error,
+    printf("{\"operation\":\"comctl-registration\",\"phase\":\"%s\",\"loadedBeforeQuery\":%d,\"loaded\":%d,\"found\":%d,\"error\":%lu,\"procedureMapped\":%d,\"classStyle\":%u,\"windowExtra\":%d}\n",
+           phase, loaded_before_query, GetModuleHandleW(L"comctl32.dll") != NULL, found, (unsigned long)error,
            queried != 0 && page.State == MEM_COMMIT, found ? type.style : 0,
            found ? type.cbWndExtra : 0);
 }
