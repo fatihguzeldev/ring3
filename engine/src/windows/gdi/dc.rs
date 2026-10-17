@@ -38,6 +38,20 @@ impl GdiContext32 {
             }
         }
     }
+    pub(crate) fn set_dc_visible_region(
+        &mut self,
+        handle: u32,
+        region: Option<std::sync::Arc<Region32>>,
+    ) {
+        let dc = self
+            .dcs
+            .iter_mut()
+            .find(|dc| dc.handle == handle)
+            .expect("accepted display dc remains current");
+        for state in core::iter::once(&mut dc.state).chain(&mut dc.saved) {
+            state.visible_region = region.clone();
+        }
+    }
     pub fn check_select(&self, dc: u32, object: u32) -> Result<u32, GdiError32> {
         let current = self.dc(dc)?;
         Ok(match self.object(object)? {

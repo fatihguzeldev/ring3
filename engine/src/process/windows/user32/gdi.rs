@@ -1,6 +1,7 @@
 use super::{User32Context32, User32Outcome32, callback::Continuation32};
 mod query;
 mod sending;
+mod visibility;
 use crate::windows::{
     gdi::GdiWindow32,
     user32::{Rect32, User32Error32},

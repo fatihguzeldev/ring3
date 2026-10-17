@@ -135,10 +135,16 @@ impl GdiRuntime32 {
         let bounds = state.drawable_bounds(bounds);
         match api {
             GdiApi32::GetClipBox => {
+                let visible = state
+                    .visible_region
+                    .as_deref()
+                    .cloned()
+                    .unwrap_or_else(|| Region32::rectangle(bounds));
                 let region = state
                     .clip
                     .clone()
-                    .unwrap_or_else(|| Region32::rectangle(bounds))
+                    .unwrap_or_else(|| visible.clone())
+                    .combine(&visible, 1)?
                     .combine(&Region32::rectangle(bounds), 1)?;
                 let mut rect = region.bounds();
                 if region.complexity() != 1 {
@@ -193,10 +199,16 @@ impl GdiRuntime32 {
                     right: a.x.max(b.x),
                     bottom: a.y.max(b.y),
                 });
+                let visible = state
+                    .visible_region
+                    .as_deref()
+                    .cloned()
+                    .unwrap_or_else(|| Region32::rectangle(bounds));
                 let clip = state
                     .clip
                     .clone()
-                    .unwrap_or_else(|| Region32::rectangle(bounds));
+                    .unwrap_or_else(|| visible.clone())
+                    .combine(&visible, 1)?;
                 Ok(u32::from(
                     region
                         .combine(&clip, 1)?

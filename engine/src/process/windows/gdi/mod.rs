@@ -3,6 +3,7 @@ mod calls;
 mod colors;
 mod context;
 pub(in crate::process) mod controls;
+mod dc;
 mod fonts;
 mod images;
 mod memory;

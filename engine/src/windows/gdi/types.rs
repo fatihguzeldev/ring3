@@ -153,6 +153,7 @@ pub struct DcState32 {
     pub current_position: Point32,
     pub clip: Option<super::Region32>,
     pub visible_bounds: Option<Rect32>,
+    pub visible_region: Option<std::sync::Arc<super::Region32>>,
 }
 impl Default for DcState32 {
     fn default() -> Self {
@@ -183,6 +184,7 @@ impl Default for DcState32 {
             current_position: Point32::default(),
             clip: None,
             visible_bounds: None,
+            visible_region: None,
         }
     }
 }
@@ -206,8 +208,17 @@ impl DcState32 {
         )
     }
     pub fn drawable_bounds(&self, bounds: Rect32) -> Rect32 {
-        let Some(visible) = self.visible_bounds else {
-            return bounds;
+        let visible = self.visible_bounds.unwrap_or(bounds);
+        let visible = if let Some(region) = &self.visible_region {
+            let region = region.bounds();
+            Rect32 {
+                left: visible.left.max(region.left),
+                top: visible.top.max(region.top),
+                right: visible.right.min(region.right),
+                bottom: visible.bottom.min(region.bottom),
+            }
+        } else {
+            visible
         };
         let result = Rect32 {
             left: bounds.left.max(visible.left),
@@ -227,6 +238,10 @@ impl DcState32 {
             && point.x < bounds.right
             && point.y >= bounds.top
             && point.y < bounds.bottom
+            && self
+                .visible_region
+                .as_ref()
+                .is_none_or(|region| region.contains(point))
             && self.clip.as_ref().is_none_or(|clip| clip.contains(point))
     }
 }

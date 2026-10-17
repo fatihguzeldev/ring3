@@ -359,3 +359,5 @@ mod stretch;
 mod msimg;
 
 mod patterns;
+
+mod dc;

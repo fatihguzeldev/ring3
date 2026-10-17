@@ -83,6 +83,8 @@ impl EngineInstance {
         let args = frame.arguments();
         let result = if erase {
             self.gdi_erase_background(args)
+        } else if api == Some(GdiApi32::GetDCEx) {
+            self.gdi_dc_ex(args, thread)
         } else if matches!(api, Some(GdiApi32::GetDC | GdiApi32::GetWindowDC)) {
             let whole = api == Some(GdiApi32::GetWindowDC);
             let window = if args[0] == 0 {
@@ -360,8 +362,8 @@ impl GdiRuntime32 {
                 DcKind32::Display { window, .. } => window,
                 _ => 0,
             }),
-            GetDC | GetWindowDC | BeginPaint | EndPaint | InvalidateRect | ValidateRect
-            | GetUpdateRect | UpdateWindow => Err(GdiError32::InvalidRequest),
+            GetDC | GetDCEx | GetWindowDC | BeginPaint | EndPaint | InvalidateRect
+            | ValidateRect | GetUpdateRect | UpdateWindow => Err(GdiError32::InvalidRequest),
         }
     }
 }

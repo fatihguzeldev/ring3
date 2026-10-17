@@ -27,13 +27,28 @@ impl GdiRuntime32 {
         window: GdiWindow32,
         thread: u32,
     ) -> Result<u32, GdiError32> {
+        self.acquire_dc_options(window, thread, false)
+    }
+    pub(in crate::process::windows::gdi) fn acquire_dc_options(
+        &mut self,
+        mut window: GdiWindow32,
+        thread: u32,
+        cache: bool,
+    ) -> Result<u32, GdiError32> {
+        if cache {
+            window.class_style &= !(0x20 | 0x40);
+        }
         let key = SurfaceKey32::Window {
             window: window.window,
             whole: window.whole,
         };
         let class = (!window.whole && window.class_style & 0x40 != 0).then_some(window.class_atom);
         let private = !window.whole && window.class_style & 0x20 != 0;
-        let persistent = self.model.persistent_dc(window.window, class, window.whole);
+        let persistent = if cache {
+            None
+        } else {
+            self.model.persistent_dc(window.window, class, window.whole)
+        };
         let prepared = if persistent.is_none() {
             Some(self.model.prepare_dc(DcKind32::Display {
                 window: window.window,
@@ -97,6 +112,7 @@ impl GdiRuntime32 {
         };
         self.model
             .set_display_visibility(window.window, window.whole, visible);
+        self.model.set_dc_visible_region(handle, None);
         Ok(handle)
     }
     pub(in crate::process) fn release_window_dc(
