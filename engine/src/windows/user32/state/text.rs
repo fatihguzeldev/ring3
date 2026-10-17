@@ -9,6 +9,7 @@ impl User32State32 {
             .flatten()
             .map(|index| crate::windows::controls::ControlKind32::STANDARD[index])
     }
+    #[cfg(test)]
     pub(crate) fn standard_atom(&self, kind: crate::windows::controls::ControlKind32) -> u16 {
         self.standard_atoms[kind as usize]
     }

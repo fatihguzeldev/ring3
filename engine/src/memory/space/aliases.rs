@@ -284,6 +284,7 @@ impl AddressSpace {
         }
         Ok(())
     }
+    #[cfg(test)]
     pub(crate) fn map_shared_page_rights(
         &mut self,
         range: PageRange,
