@@ -11,7 +11,7 @@ const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const engineHash = hash(readFileSync(enginePath));
 assert.equal(engineHash, process.env.RING3_ENGINE_SHA256);
 const guest = image(), a = guest.addresses;
-assert.equal(guest.calls.length, 14);
+assert.equal(guest.calls.length, 21);
 writeFileSync(join(output, 'automation-authored.exe'), guest.bytes);
 const engine = host(enginePath, root, output, guest, {
   gateOwners: 5,
@@ -58,10 +58,19 @@ function finishCallbacks() {
     const method = methods.find(method => method.entry === procedure);
     assert.ok(method); assert.equal(count, method.words);
     const object = pending.readUInt32LE(32);
-    assert.ok([a.first, a.old, a.rejecting].includes(object));
+    assert.ok([a.first, a.old, a.rejecting, a.numeric, a.failure, a.conversion].includes(object));
     if (count === 3) {
       const iid = pending.readUInt32LE(36);
       assert.deepEqual([0, 4, 8, 12].map(offset => read(iid + offset)), [0x20400, 0, 0xc0, 0x46000000]);
+    }
+    if (count === 9) {
+      assert.equal(pending.readUInt32LE(36), 0);
+      const iid = pending.readUInt32LE(40), parameters = pending.readUInt32LE(52);
+      assert.deepEqual([0, 4, 8, 12].map(offset => read(iid + offset)), [0, 0, 0, 0]);
+      assert.equal(pending.readUInt32LE(44), 0x407);
+      assert.equal(pending.readUInt32LE(48), 2);
+      assert.deepEqual([0, 4, 8, 12].map(offset => read(parameters + offset)), [0, 0, 0, 0]);
+      assert.deepEqual([pending.readUInt32LE(60), pending.readUInt32LE(64)], [0, 0]);
     }
     assert.equal(api.begin_windows_resident_callback(...key, method.low, method.high, returnPc, returnId), 0);
     const record = take(72), token = record.readUInt32LE(16);
@@ -85,7 +94,7 @@ function finishCallbacks() {
       if (reason === 1 || reason === 3) {select = reason === 3; continue;}
       assert.equal(reason, 8); assert.equal(detail, returnId); assert.equal(get(48), returnPc);
       assert.ok(retired > 0);
-      const expected = procedure === guest.procedures[0].entry ? (object === a.rejecting ? 0x80004002 : 0) : read(object + 4);
+      const expected = method.result ?? (procedure === guest.procedures[0].entry ? (object === a.rejecting ? 0x80004002 : 0) : read(object + 4));
       assert.equal(get(16), expected, 'actual native-method guest return');
       completed = true; break;
     }
@@ -98,6 +107,7 @@ function finishCallbacks() {
 function object(pointer) {return [4, 8, 12, 16].map(offset => read(pointer + offset));}
 try {
   for (const unit of engine.units) {
+    const destinationBefore = [0, 4, 8, 12].map(offset => read(a.destination + offset));
     const owner = engine.run(unit);
     assert.equal(api.capture_resident_call(...key, owner.low, owner.high, 2, unit.words), 0);
     const token = take(112).readUInt32LE(16);
@@ -125,11 +135,21 @@ try {
       assert.deepEqual([0, 4, 8, 12].map(offset => read(a.destination + offset)), [0x400d, 0, a.borrowed, 0]);
     }
     if (unit.hook === 'clear-borrowed') assert.deepEqual(object(a.first), [1, 4, 4, 1]);
+    if (unit.hook?.startsWith('invoke-')) {
+      const pointer = unit.hook === 'invoke-numeric' ? a.numeric : unit.hook === 'invoke-failure' ? a.failure : a.conversion;
+      assert.deepEqual([24, 28, 32, 36, 40, 44, 48, 56, 60].map(offset => read(pointer + offset)), [1, 0, 0x407, 2, 0, 0, 0, 0, 0]);
+      assert.ok(read(pointer + 52) > 0, 'real Invoke VARIANT result pointer');
+      assert.deepEqual(object(pointer), unit.hook === 'invoke-numeric' ? [1, 0, 0, 0] : [1, 1, 1, 0]);
+      assert.deepEqual([0, 4, 8, 12].map(offset => read(a.destination + offset)), unit.hook === 'invoke-numeric' ? [3, 0, 37, 0] : destinationBefore);
+    }
   }
-  assert.equal(calls.length, 14); assert.equal(callbacks.length, 12);
+  assert.equal(calls.length, 21); assert.equal(callbacks.length, 20);
   assert.deepEqual(object(a.first), [0, 4, 5, 1]);
   assert.deepEqual(object(a.old), [0, 0, 1, 0]);
   assert.deepEqual(object(a.rejecting), [0, 0, 1, 1]);
+  assert.deepEqual(object(a.numeric), [0, 0, 1, 0]);
+  assert.deepEqual(object(a.failure), [0, 1, 2, 0]);
+  assert.deepEqual(object(a.conversion), [0, 1, 2, 0]);
   assert.deepEqual(callbacks.map(callback => [callback.procedure, callback.object]), [
     [guest.procedures[1].entry, a.first], [guest.procedures[2].entry, a.old],
     [guest.procedures[2].entry, a.first], [guest.procedures[0].entry, a.first],
@@ -137,11 +157,15 @@ try {
     [guest.procedures[2].entry, a.first], [guest.procedures[0].entry, a.rejecting],
     [guest.procedures[1].entry, a.first], [guest.procedures[2].entry, a.first],
     [guest.procedures[2].entry, a.rejecting], [guest.procedures[2].entry, a.first],
+    [guest.procedures[3].entry, a.numeric],
+    [guest.procedures[4].entry, a.failure], [guest.procedures[2].entry, a.failure],
+    [guest.procedures[5].entry, a.conversion], [guest.procedures[2].entry, a.conversion],
+    [guest.procedures[2].entry, a.numeric], [guest.procedures[2].entry, a.failure], [guest.procedures[2].entry, a.conversion],
   ]);
   const receipt = {engineHash, guestHash: hash(guest.bytes), calls: calls.length, callbacks: callbacks.length,
-    objects: {first: object(a.first), old: object(a.old), rejecting: object(a.rejecting)},
+    objects: {first: object(a.first), old: object(a.old), rejecting: object(a.rejecting), numeric: object(a.numeric), failure: object(a.failure), conversion: object(a.conversion)},
     nativeMethodCallbacks: callbacks, runs: engine.runs,
-    claim: 'authored PE32 executes generated Wasm AddRef/Release/QI methods through provider9; exact ownership counters, independent copies, borrowed values, E_NOINTERFACE and final zero-reference guest counters'};
+    claim: 'authored PE32 executes generated Wasm AddRef/Release/QI and IDispatch Invoke methods through provider9; exact native Invoke signature, numeric37, owned-result Release on Invoke/conversion failure, prior copy/byref/E_NOINTERFACE oracles, and final zero-reference guest counters'};
   writeFileSync(join(output, 'receipt.json'), JSON.stringify(receipt, null, 2));
   console.log(JSON.stringify({engineHash, calls: calls.length, callbacks: callbacks.length}));
 } catch (error) {

@@ -30,20 +30,26 @@ impl EngineInstance {
             return self.advance_automation_reference(continuation);
         }
         let operation = self.prepare_automation_variant_operation(api, frame.arguments())?;
-        let (destination, mut plan, query) = match operation {
+        let (destination, mut plan, query, invoke) = match operation {
             VariantOperation32::Complete(result) => {
                 return Ok(WindowsProviderOutcome32::Return(result));
             }
-            VariantOperation32::Publish { destination, plan } => (destination, plan, None),
+            VariantOperation32::Publish { destination, plan } => (destination, plan, None, None),
             VariantOperation32::Query {
                 destination,
                 plan,
                 source,
                 target,
-            } => (destination, plan, Some((source, target))),
+            } => (destination, plan, Some((source, target)), None),
+            VariantOperation32::Invoke {
+                destination,
+                plan,
+                source,
+                parameters,
+            } => (destination, plan, None, Some((source, parameters))),
         };
         let mut objects = preflight_references(self, &plan)?;
-        if objects.is_none() && query.is_none() {
+        if objects.is_none() && query.is_none() && invoke.is_none() {
             self.publish_retained_variant_plan(destination, &mut plan)?;
             return Ok(WindowsProviderOutcome32::Return(0));
         }
@@ -52,6 +58,13 @@ impl EngineInstance {
             objects.capture(self.memory.as_mut().ok_or(HostError::Closed)?, source)?;
             objects.reserve_query()?;
         }
+        if let Some((source, _)) = invoke {
+            objects.capture(self.memory.as_mut().ok_or(HostError::Closed)?, source)?;
+            BorrowedCall32::prepare(self.memory.as_mut().ok_or(HostError::Closed)?, source, 6)?;
+        }
+        let invoke_state = invoke
+            .map(|(_, parameters)| super::invoke::InvokeState32::prepare(self, parameters))
+            .transpose()?;
         self.check_windows_callback_capacity()?;
         self.preflight_retained_variant_plan(&plan)?;
         self.validate_new_windows_reply(owner, token)?;
@@ -91,6 +104,18 @@ impl EngineInstance {
                     object: source,
                 },
             )
+        } else if let Some((source, _)) = invoke {
+            let bounds = self.automation_scratch_bounds();
+            let scratch =
+                GuestCallbackScratch32::allocate(self.memory.as_mut().unwrap(), bounds, &[0; 48])
+                    .map_err(HostError::Memory)?;
+            (
+                Some(scratch),
+                Stage32::NeedCall {
+                    action: Action32::Invoke,
+                    object: source,
+                },
+            )
         } else {
             (None, Stage32::Acquire)
         };
@@ -113,6 +138,7 @@ impl EngineInstance {
             objects,
             stage,
             scratch,
+            invoke: invoke_state,
         };
         self.automation.next_reference = continuation;
         self.automation.references.push(work);

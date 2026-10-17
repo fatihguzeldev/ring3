@@ -8,3 +8,5 @@ mod tls;
 mod utilities;
 
 mod completion;
+
+mod automation;

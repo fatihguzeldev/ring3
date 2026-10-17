@@ -3,6 +3,7 @@ import {builder} from '../../../../support/pe32/image.mjs';
 
 const word = value => {const bytes = Buffer.alloc(4); bytes.writeUInt32LE(value >>> 0); return [...bytes];};
 const queryEntry = 0x404d00, addEntry = 0x404e00, releaseEntry = 0x404f00;
+const invokeEntries = [0x404a00, 0x404b00, 0x404c00];
 
 export function image() {
   const b = builder([
@@ -19,6 +20,11 @@ export function image() {
   b.allocate('second', [0, 0, 0, 0]);
   b.allocate('indirect', [0x400d, 0, borrowed, 0]);
   b.allocate('rejectingSource', [13, 0, rejecting, 0]);
+  for (const [index, name] of ['numeric', 'failure', 'conversion'].entries()) {
+    const table = b.data(`${name}Table`, [queryEntry, addEntry, releaseEntry, 0, 0, 0, invokeEntries[index]]);
+    const object = b.allocate(name, [table, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    b.allocate(`${name}Source`, [9, 0, object, 0]);
+  }
   const rows = [];
   const call = (name, id, args, expected = 0, hook) => {
     b.external(name, id, args, expected, undefined, hook); rows.push(args.length);
@@ -38,6 +44,13 @@ export function image() {
   call('VariantClear', 0x20001a, [a.destination], 0, 'clear-borrowed');
   call('VariantClear', 0x20001a, [a.rejectingSource]);
   call('VariantClear', 0x20001a, [a.source]);
+  call('VariantChangeTypeEx', 0x20001e, [a.destination, a.numericSource, 0x407, 0, 3], 0, 'invoke-numeric');
+  call('VariantClear', 0x20001a, [a.destination]);
+  call('VariantChangeTypeEx', 0x20001e, [a.destination, a.failureSource, 0x407, 0, 3], 0x80020005, 'invoke-failure');
+  call('VariantChangeTypeEx', 0x20001e, [a.destination, a.conversionSource, 0x407, 0, 3], 0x80020005, 'invoke-conversion');
+  call('VariantClear', 0x20001a, [a.numericSource]);
+  call('VariantClear', 0x20001a, [a.failureSource]);
+  call('VariantClear', 0x20001a, [a.conversionSource]);
   call('ExitProcess', 0x10003, [0], 'exit');
   const guest = b.seal();
   assert.ok(guest.calls.at(-1).end < 0x3d00, 'authored main does not overlap interface methods');
@@ -63,7 +76,29 @@ export function image() {
     const offset = labels.get(target) - at - 1;
     assert.ok(offset >= -128 && offset <= 127); query[at] = offset & 255;
   }
-  const procedures = [[queryEntry, query, 3], [addEntry, add, 1], [releaseEntry, release, 1]];
+  const invocation = (unknown, status) => {
+    const bytes = [], emit = (...values) => bytes.push(...values);
+    emit(0x8b, 0x4c, 0x24, 4, 0xff, 0x41, 24);
+    for (const [argument, field] of [[8, 28], [16, 32], [20, 36], [28, 52], [32, 56], [36, 60]]) {
+      emit(0x8b, 0x44, 0x24, argument, 0x89, 0x41, field);
+    }
+    emit(0x8b, 0x54, 0x24, 24, 0x8b, 0x42, 8, 0x89, 0x41, 40, 0x8b, 0x42, 12, 0x89, 0x41, 44);
+    emit(0x8b, 0x54, 0x24, 12, 0x8b, 0x02, 0x0b, 0x42, 4, 0x0b, 0x42, 8, 0x0b, 0x42, 12, 0x89, 0x41, 48);
+    emit(0x8b, 0x54, 0x24, 28, 0xc7, 0x02, ...word(unknown ? 13 : 3));
+    emit(0xc7, 0x42, 4, ...word(0), 0xc7, 0x42, 12, ...word(0));
+    if (unknown) {
+      emit(0x89, 0x4a, 8, 0xff, 0x41, 4, 0xff, 0x41, 8);
+    } else {
+      emit(0xc7, 0x42, 8, ...word(37));
+    }
+    emit(0xb8, ...word(status), 0xc2, 36, 0);
+    return bytes;
+  };
+  const procedures = [[queryEntry, query, 3], [addEntry, add, 1], [releaseEntry, release, 1],
+    [invokeEntries[0], invocation(false, 0), 9],
+    [invokeEntries[1], invocation(true, 0x80020006), 9],
+    [invokeEntries[2], invocation(true, 0), 9],
+  ];
   for (const [entry, bytes] of procedures) {
     assert.ok(bytes.length <= 0xe0);
     guest.bytes.set(bytes, 0x200 + entry - 0x401000);
@@ -73,6 +108,7 @@ export function image() {
   assert.equal(queryBlocks.length, 8, 'authored QI control flow fits the existing descriptor bound');
   guest.procedures = procedures.map(([entry, bytes, words]) => ({entry, length: bytes.length, words,
     blocks: entry === queryEntry ? queryBlocks : [{entry, length: bytes.length}],
+    result: entry === invokeEntries[1] ? 0x80020006 : invokeEntries.includes(entry) ? 0 : undefined,
   }));
   let start = guest.entry;
   guest.segments = guest.calls.map((call, index) => {

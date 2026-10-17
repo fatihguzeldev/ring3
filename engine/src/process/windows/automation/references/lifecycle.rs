@@ -29,13 +29,13 @@ impl EngineInstance {
         let Stage32::Calling { action, call } = work.stage else {
             return Err(HostError::Call(CallError::StateChanged));
         };
-        if !matches!(action, Action32::Compensate) {
+        if !matches!(action, Action32::Compensate | Action32::ReleaseTemporary) {
             work.output.check(self.memory()?)?;
             self.check_retained_variant_allocations(&work.plan)?;
         }
         work.objects.check(self.memory()?, call.object)?;
         call.check(self.memory()?)?;
-        if matches!(action, Action32::Query(_)) {
+        if matches!(action, Action32::Query(_) | Action32::Invoke) {
             work.scratch
                 .ok_or(HostError::Call(CallError::StateChanged))?
                 .check(self.memory()?)

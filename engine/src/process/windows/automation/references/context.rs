@@ -17,6 +17,8 @@ pub(super) enum Action32 {
     Release,
     Compensate,
     Query(u16),
+    Invoke,
+    ReleaseTemporary,
 }
 
 #[derive(Clone, Copy)]
@@ -36,6 +38,13 @@ pub(super) enum Stage32 {
         result: u32,
     },
     QueryOwned(u16),
+    InvokeReturned {
+        status: u32,
+        returned: crate::windows::automation::variants::Variant32,
+    },
+    InvokeConvert(u32),
+    ReleaseTemporaries,
+    RetireTemporaries,
     Rollback,
     Publish,
     Complete(u32),
@@ -61,4 +70,5 @@ pub(in crate::process::windows::automation) struct ReferenceWork32 {
     pub(super) objects: ObjectWitnesses32,
     pub(super) stage: Stage32,
     pub(super) scratch: Option<GuestCallbackScratch32>,
+    pub(super) invoke: Option<super::invoke::InvokeState32>,
 }

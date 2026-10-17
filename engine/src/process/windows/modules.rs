@@ -425,6 +425,9 @@ impl EngineInstance {
         extra_ranges.extend(self.automation_process_scratch_ranges());
         extra_ranges.sort_unstable_by_key(|range| range.first);
         let media = self.prepare_media_process_exit()?;
+        let automation_allocations = self.automation_process_temporary_allocations()?;
+        let automation_retirement =
+            self.prepare_windows_runtime_retirement(&automation_allocations)?;
         let mut bindings = self
             .registry
             .as_ref()
@@ -441,6 +444,8 @@ impl EngineInstance {
             self.process_exit_owner = Some(self.threads.current_id());
             return Ok(());
         }
+        self.commit_windows_runtime_retirement_after_memory(automation_retirement);
+        self.commit_automation_temporary_retirement(&automation_allocations);
         self.commit_media_process_exit(media);
         if let Some(gdi) = self.gdi.as_mut() {
             gdi.retire_process();

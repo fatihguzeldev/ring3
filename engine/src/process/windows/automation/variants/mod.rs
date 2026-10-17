@@ -1,5 +1,7 @@
 mod coercion;
 mod date;
+mod invoke;
+pub(super) use invoke::InvokeParameters32;
 mod owned;
 pub(super) use owned::OwnedValuePlan32;
 
@@ -20,6 +22,12 @@ pub(super) enum VariantOperation32 {
     Publish {
         destination: u32,
         plan: OwnedValuePlan32,
+    },
+    Invoke {
+        destination: u32,
+        plan: OwnedValuePlan32,
+        source: u32,
+        parameters: InvokeParameters32,
     },
     Query {
         destination: u32,
@@ -96,7 +104,17 @@ impl EngineInstance {
                 Variant32::new(target, &[])
                     .validate()
                     .map_err(HostError::Automation)?;
-                return Err(HostError::Automation(E::NotImplemented));
+                let plan = self.plan_owned_variant(Variant32::EMPTY, destination, true)?;
+                return Ok(VariantOperation32::Invoke {
+                    destination: args[0],
+                    plan,
+                    source: source.pointer(),
+                    parameters: InvokeParameters32 {
+                        locale,
+                        flags,
+                        target,
+                    },
+                });
             }
             self.coerce_automation_variant(source, locale, flags, target)?
         };

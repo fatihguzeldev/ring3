@@ -412,3 +412,5 @@ fn compensation_never_calls_a_replacement_object_at_the_same_guest_address() {
     assert_eq!(engine.memory().unwrap().transaction_version(), version);
     assert_eq!(read(&engine, 0x1500, 16), nested.0);
 }
+
+mod invoke;

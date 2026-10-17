@@ -67,6 +67,9 @@ impl EngineInstance {
             .map_err(HostError::Nls)?;
         let activation = self.prepare_activation_thread_exit(id)?;
         let com: PreparedComThreadExit32 = self.prepare_com_thread_exit(id)?;
+        let automation_allocations = self.automation_thread_temporary_allocations(id)?;
+        let automation_retirement =
+            self.prepare_windows_runtime_retirement(&automation_allocations)?;
         let capacity = self
             .windows_memory
             .committed_ranges()
@@ -324,6 +327,8 @@ impl EngineInstance {
                 .write_thread_words32(words)
                 .map_err(HostError::Memory)?;
         }
+        self.commit_windows_runtime_retirement_after_memory(automation_retirement);
+        self.commit_automation_temporary_retirement(&automation_allocations);
         let memory_changed = self.memory.as_ref().unwrap().transaction_version() != memory_version;
         self.synchronization
             .as_mut()

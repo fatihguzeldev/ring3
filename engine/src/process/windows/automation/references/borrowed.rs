@@ -28,6 +28,28 @@ pub(super) struct ObjectWitnesses32 {
     pages: Vec<PageWitness32>,
 }
 impl ObjectWitnesses32 {
+    pub(super) fn extend(&mut self, memory: &AddressSpace, other: Self) -> Result<(), HostError> {
+        if other
+            .identity
+            .is_some_and(|identity| identity != memory.identity())
+        {
+            return Err(HostError::Call(CallError::StateChanged));
+        }
+        self.pages
+            .try_reserve(other.pages.len())
+            .map_err(|_| HostError::Automation(E::Allocation))?;
+        for page in other.pages {
+            match self
+                .pages
+                .binary_search_by_key(&page.address.0, |page| page.address.0)
+            {
+                Ok(index) => self.pages[index].check(memory)?,
+                Err(index) => self.pages.insert(index, page),
+            }
+        }
+        self.identity = Some(memory.identity());
+        Ok(())
+    }
     pub(super) fn reserve_query(&mut self) -> Result<(), HostError> {
         self.pages
             .try_reserve(2)

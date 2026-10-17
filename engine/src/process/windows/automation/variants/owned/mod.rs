@@ -104,6 +104,53 @@ impl OwnedValuePlan32 {
             .map(|array| (array.vartype, array.bytes.as_slice()))
     }
 
+    pub(in crate::process::windows::automation) fn retirement_allocations(&self) -> &[(u32, u64)] {
+        &self.retire_identities
+    }
+    pub(in crate::process::windows::automation) fn absorb_retirement(
+        &mut self,
+        other: &Self,
+        limits: AutomationLimits32,
+    ) -> Result<(), E> {
+        if other
+            .retire
+            .iter()
+            .any(|pointer| self.retire.binary_search(pointer).is_ok())
+        {
+            return Err(E::InvalidParameter);
+        }
+        let count = self
+            .retire
+            .len()
+            .checked_add(other.retire.len())
+            .filter(|&count| count <= limits.objects.saturating_mul(2))
+            .ok_or(E::Capacity)?;
+        let freed = self.freed.checked_add(other.freed).ok_or(E::Capacity)?;
+        let strings = self
+            .retired_strings
+            .checked_add(other.retired_strings)
+            .ok_or(E::Capacity)?;
+        let arrays = self
+            .retired_arrays
+            .checked_add(other.retired_arrays)
+            .ok_or(E::Capacity)?;
+        self.retire
+            .try_reserve(count - self.retire.len())
+            .map_err(|_| E::Allocation)?;
+        self.retire_identities
+            .try_reserve(other.retire_identities.len())
+            .map_err(|_| E::Allocation)?;
+        self.retire.extend_from_slice(&other.retire);
+        self.retire.sort_unstable();
+        self.retire_identities
+            .extend_from_slice(&other.retire_identities);
+        self.retire_identities.sort_unstable_by_key(|row| row.0);
+        self.freed = freed;
+        self.retired_strings = strings;
+        self.retired_arrays = arrays;
+        Ok(())
+    }
+
     fn reserve_block(&mut self, size: usize, limits: AutomationLimits32) -> Result<usize, E> {
         if self.blocks.len() >= limits.objects {
             return Err(E::Capacity);

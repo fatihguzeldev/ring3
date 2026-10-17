@@ -32,6 +32,12 @@ impl EngineInstance {
     ) -> Result<(), HostError> {
         self.publish_owned_variant_plan(Some(destination), plan)
     }
+    pub(in crate::process::windows::automation) fn retire_retained_variant_plan(
+        &mut self,
+        plan: &mut OwnedValuePlan32,
+    ) -> Result<(), HostError> {
+        self.publish_owned_variant_plan(None, plan)
+    }
     fn publish_owned_variant_plan(
         &mut self,
         destination: Option<u32>,

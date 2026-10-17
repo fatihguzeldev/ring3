@@ -88,16 +88,22 @@ impl EngineInstance {
                             object,
                         }
                     } else if acquire {
-                        Stage32::Release
+                        if work.invoke.is_some() {
+                            Stage32::ReleaseTemporaries
+                        } else {
+                            Stage32::Release
+                        }
                     } else {
                         Stage32::Publish
                     };
                 }
                 Stage32::NeedCall { action, object } => {
-                    if !matches!(action, Action32::Compensate) && !check_output(self, work)? {
+                    if !matches!(action, Action32::Compensate | Action32::ReleaseTemporary)
+                        && !check_output(self, work)?
+                    {
                         continue;
                     }
-                    if matches!(action, Action32::Query(_)) {
+                    if matches!(action, Action32::Query(_) | Action32::Invoke) {
                         work.scratch
                             .ok_or_else(invalid_state)?
                             .check(self.memory()?)
@@ -106,7 +112,8 @@ impl EngineInstance {
                     work.objects.check(self.memory()?, object)?;
                     let slot = match action {
                         Action32::Acquire => 1,
-                        Action32::Release | Action32::Compensate => 2,
+                        Action32::Release | Action32::Compensate | Action32::ReleaseTemporary => 2,
+                        Action32::Invoke => 6,
                         Action32::Query(_) => 0,
                     };
                     let call = BorrowedCall32::prepare(
@@ -124,6 +131,16 @@ impl EngineInstance {
                         arguments[1] = scratch.address.0;
                         arguments[2] = scratch.address.0 + 16;
                         3
+                    } else if matches!(action, Action32::Invoke) {
+                        let scratch = work.scratch.ok_or_else(invalid_state)?;
+                        let parameters = work.invoke.as_ref().ok_or_else(invalid_state)?.parameters;
+                        arguments[1] = 0;
+                        arguments[2] = scratch.address.0;
+                        arguments[3] = parameters.locale;
+                        arguments[4] = 2;
+                        arguments[5] = scratch.address.0 + 16;
+                        arguments[6] = scratch.address.0 + 32;
+                        9
                     } else {
                         1
                     };
@@ -146,6 +163,50 @@ impl EngineInstance {
                     action: Action32::Release,
                     ..
                 } => work.stage = Stage32::Release,
+                Stage32::Received {
+                    action: Action32::ReleaseTemporary,
+                    ..
+                } => work.stage = Stage32::ReleaseTemporaries,
+                Stage32::Received {
+                    action: Action32::Invoke,
+                    result,
+                } => {
+                    let scratch = work.scratch.ok_or_else(invalid_state)?;
+                    scratch.check(self.memory()?).map_err(HostError::Memory)?;
+                    let returned = self.read_automation_variant(scratch.address.0 + 32, false)?;
+                    work.stage = Stage32::InvokeReturned {
+                        status: result,
+                        returned,
+                    };
+                }
+                Stage32::InvokeReturned { status, returned } => {
+                    self.accept_automation_invoke_result(work, status, returned)?
+                }
+                Stage32::InvokeConvert(status) => {
+                    self.convert_automation_invoke_result(work, status)?
+                }
+                Stage32::ReleaseTemporaries => {
+                    if let Some(object) = self.next_automation_temporary_release(work)? {
+                        work.stage = Stage32::NeedCall {
+                            action: Action32::ReleaseTemporary,
+                            object,
+                        };
+                    } else if work.failure.is_some()
+                        || work.invoke.as_ref().ok_or_else(invalid_state)?.result != 0
+                    {
+                        work.stage = Stage32::RetireTemporaries;
+                    } else {
+                        work.stage = Stage32::Release;
+                    }
+                }
+                Stage32::RetireTemporaries => {
+                    self.retire_automation_temporary_values(work)?;
+                    work.stage = if let Some(error) = work.failure {
+                        Stage32::Failed(error)
+                    } else {
+                        Stage32::Complete(work.invoke.as_ref().ok_or_else(invalid_state)?.result)
+                    };
+                }
                 Stage32::Received {
                     action: Action32::Compensate,
                     ..
@@ -200,9 +261,12 @@ impl EngineInstance {
                     } else if let Some(object) = work.query_owned {
                         object
                     } else {
-                        retire_scratch(self, work)?;
-                        work.stage = Stage32::Failed(work.failure.ok_or_else(invalid_state)?);
-
+                        if work.invoke.is_some() {
+                            work.stage = Stage32::ReleaseTemporaries;
+                        } else {
+                            retire_scratch(self, work)?;
+                            work.stage = Stage32::Failed(work.failure.ok_or_else(invalid_state)?);
+                        }
                         continue;
                     };
                     work.stage = Stage32::NeedCall {
@@ -216,6 +280,9 @@ impl EngineInstance {
                     }
                     retire_scratch(self, work)?;
                     self.publish_retained_variant_plan(work.destination, &mut work.plan)?;
+                    if let Some(invoke) = &mut work.invoke {
+                        invoke.forget_temporaries();
+                    }
                     work.stage = Stage32::Complete(0);
                 }
                 Stage32::Failed(error) => return Err(error),
