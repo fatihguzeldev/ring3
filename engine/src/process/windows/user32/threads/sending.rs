@@ -98,6 +98,9 @@ impl User32Context32 {
         if self.menu_bar_wait(token).is_some() {
             return self.pending_menu_bar_message(token);
         }
+        if let Some(message) = self.pending_resource_dialog_send(token) {
+            return Ok(Some(message));
+        }
         if self.ui_wait(token).is_some() {
             return Ok(self.pending_ui_message(token));
         }

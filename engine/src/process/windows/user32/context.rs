@@ -54,6 +54,7 @@ impl User32Context32 {
                 limits.continuations,
                 limits.windows,
             )?,
+            file_dialogs: super::file_dialogs::FileDialogs32::new(limits.continuations)?,
             provenance: super::messages::MessageProvenance32::new(limits.messages)?,
             call_activation: Default::default(),
             activation_capture_limit: limits

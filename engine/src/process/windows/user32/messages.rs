@@ -126,15 +126,16 @@ impl User32Context32 {
         token: u64,
         memory: &mut AddressSpace,
     ) -> Result<User32Outcome32, User32Error32> {
+        if let Some(outcome) = self.resume_file_prompt_dialog(token, memory) {
+            return outcome;
+        }
         let outcome = self.resume_wait_step(token, memory)?;
         let outcome = self.complete_resource_dialog_child(token, outcome, memory)?;
         let outcome = self.complete_accelerator_child(token, outcome)?;
         let outcome = self.complete_clipboard_child(token, outcome)?;
         let outcome = self.complete_sent_paint_child(token, outcome)?;
         let outcome = self.complete_system_colors_child(token, outcome)?;
-        let outcome = self.complete_ui_child(token, outcome)?;
-        let outcome = self.complete_menu_bar_child(token, outcome)?;
-        self.complete_common_layout_child(token, outcome)
+        self.complete_ui_child(token, outcome)
     }
 
     fn resume_wait_step(
@@ -148,9 +149,6 @@ impl User32Context32 {
             .filter(|pending| pending.token == token)
             .cloned()
             .ok_or(User32Error32::InvalidToken)?;
-        if let Continuation32::CommonLayout(_) = pending.continuation {
-            return self.resume_common_layout(token);
-        }
         if let Continuation32::UiState(_) = pending.continuation {
             return self.resume_ui_change(token);
         }

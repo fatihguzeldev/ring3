@@ -28,6 +28,7 @@ impl User32Context32 {
             modal,
             font,
             context,
+            foreign_owner,
         } = input;
         self.prepare_thread_slots()?;
         if self.pending.len() + 2 > self.continuation_limit
@@ -40,8 +41,12 @@ impl User32Context32 {
         self.state.check_window_capacity(prepared.windows.len())?;
         let owner = if args[2] == 0 {
             None
-        } else {
+        } else if !foreign_owner {
             Some(self.owned(args[2], context.thread_id)?)
+        } else {
+            let owner = WindowHandle32::try_from(args[2])?;
+            self.windows().get(owner)?;
+            Some(owner)
         };
         let owner_enabled = owner.is_some_and(|window| {
             self.windows()

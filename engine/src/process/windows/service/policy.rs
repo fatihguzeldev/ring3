@@ -144,6 +144,7 @@ pub(super) fn is_memory_fault(error: crate::process::HostError) -> bool {
         HostError::Memory(MemoryError::Fault(_))
             | HostError::Call(CallError::Memory(MemoryError::Fault(_)))
             | HostError::User32(User32Error32::Memory(MemoryError::Fault(_)))
+            | HostError::Comdlg(crate::windows::commdlg::ComdlgError32::Memory(MemoryError::Fault(_)))
             | HostError::Gdi(crate::windows::gdi::GdiError32::Memory(MemoryError::Fault(_)))
     )
 }

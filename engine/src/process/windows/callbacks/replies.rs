@@ -279,6 +279,7 @@ impl EngineInstance {
             let thread = self.current_windows_thread()?.with_last_error(error);
             self.publish_windows_thread(thread)?;
         }
+        self.finish_commdlg_publication(reply.owner, reply.token)?;
         self.publish_prepared_call(prepared);
         if !self.defer_guard_service_cleanup(
             crate::process::windows::service::WindowsServiceCleanup32::Callback,

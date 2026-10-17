@@ -105,7 +105,13 @@ impl User32Context32 {
         {
             return Err(User32Error32::InvalidToken);
         }
-        self.check_thread_scratch(memory)
+        self.check_thread_scratch(memory)?;
+        if let Some(pending) = self.pending.last()
+            && let super::super::callback::Continuation32::FileDialog(call) = pending.continuation
+        {
+            self.check_file_dialog_output(call, memory)?;
+        }
+        Ok(())
     }
     pub(in crate::process) fn thread_scratch_ranges(
         &self,
@@ -113,6 +119,9 @@ impl User32Context32 {
         self.pending
             .iter()
             .filter_map(|pending| match pending.continuation {
+                super::super::callback::Continuation32::FileDialog(call) => {
+                    call.scratch.map(|scratch| scratch.range())
+                }
                 super::super::callback::Continuation32::DialogHelp { scratch, .. }
                 | super::super::callback::Continuation32::ResourceDialog { scratch, .. }
                 | super::super::callback::Continuation32::MenuPopup { scratch, .. }
@@ -237,6 +246,9 @@ impl User32ThreadReply32 {
         self.pending
             .iter()
             .filter_map(|pending| match pending.continuation {
+                super::super::callback::Continuation32::FileDialog(call) => {
+                    call.scratch.map(|scratch| scratch.range())
+                }
                 super::super::callback::Continuation32::DialogHelp { scratch, .. }
                 | super::super::callback::Continuation32::ResourceDialog { scratch, .. }
                 | super::super::callback::Continuation32::MenuPopup { scratch, .. }
@@ -345,6 +357,11 @@ fn check_owned_scratch(
 ) -> Result<(), User32Error32> {
     for pending in pending {
         match pending.continuation {
+            super::super::callback::Continuation32::FileDialog(call) => {
+                if let Some(scratch) = call.scratch {
+                    scratch.check(memory)?;
+                }
+            }
             super::super::callback::Continuation32::DialogHelp { scratch, .. }
             | super::super::callback::Continuation32::ResourceDialog { scratch, .. }
             | super::super::callback::Continuation32::MenuPopup { scratch, .. }

@@ -3,6 +3,7 @@ export_process_calls! {
     register_shlwapi_module(base:u32);
     register_msimg32_module(base:u32);
     register_comctl32_module(base:u32);
+    register_commdlg32_module(base:u32);
     register_shell32_module(base:u32);
     configure_shell_folder(kind:u32,length:u32);
     register_oleaut32_module(base:u32);

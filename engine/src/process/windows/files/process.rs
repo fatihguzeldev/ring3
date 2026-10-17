@@ -100,7 +100,16 @@ impl FileRuntime32 {
         wide: bool,
     ) -> Result<FileCallOutcome32, FileError32> {
         let path = ordinary::memory::path(memory, args[0], wide, self.ordinary.ansi)?;
-        let absolute = self.vfs.full_path(&path)?;
+        self.set_process_current_directory_units(memory, startup, &path)?;
+        Ok(FileCallOutcome32::success(1))
+    }
+    fn set_process_current_directory_units(
+        &mut self,
+        memory: &mut AddressSpace,
+        startup: &mut ProcessStartup32,
+        path: &[u16],
+    ) -> Result<(), FileError32> {
+        let absolute = self.vfs.full_path(path)?;
         let prepared = self.vfs.prepare_current_directory(&absolute)?;
         prepared.validate(&self.vfs)?;
         startup
@@ -112,6 +121,38 @@ impl FileRuntime32 {
                 _ => FileError32::InvalidParameter,
             })?;
         self.vfs.commit_namespace(prepared);
-        Ok(FileCallOutcome32::success(1))
+        Ok(())
+    }
+}
+
+impl EngineInstance {
+    pub(in crate::process) fn set_provider_current_directory(
+        &mut self,
+        path: &[u16],
+    ) -> Result<(), crate::process::HostError> {
+        use crate::process::HostError;
+        let files = self.files.as_mut().ok_or(HostError::InvalidRequest)?;
+        let absolute = files.vfs.full_path(path).map_err(HostError::File)?;
+        files
+            .vfs
+            .check_path_access(&absolute, 0x20, self.windows_security.token())
+            .map_err(HostError::File)?;
+        if let Some(startup) = self.process_runtime.startup.as_mut() {
+            files
+                .set_process_current_directory_units(
+                    self.memory.as_mut().ok_or(HostError::Closed)?,
+                    startup,
+                    &absolute,
+                )
+                .map_err(HostError::File)
+        } else {
+            let prepared = files
+                .vfs
+                .prepare_current_directory(&absolute)
+                .map_err(HostError::File)?;
+            prepared.validate(&files.vfs).map_err(HostError::File)?;
+            files.vfs.commit_namespace(prepared);
+            Ok(())
+        }
     }
 }

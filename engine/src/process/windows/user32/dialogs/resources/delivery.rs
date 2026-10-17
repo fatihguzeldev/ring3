@@ -114,6 +114,13 @@ impl User32Context32 {
                         continue;
                     }
                     let owner = plan.owner.ok_or(E::InvalidRequest)?;
+                    if self.windows().get(owner)?.description.thread_id != plan.thread
+                        && admitted != Some(Stage32::Disable)
+                    {
+                        return Ok(User32Outcome32::Wait {
+                            continuation: token,
+                        });
+                    }
                     let mut description = self.windows().get(owner)?.description;
                     description.enabled = false;
                     self.state
@@ -225,6 +232,13 @@ impl User32Context32 {
                         .owner
                         .filter(|&owner| self.windows().get(owner).is_ok());
                     if let Some(owner) = owner {
+                        if self.windows().get(owner)?.description.thread_id != plan.thread
+                            && admitted != Some(Stage32::Restore)
+                        {
+                            return Ok(User32Outcome32::Wait {
+                                continuation: token,
+                            });
+                        }
                         let mut description = self.windows().get(owner)?.description;
                         description.enabled = true;
                         self.state
@@ -274,8 +288,9 @@ impl User32Context32 {
         let index = self.resource_dialog_index(token)?;
         self.resource_dialog_scratch(token)?.release(ram)?;
         let plan = self.resource_dialogs.plans.remove(index);
+        let result = self.file_dialogs.complete(token, plan.result);
         self.pending.pop();
-        Ok(User32Outcome32::Return(plan.result))
+        Ok(User32Outcome32::Return(result))
     }
 
     pub(in crate::process::windows::user32) fn resource_dialog_ready(&self, token: u64) -> bool {
@@ -283,7 +298,9 @@ impl User32Context32 {
             let plan = &self.resource_dialogs.plans[index];
             matches!(
                 plan.stage,
-                Stage32::Focus
+                Stage32::Disable
+                    | Stage32::Restore
+                    | Stage32::Focus
                     | Stage32::Destroy
                     | Stage32::RestoreFocus
                     | Stage32::Retrieve
@@ -312,5 +329,32 @@ impl User32Context32 {
                     .is_ok_and(|message| message.is_some())
                 || self.timer_message_ready(plan.thread, 0, 0, 0)
         })
+    }
+
+    pub(in crate::process::windows::user32) fn pending_resource_dialog_send(
+        &self,
+        token: u64,
+    ) -> Option<[u32; 4]> {
+        let pending = self
+            .pending
+            .last()
+            .filter(|pending| pending.token == token)?;
+        let Continuation32::ResourceDialog {
+            plan, child: None, ..
+        } = pending.continuation
+        else {
+            return None;
+        };
+        let entry = &self.resource_dialogs.plans[self.resource_dialog_index(plan).ok()?];
+        let owner = entry.owner?;
+        if self.windows().get(owner).ok()?.description.thread_id == entry.thread {
+            return None;
+        }
+        let enabled = match entry.stage {
+            Stage32::Disable if entry.modal && entry.owner_enabled && !entry.owner_disabled => 0,
+            Stage32::Restore if entry.owner_disabled => 1,
+            _ => return None,
+        };
+        Some([owner.get(), 0xa, enabled, 0])
     }
 }

@@ -40,6 +40,7 @@ impl User32Context32 {
         self.provenance.retire_thread(thread);
         self.dialogs.retain(|dialog| dialog.thread != thread);
         self.retire_resource_dialog_thread(thread);
+        self.file_dialogs.retire_thread(thread);
         let windows = self.state.windows();
         for dialog in &mut self.dialogs {
             if dialog.help

@@ -12,6 +12,13 @@ pub struct WindowsGateInfo32 {
 }
 
 pub fn windows_gate_info(id: u32) -> Option<WindowsGateInfo32> {
+    if let Some(api) = crate::windows::commdlg::ComdlgApi32::from_id(id) {
+        return Some(WindowsGateInfo32 { convention: api.convention(), stack_words: api.stack_words() });
+    }
+    if matches!(id, crate::windows::commdlg::DIALOG_PROCEDURE_A | crate::windows::commdlg::DIALOG_PROCEDURE_W) {
+        return Some(WindowsGateInfo32 { convention: crate::windows::CallingConvention32::Stdcall, stack_words: 4 });
+    }
+
     if let Some(api) = crate::windows::comctl32::CommonControlsApi32::from_id(id) {
         return Some(WindowsGateInfo32 { convention: api.convention(), stack_words: api.stack_words() });
     }
@@ -323,7 +330,8 @@ impl EngineInstance {
         let ExitReason::Gate { id } = exit.reason else {
             return Err(HostError::Infrastructure);
         };
-        if self.try_complete_common_controls_call(owner, token, id, frame)?
+        if self.try_complete_commdlg_call(owner, token, id, frame)?
+            || self.try_complete_common_controls_call(owner, token, id, frame)?
             || self.try_complete_builtin_control_call(owner, token, id, frame)?
             || self.try_complete_gdi_call(owner, token, id, frame)?
             || self.try_complete_automation_call(owner, token, id, frame)?

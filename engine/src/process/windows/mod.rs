@@ -46,3 +46,5 @@ pub(super) mod gdi;
 pub(super) mod automation;
 
 pub(super) mod comctl32;
+
+pub(super) mod commdlg;

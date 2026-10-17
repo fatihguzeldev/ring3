@@ -7,6 +7,7 @@ mod procedure;
 mod projection;
 mod requests;
 mod types;
+pub(in crate::process::windows::user32) use requests::InternalDialog32;
 pub(in crate::process::windows::user32) use types::ResourceDialogs32;
 
 #[cfg(test)]

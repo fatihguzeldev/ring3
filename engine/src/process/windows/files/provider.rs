@@ -502,3 +502,138 @@ impl EngineInstance {
         Ok(())
     }
 }
+
+impl EngineInstance {
+    pub(in crate::process) fn admit_common_dialog_path(
+        &mut self,
+        path: &[u16],
+        save: bool,
+        must_exist: bool,
+        no_test_create: bool,
+    ) -> Result<(), HostError> {
+        let files = self.files.as_mut().ok_or(HostError::InvalidRequest)?;
+        let exists = files.vfs.path_info(path).is_ok();
+        if !save && !must_exist && !exists {
+            return Ok(());
+        }
+        if save && no_test_create && !exists {
+            // path syntax and parent existence remain mandatory; the flag skips create-permission probing.
+            let absolute = files.vfs.full_path(path).map_err(HostError::File)?;
+            let parent = crate::files::path::parent(&absolute).map_err(HostError::File)?;
+            files
+                .vfs
+                .check_path_access(parent, 0x80, self.windows_security.token())
+                .map_err(HostError::File)?;
+            if files
+                .vfs
+                .path_info(parent)
+                .map_err(HostError::File)?
+                .attributes
+                & 0x10
+                == 0
+            {
+                return Err(HostError::File(FileError32::PathNotFound));
+            }
+            return Ok(());
+        }
+        let options = FileOpenOptions32 {
+            access: if save {
+                FileAccess32::WRITE
+            } else {
+                FileAccess32::READ
+            },
+            disposition: if save && !must_exist {
+                FileDisposition32::OpenAlways
+            } else {
+                FileDisposition32::OpenExisting
+            },
+            ..Default::default()
+        };
+        let prepared = files
+            .vfs
+            .prepare_open_with_security(
+                path,
+                options,
+                if save { 0x40000000 } else { 0x80000000 },
+                self.windows_security.token(),
+                None,
+            )
+            .map_err(HostError::File)?;
+        prepared.validate(&files.vfs).map_err(HostError::File)?;
+        // dropping a prepared open publishes neither a file, an open handle, nor a truncated payload.
+        drop(prepared);
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod common_dialog_tests {
+    use super::*;
+    use crate::windows::security::{Acl32, Dacl32};
+    fn path(value: &str) -> Vec<u16> {
+        value.encode_utf16().collect()
+    }
+    #[test]
+    fn selected_and_save_admission_use_real_open_policy_without_publishing_a_file_or_open() {
+        let mut engine = EngineInstance::new(128, 7).unwrap();
+        engine
+            .configure_files(FileConfig32 {
+                vfs: FileLimits32 {
+                    opens: 1,
+                    ..Default::default()
+                },
+                ..Default::default()
+            })
+            .unwrap();
+        engine
+            .replace_provider_file(&path(r"C:\owned.dat"), b"preserved")
+            .unwrap();
+        let revision = engine.files.as_ref().unwrap().vfs.revision();
+        for _ in 0..4 {
+            engine
+                .admit_common_dialog_path(&path(r"C:\owned.dat"), true, false, false)
+                .unwrap();
+            engine
+                .admit_common_dialog_path(&path(r"C:\new.dat"), true, false, false)
+                .unwrap();
+        }
+        assert_eq!(engine.files.as_ref().unwrap().vfs.revision(), revision);
+        assert_eq!(
+            engine.provider_path_info(&path(r"C:\new.dat")),
+            Err(HostError::File(FileError32::NotFound))
+        );
+        let lease = engine
+            .open_provider_file(&path(r"C:\owned.dat"), false)
+            .unwrap();
+        assert_eq!(engine.provider_file_size(lease).unwrap(), 9);
+        engine.close_provider_file(lease).unwrap();
+        let token = engine.windows_security.token().clone();
+        let files = engine.files.as_mut().unwrap();
+        let parent = files.vfs.path_info(&path(r"C:\")).unwrap().id;
+        let mut descriptor = files.vfs.file_security(parent, 4, &token, None).unwrap();
+        descriptor.dacl = Dacl32::Acl(Acl32 {
+            revision: 2,
+            aces: Vec::new(),
+        });
+        let prepared = files
+            .vfs
+            .prepare_file_security(parent, 4, descriptor, &token, None)
+            .unwrap();
+        files.vfs.commit_file_security(prepared);
+        let revision = files.vfs.revision();
+        assert_eq!(
+            engine.admit_common_dialog_path(&path(r"C:\denied.dat"), true, false, false),
+            Err(HostError::File(FileError32::AccessDenied))
+        );
+        assert_eq!(engine.files.as_ref().unwrap().vfs.revision(), revision);
+        assert!(
+            engine
+                .files
+                .as_ref()
+                .unwrap()
+                .vfs
+                .path_info(&path(r"C:\denied.dat"))
+                .is_err()
+        );
+    }
+}

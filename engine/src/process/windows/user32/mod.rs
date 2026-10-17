@@ -1,4 +1,5 @@
 mod dialogs;
+mod file_dialogs;
 mod gdi;
 pub use dialogs::{User32DialogIcon32, User32DialogRequest32};
 mod accelerators;
@@ -88,6 +89,7 @@ pub(crate) struct User32Context32 {
     timers: timers::TimerState32,
     dialogs: Vec<dialogs::Dialog32>,
     resource_dialogs: dialogs::resources::ResourceDialogs32,
+    file_dialogs: file_dialogs::FileDialogs32,
     call_activation: crate::windows::activation::CapturedActivation32,
     activation_capture_limit: usize,
     provenance: messages::MessageProvenance32,

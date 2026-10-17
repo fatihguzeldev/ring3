@@ -38,6 +38,8 @@ pub(super) enum PositionStage32 {
 pub(super) enum Continuation32 {
     MenuBar(super::menus::bar::MenuBar32),
     CommonLayout(super::common::layout::CommonLayout32),
+    FileDialog(super::file_dialogs::FileDialogCall32),
+    FilePrompt(super::file_dialogs::FilePrompt32),
     MenuPopup {
         plan: u64,
         scratch: Scratch32,
@@ -143,6 +145,7 @@ impl User32Context32 {
             .ok_or(User32Error32::InvalidToken)?;
         let (procedure, arguments) = match pending.continuation {
             Continuation32::ResourceDialog { .. }
+            | Continuation32::FilePrompt(_)
             | Continuation32::MenuPopup { .. }
             | Continuation32::MenuBar(_)
             | Continuation32::CommonLayout(_)
@@ -160,6 +163,7 @@ impl User32Context32 {
                 arguments,
                 ..
             } => (procedure, arguments),
+            Continuation32::FileDialog(call) => self.file_dialog_callback(call)?,
             Continuation32::ControlPaint(paint) => self.control_paint_callback(paint)?,
             Continuation32::ControlFocus(focus) => {
                 let event = focus
@@ -387,6 +391,7 @@ impl User32Context32 {
             .ok_or(User32Error32::InvalidToken)?;
         match pending.continuation {
             Continuation32::ResourceDialog { .. }
+            | Continuation32::FilePrompt(_)
             | Continuation32::MenuPopup { .. }
             | Continuation32::MenuBar(_)
             | Continuation32::CommonLayout(_)
@@ -404,6 +409,9 @@ impl User32Context32 {
             Continuation32::ControlDropdown(drop) => self.complete_control_dropdown(drop),
             Continuation32::ControlFocus(focus) => self.complete_control_focus(focus, memory),
             Continuation32::ControlClose(close) => self.complete_control_close(close),
+            Continuation32::FileDialog(call) => {
+                self.complete_file_dialog_hook(call, result, memory)
+            }
             Continuation32::ControlPaint(_) | Continuation32::QueryPaint(_) => {
                 Err(User32Error32::InvalidRequest)
             }

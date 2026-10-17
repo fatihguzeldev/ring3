@@ -395,6 +395,7 @@ impl EngineInstance {
         self.threads.fls.retire_thread(id);
         self.exceptions.retire_thread(id);
         self.nls.retire_thread(id);
+        self.comdlg.retire_thread(id);
         self.automation_retire_thread(id);
         if let Some(gdi) = self.gdi.as_mut() {
             gdi.retire_thread(id);
