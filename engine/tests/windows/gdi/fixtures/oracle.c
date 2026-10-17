@@ -523,6 +523,95 @@ static void font_resource_reference(void) {
     DeleteDC(dc);
 }
 
+
+static void font_face_units(const WCHAR *name) {
+    printf("[");
+    for (unsigned i = 0; i < LF_FACESIZE && name[i]; ++i) printf("%s%u", i ? "," : "", name[i]);
+    printf("]");
+}
+static void font_selection_state(HDC dc, HFONT font, DWORD *pixels, const char *label, int comma) {
+    WCHAR before[LF_FACESIZE] = {0}, after[LF_FACESIZE] = {0};
+    TEXTMETRICW metrics = {0}; SIZE extent = {0}; LOGFONTW logical = {0};
+    int before_count = GetTextFaceW(dc, LF_FACESIZE, before);
+    BOOL metric_result = GetTextMetricsW(dc, &metrics);
+    BOOL extent_result = GetTextExtentPoint32W(dc, L"MmW", 3, &extent);
+    int object_size = GetObjectW(font, sizeof(logical), &logical);
+    BYTE header[16] = {0}; DWORD data_size = GetFontData(dc, 0, 0, header, sizeof(header));
+    DWORD hash = 2166136261u; unsigned ink = 0;
+    if (pixels) for (unsigned i = 0; i < 96 * 48; ++i) pixels[i] = 0x00ffffff;
+    SetBkMode(dc, TRANSPARENT); SetTextColor(dc, RGB(0,0,0));
+    BOOL drawn = TextOutW(dc, 4, 4, L"MmW", 3);
+    GdiFlush();
+    if (pixels) for (unsigned i = 0; i < 96 * 48; ++i) {
+        DWORD color = pixels[i] & 0x00ffffff;
+        if (color != 0x00ffffff) ++ink;
+        hash = (hash ^ color) * 16777619u;
+    }
+    int after_count = GetTextFaceW(dc, LF_FACESIZE, after);
+    printf("%s{\"stage\":\"%s\",\"currentHandle\":%u,\"beforeCount\":%d,\"beforeFace\":", comma ? "," : "", label,
+        GetCurrentObject(dc, OBJ_FONT) == font, before_count);
+    font_face_units(before);
+    printf(",\"afterCount\":%d,\"afterFace\":", after_count); font_face_units(after);
+    printf(",\"metricResult\":%u,\"metrics\":[%ld,%ld,%ld,%ld,%ld,%ld,%u,%u],\"extentResult\":%u,\"extent\":[%ld,%ld],\"objectBytes\":%d,\"logicalFace\":",
+        metric_result, metrics.tmHeight, metrics.tmAscent, metrics.tmDescent, metrics.tmAveCharWidth,
+        metrics.tmMaxCharWidth, metrics.tmWeight, metrics.tmPitchAndFamily, metrics.tmCharSet,
+        extent_result, extent.cx, extent.cy, object_size);
+    font_face_units(logical.lfFaceName);
+    printf(",\"fontDataBytes\":%lu,\"fontData\":[", data_size);
+    for (unsigned i = 0; i < sizeof(header); ++i) printf("%s%u", i ? "," : "", header[i]);
+    printf("],\"drawn\":%u,\"ink\":%u,\"hash\":%lu}", drawn, ink, hash);
+}
+static void font_lifetime_reference(void) {
+    FILE *input = fopen("engine/assets/fonts/NotoSans-Regular.ttf", "rb");
+    BYTE *bytes = NULL; long length = 0;
+    if (input && !fseek(input, 0, SEEK_END)) {
+        length = ftell(input);
+        if (length > 0 && length <= 4 * 1024 * 1024 && !fseek(input, 0, SEEK_SET)) {
+            bytes = malloc((size_t)length);
+            if (bytes && fread(bytes, 1, (size_t)length, input) != (size_t)length) { free(bytes); bytes = NULL; }
+        }
+    }
+    if (input) fclose(input);
+    printf(",\"fontSelectionLifetime\":[");
+    for (unsigned phase = 0; phase < 3; ++phase) {
+        HDC dc = CreateCompatibleDC(NULL);
+        BITMAPINFO info = {0}; info.bmiHeader.biSize = sizeof(info.bmiHeader);
+        info.bmiHeader.biWidth = 96; info.bmiHeader.biHeight = -48;
+        info.bmiHeader.biPlanes = 1; info.bmiHeader.biBitCount = 32;
+        DWORD *pixels = NULL;
+        HBITMAP bitmap = CreateDIBSection(dc, &info, DIB_RGB_COLORS, (void **)&pixels, NULL, 0);
+        HGDIOBJ old_bitmap = SelectObject(dc, bitmap);
+        HFONT font = CreateFontW(-16, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, ANSI_CHARSET, OUT_TT_PRECIS,
+            CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH, L"Noto Sans");
+        HGDIOBJ old_font = phase == 2 ? SelectObject(dc, font) : GetCurrentObject(dc, OBJ_FONT);
+        printf("%s{\"case\":\"%s\",\"created\":%u,\"states\":[", phase ? "," : "",
+            phase == 0 ? "create-before-add-selected-remove" : phase == 1 ? "remove-before-first-select" : "reselect-after-add", font != NULL);
+        if (phase == 2) font_selection_state(dc, font, pixels, "selected-before-add", 0);
+        DWORD count = 0; HANDLE resource = bytes ? AddFontMemResourceEx(bytes, (DWORD)length, NULL, &count) : NULL;
+        BOOL removed = FALSE;
+        if (phase == 1) {
+            removed = resource ? RemoveFontMemResourceEx(resource) : FALSE;
+            SelectObject(dc, font);
+            font_selection_state(dc, font, pixels, "first-select-after-remove", 0);
+        } else {
+            SelectObject(dc, font);
+            font_selection_state(dc, font, pixels, "selected-after-add", phase == 2);
+            int saved = SaveDC(dc);
+            removed = resource ? RemoveFontMemResourceEx(resource) : FALSE;
+            font_selection_state(dc, font, pixels, "selected-after-remove", 1);
+            SelectObject(dc, old_font);
+            BOOL restored = saved ? RestoreDC(dc, saved) : FALSE;
+            font_selection_state(dc, font, pixels, restored ? "restored-after-remove" : "restore-failed", 1);
+            SelectObject(dc, old_font); SelectObject(dc, font);
+            font_selection_state(dc, font, pixels, "reselected-after-remove", 1);
+        }
+        printf("],\"added\":%u,\"count\":%lu,\"removed\":%u}", resource != NULL, count, removed);
+        SelectObject(dc, old_font); SelectObject(dc, old_bitmap);
+        DeleteObject(font); DeleteObject(bitmap); DeleteDC(dc);
+    }
+    printf("]"); free(bytes);
+}
+
 int main(void) {
     const char *classes[] = {"Button", "Edit", "Static", "ListBox", "ScrollBar", "ComboBox"};
     HWND parent = CreateWindowExA(0, "Static", "parent", WS_POPUP, 0, 0, 100, 100, NULL, NULL, NULL, NULL);
@@ -580,6 +669,7 @@ int main(void) {
     stretch_mode_reference();
     rotated_font_reference();
     font_resource_reference();
+    font_lifetime_reference();
     DestroyWindow(parent);
     puts("}");
     return 0;
