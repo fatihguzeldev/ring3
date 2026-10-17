@@ -98,6 +98,9 @@ impl User32Context32 {
         if self.clipboard_wait(token).is_some() {
             return Ok(self.pending_clipboard_message(token));
         }
+        if self.sent_paint_wait(token).is_some() {
+            return self.pending_sent_paint_message(token);
+        }
         self.pending_accelerator_message(token)
     }
 
@@ -109,6 +112,7 @@ impl User32Context32 {
                     Continuation32::ResourceDialog { .. }
                         | Continuation32::Accelerator(_)
                         | Continuation32::Clipboard(_)
+                        | Continuation32::SentPaint(_)
                         | Continuation32::Retrieve { .. }
                         | Continuation32::MessageWait { .. }
                 )

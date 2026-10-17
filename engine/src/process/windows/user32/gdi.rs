@@ -1,11 +1,13 @@
 use super::{User32Context32, User32Outcome32, callback::Continuation32};
 mod query;
+mod sending;
 use crate::windows::{
     gdi::GdiWindow32,
     user32::{Rect32, User32Error32},
     window::WindowHandle32,
 };
 pub(super) use query::QueryPaint32;
+pub(super) use sending::SentPaint32;
 impl User32Context32 {
     pub(in crate::process) fn gdi_update_region(
         &self,
@@ -25,12 +27,16 @@ impl User32Context32 {
         &mut self,
         window: WindowHandle32,
         erase: bool,
+        thread: u32,
     ) -> Result<(), User32Error32> {
-        self.windows().get(window)?;
+        let owner = self.windows().get(window)?.description.thread_id;
         self.state.check_paint_change()?;
         if erase {
             self.prepare_thread_slots()?;
             self.check_continuation()?;
+            if owner != thread {
+                self.check_sent_paint_capacity()?;
+            }
         }
         Ok(())
     }
@@ -46,10 +52,13 @@ impl User32Context32 {
         output: PaintOutput32,
         dc: u32,
         erase: bool,
+        thread: u32,
     ) -> Result<User32Outcome32, User32Error32> {
         self.state
             .set_update_region(window, crate::windows::gdi::Region32::default(), false)?;
-        if erase {
+        if erase && self.windows().get(window)?.description.thread_id != thread {
+            self.start_sent_paint(window, thread, Some((output, dc)))
+        } else if erase {
             self.start(Continuation32::Paint { window, output, dc })
         } else {
             Ok(User32Outcome32::Return(dc))
@@ -58,6 +67,7 @@ impl User32Context32 {
     pub(in crate::process) fn gdi_update_window(
         &mut self,
         window: WindowHandle32,
+        thread: u32,
     ) -> Result<User32Outcome32, User32Error32> {
         let (region, _) = self.state.update_region(window)?;
         if region.complexity() == 1 {
@@ -65,6 +75,10 @@ impl User32Context32 {
         }
         self.prepare_thread_slots()?;
         self.check_continuation()?;
+        if self.windows().get(window)?.description.thread_id != thread {
+            self.check_sent_paint_capacity()?;
+            return self.start_sent_paint(window, thread, None);
+        }
         let procedure = self.windows().get(window)?.description.procedure;
         self.start(Continuation32::Sequence {
             events: [

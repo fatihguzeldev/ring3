@@ -41,7 +41,8 @@ impl User32Context32 {
             }
             super::super::callback::Continuation32::Retrieve { .. }
             | super::super::callback::Continuation32::Accelerator(_)
-            | super::super::callback::Continuation32::Clipboard(_) => true,
+            | super::super::callback::Continuation32::Clipboard(_)
+            | super::super::callback::Continuation32::SentPaint(_) => true,
             super::super::callback::Continuation32::MessageWait {
                 thread,
                 window,
@@ -299,6 +300,9 @@ fn check_scratch(
         match pending.continuation {
             super::super::callback::Continuation32::Paint { output, .. } => output.check(memory)?,
             super::super::callback::Continuation32::QueryPaint(paint) => {
+                paint.check_output(memory)?
+            }
+            super::super::callback::Continuation32::SentPaint(paint) => {
                 paint.check_output(memory)?
             }
             _ => {}

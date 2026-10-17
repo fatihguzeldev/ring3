@@ -52,6 +52,7 @@ pub(super) enum Continuation32 {
     },
     ControlPaint(super::controls::painting::ControlPaint32),
     QueryPaint(super::gdi::QueryPaint32),
+    SentPaint(super::gdi::SentPaint32),
     Paint {
         window: WindowHandle32,
         output: super::gdi::PaintOutput32,
@@ -132,7 +133,8 @@ impl User32Context32 {
         let (procedure, arguments) = match pending.continuation {
             Continuation32::ResourceDialog { .. }
             | Continuation32::Accelerator(_)
-            | Continuation32::Clipboard(_) => {
+            | Continuation32::Clipboard(_)
+            | Continuation32::SentPaint(_) => {
                 return Ok(User32Outcome32::Wait {
                     continuation: pending.token,
                 });
@@ -276,13 +278,17 @@ impl User32Context32 {
         if let Some(outcome) = self.retry_clipboard_completion(token) {
             return Ok(outcome);
         }
+        if let Some(outcome) = self.retry_sent_paint_completion(token) {
+            return Ok(outcome);
+        }
         if let Some(outcome) = self.retry_accelerator_completion(token) {
             return Ok(outcome);
         }
         let outcome = self.complete_step(token, result, memory)?;
         let outcome = self.complete_resource_dialog_child(token, outcome, memory)?;
         let outcome = self.complete_accelerator_child(token, outcome)?;
-        self.complete_clipboard_child(token, outcome)
+        let outcome = self.complete_clipboard_child(token, outcome)?;
+        self.complete_sent_paint_child(token, outcome)
     }
 
     fn complete_step(
@@ -300,7 +306,8 @@ impl User32Context32 {
         match pending.continuation {
             Continuation32::ResourceDialog { .. }
             | Continuation32::Accelerator(_)
-            | Continuation32::Clipboard(_) => Err(User32Error32::InvalidToken),
+            | Continuation32::Clipboard(_)
+            | Continuation32::SentPaint(_) => Err(User32Error32::InvalidToken),
             Continuation32::ResourceProcedure {
                 window,
                 arguments,

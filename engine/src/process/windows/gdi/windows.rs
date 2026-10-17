@@ -133,6 +133,7 @@ impl GdiRuntime32 {
         for window in dead {
             self.model.retire_window(window);
         }
+        self.paints.retain(|paint| alive(paint.window));
         let mut removed = 0;
         self.surfaces.retain(|surface| { let keep = !matches!(surface.key, SurfaceKey32::Window { window, .. } if window != 0 && !alive(window)); if !keep { removed += surface.layout.byte_len().unwrap(); } keep });
         self.bytes -= removed;

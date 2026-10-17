@@ -123,18 +123,6 @@ impl EngineInstance {
                 return Ok(true);
             }
         };
-        if projection.thread != thread
-            && matches!(api, GdiApi32::BeginPaint | GdiApi32::UpdateWindow)
-        {
-            self.publish_user32_result(
-                owner,
-                token,
-                frame,
-                super::super::user32::User32Outcome32::Return(0),
-                Some(50),
-            )?;
-            return Ok(true);
-        }
         let queue = self.prepare_user32_queue_change_for(projection.thread)?;
         let result = self.execute_gdi_paint(api, args, projection, thread);
         match result {
@@ -221,7 +209,7 @@ impl EngineInstance {
                     self.user32
                         .as_mut()
                         .unwrap()
-                        .gdi_check_begin_paint(handle, true)
+                        .gdi_check_begin_paint(handle, true, thread)
                         .map_err(HostError::User32)?;
                     let output = super::super::user32::User32Context32::gdi_prepare_query_output(
                         self.memory.as_mut().ok_or(HostError::Closed)?,
@@ -252,13 +240,13 @@ impl EngineInstance {
                 .user32
                 .as_mut()
                 .unwrap()
-                .gdi_update_window(handle)
+                .gdi_update_window(handle, thread)
                 .map_err(HostError::User32),
             GdiApi32::BeginPaint => {
                 self.user32
                     .as_mut()
                     .unwrap()
-                    .gdi_check_begin_paint(handle, erase)
+                    .gdi_check_begin_paint(handle, erase, thread)
                     .map_err(HostError::User32)?;
                 let output = super::super::user32::User32Context32::gdi_prepare_paint_output(
                     self.memory.as_mut().ok_or(HostError::Closed)?,
@@ -309,7 +297,7 @@ impl EngineInstance {
                 self.user32
                     .as_mut()
                     .unwrap()
-                    .gdi_begin_paint(handle, output, dc, erase)
+                    .gdi_begin_paint(handle, output, dc, erase, thread)
                     .map_err(HostError::User32)
             }
             GdiApi32::EndPaint => {

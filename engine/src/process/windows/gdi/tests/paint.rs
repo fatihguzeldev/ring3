@@ -93,13 +93,32 @@ fn words<const N: usize>(engine: &EngineInstance, address: u32) -> [u32; N] {
     })
 }
 pub(super) fn finish(engine: &mut EngineInstance, callback_unit: u64, result: u32) {
+    let return_esp = engine
+        .pending_call
+        .as_ref()
+        .unwrap()
+        .frame
+        .state()
+        .registers[4];
     let record = engine
         .begin_windows_resident_callback(KEY, callback_unit, RETURN, RETURN_ID)
         .unwrap();
     engine
         .authorize_resident_callback(KEY, callback_unit, record.token)
         .unwrap();
-    stop(engine, RETURN, RETURN_ID, result);
+    let mut state = decode_state(&engine.arena()[..STATE_SIZE]).unwrap();
+    state.eip = RETURN;
+    state.registers[0] = result;
+    state.registers[4] = return_esp;
+    encode_state_current(&state, &mut engine.arena_mut().unwrap()[..STATE_SIZE]).unwrap();
+    encode_exit_v3(
+        &ExecutionExit {
+            retired: 0,
+            reason: ExitReason::Gate { id: RETURN_ID },
+        },
+        &mut engine.arena_mut().unwrap()[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE],
+    )
+    .unwrap();
     engine
         .finish_windows_resident_callback(KEY, callback_unit, record.token)
         .unwrap();
@@ -795,3 +814,5 @@ fn forced_paint_retirement_preflights_real_nested_create_scratch_before_one_ram_
         assert_eq!(words::<8>(&engine, PAINT), output);
     }
 }
+
+mod sending;
