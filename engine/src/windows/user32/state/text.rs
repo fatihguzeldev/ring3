@@ -9,12 +9,22 @@ impl User32State32 {
             .flatten()
             .map(|index| crate::windows::controls::ControlKind32::STANDARD[index])
     }
-    #[cfg(test)]
     pub(crate) fn standard_atom(&self, kind: crate::windows::controls::ControlKind32) -> u16 {
         self.standard_atoms[kind as usize]
     }
     pub(crate) fn text(&self, window: WindowHandle32) -> Result<&[u16], User32Error32> {
-        Ok(&self.slots[self.slot(window)?].text)
+        let index = self.slot(window)?;
+        let slot = &self.slots[index];
+        if self.standard_kind(slot.data.class_atom)
+            == Some(crate::windows::controls::ControlKind32::ComboBox)
+            && let Some(text) = slot
+                .control
+                .selected
+                .and_then(|selected| slot.control.items.get(selected))
+        {
+            return Ok(text);
+        }
+        Ok(&slot.text)
     }
     pub(crate) fn set_text(
         &mut self,
@@ -22,6 +32,11 @@ impl User32State32 {
         text: Vec<u16>,
     ) -> Result<(), User32Error32> {
         let index = self.slot(window)?;
+        if self.standard_kind(self.slots[index].data.class_atom)
+            == Some(crate::windows::controls::ControlKind32::ComboBox)
+        {
+            self.slots[index].control.selected = None;
+        }
         self.slots[index].text = text;
         Ok(())
     }
@@ -29,14 +44,22 @@ impl User32State32 {
         &self,
         window: WindowHandle32,
     ) -> Result<&crate::windows::controls::ControlState32, User32Error32> {
-        Ok(&self.slots[self.slot(window)?].control)
+        let index = self.control_slot(window)?;
+        Ok(&self.slots[index].control)
     }
     pub(crate) fn control(
         &mut self,
         window: WindowHandle32,
     ) -> Result<&mut crate::windows::controls::ControlState32, User32Error32> {
-        let index = self.slot(window)?;
+        let index = self.control_slot(window)?;
         Ok(&mut self.slots[index].control)
+    }
+    fn control_slot(&self, window: WindowHandle32) -> Result<usize, User32Error32> {
+        let index = self.slot(window)?;
+        self.slots[index]
+            .control
+            .list_owner
+            .map_or(Ok(index), |owner| self.slot(owner))
     }
     pub(crate) fn install_standard_classes(
         &mut self,

@@ -1,3 +1,5 @@
+mod input;
+pub(in crate::process::windows::user32) use input::{Close32, Dropdown32, Focus32};
 mod messages;
 pub(super) mod painting;
 mod text;
@@ -64,16 +66,7 @@ impl EngineInstance {
         let outcome = if matches!(frame.arguments()[1], 0x0f | 0x14) {
             self.execute_builtin_control_paint(frame.arguments())
         } else {
-            self.user32
-                .as_mut()
-                .ok_or(HostError::InvalidRequest)?
-                .control_message(
-                    frame.arguments(),
-                    id == BUILTIN_PROC_W,
-                    self.memory.as_mut().ok_or(HostError::Closed)?,
-                    call,
-                )
-                .map_err(HostError::User32)
+            self.execute_builtin_control_message(frame.arguments(), id == BUILTIN_PROC_W, call)
         };
         let (outcome, error) = match outcome {
             Ok(outcome) => (outcome, None),

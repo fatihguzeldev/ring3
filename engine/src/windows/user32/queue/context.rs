@@ -4,8 +4,11 @@ use std::collections::VecDeque;
 
 impl MessageQueue32 {
     pub(crate) fn check_external_change(&self) -> Result<(), User32Error32> {
+        self.check_external_changes(1)
+    }
+    pub(crate) fn check_external_changes(&self, count: u64) -> Result<(), User32Error32> {
         self.generation
-            .checked_add(1)
+            .checked_add(count)
             .map(|_| ())
             .ok_or(User32Error32::Capacity)
     }

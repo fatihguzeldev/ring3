@@ -18,6 +18,36 @@ pub(in crate::process) struct ControlVisual32<'a> {
     pub control: &'a ControlState32,
 }
 impl GdiRuntime32 {
+    pub(in crate::process) fn control_input_metrics(
+        &self,
+        font: u32,
+        hit: Option<(&[u16], i32)>,
+    ) -> Result<(i32, Option<usize>), GdiError32> {
+        let font = self.logical_font(if font == 0 {
+            GdiContext32::stock_object(13)?
+        } else {
+            font
+        })?;
+        let height = self.fonts.metrics(&font)?.height.max(1);
+        let caret = hit
+            .map(|(text, x)| -> Result<usize, GdiError32> {
+                let shaped = self.fonts.shape(&font, text, false, false)?;
+                let mut nearest = (f32::INFINITY, 0);
+                for glyph in &shaped.glyphs {
+                    for (position, cluster) in
+                        [(glyph.x, glyph.cluster), (shaped.advance, text.len())]
+                    {
+                        let distance = (position - x as f32).abs();
+                        if distance < nearest.0 {
+                            nearest = (distance, cluster.min(text.len()));
+                        }
+                    }
+                }
+                Ok(nearest.1)
+            })
+            .transpose()?;
+        Ok((height, caret))
+    }
     pub(in crate::process) fn check_control_visual(
         &self,
         visual: &ControlVisual32<'_>,

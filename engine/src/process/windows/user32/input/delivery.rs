@@ -564,7 +564,20 @@ impl User32Context32 {
         if capture != 0 && self.live_input_window(capture) {
             return capture;
         }
+        let root = WindowHandle32::try_from(focus)
+            .ok()
+            .and_then(|handle| self.state.top_level(handle).ok())
+            .or_else(|| self.windows().active());
+        if let Some(root) = root
+            && let Some(child) = self.state.control_mouse_target(root, point)
+        {
+            return child.get();
+        }
         if focus != 0
+            && self
+                .windows()
+                .get(WindowHandle32::try_from(focus).unwrap())
+                .is_ok_and(|record| record.description.enabled)
             && self.live_input_window(focus)
             && self
                 .state

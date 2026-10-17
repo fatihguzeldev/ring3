@@ -205,6 +205,30 @@ impl WindowContext32 {
         Ok(old)
     }
 
+    pub(crate) fn check_focus_capture(
+        &self,
+        thread: u32,
+        focus: Option<Option<WindowHandle32>>,
+        capture: Option<Option<WindowHandle32>>,
+    ) -> Result<(), WindowError32> {
+        if let Some(next) = focus {
+            self.check_set_focus(thread, next)?;
+        }
+        if let Some(next) = capture {
+            self.check_set_capture(thread, next)?;
+        }
+        let focus_count = focus.map_or(0, |next| {
+            if next == self.focus {
+                0
+            } else {
+                usize::from(self.focus.is_some()) + usize::from(next.is_some())
+            }
+        });
+        let capture_count =
+            usize::from(capture.is_some_and(|next| next != self.capture) && self.capture.is_some());
+        self.check_messages(focus_count + capture_count)
+    }
+
     pub fn check_set_focus(
         &self,
         thread_id: u32,

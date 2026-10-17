@@ -84,6 +84,42 @@ impl User32Context32 {
             .pending
             .last()
             .filter(|pending| pending.token == token)?;
+        if let Continuation32::ControlFocus(focus) = pending.continuation
+            && (focus.ready
+                || focus
+                    .events
+                    .get(focus.index + 1)
+                    .copied()
+                    .flatten()
+                    .is_none())
+            && let Ok(data) = self.state.record(focus.window)
+            && let Some(kind) = self.state.standard_kind(data.class_atom)
+        {
+            return self.control_input_flags(focus.window, kind, &focus.arguments, true);
+        }
+        if let Continuation32::ControlDropdown(drop) = pending.continuation {
+            let show = (drop.ready || drop.events.get(drop.index + 1).copied().flatten().is_none())
+                && self
+                    .state
+                    .control_state(drop.window)
+                    .is_ok_and(|state| state.opening && state.popup == Some(drop.popup))
+                && self
+                    .windows()
+                    .get(drop.window)
+                    .is_ok_and(|record| record.description.enabled)
+                && self.windows().get(drop.popup).is_ok();
+            if show {
+                if let Some(capture) = drop.capture {
+                    self.windows()
+                        .check_set_capture(drop.thread, Some(capture))
+                        .ok()?;
+                }
+                return Some((
+                    self.windows().focus().is_some(),
+                    drop.capture.is_some() || self.windows().capture().is_some(),
+                ));
+            }
+        }
         if let Continuation32::Show(show) = pending.continuation {
             let (thread, target) = self.show_completion_focus_target(show)?;
             self.windows().check_set_focus(thread, target).ok()?;

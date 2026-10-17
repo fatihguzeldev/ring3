@@ -58,6 +58,9 @@ pub(super) enum Continuation32 {
         wide: bool,
     },
     ControlPaint(super::controls::painting::ControlPaint32),
+    ControlDropdown(super::controls::Dropdown32),
+    ControlFocus(super::controls::Focus32),
+    ControlClose(super::controls::Close32),
     QueryPaint(super::gdi::QueryPaint32),
     SentPaint(super::gdi::SentPaint32),
     Paint {
@@ -156,6 +159,51 @@ impl User32Context32 {
                 ..
             } => (procedure, arguments),
             Continuation32::ControlPaint(paint) => self.control_paint_callback(paint)?,
+            Continuation32::ControlFocus(focus) => {
+                let event = focus
+                    .events
+                    .get(focus.index)
+                    .copied()
+                    .flatten()
+                    .ok_or(User32Error32::InvalidToken)?;
+                (
+                    event.procedure,
+                    [
+                        event.window.get(),
+                        event.message,
+                        event.wparam,
+                        event.lparam,
+                    ],
+                )
+            }
+            Continuation32::ControlClose(close) => {
+                let Some(event) = close.events.get(close.index).copied().flatten() else {
+                    return self.complete_control_close(close);
+                };
+                (
+                    event.procedure,
+                    [
+                        event.window.get(),
+                        event.message,
+                        event.wparam,
+                        event.lparam,
+                    ],
+                )
+            }
+            Continuation32::ControlDropdown(drop) => {
+                let Some(event) = drop.events.get(drop.index).copied().flatten() else {
+                    return self.complete_control_dropdown(drop);
+                };
+                (
+                    event.procedure,
+                    [
+                        event.window.get(),
+                        event.message,
+                        event.wparam,
+                        event.lparam,
+                    ],
+                )
+            }
             Continuation32::QueryPaint(paint) => (
                 self.windows().get(paint.window)?.description.procedure,
                 [paint.window.get(), 0x14, paint.dc, 0],
@@ -346,6 +394,9 @@ impl User32Context32 {
                 wide,
                 ..
             } => self.complete_dialog_procedure(window, arguments, wide, result, memory),
+            Continuation32::ControlDropdown(drop) => self.complete_control_dropdown(drop),
+            Continuation32::ControlFocus(focus) => self.complete_control_focus(focus, memory),
+            Continuation32::ControlClose(close) => self.complete_control_close(close),
             Continuation32::ControlPaint(_) | Continuation32::QueryPaint(_) => {
                 Err(User32Error32::InvalidRequest)
             }

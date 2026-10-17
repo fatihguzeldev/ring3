@@ -9,6 +9,7 @@ pub(crate) use menu_layout::{MenuBarCache32, MenuOwnerSize32};
 mod paint;
 mod text;
 mod ui;
+mod controls;
 
 struct WindowSlot32 {
     data: WindowData32,

@@ -24,6 +24,12 @@ impl User32Context32 {
         if let Some(outcome) = self.window_text_message(args, wide, ram, call)? {
             return Ok(outcome);
         }
+        if kind == ControlKind32::ComboBox
+            && args[1] == 0x134
+            && let Some(parent) = data.parent
+        {
+            return self.send_message(&[parent.get(), args[1], args[2], args[3]], call);
+        }
         if args[1] == 0x81 {
             return Ok(User32Outcome32::Return(1));
         }
@@ -59,8 +65,14 @@ impl User32Context32 {
                     0
                 }
                 0xf2 => {
-                    let state = self.state.control(window)?;
-                    state.check | if state.pressed { 4 } else { 0 }
+                    let state = self.state.control_state(window)?;
+                    state.check
+                        | if state.pressed { 4 } else { 0 }
+                        | if self.windows().focus() == Some(window) {
+                            8
+                        } else {
+                            0
+                        }
                 }
                 0xf3 => {
                     self.state.control(window)?.pressed = args[2] != 0;
