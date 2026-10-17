@@ -5,13 +5,25 @@ pub enum ConsoleApi32 {
     VerifyConsoleIoHandle,
     WriteConsoleA,
     WriteConsoleW,
+    GetConsoleMode,
+    SetConsoleMode,
+    GetNumberOfConsoleInputEvents,
+    PeekConsoleInputA,
+    ReadConsoleInputA,
+    ReadConsoleA,
 }
 impl ConsoleApi32 {
-    pub const ALL: [Self; 4] = [
+    pub const ALL: [Self; 10] = [
         Self::SetConsoleCtrlHandler,
         Self::VerifyConsoleIoHandle,
         Self::WriteConsoleA,
         Self::WriteConsoleW,
+        Self::GetConsoleMode,
+        Self::SetConsoleMode,
+        Self::GetNumberOfConsoleInputEvents,
+        Self::PeekConsoleInputA,
+        Self::ReadConsoleInputA,
+        Self::ReadConsoleA,
     ];
     pub fn from_id(id: u32) -> Option<Self> {
         Self::ALL
@@ -27,13 +39,23 @@ impl ConsoleApi32 {
             Self::VerifyConsoleIoHandle => "VerifyConsoleIoHandle",
             Self::WriteConsoleA => "WriteConsoleA",
             Self::WriteConsoleW => "WriteConsoleW",
+            Self::GetConsoleMode => "GetConsoleMode",
+            Self::SetConsoleMode => "SetConsoleMode",
+            Self::GetNumberOfConsoleInputEvents => "GetNumberOfConsoleInputEvents",
+            Self::PeekConsoleInputA => "PeekConsoleInputA",
+            Self::ReadConsoleInputA => "ReadConsoleInputA",
+            Self::ReadConsoleA => "ReadConsoleA",
         }
     }
     pub fn stack_words(self) -> u32 {
         match self {
-            Self::SetConsoleCtrlHandler => 2,
+            Self::SetConsoleCtrlHandler
+            | Self::GetConsoleMode
+            | Self::SetConsoleMode
+            | Self::GetNumberOfConsoleInputEvents => 2,
             Self::VerifyConsoleIoHandle => 1,
-            Self::WriteConsoleA | Self::WriteConsoleW => 5,
+            Self::WriteConsoleA | Self::WriteConsoleW | Self::ReadConsoleA => 5,
+            Self::PeekConsoleInputA | Self::ReadConsoleInputA => 4,
         }
     }
 }
