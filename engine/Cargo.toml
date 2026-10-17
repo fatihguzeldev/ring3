@@ -46,6 +46,10 @@ unsafe_code = "deny"
 name = "windows_foundations_wasm"
 path = "tests/windows/foundations/wasm.rs"
 
+[[test]]
+name = "windows_user32_clipboard_wasm"
+path = "tests/windows/user32/clipboard/wasm.rs"
+
 [lints.clippy]
 all = "warn"
 
