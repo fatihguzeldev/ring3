@@ -42,6 +42,10 @@ naga = { version = "=30.0.1", default-features = false, features = ["wgsl-in"] }
 [lints.rust]
 unsafe_code = "deny"
 
+[[test]]
+name = "windows_foundations_wasm"
+path = "tests/windows/foundations/wasm.rs"
+
 [lints.clippy]
 all = "warn"
 
