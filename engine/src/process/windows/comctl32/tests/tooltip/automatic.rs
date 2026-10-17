@@ -240,10 +240,18 @@ fn private_tooltip_relay_gate_rejects_uncaptured_original_procedure_authority() 
 fn foreign_subclass_invocation_preserves_sender_frame_and_calls_actual_owner_procedure_once() {
     use crate::windows::thread::{ThreadApi32, ThreadSchedule32};
     let (mut engine, callback, common, procedure, _, parent) = fixture();
-    engine.configure_synchronization(Default::default()).unwrap();
+    engine
+        .configure_synchronization(Default::default())
+        .unwrap();
     automatic(&mut engine, callback, common, procedure, parent);
-    engine.load_library_module("kernel32.dll",None).unwrap();
-    assert!(engine.module_gates().unwrap().iter().any(|gate|gate.id==crate::process::windows::threads::THREAD_RETURN_ID));
+    engine.load_library_module("kernel32.dll", None).unwrap();
+    assert!(
+        engine
+            .module_gates()
+            .unwrap()
+            .iter()
+            .any(|gate| gate.id == crate::process::windows::threads::THREAD_RETURN_ID)
+    );
     capture(
         &mut engine,
         ThreadApi32::CreateThread.id(),

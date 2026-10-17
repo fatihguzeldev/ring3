@@ -1,6 +1,6 @@
+pub(crate) mod animate;
 mod api;
 mod classes;
-pub(crate) mod animate;
 pub(crate) mod header;
 pub(crate) mod hotkey;
 pub(crate) mod listview;

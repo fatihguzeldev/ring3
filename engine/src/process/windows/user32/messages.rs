@@ -151,7 +151,9 @@ impl User32Context32 {
         if let Continuation32::Numeric(_) = pending.continuation {
             return self.resume_numeric(token, memory);
         }
-        if let Continuation32::ListView(_) = pending.continuation { return self.resume_listview_call(token,memory); }
+        if let Continuation32::ListView(_) = pending.continuation {
+            return self.resume_listview_call(token, memory);
+        }
         if let Continuation32::Header(_) = pending.continuation {
             return self.resume_header_call(token, memory);
         }
