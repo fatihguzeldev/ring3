@@ -267,7 +267,16 @@ fn captured_header_items_layout_order_and_font_pixels_use_the_named_canonical_cl
         .expect("header publishes actual pixels");
     let mut pixels = Vec::new();
     for offset in (0..frame.bytes).step_by(4096) {
-        pixels.extend_from_slice(engine.read_gdi_frame(frame.id, frame.revision, offset, (frame.bytes - offset).min(4096)).unwrap());
+        pixels.extend_from_slice(
+            engine
+                .read_gdi_frame(
+                    frame.id,
+                    frame.revision,
+                    offset,
+                    (frame.bytes - offset).min(4096),
+                )
+                .unwrap(),
+        );
     }
     let background = [0xc0, 0xc0, 0xc0, 0];
     assert_eq!((frame.width, frame.height), (96, 24));
@@ -517,4 +526,68 @@ fn captured_header_getitem_fault_preserves_all_outputs_and_retries_the_same_owne
         words::<3>(&engine, 0x14000),
         [0x00690066, 0x00730072, 0x00000074]
     );
+}
+
+#[test]
+fn captured_header_long_set_text_uses_the_same_bounded_multipage_callback_owner() {
+    let (mut engine, callback, common, procedure, _, parent) = fixture();
+    let window = header(&mut engine, callback, common, procedure, parent);
+    insert(
+        &mut engine,
+        callback,
+        common,
+        procedure,
+        window,
+        0,
+        40,
+        "first",
+    );
+    engine.map(0x14000, 3, 3).unwrap();
+    let text = vec![u16::from(b'A'); 2300];
+    let input = text
+        .iter()
+        .copied()
+        .chain([0])
+        .flat_map(u16::to_le_bytes)
+        .collect::<Vec<_>>();
+    engine
+        .memory
+        .as_mut()
+        .unwrap()
+        .write(GuestAddress(0x14000), &input)
+        .unwrap();
+    put(&mut engine, &[2, 0, 0x14000]);
+    let notes = notifying(
+        &mut engine,
+        callback,
+        common,
+        procedure,
+        window,
+        [0x120c, 0, 0x12500],
+        0,
+    );
+    assert_eq!(
+        notes.iter().map(|note| note[2]).collect::<Vec<_>>(),
+        [(-320i32) as u32, (-321i32) as u32]
+    );
+    assert_eq!(eax(&engine), 1);
+    put(&mut engine, &[2, 0, 0x15400, 0, 2301]);
+    assert_eq!(
+        send(
+            &mut engine,
+            callback,
+            common,
+            procedure,
+            window,
+            [0x120b, 0, 0x12500]
+        ),
+        1
+    );
+    let mut actual = vec![0; input.len()];
+    engine
+        .memory()
+        .unwrap()
+        .read(GuestAddress(0x15400), &mut actual)
+        .unwrap();
+    assert_eq!(actual, input);
 }

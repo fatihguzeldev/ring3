@@ -139,7 +139,7 @@ impl User32Context32 {
         for (out, value) in bytes[..60].chunks_exact_mut(4).zip(values) {
             out.copy_from_slice(&value.to_le_bytes());
         }
-        let scratch = Scratch32::allocate(ram, self.scratch_bounds, &bytes)?;
+        let scratch = Scratch32::allocate_span(ram, self.scratch_bounds, &bytes)?;
         self.start(Continuation32::Header(HeaderCall32 {
             window,
             parent,

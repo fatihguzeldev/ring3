@@ -30,7 +30,7 @@ impl Scratch32 {
         })
     }
 
-    pub(super) fn allocate_span(
+    pub(in crate::process::windows::user32) fn allocate_span(
         memory: &mut AddressSpace,
         bounds: PageRange,
         bytes: &[u8],
@@ -43,6 +43,7 @@ impl Scratch32 {
             lease,
         })
     }
+
     pub(super) fn check(self, memory: &AddressSpace) -> Result<(), User32Error32> {
         self.lease.check(memory).map_err(scratch_error)
     }
