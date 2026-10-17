@@ -7,7 +7,7 @@ use crate::{
         arena::{CANCEL_OFFSET, EXIT_OFFSET, STATE_OFFSET, TRANSFER_OFFSET},
         call_frame::{CALL_FRAME_SIZE, CallRecord32, encode_call_frame},
         x86::{
-            EXIT_SIZE, STATE_SIZE, decode_exit, decode_state, encode_exit_v3,
+            EXIT_SIZE, REGISTERS_OFFSET, STATE_SIZE, decode_exit, decode_state, encode_exit_v3,
             encode_state_current as encode_state,
         },
     },
@@ -480,6 +480,12 @@ impl EngineInstance {
         arena[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE].copy_from_slice(&prepared.exit);
         self.pending_call = None;
         self.module_windows_reply = None;
+        let esp_offset = REGISTERS_OFFSET + 4 * 4;
+        self.retire_popped_windows_exception_returns(u32::from_le_bytes(
+            prepared.state[esp_offset..esp_offset + 4]
+                .try_into()
+                .unwrap(),
+        ));
     }
 
     pub fn abandon_call(&mut self, key: u64, token: u32) -> Result<(), HostError> {

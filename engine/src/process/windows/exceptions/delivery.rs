@@ -175,7 +175,18 @@ impl EngineInstance {
                 None
             }
         });
-        if self.exceptions.deliveries.len() >= 64 {
+        let original_esp = original.state.registers[4];
+        if self
+            .exceptions
+            .deliveries
+            .iter()
+            .filter(|delivery| {
+                delivery.thread != self.threads.current_id()
+                    || delivery.return_is_live(self.threads.current_id(), original_esp)
+            })
+            .count()
+            >= 64
+        {
             return Err(HostError::Exception(ExceptionError32::Capacity));
         }
         let thread = self.current_windows_thread_id()?;
@@ -255,7 +266,7 @@ impl EngineInstance {
             cursor: 0,
             chain,
             nested_boundary: None,
-            abandoned: Vec::new(),
+            popped: Vec::new(),
             visited: Vec::new(),
             stack_low,
             stack_high,
@@ -278,7 +289,7 @@ impl EngineInstance {
             initial_stack_limit: stack_overflow.as_ref().map(|receipt| receipt.limit()),
         };
         delivery
-            .abandoned
+            .popped
             .try_reserve_exact(64)
             .map_err(|_| HostError::Infrastructure)?;
         delivery
@@ -311,7 +322,8 @@ impl EngineInstance {
         if let Some(receipt) = stack_overflow {
             self.threads.commit_stack_overflow(receipt);
         }
-        self.commit_abandoned_exception_deliveries(&delivery, None);
+        self.commit_popped_exception_registrations(&delivery);
+        self.retire_popped_windows_exception_returns(original_esp);
         if delivery.phase == ExceptionPhase32::Resumed {
             return Ok(ExceptionDispatch32 {
                 id,
@@ -335,12 +347,15 @@ impl EngineInstance {
     }
     pub fn pending_windows_exception(&self) -> Option<ExceptionDispatch32> {
         let current = self.threads.current_id();
+        let esp = decode_state(&self.arena()[STATE_OFFSET..STATE_OFFSET + STATE_SIZE])
+            .ok()?
+            .registers[4];
         let delivery = self
             .exceptions
             .deliveries
             .iter()
             .rev()
-            .find(|delivery| delivery.thread == current)?;
+            .find(|delivery| delivery.return_is_live(current, esp))?;
         Some(ExceptionDispatch32 {
             id: delivery.id,
             thread: delivery.thread,
@@ -366,19 +381,19 @@ impl EngineInstance {
             return Err(HostError::Exception(ExceptionError32::Busy));
         }
         let thread = self.threads.current_id();
+        let state = decode_state(&self.arena()[STATE_OFFSET..STATE_OFFSET + STATE_SIZE])
+            .map_err(|_| HostError::Infrastructure)?;
         let index = self
             .exceptions
             .deliveries
             .iter()
-            .rposition(|delivery| delivery.thread == thread)
+            .rposition(|delivery| delivery.return_is_live(thread, state.registers[4]))
             .filter(|&index| self.exceptions.deliveries[index].id == id)
             .ok_or(HostError::Exception(ExceptionError32::Stale))?;
         let delivery = &self.exceptions.deliveries[index];
         let active = delivery
             .active
             .ok_or(HostError::Exception(ExceptionError32::InvalidDisposition))?;
-        let state = decode_state(&self.arena()[STATE_OFFSET..STATE_OFFSET + STATE_SIZE])
-            .map_err(|_| HostError::Infrastructure)?;
         let exit = decode_exit(&self.arena()[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE])
             .map_err(|_| HostError::Infrastructure)?;
         if state.eip != delivery.return_pc
@@ -405,18 +420,22 @@ impl EngineInstance {
             delivery.chain_write,
             delivery.record,
             delivery.nested_boundary,
-            delivery.abandoned.len(),
+            delivery.popped.len(),
         );
         let mut delivery = self.exceptions.deliveries.remove(index);
         let outcome = self.complete_exception_handler(&mut delivery, result);
         match outcome {
             Ok(true) => {
-                self.commit_abandoned_exception_deliveries(&delivery, None);
+                self.commit_popped_exception_registrations(&delivery);
                 Ok(None)
             }
             Ok(false) => {
-                let index = self.commit_abandoned_exception_deliveries(&delivery, Some(index));
-                self.exceptions.deliveries.insert(index.unwrap(), delivery);
+                self.commit_popped_exception_registrations(&delivery);
+                let index = self
+                    .exceptions
+                    .deliveries
+                    .partition_point(|entry| entry.id < delivery.id);
+                self.exceptions.deliveries.insert(index, delivery);
                 Ok(self.pending_windows_exception())
             }
             Err(error) => {
@@ -432,7 +451,7 @@ impl EngineInstance {
                     _,
                 ) = before;
                 delivery.visited.truncate(before.3);
-                delivery.abandoned.truncate(before.8);
+                delivery.popped.truncate(before.8);
                 delivery.handlers = handlers;
                 self.exceptions.deliveries.insert(index, delivery);
                 Err(error)

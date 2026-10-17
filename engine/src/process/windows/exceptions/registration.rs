@@ -93,7 +93,7 @@ impl EngineInstance {
         Ok(())
     }
 
-    fn check_exception_registration(
+    pub(super) fn check_exception_registration(
         &self,
         registration: HandlerRegistration32,
     ) -> Result<(), HostError> {
@@ -120,6 +120,7 @@ impl EngineInstance {
             .filter_map(|parent| {
                 parent
                     .active
+                    .filter(|active| !active.registration_popped)
                     .and_then(|active| active.registration)
                     .map(|registration| (parent.id, registration))
             })
@@ -133,8 +134,8 @@ impl EngineInstance {
         }
         delivery.visited.push(registration.address);
         if delivery.phase == ExceptionPhase32::Unwind {
-            if !delivery.abandoned.contains(&parent) {
-                delivery.abandoned.push(parent);
+            if !delivery.popped.contains(&parent) {
+                delivery.popped.push(parent);
             }
             let next = if registration.unwind {
                 if delivery.unwind.is_some_and(|unwind| {
@@ -165,21 +166,25 @@ impl EngineInstance {
         Ok(true)
     }
 
-    pub(super) fn commit_abandoned_exception_deliveries(
-        &mut self,
-        delivery: &Delivery32,
-        insertion: Option<usize>,
-    ) -> Option<usize> {
-        let insertion = insertion.map(|index| {
-            index
-                - self.exceptions.deliveries[..index]
-                    .iter()
-                    .filter(|parent| delivery.abandoned.contains(&parent.id))
-                    .count()
-        });
+    pub(super) fn commit_popped_exception_registrations(&mut self, delivery: &Delivery32) {
+        // i386 RtlUnwind changes the registration chain, then resumes its call site.
+        // the handler that invoked it can still return through its checked receipt.
+        for parent in &mut self.exceptions.deliveries {
+            if delivery.popped.contains(&parent.id)
+                && let Some(active) = &mut parent.active
+            {
+                active.registration_popped = true;
+            }
+        }
+    }
+
+    pub(in crate::process) fn retire_popped_windows_exception_returns(&mut self, esp: u32) {
+        if self.exceptions.deliveries.is_empty() {
+            return;
+        }
+        let thread = self.threads.current_id();
         self.exceptions
             .deliveries
-            .retain(|parent| !delivery.abandoned.contains(&parent.id));
-        insertion
+            .retain(|delivery| delivery.thread != thread || delivery.return_is_live(thread, esp));
     }
 }

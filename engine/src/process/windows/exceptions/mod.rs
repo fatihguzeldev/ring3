@@ -84,7 +84,7 @@ struct Delivery32 {
     cursor: usize,
     chain: u32,
     nested_boundary: Option<u32>,
-    abandoned: Vec<u64>,
+    popped: Vec<u64>,
     visited: Vec<u32>,
     stack_low: u32,
     stack_high: u32,
@@ -116,6 +116,16 @@ struct ActiveHandler32 {
     establisher: u32,
     next: u32,
     registration: Option<registration::HandlerRegistration32>,
+    registration_popped: bool,
+}
+
+impl Delivery32 {
+    fn return_is_live(&self, thread: u32, esp: u32) -> bool {
+        self.thread == thread
+            && self
+                .active
+                .is_none_or(|active| !active.registration_popped || esp <= active.return_esp)
+    }
 }
 #[derive(Clone, Copy)]
 pub(in crate::process) struct Unwind32 {

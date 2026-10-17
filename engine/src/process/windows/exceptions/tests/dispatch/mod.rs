@@ -1,6 +1,7 @@
 use super::*;
 
 mod collided;
+mod lifetime;
 mod nested;
 
 fn chain(engine: &mut EngineInstance) -> (ContextState32, [u32; 3]) {

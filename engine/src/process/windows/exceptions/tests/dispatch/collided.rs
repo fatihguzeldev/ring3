@@ -71,7 +71,7 @@ fn malformed_collision_is_neutral_and_the_same_handler_return_can_be_repaired() 
 }
 
 #[test]
-fn unwind_inside_an_unwind_handler_collides_at_its_wrapper_and_retires_only_that_parent() {
+fn unwind_inside_an_unwind_handler_collides_without_discarding_its_physical_return() {
     let mut engine = engine();
     let (parent, frames) = unwind(&mut engine);
     let current = engine.windows_context_state().unwrap();
@@ -94,7 +94,7 @@ fn unwind_inside_an_unwind_handler_collides_at_its_wrapper_and_retires_only_that
             .exceptions
             .deliveries
             .iter()
-            .all(|delivery| delivery.id != parent.id)
+            .any(|delivery| delivery.id == parent.id)
     );
     returned(&mut engine, child, 1, true);
     assert_eq!(
@@ -108,9 +108,19 @@ fn unwind_inside_an_unwind_handler_collides_at_its_wrapper_and_retires_only_that
         engine.windows_context_state().unwrap().state.registers[0],
         0x27182818
     );
-    assert!(
+    assert_eq!(engine.pending_windows_exception().unwrap().id, parent.id);
+    returned(&mut engine, parent, 1, true);
+    let next = engine
+        .finish_windows_exception_handler(77, parent.id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(next.procedure, 0x401001);
+    returned(&mut engine, next, 1, true);
+    assert_eq!(
         engine
             .finish_windows_exception_handler(77, parent.id)
-            .is_err()
+            .unwrap(),
+        None
     );
+    assert!(engine.exceptions.deliveries.is_empty());
 }

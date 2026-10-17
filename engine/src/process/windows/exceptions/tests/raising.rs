@@ -12,6 +12,16 @@ fn captured_call_using(
     args: &[u32],
     convention: Option<crate::windows::CallingConvention32>,
 ) -> Result<(), HostError> {
+    captured_call_on_stack(engine, id, args, convention, 0x7f003000)
+}
+
+pub(in crate::process::windows::exceptions::tests) fn captured_call_on_stack(
+    engine: &mut EngineInstance,
+    id: u32,
+    args: &[u32],
+    convention: Option<crate::windows::CallingConvention32>,
+    stack: u32,
+) -> Result<(), HostError> {
     let gate = engine
         .loaded_windows_modules()
         .flat_map(|module| module.gates())
@@ -26,7 +36,6 @@ fn captured_call_using(
     }
     engine.compile_with_gates(1, 1).unwrap();
     let mut context = engine.windows_context_state().unwrap();
-    let stack = 0x7f003000;
     let words: Vec<u8> = std::iter::once(0x401010u32)
         .chain(args.iter().copied())
         .flat_map(u32::to_le_bytes)

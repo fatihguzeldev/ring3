@@ -2,7 +2,7 @@ use super::*;
 use crate::windows::exceptions::ExceptionApi32;
 
 #[path = "raising.rs"]
-mod raising;
+pub(super) mod raising;
 
 fn chain(
     engine: &mut EngineInstance,

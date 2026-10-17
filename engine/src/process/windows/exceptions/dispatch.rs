@@ -162,6 +162,7 @@ impl EngineInstance {
                     establisher,
                     next,
                     registration,
+                    registration_popped: false,
                 });
                 self.publish_prepared_call(prepared);
                 return Ok(());
@@ -222,7 +223,11 @@ impl EngineInstance {
             .active
             .ok_or(HostError::Exception(ExceptionError32::Stale))?;
         if let Some(registration) = active.registration {
-            self.restore_exception_registration(delivery, registration)?;
+            if active.registration_popped {
+                self.check_exception_registration(registration)?;
+            } else {
+                self.restore_exception_registration(delivery, registration)?;
+            }
         }
         delivery.record = self.read_exception_record(delivery.record_address)?;
         if delivery.nested_boundary == Some(active.establisher) {
