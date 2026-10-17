@@ -1,3 +1,5 @@
+mod globals;
+mod packed;
 use super::{
     context::GdiRuntime32,
     storage::{Storage32, SurfaceKey32},

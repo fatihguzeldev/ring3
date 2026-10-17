@@ -55,7 +55,7 @@ gdi_apis! {
     AddFontResourceA,1; AddFontResourceW,1; RemoveFontResourceA,1; RemoveFontResourceW,1;
     AddFontResourceExA,3; AddFontResourceExW,3; RemoveFontResourceExA,3; RemoveFontResourceExW,3;
     AlphaBlend,11; TransparentBlt,11; GradientFill,6;
-    CreatePatternBrush,1; GetDCEx,3; ExtCreatePen,5; DrawEdge,4; DrawFrameControl,4;
+    CreatePatternBrush,1; GetDCEx,3; ExtCreatePen,5; DrawEdge,4; DrawFrameControl,4; CreateDIBPatternBrushPt,2; CreateDIBPatternBrush,2;
 }
 impl GdiApi32 {
     pub fn msimg(self) -> bool {

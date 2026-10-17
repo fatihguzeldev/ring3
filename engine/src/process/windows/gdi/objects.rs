@@ -13,6 +13,9 @@ impl GdiRuntime32 {
         if api == GdiApi32::CreatePatternBrush {
             return self.create_pattern_brush(memory, args[0]);
         }
+        if api == GdiApi32::CreateDIBPatternBrushPt {
+            return self.create_dib_pattern_brush(memory, args[0], args[1]);
+        }
         let object = match api {
             GdiApi32::CreateSolidBrush => GdiObject32::Brush(Brush32::Solid(args[0] & 0x00ff_ffff)),
             GdiApi32::CreateHatchBrush if args[0] <= 5 => GdiObject32::Brush(Brush32::Hatch {
@@ -22,6 +25,9 @@ impl GdiRuntime32 {
             GdiApi32::CreateHatchBrush => return Err(GdiError32::InvalidRequest),
             GdiApi32::CreateBrushIndirect => {
                 let [style, color, hatch] = memory::words(memory, args[0])?;
+                if style == 6 {
+                    return self.create_dib_pattern_brush(memory, hatch, color & 0xffff);
+                }
                 if style == 3 {
                     return self.create_pattern_brush(memory, hatch);
                 }
@@ -109,6 +115,7 @@ impl GdiRuntime32 {
                         Brush32::Null => (1, 0, 0),
                         Brush32::Hatch { style, color } => (2, color, style),
                         Brush32::Pattern { bitmap, .. } => (3, 0, bitmap),
+                        Brush32::DibPattern { address, usage } => (6, usage, address),
                         Brush32::System(index) => (0, self.system_color(index), 0),
                     };
                     let mut words = vec![
@@ -130,6 +137,7 @@ impl GdiRuntime32 {
                 Brush32::Solid(color) => vec![0, color, 0],
                 Brush32::Null => vec![1, 0, 0],
                 Brush32::Pattern { bitmap, .. } => vec![3, 0, bitmap],
+                Brush32::DibPattern { address, usage } => vec![6, usage, address],
                 Brush32::Hatch { style, color } => vec![2, color, style],
             },
             GdiObject32::Bitmap(layout) => {

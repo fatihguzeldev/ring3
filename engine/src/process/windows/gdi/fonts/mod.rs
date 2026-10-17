@@ -93,6 +93,25 @@ impl GdiRuntime32 {
             state.font_realization = Some(resolved);
             self.model.set_state(dc, state)?;
             Ok(previous)
+        } else if matches!(
+            self.model.object(handle)?,
+            GdiObject32::Brush(_) | GdiObject32::Pen(_)
+        ) {
+            let mut state = self.model.state(dc)?.clone();
+            let palette = self.realize_pattern_palette(&state, handle)?;
+            match self.model.object(handle)? {
+                GdiObject32::Brush(_) => {
+                    state.brush = handle;
+                    state.brush_palette = palette;
+                }
+                GdiObject32::Pen(_) => {
+                    state.pen = handle;
+                    state.pen_palette = palette;
+                }
+                _ => unreachable!(),
+            }
+            self.model.set_state(dc, state)?;
+            Ok(previous)
         } else {
             self.model.select_object(dc, handle)
         }

@@ -83,6 +83,8 @@ impl EngineInstance {
         let args = frame.arguments();
         let result = if erase {
             self.gdi_erase_background(args)
+        } else if let Some(result) = self.gdi_global_pattern_call(api.unwrap(), args) {
+            result
         } else if api == Some(GdiApi32::GetDCEx) {
             self.gdi_dc_ex(args, thread)
         } else if matches!(api, Some(GdiApi32::GetDC | GdiApi32::GetWindowDC)) {
@@ -295,8 +297,14 @@ impl GdiRuntime32 {
             | SetTextJustification => self.text_call(memory, api, args, ansi),
             DrawEdge | DrawFrameControl => self.decoration_call(memory, api, args),
             ExtCreatePen => self.ext_create_pen(memory, args),
-            CreatePen | CreatePenIndirect | CreateSolidBrush | CreateHatchBrush
-            | CreatePatternBrush | CreateBrushIndirect => self.create_object(memory, api, args),
+            CreatePen
+            | CreatePenIndirect
+            | CreateSolidBrush
+            | CreateHatchBrush
+            | CreatePatternBrush
+            | CreateDIBPatternBrush
+            | CreateDIBPatternBrushPt
+            | CreateBrushIndirect => self.create_object(memory, api, args),
             CreateBitmap => {
                 if args[2] != 1 || args[3] > u16::MAX as u32 {
                     return Err(GdiError32::Unsupported);

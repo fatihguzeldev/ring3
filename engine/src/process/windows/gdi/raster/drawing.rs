@@ -116,6 +116,33 @@ impl GdiRuntime32 {
                     surface.layout.read_pixel(pixels, &surface.palette, x, y)
                 })
             }
+            Brush32::DibPattern { usage, .. } => {
+                let surface =
+                    &self.surfaces[self.surface_index(SurfaceKey32::PatternBrush(handle))?];
+                let Storage32::Owned(pixels) = &surface.storage else {
+                    return Err(GdiError32::InvalidRequest);
+                };
+                let x = (i64::from(point.x) - i64::from(state.brush_origin.x))
+                    .rem_euclid(i64::from(surface.layout.width)) as u32;
+                let y = (i64::from(point.y) - i64::from(state.brush_origin.y))
+                    .rem_euclid(i64::from(surface.layout.height)) as u32;
+                let realized = if handle == state.brush {
+                    state.brush_palette.as_deref()
+                } else if handle == state.pen {
+                    state.pen_palette.as_deref()
+                } else {
+                    None
+                };
+                Some(if usage == 0 || surface.layout.bits_per_pixel > 8 {
+                    surface.layout.read_pixel(pixels, &surface.palette, x, y)
+                } else if let Some(colors) = realized {
+                    surface.layout.read_pixel(pixels, colors, x, y)
+                } else {
+                    let index = surface.layout.read_pixel(pixels, &surface.palette, x, y) as usize;
+                    let palette = self.model.palette_entries(state.palette)?;
+                    palette[index % palette.len()] & 0xffffff
+                })
+            }
             Brush32::Hatch { style, color } => {
                 let x = (i64::from(point.x) - i64::from(state.brush_origin.x)).rem_euclid(8);
                 let y = (i64::from(point.y) - i64::from(state.brush_origin.y)).rem_euclid(8);

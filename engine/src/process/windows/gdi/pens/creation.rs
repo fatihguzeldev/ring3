@@ -10,6 +10,16 @@ impl GdiRuntime32 {
         memory: &AddressSpace,
         args: &[u32],
     ) -> Result<u32, GdiError32> {
+        let brush = memory::words(memory, args[2])?;
+        self.ext_create_pen_with_brush(memory, args, brush, None)
+    }
+    pub(in crate::process::windows::gdi) fn ext_create_pen_with_brush(
+        &mut self,
+        memory: &AddressSpace,
+        args: &[u32],
+        brush: [u32; 3],
+        limit: Option<u32>,
+    ) -> Result<u32, GdiError32> {
         let style = args[0];
         let geometric = style & 0xf0000 == 0x10000;
         let kind = style & 15;
@@ -29,7 +39,7 @@ impl GdiRuntime32 {
         {
             return Err(GdiError32::InvalidRequest);
         }
-        let [brush_style, color, hatch] = memory::words(memory, args[2])?;
+        let [brush_style, color, hatch] = brush;
         if !geometric && brush_style != 0 {
             return Err(GdiError32::InvalidRequest);
         }
@@ -53,6 +63,11 @@ impl GdiRuntime32 {
                     monochrome: layout.bits_per_pixel == 1,
                 }
             }
+            6 if color & 0xffff <= 1 => Brush32::DibPattern {
+                address: hatch,
+                usage: color & 0xffff,
+            },
+            6 => return Err(GdiError32::InvalidRequest),
             _ => return Err(GdiError32::Unsupported),
         };
         let mut entries = [0; 16];
@@ -74,10 +89,18 @@ impl GdiRuntime32 {
             }),
         };
         let prepared = self.model.prepare_object(GdiObject32::Pen(pen))?;
-        let pattern = if let Brush32::Pattern { bitmap, .. } = brush {
-            Some(self.prepare_pattern_surface(memory, bitmap, prepared.handle())?)
-        } else {
-            None
+        let pattern = match brush {
+            Brush32::Pattern { bitmap, .. } => {
+                Some(self.prepare_pattern_surface(memory, bitmap, prepared.handle())?)
+            }
+            Brush32::DibPattern { address, usage } => Some(self.prepare_dib_pattern_surface(
+                memory,
+                address,
+                usage,
+                prepared.handle(),
+                limit,
+            )?),
+            _ => None,
         };
         let handle = self.model.commit_new(prepared);
         if let Some(pattern) = pattern {
