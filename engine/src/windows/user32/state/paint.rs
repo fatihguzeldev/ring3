@@ -2,6 +2,30 @@ use super::*;
 use crate::windows::gdi::Region32;
 
 impl User32State32 {
+    pub(crate) fn take_background_erase(
+        &mut self,
+        window: WindowHandle32,
+    ) -> Result<(), User32Error32> {
+        self.windows.get(window)?;
+        let slot = self
+            .slots
+            .iter_mut()
+            .find(|slot| slot.data.handle == window)
+            .ok_or(User32Error32::Win32(1400))?;
+        slot.erase = false;
+        Ok(())
+    }
+    pub(crate) fn finish_background_erase(&mut self, window: WindowHandle32, handled: bool) {
+        if !handled
+            && let Some(slot) = self
+                .slots
+                .iter_mut()
+                .find(|slot| slot.data.handle == window)
+            && slot.update.complexity() != 1
+        {
+            slot.erase = true;
+        }
+    }
     pub(crate) fn window_class(
         &self,
         window: WindowHandle32,

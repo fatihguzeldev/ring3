@@ -18,8 +18,8 @@ use crate::{
             registry::RegistryReply32,
             synchronization::SynchronizationThreadReply32,
             user32::User32ThreadReply32,
-            winmm::WinmmThreadReply32,
             version::VersionThreadReply32,
+            winmm::WinmmThreadReply32,
         },
     },
     windows::ThreadState32,
@@ -102,13 +102,13 @@ impl SavedThread32 {
     pub(super) fn dinput_reply(&self) -> Option<&DirectInputThreadReply32> {
         self.dinput.as_ref()
     }
-    pub(super) fn check_scratch(
+    pub(super) fn check_owned_scratch(
         &self,
         memory: &crate::memory::AddressSpace,
     ) -> Result<(), HostError> {
         if let Some(reply) = self.user32.as_ref() {
             reply
-                .check_thread_scratch(memory)
+                .check_owned_thread_scratch(memory)
                 .map_err(HostError::User32)?;
         }
         if let Some(reply) = self.dinput.as_ref() {
@@ -127,10 +127,13 @@ impl SavedThread32 {
             ))
     }
     pub(super) fn ready(&self, engine: &EngineInstance, now: u64, thread: u32) -> bool {
-        self.version.as_ref().is_some_and(|reply| engine.version_thread_reply_ready(reply))
-            || self.activation
+        self.version
             .as_ref()
-            .is_some_and(|reply| engine.activation_thread_reply_ready(reply))
+            .is_some_and(|reply| engine.version_thread_reply_ready(reply))
+            || self
+                .activation
+                .as_ref()
+                .is_some_and(|reply| engine.activation_thread_reply_ready(reply))
             || engine.registered_com_wait_ready(thread)
             || engine.com_proxy_wait_ready(thread)
             || engine.com_abandoned_work_ready(thread)

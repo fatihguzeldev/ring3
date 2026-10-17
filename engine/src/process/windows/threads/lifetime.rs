@@ -22,17 +22,17 @@ impl EngineInstance {
         if id == self.threads.current_id() {
             if let Some(user32) = self.user32.as_ref() {
                 user32
-                    .check_thread_scratch(self.memory()?)
+                    .check_owned_thread_scratch(self.memory()?)
                     .map_err(HostError::User32)?;
             }
             if let Some(dinput) = self.dinput.as_ref() {
                 dinput.check_active_thread_scratch(self.memory()?)?;
             }
         } else if let Some(saved) = record.saved.as_ref() {
-            saved.check_scratch(self.memory()?)?;
+            saved.check_owned_scratch(self.memory()?)?;
         }
         for invocation in &record.active_invocations {
-            invocation.saved.check_scratch(self.memory()?)?;
+            invocation.saved.check_owned_scratch(self.memory()?)?;
         }
 
         let scratch = if id == self.threads.current_id() {
@@ -429,6 +429,14 @@ impl EngineInstance {
             .invocations
             .retain(|invocation| invocation.target != id);
         Ok(())
+    }
+    #[cfg(test)]
+    pub(in crate::process) fn terminate_windows_thread_for_test(
+        &mut self,
+        id: u32,
+        code: u32,
+    ) -> Result<(), HostError> {
+        self.terminate_windows_thread(id, code)
     }
     pub(in crate::process) fn resolve_thread_handle(
         &self,

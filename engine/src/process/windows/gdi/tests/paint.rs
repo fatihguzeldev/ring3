@@ -1,3 +1,4 @@
+use super::memory;
 use crate::{
     abi::{arena::*, x86::*},
     cpu::{ExecutionExit, ExitReason, x86::State32},
@@ -107,6 +108,9 @@ fn fixture() -> (EngineInstance, u64, u32) {
     fixture_with_startup(false)
 }
 pub(super) fn fixture_with_startup(startup: bool) -> (EngineInstance, u64, u32) {
+    fixture_with_nested_create(startup, false)
+}
+fn fixture_with_nested_create(startup: bool, nested: bool) -> (EngineInstance, u64, u32) {
     let mut engine = EngineInstance::new(if startup { 256 } else { 32 }, KEY).unwrap();
     engine
         .configure_execution(crate::process::ExecutionConfig32 {
@@ -171,7 +175,27 @@ pub(super) fn fixture_with_startup(startup: bool) -> (EngineInstance, u64, u32) 
         .write(GuestAddress(RETURN), &[0x0f, 0x0b])
         .unwrap();
     engine.protect(PC, 1, 5).unwrap();
-    let callback = unit(&mut engine, &[PROC, 1, RETURN, 2, RETURN, RETURN_ID], 2, 1);
+    let callback = if nested {
+        unit(
+            &mut engine,
+            &[
+                PROC,
+                1,
+                RETURN,
+                2,
+                0x10030,
+                2,
+                RETURN,
+                RETURN_ID,
+                0x10030,
+                User32Api32::CreateWindowExA.id(),
+            ],
+            3,
+            2,
+        )
+    } else {
+        unit(&mut engine, &[PROC, 1, RETURN, 2, RETURN, RETURN_ID], 2, 1)
+    };
     engine
         .memory
         .as_mut()
@@ -375,5 +399,399 @@ fn paintstruct_fault_retains_result_for_exact_outer_retry_and_rejects_remap() {
             assert_eq!(words::<1>(&engine, PAINT + 4), [0]);
             assert!(engine.pending_call.is_none());
         }
+    }
+}
+
+#[test]
+fn captured_getupdaterect_erase_calls_real_wndproc_without_validating_dirty_region() {
+    let (mut engine, callback, window) = fixture();
+    capture(&mut engine, GdiApi32::ValidateRect.id(), &[window, 0]);
+    memory::write_words(engine.memory.as_mut().unwrap(), 0x12200, &[1, 2, 7, 5]).unwrap();
+    capture(
+        &mut engine,
+        GdiApi32::InvalidateRect.id(),
+        &[window, 0x12200, 1],
+    );
+    let (owner, token) = capture(
+        &mut engine,
+        GdiApi32::GetUpdateRect.id(),
+        &[window, 0x12300, 1],
+    );
+    let request = engine
+        .pending_windows_callback()
+        .expect("nonempty erasing GetUpdateRect calls the actual window procedure");
+    assert_eq!(request.procedure.0, PROC);
+    assert_eq!(request.count, 4);
+    assert_eq!(&request.arguments[..2], &[window, 0x14]);
+    assert_ne!(request.arguments[2], 0);
+    assert_eq!(&request.arguments[3..], &[0; 13]);
+    assert_eq!(engine.pending_call.as_ref().unwrap().token, token);
+    assert_eq!(
+        engine.pending_call.as_ref().unwrap().owner,
+        crate::process::calls::call::PendingOwner::Resident(owner)
+    );
+    finish(&mut engine, callback, 1);
+    assert!(engine.pending_call.is_none());
+    assert_eq!(eax(&engine), 1);
+    assert_eq!(words::<4>(&engine, 0x12300), [1, 2, 7, 5]);
+    capture(
+        &mut engine,
+        GdiApi32::GetUpdateRect.id(),
+        &[window, 0x12300, 0],
+    );
+    assert!(engine.pending_windows_callback().is_none());
+    assert_eq!(eax(&engine), 1);
+    assert_eq!(words::<4>(&engine, 0x12300), [1, 2, 7, 5]);
+}
+
+#[test]
+fn empty_getupdaterect_erase_returns_empty_without_guest_callback() {
+    let (mut engine, _, window) = fixture();
+    capture(&mut engine, GdiApi32::ValidateRect.id(), &[window, 0]);
+    memory::write_words(
+        engine.memory.as_mut().unwrap(),
+        0x12300,
+        &[101, 102, 103, 104],
+    )
+    .unwrap();
+    capture(
+        &mut engine,
+        GdiApi32::GetUpdateRect.id(),
+        &[window, 0x12300, 1],
+    );
+    assert!(engine.pending_call.is_none());
+    assert!(engine.pending_windows_callback().is_none());
+    assert_eq!(eax(&engine), 0);
+    assert_eq!(words::<4>(&engine, 0x12300), [0; 4]);
+}
+
+fn sealed_paint_output_failure(
+    api: GdiApi32,
+    remap: bool,
+    startup: bool,
+) -> (EngineInstance, u64, u32, u32, u32, u32, usize) {
+    let (mut engine, callback, window) = fixture_with_startup(startup);
+    if startup {
+        engine
+            .configure_synchronization(Default::default())
+            .unwrap();
+    }
+    capture(&mut engine, GdiApi32::ValidateRect.id(), &[window, 0]);
+    capture(&mut engine, GdiApi32::InvalidateRect.id(), &[window, 0, 1]);
+    let (output, length) = if api == GdiApi32::GetUpdateRect {
+        (PAINT + 24, 16)
+    } else {
+        (PAINT, 64)
+    };
+    memory::write_words(
+        engine.memory.as_mut().unwrap(),
+        output,
+        &[101, 102, 103, 104],
+    )
+    .unwrap();
+    let args = if api == GdiApi32::GetUpdateRect {
+        vec![window, output, 1]
+    } else {
+        vec![window, output]
+    };
+    let (owner, token) = capture(&mut engine, api.id(), &args);
+    let frame = engine.pending_call.as_ref().unwrap().frame;
+    let state = decode_state(&engine.arena()[..STATE_SIZE]).unwrap();
+    let request = engine.pending_windows_callback().unwrap();
+    let dc = request.arguments[2];
+    if api == GdiApi32::GetUpdateRect {
+        assert_eq!(words::<4>(&engine, output), [101, 102, 103, 104]);
+    }
+    let record = engine
+        .begin_windows_resident_callback(KEY, callback, RETURN, RETURN_ID)
+        .unwrap();
+    engine
+        .authorize_resident_callback(KEY, callback, record.token)
+        .unwrap();
+    stop(&mut engine, RETURN, RETURN_ID, 1);
+    let range = PageRange::new(GuestAddress(0x13000), 1).unwrap();
+    if remap {
+        engine.memory.as_mut().unwrap().unmap(range).unwrap();
+        engine
+            .memory
+            .as_mut()
+            .unwrap()
+            .map_zeroed(range, Permissions::READ_WRITE)
+            .unwrap();
+    } else {
+        engine
+            .memory
+            .as_mut()
+            .unwrap()
+            .protect(range, Permissions::READ)
+            .unwrap();
+    }
+    let mut bytes = vec![0; length];
+    engine
+        .memory()
+        .unwrap()
+        .read(GuestAddress(output), &mut bytes)
+        .unwrap();
+    let version = engine.memory().unwrap().transaction_version();
+    assert!(
+        engine
+            .finish_windows_resident_callback(KEY, callback, record.token)
+            .is_err()
+    );
+    assert_eq!(decode_state(&engine.arena()[..STATE_SIZE]).unwrap(), state);
+    let pending = engine.pending_call.as_ref().unwrap();
+    assert_eq!(pending.frame, frame);
+    assert_eq!(pending.token, token);
+    let expected_owner = crate::process::calls::call::PendingOwner::Resident(owner);
+    assert_eq!(pending.owner, expected_owner);
+    assert!(engine.callback.is_none());
+    assert!(engine.pending_windows_callback().is_none());
+    assert_eq!(
+        engine.windows_replies.last().unwrap().received_result(
+            crate::process::windows::callbacks::WindowsCallbackProvider32::User32,
+            expected_owner,
+            token,
+            request.continuation,
+            frame,
+        ),
+        Some(1)
+    );
+    let mut after = vec![0; length];
+    engine
+        .memory()
+        .unwrap()
+        .read(GuestAddress(output), &mut after)
+        .unwrap();
+    assert_eq!(after, bytes);
+    assert_eq!(engine.memory().unwrap().transaction_version(), version);
+    (engine, owner, token, window, dc, output, length)
+}
+
+#[test]
+fn query_rect_fault_seals_erase_once_and_repairs_rights_without_accepting_remap() {
+    for remap in [false, true] {
+        let (mut engine, owner, token, _, dc, output, _) =
+            sealed_paint_output_failure(GdiApi32::GetUpdateRect, remap, false);
+        let arena = engine.arena().to_vec();
+        let bytes = words::<4>(&engine, output);
+        let version = engine.memory().unwrap().transaction_version();
+        assert!(
+            engine
+                .complete_resident_windows_call(KEY, owner, token)
+                .is_err()
+        );
+        assert_eq!(engine.arena(), arena);
+        assert_eq!(words::<4>(&engine, output), bytes);
+        assert_eq!(engine.memory().unwrap().transaction_version(), version);
+        assert!(engine.pending_windows_callback().is_none());
+        if !remap {
+            engine
+                .memory
+                .as_mut()
+                .unwrap()
+                .protect(
+                    PageRange::new(GuestAddress(0x13000), 1).unwrap(),
+                    Permissions::READ_WRITE,
+                )
+                .unwrap();
+            engine
+                .complete_resident_windows_call(KEY, owner, token)
+                .unwrap();
+            assert_eq!(words::<4>(&engine, output), [0, 0, 8, 6]);
+            assert!(engine.pending_call.is_none());
+            assert!(engine.pending_windows_callback().is_none());
+            assert!(engine.gdi.as_ref().unwrap().model.dc_kind(dc).is_err());
+            assert!(engine.gdi.as_ref().unwrap().paints.is_empty());
+        }
+    }
+}
+
+#[test]
+fn forced_thread_retirement_with_only_borrowed_paint_outputs_needs_no_ram_version() {
+    for api in [GdiApi32::BeginPaint, GdiApi32::GetUpdateRect] {
+        for remap in [false, true] {
+            let (mut engine, _, _, window, dc, output, length) =
+                sealed_paint_output_failure(api, remap, true);
+            assert_eq!(
+                engine
+                    .user32
+                    .as_ref()
+                    .unwrap()
+                    .thread_scratch_ranges()
+                    .count(),
+                0
+            );
+            let mut bytes = vec![0; length];
+            engine
+                .memory()
+                .unwrap()
+                .read(GuestAddress(output), &mut bytes)
+                .unwrap();
+            engine.memory.as_mut().unwrap().exhaust_versions_for_test();
+            let version = engine.memory().unwrap().transaction_version();
+            engine.terminate_windows_thread_for_test(1, 41).unwrap();
+            assert_eq!(
+                engine.windows_thread_info(1).unwrap().state,
+                crate::windows::thread::ThreadState32::Terminated
+            );
+            assert!(engine.pending_call.is_none());
+            assert!(engine.callback.is_none());
+            assert!(engine.pending_windows_callback().is_none());
+            assert!(
+                engine
+                    .user32
+                    .as_ref()
+                    .unwrap()
+                    .windows()
+                    .get(WindowHandle32::try_from(window).unwrap())
+                    .is_err()
+            );
+            assert!(engine.gdi.as_ref().unwrap().model.dc_kind(dc).is_err());
+            assert!(engine.gdi.as_ref().unwrap().paints.is_empty());
+            let mut after = vec![0; length];
+            engine
+                .memory()
+                .unwrap()
+                .read(GuestAddress(output), &mut after)
+                .unwrap();
+            assert_eq!(after, bytes);
+            assert_eq!(engine.memory().unwrap().transaction_version(), version);
+        }
+    }
+}
+
+#[test]
+fn forced_paint_retirement_preflights_real_nested_create_scratch_before_one_ram_commit() {
+    for remap in [false, true] {
+        let (mut engine, callback, window) = fixture_with_nested_create(true, true);
+        engine
+            .configure_synchronization(Default::default())
+            .unwrap();
+        capture(&mut engine, GdiApi32::BeginPaint.id(), &[window, PAINT]);
+        let dc = words::<1>(&engine, PAINT)[0];
+        let record = engine
+            .begin_windows_resident_callback(KEY, callback, RETURN, RETURN_ID)
+            .unwrap();
+        engine
+            .authorize_resident_callback(KEY, callback, record.token)
+            .unwrap();
+        let atom = engine
+            .user32
+            .as_ref()
+            .unwrap()
+            .gdi_window(window, false)
+            .unwrap()
+            .class_atom;
+        let args = [
+            0,
+            u32::from(atom),
+            0,
+            0x90000000,
+            0,
+            0,
+            8,
+            6,
+            0,
+            0,
+            0x400000,
+            0,
+        ];
+        let bytes = std::iter::once(PROC)
+            .chain(args)
+            .flat_map(u32::to_le_bytes)
+            .collect::<Vec<_>>();
+        engine
+            .memory
+            .as_mut()
+            .unwrap()
+            .write(GuestAddress(STACK), &bytes)
+            .unwrap();
+        stop(&mut engine, 0x10030, User32Api32::CreateWindowExA.id(), 0);
+        let inner = engine
+            .capture_resident_callback_call(
+                KEY,
+                callback,
+                record.token,
+                CallingConvention32::Stdcall,
+                12,
+            )
+            .unwrap()
+            .token;
+        engine
+            .complete_active_resident_callback_windows_call(KEY, callback, record.token, inner)
+            .unwrap();
+        let scratch: Vec<_> = engine
+            .user32
+            .as_ref()
+            .unwrap()
+            .thread_scratch_ranges()
+            .collect();
+        assert_eq!(
+            scratch.len(),
+            1,
+            "actual nested CreateWindow owns one canonical scratch page"
+        );
+        let address = GuestAddress(scratch[0].first as u32 * 4096);
+        let mut scratch_bytes = [0; 4096];
+        engine
+            .memory()
+            .unwrap()
+            .read(address, &mut scratch_bytes)
+            .unwrap();
+        let range = PageRange::new(GuestAddress(0x13000), 1).unwrap();
+        if remap {
+            engine.memory.as_mut().unwrap().unmap(range).unwrap();
+            engine
+                .memory
+                .as_mut()
+                .unwrap()
+                .map_zeroed(range, Permissions::READ_WRITE)
+                .unwrap();
+        } else {
+            engine
+                .memory
+                .as_mut()
+                .unwrap()
+                .protect(range, Permissions::READ)
+                .unwrap();
+        }
+        let output = words::<8>(&engine, PAINT);
+        let version = engine.memory().unwrap().transaction_version();
+        engine.memory.as_mut().unwrap().exhaust_versions_for_test();
+        let arena = engine.arena().to_vec();
+        let info = engine.windows_thread_info(1).unwrap();
+        let pending = engine.pending_call.as_ref().unwrap();
+        let (pending_token, pending_owner, pending_frame) =
+            (pending.token, pending.owner, pending.frame);
+        assert_eq!(
+            engine.terminate_windows_thread_for_test(1, 41),
+            Err(HostError::Memory(
+                crate::memory::MemoryError::VersionExhausted
+            ))
+        );
+        assert_eq!(engine.arena(), arena);
+        assert_eq!(engine.windows_thread_info(1).unwrap(), info);
+        assert_eq!(engine.pending_call.as_ref().unwrap().token, pending_token);
+        assert_eq!(engine.pending_call.as_ref().unwrap().owner, pending_owner);
+        assert_eq!(engine.pending_call.as_ref().unwrap().frame, pending_frame);
+        let mut after = [0; 4096];
+        engine.memory().unwrap().read(address, &mut after).unwrap();
+        assert_eq!(after, scratch_bytes);
+        assert_eq!(words::<8>(&engine, PAINT), output);
+        engine
+            .memory
+            .as_mut()
+            .unwrap()
+            .restore_version_for_test(version);
+        engine.terminate_windows_thread_for_test(1, 41).unwrap();
+        assert_eq!(
+            engine.windows_thread_info(1).unwrap().state,
+            crate::windows::thread::ThreadState32::Terminated
+        );
+        assert_eq!(engine.memory().unwrap().transaction_version(), version + 1);
+        assert!(engine.memory().unwrap().permissions_at(address).is_err());
+        assert!(engine.gdi.as_ref().unwrap().model.dc_kind(dc).is_err());
+        assert!(engine.gdi.as_ref().unwrap().paints.is_empty());
+        assert_eq!(words::<8>(&engine, PAINT), output);
     }
 }

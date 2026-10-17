@@ -163,6 +163,22 @@ impl User32Context32 {
         memory: &mut AddressSpace,
         gdi: Option<&mut GdiRuntime32>,
     ) -> Result<User32Outcome32, HostError> {
+        if let Some(paint) = self
+            .pending
+            .last()
+            .filter(|pending| pending.token == token)
+            .and_then(|pending| match pending.continuation {
+                Continuation32::QueryPaint(paint) => Some(paint),
+                _ => None,
+            })
+        {
+            return self.complete_query_paint(
+                paint,
+                result,
+                memory,
+                gdi.ok_or(HostError::Gdi(GdiError32::InvalidRequest))?,
+            );
+        }
         let paint = self
             .pending
             .last()

@@ -51,6 +51,7 @@ pub(super) enum Continuation32 {
         wide: bool,
     },
     ControlPaint(super::controls::painting::ControlPaint32),
+    QueryPaint(super::gdi::QueryPaint32),
     Paint {
         window: WindowHandle32,
         output: super::gdi::PaintOutput32,
@@ -142,6 +143,10 @@ impl User32Context32 {
                 ..
             } => (procedure, arguments),
             Continuation32::ControlPaint(paint) => self.control_paint_callback(paint)?,
+            Continuation32::QueryPaint(paint) => (
+                self.windows().get(paint.window)?.description.procedure,
+                [paint.window.get(), 0x14, paint.dc, 0],
+            ),
             Continuation32::Paint { window, dc, .. } => (
                 self.windows().get(window)?.description.procedure,
                 [window.get(), 0x14, dc, 0],
@@ -302,7 +307,9 @@ impl User32Context32 {
                 wide,
                 ..
             } => self.complete_dialog_procedure(window, arguments, wide, result, memory),
-            Continuation32::ControlPaint(_) => Err(User32Error32::InvalidRequest),
+            Continuation32::ControlPaint(_) | Continuation32::QueryPaint(_) => {
+                Err(User32Error32::InvalidRequest)
+            }
             Continuation32::Paint { window, output, dc } => {
                 self.windows().get(window)?;
                 output.complete(memory, result != 0)?;

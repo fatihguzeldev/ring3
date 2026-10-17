@@ -1,9 +1,11 @@
 use super::{User32Context32, User32Outcome32, callback::Continuation32};
+mod query;
 use crate::windows::{
     gdi::GdiWindow32,
     user32::{Rect32, User32Error32},
     window::WindowHandle32,
 };
+pub(super) use query::QueryPaint32;
 impl User32Context32 {
     pub(in crate::process) fn gdi_update_region(
         &self,
@@ -125,14 +127,22 @@ pub(in crate::process) struct PaintOutput32 {
     first: u32,
     mappings: [u64; 2],
     count: u32,
+    length: usize,
 }
 impl PaintOutput32 {
     fn new(memory: &mut crate::memory::AddressSpace, raw: u32) -> Result<Self, User32Error32> {
+        Self::capture(memory, raw, 64)
+    }
+    fn capture(
+        memory: &mut crate::memory::AddressSpace,
+        raw: u32,
+        length: usize,
+    ) -> Result<Self, User32Error32> {
         use crate::memory::{Access, GuestAddress, PAGE_SIZE};
         let address = GuestAddress(raw);
-        memory.check_span(address, 64, Access::Write)?;
+        memory.check_span(address, length, Access::Write)?;
         let first = raw / PAGE_SIZE;
-        let last = ((u64::from(raw) + 63) / u64::from(PAGE_SIZE)) as u32;
+        let last = ((u64::from(raw) + length as u64 - 1) / u64::from(PAGE_SIZE)) as u32;
         let mut mappings = [0; 2];
         memory.observe_mapping_incarnations(crate::memory::PageRange::new(
             GuestAddress(first * PAGE_SIZE),
@@ -148,6 +158,7 @@ impl PaintOutput32 {
             first,
             mappings,
             count: last - first + 1,
+            length,
         })
     }
     pub(super) fn check(self, memory: &crate::memory::AddressSpace) -> Result<(), User32Error32> {
@@ -162,7 +173,7 @@ impl PaintOutput32 {
                 return Err(User32Error32::InvalidRequest);
             }
         }
-        memory.check_span(self.address, 64, crate::memory::Access::Write)?;
+        memory.check_span(self.address, self.length, crate::memory::Access::Write)?;
         Ok(())
     }
     pub(super) fn complete(

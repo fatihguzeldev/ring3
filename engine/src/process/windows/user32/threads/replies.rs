@@ -76,6 +76,12 @@ impl User32Context32 {
     ) -> Result<(), User32Error32> {
         check_scratch(&self.pending, &self.destructions, memory)
     }
+    pub(in crate::process) fn check_owned_thread_scratch(
+        &self,
+        memory: &crate::memory::AddressSpace,
+    ) -> Result<(), User32Error32> {
+        check_owned_scratch(&self.pending, &self.destructions, memory)
+    }
     pub(in crate::process) fn check_callback_scratch(
         &self,
         continuation: u64,
@@ -190,11 +196,11 @@ impl User32ThreadReply32 {
         super::super::clipboard::owns_render(&self.pending, child, window, format)
     }
 
-    pub(in crate::process) fn check_thread_scratch(
+    pub(in crate::process) fn check_owned_thread_scratch(
         &self,
         memory: &crate::memory::AddressSpace,
     ) -> Result<(), User32Error32> {
-        check_scratch(&self.pending, &self.destructions, memory)
+        check_owned_scratch(&self.pending, &self.destructions, memory)
     }
     pub(super) fn layout_revision(&self) -> u64 {
         self.input.layout_revision
@@ -288,9 +294,26 @@ fn check_scratch(
     destructions: &[DestroyPlan32],
     memory: &crate::memory::AddressSpace,
 ) -> Result<(), User32Error32> {
+    check_owned_scratch(pending, destructions, memory)?;
     for pending in pending {
         match pending.continuation {
             super::super::callback::Continuation32::Paint { output, .. } => output.check(memory)?,
+            super::super::callback::Continuation32::QueryPaint(paint) => {
+                paint.check_output(memory)?
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn check_owned_scratch(
+    pending: &[Pending32],
+    destructions: &[DestroyPlan32],
+    memory: &crate::memory::AddressSpace,
+) -> Result<(), User32Error32> {
+    for pending in pending {
+        match pending.continuation {
             super::super::callback::Continuation32::DialogHelp { scratch, .. }
             | super::super::callback::Continuation32::ResourceDialog { scratch, .. }
             | super::super::callback::Continuation32::DialogRemoteHelp { scratch, .. }

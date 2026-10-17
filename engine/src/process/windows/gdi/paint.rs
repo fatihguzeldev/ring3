@@ -14,6 +14,80 @@ pub(super) struct PaintLease32 {
     pub thread: u32,
     dc: u32,
     clip: Option<Region32>,
+    query: bool,
+}
+pub(in crate::process) struct PreparedQueryEraseFinish32 {
+    index: usize,
+    window: u32,
+    dc: u32,
+    thread: u32,
+    state: crate::windows::gdi::DcState32,
+}
+impl super::GdiRuntime32 {
+    pub(in crate::process) fn begin_query_erase(
+        &mut self,
+        window: GdiWindow32,
+        thread: u32,
+        region: Region32,
+    ) -> Result<u32, GdiError32> {
+        if self.paints.len() == self.config.dcs {
+            return Err(GdiError32::Capacity);
+        }
+        let dc = self.acquire_dc(window, thread)?;
+        let clip = self.model.state(dc)?.clip.clone();
+        self.model
+            .set_clip(dc, Some(region))
+            .expect("accepted query DC");
+        self.paints.push(PaintLease32 {
+            window: window.window,
+            thread,
+            dc,
+            clip,
+            query: true,
+        });
+        Ok(dc)
+    }
+    pub(in crate::process) fn prepare_query_erase_finish(
+        &self,
+        window: u32,
+        dc: u32,
+        thread: u32,
+    ) -> Result<PreparedQueryEraseFinish32, GdiError32> {
+        let index = self
+            .paints
+            .iter()
+            .rposition(|paint| {
+                paint.query && paint.window == window && paint.dc == dc && paint.thread == thread
+            })
+            .ok_or(GdiError32::InvalidHandle)?;
+        let mut state = self.model.state(dc)?.clone();
+        state.clip = self.paints[index].clip.clone();
+        Ok(PreparedQueryEraseFinish32 {
+            index,
+            window,
+            dc,
+            thread,
+            state,
+        })
+    }
+    pub(in crate::process) fn commit_query_erase_finish(
+        &mut self,
+        prepared: PreparedQueryEraseFinish32,
+    ) {
+        let paint = self.paints.remove(prepared.index);
+        assert!(
+            paint.query
+                && paint.window == prepared.window
+                && paint.dc == prepared.dc
+                && paint.thread == prepared.thread
+        );
+        self.model
+            .set_state(prepared.dc, prepared.state)
+            .expect("prepared query DC");
+        self.model
+            .release_dc(prepared.window, prepared.dc, prepared.thread)
+            .expect("prepared query DC");
+    }
 }
 impl EngineInstance {
     pub(super) fn complete_gdi_paint(
@@ -143,8 +217,30 @@ impl EngineInstance {
                 Ok(Outcome::Return(1))
             }
             GdiApi32::GetUpdateRect => {
-                if args[2] != 0 && erase {
-                    return Err(HostError::Gdi(GdiError32::Unsupported));
+                if args[2] != 0 && erase && window.thread == thread {
+                    self.user32
+                        .as_mut()
+                        .unwrap()
+                        .gdi_check_begin_paint(handle, true)
+                        .map_err(HostError::User32)?;
+                    let output = super::super::user32::User32Context32::gdi_prepare_query_output(
+                        self.memory.as_mut().ok_or(HostError::Closed)?,
+                        args[1],
+                    )
+                    .map_err(HostError::User32)?;
+                    let rectangle = region.bounds();
+                    let dc = self
+                        .gdi
+                        .as_mut()
+                        .ok_or(HostError::InvalidRequest)?
+                        .begin_query_erase(window, thread, region)
+                        .map_err(HostError::Gdi)?;
+                    return self
+                        .user32
+                        .as_mut()
+                        .unwrap()
+                        .gdi_begin_query_erase(handle, dc, thread, rectangle, output)
+                        .map_err(HostError::User32);
                 }
                 if args[1] != 0 {
                     memory::write_rect(self.memory.as_mut().unwrap(), args[1], region.bounds())
@@ -208,6 +304,7 @@ impl EngineInstance {
                     thread,
                     dc,
                     clip,
+                    query: false,
                 });
                 self.user32
                     .as_mut()
@@ -223,7 +320,10 @@ impl EngineInstance {
                     .paints
                     .iter()
                     .rposition(|paint| {
-                        paint.window == window.window && paint.thread == thread && paint.dc == dc
+                        !paint.query
+                            && paint.window == window.window
+                            && paint.thread == thread
+                            && paint.dc == dc
                     })
                     .ok_or(HostError::Gdi(GdiError32::InvalidHandle))?;
                 runtime.model.dc_kind(dc).map_err(HostError::Gdi)?;
