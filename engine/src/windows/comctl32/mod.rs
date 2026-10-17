@@ -5,8 +5,8 @@ pub(crate) mod hotkey;
 pub(crate) mod progress;
 pub(crate) mod status;
 pub(crate) mod tab;
-pub(crate) mod tooltip;
 pub(crate) mod toolbar;
+pub(crate) mod tooltip;
 pub(crate) mod trackbar;
 pub(crate) mod updown;
 

@@ -33,6 +33,12 @@ impl User32Context32 {
             CommonControlState32::Header(_) => {
                 return self.header_control_message(args, wide, ram, gdi, call);
             }
+            CommonControlState32::Trackbar(_) => {
+                return self.trackbar_control_message(args, wide, ram, gdi, call);
+            }
+            CommonControlState32::UpDown(_) => {
+                return self.updown_control_message(args, wide, ram, gdi, call);
+            }
             CommonControlState32::Tab(_) => {
                 return self.tab_control_message(args, wide, ram, gdi, call);
             }

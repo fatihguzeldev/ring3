@@ -68,6 +68,18 @@ fn put(engine: &mut EngineInstance, words: &[u32]) {
 #[test]
 fn captured_toolbar_owns_unicode_button_text_and_publishes_real_command_check_and_pixels() {
     let (mut engine, callback, common, procedure, _, parent) = fixture();
+    engine
+        .memory
+        .as_mut()
+        .unwrap()
+        .write(GuestAddress(0x12300), &[8, 0, 0, 0, 4, 0, 0, 0])
+        .unwrap();
+    capture(
+        &mut engine,
+        CommonControlsApi32::InitCommonControlsEx.id(),
+        &[0x12300],
+    );
+    assert_eq!(eax(&engine), 1);
     let bar = toolbar(&mut engine, callback, common, procedure, parent);
     assert_eq!(
         send(

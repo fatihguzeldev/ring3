@@ -60,6 +60,11 @@ impl User32Context32 {
             {
                 return Err(User32Error32::Win32(50));
             }
+            if kind == crate::windows::comctl32::CommonControlKind32::Trackbar
+                && args[3] & 0x1900 != 0
+            {
+                return Err(User32Error32::Win32(50));
+            }
             if kind == crate::windows::comctl32::CommonControlKind32::Tab && args[3] & 0x6080 != 0 {
                 return Err(User32Error32::Win32(50));
             }

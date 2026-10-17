@@ -39,7 +39,7 @@ fn callback_returning(
     parent: u64,
     common: u64,
     procedure: u32,
-    observe: &mut impl FnMut(&EngineInstance, &[u32]) -> Option<u32>,
+    observe: &mut impl FnMut(&mut EngineInstance, &[u32]) -> Option<u32>,
 ) {
     let request = engine.pending_windows_callback().unwrap();
     if request.procedure.0 == PROC {
@@ -313,10 +313,10 @@ fn captured_common_progress_colors_and_position_publish_real_bounded_gdi_pixels(
 #[path = "status.rs"]
 mod status;
 
-#[path = "tab.rs"]
-mod tab;
 #[path = "hotkey.rs"]
 mod hotkey;
+#[path = "tab.rs"]
+mod tab;
 
 #[path = "tooltip.rs"]
 mod tooltip;
@@ -326,3 +326,6 @@ mod header;
 
 #[path = "toolbar.rs"]
 mod toolbar;
+
+#[path = "numeric.rs"]
+mod numeric;

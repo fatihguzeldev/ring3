@@ -1,12 +1,15 @@
 pub(super) mod header;
 mod hotkey;
 pub(super) mod layout;
+pub(super) mod numeric;
 mod painting;
 mod progress;
 pub(super) mod status;
 pub(super) mod tab;
-pub(super) mod tooltip;
 mod toolbar;
+pub(super) mod tooltip;
+pub(super) mod trackbar;
+pub(super) mod updown;
 
 use super::{User32Outcome32, memory};
 use crate::{
@@ -26,12 +29,12 @@ impl EngineInstance {
         if size != 8 {
             return Ok(User32Outcome32::Return(0));
         }
-        if flags & 0xffff & !0x68 != 0 {
+        if flags & 0xffff & !0x7c != 0 {
             return Err(HostError::User32(
                 crate::windows::user32::User32Error32::Win32(50),
             ));
         }
-        if flags & 0x68 == 0 {
+        if flags & 0x7c == 0 {
             return Ok(User32Outcome32::Return(1));
         }
         self.bind_common_control_classes(flags)?;

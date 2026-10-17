@@ -50,6 +50,14 @@ impl EngineInstance {
         let window = context
             .owned(args[0], call.thread_id)
             .map_err(HostError::User32)?;
+        if let Some(target) = context.numeric_buddy_key_target(window, args) {
+            return self
+                .user32
+                .as_mut()
+                .unwrap()
+                .send_message(&[target.get(), args[1], args[2], args[3]], call)
+                .map_err(HostError::User32);
+        }
         let data = context.state.record(window).map_err(HostError::User32)?;
         let kind = context
             .state

@@ -47,6 +47,7 @@ impl User32Context32 {
             super::super::callback::Continuation32::MenuBar(_) => true,
             super::super::callback::Continuation32::TooltipTrack(_) => true,
             super::super::callback::Continuation32::TooltipRelay(_) => true,
+            super::super::callback::Continuation32::Numeric(_) => true,
             super::super::callback::Continuation32::Header(_) => true,
             super::super::callback::Continuation32::TabSelection(_) => true,
             super::super::callback::Continuation32::StatusDraw(_) => true,
@@ -138,6 +139,9 @@ impl User32Context32 {
                     Some(scratch.range())
                 }
                 super::super::callback::Continuation32::StatusDraw(call) => {
+                    Some(call.scratch().range())
+                }
+                super::super::callback::Continuation32::Numeric(call) => {
                     Some(call.scratch().range())
                 }
                 super::super::callback::Continuation32::Header(call) => {
@@ -279,6 +283,9 @@ impl User32ThreadReply32 {
                 super::super::callback::Continuation32::StatusDraw(call) => {
                     Some(call.scratch().range())
                 }
+                super::super::callback::Continuation32::Numeric(call) => {
+                    Some(call.scratch().range())
+                }
                 super::super::callback::Continuation32::Header(call) => {
                     Some(call.scratch().range())
                 }
@@ -376,6 +383,10 @@ fn check_scratch(
             super::super::callback::Continuation32::StatusDraw(call) => {
                 call.scratch().check(memory)?
             }
+            super::super::callback::Continuation32::Numeric(call) => {
+                call.scratch().check(memory)?;
+                call.check_output(memory)?;
+            }
             super::super::callback::Continuation32::Header(call) => call.scratch().check(memory)?,
             super::super::callback::Continuation32::TabSelection(call) => {
                 call.scratch().check(memory)?
@@ -414,6 +425,9 @@ fn check_owned_scratch(
                 scratch.check(memory)?
             }
             super::super::callback::Continuation32::StatusDraw(call) => {
+                call.scratch().check(memory)?
+            }
+            super::super::callback::Continuation32::Numeric(call) => {
                 call.scratch().check(memory)?
             }
             super::super::callback::Continuation32::Header(call) => call.scratch().check(memory)?,

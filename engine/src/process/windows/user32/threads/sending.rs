@@ -98,6 +98,9 @@ impl User32Context32 {
         if self.status_draw_wait(token) {
             return self.pending_status_draw_message(token);
         }
+        if self.numeric_wait(token) {
+            return self.pending_numeric_message(token);
+        }
         if self.header_wait(token) {
             return self.pending_header_message(token);
         }
@@ -145,6 +148,7 @@ impl User32Context32 {
                         | Continuation32::CommonLayout(_)
                         | Continuation32::TooltipRelay(_)
                         | Continuation32::TooltipTrack(_)
+                        | Continuation32::Numeric(_)
                         | Continuation32::Header(_)
                         | Continuation32::TabSelection(_)
                         | Continuation32::StatusDraw(_)
