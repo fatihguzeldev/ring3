@@ -1,3 +1,4 @@
+pub(in crate::process::windows::user32) mod input;
 mod painting;
 use super::super::{User32CallContext32, User32Context32, User32Outcome32, memory};
 use crate::{
@@ -208,11 +209,17 @@ impl User32Context32 {
             }
             0x132f => self.tab(window).map_err(HostError::User32)?.focused as u32,
             0x1330 => {
-                if index < self.tab(window).map_err(HostError::User32)?.items.len() {
-                    self.state.check_paint_change().map_err(HostError::User32)?;
-                    self.tab_mut(window).map_err(HostError::User32)?.focused = index as i32;
-                    self.tab_changed(window);
+                if index >= self.tab(window).map_err(HostError::User32)?.items.len() {
+                    return Ok(User32Outcome32::Return(0));
                 }
+                if self.state.record(window).map_err(HostError::User32)?.style & 0x100 == 0 {
+                    return self
+                        .begin_tab_selection(window, index, false, ram, call)
+                        .map_err(HostError::User32);
+                }
+                self.state.check_paint_change().map_err(HostError::User32)?;
+                self.tab_mut(window).map_err(HostError::User32)?.focused = index as i32;
+                self.tab_changed(window);
                 0
             }
             0x1331 => {
@@ -266,7 +273,40 @@ impl User32Context32 {
                 u32::from(old)
             }
             0x2006 => u32::from(self.tab(window).map_err(HostError::User32)?.unicode),
-            0x100 | 0x201 | 0x202 => return Err(HostError::User32(E::Win32(50))),
+            0x100 | 0x201 => {
+                let record = self
+                    .windows()
+                    .get(window)
+                    .map_err(E::from)
+                    .map_err(HostError::User32)?;
+                if !record.description.enabled {
+                    return Ok(User32Outcome32::Return(0));
+                }
+                let style = self.state.record(window).map_err(HostError::User32)?.style;
+                if style & 0x100 != 0 {
+                    return Err(HostError::User32(E::Win32(50)));
+                }
+                let Some(index) = self.tab_input_index(
+                    window,
+                    args,
+                    ram,
+                    gdi.ok_or(HostError::InvalidRequest)?,
+                    call.thread_id,
+                )?
+                else {
+                    return Ok(User32Outcome32::Return(0));
+                };
+                return self
+                    .begin_tab_selection(
+                        window,
+                        index,
+                        args[1] == 0x201 && style & 0x8000 == 0,
+                        ram,
+                        call,
+                    )
+                    .map_err(HostError::User32);
+            }
+            0x202 => 0,
             _ => {
                 return self
                     .def_window_proc(args, ram, call)
@@ -356,6 +396,7 @@ impl User32Context32 {
             data.copy_from_slice(&old.data);
         }
         let item = TabItem32 {
+            key: old.map_or(0, |item| item.key),
             text,
             image: if mask & 2 != 0 {
                 words[5] as i32

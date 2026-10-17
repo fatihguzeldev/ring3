@@ -98,6 +98,9 @@ impl User32Context32 {
         if self.status_draw_wait(token) {
             return self.pending_status_draw_message(token);
         }
+        if self.tab_selection_wait(token) {
+            return self.pending_tab_selection_message(token);
+        }
         if self.menu_bar_wait(token).is_some() {
             return self.pending_menu_bar_message(token);
         }
@@ -134,6 +137,7 @@ impl User32Context32 {
                         | Continuation32::MenuPopup { .. }
                         | Continuation32::MenuBar(_)
                         | Continuation32::CommonLayout(_)
+                        | Continuation32::TabSelection(_)
                         | Continuation32::StatusDraw(_)
                         | Continuation32::Accelerator(_)
                         | Continuation32::Clipboard(_)

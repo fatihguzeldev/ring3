@@ -2,7 +2,7 @@ pub(super) mod layout;
 mod painting;
 mod progress;
 pub(super) mod status;
-mod tab;
+pub(super) mod tab;
 
 use super::{User32Outcome32, memory};
 use crate::{

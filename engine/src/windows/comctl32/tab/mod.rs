@@ -5,6 +5,7 @@ const MAX_BYTES: usize = 1_048_576;
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct TabItem32 {
+    pub key: u64,
     pub text: Vec<u16>,
     pub image: i32,
     pub state: u32,
@@ -13,6 +14,7 @@ pub(crate) struct TabItem32 {
 impl Default for TabItem32 {
     fn default() -> Self {
         Self {
+            key: 0,
             text: Vec::new(),
             image: -1,
             state: 0,
@@ -23,6 +25,7 @@ impl Default for TabItem32 {
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct Tab32 {
     pub items: Vec<TabItem32>,
+    next_key: u64,
     pub selected: i32,
     pub focused: i32,
     pub font: u32,
@@ -37,6 +40,7 @@ impl Default for Tab32 {
     fn default() -> Self {
         Self {
             items: Vec::new(),
+            next_key: 1,
             selected: -1,
             focused: -1,
             font: 0,
@@ -71,12 +75,15 @@ impl Tab32 {
         if self.items.len() == MAX_ITEMS {
             return Err(E::Capacity);
         }
+        self.next_key.checked_add(1).ok_or(E::Capacity)?;
         self.check_item(None, item)?;
         self.items.try_reserve(1).map_err(|_| E::Allocation)
     }
-    pub(crate) fn insert(&mut self, index: usize, item: TabItem32) -> usize {
+    pub(crate) fn insert(&mut self, index: usize, mut item: TabItem32) -> usize {
         let first = self.items.is_empty();
         let index = index.min(self.items.len());
+        item.key = self.next_key;
+        self.next_key += 1;
         self.items.insert(index, item);
         if first {
             self.selected = 0;

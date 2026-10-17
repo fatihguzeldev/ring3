@@ -295,3 +295,56 @@ impl User32Context32 {
         Ok(User32Outcome32::Return(0))
     }
 }
+
+impl User32Context32 {
+    pub(in crate::process::windows::user32::common::tab) fn tab_input_index(
+        &self,
+        window: WindowHandle32,
+        args: &[u32],
+        ram: &AddressSpace,
+        gdi: &mut GdiRuntime32,
+        thread: u32,
+    ) -> Result<Option<usize>, HostError> {
+        let tab = self.tab(window).map_err(HostError::User32)?;
+        if tab.items.is_empty() {
+            return Ok(None);
+        }
+        let layout = self.tab_layout(window, ram, gdi, thread)?;
+        if args[1] == 0x201 {
+            let x = i32::from(args[3] as i16);
+            let y = i32::from((args[3] >> 16) as i16);
+            return Ok(layout.items.iter().position(|rect| {
+                x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom
+            }));
+        }
+        let current = tab.selected.max(tab.focused).max(0) as usize;
+        let current = current.min(tab.items.len() - 1);
+        Ok(match args[2] {
+            37 => Some(current.saturating_sub(1)),
+            39 => Some((current + 1).min(tab.items.len() - 1)),
+            36 => Some(0),
+            35 => Some(tab.items.len() - 1),
+            38 | 40 => {
+                let old = layout.items[current];
+                let x = (i64::from(old.left) + i64::from(old.right)) / 2;
+                layout
+                    .items
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, rect)| {
+                        if args[2] == 38 {
+                            rect.top < old.top
+                        } else {
+                            rect.top > old.top
+                        }
+                    })
+                    .min_by_key(|(_, rect)| {
+                        (i64::from(rect.top) - i64::from(old.top)).abs() * 1_000_000
+                            + ((i64::from(rect.left) + i64::from(rect.right)) / 2 - x).abs()
+                    })
+                    .map(|(index, _)| index)
+            }
+            _ => None,
+        })
+    }
+}

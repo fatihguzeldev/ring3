@@ -284,3 +284,184 @@ fn captured_tab_getitem_guarded_text_output_does_not_publish_updated_structure()
         [0x00690066, 0x00730072, 0x00000074]
     );
 }
+
+fn input(
+    engine: &mut EngineInstance,
+    callback: u64,
+    common: u64,
+    procedure: u32,
+    window: u32,
+    message: [u32; 3],
+    cancel: bool,
+) -> Vec<[u32; 3]> {
+    capture(
+        engine,
+        User32Api32::SendMessageW.id(),
+        &[window, message[0], message[1], message[2]],
+    );
+    let mut notes = Vec::new();
+    for _ in 0..64 {
+        if engine.pending_windows_callback().is_some() {
+            callback_returning(engine, callback, common, procedure, &mut |engine, args| {
+                if args[1] != 0x4e {
+                    return None;
+                }
+                let note = words::<3>(engine, args[3]);
+                assert_eq!(args[2], 92);
+                notes.push(note);
+                Some(u32::from(cancel && note[2] == (-552i32) as u32))
+            });
+        } else if let Some(wait) = engine.waiting_user32_message() {
+            engine.resume_user32_wait(KEY, wait).unwrap();
+        } else {
+            break;
+        }
+    }
+    assert!(engine.pending_call.is_none());
+    assert_eq!(eax(engine), 0);
+    notes
+}
+#[test]
+fn captured_tab_mouse_keyboard_and_focus_messages_send_real_cancellable_parent_notifications() {
+    let (mut engine, callback, common, procedure, _, parent) = fixture();
+    let window = tab(&mut engine, callback, common, procedure, parent);
+    for (index, text) in [(0, b"first\0".as_slice()), (1, b"second\0".as_slice())] {
+        engine
+            .memory
+            .as_mut()
+            .unwrap()
+            .write(GuestAddress(0x12600), text)
+            .unwrap();
+        put_item(&mut engine, [9, 0, 0, 0x12600, 0, 0, index + 10]);
+        assert_eq!(
+            send(
+                &mut engine,
+                callback,
+                common,
+                procedure,
+                window,
+                [0x1307, index, 0x12500]
+            ),
+            index
+        );
+    }
+    assert_eq!(
+        send(
+            &mut engine,
+            callback,
+            common,
+            procedure,
+            window,
+            [0x130a, 1, 0x12800]
+        ),
+        1
+    );
+    let [left, top, _, _] = words::<4>(&engine, 0x12800);
+    let point = (left + 1) | ((top + 1) << 16);
+    assert_eq!(
+        input(
+            &mut engine,
+            callback,
+            common,
+            procedure,
+            window,
+            [0x201, 1, point],
+            false
+        ),
+        [
+            [window, 92, (-552i32) as u32],
+            [window, 92, (-551i32) as u32]
+        ]
+    );
+    assert_eq!(
+        engine.user32_windows().unwrap().focus(),
+        Some(WindowHandle32::try_from(window).unwrap())
+    );
+    assert_eq!(
+        send(
+            &mut engine,
+            callback,
+            common,
+            procedure,
+            window,
+            [0x130b, 0, 0]
+        ),
+        1
+    );
+    assert_eq!(
+        input(
+            &mut engine,
+            callback,
+            common,
+            procedure,
+            window,
+            [0x100, 37, 0],
+            true
+        ),
+        [[window, 92, (-552i32) as u32]]
+    );
+    assert_eq!(
+        send(
+            &mut engine,
+            callback,
+            common,
+            procedure,
+            window,
+            [0x130b, 0, 0]
+        ),
+        1
+    );
+    assert_eq!(
+        input(
+            &mut engine,
+            callback,
+            common,
+            procedure,
+            window,
+            [0x100, 37, 0],
+            false
+        ),
+        [
+            [window, 92, (-552i32) as u32],
+            [window, 92, (-551i32) as u32]
+        ]
+    );
+    assert_eq!(
+        send(
+            &mut engine,
+            callback,
+            common,
+            procedure,
+            window,
+            [0x130b, 0, 0]
+        ),
+        0
+    );
+    assert_eq!(
+        input(
+            &mut engine,
+            callback,
+            common,
+            procedure,
+            window,
+            [0x1330, 1, 0],
+            false
+        ),
+        [
+            [window, 92, (-552i32) as u32],
+            [window, 92, (-551i32) as u32]
+        ]
+    );
+    assert!(
+        input(
+            &mut engine,
+            callback,
+            common,
+            procedure,
+            window,
+            [0x201, 1, point],
+            false
+        )
+        .is_empty()
+    );
+}

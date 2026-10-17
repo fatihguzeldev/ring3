@@ -28,10 +28,24 @@ fn callback_observing(
     procedure: u32,
     observe: &mut impl FnMut(&EngineInstance, &[u32]),
 ) {
+    callback_returning(engine, parent, common, procedure, &mut |engine, args| {
+        observe(engine, args);
+        None
+    });
+}
+
+fn callback_returning(
+    engine: &mut EngineInstance,
+    parent: u64,
+    common: u64,
+    procedure: u32,
+    observe: &mut impl FnMut(&EngineInstance, &[u32]) -> Option<u32>,
+) {
     let request = engine.pending_windows_callback().unwrap();
     if request.procedure.0 == PROC {
-        observe(engine, &request.arguments[..request.count as usize]);
-        finish(engine, parent, u32::from(request.arguments[1] == 0x81));
+        let result = observe(engine, &request.arguments[..request.count as usize])
+            .unwrap_or(u32::from(request.arguments[1] == 0x81));
+        finish(engine, parent, result);
         return;
     }
     assert_eq!(request.procedure.0, procedure);
@@ -68,7 +82,7 @@ fn callback_observing(
             break;
         }
         if engine.pending_windows_callback().is_some() {
-            callback_observing(engine, parent, common, procedure, observe);
+            callback_returning(engine, parent, common, procedure, observe);
         } else if let Some(wait) = engine.waiting_user32_message() {
             engine.resume_user32_wait(KEY, wait).unwrap();
         } else {

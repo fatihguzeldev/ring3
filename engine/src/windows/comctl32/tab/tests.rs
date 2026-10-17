@@ -37,3 +37,18 @@ fn payload_and_text_budget_refusals_do_not_replace_live_items() {
     assert!(tab.check_item(Some(0), &next).is_err());
     assert_eq!(tab.items[0].text, [65]);
 }
+
+#[test]
+fn an_accepted_tab_target_key_is_not_reused_after_delete_and_same_index_insertion() {
+    let mut tab = Tab32::default();
+    let first = item(65);
+    tab.prepare_insert(&first).unwrap();
+    tab.insert(0, first);
+    let key = tab.items[0].key;
+    assert!(tab.delete(0));
+    let next = item(66);
+    tab.prepare_insert(&next).unwrap();
+    tab.insert(0, next);
+    assert_ne!(tab.items[0].key, key);
+    assert_eq!(tab.items[0].text, [66]);
+}
