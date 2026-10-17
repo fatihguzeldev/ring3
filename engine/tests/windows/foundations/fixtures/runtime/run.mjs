@@ -41,6 +41,7 @@ for (const unit of engine.units) {
   if (unit.name === 'CreateDIBSection') dibPointer = read(guest.addresses.bits);
   if (unit.hook === 'file-title') assert.deepEqual([0,4,8].map(offset => read(guest.addresses.title_output + offset)), [0x00650064,0x006f006d,0]);
   if (unit.hook === 'ime-conversion') assert.deepEqual([read(guest.addresses.conversion), read(guest.addresses.sentence)], [1,8]);
+  if (unit.hook === 'ime-window') assert.equal(get(16), read(guest.addresses.ime_window));
   if (unit.hook === 'ime-form') assert.deepEqual(Array.from({length:7}, (_, index) => read(guest.addresses.composition_output + index*4)), [2,11,17,2,3,97,63]);
   if (unit.hook === 'message') {
     const pointer = read(guest.addresses.message);

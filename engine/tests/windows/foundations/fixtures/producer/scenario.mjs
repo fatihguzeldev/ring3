@@ -3,17 +3,17 @@ import {builder} from '../../../../support/pe32/image.mjs';
 export function image() {
   const b = builder([
     ['kernel32.dll', ['LocalFree', 'ExitProcess', 'FormatMessageA', 'FormatMessageW', 'GetLastError']],
-    ['user32.dll', ['GetDC', 'ReleaseDC']],
+    ['user32.dll', ['GetDC', 'ReleaseDC', 'IsWindow']],
     ['gdi32.dll', ['SetPixel', 'GetPixel', 'SetTextColor', 'TextOutW', 'GetTextExtentPoint32W', 'CreateDIBSection']],
     ['oleaut32.dll', ['SysAllocStringLen', 'SysStringLen', 'SysStringByteLen', 'SysFreeString']],
     ['shlwapi.dll', ['StrCmpNIA']],
     ['shell32.dll', ['CommandLineToArgvW']],
     ['msimg32.dll', ['TransparentBlt']],
-    ['imm32.dll', ['ImmCreateContext', 'ImmDestroyContext', 'ImmSetOpenStatus', 'ImmGetOpenStatus', 'ImmGetConversionStatus', 'ImmSetCompositionWindow', 'ImmGetCompositionWindow', 'ImmGetCompositionStringW']],
+    ['imm32.dll', ['ImmCreateContext', 'ImmDestroyContext', 'ImmSetOpenStatus', 'ImmGetOpenStatus', 'ImmGetConversionStatus', 'ImmSetCompositionWindow', 'ImmGetCompositionWindow', 'ImmGetCompositionStringW', 'ImmGetDefaultIMEWnd']],
     ['comctl32.dll', ['InitCommonControlsEx']],
     ['comdlg32.dll', ['CommDlgExtendedError', 'GetFileTitleW']],
   ]);
-  for (const name of ['dc', 'bstr', 'argv', 'argc', 'dib', 'bits', 'message', 'imc', 'conversion', 'sentence']) b.allocate(name);
+  for (const name of ['dc', 'bstr', 'argv', 'argc', 'dib', 'bits', 'message', 'imc', 'conversion', 'sentence', 'ime_window', 'ime_window_again']) b.allocate(name);
   b.allocate('composition_output', Array(7).fill(0));
   b.allocate('title_output', Array(8).fill(0));
   b.allocate('extent', [0, 0]);
@@ -62,6 +62,9 @@ export function image() {
   call('ImmGetCompositionWindow', 0x23000a, [b.ref('imc'), b.addresses.composition_output], 1, undefined, 'ime-form');
   call('ImmGetCompositionStringW', 0x230013, [b.ref('imc'), 8, 0, 0], 0);
   call('ImmDestroyContext', 0x230002, [b.ref('imc')], 1);
+  call('ImmGetDefaultIMEWnd', 0x230014, [0], 'nonzero', 'ime_window');
+  call('IsWindow', 0x2000c, [b.ref('ime_window')], 1);
+  call('ImmGetDefaultIMEWnd', 0x230014, [b.ref('ime_window')], 'nonzero', 'ime_window_again', 'ime-window');
   call('SysAllocStringLen', 0x200002, [embedded, 3], 'nonzero', 'bstr');
   call('SysStringLen', 0x200007, [b.ref('bstr')], 3);
   call('SysStringByteLen', 0x200008, [b.ref('bstr')], 6);
