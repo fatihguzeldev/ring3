@@ -76,8 +76,9 @@ impl User32Context32 {
             position: 0,
             origin: Point32::default(),
             visual: None,
+            measurements: Vec::new(),
         });
-        let mut bytes = [0; 64];
+        let mut bytes = [0; 128];
         for (out, unit) in bytes[32..].chunks_exact_mut(2).zip("#32768".encode_utf16()) {
             out.copy_from_slice(&unit.to_le_bytes());
         }
@@ -114,6 +115,14 @@ impl User32Context32 {
             restore_capture,
             child: None,
             completed: None,
+            draw_dc: None,
+            measure_revision: 0,
+            measure_padding: 0,
+            hide_accel: !self.input.last_ui_keyboard,
+            paint_notify: false,
+            draw_action: 1,
+            draw_only: None,
+            exit_draw: false,
         });
         self.next_token = token;
         self.pending.push(Pending32 {

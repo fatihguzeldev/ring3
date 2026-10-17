@@ -1,4 +1,5 @@
 mod delivery;
+mod drawing;
 mod integration;
 mod requests;
 mod types;

@@ -16,11 +16,17 @@ pub(super) enum Stage32 {
     Initialize,
     InitializePopup(usize),
     Layout(usize),
+    MeasurePrepare(usize, usize),
+    MeasureCall(usize, usize),
+    MeasureRead(usize, usize),
     Create(usize),
     Position(usize),
     Show(usize),
     Capture,
     Paint(usize),
+    DrawPrepare(usize, usize),
+    DrawCall(usize, usize),
+    DrawFinish(usize, usize),
     Wait,
     Retrieve,
     Dispatch,
@@ -48,6 +54,7 @@ pub(super) struct Window32 {
     pub position: usize,
     pub origin: Point32,
     pub visual: Option<MenuVisual32>,
+    pub measurements: Vec<Option<super::super::visual::OwnerSize32>>,
 }
 
 pub(super) struct Plan32 {
@@ -70,6 +77,14 @@ pub(super) struct Plan32 {
     pub restore_capture: Option<WindowHandle32>,
     pub child: Option<u64>,
     pub completed: Option<u64>,
+    pub draw_dc: Option<(WindowHandle32, u32)>,
+    pub measure_revision: u64,
+    pub measure_padding: i32,
+    pub hide_accel: bool,
+    pub paint_notify: bool,
+    pub draw_action: u32,
+    pub draw_only: Option<[Option<usize>; 2]>,
+    pub exit_draw: bool,
 }
 
 pub(in crate::process::windows::user32) struct PopupContext32 {

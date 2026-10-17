@@ -253,3 +253,154 @@ fn replaced_popup_scratch_is_rejected_before_callbacks_windows_or_pixels_are_ado
     );
     assert!(engine.gdi.as_ref().unwrap().frame(0).is_none());
 }
+
+#[test]
+fn ownerdraw_callbacks_supply_dimensions_and_use_the_canonical_popup_dc_for_real_pixels() {
+    let (mut engine, owner, menu, thread) = fixture();
+    let mut item = MenuItem32::command(37, Vec::new());
+    item.kind = 0x100;
+    item.data = 0x13572468;
+    engine
+        .user32
+        .as_mut()
+        .unwrap()
+        .menus
+        .replace(menu, 0, true, item)
+        .unwrap();
+    let mut outcome = start(&mut engine, owner, menu, 0x100, thread);
+    let mut measures = 0;
+    let mut draws = 0;
+    let mut injected = false;
+    let mut result = None;
+    for _ in 0..256 {
+        match outcome {
+            User32Outcome32::Return(value) => {
+                result = Some(value);
+                break;
+            }
+            User32Outcome32::Callback(callback) => {
+                if callback.arguments[0] == owner && callback.arguments[1] == 0x2c {
+                    assert_eq!(callback.arguments[2], 0);
+                    let words = crate::process::windows::user32::memory::words::<6>(
+                        engine.memory.as_ref().unwrap(),
+                        callback.arguments[3],
+                    )
+                    .unwrap();
+                    assert_eq!(&words[..4], &[1, 0, 37, 0]);
+                    assert_eq!(words[4], 16);
+                    assert_eq!(words[5], 0x13572468);
+                    engine
+                        .memory
+                        .as_mut()
+                        .unwrap()
+                        .write(
+                            GuestAddress(callback.arguments[3] + 12),
+                            &[53u32, 17]
+                                .into_iter()
+                                .flat_map(u32::to_le_bytes)
+                                .collect::<Vec<_>>(),
+                        )
+                        .unwrap();
+                    measures += 1;
+                } else if callback.arguments[0] == owner && callback.arguments[1] == 0x2b {
+                    assert_eq!(callback.arguments[2], 0);
+                    let words = crate::process::windows::user32::memory::words::<12>(
+                        engine.memory.as_ref().unwrap(),
+                        callback.arguments[3],
+                    )
+                    .unwrap();
+                    assert_eq!(&words[..3], &[1, 0, 37]);
+                    assert_eq!(words[3], if draws == 0 { 1 } else { 2 });
+                    assert_eq!(words[4], if draws == 1 { 0x101 } else { 0x100 });
+                    assert_eq!(words[5], menu.get());
+                    assert_ne!(words[6], 0);
+                    assert_eq!(words[9] - words[7], 67);
+                    assert_eq!(words[10] - words[8], 17);
+                    assert_eq!(words[11], 0x13572468);
+                    let rect = crate::windows::user32::Rect32 {
+                        left: words[7] as i32,
+                        top: words[8] as i32,
+                        right: words[9] as i32,
+                        bottom: words[10] as i32,
+                    };
+                    let gdi = engine.gdi.as_mut().unwrap();
+                    let mut canvas = gdi
+                        .begin_canvas(engine.memory.as_ref().unwrap(), words[6])
+                        .unwrap();
+                    canvas.fill(gdi, rect, 0x00664422);
+                    gdi.publish_canvas(engine.memory.as_mut().unwrap(), canvas)
+                        .unwrap();
+                    let popup = engine
+                        .user32
+                        .as_ref()
+                        .unwrap()
+                        .menu_popups
+                        .plans
+                        .last()
+                        .unwrap()
+                        .windows[0]
+                        .handle
+                        .unwrap();
+                    let frame = (0..32)
+                        .filter_map(|index| gdi.frame(index))
+                        .find(|frame| frame.window == popup.get() && !frame.window_dc)
+                        .unwrap();
+                    assert_eq!(
+                        gdi.read_frame(frame.id, frame.revision, 0, 4).unwrap(),
+                        &[0x66, 0x44, 0x22, 0]
+                    );
+                    draws += 1;
+                }
+                outcome = engine
+                    .user32
+                    .as_mut()
+                    .unwrap()
+                    .complete_with_gdi(
+                        callback.continuation,
+                        u32::from(matches!(callback.arguments[1], 0x81 | 0x2c | 0x2b)),
+                        engine.memory.as_mut().unwrap(),
+                        engine.gdi.as_mut(),
+                    )
+                    .unwrap();
+            }
+            User32Outcome32::Wait { continuation } => {
+                let context = engine.user32.as_mut().unwrap();
+                if context.menu_popups.plans[context.popup_index(continuation).unwrap()].stage
+                    == types::Stage32::Wait
+                    && !injected
+                {
+                    for key in [0x28, 0x0d] {
+                        context
+                            .state
+                            .post(Message32 {
+                                thread_id: thread,
+                                window: owner,
+                                message: 0x100,
+                                wparam: key,
+                                ..Default::default()
+                            })
+                            .unwrap();
+                    }
+                    injected = true;
+                }
+                outcome = context
+                    .resume_wait_with_gdi(
+                        continuation,
+                        engine.memory.as_mut().unwrap(),
+                        engine.gdi.as_mut(),
+                    )
+                    .unwrap();
+            }
+        }
+    }
+    assert_eq!(result, Some(37));
+    assert_eq!(
+        measures, 1,
+        "selection doesn't rerun an accepted measure callback"
+    );
+    assert_eq!(
+        draws, 3,
+        "initial, selected and final deselection invoke the real owner"
+    );
+    assert!(engine.user32.as_ref().unwrap().menu_popups.plans.is_empty());
+}

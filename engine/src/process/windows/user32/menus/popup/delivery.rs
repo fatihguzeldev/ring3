@@ -57,6 +57,8 @@ impl User32Context32 {
         let event = match plan.stage {
             Stage32::Enter if notify => [0x211, 1, 0],
             Stage32::Initialize if notify => [0x116, plan.root.get(), 0],
+            Stage32::MeasureCall(_, _) => [0x2c, 0, self.popup_scratch(token)?.address.0 + 64],
+            Stage32::DrawCall(_, _) => [0x2b, 0, self.popup_scratch(token)?.address.0 + 64],
             Stage32::InitializePopup(depth) if notify => {
                 let popup = &plan.windows[depth];
                 [0x117, popup.menu.get(), popup.position as u32]
@@ -127,6 +129,7 @@ impl User32Context32 {
                 && !matches!(
                     stage,
                     Stage32::Uninitialize(_)
+                        | Stage32::DrawFinish(_, _)
                         | Stage32::Destroy(_)
                         | Stage32::Release
                         | Stage32::FinalSelect
@@ -162,6 +165,46 @@ impl User32Context32 {
                 Stage32::Layout(depth) => {
                     self.layout_popup(token, depth, ram, gdi.as_deref_mut().ok_or(E::Win32(50))?)?;
                     continue;
+                }
+                Stage32::MeasurePrepare(depth, position) => {
+                    self.prepare_menu_measure(
+                        token,
+                        depth,
+                        position,
+                        ram,
+                        gdi.as_deref().ok_or(E::Win32(50))?,
+                    )?;
+                    return Ok(User32Outcome32::Wait {
+                        continuation: token,
+                    });
+                }
+                Stage32::MeasureRead(depth, position) => {
+                    self.accept_menu_measure(token, depth, position, ram)?;
+                    continue;
+                }
+                Stage32::DrawPrepare(depth, position) => {
+                    self.prepare_menu_draw(
+                        token,
+                        depth,
+                        position,
+                        ram,
+                        gdi.as_deref_mut().ok_or(E::Win32(50))?,
+                    )?;
+                    return Ok(User32Outcome32::Wait {
+                        continuation: token,
+                    });
+                }
+                Stage32::DrawFinish(depth, position) => {
+                    self.finish_menu_draw(
+                        token,
+                        depth,
+                        position,
+                        gdi.as_deref_mut().ok_or(E::Win32(50))?,
+                    )?;
+                    continue;
+                }
+                Stage32::MeasureCall(_, _) | Stage32::DrawCall(_, _) => {
+                    return Err(E::InvalidToken);
                 }
                 Stage32::Create(depth) => {
                     let popup = &plan.windows[depth];
@@ -233,7 +276,7 @@ impl User32Context32 {
                         continue;
                     }
                     self.paint_popup(token, depth, ram, gdi.as_deref_mut().ok_or(E::Win32(50))?)?;
-                    self.menu_popups.plans[index].stage = Stage32::Wait;
+                    self.menu_popups.plans[index].stage = Stage32::DrawPrepare(depth, 0);
                     continue;
                 }
                 Stage32::Wait => {
@@ -404,6 +447,8 @@ impl User32Context32 {
                 }
             }
             Stage32::Position(depth) => Stage32::Paint(depth),
+            Stage32::MeasureCall(depth, position) => Stage32::MeasureRead(depth, position),
+            Stage32::DrawCall(depth, position) => Stage32::DrawFinish(depth, position),
             Stage32::Show(depth) => {
                 if depth == 0 && !plan.captured {
                     Stage32::Capture
@@ -419,7 +464,22 @@ impl User32Context32 {
             Stage32::Dispatch => Stage32::Wait,
             Stage32::Select => {
                 let after = plan.after;
-                self.popup_after(token, after)?;
+                if matches!(after, After32::Wait) {
+                    plan.stage = if plan.windows.iter().any(|window| {
+                        window
+                            .visual
+                            .as_ref()
+                            .is_some_and(|visual| visual.revision != self.menus.revision())
+                    }) {
+                        plan.draw_action = 1;
+                        plan.draw_only = None;
+                        Stage32::Layout(plan.windows.len() - 1)
+                    } else {
+                        Stage32::Wait
+                    };
+                } else {
+                    self.popup_after(token, after)?;
+                }
                 return Ok(());
             }
             Stage32::Character => {
@@ -461,6 +521,10 @@ impl User32Context32 {
         Ok(())
     }
 
+    pub(super) fn popup_after_drawing_exit(&mut self, token: u64) -> Result<(), E> {
+        self.popup_after(token, After32::Finish)
+    }
+
     fn popup_after(&mut self, token: u64, after: After32) -> Result<(), E> {
         let index = self.popup_index(token)?;
         let plan = &mut self.menu_popups.plans[index];
@@ -485,6 +549,7 @@ impl User32Context32 {
                 position,
                 origin: Point32::default(),
                 visual: None,
+                measurements: Vec::new(),
             });
             plan.stage = Stage32::InitializePopup(depth);
         } else if matches!(after, After32::Finish) {
@@ -501,9 +566,16 @@ impl User32Context32 {
         match action {
             MenuAction32::None => plan.stage = Stage32::Wait,
             MenuAction32::Select { depth, position } => {
+                let previous = plan
+                    .selected
+                    .filter(|&(previous_depth, _)| previous_depth == depth)
+                    .and_then(|(_, position)| position);
                 plan.selected = Some((depth, position));
+                plan.draw_action = 2;
+                plan.draw_only = Some([previous, position]);
+                plan.paint_notify = true;
                 plan.after = After32::Wait;
-                plan.stage = Stage32::Select;
+                self.popup_after(token, After32::Wait)?;
             }
             MenuAction32::Open {
                 depth,
@@ -531,7 +603,10 @@ impl User32Context32 {
                 if plan.selected != selected {
                     plan.selected = selected;
                     plan.after = After32::Open(depth);
-                    plan.stage = Stage32::Select;
+                    plan.paint_notify = true;
+                    plan.draw_action = 2;
+                    plan.draw_only = Some([None, selected.and_then(|(_, position)| position)]);
+                    plan.stage = Stage32::Layout(depth - 1);
                 } else {
                     self.popup_after(token, After32::Open(depth))?;
                 }
@@ -541,7 +616,10 @@ impl User32Context32 {
             }
             MenuAction32::Command { menu, position, id } => {
                 plan.command = Some((menu, position, id));
-                self.popup_after(token, After32::Finish)?;
+                plan.exit_draw = true;
+                plan.draw_action = 2;
+                plan.draw_only = Some([Some(position), None]);
+                plan.stage = Stage32::DrawPrepare(plan.tracker.depth() - 1, position);
             }
             MenuAction32::Cancel => {
                 plan.cancelled = true;

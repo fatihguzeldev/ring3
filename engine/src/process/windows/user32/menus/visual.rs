@@ -8,6 +8,13 @@ use crate::{
     },
 };
 
+#[derive(Clone, Copy)]
+pub(super) struct OwnerSize32 {
+    pub revision: u64,
+    pub width: i32,
+    pub height: i32,
+}
+
 pub(super) struct MenuVisual32 {
     pub layout: MenuLayout32,
     pub revision: u64,
@@ -24,6 +31,7 @@ impl MenuVisual32 {
         handle: MenuHandle32,
         popup: bool,
         width: i32,
+        owned: &[Option<OwnerSize32>],
     ) -> Result<Self, E> {
         let metrics = gdi.measure_text(dc, &[]).map_err(gdi_error)?.metrics;
         let padding = (metrics.average_width / 2).max(2);
@@ -35,8 +43,22 @@ impl MenuVisual32 {
         let mut text = Vec::new();
         for index in 0..count {
             let item = menus.item(handle, index as u32, true)?;
-            if item.kind & (4 | 0x100 | 0x2000) != 0 || item.bitmap != 0 {
+            if item.kind & (4 | 0x2000) != 0 || item.bitmap != 0 {
                 return Err(E::Win32(50));
+            }
+            if item.kind & 0x100 != 0 {
+                let size = owned
+                    .get(index)
+                    .copied()
+                    .flatten()
+                    .filter(|size| size.revision == menus.revision())
+                    .ok_or(E::InvalidRequest)?;
+                sizes.push(ItemSize32 {
+                    width: size.width,
+                    height: size.height,
+                    kind: item.kind,
+                });
+                continue;
             }
             let (label, shortcut) = parts(&item.text);
             visible_label(label, &mut text)?;
@@ -69,7 +91,7 @@ impl MenuVisual32 {
             });
         }
         let layout = if popup {
-            MenuLayout32::popup(&sizes, 2)?
+            MenuLayout32::popup(&sizes, 1)?
         } else {
             MenuLayout32::bar(&sizes, width)?
         };
@@ -94,6 +116,7 @@ impl MenuVisual32 {
             handle,
             origin,
             selected,
+            dirty,
         } = paint;
         let color = |index| gdi.system_color(index);
         let bounds = Rect32 {
@@ -108,14 +131,22 @@ impl MenuVisual32 {
                 .checked_add(self.layout.extent.y)
                 .ok_or(E::Capacity)?,
         };
-        canvas.fill(gdi, bounds, color(4));
-        if self.popup {
+        if dirty.is_none() {
+            canvas.fill(gdi, bounds, color(4));
+        }
+        if self.popup && dirty.is_none() {
             canvas.frame(gdi, bounds, color(20), color(16));
         }
         for (index, _) in self.layout.items.iter().enumerate() {
+            if dirty.is_some_and(|positions| !positions.contains(&Some(index))) {
+                continue;
+            }
             let item = menus.item(handle, index as u32, true)?;
-            if item.kind & (4 | 0x100 | 0x2000) != 0 || item.bitmap != 0 {
+            if item.kind & (4 | 0x2000) != 0 || item.bitmap != 0 {
                 return Err(E::Win32(50));
+            }
+            if item.kind & 0x100 != 0 {
+                continue;
             }
             let rect = self.layout.screen_item(index, origin)?;
             if item.kind & 0x800 != 0 {
@@ -275,4 +306,5 @@ pub(super) struct MenuPaint32 {
     pub handle: MenuHandle32,
     pub origin: Point32,
     pub selected: Option<usize>,
+    pub dirty: Option<[Option<usize>; 2]>,
 }

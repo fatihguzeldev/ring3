@@ -24,13 +24,38 @@ impl User32Context32 {
         gdi: &mut GdiRuntime32,
     ) -> Result<(), E> {
         let index = self.popup_index(token)?;
+        let menu = self.menu_popups.plans[index].windows[depth].menu;
+        let count = self.menus.count(menu)?;
+        let measurements = &mut self.menu_popups.plans[index].windows[depth].measurements;
+        if measurements.len() < count {
+            measurements
+                .try_reserve(count - measurements.len())
+                .map_err(|_| E::Allocation)?;
+            measurements.resize(count, None);
+        }
+        for position in 0..count {
+            if self.menus.item(menu, position as u32, true)?.kind & 0x100 != 0
+                && self.menu_popups.plans[index].windows[depth].measurements[position]
+                    .is_none_or(|size| size.revision != self.menus.revision())
+            {
+                self.menu_popups.plans[index].stage = Stage32::MeasurePrepare(depth, position);
+                return Ok(());
+            }
+        }
         let plan = &self.menu_popups.plans[index];
         let owner = self.gdi_window(plan.owner.get(), true)?;
         let dc = gdi
             .acquire_dc(owner, plan.call.thread_id)
             .map_err(gdi_error)?;
-        let measured =
-            MenuVisual32::measure(gdi, dc, &self.menus, plan.windows[depth].menu, true, 0);
+        let measured = MenuVisual32::measure(
+            gdi,
+            dc,
+            &self.menus,
+            plan.windows[depth].menu,
+            true,
+            0,
+            &plan.windows[depth].measurements,
+        );
         assert!(
             gdi.release_window_dc(owner.window, dc, plan.call.thread_id)
                 .map_err(gdi_error)?
@@ -77,6 +102,14 @@ impl User32Context32 {
             Stage32::Create(depth)
         };
         let plan = &mut self.menu_popups.plans[index];
+        if plan.windows[depth]
+            .visual
+            .as_ref()
+            .is_none_or(|previous| previous.revision != visual.revision)
+        {
+            plan.draw_action = 1;
+            plan.draw_only = None;
+        }
         plan.windows[depth].visual = Some(visual);
         plan.windows[depth].origin = origin;
         plan.stage = stage;
@@ -107,7 +140,12 @@ impl User32Context32 {
                 MenuPaint32 {
                     handle: popup.menu,
                     origin: Point32::default(),
-                    selected: plan.tracker.level(depth).and_then(|level| level.selected),
+                    selected: if plan.exit_draw {
+                        None
+                    } else {
+                        plan.tracker.level(depth).and_then(|level| level.selected)
+                    },
+                    dirty: plan.draw_only,
                 },
             )?;
             gdi.publish_canvas(ram, canvas).map_err(gdi_error)

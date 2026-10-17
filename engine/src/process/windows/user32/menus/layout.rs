@@ -115,7 +115,7 @@ impl MenuLayout32 {
 
 impl ItemSize32 {
     fn check(self) -> Result<(), E> {
-        if self.width <= 0 || self.height <= 0 {
+        if self.width <= 0 || self.height < 0 || self.height == 0 && self.kind & 0x100 == 0 {
             return Err(E::Win32(87));
         }
         Ok(())
