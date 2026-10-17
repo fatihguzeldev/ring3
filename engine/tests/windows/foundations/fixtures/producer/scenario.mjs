@@ -10,7 +10,7 @@ export function image() {
     ['shell32.dll', ['CommandLineToArgvW']],
     ['msimg32.dll', ['TransparentBlt']],
     ['imm32.dll', ['ImmCreateContext', 'ImmDestroyContext', 'ImmSetOpenStatus', 'ImmGetOpenStatus', 'ImmGetConversionStatus', 'ImmSetCompositionWindow', 'ImmGetCompositionWindow', 'ImmGetCompositionStringW', 'ImmGetDefaultIMEWnd']],
-    ['comctl32.dll', ['InitCommonControlsEx']],
+    ['comctl32.dll', ['InitCommonControls', 'InitCommonControlsEx']],
     ['comdlg32.dll', ['CommDlgExtendedError', 'GetFileTitleW']],
   ]);
   for (const name of ['dc', 'bstr', 'argv', 'argc', 'dib', 'bits', 'message', 'imc', 'conversion', 'sentence', 'ime_window', 'ime_window_again']) b.allocate(name);
@@ -50,6 +50,7 @@ export function image() {
   call('CreateDIBSection', 0x1a0016, [0, info, 0, b.addresses.bits, 0, 0], 'nonzero', 'dib');
   b.writeLocked(b.addresses.bits, [0x00aabbcc]);
   call('ReleaseDC', 0x1a005c, [0, b.ref('dc')], 1);
+  call('InitCommonControls', 0x220001, [], 'void');
   call('InitCommonControlsEx', 0x220002, [commonControls], 1);
   call('CommDlgExtendedError', 0x210005, [], 0);
   call('GetFileTitleW', 0x210007, [title, b.addresses.title_output, 16], 0, undefined, 'file-title');

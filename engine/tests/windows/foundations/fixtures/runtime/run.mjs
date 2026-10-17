@@ -37,7 +37,7 @@ for (const unit of engine.units) {
   if (unit.expected === 'exit') {
     assert.equal(get(72), 9); assert.equal(get(80), 0);
   } else if (unit.expected === 'nonzero') assert.notEqual(get(16), 0, unit.name);
-  else assert.equal(get(16), unit.expected, unit.name);
+  else if (unit.expected !== 'void') assert.equal(get(16), unit.expected, unit.name);
   if (unit.name === 'CreateDIBSection') dibPointer = read(guest.addresses.bits);
   if (unit.hook === 'file-title') assert.deepEqual([0,4,8].map(offset => read(guest.addresses.title_output + offset)), [0x00650064,0x006f006d,0]);
   if (unit.hook === 'ime-conversion') assert.deepEqual([read(guest.addresses.conversion), read(guest.addresses.sentence)], [1,8]);
@@ -82,6 +82,6 @@ assert.equal(api.read32(dibPointer), 0); assert.notEqual(get(116), 0, 'process e
 assert.equal(api.pending_gdi_frame(0), 21, 'frame transport closes after process exit');
 const receipt = {engineHash, guestHash: hash(guest.bytes), frames, calls: guest.calls.length,
   modules: 13, residentSlots: guest.calls.length + gateCount, dibPointer, runs: engine.runs,
-  claim: 'authored PE32 executes generated Wasm across USER32/GDI fonts and frames, MSIMG transparency, COMCTL progress registration, COMDLG title and per-thread error, live IMM context/preferences, BSTR, comparison, shell heap ownership, message formatting and live-DIB process retirement; native control callbacks and browser input remain separate evidence'};
+  claim: 'authored PE32 executes generated Wasm across USER32/GDI fonts and frames, MSIMG transparency, COMCTL legacy and typed class registration, COMDLG title and per-thread error, live IMM context/preferences, BSTR, comparison, shell heap ownership, message formatting and live-DIB process retirement; native control callbacks and browser input remain separate evidence'};
 writeFileSync(join(output, 'receipt.json'), JSON.stringify(receipt, null, 2));
 console.log(JSON.stringify({engineHash, frames, calls: guest.calls.length, dibPointer}));
