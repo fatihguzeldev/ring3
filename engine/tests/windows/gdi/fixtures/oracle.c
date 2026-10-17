@@ -449,6 +449,80 @@ static void rotated_font_reference(void) {
     printf("]");
 }
 
+
+struct font_probe_state { unsigned count, stop; int value; WCHAR first[LF_FACESIZE]; BYTE charset; DWORD kind; };
+static int CALLBACK font_probe(const LOGFONTW *font, const TEXTMETRICW *metrics, DWORD kind, LPARAM parameter) {
+    struct font_probe_state *state = (struct font_probe_state *)parameter;
+    if (!state->count) {
+        memcpy(state->first, font->lfFaceName, sizeof(state->first));
+        state->charset = metrics->tmCharSet;
+        state->kind = kind;
+    }
+    ++state->count;
+    return state->stop && state->count >= state->stop ? 0 : state->value;
+}
+static void font_probe_case(HDC dc, const char *name, const WCHAR *family, BYTE charset, unsigned stop, int value, int comma) {
+    LOGFONTW filter = {0}; filter.lfCharSet = charset;
+    if (family) lstrcpynW(filter.lfFaceName, family, LF_FACESIZE);
+    struct font_probe_state state = {0}; state.stop = stop; state.value = value;
+    SetLastError(0xabcdef01);
+    int result = EnumFontFamiliesExW(dc, &filter, font_probe, (LPARAM)&state, 0);
+    DWORD error = GetLastError();
+    printf("%s{\"case\":\"%s\",\"result\":%d,\"calls\":%u,\"charset\":%u,\"kind\":%lu,\"error\":%lu,\"first\":[", comma ? "," : "", name, result, state.count, state.charset, state.kind, error);
+    for (unsigned i = 0; i < LF_FACESIZE && state.first[i]; ++i) printf("%s%u", i ? "," : "", state.first[i]);
+    printf("]}");
+}
+static void font_resource_reference(void) {
+    HDC dc = CreateCompatibleDC(NULL);
+    WCHAR system_face[LF_FACESIZE] = {0}; GetTextFaceW(dc, LF_FACESIZE, system_face);
+    printf(",\"fontEnumeration\":[");
+    font_probe_case(dc, "absent", L"ring3 absent font family", DEFAULT_CHARSET, 0, 42, 0);
+    font_probe_case(dc, "last42", system_face, ANSI_CHARSET, 0, 42, 1);
+    font_probe_case(dc, "stop0", NULL, DEFAULT_CHARSET, 1, 42, 1);
+    font_probe_case(dc, "beforeMemory", L"Noto Sans", DEFAULT_CHARSET, 0, 42, 1);
+    printf("]");
+    FILE *input = fopen("engine/assets/fonts/NotoSans-Regular.ttf", "rb");
+    BYTE *bytes = NULL; long length = 0;
+    if (input && !fseek(input, 0, SEEK_END)) {
+        length = ftell(input);
+        if (length > 0 && length <= 4 * 1024 * 1024 && !fseek(input, 0, SEEK_SET)) {
+            bytes = malloc((size_t)length);
+            if (bytes && fread(bytes, 1, (size_t)length, input) != (size_t)length) { free(bytes); bytes = NULL; }
+        }
+    }
+    if (input) fclose(input);
+    DWORD count = 0x12345678;
+    SetLastError(0xabcdef01);
+    HANDLE memory_font = bytes ? AddFontMemResourceEx(bytes, (DWORD)length, NULL, &count) : NULL;
+    DWORD add_error = GetLastError(); free(bytes);
+    HFONT font = CreateFontW(-16, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, ANSI_CHARSET, OUT_TT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH, L"Noto Sans");
+    HGDIOBJ old_font = SelectObject(dc, font);
+    WCHAR before[LF_FACESIZE] = {0}, after[LF_FACESIZE] = {0};
+    SIZE before_size = {0}, after_size = {0};
+    GetTextFaceW(dc, LF_FACESIZE, before); GetTextExtentPoint32W(dc, L"Mm", 2, &before_size);
+    printf(",\"fontMemoryEnumeration\":[");
+    font_probe_case(dc, "afterMemory", L"Noto Sans", DEFAULT_CHARSET, 0, 42, 0);
+    printf("]");
+    SetLastError(0xabcdef01);
+    BOOL removed = memory_font ? RemoveFontMemResourceEx(memory_font) : FALSE;
+    DWORD remove_error = GetLastError();
+    GetTextFaceW(dc, LF_FACESIZE, after); GetTextExtentPoint32W(dc, L"Mm", 2, &after_size);
+    printf(",\"fontMemory\":{\"input\":%u,\"added\":%u,\"count\":%lu,\"addError\":%lu,\"removed\":%u,\"removeError\":%lu,\"sameSelectedFace\":%u,\"beforeWidth\":%ld,\"afterWidth\":%ld}",
+        length > 0, memory_font != NULL, count, add_error, removed, remove_error, !lstrcmpW(before, after), before_size.cx, after_size.cx);
+    SelectObject(dc, old_font); DeleteObject(font);
+    int file_first = AddFontResourceExW(L"engine\\assets\\fonts\\NotoSans-Regular.ttf", FR_PRIVATE, NULL);
+    int file_second = AddFontResourceExW(L"engine\\assets\\fonts\\NotoSans-Regular.ttf", FR_PRIVATE, NULL);
+    printf(",\"fontFileEnumeration\":[");
+    font_probe_case(dc, "afterFile", L"Noto Sans", DEFAULT_CHARSET, 0, 42, 0);
+    printf("]");
+    BOOL wrong_flags = RemoveFontResourceExW(L"engine\\assets\\fonts\\NotoSans-Regular.ttf", 0, NULL);
+    BOOL remove_first = RemoveFontResourceExW(L"engine\\assets\\fonts\\NotoSans-Regular.ttf", FR_PRIVATE, NULL);
+    BOOL remove_second = RemoveFontResourceExW(L"engine\\assets\\fonts\\NotoSans-Regular.ttf", FR_PRIVATE, NULL);
+    BOOL remove_third = RemoveFontResourceExW(L"engine\\assets\\fonts\\NotoSans-Regular.ttf", FR_PRIVATE, NULL);
+    printf(",\"fontFile\":{\"first\":%d,\"second\":%d,\"wrongFlags\":%u,\"removeFirst\":%u,\"removeSecond\":%u,\"removeThird\":%u}",file_first,file_second,wrong_flags,remove_first,remove_second,remove_third);
+    DeleteDC(dc);
+}
+
 int main(void) {
     const char *classes[] = {"Button", "Edit", "Static", "ListBox", "ScrollBar", "ComboBox"};
     HWND parent = CreateWindowExA(0, "Static", "parent", WS_POPUP, 0, 0, 100, 100, NULL, NULL, NULL, NULL);
@@ -505,6 +579,7 @@ int main(void) {
     paint_thread_reference();
     stretch_mode_reference();
     rotated_font_reference();
+    font_resource_reference();
     DestroyWindow(parent);
     puts("}");
     return 0;
