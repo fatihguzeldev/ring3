@@ -49,9 +49,6 @@ impl GdiRuntime32 {
         seed: Option<TextPixels32>,
     ) -> Result<TextPixels32, GdiError32> {
         let font = self.logical_font(state.font)?;
-        if font.escapement % 3600 != 0 || font.orientation % 3600 != 0 {
-            return Err(GdiError32::Unsupported);
-        }
         let direct = request.options & (16 | 4096) != 0;
         let converted;
         let units = if request.options & 4096 != 0 && request.options & 16 == 0 {
@@ -100,6 +97,7 @@ impl GdiRuntime32 {
         } else {
             request.point
         };
+        let rotation = super::rotation::TextRotation32::new(font.escapement, reference);
         let baseline = point
             .y
             .checked_add(match state.text_align & 24 {
@@ -127,14 +125,20 @@ impl GdiRuntime32 {
             .filter(|_| request.options & 4 != 0)
             .map(|rectangle| device_rect(&state, rectangle))
             .transpose()?;
-        let mut paint = |rectangle: Rect32, color: u32, coverage: u8| -> Result<(), GdiError32> {
-            let rectangle = device_rect(&state, rectangle)?;
+        let mut paint = |source: Rect32,
+                         color: u32,
+                         coverage: u8,
+                         rotation: super::rotation::TextRotation32|
+         -> Result<(), GdiError32> {
+            let rectangle = rotation.device_bounds(&state, source)?;
             let rectangle = intersect(rectangle, bounds(layout));
             let rectangle = clip.map_or(rectangle, |clip| intersect(rectangle, clip));
             for y in rectangle.top..rectangle.bottom {
                 for x in rectangle.left..rectangle.right {
                     let point = Point32 { x, y };
-                    if !state.accepts(point, bounds(layout)) {
+                    if !state.accepts(point, bounds(layout))
+                        || !rotation.accepts(&state, source, point)?
+                    {
                         continue;
                     }
                     let old = layout.read_pixel(&pixels, &surface.palette, x as u32, y as u32);
@@ -154,7 +158,12 @@ impl GdiRuntime32 {
             Ok(())
         };
         if request.options & 2 != 0 && !request.prefix_only {
-            paint(request.rectangle.unwrap(), state.background_color, 255)?;
+            paint(
+                request.rectangle.unwrap(),
+                state.background_color,
+                255,
+                super::rotation::TextRotation32::identity(),
+            )?;
         } else if state.background_mode == 2 && !units.is_empty() && !request.prefix_only {
             let right = point
                 .x
@@ -173,6 +182,7 @@ impl GdiRuntime32 {
                 },
                 state.background_color,
                 255,
+                rotation,
             )?;
         }
         let mut cache: Vec<(u16, GlyphRaster32)> = Vec::new();
@@ -210,7 +220,7 @@ impl GdiRuntime32 {
                 .checked_add(glyph.y.round() as i32)
                 .and_then(|y| y.checked_add(raster.top))
                 .ok_or(GdiError32::InvalidRequest)?;
-            let glyph_bounds = device_rect(
+            let glyph_bounds = rotation.device_bounds(
                 &state,
                 Rect32 {
                     left,
@@ -255,6 +265,7 @@ impl GdiRuntime32 {
                         } else {
                             coverage
                         },
+                        rotation,
                     )?;
                 }
             }
@@ -284,6 +295,7 @@ impl GdiRuntime32 {
                 },
                 state.text_color,
                 255,
+                rotation,
             )?;
         }
         for y in [
@@ -309,13 +321,11 @@ impl GdiRuntime32 {
                 },
                 state.text_color,
                 255,
+                rotation,
             )?;
         }
         if state.text_align & 1 != 0 {
-            state.current_position.x = reference
-                .x
-                .checked_add(shaped.advance.round() as i32)
-                .ok_or(GdiError32::InvalidRequest)?;
+            state.current_position = rotation.advance(shaped.advance)?;
         }
         Ok(TextPixels32 {
             index,
@@ -399,7 +409,7 @@ fn override_advances(text: &mut ShapedText32, advances: &[(i32, i32)]) -> Result
     text.advance = pen.x as f32;
     Ok(())
 }
-fn device_rect(state: &DcState32, rectangle: Rect32) -> Result<Rect32, GdiError32> {
+pub(super) fn device_rect(state: &DcState32, rectangle: Rect32) -> Result<Rect32, GdiError32> {
     let a = state.device_point(Point32 {
         x: rectangle.left,
         y: rectangle.top,

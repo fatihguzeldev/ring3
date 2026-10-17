@@ -92,3 +92,5 @@ impl GdiRuntime32 {
         Ok(Some(bytes.len() as u32))
     }
 }
+
+mod rotation;
