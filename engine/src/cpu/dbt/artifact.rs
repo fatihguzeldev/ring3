@@ -33,9 +33,33 @@ pub struct CompiledRegion {
     prepared: PreparedRegion,
     tier: super::CompilationTier32,
     bytes: Vec<u8>,
+    entry_start: u32,
+    entry_end: u32,
 }
 
 impl CompiledRegion {
+    fn new(prepared: PreparedRegion, bytes: Vec<u8>, tier: super::CompilationTier32) -> Self {
+        let mut region = Self {
+            prepared,
+            bytes,
+            tier,
+            entry_start: u32::MAX,
+            entry_end: 0,
+        };
+        let (start, end) = region
+            .executable_addresses()
+            .fold((u32::MAX, 0), |(start, end), address| {
+                (start.min(address.0), end.max(address.0))
+            });
+        region.entry_start = start;
+        region.entry_end = end;
+        region
+    }
+
+    fn may_contain_entry(&self, pc: u32) -> bool {
+        self.entry_start <= pc && pc <= self.entry_end
+    }
+
     pub fn tier(&self) -> super::CompilationTier32 {
         self.tier
     }
@@ -80,7 +104,7 @@ impl CompiledRegion {
     }
 
     pub(crate) fn contains_executable(&self, pc: u32) -> bool {
-        self.executable_addresses().any(|entry| entry.0 == pc)
+        self.may_contain_entry(pc) && self.executable_addresses().any(|entry| entry.0 == pc)
     }
 
     pub(crate) fn contains_instruction(&self, pc: u32) -> bool {
@@ -117,16 +141,20 @@ impl CompiledRegion {
     }
 
     pub(crate) fn contains_material(&self, pc: u32) -> bool {
-        self.prepared.blocks.iter().any(|block| {
-            block
-                .instructions
-                .iter()
-                .any(|instruction| instruction.pc().0 == pc)
-                || block.gate().is_some_and(|gate| gate.entry.0 == pc)
-        })
+        self.may_contain_entry(pc)
+            && self.prepared.blocks.iter().any(|block| {
+                block
+                    .instructions
+                    .iter()
+                    .any(|instruction| instruction.pc().0 == pc)
+                    || block.gate().is_some_and(|gate| gate.entry.0 == pc)
+            })
     }
 
     pub(crate) fn context_fault(&self, pc: u32) -> Option<&CapturedCodeFault> {
+        if !self.may_contain_entry(pc) {
+            return None;
+        }
         self.prepared
             .blocks
             .iter()
@@ -279,11 +307,11 @@ pub(super) fn emit_prepared(
     if bytes.len() > limits.wasm_bytes {
         return Err(CompileError::WasmLimit);
     }
-    Ok(CompiledRegion {
+    Ok(CompiledRegion::new(
         prepared,
         bytes,
-        tier: super::CompilationTier32::Baseline,
-    })
+        super::CompilationTier32::Baseline,
+    ))
 }
 
 pub(super) fn emit_entry_prepared(
@@ -324,14 +352,14 @@ pub(super) fn emit_entry_prepared_tier(
         let bytes =
             wasm::emit_with_tier(&prepared.blocks, binding, prepared.decode_key, applied_tier);
         if bytes.len() <= limits.wasm_bytes {
-            return Ok(CompiledRegion {
-                prepared,
-                bytes,
-                tier: applied_tier,
-            });
+            return Ok(CompiledRegion::new(prepared, bytes, applied_tier));
         }
         if !shorten_entry_region(memory, &mut prepared, cs)? {
             return Err(CompileError::WasmLimit);
         }
     }
 }
+
+#[cfg(test)]
+#[path = "artifact/tests/bounds.rs"]
+mod bounds_tests;
