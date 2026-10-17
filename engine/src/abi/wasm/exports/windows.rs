@@ -20,6 +20,7 @@ export_process_calls! {
     register_user32_module(base:u32);
     set_user32_keyboard_state(flags:u32);
     post_user32_message(window:u32,message:u32,wparam:u32,lparam:u32,time_ms:u32,x:u32,y:u32);
+    submit_ime_composition(window:u32,length:u32);
     waiting_user32_message();
     resume_user32_wait(low:u32,high:u32,continuation_low:u32,continuation_high:u32);
     pending_user32_input();

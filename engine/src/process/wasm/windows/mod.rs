@@ -23,6 +23,7 @@ mod registry;
 mod synchronization;
 mod threads;
 mod user32;
+mod ime;
 
 pub(crate) use activation::*;
 pub(crate) use version::*;
@@ -40,6 +41,7 @@ pub(crate) use registry::*;
 pub(crate) use synchronization::*;
 pub(crate) use threads::*;
 pub(crate) use user32::*;
+pub(crate) use ime::*;
 
 fn wide(low: u32, high: u32) -> u64 {
     u64::from(low) | (u64::from(high) << 32)

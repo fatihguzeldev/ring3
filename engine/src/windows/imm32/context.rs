@@ -166,11 +166,23 @@ impl InputContexts32 {
         thread: u32,
         composition: InputComposition32,
     ) -> Result<(), ImmError32> {
-        composition.check(self.unit_limit)?;
+        self.check_composition(&composition)?;
         self.context_mut(handle, thread)?.composition = composition;
         Ok(())
     }
+    pub(crate) fn check_composition(
+        &self,
+        composition: &InputComposition32,
+    ) -> Result<(), ImmError32> {
+        composition.check(self.unit_limit)
+    }
     pub fn retire_window(&mut self, window: u32) {
+        for context in &mut self.contexts {
+            if context.composing_window == Some(window) {
+                context.composing_window = None;
+                context.composition = Default::default();
+            }
+        }
         self.associations
             .retain(|association| association.window != window);
     }
@@ -178,5 +190,11 @@ impl InputContexts32 {
         self.associations
             .retain(|association| association.thread != thread);
         self.contexts.retain(|context| context.thread != thread);
+    }
+    pub(crate) fn reset_compositions(&mut self) {
+        for context in &mut self.contexts {
+            context.composing_window = None;
+            context.composition = Default::default();
+        }
     }
 }

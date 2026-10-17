@@ -51,6 +51,7 @@ impl EngineInstance {
         };
         let was_exclusive = context.input.mouse_exclusive;
         context.state.discard_input_messages();
+        context.ime.reset_compositions();
         context.raw_input.reset_packets();
         context
             .input

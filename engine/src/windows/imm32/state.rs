@@ -27,6 +27,14 @@ pub struct InputComposition32 {
     pub clauses: Vec<u32>,
     pub cursor: u32,
 }
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum InputCompositionEvent32 {
+    Begin,
+    Update(InputComposition32),
+    Commit(Vec<u16>),
+    Cancel,
+}
 impl InputComposition32 {
     pub fn check(&self, unit_limit: usize) -> Result<(), ImmError32> {
         if self.text.len() > unit_limit || self.result.len() > unit_limit {
@@ -58,6 +66,7 @@ pub struct InputContext32 {
     pub candidate_windows: [Option<CandidateWindow32>; 4],
     pub font: LogicalFont32,
     pub composition: InputComposition32,
+    pub(crate) composing_window: Option<u32>,
 }
 impl InputContext32 {
     pub fn handle(&self) -> u32 {
@@ -78,6 +87,7 @@ impl InputContext32 {
             candidate_windows: [None; 4],
             font: LogicalFont32::stock(13),
             composition: InputComposition32::default(),
+            composing_window: None,
         }
     }
 }
