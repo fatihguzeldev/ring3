@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#pragma comment(lib, "msimg32.lib")
 
 static void failed_dib(const char *name, BITMAPINFO *info, HANDLE section, DWORD offset, int comma) {
     void *bits = (void *)(ULONG_PTR)0x12345678;
@@ -667,6 +668,54 @@ static void font_scope_reference(void) {
     DeleteObject(first); DeleteObject(second); DeleteObject(third);
 }
 
+
+static void msimg_reference(void) {
+    BITMAPINFO info = {0}; info.bmiHeader.biSize = sizeof(info.bmiHeader);
+    info.bmiHeader.biWidth = 4; info.bmiHeader.biHeight = -2;
+    info.bmiHeader.biPlanes = 1; info.bmiHeader.biBitCount = 32;
+    DWORD *source_pixels = NULL, *target_pixels = NULL;
+    HDC source = CreateCompatibleDC(NULL), target = CreateCompatibleDC(NULL);
+    HBITMAP source_bitmap = CreateDIBSection(source, &info, DIB_RGB_COLORS, (void **)&source_pixels, NULL, 0);
+    HBITMAP target_bitmap = CreateDIBSection(target, &info, DIB_RGB_COLORS, (void **)&target_pixels, NULL, 0);
+    HGDIOBJ old_source = SelectObject(source, source_bitmap), old_target = SelectObject(target, target_bitmap);
+    printf(",\"msimg\":{\"alpha\":[");
+    const BYTE constants[] = {255,128,128,255,255};
+    const BYTE formats[] = {AC_SRC_ALPHA,AC_SRC_ALPHA,0,0,AC_SRC_ALPHA};
+    const DWORD inputs[] = {0x80400000,0x80400000,0x80400000,0x80400000,0x80800000};
+    for (unsigned i = 0; i < 5; ++i) {
+        if (source_pixels) for (unsigned p = 0; p < 8; ++p) source_pixels[p] = inputs[i];
+        if (target_pixels) for (unsigned p = 0; p < 8; ++p) target_pixels[p] = 0x40000040;
+        BLENDFUNCTION blend = {AC_SRC_OVER, 0, constants[i], formats[i]};
+        SetLastError(0xabcdef01);
+        BOOL result = AlphaBlend(target, 0, 0, 2, 1, source, 0, 0, 4, 2, blend);
+        DWORD error = GetLastError(); GdiFlush();
+        printf("%s{\"source\":%lu,\"destination\":1073741888,\"constant\":%u,\"format\":%u,\"result\":%u,\"error\":%lu,\"pixels\":[%lu,%lu,%lu]}",
+            i ? "," : "", inputs[i], constants[i], formats[i], result, error,
+            target_pixels ? target_pixels[0] : 0, target_pixels ? target_pixels[1] : 0, target_pixels ? target_pixels[2] : 0);
+    }
+    if (source_pixels) { source_pixels[0] = 0x80400000; source_pixels[1] = 0x9900ff00; }
+    if (target_pixels) for (unsigned p = 0; p < 8; ++p) target_pixels[p] = 0x40000040;
+    SetLastError(0xabcdef01);
+    BOOL transparent = TransparentBlt(target, 0, 0, 2, 1, source, 0, 0, 2, 1, RGB(64,0,0));
+    DWORD transparent_error = GetLastError(); GdiFlush();
+    printf("],\"transparent\":{\"result\":%u,\"error\":%lu,\"pixels\":[%lu,%lu,%lu]},\"gradients\":[", transparent, transparent_error,
+        target_pixels ? target_pixels[0] : 0, target_pixels ? target_pixels[1] : 0, target_pixels ? target_pixels[2] : 0);
+    for (unsigned mode = 0; mode <= 2; ++mode) {
+        if (target_pixels) for (unsigned p = 0; p < 8; ++p) target_pixels[p] = 0x5a123456;
+        TRIVERTEX vertices[3] = {{0,0,0xff00,0,0,0xffff}, {4,2,0,0,0xff00,0xffff}, {4,0,0,0xff00,0,0xffff}};
+        GRADIENT_RECT rect = {0,1}; GRADIENT_TRIANGLE triangle = {0,2,1};
+        SetLastError(0xabcdef01);
+        BOOL result = GradientFill(target, vertices, 3, mode == GRADIENT_FILL_TRIANGLE ? (void *)&triangle : (void *)&rect, 1, mode);
+        DWORD error = GetLastError(); GdiFlush();
+        printf("%s{\"mode\":%u,\"result\":%u,\"error\":%lu,\"pixels\":[", mode ? "," : "", mode, result, error);
+        for (unsigned p = 0; p < 8; ++p) printf("%s%lu", p ? "," : "", target_pixels ? target_pixels[p] : 0);
+        printf("]}");
+    }
+    printf("]}");
+    SelectObject(source, old_source); SelectObject(target, old_target);
+    DeleteObject(source_bitmap); DeleteObject(target_bitmap); DeleteDC(source); DeleteDC(target);
+}
+
 int main(void) {
     const char *classes[] = {"Button", "Edit", "Static", "ListBox", "ScrollBar", "ComboBox"};
     HWND parent = CreateWindowExA(0, "Static", "parent", WS_POPUP, 0, 0, 100, 100, NULL, NULL, NULL, NULL);
@@ -726,6 +775,7 @@ int main(void) {
     font_resource_reference();
     font_lifetime_reference();
     font_scope_reference();
+    msimg_reference();
     DestroyWindow(parent);
     puts("}");
     return 0;
