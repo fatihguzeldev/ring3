@@ -79,6 +79,44 @@ static void placed(HWND window, const char *name) {
     }
 }
 
+static void query_row(const char *name, ULONG_PTR result, DWORD error) {
+    printf("{\"operation\":\"clipboard-query\",\"case\":\"%s\",\"result\":%llu,\"error\":%lu}\n", name, (unsigned long long)result, error);
+}
+static void query_reference(HWND window) {
+    WCHAR name[4] = {0xeeee,0xeeee,0xeeee,0xeeee};
+    UINT formats[] = {CF_UNICODETEXT, CF_TEXT};
+    SetLastError(0xabcdef01); UINT result = EnumClipboardFormats(0); DWORD error = GetLastError();
+    query_row("enum-closed", result, error);
+    SetLastError(0xabcdef01); HANDLE data = GetClipboardData(CF_UNICODETEXT); error = GetLastError();
+    query_row("get-closed", (ULONG_PTR)data, error);
+    SetLastError(0xabcdef01); result = EmptyClipboard(); error = GetLastError();
+    query_row("empty-closed", result, error);
+    SetLastError(0xabcdef01); data = SetClipboardData(CF_UNICODETEXT, NULL); error = GetLastError();
+    query_row("set-closed", (ULONG_PTR)data, error);
+    SetLastError(0xabcdef01); result = GetClipboardFormatNameW(CF_UNICODETEXT, name, 4); error = GetLastError();
+    query_row("name-predefined", result, error);
+    SetLastError(0xabcdef01); result = GetClipboardFormatNameW(delayed_format, name, 0); error = GetLastError();
+    query_row("name-zero-capacity", result, error);
+    if (!OpenClipboard(window)) ExitProcess(2);
+    EmptyClipboard();
+    SetLastError(0xabcdef01); result = EnumClipboardFormats(0); error = GetLastError();
+    query_row("enum-empty", result, error);
+    SetLastError(0xabcdef01); result = EnumClipboardFormats(CF_TEXT); error = GetLastError();
+    query_row("enum-invalid-previous", result, error);
+    SetLastError(0xabcdef01); result = GetPriorityClipboardFormat(formats, 2); error = GetLastError();
+    query_row("priority-empty", result, error);
+    SetLastError(0xabcdef01); data = SetClipboardData(0, NULL); error = GetLastError();
+    query_row("set-format-zero", (ULONG_PTR)data, error);
+    SetClipboardData(CF_UNICODETEXT, NULL);
+    CloseClipboard();
+    if (!OpenClipboard(window)) ExitProcess(2);
+    SetLastError(0xabcdef01); data = GetClipboardData(CF_LOCALE); error = GetLastError();
+    DWORD locale = 0;
+    if (data) { DWORD *value = GlobalLock(data); if (value && GlobalSize(data) >= 4) locale = *value; if (value) GlobalUnlock(data); }
+    printf("{\"operation\":\"clipboard-query\",\"case\":\"locale-from-delayed-text\",\"result\":%u,\"error\":%lu,\"locale\":%lu,\"inputLocale\":%u}\n", data != NULL, error, locale, LOWORD(GetKeyboardLayout(0)));
+    EmptyClipboard(); CloseClipboard();
+}
+
 int main(void) {
     WNDCLASSW type;
     memset(&type, 0, sizeof(type));
@@ -113,6 +151,7 @@ int main(void) {
     BOOL first = CloseClipboard(); SetLastError(0xabcdef01);
     BOOL second = CloseClipboard(); DWORD close_error = GetLastError();
     printf("{\"operation\":\"clipboard-close\",\"first\":%d,\"second\":%d,\"error\":%lu}\n", !!first, !!second, close_error);
+    query_reference(window);
     DestroyWindow(window);
     return 0;
 }
