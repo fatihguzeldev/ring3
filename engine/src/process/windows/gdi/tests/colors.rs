@@ -4,6 +4,9 @@ use crate::{
     windows::gdi::{Brush32, GdiApi32, GdiError32, GdiObject32},
 };
 
+#[path = "colors/updates.rs"]
+mod updates;
+
 #[test]
 fn system_brush_is_cached_immortal_and_consumes_no_guest_object_quota() {
     let (mut runtime, mut ram) = fixture();

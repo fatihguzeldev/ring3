@@ -1,6 +1,7 @@
 use super::{Message32, Point32, User32Error32, User32Limits32, WindowClass32, WindowData32};
 use crate::windows::window::{WindowContext32, WindowDescription32, WindowHandle32};
 mod classes;
+mod colors;
 mod dialogs;
 mod menus;
 mod paint;

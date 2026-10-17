@@ -17,6 +17,7 @@ mod messages;
 mod properties;
 mod rawinput;
 mod runtime;
+mod system_colors;
 mod threads;
 mod timers;
 pub(in crate::process) use timers::PreparedUser32TimerClock32;

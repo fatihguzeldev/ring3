@@ -199,6 +199,7 @@ api_catalog! {
     GetOpenClipboardWindow=0x0002_00bd,0;
     GetClipboardSequenceNumber=0x0002_00be,0;
     GetPriorityClipboardFormat=0x0002_00bf,2;
+    SetSysColors=0x0002_00cd,3;
 }
 
 impl User32Api32 {

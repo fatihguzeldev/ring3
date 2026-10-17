@@ -3,7 +3,7 @@ use crate::{
     memory::AddressSpace,
     process::windows::gdi::{CanvasText32, GdiCanvas32, GdiRuntime32},
     windows::user32::{
-        Point32, Rect32, SystemColors32, User32Error32 as E,
+        Point32, Rect32, User32Error32 as E,
         menus::{MenuHandle32, MenuStore32},
     },
 };
@@ -95,8 +95,7 @@ impl MenuVisual32 {
             origin,
             selected,
         } = paint;
-        let colors = SystemColors32;
-        let color = |index| colors.get(index).expect("menu uses defined system colors");
+        let color = |index| gdi.system_color(index);
         let bounds = Rect32 {
             left: origin.x,
             top: origin.y,

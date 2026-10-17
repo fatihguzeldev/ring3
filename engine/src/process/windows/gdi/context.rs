@@ -47,7 +47,7 @@ impl GdiRuntime32 {
         Ok(Self {
             config,
             model,
-            colors: crate::windows::user32::SystemColors32,
+            colors: Default::default(),
             bounds,
             surfaces,
             next_surface: 1,

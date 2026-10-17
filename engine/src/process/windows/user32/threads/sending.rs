@@ -95,6 +95,9 @@ impl User32Context32 {
         &self,
         token: u64,
     ) -> Result<Option<[u32; 4]>, User32Error32> {
+        if self.system_colors_wait(token).is_some() {
+            return Ok(self.pending_system_colors_message(token));
+        }
         if self.clipboard_wait(token).is_some() {
             return Ok(self.pending_clipboard_message(token));
         }
@@ -119,6 +122,7 @@ impl User32Context32 {
                         | Continuation32::MenuPopup { .. }
                         | Continuation32::Accelerator(_)
                         | Continuation32::Clipboard(_)
+                        | Continuation32::SystemColors(_)
                         | Continuation32::SentPaint(_)
                         | Continuation32::Retrieve { .. }
                         | Continuation32::MessageWait { .. }

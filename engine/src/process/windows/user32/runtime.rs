@@ -299,11 +299,15 @@ impl EngineInstance {
         } else {
             None
         };
-        let clipboard = if api.clipboard() {
+        let frontend = if api.clipboard() || api == User32Api32::SetSysColors {
             if frame.convention() != api.convention() || frame.stack_words() != api.stack_words() {
                 return Err(HostError::User32(User32Error32::InvalidRequest));
             }
-            Some(self.execute_clipboard_call(api, frame.arguments(), call_context))
+            Some(if api.clipboard() {
+                self.execute_clipboard_call(api, frame.arguments(), call_context)
+            } else {
+                self.execute_system_colors(frame.arguments(), call_context.thread_id)
+            })
         } else {
             None
         };
@@ -316,7 +320,7 @@ impl EngineInstance {
             .map_or_else(Default::default, |capture| capture.token());
         let result = if let Some(result) = popup_system {
             result
-        } else if let Some(result) = clipboard {
+        } else if let Some(result) = frontend {
             match result {
                 Ok(value) => Ok(value),
                 Err(HostError::User32(error)) => Err(error),
