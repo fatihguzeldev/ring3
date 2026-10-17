@@ -295,7 +295,7 @@ impl User32Context32 {
             _ => Ok(None),
         }
     }
-    fn check_control_transition(
+    pub(in crate::process::windows::user32) fn check_control_transition(
         &self,
         window: WindowHandle32,
         thread: u32,
@@ -315,7 +315,7 @@ impl User32Context32 {
         }
         Ok(())
     }
-    fn commit_control_transition(
+    pub(in crate::process::windows::user32) fn commit_control_transition(
         &mut self,
         window: WindowHandle32,
         thread: u32,

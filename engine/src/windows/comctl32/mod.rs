@@ -1,5 +1,6 @@
 mod api;
 mod classes;
+pub(crate) mod hotkey;
 pub(crate) mod progress;
 pub(crate) mod status;
 pub(crate) mod tab;

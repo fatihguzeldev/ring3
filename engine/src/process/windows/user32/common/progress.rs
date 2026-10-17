@@ -27,6 +27,9 @@ impl User32Context32 {
             CommonControlState32::Tab(_) => {
                 return self.tab_control_message(args, wide, ram, gdi, call);
             }
+            CommonControlState32::Hotkey(_) => {
+                return self.hotkey_control_message(args, wide, ram, gdi, call);
+            }
             CommonControlState32::Status(_) => {
                 return self.status_control_message(args, wide, ram, gdi, call);
             }

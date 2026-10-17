@@ -315,3 +315,6 @@ mod status;
 
 #[path = "tab.rs"]
 mod tab;
+
+#[path = "hotkey.rs"]
+mod hotkey;

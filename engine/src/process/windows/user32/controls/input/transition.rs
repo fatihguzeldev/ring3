@@ -47,7 +47,7 @@ impl User32Context32 {
             self.start(next)
         }
     }
-    pub(super) fn control_sequence(
+    pub(in crate::process::windows::user32) fn control_sequence(
         &mut self,
         events: [Option<WindowMessage32>; 6],
         result: u32,
