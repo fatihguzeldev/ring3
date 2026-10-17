@@ -95,6 +95,9 @@ impl User32Context32 {
         &self,
         token: u64,
     ) -> Result<Option<[u32; 4]>, User32Error32> {
+        if self.status_draw_wait(token) {
+            return self.pending_status_draw_message(token);
+        }
         if self.menu_bar_wait(token).is_some() {
             return self.pending_menu_bar_message(token);
         }
@@ -131,6 +134,7 @@ impl User32Context32 {
                         | Continuation32::MenuPopup { .. }
                         | Continuation32::MenuBar(_)
                         | Continuation32::CommonLayout(_)
+                        | Continuation32::StatusDraw(_)
                         | Continuation32::Accelerator(_)
                         | Continuation32::Clipboard(_)
                         | Continuation32::SystemColors(_)

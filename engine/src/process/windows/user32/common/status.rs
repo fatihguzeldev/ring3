@@ -1,3 +1,4 @@
+pub(in crate::process::windows::user32) mod owner;
 mod painting;
 use super::super::{User32CallContext32, User32Context32, User32Outcome32, memory};
 use crate::{
@@ -155,12 +156,7 @@ impl User32Context32 {
                 );
             }
             0x0f => {
-                return self.paint_status(
-                    window,
-                    ram,
-                    gdi.ok_or(HostError::InvalidRequest)?,
-                    call.thread_id,
-                );
+                return self.paint_status(window, ram, gdi.ok_or(HostError::InvalidRequest)?, call);
             }
             0x14 => 1,
             0x30 => {
@@ -300,10 +296,14 @@ impl User32Context32 {
                 {
                     return Ok(User32Outcome32::Return(0));
                 }
-                if kind & (0x1000 | 0x400) != 0 {
+                if kind & 0x400 != 0 {
                     return Err(HostError::User32(E::Win32(50)));
                 }
-                let mut text = if args[3] == 0 {
+                let owner = kind & 0x1000 != 0;
+                if owner && part == 0xff {
+                    return Ok(User32Outcome32::Return(0));
+                }
+                let mut text = if owner || args[3] == 0 {
                     Vec::new()
                 } else {
                     memory::string(
@@ -329,6 +329,23 @@ impl User32Context32 {
                     .check_text(part, text.len())
                     .map_err(HostError::User32)?;
                 self.state.check_paint_change().map_err(HostError::User32)?;
+                let draw = if owner
+                    && !self.status(window).map_err(HostError::User32)?.simple_mode
+                    && self
+                        .windows()
+                        .get(window)
+                        .map_err(E::from)
+                        .map_err(HostError::User32)?
+                        .description
+                        .visible
+                {
+                    Some(
+                        self.begin_status_draw(window, part, false, ram, call)
+                            .map_err(HostError::User32)?,
+                    )
+                } else {
+                    None
+                };
                 let target = self
                     .status_mut(window)
                     .map_err(HostError::User32)?
@@ -336,9 +353,9 @@ impl User32Context32 {
                     .unwrap();
                 target.text = text;
                 target.kind = kind;
-                target.data = 0;
+                target.data = if owner { args[3] } else { 0 };
                 self.status_changed(window);
-                1
+                return Ok(draw.unwrap_or(User32Outcome32::Return(1)));
             }
             0x402 | 0x40d | 0x403 | 0x40c | 0x0d | 0x0e => {
                 let part = if matches!(args[1], 0x0d | 0x0e) {
@@ -354,7 +371,13 @@ impl User32Context32 {
                     return Ok(User32Outcome32::Return(0));
                 };
                 if part.kind & 0x1000 != 0 {
-                    return Ok(User32Outcome32::Return(part.data));
+                    return Ok(User32Outcome32::Return(
+                        if matches!(args[1], 0x402 | 0x40d | 0x0d) {
+                            part.data
+                        } else {
+                            part.kind << 16
+                        },
+                    ));
                 }
                 let output_wide = if matches!(args[1], 0x0d | 0x0e) {
                     wide

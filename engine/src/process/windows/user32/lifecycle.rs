@@ -54,9 +54,9 @@ impl User32Context32 {
                 .procedures
                 .ok_or(User32Error32::Win32(1407))?;
             (procedures[usize::from(api.wide())], api.wide())
-        } else if self.state.common_kind(class.atom).is_some() {
+        } else if let Some(kind) = self.state.common_kind(class.atom) {
             let procedures = self.common_procedures.ok_or(User32Error32::Win32(1407))?;
-            if args[3] & 8 != 0 {
+            if kind == crate::windows::comctl32::CommonControlKind32::Progress && args[3] & 8 != 0 {
                 return Err(User32Error32::Win32(50));
             }
             (procedures[usize::from(api.wide())], api.wide())

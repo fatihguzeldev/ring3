@@ -2,6 +2,7 @@ pub(super) mod bar;
 mod popup;
 mod visual;
 pub(super) use popup::PopupContext32;
+pub(super) use visual::gdi_error;
 mod information;
 mod legacy;
 mod queries;

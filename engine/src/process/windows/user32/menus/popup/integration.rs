@@ -61,6 +61,13 @@ impl User32Context32 {
             .is_some_and(|pending| {
                 matches!(pending.continuation, Continuation32::MenuPopup { .. })
             });
+        if self.pending.last().is_some_and(|pending| {
+            pending.token == token && matches!(pending.continuation, Continuation32::StatusDraw(_))
+        }) {
+            return self
+                .resume_status_draw(token, ram, gdi.ok_or(E::Win32(50))?)
+                .map_err(super::super::super::common::status::owner::user32_error);
+        }
         if self.menu_bar_wait(token).is_some() {
             return self.resume_menu_bar(token, ram, gdi.ok_or(E::Win32(50))?);
         }

@@ -18,8 +18,19 @@ fn callbacks(engine: &mut EngineInstance, parent: u64, common: u64, procedure: u
 }
 
 fn callback(engine: &mut EngineInstance, parent: u64, common: u64, procedure: u32) {
+    callback_observing(engine, parent, common, procedure, &mut |_, _| {});
+}
+
+fn callback_observing(
+    engine: &mut EngineInstance,
+    parent: u64,
+    common: u64,
+    procedure: u32,
+    observe: &mut impl FnMut(&EngineInstance, &[u32]),
+) {
     let request = engine.pending_windows_callback().unwrap();
     if request.procedure.0 == PROC {
+        observe(engine, &request.arguments[..request.count as usize]);
         finish(engine, parent, u32::from(request.arguments[1] == 0x81));
         return;
     }
@@ -57,7 +68,7 @@ fn callback(engine: &mut EngineInstance, parent: u64, common: u64, procedure: u3
             break;
         }
         if engine.pending_windows_callback().is_some() {
-            callback(engine, parent, common, procedure);
+            callback_observing(engine, parent, common, procedure, observe);
         } else if let Some(wait) = engine.waiting_user32_message() {
             engine.resume_user32_wait(KEY, wait).unwrap();
         } else {

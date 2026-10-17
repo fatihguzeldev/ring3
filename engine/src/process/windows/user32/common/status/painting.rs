@@ -8,7 +8,7 @@ impl User32Context32 {
         window: WindowHandle32,
         ram: &mut AddressSpace,
         gdi: &mut GdiRuntime32,
-        thread: u32,
+        call: User32CallContext32,
     ) -> Result<User32Outcome32, HostError> {
         let (region, _) = self
             .state
@@ -18,6 +18,32 @@ impl User32Context32 {
             return Ok(User32Outcome32::Return(0));
         }
         self.state.check_paint_change().map_err(HostError::User32)?;
+        let status = self.status(window).map_err(HostError::User32)?;
+        if !status.simple_mode
+            && (0..status.count()).any(|index| status.part(index).unwrap().kind & 0x1000 != 0)
+        {
+            return self
+                .begin_status_draw(window, 0, true, ram, call)
+                .map_err(HostError::User32);
+        }
+        self.render_status_text(window, ram, gdi, call.thread_id)?;
+        self.state
+            .set_update_region(window, Region32::default(), false)
+            .expect("status paint was preflighted");
+        Ok(User32Outcome32::Return(0))
+    }
+
+    pub(in crate::process::windows::user32::common::status) fn render_status_text(
+        &self,
+        window: WindowHandle32,
+        ram: &mut AddressSpace,
+        gdi: &mut GdiRuntime32,
+        thread: u32,
+    ) -> Result<(), HostError> {
+        let (region, _) = self
+            .state
+            .update_region(window)
+            .map_err(HostError::User32)?;
         let projection = self
             .gdi_window(window.get(), false)
             .map_err(HostError::User32)?;
@@ -65,7 +91,7 @@ impl User32Context32 {
                     )
                 };
                 if part.kind & 0x1000 != 0 {
-                    return Err(HostError::User32(E::Win32(50)));
+                    continue;
                 }
                 if part.kind & 0x100 == 0 {
                     let (top, bottom) = if part.kind & 0x200 != 0 {
@@ -126,9 +152,6 @@ impl User32Context32 {
                 .expect("status owns its paint dc")
         );
         result?;
-        self.state
-            .set_update_region(window, Region32::default(), false)
-            .expect("status paint was preflighted");
-        Ok(User32Outcome32::Return(0))
+        Ok(())
     }
 }

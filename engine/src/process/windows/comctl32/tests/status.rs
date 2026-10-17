@@ -266,3 +266,93 @@ fn captured_status_rect_and_paint_publish_real_font_metrics_and_pixels() {
         1
     );
 }
+
+#[test]
+fn captured_status_ownerdraw_uses_parent_callback_real_dc_and_owned_drawitem_scratch() {
+    let (mut engine, parent_callback, common, procedure, _, parent) = fixture();
+    let window = status(&mut engine, parent_callback, common, procedure, parent);
+    let mut observed = Vec::new();
+    let mut scratch = 0;
+    capture(
+        &mut engine,
+        User32Api32::SendMessageW.id(),
+        &[window, 0x40b, 0x1000, 0xdeadbeef],
+    );
+    for _ in 0..64 {
+        if engine.pending_windows_callback().is_some() {
+            callback_observing(
+                &mut engine,
+                parent_callback,
+                common,
+                procedure,
+                &mut |engine, arguments| {
+                    if arguments[1] != 0x2b {
+                        return;
+                    }
+                    assert_eq!(&arguments[..3], &[parent, 0x2b, 91]);
+                    let output = words::<12>(engine, arguments[3]);
+                    assert_eq!(&output[..6], &[0, 91, 0, 0, 0, window]);
+                    assert_eq!(output[7..10], [0, 2, 8]);
+                    assert!(output[10] > 4);
+                    assert_eq!(output[11], 0xdeadbeef);
+                    engine
+                        .gdi
+                        .as_ref()
+                        .unwrap()
+                        .check_control_dc(output[6], window, 1)
+                        .unwrap();
+                    scratch = arguments[3];
+                    observed.push(output);
+                },
+            );
+        } else if let Some(wait) = engine.waiting_user32_message() {
+            engine.resume_user32_wait(KEY, wait).unwrap();
+        } else {
+            break;
+        }
+    }
+    assert!(engine.pending_call.is_none());
+    assert_eq!(eax(&engine), 1);
+    assert_eq!(
+        observed.len(),
+        1,
+        "setting ownerdraw sends exactly one accepted native parent call"
+    );
+    assert!(
+        engine
+            .memory()
+            .unwrap()
+            .read(GuestAddress(scratch), &mut [0; 48])
+            .is_err()
+    );
+    assert!(
+        engine
+            .gdi
+            .as_ref()
+            .unwrap()
+            .check_control_dc(observed[0][6], window, 1)
+            .is_err()
+    );
+    assert_eq!(
+        send(
+            &mut engine,
+            parent_callback,
+            common,
+            procedure,
+            window,
+            [0x40c, 0, 0]
+        ),
+        0x10000000
+    );
+    assert_eq!(
+        send(
+            &mut engine,
+            parent_callback,
+            common,
+            procedure,
+            window,
+            [0x40d, 0, 0]
+        ),
+        0xdeadbeef
+    );
+}

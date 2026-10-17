@@ -327,7 +327,7 @@ mod tests {
     }
 }
 
-pub(super) fn gdi_error(error: crate::windows::gdi::GdiError32) -> E {
+pub(in crate::process::windows::user32) fn gdi_error(error: crate::windows::gdi::GdiError32) -> E {
     match error {
         crate::windows::gdi::GdiError32::Memory(error) => E::Memory(error),
         crate::windows::gdi::GdiError32::Allocation => E::Allocation,
