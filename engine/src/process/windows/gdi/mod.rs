@@ -4,7 +4,7 @@ mod colors;
 mod context;
 pub(in crate::process) mod controls;
 mod dc;
-mod fonts;
+pub(in crate::process) mod fonts;
 mod images;
 mod memory;
 mod objects;

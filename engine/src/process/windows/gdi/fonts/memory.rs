@@ -49,7 +49,7 @@ pub(super) fn string(
             .map_err(|_| GdiError32::InvalidRequest)
     }
 }
-pub(super) fn logical_font(
+pub(in crate::process) fn logical_font(
     memory: &AddressSpace,
     pointer: u32,
     wide: bool,
@@ -88,7 +88,7 @@ pub(super) fn logical_font(
         face,
     })
 }
-pub(super) fn encode_font(
+pub(in crate::process) fn encode_font(
     font: &LogicalFont32,
     wide: bool,
     cp: CodePage32,

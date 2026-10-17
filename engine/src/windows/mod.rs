@@ -63,3 +63,5 @@ pub(crate) mod controls;
 pub mod comctl32;
 
 pub mod commdlg;
+
+pub mod imm32;

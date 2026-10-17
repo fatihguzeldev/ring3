@@ -34,6 +34,7 @@ impl User32Context32 {
         self.raw_input.retire_thread(thread);
         self.images.retire_thread(thread);
         self.clipboard.retire_thread(thread);
+        self.ime.retire_thread(thread);
         self.retire_popup_thread(thread);
         self.state.retire_thread(thread);
         self.timers.retire_thread(thread);

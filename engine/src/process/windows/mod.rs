@@ -48,3 +48,5 @@ pub(super) mod automation;
 pub(super) mod comctl32;
 
 pub(super) mod commdlg;
+
+pub(super) mod imm32;

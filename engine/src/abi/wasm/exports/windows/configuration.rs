@@ -1,6 +1,7 @@
 export_process_calls! {
     register_version_module(base:u32);
     register_shlwapi_module(base:u32);
+    register_imm32_module(base:u32);
     register_msimg32_module(base:u32);
     register_comctl32_module(base:u32);
     register_commdlg32_module(base:u32);

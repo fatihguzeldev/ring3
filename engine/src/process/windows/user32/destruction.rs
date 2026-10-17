@@ -288,6 +288,7 @@ impl User32Context32 {
                     self.state.remove_delivered(thread, window)?;
                     self.menus.commit_retirement(menus);
                     self.clipboard.retire_window(window);
+                    self.ime.retire_window(window.get());
                     self.raw_input.retire_window(window.get());
                     self.timers.retire_window(window.get());
                     self.provenance.retire_window(window.get());

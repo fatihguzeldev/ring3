@@ -12,6 +12,12 @@ pub struct WindowsGateInfo32 {
 }
 
 pub fn windows_gate_info(id: u32) -> Option<WindowsGateInfo32> {
+    if let Some(api) = crate::windows::imm32::ImmApi32::from_id(id) {
+        return Some(WindowsGateInfo32 {
+            convention: crate::windows::CallingConvention32::Stdcall,
+            stack_words: api.stack_words(),
+        });
+    }
     if let Some(api) = crate::windows::commdlg::ComdlgApi32::from_id(id) {
         return Some(WindowsGateInfo32 { convention: api.convention(), stack_words: api.stack_words() });
     }
@@ -332,6 +338,7 @@ impl EngineInstance {
         };
         if self.try_complete_commdlg_call(owner, token, id, frame)?
             || self.try_complete_common_controls_call(owner, token, id, frame)?
+            || self.try_complete_imm32_call(owner, token, id, frame)?
             || self.try_complete_builtin_control_call(owner, token, id, frame)?
             || self.try_complete_gdi_call(owner, token, id, frame)?
             || self.try_complete_automation_call(owner, token, id, frame)?

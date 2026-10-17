@@ -72,3 +72,7 @@ pub(crate) fn register_comctl32_module(base: u32) -> u32 {
 pub(crate) fn register_commdlg32_module(base: u32) -> u32 {
     mutate(|instance| instance.register_commdlg32_module(base))
 }
+
+pub(crate) fn register_imm32_module(base: u32) -> u32 {
+    mutate(|instance| instance.register_imm32_module(base))
+}

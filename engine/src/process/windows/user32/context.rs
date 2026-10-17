@@ -46,6 +46,8 @@ impl User32Context32 {
             runtime_input: User32CallContext32::default(),
             input: super::input::User32Input32::default(),
             images: Default::default(),
+            ime: crate::windows::imm32::InputContexts32::new(256, limits.windows, 8192)
+                .map_err(|_| User32Error32::InvalidLimits)?,
             raw_input: crate::windows::rawinput::RawInputRuntime32::new(limits.messages)?,
             destructions,
             timers: super::timers::TimerState32::new(limits.messages, limits.windows)?,

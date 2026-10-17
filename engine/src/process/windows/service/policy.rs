@@ -40,6 +40,10 @@ impl GuardFailure32 {
         if crate::windows::version::VersionApi32::from_id(id).is_some()
             || crate::windows::shlwapi::ShlwapiApi32::from_id(id).is_some()
         { return noaccess(0); }
+        if let Some(api) = crate::windows::imm32::ImmApi32::from_id(id) {
+            let value = if matches!(api, crate::windows::imm32::ImmApi32::ImmGetCompositionStringA | crate::windows::imm32::ImmApi32::ImmGetCompositionStringW) { (-2i32) as u32 } else { 0 };
+            return Some(Self { value, last_error: None });
+        }
         if id >> 16 == 0x22 { return noaccess(0); }
         if let Some(api) = crate::windows::activation::ActivationApi32::from_id(id) {
             return noaccess(api.failure_value());
