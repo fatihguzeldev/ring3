@@ -64,3 +64,18 @@ pub fn shell32_module(preferred_base: u32) -> SystemModule32 {
             .collect(),
     }
 }
+
+pub fn shfolder_module(preferred_base: u32) -> SystemModule32 {
+    SystemModule32 {
+        name: "shfolder.dll".into(),
+        preferred_base,
+        exports: [ShellApi32::SHGetFolderPathA, ShellApi32::SHGetFolderPathW]
+            .into_iter()
+            .map(|api| SystemExport32 {
+                name: Some(api.name().into()),
+                ordinal: None,
+                target: SystemExportTarget32::Forwarder(format!("shell32.{}", api.name())),
+            })
+            .collect(),
+    }
+}

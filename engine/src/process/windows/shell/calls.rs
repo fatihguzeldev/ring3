@@ -8,7 +8,15 @@ use crate::{
 };
 impl EngineInstance {
     pub fn register_shell32_module(&mut self, base: u32) -> Result<(), HostError> {
-        self.register_system_module(crate::windows::shell::shell32_module(base))
+        let shell = crate::windows::shell::shell32_module(base);
+        if self.has_registered_module("shfolder.dll") {
+            self.register_system_module(shell)
+        } else {
+            self.register_system_module_group(vec![
+                shell,
+                crate::windows::shell::shfolder_module(0x77e00000),
+            ])
+        }
     }
 
     pub(in crate::process) fn try_complete_shell_call(

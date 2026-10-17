@@ -2,7 +2,7 @@ mod api;
 mod arguments;
 mod folders;
 
-pub use api::{ShellApi32, shell32_module};
+pub use api::{ShellApi32, shell32_module, shfolder_module};
 pub(crate) use arguments::command_line_arguments;
 pub use folders::ShellFolderProfile32;
 

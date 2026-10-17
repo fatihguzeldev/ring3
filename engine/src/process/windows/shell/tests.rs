@@ -208,3 +208,5 @@ fn recursive_folder_capacity_failure_does_not_publish_a_prefix() {
             .is_err()
     );
 }
+
+mod registration;
