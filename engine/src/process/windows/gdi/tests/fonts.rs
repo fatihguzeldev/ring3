@@ -1,4 +1,4 @@
-use super::{call, fixture, memory};
+use super::{call, fixture, memory as guest_memory};
 use crate::{
     memory::{GuestAddress, MemoryError},
     windows::gdi::{GdiApi32, GdiError32},
@@ -20,7 +20,7 @@ fn canvas(
     runtime: &mut super::GdiRuntime32,
     memory: &mut crate::memory::AddressSpace,
 ) -> (u32, u32) {
-    memory::write_words(
+    guest_memory::write_words(
         memory,
         0x10000,
         &[40, 64, (-32i32) as u32, 1 | 32 << 16, 0, 8192, 0, 0, 0, 0],
@@ -35,7 +35,7 @@ fn canvas(
     .unwrap();
     let dc = call(runtime, memory, GdiApi32::CreateCompatibleDC, &[0]).unwrap();
     call(runtime, memory, GdiApi32::SelectObject, &[dc, bitmap]).unwrap();
-    let [pointer] = memory::words(memory, 0x10080).unwrap();
+    let [pointer] = guest_memory::words(memory, 0x10080).unwrap();
     (dc, pointer)
 }
 #[test]
@@ -63,7 +63,7 @@ fn logical_font_selection_metrics_face_and_saved_dc_lifetime_use_actual_open_fon
         &[dc, 0x10100],
     )
     .unwrap();
-    let [height, ascent, descent]: [u32; 3] = memory::words(&memory, 0x10100).unwrap();
+    let [height, ascent, descent]: [u32; 3] = guest_memory::words(&memory, 0x10100).unwrap();
     assert_eq!(height, ascent + descent);
     assert!(height > 20);
     let count = call(
@@ -160,7 +160,7 @@ fn textout_rasterizes_real_glyphs_and_exttextout_opaque_clip_changes_only_reques
         && pixel[0] == pixel[1]
         && pixel[1] == pixel[2]));
     assert!(pixels.chunks_exact(4).any(|pixel| pixel[..3] == [255; 3]));
-    memory::write_words(&mut memory, 0x10200, &[40, 0, 50, 10]).unwrap();
+    guest_memory::write_words(&mut memory, 0x10200, &[40, 0, 50, 10]).unwrap();
     call(
         &mut runtime,
         &mut memory,
@@ -280,7 +280,7 @@ fn drawtext_calcrect_lines_and_tab_stops_use_actual_selected_font_metrics() {
                 .collect::<Vec<_>>(),
         )
         .unwrap();
-    memory::write_words(&mut memory, 0x10200, &[0, 0, 64, 32]).unwrap();
+    guest_memory::write_words(&mut memory, 0x10200, &[0, 0, 64, 32]).unwrap();
     let measured = runtime.measure_text(dc, &units[..2]).unwrap();
     assert_eq!(
         call(
@@ -291,7 +291,7 @@ fn drawtext_calcrect_lines_and_tab_stops_use_actual_selected_font_metrics() {
         ),
         Ok(measured.metrics.height as u32 * 2)
     );
-    let [left, top, right, bottom]: [u32; 4] = memory::words(&memory, 0x10200).unwrap();
+    let [left, top, right, bottom]: [u32; 4] = guest_memory::words(&memory, 0x10200).unwrap();
     assert_eq!(
         [left, top, right, bottom],
         [
@@ -310,7 +310,7 @@ fn drawtext_calcrect_lines_and_tab_stops_use_actual_selected_font_metrics() {
                 .collect::<Vec<_>>(),
         )
         .unwrap();
-    memory::write_words(&mut memory, 0x10200, &[0, 0, 200, 32]).unwrap();
+    guest_memory::write_words(&mut memory, 0x10200, &[0, 0, 200, 32]).unwrap();
     let w = runtime.measure_text(dc, &[u16::from(b'W')]).unwrap();
     call(
         &mut runtime,
@@ -319,7 +319,7 @@ fn drawtext_calcrect_lines_and_tab_stops_use_actual_selected_font_metrics() {
         &[dc, 0x10100, 3, 0x10200, 0x440],
     )
     .unwrap();
-    let [_, _, right, _]: [u32; 4] = memory::words(&memory, 0x10200).unwrap();
+    let [_, _, right, _]: [u32; 4] = guest_memory::words(&memory, 0x10200).unwrap();
     assert_eq!(
         right,
         (w.metrics.average_width * 8) as u32 + w.advance.round() as u32
@@ -330,8 +330,8 @@ fn drawtextex_output_fault_is_atomic_with_dib_pixels_and_dc_state() {
     let (mut runtime, mut memory) = fixture();
     let (dc, pointer) = canvas(&mut runtime, &mut memory);
     memory.write(GuestAddress(0x10100), b"Wi").unwrap();
-    memory::write_words(&mut memory, 0x10200, &[0, 0, 64, 32]).unwrap();
-    memory::write_words(&mut memory, 0x11000, &[20, 8, 0, 0, 0xa5a5a5a5]).unwrap();
+    guest_memory::write_words(&mut memory, 0x10200, &[0, 0, 64, 32]).unwrap();
+    guest_memory::write_words(&mut memory, 0x11000, &[20, 8, 0, 0, 0xa5a5a5a5]).unwrap();
     memory
         .protect(
             crate::memory::PageRange::new(GuestAddress(0x11000), 1).unwrap(),
@@ -354,7 +354,7 @@ fn drawtextex_output_fault_is_atomic_with_dib_pixels_and_dc_state() {
     assert_eq!(pixels, vec![0; 8192]);
     assert_eq!(runtime.model.state(dc).unwrap(), &state);
     assert_eq!(memory.transaction_version(), version);
-    assert_eq!(memory::words::<1>(&memory, 0x11010).unwrap(), [0xa5a5a5a5]);
+    assert_eq!(guest_memory::words::<1>(&memory, 0x11010).unwrap(), [0xa5a5a5a5]);
 }
 #[test]
 fn drawtext_prefix_only_emits_visible_mnemonic_underline_without_glyph_or_background() {
@@ -368,7 +368,7 @@ fn drawtext_prefix_only_emits_visible_mnemonic_underline_without_glyph_or_backgr
     )
     .unwrap();
     memory.write(GuestAddress(0x10100), b"&Wi").unwrap();
-    memory::write_words(&mut memory, 0x10200, &[0, 0, 64, 32]).unwrap();
+    guest_memory::write_words(&mut memory, 0x10200, &[0, 0, 64, 32]).unwrap();
     call(
         &mut runtime,
         &mut memory,
@@ -394,5 +394,8 @@ fn drawtext_prefix_only_emits_visible_mnemonic_underline_without_glyph_or_backgr
 mod rotation;
 
 mod resources;
+
+mod enumeration;
+mod memory;
 
 mod realization;

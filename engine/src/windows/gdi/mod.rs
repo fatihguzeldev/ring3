@@ -15,8 +15,8 @@ pub use bitmap::{BitmapLayout32, BitmapPalette32};
 pub(crate) use bitmap::{DibHeader32, decode_dib_header};
 pub use context::{GdiContext32, PreparedGdiObject32};
 pub use fonts::{
-    FontDatabase32, FontMetrics32, GlyphRaster32, LogicalFont32, PreparedFontSource32,
-    ResolvedFont32, ShapedGlyph32, ShapedText32,
+    EnumeratedFont32, FontDatabase32, FontMetrics32, GlyphRaster32, LogicalFont32,
+    PreparedFontSource32, ResolvedFont32, ShapedGlyph32, ShapedText32,
 };
 pub use palette::{LogicalPalette32, nearest_palette_index32, synthesized_palette32};
 pub use raster::{raster_operation32, raster_uses_source32};

@@ -1,10 +1,12 @@
 mod calls;
 mod dialog;
+pub(super) mod enumeration;
 mod layout;
 mod memory;
 mod paragraph;
 mod queries;
 pub(super) mod rendering;
+mod resources;
 
 use super::context::GdiRuntime32;
 use crate::{

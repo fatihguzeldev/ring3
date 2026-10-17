@@ -10,6 +10,11 @@ use crate::{
 };
 
 impl EngineInstance {
+    pub(in crate::process) fn gdi_font_provider_owns_token(&self, token: u32) -> bool {
+        self.gdi
+            .as_ref()
+            .is_some_and(|gdi| gdi.font_enumerations.iter().any(|call| call.token == token))
+    }
     pub(in crate::process) fn try_complete_gdi_call(
         &mut self,
         owner: PendingOwner,
@@ -22,6 +27,11 @@ impl EngineInstance {
             User32Api32::from_id(id),
             Some(User32Api32::DefWindowProcA | User32Api32::DefWindowProcW)
         ) && frame.arguments().get(1) == Some(&0x14);
+        if let Some(api) = api
+            && api.font_enumeration()
+        {
+            return self.complete_gdi_font_enumeration(owner, token, api, frame);
+        }
         if api.is_none() && !erase {
             return Ok(false);
         }
@@ -110,7 +120,14 @@ impl EngineInstance {
                 error @ (crate::memory::MemoryError::VersionExhausted
                 | crate::memory::MemoryError::Allocation),
             )) => return Err(HostError::Memory(error)),
-            Err(error) => (api.map_or(0, GdiApi32::failure_value), Some(error.win32())),
+            Err(error) => (
+                api.map_or(0, GdiApi32::failure_value),
+                if api.is_some_and(GdiApi32::font_memory_resource) {
+                    None
+                } else {
+                    Some(error.win32())
+                },
+            ),
         };
         let prepared = self.prepare_gdi_result(api, frame, value, error)?;
         self.publish_prepared_call(prepared);
@@ -163,6 +180,11 @@ impl GdiRuntime32 {
     ) -> Result<u32, GdiError32> {
         use GdiApi32::*;
         match api {
+            AddFontMemResourceEx | RemoveFontMemResourceEx => {
+                self.memory_font_resource(memory, api, args)
+            }
+            EnumFontsA | EnumFontsW | EnumFontFamiliesA | EnumFontFamiliesW
+            | EnumFontFamiliesExA | EnumFontFamiliesExW => Err(GdiError32::InvalidRequest),
             GetSysColor => Ok(self.system_color(args[0])),
             GetSysColorBrush => {
                 Ok(crate::windows::gdi::GdiContext32::system_brush(args[0]).unwrap_or(0))

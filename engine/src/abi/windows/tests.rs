@@ -55,7 +55,7 @@ fn windows_callback_carries_sixteen_arguments_and_rejects_reserved_tail() {
 #[test]
 fn known_callback_providers_keep_the_wire_shape_and_reject_unknown_providers() {
     let mut bytes = [0; WINDOWS_CALLBACK_RECORD_SIZE];
-    for provider in [3, 4, 5, 6, 7, 8, 9] {
+    for provider in [3, 4, 5, 6, 7, 8, 9, 10] {
         let record = WindowsCallbackRecord32 {
             provider,
             procedure: 0x1234,
@@ -65,7 +65,7 @@ fn known_callback_providers_keep_the_wire_shape_and_reject_unknown_providers() {
         };
         encode_windows_callback(Some(record), &mut bytes).unwrap();
         assert_eq!(decode_windows_callback(&bytes), Ok(Some(record)));
-        bytes[12..16].copy_from_slice(&10u32.to_le_bytes());
+        bytes[12..16].copy_from_slice(&11u32.to_le_bytes());
         assert_eq!(
             decode_windows_callback(&bytes),
             Err(AbiError::CallbackFrame)
@@ -101,7 +101,7 @@ fn files_progress_callback_has_literal_provider_and_thirteen_stack_words() {
     );
     assert_eq!(&bytes[84..], &[0; 12]);
     assert_eq!(decode_windows_callback(&bytes), Ok(Some(record)));
-    bytes[12..16].copy_from_slice(&10u32.to_le_bytes());
+    bytes[12..16].copy_from_slice(&11u32.to_le_bytes());
     assert_eq!(
         decode_windows_callback(&bytes),
         Err(AbiError::CallbackFrame)

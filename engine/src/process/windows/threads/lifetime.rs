@@ -65,6 +65,13 @@ impl EngineInstance {
             .nls
             .thread_exit_ranges(self.memory()?, id)
             .map_err(HostError::Nls)?;
+        let gdi_ranges = self
+            .gdi
+            .as_ref()
+            .map(|gdi| gdi.thread_scratch_ranges(self.memory().unwrap(), id))
+            .transpose()
+            .map_err(HostError::Gdi)?
+            .unwrap_or_default();
         let activation = self.prepare_activation_thread_exit(id)?;
         let com: PreparedComThreadExit32 = self.prepare_com_thread_exit(id)?;
         let automation_arrays: crate::process::windows::automation::PreparedAutomationArrays32 =
@@ -80,6 +87,7 @@ impl EngineInstance {
             .and_then(|count| count.checked_add(extra))
             .and_then(|count| count.checked_add(resource_ranges.len()))
             .and_then(|count| count.checked_add(nls_ranges.len()))
+            .and_then(|count| count.checked_add(gdi_ranges.len()))
             .and_then(|count| count.checked_add(self.automation_thread_scratch_ranges(id).count()))
             .and_then(|count| {
                 count.checked_add(
@@ -130,6 +138,7 @@ impl EngineInstance {
         }
         ranges.extend(resource_ranges);
         ranges.extend(nls_ranges);
+        ranges.extend(gdi_ranges);
         ranges.extend(self.automation_thread_scratch_ranges(id));
         if let Some(receipt) = &activation {
             ranges.extend_from_slice(receipt.ranges());

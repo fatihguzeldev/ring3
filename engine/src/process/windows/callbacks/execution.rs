@@ -43,6 +43,14 @@ impl EngineInstance {
                 reply.continuation,
             )?;
         }
+        if reply.provider == super::WindowsCallbackProvider32::Gdi {
+            self.check_gdi_font_callback(
+                reply.owner,
+                reply.token,
+                reply.frame,
+                reply.continuation,
+            )?;
+        }
         if reply.provider == super::WindowsCallbackProvider32::User32 {
             self.user32
                 .as_ref()
@@ -133,6 +141,14 @@ impl EngineInstance {
         }
         if reply.provider == super::WindowsCallbackProvider32::Automation {
             self.check_automation_callback(
+                reply.owner,
+                reply.token,
+                reply.frame,
+                reply.continuation,
+            )?;
+        }
+        if reply.provider == super::WindowsCallbackProvider32::Gdi {
+            self.check_gdi_font_callback(
                 reply.owner,
                 reply.token,
                 reply.frame,

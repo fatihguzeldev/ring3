@@ -238,7 +238,11 @@ fn transport_extents(
     }
     Ok(output)
 }
-fn metric_bytes(metrics: FontMetrics32, wide: bool, cp: CodePage32) -> Result<Vec<u8>, GdiError32> {
+pub(super) fn metric_bytes(
+    metrics: FontMetrics32,
+    wide: bool,
+    cp: CodePage32,
+) -> Result<Vec<u8>, GdiError32> {
     let mut bytes = vec![0; if wide { 60 } else { 56 }];
     for (output, word) in bytes[..44].chunks_exact_mut(4).zip([
         metrics.height,

@@ -13,6 +13,8 @@ pub(in crate::process) struct GdiRuntime32 {
     pub(super) next_surface: u64,
     pub(super) bytes: usize,
     pub(super) fonts: crate::windows::gdi::FontDatabase32,
+    pub(super) font_enumerations: Vec<super::fonts::enumeration::FontEnumerationCall32>,
+    pub(super) next_font_enumeration: u64,
     pub(super) paints: Vec<super::paint::PaintLease32>,
 }
 impl GdiRuntime32 {
@@ -53,6 +55,8 @@ impl GdiRuntime32 {
             next_surface: 1,
             bytes: 0,
             paints,
+            font_enumerations: Vec::new(),
+            next_font_enumeration: 0,
             fonts: crate::windows::gdi::FontDatabase32::new(16 << 20)?,
         })
     }
@@ -66,6 +70,11 @@ impl GdiRuntime32 {
         self.surfaces
             .iter()
             .filter_map(|surface| surface.storage.range())
+            .chain(
+                self.font_enumerations
+                    .iter()
+                    .map(|call| call.scratch.range()),
+            )
     }
     pub(in crate::process) fn check_process_exit(
         &self,
@@ -74,10 +83,14 @@ impl GdiRuntime32 {
         for surface in &self.surfaces {
             surface.storage.check(memory)?;
         }
+        for call in &self.font_enumerations {
+            call.scratch.check(memory)?;
+        }
         Ok(())
     }
     pub(in crate::process) fn retire_process(&mut self) {
         self.model.clear();
+        self.font_enumerations.clear();
         self.fonts.retire_process_resources();
         self.surfaces.clear();
         self.paints.clear();
@@ -85,6 +98,7 @@ impl GdiRuntime32 {
     }
     pub(in crate::process) fn retire_thread(&mut self, thread: u32) {
         self.model.retire_thread(thread);
+        self.font_enumerations.retain(|call| call.thread != thread);
         self.paints.retain(|paint| paint.thread != thread);
         self.prune_defaults();
     }

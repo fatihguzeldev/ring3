@@ -62,7 +62,7 @@ pub fn decode_windows_callback(input: &[u8]) -> Result<Option<WindowsCallbackRec
 }
 
 fn validate(record: WindowsCallbackRecord32) -> Result<(), AbiError> {
-    if !matches!(record.provider, 1..=9)
+    if !matches!(record.provider, 1..=10)
         || record.procedure == 0
         || record.continuation == 0
         || record.count > 16

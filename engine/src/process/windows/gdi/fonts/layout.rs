@@ -29,7 +29,6 @@ impl GdiRuntime32 {
         {
             return Err(GdiError32::InvalidRequest);
         }
-        let state = self.model.state(dc)?;
         let metrics = self.resolved_dc_metrics(dc)?.metrics()?;
         let line_height = metrics
             .height

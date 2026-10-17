@@ -49,8 +49,28 @@ gdi_apis! {
     GetSysColor,1; GetSysColorBrush,1;
     CreatePalette,1; SelectPalette,3; GetPaletteEntries,4; SetPaletteEntries,4;
     ResizePalette,2; GetNearestPaletteIndex,2; RealizePalette,1; GetSystemPaletteEntries,4;
+    AddFontMemResourceEx,4; RemoveFontMemResourceEx,1;
+    EnumFontsA,4; EnumFontsW,4; EnumFontFamiliesA,4; EnumFontFamiliesW,4;
+    EnumFontFamiliesExA,5; EnumFontFamiliesExW,5;
 }
 impl GdiApi32 {
+    pub fn font_enumeration(self) -> bool {
+        matches!(
+            self,
+            Self::EnumFontsA
+                | Self::EnumFontsW
+                | Self::EnumFontFamiliesA
+                | Self::EnumFontFamiliesW
+                | Self::EnumFontFamiliesExA
+                | Self::EnumFontFamiliesExW
+        )
+    }
+    pub fn font_memory_resource(self) -> bool {
+        matches!(
+            self,
+            Self::AddFontMemResourceEx | Self::RemoveFontMemResourceEx
+        )
+    }
     pub fn user32(self) -> bool {
         matches!(
             self,

@@ -1,4 +1,5 @@
-use super::{call, fixture, memory};
+use super::{call, fixture};
+use super::super::memory;
 use crate::{
     memory::{AddressSpace, GuestAddress, PageRange, Permissions},
     process::windows::gdi::GdiRuntime32,

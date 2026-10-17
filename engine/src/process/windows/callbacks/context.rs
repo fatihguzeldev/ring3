@@ -153,6 +153,15 @@ impl EngineInstance {
         }
         self.park_windows_callback(request)
     }
+    pub(in crate::process) fn park_gdi_callback(
+        &mut self,
+        request: WindowsCallback32,
+    ) -> Result<(), HostError> {
+        if request.provider != WindowsCallbackProvider32::Gdi {
+            return Err(HostError::InvalidRequest);
+        }
+        self.park_windows_callback(request)
+    }
     fn park_windows_callback(&mut self, request: WindowsCallback32) -> Result<(), HostError> {
         validate_request(request)?;
         self.check_windows_callback_capacity()?;
@@ -196,6 +205,7 @@ impl EngineInstance {
                 .any(|reply| reply.token == token)
                 || self.synchronization_provider_owns_token(token)
                 || self.files_provider_owns_token(token)
+                || self.gdi_font_provider_owns_token(token)
                 || self.registry_provider_owns_token(token)
                 || self.windows_fls_provider_owns_token(token)
                 || self.dinput_file_provider_owns_token(token)

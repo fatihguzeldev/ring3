@@ -18,7 +18,14 @@ impl GuardFailure32 {
             })
         };
         if let Some(api) = crate::windows::gdi::GdiApi32::from_id(id) {
-            return noaccess(api.failure_value());
+            return if api.font_enumeration() || api.font_memory_resource() {
+                Some(Self {
+                    value: 0,
+                    last_error: None,
+                })
+            } else {
+                noaccess(api.failure_value())
+            };
         }
         if let Some(api) = crate::windows::automation::Oleaut32Api32::from_id(id) {
             return if api.returns_hresult() {
