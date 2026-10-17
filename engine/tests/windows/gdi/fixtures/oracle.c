@@ -612,6 +612,61 @@ static void font_lifetime_reference(void) {
     printf("]"); free(bytes);
 }
 
+
+static void font_scope_reference(void) {
+    FILE *input = fopen("engine/assets/fonts/NotoSans-Regular.ttf", "rb");
+    BYTE *bytes = NULL; long length = 0;
+    if (input && !fseek(input, 0, SEEK_END)) {
+        length = ftell(input);
+        if (length > 0 && length <= 4 * 1024 * 1024 && !fseek(input, 0, SEEK_SET)) {
+            bytes = malloc((size_t)length);
+            if (bytes && fread(bytes, 1, (size_t)length, input) != (size_t)length) { free(bytes); bytes = NULL; }
+        }
+    }
+    if (input) fclose(input);
+    HDC dc[3]; HBITMAP bitmap[3]; HGDIOBJ old_bitmap[3], old_font[3]; DWORD *pixels[3] = {0};
+    BITMAPINFO info = {0}; info.bmiHeader.biSize = sizeof(info.bmiHeader);
+    info.bmiHeader.biWidth = 96; info.bmiHeader.biHeight = -48;
+    info.bmiHeader.biPlanes = 1; info.bmiHeader.biBitCount = 32;
+    for (unsigned i = 0; i < 3; ++i) {
+        dc[i] = CreateCompatibleDC(NULL);
+        bitmap[i] = CreateDIBSection(dc[i], &info, DIB_RGB_COLORS, (void **)&pixels[i], NULL, 0);
+        old_bitmap[i] = SelectObject(dc[i], bitmap[i]); old_font[i] = GetCurrentObject(dc[i], OBJ_FONT);
+    }
+    HFONT first = CreateFontW(-16, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, ANSI_CHARSET, OUT_TT_PRECIS,
+        CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH, L"Noto Sans");
+    SelectObject(dc[0], first);
+    printf(",\"fontRealizationScope\":{\"states\":[");
+    font_selection_state(dc[0], first, pixels[0], "first-font-dc0-before-add", 0);
+    DWORD count = 0; HANDLE resource = bytes ? AddFontMemResourceEx(bytes, (DWORD)length, NULL, &count) : NULL;
+    free(bytes);
+    SelectObject(dc[1], first);
+    font_selection_state(dc[1], first, pixels[1], "first-font-dc1-first-select-after-add", 1);
+    HFONT second = CreateFontW(-16, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, ANSI_CHARSET, OUT_TT_PRECIS,
+        CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH, L"Noto Sans");
+    SelectObject(dc[0], second);
+    font_selection_state(dc[0], second, pixels[0], "second-font-dc0-first-select-after-add", 1);
+    SelectObject(dc[1], second);
+    font_selection_state(dc[1], second, pixels[1], "second-font-dc1-first-select-after-add", 1);
+    BOOL removed = resource ? RemoveFontMemResourceEx(resource) : FALSE;
+    font_selection_state(dc[0], second, pixels[0], "second-font-dc0-selected-after-remove", 1);
+    SelectObject(dc[2], second);
+    font_selection_state(dc[2], second, pixels[2], "second-font-dc2-first-select-after-remove", 1);
+    for (unsigned i = 0; i < 3; ++i) SelectObject(dc[i], old_font[i]);
+    SelectObject(dc[0], second);
+    font_selection_state(dc[0], second, pixels[0], "second-font-dc0-after-all-deselected", 1);
+    HFONT third = CreateFontW(-16, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, ANSI_CHARSET, OUT_TT_PRECIS,
+        CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH, L"Noto Sans");
+    SelectObject(dc[1], third);
+    font_selection_state(dc[1], third, pixels[1], "third-font-dc1-created-after-remove", 1);
+    printf("],\"added\":%u,\"removed\":%u,\"count\":%lu}", resource != NULL, removed, count);
+    for (unsigned i = 0; i < 3; ++i) {
+        SelectObject(dc[i], old_font[i]); SelectObject(dc[i], old_bitmap[i]);
+        DeleteObject(bitmap[i]); DeleteDC(dc[i]);
+    }
+    DeleteObject(first); DeleteObject(second); DeleteObject(third);
+}
+
 int main(void) {
     const char *classes[] = {"Button", "Edit", "Static", "ListBox", "ScrollBar", "ComboBox"};
     HWND parent = CreateWindowExA(0, "Static", "parent", WS_POPUP, 0, 0, 100, 100, NULL, NULL, NULL, NULL);
@@ -670,6 +725,7 @@ int main(void) {
     rotated_font_reference();
     font_resource_reference();
     font_lifetime_reference();
+    font_scope_reference();
     DestroyWindow(parent);
     puts("}");
     return 0;
