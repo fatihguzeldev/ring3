@@ -1774,3 +1774,121 @@ fn relative_filename_preserves_explicit_initial_directory_and_readonly_return_is
         1
     );
 }
+
+#[test]
+fn captured_file_dialog_accepts_a_real_foreign_owner_while_child_creation_stays_thread_owned() {
+    let mut engine = engine();
+    request(&mut engine, false);
+    engine.map(0x10000, 2, 3).unwrap();
+    call(
+        &mut engine,
+        crate::windows::thread::ThreadApi32::CreateThread.id(),
+        &[0, 0, HOOK, 0, 4, OFN + 0x900],
+    )
+    .unwrap();
+    let [foreign] =
+        super::super::memory::words::<1>(engine.memory().unwrap(), OFN + 0x900).unwrap();
+    assert_ne!(foreign, engine.current_windows_thread_id().unwrap());
+    assert_eq!(
+        engine.windows_thread_info(foreign).unwrap().state,
+        crate::windows::thread::ThreadState32::Suspended
+    );
+    let mut call_context = engine.user32_call_context().unwrap();
+    call_context.thread_id = foreign;
+    let owner_procedure = engine
+        .loaded_windows_modules()
+        .flat_map(|module| module.gates())
+        .find(|gate| gate.id == Api::DefWindowProcA.id())
+        .unwrap()
+        .entry
+        .0;
+    let context = engine.user32.as_mut().unwrap();
+    let memory = engine.memory.as_mut().unwrap();
+    memory
+        .write(GuestAddress(0x10100), b"CommonOwner\0")
+        .unwrap();
+    let mut class = [0u8; 40];
+    for (offset, value) in [
+        (4, owner_procedure),
+        (16, call_context.instance),
+        (36, 0x10100),
+    ] {
+        class[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+    }
+    memory.write(GuestAddress(0x10000), &class).unwrap();
+    let User32Outcome32::Return(atom) = context
+        .prepare_arguments(Api::RegisterClassA, &[0x10000], memory, call_context)
+        .unwrap()
+    else {
+        panic!("class registration")
+    };
+    let owner = super::super::tests::create(context, memory, call_context, atom);
+    memory
+        .write(GuestAddress(OFN + 4), &owner.to_le_bytes())
+        .unwrap();
+    memory
+        .write(GuestAddress(OFN + 52), &0x81010u32.to_le_bytes())
+        .unwrap();
+    call(&mut engine, 0x00210002, &[OFN]).unwrap();
+    assert_eq!(
+        engine.user32.as_ref().unwrap().file_dialogs.plans.len(),
+        1,
+        "a valid canonical foreign owner must not turn modal creation into FALSE"
+    );
+    let callback = engine
+        .pending_windows_callback()
+        .expect("real modal root creation callback");
+    let root = WindowHandle32::try_from(callback.arguments[0]).unwrap();
+    let context = engine.user32.as_mut().unwrap();
+    assert_eq!(
+        context.state.record(root).unwrap().parent,
+        Some(WindowHandle32::try_from(owner).unwrap())
+    );
+    assert_eq!(
+        context.windows().get(root).unwrap().description.thread_id,
+        1
+    );
+    assert_eq!(
+        context
+            .windows()
+            .get(WindowHandle32::try_from(owner).unwrap())
+            .unwrap()
+            .description
+            .thread_id,
+        foreign
+    );
+    let caller = crate::process::windows::user32::User32CallContext32 {
+        thread_id: 1,
+        ..call_context
+    };
+    let before = engine.memory.as_ref().unwrap().transaction_version();
+    let windows = context.windows().live_windows();
+    assert_eq!(
+        context.prepare_arguments(
+            Api::CreateWindowExA,
+            &[
+                0,
+                atom,
+                0,
+                0x40000000,
+                0,
+                0,
+                20,
+                20,
+                owner,
+                3,
+                caller.instance,
+                0
+            ],
+            engine.memory.as_mut().unwrap(),
+            caller
+        ),
+        Ok(User32Outcome32::Return(0))
+    );
+    assert_eq!(context.take_last_error(), Some(5));
+    assert_eq!(context.windows().live_windows(), windows);
+    assert_eq!(
+        engine.memory.as_ref().unwrap().transaction_version(),
+        before
+    );
+}

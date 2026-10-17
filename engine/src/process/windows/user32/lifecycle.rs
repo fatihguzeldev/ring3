@@ -84,8 +84,12 @@ impl User32Context32 {
         }
         let mut parent = if args[8] == 0 {
             None
-        } else {
+        } else if args[3] & 0x4000_0000 != 0 {
             Some(self.owned(args[8], context.thread_id)?)
+        } else {
+            let owner = WindowHandle32::try_from(args[8])?;
+            self.windows().get(owner)?;
+            Some(owner)
         };
         if args[3] & 0x4000_0000 == 0 {
             parent = parent
