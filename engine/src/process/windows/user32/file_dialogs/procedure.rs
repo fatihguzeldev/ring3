@@ -139,6 +139,19 @@ impl EngineInstance {
             self.set_common_dialog_error(0)?;
             return Ok(User32Outcome32::Return(1));
         }
+        if self.user32.as_ref().unwrap().file_dialogs.plans[index]
+            .request
+            .input
+            .flag(0x10)
+            && (args[1] == 0x53 || args[1] == 0x111 && id == template::HELP)
+        {
+            return self
+                .user32
+                .as_mut()
+                .unwrap()
+                .file_dialog_hook(token, HookStage32::Help, self.memory.as_mut().unwrap())
+                .map_err(HostError::User32);
+        }
         if args[1] != 0x111 {
             return Ok(User32Outcome32::Return(0));
         }
@@ -350,6 +363,50 @@ impl EngineInstance {
         }
         let path = match self.common_dialog_selection(token, &text) {
             Ok(path) => path,
+            Err(HostError::File(crate::files::FileError32::SharingViolation)) => {
+                let path = self.common_dialog_candidate(token, &text)?;
+                let context = self.user32.as_mut().unwrap();
+                let plan = &context.file_dialogs.plans[index];
+                if !plan.request.input.flag(0x20) || plan.request.input.hook == 0 {
+                    return context
+                        .begin_file_prompt(
+                            token,
+                            PromptKind32::Invalid(32),
+                            None,
+                            self.memory.as_mut().unwrap(),
+                        )
+                        .map_err(HostError::User32);
+                }
+                let readonly = context
+                    .state
+                    .dialog_item(root, template::READ_ONLY)
+                    .map_err(HostError::User32)?
+                    .map(|window| {
+                        context
+                            .state
+                            .control_state(window)
+                            .map(|state| state.check != 0)
+                    })
+                    .transpose()
+                    .map_err(HostError::User32)?
+                    .unwrap_or(plan.request.input.flag(1));
+                let old = context.file_dialogs.plans[index]
+                    .selection
+                    .replace(Selection32 {
+                        path,
+                        readonly,
+                        additional: Vec::new(),
+                    });
+                let outcome = context.file_dialog_hook(
+                    token,
+                    HookStage32::Share,
+                    self.memory.as_mut().unwrap(),
+                );
+                if outcome.is_err() {
+                    context.file_dialogs.plans[index].selection = old;
+                }
+                return outcome.map_err(HostError::User32);
+            }
             Err(HostError::File(error))
                 if !matches!(
                     error,

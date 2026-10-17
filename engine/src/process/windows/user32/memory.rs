@@ -30,6 +30,19 @@ impl Scratch32 {
         })
     }
 
+    pub(super) fn allocate_span(
+        memory: &mut AddressSpace,
+        bounds: PageRange,
+        bytes: &[u8],
+    ) -> Result<Self, User32Error32> {
+        let lease =
+            super::super::callbacks::GuestCallbackScratch32::allocate_span(memory, bounds, bytes)
+                .map_err(scratch_error)?;
+        Ok(Self {
+            address: lease.address,
+            lease,
+        })
+    }
     pub(super) fn check(self, memory: &AddressSpace) -> Result<(), User32Error32> {
         self.lease.check(memory).map_err(scratch_error)
     }

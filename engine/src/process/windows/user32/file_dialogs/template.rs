@@ -8,6 +8,7 @@ pub(super) const DIRECTORY: u32 = 0x0471;
 pub(super) const NAME: u32 = 0x0480;
 pub(super) const READ_ONLY: u32 = 0x0410;
 pub(super) const HOOK: u32 = 0x04a0;
+pub(super) const HELP: u32 = 0x040e;
 
 pub(super) fn template(
     title: Vec<u16>,
@@ -15,6 +16,7 @@ pub(super) fn template(
     readonly: bool,
     hook: bool,
     multiple: bool,
+    help: bool,
 ) -> DialogTemplate32 {
     let mut items = vec![
         item(0x0443, 0x82, "Look in:", [8, 9, 42, 12], 0),
@@ -39,6 +41,9 @@ pub(super) fn template(
         ),
         item(2, 0x80, "Cancel", [212, 145, 40, 14], 0x0001_0000),
     ];
+    if help {
+        items.push(item(HELP, 0x80, "Help", [212, 165, 40, 14], 0x0001_0000));
+    }
     if readonly {
         items.push(item(
             READ_ONLY,

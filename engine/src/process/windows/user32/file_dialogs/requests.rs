@@ -30,7 +30,7 @@ impl EngineInstance {
         }
         let token = user32.check_continuation().map_err(HostError::User32)?;
         // unsupported flags are rejected before any window, output or directory publication.
-        if request.input.flags & (0x10 | 0x8000 | 0x400000) != 0
+        if request.input.flags & 0x400000 != 0
             || request.input.flag(0x200) && !request.input.flag(0x80000)
             || api.save() && request.input.flag(0x200)
             || request.input.flags_ex != 0
@@ -68,6 +68,7 @@ impl EngineInstance {
             !request.input.flag(4),
             explorer && hook && custom.is_none(),
             request.input.flag(0x200),
+            request.input.flag(0x10),
         );
         let (dialog, child) = if explorer {
             (default, custom)
@@ -87,6 +88,32 @@ impl EngineInstance {
         } else {
             None
         };
+        let help_message = if request.input.flag(0x10) {
+            self.user32
+                .as_mut()
+                .unwrap()
+                .state
+                .register_message("commdlg_help".encode_utf16().collect())
+                .map_err(HostError::User32)?
+        } else {
+            0
+        };
+        let share_message = if !explorer && hook {
+            self.user32
+                .as_mut()
+                .unwrap()
+                .state
+                .register_message("commdlg_ShareViolation".encode_utf16().collect())
+                .map_err(HostError::User32)?
+        } else {
+            0
+        };
+        let send_message = self
+            .loaded_windows_modules()
+            .flat_map(|module| module.gates())
+            .find(|gate| gate.id == crate::windows::user32::User32Api32::SendMessageW.id())
+            .map(|gate| gate.entry)
+            .ok_or(HostError::InvalidRequest)?;
         let creation = self.prepare_internal_dialog(
             InternalDialog32 {
                 template: dialog,
@@ -113,6 +140,7 @@ impl EngineInstance {
             call_token,
             original_directory,
             completed: false,
+            accepted: false,
             thread: context.thread_id,
             root: None,
             save: api.save(),
@@ -120,6 +148,9 @@ impl EngineInstance {
             explorer,
             procedure,
             legacy_messages,
+            help_message,
+            send_message,
+            share_message,
             published_error: None,
             selection: None,
             directory,
@@ -165,11 +196,34 @@ impl EngineInstance {
         };
         let modal = plan.token;
         let error = plan.published_error.unwrap_or(0);
+        let recent = if let Some(selection) = plan
+            .selection
+            .as_ref()
+            .filter(|_| plan.accepted && error == 0)
+        {
+            let at = selection
+                .path
+                .iter()
+                .rposition(|unit| *unit == 92)
+                .ok_or(HostError::InvalidRequest)?;
+            let directory = super::paths::directory_prefix(&selection.path, at);
+            let mut recent = Vec::new();
+            recent.try_reserve_exact(directory.len()).map_err(|_| {
+                HostError::Comdlg(crate::windows::commdlg::ComdlgError32::Allocation)
+            })?;
+            recent.extend_from_slice(directory);
+            Some(recent)
+        } else {
+            None
+        };
         if plan.save && plan.request.input.flag(8) {
             let original = plan.original_directory.clone();
             self.set_provider_current_directory(&original)?;
         }
         self.set_common_dialog_error(error)?;
+        if let Some(recent) = recent {
+            self.user32.as_mut().unwrap().file_dialogs.recent = recent;
+        }
         self.user32.as_mut().unwrap().file_dialogs.retire(modal);
         Ok(())
     }

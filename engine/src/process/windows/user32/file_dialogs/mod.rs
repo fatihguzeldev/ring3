@@ -34,6 +34,7 @@ pub(super) struct FileDialog32 {
     call_token: u32,
     original_directory: Vec<u16>,
     completed: bool,
+    accepted: bool,
     thread: u32,
     root: Option<WindowHandle32>,
     request: CapturedFileDialog32,
@@ -42,6 +43,9 @@ pub(super) struct FileDialog32 {
     explorer: bool,
     procedure: crate::memory::GuestAddress,
     legacy_messages: Option<[u32; 2]>,
+    help_message: u32,
+    send_message: crate::memory::GuestAddress,
+    share_message: u32,
     published_error: Option<u32>,
     selection: Option<Selection32>,
     directory: Vec<u16>,
@@ -52,12 +56,17 @@ pub(super) struct FileDialog32 {
 pub(super) struct FileDialogs32 {
     plans: Vec<FileDialog32>,
     limit: usize,
+    recent: Vec<u16>,
 }
 impl FileDialogs32 {
     pub(super) fn new(limit: usize) -> Result<Self, E> {
         let mut plans = Vec::new();
         plans.try_reserve_exact(limit).map_err(|_| E::Allocation)?;
-        Ok(Self { plans, limit })
+        Ok(Self {
+            plans,
+            limit,
+            recent: Vec::new(),
+        })
     }
     pub(super) fn bind_root(&mut self, token: u64, root: WindowHandle32) {
         if let Some(plan) = self.plans.iter_mut().find(|plan| plan.token == token) {
@@ -74,6 +83,7 @@ impl FileDialogs32 {
     pub(super) fn complete(&mut self, token: u64, result: u32) -> u32 {
         if let Some(plan) = self.plans.iter_mut().find(|plan| plan.token == token) {
             plan.completed = true;
+            plan.accepted = result == 1;
             if result > 1 {
                 plan.published_error = Some(0xffff);
                 return 0;

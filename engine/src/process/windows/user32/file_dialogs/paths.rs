@@ -10,7 +10,12 @@ impl EngineInstance {
         request: &CapturedFileDialog32,
     ) -> Result<Vec<u16>, HostError> {
         let scope = self.capture_module_file_paths();
-        if !request.initial_file.is_empty() {
+        if request
+            .initial_file
+            .iter()
+            .any(|unit| matches!(*unit, 47 | 92))
+            || request.initial_file.get(1) == Some(&58)
+        {
             let path = scope
                 .normalize(&request.initial_file)
                 .map_err(HostError::File)?;
@@ -33,6 +38,16 @@ impl EngineInstance {
                 .is_ok_and(|info| info.attributes & 0x10 != 0)
             {
                 return Ok(directory);
+            }
+        }
+        if let Some(context) = &self.user32 {
+            let recent = &context.file_dialogs.recent;
+            if !recent.is_empty()
+                && self
+                    .provider_path_info(recent)
+                    .is_ok_and(|info| info.attributes & 0x10 != 0)
+            {
+                return Ok(recent.clone());
             }
         }
         let directory = self
@@ -108,6 +123,30 @@ impl EngineInstance {
         token: u64,
         text: &[u16],
     ) -> Result<Vec<u16>, HostError> {
+        let path = self.common_dialog_candidate(token, text)?;
+        let context = self.user32.as_ref().ok_or(HostError::InvalidRequest)?;
+        let plan = &context.file_dialogs.plans[context
+            .file_dialogs
+            .index(token)
+            .map_err(HostError::User32)?];
+        let admission = (
+            plan.save,
+            plan.request.input.flag(0x1000),
+            plan.request.input.flag(0x10000),
+        );
+        let share_aware = plan.request.input.flag(0x4000);
+        match self.admit_common_dialog_path(&path, admission.0, admission.1, admission.2) {
+            Err(HostError::File(FileError32::SharingViolation)) if share_aware => {}
+            Err(error) => return Err(error),
+            Ok(()) => {}
+        }
+        Ok(path)
+    }
+    pub(super) fn common_dialog_candidate(
+        &mut self,
+        token: u64,
+        text: &[u16],
+    ) -> Result<Vec<u16>, HostError> {
         let context = self.user32.as_ref().ok_or(HostError::InvalidRequest)?;
         let plan = &context.file_dialogs.plans[context
             .file_dialogs
@@ -146,12 +185,13 @@ impl EngineInstance {
                 crate::windows::user32::User32Error32::Win32(50),
             ));
         }
-        let admission = (
-            plan.save,
-            plan.request.input.flag(0x1000),
-            plan.request.input.flag(0x10000),
-        );
-        self.admit_common_dialog_path(&path, admission.0, admission.1, admission.2)?;
+        if plan.request.input.flag(0x8000)
+            && self
+                .provider_path_info(&path)
+                .is_ok_and(|info| info.attributes & 1 != 0)
+        {
+            return Err(HostError::File(FileError32::AccessDenied));
+        }
         Ok(path)
     }
 }

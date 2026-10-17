@@ -1,5 +1,5 @@
-use super::*;
 use super::callbacks::HookStage32;
+use super::*;
 use crate::{
     memory::{GuestAddress, PageRange, Permissions},
     process::{
@@ -1019,6 +1019,7 @@ fn explorer_custom_template_has_its_own_real_parent_and_font_after_input_block_c
         false,
         false,
         false,
+        false,
     );
     custom.items.truncate(1);
     custom.items[0].id = 900;
@@ -1185,6 +1186,7 @@ fn legacy_fileok_registered_identity_uses_hook_return_without_explorer_dwl_resul
         true,
         false,
         false,
+        false,
     );
     let block = engine
         .allocate_windows_runtime_initialized(&common_template_bytes(&template))
@@ -1324,5 +1326,451 @@ fn captured_registered_messages_use_same_ansi_unicode_name_and_do_not_share_clas
             .register_message("commdlg_FileNameOK".encode_utf16().collect())
             .unwrap(),
         wide
+    );
+}
+
+#[test]
+fn shown_help_button_issues_owned_explorer_notification_and_ignores_hook_return() {
+    let (mut engine, token, root, _) = initialized_api(0x00210002, 0x1010, true);
+    let context = engine.user32.as_ref().unwrap();
+    let button = context.file_dialog_control(root, template::HELP).unwrap();
+    assert_eq!(context.state.record(button).unwrap().parent, Some(root));
+    let User32Outcome32::Callback(callback) = engine
+        .execute_common_file_dialog_procedure(
+            &[root.get(), 0x111, template::HELP, button.get()],
+            true,
+        )
+        .unwrap()
+    else {
+        panic!("the help button must invoke the actual guest hook")
+    };
+    assert_eq!(callback.procedure.0, HOOK);
+    let info =
+        super::super::memory::words::<5>(engine.memory().unwrap(), callback.arguments[3]).unwrap();
+    assert_eq!(info, [root.get(), 0, (-605i32) as u32, OFN, 0]);
+    assert_eq!(
+        engine
+            .user32
+            .as_mut()
+            .unwrap()
+            .complete(
+                callback.continuation,
+                u32::MAX,
+                engine.memory.as_mut().unwrap()
+            )
+            .unwrap(),
+        User32Outcome32::Return(1)
+    );
+    let context = engine.user32.as_ref().unwrap();
+    assert_eq!(context.file_dialogs.plans[0].token, token);
+    assert_eq!(context.state.dialog(root).unwrap().ended, None);
+    assert!(context.file_dialogs.plans[0].selection.is_none());
+}
+
+#[test]
+fn owner_help_uses_the_canonical_sendmessage_gate_with_captured_owner_and_ofn() {
+    let mut engine = engine();
+    request(&mut engine, false);
+    engine.map(0x10000, 2, 3).unwrap();
+    let call_context = engine.user32_call_context().unwrap();
+    let owner_procedure = engine
+        .loaded_windows_modules()
+        .flat_map(|module| module.gates())
+        .find(|gate| gate.id == Api::DefWindowProcA.id())
+        .unwrap()
+        .entry
+        .0;
+    let context = engine.user32.as_mut().unwrap();
+    let memory = engine.memory.as_mut().unwrap();
+    memory
+        .write(GuestAddress(0x10100), b"CommonOwner\0")
+        .unwrap();
+    let mut class = [0u8; 40];
+    for (offset, value) in [
+        (4, owner_procedure),
+        (16, call_context.instance),
+        (36, 0x10100),
+    ] {
+        class[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+    }
+    memory.write(GuestAddress(0x10000), &class).unwrap();
+    let User32Outcome32::Return(atom) = context
+        .prepare_arguments(Api::RegisterClassA, &[0x10000], memory, call_context)
+        .unwrap()
+    else {
+        panic!("class registration")
+    };
+    let owner = super::super::tests::create(context, memory, call_context, atom);
+    memory
+        .write(GuestAddress(OFN + 4), &owner.to_le_bytes())
+        .unwrap();
+    memory
+        .write(GuestAddress(OFN + 52), &0x81010u32.to_le_bytes())
+        .unwrap();
+    call(&mut engine, 0x00210002, &[OFN]).unwrap();
+    let outcome = pending(&engine);
+    settle(&mut engine, outcome, &mut Vec::new()).unwrap();
+    let root = engine.user32.as_ref().unwrap().file_dialogs.plans[0]
+        .root
+        .unwrap();
+    let User32Outcome32::Callback(callback) = engine
+        .execute_common_file_dialog_procedure(&[root.get(), 0x111, template::HELP, 0], true)
+        .unwrap()
+    else {
+        panic!("owner notification")
+    };
+    let gate = engine
+        .loaded_windows_modules()
+        .flat_map(|module| module.gates())
+        .find(|gate| gate.id == Api::SendMessageW.id())
+        .map(|gate| gate.entry)
+        .unwrap();
+    let message = engine
+        .user32
+        .as_mut()
+        .unwrap()
+        .state
+        .register_message("commdlg_help".encode_utf16().collect())
+        .unwrap();
+    assert_eq!(callback.procedure, gate);
+    assert_eq!(callback.arguments, [owner, message, root.get(), OFN]);
+    assert_eq!(
+        engine
+            .user32
+            .as_ref()
+            .unwrap()
+            .windows()
+            .get(WindowHandle32::try_from(owner).unwrap())
+            .unwrap()
+            .description
+            .thread_id,
+        call_context.thread_id
+    );
+    assert_eq!(
+        engine
+            .user32
+            .as_mut()
+            .unwrap()
+            .complete(callback.continuation, 0, engine.memory.as_mut().unwrap())
+            .unwrap(),
+        User32Outcome32::Return(1)
+    );
+    assert_eq!(
+        engine
+            .user32
+            .as_ref()
+            .unwrap()
+            .state
+            .dialog(root)
+            .unwrap()
+            .ended,
+        None
+    );
+}
+
+#[test]
+fn sharing_hook_keeps_sealed_fallthrough_across_output_repair_and_then_delivers_fileok() {
+    let (mut engine, _, root, _) = initialized_api(0x00210004, 0, true);
+    let lease = engine
+        .open_provider_file(&r"C:\file.txt".encode_utf16().collect::<Vec<_>>(), false)
+        .unwrap();
+    let User32Outcome32::Callback(share) = engine
+        .execute_common_file_dialog_procedure(&[root.get(), 0x111, 1, 0], true)
+        .unwrap()
+    else {
+        panic!("sharing violation must reach the guest hook")
+    };
+    let info =
+        super::super::memory::words::<5>(engine.memory().unwrap(), share.arguments[3]).unwrap();
+    assert_eq!(&info[..4], &[root.get(), 0, (-604i32) as u32, OFN]);
+    let name = super::super::memory::string(
+        engine.memory().unwrap(),
+        info[4],
+        true,
+        32767,
+        crate::windows::text::CodePage32::Windows1252,
+    )
+    .unwrap();
+    assert_eq!(name, r"C:\file.txt".encode_utf16().collect::<Vec<_>>());
+    let hook = engine
+        .user32
+        .as_ref()
+        .unwrap()
+        .file_dialog_control(root, template::HOOK)
+        .unwrap();
+    engine
+        .user32
+        .as_mut()
+        .unwrap()
+        .state
+        .set_extra(hook, 0, 2)
+        .unwrap();
+    let range = PageRange::new(GuestAddress(OFN), 1).unwrap();
+    engine
+        .memory
+        .as_mut()
+        .unwrap()
+        .protect(range, Permissions::READ)
+        .unwrap();
+    let version = engine.memory().unwrap().transaction_version();
+    assert!(matches!(
+        engine.user32.as_mut().unwrap().complete(
+            share.continuation,
+            1,
+            engine.memory.as_mut().unwrap()
+        ),
+        Err(E::Memory(_))
+    ));
+    assert_eq!(engine.memory().unwrap().transaction_version(), version);
+    assert_eq!(
+        engine
+            .user32
+            .as_ref()
+            .unwrap()
+            .pending
+            .last()
+            .unwrap()
+            .token,
+        share.continuation
+    );
+    // the accepted decision is owned by the continuation, not by mutable DWLP_MSGRESULT.
+    engine
+        .user32
+        .as_mut()
+        .unwrap()
+        .state
+        .set_extra(hook, 0, 1)
+        .unwrap();
+    engine
+        .memory
+        .as_mut()
+        .unwrap()
+        .protect(range, Permissions::READ_WRITE)
+        .unwrap();
+    let User32Outcome32::Callback(fileok) = engine
+        .execute_common_file_dialog_procedure(&[root.get(), 0x111, 1, 0], true)
+        .unwrap()
+    else {
+        panic!("sealed fallthrough must advance directly to FILEOK")
+    };
+    assert_eq!(fileok.continuation, share.continuation);
+    assert_eq!(
+        super::super::memory::words::<5>(engine.memory().unwrap(), fileok.arguments[3]).unwrap()[2],
+        (-606i32) as u32
+    );
+    assert_eq!(
+        engine
+            .user32
+            .as_mut()
+            .unwrap()
+            .complete(fileok.continuation, 0, engine.memory.as_mut().unwrap())
+            .unwrap(),
+        User32Outcome32::Return(1)
+    );
+    assert_eq!(
+        engine
+            .user32
+            .as_ref()
+            .unwrap()
+            .state
+            .dialog(root)
+            .unwrap()
+            .ended,
+        Some(1)
+    );
+    engine.close_provider_file(lease).unwrap();
+}
+
+#[test]
+fn share_nowarn_stays_modal_and_zero_result_opens_real_warning_on_the_same_parent_token() {
+    let (mut engine, _, root, _) = initialized_api(0x00210004, 0, true);
+    let lease = engine
+        .open_provider_file(&r"C:\file.txt".encode_utf16().collect::<Vec<_>>(), false)
+        .unwrap();
+    let hook = engine
+        .user32
+        .as_ref()
+        .unwrap()
+        .file_dialog_control(root, template::HOOK)
+        .unwrap();
+    for action in [1, 0] {
+        let User32Outcome32::Callback(callback) = engine
+            .execute_common_file_dialog_procedure(&[root.get(), 0x111, 1, 0], true)
+            .unwrap()
+        else {
+            panic!("sharing callback")
+        };
+        engine
+            .user32
+            .as_mut()
+            .unwrap()
+            .state
+            .set_extra(hook, 0, action)
+            .unwrap();
+        let outcome = engine
+            .user32
+            .as_mut()
+            .unwrap()
+            .complete(
+                callback.continuation,
+                if action == 0 { 0 } else { 1 },
+                engine.memory.as_mut().unwrap(),
+            )
+            .unwrap();
+        if action == 1 {
+            assert_eq!(outcome, User32Outcome32::Return(1));
+            assert!(engine.user32_dialog_request(0).unwrap().is_none());
+        } else {
+            let User32Outcome32::Wait { continuation } = outcome else {
+                panic!("owned sharing warning")
+            };
+            let context = engine.user32.as_ref().unwrap();
+            assert_eq!(
+                context.pending[context.pending.len() - 2].token,
+                callback.continuation
+            );
+            let request = engine.user32_dialog_request(0).unwrap().unwrap();
+            assert_eq!((request.owner, request.style), (root.get(), 0x30));
+            let (epoch, id) = (request.epoch, request.id);
+            engine.complete_user32_dialog(epoch, id, 1, 0).unwrap();
+            assert_eq!(
+                engine
+                    .user32
+                    .as_mut()
+                    .unwrap()
+                    .resume_wait(continuation, engine.memory.as_mut().unwrap())
+                    .unwrap(),
+                User32Outcome32::Return(1)
+            );
+        }
+        assert_eq!(
+            engine
+                .user32
+                .as_ref()
+                .unwrap()
+                .state
+                .dialog(root)
+                .unwrap()
+                .ended,
+            None
+        );
+        assert!(
+            engine.user32.as_ref().unwrap().file_dialogs.plans[0]
+                .selection
+                .is_none()
+        );
+    }
+    engine.close_provider_file(lease).unwrap();
+}
+
+#[test]
+fn shareaware_uses_canonical_file_admission_without_publishing_an_open_or_warning() {
+    let (mut engine, _, root, _) = initialized_api(0x00210004, 0x4000, false);
+    let lease = engine
+        .open_provider_file(&r"C:\file.txt".encode_utf16().collect::<Vec<_>>(), false)
+        .unwrap();
+    let version = engine.provider_file_version(lease).unwrap();
+    assert_eq!(
+        engine
+            .execute_common_file_dialog_procedure(&[root.get(), 0x111, 1, 0], true)
+            .unwrap(),
+        User32Outcome32::Return(1)
+    );
+    assert_eq!(
+        engine
+            .user32
+            .as_ref()
+            .unwrap()
+            .state
+            .dialog(root)
+            .unwrap()
+            .ended,
+        Some(1)
+    );
+    assert!(engine.user32_dialog_request(0).unwrap().is_none());
+    assert_eq!(engine.provider_file_version(lease).unwrap(), version);
+    engine.close_provider_file(lease).unwrap();
+}
+
+#[test]
+fn relative_filename_preserves_explicit_initial_directory_and_readonly_return_is_rejected() {
+    let mut engine = engine();
+    request(&mut engine, false);
+    engine
+        .provider_create_directories(&r"C:\chosen".encode_utf16().collect::<Vec<_>>())
+        .unwrap();
+    engine
+        .replace_provider_file(
+            &r"C:\chosen\file.txt".encode_utf16().collect::<Vec<_>>(),
+            b"kept",
+        )
+        .unwrap();
+    let ram = engine.memory.as_mut().unwrap();
+    ram.write(
+        GuestAddress(FILE),
+        &"file.txt\0"
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes)
+            .collect::<Vec<_>>(),
+    )
+    .unwrap();
+    ram.write(
+        GuestAddress(OFN + 0x700),
+        &"C:\\chosen\0"
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes)
+            .collect::<Vec<_>>(),
+    )
+    .unwrap();
+    ram.write(GuestAddress(OFN + 44), &(OFN + 0x700).to_le_bytes())
+        .unwrap();
+    ram.write(GuestAddress(OFN + 52), &0x89000u32.to_le_bytes())
+        .unwrap();
+    // use the actual file provider to set the on-disk read-only attribute before opening the dialog.
+    let attributes = crate::windows::files::FileApi32::SetFileAttributesW.id();
+    ram.write(
+        GuestAddress(OFN + 0x800),
+        &"C:\\chosen\\file.txt\0"
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes)
+            .collect::<Vec<_>>(),
+    )
+    .unwrap();
+    call(&mut engine, attributes, &[OFN + 0x800, 1]).unwrap();
+    call(&mut engine, 0x00210002, &[OFN]).unwrap();
+    let outcome = pending(&engine);
+    settle(&mut engine, outcome, &mut Vec::new()).unwrap();
+    let plan = &engine.user32.as_ref().unwrap().file_dialogs.plans[0];
+    assert_eq!(
+        plan.directory,
+        r"C:\chosen".encode_utf16().collect::<Vec<_>>()
+    );
+    let root = plan.root.unwrap();
+    let User32Outcome32::Wait { .. } = engine
+        .execute_common_file_dialog_procedure(&[root.get(), 0x111, 1, 0], true)
+        .unwrap()
+    else {
+        panic!("read-only selection must produce the real access warning")
+    };
+    assert_eq!(
+        engine
+            .user32
+            .as_ref()
+            .unwrap()
+            .state
+            .dialog(root)
+            .unwrap()
+            .ended,
+        None
+    );
+    let request = engine.user32_dialog_request(0).unwrap().unwrap();
+    assert!(String::from_utf16_lossy(request.text).contains("error 5"));
+    assert_eq!(
+        engine
+            .provider_path_info(&r"C:\chosen\file.txt".encode_utf16().collect::<Vec<_>>())
+            .unwrap()
+            .attributes
+            & 1,
+        1
     );
 }

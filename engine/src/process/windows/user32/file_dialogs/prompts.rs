@@ -29,10 +29,13 @@ impl User32Context32 {
         let index = self.file_dialogs.index(plan)?;
         let entry = &self.file_dialogs.plans[index];
         let root = entry.root.ok_or(E::InvalidToken)?;
+        let reuse = self.pending.last().is_some_and(|pending| matches!(pending.continuation,Continuation32::FileDialog(call) if call.plan == plan && matches!(call.stage,HookStage32::ShareWarning)));
+        self.windows().get(root)?;
         self.prepare_thread_slots()?;
-        if self.pending.len() + 2 > self.continuation_limit
+        let slots = if reuse { 1 } else { 2 };
+        if self.pending.len() + slots > self.continuation_limit
             || self.dialogs.len() >= self.continuation_limit
-            || self.next_token.checked_add(2).is_none()
+            || self.next_token.checked_add(slots as u64).is_none()
         {
             return Err(E::Capacity);
         }
@@ -76,17 +79,25 @@ impl User32Context32 {
             result: None,
             help: false,
         };
-        let token = self.check_continuation()?;
-        self.next_token = token;
-        self.pending.push(super::super::callback::Pending32 {
-            token,
-            continuation: Continuation32::FilePrompt(FilePrompt32 {
-                plan,
-                kind,
-                child: None,
-            }),
-            activation: None,
+        let continuation = Continuation32::FilePrompt(FilePrompt32 {
+            plan,
+            kind,
+            child: None,
         });
+        let token = if reuse {
+            let parent = self.pending.last_mut().unwrap();
+            parent.continuation = continuation;
+            parent.token
+        } else {
+            let token = self.check_continuation()?;
+            self.next_token = token;
+            self.pending.push(super::super::callback::Pending32 {
+                token,
+                continuation,
+                activation: None,
+            });
+            token
+        };
         self.file_dialogs.plans[index].selection = selection;
         let outcome = self.begin_dialog(dialog)?;
         let child = match outcome {
