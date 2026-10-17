@@ -213,16 +213,14 @@ static void dialog_a(const char *name, BOOL save, const char *chosen, DWORD flag
     if (p.timeout) ExitProcess(2);
 }
 
-static DWORD WINAPI missing_hook_in_thread(void *out) {
+struct thread_errors { DWORD before, after; };
+static DWORD WINAPI invalid_size_in_thread(void *out) {
     OPENFILENAMEW ofn;
-    WCHAR file[512] = L"";
+    struct thread_errors *errors = (struct thread_errors *)out;
+    errors->before = CommDlgExtendedError();
     memset(&ofn, 0, sizeof(ofn));
-    ofn.lStructSize = sizeof(ofn);
-    ofn.lpstrFile = file;
-    ofn.nMaxFile = 512;
-    ofn.Flags = OFN_EXPLORER | OFN_ENABLEHOOK;
     GetOpenFileNameW(&ofn);
-    *(DWORD *)out = CommDlgExtendedError();
+    errors->after = CommDlgExtendedError();
     return 0;
 }
 
@@ -232,7 +230,8 @@ int main(void) {
     char chosen_a[512], narrow[64];
     OPENFILENAMEW invalid;
     HANDLE file, thread;
-    DWORD thread_error, main_before, main_after;
+    struct thread_errors thread_error;
+    DWORD main_before, main_after;
     int capacity;
     if (!GetTempPathW(MAX_PATH, temporary) || !GetTempFileNameW(temporary, L"r3d", 0, directory)) return 2;
     if (!DeleteFileW(directory) || !CreateDirectoryW(directory, NULL)) return 2;
@@ -251,10 +250,10 @@ int main(void) {
     { BOOL ok = GetOpenFileNameW(&invalid); DWORD last = GetLastError();
       row("invalid-size-zero"); printf(",\"ok\":%u,\"extended\":%lu,\"lastError\":%lu}", ok != 0, CommDlgExtendedError(), last); }
     main_before = CommDlgExtendedError();
-    thread = CreateThread(NULL, 0, missing_hook_in_thread, &thread_error, 0, NULL);
+    thread = CreateThread(NULL, 0, invalid_size_in_thread, &thread_error, 0, NULL);
     if (!thread || WaitForSingleObject(thread, 5000) != WAIT_OBJECT_0) return 2;
     CloseHandle(thread); main_after = CommDlgExtendedError();
-    row("thread-error-owner"); printf(",\"mainBefore\":%lu,\"worker\":%lu,\"mainAfter\":%lu}", main_before, thread_error, main_after);
+    row("thread-error-owner"); printf(",\"mainBefore\":%lu,\"workerBefore\":%lu,\"workerAfter\":%lu,\"mainAfter\":%lu}", main_before, thread_error.before, thread_error.after, main_after);
     dialog_w("cancel-modern", FALSE, existing, 0, 512, TRUE, FALSE, sizeof(OPENFILENAMEW));
     dialog_w("cancel-nt4-size", FALSE, existing, 0, 512, TRUE, FALSE, OPENFILENAME_SIZE_VERSION_400W);
     dialog_w("existing-file", FALSE, existing, OFN_FILEMUSTEXIST, 512, FALSE, FALSE, sizeof(OPENFILENAMEW));
