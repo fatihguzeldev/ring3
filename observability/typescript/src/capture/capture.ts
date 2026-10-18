@@ -78,6 +78,8 @@ export class Capture {
   #flushing: Promise<CaptureStatus> | undefined;
   #engineChunkBytes = 4096;
   #pendingExportBytes = 0;
+  #queuedInputBytes = 0;
+  #ingesting: Promise<void> = Promise.resolve();
 
   constructor(options: CaptureOptions) {
     this.#configuration = configureCapture(options);
@@ -131,9 +133,11 @@ export class Capture {
         this.#reservedBytes +
         this.#externalStream.pendingBytes +
         this.#engineStream.pendingBytes +
-        this.#pendingExportBytes,
+        this.#pendingExportBytes +
+        this.#queuedInputBytes,
       pendingPacketBytes: this.#externalStream.pendingBytes + this.#engineStream.pendingBytes,
       pendingExportBytes: this.#pendingExportBytes,
+      queuedInputBytes: this.#queuedInputBytes,
       openScopes: this.#scopes.size,
       engine: this.#engineState,
       ...(this.#writer.error === undefined ? {} : { sinkError: this.#writer.error }),
@@ -145,7 +149,39 @@ export class Capture {
   ingest(bytes: Uint8Array): boolean {
     if (this.#state !== "recording" || this.#configuration.level === "off") return false;
     if (bytes.byteLength === 0) return true;
+    if (this.#queuedInputBytes > 0) {
+      this.#droppedChunks++;
+      this.markIncomplete("synchronous ingestion cannot interleave queued asynchronous input");
+      return false;
+    }
     return this.#ingest(this.#externalStream, bytes);
+  }
+
+  ingestAsync(bytes: Uint8Array): Promise<boolean> {
+    if (this.#state !== "recording" || this.#configuration.level === "off")
+      return Promise.resolve(false);
+    if (bytes.byteLength === 0) return Promise.resolve(true);
+    if (bytes.byteLength > this.#configuration.maxBufferedBytes - this.#queuedInputBytes) {
+      this.#droppedChunks++;
+      this.markIncomplete("asynchronous trace input byte budget exceeded");
+      return Promise.resolve(false);
+    }
+    const input = bytes.slice();
+    this.#queuedInputBytes += input.byteLength;
+    const pending = this.#ingesting.then(async () => {
+      try {
+        await this.#ingestAsync(this.#externalStream, input);
+        return true;
+      } catch (error) {
+        this.#droppedChunks++;
+        this.markIncomplete(`trace ingestion: ${message(error)}`);
+        return false;
+      } finally {
+        this.#queuedInputBytes -= input.byteLength;
+      }
+    });
+    this.#ingesting = pending.then(() => {});
+    return pending;
   }
 
   attachEngine(port: EngineObservationPort, options: EngineAttachmentOptions): void {
@@ -363,6 +399,7 @@ export class Capture {
     } catch (error) {
       this.markIncomplete(`engine observation: ${message(error)}`);
     }
+    await this.#ingesting;
     await this.#writer.flush();
     return this.status();
   }
@@ -385,6 +422,7 @@ export class Capture {
     this.#reservedBytes = 0;
     if (this.#configuration.level !== "off") {
       await this.#flushing;
+      await this.#ingesting;
       if (this.#engine !== undefined && this.#engineState === "recording") {
         try {
           let chunk = this.#readEngine(true);
@@ -449,13 +487,21 @@ export class Capture {
 
   async #consumeEngineAsync(chunk: EngineTraceChunk): Promise<void> {
     this.#observeEngineChunk(chunk);
-    if (chunk.bytes.length === 0) return;
+    await this.#ingestAsync(this.#engineStream, chunk.bytes);
+  }
+
+  async #ingestAsync(stream: TracePacketStream, bytes: Uint8Array): Promise<void> {
+    if (bytes.length === 0) return;
     const packets: Uint8Array[] = [];
-    this.#engineStream.push(chunk.bytes, (packet) => {
-      packets.push(packet);
-      return true;
-    });
-    this.#pendingExportBytes = packets.reduce((total, packet) => total + packet.length, 0);
+    if (
+      !stream.push(bytes, (packet) => {
+        packets.push(packet);
+        return true;
+      })
+    )
+      throw new Error("trace stream is already invalid");
+    const pendingBytes = packets.reduce((total, packet) => total + packet.length, 0);
+    this.#pendingExportBytes += pendingBytes;
     try {
       if (!this.#clockDeclared || !this.#knownTracks.has(this.#base | 1n)) {
         await this.#writer.flush();
@@ -465,17 +511,18 @@ export class Capture {
       for (const packet of packets) {
         if (isIdentityClockSnapshot(packet)) continue;
         if (packet.length > this.#configuration.maxBufferedBytes - this.#reservedBytes)
-          throw new Error("engine trace packet exceeds available capture byte budget");
-        if (
+          throw new Error("trace packet exceeds available capture byte budget");
+        while (
           packet.length >
           this.#configuration.maxBufferedBytes - this.#writer.bufferedBytes - this.#reservedBytes
-        )
+        ) {
           await this.#writer.flush();
-        if (!this.#append(packet, false))
-          throw new Error("capture output rejected engine trace bytes");
+          if (this.#writer.error !== undefined) throw new Error(this.#writer.error);
+        }
+        if (!this.#append(packet, false)) throw new Error("capture output rejected trace bytes");
       }
     } finally {
-      this.#pendingExportBytes = 0;
+      this.#pendingExportBytes -= pendingBytes;
     }
   }
 
