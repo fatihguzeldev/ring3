@@ -18,6 +18,42 @@ pub(crate) struct StateMetadata {
     pub(crate) ss_debug_shadow: bool,
 }
 
+/// validation applies only while these same record bytes remain immutably borrowed.
+pub(crate) struct ValidatedState<'a> {
+    input: &'a [u8],
+    metadata: StateMetadata,
+    eflags: u32,
+}
+
+impl<'a> ValidatedState<'a> {
+    pub(crate) fn decode(input: &'a [u8]) -> Result<Self, AbiError> {
+        let (version, metadata) = validate_header(input)?;
+        let eflags = read_u32(input, EFLAGS_OFFSET);
+        validate_flags(eflags, version)?;
+        Ok(Self {
+            input,
+            metadata: StateMetadata {
+                ss_debug_shadow: metadata == 1,
+            },
+            eflags,
+        })
+    }
+
+    pub(crate) fn state(&self) -> State32 {
+        State32 {
+            registers: std::array::from_fn(|index| {
+                read_u32(self.input, REGISTERS_OFFSET + index * 4)
+            }),
+            eip: read_u32(self.input, EIP_OFFSET),
+            eflags: self.eflags,
+        }
+    }
+
+    pub(crate) fn metadata(&self) -> StateMetadata {
+        self.metadata
+    }
+}
+
 impl StateMetadata {
     pub(crate) fn write(self, state: &mut [u8; STATE_SIZE]) {
         if self.ss_debug_shadow && state[4..6] != STATE_VERSION_3.to_le_bytes() {
@@ -70,22 +106,11 @@ fn encode(state: &State32, output: &mut [u8], version: u16) -> Result<(), AbiErr
 }
 
 pub fn decode_state(input: &[u8]) -> Result<State32, AbiError> {
-    let (version, _) = validate_header(input)?;
-    let eflags = read_u32(input, EFLAGS_OFFSET);
-    validate_flags(eflags, version)?;
-    Ok(State32 {
-        registers: std::array::from_fn(|index| read_u32(input, REGISTERS_OFFSET + index * 4)),
-        eip: read_u32(input, EIP_OFFSET),
-        eflags,
-    })
+    Ok(ValidatedState::decode(input)?.state())
 }
 
 pub(crate) fn decode_state_metadata(input: &[u8]) -> Result<StateMetadata, AbiError> {
-    let (version, metadata) = validate_header(input)?;
-    validate_flags(read_u32(input, EFLAGS_OFFSET), version)?;
-    Ok(StateMetadata {
-        ss_debug_shadow: metadata == 1,
-    })
+    Ok(ValidatedState::decode(input)?.metadata())
 }
 
 fn validate_header(input: &[u8]) -> Result<(u16, u32), AbiError> {

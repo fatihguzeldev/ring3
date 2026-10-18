@@ -80,9 +80,15 @@ fn need_code_cleanup_refuses_nonzero_fields_bad_context_wrong_epoch_and_downgrad
     );
     for offset in [
         0,
+        crate::abi::x86::STATE_METADATA_OFFSET + 1,
+        crate::abi::x86::EFLAGS_OFFSET + 3,
+        EXIT_OFFSET + 5,
         X87_OFFSET,
+        X87_OFFSET + 36,
         SIMD_OFFSET,
+        SIMD_OFFSET + 24,
         YMM_OFFSET,
+        YMM_OFFSET + 12,
         SEGMENTS_OFFSET,
         WORK_OFFSET,
         WORK_OFFSET + 20,

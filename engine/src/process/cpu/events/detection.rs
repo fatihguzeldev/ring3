@@ -2,7 +2,7 @@ use crate::{
     abi::{
         arena::{EXIT_OFFSET, STATE_OFFSET, WORK_OFFSET, WORK_SIZE},
         header,
-        x86::{EXIT_SIZE, STATE_SIZE, decode_exit, decode_state, decode_state_metadata},
+        x86::{EXIT_SIZE, STATE_SIZE, decode_exit, decode_state},
     },
     cpu::{
         ExecutionExit, ExitReason,
@@ -304,13 +304,13 @@ impl EngineInstance {
         let exit_bytes: [u8; EXIT_SIZE] = arena[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE]
             .try_into()
             .unwrap();
-        let state =
-            decode_state(&state_bytes).map_err(|_| HostError::Call(CallError::InvalidStop))?;
+        let capture = ExtendedCpuState::prepare_capture(arena)?;
+        let state = capture.state();
         let exit = decode_exit(&exit_bytes).map_err(|_| HostError::Call(CallError::InvalidStop))?;
         if !event.matches_exit(exit) {
             return Err(HostError::Call(CallError::InvalidStop));
         }
-        let extended = ExtendedCpuState::capture(arena)?;
+        let extended = capture.finish()?;
         let work: [u8; WORK_SIZE] = arena[WORK_OFFSET..WORK_OFFSET + WORK_SIZE]
             .try_into()
             .unwrap();
@@ -326,14 +326,12 @@ impl EngineInstance {
             flags: state.eflags,
             cs: context.state.selectors[SegmentRegister::Cs.index()],
         };
-        let metadata = decode_state_metadata(&state_bytes)
-            .map_err(|_| HostError::Call(CallError::InvalidStop))?;
         if !restart::valid_provenance(
             event,
             restart,
             input,
             exit.retired,
-            metadata.ss_debug_shadow,
+            extended.metadata.ss_debug_shadow,
             header::read_u32(&work, 16),
         ) {
             return Err(HostError::Call(CallError::InvalidStop));
@@ -404,14 +402,13 @@ impl EngineInstance {
         };
         self.check_detection_owner(owner, callback_token)?;
         let arena = self.arena();
-        decode_state(&arena[STATE_OFFSET..STATE_OFFSET + STATE_SIZE])
-            .map_err(|_| HostError::Call(CallError::InvalidStop))?;
+        let capture = ExtendedCpuState::prepare_capture(arena)?;
         let exit = decode_exit(&arena[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE])
             .map_err(|_| HostError::Call(CallError::InvalidStop))?;
         if exit.reason != ExitReason::NeedCode {
             return Err(HostError::Call(CallError::InvalidStop));
         }
-        let extended = ExtendedCpuState::capture(arena)?;
+        let extended = capture.finish()?;
         let work = &arena[WORK_OFFSET..WORK_OFFSET + WORK_SIZE];
         header::validate(work, *b"R3WK", WORK_SIZE)
             .map_err(|_| HostError::Call(CallError::InvalidStop))?;

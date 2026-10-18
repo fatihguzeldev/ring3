@@ -2,6 +2,37 @@ use super::*;
 use crate::process::EngineInstance;
 
 #[test]
+fn prepared_capture_preserves_state_and_shadow_across_all_record_versions() {
+    use crate::abi::x86::{encode_state, encode_state_v2, encode_state_v3};
+
+    for (version, encode) in [encode_state, encode_state_v2, encode_state_v3]
+        .into_iter()
+        .enumerate()
+    {
+        let mut engine = EngineInstance::new(1, 71).unwrap();
+        let state = State32 {
+            registers: std::array::from_fn(|index| 0xfedc_ba98_u32.rotate_right(index as u32)),
+            eip: 0x8765_4321,
+            eflags: 2,
+        };
+        let metadata = StateMetadata {
+            ss_debug_shadow: version != 0,
+        };
+        let arena = engine.arena_mut().unwrap();
+        encode(&state, &mut arena[..STATE_SIZE]).unwrap();
+        metadata.write((&mut arena[..STATE_SIZE]).try_into().unwrap());
+        let before = engine.arena().to_vec();
+
+        let capture = ExtendedCpuState::prepare_capture(engine.arena()).unwrap();
+        assert_eq!(capture.state(), state);
+        let extended = capture.finish().unwrap();
+        assert_eq!(extended.metadata, metadata);
+        assert!(extended.matches(engine.arena()));
+        assert_eq!(engine.arena(), before);
+    }
+}
+
+#[test]
 fn validated_snapshots_preserve_every_opaque_vector_and_float_payload_bit() {
     let mut engine = EngineInstance::new(1, 71).unwrap();
     for (start, length) in [
