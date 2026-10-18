@@ -21,6 +21,8 @@ use crate::{
 mod accounting;
 mod paging;
 mod restart;
+#[cfg(any(target_arch = "wasm32", test))]
+mod returning;
 pub(in crate::process) mod site;
 pub(in crate::process) use restart::InstructionTrapRestart32;
 
@@ -242,6 +244,8 @@ impl EngineInstance {
         }
         let callback_token = self.callback.as_ref().map(|callback| callback.token());
         self.check_detection_owner(owner, callback_token)?;
+        #[cfg(any(target_arch = "wasm32", test))]
+        let installed = self.authorize_execution_child(owner)?;
         let epoch = self
             .detection_epoch
             .checked_add(1)
@@ -268,6 +272,8 @@ impl EngineInstance {
         }
         self.detection_epoch = epoch;
         self.cpu_event = None;
+        #[cfg(any(target_arch = "wasm32", test))]
+        self.entered_execution_child(epoch, installed);
         Ok(epoch)
     }
 

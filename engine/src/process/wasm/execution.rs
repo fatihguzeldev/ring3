@@ -1,5 +1,7 @@
 mod cache;
 pub(crate) use cache::*;
+mod receipt;
+pub(crate) use receipt::*;
 
 use super::{REGISTRY, inspect, mutate, status};
 use crate::abi::arena::{CANCEL_OFFSET, EXIT_OFFSET, STATE_OFFSET, TRANSFER_OFFSET};
@@ -177,9 +179,13 @@ pub(crate) fn find_installed_resident(key_low: u32, key_high: u32, pc: u32) -> u
         let key = u64::from(key_low) | (u64::from(key_high) << 32);
         let installed = match instance.lookup_installed_resident(key, pc) {
             Ok(installed) => installed,
-            Err(HostError::Resident(RegistryError::NotFound { .. })) => return 17,
+            Err(HostError::Resident(RegistryError::NotFound { .. })) => {
+                instance.expect_execution_lookup(None);
+                return 17;
+            }
             Err(error) => return status(error),
         };
+        instance.expect_execution_lookup(Some(installed));
         installation_record(instance, installed);
         0
     })

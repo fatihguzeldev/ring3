@@ -106,6 +106,11 @@ pub struct EngineInstance {
     #[cfg(any(target_arch = "wasm32", test))]
     pub(in crate::process) exception_detection:
         Option<Box<[crate::process::cpu::events::detection::DetectionSlot32; 1]>>,
+    #[cfg(any(target_arch = "wasm32", test))]
+    pub(in crate::process) execution_frame:
+        Option<crate::process::execution::receipt::ExecutionFrame32>,
+    #[cfg(any(target_arch = "wasm32", test))]
+    pub(in crate::process) execution_frame_issuer: u64,
     pub(in crate::process) system_register_bank: Option<crate::cpu::x86::UserSystemRegisterBank32>,
     pub(in crate::process) modules: crate::process::loading::modules::ModuleProcess32,
     pub(in crate::process) image: Option<crate::loader::ImageMetadata32>,
@@ -197,6 +202,10 @@ impl EngineInstance {
             detection_epoch: 0,
             #[cfg(any(target_arch = "wasm32", test))]
             exception_detection: None,
+            #[cfg(any(target_arch = "wasm32", test))]
+            execution_frame: None,
+            #[cfg(any(target_arch = "wasm32", test))]
+            execution_frame_issuer: 0,
             system_register_bank: Some(crate::cpu::x86::UserSystemRegisterBank32::application()),
             modules: crate::process::loading::modules::ModuleProcess32::default(),
             image: None,
@@ -298,6 +307,7 @@ impl EngineInstance {
         #[cfg(any(target_arch = "wasm32", test))]
         {
             self.exception_detection = None;
+            self.execution_frame = None;
         }
         self.pending_call = None;
         self.module_windows_reply = None;

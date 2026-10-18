@@ -52,3 +52,4 @@ pub fn encode_resident_module(
 mod tests;
 
 pub mod cache;
+pub mod receipt;

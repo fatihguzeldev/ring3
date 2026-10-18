@@ -12,16 +12,21 @@ impl EngineInstance {
         epoch: u64,
         fields: [u32; 11],
     ) -> Result<(), HostError> {
+        #[cfg(any(target_arch = "wasm32", test))]
+        let progress = self.prepare_execution_progress()?;
         if fields[0] == 3 {
             if fields[1..] != [0; 10] {
                 return Err(HostError::InvalidRequest);
             }
-            return self.finish_need_code_detection(epoch);
+            self.finish_need_code_detection(epoch)?;
+        } else {
+            let (event, restart) =
+                generated_site_with_paging(fields, self.certified_page_fault32(epoch))?;
+            self.finish_exception_detection(epoch, event, restart)?;
+            self.cpu_event = Some(self.consume_exception_detection(epoch)?.into_event());
         }
-        let (event, restart) =
-            generated_site_with_paging(fields, self.certified_page_fault32(epoch))?;
-        self.finish_exception_detection(epoch, event, restart)?;
-        self.cpu_event = Some(self.consume_exception_detection(epoch)?.into_event());
+        #[cfg(any(target_arch = "wasm32", test))]
+        self.commit_execution_progress(progress);
         Ok(())
     }
 }

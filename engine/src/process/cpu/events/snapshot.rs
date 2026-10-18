@@ -45,9 +45,24 @@ impl CpuEvent32 {
     }
 
     pub(in crate::process) fn matches_context(&self, arena: &[u8]) -> bool {
+        self.matches_execution_context(arena, false)
+    }
+
+    #[cfg(any(target_arch = "wasm32", test))]
+    pub(in crate::process) fn matches_folded_context(&self, arena: &[u8]) -> bool {
+        self.matches_execution_context(arena, true)
+    }
+
+    fn matches_execution_context(&self, arena: &[u8], folded_retired: bool) -> bool {
         use crate::abi::{arena::*, x86::*};
+        let exit = decode_exit(&arena[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE]).map(|mut exit| {
+            if folded_retired {
+                exit.retired = self.exit.retired;
+            }
+            exit
+        });
         decode_state(&arena[STATE_OFFSET..STATE_OFFSET + STATE_SIZE]) == Ok(self.state)
-            && decode_exit(&arena[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE]) == Ok(self.exit)
+            && exit == Ok(self.exit)
             && decode_state_metadata(&arena[STATE_OFFSET..STATE_OFFSET + STATE_SIZE])
                 .is_ok_and(|metadata| metadata.ss_debug_shadow == self.ss_debug_shadow)
             && decode_x87(&arena[X87_OFFSET..X87_OFFSET + X87_SIZE]) == Ok(self.x87)

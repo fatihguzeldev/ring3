@@ -379,14 +379,15 @@ pub(crate) use loading::{
 mod execution;
 pub(crate) use execution::{
     acknowledge_cache_eviction, acknowledge_resident_callback_installation,
-    acknowledge_resident_installation, cache_usage, cancel_cache_request, compile, compile_entries,
-    compile_resident, compile_resident_callback_unit, compile_resident_entries,
-    compile_resident_with_gates, compile_stopped_entry, compile_stopped_resident_entry,
-    compile_with_gates, configure_execution, discard_installed_resident,
-    discard_unacknowledged_resident, dispatcher_module, find_installed_resident, find_resident,
-    generation, guard, guard_dispatch_entry, guard_resident, install_cached_entry, module_len,
-    module_ptr, pending_cache_request, prepare_cache_entry, prepare_cache_promotion,
-    resident_module, retire_stale_resident,
+    acknowledge_resident_installation, begin_execution_receipt, cache_usage, cancel_cache_request,
+    compile, compile_entries, compile_resident, compile_resident_callback_unit,
+    compile_resident_entries, compile_resident_with_gates, compile_stopped_entry,
+    compile_stopped_resident_entry, compile_with_gates, configure_execution,
+    discard_installed_resident, discard_unacknowledged_resident, dispatcher_module,
+    find_installed_resident, find_resident, finish_execution_receipt, generation, guard,
+    guard_dispatch_entry, guard_resident, install_cached_entry, module_len, module_ptr,
+    pending_cache_request, prepare_cache_entry, prepare_cache_promotion, resident_module,
+    retire_stale_resident,
 };
 
 mod calls;

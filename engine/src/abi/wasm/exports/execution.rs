@@ -1,6 +1,8 @@
 mod cache;
 
 export_process_calls! {
+    begin_execution_receipt(key_low: u32, key_high: u32, budget: u32, unit_low: u32, unit_high: u32, dispatch: u32);
+    finish_execution_receipt(key_low: u32, key_high: u32, token_low: u32, token_high: u32);
     compile(count: u32);
     generation();
     compile_with_gates(count: u32, gate_count: u32);

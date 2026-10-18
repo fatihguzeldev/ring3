@@ -24,7 +24,7 @@ impl EngineInstance {
             + self.windows_replies.len()
             + self.ole32_pending_owners().count()
             + self.automation_pending_owners().count()
-            + 8)
+            + 10)
         .checked_add(saved)
         .ok_or(HostError::Resident(
             crate::cpu::dbt::RegistryError::Allocation,
@@ -83,6 +83,8 @@ impl EngineInstance {
         pins.extend(self.threads.execution_pins());
         pins.extend(self.exceptions.execution_pins());
         pins.extend(self.modules.execution_pins());
+        #[cfg(any(target_arch = "wasm32", test))]
+        pins.extend(self.execution_frame_pins());
         if let Some(registry) = &self.registry
             && let Some(value) = registry.pending_owner()
         {
