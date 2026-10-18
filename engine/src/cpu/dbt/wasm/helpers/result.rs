@@ -11,6 +11,7 @@ use wasm_encoder::{BlockType, InstructionSink};
 pub(in crate::cpu::dbt::wasm) struct ResultContext {
     pub(in crate::cpu::dbt::wasm) paging_configured: bool,
     paging_access_mask: Option<u32>,
+    zero_span_validator: Option<u32>,
 }
 
 impl From<Imports> for ResultContext {
@@ -18,6 +19,7 @@ impl From<Imports> for ResultContext {
         Self {
             paging_configured: imports.paging_configured,
             paging_access_mask: None,
+            zero_span_validator: imports.zero_span_validator,
         }
     }
 }
@@ -27,6 +29,7 @@ impl ResultContext {
         Self {
             paging_configured: false,
             paging_access_mask: None,
+            zero_span_validator: None,
         }
     }
 
@@ -44,6 +47,7 @@ impl ResultContext {
     }
 }
 
+pub(in crate::cpu::dbt::wasm) mod outlined;
 pub(in crate::cpu::dbt::wasm) mod paging;
 
 pub(in crate::cpu::dbt::wasm) fn value(code: &mut InstructionSink<'_>) {
@@ -77,6 +81,16 @@ pub(in crate::cpu::dbt::wasm) fn validate(
     exit_depth: u32,
     context: ResultContext,
 ) {
+    if length == 0
+        && access_mask == 0
+        && !allow_smc
+        && context.paging_configured
+        && context.paging_access_mask.is_none()
+        && let Some(index) = context.zero_span_validator
+    {
+        outlined::call(code, index, exit_depth);
+        return;
+    }
     validate_span(
         code,
         length,

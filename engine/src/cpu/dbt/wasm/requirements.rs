@@ -27,6 +27,7 @@ pub(in crate::cpu::dbt::wasm) struct ModuleRequirements {
     pub(in crate::cpu::dbt::wasm) has_repeat: bool,
     pub(in crate::cpu::dbt::wasm) has_segments: bool,
     pub(in crate::cpu::dbt::wasm) has_segment_check: bool,
+    pub(in crate::cpu::dbt::wasm) has_zero_span_validator: bool,
     pub(in crate::cpu::dbt::wasm) upper_xstate: bool,
 }
 
@@ -206,6 +207,20 @@ impl ModuleRequirements {
                 });
         let upper_xstate =
             crate::cpu::x86::capabilities::AVX_ENABLED && (imports.cpu_xsave || imports.cpu_xrstor);
+        // register x87 operations emit the same ordinary result checks at each helper site.
+        // other modules retain their current layout without an unused local function.
+        let has_zero_span_validator = has_x87
+            && paging_configured
+            && blocks
+                .iter()
+                .flat_map(|block| &block.instructions)
+                .any(|instruction| {
+                    matches!(
+                        instruction.operation(),
+                        Operation::X87 { operation, address: None, .. }
+                            if operation.read_size() == 0 && operation.write_size() == 0
+                    )
+                });
         Self {
             imports,
             modify,
@@ -225,6 +240,7 @@ impl ModuleRequirements {
             has_repeat,
             has_segments,
             has_segment_check,
+            has_zero_span_validator,
             upper_xstate,
         }
     }
