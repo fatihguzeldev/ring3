@@ -392,6 +392,10 @@ name = "windows_user32_activation_wasm"
 path = "tests/windows/user32/activation/wasm.rs"
 
 [[test]]
+name = "windows_user32_keyboard_hooks_wasm"
+path = "tests/windows/user32/hooks/keyboard/wasm.rs"
+
+[[test]]
 name = "windows_activation_wasm"
 path = "tests/windows/activation/wasm.rs"
 
