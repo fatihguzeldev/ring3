@@ -55,6 +55,20 @@ impl User32Context32 {
             args[3],
             queue_mask,
         )? {
+            if let Some(outcome) = self.begin_keyboard_message(
+                super::hooks::KeyboardQuery32 {
+                    api,
+                    arguments: core::array::from_fn(|index| args.get(index).copied().unwrap_or(0)),
+                    context,
+                    remove,
+                    observed,
+                },
+                index,
+                message,
+                memory,
+            )? {
+                return Ok(outcome);
+            }
             let (sequence, activation) = self.state.message_activation(index);
             let delivery = self.provenance.prepare(
                 MessageIdentity32 {
@@ -261,42 +275,21 @@ impl User32Context32 {
             }
             Err(error) => return Err(error),
         };
-        if let Some((index, message)) = message {
-            let (sequence, activation) = self.state.message_activation(index);
-            let delivery = self.provenance.prepare(
-                MessageIdentity32 {
-                    timer: false,
-                    sequence,
-                },
-                message,
-                activation,
-            )?;
-            memory::write_message(memory, output, message)?;
-            self.provenance.commit(delivery);
-            self.observe_queue_with_timers(
-                thread,
-                if min == 0 && max == 0 {
-                    u32::MAX
-                } else {
-                    !0x100
-                },
-            );
-            self.input.message = message;
-            if let Some(keyboard) = self.state.remove_message(index) {
-                self.input.queued = keyboard.state;
-            }
-            self.raw_input.mark_delivered(
-                thread,
-                if message.message == 0xff {
-                    message.lparam
-                } else {
-                    0
-                },
-            );
+        if message.is_some() {
             self.pending.pop();
-            Ok(User32Outcome32::Return(u32::from(
-                message.message != 0x0012,
-            )))
+            let outcome = self.retrieve_message(
+                User32Api32::GetMessageW,
+                &[output, window, min, max],
+                memory,
+                User32CallContext32 {
+                    thread_id: thread,
+                    ..self.runtime_input
+                },
+            );
+            if outcome.is_err() {
+                self.pending.push(pending);
+            }
+            outcome
         } else if let Some(message) = self.state.paint_message(
             thread,
             window,

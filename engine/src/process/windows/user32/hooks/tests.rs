@@ -8,6 +8,9 @@ use crate::{
     windows::{user32::User32Api32, window::WindowHandle32},
 };
 
+#[path = "tests/keyboard.rs"]
+mod keyboard;
+
 fn setup() -> (User32Context32, AddressSpace, User32CallContext32, u32) {
     let (mut context, mut memory, call) = fixture();
     memory

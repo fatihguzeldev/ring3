@@ -19,12 +19,15 @@ impl User32Context32 {
         window: WindowHandle32,
         scratch: Scratch32,
     ) -> Option<HookCall32> {
-        self.hooks.first(thread).map(|hook| HookCall32 {
-            handle: hook.handle,
-            thread,
-            procedure: hook.procedure,
-            arguments: [3, window.get(), scratch.address.0 + 64],
-        })
+        self.hooks
+            .first(thread, HookKind32::Cbt)
+            .map(|hook| HookCall32 {
+                kind: HookKind32::Cbt,
+                handle: hook.handle,
+                thread,
+                procedure: hook.procedure,
+                arguments: [3, window.get(), scratch.address.0 + 64],
+            })
     }
     pub(in crate::process::windows::user32) fn apply_creation_hook(
         &mut self,

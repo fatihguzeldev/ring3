@@ -25,12 +25,20 @@ impl User32Context32 {
                 if a[1] == 0 {
                     return Err(User32Error32::Win32(1427));
                 }
-                if kind != 5 || a[3] != c.thread_id {
+                if !matches!(kind, 2 | 5) || a[3] != c.thread_id {
                     return Err(User32Error32::Win32(120));
                 }
                 memory.check_span(GuestAddress(a[1]), 1, Access::Execute)?;
                 self.hooks
-                    .insert(c.thread_id, GuestAddress(a[1]))
+                    .insert(
+                        if kind == 2 {
+                            HookKind32::Keyboard
+                        } else {
+                            HookKind32::Cbt
+                        },
+                        c.thread_id,
+                        GuestAddress(a[1]),
+                    )
                     .map(User32Outcome32::Return)
             }
             UnhookWindowsHookEx => {
@@ -48,15 +56,17 @@ impl User32Context32 {
                                 stage: CreateStage32::Hook(call),
                                 ..
                             } => Some(call),
+                            Continuation32::Keyboard(call) => Some(call.hook),
                             _ => None,
                         });
                 let Some(active) = active.filter(|active| active.thread == c.thread_id) else {
                     return Ok(User32Outcome32::Return(0));
                 };
-                let Some(next) = self.hooks.next(c.thread_id, active.handle) else {
+                let Some(next) = self.hooks.next(c.thread_id, active.kind, active.handle) else {
                     return Ok(User32Outcome32::Return(0));
                 };
                 self.start(Continuation32::Hook(HookCall32 {
+                    kind: active.kind,
                     handle: next.handle,
                     thread: next.thread,
                     procedure: next.procedure,

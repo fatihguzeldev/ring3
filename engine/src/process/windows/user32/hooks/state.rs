@@ -1,7 +1,9 @@
+use super::HookKind32;
 use crate::{memory::GuestAddress, windows::user32::User32Error32};
 
 #[derive(Clone, Copy)]
 pub(super) struct Hook32 {
+    pub kind: HookKind32,
     pub handle: u32,
     pub thread: u32,
     pub procedure: GuestAddress,
@@ -16,6 +18,7 @@ pub(in crate::process::windows::user32) struct Hooks32 {
 impl Hooks32 {
     pub(super) fn insert(
         &mut self,
+        kind: HookKind32,
         thread: u32,
         procedure: GuestAddress,
     ) -> Result<u32, User32Error32> {
@@ -32,6 +35,7 @@ impl Hooks32 {
             .map_err(|_| User32Error32::Allocation)?;
         let handle = 0x4000_0000 | serial;
         self.entries.push(Hook32 {
+            kind,
             handle,
             thread,
             procedure,
@@ -49,20 +53,20 @@ impl Hooks32 {
         Ok(())
     }
     pub(in crate::process::windows::user32) fn first_for_thread(&self, thread: u32) -> bool {
-        self.first(thread).is_some()
+        self.first(thread, HookKind32::Cbt).is_some()
     }
-    pub(super) fn first(&self, thread: u32) -> Option<Hook32> {
+    pub(super) fn first(&self, thread: u32, kind: HookKind32) -> Option<Hook32> {
         self.entries
             .iter()
             .rev()
-            .find(|hook| hook.thread == thread)
+            .find(|hook| hook.thread == thread && hook.kind == kind)
             .copied()
     }
-    pub(super) fn next(&self, thread: u32, after: u32) -> Option<Hook32> {
+    pub(super) fn next(&self, thread: u32, kind: HookKind32, after: u32) -> Option<Hook32> {
         self.entries
             .iter()
             .rev()
-            .find(|hook| hook.thread == thread && hook.handle < after)
+            .find(|hook| hook.thread == thread && hook.kind == kind && hook.handle < after)
             .copied()
     }
     pub(in crate::process::windows::user32) fn retire_thread(&mut self, thread: u32) {

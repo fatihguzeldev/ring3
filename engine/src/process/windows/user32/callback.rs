@@ -38,6 +38,7 @@ pub(super) enum PositionStage32 {
 #[derive(Clone, Copy)]
 pub(super) enum Continuation32 {
     Hook(super::hooks::HookCall32),
+    Keyboard(super::hooks::KeyboardMessage32),
     MenuBar(super::menus::bar::MenuBar32),
     CommonLayout(super::common::layout::CommonLayout32),
     TabTooltip(super::common::tab::tooltip::TabTooltip32),
@@ -188,6 +189,7 @@ impl User32Context32 {
                 });
             }
             Continuation32::Hook(call) => return self.hook_outcome(call, pending.token),
+            Continuation32::Keyboard(call) => return self.hook_outcome(call.hook, pending.token),
             Continuation32::ResourceProcedure {
                 procedure,
                 arguments,
@@ -480,6 +482,7 @@ impl User32Context32 {
             .cloned()
             .ok_or(User32Error32::InvalidToken)?;
         match pending.continuation {
+            Continuation32::Keyboard(call) => self.complete_keyboard_message(call, result, memory),
             Continuation32::ResourceDialog { .. }
             | Continuation32::FilePrompt(_)
             | Continuation32::MenuPopup { .. }

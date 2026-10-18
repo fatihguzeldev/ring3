@@ -55,15 +55,20 @@ impl EngineInstance {
         self.check_windows_thread_write()?;
         match reply.provider {
             WindowsCallbackProvider32::User32 => {
-                let queue = if self
-                    .user32
-                    .as_ref()
-                    .is_some_and(|context| context.app_queue_may_change(reply.continuation))
-                {
-                    self.prepare_user32_activation_queues()?
-                } else {
-                    None
-                };
+                let queue =
+                    if self
+                        .user32
+                        .as_ref()
+                        .is_some_and(|context| context.app_queue_may_change(reply.continuation))
+                    {
+                        self.prepare_user32_activation_queues()?
+                    } else if self.user32.as_ref().is_some_and(|context| {
+                        context.keyboard_queue_may_change(reply.continuation)
+                    }) {
+                        self.prepare_user32_queue_change()?
+                    } else {
+                        None
+                    };
                 let flags = self.user32.as_ref().and_then(|context| {
                     context.preview_completion_input_flags(reply.continuation, result)
                 });

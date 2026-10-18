@@ -185,6 +185,12 @@ impl MessageQueue32 {
             self.quits.remove(index - self.limit).keyboard
         }
     }
+    pub(crate) fn keyboard(&self, index: usize) -> Option<QueuedKeyboard32> {
+        self.posted.get(index).and_then(|slot| slot.keyboard)
+    }
+    pub(crate) fn index_by_sequence(&self, sequence: u64) -> Option<usize> {
+        self.posted.iter().position(|slot| slot.id == sequence)
+    }
     pub(crate) fn discard_input(&mut self) {
         self.posted.retain(|slot| !slot.input);
     }

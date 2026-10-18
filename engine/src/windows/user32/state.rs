@@ -555,6 +555,12 @@ impl User32State32 {
     pub(crate) fn remove_message(&mut self, index: usize) -> Option<super::QueuedKeyboard32> {
         self.queue.remove(index)
     }
+    pub(crate) fn message_keyboard(&self, index: usize) -> Option<super::QueuedKeyboard32> {
+        self.queue.keyboard(index)
+    }
+    pub(crate) fn message_index_by_sequence(&self, sequence: u64) -> Option<usize> {
+        self.queue.index_by_sequence(sequence)
+    }
 
     fn is_descendant(&self, mut window: u32, parent: u32) -> bool {
         for _ in 0..self.slots.len() + 1 {

@@ -1,12 +1,21 @@
 mod calls;
 mod creation;
+mod keyboard;
 mod state;
 use super::{User32Callback32, User32Outcome32};
 use crate::{memory::GuestAddress, windows::user32::User32Error32};
+pub(in crate::process::windows::user32) use keyboard::{KeyboardMessage32, KeyboardQuery32};
 pub(super) use state::Hooks32;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum HookKind32 {
+    Keyboard,
+    Cbt,
+}
 
 #[derive(Clone, Copy)]
 pub(super) struct HookCall32 {
+    pub kind: HookKind32,
     pub handle: u32,
     pub thread: u32,
     pub procedure: GuestAddress,

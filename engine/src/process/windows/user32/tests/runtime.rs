@@ -1,4 +1,7 @@
 use super::*;
+
+#[path = "runtime/keyboard.rs"]
+mod keyboard;
 use crate::{
     abi::{
         arena::{EXIT_OFFSET, STATE_OFFSET, TRANSFER_OFFSET},
