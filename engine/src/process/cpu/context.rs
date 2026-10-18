@@ -31,23 +31,6 @@ pub(in crate::process) struct ExtendedCpuState {
 }
 
 impl ExtendedCpuState {
-    #[cfg(any(target_arch = "wasm32", test))]
-    pub(in crate::process) fn capture_cached(
-        arena: &[u8],
-        validated: Option<&Self>,
-    ) -> Result<Self, HostError> {
-        if let Some(state) = validated
-            && state.matches(arena)
-            && arena.get(
-                SEGMENT_BASES_RECORD_OFFSET
-                    ..SEGMENT_BASES_RECORD_OFFSET + SEGMENT_BASES_RECORD_SIZE,
-            ) == state.segment_bases.as_ref().map(|bases| bases.as_slice())
-        {
-            return Ok(*state);
-        }
-        Self::capture(arena)
-    }
-
     pub(in crate::process) fn capture(arena: &[u8]) -> Result<Self, HostError> {
         let upper = arena
             .get(YMM_OFFSET..YMM_OFFSET + YMM_SIZE)
@@ -164,56 +147,6 @@ mod tests {
         },
         windows::{CallFrame32, CallingConvention32},
     };
-
-    #[test]
-    fn validated_context_reuse_matches_fresh_capture_for_every_mutated_record_byte() {
-        let mut engine = EngineInstance::new(1, 97).unwrap();
-        engine
-            .set_segment_base(crate::cpu::x86::SegmentRegister::Ds, 0x5000)
-            .unwrap();
-        let original = engine.arena().to_vec();
-        let previous = ExtendedCpuState::capture(&original).unwrap();
-        assert_eq!(
-            ExtendedCpuState::capture_cached(&original, Some(&previous)),
-            Ok(previous)
-        );
-        for (offset, size) in [
-            (0, STATE_SIZE),
-            (X87_OFFSET, X87_SIZE),
-            (SIMD_OFFSET, SIMD_SIZE),
-            (SEGMENTS_OFFSET, SEGMENTS_SIZE),
-            (SEGMENT_BASES_RECORD_OFFSET, SEGMENT_BASES_RECORD_SIZE),
-            (YMM_OFFSET, YMM_SIZE),
-        ] {
-            for index in offset..offset + size {
-                let mut changed = original.clone();
-                changed[index] ^= 0xff;
-                assert_eq!(
-                    ExtendedCpuState::capture_cached(&changed, Some(&previous)),
-                    ExtendedCpuState::capture(&changed),
-                    "record byte {index}"
-                );
-            }
-        }
-        assert_eq!(
-            ExtendedCpuState::capture_cached(&original, None),
-            Ok(previous)
-        );
-    }
-
-    #[test]
-    fn legacy_context_reuse_keeps_ignored_segment_base_payload_exact() {
-        let mut engine = EngineInstance::new(1, 97).unwrap();
-        let previous = ExtendedCpuState::capture(engine.arena()).unwrap();
-        engine.arena_mut().unwrap()[SEGMENT_BASES_RECORD_OFFSET + 28] ^= 1;
-        assert!(previous.matches(engine.arena()));
-        let fresh = ExtendedCpuState::capture(engine.arena()).unwrap();
-        assert_ne!(fresh, previous);
-        assert_eq!(
-            ExtendedCpuState::capture_cached(engine.arena(), Some(&previous)),
-            Ok(fresh)
-        );
-    }
 
     #[test]
     fn rf_ss_shadow_and_nonflat_segments_survive_call_completion_and_callback_abort() {

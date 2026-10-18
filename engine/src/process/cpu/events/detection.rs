@@ -304,8 +304,7 @@ impl EngineInstance {
         if !event.matches_exit(exit) {
             return Err(HostError::Call(CallError::InvalidStop));
         }
-        let extended =
-            ExtendedCpuState::capture_cached(arena, self.validated_extended_state.as_ref())?;
+        let extended = ExtendedCpuState::capture(arena)?;
         let work: [u8; WORK_SIZE] = arena[WORK_OFFSET..WORK_OFFSET + WORK_SIZE]
             .try_into()
             .unwrap();
@@ -382,7 +381,6 @@ impl EngineInstance {
             guard_page,
         };
         self.exception_detection.as_mut().unwrap()[0] = DetectionSlot32::Ready(record);
-        self.validated_extended_state = Some(extended);
         Ok(())
     }
 
@@ -407,8 +405,7 @@ impl EngineInstance {
         if exit.reason != ExitReason::NeedCode {
             return Err(HostError::Call(CallError::InvalidStop));
         }
-        let extended =
-            ExtendedCpuState::capture_cached(arena, self.validated_extended_state.as_ref())?;
+        let extended = ExtendedCpuState::capture(arena)?;
         let work = &arena[WORK_OFFSET..WORK_OFFSET + WORK_SIZE];
         header::validate(work, *b"R3WK", WORK_SIZE)
             .map_err(|_| HostError::Call(CallError::InvalidStop))?;
@@ -430,7 +427,6 @@ impl EngineInstance {
             work: work.try_into().unwrap(),
         };
         self.exception_detection.as_mut().unwrap()[0] = DetectionSlot32::Returned(returned);
-        self.validated_extended_state = Some(extended);
         Ok(())
     }
 

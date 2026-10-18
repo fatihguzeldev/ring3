@@ -42,10 +42,7 @@ impl EngineInstance {
                     .map_err(|_| HostError::Call(CallError::InvalidStop))?;
                 decode_exit(&self.arena()[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE])
                     .map_err(|_| HostError::Call(CallError::InvalidStop))?;
-                ExtendedCpuState::capture_cached(
-                    self.arena(),
-                    self.validated_extended_state.as_ref(),
-                )?;
+                ExtendedCpuState::capture(self.arena())?;
                 let work = &self.arena()[WORK_OFFSET..WORK_OFFSET + WORK_SIZE];
                 header::validate(work, *b"R3WK", WORK_SIZE)
                     .map_err(|_| HostError::Call(CallError::InvalidStop))?;
