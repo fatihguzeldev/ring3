@@ -25,10 +25,15 @@ impl EngineInstance {
             .try_reserve_exact(config.units as usize)
             .map_err(|_| HostError::Resident(crate::cpu::dbt::RegistryError::Allocation))?;
         installations.resize(config.units as usize, None);
+        let mut installations_by_id = Vec::new();
+        installations_by_id
+            .try_reserve_exact(config.units as usize)
+            .map_err(|_| HostError::Resident(crate::cpu::dbt::RegistryError::Allocation))?;
         let dispatcher = emit_dispatcher_with_capacity(self.key, config.units);
         self.execution_cache = Some(cache);
         self.resident = Some(registry);
         self.resident_installations = installations;
+        self.resident_installations_by_id = installations_by_id;
         self.dispatcher = Some(dispatcher);
         Ok(())
     }

@@ -82,6 +82,8 @@ pub struct EngineInstance {
     pub(in crate::process) dispatcher: Option<Vec<u8>>,
     pub(in crate::process) resident: Option<ResidentRegistry>,
     pub(in crate::process) resident_installations: Vec<Option<ResidentInstallation>>,
+    // Sorted by unit ID; lookups must still validate the canonical slot receipt.
+    pub(in crate::process) resident_installations_by_id: Vec<ResidentInstallation>,
     pub(in crate::process) execution_cache:
         Option<crate::process::execution::cache::ExecutionCache32>,
     pub(in crate::process) key: u64,
@@ -147,6 +149,10 @@ impl EngineInstance {
             .map_err(|_| HostError::Infrastructure)?;
         arena.resize(ARENA_SIZE, 0);
         arena::initialize(&mut arena).map_err(|_| HostError::Infrastructure)?;
+        let mut resident_installations_by_id = Vec::new();
+        resident_installations_by_id
+            .try_reserve_exact(RESIDENT_INSTALLATION_SLOTS)
+            .map_err(|_| HostError::Infrastructure)?;
         Ok(Self {
             console: crate::windows::console::ConsoleControl32::new(),
             native_diagnostics: Default::default(),
@@ -169,6 +175,7 @@ impl EngineInstance {
             dispatcher: Some(emit_dispatcher(key)),
             resident: None,
             resident_installations: vec![None; RESIDENT_INSTALLATION_SLOTS],
+            resident_installations_by_id,
             execution_cache: None,
             key,
             generation: 0,
@@ -296,6 +303,7 @@ impl EngineInstance {
         self.dispatcher = None;
         self.resident = None;
         self.resident_installations.clear();
+        self.resident_installations_by_id.clear();
         self.memory = None;
         self.windows_memory =
             crate::process::windows::memory::WindowsMemoryRuntime32::new(Default::default())

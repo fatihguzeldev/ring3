@@ -229,6 +229,7 @@ struct Retained {
     usage: RegistryUsage,
     units: Vec<(u64, Vec<u8>, usize)>,
     installations: Vec<Option<ResidentInstallation>>,
+    installations_by_id: Vec<ResidentInstallation>,
     pages: Vec<PageObservation>,
 }
 
@@ -292,6 +293,7 @@ fn retained(f: &Fixture) -> Retained {
             })
             .collect(),
         installations: engine.resident_installations.clone(),
+        installations_by_id: engine.resident_installations_by_id.clone(),
         pages: PAGES
             .into_iter()
             .map(|address| {
@@ -748,6 +750,7 @@ fn discard_installed_returns_exact_byte_credit_under_a_tight_registry_budget() {
         .get();
     f.engine.resident = Some(registry);
     f.engine.resident_installations = vec![None; 8];
+    f.engine.resident_installations_by_id.clear();
     f.engine
         .acknowledge_resident_installation(KEY, id, 0)
         .unwrap();

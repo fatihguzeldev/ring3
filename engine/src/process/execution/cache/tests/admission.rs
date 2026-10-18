@@ -58,6 +58,7 @@ fn eviction_requires_exact_quiescent_receipt_and_only_then_reclaims_slot_and_art
         (CacheRequestKind32::Evict, second.unit_id)
     );
     let before = engine.cache_usage().unwrap();
+    let installations = engine.resident_installations_by_id.clone();
     assert_eq!(
         engine.acknowledge_cache_eviction(
             KEY,
@@ -68,6 +69,7 @@ fn eviction_requires_exact_quiescent_receipt_and_only_then_reclaims_slot_and_art
         Err(HostError::InvalidRequest)
     );
     assert_eq!(engine.cache_usage().unwrap(), before);
+    assert_eq!(engine.resident_installations_by_id, installations);
     assert!(
         engine
             .resident
@@ -87,6 +89,12 @@ fn eviction_requires_exact_quiescent_receipt_and_only_then_reclaims_slot_and_art
     assert_eq!(engine.cache_usage().unwrap().evictions, 1);
     assert!(
         engine
+            .resident_installations_by_id
+            .iter()
+            .all(|installed| installed.unit_id != second.unit_id)
+    );
+    assert!(
+        engine
             .resident
             .as_ref()
             .unwrap()
@@ -95,6 +103,13 @@ fn eviction_requires_exact_quiescent_receipt_and_only_then_reclaims_slot_and_art
     );
     let third = install(&mut engine, 0x1040);
     assert_eq!(third.slot, second.slot);
+    assert_eq!(
+        engine
+            .lookup_installed_resident(KEY, 0x1040)
+            .unwrap()
+            .unit_id,
+        third.unit_id
+    );
     assert_eq!(
         engine
             .lookup_installed_resident(KEY, 0x1000)

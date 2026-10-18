@@ -91,7 +91,7 @@ impl EngineInstance {
             .ok_or(HostError::Resident(RegistryError::InvalidUnit))?
             .discard_current_raw(memory, id)
             .map_err(HostError::Resident)?;
-        self.resident_installations[slot] = None;
+        self.remove_resident_installation(id);
         self.cache_track_removal(id);
         Ok(())
     }
@@ -123,11 +123,7 @@ impl EngineInstance {
             .ok_or(HostError::Resident(RegistryError::InvalidUnit))?
             .retire_stale_raw(memory, id)
             .map_err(HostError::Resident)?;
-        for installed in &mut self.resident_installations {
-            if installed.is_some_and(|entry| entry.unit_id == id) {
-                *installed = None;
-            }
-        }
+        self.remove_resident_installation(id);
         self.cache_track_removal(id);
         Ok(())
     }

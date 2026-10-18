@@ -17,6 +17,8 @@ fn configured_registry_installs_and_resolves_a_ninth_unit_without_changing_legac
                     ..ExecutionConfig32::default()
                 })
                 .unwrap();
+            assert!(engine.resident_installations_by_id.is_empty());
+            assert!(engine.resident_installations_by_id.capacity() >= 16);
         }
         for index in 0..9 {
             let entry = 0x1000 + index * 16;
@@ -71,6 +73,7 @@ fn rejected_configuration_preserves_dispatcher_and_legacy_storage() {
         );
         assert_eq!(engine.dispatcher_bytes(97).unwrap(), bytes);
         assert_eq!(engine.resident_installations.len(), 8);
+        assert!(engine.resident_installations_by_id.is_empty());
         assert!(engine.resident.is_none());
         assert_eq!(engine.execution_config().unwrap(), None);
     }

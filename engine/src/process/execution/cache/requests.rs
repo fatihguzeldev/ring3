@@ -68,7 +68,7 @@ impl EngineInstance {
             .unwrap()
             .discard_quiescent_raw(self.memory.as_ref().unwrap(), victim)
             .map_err(HostError::Resident)?;
-        self.resident_installations[slot as usize] = None;
+        self.remove_resident_installation(victim);
         self.cache_track_removal(victim);
         let cache = self.execution_cache.as_mut().unwrap();
         cache.evictions = cache.evictions.saturating_add(1);
