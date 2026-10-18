@@ -53,12 +53,21 @@ fn verified_need_code_retires_only_the_attempt_and_preserves_observed_fault_meta
         );
         assert_eq!(engine.arena(), before);
         assert_eq!(engine.begin_exception_detection(owner), Ok(epoch + 1));
+        assert!(engine.validated_extended_state.is_some());
+        engine.close();
+        assert!(engine.validated_extended_state.is_none());
     }
 }
 
 #[test]
 fn need_code_cleanup_refuses_nonzero_fields_bad_context_wrong_epoch_and_downgraded_faults() {
     let (mut engine, owner) = fixture(false);
+    let warm = engine.begin_exception_detection(owner).unwrap();
+    stop(&mut engine, ExitReason::NeedCode, 0x1000, 0, 0);
+    engine
+        .finish_generated_detection(warm, [3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+        .unwrap();
+    assert!(engine.validated_extended_state.is_some());
     let epoch = engine.begin_exception_detection(owner).unwrap();
     observed_fault(&mut engine);
     stop(&mut engine, ExitReason::NeedCode, 0x1000, 0, 0);
