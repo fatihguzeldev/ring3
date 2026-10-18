@@ -3,11 +3,14 @@ use super::*;
 impl HeapManager32 {
     pub(super) fn coalesce(&mut self, heap: usize) {
         group::coalesce_blocks(&mut self.heaps[heap].blocks);
+        let heap_state = &mut self.heaps[heap];
+        heap_state.free.rebuild(&heap_state.blocks);
         self.rebuild_small_blocks(heap);
     }
 
     pub(super) fn coalesce_at(&mut self, heap: usize, block: usize) {
-        let blocks = &mut self.heaps[heap].blocks;
+        let heap_state = &mut self.heaps[heap];
+        let blocks = &mut heap_state.blocks;
         debug_assert!(blocks[block].size.is_none());
         let first = if block > 0 && blocks[block - 1].size.is_none() {
             block - 1
@@ -19,12 +22,20 @@ impl HeapManager32 {
         } else {
             block
         };
+        if first != block {
+            heap_state.free.remove(blocks[first]);
+        }
+        if last != block {
+            heap_state.free.remove(blocks[last]);
+        }
         for next in first + 1..=last {
-            blocks[first].extent += blocks[next].extent;
+            let extent = blocks[next].extent;
+            blocks[first].extent += extent;
         }
         if first != last {
             blocks.drain(first + 1..=last);
         }
+        heap_state.free.insert(blocks[first]);
         self.rebuild_small_blocks(heap);
     }
 }

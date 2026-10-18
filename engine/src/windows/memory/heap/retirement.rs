@@ -4,6 +4,7 @@ pub(crate) struct PreparedHeapRetirement32 {
     heap: usize,
     handle: u32,
     blocks: Vec<Block32>,
+    free: free::FreeBlocks32,
 }
 
 impl HeapManager32 {
@@ -34,10 +35,12 @@ impl HeapManager32 {
             blocks[block].allocation = 0;
         }
         group::coalesce_blocks(&mut blocks);
+        let free = free::FreeBlocks32::new(&blocks)?;
         Ok(PreparedHeapRetirement32 {
             heap,
             handle,
             blocks,
+            free,
         })
     }
 
@@ -45,6 +48,7 @@ impl HeapManager32 {
     pub(crate) fn commit_retirement_after_memory(&mut self, prepared: PreparedHeapRetirement32) {
         assert_eq!(self.heaps[prepared.heap].handle, prepared.handle);
         self.heaps[prepared.heap].blocks = prepared.blocks;
+        self.heaps[prepared.heap].free = prepared.free;
         self.rebuild_small_blocks(prepared.heap);
     }
 }

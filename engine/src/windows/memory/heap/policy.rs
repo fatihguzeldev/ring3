@@ -34,14 +34,15 @@ impl SmallBlocks32 {
             Some(16 + band as usize * 8 + ((extent - power / 2) / (power / 16) - 1) as usize)
         }
     }
-    pub(super) fn rebuild(&mut self, blocks: &[Block32]) {
-        self.free.fill(0);
-        for block in blocks.iter().filter(|block| block.size.is_none()) {
-            if let Some(class) = Self::class(block.extent)
-                && self.free[class] == 0
-            {
-                self.free[class] = block.address;
-            }
+    pub(super) fn rebuild(&mut self, blocks: &free::FreeBlocks32) {
+        for (class, address) in self.free.iter_mut().enumerate() {
+            let extent = if class < 16 {
+                (class as u32 + 1) * 8
+            } else {
+                let power = 1 << ((class - 16) / 8 + 8);
+                power / 2 + ((class - 16) % 8 + 1) as u32 * (power / 16)
+            };
+            *address = blocks.exact(extent).unwrap_or(0);
         }
     }
     pub(super) fn allocated(&mut self, original: Block32, extent: u32) {
@@ -88,7 +89,7 @@ impl HeapManager32 {
         }
         if self.heaps[heap].small.is_none() {
             let mut small = SmallBlocks32::new();
-            small.rebuild(&self.heaps[heap].blocks);
+            small.rebuild(&self.heaps[heap].free);
             self.heaps[heap].small = Some(small);
         }
         Ok(())
@@ -112,7 +113,7 @@ impl HeapManager32 {
     pub(super) fn rebuild_small_blocks(&mut self, heap: usize) {
         let heap = &mut self.heaps[heap];
         if let Some(small) = heap.small.as_mut() {
-            small.rebuild(&heap.blocks);
+            small.rebuild(&heap.free);
         }
     }
     pub(super) fn invalid_block(&self, heap: usize, pointer: u32) -> MemoryError32 {

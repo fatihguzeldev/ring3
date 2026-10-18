@@ -80,13 +80,12 @@ impl HeapManager32 {
             .as_ref()
             .and_then(|small| small.find(extent, &self.heaps[heap].blocks))
             .or_else(|| {
-                self.heaps[heap]
-                    .blocks
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, block)| block.size.is_none() && block.extent >= extent)
-                    .min_by_key(|(_, block)| block.extent)
-                    .map(|(index, _)| index)
+                self.heaps[heap].free.find(extent).map(|address| {
+                    self.heaps[heap]
+                        .blocks
+                        .binary_search_by_key(&address, |block| block.address)
+                        .expect("indexed free block remains in the heap")
+                })
             })
             .ok_or(MemoryError32::Capacity)?;
         let original = self.heaps[heap].blocks[block];
@@ -160,6 +159,7 @@ impl HeapManager32 {
             )?;
         }
         let original = prepared.original;
+        self.heaps[heap].free.remove(original);
         self.next_allocation = prepared.allocation;
         self.heaps[heap].blocks[prepared.block] = Block32 {
             address: original.address,
@@ -168,15 +168,16 @@ impl HeapManager32 {
             allocation: prepared.allocation,
         };
         if original.extent > prepared.extent {
-            self.heaps[heap].blocks.insert(
-                prepared.block + 1,
-                Block32 {
-                    address: original.address + prepared.extent,
-                    extent: original.extent - prepared.extent,
-                    size: None,
-                    allocation: 0,
-                },
-            );
+            let remainder = Block32 {
+                address: original.address + prepared.extent,
+                extent: original.extent - prepared.extent,
+                size: None,
+                allocation: 0,
+            };
+            self.heaps[heap]
+                .blocks
+                .insert(prepared.block + 1, remainder);
+            self.heaps[heap].free.insert(remainder);
         }
         self.record_small_allocation(heap, original, prepared.extent);
         Ok(original.address)
@@ -246,7 +247,8 @@ impl HeapManager32 {
                     &zeros,
                 )],
             )?;
-            if adjacent.is_some() {
+            if let Some(adjacent) = adjacent {
+                self.heaps[heap].free.remove(adjacent);
                 self.heaps[heap].blocks.remove(block + 1);
             }
             self.next_allocation = allocation;

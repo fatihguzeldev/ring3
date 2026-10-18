@@ -4,6 +4,7 @@ pub(crate) struct PreparedHeapAllocations32 {
     handle: u32,
     original: Vec<Block32>,
     candidate: Vec<Block32>,
+    free: free::FreeBlocks32,
     addresses: Vec<u32>,
     sizes: Vec<u32>,
     extents: Vec<(u32, u32)>,
@@ -126,10 +127,12 @@ impl HeapManager32 {
         {
             return Err(MemoryError32::Capacity);
         }
+        let free = free::FreeBlocks32::new(&candidate)?;
         Ok(PreparedHeapAllocations32 {
             handle,
             original,
             candidate,
+            free,
             addresses,
             sizes: owned_sizes,
             extents,
@@ -211,6 +214,7 @@ impl HeapManager32 {
             &writes,
         )?;
         self.heaps[heap].blocks = prepared.candidate;
+        self.heaps[heap].free = prepared.free;
         self.next_allocation = prepared.next_allocation;
         self.rebuild_small_blocks(heap);
         Ok(())

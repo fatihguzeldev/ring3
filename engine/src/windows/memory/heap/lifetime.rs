@@ -50,6 +50,8 @@ impl HeapManager32 {
         blocks
             .try_reserve_exact(1)
             .map_err(|_| MemoryError32::Allocation)?;
+        let mut free = free::FreeBlocks32::new(&[])?;
+        free.reserve_for(1)?;
         let handle = vm.allocate(
             memory,
             external,
@@ -79,11 +81,13 @@ impl HeapManager32 {
             size: None,
             allocation: 0,
         });
+        free.insert(blocks[0]);
         self.heaps.push(Heap32 {
             handle,
             maximum,
             flags,
             blocks,
+            free,
             locks: 0,
             small: None,
         });

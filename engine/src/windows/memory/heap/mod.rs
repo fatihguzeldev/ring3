@@ -1,5 +1,6 @@
 mod allocation;
 mod coalescing;
+mod free;
 mod group;
 mod lifetime;
 mod movable;
@@ -31,6 +32,7 @@ struct Heap32 {
     maximum: u32,
     flags: u32,
     blocks: Vec<Block32>,
+    free: free::FreeBlocks32,
     locks: u32,
     small: Option<policy::SmallBlocks32>,
 }
@@ -115,7 +117,9 @@ impl HeapManager32 {
         self.heaps[heap]
             .blocks
             .try_reserve(1)
-            .map_err(|_| MemoryError32::Allocation)
+            .map_err(|_| MemoryError32::Allocation)?;
+        let count = self.heaps[heap].blocks.len() + 1;
+        self.heaps[heap].free.reserve_for(count)
     }
     pub(crate) fn revoke(&mut self, range: PageRange) {
         self.heaps.retain(|heap| {
