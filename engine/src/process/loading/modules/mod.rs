@@ -4,6 +4,8 @@ mod initialization;
 mod input;
 mod lifetime;
 mod loading;
+#[cfg(feature = "observability")]
+mod observation;
 mod source;
 pub(in crate::process) use loading::ModulePlanProbe32;
 pub(in crate::process) use source::CapturedModuleRequest32;

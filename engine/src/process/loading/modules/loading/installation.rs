@@ -297,6 +297,8 @@ impl EngineInstance {
                 pinned: false,
             });
         }
+        #[cfg(feature = "observability")]
+        self.observe_mapped_modules(&loaded.new_ids);
         self.modules.attached.extend(attached);
         if let Some(thread) = new_thread {
             self.modules.thread = Some(thread);

@@ -260,6 +260,8 @@ impl EngineInstance {
         self.commit_secondary_static_tls(secondary_tls);
         self.commit_process_loader_change(loader_change);
         self.modules.remove_records(ids);
+        #[cfg(feature = "observability")]
+        self.observe_unmapped_modules(ids);
         if initial {
             self.modules.thread = None;
             self.threads.reset_primary_thread();

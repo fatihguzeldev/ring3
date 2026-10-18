@@ -3,7 +3,7 @@ use crate::{
     process::{EngineInstance, HostError, ModuleOperation32, loading::modules::ModulePlanProbe32},
 };
 
-fn dll(base: u32) -> Vec<u8> {
+pub(super) fn dll(base: u32) -> Vec<u8> {
     let mut bytes = crate::process::windows::process::test_image_for_startup();
     bytes[0x96..0x98].copy_from_slice(&0x2103u16.to_le_bytes());
     bytes[0xa8..0xac].fill(0);
