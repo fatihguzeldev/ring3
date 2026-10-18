@@ -2,6 +2,8 @@ pub(super) mod actions;
 mod format;
 mod information;
 mod names;
+#[cfg(feature = "observability")]
+mod observation;
 mod properties;
 mod reading;
 use super::DirectInputRuntime32;

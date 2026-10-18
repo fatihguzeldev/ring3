@@ -19,6 +19,8 @@ impl EngineInstance {
         if factory.is_none() && method.is_none() {
             return Ok(false);
         }
+        #[cfg(feature = "observability")]
+        let _capture = self.observer.enter();
         self.validate_windows_provider_owner(owner)?;
         let count = factory.map_or_else(
             || u32::from(method.unwrap().stack_words()),

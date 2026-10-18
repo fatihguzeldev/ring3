@@ -8,6 +8,8 @@ mod enumeration;
 
 mod haptics;
 mod names;
+#[cfg(feature = "observability")]
+mod observation;
 mod reset;
 
 mod effect_files;

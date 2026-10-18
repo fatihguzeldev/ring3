@@ -23,6 +23,8 @@ impl DirectInputRuntime32 {
         device.native.read_state(&mut device.transfer)?;
         memory.write(GuestAddress(address), &device.transfer)?;
         device.native.commit_state_read();
+        #[cfg(feature = "observability")]
+        super::observation::state(pointer.0, device.kind, &device.transfer);
         Ok(0)
     }
     pub(in crate::process::windows::dinput) fn get_data(
@@ -73,6 +75,19 @@ impl DirectInputRuntime32 {
         if args[4] & 1 == 0 {
             device.native.consume_buffer(count)?;
         }
+        #[cfg(feature = "observability")]
+        super::observation::data(
+            pointer.0,
+            requested,
+            count as u32,
+            args[4],
+            result.0,
+            if args[2] == 0 || count == 0 {
+                &[]
+            } else {
+                &device.transfer[..size]
+            },
+        );
         Ok(result.0)
     }
 }
