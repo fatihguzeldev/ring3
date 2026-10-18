@@ -26,12 +26,14 @@ impl ExecutionCache32 {
             hits: AtomicU64::new(0),
             last: AtomicU64::new(increment(&self.clock)),
         });
+        self.free_slots.occupy(slot);
         self.revision = self.revision.saturating_add(1);
     }
     pub(super) fn removed(&mut self, id: u64) {
-        for row in &mut self.entries {
+        for (slot, row) in self.entries.iter_mut().enumerate() {
             if row.as_ref().is_some_and(|row| row.id == id) {
                 *row = None;
+                self.free_slots.release(slot as u32);
             }
         }
         self.revision = self.revision.saturating_add(1);

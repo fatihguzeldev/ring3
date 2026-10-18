@@ -126,10 +126,8 @@ impl EngineInstance {
                 return Err(HostError::Call(CallError::Busy));
             }
             if self
-                .resident_installations
-                .iter()
-                .flatten()
-                .any(|installed| installed.unit_id == pending.request.unit_id)
+                .resident_installation_by_id(pending.request.unit_id)
+                .is_some()
             {
                 return Err(HostError::Call(CallError::Busy));
             }

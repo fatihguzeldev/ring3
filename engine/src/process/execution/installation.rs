@@ -39,10 +39,10 @@ impl EngineInstance {
             .ok_or(HostError::InvalidRequest)?;
         if existing.is_some_and(|installed| installed.unit_id != id)
             || self
-                .resident_installations
-                .iter()
-                .flatten()
-                .any(|installed| installed.unit_id == id && installed.slot != slot)
+                .resident_installations_by_id
+                .binary_search_by_key(&id, |installed| installed.unit_id)
+                .ok()
+                .is_some_and(|position| self.resident_installations_by_id[position].slot != slot)
         {
             return Err(HostError::InvalidRequest);
         }
@@ -72,17 +72,33 @@ impl EngineInstance {
     }
 
     pub(in crate::process) fn remove_resident_installation(&mut self, id: u64) {
-        for installed in &mut self.resident_installations {
-            if installed.is_some_and(|entry| entry.unit_id == id) {
-                *installed = None;
-            }
-        }
         if let Ok(position) = self
             .resident_installations_by_id
             .binary_search_by_key(&id, |installed| installed.unit_id)
         {
-            self.resident_installations_by_id.remove(position);
+            let installed = self.resident_installations_by_id.remove(position);
+            if self.resident_installations[installed.slot as usize] == Some(installed) {
+                self.resident_installations[installed.slot as usize] = None;
+            }
         }
+    }
+
+    pub(in crate::process) fn resident_installation_by_id(
+        &self,
+        id: u64,
+    ) -> Option<ResidentInstallation> {
+        self.resident_installations_by_id
+            .binary_search_by_key(&id, |installed| installed.unit_id)
+            .ok()
+            .map(|position| self.resident_installations_by_id[position])
+            // the reverse index proposes a slot; its exact receipt remains authoritative.
+            .filter(|installed| {
+                self.resident_installations
+                    .get(installed.slot as usize)
+                    .copied()
+                    .flatten()
+                    == Some(*installed)
+            })
     }
 
     pub fn lookup_installed_resident(
@@ -104,18 +120,7 @@ impl EngineInstance {
             return Err(HostError::Call(CallError::Busy));
         }
         let installed = self
-            .resident_installations_by_id
-            .binary_search_by_key(&unit_id, |installed| installed.unit_id)
-            .ok()
-            .map(|position| self.resident_installations_by_id[position])
-            // The reverse index only proposes a slot; its exact receipt remains authoritative.
-            .filter(|installed| {
-                self.resident_installations
-                    .get(installed.slot as usize)
-                    .copied()
-                    .flatten()
-                    == Some(*installed)
-            })
+            .resident_installation_by_id(unit_id)
             .ok_or(HostError::Resident(RegistryError::NotFound {
                 pc: GuestAddress(pc),
             }))?;

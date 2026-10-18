@@ -5,6 +5,7 @@ mod directory;
 mod pins;
 mod promotion;
 mod requests;
+mod slots;
 mod types;
 
 pub(in crate::process) use context::ExecutionCache32;

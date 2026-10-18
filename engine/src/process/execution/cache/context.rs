@@ -21,6 +21,7 @@ impl Default for ExecutionConfig32 {
 pub(in crate::process) struct ExecutionCache32 {
     pub(super) config: ExecutionConfig32,
     pub(super) entries: Vec<Option<CacheEntry32>>,
+    pub(super) free_slots: super::slots::FreeSlots,
     pub(super) request: Option<PendingCache32>,
     pub(super) promotion: Option<PromotionTarget32>,
     pub(super) serial: u64,
@@ -74,9 +75,11 @@ impl ExecutionCache32 {
             .try_reserve_exact(config.units as usize)
             .map_err(|_| RegistryError::Allocation)?;
         entries.resize_with(config.units as usize, || None);
+        let free_slots = super::slots::FreeSlots::new(config.units as usize)?;
         Ok(Self {
             config,
             entries,
+            free_slots,
             request: None,
             promotion: None,
             serial: 1,

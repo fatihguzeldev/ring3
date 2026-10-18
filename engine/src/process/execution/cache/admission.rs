@@ -45,11 +45,7 @@ impl EngineInstance {
             Err(error) => return Err(HostError::Resident(error)),
         };
         if let Some(id) = existing
-            && let Some(installed) = self
-                .resident_installations
-                .iter()
-                .flatten()
-                .find(|installed| installed.unit_id == id)
+            && let Some(installed) = self.resident_installation_by_id(id)
         {
             cache.touch(installed.slot, id);
             return Ok(CacheRequest32 {
@@ -65,7 +61,7 @@ impl EngineInstance {
                     .map_or(CompilationTier32::Baseline, |row| row.tier),
             });
         }
-        let free = self.resident_installations.iter().position(Option::is_none);
+        let free = cache.free_slots.first().map(|slot| slot as usize);
         let usage = registry.usage();
         let quota = existing.is_none()
             && (usage.units >= cache.config.units as usize
