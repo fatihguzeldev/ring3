@@ -473,6 +473,20 @@ impl User32State32 {
     pub(crate) fn commit_sent_change(&mut self, prepared: super::PreparedSentChange32) {
         self.queue.commit_sent_change(prepared);
     }
+    pub(crate) fn prepare_sent_batch(
+        &self,
+        changes: &[(u32, i32)],
+    ) -> Result<super::PreparedSentBatch32, User32Error32> {
+        let mut prepared = self.queue.prepare_sent_batch(changes)?;
+        for &(thread, _) in changes {
+            let paint = self.paint_status(thread);
+            prepared.add_flags(thread, paint.0, paint.1);
+        }
+        Ok(prepared)
+    }
+    pub(crate) fn commit_sent_batch(&mut self, prepared: super::PreparedSentBatch32) {
+        self.queue.commit_sent_batch(prepared);
+    }
     pub(crate) fn observe_queue(&mut self, thread: u32, mask: u32) {
         if mask & 0x20 != 0 {
             for slot in &mut self.slots {

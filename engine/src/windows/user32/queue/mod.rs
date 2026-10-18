@@ -40,7 +40,7 @@ struct SentQueue32 {
     fresh: bool,
 }
 
-pub(crate) use sent::PreparedSentChange32;
+pub(crate) use sent::{PreparedSentBatch32, PreparedSentChange32};
 
 #[cfg(test)]
 mod tests {
