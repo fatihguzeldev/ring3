@@ -267,7 +267,11 @@ impl HeapManager32 {
                     },
                 );
             }
-            self.coalesce(heap);
+            if extent < available {
+                self.coalesce_at(heap, block + 1);
+            } else {
+                self.rebuild_small_blocks(heap);
+            }
             return Ok(pointer);
         }
         if flags & HEAP_REALLOC_IN_PLACE_ONLY != 0 {

@@ -1,4 +1,5 @@
 mod allocation;
+mod coalescing;
 mod group;
 mod lifetime;
 mod movable;
@@ -115,21 +116,6 @@ impl HeapManager32 {
             .blocks
             .try_reserve(1)
             .map_err(|_| MemoryError32::Allocation)
-    }
-    fn coalesce(&mut self, heap: usize) {
-        let blocks = &mut self.heaps[heap].blocks;
-        let mut count = 0;
-        for index in 0..blocks.len() {
-            let block = blocks[index];
-            if count != 0 && blocks[count - 1].size.is_none() && block.size.is_none() {
-                blocks[count - 1].extent += block.extent;
-            } else {
-                blocks[count] = block;
-                count += 1;
-            }
-        }
-        blocks.truncate(count);
-        self.rebuild_small_blocks(heap);
     }
     pub(crate) fn revoke(&mut self, range: PageRange) {
         self.heaps.retain(|heap| {

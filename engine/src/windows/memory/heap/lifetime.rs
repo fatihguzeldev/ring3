@@ -127,7 +127,7 @@ impl HeapManager32 {
         let block = self.block(heap, pointer)?;
         self.heaps[heap].blocks[block].size = None;
         self.heaps[heap].blocks[block].allocation = 0;
-        self.coalesce(heap);
+        self.coalesce_at(heap, block);
         Ok(())
     }
 }
