@@ -41,6 +41,8 @@ impl EngineInstance {
         gate_count: u32,
         format: DescriptorFormat,
     ) -> Result<u32, HostError> {
+        #[cfg(feature = "observability")]
+        let _capture = self.observer.enter();
         self.memory()?;
         if self.pending_call.is_some() || self.callback.is_some() {
             return Err(HostError::Call(CallError::Busy));

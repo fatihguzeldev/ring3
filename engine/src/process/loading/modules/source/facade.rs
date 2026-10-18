@@ -20,6 +20,15 @@ impl EngineInstance {
         epoch: u64,
         token: u64,
     ) -> Result<super::super::ModuleOperation32, HostError> {
+        #[cfg(feature = "observability")]
+        let _capture = self.observer.enter();
+        #[cfg(feature = "observability")]
+        let _scope = ring3_observability::current().scope(
+            ring3_observability::Level::Basic,
+            "engine.loader.modules",
+            "resume_source",
+            &[ring3_observability::Field::unsigned("token", token)],
+        );
         self.memory()?;
         if epoch != self.key {
             return Err(HostError::InvalidArtifact);

@@ -13,6 +13,15 @@ impl EngineInstance {
         actual_base: Option<u32>,
         config: ModuleRuntimeConfig32,
     ) -> Result<ModuleOperation32, HostError> {
+        #[cfg(feature = "observability")]
+        let _capture = self.observer.enter();
+        #[cfg(feature = "observability")]
+        let _scope = ring3_observability::current().scope(
+            ring3_observability::Level::Basic,
+            "engine.loader.modules",
+            "start_process",
+            &[ring3_observability::Field::string("module", name)],
+        );
         self.module_process_capacity()?;
         if self.launch_input_pending() {
             return Err(HostError::Module(ModuleError32::Busy));

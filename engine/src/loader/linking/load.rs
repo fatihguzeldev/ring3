@@ -16,6 +16,16 @@ pub(crate) fn load_linked_profile(
     resident_pages: u32,
     profile: ProviderProfile,
 ) -> Result<LoadedLinkedImage32, LoadError> {
+    #[cfg(feature = "observability")]
+    let _scope = ring3_observability::current().scope(
+        ring3_observability::Level::Basic,
+        "engine.loader.linker",
+        "load",
+        &[ring3_observability::Field::unsigned(
+            "bytes",
+            bytes.len() as u64,
+        )],
+    );
     if !(1..=MAX_RESIDENT_PAGES).contains(&resident_pages) || bytes.len() > MAX_IMAGE_BYTES as usize
     {
         return Err(LoadError::Capacity);

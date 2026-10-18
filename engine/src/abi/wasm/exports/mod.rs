@@ -25,6 +25,8 @@ mod instance;
 mod media;
 mod memory;
 mod modules;
+#[cfg(feature = "observability")]
+mod observability;
 mod paging;
 mod windows;
 mod xstate;

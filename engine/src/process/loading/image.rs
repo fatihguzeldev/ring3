@@ -11,6 +11,8 @@ use crate::{
 
 impl EngineInstance {
     pub fn load_pe32(&mut self, bytes: &[u8]) -> Result<ImageMetadata32, HostError> {
+        #[cfg(feature = "observability")]
+        let _capture = self.observer.enter();
         let pages = self.image_capacity()?;
         let image = load_pe32(bytes, pages).map_err(HostError::Loader)?;
         Ok(self.publish_image(image))
@@ -21,6 +23,8 @@ impl EngineInstance {
         bytes: &[u8],
         actual_base: u32,
     ) -> Result<ImageMetadata32, HostError> {
+        #[cfg(feature = "observability")]
+        let _capture = self.observer.enter();
         let pages = self.image_capacity()?;
         let image = load_pe32_at(bytes, actual_base, pages).map_err(HostError::Loader)?;
         Ok(self.publish_image(image))
@@ -145,6 +149,8 @@ impl EngineInstance {
         gate_base: u32,
         profile: ProviderProfile,
     ) -> Result<M, HostError> {
+        #[cfg(feature = "observability")]
+        let _capture = self.observer.enter();
         let pages = self.image_capacity()?;
         let loaded = load_linked_profile(bytes, actual_base, gate_base, pages, profile)
             .map_err(HostError::Loader)?;

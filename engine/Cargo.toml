@@ -9,7 +9,11 @@ license = "Apache-2.0"
 [lib]
 crate-type = ["rlib", "cdylib"]
 
+[features]
+observability = ["dep:ring3-observability"]
+
 [dependencies]
+ring3-observability = { path = "../observability/rust", optional = true }
 aes = { version = "=0.9.3", default-features = false, features = ["hazmat"] }
 rustc_apfloat = "=0.2.3"
 astro-float-num = { version = "=0.3.7", default-features = false, features = ["std"] }
@@ -38,6 +42,16 @@ oem_cp = "=2.1.2"
 
 [dev-dependencies]
 naga = { version = "=30.0.1", default-features = false, features = ["wgsl-in"] }
+
+[[test]]
+name = "observability"
+path = "tests/observability/native.rs"
+required-features = ["observability"]
+
+[[example]]
+name = "capture"
+path = "examples/observability/capture.rs"
+required-features = ["observability"]
 
 [lints.rust]
 unsafe_code = "deny"

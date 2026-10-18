@@ -198,6 +198,13 @@ pub fn compile_region(
     specs: &[BlockSpec],
     limits: CompileLimits,
 ) -> Result<CompiledRegion, CompileError> {
+    #[cfg(feature = "observability")]
+    let _scope = ring3_observability::current().scope(
+        ring3_observability::Level::Detailed,
+        "engine.cpu.codegen",
+        "compile_region",
+        &[],
+    );
     compile(
         memory,
         specs,
@@ -214,6 +221,13 @@ pub fn compile_entry_region(
     entries: &[GuestAddress],
     limits: CompileLimits,
 ) -> Result<CompiledRegion, CompileError> {
+    #[cfg(feature = "observability")]
+    let _scope = ring3_observability::current().scope(
+        ring3_observability::Level::Detailed,
+        "engine.cpu.codegen",
+        "compile_entries",
+        &[],
+    );
     let prepared = prepare_entry_region(memory, entries, limits)?;
     emit_entry_prepared(memory, prepared, limits, None, None)
 }
@@ -303,6 +317,13 @@ pub(super) fn emit_prepared(
     limits: CompileLimits,
     binding: Option<wasm::EmbeddedBinding>,
 ) -> Result<CompiledRegion, CompileError> {
+    #[cfg(feature = "observability")]
+    let _scope = ring3_observability::current().scope(
+        ring3_observability::Level::Detailed,
+        "engine.cpu.codegen",
+        "emit",
+        &[],
+    );
     let bytes = wasm::emit(&prepared.blocks, binding, prepared.decode_key);
     if bytes.len() > limits.wasm_bytes {
         return Err(CompileError::WasmLimit);

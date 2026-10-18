@@ -44,6 +44,13 @@ pub fn decode_one(
     memory: &AddressSpace,
     pc: GuestAddress,
 ) -> Result<DecodedInstruction, DecodeError> {
+    #[cfg(feature = "observability")]
+    let _scope = ring3_observability::current().scope(
+        ring3_observability::Level::Detailed,
+        "engine.cpu.decode",
+        "instruction",
+        &[ring3_observability::Field::unsigned("pc", u64::from(pc.0))],
+    );
     unbound(snapshot_decode(
         memory,
         decode_core(

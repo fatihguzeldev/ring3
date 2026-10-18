@@ -266,6 +266,16 @@ impl ResidentRegistry {
         authority: crate::cpu::x86::decode::DecodeAuthority,
         tier: super::CompilationTier32,
     ) -> Result<UnitId, RegistryError> {
+        #[cfg(feature = "observability")]
+        let _scope = ring3_observability::current().scope(
+            ring3_observability::Level::Detailed,
+            "engine.cpu.codegen",
+            "compile_cached",
+            &[ring3_observability::Field::unsigned(
+                "pc",
+                u64::from(entry.0),
+            )],
+        );
         self.check_memory(memory)?;
         if self.entries.len() == self.limits.units {
             return Err(RegistryError::UnitCapacity);
@@ -284,6 +294,17 @@ impl ResidentRegistry {
         }
         .map_err(RegistryError::Compile)?;
         let id = allocate_id(&NEXT_UNIT_ID)?;
+        #[cfg(feature = "observability")]
+        let _emission = ring3_observability::current().scope(
+            ring3_observability::Level::Detailed,
+            "engine.cpu.codegen",
+            "emit_resident",
+            &[
+                ring3_observability::Field::unsigned("unit_id", id.get()),
+                ring3_observability::Field::unsigned("pc", u64::from(entry.0)),
+                ring3_observability::Field::unsigned("tier", tier as u64),
+            ],
+        );
         let region = super::artifact::emit_entry_prepared_tier(
             memory,
             prepared,

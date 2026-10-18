@@ -58,6 +58,15 @@ impl EngineInstance {
     }
 
     pub fn commit_module_input(&mut self) -> Result<(), HostError> {
+        #[cfg(feature = "observability")]
+        let _capture = self.observer.enter();
+        #[cfg(feature = "observability")]
+        let _scope = ring3_observability::current().scope(
+            ring3_observability::Level::Basic,
+            "engine.loader.modules",
+            "commit_source",
+            &[],
+        );
         self.module_input_guard()?;
         let input = self
             .modules

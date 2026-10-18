@@ -74,6 +74,16 @@ impl ImagePlan {
 }
 
 pub fn load_pe32(bytes: &[u8], resident_pages: u32) -> Result<LoadedPe32, LoadError> {
+    #[cfg(feature = "observability")]
+    let _scope = ring3_observability::current().scope(
+        ring3_observability::Level::Basic,
+        "engine.loader.pe32",
+        "load",
+        &[ring3_observability::Field::unsigned(
+            "bytes",
+            bytes.len() as u64,
+        )],
+    );
     if !(1..=MAX_RESIDENT_PAGES).contains(&resident_pages) || bytes.len() > MAX_IMAGE_BYTES as usize
     {
         return Err(LoadError::Capacity);
@@ -110,6 +120,16 @@ pub fn load_pe32_at(
     actual_base: u32,
     resident_pages: u32,
 ) -> Result<LoadedPe32, LoadError> {
+    #[cfg(feature = "observability")]
+    let _scope = ring3_observability::current().scope(
+        ring3_observability::Level::Basic,
+        "engine.loader.pe32",
+        "load_at",
+        &[ring3_observability::Field::unsigned(
+            "bytes",
+            bytes.len() as u64,
+        )],
+    );
     if !(1..=MAX_RESIDENT_PAGES).contains(&resident_pages) || bytes.len() > MAX_IMAGE_BYTES as usize
     {
         return Err(LoadError::Capacity);
@@ -217,6 +237,16 @@ pub(super) fn parse_linked(bytes: &[u8]) -> Result<ImagePlan, LoadError> {
 }
 
 fn parse(bytes: &[u8], profile: Profile) -> Result<ImagePlan, LoadError> {
+    #[cfg(feature = "observability")]
+    let _scope = ring3_observability::current().scope(
+        ring3_observability::Level::Detailed,
+        "engine.loader.pe32",
+        "parse",
+        &[ring3_observability::Field::unsigned(
+            "bytes",
+            bytes.len() as u64,
+        )],
+    );
     if bytes.len() < 64 || bytes.get(..2) != Some(b"MZ") {
         return Err(LoadError::Malformed);
     }

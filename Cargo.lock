@@ -851,6 +851,7 @@ dependencies = [
  "lcid",
  "naga",
  "oem_cp",
+ "ring3-observability",
  "roxmltree",
  "rustc_apfloat",
  "rustfft",

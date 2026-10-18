@@ -137,6 +137,8 @@ impl EngineInstance {
         count: u32,
         gate_count: u32,
     ) -> Result<UnitId, HostError> {
+        #[cfg(feature = "observability")]
+        let _capture = self.observer.enter();
         self.memory()?;
         if self.pending_call.is_some() || self.callback.is_some() {
             return Err(HostError::Call(CallError::Busy));
@@ -150,6 +152,8 @@ impl EngineInstance {
         count: u32,
         gate_count: u32,
     ) -> Result<UnitId, HostError> {
+        #[cfg(feature = "observability")]
+        let _capture = self.observer.enter();
         self.memory()?;
         if self.pending_call.is_some() || self.callback.is_some() {
             return Err(HostError::Call(CallError::Busy));

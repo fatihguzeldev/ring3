@@ -33,6 +33,16 @@ pub(crate) fn parse_module_with_limits(
     bytes: &[u8],
     limits: ParserLimits32,
 ) -> Result<PreparedPe32, LoadError> {
+    #[cfg(feature = "observability")]
+    let _scope = ring3_observability::current().scope(
+        ring3_observability::Level::Detailed,
+        "engine.loader.pe32",
+        "parse_module",
+        &[ring3_observability::Field::unsigned(
+            "bytes",
+            bytes.len() as u64,
+        )],
+    );
     let mut budget = read::ParseBudget::new(limits);
     let mut image = headers::parse(bytes, &mut budget)?;
     image.imports = imports::parse(bytes, &image, &mut budget)?;

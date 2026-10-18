@@ -8,6 +8,13 @@ use crate::cpu::dbt::RegistryError;
 mod clock;
 pub(crate) use clock::{advance_cpu_clock, configure_cpu_clock, observe_cpu_clock};
 
+#[cfg(feature = "observability")]
+mod observability;
+#[cfg(feature = "observability")]
+pub(crate) use observability::{
+    configure_observability, observability_drain, observability_finish, observability_status,
+};
+
 mod media;
 pub(crate) use media::*;
 mod windows;
@@ -110,7 +117,10 @@ pub(super) fn status(error: HostError) -> u32 {
             crate::windows::gdi::GdiError32::Capacity => 18,
             _ => 7,
         },
-        HostError::Version(_) | HostError::Shlwapi(_) | HostError::Shell(_) | HostError::Automation(_) => 7,
+        HostError::Version(_)
+        | HostError::Shlwapi(_)
+        | HostError::Shell(_)
+        | HostError::Automation(_) => 7,
         HostError::Activation(error) => match error {
             crate::windows::activation::ActivationError32::NotEnoughMemory => 9,
             crate::windows::activation::ActivationError32::Busy => 12,

@@ -11,6 +11,15 @@ use std::sync::atomic::Ordering;
 
 impl EngineInstance {
     pub fn prepare_cache_entry(&mut self, key: u64, pc: u32) -> Result<CacheRequest32, HostError> {
+        #[cfg(feature = "observability")]
+        let _capture = self.observer.enter();
+        #[cfg(feature = "observability")]
+        let _scope = ring3_observability::current().scope(
+            ring3_observability::Level::Detailed,
+            "engine.cpu.cache",
+            "prepare_entry",
+            &[ring3_observability::Field::unsigned("pc", u64::from(pc))],
+        );
         self.guard_cache_control(key)?;
         let cache = self
             .execution_cache
@@ -106,6 +115,25 @@ impl EngineInstance {
                 victim_slot: slot as u32,
                 tier: CompilationTier32::Baseline,
             };
+            #[cfg(feature = "observability")]
+            ring3_observability::current().instant(
+                ring3_observability::Level::Detailed,
+                "engine.cpu.cache",
+                "eviction.requested",
+                &[
+                    ring3_observability::Field::unsigned("unit_id", victim.id),
+                    ring3_observability::Field::unsigned("pc", u64::from(pc)),
+                    ring3_observability::Field::boolean(
+                        "unit_capacity",
+                        usage.units >= cache.config.units as usize,
+                    ),
+                    ring3_observability::Field::boolean(
+                        "byte_capacity",
+                        quota && usage.units < cache.config.units as usize,
+                    ),
+                    ring3_observability::Field::boolean("slot_capacity", free.is_none()),
+                ],
+            );
             self.publish_cache_request(request, false)?;
             return Ok(request);
         }
@@ -148,6 +176,18 @@ impl EngineInstance {
             tier,
         };
         self.publish_cache_request(request, existing.is_none())?;
+        #[cfg(feature = "observability")]
+        ring3_observability::current().instant(
+            ring3_observability::Level::Detailed,
+            "engine.cpu.cache",
+            "installation.requested",
+            &[
+                ring3_observability::Field::unsigned("unit_id", id),
+                ring3_observability::Field::unsigned("pc", u64::from(pc)),
+                ring3_observability::Field::unsigned("tier", tier as u64),
+                ring3_observability::Field::boolean("compiled", existing.is_none()),
+            ],
+        );
         Ok(request)
     }
     pub(super) fn publish_cache_request(

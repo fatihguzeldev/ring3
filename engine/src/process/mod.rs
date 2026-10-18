@@ -8,6 +8,8 @@ mod instance;
 mod loading;
 mod media;
 mod memory;
+#[cfg(feature = "observability")]
+mod observability;
 #[cfg(target_arch = "wasm32")]
 pub(crate) mod wasm;
 mod windows;
@@ -65,5 +67,5 @@ pub use windows::resources::{ResourceConfig32, ResourceError32};
 pub use windows::activation::{ActivationConfig32, ActivationError32, ActivationWait32};
 pub use windows::nls::{NlsError32, NlsProfile32};
 
-pub use windows::version::PendingVersionCall32;
 pub use windows::gdi::{GdiConfig32, GdiFrame32};
+pub use windows::version::PendingVersionCall32;

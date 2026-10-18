@@ -100,6 +100,16 @@ fn prepare(
     authority: crate::cpu::x86::decode::DecodeAuthority,
     joins: &dyn Fn(GuestAddress) -> bool,
 ) -> Result<PreparedRegion, CompileError> {
+    #[cfg(feature = "observability")]
+    let _scope = ring3_observability::current().scope(
+        ring3_observability::Level::Detailed,
+        "engine.cpu.decode",
+        "prepare_entries",
+        &[ring3_observability::Field::unsigned(
+            "entries",
+            entries.len() as u64,
+        )],
+    );
     region::validate_limits(limits)?;
     if entries.is_empty() || entries.len() > limits.blocks {
         return Err(CompileError::InvalidBlocks);

@@ -64,6 +64,8 @@ pub enum StoreCompletion {
 pub struct EngineInstance {
     pub(in crate::process) memory: Option<AddressSpace>,
     pub(in crate::process) arena: Pin<Box<[u8]>>,
+    #[cfg(feature = "observability")]
+    pub(in crate::process) observer: ring3_observability::Observer,
     pub(in crate::process) console: crate::windows::console::ConsoleControl32,
     pub(in crate::process) native_diagnostics: crate::windows::native::NativeDiagnostics32,
     pub(in crate::process) resources: Option<crate::process::windows::resources::ResourceRuntime32>,
@@ -154,6 +156,8 @@ impl EngineInstance {
             .try_reserve_exact(RESIDENT_INSTALLATION_SLOTS)
             .map_err(|_| HostError::Infrastructure)?;
         Ok(Self {
+            #[cfg(feature = "observability")]
+            observer: ring3_observability::Observer::disabled(),
             console: crate::windows::console::ConsoleControl32::new(),
             native_diagnostics: Default::default(),
             activation: None,
@@ -252,6 +256,8 @@ impl EngineInstance {
     }
 
     pub fn close(&mut self) {
+        #[cfg(feature = "observability")]
+        self.observer.finalize();
         self.console = crate::windows::console::ConsoleControl32::new();
         self.native_diagnostics = Default::default();
         self.activation = None;
