@@ -9,6 +9,8 @@ mod stack;
 mod word_exchange;
 mod word_store;
 
+pub(in crate::cpu::dbt::wasm) use cpu_scalar::outlined::build_function as build_read32_validator;
+
 pub(in crate::cpu::dbt::wasm) use address::{
     address_value, checked_address, checked_offset, effective_address, offset_value,
 };

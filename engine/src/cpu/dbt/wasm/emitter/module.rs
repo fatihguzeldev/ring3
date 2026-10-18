@@ -2,8 +2,12 @@ use crate::cpu::{
     dbt::{
         region::CompiledBlock,
         wasm::{
-            EmbeddedBinding, emitter::body, helpers::result::outlined, imports,
-            instructions::segments, requirements::ModuleRequirements,
+            EmbeddedBinding,
+            emitter::body,
+            helpers::result::outlined,
+            imports,
+            instructions::{memory, segments},
+            requirements::ModuleRequirements,
         },
     },
     x86::decode::CodeDecodeKey,
@@ -47,6 +51,15 @@ pub(in crate::cpu::dbt) fn emit_with_tier(
             Some(sections.run_index + 1 + u32::from(plan.has_segment_check));
         functions.function(sections.zero_span_validator_type);
     }
+    if plan.has_read32_validator {
+        helper_imports.scalar_read32_validator = Some(
+            sections.run_index
+                + 1
+                + u32::from(plan.has_segment_check)
+                + u32::from(plan.has_zero_span_validator),
+        );
+        functions.function(sections.scalar_read32_validator_type);
+    }
     module.section(&functions);
     let key = decode_key.unwrap_or(crate::cpu::x86::decode::CodeDecodeKey::FLAT);
     let mut globals = GlobalSection::new();
@@ -77,6 +90,9 @@ pub(in crate::cpu::dbt) fn emit_with_tier(
     }
     if plan.has_zero_span_validator {
         bodies.function(&outlined::build_function());
+    }
+    if plan.has_read32_validator {
+        bodies.function(&memory::build_read32_validator());
     }
     module.section(&bodies);
     module.finish()

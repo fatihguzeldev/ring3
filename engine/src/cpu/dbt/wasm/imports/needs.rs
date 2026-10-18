@@ -25,6 +25,7 @@ pub(in crate::cpu::dbt::wasm) struct ImportNeeds {
     pub(in crate::cpu::dbt::wasm) far_call: bool,
     pub(in crate::cpu::dbt::wasm) far_return: bool,
     pub(in crate::cpu::dbt::wasm) read: bool,
+    pub(in crate::cpu::dbt::wasm) read32_result_sites: usize,
     pub(in crate::cpu::dbt::wasm) store: bool,
     pub(in crate::cpu::dbt::wasm) read8: bool,
     pub(in crate::cpu::dbt::wasm) read16: bool,
@@ -67,6 +68,7 @@ impl Imports {
         let mut far_call = false;
         let mut far_return = false;
         let mut read = false;
+        let mut read32_result_sites = 0;
         let mut store = false;
         let mut read8 = false;
         let mut read16 = false;
@@ -141,15 +143,22 @@ impl Imports {
                 } => match width {
                     crate::cpu::x86::bits::Crc32Width::Byte => read8 = true,
                     crate::cpu::x86::bits::Crc32Width::Word => read16 = true,
-                    crate::cpu::x86::bits::Crc32Width::Dword => read = true,
+                    crate::cpu::x86::bits::Crc32Width::Dword => {
+                        read = true;
+                        read32_result_sites += 1;
+                    }
                 },
                 Operation::BitManipulation { source, .. }
                 | Operation::MultiplyExtended { source, .. } => {
                     read |= matches!(source, Value32::Memory(_));
+                    read32_result_sites += usize::from(matches!(source, Value32::Memory(_)));
                 }
                 Operation::Control(operation) => match operation {
                     crate::cpu::x86::ControlOperation::PopFlags { word: true } => read16 = true,
-                    crate::cpu::x86::ControlOperation::PopFlags { word: false } => read = true,
+                    crate::cpu::x86::ControlOperation::PopFlags { word: false } => {
+                        read = true;
+                        read32_result_sites += 1;
+                    }
                     crate::cpu::x86::ControlOperation::Bound { .. } => cpu_read = true,
                     _ => {}
                 },
@@ -157,7 +166,10 @@ impl Imports {
                     if matches!(source, Value32::Memory(_)) {
                         match width {
                             crate::cpu::x86::bits::ScalarWidth::Word => read16 = true,
-                            crate::cpu::x86::bits::ScalarWidth::Dword => read = true,
+                            crate::cpu::x86::bits::ScalarWidth::Dword => {
+                                read = true;
+                                read32_result_sites += 1;
+                            }
                         }
                     }
                 }
@@ -175,6 +187,7 @@ impl Imports {
                         }
                         crate::cpu::x86::bits::ScalarWidth::Dword => {
                             read |= reads;
+                            read32_result_sites += usize::from(reads);
                             store |= writes;
                         }
                     }
@@ -214,6 +227,7 @@ impl Imports {
                         read16 = true;
                     } else {
                         read = true;
+                        read32_result_sites += 1;
                     }
                 }
                 Operation::LoadFarPointer { .. } => segment_load_far = true,
@@ -233,6 +247,8 @@ impl Imports {
                         }
                         StringWidth::Dword => {
                             read |= reads;
+                            read32_result_sites += usize::from(reads)
+                                + usize::from(matches!(kind, StringKind::Compare));
                             store |= writes;
                         }
                     }
@@ -339,8 +355,7 @@ impl Imports {
                     SmallWidth::Byte => read8 = true,
                     SmallWidth::Word => read16 = true,
                 },
-                Operation::MemoryBitMutation { .. }
-                | Operation::Push {
+                Operation::Push {
                     source: Value32::Memory(_),
                 }
                 | Operation::Pop {
@@ -348,7 +363,12 @@ impl Imports {
                 }
                 | Operation::Call {
                     target: BranchTarget::Indirect(Location32::Memory(_)),
+                } => {
+                    read = true;
+                    read32_result_sites += 1;
+                    store = true;
                 }
+                Operation::MemoryBitMutation { .. }
                 | Operation::Unary {
                     kind: UnaryKind::Inc | UnaryKind::Dec | UnaryKind::Not | UnaryKind::Neg,
                     destination: Location32::Memory(_),
@@ -408,7 +428,10 @@ impl Imports {
                 | Operation::Jump {
                     target: BranchTarget::Indirect(Location32::Memory(_)),
                 }
-                | Operation::Pop { .. } => read = true,
+                | Operation::Pop { .. } => {
+                    read = true;
+                    read32_result_sites += 1;
+                }
                 Operation::Move {
                     destination: Location32::Memory(_),
                     ..
@@ -437,6 +460,7 @@ impl Imports {
             far_call,
             far_return,
             read,
+            read32_result_sites,
             store,
             read8,
             read16,

@@ -544,6 +544,7 @@ function altered(record, offset, value, width = 4) {
   return bytes;
 }
 const injectionCases = [
+  {name: 'register-helper version is not a scalar read reply', record: altered(legacyCpuHelperRecord(0), 4, 7, 2), detail: 2, loadOnly: true},
   {name: 'version exhaustion', record: legacyCpuHelperRecord(2, 0, 1), detail: 1},
   {name: 'other returned infrastructure', record: legacyCpuHelperRecord(2, 0, 2), detail: 3},
   {name: 'unknown tag', record: legacyCpuHelperRecord(3), detail: 2},
@@ -577,7 +578,7 @@ for (const [offset, width, value, name] of [[0, 1, 0, 'magic'], [4, 2, 2, 'versi
 }
 for (const store of [false, true]) {
   const engine = fresh();
-  const bytes = Uint8Array.from([0xbe, 0x78, 0x56, 0x34, 0x12, store ? 0x89 : 0x8b, store ? 0x03 : 0x13, 0xb9, 0x99, 0x99, 0x99, 0x99]);
+  const bytes = Uint8Array.from([0xbe, 0x78, 0x56, 0x34, 0x12, store ? 0x89 : 0x8b, store ? 0x03 : 0x13, ...(!store ? [0x8b, 0x03] : []), 0xb9, 0x99, 0x99, 0x99, 0x99]);
   const actual = compile(engine, bytes, undefined, [store ? 'store32' : 'read32']);
   const injector = new WebAssembly.Instance(injectorModule, {env: {memory: engine.memory}, ring3: {guard: engine.api.guard}}).exports;
   const injected = new WebAssembly.Instance(actual.module, {env: {memory: engine.memory}, ring3: {guard_detect: engine.api.guard_detect, finish_exception_detection: engine.api.finish_exception_detection, cpu_read32: injector.read32, cpu_store32: injector.store32}}).exports;
@@ -606,6 +607,30 @@ for (const store of [false, true]) {
 
 {
   const engine = fresh();
+  const bytes = Uint8Array.from([0xbe, 0x78, 0x56, 0x34, 0x12, 0x8b, 0x13, 0x8b, 0x03, 0xb9, 0x99, 0x99, 0x99, 0x99]);
+  const actual = compile(engine, bytes, undefined, ['read32']);
+  const injector = new WebAssembly.Instance(injectorModule, {env: {memory: engine.memory}, ring3: {guard: engine.api.guard}}).exports;
+  const injected = new WebAssembly.Instance(actual.module, {env: {memory: engine.memory}, ring3: {guard_detect: engine.api.guard_detect, finish_exception_detection: engine.api.finish_exception_detection, cpu_read32: injector.read32}}).exports;
+  for (const payload of [0, 0x80000000, 0xffffffff]) {
+    const start = state();
+    start.registers[3] = 0x9000;
+    const expected = copyState(start);
+    expected.registers[6] = 0x12345678;
+    expected.registers[0] = payload;
+    expected.registers[2] = payload;
+    expected.registers[1] = 0x99999999;
+    expected.eip = 0x100e;
+    writeState(engine, start);
+    const record = legacyCpuHelperRecord(0, payload);
+    refresh(engine).bytes.set(record, engine.base + 140);
+    injector.configure(engine.base + 100, engine.base + 140, 0);
+    run(engine, injected, 10, expected, exit(3, 4), `synthetic Read32 success payload/${payload}`, record, true);
+    assert.equal(injector.calls(), 2, 'both outlined scalar successes preserve payload and resume the caller');
+  }
+}
+
+{
+  const engine = fresh();
   const bytes = Uint8Array.from([0xb8, 0xff, 0xff, 0xff, 0xff, 0x83, 0xc0, 1, 0x8b, 0x13, 0xb9, 0x99, 0x99, 0x99, 0x99]);
   const actual = compile(engine, bytes, undefined, ['read32']);
   const injector = new WebAssembly.Instance(injectorModule, {env: {memory: engine.memory}, ring3: {guard: engine.api.guard}}).exports;
@@ -624,7 +649,7 @@ for (const store of [false, true]) {
   assert.equal(injector.calls(), 1);
 }
 
-const cpuSourcePaths=['engine/src/abi/memory_helper/cpu.rs', 'engine/src/cpu/dbt/wasm/instructions/memory/cpu_scalar.rs', 'engine/src/cpu/dbt/wasm/emitter/mod.rs', 'engine/src/cpu/dbt/wasm/emitter/module.rs', 'engine/src/cpu/dbt/wasm/emitter/body.rs', 'engine/src/cpu/dbt/wasm/requirements.rs', 'engine/src/cpu/dbt/wasm/imports/wiring.rs', 'engine/src/cpu/dbt/wasm/code_fetch.rs', 'engine/src/process/memory/cpu_scalar.rs', 'engine/src/process/memory/scalar/cpu_write.rs', 'engine/src/process/wasm/memory/cpu_write.rs', 'engine/src/abi/wasm/exports/memory/cpu_write.rs'];
+const cpuSourcePaths=['engine/src/abi/memory_helper/cpu.rs', 'engine/src/cpu/dbt/wasm/instructions/memory/cpu_scalar.rs', 'engine/src/cpu/dbt/wasm/instructions/memory/cpu_scalar/outlined.rs', 'engine/src/cpu/dbt/wasm/emitter/mod.rs', 'engine/src/cpu/dbt/wasm/emitter/module.rs', 'engine/src/cpu/dbt/wasm/emitter/body.rs', 'engine/src/cpu/dbt/wasm/requirements.rs', 'engine/src/cpu/dbt/wasm/imports/wiring.rs', 'engine/src/cpu/dbt/wasm/code_fetch.rs', 'engine/src/process/memory/cpu_scalar.rs', 'engine/src/process/memory/scalar/cpu_write.rs', 'engine/src/process/wasm/memory/cpu_write.rs', 'engine/src/abi/wasm/exports/memory/cpu_write.rs'];
 const provenance = {
   cpu_source_sha256: Object.fromEntries(cpuSourcePaths.map(path => [path, hash(readFileSync(join(root, path)))])),
   engine_sha256: hash(engineBytes), injector_sha256: hash(injectorBytes), generated_modules: modules,

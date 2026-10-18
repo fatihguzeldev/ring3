@@ -9,6 +9,7 @@ pub(in crate::cpu::dbt::wasm) struct Imports {
     pub(in crate::cpu::dbt::wasm) finish_detection: Option<u32>,
     pub(in crate::cpu::dbt::wasm) segment_check: Option<u32>,
     pub(in crate::cpu::dbt::wasm) zero_span_validator: Option<u32>,
+    pub(in crate::cpu::dbt::wasm) scalar_read32_validator: Option<u32>,
     pub(in crate::cpu::dbt::wasm) code_fetch_limit: Option<u32>,
     pub(in crate::cpu::dbt::wasm) stack_execute: Option<HelperBinding>,
     pub(in crate::cpu::dbt::wasm) cpu_integer: Option<HelperBinding>,

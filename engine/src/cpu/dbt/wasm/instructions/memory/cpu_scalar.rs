@@ -8,6 +8,29 @@ use crate::{
     },
 };
 use wasm_encoder::{BlockType, InstructionSink};
+
+pub(in crate::cpu::dbt::wasm) mod outlined;
+
+#[cfg(test)]
+thread_local! {
+    static EMITTED_READ32_SITES: core::cell::Cell<usize> = const { core::cell::Cell::new(0) };
+}
+
+pub(super) fn validate_read32(
+    code: &mut InstructionSink<'_>,
+    imports: crate::cpu::dbt::wasm::imports::Imports,
+) {
+    #[cfg(test)]
+    EMITTED_READ32_SITES.with(|sites| sites.set(sites.get() + 1));
+    if imports.paging_configured
+        && let Some(index) = imports.scalar_read32_validator
+    {
+        outlined::call(code, index);
+        return;
+    }
+    validate(code, 4, CpuScalarOperation::Read, imports.paging_configured);
+}
+
 /// current CPU scalar bus replies; no legacy packet version is accepted here.
 pub(super) fn validate(
     code: &mut InstructionSink<'_>,

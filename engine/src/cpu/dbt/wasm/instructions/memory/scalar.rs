@@ -17,12 +17,7 @@ pub(in crate::cpu::dbt::wasm) fn load(
         .call(imports.read.expect("prepared memory load has an import"))
         .local_set(HELPER_STATUS);
     crate::cpu::dbt::wasm::code_fetch::check_context(code, exit_depth);
-    cpu_scalar::validate(
-        code,
-        4,
-        crate::abi::memory_helper::CpuScalarOperation::Read,
-        imports.paging_configured,
-    );
+    cpu_scalar::validate_read32(code, imports);
     exit_if_failed(code, exit_depth);
     helper_field(code, 20);
     code.local_set(register(destination));
@@ -145,16 +140,16 @@ fn load_at_address_with_intent(
         )
         .local_set(HELPER_STATUS);
     crate::cpu::dbt::wasm::code_fetch::check_context(code, exit_depth);
-    cpu_scalar::validate(
-        code,
-        4,
-        if paging_modify {
-            crate::abi::memory_helper::CpuScalarOperation::Modify
-        } else {
-            crate::abi::memory_helper::CpuScalarOperation::Read
-        },
-        imports.paging_configured,
-    );
+    if paging_modify {
+        cpu_scalar::validate(
+            code,
+            4,
+            crate::abi::memory_helper::CpuScalarOperation::Modify,
+            imports.paging_configured,
+        );
+    } else {
+        cpu_scalar::validate_read32(code, imports);
+    }
     exit_if_failed(code, exit_depth);
     helper_field(code, 20);
     code.local_set(RESULT);

@@ -28,6 +28,7 @@ pub(in crate::cpu::dbt::wasm) struct ModuleRequirements {
     pub(in crate::cpu::dbt::wasm) has_segments: bool,
     pub(in crate::cpu::dbt::wasm) has_segment_check: bool,
     pub(in crate::cpu::dbt::wasm) has_zero_span_validator: bool,
+    pub(in crate::cpu::dbt::wasm) has_read32_validator: bool,
     pub(in crate::cpu::dbt::wasm) upper_xstate: bool,
 }
 
@@ -207,6 +208,8 @@ impl ModuleRequirements {
                 });
         let upper_xstate =
             crate::cpu::x86::capabilities::AVX_ENABLED && (imports.cpu_xsave || imports.cpu_xrstor);
+        // one site grows when it owns the shared failure body; two sites already amortize it.
+        let has_read32_validator = paging_configured && imports.read32_result_sites >= 2;
         // register x87 operations emit the same ordinary result checks at each helper site.
         // other modules retain their current layout without an unused local function.
         let has_zero_span_validator = has_x87
@@ -241,6 +244,7 @@ impl ModuleRequirements {
             has_segments,
             has_segment_check,
             has_zero_span_validator,
+            has_read32_validator,
             upper_xstate,
         }
     }
