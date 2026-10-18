@@ -7,9 +7,9 @@ use crate::{
         },
         x86::{
             SEGMENT_BASES_RECORD_SIZE, SEGMENTS_SIZE, SEGMENTS_VERSION_3, SIMD_SIZE, STATE_SIZE,
-            StateMetadata, X87_SIZE, YMM_SIZE, decode_current_segment_context, decode_simd,
-            decode_state_metadata, decode_x87, decode_ymm, encode_current_segment_context,
-            encode_simd, encode_x87, encode_ymm,
+            StateMetadata, X87_SIZE, YMM_SIZE, decode_current_segment_context,
+            decode_state_metadata, encode_current_segment_context, encode_simd, encode_x87,
+            encode_ymm, validate_simd, validate_x87, validate_ymm,
         },
     },
     cpu::x86::{
@@ -55,9 +55,9 @@ impl ExtendedCpuState {
                 .try_into()
                 .unwrap(),
         };
-        decode_ymm(&state.upper).map_err(|_| HostError::Call(CallError::InvalidStop))?;
-        decode_x87(&state.x87).map_err(|_| HostError::Call(CallError::InvalidStop))?;
-        decode_simd(&state.simd).map_err(|_| HostError::Call(CallError::InvalidStop))?;
+        validate_ymm(&state.upper).map_err(|_| HostError::Call(CallError::InvalidStop))?;
+        validate_x87(&state.x87).map_err(|_| HostError::Call(CallError::InvalidStop))?;
+        validate_simd(&state.simd).map_err(|_| HostError::Call(CallError::InvalidStop))?;
         decode_current_segment_context(
             &state.segments,
             state.segment_bases.as_ref().map(|bases| bases.as_slice()),
@@ -127,6 +127,10 @@ impl ExtendedCpuState {
         self.metadata.write(state);
     }
 }
+
+#[cfg(test)]
+#[path = "context/tests/validation.rs"]
+mod validation_tests;
 
 #[cfg(test)]
 mod tests {

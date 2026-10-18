@@ -43,15 +43,7 @@ pub fn encode_x87(state: &X87State, output: &mut [u8]) -> Result<(), AbiError> {
 }
 
 pub fn decode_x87(input: &[u8]) -> Result<X87State, AbiError> {
-    header::validate(input, *b"R3FP", X87_SIZE)?;
-    if input[36..40]
-        .iter()
-        .chain(&input[120..128])
-        .any(|byte| *byte != 0)
-        || read_u16(input, X87_OPCODE_OFFSET) > 0x7ff
-    {
-        return Err(AbiError::Reserved);
-    }
+    validate_x87(input)?;
     Ok(X87State {
         control: read_u16(input, X87_CONTROL_OFFSET),
         status: read_u16(input, X87_STATUS_OFFSET),
@@ -67,6 +59,19 @@ pub fn decode_x87(input: &[u8]) -> Result<X87State, AbiError> {
             .try_into()
             .unwrap(),
     })
+}
+
+pub(crate) fn validate_x87(input: &[u8]) -> Result<(), AbiError> {
+    header::validate(input, *b"R3FP", X87_SIZE)?;
+    if input[36..40]
+        .iter()
+        .chain(&input[120..128])
+        .any(|byte| *byte != 0)
+        || read_u16(input, X87_OPCODE_OFFSET) > 0x7ff
+    {
+        return Err(AbiError::Reserved);
+    }
+    Ok(())
 }
 
 fn read_u16(bytes: &[u8], offset: usize) -> u16 {

@@ -19,13 +19,17 @@ pub fn encode_ymm(state: &YmmUpperState, output: &mut [u8]) -> Result<(), AbiErr
 }
 
 pub fn decode_ymm(input: &[u8]) -> Result<YmmUpperState, AbiError> {
-    header::validate(input, *b"R3YU", YMM_SIZE)?;
+    validate_ymm(input)?;
     Ok(YmmUpperState {
         registers: std::array::from_fn(|index| {
             let offset = YMM_REGISTERS_OFFSET + index * 16;
             input[offset..offset + 16].try_into().unwrap()
         }),
     })
+}
+
+pub(crate) fn validate_ymm(input: &[u8]) -> Result<(), AbiError> {
+    header::validate(input, *b"R3YU", YMM_SIZE)
 }
 
 #[cfg(test)]

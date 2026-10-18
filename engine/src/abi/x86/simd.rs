@@ -22,19 +22,24 @@ pub fn encode_simd(state: &SimdState, output: &mut [u8]) -> Result<(), AbiError>
 }
 
 pub fn decode_simd(input: &[u8]) -> Result<SimdState, AbiError> {
-    header::validate(input, *b"R3SV", SIMD_SIZE)?;
-    let mxcsr = header::read_u32(input, SIMD_MXCSR_OFFSET);
-    if mxcsr & !MXCSR_MASK != 0 || input[20..32].iter().any(|byte| *byte != 0) {
-        return Err(AbiError::Reserved);
-    }
+    validate_simd(input)?;
     Ok(SimdState {
-        mxcsr,
+        mxcsr: header::read_u32(input, SIMD_MXCSR_OFFSET),
         xmm: input[SIMD_XMM_OFFSET..SIMD_XMM_OFFSET + 128]
             .as_chunks::<16>()
             .0
             .try_into()
             .unwrap(),
     })
+}
+
+pub(crate) fn validate_simd(input: &[u8]) -> Result<(), AbiError> {
+    header::validate(input, *b"R3SV", SIMD_SIZE)?;
+    let mxcsr = header::read_u32(input, SIMD_MXCSR_OFFSET);
+    if mxcsr & !MXCSR_MASK != 0 || input[20..32].iter().any(|byte| *byte != 0) {
+        return Err(AbiError::Reserved);
+    }
+    Ok(())
 }
 
 #[cfg(test)]
