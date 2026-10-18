@@ -1,13 +1,7 @@
-use crate::cpu::{
-    dbt::region::CompiledBlock,
-    x86::ir::{BranchTarget, Location32, Operation, Value32},
-};
-pub(in crate::cpu::dbt::wasm) fn helper_free_block(block: &CompiledBlock) -> bool {
-    !block.instructions.is_empty()
-        && block
-            .instructions
-            .iter()
-            .all(|instruction| helper_free(instruction.operation()))
+use crate::cpu::x86::ir::{BranchTarget, Location32, Operation, Value32};
+
+pub(in crate::cpu::dbt::wasm) fn refresh_after(operation: &Operation) -> bool {
+    !helper_free(operation)
 }
 
 fn helper_free(operation: &Operation) -> bool {
@@ -53,3 +47,6 @@ fn helper_free(operation: &Operation) -> bool {
             | Operation::CountBranchWord { .. }
     )
 }
+
+#[cfg(test)]
+mod tests;

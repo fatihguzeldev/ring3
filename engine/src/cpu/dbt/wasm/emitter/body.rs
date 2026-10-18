@@ -244,8 +244,7 @@ fn emit_block(
                 .i32_ne()
                 .if_(BlockType::Empty);
         }
-        let helper_free = code_fetch::helper_free_block(block);
-        if helper_free && let Some(limit) = imports.code_fetch_limit {
+        if let Some(limit) = imports.code_fetch_limit {
             // the loop's safepoint and key check already precede this selected block.
             code_fetch::refresh(code, limit);
         }
@@ -267,7 +266,9 @@ fn emit_block(
             let remaining = count - index as u32 - 1;
             abi::safepoint(code, remaining + 2);
             if let Some(limit) = imports.code_fetch_limit {
-                if !helper_free {
+                if index != 0
+                    && code_fetch::refresh_after(block.instructions[index - 1].operation())
+                {
                     code_fetch::check_context(code, remaining + 2);
                     code_fetch::refresh(code, limit);
                 }

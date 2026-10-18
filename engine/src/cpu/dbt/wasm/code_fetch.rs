@@ -180,7 +180,7 @@ fn live_limit(code: &mut InstructionSink<'_>) {
 }
 
 mod hoist;
-pub(super) use hoist::helper_free_block;
+pub(super) use hoist::refresh_after;
 
 mod paging;
 pub(super) use paging::fault as paging_fault;
