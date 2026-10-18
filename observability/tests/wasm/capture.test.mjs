@@ -2,7 +2,14 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
-import { createCapture, epochNowNs } from "../../typescript/dist/index.js";
+import {
+  categories,
+  createCapture,
+  encodeCategorySelection,
+  epochNowNs,
+} from "../../typescript/dist/index.js";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 
 const root = resolve(import.meta.dirname, "../../..");
 const artifact =
@@ -47,7 +54,7 @@ function engine() {
     port: {
       supported: typeof api.configure_observability === "function",
       configure(config) {
-        const context = new TextEncoder().encode(config.contexts.join("\n"));
+        const context = new TextEncoder().encode(encodeCategorySelection(config.categories));
         transfer().set(context);
         call(
           "configure_observability",
@@ -82,7 +89,7 @@ test("real Wasm codegen and host scopes share a complete standard capture withou
   e.call("map", 0x1000, 1, 7);
   e.transfer().set([0xb8, 1, 0, 0, 0]);
   e.call("upload", 0x1000, 5);
-  const observer = capture.observer("host.test");
+  const observer = capture.observer(categories.hostBrowser);
   for (let i = 0; i < 48; i++) {
     const descriptor = new DataView(e.transfer().buffer, e.transfer().byteOffset, 8);
     descriptor.setUint32(0, 0x1000, true);
@@ -105,6 +112,15 @@ test("real Wasm codegen and host scopes share a complete standard capture withou
 test("feature Wasm capture configuration validates without starting a guest", () => {
   const e = engine();
   assert.notEqual(e.api.configure_observability(3, 65536, 40, 1, 40, 0), 0);
+  for (const input of ["unknown.category", "observability", "engine.cpu\nengine.cpu"]) {
+    const selection = new TextEncoder().encode(input);
+    e.transfer().set(selection);
+    assert.notEqual(
+      e.api.configure_observability(1, 65536, 40, 1, 40, selection.length),
+      0,
+      `invalid category selection: ${input}`,
+    );
+  }
   e.call("configure_observability", 1, 65536, 40, 1, 40, 0);
   assert.notEqual(
     e.api.configure_observability(1, 65536, 40, 1, 40, 0),
@@ -115,4 +131,92 @@ test("feature Wasm capture configuration validates without starting a guest", ()
   while (!chunk.finished) chunk = e.port.drain();
   e.call("configure_observability", 0, 65536, 41, 1, 41, 0);
   e.call("close");
+});
+
+test("actual Wasm catalog selection preserves all, none, parent and subset semantics", async () => {
+  const processor =
+    process.env.RING3_TRACE_PROCESSOR ??
+    resolve(root, "target/observability-tools/trace_processor_shell");
+  const directory = resolve(root, "target/observability-verification/catalog");
+  await mkdir(directory, { recursive: true });
+  const execute = promisify(execFile);
+  const cases = [
+    { name: "all", selection: undefined, decode: true, codegen: true, host: true },
+    { name: "none", selection: [], decode: false, codegen: false, host: false },
+    { name: "parent", selection: [categories.engineCpu], decode: true, codegen: true, host: false },
+    {
+      name: "decode",
+      selection: [categories.engineCpuDecode],
+      decode: true,
+      codegen: false,
+      host: false,
+    },
+    {
+      name: "host",
+      selection: [categories.hostBrowser],
+      decode: false,
+      codegen: false,
+      host: true,
+    },
+  ];
+  for (const item of cases) {
+    const parts = [];
+    const capture = createCapture({
+      level: "detailed",
+      categories: item.selection,
+      producerId: 31,
+      output: {
+        async write(bytes) {
+          parts.push(bytes.slice());
+        },
+        async flush() {},
+      },
+    });
+    const e = engine();
+    try {
+      capture.attachEngine(e.port, { producerId: 32 });
+      e.call("map", 0x1000, 1, 7);
+      e.transfer().set([0xb8, 42, 0, 0, 0, 0xeb, 0xfe]);
+      e.call("upload", 0x1000, 7);
+      const descriptor = new DataView(e.transfer().buffer, e.transfer().byteOffset, 4);
+      descriptor.setUint32(0, 0x1000, true);
+      capture.observer(categories.hostBrowser).scope("host.compile", {}, () => {
+        e.call("compile_entries", 1, 0);
+        const block = new DataView(e.transfer().buffer, e.transfer().byteOffset, 8);
+        block.setUint32(0, 0x1000, true);
+        block.setUint32(4, 7, true);
+        e.call("compile", 1);
+      });
+      assert.equal((await capture.finish()).complete, true, item.name);
+      const trace = resolve(directory, `${item.name}.pftrace`);
+      await writeFile(trace, Buffer.concat(parts));
+      const query = async (sql) => (await execute(processor, ["query", trace, sql])).stdout.trim();
+      for (const [category, expected] of [
+        [categories.engineCpuDecode, item.decode],
+        [categories.engineCpuCodegen, item.codegen],
+        [categories.hostBrowser, item.host],
+      ]) {
+        const count = await query(`SELECT count(*) AS n FROM slice WHERE category = '${category}'`);
+        assert.equal(Number(count.split("\n").at(-1)) > 0, expected, `${item.name}: ${category}`);
+      }
+      assert.equal(
+        Number(
+          (await query("SELECT count(*) AS n FROM slice WHERE name = 'capture.finished'"))
+            .split("\n")
+            .at(-1),
+        ),
+        2,
+        `${item.name}: lifecycle metadata is retained`,
+      );
+      assert.equal(
+        await query(
+          "SELECT name, value FROM stats WHERE severity IN ('error','data_loss') AND value > 0",
+        ),
+        '"name","value"',
+      );
+    } finally {
+      await capture.finish("failed");
+      e.call("close");
+    }
+  }
 });

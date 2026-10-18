@@ -6,7 +6,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { test } from "node:test";
-import { createCapture } from "../typescript/dist/index.js";
+import { categories, createCapture } from "../typescript/dist/index.js";
 import { createHttpTraceOutput } from "../typescript/dist/output/client.js";
 import { createNodeCaptureStore } from "../typescript/dist/output/node.js";
 import { createTraceHttpHandler } from "../typescript/dist/output/http.js";
@@ -42,7 +42,7 @@ test("real Perfetto parses a persisted cross-producer trace and SQL recovers sco
   });
   const capture = createCapture({ level: "detailed", producerId: 101, output });
   if (engineTrace !== undefined) assert.equal(capture.ingest(await readFile(engineTrace)), true);
-  const loader = capture.observer("loader");
+  const loader = capture.observer(categories.engineLoader);
   await loader.scopeAsync("load.fixture", { input: "authored bytes" }, async (operation) => {
     operation.scope("link.fixture", { modules: 2 }, () =>
       operation.event("module.ready", { bytes: 4096 }),
@@ -65,9 +65,9 @@ test("real Perfetto parses a persisted cross-producer trace and SQL recovers sco
   assert.match(scopes, /"module\.ready",1/);
   assert.match(scopes, /"capture\.finished",1/);
   const counters = await query(
-    "SELECT counter_track.name, counter.value FROM counter JOIN counter_track ON counter.track_id = counter_track.id WHERE counter_track.name = 'loader:file.bytes'",
+    "SELECT counter_track.name, counter.value FROM counter JOIN counter_track ON counter.track_id = counter_track.id WHERE counter_track.name = 'engine.loader:file.bytes'",
   );
-  assert.match(counters, /"loader:file\.bytes",4096/);
+  assert.match(counters, /"engine\.loader:file\.bytes",4096/);
   const completeness = await query(
     "SELECT EXTRACT_ARG(arg_set_id, 'debug.complete') AS complete FROM slice WHERE name = 'capture.finished'",
   );

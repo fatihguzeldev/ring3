@@ -1,4 +1,9 @@
-import { createCapture, epochNowNs } from "/observability/typescript/dist/index.js";
+import {
+  categories,
+  createCapture,
+  encodeCategorySelection,
+  epochNowNs,
+} from "/observability/typescript/dist/index.js";
 
 self.onmessage = async ({ data }) => {
   const capture = createCapture({
@@ -13,7 +18,7 @@ self.onmessage = async ({ data }) => {
   });
   let error;
   try {
-    const observer = capture.observer("host.worker");
+    const observer = capture.observer(categories.hostWorker);
     const bytes = await observer.scopeAsync("engine.fetch", {}, async () => {
       const response = await fetch("/engine.wasm");
       if (!response.ok) throw new Error(`engine HTTP ${response.status}`);
@@ -58,7 +63,7 @@ self.onmessage = async ({ data }) => {
       {
         supported: typeof api.configure_observability === "function",
         configure(config) {
-          const context = new TextEncoder().encode(config.contexts.join("\n"));
+          const context = new TextEncoder().encode(encodeCategorySelection(config.categories));
           transfer().set(context);
           call(
             "configure_observability",

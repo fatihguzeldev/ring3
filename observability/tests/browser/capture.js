@@ -1,4 +1,4 @@
-import { createCapture } from "/observability/typescript/dist/index.js";
+import { categories, createCapture } from "/observability/typescript/dist/index.js";
 import { createHttpTraceOutput } from "/observability/typescript/dist/output/index.js";
 
 const button = document.getElementById("record"),
@@ -16,7 +16,7 @@ button.onclick = async () => {
       metadata: { fixture: "browser CPU compile", level },
     });
     capture = createCapture({ level, producerId: 1, output });
-    const observer = capture.observer("host.browser");
+    const observer = capture.observer(categories.hostBrowser);
     observer.event("fixture.started");
     worker = new Worker("./worker.js", { type: "module" });
     const completed = await new Promise((resolve, reject) => {
