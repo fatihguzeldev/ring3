@@ -48,10 +48,20 @@ pub(crate) fn write(bytes: &mut [u8], magic: [u8; 4]) {
 
 pub(crate) fn write_version(bytes: &mut [u8], magic: [u8; 4], version: u16) {
     bytes.fill(0);
+    write_version_prefix(bytes, magic, version);
+}
+
+// initializes the complete header without changing payload bytes.
+pub(crate) fn write_prefix(bytes: &mut [u8], magic: [u8; 4]) {
+    write_version_prefix(bytes, magic, ABI_VERSION);
+}
+
+fn write_version_prefix(bytes: &mut [u8], magic: [u8; 4], version: u16) {
     bytes[..4].copy_from_slice(&magic);
     bytes[4..6].copy_from_slice(&version.to_le_bytes());
     bytes[6..8].copy_from_slice(&X86_INTEGER_PROFILE.to_le_bytes());
     write_u32(bytes, 8, bytes.len() as u32);
+    write_u32(bytes, 12, 0);
 }
 
 pub(crate) fn read_u32(bytes: &[u8], offset: usize) -> u32 {

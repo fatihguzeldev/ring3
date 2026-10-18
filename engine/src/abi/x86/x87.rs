@@ -20,7 +20,9 @@ pub fn encode_x87(state: &X87State, output: &mut [u8]) -> Result<(), AbiError> {
     if state.opcode > 0x7ff {
         return Err(AbiError::Reserved);
     }
-    header::write(output, *b"R3FP");
+    header::write_prefix(output, *b"R3FP");
+    output[36..40].fill(0);
+    output[120..128].fill(0);
     for (offset, value) in [
         (X87_CONTROL_OFFSET, state.control),
         (X87_STATUS_OFFSET, state.status),
@@ -77,3 +79,6 @@ pub(crate) fn validate_x87(input: &[u8]) -> Result<(), AbiError> {
 fn read_u16(bytes: &[u8], offset: usize) -> u16 {
     u16::from_le_bytes(bytes[offset..offset + 2].try_into().unwrap())
 }
+
+#[cfg(test)]
+mod tests;

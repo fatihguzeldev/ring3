@@ -62,7 +62,9 @@ impl EngineInstance {
         }
         let mut state = decode_x87(&self.arena[X87_OFFSET..X87_OFFSET + X87_SIZE])
             .map_err(|_| HostError::Infrastructure)?;
-        let length = operation.read_size().max(operation.write_size()) as u32;
+        let read_size = operation.read_size();
+        let write_size = operation.write_size();
+        let length = read_size.max(write_size) as u32;
         if waiting & 1 != 0 && state.status & 0x3f & !state.control != 0 {
             state.status |= 0x8080;
             encode_x87(&state, &mut self.arena[X87_OFFSET..X87_OFFSET + X87_SIZE])
@@ -92,8 +94,8 @@ impl EngineInstance {
         };
         let offset = address.wrapping_sub(segments.bases[segment.index()]);
         for (width, access) in [
-            (operation.read_size(), SegmentAccess::Read),
-            (operation.write_size(), SegmentAccess::Write),
+            (read_size, SegmentAccess::Read),
+            (write_size, SegmentAccess::Write),
         ] {
             if width != 0
                 && let Err(error) = super::segments::check_cached_span(
@@ -107,18 +109,18 @@ impl EngineInstance {
                 return self.x87_packet(length, 0, Err(error), false, resident);
             }
         }
-        let mut input = [0; 108];
-        if operation.read_size() != 0
+        let mut input = (read_size != 0).then(|| [0; 108]);
+        if let Some(input) = &mut input
             && let Err(error) = self
                 .cpu_memory_port32()
-                .read(GuestAddress(address), &mut input[..operation.read_size()])
+                .read(GuestAddress(address), &mut input[..read_size])
         {
             return self.x87_packet(length, 0, Err(CpuMemoryError::from(error)), false, resident);
         }
-        if operation.write_size() != 0
+        if write_size != 0
             && let Err(error) = self.cpu_memory_port32().check(
                 GuestAddress(address),
-                operation.write_size(),
+                write_size,
                 PagingAccess32::Write,
             )
         {
@@ -136,7 +138,7 @@ impl EngineInstance {
         let outcome = state
             .evaluate_with_workspace(
                 operation,
-                &input[..operation.read_size()],
+                input.as_ref().map_or(&[], |input| &input[..read_size]),
                 flags,
                 &mut self.numerical_workspace,
             )
