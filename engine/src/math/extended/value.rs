@@ -761,8 +761,8 @@ pub(crate) fn round(
         _ => 64,
     };
     let mode = X87Rounding::from_control(control);
-    let (mut unbounded, unbounded_inexact, unbounded_incremented) =
-        rounded_significand(extended, 67 - precision, negative, mode);
+    let rounded = rounded_significand(extended, 67 - precision, negative, mode);
+    let (mut unbounded, unbounded_inexact, unbounded_incremented) = rounded;
     let mut unbounded_exponent = exponent;
     if unbounded >= 1_u128 << precision {
         unbounded >>= 1;
@@ -802,12 +802,13 @@ pub(crate) fn round(
             incremented: unbounded_incremented,
         };
     }
-    if exponent < -16382 {
+    let (mut significand, inexact, incremented) = if exponent < -16382 {
         extended = shift_jam(extended, (-16382 - exponent) as u32);
         exponent = -16382;
-    }
-    let (mut significand, inexact, incremented) =
-        rounded_significand(extended, 67 - precision, negative, mode);
+        rounded_significand(extended, 67 - precision, negative, mode)
+    } else {
+        rounded
+    };
     if significand >= 1_u128 << precision {
         significand >>= 1;
         exponent += 1;
@@ -963,6 +964,127 @@ mod tests {
             single.value,
             Ext80::from_parts(false, 16383, (1 << 63) | (1 << 40))
         );
+    }
+
+    #[test]
+    fn normal_rounding_preserves_exact_values_ties_and_carry_at_each_precision() {
+        for (precision_bits, precision) in [(0, 24), (0x200, 53), (0x300, 64)] {
+            let shift = 67 - precision;
+            let unit = 1_u64 << (64 - precision);
+            let half = 1_u128 << (shift - 1);
+            let one = 1_u64 << 63;
+            for (rounding_bits, mode) in [
+                (0, X87Rounding::Nearest),
+                (0x400, X87Rounding::Down),
+                (0x800, X87Rounding::Up),
+                (0xc00, X87Rounding::Zero),
+            ] {
+                for negative in [false, true] {
+                    let control = 0x7f | precision_bits | rounding_bits;
+                    let exact = round(
+                        negative,
+                        0,
+                        (1_u128 << 66) | (1_u128 << shift),
+                        control,
+                        DENORMAL,
+                    );
+                    assert_eq!(exact.value, Ext80::from_parts(negative, 0x3fff, one | unit));
+                    assert_eq!(exact.exceptions, DENORMAL);
+                    assert!(!exact.incremented);
+                    for (extended, truncated, nearest_increment, carry) in [
+                        ((1_u128 << 66) | half, one, false, false),
+                        (
+                            (1_u128 << 66) | (1_u128 << shift) | half,
+                            one | unit,
+                            true,
+                            false,
+                        ),
+                        (
+                            (((1_u128 << precision) - 1) << shift) | half,
+                            u64::MAX << (64 - precision),
+                            true,
+                            true,
+                        ),
+                    ] {
+                        let incremented = match mode {
+                            X87Rounding::Nearest => nearest_increment,
+                            X87Rounding::Down => negative,
+                            X87Rounding::Up => !negative,
+                            X87Rounding::Zero => false,
+                        };
+                        let result = round(negative, 0, extended, control, DENORMAL);
+                        let carried = carry && incremented;
+                        assert_eq!(
+                            result.value,
+                            Ext80::from_parts(
+                                negative,
+                                if carried { 0x4000 } else { 0x3fff },
+                                if carried {
+                                    one
+                                } else {
+                                    truncated + if incremented { unit } else { 0 }
+                                },
+                            ),
+                            "precision={precision} mode={mode:?} negative={negative}"
+                        );
+                        assert_eq!(result.exceptions, DENORMAL | PRECISION);
+                        assert_eq!(result.incremented, incremented);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn underflow_recomputes_rounding_after_the_denormal_shift() {
+        for (rounding_bits, mode) in [
+            (0, X87Rounding::Nearest),
+            (0x400, X87Rounding::Down),
+            (0x800, X87Rounding::Up),
+            (0xc00, X87Rounding::Zero),
+        ] {
+            for negative in [false, true] {
+                let control = 0x37f | rounding_bits;
+                let incremented = match mode {
+                    X87Rounding::Nearest | X87Rounding::Zero => false,
+                    X87Rounding::Down => negative,
+                    X87Rounding::Up => !negative,
+                };
+                let result = round(negative, -16383, (1_u128 << 66) | 8, control, 0);
+                assert_eq!(
+                    result.value,
+                    Ext80::from_parts(negative, 0, (1_u64 << 62) + u64::from(incremented))
+                );
+                assert_eq!(result.exceptions, UNDERFLOW | PRECISION);
+                assert_eq!(result.incremented, incremented);
+                let unmasked = round(
+                    negative,
+                    -16383,
+                    (1_u128 << 66) | 8,
+                    control & !UNDERFLOW,
+                    0,
+                );
+                assert_eq!(
+                    unmasked.value,
+                    Ext80::from_parts(negative, 0x6000, (1_u64 << 63) | 1)
+                );
+                assert_eq!(unmasked.exceptions, UNDERFLOW);
+                assert!(!unmasked.incremented);
+            }
+        }
+    }
+
+    #[test]
+    fn overflow_carry_preserves_masked_and_unmasked_result_exponents() {
+        let extended = (u128::from(u64::MAX) << 3) | 4;
+        for negative in [false, true] {
+            for (control, exponent) in [(0x37f, 0x7fff), (0x37f & !OVERFLOW, 0x1fff)] {
+                let result = round(negative, 16383, extended, control, 0);
+                assert_eq!(result.value, Ext80::from_parts(negative, exponent, 1 << 63));
+                assert_eq!(result.exceptions, OVERFLOW | PRECISION);
+                assert!(result.incremented);
+            }
+        }
     }
 
     #[test]
