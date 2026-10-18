@@ -1,6 +1,39 @@
 use super::*;
 
 #[test]
+fn heap_metadata_quota_is_independent_of_page_capacity_and_coalescing_reclaims_it() {
+    let limits = MemoryLimits32 {
+        blocks: 4,
+        ..Default::default()
+    };
+    let mut memory = memory();
+    let mut vm = VirtualMemory32::new(limits).unwrap();
+    let mut heaps = HeapManager32::new(limits).unwrap();
+    let heap = heaps.ensure_default(&mut vm, &mut memory, &[]).unwrap();
+    let pointers = [0; 3].map(|_| heaps.allocate(&mut vm, &mut memory, heap, 0, 80).unwrap());
+    let mapped = memory.mapped_pages();
+    assert_eq!(mapped, 1);
+    assert!(mapped < memory.capacity_pages());
+    assert_eq!(
+        heaps.allocate(&mut vm, &mut memory, heap, 0, 80),
+        Err(MemoryError32::Capacity)
+    );
+    assert_eq!(memory.mapped_pages(), mapped);
+    for pointer in pointers {
+        assert_eq!(heaps.size(heap, 0, pointer).unwrap(), 80);
+        heaps.free(heap, 0, pointer).unwrap();
+    }
+    // cumulative allocations may exceed the quota after free/coalesce recovers records.
+    for _ in 0..limits.blocks * 2 {
+        let pointer = heaps.allocate(&mut vm, &mut memory, heap, 0, 80).unwrap();
+        assert_eq!(pointer, pointers[0]);
+        heaps.free(heap, 0, pointer).unwrap();
+    }
+    assert!(heaps.validate(heap, 0, 0).unwrap());
+    assert_eq!(memory.mapped_pages(), mapped);
+}
+
+#[test]
 fn heap_free_coalesces_and_realloc_preserves_data_and_zeroes_only_new_tail() {
     let mut memory = memory();
     let mut vm = virtual_memory();

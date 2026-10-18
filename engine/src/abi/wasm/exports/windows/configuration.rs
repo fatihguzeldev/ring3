@@ -1,4 +1,5 @@
 export_process_calls! {
+    configure_windows_memory(regions:u32,fragments:u32,heaps:u32,blocks:u32,moveable_handles:u32,heap_reserve_bytes:u32);
     register_version_module(base:u32);
     register_shlwapi_module(base:u32);
     register_imm32_module(base:u32);

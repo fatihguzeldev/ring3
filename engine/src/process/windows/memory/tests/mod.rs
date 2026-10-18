@@ -1,5 +1,6 @@
 mod admission;
 mod calls;
+mod configuration;
 mod policy;
 mod query;
 mod instructions;
