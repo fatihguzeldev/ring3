@@ -145,13 +145,17 @@ impl EngineInstance {
                 .map_err(HostError::Resident)?
                 .get()
         };
-        let tier = self
+        let region = self
             .resident
             .as_ref()
             .unwrap()
             .get_raw(self.memory.as_ref().unwrap(), id)
-            .map_err(HostError::Resident)?
-            .tier();
+            .map_err(HostError::Resident)?;
+        let tier = region.tier();
+        #[cfg(feature = "observability")]
+        let metadata = region.metadata();
+        #[cfg(feature = "observability")]
+        let code_bytes = region.retained_wasm_byte_len();
         let request = CacheRequest32 {
             serial: self.execution_cache.as_ref().unwrap().serial,
             kind: CacheRequestKind32::Install,
@@ -172,6 +176,9 @@ impl EngineInstance {
                 ring3_observability::Field::unsigned("unit_id", id),
                 ring3_observability::Field::unsigned("pc", u64::from(pc)),
                 ring3_observability::Field::unsigned("tier", tier as u64),
+                ring3_observability::Field::unsigned("blocks", metadata.blocks as u64),
+                ring3_observability::Field::unsigned("instructions", metadata.instructions as u64),
+                ring3_observability::Field::unsigned("wasm_bytes", code_bytes as u64),
                 ring3_observability::Field::boolean("compiled", existing.is_none()),
             ],
         );
