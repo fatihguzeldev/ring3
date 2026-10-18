@@ -139,7 +139,7 @@ pub struct EngineInstance {
 
 impl EngineInstance {
     pub fn new(pages: u32, key: u64) -> Result<Self, HostError> {
-        if pages == 0 || pages > 4096 || key == 0 {
+        if !(1..=crate::memory::MAX_RESIDENT_PAGES).contains(&pages) || key == 0 {
             return Err(HostError::InvalidRequest);
         }
         let memory = AddressSpace::new(pages).map_err(HostError::Memory)?;

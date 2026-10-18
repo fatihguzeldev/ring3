@@ -2,7 +2,10 @@ use super::support_pe32 as pe;
 
 use ring3_engine::{
     loader::{ImageMetadata32, LoadError, load_pe32},
-    memory::{Access, AddressSpace, FaultReason, GuestAddress, MemoryError, MemoryFault},
+    memory::{
+        Access, AddressSpace, FaultReason, GuestAddress, MAX_RESIDENT_PAGES, MemoryError,
+        MemoryFault,
+    },
     process::{EngineInstance, HostError},
 };
 
@@ -277,7 +280,7 @@ fn unsupported_profiles_and_every_nonempty_directory_are_explicit_refusals() {
 
 #[test]
 fn resident_and_file_image_resource_limits_fail_before_publication() {
-    for pages in [0, 1, 2, 3, 4097, u32::MAX] {
+    for pages in [0, 1, 2, 3, MAX_RESIDENT_PAGES + 1, u32::MAX] {
         assert_eq!(
             load_pe32(&pe::image(), pages).err(),
             Some(LoadError::Capacity)
@@ -289,6 +292,20 @@ fn resident_and_file_image_resource_limits_fail_before_publication() {
     let mut bytes = pe::image();
     pe::put32(&mut bytes, pe::OPTIONAL + 56, 16 * 1024 * 1024 + 4096);
     rejected(&bytes, LoadError::Capacity, "oversized image");
+}
+
+#[test]
+fn small_image_preserves_a_backing_budget_above_the_previous_limit() {
+    let bytes = pe::image();
+    let (memory, info) = load_pe32(&bytes, 4097).unwrap().into_parts();
+    metadata(info);
+    assert_eq!(memory.capacity_pages(), 4097);
+    assert_eq!(memory.mapped_pages(), pe::MAPPED_PAGES);
+    assert_eq!(read(&memory, info.entry_point, 5), [0xb8, 42, 0, 0, 0]);
+    let mut engine = EngineInstance::new(4097, KEY).unwrap();
+    metadata(engine.load_pe32(&bytes).unwrap());
+    assert_eq!(engine.memory().unwrap().capacity_pages(), 4097);
+    assert_eq!(engine.memory().unwrap().mapped_pages(), pe::MAPPED_PAGES);
 }
 
 fn sentinel(engine: &mut EngineInstance) {

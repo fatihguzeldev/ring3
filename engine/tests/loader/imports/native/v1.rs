@@ -1,7 +1,10 @@
 use ring3_engine::{
     cpu::dbt::GateSpec,
     loader::{self, ImageMetadata32, LinkedImageMetadata32, LoadError},
-    memory::{Access, AddressSpace, FaultReason, GuestAddress, MemoryError, MemoryFault},
+    memory::{
+        Access, AddressSpace, FaultReason, GuestAddress, MAX_RESIDENT_PAGES, MemoryError,
+        MemoryFault,
+    },
     process::{EngineInstance, HostError},
 };
 
@@ -612,7 +615,7 @@ fn explicit_gate_page_and_total_capacity_include_last_guest_page_and_whole_image
             Some(LoadError::Malformed)
         );
     }
-    for pages in [0, 4, 4097, u32::MAX] {
+    for pages in [0, 4, MAX_RESIDENT_PAGES + 1, u32::MAX] {
         assert_eq!(
             loader::load_pe32_linked_at(&bytes, BASE, GATE, pages).err(),
             Some(LoadError::Capacity)
@@ -662,6 +665,24 @@ fn explicit_gate_page_and_total_capacity_include_last_guest_page_and_whole_image
     let mut oversized_file = image(&[GET_NAME]);
     oversized_file.resize(16 * 1024 * 1024 + 1, 0);
     refused(&oversized_file, LoadError::Capacity);
+}
+
+#[test]
+fn linked_loading_preserves_expanded_backing_budget_and_import_gates() {
+    let bytes = image(&[SET_NAME]);
+    let (memory, metadata) = loader::load_pe32_linked_at(&bytes, BASE, GATE, 4097)
+        .unwrap()
+        .into_parts();
+    assert_eq!(memory.capacity_pages(), 4097);
+    assert_eq!(memory.mapped_pages(), 5);
+    assert_eq!(metadata, expected_metadata(BASE, GATE, false, true, 5));
+    assert_eq!(bytes_at(&memory, BASE + IAT, 4), (GATE + 16).to_le_bytes());
+    let mut engine = EngineInstance::new(4097, KEY).unwrap();
+    assert_eq!(
+        engine.load_pe32_linked_at(&bytes, BASE, GATE).unwrap(),
+        metadata
+    );
+    assert_eq!(engine.memory().unwrap().capacity_pages(), 4097);
 }
 
 type ModuleView = Result<(Vec<u8>, usize), HostError>;

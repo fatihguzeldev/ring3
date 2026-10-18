@@ -4,7 +4,10 @@ use super::support_pe32_relocation as reloc;
 
 use ring3_engine::{
     loader::{LoadError, load_pe32, load_pe32_at},
-    memory::{Access, AddressSpace, FaultReason, GuestAddress, MemoryError, MemoryFault},
+    memory::{
+        Access, AddressSpace, FaultReason, GuestAddress, MAX_RESIDENT_PAGES, MemoryError,
+        MemoryFault,
+    },
     process::{EngineInstance, HostError},
 };
 
@@ -280,12 +283,31 @@ fn selected_base_and_existing_resident_limits_remain_checked() {
         LoadError::Malformed,
         "selected image overflow",
     );
-    for pages in [0, 5, 4097, u32::MAX] {
+    for pages in [0, 5, MAX_RESIDENT_PAGES + 1, u32::MAX] {
         assert_eq!(
             load_pe32_at(&bytes, pe::BASE, pages).err(),
             Some(LoadError::Capacity)
         );
     }
+}
+
+#[test]
+fn selected_base_loading_preserves_expanded_backing_budget_and_fixups() {
+    let bytes = reloc::full_image();
+    let base = 0x0050_0000;
+    let (memory, info) = load_pe32_at(&bytes, base, 4097).unwrap().into_parts();
+    assert_eq!(memory.capacity_pages(), 4097);
+    assert_eq!(memory.mapped_pages(), info.mapped_pages);
+    assert_eq!(info.entry_point, base + 0x1000);
+    for (rva, original) in reloc::WORDS {
+        assert_eq!(
+            word(&memory, base + rva),
+            original.wrapping_add(base - pe::BASE)
+        );
+    }
+    let mut engine = EngineInstance::new(4097, KEY).unwrap();
+    assert_eq!(engine.load_pe32_at(&bytes, base).unwrap(), info);
+    assert_eq!(engine.memory().unwrap().capacity_pages(), 4097);
 }
 
 #[test]

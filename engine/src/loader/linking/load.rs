@@ -6,7 +6,7 @@ use crate::{
         pe32::{MAX_IMAGE_BYTES, initialize, parse_linked, protect},
         relocation::prepare_fixups,
     },
-    memory::{AddressSpace, GuestAddress, PAGE_SIZE, Permissions},
+    memory::{AddressSpace, GuestAddress, MAX_RESIDENT_PAGES, PAGE_SIZE, Permissions},
 };
 
 pub(crate) fn load_linked_profile(
@@ -16,7 +16,8 @@ pub(crate) fn load_linked_profile(
     resident_pages: u32,
     profile: ProviderProfile,
 ) -> Result<LoadedLinkedImage32, LoadError> {
-    if !(1..=4096).contains(&resident_pages) || bytes.len() > MAX_IMAGE_BYTES as usize {
+    if !(1..=MAX_RESIDENT_PAGES).contains(&resident_pages) || bytes.len() > MAX_IMAGE_BYTES as usize
+    {
         return Err(LoadError::Capacity);
     }
     if actual_base == 0 || !actual_base.is_multiple_of(65536) {

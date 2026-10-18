@@ -1,5 +1,5 @@
 use ring3_engine::cpu::{UnsupportedFeature, x86::decode::DecodeError};
-use ring3_engine::memory::{Access, GuestAddress, MemoryError};
+use ring3_engine::memory::{Access, GuestAddress, MAX_RESIDENT_PAGES, MemoryError, PAGE_SIZE};
 use ring3_engine::process::{EngineInstance, HostError};
 
 const KEY: u64 = 0xfedc_ba98_7654_3210;
@@ -260,9 +260,60 @@ fn close_retains_arena_and_rejects_every_live_context_operation() {
 
 #[test]
 fn constructor_rejects_empty_and_oversized_resident_capacity() {
-    for pages in [0, 4097, u32::MAX] {
+    for pages in [0, MAX_RESIDENT_PAGES + 1, u32::MAX] {
         assert!(EngineInstance::new(pages, KEY).is_err());
     }
+}
+
+#[test]
+fn expanded_backing_budget_maps_real_slots_beyond_the_previous_limit() {
+    let mut engine = EngineInstance::new(MAX_RESIDENT_PAGES, KEY).unwrap();
+    assert_eq!(
+        engine.memory().unwrap().capacity_pages(),
+        MAX_RESIDENT_PAGES
+    );
+    let base = 0x1000_0000;
+    let last = base + 4096 * PAGE_SIZE;
+    engine.map(base, 4097, 7).unwrap();
+    assert_eq!(engine.memory().unwrap().mapped_pages(), 4097);
+    assert_eq!(
+        engine
+            .memory()
+            .unwrap()
+            .resolve(GuestAddress(last), Access::Write)
+            .unwrap()
+            .0,
+        4096 * PAGE_SIZE
+    );
+    upload(&mut engine, base, &[0x11, 0x22, 0x33, 0x44]);
+    upload(&mut engine, last, &[0xb8, 42, 0, 0, 0]);
+    let snapshot = engine
+        .memory()
+        .unwrap()
+        .snapshot_code(GuestAddress(last), 5)
+        .unwrap();
+    let generation = compile(&mut engine, last, 5).unwrap();
+    engine.guard(KEY, generation).unwrap();
+    engine.write32(last + 1, 43).unwrap();
+    assert!(!engine.memory().unwrap().is_code_current(&snapshot));
+    assert!(matches!(
+        engine.guard(KEY, generation),
+        Err(HostError::CodeInvalidated)
+    ));
+    let mut bytes = [0; 5];
+    engine
+        .memory()
+        .unwrap()
+        .read(GuestAddress(last), &mut bytes)
+        .unwrap();
+    assert_eq!(bytes, [0xb8, 43, 0, 0, 0]);
+    let mut first = [0; 4];
+    engine
+        .memory()
+        .unwrap()
+        .read(GuestAddress(base), &mut first)
+        .unwrap();
+    assert_eq!(first, [0x11, 0x22, 0x33, 0x44]);
 }
 
 #[test]

@@ -7,7 +7,10 @@ use ring3_engine::{
     },
     cpu::{ExecutionExit, ExitReason, dbt::GateSpec, x86::State32},
     loader::{self, ImageMetadata32, LinkedImageMetadata32V2, LoadError},
-    memory::{Access, AddressSpace, FaultReason, GuestAddress, MemoryError, MemoryFault},
+    memory::{
+        Access, AddressSpace, FaultReason, GuestAddress, MAX_RESIDENT_PAGES, MemoryError,
+        MemoryFault,
+    },
     process::{EngineInstance, HostError},
     windows::CallingConvention32,
 };
@@ -355,7 +358,7 @@ fn final_gate_page_and_exact_image_adjacency_are_valid_but_whole_image_gaps_over
 
 #[test]
 fn global_capacity_and_ninth_ilt_priorities_remain_bounded() {
-    for pages in [0, 4097, u32::MAX] {
+    for pages in [0, MAX_RESIDENT_PAGES + 1, u32::MAX] {
         assert_eq!(
             loader::load_pe32_linked_v2_at(b"bad", 0, 0, pages).err(),
             Some(LoadError::Capacity)
@@ -366,15 +369,11 @@ fn global_capacity_and_ninth_ilt_priorities_remain_bounded() {
         loader::load_pe32_linked_v2_at(&bytes, pe::BASE, GATE, 4).err(),
         Some(LoadError::Capacity)
     );
-    assert_eq!(
-        loader::load_pe32_linked_v2_at(&bytes, pe::BASE, GATE, 4096)
-            .unwrap()
-            .into_parts()
-            .1
-            .image
-            .mapped_pages,
-        5
-    );
+    let (memory, metadata) = loader::load_pe32_linked_v2_at(&bytes, pe::BASE, GATE, 4097)
+        .unwrap()
+        .into_parts();
+    assert_eq!(memory.capacity_pages(), 4097);
+    assert_eq!(metadata.image.mapped_pages, 5);
     let mut large = bytes.clone();
     large.resize(16 * 1024 * 1024 + 1, 0);
     assert_eq!(

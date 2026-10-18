@@ -4,8 +4,8 @@ mod paging;
 mod space;
 
 pub use address::{
-    Access, BackingOffset, FaultReason, GuestAddress, MAX_WORD_WRITES32, MemoryError, MemoryFault,
-    PAGE_SIZE, PageRange, Permissions, WordWrite32,
+    Access, BackingOffset, FaultReason, GuestAddress, MAX_RESIDENT_PAGES, MAX_WORD_WRITES32,
+    MemoryError, MemoryFault, PAGE_SIZE, PageRange, Permissions, WordWrite32,
 };
 pub use code::CodeSnapshot;
 pub use space::AddressSpace;

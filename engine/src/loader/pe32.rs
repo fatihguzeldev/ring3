@@ -1,7 +1,9 @@
 use super::imports::ImportDirectory;
 use super::relocation::{RelocationDirectory, prepare_fixups};
 use super::{ImageMetadata32, LoadError, LoadedPe32};
-use crate::memory::{AddressSpace, GuestAddress, PAGE_SIZE, PageRange, Permissions};
+use crate::memory::{
+    AddressSpace, GuestAddress, MAX_RESIDENT_PAGES, PAGE_SIZE, PageRange, Permissions,
+};
 
 pub(crate) mod module;
 
@@ -72,7 +74,8 @@ impl ImagePlan {
 }
 
 pub fn load_pe32(bytes: &[u8], resident_pages: u32) -> Result<LoadedPe32, LoadError> {
-    if !(1..=4096).contains(&resident_pages) || bytes.len() > MAX_IMAGE_BYTES as usize {
+    if !(1..=MAX_RESIDENT_PAGES).contains(&resident_pages) || bytes.len() > MAX_IMAGE_BYTES as usize
+    {
         return Err(LoadError::Capacity);
     }
     let plan = parse(bytes, Profile::Fixed)?;
@@ -107,7 +110,8 @@ pub fn load_pe32_at(
     actual_base: u32,
     resident_pages: u32,
 ) -> Result<LoadedPe32, LoadError> {
-    if !(1..=4096).contains(&resident_pages) || bytes.len() > MAX_IMAGE_BYTES as usize {
+    if !(1..=MAX_RESIDENT_PAGES).contains(&resident_pages) || bytes.len() > MAX_IMAGE_BYTES as usize
+    {
         return Err(LoadError::Capacity);
     }
     if actual_base == 0 || !actual_base.is_multiple_of(65536) {

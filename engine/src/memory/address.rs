@@ -1,4 +1,6 @@
 pub const PAGE_SIZE: u32 = 4096;
+/// caller-selected backing budget admitted by process and standalone image entry points.
+pub const MAX_RESIDENT_PAGES: u32 = 128 * 1024 * 1024 / PAGE_SIZE;
 pub const MAX_WORD_WRITES32: usize = 17;
 pub(crate) const GUEST_PAGES: usize = 1 << 20;
 pub(crate) const ADDRESS_LIMIT: u64 = 1 << 32;
