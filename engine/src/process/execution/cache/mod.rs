@@ -1,4 +1,5 @@
 mod admission;
+mod cohort;
 mod configuration;
 mod context;
 mod directory;

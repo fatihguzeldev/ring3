@@ -16,6 +16,9 @@ impl EngineInstance {
             .as_ref()
             .ok_or(HostError::InvalidRequest)?;
         cache.can_request()?;
+        if cache.cohort.is_some() {
+            return Err(HostError::Call(crate::process::CallError::Busy));
+        }
         let pins = self.cache_pins()?;
         let memory = self.memory.as_ref().unwrap();
         let cs = self.code_fetch_context()?;
@@ -56,7 +59,37 @@ impl EngineInstance {
             victim_slot: slot as u32,
             tier: CompilationTier32::Optimized,
         };
+        let coverage = registry
+            .plan_cached_cohort(
+                memory,
+                crate::memory::GuestAddress(row.entry),
+                crate::cpu::dbt::CompileLimits::default(),
+                cs,
+                crate::cpu::x86::decode::DecodeAuthority::new(self.system_register_bank),
+                &|id| {
+                    !pins.contains(&id)
+                        && self
+                            .resident_installation_by_id(id)
+                            .is_some_and(|installed| {
+                                cache.entries[installed.slot as usize]
+                                    .as_ref()
+                                    .is_some_and(|row| row.id == id)
+                            })
+                },
+                &|pc| {
+                    super::admission::cache_gate_at(&self.modules, self.callback.as_ref(), pc.0)
+                        .is_some()
+                },
+            )
+            .map_err(HostError::Resident)?;
+        let plan = coverage
+            .map(|coverage| super::cohort::PromotionCohort32::new(self, row.entry, coverage))
+            .transpose()?;
+        let request = plan
+            .as_ref()
+            .map_or(request, |plan| plan.request(cache.serial));
         self.publish_cache_request(request, false)?;
+        self.execution_cache.as_mut().unwrap().cohort = plan;
         Ok(Some(request))
     }
 }

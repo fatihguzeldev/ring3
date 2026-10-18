@@ -15,6 +15,9 @@ const MAX_UNITS: usize = 8;
 const MAX_BYTES: usize = MAX_UNITS * 65_536;
 static NEXT_UNIT_ID: AtomicU64 = AtomicU64::new(1);
 
+mod cohort;
+pub(crate) use cohort::{COHORT_OWNERS, ResidentCohort};
+
 mod index;
 mod lookup;
 use index::{EntryIndex, PreparedEntryPages};

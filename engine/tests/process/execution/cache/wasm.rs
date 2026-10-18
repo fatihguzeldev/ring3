@@ -32,3 +32,6 @@ fn actual_engine_cache_promotes_indexed_code_with_identical_safepoints_and_warm_
     );
     println!("{}", String::from_utf8_lossy(&result.stdout).trim());
 }
+
+#[path = "cohort/wasm.rs"]
+mod cohort;

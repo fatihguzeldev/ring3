@@ -23,4 +23,6 @@ pub use region::{
     BlockSpec, CompileError, CompileLimits, InstructionError, PreparedRegion, prepare_region,
 };
 
+pub(crate) use resident::{COHORT_OWNERS, ResidentCohort};
+
 pub use resident::{RegistryError, RegistryLimits, RegistryUsage, ResidentRegistry, UnitId};

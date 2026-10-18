@@ -19,7 +19,21 @@ impl EngineInstance {
             "prepare_entry",
             &[ring3_observability::Field::unsigned("pc", u64::from(pc))],
         );
-        self.guard_cache_control(key)?;
+        if let Err(error) = self.guard_cache_control(key) {
+            if key == self.key
+                && error == HostError::Call(CallError::Cancelled)
+                && self
+                    .execution_cache
+                    .as_ref()
+                    .is_some_and(|cache| cache.request.is_none() && cache.cohort.is_some())
+            {
+                self.abandon_promotion_cohort();
+            }
+            return Err(error);
+        }
+        if let Some(request) = self.continue_promotion_cohort(pc)? {
+            return Ok(request);
+        }
         let cache = self
             .execution_cache
             .as_ref()
@@ -29,6 +43,7 @@ impl EngineInstance {
         let memory = self.memory.as_ref().unwrap();
         let tier = cache
             .promotion
+            .as_ref()
             .filter(|target| {
                 target.pc == pc
                     && target.version == memory.code_validation_version()
@@ -152,6 +167,34 @@ impl EngineInstance {
             .get_raw(self.memory.as_ref().unwrap(), id)
             .map_err(HostError::Resident)?;
         let tier = region.tier();
+        if self
+            .execution_cache
+            .as_ref()
+            .unwrap()
+            .promotion
+            .as_ref()
+            .filter(|target| {
+                target.pc == pc
+                    && target.version == self.memory.as_ref().unwrap().code_validation_version()
+                    && target.decode_key == cs.decode_key()
+            })
+            .and_then(|target| target.coverage.as_ref())
+            .is_some_and(|coverage| {
+                tier != CompilationTier32::Optimized || !coverage.covers(region)
+            })
+        {
+            // an emitted byte-limit fallback cannot claim to replace a whole cohort.
+            // already acknowledged owners remain absent; the normal cold path rebuilds them.
+            if existing.is_none() {
+                self.resident
+                    .as_mut()
+                    .unwrap()
+                    .discard_quiescent_raw(self.memory.as_ref().unwrap(), id)
+                    .map_err(HostError::Resident)?;
+            }
+            self.execution_cache.as_mut().unwrap().promotion = None;
+            return self.prepare_cache_entry(key, pc);
+        }
         #[cfg(feature = "observability")]
         let metadata = region.metadata();
         #[cfg(feature = "observability")]
@@ -205,7 +248,7 @@ impl EngineInstance {
     }
 }
 
-fn cache_gate_at(
+pub(super) fn cache_gate_at(
     modules: &crate::process::loading::modules::ModuleProcess32,
     mut callback: Option<&crate::process::calls::callback::SuspendedCallback>,
     pc: u32,

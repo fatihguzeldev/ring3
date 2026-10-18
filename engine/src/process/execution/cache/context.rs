@@ -25,6 +25,7 @@ pub(in crate::process) struct ExecutionCache32 {
     pub(super) victims: super::victims::VictimIndex,
     pub(super) request: Option<PendingCache32>,
     pub(super) promotion: Option<PromotionTarget32>,
+    pub(super) cohort: Option<super::cohort::PromotionCohort32>,
     pub(super) serial: u64,
     pub(super) revision: u64,
     pub(super) clock: AtomicU64,
@@ -46,6 +47,7 @@ pub(super) struct PromotionTarget32 {
     pub pc: u32,
     pub version: u64,
     pub decode_key: CodeDecodeKey,
+    pub coverage: Option<crate::cpu::dbt::ResidentCohort>,
 }
 #[derive(Clone, Copy)]
 pub(super) struct PendingCache32 {
@@ -85,6 +87,7 @@ impl ExecutionCache32 {
             victims,
             request: None,
             promotion: None,
+            cohort: None,
             serial: 1,
             revision: 0,
             clock: AtomicU64::new(0),

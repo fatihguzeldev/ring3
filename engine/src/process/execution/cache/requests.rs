@@ -60,6 +60,7 @@ impl EngineInstance {
         {
             return Err(HostError::InvalidRequest);
         }
+        self.validate_cohort_ack(pending.request)?;
         if self.cache_pins()?.contains(&victim) {
             return Err(HostError::Call(CallError::Busy));
         }
@@ -69,16 +70,21 @@ impl EngineInstance {
             .discard_quiescent_raw(self.memory.as_ref().unwrap(), victim)
             .map_err(HostError::Resident)?;
         self.remove_resident_installation(victim);
-        let cache = self.execution_cache.as_mut().unwrap();
-        cache.evictions = cache.evictions.saturating_add(1);
-        if pending.request.tier == crate::cpu::dbt::CompilationTier32::Optimized {
-            cache.promotion = Some(PromotionTarget32 {
+        {
+            let cache = self.execution_cache.as_mut().unwrap();
+            cache.evictions = cache.evictions.saturating_add(1);
+            cache.request = None;
+        }
+        if !self.advance_promotion_cohort(pending.request.serial)
+            && pending.request.tier == crate::cpu::dbt::CompilationTier32::Optimized
+        {
+            self.execution_cache.as_mut().unwrap().promotion = Some(PromotionTarget32 {
                 pc: pending.request.pc,
                 version: pending.version,
                 decode_key: pending.decode_key,
+                coverage: None,
             });
         }
-        cache.request = None;
         Ok(())
     }
     /// acknowledges the compiled unit installed in its reserved host table slot.
@@ -114,6 +120,9 @@ impl EngineInstance {
             return Err(HostError::InvalidArtifact);
         }
         self.guard_detection_material_change()?;
+        if self.cancel_cohort_after_ack(serial) {
+            return Ok(());
+        }
         let pending = self
             .execution_cache
             .as_ref()
@@ -137,7 +146,15 @@ impl EngineInstance {
                 .map_err(HostError::Resident)?;
             self.cache_track_removal(pending.request.unit_id, None);
         }
-        self.execution_cache.as_mut().unwrap().request = None;
+        let cache = self.execution_cache.as_mut().unwrap();
+        if cache.cohort.take().is_some()
+            || cache
+                .promotion
+                .is_some_and(|target| target.coverage.is_some())
+        {
+            cache.promotion = None;
+        }
+        cache.request = None;
         Ok(())
     }
 }
