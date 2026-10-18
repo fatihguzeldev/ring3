@@ -362,8 +362,9 @@ impl ResidentRegistry {
             .filter(|&total| total <= self.limits.wasm_bytes)
             .ok_or(RegistryError::ByteCapacity)?;
         for pc in region.executable_addresses() {
-            if self.entries.iter().any(|unit| {
-                unit.region.matches_decode_key(region.decode_key())
+            for &id in self.entry_index.candidates(pc.0) {
+                let unit = &self.entries[self.unit_index(id.get())?];
+                if unit.region.matches_decode_key(region.decode_key())
                     && unit.region.contains_executable(pc.0)
                     && unit.region.wasm_bytes(memory).is_ok()
                     && (unit.region.contains_material(pc.0)
@@ -371,8 +372,9 @@ impl ResidentRegistry {
                         || unit.region.context_fault(pc.0).is_none_or(|fault| {
                             cs.is_none_or(|cs| fault.remains_denied(memory, cs))
                         }))
-            }) {
-                return Err(RegistryError::InstructionOverlap { pc });
+                {
+                    return Err(RegistryError::InstructionOverlap { pc });
+                }
             }
         }
         Ok(wasm_bytes)
