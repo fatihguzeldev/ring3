@@ -457,3 +457,64 @@ fn optimized_cfg_keeps_current_tail_and_repairs_only_invalidated_region() {
     assert_eq!(retained_tail.as_ptr(), tail_pointer);
     assert_eq!(registry.usage().units, 2);
 }
+
+#[test]
+fn optimized_discovery_preserves_live_successor_owners_in_a_fully_warm_cfg() {
+    let (mut memory, mut warm, cs) = fixture(&[]);
+    diamond(&mut memory);
+    let entries = [0x1000, 0x1009, 0x1020, 0x1030];
+    let baseline = entries.map(|pc| cached(&mut warm, &memory, pc, cs));
+    let successors = baseline[1..]
+        .iter()
+        .map(|&id| {
+            let bytes = warm.get(&memory, id).unwrap().wasm_bytes(&memory).unwrap();
+            (id, bytes.as_ptr(), bytes.to_vec())
+        })
+        .collect::<Vec<_>>();
+    warm.discard_current_raw(&memory, baseline[0].get())
+        .unwrap();
+    let promoted = optimized(
+        &mut warm,
+        &memory,
+        entries[0],
+        cs,
+        CompileLimits::default(),
+        &|_| false,
+    )
+    .unwrap();
+    let region = warm.get(&memory, promoted).unwrap();
+    assert_eq!(region.tier(), CompilationTier32::Optimized);
+    assert_eq!(
+        (region.metadata().blocks, region.metadata().instructions),
+        (1, 3)
+    );
+    assert_eq!(warm.usage().units, 4);
+    for ((pc, expected), (id, pointer, bytes)) in
+        entries[1..].iter().zip(&baseline[1..]).zip(successors)
+    {
+        assert_eq!(
+            warm.lookup_bound(&memory, GuestAddress(*pc), cs),
+            Ok(*expected)
+        );
+        let current = warm.get(&memory, id).unwrap().wasm_bytes(&memory).unwrap();
+        assert_eq!(current, bytes);
+        assert_eq!(current.as_ptr(), pointer);
+    }
+
+    let mut cold = ResidentRegistry::new(&memory, RegistryLimits::default()).unwrap();
+    let discovered = optimized(
+        &mut cold,
+        &memory,
+        entries[0],
+        cs,
+        CompileLimits::default(),
+        &|_| false,
+    )
+    .unwrap();
+    let region = cold.get(&memory, discovered).unwrap();
+    assert_eq!(
+        (region.metadata().blocks, region.metadata().instructions),
+        (4, 9)
+    );
+    assert_eq!(cold.usage().units, 1);
+}
