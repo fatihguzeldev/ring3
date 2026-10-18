@@ -24,3 +24,5 @@
 # Logs and temporary files
 *.log
 *.tmp
+*.pftrace
+*.pftrace.partial

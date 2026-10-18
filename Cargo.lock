@@ -863,6 +863,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "ring3-observability"
+version = "0.1.0"
+
+[[package]]
 name = "roxmltree"
 version = "0.21.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
