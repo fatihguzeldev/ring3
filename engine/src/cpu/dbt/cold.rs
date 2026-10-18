@@ -1,3 +1,7 @@
+mod formation;
+
+pub(super) use formation::prepare_runtime_region_until;
+
 use super::{
     BlockSpec, CompileError, CompileLimits, GateSpec, InstructionError, PreparedRegion, gate,
     region::{self, BlockSource, CompiledBlock, GUEST_END, MAX_BLOCKS},
@@ -22,6 +26,7 @@ pub fn prepare_entry_region(
         None,
         crate::cpu::x86::decode::DecodeAuthority::default(),
         &|_| false,
+        DecodeFailure::Reject,
     )
 }
 
@@ -43,6 +48,7 @@ pub(super) fn prepare_embedded_entry_region(
         cs,
         authority,
         &|_| false,
+        DecodeFailure::Reject,
     )
 }
 
@@ -85,7 +91,14 @@ pub(super) fn prepare_runtime_entry_until(
         cs,
         authority,
         joins,
+        DecodeFailure::Reject,
     )
+}
+
+#[derive(Clone, Copy)]
+enum DecodeFailure {
+    Reject,
+    KeepPrefix,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -99,6 +112,7 @@ fn prepare(
     cs: Option<CodeFetchContext>,
     authority: crate::cpu::x86::decode::DecodeAuthority,
     joins: &dyn Fn(GuestAddress) -> bool,
+    failure: DecodeFailure,
 ) -> Result<PreparedRegion, CompileError> {
     #[cfg(feature = "observability")]
     let _scope = ring3_observability::current().scope(
@@ -170,14 +184,30 @@ fn prepare(
             if cursor != start && joins(pc) {
                 break;
             }
-            let decoded = crate::cpu::x86::decode::decode_for_compilation(
+            let decoded = match crate::cpu::x86::decode::decode_for_compilation(
                 memory,
                 pc,
                 decode_policy,
                 cs,
                 authority,
-            )
-            .map_err(|error| region::instruction_error(pc, InstructionError::Decode(error)))?;
+            ) {
+                Ok(decoded) => decoded,
+                Err(error) => {
+                    if matches!(failure, DecodeFailure::KeepPrefix)
+                        && !instructions.is_empty()
+                        && !matches!(
+                            error,
+                            crate::cpu::x86::decode::DecodeError::Infrastructure(_)
+                        )
+                    {
+                        break;
+                    }
+                    return Err(region::instruction_error(
+                        pc,
+                        InstructionError::Decode(error),
+                    ));
+                }
+            };
             let instruction = match decoded {
                 BoundDecode::Instruction(instruction) => instruction,
                 BoundDecode::CodeFault(mut fault) => {
@@ -207,6 +237,9 @@ fn prepare(
                 return Err(CompileError::InvalidBlocks);
             }
             if !region::supports(&instruction, embedded) {
+                if matches!(failure, DecodeFailure::KeepPrefix) && !instructions.is_empty() {
+                    break;
+                }
                 return Err(region::instruction_error(
                     pc,
                     InstructionError::BackendUnsupported,

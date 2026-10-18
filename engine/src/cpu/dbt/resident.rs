@@ -288,16 +288,17 @@ impl ResidentRegistry {
         let prepared = if let Some(gate) = gate {
             prepare_resident_entry_region(memory, &[entry], limits, &[gate], Some(cs), authority)
         } else {
-            super::cold::prepare_runtime_entry_until(
-                memory,
-                entry,
-                limits,
-                Some(cs),
-                authority,
-                &|pc| is_gate(pc) || self.lookup_bound(memory, pc, cs).is_ok(),
-            )
+            let prepare = if tier == super::CompilationTier32::Optimized {
+                super::cold::prepare_runtime_region_until
+            } else {
+                super::cold::prepare_runtime_entry_until
+            };
+            prepare(memory, entry, limits, Some(cs), authority, &|pc| {
+                is_gate(pc) || self.lookup_bound(memory, pc, cs).is_ok()
+            })
         }
         .map_err(RegistryError::Compile)?;
+        let expanded = prepared.block_count() > 1;
         let id = allocate_id(&NEXT_UNIT_ID)?;
         #[cfg(feature = "observability")]
         let _emission = ring3_observability::current().scope(
@@ -310,14 +311,37 @@ impl ResidentRegistry {
                 ring3_observability::Field::unsigned("tier", tier as u64),
             ],
         );
+        let binding = Some(EmbeddedBinding::Resident { key, id: id.get() });
         let region = super::artifact::emit_entry_prepared_tier(
             memory,
             prepared,
             limits,
-            Some(EmbeddedBinding::Resident { key, id: id.get() }),
+            binding,
             Some(cs),
             tier,
-        )
+        );
+        let region = match region {
+            Err(CompileError::WasmLimit) if expanded => {
+                let mandatory = super::cold::prepare_runtime_entry_until(
+                    memory,
+                    entry,
+                    limits,
+                    Some(cs),
+                    authority,
+                    &|pc| is_gate(pc) || self.lookup_bound(memory, pc, cs).is_ok(),
+                )
+                .map_err(RegistryError::Compile)?;
+                super::artifact::emit_entry_prepared_tier(
+                    memory,
+                    mandatory,
+                    limits,
+                    binding,
+                    Some(cs),
+                    tier,
+                )
+            }
+            result => result,
+        }
         .map_err(RegistryError::Compile)?;
         let bytes = self.admit(memory, &region, Some(cs))?;
         let pages = self.entry_index.prepare(&region)?;
