@@ -269,7 +269,7 @@ impl ResidentRegistry {
         #[cfg(feature = "observability")]
         let _scope = ring3_observability::current().scope(
             ring3_observability::Level::Detailed,
-            "engine.cpu.codegen",
+            ring3_observability::categories::ENGINE_CPU_CODEGEN,
             "compile_cached",
             &[ring3_observability::Field::unsigned(
                 "pc",
@@ -297,7 +297,7 @@ impl ResidentRegistry {
         #[cfg(feature = "observability")]
         let _emission = ring3_observability::current().scope(
             ring3_observability::Level::Detailed,
-            "engine.cpu.codegen",
+            ring3_observability::categories::ENGINE_CPU_CODEGEN,
             "emit_resident",
             &[
                 ring3_observability::Field::unsigned("unit_id", id.get()),

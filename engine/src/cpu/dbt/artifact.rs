@@ -201,7 +201,7 @@ pub fn compile_region(
     #[cfg(feature = "observability")]
     let _scope = ring3_observability::current().scope(
         ring3_observability::Level::Detailed,
-        "engine.cpu.codegen",
+        ring3_observability::categories::ENGINE_CPU_CODEGEN,
         "compile_region",
         &[],
     );
@@ -224,7 +224,7 @@ pub fn compile_entry_region(
     #[cfg(feature = "observability")]
     let _scope = ring3_observability::current().scope(
         ring3_observability::Level::Detailed,
-        "engine.cpu.codegen",
+        ring3_observability::categories::ENGINE_CPU_CODEGEN,
         "compile_entries",
         &[],
     );
@@ -320,7 +320,7 @@ pub(super) fn emit_prepared(
     #[cfg(feature = "observability")]
     let _scope = ring3_observability::current().scope(
         ring3_observability::Level::Detailed,
-        "engine.cpu.codegen",
+        ring3_observability::categories::ENGINE_CPU_CODEGEN,
         "emit",
         &[],
     );

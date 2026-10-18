@@ -63,7 +63,7 @@ impl EngineInstance {
         #[cfg(feature = "observability")]
         let _scope = ring3_observability::current().scope(
             ring3_observability::Level::Basic,
-            "engine.loader.modules",
+            ring3_observability::categories::ENGINE_LOADER_MODULES,
             "commit_source",
             &[],
         );

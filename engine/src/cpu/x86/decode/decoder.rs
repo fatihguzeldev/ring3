@@ -47,7 +47,7 @@ pub fn decode_one(
     #[cfg(feature = "observability")]
     let _scope = ring3_observability::current().scope(
         ring3_observability::Level::Detailed,
-        "engine.cpu.decode",
+        ring3_observability::categories::ENGINE_CPU_DECODE,
         "instruction",
         &[ring3_observability::Field::unsigned("pc", u64::from(pc.0))],
     );

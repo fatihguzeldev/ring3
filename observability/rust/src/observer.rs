@@ -1,4 +1,6 @@
-use crate::{Config, ConfigError, Field, Level, Value, clock::Clock, perfetto};
+use crate::{
+    Category, Config, ConfigError, Field, Level, Value, categories, clock::Clock, perfetto,
+};
 use std::{
     collections::{HashMap, VecDeque},
     marker::PhantomData,
@@ -43,7 +45,7 @@ struct State {
     open_scopes: u64,
     next_track: u32,
     threads: HashMap<std::thread::ThreadId, u64>,
-    counters: HashMap<(String, String), u64>,
+    counters: HashMap<(Category, String), u64>,
 }
 
 impl State {
@@ -51,8 +53,8 @@ impl State {
         self.last_timestamp = self.last_timestamp.max(self.clock.now_ns());
         self.last_timestamp
     }
-    fn accepts(&self, level: Level, context: &str) -> bool {
-        !self.finished && self.config.accepts(level, context)
+    fn accepts(&self, level: Level, category: Category) -> bool {
+        !self.finished && self.config.accepts(level, category)
     }
     fn push(&mut self, packet: Vec<u8>, reserve: usize) -> bool {
         let needed = self
@@ -111,7 +113,7 @@ impl State {
         &mut self,
         track: u64,
         kind: u64,
-        context: &str,
+        category: Option<Category>,
         name: &str,
         fields: &[Field<'_>],
         counter: Option<f64>,
@@ -123,7 +125,7 @@ impl State {
             timestamp,
             track,
             kind,
-            context,
+            category,
             name,
             fields,
             counter,
@@ -134,9 +136,8 @@ impl State {
         self.emitted = self.emitted.saturating_add(1);
         true
     }
-    fn valid(&mut self, context: &str, name: &str, fields: &[Field<'_>]) -> bool {
-        if context.len() <= 128
-            && name.len() <= 256
+    fn valid(&mut self, name: &str, fields: &[Field<'_>]) -> bool {
+        if name.len() <= 256
             && fields.len() <= 32
             && fields.iter().all(|field| {
                 field.name.len() <= 128
@@ -195,7 +196,15 @@ impl Observer {
         ));
         state.force_push(descriptor);
         let track = state.config.track_uuid;
-        state.record(track, 3, "observability", "capture.started", &[], None, 0);
+        state.record(
+            track,
+            3,
+            Some(categories::OBSERVABILITY),
+            "capture.started",
+            &[],
+            None,
+            0,
+        );
         Ok(Self(Some(Arc::new(Mutex::new(state)))))
     }
     fn with<T>(&self, default: T, operation: impl FnOnce(&mut State) -> T) -> T {
@@ -210,8 +219,8 @@ impl Observer {
     pub fn is_recording(&self) -> bool {
         self.with(false, |state| !state.finished)
     }
-    pub fn enabled(&self, level: Level, context: &str) -> bool {
-        self.with(false, |state| state.accepts(level, context))
+    pub fn enabled(&self, level: Level, category: Category) -> bool {
+        self.with(false, |state| state.accepts(level, category))
     }
     pub fn stats(&self) -> Stats {
         self.with(Stats::default(), |state| Stats {
@@ -223,44 +232,47 @@ impl Observer {
             open_scopes: state.open_scopes,
         })
     }
-    pub fn instant(&self, level: Level, context: &str, name: &str, fields: &[Field<'_>]) {
+    pub fn instant(&self, level: Level, category: Category, name: &str, fields: &[Field<'_>]) {
         self.with((), |state| {
-            if !state.accepts(level, context) || !state.valid(context, name, fields) {
+            if !state.accepts(level, category) || !state.valid(name, fields) {
                 return;
             }
             if let Some(track) = state.thread_track() {
-                state.record(track, 3, context, name, fields, None, 0);
+                state.record(track, 3, Some(category), name, fields, None, 0);
             }
         });
     }
-    pub fn counter(&self, level: Level, context: &str, name: &str, value: f64) {
+    pub fn counter(&self, level: Level, category: Category, name: &str, value: f64) {
         self.with((), |state| {
-            if !state.accepts(level, context)
-                || !state.valid(context, name, &[])
-                || !value.is_finite()
-            {
+            if !state.accepts(level, category) || !state.valid(name, &[]) || !value.is_finite() {
                 return;
             }
-            let key = (context.to_owned(), name.to_owned());
+            let key = (category, name.to_owned());
             let track = if let Some(track) = state.counters.get(&key) {
                 *track
             } else {
-                let Some(track) = state.track(&format!("{context}.{name}"), true) else {
+                let Some(track) = state.track(&perfetto::counter_name(category, name), true) else {
                     return;
                 };
                 state.counters.insert(key, track);
                 track
             };
-            state.record(track, 4, "", "", &[], Some(value), 0);
+            state.record(track, 4, None, "", &[], Some(value), 0);
         });
     }
-    pub fn scope(&self, level: Level, context: &str, name: &str, fields: &[Field<'_>]) -> Scope {
+    pub fn scope(
+        &self,
+        level: Level,
+        category: Category,
+        name: &str,
+        fields: &[Field<'_>],
+    ) -> Scope {
         let track = self.with(None, |state| {
-            if !state.accepts(level, context) || !state.valid(context, name, fields) {
+            if !state.accepts(level, category) || !state.valid(name, fields) {
                 return None;
             }
             let track = state.thread_track()?;
-            if !state.record(track, 1, context, name, fields, None, END_RESERVE) {
+            if !state.record(track, 1, Some(category), name, fields, None, END_RESERVE) {
                 return None;
             }
             state.reserved_bytes += END_RESERVE;
@@ -315,7 +327,7 @@ impl Observer {
                 timestamp,
                 state.config.track_uuid,
                 3,
-                "observability",
+                Some(categories::OBSERVABILITY),
                 "capture.finished",
                 &fields,
                 None,
@@ -351,7 +363,7 @@ impl Drop for Scope {
                 timestamp,
                 track,
                 2,
-                "",
+                None,
                 "",
                 &[],
                 None,

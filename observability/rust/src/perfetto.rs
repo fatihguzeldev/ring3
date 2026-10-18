@@ -1,3 +1,5 @@
+use crate::Category;
+
 #[derive(Clone, Copy, Debug)]
 pub enum Value<'a> {
     Unsigned(u64),
@@ -120,7 +122,7 @@ pub(crate) fn event(
     timestamp: u64,
     track: u64,
     kind: u64,
-    context: &str,
+    category: Option<Category>,
     name: &str,
     fields: &[Field<'_>],
     counter: Option<f64>,
@@ -129,7 +131,9 @@ pub(crate) fn event(
     number(&mut event, 9, kind);
     number(&mut event, 11, track);
     if kind != 4 && kind != 2 {
-        bytes(&mut event, 22, context.as_bytes());
+        if let Some(category) = category {
+            bytes(&mut event, 22, category.id().as_bytes());
+        }
         bytes(&mut event, 23, name.as_bytes());
     }
     if let Some(value) = counter {
@@ -152,4 +156,8 @@ pub(crate) fn event(
         bytes(&mut event, 4, &annotation);
     }
     packet(sequence, timestamp, 11, &event)
+}
+
+pub(crate) fn counter_name(category: Category, name: &str) -> String {
+    format!("{}.{name}", category.id())
 }

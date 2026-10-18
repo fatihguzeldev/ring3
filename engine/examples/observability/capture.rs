@@ -5,7 +5,7 @@ use ring3_engine::{
     },
     memory::{AddressSpace, GuestAddress, PageRange, Permissions},
 };
-use ring3_observability::{Config, Field, Level, Observer};
+use ring3_observability::{Config, Field, Level, Observer, categories};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let path = std::env::args()
@@ -34,7 +34,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .expect("compile");
         observer.instant(
             Level::Basic,
-            "example",
+            categories::ENGINE_CPU_CODEGEN,
             "compiled",
             &[Field::unsigned(
                 "instructions",
@@ -43,7 +43,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
         observer.counter(
             Level::Basic,
-            "example",
+            categories::ENGINE_CPU_CODEGEN,
             "wasm.bytes",
             region.wasm_bytes(&memory).expect("current code").len() as f64,
         );

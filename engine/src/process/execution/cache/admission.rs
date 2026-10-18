@@ -16,7 +16,7 @@ impl EngineInstance {
         #[cfg(feature = "observability")]
         let _scope = ring3_observability::current().scope(
             ring3_observability::Level::Detailed,
-            "engine.cpu.cache",
+            ring3_observability::categories::ENGINE_CPU_CACHE,
             "prepare_entry",
             &[ring3_observability::Field::unsigned("pc", u64::from(pc))],
         );
@@ -118,7 +118,7 @@ impl EngineInstance {
             #[cfg(feature = "observability")]
             ring3_observability::current().instant(
                 ring3_observability::Level::Detailed,
-                "engine.cpu.cache",
+                ring3_observability::categories::ENGINE_CPU_CACHE,
                 "eviction.requested",
                 &[
                     ring3_observability::Field::unsigned("unit_id", victim.id),
@@ -179,7 +179,7 @@ impl EngineInstance {
         #[cfg(feature = "observability")]
         ring3_observability::current().instant(
             ring3_observability::Level::Detailed,
-            "engine.cpu.cache",
+            ring3_observability::categories::ENGINE_CPU_CACHE,
             "installation.requested",
             &[
                 ring3_observability::Field::unsigned("unit_id", id),

@@ -19,7 +19,7 @@ pub(crate) fn load_linked_profile(
     #[cfg(feature = "observability")]
     let _scope = ring3_observability::current().scope(
         ring3_observability::Level::Basic,
-        "engine.loader.linker",
+        ring3_observability::categories::ENGINE_LOADER_LINKER,
         "load",
         &[ring3_observability::Field::unsigned(
             "bytes",

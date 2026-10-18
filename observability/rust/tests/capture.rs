@@ -1,22 +1,22 @@
-use ring3_observability::{Config, Field, Level, Observer};
+use ring3_observability::{CategorySelection, Config, Field, Level, Observer, categories};
 
 #[test]
 fn off_and_filtered_scopes_produce_no_events() {
     let off = Observer::new(Config::default()).unwrap();
-    off.instant(Level::Basic, "engine.loader", "load", &[]);
+    off.instant(Level::Basic, categories::ENGINE_LOADER, "load", &[]);
     assert!(off.drain().is_empty());
     let observer = Observer::new(Config {
         level: Level::Basic,
-        contexts: vec!["engine.cpu".into()],
+        categories: CategorySelection::Only(vec![categories::ENGINE_CPU]),
         ..Config::default()
     })
     .unwrap();
     let baseline = observer.stats().emitted_events;
-    observer.instant(Level::Detailed, "engine.cpu", "detail", &[]);
-    observer.instant(Level::Basic, "engine.cpus", "not-a-child", &[]);
-    observer.instant(Level::Basic, "engine.loader", "load", &[]);
+    observer.instant(Level::Detailed, categories::ENGINE_CPU, "detail", &[]);
+    assert!(ring3_observability::Category::from_id("engine.cpus").is_none());
+    observer.instant(Level::Basic, categories::ENGINE_LOADER, "load", &[]);
     assert_eq!(observer.stats().emitted_events, baseline);
-    observer.instant(Level::Basic, "engine.cpu.cache", "hit", &[]);
+    observer.instant(Level::Basic, categories::ENGINE_CPU_CACHE, "hit", &[]);
     assert_eq!(observer.stats().emitted_events, baseline + 1);
 }
 
@@ -28,11 +28,11 @@ fn bounded_capture_reports_loss_and_preserves_scope_ends() {
         ..Config::default()
     })
     .unwrap();
-    let scope = observer.scope(Level::Basic, "engine.loader", "load", &[]);
+    let scope = observer.scope(Level::Basic, categories::ENGINE_LOADER, "load", &[]);
     for _ in 0..200 {
         observer.instant(
             Level::Basic,
-            "engine.loader",
+            categories::ENGINE_LOADER,
             "page",
             &[Field::string("value", &"x".repeat(200))],
         );
@@ -69,14 +69,24 @@ fn component_context_is_scoped_and_nested_captures_restore_the_parent() {
     let b = second.stats().emitted_events;
     {
         let _context = first.enter();
-        ring3_observability::current().instant(Level::Basic, "engine.loader", "one", &[]);
+        ring3_observability::current().instant(Level::Basic, categories::ENGINE_LOADER, "one", &[]);
         {
             let _nested = second.enter();
-            ring3_observability::current().instant(Level::Basic, "engine.loader", "two", &[]);
+            ring3_observability::current().instant(
+                Level::Basic,
+                categories::ENGINE_LOADER,
+                "two",
+                &[],
+            );
         }
-        ring3_observability::current().instant(Level::Basic, "engine.loader", "three", &[]);
+        ring3_observability::current().instant(
+            Level::Basic,
+            categories::ENGINE_LOADER,
+            "three",
+            &[],
+        );
     }
-    ring3_observability::current().instant(Level::Basic, "engine.loader", "off", &[]);
+    ring3_observability::current().instant(Level::Basic, categories::ENGINE_LOADER, "off", &[]);
     assert_eq!(first.stats().emitted_events, a + 2);
     assert_eq!(second.stats().emitted_events, b + 1);
 }
@@ -94,13 +104,13 @@ fn disabled_context_shadows_active_capture_without_contaminating_its_events() {
         let _off = Observer::disabled().enter();
         ring3_observability::current().instant(
             Level::Basic,
-            "engine.loader",
+            categories::ENGINE_LOADER,
             "should-not-record",
             &[],
         );
     }
     assert_eq!(observer.stats().emitted_events, before);
-    ring3_observability::current().instant(Level::Basic, "engine.loader", "resumed", &[]);
+    ring3_observability::current().instant(Level::Basic, categories::ENGINE_LOADER, "resumed", &[]);
     assert_eq!(observer.stats().emitted_events, before + 1);
 }
 
@@ -111,7 +121,7 @@ fn byte_sized_drains_preserve_all_buffered_data_and_stop_at_empty() {
         ..Config::default()
     })
     .unwrap();
-    observer.instant(Level::Basic, "engine.loader", "load", &[]);
+    observer.instant(Level::Basic, categories::ENGINE_LOADER, "load", &[]);
     observer.finalize();
     let expected = observer.stats().buffered_bytes;
     let mut output = Vec::new();
@@ -141,7 +151,7 @@ fn finalization_reports_unfinished_scopes_instead_of_inventing_scope_completion(
         ..Config::default()
     })
     .unwrap();
-    let scope = observer.scope(Level::Basic, "engine.loader", "unfinished", &[]);
+    let scope = observer.scope(Level::Basic, categories::ENGINE_LOADER, "unfinished", &[]);
     let bytes = observer.finish();
     assert_eq!(observer.stats().open_scopes, 1);
     assert!(
@@ -173,7 +183,7 @@ fn invalid_namespace_or_resource_settings_are_rejected() {
             ..Config::default()
         },
         Config {
-            contexts: vec!["".into()],
+            categories: CategorySelection::Only(vec![categories::OBSERVABILITY]),
             ..Config::default()
         },
     ] {
@@ -192,7 +202,7 @@ fn finalized_multichunk_trace_is_finished_only_after_every_byte_is_drained() {
     for _ in 0..100 {
         observer.instant(
             Level::Basic,
-            "engine.loader",
+            categories::ENGINE_LOADER,
             "page",
             &[Field::string(
                 "path",

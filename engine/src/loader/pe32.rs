@@ -77,7 +77,7 @@ pub fn load_pe32(bytes: &[u8], resident_pages: u32) -> Result<LoadedPe32, LoadEr
     #[cfg(feature = "observability")]
     let _scope = ring3_observability::current().scope(
         ring3_observability::Level::Basic,
-        "engine.loader.pe32",
+        ring3_observability::categories::ENGINE_LOADER_PE32,
         "load",
         &[ring3_observability::Field::unsigned(
             "bytes",
@@ -123,7 +123,7 @@ pub fn load_pe32_at(
     #[cfg(feature = "observability")]
     let _scope = ring3_observability::current().scope(
         ring3_observability::Level::Basic,
-        "engine.loader.pe32",
+        ring3_observability::categories::ENGINE_LOADER_PE32,
         "load_at",
         &[ring3_observability::Field::unsigned(
             "bytes",
@@ -240,7 +240,7 @@ fn parse(bytes: &[u8], profile: Profile) -> Result<ImagePlan, LoadError> {
     #[cfg(feature = "observability")]
     let _scope = ring3_observability::current().scope(
         ring3_observability::Level::Detailed,
-        "engine.loader.pe32",
+        ring3_observability::categories::ENGINE_LOADER_PE32,
         "parse",
         &[ring3_observability::Field::unsigned(
             "bytes",

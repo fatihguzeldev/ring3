@@ -6,7 +6,7 @@ use ring3_engine::{
     loader::load_pe32,
     memory::GuestAddress,
 };
-use ring3_observability::{Config, Level, Observer};
+use ring3_observability::{CategorySelection, Config, Level, Observer, categories};
 
 #[test]
 fn direct_loader_decoder_and_codegen_emit_without_process_or_playground() {
@@ -56,7 +56,7 @@ fn direct_loader_decoder_and_codegen_emit_without_process_or_playground() {
 fn basic_context_filter_does_not_emit_detailed_cpu_events() {
     let observer = Observer::new(Config {
         level: Level::Basic,
-        contexts: vec!["engine.loader".into()],
+        categories: CategorySelection::Only(vec![categories::ENGINE_LOADER]),
         ..Config::default()
     })
     .unwrap();

@@ -36,7 +36,7 @@ pub(crate) fn parse_module_with_limits(
     #[cfg(feature = "observability")]
     let _scope = ring3_observability::current().scope(
         ring3_observability::Level::Detailed,
-        "engine.loader.pe32",
+        ring3_observability::categories::ENGINE_LOADER_PE32,
         "parse_module",
         &[ring3_observability::Field::unsigned(
             "bytes",

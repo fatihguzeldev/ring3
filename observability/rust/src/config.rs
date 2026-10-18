@@ -1,3 +1,5 @@
+use crate::{Category, CategorySelection};
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(u32)]
 pub enum Level {
@@ -22,7 +24,7 @@ impl TryFrom<u32> for Level {
 #[derive(Clone, Debug)]
 pub struct Config {
     pub level: Level,
-    pub contexts: Vec<String>,
+    pub categories: CategorySelection,
     pub max_buffer_bytes: usize,
     pub producer_sequence_id: u32,
     pub track_uuid: u64,
@@ -33,7 +35,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             level: Level::Off,
-            contexts: Vec::new(),
+            categories: CategorySelection::All,
             max_buffer_bytes: 1024 * 1024,
             producer_sequence_id: 1,
             track_uuid: 0x1_0000_0001,
@@ -48,7 +50,7 @@ pub enum ConfigError {
     Buffer,
     Sequence,
     Track,
-    Context,
+    Categories,
 }
 
 impl Config {
@@ -65,25 +67,11 @@ impl Config {
         {
             return Err(ConfigError::Track);
         }
-        if self.contexts.len() > 64
-            || self.contexts.iter().any(|prefix| {
-                prefix.is_empty() || prefix.len() > 128 || prefix.contains(['\0', '\n', '\r'])
-            })
-        {
-            return Err(ConfigError::Context);
-        }
+        self.categories.validate()?;
         Ok(())
     }
 
-    pub(crate) fn accepts(&self, level: Level, context: &str) -> bool {
-        level != Level::Off
-            && level <= self.level
-            && (self.contexts.is_empty()
-                || self.contexts.iter().any(|prefix| {
-                    context == prefix
-                        || context
-                            .strip_prefix(prefix)
-                            .is_some_and(|suffix| suffix.starts_with('.'))
-                }))
+    pub(crate) fn accepts(&self, level: Level, category: Category) -> bool {
+        level != Level::Off && level <= self.level && self.categories.allows(category)
     }
 }

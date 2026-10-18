@@ -25,7 +25,7 @@ impl EngineInstance {
         #[cfg(feature = "observability")]
         let _scope = ring3_observability::current().scope(
             ring3_observability::Level::Basic,
-            "engine.loader.modules",
+            ring3_observability::categories::ENGINE_LOADER_MODULES,
             "resume_source",
             &[ring3_observability::Field::unsigned("token", token)],
         );

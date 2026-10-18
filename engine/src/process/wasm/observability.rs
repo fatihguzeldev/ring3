@@ -3,7 +3,7 @@ use crate::{
     abi::arena::{TRANSFER_OFFSET, TRANSFER_SIZE},
     process::{CallError, HostError},
 };
-use ring3_observability::{Config, Level, Observer};
+use ring3_observability::{CategorySelection, Config, Level, Observer};
 
 pub(crate) fn configure_observability(
     level: u32,
@@ -21,15 +21,12 @@ pub(crate) fn configure_observability(
             return Err(HostError::InvalidRequest);
         }
         let input = &instance.arena()[TRANSFER_OFFSET..TRANSFER_OFFSET + context_length as usize];
-        let contexts = std::str::from_utf8(input).map_err(|_| HostError::InvalidRequest)?;
-        let contexts = if contexts.is_empty() {
-            Vec::new()
-        } else {
-            contexts.split('\n').map(str::to_owned).collect()
-        };
+        let selection = std::str::from_utf8(input).map_err(|_| HostError::InvalidRequest)?;
+        let categories =
+            CategorySelection::from_wire(selection).map_err(|_| HostError::InvalidRequest)?;
         let observer = Observer::new(Config {
             level: Level::try_from(level).map_err(|_| HostError::InvalidRequest)?,
-            contexts,
+            categories,
             max_buffer_bytes: max_bytes as usize,
             producer_sequence_id: sequence,
             track_uuid: u64::from(track_low) | (u64::from(track_high) << 32),

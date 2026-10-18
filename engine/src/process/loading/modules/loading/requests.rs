@@ -18,7 +18,7 @@ impl EngineInstance {
         #[cfg(feature = "observability")]
         let _scope = ring3_observability::current().scope(
             ring3_observability::Level::Basic,
-            "engine.loader.modules",
+            ring3_observability::categories::ENGINE_LOADER_MODULES,
             "start_process",
             &[ring3_observability::Field::string("module", name)],
         );
