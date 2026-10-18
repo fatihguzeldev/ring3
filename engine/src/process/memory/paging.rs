@@ -53,19 +53,6 @@ impl EngineInstance {
         self.preflight_cpu_paging_backing32(address, length, access, backing)
     }
 
-    pub(in crate::process) fn preflight_cpu_read_modify32(
-        &mut self,
-        address: GuestAddress,
-        length: u32,
-    ) -> Result<(), CpuPagingError32> {
-        self.preflight_cpu_paging_backing32(
-            address,
-            length,
-            PagingAccess32::Write,
-            PagingBacking32::Read,
-        )
-    }
-
     pub(in crate::process) fn preflight_cpu_modify32(
         &mut self,
         address: GuestAddress,

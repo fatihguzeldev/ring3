@@ -7,7 +7,7 @@ use crate::{
     },
     cpu::{
         dbt::RegistryError,
-        x86::{CpuPagingError32, PagingAccess32},
+        x86::{CpuPagingError32, PagingAccess32, read_cpu_paging_access32},
     },
     memory::{Access, GuestAddress},
 };
@@ -39,21 +39,21 @@ impl EngineInstance {
             Err(CpuMemoryError::GeneralProtection(0))
         } else {
             let at = GuestAddress(address);
-            let preflight = if modify {
-                self.preflight_cpu_read_modify32(at, length)
+            let intent = if modify {
+                PagingAccess32::Write
             } else {
-                self.preflight_cpu_paging32(at, length, PagingAccess32::Read)
+                PagingAccess32::Read
             };
+            #[cfg(any(target_arch = "wasm32", test))]
+            self.clear_certified_page_fault32();
             let memory = self.memory.as_ref().ok_or(HostError::Closed)?;
             let output = &mut self.arena.as_mut().get_mut()
                 [TRANSFER_OFFSET..TRANSFER_OFFSET + length as usize];
-            preflight
-                .and_then(|()| {
-                    memory
-                        .cpu_read(at, output)
-                        .map_err(CpuPagingError32::Memory)
-                })
-                .map_err(CpuMemoryError::from)
+            let result = read_cpu_paging_access32(memory, at, output, intent);
+            if let Err(error) = result {
+                self.record_cpu_paging_error32(error);
+            }
+            result.map_err(CpuMemoryError::from)
         };
         self.cpu_memory_result(length, result)
     }
@@ -281,6 +281,44 @@ mod tests {
             &engine.arena()[TRANSFER_OFFSET..TRANSFER_OFFSET + 16],
             &[0xa5; 16]
         );
+    }
+
+    #[test]
+    fn wrapped_rmw_span_keeps_transfer_neutral_until_all_read_and_write_permissions_pass() {
+        let mut engine = EngineInstance::new(2, 7).unwrap();
+        for address in [0xffff_f000, 0] {
+            engine.map(address, 1, 3).unwrap();
+        }
+        engine
+            .memory
+            .as_mut()
+            .unwrap()
+            .write(GuestAddress(0xffff_fffe), &[0x11, 0x22])
+            .unwrap();
+        engine
+            .memory
+            .as_mut()
+            .unwrap()
+            .write(GuestAddress(0), &[0x33, 0x44])
+            .unwrap();
+        engine.protect(0, 1, 2).unwrap();
+        engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + 4].fill(0xa5);
+        let before = engine.arena().to_vec();
+        let version = engine.memory().unwrap().transaction_version();
+        engine.cpu_read_modify(0xffff_fffe, 4, 1).unwrap();
+        application_fault(&engine, &before, [9, 0, 7, 0, 2, 4]);
+        assert_eq!(engine.memory().unwrap().transaction_version(), version);
+
+        engine.protect(0, 1, 3).unwrap();
+        let version = engine.memory().unwrap().transaction_version();
+        engine.cpu_read_modify(0xffff_fffe, 4, 1).unwrap();
+        assert_eq!(field(&engine, 16), 0);
+        assert_eq!(
+            &engine.arena()[TRANSFER_OFFSET..TRANSFER_OFFSET + 4],
+            &[0x11, 0x22, 0x33, 0x44]
+        );
+        assert_eq!(engine.cr2(), Some(GuestAddress(0)));
+        assert_eq!(engine.memory().unwrap().transaction_version(), version);
     }
 
     #[test]
