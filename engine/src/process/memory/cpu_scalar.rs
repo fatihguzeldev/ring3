@@ -3,7 +3,7 @@ use crate::{
         arena::HELPER_OFFSET,
         memory_helper::{CpuScalarOperation, HELPER_SIZE, encode_cpu_paging_scalar_result},
     },
-    cpu::x86::{CpuPagingError32, PagingAccess32},
+    cpu::x86::PagingAccess32,
     memory::GuestAddress,
     process::{EngineInstance, HostError},
 };
@@ -40,20 +40,18 @@ impl EngineInstance {
         // cpu helper lifetime admission is separate from diagnostic reads; DBT checks segments.
         self.memory()?;
         let at = GuestAddress(address);
-        let preflight = if modify {
-            self.preflight_cpu_read_modify32(at, width)
-        } else {
-            self.preflight_cpu_paging32(at, width, PagingAccess32::Read)
-        };
         let mut bytes = [0; 4];
-        let result = preflight.and_then(|()| {
-            self.memory
-                .as_ref()
-                .unwrap()
-                .cpu_read(at, &mut bytes[..width as usize])
-                .map(|()| u32::from_le_bytes(bytes))
-                .map_err(CpuPagingError32::Memory)
-        });
+        let result = self
+            .read_cpu_paging32(
+                at,
+                &mut bytes[..width as usize],
+                if modify {
+                    PagingAccess32::Write
+                } else {
+                    PagingAccess32::Read
+                },
+            )
+            .map(|()| u32::from_le_bytes(bytes));
         encode_cpu_paging_scalar_result(
             GuestAddress(address),
             width,

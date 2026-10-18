@@ -46,7 +46,7 @@ pub use x87::{
     X87State,
 };
 
-pub(crate) use paging::inspect_cpu_paging_access32;
+pub(crate) use paging::{inspect_cpu_paging_access32, read_cpu_paging_access32};
 
 #[cfg(test)]
 pub(crate) use paging::{DefaultCpuMemoryPort32, DefaultCpuReadPort32};

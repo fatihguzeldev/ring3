@@ -1,6 +1,8 @@
 use super::{CpuMemoryPort32, CpuReadPort32};
 use crate::{
-    cpu::x86::{CpuPagingError32, PagingAccess32, inspect_cpu_paging_access32},
+    cpu::x86::{
+        CpuPagingError32, PagingAccess32, inspect_cpu_paging_access32, read_cpu_paging_access32,
+    },
     memory::{AddressSpace, GuestAddress, MemoryError, PagingBacking32},
 };
 
@@ -63,32 +65,14 @@ fn masked_preflight(
 }
 impl CpuReadPort32 for DefaultCpuReadPort32<'_> {
     fn read(&mut self, address: GuestAddress, output: &mut [u8]) -> Result<(), CpuPagingError32> {
-        preflight(
-            self.memory,
-            address,
-            output.len(),
-            PagingAccess32::Read,
-            PagingBacking32::Read,
-        )?;
-        self.memory
-            .cpu_read(address, output)
-            .map_err(CpuPagingError32::Memory)
+        read_cpu_paging_access32(self.memory, address, output, PagingAccess32::Read)
     }
     fn read_modify(
         &mut self,
         address: GuestAddress,
         output: &mut [u8],
     ) -> Result<(), CpuPagingError32> {
-        preflight(
-            self.memory,
-            address,
-            output.len(),
-            PagingAccess32::Write,
-            PagingBacking32::Read,
-        )?;
-        self.memory
-            .cpu_read(address, output)
-            .map_err(CpuPagingError32::Memory)
+        read_cpu_paging_access32(self.memory, address, output, PagingAccess32::Write)
     }
     fn check(
         &mut self,

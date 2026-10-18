@@ -13,4 +13,4 @@ pub(crate) use port::{CpuMemoryPort32, CpuReadPort32};
 pub(crate) use port::{DefaultCpuMemoryPort32, DefaultCpuReadPort32};
 
 mod inspect;
-pub(crate) use inspect::inspect_cpu_paging_access32;
+pub(crate) use inspect::{inspect_cpu_paging_access32, read_cpu_paging_access32};

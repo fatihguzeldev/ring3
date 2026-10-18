@@ -1,5 +1,7 @@
 use crate::{
-    cpu::x86::{CpuPagingError32, PagingAccess32, inspect_cpu_paging_access32},
+    cpu::x86::{
+        CpuPagingError32, PagingAccess32, inspect_cpu_paging_access32, read_cpu_paging_access32,
+    },
     memory::{GuestAddress, MemoryError, PagingBacking32},
     process::EngineInstance,
 };
@@ -11,6 +13,30 @@ mod request;
 impl EngineInstance {
     pub fn cr2(&self) -> Option<GuestAddress> {
         self.cr2
+    }
+
+    pub(in crate::process) fn read_cpu_paging32(
+        &mut self,
+        address: GuestAddress,
+        output: &mut [u8],
+        access: PagingAccess32,
+    ) -> Result<(), CpuPagingError32> {
+        u32::try_from(output.len())
+            .map_err(|_| CpuPagingError32::Memory(MemoryError::InvalidRange))?;
+        #[cfg(any(target_arch = "wasm32", test))]
+        self.clear_certified_page_fault32();
+        let result = read_cpu_paging_access32(
+            self.memory
+                .as_ref()
+                .expect("live process guard precedes cpu read"),
+            address,
+            output,
+            access,
+        );
+        if let Err(error) = result {
+            self.record_cpu_paging_error32(error);
+        }
+        result
     }
 
     pub(in crate::process) fn preflight_cpu_paging32(

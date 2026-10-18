@@ -30,28 +30,20 @@ fn backing(access: PagingAccess32) -> PagingBacking32 {
 #[cfg(test)]
 impl CpuReadPort32 for InspectCpuMemoryPort32<'_> {
     fn read(&mut self, a: GuestAddress, o: &mut [u8]) -> Result<(), CpuPagingError32> {
-        self.engine
-            .inspect_cpu_paging32(a, width(o.len())?, PagingAccess32::Read)?;
-        self.engine
-            .memory
-            .as_ref()
-            .unwrap()
-            .cpu_read(a, o)
-            .map_err(CpuPagingError32::Memory)
+        read_cpu_paging_access32(
+            self.engine.memory.as_ref().unwrap(),
+            a,
+            o,
+            PagingAccess32::Read,
+        )
     }
     fn read_modify(&mut self, a: GuestAddress, o: &mut [u8]) -> Result<(), CpuPagingError32> {
-        self.engine.inspect_cpu_paging_backing32(
+        read_cpu_paging_access32(
+            self.engine.memory.as_ref().unwrap(),
             a,
-            width(o.len())?,
+            o,
             PagingAccess32::Write,
-            PagingBacking32::Read,
-        )?;
-        self.engine
-            .memory
-            .as_ref()
-            .unwrap()
-            .cpu_read(a, o)
-            .map_err(CpuPagingError32::Memory)
+        )
     }
     fn check(
         &mut self,
@@ -59,21 +51,7 @@ impl CpuReadPort32 for InspectCpuMemoryPort32<'_> {
         n: usize,
         x: PagingAccess32,
     ) -> Result<(), CpuPagingError32> {
-        self.engine.inspect_cpu_paging32(a, width(n)?, x)?;
-        self.engine
-            .memory
-            .as_ref()
-            .unwrap()
-            .cpu_check_span(
-                a,
-                n,
-                match x {
-                    PagingAccess32::Read => crate::memory::Access::Read,
-                    PagingAccess32::Write => crate::memory::Access::Write,
-                    PagingAccess32::Execute => crate::memory::Access::Execute,
-                },
-            )
-            .map_err(CpuPagingError32::Memory)
+        self.engine.inspect_cpu_paging32(a, width(n)?, x)
     }
     fn read_masked(
         &mut self,
@@ -103,24 +81,10 @@ impl CpuReadPort32 for InspectCpuMemoryPort32<'_> {
 }
 impl CpuReadPort32 for EngineCpuMemoryPort32<'_> {
     fn read(&mut self, a: GuestAddress, o: &mut [u8]) -> Result<(), CpuPagingError32> {
-        self.engine
-            .preflight_cpu_paging32(a, width(o.len())?, PagingAccess32::Read)?;
-        self.engine
-            .memory
-            .as_ref()
-            .unwrap()
-            .cpu_read(a, o)
-            .map_err(CpuPagingError32::Memory)
+        self.engine.read_cpu_paging32(a, o, PagingAccess32::Read)
     }
     fn read_modify(&mut self, a: GuestAddress, o: &mut [u8]) -> Result<(), CpuPagingError32> {
-        self.engine
-            .preflight_cpu_read_modify32(a, width(o.len())?)?;
-        self.engine
-            .memory
-            .as_ref()
-            .unwrap()
-            .cpu_read(a, o)
-            .map_err(CpuPagingError32::Memory)
+        self.engine.read_cpu_paging32(a, o, PagingAccess32::Write)
     }
     fn check(
         &mut self,
@@ -129,21 +93,7 @@ impl CpuReadPort32 for EngineCpuMemoryPort32<'_> {
         x: PagingAccess32,
     ) -> Result<(), CpuPagingError32> {
         self.engine
-            .preflight_cpu_paging_backing32(a, width(n)?, x, backing(x))?;
-        self.engine
-            .memory
-            .as_ref()
-            .unwrap()
-            .cpu_check_span(
-                a,
-                n,
-                match x {
-                    PagingAccess32::Read => crate::memory::Access::Read,
-                    PagingAccess32::Write => crate::memory::Access::Write,
-                    PagingAccess32::Execute => crate::memory::Access::Execute,
-                },
-            )
-            .map_err(CpuPagingError32::Memory)
+            .preflight_cpu_paging_backing32(a, width(n)?, x, backing(x))
     }
     fn read_masked(
         &mut self,

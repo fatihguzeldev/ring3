@@ -4,6 +4,8 @@ use crate::memory::{
     paging::{PagingBacking32, PagingCheckError32, PagingFaultFacts32},
 };
 
+mod read;
+
 impl AddressSpace {
     pub(crate) fn cpu_paging_check32(
         &self,
