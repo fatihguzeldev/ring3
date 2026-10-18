@@ -543,6 +543,97 @@ fn bounded_message_refresh_rejects_changed_identity_or_stale_rows_without_public
 }
 
 #[test]
+fn bounded_message_refresh_preflights_mutex_recursion_hidden_by_waiter_order() {
+    use super::super::context::ObjectKind32;
+
+    for (depth, waiters) in [(u32::MAX, 1), (u32::MAX - 1, 2)] {
+        let mut context = context();
+        let (semaphore, _) = context
+            .create_semaphore(waiters, waiters, false, None)
+            .unwrap();
+        context.set_current_thread(2).unwrap();
+        let (mutex, _) = context.create_mutex(true, false, None).unwrap();
+        let slot = context.handles[context.handle_index(mutex, 0).unwrap()].event;
+        // represent a valid recursion boundary without billions of acquisitions.
+        context.objects[slot].as_mut().unwrap().kind = ObjectKind32::Mutex {
+            owner: 2,
+            depth,
+            abandoned: false,
+        };
+        let message = Some(MessageWait32 {
+            mask: 0x40,
+            input_available: true,
+        });
+        context.set_current_thread(1).unwrap();
+        let first = pending(
+            context
+                .wait(&[semaphore], WaitMode32::All, INFINITE, false, message)
+                .unwrap(),
+        );
+        context.set_current_thread(2).unwrap();
+        let mut blocked = Vec::new();
+        for _ in 0..waiters {
+            blocked.push(pending(
+                context
+                    .wait(
+                        &[semaphore, mutex],
+                        WaitMode32::All,
+                        INFINITE,
+                        false,
+                        message,
+                    )
+                    .unwrap(),
+            ));
+        }
+        let revision = context.revision();
+        assert!(matches!(
+            context.prepare_bounded_message_refresh(&[1, 2]),
+            Err(SynchronizationError32::Exhausted)
+        ));
+        assert_eq!(context.revision(), revision);
+        assert_eq!(context.mutex_state(mutex).unwrap(), (2, depth));
+        assert_eq!(context.wait_status(first).unwrap(), None);
+        for waiter in blocked {
+            assert_eq!(context.wait_status(waiter).unwrap(), None);
+        }
+    }
+}
+
+#[test]
+fn bounded_message_refresh_accepts_the_exact_mutex_recursion_bound() {
+    use super::super::context::ObjectKind32;
+
+    let mut context = context();
+    context.set_current_thread(2).unwrap();
+    let (mutex, _) = context.create_mutex(true, false, None).unwrap();
+    let slot = context.handles[context.handle_index(mutex, 0).unwrap()].event;
+    context.objects[slot].as_mut().unwrap().kind = ObjectKind32::Mutex {
+        owner: 2,
+        depth: u32::MAX - 1,
+        abandoned: false,
+    };
+    let wait = pending(
+        context
+            .wait(
+                &[mutex],
+                WaitMode32::All,
+                INFINITE,
+                false,
+                Some(MessageWait32 {
+                    mask: 0x40,
+                    input_available: true,
+                }),
+            )
+            .unwrap(),
+    );
+    let prepared = context.prepare_bounded_message_refresh(&[2]).unwrap();
+    let prepared = context.refresh_prepared_messages_for_threads(prepared, &[(2, 0x40, 0x40, 1)]);
+    context.commit_signals(prepared);
+    assert_eq!(context.wait_status(wait).unwrap().unwrap().value, 0);
+    assert_eq!(context.mutex_state(mutex).unwrap(), (2, u32::MAX));
+}
+
+#[test]
 fn queued_apc_interrupts_only_alertable_waits_without_consuming_a_signaled_auto_event() {
     let mut context = context();
     let (event, _) = context.create_event(false, false, false, None).unwrap();

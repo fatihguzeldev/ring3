@@ -458,7 +458,31 @@ impl SynchronizationContext32 {
         for (row, &thread) in rows.iter_mut().zip(threads) {
             *row = (thread, u32::MAX, u32::MAX, self.queue_state(thread).2);
         }
-        self.prepare_messages_for_threads(&rows[..threads.len()])
+        let prepared = self.prepare_messages_for_threads(&rows[..threads.len()])?;
+        // reserve recursion headroom independently of tentative waiter order:
+        // one message subset can leave a semaphore available to another waiter.
+        for &(slot, _) in &prepared.objects {
+            let ObjectKind32::Mutex { owner, depth, .. } =
+                self.objects[slot].as_ref().unwrap().kind
+            else {
+                continue;
+            };
+            if owner == 0 || depth <= u32::MAX - MAX_WAITS as u32 {
+                continue;
+            }
+            let acquisitions = self
+                .waits
+                .iter()
+                .flatten()
+                .filter(|wait| {
+                    wait.result.is_none()
+                        && wait.thread == owner
+                        && wait.events[..wait.count].contains(&slot)
+                })
+                .count() as u32;
+            depth.checked_add(acquisitions).ok_or(Error::Exhausted)?;
+        }
+        Ok(prepared)
     }
     pub(super) fn project_message_rows(
         &self,
