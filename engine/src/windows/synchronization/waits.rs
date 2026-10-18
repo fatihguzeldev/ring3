@@ -447,6 +447,19 @@ impl SynchronizationContext32 {
         self.resolve_waiters(&mut prepared)?;
         Ok(prepared)
     }
+    pub(crate) fn prepare_bounded_message_refresh(
+        &self,
+        threads: &[u32],
+    ) -> Result<PreparedSignals32, Error> {
+        if threads.len() > 2 {
+            return Err(Error::InvalidWait);
+        }
+        let mut rows = [(0, 0, 0, 0); 2];
+        for (row, &thread) in rows.iter_mut().zip(threads) {
+            *row = (thread, u32::MAX, u32::MAX, self.queue_state(thread).2);
+        }
+        self.prepare_messages_for_threads(&rows[..threads.len()])
+    }
     pub(super) fn project_message_rows(
         &self,
         prepared: &mut PreparedSignals32,
@@ -493,33 +506,54 @@ impl SynchronizationContext32 {
     }
     pub fn refresh_prepared_messages_for_thread(
         &self,
-        mut prepared: PreparedSignals32,
+        prepared: PreparedSignals32,
         thread: u32,
         current: u32,
         new: u32,
         generation: u64,
+    ) -> PreparedSignals32 {
+        self.refresh_prepared_messages_for_threads(prepared, &[(thread, current, new, generation)])
+    }
+    pub(crate) fn refresh_prepared_messages_for_threads(
+        &self,
+        mut prepared: PreparedSignals32,
+        rows: &[(u32, u32, u32, u64)],
     ) -> PreparedSignals32 {
         assert_eq!(
             (self.epoch, self.revision),
             (prepared.epoch, prepared.revision)
         );
         assert_eq!(
-            prepared.queue.as_ref().map(|queue| queue.thread),
-            Some(thread)
+            prepared.queue.iter().count() + prepared.extra_queues.len(),
+            rows.len()
         );
-        assert!(prepared.extra_queues.is_empty());
-        assert!(generation >= self.queue_state(thread).2);
+        for (queue, &(thread, _, _, generation)) in prepared
+            .queue
+            .iter()
+            .chain(&prepared.extra_queues)
+            .zip(rows)
+        {
+            assert_eq!(queue.thread, thread);
+            assert!(generation >= self.queue_state(thread).2);
+        }
         prepared.signaled = self.signaled;
         prepared.completed.fill(None);
         for (slot, kind) in &mut prepared.objects {
             *kind = self.objects[*slot].as_ref().unwrap().kind;
         }
-        prepared.queue = Some(QueueObservation32 {
-            thread,
-            current,
-            new,
-            generation,
-        });
+        for (queue, &(thread, current, new, generation)) in prepared
+            .queue
+            .iter_mut()
+            .chain(&mut prepared.extra_queues)
+            .zip(rows)
+        {
+            *queue = QueueObservation32 {
+                thread,
+                current,
+                new,
+                generation,
+            };
+        }
         self.resolve_waiters(&mut prepared)
             .expect("all possible message masks were preflighted before queue mutation");
         prepared

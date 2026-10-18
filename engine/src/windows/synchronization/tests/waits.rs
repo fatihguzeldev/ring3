@@ -390,6 +390,159 @@ fn composite_message_projection_failure_preserves_every_thread_and_pending_wait(
 }
 
 #[test]
+fn bounded_message_refresh_recomputes_both_waiters_from_the_final_rows() {
+    let mut context = context();
+    let (event, _) = context.create_event(false, true, false, None).unwrap();
+    let message = Some(MessageWait32 {
+        mask: 0x40,
+        input_available: true,
+    });
+    context.set_current_thread(1).unwrap();
+    let first = pending(
+        context
+            .wait(&[event], WaitMode32::All, INFINITE, false, message)
+            .unwrap(),
+    );
+    context.set_current_thread(2).unwrap();
+    let second = pending(
+        context
+            .wait(&[event], WaitMode32::All, INFINITE, false, message)
+            .unwrap(),
+    );
+    let revision = context.revision();
+    let prepared = context.prepare_bounded_message_refresh(&[1, 2]).unwrap();
+    assert_eq!(context.revision(), revision);
+    assert_eq!(context.wait_status(first).unwrap(), None);
+    assert_eq!(context.wait_status(second).unwrap(), None);
+    assert!(context.event_is_signaled(event).unwrap());
+    let prepared = context
+        .refresh_prepared_messages_for_threads(prepared, &[(1, 0, 0, 3), (2, 0x40, 0x40, 3)]);
+    assert_eq!(context.wait_status(second).unwrap(), None);
+    context.commit_signals(prepared);
+    assert_eq!(context.revision(), revision + 1);
+    assert_eq!(context.wait_status(first).unwrap(), None);
+    assert_eq!(context.wait_status(second).unwrap().unwrap().value, 0);
+    assert!(!context.event_is_signaled(event).unwrap());
+    assert_eq!(context.queue_state(1), (0, 0, 3));
+    assert_eq!(context.queue_state(2), (0x40, 0x40, 3));
+}
+
+#[test]
+fn bounded_message_refresh_releases_tentative_typed_object_consumption() {
+    let mut context = context();
+    let (semaphore, _) = context.create_semaphore(1, 1, false, None).unwrap();
+    let message = Some(MessageWait32 {
+        mask: 0x40,
+        input_available: true,
+    });
+    context.set_current_thread(1).unwrap();
+    let first = pending(
+        context
+            .wait(&[semaphore], WaitMode32::All, INFINITE, false, message)
+            .unwrap(),
+    );
+    context.set_current_thread(2).unwrap();
+    let second = pending(
+        context
+            .wait(&[semaphore], WaitMode32::All, INFINITE, false, message)
+            .unwrap(),
+    );
+    let prepared = context.prepare_bounded_message_refresh(&[1, 2]).unwrap();
+    let prepared =
+        context.refresh_prepared_messages_for_threads(prepared, &[(1, 0, 0, 1), (2, 0, 0, 1)]);
+    context.commit_signals(prepared);
+    assert_eq!(context.wait_status(first).unwrap(), None);
+    assert_eq!(context.wait_status(second).unwrap(), None);
+    assert_eq!(
+        ready(
+            context
+                .wait(&[semaphore], WaitMode32::Any, 0, false, None)
+                .unwrap()
+        ),
+        0
+    );
+    assert_eq!(
+        ready(
+            context
+                .wait(&[semaphore], WaitMode32::Any, 0, false, None)
+                .unwrap()
+        ),
+        WAIT_TIMEOUT
+    );
+}
+
+#[test]
+fn bounded_message_refresh_preflight_failures_preserve_all_queue_state() {
+    let mut context = context();
+    context.observe_messages_for_thread(1, 0, 0, 5).unwrap();
+    let revision = context.revision();
+    for threads in [&[1, 1][..], &[0][..], &[1, 2, 3][..]] {
+        assert!(matches!(
+            context.prepare_bounded_message_refresh(threads),
+            Err(SynchronizationError32::InvalidWait)
+        ));
+        assert_eq!(context.revision(), revision);
+        assert_eq!(context.queue_state(1), (0, 0, 5));
+    }
+    let capacity = context.queues.capacity();
+    for thread in 2..=capacity as u32 {
+        context
+            .observe_messages_for_thread(thread, 0, 0, 5)
+            .unwrap();
+    }
+    let revision = context.revision();
+    assert!(matches!(
+        context.prepare_bounded_message_refresh(&[1, capacity as u32 + 1]),
+        Err(SynchronizationError32::Capacity)
+    ));
+    assert_eq!(context.revision(), revision);
+    assert_eq!(context.queue_state(1), (0, 0, 5));
+    assert_eq!(context.queue_state(capacity as u32 + 1), (0, 0, 0));
+}
+
+#[test]
+fn bounded_message_refresh_rejects_changed_identity_or_stale_rows_without_publication() {
+    let mut context = context();
+    context.observe_messages_for_thread(1, 0, 0, 5).unwrap();
+    context.observe_messages_for_thread(2, 0, 0, 5).unwrap();
+    let message = Some(MessageWait32 {
+        mask: 0x40,
+        input_available: true,
+    });
+    let first = pending(
+        context
+            .wait(&[], WaitMode32::Any, INFINITE, false, message)
+            .unwrap(),
+    );
+    context.set_current_thread(2).unwrap();
+    let second = pending(
+        context
+            .wait(&[], WaitMode32::Any, INFINITE, false, message)
+            .unwrap(),
+    );
+    let revision = context.revision();
+    for rows in [
+        &[(2, 0x40, 0x40, 6), (1, 0x40, 0x40, 6)][..],
+        &[(1, 0x40, 0x40, 6), (1, 0x40, 0x40, 6)][..],
+        &[(1, 0x40, 0x40, 6)][..],
+        &[(1, 0x40, 0x40, 6), (2, 0x40, 0x40, 4)][..],
+    ] {
+        let prepared = context.prepare_bounded_message_refresh(&[1, 2]).unwrap();
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                context.refresh_prepared_messages_for_threads(prepared, rows)
+            }))
+            .is_err()
+        );
+        assert_eq!(context.revision(), revision);
+        assert_eq!(context.queue_state(1), (0, 0, 5));
+        assert_eq!(context.queue_state(2), (0, 0, 5));
+        assert_eq!(context.wait_status(first).unwrap(), None);
+        assert_eq!(context.wait_status(second).unwrap(), None);
+    }
+}
+
+#[test]
 fn queued_apc_interrupts_only_alertable_waits_without_consuming_a_signaled_auto_event() {
     let mut context = context();
     let (event, _) = context.create_event(false, false, false, None).unwrap();
