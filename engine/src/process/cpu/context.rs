@@ -7,13 +7,13 @@ use crate::{
         },
         x86::{
             SEGMENT_BASES_RECORD_SIZE, SEGMENTS_SIZE, SEGMENTS_VERSION_3, SIMD_SIZE, STATE_SIZE,
-            StateMetadata, ValidatedState, X87_SIZE, YMM_SIZE, decode_current_segment_context,
+            StateMetadata, X87_SIZE, YMM_SIZE, decode_current_segment_context,
             decode_state_metadata, encode_current_segment_context, encode_simd, encode_x87,
             encode_ymm, validate_simd, validate_x87, validate_ymm,
         },
     },
     cpu::x86::{
-        SegmentContext, State32, X87State,
+        SegmentContext, X87State,
         simd::{SimdState, ymm::YmmUpperState},
     },
 };
@@ -30,28 +30,40 @@ pub(in crate::process) struct ExtendedCpuState {
     pub(in crate::process) metadata: StateMetadata,
 }
 
-/// separates state validation from extended capture without releasing the arena borrow.
-pub(in crate::process) struct PreparedCpuCapture<'a> {
-    arena: &'a [u8],
-    state: ValidatedState<'a>,
-}
-
 impl ExtendedCpuState {
     pub(in crate::process) fn capture(arena: &[u8]) -> Result<Self, HostError> {
-        Self::prepare_capture(arena)?.finish()
-    }
-
-    pub(in crate::process) fn prepare_capture(
-        arena: &[u8],
-    ) -> Result<PreparedCpuCapture<'_>, HostError> {
-        let state = arena
-            .get(STATE_OFFSET..STATE_OFFSET + STATE_SIZE)
-            .ok_or(HostError::Call(CallError::InvalidStop))?;
-        Ok(PreparedCpuCapture {
-            arena,
-            state: ValidatedState::decode(state)
+        let upper = arena
+            .get(YMM_OFFSET..YMM_OFFSET + YMM_SIZE)
+            .ok_or(HostError::Call(CallError::InvalidStop))?
+            .try_into()
+            .unwrap();
+        let state = Self {
+            upper,
+            metadata: decode_state_metadata(&arena[STATE_OFFSET..STATE_OFFSET + STATE_SIZE])
                 .map_err(|_| HostError::Call(CallError::InvalidStop))?,
-        })
+            x87: arena[X87_OFFSET..X87_OFFSET + X87_SIZE].try_into().unwrap(),
+            simd: arena[SIMD_OFFSET..SIMD_OFFSET + SIMD_SIZE]
+                .try_into()
+                .unwrap(),
+            segment_bases: arena
+                .get(
+                    SEGMENT_BASES_RECORD_OFFSET
+                        ..SEGMENT_BASES_RECORD_OFFSET + SEGMENT_BASES_RECORD_SIZE,
+                )
+                .map(|bases| bases.try_into().unwrap()),
+            segments: arena[SEGMENTS_OFFSET..SEGMENTS_OFFSET + SEGMENTS_SIZE]
+                .try_into()
+                .unwrap(),
+        };
+        validate_ymm(&state.upper).map_err(|_| HostError::Call(CallError::InvalidStop))?;
+        validate_x87(&state.x87).map_err(|_| HostError::Call(CallError::InvalidStop))?;
+        validate_simd(&state.simd).map_err(|_| HostError::Call(CallError::InvalidStop))?;
+        decode_current_segment_context(
+            &state.segments,
+            state.segment_bases.as_ref().map(|bases| bases.as_slice()),
+        )
+        .map_err(|_| HostError::Call(CallError::InvalidStop))?;
+        Ok(state)
     }
 
     pub(in crate::process) fn initial() -> Result<Self, HostError> {
@@ -113,47 +125,6 @@ impl ExtendedCpuState {
 
     pub(in crate::process) fn restore_state_metadata(&self, state: &mut [u8; STATE_SIZE]) {
         self.metadata.write(state);
-    }
-}
-
-impl PreparedCpuCapture<'_> {
-    pub(in crate::process) fn state(&self) -> State32 {
-        self.state.state()
-    }
-
-    pub(in crate::process) fn finish(self) -> Result<ExtendedCpuState, HostError> {
-        let arena = self.arena;
-        let upper = arena
-            .get(YMM_OFFSET..YMM_OFFSET + YMM_SIZE)
-            .ok_or(HostError::Call(CallError::InvalidStop))?
-            .try_into()
-            .unwrap();
-        let state = ExtendedCpuState {
-            upper,
-            metadata: self.state.metadata(),
-            x87: arena[X87_OFFSET..X87_OFFSET + X87_SIZE].try_into().unwrap(),
-            simd: arena[SIMD_OFFSET..SIMD_OFFSET + SIMD_SIZE]
-                .try_into()
-                .unwrap(),
-            segment_bases: arena
-                .get(
-                    SEGMENT_BASES_RECORD_OFFSET
-                        ..SEGMENT_BASES_RECORD_OFFSET + SEGMENT_BASES_RECORD_SIZE,
-                )
-                .map(|bases| bases.try_into().unwrap()),
-            segments: arena[SEGMENTS_OFFSET..SEGMENTS_OFFSET + SEGMENTS_SIZE]
-                .try_into()
-                .unwrap(),
-        };
-        validate_ymm(&state.upper).map_err(|_| HostError::Call(CallError::InvalidStop))?;
-        validate_x87(&state.x87).map_err(|_| HostError::Call(CallError::InvalidStop))?;
-        validate_simd(&state.simd).map_err(|_| HostError::Call(CallError::InvalidStop))?;
-        decode_current_segment_context(
-            &state.segments,
-            state.segment_bases.as_ref().map(|bases| bases.as_slice()),
-        )
-        .map_err(|_| HostError::Call(CallError::InvalidStop))?;
-        Ok(state)
     }
 }
 

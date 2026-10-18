@@ -31,9 +31,7 @@ pub use state::{
     STATE_SIZE, STATE_VERSION_2, STATE_VERSION_3, USER_FLAGS_MASK, USER_FLAGS_MASK_V3,
     decode_state, encode_state, encode_state_v2, encode_state_v3,
 };
-pub(crate) use state::{
-    StateMetadata, ValidatedState, decode_state_metadata, encode_state_current,
-};
+pub(crate) use state::{StateMetadata, decode_state_metadata, encode_state_current};
 
 pub(crate) use x87::validate_x87;
 pub use x87::{

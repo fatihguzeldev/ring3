@@ -38,10 +38,11 @@ impl EngineInstance {
                 callback_token,
                 ..
             }) if *active == epoch => {
-                let capture = ExtendedCpuState::prepare_capture(self.arena())?;
+                decode_state(&self.arena()[STATE_OFFSET..STATE_OFFSET + STATE_SIZE])
+                    .map_err(|_| HostError::Call(CallError::InvalidStop))?;
                 decode_exit(&self.arena()[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE])
                     .map_err(|_| HostError::Call(CallError::InvalidStop))?;
-                capture.finish()?;
+                ExtendedCpuState::capture(self.arena())?;
                 let work = &self.arena()[WORK_OFFSET..WORK_OFFSET + WORK_SIZE];
                 header::validate(work, *b"R3WK", WORK_SIZE)
                     .map_err(|_| HostError::Call(CallError::InvalidStop))?;
