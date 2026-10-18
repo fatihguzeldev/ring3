@@ -21,6 +21,8 @@ export type {
 } from "./capture/types.js";
 export type {
   EngineAttachmentOptions,
+  EngineDrainOptions,
+  EngineDrainResult,
   EngineObservationPort,
   EngineTraceChunk,
   EngineTraceConfiguration,

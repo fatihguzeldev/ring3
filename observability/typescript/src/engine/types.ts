@@ -18,6 +18,7 @@ export interface EngineTraceChunk {
 
 export interface EngineObservationPort {
   readonly supported: boolean;
+  readonly maxChunkBytes?: number;
   configure(configuration: EngineTraceConfiguration): void;
   drain(): EngineTraceChunk;
   finish(): EngineTraceChunk;
@@ -26,4 +27,17 @@ export interface EngineObservationPort {
 export interface EngineAttachmentOptions {
   readonly producerId: number;
   readonly maxBytes?: number;
+}
+
+export interface EngineDrainOptions {
+  readonly maxChunks?: number;
+  readonly maxBytes?: number;
+  readonly budgetMs?: number;
+}
+
+export interface EngineDrainResult {
+  readonly chunks: number;
+  readonly bytes: number;
+  readonly pending: boolean;
+  readonly blocked: boolean;
 }

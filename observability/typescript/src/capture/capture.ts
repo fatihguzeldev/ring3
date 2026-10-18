@@ -3,6 +3,8 @@ import { requireCategory, matchesCategory } from "../catalog/selection.js";
 import { categories } from "../catalog/generated.js";
 import type {
   EngineAttachmentOptions,
+  EngineDrainOptions,
+  EngineDrainResult,
   EngineObservationPort,
   EngineTraceChunk,
 } from "../engine/types.js";
@@ -10,6 +12,7 @@ import { clockSnapshot, counterEvent, descriptor, event } from "../perfetto/even
 import { TracePacketStream } from "../perfetto/stream.js";
 import { isIdentityClockSnapshot } from "../perfetto/clocks.js";
 import { BatchWriter } from "./buffer.js";
+import { drainBudget, yieldExportTask } from "../engine/drain.js";
 import { configureCapture, epochNowNs } from "./configuration.js";
 import type { CaptureConfiguration } from "./configuration.js";
 import { Observer } from "./observer.js";
@@ -72,6 +75,9 @@ export class Capture {
   #engine: EngineObservationPort | undefined;
   #engineProducerId: number | undefined;
   #finishing: Promise<CaptureResult> | undefined;
+  #flushing: Promise<CaptureStatus> | undefined;
+  #engineChunkBytes = 4096;
+  #pendingExportBytes = 0;
 
   constructor(options: CaptureOptions) {
     this.#configuration = configureCapture(options);
@@ -124,8 +130,10 @@ export class Capture {
         this.#writer.bufferedBytes +
         this.#reservedBytes +
         this.#externalStream.pendingBytes +
-        this.#engineStream.pendingBytes,
+        this.#engineStream.pendingBytes +
+        this.#pendingExportBytes,
       pendingPacketBytes: this.#externalStream.pendingBytes + this.#engineStream.pendingBytes,
+      pendingExportBytes: this.#pendingExportBytes,
       openScopes: this.#scopes.size,
       engine: this.#engineState,
       ...(this.#writer.error === undefined ? {} : { sinkError: this.#writer.error }),
@@ -161,6 +169,9 @@ export class Capture {
     const maxBytes = options.maxBytes ?? 256 * 1024;
     if (!Number.isSafeInteger(maxBytes) || maxBytes < 1024 || maxBytes > 64 * 1024 * 1024)
       throw new RangeError("invalid engine trace byte budget");
+    const chunkBytes = port.maxChunkBytes ?? 4096;
+    if (!Number.isSafeInteger(chunkBytes) || chunkBytes < 1 || chunkBytes > 64 * 1024 * 1024)
+      throw new RangeError("invalid engine trace chunk byte bound");
     const engineProducer = producerId(options.producerId);
     try {
       port.configure({
@@ -177,16 +188,43 @@ export class Capture {
     }
     this.#engineProducerId = engineProducer;
     this.#engine = port;
+    this.#engineChunkBytes = chunkBytes;
     this.#engineState = "recording";
   }
 
-  drainEngine(): void {
-    if (this.#engine === undefined || this.#engineState !== "recording") return;
+  drainEngine(options: EngineDrainOptions = {}): EngineDrainResult {
+    const budget = drainBudget(options);
+    const result = { chunks: 0, bytes: 0, pending: false, blocked: false };
+    if (
+      this.#engine === undefined ||
+      this.#engineState !== "recording" ||
+      this.#state !== "recording"
+    )
+      return result;
+    if (this.#flushing !== undefined) return { ...result, pending: true, blocked: true };
+    const started = performance.now();
     try {
-      this.#consumeEngine(this.#engine.drain());
+      while (result.chunks < budget.maxChunks && result.bytes < budget.maxBytes) {
+        if (budget.maxBytes - result.bytes < this.#engineChunkBytes)
+          return { ...result, pending: true, blocked: false };
+        const needed = this.#engineChunkBytes + this.#engineStream.pendingBytes + 256;
+        if (
+          needed >
+          this.#configuration.maxBufferedBytes - this.#writer.bufferedBytes - this.#reservedBytes
+        )
+          return { ...result, pending: true, blocked: true };
+        const chunk = this.#readEngine();
+        result.chunks++;
+        result.bytes += chunk.bytes.length;
+        this.#consumeEngine(chunk);
+        if (chunk.finished || chunk.bytes.length === 0) return result;
+        if (performance.now() - started >= budget.budgetMs) break;
+      }
+      result.pending = true;
     } catch (error) {
-      this.#recordingError ??= `engine observation: ${message(error)}`;
+      this.markIncomplete(`engine observation: ${message(error)}`);
     }
+    return result;
   }
 
   recordEvent(category: Category, name: string, args: TraceArgs = {}, track?: bigint): void {
@@ -281,17 +319,59 @@ export class Capture {
     if (token.asynchronous) this.#freeAsyncTracks.push(token.track);
   }
 
-  async flush(): Promise<CaptureStatus> {
-    if (this.#state === "finished") return this.status();
-    if (this.#finishing !== undefined) {
-      await this.#finishing;
-      return this.status();
+  flush(): Promise<CaptureStatus> {
+    if (this.#state === "finished") return Promise.resolve(this.status());
+    if (this.#finishing !== undefined) return this.#finishing.then(() => this.status());
+    this.#flushing ??= this.#flush().finally(() => {
+      this.#flushing = undefined;
+    });
+    return this.#flushing;
+  }
+
+  async #flush(): Promise<CaptureStatus> {
+    if (this.#configuration.level === "off") return this.status();
+    const budget = drainBudget();
+    try {
+      while (
+        this.#engine !== undefined &&
+        this.#engineState === "recording" &&
+        this.#state === "recording"
+      ) {
+        const started = performance.now();
+        let chunks = 0,
+          bytes = 0,
+          pending = true;
+        while (
+          chunks < budget.maxChunks &&
+          bytes < budget.maxBytes &&
+          this.#state === "recording"
+        ) {
+          const chunk = this.#readEngine();
+          chunks++;
+          bytes += chunk.bytes.length;
+          await this.#consumeEngineAsync(chunk);
+          if (chunk.finished || chunk.bytes.length === 0) {
+            pending = false;
+            break;
+          }
+          if (performance.now() - started >= budget.budgetMs) break;
+        }
+        await this.#writer.flush();
+        if (!pending || this.#writer.error !== undefined) break;
+        await yieldExportTask();
+      }
+    } catch (error) {
+      this.markIncomplete(`engine observation: ${message(error)}`);
     }
-    if (this.#configuration.level !== "off") {
-      this.drainEngine();
-      await this.#writer.flush();
-    }
+    await this.#writer.flush();
     return this.status();
+  }
+
+  #readEngine(finish = false): EngineTraceChunk {
+    const chunk = finish ? this.#engine!.finish() : this.#engine!.drain();
+    if (!(chunk.bytes instanceof Uint8Array) || chunk.bytes.length > this.#engineChunkBytes)
+      throw new Error("engine trace chunk exceeds its declared byte bound");
+    return chunk;
   }
 
   finish(outcome: CaptureOutcome = "complete", error?: unknown): Promise<CaptureResult> {
@@ -304,22 +384,19 @@ export class Capture {
     const unfinishedScopes = this.#scopes.size;
     this.#reservedBytes = 0;
     if (this.#configuration.level !== "off") {
+      await this.#flushing;
       if (this.#engine !== undefined && this.#engineState === "recording") {
         try {
-          let chunk = this.#engine.finish();
+          let chunk = this.#readEngine(true);
           for (let index = 0; index < 65_536; index++) {
-            if (
-              chunk.bytes.byteLength >
-              this.#configuration.maxBufferedBytes -
-                this.#writer.bufferedBytes -
-                this.#reservedBytes
-            ) {
-              await this.#writer.flush();
-            }
-            this.#consumeEngine(chunk);
+            await this.#consumeEngineAsync(chunk);
             if (chunk.finished) break;
             if (chunk.bytes.length === 0) throw new Error("engine trace finish made no progress");
-            chunk = this.#engine.drain();
+            if (index % 64 === 63) {
+              await this.#writer.flush();
+              await yieldExportTask();
+            }
+            chunk = this.#readEngine();
           }
           if (!chunk.finished) throw new Error("engine trace finish did not terminate");
         } catch (failure) {
@@ -366,11 +443,48 @@ export class Capture {
   }
 
   #consumeEngine(chunk: EngineTraceChunk): void {
+    this.#observeEngineChunk(chunk);
+    if (chunk.bytes.length > 0) this.#ingest(this.#engineStream, chunk.bytes);
+  }
+
+  async #consumeEngineAsync(chunk: EngineTraceChunk): Promise<void> {
+    this.#observeEngineChunk(chunk);
+    if (chunk.bytes.length === 0) return;
+    const packets: Uint8Array[] = [];
+    this.#engineStream.push(chunk.bytes, (packet) => {
+      packets.push(packet);
+      return true;
+    });
+    this.#pendingExportBytes = packets.reduce((total, packet) => total + packet.length, 0);
+    try {
+      if (!this.#clockDeclared || !this.#knownTracks.has(this.#base | 1n)) {
+        await this.#writer.flush();
+        if (this.#hostTrack() === undefined)
+          throw new Error("capture cannot declare its host track");
+      }
+      for (const packet of packets) {
+        if (isIdentityClockSnapshot(packet)) continue;
+        if (packet.length > this.#configuration.maxBufferedBytes - this.#reservedBytes)
+          throw new Error("engine trace packet exceeds available capture byte budget");
+        if (
+          packet.length >
+          this.#configuration.maxBufferedBytes - this.#writer.bufferedBytes - this.#reservedBytes
+        )
+          await this.#writer.flush();
+        if (!this.#append(packet, false))
+          throw new Error("capture output rejected engine trace bytes");
+      }
+    } finally {
+      this.#pendingExportBytes = 0;
+    }
+  }
+
+  #observeEngineChunk(chunk: EngineTraceChunk): void {
     const drops = Number(chunk.droppedEvents);
     if (!Number.isSafeInteger(drops) || drops < this.#engineDrops)
       throw new Error("invalid engine trace drop count");
     this.#engineDrops = drops;
-    if (chunk.bytes.length > 0) this.#ingest(this.#engineStream, chunk.bytes);
+
     if (chunk.finished) {
       this.#engineState = "finished";
       if (chunk.openScopes !== undefined) {

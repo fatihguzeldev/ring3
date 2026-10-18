@@ -31,6 +31,7 @@ export interface CaptureStatus {
   readonly writtenBytes: number;
   readonly bufferedBytes: number;
   readonly pendingPacketBytes: number;
+  readonly pendingExportBytes: number;
   readonly openScopes: number;
   readonly engine: "off" | "host-only" | "recording" | "finished" | "unsupported";
   readonly sinkError?: string;

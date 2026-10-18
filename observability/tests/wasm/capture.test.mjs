@@ -220,3 +220,76 @@ test("actual Wasm catalog selection preserves all, none, parent and subset seman
     }
   }
 });
+
+test("normal flush exports dense real Wasm admissions without interval-rate loss", async () => {
+  const e = engine(),
+    parts = [];
+  const capture = createCapture({
+    level: "detailed",
+    maxBufferedBytes: 8192,
+    batchBytes: 4096,
+    producerId: 31,
+    output: {
+      async write(bytes) {
+        parts.push(bytes.slice());
+      },
+      async flush() {},
+    },
+  });
+  try {
+    e.call("map", 0x1000, 1, 7);
+    e.call("configure_execution", 1024, 64 * 1024 * 1024, 0xffffffff);
+    const source = new Uint8Array(4096).fill(0x90);
+    for (let index = 0; index < 512; index++) source[index * 8 + 1] = 0xc3;
+    e.transfer().set(source);
+    e.call("upload", 0x1000, source.length);
+    capture.attachEngine(e.port, { producerId: 32, maxBytes: 64 * 1024 });
+    for (let index = 0; index < 512; index++) {
+      e.call("prepare_cache_entry", ...key, 0x1000 + index * 8);
+      const packet = new DataView(e.transfer().buffer, e.transfer().byteOffset, 64);
+      assert.equal(packet.getUint32(24, true), 1);
+      const serial = packet.getBigUint64(16, true),
+        id = packet.getBigUint64(32, true),
+        slot = packet.getUint32(48, true);
+      e.call(
+        "install_cached_entry",
+        ...key,
+        Number(serial & 0xffffffffn),
+        Number(serial >> 32n),
+        Number(id & 0xffffffffn),
+        Number(id >> 32n),
+        slot,
+      );
+      if (index % 32 === 31) await capture.flush();
+    }
+    const result = await capture.finish();
+    assert.equal(result.complete, true, JSON.stringify(result));
+    assert.equal(result.droppedEvents, 0);
+    assert.equal(result.droppedChunks, 0);
+    const output = Buffer.concat(parts);
+    assert.ok(output.length > 256 * 1024, "exports beyond the normal engine buffer without loss");
+    const directory = resolve(root, "target/observability-verification");
+    await mkdir(directory, { recursive: true });
+    const trace = resolve(directory, "engine-throughput.pftrace");
+    await writeFile(trace, output);
+    const processor =
+      process.env.RING3_TRACE_PROCESSOR ??
+      resolve(root, "target/observability-tools/trace_processor_shell");
+    const execute = promisify(execFile);
+    const count = await execute(processor, [
+      "query",
+      trace,
+      "SELECT count(*) AS n FROM slice WHERE name='installation.requested'",
+    ]);
+    assert.equal(Number(count.stdout.trim().split("\n").at(-1)), 512);
+    const errors = await execute(processor, [
+      "query",
+      trace,
+      "SELECT name,value FROM stats WHERE severity IN ('error','data_loss') AND value>0",
+    ]);
+    assert.equal(errors.stdout.trim(), '"name","value"');
+  } finally {
+    await capture.finish("failed");
+    e.call("close");
+  }
+});
