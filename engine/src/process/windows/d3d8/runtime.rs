@@ -21,6 +21,7 @@ pub(in crate::process) struct D3D8Reply32 {
     pub(super) token: u32,
     pub(super) epoch: u64,
     pub(super) kind: ReplyKind32,
+    pub(super) window: Option<super::super::user32::User32Callback32>,
 }
 #[derive(Clone, Copy)]
 pub(super) enum ReplyKind32 {
@@ -29,11 +30,14 @@ pub(super) enum ReplyKind32 {
     Readback(ReadbackId),
     LockReadback(ReadbackId),
     Ready(u32),
+    Private,
+    Window,
 }
 impl D3D8Reply32 {
     pub(in crate::process) fn ready(&self, runtime: &D3D8Runtime32) -> bool {
         let device = runtime.device_by_epoch(self.epoch).ok();
         match self.kind {
+            ReplyKind32::Private | ReplyKind32::Window => false,
             ReplyKind32::Ready(_) => true,
             ReplyKind32::Retry | ReplyKind32::Drain(_) => device
                 .is_none_or(|device| !device.queue().is_draining() && !device.queue().is_sealed()),
@@ -113,7 +117,6 @@ impl EngineInstance {
                 _ => return Err(HostError::Call(CallError::Busy)),
             };
             if let Some(result) = result {
-                self.d3d8_reply = None;
                 self.finish_d3d8_result(frame, result)?;
                 return Ok(true);
             }
@@ -131,10 +134,6 @@ impl EngineInstance {
         } else {
             0
         };
-        let windows = self
-            .user32
-            .as_ref()
-            .map(super::super::user32::User32Context32::windows);
         let runtime = self
             .d3d8
             .as_mut()
@@ -170,9 +169,40 @@ impl EngineInstance {
                 token,
                 epoch: device_epoch.unwrap(),
                 kind: ReplyKind32::Retry,
+                window: None,
             });
             return Err(HostError::Call(CallError::Busy));
         }
+        let window = match self.prepare_d3d8_window(gate, frame.arguments()) {
+            Ok(window) => window,
+            Err(HostError::User32(error)) => {
+                use crate::{memory::MemoryError as M, windows::user32::User32Error32 as U};
+                let result = match error {
+                    U::Capacity | U::Allocation | U::Memory(M::Capacity | M::Allocation) => {
+                        HResult::OUT_OF_MEMORY
+                    }
+                    U::InvalidRequest | U::Win32(_) => HResult::INVALID_CALL,
+                    _ => return Err(HostError::User32(error)),
+                };
+                self.finish_d3d8_result(frame, result.0)?;
+                return Ok(true);
+            }
+            Err(error) => return Err(error),
+        };
+        if window.is_some() {
+            self.d3d8_reply = Some(D3D8Reply32 {
+                owner,
+                token,
+                epoch: device_epoch.unwrap_or(epoch),
+                kind: ReplyKind32::Private,
+                window,
+            });
+        }
+        let runtime = self.d3d8.as_mut().unwrap();
+        let windows = self
+            .user32
+            .as_ref()
+            .map(super::super::user32::User32Context32::windows);
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
         let result = if id == CREATE_GATE {
             Ok(runtime
@@ -206,6 +236,7 @@ impl EngineInstance {
                         token,
                         epoch: device_epoch.unwrap(),
                         kind: ReplyKind32::Drain(result),
+                        window,
                     });
                     return Err(HostError::Call(CallError::Busy));
                 } else {
@@ -221,6 +252,7 @@ impl EngineInstance {
                     token,
                     epoch: id.epoch,
                     kind: ReplyKind32::Readback(id),
+                    window: None,
                 });
                 return Err(HostError::Call(CallError::Busy));
             }
@@ -230,16 +262,19 @@ impl EngineInstance {
                     token,
                     epoch: id.epoch,
                     kind: ReplyKind32::LockReadback(id),
+                    window: None,
                 });
                 return Err(HostError::Call(CallError::Busy));
             }
             Err(DispatchError32::Device(DeviceError::Command(CommandError::Backpressure))) => {
                 let epoch = device_epoch.ok_or(HostError::Infrastructure)?;
+                self.cancel_d3d8_window()?;
                 self.d3d8_reply = Some(D3D8Reply32 {
                     owner,
                     token,
                     epoch,
                     kind: ReplyKind32::Retry,
+                    window: None,
                 });
                 return Err(HostError::Call(CallError::Busy));
             }
@@ -263,7 +298,13 @@ impl EngineInstance {
     }
     fn finish_d3d8_result(&mut self, frame: CallFrame32, result: u32) -> Result<(), HostError> {
         let prepared = Self::prepare_completed_call(frame.complete(result))?;
-        self.publish_prepared_call(prepared);
+        match self.d3d8_window_outcome(result)? {
+            WindowsProviderOutcome32::Callback(request) => self.park_d3d8_callback(request)?,
+            WindowsProviderOutcome32::Return(_) => {
+                self.d3d8_reply = None;
+                self.publish_prepared_call(prepared);
+            }
+        }
         Ok(())
     }
     pub(in crate::process) fn resume_d3d8_callback(
@@ -271,6 +312,12 @@ impl EngineInstance {
         continuation: u64,
         result: u32,
     ) -> Result<WindowsProviderOutcome32, HostError> {
+        if self
+            .d3d8_reply
+            .is_some_and(|reply| matches!(reply.kind, ReplyKind32::Window))
+        {
+            return self.resume_d3d8_window(continuation, result);
+        }
         let runtime = self
             .d3d8
             .as_mut()
@@ -291,11 +338,11 @@ impl EngineInstance {
             runtime.release_private_callbacks(memory, pointers, resumed)
         };
         match finished {
-            Ok(value) => Ok(WindowsProviderOutcome32::Return(value)),
+            Ok(value) => self.d3d8_window_outcome(value),
             Err(DispatchError32::Callback(request)) => {
                 Ok(WindowsProviderOutcome32::Callback(callback(request)))
             }
-            Err(error) => Ok(WindowsProviderOutcome32::Return(dispatch_hresult(error).0)),
+            Err(error) => self.d3d8_window_outcome(dispatch_hresult(error).0),
         }
     }
 }

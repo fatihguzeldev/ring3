@@ -369,7 +369,53 @@ impl User32Context32 {
             window,
             scratch,
             stage,
+            result: 1,
         })
+    }
+
+    pub(in crate::process) fn begin_presentation_position(
+        &mut self,
+        window: u32,
+        width: u32,
+        height: u32,
+        memory: &mut AddressSpace,
+        context: User32CallContext32,
+    ) -> Result<super::User32Callback32, User32Error32> {
+        self.prepare_thread_slots()?;
+        self.prepare_thread_layout(context.thread_id)?;
+        self.runtime_input.thread_id = context.thread_id;
+        self.runtime_input.ansi = context.ansi;
+        let mut position = self.prepare_window_position(
+            User32Api32::SetWindowPos,
+            &[window, 0, 0, 0, width, height, 0x0054],
+            memory,
+            context,
+        )?;
+        let Continuation32::Position { result, .. } = &mut position else {
+            unreachable!()
+        };
+        *result = 0;
+        let User32Outcome32::Callback(request) = self.start(position)? else {
+            unreachable!("a prepared position starts with WINDOWPOSCHANGING")
+        };
+        Ok(request)
+    }
+
+    pub(in crate::process) fn cancel_presentation_position(
+        &mut self,
+        continuation: u64,
+        memory: &mut AddressSpace,
+    ) -> Result<(), User32Error32> {
+        let pending = self.pending.last().ok_or(User32Error32::InvalidToken)?;
+        if pending.token != continuation {
+            return Err(User32Error32::InvalidToken);
+        }
+        let Continuation32::Position { scratch, .. } = pending.continuation else {
+            return Err(User32Error32::InvalidToken);
+        };
+        scratch.release(memory)?;
+        self.pending.pop();
+        Ok(())
     }
 
     pub(super) fn position_rect(

@@ -490,7 +490,9 @@ impl EngineInstance {
         Ok(true)
     }
 
-    pub(super) fn user32_call_context(&self) -> Result<User32CallContext32, HostError> {
+    pub(in crate::process::windows) fn user32_call_context(
+        &self,
+    ) -> Result<User32CallContext32, HostError> {
         let context = self
             .user32
             .as_ref()

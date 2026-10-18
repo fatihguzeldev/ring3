@@ -1,4 +1,5 @@
 mod configuration;
+mod fullscreen;
 mod retry;
 mod startup;
 pub(super) mod support;

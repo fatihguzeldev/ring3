@@ -132,6 +132,7 @@ pub(super) enum Continuation32 {
         window: WindowHandle32,
         scratch: Scratch32,
         stage: PositionStage32,
+        result: u32,
     },
     MessageWait {
         thread: u32,
@@ -317,6 +318,7 @@ impl User32Context32 {
                 window,
                 scratch,
                 stage,
+                ..
             } => {
                 let (message, wparam, lparam) = match stage {
                     PositionStage32::Changing => (0x0046, 0, scratch.address.0),
@@ -668,6 +670,7 @@ impl User32Context32 {
                 window,
                 scratch,
                 stage,
+                result: completion,
             } => {
                 scratch.check(memory)?;
                 if self.windows().get(window).is_err() {
@@ -678,7 +681,7 @@ impl User32Context32 {
                 if matches!(stage, PositionStage32::Changed) {
                     scratch.release(memory)?;
                     self.pending.pop();
-                    return Ok(User32Outcome32::Return(1));
+                    return Ok(User32Outcome32::Return(completion));
                 }
                 if matches!(stage, PositionStage32::Changing) {
                     let [hwnd, _, x, y, width, height, flags] =
@@ -695,6 +698,7 @@ impl User32Context32 {
                             window,
                             scratch,
                             stage: PositionStage32::NonClientSize,
+                            result: completion,
                         };
                         return self.next_outcome();
                     }
@@ -740,6 +744,7 @@ impl User32Context32 {
                     window,
                     scratch,
                     stage: PositionStage32::Changed,
+                    result: completion,
                 };
                 self.next_outcome()
             }
