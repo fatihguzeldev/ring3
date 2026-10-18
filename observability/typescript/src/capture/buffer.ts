@@ -87,9 +87,11 @@ export class BatchWriter {
 
   #start(): void {
     if (this.#pending !== undefined || this.#queuedBytes === 0 || this.#error !== undefined) return;
-    this.#pending = this.#write().finally(() => {
-      this.#pending = undefined;
-    });
+    this.#pending = Promise.resolve()
+      .then(() => this.#write())
+      .finally(() => {
+        this.#pending = undefined;
+      });
   }
 
   async #write(): Promise<void> {
