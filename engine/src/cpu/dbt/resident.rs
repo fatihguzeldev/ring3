@@ -269,6 +269,7 @@ impl ResidentRegistry {
         cs: CodeFetchContext,
         authority: crate::cpu::x86::decode::DecodeAuthority,
         tier: super::CompilationTier32,
+        is_gate: &dyn Fn(GuestAddress) -> bool,
     ) -> Result<UnitId, RegistryError> {
         #[cfg(feature = "observability")]
         let _scope = ring3_observability::current().scope(
@@ -293,7 +294,7 @@ impl ResidentRegistry {
                 limits,
                 Some(cs),
                 authority,
-                &|pc| self.lookup_bound(memory, pc, cs).is_ok(),
+                &|pc| is_gate(pc) || self.lookup_bound(memory, pc, cs).is_ok(),
             )
         }
         .map_err(RegistryError::Compile)?;

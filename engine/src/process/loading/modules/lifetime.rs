@@ -367,9 +367,14 @@ impl EngineInstance {
     }
 
     pub(in crate::process) fn module_gate_at(&self, pc: u32) -> Option<crate::cpu::dbt::GateSpec> {
-        self.modules.loaded.gate(GuestAddress(pc)).or_else(|| {
-            self.modules
-                .thread
+        self.modules.gate_at(pc)
+    }
+}
+
+impl super::ModuleProcess32 {
+    pub(in crate::process) fn gate_at(&self, pc: u32) -> Option<crate::cpu::dbt::GateSpec> {
+        self.loaded.gate(GuestAddress(pc)).or_else(|| {
+            self.thread
                 .as_ref()
                 .filter(|thread| thread.return_pc() == pc)
                 .map(|_| crate::cpu::dbt::GateSpec {
@@ -378,7 +383,9 @@ impl EngineInstance {
                 })
         })
     }
+}
 
+impl EngineInstance {
     pub fn module_gates(&self) -> Result<Vec<crate::cpu::dbt::GateSpec>, HostError> {
         self.memory()?;
         let mut gates = Vec::new();

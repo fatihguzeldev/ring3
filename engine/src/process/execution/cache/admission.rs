@@ -125,7 +125,9 @@ impl EngineInstance {
         let id = if let Some(id) = existing {
             id
         } else {
-            let gate = self.cache_gate_at(pc);
+            let modules = &self.modules;
+            let callback = self.callback.as_ref();
+            let gate = cache_gate_at(modules, callback, pc);
             let registry = self.resident.as_mut().unwrap();
             let memory = self.memory.as_ref().unwrap();
             registry
@@ -138,6 +140,7 @@ impl EngineInstance {
                     cs,
                     DecodeAuthority::new(self.system_register_bank),
                     tier,
+                    &|address| cache_gate_at(modules, callback, address.0).is_some(),
                 )
                 .map_err(HostError::Resident)?
                 .get()
@@ -193,28 +196,32 @@ impl EngineInstance {
         cache.misses = cache.misses.saturating_add(1);
         Ok(())
     }
-    fn cache_gate_at(&self, pc: u32) -> Option<crate::cpu::dbt::GateSpec> {
-        if let Some(gate) = self.module_gate_at(pc) {
-            return Some(gate);
-        }
-        let mut callback = self.callback.as_ref();
-        while let Some(current) = callback {
-            let (return_pc, return_id) = match current.record {
-                crate::process::calls::callback::SuspendedRecord::Replacement(record) => {
-                    (record.return_pc, record.return_id)
-                }
-                crate::process::calls::callback::SuspendedRecord::Resident { record, .. } => {
-                    (record.return_pc, record.return_id)
-                }
-            };
-            if return_pc == pc {
-                return Some(crate::cpu::dbt::GateSpec {
-                    entry: GuestAddress(pc),
-                    id: return_id,
-                });
-            }
-            callback = current.parent.as_ref().map(|parent| &parent[0]);
-        }
-        None
+}
+
+fn cache_gate_at(
+    modules: &crate::process::loading::modules::ModuleProcess32,
+    mut callback: Option<&crate::process::calls::callback::SuspendedCallback>,
+    pc: u32,
+) -> Option<crate::cpu::dbt::GateSpec> {
+    if let Some(gate) = modules.gate_at(pc) {
+        return Some(gate);
     }
+    while let Some(current) = callback {
+        let (return_pc, return_id) = match current.record {
+            crate::process::calls::callback::SuspendedRecord::Replacement(record) => {
+                (record.return_pc, record.return_id)
+            }
+            crate::process::calls::callback::SuspendedRecord::Resident { record, .. } => {
+                (record.return_pc, record.return_id)
+            }
+        };
+        if return_pc == pc {
+            return Some(crate::cpu::dbt::GateSpec {
+                entry: GuestAddress(pc),
+                id: return_id,
+            });
+        }
+        callback = current.parent.as_ref().map(|parent| &parent[0]);
+    }
+    None
 }

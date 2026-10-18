@@ -35,6 +35,7 @@ fn cached(
             cs,
             DecodeAuthority::default(),
             super::super::CompilationTier32::Baseline,
+            &|_| false,
         )
         .unwrap()
 }
