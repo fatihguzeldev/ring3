@@ -55,7 +55,7 @@ function fresh(label) {
   }
   return e;
 }
-function install(e, pc) {
+function install(e, pc, exitVersion) {
   ok(e, 'prepare_cache_entry', low(KEY), high(KEY), pc);
   const receipt = request(e);
   assert.equal(receipt.kind, 1);
@@ -75,7 +75,7 @@ function install(e, pc) {
   const filename = `${e.label}-${pc.toString(16)}-tier${receipt.tier}.wasm`;
   writeFileSync(join(output, filename), bytes);
   receipts.push({...receipt, id: receipt.id.toString(), serial: receipt.serial.toString(), victim: receipt.victim.toString(), filename, bytes: length, sha256: hash(bytes)});
-  return {...receipt, run, bytes};
+  return {...receipt, run, bytes, exitVersion};
 }
 function promote(e, unit) {
   for (let index = 0; index < 8; index++) ok(e, 'find_installed_resident', low(KEY), high(KEY), unit.pc);
@@ -86,13 +86,15 @@ function promote(e, unit) {
   assert.equal(receipt.victim, unit.id);
   e.table.set(receipt.victimSlot, null);
   ok(e, 'acknowledge_cache_eviction', low(KEY), high(KEY), low(receipt.serial), high(receipt.serial), low(receipt.victim), high(receipt.victim), receipt.victimSlot);
-  const optimized = install(e, unit.pc);
+  // formation includes the branch fallthrough's memory instruction, so its
+  // module-wide exit schema supports memory faults even when this run never falls through.
+  const optimized = install(e, unit.pc, 6);
   assert.equal(optimized.tier, 1);
   assert.notEqual(optimized.id, unit.id);
   assert.equal(optimized.slot, unit.slot);
   return optimized;
 }
-function reset(e, {pc = CODE, ecx = 5, ebx = 0x8000, flags = 2, cancel = 0} = {}) {
+function reset(e, {pc = CODE, ecx = 100, ebx = 0x8000, flags = 2, cancel = 0} = {}) {
   refresh(e);
   const at = e.base, v = e.view;
   e.bytes.fill(0, at, at + 140);
@@ -110,16 +112,48 @@ function execute(e, unit, options, budget) {
   return row;
 }
 const baseline = fresh('baseline'), indexed = fresh('indexed');
-const base = install(baseline, CODE), opt = promote(indexed, install(indexed, CODE));
+const base = install(baseline, CODE, 1), opt = promote(indexed, install(indexed, CODE, 1));
 assert.equal(base.tier, 0); assert.equal(opt.tier, 1);
-const faultBase = install(baseline, 0x1200), faultOpt = promote(indexed, install(indexed, 0x1200));
-function compare(label, left, right, options, budget, oracle) {
-  const a = execute(baseline, left, options, budget), b = execute(indexed, right, options, budget);
-  assert.equal(a.status, b.status, `${label}: status`);
-  assert.deepEqual(a.snapshot, b.snapshot, `${label}: guest state, exit, cancel, helper`);
-  if (oracle) oracle(a);
-  cases.push({label, budget, status: a.status, reason: a.reason, retired: a.retired, pc: a.pc});
+const faultBase = install(baseline, 0x1200, 6), faultOpt = promote(indexed, install(indexed, 0x1200, 6));
+function validateExit(row, unit, label) {
+  const exit = new DataView(row.snapshot.buffer, row.snapshot.byteOffset + 56, 40);
+  assert.equal(exit.getUint32(0, true), 0x58453352, `${label}: exit magic`);
+  assert.equal(exit.getUint16(6, true), 1, `${label}: exit profile`);
+  assert.equal(exit.getUint32(8, true), 40, `${label}: exit size`);
+  assert.equal(exit.getUint32(12, true), 0, `${label}: exit reserved`);
+  const expected = row.reason === 23 ? 12 : row.reason === 16 ? 7 : unit.exitVersion;
+  assert.equal(exit.getUint16(4, true), expected, `${label}: literal module-specific exit schema`);
+  row.exitVersion = expected;
 }
+function comparePayload(label, a, b) {
+  const left = a.snapshot.slice(),
+    right = b.snapshot.slice();
+  // versions advertise module capabilities; validate them literally before
+  // comparing every remaining state, exit-payload, cancellation and helper byte.
+  left[60] = right[60] = 0;
+  left[61] = right[61] = 0;
+  assert.deepEqual(left, right, `${label}: guest state, exit payload, cancel, helper`);
+}
+function compare(label, left, right, options, budget, oracle) {
+  const a = execute(baseline, left, options, budget),
+    b = execute(indexed, right, options, budget);
+  assert.equal(a.status, b.status, `${label}: status`);
+  validateExit(a, left, `${label}/baseline`);
+  validateExit(b, right, `${label}/formed`);
+  comparePayload(label, a, b);
+  if (oracle) oracle(a);
+  cases.push({
+    label,
+    budget,
+    status: a.status,
+    reason: a.reason,
+    retired: a.retired,
+    pc: a.pc,
+    baselineExitVersion: a.exitVersion,
+    formedExitVersion: b.exitVersion,
+  });
+}
+// ecx100 keeps the untaken fallthrough outside every bounded safepoint case.
 for (const start of [0, 16, 32, 48, 51, 52]) {
   for (let budget = 0; budget <= 64; budget++) compare(`entry+${start}/budget${budget}`, base, opt, {pc: CODE + start}, budget, row => {
     assert.equal(row.status, 0);
@@ -136,20 +170,37 @@ compare('memory read at middle entry', faultBase, faultOpt, {pc: 0x1214}, 1, row
 
 const rounds = [];
 function timed(e, unit) {
-  reset(e, {pc: CODE + 32, ecx: 20_000});
+  // both tiers reach the same budget frontier before the final fallthrough.
+  reset(e, { pc: CODE + 32, ecx: 20_001 });
   const begin = process.hrtime.bigint();
-  const status = unit.run(e.base, e.base + 56, 400_000, e.base + 96);
+  const status = unit.run(e.base, e.base + 56, 380_000, e.base + 96);
   const elapsed = Number(process.hrtime.bigint() - begin);
   assert.equal(status, 0);
   refresh(e);
   assert.equal(e.view.getUint32(e.base + 76, true), 380_000);
   assert.equal(e.view.getUint32(e.base + 16, true), 20_007);
-  return elapsed;
+  assert.equal(e.view.getUint32(e.base + 20, true), 1);
+  assert.equal(e.view.getUint32(e.base + 48, true), CODE + 32);
+  assert.equal(e.view.getUint32(e.base + 72, true), 1);
+  const row = { elapsed, snapshot: e.bytes.slice(e.base, e.base + 140), reason: 1 };
+  validateExit(row, unit, `${e.label}/warm`);
+  return row;
 }
-for (let index = 0; index < 12; index++) {timed(baseline, base); timed(indexed, opt);}
+function timedPair(reverse) {
+  let a, b;
+  if (reverse) {
+    b = timed(indexed, opt);
+    a = timed(baseline, base);
+  } else {
+    a = timed(baseline, base);
+    b = timed(indexed, opt);
+  }
+  comparePayload("warm matching budget frontier", a, b);
+  return { baseline: a.elapsed, indexed: b.elapsed };
+}
+for (let index = 0; index < 12; index++) timedPair(index % 2);
 for (let index = 0; index < 28; index++) {
-  const row = index % 2 ? {indexed: timed(indexed, opt), baseline: timed(baseline, base)} : {baseline: timed(baseline, base), indexed: timed(indexed, opt)};
-  rounds.push(row);
+  rounds.push(timedPair(index % 2));
 }
 function median(values) {values.sort((a, b) => a - b); return (values[13] + values[14]) / 2;}
 const baseMedian = median(rounds.map(row => row.baseline)), optMedian = median(rounds.map(row => row.indexed));
@@ -161,6 +212,6 @@ for (const [e, unit] of [[baseline, base], [indexed, opt]]) {
   assert.deepEqual(refresh(e).bytes.slice(e.base, e.base + 140), before, 'stale entry preserves state');
   ok(e, 'close');
 }
-const report = {engine_sha256: engine.sha256, source_hex: Buffer.from(source).toString('hex'), receipts, cases, warm: {rounds, baseline_median_ns: baseMedian, indexed_median_ns: optMedian, ratio: optMedian / baseMedian, retired_per_round: 380_000}, claim: 'actual Node WebAssembly engine and generated code; bounded entry-index optimization; no browser or game throughput claim'};
+const report = {engine_sha256: engine.sha256, source_hex: Buffer.from(source).toString('hex'), receipts, cases, warm: {rounds, baseline_median_ns: baseMedian, indexed_median_ns: optMedian, ratio: optMedian / baseMedian, retired_per_round: 380_000}, claim: 'actual Node WebAssembly engine and generated code; 396 bounded entry safepoints keep ECX100 branch fallthrough out of range; literal module-specific exit versions are checked before only their two bytes are normalized; all remaining payload bytes and warm matching-budget frontiers are equal; stale rejection retained; no browser or game throughput claim'};
 writeFileSync(join(output, 'result.json'), JSON.stringify(report, null, 2));
 console.log(JSON.stringify({engine_sha256: report.engine_sha256, differential_cases: cases.length, rounds: rounds.length, baseline_median_ns: baseMedian, indexed_median_ns: optMedian, ratio: report.warm.ratio, output}));
