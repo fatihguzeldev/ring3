@@ -42,15 +42,17 @@ export class BatchWriter {
     for (;;) {
       this.#start();
       const pending = this.#pending;
-      if (pending === undefined) break;
-      await pending;
-    }
-    if (this.#error === undefined) {
+      if (pending !== undefined) {
+        await pending;
+        continue;
+      }
+      if (this.#error !== undefined) break;
       try {
         await this.#output.flush();
       } catch (error) {
         this.#fail(error);
       }
+      if (this.#pending === undefined && this.#queuedBytes === 0) break;
     }
   }
 

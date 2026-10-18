@@ -47,3 +47,40 @@ test("reentrant output callbacks cannot start concurrent writes", async () => {
   assert.deepEqual(written, [[1], [2]]);
   assert.equal(writer.bufferedBytes, 0);
 });
+
+test("flush joins a write admitted by an output flush callback", async (t) => {
+  let release,
+    injected = false;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  t.after(() => release());
+  const written = [];
+  const writer = new BatchWriter(
+    {
+      async write(bytes) {
+        if (bytes[0] === 2) await gate;
+        written.push(...bytes);
+      },
+      async flush() {
+        if (!injected) {
+          injected = true;
+          writer.append(Uint8Array.of(2));
+        }
+      },
+    },
+    1024,
+    1,
+  );
+  writer.append(Uint8Array.of(1));
+  let finished = false;
+  const flushing = writer.flush().then(() => {
+    finished = true;
+  });
+  for (let index = 0; index < 20; index++) await Promise.resolve();
+  assert.equal(finished, false);
+  release();
+  await flushing;
+  assert.deepEqual(written, [1, 2]);
+  assert.equal(writer.bufferedBytes, 0);
+});
