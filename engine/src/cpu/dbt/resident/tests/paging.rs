@@ -98,3 +98,61 @@ fn source_free_and_consumed_prefix_resident_denials_can_be_repaired_without_drop
         );
     }
 }
+
+#[test]
+fn repaired_material_falls_back_to_retained_source_free_denial_after_execute_permission_is_removed()
+{
+    let mut memory = AddressSpace::new(1).unwrap();
+    let page = PageRange::new(GuestAddress(0x1000), 1).unwrap();
+    memory.map_zeroed(page, Permissions::READ_WRITE).unwrap();
+    let pc = GuestAddress(0x1000);
+    memory.write(pc, &[0xeb, 0xfe]).unwrap();
+    let cs = CodeFetchContext::from_segments(&SegmentContext::default()).unwrap();
+    let mut registry = ResidentRegistry::new(&memory, RegistryLimits::default()).unwrap();
+    let compile = |registry: &mut ResidentRegistry, memory: &AddressSpace| {
+        registry
+            .compile_runtime_bound(
+                memory,
+                pc,
+                CompileLimits::default(),
+                7,
+                cs,
+                DecodeAuthority::default(),
+            )
+            .unwrap()
+    };
+    let denied = compile(&mut registry, &memory);
+    assert_eq!(registry.lookup_bound(&memory, pc, cs), Ok(denied));
+    memory.protect(page, Permissions::ALL).unwrap();
+    assert_eq!(
+        registry.lookup_bound(&memory, pc, cs),
+        Err(RegistryError::NotFound { pc })
+    );
+    let material = compile(&mut registry, &memory);
+    assert_ne!(material, denied);
+    assert_eq!(registry.lookup_bound(&memory, pc, cs), Ok(material));
+
+    memory.protect(page, Permissions::READ_WRITE).unwrap();
+    assert_eq!(
+        registry.get(&memory, material).unwrap_err(),
+        RegistryError::CodeInvalidated
+    );
+    assert_eq!(registry.lookup_bound(&memory, pc, cs), Ok(denied));
+    registry
+        .discard_quiescent_raw(&memory, denied.get())
+        .unwrap();
+    assert_eq!(
+        registry.lookup_bound(&memory, pc, cs),
+        Err(RegistryError::CodeInvalidated)
+    );
+    registry.retire_stale(&memory, material).unwrap();
+    assert_eq!(
+        registry.lookup_bound(&memory, pc, cs),
+        Err(RegistryError::NotFound { pc })
+    );
+    memory.protect(page, Permissions::ALL).unwrap();
+    let retry = compile(&mut registry, &memory);
+    assert_ne!(retry, denied);
+    assert_ne!(retry, material);
+    assert_eq!(registry.lookup_bound(&memory, pc, cs), Ok(retry));
+}

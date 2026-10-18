@@ -17,6 +17,9 @@ const CONFIGURED_MAX_UNITS: usize = 4096;
 const CONFIGURED_MAX_BYTES: usize = 256 * 1024 * 1024;
 static NEXT_UNIT_ID: AtomicU64 = AtomicU64::new(1);
 
+mod lookup;
+use lookup::{EntryIndex, PreparedEntryPages};
+
 enum EmissionPolicy {
     WholeUnit(CompileLimits),
     EntryPrefix(CompileLimits),
@@ -73,6 +76,7 @@ pub enum RegistryError {
 struct ResidentUnit {
     id: UnitId,
     region: CompiledRegion,
+    entry_pages: Vec<u32>,
 }
 
 #[derive(Debug)]
@@ -80,6 +84,7 @@ pub struct ResidentRegistry {
     memory_identity: u64,
     limits: RegistryLimits,
     entries: Vec<ResidentUnit>,
+    entry_index: EntryIndex,
     wasm_bytes: usize,
 }
 
@@ -98,6 +103,7 @@ impl ResidentRegistry {
             memory_identity: memory.identity(),
             limits,
             entries,
+            entry_index: EntryIndex::default(),
             wasm_bytes: 0,
         })
     }
@@ -114,8 +120,9 @@ impl ResidentRegistry {
         }
         let region = compile_region(memory, specs, limits).map_err(RegistryError::Compile)?;
         let wasm_bytes = self.admit(memory, &region, None)?;
+        let pages = self.entry_index.prepare(&region)?;
         let id = allocate_id(&NEXT_UNIT_ID)?;
-        self.publish(id, region, wasm_bytes);
+        self.publish(id, region, wasm_bytes, pages);
         Ok(id)
     }
 
@@ -287,7 +294,8 @@ impl ResidentRegistry {
         )
         .map_err(RegistryError::Compile)?;
         let bytes = self.admit(memory, &region, Some(cs))?;
-        self.publish(id, region, bytes);
+        let pages = self.entry_index.prepare(&region)?;
+        self.publish(id, region, bytes, pages);
         Ok(id)
     }
 
@@ -311,7 +319,8 @@ impl ResidentRegistry {
         }
         .map_err(RegistryError::Compile)?;
         let wasm_bytes = self.admit(memory, &region, cs)?;
-        self.publish(id, region, wasm_bytes);
+        let pages = self.entry_index.prepare(&region)?;
+        self.publish(id, region, wasm_bytes, pages);
         Ok(id)
     }
 
@@ -347,14 +356,25 @@ impl ResidentRegistry {
         Ok(wasm_bytes)
     }
 
-    fn publish(&mut self, id: UnitId, region: CompiledRegion, wasm_bytes: usize) {
+    fn publish(
+        &mut self,
+        id: UnitId,
+        region: CompiledRegion,
+        wasm_bytes: usize,
+        pages: PreparedEntryPages,
+    ) {
         debug_assert!(
             self.entries
                 .last()
                 .is_none_or(|unit| unit.id.get() < id.get())
         );
         // the reserved vector makes publication infallible after the id claim.
-        self.entries.push(ResidentUnit { id, region });
+        let entry_pages = self.entry_index.publish(id, pages);
+        self.entries.push(ResidentUnit {
+            id,
+            region,
+            entry_pages,
+        });
         self.wasm_bytes = wasm_bytes;
     }
 
@@ -396,70 +416,6 @@ impl ResidentRegistry {
         Ok(&unit.region)
     }
 
-    pub fn lookup(&self, memory: &AddressSpace, pc: GuestAddress) -> Result<UnitId, RegistryError> {
-        self.check_memory(memory)?;
-        let mut stale = false;
-        for unit in &self.entries {
-            if unit
-                .region
-                .matches_decode_key(crate::cpu::x86::decode::CodeDecodeKey::FLAT)
-                && unit.region.contains_executable(pc.0)
-            {
-                match unit.region.wasm_bytes(memory) {
-                    Ok(_) => return Ok(unit.id),
-                    Err(ArtifactError::CodeInvalidated) => stale = true,
-                }
-            }
-        }
-        Err(if stale {
-            RegistryError::CodeInvalidated
-        } else {
-            RegistryError::NotFound { pc }
-        })
-    }
-
-    pub(crate) fn lookup_bound(
-        &self,
-        memory: &AddressSpace,
-        pc: GuestAddress,
-        cs: CodeFetchContext,
-    ) -> Result<UnitId, RegistryError> {
-        self.check_memory(memory)?;
-        let mut stale = false;
-        for material in [true, false] {
-            for unit in &self.entries {
-                if !unit.region.matches_decode_key(cs.decode_key()) {
-                    continue;
-                }
-                let matches = if material {
-                    unit.region.contains_material(pc.0)
-                } else {
-                    unit.region.context_fault(pc.0).is_some()
-                };
-                if matches {
-                    match unit.region.wasm_bytes(memory) {
-                        Ok(_)
-                            if material
-                                || unit
-                                    .region
-                                    .context_fault(pc.0)
-                                    .is_some_and(|fault| fault.remains_denied(memory, cs)) =>
-                        {
-                            return Ok(unit.id);
-                        }
-                        Ok(_) => {}
-                        Err(ArtifactError::CodeInvalidated) => stale = true,
-                    }
-                }
-            }
-        }
-        Err(if stale {
-            RegistryError::CodeInvalidated
-        } else {
-            RegistryError::NotFound { pc }
-        })
-    }
-
     pub fn usage(&self) -> RegistryUsage {
         RegistryUsage {
             units: self.entries.len(),
@@ -499,7 +455,8 @@ impl ResidentRegistry {
             .wasm_bytes
             .checked_sub(bytes)
             .ok_or(RegistryError::InvalidLimits)?;
-        self.entries.remove(index);
+        let unit = self.entries.remove(index);
+        self.entry_index.remove(unit.id, &unit.entry_pages);
         self.wasm_bytes = remaining;
         Ok(())
     }
@@ -548,6 +505,10 @@ mod resident_retirement_tests;
 #[cfg(test)]
 #[path = "resident/tests/identities.rs"]
 mod resident_identity_tests;
+
+#[cfg(test)]
+#[path = "resident/tests/lookup.rs"]
+mod resident_lookup_tests;
 
 fn allocate_id(counter: &AtomicU64) -> Result<UnitId, RegistryError> {
     counter
