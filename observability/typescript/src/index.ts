@@ -1,6 +1,14 @@
 export { Capture, createCapture } from "./capture/capture.js";
 export { Observer } from "./capture/observer.js";
 export { epochNowNs } from "./capture/configuration.js";
+export {
+  categories,
+  categoryCatalog,
+  catalogVersion,
+  encodeCategorySelection,
+  resolveCategorySelection,
+} from "./catalog/index.js";
+export type { Category, CategoryDescriptor } from "./catalog/index.js";
 export type {
   CaptureOptions,
   CaptureOutcome,

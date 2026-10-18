@@ -1,0 +1,133 @@
+{
+  "version": 1,
+  "categories": [
+    {
+      "id": "engine",
+      "key": "engine",
+      "label": "Engine",
+      "description": "Guest execution and Windows compatibility runtime.",
+      "parent": null,
+      "selectable": true
+    },
+    {
+      "id": "engine.cpu",
+      "key": "engineCpu",
+      "label": "CPU and translation",
+      "description": "Guest CPU execution, translation and code cache activity.",
+      "parent": "engine",
+      "selectable": true
+    },
+    {
+      "id": "engine.cpu.decode",
+      "key": "engineCpuDecode",
+      "label": "Instruction decoding",
+      "description": "Decoding x86 instructions and forming translation inputs.",
+      "parent": "engine.cpu",
+      "selectable": true
+    },
+    {
+      "id": "engine.cpu.codegen",
+      "key": "engineCpuCodegen",
+      "label": "Code generation",
+      "description": "Translating decoded guest code into WebAssembly.",
+      "parent": "engine.cpu",
+      "selectable": true
+    },
+    {
+      "id": "engine.cpu.cache",
+      "key": "engineCpuCache",
+      "label": "Code cache",
+      "description": "Admitting, finding and removing translated code.",
+      "parent": "engine.cpu",
+      "selectable": true
+    },
+    {
+      "id": "engine.loader",
+      "key": "engineLoader",
+      "label": "Executable loading",
+      "description": "Loading executable images and resolving their dependencies.",
+      "parent": "engine",
+      "selectable": true
+    },
+    {
+      "id": "engine.loader.pe32",
+      "key": "engineLoaderPe32",
+      "label": "PE32 images",
+      "description": "Parsing and mapping Windows PE32 executable images.",
+      "parent": "engine.loader",
+      "selectable": true
+    },
+    {
+      "id": "engine.loader.linker",
+      "key": "engineLoaderLinker",
+      "label": "Linking",
+      "description": "Resolving imports, exports and image relocations.",
+      "parent": "engine.loader",
+      "selectable": true
+    },
+    {
+      "id": "engine.loader.modules",
+      "key": "engineLoaderModules",
+      "label": "Module dependencies",
+      "description": "Requesting and supplying guest executable dependencies.",
+      "parent": "engine.loader",
+      "selectable": true
+    },
+    {
+      "id": "host",
+      "key": "host",
+      "label": "Host",
+      "description": "Browser APIs and the host runtime driving the engine.",
+      "parent": null,
+      "selectable": true
+    },
+    {
+      "id": "host.browser",
+      "key": "hostBrowser",
+      "label": "Browser lifecycle",
+      "description": "Starting, controlling and completing browser game sessions.",
+      "parent": "host",
+      "selectable": true
+    },
+    {
+      "id": "host.worker",
+      "key": "hostWorker",
+      "label": "Runtime worker",
+      "description": "Worker execution, scheduling and guest service dispatch.",
+      "parent": "host",
+      "selectable": true
+    },
+    {
+      "id": "host.wasm",
+      "key": "hostWasm",
+      "label": "WebAssembly host",
+      "description": "Compiling, instantiating and installing WebAssembly code.",
+      "parent": "host",
+      "selectable": true
+    },
+    {
+      "id": "host.files",
+      "key": "hostFiles",
+      "label": "Host file access",
+      "description": "Providing executable and game data bytes to the engine.",
+      "parent": "host",
+      "selectable": true
+    },
+    {
+      "id": "host.graphics",
+      "key": "hostGraphics",
+      "label": "Host graphics",
+      "description": "Preparing browser graphics resources and presenting output.",
+      "parent": "host",
+      "selectable": true
+    },
+    {
+      "id": "observability",
+      "key": "observability",
+      "label": "Recording control",
+      "description": "Recording lifecycle, completeness and diagnostic failures.",
+      "parent": null,
+      "selectable": false
+    }
+  ]
+}
