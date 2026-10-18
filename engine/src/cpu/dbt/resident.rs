@@ -13,8 +13,6 @@ use super::{
 
 const MAX_UNITS: usize = 8;
 const MAX_BYTES: usize = MAX_UNITS * 65_536;
-const CONFIGURED_MAX_UNITS: usize = 4096;
-const CONFIGURED_MAX_BYTES: usize = 256 * 1024 * 1024;
 static NEXT_UNIT_ID: AtomicU64 = AtomicU64::new(1);
 
 mod index;
@@ -40,6 +38,11 @@ impl UnitId {
 pub struct RegistryLimits {
     pub units: usize,
     pub wasm_bytes: usize,
+}
+
+impl RegistryLimits {
+    pub const MAX_UNITS: usize = 65_536;
+    pub const MAX_WASM_BYTES: usize = 256 * 1024 * 1024;
 }
 
 impl Default for RegistryLimits {
@@ -91,8 +94,8 @@ pub struct ResidentRegistry {
 
 impl ResidentRegistry {
     pub fn new(memory: &AddressSpace, limits: RegistryLimits) -> Result<Self, RegistryError> {
-        if !(1..=CONFIGURED_MAX_UNITS).contains(&limits.units)
-            || !(1..=CONFIGURED_MAX_BYTES).contains(&limits.wasm_bytes)
+        if !(1..=RegistryLimits::MAX_UNITS).contains(&limits.units)
+            || !(1..=RegistryLimits::MAX_WASM_BYTES).contains(&limits.wasm_bytes)
         {
             return Err(RegistryError::InvalidLimits);
         }

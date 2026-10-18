@@ -18,22 +18,26 @@ impl ExecutionCache32 {
         if row.as_ref().is_some_and(|row| row.id == id) {
             return;
         }
+        let last = increment(&self.clock);
         *row = Some(CacheEntry32 {
             id,
             entry,
             bytes,
             tier,
             hits: AtomicU64::new(0),
-            last: AtomicU64::new(increment(&self.clock)),
+            last: AtomicU64::new(last),
         });
         self.free_slots.occupy(slot);
+        self.victims.install(slot, id, last);
         self.revision = self.revision.saturating_add(1);
     }
-    pub(super) fn removed(&mut self, id: u64) {
-        for (slot, row) in self.entries.iter_mut().enumerate() {
+    pub(super) fn removed(&mut self, id: u64, slot: Option<u32>) {
+        if let Some(slot) = slot {
+            let row = &mut self.entries[slot as usize];
             if row.as_ref().is_some_and(|row| row.id == id) {
                 *row = None;
-                self.free_slots.release(slot as u32);
+                self.free_slots.release(slot);
+                self.victims.remove(slot);
             }
         }
         self.revision = self.revision.saturating_add(1);
@@ -74,7 +78,7 @@ impl EngineInstance {
         Ok(CacheUsage32 {
             units: usage.units as u32,
             wasm_bytes: usage.wasm_bytes as u32,
-            installed: cache.entries.iter().flatten().count() as u32,
+            installed: cache.victims.len() as u32,
             hits: cache.hits.load(Ordering::Relaxed),
             misses: cache.misses,
             evictions: cache.evictions,
@@ -100,9 +104,13 @@ impl EngineInstance {
             .unwrap()
             .installed(slot, id, entry, bytes, tier);
     }
-    pub(in crate::process::execution) fn cache_track_removal(&mut self, id: u64) {
+    pub(in crate::process::execution) fn cache_track_removal(
+        &mut self,
+        id: u64,
+        slot: Option<u32>,
+    ) {
         if let Some(cache) = self.execution_cache.as_mut() {
-            cache.removed(id);
+            cache.removed(id, slot);
         }
     }
 }

@@ -69,7 +69,6 @@ impl EngineInstance {
             .discard_quiescent_raw(self.memory.as_ref().unwrap(), victim)
             .map_err(HostError::Resident)?;
         self.remove_resident_installation(victim);
-        self.cache_track_removal(victim);
         let cache = self.execution_cache.as_mut().unwrap();
         cache.evictions = cache.evictions.saturating_add(1);
         if pending.request.tier == crate::cpu::dbt::CompilationTier32::Optimized {
@@ -136,7 +135,7 @@ impl EngineInstance {
                 .unwrap()
                 .discard_quiescent_raw(self.memory.as_ref().unwrap(), pending.request.unit_id)
                 .map_err(HostError::Resident)?;
-            self.cache_track_removal(pending.request.unit_id);
+            self.cache_track_removal(pending.request.unit_id, None);
         }
         self.execution_cache.as_mut().unwrap().request = None;
         Ok(())

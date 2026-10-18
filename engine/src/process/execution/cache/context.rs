@@ -22,6 +22,7 @@ pub(in crate::process) struct ExecutionCache32 {
     pub(super) config: ExecutionConfig32,
     pub(super) entries: Vec<Option<CacheEntry32>>,
     pub(super) free_slots: super::slots::FreeSlots,
+    pub(super) victims: super::victims::VictimIndex,
     pub(super) request: Option<PendingCache32>,
     pub(super) promotion: Option<PromotionTarget32>,
     pub(super) serial: u64,
@@ -64,8 +65,8 @@ pub(super) fn increment(counter: &AtomicU64) -> u64 {
 }
 impl ExecutionCache32 {
     pub(super) fn new(config: ExecutionConfig32) -> Result<Self, RegistryError> {
-        if !(1..=4096).contains(&config.units)
-            || !(65_536..=256 * 1024 * 1024).contains(&config.wasm_bytes)
+        if !(1..=RegistryLimits::MAX_UNITS as u32).contains(&config.units)
+            || !(65_536..=RegistryLimits::MAX_WASM_BYTES as u32).contains(&config.wasm_bytes)
             || config.promotion_hits == 0
         {
             return Err(RegistryError::InvalidLimits);
@@ -76,10 +77,12 @@ impl ExecutionCache32 {
             .map_err(|_| RegistryError::Allocation)?;
         entries.resize_with(config.units as usize, || None);
         let free_slots = super::slots::FreeSlots::new(config.units as usize)?;
+        let victims = super::victims::VictimIndex::new(config.units as usize)?;
         Ok(Self {
             config,
             entries,
             free_slots,
+            victims,
             request: None,
             promotion: None,
             serial: 1,

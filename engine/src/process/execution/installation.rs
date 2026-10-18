@@ -77,9 +77,12 @@ impl EngineInstance {
             .binary_search_by_key(&id, |installed| installed.unit_id)
         {
             let installed = self.resident_installations_by_id.remove(position);
-            if self.resident_installations[installed.slot as usize] == Some(installed) {
-                self.resident_installations[installed.slot as usize] = None;
+            if let Some(slot) = self.resident_installations.get_mut(installed.slot as usize)
+                && *slot == Some(installed)
+            {
+                *slot = None;
             }
+            self.cache_track_removal(id, Some(installed.slot));
         }
     }
 

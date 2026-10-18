@@ -7,6 +7,7 @@ mod promotion;
 mod requests;
 mod slots;
 mod types;
+mod victims;
 
 pub(in crate::process) use context::ExecutionCache32;
 pub use context::ExecutionConfig32;

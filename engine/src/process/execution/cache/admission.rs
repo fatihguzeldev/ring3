@@ -7,7 +7,6 @@ use crate::{
     memory::GuestAddress,
     process::{CallError, EngineInstance, HostError},
 };
-use std::sync::atomic::Ordering;
 
 impl EngineInstance {
     pub fn prepare_cache_entry(&mut self, key: u64, pc: u32) -> Result<CacheRequest32, HostError> {
@@ -71,44 +70,33 @@ impl EngineInstance {
                     .is_none_or(|bytes| bytes > cache.config.wasm_bytes as usize));
         if free.is_none() || quota {
             let pins = self.cache_pins()?;
-            let victim = cache
-                .entries
-                .iter()
-                .enumerate()
-                .filter_map(|(slot, row)| row.as_ref().map(|row| (slot, row)))
-                .filter(|(_, row)| !pins.contains(&row.id))
-                .min_by_key(|(_, row)| {
-                    (
-                        registry.get_raw(memory, row.id).is_ok(),
-                        row.last.load(Ordering::Relaxed),
-                    )
-                });
-            let Some((slot, victim)) = victim else {
-                return Err(
-                    if cache
-                        .entries
-                        .iter()
-                        .flatten()
-                        .any(|row| pins.contains(&row.id))
-                    {
-                        HostError::Call(CallError::Busy)
+            let cache = self.execution_cache.as_mut().unwrap();
+            let selected = cache.victims.select(
+                &cache.entries,
+                memory.code_validation_version(),
+                |id| registry.get_raw(memory, id).is_ok(),
+                &pins,
+            );
+            let Some(slot) = selected else {
+                return Err(if cache.victims.len() != 0 {
+                    HostError::Call(CallError::Busy)
+                } else {
+                    HostError::Resident(if usage.units >= cache.config.units as usize {
+                        RegistryError::UnitCapacity
                     } else {
-                        HostError::Resident(if usage.units >= cache.config.units as usize {
-                            RegistryError::UnitCapacity
-                        } else {
-                            RegistryError::ByteCapacity
-                        })
-                    },
-                );
+                        RegistryError::ByteCapacity
+                    })
+                });
             };
+            let victim = cache.entries[slot as usize].as_ref().unwrap();
             let request = CacheRequest32 {
                 serial: cache.serial,
                 kind: CacheRequestKind32::Evict,
                 pc,
                 unit_id: existing.unwrap_or(0),
                 victim_id: victim.id,
-                slot: free.unwrap_or(slot) as u32,
-                victim_slot: slot as u32,
+                slot: free.unwrap_or(slot as usize) as u32,
+                victim_slot: slot,
                 tier: CompilationTier32::Baseline,
             };
             #[cfg(feature = "observability")]

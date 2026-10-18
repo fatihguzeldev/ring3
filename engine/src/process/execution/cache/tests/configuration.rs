@@ -59,6 +59,10 @@ fn rejected_configuration_preserves_dispatcher_and_legacy_storage() {
             ..ExecutionConfig32::default()
         },
         ExecutionConfig32 {
+            units: crate::cpu::dbt::RegistryLimits::MAX_UNITS as u32 + 1,
+            ..ExecutionConfig32::default()
+        },
+        ExecutionConfig32 {
             wasm_bytes: 1,
             ..ExecutionConfig32::default()
         },
@@ -77,4 +81,23 @@ fn rejected_configuration_preserves_dispatcher_and_legacy_storage() {
         assert!(engine.resident.is_none());
         assert_eq!(engine.execution_config().unwrap(), None);
     }
+}
+
+#[test]
+fn maximum_bounded_capacity_configures_without_changing_default_or_legacy_capacity() {
+    let mut engine = EngineInstance::new(1, 97).unwrap();
+    let config = ExecutionConfig32 {
+        units: crate::cpu::dbt::RegistryLimits::MAX_UNITS as u32,
+        ..ExecutionConfig32::default()
+    };
+    assert_eq!(ExecutionConfig32::default().units, 256);
+    engine.configure_execution(config).unwrap();
+    assert_eq!(engine.execution_config().unwrap(), Some(config));
+    assert_eq!(engine.resident_installations.len(), 65_536);
+    assert_eq!(engine.cache_usage().unwrap().installed, 0);
+    assert_eq!(
+        engine.execution_cache.as_ref().unwrap().free_slots.first(),
+        Some(0)
+    );
+    assert!(engine.dispatcher_bytes(97).unwrap().len() < 1024);
 }
