@@ -220,7 +220,7 @@ assert.equal(engine.probe.guard(engine.low, engine.high, 1, 0, 0, 0), 5, 'uninit
 assert.equal(engine.probe.read32(0xffffffff), 5, 'uninitialized read helper');
 assert.equal(engine.probe.write32(0xffffffff, 0xffffffff), 5, 'uninitialized write helper');
 assert.equal(engine.api.open(8, 0, 0), 7, 'zero key rejected');
-for (const pages of [0, 4097, 0xffffffff]) assert.equal(engine.api.open(pages, engine.low, engine.high), 7, `invalid resident pages ${pages}`);
+for (const pages of [0, 32769, 0xffffffff]) assert.equal(engine.api.open(pages, engine.low, engine.high), 7, `invalid resident pages ${pages}`);
 assert.equal(engine.api.arena_ptr(), 0, 'failed init remains uninitialized');
 open(engine);
 const fixedPointer = engine.base;
@@ -416,5 +416,14 @@ for (const getter of ['arena_ptr', 'generation', 'module_ptr', 'module_len']) {
 assert.equal(neverOpened.probe.guard(neverOpened.low, neverOpened.high, 1, 0, 0, 0), 5, 'closed uninitialized guard');
 assert.equal(neverOpened.probe.read32(0xffffffff), 5, 'closed uninitialized read helper');
 assert.equal(neverOpened.probe.write32(0xffffffff, 0xffffffff), 5, 'closed uninitialized write helper');
+
+const expanded = fresh();
+open(expanded, 32768);
+assert.equal(expanded.api.map(0x10000000, 4097, 3), 0, 'backing maps beyond the former resident limit');
+assert.equal(expanded.probe.write32(0x10000000, 0x2468ace0), 0);
+assert.equal(expanded.probe.write32(0x11000000, 0x13579bdf), 0);
+assert.equal(guestValue(expanded, 0x11000000), 0x13579bdf, 'high backing page is writable');
+assert.equal(guestValue(expanded, 0x10000000), 0x2468ace0, 'high backing write preserves the first page');
+assert.equal(expanded.api.close(), 0);
 
 console.log(JSON.stringify({engine_sha256: hash(engineBytes), probe_sha256: hash(probeBytes), generated_modules: modules, calls, resumes, native_cases: 6, oracle_reused: reused, generated_set_sha256: hash(generatedHashes.join('\n')), artifacts: outputDir}));
