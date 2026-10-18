@@ -226,6 +226,15 @@ impl EngineInstance {
         };
         let queue = if matches!(
             api,
+            User32Api32::ShowWindow
+                | User32Api32::SetActiveWindow
+                | User32Api32::CreateWindowExA
+                | User32Api32::CreateWindowExW
+                | User32Api32::DestroyWindow
+        ) {
+            self.prepare_user32_activation_queues()?
+        } else if matches!(
+            api,
             User32Api32::PeekMessageA
                 | User32Api32::PeekMessageW
                 | User32Api32::GetMessageA

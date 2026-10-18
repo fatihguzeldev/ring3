@@ -63,6 +63,7 @@ impl User32Context32 {
         self.hooks.retire_thread(thread);
         self.ime.retire_thread(thread);
         self.retire_popup_thread(thread);
+        self.app_activation.retire_thread(thread);
         self.state.retire_thread(thread);
         self.timers.retire_thread(thread);
         self.provenance.retire_thread(thread);

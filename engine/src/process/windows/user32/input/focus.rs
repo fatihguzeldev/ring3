@@ -125,6 +125,15 @@ impl User32Context32 {
             self.windows().check_set_focus(thread, target).ok()?;
             return Some((target.is_some(), self.windows().capture().is_some()));
         }
+        if let Continuation32::AppActivation {
+            resume: super::super::activation::AppResume32::Show(show),
+            ..
+        } = pending.continuation
+        {
+            let (thread, target) = self.show_completion_focus_target(show)?;
+            self.windows().check_set_focus(thread, target).ok()?;
+            return Some((target.is_some(), self.windows().capture().is_some()));
+        }
         if let Continuation32::Destroy { plan } = pending.continuation {
             return self.destroy_completion_flags(plan);
         }

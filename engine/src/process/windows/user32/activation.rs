@@ -7,6 +7,9 @@ use crate::windows::{
     window::{WindowHandle32, WindowMessage32},
 };
 
+mod app;
+pub(super) use app::{AppActivation32, AppNotification32, AppResume32, PreparedAppActivation32};
+
 #[derive(Clone, Copy)]
 pub(super) enum ShowStage32 {
     Show,
@@ -14,6 +17,7 @@ pub(super) enum ShowStage32 {
     Deactivate,
     ActivateNonClient,
     Activate,
+    Finish,
 }
 
 #[derive(Clone, Copy)]
@@ -137,6 +141,7 @@ impl User32Context32 {
                 1,
                 super::raw(show.previous),
             ),
+            ShowStage32::Finish => return self.finish_show(show, true),
         };
         Ok(User32Outcome32::Callback(User32Callback32 {
             count: 4,
@@ -168,15 +173,19 @@ impl User32Context32 {
                 {
                     self.windows().check_set_focus(show.thread, target)?;
                 }
+                let app = self.prepare_app_activation(self.input.physical_focus, show.target)?;
                 self.state
                     .windows_mut()
                     .update_active(show.thread, show.target)?;
+                if let Some(app) = app {
+                    self.commit_app_activation(app);
+                }
                 if show.target.is_none() {
-                    self.finish_show(show, true)
+                    show.stage = ShowStage32::Finish;
                 } else {
                     show.stage = ShowStage32::ActivateNonClient;
-                    self.set_show(show)
                 }
+                self.show_after_app_notifications(show)
             }
             ShowStage32::ActivateNonClient => {
                 if self.windows().active() != show.target || !self.show_target_valid(show) {
@@ -190,6 +199,7 @@ impl User32Context32 {
                     self.windows().active() == show.target && self.show_target_valid(show);
                 self.finish_show(show, focused)
             }
+            ShowStage32::Finish => self.finish_show(show, true),
         }
     }
 
@@ -207,12 +217,31 @@ impl User32Context32 {
         if show.previous.is_some() {
             show.stage = ShowStage32::DeactivateNonClient;
         } else {
+            let app = self.prepare_app_activation(self.input.physical_focus, show.target)?;
             self.state
                 .windows_mut()
                 .update_active(show.thread, show.target)?;
+            if let Some(app) = app {
+                self.commit_app_activation(app);
+            }
             show.stage = ShowStage32::ActivateNonClient;
+            return self.show_after_app_notifications(show);
         }
         self.set_show(show)
+    }
+
+    fn show_after_app_notifications(
+        &mut self,
+        show: Show32,
+    ) -> Result<User32Outcome32, User32Error32> {
+        if let Some(outcome) = self.begin_app_notifications(AppResume32::Show(show))? {
+            return Ok(outcome);
+        }
+        if matches!(show.stage, ShowStage32::Finish) {
+            self.finish_show(show, true)
+        } else {
+            self.set_show(show)
+        }
     }
 
     fn show_target_valid(&self, show: Show32) -> bool {
@@ -235,7 +264,7 @@ impl User32Context32 {
         show: Show32,
     ) -> Option<(u32, Option<WindowHandle32>)> {
         let completes_activation = match show.stage {
-            ShowStage32::Activate => self.windows().active() == show.target,
+            ShowStage32::Activate | ShowStage32::Finish => self.windows().active() == show.target,
             ShowStage32::Deactivate if show.target.is_none() => {
                 self.windows().active() == show.previous
             }

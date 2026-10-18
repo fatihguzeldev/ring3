@@ -55,6 +55,15 @@ impl EngineInstance {
         self.check_windows_thread_write()?;
         match reply.provider {
             WindowsCallbackProvider32::User32 => {
+                let queue = if self
+                    .user32
+                    .as_ref()
+                    .is_some_and(|context| context.app_queue_may_change(reply.continuation))
+                {
+                    self.prepare_user32_activation_queues()?
+                } else {
+                    None
+                };
                 let flags = self.user32.as_ref().and_then(|context| {
                     context.preview_completion_input_flags(reply.continuation, result)
                 });
@@ -82,6 +91,7 @@ impl EngineInstance {
                 );
                 self.commit_windows_input_flags(if flags == Some(actual) { input } else { None });
                 self.commit_user32_window_event(window_event, window_ids);
+                self.commit_user32_queue_change(queue);
                 self.accept_user32_outcome(outcome, error)?;
                 let _ = self.sync_windows_input();
             }

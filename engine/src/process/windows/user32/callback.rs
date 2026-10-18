@@ -97,6 +97,10 @@ pub(super) enum Continuation32 {
         ready: Option<u32>,
     },
     Show(super::activation::Show32),
+    AppActivation {
+        notification: super::activation::AppNotification32,
+        resume: super::activation::AppResume32,
+    },
     Destroy {
         plan: u64,
     },
@@ -251,6 +255,9 @@ impl User32Context32 {
             }
             Continuation32::DialogHelp { .. } => return Err(User32Error32::InvalidToken),
             Continuation32::Show(show) => return self.show_outcome(show),
+            Continuation32::AppActivation { notification, .. } => {
+                return self.app_notification_outcome(notification);
+            }
             Continuation32::Destroy { plan } => return self.destroy_outcome(plan),
             Continuation32::Call {
                 procedure,
@@ -522,6 +529,9 @@ impl User32Context32 {
                 self.complete_dialog_help(id, scratch, memory)
             }
             Continuation32::Show(show) => self.complete_show(show),
+            Continuation32::AppActivation { resume, .. } => {
+                self.complete_app_notifications(resume, memory)
+            }
             Continuation32::Destroy { plan } => self.complete_destroy(plan, memory),
             Continuation32::Timer { .. } => {
                 self.pending.pop();

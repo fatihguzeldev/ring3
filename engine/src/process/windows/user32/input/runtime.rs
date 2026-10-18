@@ -6,7 +6,8 @@ use crate::{
 
 pub(in crate::process) struct PreparedUser32Queue32 {
     signals: crate::windows::synchronization::PreparedSignals32,
-    thread: u32,
+    threads: [u32; 2],
+    count: usize,
 }
 
 impl EngineInstance {
@@ -223,20 +224,40 @@ impl EngineInstance {
     ) -> Result<Option<PreparedUser32Queue32>, HostError> {
         self.prepare_user32_queue_change_for(self.current_windows_thread_id()?)
     }
-    pub(in crate::process) fn prepare_user32_queue_change_for(
+    pub(in crate::process) fn prepare_user32_activation_queues(
         &self,
-        thread: u32,
     ) -> Result<Option<PreparedUser32Queue32>, HostError> {
         let (Some(context), Some(sync)) = (self.user32.as_ref(), self.synchronization.as_ref())
         else {
             return Ok(None);
         };
-        let (_, _, generation) = context.wait_queue_status(thread);
+        let (threads, count) = context.app_queue_threads(self.current_windows_thread_id()?);
         let signals = sync
             .context()
-            .prepare_messages_for_thread(thread, u32::MAX, u32::MAX, generation)
+            .prepare_bounded_message_refresh(&threads[..count])
             .map_err(HostError::Synchronization)?;
-        Ok(Some(PreparedUser32Queue32 { signals, thread }))
+        Ok(Some(PreparedUser32Queue32 {
+            signals,
+            threads,
+            count,
+        }))
+    }
+    pub(in crate::process) fn prepare_user32_queue_change_for(
+        &self,
+        thread: u32,
+    ) -> Result<Option<PreparedUser32Queue32>, HostError> {
+        let (Some(_), Some(sync)) = (self.user32.as_ref(), self.synchronization.as_ref()) else {
+            return Ok(None);
+        };
+        let signals = sync
+            .context()
+            .prepare_bounded_message_refresh(&[thread])
+            .map_err(HostError::Synchronization)?;
+        Ok(Some(PreparedUser32Queue32 {
+            signals,
+            threads: [thread, 0],
+            count: 1,
+        }))
     }
 
     pub(in crate::process) fn commit_user32_queue_change(
@@ -246,19 +267,15 @@ impl EngineInstance {
         let Some(prepared) = prepared else {
             return;
         };
-        let (current, new, generation) = self
-            .user32
-            .as_ref()
-            .unwrap()
-            .wait_queue_status(prepared.thread);
+        let mut rows = [(0, 0, 0, 0); 2];
+        for (index, &thread) in prepared.threads[..prepared.count].iter().enumerate() {
+            let (current, new, generation) =
+                self.user32.as_ref().unwrap().wait_queue_status(thread);
+            rows[index] = (thread, current, new, generation);
+        }
         let sync = self.synchronization.as_mut().unwrap().context_mut();
-        let receipt = sync.refresh_prepared_messages_for_thread(
-            prepared.signals,
-            prepared.thread,
-            current,
-            new,
-            generation,
-        );
+        let receipt =
+            sync.refresh_prepared_messages_for_threads(prepared.signals, &rows[..prepared.count]);
         sync.commit_signals(receipt);
     }
 }

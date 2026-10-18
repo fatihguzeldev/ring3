@@ -285,6 +285,7 @@ impl User32Context32 {
                         })
                         .flatten();
                     let menus = self.menus.prepare_retirement(menu)?;
+                    self.retire_window_app_activation(window)?;
                     self.state.remove_delivered(thread, window)?;
                     self.compatibility.retire_window(window.get());
                     self.menus.commit_retirement(menus);

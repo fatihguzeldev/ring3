@@ -47,6 +47,7 @@ impl User32Context32 {
             last_error: None,
             runtime_input: User32CallContext32::default(),
             input: super::input::User32Input32::default(),
+            app_activation: super::activation::AppActivation32::new(limits.messages as usize)?,
             images: Default::default(),
             ime: crate::windows::imm32::InputContexts32::new(
                 256,

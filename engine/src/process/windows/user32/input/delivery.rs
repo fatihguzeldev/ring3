@@ -18,6 +18,7 @@ pub(super) struct InputDelivery32 {
     count: usize,
     layout: Option<(u32, crate::input::keyboard::KeyboardLayout32)>,
     raw: Option<crate::windows::rawinput::PreparedRawPacket32>,
+    app: Option<super::super::activation::PreparedAppActivation32>,
 }
 
 impl EngineInstance {
@@ -62,6 +63,13 @@ impl EngineInstance {
             }
             let mut rows = [(0, 0, 0, 0); 4];
             let mut row_count = 0;
+            if let Some(app) = &delivery.app {
+                for (thread, current, fresh, generation) in app.queue_rows() {
+                    let timers = context.timers.status_at(thread, context.timers.now);
+                    rows[row_count] = (thread, current | timers.0, fresh | timers.1, generation);
+                    row_count += 1;
+                }
+            }
             for message in &messages[..delivery.count] {
                 if rows[..row_count]
                     .iter()
@@ -493,16 +501,25 @@ impl User32Context32 {
             count += 1;
         }
         self.state.can_post(count)?;
+        let app = if matches!(event.kind, SourceKind32::Physical(InputKind::Focus { .. })) {
+            self.prepare_app_activation(input.physical_focus, self.windows().active())?
+        } else {
+            None
+        };
         Ok(InputDelivery32 {
             input,
             messages,
             count,
             layout,
             raw,
+            app,
         })
     }
 
     pub(super) fn commit_input(&mut self, delivery: InputDelivery32) {
+        if let Some(app) = delivery.app {
+            self.commit_app_activation(app);
+        }
         if let Some(raw) = delivery.raw {
             self.raw_input.commit_packet(raw);
         }

@@ -73,7 +73,8 @@ impl User32Context32 {
                 ..
             } => match self.state.find_message(thread, window, min, max) {
                 Ok(message) => {
-                    message.is_some()
+                    self.app_activation.pending(thread)
+                        || message.is_some()
                         || self
                             .state
                             .paint_message(

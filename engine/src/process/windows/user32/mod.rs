@@ -91,6 +91,7 @@ pub(crate) struct User32Context32 {
     last_error: Option<u32>,
     runtime_input: User32CallContext32,
     input: input::User32Input32,
+    app_activation: activation::AppActivation32,
     images: images::ImageRuntime32,
     ime: crate::windows::imm32::InputContexts32,
     raw_input: crate::windows::rawinput::RawInputRuntime32,

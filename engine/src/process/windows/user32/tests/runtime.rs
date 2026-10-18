@@ -482,7 +482,12 @@ fn hidden_show_resident_callbacks_publish_logical_focus_without_granting_physica
         engine
             .complete_resident_windows_call(KEY, outer, token)
             .unwrap();
-        for message in [0x18, 0x86, 6, 7] {
+        let messages = if host_focused {
+            vec![0x18, 0x1c, 0x86, 6, 7]
+        } else {
+            vec![0x18, 0x86, 6, 7]
+        };
+        for message in messages {
             let request = engine.pending_windows_callback().unwrap();
             assert_eq!(request.arguments[1], message);
             assert_eq!(
@@ -521,7 +526,7 @@ fn hidden_show_resident_callbacks_publish_logical_focus_without_granting_physica
 
 #[test]
 fn visible_creation_reuses_activation_callbacks_and_focus_receipt_after_scratch_reclamation() {
-    let (mut engine, _, callback_unit, _) = engine();
+    let (mut engine, _, callback_unit, previous_window) = engine();
     let epoch = engine.media_epoch().unwrap();
     engine
         .submit_input(
@@ -592,9 +597,16 @@ fn visible_creation_reuses_activation_callbacks_and_focus_receipt_after_scratch_
         .complete_resident_windows_call(KEY, outer, token)
         .unwrap();
     let window = engine.pending_windows_callback().unwrap().arguments[0];
-    for message in [0x81, 0x83, 1, 5, 3, 0x18, 0x86, 6, 7] {
+    let mut application_windows = Vec::new();
+    for message in [0x81, 0x83, 1, 5, 3, 0x18, 0x1c, 0x1c, 0x86, 6, 7] {
         let request = engine.pending_windows_callback().unwrap();
-        assert_eq!(&request.arguments[..2], &[window, message]);
+        assert_eq!(request.arguments[1], message);
+        if message == 0x1c {
+            application_windows.push(request.arguments[0]);
+            assert_eq!(&request.arguments[2..4], &[1, 0]);
+        } else {
+            assert_eq!(request.arguments[0], window);
+        }
         assert_eq!(engine.input().unwrap().state().focused, message == 7);
         if matches!(message, 0x86 | 6 | 7) {
             assert_eq!(engine.memory.as_ref().unwrap().mapped_pages(), mapped);
@@ -616,6 +628,7 @@ fn visible_creation_reuses_activation_callbacks_and_focus_receipt_after_scratch_
             .finish_windows_resident_callback(KEY, callback_unit, record.token)
             .unwrap();
     }
+    assert_eq!(application_windows, [previous_window, window]);
     assert_eq!(
         engine.user32_windows().unwrap().active().unwrap().get(),
         window

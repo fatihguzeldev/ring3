@@ -40,6 +40,14 @@ impl User32Context32 {
             } else {
                 !0x100
             };
+        let resume = super::activation::AppResume32::Retrieve {
+            api,
+            arguments: core::array::from_fn(|index| args.get(index).copied().unwrap_or(0)),
+            context,
+        };
+        if let Some(outcome) = self.begin_app_notifications(resume)? {
+            return Ok(outcome);
+        }
         if let Some((index, message)) = self.state.find_message_mask(
             context.thread_id,
             args[1],
@@ -228,6 +236,22 @@ impl User32Context32 {
         else {
             return Err(User32Error32::InvalidToken);
         };
+        if self.app_activation.pending(thread) {
+            self.pending.pop();
+            let outcome = self.retrieve_message(
+                User32Api32::GetMessageW,
+                &[output, window, min, max],
+                memory,
+                User32CallContext32 {
+                    thread_id: thread,
+                    ..self.runtime_input
+                },
+            );
+            if outcome.is_err() {
+                self.pending.push(pending);
+            }
+            return outcome;
+        }
         let message = match self.state.find_message(thread, window, min, max) {
             Ok(message) => message,
             Err(User32Error32::Window(_) | User32Error32::Win32(1400)) => {
