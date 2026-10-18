@@ -2,10 +2,7 @@ use super::{
     BlockSpec, CompileError, CompileLimits, GateSpec, PreparedRegion, prepare_region, wasm,
 };
 use super::{
-    cold::{
-        prepare_embedded_entry_region, prepare_entry_region, prepare_runtime_entry,
-        shorten_entry_region,
-    },
+    cold::{prepare_embedded_entry_region, prepare_entry_region, prepare_runtime_entry},
     region::prepare_embedded_region,
 };
 use crate::{
@@ -353,33 +350,16 @@ pub(super) fn emit_entry_prepared(
 }
 pub(super) fn emit_entry_prepared_tier(
     memory: &AddressSpace,
-    mut prepared: PreparedRegion,
+    prepared: PreparedRegion,
     limits: CompileLimits,
     binding: Option<wasm::EmbeddedBinding>,
     cs: Option<CodeFetchContext>,
     tier: super::CompilationTier32,
 ) -> Result<CompiledRegion, CompileError> {
-    loop {
-        let applied_tier = if tier == super::CompilationTier32::Optimized
-            && prepared
-                .blocks
-                .iter()
-                .any(|block| block.indexed_span().is_some())
-        {
-            tier
-        } else {
-            super::CompilationTier32::Baseline
-        };
-        let bytes =
-            wasm::emit_with_tier(&prepared.blocks, binding, prepared.decode_key, applied_tier);
-        if bytes.len() <= limits.wasm_bytes {
-            return Ok(CompiledRegion::new(prepared, bytes, applied_tier));
-        }
-        if !shorten_entry_region(memory, &mut prepared, cs)? {
-            return Err(CompileError::WasmLimit);
-        }
-    }
+    shortening::emit(memory, prepared, limits, binding, cs, tier)
 }
+
+mod shortening;
 
 #[cfg(test)]
 #[path = "artifact/tests/bounds.rs"]
