@@ -1,8 +1,10 @@
 import type { CaptureOptions, ObservationLevel } from "./types.js";
+import { resolveCategorySelection } from "../catalog/selection.js";
+import type { Category } from "../catalog/types.js";
 
 export interface CaptureConfiguration {
   readonly level: ObservationLevel;
-  readonly contexts: readonly string[];
+  readonly categories: readonly Category[] | undefined;
   readonly maxBufferedBytes: number;
   readonly batchBytes: number;
 }
@@ -10,9 +12,9 @@ export interface CaptureConfiguration {
 export function configureCapture(options: CaptureOptions): CaptureConfiguration {
   if (!["off", "basic", "detailed"].includes(options.level))
     throw new TypeError("invalid observation level");
-  const contexts = [...(options.contexts ?? [])];
-  if (contexts.length > 64) throw new RangeError("at most 64 context prefixes are supported");
-  for (const context of contexts) validateContext(context);
+  if (Object.hasOwn(options, "contexts"))
+    throw new TypeError("use catalog category selections instead of contexts");
+  const categories = resolveCategorySelection(options.categories);
   const maxBufferedBytes = options.maxBufferedBytes ?? 1024 * 1024;
   const batchBytes = options.batchBytes ?? Math.min(64 * 1024, maxBufferedBytes);
   if (
@@ -25,20 +27,7 @@ export function configureCapture(options: CaptureOptions): CaptureConfiguration 
   if (!Number.isSafeInteger(batchBytes) || batchBytes < 1 || batchBytes > maxBufferedBytes) {
     throw new RangeError("batchBytes must fit within maxBufferedBytes");
   }
-  return { level: options.level, contexts, maxBufferedBytes, batchBytes };
-}
-
-export function validateContext(context: string): void {
-  if (context.length > 128 || !/^[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)*$/.test(context)) {
-    throw new TypeError(`invalid observation context: ${context}`);
-  }
-}
-
-export function matchesContext(context: string, prefixes: readonly string[]): boolean {
-  return (
-    prefixes.length === 0 ||
-    prefixes.some((prefix) => context === prefix || context.startsWith(`${prefix}.`))
-  );
+  return { level: options.level, categories, maxBufferedBytes, batchBytes };
 }
 
 export function createEpochClock(): () => bigint {

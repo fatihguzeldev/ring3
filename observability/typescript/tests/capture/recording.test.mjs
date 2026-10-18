@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createCapture } from "../../dist/index.js";
+import { categories, createCapture } from "../../dist/index.js";
 import { get, packets } from "../perfetto/decode.mjs";
 
 function output() {
@@ -24,7 +24,7 @@ test("off recording does not read clocks or write output and preserves results",
       throw Error("clock must not run");
     },
   });
-  const observer = capture.observer("cpu.dbt");
+  const observer = capture.observer(categories.engineCpu);
   assert.equal(
     observer.scope("decode", {}, () => 42),
     42,
@@ -38,7 +38,7 @@ test("off recording does not read clocks or write output and preserves results",
 
 test("application throw and rejected promise retain their exact identity", async () => {
   const capture = createCapture({ level: "detailed", output: output() });
-  const observer = capture.observer("files");
+  const observer = capture.observer(categories.hostFiles);
   const error = new Error("game failure");
   assert.throws(
     () =>
@@ -58,7 +58,7 @@ test("application throw and rejected promise retain their exact identity", async
 
 test("instrumentation preserves throwing undefined and rejecting non-Error values", async () => {
   const capture = createCapture({ level: "basic", output: output() });
-  const observer = capture.observer("process");
+  const observer = capture.observer(categories.hostWorker);
   let threw = false;
   try {
     observer.scope("start", {}, () => {
@@ -93,7 +93,7 @@ test("sink failures cannot replace application errors and make capture incomplet
   const gameError = new Error("application error");
   assert.throws(
     () =>
-      capture.observer("process").scope("start", {}, () => {
+      capture.observer(categories.hostWorker).scope("start", {}, () => {
         throw gameError;
       }),
     (value) => value === gameError,
@@ -119,7 +119,7 @@ test("slow output is bounded and dropped events remain visible", async () => {
       async flush() {},
     },
   });
-  const observer = capture.observer("cpu");
+  const observer = capture.observer(categories.engineCpu);
   for (let index = 0; index < 1000; index++) observer.event("step", { index });
   assert.ok(capture.status().droppedEvents > 0);
   assert.ok(capture.status().bufferedBytes <= 2048);
@@ -162,7 +162,7 @@ test("terminal capture is idempotent and cannot write records after output close
     assert.equal(closed, false);
   };
   const capture = createCapture({ level: "basic", output: sink });
-  const observer = capture.observer("process");
+  const observer = capture.observer(categories.hostWorker);
   observer.event("start");
   const first = capture.finish("cancelled");
   const second = capture.finish("failed");
@@ -170,7 +170,7 @@ test("terminal capture is idempotent and cannot write records after output close
   assert.equal((await first).outcome, "cancelled");
   const count = sink.chunks.length;
   observer.event("late");
-  capture.recordEvent("process", "late-direct");
+  capture.recordEvent(categories.hostWorker, "late-direct");
   assert.equal(capture.ingest(Uint8Array.of(1)), false);
   await capture.flush();
   assert.equal(sink.chunks.length, count);
@@ -217,7 +217,7 @@ test("unprintable output exceptions cannot become unhandled rejections or replac
   const gameError = new Error("game");
   assert.throws(
     () =>
-      capture.observer("process").scope("start", {}, () => {
+      capture.observer(categories.hostWorker).scope("start", {}, () => {
         throw gameError;
       }),
     (error) => error === gameError,

@@ -6,7 +6,7 @@ import { test } from "node:test";
 import fs from "node:fs/promises";
 import { constants } from "node:fs";
 import { createNodeCaptureStore, createNodeTraceOutput } from "../../dist/output/node.js";
-import { createCapture } from "../../dist/index.js";
+import { categories, createCapture } from "../../dist/index.js";
 
 async function fixture(t, limits = {}) {
   const rootDirectory = await mkdtemp(join(tmpdir(), "ring3-observation-"));
@@ -108,7 +108,7 @@ test("a capture can write directly to the Node output without an HTTP server", a
   const { rootDirectory, store } = await fixture(t, { maxChunkBytes: 64 });
   const output = await createNodeTraceOutput(store, { source: "direct Node capture" });
   const capture = createCapture({ level: "basic", output });
-  capture.observer("loader").event("fixture.ready", { bytes: 128 });
+  capture.observer(categories.engineLoader).event("fixture.ready", { bytes: 128 });
   const result = await capture.finish("cancelled");
   assert.equal(result.complete, true);
   assert.equal(result.outcome, "cancelled");

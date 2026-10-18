@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createCapture } from "../../dist/index.js";
+import { categories, createCapture } from "../../dist/index.js";
 import { get, memoryOutput, packets } from "../perfetto/decode.mjs";
 
 test("unsupported detailed engine observation fails clearly; basic labels host-only coverage", async () => {
@@ -41,14 +41,14 @@ test("engine configuration owns a separate producer namespace and finish drains 
   };
   const capture = createCapture({
     level: "basic",
-    contexts: ["files"],
+    categories: [categories.hostFiles],
     output: sink,
     producerId: 11,
   });
   capture.attachEngine(port, { producerId: 12 });
   assert.equal(configuration.sequenceId, 12);
   assert.equal(configuration.trackUuid, (12n << 32n) | 1n);
-  assert.deepEqual(configuration.contexts, ["files"]);
+  assert.deepEqual(configuration.categories, [categories.hostFiles]);
   const result = await capture.finish("complete");
   assert.equal(result.engine, "finished");
   assert.equal(result.droppedEvents, 2);
@@ -59,7 +59,7 @@ test("engine configuration owns a separate producer namespace and finish drains 
 test("external truncation and unfinished async work make a terminal capture incomplete", async () => {
   const capture = createCapture({ level: "basic", output: memoryOutput() });
   let finishWork;
-  const pending = capture.observer("process").scopeAsync(
+  const pending = capture.observer(categories.hostWorker).scopeAsync(
     "worker",
     {},
     () =>

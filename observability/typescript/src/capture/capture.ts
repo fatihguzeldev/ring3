@@ -1,3 +1,6 @@
+import type { Category } from "../catalog/types.js";
+import { requireCategory, matchesCategory } from "../catalog/selection.js";
+import { categories } from "../catalog/generated.js";
 import type {
   EngineAttachmentOptions,
   EngineObservationPort,
@@ -7,7 +10,7 @@ import { clockSnapshot, counterEvent, descriptor, event } from "../perfetto/even
 import { TracePacketStream } from "../perfetto/stream.js";
 import { isIdentityClockSnapshot } from "../perfetto/clocks.js";
 import { BatchWriter } from "./buffer.js";
-import { configureCapture, epochNowNs, matchesContext, validateContext } from "./configuration.js";
+import { configureCapture, epochNowNs } from "./configuration.js";
 import type { CaptureConfiguration } from "./configuration.js";
 import { Observer } from "./observer.js";
 import type { ScopeToken } from "./observer.js";
@@ -85,18 +88,19 @@ export class Capture {
     this.#engineState = options.level === "off" ? "off" : "host-only";
   }
 
-  observer(context: string, level: ObservationLevel = "basic"): Observer {
-    validateContext(context);
-    return new Observer(this, context, level);
+  observer(category: Category, level: ObservationLevel = "basic"): Observer {
+    requireCategory(category);
+    return new Observer(this, category, level);
   }
 
-  enabled(context: string, level: ObservationLevel): boolean {
+  enabled(category: Category, level: ObservationLevel): boolean {
+    requireCategory(category);
     return (
       this.#state === "recording" &&
       this.#configuration.level !== "off" &&
       level !== "off" &&
       (level !== "detailed" || this.#configuration.level === "detailed") &&
-      matchesContext(context, this.#configuration.contexts)
+      matchesCategory(category, this.#configuration.categories)
     );
   }
 
@@ -142,7 +146,9 @@ export class Capture {
     if (this.#configuration.level === "off") return;
     if (!port.supported) {
       this.#engineState = "unsupported";
-      this.recordEvent("observability", "engine.unsupported", { level: this.#configuration.level });
+      this.recordEvent(categories.observability, "engine.unsupported", {
+        level: this.#configuration.level,
+      });
       if (this.#configuration.level === "detailed") {
         const reason = "detailed engine observation requires an observability-enabled engine build";
         this.markIncomplete(reason);
@@ -162,7 +168,7 @@ export class Capture {
         maxBytes,
         sequenceId: engineProducer,
         trackUuid: (BigInt(engineProducer) << 32n) | 1n,
-        contexts: this.#configuration.contexts,
+        categories: this.#configuration.categories,
       });
     } catch (error) {
       activeProducers.delete(engineProducer);
@@ -183,19 +189,21 @@ export class Capture {
     }
   }
 
-  recordEvent(context: string, name: string, args: TraceArgs = {}, track?: bigint): void {
+  recordEvent(category: Category, name: string, args: TraceArgs = {}, track?: bigint): void {
+    requireCategory(category);
     if (this.#state !== "recording" || this.#configuration.level === "off") return;
     this.#safe(() => {
       const target = track ?? this.#hostTrack();
       if (target !== undefined)
-        this.#append(event(this.#producerId, this.#time(), target, 3, context, name, args));
+        this.#append(event(this.#producerId, this.#time(), target, 3, category, name, args));
     });
   }
 
-  recordCounter(context: string, name: string, value: number | bigint): void {
+  recordCounter(category: Category, name: string, value: number | bigint): void {
+    requireCategory(category);
     if (this.#state !== "recording" || this.#configuration.level === "off") return;
     this.#safe(() => {
-      const key = `${context}:${name}`;
+      const key = `${category}:${name}`;
       let track = this.#counters.get(key);
       if (track === undefined) {
         if (this.#counters.size >= 1024) {
@@ -214,12 +222,13 @@ export class Capture {
   }
 
   beginScope(
-    context: string,
+    category: Category,
     name: string,
     args: TraceArgs,
     existing: bigint | undefined,
     asynchronous: boolean,
   ): ScopeToken | undefined {
+    requireCategory(category);
     if (this.#state !== "recording" || this.#configuration.level === "off") return undefined;
     let token: ScopeToken | undefined;
     this.#safe(() => {
@@ -241,13 +250,13 @@ export class Capture {
             this.#knownTracks.add(track);
           }
         }
-        const begin = event(this.#producerId, this.#time(), track, 1, context, name, args);
+        const begin = event(this.#producerId, this.#time(), track, 1, category, name, args);
         this.#reservedBytes += scopeEndReserve;
         if (!this.#append(begin)) {
           this.#reservedBytes -= scopeEndReserve;
           return;
         }
-        token = { context, track, asynchronous };
+        token = { category, track, asynchronous };
         this.#scopes.add(token);
       } finally {
         if (token === undefined && leasedTrack !== undefined) {
@@ -265,7 +274,7 @@ export class Capture {
       this.#safe(() => {
         const args = failed ? { error: message(error) } : {};
         this.#append(
-          event(this.#producerId, this.#time(), token.track, 2, token.context, "", args),
+          event(this.#producerId, this.#time(), token.track, 2, token.category, "", args),
         );
       });
     }
@@ -326,18 +335,26 @@ export class Capture {
         const host = this.#hostTrack();
         if (host !== undefined)
           this.#append(
-            event(this.#producerId, this.#time(), host, 3, "observability", "capture.finished", {
-              outcome,
-              complete: this.#complete(unfinishedScopes),
-              droppedEvents: this.#droppedEvents + this.#engineDrops,
-              droppedChunks: this.#droppedChunks,
-              openScopes: unfinishedScopes,
-              engine: this.#engineState,
-              ...(error === undefined ? {} : { error: message(error) }),
-              ...(this.#recordingError === undefined
-                ? {}
-                : { recordingError: this.#recordingError }),
-            }),
+            event(
+              this.#producerId,
+              this.#time(),
+              host,
+              3,
+              categories.observability,
+              "capture.finished",
+              {
+                outcome,
+                complete: this.#complete(unfinishedScopes),
+                droppedEvents: this.#droppedEvents + this.#engineDrops,
+                droppedChunks: this.#droppedChunks,
+                openScopes: unfinishedScopes,
+                engine: this.#engineState,
+                ...(error === undefined ? {} : { error: message(error) }),
+                ...(this.#recordingError === undefined
+                  ? {}
+                  : { recordingError: this.#recordingError }),
+              },
+            ),
           );
       });
       await this.#writer.close(this.#complete(unfinishedScopes), this.#recordingError);

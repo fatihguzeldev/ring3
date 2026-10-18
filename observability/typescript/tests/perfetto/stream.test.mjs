@@ -1,17 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createCapture } from "../../dist/index.js";
+import { categories, createCapture } from "../../dist/index.js";
 import { clockSnapshot, event } from "../../dist/perfetto/events.js";
 import { fields, get, memoryOutput, packets, text } from "./decode.mjs";
 
 test("split external packets cannot interleave with host events", async () => {
   const sink = memoryOutput();
   const capture = createCapture({ level: "basic", output: sink });
-  const packet = event(900, 1n, 900n << 32n, 3, "worker", "split", { payload: "x".repeat(500) });
+  const packet = event(900, 1n, 900n << 32n, 3, categories.hostWorker, "split", {
+    payload: "x".repeat(500),
+  });
   assert.equal(capture.ingest(packet.subarray(0, 3)), true);
   assert.ok(capture.status().pendingPacketBytes > 0);
   assert.ok(capture.status().bufferedBytes >= capture.status().pendingPacketBytes);
-  capture.observer("host").event("between");
+  capture.observer(categories.hostBrowser).event("between");
   assert.equal(capture.ingest(packet.subarray(3)), true);
   assert.equal((await capture.finish("complete")).complete, true);
   const names = packets(sink.chunks).flatMap((value) =>
@@ -31,7 +33,7 @@ test("terminal partial packets remain incomplete and never poison the saved trac
     aborted = true;
   };
   const capture = createCapture({ level: "basic", output: sink });
-  const packet = event(901, 1n, 901n << 32n, 3, "worker", "truncated");
+  const packet = event(901, 1n, 901n << 32n, 3, categories.hostWorker, "truncated");
   capture.ingest(packet.subarray(0, 3));
   const result = await capture.finish("failed");
   assert.equal(result.complete, false);
@@ -44,7 +46,7 @@ test("terminal partial packets remain incomplete and never poison the saved trac
 test("invalid async scope arguments reuse the abandoned track lease", async () => {
   const sink = memoryOutput();
   const capture = createCapture({ level: "detailed", output: sink });
-  const observer = capture.observer("files");
+  const observer = capture.observer(categories.hostFiles);
   for (let index = 0; index < 100; index++)
     await observer.scopeAsync("x".repeat(257), {}, async () => {});
   await observer.scopeAsync("valid", {}, async () => {});
@@ -58,11 +60,11 @@ test("invalid async scope arguments reuse the abandoned track lease", async () =
 test("aggregation keeps one clock anchor despite late arrivals from older producers", async () => {
   const childOutput = memoryOutput();
   const child = createCapture({ level: "basic", output: childOutput, clock: () => 10n });
-  child.observer("worker").event("child");
+  child.observer(categories.hostWorker).event("child");
   await child.finish("complete");
   const sink = memoryOutput();
   const capture = createCapture({ level: "basic", output: sink, clock: () => 100n });
-  capture.observer("host").event("parent");
+  capture.observer(categories.hostBrowser).event("parent");
   for (const chunk of childOutput.chunks) assert.equal(capture.ingest(chunk), true);
   assert.equal((await capture.finish("complete")).complete, true);
   const parsed = packets(sink.chunks);

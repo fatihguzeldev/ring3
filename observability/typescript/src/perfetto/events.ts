@@ -1,4 +1,5 @@
 import type { TraceArgs, TraceValue } from "../capture/types.js";
+import type { Category } from "../catalog/types.js";
 import { bytes, double, join, sint, string, uint } from "./writer.js";
 
 export type EventType = 1 | 2 | 3 | 4;
@@ -52,13 +53,13 @@ export function event(
   timestamp: bigint,
   track: bigint,
   type: EventType,
-  context: string,
+  category: Category,
   name: string,
   args: TraceArgs = {},
 ): Uint8Array {
   if (name.length > 256) throw new RangeError("trace event name too large");
   const fields = [uint(9, type), uint(11, track)];
-  if (type !== 2) fields.push(string(22, context), string(23, name));
+  if (type !== 2) fields.push(string(22, category), string(23, name));
   const entries = Object.entries(args);
   if (entries.length > 64) throw new RangeError("too many trace arguments");
   for (const [key, value] of entries) fields.push(annotation(key, value));

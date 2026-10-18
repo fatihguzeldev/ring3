@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createCapture } from "../../dist/index.js";
+import { categories, createCapture } from "../../dist/index.js";
 import { fields, get, memoryOutput, packets, text } from "./decode.mjs";
 
 test("standard TracePacket fields carry nanoseconds, typed annotations, counters and nested scopes", async () => {
   const sink = memoryOutput();
   let time = 1_700_000_000_000_000_000n;
   const capture = createCapture({ level: "detailed", output: sink, clock: () => time++ });
-  const observer = capture.observer("files");
+  const observer = capture.observer(categories.hostFiles);
   observer.scope(
     "open",
     { path: "game.ras", ok: true, offset: 0x1_0000_0001n, delta: -5n, ratio: 0.5 },
@@ -60,14 +60,18 @@ test("standard TracePacket fields carry nanoseconds, typed annotations, counters
     );
 });
 
-test("context filters use path boundaries and detailed observers require detailed level", async () => {
+test("catalog parent selection includes descendants and detailed observers require detailed level", async () => {
   const sink = memoryOutput();
-  const capture = createCapture({ level: "basic", contexts: ["cpu.dbt"], output: sink });
-  capture.observer("cpu.dbt").event("selected");
-  capture.observer("cpu.dbt.cache").event("child");
-  capture.observer("cpu.dbtx").event("wrong-prefix");
-  capture.observer("cpu").event("parent");
-  capture.observer("cpu.dbt", "detailed").event("detailed-only");
+  const capture = createCapture({
+    level: "basic",
+    categories: [categories.engineCpu],
+    output: sink,
+  });
+  capture.observer(categories.engineCpu).event("selected");
+  capture.observer(categories.engineCpuCache).event("child");
+  capture.observer(categories.engineLoader).event("sibling");
+  capture.observer(categories.engine).event("parent");
+  capture.observer(categories.engineCpu, "detailed").event("detailed-only");
   await capture.finish("complete");
   const names = packets(sink.chunks).flatMap((value) =>
     value.event && get(value.event, 23) ? [text(get(value.event, 23))] : [],
@@ -78,7 +82,7 @@ test("context filters use path boundaries and detailed observers require detaile
 test("parallel async operations retain separate tracks across awaits and scoped child calls", async () => {
   const sink = memoryOutput();
   const capture = createCapture({ level: "detailed", output: sink });
-  const observer = capture.observer("files");
+  const observer = capture.observer(categories.hostFiles);
   let releaseFirst;
   const firstGate = new Promise((resolve) => {
     releaseFirst = resolve;

@@ -1,3 +1,5 @@
+import type { Category } from "../catalog/types.js";
+
 export type ObservationLevel = "off" | "basic" | "detailed";
 export type CaptureOutcome = "complete" | "cancelled" | "failed";
 export type TraceValue = string | number | bigint | boolean;
@@ -13,7 +15,7 @@ export interface TraceOutput {
 export interface CaptureOptions {
   readonly level: ObservationLevel;
   readonly output: TraceOutput;
-  readonly contexts?: readonly string[];
+  readonly categories?: readonly Category[] | undefined;
   readonly clock?: () => bigint;
   readonly producerId?: number;
   readonly maxBufferedBytes?: number;

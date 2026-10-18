@@ -1,11 +1,12 @@
 import type { ObservationLevel } from "../capture/types.js";
+import type { Category } from "../catalog/types.js";
 
 export interface EngineTraceConfiguration {
   readonly level: ObservationLevel;
   readonly maxBytes: number;
   readonly sequenceId: number;
   readonly trackUuid: bigint;
-  readonly contexts: readonly string[];
+  readonly categories: readonly Category[] | undefined;
 }
 
 export interface EngineTraceChunk {
