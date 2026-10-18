@@ -65,9 +65,8 @@ impl EngineInstance {
         let length = operation.read_size().max(operation.write_size()) as u32;
         if waiting & 1 != 0 && state.status & 0x3f & !state.control != 0 {
             state.status |= 0x8080;
-            let mut record = [0; X87_SIZE];
-            encode_x87(&state, &mut record).map_err(|_| HostError::Infrastructure)?;
-            self.arena[X87_OFFSET..X87_OFFSET + X87_SIZE].copy_from_slice(&record);
+            encode_x87(&state, &mut self.arena[X87_OFFSET..X87_OFFSET + X87_SIZE])
+                .map_err(|_| HostError::Infrastructure)?;
             return self.x87_packet(
                 length,
                 0,
@@ -148,13 +147,26 @@ impl EngineInstance {
                     HostError::InvalidRequest
                 }
             })?;
+        if outcome.memory_len == 0 {
+            encode_x87(
+                &outcome.state,
+                &mut self.arena[X87_OFFSET..X87_OFFSET + X87_SIZE],
+            )
+            .map_err(|_| HostError::Infrastructure)?;
+            return self.x87_packet(
+                length,
+                outcome.eflags.unwrap_or(flags),
+                Ok(()),
+                false,
+                resident,
+            );
+        }
         let mut record = [0; X87_SIZE];
         encode_x87(&outcome.state, &mut record).map_err(|_| HostError::Infrastructure)?;
         let version = self.memory.as_ref().unwrap().code_validation_version();
-        if outcome.memory_len != 0
-            && let Err(error) = self
-                .cpu_memory_port32()
-                .write(GuestAddress(address), &outcome.memory[..outcome.memory_len])
+        if let Err(error) = self
+            .cpu_memory_port32()
+            .write(GuestAddress(address), &outcome.memory[..outcome.memory_len])
         {
             return self.x87_packet(length, 0, Err(CpuMemoryError::from(error)), false, resident);
         }
@@ -198,6 +210,8 @@ mod tests {
         },
         cpu::x86::{SegmentCache, X87Format, X87State},
     };
+
+    mod publication;
 
     fn engine() -> EngineInstance {
         let mut engine = EngineInstance::new(3, 0x783837).unwrap();
