@@ -39,7 +39,7 @@ fn compile(registry: &mut ResidentRegistry, memory: &AddressSpace, pc: u32) -> U
 }
 
 #[test]
-fn candidate_pages_reject_other_units_without_owning_instruction_interiors_or_holes() {
+fn exact_candidates_reject_other_units_instruction_interiors_and_holes() {
     let (memory, mut registry) = fixture();
     let ids = (1..=8)
         .map(|page| compile(&mut registry, &memory, page * 4096))
@@ -47,7 +47,7 @@ fn candidate_pages_reject_other_units_without_owning_instruction_interiors_or_ho
     for (index, &id) in ids.iter().enumerate() {
         let pc = (index as u32 + 1) * 4096;
         assert_eq!(registry.entry_index.candidates(pc), &[id]);
-        assert_eq!(registry.entry_index.candidates(pc + 4095), &[id]);
+        assert!(registry.entry_index.candidates(pc + 4095).is_empty());
         assert_eq!(
             registry.lookup_bound(&memory, GuestAddress(pc), context()),
             Ok(id)
@@ -70,6 +70,47 @@ fn candidate_pages_reject_other_units_without_owning_instruction_interiors_or_ho
             registry.lookup_bound(&foreign, GuestAddress(pc), context()),
             Err(RegistryError::WrongAddressSpace)
         );
+    }
+}
+
+#[test]
+fn dense_page_entries_select_exact_offsets_and_retire_without_other_candidates() {
+    let (mut memory, _) = fixture();
+    let mut registry = ResidentRegistry::new(
+        &memory,
+        RegistryLimits {
+            units: 32,
+            wasm_bytes: 4 * 1024 * 1024,
+        },
+    )
+    .unwrap();
+    for index in 0..32 {
+        let pc = 0x1000 + index * 4;
+        memory.write(GuestAddress(pc), &[0x90, 0xeb, 0]).unwrap();
+    }
+    let entries = (0..32)
+        .map(|index| {
+            let pc = 0x1000 + index * 4;
+            (pc, compile(&mut registry, &memory, pc))
+        })
+        .collect::<Vec<_>>();
+    for &(pc, id) in &entries {
+        for entry in [pc, pc + 1] {
+            assert_eq!(registry.entry_index.candidates(entry), &[id]);
+            assert_eq!(registry.lookup(&memory, GuestAddress(entry)), Ok(id));
+        }
+        for hole in [pc + 2, pc + 3] {
+            assert!(registry.entry_index.candidates(hole).is_empty());
+        }
+    }
+    for &(pc, id) in entries.iter().step_by(2) {
+        registry.discard_current_raw(&memory, id.get()).unwrap();
+        assert!(registry.entry_index.candidates(pc).is_empty());
+        assert!(registry.entry_index.candidates(pc + 1).is_empty());
+    }
+    for &(pc, id) in entries.iter().skip(1).step_by(2) {
+        assert_eq!(registry.entry_index.candidates(pc), &[id]);
+        assert_eq!(registry.lookup(&memory, GuestAddress(pc + 1)), Ok(id));
     }
 }
 

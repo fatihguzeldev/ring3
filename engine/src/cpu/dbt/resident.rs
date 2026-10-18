@@ -17,8 +17,9 @@ const CONFIGURED_MAX_UNITS: usize = 4096;
 const CONFIGURED_MAX_BYTES: usize = 256 * 1024 * 1024;
 static NEXT_UNIT_ID: AtomicU64 = AtomicU64::new(1);
 
+mod index;
 mod lookup;
-use lookup::{EntryIndex, PreparedEntryPages};
+use index::{EntryIndex, PreparedEntryPages};
 
 enum EmissionPolicy {
     WholeUnit(CompileLimits),
