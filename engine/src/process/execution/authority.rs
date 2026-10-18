@@ -70,7 +70,11 @@ impl EngineInstance {
     }
 
     pub fn guard_resident(&self, key: u64, id: u64) -> Result<(), HostError> {
-        self.guard_resident_unit(key, id)?;
+        self.guard_resident_region(key, id).map(|_| ())
+    }
+
+    fn guard_resident_region(&self, key: u64, id: u64) -> Result<&CompiledRegion, HostError> {
+        let region = self.guard_resident_unit(key, id)?;
         self.guard_thread_execution_ready()?;
         if self.pending_call.is_some() {
             return Err(HostError::Call(CallError::Busy));
@@ -85,7 +89,7 @@ impl EngineInstance {
             self.guard_resident_unit(key, record.callback_unit_id)?;
             self.guard_resident_unit(key, record.outer_unit_id)?;
         }
-        Ok(())
+        Ok(region)
     }
 
     pub(in crate::process) fn check_decode_key(
@@ -112,8 +116,7 @@ impl EngineInstance {
         key: u64,
         id: u64,
     ) -> Result<(), HostError> {
-        self.guard_resident(key, id)?;
-        self.check_decode_key(self.guard_resident_unit(key, id)?)
+        self.check_decode_key(self.guard_resident_region(key, id)?)
     }
 
     pub(in crate::process) fn guard_resident_unit(
@@ -132,6 +135,10 @@ impl EngineInstance {
             .map_err(HostError::Resident)
     }
 }
+
+#[cfg(test)]
+#[path = "authority/tests.rs"]
+mod tests;
 
 #[cfg(test)]
 mod decode_key_tests {
