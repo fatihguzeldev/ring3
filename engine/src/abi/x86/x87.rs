@@ -44,6 +44,7 @@ pub fn encode_x87(state: &X87State, output: &mut [u8]) -> Result<(), AbiError> {
     Ok(())
 }
 
+#[inline(always)]
 pub fn decode_x87(input: &[u8]) -> Result<X87State, AbiError> {
     validate_x87(input)?;
     Ok(X87State {
