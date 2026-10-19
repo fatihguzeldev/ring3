@@ -2,6 +2,8 @@
 
 pub(super) mod authority;
 pub(super) mod cache;
+#[cfg(any(all(feature = "observability", target_arch = "wasm32"), test))]
+pub(super) mod census;
 pub(super) mod compiled;
 pub(super) mod continuation;
 pub(super) mod installation;
@@ -17,3 +19,7 @@ mod owned_tests;
 #[cfg(test)]
 #[path = "installation/disposal/tests.rs"]
 mod installed_resident_disposal_tests;
+
+#[cfg(test)]
+#[path = "census/tests.rs"]
+mod census_tests;

@@ -165,6 +165,8 @@ mod control {
                 frame.expected = None;
                 frame.last = Some((epoch, installed.expect("authorized execution child")));
             }
+            #[cfg(any(feature = "observability", test))]
+            self.entered_execution_census_child(epoch);
         }
 
         pub(in crate::process) fn prepare_execution_progress(
@@ -289,6 +291,8 @@ mod control {
                     kind: 0,
                 }
             };
+            #[cfg(any(feature = "observability", test))]
+            self.finished_execution_census_receipt(frame.token, receipt);
             // every fallible check precedes restoring the final child's sealed exit.
             if let Some((epoch, _)) = frame.last {
                 // terminal preparation has validated this exact seal and all outer transformations.

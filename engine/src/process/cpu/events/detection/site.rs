@@ -27,6 +27,8 @@ impl EngineInstance {
         }
         #[cfg(any(target_arch = "wasm32", test))]
         self.commit_execution_progress(progress);
+        #[cfg(any(all(feature = "observability", target_arch = "wasm32"), test))]
+        self.sealed_execution_census_child(epoch);
         Ok(())
     }
 }

@@ -153,6 +153,11 @@ pub struct EngineInstance {
     pub(in crate::process) winmm: crate::process::windows::winmm::WinmmRuntime32,
     #[cfg(any(target_arch = "wasm32", test))]
     pub(in crate::process) cpu_read32_view: crate::process::cpu::read_view::CpuRead32View32,
+    #[cfg(any(all(feature = "observability", target_arch = "wasm32"), test))]
+    pub(in crate::process) execution_census:
+        Option<crate::process::execution::census::ExecutionCensus32>,
+    #[cfg(any(all(feature = "observability", target_arch = "wasm32"), test))]
+    pub(in crate::process) execution_census_generation: u64,
 }
 
 impl EngineInstance {
@@ -261,6 +266,10 @@ impl EngineInstance {
             winmm: Default::default(),
             #[cfg(any(target_arch = "wasm32", test))]
             cpu_read32_view,
+            #[cfg(any(all(feature = "observability", target_arch = "wasm32"), test))]
+            execution_census: None,
+            #[cfg(any(all(feature = "observability", target_arch = "wasm32"), test))]
+            execution_census_generation: 0,
         })
     }
 
@@ -289,6 +298,10 @@ impl EngineInstance {
 
     pub fn close(&mut self) {
         self.revoke_owned_execution();
+        #[cfg(any(all(feature = "observability", target_arch = "wasm32"), test))]
+        {
+            self.execution_census = None;
+        }
         #[cfg(any(target_arch = "wasm32", test))]
         self.revoke_cpu_read32_view();
         #[cfg(feature = "observability")]
