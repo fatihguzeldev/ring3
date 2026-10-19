@@ -11,6 +11,7 @@ use crate::{
     memory::{AddressSpace, GuestAddress},
 };
 
+mod continuation;
 mod native_x87;
 use native_x87::NativeX87Catalog32;
 pub(crate) use native_x87::{X87NativePlan32, X87PreparedStep32};
@@ -37,6 +38,7 @@ pub struct CompiledRegion {
     entry_start: u32,
     entry_end: u32,
     has_indexed_entry: bool,
+    preserves_extended_record_validity: bool,
     #[cfg(test)]
     x87_pairs: Vec<[super::X87PairStep32; 2]>,
     #[cfg(test)]
@@ -123,6 +125,8 @@ impl CompiledRegion {
             .blocks
             .iter()
             .any(|block| block.indexed_span().is_some());
+        let preserves_extended_record_validity =
+            continuation::preserves_extended_record_validity(&prepared);
         let mut region = Self {
             prepared,
             bytes,
@@ -130,6 +134,7 @@ impl CompiledRegion {
             entry_start: u32::MAX,
             entry_end: 0,
             has_indexed_entry,
+            preserves_extended_record_validity,
             #[cfg(test)]
             x87_pairs,
             #[cfg(test)]
@@ -152,6 +157,12 @@ impl CompiledRegion {
 
     pub fn tier(&self) -> super::CompilationTier32 {
         self.tier
+    }
+
+    // valid initial records remain structurally valid under admitted execution.
+    // this says nothing about unchanged values or current execution authority.
+    pub(crate) fn preserves_extended_record_validity(&self) -> bool {
+        self.preserves_extended_record_validity
     }
 
     #[cfg(test)]
@@ -488,6 +499,10 @@ pub(super) fn emit_entry_prepared_tier(
 }
 
 mod shortening;
+
+#[cfg(test)]
+#[path = "artifact/tests/continuation.rs"]
+mod continuation_tests;
 
 #[cfg(test)]
 #[path = "artifact/tests/bounds.rs"]
