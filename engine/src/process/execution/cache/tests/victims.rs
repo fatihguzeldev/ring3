@@ -14,6 +14,7 @@ fn row(id: u64, last: u64) -> CacheEntry32 {
         tier: CompilationTier32::Baseline,
         hits: AtomicU64::new(0),
         last: AtomicU64::new(last),
+        promotion_retry: Default::default(),
     }
 }
 

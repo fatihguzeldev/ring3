@@ -5,7 +5,9 @@ use crate::cpu::{
 };
 use std::sync::atomic::Ordering;
 
-fn chain(configured_bytes: Option<usize>) -> (EngineInstance, Vec<CacheRequest32>) {
+pub(in crate::process::execution::cache::tests) fn chain(
+    configured_bytes: Option<usize>,
+) -> (EngineInstance, Vec<CacheRequest32>) {
     let mut engine = EngineInstance::new(1, KEY).unwrap();
     engine.map(0x1000, 1, 7).unwrap();
     for index in 0..8 {

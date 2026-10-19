@@ -5,6 +5,8 @@ use crate::{
     process::{CallError, HostError, execution::cache::CacheRequestKind32},
 };
 
+mod backoff;
+
 #[test]
 fn hot_baseline_promotes_only_after_quiescent_eviction_and_new_installation() {
     let mut engine = fixture();

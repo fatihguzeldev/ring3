@@ -348,4 +348,4 @@ fn publication_in_the_final_ack_gap_invalidates_only_the_unpublished_replacement
     assert_eq!(install.tier, CompilationTier32::Baseline);
 }
 
-mod transaction;
+pub(super) mod transaction;

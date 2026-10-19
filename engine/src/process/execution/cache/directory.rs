@@ -26,6 +26,7 @@ impl ExecutionCache32 {
             tier,
             hits: AtomicU64::new(0),
             last: AtomicU64::new(last),
+            promotion_retry: Default::default(),
         });
         self.free_slots.occupy(slot);
         self.victims.install(slot, id, last);

@@ -5,6 +5,9 @@ use crate::{
 };
 use std::sync::atomic::Ordering;
 
+mod retry;
+pub(super) use retry::PromotionRetry32;
+
 impl EngineInstance {
     pub fn prepare_cache_promotion(
         &mut self,
@@ -21,6 +24,12 @@ impl EngineInstance {
         if cache.cohort.is_some() || cache.replacement.is_some() {
             return Err(HostError::Call(crate::process::CallError::Busy));
         }
+        let round = self
+            .execution_cache
+            .as_mut()
+            .unwrap()
+            .next_promotion_round();
+        let cache = self.execution_cache.as_ref().unwrap();
         let pins = self.cache_pins()?;
         let memory = self.memory.as_ref().unwrap();
         let cs = self.code_fetch_context()?;
@@ -31,7 +40,8 @@ impl EngineInstance {
             .enumerate()
             .filter_map(|(slot, row)| row.as_ref().map(|row| (slot, row)))
             .filter(|(_, row)| {
-                row.tier == CompilationTier32::Baseline
+                row.promotion_retry.eligible(round)
+                    && row.tier == CompilationTier32::Baseline
                     && row.hits.load(Ordering::Relaxed) >= u64::from(cache.config.promotion_hits)
                     && !pins.contains(&row.id)
             })
@@ -48,10 +58,12 @@ impl EngineInstance {
                     std::cmp::Reverse(row.bytes),
                 )
             });
-        let Some((_, row)) = candidate else {
+        let Some((slot, row)) = candidate else {
             return Ok(None);
         };
         let pc = row.entry;
+        #[cfg(test)]
+        cache.promotion_attempts.fetch_add(1, Ordering::Relaxed);
         let installations = &self.resident_installations;
         let by_id = &self.resident_installations_by_id;
         let modules = &self.modules;
@@ -88,6 +100,31 @@ impl EngineInstance {
             )
             .map_err(HostError::Resident)?;
         let Some(replacement) = replacement else {
+            let row = self.execution_cache.as_mut().unwrap().entries[slot]
+                .as_mut()
+                .unwrap();
+            row.promotion_retry.declined(round);
+            #[cfg(feature = "observability")]
+            if self.observer.enabled(
+                ring3_observability::Level::Basic,
+                ring3_observability::categories::ENGINE_CPU_CACHE,
+            ) {
+                let next = row.promotion_retry.next_round();
+                self.observer.instant(
+                    ring3_observability::Level::Basic,
+                    ring3_observability::categories::ENGINE_CPU_CACHE,
+                    "promotion.declined",
+                    &[
+                        ring3_observability::Field::unsigned("unit_id", row.id),
+                        ring3_observability::Field::unsigned("pc", u64::from(pc)),
+                        ring3_observability::Field::unsigned(
+                            "retry_rounds",
+                            next.saturating_sub(round).saturating_sub(1),
+                        ),
+                        ring3_observability::Field::unsigned("next_promotion_round", next),
+                    ],
+                );
+            }
             return Ok(None);
         };
         let plan = super::cohort::PromotionCohort32::new(self, pc, replacement.coverage())?;

@@ -31,6 +31,9 @@ pub(in crate::process) struct ExecutionCache32 {
     pub(super) promotion: Option<PromotionTarget32>,
     pub(super) cohort: Option<super::cohort::PromotionCohort32>,
     pub(super) replacement: Option<PreparedResidentReplacement>,
+    pub(super) promotion_round: u64,
+    #[cfg(test)]
+    pub(super) promotion_attempts: AtomicU64,
     pub(super) serial: u64,
     pub(super) revision: u64,
     pub(super) clock: AtomicU64,
@@ -46,6 +49,7 @@ pub(super) struct CacheEntry32 {
     pub tier: CompilationTier32,
     pub hits: AtomicU64,
     pub last: AtomicU64,
+    pub promotion_retry: super::promotion::PromotionRetry32,
 }
 #[derive(Clone, Copy)]
 pub(super) struct PromotionTarget32 {
@@ -104,6 +108,9 @@ impl ExecutionCache32 {
             promotion: None,
             cohort: None,
             replacement: None,
+            promotion_round: 0,
+            #[cfg(test)]
+            promotion_attempts: AtomicU64::new(0),
             serial: 1,
             revision: 0,
             clock: AtomicU64::new(0),
