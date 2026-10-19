@@ -52,6 +52,60 @@ pub extern "C" fn x87_resident_group(
         )
     }
 }`;
+const cpuWideGroup = `#[allow(unsafe_code, clippy::too_many_arguments)]
+#[unsafe(export_name = "ring3_abi_v1_x87_resident_group32")]
+pub extern "C" fn x87_resident_group32(
+    key_low: u32,
+    key_high: u32,
+    id_low: u32,
+    id_high: u32,
+    ordinal: u32,
+    address0: u32,
+    address1: u32,
+    address2: u32,
+    address3: u32,
+    address4: u32,
+    address5: u32,
+    address6: u32,
+    address7: u32,
+    address8: u32,
+    address9: u32,
+    address10: u32,
+    address11: u32,
+    address12: u32,
+    address13: u32,
+    address14: u32,
+    address15: u32,
+    address16: u32,
+    address17: u32,
+    address18: u32,
+    address19: u32,
+    address20: u32,
+    address21: u32,
+    address22: u32,
+    address23: u32,
+    address24: u32,
+    address25: u32,
+    address26: u32,
+    address27: u32,
+    address28: u32,
+    address29: u32,
+    address30: u32,
+    address31: u32,
+    flags: u32,
+    max_steps: u32,
+) -> i64 {
+    {
+        #![forbid(unsafe_code)]
+        crate::process::wasm::x87_resident_group32(
+            key_low, key_high, id_low, id_high, ordinal, address0, address1, address2, address3,
+            address4, address5, address6, address7, address8, address9, address10, address11,
+            address12, address13, address14, address15, address16, address17, address18, address19,
+            address20, address21, address22, address23, address24, address25, address26, address27,
+            address28, address29, address30, address31, flags, max_steps,
+        )
+    }
+}`;
 const detectionMacro = `macro_rules! export_detection_guards {
     ($($name:ident($($argument:ident: $kind:ty),*);)*) => {
         $(
@@ -123,10 +177,11 @@ export function assertEngineExports(module, root) {
     if (path === cpuOwner) {
       const parts = text.match(/^(export_process_calls!\s*\{[^{}]*\})\s*([\s\S]*)$/);
       assert.ok(parts, `${path}: closed CPU declaration table`);
-      assert.deepEqual(tokens(parts[2]), tokens(cpuPair + '\n' + cpuGroup), `${path}: declared i64 pair/group exports`);
+      assert.deepEqual(tokens(parts[2]), tokens(cpuPair + '\n' + cpuGroup + '\n' + cpuWideGroup), `${path}: declared i64 pair/group exports`);
       text = parts[1];
       extra.push({name: 'ring3_abi_v1_x87_resident_pair', kind: 'function', arity: 9});
       extra.push({name: 'ring3_abi_v1_x87_resident_group', kind: 'function', arity: 15});
+      extra.push({name: 'ring3_abi_v1_x87_resident_group32', kind: 'function', arity: 39});
     }
     const table = text.match(/^((?:mod [a-z0-9_]+;\s*\n)*)\s*export_process_calls! \{\s*([^{}]*)\s*\}\s*$/);
     const body = table?.[2];

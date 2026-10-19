@@ -2,6 +2,9 @@ use super::paging::{cpu_mutate, cpu_paging_store};
 use super::{REGISTRY, mutate, status};
 use crate::process::{HostError, StoreCompletion};
 
+mod group32;
+pub(crate) use group32::x87_resident_group32;
+
 pub(crate) fn cpu_read8(address: u32) -> u32 {
     cpu_mutate(|instance| instance.cpu_read8(address))
 }

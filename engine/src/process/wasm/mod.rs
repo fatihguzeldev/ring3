@@ -441,7 +441,8 @@ pub(crate) use cpu::{
     cpu_write, cpu_write_resident, far_call, far_call_resident, far_jump, far_jump_resident,
     far_return, far_return_resident, segment_load, segment_load_far, segment_load_far_resident,
     segment_load_resident, set_segment_base, simd_execute, simd_execute_resident, stack_execute,
-    stack_execute_resident, x87_op, x87_resident_group, x87_resident_op, x87_resident_pair,
+    stack_execute_resident, x87_op, x87_resident_group, x87_resident_group32, x87_resident_op,
+    x87_resident_pair,
 };
 
 mod paging;

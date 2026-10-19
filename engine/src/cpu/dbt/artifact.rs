@@ -75,17 +75,30 @@ impl CompiledRegion {
                     .iter()
                     .enumerate()
                     .flat_map(|(block, retained)| {
-                        super::x87_groups(&retained.instructions).map(move |plan| (block, plan))
+                        super::x87_groups(&retained.instructions)
+                            .map(move |plan| (block, plan.first, plan.length))
+                    })
+            };
+            let wide_groups = || {
+                prepared
+                    .blocks
+                    .iter()
+                    .enumerate()
+                    .flat_map(|(block, retained)| {
+                        super::x87_wide_groups(&retained.instructions)
+                            .map(move |plan| (block, plan.first, plan.length))
                     })
             };
             x87_groups
-                .try_reserve_exact(groups().count())
+                .try_reserve_exact(groups().chain(wide_groups()).count())
                 .map_err(|_| CompileError::Allocation)?;
-            for (block, plan) in groups() {
+            // legacy ordinals are a stable prefix; wider spans are appended only
+            // after both catalogs have been derived from the final retained ir.
+            for (block, first, length) in groups().chain(wide_groups()) {
                 x87_groups.push(X87GroupSpan32 {
                     block: u16::try_from(block).map_err(|_| CompileError::InvalidLimits)?,
-                    first: u16::try_from(plan.first).map_err(|_| CompileError::InvalidLimits)?,
-                    length: plan.length as u8,
+                    first: u16::try_from(first).map_err(|_| CompileError::InvalidLimits)?,
+                    length: length as u8,
                 });
             }
         }
@@ -137,6 +150,16 @@ impl CompiledRegion {
             length: usize::from(span.length),
         }
         .descriptors(&block.instructions)
+    }
+
+    pub(crate) fn x87_group32(&self, ordinal: u32) -> Option<super::X87WideGroup32<'_>> {
+        let span = self.x87_groups.get(ordinal as usize)?;
+        let block = self.prepared.blocks.get(usize::from(span.block))?;
+        super::x87_group::X87WideGroupPlan32 {
+            first: usize::from(span.first),
+            length: usize::from(span.length),
+        }
+        .view(&block.instructions)
     }
     pub(crate) fn supports_indexed_entry(&self) -> bool {
         self.has_indexed_entry
@@ -443,6 +466,10 @@ mod pair_tests;
 #[cfg(test)]
 #[path = "artifact/tests/groups.rs"]
 mod group_tests;
+
+#[cfg(test)]
+#[path = "artifact/tests/wide_groups.rs"]
+mod wide_group_tests;
 
 #[cfg(test)]
 #[path = "artifact/tests/indexed/mod.rs"]

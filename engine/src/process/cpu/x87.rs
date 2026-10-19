@@ -15,6 +15,7 @@ use crate::{
 use crate::process::instance::{EngineInstance, HostError, StoreCompletion};
 
 mod group;
+mod group32;
 mod pair;
 mod step;
 

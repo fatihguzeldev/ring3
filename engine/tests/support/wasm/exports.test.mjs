@@ -16,8 +16,17 @@ function workspace(body, child, check) {
 }
 
 function moduleWith(names) {
-  const section = (id, bytes) => [id, bytes.length, ...bytes];
-  const name = value => [value.length, ...Buffer.from(value)];
+  const unsigned = value => {
+    const bytes = [];
+    do {
+      const byte = value & 127;
+      value >>>= 7;
+      bytes.push(byte | (value ? 128 : 0));
+    } while (value);
+    return bytes;
+  };
+  const section = (id, bytes) => [id, ...unsigned(bytes.length), ...bytes];
+  const name = value => [...unsigned(Buffer.byteLength(value)), ...Buffer.from(value)];
   return new WebAssembly.Module(Uint8Array.from([
     0, 97, 115, 109, 1, 0, 0, 0,
     ...section(1, [1, 0x60, 0, 0]),
@@ -145,9 +154,9 @@ test('the CPU owner keeps only its exact i64 view parameter and pair/group expor
     const source = 'export_process_calls! { cpu_read32_view(epoch: i64); }\n' + pairSource;
     const cpu = join(dir, 'cpu.rs');
     writeFileSync(cpu, source);
-    const actual = moduleWith(['ring3_abi_v1_cpu_read32_view', 'ring3_abi_v1_x87_resident_pair', 'ring3_abi_v1_x87_resident_group']);
+    const actual = moduleWith(['ring3_abi_v1_cpu_read32_view', 'ring3_abi_v1_x87_resident_pair', 'ring3_abi_v1_x87_resident_group', 'ring3_abi_v1_x87_resident_group32']);
     assert.deepEqual(assertEngineExports(actual, root).functions.map(row => [row.name, row.arity]), [
-      ['ring3_abi_v1_cpu_read32_view', 1], ['ring3_abi_v1_x87_resident_pair', 9], ['ring3_abi_v1_x87_resident_group', 15],
+      ['ring3_abi_v1_cpu_read32_view', 1], ['ring3_abi_v1_x87_resident_pair', 9], ['ring3_abi_v1_x87_resident_group', 15], ['ring3_abi_v1_x87_resident_group32', 39],
     ]);
     for (const invalid of [
       source.replace('epoch: i64', 'epoch: u32'),
@@ -156,6 +165,8 @@ test('the CPU owner keeps only its exact i64 view parameter and pair/group expor
       source.replace('max_steps: u32', 'max_steps: i64'),
       source.replace('ordinal: u32', 'ordinal: i64'),
       source.replace('address7: u32,', ''),
+      source.replace('address31: u32,', ''),
+      source.replace('address30, address31, flags', 'address31, address30, flags'),
       source.replace('address6, address7, flags', 'address7, address6, flags'),
       source + '\nfn hidden() {}\n',
     ]) {

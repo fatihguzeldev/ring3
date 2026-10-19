@@ -4,7 +4,7 @@ use crate::{
     memory::{PageRange, Permissions},
 };
 
-fn memory() -> AddressSpace {
+pub(super) fn memory() -> AddressSpace {
     let mut memory = AddressSpace::new(2).unwrap();
     memory
         .map_zeroed(
@@ -14,13 +14,13 @@ fn memory() -> AddressSpace {
         .unwrap();
     for pc in [0x1000, 0x2000] {
         memory
-            .write(GuestAddress(pc), &[0xd9, 0xe8].repeat(16))
+            .write(GuestAddress(pc), &[0xd9, 0xe8].repeat(64))
             .unwrap();
     }
     memory
 }
 
-fn prepared(memory: &AddressSpace, pc: u32, instructions: usize) -> PreparedRegion {
+pub(super) fn prepared(memory: &AddressSpace, pc: u32, instructions: usize) -> PreparedRegion {
     prepare_runtime_entry(
         memory,
         GuestAddress(pc),
@@ -34,7 +34,7 @@ fn prepared(memory: &AddressSpace, pc: u32, instructions: usize) -> PreparedRegi
     .unwrap()
 }
 
-fn resident() -> Option<wasm::EmbeddedBinding> {
+pub(super) fn resident() -> Option<wasm::EmbeddedBinding> {
     Some(wasm::EmbeddedBinding::Resident { key: 7, id: 1 })
 }
 
@@ -99,7 +99,9 @@ fn group_metadata_is_final_prefix_only_and_absent_without_resident_binding() {
         .unwrap();
         let expected =
             super::super::x87_groups(&region.prepared.blocks[0].instructions).collect::<Vec<_>>();
-        assert_eq!(region.x87_groups.len(), expected.len());
+        let wide = super::super::x87_wide_groups(&region.prepared.blocks[0].instructions)
+            .collect::<Vec<_>>();
+        assert_eq!(region.x87_groups.len(), expected.len() + wide.len());
         for (ordinal, plan) in expected.iter().enumerate() {
             assert_eq!(
                 region.x87_group(ordinal as u32),
@@ -107,6 +109,12 @@ fn group_metadata_is_final_prefix_only_and_absent_without_resident_binding() {
             );
         }
         assert!(region.x87_group(expected.len() as u32).is_none());
+        for (index, plan) in wide.iter().enumerate() {
+            let ordinal = (expected.len() + index) as u32;
+            let view = region.x87_group32(ordinal).unwrap();
+            assert_eq!(view.len(), plan.length);
+            assert!(region.x87_group(ordinal).is_none());
+        }
         if length < 4 {
             assert_eq!(region.x87_groups.capacity(), 0);
         }

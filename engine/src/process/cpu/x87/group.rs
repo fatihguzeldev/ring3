@@ -18,7 +18,7 @@ pub(in crate::process) struct X87GroupOutcome {
 mod tests;
 
 impl X87GroupOutcome {
-    fn failure(completed: u32, reported_step: u32, error: HostError) -> Self {
+    pub(super) fn failure(completed: u32, reported_step: u32, error: HostError) -> Self {
         Self {
             completed,
             reported_step,
@@ -26,7 +26,7 @@ impl X87GroupOutcome {
         }
     }
 
-    fn complete(completed: u32, reported_step: u32) -> Self {
+    pub(super) fn complete(completed: u32, reported_step: u32) -> Self {
         Self {
             completed,
             reported_step,
@@ -36,10 +36,10 @@ impl X87GroupOutcome {
 }
 
 #[derive(Clone, Copy)]
-struct Packet {
-    length: u32,
-    value: u32,
-    result: Result<(), CpuMemoryError>,
+pub(super) struct Packet {
+    pub(super) length: u32,
+    pub(super) value: u32,
+    pub(super) result: Result<(), CpuMemoryError>,
 }
 
 fn requests(
@@ -192,7 +192,7 @@ impl EngineInstance {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn x87_final_store_group(
+    pub(super) fn x87_final_store_group(
         &mut self,
         id: u64,
         state: &mut X87State,
@@ -234,7 +234,7 @@ impl EngineInstance {
         }
     }
 
-    fn finish_x87_group(
+    pub(super) fn finish_x87_group(
         &mut self,
         state: &X87State,
         publish_state: bool,

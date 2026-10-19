@@ -1,6 +1,15 @@
 use super::X87PairStep32;
 use crate::cpu::x86::decode::DecodedOperation;
 
+mod wide;
+#[cfg(target_arch = "wasm32")]
+pub(crate) use wide::X87WideGroupProgress32;
+pub(crate) use wide::{
+    X87_WIDE_GROUP_COMPLETED_SHIFT, X87_WIDE_GROUP_MAX_STEPS, X87_WIDE_GROUP_REPORTED_SHIFT,
+    X87WideGroup32,
+};
+pub(super) use wide::{X87WideGroupPlan32, x87_wide_groups};
+
 pub(crate) const X87_GROUP_MIN_STEPS: usize = 4;
 pub(crate) const X87_GROUP_MAX_STEPS: usize = 8;
 pub(crate) const X87_GROUP_COMPLETED_SHIFT: u32 = 32;
