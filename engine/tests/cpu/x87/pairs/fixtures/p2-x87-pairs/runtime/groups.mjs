@@ -23,7 +23,7 @@ const four = program('group-mixed4', ['load', 'mul', 'twice', 'div'], data);
 const eight = program('group-mixed8', ['load', 'mul', 'twice', 'div', 'mul', 'add', 'div', 'neg'], data);
 const store = program('group-final-store4', ['load', 'mul', 'add', 'store'], data);
 
-// positive finite rational arithmetic, rounded independently to pc53/pc64/rn.
+// positive finite rational arithmetic, rounded independently to pc24/pc53/pc64/rn.
 // the bounded fixture never approaches exponent, denormal or NaN boundaries.
 const bits = value => {
   const bytes = Buffer.alloc(4); bytes.writeFloatLE(value); return bytes.readUInt32LE();
@@ -54,6 +54,8 @@ function rounded(value, precision) {
   return {rational, raw, exponent, significand, inexact: remainder !== 0n, incremented};
 }
 function numeric(program, count, control) {
+  const precision = new Map([[0x003f, 24], [0x023f, 53], [0x037f, 64]]).get(control);
+  assert.ok(precision, 'explicit supported precision with round-to-nearest');
   const a = binary32(program.data[0].value), b = binary32(program.data[1].value);
   let value, raw = ext(1), status = 0, negative = false;
   for (const step of program.steps.slice(0, count)) {
@@ -67,7 +69,7 @@ function numeric(program, count, control) {
       if (step.name === 'twice') exact = {n: value.n * 2n, d: value.d};
       if (step.name === 'add') exact = {n: value.n * a.d + a.n * value.d, d: value.d * a.d};
       if (step.name === 'div') exact = {n: value.n * b.d, d: value.d * b.n};
-      const next = rounded(exact, control === 0x23f ? 53 : 64);
+      const next = rounded(exact, precision);
       value = next.rational; raw = next.raw;
       status = status & ~0x200 | (next.inexact ? 0x20 : 0) | (next.incremented ? 0x200 : 0);
     } else {
@@ -115,7 +117,7 @@ export function verifyGroups(make, observations) {
         arena_sha256: hash(defined(b.arena)), groupCalls: b.calls.filter(call => call.name === 'x87_resident_group')});
     } finally {scalar.close(); grouped.close();}
   }
-  for (const source of [four, eight]) for (const control of [0x23f, 0x37f]) {
+  for (const source of [four, eight]) for (const control of [0x003f, 0x023f, 0x037f]) {
     for (let budget = 0; budget <= source.steps.length + 1; budget++) {
       compare(`${source.name}/CW${control}/budget${budget}`, source, {control, budget}, result => {
         const retired = Math.min(budget, source.steps.length + 1), count = Math.min(budget, source.steps.length);
@@ -182,7 +184,7 @@ export function verifyGroups(make, observations) {
       assert.equal(result.arena.readUInt16LE(FP + 18), 0x8084);
       assert.equal(BigInt(result.calls.find(call => call.name === 'x87_resident_group').result), groupEnvelope(0, 1, 0));
     });
-  for (const control of [0x23f, 0x37f]) {
+  for (const control of [0x003f, 0x023f, 0x037f]) {
     const wanted = numeric(store, 4, control);
     compare(`group terminal store/CW${control}`, store, {control, budget: 4}, result => {
       stop(result, 1, 4, PC + 8);
