@@ -65,6 +65,9 @@ fn enqueue(block: &CompiledBlock, frontier: &mut Vec<GuestAddress>) {
         Operation::Jump {
             target: BranchTarget::Direct(target),
         } => [Some(target), None],
+        Operation::Call {
+            target: BranchTarget::Direct(target),
+        } => [Some(target), Some(last.next_pc())],
         Operation::ConditionalJump { target, .. }
         | Operation::CountBranch { target, .. }
         | Operation::CountBranchWord { target, .. } => [Some(last.next_pc()), Some(target)],

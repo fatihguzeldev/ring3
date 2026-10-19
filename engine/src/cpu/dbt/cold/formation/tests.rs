@@ -108,15 +108,15 @@ fn loops_reuse_existing_instruction_starts_and_never_decode_interior_targets() {
 }
 
 #[test]
-fn direct_calls_and_indirect_jumps_remain_region_boundaries() {
-    for code in [&[0xe8, 0x1b, 0, 0, 0][..], &[0xff, 0xe0][..]] {
-        let mut memory = memory();
-        memory.write(GuestAddress(0x1000), code).unwrap();
-        memory.write(GuestAddress(0x1020), &[0x40, 0xc3]).unwrap();
-        let region = prepare(&memory, 0x1000, CompileLimits::default(), &|_| false).unwrap();
-        assert_eq!((region.block_count(), region.instruction_count()), (1, 1));
-    }
+fn indirect_jumps_remain_region_boundaries() {
+    let mut memory = memory();
+    memory.write(GuestAddress(0x1000), &[0xff, 0xe0]).unwrap();
+    memory.write(GuestAddress(0x1020), &[0x40, 0xc3]).unwrap();
+    let region = prepare(&memory, 0x1000, CompileLimits::default(), &|_| false).unwrap();
+    assert_eq!((region.block_count(), region.instruction_count()), (1, 1));
 }
+
+mod calls;
 
 #[test]
 fn external_unit_and_gate_joins_are_not_fetched_or_snapshotted() {
