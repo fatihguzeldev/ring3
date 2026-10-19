@@ -3,7 +3,7 @@ use crate::cpu::dbt::wasm::locals::{
     ADDRESS, DETAIL, EIP, FAULT_ACCESS, FAULT_ADDRESS, FAULT_LENGTH, HELPER_STATUS, LHS, REASON,
     RESULT, RHS, STATE_PTR,
 };
-use wasm_encoder::{BlockType, Function, InstructionSink, ValType};
+use wasm_encoder::{BlockType, Function, InstructionSink, MemArg, ValType};
 
 const INPUTS: [u32; 12] = [
     STATE_PTR,
@@ -82,28 +82,18 @@ fn call_span(code: &mut InstructionSink<'_>, index: u32, exit_depth: u32, length
     code.local_get(HELPER_STATUS)
         .i32_eqz()
         .if_(BlockType::Result(ValType::I32));
-    helper_field(code, 0);
-    code.i32_const(u32::from_le_bytes(*b"R3MH") as i32)
-        .i32_eq()
-        .if_(BlockType::Result(ValType::I32));
-    for (position, (offset, expected)) in [
-        (4, 0x10007),
-        (8, 40),
-        (12, 0),
-        (16, 0),
-        (24, 0),
-        (28, 0),
-        (32, 0),
-        (36, length),
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        helper_field(code, offset);
-        code.i32_const(expected).i32_eq();
-        if position != 0 {
-            code.i32_and();
-        }
+    helper_pair(
+        code,
+        0,
+        (0x10007_i64 << 32) | i64::from(u32::from_le_bytes(*b"R3MH")),
+    );
+    code.if_(BlockType::Result(ValType::I32));
+    helper_pair(code, 8, 40);
+    helper_field(code, 16);
+    code.i32_eqz().i32_and();
+    for (offset, expected) in [(24, 0), (32, i64::from(length) << 32)] {
+        helper_pair(code, offset, expected);
+        code.i32_and();
     }
     code.else_().i32_const(0).end().else_().i32_const(0).end();
     code.if_(BlockType::Empty)
@@ -125,6 +115,17 @@ fn call_span(code: &mut InstructionSink<'_>, index: u32, exit_depth: u32, length
         .if_(BlockType::Empty)
         .br(exit_depth + 1)
         .end();
+}
+
+fn helper_pair(code: &mut InstructionSink<'_>, offset: u64, expected: i64) {
+    code.local_get(STATE_PTR)
+        .i64_load(MemArg {
+            offset: 100 + offset,
+            align: 2,
+            memory_index: 0,
+        })
+        .i64_const(expected)
+        .i64_eq();
 }
 
 pub(in crate::cpu::dbt::wasm) fn build_function() -> Function {

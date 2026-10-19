@@ -14,10 +14,11 @@ let controls = 0;
 
 function check(name, {words = packet, args = initial, mode = 1, base = 0, descriptor = 0x020fffff, expected, completed = 0, slow = true} = {}) {
   new Uint8Array(memory.buffer).fill(0x5a);
-  words.forEach((value, index) => view.setUint32(100 + index * 4, value, true));
-  view.setUint16(fixture.segments + 4, mode, true);
-  view.setUint32(fixture.segments + 32, descriptor, true);
-  view.setUint32(fixture.bases + 20, base, true);
+  const pointer = args[0] >>> 0;
+  words.forEach((value, index) => view.setUint32(pointer + 100 + index * 4, value, true));
+  view.setUint16(pointer + fixture.segments + 4, mode, true);
+  view.setUint32(pointer + fixture.segments + 32, descriptor, true);
+  view.setUint32(pointer + fixture.bases + 20, base, true);
   const before = new Uint8Array(memory.buffer).slice();
   const slowBefore = exports.slowCalls.value;
   const inline = exports.inline(...args).map(value => value >>> 0);
@@ -39,6 +40,14 @@ for (const payload of [0, 0x202, 0x80000000, 0xffffffff]) {
   check(`success payload ${payload}`, {words: packet.with(5, payload), completed: 1, slow: false});
 }
 check('prior reason preserved', {args: initial.with(4, 13), expected: [13, 0x91, 0xa2, 0xb3, 0xc4], slow: false});
+for (const pointer of [1, 4, 7]) {
+  check(`unaligned packet base ${pointer}`, {args: initial.with(0, pointer), expected: [0, 0x91, 0xa2, 0xb3, 0xc4], completed: 1, slow: false});
+}
+for (let byte = 0; byte < 40; byte++) {
+  if (byte >= 20 && byte < 24) continue;
+  const field = byte >>> 2, bit = 1 << ((byte & 3) * 8);
+  check(`success contract byte ${byte}`, {words: packet.with(field, (packet[field] ^ bit) >>> 0), expected: [7, 2, 0xa2, 0xb3, 0xc4]});
+}
 for (const status of [1, 2, 3, 4, 7, 0xffffffff]) {
   check(`transport ${status}`, {args: initial.with(1, status), expected: [7, 3, 0xa2, 0xb3, 0xc4]});
 }
