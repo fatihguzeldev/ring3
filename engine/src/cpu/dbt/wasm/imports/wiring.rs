@@ -18,6 +18,14 @@ pub(in crate::cpu::dbt::wasm) fn build(
     plan: &ModuleRequirements,
     binding: Option<EmbeddedBinding>,
 ) -> ImportSections {
+    build_profile(plan, binding, false)
+}
+
+pub(in crate::cpu::dbt::wasm) fn build_profile(
+    plan: &ModuleRequirements,
+    binding: Option<EmbeddedBinding>,
+    native_success: bool,
+) -> ImportSections {
     let mut types = TypeSection::new();
     types.ty().function([ValType::I32; 4], [ValType::I32]);
     if let Some(binding) = binding {
@@ -182,11 +190,15 @@ pub(in crate::cpu::dbt::wasm) fn build(
     if let Some(binding) = binding {
         let name = match binding {
             EmbeddedBinding::Replacement { .. } => "guard_detect",
+            EmbeddedBinding::Resident { .. } if native_success => {
+                "guard_detect_resident_native_success"
+            }
             EmbeddedBinding::Resident { .. } => "guard_detect_resident",
         };
         imports.import("ring3", name, EntityType::Function(1));
     }
     let mut helper_imports = Imports::default();
+    helper_imports.native_success = native_success;
     let mut function_index = u32::from(binding.is_some());
     let mut type_index = 1 + u32::from(binding.is_some());
     let read_type_index = type_index;

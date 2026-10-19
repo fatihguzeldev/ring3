@@ -8,6 +8,7 @@ mod detection;
 mod dispatcher;
 mod emitter;
 mod locals;
+mod native_success;
 mod requirements;
 
 #[derive(Clone, Copy)]
@@ -17,6 +18,7 @@ pub(super) enum EmbeddedBinding {
 }
 
 pub(super) use emitter::{emit, emit_with_tier};
+pub(super) use native_success::emit as emit_native_success;
 
 pub(crate) use dispatcher::emit_dispatcher;
 pub(crate) use dispatcher::emit_dispatcher_with_capacity;

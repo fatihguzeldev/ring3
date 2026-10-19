@@ -159,6 +159,10 @@ impl CompiledRegion {
         self.tier
     }
 
+    pub(crate) fn emit_native_success(&self, key: u64, id: u64) -> Result<Vec<u8>, CompileError> {
+        wasm::emit_native_success(&self.prepared, self.tier, key, id)
+    }
+
     // valid initial records remain structurally valid under admitted execution.
     // this says nothing about unchanged values or current execution authority.
     pub(crate) fn preserves_extended_record_validity(&self) -> bool {
@@ -523,6 +527,10 @@ mod wide_group_tests;
 #[cfg(test)]
 #[path = "artifact/tests/native_x87.rs"]
 mod native_x87_tests;
+
+#[cfg(test)]
+#[path = "artifact/tests/native_success.rs"]
+mod native_success_tests;
 
 #[cfg(test)]
 #[path = "artifact/tests/indexed/mod.rs"]

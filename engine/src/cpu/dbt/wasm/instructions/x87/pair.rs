@@ -92,6 +92,46 @@ pub(in crate::cpu::dbt::wasm) fn operation(
             .local_set(local);
     }
     let final_store = pair[1].operation.write_size() != 0;
+    if imports.native_success {
+        crate::cpu::dbt::wasm::native_success::full_group(
+            code,
+            locals.limit,
+            locals.completed,
+            locals.reported_step,
+            2,
+        );
+        code.if_(BlockType::Empty);
+        select_step(code, pair[1], locals.second_address);
+        crate::cpu::dbt::wasm::native_success::flags(code);
+        code.i32_const(pair[1].next_pc as i32).local_set(EIP);
+        code.else_();
+        consume_checked(code, pair, imports, locals, final_store, exit_depth + 1);
+        code.end();
+    } else {
+        consume_checked(code, pair, imports, locals, final_store, exit_depth);
+    }
+    code.local_get(RETIRED)
+        .local_get(locals.completed)
+        .i32_add()
+        .local_set(RETIRED)
+        .local_get(BUDGET)
+        .local_get(locals.completed)
+        .i32_sub()
+        .local_set(BUDGET);
+    protocol::exit_if_failed(code, exit_depth);
+    if final_store {
+        protocol::exit_if_invalidated(code, exit_depth, imports);
+    }
+}
+
+fn consume_checked(
+    code: &mut InstructionSink<'_>,
+    pair: [X87PairStep32; 2],
+    imports: Imports,
+    locals: PairLocals,
+    final_store: bool,
+    exit_depth: u32,
+) {
     check_progress(code, locals, final_store, exit_depth);
 
     // catch the ordinary validator's terminal branch locally so a completed
@@ -133,18 +173,6 @@ pub(in crate::cpu::dbt::wasm) fn operation(
         .end()
         .local_set(EIP)
         .end();
-    code.local_get(RETIRED)
-        .local_get(locals.completed)
-        .i32_add()
-        .local_set(RETIRED)
-        .local_get(BUDGET)
-        .local_get(locals.completed)
-        .i32_sub()
-        .local_set(BUDGET);
-    protocol::exit_if_failed(code, exit_depth);
-    if final_store {
-        protocol::exit_if_invalidated(code, exit_depth, imports);
-    }
 }
 
 fn check_progress(

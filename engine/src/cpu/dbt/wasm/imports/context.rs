@@ -2,6 +2,7 @@ use super::HelperBinding;
 
 #[derive(Clone, Copy, Default)]
 pub(in crate::cpu::dbt::wasm) struct Imports {
+    pub(in crate::cpu::dbt::wasm) native_success: bool,
     pub(in crate::cpu::dbt::wasm) paging_configured: bool,
     pub(in crate::cpu::dbt::wasm) fetch_fault: Option<HelperBinding>,
     pub(in crate::cpu::dbt::wasm) detection:

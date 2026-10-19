@@ -34,8 +34,22 @@ pub(in crate::cpu::dbt) fn emit_with_tier(
     decode_key: Option<CodeDecodeKey>,
     tier: crate::cpu::dbt::CompilationTier32,
 ) -> Vec<u8> {
+    emit_profile(blocks, binding, decode_key, tier, false)
+}
+
+pub(in crate::cpu::dbt::wasm) fn emit_profile(
+    blocks: &[CompiledBlock],
+    binding: Option<EmbeddedBinding>,
+    decode_key: Option<CodeDecodeKey>,
+    tier: crate::cpu::dbt::CompilationTier32,
+    native_success: bool,
+) -> Vec<u8> {
     let plan = ModuleRequirements::new(blocks, binding);
-    let sections = imports::wiring::build(&plan, binding);
+    let sections = if native_success {
+        imports::wiring::build_profile(&plan, binding, true)
+    } else {
+        imports::wiring::build(&plan, binding)
+    };
     let mut module = Module::new();
     module.section(&sections.types);
     module.section(&sections.imports);

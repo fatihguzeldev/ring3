@@ -55,6 +55,7 @@ pub(in crate::cpu::dbt::wasm) fn precheck_instruction(
                 imports.x87_op.expect("waiting x87 helper"),
                 exit_depth + 1,
                 crate::cpu::dbt::wasm::helpers::result::ResultContext::from(imports),
+                imports.native_success,
             );
             // a pending check cannot complete an ordinary x87 operation successfully.
             protocol::infrastructure(code, 2);
@@ -80,6 +81,7 @@ pub(in crate::cpu::dbt::wasm) fn operation(
     exit_depth: u32,
 
     context: crate::cpu::dbt::wasm::helpers::result::ResultContext,
+    native_success: bool,
 ) {
     if let Some(address) = address {
         crate::cpu::dbt::wasm::instructions::memory::address_value(code, address);
@@ -106,6 +108,27 @@ pub(in crate::cpu::dbt::wasm) fn operation(
         crate::cpu::dbt::wasm::code_fetch::check_context(code, exit_depth + 1);
         code.end();
     }
+    if native_success {
+        crate::cpu::dbt::wasm::native_success::success(code);
+        code.if_(BlockType::Empty);
+        crate::cpu::dbt::wasm::native_success::flags(code);
+        code.else_();
+        consume_checked(code, operation, exit_depth + 1, context);
+        code.end();
+    } else {
+        consume_checked(code, operation, exit_depth, context);
+    }
+    if operation == crate::cpu::x86::X87Operation::StatusToAx {
+        status_to_ax(code);
+    }
+}
+
+fn consume_checked(
+    code: &mut InstructionSink<'_>,
+    operation: crate::cpu::x86::X87Operation,
+    exit_depth: u32,
+    context: crate::cpu::dbt::wasm::helpers::result::ResultContext,
+) {
     let length = operation.read_size().max(operation.write_size()) as u32;
     let access =
         u32::from(operation.read_size() != 0) | (u32::from(operation.write_size() != 0) << 1);
@@ -148,9 +171,6 @@ pub(in crate::cpu::dbt::wasm) fn operation(
         if integer_flags { 0x8d5 } else { 0 },
         exit_depth,
     );
-    if operation == crate::cpu::x86::X87Operation::StatusToAx {
-        status_to_ax(code);
-    }
 }
 
 fn control_word(address: Option<EffectiveAddress>, waiting: bool) -> u32 {

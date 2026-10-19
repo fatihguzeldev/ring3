@@ -62,11 +62,11 @@ pub(in crate::cpu::dbt::wasm) fn store(
         Value32::Memory(_) => unreachable!("prepared move cannot have two memory operands"),
     }
     code.call(index).local_set(HELPER_STATUS);
-    cpu_scalar::validate(
+    cpu_scalar::validate_with_imports(
         code,
         4,
         crate::abi::memory_helper::CpuScalarOperation::Store,
-        imports.paging_configured,
+        imports,
     );
     exit_if_failed(code, exit_depth);
 }
@@ -162,11 +162,11 @@ fn load_at_address_with_intent(
     };
     crate::cpu::dbt::wasm::code_fetch::check_context(code, exit_depth);
     if paging_modify {
-        cpu_scalar::validate(
+        cpu_scalar::validate_with_imports(
             code,
             4,
             crate::abi::memory_helper::CpuScalarOperation::Modify,
-            imports.paging_configured,
+            imports,
         );
     } else {
         validate_read32(code, imports, direct_result);
@@ -221,11 +221,11 @@ pub(in crate::cpu::dbt::wasm) fn store_result_at_address(
         .local_get(RESULT)
         .call(index)
         .local_set(HELPER_STATUS);
-    cpu_scalar::validate(
+    cpu_scalar::validate_with_imports(
         code,
         4,
         crate::abi::memory_helper::CpuScalarOperation::Store,
-        imports.paging_configured,
+        imports,
     );
     exit_if_failed(code, exit_depth);
 }

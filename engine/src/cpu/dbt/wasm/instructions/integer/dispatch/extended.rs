@@ -121,6 +121,7 @@ pub(super) fn emit(
                 imports.x87_op.expect("x87 execution import"),
                 exit_depth,
                 crate::cpu::dbt::wasm::helpers::result::ResultContext::from(imports),
+                imports.native_success,
             );
             store = operation.write_size() != 0;
         }

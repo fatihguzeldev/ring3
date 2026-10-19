@@ -79,25 +79,26 @@ pub(in crate::cpu::dbt::wasm) fn operation(
         .local_set(HELPER_STATUS);
     progress::decode(code, locals);
     let final_store = descriptor(group, group.len() - 1).operation.write_size() != 0;
-    progress::check(code, locals, group.len() as u32, final_store, exit_depth);
-
-    // retain the reported boundary for faults, and its next pc only for a
-    // fully validated success whose reported instruction completed.
-    code.block(BlockType::Empty);
-    for index in 0..group.len() {
-        let step = descriptor(group, index);
-        code.local_get(locals.reported_step)
-            .i32_const(index as i32)
-            .i32_eq()
-            .if_(BlockType::Empty);
-        select_step(code, step, locals.address(index));
-        code.i32_const(step.next_pc as i32)
-            .local_set(locals.next_pc)
-            .br(1)
-            .end();
+    if imports.native_success {
+        crate::cpu::dbt::wasm::native_success::full_group(
+            code,
+            locals.limit,
+            locals.completed,
+            locals.reported_step,
+            group.len() as u32,
+        );
+        code.if_(BlockType::Empty);
+        let last = descriptor(group, group.len() - 1);
+        select_step(code, last, locals.address(group.len() - 1));
+        crate::cpu::dbt::wasm::native_success::flags(code);
+        code.i32_const(last.next_pc as i32)
+            .local_set(locals.next_pc);
+        code.else_();
+        consume_checked(code, group, imports, locals, final_store, exit_depth + 1);
+        code.end();
+    } else {
+        consume_checked(code, group, imports, locals, final_store, exit_depth);
     }
-    code.end();
-    packets::validate(code, group, locals, imports);
     code.local_get(REASON)
         .if_(BlockType::Empty)
         .local_get(locals.reported_step)
@@ -118,4 +119,33 @@ pub(in crate::cpu::dbt::wasm) fn operation(
     if final_store {
         protocol::exit_if_invalidated(code, exit_depth, imports);
     }
+}
+
+fn consume_checked(
+    code: &mut InstructionSink<'_>,
+    group: X87WideGroup32<'_>,
+    imports: Imports,
+    locals: GroupLocals,
+    final_store: bool,
+    exit_depth: u32,
+) {
+    progress::check(code, locals, group.len() as u32, final_store, exit_depth);
+
+    // retain the reported boundary for faults, and its next pc only for a
+    // fully validated success whose reported instruction completed.
+    code.block(BlockType::Empty);
+    for index in 0..group.len() {
+        let step = descriptor(group, index);
+        code.local_get(locals.reported_step)
+            .i32_const(index as i32)
+            .i32_eq()
+            .if_(BlockType::Empty);
+        select_step(code, step, locals.address(index));
+        code.i32_const(step.next_pc as i32)
+            .local_set(locals.next_pc)
+            .br(1)
+            .end();
+    }
+    code.end();
+    packets::validate(code, group, locals, imports);
 }

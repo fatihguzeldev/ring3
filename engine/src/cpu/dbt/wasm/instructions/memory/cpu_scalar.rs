@@ -20,6 +20,22 @@ pub(super) fn validate_read32(
     code: &mut InstructionSink<'_>,
     imports: crate::cpu::dbt::wasm::imports::Imports,
 ) {
+    if imports.native_success {
+        crate::cpu::dbt::wasm::native_success::success(code);
+        code.if_(BlockType::Empty);
+        crate::cpu::dbt::wasm::native_success::zero_scratch(code);
+        code.else_();
+        validate_read32_checked(code, imports);
+        code.end();
+    } else {
+        validate_read32_checked(code, imports);
+    }
+}
+
+fn validate_read32_checked(
+    code: &mut InstructionSink<'_>,
+    imports: crate::cpu::dbt::wasm::imports::Imports,
+) {
     #[cfg(test)]
     EMITTED_READ32_SITES.with(|sites| sites.set(sites.get() + 1));
     if imports.paging_configured
@@ -29,6 +45,24 @@ pub(super) fn validate_read32(
         return;
     }
     validate(code, 4, CpuScalarOperation::Read, imports.paging_configured);
+}
+
+pub(super) fn validate_with_imports(
+    code: &mut InstructionSink<'_>,
+    width: u32,
+    operation: CpuScalarOperation,
+    imports: crate::cpu::dbt::wasm::imports::Imports,
+) {
+    if imports.native_success {
+        crate::cpu::dbt::wasm::native_success::success(code);
+        code.if_(BlockType::Empty);
+        crate::cpu::dbt::wasm::native_success::zero_scratch(code);
+        code.else_();
+        validate(code, width, operation, imports.paging_configured);
+        code.end();
+    } else {
+        validate(code, width, operation, imports.paging_configured);
+    }
 }
 
 /// current CPU scalar bus replies; no legacy packet version is accepted here.
