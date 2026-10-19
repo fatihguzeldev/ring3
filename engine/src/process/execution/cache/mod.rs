@@ -3,6 +3,7 @@ mod cohort;
 mod configuration;
 mod context;
 mod directory;
+mod edges;
 mod pins;
 mod promotion;
 mod requests;

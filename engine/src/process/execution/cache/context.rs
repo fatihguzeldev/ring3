@@ -49,6 +49,7 @@ pub(super) struct CacheEntry32 {
     pub tier: CompilationTier32,
     pub hits: AtomicU64,
     pub last: AtomicU64,
+    pub need_code_hint: super::edges::NeedCodeHint32,
     pub promotion_retry: super::promotion::PromotionRetry32,
 }
 #[derive(Clone, Copy)]

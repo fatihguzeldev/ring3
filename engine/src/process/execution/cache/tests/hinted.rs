@@ -1,3 +1,4 @@
+mod controls;
 mod fixture;
 
 use crate::{cpu::dbt::CompileLimits, cpu::x86::SegmentRegister, memory::GuestAddress};

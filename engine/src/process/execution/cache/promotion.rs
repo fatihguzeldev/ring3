@@ -41,7 +41,11 @@ impl EngineInstance {
             .filter_map(|(slot, row)| row.as_ref().map(|row| (slot, row)))
             .filter(|(_, row)| {
                 row.promotion_retry.eligible(round)
-                    && row.tier == CompilationTier32::Baseline
+                    && (row.tier == CompilationTier32::Baseline
+                        || row
+                            .need_code_hint
+                            .target(cache.config.promotion_hits)
+                            .is_some())
                     && row.hits.load(Ordering::Relaxed) >= u64::from(cache.config.promotion_hits)
                     && !pins.contains(&row.id)
             })
@@ -62,43 +66,70 @@ impl EngineInstance {
             return Ok(None);
         };
         let pc = row.entry;
+        let tier = row.tier;
+        #[cfg(feature = "observability")]
+        let source_id = row.id;
         #[cfg(test)]
         cache.promotion_attempts.fetch_add(1, Ordering::Relaxed);
         let installations = &self.resident_installations;
         let by_id = &self.resident_installations_by_id;
         let modules = &self.modules;
         let callback = self.callback.as_ref();
-        let replacement = self
-            .resident
-            .as_mut()
-            .unwrap()
-            .prepare_cached_replacement(
+        let current_row = |id| {
+            let installed = by_id
+                .binary_search_by_key(&id, |installed| installed.unit_id)
+                .ok()
+                .map(|index| by_id[index])?;
+            if installations
+                .get(installed.slot as usize)
+                .copied()
+                .flatten()
+                != Some(installed)
+            {
+                return None;
+            }
+            cache
+                .entries
+                .get(installed.slot as usize)?
+                .as_ref()
+                .filter(|row| row.id == id)
+        };
+        let eligible = |id| !pins.contains(&id) && current_row(id).is_some();
+        let is_gate = |pc: crate::memory::GuestAddress| {
+            super::admission::cache_gate_at(modules, callback, pc.0).is_some()
+        };
+        let registry = self.resident.as_mut().unwrap();
+        let authority = crate::cpu::x86::decode::DecodeAuthority::new(self.system_register_bank);
+        let replacement = if tier == CompilationTier32::Optimized {
+            registry.prepare_hinted_replacement(
                 memory,
                 crate::memory::GuestAddress(pc),
                 cache.compile_limits,
                 key,
                 cs,
-                crate::cpu::x86::decode::DecodeAuthority::new(self.system_register_bank),
+                authority,
+                &eligible,
+                &is_gate,
                 &|id| {
-                    !pins.contains(&id)
-                        && by_id
-                            .binary_search_by_key(&id, |installed| installed.unit_id)
-                            .ok()
-                            .map(|index| by_id[index])
-                            .is_some_and(|installed| {
-                                installations
-                                    .get(installed.slot as usize)
-                                    .copied()
-                                    .flatten()
-                                    == Some(installed)
-                                    && cache.entries[installed.slot as usize]
-                                        .as_ref()
-                                        .is_some_and(|row| row.id == id)
-                            })
+                    current_row(id)?
+                        .need_code_hint
+                        .target(cache.config.promotion_hits)
+                        .map(crate::memory::GuestAddress)
                 },
-                &|pc| super::admission::cache_gate_at(modules, callback, pc.0).is_some(),
             )
-            .map_err(HostError::Resident)?;
+        } else {
+            registry.prepare_cached_replacement(
+                memory,
+                crate::memory::GuestAddress(pc),
+                cache.compile_limits,
+                key,
+                cs,
+                authority,
+                &eligible,
+                &is_gate,
+            )
+        }
+        .map_err(HostError::Resident)?;
         let Some(replacement) = replacement else {
             let row = self.execution_cache.as_mut().unwrap().entries[slot]
                 .as_mut()
@@ -127,6 +158,22 @@ impl EngineInstance {
             }
             return Ok(None);
         };
+        #[cfg(feature = "observability")]
+        if tier == CompilationTier32::Optimized {
+            self.observer.instant(
+                ring3_observability::Level::Basic,
+                ring3_observability::categories::ENGINE_CPU_CACHE,
+                "promotion.hinted.prepared",
+                &[
+                    ring3_observability::Field::unsigned("unit_id", source_id),
+                    ring3_observability::Field::unsigned("pc", u64::from(pc)),
+                    ring3_observability::Field::unsigned(
+                        "owners",
+                        replacement.coverage().owners().len() as u64,
+                    ),
+                ],
+            );
+        }
         let plan = super::cohort::PromotionCohort32::new(self, pc, replacement.coverage())?;
         let request = plan.request(self.execution_cache.as_ref().unwrap().serial);
         self.publish_cache_request(request, false)?;
