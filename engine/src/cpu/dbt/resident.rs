@@ -45,7 +45,7 @@ pub struct RegistryLimits {
 
 impl RegistryLimits {
     pub const MAX_UNITS: usize = 65_536;
-    pub const MAX_WASM_BYTES: usize = 256 * 1024 * 1024;
+    pub const MAX_WASM_BYTES: usize = 512 * 1024 * 1024;
 }
 
 impl Default for RegistryLimits {

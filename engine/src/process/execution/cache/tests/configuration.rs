@@ -1,7 +1,7 @@
 use crate::{
     abi::arena::TRANSFER_OFFSET,
-    cpu::dbt::RegistryError,
-    memory::GuestAddress,
+    cpu::dbt::{CompileError, CompileLimits, RegistryError, RegistryLimits, ResidentRegistry},
+    memory::{AddressSpace, GuestAddress},
     process::{EngineInstance, HostError, execution::cache::ExecutionConfig32},
 };
 
@@ -67,6 +67,14 @@ fn rejected_configuration_preserves_dispatcher_and_legacy_storage() {
             ..ExecutionConfig32::default()
         },
         ExecutionConfig32 {
+            wasm_bytes: RegistryLimits::MAX_WASM_BYTES as u32 + 1,
+            ..ExecutionConfig32::default()
+        },
+        ExecutionConfig32 {
+            wasm_bytes: u32::MAX,
+            ..ExecutionConfig32::default()
+        },
+        ExecutionConfig32 {
             promotion_hits: 0,
             ..ExecutionConfig32::default()
         },
@@ -100,4 +108,75 @@ fn maximum_bounded_capacity_configures_without_changing_default_or_legacy_capaci
         Some(0)
     );
     assert!(engine.dispatcher_bytes(97).unwrap().len() < 1024);
+}
+
+#[test]
+fn explicit_byte_ceiling_keeps_empty_usage_defaults_and_per_unit_limits() {
+    assert_eq!(RegistryLimits::MAX_WASM_BYTES, 512 * 1024 * 1024);
+    assert_eq!(RegistryLimits::MAX_UNITS, 65_536);
+    assert_eq!(
+        ExecutionConfig32::default(),
+        ExecutionConfig32 {
+            units: 256,
+            wasm_bytes: 16 * 1024 * 1024,
+            promotion_hits: 256,
+        }
+    );
+    assert_eq!(
+        RegistryLimits::default(),
+        RegistryLimits {
+            units: 8,
+            wasm_bytes: 8 * 65_536
+        }
+    );
+    assert_eq!(CompileLimits::default().wasm_bytes, 65_536);
+    let memory = AddressSpace::new(1).unwrap();
+    assert_eq!(
+        crate::cpu::dbt::prepare_region(
+            &memory,
+            &[],
+            CompileLimits {
+                wasm_bytes: 65_537,
+                ..CompileLimits::default()
+            },
+        )
+        .unwrap_err(),
+        CompileError::InvalidLimits,
+    );
+
+    for wasm_bytes in [
+        65_536,
+        256 * 1024 * 1024,
+        RegistryLimits::MAX_WASM_BYTES as u32,
+    ] {
+        let mut engine = EngineInstance::new(1, 97).unwrap();
+        let config = ExecutionConfig32 {
+            units: 1,
+            wasm_bytes,
+            ..ExecutionConfig32::default()
+        };
+        engine.configure_execution(config).unwrap();
+        assert_eq!(engine.execution_config().unwrap(), Some(config));
+        let usage = engine.cache_usage().unwrap();
+        assert_eq!((usage.units, usage.wasm_bytes, usage.installed), (0, 0, 0));
+        assert_eq!(engine.resident_installations.len(), 1);
+    }
+}
+
+#[test]
+fn registry_rejects_over_ceiling_and_extreme_byte_requests() {
+    let memory = AddressSpace::new(1).unwrap();
+    for wasm_bytes in [0, RegistryLimits::MAX_WASM_BYTES + 1, usize::MAX] {
+        assert_eq!(
+            ResidentRegistry::new(
+                &memory,
+                RegistryLimits {
+                    units: 1,
+                    wasm_bytes
+                }
+            )
+            .unwrap_err(),
+            RegistryError::InvalidLimits,
+        );
+    }
 }
