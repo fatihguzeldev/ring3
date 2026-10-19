@@ -61,7 +61,7 @@ pub(super) fn emit(
 ) -> Result<CompiledRegion, CompileError> {
     let full = emit_bytes(&prepared, binding, tier);
     if full.bytes.len() <= limits.wasm_bytes {
-        return Ok(CompiledRegion::new(prepared, full.bytes, full.tier));
+        return CompiledRegion::new(prepared, full.bytes, full.tier, binding);
     }
     drop(full);
     let mut journal = TrimJournal::new(&prepared)?;
@@ -75,11 +75,12 @@ pub(super) fn emit(
     if let Some(fitting) = fitting {
         journal.seek(memory, &mut prepared, cs, fitting.position)?;
         journal.finalize(memory, &mut prepared, cs)?;
-        return Ok(CompiledRegion::new(
+        return CompiledRegion::new(
             prepared,
             fitting.emission.bytes,
             fitting.emission.tier,
-        ));
+            binding,
+        );
     }
 
     // a larger prefix can be smaller after helper/type/tier changes. a failed minimum
@@ -89,7 +90,7 @@ pub(super) fn emit(
     while shorten_entry_region(memory, &mut prepared, cs)? {
         let emission = emit_bytes(&prepared, binding, tier);
         if emission.bytes.len() <= limits.wasm_bytes {
-            return Ok(CompiledRegion::new(prepared, emission.bytes, emission.tier));
+            return CompiledRegion::new(prepared, emission.bytes, emission.tier, binding);
         }
     }
     Err(CompileError::WasmLimit)

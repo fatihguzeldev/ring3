@@ -17,6 +17,9 @@ pub(in crate::cpu::dbt::wasm) struct Imports {
     pub(in crate::cpu::dbt::wasm) cpu_read: Option<u32>,
     pub(in crate::cpu::dbt::wasm) cpu_write: Option<HelperBinding>,
     pub(in crate::cpu::dbt::wasm) x87_op: Option<HelperBinding>,
+    pub(in crate::cpu::dbt::wasm) x87_pair: Option<HelperBinding>,
+    pub(in crate::cpu::dbt::wasm) x87_pair_locals:
+        Option<crate::cpu::dbt::wasm::instructions::x87::pair::PairLocals>,
     pub(in crate::cpu::dbt::wasm) simd_execute: Option<HelperBinding>,
     pub(in crate::cpu::dbt::wasm) avx_execute: Option<HelperBinding>,
     pub(in crate::cpu::dbt::wasm) avx_locals:

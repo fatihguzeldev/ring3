@@ -5,6 +5,11 @@ mod region;
 mod resident;
 mod tier;
 mod wasm;
+mod x87_pair;
+
+pub(crate) use x87_pair::{
+    X87_PAIR_COMPLETED_SHIFT, X87_PAIR_REPORTED_SHIFT, X87PairProgress32, X87PairStep32, x87_pairs,
+};
 
 pub use tier::CompilationTier32;
 

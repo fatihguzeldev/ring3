@@ -149,6 +149,10 @@ pub(in crate::cpu::dbt::wasm) fn build(
     if plan.has_read32_validator {
         types.ty().function([ValType::I32; 10], [ValType::I32; 7]);
     }
+    let x87_pair_type = scalar_read32_validator_type + u32::from(plan.has_read32_validator);
+    if plan.has_x87_pairs {
+        types.ty().function([ValType::I32; 9], [ValType::I64]);
+    }
     let mut imports = ImportSection::new();
     imports.import(
         "env",
@@ -714,6 +718,23 @@ pub(in crate::cpu::dbt::wasm) fn build(
         };
         imports.import("ring3", name, EntityType::Function(fetch_fault_type));
         helper_imports.fetch_fault = Some(import);
+        function_index += 1;
+    }
+
+    if plan.has_x87_pairs {
+        let Some(EmbeddedBinding::Resident { key, id }) = binding else {
+            unreachable!("x87 pairs require resident material");
+        };
+        imports.import(
+            "ring3",
+            "x87_resident_pair",
+            EntityType::Function(x87_pair_type),
+        );
+        helper_imports.x87_pair = Some(HelperBinding::Resident {
+            index: function_index,
+            key,
+            id,
+        });
         function_index += 1;
     }
 

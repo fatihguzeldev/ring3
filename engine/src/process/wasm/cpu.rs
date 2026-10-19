@@ -1,5 +1,5 @@
-use super::mutate;
 use super::paging::{cpu_mutate, cpu_paging_store};
+use super::{REGISTRY, mutate, status};
 use crate::process::HostError;
 
 pub(crate) fn cpu_read8(address: u32) -> u32 {
@@ -121,6 +121,46 @@ pub(crate) fn x87_resident_op(
             opcode,
             waiting,
         )
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn x87_resident_pair(
+    key_low: u32,
+    key_high: u32,
+    id_low: u32,
+    id_high: u32,
+    first_pc: u32,
+    address0: u32,
+    address1: u32,
+    flags: u32,
+    max_steps: u32,
+) -> i64 {
+    use crate::cpu::dbt::X87PairProgress32;
+    REGISTRY.with(|registry| {
+        let Ok(mut registry) = registry.try_borrow_mut() else {
+            return X87PairProgress32::encode(9, 0, 0) as i64;
+        };
+        let Some(instance) = registry.instance.as_mut() else {
+            return X87PairProgress32::encode(5, 0, 0) as i64;
+        };
+        let before = instance.cpu_page_fault_sequence32();
+        let outcome = instance.x87_resident_pair(
+            u64::from(key_low) | (u64::from(key_high) << 32),
+            u64::from(id_low) | (u64::from(id_high) << 32),
+            first_pc,
+            [address0, address1],
+            flags,
+            max_steps,
+        );
+        let transport = match outcome.result {
+            Ok(()) if instance.cpu_page_fault_sequence32() != before => {
+                crate::abi::cpu_helper::CPU_PAGE_FAULT_TRANSPORT
+            }
+            Ok(()) => 0,
+            Err(error) => status(error),
+        };
+        X87PairProgress32::encode(transport, outcome.completed, outcome.reported_step) as i64
     })
 }
 

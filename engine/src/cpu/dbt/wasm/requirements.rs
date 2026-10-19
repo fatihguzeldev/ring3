@@ -24,6 +24,7 @@ pub(in crate::cpu::dbt::wasm) struct ModuleRequirements {
     pub(in crate::cpu::dbt::wasm) has_gates: bool,
     pub(in crate::cpu::dbt::wasm) has_arithmetic: bool,
     pub(in crate::cpu::dbt::wasm) has_x87: bool,
+    pub(in crate::cpu::dbt::wasm) has_x87_pairs: bool,
     pub(in crate::cpu::dbt::wasm) has_repeat: bool,
     pub(in crate::cpu::dbt::wasm) has_segments: bool,
     pub(in crate::cpu::dbt::wasm) has_segment_check: bool,
@@ -210,6 +211,12 @@ impl ModuleRequirements {
         let upper_xstate =
             crate::cpu::x86::capabilities::AVX_ENABLED && (imports.cpu_xsave || imports.cpu_xrstor);
         // one site grows when it owns the shared failure body; two sites already amortize it.
+        let has_x87_pairs = matches!(binding, Some(EmbeddedBinding::Resident { .. }))
+            && blocks.iter().any(|block| {
+                crate::cpu::dbt::x87_pairs(&block.instructions)
+                    .next()
+                    .is_some()
+            });
         let has_read32_validator = paging_configured && imports.read32_result_sites >= 2;
         // waiting instructions emit a second operation site for pending x87 exceptions.
         let x87_read32_sites: usize = blocks
@@ -255,6 +262,7 @@ impl ModuleRequirements {
             has_gates,
             has_arithmetic,
             has_x87,
+            has_x87_pairs,
             has_repeat,
             has_segments,
             has_segment_check,
@@ -265,3 +273,7 @@ impl ModuleRequirements {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "requirements/tests/pairs.rs"]
+mod pair_tests;

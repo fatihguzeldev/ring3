@@ -32,3 +32,24 @@ export_process_calls! {
     stack_execute(control: u32);
     stack_execute_resident(key_low: u32, key_high: u32, id_low: u32, id_high: u32, control: u32);
 }
+
+#[allow(unsafe_code, clippy::too_many_arguments)]
+#[unsafe(export_name = "ring3_abi_v1_x87_resident_pair")]
+pub extern "C" fn x87_resident_pair(
+    key_low: u32,
+    key_high: u32,
+    id_low: u32,
+    id_high: u32,
+    first_pc: u32,
+    address0: u32,
+    address1: u32,
+    flags: u32,
+    max_steps: u32,
+) -> i64 {
+    {
+        #![forbid(unsafe_code)]
+        crate::process::wasm::x87_resident_pair(
+            key_low, key_high, id_low, id_high, first_pc, address0, address1, flags, max_steps,
+        )
+    }
+}

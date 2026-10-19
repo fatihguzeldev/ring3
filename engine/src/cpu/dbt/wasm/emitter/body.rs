@@ -71,6 +71,12 @@ pub(super) fn emit(
         declarations.push((1, ValType::I64));
         declarations.push((6, ValType::I32));
     }
+    if plan.has_x87_pairs {
+        let first = 4 + declarations.iter().map(|(count, _)| count).sum::<u32>();
+        helper_imports.x87_pair_locals = Some(x87::pair::PairLocals::new(first));
+        declarations.push((5, ValType::I32));
+        declarations.push((1, ValType::I64));
+    }
 
     helper_imports.paging_configured = plan.paging_configured;
     let mut function = Function::new(declarations);
@@ -261,9 +267,19 @@ fn emit_block(
         } else {
             code.local_get(RESUME).br_table(0..count, count);
         }
+        let mut pairs = crate::cpu::dbt::x87_pairs(&block.instructions).peekable();
         for (index, instruction) in block.instructions.iter().enumerate() {
             code.end();
             let remaining = count - index as u32 - 1;
+            let pair = if imports.x87_pair.is_some()
+                && pairs
+                    .peek()
+                    .is_some_and(|pair| pair[0].pc == instruction.pc().0)
+            {
+                pairs.next()
+            } else {
+                None
+            };
             abi::safepoint(code, remaining + 2);
             if let Some(limit) = imports.code_fetch_limit {
                 if index != 0
@@ -276,11 +292,18 @@ fn emit_block(
             }
             x87::precheck_instruction(code, instruction, imports, remaining + 2);
             crate::cpu::dbt::wasm::detection::snapshot(code, instruction, imports);
+            if pair.is_some() {
+                x87::pair::capture_limit(code, imports);
+            }
             abi::begin_instruction(code);
             if matches!(instruction.operation(), Operation::InterruptReturn { .. }) {
                 abi::interrupt_return_precheck(code, remaining + 2);
             }
-            integer::instruction(code, instruction, imports, remaining + 2);
+            if let Some(pair) = pair {
+                x87::pair::operation(code, pair, imports, remaining + 2);
+            } else {
+                integer::instruction(code, instruction, imports, remaining + 2);
+            }
             if matches!(
                 instruction.operation(),
                 Operation::FarJump { .. }
@@ -292,6 +315,9 @@ fn emit_block(
                 code_fetch::refresh(code, limit);
             }
             abi::debug_after_retirement(code, remaining + 2, imports.detection, false);
+            if pair.is_some() {
+                x87::pair::skip_completed_second(code, imports, remaining);
+            }
         }
         code.br(1).end();
     }

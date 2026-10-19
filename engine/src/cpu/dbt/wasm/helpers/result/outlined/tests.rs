@@ -204,25 +204,26 @@ fn ordinary_helpers_count_real_x87_sites_and_compose_with_scalar_and_segment_hel
         },
         memory::{AddressSpace, GuestAddress, PageRange, Permissions},
     };
-    let cases: [(&[u8], bool, bool, usize); 10] = [
-        (&[0x90, 0xff, 0xe2], false, false, 0),
-        (&[0xd9, 0x00, 0xff, 0xe2], false, true, 2),
-        (&[0xdb, 0x00, 0xff, 0xe2], false, true, 2),
-        (&[0xd8, 0x00, 0xff, 0xe2], false, true, 2),
-        (&[0xdd, 0x00, 0xff, 0xe2], false, true, 0),
-        (&[0xd9, 0x10, 0xff, 0xe2], false, true, 0),
-        (&[0xd9, 0xe8, 0xff, 0xe2], true, false, 0),
-        (&[0xd9, 0xe8, 0xd9, 0x00, 0xff, 0xe2], true, true, 2),
-        (&[0xdf, 0xe9, 0xff, 0xe2], true, false, 0),
+    let cases: [(&[u8], bool, bool, usize, usize); 10] = [
+        (&[0x90, 0xff, 0xe2], false, false, 0, 0),
+        (&[0xd9, 0x00, 0xff, 0xe2], false, true, 2, 2),
+        (&[0xdb, 0x00, 0xff, 0xe2], false, true, 2, 2),
+        (&[0xd8, 0x00, 0xff, 0xe2], false, true, 2, 2),
+        (&[0xdd, 0x00, 0xff, 0xe2], false, true, 0, 0),
+        (&[0xd9, 0x10, 0xff, 0xe2], false, true, 0, 0),
+        (&[0xd9, 0xe8, 0xff, 0xe2], true, false, 0, 0),
+        (&[0xd9, 0xe8, 0xd9, 0x00, 0xff, 0xe2], true, true, 2, 3),
+        (&[0xdf, 0xe9, 0xff, 0xe2], true, false, 0, 0),
         (
             &[0xd9, 0x00, 0xd9, 0xe8, 0x8b, 0x03, 0x8b, 0x0b, 0xff, 0xe2],
             true,
             true,
             2,
+            2,
         ),
     ];
     let mut modules = Vec::new();
-    for (code, outlined, segments, read32_sites) in cases {
+    for (code, outlined, segments, scalar_sites, resident_sites) in cases {
         let mut memory = AddressSpace::new(1).unwrap();
         memory
             .map_zeroed(
@@ -250,13 +251,17 @@ fn ordinary_helpers_count_real_x87_sites_and_compose_with_scalar_and_segment_hel
             let plan = ModuleRequirements::new(&prepared.blocks, Some(binding));
             assert_eq!(plan.has_zero_span_validator, outlined);
             assert_eq!(plan.has_segment_check, segments);
-            assert_eq!(plan.has_x87_read32_validator, read32_sites >= 2);
+            assert_eq!(plan.has_x87_read32_validator, scalar_sites >= 2);
             take_read32_sites();
             let bytes = emit(&prepared.blocks, Some(binding), Some(cs.decode_key()));
+            let emitted_sites = match binding {
+                EmbeddedBinding::Replacement { .. } => scalar_sites,
+                EmbeddedBinding::Resident { .. } => resident_sites,
+            };
             assert_eq!(
                 take_read32_sites(),
-                read32_sites,
-                "waiting prechecks count as emitted sites"
+                emitted_sites,
+                "waiting prechecks and pair branches count as real emitted sites"
             );
             modules.push(format!("\"{}\"", hex(&bytes)));
         }

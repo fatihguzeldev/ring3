@@ -18,6 +18,8 @@ use crate::{
     cpu::x86::{Register32, X87State, ir::EffectiveAddress},
 };
 use wasm_encoder::{BlockType, InstructionSink, MemArg};
+
+pub(in crate::cpu::dbt::wasm) mod pair;
 pub(in crate::cpu::dbt::wasm) fn precheck_instruction(
     code: &mut InstructionSink<'_>,
     instruction: &crate::cpu::x86::decode::DecodedOperation,

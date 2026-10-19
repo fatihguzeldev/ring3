@@ -32,16 +32,38 @@ pub struct CompiledRegion {
     bytes: Vec<u8>,
     entry_start: u32,
     entry_end: u32,
+    x87_pairs: Vec<[super::X87PairStep32; 2]>,
 }
 
 impl CompiledRegion {
-    fn new(prepared: PreparedRegion, bytes: Vec<u8>, tier: super::CompilationTier32) -> Self {
+    fn new(
+        prepared: PreparedRegion,
+        bytes: Vec<u8>,
+        tier: super::CompilationTier32,
+        binding: Option<wasm::EmbeddedBinding>,
+    ) -> Result<Self, CompileError> {
+        let mut x87_pairs = Vec::new();
+        if matches!(binding, Some(wasm::EmbeddedBinding::Resident { .. })) {
+            // final retained instructions are the descriptor source after any shortening.
+            let pairs = || {
+                prepared
+                    .blocks
+                    .iter()
+                    .flat_map(|block| super::x87_pairs(&block.instructions))
+            };
+            x87_pairs
+                .try_reserve_exact(pairs().count())
+                .map_err(|_| CompileError::Allocation)?;
+            x87_pairs.extend(pairs());
+            x87_pairs.sort_unstable_by_key(|pair| pair[0].pc);
+        }
         let mut region = Self {
             prepared,
             bytes,
             tier,
             entry_start: u32::MAX,
             entry_end: 0,
+            x87_pairs,
         };
         let (start, end) = region
             .executable_addresses()
@@ -50,7 +72,7 @@ impl CompiledRegion {
             });
         region.entry_start = start;
         region.entry_end = end;
-        region
+        Ok(region)
     }
 
     fn may_contain_entry(&self, pc: u32) -> bool {
@@ -59,6 +81,13 @@ impl CompiledRegion {
 
     pub fn tier(&self) -> super::CompilationTier32 {
         self.tier
+    }
+
+    pub(crate) fn x87_pair(&self, first_pc: u32) -> Option<[super::X87PairStep32; 2]> {
+        self.x87_pairs
+            .binary_search_by_key(&first_pc, |pair| pair[0].pc)
+            .ok()
+            .map(|index| self.x87_pairs[index])
     }
     pub(crate) fn supports_indexed_entry(&self) -> bool {
         self.prepared
@@ -325,11 +354,7 @@ pub(super) fn emit_prepared(
     if bytes.len() > limits.wasm_bytes {
         return Err(CompileError::WasmLimit);
     }
-    Ok(CompiledRegion::new(
-        prepared,
-        bytes,
-        super::CompilationTier32::Baseline,
-    ))
+    CompiledRegion::new(prepared, bytes, super::CompilationTier32::Baseline, binding)
 }
 
 pub(super) fn emit_entry_prepared(
@@ -364,3 +389,7 @@ mod shortening;
 #[cfg(test)]
 #[path = "artifact/tests/bounds.rs"]
 mod bounds_tests;
+
+#[cfg(test)]
+#[path = "artifact/tests/pairs.rs"]
+mod pair_tests;

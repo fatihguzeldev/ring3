@@ -116,7 +116,17 @@ impl EngineInstance {
         key: u64,
         id: u64,
     ) -> Result<(), HostError> {
-        self.check_decode_key(self.guard_resident_region(key, id)?)
+        self.guard_material_resident_region(key, id).map(|_| ())
+    }
+
+    pub(in crate::process) fn guard_material_resident_region(
+        &self,
+        key: u64,
+        id: u64,
+    ) -> Result<&CompiledRegion, HostError> {
+        let region = self.guard_resident_region(key, id)?;
+        self.check_decode_key(region)?;
+        Ok(region)
     }
 
     pub(in crate::process) fn guard_resident_unit(

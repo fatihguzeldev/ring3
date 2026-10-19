@@ -22,6 +22,7 @@ const packet=(version,value=0,length=0,{status=0,detail=0,address=0,access=0}={}
 const pattern=(length,multiplier=17,add=23)=>Buffer.from(Array.from({length},(_,i)=>(i*multiplier+add)&255));
 const parents=()=>[0xa1001234,0xa1012345,0xa1023456,0xa1034567,ESP,0xa1056789,0xa106789a,0xa10789ab];
 const sourcePaths=['engine/src/cpu/x86/decode/x87.rs','engine/src/cpu/x86/decode/simd.rs','engine/src/cpu/dbt/wasm/instructions/x87.rs','engine/src/cpu/dbt/wasm/instructions/simd.rs','engine/src/cpu/dbt/wasm/instructions/simd/direct.rs','engine/src/process/cpu/x87.rs', 'engine/src/process/cpu/mod.rs', 'engine/src/process/mod.rs','engine/src/process/cpu/simd.rs','engine/src/process/memory/span.rs', 'engine/src/process/memory/mod.rs','engine/src/cpu/x86/x87.rs','engine/src/cpu/x86/simd/float.rs', 'engine/src/math/mod.rs', 'engine/src/math/ieee.rs', 'engine/src/math/integer.rs', 'engine/src/lib.rs','engine/src/abi/x86/x87.rs','engine/src/abi/x86/simd.rs','engine/tests/support/wasm/engine.mjs','engine/tests/programs/numeric/fixtures/p2-fp-compiled/runtime/run.mjs',...['x87','sse2'].flatMap(kind=>['kernel.c','kernel.obj','kernel.text.bin','kernel.disasm.txt','receipt.json','cases.json'].map(file=>'engine/tests/programs/numeric/fixtures/p2-fp-compiled/'+kind+'/'+file))];
+sourcePaths.push('engine/src/cpu/dbt/x87_pair.rs','engine/src/cpu/dbt/artifact.rs','engine/src/cpu/dbt/wasm/instructions/x87/pair.rs','engine/src/cpu/dbt/wasm/requirements.rs','engine/src/cpu/dbt/wasm/imports/context.rs','engine/src/cpu/dbt/wasm/imports/wiring.rs','engine/src/cpu/dbt/wasm/emitter/body.rs','engine/src/process/cpu/x87/step.rs','engine/src/process/cpu/x87/pair.rs','engine/src/process/wasm/cpu.rs','engine/src/abi/wasm/exports/cpu.rs');
 const sourceHashes=()=>Object.fromEntries(sourcePaths.map(path=>[path,hash(readFileSync(join(root,path)))])),sourceBefore=sourceHashes();
 const specs=Object.fromEntries(['x87','sse2'].map(kind=>[kind,{cases:JSON.parse(readFileSync(join(root,'engine/tests/programs/numeric/fixtures/p2-fp-compiled',kind,'cases.json'),'utf8')),text:readFileSync(join(root,'engine/tests/programs/numeric/fixtures/p2-fp-compiled',kind,'kernel.text.bin'))}]));
 assert.equal(specs.x87.text.toString('hex'),'5589e583e4f083ec208b450cd9eedb3c2485c074138b4d08db2c24db29dec1db3c2483c1104875f0db2c2489ec5dc3');
@@ -67,8 +68,11 @@ function capture(c,label){
  const a=arena(c);c.binding=c.owner==='resident'?{low:a.readUInt32LE(T+8),high:a.readUInt32LE(T+12),pointer:a.readUInt32LE(T+16),length:a.readUInt32LE(T+20)}:{generation:c.api.generation(),pointer:c.api.module_ptr()>>>0,length:c.api.module_len()>>>0};
  const bytes=Buffer.from(new Uint8Array(c.memory.buffer,c.binding.pointer,c.binding.length)),module=new WebAssembly.Module(bytes),imports=WebAssembly.Module.imports(module),ring3={};
  assert.deepEqual(WebAssembly.Module.exports(module),[{name:'run',kind:'function'}]);assert.deepEqual(imports[0],{module:'env',name:'memory',kind:'memory'});
- const allowed=new Set(['guard_detect','guard_detect_resident','finish_exception_detection','cpu_read32','cpu_store32','cpu_store_resident32','x87_op','x87_resident_op','cpu_read','cpu_write','cpu_write_resident','simd_execute','simd_execute_resident']);
- assert.equal(imports[1].name,c.owner==='resident'?'guard_detect_resident':'guard_detect');assert.equal(imports.at(-1).name,'finish_exception_detection');
+ const allowed=new Set(['guard_detect','guard_detect_resident','finish_exception_detection','cpu_read32','cpu_store32','cpu_store_resident32','x87_op','x87_resident_op','x87_resident_pair','cpu_read','cpu_write','cpu_write_resident','simd_execute','simd_execute_resident']);
+ const hasPairs=c.kind==='x87'&&c.owner==='resident';
+ assert.equal(imports.some(im=>im.name==='x87_resident_pair'),hasPairs,'only the resident x87 kernel has an eligible pair');
+ assert.equal(imports[1].name,c.owner==='resident'?'guard_detect_resident':'guard_detect');
+ assert.deepEqual(imports.slice(hasPairs?-2:-1).map(im=>im.name),hasPairs?['finish_exception_detection','x87_resident_pair']:['finish_exception_detection']);
  for(const im of imports.slice(1)){assert.equal(im.module,'ring3');assert.equal(im.kind,'function');assert.ok(allowed.has(im.name),im.name);assert.equal(typeof c.api[im.name],'function');ring3[im.name]=(...args)=>forward(c,im.name,args);}
  c.run=new WebAssembly.Instance(module,{env:{memory:c.memory},ring3}).exports.run;assert.equal(c.run.length,4);
  const file='module-'+(modules.length+1)+'.wasm';writeFileSync(join(output,file),bytes,{flag:'wx'});modules.push({context:c.id,kind:c.kind,owner:c.owner,entries:c.entries,material:label,file,bytes:bytes.length,sha256:hash(bytes),imports,blocks:blocks.map(({pc,bytes,instructions})=>({pc,length:bytes.length,instructions})),...c.binding});c.material=label;c.materials.set(label,{binding:c.binding,run:c.run});
@@ -76,6 +80,19 @@ function capture(c,label){
 function forward(c,name,args){
  const before=arena(c),status=c.api[name](...args),after=arena(c);if(name.startsWith('guard')){assert.equal(typeof status,'bigint');assert.ok(status>0n,'positive bound entry epoch');c.epoch=status;assert.deepEqual(after,before,'bound guard neutrality');return status;}
  if(name==='finish_exception_detection'){assert.equal(status,0,'actual stop finalizer');assert.deepEqual(args,[c.epoch,...[72,80,84,88,92].map(at=>after.readUInt32LE(at)),0,0,0,0,0,0]);assert.deepEqual(after,before,'detector is arena-neutral');detections.push({context:c.id,case:c.case,args:args.map(n=>typeof n==='bigint'?n.toString():n>>>0),status});return status;}
+ if(name==='x87_resident_pair'){
+  const p=args.slice(4).map(n=>n>>>0),expected=Buffer.from(before),wanted=packet(7,p[3],10);
+  assert.equal(c.kind,'x87');assert.equal(c.owner,'resident');
+  assert.equal(p[0],ENTRY+0x18,'literal first FLD80 in the retained compiler-produced loop');
+  assert.equal(p[1],0x9050,'literal callee local-total stack slot');
+  assert.equal(p[4],2,'the whole-function budget permits both FLD80 instructions');
+  assert.equal(status,(2n<<32n)|(1n<<34n),'native pair completes both reads with the second packet');
+  expected.set(after.subarray(FP,FP+128),FP);expected.set(wanted,100);
+  assert.deepEqual(after.subarray(100,140),wanted,'pair canonical last-step packet');
+  assert.deepEqual(after,expected,'pair changes only floating state and the ordinary helper packet');
+  helpers.push({context:c.id,case:c.case,name,args:args.map(n=>n>>>0),payload:p,status:0,progress:status.toString(),packet_hex:wanted.toString('hex'),x87_hex:after.subarray(FP,FP+128).toString('hex')});
+  return status;
+ }
  const resident=name==='cpu_store_resident32'||name==='x87_resident_op'||name==='cpu_write_resident'||name==='simd_execute_resident',p=args.slice(resident?4:0).map(n=>n>>>0),expected=Buffer.from(before);
  let wanted;
  if(name==='cpu_read32'){const value=ramRead(c,p[0],4).readUInt32LE(0);wanted=packet(10,value,4);}
@@ -114,7 +131,12 @@ function x87Case(c,row,index){
  const cleaned=[...returned];cleaned[4]=ESP;run(c,'natural-return-caller-cleans-cdecl-stack',1,cleaned,c.returnPc+3,0x412,finalFp,sv);
  if(index===1){host(c,'protect',[0xa000,1,1]);c.failStore=true;run(c,'returned-ST0-store-write-fault',1,cleaned,c.returnPc+3,0x412,finalFp,sv,{reason:5,retired:0,fault:{detail:2,address:SCALAR,access:2,length:10}});c.failStore=false;checkRam(c,SCALAR-16,out,'failed x87 store preserves output');const stopped=arena(c);host(c,'protect',[0xa000,1,3]);assert.deepEqual(arena(c),stopped);repairs.push({context:c.id,case:row.name,kind:'x87 returned ST0 output write',repair:'protect only; no CPU/FP/RAM upload, remap or recapture'});}
  const storedFp=expectedX87(fp,row,true,c.returnPc+3);run(c,'caller-consumes-ST0-by-extended80-store',2,cleaned,c.returnPc+9,0x412,storedFp,sv);hex(row.expected.hex80).copy(out,16);checkRam(c,SCALAR-16,out,'literal extended80 result and canaries');checkRam(c,STACK,stack,'callee stack retained after caller');checkRam(c,INPUT-16,data,'x87 input remains unchanged');
- const events=helpers.slice(before),x87=events.filter(e=>e.name.startsWith('x87'));assert.equal(x87.length,4+4*row.count+(index===1?1:0));assert.deepEqual(x87.filter(e=>e.payload[3]===ENTRY+0x1b).map(e=>e.payload[1]),row.inputs.map((_,i)=>INPUT+i*16));assert.equal(events.filter(e=>e.name==='cpu_read32').length,row.count?4:3);assert.equal(events.filter(e=>e.name.startsWith('cpu_store')).length,4);
+ const events=helpers.slice(before),x87=events.filter(e=>e.name.startsWith('x87')),pairs=x87.filter(e=>e.name==='x87_resident_pair');
+ assert.equal(pairs.length,c.owner==='resident'?row.count:0,'one actual pair per original compiler loop iteration');
+ assert.equal(x87.length,4+(c.owner==='resident'?3:4)*row.count+(index===1?1:0),'exact native helper invocation count');
+ const operations=x87.flatMap(e=>e.name==='x87_resident_pair'?[{pc:e.payload[0],address:e.payload[1]},{pc:e.payload[0]+3,address:e.payload[2]}]:[{pc:e.payload[3],address:e.payload[1]}]);
+ assert.equal(operations.length,4+4*row.count+(index===1?1:0),'original x87 instruction count is unchanged');
+ assert.deepEqual(operations.filter(e=>e.pc===ENTRY+0x1b).map(e=>e.address),row.inputs.map((_,i)=>INPUT+i*16));assert.equal(events.filter(e=>e.name==='cpu_read32').length,row.count?4:3);assert.equal(events.filter(e=>e.name.startsWith('cpu_store')).length,4);
  cases.push({context:c.id,kind:'x87',name:row.name,count:row.count,raw_return80:row.expected.hex80,output_hex:out.toString('hex'),data_hex:data.toString('hex'),stack_hex:stack.toString('hex'),helper_calls:events.length,natural_return_pc:c.returnPc});
 }
 function sseCase(c,row,index){

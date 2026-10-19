@@ -24,3 +24,6 @@ mod cpu_x87_compatibility;
 
 #[path = "protocol/wasm/helper.rs"]
 mod cpu_x87_helper_protocol;
+
+#[path = "pairs/wasm.rs"]
+mod cpu_x87_pairs;
