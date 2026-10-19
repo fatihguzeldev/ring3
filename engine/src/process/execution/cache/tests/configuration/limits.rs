@@ -172,7 +172,7 @@ fn invalid_unit_limits_leave_pristine_configuration_and_arena_unchanged() {
             ..larger_limits()
         },
         CompileLimits {
-            instructions: 129,
+            instructions: 257,
             ..larger_limits()
         },
         CompileLimits {
@@ -184,7 +184,7 @@ fn invalid_unit_limits_leave_pristine_configuration_and_arena_unchanged() {
             ..larger_limits()
         },
         CompileLimits {
-            wasm_bytes: 131_073,
+            wasm_bytes: 524_289,
             ..larger_limits()
         },
         CompileLimits {

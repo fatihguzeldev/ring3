@@ -319,29 +319,113 @@ fn selected_larger_limit_captures_all_one_hundred_twenty_eight_owner_starts() {
 }
 
 #[test]
-fn larger_unit_keeps_the_existing_nonindexed_span_baseline_fallback() {
+fn maximum_unit_stages_and_publishes_all_256_whole_owner_starts() {
     let (mut memory, mut registry, cs) = fixture();
-    let mut bytes = [0x66, 0x0f, 0x1f, 0x84, 0, 0, 0, 0, 0].repeat(127);
-    bytes.extend_from_slice(&[0xff, 0xe2]);
-    assert!(bytes.len() > 1024);
-    memory.write(GuestAddress(0x1000), &bytes).unwrap();
-    let id = cached(
-        &mut registry,
-        &memory,
-        0x1000,
-        cs,
-        CompilationTier32::Optimized,
-        CompileLimits {
-            instructions: 128,
-            wasm_bytes: 131072,
-            ..CompileLimits::default()
-        },
-        &|_| false,
-    );
-    let region = registry.get(&memory, id).unwrap();
-    assert_eq!(region.metadata().instructions, 128);
-    assert_eq!(region.tier(), CompilationTier32::Baseline);
-    assert!(!region.supports_indexed_entry());
-    assert_eq!(region.executable_addresses().count(), 128);
-    assert!(region.wasm_bytes(&memory).unwrap().len() <= 131072);
+    let entries = [0x1000_u32, 0x1100, 0x1200, 0x1300];
+    for (index, pc) in entries.into_iter().enumerate() {
+        let target = entries[(index + 1) % entries.len()];
+        let mut bytes = vec![0x90; 63];
+        bytes.push(0xe9);
+        bytes.extend_from_slice(&target.wrapping_sub(pc + 68).to_le_bytes());
+        memory.write(GuestAddress(pc), &bytes).unwrap();
+    }
+    let owners = entries.map(|entry| {
+        cached(
+            &mut registry,
+            &memory,
+            entry,
+            cs,
+            CompilationTier32::Baseline,
+            CompileLimits::default(),
+            &|_| false,
+        )
+    });
+    let usage = registry.usage();
+    let limits = CompileLimits {
+        instructions: 256,
+        wasm_bytes: 262144,
+        ..CompileLimits::default()
+    };
+    let candidate = registry
+        .prepare_cached_replacement(
+            &memory,
+            GuestAddress(0x1000),
+            limits,
+            7,
+            cs,
+            DecodeAuthority::default(),
+            &|_| true,
+            &|_| false,
+        )
+        .unwrap()
+        .unwrap();
+    let coverage = candidate.coverage();
+    assert_eq!(COHORT_INSTRUCTIONS, 256);
+    assert_eq!(coverage.owner_count, 4);
+    assert_eq!(coverage.address_count, 256);
+    assert_eq!(coverage.owners(), owners.map(UnitId::get));
+    for (entry, owner) in entries.into_iter().zip(owners) {
+        for offset in 0..64 {
+            assert!(coverage.addresses[..256].contains(&(entry + offset)));
+            assert_eq!(
+                registry.lookup_bound(&memory, GuestAddress(entry + offset), cs),
+                Ok(owner)
+            );
+        }
+    }
+    assert_eq!(registry.usage(), usage);
+    for owner in owners {
+        registry
+            .discard_quiescent_raw(&memory, owner.get())
+            .unwrap();
+    }
+    let fused = registry
+        .publish_cached_replacement(&memory, cs, candidate, &|_| false)
+        .unwrap();
+    let region = registry.get(&memory, fused).unwrap();
+    assert_eq!(region.metadata().instructions, 256);
+    assert_eq!(region.metadata().blocks, 4);
+    assert_eq!(region.tier(), CompilationTier32::Optimized);
+    assert!(coverage.covers(region));
+    assert!(region.wasm_bytes(&memory).unwrap().len() <= 262144);
+    assert_eq!(registry.usage().units, 1);
+    for entry in entries {
+        for offset in 0..64 {
+            assert_eq!(
+                registry.lookup_bound(&memory, GuestAddress(entry + offset), cs),
+                Ok(fused)
+            );
+        }
+    }
+}
+
+#[test]
+fn larger_unit_keeps_the_existing_nonindexed_span_baseline_fallback() {
+    for instructions in [128, 256] {
+        let (mut memory, mut registry, cs) = fixture();
+        let mut bytes = [0x66, 0x0f, 0x1f, 0x84, 0, 0, 0, 0, 0].repeat(instructions - 1);
+        bytes.extend_from_slice(&[0xff, 0xe2]);
+        assert!(bytes.len() > 1024);
+        memory.write(GuestAddress(0x1000), &bytes).unwrap();
+        let wasm_bytes = instructions * 1024;
+        let id = cached(
+            &mut registry,
+            &memory,
+            0x1000,
+            cs,
+            CompilationTier32::Optimized,
+            CompileLimits {
+                instructions,
+                wasm_bytes,
+                ..CompileLimits::default()
+            },
+            &|_| false,
+        );
+        let region = registry.get(&memory, id).unwrap();
+        assert_eq!(region.metadata().instructions, instructions);
+        assert_eq!(region.tier(), CompilationTier32::Baseline);
+        assert!(!region.supports_indexed_entry());
+        assert_eq!(region.executable_addresses().count(), instructions);
+        assert!(region.wasm_bytes(&memory).unwrap().len() <= wasm_bytes);
+    }
 }

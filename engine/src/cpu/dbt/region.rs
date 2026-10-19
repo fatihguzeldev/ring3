@@ -14,8 +14,8 @@ use crate::{
 use super::gate::{self, GateSpec, PreparedGate};
 
 pub(super) const MAX_BLOCKS: usize = 8;
-pub(super) const MAX_INSTRUCTIONS: usize = 128;
-const MAX_WASM_BYTES: usize = 131_072;
+pub(super) const MAX_INSTRUCTIONS: usize = 256;
+const MAX_WASM_BYTES: usize = 524_288;
 const DEFAULT_INSTRUCTIONS: usize = 64;
 const DEFAULT_WASM_BYTES: usize = 65_536;
 pub(super) const GUEST_END: u64 = 1 << 32;
