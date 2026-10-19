@@ -56,17 +56,25 @@ impl EngineInstance {
                 return Err(HostError::InvalidRequest);
             }
             let descriptors = region.x87_pair(first_pc).ok_or(HostError::InvalidRequest)?;
-            let requests = [0, 1].map(|index| {
-                let X87PairStep32 {
-                    operation,
-                    pc,
-                    opcode,
-                    control,
-                    ..
-                } = descriptors[index];
-                X87Request::new(operation, addresses[index], pc, u32::from(opcode), control)
-            });
-            let requests = [requests[0]?, requests[1]?];
+            let X87PairStep32 {
+                operation,
+                pc,
+                opcode,
+                control,
+                ..
+            } = descriptors[0];
+            let first_request =
+                X87Request::new(operation, addresses[0], pc, u32::from(opcode), control)?;
+            let X87PairStep32 {
+                operation,
+                pc,
+                opcode,
+                control,
+                ..
+            } = descriptors[1];
+            let second_request =
+                X87Request::new(operation, addresses[1], pc, u32::from(opcode), control)?;
+            let requests = [first_request, second_request];
             let state = decode_x87(&self.arena[X87_OFFSET..X87_OFFSET + X87_SIZE])
                 .map_err(|_| HostError::Infrastructure)?;
             Ok((descriptors, requests, state))
