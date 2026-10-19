@@ -7,6 +7,8 @@ pub(super) mod census;
 pub(super) mod compiled;
 pub(super) mod continuation;
 pub(super) mod installation;
+#[cfg(any(target_arch = "wasm32", test))]
+pub(super) mod native_success;
 pub(super) mod owned;
 pub(super) mod receipt;
 pub(super) mod resident;

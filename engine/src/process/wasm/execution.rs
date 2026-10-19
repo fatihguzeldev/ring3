@@ -219,6 +219,32 @@ pub(crate) fn resident_module(low: u32, high: u32) -> u32 {
     mutate(|instance| resident_record(instance, id))
 }
 
+pub(crate) fn resident_native_success_module(
+    key_low: u32,
+    key_high: u32,
+    id_low: u32,
+    id_high: u32,
+) -> u32 {
+    REGISTRY.with(|registry| {
+        let Ok(mut registry) = registry.try_borrow_mut() else {
+            return 9;
+        };
+        let Some(instance) = registry.instance.as_mut() else {
+            return 5;
+        };
+        let key = u64::from(key_low) | (u64::from(key_high) << 32);
+        let id = u64::from(id_low) | (u64::from(id_high) << 32);
+        let (pointer, length) = match instance.prepare_native_success_module(key, id) {
+            Ok(bytes) => (bytes.as_ptr() as u32, bytes.len() as u32),
+            Err(error) => return status(error),
+        };
+        let output = &mut instance.arena.as_mut().get_mut()
+            [TRANSFER_OFFSET..TRANSFER_OFFSET + RESIDENT_MODULE_RECORD_SIZE];
+        encode_resident_module(id, pointer, length, output.try_into().unwrap());
+        0
+    })
+}
+
 fn resident_record(instance: &mut EngineInstance, id: u64) -> Result<(), HostError> {
     let bytes = instance.resident_bytes(id)?;
     let pointer = bytes.as_ptr() as u32;

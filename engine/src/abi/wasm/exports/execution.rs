@@ -19,6 +19,7 @@ export_process_calls! {
     compile_resident_callback_unit(key_low: u32, key_high: u32, home_low: u32, home_high: u32, callback_token: u32, count: u32, gate_count: u32);
     dispatcher_module(low: u32, high: u32);
     resident_module(low: u32, high: u32);
+    resident_native_success_module(key_low: u32, key_high: u32, id_low: u32, id_high: u32);
     discard_installed_resident(key_low: u32, key_high: u32, id_low: u32, id_high: u32, expected_slot: u32);
     retire_stale_resident(key_low: u32, key_high: u32, id_low: u32, id_high: u32);
     discard_unacknowledged_resident(key_low: u32, key_high: u32, id_low: u32, id_high: u32);

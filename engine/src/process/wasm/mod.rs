@@ -418,7 +418,7 @@ pub(crate) use execution::{
     dispatcher_module, find_installed_resident, find_resident, finish_execution_receipt,
     generation, guard, guard_dispatch_entry, guard_resident, install_cached_entry, module_len,
     module_ptr, pending_cache_request, prepare_cache_entry, prepare_cache_promotion,
-    resident_module, retire_stale_resident,
+    resident_module, resident_native_success_module, retire_stale_resident,
 };
 
 mod calls;
@@ -484,7 +484,8 @@ pub(crate) use paging::{
 
 mod detection;
 pub(crate) use detection::{
-    finish_exception_detection, guard_detect, guard_detect_resident, take_cpu_event,
+    finish_exception_detection, guard_detect, guard_detect_resident,
+    guard_detect_resident_native_success, take_cpu_event,
 };
 
 mod avx;

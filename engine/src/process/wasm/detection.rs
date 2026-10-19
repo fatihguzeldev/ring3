@@ -4,7 +4,14 @@ use crate::{
     process::{CallError, HostError, calls::call::PendingOwner},
 };
 
-fn guard_detection(key: u64, material: u64, resident: bool, pointers: [u32; 3]) -> i64 {
+#[derive(Clone, Copy)]
+enum EntryProfile {
+    Replacement,
+    Resident,
+    NativeSuccess,
+}
+
+fn guard_detection(key: u64, material: u64, profile: EntryProfile, pointers: [u32; 3]) -> i64 {
     REGISTRY.with(|registry| {
         let Ok(mut registry) = registry.try_borrow_mut() else {
             return -9;
@@ -13,6 +20,7 @@ fn guard_detection(key: u64, material: u64, resident: bool, pointers: [u32; 3]) 
             return -5;
         };
         let result = (|| {
+            let resident = !matches!(profile, EntryProfile::Replacement);
             if resident {
                 instance.guard_resident(key, material).map_err(status)?;
             } else {
@@ -29,6 +37,9 @@ fn guard_detection(key: u64, material: u64, resident: bool, pointers: [u32; 3]) 
                 ]
             {
                 return Err(1);
+            }
+            if matches!(profile, EntryProfile::NativeSuccess) {
+                instance.guard_native_success_receipt().map_err(status)?;
             }
             let owner = if resident {
                 if let Some(callback) = instance.callback.as_ref() {
@@ -62,7 +73,7 @@ pub(crate) fn guard_detect(
     guard_detection(
         u64::from(low) | (u64::from(high) << 32),
         u64::from(generation),
-        false,
+        EntryProfile::Replacement,
         [state, exit, cancel],
     )
 }
@@ -79,7 +90,24 @@ pub(crate) fn guard_detect_resident(
     guard_detection(
         u64::from(low) | (u64::from(high) << 32),
         u64::from(id_low) | (u64::from(id_high) << 32),
-        true,
+        EntryProfile::Resident,
+        [state, exit, cancel],
+    )
+}
+
+pub(crate) fn guard_detect_resident_native_success(
+    low: u32,
+    high: u32,
+    id_low: u32,
+    id_high: u32,
+    state: u32,
+    exit: u32,
+    cancel: u32,
+) -> i64 {
+    guard_detection(
+        u64::from(low) | (u64::from(high) << 32),
+        u64::from(id_low) | (u64::from(id_high) << 32),
+        EntryProfile::NativeSuccess,
         [state, exit, cancel],
     )
 }

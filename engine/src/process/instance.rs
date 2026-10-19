@@ -158,6 +158,8 @@ pub struct EngineInstance {
         Option<crate::process::execution::census::ExecutionCensus32>,
     #[cfg(any(all(feature = "observability", target_arch = "wasm32"), test))]
     pub(in crate::process) execution_census_generation: u64,
+    #[cfg(any(target_arch = "wasm32", test))]
+    pub(in crate::process) native_success_module: Vec<u8>,
 }
 
 impl EngineInstance {
@@ -200,6 +202,8 @@ impl EngineInstance {
             arena: Box::into_pin(arena.into_boxed_slice()),
             artifact: None,
             dispatcher: Some(emit_dispatcher(key)),
+            #[cfg(any(target_arch = "wasm32", test))]
+            native_success_module: Vec::new(),
             resident: None,
             resident_installations: vec![None; RESIDENT_INSTALLATION_SLOTS],
             resident_installations_by_id,
@@ -356,6 +360,8 @@ impl EngineInstance {
         self.callback = None;
         self.artifact = None;
         self.dispatcher = None;
+        #[cfg(any(target_arch = "wasm32", test))]
+        self.native_success_module.clear();
         self.resident = None;
         self.resident_installations.clear();
         self.resident_installations_by_id.clear();

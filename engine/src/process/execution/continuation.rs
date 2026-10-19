@@ -58,6 +58,17 @@ impl EngineInstance {
 
 #[cfg(any(target_arch = "wasm32", test))]
 impl EngineInstance {
+    pub(in crate::process) fn guard_native_success_receipt(&self) -> Result<(), HostError> {
+        let compiled = self
+            .compiled_execution
+            .as_ref()
+            .ok_or(HostError::InvalidRequest)?;
+        if self.owned_receipt_token() != Some(compiled.token) {
+            return Err(HostError::Call(CallError::StateChanged));
+        }
+        Ok(())
+    }
+
     pub(super) fn invalidate_compiled_context(&self) {
         if let Some(compiled) = &self.compiled_execution {
             compiled.seeded.set(false);

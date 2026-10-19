@@ -16,6 +16,7 @@ macro_rules! export_detection_guards {
 export_detection_guards! {
     guard_detect(low: u32, high: u32, generation: u32, state: u32, exit: u32, cancel: u32);
     guard_detect_resident(low: u32, high: u32, id_low: u32, id_high: u32, state: u32, exit: u32, cancel: u32);
+    guard_detect_resident_native_success(low: u32, high: u32, id_low: u32, id_high: u32, state: u32, exit: u32, cancel: u32);
 }
 
 export_process_calls! {
