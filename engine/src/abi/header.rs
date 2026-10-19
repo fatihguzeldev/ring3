@@ -1,9 +1,11 @@
 use super::{ABI_VERSION, AbiError, X86_INTEGER_PROFILE};
 
+#[inline(always)]
 pub(crate) fn validate(bytes: &[u8], magic: [u8; 4], size: usize) -> Result<(), AbiError> {
     validate_versions(bytes, magic, size, &[ABI_VERSION]).map(|_| ())
 }
 
+#[inline(always)]
 pub(crate) fn validate_versions(
     bytes: &[u8],
     magic: [u8; 4],
@@ -17,6 +19,7 @@ pub(crate) fn validate_versions(
     Ok(version)
 }
 
+#[inline(always)]
 pub(crate) fn validate_versions_with_metadata(
     bytes: &[u8],
     magic: [u8; 4],
