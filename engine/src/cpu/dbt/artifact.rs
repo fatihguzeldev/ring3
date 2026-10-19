@@ -11,6 +11,10 @@ use crate::{
     memory::{AddressSpace, GuestAddress},
 };
 
+mod native_x87;
+use native_x87::NativeX87Catalog32;
+pub(crate) use native_x87::{X87NativePlan32, X87PreparedStep32};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ArtifactError {
     CodeInvalidated,
@@ -33,8 +37,11 @@ pub struct CompiledRegion {
     entry_start: u32,
     entry_end: u32,
     has_indexed_entry: bool,
+    #[cfg(test)]
     x87_pairs: Vec<[super::X87PairStep32; 2]>,
+    #[cfg(test)]
     x87_groups: Vec<X87GroupSpan32>,
+    native_x87: Option<NativeX87Catalog32>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -102,6 +109,15 @@ impl CompiledRegion {
                 });
             }
         }
+        let native_x87 = if x87_pairs.is_empty() && x87_groups.is_empty() {
+            None
+        } else {
+            Some(NativeX87Catalog32::new(
+                &prepared.blocks,
+                &x87_pairs,
+                &x87_groups,
+            )?)
+        };
         // this describes final immutable ir, not current source or decode authority.
         let has_indexed_entry = prepared
             .blocks
@@ -114,8 +130,11 @@ impl CompiledRegion {
             entry_start: u32::MAX,
             entry_end: 0,
             has_indexed_entry,
+            #[cfg(test)]
             x87_pairs,
+            #[cfg(test)]
             x87_groups,
+            native_x87,
         };
         let (start, end) = region
             .executable_addresses()
@@ -135,6 +154,7 @@ impl CompiledRegion {
         self.tier
     }
 
+    #[cfg(test)]
     pub(crate) fn x87_pair(&self, first_pc: u32) -> Option<[super::X87PairStep32; 2]> {
         self.x87_pairs
             .binary_search_by_key(&first_pc, |pair| pair[0].pc)
@@ -142,6 +162,19 @@ impl CompiledRegion {
             .map(|index| self.x87_pairs[index])
     }
 
+    pub(crate) fn native_x87_pair(&self, first_pc: u32) -> Option<X87NativePlan32> {
+        self.native_x87.as_ref()?.pair(first_pc)
+    }
+
+    pub(crate) fn native_x87_group(&self, ordinal: u32) -> Option<X87NativePlan32> {
+        self.native_x87.as_ref()?.group(ordinal, false)
+    }
+
+    pub(crate) fn native_x87_group32(&self, ordinal: u32) -> Option<X87NativePlan32> {
+        self.native_x87.as_ref()?.group(ordinal, true)
+    }
+
+    #[cfg(test)]
     pub(crate) fn x87_group(&self, ordinal: u32) -> Option<super::X87Group32> {
         let span = self.x87_groups.get(ordinal as usize)?;
         let block = self.prepared.blocks.get(usize::from(span.block))?;
@@ -152,6 +185,7 @@ impl CompiledRegion {
         .descriptors(&block.instructions)
     }
 
+    #[cfg(test)]
     pub(crate) fn x87_group32(&self, ordinal: u32) -> Option<super::X87WideGroup32<'_>> {
         let span = self.x87_groups.get(ordinal as usize)?;
         let block = self.prepared.blocks.get(usize::from(span.block))?;
@@ -470,6 +504,10 @@ mod group_tests;
 #[cfg(test)]
 #[path = "artifact/tests/wide_groups.rs"]
 mod wide_group_tests;
+
+#[cfg(test)]
+#[path = "artifact/tests/native_x87.rs"]
+mod native_x87_tests;
 
 #[cfg(test)]
 #[path = "artifact/tests/indexed/mod.rs"]

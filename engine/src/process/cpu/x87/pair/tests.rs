@@ -4,7 +4,7 @@ use crate::{
         arena::SEGMENTS_OFFSET,
         x86::{SEGMENTS_SIZE, encode_segment_context},
     },
-    cpu::x86::SegmentCache,
+    cpu::{dbt::X87PairStep32, x86::SegmentCache},
     process::{ExecutionConfig32, calls::call::PendingOwner},
 };
 

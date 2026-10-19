@@ -22,6 +22,7 @@ pub(crate) use x87_pair::{
 
 pub use tier::CompilationTier32;
 
+pub(crate) use artifact::X87PreparedStep32;
 pub(crate) use artifact::compile_runtime_entry;
 pub(crate) use artifact::{compile_embedded_entry_region, compile_embedded_region};
 pub(crate) use wasm::emit_dispatcher;

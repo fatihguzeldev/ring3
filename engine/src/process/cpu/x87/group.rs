@@ -2,7 +2,7 @@ use super::{step::X87Request, *};
 use crate::{
     abi::{arena::CANCEL_OFFSET, header},
     cpu::{
-        dbt::{X87_GROUP_MAX_STEPS, X87Group32},
+        dbt::X87_GROUP_MAX_STEPS,
         x86::{SegmentContext, X87State, decode::CodeFetchContext},
     },
 };
@@ -42,31 +42,6 @@ pub(super) struct Packet {
     pub(super) result: Result<(), CpuMemoryError>,
 }
 
-fn requests(
-    group: &X87Group32,
-    addresses: [u32; X87_GROUP_MAX_STEPS],
-) -> Result<[X87Request; X87_GROUP_MAX_STEPS], HostError> {
-    let first = group.steps()[0];
-    let first = X87Request::new(
-        first.operation,
-        addresses[0],
-        first.pc,
-        u32::from(first.opcode),
-        first.control,
-    )?;
-    let mut requests = [first; X87_GROUP_MAX_STEPS];
-    for (index, descriptor) in group.steps().iter().enumerate().skip(1) {
-        requests[index] = X87Request::new(
-            descriptor.operation,
-            addresses[index],
-            descriptor.pc,
-            u32::from(descriptor.opcode),
-            descriptor.control,
-        )?;
-    }
-    Ok(requests)
-}
-
 impl EngineInstance {
     #[allow(clippy::too_many_arguments)]
     pub(in crate::process) fn x87_resident_group(
@@ -80,16 +55,17 @@ impl EngineInstance {
     ) -> X87GroupOutcome {
         let prepare = (|| {
             let region = self.guard_material_resident_region(key, id)?;
-            let group = region.x87_group(ordinal).ok_or(HostError::InvalidRequest)?;
-            if max_steps == 0 || max_steps as usize > group.len() {
+            let group = region
+                .native_x87_group(ordinal)
+                .ok_or(HostError::InvalidRequest)?;
+            if max_steps == 0 || max_steps as usize > group.steps().len() {
                 return Err(HostError::InvalidRequest);
             }
-            let requests = requests(&group, addresses)?;
             let state = decode_x87(&self.arena[X87_OFFSET..X87_OFFSET + X87_SIZE])
                 .map_err(|_| HostError::Infrastructure)?;
-            Ok((group, requests, state))
+            Ok((group, state))
         })();
-        let (group, requests, mut state) = match prepare {
+        let (group, mut state) = match prepare {
             Ok(prepared) => prepared,
             Err(error) => return X87GroupOutcome::failure(0, 0, error),
         };
@@ -98,13 +74,15 @@ impl EngineInstance {
         let mut publish_state = false;
         let mut packet = None;
         for index in 0..max_steps as usize {
-            let request = requests[index];
+            let descriptor = &group.steps()[index];
+            let request = X87Request::prepared(descriptor, addresses[index]);
             if index != 0 {
-                let descriptor = group.steps()[index];
                 let permitted = context
                     .as_ref()
                     .and_then(CodeFetchContext::from_segments)
-                    .is_some_and(|cs| cs.permits(GuestAddress(descriptor.pc), descriptor.length));
+                    .is_some_and(|cs| {
+                        cs.permits(GuestAddress(descriptor.pc), descriptor.instruction_length)
+                    });
                 if header::read_u32(&self.arena, CANCEL_OFFSET) != 0
                     || !permitted
                     || request.waiting && state.status & 0x3f & !state.control != 0
@@ -118,7 +96,7 @@ impl EngineInstance {
                 }
             }
             if request.write_size != 0 {
-                if index + 1 != group.len() {
+                if index + 1 != group.steps().len() {
                     return self.finish_x87_group(
                         &state,
                         publish_state,

@@ -1,10 +1,7 @@
 use super::{step::X87Request, *};
 use crate::{
     abi::{arena::CANCEL_OFFSET, header},
-    cpu::{
-        dbt::X87PairStep32,
-        x86::{SegmentContext, X87State, decode::CodeFetchContext},
-    },
+    cpu::x86::{SegmentContext, X87State, decode::CodeFetchContext},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -55,31 +52,14 @@ impl EngineInstance {
             if !(1..=2).contains(&max_steps) {
                 return Err(HostError::InvalidRequest);
             }
-            let descriptors = region.x87_pair(first_pc).ok_or(HostError::InvalidRequest)?;
-            let X87PairStep32 {
-                operation,
-                pc,
-                opcode,
-                control,
-                ..
-            } = descriptors[0];
-            let first_request =
-                X87Request::new(operation, addresses[0], pc, u32::from(opcode), control)?;
-            let X87PairStep32 {
-                operation,
-                pc,
-                opcode,
-                control,
-                ..
-            } = descriptors[1];
-            let second_request =
-                X87Request::new(operation, addresses[1], pc, u32::from(opcode), control)?;
-            let requests = [first_request, second_request];
+            let plan = region
+                .native_x87_pair(first_pc)
+                .ok_or(HostError::InvalidRequest)?;
             let state = decode_x87(&self.arena[X87_OFFSET..X87_OFFSET + X87_SIZE])
                 .map_err(|_| HostError::Infrastructure)?;
-            Ok((descriptors, requests, state))
+            Ok((plan, state))
         })();
-        let (descriptors, requests, mut state) = match prepare {
+        let (plan, mut state) = match prepare {
             Ok(prepared) => prepared,
             Err(error) => return X87PairOutcome::failure(0, 0, error),
         };
@@ -88,16 +68,18 @@ impl EngineInstance {
         let mut publish_state = false;
         let mut packet = None;
         for index in 0..max_steps as usize {
+            let descriptor = &plan.steps()[index];
+            let request = X87Request::prepared(descriptor, addresses[index]);
             if index == 1 {
                 let permitted = context
                     .as_ref()
                     .and_then(CodeFetchContext::from_segments)
                     .is_some_and(|cs| {
-                        cs.permits(GuestAddress(descriptors[1].pc), descriptors[1].length)
+                        cs.permits(GuestAddress(descriptor.pc), descriptor.instruction_length)
                     });
                 if header::read_u32(&self.arena, CANCEL_OFFSET) != 0
                     || !permitted
-                    || requests[1].waiting && state.status & 0x3f & !state.control != 0
+                    || request.waiting && state.status & 0x3f & !state.control != 0
                 {
                     return self.finish_x87_pair(
                         &state,
@@ -106,7 +88,7 @@ impl EngineInstance {
                         X87PairOutcome::complete(completed, 0),
                     );
                 }
-                if requests[index].write_size != 0 {
+                if request.write_size != 0 {
                     let prefix = self.finish_x87_pair(
                         &state,
                         publish_state,
@@ -116,27 +98,20 @@ impl EngineInstance {
                     if prefix.result.is_err() {
                         return prefix;
                     }
-                    return self.x87_final_store_pair(
-                        id,
-                        &mut state,
-                        &mut context,
-                        requests[index],
-                        flags,
-                    );
+                    return self.x87_final_store_pair(id, &mut state, &mut context, request, flags);
                 }
             }
-            let outcome =
-                match self.x87_step(&mut state, &mut context, requests[index], flags, &mut None) {
-                    Ok(outcome) => outcome,
-                    Err(error) => {
-                        return self.finish_x87_pair(
-                            &state,
-                            publish_state,
-                            packet,
-                            X87PairOutcome::failure(completed, index as u32, error),
-                        );
-                    }
-                };
+            let outcome = match self.x87_step(&mut state, &mut context, request, flags, &mut None) {
+                Ok(outcome) => outcome,
+                Err(error) => {
+                    return self.finish_x87_pair(
+                        &state,
+                        publish_state,
+                        packet,
+                        X87PairOutcome::failure(completed, index as u32, error),
+                    );
+                }
+            };
             if outcome.memory_len != 0 {
                 return self.finish_x87_pair(
                     &state,
@@ -149,7 +124,7 @@ impl EngineInstance {
                 publish_state = true;
             }
             packet = Some(Packet {
-                length: requests[index].length,
+                length: request.length,
                 value: outcome.value,
                 result: outcome.result,
             });

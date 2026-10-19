@@ -15,6 +15,22 @@ pub(super) struct X87Request {
 }
 
 impl X87Request {
+    pub(super) fn prepared(step: &crate::cpu::dbt::X87PreparedStep32, address: u32) -> Self {
+        let read_size = usize::from(step.read_size);
+        let write_size = usize::from(step.write_size);
+        Self {
+            operation: step.operation,
+            address,
+            pc: step.pc,
+            opcode: step.opcode,
+            segment: step.segment,
+            waiting: step.waiting,
+            read_size,
+            write_size,
+            length: read_size.max(write_size) as u32,
+        }
+    }
+
     pub(super) fn new(
         operation: X87Operation,
         address: u32,
