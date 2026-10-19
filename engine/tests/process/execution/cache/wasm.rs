@@ -35,3 +35,6 @@ fn actual_engine_cache_promotes_indexed_code_with_identical_safepoints_and_warm_
 
 #[path = "cohort/wasm.rs"]
 mod cohort;
+
+#[path = "hinted/wasm.rs"]
+mod hinted;
