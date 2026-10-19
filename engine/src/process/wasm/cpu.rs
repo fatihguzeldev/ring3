@@ -1,6 +1,6 @@
 use super::paging::{cpu_mutate, cpu_paging_store};
 use super::{REGISTRY, mutate, status};
-use crate::process::HostError;
+use crate::process::{HostError, StoreCompletion};
 
 pub(crate) fn cpu_read8(address: u32) -> u32 {
     cpu_mutate(|instance| instance.cpu_read8(address))
@@ -169,10 +169,11 @@ pub(crate) fn x87_resident_pair(
             max_steps,
         );
         let transport = match outcome.result {
-            Ok(()) if instance.cpu_page_fault_sequence32() != before => {
+            Ok(StoreCompletion::Complete) if instance.cpu_page_fault_sequence32() != before => {
                 crate::abi::cpu_helper::CPU_PAGE_FAULT_TRANSPORT
             }
-            Ok(()) => 0,
+            Ok(StoreCompletion::Complete) => 0,
+            Ok(StoreCompletion::CodeInvalidated) => 11,
             Err(error) => status(error),
         };
         X87PairProgress32::encode(transport, outcome.completed, outcome.reported_step) as i64

@@ -11,7 +11,7 @@ use crate::{
 pub(in crate::process) struct X87PairOutcome {
     pub(in crate::process) completed: u32,
     pub(in crate::process) reported_step: u32,
-    pub(in crate::process) result: Result<(), HostError>,
+    pub(in crate::process) result: Result<StoreCompletion, HostError>,
 }
 
 impl X87PairOutcome {
@@ -27,7 +27,7 @@ impl X87PairOutcome {
         Self {
             completed,
             reported_step,
-            result: Ok(()),
+            result: Ok(StoreCompletion::Complete),
         }
     }
 }
@@ -98,6 +98,24 @@ impl EngineInstance {
                         X87PairOutcome::complete(completed, 0),
                     );
                 }
+                if requests[index].write_size != 0 {
+                    let prefix = self.finish_x87_pair(
+                        &state,
+                        publish_state,
+                        packet,
+                        X87PairOutcome::complete(completed, 0),
+                    );
+                    if prefix.result.is_err() {
+                        return prefix;
+                    }
+                    return self.x87_final_store_pair(
+                        id,
+                        &mut state,
+                        &mut context,
+                        requests[index],
+                        flags,
+                    );
+                }
             }
             let outcome =
                 match self.x87_step(&mut state, &mut context, requests[index], flags, &mut None) {
@@ -143,6 +161,47 @@ impl EngineInstance {
             packet,
             X87PairOutcome::complete(completed, completed - 1),
         )
+    }
+
+    fn x87_final_store_pair(
+        &mut self,
+        id: u64,
+        state: &mut X87State,
+        context: &mut Option<SegmentContext>,
+        request: X87Request,
+        flags: u32,
+    ) -> X87PairOutcome {
+        let mut output = None;
+        let outcome = match self.x87_step(state, context, request, flags, &mut output) {
+            Ok(outcome) => outcome,
+            Err(error) => return X87PairOutcome::failure(1, 1, error),
+        };
+        if outcome.result.is_err() || outcome.memory_len == 0 {
+            return self.finish_x87_pair(
+                state,
+                outcome.publish_state,
+                Some(Packet {
+                    length: request.length,
+                    value: outcome.value,
+                    result: outcome.result,
+                }),
+                X87PairOutcome::complete(1 + u32::from(outcome.result.is_ok()), 1),
+            );
+        }
+        match self.x87_commit_store(
+            request,
+            state,
+            outcome.value,
+            &output.as_ref().unwrap()[..outcome.memory_len],
+            Some(id),
+        ) {
+            Ok(commit) => X87PairOutcome {
+                completed: 1 + u32::from(commit.instruction_completed),
+                reported_step: 1,
+                result: Ok(commit.completion),
+            },
+            Err(error) => X87PairOutcome::failure(1, 1, error),
+        }
     }
 
     fn finish_x87_pair(

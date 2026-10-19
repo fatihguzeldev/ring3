@@ -17,6 +17,12 @@ use crate::process::instance::{EngineInstance, HostError, StoreCompletion};
 mod pair;
 mod step;
 
+struct X87StoreCommit {
+    completion: StoreCompletion,
+    // an encoded write failure can have a complete transport without completing the instruction.
+    instruction_completed: bool,
+}
+
 impl EngineInstance {
     pub fn x87_op(
         &mut self,
@@ -77,24 +83,51 @@ impl EngineInstance {
                 resident,
             );
         }
-        let mut record = [0; X87_SIZE];
-        encode_x87(&state, &mut record).map_err(|_| HostError::Infrastructure)?;
-        let version = self.memory.as_ref().unwrap().code_validation_version();
-        if let Err(error) = self.cpu_memory_port32().write(
-            GuestAddress(address),
+        self.x87_commit_store(
+            request,
+            &state,
+            outcome.value,
             &output.as_ref().unwrap()[..outcome.memory_len],
-        ) {
-            return self.x87_packet(
-                request.length,
-                0,
-                Err(CpuMemoryError::from(error)),
-                false,
-                resident,
-            );
+            resident,
+        )
+        .map(|outcome| outcome.completion)
+    }
+
+    fn x87_commit_store(
+        &mut self,
+        request: step::X87Request,
+        state: &crate::cpu::x86::X87State,
+        value: u32,
+        output: &[u8],
+        resident: Option<u64>,
+    ) -> Result<X87StoreCommit, HostError> {
+        let mut record = [0; X87_SIZE];
+        encode_x87(state, &mut record).map_err(|_| HostError::Infrastructure)?;
+        let version = self.memory.as_ref().unwrap().code_validation_version();
+        if let Err(error) = self
+            .cpu_memory_port32()
+            .write(GuestAddress(request.address), output)
+        {
+            return self
+                .x87_packet(
+                    request.length,
+                    0,
+                    Err(CpuMemoryError::from(error)),
+                    false,
+                    resident,
+                )
+                .map(|completion| X87StoreCommit {
+                    completion,
+                    instruction_completed: false,
+                });
         }
         let changed = version != self.memory.as_ref().unwrap().code_validation_version();
         self.arena[X87_OFFSET..X87_OFFSET + X87_SIZE].copy_from_slice(&record);
-        self.x87_packet(request.length, outcome.value, Ok(()), changed, resident)
+        self.x87_packet(request.length, value, Ok(()), changed, resident)
+            .map(|completion| X87StoreCommit {
+                completion,
+                instruction_completed: true,
+            })
     }
 
     fn x87_packet(

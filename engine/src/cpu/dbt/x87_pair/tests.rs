@@ -64,9 +64,13 @@ fn pairs_keep_exact_nonoverlapping_entries_and_descriptor_provenance() {
 }
 
 #[test]
-fn pairs_reject_guest_writes_flags_control_and_nonadjacent_material() {
+fn pairs_reject_other_guest_writes_flags_control_and_nonadjacent_material() {
     for excluded in [
-        &[0xd9, 0x1b][..], // fstp dword[ebx].
+        &[0xd9, 0x13][..], // fst dword[ebx], without pop.
+        &[0xdd, 0x1b],     // fstp qword[ebx].
+        &[0xdb, 0x3b],     // fstp tbyte[ebx].
+        &[0xdb, 0x1b],     // fistp dword[ebx].
+        &[0xdb, 0x0b],     // fisttp dword[ebx].
         &[0xdb, 0xf1],     // fcomi st0,st1.
         &[0xdf, 0xe0],     // fnstsw ax.
         &[0xd9, 0x2b],     // fldcw word[ebx].
@@ -89,6 +93,47 @@ fn pairs_reject_guest_writes_flags_control_and_nonadjacent_material() {
     );
     assert_eq!(pair[1].operation.read_size(), 4);
     assert_eq!(pair[0].address.unwrap().displacement, 4);
+}
+
+#[test]
+fn pairs_allow_only_a_final_memory_float32_pop_store_with_exact_provenance() {
+    let source = instructions(&[0xd9, 0xe8, 0x64, 0xd9, 0x5b, 4, 0xd9, 0xee, 0xd9, 0x1b]);
+    let pairs = x87_pairs(&source).collect::<Vec<_>>();
+    assert_eq!(pairs.len(), 2);
+    assert_eq!(
+        pairs
+            .iter()
+            .map(|pair| [pair[0].pc, pair[1].pc])
+            .collect::<Vec<_>>(),
+        [[0x1000, 0x1002], [0x1006, 0x1008]]
+    );
+    let step = pairs[0][1];
+    assert_eq!(
+        step.operation,
+        X87Operation::Store {
+            format: X87Format::Float32,
+            pop: true,
+            truncate: false,
+        }
+    );
+    assert_eq!(step.length, 4);
+    assert_eq!(step.next_pc, 0x1006);
+    assert_eq!(step.opcode, 0x15b);
+    assert_eq!(step.address.unwrap().displacement, 4);
+    assert_eq!(
+        step.control,
+        1 | ((crate::cpu::x86::SegmentRegister::Fs.index() as u32 + 1) << 8)
+    );
+    // a store is never the first instruction, including after another store.
+    for code in [&[0xd9, 0x1b, 0xd9, 0xe8][..], &[0xd9, 0x1b, 0xd9, 0x1f]] {
+        assert!(x87_pairs(&instructions(code)).next().is_none());
+    }
+    // greediness preserves the earlier computational pair in a three-op run.
+    let source = instructions(&[0xd9, 0xe8, 0xd9, 0xee, 0xd9, 0x1b]);
+    let pairs = x87_pairs(&source).collect::<Vec<_>>();
+    assert_eq!(pairs.len(), 1);
+    assert_eq!(pairs[0].map(|step| step.pc), [0x1000, 0x1002]);
+    assert!(pairs[0].iter().all(|step| step.operation.write_size() == 0));
 }
 
 #[test]

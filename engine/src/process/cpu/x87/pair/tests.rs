@@ -11,6 +11,8 @@ use crate::{
 const KEY: u64 = 97;
 const FLAGS: u32 = 0x46;
 
+mod stores;
+
 fn fixture(code: &[u8]) -> (EngineInstance, u64, [X87PairStep32; 2]) {
     let mut engine = EngineInstance::new(3, KEY).unwrap();
     engine.map(0x1000, 1, 7).unwrap();

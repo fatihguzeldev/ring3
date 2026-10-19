@@ -56,7 +56,9 @@ fn pair_import_requires_resident_binding_and_two_eligible_adjacent_instructions(
         &[0x90, 0x90][..],
         &[0xd9, 0xe8],
         &[0xd9, 0xe8, 0x90, 0xd9, 0xee],
-        &[0xd9, 0xe8, 0xd9, 0x1b],
+        &[0xd9, 0x1b, 0xd9, 0xe8],
+        &[0xd9, 0xe8, 0xd9, 0x13],
+        &[0xd9, 0xe8, 0xdd, 0x1b],
         &[0xd9, 0xe8, 0xdb, 0xf1],
         &[0xd9, 0xe8, 0xd9, 0x2b],
     ] {
@@ -72,4 +74,25 @@ fn pair_import_requires_resident_binding_and_two_eligible_adjacent_instructions(
         sections.context.x87_pair,
         Some(crate::cpu::dbt::wasm::imports::HelperBinding::Resident { key: 7, id: 1, .. })
     ));
+}
+
+#[test]
+fn final_float32_store_pair_keeps_resident_only_import_and_write_validator() {
+    let region = prepared(&[0xd9, 0xe8, 0xd9, 0x1b]);
+    for binding in [
+        EmbeddedBinding::Resident { key: 7, id: 1 },
+        EmbeddedBinding::Replacement {
+            key: 7,
+            generation: 1,
+        },
+    ] {
+        let plan = ModuleRequirements::new(&region.blocks, Some(binding));
+        assert!(plan.has_x87_write32_validator);
+        assert_eq!(
+            plan.has_x87_pairs,
+            matches!(binding, EmbeddedBinding::Resident { .. })
+        );
+        let imports = crate::cpu::dbt::wasm::imports::wiring::build(&plan, Some(binding));
+        assert_eq!(imports.context.x87_pair.is_some(), plan.has_x87_pairs);
+    }
 }

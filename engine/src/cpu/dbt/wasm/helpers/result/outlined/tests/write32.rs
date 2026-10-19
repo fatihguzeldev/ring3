@@ -100,7 +100,7 @@ fn write32_planning_counts_waiting_sites_and_composes_with_all_private_validator
         },
         memory::{AddressSpace, GuestAddress, PageRange, Permissions},
     };
-    let cases: [(&[u8], usize); 6] = [
+    let cases: [(&[u8], usize); 7] = [
         (&[0x90, 0xff, 0xe2], 0),
         (&[0xd9, 0x18, 0xff, 0xe2], 2), // fstp float32.
         (&[0xdb, 0x18, 0xff, 0xe2], 2), // fistp int32.
@@ -112,6 +112,7 @@ fn write32_planning_counts_waiting_sites_and_composes_with_all_private_validator
             ],
             2,
         ),
+        (&[0xd9, 0xe8, 0xd9, 0x18, 0xff, 0xe2], 2), // fld1; fstp float32.
     ];
     let mut modules = Vec::new();
     for (index, (code, sites)) in cases.into_iter().enumerate() {
@@ -151,17 +152,23 @@ fn write32_planning_counts_waiting_sites_and_composes_with_all_private_validator
             }
             take_write32_sites();
             let bytes = emit(&prepared.blocks, Some(binding), Some(cs.decode_key()));
+            let emitted_sites = if index == 6 && matches!(binding, EmbeddedBinding::Resident { .. })
+            {
+                3
+            } else {
+                sites
+            };
             assert_eq!(
                 take_write32_sites(),
-                sites,
-                "waiting precheck and ordinary store remain separate sites"
+                emitted_sites,
+                "waiting, reported final-pair store and ordinary side entry are real sites"
             );
             modules.push(format!("\"{}\"", hex(&bytes)));
         }
     }
-    let script = "import assert from 'node:assert/strict'; let input=''; for await(const c of process.stdin) input+=c; const modules=JSON.parse(input); assert.equal(modules.length,12); for(const [i,hex] of modules.entries()) assert.ok(WebAssembly.validate(Buffer.from(hex,'hex')),`module ${i}`); console.log('12 write32 composition modules validated');";
+    let script = "import assert from 'node:assert/strict'; let input=''; for await(const c of process.stdin) input+=c; const modules=JSON.parse(input); assert.equal(modules.length,14); for(const [i,hex] of modules.entries()) assert.ok(WebAssembly.validate(Buffer.from(hex,'hex')),`module ${i}`); console.log('14 write32 composition modules validated');";
     assert_eq!(
         node(script, &format!("[{}]", modules.join(","))).trim(),
-        "12 write32 composition modules validated"
+        "14 write32 composition modules validated"
     );
 }

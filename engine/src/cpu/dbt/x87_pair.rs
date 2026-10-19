@@ -1,5 +1,5 @@
 use crate::cpu::x86::{
-    X87Operation,
+    X87Format, X87Operation,
     decode::DecodedOperation,
     ir::{EffectiveAddress, Operation},
 };
@@ -19,7 +19,7 @@ pub(crate) struct X87PairStep32 {
 }
 
 impl X87PairStep32 {
-    fn from_instruction(instruction: &DecodedOperation) -> Option<Self> {
+    fn from_instruction(instruction: &DecodedOperation, final_step: bool) -> Option<Self> {
         let Operation::X87 {
             operation,
             address,
@@ -29,16 +29,26 @@ impl X87PairStep32 {
         else {
             return None;
         };
-        if !operation.is_computation()
-            || operation.write_size() != 0
-            || matches!(
+        let computation = operation.is_computation()
+            && operation.write_size() == 0
+            && !matches!(
                 operation,
                 X87Operation::Compare {
                     integer_flags: true,
                     ..
                 }
-            )
-        {
+            );
+        let final_store = final_step
+            && address.is_some()
+            && matches!(
+                operation,
+                X87Operation::Store {
+                    format: X87Format::Float32,
+                    pop: true,
+                    truncate: false,
+                }
+            );
+        if !computation && !final_store {
             return None;
         }
         let segment = address.map_or(0, |address| {
@@ -66,8 +76,8 @@ pub(crate) fn x87_pairs(
             let first = &instructions[index];
             let second = &instructions[index + 1];
             if first.pc().0.checked_add(u32::from(first.length())) == Some(second.pc().0)
-                && let Some(first) = X87PairStep32::from_instruction(first)
-                && let Some(second) = X87PairStep32::from_instruction(second)
+                && let Some(first) = X87PairStep32::from_instruction(first, false)
+                && let Some(second) = X87PairStep32::from_instruction(second, true)
             {
                 index += 2;
                 return Some([first, second]);

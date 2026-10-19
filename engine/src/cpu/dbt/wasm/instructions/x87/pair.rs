@@ -91,7 +91,8 @@ pub(in crate::cpu::dbt::wasm) fn operation(
             .i32_and()
             .local_set(local);
     }
-    check_progress(code, locals, exit_depth);
+    let final_store = pair[1].operation.write_size() != 0;
+    check_progress(code, locals, final_store, exit_depth);
 
     // catch the ordinary validator's terminal branch locally so a completed
     // first instruction is accounted before reporting the second's fault.
@@ -99,19 +100,19 @@ pub(in crate::cpu::dbt::wasm) fn operation(
         .local_get(locals.reported_step)
         .if_(BlockType::Empty);
     select_step(code, pair[1], locals.second_address);
-    let first_width = pair[0].operation.read_size() as u32;
-    let second_width = pair[1].operation.read_size() as u32;
-    if first_width != second_width {
-        validate_packet(code, second_width, imports, 1);
+    let first_contract = PacketContract::from(pair[0]);
+    let second_contract = PacketContract::from(pair[1]);
+    if first_contract != second_contract {
+        validate_packet(code, second_contract, imports, 1);
     }
     code.else_();
     select_step(code, pair[0], locals.first_address);
-    if first_width != second_width {
-        validate_packet(code, first_width, imports, 1);
+    if first_contract != second_contract {
+        validate_packet(code, first_contract, imports, 1);
     }
     code.end();
-    if first_width == second_width {
-        validate_packet(code, first_width, imports, 0);
+    if first_contract == second_contract {
+        validate_packet(code, first_contract, imports, 0);
     }
     code.end();
 
@@ -141,9 +142,17 @@ pub(in crate::cpu::dbt::wasm) fn operation(
         .i32_sub()
         .local_set(BUDGET);
     protocol::exit_if_failed(code, exit_depth);
+    if final_store {
+        protocol::exit_if_invalidated(code, exit_depth, imports);
+    }
 }
 
-fn check_progress(code: &mut InstructionSink<'_>, locals: PairLocals, exit_depth: u32) {
+fn check_progress(
+    code: &mut InstructionSink<'_>,
+    locals: PairLocals,
+    final_store: bool,
+    exit_depth: u32,
+) {
     protocol::reset_checks(code);
     code.local_get(locals.progress)
         .i64_const(35)
@@ -165,13 +174,40 @@ fn check_progress(code: &mut InstructionSink<'_>, locals: PairLocals, exit_depth
         .i32_const(1)
         .i32_gt_u();
     protocol::add_check(code);
-    // status23 is an existing certified page-fault reply. every nonzero
-    // transport status reports no retirement for its reported instruction.
+    if final_store {
+        // a committed invalidating store is possible only at the exact final
+        // step; its ordinary success packet still has to pass the write validator.
+        code.local_get(HELPER_STATUS)
+            .i32_const(11)
+            .i32_eq()
+            .if_(BlockType::Empty)
+            .local_get(locals.completed)
+            .i32_const(2)
+            .i32_ne()
+            .local_get(locals.reported_step)
+            .i32_const(1)
+            .i32_ne()
+            .i32_or()
+            .local_get(locals.limit)
+            .i32_const(2)
+            .i32_ne()
+            .i32_or();
+        protocol::add_check(code);
+        code.end();
+    }
+    // status23 and every other nonzero transport cannot complete their reported
+    // instruction. only the known final-store status11 uses success accounting.
     code.local_get(locals.completed)
         .local_get(locals.reported_step)
         .local_get(HELPER_STATUS)
-        .i32_eqz()
-        .if_(BlockType::Result(wasm_encoder::ValType::I32));
+        .i32_eqz();
+    if final_store {
+        code.local_get(HELPER_STATUS)
+            .i32_const(11)
+            .i32_eq()
+            .i32_or();
+    }
+    code.if_(BlockType::Result(wasm_encoder::ValType::I32));
     protocol::helper_field(code, 16);
     code.i32_eqz().else_().i32_const(0).end().i32_add().i32_ne();
     protocol::add_check(code);
@@ -186,12 +222,36 @@ fn select_step(code: &mut InstructionSink<'_>, step: X87PairStep32, address: u32
         .local_set(ADDRESS);
 }
 
-fn validate_packet(code: &mut InstructionSink<'_>, length: u32, imports: Imports, exit_depth: u32) {
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct PacketContract {
+    length: u32,
+    access: u32,
+    allow_smc: bool,
+}
+
+impl From<X87PairStep32> for PacketContract {
+    fn from(step: X87PairStep32) -> Self {
+        let read = step.operation.read_size() as u32;
+        let write = step.operation.write_size() as u32;
+        Self {
+            length: read.max(write),
+            access: u32::from(read != 0) | (u32::from(write != 0) << 1),
+            allow_smc: write != 0,
+        }
+    }
+}
+
+fn validate_packet(
+    code: &mut InstructionSink<'_>,
+    contract: PacketContract,
+    imports: Imports,
+    exit_depth: u32,
+) {
     result::validate_x87(
         code,
-        length,
-        u32::from(length != 0),
-        false,
+        contract.length,
+        contract.access,
+        contract.allow_smc,
         exit_depth,
         result::ResultContext::from(imports),
     );
