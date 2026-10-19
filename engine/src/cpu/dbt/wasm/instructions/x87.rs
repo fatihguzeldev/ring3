@@ -19,6 +19,7 @@ use crate::{
 };
 use wasm_encoder::{BlockType, InstructionSink, MemArg};
 
+pub(in crate::cpu::dbt::wasm) mod group;
 pub(in crate::cpu::dbt::wasm) mod pair;
 pub(in crate::cpu::dbt::wasm) fn precheck_instruction(
     code: &mut InstructionSink<'_>,

@@ -54,3 +54,31 @@ pub extern "C" fn x87_resident_pair(
         )
     }
 }
+
+#[allow(unsafe_code, clippy::too_many_arguments)]
+#[unsafe(export_name = "ring3_abi_v1_x87_resident_group")]
+pub extern "C" fn x87_resident_group(
+    key_low: u32,
+    key_high: u32,
+    id_low: u32,
+    id_high: u32,
+    ordinal: u32,
+    address0: u32,
+    address1: u32,
+    address2: u32,
+    address3: u32,
+    address4: u32,
+    address5: u32,
+    address6: u32,
+    address7: u32,
+    flags: u32,
+    max_steps: u32,
+) -> i64 {
+    {
+        #![forbid(unsafe_code)]
+        crate::process::wasm::x87_resident_group(
+            key_low, key_high, id_low, id_high, ordinal, address0, address1, address2, address3,
+            address4, address5, address6, address7, flags, max_steps,
+        )
+    }
+}

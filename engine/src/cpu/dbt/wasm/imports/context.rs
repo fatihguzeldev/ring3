@@ -24,6 +24,9 @@ pub(in crate::cpu::dbt::wasm) struct Imports {
     pub(in crate::cpu::dbt::wasm) x87_pair: Option<HelperBinding>,
     pub(in crate::cpu::dbt::wasm) x87_pair_locals:
         Option<crate::cpu::dbt::wasm::instructions::x87::pair::PairLocals>,
+    pub(in crate::cpu::dbt::wasm) x87_group: Option<HelperBinding>,
+    pub(in crate::cpu::dbt::wasm) x87_group_locals:
+        Option<crate::cpu::dbt::wasm::instructions::x87::group::GroupLocals>,
     pub(in crate::cpu::dbt::wasm) simd_execute: Option<HelperBinding>,
     pub(in crate::cpu::dbt::wasm) avx_execute: Option<HelperBinding>,
     pub(in crate::cpu::dbt::wasm) avx_locals:

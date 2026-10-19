@@ -138,26 +138,29 @@ test('the no-import profile omits only the declared conditional observability ow
 const cpuSource = readFileSync(new URL('../../../src/abi/wasm/exports/cpu.rs', import.meta.url), 'utf8');
 const pairSource = cpuSource.slice(cpuSource.indexOf('#[allow('));
 
-test('the CPU owner keeps only its exact i64 view parameter and pair export', () => {
+test('the CPU owner keeps only its exact i64 view parameter and pair/group exports', () => {
   workspace(parent, child, root => {
     const dir = join(root, 'engine/src/abi/wasm/exports');
     writeFileSync(join(dir, 'mod.rs'), 'macro_rules! export_process_calls {\n}\nmod cpu;\n');
     const source = 'export_process_calls! { cpu_read32_view(epoch: i64); }\n' + pairSource;
     const cpu = join(dir, 'cpu.rs');
     writeFileSync(cpu, source);
-    const actual = moduleWith(['ring3_abi_v1_cpu_read32_view', 'ring3_abi_v1_x87_resident_pair']);
+    const actual = moduleWith(['ring3_abi_v1_cpu_read32_view', 'ring3_abi_v1_x87_resident_pair', 'ring3_abi_v1_x87_resident_group']);
     assert.deepEqual(assertEngineExports(actual, root).functions.map(row => [row.name, row.arity]), [
-      ['ring3_abi_v1_cpu_read32_view', 1], ['ring3_abi_v1_x87_resident_pair', 9],
+      ['ring3_abi_v1_cpu_read32_view', 1], ['ring3_abi_v1_x87_resident_pair', 9], ['ring3_abi_v1_x87_resident_group', 15],
     ]);
     for (const invalid of [
       source.replace('epoch: i64', 'epoch: u32'),
       source.replace('epoch: i64', 'other: i64'),
       source.replace(') -> i64', ') -> u32'),
       source.replace('max_steps: u32', 'max_steps: i64'),
+      source.replace('ordinal: u32', 'ordinal: i64'),
+      source.replace('address7: u32,', ''),
+      source.replace('address6, address7, flags', 'address7, address6, flags'),
       source + '\nfn hidden() {}\n',
     ]) {
       writeFileSync(cpu, invalid);
-      assert.throws(() => assertEngineExports(actual, root), /view parameters|pair export/);
+      assert.throws(() => assertEngineExports(actual, root), /view parameters|pair\/group exports/);
     }
     writeFileSync(cpu, source.replace('cpu_read32_view(epoch: i64)', 'other(epoch: i64)'));
     assert.throws(() => assertEngineExports(actual, root), /ABI parameter/);

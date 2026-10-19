@@ -19,7 +19,10 @@ pub(crate) struct X87PairStep32 {
 }
 
 impl X87PairStep32 {
-    fn from_instruction(instruction: &DecodedOperation, final_step: bool) -> Option<Self> {
+    pub(super) fn from_instruction(
+        instruction: &DecodedOperation,
+        final_step: bool,
+    ) -> Option<Self> {
         let Operation::X87 {
             operation,
             address,

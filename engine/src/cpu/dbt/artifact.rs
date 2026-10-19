@@ -33,6 +33,14 @@ pub struct CompiledRegion {
     entry_start: u32,
     entry_end: u32,
     x87_pairs: Vec<[super::X87PairStep32; 2]>,
+    x87_groups: Vec<X87GroupSpan32>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct X87GroupSpan32 {
+    block: u16,
+    first: u16,
+    length: u8,
 }
 
 impl CompiledRegion {
@@ -43,6 +51,7 @@ impl CompiledRegion {
         binding: Option<wasm::EmbeddedBinding>,
     ) -> Result<Self, CompileError> {
         let mut x87_pairs = Vec::new();
+        let mut x87_groups = Vec::new();
         if matches!(binding, Some(wasm::EmbeddedBinding::Resident { .. })) {
             // final retained instructions are the descriptor source after any shortening.
             let pairs = || {
@@ -56,6 +65,28 @@ impl CompiledRegion {
                 .map_err(|_| CompileError::Allocation)?;
             x87_pairs.extend(pairs());
             x87_pairs.sort_unstable_by_key(|pair| pair[0].pc);
+
+            // ordinals follow final block order, including overlapping entries whose
+            // first pc agrees but whose selected group length differs.
+            let groups = || {
+                prepared
+                    .blocks
+                    .iter()
+                    .enumerate()
+                    .flat_map(|(block, retained)| {
+                        super::x87_groups(&retained.instructions).map(move |plan| (block, plan))
+                    })
+            };
+            x87_groups
+                .try_reserve_exact(groups().count())
+                .map_err(|_| CompileError::Allocation)?;
+            for (block, plan) in groups() {
+                x87_groups.push(X87GroupSpan32 {
+                    block: u16::try_from(block).map_err(|_| CompileError::InvalidLimits)?,
+                    first: u16::try_from(plan.first).map_err(|_| CompileError::InvalidLimits)?,
+                    length: plan.length as u8,
+                });
+            }
         }
         let mut region = Self {
             prepared,
@@ -64,6 +95,7 @@ impl CompiledRegion {
             entry_start: u32::MAX,
             entry_end: 0,
             x87_pairs,
+            x87_groups,
         };
         let (start, end) = region
             .executable_addresses()
@@ -88,6 +120,16 @@ impl CompiledRegion {
             .binary_search_by_key(&first_pc, |pair| pair[0].pc)
             .ok()
             .map(|index| self.x87_pairs[index])
+    }
+
+    pub(crate) fn x87_group(&self, ordinal: u32) -> Option<super::X87Group32> {
+        let span = self.x87_groups.get(ordinal as usize)?;
+        let block = self.prepared.blocks.get(usize::from(span.block))?;
+        super::x87_group::X87GroupPlan32 {
+            first: usize::from(span.first),
+            length: usize::from(span.length),
+        }
+        .descriptors(&block.instructions)
     }
     pub(crate) fn supports_indexed_entry(&self) -> bool {
         self.prepared
@@ -393,3 +435,7 @@ mod bounds_tests;
 #[cfg(test)]
 #[path = "artifact/tests/pairs.rs"]
 mod pair_tests;
+
+#[cfg(test)]
+#[path = "artifact/tests/groups.rs"]
+mod group_tests;

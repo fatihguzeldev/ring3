@@ -7,6 +7,8 @@ const key = [0x58503837, 0x50414952];
 const pair = value => [Number(value & 0xffffffffn), Number(value >> 32n)];
 export const envelope = (status, completed, reported = 0) =>
   BigInt(status >>> 0) | BigInt(completed) << 32n | BigInt(reported) << 34n;
+export const groupEnvelope = (status, completed, reported = 0) =>
+  BigInt(status >>> 0) | BigInt(completed) << 32n | BigInt(reported) << 36n;
 export function packet(length, flags = 0x202) {
   const bytes = Buffer.alloc(40);
   bytes.write('R3MH'); bytes.writeUInt32LE(0x10007, 4); bytes.writeUInt32LE(40, 8);
@@ -37,6 +39,7 @@ export class Fixture {
     this.ok('map', PC, 1, 7); this.ok('map', RAM, 1, 3);
     this.data = Buffer.alloc(4096, 0x5a);
     this.data.writeFloatLE(3, 0); this.data.writeFloatLE(5, 4);
+    for (const {offset, value} of program.data ?? []) this.data.writeFloatLE(value, offset);
     this.put(140, this.data); this.ok('upload', RAM, this.data.length);
     this.code = Buffer.alloc(4096); this.code.set(program.code);
     this.put(140, Buffer.from(program.code)); this.ok('upload', PC, program.code.length);
@@ -66,12 +69,35 @@ export class Fixture {
         result = reply.envelope;
       } else if (this.scalar) {
         // use the real pre-pair scalar helper, then the unchanged second instruction body.
-        const step = this.program.steps[0];
+        const step = this.program.steps.find(step => step.pc === args[4]) ?? this.program.steps[0];
         const status = this.api.x87_resident_op(...args.slice(0, 4), step.word,
           args[5], args[7], args[4], step.opcode, step.control);
         result = envelope(status, status === 0 && this.arena().readUInt32LE(116) === 0 ? 1 : 0);
       } else {
         result = this.api.x87_resident_pair(...args.slice(0, 8), this.forceOne ? 1 : args[8]);
+      }
+      if (this.cancelAfterFirst) this.put(96, Buffer.from([1, 0, 0, 0]));
+      row.result = result.toString();
+      return result;
+    };
+    bindings.x87_resident_group = (...args) => {
+      const row = {name: 'x87_resident_group', args: args.map(value => value >>> 0)};
+      this.calls.push(row);
+      let result;
+      if (this.groupSynthetic) {
+        const reply = this.groupSynthetic(args, this);
+        if (reply.packet) this.put(100, reply.packet);
+        result = reply.envelope;
+      } else if (this.scalar) {
+        const step = this.program.steps[this.program.groups[args[4]].first];
+        const status = this.api.x87_resident_op(...args.slice(0, 4), step.word,
+          args[5], args[13], step.pc, step.opcode, step.control);
+        result = groupEnvelope(status, status === 0 && this.arena().readUInt32LE(116) === 0 ? 1 : 0);
+      } else {
+        const forwarded = [...args];
+        if (this.groupOrdinal !== undefined) forwarded[4] = this.groupOrdinal;
+        if (this.forceOne) forwarded[14] = 1;
+        result = this.api.x87_resident_group(...forwarded);
       }
       if (this.cancelAfterFirst) this.put(96, Buffer.from([1, 0, 0, 0]));
       row.result = result.toString();

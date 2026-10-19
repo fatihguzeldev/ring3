@@ -180,6 +180,55 @@ pub(crate) fn x87_resident_pair(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn x87_resident_group(
+    key_low: u32,
+    key_high: u32,
+    id_low: u32,
+    id_high: u32,
+    ordinal: u32,
+    address0: u32,
+    address1: u32,
+    address2: u32,
+    address3: u32,
+    address4: u32,
+    address5: u32,
+    address6: u32,
+    address7: u32,
+    flags: u32,
+    max_steps: u32,
+) -> i64 {
+    use crate::cpu::dbt::X87GroupProgress32;
+    REGISTRY.with(|registry| {
+        let Ok(mut registry) = registry.try_borrow_mut() else {
+            return X87GroupProgress32::encode(9, 0, 0) as i64;
+        };
+        let Some(instance) = registry.instance.as_mut() else {
+            return X87GroupProgress32::encode(5, 0, 0) as i64;
+        };
+        let before = instance.cpu_page_fault_sequence32();
+        let outcome = instance.x87_resident_group(
+            u64::from(key_low) | (u64::from(key_high) << 32),
+            u64::from(id_low) | (u64::from(id_high) << 32),
+            ordinal,
+            [
+                address0, address1, address2, address3, address4, address5, address6, address7,
+            ],
+            flags,
+            max_steps,
+        );
+        let transport = match outcome.result {
+            Ok(StoreCompletion::Complete) if instance.cpu_page_fault_sequence32() != before => {
+                crate::abi::cpu_helper::CPU_PAGE_FAULT_TRANSPORT
+            }
+            Ok(StoreCompletion::Complete) => 0,
+            Ok(StoreCompletion::CodeInvalidated) => 11,
+            Err(error) => status(error),
+        };
+        X87GroupProgress32::encode(transport, outcome.completed, outcome.reported_step) as i64
+    })
+}
+
 pub(crate) fn simd_execute(
     descriptor: u32,
     operands: u32,

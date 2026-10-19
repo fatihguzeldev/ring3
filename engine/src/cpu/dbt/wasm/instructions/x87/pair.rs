@@ -215,7 +215,7 @@ fn check_progress(
     protocol::exit_if_failed(code, exit_depth);
 }
 
-fn select_step(code: &mut InstructionSink<'_>, step: X87PairStep32, address: u32) {
+pub(super) fn select_step(code: &mut InstructionSink<'_>, step: X87PairStep32, address: u32) {
     code.i32_const(step.pc as i32)
         .local_set(EIP)
         .local_get(address)
@@ -223,7 +223,7 @@ fn select_step(code: &mut InstructionSink<'_>, step: X87PairStep32, address: u32
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-struct PacketContract {
+pub(super) struct PacketContract {
     length: u32,
     access: u32,
     allow_smc: bool,
@@ -241,7 +241,7 @@ impl From<X87PairStep32> for PacketContract {
     }
 }
 
-fn validate_packet(
+pub(super) fn validate_packet(
     code: &mut InstructionSink<'_>,
     contract: PacketContract,
     imports: Imports,
