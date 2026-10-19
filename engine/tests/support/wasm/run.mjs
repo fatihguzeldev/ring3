@@ -95,7 +95,11 @@ export function generatedRunBody(bytes, {csBase = 0, default32 = true} = {}) {
     const result = []; for (let n = read(); n; n--) result.push([read(), body[at++]]);
     return {result, at};
   };
-  assert.deepEqual(locals(bodies[0]).result, [[16, 0x7f], [1, 0x7e], [10, 0x7f], ...(bound ? [[1, 0x7f]] : []), ...(detects ? [[1, 0x7e], [6, 0x7f]] : []), ...(readView ? [[7, 0x7f], [1, 0x7e]] : [])]);
+  const runLocals = locals(bodies[0]).result;
+  const expectedLocals = [[16, 0x7f], [1, 0x7e], [10, 0x7f], ...(bound ? [[1, 0x7f]] : []), ...(detects ? [[1, 0x7e], [6, 0x7f]] : []), ...(readView ? [[7, 0x7f], [1, 0x7e]] : [])];
+  // only a resident view can add the single private direct-mov context marker.
+  if (readView && runLocals.length === expectedLocals.length + 1) expectedLocals.push([1, 0x7f]);
+  assert.deepEqual(runLocals, expectedLocals);
   if (segment !== null) {
     assert.equal(functions[segment], types.length - 1 - Number(detects) - Number(readView) - Number(read32 !== null));
     const body = bodies[segment], shape = locals(body); assert.deepEqual(shape.result, [[3, 0x7f]]);

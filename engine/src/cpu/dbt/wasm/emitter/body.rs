@@ -100,6 +100,19 @@ pub(super) fn emit(
         declarations.push((read_view::INTEGER_LOCALS, ValType::I32));
         declarations.push((1, ValType::I64));
     }
+    let read32_context_marker = if plan.has_read32_view
+        && blocks.iter().any(|block| {
+            block
+                .instructions
+                .iter()
+                .any(|instruction| code_fetch::direct_read_move(instruction.operation()))
+        }) {
+        let first = 4 + declarations.iter().map(|(count, _)| count).sum::<u32>();
+        declarations.push((1, ValType::I32));
+        Some(first)
+    } else {
+        None
+    };
 
     helper_imports.paging_configured = plan.paging_configured;
     let mut function = Function::new(declarations);
@@ -191,6 +204,7 @@ pub(super) fn emit(
             block,
             *helper_imports,
             tier,
+            read32_context_marker,
             &mut group_ordinal,
             &mut wide_ordinal,
         );
@@ -237,6 +251,7 @@ fn emit_block(
     block: &CompiledBlock,
     imports: Imports,
     tier: CompilationTier32,
+    read32_context_marker: Option<u32>,
     group_ordinal: &mut u32,
     wide_ordinal: &mut u32,
 ) {
@@ -291,6 +306,10 @@ fn emit_block(
         if let Some(limit) = imports.code_fetch_limit {
             // the loop's safepoint and key check already precede this selected block.
             code_fetch::refresh(code, limit);
+        }
+        if let Some(marker) = read32_context_marker {
+            // a selected interior entry cannot inherit a skipped predecessor's result.
+            code.i32_const(0).local_set(marker);
         }
         let count = block.instructions.len() as u32;
         for _ in 0..count {
@@ -351,8 +370,17 @@ fn emit_block(
                 if index != 0
                     && code_fetch::refresh_after(block.instructions[index - 1].operation())
                 {
-                    code_fetch::check_context(code, remaining + 2);
-                    code_fetch::refresh(code, limit);
+                    if let Some(marker) = read32_context_marker.filter(|_| {
+                        code_fetch::direct_read_move(block.instructions[index - 1].operation())
+                    }) {
+                        code.local_get(marker).i32_eqz().if_(BlockType::Empty);
+                        code_fetch::check_context(code, remaining + 3);
+                        code_fetch::refresh(code, limit);
+                        code.end();
+                    } else {
+                        code_fetch::check_context(code, remaining + 2);
+                        code_fetch::refresh(code, limit);
+                    }
                 }
                 code_fetch::check_instruction(code, instruction, limit, remaining + 2);
             }
@@ -376,7 +404,12 @@ fn emit_block(
             } else if let Some(pair) = pair {
                 x87::pair::operation(code, pair, imports, remaining + 2);
             } else {
-                integer::instruction(code, instruction, imports, remaining + 2);
+                let instruction_imports = Imports {
+                    read32_context_marker: read32_context_marker
+                        .filter(|_| code_fetch::direct_read_move(instruction.operation())),
+                    ..imports
+                };
+                integer::instruction(code, instruction, instruction_imports, remaining + 2);
             }
             if matches!(
                 instruction.operation(),
@@ -429,3 +462,7 @@ fn emit_block(
         code.br(2).end();
     }
 }
+
+#[cfg(test)]
+#[path = "direct_read_context/tests.rs"]
+mod direct_read_context_tests;

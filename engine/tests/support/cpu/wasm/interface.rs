@@ -194,7 +194,12 @@ pub fn assert_interface(
     if read_view {
         locals.extend([(7, 0x7f), (1, 0x7e)]);
     }
-    assert_eq!(body.unsigned(), locals.len());
+    let declared_groups = body.unsigned();
+    if read_view && declared_groups == locals.len() + 1 {
+        // the full emitter can append one private direct-mov context marker.
+        locals.push((1, 0x7f));
+    }
+    assert_eq!(declared_groups, locals.len());
     for expected in locals {
         assert_eq!((body.unsigned(), body.byte()), expected);
     }

@@ -12,9 +12,27 @@ pub(in crate::cpu::dbt::wasm) fn load(
     imports: Imports,
     exit_depth: u32,
 ) {
+    if let Some(marker) = imports.read32_context_marker {
+        code.i32_const(0).local_set(marker);
+    }
     checked_address(code, address, 4, SegmentAccess::Read, imports, exit_depth);
     let direct_result = super::read_view::load(code, imports);
-    crate::cpu::dbt::wasm::code_fetch::check_context(code, exit_depth);
+    if let Some(marker) = imports.read32_context_marker {
+        assert!(
+            direct_result,
+            "full-emitter mov requires its optional read view"
+        );
+        // only this pure direct branch preserves the full emitter's fresh cs context.
+        // leave its success flag on the stack for the unchanged packet selection.
+        code.local_tee(marker)
+            .local_get(marker)
+            .i32_eqz()
+            .if_(BlockType::Empty);
+        crate::cpu::dbt::wasm::code_fetch::check_context(code, exit_depth + 1);
+        code.end();
+    } else {
+        crate::cpu::dbt::wasm::code_fetch::check_context(code, exit_depth);
+    }
     validate_read32(code, imports, direct_result);
     exit_if_failed(code, exit_depth);
     helper_field(code, 20);

@@ -4,6 +4,16 @@ pub(in crate::cpu::dbt::wasm) fn refresh_after(operation: &Operation) -> bool {
     !helper_free(operation)
 }
 
+pub(in crate::cpu::dbt::wasm) fn direct_read_move(operation: &Operation) -> bool {
+    matches!(
+        operation,
+        Operation::Move {
+            destination: Location32::Register(_),
+            source: Value32::Memory(_),
+        }
+    )
+}
+
 fn helper_free(operation: &Operation) -> bool {
     // all unreviewed families retain instruction-boundary checks, including pure
     // families whose future lowering could gain an external helper.
