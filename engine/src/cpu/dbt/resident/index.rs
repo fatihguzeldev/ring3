@@ -1,9 +1,22 @@
 use super::{CompiledRegion, RegistryError, UnitId};
 use crate::memory::PAGE_SIZE;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
-#[derive(Debug, Default)]
+const PAGE_HINTS: usize = 64;
+
+#[derive(Debug)]
 pub(super) struct EntryIndex {
     pages: Vec<EntryPage>,
+    page_hints: [AtomicUsize; PAGE_HINTS],
+}
+
+impl Default for EntryIndex {
+    fn default() -> Self {
+        Self {
+            pages: Vec::new(),
+            page_hints: [const { AtomicUsize::new(usize::MAX) }; PAGE_HINTS],
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -140,7 +153,7 @@ impl EntryIndex {
     }
 
     pub(super) fn candidates(&self, pc: u32) -> &[UnitId] {
-        let Ok(index) = self.find(pc / PAGE_SIZE) else {
+        let Ok(index) = self.candidate_page(pc / PAGE_SIZE) else {
             return &[];
         };
         let page = &self.pages[index];
@@ -148,6 +161,23 @@ impl EntryIndex {
         let start = page.offsets.partition_point(|&entry| entry < offset);
         let count = page.offsets[start..].partition_point(|&entry| entry == offset);
         &page.units[start..start + count]
+    }
+
+    fn candidate_page(&self, page: u32) -> Result<usize, usize> {
+        let hint = &self.page_hints[page as usize % PAGE_HINTS];
+        let index = hint.load(Ordering::Relaxed);
+        // insertion and retirement can shift positions; only the current page
+        // number makes a hint usable. offset and id rows are always read live.
+        if self
+            .pages
+            .get(index)
+            .is_some_and(|entry| entry.page == page)
+        {
+            return Ok(index);
+        }
+        let index = self.find(page)?;
+        hint.store(index, Ordering::Relaxed);
+        Ok(index)
     }
 
     fn find(&self, page: u32) -> Result<usize, usize> {
@@ -165,3 +195,7 @@ impl EntryPage {
             .map_err(|_| RegistryError::Allocation)
     }
 }
+
+#[cfg(test)]
+#[path = "index/page_hints/tests.rs"]
+mod page_hint_tests;
