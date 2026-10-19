@@ -12,3 +12,6 @@ mod process_execution_cache_wasm;
 
 #[path = "../execution/receipt/wasm.rs"]
 mod process_execution_receipt_wasm;
+
+#[path = "../execution/native_success/wasm.rs"]
+mod process_execution_native_success_wasm;
