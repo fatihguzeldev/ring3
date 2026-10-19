@@ -15,6 +15,8 @@ macro_rules! export_process_calls {
 
 mod avx;
 mod calls;
+#[cfg(feature = "observability")]
+mod census;
 mod clock;
 mod cpu;
 mod detection;

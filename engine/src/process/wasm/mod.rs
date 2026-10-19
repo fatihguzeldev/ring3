@@ -402,7 +402,11 @@ pub(crate) use loading::{
     start_loaded_image,
 };
 
+#[cfg(feature = "observability")]
+mod census;
 mod execution;
+#[cfg(feature = "observability")]
+pub(crate) use census::{begin_execution_census, execution_census_page, stop_execution_census};
 pub(crate) use execution::{
     acknowledge_cache_eviction, acknowledge_resident_callback_installation,
     acknowledge_resident_installation, begin_compiled_execution_receipt, begin_execution_receipt,
