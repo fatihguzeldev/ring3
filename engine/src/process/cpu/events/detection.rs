@@ -45,6 +45,7 @@ pub(in crate::process) enum DetectionSlot32 {
     },
     Ready(ConsumedDetection32),
     Returned(ReturnedDetection32),
+    Continued(ContinuedDetection32),
 }
 
 pub(in crate::process) struct ReturnedDetection32 {
@@ -64,6 +65,20 @@ impl ReturnedDetection32 {
             && self.extended.matches(arena)
             && arena[WORK_OFFSET..WORK_OFFSET + WORK_SIZE] == self.work
     }
+}
+
+// a private internal continuation contains no extended-bank payload. this is
+// deliberately a separate detector variant, not a large returned record whose
+// optional extended field would still be copied during enum publication.
+#[derive(Clone, Copy)]
+pub(in crate::process) struct ContinuedDetection32 {
+    epoch: u64,
+    owner: PendingOwner,
+    callback_token: Option<u32>,
+    state: [u8; STATE_SIZE],
+    exit: [u8; EXIT_SIZE],
+    work: [u8; WORK_SIZE],
+    compiled_token: u64,
 }
 
 /// one opaque sealed snapshot, movable only by consume; no duplicate compiled-material ownership.
@@ -251,6 +266,8 @@ impl EngineInstance {
             .checked_add(1)
             .filter(|value| *value <= i64::MAX as u64)
             .ok_or(HostError::GenerationExhausted)?;
+        #[cfg(any(target_arch = "wasm32", test))]
+        let compiled = self.prepare_compiled_child(owner)?;
         let active = DetectionSlot32::Active {
             epoch,
             owner,
@@ -274,6 +291,8 @@ impl EngineInstance {
         self.cpu_event = None;
         #[cfg(any(target_arch = "wasm32", test))]
         self.entered_execution_child(epoch, installed);
+        #[cfg(any(target_arch = "wasm32", test))]
+        self.entered_compiled_child(compiled);
         self.refresh_cpu_read32_view();
         Ok(epoch)
     }
@@ -413,6 +432,35 @@ impl EngineInstance {
         if exit.reason != ExitReason::NeedCode {
             return Err(HostError::Call(CallError::InvalidStop));
         }
+        if let Some(compiled_token) = self.compiled_need_code_token(epoch) {
+            // flush changes state metadata in any instruction. decode it freshly;
+            // then publish only the small variant and leave the full path here.
+            decode_state_metadata(&arena[STATE_OFFSET..STATE_OFFSET + STATE_SIZE])
+                .map_err(|_| HostError::Call(CallError::InvalidStop))?;
+            let work = &arena[WORK_OFFSET..WORK_OFFSET + WORK_SIZE];
+            header::validate(work, *b"R3WK", WORK_SIZE)
+                .map_err(|_| HostError::Call(CallError::InvalidStop))?;
+            if header::read_u32(work, 20) != 0 {
+                return Err(HostError::Call(CallError::InvalidStop));
+            }
+            let continued = ContinuedDetection32 {
+                epoch,
+                owner,
+                callback_token,
+                state: arena[STATE_OFFSET..STATE_OFFSET + STATE_SIZE]
+                    .try_into()
+                    .unwrap(),
+                exit: arena[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE]
+                    .try_into()
+                    .unwrap(),
+                work: work.try_into().unwrap(),
+                compiled_token,
+            };
+            self.exception_detection.as_mut().unwrap()[0] = DetectionSlot32::Continued(continued);
+            self.committed_compiled_need_code(true);
+            self.refresh_cpu_read32_view();
+            return Ok(());
+        }
         let extended = ExtendedCpuState::capture(arena)?;
         let work = &arena[WORK_OFFSET..WORK_OFFSET + WORK_SIZE];
         header::validate(work, *b"R3WK", WORK_SIZE)
@@ -435,7 +483,48 @@ impl EngineInstance {
             work: work.try_into().unwrap(),
         };
         self.exception_detection.as_mut().unwrap()[0] = DetectionSlot32::Returned(returned);
+        self.committed_compiled_need_code(false);
         self.refresh_cpu_read32_view();
+        Ok(())
+    }
+
+    pub(in crate::process) fn has_compiled_light_continuation(&self) -> bool {
+        matches!(
+            self.exception_detection.as_ref().map(|slot| &slot[0]),
+            Some(DetectionSlot32::Continued(_))
+        )
+    }
+
+    /// explicit fallible upgrade. never called implicitly by void revocation.
+    /// canonical banks remain live and fully published by ordinary x87 helpers.
+    pub(in crate::process) fn materialize_compiled_continuation(
+        &mut self,
+    ) -> Result<(), HostError> {
+        let continued = match self.exception_detection.as_ref().map(|slot| &slot[0]) {
+            Some(DetectionSlot32::Continued(record)) => *record,
+            _ => return Ok(()),
+        };
+        if !self.compiled_continuation_current(
+            continued.compiled_token,
+            continued.epoch,
+            continued.owner,
+        ) {
+            return Err(HostError::Call(CallError::StateChanged));
+        }
+        self.check_detection_owner(continued.owner, continued.callback_token)?;
+        let extended = ExtendedCpuState::capture(self.arena())?;
+        let returned = ReturnedDetection32 {
+            epoch: continued.epoch,
+            owner: continued.owner,
+            callback_token: continued.callback_token,
+            state: continued.state,
+            exit: continued.exit,
+            work: continued.work,
+            extended,
+        };
+        self.exception_detection.as_mut().unwrap()[0] = DetectionSlot32::Returned(returned);
+        let count = &self.compiled_execution_stats.full_materializations;
+        count.set(count.get().saturating_add(1));
         Ok(())
     }
 

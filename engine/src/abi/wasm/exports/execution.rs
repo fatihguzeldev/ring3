@@ -3,6 +3,8 @@ mod cache;
 export_process_calls! {
     begin_execution_receipt(key_low: u32, key_high: u32, budget: u32, unit_low: u32, unit_high: u32, dispatch: u32);
     begin_owned_execution_receipt(key_low: u32, key_high: u32, budget: u32, unit_low: u32, unit_high: u32, dispatch: u32);
+    begin_compiled_execution_receipt(key_low: u32, key_high: u32, budget: u32, unit_low: u32, unit_high: u32, dispatch: u32);
+    compiled_execution_usage(key_low: u32, key_high: u32);
     finish_execution_receipt(key_low: u32, key_high: u32, token_low: u32, token_high: u32);
     compile(count: u32);
     generation();

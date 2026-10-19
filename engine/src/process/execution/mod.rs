@@ -3,6 +3,7 @@
 pub(super) mod authority;
 pub(super) mod cache;
 pub(super) mod compiled;
+pub(super) mod continuation;
 pub(super) mod installation;
 pub(super) mod owned;
 pub(super) mod receipt;

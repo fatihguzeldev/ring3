@@ -109,7 +109,8 @@ impl EngineInstance {
         generation: u32,
     ) -> Result<(), HostError> {
         self.guard(key, generation)?;
-        self.check_decode_key(self.artifact.as_ref().unwrap())
+        self.check_decode_key(self.artifact.as_ref().unwrap())?;
+        self.guard_compiled_public_transition()
     }
 
     #[inline]
@@ -146,6 +147,7 @@ impl EngineInstance {
     ) -> Result<&CompiledRegion, HostError> {
         let region = self.guard_resident_region(key, id)?;
         self.check_decode_key(region)?;
+        self.guard_compiled_public_transition()?;
         Ok(region)
     }
 

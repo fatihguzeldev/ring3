@@ -15,6 +15,8 @@ const KEY: u64 = 0x44455445;
 
 #[path = "tests/accounting.rs"]
 mod accounting;
+#[path = "tests/continued.rs"]
+mod continued;
 #[path = "tests/need_code.rs"]
 mod need_code;
 

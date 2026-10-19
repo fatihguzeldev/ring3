@@ -26,6 +26,10 @@ impl EngineInstance {
                 }
                 (record.owner, record.callback_token)
             }
+            Some(DetectionSlot32::Continued(record)) if record.epoch == epoch => {
+                // the private internal witness is not a public return seal.
+                return Err(HostError::Call(CallError::StateChanged));
+            }
             Some(DetectionSlot32::Returned(record)) if record.epoch == epoch => {
                 if !record.matches(self.arena()) {
                     return Err(HostError::Call(CallError::StateChanged));

@@ -59,6 +59,23 @@ mod control {
             Ok(frame)
         }
 
+        /// admits one synchronous invocation whose generated children use only
+        /// direct engine imports and pure clocks. raw context mutation, opaque
+        /// callbacks and reentrant host processing are forbidden until finish.
+        /// unsupported public transitions while an internal light seal is held
+        /// return busy; callers must finish the receipt before servicing them.
+        pub fn begin_compiled_execution_receipt(
+            &mut self,
+            key: u64,
+            budget: u32,
+            unit: u64,
+            dispatch: bool,
+        ) -> Result<ExecutionFrameStart32, HostError> {
+            let frame = self.begin_owned_execution_receipt(key, budget, unit, dispatch)?;
+            self.enable_compiled_execution(frame.token);
+            Ok(frame)
+        }
+
         pub fn begin_execution_receipt(
             &mut self,
             key: u64,
@@ -208,7 +225,12 @@ mod control {
                 .execution_frame
                 .filter(|frame| token != 0 && frame.token == token)
                 .ok_or(HostError::Call(CallError::InvalidToken))?;
+            // wrong key/token above is neutral. a valid-token terminal attempt
+            // upgrades private continuation authority before void revocation,
+            // even if a later terminal check fails and the pinned frame retries.
+            let materialized = self.materialize_compiled_continuation();
             self.revoke_owned_execution();
+            materialized?;
             let exit = decode_exit(&self.arena()[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE])
                 .map_err(|_| HostError::Call(CallError::InvalidStop))?;
             let total_retired = exit.retired;

@@ -16,6 +16,7 @@ mod windows;
 
 pub use calls::call::CallError;
 pub use cpu::events::{CpuEvent32, CpuInstructionSite32};
+pub use execution::continuation::CompiledExecutionUsage32;
 pub use execution::installation::ResidentInstallation;
 pub use execution::receipt::{ExecutionFrameStart32, ExecutionReceipt32};
 pub use instance::{EngineInstance, HostError, StoreCompletion};

@@ -56,8 +56,11 @@ impl EngineInstance {
 
     pub(in crate::process) fn invalidate_owned_context(&self) {
         #[cfg(any(target_arch = "wasm32", test))]
-        if let Some(owned) = &self.owned_execution {
-            owned.invalidate();
+        {
+            if let Some(owned) = &self.owned_execution {
+                owned.invalidate();
+            }
+            self.invalidate_compiled_context();
         }
     }
 
@@ -65,6 +68,7 @@ impl EngineInstance {
         #[cfg(any(target_arch = "wasm32", test))]
         {
             self.owned_execution = None;
+            self.compiled_execution = None;
         }
     }
 
@@ -81,7 +85,7 @@ impl EngineInstance {
     }
 
     #[cfg(any(target_arch = "wasm32", test))]
-    fn owned_activation(&self) -> Option<(&OwnedExecution32, u64, u64)> {
+    fn owned_receipt(&self) -> Option<&OwnedExecution32> {
         let owned = self.owned_execution.as_ref()?;
         let frame = self.execution_frame.as_ref()?;
         if owned.token != frame.token
@@ -94,6 +98,18 @@ impl EngineInstance {
         {
             return None;
         }
+        Some(owned)
+    }
+
+    #[cfg(any(target_arch = "wasm32", test))]
+    pub(super) fn owned_receipt_token(&self) -> Option<u64> {
+        self.owned_receipt().map(|owned| owned.token)
+    }
+
+    #[cfg(any(target_arch = "wasm32", test))]
+    pub(super) fn owned_activation(&self) -> Option<(&OwnedExecution32, u64, u64)> {
+        let owned = self.owned_receipt()?;
+        let frame = self.execution_frame.as_ref()?;
         let DetectionSlot32::Active {
             epoch,
             owner,

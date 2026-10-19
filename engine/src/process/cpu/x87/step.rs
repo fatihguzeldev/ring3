@@ -97,6 +97,8 @@ impl EngineInstance {
         flags: u32,
         output: &mut Option<[u8; 108]>,
     ) -> Result<X87Step, HostError> {
+        #[cfg(any(target_arch = "wasm32", test))]
+        self.record_compiled_x87_step_attempt();
         if request.waiting && state.status & 0x3f & !state.control != 0 {
             state.status |= 0x8080;
             return Ok(X87Step::fault(

@@ -298,6 +298,7 @@ mod tests;
 impl EngineInstance {
     pub(super) fn take_windows_thread_context(&mut self) -> Result<SavedThread32, HostError> {
         ExtendedCpuState::capture(self.arena())?;
+        self.guard_compiled_public_transition()?;
         self.revoke_owned_execution();
         let saved = SavedThread32 {
             artifact: self.artifact.take(),

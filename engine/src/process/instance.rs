@@ -114,6 +114,12 @@ pub struct EngineInstance {
     #[cfg(any(target_arch = "wasm32", test))]
     pub(in crate::process) owned_execution:
         Option<crate::process::execution::owned::OwnedExecution32>,
+    #[cfg(any(target_arch = "wasm32", test))]
+    pub(in crate::process) compiled_execution:
+        Option<crate::process::execution::continuation::CompiledExecution32>,
+    #[cfg(any(target_arch = "wasm32", test))]
+    pub(in crate::process) compiled_execution_stats:
+        crate::process::execution::continuation::CompiledExecutionStats32,
     pub(in crate::process) system_register_bank: Option<crate::cpu::x86::UserSystemRegisterBank32>,
     pub(in crate::process) modules: crate::process::loading::modules::ModuleProcess32,
     pub(in crate::process) image: Option<crate::loader::ImageMetadata32>,
@@ -215,6 +221,10 @@ impl EngineInstance {
             execution_frame_issuer: 0,
             #[cfg(any(target_arch = "wasm32", test))]
             owned_execution: None,
+            #[cfg(any(target_arch = "wasm32", test))]
+            compiled_execution: None,
+            #[cfg(any(target_arch = "wasm32", test))]
+            compiled_execution_stats: Default::default(),
             system_register_bank: Some(crate::cpu::x86::UserSystemRegisterBank32::application()),
             modules: crate::process::loading::modules::ModuleProcess32::default(),
             image: None,
@@ -268,6 +278,7 @@ impl EngineInstance {
 
     pub fn arena_mut(&mut self) -> Result<&mut [u8], HostError> {
         self.memory()?;
+        self.guard_compiled_public_transition()?;
         self.invalidate_owned_context();
         Ok(self.arena.as_mut().get_mut())
     }

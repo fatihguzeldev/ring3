@@ -81,6 +81,7 @@ impl EngineInstance {
         encode_simd(&state.simd, &mut simd).map_err(|_| invalid())?;
         encode_current_segment_context(&state.segments, &mut segments, &mut bases)
             .map_err(|_| invalid())?;
+        self.guard_compiled_public_transition()?;
         self.revoke_owned_execution();
         let arena = self.arena.as_mut().get_mut();
         arena[STATE_OFFSET..STATE_OFFSET + STATE_SIZE].copy_from_slice(&integer);

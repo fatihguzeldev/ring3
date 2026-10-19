@@ -160,6 +160,7 @@ impl EngineInstance {
         let mut output = [0; RESIDENT_CALLBACK_RESULT_SIZE];
         encode_resident_callback_result(&result, &mut output)
             .map_err(|_| HostError::Infrastructure)?;
+        self.guard_compiled_public_transition()?;
         self.revoke_owned_execution();
         let mut callback = self.callback.take().unwrap();
         self.callback = callback.parent.take().map(|parent| {

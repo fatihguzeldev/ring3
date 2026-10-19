@@ -344,6 +344,7 @@ impl EngineInstance {
         invocation: ThreadInvocation32,
         state: crate::cpu::x86::State32,
     ) -> Result<PreparedInvocationEntry32, HostError> {
+        self.guard_compiled_public_transition()?;
         let current = self.threads.current_id();
         let thread_index = self
             .threads
@@ -502,6 +503,7 @@ impl EngineInstance {
             return Err(HostError::Thread(ThreadError32::InvalidParameter));
         }
         crate::process::cpu::context::ExtendedCpuState::capture(self.arena())?;
+        self.guard_compiled_public_transition()?;
         let completion = active.completion;
         let activation = self.prepare_activation_scope_exit(active.activation)?;
         if completion == ThreadInvocationCompletion32::Initialize

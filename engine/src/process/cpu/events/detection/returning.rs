@@ -49,11 +49,12 @@ impl EngineInstance {
                 kind: 3,
             });
         }
-        let (owner, callback_token, child_retired, kind) = match self
-            .exception_detection
-            .as_ref()
-            .map(|slot| &slot[0])
-        {
+        let slot = self.exception_detection.as_ref().map(|slot| &slot[0]);
+        let (owner, callback_token, child_retired, kind) = match slot {
+            Some(DetectionSlot32::Continued(record)) if record.epoch == epoch => {
+                // internal authority must be explicitly upgraded before return.
+                return Err(HostError::Call(CallError::StateChanged));
+            }
             Some(DetectionSlot32::Returned(record)) if record.epoch == epoch => {
                 if !context_matches(self.arena(), &record.state, &record.extended, &record.work) {
                     return Err(HostError::Call(CallError::StateChanged));
@@ -142,6 +143,7 @@ impl EngineInstance {
             return;
         }
         let exit = match self.exception_detection.as_ref().map(|slot| &slot[0]) {
+            Some(DetectionSlot32::Continued(_)) => None,
             Some(DetectionSlot32::Returned(record)) if record.epoch == epoch => Some(record.exit),
             Some(DetectionSlot32::Ready(record)) if record.epoch == epoch => Some(record.exit),
             _ => None,

@@ -344,6 +344,7 @@ impl EngineInstance {
         };
         let mut output = [0; CALLBACK_RECORD_SIZE];
         encode_callback(&record, &mut output).map_err(|_| HostError::Infrastructure)?;
+        self.guard_compiled_public_transition()?;
         let mut callback = self.callback.take().unwrap();
         self.revoke_owned_execution();
         self.callback = callback.parent.take().map(|parent| {
@@ -375,6 +376,7 @@ impl EngineInstance {
         if self.windows_provider_owns_callback_token(token) {
             return Err(call_error(CallError::Busy));
         }
+        self.guard_compiled_public_transition()?;
         self.revoke_owned_execution();
         let mut callback = self.callback.take().unwrap();
         self.callback = callback.parent.take().map(|parent| {

@@ -401,6 +401,7 @@ impl EngineInstance {
         &self,
         index: usize,
     ) -> Result<PreparedThreadSwitch32, HostError> {
+        self.guard_compiled_public_transition()?;
         crate::process::cpu::context::ExtendedCpuState::capture(self.arena())?;
         let current_index = self
             .threads
