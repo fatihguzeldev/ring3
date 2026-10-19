@@ -112,7 +112,7 @@ function compile(ctx) {
   }
   refresh(ctx); assert.ok(binding.pointer > 0 && binding.length > 8 && binding.pointer + binding.length <= ctx.bytes.length);
   const bytes = Buffer.from(ctx.bytes.subarray(binding.pointer, binding.pointer + binding.length)), module = new WebAssembly.Module(bytes);
-  const imports = generatedImports({resident: ctx.owner !== 'replacement', helpers: ['cpu_read32','cpu_store32','cpu_read_modify32']}).slice(1).map(item => item.name).map(name => ctx.owner === 'replacement' ? name : name === 'cpu_store32' ? 'cpu_store_resident32' : name);
+  const imports = generatedImports({read32View: false, resident: ctx.owner !== 'replacement', helpers: ['cpu_read32','cpu_store32','cpu_read_modify32']}).slice(1).map(item => item.name).map(name => ctx.owner === 'replacement' ? name : name === 'cpu_store32' ? 'cpu_store_resident32' : name);
   assert.deepEqual(WebAssembly.Module.imports(module), [{module: 'env', name: 'memory', kind: 'memory'}, ...imports.map(name => ({module: 'ring3', name, kind: 'function'}))]);
   assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]); const child = new WebAssembly.Instance(module, {env: {memory: ctx.memory}, ring3: ctx.api}); assert.equal(child.exports.run.length, 4);
   writeFileSync(join(output, `${ctx.owner}-${ctx.kind}-${counts.contexts}.wasm`), bytes, {flag: 'wx'}); counts.modules++;

@@ -155,6 +155,10 @@ pub(in crate::cpu::dbt::wasm) fn build(
     if plan.has_x87_pairs {
         types.ty().function([ValType::I32; 9], [ValType::I64]);
     }
+    let read32_view_type = x87_pair_type + u32::from(plan.has_x87_pairs);
+    if plan.has_read32_view {
+        types.ty().function([ValType::I64], [ValType::I32]);
+    }
     let mut imports = ImportSection::new();
     imports.import(
         "env",
@@ -737,6 +741,16 @@ pub(in crate::cpu::dbt::wasm) fn build(
             key,
             id,
         });
+        function_index += 1;
+    }
+
+    if plan.has_read32_view {
+        imports.import(
+            "ring3",
+            "cpu_read32_view",
+            EntityType::Function(read32_view_type),
+        );
+        helper_imports.read32_view = Some(function_index);
         function_index += 1;
     }
 

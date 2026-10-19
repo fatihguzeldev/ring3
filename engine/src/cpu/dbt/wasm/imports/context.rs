@@ -12,6 +12,9 @@ pub(in crate::cpu::dbt::wasm) struct Imports {
     pub(in crate::cpu::dbt::wasm) x87_read32_validator: Option<u32>,
     pub(in crate::cpu::dbt::wasm) x87_write32_validator: Option<u32>,
     pub(in crate::cpu::dbt::wasm) scalar_read32_validator: Option<u32>,
+    pub(in crate::cpu::dbt::wasm) read32_view: Option<u32>,
+    pub(in crate::cpu::dbt::wasm) read32_view_locals:
+        Option<crate::cpu::dbt::wasm::instructions::memory::read_view::ReadViewLocals>,
     pub(in crate::cpu::dbt::wasm) code_fetch_limit: Option<u32>,
     pub(in crate::cpu::dbt::wasm) stack_execute: Option<HelperBinding>,
     pub(in crate::cpu::dbt::wasm) cpu_integer: Option<HelperBinding>,

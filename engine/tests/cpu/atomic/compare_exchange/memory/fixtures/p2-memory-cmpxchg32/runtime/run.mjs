@@ -160,7 +160,7 @@ function compile(ctx, phase = 'initial', tail) {
   }
   refresh(ctx); assert.ok(binding.pointer > 0 && binding.length > 8 && binding.length <= 65536 && binding.pointer + binding.length <= ctx.bytes.length);
   const bytes = Buffer.from(ctx.bytes.subarray(binding.pointer, binding.pointer + binding.length)), module = new WebAssembly.Module(bytes);
-  const names = generatedImports({resident: !(ctx.owner === 'replacement'), helpers: [...(memory ? ['cpu_read32', ctx.owner === 'replacement' ? 'cpu_store32' : 'cpu_store_resident32', 'cpu_read_modify32'] : [])]}).slice(1).map(item => item.name);
+  const names = generatedImports({read32View: false, resident: !(ctx.owner === 'replacement'), helpers: [...(memory ? ['cpu_read32', ctx.owner === 'replacement' ? 'cpu_store32' : 'cpu_store_resident32', 'cpu_read_modify32'] : [])]}).slice(1).map(item => item.name);
   const imports = [{module: 'env', name: 'memory', kind: 'memory'}, ...names.map(name => ({module: 'ring3', name, kind: 'function'}))];
   assert.deepEqual(WebAssembly.Module.imports(module), imports); assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
   const child = new WebAssembly.Instance(module, {env: {memory: ctx.memory}, ring3: ctx.api}); assert.equal(child.exports.run.length, 4);

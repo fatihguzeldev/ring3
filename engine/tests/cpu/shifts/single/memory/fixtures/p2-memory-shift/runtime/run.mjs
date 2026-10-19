@@ -59,7 +59,7 @@ function currentWireOracle(original) {
     const guard = values[0]; assert.ok(guard === 'guard' || guard === 'guard_resident');
     const names = values.slice(1).map(name => name.startsWith('cpu_') ? name : 'cpu_' + name);
     if (names.includes('cpu_read32') && names.some(name => name.startsWith('cpu_store'))) names.push('cpu_read_modify32');
-    current.transport[key] = generatedImports({resident: guard === 'guard_resident', helpers: names}).slice(1).map(item => item.name);
+    current.transport[key] = generatedImports({read32View: false, resident: guard === 'guard_resident', helpers: names}).slice(1).map(item => item.name);
   }
   current.transport.arena_bytes = ARENA_SIZE;
   current.transport.locals = [[16, 127], [1, 126], [10, 127], [1, 127], [1, 126], [6, 127]];

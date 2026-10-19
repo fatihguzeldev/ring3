@@ -143,7 +143,7 @@ function compile(ctx, specs = ctx.bank.specs, continuation = false, role = 'c1')
     }
     refresh(ctx); assert.ok(binding.pointer > 0 && binding.length > 8 && binding.length <= 65536 && binding.pointer + binding.length <= ctx.bytes.length);
     bytes = Buffer.from(ctx.bytes.subarray(binding.pointer, binding.pointer + binding.length));
-    imports = (pureModule ? generatedImports({resident: ctx.owner !== 'replacement', helpers: []}).slice(1).map(item => item.name) : generatedImports({resident: ctx.owner !== 'replacement', helpers: ['cpu_read32','cpu_store32','cpu_read_modify32']}).slice(1).map(item => item.name)).map(name => ctx.owner === 'replacement' ? name : name === 'cpu_store32' ? 'cpu_store_resident32' : name);
+    imports = (pureModule ? generatedImports({read32View: false, resident: ctx.owner !== 'replacement', helpers: []}).slice(1).map(item => item.name) : generatedImports({read32View: false, resident: ctx.owner !== 'replacement', helpers: ['cpu_read32','cpu_store32','cpu_read_modify32']}).slice(1).map(item => item.name)).map(name => ctx.owner === 'replacement' ? name : name === 'cpu_store32' ? 'cpu_store_resident32' : name);
     writeFileSync(join(output, `${ctx.owner}-${ctx.bank.id}-${ctx.low}-${counts.modules + 1}.wasm`), bytes, {flag: 'wx'});
   }
   assert.ok(bytes.length <= 65536, 'default emitted byte cap'); const module = new WebAssembly.Module(bytes);

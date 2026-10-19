@@ -65,7 +65,7 @@ for (const [index, owner] of ["replacement", "resident"].entries()) {
     ctx.expected.set(words([1, 24, binding.low, binding.high, binding.pointer, binding.length]), 140); check(ctx, "resident receipt only");
   }
   const bytes = Buffer.from(new Uint8Array(ctx.memory.buffer, binding.pointer, binding.length)), module = new WebAssembly.Module(bytes);
-  const names = owner === "replacement" ? generatedImports({resident: false, helpers: ["cpu_read32", "cpu_read8", "cpu_store8"]}).slice(1).map(item => item.name) : generatedImports({resident: true, helpers: ["cpu_read32", "cpu_read8", "cpu_store_resident8"]}).slice(1).map(item => item.name);
+  const names = owner === "replacement" ? generatedImports({read32View: false, resident: false, helpers: ["cpu_read32", "cpu_read8", "cpu_store8"]}).slice(1).map(item => item.name) : generatedImports({read32View: false, resident: true, helpers: ["cpu_read32", "cpu_read8", "cpu_store_resident8"]}).slice(1).map(item => item.name);
   assert.deepEqual(WebAssembly.Module.imports(module), [{module: "env", name: "memory", kind: "memory"}, ...names.map(name => ({module: "ring3", name, kind: "function"}))]);
   ctx.run = new WebAssembly.Instance(module, {env: {memory: ctx.memory}, ring3: ctx.api}).exports.run;
   writeFileSync(join(output, `${owner}.wasm`), bytes, {flag: "wx"}); modules.push({owner, ...binding, bytes: bytes.length, sha256: hash(bytes)});

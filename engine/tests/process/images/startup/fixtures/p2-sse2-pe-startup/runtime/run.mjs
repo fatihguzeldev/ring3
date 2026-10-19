@@ -144,6 +144,7 @@ function checkRam(c, address, expected, label) {
   }
 }
 function bindHelper(c, unit, name) {
+  if (name === 'cpu_read32_view') return () => 0;
   return (...raw) => {
     const before = arena(c), expected = Buffer.from(before);
     const args = raw.map(value => value >>> 0);
@@ -218,7 +219,7 @@ function capture(c, label, rvas, slot) {
   const bytes = Buffer.from(new Uint8Array(c.memory.buffer, unit.pointer, unit.length));
   const module = new WebAssembly.Module(bytes), imports = WebAssembly.Module.imports(module), ring3 = {};
   assert.deepEqual(imports[0], {module: 'env', name: 'memory', kind: 'memory'});
-  const allowed = new Set(['guard_detect_resident', 'cpu_read32', 'cpu_store_resident32', 'cpu_read', 'cpu_write_resident', 'simd_execute_resident', 'finish_exception_detection']);
+  const allowed = new Set(['guard_detect_resident', 'cpu_read32', 'cpu_read32_view', 'cpu_store_resident32', 'cpu_read', 'cpu_write_resident', 'simd_execute_resident', 'finish_exception_detection']);
   for (const item of imports.slice(1)) {
     assert.equal(item.module, 'ring3');
     assert.equal(item.kind, 'function');

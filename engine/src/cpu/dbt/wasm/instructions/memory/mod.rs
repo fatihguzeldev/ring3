@@ -4,6 +4,7 @@ mod byte_store;
 mod cpu_scalar;
 mod exchange;
 mod narrow;
+pub(in crate::cpu::dbt::wasm) mod read_view;
 mod scalar;
 mod stack;
 mod word_exchange;

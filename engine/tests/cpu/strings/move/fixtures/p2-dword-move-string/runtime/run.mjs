@@ -147,7 +147,7 @@ function open(owner,ordinal){const instance=new WebAssembly.Instance(engine.modu
   upload(c,PC,bank);input(c,140,words([PC,3,PC+16,8]),"two compiler block descriptors");
   let binding;if(owner==="replacement"){host(c,"compile",[2]);binding={generation:c.api.generation(),pointer:c.api.module_ptr()>>>0,length:c.api.module_len()>>>0};}
   else{host(c,"compile_resident",[2]);const b=arena(c);binding=Object.fromEntries(["low","high","pointer","length"].map((name,i)=>[name,b.readUInt32LE(148+i*4)]));}
-  const bytes=Buffer.from(new Uint8Array(c.memory.buffer,binding.pointer,binding.length)),module=new WebAssembly.Module(bytes),names=owner==="replacement"?generatedImports({resident: false, helpers: ["cpu_read32", "cpu_store32"]}).slice(1).map(item => item.name):generatedImports({resident: true, helpers: ["cpu_read32", "cpu_store_resident32"]}).slice(1).map(item => item.name);
+  const bytes=Buffer.from(new Uint8Array(c.memory.buffer,binding.pointer,binding.length)),module=new WebAssembly.Module(bytes),names=owner==="replacement"?generatedImports({read32View: false, resident: false, helpers: ["cpu_read32", "cpu_store32"]}).slice(1).map(item => item.name):generatedImports({read32View: false, resident: true, helpers: ["cpu_read32", "cpu_store_resident32"]}).slice(1).map(item => item.name);
   assert.deepEqual(WebAssembly.Module.imports(module),[{module:"env",name:"memory",kind:"memory"},...names.map(name=>({module:"ring3",name,kind:"function"}))]);
   c.run=new WebAssembly.Instance(module,{env:{memory:c.memory},ring3:c.api}).exports.run;c.binding=binding;
   const file=owner+"-"+ordinal+".wasm";writeFileSync(join(output,file),bytes,{flag:"wx"});modules.push({context:ordinal,owner,file,...binding,bytes:bytes.length,sha256:hash(bytes),imports:names});return c;}
@@ -206,9 +206,9 @@ for(const owner of ["replacement","resident"])for(const same of [true,false]){co
   let binding;if(owner==="replacement"){host(c,"compile",[1]);binding={generation:c.api.generation(),pointer:c.api.module_ptr()>>>0,length:c.api.module_len()>>>0};}
   else{host(c,"compile_resident",[1]);const b=arena(c);binding=Object.fromEntries(["low","high","pointer","length"].map((name,i)=>[name,b.readUInt32LE(148+i*4)]));}
   const bytes=Buffer.from(new Uint8Array(c.memory.buffer,binding.pointer,binding.length)),module=new WebAssembly.Module(bytes),guard=detectionGuardName(!(owner==="replacement"));
-  assert.deepEqual(WebAssembly.Module.imports(module),generatedImports({bound: true, resident: !(owner==="replacement"), helpers: []}));
+  assert.deepEqual(WebAssembly.Module.imports(module),generatedImports({read32View: false, bound: true, resident: !(owner==="replacement"), helpers: []}));
   c.run=new WebAssembly.Instance(module,{env:{memory:c.memory},ring3:c.api}).exports.run;c.binding=binding;
-  const file=owner+"-"+c.ordinal+"-tail.wasm";writeFileSync(join(output,file),bytes,{flag:"wx"});modules.push({context:c.ordinal,owner,file,...binding,bytes:bytes.length,sha256:hash(bytes),imports:generatedImports({resident: !(owner==="replacement"), helpers: []}).slice(1).map(item => item.name)});
+  const file=owner+"-"+c.ordinal+"-tail.wasm";writeFileSync(join(output,file),bytes,{flag:"wx"});modules.push({context:c.ordinal,owner,file,...binding,bytes:bytes.length,sha256:hash(bytes),imports:generatedImports({read32View: false, resident: !(owner==="replacement"), helpers: []}).slice(1).map(item => item.name)});
   run(c,2,"fresh current tail continues retained CPU then cold",{...cpu(c),pc:PC+3},3,1,undefined,0,false,1);close(c);}
 assert.deepEqual(sourcePins(),beforeSources,"source bytes unchanged");
 assert.equal(copies.length,82);assert.equal(faults,36);assert.equal(generated,138);assert.equal(retired,106);assert.equal(closed,6);assert.equal(contexts,6);assert.equal(modules.length,10);

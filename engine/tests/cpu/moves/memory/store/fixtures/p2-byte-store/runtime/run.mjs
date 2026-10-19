@@ -1,5 +1,5 @@
 import {pageFaultExit, pageFaultPacket} from '../../../../../../../support/wasm/page-fault.mjs';
-import {generatedImports} from '../../../../../../../support/wasm/binding.mjs';
+import {generatedImports, attachDetectionApi} from '../../../../../../../support/wasm/binding.mjs';
 import {generatedRunBody} from '../../../../../../../support/wasm/run.mjs';
 import {assertEngineExports} from '../../../../../../../support/wasm/exports.mjs';
 import {ARENA_SIZE, createArena} from '../../../../../../../support/wasm/arena.mjs';
@@ -134,6 +134,7 @@ function request(bytes, label = 'explicit host Transfer input') { assert.ok(byte
 function fresh(name, owner, pages = 8) {
   const instance = new WebAssembly.Instance(engineModule, {}), api = {};
   for (const [name, arity] of Object.entries(arities)) { const fn = instance.exports[`ring3_abi_v1_${name}`]; assert.equal(typeof fn,'function',name); assert.equal(fn.length,arity,name); api[name]=fn; }
+  attachDetectionApi(api, instance.exports);
   const ordinal = ++nextInstance, key = 0xa352cdef00000000n + BigInt(ordinal);
   engine = {name,owner,ordinal,api,key,low:Number(key & 0xffffffffn),high:Number(key >> 32n),memory:instance.exports.memory,units:[]};
   assert.ok(engine.memory instanceof WebAssembly.Memory); assert.equal(api.open(pages,engine.low,engine.high),0); engine.base=api.arena_ptr()>>>0; refresh();
@@ -173,7 +174,7 @@ function childShape(bytes, unit, helpers, dispatch = false) {
     else if(section===7) {for(let count=unsigned();count>0;count--)exports.push({name:name(),kind:bytes[at++],index:unsigned()});}
     else if(section===10) {
       assert.equal(unsigned(), functions.length);const bodyLength=unsigned(),bodyEnd=at+bodyLength;if (dispatch) assert.equal(bodyEnd, end); else {assert.equal(bodyLength, runBody.length); assert.ok(bodyEnd <= end);}locals=Array.from({length:unsigned()},()=>[unsigned(),bytes[at++]]);
-      assert.deepEqual(locals,dispatch?[[6,0x7f]]:[[16,0x7f],[1,0x7e],[10,0x7f],[1,0x7f],[1,0x7e],[6,0x7f]]);
+      assert.deepEqual(locals,dispatch?[[6,0x7f]]:[[16,0x7f],[1,0x7e],[10,0x7f],[1,0x7f],[1,0x7e],[6,0x7f],...(imports.some(item=>item.name==='cpu_read32_view')?[[7,0x7f],[1,0x7e]]:[])]);
       const expected=[engine.low,engine.high,...(dispatch?[]:engine.owner==='resident'?[unit.low,unit.high]:[unit.generation])];
       guard={name:dispatch?'guard_dispatch_entry':engine.owner==='resident'?'guard_detect_resident':'guard_detect',constants:expected};
       for(const value of expected){assert.equal(bytes[at++],0x41);assert.equal(signed(),value);}
@@ -182,9 +183,10 @@ function childShape(bytes, unit, helpers, dispatch = false) {
     } else assert.fail(`unexpected generated child section${section}`);
     assert.equal(at,end);
   }
-  if (dispatch) assert.deepEqual(functions, [0]); else {assert.deepEqual(functions, [0, ...(functions.length === 2 ? [types.length - 2] : [])]); if (functions.length === 2) assert.deepEqual(types.at(-2), {parameters: Array(6).fill(0x7f), results: [0x7f]});}assert.deepEqual(types[0],{parameters:[0x7f,0x7f,0x7f,0x7f],results:[0x7f]});
+  if (dispatch) assert.deepEqual(functions, [0]); else assert.equal(functions[0], 0); // shared parser checks exact segment/Read32 callee composition
+  assert.deepEqual(types[0],{parameters:[0x7f,0x7f,0x7f,0x7f],results:[0x7f]});
   assert.deepEqual(exports,[{name:'run',kind:0,index:helpers.length}]);assert.ok(locals && guard);
-  const importArities={};for(const row of imports.filter(row=>row.kind==='function')){const type=types[row.type],arity=arities[row.name];assert.ok(arity!==undefined);assert.deepEqual(type,{parameters:Array.from({length:arity},(_,index)=>row.name==='finish_exception_detection'&&index===0?0x7e:0x7f),results:[row.name.startsWith('guard_detect')?0x7e:0x7f]});importArities[row.name]=arity;}
+  const importArities={};for(const row of imports.filter(row=>row.kind==='function')){const type=types[row.type],arity=row.name==='cpu_read32_view'?1:arities[row.name];assert.ok(arity!==undefined);assert.deepEqual(type,{parameters:Array.from({length:arity},(_,index)=>['finish_exception_detection','cpu_read32_view'].includes(row.name)&&index===0?0x7e:0x7f),results:[row.name.startsWith('guard_detect')?0x7e:0x7f]});importArities[row.name]=arity;}
   assert.deepEqual(imports.filter(row=>row.kind==='function').map(row=>row.name),helpers);
   return {locals,guard,import_arities:importArities,run_arity:4};
 }

@@ -32,6 +32,7 @@ pub(in crate::cpu::dbt::wasm) struct ModuleRequirements {
     pub(in crate::cpu::dbt::wasm) has_x87_read32_validator: bool,
     pub(in crate::cpu::dbt::wasm) has_x87_write32_validator: bool,
     pub(in crate::cpu::dbt::wasm) has_read32_validator: bool,
+    pub(in crate::cpu::dbt::wasm) has_read32_view: bool,
     pub(in crate::cpu::dbt::wasm) upper_xstate: bool,
 }
 
@@ -219,6 +220,17 @@ impl ModuleRequirements {
                     .is_some()
             });
         let has_read32_validator = paging_configured && imports.read32_result_sites >= 2;
+        let has_read32_view = matches!(binding, Some(EmbeddedBinding::Resident { .. }))
+            && imports.read32_result_sites != 0
+            && !blocks
+                .iter()
+                .flat_map(|block| &block.instructions)
+                .any(|instruction| {
+                    matches!(
+                        instruction.operation(),
+                        Operation::String { .. } | Operation::RepeatString { .. }
+                    )
+                });
         // waiting instructions emit a second operation site for pending x87 exceptions.
         let x87_read32_sites: usize = blocks
             .iter()
@@ -286,6 +298,7 @@ impl ModuleRequirements {
             has_x87_read32_validator,
             has_x87_write32_validator,
             has_read32_validator,
+            has_read32_view,
             upper_xstate,
         }
     }

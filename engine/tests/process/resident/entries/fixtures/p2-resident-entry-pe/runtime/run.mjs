@@ -148,8 +148,8 @@ function compile(entries, gates, label, helpers) {
   unit.bytes = engine.bytes.slice(unit.pointer, unit.pointer + unit.length);
   const module = new WebAssembly.Module(unit.bytes), imports = WebAssembly.Module.imports(module);
   const sort = rows => rows.sort((a, b) => `${a.module}.${a.name}`.localeCompare(`${b.module}.${b.name}`));
-  assert.deepEqual(sort(imports), sort(generatedImports({resident: helpers[0] === 'guard_detect_resident', helpers: helpers.slice(1)})), 'exact independently frozen required helpers');
-  const allowed = new Set(['guard_detect_resident', 'cpu_read32', 'cpu_store_resident32', 'finish_exception_detection']);
+  assert.deepEqual(sort(imports), sort(generatedImports({resident: helpers[0] === 'guard_detect_resident', helpers: helpers.slice(1), read32View: helpers.includes('cpu_read32')})), 'exact independently frozen required helpers');
+  const allowed = new Set(['guard_detect_resident', 'cpu_read32', 'cpu_read32_view', 'cpu_store_resident32', 'finish_exception_detection']);
   const binding = Object.fromEntries(imports.filter(item => item.module === 'ring3').map(item => { assert.ok(allowed.has(item.name)); return [item.name, api[item.name]]; }));
   unit.instance = new WebAssembly.Instance(module, {env: {memory: engine.memory}, ring3: {...(binding), finish_exception_detection: engine.api.finish_exception_detection}}); unit.run = unit.instance.exports.run;
   assert.equal(typeof unit.run, 'function'); assert.equal(unit.run.length, 4);

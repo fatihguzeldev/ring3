@@ -5,7 +5,7 @@ use crate::cpu::{
         wasm::{
             EmbeddedBinding, abi, code_fetch,
             imports::Imports,
-            instructions::{integer, x87},
+            instructions::{integer, memory::read_view, x87},
             locals::*,
             requirements::ModuleRequirements,
         },
@@ -75,6 +75,12 @@ pub(super) fn emit(
         let first = 4 + declarations.iter().map(|(count, _)| count).sum::<u32>();
         helper_imports.x87_pair_locals = Some(x87::pair::PairLocals::new(first));
         declarations.push((5, ValType::I32));
+        declarations.push((1, ValType::I64));
+    }
+    if plan.has_read32_view {
+        let first = 4 + declarations.iter().map(|(count, _)| count).sum::<u32>();
+        helper_imports.read32_view_locals = Some(read_view::ReadViewLocals::new(first));
+        declarations.push((read_view::INTEGER_LOCALS, ValType::I32));
         declarations.push((1, ValType::I64));
     }
 
@@ -149,6 +155,7 @@ pub(super) fn emit(
     if let Some(locals) = helper_imports.avx_locals {
         crate::cpu::dbt::wasm::instructions::avx::initialize(&mut code, locals);
     }
+    read_view::initialize(&mut code, *helper_imports);
     code.block(BlockType::Empty);
 
     code.loop_(BlockType::Empty);

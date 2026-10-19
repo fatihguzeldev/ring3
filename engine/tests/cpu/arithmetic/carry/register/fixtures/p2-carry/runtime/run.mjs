@@ -144,7 +144,7 @@ function compile(seeds,access,label) {
   refresh();assert.ok(unit.pointer>0&&unit.length>8&&unit.pointer+unit.length<=engine.bytes.length);
   unit.bytes=engine.bytes.slice(unit.pointer,unit.pointer+unit.length);const module=new WebAssembly.Module(unit.bytes);
   const guard=detectionGuardName(engine.owner==='resident');
-  const helpers=generatedImports({resident: engine.owner==='resident', helpers: [...(access.read?['cpu_read32']:[]), ...(access.store?[engine.owner==='resident'?'cpu_store_resident32':'cpu_store32', 'cpu_read_modify32']:[])]}).slice(1).map(item => item.name);
+  const helpers=generatedImports({read32View: access.store ? false : undefined, resident: engine.owner==='resident', helpers: [...(access.read?['cpu_read32']:[]), ...(access.store?[engine.owner==='resident'?'cpu_store_resident32':'cpu_store32', 'cpu_read_modify32']:[])]}).slice(1).map(item => item.name);
   unit.memory=access.read||access.store;unit.writeIntent=access.store;
   assert.deepEqual(WebAssembly.Module.imports(module),[{module:'env',name:'memory',kind:'memory'},...helpers.map(name=>({module:'ring3',name,kind:'function'}))]);
   assert.deepEqual(WebAssembly.Module.exports(module),[{name:'run',kind:'function'}]);

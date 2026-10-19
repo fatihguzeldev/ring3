@@ -194,7 +194,7 @@ function compile(ctx, phase = 'initial', tail) {
   const bytes = Buffer.from(ctx.bytes.subarray(binding.pointer, binding.pointer + binding.length)); assert.ok(WebAssembly.validate(bytes));
   const module = new WebAssembly.Module(bytes), guardName = ctx.owner === 'replacement' ? 'guard_detect' : 'guard_detect_resident';
   const names = [guardName, ...(memory ? ['cpu_read32', ctx.owner === 'replacement' ? 'cpu_store32' : 'cpu_store_resident32','cpu_read_modify32'] : [])];
-  const imports=generatedImports({resident:ctx.owner==='resident',helpers:names.slice(1)});
+  const imports=generatedImports({read32View: false, resident:ctx.owner==='resident',helpers:names.slice(1)});
   assert.deepEqual(WebAssembly.Module.imports(module), imports); assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
   const abi = profile(bytes, ctx.owner, memory, ctx, binding), child = new WebAssembly.Instance(module, {env: {memory: ctx.memory}, ring3: {...Object.fromEntries(names.map(name => [name, ctx.api[name]])),finish_exception_detection:ctx.api.finish_exception_detection}});
   assert.equal(child.exports.run.length, 4); check(ctx, 'child linking preserves arena');

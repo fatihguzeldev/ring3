@@ -116,7 +116,7 @@ function compile(ctx, specs = banks[ctx.kind].specs, continuation = false) {
   }
   refresh(ctx); assert.ok(binding.pointer > 0 && binding.length > 8 && binding.pointer + binding.length <= ctx.bytes.length);
   const bytes = Buffer.from(ctx.bytes.subarray(binding.pointer, binding.pointer + binding.length)), module = new WebAssembly.Module(bytes);
-  const imports = (continuation ? generatedImports({resident: ctx.owner !== 'replacement', helpers: []}).slice(1).map(item => item.name) : generatedImports({resident: ctx.owner !== 'replacement', helpers: ['cpu_read32','cpu_store32','cpu_read_modify32']}).slice(1).map(item => item.name)).map(name => ctx.owner === 'replacement' ? name : name === 'cpu_store32' ? 'cpu_store_resident32' : name);
+  const imports = (continuation ? generatedImports({read32View: false, resident: ctx.owner !== 'replacement', helpers: []}).slice(1).map(item => item.name) : generatedImports({read32View: false, resident: ctx.owner !== 'replacement', helpers: ['cpu_read32','cpu_store32','cpu_read_modify32']}).slice(1).map(item => item.name)).map(name => ctx.owner === 'replacement' ? name : name === 'cpu_store32' ? 'cpu_store_resident32' : name);
   assert.deepEqual(WebAssembly.Module.imports(module), [{module: 'env', name: 'memory', kind: 'memory'}, ...imports.map(name => ({module: 'ring3', name, kind: 'function'}))]);
   assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]); const child = new WebAssembly.Instance(module, {env: {memory: ctx.memory}, ring3: ctx.api}); assert.equal(child.exports.run.length, 4);
   writeFileSync(join(output, `${ctx.owner}-${ctx.kind}-${counts.contexts}-${counts.modules + 1}.wasm`), bytes, {flag: 'wx'}); counts.modules++;

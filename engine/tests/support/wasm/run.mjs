@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 
-// retain the run body's binding contract while validating the optional pure segment callee.
+// retain the run body's binding contract and the known segment/read32 callee composition.
 export function generatedRunBody(bytes, {csBase = 0, default32 = true} = {}) {
   assert.ok(Number.isInteger(csBase) && csBase >= 0 && csBase <= 0xffffffff, 'declared retained CS base');
   assert.equal(typeof default32, 'boolean', 'declared retained code mode');
@@ -22,7 +22,7 @@ export function generatedRunBody(bytes, {csBase = 0, default32 = true} = {}) {
     return Number(BigInt.asUintN(32, value));
   };
   const string = () => Buffer.from(vector()).toString();
-  const arities = {guard: 6, guard_resident: 7, guard_detect: 6, guard_detect_resident: 7, finish_exception_detection: 12, read8: 1, read16: 1, read32: 1, store8: 2, store16: 2, store32: 2, store_resident8: 6, store_resident16: 6, store_resident32: 6, cpu_read8: 1, cpu_read16: 1, cpu_read32: 1, cpu_read_modify8: 1, cpu_read_modify16: 1, cpu_read_modify32: 1, cpu_store8: 2, cpu_store16: 2, cpu_store32: 2, cpu_store_resident8: 6, cpu_store_resident16: 6, cpu_store_resident32: 6};
+  const arities = {guard: 6, guard_resident: 7, guard_detect: 6, guard_detect_resident: 7, finish_exception_detection: 12, cpu_read32_view: 1, read8: 1, read16: 1, read32: 1, store8: 2, store16: 2, store32: 2, store_resident8: 6, store_resident16: 6, store_resident32: 6, cpu_read8: 1, cpu_read16: 1, cpu_read32: 1, cpu_read_modify8: 1, cpu_read_modify16: 1, cpu_read_modify32: 1, cpu_store8: 2, cpu_store16: 2, cpu_store32: 2, cpu_store_resident8: 6, cpu_store_resident16: 6, cpu_store_resident32: 6};
   while (p < bytes.length) {
     const section = bytes[p++], size = leb(), end = p + size;
     assert.ok(end <= bytes.length);
@@ -56,18 +56,36 @@ export function generatedRunBody(bytes, {csBase = 0, default32 = true} = {}) {
   assert.ok(guards.length <= 1, 'one guard identifies a bound module');
   const bound = guards.length === 1;
   const detects = bound && guards[0].startsWith('guard_detect');
+  const readView = importedTypes.some(([, name]) => name === 'cpu_read32_view');
+  assert.ok(!readView || guards[0] === 'guard_detect_resident', 'only resident detection owns a Read32 view');
   assert.equal(finalizers.length, Number(detects), 'one finalizer accompanies a detection guard');
   assert.deepEqual(globals, [Number(bound), csBase, Number(default32)], 'literal retained code key');
   const usedTypes = new Set(functions);
   for (const [type, name] of importedTypes) {
     const parameters = Array(arities[name]).fill(0x7f);
-    if (name === 'finish_exception_detection') parameters[0] = 0x7e;
+    if (name === 'finish_exception_detection' || name === 'cpu_read32_view') parameters[0] = 0x7e;
     const result = name.startsWith('guard_detect') ? 0x7e : 0x7f;
     assert.deepEqual(types[type], [parameters, [result]], `exact signature for ${name}`);
     usedTypes.add(type);
   }
   assert.equal(usedTypes.size, types.length, 'every signature belongs to an imported or defined function');
-  assert.ok(functions.length === 1 || functions.length === 2);
+  const signature = (index, inputs, outputs) =>
+    JSON.stringify(types[index]) === JSON.stringify([Array(inputs).fill(0x7f), Array(outputs).fill(0x7f)]);
+  let segment = null, read32 = null;
+  for (let index = 1; index < functions.length; index++) {
+    if (signature(functions[index], 6, 1)) {
+      assert.equal(segment, null, 'one pure segment callee');
+      assert.equal(index, 1, 'segment callee precedes the Read32 validator');
+      segment = index;
+    } else {
+      assert.ok(signature(functions[index], 10, 7), 'only the declared Read32 validator may follow the segment callee');
+      assert.equal(read32, null, 'one Read32 validator');
+      assert.ok(detects && importedTypes.some(([, name]) => name === 'cpu_read32'), 'Read32 validator requires a bound ordinary read');
+      assert.equal(index, functions.length - 1, 'Read32 validator is the final defined callee');
+      read32 = index;
+    }
+  }
+  assert.equal(functions.length, 1 + Number(segment !== null) + Number(read32 !== null));
   assert.equal(functions.length, bodies.length);
   assert.equal(functions[0], 0);
   assert.deepEqual(types[0], [Array(4).fill(0x7f), [0x7f]]);
@@ -77,11 +95,10 @@ export function generatedRunBody(bytes, {csBase = 0, default32 = true} = {}) {
     const result = []; for (let n = read(); n; n--) result.push([read(), body[at++]]);
     return {result, at};
   };
-  assert.deepEqual(locals(bodies[0]).result, [[16, 0x7f], [1, 0x7e], [10, 0x7f], ...(bound ? [[1, 0x7f]] : []), ...(detects ? [[1, 0x7e], [6, 0x7f]] : [])]);
-  if (functions.length === 2) {
-    assert.equal(functions[1], types.length - 1 - Number(detects));
-    assert.deepEqual(types[functions[1]], [Array(6).fill(0x7f), [0x7f]]);
-    const body = bodies[1], shape = locals(body); assert.deepEqual(shape.result, [[3, 0x7f]]);
+  assert.deepEqual(locals(bodies[0]).result, [[16, 0x7f], [1, 0x7e], [10, 0x7f], ...(bound ? [[1, 0x7f]] : []), ...(detects ? [[1, 0x7e], [6, 0x7f]] : []), ...(readView ? [[7, 0x7f], [1, 0x7e]] : [])]);
+  if (segment !== null) {
+    assert.equal(functions[segment], types.length - 1 - Number(detects) - Number(readView) - Number(read32 !== null));
+    const body = bodies[segment], shape = locals(body); assert.deepEqual(shape.result, [[3, 0x7f]]);
     let at = shape.at, depth = 0;
     const immediate = () => {let count = 0, byte; do {byte = body[at++]; assert.ok(byte !== undefined && ++count <= 5);} while (byte & 128);};
     while (at < body.length) {
@@ -94,6 +111,16 @@ export function generatedRunBody(bytes, {csBase = 0, default32 = true} = {}) {
       else assert.ok([0x0f, 0x45, 0x46, 0x47, 0x49, 0x4b, 0x4d, 0x4f, 0x6a, 0x6b, 0x71, 0x72, 0x74].includes(opcode), 'segment callee has only pure integer/control/checked-load instructions');
     }
     assert.equal(depth, 0); assert.equal(body.at(-1), 0x0b);
+  }
+  if (read32 !== null) {
+    assert.equal(functions[read32], types.length - 1 - Number(readView), 'Read32 validator owns the final non-view type');
+    const body = bodies[read32], shape = locals(body);
+    assert.deepEqual(shape.result, [[17, 0x7f]], 'ten parameters plus seventeen canonical validator locals');
+    const destinations = [25, 26, 15, 21, 22, 23, 24, 16, 17];
+    const adapter = destinations.flatMap((local, index) => [0x20, index + 1, 0x21, local]);
+    assert.deepEqual([...body.subarray(shape.at, shape.at + adapter.length)], adapter, 'exact canonical parameter adapter');
+    const returned = [15, 21, 22, 23, 24, 16, 17].flatMap(local => [0x20, local]).concat(0x0b);
+    assert.deepEqual([...body.subarray(-returned.length)], returned, 'exact canonical terminal/scratch return tuple');
   }
   return bodies[0];
 }

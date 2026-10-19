@@ -68,16 +68,18 @@ function capture(c,label){
  const a=arena(c);c.binding=c.owner==='resident'?{low:a.readUInt32LE(T+8),high:a.readUInt32LE(T+12),pointer:a.readUInt32LE(T+16),length:a.readUInt32LE(T+20)}:{generation:c.api.generation(),pointer:c.api.module_ptr()>>>0,length:c.api.module_len()>>>0};
  const bytes=Buffer.from(new Uint8Array(c.memory.buffer,c.binding.pointer,c.binding.length)),module=new WebAssembly.Module(bytes),imports=WebAssembly.Module.imports(module),ring3={};
  assert.deepEqual(WebAssembly.Module.exports(module),[{name:'run',kind:'function'}]);assert.deepEqual(imports[0],{module:'env',name:'memory',kind:'memory'});
- const allowed=new Set(['guard_detect','guard_detect_resident','finish_exception_detection','cpu_read32','cpu_store32','cpu_store_resident32','x87_op','x87_resident_op','x87_resident_pair','cpu_read','cpu_write','cpu_write_resident','simd_execute','simd_execute_resident']);
+ const allowed=new Set(['guard_detect','guard_detect_resident','finish_exception_detection','cpu_read32','cpu_read32_view','cpu_store32','cpu_store_resident32','x87_op','x87_resident_op','x87_resident_pair','cpu_read','cpu_write','cpu_write_resident','simd_execute','simd_execute_resident']);
  const hasPairs=c.kind==='x87'&&c.owner==='resident';
  assert.equal(imports.some(im=>im.name==='x87_resident_pair'),hasPairs,'only the resident x87 kernel has an eligible pair');
  assert.equal(imports[1].name,c.owner==='resident'?'guard_detect_resident':'guard_detect');
- assert.deepEqual(imports.slice(hasPairs?-2:-1).map(im=>im.name),hasPairs?['finish_exception_detection','x87_resident_pair']:['finish_exception_detection']);
+ const coreImports=imports.filter(im=>im.name!=='cpu_read32_view');
+ assert.deepEqual(coreImports.slice(hasPairs?-2:-1).map(im=>im.name),hasPairs?['finish_exception_detection','x87_resident_pair']:['finish_exception_detection']);
  for(const im of imports.slice(1)){assert.equal(im.module,'ring3');assert.equal(im.kind,'function');assert.ok(allowed.has(im.name),im.name);assert.equal(typeof c.api[im.name],'function');ring3[im.name]=(...args)=>forward(c,im.name,args);}
  c.run=new WebAssembly.Instance(module,{env:{memory:c.memory},ring3}).exports.run;assert.equal(c.run.length,4);
  const file='module-'+(modules.length+1)+'.wasm';writeFileSync(join(output,file),bytes,{flag:'wx'});modules.push({context:c.id,kind:c.kind,owner:c.owner,entries:c.entries,material:label,file,bytes:bytes.length,sha256:hash(bytes),imports,blocks:blocks.map(({pc,bytes,instructions})=>({pc,length:bytes.length,instructions})),...c.binding});c.material=label;c.materials.set(label,{binding:c.binding,run:c.run});
 }
 function forward(c,name,args){
+ if(name==='cpu_read32_view')return 0;
  const before=arena(c),status=c.api[name](...args),after=arena(c);if(name.startsWith('guard')){assert.equal(typeof status,'bigint');assert.ok(status>0n,'positive bound entry epoch');c.epoch=status;assert.deepEqual(after,before,'bound guard neutrality');return status;}
  if(name==='finish_exception_detection'){assert.equal(status,0,'actual stop finalizer');assert.deepEqual(args,[c.epoch,...[72,80,84,88,92].map(at=>after.readUInt32LE(at)),0,0,0,0,0,0]);assert.deepEqual(after,before,'detector is arena-neutral');detections.push({context:c.id,case:c.case,args:args.map(n=>typeof n==='bigint'?n.toString():n>>>0),status});return status;}
  if(name==='x87_resident_pair'){

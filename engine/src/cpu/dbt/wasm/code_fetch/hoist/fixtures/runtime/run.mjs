@@ -77,6 +77,7 @@ for(const item of fixture.modules) {
     if(imp.name==='guard_detect'||imp.name==='guard_detect_resident')bindings[imp.name]=()=>1n;
     else if(imp.name==='finish_exception_detection')bindings[imp.name]=(...args)=>{finishes.push(args);return 0;};
     else if(imp.name==='cpu_read32')bindings[imp.name]=()=>helper(0);
+    else if(imp.name==='cpu_read32_view')bindings[imp.name]=()=>0;
     else if(imp.name==='x87_op'||imp.name==='x87_resident_op')bindings[imp.name]=(...args)=>helper(args.at(-4));
     else throw new Error(`unexpected import ${imp.module}.${imp.name}`);
   }

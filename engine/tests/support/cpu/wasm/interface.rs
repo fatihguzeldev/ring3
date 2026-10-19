@@ -62,6 +62,27 @@ pub fn assert_interface(
     segmented: bool,
 ) {
     validate(wasm);
+    let mut imports = section(wasm, 2);
+    let import_count = imports.unsigned();
+    let mut expected = expected.to_vec();
+    let mut arities = arities.to_vec();
+    if import_count == expected.len() + 2 {
+        expected.push(("cpu_read32_view", 1));
+        arities.push(1);
+    }
+    let read_view = expected
+        .last()
+        .is_some_and(|(name, arity)| *name == "cpu_read32_view" && *arity == 1);
+    if read_view {
+        assert_eq!(expected.first(), Some(&("guard_detect_resident", 7)));
+        assert!(
+            expected
+                .iter()
+                .any(|&(name, arity)| name == "cpu_read32" && arity == 1)
+        );
+    }
+    assert_eq!(import_count, expected.len() + 1);
+    let finish_type = arities.len() - 1 - usize::from(read_view);
     let bound = expected
         .first()
         .is_some_and(|(name, _)| matches!(*name, "guard_detect" | "guard_detect_resident"));
@@ -86,7 +107,7 @@ pub fn assert_interface(
         assert_eq!(types.byte(), 0x60);
         assert_eq!(types.unsigned(), arity);
         let mut parameters = vec![0x7f; arity];
-        if detection && index == arities.len() - 1 {
+        if (detection && index == finish_type) || (read_view && index == arities.len() - 1) {
             parameters[0] = 0x7e;
         }
         assert_eq!(types.take(arity), parameters, "type {index}");
@@ -98,14 +119,12 @@ pub fn assert_interface(
         );
     }
     types.end();
-    let mut imports = section(wasm, 2);
-    assert_eq!(imports.unsigned(), expected.len() + 1);
     assert_eq!(
         (imports.name(), imports.name(), imports.byte()),
         ("env", "memory", 2)
     );
     assert_eq!((imports.unsigned(), imports.unsigned()), (0, 1));
-    for &(name, arity) in expected {
+    for &(name, arity) in &expected {
         assert_eq!(
             (imports.name(), imports.name(), imports.byte()),
             ("ring3", name, 0)
@@ -113,19 +132,28 @@ pub fn assert_interface(
         let index = imports.unsigned();
         assert_eq!(arities[index], arity, "import {name}");
         if name == "finish_exception_detection" {
+            assert_eq!(index, finish_type);
+        }
+        if name == "cpu_read32_view" {
             assert_eq!(index, arities.len() - 1);
         }
         if matches!(name, "guard_detect" | "guard_detect_resident") {
             assert_eq!(index, 1);
-        } else if name != "finish_exception_detection" {
+        } else if !matches!(name, "finish_exception_detection" | "cpu_read32_view") {
             if bound {
                 assert_ne!(index, 1, "ordinary helper {name} must return i32");
             }
             if detection {
                 assert_ne!(
+                    index, finish_type,
+                    "ordinary helper {name} must take only i32 parameters"
+                );
+            }
+            if read_view {
+                assert_ne!(
                     index,
                     arities.len() - 1,
-                    "ordinary helper {name} must take only i32 parameters"
+                    "ordinary helper {name} cannot use the view signature"
                 );
             }
         }
@@ -137,7 +165,7 @@ pub fn assert_interface(
     if segmented {
         assert_eq!(
             functions.unsigned(),
-            arities.len() - 1 - usize::from(detection)
+            arities.len() - 1 - usize::from(detection) - usize::from(read_view)
         );
     }
     functions.end();
@@ -162,6 +190,9 @@ pub fn assert_interface(
     }
     if detection {
         locals.extend([(1, 0x7e), (6, 0x7f)]);
+    }
+    if read_view {
+        locals.extend([(7, 0x7f), (1, 0x7e)]);
     }
     assert_eq!(body.unsigned(), locals.len());
     for expected in locals {

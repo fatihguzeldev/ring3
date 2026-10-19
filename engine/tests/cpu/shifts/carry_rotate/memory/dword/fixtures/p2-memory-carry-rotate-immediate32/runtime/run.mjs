@@ -536,7 +536,7 @@ function instantiate(ctx, bytes, file, binding, scans, pureTail = false, origin 
             ? "cpu_store_resident32"
             : name,
     );
-  const imports=generatedImports({resident:ctx.owner==='resident',helpers:helperNames.slice(1)});
+  const imports=generatedImports({read32View: false, resident:ctx.owner==='resident',helpers:helperNames.slice(1)});
   assert.deepEqual(WebAssembly.Module.imports(module),imports);
   assert.deepEqual(WebAssembly.Module.exports(module), [{ name: "run", kind: "function" }]);
   assert.ok(WebAssembly.validate(bytes));

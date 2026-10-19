@@ -125,7 +125,7 @@ function open(owner,entries){const instance=new WebAssembly.Instance(engine.modu
  const method=owner==="resident"?(entries?"compile_resident_entries":"compile_resident"):(entries?"compile_entries":"compile");host(c,method,entries?[3,0]:[3]);
  let binding;if(owner==="resident"){const b=arena(c);binding=Object.fromEntries(["low","high","pointer","length"].map((name,i)=>[name,b.readUInt32LE(148+i*4)]));}
  else binding={generation:c.api.generation(),pointer:c.api.module_ptr()>>>0,length:c.api.module_len()>>>0};
- const bytes=Buffer.from(new Uint8Array(c.memory.buffer,binding.pointer,binding.length)),module=new WebAssembly.Module(bytes),names=generatedImports({resident: owner==="resident", helpers: ["cpu_read32"]}).slice(1).map(item => item.name);
+ const bytes=Buffer.from(new Uint8Array(c.memory.buffer,binding.pointer,binding.length)),module=new WebAssembly.Module(bytes),names=generatedImports({read32View: false, resident: owner==="resident", helpers: ["cpu_read32"]}).slice(1).map(item => item.name);
  assert.deepEqual(WebAssembly.Module.imports(module),[{module:"env",name:"memory",kind:"memory"},...names.map(name=>({module:"ring3",name,kind:"function"}))]);
  c.run=new WebAssembly.Instance(module,{env:{memory:c.memory},ring3:c.api}).exports.run;const file=`${owner}-${entries?"entries":"explicit"}.wasm`;
  writeFileSync(join(output,file),bytes,{flag:"wx"});modules.push({context:c.ordinal,owner,entries,file,...binding,bytes:bytes.length,sha256:hash(bytes),imports:names});return c;}

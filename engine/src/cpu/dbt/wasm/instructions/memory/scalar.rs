@@ -13,9 +13,7 @@ pub(in crate::cpu::dbt::wasm) fn load(
     exit_depth: u32,
 ) {
     checked_address(code, address, 4, SegmentAccess::Read, imports, exit_depth);
-    code.local_get(ADDRESS)
-        .call(imports.read.expect("prepared memory load has an import"))
-        .local_set(HELPER_STATUS);
+    super::read_view::load(code, imports);
     crate::cpu::dbt::wasm::code_fetch::check_context(code, exit_depth);
     cpu_scalar::validate_read32(code, imports);
     exit_if_failed(code, exit_depth);
@@ -129,16 +127,20 @@ fn load_at_address_with_intent(
     modify: bool,
 ) {
     let paging_modify = modify && imports.paging_configured;
-    code.local_get(ADDRESS)
-        .call(
-            (if paging_modify {
-                imports.read_modify
-            } else {
-                imports.read
-            })
-            .expect("prepared memory operand has a read import"),
-        )
-        .local_set(HELPER_STATUS);
+    if modify {
+        code.local_get(ADDRESS)
+            .call(
+                (if paging_modify {
+                    imports.read_modify
+                } else {
+                    imports.read
+                })
+                .expect("prepared memory operand has a read import"),
+            )
+            .local_set(HELPER_STATUS);
+    } else {
+        super::read_view::load(code, imports);
+    }
     crate::cpu::dbt::wasm::code_fetch::check_context(code, exit_depth);
     if paging_modify {
         cpu_scalar::validate(

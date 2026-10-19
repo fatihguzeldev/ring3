@@ -68,7 +68,7 @@ for (const [index, owner] of ["replacement", "resident"].entries()) {
   }
   const bytes = Buffer.from(new Uint8Array(ctx.memory.buffer, binding.pointer, binding.length)), module = new WebAssembly.Module(bytes);
   const guard = detectionGuardName(!(owner === "replacement")), store = owner === "replacement" ? "cpu_store32" : "cpu_store_resident32";
-  assert.deepEqual(WebAssembly.Module.imports(module), [{module: "env", name: "memory", kind: "memory"}, ...generatedImports({resident: !(owner === "replacement"), helpers: ["cpu_read32", store]}).slice(1).map(item => item.name).map(name => ({module: "ring3", name, kind: "function"}))]);
+  assert.deepEqual(WebAssembly.Module.imports(module), [{module: "env", name: "memory", kind: "memory"}, ...generatedImports({read32View: false, resident: !(owner === "replacement"), helpers: ["cpu_read32", store]}).slice(1).map(item => item.name).map(name => ({module: "ring3", name, kind: "function"}))]);
   ctx.run = new WebAssembly.Instance(module, {env: {memory: ctx.memory}, ring3: ctx.api}).exports.run;
   writeFileSync(join(output, `${owner}.wasm`), bytes, {flag: "wx"}); modules.push({owner, ...binding, bytes: bytes.length, sha256: hash(bytes)});
   const registers = [0x7fffffff, 31, 0xa53cabcd, 0x3456789a, 0x4567ff00, 0x56789abc, SOURCE, DESTINATION];
