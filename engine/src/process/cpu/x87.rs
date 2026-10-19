@@ -135,11 +135,13 @@ impl EngineInstance {
                 state.data_selector = segments.selectors[segment.index()];
             }
         }
+        let mut output = (write_size != 0).then(|| [0; 108]);
         let outcome = state
-            .evaluate_with_workspace(
+            .evaluate_into(
                 operation,
                 input.as_ref().map_or(&[], |input| &input[..read_size]),
                 flags,
+                output.as_mut(),
                 &mut self.numerical_workspace,
             )
             .map_err(|error| {
@@ -168,7 +170,7 @@ impl EngineInstance {
         let version = self.memory.as_ref().unwrap().code_validation_version();
         if let Err(error) = self
             .cpu_memory_port32()
-            .write(GuestAddress(address), &outcome.memory[..outcome.memory_len])
+            .write(GuestAddress(address), outcome.memory())
         {
             return self.x87_packet(length, 0, Err(CpuMemoryError::from(error)), false, resident);
         }

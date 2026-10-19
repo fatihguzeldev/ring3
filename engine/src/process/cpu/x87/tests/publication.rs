@@ -201,3 +201,58 @@ fn failed_store_commit_keeps_preinstruction_fp_state_and_guest_bytes() {
     assert_eq!(actual, memory_before);
     assert_eq!(engine.memory().unwrap().transaction_version(), u64::MAX);
 }
+
+#[test]
+fn unmasked_store_suppression_never_publishes_attempted_output_or_pop() {
+    let mut engine = engine();
+    let mut original = one();
+    original.control &= !8;
+    original.registers[0] = crate::cpu::x86::Ext80::from_parts(false, 16383 + 128, 1 << 63).0;
+    encode_x87(
+        &original,
+        &mut engine.arena_mut().unwrap()[X87_OFFSET..X87_OFFSET + X87_SIZE],
+    )
+    .unwrap();
+    let before = engine.arena().to_vec();
+    let version = engine.memory().unwrap().transaction_version();
+    let mut memory_before = [0; 4];
+    engine
+        .memory()
+        .unwrap()
+        .read(GuestAddress(0x5000), &mut memory_before)
+        .unwrap();
+    assert_eq!(
+        engine.x87_op(
+            X87Operation::Store {
+                format: X87Format::Float32,
+                pop: true,
+                truncate: false,
+            }
+            .encode(),
+            0x5000,
+            0x46,
+            0x1000,
+            0x118,
+            1,
+        ),
+        Ok(StoreCompletion::Complete)
+    );
+    original.status = 0x8088;
+    original.instruction_pointer = 0x1000;
+    original.data_pointer = 0x5000;
+    original.opcode = 0x118;
+    original.code_selector = 0x1b;
+    original.data_selector = 0x23;
+    let mut expected = expected_packet(&before, 0, 0, 4);
+    expected[HELPER_OFFSET + 20..HELPER_OFFSET + 24].copy_from_slice(&0x46_u32.to_le_bytes());
+    encode_x87(&original, &mut expected[X87_OFFSET..X87_OFFSET + X87_SIZE]).unwrap();
+    assert_eq!(engine.arena(), expected);
+    let mut memory_after = [0; 4];
+    engine
+        .memory()
+        .unwrap()
+        .read(GuestAddress(0x5000), &mut memory_after)
+        .unwrap();
+    assert_eq!(memory_after, memory_before);
+    assert_eq!(engine.memory().unwrap().transaction_version(), version);
+}

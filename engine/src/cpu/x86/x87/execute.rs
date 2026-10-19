@@ -7,6 +7,10 @@ use super::value::{DENORMAL, Ext80, INVALID, Kind, Rounded, X87Rounding};
 #[path = "execute/tests/division.rs"]
 mod division_tests;
 
+#[cfg(test)]
+#[path = "execute/tests/output.rs"]
+mod output_tests;
+
 const C0: u16 = 1 << 8;
 const C1: u16 = 1 << 9;
 const C2: u16 = 1 << 10;
@@ -452,6 +456,14 @@ pub struct X87Outcome {
     pub unmasked_exception: bool,
 }
 
+pub(crate) struct Evaluation<'output> {
+    pub(crate) state: X87State,
+    memory: Option<&'output mut [u8; 108]>,
+    pub(crate) memory_len: usize,
+    pub(crate) eflags: Option<u32>,
+    pub(crate) unmasked_exception: bool,
+}
+
 impl X87State {
     pub fn top(&self) -> usize {
         usize::from((self.status >> 11) & 7)
@@ -475,22 +487,43 @@ impl X87State {
         input: &[u8],
         eflags: u32,
     ) -> Result<X87Outcome, X87Error> {
-        self.evaluate_with_workspace(operation, input, eflags, &mut Default::default())
+        let mut memory = [0; 108];
+        let Evaluation {
+            state,
+            memory_len,
+            eflags,
+            unmasked_exception,
+            ..
+        } = self.evaluate_into(
+            operation,
+            input,
+            eflags,
+            Some(&mut memory),
+            &mut Default::default(),
+        )?;
+        Ok(X87Outcome {
+            state,
+            memory,
+            memory_len,
+            eflags,
+            unmasked_exception,
+        })
     }
 
-    pub(crate) fn evaluate_with_workspace(
+    pub(crate) fn evaluate_into<'output>(
         &self,
         operation: X87Operation,
         input: &[u8],
         eflags: u32,
+        memory: Option<&'output mut [u8; 108]>,
         workspace: &mut crate::math::NumericalWorkspace,
-    ) -> Result<X87Outcome, X87Error> {
-        if input.len() != operation.read_size() {
+    ) -> Result<Evaluation<'output>, X87Error> {
+        if input.len() != operation.read_size() || operation.write_size() != 0 && memory.is_none() {
             return Err(X87Error::InvalidInputLength);
         }
-        let mut outcome = X87Outcome {
+        let mut outcome = Evaluation {
             state: *self,
-            memory: [0; 108],
+            memory,
             memory_len: 0,
             eflags: None,
             unmasked_exception: false,
@@ -538,7 +571,13 @@ impl X87State {
     }
 }
 
-impl X87Outcome {
+impl Evaluation<'_> {
+    pub(crate) fn memory(&self) -> &[u8] {
+        self.memory
+            .as_deref()
+            .map_or(&[], |memory| &memory[..self.memory_len])
+    }
+
     fn physical(&self, index: u8) -> Result<usize, X87Error> {
         if index >= 8 {
             Err(X87Error::InvalidOperand)
@@ -634,7 +673,8 @@ impl X87Outcome {
                 );
                 self.state.status =
                     (self.state.status & !C1) | exceptions | if incremented { C1 } else { 0 };
-                self.memory[..format.size()].copy_from_slice(&bytes[..format.size()]);
+                self.memory.as_deref_mut().expect("validated x87 output")[..format.size()]
+                    .copy_from_slice(&bytes[..format.size()]);
                 self.memory_len = format.size();
                 if pop {
                     self.pop();
@@ -918,7 +958,8 @@ impl X87Outcome {
                 } else {
                     self.state.status
                 };
-                self.memory[..2].copy_from_slice(&word.to_le_bytes());
+                self.memory.as_deref_mut().expect("validated x87 output")[..2]
+                    .copy_from_slice(&word.to_le_bytes());
                 self.memory_len = 2;
             }
             X87Operation::LoadEnvironment { operand16 } => self.load_environment(input, operand16),
@@ -940,9 +981,10 @@ impl X87Outcome {
             X87Operation::Save { operand16 } => {
                 self.save_environment(operand16);
                 let environment_size = self.memory_len;
+                let memory = self.memory.as_deref_mut().expect("validated x87 output");
                 for index in 0..8 {
                     let physical = (self.state.top() + index) & 7;
-                    self.memory[environment_size + index * 10..environment_size + (index + 1) * 10]
+                    memory[environment_size + index * 10..environment_size + (index + 1) * 10]
                         .copy_from_slice(&self.state.registers[physical]);
                 }
                 self.memory_len += 80;
@@ -1003,6 +1045,7 @@ impl X87Outcome {
     }
 
     fn save_environment(&mut self, operand16: bool) {
+        let memory = self.memory.as_deref_mut().expect("validated x87 output");
         if operand16 {
             for (offset, word) in [
                 (0, self.state.control),
@@ -1013,11 +1056,11 @@ impl X87Outcome {
                 (10, self.state.data_pointer as u16),
                 (12, self.state.data_selector),
             ] {
-                self.memory[offset..offset + 2].copy_from_slice(&word.to_le_bytes());
+                memory[offset..offset + 2].copy_from_slice(&word.to_le_bytes());
             }
             self.memory_len = 14;
         } else {
-            self.memory[..28].fill(0xff);
+            memory[..28].fill(0xff);
             for (offset, word) in [
                 (0, self.state.control),
                 (4, self.state.status),
@@ -1026,11 +1069,11 @@ impl X87Outcome {
                 (18, self.state.opcode),
                 (24, self.state.data_selector),
             ] {
-                self.memory[offset..offset + 2].copy_from_slice(&word.to_le_bytes());
+                memory[offset..offset + 2].copy_from_slice(&word.to_le_bytes());
             }
-            self.memory[12..16].copy_from_slice(&self.state.instruction_pointer.to_le_bytes());
-            self.memory[20..24].copy_from_slice(&self.state.data_pointer.to_le_bytes());
-            self.memory[26..28].fill(0);
+            memory[12..16].copy_from_slice(&self.state.instruction_pointer.to_le_bytes());
+            memory[20..24].copy_from_slice(&self.state.data_pointer.to_le_bytes());
+            memory[26..28].fill(0);
             self.memory_len = 28;
         }
     }
