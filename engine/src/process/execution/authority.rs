@@ -3,6 +3,7 @@ use crate::process::{CallError, EngineInstance, HostError, calls::callback::Susp
 
 impl EngineInstance {
     pub(in crate::process) fn guard_detection_material_change(&self) -> Result<(), HostError> {
+        self.guard_owned_host_mutation()?;
         #[cfg(any(target_arch = "wasm32", test))]
         if self.has_retained_detection() {
             return Err(HostError::Call(CallError::Busy));
@@ -111,21 +112,68 @@ impl EngineInstance {
         self.check_decode_key(self.artifact.as_ref().unwrap())
     }
 
+    #[inline]
     pub(in crate::process) fn guard_material_resident(
         &self,
         key: u64,
         id: u64,
     ) -> Result<(), HostError> {
-        self.guard_material_resident_region(key, id).map(|_| ())
+        #[cfg(any(target_arch = "wasm32", test))]
+        if self.owned_execution.is_some() {
+            return self.guard_owned_material_resident(key, id);
+        }
+        self.guard_checked_material_resident_region(key, id)
+            .map(|_| ())
     }
 
+    #[inline]
     pub(in crate::process) fn guard_material_resident_region(
+        &self,
+        key: u64,
+        id: u64,
+    ) -> Result<&CompiledRegion, HostError> {
+        #[cfg(any(target_arch = "wasm32", test))]
+        if self.owned_execution.is_some() {
+            return self.guard_owned_material_resident_region(key, id);
+        }
+        self.guard_checked_material_resident_region(key, id)
+    }
+
+    fn guard_checked_material_resident_region(
         &self,
         key: u64,
         id: u64,
     ) -> Result<&CompiledRegion, HostError> {
         let region = self.guard_resident_region(key, id)?;
         self.check_decode_key(region)?;
+        Ok(region)
+    }
+
+    #[cfg(any(target_arch = "wasm32", test))]
+    fn guard_owned_material_resident(&self, key: u64, id: u64) -> Result<(), HostError> {
+        if !self.owned_material_current(key, id) {
+            self.guard_checked_material_resident_region(key, id)?;
+            self.remember_owned_material(id);
+        }
+        Ok(())
+    }
+
+    #[cfg(any(target_arch = "wasm32", test))]
+    fn guard_owned_material_resident_region(
+        &self,
+        key: u64,
+        id: u64,
+    ) -> Result<&CompiledRegion, HostError> {
+        if self.owned_material_current(key, id) {
+            return self
+                .resident
+                .as_ref()
+                .ok_or(HostError::Resident(RegistryError::InvalidUnit))?
+                .get_retained_raw(self.memory()?, id)
+                .map_err(HostError::Resident);
+        }
+        let region = self.guard_checked_material_resident_region(key, id)?;
+        self.remember_owned_material(id);
         Ok(region)
     }
 

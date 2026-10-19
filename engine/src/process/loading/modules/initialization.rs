@@ -107,6 +107,7 @@ impl InitialModuleContext {
     }
 
     pub fn restore(&self, engine: &mut EngineInstance) {
+        engine.revoke_owned_execution();
         // the descriptor base and loaded cache may differ before thread startup.
         engine
             .segment_descriptors
@@ -270,6 +271,7 @@ impl EngineInstance {
         token: u64,
     ) -> Result<ModuleOperation32, HostError> {
         self.memory()?;
+        self.guard_owned_host_mutation()?;
         if let Some(result) = self.retry_module_windows_initializer(token)? {
             return Ok(result);
         }

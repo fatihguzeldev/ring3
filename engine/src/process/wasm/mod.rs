@@ -101,6 +101,7 @@ pub(super) fn mutate(operation: impl FnOnce(&mut EngineInstance) -> Result<(), H
         let Some(instance) = registry.instance.as_mut() else {
             return 5;
         };
+        instance.invalidate_owned_context();
         operation(instance).map_or_else(status, |()| 0)
     })
 }
@@ -379,10 +380,10 @@ pub(crate) use loading::{
 mod execution;
 pub(crate) use execution::{
     acknowledge_cache_eviction, acknowledge_resident_callback_installation,
-    acknowledge_resident_installation, begin_execution_receipt, cache_usage, cancel_cache_request,
-    compile, compile_entries, compile_resident, compile_resident_callback_unit,
-    compile_resident_entries, compile_resident_with_gates, compile_stopped_entry,
-    compile_stopped_resident_entry, compile_with_gates, configure_execution,
+    acknowledge_resident_installation, begin_execution_receipt, begin_owned_execution_receipt,
+    cache_usage, cancel_cache_request, compile, compile_entries, compile_resident,
+    compile_resident_callback_unit, compile_resident_entries, compile_resident_with_gates,
+    compile_stopped_entry, compile_stopped_resident_entry, compile_with_gates, configure_execution,
     configure_execution_with_limits, discard_installed_resident, discard_unacknowledged_resident,
     dispatcher_module, find_installed_resident, find_resident, finish_execution_receipt,
     generation, guard, guard_dispatch_entry, guard_resident, install_cached_entry, module_len,

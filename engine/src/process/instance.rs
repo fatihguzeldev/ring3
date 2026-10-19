@@ -111,6 +111,9 @@ pub struct EngineInstance {
         Option<crate::process::execution::receipt::ExecutionFrame32>,
     #[cfg(any(target_arch = "wasm32", test))]
     pub(in crate::process) execution_frame_issuer: u64,
+    #[cfg(any(target_arch = "wasm32", test))]
+    pub(in crate::process) owned_execution:
+        Option<crate::process::execution::owned::OwnedExecution32>,
     pub(in crate::process) system_register_bank: Option<crate::cpu::x86::UserSystemRegisterBank32>,
     pub(in crate::process) modules: crate::process::loading::modules::ModuleProcess32,
     pub(in crate::process) image: Option<crate::loader::ImageMetadata32>,
@@ -210,6 +213,8 @@ impl EngineInstance {
             execution_frame: None,
             #[cfg(any(target_arch = "wasm32", test))]
             execution_frame_issuer: 0,
+            #[cfg(any(target_arch = "wasm32", test))]
+            owned_execution: None,
             system_register_bank: Some(crate::cpu::x86::UserSystemRegisterBank32::application()),
             modules: crate::process::loading::modules::ModuleProcess32::default(),
             image: None,
@@ -263,6 +268,7 @@ impl EngineInstance {
 
     pub fn arena_mut(&mut self) -> Result<&mut [u8], HostError> {
         self.memory()?;
+        self.invalidate_owned_context();
         Ok(self.arena.as_mut().get_mut())
     }
 
@@ -271,6 +277,7 @@ impl EngineInstance {
     }
 
     pub fn close(&mut self) {
+        self.revoke_owned_execution();
         #[cfg(any(target_arch = "wasm32", test))]
         self.revoke_cpu_read32_view();
         #[cfg(feature = "observability")]

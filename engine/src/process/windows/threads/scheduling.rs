@@ -137,6 +137,7 @@ impl EngineInstance {
         if self.call_cancelled() {
             return Err(HostError::Call(CallError::Cancelled));
         }
+        self.guard_owned_host_mutation()?;
         let now = self.cpu_clock.monotonic_bounds()?.1;
         self.service_multimedia_timers(now)?;
         if self.synchronization.as_ref().is_some_and(|runtime| {

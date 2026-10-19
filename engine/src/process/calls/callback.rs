@@ -345,6 +345,7 @@ impl EngineInstance {
         let mut output = [0; CALLBACK_RECORD_SIZE];
         encode_callback(&record, &mut output).map_err(|_| HostError::Infrastructure)?;
         let mut callback = self.callback.take().unwrap();
+        self.revoke_owned_execution();
         self.callback = callback.parent.take().map(|parent| {
             let [parent] = *parent;
             parent
@@ -374,6 +375,7 @@ impl EngineInstance {
         if self.windows_provider_owns_callback_token(token) {
             return Err(call_error(CallError::Busy));
         }
+        self.revoke_owned_execution();
         let mut callback = self.callback.take().unwrap();
         self.callback = callback.parent.take().map(|parent| {
             let [parent] = *parent;
@@ -389,6 +391,7 @@ impl EngineInstance {
 
     fn callback_request(&self, key: u64, generation: u32, count: usize) -> Result<(), HostError> {
         self.guard_artifact(key, generation)?;
+        self.guard_owned_host_mutation()?;
         if self.modules.parked_callback_depth()
             + self.callback.as_ref().map_or(0, SuspendedCallback::depth)
             >= MAX_CALLBACK_DEPTH

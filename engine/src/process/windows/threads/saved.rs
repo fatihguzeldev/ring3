@@ -298,6 +298,7 @@ mod tests;
 impl EngineInstance {
     pub(super) fn take_windows_thread_context(&mut self) -> Result<SavedThread32, HostError> {
         ExtendedCpuState::capture(self.arena())?;
+        self.revoke_owned_execution();
         let saved = SavedThread32 {
             artifact: self.artifact.take(),
             generation: std::mem::take(&mut self.generation),
@@ -357,6 +358,7 @@ impl EngineInstance {
                 && self.callback.is_none()
                 && self.windows_replies.is_empty()
         );
+        self.revoke_owned_execution();
         let cancel: [u8; 4] = self.arena()[CANCEL_OFFSET..CANCEL_OFFSET + 4]
             .try_into()
             .unwrap();

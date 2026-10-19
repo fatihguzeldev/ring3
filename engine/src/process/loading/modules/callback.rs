@@ -17,6 +17,7 @@ pub(super) struct ParkedModuleExecution32 {
 impl ParkedModuleExecution32 {
     pub(super) fn restore(self, engine: &mut EngineInstance) {
         assert!(engine.callback.is_none() && engine.windows_replies.is_empty());
+        engine.revoke_owned_execution();
         engine.callback = self.callback;
         engine.windows_replies = self.replies;
         engine.artifact = self.artifact;

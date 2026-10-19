@@ -12,6 +12,33 @@ pub(crate) fn begin_execution_receipt(
     unit_high: u32,
     dispatch: u32,
 ) -> u32 {
+    begin_receipt(
+        key_low, key_high, budget, unit_low, unit_high, dispatch, false,
+    )
+}
+
+pub(crate) fn begin_owned_execution_receipt(
+    key_low: u32,
+    key_high: u32,
+    budget: u32,
+    unit_low: u32,
+    unit_high: u32,
+    dispatch: u32,
+) -> u32 {
+    begin_receipt(
+        key_low, key_high, budget, unit_low, unit_high, dispatch, true,
+    )
+}
+
+fn begin_receipt(
+    key_low: u32,
+    key_high: u32,
+    budget: u32,
+    unit_low: u32,
+    unit_high: u32,
+    dispatch: u32,
+    owned: bool,
+) -> u32 {
     let key = u64::from(key_low) | (u64::from(key_high) << 32);
     let unit = u64::from(unit_low) | (u64::from(unit_high) << 32);
     mutate(|instance| {
@@ -20,7 +47,11 @@ pub(crate) fn begin_execution_receipt(
             1 => true,
             _ => return Err(HostError::InvalidRequest),
         };
-        let frame = instance.begin_execution_receipt(key, budget, unit, dispatch)?;
+        let frame = if owned {
+            instance.begin_owned_execution_receipt(key, budget, unit, dispatch)
+        } else {
+            instance.begin_execution_receipt(key, budget, unit, dispatch)
+        }?;
         let output = &mut instance.arena.as_mut().get_mut()
             [TRANSFER_OFFSET..TRANSFER_OFFSET + EXECUTION_FRAME_SIZE];
         encode_execution_frame(frame, output.try_into().unwrap());

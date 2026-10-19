@@ -26,7 +26,7 @@ pub(in crate::process) struct ExecutionFrame32 {
     budget: u32,
     dispatch: bool,
     expected: Option<ResidentInstallation>,
-    last: Option<(u64, ResidentInstallation)>,
+    pub(super) last: Option<(u64, ResidentInstallation)>,
     sealed_retired: u32,
     sealed_work: u32,
 }
@@ -45,6 +45,20 @@ mod control {
     };
 
     impl EngineInstance {
+        /// owns one synchronous invocation with direct engine helpers and pure clock imports.
+        /// callers must not mutate raw architectural memory or invoke opaque callbacks inside it.
+        pub fn begin_owned_execution_receipt(
+            &mut self,
+            key: u64,
+            budget: u32,
+            unit: u64,
+            dispatch: bool,
+        ) -> Result<ExecutionFrameStart32, HostError> {
+            let frame = self.begin_execution_receipt(key, budget, unit, dispatch)?;
+            self.enable_owned_execution(frame.token);
+            Ok(frame)
+        }
+
         pub fn begin_execution_receipt(
             &mut self,
             key: u64,
@@ -194,6 +208,7 @@ mod control {
                 .execution_frame
                 .filter(|frame| token != 0 && frame.token == token)
                 .ok_or(HostError::Call(CallError::InvalidToken))?;
+            self.revoke_owned_execution();
             let exit = decode_exit(&self.arena()[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE])
                 .map_err(|_| HostError::Call(CallError::InvalidStop))?;
             let total_retired = exit.retired;

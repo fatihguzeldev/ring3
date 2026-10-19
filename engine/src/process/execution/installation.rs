@@ -33,6 +33,7 @@ impl EngineInstance {
         id: u64,
         slot: u32,
     ) -> Result<ResidentInstallation, HostError> {
+        self.guard_owned_host_mutation()?;
         let existing = self
             .resident_installations
             .get(slot as usize)

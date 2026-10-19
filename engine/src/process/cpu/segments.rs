@@ -77,6 +77,12 @@ impl EngineInstance {
     }
 
     pub(in crate::process) fn operand_segment_context(&self) -> Result<SegmentContext, HostError> {
+        #[cfg(any(target_arch = "wasm32", test))]
+        if self.owned_execution.is_some()
+            && let Some(context) = self.owned_operand_segment_context()
+        {
+            return context;
+        }
         self.segment_context()
     }
 
@@ -85,6 +91,7 @@ impl EngineInstance {
         segments: &[u8; SEGMENTS_SIZE],
         bases: &[u8; SEGMENT_BASES_RECORD_SIZE],
     ) {
+        self.invalidate_owned_context();
         let arena = self.arena.as_mut().get_mut();
         arena[SEGMENTS_OFFSET..SEGMENTS_OFFSET + SEGMENTS_SIZE].copy_from_slice(segments);
         arena[SEGMENT_BASES_RECORD_OFFSET..SEGMENT_BASES_RECORD_OFFSET + SEGMENT_BASES_RECORD_SIZE]
@@ -189,6 +196,7 @@ impl EngineInstance {
 
     fn segment_configuration_guard(&self) -> Result<(), HostError> {
         self.memory()?;
+        self.guard_owned_host_mutation()?;
         if self.pending_call.is_some()
             || self.callback.is_some()
             || self.has_active_module_operation()

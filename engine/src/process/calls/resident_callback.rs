@@ -160,6 +160,7 @@ impl EngineInstance {
         let mut output = [0; RESIDENT_CALLBACK_RESULT_SIZE];
         encode_resident_callback_result(&result, &mut output)
             .map_err(|_| HostError::Infrastructure)?;
+        self.revoke_owned_execution();
         let mut callback = self.callback.take().unwrap();
         self.callback = callback.parent.take().map(|parent| {
             let [parent] = *parent;
@@ -453,6 +454,7 @@ impl EngineInstance {
     ) -> Result<(), HostError> {
         self.guard_resident_unit(key, outer_id)?;
         self.guard_resident_unit(key, callback_id)?;
+        self.guard_owned_host_mutation()?;
         if self.modules.parked_callback_depth()
             + self.callback.as_ref().map_or(0, SuspendedCallback::depth)
             >= MAX_CALLBACK_DEPTH

@@ -149,6 +149,7 @@ impl EngineInstance {
         unwind: Option<Unwind32>,
         initial: ExceptionInitial32,
     ) -> Result<ExceptionDispatch32, HostError> {
+        self.revoke_owned_execution();
         let ExceptionInitial32 {
             filter,
             page_change: initial_page_change,
@@ -422,6 +423,7 @@ impl EngineInstance {
             delivery.nested_boundary,
             delivery.popped.len(),
         );
+        self.revoke_owned_execution();
         let mut delivery = self.exceptions.deliveries.remove(index);
         let outcome = self.complete_exception_handler(&mut delivery, result);
         match outcome {

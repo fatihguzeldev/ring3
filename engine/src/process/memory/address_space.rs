@@ -19,6 +19,7 @@ impl EngineInstance {
 
     pub fn map(&mut self, address: u32, pages: u32, bits: u32) -> Result<(), HostError> {
         self.memory()?;
+        self.guard_owned_host_mutation()?;
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
         let permissions = permissions(bits)?;
         let range = PageRange::new(GuestAddress(address), pages).map_err(HostError::Memory)?;
@@ -29,6 +30,7 @@ impl EngineInstance {
 
     pub fn protect(&mut self, address: u32, pages: u32, bits: u32) -> Result<(), HostError> {
         self.memory()?;
+        self.guard_owned_host_mutation()?;
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
         let permissions = permissions(bits)?;
         let range = PageRange::new(GuestAddress(address), pages).map_err(HostError::Memory)?;
@@ -39,6 +41,7 @@ impl EngineInstance {
 
     pub fn unmap(&mut self, address: u32, pages: u32) -> Result<(), HostError> {
         self.memory()?;
+        self.guard_owned_host_mutation()?;
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
         let range = PageRange::new(GuestAddress(address), pages).map_err(HostError::Memory)?;
         memory.unmap(range).map_err(HostError::Memory)?;

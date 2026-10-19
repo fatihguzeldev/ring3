@@ -354,6 +354,7 @@ impl EngineInstance {
         };
         let mut output = [0; CALL_FRAME_SIZE];
         encode_call_frame(&record, &mut output).map_err(|_| HostError::Infrastructure)?;
+        self.revoke_owned_execution();
         self.pending_call = Some(PendingCall {
             token,
             owner,

@@ -48,6 +48,7 @@ impl EngineInstance {
         if !source.ready(self) {
             return Err(HostError::Call(crate::process::CallError::Busy));
         }
+        self.guard_owned_host_mutation()?;
         let source = self.modules.source.take().unwrap();
         let result = self.advance_module_source(source);
         if let Err(error) = result
