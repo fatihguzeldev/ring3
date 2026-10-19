@@ -57,6 +57,10 @@ pub fn encode_segments(state: &SegmentState, output: &mut [u8]) -> Result<(), Ab
 
 pub fn decode_segments(input: &[u8]) -> Result<SegmentState, AbiError> {
     header::validate(input, *b"R3SG", SEGMENTS_SIZE)?;
+    decode_legacy_segments_payload(input)
+}
+
+fn decode_legacy_segments_payload(input: &[u8]) -> Result<SegmentState, AbiError> {
     if input[28..32]
         .iter()
         .chain(&input[56..64])
@@ -123,7 +127,7 @@ pub fn decode_segment_context(input: &[u8]) -> Result<SegmentContext, AbiError> 
 
 fn decode_legacy_context(input: &[u8], version: u16) -> Result<SegmentContext, AbiError> {
     if version == 1 {
-        return decode_segments(input).map(SegmentContext::legacy);
+        return decode_legacy_segments_payload(input).map(SegmentContext::legacy);
     }
     if read_u32(input, 60) != 0 {
         return Err(AbiError::Reserved);
@@ -249,6 +253,42 @@ mod tests {
             let mut malformed = record;
             malformed[SEGMENTS_BASES_OFFSET + index * 4] = 1;
             assert_eq!(decode_segments(&malformed), Err(AbiError::Reserved));
+        }
+    }
+
+    #[test]
+    fn legacy_v1_payload_validation_preserves_all_decoder_header_priorities() {
+        let mut record = [0; SEGMENTS_SIZE];
+        encode_segments(&SegmentState::default(), &mut record).unwrap();
+        let decode = |input: &[u8]| {
+            [
+                decode_segments(input).map(SegmentContext::legacy),
+                decode_segment_context(input),
+                decode_current_segment_context(input, Some(&[0xa5; SEGMENT_BASES_RECORD_SIZE])),
+            ]
+        };
+        for actual in decode(&record) {
+            assert_eq!(actual, Ok(SegmentContext::legacy(SegmentState::default())));
+        }
+        for offset in (12..16).chain(28..32).chain(56..64) {
+            let mut malformed = record;
+            malformed[offset] = 1;
+            for actual in decode(&malformed) {
+                assert_eq!(actual, Err(AbiError::Reserved));
+            }
+        }
+        for (offset, value, error) in [
+            (0, b'X', AbiError::Magic),
+            (4, 4, AbiError::Version),
+            (6, 2, AbiError::Profile),
+            (8, 63, AbiError::Length),
+        ] {
+            let mut malformed = record;
+            malformed[28] = 1;
+            malformed[offset] = value;
+            for actual in decode(&malformed) {
+                assert_eq!(actual, Err(error));
+            }
         }
     }
 
