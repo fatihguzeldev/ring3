@@ -14,6 +14,7 @@ use crate::{
 use super::gate::{self, GateSpec, PreparedGate};
 
 pub(super) const MAX_BLOCKS: usize = 8;
+pub(super) const MAX_COHORT_BLOCKS: usize = 16;
 pub(super) const MAX_INSTRUCTIONS: usize = 256;
 const MAX_WASM_BYTES: usize = 524_288;
 const DEFAULT_INSTRUCTIONS: usize = 64;
@@ -68,6 +69,7 @@ pub enum InstructionError {
 #[derive(Debug)]
 pub struct PreparedRegion {
     pub(super) blocks: Vec<CompiledBlock>,
+    cohort: bool,
     memory_identity: u64,
     pub(super) decode_key: Option<CodeDecodeKey>,
     validated_version: AtomicU64,
@@ -78,6 +80,7 @@ enum PreparationProfile {
     Standalone,
     Embedded,
     Resident,
+    ResidentCohort,
 }
 
 #[derive(Debug)]
@@ -139,6 +142,7 @@ impl PreparedRegion {
     ) -> Self {
         Self {
             blocks,
+            cohort: false,
             memory_identity: memory.identity(),
             decode_key: cs.map(CodeFetchContext::decode_key),
             validated_version: AtomicU64::new(0),
@@ -181,6 +185,27 @@ impl PreparedRegion {
             })
             .sum()
     }
+
+    pub(super) fn validate_emission_limits(
+        &self,
+        limits: CompileLimits,
+    ) -> Result<(), CompileError> {
+        validate_limits_for_blocks(
+            limits,
+            if self.cohort {
+                MAX_COHORT_BLOCKS
+            } else {
+                MAX_BLOCKS
+            },
+        )?;
+        if self.block_count() > limits.blocks {
+            return Err(CompileError::InvalidBlocks);
+        }
+        if self.instruction_count() > limits.instructions {
+            return Err(CompileError::InstructionLimit);
+        }
+        Ok(())
+    }
 }
 
 pub fn prepare_region(
@@ -218,6 +243,25 @@ pub(super) fn prepare_resident_region(
     )
 }
 
+pub(super) fn prepare_resident_cohort_region(
+    memory: &AddressSpace,
+    specs: &[BlockSpec],
+    limits: CompileLimits,
+    gates: &[GateSpec],
+    cs: Option<CodeFetchContext>,
+    authority: crate::cpu::x86::decode::DecodeAuthority,
+) -> Result<PreparedRegion, CompileError> {
+    prepare(
+        memory,
+        specs,
+        limits,
+        PreparationProfile::ResidentCohort,
+        gates,
+        cs,
+        authority,
+    )
+}
+
 pub(super) fn prepare_embedded_region(
     memory: &AddressSpace,
     specs: &[BlockSpec],
@@ -246,11 +290,22 @@ fn prepare(
     cs: Option<CodeFetchContext>,
     authority: crate::cpu::x86::decode::DecodeAuthority,
 ) -> Result<PreparedRegion, CompileError> {
-    validate_limits(limits)?;
+    let cohort = matches!(profile, PreparationProfile::ResidentCohort);
+    validate_limits_for_blocks(
+        limits,
+        if cohort {
+            MAX_COHORT_BLOCKS
+        } else {
+            MAX_BLOCKS
+        },
+    )?;
     validate_blocks(specs, limits.blocks)?;
     gate::validate(specs, gates)?;
     let embedded = matches!(profile, PreparationProfile::Embedded);
-    let resident = matches!(profile, PreparationProfile::Resident);
+    let resident = matches!(
+        profile,
+        PreparationProfile::Resident | PreparationProfile::ResidentCohort
+    );
 
     let mut blocks = Vec::new();
     blocks
@@ -320,7 +375,9 @@ fn prepare(
         });
     }
 
-    Ok(PreparedRegion::new(memory, blocks, cs))
+    let mut prepared = PreparedRegion::new(memory, blocks, cs);
+    prepared.cohort = cohort;
+    Ok(prepared)
 }
 
 pub(super) fn strict_instruction(
@@ -342,8 +399,12 @@ pub(super) fn strict_instruction(
 }
 
 pub(crate) fn validate_limits(limits: CompileLimits) -> Result<(), CompileError> {
+    validate_limits_for_blocks(limits, MAX_BLOCKS)
+}
+
+fn validate_limits_for_blocks(limits: CompileLimits, blocks: usize) -> Result<(), CompileError> {
     if limits.blocks == 0
-        || limits.blocks > MAX_BLOCKS
+        || limits.blocks > blocks
         || limits.instructions == 0
         || limits.instructions > MAX_INSTRUCTIONS
         || limits.wasm_bytes == 0

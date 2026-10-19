@@ -210,6 +210,54 @@ impl CompiledRegion {
         self.has_indexed_entry
     }
 
+    // current source and decode authority remain the caller's admission checks.
+    pub(super) fn material_block_specs(&self) -> Result<Option<Vec<BlockSpec>>, CompileError> {
+        if self.prepared.blocks.is_empty()
+            || self.prepared.blocks.len() > super::region::MAX_COHORT_BLOCKS
+        {
+            return Ok(None);
+        }
+        let mut specs: Vec<BlockSpec> = Vec::new();
+        specs
+            .try_reserve_exact(self.prepared.blocks.len())
+            .map_err(|_| CompileError::Allocation)?;
+        for block in &self.prepared.blocks {
+            if !matches!(&block.source, super::region::BlockSource::Instructions(_)) {
+                return Ok(None);
+            }
+            let Some(first) = block.instructions.first() else {
+                return Ok(None);
+            };
+            let start = first.pc().0;
+            let mut cursor = start;
+            for instruction in &block.instructions {
+                if instruction.pc().0 != cursor || instruction.length() == 0 {
+                    return Ok(None);
+                }
+                let Some(next) = cursor.checked_add(u32::from(instruction.length())) else {
+                    return Ok(None);
+                };
+                if instruction.next_pc().0 != next {
+                    return Ok(None);
+                }
+                cursor = next;
+            }
+            let length = cursor - start;
+            if length == 0
+                || specs.iter().any(|earlier| {
+                    start < earlier.entry.0 + earlier.byte_length && earlier.entry.0 < cursor
+                })
+            {
+                return Ok(None);
+            }
+            specs.push(BlockSpec {
+                entry: GuestAddress(start),
+                byte_length: length,
+            });
+        }
+        Ok(Some(specs))
+    }
+
     pub(crate) fn decode_key(&self) -> CodeDecodeKey {
         self.prepared.decode_key.unwrap_or(CodeDecodeKey::FLAT)
     }
@@ -457,6 +505,7 @@ pub(super) fn emit_prepared(
     limits: CompileLimits,
     binding: Option<wasm::EmbeddedBinding>,
 ) -> Result<CompiledRegion, CompileError> {
+    prepared.validate_emission_limits(limits)?;
     #[cfg(feature = "observability")]
     let _scope = ring3_observability::current().scope(
         ring3_observability::Level::Detailed,
@@ -495,6 +544,7 @@ pub(super) fn emit_entry_prepared_tier(
     cs: Option<CodeFetchContext>,
     tier: super::CompilationTier32,
 ) -> Result<CompiledRegion, CompileError> {
+    prepared.validate_emission_limits(limits)?;
     shortening::emit(memory, prepared, limits, binding, cs, tier)
 }
 
@@ -527,3 +577,7 @@ mod native_x87_tests;
 #[cfg(test)]
 #[path = "artifact/tests/indexed/mod.rs"]
 mod indexed_tests;
+
+#[cfg(test)]
+#[path = "artifact/tests/material.rs"]
+mod material_tests;

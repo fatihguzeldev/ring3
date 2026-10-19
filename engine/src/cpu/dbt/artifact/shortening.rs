@@ -221,7 +221,7 @@ impl TrimJournal {
         prepared: &mut PreparedRegion,
         cs: Option<CodeFetchContext>,
     ) -> Result<(), CompileError> {
-        let mut changed = [false; region::MAX_BLOCKS];
+        let mut changed = [false; region::MAX_COHORT_BLOCKS];
         for removed in &self.removed {
             let block = match removed {
                 Removed::Instruction { block, .. } | Removed::Fault { block, .. } => *block,
