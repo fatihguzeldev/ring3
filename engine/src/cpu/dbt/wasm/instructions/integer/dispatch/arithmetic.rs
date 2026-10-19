@@ -1,5 +1,8 @@
 use super::*;
 
+#[cfg(test)]
+mod tests;
+
 pub(super) fn emit(
     code: &mut InstructionSink<'_>,
     instruction: &DecodedOperation,
@@ -397,6 +400,21 @@ pub(super) fn emit(
             arithmetic_flags(code, binary, CarryFlag::Calculate, 7);
             code.local_get(RESULT);
             insert_byte(code, destination);
+        }
+        Operation::Binary {
+            kind: kind @ (BinaryKind::Xor | BinaryKind::Sub | BinaryKind::Cmp),
+            destination: Location32::Register(destination),
+            source: Value32::Register(source),
+        } if destination == source => {
+            if kind != BinaryKind::Cmp {
+                code.i32_const(0).local_set(register(destination));
+            }
+            code.local_get(FLAGS)
+                .i32_const(!0x8d7)
+                .i32_and()
+                .i32_const(0x46)
+                .i32_or()
+                .local_set(FLAGS);
         }
         Operation::Binary {
             kind,
