@@ -155,6 +155,133 @@ fn automatic_hinted_promotion_uses_serial_ack_then_preserves_every_cold_and_inte
 }
 
 #[test]
+fn eligible_baseline_precedes_a_hot_hinted_owner_without_disabling_later_fusion() {
+    let mut fixture = fixture();
+    // this separate page was not part of any retained owner's code snapshot.
+    fixture.engine.protect(0x8000, 1, 7).unwrap();
+    fixture
+        .engine
+        .memory
+        .as_mut()
+        .unwrap()
+        .write(GuestAddress(0x8000), &[0x83, 0xc1, 1, 0xff, 0xe2])
+        .unwrap();
+    let baseline = fixture.engine.prepare_cache_entry(KEY, 0x8000).unwrap();
+    assert_eq!(
+        (baseline.kind, baseline.tier),
+        (CacheRequestKind32::Install, CompilationTier32::Baseline)
+    );
+    fixture
+        .engine
+        .install_cached_entry(KEY, baseline.serial, baseline.unit_id, baseline.slot)
+        .unwrap();
+    for _ in 0..8 {
+        fixture
+            .engine
+            .lookup_installed_resident(KEY, 0x8000)
+            .unwrap();
+    }
+    train(&mut fixture);
+    for _ in 0..1024 {
+        fixture
+            .engine
+            .lookup_installed_resident(KEY, ROOTS[0])
+            .unwrap();
+    }
+    let cache = fixture.engine.execution_cache.as_ref().unwrap();
+    let hot = cache.entries[fixture.owners[0].slot as usize]
+        .as_ref()
+        .unwrap();
+    let cold = cache.entries[baseline.slot as usize].as_ref().unwrap();
+    assert_eq!(hot.tier, CompilationTier32::Optimized);
+    assert_eq!(hot.need_code_hint.target(8), TARGETS[0]);
+    assert!(
+        hot.hits.load(std::sync::atomic::Ordering::Relaxed)
+            > cold.hits.load(std::sync::atomic::Ordering::Relaxed)
+    );
+    let before = retained(&fixture);
+    let request = fixture
+        .engine
+        .prepare_cache_promotion(KEY)
+        .unwrap()
+        .expect("eligible baseline work keeps its promotion opportunity");
+    assert_eq!(
+        (request.kind, request.victim_id, request.victim_slot),
+        (CacheRequestKind32::Evict, baseline.unit_id, baseline.slot),
+        "a mature high-hit optimized root cannot preempt a ready baseline"
+    );
+    assert_eq!(retained(&fixture), before);
+    fixture
+        .engine
+        .acknowledge_cache_eviction(KEY, request.serial, request.victim_id, request.victim_slot)
+        .unwrap();
+    let promoted = fixture.engine.prepare_cache_entry(KEY, 0x8000).unwrap();
+    assert_eq!(
+        (promoted.kind, promoted.tier),
+        (CacheRequestKind32::Install, CompilationTier32::Optimized)
+    );
+    fixture
+        .engine
+        .install_cached_entry(KEY, promoted.serial, promoted.unit_id, promoted.slot)
+        .unwrap();
+    assert_eq!(
+        fixture
+            .engine
+            .resident
+            .as_ref()
+            .unwrap()
+            .get_raw(fixture.engine.memory.as_ref().unwrap(), promoted.unit_id)
+            .unwrap()
+            .tier(),
+        CompilationTier32::Optimized
+    );
+
+    let mut next = fixture
+        .engine
+        .prepare_cache_promotion(KEY)
+        .unwrap()
+        .unwrap();
+    for owner in fixture.owners {
+        assert_eq!(
+            (next.kind, next.victim_id, next.victim_slot),
+            (CacheRequestKind32::Evict, owner.unit_id, owner.slot)
+        );
+        fixture
+            .engine
+            .acknowledge_cache_eviction(KEY, next.serial, next.victim_id, next.victim_slot)
+            .unwrap();
+        next = fixture.engine.prepare_cache_entry(KEY, ROOTS[0]).unwrap();
+    }
+    assert_eq!(
+        (next.kind, next.tier),
+        (CacheRequestKind32::Install, CompilationTier32::Optimized)
+    );
+    fixture
+        .engine
+        .install_cached_entry(KEY, next.serial, next.unit_id, next.slot)
+        .unwrap();
+    for &pc in STARTS.into_iter().flatten() {
+        assert_eq!(
+            fixture
+                .engine
+                .lookup_installed_resident(KEY, pc)
+                .unwrap()
+                .unit_id,
+            next.unit_id
+        );
+    }
+    assert_eq!(
+        fixture
+            .engine
+            .lookup_installed_resident(KEY, 0x8000)
+            .unwrap()
+            .unit_id,
+        promoted.unit_id
+    );
+    assert_eq!(fixture.engine.cache_usage().unwrap().installed, 2);
+}
+
+#[test]
 fn automatic_hint_replacement_wrong_ack_and_cancel_leave_old_owners_untouched() {
     let mut fixture = fixture();
     let next = request(&mut fixture);

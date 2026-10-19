@@ -58,6 +58,7 @@ impl EngineInstance {
             })
             .max_by_key(|(_, row)| {
                 (
+                    row.tier == CompilationTier32::Baseline,
                     row.hits.load(Ordering::Relaxed),
                     std::cmp::Reverse(row.bytes),
                 )
