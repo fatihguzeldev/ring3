@@ -16,6 +16,57 @@ impl PreparedResidentReplacement {
 
 impl ResidentRegistry {
     #[allow(clippy::too_many_arguments)]
+    pub(crate) fn prepare_hinted_replacement(
+        &mut self,
+        memory: &AddressSpace,
+        entry: GuestAddress,
+        limits: CompileLimits,
+        key: u64,
+        cs: CodeFetchContext,
+        authority: crate::cpu::x86::decode::DecodeAuthority,
+        eligible: &dyn Fn(u64) -> bool,
+        is_gate: &dyn Fn(GuestAddress) -> bool,
+        hint_target: &dyn Fn(u64) -> Option<GuestAddress>,
+    ) -> Result<Option<PreparedResidentReplacement>, RegistryError> {
+        super::super::region::validate_limits(limits).map_err(RegistryError::Compile)?;
+        let limits = CompileLimits {
+            blocks: super::super::region::MAX_COHORT_BLOCKS,
+            ..limits
+        };
+        let Some((coverage, prepared)) = self.prepare_hinted_cohort(
+            memory,
+            entry,
+            limits,
+            cs,
+            authority,
+            eligible,
+            is_gate,
+            hint_target,
+        )?
+        else {
+            return Ok(None);
+        };
+        match self.emit_cached_replacement(memory, coverage, prepared, limits, key, cs) {
+            Err(error @ RegistryError::Compile(CompileError::Allocation))
+            | Err(
+                error @ RegistryError::Compile(CompileError::Instruction {
+                    cause:
+                        super::super::InstructionError::Decode(
+                            crate::cpu::x86::decode::DecodeError::Infrastructure(_),
+                        ),
+                    ..
+                }),
+            ) => Err(error),
+            Err(
+                RegistryError::Compile(_)
+                | RegistryError::InstructionOverlap { .. }
+                | RegistryError::CodeInvalidated,
+            ) => Ok(None),
+            result => result,
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn prepare_cached_replacement(
         &mut self,
         memory: &AddressSpace,
@@ -32,6 +83,18 @@ impl ResidentRegistry {
         else {
             return Ok(None);
         };
+        self.emit_cached_replacement(memory, coverage, prepared, limits, key, cs)
+    }
+
+    fn emit_cached_replacement(
+        &mut self,
+        memory: &AddressSpace,
+        coverage: ResidentCohort,
+        prepared: PreparedRegion,
+        limits: CompileLimits,
+        key: u64,
+        cs: CodeFetchContext,
+    ) -> Result<Option<PreparedResidentReplacement>, RegistryError> {
         let id = allocate_id(&NEXT_UNIT_ID)?;
         let region = match super::super::artifact::emit_entry_prepared_tier(
             memory,

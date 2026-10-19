@@ -1,6 +1,8 @@
 use super::*;
 use std::cell::RefCell;
 
+mod hinted;
+
 pub(crate) const COHORT_OWNERS: usize = 8;
 pub(crate) const COHORT_INSTRUCTIONS: usize = super::super::region::MAX_INSTRUCTIONS;
 
@@ -57,10 +59,26 @@ impl ResidentCohort {
         if self.owners().contains(&id) {
             return true;
         }
+        if region.first_entry() != Some(pc.0) {
+            return false;
+        }
+        self.include_material(id, region, limits, COHORT_OWNERS, is_gate)
+    }
+
+    fn include_material(
+        &mut self,
+        id: u64,
+        region: &CompiledRegion,
+        limits: CompileLimits,
+        block_ceiling: usize,
+        is_gate: &dyn Fn(GuestAddress) -> bool,
+    ) -> bool {
+        if self.owners().contains(&id) {
+            return true;
+        }
         let metadata = region.metadata();
         if self.owner_count >= COHORT_OWNERS
-            || region.first_entry() != Some(pc.0)
-            || self.blocks + metadata.blocks > limits.blocks.min(COHORT_OWNERS)
+            || self.blocks + metadata.blocks > limits.blocks.min(block_ceiling)
             || self.address_count + metadata.instructions
                 > limits.instructions.min(COHORT_INSTRUCTIONS)
             || region
