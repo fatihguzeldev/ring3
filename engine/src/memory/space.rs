@@ -1,5 +1,6 @@
 mod aliases;
 mod atomic;
+mod backing;
 mod code_fetch;
 mod cpu;
 mod guard;
@@ -17,9 +18,10 @@ pub(crate) use windows::PrivatePageChange32;
 use super::address::{ADDRESS_LIMIT, GUEST_PAGES};
 use super::code::{PageVersion, new_identity};
 use super::*;
+use backing::Backing;
 
 pub struct AddressSpace {
-    backing: Box<[u8]>,
+    backing: Backing,
     mappings: Box<[u32]>,
     permissions: Box<[Permissions]>,
     mapping_versions: Box<[u64]>,
@@ -104,7 +106,7 @@ impl AddressSpace {
         if resident_pages == 0 || bytes > u64::from(u32::MAX) || bytes > isize::MAX as u64 {
             return Err(MemoryError::Capacity);
         }
-        let backing = filled(bytes as usize, 0)?.into_boxed_slice();
+        let backing = Backing::zeroed(bytes as usize)?;
         let mappings = filled(GUEST_PAGES, 0)?.into_boxed_slice();
         let permissions = filled(GUEST_PAGES, Permissions::NONE)?.into_boxed_slice();
         let mapping_versions = filled(GUEST_PAGES, 0)?.into_boxed_slice();
@@ -643,6 +645,10 @@ fn fault(address: GuestAddress, access: Access, reason: FaultReason) -> MemoryEr
         reason,
     })
 }
+
+#[cfg(test)]
+#[path = "space/aligned_backing_tests.rs"]
+mod aligned_backing_tests;
 
 #[cfg(test)]
 #[path = "space/protection/tests.rs"]
