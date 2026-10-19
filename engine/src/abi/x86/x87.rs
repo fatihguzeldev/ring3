@@ -66,10 +66,9 @@ pub fn decode_x87(input: &[u8]) -> Result<X87State, AbiError> {
 
 pub(crate) fn validate_x87(input: &[u8]) -> Result<(), AbiError> {
     header::validate(input, *b"R3FP", X87_SIZE)?;
-    if input[36..40]
-        .iter()
-        .chain(&input[120..128])
-        .any(|byte| *byte != 0)
+    if read_u32(input, 36) != 0
+        || read_u32(input, 120) != 0
+        || read_u32(input, 124) != 0
         || read_u16(input, X87_OPCODE_OFFSET) > 0x7ff
     {
         return Err(AbiError::Reserved);
