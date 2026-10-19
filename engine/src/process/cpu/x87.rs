@@ -14,6 +14,8 @@ use crate::{
 
 use crate::process::instance::{EngineInstance, HostError, StoreCompletion};
 
+mod step;
+
 impl EngineInstance {
     pub fn x87_op(
         &mut self,
@@ -56,133 +58,42 @@ impl EngineInstance {
         waiting: u32,
     ) -> Result<StoreCompletion, HostError> {
         let operation = X87Operation::decode(word).ok_or(HostError::InvalidRequest)?;
-        let segment = (waiting >> 8) & 7;
-        if opcode > 0x7ff || waiting & !0x701 != 0 || segment > 6 {
-            return Err(HostError::InvalidRequest);
-        }
+        let request = step::X87Request::new(operation, address, pc, opcode, waiting)?;
         let mut state = decode_x87(&self.arena[X87_OFFSET..X87_OFFSET + X87_SIZE])
             .map_err(|_| HostError::Infrastructure)?;
-        let read_size = operation.read_size();
-        let write_size = operation.write_size();
-        let length = read_size.max(write_size) as u32;
-        if waiting & 1 != 0 && state.status & 0x3f & !state.control != 0 {
-            state.status |= 0x8080;
-            encode_x87(&state, &mut self.arena[X87_OFFSET..X87_OFFSET + X87_SIZE])
-                .map_err(|_| HostError::Infrastructure)?;
-            return self.x87_packet(
-                length,
-                0,
-                Err(CpuMemoryError::FloatingPoint(state.status)),
-                false,
-                resident,
-            );
-        }
-        // waiting x87 exceptions precede operand authority, including null selectors.
-        let context = self.operand_segment_context()?;
-        let segments = context.state;
-        let segment = if segment == 0 {
-            SegmentRegister::Ds
-        } else {
-            [
-                SegmentRegister::Es,
-                SegmentRegister::Cs,
-                SegmentRegister::Ss,
-                SegmentRegister::Ds,
-                SegmentRegister::Fs,
-                SegmentRegister::Gs,
-            ][(segment - 1) as usize]
-        };
-        let offset = address.wrapping_sub(segments.bases[segment.index()]);
-        for (width, access) in [
-            (read_size, SegmentAccess::Read),
-            (write_size, SegmentAccess::Write),
-        ] {
-            if width != 0
-                && let Err(error) = super::segments::check_cached_span(
-                    &context,
-                    segment,
-                    offset,
-                    width as u32,
-                    access,
-                )
-            {
-                return self.x87_packet(length, 0, Err(error), false, resident);
+        let mut output = None;
+        let outcome = self.x87_step(&mut state, &mut None, request, flags, &mut output)?;
+        if outcome.result.is_err() || outcome.memory_len == 0 {
+            if outcome.publish_state {
+                encode_x87(&state, &mut self.arena[X87_OFFSET..X87_OFFSET + X87_SIZE])
+                    .map_err(|_| HostError::Infrastructure)?;
             }
-        }
-        let mut input = (read_size != 0).then(|| [0; 108]);
-        if let Some(input) = &mut input
-            && let Err(error) = self
-                .cpu_memory_port32()
-                .read(GuestAddress(address), &mut input[..read_size])
-        {
-            return self.x87_packet(length, 0, Err(CpuMemoryError::from(error)), false, resident);
-        }
-        if write_size != 0
-            && let Err(error) = self.cpu_memory_port32().check(
-                GuestAddress(address),
-                write_size,
-                PagingAccess32::Write,
-            )
-        {
-            return self.x87_packet(length, 0, Err(CpuMemoryError::from(error)), false, resident);
-        }
-        if operation.is_computation() {
-            state.instruction_pointer = pc;
-            state.opcode = opcode as u16;
-            state.code_selector = segments.selectors[SegmentRegister::Cs.index()];
-            if length != 0 {
-                state.data_pointer = offset;
-                state.data_selector = segments.selectors[segment.index()];
-            }
-        }
-        let mut output = (write_size != 0).then(|| [0; 108]);
-        let outcome = state
-            .evaluate_into(
-                operation,
-                input.as_ref().map_or(&[], |input| &input[..read_size]),
-                flags,
-                output.as_mut(),
-                &mut self.numerical_workspace,
-            )
-            .map_err(|error| {
-                if error == X87Error::NumericalFailure {
-                    HostError::Infrastructure
-                } else {
-                    HostError::InvalidRequest
-                }
-            })?;
-        if outcome.memory_len == 0 {
-            encode_x87(
-                &outcome.state,
-                &mut self.arena[X87_OFFSET..X87_OFFSET + X87_SIZE],
-            )
-            .map_err(|_| HostError::Infrastructure)?;
             return self.x87_packet(
-                length,
-                outcome.eflags.unwrap_or(flags),
-                Ok(()),
+                request.length,
+                outcome.value,
+                outcome.result,
                 false,
                 resident,
             );
         }
         let mut record = [0; X87_SIZE];
-        encode_x87(&outcome.state, &mut record).map_err(|_| HostError::Infrastructure)?;
+        encode_x87(&state, &mut record).map_err(|_| HostError::Infrastructure)?;
         let version = self.memory.as_ref().unwrap().code_validation_version();
-        if let Err(error) = self
-            .cpu_memory_port32()
-            .write(GuestAddress(address), outcome.memory())
-        {
-            return self.x87_packet(length, 0, Err(CpuMemoryError::from(error)), false, resident);
+        if let Err(error) = self.cpu_memory_port32().write(
+            GuestAddress(address),
+            &output.as_ref().unwrap()[..outcome.memory_len],
+        ) {
+            return self.x87_packet(
+                request.length,
+                0,
+                Err(CpuMemoryError::from(error)),
+                false,
+                resident,
+            );
         }
         let changed = version != self.memory.as_ref().unwrap().code_validation_version();
         self.arena[X87_OFFSET..X87_OFFSET + X87_SIZE].copy_from_slice(&record);
-        self.x87_packet(
-            length,
-            outcome.eflags.unwrap_or(flags),
-            Ok(()),
-            changed,
-            resident,
-        )
+        self.x87_packet(request.length, outcome.value, Ok(()), changed, resident)
     }
 
     fn x87_packet(

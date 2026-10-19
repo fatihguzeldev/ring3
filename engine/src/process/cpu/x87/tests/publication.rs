@@ -10,6 +10,99 @@ fn one() -> X87State {
 }
 
 #[test]
+fn shared_step_prepares_store_output_only_after_pending_and_operand_preflight() {
+    use super::super::step::X87Request;
+
+    for (pending, address, prepared) in [
+        (true, 0x7000, false),
+        (false, 0x7000, false),
+        (false, 0x5000, true),
+    ] {
+        let mut engine = engine();
+        engine
+            .guard_material(engine.key, engine.generation())
+            .unwrap();
+        let mut state = one();
+        if pending {
+            state.control &= !1;
+            state.status = 1;
+        }
+        let request = X87Request::new(
+            X87Operation::Store {
+                format: X87Format::Float32,
+                pop: false,
+                truncate: false,
+            },
+            address,
+            0x1000,
+            0x100,
+            0x401,
+        )
+        .unwrap();
+        let mut context = None;
+        let mut output = None;
+        let outcome = engine
+            .x87_step(&mut state, &mut context, request, 0x46, &mut output)
+            .unwrap();
+        assert_eq!(output.is_some(), prepared);
+        assert_eq!(outcome.result.is_ok(), prepared);
+        if pending {
+            assert!(
+                context.is_none(),
+                "pending mf precedes even operand-context preparation"
+            );
+        }
+        if let Some(output) = output {
+            assert_eq!(outcome.memory_len, 4);
+            assert_eq!(&output[..4], &1.0_f32.to_le_bytes());
+        }
+    }
+}
+
+#[test]
+fn shared_step_evaluator_failure_restores_local_metadata_and_preserves_prior_prefix() {
+    use super::super::step::X87Request;
+
+    for prefix in [false, true] {
+        let mut engine = engine();
+        engine
+            .guard_material(engine.key, engine.generation())
+            .unwrap();
+        let mut state = X87State {
+            instruction_pointer: 0x11223344,
+            opcode: 0x321,
+            code_selector: 0x33,
+            data_pointer: 0x55667788,
+            data_selector: 0x2b,
+            ..one()
+        };
+        let mut context = None;
+        let mut output = None;
+        if prefix {
+            let request = X87Request::new(X87Operation::ChangeSign, 0, 0x1000, 0x1e0, 1).unwrap();
+            let outcome = engine
+                .x87_step(&mut state, &mut context, request, 0x46, &mut output)
+                .unwrap();
+            assert!(outcome.result.is_ok());
+            assert_eq!(state.registers[0][9], 0xbf);
+        }
+        let expected = state;
+        let arena = engine.arena().to_vec();
+        let version = engine.memory().unwrap().transaction_version();
+        let request =
+            X87Request::new(X87Operation::LoadRegister { index: 8 }, 0, 0x1002, 0x100, 1).unwrap();
+        assert!(matches!(
+            engine.x87_step(&mut state, &mut context, request, 0x46, &mut output),
+            Err(HostError::InvalidRequest)
+        ));
+        assert_eq!(state, expected);
+        assert_eq!(engine.arena(), arena);
+        assert_eq!(engine.memory().unwrap().transaction_version(), version);
+        assert!(output.is_none());
+    }
+}
+
+#[test]
 fn register_outcome_publishes_exact_fp_and_helper_records_without_memory_changes() {
     let mut engine = engine();
     let original = one();
