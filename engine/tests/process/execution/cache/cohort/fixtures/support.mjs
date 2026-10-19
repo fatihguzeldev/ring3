@@ -5,7 +5,7 @@ export const pair = (value) => [Number(value & 0xffffffffn), Number(value >> 32n
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
 
 export class Fixture {
-  constructor(module, sources) {
+  constructor(module, sources, limits) {
     const instance = new WebAssembly.Instance(module, {
       ring3_observability: { now_ns: () => BigInt(Date.now()) * 1000000n },
     });
@@ -19,7 +19,8 @@ export class Fixture {
     this.base = this.api.arena_ptr() >>> 0;
     this.ok("map", 0x1000, 1, 7);
     this.ok("map", 0x8000, 1, 3);
-    this.ok("configure_execution", 8, 1048576, 8);
+    if (limits === undefined) this.ok("configure_execution", 8, 1048576, 8);
+    else this.ok("configure_execution_with_limits", 8, 1048576, 8, limits.instructions, limits.wasmBytes);
     this.table = new WebAssembly.Table({ element: "anyfunc", initial: 8, maximum: 8 });
     for (const [pc, bytes] of sources) {
       this.put(Uint8Array.from(bytes));
