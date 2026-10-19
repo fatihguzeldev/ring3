@@ -4,3 +4,8 @@ export_process_calls! {
     arena_ptr();
     arena_len();
 }
+
+#[cfg(feature = "external-cpu")]
+export_process_calls! {
+    component_memory_lease(key_low: u32, key_high: u32);
+}

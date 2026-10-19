@@ -260,6 +260,10 @@ impl EngineInstance {
         self.initial_image_capacity(true)
     }
     fn initial_image_capacity(&self, retain_empty_registry: bool) -> Result<u32, HostError> {
+        #[cfg(feature = "external-cpu")]
+        if self.external_cpu_memory_pinned {
+            return Err(HostError::InvalidRequest);
+        }
         let memory = self.memory()?;
         if memory.mapped_pages() != 0
             || !self.windows_memory.is_empty()
@@ -379,3 +383,21 @@ mod tests {
 #[cfg(test)]
 #[path = "image/tests/linked.rs"]
 mod linked_v2_tests;
+
+#[cfg(all(test, feature = "external-cpu"))]
+#[test]
+fn external_cpu_pin_rejects_initial_memory_replacement_after_unmap_all() {
+    let mut engine = EngineInstance::new(2, 7).unwrap();
+    engine.map(0x1000, 1, 3).unwrap();
+    engine.external_cpu_memory_pinned = true;
+    engine.unmap(0x1000, 1).unwrap();
+    assert_eq!(engine.memory().unwrap().mapped_pages(), 0);
+    assert_eq!(engine.image_capacity(), Err(HostError::InvalidRequest));
+    assert_eq!(
+        engine.module_process_capacity(),
+        Err(HostError::InvalidRequest)
+    );
+    assert_eq!(engine.begin_image_input(1), Err(HostError::InvalidRequest));
+    assert_eq!(engine.load_pe32(&[]), Err(HostError::InvalidRequest));
+    assert!(engine.image_input.is_none());
+}

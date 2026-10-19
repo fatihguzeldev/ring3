@@ -158,6 +158,8 @@ pub struct EngineInstance {
         Option<crate::process::execution::census::ExecutionCensus32>,
     #[cfg(any(all(feature = "observability", target_arch = "wasm32"), test))]
     pub(in crate::process) execution_census_generation: u64,
+    #[cfg(feature = "external-cpu")]
+    pub(in crate::process) external_cpu_memory_pinned: bool,
 }
 
 impl EngineInstance {
@@ -179,6 +181,8 @@ impl EngineInstance {
             .try_reserve_exact(RESIDENT_INSTALLATION_SLOTS)
             .map_err(|_| HostError::Infrastructure)?;
         Ok(Self {
+            #[cfg(feature = "external-cpu")]
+            external_cpu_memory_pinned: false,
             #[cfg(feature = "observability")]
             observer: ring3_observability::Observer::disabled(),
             console: crate::windows::console::ConsoleControl32::new(),

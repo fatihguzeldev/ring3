@@ -5,6 +5,11 @@ use std::cell::RefCell;
 use super::{CallError, EngineInstance, HostError, StoreCompletion};
 use crate::cpu::dbt::RegistryError;
 
+#[cfg(feature = "external-cpu")]
+mod component_memory;
+#[cfg(feature = "external-cpu")]
+pub(crate) use component_memory::component_memory_lease;
+
 mod clock;
 pub(crate) use clock::{advance_cpu_clock, configure_cpu_clock, observe_cpu_clock};
 
@@ -56,6 +61,14 @@ pub(crate) fn close() -> u32 {
         let Ok(mut registry) = registry.try_borrow_mut() else {
             return 9;
         };
+        #[cfg(feature = "external-cpu")]
+        if registry
+            .instance
+            .as_ref()
+            .is_some_and(|instance| instance.external_cpu_memory_pinned)
+        {
+            return 12;
+        }
         registry.opened = true;
         if let Some(instance) = registry.instance.as_mut() {
             instance.close();

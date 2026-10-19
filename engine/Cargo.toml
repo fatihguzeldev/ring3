@@ -10,6 +10,7 @@ license = "Apache-2.0"
 crate-type = ["rlib", "cdylib"]
 
 [features]
+external-cpu = []
 observability = ["dep:ring3-observability"]
 
 [dependencies]
