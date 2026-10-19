@@ -890,7 +890,7 @@ fn default_caps_and_observed_module_size_remain_closed() {
             ..limits
         },
         CompileLimits {
-            instructions: 65,
+            instructions: 257,
             ..limits
         },
         CompileLimits {
@@ -898,7 +898,7 @@ fn default_caps_and_observed_module_size_remain_closed() {
             ..limits
         },
         CompileLimits {
-            wasm_bytes: 65_537,
+            wasm_bytes: 524_289,
             ..limits
         },
     ] {

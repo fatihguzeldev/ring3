@@ -1181,7 +1181,7 @@ fn default_limits_and_refusals_preserve_both_owner_publications() {
             ..limits
         },
         CompileLimits {
-            instructions: 65,
+            instructions: 257,
             ..limits
         },
         CompileLimits {
@@ -1189,7 +1189,7 @@ fn default_limits_and_refusals_preserve_both_owner_publications() {
             ..limits
         },
         CompileLimits {
-            wasm_bytes: 65_537,
+            wasm_bytes: 524_289,
             ..limits
         },
     ] {

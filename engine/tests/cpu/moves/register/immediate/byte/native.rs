@@ -835,7 +835,7 @@ fn default_and_custom_caps_keep_full_installed_publication() {
                 &ordinary,
                 vec![(CODE, 98)],
                 CompileLimits {
-                    instructions: 65,
+                    instructions: 257,
                     ..CompileLimits::default()
                 },
                 CompileError::InvalidLimits,

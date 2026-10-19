@@ -902,7 +902,7 @@ fn rotate_counts_keep_default_instruction_block_and_tight_wasm_limits() {
             ..limits
         },
         CompileLimits {
-            instructions: 65,
+            instructions: 257,
             ..limits
         },
         CompileLimits {
@@ -910,7 +910,7 @@ fn rotate_counts_keep_default_instruction_block_and_tight_wasm_limits() {
             ..limits
         },
         CompileLimits {
-            wasm_bytes: 65_537,
+            wasm_bytes: 524_289,
             ..limits
         },
     ] {

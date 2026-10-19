@@ -954,7 +954,7 @@ fn unchanged_default_limits_preserve_both_owner_publications_on_failure() {
             ..limits
         },
         CompileLimits {
-            instructions: 65,
+            instructions: 257,
             ..limits
         },
         CompileLimits {
@@ -962,7 +962,7 @@ fn unchanged_default_limits_preserve_both_owner_publications_on_failure() {
             ..limits
         },
         CompileLimits {
-            wasm_bytes: 65_537,
+            wasm_bytes: 524_289,
             ..limits
         },
     ] {

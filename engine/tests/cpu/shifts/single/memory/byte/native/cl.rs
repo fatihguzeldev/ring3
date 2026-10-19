@@ -1050,7 +1050,7 @@ fn current_cl_inputs_source_currency_and_caps_keep_distinct_owner_state() {
             ..limits
         },
         CompileLimits {
-            instructions: 65,
+            instructions: 257,
             ..limits
         },
         CompileLimits {
@@ -1058,7 +1058,7 @@ fn current_cl_inputs_source_currency_and_caps_keep_distinct_owner_state() {
             ..limits
         },
         CompileLimits {
-            wasm_bytes: 65_537,
+            wasm_bytes: 524_289,
             ..limits
         },
     ] {

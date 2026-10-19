@@ -1042,7 +1042,7 @@ fn instruction_caps_and_pure_tiny_wasm_fail_without_replacing_owners() {
             ..limits
         },
         CompileLimits {
-            instructions: 65,
+            instructions: 257,
             ..limits
         },
         CompileLimits {
@@ -1050,7 +1050,7 @@ fn instruction_caps_and_pure_tiny_wasm_fail_without_replacing_owners() {
             ..limits
         },
         CompileLimits {
-            wasm_bytes: 65_537,
+            wasm_bytes: 524_289,
             ..limits
         },
     ] {

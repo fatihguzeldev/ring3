@@ -956,7 +956,7 @@ fn current_cl_admission_and_failures_keep_default_limits_and_prior_owner_state()
             ..limits
         },
         CompileLimits {
-            instructions: 65,
+            instructions: 257,
             ..limits
         },
         CompileLimits {
@@ -964,7 +964,7 @@ fn current_cl_admission_and_failures_keep_default_limits_and_prior_owner_state()
             ..limits
         },
         CompileLimits {
-            wasm_bytes: 65_537,
+            wasm_bytes: 524_289,
             ..limits
         },
     ] {

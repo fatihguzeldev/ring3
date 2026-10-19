@@ -904,7 +904,7 @@ fn exact_caps_and_eight_failures_preserve_complete_installed_publication() {
             ),
             (
                 CompileLimits {
-                    instructions: 65,
+                    instructions: 257,
                     ..CompileLimits::default()
                 },
                 CompileError::InvalidLimits,
