@@ -12,6 +12,7 @@ pub(in crate::cpu::dbt::wasm) struct ResultContext {
     pub(in crate::cpu::dbt::wasm) paging_configured: bool,
     paging_access_mask: Option<u32>,
     zero_span_validator: Option<u32>,
+    x87_read32_validator: Option<u32>,
 }
 
 impl From<Imports> for ResultContext {
@@ -20,6 +21,7 @@ impl From<Imports> for ResultContext {
             paging_configured: imports.paging_configured,
             paging_access_mask: None,
             zero_span_validator: imports.zero_span_validator,
+            x87_read32_validator: imports.x87_read32_validator,
         }
     }
 }
@@ -30,6 +32,7 @@ impl ResultContext {
             paging_configured: false,
             paging_access_mask: None,
             zero_span_validator: None,
+            x87_read32_validator: None,
         }
     }
 
@@ -100,6 +103,31 @@ pub(in crate::cpu::dbt::wasm) fn validate(
         exit_depth,
         context,
     );
+}
+
+pub(in crate::cpu::dbt::wasm) fn validate_x87(
+    code: &mut InstructionSink<'_>,
+    length: u32,
+    access_mask: u32,
+    allow_smc: bool,
+    exit_depth: u32,
+    context: ResultContext,
+) {
+    #[cfg(test)]
+    if length == 4 && access_mask == 1 && !allow_smc {
+        outlined::record_read32_site();
+    }
+    if length == 4
+        && access_mask == 1
+        && !allow_smc
+        && context.paging_configured
+        && context.paging_access_mask.is_none()
+        && let Some(index) = context.x87_read32_validator
+    {
+        outlined::call_read32(code, index, exit_depth);
+        return;
+    }
+    validate(code, length, access_mask, allow_smc, exit_depth, context);
 }
 
 // gate packets report an effective frame slot, not an ordinary scalar-memory span.

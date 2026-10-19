@@ -49,14 +49,24 @@ pub(in crate::cpu::dbt) fn emit_with_tier(
     if plan.has_zero_span_validator {
         helper_imports.zero_span_validator =
             Some(sections.run_index + 1 + u32::from(plan.has_segment_check));
-        functions.function(sections.zero_span_validator_type);
+        functions.function(sections.ordinary_validator_type);
+    }
+    if plan.has_x87_read32_validator {
+        helper_imports.x87_read32_validator = Some(
+            sections.run_index
+                + 1
+                + u32::from(plan.has_segment_check)
+                + u32::from(plan.has_zero_span_validator),
+        );
+        functions.function(sections.ordinary_validator_type);
     }
     if plan.has_read32_validator {
         helper_imports.scalar_read32_validator = Some(
             sections.run_index
                 + 1
                 + u32::from(plan.has_segment_check)
-                + u32::from(plan.has_zero_span_validator),
+                + u32::from(plan.has_zero_span_validator)
+                + u32::from(plan.has_x87_read32_validator),
         );
         functions.function(sections.scalar_read32_validator_type);
     }
@@ -90,6 +100,9 @@ pub(in crate::cpu::dbt) fn emit_with_tier(
     }
     if plan.has_zero_span_validator {
         bodies.function(&outlined::build_function());
+    }
+    if plan.has_x87_read32_validator {
+        bodies.function(&outlined::build_read32_function());
     }
     if plan.has_read32_validator {
         bodies.function(&memory::build_read32_validator());

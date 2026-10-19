@@ -10,7 +10,7 @@ pub(in crate::cpu::dbt::wasm) struct ImportSections {
     pub(in crate::cpu::dbt::wasm) context: Imports,
     pub(in crate::cpu::dbt::wasm) run_index: u32,
     pub(in crate::cpu::dbt::wasm) segment_check_type: u32,
-    pub(in crate::cpu::dbt::wasm) zero_span_validator_type: u32,
+    pub(in crate::cpu::dbt::wasm) ordinary_validator_type: u32,
     pub(in crate::cpu::dbt::wasm) scalar_read32_validator_type: u32,
 }
 
@@ -140,12 +140,12 @@ pub(in crate::cpu::dbt::wasm) fn build(
             [ValType::I32],
         );
     }
-    let zero_span_validator_type = fetch_fault_type + u32::from(plan.needs_fetch_paging);
-    if plan.has_zero_span_validator {
+    let ordinary_validator_type = fetch_fault_type + u32::from(plan.needs_fetch_paging);
+    let has_ordinary_validator = plan.has_zero_span_validator || plan.has_x87_read32_validator;
+    if has_ordinary_validator {
         types.ty().function([ValType::I32; 12], [ValType::I32; 8]);
     }
-    let scalar_read32_validator_type =
-        zero_span_validator_type + u32::from(plan.has_zero_span_validator);
+    let scalar_read32_validator_type = ordinary_validator_type + u32::from(has_ordinary_validator);
     if plan.has_read32_validator {
         types.ty().function([ValType::I32; 10], [ValType::I32; 7]);
     }
@@ -723,7 +723,7 @@ pub(in crate::cpu::dbt::wasm) fn build(
         context: helper_imports,
         run_index: function_index,
         segment_check_type,
-        zero_span_validator_type,
+        ordinary_validator_type,
         scalar_read32_validator_type,
     }
 }

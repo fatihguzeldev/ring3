@@ -1,7 +1,7 @@
 use super::*;
 use crate::{
     abi::arena::{SEGMENT_BASES_RECORD_OFFSET, SEGMENTS_OFFSET},
-    cpu::dbt::wasm::helpers::result::validate,
+    cpu::dbt::wasm::helpers::result::{validate, validate_x87},
 };
 use std::{
     io::Write,
@@ -12,7 +12,9 @@ use wasm_encoder::{
     GlobalSection, GlobalType, ImportSection, MemoryType, Module, TypeSection,
 };
 
-fn wrapper(outlined: bool) -> Function {
+mod read32;
+
+fn wrapper(outlined: bool, read32: bool) -> Function {
     let mut function = Function::new([(ADDRESS + 1 - INPUTS.len() as u32, ValType::I32)]);
     let mut code = function.instructions();
     for (parameter, local) in INPUTS.into_iter().enumerate().skip(1) {
@@ -20,16 +22,18 @@ fn wrapper(outlined: bool) -> Function {
     }
     // parameter 1 has already been copied to HELPER_STATUS and now witnesses the exit branch.
     code.i32_const(0).local_set(1).block(BlockType::Empty);
-    validate(
+    let emit = if read32 { validate_x87 } else { validate };
+    emit(
         &mut code,
-        0,
-        0,
+        if read32 { 4 } else { 0 },
+        u32::from(read32),
         false,
         0,
         ResultContext {
             paging_configured: true,
             paging_access_mask: None,
             zero_span_validator: outlined.then_some(2),
+            x87_read32_validator: outlined.then_some(2),
         },
     );
     code.i32_const(1).local_set(1).end();
@@ -40,7 +44,7 @@ fn wrapper(outlined: bool) -> Function {
     function
 }
 
-fn differential_module() -> Vec<u8> {
+fn differential_module(read32: bool) -> Vec<u8> {
     let mut module = Module::new();
     let mut types = TypeSection::new();
     types.ty().function([ValType::I32; 12], [ValType::I32; 9]);
@@ -88,8 +92,8 @@ fn differential_module() -> Vec<u8> {
     exports.export("slowCalls", ExportKind::Global, 3);
     module.section(&exports);
     let mut bodies = CodeSection::new();
-    bodies.function(&wrapper(false));
-    bodies.function(&wrapper(true));
+    bodies.function(&wrapper(false, read32));
+    bodies.function(&wrapper(true, read32));
     let mut counted = Function::new([]);
     let mut code = counted.instructions();
     code.global_get(3).i32_const(1).i32_add().global_set(3);
@@ -98,7 +102,11 @@ fn differential_module() -> Vec<u8> {
     }
     code.call(3).end();
     bodies.function(&counted);
-    bodies.function(&build_function());
+    bodies.function(&if read32 {
+        build_read32_function()
+    } else {
+        build_function()
+    });
     module.section(&bodies);
     module.finish()
 }
@@ -134,7 +142,7 @@ fn hex(bytes: &[u8]) -> String {
 fn generated_zero_span_matches_inline_failure_priority_scratch_and_live_context() {
     let input = format!(
         "{{\"module\":\"{}\",\"segments\":{},\"bases\":{}}}",
-        hex(&differential_module()),
+        hex(&differential_module(false)),
         SEGMENTS_OFFSET,
         SEGMENT_BASES_RECORD_OFFSET,
     );
@@ -158,6 +166,7 @@ fn zero_span_outline_requires_the_exact_contract_and_an_available_local_function
             paging_configured: paging,
             paging_access_mask: intent,
             zero_span_validator: has_helper.then_some(42),
+            x87_read32_validator: has_helper.then_some(43),
         };
         let mut actual = Function::new([(36, ValType::I32)]);
         let mut retained = Function::new([(36, ValType::I32)]);
@@ -180,7 +189,7 @@ fn zero_span_outline_requires_the_exact_contract_and_an_available_local_function
 }
 
 #[test]
-fn helper_is_absent_without_register_x87_sites_and_composes_with_segment_helpers() {
+fn ordinary_helpers_count_real_x87_sites_and_compose_with_scalar_and_segment_helpers() {
     use crate::{
         cpu::{
             dbt::{
@@ -195,15 +204,25 @@ fn helper_is_absent_without_register_x87_sites_and_composes_with_segment_helpers
         },
         memory::{AddressSpace, GuestAddress, PageRange, Permissions},
     };
-    let cases: [(&[u8], bool, bool); 5] = [
-        (&[0x90, 0xff, 0xe2], false, false),
-        (&[0xd9, 0x00, 0xff, 0xe2], false, true),
-        (&[0xd9, 0xe8, 0xff, 0xe2], true, false),
-        (&[0xd9, 0xe8, 0xd9, 0x00, 0xff, 0xe2], true, true),
-        (&[0xdf, 0xe9, 0xff, 0xe2], true, false),
+    let cases: [(&[u8], bool, bool, usize); 10] = [
+        (&[0x90, 0xff, 0xe2], false, false, 0),
+        (&[0xd9, 0x00, 0xff, 0xe2], false, true, 2),
+        (&[0xdb, 0x00, 0xff, 0xe2], false, true, 2),
+        (&[0xd8, 0x00, 0xff, 0xe2], false, true, 2),
+        (&[0xdd, 0x00, 0xff, 0xe2], false, true, 0),
+        (&[0xd9, 0x10, 0xff, 0xe2], false, true, 0),
+        (&[0xd9, 0xe8, 0xff, 0xe2], true, false, 0),
+        (&[0xd9, 0xe8, 0xd9, 0x00, 0xff, 0xe2], true, true, 2),
+        (&[0xdf, 0xe9, 0xff, 0xe2], true, false, 0),
+        (
+            &[0xd9, 0x00, 0xd9, 0xe8, 0x8b, 0x03, 0x8b, 0x0b, 0xff, 0xe2],
+            true,
+            true,
+            2,
+        ),
     ];
     let mut modules = Vec::new();
-    for (code, outlined, segments) in cases {
+    for (code, outlined, segments, read32_sites) in cases {
         let mut memory = AddressSpace::new(1).unwrap();
         memory
             .map_zeroed(
@@ -231,19 +250,20 @@ fn helper_is_absent_without_register_x87_sites_and_composes_with_segment_helpers
             let plan = ModuleRequirements::new(&prepared.blocks, Some(binding));
             assert_eq!(plan.has_zero_span_validator, outlined);
             assert_eq!(plan.has_segment_check, segments);
-            modules.push(format!(
-                "\"{}\"",
-                hex(&emit(
-                    &prepared.blocks,
-                    Some(binding),
-                    Some(cs.decode_key())
-                ))
-            ));
+            assert_eq!(plan.has_x87_read32_validator, read32_sites >= 2);
+            take_read32_sites();
+            let bytes = emit(&prepared.blocks, Some(binding), Some(cs.decode_key()));
+            assert_eq!(
+                take_read32_sites(),
+                read32_sites,
+                "waiting prechecks count as emitted sites"
+            );
+            modules.push(format!("\"{}\"", hex(&bytes)));
         }
     }
-    let script = "import assert from 'node:assert/strict'; let input=''; for await(const c of process.stdin) input+=c; const modules=JSON.parse(input); assert.equal(modules.length,10); for(const [i,hex] of modules.entries()) assert.ok(WebAssembly.validate(Buffer.from(hex,'hex')),`module ${i}`); console.log('10 generated modules validated');";
+    let script = "import assert from 'node:assert/strict'; let input=''; for await(const c of process.stdin) input+=c; const modules=JSON.parse(input); assert.equal(modules.length,20); for(const [i,hex] of modules.entries()) assert.ok(WebAssembly.validate(Buffer.from(hex,'hex')),`module ${i}`); console.log('20 generated modules validated');";
     assert_eq!(
         node(script, &format!("[{}]", modules.join(","))).trim(),
-        "10 generated modules validated"
+        "20 generated modules validated"
     );
 }

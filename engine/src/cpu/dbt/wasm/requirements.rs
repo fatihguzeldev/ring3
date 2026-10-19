@@ -28,6 +28,7 @@ pub(in crate::cpu::dbt::wasm) struct ModuleRequirements {
     pub(in crate::cpu::dbt::wasm) has_segments: bool,
     pub(in crate::cpu::dbt::wasm) has_segment_check: bool,
     pub(in crate::cpu::dbt::wasm) has_zero_span_validator: bool,
+    pub(in crate::cpu::dbt::wasm) has_x87_read32_validator: bool,
     pub(in crate::cpu::dbt::wasm) has_read32_validator: bool,
     pub(in crate::cpu::dbt::wasm) upper_xstate: bool,
 }
@@ -210,6 +211,20 @@ impl ModuleRequirements {
             crate::cpu::x86::capabilities::AVX_ENABLED && (imports.cpu_xsave || imports.cpu_xrstor);
         // one site grows when it owns the shared failure body; two sites already amortize it.
         let has_read32_validator = paging_configured && imports.read32_result_sites >= 2;
+        // waiting instructions emit a second operation site for pending x87 exceptions.
+        let x87_read32_sites: usize = blocks
+            .iter()
+            .flat_map(|block| &block.instructions)
+            .map(|instruction| match instruction.operation() {
+                Operation::X87 {
+                    operation, waiting, ..
+                } if operation.read_size() == 4 && operation.write_size() == 0 => {
+                    1 + usize::from(*waiting)
+                }
+                _ => 0,
+            })
+            .sum();
+        let has_x87_read32_validator = paging_configured && x87_read32_sites >= 2;
         // register x87 operations emit the same ordinary result checks at each helper site.
         // other modules retain their current layout without an unused local function.
         let has_zero_span_validator = has_x87
@@ -244,6 +259,7 @@ impl ModuleRequirements {
             has_segments,
             has_segment_check,
             has_zero_span_validator,
+            has_x87_read32_validator,
             has_read32_validator,
             upper_xstate,
         }

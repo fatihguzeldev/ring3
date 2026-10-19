@@ -114,6 +114,7 @@ fn module(length: u32, access: u32, masked: bool, transport: u32, address: u32) 
         paging_configured: true,
         paging_access_mask: None,
         zero_span_validator: None,
+        x87_read32_validator: None,
     };
     if masked {
         validate_masked(&mut code, length, RESUME, 0, context);

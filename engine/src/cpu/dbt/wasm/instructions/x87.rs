@@ -106,7 +106,7 @@ pub(in crate::cpu::dbt::wasm) fn operation(
     let length = operation.read_size().max(operation.write_size()) as u32;
     let access =
         u32::from(operation.read_size() != 0) | (u32::from(operation.write_size() != 0) << 1);
-    crate::cpu::dbt::wasm::helpers::result::validate(
+    crate::cpu::dbt::wasm::helpers::result::validate_x87(
         code,
         length,
         access,

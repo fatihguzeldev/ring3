@@ -30,7 +30,34 @@ const OUTPUTS: [u32; 8] = [
     RESULT,
 ];
 
+#[cfg(test)]
+thread_local! {
+    static EMITTED_READ32_SITES: core::cell::Cell<usize> = const { core::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(super) fn record_read32_site() {
+    EMITTED_READ32_SITES.with(|sites| sites.set(sites.get() + 1));
+}
+
+#[cfg(test)]
+fn take_read32_sites() -> usize {
+    EMITTED_READ32_SITES.with(|sites| sites.replace(0))
+}
+
 pub(in crate::cpu::dbt::wasm) fn call(code: &mut InstructionSink<'_>, index: u32, exit_depth: u32) {
+    call_span(code, index, exit_depth, 0);
+}
+
+pub(in crate::cpu::dbt::wasm) fn call_read32(
+    code: &mut InstructionSink<'_>,
+    index: u32,
+    exit_depth: u32,
+) {
+    call_span(code, index, exit_depth, 4);
+}
+
+fn call_span(code: &mut InstructionSink<'_>, index: u32, exit_depth: u32, length: i32) {
     // preserve every caller local while selecting the unchanged slow validator.
     // only an exact ordinary success can avoid the call; its payload remains caller-validated.
     code.local_get(HELPER_STATUS)
@@ -48,7 +75,7 @@ pub(in crate::cpu::dbt::wasm) fn call(code: &mut InstructionSink<'_>, index: u32
         (24, 0),
         (28, 0),
         (32, 0),
-        (36, 0),
+        (36, length),
     ]
     .into_iter()
     .enumerate()
@@ -82,6 +109,14 @@ pub(in crate::cpu::dbt::wasm) fn call(code: &mut InstructionSink<'_>, index: u32
 }
 
 pub(in crate::cpu::dbt::wasm) fn build_function() -> Function {
+    build_span_function(0, 0)
+}
+
+pub(in crate::cpu::dbt::wasm) fn build_read32_function() -> Function {
+    build_span_function(4, 1)
+}
+
+fn build_span_function(length: u32, access: u32) -> Function {
     // parameters occupy 0..12; the validator uses the existing canonical locals through 26.
     // every destination is outside the parameter range, so rebinding cannot clobber an input.
     let mut function = Function::new([(ADDRESS + 1 - INPUTS.len() as u32, ValType::I32)]);
@@ -92,8 +127,8 @@ pub(in crate::cpu::dbt::wasm) fn build_function() -> Function {
     code.block(BlockType::Empty);
     validate_span(
         &mut code,
-        0,
-        0,
+        length,
+        access,
         false,
         Validation::Ordinary { mask: None },
         0,
@@ -101,6 +136,7 @@ pub(in crate::cpu::dbt::wasm) fn build_function() -> Function {
             paging_configured: true,
             paging_access_mask: None,
             zero_span_validator: None,
+            x87_read32_validator: None,
         },
     );
     code.end();
