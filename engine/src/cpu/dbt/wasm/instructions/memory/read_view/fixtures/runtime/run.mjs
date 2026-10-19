@@ -9,8 +9,9 @@ const BYTES = 128 * 65536, ADDRESS = 0x4000;
 let controls = 0;
 
 function execute(row, enabled) {
-  const memory = new WebAssembly.Memory({initial: 128, maximum: 128});
-  const data = new DataView(memory.buffer), bytes = new Uint8Array(memory.buffer);
+  const memory = new WebAssembly.Memory({initial: 128, maximum: row.grow ? 256 : 128});
+  let data = new DataView(memory.buffer), bytes = new Uint8Array(memory.buffer);
+  const backend = {mappings: MAP, permissions: PERMS, backing: BACK, pages: 2}, values = [];
   const set = (offset, value) => data.setUint32(offset, value >>> 0, true);
   const get = offset => data.getUint32(offset, true);
   const address = row.address ?? ADDRESS, epoch = row.epoch ?? 1n, count = row.count ?? 1;
@@ -28,6 +29,7 @@ function execute(row, enabled) {
     const at = (address + index) >>> 0, slot = get(MAP + (at >>> 12) * 4);
     bytes[BACK + (slot - 1) * 4096 + (at & 4095)] = value >>> (index * 8);
   }
+  if (row.poison) { bytes.fill(0xa5, 100, 140); bytes[99] = 0x6b; bytes[140] = 0xd8; }
   if (row.field) set(DESC + row.field[0], row.field[1]);
   if (row.mapping !== undefined) set(MAP + first * 4, row.mapping);
   if (row.permission !== undefined) bytes[PERMS + first] = row.permission;
@@ -46,14 +48,14 @@ function execute(row, enabled) {
     if (row.mode === 'legacy23') { success(value); return 23; }
     let result = 0;
     for (let index = 0; index < 4; index++) {
-      const linear = (address + index) >>> 0, slot = get(MAP + (linear >>> 12) * 4);
-      const readable = bytes[PERMS + (linear >>> 12)] & 1;
-      if (slot < 1 || slot > 2 || !readable) {
+      const linear = (address + index) >>> 0, slot = get(backend.mappings + (linear >>> 12) * 4);
+      const readable = bytes[backend.permissions + (linear >>> 12)] & 1;
+      if (slot < 1 || slot > backend.pages || !readable) {
         packet([0x484d3352, 0x1000f, 40, 0, 9, 0, readable ? 4 : 5, linear, 1, 4]);
         data.setBigUint64(DESC, 0n, true);
         return 23;
       }
-      result |= bytes[BACK + (slot - 1) * 4096 + (linear & 4095)] << (index * 8);
+      result |= bytes[backend.backing + (slot - 1) * 4096 + (linear & 4095)] << (index * 8);
     }
     success(result);
     if (row.mode === 'reactivate' || (row.mode === 'witness' && phase >= 2)) data.setBigUint64(DESC, epoch, true);
@@ -61,6 +63,10 @@ function execute(row, enabled) {
   }
   function barrier() {
     phase++;
+    if (row.trace) values.push(get(120));
+    row.barrier?.({phase, memory, backend, get, set,
+      get data() { return data; }, get bytes() { return bytes; },
+      grow(pages) { memory.grow(pages); data = new DataView(memory.buffer); bytes = new Uint8Array(memory.buffer); }});
     if (phase !== 1) return;
     if (row.mode === 'remap') { set(MAP + first * 4, 2); set(BACK + 4096 + (address & 4095), 0x11223344); }
     if (row.mode === 'protect') bytes[PERMS + first] = 2;
@@ -72,10 +78,17 @@ function execute(row, enabled) {
     getters++; assert.equal(saved, epoch);
     return enabled ? row.pointer ?? DESC : 0;
   }, barrier};
-  const {run} = new WebAssembly.Instance(module, {env: {memory}, ring3: bindings}).exports;
+  const selected = row.grow ? new WebAssembly.Module(Buffer.from(fixture.growWrapper, 'hex')) : module;
+  const {run} = new WebAssembly.Instance(selected, {env: {memory}, ring3: bindings}).exports;
   const output = run(address, count, row.priorReason ?? 0).map(value => value >>> 0);
-  assert.equal(getters, 1, 'only the descriptor pointer is initialized once per call');
-  return {output, bytes: Buffer.from(bytes), calls};
+  if (row.trace && output[9] > values.length) values.push(output[8]);
+  const result = {output, bytes: Buffer.from(bytes), calls, values};
+  if (row.reenter) {
+    const before = calls;
+    result.reentry = {output: run(address, 1, row.priorReason ?? 0).map(value => value >>> 0), calls: calls - before};
+  }
+  assert.equal(getters, row.reenter ? 2 : 1, 'only the descriptor pointer is initialized once per call');
+  return result;
 }
 
 const rows = [];

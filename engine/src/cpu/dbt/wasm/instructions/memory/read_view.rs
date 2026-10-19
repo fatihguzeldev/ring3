@@ -4,6 +4,8 @@ use crate::cpu::dbt::wasm::{
 };
 use wasm_encoder::{BlockType, InstructionSink, MemArg, ValType};
 
+mod geometry;
+
 pub(in crate::cpu::dbt::wasm) const INTEGER_LOCALS: u32 = 7;
 
 #[derive(Clone, Copy)]
@@ -43,7 +45,8 @@ pub(in crate::cpu::dbt::wasm) fn initialize(code: &mut InstructionSink<'_>, impo
                 .epoch,
         )
         .call(index)
-        .local_set(locals.pointer);
+        .local_set(locals.mapping);
+        geometry::initialize(code, locals);
     }
 }
 
@@ -57,12 +60,6 @@ pub(super) fn load(code: &mut InstructionSink<'_>, imports: Imports) -> bool {
     code.block(BlockType::Result(ValType::I32))
         .block(BlockType::Empty);
     code.local_get(locals.pointer).i32_eqz().br_if(0);
-    code.memory_size(0)
-        .i64_extend_i32_u()
-        .i64_const(16)
-        .i64_shl()
-        .local_set(locals.memory_bytes);
-    bounded(code, locals.pointer, 24, locals.memory_bytes);
     code.local_get(locals.pointer)
         .i64_load(arg(0, 3))
         .local_get(
@@ -79,37 +76,7 @@ pub(super) fn load(code: &mut InstructionSink<'_>, imports: Imports) -> bool {
         .i32_const(4092)
         .i32_gt_u()
         .br_if(0);
-    for (offset, local) in [
-        (8, locals.mappings),
-        (12, locals.permissions),
-        (16, locals.backing),
-        (20, locals.pages),
-    ] {
-        code.local_get(locals.pointer)
-            .i32_load(arg(offset, 2))
-            .local_set(local);
-    }
-    code.local_get(locals.pages)
-        .i32_const(1)
-        .i32_sub()
-        .i32_const(crate::memory::MAX_RESIDENT_PAGES as i32 - 1)
-        .i32_gt_u()
-        .br_if(0);
-    for local in [locals.mappings, locals.permissions, locals.backing] {
-        code.local_get(local).i32_eqz().br_if(0);
-    }
-    bounded(code, locals.mappings, 4 << 20, locals.memory_bytes);
-    bounded(code, locals.permissions, 1 << 20, locals.memory_bytes);
-    code.local_get(locals.backing)
-        .i64_extend_i32_u()
-        .local_get(locals.pages)
-        .i64_extend_i32_u()
-        .i64_const(12)
-        .i64_shl()
-        .i64_add()
-        .local_get(locals.memory_bytes)
-        .i64_gt_u()
-        .br_if(0);
+    geometry::require_unchanged(code, locals);
     code.local_get(locals.mappings)
         .local_get(ADDRESS)
         .i32_const(12)
@@ -149,23 +116,21 @@ pub(super) fn load(code: &mut InstructionSink<'_>, imports: Imports) -> bool {
         .i32_load(arg(0, 0))
         .local_set(locals.value);
     for (offset, value) in [
-        (0, u32::from_le_bytes(*b"R3MH")),
-        (4, 0x1000a),
+        (0, 0x0001_000a_484d_3352_u64),
         (8, 40),
-        (12, 0),
-        (16, 0),
         (24, 0),
-        (28, 0),
-        (32, 0),
-        (36, 4),
+        (32, 4_u64 << 32),
     ] {
         code.local_get(STATE_PTR)
-            .i32_const(value as i32)
-            .i32_store(arg(100 + offset, 2));
+            .i64_const(value as i64)
+            .i64_store(arg(100 + offset, 2));
     }
     code.local_get(STATE_PTR)
         .local_get(locals.value)
-        .i32_store(arg(120, 2));
+        .i64_extend_i32_u()
+        .i64_const(32)
+        .i64_shl()
+        .i64_store(arg(116, 2));
     code.i32_const(0)
         .local_set(HELPER_STATUS)
         .i32_const(1)

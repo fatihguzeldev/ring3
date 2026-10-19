@@ -26,7 +26,7 @@ use wasm_encoder::{
     GlobalSection, GlobalType, ImportSection, MemoryType, Module, TypeSection, ValType,
 };
 
-fn wrapper() -> Vec<u8> {
+fn wrapper(growable: bool) -> Vec<u8> {
     let mut module = Module::new();
     let mut types = TypeSection::new();
     types.ty().function([ValType::I32; 3], [ValType::I32; 10]);
@@ -40,7 +40,7 @@ fn wrapper() -> Vec<u8> {
         "memory",
         EntityType::Memory(MemoryType {
             minimum: 128,
-            maximum: Some(128),
+            maximum: Some(if growable { 256 } else { 128 }),
             memory64: false,
             shared: false,
             page_size_log2: None,
@@ -144,8 +144,7 @@ fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
-#[test]
-fn generated_read32_view_checks_live_metadata_and_preserves_fallback_protocol() {
+fn input() -> String {
     let cases: [(&str, &[u8], bool); 8] = [
         ("pure", &[0x90, 0xff, 0xe2], false),
         ("read", &[0x8b, 0x03, 0xff, 0xe2], true),
@@ -209,17 +208,18 @@ fn generated_read32_view_checks_live_metadata_and_preserves_fallback_protocol() 
     let mut arena = vec![0; ARENA_SIZE];
     arena::initialize(&mut arena).unwrap();
     let input = format!(
-        "{{\"wrapper\":\"{}\",\"arena\":\"{}\",\"segments\":{SEGMENTS_OFFSET},\"bases\":{SEGMENT_BASES_RECORD_OFFSET},\"modules\":[{}]}}",
-        hex(&wrapper()),
+        "{{\"wrapper\":\"{}\",\"growWrapper\":\"{}\",\"arena\":\"{}\",\"segments\":{SEGMENTS_OFFSET},\"bases\":{SEGMENT_BASES_RECORD_OFFSET},\"modules\":[{}]}}",
+        hex(&wrapper(false)),
+        hex(&wrapper(true)),
         hex(&arena),
         modules.join(",")
     );
+    input
+}
+
+fn run_fixture(input: String, script: &str) {
     let mut child = Command::new("node")
-        .args([
-            "--input-type=module",
-            "-e",
-            include_str!("fixtures/runtime/run.mjs"),
-        ])
+        .args(["--input-type=module", "-e", script])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -238,4 +238,33 @@ fn generated_read32_view_checks_live_metadata_and_preserves_fallback_protocol() 
         String::from_utf8_lossy(&output.stderr)
     );
     print!("{}", String::from_utf8(output.stdout).unwrap());
+}
+
+#[test]
+fn generated_read32_view_checks_live_metadata_and_preserves_fallback_protocol() {
+    run_fixture(input(), include_str!("fixtures/runtime/run.mjs"));
+}
+
+#[test]
+fn generated_read32_view_packet_stores_preserve_poison_and_adjacent_canaries() {
+    run_fixture(
+        input(),
+        concat!(
+            include_str!("fixtures/runtime/run.mjs"),
+            "\n",
+            include_str!("fixtures/runtime/packet.mjs")
+        ),
+    );
+}
+
+#[test]
+fn generated_read32_view_cached_geometry_preserves_live_fields_and_repair_fallback() {
+    run_fixture(
+        input(),
+        concat!(
+            include_str!("fixtures/runtime/run.mjs"),
+            "\n",
+            include_str!("fixtures/runtime/geometry.mjs")
+        ),
+    );
 }
