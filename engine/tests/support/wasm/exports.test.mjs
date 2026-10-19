@@ -117,3 +117,52 @@ test('detection i64 parameter position and all three source arities remain exact
     assert.throws(() => assertEngineExports(module, root), /ABI parameter/);
   });
 });
+
+test('the no-import profile omits only the declared conditional observability owner', () => {
+  workspace(parent, child, root => {
+    const owner = join(root, 'engine/src/abi/wasm/exports/mod.rs');
+    const original = readFileSync(owner, 'utf8');
+    writeFileSync(owner, original + '#[cfg(feature = "observability")]\nmod observability;\n');
+    const result = assertEngineExports(module, root);
+    assert.ok(!result.sourcePaths.some(path => path.endsWith('/observability.rs')));
+    for (const suffix of [
+      '#[cfg(feature = "profiling")]\nmod observability;\n',
+      '#[cfg(feature = "observability")]\nmod other;\n',
+    ]) {
+      writeFileSync(owner, original + suffix);
+      assert.throws(() => assertEngineExports(module, root), /closed ABI export owner list/);
+    }
+  });
+});
+
+const cpuSource = readFileSync(new URL('../../../src/abi/wasm/exports/cpu.rs', import.meta.url), 'utf8');
+const pairSource = cpuSource.slice(cpuSource.indexOf('#[allow('));
+
+test('the CPU owner keeps only its exact i64 view parameter and pair export', () => {
+  workspace(parent, child, root => {
+    const dir = join(root, 'engine/src/abi/wasm/exports');
+    writeFileSync(join(dir, 'mod.rs'), 'macro_rules! export_process_calls {\n}\nmod cpu;\n');
+    const source = 'export_process_calls! { cpu_read32_view(epoch: i64); }\n' + pairSource;
+    const cpu = join(dir, 'cpu.rs');
+    writeFileSync(cpu, source);
+    const actual = moduleWith(['ring3_abi_v1_cpu_read32_view', 'ring3_abi_v1_x87_resident_pair']);
+    assert.deepEqual(assertEngineExports(actual, root).functions.map(row => [row.name, row.arity]), [
+      ['ring3_abi_v1_cpu_read32_view', 1], ['ring3_abi_v1_x87_resident_pair', 9],
+    ]);
+    for (const invalid of [
+      source.replace('epoch: i64', 'epoch: u32'),
+      source.replace('epoch: i64', 'other: i64'),
+      source.replace(') -> i64', ') -> u32'),
+      source.replace('max_steps: u32', 'max_steps: i64'),
+      source + '\nfn hidden() {}\n',
+    ]) {
+      writeFileSync(cpu, invalid);
+      assert.throws(() => assertEngineExports(actual, root), /view parameters|pair export/);
+    }
+    writeFileSync(cpu, source.replace('cpu_read32_view(epoch: i64)', 'other(epoch: i64)'));
+    assert.throws(() => assertEngineExports(actual, root), /ABI parameter/);
+  });
+  workspace('export_process_calls! { cpu_read32_view(epoch: i64); }\n', child, root => {
+    assert.throws(() => assertEngineExports(module, root), /ABI parameter/);
+  });
+});
