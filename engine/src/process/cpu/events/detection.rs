@@ -274,6 +274,7 @@ impl EngineInstance {
         self.cpu_event = None;
         #[cfg(any(target_arch = "wasm32", test))]
         self.entered_execution_child(epoch, installed);
+        self.refresh_cpu_read32_view();
         Ok(epoch)
     }
 
@@ -387,6 +388,7 @@ impl EngineInstance {
             guard_page,
         };
         self.exception_detection.as_mut().unwrap()[0] = DetectionSlot32::Ready(record);
+        self.refresh_cpu_read32_view();
         Ok(())
     }
 
@@ -433,6 +435,7 @@ impl EngineInstance {
             work: work.try_into().unwrap(),
         };
         self.exception_detection.as_mut().unwrap()[0] = DetectionSlot32::Returned(returned);
+        self.refresh_cpu_read32_view();
         Ok(())
     }
 
@@ -462,6 +465,7 @@ impl EngineInstance {
         ) else {
             unreachable!("ready record checked before infallible single consumption")
         };
+        self.refresh_cpu_read32_view();
         Ok(record)
     }
 
@@ -481,14 +485,16 @@ impl EngineInstance {
             return Err(HostError::Call(CallError::InvalidToken));
         }
         self.exception_detection.as_mut().unwrap()[0] = DetectionSlot32::Idle;
+        self.refresh_cpu_read32_view();
         Ok(())
     }
 
     pub(in crate::process) fn clear_certified_page_fault32(&mut self) {
         if let Some(DetectionSlot32::Active { page_fault, .. }) =
             self.exception_detection.as_mut().map(|slot| &mut slot[0])
+            && page_fault.take().is_some()
         {
-            *page_fault = None;
+            self.refresh_cpu_read32_view();
         }
     }
 
@@ -500,6 +506,7 @@ impl EngineInstance {
             self.exception_detection.as_mut().map(|slot| &mut slot[0])
         {
             *page_fault = Some(fault);
+            self.revoke_cpu_read32_view();
         }
     }
 

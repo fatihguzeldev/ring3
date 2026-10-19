@@ -292,10 +292,13 @@ impl super::ThreadRuntime32 {
             )
     }
 }
+
+#[cfg(test)]
+mod tests;
 impl EngineInstance {
     pub(super) fn take_windows_thread_context(&mut self) -> Result<SavedThread32, HostError> {
         ExtendedCpuState::capture(self.arena())?;
-        Ok(SavedThread32 {
+        let saved = SavedThread32 {
             artifact: self.artifact.take(),
             generation: std::mem::take(&mut self.generation),
             arena: self.arena().try_into().unwrap(),
@@ -343,7 +346,10 @@ impl EngineInstance {
                 .and_then(|runtime| runtime.take_thread_reply()),
             #[cfg(any(target_arch = "wasm32", test))]
             detection: self.exception_detection.take(),
-        })
+        };
+        #[cfg(any(target_arch = "wasm32", test))]
+        self.refresh_cpu_read32_view();
+        Ok(saved)
     }
     pub(super) fn restore_windows_thread_context(&mut self, saved: SavedThread32) {
         assert!(
@@ -399,6 +405,7 @@ impl EngineInstance {
         #[cfg(any(target_arch = "wasm32", test))]
         {
             self.exception_detection = saved.detection;
+            self.refresh_cpu_read32_view();
         }
     }
 }

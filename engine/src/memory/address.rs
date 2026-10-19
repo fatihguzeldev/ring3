@@ -25,6 +25,7 @@ pub enum Access {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(transparent)]
 pub struct Permissions(u8);
 
 impl Permissions {

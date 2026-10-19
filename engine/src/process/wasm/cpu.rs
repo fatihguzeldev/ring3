@@ -14,6 +14,21 @@ pub(crate) fn cpu_read32(address: u32) -> u32 {
     cpu_mutate(|instance| instance.cpu_read32(address))
 }
 
+pub(crate) fn cpu_read32_view(epoch: i64) -> u32 {
+    REGISTRY.with(|registry| {
+        let Ok(registry) = registry.try_borrow() else {
+            return 0;
+        };
+        let Some(instance) = registry.instance.as_ref() else {
+            return 0;
+        };
+        let Ok(epoch) = u64::try_from(epoch) else {
+            return 0;
+        };
+        instance.cpu_read32_view_address(epoch) as u32
+    })
+}
+
 pub(crate) fn cpu_read(address: u32, length: u32, alignment: u32) -> u32 {
     cpu_mutate(|instance| instance.cpu_read(address, length, alignment))
 }

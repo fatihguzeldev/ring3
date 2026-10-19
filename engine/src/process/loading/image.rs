@@ -286,8 +286,12 @@ impl EngineInstance {
     }
 
     fn publish_image_parts(&mut self, memory: AddressSpace, image: ImageMetadata32) {
+        #[cfg(any(target_arch = "wasm32", test))]
+        self.revoke_cpu_read32_view();
         self.memory = Some(memory);
         self.image = Some(image);
+        #[cfg(any(target_arch = "wasm32", test))]
+        self.reset_cpu_read32_view();
     }
 }
 
@@ -295,6 +299,26 @@ impl EngineInstance {
 mod tests {
     use super::*;
     use crate::{loader::LoadError, memory::MemoryError};
+
+    #[test]
+    fn pristine_image_replacement_republishes_bases_with_no_admitted_epoch() {
+        let mut instance = EngineInstance::new(2, 7).unwrap();
+        instance.reset_cpu_read32_view();
+        let before = instance.cpu_read32_view;
+        let arena = instance.arena().to_vec();
+        let image = ImageMetadata32 {
+            image_base: 0x400000,
+            image_size: 4096,
+            entry_point: 0x400100,
+            mapped_pages: 0,
+        };
+        instance.publish_image_parts(AddressSpace::new(3).unwrap(), image);
+        assert_ne!(instance.cpu_read32_view, before);
+        assert_eq!(instance.cpu_read32_view_address(1), 0);
+        assert_eq!(instance.arena(), arena);
+        assert_eq!(instance.memory().unwrap().capacity_pages(), 3);
+        assert_eq!(instance.image, Some(image));
+    }
 
     #[test]
     fn failed_pristine_load_keeps_identity_and_exhausted_memory_version() {

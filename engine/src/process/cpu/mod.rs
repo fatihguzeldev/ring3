@@ -14,3 +14,5 @@ pub(super) mod x87;
 pub(super) mod xstate;
 
 mod fetch;
+#[cfg(any(target_arch = "wasm32", test))]
+pub(super) mod read_view;

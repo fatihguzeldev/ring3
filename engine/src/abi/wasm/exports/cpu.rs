@@ -3,6 +3,7 @@ export_process_calls! {
     cpu_read8(address: u32);
     cpu_read16(address: u32);
     cpu_read32(address: u32);
+    cpu_read32_view(epoch: i64);
     cpu_read(address: u32, length: u32, alignment: u32);
     cpu_write(address: u32, length: u32, alignment: u32);
     cpu_write_resident(key_low: u32, key_high: u32, id_low: u32, id_high: u32, address: u32, length: u32, alignment: u32);

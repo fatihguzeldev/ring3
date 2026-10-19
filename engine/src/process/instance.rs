@@ -142,6 +142,8 @@ pub struct EngineInstance {
     pub(in crate::process) ole32: Option<crate::process::windows::ole32::Ole32Runtime32>,
     pub(in crate::process) ole32_task_memory: crate::process::windows::ole32::Ole32TaskMemory32,
     pub(in crate::process) winmm: crate::process::windows::winmm::WinmmRuntime32,
+    #[cfg(any(target_arch = "wasm32", test))]
+    pub(in crate::process) cpu_read32_view: crate::process::cpu::read_view::CpuRead32View32,
 }
 
 impl EngineInstance {
@@ -150,6 +152,8 @@ impl EngineInstance {
             return Err(HostError::InvalidRequest);
         }
         let memory = AddressSpace::new(pages).map_err(HostError::Memory)?;
+        #[cfg(any(target_arch = "wasm32", test))]
+        let cpu_read32_view = crate::process::cpu::read_view::CpuRead32View32::for_memory(&memory);
         let mut arena = Vec::new();
         arena
             .try_reserve_exact(ARENA_SIZE)
@@ -240,6 +244,8 @@ impl EngineInstance {
             ole32: None,
             ole32_task_memory: Default::default(),
             winmm: Default::default(),
+            #[cfg(any(target_arch = "wasm32", test))]
+            cpu_read32_view,
         })
     }
 
@@ -265,6 +271,8 @@ impl EngineInstance {
     }
 
     pub fn close(&mut self) {
+        #[cfg(any(target_arch = "wasm32", test))]
+        self.revoke_cpu_read32_view();
         #[cfg(feature = "observability")]
         self.observer.finalize();
         self.console = crate::windows::console::ConsoleControl32::new();

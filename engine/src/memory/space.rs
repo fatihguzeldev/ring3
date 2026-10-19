@@ -131,6 +131,11 @@ impl AddressSpace {
         self.references.len() as u32
     }
 
+    #[cfg(any(target_arch = "wasm32", test))]
+    pub(crate) fn cpu_read_arrays(&self) -> (&[u32], &[Permissions], &[u8]) {
+        (&self.mappings, &self.permissions, &self.backing)
+    }
+
     pub fn mapped_pages(&self) -> u32 {
         self.capacity_pages() - self.free.len() as u32
     }
