@@ -1,4 +1,4 @@
-use super::{CacheRequest32, CacheRequestKind32};
+use super::CacheRequest32;
 use crate::{
     cpu::dbt::CompilationTier32,
     process::{EngineInstance, HostError},
@@ -10,13 +10,15 @@ impl EngineInstance {
         &mut self,
         key: u64,
     ) -> Result<Option<CacheRequest32>, HostError> {
+        #[cfg(feature = "observability")]
+        let _capture = self.observer.enter();
         self.guard_cache_control(key)?;
         let cache = self
             .execution_cache
             .as_ref()
             .ok_or(HostError::InvalidRequest)?;
         cache.can_request()?;
-        if cache.cohort.is_some() {
+        if cache.cohort.is_some() || cache.replacement.is_some() {
             return Err(HostError::Call(crate::process::CallError::Busy));
         }
         let pins = self.cache_pins()?;
@@ -46,50 +48,54 @@ impl EngineInstance {
                     std::cmp::Reverse(row.bytes),
                 )
             });
-        let Some((slot, row)) = candidate else {
+        let Some((_, row)) = candidate else {
             return Ok(None);
         };
-        let request = CacheRequest32 {
-            serial: cache.serial,
-            kind: CacheRequestKind32::Evict,
-            pc: row.entry,
-            unit_id: 0,
-            victim_id: row.id,
-            slot: slot as u32,
-            victim_slot: slot as u32,
-            tier: CompilationTier32::Optimized,
-        };
-        let coverage = registry
-            .plan_cached_cohort(
+        let pc = row.entry;
+        let installations = &self.resident_installations;
+        let by_id = &self.resident_installations_by_id;
+        let modules = &self.modules;
+        let callback = self.callback.as_ref();
+        let replacement = self
+            .resident
+            .as_mut()
+            .unwrap()
+            .prepare_cached_replacement(
                 memory,
-                crate::memory::GuestAddress(row.entry),
+                crate::memory::GuestAddress(pc),
                 cache.compile_limits,
+                key,
                 cs,
                 crate::cpu::x86::decode::DecodeAuthority::new(self.system_register_bank),
                 &|id| {
                     !pins.contains(&id)
-                        && self
-                            .resident_installation_by_id(id)
+                        && by_id
+                            .binary_search_by_key(&id, |installed| installed.unit_id)
+                            .ok()
+                            .map(|index| by_id[index])
                             .is_some_and(|installed| {
-                                cache.entries[installed.slot as usize]
-                                    .as_ref()
-                                    .is_some_and(|row| row.id == id)
+                                installations
+                                    .get(installed.slot as usize)
+                                    .copied()
+                                    .flatten()
+                                    == Some(installed)
+                                    && cache.entries[installed.slot as usize]
+                                        .as_ref()
+                                        .is_some_and(|row| row.id == id)
                             })
                 },
-                &|pc| {
-                    super::admission::cache_gate_at(&self.modules, self.callback.as_ref(), pc.0)
-                        .is_some()
-                },
+                &|pc| super::admission::cache_gate_at(modules, callback, pc.0).is_some(),
             )
             .map_err(HostError::Resident)?;
-        let plan = coverage
-            .map(|coverage| super::cohort::PromotionCohort32::new(self, row.entry, coverage))
-            .transpose()?;
-        let request = plan
-            .as_ref()
-            .map_or(request, |plan| plan.request(cache.serial));
+        let Some(replacement) = replacement else {
+            return Ok(None);
+        };
+        let plan = super::cohort::PromotionCohort32::new(self, pc, replacement.coverage())?;
+        let request = plan.request(self.execution_cache.as_ref().unwrap().serial);
         self.publish_cache_request(request, false)?;
-        self.execution_cache.as_mut().unwrap().cohort = plan;
+        let cache = self.execution_cache.as_mut().unwrap();
+        cache.cohort = Some(plan);
+        cache.replacement = Some(replacement);
         Ok(Some(request))
     }
 }

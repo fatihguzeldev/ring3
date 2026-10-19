@@ -1,5 +1,8 @@
 use super::types::CacheRequest32;
-use crate::cpu::dbt::{CompileLimits, RegistryError, RegistryLimits, validate_compile_limits};
+use crate::cpu::dbt::{
+    CompileLimits, PreparedResidentReplacement, RegistryError, RegistryLimits,
+    validate_compile_limits,
+};
 use crate::cpu::{dbt::CompilationTier32, x86::decode::CodeDecodeKey};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -27,6 +30,7 @@ pub(in crate::process) struct ExecutionCache32 {
     pub(super) request: Option<PendingCache32>,
     pub(super) promotion: Option<PromotionTarget32>,
     pub(super) cohort: Option<super::cohort::PromotionCohort32>,
+    pub(super) replacement: Option<PreparedResidentReplacement>,
     pub(super) serial: u64,
     pub(super) revision: u64,
     pub(super) clock: AtomicU64,
@@ -99,6 +103,7 @@ impl ExecutionCache32 {
             request: None,
             promotion: None,
             cohort: None,
+            replacement: None,
             serial: 1,
             revision: 0,
             clock: AtomicU64::new(0),

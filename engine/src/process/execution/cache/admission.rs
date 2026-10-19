@@ -40,6 +40,8 @@ impl EngineInstance {
             .ok_or(HostError::InvalidRequest)?;
         cache.can_request()?;
         let cs = self.code_fetch_context()?;
+        let staged = self.publish_promotion_replacement(pc, cs)?;
+        let cache = self.execution_cache.as_ref().unwrap();
         let memory = self.memory.as_ref().unwrap();
         let tier = cache
             .promotion
@@ -53,10 +55,14 @@ impl EngineInstance {
                 CompilationTier32::Optimized
             });
         let registry = self.resident.as_ref().unwrap();
-        let existing = match registry.lookup_bound(memory, GuestAddress(pc), cs) {
-            Ok(id) => Some(id.get()),
-            Err(RegistryError::NotFound { .. } | RegistryError::CodeInvalidated) => None,
-            Err(error) => return Err(HostError::Resident(error)),
+        let existing = if staged.is_some() {
+            staged
+        } else {
+            match registry.lookup_bound(memory, GuestAddress(pc), cs) {
+                Ok(id) => Some(id.get()),
+                Err(RegistryError::NotFound { .. } | RegistryError::CodeInvalidated) => None,
+                Err(error) => return Err(HostError::Resident(error)),
+            }
         };
         if let Some(id) = existing
             && let Some(installed) = self.resident_installation_by_id(id)
@@ -183,9 +189,9 @@ impl EngineInstance {
                 tier != CompilationTier32::Optimized || !coverage.covers(region)
             })
         {
-            // an emitted byte-limit fallback cannot claim to replace a whole cohort.
-            // already acknowledged owners remain absent; the normal cold path rebuilds them.
-            if existing.is_none() {
+            // prepared replacements were checked before retirement; retain this defensive
+            // publication invariant without discarding a reused external owner.
+            if staged.is_some() || existing.is_none() {
                 self.resident
                     .as_mut()
                     .unwrap()
@@ -209,7 +215,7 @@ impl EngineInstance {
             victim_slot: u32::MAX,
             tier,
         };
-        self.publish_cache_request(request, existing.is_none())?;
+        self.publish_cache_request(request, staged.is_some() || existing.is_none())?;
         #[cfg(feature = "observability")]
         ring3_observability::current().instant(
             ring3_observability::Level::Detailed,
@@ -222,7 +228,10 @@ impl EngineInstance {
                 ring3_observability::Field::unsigned("blocks", metadata.blocks as u64),
                 ring3_observability::Field::unsigned("instructions", metadata.instructions as u64),
                 ring3_observability::Field::unsigned("wasm_bytes", code_bytes as u64),
-                ring3_observability::Field::boolean("compiled", existing.is_none()),
+                ring3_observability::Field::boolean(
+                    "compiled",
+                    staged.is_some() || existing.is_none(),
+                ),
             ],
         );
         Ok(request)

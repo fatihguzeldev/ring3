@@ -2,7 +2,7 @@ use super::{context::PromotionTarget32, types::*};
 use crate::{
     cpu::{
         dbt::{COHORT_OWNERS, CompilationTier32, ResidentCohort},
-        x86::decode::CodeDecodeKey,
+        x86::decode::{CodeDecodeKey, CodeFetchContext},
     },
     process::{CallError, EngineInstance, HostError, ResidentInstallation},
 };
@@ -70,6 +70,23 @@ impl PromotionCohort32 {
         {
             return Err(HostError::Call(CallError::StateChanged));
         }
+        engine
+            .resident
+            .as_ref()
+            .unwrap()
+            .validate_cached_replacement(
+                memory,
+                cs,
+                cache
+                    .replacement
+                    .as_ref()
+                    .ok_or(HostError::InvalidArtifact)?,
+                &|pc| {
+                    super::admission::cache_gate_at(&engine.modules, engine.callback.as_ref(), pc.0)
+                        .is_some()
+                },
+            )
+            .map_err(|_| HostError::Call(CallError::StateChanged))?;
         let pins = engine.cache_pins()?;
         for owner in &self.owners[self.next..self.coverage.owner_count] {
             if engine.resident_installation_by_id(owner.unit_id) != Some(*owner) {
@@ -93,6 +110,65 @@ impl PromotionCohort32 {
 }
 
 impl EngineInstance {
+    pub(super) fn publish_promotion_replacement(
+        &mut self,
+        pc: u32,
+        cs: CodeFetchContext,
+    ) -> Result<Option<u64>, HostError> {
+        let cache = self.execution_cache.as_ref().unwrap();
+        if cache.replacement.is_none() {
+            return Ok(None);
+        }
+        if cache.promotion.is_none_or(|target| {
+            target.pc != pc
+                || target.version != self.memory.as_ref().unwrap().code_validation_version()
+                || target.decode_key != cs.decode_key()
+        }) {
+            self.abandon_promotion_cohort();
+            return Ok(None);
+        }
+        if self
+            .resident
+            .as_ref()
+            .unwrap()
+            .validate_cached_replacement(
+                self.memory.as_ref().unwrap(),
+                cs,
+                cache.replacement.as_ref().unwrap(),
+                &|pc| {
+                    super::admission::cache_gate_at(&self.modules, self.callback.as_ref(), pc.0)
+                        .is_some()
+                },
+            )
+            .is_err()
+        {
+            self.abandon_promotion_cohort();
+            return Err(HostError::Call(CallError::StateChanged));
+        }
+        let candidate = self
+            .execution_cache
+            .as_mut()
+            .unwrap()
+            .replacement
+            .take()
+            .unwrap();
+        let modules = &self.modules;
+        let callback = self.callback.as_ref();
+        let result = self.resident.as_mut().unwrap().publish_cached_replacement(
+            self.memory.as_ref().unwrap(),
+            cs,
+            candidate,
+            &|pc| super::admission::cache_gate_at(modules, callback, pc.0).is_some(),
+        );
+        match result {
+            Ok(id) => Ok(Some(id.get())),
+            Err(error) => {
+                self.abandon_promotion_cohort();
+                Err(HostError::Resident(error))
+            }
+        }
+    }
+
     pub(super) fn continue_promotion_cohort(
         &mut self,
         pc: u32,
@@ -136,15 +212,20 @@ impl EngineInstance {
         let cache = self.execution_cache.as_mut().unwrap();
         cache.cohort = None;
         cache.promotion = None;
+        cache.replacement = None;
     }
 
     pub(super) fn cancel_cohort_after_ack(&mut self, serial: u64) -> bool {
         let matches = self.execution_cache.as_ref().is_some_and(|cache| {
             cache.request.is_none()
-                && cache
+                && serial != 0
+                && (cache
                     .cohort
                     .as_ref()
-                    .is_some_and(|plan| serial != 0 && plan.last_serial == serial)
+                    .is_some_and(|plan| plan.last_serial == serial)
+                    || cache.replacement.is_some()
+                        && cache.promotion.is_some()
+                        && cache.serial.checked_sub(1) == Some(serial))
         });
         if matches {
             self.abandon_promotion_cohort();

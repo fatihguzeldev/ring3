@@ -82,6 +82,7 @@ impl ResidentCohort {
 
 impl ResidentRegistry {
     /// the live registry remains unchanged. Failed speculative coverage never authorizes retirement.
+    #[cfg(test)]
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn plan_cached_cohort(
         &self,
@@ -93,6 +94,23 @@ impl ResidentRegistry {
         eligible: &dyn Fn(u64) -> bool,
         is_gate: &dyn Fn(GuestAddress) -> bool,
     ) -> Result<Option<ResidentCohort>, RegistryError> {
+        Ok(self
+            .prepare_cached_cohort(memory, entry, limits, cs, authority, eligible, is_gate)?
+            .map(|(plan, _)| plan)
+            .filter(|plan| plan.owner_count > 1))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn prepare_cached_cohort(
+        &self,
+        memory: &AddressSpace,
+        entry: GuestAddress,
+        limits: CompileLimits,
+        cs: CodeFetchContext,
+        authority: crate::cpu::x86::decode::DecodeAuthority,
+        eligible: &dyn Fn(u64) -> bool,
+        is_gate: &dyn Fn(GuestAddress) -> bool,
+    ) -> Result<Option<(ResidentCohort, PreparedRegion)>, RegistryError> {
         self.check_memory(memory)?;
         let root = self.lookup_bound(memory, entry, cs)?;
         if !eligible(root.get()) {
@@ -133,7 +151,7 @@ impl ResidentRegistry {
         )
         .map_err(RegistryError::Compile)?;
         let plan = plan.into_inner();
-        Ok((plan.owner_count > 1 && plan.covers_prepared(&prepared)).then_some(plan))
+        Ok(plan.covers_prepared(&prepared).then_some((plan, prepared)))
     }
 }
 

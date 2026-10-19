@@ -154,6 +154,7 @@ impl EngineInstance {
         {
             cache.promotion = None;
         }
+        cache.replacement = None;
         cache.request = None;
         Ok(())
     }

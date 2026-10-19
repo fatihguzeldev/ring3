@@ -25,6 +25,21 @@ impl EntryIndex {
         &mut self,
         region: &CompiledRegion,
     ) -> Result<PreparedEntryPages, RegistryError> {
+        self.prepare_pages(region, false)
+    }
+
+    pub(super) fn prepare_replacement(
+        &mut self,
+        region: &CompiledRegion,
+    ) -> Result<PreparedEntryPages, RegistryError> {
+        self.prepare_pages(region, true)
+    }
+
+    fn prepare_pages(
+        &mut self,
+        region: &CompiledRegion,
+        replacement: bool,
+    ) -> Result<PreparedEntryPages, RegistryError> {
         let mut addresses = Vec::new();
         for address in region.executable_addresses() {
             addresses
@@ -45,28 +60,33 @@ impl EntryIndex {
             .iter()
             .filter(|&&page| self.find(page).is_err())
             .count();
+        let spares = if replacement { pages.len() } else { new_pages };
         self.pages
-            .try_reserve(new_pages)
+            .try_reserve(spares)
             .map_err(|_| RegistryError::Allocation)?;
         let mut additions = Vec::new();
         additions
-            .try_reserve_exact(new_pages)
+            .try_reserve_exact(spares)
             .map_err(|_| RegistryError::Allocation)?;
         for group in addresses.chunk_by(|a, b| a / PAGE_SIZE == b / PAGE_SIZE) {
             let page = group[0] / PAGE_SIZE;
             let entries = group.len();
             match self.find(page) {
-                Ok(index) => self.pages[index].reserve(entries)?,
-                Err(_) => {
-                    let mut entry = EntryPage {
-                        page,
-                        offsets: Vec::new(),
-                        units: Vec::new(),
-                    };
-                    entry.reserve(entries)?;
-                    additions.push(entry);
+                Ok(index) => {
+                    self.pages[index].reserve(entries)?;
+                    if !replacement {
+                        continue;
+                    }
                 }
+                Err(_) => {}
             }
+            let mut entry = EntryPage {
+                page,
+                offsets: Vec::new(),
+                units: Vec::new(),
+            };
+            entry.reserve(entries)?;
+            additions.push(entry);
         }
         // only capacities changed; abandoned preparation cannot publish candidates.
         Ok(PreparedEntryPages {
@@ -78,10 +98,9 @@ impl EntryIndex {
 
     pub(super) fn publish(&mut self, id: UnitId, prepared: PreparedEntryPages) -> Vec<u32> {
         for page in prepared.additions {
-            let index = self
-                .find(page.page)
-                .expect_err("prepared entry page is new");
-            self.pages.insert(index, page);
+            if let Err(index) = self.find(page.page) {
+                self.pages.insert(index, page);
+            }
         }
         for address in prepared.addresses {
             let index = self

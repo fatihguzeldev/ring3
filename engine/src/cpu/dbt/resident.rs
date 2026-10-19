@@ -21,7 +21,9 @@ pub(crate) use cohort::{COHORT_OWNERS, ResidentCohort};
 
 mod index;
 mod lookup;
+mod replacement;
 use index::{EntryIndex, PreparedEntryPages};
+pub(crate) use replacement::PreparedResidentReplacement;
 
 enum EmissionPolicy {
     WholeUnit(CompileLimits),
@@ -386,17 +388,46 @@ impl ResidentRegistry {
         region: &CompiledRegion,
         cs: Option<CodeFetchContext>,
     ) -> Result<usize, RegistryError> {
+        self.admit_after_retiring(memory, region, cs, &[])
+    }
+
+    fn admit_after_retiring(
+        &self,
+        memory: &AddressSpace,
+        region: &CompiledRegion,
+        cs: Option<CodeFetchContext>,
+        retired: &[u64],
+    ) -> Result<usize, RegistryError> {
         let bytes = region
             .wasm_bytes(memory)
             .map_err(|ArtifactError::CodeInvalidated| RegistryError::CodeInvalidated)?
             .len();
+        let removed = retired.iter().try_fold(0_usize, |total, &id| {
+            total
+                .checked_add(self.get_raw(memory, id)?.retained_wasm_byte_len())
+                .ok_or(RegistryError::InvalidLimits)
+        })?;
+        if self
+            .entries
+            .len()
+            .checked_sub(retired.len())
+            .and_then(|units| units.checked_add(1))
+            .is_none_or(|units| units > self.limits.units)
+        {
+            return Err(RegistryError::UnitCapacity);
+        }
         let wasm_bytes = self
             .wasm_bytes
+            .checked_sub(removed)
+            .ok_or(RegistryError::InvalidLimits)?
             .checked_add(bytes)
             .filter(|&total| total <= self.limits.wasm_bytes)
             .ok_or(RegistryError::ByteCapacity)?;
         for pc in region.executable_addresses() {
             for &id in self.entry_index.candidates(pc.0) {
+                if retired.contains(&id.get()) {
+                    continue;
+                }
                 let unit = &self.entries[self.unit_index(id.get())?];
                 if unit.region.matches_decode_key(region.decode_key())
                     && unit.region.contains_executable(pc.0)

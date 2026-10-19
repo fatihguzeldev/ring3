@@ -317,7 +317,7 @@ fn a_pinned_successor_remains_a_join_instead_of_becoming_a_retirement_victim() {
 }
 
 #[test]
-fn reused_uninstalled_owner_is_not_discarded_by_cohort_coverage_fallback() {
+fn publication_in_the_final_ack_gap_invalidates_only_the_unpublished_replacement() {
     let (mut engine, owners, _) = fixture();
     let mut request = engine.prepare_cache_promotion(KEY).unwrap().unwrap();
     for (index, _) in owners.iter().enumerate() {
@@ -330,9 +330,22 @@ fn reused_uninstalled_owner_is_not_discarded_by_cohort_coverage_fallback() {
     arena[140..148].copy_from_slice(&[0, 0x10, 0, 0, 0, 0, 0, 0]);
     let existing = engine.compile_resident_entries(1, 0).unwrap().get();
     let bytes = engine.resident_bytes(existing).unwrap().to_vec();
-    pin(&mut engine, existing);
+    assert_eq!(
+        engine.prepare_cache_entry(KEY, 0x1000),
+        Err(HostError::Call(CallError::StateChanged))
+    );
+    assert!(
+        engine
+            .execution_cache
+            .as_ref()
+            .unwrap()
+            .replacement
+            .is_none()
+    );
+    assert_eq!(engine.resident_bytes(existing).unwrap(), bytes);
     let install = engine.prepare_cache_entry(KEY, 0x1000).unwrap();
     assert_eq!(install.unit_id, existing);
     assert_eq!(install.tier, CompilationTier32::Baseline);
-    assert_eq!(engine.resident_bytes(existing).unwrap(), bytes);
 }
+
+mod transaction;
