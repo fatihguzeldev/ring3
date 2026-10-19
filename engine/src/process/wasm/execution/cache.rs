@@ -8,6 +8,7 @@ use crate::{
             encode_installation,
         },
     },
+    cpu::dbt::CompileLimits,
     process::{EngineInstance, ExecutionConfig32, wasm::mutate},
 };
 fn wide(low: u32, high: u32) -> u64 {
@@ -29,6 +30,28 @@ pub(crate) fn configure_execution(units: u32, wasm_bytes: u32, promotion_hits: u
             wasm_bytes,
             promotion_hits,
         })
+    })
+}
+pub(crate) fn configure_execution_with_limits(
+    units: u32,
+    wasm_bytes: u32,
+    promotion_hits: u32,
+    unit_instructions: u32,
+    unit_wasm_bytes: u32,
+) -> u32 {
+    mutate(|instance| {
+        instance.configure_execution_with_limits(
+            ExecutionConfig32 {
+                units,
+                wasm_bytes,
+                promotion_hits,
+            },
+            CompileLimits {
+                instructions: unit_instructions as usize,
+                wasm_bytes: unit_wasm_bytes as usize,
+                ..CompileLimits::default()
+            },
+        )
     })
 }
 pub(crate) fn prepare_cache_entry(low: u32, high: u32, pc: u32) -> u32 {

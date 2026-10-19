@@ -153,7 +153,7 @@ fn limits_and_structural_seeds_are_checked_before_guest_fetch() {
             ..CompileLimits::default()
         },
         CompileLimits {
-            instructions: 65,
+            instructions: 129,
             ..CompileLimits::default()
         },
         CompileLimits {
@@ -161,7 +161,7 @@ fn limits_and_structural_seeds_are_checked_before_guest_fetch() {
             ..CompileLimits::default()
         },
         CompileLimits {
-            wasm_bytes: 65537,
+            wasm_bytes: 131073,
             ..CompileLimits::default()
         },
     ] {

@@ -31,7 +31,7 @@ fn code_memory(pc: u32, bytes: &[u8]) -> AddressSpace {
 }
 
 #[test]
-fn default_limits_are_the_declared_hard_maxima() {
+fn default_limits_remain_eight_blocks_sixty_four_instructions_and_sixty_four_kib() {
     let limits = CompileLimits::default();
     assert_eq!(limits.blocks, 8);
     assert_eq!(limits.instructions, 64);
@@ -55,7 +55,7 @@ fn invalid_limits_are_rejected_before_reading_guest_code() {
             ..CompileLimits::default()
         },
         CompileLimits {
-            instructions: 65,
+            instructions: 129,
             ..CompileLimits::default()
         },
         CompileLimits {
@@ -63,8 +63,42 @@ fn invalid_limits_are_rejected_before_reading_guest_code() {
             ..CompileLimits::default()
         },
         CompileLimits {
-            wasm_bytes: 65537,
+            wasm_bytes: 131073,
             ..CompileLimits::default()
+        },
+    ] {
+        assert!(matches!(
+            prepare_region(&memory, &[spec(0x1000, 1)], limits),
+            Err(CompileError::InvalidLimits)
+        ));
+    }
+}
+
+#[test]
+fn explicit_supported_maxima_admit_one_hundred_twenty_eight_instructions() {
+    let memory = code_memory(0x1000, &[0x90; 129]);
+    let limits = CompileLimits {
+        blocks: 8,
+        instructions: 128,
+        wasm_bytes: 131072,
+    };
+    let blocks: Vec<_> = (0..8).map(|index| spec(0x1000 + index * 16, 16)).collect();
+    let prepared = prepare_region(&memory, &blocks, limits).unwrap();
+    assert_eq!(prepared.block_count(), 8);
+    assert_eq!(prepared.instruction_count(), 128);
+    assert!(prepared.is_current(&memory));
+    assert!(matches!(
+        prepare_region(&memory, &[spec(0x1000, 129)], limits),
+        Err(CompileError::InstructionLimit)
+    ));
+    for limits in [
+        CompileLimits {
+            instructions: usize::MAX,
+            ..limits
+        },
+        CompileLimits {
+            wasm_bytes: usize::MAX,
+            ..limits
         },
     ] {
         assert!(matches!(

@@ -1,5 +1,5 @@
 use super::types::CacheRequest32;
-use crate::cpu::dbt::{RegistryError, RegistryLimits};
+use crate::cpu::dbt::{CompileLimits, RegistryError, RegistryLimits, validate_compile_limits};
 use crate::cpu::{dbt::CompilationTier32, x86::decode::CodeDecodeKey};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -20,6 +20,7 @@ impl Default for ExecutionConfig32 {
 }
 pub(in crate::process) struct ExecutionCache32 {
     pub(super) config: ExecutionConfig32,
+    pub(super) compile_limits: CompileLimits,
     pub(super) entries: Vec<Option<CacheEntry32>>,
     pub(super) free_slots: super::slots::FreeSlots,
     pub(super) victims: super::victims::VictimIndex,
@@ -66,10 +67,19 @@ pub(super) fn increment(counter: &AtomicU64) -> u64 {
         .saturating_add(1)
 }
 impl ExecutionCache32 {
-    pub(super) fn new(config: ExecutionConfig32) -> Result<Self, RegistryError> {
+    pub(super) fn new(
+        config: ExecutionConfig32,
+        compile_limits: CompileLimits,
+    ) -> Result<Self, RegistryError> {
         if !(1..=RegistryLimits::MAX_UNITS as u32).contains(&config.units)
             || !(65_536..=RegistryLimits::MAX_WASM_BYTES as u32).contains(&config.wasm_bytes)
             || config.promotion_hits == 0
+        {
+            return Err(RegistryError::InvalidLimits);
+        }
+        if validate_compile_limits(compile_limits).is_err()
+            || compile_limits.blocks != CompileLimits::default().blocks
+            || compile_limits.wasm_bytes > config.wasm_bytes as usize
         {
             return Err(RegistryError::InvalidLimits);
         }
@@ -82,6 +92,7 @@ impl ExecutionCache32 {
         let victims = super::victims::VictimIndex::new(config.units as usize)?;
         Ok(Self {
             config,
+            compile_limits,
             entries,
             free_slots,
             victims,

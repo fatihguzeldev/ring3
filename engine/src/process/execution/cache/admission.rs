@@ -1,7 +1,7 @@
 use super::{context::PendingCache32, types::*};
 use crate::{
     cpu::{
-        dbt::{CompilationTier32, CompileLimits, RegistryError},
+        dbt::{CompilationTier32, RegistryError},
         x86::decode::DecodeAuthority,
     },
     memory::GuestAddress,
@@ -81,7 +81,7 @@ impl EngineInstance {
             && (usage.units >= cache.config.units as usize
                 || usage
                     .wasm_bytes
-                    .checked_add(CompileLimits::default().wasm_bytes)
+                    .checked_add(cache.compile_limits.wasm_bytes)
                     .is_none_or(|bytes| bytes > cache.config.wasm_bytes as usize));
         if free.is_none() || quota {
             let pins = self.cache_pins()?;
@@ -150,7 +150,7 @@ impl EngineInstance {
                     memory,
                     GuestAddress(pc),
                     gate,
-                    CompileLimits::default(),
+                    cache.compile_limits,
                     key,
                     cs,
                     DecodeAuthority::new(self.system_register_bank),

@@ -1,11 +1,21 @@
 use super::{ExecutionCache32, ExecutionConfig32};
 use crate::{
-    cpu::dbt::{ResidentRegistry, emit_dispatcher_with_capacity},
+    cpu::dbt::{CompileLimits, ResidentRegistry, emit_dispatcher_with_capacity},
     process::{CallError, EngineInstance, HostError},
 };
 
 impl EngineInstance {
     pub fn configure_execution(&mut self, config: ExecutionConfig32) -> Result<(), HostError> {
+        self.configure_execution_with_limits(config, CompileLimits::default())
+    }
+
+    /// configures cache-only unit formation atomically before any execution material exists.
+    /// manual compilation retains its default limits; cache units keep the default block bound.
+    pub fn configure_execution_with_limits(
+        &mut self,
+        config: ExecutionConfig32,
+        compile_limits: CompileLimits,
+    ) -> Result<(), HostError> {
         self.memory()?;
         if self.execution_cache.is_some()
             || self.artifact.is_some()
@@ -16,7 +26,7 @@ impl EngineInstance {
             return Err(HostError::Call(CallError::Busy));
         }
         self.guard_detection_material_change()?;
-        let cache = ExecutionCache32::new(config).map_err(HostError::Resident)?;
+        let cache = ExecutionCache32::new(config, compile_limits).map_err(HostError::Resident)?;
         let registry =
             ResidentRegistry::new(self.memory.as_ref().unwrap(), cache.registry_limits())
                 .map_err(HostError::Resident)?;

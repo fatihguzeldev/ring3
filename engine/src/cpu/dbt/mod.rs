@@ -24,6 +24,7 @@ pub use artifact::{
 pub use cold::prepare_entry_region;
 pub use gate::GateSpec;
 
+pub(crate) use region::validate_limits as validate_compile_limits;
 pub use region::{
     BlockSpec, CompileError, CompileLimits, InstructionError, PreparedRegion, prepare_region,
 };

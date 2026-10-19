@@ -136,7 +136,7 @@ fn explicit_byte_ceiling_keeps_empty_usage_defaults_and_per_unit_limits() {
             &memory,
             &[],
             CompileLimits {
-                wasm_bytes: 65_537,
+                wasm_bytes: 131_073,
                 ..CompileLimits::default()
             },
         )
@@ -162,6 +162,8 @@ fn explicit_byte_ceiling_keeps_empty_usage_defaults_and_per_unit_limits() {
         assert_eq!(engine.resident_installations.len(), 1);
     }
 }
+
+mod limits;
 
 #[test]
 fn registry_rejects_over_ceiling_and_extreme_byte_requests() {

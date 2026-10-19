@@ -14,8 +14,10 @@ use crate::{
 use super::gate::{self, GateSpec, PreparedGate};
 
 pub(super) const MAX_BLOCKS: usize = 8;
-const MAX_INSTRUCTIONS: usize = 64;
-const MAX_WASM_BYTES: usize = 65_536;
+pub(super) const MAX_INSTRUCTIONS: usize = 128;
+const MAX_WASM_BYTES: usize = 131_072;
+const DEFAULT_INSTRUCTIONS: usize = 64;
+const DEFAULT_WASM_BYTES: usize = 65_536;
 pub(super) const GUEST_END: u64 = 1 << 32;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -35,8 +37,8 @@ impl Default for CompileLimits {
     fn default() -> Self {
         Self {
             blocks: MAX_BLOCKS,
-            instructions: MAX_INSTRUCTIONS,
-            wasm_bytes: MAX_WASM_BYTES,
+            instructions: DEFAULT_INSTRUCTIONS,
+            wasm_bytes: DEFAULT_WASM_BYTES,
         }
     }
 }
@@ -339,7 +341,7 @@ pub(super) fn strict_instruction(
     }
 }
 
-pub(super) fn validate_limits(limits: CompileLimits) -> Result<(), CompileError> {
+pub(crate) fn validate_limits(limits: CompileLimits) -> Result<(), CompileError> {
     if limits.blocks == 0
         || limits.blocks > MAX_BLOCKS
         || limits.instructions == 0

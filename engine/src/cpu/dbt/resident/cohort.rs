@@ -2,7 +2,7 @@ use super::*;
 use std::cell::RefCell;
 
 pub(crate) const COHORT_OWNERS: usize = 8;
-pub(crate) const COHORT_INSTRUCTIONS: usize = 64;
+pub(crate) const COHORT_INSTRUCTIONS: usize = super::super::region::MAX_INSTRUCTIONS;
 
 /// exact instruction starts of whole owners, captured before any destructive acknowledgement.
 #[derive(Clone, Copy)]

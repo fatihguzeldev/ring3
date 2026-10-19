@@ -1,5 +1,6 @@
 export_process_calls! {
  configure_execution(units:u32,wasm_bytes:u32,promotion_hits:u32);
+ configure_execution_with_limits(units:u32,wasm_bytes:u32,promotion_hits:u32,unit_instructions:u32,unit_wasm_bytes:u32);
  prepare_cache_entry(low:u32,high:u32,pc:u32);
  pending_cache_request();
  prepare_cache_promotion(low:u32,high:u32);

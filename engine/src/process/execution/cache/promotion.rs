@@ -63,7 +63,7 @@ impl EngineInstance {
             .plan_cached_cohort(
                 memory,
                 crate::memory::GuestAddress(row.entry),
-                crate::cpu::dbt::CompileLimits::default(),
+                cache.compile_limits,
                 cs,
                 crate::cpu::x86::decode::DecodeAuthority::new(self.system_register_bank),
                 &|id| {
