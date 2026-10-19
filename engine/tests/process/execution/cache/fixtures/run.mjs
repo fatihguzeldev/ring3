@@ -41,7 +41,9 @@ function request(e) {
   return {serial: v.getBigUint64(at + 16, true), kind: v.getUint32(at + 24, true), pc: v.getUint32(at + 28, true), id: v.getBigUint64(at + 32, true), victim: v.getBigUint64(at + 40, true), slot: v.getUint32(at + 48, true), victimSlot: v.getUint32(at + 52, true), tier: v.getUint32(at + 56, true)};
 }
 function fresh(label) {
-  const instance = new WebAssembly.Instance(engine.module, {});
+  const instance = new WebAssembly.Instance(engine.module, {
+    ring3_observability: { now_ns: () => 0n },
+  });
   const api = Object.fromEntries(Object.entries(instance.exports).filter(([name, fn]) => name.startsWith('ring3_abi_v1_') && typeof fn === 'function').map(([name, fn]) => [name.slice(13), fn]));
   const e = {api, memory: instance.exports.memory, label, table: new WebAssembly.Table({element: 'anyfunc', initial: 16, maximum: 16})};
   ok(e, 'open', 16, low(KEY), high(KEY));

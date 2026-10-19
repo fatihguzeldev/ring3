@@ -176,13 +176,13 @@ function fuse(context) {
     a = e.install(0x1000),
     old = e.material(side.id);
   const request = e.promotion();
-  assert.equal(request.victim, a.id);
-  e.acknowledge(request);
-  e.install(a.pc);
+  assert.equal(e.transfer(64).getUint32(12, true), 0);
+  assert.equal(request.victim, 0n);
+  preserve(e, a);
   assert.deepEqual(e.find(0x1100), { status: 0, id: side.id, slot: side.slot });
   assert.equal(e.material(side.id).pointer, old.pointer);
   assert.equal(e.material(side.id).sha256, old.sha256);
-  assert.equal(e.usage().evictions, 1n);
+  assert.equal(e.usage().evictions, 0n);
   cases.push({ label: "disconnected-side-entry-preserved" });
   e.close();
 }
