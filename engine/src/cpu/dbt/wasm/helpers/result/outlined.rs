@@ -33,6 +33,7 @@ const OUTPUTS: [u32; 8] = [
 #[cfg(test)]
 thread_local! {
     static EMITTED_READ32_SITES: core::cell::Cell<usize> = const { core::cell::Cell::new(0) };
+    static EMITTED_WRITE32_SITES: core::cell::Cell<usize> = const { core::cell::Cell::new(0) };
 }
 
 #[cfg(test)]
@@ -45,11 +46,29 @@ fn take_read32_sites() -> usize {
     EMITTED_READ32_SITES.with(|sites| sites.replace(0))
 }
 
+#[cfg(test)]
+pub(super) fn record_write32_site() {
+    EMITTED_WRITE32_SITES.with(|sites| sites.set(sites.get() + 1));
+}
+
+#[cfg(test)]
+fn take_write32_sites() -> usize {
+    EMITTED_WRITE32_SITES.with(|sites| sites.replace(0))
+}
+
 pub(in crate::cpu::dbt::wasm) fn call(code: &mut InstructionSink<'_>, index: u32, exit_depth: u32) {
     call_span(code, index, exit_depth, 0);
 }
 
 pub(in crate::cpu::dbt::wasm) fn call_read32(
+    code: &mut InstructionSink<'_>,
+    index: u32,
+    exit_depth: u32,
+) {
+    call_span(code, index, exit_depth, 4);
+}
+
+pub(in crate::cpu::dbt::wasm) fn call_write32(
     code: &mut InstructionSink<'_>,
     index: u32,
     exit_depth: u32,
@@ -109,14 +128,18 @@ fn call_span(code: &mut InstructionSink<'_>, index: u32, exit_depth: u32, length
 }
 
 pub(in crate::cpu::dbt::wasm) fn build_function() -> Function {
-    build_span_function(0, 0)
+    build_span_function(0, 0, false)
 }
 
 pub(in crate::cpu::dbt::wasm) fn build_read32_function() -> Function {
-    build_span_function(4, 1)
+    build_span_function(4, 1, false)
 }
 
-fn build_span_function(length: u32, access: u32) -> Function {
+pub(in crate::cpu::dbt::wasm) fn build_write32_function() -> Function {
+    build_span_function(4, 2, true)
+}
+
+fn build_span_function(length: u32, access: u32, allow_smc: bool) -> Function {
     // parameters occupy 0..12; the validator uses the existing canonical locals through 26.
     // every destination is outside the parameter range, so rebinding cannot clobber an input.
     let mut function = Function::new([(ADDRESS + 1 - INPUTS.len() as u32, ValType::I32)]);
@@ -129,7 +152,7 @@ fn build_span_function(length: u32, access: u32) -> Function {
         &mut code,
         length,
         access,
-        false,
+        allow_smc,
         Validation::Ordinary { mask: None },
         0,
         ResultContext {
@@ -137,6 +160,7 @@ fn build_span_function(length: u32, access: u32) -> Function {
             paging_access_mask: None,
             zero_span_validator: None,
             x87_read32_validator: None,
+            x87_write32_validator: None,
         },
     );
     code.end();

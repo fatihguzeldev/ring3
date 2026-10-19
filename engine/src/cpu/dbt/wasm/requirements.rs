@@ -30,6 +30,7 @@ pub(in crate::cpu::dbt::wasm) struct ModuleRequirements {
     pub(in crate::cpu::dbt::wasm) has_segment_check: bool,
     pub(in crate::cpu::dbt::wasm) has_zero_span_validator: bool,
     pub(in crate::cpu::dbt::wasm) has_x87_read32_validator: bool,
+    pub(in crate::cpu::dbt::wasm) has_x87_write32_validator: bool,
     pub(in crate::cpu::dbt::wasm) has_read32_validator: bool,
     pub(in crate::cpu::dbt::wasm) upper_xstate: bool,
 }
@@ -232,6 +233,21 @@ impl ModuleRequirements {
             })
             .sum();
         let has_x87_read32_validator = paging_configured && x87_read32_sites >= 2;
+        let has_x87_write32_validator = has_x87
+            && paging_configured
+            && blocks
+                .iter()
+                .flat_map(|block| &block.instructions)
+                .map(|instruction| match instruction.operation() {
+                    Operation::X87 {
+                        operation, waiting, ..
+                    } if operation.write_size() == 4 && operation.read_size() == 0 => {
+                        1 + usize::from(*waiting)
+                    }
+                    _ => 0,
+                })
+                .sum::<usize>()
+                >= 2;
         // register x87 operations emit the same ordinary result checks at each helper site.
         // other modules retain their current layout without an unused local function.
         let has_zero_span_validator = has_x87
@@ -268,6 +284,7 @@ impl ModuleRequirements {
             has_segment_check,
             has_zero_span_validator,
             has_x87_read32_validator,
+            has_x87_write32_validator,
             has_read32_validator,
             upper_xstate,
         }

@@ -10,6 +10,7 @@ pub(in crate::cpu::dbt::wasm) struct Imports {
     pub(in crate::cpu::dbt::wasm) segment_check: Option<u32>,
     pub(in crate::cpu::dbt::wasm) zero_span_validator: Option<u32>,
     pub(in crate::cpu::dbt::wasm) x87_read32_validator: Option<u32>,
+    pub(in crate::cpu::dbt::wasm) x87_write32_validator: Option<u32>,
     pub(in crate::cpu::dbt::wasm) scalar_read32_validator: Option<u32>,
     pub(in crate::cpu::dbt::wasm) code_fetch_limit: Option<u32>,
     pub(in crate::cpu::dbt::wasm) stack_execute: Option<HelperBinding>,

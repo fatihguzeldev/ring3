@@ -141,7 +141,9 @@ pub(in crate::cpu::dbt::wasm) fn build(
         );
     }
     let ordinary_validator_type = fetch_fault_type + u32::from(plan.needs_fetch_paging);
-    let has_ordinary_validator = plan.has_zero_span_validator || plan.has_x87_read32_validator;
+    let has_ordinary_validator = plan.has_zero_span_validator
+        || plan.has_x87_read32_validator
+        || plan.has_x87_write32_validator;
     if has_ordinary_validator {
         types.ty().function([ValType::I32; 12], [ValType::I32; 8]);
     }

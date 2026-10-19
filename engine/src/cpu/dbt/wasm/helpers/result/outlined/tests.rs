@@ -13,8 +13,9 @@ use wasm_encoder::{
 };
 
 mod read32;
+mod write32;
 
-fn wrapper(outlined: bool, read32: bool) -> Function {
+fn wrapper(outlined: bool, length: u32, access: u32, allow_smc: bool) -> Function {
     let mut function = Function::new([(ADDRESS + 1 - INPUTS.len() as u32, ValType::I32)]);
     let mut code = function.instructions();
     for (parameter, local) in INPUTS.into_iter().enumerate().skip(1) {
@@ -22,18 +23,19 @@ fn wrapper(outlined: bool, read32: bool) -> Function {
     }
     // parameter 1 has already been copied to HELPER_STATUS and now witnesses the exit branch.
     code.i32_const(0).local_set(1).block(BlockType::Empty);
-    let emit = if read32 { validate_x87 } else { validate };
+    let emit = if length == 0 { validate } else { validate_x87 };
     emit(
         &mut code,
-        if read32 { 4 } else { 0 },
-        u32::from(read32),
-        false,
+        length,
+        access,
+        allow_smc,
         0,
         ResultContext {
             paging_configured: true,
             paging_access_mask: None,
             zero_span_validator: outlined.then_some(2),
             x87_read32_validator: outlined.then_some(2),
+            x87_write32_validator: outlined.then_some(2),
         },
     );
     code.i32_const(1).local_set(1).end();
@@ -45,6 +47,10 @@ fn wrapper(outlined: bool, read32: bool) -> Function {
 }
 
 fn differential_module(read32: bool) -> Vec<u8> {
+    differential_span_module(if read32 { 4 } else { 0 }, u32::from(read32), false)
+}
+
+fn differential_span_module(length: u32, access: u32, allow_smc: bool) -> Vec<u8> {
     let mut module = Module::new();
     let mut types = TypeSection::new();
     types.ty().function([ValType::I32; 12], [ValType::I32; 9]);
@@ -92,8 +98,8 @@ fn differential_module(read32: bool) -> Vec<u8> {
     exports.export("slowCalls", ExportKind::Global, 3);
     module.section(&exports);
     let mut bodies = CodeSection::new();
-    bodies.function(&wrapper(false, read32));
-    bodies.function(&wrapper(true, read32));
+    bodies.function(&wrapper(false, length, access, allow_smc));
+    bodies.function(&wrapper(true, length, access, allow_smc));
     let mut counted = Function::new([]);
     let mut code = counted.instructions();
     code.global_get(3).i32_const(1).i32_add().global_set(3);
@@ -102,11 +108,7 @@ fn differential_module(read32: bool) -> Vec<u8> {
     }
     code.call(3).end();
     bodies.function(&counted);
-    bodies.function(&if read32 {
-        build_read32_function()
-    } else {
-        build_function()
-    });
+    bodies.function(&build_span_function(length, access, allow_smc));
     module.section(&bodies);
     module.finish()
 }
@@ -167,6 +169,7 @@ fn zero_span_outline_requires_the_exact_contract_and_an_available_local_function
             paging_access_mask: intent,
             zero_span_validator: has_helper.then_some(42),
             x87_read32_validator: has_helper.then_some(43),
+            x87_write32_validator: has_helper.then_some(44),
         };
         let mut actual = Function::new([(36, ValType::I32)]);
         let mut retained = Function::new([(36, ValType::I32)]);

@@ -33,6 +33,7 @@ fn read32_outline_requires_the_x87_ordinary_read_contract() {
             paging_access_mask: intent,
             zero_span_validator: None,
             x87_read32_validator: has_helper.then_some(42),
+            x87_write32_validator: None,
         };
         let mut actual = Function::new([(36, ValType::I32)]);
         let mut retained = Function::new([(36, ValType::I32)]);
@@ -59,6 +60,7 @@ fn read32_outline_requires_the_x87_ordinary_read_contract() {
         paging_access_mask: None,
         zero_span_validator: None,
         x87_read32_validator: Some(42),
+        x87_write32_validator: None,
     };
     let mut ordinary = Function::new([(36, ValType::I32)]);
     let mut retained = Function::new([(36, ValType::I32)]);
