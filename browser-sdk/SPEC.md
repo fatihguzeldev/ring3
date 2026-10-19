@@ -9,13 +9,19 @@ not a claim of full game compatibility or a stable released SDK.
 
 - The same owned Max Payne v1.01 installation reached its menu and tutorial in
   the locally built pinned reference. Movement and firing worked. Its displayed
-  69–76 FPS measured guest Present submissions; audio, saves, long play and GPU
-  completion remain unverified.
+  69–76 FPS measured guest Present submissions; this was a short observation.
 - The SDK vertical acceptance then opened that same bundle, observed tutorial
   movement and ammo 18→17 at displayed 67–85 FPS, acknowledged actual CPU pause
   and resume, and successfully stopped and removed the frame. Closed-session
   calls rejected. This remains a short local observation, not a compatibility
   guarantee or a game-speed ratio against the old engine.
+- A manual save in the normal prologue survived a graceful SDK stop and a new
+  session: loading that slot restored the saved doorway position rather than the
+  later unsaved entrance position, and movement continued into the next sequence.
+- Audio status showed initially zero then positive master input, progressing
+  render frames and source cursors, stable context time/frames while paused, and
+  renewed progress after resume. This establishes digital signal/lifecycle
+  behavior, not audible quality, fresh PCM production or long-play stability.
 - The first embedding uses the same origin for the host and runtime frame. The
   host supplies a private, reachable bundle URL; game payloads are never committed.
 - BottleShip's CPU, Win32, renderer, audio and filesystem remain together. Its
@@ -41,6 +47,15 @@ ExitProcess or a flush of private guest CRT buffers. A failed drain must remain
 a failure and retain the session for retry or explicit forced disposal. A
 previously lost file write cannot be reconstructed by retrying a barrier. No arbitrary
 worker evaluation or translation through the old Ring3 CPU/Win32 ABI is used.
+
+Status and lifecycle replies include a cold audio snapshot: context state/time,
+volume/mute, reported worklet versions, existing signal counters and at most 32
+buffer-control or encoded-source rows per list. Reads do not create a context,
+control playback, reset counters or scan PCM. Missing signal storage is null.
+Fields are individually atomic, not a coherent transaction; compare only the
+same document and registration. Counters wrap at 32 bits. Master peak is a
+lifetime maximum before the limiter, and advancing frames may contain silence.
+Streaming starvation counts source-block episodes, not browser/device underruns.
 
 ## Structure and commands
 
@@ -82,7 +97,9 @@ const state = await runtime.status();
 4. In the browser, launch the same private Max Payne bundle through the facade;
    observe menu, tutorial movement and firing.
 5. Verify pause/resume and stop from the host; confirm the frame is removed and
-   the old session cannot resume. Keep save/audio acceptance explicitly open.
+   the old session cannot resume. Exercise a real save in a new session, then
+   verify audio signal progress and pause/resume/stop through status. Audible
+   quality, extended play and broader game compatibility remain separate gates.
 
 Always keep work scoped, record actual results and preserve upstream notices.
 Never publish game data, bypass failed lifecycle acknowledgments, silently drop

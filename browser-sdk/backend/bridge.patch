@@ -1,5 +1,5 @@
 diff --git a/src/app/App.tsx b/src/app/App.tsx
-index 1b4b651..7c36cb2 100644
+index 1b4b651..1265362 100644
 --- a/src/app/App.tsx
 +++ b/src/app/App.tsx
 @@ -1,5 +1,6 @@
@@ -9,7 +9,16 @@ index 1b4b651..7c36cb2 100644
  import { ChildSessionSurface } from './child-session-surface';
  import { cx } from "../ui/cx";
  import s from "./App.module.css";
-@@ -487,6 +488,7 @@ export default function App() {
+@@ -182,6 +183,8 @@ let capturePending: { resolve: (blob: Blob) => void; reject: (err: Error) => voi
+ let statsPending: { resolve: (stats: Record<string, number>) => void; reject: (err: Error) => void } | null = null;
+ let verboseLogPending: { resolve: (text: string) => void; reject: (err: Error) => void } | null = null;
+ let audioEngine: AudioEngine | null = null;
++let reportedAudioFailures = 0;
++let lastReportedAudioFailure: { id: number; error: string } | null = null;
+ let isRecording = false;
+ let recordStart = 0;
+ let recordedInputs: InputSample[] = [];
+@@ -487,6 +490,7 @@ export default function App() {
    // toggling pause does NOT tear down and recreate the whole worker/input/audio
    // effect (see the core-I/O effect's deps) — only this cheap sync effect runs.
    const isPausedRef = useRef(false);
@@ -17,7 +26,7 @@ index 1b4b651..7c36cb2 100644
  
    // Patch helper: SettingsDrawer (and the old controls) hand back partial UiSettings updates.
    const handleUiChange = useCallback((patch: Partial<UiSettings>) => {
-@@ -803,6 +805,7 @@ export default function App() {
+@@ -803,6 +807,7 @@ export default function App() {
    // re-running the monolithic worker/input/audio setup.
    useEffect(() => {
      isPausedRef.current = isPaused;
@@ -25,7 +34,18 @@ index 1b4b651..7c36cb2 100644
    }, [isPaused]);
  
    // Push the display pacing policy to the worker on change and once the worker is ready.
-@@ -1277,6 +1280,7 @@ export default function App() {
+@@ -1223,6 +1228,10 @@ export default function App() {
+       }
+     };
+     audioEngine.onStatusChange = (id: number, status: "started" | "error", error?: string) => {
++      if (status === "error") {
++        reportedAudioFailures++;
++        lastReportedAudioFailure = { id, error: String(error ?? "Unknown error").slice(0, 512) };
++      }
+       if (globalWorker) {
+         if (status === "started") {
+           globalWorker.postMessage({ type: "audio_started", id });
+@@ -1277,6 +1286,7 @@ export default function App() {
  
      // 3. Setup Worker Message Handling
      worker.onmessage = (event: MessageEvent) => {
@@ -33,11 +53,13 @@ index 1b4b651..7c36cb2 100644
        if (event.data?.type === 'child_session') {
          audioEngine?.stopAll();
          setExitInfo(null); exitInfoRef.current = null;
-@@ -2298,6 +2302,51 @@ export default function App() {
+@@ -2298,6 +2308,53 @@ export default function App() {
        }
      };
  
 +    runtimeBridgeRef.current = installRuntimeBridge({
++      audioStatus: () => ({ ...(audioEngine?.getStatus() ?? {}),
++        reportedPlaybackFailures: reportedAudioFailures, lastReportedPlaybackFailure: lastReportedAudioFailure }),
 +      launch: async (url, options) => {
 +        isPausedRef.current = false;
 +        setIsPaused(false);
@@ -85,7 +107,7 @@ index 1b4b651..7c36cb2 100644
      // A self re-exec from a loadApp(url) session (dev / harness / "?game=dev"): the reload
      // lands on a page that boots no game by itself, so replay the URL now that loadApp
      // exists. The worker already holds the launcher's command line (set_boot_args above);
-@@ -2561,6 +2610,8 @@ export default function App() {
+@@ -2561,6 +2618,8 @@ export default function App() {
      (window as any).clearVerboseLog = clearVerboseLog;
  
      return () => {
@@ -518,9 +540,10 @@ index 0278d1c..fb7a108 100644
          }
 diff --git a/src/app/runtime-bridge.ts b/src/app/runtime-bridge.ts
 new file mode 100644
+index 0000000..3c06bbf
 --- /dev/null
 +++ b/src/app/runtime-bridge.ts
-@@ -0,0 +1,154 @@
+@@ -0,0 +1,161 @@
 +const NS = "ring3.runtime.v1";
 +type Phase = "ready" | "loading" | "running" | "paused" | "stopped" | "error";
 +type Operation = "pause" | "resume" | "status" | "stop";
@@ -551,6 +574,7 @@ new file mode 100644
 +export function installRuntimeBridge(hooks: {
 +    launch(url: string, options: { preload: boolean; args?: string }): Promise<void>;
 +    control(operation: Operation): Promise<Facts>;
++    audioStatus?(): unknown;
 +    dispose(): void;
 +}) {
 +    const q = new URLSearchParams(location.search);
@@ -567,6 +591,10 @@ new file mode 100644
 +        phase: launched ? "loading" : "ready", paused: false, workerReady: false, firstPresent: false,
 +    };
 +    const save = () => sessionStorage.setItem(key, JSON.stringify({ sequence, launched }));
++    const readAudio = () => {
++        try { return hooks.audioStatus?.() ?? null; }
++        catch (error) { return { schema: 1, available: false, error: String(error).slice(0, 512) }; }
++    };
 +    const emit = (type: "ready" | "state") => {
 +        sequence++; save();
 +        window.parent.postMessage({ namespace: NS, type, session, generation, sequence, state: { ...state } }, location.origin);
@@ -610,6 +638,7 @@ new file mode 100644
 +                    if (presented && facts.paused === true && facts.running === false) { state.phase = "paused"; state.paused = true; }
 +                    else if (presented && facts.paused === false && facts.running === true) { state.phase = "running"; state.paused = false; }
 +                }
++                state.audio = readAudio();
 +                reply(m.id, true, { ...state });
 +            } else {
 +                if (stopCompleted) {
@@ -619,6 +648,7 @@ new file mode 100644
 +                    state.native = await hooks.control(m.method);
 +                    if (m.method === "stop") { stopCompleted = true; state.phase = "stopped"; state.paused = true; }
 +                    else { state.phase = m.method === "pause" ? "paused" : "running"; state.paused = m.method === "pause"; }
++                    state.audio = readAudio();
 +                    emit("state");
 +                }
 +                reply(m.id, true, { ...state });
@@ -677,6 +707,7 @@ new file mode 100644
 +}
 diff --git a/tools/tests/sdk-child-stop.test.ts b/tools/tests/sdk-child-stop.test.ts
 new file mode 100644
+index 0000000..ea583f1
 --- /dev/null
 +++ b/tools/tests/sdk-child-stop.test.ts
 @@ -0,0 +1,105 @@
@@ -787,6 +818,7 @@ new file mode 100644
 +});
 diff --git a/tools/tests/sdk-vfs-strict-stop.test.ts b/tools/tests/sdk-vfs-strict-stop.test.ts
 new file mode 100644
+index 0000000..1e732af
 --- /dev/null
 +++ b/tools/tests/sdk-vfs-strict-stop.test.ts
 @@ -0,0 +1,56 @@
@@ -848,6 +880,7 @@ new file mode 100644
 +});
 diff --git a/tools/tests/sdk-registry-strict-stop.test.ts b/tools/tests/sdk-registry-strict-stop.test.ts
 new file mode 100644
+index 0000000..3980219
 --- /dev/null
 +++ b/tools/tests/sdk-registry-strict-stop.test.ts
 @@ -0,0 +1,82 @@
@@ -935,6 +968,7 @@ new file mode 100644
 +});
 diff --git a/tools/tests/sdk-runtime-bridge-owner.test.ts b/tools/tests/sdk-runtime-bridge-owner.test.ts
 new file mode 100644
+index 0000000..b92d89d
 --- /dev/null
 +++ b/tools/tests/sdk-runtime-bridge-owner.test.ts
 @@ -0,0 +1,58 @@
@@ -995,4 +1029,234 @@ new file mode 100644
 +            else Reflect.deleteProperty(globalThis, name);
 +        });
 +    }
++});
+diff --git a/src/audio/audio-engine.ts b/src/audio/audio-engine.ts
+index f5cbd68..8060b73 100644
+--- a/src/audio/audio-engine.ts
++++ b/src/audio/audio-engine.ts
+@@ -1,6 +1,8 @@
+ import { BufferSource } from "@bottleship/formats/unpack/source";
+ import { probeAudio, sniffAudioContainer } from "@bottleship/formats/audio";
+ 
++import { readAudioSignalStats, readAudioBufferState } from "./audio-status";
++
+ export type AudioPlayPayload = {
+   id: number;
+   data: Float32Array;
+@@ -136,6 +138,12 @@ export class AudioEngine {
+   /** Which processors' "ready" handshake (see checkWorkletVersion) has arrived —
+    *  the set membership IS the check; armWorkletReadyTimeout reads absence from it. */
+   private workletReadyReceived: Set<"ring" | "master"> = new Set();
++  private workletReportedVersion: Record<"ring" | "master", number | null> = { ring: null, master: null };
++  private ringStats: Int32Array | null = null;
++  private masterStats: Int32Array | null = null;
++  private ringStatsRegistration = 0;
++  private masterStatsRegistration = 0;
++  private registeredBuffers = new Map<number, Int32Array>();
+   private masterVolume = 1;
+   private muted = false;
+   private ready: Promise<void> | null = null;
+@@ -275,6 +283,7 @@ export class AudioEngine {
+    *  code while every counter reads zero and nothing else in the app notices. */
+   private checkWorkletVersion(proc: "ring" | "master", version: unknown): void {
+     this.workletReadyReceived.add(proc);
++    this.workletReportedVersion[proc] = typeof version === "number" && Number.isFinite(version) ? version : null;
+     if (version !== AUDIO_WORKLET_VERSION) {
+       console.error(
+         `BottleShip: audio worklet '${proc}' processor reported version ${JSON.stringify(version)}, ` +
+@@ -518,10 +527,12 @@ export class AudioEngine {
+   async registerBuffer(id: number, sab: SharedArrayBuffer): Promise<void> {
+     await this.ensureReady();
+     if (!this.node) return;
++    this.registeredBuffers.set(id, new Int32Array(sab, 0, 64));
+     this.node.port.postMessage({ type: "register", id, sab });
+   }
+ 
+   unregisterBuffer(id: number): void {
++    this.registeredBuffers.delete(id);
+     if (!this.node) return;
+     this.node.port.postMessage({ type: "unregister", id });
+   }
+@@ -536,6 +547,10 @@ export class AudioEngine {
+   async registerStatsSab(sab: SharedArrayBuffer): Promise<void> {
+     await this.ensureReady();
+     if (!this.node) return;
++    if (this.ringStats?.buffer !== sab) {
++      this.ringStats = new Int32Array(sab, 0, 16);
++      this.ringStatsRegistration++;
++    }
+     this.node.port.postMessage({ type: "register_stats", sab });
+   }
+ 
+@@ -544,6 +559,10 @@ export class AudioEngine {
+   async registerMasterStatsSab(sab: SharedArrayBuffer): Promise<void> {
+     await this.ensureReady();
+     if (!this.masterLimiterNode) return;
++    if (this.masterStats?.buffer !== sab) {
++      this.masterStats = new Int32Array(sab, 0, 16);
++      this.masterStatsRegistration++;
++    }
+     this.masterLimiterNode.port.postMessage({ type: "register_master_stats", sab });
+   }
+ 
+@@ -561,6 +580,7 @@ export class AudioEngine {
+    *  loop a stale ring/encoded buffer forever. The worklet stays alive (renders
+    *  silence) so the next loaded game can register fresh sources. */
+   stopAll(): void {
++    this.registeredBuffers.clear();
+     this.pendingDecodes.clear();
+     this.sampleMeta.clear();
+     for (const id of Array.from(this.encodedSources.keys())) this.cleanupEncodedSource(id);
+@@ -596,6 +616,39 @@ export class AudioEngine {
+     }
+   }
+ 
++  // cold read only: do not create/resume a context, reset stats, or scan PCM.
++  getStatus() {
++    const ringBufferRows: ReturnType<typeof readAudioBufferState>[] = [];
++    for (const [id, ctrl] of this.registeredBuffers) {
++      if (ringBufferRows.length === 32) break;
++      ringBufferRows.push(readAudioBufferState(id, ctrl));
++    }
++    const encodedRows: { id: number; currentTimeSeconds: number; paused: boolean; ended: boolean; readyState: number; errorCode: number | null }[] = [];
++    for (const [id, source] of this.encodedSources) {
++      if (encodedRows.length === 32) break;
++      const e = source.element;
++      encodedRows.push({ id, currentTimeSeconds: e.currentTime, paused: e.paused, ended: e.ended,
++        readyState: e.readyState, errorCode: e.error?.code ?? null });
++    }
++    const ready = (proc: "ring" | "master") => ({ received: this.workletReadyReceived.has(proc),
++      reportedVersion: this.workletReportedVersion[proc], matched: this.workletReadyReceived.has(proc) && this.workletReportedVersion[proc] === AUDIO_WORKLET_VERSION });
++    return {
++      schema: 1 as const, capturedAtMs: performance.now(), documentTimeOriginMs: performance.timeOrigin,
++      activation: { hasBeenActive: typeof navigator === "undefined" ? null : navigator.userActivation?.hasBeenActive ?? null,
++        isActive: typeof navigator === "undefined" ? null : navigator.userActivation?.isActive ?? null },
++      context: { state: this.context?.state ?? "absent", currentTimeSeconds: this.context?.currentTime ?? null,
++        sampleRate: this.context?.sampleRate ?? null, userPaused: this.userPaused },
++      output: { volume: this.masterVolume, muted: this.muted },
++      worklets: { expectedVersion: AUDIO_WORKLET_VERSION, ring: ready("ring"), master: ready("master") },
++      ring: readAudioSignalStats(this.ringStats, this.ringStatsRegistration),
++      master: readAudioSignalStats(this.masterStats, this.masterStatsRegistration),
++      decoding: { pending: this.pendingDecodes.size, inflight: this.inflightDecodes.size },
++      sources: { registeredRingBuffers: this.registeredBuffers.size, ringBufferRows,
++        ringBufferRowsTruncated: this.registeredBuffers.size > ringBufferRows.length,
++        encodedCount: this.encodedSources.size, encodedRows, encodedRowsTruncated: this.encodedSources.size > encodedRows.length },
++    };
++  }
++
+   async pause(): Promise<void> {
+     // Mark intentional pause BEFORE suspend() so the statechange→suspended event
+     // (and any concurrent gesture) does not immediately auto-resume us.
+diff --git a/src/audio/audio-status.ts b/src/audio/audio-status.ts
+new file mode 100644
+index 0000000..6103679
+--- /dev/null
++++ b/src/audio/audio-status.ts
+@@ -0,0 +1,18 @@
++// diagnostic snapshots only: each field is atomic, the group is not a transaction.
++export function readAudioSignalStats(s: Int32Array | null, registration: number) {
++  if (!s) return null;
++  const u = (i: number) => Atomics.load(s, i) >>> 0;
++  return {
++    registration, counterBits: 32 as const,
++    processCalls: u(0), frames: u(1), activeRing: u(2), activeLegacy: u(10),
++    clipInputSamples: u(3), limitedInputSamples: u(4), peakInputMilli: u(5),
++    discontinuities: u(6), maxJumpMilli: u(7), underrunMid: u(8), starvedSourceBlocks: u(9),
++  };
++}
++
++export function readAudioBufferState(id: number, s: Int32Array) {
++  const u = (i: number) => Atomics.load(s, i) >>> 0;
++  return { id, playCursor: u(0), writeCursor: u(1), bufferBytes: u(2), channels: u(3),
++    sampleRate: u(4), bitsPerSample: u(5), blockAlign: u(6), state: u(7),
++    loopMode: Atomics.load(s, 8), frequency: u(11), dataLength: u(12), flags: u(14) };
++}
+diff --git a/tools/tests/sdk-audio-status.test.ts b/tools/tests/sdk-audio-status.test.ts
+new file mode 100644
+index 0000000..8297038
+--- /dev/null
++++ b/tools/tests/sdk-audio-status.test.ts
+@@ -0,0 +1,83 @@
++import { describe, expect, test } from "bun:test";
++import { AudioEngine } from "../../src/audio/audio-engine";
++import { readAudioSignalStats, readAudioBufferState } from "../../src/audio/audio-status";
++
++describe("read-only SDK audio snapshots", () => {
++  test("a cold status does not create or start an audio context", () => {
++    const engine = new AudioEngine();
++    const a = engine.getStatus();
++    const b = engine.getStatus();
++    expect(a.context).toEqual({ state: "absent", currentTimeSeconds: null, sampleRate: null, userPaused: false });
++    expect(b.context).toEqual(a.context);
++    expect(a.ring).toBeNull();
++    expect(a.master).toBeNull();
++    expect(a.sources.registeredRingBuffers).toBe(0);
++    expect(a.sources.encodedCount).toBe(0);
++  });
++
++  test("existing signal fields are unsigned snapshots without reset or mutation", () => {
++    const s = new Int32Array(new SharedArrayBuffer(64));
++    for (let i = 0; i < s.length; i++) Atomics.store(s, i, i + 1);
++    Atomics.store(s, 1, -1);
++    const before = Array.from(s);
++    const a = readAudioSignalStats(s, 9)!;
++    expect(a.registration).toBe(9);
++    expect(a.processCalls).toBe(1);
++    expect(a.frames).toBe(0xffffffff);
++    expect(a.peakInputMilli).toBe(6);
++    expect(a.underrunMid).toBe(9);
++    expect(a.starvedSourceBlocks).toBe(10);
++    expect(Array.from(s)).toEqual(before);
++    expect(readAudioSignalStats(null, 0)).toBeNull();
++    Atomics.store(s, 1, 12);
++    expect(a.frames).toBe(0xffffffff);
++  });
++
++  test("version readiness distinguishes a reply from a matched processor", () => {
++    const engine = new AudioEngine();
++    const internal = engine as unknown as { workletReadyReceived: Set<"ring" | "master">;
++      workletReportedVersion: Record<"ring" | "master", number | null> };
++    internal.workletReadyReceived.add("ring");
++    internal.workletReportedVersion.ring = 9;
++    internal.workletReportedVersion.master = 10;
++    const a = engine.getStatus();
++    expect(a.worklets.ring).toEqual({ received: true, reportedVersion: 9, matched: false });
++    expect(a.worklets.master).toEqual({ received: false, reportedVersion: 10, matched: false });
++    internal.workletReadyReceived.add("master");
++    expect(engine.getStatus().worklets.master.matched).toBe(true);
++  });
++
++  test("buffer control snapshots exclude PCM and preserve the producer controls", () => {
++    const s = new Int32Array(new SharedArrayBuffer(256));
++    for (let i = 0; i < s.length; i++) Atomics.store(s, i, i + 11);
++    Atomics.store(s, 8, -1);
++    const before = Array.from(s);
++    expect(readAudioBufferState(31, s)).toEqual({ id: 31, playCursor: 11, writeCursor: 12, bufferBytes: 13,
++      channels: 14, sampleRate: 15, bitsPerSample: 16, blockAlign: 17, state: 18, loopMode: -1, frequency: 22, dataLength: 23, flags: 25 });
++    expect(Array.from(s)).toEqual(before);
++  });
++
++  test("source rows are bounded and status reads do not call playback methods", () => {
++    const engine = new AudioEngine();
++    const internal = engine as unknown as {
++      registeredBuffers: Map<number, Int32Array>;
++      encodedSources: Map<number, { element: HTMLAudioElement }>;
++    };
++    for (let id = 1; id <= 40; id++) {
++      internal.registeredBuffers.set(id, new Int32Array(new SharedArrayBuffer(256)));
++      internal.encodedSources.set(id, { element: { currentTime: id, paused: false, ended: false,
++        readyState: 4, error: null, play() { throw new Error("status called play"); },
++        pause() { throw new Error("status called pause"); } } as unknown as HTMLAudioElement });
++    }
++    const a = engine.getStatus();
++    expect(a.sources.registeredRingBuffers).toBe(40);
++    expect(a.sources.ringBufferRows).toHaveLength(32);
++    expect(a.sources.ringBufferRowsTruncated).toBe(true);
++    expect(a.sources.encodedCount).toBe(40);
++    expect(a.sources.encodedRows).toHaveLength(32);
++    expect(a.sources.encodedRowsTruncated).toBe(true);
++    expect(a.sources.encodedRows[0]).toEqual({ id: 1, currentTimeSeconds: 1, paused: false, ended: false, readyState: 4, errorCode: null });
++    expect(internal.registeredBuffers.size).toBe(40);
++    expect(internal.encodedSources.size).toBe(40);
++  });
 +});
