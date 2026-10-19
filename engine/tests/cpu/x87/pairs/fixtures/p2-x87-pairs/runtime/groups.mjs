@@ -213,10 +213,14 @@ export function verifyGroups(make, observations) {
     ['count exceeds max', groupEnvelope(0, 5, 3)],
     ['reported outside group', groupEnvelope(0, 4, 4)],
     ['success without completed report', groupEnvelope(0, 3, 3)],
+    ['success skips reported instruction', groupEnvelope(0, 2, 0)],
+    ['failed packet claims reported completion', groupEnvelope(0, 2, 1), bytes => bytes.writeUInt32LE(1, 16)],
     ['original debug max exceeded', groupEnvelope(0, 4, 3), undefined, {flags: 0x302}],
     ['nonstore SMC', groupEnvelope(11, 4, 3)],
     ['malformed last packet', groupEnvelope(0, 4, 3), bytes => bytes.writeUInt32LE(39, 8), {}, 3],
+    ['malformed middle packet keeps reported PC', groupEnvelope(0, 2, 1), bytes => bytes.writeUInt32LE(39, 8), {}, 1],
     ['nonpacket stale success', groupEnvelope(7, 0, 0)],
+    ['nonpacket stale success keeps reported PC', groupEnvelope(7, 2, 2), undefined, {}, 2],
   ]) {
     const c = make(four);
     try {

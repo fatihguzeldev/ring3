@@ -5,7 +5,7 @@ use crate::cpu::dbt::{
 };
 use wasm_encoder::{BlockType, InstructionSink, ValType};
 
-pub(in crate::cpu::dbt::wasm) const INTEGER_LOCALS: u32 = 11;
+pub(in crate::cpu::dbt::wasm) const INTEGER_LOCALS: u32 = 12;
 
 #[derive(Clone, Copy)]
 pub(in crate::cpu::dbt::wasm) struct GroupLocals {
@@ -13,6 +13,7 @@ pub(in crate::cpu::dbt::wasm) struct GroupLocals {
     first_address: u32,
     completed: u32,
     reported_step: u32,
+    next_pc: u32,
     progress: u32,
 }
 
@@ -23,6 +24,7 @@ impl GroupLocals {
             first_address: first + 1,
             completed: first + 9,
             reported_step: first + 10,
+            next_pc: first + 11,
             progress: first + INTEGER_LOCALS,
         }
     }
@@ -116,7 +118,10 @@ pub(in crate::cpu::dbt::wasm) fn operation(
             .i32_eq()
             .if_(BlockType::Empty);
         select_step(code, *step, locals.address(index));
-        code.br(1).end();
+        code.i32_const(step.next_pc as i32)
+            .local_set(locals.next_pc)
+            .br(1)
+            .end();
     }
     code.end();
     validate_reported_packet(code, group, locals, imports);
@@ -125,17 +130,12 @@ pub(in crate::cpu::dbt::wasm) fn operation(
         .if_(BlockType::Empty)
         .local_get(locals.reported_step)
         .local_set(locals.completed)
-        .else_();
-    for (index, step) in group.steps().iter().enumerate() {
-        code.local_get(locals.completed)
-            .i32_const(index as i32 + 1)
-            .i32_eq()
-            .if_(BlockType::Empty)
-            .i32_const(step.next_pc as i32)
-            .local_set(EIP)
-            .end();
-    }
-    code.end()
+        .else_()
+        // valid success completes the reported instruction, including an early
+        // native stop whose reported instruction is the last completed prefix.
+        .local_get(locals.next_pc)
+        .local_set(EIP)
+        .end()
         .local_get(RETIRED)
         .local_get(locals.completed)
         .i32_add()
