@@ -32,6 +32,7 @@ pub struct CompiledRegion {
     bytes: Vec<u8>,
     entry_start: u32,
     entry_end: u32,
+    has_indexed_entry: bool,
     x87_pairs: Vec<[super::X87PairStep32; 2]>,
     x87_groups: Vec<X87GroupSpan32>,
 }
@@ -88,12 +89,18 @@ impl CompiledRegion {
                 });
             }
         }
+        // this describes final immutable ir, not current source or decode authority.
+        let has_indexed_entry = prepared
+            .blocks
+            .iter()
+            .any(|block| block.indexed_span().is_some());
         let mut region = Self {
             prepared,
             bytes,
             tier,
             entry_start: u32::MAX,
             entry_end: 0,
+            has_indexed_entry,
             x87_pairs,
             x87_groups,
         };
@@ -132,10 +139,7 @@ impl CompiledRegion {
         .descriptors(&block.instructions)
     }
     pub(crate) fn supports_indexed_entry(&self) -> bool {
-        self.prepared
-            .blocks
-            .iter()
-            .any(|block| block.indexed_span().is_some())
+        self.has_indexed_entry
     }
 
     pub(crate) fn decode_key(&self) -> CodeDecodeKey {
@@ -439,3 +443,7 @@ mod pair_tests;
 #[cfg(test)]
 #[path = "artifact/tests/groups.rs"]
 mod group_tests;
+
+#[cfg(test)]
+#[path = "artifact/tests/indexed/mod.rs"]
+mod indexed_tests;
