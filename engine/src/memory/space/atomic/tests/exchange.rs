@@ -175,6 +175,7 @@ fn exchange_uses_one_final_version_for_mixed_pages_and_identical_values() {
             expected.version = u64::MAX;
             if snapshots.iter().any(Option::is_some) {
                 expected.code_version = u64::MAX;
+                expected.source_version = u64::MAX;
             }
             assert_eq!(
                 space.exchange32(GuestAddress(0x1ffe), value),
@@ -332,6 +333,7 @@ fn final_byte_exchange_version_commits_once_for_identity_and_changed_values() {
                 expected.version = u64::MAX;
                 if consumed.is_some() {
                     expected.code_version = u64::MAX;
+                    expected.source_version = u64::MAX;
                 }
                 assert_eq!(space.exchange8(GuestAddress(address), value), Ok(0x5a));
                 assert_eq!(exchange_state(&space), expected);
@@ -566,6 +568,7 @@ fn word_exchange_uses_one_final_version_for_both_pages_and_identity_writes() {
             expected.version = u64::MAX;
             if snapshots.iter().any(Option::is_some) {
                 expected.code_version = u64::MAX;
+                expected.source_version = u64::MAX;
             }
             assert_eq!(space.exchange16(GuestAddress(0x1fff), value), Ok(0x3322));
             assert_eq!(exchange_state(&space), expected);

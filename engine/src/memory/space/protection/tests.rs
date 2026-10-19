@@ -14,6 +14,7 @@ struct Saved {
     identity: u64,
     version: u64,
     code_version: u64,
+    source_version: u64,
 }
 
 fn saved(space: &AddressSpace) -> Saved {
@@ -26,6 +27,7 @@ fn saved(space: &AddressSpace) -> Saved {
         identity: space.identity,
         version: space.version,
         code_version: space.code_validation_version(),
+        source_version: space.code_source_version(),
     }
 }
 

@@ -50,6 +50,7 @@ fn exchange_add_wrap_and_zero_source_use_one_final_version() {
             after.version = u64::MAX;
             if snapshots.iter().any(Option::is_some) {
                 after.code_version = u64::MAX;
+                after.source_version = u64::MAX;
             }
             assert_eq!(space.exchange_add32(GuestAddress(0x1ffe), source), Ok(old));
             assert_eq!(exchange_state(&space), after);
@@ -225,6 +226,7 @@ fn byte_exchange_add_wrap_and_zero_use_one_final_version() {
                 after.version = u64::MAX;
                 if consumed.is_some() {
                     after.code_version = u64::MAX;
+                    after.source_version = u64::MAX;
                 }
                 assert_eq!(space.exchange_add8(GuestAddress(address), source), Ok(old));
                 assert_eq!(exchange_state(&space), after);
@@ -345,6 +347,7 @@ fn word_exchange_add_wrap_and_zero_use_one_final_version() {
             after.version = u64::MAX;
             if snapshots.iter().any(Option::is_some) {
                 after.code_version = u64::MAX;
+                after.source_version = u64::MAX;
             }
             assert_eq!(
                 space.exchange_add16(GuestAddress(0x1fff), source),

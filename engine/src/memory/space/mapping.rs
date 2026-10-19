@@ -44,6 +44,12 @@ impl AddressSpace {
         self.validate_mapping_words(words)?;
         let version = self.advance_version()?;
         self.code_validation_version = version;
+        if pages
+            .iter()
+            .any(|page| page.permissions != Permissions::READ_WRITE)
+        {
+            self.code_source_version = version;
+        }
         for page in pages {
             let slot = self.free.pop().unwrap() as usize;
             let offset = slot * PAGE_SIZE as usize;
@@ -112,6 +118,7 @@ impl AddressSpace {
         }
         let version = self.advance_version()?;
         self.code_validation_version = version;
+        self.code_source_version = version;
         for word in words {
             self.copy_in_validated(word.address, &word.value.to_le_bytes(), version);
         }

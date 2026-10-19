@@ -52,6 +52,7 @@ fn atomic_or_changed_and_identity_use_one_final_version() {
             after.version = u64::MAX;
             if snapshots.iter().any(Option::is_some) {
                 after.code_version = u64::MAX;
+                after.source_version = u64::MAX;
             }
             assert_eq!(space.atomic_or_u32(GuestAddress(0x1ffe), mask), Ok(old));
             assert_eq!(exchange_state(&space), after);
@@ -239,6 +240,7 @@ fn atomic_and_changed_and_identity_use_one_final_version() {
             after.version = u64::MAX;
             if snapshots.iter().any(Option::is_some) {
                 after.code_version = u64::MAX;
+                after.source_version = u64::MAX;
             }
             assert_eq!(space.atomic_and_u32(GuestAddress(0x1ffe), mask), Ok(old));
             assert_eq!(exchange_state(&space), after);
@@ -426,6 +428,7 @@ fn atomic_xor_changed_and_identity_use_one_final_version() {
             after.version = u64::MAX;
             if snapshots.iter().any(Option::is_some) {
                 after.code_version = u64::MAX;
+                after.source_version = u64::MAX;
             }
             assert_eq!(space.atomic_xor_u32(GuestAddress(0x1ffe), mask), Ok(old));
             assert_eq!(exchange_state(&space), after);
@@ -487,6 +490,7 @@ fn atomic_xor_changed_and_identity_use_one_final_version() {
         }
         after.version = u64::MAX;
         after.code_version = u64::MAX;
+        after.source_version = u64::MAX;
         assert_eq!(exchange_state(&space), after);
         assert!(!space.is_code_current(&original));
         assert!(!space.is_code_current(&toggled));

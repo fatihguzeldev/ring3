@@ -53,6 +53,7 @@ fn compare_exchange_match_mismatch_and_identity_use_one_final_version() {
             after.version = u64::MAX;
             if snapshots.iter().any(Option::is_some) {
                 after.code_version = u64::MAX;
+                after.source_version = u64::MAX;
             }
             assert_eq!(
                 space.compare_exchange32(GuestAddress(0x1ffe), expected, desired),
@@ -213,6 +214,7 @@ fn byte_compare_exchange_match_mismatch_and_identity_use_one_final_version() {
                 after.version = u64::MAX;
                 if consumed.is_some() {
                     after.code_version = u64::MAX;
+                    after.source_version = u64::MAX;
                 }
                 assert_eq!(
                     space.compare_exchange8(GuestAddress(address), expected, desired),
@@ -344,6 +346,7 @@ fn word_compare_exchange_match_mismatch_and_identity_use_one_final_version() {
             after.version = u64::MAX;
             if snapshots.iter().any(Option::is_some) {
                 after.code_version = u64::MAX;
+                after.source_version = u64::MAX;
             }
             assert_eq!(
                 space.compare_exchange16(GuestAddress(0x1fff), expected, desired),

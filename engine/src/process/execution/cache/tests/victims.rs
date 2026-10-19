@@ -119,3 +119,5 @@ fn all_pinned_selection_preserves_every_candidate_for_later_unpinning() {
         Some(0)
     );
 }
+
+mod source;

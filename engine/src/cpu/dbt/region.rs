@@ -149,8 +149,8 @@ impl PreparedRegion {
         if memory.identity() != self.memory_identity {
             return false;
         }
-        let version = memory.code_validation_version();
-        // non-executable writes leave every executable snapshot unchanged.
+        let version = memory.code_source_version();
+        // private fresh rw mappings and non-executable writes preserve executable snapshots.
         if self.validated_version.load(Ordering::Relaxed) == version {
             return true;
         }
@@ -889,3 +889,7 @@ pub(super) fn supports(instruction: &DecodedOperation, embedded: bool) -> bool {
 #[cfg(test)]
 #[path = "region/avx/native.rs"]
 mod avx;
+
+#[cfg(test)]
+#[path = "region/code_source/tests.rs"]
+mod code_source_tests;

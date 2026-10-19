@@ -94,7 +94,7 @@ impl EngineInstance {
             let cache = self.execution_cache.as_mut().unwrap();
             let selected = cache.victims.select(
                 &cache.entries,
-                memory.code_validation_version(),
+                memory.code_source_version(),
                 |id| registry.get_raw(memory, id).is_ok(),
                 &pins,
             );

@@ -155,6 +155,7 @@ impl AddressSpace {
         }
         let version = self.advance_version()?;
         self.code_validation_version = version;
+        self.code_source_version = version;
         for (page, &slot) in range.indices().zip(slots) {
             self.references[slot as usize] += 1;
             self.executable_views[slot as usize] += u32::from(permissions.allows(Access::Execute));
@@ -255,6 +256,7 @@ impl AddressSpace {
         }
         self.copy_in_validated(word.address, &word.value.to_le_bytes(), version);
         self.code_validation_version = version;
+        self.code_source_version = version;
         for page in range.indices() {
             let slot = self.mappings[page] as usize - 1;
             self.change_permissions(page, slot, permissions, version);
@@ -277,6 +279,7 @@ impl AddressSpace {
         }
         let version = self.advance_version()?;
         self.code_validation_version = version;
+        self.code_source_version = version;
         for &(address, permissions) in pages {
             let page = (address.0 / PAGE_SIZE) as usize;
             let slot = self.mappings[page] as usize - 1;
@@ -342,6 +345,7 @@ impl AddressSpace {
         }
         let version = self.advance_version()?;
         self.code_validation_version = version;
+        self.code_source_version = version;
         for (page, (owner, index, permissions)) in range.indices().zip(pages) {
             let slot = owner.slots[*index];
             self.references[slot as usize] += 1;

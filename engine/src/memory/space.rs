@@ -31,6 +31,7 @@ pub struct AddressSpace {
     identity: u64,
     version: u64,
     code_validation_version: u64,
+    code_source_version: u64,
     versions: Box<[PageVersion]>,
     service_guard: service::GuardService32,
 }
@@ -42,6 +43,11 @@ impl AddressSpace {
 
     pub(crate) fn code_validation_version(&self) -> u64 {
         self.code_validation_version
+    }
+
+    /// a global transaction stamp for executable-source memoization, not authority.
+    pub(crate) fn code_source_version(&self) -> u64 {
+        self.code_source_version
     }
 
     pub(crate) fn ensure_transaction_versions(&self, count: u64) -> Result<(), MemoryError> {
@@ -122,6 +128,7 @@ impl AddressSpace {
             identity: new_identity()?,
             version: 0,
             code_validation_version: 0,
+            code_source_version: 0,
             versions,
             service_guard: Default::default(),
         })
@@ -194,6 +201,9 @@ impl AddressSpace {
         }
         let version = self.advance_version()?;
         self.code_validation_version = version;
+        if permissions != Permissions::READ_WRITE {
+            self.code_source_version = version;
+        }
         for page in range.indices() {
             let slot = self.free.pop().unwrap();
             let offset = slot as usize * PAGE_SIZE as usize;
@@ -220,6 +230,7 @@ impl AddressSpace {
         self.require_mapped(range)?;
         let version = self.advance_version()?;
         self.code_validation_version = version;
+        self.code_source_version = version;
         for page in range.indices() {
             let slot = self.mappings[page] as usize - 1;
             self.change_permissions(page, slot, permissions, version);
@@ -271,6 +282,7 @@ impl AddressSpace {
         let version = self.advance_version()?;
         self.copy_in_validated(word.address, &word.value.to_le_bytes(), version);
         self.code_validation_version = version;
+        self.code_source_version = version;
         for page in range.indices() {
             let slot = self.mappings[page] as usize - 1;
             self.change_permissions(page, slot, permissions, version);
@@ -281,6 +293,7 @@ impl AddressSpace {
     pub fn unmap(&mut self, range: PageRange) -> Result<(), MemoryError> {
         self.require_mapped(range)?;
         self.code_validation_version = self.advance_version()?;
+        self.code_source_version = self.code_validation_version;
         for page in range.indices() {
             self.release_mapping(page);
         }
@@ -332,6 +345,7 @@ impl AddressSpace {
             self.versions[slot].content = version;
             if self.executable_views[slot] != 0 {
                 self.code_validation_version = version;
+                self.code_source_version = version;
             }
             return Ok(());
         }
@@ -498,6 +512,7 @@ impl AddressSpace {
             self.versions[slot].content = version;
             if self.executable_views[slot] != 0 {
                 self.code_validation_version = version;
+                self.code_source_version = version;
             }
             copied += count;
         }
@@ -912,3 +927,7 @@ mod write;
 #[cfg(test)]
 #[path = "space/masked/native.rs"]
 mod masked_access_tests;
+
+#[cfg(test)]
+#[path = "space/source/tests/mod.rs"]
+mod code_source_tests;

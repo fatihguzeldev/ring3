@@ -248,6 +248,14 @@ impl AddressSpace {
         }
         if !changes.is_empty() {
             self.code_validation_version = version;
+            if changes.iter().any(|change| match *change {
+                PrivatePageChange32::Commit { permissions, .. } => {
+                    permissions != Permissions::READ_WRITE
+                }
+                PrivatePageChange32::Decommit { .. } | PrivatePageChange32::Protect { .. } => true,
+            }) {
+                self.code_source_version = version;
+            }
         }
         Ok(())
     }

@@ -51,6 +51,7 @@ fn bit_test_set_changed_and_identity_use_one_final_version() {
             after.version = u64::MAX;
             if snapshots.iter().any(Option::is_some) {
                 after.code_version = u64::MAX;
+                after.source_version = u64::MAX;
             }
             assert_eq!(space.bit_test_set32(GuestAddress(0x1ffe), bit), Ok(old));
             assert_eq!(exchange_state(&space), after);
@@ -235,6 +236,7 @@ fn bit_test_reset_changed_and_identity_use_one_final_version() {
             after.version = u64::MAX;
             if snapshots.iter().any(Option::is_some) {
                 after.code_version = u64::MAX;
+                after.source_version = u64::MAX;
             }
             assert_eq!(space.bit_test_reset32(GuestAddress(0x1ffe), bit), Ok(old));
             assert_eq!(exchange_state(&space), after);

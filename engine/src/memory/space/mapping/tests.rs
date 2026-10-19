@@ -9,6 +9,7 @@ struct Snapshot {
     versions: Vec<PageVersion>,
     version: u64,
     code_version: u64,
+    source_version: u64,
 }
 
 fn snapshot(memory: &AddressSpace) -> Snapshot {
@@ -20,6 +21,7 @@ fn snapshot(memory: &AddressSpace) -> Snapshot {
         versions: memory.versions.to_vec(),
         version: memory.version,
         code_version: memory.code_validation_version,
+        source_version: memory.code_source_version,
     }
 }
 

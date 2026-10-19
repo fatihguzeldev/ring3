@@ -10,6 +10,7 @@ struct ExchangeState {
     identity: u64,
     version: u64,
     code_version: u64,
+    source_version: u64,
 }
 
 fn exchange_state(space: &AddressSpace) -> ExchangeState {
@@ -22,6 +23,7 @@ fn exchange_state(space: &AddressSpace) -> ExchangeState {
         identity: space.identity,
         version: space.version,
         code_version: space.code_validation_version(),
+        source_version: space.code_source_version(),
     }
 }
 

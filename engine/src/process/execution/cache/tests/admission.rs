@@ -257,3 +257,5 @@ fn cache_prefix_joins_installed_tail_and_smc_recompiles_page_dependents() {
         new_prefix.unit_id
     );
 }
+
+mod source;
