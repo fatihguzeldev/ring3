@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 use crate::{
     cpu::x86::decode::CodeFetchContext,
@@ -13,6 +13,7 @@ use super::{
 
 const MAX_UNITS: usize = 8;
 const MAX_BYTES: usize = MAX_UNITS * 65_536;
+const UNIT_INDEX_HINTS: usize = 64;
 static NEXT_UNIT_ID: AtomicU64 = AtomicU64::new(1);
 
 mod cohort;
@@ -91,6 +92,7 @@ pub struct ResidentRegistry {
     memory_identity: u64,
     limits: RegistryLimits,
     entries: Vec<ResidentUnit>,
+    unit_index_hints: [AtomicUsize; UNIT_INDEX_HINTS],
     entry_index: EntryIndex,
     wasm_bytes: usize,
 }
@@ -110,6 +112,7 @@ impl ResidentRegistry {
             memory_identity: memory.identity(),
             limits,
             entries,
+            unit_index_hints: [const { AtomicUsize::new(usize::MAX) }; UNIT_INDEX_HINTS],
             entry_index: EntryIndex::default(),
             wasm_bytes: 0,
         })
@@ -498,10 +501,23 @@ impl ResidentRegistry {
     }
 
     fn unit_index(&self, id: u64) -> Result<usize, RegistryError> {
+        let hint = &self.unit_index_hints[id as usize % UNIT_INDEX_HINTS];
+        let index = hint.load(Ordering::Relaxed);
+        // retirement can shift indices; only the canonical full id makes a hint usable.
+        if self
+            .entries
+            .get(index)
+            .is_some_and(|unit| unit.id.get() == id)
+        {
+            return Ok(index);
+        }
         // ids increase at publication, and retirement preserves the retained vector order.
-        self.entries
+        let index = self
+            .entries
             .binary_search_by_key(&id, |unit| unit.id.get())
-            .map_err(|_| RegistryError::InvalidUnit)
+            .map_err(|_| RegistryError::InvalidUnit)?;
+        hint.store(index, Ordering::Relaxed);
+        Ok(index)
     }
 
     fn remove_unit(&mut self, index: usize) -> Result<(), RegistryError> {
@@ -560,6 +576,10 @@ mod resident_retirement_tests;
 #[cfg(test)]
 #[path = "resident/tests/identities.rs"]
 mod resident_identity_tests;
+
+#[cfg(test)]
+#[path = "resident/tests/identities/hints.rs"]
+mod resident_index_hint_tests;
 
 #[cfg(test)]
 #[path = "resident/tests/lookup.rs"]
