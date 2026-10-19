@@ -89,7 +89,9 @@ function install(e, pc, length, slot, gates = [], extra = []) {
   const run = new WebAssembly.Instance(module, { env: { memory: e.memory }, ring3 }).exports.run;
   e.table.set(slot, run);
   ok(e, "acknowledge_resident_installation", ...key, ...pair(id), slot);
-  const unit = { id, slot, run, imports: ring3 };
+  const unit = { id, slot, run, imports: ring3,
+    moduleBytes: Buffer.from(new Uint8Array(e.memory.buffer).slice(pointer, pointer + size)).toString("hex"),
+    moduleImports: WebAssembly.Module.imports(module) };
   e.installed.push(unit);
   return unit;
 }
@@ -114,8 +116,10 @@ function header(v, magic, size) {
   assert.equal(v.getUint32(8, true), size);
   assert.equal(v.getUint32(12, true), 0);
 }
-function begin(e, unit, budget, dispatch = true) {
-  ok(e, "begin_execution_receipt", ...key, budget, ...pair(unit.id), dispatch ? 1 : 0);
+function begin(e, unit, budget, dispatch = true, mode = "checked") {
+  const operation = { checked: "begin_execution_receipt", owned: "begin_owned_execution_receipt", compiled: "begin_compiled_execution_receipt" }[mode];
+  assert.ok(operation);
+  ok(e, operation, ...key, budget, ...pair(unit.id), dispatch ? 1 : 0);
   const v = transfer(e, 32);
   header(v, "R3EF", 32);
   const token = v.getBigUint64(16, true);
@@ -313,6 +317,112 @@ for (const dispatch of [false, true]) {
   record(dispatch ? "callback-dispatch" : "callback-direct", result);
   ok(e, "close");
 }
+// three authored fp children retain pristine native imports across receipt modes.
+const compiledUsageFields = ["seedFullNeedCodeSeals", "strictFullNeedCodeSeals", "lightNeedCodeSeals", "fullMaterializations",
+  "eligibleChildren", "strictChildren", "continuedX87StepAttempts", "rejectedPublicTransitions"];
+function compiledUsage(e) {
+  const scratch = new Uint8Array(e.memory.buffer, e.base + 140, 4096).slice();
+  try {
+    ok(e, "compiled_execution_usage", ...key);
+    const packet = transfer(e, 80); header(packet, "R3EU", 80);
+    return Object.fromEntries(compiledUsageFields.map((name, i) => [name, packet.getBigUint64(16 + i * 8, true)]));
+  } finally { request(e, scratch); }
+}
+function compiledRam(e) {
+  const before = arena(e), rows = [];
+  try {
+    for (const [address, length] of [[0x1000, 3 * 4096], [0x8000, 4096]]) {
+      const bytes = new Uint8Array(length), view = new DataView(bytes.buffer);
+      for (let offset = 0; offset < length; offset += 4) {
+        ok(e, "read32", address + offset);
+        assert.equal(new DataView(e.memory.buffer).getUint32(e.base + 116, true), 0);
+        view.setUint32(offset, new DataView(e.memory.buffer).getUint32(e.base + 120, true), true);
+      }
+      rows.push({ address, bytes });
+    }
+    const after = arena(e);
+    assert.deepEqual(after.slice(0, 100), before.slice(0, 100));
+    assert.deepEqual(after.slice(140), before.slice(140));
+  } finally {
+    new Uint8Array(e.memory.buffer, e.base + 100, 40).set(before.slice(100, 140));
+    assert.deepEqual(arena(e), before);
+  }
+  return rows;
+}
+function compiledFpExpected(initial, cw) {
+  const expected = initial.slice(4236, 4364), v = new DataView(expected.buffer);
+  v.setUint16(16, cw, true); v.setUint16(18, 0, true); v.setUint16(20, 0xffff, true);
+  v.setUint16(22, 0x011d, true); v.setUint32(24, 0x1200, true); v.setUint32(28, 0x3010, true);
+  v.setUint16(32, 0x1b, true); v.setUint16(34, 0x23, true);
+  // fld2; fadd0.5; fstp2.5 leaves physical st7=2.5, empty tags, top0.
+  v.setBigUint64(40 + 7 * 10, 0xa000000000000000n, true);
+  v.setUint16(48 + 7 * 10, 0x4000, true);
+  return expected;
+}
+function compiledControl(mode, strict, cw) {
+  const e = fresh();
+  try {
+    for (const [pc, bytes] of [
+      [0x1000, "d90500300000e9f5000000"], // fld [3000]; jmp1100
+      [0x1100, "d80504300000e9f5000000"], // fadd [3004]; jmp1200
+      [0x1200, "d91d10300000e9f5000000"], // fstp [3010]; jmp1300 (cold miss)
+      [0x1400, "0f57c0e9f8fbffff"], // unsupported xorps xmm0,xmm0; jmp1000
+    ]) { request(e, Buffer.from(bytes, "hex")); ok(e, "upload", pc, bytes.length / 2); }
+    ok(e, "write32", 0x3000, 0x40000000); // literal float32 2
+    ok(e, "write32", 0x3004, 0x3f000000); // literal float32 0.5
+    const a = install(e, 0x1000, 11, 0), b = install(e, 0x1100, 11, 1), c = install(e, 0x1200, 11, 2);
+    const entry = strict ? install(e, 0x1400, 8, 3) : a;
+    reset(e, strict ? 0x1400 : 0x1000);
+    new DataView(e.memory.buffer).setUint16(e.base + 4236 + 16, cw, true);
+    const initial = arena(e);
+    assert.ok(initial.slice(4364 + 32, 4364 + 48).every(byte => byte === 0), "strict XORPS fixture starts with zero XMM0");
+    const beforeUsage = compiledUsage(e), token = begin(e, entry, 64, true, mode);
+    assert.equal(e.dispatch(e.base, e.base + 56, 64, e.base + 96), 0);
+    const beforeRejected = arena(e);
+    assert.equal(e.api.finish_execution_receipt(...key, ...pair(token + 1n)), 14);
+    assert.deepEqual(arena(e), beforeRejected);
+    const wrongKey = [(key[0] ^ 1) >>> 0, key[1]];
+    assert.equal(e.api.finish_execution_receipt(...wrongKey, ...pair(token)), 3);
+    assert.deepEqual(arena(e), beforeRejected);
+    assert.equal(e.api.compiled_execution_usage(...wrongKey), 3);
+    assert.deepEqual(arena(e), beforeRejected);
+    assert.equal(e.api.compiled_execution_usage(...key), 12);
+    assert.deepEqual(arena(e), beforeRejected);
+    const receipt = finish(e, token), fullArena = arena(e), afterUsage = compiledUsage(e);
+    assert.deepEqual(arena(e), fullArena, "usage preserves all public bytes after restoring transfer scratch");
+    const mechanism = Object.fromEntries(compiledUsageFields.map(name => [name, afterUsage[name] - beforeUsage[name]]));
+    assert.deepEqual([receipt.reason, receipt.kind, receipt.retired, receipt.child], [3, 2, strict ? 8 : 6, 2]);
+    const v = new DataView(e.memory.buffer);
+    assert.deepEqual(Array.from({ length: 8 }, (_, i) => v.getUint32(e.base + 16 + i * 4, true)), [5, 3, 0, 0, 0x8800, 0, 0x8000, 0x8100]);
+    assert.equal(v.getUint32(e.base + 48, true), 0x1300); assert.equal(v.getUint32(e.base + 52, true), 2);
+    assert.deepEqual(fullArena.slice(4236, 4364), compiledFpExpected(initial, cw));
+    assert.deepEqual(fullArena.slice(4364, 4588), initial.slice(4364, 4588));
+    assert.deepEqual(fullArena.slice(4612), initial.slice(4612));
+    const ram = compiledRam(e), data = new DataView(ram[0].bytes.buffer);
+    assert.equal(data.getUint32(0x2000, true), 0x40000000);
+    assert.equal(data.getUint32(0x2004, true), 0x3f000000);
+    assert.equal(data.getUint32(0x2010, true), 0x40200000, "literal float32 2.5 result");
+    assert.deepEqual(ram[1].bytes, new Uint8Array(4096), "no stack writes");
+    if (mode === "compiled") {
+      assert.equal(mechanism.eligibleChildren, 3n);
+      assert.equal(mechanism.lightNeedCodeSeals, strict ? 3n : 2n);
+      assert.equal(mechanism.continuedX87StepAttempts, strict ? 3n : 2n);
+      assert.equal(mechanism.seedFullNeedCodeSeals, strict ? 0n : 1n);
+      assert.equal(mechanism.strictChildren, strict ? 1n : 0n);
+      assert.equal(mechanism.strictFullNeedCodeSeals, strict ? 1n : 0n);
+      assert.equal(mechanism.fullMaterializations, 1n);
+    } else assert.ok(Object.values(mechanism).every(value => value === 0n));
+    const modules = e.installed.map(unit => ({ bytes: unit.moduleBytes, imports: unit.moduleImports }));
+    cases.push({ label: "compiled-ordinary-fp-light", mode, strict, cw, retired: receipt.retired,
+      mechanism: Object.fromEntries(Object.entries(mechanism).map(([name, value]) => [name, value.toString()])) });
+    return { modules, fullArena, ram, receipt };
+  } finally { ok(e, "close"); }
+}
+for (const cw of [0x007f, 0x027f, 0x037f]) for (const strict of [false, true]) {
+  const values = ["checked", "owned", "compiled"].map(mode => compiledControl(mode, strict, cw));
+  for (const value of values.slice(1)) assert.deepEqual(value, values[0], "same generated bytes, complete arena/RAM/receipt across all three modes");
+}
+
 writeFileSync(
   join(output, "result.json"),
   JSON.stringify({ engine_sha256: engine.sha256, cases }, null, 2),
