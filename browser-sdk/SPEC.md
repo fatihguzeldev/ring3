@@ -1,0 +1,91 @@
+# Browser runtime prototype
+
+The goal is playable, responsive browser games through an embeddable Ring3 API.
+The first vertical prototype reuses the complete BottleShip runtime instead of
+preserving Ring3's current CPU/Win32 boundary. This is an experimental backend,
+not a claim of full game compatibility or a stable released SDK.
+
+## Evidence and assumptions
+
+- The same owned Max Payne v1.01 installation reached its menu and tutorial in
+  the locally built pinned reference. Movement and firing worked. Its displayed
+  69–76 FPS measured guest Present submissions; audio, saves, long play and GPU
+  completion remain unverified.
+- The SDK vertical acceptance then opened that same bundle, observed tutorial
+  movement and ammo 18→17 at displayed 67–85 FPS, acknowledged actual CPU pause
+  and resume, and successfully stopped and removed the frame. Closed-session
+  calls rejected. This remains a short local observation, not a compatibility
+  guarantee or a game-speed ratio against the old engine.
+- The first embedding uses the same origin for the host and runtime frame. The
+  host supplies a private, reachable bundle URL; game payloads are never committed.
+- BottleShip's CPU, Win32, renderer, audio and filesystem remain together. Its
+  relaxed arithmetic policy differs from exact x87. Preserve upstream identity,
+  licenses and effective configuration rather than claiming equivalence.
+- The user has delegated implementation choices and authorized logical commits
+  and push. Existing code and these experiments may be replaced.
+
+## Interface and behavior
+
+The host facade mounts one runtime frame and exposes launch, pause, resume,
+status, stop and disposal. The adapter identifies the upstream backend and pin.
+
+The wire namespace is `ring3.runtime.v1`; every request/reply carries its session,
+generation and request ID. Validate origin, source and payload before accepting
+it. Late or forged messages cannot complete a current operation.
+
+Launch submission is distinct from the first guest presentation. Pause/resume
+complete only after the worker acknowledges the actual scheduler transition.
+Stop completes after child sessions and accepted engine filesystem/registry
+writes are drained, then releases the frame and listeners. This is not a guest
+ExitProcess or a flush of private guest CRT buffers. A failed drain must remain
+a failure and retain the session for retry or explicit forced disposal. A
+previously lost file write cannot be reconstructed by retrying a barrier. No arbitrary
+worker evaluation or translation through the old Ring3 CPU/Win32 ABI is used.
+
+## Structure and commands
+
+- `runtime.mjs` / `runtime.d.mts`: dependency-free ESM browser facade and types.
+- `backend.lock.json`: immutable upstream source and CPU artifact identities.
+- `backend/bridge.patch`: narrow upstream host/worker lifecycle adapter.
+- `tools/prepare-backend.mjs`: reproducible isolated backend checkout and build.
+- `tests/`: focused protocol/ownership checks and the browser acceptance fixture.
+
+Preparation, with Bun installed:
+
+```sh
+node browser-sdk/tools/prepare-backend.mjs --directory target/browser-runtime --bun bun
+node --test browser-sdk/tests/*.test.mjs
+```
+
+The backend itself uses its pinned lockfile and `bun run build`. Existing build
+output is preserved in a `dist.previous-*` sibling; each new distribution starts
+empty. The build records source pins, local changes, actual tools and emitted
+JavaScript/Wasm hashes. It reuses the pinned upstream CPU binary.
+
+The distribution includes `ring3-sdk/runtime.mjs` and the acceptance host at
+`ring3-sdk/acceptance.html?bundle=<encoded-local-wgb-url>`. The host contains no
+game payload. Serving must supply COOP/COEP; private bundles stay outside public
+assets and require a same-origin streaming route.
+
+Code uses ESM, small named functions and structured process arguments:
+
+```js
+await runtime.pause();
+const state = await runtime.status();
+```
+
+## Verification and delivery
+
+1. Pin and build the original backend without proprietary payloads.
+2. Review the parent/child contract before applying the bridge.
+3. Test malformed/stale replies, acknowledgments, timeout and cleanup ownership.
+4. In the browser, launch the same private Max Payne bundle through the facade;
+   observe menu, tutorial movement and firing.
+5. Verify pause/resume and stop from the host; confirm the frame is removed and
+   the old session cannot resume. Keep save/audio acceptance explicitly open.
+
+Always keep work scoped, record actual results and preserve upstream notices.
+Never publish game data, bypass failed lifecycle acknowledgments, silently drop
+durable state, or call a launch postMessage a successful gameplay result.
+
+The whole playable engine/SDK objective remains open after this prototype.

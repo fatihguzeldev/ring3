@@ -1,0 +1,998 @@
+diff --git a/src/app/App.tsx b/src/app/App.tsx
+index 1b4b651..7c36cb2 100644
+--- a/src/app/App.tsx
++++ b/src/app/App.tsx
+@@ -1,5 +1,6 @@
+ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+ import { SessionWorker } from './session-worker';
++import { installRuntimeBridge, requestSdkControl, type RuntimeSdkBridge } from "./runtime-bridge";
+ import { ChildSessionSurface } from './child-session-surface';
+ import { cx } from "../ui/cx";
+ import s from "./App.module.css";
+@@ -487,6 +488,7 @@ export default function App() {
+   // toggling pause does NOT tear down and recreate the whole worker/input/audio
+   // effect (see the core-I/O effect's deps) — only this cheap sync effect runs.
+   const isPausedRef = useRef(false);
++  const runtimeBridgeRef = useRef<RuntimeSdkBridge>(null);
+ 
+   // Patch helper: SettingsDrawer (and the old controls) hand back partial UiSettings updates.
+   const handleUiChange = useCallback((patch: Partial<UiSettings>) => {
+@@ -803,6 +805,7 @@ export default function App() {
+   // re-running the monolithic worker/input/audio setup.
+   useEffect(() => {
+     isPausedRef.current = isPaused;
++    runtimeBridgeRef.current?.setPaused(isPaused);
+   }, [isPaused]);
+ 
+   // Push the display pacing policy to the worker on change and once the worker is ready.
+@@ -1277,6 +1280,7 @@ export default function App() {
+ 
+     // 3. Setup Worker Message Handling
+     worker.onmessage = (event: MessageEvent) => {
++      runtimeBridgeRef.current?.observe(event.data);
+       if (event.data?.type === 'child_session') {
+         audioEngine?.stopAll();
+         setExitInfo(null); exitInfoRef.current = null;
+@@ -2298,6 +2302,51 @@ export default function App() {
+       }
+     };
+ 
++    runtimeBridgeRef.current = installRuntimeBridge({
++      launch: async (url, options) => {
++        isPausedRef.current = false;
++        setIsPaused(false);
++        await (window as any).loadApp(url, options);
++      },
++      control: async (operation) => {
++        const selected = globalWorker;
++        if (!selected) throw new Error("runtime worker unavailable");
++        if (operation === "pause" || operation === "stop") handleBlur();
++        const facts = await requestSdkControl(selected, operation);
++        if (operation === "pause" || operation === "resume") {
++          const paused = operation === "pause";
++          isPausedRef.current = paused;
++          setIsPaused(paused);
++          if (paused) await audioEngine?.pause();
++          else await audioEngine?.resume();
++        } else if (operation === "stop") {
++          isPausedRef.current = true;
++          setIsPaused(true);
++          await audioEngine?.pause();
++          audioEngine?.stopAll();
++          selected.terminate();
++          if (globalWorker === selected) globalWorker = null;
++          childSurface.clear();
++          disarmPointerLockGesture();
++          if (document.pointerLockElement) document.exitPointerLock();
++          setWorkerStatus("idle");
++          setIsLoadingApp(false);
++          setLoadingProgress(null);
++        }
++        return facts;
++      },
++      dispose: () => {
++        const selected = globalWorker;
++        globalWorker = null;
++        selected?.terminate();
++        audioEngine?.stopAll();
++        void audioEngine?.pause().catch(() => {});
++        handleBlur();
++        disarmPointerLockGesture();
++        if (document.pointerLockElement) document.exitPointerLock();
++      },
++    });
++
+     // A self re-exec from a loadApp(url) session (dev / harness / "?game=dev"): the reload
+     // lands on a page that boots no game by itself, so replay the URL now that loadApp
+     // exists. The worker already holds the launcher's command line (set_boot_args above);
+@@ -2561,6 +2610,8 @@ export default function App() {
+     (window as any).clearVerboseLog = clearVerboseLog;
+ 
+     return () => {
++      runtimeBridgeRef.current?.dispose();
++      runtimeBridgeRef.current = null;
+       window.removeEventListener("resize", resize);
+       window.visualViewport?.removeEventListener("resize", resize);
+       window.visualViewport?.removeEventListener("scroll", resize);
+diff --git a/src/app/session-worker.ts b/src/app/session-worker.ts
+index 07be421..c33c202 100644
+--- a/src/app/session-worker.ts
++++ b/src/app/session-worker.ts
+@@ -31,8 +31,9 @@ export class SessionWorker extends EventTarget implements Worker {
+                 this.rootPresentation.set(data.type, data);
+             }
+         }
+-        const reply = event.data?.type === 'harness_reply' && this.requests.has(event.data.id)
+-            && this.requests.get(event.data.id) === source;
++        const sdkReply = data?.type === "ring3_sdk_control_reply" && source === null;
++        const reply = sdkReply || (event.data?.type === 'harness_reply' && this.requests.has(event.data.id)
++            && this.requests.get(event.data.id) === source);
+         if (reply) this.requests.delete(event.data.id);
+         if (source !== this.foreground && source !== null && !reply) return;
+         if (event.data?.type === 'child_session') {
+@@ -121,7 +122,8 @@ export class SessionWorker extends EventTarget implements Worker {
+         // foreground. The parent keeps running (VFS broker) and owns the history a
+         // promoted child's realm cannot see — its own childProcesses(), its thunk ring,
+         // its VFS. Without an address for it that state is merely unreachable, not gone.
+-        const toRoot = message?.type === 'harness_rpc' && message?.opts?.target === 'root';
++        const toRoot = (message?.type === 'harness_rpc' && message?.opts?.target === 'root')
++            || (message?.type === 'ring3_sdk_control' && message?.operation === 'stop');
+         if (message?.type === 'harness_rpc') this.requests.set(message.id, toRoot ? null : this.foreground);
+         if (toRoot) { this.root.postMessage(message, options as Transferable[]); return; }
+         if (message?.type === 'harness_cancel' && this.requests.has(message.id)) {
+diff --git a/src/worker/core/child-process.ts b/src/worker/core/child-process.ts
+index 8eb16ac..62df5b6 100644
+--- a/src/worker/core/child-process.ts
++++ b/src/worker/core/child-process.ts
+@@ -62,6 +62,7 @@ export interface ChildProcessTask {
+     completion: Promise<number>;
+     terminate(exitCode: number): void;
+     cancel(): void;
++    drainForShutdown(): Promise<void>;
+     promote?(): boolean;
+     /** Guest lifetime can end before this worker's descendant VFS broker is released. */
+     onGuestExit?: (exitCode: number) => void;
+@@ -71,7 +72,7 @@ export interface ChildExecutionContext {
+     signal: AbortSignal;
+     record: ChildProcessRecord;
+     checkActive(): void;
+-    onStop(cleanup: () => void | Promise<void>): void;
++    onStop(cleanup: () => void | Promise<void>, verify?: () => void): void;
+ }
+ 
+ export class ChildProcessCancelled extends Error {
+@@ -86,6 +87,8 @@ export class ChildNeedsSession extends Error {
+ 
+ export const childProcessHistory: ChildProcessRecord[] = [];
+ const active = new Set<ChildProcessTask>();
++const strictShutdownPending = new Set<ChildProcessTask>();
++export function clearChildShutdownDebtsForTests(): void { strictShutdownPending.clear(); }
+ const unfinished = new Set<ChildProcessRecord>();
+ let publishSession: ((port: MessagePort, record: ChildProcessRecord) => void) | undefined;
+ let sessionFinished: (() => void) | undefined;
+@@ -135,11 +138,22 @@ export function pendingChildHandoff(): ChildProcessRecord | null {
+ }
+ 
+ /** Stops execution immediately; await the result before replacing/resetting the shared VFS. */
+-export function stopChildProcesses(keepSession = false): Promise<void> {
+-    const tasks = [...active].filter(task => !keepSession || !task.record.session);
++export function stopChildProcesses(keepSession = false, strict = false): Promise<void> {
++    const tasks = [...new Set([...active, ...(strict ? strictShutdownPending : [])])]
++        .filter(task => !keepSession || !task.record.session);
++    if (strict) for (const task of tasks) strictShutdownPending.add(task);
+     for (const task of tasks) task.cancel();
+     unfinished.clear();
+-    return Promise.allSettled(tasks.map(task => task.completion)).then(() => {});
++    if (!strict) return Promise.allSettled(tasks.map(task => task.completion)).then(() => {});
++    return Promise.all(tasks.map(async task => {
++        try {
++            await task.drainForShutdown();
++            strictShutdownPending.delete(task);
++        } catch (error) {
++            strictShutdownPending.add(task);
++            throw error;
++        }
++    })).then(() => {});
+ }
+ 
+ /** Registers the lifetime before invoking a backend: ExitProcess may be the next guest instruction. */
+@@ -156,6 +170,11 @@ export function startChildExecution(
+     const controller = new AbortController();
+     const cleanups: Array<() => void | Promise<void>> = [];
+     const drains: Promise<void>[] = [];
++    const historicalFlushes: Promise<void>[] = [];
++    let shutdownFlush: Promise<void> | null = null;
++    const shutdownChecks: Array<() => void> = [];
++    let shutdownDrain: Promise<void> | null = null;
++    let cleanupVerified = false, flushVerified = false;
+     let stopped = false;
+     let settled = false;
+     let forcedExit: number | undefined;
+@@ -174,10 +193,38 @@ export function startChildExecution(
+     const context: ChildExecutionContext = {
+         signal: controller.signal, record,
+         checkActive: () => { if (controller.signal.aborted) throw new ChildProcessCancelled(); },
+-        onStop: cleanup => { if (stopped) clean(cleanup); else cleanups.push(cleanup); },
++        onStop: (cleanup, verify) => {
++            if (verify) shutdownChecks.push(verify);
++            if (stopped) clean(cleanup); else cleanups.push(cleanup);
++        },
+     };
+     const task: ChildProcessTask = {
+         record, completion: null as unknown as Promise<number>,
++        drainForShutdown: () => {
++            if (shutdownDrain) return shutdownDrain;
++            const wait = async (work: Promise<unknown>, step: string) => {
++                void work.catch(() => {});
++                if (await settleWithin(work, CHILD_DRAIN_BUDGET_MS)) throw new Error(`Child shutdown ${step} timed out`);
++                await work;
++            };
++            shutdownDrain = (async () => {
++                await wait(task.completion.catch(error => {
++                    if (!(error instanceof ChildProcessCancelled)) throw error;
++                }), "completion");
++                await wait(Promise.all(drains), "cleanup drain");
++                await wait(Promise.all(historicalFlushes), "prior vfs.flushAll");
++                for (const verify of shutdownChecks) verify();
++                if (record.stalled?.includes("child exit flush:")) throw new Error(record.stalled);
++                if (!shutdownFlush) {
++                    const work = vfs.flushAll(true);
++                    shutdownFlush = work;
++                    const clear = () => { if (shutdownFlush === work) shutdownFlush = null; };
++                    void work.then(clear, clear);
++                }
++                await wait(shutdownFlush, "vfs.flushAll");
++            })().finally(() => { shutdownDrain = null; });
++            return shutdownDrain;
++        },
+         terminate: code => {
+             if (settled || controller.signal.aborted) return;
+             forcedExit = code >>> 0;
+@@ -205,15 +252,16 @@ export function startChildExecution(
+             // WaitForSingleObject on the child handle ultimately blocks on.
+             const drained = Promise.all(drains);
+             if (await settleWithin(drained, CHILD_DRAIN_BUDGET_MS)) stall(record, 'cleanup drain');
+-            else await drained;
++            else { await drained; cleanupVerified = true; }
+             if (forcedExit === undefined) {
+                 context.checkActive();
+                 if (failure !== undefined) throw failure;
+             }
+             const flushed = vfs.flushAll();
++            historicalFlushes.push(flushed);
+             void flushed.catch(() => {}); // its owner logs it; an unbounded wait must not be the only handler
+             if (await settleWithin(flushed, CHILD_DRAIN_BUDGET_MS)) stall(record, 'vfs.flushAll');
+-            else await flushed;
++            else { await flushed; flushVerified = true; }
+             if (forcedExit === undefined) context.checkActive();
+             record.exitCode = (forcedExit ?? code) >>> 0;
+             unfinished.delete(record);
+@@ -225,6 +273,9 @@ export function startChildExecution(
+             settled = true;
+             record.finished = performance.now();
+             stopResources();
++            let transportVerified = true;
++            try { for (const verify of shutdownChecks) verify(); } catch { transportVerified = false; }
++            if (!cleanupVerified || !flushVerified || !transportVerified || record.stalled) strictShutdownPending.add(task);
+             active.delete(task);
+             if (record.session && (!controller.signal.aborted || forcedExit !== undefined)) sessionFinished?.();
+         }
+@@ -281,6 +332,9 @@ export function startChildProcess(vfs: VirtualFileSystem, request: ChildProcessR
+             child.onmessageerror = null;
+             child.terminate();
+             return serve.close();
++        }, () => {
++            const pending = serve.pendingOperations();
++            if (pending.length) throw new Error(`Child transport drain timed out: ${pending.join(", ")}`);
+         });
+         return new Promise<number>((resolve, reject) => {
+             let done = false;
+diff --git a/src/worker/emulator.worker.ts b/src/worker/emulator.worker.ts
+index 4a061f6..c674745 100644
+--- a/src/worker/emulator.worker.ts
++++ b/src/worker/emulator.worker.ts
+@@ -166,6 +166,7 @@ import { bootMark, dumpBootTimeline } from "./core/boot-timer";
+ import { setBootOverlayActive } from "./runtime/boot-status";
+ import { ThreadState } from "./core/scheduler/types";
+ import { libHleManager } from "./core/hle-lib/lib-hle-manager";
++import { NATIVE_LEAVES } from "./core/hle-lib/native-leaves";
+ import { hookRegistry } from "./core/hooks";
+ import { Galaxy } from "./modules/galaxy";
+ import { registerFastPathMessageFunctions } from "./modules/user32/message";
+@@ -3253,6 +3254,55 @@ function resumeEmulator(): void {
+   kick();
+   if (raced) void raced.then(kick, kick);
+ }
++let sdkControlChain: Promise<void> = Promise.resolve();
++const sdkStatus = () => {
++  const system = System.getInstance(), v86 = system.process?.v86;
++  const cpu = (v86 as any)?.v86?.cpu, mem = cpu?.mem8;
++  const cfg = EmulatorConfig.getInstance().hleLibs;
++  const libs = libHleManager.getReport(), leaves = libHleManager.getNativeLeafSites();
++  const engine = (globalThis as any).__v86EngineLoad;
++  const exports = preemptionManager.getWasmExports();
++  return {
++    hasProcess: !!system.process, paused: !!system.isPaused, running: !!v86?.is_running?.(),
++    engine: engine ? { requested: engine.requested, path: engine.path, sha256: engine.sha256, bytes: engine.bytes, error: engine.error } : null,
++    relaxedFpu: typeof exports?.get_relaxed_fpu === "function" ? !!exports.get_relaxed_fpu() : null,
++    hle: {
++      enable: cfg.enable, logOnly: cfg.logOnly, killSwitch: (globalThis as any).__noNativeLeaves === true,
++      libs: libs.slice(0, 16).map(r => ({ ...r, patches: r.patches.slice(0, 128) })),
++      nativeLeaves: leaves.slice(0, 256).map(site => {
++        const leaf = NATIVE_LEAVES.find(l => l.name === site.name && l.crt === site.crt);
++        const intact = leaf && mem ? leaf.replacement.every((b, i) => mem[site.address + i] === b) : null;
++        return { module: site.module, name: site.name, crt: site.crt, address: site.address, intact };
++      }),
++      truncated: libs.length > 16 || libs.some(r => r.patches.length > 128) || leaves.length > 256,
++    },
++  };
++};
++const sdkControl = async (operation: string) => {
++  if (operation === "status") return sdkStatus();
++  if (operation === "stop") await loadBundleChain;
++  const system = System.getInstance(), selected = system.process?.v86;
++  if (!selected && operation !== "stop") throw new Error("no runtime process");
++  if (operation === "pause" || operation === "stop") {
++    pauseEmulator();
++    if (pendingStop) await pendingStop;
++    if (system.process?.v86 !== selected || selected?.is_running?.() || (selected && !system.isPaused)) throw new Error("pause did not settle");
++    if (operation === "stop") {
++      await stopChildProcesses(false, true);
++      cancelRegistryAutosave();
++      await Promise.all([system.fileSystem.flushAll(true), system.registry.flush(true)]);
++      await prepareFullGameSwitch();
++      return { ...sdkStatus(), stopped: true, rootPersistenceFlushed: true };
++    }
++  } else if (operation === "resume") {
++    if (pendingStop) await pendingStop;
++    if (system.process?.v86 !== selected) throw new Error("process changed before resume");
++    resumeEmulator();
++    if (system.isPaused || !selected?.is_running?.()) throw new Error("resume did not settle");
++  } else throw new Error("unsupported runtime control");
++  return sdkStatus();
++};
++
+ // Harness hooks (cmds/time.ts park, cmds/breakpoints.ts pause/resume, eip-breaks).
+ (globalThis as any).__harnessPause = pauseEmulator;
+ (globalThis as any).__harnessResume = resumeEmulator;
+@@ -3332,6 +3382,16 @@ const handleWorkerMessage = (event: MessageEvent): void => {
+   }
+   const message = event.data;
+ 
++  if (message?.type === "ring3_sdk_control") {
++    if (typeof message.id !== "string" || !/^ring3-sdk:[0-9]+$/.test(message.id)
++        || !["pause", "resume", "status", "stop"].includes(message.operation)) return;
++    sdkControlChain = sdkControlChain.then(async () => {
++      try { self.postMessage({ type: "ring3_sdk_control_reply", id: message.id, ok: true, result: await sdkControl(message.operation) }); }
++      catch (error) { self.postMessage({ type: "ring3_sdk_control_reply", id: message.id, ok: false, error: String(error) }); }
++    });
++    return;
++  }
++
+   if (message?.type === "dbg") {
+     // Guest debugger bridge: window.dbg.<cmd>(...args) on the page -> here.
+     handleDbgCommand(message.cmd, message.args);
+diff --git a/src/worker/runtime/filesystem/registry-persistence.ts b/src/worker/runtime/filesystem/registry-persistence.ts
+index 4ab46fc..46df641 100644
+--- a/src/worker/runtime/filesystem/registry-persistence.ts
++++ b/src/worker/runtime/filesystem/registry-persistence.ts
+@@ -30,6 +30,7 @@ export class RegistryPersistence {
+     /** registry.json + its access log live INSIDE the game's container (bottleship/games/<cid>/). */
+     private static readonly STATE_FILE = "registry.json";
+     private static readonly ACCESS_LOG_FILE = "registry-access.log";
++    private static readonly pendingSaves = new Map<string, Promise<void>>();
+ 
+     /**
+      * Get the OPFS container dir for a game's registry storage. The registry is just one file in the
+@@ -90,11 +91,22 @@ export class RegistryPersistence {
+     /**
+      * Save registry state for a game
+      */
+-    static async save(gameId: string, state: PersistedRegistryState): Promise<void> {
++    static save(gameId: string, state: PersistedRegistryState, strict = false): Promise<void> {
++        // A final snapshot must not be overwritten by an older autosave closing later.
++        const previous = this.pendingSaves.get(gameId) ?? Promise.resolve();
++        const next = previous.catch(() => {}).then(() => this.saveNow(gameId, state, strict));
++        this.pendingSaves.set(gameId, next);
++        const settled = () => { if (this.pendingSaves.get(gameId) === next) this.pendingSaves.delete(gameId); };
++        void next.then(settled, settled);
++        return next;
++    }
++
++    private static async saveNow(gameId: string, state: PersistedRegistryState, strict: boolean): Promise<void> {
+         try {
+             const gameDir = await this.getGameRegistryDir(gameId, true);
+             if (!gameDir) {
+                 Logger.error(LogCategory.SYSTEM, `Failed to create registry directory for game ${gameId}`);
++                if (strict) throw new Error(`Failed to create registry directory for game ${gameId}`);
+                 return;
+             }
+ 
+@@ -112,6 +124,7 @@ export class RegistryPersistence {
+             );
+         } catch (error) {
+             Logger.error(LogCategory.SYSTEM, `Failed to save registry state for ${gameId}: ${error}`);
++            if (strict) throw error;
+         }
+     }
+ 
+diff --git a/src/worker/runtime/filesystem/registry.ts b/src/worker/runtime/filesystem/registry.ts
+index 0ac30df..a90add9 100644
+--- a/src/worker/runtime/filesystem/registry.ts
++++ b/src/worker/runtime/filesystem/registry.ts
+@@ -631,9 +631,9 @@ export class RegistryStore {
+      * with no gameId owns no container: that is a child's copy, and its writes reach disk
+      * through the owner it forwards them to, not from here.
+      */
+-    async flush(): Promise<void> {
++    async flush(strict = false): Promise<void> {
+         if (!this.gameId) return;
+-        await RegistryPersistence.save(this.gameId, this.serialize());
++        await RegistryPersistence.save(this.gameId, this.serialize(), strict);
+     }
+ 
+     /**
+diff --git a/src/worker/runtime/filesystem/vfs.ts b/src/worker/runtime/filesystem/vfs.ts
+index 0278d1c..fb7a108 100644
+--- a/src/worker/runtime/filesystem/vfs.ts
++++ b/src/worker/runtime/filesystem/vfs.ts
+@@ -1292,9 +1292,9 @@ export class VirtualFileSystem {
+         await this.overlay.flushFile(path);
+     }
+ 
+-    async flushAll(): Promise<void> {
++    async flushAll(strict = false): Promise<void> {
+         if (!this.overlay) return;
+-        await this.overlay.flushAll();
++        await this.overlay.flushAll(strict);
+     }
+ 
+     async deleteFile(path: string): Promise<boolean> {
+@@ -2426,6 +2426,12 @@ class OpfsOverlay {
+      * write→close→read ordering holds despite the async commit.
+      */
+     private pendingFlushes = new Map<string, Promise<void>>();
++    private durabilityFailures = new Map<string, string>();
++    private noteDurabilityFailure(path: string, error: unknown): void {
++        if (!this.durabilityFailures.has(path) && this.durabilityFailures.size < 32) {
++            this.durabilityFailures.set(path, String(error).slice(0, 2048));
++        }
++    }
+     /**
+      * Paths whose pendingFlushes commit is currently ON THE STACK. That commit awaits the
+      * entry's flushInFlight, which reaches ensureWriter — whose lock-conflict recovery
+@@ -2570,6 +2576,7 @@ class OpfsOverlay {
+             await writable.close();
+             this.shadowDirty = false;
+         } catch (e) {
++            this.noteDurabilityFailure(SHADOW_INDEX_FILE, e);
+             Logger.warn(LogCategory.SYSTEM, `OPFS: saveShadowIndex failed: ${e}`);
+         }
+     }
+@@ -2644,6 +2651,7 @@ class OpfsOverlay {
+                 // it is registered as a pending commit rather than dropped: the next
+                 // writer for this path awaits it instead of failing to open (ensureWriter).
+                 const closing = staleWriter.writer.close().catch((e) => {
++                    this.noteDurabilityFailure(path, e);
+                     Logger.warn(LogCategory.SYSTEM, `OPFS: closing stale writer for "${path}" failed: ${e}`);
+                 });
+                 this.pendingFlushes.set(key, closing);
+@@ -3339,6 +3347,9 @@ class OpfsOverlay {
+         entry.flushInFlight = run;
+         try {
+             await run;
++        } catch (error) {
++            this.noteDurabilityFailure(entry.path, error);
++            throw error;
+         } finally {
+             if (entry.flushInFlight === run) {
+                 entry.flushInFlight = null;
+@@ -3400,6 +3411,7 @@ class OpfsOverlay {
+                     try {
+                         await cacheEntry.flushInFlight;
+                     } catch (e) {
++                        this.noteDurabilityFailure(path, e);
+                         Logger.warn(LogCategory.SYSTEM, `OPFS: flushFile("${path}") in-flight buffer flush failed: ${e}`);
+                     }
+                 }
+@@ -3443,6 +3455,7 @@ class OpfsOverlay {
+                         }
+                     }
+                 } catch (e) {
++                    this.noteDurabilityFailure(path, e);
+                     Logger.warn(LogCategory.SYSTEM, `OPFS: flushFile("${path}") commit failed: ${e}`);
+                 }
+             } finally {
+@@ -3467,7 +3480,7 @@ class OpfsOverlay {
+      * late in a session were lost on relaunch and the guest had to re-create them on
+      * the next run (the "create -> not found -> crash, relaunch, repeat" symptom).
+      */
+-    async flushAll(): Promise<void> {
++    async flushAll(strict = false): Promise<void> {
+         // Settle in-flight CloseHandle commits FIRST: flushFile holds a sync access
+         // handle, and OPFS refuses a WritableFileStream on a file one is open on — so
+         // draining first makes the drain fail on exactly the files a commit just touched.
+@@ -3477,11 +3490,14 @@ class OpfsOverlay {
+         await this.settlePendingFlushes();
+         // Persist CoW tombstones so a relaunch re-opens the truncated state, not stale ROM.
+         await this.saveShadowIndex();
++        if (strict && this.durabilityFailures.size) {
++            throw new Error("OPFS persistence failed: " + [...this.durabilityFailures].map(([path, error]) => `${path}: ${error}`).join("; "));
++        }
+     }
+ 
+     private async settlePendingFlushes(): Promise<void> {
+         for (const p of Array.from(this.pendingFlushes.values())) {
+-            try { await p; } catch { /* commit error already logged in flushFile */ }
++            try { await p; } catch (error) { this.noteDurabilityFailure("pending commit", error); }
+         }
+     }
+ 
+@@ -3498,6 +3514,7 @@ class OpfsOverlay {
+             } catch (e) {
+                 // Loud: the teardown barrier failing means the guest's last writes to
+                 // this file did not reach OPFS (see flushWriteBuffer's fallback).
++                this.noteDurabilityFailure(key, e);
+                 Logger.error(LogCategory.SYSTEM, `OPFS: drainWriters FAILED for "${key}" — writes may be lost: ${e}`);
+             }
+         }
+diff --git a/src/app/runtime-bridge.ts b/src/app/runtime-bridge.ts
+new file mode 100644
+--- /dev/null
++++ b/src/app/runtime-bridge.ts
+@@ -0,0 +1,154 @@
++const NS = "ring3.runtime.v1";
++type Phase = "ready" | "loading" | "running" | "paused" | "stopped" | "error";
++type Operation = "pause" | "resume" | "status" | "stop";
++type Facts = Record<string, unknown>;
++export type RuntimeSdkBridge = ReturnType<typeof installRuntimeBridge>;
++let nextControl = 0;
++let activeOwner: object | null = null;
++let activePagehide: (() => void) | null = null;
++
++export function requestSdkControl(worker: Worker, operation: Operation): Promise<Facts> {
++    const id = `ring3-sdk:${++nextControl}`;
++    return new Promise((resolve, reject) => {
++        const cleanup = () => { clearTimeout(timer); worker.removeEventListener("message", receive); };
++        const receive = (event: MessageEvent) => {
++            const m = event.data;
++            if (m?.type !== "ring3_sdk_control_reply" || m.id !== id) return;
++            cleanup();
++            if (m.ok) resolve(m.result);
++            else reject(new Error(String(m.error ?? "runtime control failed")));
++        };
++        const timer = setTimeout(() => { cleanup(); reject(new Error(`${operation} timed out`)); }, 180000);
++        worker.addEventListener("message", receive);
++        try { worker.postMessage({ type: "ring3_sdk_control", id, operation }); }
++        catch (error) { cleanup(); reject(error); }
++    });
++}
++
++export function installRuntimeBridge(hooks: {
++    launch(url: string, options: { preload: boolean; args?: string }): Promise<void>;
++    control(operation: Operation): Promise<Facts>;
++    dispose(): void;
++}) {
++    const q = new URLSearchParams(location.search);
++    if (q.get("ring3Sdk") !== "1" || window.parent === window) return null;
++    const session = q.get("ring3Session") ?? "", generation = Number(q.get("ring3Generation"));
++    if (!/^[a-zA-Z0-9_-]{8,128}$/.test(session) || !Number.isSafeInteger(generation) || generation < 1) {
++        throw new Error("invalid Ring3 SDK session");
++    }
++    const key = `ring3-sdk:${session}:${generation}`;
++    const stored = JSON.parse(sessionStorage.getItem(key) ?? "{}");
++    let sequence = Number.isSafeInteger(stored.sequence) && stored.sequence >= 0 ? stored.sequence : 0;
++    let launched = stored.launched === true, busy = false, disposed = false, lastId = 0, presented = false, stopCompleted = false;
++    const state: { phase: Phase; paused: boolean; [key: string]: unknown } = {
++        phase: launched ? "loading" : "ready", paused: false, workerReady: false, firstPresent: false,
++    };
++    const save = () => sessionStorage.setItem(key, JSON.stringify({ sequence, launched }));
++    const emit = (type: "ready" | "state") => {
++        sequence++; save();
++        window.parent.postMessage({ namespace: NS, type, session, generation, sequence, state: { ...state } }, location.origin);
++    };
++    const setPaused = (paused: boolean) => {
++        if (disposed || state.phase === "stopped" || state.phase === "error") return;
++        state.hostPauseRequested = paused;
++        emit("state");
++    };
++    const reply = (id: number, ok: boolean, value: unknown) => window.parent.postMessage({
++        namespace: NS, type: "reply", session, generation, id, ok,
++        ...(ok ? { result: value } : { error: { code: "RUNTIME_CONTROL", message: String(value) } }),
++    }, location.origin);
++    const receive = async (event: MessageEvent) => {
++        const m = event.data;
++        if (disposed || event.origin !== location.origin || event.source !== window.parent || m?.namespace !== NS
++            || m.type !== "request" || m.session !== session || m.generation !== generation) return;
++        if (!Number.isSafeInteger(m.id) || m.id <= lastId) return;
++        lastId = m.id;
++        if (!["launch", "pause", "resume", "status", "stop"].includes(m.method)) { reply(m.id, false, "unsupported method"); return; }
++        if (busy) {
++            if (m.method === "status") reply(m.id, true, { ...state, busy: true });
++            else reply(m.id, false, "runtime control busy");
++            return;
++        }
++        busy = true;
++        try {
++            if (m.method === "launch") {
++                if (launched || state.phase === "stopped") throw new Error("one launch per SDK generation");
++                const p = m.params ?? {}, url = new URL(String(p.url ?? ""), location.href);
++                if (url.origin !== location.origin || url.username || url.password || !url.href.toLowerCase().endsWith(".wgb") || url.hash
++                    || (p.preload !== undefined && typeof p.preload !== "boolean")
++                    || (p.args !== undefined && (typeof p.args !== "string" || p.args.length > 4096))) throw new Error("invalid local WGB launch");
++                launched = true; save(); state.phase = "loading"; state.paused = false; emit("state");
++                await hooks.launch(url.href, { preload: p.preload === true, args: p.args });
++                reply(m.id, true, { accepted: true, state: { ...state } });
++            } else if (m.method === "status") {
++                if (state.phase !== "stopped") {
++                    const facts = await hooks.control("status");
++                    state.native = facts;
++                    if (presented && facts.paused === true && facts.running === false) { state.phase = "paused"; state.paused = true; }
++                    else if (presented && facts.paused === false && facts.running === true) { state.phase = "running"; state.paused = false; }
++                }
++                reply(m.id, true, { ...state });
++            } else {
++                if (stopCompleted) {
++                    if (m.method !== "stop") throw new Error("runtime stopped");
++                } else {
++                    if (m.method !== "stop" && (!presented || !["running", "paused"].includes(state.phase))) throw new Error("no running guest");
++                    state.native = await hooks.control(m.method);
++                    if (m.method === "stop") { stopCompleted = true; state.phase = "stopped"; state.paused = true; }
++                    else { state.phase = m.method === "pause" ? "paused" : "running"; state.paused = m.method === "pause"; }
++                    emit("state");
++                }
++                reply(m.id, true, { ...state });
++            }
++        } catch (error) {
++            state.phase = "error";
++            state.error = error instanceof Error ? error.message : String(error);
++            emit("state");
++            reply(m.id, false, state.error);
++        } finally { busy = false; }
++    };
++    const owner = {};
++    let runtimeDisposed = false;
++    const forceDispose = () => {
++        if (runtimeDisposed || activeOwner !== owner) return;
++        runtimeDisposed = true;
++        disposed = true;
++        window.removeEventListener("message", receive);
++        window.removeEventListener("pagehide", forceDispose);
++        activePagehide = null;
++        activeOwner = null;
++        hooks.dispose();
++    };
++    const dispose = () => {
++        if (disposed) return;
++        disposed = true;
++        window.removeEventListener("message", receive);
++        // StrictMode replays setup synchronously; only the surviving owner may end the runtime.
++        queueMicrotask(forceDispose);
++    };
++    if (activePagehide) window.removeEventListener("pagehide", activePagehide);
++    activeOwner = owner;
++    activePagehide = forceDispose;
++    window.addEventListener("message", receive);
++    window.addEventListener("pagehide", forceDispose);
++    emit("ready");
++    return {
++        setPaused,
++        observe(m: any) {
++            if (disposed || state.phase === "stopped") return;
++            if (m?.type === "ready") state.workerReady = true;
++            else if (m?.type === "first_present") {
++                presented = true; state.firstPresent = true; state.phase = state.paused ? "paused" : "running";
++            } else if (m?.type === "loading_progress") {
++                state.progress = { phase: String(m.phase ?? "").slice(0, 64), percent: Number(m.percent) || 0, label: String(m.label ?? "").slice(0, 512) };
++            } else if (m?.type === "fpu_strict_state") state.fpuStrict = !!m.strict;
++            else if (m?.type === "app_resize") state.resolution = { width: m.width, height: m.height };
++            else if (m?.type === "reexec") { state.phase = "loading"; state.restarting = true; }
++            else if (m?.type === "process_exit") { state.phase = "stopped"; state.exit = { code: m.exitCode, crashed: !!m.crashed }; }
++            else if (m?.type === "error") { state.phase = "error"; state.error = String(m.message ?? "runtime error").slice(0, 2048); }
++            else return;
++            emit("state");
++        },
++        dispose,
++    };
++}
+diff --git a/tools/tests/sdk-child-stop.test.ts b/tools/tests/sdk-child-stop.test.ts
+new file mode 100644
+--- /dev/null
++++ b/tools/tests/sdk-child-stop.test.ts
+@@ -0,0 +1,105 @@
++import { expect, test } from "bun:test";
++import {
++    ChildProcessCancelled, startChildExecution, startChildProcess,
++    stopChildProcesses, setChildDrainBudgetForTests, clearChildShutdownDebtsForTests,
++} from "../../src/worker/core/child-process";
++import { setChildVfsCloseBudgetForTests } from "../../src/worker/core/child-vfs";
++import type { VirtualFileSystem } from "../../src/worker/runtime/filesystem/vfs";
++
++const request = { imagePath: "C:\\helper.exe", commandLine: "helper.exe", currentDirectory: "C:\\" };
++const fakeVfs = (flushAll: () => Promise<void>) => ({ flushAll }) as VirtualFileSystem;
++const tasks: Array<{ completion: Promise<number> }> = [];
++function child(vfs: VirtualFileSystem, cleanup: () => void | Promise<void>) {
++    const task = startChildExecution(vfs, request, context => {
++        context.onStop(cleanup);
++        return new Promise<number>((_, reject) => context.signal.addEventListener("abort", () => reject(new ChildProcessCancelled()), { once: true }));
++    });
++    void task.completion.catch(() => {}); tasks.push(task); return task;
++}
++async function until(check: () => boolean) {
++    for (let i = 0; i < 1000; i++) {
++        if (check()) return;
++        await new Promise(r => setTimeout(r, 1));
++    }
++    throw new Error("fixture did not reach child I/O");
++}
++
++test("SDK strict stop propagates child drain failures/timeouts and retains failed work for retry", async () => {
++    clearChildShutdownDebtsForTests();
++    setChildDrainBudgetForTests(50);
++    setChildVfsCloseBudgetForTests(10);
++    let releaseCleanup = () => {}, releaseTransport = () => {}, releaseOldFlush = () => {};
++    try {
++        let cleaned = false, flushes = 0;
++        child(fakeVfs(async () => { flushes++; }), async () => { await Promise.resolve(); cleaned = true; });
++        await stopChildProcesses(false, true);
++        expect(cleaned).toBe(true);
++        expect(flushes).toBe(1);
++
++        let release!: () => void;
++        const cleanup = new Promise<void>(r => { release = r; }); releaseCleanup = release;
++        child(fakeVfs(async () => {}), () => cleanup);
++        await expect(stopChildProcesses(false, true)).rejects.toThrow("timed out");
++        release();
++        await stopChildProcesses(false, true);
++
++        let finishOldFlush!: () => void, oldFlushAttempts = 0;
++        const oldFlush = new Promise<void>(r => { finishOldFlush = r; }); releaseOldFlush = finishOldFlush;
++        const prior = startChildExecution(fakeVfs(async () => { if (++oldFlushAttempts === 1) await oldFlush; }), request, async () => 0);
++        void prior.completion.catch(() => {}); tasks.push(prior);
++        expect(await prior.completion).toBe(0);
++        expect(oldFlushAttempts).toBe(1);
++        await expect(stopChildProcesses(false, true)).rejects.toThrow("prior vfs.flushAll timed out");
++        expect(oldFlushAttempts).toBe(1);
++        finishOldFlush();
++        await stopChildProcesses(false, true);
++        expect(oldFlushAttempts).toBe(2);
++
++        let failing = true, attempts = 0;
++        child(fakeVfs(async () => { attempts++; if (failing) throw new Error("storage commit refused"); }), () => {});
++        await expect(stopChildProcesses(false, true)).rejects.toThrow("storage commit refused");
++        failing = false;
++        await stopChildProcesses(false, true);
++        expect(attempts).toBe(2);
++
++        let finish!: () => void, dispatched = false;
++        const pending = new Promise<void>(r => { finish = r; }); releaseTransport = finish;
++        let emit: ((data: unknown) => void) | null = null;
++        const worker = {
++            postMessage(m: any) {
++                if (m.type === "child_boot") queueMicrotask(() => {
++                    emit!({ type: "child_io", request: { method: "flushAll", args: [] } });
++                    emit!({ type: "process_exit", exitCode: 0 });
++                });
++            },
++            terminate() {},
++            set onmessage(fn: ((event: { data: unknown }) => void) | null) { emit = fn ? data => fn({ data }) : null; },
++            set onerror(_: unknown) {}, set onmessageerror(_: unknown) {},
++        } as unknown as Worker;
++        const image = { path: request.imagePath };
++        let transportFlushes = 0;
++        const vfs = {
++            open: async () => image, getFileSize: () => 4, read: async () => new Uint8Array(4),
++            flushAll: async () => { transportFlushes++; dispatched = true; if (transportFlushes === 1) await pending; },
++        } as unknown as VirtualFileSystem;
++        const task = startChildProcess(vfs, request, () => worker);
++        void task.completion.catch(() => {}); tasks.push(task);
++        await until(() => dispatched);
++        expect(await task.completion).toBe(0);
++        expect(transportFlushes).toBe(2);
++        await expect(stopChildProcesses(false, true)).rejects.toThrow("transport drain timed out");
++        finish();
++        await stopChildProcesses(false, true);
++
++        child(fakeVfs(async () => {}), () => { throw new Error("child resource close refused"); });
++        await expect(stopChildProcesses(false, true)).rejects.toThrow("child resource close refused");
++        await expect(stopChildProcesses(false, true)).rejects.toThrow("child resource close refused");
++    } finally {
++        releaseCleanup(); releaseTransport(); releaseOldFlush();
++        await stopChildProcesses();
++        await Promise.allSettled(tasks.map(task => task.completion));
++        clearChildShutdownDebtsForTests();
++        setChildDrainBudgetForTests(30000);
++        setChildVfsCloseBudgetForTests(30000);
++    }
++});
+diff --git a/tools/tests/sdk-vfs-strict-stop.test.ts b/tools/tests/sdk-vfs-strict-stop.test.ts
+new file mode 100644
+--- /dev/null
++++ b/tools/tests/sdk-vfs-strict-stop.test.ts
+@@ -0,0 +1,56 @@
++import { afterAll, expect, test } from "bun:test";
++import { VirtualFileSystem } from "../../src/worker/runtime/filesystem/vfs";
++import type { ZipArchive } from "@bottleship/formats/zip";
++import { installFakeOpfs, findFakeByName } from "./fixtures/fake-opfs";
++
++const savedNavigator = globalThis.navigator;
++afterAll(() => { (globalThis as unknown as { navigator: unknown }).navigator = savedNavigator; });
++let sequence = 0;
++interface WriterEntry { writer: { close(): Promise<void> } | null }
++interface Overlay {
++    writerCache: Map<string, WriterEntry>;
++    flushWriteBuffer(entry: WriterEntry): Promise<void>;
++}
++async function fresh() {
++    const root = installFakeOpfs();
++    const vfs = new VirtualFileSystem();
++    vfs.mountRom(null as unknown as ZipArchive, "rom", new Map());
++    await vfs.initOverlay(`test:sdk-strict-${++sequence}`);
++    const overlay = (vfs as unknown as { overlay: Overlay }).overlay;
++    return { root, vfs, overlay };
++}
++
++test("SDK strict storage barrier retains a real swallowed writer-close failure", async () => {
++    const { root, vfs, overlay } = await fresh();
++    const path = "C:\\save.bin";
++    const handle = vfs.openSync(path, 0x40000000, 2)!;
++    expect(vfs.writeSync(handle, new Uint8Array([0xaa, 0xbb]))).toBe(2);
++    const entry = overlay.writerCache.get(path.toLowerCase())!;
++    await overlay.flushWriteBuffer(entry);
++    expect(entry.writer).toBeTruthy();
++    const writer = entry.writer!, close = writer.close.bind(writer);
++    writer.close = async () => { throw new Error("fixture OPFS close denied"); };
++    try {
++        // the real default close path consumes its writer and logs the failure.
++        await expect(vfs.flushFile(path)).resolves.toBeUndefined();
++        expect(overlay.writerCache.has(path.toLowerCase())).toBe(false);
++        expect([...findFakeByName(root, "save.bin")!.data]).not.toEqual([0xaa, 0xbb]);
++        await expect(vfs.flushAll()).resolves.toBeUndefined();
++        await expect(vfs.flushAll(true)).rejects.toThrow("fixture OPFS close denied");
++        writer.close = close;
++        // removing the fault does not reconstruct already-discarded accepted bytes.
++        await expect(vfs.flushAll(true)).rejects.toThrow("fixture OPFS close denied");
++        expect([...findFakeByName(root, "save.bin")!.data]).not.toEqual([0xaa, 0xbb]);
++    } finally {
++        writer.close = close;
++        await vfs.flushAll();
++    }
++});
++
++test("SDK strict storage barrier commits a separate healthy real overlay", async () => {
++    const { root, vfs } = await fresh();
++    const handle = vfs.openSync("C:\\healthy.bin", 0x40000000, 2)!;
++    expect(vfs.writeSync(handle, new Uint8Array([0x12, 0x34, 0x56]))).toBe(3);
++    await expect(vfs.flushAll(true)).resolves.toBeUndefined();
++    expect([...findFakeByName(root, "healthy.bin")!.data]).toEqual([0x12, 0x34, 0x56]);
++});
+diff --git a/tools/tests/sdk-registry-strict-stop.test.ts b/tools/tests/sdk-registry-strict-stop.test.ts
+new file mode 100644
+--- /dev/null
++++ b/tools/tests/sdk-registry-strict-stop.test.ts
+@@ -0,0 +1,82 @@
++import { afterAll, expect, test } from "bun:test";
++import { RegistryStore } from "../../src/worker/runtime/filesystem/registry";
++import { FakeFileHandle, installFakeOpfs, findFakeByName } from "./fixtures/fake-opfs";
++
++const savedNavigator = globalThis.navigator;
++const originalWriter = FakeFileHandle.prototype.createWritable;
++afterAll(() => {
++    (globalThis as unknown as { navigator: unknown }).navigator = savedNavigator;
++    FakeFileHandle.prototype.createWritable = originalWriter;
++});
++
++test("SDK registry stop rejects a failed commit and persists the retained hive on retry", async () => {
++    const root = installFakeOpfs();
++    const registry = new RegistryStore();
++    registry.setGameId("test:sdk-registry-stop");
++    const { key } = registry.createKey("HKCU", "Software\\SdkStop");
++    registry.setValue(key, "Saved", { name: "Saved", type: "REG_SZ", data: "retained" });
++    FakeFileHandle.prototype.createWritable = async function (options) {
++        const writer = await originalWriter.call(this, options);
++        if (this.name === "registry.json") writer.close = async () => { throw new Error("registry commit refused"); };
++        return writer;
++    };
++    try {
++        await expect(registry.flush()).resolves.toBeUndefined();
++        await expect(registry.flush(true)).rejects.toThrow("registry commit refused");
++        expect(findFakeByName(root, "registry.json")!.data.length).toBe(0);
++        FakeFileHandle.prototype.createWritable = originalWriter;
++        await expect(registry.flush(true)).resolves.toBeUndefined();
++        const saved = JSON.parse(new TextDecoder().decode(findFakeByName(root, "registry.json")!.data));
++        expect(saved.keys["hkcu\\software\\sdkstop"].saved.data).toBe("retained");
++    } finally { FakeFileHandle.prototype.createWritable = originalWriter; }
++});
++
++test("SDK registry stop rejects inaccessible storage; a child without a container remains a no-op", async () => {
++    installFakeOpfs();
++    const storage = navigator.storage.getDirectory;
++    navigator.storage.getDirectory = async () => { throw new Error("registry storage unavailable"); };
++    const owner = new RegistryStore();
++    owner.setGameId("test:sdk-registry-unavailable");
++    try {
++        await expect(owner.flush()).resolves.toBeUndefined();
++        await expect(owner.flush(true)).rejects.toThrow("registry directory");
++        await expect(new RegistryStore().flush(true)).resolves.toBeUndefined();
++    } finally { navigator.storage.getDirectory = storage; }
++});
++
++test("the latest strict registry snapshot follows an already-running autosave", async () => {
++    const root = installFakeOpfs();
++    const registry = new RegistryStore();
++    registry.setGameId("test:sdk-registry-order");
++    const { key } = registry.createKey("HKCU", "Software\\SdkStop");
++    registry.setValue(key, "Saved", { name: "Saved", type: "REG_SZ", data: "older" });
++    let release!: () => void, started!: () => void, first = true;
++    const gate = new Promise<void>(resolve => { release = resolve; });
++    const waiting = new Promise<void>(resolve => { started = resolve; });
++    FakeFileHandle.prototype.createWritable = async function (options) {
++        const writer = await originalWriter.call(this, options);
++        if (this.name === "registry.json" && first) {
++            first = false;
++            const close = writer.close.bind(writer);
++            writer.close = async () => { started(); await gate; await close(); };
++        }
++        return writer;
++    };
++    let older: Promise<void> | undefined, latest: Promise<void> | undefined;
++    try {
++        older = registry.flush();
++        await waiting;
++        registry.setValue(key, "Saved", { name: "Saved", type: "REG_SZ", data: "latest" });
++        latest = registry.flush(true);
++        // Let every unblocked fake-storage promise settle while the old close is held.
++        await new Promise(resolve => setTimeout(resolve, 0));
++        release();
++        await Promise.all([older, latest]);
++        const saved = JSON.parse(new TextDecoder().decode(findFakeByName(root, "registry.json")!.data));
++        expect(saved.keys["hkcu\\software\\sdkstop"].saved.data).toBe("latest");
++    } finally {
++        release();
++        await Promise.allSettled([older, latest]);
++        FakeFileHandle.prototype.createWritable = originalWriter;
++    }
++});
+diff --git a/tools/tests/sdk-runtime-bridge-owner.test.ts b/tools/tests/sdk-runtime-bridge-owner.test.ts
+new file mode 100644
+--- /dev/null
++++ b/tools/tests/sdk-runtime-bridge-owner.test.ts
+@@ -0,0 +1,58 @@
++import { expect, test } from "bun:test";
++import { installRuntimeBridge } from "../../src/app/runtime-bridge";
++
++test("SDK bridge StrictMode replay retains runtime ownership, while unmount and pagehide contain it", async () => {
++    const names = ["window", "location", "sessionStorage"] as const;
++    const original = names.map(name => Object.getOwnPropertyDescriptor(globalThis, name));
++    const host = Object.assign(new EventTarget(), { parent: { postMessage() {} } });
++    const stored = new Map<string, string>();
++    const globals = {
++        window: host,
++        location: new URL("http://localhost/?ring3Sdk=1&ring3Session=strictmode-test&ring3Generation=1"),
++        sessionStorage: { getItem: (key: string) => stored.get(key) ?? null, setItem: (key: string, value: string) => { stored.set(key, value); } },
++    };
++    for (const name of names) Object.defineProperty(globalThis, name, { configurable: true, writable: true, value: globals[name] });
++    const closed = [0, 0, 0, 0];
++    const mount = (index: number) => {
++        const bridge = installRuntimeBridge({ launch: async () => {}, control: async () => ({}), dispose: () => { closed[index]++; } });
++        expect(bridge).not.toBeNull();
++        return bridge!;
++    };
++    try {
++        const first = mount(0);
++        first.dispose();
++        expect(closed).toEqual([0, 0, 0, 0]);
++        const replay = mount(1);
++        await Promise.resolve();
++        expect(closed).toEqual([0, 0, 0, 0]);
++        host.dispatchEvent(new Event("pagehide"));
++        expect(closed).toEqual([0, 1, 0, 0]);
++        replay.dispose();
++        await Promise.resolve();
++        expect(closed).toEqual([0, 1, 0, 0]);
++
++        const unmount = mount(2);
++        unmount.dispose();
++        expect(closed[2]).toBe(0);
++        await Promise.resolve();
++        expect(closed[2]).toBe(1);
++        unmount.dispose();
++        await Promise.resolve();
++        expect(closed[2]).toBe(1);
++
++        const leave = mount(3);
++        leave.dispose();
++        host.dispatchEvent(new Event("pagehide"));
++        expect(closed[3]).toBe(1);
++        await Promise.resolve();
++        expect(closed).toEqual([0, 1, 1, 1]);
++    } finally {
++        host.dispatchEvent(new Event("pagehide"));
++        await Promise.resolve();
++        names.forEach((name, index) => {
++            const descriptor = original[index];
++            if (descriptor) Object.defineProperty(globalThis, name, descriptor);
++            else Reflect.deleteProperty(globalThis, name);
++        });
++    }
++});
