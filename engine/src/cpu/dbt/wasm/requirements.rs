@@ -26,6 +26,7 @@ pub(in crate::cpu::dbt::wasm) struct ModuleRequirements {
     pub(in crate::cpu::dbt::wasm) has_x87: bool,
     pub(in crate::cpu::dbt::wasm) has_x87_pairs: bool,
     pub(in crate::cpu::dbt::wasm) has_x87_groups: bool,
+    pub(in crate::cpu::dbt::wasm) has_x87_wide_groups: bool,
     pub(in crate::cpu::dbt::wasm) has_repeat: bool,
     pub(in crate::cpu::dbt::wasm) has_segments: bool,
     pub(in crate::cpu::dbt::wasm) has_segment_check: bool,
@@ -226,6 +227,12 @@ impl ModuleRequirements {
                     .next()
                     .is_some()
             });
+        let has_x87_wide_groups = matches!(binding, Some(EmbeddedBinding::Resident { .. }))
+            && blocks.iter().any(|block| {
+                crate::cpu::dbt::x87_wide_groups(&block.instructions)
+                    .next()
+                    .is_some()
+            });
         let has_read32_validator = paging_configured && imports.read32_result_sites >= 2;
         let has_read32_view = matches!(binding, Some(EmbeddedBinding::Resident { .. }))
             && imports.read32_result_sites != 0
@@ -299,6 +306,7 @@ impl ModuleRequirements {
             has_x87,
             has_x87_pairs,
             has_x87_groups,
+            has_x87_wide_groups,
             has_repeat,
             has_segments,
             has_segment_check,
@@ -315,3 +323,7 @@ impl ModuleRequirements {
 #[cfg(test)]
 #[path = "requirements/tests/pairs.rs"]
 mod pair_tests;
+
+#[cfg(test)]
+#[path = "requirements/tests/wide.rs"]
+mod wide_group_tests;

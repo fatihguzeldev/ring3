@@ -10,7 +10,7 @@ use crate::{
     memory::{AddressSpace, GuestAddress, PageRange, Permissions},
 };
 
-fn prepared(code: &[u8]) -> crate::cpu::dbt::PreparedRegion {
+pub(super) fn prepared(code: &[u8]) -> crate::cpu::dbt::PreparedRegion {
     let mut memory = AddressSpace::new(1).unwrap();
     memory
         .map_zeroed(

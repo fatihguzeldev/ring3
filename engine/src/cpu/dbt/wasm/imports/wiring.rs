@@ -159,7 +159,11 @@ pub(in crate::cpu::dbt::wasm) fn build(
     if plan.has_x87_groups {
         types.ty().function([ValType::I32; 15], [ValType::I64]);
     }
-    let read32_view_type = x87_group_type + u32::from(plan.has_x87_groups);
+    let x87_group32_type = x87_group_type + u32::from(plan.has_x87_groups);
+    if plan.has_x87_wide_groups {
+        types.ty().function([ValType::I32; 39], [ValType::I64]);
+    }
+    let read32_view_type = x87_group32_type + u32::from(plan.has_x87_wide_groups);
     if plan.has_read32_view {
         types.ty().function([ValType::I64], [ValType::I32]);
     }
@@ -758,6 +762,23 @@ pub(in crate::cpu::dbt::wasm) fn build(
             EntityType::Function(x87_group_type),
         );
         helper_imports.x87_group = Some(HelperBinding::Resident {
+            index: function_index,
+            key,
+            id,
+        });
+        function_index += 1;
+    }
+
+    if plan.has_x87_wide_groups {
+        let Some(EmbeddedBinding::Resident { key, id }) = binding else {
+            unreachable!("wide x87 groups require resident material");
+        };
+        imports.import(
+            "ring3",
+            "x87_resident_group32",
+            EntityType::Function(x87_group32_type),
+        );
+        helper_imports.x87_group32 = Some(HelperBinding::Resident {
             index: function_index,
             key,
             id,

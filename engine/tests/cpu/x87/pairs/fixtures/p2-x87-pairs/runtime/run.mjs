@@ -7,6 +7,7 @@ import {pageFaultPacket} from '../../../../../../support/wasm/page-fault.mjs';
 import {Fixture, PC, FP, RAM, defined, envelope, ext, packet} from './support.mjs';
 import {verifyFinalStores} from './final-store.mjs';
 import {verifyGroups} from './groups.mjs';
+import {verifyWideGroups} from './groups/wide.mjs';
 
 const [enginePath, output] = process.argv.slice(2);
 const engine = readEngine(enginePath), observations = [], modules = new Map();
@@ -286,6 +287,7 @@ for (const program of [programs.readRegister, programs.register]) {
 }
 verifyFinalStores(make, observations);
 verifyGroups(make, observations);
+verifyWideGroups(make, observations);
 
 writeFileSync(join(output, 'result.json'), JSON.stringify({status: 'PASS',
   engine: {path: enginePath, sha256: engine.sha256, bytes: engine.bytes.length},

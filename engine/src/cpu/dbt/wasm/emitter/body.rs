@@ -77,10 +77,21 @@ pub(super) fn emit(
         declarations.push((5, ValType::I32));
         declarations.push((1, ValType::I64));
     }
-    if plan.has_x87_groups {
+    if plan.has_x87_groups || plan.has_x87_wide_groups {
         let first = 4 + declarations.iter().map(|(count, _)| count).sum::<u32>();
-        helper_imports.x87_group_locals = Some(x87::group::GroupLocals::new(first));
-        declarations.push((x87::group::INTEGER_LOCALS, ValType::I32));
+        let (locals, count) = if plan.has_x87_wide_groups {
+            (
+                x87::group::GroupLocals::wide(first),
+                x87::group::wide::INTEGER_LOCALS,
+            )
+        } else {
+            (
+                x87::group::GroupLocals::new(first),
+                x87::group::INTEGER_LOCALS,
+            )
+        };
+        helper_imports.x87_group_locals = Some(locals);
+        declarations.push((count, ValType::I32));
         declarations.push((1, ValType::I64));
     }
     if plan.has_read32_view {
@@ -170,8 +181,19 @@ pub(super) fn emit(
         code_fetch::check_context(&mut code, 1);
     }
     let mut group_ordinal = 0;
+    let mut wide_ordinal = blocks
+        .iter()
+        .map(|block| crate::cpu::dbt::x87_groups(&block.instructions).count() as u32)
+        .sum();
     for block in blocks {
-        emit_block(&mut code, block, *helper_imports, tier, &mut group_ordinal);
+        emit_block(
+            &mut code,
+            block,
+            *helper_imports,
+            tier,
+            &mut group_ordinal,
+            &mut wide_ordinal,
+        );
     }
     if let Some(limit) = helper_imports.code_fetch_limit {
         code_fetch::check_pc(&mut code, limit, 1);
@@ -216,6 +238,7 @@ fn emit_block(
     imports: Imports,
     tier: CompilationTier32,
     group_ordinal: &mut u32,
+    wide_ordinal: &mut u32,
 ) {
     if let Some(gate) = block.gate() {
         code.local_get(EIP)
@@ -284,6 +307,7 @@ fn emit_block(
         }
         let mut pairs = crate::cpu::dbt::x87_pairs(&block.instructions).peekable();
         let mut groups = crate::cpu::dbt::x87_groups(&block.instructions).peekable();
+        let mut wide_groups = crate::cpu::dbt::x87_wide_groups(&block.instructions).peekable();
         for (index, instruction) in block.instructions.iter().enumerate() {
             code.end();
             let remaining = count - index as u32 - 1;
@@ -309,6 +333,19 @@ fn emit_block(
             } else {
                 None
             };
+            let wide_group = if imports.x87_group32.is_some()
+                && wide_groups.peek().is_some_and(|group| group.first == index)
+            {
+                let plan = wide_groups.next().unwrap();
+                let group = plan
+                    .view(&block.instructions)
+                    .expect("planned wide x87 group");
+                let ordinal = *wide_ordinal;
+                *wide_ordinal += 1;
+                Some((ordinal, group))
+            } else {
+                None
+            };
             abi::safepoint(code, remaining + 2);
             if let Some(limit) = imports.code_fetch_limit {
                 if index != 0
@@ -321,7 +358,9 @@ fn emit_block(
             }
             x87::precheck_instruction(code, instruction, imports, remaining + 2);
             crate::cpu::dbt::wasm::detection::snapshot(code, instruction, imports);
-            if let Some((_, group)) = group {
+            if let Some((_, group)) = wide_group {
+                x87::group::wide::capture_limit(code, group, imports);
+            } else if let Some((_, group)) = group {
                 x87::group::capture_limit(code, group, imports);
             } else if pair.is_some() {
                 x87::pair::capture_limit(code, imports);
@@ -330,7 +369,9 @@ fn emit_block(
             if matches!(instruction.operation(), Operation::InterruptReturn { .. }) {
                 abi::interrupt_return_precheck(code, remaining + 2);
             }
-            if let Some((ordinal, group)) = group {
+            if let Some((ordinal, group)) = wide_group {
+                x87::group::wide::operation(code, ordinal, group, imports, remaining + 2);
+            } else if let Some((ordinal, group)) = group {
                 x87::group::operation(code, ordinal, group, imports, remaining + 2);
             } else if let Some(pair) = pair {
                 x87::pair::operation(code, pair, imports, remaining + 2);
@@ -348,7 +389,9 @@ fn emit_block(
                 code_fetch::refresh(code, limit);
             }
             abi::debug_after_retirement(code, remaining + 2, imports.detection, false);
-            if let Some((_, group)) = group {
+            if let Some((_, group)) = wide_group {
+                x87::group::skip_completed(code, imports, group.len(), remaining);
+            } else if let Some((_, group)) = group {
                 x87::group::skip_completed(code, imports, group.len(), remaining);
             } else if pair.is_some() {
                 x87::pair::skip_completed_second(code, imports, remaining);

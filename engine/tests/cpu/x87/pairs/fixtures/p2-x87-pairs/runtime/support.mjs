@@ -9,6 +9,8 @@ export const envelope = (status, completed, reported = 0) =>
   BigInt(status >>> 0) | BigInt(completed) << 32n | BigInt(reported) << 34n;
 export const groupEnvelope = (status, completed, reported = 0) =>
   BigInt(status >>> 0) | BigInt(completed) << 32n | BigInt(reported) << 36n;
+export const wideEnvelope = (status, completed, reported = 0) =>
+  BigInt(status >>> 0) | BigInt(completed) << 32n | BigInt(reported) << 38n;
 export function packet(length, flags = 0x202) {
   const bytes = Buffer.alloc(40);
   bytes.write('R3MH'); bytes.writeUInt32LE(0x10007, 4); bytes.writeUInt32LE(40, 8);
@@ -28,7 +30,7 @@ export function ext(value) {
 }
 
 export class Fixture {
-  constructor(module, program, {resident = true, scalar = false} = {}) {
+  constructor(module, program, {resident = true, scalar = false, wide = false} = {}) {
     const instance = new WebAssembly.Instance(module, {ring3_observability: {now_ns: () => 0n}});
     this.api = Object.fromEntries(Object.entries(instance.exports)
       .filter(([name]) => name.startsWith('ring3_abi_v1_'))
@@ -43,12 +45,26 @@ export class Fixture {
     this.put(140, this.data); this.ok('upload', RAM, this.data.length);
     this.code = Buffer.alloc(4096); this.code.set(program.code);
     this.put(140, Buffer.from(program.code)); this.ok('upload', PC, program.code.length);
-    const specs = Buffer.alloc(8); specs.writeUInt32LE(PC); specs.writeUInt32LE(program.code.length, 4);
-    this.put(140, specs); this.ok(resident ? 'compile_resident' : 'compile', 1);
-    const descriptor = this.arena();
-    this.id = resident ? descriptor.readBigUInt64LE(148) : 0n;
-    const pointer = resident ? descriptor.readUInt32LE(156) : this.api.module_ptr() >>> 0;
-    const length = resident ? descriptor.readUInt32LE(160) : this.api.module_len() >>> 0;
+    let pointer, length;
+    if (wide) {
+      assert.equal(resident, true, 'wide control uses the selected resident cache limits');
+      this.ok('configure_execution_with_limits', 4, 8 * 1024 * 1024, 0xffffffff, program.captureInstructions ?? 256, 524288);
+      this.ok('prepare_cache_entry', ...key, PC);
+      const request = this.arena().subarray(140, 204);
+      assert.equal(request.subarray(0, 4).toString(), 'R3CQ'); assert.equal(request.readUInt32LE(24), 1);
+      this.id = request.readBigUInt64LE(32); this.serial = request.readBigUInt64LE(16);
+      assert.equal(request.readUInt32LE(48), 0);
+      this.ok('resident_module', ...pair(this.id));
+      const descriptor = this.arena().subarray(140, 164);
+      pointer = descriptor.readUInt32LE(16); length = descriptor.readUInt32LE(20);
+    } else {
+      const specs = Buffer.alloc(8); specs.writeUInt32LE(PC); specs.writeUInt32LE(program.code.length, 4);
+      this.put(140, specs); this.ok(resident ? 'compile_resident' : 'compile', 1);
+      const descriptor = this.arena();
+      this.id = resident ? descriptor.readBigUInt64LE(148) : 0n;
+      pointer = resident ? descriptor.readUInt32LE(156) : this.api.module_ptr() >>> 0;
+      length = resident ? descriptor.readUInt32LE(160) : this.api.module_len() >>> 0;
+    }
     this.bytes = Buffer.from(new Uint8Array(this.memory.buffer, pointer, length));
     const generated = new WebAssembly.Module(this.bytes);
     this.imports = WebAssembly.Module.imports(generated);
@@ -103,11 +119,37 @@ export class Fixture {
       row.result = result.toString();
       return result;
     };
+    bindings.x87_resident_group32 = (...args) => {
+      const row = {name: 'x87_resident_group32', args: args.map(value => value >>> 0)};
+      this.calls.push(row);
+      let result;
+      if (this.wideSynthetic) {
+        const reply = this.wideSynthetic(args, this);
+        if (reply.packet) this.put(100, reply.packet);
+        result = reply.envelope;
+      } else if (this.scalar) {
+        const selected = this.program.wideGroups[args[4]];
+        assert.ok(selected, 'literal wide ordinal names the retained source span');
+        const step = this.program.steps[selected.first];
+        const status = this.api.x87_resident_op(...args.slice(0, 4), step.word,
+          args[5], args[37], step.pc, step.opcode, step.control);
+        result = wideEnvelope(status, status === 0 && this.arena().readUInt32LE(116) === 0 ? 1 : 0);
+      } else {
+        const forwarded = [...args];
+        if (this.wideOrdinal !== undefined) forwarded[4] = this.wideOrdinal;
+        if (this.forceOne) forwarded[38] = 1;
+        result = this.api.x87_resident_group32(...forwarded);
+      }
+      if (this.cancelAfterFirst) this.put(96, Buffer.from([1, 0, 0, 0]));
+      row.result = result.toString();
+      return result;
+    };
     this.run = new WebAssembly.Instance(generated, {env: {memory: this.memory}, ring3: bindings}).exports.run;
     if (resident) {
       this.table = new WebAssembly.Table({element: 'anyfunc', initial: 1, maximum: 1});
       this.table.set(0, this.run);
-      this.ok('acknowledge_resident_installation', ...key, ...pair(this.id), 0);
+      if (wide) this.ok('install_cached_entry', ...key, ...pair(this.serial), ...pair(this.id), 0);
+      else this.ok('acknowledge_resident_installation', ...key, ...pair(this.id), 0);
     }
   }
   ok(name, ...args) { assert.equal(this.api[name](...args), 0, name); }

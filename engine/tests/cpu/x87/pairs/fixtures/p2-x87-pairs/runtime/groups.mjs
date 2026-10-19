@@ -13,7 +13,7 @@ const operations = {
   abs: {bytes: [0xd9, 0xe1], opcode: 0x1e1, word: 16, control: 1},
   store: {bytes: [0xd9, 0x1f], opcode: 0x11f, word: 4 | 1 << 16, control: 0x401},
 };
-function program(name, names, data = []) {
+export function program(name, names, data = []) {
   return {name, code: [...names.flatMap(name => operations[name].bytes), 0xff, 0xe2],
     steps: names.map((name, index) => ({...operations[name], pc: PC + index * 2, name})),
     groups: [{first: 0, length: names.length}], data};
@@ -53,7 +53,7 @@ function rounded(value, precision) {
   raw.writeBigUInt64LE(significand << BigInt(64 - precision)); raw.writeUInt16LE(0x3fff + exponent, 8);
   return {rational, raw, exponent, significand, inexact: remainder !== 0n, incremented};
 }
-function numeric(program, count, control) {
+export function numeric(program, count, control) {
   const precision = new Map([[0x003f, 24], [0x023f, 53], [0x037f, 64]]).get(control);
   assert.ok(precision, 'explicit supported precision with round-to-nearest');
   const a = binary32(program.data[0].value), b = binary32(program.data[1].value);
@@ -82,11 +82,11 @@ function numeric(program, count, control) {
   return {raw, status, tag: count ? 0x3ffc : 0xfffc};
 }
 
-function stop(result, reason, retired, pc, flags = 0x202) {
+export function stop(result, reason, retired, pc, flags = 0x202) {
   assert.equal(result.status, 0);
   assert.deepEqual([72, 76, 48, 52].map(at => result.arena.readUInt32LE(at)), [reason, retired, pc, flags]);
 }
-function memory(c, writes = []) {
+export function memory(c, writes = []) {
   const view = new DataView(c.memory.buffer);
   for (const [address, original] of [[PC, c.code], [RAM, c.data]]) {
     const expected = Buffer.from(original), actual = Buffer.alloc(4096);

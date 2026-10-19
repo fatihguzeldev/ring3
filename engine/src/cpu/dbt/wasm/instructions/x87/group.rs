@@ -5,6 +5,8 @@ use crate::cpu::dbt::{
 };
 use wasm_encoder::{BlockType, InstructionSink, ValType};
 
+pub(in crate::cpu::dbt::wasm) mod wide;
+
 pub(in crate::cpu::dbt::wasm) const INTEGER_LOCALS: u32 = 12;
 
 #[derive(Clone, Copy)]
@@ -29,8 +31,19 @@ impl GroupLocals {
         }
     }
 
+    pub(in crate::cpu::dbt::wasm) const fn wide(first: u32) -> Self {
+        Self {
+            limit: first,
+            first_address: first + 1,
+            completed: first + 33,
+            reported_step: first + 34,
+            next_pc: first + 35,
+            progress: first + wide::INTEGER_LOCALS,
+        }
+    }
+
     fn address(self, index: usize) -> u32 {
-        debug_assert!(index < X87_GROUP_MAX_STEPS);
+        debug_assert!(index < crate::cpu::dbt::X87_WIDE_GROUP_MAX_STEPS);
         self.first_address + index as u32
     }
 }
