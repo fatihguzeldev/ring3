@@ -29,7 +29,7 @@ use wasm_encoder::{
 fn wrapper() -> Vec<u8> {
     let mut module = Module::new();
     let mut types = TypeSection::new();
-    types.ty().function([ValType::I32; 2], [ValType::I32; 10]);
+    types.ty().function([ValType::I32; 3], [ValType::I32; 10]);
     types.ty().function([ValType::I32], [ValType::I32]);
     types.ty().function([ValType::I64], [ValType::I32]);
     types.ty().function([], []);
@@ -69,7 +69,7 @@ fn wrapper() -> Vec<u8> {
     exports.export("run", ExportKind::Func, 3);
     module.section(&exports);
     let mut function = Function::new([
-        (25, ValType::I32),
+        (24, ValType::I32),
         (1, ValType::I64),
         (13, ValType::I32),
         (1, ValType::I64),
@@ -79,11 +79,12 @@ fn wrapper() -> Vec<u8> {
     code.local_get(0)
         .local_set(ADDRESS)
         .local_get(1)
-        .local_set(42);
+        .local_set(42)
+        .local_get(2)
+        .local_set(REASON);
     for (local, value) in [
         (STATE_PTR, 0),
         (EIP, 0x1000),
-        (REASON, 0),
         (DETAIL, 0x91),
         (FAULT_ADDRESS, 0xa2),
         (FAULT_ACCESS, 0xb3),

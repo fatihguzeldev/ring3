@@ -3,7 +3,7 @@ use crate::cpu::dbt::wasm::helpers::protocol::{exit_if_failed, helper_field};
 use crate::cpu::dbt::wasm::{imports::Imports, locals::*};
 use crate::cpu::x86::SegmentAccess;
 use crate::cpu::x86::ir::{EffectiveAddress, SmallWidth, Value32};
-use wasm_encoder::InstructionSink;
+use wasm_encoder::{BlockType, InstructionSink};
 
 pub(in crate::cpu::dbt::wasm) fn load(
     code: &mut InstructionSink<'_>,
@@ -13,9 +13,9 @@ pub(in crate::cpu::dbt::wasm) fn load(
     exit_depth: u32,
 ) {
     checked_address(code, address, 4, SegmentAccess::Read, imports, exit_depth);
-    super::read_view::load(code, imports);
+    let direct_result = super::read_view::load(code, imports);
     crate::cpu::dbt::wasm::code_fetch::check_context(code, exit_depth);
-    cpu_scalar::validate_read32(code, imports);
+    validate_read32(code, imports, direct_result);
     exit_if_failed(code, exit_depth);
     helper_field(code, 20);
     code.local_set(register(destination));
@@ -127,7 +127,7 @@ fn load_at_address_with_intent(
     modify: bool,
 ) {
     let paging_modify = modify && imports.paging_configured;
-    if modify {
+    let direct_result = if modify {
         code.local_get(ADDRESS)
             .call(
                 (if paging_modify {
@@ -138,9 +138,10 @@ fn load_at_address_with_intent(
                 .expect("prepared memory operand has a read import"),
             )
             .local_set(HELPER_STATUS);
+        false
     } else {
-        super::read_view::load(code, imports);
-    }
+        super::read_view::load(code, imports)
+    };
     crate::cpu::dbt::wasm::code_fetch::check_context(code, exit_depth);
     if paging_modify {
         cpu_scalar::validate(
@@ -150,11 +151,26 @@ fn load_at_address_with_intent(
             imports.paging_configured,
         );
     } else {
-        cpu_scalar::validate_read32(code, imports);
+        validate_read32(code, imports, direct_result);
     }
     exit_if_failed(code, exit_depth);
     helper_field(code, 20);
     code.local_set(RESULT);
+}
+
+fn validate_read32(code: &mut InstructionSink<'_>, imports: Imports, direct_result: bool) {
+    if direct_result {
+        code.if_(BlockType::Empty)
+            .i32_const(0)
+            .local_set(LHS)
+            .i32_const(0)
+            .local_set(RHS)
+            .else_();
+    }
+    cpu_scalar::validate_read32(code, imports);
+    if direct_result {
+        code.end();
+    }
 }
 
 pub(in crate::cpu::dbt::wasm) fn store_result(

@@ -2,7 +2,7 @@ use crate::cpu::dbt::wasm::{
     imports::Imports,
     locals::{ADDRESS, HELPER_STATUS, STATE_PTR},
 };
-use wasm_encoder::{BlockType, InstructionSink, MemArg};
+use wasm_encoder::{BlockType, InstructionSink, MemArg, ValType};
 
 pub(in crate::cpu::dbt::wasm) const INTEGER_LOCALS: u32 = 7;
 
@@ -47,12 +47,15 @@ pub(in crate::cpu::dbt::wasm) fn initialize(code: &mut InstructionSink<'_>, impo
     }
 }
 
-pub(super) fn load(code: &mut InstructionSink<'_>, imports: Imports) {
+// true leaves a private direct-success i32 on the operand stack; false leaves no result.
+#[must_use]
+pub(super) fn load(code: &mut InstructionSink<'_>, imports: Imports) -> bool {
     let Some(locals) = imports.read32_view_locals else {
         fallback(code, imports);
-        return;
+        return false;
     };
-    code.block(BlockType::Empty).block(BlockType::Empty);
+    code.block(BlockType::Result(ValType::I32))
+        .block(BlockType::Empty);
     code.local_get(locals.pointer).i32_eqz().br_if(0);
     code.memory_size(0)
         .i64_extend_i32_u()
@@ -163,9 +166,14 @@ pub(super) fn load(code: &mut InstructionSink<'_>, imports: Imports) {
     code.local_get(STATE_PTR)
         .local_get(locals.value)
         .i32_store(arg(120, 2));
-    code.i32_const(0).local_set(HELPER_STATUS).br(1).end();
+    code.i32_const(0)
+        .local_set(HELPER_STATUS)
+        .i32_const(1)
+        .br(1)
+        .end();
     fallback(code, imports);
-    code.end();
+    code.i32_const(0).end();
+    true
 }
 
 fn bounded(code: &mut InstructionSink<'_>, base: u32, length: i64, memory_bytes: u32) {

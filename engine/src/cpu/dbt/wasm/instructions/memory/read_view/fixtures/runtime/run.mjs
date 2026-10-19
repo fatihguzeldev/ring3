@@ -31,6 +31,10 @@ function execute(row, enabled) {
   if (row.field) set(DESC + row.field[0], row.field[1]);
   if (row.mapping !== undefined) set(MAP + first * 4, row.mapping);
   if (row.permission !== undefined) bytes[PERMS + first] = row.permission;
+  if (row.firstContext) {
+    data.setUint16(fixture.segments + 4, 3, true);
+    set(fixture.bases + 20, 0x8000);
+  }
   let calls = 0, getters = 0, phase = 0, closed = false;
   function packet(words) { words.forEach((word, index) => set(100 + index * 4, word)); }
   function success(payload) { packet([0x484d3352, 0x1000a, 40, 0, 0, payload, 0, 0, 0, 4]); }
@@ -69,7 +73,7 @@ function execute(row, enabled) {
     return enabled ? row.pointer ?? DESC : 0;
   }, barrier};
   const {run} = new WebAssembly.Instance(module, {env: {memory}, ring3: bindings}).exports;
-  const output = run(address, count).map(value => value >>> 0);
+  const output = run(address, count, row.priorReason ?? 0).map(value => value >>> 0);
   assert.equal(getters, 1, 'only the descriptor pointer is initialized once per call');
   return {output, bytes: Buffer.from(bytes), calls};
 }
@@ -91,6 +95,9 @@ for (const [name, extra] of [
 for (const address of [ADDRESS + 4093, ADDRESS + 4094, ADDRESS + 4095, 0xfffffffe]) rows.push({name: `cross-page ${address}`, address, fallback: 1});
 rows.push(
   {name: 'full64-bit admitted epoch', epoch: 0x100000001n, fallback: 0, literal: true},
+  // this prior-reason input is a private emitter contract, not a claimed public caller path.
+  {name: 'prior reason survives certified success', priorReason: 7, fallback: 0, expected: [0, 7, 0x91, 0xa2, 0xb3, 0xc4, 0, 0, 0xf7, 0]},
+  {name: 'first read context failure precedes scratch reset', firstContext: true, fallback: 0, expected: [0, 3, 0, 0, 0, 0, 0xd5, 0xe6, 0xf7, 0]},
   {name: 'live mapping after import', count: 2, mode: 'remap', fallback: 0},
   {name: 'live permission after import', count: 2, mode: 'protect', fallback: 1},
   {name: 'reactivated epoch after fallback', count: 3, mode: 'reactivate', fallback: 1},
@@ -104,6 +111,7 @@ for (const row of rows) {
   assert.deepEqual(direct.bytes, old.bytes, `${row.name}: complete Wasm RAM and opaque arena parity`);
   assert.equal(direct.calls, row.fallback, `${row.name}: exact optional-view/fallback branch`);
   if (row.literal) assert.deepEqual(direct.output, [0, 0, 0x91, 0xa2, 0xb3, 0xc4, 0, 0, row.value ?? 0x80000000, 1]);
+  if (row.expected) assert.deepEqual(direct.output, row.expected, `${row.name}: independent literal scratch/terminal/frontier`);
   if (row.mode === 'malformed' || row.mode === 'legacy23') assert.deepEqual(direct.output.slice(0, 3), [row.mode === 'legacy23' ? 23 : 0, 7, 2]);
   if (row.mode === 'transport') assert.deepEqual(direct.output.slice(0, 3), [7, 7, 3]);
   if (row.mode === 'context') assert.deepEqual(direct.output.slice(1, 6), [3, 0, 0, 0, 0]);
