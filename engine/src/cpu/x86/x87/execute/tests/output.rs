@@ -14,25 +14,29 @@ fn compare(state: X87State, operation: X87Operation, input: &[u8]) -> X87Outcome
     let mut memory = [0; 108];
     let mut workspace = Default::default();
     {
-        let actual = state
-            .evaluate_into(operation, input, 0x8d7, Some(&mut memory), &mut workspace)
+        let mut actual_state = state;
+        let actual = actual_state
+            .evaluate_in_place(operation, input, 0x8d7, Some(&mut memory), &mut workspace)
             .unwrap();
-        assert_eq!(actual.state, expected.state);
+        assert_eq!(actual_state, expected.state);
         assert_eq!(actual.memory_len, expected.memory_len);
         assert_eq!(actual.eflags, expected.eflags);
         assert_eq!(actual.unmasked_exception, expected.unmasked_exception);
-        assert_eq!(actual.memory(), &expected.memory[..expected.memory_len]);
+        assert_eq!(
+            &memory[..actual.memory_len],
+            &expected.memory[..expected.memory_len]
+        );
     }
     assert_eq!(memory, expected.memory);
     if operation.write_size() == 0 {
-        let actual = state
-            .evaluate_into(operation, input, 0x8d7, None, &mut workspace)
+        let mut actual_state = state;
+        let actual = actual_state
+            .evaluate_in_place(operation, input, 0x8d7, None, &mut workspace)
             .unwrap();
-        assert_eq!(actual.state, expected.state);
+        assert_eq!(actual_state, expected.state);
         assert_eq!(actual.memory_len, 0);
         assert_eq!(actual.eflags, expected.eflags);
         assert_eq!(actual.unmasked_exception, expected.unmasked_exception);
-        assert!(actual.memory().is_empty());
         assert_eq!(expected.memory, [0; 108]);
     }
     expected
@@ -79,7 +83,7 @@ fn register_execution_preserves_a_supplied_unused_output_buffer() {
     let mut memory = [0xa5; 108];
     let mut workspace = Default::default();
     let result = one()
-        .evaluate_into(
+        .evaluate_in_place(
             X87Operation::ChangeSign,
             &[],
             0x8d7,
@@ -88,7 +92,6 @@ fn register_execution_preserves_a_supplied_unused_output_buffer() {
         )
         .unwrap();
     assert_eq!(result.memory_len, 0);
-    assert!(result.memory().is_empty());
     assert_eq!(memory, [0xa5; 108]);
 }
 
@@ -216,9 +219,10 @@ fn input_and_output_preconditions_fail_before_output_mutation() {
     let mut workspace = Default::default();
     for input in [&[][..], &[0; 3][..], &[0; 5][..]] {
         let mut memory = [0xa5; 108];
+        let mut actual_state = state;
         assert_eq!(
-            state
-                .evaluate_into(
+            actual_state
+                .evaluate_in_place(
                     X87Operation::Load(X87Format::Float32),
                     input,
                     0x8d7,
@@ -228,6 +232,7 @@ fn input_and_output_preconditions_fail_before_output_mutation() {
                 .err(),
             Some(X87Error::InvalidInputLength)
         );
+        assert_eq!(actual_state, state);
         assert_eq!(memory, [0xa5; 108]);
         assert_eq!(
             state.evaluate(X87Operation::Load(X87Format::Float32), input, 0x8d7),
@@ -247,11 +252,13 @@ fn input_and_output_preconditions_fail_before_output_mutation() {
         X87Operation::Save { operand16: true },
         X87Operation::Save { operand16: false },
     ] {
+        let mut actual_state = state;
         assert_eq!(
-            state
-                .evaluate_into(operation, &[], 0x8d7, None, &mut workspace)
+            actual_state
+                .evaluate_in_place(operation, &[], 0x8d7, None, &mut workspace)
                 .err(),
             Some(X87Error::InvalidInputLength)
         );
+        assert_eq!(actual_state, state);
     }
 }

@@ -11,6 +11,10 @@ mod division_tests;
 #[path = "execute/tests/output.rs"]
 mod output_tests;
 
+#[cfg(test)]
+#[path = "execute/tests/transaction.rs"]
+mod transaction_tests;
+
 const C0: u16 = 1 << 8;
 const C1: u16 = 1 << 9;
 const C2: u16 = 1 << 10;
@@ -456,12 +460,19 @@ pub struct X87Outcome {
     pub unmasked_exception: bool,
 }
 
-pub(crate) struct Evaluation<'output> {
-    pub(crate) state: X87State,
-    memory: Option<&'output mut [u8; 108]>,
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct X87Effects {
     pub(crate) memory_len: usize,
     pub(crate) eflags: Option<u32>,
     pub(crate) unmasked_exception: bool,
+}
+
+struct Evaluation<'state, 'output> {
+    state: &'state mut X87State,
+    memory: Option<&'output mut [u8; 108]>,
+    memory_len: usize,
+    eflags: Option<u32>,
+    unmasked_exception: bool,
 }
 
 impl X87State {
@@ -487,14 +498,13 @@ impl X87State {
         input: &[u8],
         eflags: u32,
     ) -> Result<X87Outcome, X87Error> {
+        let mut state = *self;
         let mut memory = [0; 108];
-        let Evaluation {
-            state,
+        let X87Effects {
             memory_len,
             eflags,
             unmasked_exception,
-            ..
-        } = self.evaluate_into(
+        } = state.evaluate_in_place(
             operation,
             input,
             eflags,
@@ -510,34 +520,39 @@ impl X87State {
         })
     }
 
-    pub(crate) fn evaluate_into<'output>(
-        &self,
+    pub(crate) fn evaluate_in_place(
+        &mut self,
         operation: X87Operation,
         input: &[u8],
         eflags: u32,
-        memory: Option<&'output mut [u8; 108]>,
+        memory: Option<&mut [u8; 108]>,
         workspace: &mut crate::math::NumericalWorkspace,
-    ) -> Result<Evaluation<'output>, X87Error> {
+    ) -> Result<X87Effects, X87Error> {
         if input.len() != operation.read_size() || operation.write_size() != 0 && memory.is_none() {
             return Err(X87Error::InvalidInputLength);
         }
+        let original = *self;
         let mut outcome = Evaluation {
-            state: *self,
+            state: self,
             memory,
             memory_len: 0,
             eflags: None,
             unmasked_exception: false,
         };
-        if !operation.ignores_pending_exception() && self.status & 0x3f & !self.control != 0 {
+        if !operation.ignores_pending_exception() && original.status & 0x3f & !original.control != 0
+        {
             outcome.state.status |= 0x8080;
             outcome.unmasked_exception = true;
-            return Ok(outcome);
+            return Ok(outcome.into_effects());
         }
         let computation = operation.is_computation();
         if computation {
             outcome.state.status &= !0x3f;
         }
-        outcome.run(operation, input, eflags, workspace)?;
+        if let Err(error) = outcome.run(operation, input, eflags, workspace) {
+            *outcome.state = original;
+            return Err(error);
+        }
         if computation {
             let mut raised = outcome.state.status & 0x3f;
             if raised & INVALID != 0 {
@@ -553,10 +568,11 @@ impl X87State {
                 raised &= !32;
                 outcome.state.status &= !C1;
             }
-            let exception_status = (outcome.state.status & !0x3f) | (self.status & 0x3f) | raised;
+            let exception_status =
+                (outcome.state.status & !0x3f) | (original.status & 0x3f) | raised;
             if suppress {
-                outcome.state = *self;
-                outcome.state.status = (self.status & !0x82ff) | (exception_status & 0x82ff);
+                *outcome.state = original;
+                outcome.state.status = (original.status & !0x82ff) | (exception_status & 0x82ff);
                 outcome.memory_len = 0;
                 outcome.eflags = None;
             } else {
@@ -567,15 +583,17 @@ impl X87State {
                 outcome.unmasked_exception = true;
             }
         }
-        Ok(outcome)
+        Ok(outcome.into_effects())
     }
 }
 
-impl Evaluation<'_> {
-    pub(crate) fn memory(&self) -> &[u8] {
-        self.memory
-            .as_deref()
-            .map_or(&[], |memory| &memory[..self.memory_len])
+impl Evaluation<'_, '_> {
+    fn into_effects(self) -> X87Effects {
+        X87Effects {
+            memory_len: self.memory_len,
+            eflags: self.eflags,
+            unmasked_exception: self.unmasked_exception,
+        }
     }
 
     fn physical(&self, index: u8) -> Result<usize, X87Error> {
@@ -645,7 +663,7 @@ impl Evaluation<'_> {
         match operation {
             X87Operation::Initialize => {
                 let registers = self.state.registers;
-                self.state = X87State::default();
+                *self.state = X87State::default();
                 self.state.registers = registers;
             }
             X87Operation::ClearExceptions => self.state.status &= 0x7f00,
@@ -989,7 +1007,7 @@ impl Evaluation<'_> {
                 }
                 self.memory_len += 80;
                 let registers = self.state.registers;
-                self.state = X87State::default();
+                *self.state = X87State::default();
                 self.state.registers = registers;
             }
         }

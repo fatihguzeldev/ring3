@@ -152,7 +152,7 @@ impl EngineInstance {
         } else {
             None
         };
-        let outcome = match state.evaluate_into(
+        let outcome = match state.evaluate_in_place(
             request.operation,
             input
                 .as_ref()
@@ -178,7 +178,6 @@ impl EngineInstance {
                 });
             }
         };
-        *state = outcome.state;
         Ok(X87Step {
             value: outcome.eflags.unwrap_or(flags),
             memory_len: outcome.memory_len,
