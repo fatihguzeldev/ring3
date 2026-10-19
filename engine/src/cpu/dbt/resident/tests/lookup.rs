@@ -55,6 +55,12 @@ fn exact_candidates_reject_other_units_instruction_interiors_and_holes() {
         assert_eq!(registry.lookup(&memory, GuestAddress(pc + 1)), Ok(id));
         for hole in [pc + 2, pc + 4095] {
             assert_eq!(
+                registry.lookup(&memory, GuestAddress(hole)),
+                Err(RegistryError::NotFound {
+                    pc: GuestAddress(hole)
+                })
+            );
+            assert_eq!(
                 registry.lookup_bound(&memory, GuestAddress(hole), context()),
                 Err(RegistryError::NotFound {
                     pc: GuestAddress(hole)
@@ -258,3 +264,6 @@ fn abandoned_page_preparation_and_failed_admission_publish_no_candidates() {
     assert!(registry.entry_index.candidates(0x2000).is_empty());
     assert_eq!(registry.lookup(&memory, GuestAddress(0x1000)), Ok(kept));
 }
+
+#[path = "lookup/union.rs"]
+mod union;
