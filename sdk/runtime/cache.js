@@ -25,9 +25,11 @@ export class CodeCache {
       if (typeof this.api[name] !== 'function') throw new Error(`missing core export ${name}`);
       return [name, this.api[name]];
     }));
+    if (typeof this.api.core_cold_run === 'function') this.native.core_cold_run = this.api.core_cold_run;
     this.budget = budget; this.instructions = instructions; this.blocks = blocks; this.capacity = capacity;
     this.units = new Map(); this.context = 0; this.open = false; this.dirty = false; this.dirtyWork = 0; this.lastStop = 1;
     this.runs = 0; this.regions = 0; this.retired = 0; this.work = 0; this.admissions = 0; this.hits = 0; this.evictions = 0;
+    this.coldRuns = 0; this.coldRetired = 0; this.coldWork = 0; this.jitPc = null;
     this.evictionReasons = {count:0,bytes:0};
     this.prunedNative = 0; this.prunedNativeBytes = 0; this.nativeCache = undefined;
     this.generatedModuleBytes = 0; this.retainedModuleBytes = 0;
@@ -177,14 +179,24 @@ export class CodeCache {
   }
   word(offset) { return new DataView(this.memory.buffer).getUint32(this.context + offset, true); }
   get pc() { return this.context ? this.word(32) : this.engine.get(48); }
+  select(pc = this.pc) {
+    if (this.open) throw new Error('cannot select code during execution');
+    this.pristine();
+    return this.native.core_cold_run && this.jitPc !== pc ? null : this.entry(pc);
+  }
+  retainContext(pointer) {
+    if (!pointer || pointer % 8 || pointer + 128 > this.memory.buffer.byteLength)
+      throw new Error('invalid core context allocation');
+    if (this.context && pointer !== this.context) throw new Error('core context allocation changed');
+    this.context = pointer;
+  }
   entry(pc = this.pc) {
     if (this.open) throw new Error('cannot select code during execution');
     this.pristine();
     if (this.compilation) this.measureCompilation('prepare',()=>this.engine.ok('core_prepare',pc,this.instructions,this.blocks),pc);
     else this.engine.ok('core_prepare', pc, this.instructions, this.blocks);
     const context = this.native.core_context_ptr() >>> 0;
-    if (!context || (this.context && context !== this.context)) throw new Error('core context allocation changed');
-    this.context = context;
+    this.retainContext(context);
     const id = new DataView(this.memory.buffer).getBigUint64(context + 120, true);
     if (id === 0n) throw new Error('core code has no identity');
     if (this.units.has(id)) {
@@ -234,13 +246,14 @@ export class CodeCache {
   execute(selected) {
     if (this.open) throw new Error('core execution is already active');
     this.pristine();
+    if (selected === null && this.native.core_cold_run) return this.executeCold();
     if (!selected || this.units.get(selected.id) !== selected) throw new Error('core region is not retained by this cache');
     if (this.dirtyWork > 0xffffffff - this.budget) this.publish();
     let unit = selected, status = this.native.core_begin();
     if (status === 4) { unit = this.entry(this.pc); status = this.native.core_begin(); }
     if (status !== 0) throw Object.assign(new Error(`core_begin returned ${status}`), {operation: 'core_begin', status});
     this.open = true;
-    const before = this.word(40);
+    const before = this.word(40), startPc = this.pc;
     let stop, failure;
     let regions;
     try {
@@ -255,16 +268,41 @@ export class CodeCache {
       const ended = this.native.core_end(); this.open = false;
       if (ended !== 0 && !failure) throw new Error(`core_end returned ${ended}`);
     }
-    const retired = (this.word(40) - before) >>> 0, remaining = this.word(44), work = this.budget - remaining;
-    if (remaining > this.budget || retired > work || stop < 1 || stop > 10 || stop === 8 || !Number.isInteger(regions) || regions < 1 || regions > work+1)
+    return this.finishRun(stop,before,regions,'compiled',startPc);
+  }
+  executeCold() {
+    if (this.dirtyWork > 0xffffffff - this.budget) this.publish();
+    const pointer = this.native.core_context_ptr() >>> 0;
+    if (pointer) this.retainContext(pointer);
+    const before = this.context ? this.word(40) : 0, startPc = this.pc;
+    let stop;
+    this.open = true;
+    try {stop = this.native.core_cold_run(this.budget);}
+    finally {this.open = false;}
+    if (Number.isInteger(stop) && stop < 0)
+      throw Object.assign(new Error(`core_cold_run returned ${stop}`),{operation:'core_cold_run',status:-stop});
+    this.retainContext(this.native.core_context_ptr() >>> 0);
+    return this.finishRun(stop,before,0,'cold',startPc);
+  }
+  finishRun(stop,before,regions,kind,startPc) {
+    const cold = kind === 'cold', retired = (this.word(40) - before) >>> 0;
+    const remaining = this.word(44), work = this.budget - remaining;
+    if (remaining > this.budget || retired > work || !Number.isInteger(stop) || stop < 1 || stop > 10 || stop === 8 ||
+        !Number.isInteger(regions) || regions < (cold ? 0 : 1) || regions > work+1)
       throw new Error(`invalid core stop ${stop} at 0x${this.pc.toString(16)}`);
-    const id = new DataView(this.memory.buffer).getBigUint64(this.context+120,true);
-    if (!this.units.has(id)) throw new Error('core dispatch selected an unretained region');
-    this.runs++; this.regions += regions; this.retired += retired; this.work += work; this.dirtyWork += work; this.lastStop = stop; this.dirty = true;
+    const identity = new DataView(this.memory.buffer).getBigUint64(this.context+120,true);
+    if (cold ? identity !== 0n : !this.units.has(identity))
+      throw new Error(cold ? 'cold execution retained a compiled identity' : 'core dispatch selected an unretained region');
+    if (!cold && this.jitPc === startPc && stop === 1 && work === 0 && this.pc === startPc)
+      throw new Error(`core JIT handoff made no progress at 0x${startPc.toString(16)}`);
+    this.jitPc = cold && stop === 1 ? this.pc : null;
+    if (cold) {this.coldRuns++;this.coldRetired += retired;this.coldWork += work;}
+    else {this.runs++;this.regions += regions;}
+    this.retired += retired; this.work += work; this.dirtyWork += work; this.lastStop = stop; this.dirty = true;
     if (stop !== 1) this.publish();
     if (stop === 4) throw Object.assign(new Error(`unsupported instruction at 0x${this.pc.toString(16)}`), {pc:this.pc,reason:stop});
     return {pc: this.pc, coreReason: stop, reason: stop === 1 ? null : this.engine.get(72),
-      detail: stop === 1 ? null : this.engine.get(80), retired, work, id, regions};
+      detail: stop === 1 ? null : this.engine.get(80), retired, work, kind, id:cold ? null : identity, regions};
   }
   publish() {
     if (this.open) throw new Error('cannot publish an active core');
@@ -288,6 +326,7 @@ export class CodeCache {
   }
   stats() {
     return {backend: 'core', chainEnabled:this.chain, runs: this.runs, regions:this.regions, retired: this.retired, work: this.work, admissions: this.admissions,
+      coldEnabled:!!this.native.core_cold_run,coldRuns:this.coldRuns,coldRetired:this.coldRetired,coldWork:this.coldWork,
       compileInstructionLimit:this.instructions, compileBlockLimit:this.blocks, workBudget:this.budget,
       engineCacheHits: this.hits, evictions: this.evictions, generatedModuleBytes: this.generatedModuleBytes,
       retainedModuleBytes: this.retainedModuleBytes, installedUnits: this.units.size, unitCapacity: this.capacity,

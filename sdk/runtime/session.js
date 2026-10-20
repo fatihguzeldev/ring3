@@ -342,13 +342,13 @@ export class Session {
       const start = performance.now();
       do {
         const unit = this.measurements
-            ? this.measurements.run("entry", () => this.code.entry())
-            : this.code.entry(),
+            ? this.measurements.run("entry", () => this.code.select())
+            : this.code.select(),
           callback = this.stack().at(-1);
         const run = this.measurements
           ? this.measurements.run("execution", () => this.code.execute(unit))
           : this.code.execute(unit);
-        this.recent.push({ ...run, id: run.id.toString() });
+        this.recent.push({ ...run, id: run.id === null ? null : run.id.toString() });
         if (this.recent.length > 48) this.recent.shift();
         if (run.coreReason === 1 || run.coreReason === 2 || run.coreReason === 6) continue;
         if (run.reason === 9) break;

@@ -112,6 +112,89 @@ function fixture(select = pc => ({id: 1n, stop: 1, next: pc + 4})) {
     ok(name, ...args) { const status = api[name](...args); if (status) throw new Error(`${name} returned ${status}`); }};
   return {engine, api, calls, arena, control, context, links, setContext: value => {context = value;}};
 }
+function coldFixture(steps, select = pc => ({id:1n,stop:2,next:pc+4})) {
+  const f=fixture(select), prepare=f.api.core_prepare;
+  let initialized=false,index=0;
+  f.api.core_context_ptr=()=>initialized ? f.context : 0;
+  f.api.core_prepare=(...args)=>{const status=prepare(...args);initialized=true;return status;};
+  f.api.core_cold_run=budget=>{
+    f.calls.push(['cold',budget]);
+    const step=steps[index++]; assert.notEqual(step,undefined,'bounded cold fixture calls');
+    if(typeof step==='number') return step;
+    const d=new DataView(f.engine.memory.buffer);
+    if(!initialized){d.setUint32(f.context+32,f.arena.get(48),true);initialized=true;}
+    const work=step.work??1,retired=step.retired??work;
+    d.setUint32(f.context+32,step.pc??d.getUint32(f.context+32,true),true);
+    d.setUint32(f.context+40,d.getUint32(f.context+40,true)+retired,true);
+    d.setUint32(f.context+44,budget-work,true);d.setBigUint64(f.context+120,0n,true);
+    for(const [offset,value] of step.words??[])d.setUint32(f.context+offset,value,true);
+    return step.stop;
+  };
+  return f;
+}
+
+test('cold selection executes before compilation without a fabricated compiled owner',()=>{
+  const f=coldFixture([{stop:2,pc:0x1008,work:2,words:[[0,42]]}]);
+  const cache=new CodeCache(f.engine,{chain:false,budget:2});
+  cache.import();const selected=cache.select();assert.equal(selected,null);
+  const run=cache.execute(selected);
+  assert.deepEqual({kind:run.kind,id:run.id,regions:run.regions,retired:run.retired,work:run.work},
+    {kind:'cold',id:null,regions:0,retired:2,work:2});
+  assert.equal(run.pc,0x1008);assert.equal(new DataView(f.engine.memory.buffer).getUint32(f.context,true),42);
+  assert.deepEqual(f.calls,[['cold',2],['export',2,2]]);
+  assert.equal(cache.stats().admissions,0);assert.equal(cache.stats().regions,0);assert.equal(cache.stats().runs,0);
+  assert.equal(cache.stats().coldRuns,1);assert.equal(cache.stats().coldRetired,2);assert.equal(cache.stats().coldWork,2);
+  assert.equal(cache.stats().retired,2);assert.equal(cache.stats().work,2);
+});
+test('cold NeedCode hands the exact PC and private state to JIT once without import',()=>{
+  const f=coldFixture([{stop:1,pc:0x1004,work:1,words:[[0,73],[100,0x12345678]]}]);
+  const cache=new CodeCache(f.engine,{chain:false,budget:2});
+  const cold=cache.execute(cache.select());assert.equal(cold.coreReason,1);
+  assert.throws(()=>cache.import(),/unpublished/);
+  const unit=cache.select();assert.equal(unit.pc,0x1004);
+  const compiled=cache.execute(unit);
+  assert.equal(compiled.kind,'compiled');assert.equal(compiled.id,1n);
+  assert.equal(new DataView(f.engine.memory.buffer).getUint32(f.context,true),73);
+  assert.equal(new DataView(f.engine.memory.buffer).getUint32(f.context+100,true),0x12345678);
+  assert.deepEqual(f.calls.filter(([name])=>['cold','prepare','import','export'].includes(name)),
+    [['cold',2],['prepare',0x1004,2048,128],['export',2,2]]);
+  assert.equal(cache.stats().coldRuns,1);assert.equal(cache.stats().runs,1);
+});
+test('compiled NeedCode returns unknown targets to cold execution',()=>{
+  const f=coldFixture([{stop:1,pc:0x1000,work:0},{stop:2,pc:0x2004,work:1}],
+    ()=>({id:1n,stop:1,next:0x2000}));
+  const cache=new CodeCache(f.engine,{chain:false,budget:1});
+  cache.execute(cache.select());cache.execute(cache.select());
+  assert.equal(cache.select(),null);const final=cache.execute(null);
+  assert.equal(final.pc,0x2004);assert.equal(cache.stats().admissions,1);
+  assert.equal(cache.stats().coldRuns,2);assert.equal(cache.stats().regions,1);
+  assert.deepEqual(f.calls.filter(([name])=>name==='prepare').map(([,pc])=>pc),[0x1000]);
+});
+test('scheduler publication preserves a same-PC pending JIT handoff',()=>{
+  const f=coldFixture([{stop:1,pc:0x1004,work:1}]);
+  const cache=new CodeCache(f.engine,{chain:false,budget:1});
+  cache.execute(cache.select());cache.publish();cache.import();
+  assert.equal(cache.select().pc,0x1004);
+  assert.equal(f.calls.filter(([name])=>name==='cold').length,1);
+});
+test('cold zero budget is a closed no-work result and API rejection cannot compile',()=>{
+  const f=coldFixture([{stop:2,pc:0x1000,work:0}]),cache=new CodeCache(f.engine,{chain:false});
+  cache.budget=0;const run=cache.execute(cache.select());assert.equal(run.work,0);assert.equal(run.retired,0);
+  assert.equal(run.coreReason,2);assert.equal(cache.open,false);assert.equal(cache.stats().admissions,0);
+  const rejected=coldFixture([-12]),other=new CodeCache(rejected.engine,{chain:false});
+  assert.throws(()=>other.execute(other.select()),error=>error.operation==='core_cold_run'&&error.status===12);
+  assert.equal(other.open,false);assert.equal(other.stats().coldRuns,0);assert.deepEqual(rejected.calls,[['cold',50000]]);
+});
+test('cold handoff fails closed on changed bindings, identity, or a zero-progress JIT retry',()=>{
+  const changed=coldFixture([]),cache=new CodeCache(changed.engine,{chain:false});
+  changed.api.core_cold_run=()=>2;assert.throws(()=>cache.execute(cache.select()),/bindings changed/);
+  const invalid=coldFixture([{stop:2,work:0,words:[[120,1]]}]),bad=new CodeCache(invalid.engine,{chain:false});
+  assert.throws(()=>bad.execute(bad.select()),/cold.*identity/);assert.equal(bad.stats().coldRuns,0);
+  const stuck=coldFixture([{stop:1,pc:0x1000,work:0}],()=>({id:1n,stop:1,next:0x1000,work:0,retired:0}));
+  const noSpin=new CodeCache(stuck.engine,{chain:false});noSpin.execute(noSpin.select());
+  assert.throws(()=>noSpin.execute(noSpin.select()),/no progress/);
+  assert.equal(stuck.calls.filter(([name])=>name==='prepare').length,1);
+});
 test('native prepare selects every requested entry and native identity controls reuse', () => {
   const f = fixture(pc => ({id: pc < 0x2000 ? 1n : 2n, stop: 1, next: pc + 4}));
   const cache = new CodeCache(f.engine,{chain:false});
