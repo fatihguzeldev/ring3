@@ -9,5 +9,6 @@ mod program;
 pub use abi::{CONTEXT_SIZE, Context32, StopReason};
 pub use dispatch::emit_dispatch;
 pub use program::{
-    CompileError, CompileOptions, CompiledCode, NativeInstruction, compile, compile_with_gates,
+    CompileError, CompileOptions, CompiledCode, NativeInstruction, compile, compile_with_frontier,
+    compile_with_gates,
 };

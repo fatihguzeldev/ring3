@@ -118,6 +118,16 @@ pub fn compile_with_gates(
     options: CompileOptions,
     gates: &[(GuestAddress, u32)],
 ) -> Result<CompiledCode, CompileError> {
+    compile_with_frontier(memory, entry, options, gates, &[])
+}
+
+pub fn compile_with_frontier(
+    memory: &AddressSpace,
+    entry: GuestAddress,
+    options: CompileOptions,
+    gates: &[(GuestAddress, u32)],
+    frontier: &[GuestAddress],
+) -> Result<CompiledCode, CompileError> {
     if options.instructions == 0
         || options.instructions > 16384
         || options.blocks == 0
@@ -127,6 +137,11 @@ pub fn compile_with_gates(
     {
         return Err(CompileError::InvalidLimits);
     }
+    let frontier: BTreeSet<_> = frontier
+        .iter()
+        .map(|address| address.0)
+        .filter(|&pc| pc != entry.0)
+        .collect();
     let mut pending = VecDeque::from([entry.0]);
     let mut nodes = BTreeMap::new();
     let mut starts = BTreeSet::from([entry.0]);
@@ -136,6 +151,9 @@ pub fn compile_with_gates(
             break;
         }
         while !nodes.contains_key(&pc) && nodes.len() < options.instructions {
+            if frontier.contains(&pc) {
+                break;
+            }
             let mut matching_gates = gates.iter().filter(|(address, _)| address.0 == pc);
             if let Some(&(_, id)) = matching_gates.next() {
                 if id == 0 || matching_gates.next().is_some() {
@@ -203,7 +221,7 @@ pub fn compile_with_gates(
                 },
             );
             let mut enqueue = |target| {
-                if starts.len() < options.blocks {
+                if !frontier.contains(&target) && starts.len() < options.blocks {
                     starts.insert(target);
                     pending.push_back(target);
                 }
@@ -371,6 +389,10 @@ fn terminates(operation: Option<Operation>) -> bool {
         )
     )
 }
+
+#[cfg(test)]
+#[path = "program/frontier_tests.rs"]
+mod frontier_tests;
 
 #[cfg(test)]
 mod tests {
