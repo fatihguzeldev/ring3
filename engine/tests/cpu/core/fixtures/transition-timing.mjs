@@ -8,11 +8,11 @@ import {CodeCache} from '../../../../../sdk/runtime/cache.js';
 import {makeKernel} from './kernels.mjs';
 
 const [baselinePath,baselineHash,candidatePath,candidateHash,reportPath,mode='same-page',kernelKind='call'] = process.argv.slice(2);
-assert(reportPath,'usage: transition-timing.mjs baseline.wasm baseline-sha256 candidate.wasm candidate-sha256 fresh-report.json [same-page|cross-page|warm] [integer|call]');
-assert(['same-page','cross-page','warm'].includes(mode),'expected same-page, cross-page or warm mode');
+assert(reportPath,'usage: transition-timing.mjs baseline.wasm baseline-sha256 candidate.wasm candidate-sha256 fresh-report.json [same-page|cross-page|cross-page-promotion|warm] [integer|call]');
+assert(['same-page','cross-page','cross-page-promotion','warm'].includes(mode),'expected same-page, cross-page, cross-page-promotion or warm mode');
 assert(['integer','call'].includes(kernelKind),'expected integer or call kernel');
 assert(mode==='warm'||kernelKind==='call','integer kernel requires warm mode');
-const crossPage=mode==='cross-page',warm=mode==='warm',sameArtifact=baselineHash===candidateHash;
+const crossPage=mode==='cross-page'||mode==='cross-page-promotion',crossPromotion=mode==='cross-page-promotion',warm=mode==='warm',sameArtifact=baselineHash===candidateHash;
 for(const value of [baselineHash,candidateHash]) assert.match(value,/^[a-f0-9]{64}$/,'explicit engine SHA-256');
 const artifacts=[readEngine(baselinePath,baselineHash),readEngine(candidatePath,candidateHash)];
 if(!crossPage&&!warm)assert.notEqual(baselineHash,candidateHash,'two selected engine artifacts');
@@ -38,7 +38,9 @@ const report={schema:1,complete:false,node:process.version,mode,kernelKind,itera
   scope:warm
     ?`same authored warm ${kernelKind} guest work through original native bindings; no game or per-component CPU attribution`
     :crossPage
-    ?'same authored cross-page CALL/RET work and native linked lookup/LRU movement; no fusion, game or per-component CPU attribution'
+    ?crossPromotion
+      ?'same authored cross-page CALL/RET work; baseline split and candidate transition promotion; no game or per-component CPU attribution'
+      :'same authored cross-page CALL/RET work and native linked lookup/LRU movement; no fusion, game or per-component CPU attribution'
     :'same authored CALL/RET guest work through original native bindings; execution includes ordinary SDK miss handling; no game or per-component CPU attribution',
   sources:Object.fromEntries(sources.map(path=>[path,hash(readFileSync(new URL(path,import.meta.url)))])),arms:[],runs:[]};
 const checkpoint=()=>writeFileSync(reportPath,JSON.stringify(report,null,2));
@@ -160,7 +162,7 @@ function run(context,phase,round,position) {
   assert.equal(sample.dispatches,outer);
   assert.deepEqual(Array.from({length:8},(_,i)=>d.getUint32(i*4,true)),kernel.regs);
   for(const [offset,value] of [[32,kernel.pc],[36,kernel.flags],[48,0],[52,0],[116,0]])assert.equal(d.getUint32(offset,true),value);
-  if(crossPage||warm) {
+  if((crossPage&&!crossPromotion)||warm) {
     if(crossPage) {
       assert.equal(outer,1);assert.equal(sample.regions,2*iterations+1);assert.equal(sample.admissions,0);
     } else if(phase!=='warmup'||round!==0) {
@@ -179,6 +181,15 @@ function run(context,phase,round,position) {
     assert(sample.regions>1&&sample.regions<2*iterations+1,'first execution reduces actual region entries');
     assert(sample.admissions>0,'first execution admits the promoted region');
   } else {assert.equal(outer,1);assert.equal(sample.regions,1);assert.equal(sample.admissions,0);}
+  if(crossPromotion) {
+    const expectedContext=beforeContext.slice(),c=view(expectedContext);
+    kernel.regs.forEach((value,i)=>c.setUint32(i*4,value,true));
+    c.setUint32(32,kernel.pc,true);c.setUint32(36,kernel.flags,true);c.setUint32(40,(priorRetired+kernel.retired)>>>0,true);
+    for(const offset of [44,48,52,112,116])c.setUint32(offset,0,true);
+    assert.equal(typeof last.id,'bigint');assert(cache.units.has(last.id),'final owner remains retained');
+    c.setBigUint64(120,last.id,true);
+    assert.deepEqual(rawContext,expectedContext,'complete cross-page context with its own native pointers and identity');
+  }
   const expectedState=record('R3ST',56),state=view(expectedState);
   kernel.regs.forEach((value,i)=>state.setUint32(16+i*4,value,true));state.setUint32(48,kernel.pc,true);state.setUint32(52,kernel.flags,true);
   assert.deepEqual(arena.slice(0,56),expectedState,'literal complete canonical state');

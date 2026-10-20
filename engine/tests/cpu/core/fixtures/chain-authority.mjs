@@ -32,7 +32,7 @@ function fp(initial,{status=0,tag=0xffff,opcode=0,fip=0,fdp=0,registers={}}={}) 
   return result;
 }
 
-function fixture(name,{entry=0x1000,target=0x1040,registers=[0,0,0x1080,0x3000,0x4800,0,0x1040,0],stack=true,data=()=>{}}={},body) {
+function fixture(name,{entry=0x1000,target=0x1040,registers=[0,0,0x1080,0x3000,0x4800,0,0x1040,0],stack=true,data=()=>{},codePage=code,extraCodePages=[]}={},body) {
   stage = name;
   const result = {name,modules:[],controls:[],runs:[]}; report.cases.push(result); checkpoint();
   const instance = new WebAssembly.Instance(artifact.module,{ring3_observability:{now_ns:()=>0n}});
@@ -49,9 +49,10 @@ function fixture(name,{entry=0x1000,target=0x1040,registers=[0,0,0x1080,0x3000,0
   try {
     engine.ok('open',16,...KEY); opened = true; engine.base = api.arena_ptr()>>>0;
     const dataPage = new Uint8Array(4096); data(view(dataPage));
-    const pages = [[0x1000,code],[0x3000,dataPage],...(stack ? [[0x4000,new Uint8Array(4096)]] : [])];
-    for (const [address,page] of pages) {
-      engine.ok('map',address,1,address === 0x1000 ? 7 : 3); engine.request(page); engine.ok('upload',address,4096);
+    const pages = [[0x1000,codePage,7],[0x3000,dataPage,3],...(stack ? [[0x4000,new Uint8Array(4096),3]] : []),
+      ...extraCodePages.map(([address,page])=>[address,page,7])];
+    for (const [address,page,permissions] of pages) {
+      engine.ok('map',address,1,permissions); engine.request(page); engine.ok('upload',address,4096);
     }
     const state = record('R3ST',56), d = view(state);
     registers.forEach((value,index) => d.setUint32(16+index*4,value,true));
@@ -194,10 +195,15 @@ try {
     t.neutral('code writer cannot reenter stale source',()=>t.status('core_begin',4));
   });
   const iterations=8192,totalWork=7*iterations;
-  for (const publicSelection of [false,true]) fixture(publicSelection
-    ? 'public-selection-preserves-hot-region-promotion'
-    : 'numerical-ordinals-survive-hot-region-promotion',{
-    entry:0x1300,target:0x1340,registers:[0,iterations,0,0x3000,0x4800,0,0,0],data:values,
+  const crossPageCode=code.slice(),crossPageCallee=new Uint8Array(4096);
+  crossPageCode.set(unhex('d903 e839400000 49 75f6 0f0b'),0x300);
+  crossPageCallee.set(unhex('d84b04 d95b08 c3'),0x340);
+  for (const [publicSelection,crossPage] of [[false,false],[true,false],[true,true]]) fixture(crossPage
+    ? 'public-selection-cross-page-numerical-promotion'
+    : publicSelection ? 'public-selection-preserves-hot-region-promotion'
+      : 'numerical-ordinals-survive-hot-region-promotion',{
+    entry:0x1300,target:crossPage?0x5340:0x1340,registers:[0,iterations,0,0x3000,0x4800,0,0,0],data:values,
+    ...(crossPage?{codePage:crossPageCode,extraCodePages:[[0x5000,crossPageCallee]]}:{}),
   },t => {
     const admissionsBefore=t.cache.stats().admissions;
     let selected=publicSelection?t.cache.select():t.first,work=0,retired=0,last,sourceVersion;
@@ -215,7 +221,7 @@ try {
     const stats=t.cache.stats();
     t.expect({stop:2,pc:0x130a,retired:totalWork,work:totalWork,remaining:0,regions:stats.regions,id:last.id,sourceVersion,
       regs:[0,0,0,0x3000,0x4800,0,0,0],flags:0x46,
-      wantedFp:fp(t.initialFp,{opcode:0x15b,fip:0x1343,fdp:0x3008,registers:{7:'00000000000000c00140'}})});
+      wantedFp:fp(t.initialFp,{opcode:0x15b,fip:crossPage?0x5343:0x1343,fdp:0x3008,registers:{7:'00000000000000c00140'}})});
     t.result.promotion={iterations,retired,work,admissionsBefore,admissionsAfter:stats.admissions,
       publicSelection,coldRuns:stats.coldRuns,coldRetired:stats.coldRetired,
       regions:stats.regions,outer:stats.runs,initialOwners:[String(t.first.id),String(t.next.id)],finalOwner:String(last.id)};
@@ -231,6 +237,12 @@ try {
     assert(stats.regions>1&&stats.regions<2*iterations+1,'actual region entries fall after promotion');
     assert(stats.runs>=2,'the first promotion returns through a closed execution boundary');
     assert.notEqual(last.id,t.first.id);assert.notEqual(last.id,t.next.id);
+    if(crossPage) {
+      t.engine.ok('write8',0x5346,0x90);t.expectedRam[12288+0x346]=0x90;
+      assert.deepEqual(t.bytes(t.word(t.cache.context,64),t.expectedRam.length),t.expectedRam,
+        'second code-page mutation is the only backing change');
+      t.neutral('fused owner validates its second code page',()=>t.status('core_begin',4));
+    }
   });
   report.complete = true; checkpoint(); console.log(JSON.stringify({complete:true,cases:report.cases.length,engineSha256:artifact.sha256}));
 } catch (error) {report.failure={stage,message:String(error),stack:error.stack};checkpoint();throw error;}
