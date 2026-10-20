@@ -32,6 +32,8 @@ export class Session {
     this.compiledEngine = undefined;
     this.failed = false;
     this.generation = 0;
+    this.audioRequest = 0;
+    this.audioHold = null;
     this.graphicsQueue = Promise.resolve();
     this.audio = new AudioHost({ onDiagnostic, onStats: onAudioStats });
     this.input = new InputHost(canvas, {
@@ -187,7 +189,9 @@ export class Session {
       this.capture?.workerStarted();
       worker.onmessage = (event) => {
         if (this.worker !== worker) return;
-        this.message(event.data, worker).catch((error) => this.fail(error));
+        this.message(event.data, worker).catch((error) => {
+          if (this.worker === worker && this.generation === generation) this.fail(error);
+        });
       };
       worker.onerror = (event) =>
         this.fail(new Error(event.message || "runtime worker failed to load"));
@@ -258,10 +262,17 @@ export class Session {
         this.dialogs.show(message);
         break;
       case "pcm": {
-        await this.audio.accept(message);
-        if (this.worker === worker) this.post({ type: "pcm-accepted", sequence: message.sequence });
+        const generation = this.generation;
+        await this.audio.accept(message, ({epoch,sequence,firstFrame,frames,consumedFrames}) => {
+          if (this.worker === worker && this.generation === generation && !this.failed)
+            this.post({type:"pcm-consumed",epoch,sequence,firstFrame,frames,consumedFrames});
+        });
         break;
       }
+      case "audio-held":
+        if (this.audioHold?.worker === worker && this.audioHold.request === message.request)
+          this.audioHold.resolve();
+        break;
       case "graphics": {
         const timeline = message.frameProbe ? { receive: frameProbeStamp() } : null;
         this.graphicsQueue = this.graphicsQueue.then(async () => {
@@ -310,11 +321,40 @@ export class Session {
         this.onDiagnostic(`unknown worker message: ${message.type}`);
     }
   }
+  holdAudio(worker) {
+    if (this.audioHold) return this.audioHold.promise;
+    const request = ++this.audioRequest;
+    let control;
+    const promise = new Promise((resolve,reject) => {
+      const settle = (operation,value) => {
+        clearTimeout(control.timer);
+        if (this.audioHold === control) this.audioHold = null;
+        operation(value);
+      };
+      control = {worker,request,resolve:()=>settle(resolve),reject:error=>settle(reject,error)};
+      control.timer = setTimeout(() => control.reject(new Error('audio production hold timed out')),5000);
+    });
+    control.promise = promise;
+    this.audioHold = control;
+    try {worker.postMessage({type:'audio-hold',request});}
+    catch (error) {control.reject(error);}
+    return promise;
+  }
+  cancelAudioHold(error) {this.audioHold?.reject(error);}
   async pause() {
     if (this.state !== "running") return;
+    const worker = this.worker, generation = this.generation;
     this.input.disable();
-    this.post({ type: "pause" });
-    await this.audio.pause();
+    try {
+      await this.holdAudio(worker);
+      if (this.worker !== worker || this.generation !== generation || this.failed) return;
+      await this.audio.pause();
+      if (this.worker === worker && this.generation === generation && !this.failed)
+        this.post({ type: "pause" });
+    } catch (error) {
+      if (this.worker === worker && this.generation === generation && !this.failed) this.fail(error);
+      throw error;
+    }
   }
   async resume() {
     if (this.state !== "paused") return;
@@ -333,6 +373,7 @@ export class Session {
   fail(error) {
     if (this.failed) return;
     this.failed = true;
+    this.cancelAudioHold(error);
     this.capture?.observer.event("error", {
       message: error.message,
       stack: String(error.stack ?? "").slice(0, 4096),
@@ -361,6 +402,7 @@ export class Session {
     const generation = ++this.generation,
       worker = this.worker,
       capture = this.capture ?? null;
+    this.cancelAudioHold(new Error('session stopped'));
     let graphicsQueue = this.graphicsQueue;
     const outcome = this.failed ? "failed" : "cancelled";
     this.input.disable();
@@ -397,6 +439,7 @@ export class Session {
   }
   async dispose() {
     ++this.generation;
+    this.cancelAudioHold(new Error('session disposed'));
     const worker = this.worker,
       capture = this.capture ?? null,
       graphicsQueue = this.graphicsQueue;

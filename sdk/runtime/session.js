@@ -472,6 +472,7 @@ export class Session {
   }
   pause() {
     if (this.paused) return;
+    this.media?.pauseAudio?.();
     this.paused = true;
     this.pauseStarted = performance.now();
     this.status("paused", "paused");
@@ -479,6 +480,7 @@ export class Session {
   resume() {
     if (!this.paused) return;
     this.pausedDuration += performance.now() - this.pauseStarted;
+    this.media?.resumeAudio?.();
     this.paused = false;
     this.status("running", "resumed");
   }
@@ -491,6 +493,7 @@ export class Session {
   }
   cancel() {
     this.running = false;
+    this.media?.pauseAudio?.();
     this.abort.abort();
   }
   async settled() {

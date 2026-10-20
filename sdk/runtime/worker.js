@@ -92,7 +92,12 @@ self.onmessage = (event) => {
     else if (message.type === "pause") session.pause();
     else if (message.type === "resume") session.resume();
     else if (message.type === "input") session.media?.enqueue(message.events ?? [], message.sentAtMs);
-    else if (message.type === "pcm-accepted") session.media?.acceptedAudio(message.sequence);
+    else if (message.type === "pcm-consumed") session.media?.consumedAudio(message);
+    else if (message.type === "audio-hold") {
+      if (!Number.isSafeInteger(message.request) || message.request < 1) throw new Error('invalid audio hold request');
+      session.media?.pauseAudio();
+      postMessage({type:'audio-held',request:message.request});
+    }
     else if (message.type === "graphics-complete") session.media?.graphicsComplete(message);
     else if (message.type === "gdi-complete") session.media?.gdiComplete(message);
     else if (message.type === "graphics-error")

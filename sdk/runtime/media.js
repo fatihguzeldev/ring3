@@ -2,7 +2,7 @@ import {record,view,pair} from './engine.js';
 import {GraphicsTransport} from './media/graphics.js';
 import {InputMeasurements} from './media/input/measurement.js';
 export class Media {
-  constructor(engine,epoch,emit,windows) {this.engine=engine;this.epoch=epoch;this.emit=emit;this.windows=windows;this.sequence=0n;this.input=[];this.inputMeasurements=engine.inputMeasurementsEnabled?new InputMeasurements():null;this.audio=null;this.lastAudio=0;this.lastCursor=0n;this.graphicsTransport=new GraphicsTransport(engine,emit);this.gdi=null;this.dialogs=new Set();}
+  constructor(engine,epoch,emit,windows) {this.engine=engine;this.epoch=epoch;this.emit=emit;this.windows=windows;this.sequence=0n;this.input=[];this.inputMeasurements=engine.inputMeasurementsEnabled?new InputMeasurements():null;this.audio=[];this.audioPaused=false;this.audioSequence=0n;this.audioFrame=0n;this.lastCursor=0n;this.graphicsTransport=new GraphicsTransport(engine,emit);this.gdi=null;this.dialogs=new Set();}
   enqueue(events,sentAtMs) {if(this.input.length+events.length>4096)throw new Error('host input queue exceeded4096');this.input.push(...events);this.inputMeasurements?.enqueue(events.length,sentAtMs);}
   inputStatus() {return this.inputMeasurements?.snapshot(this.input.length);}
   update(now) {
@@ -39,12 +39,7 @@ export class Media {
       this.lastCursor=revision;const flags=cursor.values[1], point=cursor.values[2], a=cursor.values[3],b=cursor.values[4],signed=n=>Number(BigInt.asIntN(32,n));
       this.emit({type:'cursor',revision,visible:!!(flags&256n),cursor:Number(flags>>32n),x:signed(point),y:signed(point>>32n),clip:flags&512n?{left:signed(a),top:signed(a>>32n),right:signed(b),bottom:signed(b>>32n)}:undefined});
     }
-    if(!this.audio&&performance.now()-this.lastAudio>=256/48) {
-      const submission=h.media('audio_submit',256),[sequence,,frames]=submission.values;
-      const pcmBytes=h.take(64+Number(frames)*8).slice(64),samples=new Float32Array(pcmBytes.buffer);
-      this.audio={epoch:submission.epoch,sequence,frames:Number(frames)};this.lastAudio=performance.now();
-      this.emit({type:'pcm',samples,channels:2,sampleRate:48000,frames:Number(frames),sequence},[samples.buffer]);
-    }
+    this.fillAudio();
     this.publishDialogs();
     this.publishGdi();
   }
@@ -70,10 +65,31 @@ export class Media {
   gdiComplete(message) {
     if (this.gdi && this.gdi.id === BigInt(message.id) && this.gdi.revision === BigInt(message.revision)) this.gdi = null;
   }
-  acceptedAudio(sequence) {
-    if(!this.audio||BigInt(sequence)!==this.audio.sequence)return;
-    this.engine.ok('audio_acknowledge',...pair(this.audio.epoch),...pair(this.audio.sequence),this.audio.frames);this.audio=null;
+  fillAudio() {
+    while(!this.audioPaused && this.audio.length<4) {
+      const submission=this.engine.media('audio_enqueue',256),[sequence,firstFrame,frames]=submission.values;
+      if(submission.epoch!==this.epoch || sequence!==this.audioSequence+1n || firstFrame!==this.audioFrame || frames!==256n)
+        throw new Error('invalid queued audio identity');
+      const pcmBytes=this.engine.take(64+Number(frames)*8).slice(64),samples=new Float32Array(pcmBytes.buffer);
+      const packet={epoch:submission.epoch,sequence,firstFrame,frames:Number(frames),consumedFrames:0};
+      this.audio.push(packet); this.audioSequence=sequence; this.audioFrame+=frames;
+      this.emit({type:'pcm',...packet,samples,channels:2,sampleRate:48000},[samples.buffer]);
+    }
   }
+  consumedAudio(message) {
+    if(message.epoch!==this.epoch)return;
+    const packet=this.audio[0];
+    if(!packet || message.sequence!==packet.sequence || message.firstFrame!==packet.firstFrame || message.frames!==packet.frames ||
+        !Number.isInteger(message.consumedFrames) || message.consumedFrames<1 || message.consumedFrames>packet.frames)
+      throw new Error('invalid audio head consumption identity or order');
+    if(message.consumedFrames<=packet.consumedFrames)return;
+    this.engine.ok('audio_acknowledge',...pair(packet.epoch),...pair(packet.sequence),message.consumedFrames);
+    packet.consumedFrames=message.consumedFrames;
+    if(packet.consumedFrames===packet.frames)this.audio.shift();
+    this.fillAudio();
+  }
+  pauseAudio() {this.audioPaused=true;}
+  resumeAudio() {this.audioPaused=false;this.fillAudio();}
   publishDialogs() {
     const h=this.engine;
     for(let index=0;index<256;index++) {
