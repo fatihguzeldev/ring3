@@ -2,6 +2,7 @@
 """build the private numeric backend in an isolated, pinned source snapshot."""
 
 import argparse
+from contextlib import ExitStack
 import hashlib
 import json
 import os
@@ -55,18 +56,7 @@ def run(arguments, cwd, environment, log):
     return result.stdout
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output", required=True, type=Path, help="a new retained output directory")
-    args = parser.parse_args()
-    repository = Path(__file__).resolve().parents[4]
-    output = args.output.resolve()
-    # ancestor cargo configuration can inject flags, wrappers, or dependencies.
-    for ancestor in [output, *output.parents]:
-        for name in ["config", "config.toml"]:
-            if (ancestor / ".cargo" / name).exists():
-                raise ValueError(f"choose an output without ancestor cargo configuration: {ancestor}")
-    output.mkdir(parents=True, exist_ok=False)
+def build(repository, output):
     source = output / "source"
     evidence = source / ".numeric-proof"
     evidence.mkdir(parents=True)
@@ -158,6 +148,26 @@ def main():
     })
     print(json.dumps({"backend": str(binary), "sourceRoot": str(source),
                       "receipt": str(output / "receipt.json")}, indent=2))
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--output", required=True, type=Path, help="a new retained output directory")
+    args = parser.parse_args()
+    repository = Path(__file__).resolve().parents[4]
+    output = args.output.resolve()
+    # ancestor cargo configuration can inject flags, wrappers, or dependencies.
+    for ancestor in [output, *output.parents]:
+        for name in ["config", "config.toml"]:
+            if (ancestor / ".cargo" / name).exists():
+                raise ValueError(f"choose an output without ancestor cargo configuration: {ancestor}")
+    output.mkdir(parents=True, exist_ok=False)
+    with ExitStack() as caches:
+        for name in ["cargo-home", "cargo-target"]:
+            cache = output / name
+            cache.mkdir()
+            caches.callback(shutil.rmtree, cache)
+        build(repository, output)
 
 
 if __name__ == "__main__":

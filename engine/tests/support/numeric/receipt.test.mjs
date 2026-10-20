@@ -16,7 +16,9 @@ const currentOwners = [
   "cpu/x86/avx/operation/factory/logical.rs", "cpu/x86/avx/operation/factory/compound.rs",
   "cpu/x86/avx/arithmetic.rs", "cpu/x86/avx/compound/mod.rs",
   "cpu/x86/avx/arithmetic/memory/fixtures/runtime/run.mjs",
-  "cpu/x86/avx/compound/fixtures/runtime/run.mjs", "cpu/x86/simd.rs", "cpu/x86/simd/float.rs",
+  "cpu/x86/avx/compound/fixtures/runtime/run.mjs", "cpu/x86/simd/mod.rs", "cpu/x86/simd/state.rs",
+  "cpu/x86/simd/operation.rs", "cpu/x86/simd/descriptor.rs", "cpu/x86/simd/execute.rs",
+  "cpu/x86/xstate/fxsave.rs", "process/cpu/simd/arena.rs", "cpu/x86/simd/float.rs",
   "cpu/x86/simd/packed.rs", "math/ieee.rs",
 ].map((path) => `engine/src/${path}`);
 function write(root, path, data) {
