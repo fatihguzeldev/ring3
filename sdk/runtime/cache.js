@@ -1,6 +1,11 @@
 const MAX_CODE_BYTES = 32 * 1024 * 1024;
 const NATIVE_COUNTERS = ['compiled','admittedEncodedBytes','countEvictions','byteEvictions',
   'sourceInvalidations','retainedUnits','retainedEncodedBytes','unitCapacity'];
+const DIAGNOSTIC_PC_CAPACITY = 8192;
+const DIAGNOSTIC_LAST_CAPACITY = 32;
+const DIAGNOSTIC_SLOW_CAPACITY = 8;
+const repeatOrder = (a,b) => b.admissions-a.admissions || b.bytes-a.bytes || a.pc-b.pc;
+const slowOrder = (a,b) => b.phaseTotalNs-a.phaseTotalNs || a.sequence-b.sequence;
 
 export class CodeCache {
   constructor(engine, {budget = 50000, instructions = 2048, blocks = 128, capacity = 1024, chain = true} = {}) {
@@ -26,8 +31,87 @@ export class CodeCache {
     this.evictionReasons = {count:0,bytes:0};
     this.prunedNative = 0; this.prunedNativeBytes = 0; this.nativeCache = undefined;
     this.generatedModuleBytes = 0; this.retainedModuleBytes = 0;
+    this.compilation = engine.cacheMeasurementsEnabled ? {
+      prepare:{count:0,failures:0,ns:0,maxNs:0,lastNs:0},
+      module:{count:0,failures:0,ns:0,maxNs:0,lastNs:0},
+      instance:{count:0,failures:0,ns:0,maxNs:0,lastNs:0},
+      admissionCount:0,admittedBytes:0,prepareHits:0,
+      trackedRepeatPcAdmissions:0,samePcNewIdentityAdmissions:0,samePcSameIdentityAdmissions:0,
+      droppedPcPrepares:0,droppedPcAdmissions:0,pcs:new Map(),topRepeat:[],last:[],slow:[],
+    } : null;
     this.chain = chain;
     if (chain) this.initializeDispatch();
+  }
+  measureCompilation(phase,operation,pc) {
+    const diagnostic = this.compilation, metric = diagnostic[phase];
+    let row;
+    if (phase === 'prepare') {
+      pc >>>= 0;
+      row = diagnostic.pcs.get(pc);
+      if (!row && diagnostic.pcs.size < DIAGNOSTIC_PC_CAPACITY) {
+        row = {pc,prepares:0,hits:0,prepareNs:0,prepareFailures:0,admissions:0,bytes:0,
+          identityChanges:0,repeatedIdentityAdmissions:0,lastIdentity:null,firstSequence:0,lastSequence:0};
+        diagnostic.pcs.set(pc,row);
+      }
+      if (row) row.prepares++;
+      else diagnostic.droppedPcPrepares++;
+    }
+    metric.count++;
+    const start = performance.now();
+    try {return operation();}
+    catch (error) {metric.failures++; if (row) row.prepareFailures++; throw error;}
+    finally {
+      const elapsed = Math.max(0,Math.round((performance.now()-start)*1e6));
+      metric.ns += elapsed; metric.maxNs = Math.max(metric.maxNs,elapsed); metric.lastNs = elapsed;
+      if (row) row.prepareNs += elapsed;
+    }
+  }
+  recordAdmission(pc,id,bytes) {
+    const diagnostic = this.compilation, identity = id.toString();
+    const sequence = ++diagnostic.admissionCount;
+    diagnostic.admittedBytes += bytes;
+    pc >>>= 0;
+    const row = diagnostic.pcs.get(pc);
+    if (row) {
+      if (row.admissions) {
+        diagnostic.trackedRepeatPcAdmissions++;
+        if (identity !== row.lastIdentity) {row.identityChanges++; diagnostic.samePcNewIdentityAdmissions++;}
+        else {row.repeatedIdentityAdmissions++; diagnostic.samePcSameIdentityAdmissions++;}
+      }
+      row.admissions++; row.bytes += bytes; row.lastIdentity = identity;
+      row.firstSequence ||= sequence; row.lastSequence = sequence;
+      if (row.admissions > 1) {
+        if (!diagnostic.topRepeat.includes(row)) diagnostic.topRepeat.push(row);
+        diagnostic.topRepeat.sort(repeatOrder); diagnostic.topRepeat.length = Math.min(diagnostic.topRepeat.length,16);
+      }
+    } else diagnostic.droppedPcAdmissions++;
+    const record = {sequence,pc,identity,bytes,prepareNs:diagnostic.prepare.lastNs,
+      moduleNs:diagnostic.module.lastNs,instanceNs:diagnostic.instance.lastNs};
+    record.phaseTotalNs = record.prepareNs+record.moduleNs+record.instanceNs;
+    diagnostic.last.push(record);
+    if (diagnostic.last.length > DIAGNOSTIC_LAST_CAPACITY) diagnostic.last.shift();
+    diagnostic.slow.push(record); diagnostic.slow.sort(slowOrder);
+    diagnostic.slow.length = Math.min(diagnostic.slow.length,DIAGNOSTIC_SLOW_CAPACITY);
+  }
+  compilationSnapshot() {
+    const diagnostic = this.compilation;
+    const snapshot = {
+      semantics:'elapsed wall time; same-PC identity changes have no source-change witness',
+      prepareHitSemantics:'returned identity already instantiated in the SDK cache',
+      pcCapacity:DIAGNOSTIC_PC_CAPACITY,lastCapacity:DIAGNOSTIC_LAST_CAPACITY,slowCapacity:DIAGNOSTIC_SLOW_CAPACITY,
+      trackedPcCount:diagnostic.pcs.size,droppedPcPrepares:diagnostic.droppedPcPrepares,droppedPcAdmissions:diagnostic.droppedPcAdmissions,
+      admissionCount:diagnostic.admissionCount,admittedBytes:diagnostic.admittedBytes,prepareHits:diagnostic.prepareHits,
+      trackedRepeatPcAdmissions:diagnostic.trackedRepeatPcAdmissions,
+      samePcNewIdentityAdmissions:diagnostic.samePcNewIdentityAdmissions,samePcSameIdentityAdmissions:diagnostic.samePcSameIdentityAdmissions,
+      topRepeatPcs:diagnostic.topRepeat.map(row=>({...row})),
+      lastAdmissions:diagnostic.last.map(row=>({...row})),slowestAdmissions:diagnostic.slow.map(row=>({...row})),
+    };
+    for (const phase of ['prepare','module','instance']) {
+      const metric = diagnostic[phase];
+      snapshot[`${phase}Count`] = metric.count; snapshot[`${phase}Failures`] = metric.failures;
+      snapshot[`${phase}Ns`] = metric.ns; snapshot[`${phase}MaxNs`] = metric.maxNs;
+    }
+    return snapshot;
   }
   encoded(pointerName, lengthName) {
     const pointer = this.native[pointerName]() >>> 0, length = this.native[lengthName]() >>> 0;
@@ -96,7 +180,8 @@ export class CodeCache {
   entry(pc = this.pc) {
     if (this.open) throw new Error('cannot select code during execution');
     this.pristine();
-    this.engine.ok('core_prepare', pc, this.instructions, this.blocks);
+    if (this.compilation) this.measureCompilation('prepare',()=>this.engine.ok('core_prepare',pc,this.instructions,this.blocks),pc);
+    else this.engine.ok('core_prepare', pc, this.instructions, this.blocks);
     const context = this.native.core_context_ptr() >>> 0;
     if (!context || (this.context && context !== this.context)) throw new Error('core context allocation changed');
     this.context = context;
@@ -104,11 +189,18 @@ export class CodeCache {
     if (id === 0n) throw new Error('core code has no identity');
     if (this.units.has(id)) {
       const unit = this.units.get(id); this.units.delete(id); this.units.set(id, unit); this.hits++;
+      if (this.compilation) {
+        this.compilation.prepareHits++;
+        const row = this.compilation.pcs.get(pc>>>0); if (row) row.hits++;
+      }
       return unit;
     }
     if (this.chain) this.pruneNative();
     const encoded = this.encoded('core_code_ptr','core_code_len'), length = encoded.length;
-    const module = new WebAssembly.Module(encoded), bindings = {memory: this.memory};
+    const module = this.compilation
+      ? this.measureCompilation('module',()=>new WebAssembly.Module(encoded))
+      : new WebAssembly.Module(encoded);
+    const bindings = {memory: this.memory};
     const available = {read: this.native.core_read, write: this.native.core_write, numeric: this.native.core_numeric};
     const found = new Set();
     for (const item of WebAssembly.Module.imports(module)) {
@@ -119,7 +211,10 @@ export class CodeCache {
       bindings[item.name] = available[item.name];
     }
     if (!['memory', 'read', 'write'].every(name => found.has(name))) throw new Error('incomplete core imports');
-    const run = new WebAssembly.Instance(module, {ring3: bindings}).exports.run;
+    const instance = this.compilation
+      ? this.measureCompilation('instance',()=>new WebAssembly.Instance(module,{ring3:bindings}))
+      : new WebAssembly.Instance(module,{ring3:bindings});
+    const run = instance.exports.run;
     if (typeof run !== 'function' || run.length !== 2) throw new Error('invalid core run export');
     const unit = {id, pc, run, bytes: length};
     while (this.units.size >= this.capacity || this.retainedModuleBytes + length > MAX_CODE_BYTES)
@@ -133,6 +228,7 @@ export class CodeCache {
       unit.slot = slot; this.slots.set(slot,unit);
     }
     this.units.set(id, unit); this.admissions++; this.generatedModuleBytes += length; this.retainedModuleBytes += length;
+    if (this.compilation) this.recordAdmission(pc,id,length);
     return unit;
   }
   execute(selected) {
@@ -198,6 +294,7 @@ export class CodeCache {
       byteCapacity:MAX_CODE_BYTES, evictionReasons:{...this.evictionReasons},
       prunedNative:this.prunedNative, prunedNativeBytes:this.prunedNativeBytes,
       nativeCache:this.nativeCache && {...this.nativeCache},
+      ...(this.compilation ? {cacheDiagnostics:this.compilationSnapshot()} : {}),
       wasmMemoryBytes: this.memory.buffer.byteLength};
   }
 }

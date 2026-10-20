@@ -119,6 +119,105 @@ test('native prepare selects every requested entry and native identity controls 
   assert.equal(a, inside); assert.notEqual(a, b); assert.deepEqual(f.calls.filter(c => c[0] === 'prepare').map(c => c[1]), [0x1000,0x1004,0x2000]);
   assert.equal(cache.stats().admissions, 2); assert.equal(cache.stats().engineCacheHits, 1);
 });
+test('cold compilation diagnostics remain absent and read no clock when disabled', t => {
+  const f = fixture(), cache = new CodeCache(f.engine,{chain:false});
+  t.mock.method(performance,'now',()=>{throw new Error('disabled diagnostic clock');});
+  cache.entry(0x1000); cache.entry(0x1000);
+  assert.equal(cache.stats().cacheDiagnostics,undefined);
+});
+test('cold compilation diagnostics separate prepares, hits, admissions and phase time', t => {
+  let identity = 1n, clock = 0;
+  const f = fixture(pc => ({id:identity,stop:2,next:pc+4}));
+  f.engine.cacheMeasurementsEnabled = true;
+  const cache = new CodeCache(f.engine,{chain:false,capacity:1});
+  t.mock.method(performance,'now',()=>clock++);
+  cache.entry(0x1000); cache.entry(0x1004); cache.entry(0x1000);
+  identity = 2n; cache.entry(0x1000);
+  identity = 3n; cache.entry(0x2000);
+  identity = 2n; cache.entry(0x1000);
+  const stats = cache.stats(), diagnostic = stats.cacheDiagnostics;
+  assert.equal(stats.admissions,4); assert.equal(stats.engineCacheHits,2);
+  assert.equal(diagnostic.prepareCount,6); assert.equal(diagnostic.prepareFailures,0);
+  assert.equal(diagnostic.prepareNs,6_000_000); assert.equal(diagnostic.prepareMaxNs,1_000_000);
+  for (const phase of ['module','instance']) {
+    assert.equal(diagnostic[`${phase}Count`],4); assert.equal(diagnostic[`${phase}Failures`],0);
+    assert.equal(diagnostic[`${phase}Ns`],4_000_000); assert.equal(diagnostic[`${phase}MaxNs`],1_000_000);
+  }
+  assert.equal(diagnostic.admissionCount,4);
+  assert.equal(diagnostic.admittedBytes,stats.generatedModuleBytes);
+  assert.equal(diagnostic.prepareHits,2); assert.equal(diagnostic.trackedPcCount,3);
+  assert.equal(diagnostic.trackedRepeatPcAdmissions,2);
+  assert.equal(diagnostic.samePcNewIdentityAdmissions,1);
+  assert.equal(diagnostic.samePcSameIdentityAdmissions,1);
+  assert.deepEqual(diagnostic.topRepeatPcs.map(row=>[row.pc,row.prepares,row.hits,row.admissions,row.identityChanges,row.lastIdentity]),
+    [[0x1000,4,1,3,1,'2']]);
+  assert.deepEqual(diagnostic.lastAdmissions.map(row=>[row.sequence,row.pc,row.identity,row.prepareNs,row.moduleNs,row.instanceNs,row.phaseTotalNs]),
+    [[1,0x1000,'1',1_000_000,1_000_000,1_000_000,3_000_000],
+      [2,0x1000,'2',1_000_000,1_000_000,1_000_000,3_000_000],
+      [3,0x2000,'3',1_000_000,1_000_000,1_000_000,3_000_000],
+      [4,0x1000,'2',1_000_000,1_000_000,1_000_000,3_000_000]]);
+  assert.equal(diagnostic.droppedPcPrepares,0); assert.equal(diagnostic.droppedPcAdmissions,0);
+  assert.equal(diagnostic.pcCapacity,8192); assert.equal(diagnostic.lastCapacity,32); assert.equal(diagnostic.slowCapacity,8);
+  diagnostic.topRepeatPcs[0].admissions = 999;
+  diagnostic.lastAdmissions[0].identity = '999';
+  diagnostic.slowestAdmissions[0].identity = '999';
+  const again = cache.stats().cacheDiagnostics;
+  assert.equal(again.topRepeatPcs[0].admissions,3);
+  assert.equal(again.lastAdmissions[0].identity,'1'); assert.equal(again.slowestAdmissions[0].identity,'1');
+});
+test('cold compilation diagnostics retain failed phase accounting without admitting a module', t => {
+  let clock = 0;
+  t.mock.method(performance,'now',()=>clock++);
+  const prepare = fixture(); prepare.engine.cacheMeasurementsEnabled = true;
+  prepare.api.core_prepare = () => 7;
+  const rejected = new CodeCache(prepare.engine,{chain:false});
+  assert.throws(()=>rejected.entry(),/core_prepare returned 7/);
+  const beforeModule = rejected.stats().cacheDiagnostics;
+  assert.equal(beforeModule.prepareCount,1); assert.equal(beforeModule.prepareFailures,1);
+  assert.equal(beforeModule.prepareNs,1_000_000); assert.equal(beforeModule.moduleCount,0);
+  assert.equal(beforeModule.admissionCount,0); assert.deepEqual(beforeModule.lastAdmissions,[]);
+  const malformed = fixture(); malformed.engine.cacheMeasurementsEnabled = true;
+  const pointer = malformed.api.core_code_ptr;
+  malformed.api.core_code_ptr = () => {
+    const offset = pointer(); new Uint8Array(malformed.engine.memory.buffer)[offset] = 255; return offset;
+  };
+  const badModule = new CodeCache(malformed.engine,{chain:false});
+  assert.throws(()=>badModule.entry(),WebAssembly.CompileError);
+  const afterModule = badModule.stats().cacheDiagnostics;
+  assert.equal(afterModule.prepareFailures,0); assert.equal(afterModule.moduleCount,1);
+  assert.equal(afterModule.moduleFailures,1); assert.equal(afterModule.moduleNs,1_000_000);
+  assert.equal(afterModule.instanceCount,0); assert.equal(afterModule.admissionCount,0);
+  const mismatched = fixture(); mismatched.engine.cacheMeasurementsEnabled = true;
+  mismatched.api.core_read = new WebAssembly.Instance(new WebAssembly.Module(program()),
+    {ring3:{memory:mismatched.engine.memory,read:()=>0n,write:()=>0}}).exports.run;
+  const badInstance = new CodeCache(mismatched.engine,{chain:false});
+  assert.throws(()=>badInstance.entry(),WebAssembly.LinkError);
+  const afterInstance = badInstance.stats().cacheDiagnostics;
+  assert.equal(afterInstance.moduleFailures,0); assert.equal(afterInstance.instanceCount,1);
+  assert.equal(afterInstance.instanceFailures,1); assert.equal(afterInstance.instanceNs,1_000_000);
+  assert.equal(afterInstance.admissionCount,0); assert.equal(badInstance.stats().installedUnits,0);
+});
+test('cold compilation diagnostics cap PC retention and snapshots while preserving aggregate totals', t => {
+  let identity = 0n, clock = 0;
+  const f = fixture(pc => ({id:++identity,stop:2,next:pc+4})); f.engine.cacheMeasurementsEnabled = true;
+  const cache = new CodeCache(f.engine,{chain:false,capacity:1});
+  t.mock.method(performance,'now',()=>clock++);
+  for (let index=0; index<8193; index++) cache.entry(index*4);
+  cache.entry(0); cache.entry(32768);
+  const diagnostic = cache.stats().cacheDiagnostics;
+  assert.equal(diagnostic.prepareCount,8195); assert.equal(diagnostic.admissionCount,8195);
+  assert.equal(diagnostic.moduleCount,8195); assert.equal(diagnostic.instanceCount,8195);
+  assert.equal(diagnostic.prepareNs,8_195_000_000); assert.equal(diagnostic.prepareHits,0);
+  assert.equal(diagnostic.admittedBytes,cache.stats().generatedModuleBytes);
+  assert.equal(diagnostic.trackedPcCount,8192); assert.equal(diagnostic.droppedPcPrepares,2);
+  assert.equal(diagnostic.droppedPcAdmissions,2);
+  assert.equal(diagnostic.trackedRepeatPcAdmissions,1); assert.equal(diagnostic.samePcNewIdentityAdmissions,1);
+  assert.deepEqual(diagnostic.topRepeatPcs.map(row=>[row.pc,row.admissions]),[[0,2]]);
+  assert.equal(diagnostic.lastAdmissions.length,32); assert.equal(diagnostic.lastAdmissions[0].sequence,8164);
+  assert.equal(diagnostic.lastAdmissions.at(-1).sequence,8195);
+  assert.equal(diagnostic.slowestAdmissions.length,8);
+  assert.deepEqual(diagnostic.slowestAdmissions.map(row=>row.sequence),[1,2,3,4,5,6,7,8]);
+});
 test('NeedCode retains context until a real canonical boundary is published and imported', () => {
   const f = fixture(), cache = new CodeCache(f.engine,{chain:false});
   const run = cache.execute(cache.entry());
