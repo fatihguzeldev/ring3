@@ -206,17 +206,18 @@ test('the CPU owner keeps only its exact i64 view parameter and pair/group expor
 const coreSource = readFileSync(new URL('../../../src/abi/wasm/exports/core.rs', import.meta.url), 'utf8');
 const coreReadSource = coreSource.slice(coreSource.indexOf('#[allow('));
 
-test('the Core owner retains its exact handwritten i64 read export', () => {
+test('the Core owner retains exact handwritten i64 read and signed cold exports', () => {
   workspace(parent, child, root => {
     const dir = join(root, 'engine/src/abi/wasm/exports');
     writeFileSync(join(dir, 'mod.rs'), 'macro_rules! export_process_calls {\n}\nmod core;\n');
     const core = join(dir, 'core.rs');
     const source = 'export_process_calls! { core_begin(); core_write(context: u32, address: u32, width: u32, value: u32); }\n' + coreReadSource;
     writeFileSync(core, source);
-    const actual = moduleWith(['ring3_abi_v1_core_begin', 'ring3_abi_v1_core_write', 'ring3_abi_v1_core_read']);
+    const actual = moduleWith(['ring3_abi_v1_core_begin', 'ring3_abi_v1_core_write', 'ring3_abi_v1_core_read', 'ring3_abi_v1_core_cold_run']);
     const result = assertEngineExports(actual, root);
     assert.deepEqual(result.functions.map(row => [row.name, row.arity]), [
       ['ring3_abi_v1_core_begin', 0], ['ring3_abi_v1_core_write', 4], ['ring3_abi_v1_core_read', 3],
+      ['ring3_abi_v1_core_cold_run', 1],
     ]);
     assert.ok(result.sourcePaths.includes('engine/src/abi/wasm/exports/core.rs'));
     assert.throws(() => assertEngineExports(moduleWith(['ring3_abi_v1_core_begin', 'ring3_abi_v1_core_write']), root), /exact declared engine exports/);
@@ -225,10 +226,14 @@ test('the Core owner retains its exact handwritten i64 read export', () => {
       source.replace('width: u32) -> i64', 'width: i64) -> i64'),
       source.replace('core_read(context, address, width)', 'core_read(context, width, address)'),
       source.replace('ring3_abi_v1_core_read', 'ring3_abi_v1_other'),
+      source.replace(') -> i32', ') -> u32'),
+      source.replace('budget: u32', 'budget: i32'),
+      source.replace('core_cold_run(budget)', 'core_cold_run(0)'),
+      source.replace('ring3_abi_v1_core_cold_run', 'ring3_abi_v1_other'),
       source + '\nfn hidden() {}\n',
     ]) {
       writeFileSync(core, invalid);
-      assert.throws(() => assertEngineExports(actual, root), /declared i64 Core read export/);
+      assert.throws(() => assertEngineExports(actual, root), /declared Core handwritten exports/);
     }
   });
 });

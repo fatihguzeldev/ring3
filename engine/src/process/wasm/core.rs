@@ -1,9 +1,11 @@
 mod boundary;
 mod cache;
+mod cold;
 mod dispatch;
 mod numeric;
 mod retention;
 
+pub(crate) use cold::core_cold_run;
 pub(crate) use dispatch::{
     core_chain_next, core_dispatch_code_len, core_dispatch_code_ptr, core_link, core_unlink,
 };
@@ -22,7 +24,10 @@ use crate::{
         x86::{STATE_SIZE, USER_FLAGS_MASK_V3, decode_state, decode_state_metadata},
     },
     cpu::{
-        core::{CompileError, CompileOptions, CompiledCode, Context32, compile_with_frontier},
+        core::{
+            CompileError, CompileOptions, CompiledCode, Context32, cold::ColdHeat,
+            compile_with_frontier,
+        },
         x86::{SegmentContext, SegmentRegister},
     },
     memory::{Access, CoreWriteOutcome, FaultReason, GuestAddress, MemoryError},
@@ -33,22 +38,88 @@ use numeric::NumericBank;
 use std::rc::Rc;
 
 pub(super) struct CoreSession32 {
-    code: Rc<CompiledCode>,
+    code: Option<Rc<CompiledCode>>,
     cache: CoreCache32,
     cache_status: [u64; 8],
     numeric: NumericBank,
     exported_retired: u32,
     context: Box<Context32>,
     active: bool,
+    cold_heat: ColdHeat,
 }
 
 impl CoreSession32 {
+    fn from_instance(instance: &EngineInstance) -> Result<Self, HostError> {
+        let state = decode_state(&instance.arena()[STATE_OFFSET..STATE_OFFSET + STATE_SIZE])
+            .map_err(|_| HostError::InvalidRequest)?;
+        Ok(Self {
+            code: None,
+            cache: CoreCache32::default(),
+            cache_status: [0; 8],
+            numeric: NumericBank::from_instance(instance)?,
+            exported_retired: 0,
+            context: Box::new(Context32::new(state)),
+            active: false,
+            cold_heat: ColdHeat::default(),
+        })
+    }
+
     pub(super) fn is_active(&self) -> bool {
         self.active
     }
 
     fn context_address(&mut self) -> usize {
         self.context.bytes_mut().as_mut_ptr() as usize
+    }
+
+    fn begin(&mut self, instance: &mut EngineInstance, compiled: bool) -> Result<(), u32> {
+        let segments = admission(instance).map_err(status)?;
+        let code = if compiled {
+            Some(self.code.as_ref().ok_or(7_u32)?)
+        } else {
+            None
+        };
+        let memory = instance.memory.as_mut().ok_or(5_u32)?;
+        if code.is_some_and(|code| !code.is_current(memory)) {
+            return Err(4);
+        }
+        let flags = self.context.state().eflags;
+        if flags & 2 == 0 || flags & !USER_FLAGS_MASK_V3 != 0 || flags & 0x50100 != 0 {
+            return Err(7);
+        }
+        let identity = code.map_or(0, |code| code.identity());
+        let view = memory.core_view();
+        for (offset, value) in [
+            (56, view.mappings),
+            (60, view.permissions),
+            (64, view.backing),
+            (68, view.backing_pages as usize),
+            (72, view.executable_views),
+            (76, view.private_slots),
+            (80, view.transaction_version),
+            (84, view.page_versions),
+            (88, view.code_validation_version),
+        ] {
+            self.context.set_word(offset, value as u32);
+        }
+        self.context.bytes_mut()[96..104]
+            .copy_from_slice(&view.expected_code_version.to_le_bytes());
+        self.context
+            .set_word(104, segments.state.bases[SegmentRegister::Fs.index()]);
+        self.context
+            .set_word(108, segments.state.bases[SegmentRegister::Gs.index()]);
+        self.numeric.refresh_segments(segments);
+        for offset in [48, 52, 116] {
+            self.context.set_word(offset, 0);
+        }
+        if !compiled {
+            self.code = None;
+            self.cache.clear_transition();
+        }
+        self.context.bytes_mut()[120..128].copy_from_slice(&identity.to_le_bytes());
+        self.context.set_word(112, 1);
+        self.active = true;
+        Ok(())
     }
 }
 
@@ -175,7 +246,7 @@ pub(crate) fn core_prepare(pc: u32, instructions: u32, blocks: u32) -> u32 {
         };
         let identity = code.identity();
         if let Some(session) = core.as_mut() {
-            session.code = code;
+            session.code = Some(code);
         } else {
             let mut state =
                 match decode_state(&instance.arena()[STATE_OFFSET..STATE_OFFSET + STATE_SIZE]) {
@@ -188,13 +259,14 @@ pub(crate) fn core_prepare(pc: u32, instructions: u32, blocks: u32) -> u32 {
                 Err(error) => return status(error),
             };
             *core = Some(CoreSession32 {
-                code,
+                code: Some(code),
                 cache: fresh_cache.unwrap(),
                 cache_status: [0; 8],
                 numeric,
                 exported_retired: 0,
                 context: Box::new(Context32::new(state)),
                 active: false,
+                cold_heat: ColdHeat::default(),
             });
         }
         let session = core.as_mut().unwrap();
@@ -212,7 +284,8 @@ pub(crate) fn core_code_ptr() -> u32 {
                 registry
                     .core
                     .as_ref()
-                    .map(|core| core.code.wasm().as_ptr() as usize as u32)
+                    .and_then(|core| core.code.as_ref())
+                    .map(|code| code.wasm().as_ptr() as usize as u32)
             })
             .unwrap_or(0)
     })
@@ -227,7 +300,8 @@ pub(crate) fn core_code_len() -> u32 {
                 registry
                     .core
                     .as_ref()
-                    .map(|core| core.code.wasm().len() as u32)
+                    .and_then(|core| core.code.as_ref())
+                    .map(|code| code.wasm().len() as u32)
             })
             .unwrap_or(0)
     })
@@ -260,49 +334,10 @@ pub(crate) fn core_begin() -> u32 {
         let Some(instance) = instance.as_mut() else {
             return 5;
         };
-        let segments = match admission(instance) {
-            Ok(segments) => segments,
-            Err(error) => return status(error),
-        };
-        let memory = match instance.memory.as_mut() {
-            Some(memory) => memory,
-            None => return 5,
-        };
-        if !core.code.is_current(memory) {
-            return 4;
+        match core.begin(instance, true) {
+            Ok(()) => 0,
+            Err(status) => status,
         }
-        let flags = core.context.state().eflags;
-        if flags & 2 == 0 || flags & !USER_FLAGS_MASK_V3 != 0 || flags & 0x50100 != 0 {
-            return 7;
-        }
-        let view = memory.core_view();
-        for (offset, value) in [
-            (56, view.mappings),
-            (60, view.permissions),
-            (64, view.backing),
-            (68, view.backing_pages as usize),
-            (72, view.executable_views),
-            (76, view.private_slots),
-            (80, view.transaction_version),
-            (84, view.page_versions),
-            (88, view.code_validation_version),
-        ] {
-            core.context.set_word(offset, value as u32);
-        }
-        core.context.bytes_mut()[96..104]
-            .copy_from_slice(&view.expected_code_version.to_le_bytes());
-        core.context
-            .set_word(104, segments.state.bases[SegmentRegister::Fs.index()]);
-        core.context
-            .set_word(108, segments.state.bases[SegmentRegister::Gs.index()]);
-        core.numeric.refresh_segments(segments);
-        core.context.set_word(48, 0);
-        core.context.set_word(52, 0);
-        core.context.set_word(116, 0);
-        core.context.bytes_mut()[120..128].copy_from_slice(&core.code.identity().to_le_bytes());
-        core.context.set_word(112, 1);
-        core.active = true;
-        0
     })
 }
 

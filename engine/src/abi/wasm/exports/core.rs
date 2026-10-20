@@ -33,3 +33,12 @@ pub extern "C" fn core_read(context: u32, address: u32, width: u32) -> i64 {
         crate::process::wasm::core_read(context, address, width)
     }
 }
+
+#[allow(unsafe_code)]
+#[unsafe(export_name = "ring3_abi_v1_core_cold_run")]
+pub extern "C" fn core_cold_run(budget: u32) -> i32 {
+    {
+        #![forbid(unsafe_code)]
+        crate::process::wasm::core_cold_run(budget)
+    }
+}

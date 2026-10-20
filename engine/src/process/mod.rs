@@ -78,3 +78,7 @@ pub use windows::version::PendingVersionCall32;
 #[cfg(test)]
 #[path = "wasm/core/cache.rs"]
 mod core_cache_tests;
+
+#[cfg(test)]
+#[path = "wasm/core/cold/execution.rs"]
+mod core_cold_execution_tests;

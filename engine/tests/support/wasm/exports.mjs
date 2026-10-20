@@ -19,6 +19,14 @@ pub extern "C" fn core_read(context: u32, address: u32, width: u32) -> i64 {
         crate::process::wasm::core_read(context, address, width)
     }
 }`;
+const coreCold = `#[allow(unsafe_code)]
+#[unsafe(export_name = "ring3_abi_v1_core_cold_run")]
+pub extern "C" fn core_cold_run(budget: u32) -> i32 {
+    {
+        #![forbid(unsafe_code)]
+        crate::process::wasm::core_cold_run(budget)
+    }
+}`;
 const cpuPair = `#[allow(unsafe_code, clippy::too_many_arguments)]
 #[unsafe(export_name = "ring3_abi_v1_x87_resident_pair")]
 pub extern "C" fn x87_resident_pair(
@@ -204,9 +212,10 @@ export function assertEngineExports(module, root) {
     if (path === coreOwner) {
       const parts = text.match(/^(export_process_calls!\s*\{[^{}]*\})\s*([\s\S]*)$/);
       assert.ok(parts, `${path}: closed Core declaration table`);
-      assert.deepEqual(tokens(parts[2]), tokens(coreRead), `${path}: declared i64 Core read export`);
+      assert.deepEqual(tokens(parts[2]), tokens(coreRead + '\n' + coreCold), `${path}: declared Core handwritten exports`);
       text = parts[1];
       extra.push({name: 'ring3_abi_v1_core_read', kind: 'function', arity: 3});
+      extra.push({name: 'ring3_abi_v1_core_cold_run', kind: 'function', arity: 1});
     }
     if (path === instanceOwner) {
       const parts = text.match(/^(export_process_calls!\s*\{[^{}]*\})\s*([\s\S]*)$/);

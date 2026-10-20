@@ -24,9 +24,8 @@ pub(crate) fn core_numeric(context: u32, ordinal: u32) -> u32 {
         }
         let Some(instruction) = core
             .code
-            .native_instructions()
-            .get(ordinal as usize)
-            .copied()
+            .as_ref()
+            .and_then(|code| code.native_instructions().get(ordinal as usize).copied())
         else {
             return 8;
         };
