@@ -144,11 +144,30 @@ pub(crate) fn run(
     )
 }
 
+#[cfg(test)]
 pub(crate) fn run_with_frontier(
     memory: &mut AddressSpace,
     context: &mut Context32,
     segments: &SegmentContext,
     gates: &[(GuestAddress, u32)],
+    frontier: &impl Fn(&AddressSpace, u32) -> bool,
+    cold: &mut ColdState,
+) -> ColdOutcome {
+    run_with_lookups(
+        memory,
+        context,
+        segments,
+        &|pc| gate_id(gates, pc),
+        frontier,
+        cold,
+    )
+}
+
+pub(crate) fn run_with_lookups(
+    memory: &mut AddressSpace,
+    context: &mut Context32,
+    segments: &SegmentContext,
+    gate_at: &impl Fn(u32) -> Option<u32>,
     frontier: &impl Fn(&AddressSpace, u32) -> bool,
     cold: &mut ColdState,
 ) -> ColdOutcome {
@@ -170,7 +189,7 @@ pub(crate) fn run_with_frontier(
             return finish(context, state, retired, remaining, StopReason::Budget);
         }
         let pc = state.eip;
-        match gate(memory, fetch, pc, gates) {
+        match gate(memory, fetch, pc, gate_at(pc)) {
             Ok(Some(id)) => {
                 context.set_word(116, id);
                 return finish(context, state, retired, remaining, StopReason::Host);
@@ -316,20 +335,27 @@ fn finish(
     ColdOutcome::Stop(reason)
 }
 
+#[cfg(test)]
+pub(crate) fn gate_id(gates: &[(GuestAddress, u32)], pc: u32) -> Option<u32> {
+    let index = gates.binary_search_by_key(&pc, |(entry, _)| entry.0).ok()?;
+    if index > 0 && gates[index - 1].0.0 == pc
+        || gates.get(index + 1).is_some_and(|gate| gate.0.0 == pc)
+    {
+        return Some(0);
+    }
+    Some(gates[index].1)
+}
+
 fn gate(
     memory: &AddressSpace,
     fetch: CodeFetchContext,
     pc: u32,
-    gates: &[(GuestAddress, u32)],
+    id: Option<u32>,
 ) -> Result<Option<u32>, Failure> {
-    let Ok(index) = gates.binary_search_by_key(&pc, |(entry, _)| entry.0) else {
+    let Some(id) = id else {
         return Ok(None);
     };
-    let id = gates[index].1;
-    if id == 0
-        || index > 0 && gates[index - 1].0.0 == pc
-        || gates.get(index + 1).is_some_and(|gate| gate.0.0 == pc)
-    {
+    if id == 0 {
         return Err(Failure::Infrastructure);
     }
     let mut stub = [0; 2];

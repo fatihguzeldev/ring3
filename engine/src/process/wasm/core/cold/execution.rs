@@ -6,9 +6,12 @@ use crate::{
         },
         x86::SegmentContext,
     },
-    memory::{AddressSpace, GuestAddress},
-    process::EngineInstance,
+    memory::AddressSpace,
+    process::{EngineInstance, loading::modules::ModuleProcess32},
 };
+
+#[cfg(test)]
+use crate::memory::GuestAddress;
 
 #[cfg(target_arch = "wasm32")]
 use super::super::numeric::NumericBank;
@@ -36,6 +39,7 @@ pub(in crate::process) fn run(
     )
 }
 
+#[cfg(test)]
 pub(in crate::process) fn run_with_frontier(
     instance: &mut EngineInstance,
     context: &mut Context32,
@@ -45,12 +49,42 @@ pub(in crate::process) fn run_with_frontier(
     frontier: &impl Fn(&AddressSpace, u32) -> bool,
     heat: &mut ColdState,
 ) -> StopReason {
+    run_with_lookups(
+        instance,
+        context,
+        numeric,
+        segments,
+        &|_, pc| cold::gate_id(gates, pc),
+        frontier,
+        heat,
+    )
+}
+
+pub(in crate::process) fn run_with_lookups(
+    instance: &mut EngineInstance,
+    context: &mut Context32,
+    numeric: &mut NumericBank,
+    segments: &SegmentContext,
+    gate_at: &impl Fn(&ModuleProcess32, u32) -> Option<u32>,
+    frontier: &impl Fn(&AddressSpace, u32) -> bool,
+    heat: &mut ColdState,
+) -> StopReason {
     loop {
         let outcome = {
-            let Some(memory) = instance.memory.as_mut() else {
+            let EngineInstance {
+                memory, modules, ..
+            } = instance;
+            let Some(memory) = memory.as_mut() else {
                 return StopReason::Infrastructure;
             };
-            cold::run_with_frontier(memory, context, segments, gates, frontier, heat)
+            cold::run_with_lookups(
+                memory,
+                context,
+                segments,
+                &|pc| gate_at(modules, pc),
+                frontier,
+                heat,
+            )
         };
         let instruction = match outcome {
             ColdOutcome::Stop(reason) => return reason,

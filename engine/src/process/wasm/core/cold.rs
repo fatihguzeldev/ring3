@@ -38,19 +38,6 @@ pub(crate) fn core_cold_run(budget: u32) -> i32 {
             && session
                 .cache
                 .frontier_contains(instance.memory.as_ref().unwrap(), pc);
-        let mut gates = if budget != 0 && gate.is_none() && !cached {
-            let gates = match instance.module_gates() {
-                Ok(gates) => gates,
-                Err(error) => return -(status(error) as i32),
-            };
-            gates
-                .iter()
-                .map(|gate| (gate.entry, gate.id))
-                .collect::<Vec<_>>()
-        } else {
-            Vec::new()
-        };
-        gates.sort_unstable_by_key(|gate| gate.0.0);
         if let Err(status) = session.begin(instance, false) {
             return -(status as i32);
         }
@@ -61,10 +48,8 @@ pub(crate) fn core_cold_run(budget: u32) -> i32 {
         session.context.set_word(44, budget);
         let result = if cached {
             StopReason::NeedCode as i32
-        } else if let Some(gate) = gate {
-            run(instance, session, &segments, &[(gate.entry, gate.id)])
         } else {
-            run(instance, session, &segments, &gates)
+            run(instance, session, &segments)
         };
         session.context.set_word(112, 0);
         session.active = false;
@@ -76,7 +61,6 @@ fn run(
     instance: &mut crate::process::EngineInstance,
     session: &mut CoreSession32,
     segments: &SegmentContext,
-    gates: &[(crate::memory::GuestAddress, u32)],
 ) -> i32 {
     let CoreSession32 {
         context,
@@ -85,12 +69,12 @@ fn run(
         cold_state,
         ..
     } = session;
-    execution::run_with_frontier(
+    execution::run_with_lookups(
         instance,
         context,
         numeric,
         segments,
-        gates,
+        &|modules, pc| modules.gate_at(pc).map(|gate| gate.id),
         &|memory, pc| cache.frontier_contains(memory, pc),
         cold_state,
     ) as i32
