@@ -1,3 +1,13 @@
 [workspace]
 members = ["engine", "observability/rust"]
 resolver = "3"
+
+# avoid retaining per-build debug objects on macos; test inherits this profile.
+[profile.dev]
+debug = 0
+
+# opt in for native debugging with packed symbols instead of loose objects.
+[profile.debuggable]
+inherits = "dev"
+debug = 2
+split-debuginfo = "packed"

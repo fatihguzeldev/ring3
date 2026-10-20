@@ -1,5 +1,7 @@
 # Rust
 /target/
+/artifacts/
+/.cache/
 
 # Node and package output
 /node_modules/
