@@ -27,7 +27,7 @@ element('folder').addEventListener('change',() => {
 const actions = {
   launch: () => session.launch({...(local ?? {}),
     ...(local ? {executable:element('executable').value} : {}),
-    commandLine:query.get('args') ?? undefined,
+    commandLine:query.get('commandLine') ?? undefined,
     frameProbe:query.get('frameProbe') === '1',observability:{level:query.get('observation') ?? 'off'},
   }),
   pause: () => session.pause(), resume: () => session.resume(), stop: () => session.stop(),
