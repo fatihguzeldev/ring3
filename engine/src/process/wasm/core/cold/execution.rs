@@ -6,7 +6,7 @@ use crate::{
         },
         x86::SegmentContext,
     },
-    memory::GuestAddress,
+    memory::{AddressSpace, GuestAddress},
     process::EngineInstance,
 };
 
@@ -15,6 +15,7 @@ use super::super::numeric::NumericBank;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::process::core_numeric_tests::NumericBank;
 
+#[cfg(test)]
 pub(in crate::process) fn run(
     instance: &mut EngineInstance,
     context: &mut Context32,
@@ -24,12 +25,32 @@ pub(in crate::process) fn run(
     frontier: &[GuestAddress],
     heat: &mut ColdState,
 ) -> StopReason {
+    run_with_frontier(
+        instance,
+        context,
+        numeric,
+        segments,
+        gates,
+        &|_, pc| frontier.binary_search_by_key(&pc, |entry| entry.0).is_ok(),
+        heat,
+    )
+}
+
+pub(in crate::process) fn run_with_frontier(
+    instance: &mut EngineInstance,
+    context: &mut Context32,
+    numeric: &mut NumericBank,
+    segments: &SegmentContext,
+    gates: &[(GuestAddress, u32)],
+    frontier: &impl Fn(&AddressSpace, u32) -> bool,
+    heat: &mut ColdState,
+) -> StopReason {
     loop {
         let outcome = {
             let Some(memory) = instance.memory.as_mut() else {
                 return StopReason::Infrastructure;
             };
-            cold::run(memory, context, segments, gates, frontier, heat)
+            cold::run_with_frontier(memory, context, segments, gates, frontier, heat)
         };
         let instruction = match outcome {
             ColdOutcome::Stop(reason) => return reason,

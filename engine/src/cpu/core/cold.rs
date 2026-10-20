@@ -124,13 +124,32 @@ impl ColdHeat {
     }
 }
 
-// gates and frontier are sorted snapshots from the same exclusive cpu lifetime.
+// gates and frontier belong to the same exclusive cpu lifetime.
+#[cfg(test)]
 pub(crate) fn run(
     memory: &mut AddressSpace,
     context: &mut Context32,
     segments: &SegmentContext,
     gates: &[(GuestAddress, u32)],
     frontier: &[GuestAddress],
+    cold: &mut ColdState,
+) -> ColdOutcome {
+    run_with_frontier(
+        memory,
+        context,
+        segments,
+        gates,
+        &|_, pc| frontier.binary_search_by_key(&pc, |entry| entry.0).is_ok(),
+        cold,
+    )
+}
+
+pub(crate) fn run_with_frontier(
+    memory: &mut AddressSpace,
+    context: &mut Context32,
+    segments: &SegmentContext,
+    gates: &[(GuestAddress, u32)],
+    frontier: &impl Fn(&AddressSpace, u32) -> bool,
     cold: &mut ColdState,
 ) -> ColdOutcome {
     if word(context, 112) != 1 || context.bytes()[120..128] != [0; 8] || !segments.is_legacy() {
@@ -162,7 +181,7 @@ pub(crate) fn run(
                 return finish(context, state, retired, remaining, reason);
             }
         }
-        if frontier.binary_search_by_key(&pc, |entry| entry.0).is_ok() {
+        if frontier(memory, pc) {
             return finish(context, state, retired, remaining, StopReason::NeedCode);
         }
         let decoded = match decode.decode(

@@ -38,24 +38,19 @@ pub(crate) fn core_cold_run(budget: u32) -> i32 {
             && session
                 .cache
                 .frontier_contains(instance.memory.as_ref().unwrap(), pc);
-        let (mut gates, mut frontier) = if budget != 0 && gate.is_none() && !cached {
+        let mut gates = if budget != 0 && gate.is_none() && !cached {
             let gates = match instance.module_gates() {
                 Ok(gates) => gates,
                 Err(error) => return -(status(error) as i32),
             };
-            (
-                gates
-                    .iter()
-                    .map(|gate| (gate.entry, gate.id))
-                    .collect::<Vec<_>>(),
-                session.cache.frontier(instance.memory.as_ref().unwrap()),
-            )
+            gates
+                .iter()
+                .map(|gate| (gate.entry, gate.id))
+                .collect::<Vec<_>>()
         } else {
-            (Vec::new(), Vec::new())
+            Vec::new()
         };
         gates.sort_unstable_by_key(|gate| gate.0.0);
-        frontier.sort_unstable_by_key(|entry| entry.0);
-        frontier.dedup();
         if let Err(status) = session.begin(instance, false) {
             return -(status as i32);
         }
@@ -67,9 +62,9 @@ pub(crate) fn core_cold_run(budget: u32) -> i32 {
         let result = if cached {
             StopReason::NeedCode as i32
         } else if let Some(gate) = gate {
-            run(instance, session, &segments, &[(gate.entry, gate.id)], &[])
+            run(instance, session, &segments, &[(gate.entry, gate.id)])
         } else {
-            run(instance, session, &segments, &gates, &frontier)
+            run(instance, session, &segments, &gates)
         };
         session.context.set_word(112, 0);
         session.active = false;
@@ -82,15 +77,21 @@ fn run(
     session: &mut CoreSession32,
     segments: &SegmentContext,
     gates: &[(crate::memory::GuestAddress, u32)],
-    frontier: &[crate::memory::GuestAddress],
 ) -> i32 {
-    execution::run(
+    let CoreSession32 {
+        context,
+        numeric,
+        cache,
+        cold_state,
+        ..
+    } = session;
+    execution::run_with_frontier(
         instance,
-        &mut session.context,
-        &mut session.numeric,
+        context,
+        numeric,
         segments,
         gates,
-        frontier,
-        &mut session.cold_state,
+        &|memory, pc| cache.frontier_contains(memory, pc),
+        cold_state,
     ) as i32
 }
