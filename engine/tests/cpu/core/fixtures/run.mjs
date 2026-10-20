@@ -7,7 +7,8 @@ import {runExtended} from './extended.mjs';
 import {runBits} from './bits.mjs';
 
 const directory = process.argv[2];
-const PAGE = 4096, CTX = 0x100, MAP = 0x10000, PERM = 0x410000;
+const PAGE = 4096, MAP = 0x10000, PERM = 0x410000;
+let CTX = 0x100;
 const EXEC = 0x510000, VERSION = 0x510100, PAGE_VERSION = 0x510200;
 const BACKING = 0x520000, GENERATION = 0x530000;
 const memory = new WebAssembly.Memory({initial: 96});
@@ -301,6 +302,21 @@ for (const budget of [0, 1, 2, 3, 4, 5, 6, 9, 10, 14, 15, 16]) {
 }
 runExtended(check);
 runBits(check);
+CTX = 0x101;
+try {
+  const leading = new Uint8Array(8).fill(0xa5), trailing = new Uint8Array(8).fill(0x5a);
+  bytes.set(leading,CTX-8); bytes.set(trailing,CTX+128);
+  check('rmw','unaligned-publication-preserves-all-fields-and-neighbors',17,
+    {regs:[0x11223344,0x22334455,0x33445566,0x3000,0x4800,0x55667788,0x66778899,0x778899aa],
+      flags:0x403,retired:37,initial:[[0x3000,4,0x7fffffff]]},
+    {reason:4,pc:0x1003,retired:1,flags:0xc96,writes:[[0x3000,4,0x80000000]]});
+  const guards = {leading:bytes.slice(CTX-8,CTX),trailing:bytes.slice(CTX+128,CTX+136)};
+  Object.assign(results.at(-1),{contextAddress:CTX,contextGuards:Object.fromEntries(
+    Object.entries(guards).map(([name,value])=>[name,Buffer.from(value).toString('hex')]))});
+  writeFileSync(reportPath,JSON.stringify({schema:1,complete:false,results}));
+  assert.deepEqual(guards.leading,leading,'publication preserves the eight leading context bytes');
+  assert.deepEqual(guards.trailing,trailing,'publication preserves the eight trailing context bytes');
+} finally {CTX=0x100;}
 const report = {schema: 1, complete: true, node: process.version, cases: results.length,
   sources: Object.fromEntries(['./run.mjs', './oracle.mjs', './extended.mjs', './bits.mjs', '../wasm.rs'].map(path => [path, hash(readFileSync(new URL(path, import.meta.url)))])),
   modules: Object.fromEntries([...programs].map(([name, program]) => [name, {identity: String(program.identity), wasmSha256: program.wasmSha256, codeSha256: hash(program.code)}])),

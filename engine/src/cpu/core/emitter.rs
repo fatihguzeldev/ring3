@@ -2,6 +2,8 @@ mod control;
 mod integer;
 mod numeric;
 mod strings;
+#[cfg(test)]
+mod tests;
 
 use super::{
     StopReason, flags,
@@ -83,6 +85,7 @@ pub(super) fn emit(blocks: &[Block], identity: u64, native: &[NativeInstruction]
     types.ty().function([ValType::I32; 4], [ValType::I32]);
     types.ty().function([ValType::I32; 8], [ValType::I32]);
     types.ty().function([ValType::I32], [ValType::I32]);
+    types.ty().function([ValType::I32; 13], []);
     module.section(&types);
     let mut imports = ImportSection::new();
     imports.import(
@@ -103,7 +106,7 @@ pub(super) fn emit(blocks: &[Block], identity: u64, native: &[NativeInstruction]
     }
     module.section(&imports);
     let mut functions = FunctionSection::new();
-    for kind in [3, 1, 2, 0, 4] {
+    for kind in [3, 1, 2, 0, 4, 5] {
         functions.function(kind);
     }
     module.section(&functions);
@@ -116,8 +119,22 @@ pub(super) fn emit(blocks: &[Block], identity: u64, native: &[NativeInstruction]
     code.function(&super::memory::emit_write(1));
     code.function(&run(blocks, identity, native));
     code.function(&lookup(blocks));
+    code.function(&publisher());
     module.section(&code);
     module.finish()
+}
+
+fn publisher() -> Function {
+    let mut function = Function::new([]);
+    for field in 0..12 {
+        function
+            .instructions()
+            .local_get(0)
+            .local_get(field + 1)
+            .i32_store(mem(u64::from(field * 4), 2));
+    }
+    function.instructions().end();
+    function
 }
 
 fn lookup(blocks: &[Block]) -> Function {
@@ -358,13 +375,11 @@ impl Output<'_> {
         }
         self.count(retired);
         self.materialize(flags::ARITHMETIC);
-        self.publish_operands();
-        for (offset, local) in [(40, RETIRED), (44, REMAIN)] {
-            self.c()
-                .local_get(CTX)
-                .local_get(local)
-                .i32_store(mem(offset, 2));
+        for local in [CTX, 2, 3, 4, 5, 6, 7, 8, 9, EIP, FLAGS, RETIRED, REMAIN] {
+            self.c().local_get(local);
         }
+        let function = self.internal(7);
+        self.c().call(function);
     }
 
     fn publish_operands(&mut self) {
