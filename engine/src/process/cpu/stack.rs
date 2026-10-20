@@ -12,13 +12,13 @@ use crate::{
     memory::{GuestAddress, MemoryError},
 };
 
-struct Prepared {
+pub(in crate::process) struct Prepared {
     ss_base: u32,
     pointer: StackPointerSize,
-    registers: [u32; 8],
-    addresses: [u32; 32],
-    values: [u32; 32],
-    count: usize,
+    pub(in crate::process) registers: [u32; 8],
+    pub(in crate::process) addresses: [u32; 32],
+    pub(in crate::process) values: [u32; 32],
+    pub(in crate::process) count: usize,
 }
 
 impl Prepared {
@@ -65,7 +65,7 @@ impl Prepared {
 
 // the synchronous batch profile checks all cached ss authority before probing ram.
 // this does not define a universal priority between independently faulting operands.
-fn check_segments(
+pub(in crate::process) fn check_segments(
     context: &SegmentContext,
     kind: StackFrameKind,
     allocation: u16,
@@ -126,7 +126,7 @@ fn check_segments(
     Ok(())
 }
 
-fn prepare(
+pub(in crate::process) fn prepare(
     memory: &mut impl CpuReadPort32,
     ss_base: u32,
     pointer: StackPointerSize,

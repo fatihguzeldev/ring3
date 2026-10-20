@@ -635,3 +635,216 @@ fn x87_store_rolls_back_after_successful_preflight_if_ram_cannot_commit() {
         .unwrap();
     assert_eq!(result, [0; 4]);
 }
+
+#[test]
+fn stack_push_all_saves_original_pointer_and_commits_one_complete_image() {
+    use crate::cpu::x86::StackFrameKind;
+    for kind in [StackFrameKind::PushAll16, StackFrameKind::PushAll32] {
+        let (mut instance, mut bank, mut context) = fixture();
+        instance
+            .memory
+            .as_mut()
+            .unwrap()
+            .write(GuestAddress(0x2000), &[0xa5; 4096])
+            .unwrap();
+        let registers = [
+            0x11112222, 0x33334444, 0x55556666, 0x77778888, 0x2080, 0x9999aaaa, 0xbbbbcccc,
+            0xddddeeee,
+        ];
+        let state = State32 {
+            registers,
+            eip: 0x1000,
+            eflags: 0x893,
+        };
+        context.set_state(state);
+        let width = kind.width() as usize;
+        let mut expected = [0xa5; 4096];
+        for (index, value) in registers.into_iter().enumerate() {
+            let offset = 0x80 - (index + 1) * width;
+            expected[offset..offset + width].copy_from_slice(&value.to_le_bytes()[..width]);
+        }
+        assert_eq!(
+            bank.execute(
+                &mut instance,
+                &mut context,
+                &native(Operation::StackFrame {
+                    kind,
+                    allocation: 0,
+                    nesting: 0
+                })
+            ),
+            0
+        );
+        let mut actual = [0; 4096];
+        instance
+            .memory
+            .as_ref()
+            .unwrap()
+            .read(GuestAddress(0x2000), &mut actual)
+            .unwrap();
+        assert_eq!(actual, expected);
+        let mut wanted = state;
+        wanted.registers[4] -= (8 * width) as u32;
+        assert_eq!(context.state(), wanted);
+    }
+}
+
+#[test]
+fn stack_late_push_fault_keeps_all_ram_and_registers_unmodified() {
+    use crate::cpu::x86::StackFrameKind;
+    for kind in [StackFrameKind::PushAll16, StackFrameKind::PushAll32] {
+        let (mut instance, mut bank, mut context) = fixture();
+        let width = kind.width();
+        let state = State32 {
+            registers: [1, 2, 3, 4, 0x2000 + width, 6, 7, 8],
+            eip: 0x1000,
+            eflags: 0x893,
+        };
+        context.set_state(state);
+        assert_eq!(
+            bank.execute(
+                &mut instance,
+                &mut context,
+                &native(Operation::StackFrame {
+                    kind,
+                    allocation: 0,
+                    nesting: 0
+                })
+            ),
+            3
+        );
+        assert_eq!(context.state(), state);
+        let mut actual = [1; 4096];
+        instance
+            .memory
+            .as_ref()
+            .unwrap()
+            .read(GuestAddress(0x2000), &mut actual)
+            .unwrap();
+        assert_eq!(actual, [0; 4096]);
+        assert_eq!(&context.bytes()[48..52], &(0x2000 - width).to_le_bytes());
+        assert_eq!(
+            u32::from_le_bytes(context.bytes()[52..56].try_into().unwrap()),
+            width | 0x10200
+        );
+    }
+}
+
+#[test]
+fn stack_enter_reads_the_staged_frame_and_checks_allocation_before_commit() {
+    use crate::cpu::x86::StackFrameKind;
+    let (mut instance, mut bank, mut context) = fixture();
+    instance
+        .memory
+        .as_mut()
+        .unwrap()
+        .write(GuestAddress(0x2000), &[0xa5; 4096])
+        .unwrap();
+    let state = State32 {
+        registers: [1, 2, 3, 4, 0x2080, 0x2080, 7, 8],
+        eip: 0x1000,
+        eflags: 0x893,
+    };
+    context.set_state(state);
+    assert_eq!(
+        bank.execute(
+            &mut instance,
+            &mut context,
+            &native(Operation::StackFrame {
+                kind: StackFrameKind::Enter32,
+                allocation: 16,
+                nesting: 3
+            })
+        ),
+        0
+    );
+    assert_eq!(
+        context.state().registers,
+        [1, 2, 3, 4, 0x2060, 0x207c, 7, 8]
+    );
+    assert_eq!(context.state().eflags, 0x893);
+    let mut actual = [0; 32];
+    instance
+        .memory
+        .as_ref()
+        .unwrap()
+        .read(GuestAddress(0x2060), &mut actual)
+        .unwrap();
+    let mut expected = [0xa5; 32];
+    for (offset, value) in [(16, 0x207c_u32), (20, 0x2080), (24, 0x2080), (28, 0x2080)] {
+        expected[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+    }
+    assert_eq!(actual, expected);
+    let before_page = {
+        let mut page = [0; 4096];
+        instance
+            .memory
+            .as_ref()
+            .unwrap()
+            .read(GuestAddress(0x2000), &mut page)
+            .unwrap();
+        page
+    };
+    let mut failed = state;
+    failed.registers[4] = 0x2004;
+    context.set_state(failed);
+    assert_eq!(
+        bank.execute(
+            &mut instance,
+            &mut context,
+            &native(Operation::StackFrame {
+                kind: StackFrameKind::Enter32,
+                allocation: 8,
+                nesting: 0
+            })
+        ),
+        3
+    );
+    assert_eq!(context.state(), failed);
+    let mut after = [0; 4096];
+    instance
+        .memory
+        .as_ref()
+        .unwrap()
+        .read(GuestAddress(0x2000), &mut after)
+        .unwrap();
+    assert_eq!(after, before_page);
+    assert_eq!(&context.bytes()[48..52], &0x1ff8_u32.to_le_bytes());
+}
+
+#[test]
+fn stack_code_write_reports_the_completed_transaction() {
+    use crate::cpu::x86::StackFrameKind;
+    let (mut instance, mut bank, mut context) = fixture();
+    instance.map(0x1000, 1, 7).unwrap();
+    let state = State32 {
+        registers: [1, 2, 3, 4, 0x1100, 6, 7, 8],
+        eip: 0x1000,
+        eflags: 0x893,
+    };
+    context.set_state(state);
+    assert_eq!(
+        bank.execute(
+            &mut instance,
+            &mut context,
+            &native(Operation::StackFrame {
+                kind: StackFrameKind::PushAll32,
+                allocation: 0,
+                nesting: 0
+            })
+        ),
+        6
+    );
+    assert_eq!(context.state().registers, [1, 2, 3, 4, 0x10e0, 6, 7, 8]);
+    let mut actual = [0; 32];
+    instance
+        .memory
+        .as_ref()
+        .unwrap()
+        .read(GuestAddress(0x10e0), &mut actual)
+        .unwrap();
+    let expected = [8_u32, 7, 6, 0x1100, 4, 3, 2, 1]
+        .map(u32::to_le_bytes)
+        .concat();
+    assert_eq!(actual.as_slice(), expected);
+}

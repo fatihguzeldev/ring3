@@ -26,6 +26,8 @@ mod memory;
 mod processor;
 #[path = "numeric/simd.rs"]
 mod simd;
+#[path = "numeric/stack.rs"]
+mod stack;
 #[path = "numeric/x87.rs"]
 mod x87;
 #[path = "numeric/xstate.rs"]
@@ -213,6 +215,11 @@ impl NumericBank {
             Operation::Simd(operation) => self.simd(instance, context, operation),
             Operation::Avx(operation) => self.avx(instance, context, operation),
             Operation::XState(operation) => self.xstate(instance, context, operation),
+            Operation::StackFrame {
+                kind,
+                allocation,
+                nesting,
+            } => self.stack(instance, context, kind, allocation, nesting),
             Operation::InitializeX87 => self.x87(
                 instance,
                 context,
