@@ -134,11 +134,24 @@ function check(name, label, budget, options, outcome) {
       versions.setBigUint64(Math.floor(target / PAGE) * 16 + 8, BigInt(ordinal + 1), true);
     }
   }
-  const reason = programs.get(name).run(CTX, budget) >>> 0;
+  let reason, remainingBudget = budget;
+  const moduleSequence = [];
+  for (const [index, selected] of (options?.sequence ?? [name]).entries()) {
+    const program = programs.get(selected); assert(program, `declared generated module ${selected}`);
+    if (index > 0) view.setBigUint64(CTX + 120, program.identity, true);
+    reason = program.run(CTX, remainingBudget) >>> 0;
+    moduleSequence.push({name: selected, reason, budget: remainingBudget,
+      context: Buffer.from(bytes.subarray(CTX, CTX + 128)).toString('hex')});
+    remainingBudget = get(CTX + 44);
+    if (reason !== 1) break;
+  }
   const raw = {name, label, budget, reason, context: Buffer.from(bytes.subarray(CTX, CTX + 128)).toString('hex'),
+    moduleSequence,
     ramSha256: hash(bytes.subarray(BACKING, BACKING + 16 * PAGE)), helperReads: active.reads, helperWrites: active.writes,
     transactionVersion: String(view.getBigUint64(VERSION, true)), codeGeneration: String(view.getBigUint64(GENERATION, true))};
   results.push(raw); writeFileSync(reportPath, JSON.stringify({schema: 1, complete: false, results}));
+  assert.equal(moduleSequence.length, (options?.sequence ?? [name]).length, `${label}: all declared module boundaries`);
+  assert(moduleSequence.slice(0,-1).every(step => step.reason === 1), `${label}: only NeedCode selects a following module`);
   assert.equal(reason, expected.reason, `${label}: stop reason`);
   const wanted = new DataView(before.buffer);
   (expected.regs ?? initial.regs).forEach((value, index) => wanted.setUint32(index * 4, value >>> 0, true));
@@ -254,9 +267,13 @@ check('push-pop', 'push-pop', 8, {}, initial => {
 check('push-pop', 'stack-span-overflow-is-neutral', 8,
   {regs: [5, 3, 7, 0x3000, 1, 0, 0x8000, 0]},
   {reason: 4, pc: 0x1000, retired: 0});
-check('call', 'call-ret-full', 16, {}, initial => {
+check('call', 'call-ret-full-across-explicit-module-boundaries', 16, {sequence: ['call', 'call-callee', 'call']}, initial => {
   const regs = [...initial.regs]; regs[0] = 10;
   return {reason: 4, pc: 0x1008, retired: 4, regs, flags: 6, writes: [[0x47fc, 4, 0x1005]]};
+});
+check('call', 'call-target-is-a-separate-cache-entry', 16, {}, initial => {
+  const regs = [...initial.regs]; regs[4] -= 4;
+  return {reason: 1, pc: 0x1010, retired: 1, regs, writes: [[0x47fc, 4, 0x1005]]};
 });
 check('call', 'call-budget-prefix', 1, {}, initial => {
   const regs = [...initial.regs]; regs[4] -= 4;

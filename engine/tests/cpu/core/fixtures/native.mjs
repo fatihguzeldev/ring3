@@ -47,8 +47,8 @@ function expectedWrite(address, value) {
   new DataView(expectedBacking.buffer).setUint32(physical(address) - backing, value >>> 0, true);
 }
 
-function prepare() {
-  status('core_prepare', 0, 0x1000, 256, 16);
+function prepare(pc = 0x1000) {
+  status('core_prepare', 0, pc, 256, 16);
   const pointer = api.core_code_ptr() >>> 0, length = api.core_code_len() >>> 0;
   assert(pointer > 0 && length >= 8 && length <= 1 << 20, 'bounded generated code');
   const code = bytes(pointer, length);
@@ -63,7 +63,9 @@ function prepare() {
     memory, read: api.core_read, write: api.core_write,
   }}).exports.run;
   assert.equal(run.length, 2);
-  report.modules.push({pointer, length, sha256: hash(code), wasmHex: Buffer.from(code).toString('hex')});
+  const selectedContext = api.core_context_ptr() >>> 0;
+  report.modules.push({pc, pointer, length, identity: String(view().getBigUint64(selectedContext + 120, true)),
+    sha256: hash(code), wasmHex: Buffer.from(code).toString('hex')});
   checkpoint();
   return run;
 }
@@ -148,16 +150,29 @@ try {
   neutral('inactive generated code', () => assert.equal(firstRun(context, 8), 8));
   neutral('second end', () => status('core_end', 7));
   const retained = bytes(context, 128);
-  stage = 'repeat prepare'; const secondRun = prepare();
+  stage = 'repeat prepare'; prepare();
   assert.equal(api.core_context_ptr() >>> 0, context, 'stable context allocation');
   assert.deepEqual(bytes(context, 128), retained, 'prepare retains paused state');
+  assert.equal(report.modules.at(-1).identity,report.modules[0].identity,'current caller identity reused');
+  stage = 'prepare callee'; const secondRun = prepare(0x1040);
+  assert.deepEqual(bytes(context, 120), retained.slice(0,120), 'callee selection retains paused architectural state');
+  assert.notEqual(report.modules.at(-1).identity,report.modules[0].identity,'callee has its own source identity');
   status('core_begin', 0); active = true;
   neutral('old generated identity', () => assert.equal(firstRun(context, 8), 8));
-  stage = 'resume callee and return'; assert.equal(secondRun(context, 8), 4);
+  stage = 'resume callee and return'; assert.equal(secondRun(context, 8), 1);
+  expectState([14, 3, 7, 0x3000, 0x4800, 0, 0, 0], 0x100d, 2, 6, 6);
+  status('core_end', 0); active = false;
+  const afterCallee = bytes(context, 128);
+  stage = 'prepare caller continuation'; const thirdRun = prepare(0x100d);
+  assert.deepEqual(bytes(context, 120),afterCallee.slice(0,120),'continuation selection retains paused architectural state');
+  assert.equal(report.modules.at(-1).identity,report.modules[0].identity,'retained caller continuation reuses identity');
+  status('core_begin', 0); active = true;
+  neutral('unselected callee identity', () => assert.equal(secondRun(context, 6), 8));
+  stage = 'resume caller continuation'; assert.equal(thirdRun(context, 6), 4);
   expectState([16, 3, 7, 0x3000, 0x4800, 0, 0, 0], 0x1010, 0x12, 7, 5);
   status('core_end', 0); active = false;
-  stage = 'change compiled source'; status('write8', 0, 0x1004, 2);
-  expectedBacking[physical(0x1004) - backing] = 2;
+  stage = 'change compiled source'; status('write8', 0, 0x100f, 3);
+  expectedBacking[physical(0x100f) - backing] = 3;
   neutral('stale source begin', () => status('core_begin', 4));
   assert.equal(word(context, 112), 0);
   assert.equal(api.core_context_ptr() >>> 0, context);

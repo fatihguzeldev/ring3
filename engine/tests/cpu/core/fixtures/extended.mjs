@@ -61,6 +61,15 @@ function shift(kind, width, input, count, base, source = 0) {
 const registers = (eax = 5, count = 3, ebx = 0x3000, esi = 0x3000, edi = 0x4000) => [eax, count, 7, ebx, 0x4800, 0, esi, edi];
 
 export function runExtended(check) {
+  check('bounded-prefix', 'byte-limit-retains-executable-entry-and-exact-flags', 8,
+    {flags: 0x893, initial: [[0x3000, 4, 0xffffffff]]},
+    {reason: 1, pc: 0x1003, retired: 1, flags: 0x57, writes: [[0x3000, 4, 0]]});
+  check('bounded-prefix', 'byte-limit-prefix-budget-precedes-missing-continuation', 1,
+    {flags: 0x893, initial: [[0x3000, 4, 0xffffffff]]},
+    {reason: 2, pc: 0x1003, retired: 1, flags: 0x57, writes: [[0x3000, 4, 0]]});
+  check('bounded-prefix', 'byte-limit-prefix-preserves-faulting-input-state', 8,
+    {flags: 0x893, readOnly: true, initial: [[0x3000, 4, 0xffffffff]]},
+    {reason: 3, pc: 0x1000, retired: 0, reads: 1, fault: [0x3000, 4 | 2 << 8 | 2 << 16]});
   for (const width of [8, 16, 32]) {
     for (const kind of ['shl', 'shr', 'sar', 'rol', 'ror', 'rcl', 'rcr']) {
       const lhs = width === 8 ? 0x12345681 : width === 16 ? 0x12348001 : 0x80000001;
@@ -105,8 +114,12 @@ export function runExtended(check) {
     {regs: registers(5), flags: 0x893, initial: [[0x3000, 4, 10]]},
     {reason: 4, pc: 0x1002, retired: 1, regs: registers(10), writes: [[0x3000, 4, 5]]});
   const callRegs = registers(0x12340005);
-  check('word-call', 'word-call-ret-full', 16, {regs: callRegs},
+  check('word-call', 'word-call-ret-full-across-explicit-module-boundaries', 16,
+    {regs: callRegs, sequence: ['word-call', 'word-call-callee', 'word-call']},
     {reason: 4, pc: 0x1008, retired: 4, regs: registers(0x1234000a), flags: 6, writes: [[0x47fe, 2, 0x1004]]});
+  check('word-call', 'word-call-target-is-a-separate-cache-entry', 16, {regs: callRegs},
+    {reason: 1, pc: 0x1010, retired: 1, regs: [...callRegs.slice(0, 4), 0x47fe, ...callRegs.slice(5)],
+      writes: [[0x47fe, 2, 0x1004]]});
   check('word-call', 'word-call-budget-prefix', 1, {regs: callRegs},
     {reason: 2, pc: 0x1010, retired: 1, regs: [...callRegs.slice(0, 4), 0x47fe, ...callRegs.slice(5)], writes: [[0x47fe, 2, 0x1004]]});
   check('word-call', 'word-call-fault-before-stack-or-target-commit', 8,

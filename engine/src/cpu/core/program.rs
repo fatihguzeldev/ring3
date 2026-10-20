@@ -209,20 +209,10 @@ pub fn compile_with_gates(
                     enqueue(target.0);
                     break;
                 }
-                Some(Operation::Call { target }) => {
-                    if let BranchTarget::Direct(target) = target {
-                        enqueue(target.0);
-                    }
-                    enqueue(next);
-                    break;
-                }
-                Some(Operation::CallWord { target }) => {
-                    enqueue(target.0);
-                    enqueue(next);
-                    break;
-                }
                 Some(
-                    Operation::CallRegisterWord { .. }
+                    Operation::Call { .. }
+                    | Operation::CallWord { .. }
+                    | Operation::CallRegisterWord { .. }
                     | Operation::ReadCallWord { .. }
                     | Operation::String { .. }
                     | Operation::RepeatString { .. }
@@ -287,24 +277,31 @@ pub fn compile_with_gates(
             value.checked_add(1)
         })
         .map_err(|_| CompileError::Memory(MemoryError::VersionExhausted))?;
-    let native: Vec<_> = blocks
-        .iter()
-        .flat_map(|block| &block.instructions)
-        .filter_map(|instruction| {
-            instruction
-                .operation
-                .filter(super::emitter::is_native)
-                .map(|operation| NativeInstruction {
-                    pc: instruction.pc,
-                    next: instruction.next,
-                    operation,
-                })
-        })
-        .collect();
-    let wasm = super::emitter::emit(&blocks, identity, &native);
-    if wasm.len() > options.wasm_bytes {
-        return Err(CompileError::WasmLimit);
-    }
+    let (wasm, native) = loop {
+        let native: Vec<_> = blocks
+            .iter()
+            .flat_map(|block| &block.instructions)
+            .filter_map(|instruction| {
+                instruction
+                    .operation
+                    .filter(super::emitter::is_native)
+                    .map(|operation| NativeInstruction {
+                        pc: instruction.pc,
+                        next: instruction.next,
+                        operation,
+                    })
+            })
+            .collect();
+        let wasm = super::emitter::emit(&blocks, identity, &native);
+        if wasm.len() <= options.wasm_bytes {
+            break (wasm, native);
+        }
+        let instructions: usize = blocks.iter().map(|block| block.instructions.len()).sum();
+        if instructions == 1 {
+            return Err(CompileError::WasmLimit);
+        }
+        retain_entry_prefix(&mut blocks, entry.0, instructions / 2);
+    };
     Ok(CompiledCode {
         identity,
         entries: blocks
@@ -316,6 +313,23 @@ pub fn compile_with_gates(
         sources,
         native,
     })
+}
+
+fn retain_entry_prefix(blocks: &mut Vec<Block>, entry: u32, limit: usize) {
+    let requested = blocks
+        .binary_search_by_key(&entry, |block| block.entry)
+        .expect("requested entry was decoded");
+    let retained = blocks[requested].instructions.len().min(limit);
+    blocks[requested].instructions.truncate(retained);
+    let mut remaining = limit - retained;
+    for (index, block) in blocks.iter_mut().enumerate() {
+        if index != requested {
+            let retained = block.instructions.len().min(remaining);
+            block.instructions.truncate(retained);
+            remaining -= retained;
+        }
+    }
+    blocks.retain(|block| !block.instructions.is_empty());
 }
 
 fn terminates(operation: Option<Operation>) -> bool {
@@ -469,6 +483,110 @@ mod tests {
         let code = compile(&wrapping, GuestAddress(u32::MAX), limits(1, 2)).unwrap();
         assert_eq!(code.entrypoints(), &[GuestAddress(u32::MAX)]);
         assert_eq!(code.instruction_count(), 1);
+    }
+
+    #[test]
+    fn direct_calls_keep_the_caller_continuation_without_absorbing_the_callee() {
+        for (caller, callee, continuation) in [
+            (
+                &[0xe8, 0xfb, 0, 0, 0, 0x83, 0xc0, 1, 0x0f, 0x0b][..],
+                &[0x83, 0xc0, 3, 0xc3][..],
+                0x1005,
+            ),
+            (
+                &[0x66, 0xe8, 0xfc, 0, 0x66, 0x40, 0x0f, 0x0b][..],
+                &[0x66, 0x40, 0x66, 0xc3][..],
+                0x1004,
+            ),
+        ] {
+            let mut memory = memory(&[0x1000]);
+            memory.write(GuestAddress(0x1000), caller).unwrap();
+            memory.write(GuestAddress(0x1100), callee).unwrap();
+            let caller = compile(&memory, GuestAddress(0x1000), limits(64, 8)).unwrap();
+            assert_eq!(
+                caller.entrypoints(),
+                &[GuestAddress(0x1000), GuestAddress(continuation)]
+            );
+            assert_eq!(caller.instruction_count(), 3);
+            let callee = compile(&memory, GuestAddress(0x1100), limits(64, 8)).unwrap();
+            assert_eq!(callee.entrypoints(), &[GuestAddress(0x1100)]);
+            assert_eq!(callee.instruction_count(), 2);
+        }
+    }
+
+    fn lowering_mix() -> AddressSpace {
+        let mut memory = memory(&[0x1000]);
+        let mut bytes = [0x83, 0x03, 1, 0xd3, 0x23, 0x66, 0x83, 0x03, 1].repeat(24);
+        bytes.extend_from_slice(&[0x0f, 0x0b]);
+        memory.write(GuestAddress(0x1000), &bytes).unwrap();
+        memory
+    }
+
+    #[test]
+    fn an_oversized_lowering_mix_emits_a_fitting_entry_prefix() {
+        let memory = lowering_mix();
+        let minimum = compile(&memory, GuestAddress(0x1000), limits(1, 8)).unwrap();
+        let full = compile(&memory, GuestAddress(0x1000), limits(128, 8)).unwrap();
+        let quota = minimum.wasm().len() + 1024;
+        assert!(full.wasm().len() > quota);
+        let code = compile(
+            &memory,
+            GuestAddress(0x1000),
+            CompileOptions {
+                wasm_bytes: quota,
+                ..limits(128, 8)
+            },
+        )
+        .unwrap();
+        assert!(code.wasm().len() <= quota);
+        assert!(code.entrypoints().contains(&GuestAddress(0x1000)));
+        assert!(
+            code.instruction_count() >= 1 && code.instruction_count() < full.instruction_count()
+        );
+        assert!(code.is_current(&memory));
+    }
+
+    #[test]
+    fn emission_size_reduction_retains_a_higher_requested_entry() {
+        let mut memory = lowering_mix();
+        memory
+            .write(GuestAddress(0x1300), &[0xe9, 0xfb, 0xfc, 0xff, 0xff])
+            .unwrap();
+        let minimum = compile(&memory, GuestAddress(0x1300), limits(1, 8)).unwrap();
+        let full = compile(&memory, GuestAddress(0x1300), limits(128, 8)).unwrap();
+        let quota = minimum.wasm().len() + 1024;
+        assert!(full.wasm().len() > quota);
+        let code = compile(
+            &memory,
+            GuestAddress(0x1300),
+            CompileOptions {
+                wasm_bytes: quota,
+                ..limits(128, 8)
+            },
+        )
+        .unwrap();
+        assert!(code.wasm().len() <= quota);
+        assert!(code.entrypoints().contains(&GuestAddress(0x1300)));
+        assert!(
+            code.instruction_count() >= 1 && code.instruction_count() < full.instruction_count()
+        );
+        assert!(code.is_current(&memory));
+    }
+
+    #[test]
+    fn an_unrepresentable_single_instruction_still_reports_the_byte_limit() {
+        let memory = lowering_mix();
+        assert!(matches!(
+            compile(
+                &memory,
+                GuestAddress(0x1000),
+                CompileOptions {
+                    wasm_bytes: 128,
+                    ..limits(128, 8)
+                }
+            ),
+            Err(CompileError::WasmLimit)
+        ));
     }
 
     #[test]

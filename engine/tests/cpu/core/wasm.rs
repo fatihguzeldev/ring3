@@ -103,6 +103,7 @@ fn generated_wasm_runs_authored_integer_control_memory_programs() {
         ("rmw", "8303010f0b"),
         ("push-pop", "50590f0b"),
         ("call", "e80b00000083c0020f0b90909090909083c003c3"),
+        ("call-callee", "e80b00000083c0020f0b90909090909083c003c3"),
         ("ret", "c3"),
         ("indirect", "ffe6"),
         ("loop", "83c00331c283430c014975f40f0b"),
@@ -117,6 +118,10 @@ fn generated_wasm_runs_authored_integer_control_memory_programs() {
         ("translate-byte", "d70f0b"),
         ("memory-exchange", "87030f0b"),
         ("word-call", "66e80c006683c0020f0b9090909090906683c00366c3"),
+        (
+            "word-call-callee",
+            "66e80c006683c0020f0b9090909090906683c00366c3",
+        ),
         ("word-pop-sp", "665c0f0b"),
         ("word-pop-flags", "669d0f0b"),
         ("rep-move", "f3a40f0b"),
@@ -226,11 +231,54 @@ fn generated_wasm_runs_authored_integer_control_memory_programs() {
             ));
         }
     }
+    programs.push((
+        "bounded-prefix".into(),
+        format!("{}0f0b", "830301d32366830301".repeat(24)),
+    ));
     let mut manifest = String::new();
     for (name, hex) in programs {
         let memory = memory(&bytes(&hex));
-        let code = compile(&memory, GuestAddress(0x1000), CompileOptions::default())
+        let entry = if name.ends_with("-callee") {
+            0x1010
+        } else {
+            0x1000
+        };
+        let options = if name == "bounded-prefix" {
+            let first = compile(
+                &memory,
+                GuestAddress(entry),
+                CompileOptions {
+                    instructions: 1,
+                    ..CompileOptions::default()
+                },
+            )
+            .unwrap();
+            let second = compile(
+                &memory,
+                GuestAddress(entry),
+                CompileOptions {
+                    instructions: 2,
+                    ..CompileOptions::default()
+                },
+            )
+            .unwrap();
+            let quota = first.wasm().len() + 128;
+            assert!(
+                second.wasm().len() > quota,
+                "two operations exceed authored prefix quota"
+            );
+            CompileOptions {
+                wasm_bytes: quota,
+                ..CompileOptions::default()
+            }
+        } else {
+            CompileOptions::default()
+        };
+        let code = compile(&memory, GuestAddress(entry), options)
             .unwrap_or_else(|error| panic!("compile {name}: {error:?}"));
+        if name == "bounded-prefix" {
+            assert_eq!(code.instruction_count(), 1);
+        }
         assert!(code.is_current(&memory), "fresh source: {name}");
         fs::write(scratch.0.join(format!("{name}.wasm")), code.wasm()).unwrap();
         manifest.push_str(&format!("{name}\t{hex}\t{}\n", code.identity()));
