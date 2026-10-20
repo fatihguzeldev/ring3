@@ -1,0 +1,388 @@
+use super::*;
+use crate::{
+    cpu::x86::{State32, X87Format, X87Operation, ir::Operation},
+    memory::{PageRange, Permissions},
+};
+
+fn memory(code: &[u8]) -> AddressSpace {
+    let mut memory = AddressSpace::new(4).unwrap();
+    for (pc, permissions) in [
+        (0x1000, Permissions::ALL),
+        (0x2000, Permissions::ALL),
+        (0x3000, Permissions::READ_WRITE),
+        (0x4000, Permissions::READ_WRITE),
+    ] {
+        memory
+            .map_zeroed(PageRange::new(GuestAddress(pc), 1).unwrap(), permissions)
+            .unwrap();
+    }
+    memory.write(GuestAddress(0x1000), code).unwrap();
+    memory
+}
+
+fn context(budget: u32) -> Context32 {
+    let mut context = Context32::new(State32 {
+        registers: [5, 3, 7, 0x3000, 0x4800, 0, 0, 0],
+        eip: 0x1000,
+        eflags: 2,
+    });
+    context.set_word(44, budget);
+    context.set_word(112, 1);
+    context
+}
+
+fn stop(memory: &mut AddressSpace, context: &mut Context32, heat: &mut ColdHeat) -> StopReason {
+    match run(memory, context, &SegmentContext::default(), &[], &[], heat) {
+        ColdOutcome::Stop(stop) => stop,
+        ColdOutcome::NeedNative(instruction) => {
+            panic!("unexpected native operation at {:x}", instruction.pc)
+        }
+    }
+}
+
+fn word(context: &Context32, offset: usize) -> u32 {
+    u32::from_le_bytes(context.bytes()[offset..offset + 4].try_into().unwrap())
+}
+
+#[test]
+fn successful_width_arithmetic_preserves_the_unwritten_register_bits() {
+    for (code, initial, expected) in [
+        (&[0x83, 0xc0, 1][..], u32::MAX, 0),
+        (&[0x66, 0x05, 1, 0][..], 0x1234_ffff, 0x1234_0000),
+        (&[0x04, 1][..], 0x1234_56ff, 0x1234_5600),
+    ] {
+        let mut memory = memory(code);
+        let mut context = context(1);
+        context.set_word(0, initial);
+        context.set_word(36, 0x402);
+        assert_eq!(
+            stop(&mut memory, &mut context, &mut ColdHeat::default()),
+            StopReason::Budget
+        );
+        assert_eq!(
+            context.state().registers,
+            [expected, 3, 7, 0x3000, 0x4800, 0, 0, 0]
+        );
+        assert_eq!(context.state().eflags, 0x457);
+        assert_eq!(context.state().eip, 0x1000 + code.len() as u32);
+        assert_eq!((context.retired(), context.remaining()), (1, 0));
+    }
+}
+
+#[test]
+fn actual_calls_returns_and_memory_arithmetic_run_without_a_compiled_owner() {
+    let mut memory = memory(&[0xe8, 0x3b, 0, 0, 0, 0x49, 0x75, 0xf8, 0x0f, 0x0b]);
+    memory
+        .write(
+            GuestAddress(0x1040),
+            &[0x83, 0xc0, 3, 0x31, 0xc2, 0x83, 0x43, 0x0c, 1, 0xc3],
+        )
+        .unwrap();
+    let mut context = context(21);
+    assert_eq!(
+        stop(&mut memory, &mut context, &mut ColdHeat::default()),
+        StopReason::Budget
+    );
+    assert_eq!(
+        context.state(),
+        State32 {
+            registers: [14, 0, 10, 0x3000, 0x4800, 0, 0, 0],
+            eip: 0x1008,
+            eflags: 0x46,
+        }
+    );
+    assert_eq!((context.retired(), context.remaining()), (21, 0));
+    let mut value = [0; 4];
+    memory.read(GuestAddress(0x300c), &mut value).unwrap();
+    assert_eq!(value, 3_u32.to_le_bytes());
+    memory.read(GuestAddress(0x47fc), &mut value).unwrap();
+    assert_eq!(value, 0x1005_u32.to_le_bytes());
+    assert_eq!(&context.bytes()[120..], &[0; 8]);
+}
+
+#[test]
+fn budget_and_debug_precede_fetch_and_frontier_selection() {
+    let mut memory = AddressSpace::new(1).unwrap();
+    let mut context = context(0);
+    context.set_word(32, 0xdead_0000);
+    assert!(matches!(
+        run(
+            &mut memory,
+            &mut context,
+            &SegmentContext::default(),
+            &[],
+            &[GuestAddress(0xdead_0000)],
+            &mut ColdHeat::default()
+        ),
+        ColdOutcome::Stop(StopReason::Budget)
+    ));
+    assert_eq!(context.retired(), 0);
+    context.set_word(36, 0x102);
+    assert_eq!(
+        stop(&mut memory, &mut context, &mut ColdHeat::default()),
+        StopReason::Debug
+    );
+    assert_eq!(context.state().eip, 0xdead_0000);
+}
+
+#[test]
+fn read_modify_fault_preserves_input_flags_registers_and_memory() {
+    let mut memory = memory(&[0x01, 0x03]);
+    memory
+        .write(GuestAddress(0x3000), &0x7fff_ffff_u32.to_le_bytes())
+        .unwrap();
+    memory
+        .protect(
+            PageRange::new(GuestAddress(0x3000), 1).unwrap(),
+            Permissions::READ,
+        )
+        .unwrap();
+    let mut context = context(4);
+    context.set_word(36, 0x8d7);
+    let initial = context.state();
+    let version = memory.transaction_version();
+    assert_eq!(
+        stop(&mut memory, &mut context, &mut ColdHeat::default()),
+        StopReason::MemoryFault
+    );
+    assert_eq!(context.state(), initial);
+    assert_eq!((context.retired(), context.remaining()), (0, 4));
+    assert_eq!(
+        (word(&context, 48), word(&context, 52), word(&context, 116)),
+        (0x3000, 0x20204, 0x40e)
+    );
+    let mut value = [0; 4];
+    memory.read(GuestAddress(0x3000), &mut value).unwrap();
+    assert_eq!(value, 0x7fff_ffff_u32.to_le_bytes());
+    assert_eq!(memory.transaction_version(), version);
+}
+
+#[test]
+fn code_store_retires_once_and_stops_before_decoding_changed_bytes() {
+    let mut memory = memory(&[0x89, 0x03, 0x0f, 0x0b]);
+    let mut context = context(4);
+    context.set_word(0, 0x1122_3344);
+    context.set_word(12, 0x1000);
+    assert_eq!(
+        stop(&mut memory, &mut context, &mut ColdHeat::default()),
+        StopReason::CodeInvalidated
+    );
+    assert_eq!(
+        (context.state().eip, context.retired(), context.remaining()),
+        (0x1002, 1, 3)
+    );
+    assert_eq!(context.state().eflags, 2);
+    let mut bytes = [0; 4];
+    memory.read(GuestAddress(0x1000), &mut bytes).unwrap();
+    assert_eq!(bytes, [0x44, 0x33, 0x22, 0x11]);
+}
+
+#[test]
+fn live_gate_precedes_decoding_and_compiled_frontier() {
+    let mut memory = memory(&[0x0f, 0x0b]);
+    let mut context = context(7);
+    assert!(matches!(
+        run(
+            &mut memory,
+            &mut context,
+            &SegmentContext::default(),
+            &[(GuestAddress(0x1000), 77)],
+            &[GuestAddress(0x1000)],
+            &mut ColdHeat::default()
+        ),
+        ColdOutcome::Stop(StopReason::Host)
+    ));
+    assert_eq!(
+        (
+            context.state().eip,
+            context.retired(),
+            context.remaining(),
+            word(&context, 116)
+        ),
+        (0x1000, 0, 7, 77)
+    );
+}
+
+#[test]
+fn numerical_handoff_is_genuine_decoded_and_unretired_before_operand_access() {
+    let mut memory = memory(&[0xd9, 0x03]);
+    let mut context = context(9);
+    context.set_word(12, 0xdead_0000);
+    let before = *context.bytes();
+    match run(
+        &mut memory,
+        &mut context,
+        &SegmentContext::default(),
+        &[],
+        &[],
+        &mut ColdHeat::default(),
+    ) {
+        ColdOutcome::NeedNative(instruction) => {
+            assert_eq!((instruction.pc, instruction.next), (0x1000, 0x1002));
+            assert!(matches!(
+                instruction.operation,
+                Operation::X87 {
+                    operation: X87Operation::Load(X87Format::Float32),
+                    ..
+                }
+            ));
+        }
+        outcome => panic!("expected native handoff: {outcome:?}"),
+    }
+    assert_eq!(*context.bytes(), before);
+}
+
+#[test]
+fn an_unimplemented_cold_operation_requests_jit_before_any_effect() {
+    let mut memory = memory(&[0xd1, 0xc0]);
+    let mut context = context(3);
+    context.set_word(36, 0x8d7);
+    let before = *context.bytes();
+    assert_eq!(
+        stop(&mut memory, &mut context, &mut ColdHeat::default()),
+        StopReason::NeedCode
+    );
+    assert_eq!(*context.bytes(), before);
+}
+
+#[test]
+fn a_jit_fallback_keeps_the_already_committed_cold_prefix() {
+    let mut memory = memory(&[0x40, 0xd1, 0xc0]);
+    let mut context = context(4);
+    assert_eq!(
+        stop(&mut memory, &mut context, &mut ColdHeat::default()),
+        StopReason::NeedCode
+    );
+    assert_eq!(
+        (
+            context.state().eip,
+            context.state().registers[0],
+            context.state().eflags,
+            context.retired(),
+            context.remaining()
+        ),
+        (0x1001, 6, 6, 1, 3)
+    );
+}
+
+#[test]
+fn call_esp_captures_its_target_before_the_stack_pointer_changes() {
+    let mut memory = memory(&[0xff, 0xd4]);
+    let mut context = context(1);
+    assert_eq!(
+        stop(&mut memory, &mut context, &mut ColdHeat::default()),
+        StopReason::Budget
+    );
+    assert_eq!(
+        (
+            context.state().eip,
+            context.state().registers[4],
+            context.state().eflags,
+            context.retired(),
+            context.remaining()
+        ),
+        (0x4800, 0x47fc, 2, 1, 0)
+    );
+    let mut bytes = [0; 4];
+    memory.read(GuestAddress(0x47fc), &mut bytes).unwrap();
+    assert_eq!(bytes, 0x1002_u32.to_le_bytes());
+}
+
+#[test]
+fn compiled_frontier_requests_a_closed_handoff_without_executing_the_target() {
+    let mut memory = memory(&[0xeb, 0x3e]);
+    memory.write(GuestAddress(0x1040), &[0x40]).unwrap();
+    let mut context = context(4);
+    assert!(matches!(
+        run(
+            &mut memory,
+            &mut context,
+            &SegmentContext::default(),
+            &[],
+            &[GuestAddress(0x1040)],
+            &mut ColdHeat::default()
+        ),
+        ColdOutcome::Stop(StopReason::NeedCode)
+    ));
+    assert_eq!(
+        (
+            context.state().eip,
+            context.state().registers[0],
+            context.retired(),
+            context.remaining()
+        ),
+        (0x1040, 5, 1, 3)
+    );
+}
+
+#[test]
+fn heat_uses_completed_retirements_and_a_jit_request_requires_new_reuse() {
+    let mut memory = memory(&[0x40, 0xeb, 0xfd]);
+    let mut context = context(4);
+    let mut heat = ColdHeat::with_threshold(2);
+    assert_eq!(
+        stop(&mut memory, &mut context, &mut heat),
+        StopReason::Budget
+    );
+    assert_eq!((context.retired(), context.state().registers[0]), (4, 7));
+    context.set_word(44, 10);
+    let before = *context.bytes();
+    assert_eq!(
+        stop(&mut memory, &mut context, &mut heat),
+        StopReason::NeedCode
+    );
+    assert_eq!(*context.bytes(), before);
+    context.set_word(44, 2);
+    assert_eq!(
+        stop(&mut memory, &mut context, &mut heat),
+        StopReason::Budget
+    );
+    assert_eq!(
+        (
+            context.retired(),
+            context.state().registers[0],
+            context.remaining()
+        ),
+        (6, 8, 0)
+    );
+}
+
+#[test]
+fn executable_epoch_changes_reset_heat_but_private_data_writes_do_not() {
+    let mut memory = memory(&[0x40, 0xeb, 0xfd]);
+    let mut context = context(4);
+    let mut heat = ColdHeat::with_threshold(2);
+    assert_eq!(
+        stop(&mut memory, &mut context, &mut heat),
+        StopReason::Budget
+    );
+    memory.write(GuestAddress(0x2000), &[0x90]).unwrap();
+    context.set_word(44, 4);
+    assert_eq!(
+        stop(&mut memory, &mut context, &mut heat),
+        StopReason::Budget
+    );
+    memory.write(GuestAddress(0x3000), &[0x90]).unwrap();
+    context.set_word(44, 1);
+    assert_eq!(
+        stop(&mut memory, &mut context, &mut heat),
+        StopReason::NeedCode
+    );
+    assert_eq!(context.retired(), 8);
+}
+
+#[test]
+fn inactive_or_compiled_context_is_rejected_without_changing_it() {
+    let mut memory = memory(&[0x40]);
+    for (active, identity) in [(0, 0_u64), (1, 9)] {
+        let mut context = context(1);
+        context.set_word(112, active);
+        context.bytes_mut()[120..].copy_from_slice(&identity.to_le_bytes());
+        let before = *context.bytes();
+        assert_eq!(
+            stop(&mut memory, &mut context, &mut ColdHeat::default()),
+            StopReason::Infrastructure
+        );
+        assert_eq!(*context.bytes(), before);
+    }
+}
