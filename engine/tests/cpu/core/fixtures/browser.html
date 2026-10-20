@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>core execution fixture</title>
+<style>
+  body { font: 16px system-ui; margin: 24px; max-width: 900px; }
+  label { display: block; margin: 12px 0; }
+  input { width: min(100%, 760px); padding: 6px; font: 14px monospace; }
+  button { padding: 8px 20px; }
+  pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+</style>
+<h1>core execution fixture</h1>
+<label>engine URL <input id="engine" value="/engine.wasm"></label>
+<label>expected engine SHA-256 <input id="sha" spellcheck="false"></label>
+<button id="run">Run</button>
+<pre id="status">ready</pre>
+<script type="application/json" id="core-report">null</script>
+<script type="module" src="./browser.mjs"></script>
+</html>
