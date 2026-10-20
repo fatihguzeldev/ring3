@@ -43,6 +43,14 @@ pub struct CompiledCode {
     sources: Vec<CodeSnapshot>,
     entries: Vec<GuestAddress>,
     instructions: usize,
+    native: Vec<NativeInstruction>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct NativeInstruction {
+    pub pc: u32,
+    pub next: u32,
+    pub operation: Operation,
 }
 
 impl CompiledCode {
@@ -58,6 +66,9 @@ impl CompiledCode {
     pub fn instruction_count(&self) -> usize {
         self.instructions
     }
+    pub fn native_instructions(&self) -> &[NativeInstruction] {
+        &self.native
+    }
     pub fn is_current(&self, memory: &AddressSpace) -> bool {
         self.sources
             .iter()
@@ -70,6 +81,7 @@ pub(super) struct Instruction {
     pub pc: u32,
     pub next: u32,
     pub operation: Option<Operation>,
+    pub gate: Option<u32>,
 }
 
 pub(super) struct Block {
@@ -81,6 +93,15 @@ pub fn compile(
     memory: &AddressSpace,
     entry: GuestAddress,
     options: CompileOptions,
+) -> Result<CompiledCode, CompileError> {
+    compile_with_gates(memory, entry, options, &[])
+}
+
+pub fn compile_with_gates(
+    memory: &AddressSpace,
+    entry: GuestAddress,
+    options: CompileOptions,
+    gates: &[(GuestAddress, u32)],
 ) -> Result<CompiledCode, CompileError> {
     if options.instructions == 0
         || options.instructions > 16384
@@ -100,6 +121,34 @@ pub fn compile(
             break;
         }
         while !nodes.contains_key(&pc) && nodes.len() < options.instructions {
+            let mut matching_gates = gates.iter().filter(|(address, _)| address.0 == pc);
+            if let Some(&(_, id)) = matching_gates.next() {
+                if id == 0 || matching_gates.next().is_some() {
+                    return Err(CompileError::InvalidLimits);
+                }
+                let mut stub = [0; 2];
+                memory
+                    .fetch(GuestAddress(pc), &mut stub)
+                    .map_err(CompileError::Memory)?;
+                if stub != [0x0f, 0x0b] {
+                    return Err(CompileError::InvalidLimits);
+                }
+                sources.push(
+                    memory
+                        .snapshot_code(GuestAddress(pc), stub.len())
+                        .map_err(CompileError::Memory)?,
+                );
+                nodes.insert(
+                    pc,
+                    Instruction {
+                        pc,
+                        next: pc.wrapping_add(2),
+                        operation: None,
+                        gate: Some(id),
+                    },
+                );
+                break;
+            }
             let decoded = decode_for_compilation(
                 memory,
                 GuestAddress(pc),
@@ -135,6 +184,7 @@ pub fn compile(
                     pc,
                     next,
                     operation,
+                    gate: None,
                 },
             );
             let mut enqueue = |target| {
@@ -214,7 +264,21 @@ pub fn compile(
             value.checked_add(1)
         })
         .map_err(|_| CompileError::Memory(MemoryError::VersionExhausted))?;
-    let wasm = super::emitter::emit(&blocks, identity);
+    let native: Vec<_> = blocks
+        .iter()
+        .flat_map(|block| &block.instructions)
+        .filter_map(|instruction| {
+            instruction
+                .operation
+                .filter(super::emitter::is_native)
+                .map(|operation| NativeInstruction {
+                    pc: instruction.pc,
+                    next: instruction.next,
+                    operation,
+                })
+        })
+        .collect();
+    let wasm = super::emitter::emit(&blocks, identity, &native);
     if wasm.len() > options.wasm_bytes {
         return Err(CompileError::WasmLimit);
     }
@@ -227,6 +291,7 @@ pub fn compile(
         instructions: blocks.iter().map(|block| block.instructions.len()).sum(),
         wasm,
         sources,
+        native,
     })
 }
 
@@ -400,5 +465,119 @@ mod tests {
                 .unwrap()
                 .is_current(&memory)
         );
+    }
+
+    #[test]
+    fn native_metadata_retains_typed_operations_and_decoded_addresses() {
+        let mut memory = memory(&[0x1000]);
+        memory
+            .write(
+                GuestAddress(0x1000),
+                &[0xd9, 0x03, 0xd8, 0x43, 0x04, 0xd9, 0x5b, 0x08, 0x0f, 0x0b],
+            )
+            .unwrap();
+        let code = compile(&memory, GuestAddress(0x1000), limits(8, 1)).unwrap();
+        let native = code.native_instructions();
+        assert_eq!(code.instruction_count(), 4);
+        assert_eq!(
+            native
+                .iter()
+                .map(|item| (item.pc, item.next))
+                .collect::<Vec<_>>(),
+            [(0x1000, 0x1002), (0x1002, 0x1005), (0x1005, 0x1008)]
+        );
+        let Operation::X87 {
+            operation,
+            address: Some(address),
+            waiting,
+            opcode,
+        } = native[1].operation
+        else {
+            panic!("expected typed x87 memory operation");
+        };
+        assert_eq!(operation.read_size(), 4);
+        assert_eq!(operation.write_size(), 0);
+        assert_eq!(address.base, Some(crate::cpu::x86::Register32::Ebx));
+        assert_eq!(address.displacement, 4);
+        assert!(waiting);
+        assert_eq!(opcode, 0x43);
+    }
+
+    #[test]
+    fn integer_code_does_not_require_native_operations() {
+        let mut memory = memory(&[0x1000]);
+        memory
+            .write(GuestAddress(0x1000), &[0x40, 0x0f, 0x0b])
+            .unwrap();
+        let code = compile(&memory, GuestAddress(0x1000), limits(8, 1)).unwrap();
+        assert!(code.native_instructions().is_empty());
+    }
+
+    #[test]
+    fn declared_gates_require_exact_executable_stubs_and_current_sources() {
+        let mut memory = memory(&[0x1000]);
+        memory.write(GuestAddress(0x1000), &[0x0f, 0x0b]).unwrap();
+        let code = compile_with_gates(
+            &memory,
+            GuestAddress(0x1000),
+            limits(8, 1),
+            &[(GuestAddress(0x1000), 17)],
+        )
+        .unwrap();
+        assert_eq!(code.entrypoints(), &[GuestAddress(0x1000)]);
+        assert_eq!(code.instruction_count(), 1);
+        assert!(code.native_instructions().is_empty());
+        assert!(code.is_current(&memory));
+        memory.write(GuestAddress(0x1001), &[0x90]).unwrap();
+        assert!(!code.is_current(&memory));
+        assert!(matches!(
+            compile_with_gates(
+                &memory,
+                GuestAddress(0x1000),
+                limits(8, 1),
+                &[(GuestAddress(0x1000), 17)],
+            ),
+            Err(CompileError::InvalidLimits)
+        ));
+        memory.write(GuestAddress(0x1000), &[0x0f, 0x0b]).unwrap();
+        memory
+            .protect(
+                PageRange::new(GuestAddress(0x1000), 1).unwrap(),
+                Permissions::READ,
+            )
+            .unwrap();
+        assert!(matches!(
+            compile_with_gates(
+                &memory,
+                GuestAddress(0x1000),
+                limits(8, 1),
+                &[(GuestAddress(0x1000), 17)],
+            ),
+            Err(CompileError::Memory(_))
+        ));
+    }
+
+    #[test]
+    fn only_reached_gate_metadata_is_validated() {
+        let mut memory = memory(&[0x1000]);
+        memory.write(GuestAddress(0x1000), &[0x0f, 0x0b]).unwrap();
+        for gates in [
+            vec![(GuestAddress(0x1000), 0)],
+            vec![(GuestAddress(0x1000), 17), (GuestAddress(0x1000), 18)],
+        ] {
+            assert!(matches!(
+                compile_with_gates(&memory, GuestAddress(0x1000), limits(8, 1), &gates),
+                Err(CompileError::InvalidLimits)
+            ));
+        }
+        let code = compile_with_gates(
+            &memory,
+            GuestAddress(0x1000),
+            limits(8, 1),
+            &[(GuestAddress(0x2000), 0)],
+        )
+        .unwrap();
+        assert_eq!(code.instruction_count(), 1);
+        assert!(code.native_instructions().is_empty());
     }
 }

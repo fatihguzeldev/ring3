@@ -1,6 +1,10 @@
 mod integer;
+mod numeric;
 
-use super::{StopReason, flags, program::Block};
+use super::{
+    StopReason, flags,
+    program::{Block, NativeInstruction},
+};
 use crate::cpu::x86::{
     ControlOperation,
     ir::{BranchTarget, Condition, CountBranchKind, Location32, Operation},
@@ -41,6 +45,7 @@ pub(super) fn mem(offset: u64, align: u32) -> MemArg {
 
 pub(super) fn supports(operation: &Operation) -> bool {
     integer::supports(operation)
+        || is_native(operation)
         || matches!(
             operation,
             Operation::Nop
@@ -61,7 +66,12 @@ pub(super) fn supports(operation: &Operation) -> bool {
         )
 }
 
-pub(super) fn emit(blocks: &[Block], identity: u64) -> Vec<u8> {
+pub(super) fn is_native(operation: &Operation) -> bool {
+    numeric::supports(operation)
+}
+
+pub(super) fn emit(blocks: &[Block], identity: u64, native: &[NativeInstruction]) -> Vec<u8> {
+    let shift = u32::from(!native.is_empty());
     let mut module = Module::new();
     let mut types = TypeSection::new();
     types.ty().function([ValType::I32; 2], [ValType::I32]);
@@ -84,6 +94,9 @@ pub(super) fn emit(blocks: &[Block], identity: u64) -> Vec<u8> {
     );
     imports.import("ring3", "read", EntityType::Function(1));
     imports.import("ring3", "write", EntityType::Function(2));
+    if !native.is_empty() {
+        imports.import("ring3", "numeric", EntityType::Function(0));
+    }
     module.section(&imports);
     let mut functions = FunctionSection::new();
     for kind in [3, 1, 2, 0, 4] {
@@ -91,13 +104,13 @@ pub(super) fn emit(blocks: &[Block], identity: u64) -> Vec<u8> {
     }
     module.section(&functions);
     let mut exports = ExportSection::new();
-    exports.export("run", ExportKind::Func, 5);
+    exports.export("run", ExportKind::Func, 5 + shift);
     module.section(&exports);
     let mut code = CodeSection::new();
     code.function(&flags::emit_function());
     code.function(&super::memory::emit_read(0));
     code.function(&super::memory::emit_write(1));
-    code.function(&run(blocks, identity));
+    code.function(&run(blocks, identity, native));
     code.function(&lookup(blocks));
     module.section(&code);
     module.finish()
@@ -132,7 +145,7 @@ fn lookup(blocks: &[Block]) -> Function {
     function
 }
 
-fn run(blocks: &[Block], identity: u64) -> Function {
+fn run(blocks: &[Block], identity: u64, native: &[NativeInstruction]) -> Function {
     let mut function = Function::new([(25, ValType::I32), (1, ValType::I64), (1, ValType::I32)]);
     let mut out = Output {
         function: &mut function,
@@ -140,6 +153,7 @@ fn run(blocks: &[Block], identity: u64) -> Function {
         pc: 0,
         prefix: 0,
         record_flags: true,
+        native,
     };
     out.c()
         .local_get(CTX)
@@ -192,7 +206,8 @@ fn run(blocks: &[Block], identity: u64) -> Function {
         .if_(BlockType::Empty);
     out.exit(StopReason::CodeInvalidated, None, 0);
     out.c().end().end();
-    out.c().local_get(EIP).call(6).local_set(INDEX);
+    let lookup = out.internal(6);
+    out.c().local_get(EIP).call(lookup).local_set(INDEX);
     out.c().loop_(BlockType::Empty);
     out.c().local_get(REMAIN).i32_eqz().if_(BlockType::Empty);
     out.exit(StopReason::Budget, None, 0);
@@ -227,11 +242,16 @@ pub(super) struct Output<'a> {
     pc: u32,
     prefix: u32,
     record_flags: bool,
+    native: &'a [NativeInstruction],
 }
 
 impl Output<'_> {
     pub(super) fn c(&mut self) -> wasm_encoder::InstructionSink<'_> {
         self.function.instructions()
+    }
+
+    fn internal(&self, index: u32) -> u32 {
+        index + u32::from(!self.native.is_empty())
     }
 
     fn block(&mut self, block: &Block, precise: bool) {
@@ -268,9 +288,17 @@ impl Output<'_> {
             if writes_memory {
                 self.c().i32_const(0).local_set(WRITE_STATUS);
             }
-            match instruction.operation {
-                None => self.exit(StopReason::Unsupported, Some(instruction.pc), prefix as u32),
-                Some(operation) => self.instruction(operation, instruction.next),
+            if let Some(gate) = instruction.gate {
+                self.c()
+                    .local_get(CTX)
+                    .i32_const(gate as i32)
+                    .i32_store(mem(116, 2));
+                self.exit(StopReason::Host, Some(instruction.pc), prefix as u32);
+            } else {
+                match instruction.operation {
+                    None => self.exit(StopReason::Unsupported, Some(instruction.pc), prefix as u32),
+                    Some(operation) => self.instruction(operation, instruction.next),
+                }
             }
             if writes_memory {
                 self.c()
@@ -304,28 +332,46 @@ impl Output<'_> {
         for local in [FLAGS, KIND, WIDTH, LEFT, RIGHT, VALUE, CARRY_IN] {
             self.c().local_get(local);
         }
-        self.c().i32_const(mask as i32).call(2).local_set(FLAGS);
+        let function = self.internal(2);
+        self.c()
+            .i32_const(mask as i32)
+            .call(function)
+            .local_set(FLAGS);
     }
 
     pub(super) fn exit(&mut self, reason: StopReason, pc: Option<u32>, retired: u32) {
+        self.publish_exit(pc, retired);
+        self.c().i32_const(reason as i32).return_();
+    }
+
+    fn publish_exit(&mut self, pc: Option<u32>, retired: u32) {
         if let Some(pc) = pc {
             self.c().i32_const(pc as i32).local_set(EIP);
         }
         self.count(retired);
         self.materialize(flags::ARITHMETIC);
+        self.publish_operands();
+        for (offset, local) in [(40, RETIRED), (44, REMAIN)] {
+            self.c()
+                .local_get(CTX)
+                .local_get(local)
+                .i32_store(mem(offset, 2));
+        }
+    }
+
+    fn publish_operands(&mut self) {
         for register in 0..8 {
             self.c()
                 .local_get(CTX)
                 .local_get(register + 2)
                 .i32_store(mem(u64::from(register * 4), 2));
         }
-        for (offset, local) in [(32, EIP), (36, FLAGS), (40, RETIRED), (44, REMAIN)] {
+        for (offset, local) in [(32, EIP), (36, FLAGS)] {
             self.c()
                 .local_get(CTX)
                 .local_get(local)
                 .i32_store(mem(offset, 2));
         }
-        self.c().i32_const(reason as i32).return_();
     }
 
     fn index(&self, pc: u32) -> i32 {
@@ -344,20 +390,22 @@ impl Output<'_> {
     }
 
     fn dynamic_pc(&mut self, local: u32) {
+        let lookup = self.internal(6);
         self.c()
             .local_get(local)
             .local_tee(EIP)
-            .call(6)
+            .call(lookup)
             .local_set(INDEX);
     }
 
     pub(super) fn read(&mut self, width: u32, destination: u32) {
         self.check_span(width & 0xff);
+        let function = self.internal(3);
         self.c()
             .local_get(CTX)
             .local_get(ADDRESS)
             .i32_const(width as i32)
-            .call(3)
+            .call(function)
             .local_tee(WIDE)
             .i64_const(32)
             .i64_shr_u()
@@ -381,12 +429,13 @@ impl Output<'_> {
 
     pub(super) fn write(&mut self, width: u32, source: u32) {
         self.check_span(width);
+        let function = self.internal(4);
         self.c()
             .local_get(CTX)
             .local_get(ADDRESS)
             .i32_const(width as i32)
             .local_get(source)
-            .call(4)
+            .call(function)
             .local_tee(WRITE_STATUS)
             .i32_const(2)
             .i32_gt_u()
@@ -508,6 +557,10 @@ impl Output<'_> {
     }
 
     fn instruction(&mut self, operation: Operation, next: u32) {
+        if numeric::supports(&operation) {
+            numeric::emit(self, next);
+            return;
+        }
         if integer::emit(self, operation) {
             self.set_pc(next);
             return;

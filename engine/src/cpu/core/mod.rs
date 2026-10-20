@@ -6,4 +6,6 @@ mod memory;
 mod program;
 
 pub use abi::{CONTEXT_SIZE, Context32, StopReason};
-pub use program::{CompileError, CompileOptions, CompiledCode, compile};
+pub use program::{
+    CompileError, CompileOptions, CompiledCode, NativeInstruction, compile, compile_with_gates,
+};

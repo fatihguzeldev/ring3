@@ -13,6 +13,8 @@ pub enum StopReason {
     CodeInvalidated = 6,
     Host = 7,
     Infrastructure = 8,
+    CpuFault = 9,
+    SystemEntry = 10,
 }
 
 #[derive(Clone, Debug)]
