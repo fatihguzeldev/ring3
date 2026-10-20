@@ -18,6 +18,7 @@ mod calls;
 #[cfg(feature = "observability")]
 mod census;
 mod clock;
+mod core;
 mod cpu;
 mod detection;
 mod events;

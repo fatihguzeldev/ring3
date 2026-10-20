@@ -9,7 +9,7 @@ pub use address::{
 };
 pub use code::CodeSnapshot;
 pub use space::AddressSpace;
-pub(crate) use space::{CoreMemoryView32, CoreWriteOutcome};
+pub(crate) use space::CoreWriteOutcome;
 pub(crate) use space::{GuardPage32, PageInitialization, PrivatePageChange32, SharedPages};
 
 pub(crate) use paging::{PagingBacking32, PagingCheckError32};

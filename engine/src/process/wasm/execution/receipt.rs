@@ -43,6 +43,9 @@ pub(crate) fn compiled_execution_usage(key_low: u32, key_high: u32) -> u32 {
         let Ok(mut registry) = registry.try_borrow_mut() else {
             return 9;
         };
+        if registry.core_active() {
+            return 12;
+        }
         let Some(instance) = registry.instance.as_mut() else {
             return 5;
         };

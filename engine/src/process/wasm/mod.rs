@@ -11,7 +11,12 @@ mod component_memory;
 pub(crate) use component_memory::component_memory_lease;
 
 mod clock;
+mod core;
 pub(crate) use clock::{advance_cpu_clock, configure_cpu_clock, observe_cpu_clock};
+pub(crate) use core::{
+    core_begin, core_code_len, core_code_ptr, core_context_ptr, core_end, core_prepare, core_read,
+    core_write,
+};
 
 #[cfg(feature = "observability")]
 mod observability;
@@ -28,11 +33,20 @@ pub(crate) use windows::*;
 struct Registry {
     opened: bool,
     instance: Option<EngineInstance>,
+    core: Option<core::CoreSession32>,
+}
+
+impl Registry {
+    fn core_active(&self) -> bool {
+        self.core
+            .as_ref()
+            .is_some_and(core::CoreSession32::is_active)
+    }
 }
 
 thread_local! {
     static REGISTRY: RefCell<Registry> = const {
-        RefCell::new(Registry { opened: false, instance: None })
+        RefCell::new(Registry { opened: false, instance: None, core: None })
     };
 }
 
@@ -61,6 +75,13 @@ pub(crate) fn close() -> u32 {
         let Ok(mut registry) = registry.try_borrow_mut() else {
             return 9;
         };
+        if registry
+            .core
+            .as_ref()
+            .is_some_and(core::CoreSession32::is_active)
+        {
+            return 12;
+        }
         #[cfg(feature = "external-cpu")]
         if registry
             .instance
@@ -69,6 +90,7 @@ pub(crate) fn close() -> u32 {
         {
             return 12;
         }
+        registry.core = None;
         registry.opened = true;
         if let Some(instance) = registry.instance.as_mut() {
             instance.close();
@@ -127,6 +149,13 @@ fn mutate_inner(
         let Ok(mut registry) = registry.try_borrow_mut() else {
             return 9;
         };
+        if registry
+            .core
+            .as_ref()
+            .is_some_and(core::CoreSession32::is_active)
+        {
+            return 12;
+        }
         let Some(instance) = registry.instance.as_mut() else {
             return 5;
         };
@@ -386,6 +415,13 @@ pub(super) fn cpu_store(
         let Ok(mut registry) = registry.try_borrow_mut() else {
             return 9;
         };
+        if registry
+            .core
+            .as_ref()
+            .is_some_and(core::CoreSession32::is_active)
+        {
+            return 12;
+        }
         let Some(instance) = registry.instance.as_mut() else {
             return 5;
         };

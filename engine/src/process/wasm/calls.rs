@@ -15,6 +15,9 @@ pub(crate) fn select_resident_callback_unit(
         let Ok(mut registry) = registry.try_borrow_mut() else {
             return 9;
         };
+        if registry.core_active() {
+            return 12;
+        }
         let Some(instance) = registry.instance.as_mut() else {
             return 5;
         };
@@ -211,6 +214,9 @@ pub(crate) fn begin_callback(
         let Ok(mut registry) = registry.try_borrow_mut() else {
             return 9;
         };
+        if registry.core_active() {
+            return 12;
+        }
         let Some(instance) = registry.instance.as_mut() else {
             return 5;
         };
@@ -261,6 +267,9 @@ pub(crate) fn begin_resident_callback(
         let Ok(mut registry) = registry.try_borrow_mut() else {
             return 9;
         };
+        if registry.core_active() {
+            return 12;
+        }
         let Some(instance) = registry.instance.as_mut() else {
             return 5;
         };

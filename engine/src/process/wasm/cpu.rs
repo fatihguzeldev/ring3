@@ -22,6 +22,9 @@ pub(crate) fn cpu_read32_view(epoch: i64) -> u32 {
         let Ok(registry) = registry.try_borrow() else {
             return 0;
         };
+        if registry.core_active() {
+            return 0;
+        }
         let Some(instance) = registry.instance.as_ref() else {
             return 0;
         };
@@ -159,6 +162,9 @@ pub(crate) fn x87_resident_pair(
         let Ok(mut registry) = registry.try_borrow_mut() else {
             return X87PairProgress32::encode(9, 0, 0) as i64;
         };
+        if registry.core_active() {
+            return X87PairProgress32::encode(12, 0, 0) as i64;
+        }
         let Some(instance) = registry.instance.as_mut() else {
             return X87PairProgress32::encode(5, 0, 0) as i64;
         };
@@ -206,6 +212,9 @@ pub(crate) fn x87_resident_group(
         let Ok(mut registry) = registry.try_borrow_mut() else {
             return X87GroupProgress32::encode(9, 0, 0) as i64;
         };
+        if registry.core_active() {
+            return X87GroupProgress32::encode(12, 0, 0) as i64;
+        }
         let Some(instance) = registry.instance.as_mut() else {
             return X87GroupProgress32::encode(5, 0, 0) as i64;
         };

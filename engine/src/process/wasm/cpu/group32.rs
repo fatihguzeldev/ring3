@@ -47,6 +47,9 @@ pub(crate) fn x87_resident_group32(
         let Ok(mut registry) = registry.try_borrow_mut() else {
             return X87WideGroupProgress32::encode(9, 0, 0) as i64;
         };
+        if registry.core_active() {
+            return X87WideGroupProgress32::encode(12, 0, 0) as i64;
+        }
         let Some(instance) = registry.instance.as_mut() else {
             return X87WideGroupProgress32::encode(5, 0, 0) as i64;
         };

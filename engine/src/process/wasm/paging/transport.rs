@@ -13,6 +13,9 @@ pub(in crate::process::wasm) fn cpu_mutate(
         let Ok(mut registry) = registry.try_borrow_mut() else {
             return 9;
         };
+        if registry.core_active() {
+            return 12;
+        }
         let Some(instance) = registry.instance.as_mut() else {
             return 5;
         };
@@ -31,6 +34,9 @@ pub(in crate::process::wasm) fn cpu_paging_store(
         let Ok(mut registry) = registry.try_borrow_mut() else {
             return 9;
         };
+        if registry.core_active() {
+            return 12;
+        }
         let Some(instance) = registry.instance.as_mut() else {
             return 5;
         };

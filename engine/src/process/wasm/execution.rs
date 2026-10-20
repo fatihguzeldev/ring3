@@ -111,6 +111,9 @@ pub(crate) fn find_resident(pc: u32) -> u32 {
         let Ok(mut registry) = registry.try_borrow_mut() else {
             return 9;
         };
+        if registry.core_active() {
+            return 12;
+        }
         let Some(instance) = registry.instance.as_mut() else {
             return 5;
         };
@@ -173,6 +176,9 @@ pub(crate) fn find_installed_resident(key_low: u32, key_high: u32, pc: u32) -> u
         let Ok(mut registry) = registry.try_borrow_mut() else {
             return 9;
         };
+        if registry.core_active() {
+            return 12;
+        }
         let Some(instance) = registry.instance.as_mut() else {
             return 5;
         };
@@ -240,6 +246,9 @@ pub(crate) fn guard_dispatch_entry(
         let Ok(snapshot) = registry.try_borrow() else {
             return 9;
         };
+        if snapshot.core_active() {
+            return 12;
+        }
         let Some(instance) = snapshot.instance.as_ref() else {
             return 5;
         };
@@ -276,6 +285,9 @@ pub(crate) fn guard_resident(
         let Ok(snapshot) = registry.try_borrow() else {
             return 9;
         };
+        if snapshot.core_active() {
+            return 12;
+        }
         let Some(instance) = snapshot.instance.as_ref() else {
             return 5;
         };
@@ -327,6 +339,9 @@ pub(crate) fn guard(
         let Ok(snapshot) = registry.try_borrow() else {
             return 9;
         };
+        if snapshot.core_active() {
+            return 12;
+        }
         let Some(instance) = snapshot.instance.as_ref() else {
             return 5;
         };
