@@ -32,11 +32,6 @@ impl CoreCache32 {
         if threshold == 0
             || self.transition_pending()
             || source.identity() == target.identity()
-            || source
-                .formation_roots()
-                .iter()
-                .chain(target.formation_roots())
-                .any(|root| root.0 >> 12 != pc >> 12)
             || (target.formation_roots().contains(&GuestAddress(pc))
                 && source
                     .formation_roots()

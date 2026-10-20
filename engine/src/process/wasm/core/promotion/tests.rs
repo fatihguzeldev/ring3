@@ -206,15 +206,13 @@ fn source_epoch_or_identity_changes_cannot_resurrect_pending_owners() {
 }
 
 #[test]
-fn only_the_current_linked_same_page_pair_can_accumulate_heat() {
+fn only_the_current_linked_indexed_pair_can_accumulate_heat() {
     let memory = memory();
     let mut cache = CoreCache32::default();
     let a = insert(&mut cache, &memory, 0x1000, 1);
     let b = insert(&mut cache, &memory, 0x1040, 2);
     let c = insert(&mut cache, &memory, 0x1080, 3);
-    let far = insert(&mut cache, &memory, 0x2000, 4);
     assert!(!cache.observe_transition(&memory, &a, &a, 0x1000, 1));
-    assert!(!cache.observe_transition(&memory, &a, &far, 0x2000, 1));
     assert!(!cache.observe_transition(&memory, &a, &b, 0x1041, 1));
     cache.unlink(2, b.identity()).unwrap();
     assert!(!cache.observe_transition(&memory, &a, &b, 0x1040, 1));
@@ -307,4 +305,138 @@ fn forming_a_new_ordinal_table_does_not_reset_the_persistent_numerical_bank() {
         .read(GuestAddress(0x3008), &mut output)
         .unwrap();
     assert_eq!(output, 6_f32.to_le_bytes());
+}
+
+fn cross_page_call_memory() -> AddressSpace {
+    let mut memory = memory();
+    memory
+        .write(GuestAddress(0x1000), &[0xe8, 0xfb, 0x0f, 0, 0])
+        .unwrap();
+    memory
+}
+
+#[test]
+fn cross_page_call_and_return_pairs_retain_both_roots_and_the_continuation() {
+    for return_edge in [false, true] {
+        let memory = cross_page_call_memory();
+        let mut cache = CoreCache32::default();
+        let caller = insert(&mut cache, &memory, 0x1000, 1);
+        let callee = insert(&mut cache, &memory, 0x2000, 2);
+        let before = cache.snapshot();
+        let (source, target, pc) = if return_edge {
+            (&callee, &caller, 0x1005)
+        } else {
+            (&caller, &callee, 0x2000)
+        };
+        mature(&mut cache, &memory, source, target, pc);
+        assert_eq!(cache.snapshot(), before);
+        let merged = cache
+            .prepare_transition(&memory, pc, options(), &[])
+            .unwrap();
+        let expected_roots = if return_edge {
+            vec![
+                GuestAddress(0x1000),
+                GuestAddress(0x1005),
+                GuestAddress(0x2000),
+            ]
+        } else {
+            vec![GuestAddress(0x1000), GuestAddress(0x2000)]
+        };
+        assert_eq!(merged.formation_roots(), expected_roots);
+        assert_eq!(merged.instruction_count(), 6);
+        for entry in [0x1000, 0x1005, 0x2000] {
+            assert!(merged.entrypoints().contains(&GuestAddress(entry)));
+            assert_eq!(
+                cache.lookup(&memory, entry).unwrap().identity(),
+                merged.identity()
+            );
+        }
+        assert_ne!(merged.identity(), caller.identity());
+        assert_ne!(merged.identity(), callee.identity());
+        assert_eq!(
+            &cache.link_owners[1..3],
+            &[caller.identity(), callee.identity()]
+        );
+        assert!(caller.is_current(&memory) && callee.is_current(&memory));
+        assert!(merged.is_current(&memory));
+        assert_eq!(cache.snapshot()[0], before[0] + 1);
+    }
+}
+
+#[test]
+fn cross_page_formed_sources_reject_writes_and_permission_changes_on_either_page() {
+    for changed_page in [0x1000, 0x2000] {
+        for revoke_execute in [false, true] {
+            let mut memory = cross_page_call_memory();
+            let mut cache = CoreCache32::default();
+            let caller = insert(&mut cache, &memory, 0x1000, 1);
+            let callee = insert(&mut cache, &memory, 0x2000, 2);
+            mature(&mut cache, &memory, &caller, &callee, 0x2000);
+            let merged = cache
+                .prepare_transition(&memory, 0x2000, options(), &[])
+                .unwrap();
+            assert!(merged.is_current(&memory));
+            if revoke_execute {
+                memory
+                    .protect(
+                        PageRange::new(GuestAddress(changed_page), 1).unwrap(),
+                        Permissions::READ,
+                    )
+                    .unwrap();
+            } else {
+                memory.write(GuestAddress(changed_page), &[0x90]).unwrap();
+            }
+            assert!(!merged.is_current(&memory));
+            assert_eq!(caller.is_current(&memory), changed_page != 0x1000);
+            assert_eq!(callee.is_current(&memory), changed_page != 0x2000);
+            assert!(cache.lookup(&memory, 0x2000).is_none());
+            assert_eq!(
+                &cache.link_owners[1..3],
+                &[caller.identity(), callee.identity()]
+            );
+        }
+    }
+}
+
+#[test]
+fn cross_page_shortening_declines_without_admission_and_requires_fresh_heat() {
+    let memory = cross_page_call_memory();
+    let mut cache = CoreCache32::default();
+    let caller = insert(&mut cache, &memory, 0x1000, 1);
+    let callee = insert(&mut cache, &memory, 0x2000, 2);
+    mature(&mut cache, &memory, &caller, &callee, 0x2000);
+    let before = cache.snapshot();
+    assert!(
+        cache
+            .prepare_transition(
+                &memory,
+                0x2000,
+                CompileOptions {
+                    instructions: 1,
+                    ..options()
+                },
+                &[],
+            )
+            .is_none()
+    );
+    assert_eq!(cache.snapshot(), before);
+    assert_eq!(
+        cache.lookup_linked(&memory, 0x2000).unwrap().0.identity(),
+        callee.identity()
+    );
+    assert_eq!(
+        &cache.link_owners[1..3],
+        &[caller.identity(), callee.identity()]
+    );
+    assert!(
+        cache
+            .prepare_transition(&memory, 0x2000, options(), &[])
+            .is_none()
+    );
+    mature(&mut cache, &memory, &caller, &callee, 0x2000);
+    assert!(
+        cache
+            .prepare_transition(&memory, 0x2000, options(), &[])
+            .is_some()
+    );
 }
