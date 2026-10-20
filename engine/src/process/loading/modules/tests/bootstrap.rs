@@ -87,6 +87,25 @@ fn no_import_windows_process_bootstraps_real_ntdll_in_the_same_plan_and_peb_list
 }
 
 #[test]
+fn initial_thread_return_remains_a_gate_outside_loaded_images() {
+    let mut engine = engine(32);
+    engine
+        .start_module_process("main.exe", None, Default::default())
+        .unwrap();
+    let pc = engine.modules.thread.as_ref().unwrap().return_pc();
+    assert!(engine.modules.loaded.containing(GuestAddress(pc)).is_none());
+    assert_eq!(engine.modules.loaded.gate(GuestAddress(pc)), None);
+    assert_eq!(
+        engine.module_gate_at(pc),
+        Some(crate::cpu::dbt::GateSpec {
+            entry: GuestAddress(pc),
+            id: 0x0003_0001,
+        })
+    );
+    assert_eq!(engine.module_gate_at(pc + 1), None);
+}
+
+#[test]
 fn native_runtime_page_capacity_failure_leaves_startup_and_vm_unpublished() {
     let mut engine = engine(2);
     engine.register_kernel32_module(0x70000000).unwrap();

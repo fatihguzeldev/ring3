@@ -248,11 +248,12 @@ impl ModuleSet32 {
     }
 
     pub fn gate(&self, address: GuestAddress) -> Option<GateSpec> {
-        self.modules
-            .iter()
-            .flat_map(|module| &module.gates)
-            .find(|gate| gate.entry == address)
-            .copied()
+        let module = self.containing(address)?;
+        let index = module
+            .gates
+            .binary_search_by_key(&address.0, |gate| gate.entry.0)
+            .ok()?;
+        Some(module.gates[index])
     }
 
     pub fn resolve_export(

@@ -1,5 +1,7 @@
 #[path = "native/dynamic.rs"]
 mod dynamic;
+#[path = "native/gates.rs"]
+mod gates;
 #[path = "native/image.rs"]
 mod image;
 
