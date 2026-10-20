@@ -92,7 +92,7 @@ export class Session {
     const execution = options.execution ?? DEFAULT_EXECUTION;
     this.observation?.observer.event("execution.config", execution);
     this.windows = new WindowPresentation(h, this.emit);
-    this.media = new Media(h, configure(h), this.emit, this.windows);
+    this.media = new Media(h, configure(h), this.emit, this.windows, () => this.inputClock());
     this.media.graphicsTransport.probe = () => this.frameProbe;
     this.callDiagnostics = this.observation?.observer.enabled ? new CompletedWindowsCalls(h) : null;
     this.files = new Files(h, manifest, options.bytesUrl ?? "/files/bytes");
@@ -213,6 +213,15 @@ export class Session {
     const now = BigInt(Math.floor((performance.now() - this.started - this.pausedDuration) * 1e6));
     this.engine.ok("observe_cpu_clock", ...pair(now));
     return now;
+  }
+  inputClock() {
+    const current=this.paused?this.pauseStarted:performance.now();
+    if(!Number.isFinite(this.started))return {originMs:performance.timeOrigin+current,nowNs:0n};
+    const paused=this.pausedDuration??0;
+    return {
+      originMs:performance.timeOrigin+this.started+paused,
+      nowNs:BigInt(Math.max(0,Math.floor((current-this.started-paused)*1e6))),
+    };
   }
   armFrameProbe(id) {
     if (!this.frameProbeEnabled || !this.running || this.paused || this.frameProbe || this.requestedFrameProbe) return;

@@ -28,7 +28,9 @@ export class InputMeasurements {
     this.submittedBatches++;
     const identity = { sequence: sequence.toString(), timestampNs: now.toString() };
     const accepted = performance.now();
-    for (const event of events) this.record(event, identity, "submit_windows_input", accepted);
+    for (const event of events) this.record(event, {
+      ...identity,timestampNs:(event.timestampNs ?? now).toString(),
+    }, "submit_windows_input", accepted);
   }
   pointer(x, y, now) {
     this.pointerSubmissions++;

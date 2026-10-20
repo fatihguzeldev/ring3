@@ -2,16 +2,38 @@ import {record,view,pair} from './engine.js';
 import {GraphicsTransport} from './media/graphics.js';
 import {InputMeasurements} from './media/input/measurement.js';
 export class Media {
-  constructor(engine,epoch,emit,windows) {this.engine=engine;this.epoch=epoch;this.emit=emit;this.windows=windows;this.sequence=0n;this.input=[];this.inputMeasurements=engine.inputMeasurementsEnabled?new InputMeasurements():null;this.audio=[];this.audioPaused=false;this.audioSequence=0n;this.audioFrame=0n;this.lastCursor=0n;this.graphicsTransport=new GraphicsTransport(engine,emit);this.gdi=null;this.dialogs=new Set();}
-  enqueue(events,sentAtMs) {if(this.input.length+events.length>4096)throw new Error('host input queue exceeded4096');this.input.push(...events);this.inputMeasurements?.enqueue(events.length,sentAtMs);}
+  constructor(engine,epoch,emit,windows,inputClock) {this.engine=engine;this.epoch=epoch;this.emit=emit;this.windows=windows;this.inputClock=inputClock;this.sequence=0n;this.input=[];this.inputMeasurements=engine.inputMeasurementsEnabled?new InputMeasurements():null;this.audio=[];this.audioPaused=false;this.audioSequence=0n;this.audioFrame=0n;this.lastCursor=0n;this.graphicsTransport=new GraphicsTransport(engine,emit);this.gdi=null;this.dialogs=new Set();}
+  enqueue(events,sentAtMs) {
+    if(this.input.length+events.length>4096)throw new Error('host input queue exceeded4096');
+    const clock=this.inputClock?.();
+    for(const event of events) {
+      let timestampNs;
+      if(clock) {
+        const elapsed=Number.isFinite(event.timestampMs)?(event.timestampMs-clock.originMs)*1e6:Infinity;
+        timestampNs=elapsed>=Number(clock.nowNs)?clock.nowNs:
+          elapsed<=0?0n:BigInt(Math.floor(elapsed));
+      }
+      this.input.push({...event,timestampNs});
+    }
+    this.inputMeasurements?.enqueue(events.length,sentAtMs);
+  }
   inputStatus() {return this.inputMeasurements?.snapshot(this.input.length);}
   update(now) {
     const h=this.engine;
     while(this.input.length) {
+      const time=h.media('windows_input_time');
+      if(time.epoch!==this.epoch)throw new Error('stale native input clock epoch');
+      let floor=time.values[0];
+      const upper=floor>now?floor:now;
+      const timestamp=event=>{
+        const source=event.timestampNs??now;
+        floor=source<floor?floor:source>upper?upper:source;
+        return floor;
+      };
       if(this.input[0].kind==='pointer') {
-        const {x,y}=this.input.shift();
-        h.ok('submit_windows_pointer',...pair(this.epoch),...pair(now),x>>>0,y>>>0);
-        this.inputMeasurements?.pointer(x,y,now);
+        const event=this.input.shift(),{x,y}=event,at=timestamp(event);
+        h.ok('submit_windows_pointer',...pair(this.epoch),...pair(at),x>>>0,y>>>0);
+        this.inputMeasurements?.pointer(x,y,at);
         continue;
       }
       const nextPointer=this.input.findIndex(event=>event.kind==='pointer');
@@ -19,7 +41,7 @@ export class Media {
       const bytes=new Uint8Array(32+32*events.length), d=view(bytes);
       bytes.set(new TextEncoder().encode('R3IB'));d.setUint16(4,1,true);d.setUint16(6,32,true);d.setBigUint64(8,this.epoch,true);d.setBigUint64(16,++this.sequence,true);d.setUint32(24,events.length,true);
       events.forEach((event,i)=>{
-        const at=32+i*32;d.setBigUint64(at,now,true);let fields;
+        const at=32+i*32;event.timestampNs=timestamp(event);d.setBigUint64(at,event.timestampNs,true);let fields;
         if(event.kind==='key')fields=[1,event.code,event.down?1:0,0];
         else if(event.kind==='button')fields=[2,event.button,event.down?1:0,0];
         else if(event.kind==='relative')fields=[3,event.dx,event.dy,event.wheel??0];
@@ -29,9 +51,9 @@ export class Media {
         fields.forEach((n,j)=>d.setUint32(at+8+j*4,n>>>0,true));
       });
       h.request(bytes);h.ok('submit_windows_input',bytes.length);
-      this.inputMeasurements?.submitted(events,this.sequence,now);
+      this.inputMeasurements?.submitted(events,this.sequence,events.at(-1).timestampNs);
       const focus = events.findLast(event => event.kind === 'focus');
-      if (focus) this.lastPhysicalFocus = {focused:!!focus.focused,sequence:this.sequence.toString(),timestampNs:now.toString()};
+      if (focus) this.lastPhysicalFocus = {focused:!!focus.focused,sequence:this.sequence.toString(),timestampNs:focus.timestampNs.toString()};
     }
     h.ok('sync_windows_input');
     const cursor=h.media('pending_user32_cursor'),revision=cursor.values[0];

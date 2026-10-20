@@ -53,7 +53,7 @@ export class InputHost {
       if (!this.locked && !point) return;
       event.preventDefault();
       this.flush(); this.buttons.add(button);
-      this.send([...(point ? [{kind:'pointer',...point}] : []),{kind:'button',button,down:true}]);
+      this.sendTimed([...(point ? [{kind:'pointer',...point}] : []),{kind:'button',button,down:true}],this.timestamp(event));
       accepted = true;
       } finally { if (this.diagnostics) this.recordEvent('mouse', event, accepted); }
     }, options);
@@ -62,7 +62,7 @@ export class InputHost {
       try {
       const button = mouseButton[event.button];
       if (!this.buttons.delete(button)) return;
-      this.flush(); this.send([{kind:'button',button,down:false}]);
+      this.flush(); this.sendTimed([{kind:'button',button,down:false}],this.timestamp(event));
       accepted = true;
       } finally { if (this.diagnostics) this.recordEvent('mouse', event, accepted); }
     }, options);
@@ -72,6 +72,7 @@ export class InputHost {
       event.preventDefault();
       const pixels = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? canvas.clientHeight : 1);
       this.relative.wheel += -pixels * 3;
+      this.motionTimestampMs = this.timestamp(event);
       this.schedule();
     }, {...options,passive:false});
     canvas.addEventListener('contextmenu', event => event.preventDefault(), options);
@@ -80,13 +81,20 @@ export class InputHost {
       if (!this.available) this.release(true);
       else this.focus();
       const captured = this.active && this.locked;
-      if (this.enabled) this.send([{kind:'capture',captured}]);
+      if (this.enabled) this.sendTimed([{kind:'capture',captured}]);
       this.onCapture(captured);
       if (this.locked && !captured) document.exitPointerLock();
     }, options);
     document.addEventListener('pointerlockerror', () => this.onDiagnostic('mouse capture was denied; click capture mouse to retry'), options);
   }
   get locked() { return document.pointerLockElement === this.canvas; }
+  timestamp(event) {
+    const now = performance.now(),source = event?.timeStamp;
+    return performance.timeOrigin + (Number.isFinite(source) && source > 0 && source <= now ? source : now);
+  }
+  sendTimed(events,timestampMs = this.timestamp()) {
+    this.send(events.map(event=>({...event,timestampMs})));
+  }
   setDiagnostics(enabled) {
     if (!enabled) { this.diagnostics = null; return; }
     this.diagnostics ??= {
@@ -138,7 +146,7 @@ export class InputHost {
   disable() { this.control('disable'); this.release(true); this.enabled = false; if (this.locked) document.exitPointerLock(); }
   focus() {
     if (!this.available || this.focused) return;
-    this.send([{kind:'focus',focused:true}, ...(this.locked ? [{kind:'capture',captured:true}] : [])]);
+    this.sendTimed([{kind:'focus',focused:true}, ...(this.locked ? [{kind:'capture',captured:true}] : [])]);
     this.focused = true;
   }
   setBlocked(value) {
@@ -158,7 +166,7 @@ export class InputHost {
     if (!down && !this.keys.has(code)) return;
     this.flush();
     if (down) this.keys.add(code); else this.keys.delete(code);
-    this.send([{kind:'key',code,down}]);
+    this.sendTimed([{kind:'key',code,down}],this.timestamp(event));
     accepted = true;
     } finally { if (this.diagnostics) this.recordEvent('key', event, accepted); }
   }
@@ -171,6 +179,7 @@ export class InputHost {
     }
     this.relative.dx += Number.isFinite(event.movementX) ? event.movementX : 0;
     this.relative.dy += Number.isFinite(event.movementY) ? event.movementY : 0;
+    this.motionTimestampMs = this.timestamp(event);
     this.schedule();
   }
   point(event) {
@@ -186,7 +195,7 @@ export class InputHost {
   schedule() { if (!this.frame) this.frame = requestAnimationFrame(() => this.flush()); }
   flush() {
     cancelAnimationFrame(this.frame); this.frame = 0;
-    if (!this.active) { this.relative = {dx:0,dy:0,wheel:0}; this.absolute = null; return; }
+    if (!this.active) { this.relative = {dx:0,dy:0,wheel:0}; this.absolute = null; this.motionTimestampMs = undefined; return; }
     const {dx,dy,wheel} = this.relative;
     const event = {kind:'relative',dx:integer(dx),dy:integer(dy),wheel:integer(wheel)};
     this.relative = {dx:dx-event.dx,dy:dy-event.dy,wheel:wheel-event.wheel};
@@ -194,7 +203,9 @@ export class InputHost {
     if (event.dx || event.dy || event.wheel) events.push(event);
     if (this.absolute) events.push({kind:'pointer',...this.absolute});
     this.absolute = null;
-    if (events.length) this.send(events);
+    const timestampMs = this.motionTimestampMs;
+    this.motionTimestampMs = undefined;
+    if (events.length) this.sendTimed(events,timestampMs);
   }
   release(blur) {
     cancelAnimationFrame(this.frame); this.frame = 0;
@@ -204,8 +215,9 @@ export class InputHost {
     this.keys.clear(); this.buttons.clear();
     this.relative = {dx:0,dy:0,wheel:0};
     this.absolute = null;
+    this.motionTimestampMs = undefined;
     if (blur && this.focused) events.push({kind:'focus',focused:false});
-    if (this.enabled && events.length) this.send(events);
+    if (this.enabled && events.length) this.sendTimed(events);
     if (blur) this.focused = false;
   }
   async capture() {
