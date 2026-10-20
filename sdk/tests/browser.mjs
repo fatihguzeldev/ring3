@@ -1,6 +1,9 @@
 import {createSession,selectedFolder} from '../index.js';
 const element = id => document.getElementById(id), query = new URL(location.href).searchParams;
 const events = [], report = {backend:'core',events};
+const execution = Object.fromEntries(['capacity','budget','instructions','blocks']
+  .filter(name => query.has(name)).map(name => [name,Number(query.get(name))]));
+if (query.has('chain')) execution.chain = query.get('chain') === '1';
 let local = null;
 function record(type,value) {
   events.push({at_ms:performance.timeOrigin+performance.now(),type,value});
@@ -28,7 +31,7 @@ const actions = {
   launch: () => session.launch({...(local ?? {}),
     ...(local ? {executable:element('executable').value} : {}),
     commandLine:query.get('commandLine') ?? undefined,
-    execution:query.has('chain') ? {chain:query.get('chain') === '1'} : undefined,
+    execution:Object.keys(execution).length ? execution : undefined,
     frameProbe:query.get('frameProbe') === '1',observability:{level:query.get('observation') ?? 'off'},
   }),
   pause: () => session.pause(), resume: () => session.resume(), stop: () => session.stop(),
