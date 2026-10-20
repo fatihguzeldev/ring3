@@ -21,7 +21,8 @@ let stage = 'initialization'; checkpoint();
 
 const code = new Uint8Array(4096);
 for (const [pc,bytes] of [[0x1000,'d903 ffe6'],[0x1040,'d84b04 d95b08 ffe2'],[0x1080,'0f0b'],
-  [0x1100,'f3a4 ffe2'],[0x1140,'83c001 0f0b'],[0x1200,'8903 ffe6']]) code.set(unhex(bytes),pc-0x1000);
+  [0x1100,'f3a4 ffe2'],[0x1140,'83c001 0f0b'],[0x1200,'8903 ffe6'],
+  [0x1300,'d903 e839000000 49 75f6 0f0b'],[0x1340,'d84b04 d95b08 c3']]) code.set(unhex(bytes),pc-0x1000);
 const bankRanges = [[4236,352],[4612,184]];
 function fp(initial,{status=0,tag=0xffff,opcode=0,fip=0,fdp=0,registers={}}={}) {
   const result = initial.slice(), d = view(result);
@@ -120,7 +121,7 @@ function fixture(name,{entry=0x1000,target=0x1040,registers=[0,0,0x1080,0x3000,0
       }
       assert.deepEqual(bytes(engine.base+56,40),expectedExit,'literal terminal Exit');
     }
-    body({api,engine,cache,bytes,word,select,first,next,initialFp,initialBanks,expectedRam,snapshot,neutral,status,run,expect,
+    body({api,engine,cache,bytes,word,select,first,next,initialFp,initialBanks,expectedRam,snapshot,neutral,status,run,expect,result,
       begin:()=>{status('core_begin',0); active=true;},end:()=>{status('core_end',0);active=false;}});
     result.final = snapshot(); result.stats = cache.stats(); result.complete = true; checkpoint();
   } catch (error) {
@@ -191,6 +192,36 @@ try {
     const {sourceVersion} = t.run(t.first,8); t.expectedRam.set(unhex('44332211'),0x200);
     t.expect({stop:6,pc:0x1202,retired:1,work:1,remaining:7,regions:1,id:t.first.id,sourceVersion});
     t.neutral('code writer cannot reenter stale source',()=>t.status('core_begin',4));
+  });
+  const iterations=8192,totalWork=7*iterations;
+  fixture('numerical-ordinals-survive-hot-region-promotion',{
+    entry:0x1300,target:0x1340,registers:[0,iterations,0,0x3000,0x4800,0,0,0],data:values,
+  },t => {
+    const admissionsBefore=t.cache.stats().admissions;
+    let selected=t.first,work=0,retired=0,last,sourceVersion;
+    while(work<totalWork) {
+      assert(t.result.runs.length<2*iterations+2,'bounded authored continuation count');
+      const executed=t.run(selected,totalWork-work);
+      last=executed.value;sourceVersion=executed.sourceVersion;work+=last.work;retired+=last.retired;
+      if(last.coreReason===2)break;
+      assert.equal(last.coreReason,1,'promotion continuation is a genuine NeedCode');
+      assert.deepEqual(t.bytes(t.engine.base+4236,128),t.initialFp,'dirty numerical bank remains private across promotion');
+      selected=t.select();
+    }
+    t.expectedRam.set(unhex('0000c040'),4096+8);
+    t.expectedRam.set(unhex('07130000'),8192+0x7fc);
+    const stats=t.cache.stats();
+    t.expect({stop:2,pc:0x130a,retired:totalWork,work:totalWork,remaining:0,regions:stats.regions,id:last.id,sourceVersion,
+      regs:[0,0,0,0x3000,0x4800,0,0,0],flags:0x46,
+      wantedFp:fp(t.initialFp,{opcode:0x15b,fip:0x1343,fdp:0x3008,registers:{7:'00000000000000c00140'}})});
+    t.result.promotion={iterations,retired,work,admissionsBefore,admissionsAfter:stats.admissions,
+      regions:stats.regions,outer:stats.runs,initialOwners:[String(t.first.id),String(t.next.id)],finalOwner:String(last.id)};
+    checkpoint();
+    assert.equal(retired,totalWork);assert.equal(work,totalWork);
+    assert(stats.admissions>admissionsBefore,'hot transition admits a new generated ordinal table');
+    assert(stats.regions>1&&stats.regions<2*iterations+1,'actual region entries fall after promotion');
+    assert(stats.runs>=2,'the first promotion returns through a closed execution boundary');
+    assert.notEqual(last.id,t.first.id);assert.notEqual(last.id,t.next.id);
   });
   report.complete = true; checkpoint(); console.log(JSON.stringify({complete:true,cases:report.cases.length,engineSha256:artifact.sha256}));
 } catch (error) {report.failure={stage,message:String(error),stack:error.stack};checkpoint();throw error;}

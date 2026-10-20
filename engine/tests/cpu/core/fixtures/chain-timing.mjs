@@ -79,13 +79,23 @@ function run(context,phase,round,position) {
   const ram = bytes(backing,pages*4096), arena = bytes(engine.base,api.arena_len()), after = cache.stats();
   const sample = {phase,round,position,chain,elapsedMs,outer,stop,retired,work,
     regions:after.regions-before.regions,dispatches:after.runs-before.runs,
+    admissions:after.admissions-before.admissions,
     contextHex:hex(rawContext),arenaHex:hex(arena),ramSha256:hash(ram)};
   report.runs.push(sample); report.lastRawRamHex = hex(ram); checkpoint();
   assert.equal(stop,2); assert.equal(retired,kernel.retired); assert.equal(work,kernel.retired);
   assert.equal((d.getUint32(40,true)-priorRetired)>>>0,kernel.retired);
   assert.equal(d.getUint32(44,true),0); assert.equal(d.getUint32(112,true),0);
-  assert.equal(outer,chain ? 1 : 2*iterations+1); assert.equal(sample.dispatches,outer);
-  assert.equal(sample.regions,2*iterations+1);
+  assert.equal(sample.dispatches,outer);
+  if (!chain) {
+    assert.equal(outer,2*iterations+1); assert.equal(sample.regions,2*iterations+1);
+    assert.equal(sample.admissions,0);
+  } else if (sample.admissions) {
+    assert.equal(sample.admissions,1); assert.equal(outer,2);
+    assert(sample.regions>1 && sample.regions<2*iterations+1,'cold promotion reduces actual region entries');
+  } else {
+    assert.equal(outer,1);
+    assert.equal(sample.regions,after.admissions>2 ? 1 : 2*iterations+1);
+  }
   const expectedState = record('R3ST',56), state = view(expectedState);
   kernel.regs.forEach((value,index) => state.setUint32(16+index*4,value,true));
   state.setUint32(48,kernel.pc,true); state.setUint32(52,kernel.flags,true);
