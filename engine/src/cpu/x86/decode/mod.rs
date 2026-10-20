@@ -31,7 +31,7 @@ mod xstate;
 
 pub(crate) use authority::DecodeAuthority;
 pub use decoder::{DecodeError, decode_one};
-pub(crate) use decoder::{DecodePolicy, decode_for_compilation, paging_error};
+pub(crate) use decoder::{DecodePolicy, DecodeScratch, decode_for_compilation, paging_error};
 pub use instruction::DecodedInstruction;
 pub(crate) use instruction::DecodedOperation;
 

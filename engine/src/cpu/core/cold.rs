@@ -4,7 +4,7 @@ use crate::{
         SegmentContext, State32,
         decode::{
             BoundDecode, CapturedFetchFaultKind32, CodeFetchContext, DecodeAuthority, DecodeError,
-            DecodePolicy, decode_for_compilation,
+            DecodePolicy, DecodeScratch,
         },
     },
     memory::{AddressSpace, GuestAddress},
@@ -32,12 +32,36 @@ struct HeatRow {
     generation: u64,
 }
 
-pub(crate) struct ColdHeat {
+struct ColdHeat {
     rows: Box<[HeatRow]>,
     memory: u64,
     version: u64,
     generation: u64,
     threshold: u32,
+}
+
+#[derive(Default)]
+pub(crate) struct ColdState {
+    heat: ColdHeat,
+    decode: DecodeScratch,
+}
+
+impl ColdState {
+    pub(crate) fn retired(&mut self, memory: &AddressSpace, pc: u32) {
+        self.heat.retired(memory, pc);
+    }
+
+    pub(crate) fn handoff(&mut self) {
+        self.heat.requested();
+    }
+
+    #[cfg(test)]
+    fn with_threshold(threshold: u32) -> Self {
+        Self {
+            heat: ColdHeat::new(threshold),
+            decode: DecodeScratch::default(),
+        }
+    }
 }
 
 impl Default for ColdHeat {
@@ -89,7 +113,7 @@ impl ColdHeat {
         self.advance();
     }
 
-    pub(crate) fn retired(&mut self, memory: &AddressSpace, pc: u32) {
+    fn retired(&mut self, memory: &AddressSpace, pc: u32) {
         self.source(memory);
         let row = &mut self.rows[Self::index(pc)];
         if row.generation != self.generation || row.pc != pc {
@@ -102,11 +126,6 @@ impl ColdHeat {
             row.visits = row.visits.saturating_add(1);
         }
     }
-
-    #[cfg(test)]
-    fn with_threshold(threshold: u32) -> Self {
-        Self::new(threshold)
-    }
 }
 
 // gates and frontier are sorted snapshots from the same exclusive cpu lifetime.
@@ -116,7 +135,7 @@ pub(crate) fn run(
     segments: &SegmentContext,
     gates: &[(GuestAddress, u32)],
     frontier: &[GuestAddress],
-    heat: &mut ColdHeat,
+    cold: &mut ColdState,
 ) -> ColdOutcome {
     if word(context, 112) != 1 || context.bytes()[120..128] != [0; 8] || !segments.is_legacy() {
         return ColdOutcome::Stop(StopReason::Infrastructure);
@@ -124,6 +143,7 @@ pub(crate) fn run(
     let Some(fetch) = CodeFetchContext::from_segments(segments) else {
         return ColdOutcome::Stop(StopReason::Infrastructure);
     };
+    let ColdState { heat, decode } = cold;
     let mut state = context.state();
     let mut retired = context.retired();
     let mut remaining = context.remaining();
@@ -150,7 +170,7 @@ pub(crate) fn run(
             heat.requested();
             return finish(context, state, retired, remaining, StopReason::NeedCode);
         }
-        let decoded = match decode_for_compilation(
+        let decoded = match decode.decode(
             memory,
             GuestAddress(pc),
             DecodePolicy::Execution,

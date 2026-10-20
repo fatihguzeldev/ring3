@@ -25,7 +25,7 @@ use crate::{
     },
     cpu::{
         core::{
-            CompileError, CompileOptions, CompiledCode, Context32, cold::ColdHeat,
+            CompileError, CompileOptions, CompiledCode, Context32, cold::ColdState,
             compile_with_frontier,
         },
         x86::{SegmentContext, SegmentRegister},
@@ -45,7 +45,7 @@ pub(super) struct CoreSession32 {
     exported_retired: u32,
     context: Box<Context32>,
     active: bool,
-    cold_heat: ColdHeat,
+    cold_state: ColdState,
 }
 
 impl CoreSession32 {
@@ -60,7 +60,7 @@ impl CoreSession32 {
             exported_retired: 0,
             context: Box::new(Context32::new(state)),
             active: false,
-            cold_heat: ColdHeat::default(),
+            cold_state: ColdState::default(),
         })
     }
 
@@ -266,7 +266,7 @@ pub(crate) fn core_prepare(pc: u32, instructions: u32, blocks: u32) -> u32 {
                 exported_retired: 0,
                 context: Box::new(Context32::new(state)),
                 active: false,
-                cold_heat: ColdHeat::default(),
+                cold_state: ColdState::default(),
             });
         }
         let session = core.as_mut().unwrap();

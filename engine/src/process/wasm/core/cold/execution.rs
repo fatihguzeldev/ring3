@@ -2,7 +2,7 @@ use crate::{
     cpu::{
         core::{
             Context32, StopReason,
-            cold::{self, ColdHeat, ColdOutcome},
+            cold::{self, ColdState, ColdOutcome},
         },
         x86::SegmentContext,
     },
@@ -22,7 +22,7 @@ pub(in crate::process) fn run(
     segments: &SegmentContext,
     gates: &[(GuestAddress, u32)],
     frontier: &[GuestAddress],
-    heat: &mut ColdHeat,
+    heat: &mut ColdState,
 ) -> StopReason {
     loop {
         let outcome = {

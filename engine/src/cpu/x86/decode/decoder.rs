@@ -40,6 +40,35 @@ pub(crate) enum DecodePolicy {
     Execution,
 }
 
+pub(crate) struct DecodeScratch {
+    info: iced_x86::InstructionInfoFactory,
+    #[cfg(test)]
+    info_storage: Option<[usize; 2]>,
+}
+
+impl Default for DecodeScratch {
+    fn default() -> Self {
+        Self {
+            info: iced_x86::InstructionInfoFactory::new(),
+            #[cfg(test)]
+            info_storage: None,
+        }
+    }
+}
+
+impl DecodeScratch {
+    pub(crate) fn decode(
+        &mut self,
+        memory: &AddressSpace,
+        pc: GuestAddress,
+        policy: DecodePolicy,
+        cs: Option<CodeFetchContext>,
+        authority: DecodeAuthority,
+    ) -> Result<BoundDecode, DecodeError> {
+        decode_core(memory, pc, policy, cs, authority, Some(self))
+    }
+}
+
 pub fn decode_one(
     memory: &AddressSpace,
     pc: GuestAddress,
@@ -59,6 +88,7 @@ pub fn decode_one(
             DecodePolicy::Strict,
             None,
             DecodeAuthority::default(),
+            None,
         )?,
         None,
     )?)
@@ -113,7 +143,7 @@ pub(crate) fn decode_for_compilation(
     cs: Option<CodeFetchContext>,
     authority: DecodeAuthority,
 ) -> Result<BoundDecode, DecodeError> {
-    decode_core(memory, pc, policy, cs, authority)
+    decode_core(memory, pc, policy, cs, authority, None)
 }
 
 #[cfg(test)]
@@ -124,7 +154,11 @@ fn decode(
     cs: Option<CodeFetchContext>,
     authority: DecodeAuthority,
 ) -> Result<BoundDecode<DecodedInstruction>, DecodeError> {
-    snapshot_decode(memory, decode_core(memory, pc, policy, cs, authority)?, cs)
+    snapshot_decode(
+        memory,
+        decode_core(memory, pc, policy, cs, authority, None)?,
+        cs,
+    )
 }
 
 fn snapshot_decode(
@@ -150,6 +184,7 @@ fn decode_core(
     policy: DecodePolicy,
     cs: Option<CodeFetchContext>,
     authority: DecodeAuthority,
+    mut scratch: Option<&mut DecodeScratch>,
 ) -> Result<BoundDecode, DecodeError> {
     let bitness = cs.map_or(32, CodeFetchContext::decoder_bitness);
     let mut bytes = [0; 15];
@@ -246,7 +281,10 @@ fn decode_core(
                     (Operation::Control(operation), 0)
                 } else {
                     match super::lower::lower(&instruction, &bytes[..consumed], authority) {
-                        Ok(operation) => (operation, segment_accesses(&instruction)),
+                        Ok(operation) => (
+                            operation,
+                            segment_accesses(&instruction, scratch.as_deref_mut()),
+                        ),
                         Err(DecodeError::InvalidEncoding)
                             if policy == DecodePolicy::Execution
                                 && instruction.encoding() == iced_x86::EncodingKind::VEX =>
@@ -343,7 +381,14 @@ fn memory_error(error: MemoryError, pc: GuestAddress, length: usize) -> DecodeEr
 #[path = "decoder/compilation.rs"]
 mod compilation_tests;
 
-fn segment_accesses(instruction: &iced_x86::Instruction) -> u8 {
+#[cfg(test)]
+#[path = "decoder/scratch.rs"]
+mod scratch_tests;
+
+fn segment_accesses(
+    instruction: &iced_x86::Instruction,
+    scratch: Option<&mut DecodeScratch>,
+) -> u8 {
     use iced_x86::{Code, InstructionInfoFactory, Mnemonic, Register};
     // software interrupts stop at the application os boundary without stack accesses.
     if instruction.code() == Code::Int_imm8 {
@@ -372,21 +417,32 @@ fn segment_accesses(instruction: &iced_x86::Instruction) -> u8 {
     ) {
         return 0;
     }
-    InstructionInfoFactory::new()
-        .info(instruction)
-        .used_memory()
-        .iter()
-        .fold(0, |mask, memory| {
-            mask | match memory.segment() {
-                Register::ES => 1,
-                Register::CS => 2,
-                Register::SS => 4,
-                Register::DS => 8,
-                Register::FS => 16,
-                Register::GS => 32,
-                _ => 0,
-            }
-        })
+    let mut temporary;
+    let info = if let Some(scratch) = scratch {
+        let info = scratch.info.info(instruction);
+        #[cfg(test)]
+        {
+            scratch.info_storage = Some([
+                info.used_registers().as_ptr() as usize,
+                info.used_memory().as_ptr() as usize,
+            ]);
+        }
+        info
+    } else {
+        temporary = InstructionInfoFactory::new();
+        temporary.info(instruction)
+    };
+    info.used_memory().iter().fold(0, |mask, memory| {
+        mask | match memory.segment() {
+            Register::ES => 1,
+            Register::CS => 2,
+            Register::SS => 4,
+            Register::DS => 8,
+            Register::FS => 16,
+            Register::GS => 32,
+            _ => 0,
+        }
+    })
 }
 
 #[cfg(test)]

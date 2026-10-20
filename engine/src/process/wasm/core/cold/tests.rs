@@ -37,7 +37,7 @@ fn execute(
         segments,
         gates,
         &[],
-        &mut ColdHeat::default(),
+        &mut ColdState::default(),
     )
 }
 

@@ -31,7 +31,7 @@ fn context(budget: u32) -> Context32 {
     context
 }
 
-fn stop(memory: &mut AddressSpace, context: &mut Context32, heat: &mut ColdHeat) -> StopReason {
+fn stop(memory: &mut AddressSpace, context: &mut Context32, heat: &mut ColdState) -> StopReason {
     match run(memory, context, &SegmentContext::default(), &[], &[], heat) {
         ColdOutcome::Stop(stop) => stop,
         ColdOutcome::NeedNative(instruction) => {
@@ -56,7 +56,7 @@ fn successful_width_arithmetic_preserves_the_unwritten_register_bits() {
         context.set_word(0, initial);
         context.set_word(36, 0x402);
         assert_eq!(
-            stop(&mut memory, &mut context, &mut ColdHeat::default()),
+            stop(&mut memory, &mut context, &mut ColdState::default()),
             StopReason::Budget
         );
         assert_eq!(
@@ -80,7 +80,7 @@ fn actual_calls_returns_and_memory_arithmetic_run_without_a_compiled_owner() {
         .unwrap();
     let mut context = context(21);
     assert_eq!(
-        stop(&mut memory, &mut context, &mut ColdHeat::default()),
+        stop(&mut memory, &mut context, &mut ColdState::default()),
         StopReason::Budget
     );
     assert_eq!(
@@ -112,14 +112,14 @@ fn budget_and_debug_precede_fetch_and_frontier_selection() {
             &SegmentContext::default(),
             &[],
             &[GuestAddress(0xdead_0000)],
-            &mut ColdHeat::default()
+            &mut ColdState::default()
         ),
         ColdOutcome::Stop(StopReason::Budget)
     ));
     assert_eq!(context.retired(), 0);
     context.set_word(36, 0x102);
     assert_eq!(
-        stop(&mut memory, &mut context, &mut ColdHeat::default()),
+        stop(&mut memory, &mut context, &mut ColdState::default()),
         StopReason::Debug
     );
     assert_eq!(context.state().eip, 0xdead_0000);
@@ -142,7 +142,7 @@ fn read_modify_fault_preserves_input_flags_registers_and_memory() {
     let initial = context.state();
     let version = memory.transaction_version();
     assert_eq!(
-        stop(&mut memory, &mut context, &mut ColdHeat::default()),
+        stop(&mut memory, &mut context, &mut ColdState::default()),
         StopReason::MemoryFault
     );
     assert_eq!(context.state(), initial);
@@ -164,7 +164,7 @@ fn code_store_retires_once_and_stops_before_decoding_changed_bytes() {
     context.set_word(0, 0x1122_3344);
     context.set_word(12, 0x1000);
     assert_eq!(
-        stop(&mut memory, &mut context, &mut ColdHeat::default()),
+        stop(&mut memory, &mut context, &mut ColdState::default()),
         StopReason::CodeInvalidated
     );
     assert_eq!(
@@ -188,7 +188,7 @@ fn live_gate_precedes_decoding_and_compiled_frontier() {
             &SegmentContext::default(),
             &[(GuestAddress(0x1000), 77)],
             &[GuestAddress(0x1000)],
-            &mut ColdHeat::default()
+            &mut ColdState::default()
         ),
         ColdOutcome::Stop(StopReason::Host)
     ));
@@ -215,7 +215,7 @@ fn numerical_handoff_is_genuine_decoded_and_unretired_before_operand_access() {
         &SegmentContext::default(),
         &[],
         &[],
-        &mut ColdHeat::default(),
+        &mut ColdState::default(),
     ) {
         ColdOutcome::NeedNative(instruction) => {
             assert_eq!((instruction.pc, instruction.next), (0x1000, 0x1002));
@@ -239,7 +239,7 @@ fn an_unimplemented_cold_operation_requests_jit_before_any_effect() {
     context.set_word(36, 0x8d7);
     let before = *context.bytes();
     assert_eq!(
-        stop(&mut memory, &mut context, &mut ColdHeat::default()),
+        stop(&mut memory, &mut context, &mut ColdState::default()),
         StopReason::NeedCode
     );
     assert_eq!(*context.bytes(), before);
@@ -250,7 +250,7 @@ fn a_jit_fallback_keeps_the_already_committed_cold_prefix() {
     let mut memory = memory(&[0x40, 0xd1, 0xc0]);
     let mut context = context(4);
     assert_eq!(
-        stop(&mut memory, &mut context, &mut ColdHeat::default()),
+        stop(&mut memory, &mut context, &mut ColdState::default()),
         StopReason::NeedCode
     );
     assert_eq!(
@@ -270,7 +270,7 @@ fn call_esp_captures_its_target_before_the_stack_pointer_changes() {
     let mut memory = memory(&[0xff, 0xd4]);
     let mut context = context(1);
     assert_eq!(
-        stop(&mut memory, &mut context, &mut ColdHeat::default()),
+        stop(&mut memory, &mut context, &mut ColdState::default()),
         StopReason::Budget
     );
     assert_eq!(
@@ -300,7 +300,7 @@ fn compiled_frontier_requests_a_closed_handoff_without_executing_the_target() {
             &SegmentContext::default(),
             &[],
             &[GuestAddress(0x1040)],
-            &mut ColdHeat::default()
+            &mut ColdState::default()
         ),
         ColdOutcome::Stop(StopReason::NeedCode)
     ));
@@ -319,7 +319,7 @@ fn compiled_frontier_requests_a_closed_handoff_without_executing_the_target() {
 fn heat_uses_completed_retirements_and_a_jit_request_requires_new_reuse() {
     let mut memory = memory(&[0x40, 0xeb, 0xfd]);
     let mut context = context(4);
-    let mut heat = ColdHeat::with_threshold(2);
+    let mut heat = ColdState::with_threshold(2);
     assert_eq!(
         stop(&mut memory, &mut context, &mut heat),
         StopReason::Budget
@@ -351,7 +351,7 @@ fn heat_uses_completed_retirements_and_a_jit_request_requires_new_reuse() {
 fn executable_epoch_changes_reset_heat_but_private_data_writes_do_not() {
     let mut memory = memory(&[0x40, 0xeb, 0xfd]);
     let mut context = context(4);
-    let mut heat = ColdHeat::with_threshold(2);
+    let mut heat = ColdState::with_threshold(2);
     assert_eq!(
         stop(&mut memory, &mut context, &mut heat),
         StopReason::Budget
@@ -380,7 +380,7 @@ fn inactive_or_compiled_context_is_rejected_without_changing_it() {
         context.bytes_mut()[120..].copy_from_slice(&identity.to_le_bytes());
         let before = *context.bytes();
         assert_eq!(
-            stop(&mut memory, &mut context, &mut ColdHeat::default()),
+            stop(&mut memory, &mut context, &mut ColdState::default()),
             StopReason::Infrastructure
         );
         assert_eq!(*context.bytes(), before);

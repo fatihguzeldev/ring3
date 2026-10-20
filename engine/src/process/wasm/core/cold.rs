@@ -71,6 +71,6 @@ fn run(
         segments,
         gates,
         frontier,
-        &mut session.cold_heat,
+        &mut session.cold_state,
     ) as i32
 }
