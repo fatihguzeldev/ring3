@@ -1,0 +1,189 @@
+import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
+import {readFileSync, writeFileSync, openSync, closeSync} from 'node:fs';
+import {readEngine} from '../../../support/wasm/engine.mjs';
+
+const [enginePath, reportPath] = process.argv.slice(2);
+assert(enginePath && reportPath, 'usage: numeric.mjs engine.wasm fresh-report.json');
+const engine = readEngine(enginePath), output = openSync(reportPath, 'wx');
+const hash = value => createHash('sha256').update(value).digest('hex');
+const hex = value => Buffer.from(value).toString('hex');
+const unhex = value => Uint8Array.from(Buffer.from(value.replaceAll(' ', ''), 'hex'));
+const fpOffset = 4236, simdOffset = 4364, ymmOffset = 4612;
+const report = {schema: 1, complete: false, engineSha256: engine.sha256, sources: [import.meta.url,
+  new URL('../../../support/wasm/engine.mjs', import.meta.url).href].map(url => ({url, sha256: hash(readFileSync(new URL(url)))})),
+  cases: [], checks: [], limits: ['authored typed numerical routes; no game or performance claim',
+    'pending Core call overwrite is covered by the Windows fixture, not this numerical fixture']};
+const checkpoint = () => { const data = JSON.stringify(report, null, 2); writeFileSync(reportPath, data); };
+let stage = 'initialization';
+
+function fp(initial, {status = 0, tag = 0xffff, opcode = 0, fip = 0, fdp = 0, cs = 0, ds = 0, registers = {}} = {}) {
+  const result = initial.slice(), v = new DataView(result.buffer);
+  for (const [offset, value] of [[18,status],[20,tag],[22,opcode],[32,cs],[34,ds]]) v.setUint16(offset,value,true);
+  v.setUint32(24,fip,true); v.setUint32(28,fdp,true);
+  for (const [index, bytes] of Object.entries(registers)) result.set(unhex(bytes), 40 + Number(index) * 10);
+  return result;
+}
+
+function runCase(name, codeHex, budget, options, verify) {
+  stage = name;
+  const instance = new WebAssembly.Instance(engine.module, {ring3_observability:{now_ns:()=>0n}});
+  const memory = instance.exports.memory, api = Object.fromEntries(Object.entries(instance.exports)
+    .filter(([name])=>name.startsWith('ring3_abi_v1_')).map(([name,value])=>[name.slice(13),value]));
+  const slice = (pointer,length) => new Uint8Array(memory.buffer).slice(pointer,pointer+length);
+  const view = () => new DataView(memory.buffer);
+  const word = (pointer,offset=0) => view().getUint32(pointer+offset,true);
+  const put = (pointer,offset,value) => view().setUint32(pointer+offset,value>>>0,true);
+  let arena = 0, context = 0, active = false, opened = false;
+  const result = {name, codeHex, budget, controls: []}; report.cases.push(result);
+  const status = (operation,wanted,...args) => {
+    const actual = api[operation](...args)>>>0;
+    result.controls.push({operation,args,wanted,actual});
+    assert.equal(actual,wanted,`${name}: ${operation}`);
+  };
+  const pages = new Map([[0x1000,new Uint8Array(4096)], [0x3000,new Uint8Array(4096)],
+    [0x4000,new Uint8Array(4096)], [0x5000,new Uint8Array(4096)]]);
+  pages.get(0x1000).set(unhex(codeHex));
+  options?.data?.(new DataView(pages.get(0x3000).buffer));
+  if (options?.image) pages.get(0x5000).fill(0xa5);
+  const expected = new Map([...pages].map(([address,page])=>[address,page.slice()]));
+  const physical = address => {
+    const slot = word(word(context,56)+(address>>>12)*4);
+    assert(slot>0 && slot<=word(context,68));
+    return word(context,64)+(slot-1)*4096+(address&4095);
+  };
+  const raw = () => ({context:hex(slice(context,128)), arena:hex(slice(arena,api.arena_len())),
+    pages:Object.fromEntries([...pages.keys()].map(address=>[address.toString(16),hex(slice(physical(address),4096))]))});
+  const writeExpected = (address,bytes) => expected.get(address&~4095).set(bytes,address&4095);
+  const assertRam = () => {for(const [address,page] of expected) assert.deepEqual(slice(physical(address),4096),page,`${name}: full page ${address.toString(16)}`);};
+  const neutral = (label,action) => {
+    const before = raw(); action(); const after = raw();
+    result.controls.push({label,before,after}); checkpoint(); assert.deepEqual(after,before,`${name}: ${label} neutral`);
+  };
+  try {
+    for(const name of ['open','close','arena_ptr','arena_len','map','upload','core_prepare','core_code_ptr','core_code_len',
+      'core_context_ptr','core_begin','core_end','core_import','core_export','core_numeric','core_read','core_write']) assert.equal(typeof api[name],'function',`native ${name}`);
+    status('open',0,16,97,0); opened = true; arena = api.arena_ptr()>>>0;
+    for(const [address,page] of pages) {
+      status('map',0,address,1,address===0x1000?7:3);
+      new Uint8Array(memory.buffer,arena+140,4096).set(page); status('upload',0,address,4096);
+    }
+    const registers = options?.registers ?? [0,0,0,0x3000,0x4800,0,0,0];
+    new Uint8Array(memory.buffer,arena,56).fill(0);
+    new Uint8Array(memory.buffer,arena,4).set([82,51,83,84]);
+    view().setUint16(arena+4,3,true); view().setUint16(arena+6,1,true); put(arena,8,56);
+    registers.forEach((value,index)=>put(arena,16+index*4,value)); put(arena,48,0x1000); put(arena,52,2);
+    if(options?.control!==undefined) view().setUint16(arena+fpOffset+16,options.control,true);
+    if(options?.mxcsr!==undefined) put(arena,simdOffset+16,options.mxcsr);
+    if(options?.fs) status('set_segment_base',0,4,options.fs);
+    const initialFp = slice(arena+fpOffset,128), initialSimd = slice(arena+simdOffset,160), initialYmm = slice(arena+ymmOffset,144);
+    status('core_prepare',0,0x1000,256,32);
+    context = api.core_context_ptr()>>>0; assert(context>0 && context%8===0);
+    const code = slice(api.core_code_ptr()>>>0,api.core_code_len()>>>0);
+    const module = new WebAssembly.Module(code);
+    assert.deepEqual(WebAssembly.Module.imports(module), [
+      {module:'ring3',name:'memory',kind:'memory'}, {module:'ring3',name:'read',kind:'function'},
+      {module:'ring3',name:'write',kind:'function'}, {module:'ring3',name:'numeric',kind:'function'}]);
+    const run = new WebAssembly.Instance(module,{ring3:{memory,read:api.core_read,write:api.core_write,numeric:api.core_numeric}}).exports.run;
+    result.module = {sha256:hash(code),wasmHex:hex(code)};
+    status('core_begin',0); active = true;
+    neutral('wrong numerical context',()=>status('core_numeric',8,context+8,0));
+    neutral('wrong numerical ordinal',()=>status('core_numeric',8,context,0xffffffff));
+    const stop = run(context,budget)>>>0;
+    result.executed = {stop,...raw()}; checkpoint();
+    status('core_end',0); active = false;
+    neutral('inactive numerical import',()=>status('core_numeric',8,context,0));
+    assert.deepEqual(slice(arena+fpOffset,128),initialFp,'private FP bank remains unpublished until export');
+    assert.deepEqual(slice(arena+simdOffset,160),initialSimd,'private SIMD bank remains unpublished until export');
+    const state = {registers:Array.from({length:8},(_,i)=>word(context,i*4)),pc:word(context,32),flags:word(context,36),
+      retired:word(context,40),remaining:word(context,44),vector:word(context,116),detail:word(context,48),metadata:word(context,52)};
+    const work = budget-state.remaining;
+    if(options?.invalidExport) {
+      const flags = word(context,36); put(context,36,0);
+      neutral('invalid FLAGS export with dirty bank',()=>status('core_export',7,stop,work)); put(context,36,flags);
+    }
+    status('core_export',0,stop,work);
+    result.published = raw(); checkpoint();
+    const tools = {api,memory,arena,context,initialFp,initialSimd,initialRegisters:registers,budget,state,stop,word,put,slice,physical,status,neutral,writeExpected,
+      fp:options=>fp(initialFp,options),simd:initialSimd.slice(),read:address=>slice(physical(address),4)};
+    verify(tools);
+    assert.deepEqual(slice(arena+simdOffset,160),tools.simd,'full literal SIMD160');
+    assert.deepEqual(slice(arena+ymmOffset,144),initialYmm,'unmodified upper vector bank');
+    assert.deepEqual(Array.from({length:8},(_,i)=>word(arena,16+i*4)),state.registers,'published architectural general state');
+    assertRam();
+    if(stop===3 || stop===9) {
+      neutral('outstanding exception export',()=>status('core_export',12,stop,0));
+      neutral('outstanding exception import',()=>status('core_import',12));
+    } else if(stop!==6) {
+      const retained = slice(context,40); status('core_import',0);
+      assert.deepEqual(slice(context,40),retained,'export/import preserves architectural general state');
+      status('core_begin',0); active = true;
+      assert.equal(run(context,0),2); status('core_end',0); active = false;
+    } else {
+      neutral('stale code after numerical store',()=>status('core_begin',4));
+    }
+    result.final = raw(); result.complete = true; checkpoint();
+  } finally {if(active) api.core_end(); if(opened) api.close();}
+}
+
+const values = v => {v.setFloat32(0,3,true);v.setFloat32(4,2,true);};
+const ext3 = '00000000000000c00040', ext6 = '00000000000000c00140';
+function standard(t,retired,pc,flags=2,stop=2,changes={}) {
+  assert.equal(t.stop,stop); assert.equal(t.state.retired,retired); assert.equal(t.state.pc,pc); assert.equal(t.state.flags,flags);
+  assert.equal(t.state.remaining,t.budget-retired);
+  const registers = [...t.initialRegisters];for(const [index,value] of Object.entries(changes)) registers[Number(index)]=value;
+  assert.deepEqual(t.state.registers,registers,'all architectural general registers');
+}
+function bank(t,wanted) {assert.deepEqual(t.slice(t.arena+fpOffset,128),wanted,'full literal FP128');}
+
+try {
+  runCase('x87-multiply','d903 d84b04 d95b08 0f0b',3,{data:values,invalidExport:true},t=>{
+    standard(t,3,0x1008); t.writeExpected(0x3008,unhex('0000c040')); assert.deepEqual(t.read(0x3008),unhex('0000c040'));
+    bank(t,t.fp({opcode:0x15b,fip:0x1005,fdp:0x3008,cs:0x1b,ds:0x23,registers:{7:ext6}}));
+  });
+  runCase('integer-flags-fcmov-fcomi-status','d903 d94304 31c0 dac1 39c0 dbf1 dac1 dfe0 d95b08 0f0b',9,{data:values},t=>{
+    standard(t,9,0x1014,3,2,{0:0x3000}); t.writeExpected(0x3008,unhex('00004040'));
+    bank(t,t.fp({status:0x3800,tag:0x3fff,opcode:0x15b,fip:0x1011,fdp:0x3008,cs:0x1b,ds:0x23,registers:{6:ext3,7:ext3}}));
+  });
+  runCase('mmx-physical-alias-emms','0f6ec0 0f7f03 0f77 0f0b',3,{registers:[0x76543210,0,0,0x3000,0x4800,0,0,0]},t=>{
+    standard(t,3,0x1008); t.writeExpected(0x3000,unhex('1032547600000000'));
+    bank(t,t.fp({registers:{0:'1032547600000000ffff'}}));
+  });
+  runCase('scalar-sse-add-store','f30f1003 f30f584304 f30f114308 0f0b',3,{data:values},t=>{
+    standard(t,3,0x100e); t.writeExpected(0x3008,unhex('0000a040')); t.simd.set(unhex('0000a040'),32);
+    assert.deepEqual(t.slice(t.arena+simdOffset,160),t.simd); bank(t,t.initialFp);
+  });
+  runCase('scalar-sse-unmasked-invalid','f30f1003 f30f5e4304 0f0b',8,{mxcsr:0x1f00},t=>{
+    standard(t,1,0x1004,2,9); assert.equal(t.state.vector,19); assert.equal(t.state.detail,0x1f01);
+    new DataView(t.simd.buffer).setUint32(16,0x1f01,true); assert.deepEqual(t.slice(t.arena+simdOffset,160),t.simd); bank(t,t.initialFp);
+  });
+  runCase('fxsave-restore','d903 0fae0500500000 dbe3 0fae0d00500000 dfe0 d95b08 0f0b',6,{data:values,image:true},t=>{
+    standard(t,6,0x1017,2,2,{0:0x3800}); t.writeExpected(0x3008,unhex('00004040'));
+    const image = new Uint8Array(464), v = new DataView(image.buffer);
+    v.setUint16(0,0x37f,true); v.setUint16(2,0x3800,true); image[4]=0x80; v.setUint16(6,0x103,true);
+    v.setUint32(8,0x1000,true); v.setUint16(12,0x1b,true); v.setUint32(16,0x3000,true);v.setUint16(20,0x23,true);
+    v.setUint32(24,0x1f80,true);v.setUint32(28,0xffff,true);image.set(unhex(ext3),32);t.writeExpected(0x5000,image);
+    bank(t,t.fp({opcode:0x15b,fip:0x1014,fdp:0x3008,cs:0x1b,ds:0x23,registers:{7:ext3}}));
+  });
+  runCase('fs-numerical-memory','64d903 64d95b08 0f0b',2,{data:values,fs:0x3000,registers:[0,0,0,0,0x4800,0,0,0]},t=>{
+    standard(t,2,0x1007);t.writeExpected(0x3008,unhex('00004040'));
+    bank(t,t.fp({opcode:0x15b,fip:0x1003,fdp:8,cs:0x1b,ds:0x3b,registers:{7:ext3}}));
+  });
+  runCase('x87-store-fault-prefix','d903 d91d00600000 0f0b',8,{data:values},t=>{
+    standard(t,1,0x1002,2,3);assert.equal(t.state.detail,0x6000);assert.equal(t.state.metadata,0x10204);assert.equal(t.state.vector,0x40e);
+    bank(t,t.fp({status:0x3800,tag:0x3fff,opcode:0x103,fip:0x1000,fdp:0x3000,cs:0x1b,ds:0x23,registers:{7:ext3}}));
+  });
+  runCase('x87-code-store-committed-prefix','d903 d91d00110000 0f0b',8,{data:values},t=>{
+    standard(t,2,0x1008,2,6);t.writeExpected(0x1100,unhex('00004040'));
+    bank(t,t.fp({opcode:0x11d,fip:0x1002,fdp:0x1100,cs:0x1b,ds:0x23,registers:{7:ext3}}));
+  });
+  for(const [control,small,expected] of [[0x7f,0x3e60000000000000n,null],[0x27f,0x3c30000000000000n,null],[0x37f,0x3c30000000000000n,'0000000000000080c33f']]) {
+    runCase(`precision-${control.toString(16)}`,'dd03 dc4308 dc23 db7b20 0f0b',4,{control,data:v=>{v.setFloat64(0,1,true);v.setBigUint64(8,small,true);}},t=>{
+      standard(t,4,0x100a); const value=unhex(expected??'00000000000000000000');t.writeExpected(0x3020,value);
+      bank(t,t.fp({status:expected===null?0x20:0,opcode:0x37b,fip:0x1007,fdp:0x3020,cs:0x1b,ds:0x23,registers:{7:hex(value)}}));
+    });
+  }
+  report.complete = true; checkpoint(); console.log(JSON.stringify({complete:true,cases:report.cases.length,engineSha256:engine.sha256}));
+} catch(error) {
+  report.failure={stage,message:String(error),stack:error.stack};checkpoint();throw error;
+} finally {closeSync(output);}
