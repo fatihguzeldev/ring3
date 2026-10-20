@@ -80,16 +80,24 @@ function runCase(name,spec) {
     rejectInvalidFlags('unselected cold owner');
     const initialContext=bytes(context,128),expectedArena=untouchedArena.slice();
     const expectedRam=new Uint8Array(16*4096);expectedPages.forEach((page,index)=>expectedRam.set(page,index*4096));
-    cache=new CodeCache(engine,{chain:false,budget:spec.budget,instructions:64,blocks:8});
+    cache=new CodeCache(engine,{chain:spec.chain??false,budget:spec.budget,instructions:64,blocks:8});
     for(const name of ['core_cold_run','core_read','core_write','core_numeric'])assert.equal(cache.native[name],native[name]);
-    let work=0,retired=0,last;
-    for(let index=0;index<8;index++) {
-      cache.budget=spec.budget-work;
-      const selected=cache.select();
+    function capture(selected) {
       if(selected&&!result.modules.some(item=>item.id===String(selected.id))) {
         const code=bytes(native.core_code_ptr()>>>0,native.core_code_len()>>>0);
-        result.modules.push({id:String(selected.id),pc:selected.pc,bytes:code.length,sha256:hash(code)});
+        result.modules.push({id:String(selected.id),pc:selected.pc,bytes:code.length,sha256:hash(code),
+          ...(spec.seedEntry!==undefined?{wasmHex:hex(code),atRetired:word(context,40),eax:word(context)}:{})});
       }
+    }
+    if(spec.seedEntry!==undefined) {
+      const seed=cache.entry(spec.seedEntry);capture(seed);
+      result.seeded={id:String(seed.id),pc:seed.pc,...raw()};checkpoint();
+      assert.equal(word(context,32),0x1000,'seeding compiled code preserves the cold architectural entry');
+    }
+    let work=0,retired=0,last;
+    for(let index=0;index<(spec.maxRuns??8);index++) {
+      cache.budget=spec.budget-work;
+      const selected=cache.select();capture(selected);
       if(selected&&name==='private-x87-bank-across-jit')rejectInvalidFlags('selected compiled owner before JIT handoff');
       last=cache.execute(selected);work+=last.work;retired+=last.retired;
       result.runs.push({...last,id:last.id===null?null:String(last.id),...raw()});checkpoint();
@@ -120,8 +128,14 @@ function runCase(name,spec) {
     assert.deepEqual(bytes(engine.base,native.arena_len()),expectedArena,'complete canonical arena, FP80 and other banks');
     assert.deepEqual([1,3,4].map(page=>word(word(context,56)+page*4)),[1,2,3]);assert.equal(word(context,68),16);
     assert.deepEqual(bytes(word(context,64),16*4096),expectedRam,'whole canonical allocation and literal code/data/stack');
-    assert.deepEqual(result.runs.map(({kind,coreReason})=>[kind,coreReason]),spec.runs??[['cold',spec.stop??2]]);
+    if(spec.runs!==false)assert.deepEqual(result.runs.map(({kind,coreReason})=>[kind,coreReason]),spec.runs??[['cold',spec.stop??2]]);
     assert.equal(result.modules.length,spec.modules??0);assert.equal(cache.stats().admissions,spec.modules??0);
+    if(spec.seedEntry!==undefined) {
+      assert(result.runs.some(run=>run.kind==='cold'));assert(result.runs.some(run=>run.kind==='compiled'));
+      assert.deepEqual(result.modules.map(({pc,atRetired,eax})=>[pc,atRetired,eax]),[[0x1040,0,0],[0x1000,192,64]],
+        'caller compilation follows 64 completed INC visits across compiled-callee handoffs');
+      assert.equal(last.kind,'compiled');assert(last.regions>1,'retained caller and callee execute through the warm chain');
+    }
     result.complete=true;checkpoint();
   } catch(error) {result.failure={stage,message:String(error),stack:error.stack,raw:raw(true)};checkpoint();throw error;}
   finally {if(cache?.open)native.core_end();if(opened)engine.ok('close');}
@@ -144,5 +158,9 @@ try {
     bank:arena=>{const bank=arena.subarray(4236,4364),d=view(bank);d.setUint16(22,0x15b,true);d.setUint32(24,0x1007,true);
       d.setUint32(28,0x3008,true);d.setUint16(32,0x1b,true);d.setUint16(34,0x23,true);bank.set(unhex('00000000000000800140'),110);},
     runs:[['cold',1],['compiled',2]],modules:1});
+  const heatCode=new Uint8Array(4096);heatCode.set([0x40,0xff,0xe6]);heatCode.set([0xff,0xe7],0x40);
+  runCase('cold-heat-survives-compiled-frontier',{code:heatCode,budget:225,pc:0x1000,flags:2,expectedFlags:6,
+    registers:[0,0,0,0x3000,0x4800,0,0x1040,0x1000],expectedRegisters:[75,0,0,0x3000,0x4800,0,0x1040,0x1000],
+    chain:true,seedEntry:0x1040,maxRuns:256,runs:false,modules:2});
   report.complete=true;checkpoint();console.log(JSON.stringify({complete:true,engineSha256:artifact.sha256,cases:report.cases.length}));
 } catch(error) {report.failure={stage,message:String(error),stack:error.stack};checkpoint();throw error;}

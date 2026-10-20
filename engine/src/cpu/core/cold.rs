@@ -51,10 +51,6 @@ impl ColdState {
         self.heat.retired(memory, pc);
     }
 
-    pub(crate) fn handoff(&mut self) {
-        self.heat.requested();
-    }
-
     #[cfg(test)]
     fn with_threshold(threshold: u32) -> Self {
         Self {
@@ -167,7 +163,6 @@ pub(crate) fn run(
             }
         }
         if frontier.binary_search_by_key(&pc, |entry| entry.0).is_ok() {
-            heat.requested();
             return finish(context, state, retired, remaining, StopReason::NeedCode);
         }
         let decoded = match decode.decode(

@@ -316,6 +316,60 @@ fn compiled_frontier_requests_a_closed_handoff_without_executing_the_target() {
 }
 
 #[test]
+fn retained_frontier_handoffs_preserve_completed_cold_reuse() {
+    let mut memory = memory(&[0x40, 0xeb, 0x3d]);
+    memory.write(GuestAddress(0x1040), &[0xeb, 0xbe]).unwrap();
+    let mut context = context(8);
+    let mut cold = ColdState::with_threshold(2);
+    for (retired, eax, flags) in [(2, 6, 6), (5, 7, 2)] {
+        context.set_word(44, 8);
+        assert!(matches!(
+            run(
+                &mut memory,
+                &mut context,
+                &SegmentContext::default(),
+                &[],
+                &[GuestAddress(0x1040)],
+                &mut cold
+            ),
+            ColdOutcome::Stop(StopReason::NeedCode)
+        ));
+        assert_eq!(
+            (
+                context.state().eip,
+                context.state().registers[0],
+                context.state().eflags,
+                context.retired(),
+                context.remaining(),
+            ),
+            (0x1040, eax, flags, retired, 6)
+        );
+        // the retained target's completed jump returns to the interpreted caller.
+        context.set_word(32, 0x1000);
+        context.set_word(40, retired + 1);
+        context.set_word(44, 5);
+    }
+    context.set_word(44, 8);
+    let before = *context.bytes();
+    assert!(matches!(
+        run(
+            &mut memory,
+            &mut context,
+            &SegmentContext::default(),
+            &[],
+            &[GuestAddress(0x1040)],
+            &mut cold
+        ),
+        ColdOutcome::Stop(StopReason::NeedCode)
+    ));
+    assert_eq!(
+        *context.bytes(),
+        before,
+        "hot request precedes the third INC"
+    );
+}
+
+#[test]
 fn heat_uses_completed_retirements_and_a_jit_request_requires_new_reuse() {
     let mut memory = memory(&[0x40, 0xeb, 0xfd]);
     let mut context = context(4);

@@ -65,7 +65,6 @@ pub(crate) fn core_cold_run(budget: u32) -> i32 {
         let session = core.as_mut().unwrap();
         session.context.set_word(44, budget);
         let result = if cached {
-            session.cold_state.handoff();
             StopReason::NeedCode as i32
         } else if let Some(gate) = gate {
             run(instance, session, &segments, &[(gate.entry, gate.id)], &[])
