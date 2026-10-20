@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>Ring3 playground</title>
+    <link rel="stylesheet" href="/browser/style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <h1>ring3 <span>playground</span></h1>
+      <output id="state" class="state" data-state="idle" aria-live="polite">idle</output>
+    </header>
+    <main>
+      <section class="launch" aria-label="Game session">
+        <div class="folder-picker">
+          <span>local game folder</span>
+          <div class="field-row">
+            <button id="choose-folder" type="button">choose folder</button
+            ><output id="folder-name" aria-live="polite">no folder selected</output>
+          </div>
+          <input
+            id="game-folder"
+            type="file"
+            webkitdirectory
+            multiple
+            hidden
+            aria-label="Choose game folder"
+          />
+        </div>
+        <div class="launch-fields">
+          <label for="executable"
+            >executable<select id="executable">
+              <option value="">select a game folder first</option>
+            </select></label
+          >
+          <label for="command-line"
+            >arguments<input
+              id="command-line"
+              type="text"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="optional"
+          /></label>
+        </div>
+        <div class="toolbar">
+          <div class="buttons">
+            <button id="run" class="primary" disabled>run game</button
+            ><button id="pause" disabled>pause</button><button id="stop" disabled>stop</button>
+          </div>
+          <div class="buttons">
+            <button id="capture" disabled>capture mouse</button
+            ><button id="fullscreen">fullscreen</button
+            ><button id="mute" aria-pressed="false">mute</button
+            ><label class="volume" for="volume"
+              >volume<input id="volume" type="range" min="0" max="100" value="75"
+            /></label>
+          </div>
+        </div>
+        <div class="launch-fields recording-settings">
+          <label for="observation-level"
+            >recording<select id="observation-level">
+              <option value="off">off</option>
+              <option value="basic" selected>basic</option>
+              <option value="detailed">detailed</option>
+            </select></label
+          >
+          <details class="observation-categories">
+            <summary>
+              components ·
+              <output id="observation-selection" aria-live="polite">all selected</output>
+            </summary>
+            <fieldset id="observation-categories"></fieldset>
+          </details>
+        </div>
+        <output id="observation-path" aria-live="polite"
+          >recordings stay local · target/observability/</output
+        >
+      </section>
+      <section class="viewport" aria-label="Game display">
+        <div class="display-heading">
+          <span id="guest-title">game display</span
+          ><span id="pointer-status">click the display to focus · Esc releases the mouse</span>
+        </div>
+        <div id="stage" class="stage">
+          <div id="session-display" style="width:100%;min-width:0;max-width:640px"></div>
+          <p id="display-hint" class="display-hint">choose the local game folder, then run</p>
+        </div>
+        <div class="session-info">
+          <output id="message" aria-live="polite">connecting to the local host…</output
+          ><output id="metrics"></output>
+        </div>
+      </section>
+      <details class="diagnostics" open>
+        <summary>session log <button id="clear-log" type="button">clear</button></summary>
+        <pre id="log" tabindex="0" aria-label="Session log"></pre>
+      </details>
+    </main>
+    <script type="module" src="/browser/app.js"></script>
+  </body>
+</html>
