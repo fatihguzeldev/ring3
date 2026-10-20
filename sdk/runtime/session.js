@@ -355,7 +355,8 @@ export class Session {
             : this.code.select(),
           callback = this.stack().at(-1);
         const run = this.measurements
-          ? this.measurements.run("execution", () => this.code.execute(unit))
+          ? this.measurements.run("execution", () => this.code.execute(unit),
+              this.frameProbe?.measurements === this.measurements ? (unit === null ? "cold" : "compiled") : undefined)
           : this.code.execute(unit);
         this.recent.push(run);
         if (this.recent.length > 48) this.recent.shift();

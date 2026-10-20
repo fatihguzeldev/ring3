@@ -53,6 +53,65 @@ test('observed phases retain their schema, detailed scopes and counter exports',
   ]);
 });
 
+test('execution breakdown reuses one clock pair and includes throwing runs in aggregate totals', t => {
+  let now = 0, reads = 0;
+  t.mock.method(performance, 'now', () => { reads++; return now; });
+  const fixture = observed(true), phases = new PhaseMeasurements(fixture.observation);
+  assert.equal(phases.run('execution', () => { now = 2; return 7; }, 'cold'), 7);
+  assert.equal(reads, 2);
+  const failure = new Error('compiled failure');
+  assert.throws(() => phases.run('execution', () => { now = 7; throw failure; }, 'compiled'),
+    error => error === failure);
+  assert.equal(reads, 4);
+  phases.run('execution', () => { now = 8; }, 'cold');
+  assert.equal(reads, 6);
+  const snapshot = phases.snapshot();
+  assert.deepEqual(snapshot, {
+    execution: {
+      elapsedNs: 8_000_000, maximumNs: 5_000_000, count: 3,
+      breakdownSemantics: 'included in execution; not additive',
+      breakdown: {
+        cold: {elapsedNs: 3_000_000, maximumNs: 2_000_000, count: 2},
+        compiled: {elapsedNs: 5_000_000, maximumNs: 5_000_000, count: 1},
+      },
+    },
+  });
+  const {execution} = snapshot;
+  assert.equal(execution.count, execution.breakdown.cold.count + execution.breakdown.compiled.count);
+  assert.equal(execution.elapsedNs, execution.breakdown.cold.elapsedNs + execution.breakdown.compiled.elapsedNs);
+  snapshot.execution.breakdown.cold.count = 100;
+  assert.equal(phases.snapshot().execution.breakdown.cold.count, 2);
+  phases.report();
+  assert.equal(reads, 6, 'snapshots and aggregate reporting do not sample the clock again');
+  assert.deepEqual(fixture.scopes, ['execution', 'execution', 'execution']);
+  assert.equal(fixture.events.length, 1);
+  assert.equal(fixture.events[0][0], 'measurement.schema');
+  assert.deepEqual(fixture.counters, [
+    ['execution.ns', 8_000_000], ['execution.count', 3], ['execution.max.ns', 5_000_000],
+  ]);
+});
+
+test('unclassified execution and other phase names keep the original snapshot and report shape', async t => {
+  let now = 0, reads = 0;
+  t.mock.method(performance, 'now', () => { reads++; return now; });
+  const fixture = observed(), phases = new PhaseMeasurements(fixture.observation);
+  phases.run('entry', () => { now = 1; }, 'cold');
+  phases.run('execution', () => { now = 3; }, 'other');
+  phases.run('execution', () => { now = 5; });
+  await phases.runAsync('execution', async () => { now = 7; });
+  assert.equal(reads, 8);
+  assert.deepEqual(phases.snapshot(), {
+    entry: {elapsedNs: 1_000_000, maximumNs: 1_000_000, count: 1},
+    execution: {elapsedNs: 6_000_000, maximumNs: 2_000_000, count: 3},
+  });
+  phases.report();
+  assert.equal(reads, 8);
+  assert.deepEqual(fixture.counters, [
+    ['entry.ns', 1_000_000], ['entry.count', 1], ['entry.max.ns', 1_000_000],
+    ['execution.ns', 6_000_000], ['execution.count', 3], ['execution.max.ns', 2_000_000],
+  ]);
+});
+
 test('an unobserved probe owns fresh aggregate phases until its ninth completed edge', () => {
   const owner = session(), probe = new FrameProbe('proof', owner);
   owner.frameProbe = probe;

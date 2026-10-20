@@ -33,3 +33,53 @@ for(const measured of [false,true]) {
     assert.deepEqual(phases,measured ? ['providers','entry','execution'] : []);
   });
 }
+
+for (const mode of ['active-probe', 'observed-without-probe', 'mismatched-probe', 'unmeasured']) {
+  test(`session classifies execution only for its active probe measurements: ${mode}`, async t => {
+    t.mock.method(performance, 'now', () => 0);
+    const calls = [], phases = [], unit = Object.freeze({id: 7n});
+    let selected = 0, executed = 0;
+    const measurements = mode === 'unmeasured' ? null : {
+      run(name, operation, classification) {
+        phases.push([name, classification]);
+        return operation();
+      },
+      async runAsync(name, operation) {
+        phases.push([name, undefined]);
+        return await operation();
+      },
+    };
+    const session = Object.assign(Object.create(Session.prototype), {
+      running: true, paused: false, stopped: false, lastSchedule: Infinity, lastStatus: Infinity,
+      recent: [], thread: 1, blocked: new Map(), exits: new Map(), measurements,
+      frameProbe: mode === 'active-probe' ? {measurements}
+        : mode === 'mismatched-probe' ? {measurements: {}} : null,
+      engine: {get: () => 3, api: {pending_windows_thread_schedule: () => 0}},
+      code: {
+        publish() { calls.push('publish'); }, import() { calls.push('import'); },
+        entry() { throw new Error('classification must not bypass cold selection'); },
+        select() { calls.push('select'); return selected++ === 0 ? null : unit; },
+        execute(value) {
+          const cold = executed++ === 0;
+          assert.equal(value, cold ? null : unit);
+          calls.push('execute');
+          if (!cold) session.running = false;
+          return {kind: cold ? 'cold' : 'compiled', id: cold ? null : unit.id,
+            pc: 0x1000, coreReason: cold ? 1 : 2, reason: cold ? null : 1,
+            detail: cold ? null : 0, retired: cold ? 0 : 1, work: cold ? 0 : 1, regions: cold ? 0 : 1};
+        },
+      },
+      media: {update() {}, async graphicsOutput() {}, graphicsTransport: {}},
+      async providers() { return false; }, observeClock: () => 0n,
+      initializer: () => null, stack: () => [], async wait() {},
+    });
+    await session.loop();
+    assert.deepEqual(calls, ['publish', 'import', 'select', 'execute', 'select', 'execute', 'publish']);
+    assert.deepEqual(session.recent.map(run => [run.kind, run.id]), [['cold', null], ['compiled', 7n]]);
+    assert.deepEqual(phases, mode === 'unmeasured' ? [] : [
+      ['providers', undefined], ['entry', undefined],
+      ['execution', mode === 'active-probe' ? 'cold' : undefined],
+      ['entry', undefined], ['execution', mode === 'active-probe' ? 'compiled' : undefined],
+    ]);
+  });
+}
