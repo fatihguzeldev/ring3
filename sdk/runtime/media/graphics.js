@@ -83,7 +83,7 @@ export class GraphicsTransport {
   complete(message) {
     const h = this.engine,
       pending = this.pending;
-    if (!pending || h.signal?.aborted || message.requestId !== pending.requestId) return;
+    if (!pending || h.signal?.aborted || message.requestId !== pending.requestId) return false;
     if (BigInt(message.epoch) !== pending.epoch || BigInt(message.sequence) !== pending.sequence)
       throw new Error("GPU completion identity mismatch");
     const probe = this.probePending?.probe;
@@ -119,6 +119,7 @@ export class GraphicsTransport {
     }
     this.probePending = null;
     this.pending = null;
+    return true;
   }
   status() {
     return {

@@ -25,6 +25,11 @@ export class TaskScheduler {
       this.pending.cancel = () => clearTimeout(timer);
     });
   }
+  wake() {
+    if (this.closed || this.pending?.kind !== "timer") return false;
+    this.settle();
+    return true;
+  }
   schedule(kind, start) {
     if (this.closed) return Promise.reject(this.reason);
     if (this.pending) return Promise.reject(new Error("task already pending"));

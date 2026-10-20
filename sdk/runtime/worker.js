@@ -98,7 +98,10 @@ self.onmessage = (event) => {
       session.media?.pauseAudio();
       postMessage({type:'audio-held',request:message.request});
     }
-    else if (message.type === "graphics-complete") session.media?.graphicsComplete(message);
+    else if (message.type === "graphics-complete") {
+      if (session.media?.graphicsComplete(message) === true && session.running && !session.paused && !session.stopped)
+        session.scheduler.wake();
+    }
     else if (message.type === "gdi-complete") session.media?.gdiComplete(message);
     else if (message.type === "graphics-error")
       throw new Error(message.error ?? message.message ?? "graphics executor failed");
