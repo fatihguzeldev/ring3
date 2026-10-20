@@ -1,5 +1,7 @@
+mod control;
 mod integer;
 mod numeric;
+mod strings;
 
 use super::{
     StopReason, flags,
@@ -45,6 +47,8 @@ pub(super) fn mem(offset: u64, align: u32) -> MemArg {
 
 pub(super) fn supports(operation: &Operation) -> bool {
     integer::supports(operation)
+        || control::supports(operation)
+        || strings::supports(operation)
         || is_native(operation)
         || matches!(
             operation,
@@ -282,6 +286,10 @@ impl Output<'_> {
                     .operation
                     .and_then(super::effects::analyze)
                     .is_none_or(|effect| effect.write & demands[prefix] != 0);
+            if let Some(operation) = instruction.operation.filter(strings::supports) {
+                strings::emit(self, operation, instruction.next);
+                return;
+            }
             let writes_memory = instruction
                 .operation
                 .is_some_and(|operation| super::effects::memory_barrier(operation).1);
@@ -563,6 +571,9 @@ impl Output<'_> {
         }
         if integer::emit(self, operation) {
             self.set_pc(next);
+            return;
+        }
+        if control::emit(self, operation, next) {
             return;
         }
         match operation {

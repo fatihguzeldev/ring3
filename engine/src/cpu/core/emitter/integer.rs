@@ -2,7 +2,7 @@ use super::super::flags::{self, FlagKind};
 use super::{
     A, ADDRESS, B, CARRY, CARRY_IN, FLAGS, KIND, LEFT, Output, RESULT, RIGHT, VALUE, WIDTH,
 };
-use crate::cpu::x86::{Register32, SegmentRegister, ir::*};
+use crate::cpu::x86::{Register32, SegmentRegister, atomic::AtomicKind, ir::*};
 
 #[derive(Clone, Copy)]
 enum Operand {
@@ -153,6 +153,62 @@ fn lower(operation: Operation) -> Option<Integer> {
             word(source),
             2,
         ),
+        Operation::ReadLogicalWord {
+            kind,
+            destination,
+            address,
+        } => I::Binary(
+            match kind {
+                WordLogicalKind::And => BinaryKind::And,
+                WordLogicalKind::Or => BinaryKind::Or,
+                WordLogicalKind::Xor => BinaryKind::Xor,
+            },
+            reg(destination),
+            Operand::Memory(address),
+            2,
+        ),
+        Operation::MemoryLogicalWord {
+            kind,
+            address,
+            source,
+        } => I::Binary(
+            match kind {
+                WordLogicalKind::And => BinaryKind::And,
+                WordLogicalKind::Or => BinaryKind::Or,
+                WordLogicalKind::Xor => BinaryKind::Xor,
+            },
+            Operand::Memory(address),
+            word(source),
+            2,
+        ),
+        Operation::ReadLogicalByte {
+            kind,
+            destination,
+            address,
+        } => I::Binary(
+            match kind {
+                ByteLogicalKind::And => BinaryKind::And,
+                ByteLogicalKind::Or => BinaryKind::Or,
+                ByteLogicalKind::Xor => BinaryKind::Xor,
+            },
+            byte(destination),
+            Operand::Memory(address),
+            1,
+        ),
+        Operation::MemoryLogicalByte {
+            kind,
+            address,
+            source,
+        } => I::Binary(
+            match kind {
+                ByteLogicalKind::And => BinaryKind::And,
+                ByteLogicalKind::Or => BinaryKind::Or,
+                ByteLogicalKind::Xor => BinaryKind::Xor,
+            },
+            Operand::Memory(address),
+            byte_value(source),
+            1,
+        ),
         Operation::CompareByte { left, right } => {
             I::Binary(BinaryKind::Cmp, byte(left), byte_value(right), 1)
         }
@@ -165,6 +221,31 @@ fn lower(operation: Operation) -> Option<Integer> {
         Operation::TestWord { left, right } => {
             I::Binary(BinaryKind::Test, reg(left), word(right), 2)
         }
+        Operation::ReadCompareWord { left, address } => {
+            I::Binary(BinaryKind::Cmp, reg(left), Operand::Memory(address), 2)
+        }
+        Operation::MemoryCompareWord { address, right } => {
+            I::Binary(BinaryKind::Cmp, Operand::Memory(address), word(right), 2)
+        }
+        Operation::MemoryTestWord { address, right } => {
+            I::Binary(BinaryKind::Test, Operand::Memory(address), word(right), 2)
+        }
+        Operation::ReadCompareByte { left, address } => {
+            I::Binary(BinaryKind::Cmp, byte(left), Operand::Memory(address), 1)
+        }
+        Operation::MemoryPredicateByte {
+            kind,
+            address,
+            right,
+        } => I::Binary(
+            match kind {
+                BytePredicateKind::Cmp => BinaryKind::Cmp,
+                BytePredicateKind::Test => BinaryKind::Test,
+            },
+            Operand::Memory(address),
+            byte_value(right),
+            1,
+        ),
         Operation::ReadArithmeticWord {
             kind,
             destination,
@@ -270,17 +351,87 @@ fn lower(operation: Operation) -> Option<Integer> {
         Operation::ExchangeWord { left, right } => I::Exchange(reg(left), reg(right), 2),
         Operation::Carry { kind } => I::Carry(kind),
         Operation::Direction { set } => I::Direction(set),
+        Operation::AtomicMemory {
+            kind,
+            width,
+            address,
+            source,
+        } => {
+            if !matches!(width, 1 | 2 | 4) {
+                return None;
+            }
+            let source = match source {
+                AtomicSource::Register(register) => reg(register),
+                AtomicSource::ByteRegister(register) => byte(register),
+                AtomicSource::Immediate(value) => Operand::Immediate(value),
+            };
+            let target = Operand::Memory(address);
+            match kind {
+                AtomicKind::Add => I::Binary(BinaryKind::Add, target, source, u32::from(width)),
+                AtomicKind::AddCarry => {
+                    I::Binary(BinaryKind::Adc, target, source, u32::from(width))
+                }
+                AtomicKind::Subtract => {
+                    I::Binary(BinaryKind::Sub, target, source, u32::from(width))
+                }
+                AtomicKind::SubtractBorrow => {
+                    I::Binary(BinaryKind::Sbb, target, source, u32::from(width))
+                }
+                AtomicKind::And => I::Binary(BinaryKind::And, target, source, u32::from(width)),
+                AtomicKind::Or => I::Binary(BinaryKind::Or, target, source, u32::from(width)),
+                AtomicKind::Xor => I::Binary(BinaryKind::Xor, target, source, u32::from(width)),
+                AtomicKind::Increment => I::Unary(UnaryKind::Inc, target, u32::from(width)),
+                AtomicKind::Decrement => I::Unary(UnaryKind::Dec, target, u32::from(width)),
+                AtomicKind::Negate => I::Unary(UnaryKind::Neg, target, u32::from(width)),
+                AtomicKind::Not => I::Unary(UnaryKind::Not, target, u32::from(width)),
+                _ => return None,
+            }
+        }
+        Operation::LockedMemoryOr32 { address, mask } => I::Binary(
+            BinaryKind::Or,
+            Operand::Memory(address),
+            Operand::Immediate(mask),
+            4,
+        ),
+        Operation::LockedMemoryAnd32 { address, mask } => I::Binary(
+            BinaryKind::And,
+            Operand::Memory(address),
+            Operand::Immediate(mask),
+            4,
+        ),
+        Operation::LockedMemoryXor32 { address, mask } => I::Binary(
+            BinaryKind::Xor,
+            Operand::Memory(address),
+            Operand::Immediate(mask),
+            4,
+        ),
+        Operation::LockedMemoryOrRegister32 { address, source } => {
+            I::Binary(BinaryKind::Or, Operand::Memory(address), reg(source), 4)
+        }
+        Operation::LockedMemoryAndRegister32 { address, source } => {
+            I::Binary(BinaryKind::And, Operand::Memory(address), reg(source), 4)
+        }
+        Operation::LockedMemoryXorRegister32 { address, source } => {
+            I::Binary(BinaryKind::Xor, Operand::Memory(address), reg(source), 4)
+        }
         _ => return None,
     })
 }
 
 pub(super) fn supports(operation: &Operation) -> bool {
     lower(*operation).is_some()
+        || extended::supports(operation)
+        || multiply::supports(operation)
+        || shifts::supports(operation)
+        || bits::supports(operation)
 }
 
 pub(super) fn emit(out: &mut Output<'_>, operation: Operation) -> bool {
     let Some(operation) = lower(operation) else {
-        return false;
+        return extended::emit(out, operation)
+            || multiply::emit(out, operation)
+            || shifts::emit(out, operation)
+            || bits::emit(out, operation);
     };
     match operation {
         Integer::Move(destination, source, width) => {
@@ -550,3 +701,7 @@ impl Output<'_> {
         self.c().local_set(ADDRESS);
     }
 }
+mod bits;
+mod extended;
+mod multiply;
+mod shifts;

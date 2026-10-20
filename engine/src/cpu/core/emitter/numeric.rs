@@ -8,7 +8,8 @@ use wasm_encoder::BlockType;
 pub(super) fn supports(operation: &Operation) -> bool {
     matches!(
         operation,
-        Operation::X87 { .. }
+        Operation::StackFrame { .. }
+            | Operation::X87 { .. }
             | Operation::Simd(_)
             | Operation::Avx(_)
             | Operation::XState(_)
@@ -42,7 +43,7 @@ pub(super) fn emit(out: &mut Output<'_>, next: u32) {
         .local_set(WRITE_STATUS);
     out.c()
         .local_get(WRITE_STATUS)
-        .i32_const(9)
+        .i32_const(StopReason::SystemEntry as i32)
         .i32_gt_u()
         .if_(BlockType::Empty);
     out.exit(StopReason::Infrastructure, Some(out.pc), out.prefix);
@@ -54,6 +55,14 @@ pub(super) fn emit(out: &mut Output<'_>, next: u32) {
         .if_(BlockType::Empty);
     reload(out);
     out.exit(StopReason::CodeInvalidated, Some(next), out.prefix + 1);
+    out.c().end();
+    out.c()
+        .local_get(WRITE_STATUS)
+        .i32_const(StopReason::SystemEntry as i32)
+        .i32_eq()
+        .if_(BlockType::Empty);
+    reload(out);
+    out.exit(StopReason::SystemEntry, Some(next), out.prefix + 1);
     out.c().end();
     out.c().local_get(WRITE_STATUS).if_(BlockType::Empty);
     out.publish_exit(Some(out.pc), out.prefix);

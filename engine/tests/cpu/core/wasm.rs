@@ -110,6 +110,34 @@ fn generated_wasm_runs_authored_integer_control_memory_programs() {
         ("add-jo", "83c0017007bb11111111eb05bb222222220f0b"),
         ("add-jb", "83c0017207bb11111111eb05bb222222220f0b"),
         ("sub-jl", "83e8017c07bb11111111eb05bb222222220f0b"),
+        ("memory-shift", "d3230f0b"),
+        ("extend", "0fbec10fbfd20f0b"),
+        ("byte-swap", "0fc80f0b"),
+        ("flags-ah", "9f9e0f0b"),
+        ("translate-byte", "d70f0b"),
+        ("memory-exchange", "87030f0b"),
+        ("word-call", "66e80c006683c0020f0b9090909090906683c00366c3"),
+        ("word-pop-sp", "665c0f0b"),
+        ("word-pop-flags", "669d0f0b"),
+        ("rep-move", "f3a40f0b"),
+        ("rep-prefix", "40f3a40f0b"),
+        ("rep-compare", "f3a60f0b"),
+        ("rep-scan", "f2ae0f0b"),
+        ("rep-move16-address", "67f3a40f0b"),
+        ("move-word-string", "66a50f0b"),
+        ("bsf32", "0fbcc10f0b"),
+        ("bsr32", "0fbdc10f0b"),
+        ("bsf16", "660fbcc10f0b"),
+        ("bsr16", "660fbdc10f0b"),
+        ("bsfmem", "0fbc030f0b"),
+        ("bt32", "0fa3c80f0b"),
+        ("bts32", "0fabc80f0b"),
+        ("btr16", "660fb3c80f0b"),
+        ("btmem", "0fa30b0f0b"),
+        ("btsmem", "0fab0b0f0b"),
+        ("bt16mem", "660fa30b0f0b"),
+        ("lockbtsmem", "f00fab0b0f0b"),
+        ("tzcnt", "f30fbcc10f0b"),
     ]
     .into_iter()
     .map(|(name, code)| (name.to_owned(), code.to_owned()))
@@ -133,6 +161,70 @@ fn generated_wasm_runs_authored_integer_control_memory_programs() {
             format!("jcc{condition}"),
             format!("{:02x}07bb11111111eb05bb222222220f0b", 0x70 + condition),
         ));
+    }
+    for (kind, opcode) in [
+        ("shl", "e0"),
+        ("shr", "e8"),
+        ("sar", "f8"),
+        ("rol", "c0"),
+        ("ror", "c8"),
+        ("rcl", "d0"),
+        ("rcr", "d8"),
+    ] {
+        for (width, prefix) in [(8, "d2"), (16, "66d3"), (32, "d3")] {
+            programs.push((
+                format!("shift{width}-{kind}"),
+                format!("{prefix}{opcode}0f0b"),
+            ));
+        }
+    }
+    for (kind, opcode) in [("shld", "0fa5d0"), ("shrd", "0fadd0")] {
+        for (width, prefix) in [(16, "66"), (32, "")] {
+            programs.push((
+                format!("shift{width}-{kind}"),
+                format!("{prefix}{opcode}0f0b"),
+            ));
+        }
+    }
+    for (width, prefix, opcode) in [(8, "", "f6"), (16, "66", "f7"), (32, "", "f7")] {
+        for (kind, suffix) in [("mul", "e1"), ("imul", "e9"), ("div", "f1"), ("idiv", "f9")] {
+            programs.push((
+                format!("multiply{width}-{kind}"),
+                format!("{prefix}{opcode}{suffix}0f0b"),
+            ));
+        }
+    }
+    for (width, prefix) in [(16, "66"), (32, "")] {
+        programs.push((
+            format!("multiply{width}-two"),
+            format!("{prefix}0fafc10f0b"),
+        ));
+        programs.push((
+            format!("multiply{width}-immediate"),
+            format!("{prefix}6bc1fd0f0b"),
+        ));
+    }
+    programs.push(("multiply32-memory".into(), "f7230f0b".into()));
+    programs.push(("divide32-memory".into(), "f7330f0b".into()));
+    for (kind, byte, wide) in [
+        ("add", "0003", "0103"),
+        ("adc", "1003", "1103"),
+        ("sub", "2803", "2903"),
+        ("sbb", "1803", "1903"),
+        ("and", "2003", "2103"),
+        ("or", "0803", "0903"),
+        ("xor", "3003", "3103"),
+        ("inc", "fe03", "ff03"),
+        ("dec", "fe0b", "ff0b"),
+        ("neg", "f61b", "f71b"),
+        ("not", "f613", "f713"),
+    ] {
+        for (width, prefix, opcode) in [(8, "", byte), (16, "66", wide), (32, "", wide)] {
+            programs.push((
+                format!("atomic{width}-{kind}"),
+                format!("f0{prefix}{opcode}0f0b"),
+            ));
+        }
     }
     let mut manifest = String::new();
     for (name, hex) in programs {

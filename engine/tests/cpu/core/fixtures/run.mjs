@@ -3,6 +3,8 @@ import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {arithmetic, loopOutcome} from './oracle.mjs';
+import {runExtended} from './extended.mjs';
+import {runBits} from './bits.mjs';
 
 const directory = process.argv[2];
 const PAGE = 4096, CTX = 0x100, MAP = 0x10000, PERM = 0x410000;
@@ -142,7 +144,7 @@ function check(name, label, budget, options, outcome) {
   (expected.regs ?? initial.regs).forEach((value, index) => wanted.setUint32(index * 4, value >>> 0, true));
   wanted.setUint32(32, expected.pc, true); wanted.setUint32(36, expected.flags ?? initial.flags, true);
   wanted.setUint32(40, initial.retired + expected.retired, true);
-  if (expected.reason !== 8) wanted.setUint32(44, budget - expected.retired, true);
+  if (expected.reason !== 8) wanted.setUint32(44, budget - (expected.work ?? expected.retired), true);
   if (expected.fault) { wanted.setUint32(48, expected.fault[0], true); wanted.setUint32(52, expected.fault[1], true); }
   assert.deepEqual(bytes.subarray(CTX, CTX + 128), before, `${label}: complete public context`);
   assert.deepEqual(bytes.subarray(BACKING, BACKING + 16 * PAGE), expectedRam, `${label}: whole code/data/stack backing`);
@@ -280,8 +282,10 @@ for (const flag of [0x100, 0x10000, 0x40000]) {
 for (const budget of [0, 1, 2, 3, 4, 5, 6, 9, 10, 14, 15, 16]) {
   check('loop', `loop-cut-${budget}`, budget, {retired: 23}, initial => loopOutcome(initial.regs, initial.flags, 3, budget));
 }
+runExtended(check);
+runBits(check);
 const report = {schema: 1, complete: true, node: process.version, cases: results.length,
-  sources: Object.fromEntries(['./run.mjs', './oracle.mjs', '../wasm.rs'].map(path => [path, hash(readFileSync(new URL(path, import.meta.url)))])),
+  sources: Object.fromEntries(['./run.mjs', './oracle.mjs', './extended.mjs', './bits.mjs', '../wasm.rs'].map(path => [path, hash(readFileSync(new URL(path, import.meta.url)))])),
   modules: Object.fromEntries([...programs].map(([name, program]) => [name, {identity: String(program.identity), wasmSha256: program.wasmSha256, codeSha256: hash(program.code)}])),
   results};
 writeFileSync(reportPath, JSON.stringify(report, null, 2));

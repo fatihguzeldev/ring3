@@ -196,7 +196,8 @@ pub fn compile_with_gates(
             match operation {
                 Some(
                     Operation::ConditionalJump { target, .. }
-                    | Operation::CountBranch { target, .. },
+                    | Operation::CountBranch { target, .. }
+                    | Operation::CountBranchWord { target, .. },
                 ) => {
                     enqueue(target.0);
                     enqueue(next);
@@ -215,7 +216,29 @@ pub fn compile_with_gates(
                     enqueue(next);
                     break;
                 }
-                Some(Operation::Jump { .. } | Operation::Return { .. } | Operation::Control(_))
+                Some(Operation::CallWord { target }) => {
+                    enqueue(target.0);
+                    enqueue(next);
+                    break;
+                }
+                Some(
+                    Operation::CallRegisterWord { .. }
+                    | Operation::ReadCallWord { .. }
+                    | Operation::String { .. }
+                    | Operation::RepeatString { .. }
+                    | Operation::Control(crate::cpu::x86::ControlOperation::PopFlags { .. }),
+                ) => {
+                    enqueue(next);
+                    break;
+                }
+                Some(
+                    Operation::Jump { .. }
+                    | Operation::JumpWord { .. }
+                    | Operation::ReadJumpWord { .. }
+                    | Operation::Return { .. }
+                    | Operation::ReturnWord { .. }
+                    | Operation::Control(_),
+                )
                 | None => break,
                 _ if next < pc => {
                     enqueue(next);
@@ -300,10 +323,19 @@ fn terminates(operation: Option<Operation>) -> bool {
         operation,
         None | Some(
             Operation::Jump { .. }
+                | Operation::JumpWord { .. }
+                | Operation::ReadJumpWord { .. }
                 | Operation::ConditionalJump { .. }
                 | Operation::CountBranch { .. }
+                | Operation::CountBranchWord { .. }
                 | Operation::Call { .. }
+                | Operation::CallWord { .. }
+                | Operation::CallRegisterWord { .. }
+                | Operation::ReadCallWord { .. }
                 | Operation::Return { .. }
+                | Operation::ReturnWord { .. }
+                | Operation::String { .. }
+                | Operation::RepeatString { .. }
                 | Operation::Control(_)
         )
     )
@@ -511,6 +543,44 @@ mod tests {
             .unwrap();
         let code = compile(&memory, GuestAddress(0x1000), limits(8, 1)).unwrap();
         assert!(code.native_instructions().is_empty());
+    }
+
+    #[test]
+    fn stack_frames_retain_width_allocation_and_nesting_for_transactional_execution() {
+        use crate::cpu::x86::StackFrameKind;
+
+        let mut memory = memory(&[0x1000]);
+        memory
+            .write(
+                GuestAddress(0x1000),
+                &[
+                    0x66, 0x60, 0x60, 0xc8, 0x20, 0, 2, 0x66, 0xc8, 0x10, 0, 0, 0x0f, 0x0b,
+                ],
+            )
+            .unwrap();
+        let code = compile(&memory, GuestAddress(0x1000), limits(8, 1)).unwrap();
+        let native = code.native_instructions();
+        assert_eq!(native.len(), 4);
+        for (instruction, expected) in native.iter().zip([
+            (0x1000, 0x1002, StackFrameKind::PushAll16, 0, 0),
+            (0x1002, 0x1003, StackFrameKind::PushAll32, 0, 0),
+            (0x1003, 0x1007, StackFrameKind::Enter32, 32, 2),
+            (0x1007, 0x100c, StackFrameKind::Enter16, 16, 0),
+        ]) {
+            assert_eq!((instruction.pc, instruction.next), (expected.0, expected.1));
+            let Operation::StackFrame {
+                kind,
+                allocation,
+                nesting,
+            } = instruction.operation
+            else {
+                panic!("expected typed stack frame");
+            };
+            assert_eq!(
+                (kind, allocation, nesting),
+                (expected.2, expected.3, expected.4)
+            );
+        }
     }
 
     #[test]
