@@ -30,6 +30,7 @@ pub enum CallError {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::process) enum PendingOwner {
+    Core(u64),
     Replacement(u32),
     Resident(u64),
     ResidentCallback { unit_id: u64, callback_token: u32 },
@@ -275,7 +276,7 @@ impl EngineInstance {
         )
     }
 
-    fn capture_call_frame(
+    pub(in crate::process) fn capture_call_frame(
         &mut self,
         owner: PendingOwner,
         convention_tag: u32,
@@ -302,6 +303,11 @@ impl EngineInstance {
         };
         let decode_key = self.code_fetch_context()?.decode_key();
         let matches_gate = match owner {
+            PendingOwner::Core(owner_id) => {
+                self.guard_core_owner(owner_id)?;
+                self.module_gate_at(state.eip)
+                    .is_some_and(|gate| gate.id == id)
+            }
             PendingOwner::Replacement(_) => self.artifact.as_ref().is_some_and(|artifact| {
                 artifact.matches_decode_key(decode_key) && artifact.matches_gate(state.eip, id)
             }),

@@ -127,7 +127,7 @@ impl EngineInstance {
         let ReplyStage32::Ready(request) = reply.stage else {
             return Err(HostError::Call(CallError::Busy));
         };
-        if reply.owner != PendingOwner::Replacement(generation) {
+        if reply.owner != self.callback_owner(key, generation)? {
             return Err(HostError::Call(CallError::InvalidToken));
         }
         self.checked_pending_call(reply.owner, reply.token)?;
@@ -186,9 +186,15 @@ impl EngineInstance {
         )?;
         let activation = self.commit_activation_entry(activation);
         self.windows_replies.last_mut().unwrap().activation = activation;
-        self.windows_replies.last_mut().unwrap().stage = ReplyStage32::Replacement {
-            generation,
-            token: record.token,
+        self.windows_replies.last_mut().unwrap().stage = if generation == 0 {
+            ReplyStage32::Core {
+                token: record.token,
+            }
+        } else {
+            ReplyStage32::Replacement {
+                generation,
+                token: record.token,
+            }
         };
         Ok(record)
     }
@@ -204,6 +210,7 @@ impl EngineInstance {
             .last()
             .ok_or(HostError::Call(CallError::InvalidToken))?;
         if !matches!(reply.stage,ReplyStage32::Replacement { generation:expected_generation,token:expected } if expected_generation==generation&&expected==token)
+            && !matches!(reply.stage, ReplyStage32::Core {token:expected} if generation == 0 && expected == token)
         {
             return Err(HostError::Call(CallError::InvalidToken));
         }

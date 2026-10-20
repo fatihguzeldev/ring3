@@ -173,7 +173,7 @@ fn owners(engine: &EngineInstance) -> Owners {
         pending: engine.pending_call.as_ref().map(call),
         callback: engine.callback.as_ref().map(|callback| {
             let record = match callback.record {
-                SuspendedRecord::Replacement(record) => format!("{record:?}"),
+                SuspendedRecord::Replacement(record) | SuspendedRecord::Core(record) => format!("{record:?}"),
                 SuspendedRecord::Resident { .. } => {
                     panic!("fixture is a replacement callback model")
                 }

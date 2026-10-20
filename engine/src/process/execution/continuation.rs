@@ -87,7 +87,7 @@ impl EngineInstance {
         }
         let id = match owner {
             PendingOwner::Resident(id) | PendingOwner::ResidentCallback { unit_id: id, .. } => id,
-            PendingOwner::Replacement(_) => return Err(HostError::InvalidArtifact),
+            PendingOwner::Replacement(_) | PendingOwner::Core(_) => return Err(HostError::InvalidArtifact),
         };
         let eligible = self
             .resident
@@ -165,7 +165,7 @@ impl EngineInstance {
         }
         let id = match owner {
             PendingOwner::Resident(id) | PendingOwner::ResidentCallback { unit_id: id, .. } => id,
-            PendingOwner::Replacement(_) => return false,
+            PendingOwner::Replacement(_) | PendingOwner::Core(_) => return false,
         };
         let Some((last_epoch, installed)) =
             self.execution_frame.as_ref().and_then(|frame| frame.last)

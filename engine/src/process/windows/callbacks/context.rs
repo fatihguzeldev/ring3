@@ -27,6 +27,7 @@ impl EngineInstance {
             return Err(HostError::Call(CallError::Busy));
         }
         match (callback.record, owner) {
+            (SuspendedRecord::Core(_), PendingOwner::Core(id)) => self.guard_core_owner(id),
             (SuspendedRecord::Replacement(record), PendingOwner::Replacement(generation))
                 if record.generation == generation =>
             {
@@ -78,7 +79,7 @@ impl EngineInstance {
             return Err(HostError::Call(CallError::Busy));
         }
         let current = self.callback.as_ref().map(|callback| callback.token());
-        if !matches!(reply.stage,ReplyStage32::Resident { token,.. }|ReplyStage32::Replacement { token,.. } if Some(token)==current)
+        if !matches!(reply.stage,ReplyStage32::Resident { token,.. }|ReplyStage32::Replacement { token,.. }|ReplyStage32::Core { token } if Some(token)==current)
         {
             return Err(HostError::Call(CallError::Busy));
         }

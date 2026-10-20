@@ -8,7 +8,7 @@ fn owner(output: &mut Vec<u64>, value: PendingOwner) {
         PendingOwner::Resident(id) | PendingOwner::ResidentCallback { unit_id: id, .. } => {
             output.push(id)
         }
-        PendingOwner::Replacement(_) => {}
+        PendingOwner::Replacement(_) | PendingOwner::Core(_) => {}
     }
 }
 impl EngineInstance {

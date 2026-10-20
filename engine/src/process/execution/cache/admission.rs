@@ -267,7 +267,7 @@ pub(super) fn cache_gate_at(
     }
     while let Some(current) = callback {
         let (return_pc, return_id) = match current.record {
-            crate::process::calls::callback::SuspendedRecord::Replacement(record) => {
+            crate::process::calls::callback::SuspendedRecord::Replacement(record) | crate::process::calls::callback::SuspendedRecord::Core(record) => {
                 (record.return_pc, record.return_id)
             }
             crate::process::calls::callback::SuspendedRecord::Resident { record, .. } => {

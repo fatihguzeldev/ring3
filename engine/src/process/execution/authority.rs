@@ -45,7 +45,7 @@ impl EngineInstance {
         Ok(())
     }
 
-    fn guard_thread_execution_ready(&self) -> Result<(), HostError> {
+    pub(in crate::process) fn guard_thread_execution_ready(&self) -> Result<(), HostError> {
         if self.pending_windows_thread_schedule().is_some()
             || self.exceptions.thread_unhandled(self.threads.current_id())
             || self

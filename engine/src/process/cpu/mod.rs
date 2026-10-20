@@ -2,6 +2,7 @@
 
 pub(super) mod avx;
 pub(super) mod context;
+pub(super) mod core;
 pub(super) mod events;
 pub(super) mod far;
 pub(super) mod integer;

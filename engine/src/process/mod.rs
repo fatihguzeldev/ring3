@@ -2,6 +2,9 @@
 
 mod calls;
 mod clock;
+#[cfg(test)]
+#[path = "wasm/core/numeric.rs"]
+mod core_numeric_tests;
 mod cpu;
 mod execution;
 mod instance;

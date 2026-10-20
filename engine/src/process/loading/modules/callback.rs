@@ -52,7 +52,7 @@ impl ParkedModuleExecution32 {
 fn owner_pin(owner: PendingOwner) -> Option<u64> {
     match owner {
         PendingOwner::Resident(id) | PendingOwner::ResidentCallback { unit_id: id, .. } => Some(id),
-        PendingOwner::Replacement(_) => None,
+        PendingOwner::Replacement(_) | PendingOwner::Core(_) => None,
     }
 }
 pub(super) fn operation_execution_pins(

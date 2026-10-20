@@ -10,7 +10,7 @@ use crate::process::{
 use crate::{
     abi::{
         arena::{EXIT_OFFSET, STATE_OFFSET, TRANSFER_OFFSET},
-        callback::{CALLBACK_RECORD_SIZE, CallbackRecord32, encode_callback},
+        callback::{CALLBACK_RECORD_SIZE, CallbackRecord32, encode_callback, encode_core_callback},
         resident_callback::ResidentCallbackRecord32,
         x86::{
             EXIT_SIZE, STATE_SIZE, decode_exit, decode_state, encode_exit_v3,
@@ -31,6 +31,7 @@ pub(in crate::process) const MAX_CALLBACK_DEPTH: usize = 32;
 
 #[derive(Clone, Copy)]
 pub(in crate::process) enum SuspendedRecord {
+    Core(CallbackRecord32),
     Replacement(CallbackRecord32),
     Resident {
         record: ResidentCallbackRecord32,
@@ -62,6 +63,7 @@ impl SuspendedCallback {
 
     pub(in crate::process) fn token(&self) -> u32 {
         match self.record {
+            SuspendedRecord::Core(record) => record.token,
             SuspendedRecord::Replacement(record) => record.token,
             SuspendedRecord::Resident { record, .. } => record.token,
         }
@@ -69,6 +71,10 @@ impl SuspendedCallback {
 
     pub(in crate::process) fn is_resident(&self) -> bool {
         matches!(self.record, SuspendedRecord::Resident { .. })
+    }
+
+    pub(in crate::process) fn is_core(&self) -> bool {
+        matches!(self.record, SuspendedRecord::Core(_))
     }
 
     pub(in crate::process) fn authorized_resident_record(
@@ -97,14 +103,16 @@ impl SuspendedCallback {
 
     pub(in crate::process) fn replacement_record(&self) -> Result<CallbackRecord32, HostError> {
         match self.record {
-            SuspendedRecord::Replacement(record) => Ok(record),
+            SuspendedRecord::Replacement(record) | SuspendedRecord::Core(record) => Ok(record),
             SuspendedRecord::Resident { .. } => Err(call_error(CallError::InvalidToken)),
         }
     }
 
     pub(in crate::process) fn matches_return(&self, pc: u32, id: u32) -> bool {
         let (return_pc, return_id) = match self.record {
-            SuspendedRecord::Replacement(record) => (record.return_pc, record.return_id),
+            SuspendedRecord::Replacement(record) | SuspendedRecord::Core(record) => {
+                (record.return_pc, record.return_id)
+            }
             SuspendedRecord::Resident { record, .. } => (record.return_pc, record.return_id),
         };
         return_pc == pc && return_id == id
@@ -188,7 +196,7 @@ impl EngineInstance {
             .ok_or(call_error(CallError::InvalidToken))?;
         if outer_token == 0
             || outer.token != outer_token
-            || outer.owner != PendingOwner::Replacement(generation)
+            || outer.owner != self.callback_owner(key, generation)?
         {
             return Err(call_error(CallError::InvalidToken));
         }
@@ -201,16 +209,27 @@ impl EngineInstance {
         if self.call_cancelled() {
             return Err(call_error(CallError::Cancelled));
         }
-        let artifact = self.artifact.as_ref().unwrap();
         let outer_exit =
             decode_exit(&outer.exit).map_err(|_| call_error(CallError::InvalidStop))?;
         let ExitReason::Gate { id: outer_id } = outer_exit.reason else {
             return Err(call_error(CallError::InvalidStop));
         };
-        if !self.compiled_callback_entry(artifact, entry_pc)
-            || !artifact.matches_gate(return_pc, return_id)
-            || return_id == outer_id
-        {
+        let valid_entry = if generation == 0 {
+            self.memory()?
+                .check_span(
+                    crate::memory::GuestAddress(entry_pc),
+                    1,
+                    crate::memory::Access::Execute,
+                )
+                .map_err(HostError::Memory)?;
+            self.module_gate_at(return_pc)
+                .is_some_and(|gate| gate.id == return_id)
+        } else {
+            let artifact = self.artifact.as_ref().unwrap();
+            self.compiled_callback_entry(artifact, entry_pc)
+                && artifact.matches_gate(return_pc, return_id)
+        };
+        if !valid_entry || return_id == outer_id {
             return Err(call_error(CallError::InvalidRequest));
         }
         let token = self
@@ -248,7 +267,12 @@ impl EngineInstance {
             &mut exit,
         )
         .map_err(|_| HostError::Infrastructure)?;
-        encode_callback(&record, &mut output).map_err(|_| HostError::Infrastructure)?;
+        (if generation == 0 {
+            encode_core_callback
+        } else {
+            encode_callback
+        })(&record, &mut output)
+        .map_err(|_| HostError::Infrastructure)?;
 
         let mut parent_storage = Vec::new();
         if self.callback.is_some() {
@@ -263,7 +287,7 @@ impl EngineInstance {
             .write_words32(frame.writes())
             .map_err(|error| call_error(CallError::Memory(error)))?;
         // after RAM publication only infallible record/authority publication remains.
-        if self.artifact_bytes().is_err() {
+        if generation != 0 && self.artifact_bytes().is_err() {
             record.outcome = 1;
             output[28..32].copy_from_slice(&1_u32.to_le_bytes());
         }
@@ -276,7 +300,11 @@ impl EngineInstance {
                 .unwrap_or_else(|_| unreachable!("one parent callback slot was reserved"))
         });
         self.callback = Some(SuspendedCallback {
-            record: SuspendedRecord::Replacement(record),
+            record: if generation == 0 {
+                SuspendedRecord::Core(record)
+            } else {
+                SuspendedRecord::Replacement(record)
+            },
             outer,
             parent,
         });
@@ -307,7 +335,7 @@ impl EngineInstance {
         generation: u32,
         token: u32,
     ) -> Result<CallbackRecord32, HostError> {
-        self.guard_artifact(key, generation)?;
+        self.callback_owner(key, generation)?;
         let callback = self
             .callback
             .as_ref()
@@ -328,7 +356,12 @@ impl EngineInstance {
             return Err(call_error(CallError::InvalidStop));
         };
         if !callback.matches_return(state.eip, id)
-            || !self.artifact.as_ref().unwrap().matches_gate(state.eip, id)
+            || !if generation == 0 {
+                self.module_gate_at(state.eip)
+                    .is_some_and(|gate| gate.id == id)
+            } else {
+                self.artifact.as_ref().unwrap().matches_gate(state.eip, id)
+            }
             || state.registers[4] != callback.outer.frame.state().registers[4]
         {
             return Err(call_error(CallError::InvalidStop));
@@ -343,7 +376,12 @@ impl EngineInstance {
             ..record
         };
         let mut output = [0; CALLBACK_RECORD_SIZE];
-        encode_callback(&record, &mut output).map_err(|_| HostError::Infrastructure)?;
+        (if generation == 0 {
+            encode_core_callback
+        } else {
+            encode_callback
+        })(&record, &mut output)
+        .map_err(|_| HostError::Infrastructure)?;
         self.guard_compiled_public_transition()?;
         let mut callback = self.callback.take().unwrap();
         self.revoke_owned_execution();
@@ -391,8 +429,26 @@ impl EngineInstance {
         Ok(())
     }
 
+    pub(in crate::process) fn callback_owner(
+        &self,
+        key: u64,
+        generation: u32,
+    ) -> Result<PendingOwner, HostError> {
+        if generation == 0 {
+            if key != self.key {
+                return Err(HostError::InvalidArtifact);
+            }
+            let id = self.core_owner.ok_or(HostError::InvalidArtifact)?;
+            self.guard_core_owner(id)?;
+            Ok(PendingOwner::Core(id))
+        } else {
+            self.guard_artifact(key, generation)?;
+            Ok(PendingOwner::Replacement(generation))
+        }
+    }
+
     fn callback_request(&self, key: u64, generation: u32, count: usize) -> Result<(), HostError> {
-        self.guard_artifact(key, generation)?;
+        let owner = self.callback_owner(key, generation)?;
         self.guard_owned_host_mutation()?;
         if self.modules.parked_callback_depth()
             + self.callback.as_ref().map_or(0, SuspendedCallback::depth)
@@ -401,10 +457,9 @@ impl EngineInstance {
             return Err(call_error(CallError::Busy));
         }
         if let Some(callback) = &self.callback
-            && (!matches!(callback.record, SuspendedRecord::Replacement(record) if record.generation == generation)
+            && (!matches!(callback.record, SuspendedRecord::Replacement(record) | SuspendedRecord::Core(record) if record.generation == generation)
                 || self.pending_call.as_ref().is_none_or(|pending| {
-                    pending.owner != PendingOwner::Replacement(generation)
-                        || callback.contains_outer_token(pending.token)
+                    pending.owner != owner || callback.contains_outer_token(pending.token)
                 }))
         {
             return Err(call_error(CallError::Busy));

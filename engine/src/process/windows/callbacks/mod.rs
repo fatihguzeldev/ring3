@@ -90,7 +90,7 @@ impl WindowsReply32 {
         )
     }
     pub(in crate::process) fn active_user32_callback(&self, callback: u32) -> Option<u64> {
-        (self.provider == WindowsCallbackProvider32::User32 && matches!(self.stage, ReplyStage32::Resident { token, .. } | ReplyStage32::Replacement { token, .. } if token == callback)).then_some(self.continuation)
+        (self.provider == WindowsCallbackProvider32::User32 && matches!(self.stage, ReplyStage32::Resident { token, .. } | ReplyStage32::Replacement { token, .. } | ReplyStage32::Core { token } if token == callback)).then_some(self.continuation)
     }
     pub(in crate::process) fn waiting_for_user32(&self) -> bool {
         self.provider == WindowsCallbackProvider32::User32
@@ -101,6 +101,7 @@ impl WindowsReply32 {
 #[derive(Clone, Copy)]
 enum ReplyStage32 {
     Ready(WindowsCallback32),
+    Core { token: u32 },
     Resident { callback_id: u64, token: u32 },
     Replacement { generation: u32, token: u32 },
     Received(u32),

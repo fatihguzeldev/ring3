@@ -365,6 +365,7 @@ impl EngineInstance {
             ))
         ) {
             let artifact = match owner {
+                PendingOwner::Core(_) => return Err(HostError::InvalidArtifact),
                 PendingOwner::Replacement(_) => {
                     self.artifact.as_ref().ok_or(HostError::InvalidArtifact)?
                 }
@@ -637,6 +638,16 @@ impl EngineInstance {
             return Err(HostError::Call(CallError::InvalidToken));
         }
         match owner {
+            PendingOwner::Core(id) => {
+                self.guard_core_owner(id)?;
+                if self
+                    .callback
+                    .as_ref()
+                    .is_some_and(|callback| !callback.is_core())
+                {
+                    return Err(HostError::Call(CallError::Busy));
+                }
+            }
             PendingOwner::Replacement(generation) => {
                 if generation == 0
                     || self.generation() != generation

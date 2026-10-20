@@ -259,7 +259,7 @@ impl EngineInstance {
             info.stack_words,
         )
     }
-    fn current_windows_gate_info(&self) -> Result<WindowsGateInfo32, HostError> {
+    pub(in crate::process) fn current_windows_gate_info(&self) -> Result<WindowsGateInfo32, HostError> {
         let exit = decode_exit(
             &self.arena()[crate::abi::arena::EXIT_OFFSET
                 ..crate::abi::arena::EXIT_OFFSET + crate::abi::x86::EXIT_SIZE],
@@ -301,7 +301,7 @@ impl EngineInstance {
         self.complete_windows_call_frame(owner, inner_token)
     }
 
-    fn complete_windows_call_frame(
+    pub(in crate::process) fn complete_windows_call_frame(
         &mut self,
         owner: PendingOwner,
         token: u32,

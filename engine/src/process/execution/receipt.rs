@@ -141,7 +141,7 @@ mod control {
                 PendingOwner::Resident(id) | PendingOwner::ResidentCallback { unit_id: id, .. } => {
                     id
                 }
-                PendingOwner::Replacement(_) => return Err(HostError::InvalidArtifact),
+                PendingOwner::Replacement(_) | PendingOwner::Core(_) => return Err(HostError::InvalidArtifact),
             };
             if expected.unit_id != id
                 || self
@@ -255,7 +255,7 @@ mod control {
                 let owner = match detection.owner {
                     PendingOwner::Resident(id)
                     | PendingOwner::ResidentCallback { unit_id: id, .. } => id,
-                    PendingOwner::Replacement(_) => return Err(HostError::InvalidArtifact),
+                    PendingOwner::Replacement(_) | PendingOwner::Core(_) => return Err(HostError::InvalidArtifact),
                 };
                 if owner != installed.unit_id
                     || self.resident_installation_by_id(owner) != Some(installed)

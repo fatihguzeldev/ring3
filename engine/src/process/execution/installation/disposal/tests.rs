@@ -480,7 +480,7 @@ fn observe(
         .callback
         .as_ref()
         .map(|callback| match callback.record {
-            SuspendedRecord::Replacement(record) => {
+            SuspendedRecord::Replacement(record) | SuspendedRecord::Core(record) => {
                 CallbackObservation::Replacement(record, observe_pending(&callback.outer))
             }
             SuspendedRecord::Resident {

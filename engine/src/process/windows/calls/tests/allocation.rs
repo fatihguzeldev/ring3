@@ -101,7 +101,7 @@ fn fixture(resident: bool) -> (EngineInstance, PendingOwner, u64) {
                 .capture_resident_call(KEY, id, CallingConvention32::Stdcall, 4)
                 .unwrap();
         }
-        PendingOwner::ResidentCallback { .. } => unreachable!(),
+        PendingOwner::ResidentCallback { .. } | PendingOwner::Core(_) => unreachable!(),
     }
     (engine, owner, keep)
 }
@@ -112,7 +112,7 @@ fn complete(engine: &mut EngineInstance, owner: PendingOwner, token: u32) -> Res
             engine.complete_windows_call(KEY, generation, token)
         }
         PendingOwner::Resident(id) => engine.complete_resident_windows_call(KEY, id, token),
-        PendingOwner::ResidentCallback { .. } => unreachable!(),
+        PendingOwner::ResidentCallback { .. } | PendingOwner::Core(_) => unreachable!(),
     }
 }
 
