@@ -348,7 +348,7 @@ export class Session {
         const run = this.measurements
           ? this.measurements.run("execution", () => this.code.execute(unit))
           : this.code.execute(unit);
-        this.recent.push({ ...run, id: run.id === null ? null : run.id.toString() });
+        this.recent.push(run);
         if (this.recent.length > 48) this.recent.shift();
         if (run.coreReason === 1 || run.coreReason === 2 || run.coreReason === 6) continue;
         if (run.reason === 9) break;
@@ -526,7 +526,7 @@ export class Session {
         detail: error.detail,
         exception: error.exception,
         call: this.lastCall,
-        recent: this.recent,
+        recent: this.recent.map(run => ({...run, id: run.id === null ? null : run.id.toString()})),
         ...(instruction ? {instruction} : {}),
       },
     });
