@@ -1,3 +1,13 @@
+mod boundary;
+mod cache;
+mod numeric;
+
+pub(crate) use boundary::{
+    core_begin_windows_callback, core_capture_windows_call, core_complete_windows_call,
+    core_dispatch_exception, core_export, core_finish_exception, core_finish_windows_callback,
+    core_import, core_numeric,
+};
+
 use super::{REGISTRY, Registry, status};
 use crate::{
     abi::{
@@ -5,15 +15,21 @@ use crate::{
         x86::{STATE_SIZE, USER_FLAGS_MASK_V3, decode_state, decode_state_metadata},
     },
     cpu::{
-        core::{CompileError, CompileOptions, CompiledCode, Context32, compile},
+        core::{CompileError, CompileOptions, CompiledCode, Context32, compile_with_gates},
         x86::{SegmentContext, SegmentRegister},
     },
     memory::{Access, CoreWriteOutcome, FaultReason, GuestAddress, MemoryError},
     process::{CallError, EngineInstance, HostError, cpu::events::detection::DetectionSlot32},
 };
+use cache::CoreCache32;
+use numeric::NumericBank;
+use std::rc::Rc;
 
 pub(super) struct CoreSession32 {
-    code: CompiledCode,
+    code: Rc<CompiledCode>,
+    cache: CoreCache32,
+    numeric: NumericBank,
+    exported_retired: u32,
     context: Box<Context32>,
     active: bool,
 }
@@ -29,10 +45,9 @@ impl CoreSession32 {
 }
 
 fn admission(instance: &EngineInstance) -> Result<SegmentContext, HostError> {
-    instance.guard_dispatch_entry(instance.key())?;
+    instance.guard_core_entry()?;
     instance.guard_detection_material_change()?;
-    if instance.callback.is_some()
-        || instance.execution_frame.is_some()
+    if instance.execution_frame.is_some()
         || instance.cpu_event.is_some()
         || instance.exception_detection.as_ref().is_some_and(|slot| {
             !matches!(
@@ -74,6 +89,9 @@ fn compile_status(error: CompileError) -> u32 {
 }
 
 pub(crate) fn core_prepare(pc: u32, instructions: u32, blocks: u32) -> u32 {
+    if instructions == 0 || instructions > 16384 || blocks == 0 || blocks > 1024 {
+        return 7;
+    }
     REGISTRY.with(|registry| {
         let Ok(mut registry) = registry.try_borrow_mut() else {
             return 9;
@@ -82,28 +100,49 @@ pub(crate) fn core_prepare(pc: u32, instructions: u32, blocks: u32) -> u32 {
         if core.as_ref().is_some_and(CoreSession32::is_active) {
             return 12;
         }
-        let Some(instance) = instance.as_ref() else {
+        let Some(instance) = instance.as_mut() else {
             return 5;
         };
-        if let Err(error) = admission(instance) {
+        if let Err(error) = instance
+            .enable_core_execution()
+            .and_then(|_| admission(instance))
+        {
             return status(error);
         }
-        let memory = match instance.memory() {
-            Ok(memory) => memory,
-            Err(error) => return status(error),
-        };
         let options = CompileOptions {
             instructions: instructions as usize,
             blocks: blocks as usize,
             ..CompileOptions::default()
         };
-        let code = match compile(memory, GuestAddress(pc), options) {
-            Ok(code) => code,
-            Err(error) => return compile_status(error),
+        let selected = core
+            .as_mut()
+            .and_then(|session| session.cache.lookup(instance.memory.as_ref().unwrap(), pc));
+        let mut fresh_cache = CoreCache32::default();
+        let code = if let Some(code) = selected {
+            code
+        } else {
+            let gates = match instance.module_gates() {
+                Ok(gates) => gates,
+                Err(error) => return status(error),
+            };
+            let gates: Vec<_> = gates.iter().map(|gate| (gate.entry, gate.id)).collect();
+            let code = match compile_with_gates(
+                instance.memory.as_ref().unwrap(),
+                GuestAddress(pc),
+                options,
+                &gates,
+            ) {
+                Ok(code) => code,
+                Err(error) => return compile_status(error),
+            };
+            match core.as_mut() {
+                Some(session) => session.cache.insert(code),
+                None => fresh_cache.insert(code),
+            }
         };
+        let identity = code.identity();
         if let Some(session) = core.as_mut() {
             session.code = code;
-            session.context.set_word(112, 0);
         } else {
             let mut state =
                 match decode_state(&instance.arena()[STATE_OFFSET..STATE_OFFSET + STATE_SIZE]) {
@@ -111,12 +150,21 @@ pub(crate) fn core_prepare(pc: u32, instructions: u32, blocks: u32) -> u32 {
                     Err(_) => return 7,
                 };
             state.eip = pc;
+            let numeric = match NumericBank::from_instance(instance) {
+                Ok(bank) => bank,
+                Err(error) => return status(error),
+            };
             *core = Some(CoreSession32 {
                 code,
+                cache: fresh_cache,
+                numeric,
+                exported_retired: 0,
                 context: Box::new(Context32::new(state)),
                 active: false,
             });
         }
+        let session = core.as_mut().unwrap();
+        session.context.bytes_mut()[120..128].copy_from_slice(&identity.to_le_bytes());
         0
     })
 }
@@ -190,7 +238,7 @@ pub(crate) fn core_begin() -> u32 {
             return 4;
         }
         let flags = core.context.state().eflags;
-        if flags & 2 == 0 || flags & !USER_FLAGS_MASK_V3 != 0 {
+        if flags & 2 == 0 || flags & !USER_FLAGS_MASK_V3 != 0 || flags & 0x50100 != 0 {
             return 7;
         }
         let view = memory.core_view();
@@ -213,8 +261,10 @@ pub(crate) fn core_begin() -> u32 {
             .set_word(104, segments.state.bases[SegmentRegister::Fs.index()]);
         core.context
             .set_word(108, segments.state.bases[SegmentRegister::Gs.index()]);
+        core.numeric.refresh_segments(segments);
         core.context.set_word(48, 0);
         core.context.set_word(52, 0);
+        core.context.set_word(116, 0);
         core.context.bytes_mut()[120..128].copy_from_slice(&core.code.identity().to_le_bytes());
         core.context.set_word(112, 1);
         core.active = true;
@@ -253,6 +303,7 @@ fn memory_failure(core: &mut CoreSession32, error: MemoryError, width: u32) -> u
         FaultReason::Permission => 2,
         FaultReason::AddressOverflow => 3,
     };
+    core.context.set_word(116, 14);
     core.context.set_word(48, fault.address.0);
     core.context
         .set_word(52, (width & 0xff) | access << 8 | reason << 16);
