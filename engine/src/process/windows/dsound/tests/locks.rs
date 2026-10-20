@@ -3,6 +3,66 @@ use crate::{
     audio::dsound::{BufferDescription, HResult},
     memory::GuestAddress,
 };
+
+#[test]
+fn full_output_queue_does_not_block_guest_unlock_stop_seek_or_play() {
+    let (mut runtime, mut memory, mut audio, device) = context();
+    let pointer = buffer(&mut runtime, &mut memory, &mut audio, device, 0);
+    let index = runtime.slot(pointer).unwrap();
+    let ObjectKind32::Buffer(buffer) = &runtime.records[index].as_ref().unwrap().kind else {
+        unreachable!()
+    };
+    let voice = buffer.native.voice;
+    audio.play_stream(voice, true).unwrap();
+    let packets: Vec<_> = (0..8).map(|_| audio.enqueue(1).unwrap()).collect();
+    runtime
+        .lock_buffer(
+            &mut memory,
+            &audio,
+            pointer,
+            &[pointer.0, 0, 4, DATA + 20, DATA + 24, 0, 0, 0],
+        )
+        .unwrap();
+    let first = read(&memory, DATA + 20);
+    memory.write(GuestAddress(first), &[192; 4]).unwrap();
+    runtime
+        .unlock_buffer(
+            &mut memory,
+            &mut audio,
+            pointer,
+            &[pointer.0, first, 4, 0, 0],
+        )
+        .unwrap();
+    assert_eq!(
+        runtime.buffer_call(&mut memory, &mut audio, None, pointer, 13, &[pointer.0, 2]),
+        Ok(0)
+    );
+    assert_eq!(
+        runtime.buffer_call(&mut memory, &mut audio, None, pointer, 18, &[pointer.0]),
+        Ok(0)
+    );
+    assert_eq!(
+        runtime.buffer_call(
+            &mut memory,
+            &mut audio,
+            None,
+            pointer,
+            12,
+            &[pointer.0, 0, 0, 1]
+        ),
+        Ok(0)
+    );
+    for id in packets {
+        assert_eq!(audio.submission_pcm(id).unwrap(), &[0., 0.]);
+        audio.acknowledge(id, 1).unwrap();
+        assert_eq!(audio.voice_state(voice).unwrap().position_frames, 2);
+        let refill = audio.enqueue(1).unwrap();
+        assert_eq!(audio.submission_pcm(refill).unwrap(), &[0.5, 0.5]);
+    }
+    assert!(audio.voice_state(voice).unwrap().playing);
+    assert!(audio.state().pending.is_some());
+}
+
 #[test]
 fn wrapped_partial_unlock_updates_future_pcm_and_exhausted_unmap_is_neutral() {
     let (mut runtime, mut memory, mut audio, device) = context();

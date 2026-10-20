@@ -14,7 +14,7 @@ pub use types::{
 pub use types::{AudioVoiceControls32, AudioVoiceProgress32, SampleEncoding32};
 
 use buffer::BufferSlot;
-use submission::{PendingSubmission, VoiceSpan};
+use submission::{SubmissionQueue, VoiceSpan};
 use voice::VoiceSlot;
 
 pub struct AudioContext {
@@ -28,7 +28,7 @@ pub struct AudioContext {
     output: Vec<f32>,
     wide_output: Vec<f64>,
     spans: Vec<VoiceSpan>,
-    pending: Option<PendingSubmission>,
+    pending: SubmissionQueue,
     sequence: u64,
     submitted_frames: u64,
     consumed_frames: u64,
@@ -56,7 +56,7 @@ impl AudioContext {
             output: allocated(config.render_frames as usize * 2, || 0.0)?,
             wide_output: Vec::new(),
             spans: allocated(config.max_voices as usize, VoiceSpan::default)?,
-            pending: None,
+            pending: SubmissionQueue::new(config)?,
             sequence: 0,
             submitted_frames: 0,
             consumed_frames: 0,
@@ -72,7 +72,7 @@ impl AudioContext {
             epoch: self.epoch,
             submitted_frames: self.submitted_frames,
             consumed_frames: self.consumed_frames,
-            pending: self.pending.as_ref().map(|pending| pending.id),
+            pending: self.pending.front().map(|pending| pending.id),
         }
     }
 
@@ -89,7 +89,7 @@ impl AudioContext {
         }
         self.output.fill(0.0);
         self.spans.fill(VoiceSpan::default());
-        self.pending = None;
+        self.pending.clear();
         self.epoch = new_epoch;
         self.buffer_bytes = 0;
         self.effect_bytes = 0;
@@ -115,7 +115,7 @@ impl AudioContext {
     }
 
     fn ready(&self) -> Result<(), AudioError32> {
-        if self.pending.is_some() {
+        if !self.pending.is_empty() {
             return Err(AudioError32::Busy);
         }
         Ok(())

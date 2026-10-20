@@ -156,11 +156,23 @@ pub(crate) fn audio_seek(
 }
 
 pub(crate) fn audio_submit(frames: u32) -> u32 {
+    audio_output(frames, false)
+}
+
+pub(crate) fn audio_enqueue(frames: u32) -> u32 {
+    audio_output(frames, true)
+}
+
+fn audio_output(frames: u32, queued: bool) -> u32 {
     mutate(|instance| {
         if frames as usize > (TRANSFER_SIZE - RECORD_SIZE) / 8 {
             return Err(HostError::InvalidRequest);
         }
-        let id = instance.audio_submit(frames)?;
+        let id = if queued {
+            instance.audio_enqueue(frames)?
+        } else {
+            instance.audio_submit(frames)?
+        };
         let mut bytes = [0; TRANSFER_SIZE - RECORD_SIZE];
         let pcm = instance
             .audio()?

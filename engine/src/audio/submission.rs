@@ -1,4 +1,7 @@
-use super::{AudioContext, AudioError32, AudioSubmission32, AudioVoiceId32, AudioVoiceProgress32};
+use super::{
+    AudioConfig32, AudioContext, AudioError32, AudioSubmission32, AudioVoiceId32,
+    AudioVoiceProgress32,
+};
 use super::{SampleEncoding32, buffer::BufferSlot, mixing::MixSample, voice::VoiceSlot};
 
 #[derive(Clone, Copy, Default)]
@@ -16,12 +19,102 @@ pub(super) struct VoiceSpan {
 pub(super) struct PendingSubmission {
     pub id: AudioSubmission32,
     consumed: u32,
+    pcm: Vec<f32>,
+    spans: Vec<VoiceSpan>,
+}
+
+pub(super) struct SubmissionQueue {
+    slots: Vec<PendingSubmission>,
+    head: usize,
+    length: usize,
+}
+
+impl SubmissionQueue {
+    const CAPACITY: usize = 8;
+
+    pub fn new(config: AudioConfig32) -> Result<Self, AudioError32> {
+        let mut slots = Vec::new();
+        slots
+            .try_reserve_exact(Self::CAPACITY)
+            .map_err(|_| AudioError32::Allocation)?;
+        for _ in 0..Self::CAPACITY {
+            slots.push(PendingSubmission {
+                id: AudioSubmission32 {
+                    epoch: 0,
+                    sequence: 0,
+                    first_frame: 0,
+                    frames: 0,
+                },
+                consumed: 0,
+                pcm: super::allocated(config.render_frames as usize * 2, || 0.0)?,
+                spans: super::allocated(config.max_voices as usize, VoiceSpan::default)?,
+            });
+        }
+        Ok(Self {
+            slots,
+            head: 0,
+            length: 0,
+        })
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.length == 0
+    }
+
+    pub fn front(&self) -> Option<&PendingSubmission> {
+        (!self.is_empty()).then(|| &self.slots[self.head])
+    }
+
+    fn front_mut(&mut self) -> &mut PendingSubmission {
+        &mut self.slots[self.head]
+    }
+
+    fn find(&self, id: AudioSubmission32) -> Option<&PendingSubmission> {
+        (0..self.length)
+            .map(|index| &self.slots[(self.head + index) % Self::CAPACITY])
+            .find(|packet| packet.id == id)
+    }
+
+    fn full(&self) -> bool {
+        self.length == Self::CAPACITY
+    }
+
+    fn push(&mut self, id: AudioSubmission32, pcm: &[f32], spans: &[VoiceSpan]) {
+        let slot = &mut self.slots[(self.head + self.length) % Self::CAPACITY];
+        slot.id = id;
+        slot.consumed = 0;
+        slot.pcm[..pcm.len()].copy_from_slice(pcm);
+        slot.spans.copy_from_slice(spans);
+        self.length += 1;
+    }
+
+    fn pop(&mut self) {
+        self.length -= 1;
+        self.head = if self.is_empty() {
+            0
+        } else {
+            (self.head + 1) % Self::CAPACITY
+        };
+    }
+
+    pub fn clear(&mut self) {
+        self.head = 0;
+        self.length = 0;
+    }
 }
 
 impl AudioContext {
     /// submitted pcm is immutable; later stream mutations affect the next submission.
     pub fn submit(&mut self, frames: u32) -> Result<AudioSubmission32, AudioError32> {
         self.ready()?;
+        self.enqueue(frames)
+    }
+
+    /// queued pcm and its voice witnesses remain immutable until consumed in order.
+    pub fn enqueue(&mut self, frames: u32) -> Result<AudioSubmission32, AudioError32> {
+        if self.pending.full() {
+            return Err(AudioError32::Busy);
+        }
         if frames == 0 || frames > self.config.render_frames {
             return Err(AudioError32::InvalidRequest);
         }
@@ -89,13 +182,16 @@ impl AudioContext {
             reference.append(id.first_frame, &self.output[..length]);
         }
         self.submitted_frames = submitted;
-        self.pending = Some(PendingSubmission { id, consumed: 0 });
+        self.pending.push(id, &self.output[..length], &self.spans);
         Ok(id)
     }
 
     pub fn submission_pcm(&self, submission: AudioSubmission32) -> Result<&[f32], AudioError32> {
-        self.pending_submission(submission)?;
-        Ok(&self.output[..submission.frames as usize * 2])
+        let pending = self
+            .pending
+            .find(submission)
+            .ok_or(AudioError32::InvalidSubmission)?;
+        Ok(&pending.pcm[..submission.frames as usize * 2])
     }
 
     pub fn visit_acknowledgement(
@@ -106,6 +202,9 @@ impl AudioContext {
     ) -> Result<(), AudioError32> {
         let previous = self.validate_acknowledgement(submission, consumed_frames)?;
         for (index, span) in self
+            .pending
+            .front()
+            .unwrap()
             .spans
             .iter()
             .enumerate()
@@ -155,7 +254,7 @@ impl AudioContext {
     ) -> Result<Option<AudioVoiceProgress32>, AudioError32> {
         let previous = self.validate_acknowledgement(submission, consumed_frames)?;
         let voice = self.voice(id)?;
-        let span = self.spans[id.slot as usize];
+        let span = self.pending.front().unwrap().spans[id.slot as usize];
         if span.frames == 0 || span.generation != id.generation || span.revision != voice.revision {
             return Ok(None);
         }
@@ -175,6 +274,9 @@ impl AudioContext {
     ) -> Result<(), AudioError32> {
         let previous = self.validate_acknowledgement(submission, consumed_frames)?;
         for (index, span) in self
+            .pending
+            .front()
+            .unwrap()
             .spans
             .iter()
             .enumerate()
@@ -209,9 +311,9 @@ impl AudioContext {
         }
         self.consumed_frames = submission.first_frame + u64::from(consumed_frames);
         if consumed_frames == submission.frames {
-            self.pending = None;
+            self.pending.pop();
         } else {
-            self.pending.as_mut().unwrap().consumed = consumed_frames;
+            self.pending.front_mut().consumed = consumed_frames;
         }
         Ok(())
     }
@@ -233,7 +335,7 @@ impl AudioContext {
         id: AudioSubmission32,
     ) -> Result<&PendingSubmission, AudioError32> {
         self.pending
-            .as_ref()
+            .front()
             .filter(|pending| pending.id == id)
             .ok_or(AudioError32::InvalidSubmission)
     }

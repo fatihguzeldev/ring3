@@ -1,3 +1,4 @@
+mod queue;
 mod resampling;
 mod streaming;
 mod termination;

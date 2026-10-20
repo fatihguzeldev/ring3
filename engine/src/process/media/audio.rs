@@ -87,6 +87,14 @@ impl EngineInstance {
             .map_err(|error| HostError::Media(MediaError::Audio(error)))
     }
 
+    pub fn audio_enqueue(&mut self, frames: u32) -> Result<AudioSubmission32, HostError> {
+        self.refresh_dsound_focus()?;
+        self.media_contexts_mut()?
+            .audio
+            .enqueue(frames)
+            .map_err(|error| HostError::Media(MediaError::Audio(error)))
+    }
+
     pub fn audio_acknowledge(
         &mut self,
         submission: AudioSubmission32,
