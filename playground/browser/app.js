@@ -2,6 +2,7 @@ import { createSession, selectedFolder } from "/sdk/index.js";
 import { VisibilityController } from "./visibility.js";
 import { CategoryPicker } from "./observability/categories.js";
 import { commandLineForArguments } from "./command-line.js";
+import { frameRateLabel } from "./frame-rate.js";
 
 const $ = (id) => document.getElementById(id);
 const ui = Object.fromEntries(
@@ -23,6 +24,7 @@ const ui = Object.fromEntries(
     "session-display",
     "message",
     "metrics",
+    "frame-rate",
     "log",
     "clear-log",
     "display-hint",
@@ -46,6 +48,7 @@ let game = null,
   lastStatus = "",
   lastDiagnostic = 0;
 let visibility;
+let frameRateTimer;
 const serialize = (value) =>
   JSON.stringify(value, (_key, item) => (typeof item === "bigint" ? item.toString() : item));
 function report(event) {
@@ -65,6 +68,14 @@ function log(message, detail) {
   report({ type: "diagnostic", message, detail });
 }
 function status(info) {
+  clearTimeout(frameRateTimer);
+  ui["frame-rate"].textContent = frameRateLabel(info);
+  if (["running", "waiting"].includes(info.state)) {
+    const received = performance.now();
+    frameRateTimer = setTimeout(() => {
+      ui["frame-rate"].textContent = frameRateLabel(info, Math.max(2000, performance.now() - received));
+    }, 2000);
+  }
   if (info.state === "stopped") sessionExists = false;
   visibility?.status(info);
   ui.state.textContent = info.state;
@@ -99,7 +110,6 @@ function status(info) {
   ui["display-hint"].hidden = active || info.state === "exited";
   const parts = [];
   if (info.pc !== undefined) parts.push(`pc 0x${Number(info.pc).toString(16)}`);
-  if (info.presentation?.intervalFps) parts.push(`${info.presentation.intervalFps.toFixed(1)} GPU-completed FPS`);
   if (info.stats)
     for (const [name, value] of Object.entries(info.stats))
       if (["number", "bigint", "string"].includes(typeof value)) parts.push(`${name} ${value}`);
@@ -265,6 +275,7 @@ ui["clear-log"].addEventListener("click", (event) => {
   ui.log.textContent = "";
 });
 document.addEventListener("visibilitychange", () => visibility.changed());
+window.addEventListener("pagehide", () => clearTimeout(frameRateTimer));
 window.addEventListener("error", (event) => log(event.message));
 window.addEventListener("unhandledrejection", (event) =>
   log(event.reason?.message || String(event.reason)),

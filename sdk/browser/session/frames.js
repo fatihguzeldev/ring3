@@ -5,6 +5,10 @@ export class FrameMeasurements {
     this.last = null;
     this.intervals = [];
   }
+  resetIntervals() {
+    this.last = null;
+    this.intervals.length = 0;
+  }
   present(now = performance.now()) {
     this.frames++;
     if (this.last !== null) {

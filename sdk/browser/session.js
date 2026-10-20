@@ -52,6 +52,8 @@ export class Session {
     });
   }
   status(state, message, extra = {}) {
+    if (this.state !== state && (state === "paused" || (this.state === "paused" && state === "running")))
+      this.frames?.resetIntervals();
     this.state = state;
     this.capture?.observer.event("status", { state, message });
     this.onStatus({ state, message, ...extra, browserInput: this.input.snapshot?.(),
@@ -229,7 +231,6 @@ export class Session {
       case "status":
         if (this.failed && message.state !== "stopped") return;
         const previousState = this.state;
-        this.state = message.state;
         if (message.state === "running" && previousState !== "running") this.input.enable();
         if (["exited", "stopped", "error"].includes(message.state)) this.input.disable();
         this.status(message.state, message.message, message);
