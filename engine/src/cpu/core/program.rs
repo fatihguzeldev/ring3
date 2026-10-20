@@ -128,6 +128,17 @@ pub fn compile_with_frontier(
     gates: &[(GuestAddress, u32)],
     frontier: &[GuestAddress],
 ) -> Result<CompiledCode, CompileError> {
+    compile_formation(memory, entry, options, gates, frontier, &[])
+}
+
+fn compile_formation(
+    memory: &AddressSpace,
+    entry: GuestAddress,
+    options: CompileOptions,
+    gates: &[(GuestAddress, u32)],
+    frontier: &[GuestAddress],
+    additional_roots: &[GuestAddress],
+) -> Result<CompiledCode, CompileError> {
     if options.instructions == 0
         || options.instructions > 16384
         || options.blocks == 0
@@ -149,6 +160,16 @@ pub fn compile_with_frontier(
     let mut pending = VecDeque::from([entry.0]);
     let mut nodes = BTreeMap::new();
     let mut starts = BTreeSet::from([entry.0]);
+    for root in additional_roots {
+        if starts.contains(&root.0) {
+            continue;
+        }
+        if starts.len() == options.blocks || sorted_frontier.binary_search(&root.0).is_ok() {
+            return Err(CompileError::InvalidLimits);
+        }
+        starts.insert(root.0);
+        pending.push_back(root.0);
+    }
     let mut sources = Vec::new();
     while let Some(mut pc) = pending.pop_front() {
         if nodes.len() >= options.instructions || starts.len() > options.blocks {
@@ -354,6 +375,10 @@ pub fn compile_with_frontier(
         native,
     })
 }
+
+#[cfg(test)]
+#[path = "program/call_tests.rs"]
+mod call_tests;
 
 fn retain_entry_prefix(blocks: &mut Vec<Block>, entry: u32, limit: usize) {
     let requested = blocks
