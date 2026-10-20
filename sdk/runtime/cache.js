@@ -43,6 +43,9 @@ export class CodeCache {
       instance:{count:0,failures:0,ns:0,maxNs:0,lastNs:0},
       admissionCount:0,admittedBytes:0,prepareHits:0,
       trackedRepeatPcAdmissions:0,samePcNewIdentityAdmissions:0,samePcSameIdentityAdmissions:0,
+      sourceWitnessedAdmissions:0,sourceWitnessPendingAdmissions:0,sourceWitnessRemovedAdmissions:0,
+      samePcNewIdentitySameSourceVersionAdmissions:0,samePcNewIdentityUnknownSourceAdmissions:0,
+      droppedPcSourceWitnesses:0,
       droppedPcPrepares:0,droppedPcAdmissions:0,pcs:new Map(),topRepeat:[],last:[],slow:[],
     } : null;
     this.chain = chain;
@@ -56,7 +59,8 @@ export class CodeCache {
       row = diagnostic.pcs.get(pc);
       if (!row && diagnostic.pcs.size < DIAGNOSTIC_PC_CAPACITY) {
         row = {pc,prepares:0,hits:0,prepareNs:0,prepareFailures:0,admissions:0,bytes:0,
-          identityChanges:0,repeatedIdentityAdmissions:0,lastIdentity:null,firstSequence:0,lastSequence:0};
+          identityChanges:0,repeatedIdentityAdmissions:0,lastIdentity:null,firstSequence:0,lastSequence:0,
+          sourceWitnesses:0,lastSourceVersion:null,sameSourceVersionAdmissions:0,unknownSourceAdmissions:0};
         diagnostic.pcs.set(pc,row);
       }
       if (row) row.prepares++;
@@ -78,13 +82,14 @@ export class CodeCache {
     diagnostic.admittedBytes += bytes;
     pc >>>= 0;
     const row = diagnostic.pcs.get(pc);
+    const previousIdentity = row?.lastIdentity ?? null, previousSourceVersion = row?.lastSourceVersion ?? null;
     if (row) {
       if (row.admissions) {
         diagnostic.trackedRepeatPcAdmissions++;
         if (identity !== row.lastIdentity) {row.identityChanges++; diagnostic.samePcNewIdentityAdmissions++;}
         else {row.repeatedIdentityAdmissions++; diagnostic.samePcSameIdentityAdmissions++;}
       }
-      row.admissions++; row.bytes += bytes; row.lastIdentity = identity;
+      row.admissions++; row.bytes += bytes; row.lastIdentity = identity; row.lastSourceVersion = null;
       row.firstSequence ||= sequence; row.lastSequence = sequence;
       if (row.admissions > 1) {
         if (!diagnostic.topRepeat.includes(row)) diagnostic.topRepeat.push(row);
@@ -92,23 +97,59 @@ export class CodeCache {
       }
     } else diagnostic.droppedPcAdmissions++;
     const record = {sequence,pc,identity,bytes,prepareNs:diagnostic.prepare.lastNs,
-      moduleNs:diagnostic.module.lastNs,instanceNs:diagnostic.instance.lastNs};
+      moduleNs:diagnostic.module.lastNs,instanceNs:diagnostic.instance.lastNs,
+      previousIdentity,previousSourceVersion,sourceVersion:null,sourceWitness:'pending',sourceComparison:null};
+    diagnostic.sourceWitnessPendingAdmissions++;
     record.phaseTotalNs = record.prepareNs+record.moduleNs+record.instanceNs;
     diagnostic.last.push(record);
     if (diagnostic.last.length > DIAGNOSTIC_LAST_CAPACITY) diagnostic.last.shift();
     diagnostic.slow.push(record); diagnostic.slow.sort(slowOrder);
     diagnostic.slow.length = Math.min(diagnostic.slow.length,DIAGNOSTIC_SLOW_CAPACITY);
+    return record;
+  }
+  recordSourceWitness(unit) {
+    const record = unit.compilation;
+    if (record.sourceWitness !== 'pending') return;
+    const buffer = this.memory.buffer;
+    if (this.#contextView?.buffer !== buffer) this.#contextView = new DataView(buffer);
+    const version = this.#contextView.getBigUint64(this.context+96,true).toString();
+    const diagnostic = this.compilation, row = diagnostic.pcs.get(record.pc);
+    record.sourceVersion = version; record.sourceWitness = 'first-begin';
+    diagnostic.sourceWitnessPendingAdmissions--; diagnostic.sourceWitnessedAdmissions++;
+    if (!row) {
+      diagnostic.droppedPcSourceWitnesses++; record.sourceComparison = 'untracked-pc';
+      return;
+    }
+    row.sourceWitnesses++;
+    if (row.lastIdentity === record.identity) row.lastSourceVersion = version;
+    if (record.previousIdentity === null) record.sourceComparison = 'first-admission';
+    else if (record.previousIdentity === record.identity) record.sourceComparison = 'same-identity';
+    else if (record.previousSourceVersion === version) {
+      record.sourceComparison = 'same-version';
+      diagnostic.samePcNewIdentitySameSourceVersionAdmissions++; row.sameSourceVersionAdmissions++;
+    } else {
+      record.sourceComparison = 'unknown-source';
+      diagnostic.samePcNewIdentityUnknownSourceAdmissions++; row.unknownSourceAdmissions++;
+    }
   }
   compilationSnapshot() {
     const diagnostic = this.compilation;
     const snapshot = {
-      semantics:'elapsed wall time; same-PC identity changes have no source-change witness',
+      semantics:'elapsed wall time; same-PC identity changes alone have no source-change witness',
+      sourceWitnessSemantics:'first successful core_begin before guest execution; equal validation versions apply only within the same unchanged guest address space, not identical formed regions or emitted Wasm',
+      sourceWitnessPendingSemantics:'pending or removed without a first-begin witness may include units executed only through native chaining',
       prepareHitSemantics:'returned identity already instantiated in the SDK cache',
       pcCapacity:DIAGNOSTIC_PC_CAPACITY,lastCapacity:DIAGNOSTIC_LAST_CAPACITY,slowCapacity:DIAGNOSTIC_SLOW_CAPACITY,
       trackedPcCount:diagnostic.pcs.size,droppedPcPrepares:diagnostic.droppedPcPrepares,droppedPcAdmissions:diagnostic.droppedPcAdmissions,
       admissionCount:diagnostic.admissionCount,admittedBytes:diagnostic.admittedBytes,prepareHits:diagnostic.prepareHits,
       trackedRepeatPcAdmissions:diagnostic.trackedRepeatPcAdmissions,
       samePcNewIdentityAdmissions:diagnostic.samePcNewIdentityAdmissions,samePcSameIdentityAdmissions:diagnostic.samePcSameIdentityAdmissions,
+      sourceWitnessedAdmissions:diagnostic.sourceWitnessedAdmissions,
+      sourceWitnessPendingAdmissions:diagnostic.sourceWitnessPendingAdmissions,sourceWitnessRemovedAdmissions:diagnostic.sourceWitnessRemovedAdmissions,
+      samePcNewIdentitySameSourceVersionAdmissions:diagnostic.samePcNewIdentitySameSourceVersionAdmissions,
+      samePcNewIdentityUnknownSourceAdmissions:diagnostic.samePcNewIdentityUnknownSourceAdmissions,
+      samePcNewIdentityUnwitnessedAdmissions:diagnostic.samePcNewIdentityAdmissions-diagnostic.samePcNewIdentitySameSourceVersionAdmissions-diagnostic.samePcNewIdentityUnknownSourceAdmissions,
+      droppedPcSourceWitnesses:diagnostic.droppedPcSourceWitnesses,
       topRepeatPcs:diagnostic.topRepeat.map(row=>({...row})),
       lastAdmissions:diagnostic.last.map(row=>({...row})),slowestAdmissions:diagnostic.slow.map(row=>({...row})),
     };
@@ -163,6 +204,10 @@ export class CodeCache {
       this.table.set(unit.slot,null); this.slots.delete(unit.slot); this.freeSlots.push(unit.slot);
     }
     this.units.delete(id); this.retainedModuleBytes -= unit.bytes;
+    if (this.compilation && unit.compilation.sourceWitness === 'pending') {
+      unit.compilation.sourceWitness = 'removed';
+      this.compilation.sourceWitnessPendingAdmissions--; this.compilation.sourceWitnessRemovedAdmissions++;
+    }
     if (reason === 'native') {this.prunedNative++; this.prunedNativeBytes += unit.bytes;}
     else {this.evictions++; this.evictionReasons[reason]++;}
   }
@@ -254,7 +299,7 @@ export class CodeCache {
       unit.slot = slot; this.slots.set(slot,unit);
     }
     this.units.set(id, unit); this.admissions++; this.generatedModuleBytes += length; this.retainedModuleBytes += length;
-    if (this.compilation) this.recordAdmission(pc,id,length);
+    if (this.compilation) unit.compilation = this.recordAdmission(pc,id,length);
     return unit;
   }
   execute(selected) {
@@ -271,6 +316,7 @@ export class CodeCache {
     let stop, failure;
     let regions;
     try {
+      if (this.compilation) this.recordSourceWitness(unit);
       if (this.chain) {
         if (this.table.get(unit.slot) !== unit.run) throw new Error('core table binding changed');
         stop = this.dispatch.run(this.context,this.budget,unit.slot) >>> 0;

@@ -63,7 +63,11 @@ function fixture(select = pc => ({id: 1n, stop: 1, next: pc + 4})) {
     },
     core_context_ptr: () => context, core_code_ptr: () => codePointer,
     core_code_len: () => encoded.length,
-    core_begin() { calls.push(['begin']); return control.begin(); }, core_end() { calls.push(['end']); return 0; },
+    core_begin() {
+      calls.push(['begin']); const status = control.begin();
+      if (status === 0 && control.sourceVersion !== undefined) d().setBigUint64(context + 96,control.sourceVersion,true);
+      return status;
+    }, core_end() { calls.push(['end']); return 0; },
     core_import() { calls.push(['import']); d().setUint32(context + 32, arena.get(48), true); d().setUint32(context, arena.get(16) ?? 0,true); return 0; },
     core_export(reason,work) { calls.push(['export', reason,work]); arena.set(48, d().getUint32(context + 32, true)); arena.set(72, reason === 2 ? 1 : 3); return 0; },
     core_read: () => 0n, core_write: () => 0, core_numeric: () => 0,
@@ -205,8 +209,136 @@ test('native prepare selects every requested entry and native identity controls 
 test('cold compilation diagnostics remain absent and read no clock when disabled', t => {
   const f = fixture(), cache = new CodeCache(f.engine,{chain:false});
   t.mock.method(performance,'now',()=>{throw new Error('disabled diagnostic clock');});
-  cache.entry(0x1000); cache.entry(0x1000);
+  const read = DataView.prototype.getBigUint64;
+  t.mock.method(DataView.prototype,'getBigUint64',function(offset,...args) {
+    assert.notEqual(offset,f.context+96,'disabled source witness read');
+    return read.call(this,offset,...args);
+  });
+  cache.entry(0x1000); cache.execute(cache.entry(0x1000));
   assert.equal(cache.stats().cacheDiagnostics,undefined);
+});
+test('source witnesses capture the first successful begin before guest execution', () => {
+  const f=fixture(pc=>({id:1n,stop:2,next:pc+4})); f.engine.cacheMeasurementsEnabled=true;
+  const cache=new CodeCache(f.engine,{chain:false}), unit=cache.entry(0x1000);
+  let diagnostic=cache.stats().cacheDiagnostics;
+  assert.equal(diagnostic.sourceWitnessedAdmissions,0);
+  assert.equal(diagnostic.sourceWitnessPendingAdmissions,1);
+  assert.equal(diagnostic.sourceWitnessRemovedAdmissions,0);
+  assert.equal(diagnostic.lastAdmissions[0].sourceVersion,null);
+  assert.equal(diagnostic.lastAdmissions[0].sourceWitness,'pending');
+  f.control.sourceVersion=9007199254740993n;
+  const original=unit.run;
+  unit.run=(...args)=>{
+    const row=cache.stats().cacheDiagnostics.lastAdmissions[0];
+    assert.equal(row.sourceVersion,'9007199254740993');
+    assert.equal(row.sourceWitness,'first-begin');
+    assert.equal(row.sourceComparison,'first-admission');
+    return original(...args);
+  };
+  cache.execute(unit);
+  unit.run=original; f.control.sourceVersion=9007199254740994n;
+  cache.import(); cache.execute(unit);
+  diagnostic=cache.stats().cacheDiagnostics;
+  assert.equal(diagnostic.sourceWitnessedAdmissions,1);
+  assert.equal(diagnostic.sourceWitnessPendingAdmissions,0);
+  assert.equal(diagnostic.sourceWitnessRemovedAdmissions,0);
+  assert.equal(diagnostic.lastAdmissions[0].sourceVersion,'9007199254740993');
+  assert.equal(diagnostic.slowestAdmissions[0].sourceVersion,'9007199254740993');
+  assert.match(diagnostic.sourceWitnessSemantics,/first successful.*begin/i);
+  assert.match(diagnostic.sourceWitnessSemantics,/not.*region|not.*Wasm/i);
+  diagnostic.lastAdmissions[0].sourceVersion='0';
+  diagnostic.slowestAdmissions[0].sourceVersion='0';
+  assert.equal(cache.stats().cacheDiagnostics.lastAdmissions[0].sourceVersion,'9007199254740993');
+});
+test('source witnesses compare consecutive same-PC admissions without skipping an unwitnessed owner', () => {
+  let identity=1n;
+  const f=fixture(pc=>({id:identity,stop:2,next:pc+4})); f.engine.cacheMeasurementsEnabled=true;
+  const cache=new CodeCache(f.engine,{chain:false,capacity:1});
+  const admit=(pc,version)=>{
+    f.control.sourceVersion=version;
+    const unit=cache.entry(pc);
+    if(version!==undefined)cache.execute(unit);
+    identity++;
+    return unit;
+  };
+  admit(0x1000,41n); admit(0x1000,41n); admit(0x1000,42n);
+  admit(0x1000,undefined); admit(0x1000,42n); admit(0x2000,42n);
+  const diagnostic=cache.stats().cacheDiagnostics;
+  assert.equal(diagnostic.admissionCount,6);
+  assert.equal(diagnostic.sourceWitnessedAdmissions,5);
+  assert.equal(diagnostic.sourceWitnessPendingAdmissions,0);
+  assert.equal(diagnostic.sourceWitnessRemovedAdmissions,1);
+  assert.equal(diagnostic.samePcNewIdentitySameSourceVersionAdmissions,1);
+  assert.equal(diagnostic.samePcNewIdentityUnknownSourceAdmissions,2);
+  assert.equal(diagnostic.samePcNewIdentityUnwitnessedAdmissions,1);
+  assert.deepEqual(diagnostic.lastAdmissions.map(row=>[row.identity,row.sourceVersion,row.sourceWitness,row.sourceComparison]),[
+    ['1','41','first-begin','first-admission'],['2','41','first-begin','same-version'],
+    ['3','42','first-begin','unknown-source'],['4',null,'removed',null],
+    ['5','42','first-begin','unknown-source'],['6','42','first-begin','first-admission'],
+  ]);
+  const repeat=diagnostic.topRepeatPcs[0];
+  assert.equal(repeat.sourceWitnesses,4); assert.equal(repeat.lastSourceVersion,'42');
+  assert.equal(repeat.sameSourceVersionAdmissions,1); assert.equal(repeat.unknownSourceAdmissions,2);
+  assert.equal(diagnostic.lastAdmissions[4].previousIdentity,'4');
+  assert.equal(diagnostic.lastAdmissions[4].previousSourceVersion,null);
+  repeat.lastSourceVersion='0'; assert.equal(cache.stats().cacheDiagnostics.topRepeatPcs[0].lastSourceVersion,'42');
+});
+test('source witnesses reject failed begins and preserve the final current admission after a stale retry', () => {
+  let identity=1n, fail=7;
+  const f=fixture(pc=>({id:identity,stop:2,next:pc+4})); f.engine.cacheMeasurementsEnabled=true;
+  const cache=new CodeCache(f.engine,{chain:false,capacity:1}), old=cache.entry(0x1000);
+  f.control.sourceVersion=77n; f.control.begin=()=>fail;
+  assert.throws(()=>cache.execute(old),/core_begin returned 7/);
+  let diagnostic=cache.stats().cacheDiagnostics;
+  assert.equal(diagnostic.sourceWitnessedAdmissions,0); assert.equal(diagnostic.sourceWitnessPendingAdmissions,1);
+  assert.equal(diagnostic.lastAdmissions[0].sourceVersion,null);
+  f.control.begin=()=>{if(identity===1n){identity=2n;return 4;}return fail;};
+  assert.throws(()=>cache.execute(old),/core_begin returned 7/);
+  diagnostic=cache.stats().cacheDiagnostics;
+  assert.equal(diagnostic.admissionCount,2); assert.equal(diagnostic.sourceWitnessRemovedAdmissions,1);
+  assert.equal(diagnostic.sourceWitnessedAdmissions,0); assert.equal(diagnostic.sourceWitnessPendingAdmissions,1);
+  assert(diagnostic.lastAdmissions.every(row=>row.sourceVersion===null));
+  fail=0; cache.execute(cache.entry(0x1000));
+  diagnostic=cache.stats().cacheDiagnostics;
+  assert.equal(diagnostic.sourceWitnessedAdmissions,1); assert.equal(diagnostic.sourceWitnessPendingAdmissions,0);
+  assert.deepEqual(diagnostic.lastAdmissions.map(row=>[row.identity,row.sourceVersion,row.sourceWitness]),
+    [['1',null,'removed'],['2','77','first-begin']]);
+  assert.equal(diagnostic.samePcNewIdentityUnknownSourceAdmissions,1);
+  assert.equal(f.calls.filter(([name])=>name==='end').length,1);
+});
+test('source witness read failure releases the native lease and leaves the admission unwitnessed', t => {
+  const f=fixture(pc=>({id:1n,stop:2,next:pc+4})); f.engine.cacheMeasurementsEnabled=true;
+  const cache=new CodeCache(f.engine,{chain:false}), unit=cache.entry(0x1000);
+  const read=DataView.prototype.getBigUint64; let reject=true;
+  t.mock.method(DataView.prototype,'getBigUint64',function(offset,...args) {
+    if(offset===f.context+96 && reject)throw new Error('source witness unavailable');
+    return read.call(this,offset,...args);
+  });
+  f.control.sourceVersion=7n;
+  assert.throws(()=>cache.execute(unit),/source witness unavailable/);
+  assert.equal(cache.open,false); assert.equal(cache.stats().runs,0);
+  assert.equal(f.calls.filter(([name])=>name==='end').length,1);
+  let diagnostic=cache.stats().cacheDiagnostics;
+  assert.equal(diagnostic.sourceWitnessedAdmissions,0); assert.equal(diagnostic.sourceWitnessPendingAdmissions,1);
+  assert.equal(diagnostic.lastAdmissions[0].sourceVersion,null);
+  reject=false; cache.execute(unit); diagnostic=cache.stats().cacheDiagnostics;
+  assert.equal(diagnostic.sourceWitnessedAdmissions,1); assert.equal(diagnostic.sourceWitnessPendingAdmissions,0);
+  assert.equal(diagnostic.lastAdmissions[0].sourceVersion,'7');
+});
+test('source witness absence does not classify native-chained execution as never executed', () => {
+  const f=fixture(pc=>pc===0x1000?{id:1n,stop:1,next:0x2000}:{id:2n,stop:2,next:0x2004});
+  f.engine.cacheMeasurementsEnabled=true; f.control.sourceVersion=9n;
+  const cache=new CodeCache(f.engine,{chain:true});
+  const target=cache.entry(0x2000), source=cache.entry(0x1000);
+  assert.equal(cache.execute(source).regions,2);
+  let diagnostic=cache.stats().cacheDiagnostics;
+  assert.equal(diagnostic.sourceWitnessedAdmissions,1); assert.equal(diagnostic.sourceWitnessPendingAdmissions,1);
+  assert.equal(diagnostic.lastAdmissions[0].sourceVersion,null);
+  assert.equal(diagnostic.lastAdmissions[1].sourceVersion,'9');
+  assert.match(diagnostic.sourceWitnessPendingSemantics,/native chaining/);
+  cache.execute(cache.entry(target.pc)); diagnostic=cache.stats().cacheDiagnostics;
+  assert.equal(diagnostic.sourceWitnessedAdmissions,2); assert.equal(diagnostic.sourceWitnessPendingAdmissions,0);
+  assert.equal(diagnostic.admissionCount,2);
 });
 test('cold compilation diagnostics separate prepares, hits, admissions and phase time', t => {
   let identity = 1n, clock = 0;
@@ -279,6 +411,11 @@ test('cold compilation diagnostics retain failed phase accounting without admitt
   assert.equal(afterInstance.moduleFailures,0); assert.equal(afterInstance.instanceCount,1);
   assert.equal(afterInstance.instanceFailures,1); assert.equal(afterInstance.instanceNs,1_000_000);
   assert.equal(afterInstance.admissionCount,0); assert.equal(badInstance.stats().installedUnits,0);
+  for(const diagnostic of [beforeModule,afterModule,afterInstance]) {
+    assert.equal(diagnostic.sourceWitnessedAdmissions,0);
+    assert.equal(diagnostic.sourceWitnessPendingAdmissions,0);
+    assert.equal(diagnostic.sourceWitnessRemovedAdmissions,0);
+  }
 });
 test('cold compilation diagnostics cap PC retention and snapshots while preserving aggregate totals', t => {
   let identity = 0n, clock = 0;
@@ -300,6 +437,15 @@ test('cold compilation diagnostics cap PC retention and snapshots while preservi
   assert.equal(diagnostic.lastAdmissions.at(-1).sequence,8195);
   assert.equal(diagnostic.slowestAdmissions.length,8);
   assert.deepEqual(diagnostic.slowestAdmissions.map(row=>row.sequence),[1,2,3,4,5,6,7,8]);
+  assert.equal(diagnostic.sourceWitnessedAdmissions,0);
+  assert.equal(diagnostic.sourceWitnessPendingAdmissions,1);
+  assert.equal(diagnostic.sourceWitnessRemovedAdmissions,8194);
+  f.control.sourceVersion=100n; cache.execute(cache.units.values().next().value);
+  const witnessed=cache.stats().cacheDiagnostics;
+  assert.equal(witnessed.sourceWitnessedAdmissions,1); assert.equal(witnessed.sourceWitnessPendingAdmissions,0);
+  assert.equal(witnessed.droppedPcSourceWitnesses,1);
+  assert.equal(witnessed.lastAdmissions.at(-1).sourceVersion,'100');
+  assert.equal(witnessed.lastAdmissions.at(-1).sourceComparison,'untracked-pc');
 });
 test('NeedCode retains context until a real canonical boundary is published and imported', () => {
   const f = fixture(), cache = new CodeCache(f.engine,{chain:false});
