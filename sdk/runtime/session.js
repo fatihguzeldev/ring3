@@ -249,6 +249,7 @@ export class Session {
       const checkpoint = this.observation?.checkpoint();
       if (checkpoint) await checkpoint;
       if (!this.running || this.stopped) break;
+      if (this.paused) continue;
       if (h.get(72) === 9) {
         this.status("exited", `process exited with code${h.get(80)}`, { exitCode: h.get(80) });
         this.running = false;
@@ -257,6 +258,7 @@ export class Session {
       const now = this.observeClock();
       this.media.update(now);
       await this.media.graphicsOutput();
+      if (this.paused) continue;
       if (this.running && !this.stopped && this.requestedFrameProbe && !this.media.graphicsTransport.pending &&
           ![...this.blocked.values()].some((call) => call.id === 0x4020f || call.id === 0x40c03)) {
         this.frameProbe = new FrameProbe(this.requestedFrameProbe, this);
@@ -267,6 +269,7 @@ export class Session {
         ? this.measurements.runAsync("providers", () => this.providers())
         : this.providers());
       if (!this.running || this.stopped) break;
+      if (this.paused) continue;
       // yield at a bounded host boundary even when a guest only polls or computes.
       if (
         this.needsSchedule ||
@@ -407,7 +410,7 @@ export class Session {
         )
           break;
         this.code.import();
-      } while (this.running && performance.now() - start < 6);
+      } while (this.running && !this.paused && performance.now() - start < 6);
       this.code.publish();
       if (performance.now() - this.lastStatus > 1000) {
         this.lastStatus = performance.now();
