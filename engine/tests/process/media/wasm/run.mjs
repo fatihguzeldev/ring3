@@ -10,8 +10,9 @@ const bytes = readFileSync(enginePath);
 const sha256 = createHash('sha256').update(bytes).digest('hex');
 assert.equal(sha256, process.env.RING3_ENGINE_SHA256, 'exact selected engine');
 const module = await WebAssembly.compile(bytes);
-assertEngineExports(module, root);
-const {exports: e} = await WebAssembly.instantiate(module, {});
+const observability = WebAssembly.Module.imports(module).some(item => item.module === 'ring3_observability');
+assertEngineExports(module, root, {observability});
+const {exports: e} = await WebAssembly.instantiate(module, {ring3_observability:{now_ns:()=>0n}});
 let calls = 0;
 function call(name, args = [], expected = 0) {
   const fn = e[`ring3_abi_v1_${name}`];

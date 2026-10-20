@@ -179,8 +179,9 @@ function detectionDeclarations(text, path) {
 }
 
 // the closed declaration tables own the engine export set; fixture API subsets retain their own arity checks.
-export function assertEngineExports(module, root) {
-  assert.deepEqual(WebAssembly.Module.imports(module), [], 'engine has no JS imports');
+export function assertEngineExports(module, root, {observability = false} = {}) {
+  assert.deepEqual(WebAssembly.Module.imports(module), observability
+    ? [{module:'ring3_observability',name:'now_ns',kind:'function'}] : [], 'exact engine JS imports');
   const ownerPath = 'engine/src/abi/wasm/exports/mod.rs';
   const ownerText = readFileSync(join(root, ownerPath), 'utf8');
   const ownerList = ownerText.match(/\n\}\s*\n((?:(?:mod [a-z0-9_]+;|#\[cfg\(feature = "observability"\)\]\s*\nmod (?:census|observability);)\s*\n)+)$/)?.[1];
@@ -189,10 +190,12 @@ export function assertEngineExports(module, root) {
   for (const name of ['census', 'observability']) {
     const conditional = `#[cfg(feature = "observability")]\nmod ${name};`;
     assert.ok(ownerList.split(conditional).length <= 2, `unique conditional ${name} owner`);
+    if (observability) assert.ok(ownerList.includes(conditional), `enabled conditional ${name} owner`);
     unconditionalOwners = unconditionalOwners.replace(conditional, '');
   }
   const owners = [...unconditionalOwners.matchAll(/^mod (\w+);$/gm)]
     .map(([, name]) => `engine/src/abi/wasm/exports/${name}.rs`);
+  if (observability) owners.push(...['census','observability'].map(name => `engine/src/abi/wasm/exports/${name}.rs`));
   const sourcePaths = [];
   function declarationsAt(path) {
     assert.ok(!sourcePaths.includes(path), `${path}: unique export owner`);
