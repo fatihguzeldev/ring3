@@ -402,6 +402,27 @@ fn heat_uses_completed_retirements_and_a_jit_request_requires_new_reuse() {
 }
 
 #[test]
+fn colliding_heat_sites_retain_independent_completed_reuse() {
+    let memory = memory(&[0x90]);
+    let mut heat = ColdHeat::new(2);
+    let sites = [0x1000, 0x1801];
+    assert_eq!(ColdHeat::index(sites[0]), ColdHeat::index(sites[1]));
+    for _ in 0..2 {
+        for pc in sites {
+            assert!(!heat.hot(&memory, pc));
+            heat.retired(&memory, pc);
+        }
+    }
+    for pc in sites {
+        assert!(heat.hot(&memory, pc));
+    }
+    heat.requested();
+    for pc in sites {
+        assert!(!heat.hot(&memory, pc));
+    }
+}
+
+#[test]
 fn executable_epoch_changes_reset_heat_but_private_data_writes_do_not() {
     let mut memory = memory(&[0x40, 0xeb, 0xfd]);
     let mut context = context(4);

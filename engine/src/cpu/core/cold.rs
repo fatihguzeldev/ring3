@@ -16,6 +16,8 @@ mod memory;
 use memory::{Failure, Port};
 
 const HEAT_SLOTS: usize = 8192;
+const HEAT_WAYS: usize = 4;
+const HEAT_SETS: usize = HEAT_SLOTS / HEAT_WAYS;
 // this repeat gate is provisional; its amortization point must be measured.
 const HOT_VISITS: u32 = 64;
 
@@ -78,7 +80,7 @@ impl ColdHeat {
     }
 
     fn index(pc: u32) -> usize {
-        ((pc ^ pc.rotate_left(13)) as usize) & (HEAT_SLOTS - 1)
+        ((pc ^ (pc >> 11) ^ (pc >> 22)) as usize & (HEAT_SETS - 1)) * HEAT_WAYS
     }
 
     fn advance(&mut self) {
@@ -100,8 +102,10 @@ impl ColdHeat {
 
     fn hot(&mut self, memory: &AddressSpace, pc: u32) -> bool {
         self.source(memory);
-        let row = &self.rows[Self::index(pc)];
-        row.generation == self.generation && row.pc == pc && row.visits >= self.threshold
+        let first = Self::index(pc);
+        self.rows[first..first + HEAT_WAYS].iter().any(|row| {
+            row.generation == self.generation && row.pc == pc && row.visits >= self.threshold
+        })
     }
 
     fn requested(&mut self) {
@@ -111,16 +115,31 @@ impl ColdHeat {
 
     fn retired(&mut self, memory: &AddressSpace, pc: u32) {
         self.source(memory);
-        let row = &mut self.rows[Self::index(pc)];
-        if row.generation != self.generation || row.pc != pc {
-            *row = HeatRow {
-                pc,
-                visits: 1,
-                generation: self.generation,
-            };
-        } else {
-            row.visits = row.visits.saturating_add(1);
+        let first = Self::index(pc);
+        let rows = &mut self.rows[first..first + HEAT_WAYS];
+        let mut replacement = 0;
+        let mut fewest_visits = u32::MAX;
+        let mut expired = false;
+        for (index, row) in rows.iter_mut().enumerate() {
+            if row.generation == self.generation {
+                if row.pc == pc {
+                    row.visits = row.visits.saturating_add(1);
+                    return;
+                }
+                if !expired && row.visits < fewest_visits {
+                    replacement = index;
+                    fewest_visits = row.visits;
+                }
+            } else if !expired {
+                replacement = index;
+                expired = true;
+            }
         }
+        rows[replacement] = HeatRow {
+            pc,
+            visits: 1,
+            generation: self.generation,
+        };
     }
 }
 

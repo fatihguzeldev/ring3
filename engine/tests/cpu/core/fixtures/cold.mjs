@@ -59,6 +59,7 @@ function runCase(name,spec) {
       engine.ok('map',address,1,index===0?7:3);
       engine.request(pages[index]);engine.ok('upload',address,4096);
     }
+    if(spec.codePermissions!==undefined)engine.ok('protect',0x1000,1,spec.codePermissions);
     if(spec.permissions!==undefined)engine.ok('protect',0x3000,1,spec.permissions);
     const state=record('R3ST',56),stateView=view(state);stateView.setUint16(4,3,true);
     const registers=spec.registers??[11,12,13,0x3000,0x4800,15,16,17],flags=spec.flags??0x403;
@@ -128,6 +129,13 @@ function runCase(name,spec) {
     assert.deepEqual(bytes(engine.base,native.arena_len()),expectedArena,'complete canonical arena, FP80 and other banks');
     assert.deepEqual([1,3,4].map(page=>word(word(context,56)+page*4)),[1,2,3]);assert.equal(word(context,68),16);
     assert.deepEqual(bytes(word(context,64),16*4096),expectedRam,'whole canonical allocation and literal code/data/stack');
+    if(spec.collidingHeat) {
+      const first=result.runs[0],prefix=view(unhex(first.contextHex));
+      assert.deepEqual({kind:first.kind,stop:first.coreReason,retired:first.retired,work:first.work,
+        eax:prefix.getUint32(0,true),pc:prefix.getUint32(32,true),flags:prefix.getUint32(36,true),remaining:prefix.getUint32(44,true)},
+        {kind:'cold',stop:1,retired:256,work:256,eax:128,pc:0x1000,flags:0x12,remaining:1},
+        'four repeatedly retired PCs request compilation before the 129th INC');
+    }
     if(spec.runs!==false)assert.deepEqual(result.runs.map(({kind,coreReason})=>[kind,coreReason]),spec.runs??[['cold',spec.stop??2]]);
     assert.equal(result.modules.length,spec.modules??0);assert.equal(cache.stats().admissions,spec.modules??0);
     if(spec.seedEntry!==undefined) {
@@ -162,5 +170,10 @@ try {
   runCase('cold-heat-survives-compiled-frontier',{code:heatCode,budget:225,pc:0x1000,flags:2,expectedFlags:6,
     registers:[0,0,0,0x3000,0x4800,0,0x1040,0x1000],expectedRegisters:[75,0,0,0x3000,0x4800,0,0x1040,0x1000],
     chain:true,seedEntry:0x1040,maxRuns:256,runs:false,modules:2});
+  const collisionTail=unhex('40e9fadfffff');
+  runCase('cold-heat-four-repeated-pcs',{code:'40e9fa1f0000',budget:257,pc:0x1001,flags:2,expectedFlags:6,
+    registers:[0,0,0,0x3000,0x4800,0,0,0],expectedRegisters:[129,0,0,0x3000,0x4800,0,0,0],
+    codePermissions:5,permissions:5,data:d=>collisionTail.forEach((value,index)=>d.setUint8(index,value)),
+    collidingHeat:true,runs:[['cold',1],['compiled',2]],modules:1});
   report.complete=true;checkpoint();console.log(JSON.stringify({complete:true,engineSha256:artifact.sha256,cases:report.cases.length}));
 } catch(error) {report.failure={stage,message:String(error),stack:error.stack};checkpoint();throw error;}
