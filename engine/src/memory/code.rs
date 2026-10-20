@@ -13,6 +13,7 @@ pub(crate) fn new_identity() -> Result<u64, MemoryError> {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(C)]
 pub(crate) struct PageVersion {
     pub mapping: u64,
     pub content: u64,

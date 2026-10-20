@@ -2,6 +2,7 @@ mod aliases;
 mod atomic;
 mod backing;
 mod code_fetch;
+mod core;
 mod cpu;
 mod guard;
 mod incarnations;
@@ -11,6 +12,7 @@ mod service;
 mod windows;
 
 pub(crate) use aliases::SharedPages;
+pub(crate) use core::{CoreMemoryView32, CoreWriteOutcome};
 pub(crate) use guard::GuardPage32;
 pub(crate) use mapping::PageInitialization;
 pub(crate) use windows::PrivatePageChange32;
