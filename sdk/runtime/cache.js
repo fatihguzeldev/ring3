@@ -1,7 +1,9 @@
+const MAX_CODE_BYTES = 32 * 1024 * 1024;
+
 export class CodeCache {
-  constructor(engine, {budget = 50000, instructions = 2048, blocks = 128, capacity = 256, chain = false} = {}) {
+  constructor(engine, {budget = 50000, instructions = 2048, blocks = 128, capacity = 1024, chain = true} = {}) {
     if (typeof chain !== 'boolean') throw new Error('invalid core chain option');
-    for (const [name, value, maximum] of [['budget', budget, 0xffffffff], ['instructions', instructions, 16384], ['blocks', blocks, 1024], ['capacity', capacity, 256]]) {
+    for (const [name, value, maximum] of [['budget', budget, 0xffffffff], ['instructions', instructions, 16384], ['blocks', blocks, 1024], ['capacity', capacity, 1024]]) {
       if (!Number.isInteger(value) || value < 1 || value > maximum) throw new Error(`invalid core ${name}`);
     }
     this.engine = engine;
@@ -18,6 +20,7 @@ export class CodeCache {
     this.budget = budget; this.instructions = instructions; this.blocks = blocks; this.capacity = capacity;
     this.units = new Map(); this.context = 0; this.open = false; this.dirty = false; this.dirtyWork = 0; this.lastStop = 1;
     this.runs = 0; this.regions = 0; this.retired = 0; this.work = 0; this.admissions = 0; this.hits = 0; this.evictions = 0;
+    this.evictionReasons = {count:0,bytes:0};
     this.generatedModuleBytes = 0; this.retainedModuleBytes = 0;
     this.chain = chain;
     if (chain) this.initializeDispatch();
@@ -41,14 +44,14 @@ export class CodeCache {
       throw new Error('invalid core dispatch exports');
     this.dispatch = exports;
   }
-  evict() {
+  evict(reason) {
     const [id,unit] = this.units.entries().next().value;
     if (this.chain) {
       const status = this.native.core_unlink(unit.slot,Number(id&0xffffffffn),Number(id>>32n));
       if (status !== 0) throw new Error(`core_unlink returned ${status}`);
       this.table.set(unit.slot,null); this.freeSlots.push(unit.slot);
     }
-    this.units.delete(id); this.retainedModuleBytes -= unit.bytes; this.evictions++;
+    this.units.delete(id); this.retainedModuleBytes -= unit.bytes; this.evictions++; this.evictionReasons[reason]++;
   }
   pristine() {
     if (this.engine.api !== this.api || this.engine.memory !== this.memory ||
@@ -85,7 +88,8 @@ export class CodeCache {
     const run = new WebAssembly.Instance(module, {ring3: bindings}).exports.run;
     if (typeof run !== 'function' || run.length !== 2) throw new Error('invalid core run export');
     const unit = {id, pc, run, bytes: length};
-    while (this.units.size >= this.capacity || this.retainedModuleBytes + length > 32 * 1024 * 1024) this.evict();
+    while (this.units.size >= this.capacity || this.retainedModuleBytes + length > MAX_CODE_BYTES)
+      this.evict(this.retainedModuleBytes + length > MAX_CODE_BYTES ? 'bytes' : 'count');
     if (this.chain) {
       const slot = this.freeSlots.pop();
       if (!slot || this.table.get(slot) !== null) throw new Error('invalid free core table slot');
@@ -148,6 +152,7 @@ export class CodeCache {
     return {backend: 'core', chainEnabled:this.chain, runs: this.runs, regions:this.regions, retired: this.retired, work: this.work, admissions: this.admissions,
       engineCacheHits: this.hits, evictions: this.evictions, generatedModuleBytes: this.generatedModuleBytes,
       retainedModuleBytes: this.retainedModuleBytes, installedUnits: this.units.size, unitCapacity: this.capacity,
+      byteCapacity:MAX_CODE_BYTES, evictionReasons:{...this.evictionReasons},
       wasmMemoryBytes: this.memory.buffer.byteLength};
   }
 }

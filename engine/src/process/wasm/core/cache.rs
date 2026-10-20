@@ -4,7 +4,7 @@ use std::{
     rc::{Rc, Weak},
 };
 
-const MAX_REGIONS: usize = 256;
+const MAX_REGIONS: usize = 1024;
 const MAX_CODE_BYTES: usize = 32 << 20;
 const MAX_LINK_SLOT: usize = 4096;
 
@@ -222,7 +222,9 @@ mod tests {
     };
 
     fn memory() -> AddressSpace {
-        let mut memory = AddressSpace::new(2).unwrap();
+        let filler_bytes = (MAX_REGIONS + 64) * 8;
+        let filler_pages = filler_bytes.div_ceil(4096);
+        let mut memory = AddressSpace::new((2 + filler_pages) as u32).unwrap();
         memory
             .map_zeroed(
                 PageRange::new(GuestAddress(0x1000), 1).unwrap(),
@@ -239,10 +241,18 @@ mod tests {
         code[..15].copy_from_slice(&[
             0x83, 0xc0, 1, 0x75, 5, 0x83, 0xc0, 2, 0xeb, 3, 0x83, 0xc0, 3, 0x0f, 0x0b,
         ]);
-        for index in 0..MAX_REGIONS + 32 {
-            code[0x100 + index * 8..0x103 + index * 8].copy_from_slice(&[0x90, 0x0f, 0x0b]);
-        }
         memory.write(GuestAddress(0x1000), &code).unwrap();
+        memory
+            .map_zeroed(
+                PageRange::new(GuestAddress(0x4000), filler_pages as u32).unwrap(),
+                Permissions::ALL,
+            )
+            .unwrap();
+        let mut fillers = vec![0; filler_pages * 4096];
+        for index in 0..MAX_REGIONS + 64 {
+            fillers[index * 8..index * 8 + 3].copy_from_slice(&[0x90, 0x0f, 0x0b]);
+        }
+        memory.write(GuestAddress(0x4000), &fillers).unwrap();
         memory
     }
 
@@ -260,7 +270,7 @@ mod tests {
     }
 
     fn filler(index: usize) -> u32 {
-        0x1100 + index as u32 * 8
+        0x4000 + index as u32 * 8
     }
 
     fn bounds(cache: &CoreCache32) {
@@ -530,6 +540,65 @@ mod tests {
             2
         );
         assert_eq!(cache.lookup_linked(&memory, filler(0)).unwrap().1, 1);
+        bounds(&cache);
+    }
+
+    #[test]
+    fn more_than_256_small_regions_remain_cached_below_the_byte_limit() {
+        let memory = memory();
+        let mut cache = CoreCache32::default();
+        let first = cache.insert(compiled(&memory, filler(0)));
+        cache.install_link(&first, 1).unwrap();
+        for index in 1..300 {
+            cache.insert(compiled(&memory, filler(index)));
+        }
+        assert_eq!(cache.regions.len(), 300);
+        assert!(cache.bytes < MAX_CODE_BYTES);
+        let (selected, slot) = cache.lookup_linked(&memory, filler(0)).unwrap();
+        assert!(Rc::ptr_eq(&selected, &first));
+        assert_eq!(slot, 1);
+        bounds(&cache);
+    }
+
+    #[test]
+    fn real_byte_pressure_evicts_and_releases_links_before_the_count_limit() {
+        let mut memory = AddressSpace::new(4).unwrap();
+        memory
+            .map_zeroed(
+                PageRange::new(GuestAddress(0x1000), 4).unwrap(),
+                Permissions::ALL,
+            )
+            .unwrap();
+        memory
+            .write(GuestAddress(0x1000), &[0x83, 0x03, 1].repeat(4096))
+            .unwrap();
+        let limits = CompileOptions {
+            instructions: 4096,
+            blocks: 1,
+            wasm_bytes: 16 << 20,
+        };
+        let mut cache = CoreCache32::default();
+        let first = cache.insert(compile(&memory, GuestAddress(0x1000), limits).unwrap());
+        let bytes = first.wasm().len();
+        let count = MAX_CODE_BYTES / bytes + 1;
+        assert!(
+            count < MAX_REGIONS,
+            "byte pressure must precede count pressure"
+        );
+        cache.install_link(&first, 1).unwrap();
+        let mut newest = Rc::clone(&first);
+        for index in 1..count {
+            newest = cache.insert(compile(&memory, GuestAddress(0x1000), limits).unwrap());
+            cache.install_link(&newest, index as u32 + 1).unwrap();
+            bounds(&cache);
+        }
+        assert!(cache.regions.len() < count);
+        assert!(!cache.regions.contains_key(&first.identity()));
+        assert!(cache.install_link(&first, 1).is_err());
+        cache.unlink(count as u32, newest.identity()).unwrap();
+        cache.install_link(&newest, 1).unwrap();
+        assert!(cache.unlink(1, first.identity()).is_err());
+        assert_eq!(cache.lookup_linked(&memory, 0x1000).unwrap().1, 1);
         bounds(&cache);
     }
 }

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {CodeCache} from '../runtime/cache.js';
 import {callbackRecord} from '../runtime/callback.js';
+import {DEFAULT_EXECUTION} from '../runtime/configuration.js';
 
 const u = n => { const out = []; do { const b = n & 127; n >>>= 7; out.push(b | (n ? 128 : 0)); } while (n); return out; };
 const positive = n => { const out = u(n); if (out.at(-1) & 64) {out[out.length - 1] |= 128; out.push(0);} return out; };
@@ -38,19 +39,28 @@ function driver() {
     ...section(7,[2,...string('run'),0,1,...string('regions'),3,0]),
     ...section(10,[1,...u(body.length),...body])]);
 }
+function paddedProgram(encoded, padding = 0) {
+  if (!padding) return encoded;
+  const name = string('padding'), header = Uint8Array.from([0,...u(name.length + padding),...name]);
+  const bytes = new Uint8Array(encoded.length + header.length + padding);
+  bytes.set(encoded); bytes.set(header,encoded.length); return bytes;
+}
 function fixture(select = pc => ({id: 1n, stop: 1, next: pc + 4})) {
   const memory = new WebAssembly.Memory({initial: 2}), calls = [], arena = new Map([[48, 0x1000]]), control = {begin: () => 0};
-  let context = 256, selected;
+  let context = 256, selected, encoded;
   const links = new Map(), dispatch = driver();
   const d = () => new DataView(memory.buffer);
   const api = {
     core_prepare(pc, instructions, blocks) {
       calls.push(['prepare', pc, instructions, blocks]); selected = select(pc);
+      encoded = paddedProgram(program(selected.stop, selected.next, selected.retired, selected.work),selected.padding);
+      const pages = Math.ceil((2048 + encoded.length) / 65536);
+      if (pages > memory.buffer.byteLength / 65536) memory.grow(pages - memory.buffer.byteLength / 65536);
       d().setUint32(context + 32, pc, true); d().setBigUint64(context + 120, selected.id, true);
-      new Uint8Array(memory.buffer, 2048).set(program(selected.stop, selected.next, selected.retired, selected.work)); return 0;
+      new Uint8Array(memory.buffer, 2048).set(encoded); return 0;
     },
     core_context_ptr: () => context, core_code_ptr: () => 2048,
-    core_code_len: () => program(selected.stop, selected.next, selected.retired, selected.work).length,
+    core_code_len: () => encoded.length,
     core_begin() { calls.push(['begin']); return control.begin(); }, core_end() { calls.push(['end']); return 0; },
     core_import() { calls.push(['import']); d().setUint32(context + 32, arena.get(48), true); d().setUint32(context, arena.get(16) ?? 0,true); return 0; },
     core_export(reason,work) { calls.push(['export', reason,work]); arena.set(48, d().getUint32(context + 32, true)); arena.set(72, reason === 2 ? 1 : 3); return 0; },
@@ -84,13 +94,13 @@ function fixture(select = pc => ({id: 1n, stop: 1, next: pc + 4})) {
 }
 test('native prepare selects every requested entry and native identity controls reuse', () => {
   const f = fixture(pc => ({id: pc < 0x2000 ? 1n : 2n, stop: 1, next: pc + 4}));
-  const cache = new CodeCache(f.engine);
+  const cache = new CodeCache(f.engine,{chain:false});
   const a = cache.entry(0x1000), inside = cache.entry(0x1004), b = cache.entry(0x2000);
   assert.equal(a, inside); assert.notEqual(a, b); assert.deepEqual(f.calls.filter(c => c[0] === 'prepare').map(c => c[1]), [0x1000,0x1004,0x2000]);
   assert.equal(cache.stats().admissions, 2); assert.equal(cache.stats().engineCacheHits, 1);
 });
 test('NeedCode retains context until a real canonical boundary is published and imported', () => {
-  const f = fixture(), cache = new CodeCache(f.engine);
+  const f = fixture(), cache = new CodeCache(f.engine,{chain:false});
   const run = cache.execute(cache.entry());
   assert.equal(run.pc, 0x1004); assert.equal(run.reason, null); assert.equal(f.engine.get(48), 0x1000);
   assert.throws(() => cache.import(), /unpublished/); cache.entry();
@@ -103,26 +113,26 @@ test('NeedCode retains context until a real canonical boundary is published and 
 test('stale begin selects fresh current code once and executes no old module', () => {
   let generation = 1n;
   const f = fixture(pc => ({id: generation, stop: 2, next: generation === 1n ? 0x1100 : 0x2200}));
-  const cache = new CodeCache(f.engine), old = cache.entry(); let begins = 0;
+  const cache = new CodeCache(f.engine,{chain:false}), old = cache.entry(); let begins = 0;
   f.control.begin = () => { begins++; if (begins === 1) {generation = 2n; return 4;} return 0; };
   const run = cache.execute(old); assert.equal(run.id, 2n); assert.equal(run.pc, 0x2200); assert.equal(begins, 2);
 });
 test('native failures, changed bindings, identity and context failures never select another backend', () => {
-  const f = fixture(), cache = new CodeCache(f.engine); cache.entry(); f.setContext(512);
+  const f = fixture(), cache = new CodeCache(f.engine,{chain:false}); cache.entry(); f.setContext(512);
   assert.throws(() => cache.entry(), /context allocation changed/);
-  const g = fixture(); delete g.api.core_numeric; assert.throws(() => new CodeCache(g.engine), /missing core export/);
-  const h = fixture(), guarded = new CodeCache(h.engine); const unit = guarded.entry(); h.api.core_read = () => 4n;
+  const g = fixture(); delete g.api.core_numeric; assert.throws(() => new CodeCache(g.engine,{chain:false}), /missing core export/);
+  const h = fixture(), guarded = new CodeCache(h.engine,{chain:false}); const unit = guarded.entry(); h.api.core_read = () => 4n;
   assert.throws(() => guarded.execute(unit), /bindings changed/);
-  const i = fixture(() => ({id: 1n, stop: 8, next: 0x1000})), broken = new CodeCache(i.engine);
+  const i = fixture(() => ({id: 1n, stop: 8, next: 0x1000})), broken = new CodeCache(i.engine,{chain:false});
   assert.throws(() => broken.execute(broken.entry()), /invalid core stop 8/); assert.equal(broken.open, false);
-  const j = fixture(() => ({id: 1n, stop: 4, next: 0x1000})), unsupported = new CodeCache(j.engine);
+  const j = fixture(() => ({id: 1n, stop: 4, next: 0x1000})), unsupported = new CodeCache(j.engine,{chain:false});
   assert.throws(() => unsupported.execute(unsupported.entry()), /unsupported instruction/);
   assert.deepEqual(j.calls.filter(c => c[0] === 'export'),[['export',4,1]]);
 });
 test('publication carries consumed work across NeedCode independently of retirement', () => {
   const f = fixture(pc => pc === 0x1000 ? {id:1n,stop:1,next:0x1004,retired:0,work:3}
     : {id:2n,stop:2,next:0x1008,retired:1,work:2});
-  const cache = new CodeCache(f.engine); cache.execute(cache.entry()); cache.execute(cache.entry());
+  const cache = new CodeCache(f.engine,{chain:false}); cache.execute(cache.entry()); cache.execute(cache.entry());
   assert.equal(cache.stats().retired,1); assert.equal(cache.stats().work,5);
   assert.deepEqual(f.calls.filter(c => c[0] === 'export'),[['export',2,5]]);
 });
@@ -136,6 +146,59 @@ test('chained dispatch enters linked Wasm regions with one native begin and end'
   assert.equal(cache.stats().runs,1); assert.equal(cache.stats().regions,2);
   assert.equal(f.calls.filter(([name]) => name === 'prepare').length,3);
   assert.deepEqual(f.calls.filter(([name]) => ['begin','end','next'].includes(name)),[['begin'],['next',f.context],['end']]);
+});
+test('ordinary execution defaults to chained dispatch while explicit false remains available', () => {
+  assert.equal(DEFAULT_EXECUTION.chain,true);
+  const f = fixture(pc => pc === 0x1000 ? {id:1n,stop:1,next:0x2000} : {id:2n,stop:2,next:0x2004});
+  const cache = new CodeCache(f.engine);
+  assert.equal(cache.stats().chainEnabled,true);
+  cache.entry(0x2000);
+  const run = cache.execute(cache.entry(0x1000));
+  assert.equal(run.regions,2); assert.equal(run.work,2);
+  assert.equal(f.calls.filter(([name]) => name === 'begin').length,1);
+  assert.equal(f.calls.filter(([name]) => name === 'end').length,1);
+  const direct = new CodeCache(fixture().engine,{chain:false});
+  assert.equal(direct.stats().chainEnabled,false); assert.equal(direct.table,undefined);
+});
+test('the default count bound retains more than 256 small modules within the same byte budget', () => {
+  assert.equal(DEFAULT_EXECUTION.capacity,1024);
+  const f = fixture(pc => ({id:BigInt(pc),stop:2,next:pc+4}));
+  const cache = new CodeCache(f.engine,{chain:false}), first = cache.entry(0x1000);
+  for (let index=1; index<300; index++) cache.entry(0x1000+index*4);
+  const stats = cache.stats();
+  assert.equal(stats.unitCapacity,1024); assert.equal(stats.byteCapacity,32*1024*1024);
+  assert.equal(stats.installedUnits,300); assert.equal(stats.admissions,300); assert.equal(stats.evictions,0);
+  assert.equal(cache.units.get(first.id),first); assert(stats.retainedModuleBytes<stats.byteCapacity);
+});
+test('capacity accepts 1024 and rejects invalid or larger metadata bounds', () => {
+  assert.equal(new CodeCache(fixture().engine,{capacity:1024,chain:false}).stats().unitCapacity,1024);
+  for (const capacity of [0,1025,1.5,NaN,Infinity])
+    assert.throws(() => new CodeCache(fixture().engine,{capacity,chain:false}),/invalid core capacity/);
+});
+test('count eviction statistics change only after the expected owner is unlinked', () => {
+  const f = fixture(pc => ({id:BigInt(pc),stop:2,next:pc+4}));
+  const cache = new CodeCache(f.engine,{capacity:1,chain:true});
+  cache.entry(0x1000); cache.entry(0x2000);
+  assert.deepEqual(cache.stats().evictionReasons,{count:1,bytes:0});
+  const detached = cache.stats().evictionReasons; detached.count=99;
+  f.control.unlink=()=>4;
+  assert.throws(() => cache.entry(0x3000),/core_unlink returned 4/);
+  assert.equal(cache.stats().evictions,1);
+  assert.deepEqual(cache.stats().evictionReasons,{count:1,bytes:0});
+});
+test('byte pressure evicts below the count limit and safely reuses the released table slot', () => {
+  const f = fixture(pc => ({id:BigInt(pc),stop:2,next:pc+4,padding:12*1024*1024}));
+  const cache = new CodeCache(f.engine,{capacity:1024,chain:true});
+  const first = cache.entry(0x1000), second = cache.entry(0x2000), third = cache.entry(0x3000);
+  const stats = cache.stats();
+  assert.equal(stats.byteCapacity,32*1024*1024); assert.equal(stats.installedUnits,2);
+  assert.equal(stats.evictions,1); assert.deepEqual(stats.evictionReasons,{count:0,bytes:1});
+  assert(stats.retainedModuleBytes<=stats.byteCapacity);
+  assert.equal(cache.units.has(first.id),false); assert.equal(cache.units.get(second.id),second);
+  assert.equal(third.slot,first.slot); assert.equal(cache.table.get(third.slot),third.run);
+  assert.deepEqual(f.calls.filter(([name]) => ['link','unlink'].includes(name)),[
+    ['link',first.slot,first.id],['link',second.slot,second.id],['unlink',first.slot,first.id],['link',third.slot,third.id],
+  ]);
 });
 test('cold eviction unlinks the expected owner before a private table slot is reused', () => {
   const f = fixture(pc => ({id:BigInt(pc),stop:2,next:pc+4})), cache = new CodeCache(f.engine,{chain:true,capacity:1});

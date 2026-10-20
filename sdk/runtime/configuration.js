@@ -1,5 +1,5 @@
 import {record,view} from './engine.js';
-export const DEFAULT_EXECUTION = Object.freeze({capacity:256,budget:50000,instructions:2048,blocks:128});
+export const DEFAULT_EXECUTION = Object.freeze({capacity:1024,budget:50000,instructions:2048,blocks:128,chain:true});
 export const SYSTEM_MODULES = [
   ['kernel32',0x70000000],['user32',0x72000000],['dsound',0x73000000],
   ['dinput',0x74000000],['dinput8',0x75000000],['ole32',0x76000000],
