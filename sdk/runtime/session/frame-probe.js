@@ -1,4 +1,3 @@
-import { X87PrecisionProbe } from "./x87-precision-probe.js";
 // successful Present returns bracket bounded host observations; draining enqueues can precede them.
 const origin = BigInt(Math.floor(performance.timeOrigin * 1e6));
 export const frameProbeNow = () => origin + BigInt(Math.floor(performance.now() * 1e6));
@@ -8,11 +7,9 @@ export class FrameProbe {
     this.id = id; this.session = session; this.accepted = 0; this.completed = 0;
     this.sequence = 0; this.batches = 0; this.attempts = 0; this.retries = 0;
     this.closed = false; this.openTaggedBatches = 0;
-    this.math = session.frameProbeMathEnabled ? new X87PrecisionProbe(session, frameProbeNow) : null;
     this.event("armed", { target_intervals: 8, required_producer_edges: 9,
       engine_sha256: session.engine.hash, backend: "core", callback_backend: "core", clean_graphics_boundary: true,
       measurement_enabled: !!session.measurements,
-      ...(this.math ? { x87_precision_probe_enabled: true } : {}),
       semantics: "successful native Present return brackets; enqueue may precede Busy retry completion; GPU completion is Promise-observed, not compositor visibility" });
   }
   event(event, detail = {}) {
@@ -35,8 +32,6 @@ export class FrameProbe {
     if (status === 12) this.retries++;
     const accepted = status === 0 && hresult === 0;
     if (accepted) this.accepted++;
-    const math = accepted && this.accepted === 1 ? this.math?.begin()
-      : accepted && this.accepted === 9 ? this.math?.stopAtNinth() : null;
     this.event("producer-present", {
       producer_index: accepted ? this.accepted : null, accepted, abi_status: status,
       boundary_semantics: "successful-present-return", attempt_index: this.attempts, retry_count: this.retries,
@@ -44,7 +39,6 @@ export class FrameProbe {
       api_id: receipt.id, chain: String(receipt.callArgs[0]), call_pc: receipt.pc,
       before_ns: String(before), after_ns: String(after), guest_clock_ns: String(guestClock),
       closed_phase_boundary: true, ...this.snapshot(),
-      ...(math ? { x87_precision_probe: math } : {}),
     });
     if (this.accepted > 64) this.finish("producer-overflow");
     else this.maybeFinish();
@@ -74,12 +68,11 @@ export class FrameProbe {
   }
   finish(reason) {
     if (this.closed) return;
-    const math = this.math?.finish(reason);
     this.closed = true;
     this.event("finished", { reason, accepted_producer_edges: this.accepted,
       completed_presents: this.completed, attempts: this.attempts, retries: this.retries,
       batches: this.batches, open_tagged_batches: this.openTaggedBatches,
-      ...(math ? { x87_precision_probe: math } : {}) });
+    });
     if (this.session.frameProbe === this) this.session.frameProbe = null;
   }
 }
