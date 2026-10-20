@@ -72,9 +72,9 @@ function captureModule(unit) {
 function until(stop) {
   let retired = 0,work = 0;
   for (let index = 0; index < 16; index++) {
-    const unit = cache.entry(); captureModule(unit);
+    const unit = cache.select(); if(unit)captureModule(unit);
     const result = cache.execute(unit); retired += result.retired; work += result.work;
-    report.runs.push({stage,...result,id:String(result.id),...snapshot()}); checkpoint();
+    report.runs.push({stage,...result,id:result.id===null?null:String(result.id),...snapshot()}); checkpoint();
     if (result.coreReason === 1) continue;
     assert.equal(result.coreReason,stop,`${stage}: exact core stop`); return {...result,retired,work};
   }
@@ -124,9 +124,18 @@ try {
   cache = new CodeCache(engine,{budget:16,instructions:64,blocks:16,capacity:16});
   for (const name of ['core_read','core_write','core_numeric']) assert.equal(cache.native[name],native[name]);
   report.originalNativeHelpers = true;
-  const first = cache.entry(); captureModule(first);
-  engine.ok('core_begin'); backing = word(cache.context,64); backingLength = word(cache.context,68)*4096;
-  assert.equal(backingLength,256*4096); assert.equal(word(cache.context,104),teb); engine.ok('core_end');
+  if(native.core_cold_run) {
+    assert.equal(cache.native.core_cold_run,native.core_cold_run);
+    assert.equal(native.core_cold_run(0),2,'closed cold initialization does not execute the PE');
+    cache.context=native.core_context_ptr()>>>0;assert(cache.context>0);
+    assert.equal(new DataView(engine.memory.buffer).getBigUint64(cache.context+120,true),0n);
+    report.coldInitialization=snapshot();
+  } else {
+    const first = cache.entry(); captureModule(first);engine.ok('core_begin');
+  }
+  backing = word(cache.context,64); backingLength = word(cache.context,68)*4096;
+  assert.equal(backingLength,256*4096); assert.equal(word(cache.context,104),teb);
+  if(!native.core_cold_run)engine.ok('core_end');
   expectedRam = bytes(backing,backingLength); initialBanks = banks();
   const fp = Buffer.from(record('R3FP',128)); fp.writeUInt16LE(0x037f,16); fp.writeUInt16LE(0xffff,20);
   assert.deepEqual(initialBanks[0],fp,'literal initial complete FP80 record');
@@ -177,6 +186,10 @@ try {
   assert.deepEqual(Array.from({length:3},(_,i) => ram(0x403000+i*4,4).readUInt32LE()),[0xf1234567,0,0x52494e47]);
   assert.equal(cache.stats().retired,27); assert.equal(cache.stats().work,27); assert.equal(report.calls.length,4);
   assert.equal(word(cache.context,40),27); assert.equal(word(cache.context,44),0);
+  if(native.core_cold_run) {
+    assert(cache.stats().coldRuns>0);assert.equal(cache.stats().admissions,0);
+    assert.equal(report.modules.length,0,'Windows calls require a genuine Core owner without compiled code');
+  }
   for (const offset of [48,52,112,116]) assert.equal(word(cache.context,offset),0);
   assert(Object.values(report.forbiddenCalls).every(count => count === 0));
   assert.deepEqual(sources(),report.sources,'invoked source owners unchanged');
