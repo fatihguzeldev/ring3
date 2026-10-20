@@ -4,7 +4,21 @@ import {join} from 'node:path';
 
 const detectionOwner = 'engine/src/abi/wasm/exports/detection.rs';
 const cpuOwner = 'engine/src/abi/wasm/exports/cpu.rs';
+const coreOwner = 'engine/src/abi/wasm/exports/core.rs';
+const instanceOwner = 'engine/src/abi/wasm/exports/instance.rs';
 const tokens = value => value.match(/[a-zA-Z_][a-zA-Z_0-9]*|"(?:\\.|[^"\\])*"|[^\s]/g);
+const componentLease = `#[cfg(feature = "external-cpu")]
+export_process_calls! {
+    component_memory_lease(key_low: u32, key_high: u32);
+}`;
+const coreRead = `#[allow(unsafe_code)]
+#[unsafe(export_name = "ring3_abi_v1_core_read")]
+pub extern "C" fn core_read(context: u32, address: u32, width: u32) -> i64 {
+    {
+        #![forbid(unsafe_code)]
+        crate::process::wasm::core_read(context, address, width)
+    }
+}`;
 const cpuPair = `#[allow(unsafe_code, clippy::too_many_arguments)]
 #[unsafe(export_name = "ring3_abi_v1_x87_resident_pair")]
 pub extern "C" fn x87_resident_pair(
@@ -161,11 +175,15 @@ export function assertEngineExports(module, root) {
   assert.deepEqual(WebAssembly.Module.imports(module), [], 'engine has no JS imports');
   const ownerPath = 'engine/src/abi/wasm/exports/mod.rs';
   const ownerText = readFileSync(join(root, ownerPath), 'utf8');
-  const ownerList = ownerText.match(/\n\}\s*\n((?:(?:mod [a-z0-9_]+;|#\[cfg\(feature = "observability"\)\]\s*\nmod observability;)\s*\n)+)$/)?.[1];
+  const ownerList = ownerText.match(/\n\}\s*\n((?:(?:mod [a-z0-9_]+;|#\[cfg\(feature = "observability"\)\]\s*\nmod (?:census|observability);)\s*\n)+)$/)?.[1];
   assert.ok(ownerList, 'closed ABI export owner list');
-  const conditional = '#[cfg(feature = "observability")]\nmod observability;';
-  assert.ok(ownerList.split(conditional).length <= 2, 'unique conditional observability owner');
-  const owners = [...ownerList.replace(conditional, '').matchAll(/^mod (\w+);$/gm)]
+  let unconditionalOwners = ownerList;
+  for (const name of ['census', 'observability']) {
+    const conditional = `#[cfg(feature = "observability")]\nmod ${name};`;
+    assert.ok(ownerList.split(conditional).length <= 2, `unique conditional ${name} owner`);
+    unconditionalOwners = unconditionalOwners.replace(conditional, '');
+  }
+  const owners = [...unconditionalOwners.matchAll(/^mod (\w+);$/gm)]
     .map(([, name]) => `engine/src/abi/wasm/exports/${name}.rs`);
   const sourcePaths = [];
   function declarationsAt(path) {
@@ -182,6 +200,19 @@ export function assertEngineExports(module, root) {
       extra.push({name: 'ring3_abi_v1_x87_resident_pair', kind: 'function', arity: 9});
       extra.push({name: 'ring3_abi_v1_x87_resident_group', kind: 'function', arity: 15});
       extra.push({name: 'ring3_abi_v1_x87_resident_group32', kind: 'function', arity: 39});
+    }
+    if (path === coreOwner) {
+      const parts = text.match(/^(export_process_calls!\s*\{[^{}]*\})\s*([\s\S]*)$/);
+      assert.ok(parts, `${path}: closed Core declaration table`);
+      assert.deepEqual(tokens(parts[2]), tokens(coreRead), `${path}: declared i64 Core read export`);
+      text = parts[1];
+      extra.push({name: 'ring3_abi_v1_core_read', kind: 'function', arity: 3});
+    }
+    if (path === instanceOwner) {
+      const parts = text.match(/^(export_process_calls!\s*\{[^{}]*\})\s*([\s\S]*)$/);
+      assert.ok(parts, `${path}: closed instance declaration table`);
+      assert.deepEqual(tokens(parts[2]), tokens(componentLease), `${path}: declared conditional component memory lease`);
+      text = parts[1];
     }
     const table = text.match(/^((?:mod [a-z0-9_]+;\s*\n)*)\s*export_process_calls! \{\s*([^{}]*)\s*\}\s*$/);
     const body = table?.[2];

@@ -144,6 +144,28 @@ test('the no-import profile omits only the declared conditional observability ow
   });
 });
 
+test('the no-import profile omits the declared conditional census owner without accepting other conditions', () => {
+  workspace(parent, child, root => {
+    const owner = join(root, 'engine/src/abi/wasm/exports/mod.rs');
+    const original = readFileSync(owner, 'utf8');
+    const census = '#[cfg(feature = "observability")]\nmod census;\n';
+    const observability = '#[cfg(feature = "observability")]\nmod observability;\n';
+    writeFileSync(owner, original + census + observability);
+    const result = assertEngineExports(module, root);
+    assert.ok(!result.sourcePaths.some(path => path.endsWith('/census.rs')));
+    assert.ok(!result.sourcePaths.some(path => path.endsWith('/observability.rs')));
+    writeFileSync(owner, original + census + census);
+    assert.throws(() => assertEngineExports(module, root), /unique conditional census owner/);
+    for (const suffix of [
+      '#[cfg(feature = "profiling")]\nmod census;\n',
+      '#[cfg(feature = "observability")]\nmod other;\n',
+    ]) {
+      writeFileSync(owner, original + suffix);
+      assert.throws(() => assertEngineExports(module, root), /closed ABI export owner list/);
+    }
+  });
+});
+
 const cpuSource = readFileSync(new URL('../../../src/abi/wasm/exports/cpu.rs', import.meta.url), 'utf8');
 const pairSource = cpuSource.slice(cpuSource.indexOf('#[allow('));
 
@@ -178,5 +200,65 @@ test('the CPU owner keeps only its exact i64 view parameter and pair/group expor
   });
   workspace('export_process_calls! { cpu_read32_view(epoch: i64); }\n', child, root => {
     assert.throws(() => assertEngineExports(module, root), /ABI parameter/);
+  });
+});
+
+const coreSource = readFileSync(new URL('../../../src/abi/wasm/exports/core.rs', import.meta.url), 'utf8');
+const coreReadSource = coreSource.slice(coreSource.indexOf('#[allow('));
+
+test('the Core owner retains its exact handwritten i64 read export', () => {
+  workspace(parent, child, root => {
+    const dir = join(root, 'engine/src/abi/wasm/exports');
+    writeFileSync(join(dir, 'mod.rs'), 'macro_rules! export_process_calls {\n}\nmod core;\n');
+    const core = join(dir, 'core.rs');
+    const source = 'export_process_calls! { core_begin(); core_write(context: u32, address: u32, width: u32, value: u32); }\n' + coreReadSource;
+    writeFileSync(core, source);
+    const actual = moduleWith(['ring3_abi_v1_core_begin', 'ring3_abi_v1_core_write', 'ring3_abi_v1_core_read']);
+    const result = assertEngineExports(actual, root);
+    assert.deepEqual(result.functions.map(row => [row.name, row.arity]), [
+      ['ring3_abi_v1_core_begin', 0], ['ring3_abi_v1_core_write', 4], ['ring3_abi_v1_core_read', 3],
+    ]);
+    assert.ok(result.sourcePaths.includes('engine/src/abi/wasm/exports/core.rs'));
+    assert.throws(() => assertEngineExports(moduleWith(['ring3_abi_v1_core_begin', 'ring3_abi_v1_core_write']), root), /exact declared engine exports/);
+    for (const invalid of [
+      source.replace(') -> i64', ') -> u32'),
+      source.replace('width: u32) -> i64', 'width: i64) -> i64'),
+      source.replace('core_read(context, address, width)', 'core_read(context, width, address)'),
+      source.replace('ring3_abi_v1_core_read', 'ring3_abi_v1_other'),
+      source + '\nfn hidden() {}\n',
+    ]) {
+      writeFileSync(core, invalid);
+      assert.throws(() => assertEngineExports(actual, root), /declared i64 Core read export/);
+    }
+  });
+});
+
+const instanceSource = readFileSync(new URL('../../../src/abi/wasm/exports/instance.rs', import.meta.url), 'utf8');
+
+test('the no-import default profile omits only the exact conditional component memory lease', () => {
+  workspace(parent, child, root => {
+    const dir = join(root, 'engine/src/abi/wasm/exports');
+    writeFileSync(join(dir, 'mod.rs'), 'macro_rules! export_process_calls {\n}\nmod instance;\n');
+    const instance = join(dir, 'instance.rs');
+    writeFileSync(instance, instanceSource);
+    const names = ['open', 'close', 'arena_ptr', 'arena_len'].map(name => `ring3_abi_v1_${name}`);
+    const actual = moduleWith(names);
+    const result = assertEngineExports(actual, root);
+    assert.deepEqual(result.functions.map(row => [row.name, row.arity]), [
+      [names[0], 3], [names[1], 0], [names[2], 0], [names[3], 0],
+    ]);
+    assert.ok(result.sourcePaths.includes('engine/src/abi/wasm/exports/instance.rs'));
+    assert.throws(() => assertEngineExports(moduleWith([...names, 'ring3_abi_v1_component_memory_lease']), root), /exact declared engine exports/);
+    for (const invalid of [
+      instanceSource.replace('feature = "external-cpu"', 'feature = "other"'),
+      instanceSource.replace('component_memory_lease(', 'other('),
+      instanceSource.replace('key_high: u32', 'key_high: i64'),
+      instanceSource.replace('key_low: u32, key_high: u32', 'key_high: u32, key_low: u32'),
+      instanceSource.replace('#[cfg(feature = "external-cpu")]\n', ''),
+      instanceSource + '\nfn hidden() {}\n',
+    ]) {
+      writeFileSync(instance, invalid);
+      assert.throws(() => assertEngineExports(actual, root), /declared conditional component memory lease/);
+    }
   });
 });
