@@ -5,6 +5,7 @@ mod context;
 mod dispatch;
 mod draw;
 mod factory;
+mod fpu;
 mod garbage;
 mod lifetime;
 mod locks;

@@ -1,5 +1,7 @@
 use super::{
-    D3D8Config32, D3D8Error32, D3D8Runtime32, DispatchError32, resources::PrivateCallbackRequest32,
+    D3D8Config32, D3D8Error32, D3D8Runtime32, DispatchError32,
+    fpu::{FpuSetup32, PreparedFpu32},
+    resources::PrivateCallbackRequest32,
 };
 use crate::{
     graphics::d3d8::{
@@ -122,6 +124,7 @@ impl EngineInstance {
             }
             self.d3d8_reply = None;
         }
+        let fpu = PreparedFpu32::prepare(self, gate, frame.arguments())?;
         let gates = if id == CREATE_GATE {
             Some(self.module_gates()?)
         } else {
@@ -198,19 +201,34 @@ impl EngineInstance {
                 window,
             });
         }
-        let runtime = self.d3d8.as_mut().unwrap();
-        let windows = self
-            .user32
-            .as_ref()
-            .map(super::super::user32::User32Context32::windows);
-        let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
-        let result = if id == CREATE_GATE {
-            Ok(runtime
-                .create_direct3d(memory, frame.arguments()[0], gates.as_deref().unwrap())
-                .unwrap_or(0))
-        } else {
-            runtime.method_call(memory, windows, gate.unwrap(), frame.arguments(), epoch)
+        let mut setup = FpuSetup32::NotReached;
+        let result = {
+            let runtime = self.d3d8.as_mut().unwrap();
+            let windows = self
+                .user32
+                .as_ref()
+                .map(super::super::user32::User32Context32::windows);
+            let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
+            if id == CREATE_GATE {
+                Ok(runtime
+                    .create_direct3d(memory, frame.arguments()[0], gates.as_deref().unwrap())
+                    .unwrap_or(0))
+            } else {
+                runtime.method_call(
+                    memory,
+                    windows,
+                    gate.unwrap(),
+                    frame.arguments(),
+                    epoch,
+                    &mut setup,
+                )
+            }
         };
+        if setup == FpuSetup32::Entered {
+            fpu.unwrap().commit(self);
+        }
+        let runtime = self.d3d8.as_mut().unwrap();
+        let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
         match result {
             Ok(result) => {
                 if !runtime.deferred_private_releases.is_empty() {

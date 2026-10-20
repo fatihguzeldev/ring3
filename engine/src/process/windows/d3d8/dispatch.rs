@@ -1,5 +1,6 @@
 use super::{
     D3D8Runtime32, DispatchError32,
+    fpu::FpuSetup32,
     memory::{check_output, write_words},
     objects::ObjectKind32,
 };
@@ -20,6 +21,7 @@ impl D3D8Runtime32 {
         gate: MethodGate,
         args: &[u32],
         epoch: u64,
+        fpu: &mut FpuSetup32,
     ) -> Result<u32, DispatchError32> {
         let pointer = GuestAddress(args[0]);
         self.com.preflight(memory, pointer)?;
@@ -34,7 +36,7 @@ impl D3D8Runtime32 {
         }
         match gate.interface {
             InterfaceKind::Direct3D => {
-                Ok(self.direct3d_call(memory, windows, gate.slot, args, epoch)?)
+                Ok(self.direct3d_call(memory, windows, gate.slot, args, epoch, fpu)?)
             }
             InterfaceKind::Device => self.device_call(
                 memory,

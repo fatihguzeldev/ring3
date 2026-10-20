@@ -1,5 +1,6 @@
 use super::{
     D3D8Runtime32,
+    fpu::FpuSetup32,
     memory::{check_output, read_words, word, write_words},
     objects::{Device32, Object32, ObjectKind32},
 };
@@ -55,6 +56,7 @@ impl D3D8Runtime32 {
         slot: u8,
         args: &[u32],
         epoch: u64,
+        fpu: &mut FpuSetup32,
     ) -> Result<u32, HResult> {
         let pointer = GuestAddress(args[0]);
         if self.object(pointer)?.interface != InterfaceKind::Direct3D {
@@ -135,7 +137,13 @@ impl D3D8Runtime32 {
                 adapter(args[1])?;
                 Ok(1)
             } // virtual primary monitor identity shared by the desktop host.
-            15 => self.create_device(memory, windows.ok_or(HResult::INVALID_CALL)?, args, epoch),
+            15 => self.create_device(
+                memory,
+                windows.ok_or(HResult::INVALID_CALL)?,
+                args,
+                epoch,
+                fpu,
+            ),
             _ => Err(HResult::INVALID_CALL),
         }
     }
@@ -146,6 +154,7 @@ impl D3D8Runtime32 {
         windows: &WindowContext32,
         args: &[u32],
         epoch: u64,
+        fpu: &mut FpuSetup32,
     ) -> Result<u32, HResult> {
         check_output(memory, args[6], 4)?;
         adapter(args[1])?;
@@ -170,6 +179,9 @@ impl D3D8Runtime32 {
             .description
             .extent;
         let presentation = input.normalize(args[3], extent, &self.config.adapter, false)?;
+        if args[4] & 2 == 0 {
+            *fpu = FpuSetup32::Entered;
+        }
         let backend = Device::new(
             epoch,
             DeviceDescription {
