@@ -1,6 +1,9 @@
 mod abi;
 mod effects;
+mod emitter;
 mod flags;
 mod memory;
+mod program;
 
 pub use abi::{CONTEXT_SIZE, Context32, StopReason};
+pub use program::{CompileError, CompileOptions, CompiledCode, compile};
