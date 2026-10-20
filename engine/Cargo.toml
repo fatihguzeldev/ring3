@@ -81,6 +81,10 @@ name = "cpu_arithmetic"
 path = "tests/cpu/arithmetic/native.rs"
 
 [[test]]
+name = "cpu_core_wasm"
+path = "tests/cpu/core/wasm.rs"
+
+[[test]]
 name = "cpu_arithmetic_wasm"
 path = "tests/cpu/arithmetic/wasm.rs"
 
