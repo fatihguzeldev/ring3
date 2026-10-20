@@ -401,7 +401,8 @@ export class Session {
   async stopCurrent() {
     const generation = ++this.generation,
       worker = this.worker,
-      capture = this.capture ?? null;
+      capture = this.capture ?? null,
+      graphics = this.graphics;
     this.cancelAudioHold(new Error('session stopped'));
     let graphicsQueue = this.graphicsQueue;
     const outcome = this.failed ? "failed" : "cancelled";
@@ -421,9 +422,17 @@ export class Session {
       });
       if (this.generation === generation && this.worker === worker)
         graphicsQueue = this.graphicsQueue;
-      await this.finishCapture(outcome, undefined, capture, graphicsQueue);
-      worker.terminate();
-    } else await this.finishCapture(outcome, undefined, capture, graphicsQueue);
+    }
+    let drainError;
+    try {
+      await graphicsQueue.catch(() => {});
+      await graphics?.drain();
+    } catch (error) {
+      drainError = error;
+      capture?.capture.markIncomplete(`graphics drain failed: ${error.message}`);
+    }
+    await this.finishCapture(drainError ? "failed" : outcome, drainError, capture, graphicsQueue);
+    worker?.terminate();
     if (this.generation !== generation || this.worker !== worker) return;
     this.stopped = null;
     this.worker = null;
@@ -435,6 +444,7 @@ export class Session {
     this.windows.reset();
     this.gdi.clear();
     this.failed = false;
+    if (drainError) throw drainError;
     this.status("stopped", "session stopped");
   }
   async dispose() {
