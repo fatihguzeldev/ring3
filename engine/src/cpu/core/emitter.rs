@@ -15,7 +15,7 @@ use crate::cpu::x86::{
 };
 use wasm_encoder::{
     BlockType, CodeSection, EntityType, ExportKind, ExportSection, Function, FunctionSection,
-    ImportSection, MemArg, MemoryType, Module, TypeSection, ValType,
+    ImportSection, MemArg, MemoryType, Module, NameMap, NameSection, TypeSection, ValType,
 };
 
 pub(super) const CTX: u32 = 0;
@@ -76,7 +76,12 @@ pub(super) fn is_native(operation: &Operation) -> bool {
     numeric::supports(operation)
 }
 
-pub(super) fn emit(blocks: &[Block], identity: u64, native: &[NativeInstruction]) -> Vec<u8> {
+pub(super) fn emit(
+    blocks: &[Block],
+    entry: u32,
+    identity: u64,
+    native: &[NativeInstruction],
+) -> Vec<u8> {
     let shift = u32::from(!native.is_empty());
     let mut module = Module::new();
     let mut types = TypeSection::new();
@@ -121,6 +126,29 @@ pub(super) fn emit(blocks: &[Block], identity: u64, native: &[NativeInstruction]
     code.function(&lookup(blocks));
     code.function(&publisher());
     module.section(&code);
+    let mut names = NameSection::new();
+    names.module(&format!("ring3.guest.{entry:08x}.{identity}"));
+    let mut functions = NameMap::new();
+    functions.append(0, "guest.read_slow");
+    functions.append(1, "guest.write_slow");
+    if shift != 0 {
+        functions.append(2, "guest.numeric");
+    }
+    for (index, name) in [
+        "guest.flags",
+        "guest.read",
+        "guest.write",
+        "guest.run",
+        "guest.lookup",
+        "guest.publish",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        functions.append(2 + shift + index as u32, name);
+    }
+    names.functions(&functions);
+    module.section(&names);
     module.finish()
 }
 

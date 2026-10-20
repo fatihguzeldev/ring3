@@ -3,6 +3,7 @@ import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {makeKernel} from './kernels.mjs';
+import {assertCoreNames, assertDispatchNames} from './names.mjs';
 
 const directory = process.argv[2], PAGE = 4096, CTX = 0x100;
 const MAP = 0x10000, PERM = 0x410000, EXEC = 0x510000, VERSION = 0x510100;
@@ -58,6 +59,7 @@ for (const [index, line] of readFileSync(join(directory, 'regions.tsv'), 'utf8')
   const [name, entry, id] = line.split('\t'), encoded = readFileSync(join(directory, `${name}.wasm`));
   assert(WebAssembly.validate(encoded), `${name}: original region validates`);
   const module = new WebAssembly.Module(encoded);
+  assertCoreNames(module, Number(entry), id);
   assert.deepEqual(WebAssembly.Module.imports(module), [
     {module: 'ring3', name: 'memory', kind: 'memory'}, {module: 'ring3', name: 'read', kind: 'function'},
     {module: 'ring3', name: 'write', kind: 'function'},
@@ -79,6 +81,7 @@ function next(context) {
 const encoded = readFileSync(join(directory, 'dispatch.wasm'));
 assert(WebAssembly.validate(encoded), 'dispatcher validates');
 const module = new WebAssembly.Module(encoded);
+assertDispatchNames(module);
 assert.deepEqual(WebAssembly.Module.imports(module), [
   {module: 'ring3', name: 'memory', kind: 'memory'}, {module: 'ring3', name: 'functions', kind: 'table'},
   {module: 'ring3', name: 'next', kind: 'function'},
@@ -196,6 +199,6 @@ for(const [label,remaining,stop,wanted] of [['no-work',0,1,8],['excess-remaining
   functions.set(8,stub(1,remaining));
   check(label,'caller',8,{slot:8},{stop,pc:0x1000,retired:0,remaining:wanted,regions:1});
 }
-writeFileSync(reportPath,JSON.stringify({complete:true,dispatchSha256:hash(encoded),sources:[import.meta.url,new URL('./kernels.mjs',import.meta.url).href]
+writeFileSync(reportPath,JSON.stringify({complete:true,dispatchSha256:hash(encoded),sources:[import.meta.url,new URL('./kernels.mjs',import.meta.url).href,new URL('./names.mjs',import.meta.url).href]
   .map(url=>({url,sha256:hash(readFileSync(new URL(url)))})),regions:[...regions.values()].map(({name,id,slot,sha256})=>({name,id:String(id),slot,sha256})),records},null,2));
 console.log(JSON.stringify({complete:true,cases:records.length,dispatchSha256:hash(encoded)}));

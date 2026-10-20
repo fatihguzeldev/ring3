@@ -399,7 +399,7 @@ fn compile_formation(
                     })
             })
             .collect();
-        let wasm = super::emitter::emit(&blocks, identity, &native);
+        let wasm = super::emitter::emit(&blocks, entry.0, identity, &native);
         if wasm.len() <= options.wasm_bytes {
             break (wasm, native);
         }

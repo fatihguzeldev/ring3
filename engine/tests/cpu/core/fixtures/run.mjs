@@ -5,6 +5,7 @@ import {join} from 'node:path';
 import {arithmetic, loopOutcome} from './oracle.mjs';
 import {runExtended} from './extended.mjs';
 import {runBits} from './bits.mjs';
+import {assertCoreNames} from './names.mjs';
 
 const directory = process.argv[2];
 const PAGE = 4096, MAP = 0x10000, PERM = 0x410000;
@@ -75,6 +76,7 @@ for (const line of readFileSync(join(directory, 'programs.tsv'), 'utf8').trim().
   const [name, hex, identity] = line.split('\t'), wasm = readFileSync(join(directory, `${name}.wasm`));
   assert.ok(WebAssembly.validate(wasm), `${name}: validates`);
   const module = new WebAssembly.Module(wasm);
+  assertCoreNames(module, name.endsWith('-callee') ? 0x1010 : 0x1000, identity);
   const imports = WebAssembly.Module.imports(module).sort((a, b) => a.name.localeCompare(b.name));
   assert.deepEqual(imports, [
     {module: 'ring3', name: 'memory', kind: 'memory'},
@@ -318,7 +320,7 @@ try {
   assert.deepEqual(guards.trailing,trailing,'publication preserves the eight trailing context bytes');
 } finally {CTX=0x100;}
 const report = {schema: 1, complete: true, node: process.version, cases: results.length,
-  sources: Object.fromEntries(['./run.mjs', './oracle.mjs', './extended.mjs', './bits.mjs', '../wasm.rs'].map(path => [path, hash(readFileSync(new URL(path, import.meta.url)))])),
+  sources: Object.fromEntries(['./run.mjs', './oracle.mjs', './extended.mjs', './bits.mjs', './names.mjs', '../wasm.rs'].map(path => [path, hash(readFileSync(new URL(path, import.meta.url)))])),
   modules: Object.fromEntries([...programs].map(([name, program]) => [name, {identity: String(program.identity), wasmSha256: program.wasmSha256, codeSha256: hash(program.code)}])),
   results};
 writeFileSync(reportPath, JSON.stringify(report, null, 2));

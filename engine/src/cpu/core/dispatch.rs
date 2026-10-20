@@ -1,8 +1,8 @@
 use super::StopReason;
 use wasm_encoder::{
     BlockType, CodeSection, ConstExpr, EntityType, ExportKind, ExportSection, Function,
-    FunctionSection, GlobalSection, GlobalType, ImportSection, MemArg, MemoryType, Module, RefType,
-    TableType, TypeSection, ValType,
+    FunctionSection, GlobalSection, GlobalType, ImportSection, MemArg, MemoryType, Module, NameMap,
+    NameSection, RefType, TableType, TypeSection, ValType,
 };
 
 const STATUS: u32 = 3;
@@ -134,6 +134,13 @@ pub fn emit_dispatch() -> Vec<u8> {
     let mut bodies = CodeSection::new();
     bodies.function(&run);
     module.section(&bodies);
+    let mut names = NameSection::new();
+    names.module("ring3.dispatch");
+    let mut functions = NameMap::new();
+    functions.append(0, "guest.next");
+    functions.append(1, "guest.chain");
+    names.functions(&functions);
+    module.section(&names);
     module.finish()
 }
 

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync, openSync, closeSync} from 'node:fs';
 import {readEngine} from '../../../support/wasm/engine.mjs';
+import {assertCoreNames} from './names.mjs';
 
 const [enginePath, reportPath] = process.argv.slice(2);
 assert(enginePath && reportPath, 'usage: numeric.mjs engine.wasm fresh-report.json');
@@ -11,6 +12,7 @@ const hex = value => Buffer.from(value).toString('hex');
 const unhex = value => Uint8Array.from(Buffer.from(value.replaceAll(' ', ''), 'hex'));
 const fpOffset = 4236, simdOffset = 4364, ymmOffset = 4612;
 const report = {schema: 1, complete: false, engineSha256: engine.sha256, sources: [import.meta.url,
+  new URL('./names.mjs', import.meta.url).href,
   new URL('../../../support/wasm/engine.mjs', import.meta.url).href].map(url => ({url, sha256: hash(readFileSync(new URL(url)))})),
   cases: [], checks: [], limits: ['authored typed numerical routes; no game or performance claim',
     'pending Core call overwrite is covered by the Windows fixture, not this numerical fixture']};
@@ -81,6 +83,7 @@ function runCase(name, codeHex, budget, options, verify) {
     context = api.core_context_ptr()>>>0; assert(context>0 && context%8===0);
     const code = slice(api.core_code_ptr()>>>0,api.core_code_len()>>>0);
     const module = new WebAssembly.Module(code);
+    assertCoreNames(module, 0x1000);
     assert.deepEqual(WebAssembly.Module.imports(module), [
       {module:'ring3',name:'memory',kind:'memory'}, {module:'ring3',name:'read',kind:'function'},
       {module:'ring3',name:'write',kind:'function'}, {module:'ring3',name:'numeric',kind:'function'}]);
