@@ -42,6 +42,8 @@ export class Session {
       inputDelivery: this.media?.inputStatus?.(),
       graphicsInventory: this.media?.graphicsStatus?.(),
       fileReads: this.files?.snapshot?.(),
+      manualPauseMs: (this.pausedDuration ?? 0) + (this.paused ? performance.now() - this.pauseStarted : 0),
+      ...(this.measurements ? {waitSemantics: 'host scheduler task/timer elapsed including event-loop delay; paused-loop waits excluded; not guest wait API duration'} : {}),
       ...extra,
     });
   }
@@ -243,7 +245,7 @@ export class Session {
     while (this.running) {
       this.code.publish();
       if (this.paused) {
-        await this.wait(20);
+        await this.scheduler.wait(20);
         continue;
       }
       const checkpoint = this.observation?.checkpoint();
@@ -488,6 +490,10 @@ export class Session {
     if (this.stopped) return;
     this.cancel();
     if (this.engine) this.engine.ok("close");
+    if (this.paused) {
+      this.pausedDuration = (this.pausedDuration ?? 0) + performance.now() - this.pauseStarted;
+      this.paused = false;
+    }
     this.stopped = true;
     if (notify) this.status("stopped", "stopped");
   }
