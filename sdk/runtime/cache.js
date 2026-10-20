@@ -6,6 +6,12 @@ const DIAGNOSTIC_LAST_CAPACITY = 32;
 const DIAGNOSTIC_SLOW_CAPACITY = 8;
 const repeatOrder = (a,b) => b.admissions-a.admissions || b.bytes-a.bytes || a.pc-b.pc;
 const slowOrder = (a,b) => b.phaseTotalNs-a.phaseTotalNs || a.sequence-b.sequence;
+const compilationPc = (pc,prepareHistoryPartial = false) => ({
+  pc,prepares:0,hits:0,prepareNs:0,prepareFailures:0,admissions:0,bytes:0,
+  identityChanges:0,repeatedIdentityAdmissions:0,lastIdentity:null,firstSequence:0,lastSequence:0,
+  sourceWitnesses:0,lastSourceVersion:null,sameSourceVersionAdmissions:0,unknownSourceAdmissions:0,
+  prepareHistoryPartial,
+});
 
 export class CodeCache {
   #bindings;
@@ -46,7 +52,8 @@ export class CodeCache {
       sourceWitnessedAdmissions:0,sourceWitnessPendingAdmissions:0,sourceWitnessRemovedAdmissions:0,
       samePcNewIdentitySameSourceVersionAdmissions:0,samePcNewIdentityUnknownSourceAdmissions:0,
       droppedPcSourceWitnesses:0,
-      droppedPcPrepares:0,droppedPcAdmissions:0,pcs:new Map(),topRepeat:[],last:[],slow:[],
+      reclaimedPrepareOnlyPcs:0,reclaimedPrepareOnlyPrepares:0,reclaimedPrepareOnlyHits:0,
+      droppedPcPrepares:0,droppedPcAdmissions:0,pcs:new Map(),prepareOnly:new Set(),topRepeat:[],last:[],slow:[],
     } : null;
     this.chain = chain;
     if (chain) this.initializeDispatch();
@@ -58,10 +65,9 @@ export class CodeCache {
       pc >>>= 0;
       row = diagnostic.pcs.get(pc);
       if (!row && diagnostic.pcs.size < DIAGNOSTIC_PC_CAPACITY) {
-        row = {pc,prepares:0,hits:0,prepareNs:0,prepareFailures:0,admissions:0,bytes:0,
-          identityChanges:0,repeatedIdentityAdmissions:0,lastIdentity:null,firstSequence:0,lastSequence:0,
-          sourceWitnesses:0,lastSourceVersion:null,sameSourceVersionAdmissions:0,unknownSourceAdmissions:0};
+        row = compilationPc(pc);
         diagnostic.pcs.set(pc,row);
+        diagnostic.prepareOnly.add(pc);
       }
       if (row) row.prepares++;
       else diagnostic.droppedPcPrepares++;
@@ -81,9 +87,22 @@ export class CodeCache {
     const sequence = ++diagnostic.admissionCount;
     diagnostic.admittedBytes += bytes;
     pc >>>= 0;
-    const row = diagnostic.pcs.get(pc);
+    let row = diagnostic.pcs.get(pc);
+    if (!row && diagnostic.pcs.size === DIAGNOSTIC_PC_CAPACITY && diagnostic.prepareOnly.size) {
+      const reclaimedPc = diagnostic.prepareOnly.values().next().value, reclaimed = diagnostic.pcs.get(reclaimedPc);
+      diagnostic.prepareOnly.delete(reclaimedPc); diagnostic.pcs.delete(reclaimedPc);
+      diagnostic.reclaimedPrepareOnlyPcs++;
+      diagnostic.reclaimedPrepareOnlyPrepares += reclaimed.prepares;
+      diagnostic.reclaimedPrepareOnlyHits += reclaimed.hits;
+    }
+    if (!row && diagnostic.pcs.size < DIAGNOSTIC_PC_CAPACITY) {
+      row = compilationPc(pc,true);
+      row.prepares = 1; row.prepareNs = diagnostic.prepare.lastNs;
+      diagnostic.pcs.set(pc,row);
+    }
     const previousIdentity = row?.lastIdentity ?? null, previousSourceVersion = row?.lastSourceVersion ?? null;
     if (row) {
+      diagnostic.prepareOnly.delete(pc);
       if (row.admissions) {
         diagnostic.trackedRepeatPcAdmissions++;
         if (identity !== row.lastIdentity) {row.identityChanges++; diagnostic.samePcNewIdentityAdmissions++;}
@@ -138,9 +157,13 @@ export class CodeCache {
       semantics:'elapsed wall time; same-PC identity changes alone have no source-change witness',
       sourceWitnessSemantics:'first successful core_begin before guest execution; equal validation versions apply only within the same unchanged guest address space, not identical formed regions or emitted Wasm',
       sourceWitnessPendingSemantics:'pending or removed without a first-begin witness may include units executed only through native chaining',
+      pcRetentionSemantics:'admitted PC rows take priority over prepare-only rows; prepare/hit histories may be partial after reclamation; droppedPcPrepares counts prepares without a row at collection time',
       prepareHitSemantics:'returned identity already instantiated in the SDK cache',
       pcCapacity:DIAGNOSTIC_PC_CAPACITY,lastCapacity:DIAGNOSTIC_LAST_CAPACITY,slowCapacity:DIAGNOSTIC_SLOW_CAPACITY,
       trackedPcCount:diagnostic.pcs.size,droppedPcPrepares:diagnostic.droppedPcPrepares,droppedPcAdmissions:diagnostic.droppedPcAdmissions,
+      trackedAdmissionPcCount:diagnostic.pcs.size-diagnostic.prepareOnly.size,prepareOnlyPcCount:diagnostic.prepareOnly.size,
+      reclaimedPrepareOnlyPcs:diagnostic.reclaimedPrepareOnlyPcs,reclaimedPrepareOnlyPrepares:diagnostic.reclaimedPrepareOnlyPrepares,
+      reclaimedPrepareOnlyHits:diagnostic.reclaimedPrepareOnlyHits,
       admissionCount:diagnostic.admissionCount,admittedBytes:diagnostic.admittedBytes,prepareHits:diagnostic.prepareHits,
       trackedRepeatPcAdmissions:diagnostic.trackedRepeatPcAdmissions,
       samePcNewIdentityAdmissions:diagnostic.samePcNewIdentityAdmissions,samePcSameIdentityAdmissions:diagnostic.samePcSameIdentityAdmissions,

@@ -340,6 +340,44 @@ test('source witness absence does not classify native-chained execution as never
   assert.equal(diagnostic.sourceWitnessedAdmissions,2); assert.equal(diagnostic.sourceWitnessPendingAdmissions,0);
   assert.equal(diagnostic.admissionCount,2);
 });
+test('admitted PC diagnostics reclaim prepare-only rows before losing source comparisons', t => {
+  let identity=1n,clock=0;
+  const f=fixture(pc=>({id:identity,stop:2,next:pc+4})); f.engine.cacheMeasurementsEnabled=true;
+  const cache=new CodeCache(f.engine,{chain:false,capacity:1});
+  t.mock.method(performance,'now',()=>clock++);
+  for(let index=0;index<8192;index++)cache.entry(index*4);
+  const before=cache.stats().cacheDiagnostics;
+  assert.equal(before.trackedPcCount,8192); assert.equal(before.admissionCount,1);
+  assert.equal(before.prepareHits,8191); assert.equal(before.droppedPcPrepares,0);
+  f.control.sourceVersion=7n;
+  identity=2n; cache.execute(cache.entry(0x10000));
+  identity=3n; cache.execute(cache.entry(0x10000));
+  let diagnostic=cache.stats().cacheDiagnostics;
+  assert.equal(diagnostic.droppedPcAdmissions,0);
+  assert.equal(diagnostic.samePcNewIdentityAdmissions,1);
+  assert.equal(diagnostic.samePcNewIdentitySameSourceVersionAdmissions,1);
+  assert.equal(diagnostic.samePcNewIdentityUnknownSourceAdmissions,0);
+  assert.equal(diagnostic.trackedPcCount,8192); assert.equal(diagnostic.trackedAdmissionPcCount,2);
+  assert.equal(diagnostic.prepareOnlyPcCount,8190);
+  assert.equal(diagnostic.reclaimedPrepareOnlyPcs,1);
+  assert.equal(diagnostic.reclaimedPrepareOnlyPrepares,1); assert.equal(diagnostic.reclaimedPrepareOnlyHits,1);
+  assert.equal(diagnostic.droppedPcPrepares,1);
+  const repeat=diagnostic.topRepeatPcs.find(row=>row.pc===0x10000);
+  assert.equal(repeat.admissions,2); assert.equal(repeat.sourceWitnesses,2);
+  assert.equal(repeat.prepares,2); assert.equal(repeat.prepareNs,2_000_000);
+  assert.equal(repeat.prepareHistoryPartial,true); assert.equal(repeat.lastSourceVersion,'7');
+  assert.deepEqual(diagnostic.lastAdmissions.slice(-2).map(row=>[row.pc,row.identity,row.sourceComparison]),
+    [[0x10000,'2','first-admission'],[0x10000,'3','same-version']]);
+  assert.match(diagnostic.pcRetentionSemantics,/admitted.*prepare-only/i);
+  assert.match(diagnostic.pcRetentionSemantics,/partial/i);
+  identity=4n; cache.execute(cache.entry(0));
+  diagnostic=cache.stats().cacheDiagnostics;
+  assert.equal(diagnostic.droppedPcAdmissions,0); assert.equal(diagnostic.reclaimedPrepareOnlyPcs,1);
+  assert.equal(diagnostic.lastAdmissions.at(-1).previousIdentity,'1');
+  assert.equal(diagnostic.lastAdmissions.at(-1).sourceComparison,'unknown-source');
+  const retained=diagnostic.topRepeatPcs.find(row=>row.pc===0);
+  assert.equal(retained.admissions,2); assert.equal(retained.prepareHistoryPartial,false);
+});
 test('cold compilation diagnostics separate prepares, hits, admissions and phase time', t => {
   let identity = 1n, clock = 0;
   const f = fixture(pc => ({id:identity,stop:2,next:pc+4}));
@@ -431,6 +469,9 @@ test('cold compilation diagnostics cap PC retention and snapshots while preservi
   assert.equal(diagnostic.admittedBytes,cache.stats().generatedModuleBytes);
   assert.equal(diagnostic.trackedPcCount,8192); assert.equal(diagnostic.droppedPcPrepares,2);
   assert.equal(diagnostic.droppedPcAdmissions,2);
+  assert.equal(diagnostic.trackedAdmissionPcCount,8192); assert.equal(diagnostic.prepareOnlyPcCount,0);
+  assert.equal(diagnostic.reclaimedPrepareOnlyPcs,0);
+  assert.equal(diagnostic.reclaimedPrepareOnlyPrepares,0); assert.equal(diagnostic.reclaimedPrepareOnlyHits,0);
   assert.equal(diagnostic.trackedRepeatPcAdmissions,1); assert.equal(diagnostic.samePcNewIdentityAdmissions,1);
   assert.deepEqual(diagnostic.topRepeatPcs.map(row=>[row.pc,row.admissions]),[[0,2]]);
   assert.equal(diagnostic.lastAdmissions.length,32); assert.equal(diagnostic.lastAdmissions[0].sequence,8164);
