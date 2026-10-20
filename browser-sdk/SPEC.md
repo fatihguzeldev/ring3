@@ -72,6 +72,21 @@ node browser-sdk/tools/prepare-backend.mjs --directory target/browser-runtime --
 node --test browser-sdk/tests/*.test.mjs
 ```
 
+Checking out this branch does not switch the existing playground to this
+backend. `playground/server.mjs` on port 4173 still loads Ring3's
+`ring3_engine.wasm`; disabling its trace changes recording, not the CPU backend.
+The experimental SDK runtime must be served separately. After preparation:
+
+```sh
+cd target/browser-runtime
+BS_WGB_ROOTS="/absolute/directory/containing-bundles" bun x --bun vite --host 127.0.0.1 --port 4175 --strictPort
+```
+
+Open the acceptance host on port 4175 with the encoded same-origin bundle URL
+described below. `BS_WGB_ROOTS` grants the local development route access to that
+bundle directory; keep game files outside public assets. After restarting the
+development server, create a fresh SDK session rather than resuming a stale tab.
+
 The backend itself uses its pinned lockfile and `bun run build`. Existing build
 output is preserved in a `dist.previous-*` sibling; each new distribution starts
 empty. The build records source pins, local changes, actual tools and emitted
