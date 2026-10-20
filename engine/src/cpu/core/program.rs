@@ -46,6 +46,8 @@ pub struct CompiledCode {
     entries: Vec<GuestAddress>,
     instructions: usize,
     native: Vec<NativeInstruction>,
+    roots: [GuestAddress; 8],
+    root_count: usize,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -70,6 +72,52 @@ impl CompiledCode {
     }
     pub fn native_instructions(&self) -> &[NativeInstruction] {
         &self.native
+    }
+    pub(crate) fn formation_roots(&self) -> &[GuestAddress] {
+        &self.roots[..self.root_count]
+    }
+    pub(crate) fn compile_transition(
+        memory: &AddressSpace,
+        entry: GuestAddress,
+        options: CompileOptions,
+        gates: &[(GuestAddress, u32)],
+        frontier: &[GuestAddress],
+        roots: &[GuestAddress],
+    ) -> Result<Option<Self>, CompileError> {
+        let mut retained = [entry; 8];
+        let mut count = 1;
+        for root in roots {
+            if retained[..count].contains(root) {
+                continue;
+            }
+            if count == retained.len() {
+                return Ok(None);
+            }
+            retained[count] = *root;
+            count += 1;
+        }
+        if count < 2
+            || count > options.blocks
+            || retained[..count]
+                .iter()
+                .any(|root| root.0 != entry.0 && frontier.contains(root))
+        {
+            return Ok(None);
+        }
+        retained[..count].sort_unstable_by_key(|root| root.0);
+        let mut code =
+            compile_formation(memory, entry, options, gates, frontier, &retained[..count])?;
+        // shortening may keep the requested entry while dropping another owner's root.
+        if !retained[..count].iter().all(|root| {
+            code.entries
+                .binary_search_by_key(&root.0, |pc| pc.0)
+                .is_ok()
+        }) {
+            return Ok(None);
+        }
+        code.roots = retained;
+        code.root_count = count;
+        Ok(Some(code))
     }
     pub fn is_current(&self, memory: &AddressSpace) -> bool {
         if memory.identity() != self.memory_identity {
@@ -373,12 +421,18 @@ fn compile_formation(
         wasm,
         sources,
         native,
+        roots: [entry; 8],
+        root_count: 1,
     })
 }
 
 #[cfg(test)]
 #[path = "program/call_tests.rs"]
 mod call_tests;
+
+#[cfg(test)]
+#[path = "program/transition_tests.rs"]
+mod transition_tests;
 
 fn retain_entry_prefix(blocks: &mut Vec<Block>, entry: u32, limit: usize) {
     let requested = blocks
