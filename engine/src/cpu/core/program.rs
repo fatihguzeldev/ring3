@@ -39,6 +39,8 @@ pub enum CompileError {
 #[derive(Debug)]
 pub struct CompiledCode {
     identity: u64,
+    memory_identity: u64,
+    validated_source_version: AtomicU64,
     wasm: Vec<u8>,
     sources: Vec<CodeSnapshot>,
     entries: Vec<GuestAddress>,
@@ -70,9 +72,22 @@ impl CompiledCode {
         &self.native
     }
     pub fn is_current(&self, memory: &AddressSpace) -> bool {
-        self.sources
+        if memory.identity() != self.memory_identity {
+            return false;
+        }
+        let version = memory.code_source_version();
+        if self.validated_source_version.load(Ordering::Relaxed) == version {
+            return true;
+        }
+        let current = self
+            .sources
             .iter()
-            .all(|source| memory.is_code_current(source))
+            .all(|source| memory.is_code_current(source));
+        if current {
+            self.validated_source_version
+                .store(version, Ordering::Relaxed);
+        }
+        current
     }
 }
 
@@ -304,6 +319,8 @@ pub fn compile_with_gates(
     };
     Ok(CompiledCode {
         identity,
+        memory_identity: memory.identity(),
+        validated_source_version: AtomicU64::new(memory.code_source_version()),
         entries: blocks
             .iter()
             .map(|block| GuestAddress(block.entry))
@@ -615,6 +632,143 @@ mod tests {
                 .unwrap()
                 .is_current(&memory)
         );
+    }
+
+    fn source_memo_memory() -> AddressSpace {
+        let mut memory = AddressSpace::new(4).unwrap();
+        for (page, permissions) in [
+            (0x1000, Permissions::ALL),
+            (0x2000, Permissions::ALL),
+            (0x3000, Permissions::READ_WRITE),
+        ] {
+            memory
+                .map_zeroed(PageRange::new(GuestAddress(page), 1).unwrap(), permissions)
+                .unwrap();
+        }
+        memory
+            .write(GuestAddress(0x1000), &[0x90, 0x0f, 0x0b])
+            .unwrap();
+        memory
+            .write(GuestAddress(0x2000), &[0x90, 0x0f, 0x0b])
+            .unwrap();
+        memory
+    }
+
+    #[test]
+    fn source_memo_rejects_foreign_memory_with_the_same_stamp() {
+        let memory = source_memo_memory();
+        let foreign = source_memo_memory();
+        let code = compile(&memory, GuestAddress(0x1000), limits(8, 1)).unwrap();
+        let stamp = memory.code_source_version();
+        assert_eq!(stamp, foreign.code_source_version());
+        assert_ne!(memory.identity(), foreign.identity());
+        assert_eq!(code.memory_identity, memory.identity());
+        assert_eq!(code.validated_source_version.load(Ordering::Relaxed), stamp);
+        assert!(code.is_current(&memory));
+        assert!(!code.is_current(&foreign));
+        assert_eq!(code.validated_source_version.load(Ordering::Relaxed), stamp);
+    }
+
+    #[test]
+    fn source_memo_stays_valid_through_private_data_writes_and_new_rw_pages() {
+        let mut memory = source_memo_memory();
+        let code = compile(&memory, GuestAddress(0x1000), limits(8, 1)).unwrap();
+        let stamp = memory.code_source_version();
+        memory.core_write(0x3000, 4, 0x1234_5678).unwrap();
+        memory
+            .map_zeroed(
+                PageRange::new(GuestAddress(0x4000), 1).unwrap(),
+                Permissions::READ_WRITE,
+            )
+            .unwrap();
+        memory.write(GuestAddress(0x4000), &[1, 2, 3, 4]).unwrap();
+        assert_eq!(memory.code_source_version(), stamp);
+        assert!(code.is_current(&memory));
+        assert_eq!(code.validated_source_version.load(Ordering::Relaxed), stamp);
+    }
+
+    #[test]
+    fn source_memo_advances_only_after_successful_full_source_revalidation() {
+        let mut memory = source_memo_memory();
+        let code = compile(&memory, GuestAddress(0x1000), limits(8, 1)).unwrap();
+        let old = memory.code_source_version();
+        memory.write(GuestAddress(0x2000), &[0x40]).unwrap();
+        let current = memory.code_source_version();
+        assert_ne!(old, current);
+        assert_eq!(code.validated_source_version.load(Ordering::Relaxed), old);
+        assert!(code.is_current(&memory));
+        assert_eq!(
+            code.validated_source_version.load(Ordering::Relaxed),
+            current
+        );
+        memory.core_write(0x1000, 1, 0x40).unwrap();
+        assert_ne!(memory.code_source_version(), current);
+        assert!(!code.is_current(&memory));
+        assert_eq!(
+            code.validated_source_version.load(Ordering::Relaxed),
+            current
+        );
+        assert!(!code.is_current(&memory));
+    }
+
+    #[test]
+    fn source_memo_does_not_revive_after_execute_permission_changes() {
+        let mut memory = source_memo_memory();
+        let code = compile(&memory, GuestAddress(0x1000), limits(8, 1)).unwrap();
+        let stamp = code.validated_source_version.load(Ordering::Relaxed);
+        let range = PageRange::new(GuestAddress(0x1000), 1).unwrap();
+        memory.protect(range, Permissions::READ_WRITE).unwrap();
+        assert!(!code.is_current(&memory));
+        memory.protect(range, Permissions::ALL).unwrap();
+        assert!(!code.is_current(&memory));
+        assert_eq!(code.validated_source_version.load(Ordering::Relaxed), stamp);
+    }
+
+    #[test]
+    fn source_memo_rejects_identical_bytes_after_unmap_and_remap() {
+        let mut memory = source_memo_memory();
+        let code = compile(&memory, GuestAddress(0x1000), limits(8, 1)).unwrap();
+        let stamp = code.validated_source_version.load(Ordering::Relaxed);
+        let range = PageRange::new(GuestAddress(0x1000), 1).unwrap();
+        memory.unmap(range).unwrap();
+        memory.map_zeroed(range, Permissions::ALL).unwrap();
+        memory
+            .write(GuestAddress(0x1000), &[0x90, 0x0f, 0x0b])
+            .unwrap();
+        assert!(!code.is_current(&memory));
+        assert_eq!(code.validated_source_version.load(Ordering::Relaxed), stamp);
+    }
+
+    #[test]
+    fn source_memo_rejects_a_write_through_a_nonexecutable_alias() {
+        let mut memory = AddressSpace::new(1).unwrap();
+        let pages = memory
+            .allocate_shared_pages(1, &[0x90, 0x0f, 0x0b])
+            .unwrap();
+        memory
+            .map_shared_pages(
+                PageRange::new(GuestAddress(0x1000), 1).unwrap(),
+                &pages,
+                0,
+                Permissions::READ_EXECUTE,
+                false,
+            )
+            .unwrap();
+        memory
+            .map_shared_pages(
+                PageRange::new(GuestAddress(0x3000), 1).unwrap(),
+                &pages,
+                0,
+                Permissions::READ_WRITE,
+                false,
+            )
+            .unwrap();
+        let code = compile(&memory, GuestAddress(0x1000), limits(8, 1)).unwrap();
+        let stamp = code.validated_source_version.load(Ordering::Relaxed);
+        memory.core_write(0x3000, 1, 0x40).unwrap();
+        assert_ne!(memory.code_source_version(), stamp);
+        assert!(!code.is_current(&memory));
+        assert_eq!(code.validated_source_version.load(Ordering::Relaxed), stamp);
     }
 
     #[test]
