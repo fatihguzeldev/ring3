@@ -14,7 +14,7 @@ SPEC.loader.exec_module(builder)
 
 
 class BuildLifecycleTests(unittest.TestCase):
-    def run_fixture(self, directory, failure=None):
+    def run_fixture(self, directory, failure=None, check_workspace=False):
         repository = directory / "repository"
         for name in builder.FIXED + [f"{builder.SUPPORT}/{name}" for name in builder.SUPPORT_FILES]:
             destination = repository / name
@@ -24,6 +24,16 @@ class BuildLifecycleTests(unittest.TestCase):
         library = repository / "engine/src/lib.rs"
         library.parent.mkdir(parents=True)
         library.write_text("pub fn fixture() {}\n")
+        for name in ["Cargo.toml", "src/lib.rs", "src/catalog/generated.rs"]:
+            destination = repository / "observability/rust" / name
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text("workspace dependency source\n")
+        catalog = repository / "observability/catalog/categories.json"
+        catalog.parent.mkdir(parents=True, exist_ok=True)
+        catalog.write_text("workspace dependency source\n")
+        excluded = repository / "observability/rust/target/build-output"
+        excluded.parent.mkdir(parents=True)
+        excluded.write_bytes(b"do not capture")
         sysroot = directory / "sysroot"
         for name in ["bin/rustc", "bin/cargo", "lib/rustlib/test-host/bin/rust-lld",
                      "lib/rustlib/wasm32-unknown-unknown/lib/libstd.rlib"]:
@@ -38,6 +48,14 @@ class BuildLifecycleTests(unittest.TestCase):
             (cache / "download-cache").write_bytes(b"disposable")
             log.write_text("command fixture\n")
             if "vendor" in arguments:
+                if check_workspace:
+                    self.assertTrue((cwd / "observability/rust/Cargo.toml").is_file())
+                    self.assertEqual((cwd / "observability/rust/src/lib.rs").read_text(),
+                                     "workspace dependency source\n")
+                    self.assertEqual((cwd / "observability/catalog/categories.json").read_text(),
+                                     "workspace dependency source\n")
+                    for name in ["NotoSans-Regular.ttf", "NotoSansMono-Regular.ttf", "OFL.txt", "provenance.json"]:
+                        self.assertTrue((cwd / "engine/assets/fonts" / name).is_file())
                 vendor = Path(arguments[-1])
                 vendor.mkdir()
                 (vendor / "dependency.rs").write_text("dependency source\n")
@@ -94,6 +112,22 @@ class BuildLifecycleTests(unittest.TestCase):
                 self.assertFalse((output / "receipt.json").exists())
                 self.assertFalse((output / "cargo-home").exists())
                 self.assertFalse((output / "cargo-target").exists())
+
+    def test_workspace_dependency_is_captured_and_hashed_before_vendor_without_build_outputs(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = self.run_fixture(Path(temporary), check_workspace=True)
+            receipt = json.loads((output / "receipt.json").read_text())
+            self.assertEqual(receipt["version"], 3)
+            captured = dict(receipt["sourcePaths"])
+            for name in ["Cargo.toml", "src/lib.rs", "src/catalog/generated.rs"]:
+                self.assertEqual(captured[f"observability/rust/{name}"],
+                                 builder.sha256(b"workspace dependency source\n"))
+            self.assertEqual(captured["observability/catalog/categories.json"],
+                             builder.sha256(b"workspace dependency source\n"))
+            for name in ["NotoSans-Regular.ttf", "NotoSansMono-Regular.ttf", "OFL.txt", "provenance.json"]:
+                self.assertEqual(captured[f"engine/assets/fonts/{name}"],
+                                 builder.sha256(b"fixture source\n"))
+            self.assertFalse((output / "source/observability/rust/target").exists())
 
     def test_existing_output_is_refused_without_cleaning_its_cache(self):
         with tempfile.TemporaryDirectory() as temporary:

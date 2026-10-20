@@ -31,7 +31,7 @@ function inventory(root, directory = "") {
     return entry.isDirectory() ? inventory(root, path) : [[path, sha(readFileSync(resolve(root, path)))]];
   }).sort(([a], [b]) => a.localeCompare(b, "en"));
 }
-function fixture() {
+function fixture(version = 2) {
   const root = mkdtempSync(resolve(tmpdir(), "ring3-numeric-receipt-"));
   for (const path of [...currentOwners, "Cargo.toml", "Cargo.lock", "rust-toolchain.toml",
     "engine/Cargo.toml", ".cargo/config.toml"]) write(root, path, "source\n");
@@ -41,6 +41,15 @@ function fixture() {
     + 'source = "registry+https://example.invalid/index"\nchecksum = "' + "a".repeat(64) + '"\n');
   for (const name of ["backend.rs", "build.py", "contract.json", "receipt.mjs", "receipt.test.mjs"]) {
     write(root, `${support}/${name}`, readFileSync(new URL(`./${name}`, import.meta.url)));
+  }
+  if (version === 3) {
+    for (const name of ["Cargo.toml", "src/lib.rs", "src/catalog/generated.rs"]) {
+      write(root, `observability/rust/${name}`, "workspace dependency\n");
+    }
+    write(root, "observability/catalog/categories.json", "workspace catalog\n");
+    for (const name of ["NotoSans-Regular.ttf", "NotoSansMono-Regular.ttf", "OFL.txt", "provenance.json"]) {
+      write(root, `engine/assets/fonts/${name}`, "font input\n");
+    }
   }
   write(root, "vendor/example-1.0.0/lib.rs", "dependency\n");
   write(root, "vendor/example-1.0.0/.cargo-checksum.json", JSON.stringify({
@@ -70,7 +79,7 @@ function fixture() {
     { name: "example", version: "1.0.0", source: "registry+https://example.invalid/index" },
   ] }));
   const receipt = {
-    schema: "ring3-private-numeric-backend", version: 2, protocolVersion: 1,
+    schema: "ring3-private-numeric-backend", version, protocolVersion: 1,
     families: ["compound", "foundation"], publicAVX: false, backendSha256: sha(binary),
     contractSha256: sha(readFileSync(resolve(root, `${support}/contract.json`))),
     originalLibSha256: sha(Buffer.from("source\n")),
@@ -89,6 +98,46 @@ test("current receipt admits both unchanged numeric proof families", () => {
   } finally { cleanup(); }
 });
 
+test("workspace-complete receipts hash every local dependency source and reject omissions or drift", () => {
+  const changes = [
+    () => {},
+    root => write(root, "observability/rust/src/lib.rs", "changed dependency\n"),
+    root => write(root, "observability/catalog/categories.json", "changed catalog\n"),
+    root => write(root, "engine/assets/fonts/NotoSans-Regular.ttf", "changed font\n"),
+    root => write(root, "observability/rust/src/unlisted.rs", "unlisted source\n"),
+    root => rmSync(resolve(root, "observability/rust/src/catalog/generated.rs")),
+    (root, receipt) => {
+      rmSync(resolve(root, "observability/rust/Cargo.toml"));
+      receipt.sourcePaths = receipt.sourcePaths.filter(([path]) => path !== "observability/rust/Cargo.toml");
+    },
+    (root, receipt) => {
+      rmSync(resolve(root, "observability/rust/src/lib.rs"));
+      receipt.sourcePaths = receipt.sourcePaths.filter(([path]) => path !== "observability/rust/src/lib.rs");
+    },
+    (root, receipt) => {
+      rmSync(resolve(root, "observability/catalog/categories.json"));
+      receipt.sourcePaths = receipt.sourcePaths.filter(([path]) => path !== "observability/catalog/categories.json");
+    },
+    (root, receipt) => {
+      rmSync(resolve(root, "engine/assets/fonts/OFL.txt"));
+      receipt.sourcePaths = receipt.sourcePaths.filter(([path]) => path !== "engine/assets/fonts/OFL.txt");
+    },
+  ];
+  for (const [index, change] of changes.entries()) {
+    const { root, receipt, cleanup } = fixture(3);
+    try {
+      change(root, receipt);
+      for (const family of ["foundation", "compound"]) {
+        if (index === 0) {
+          assert.deepEqual(verifyNumericReceipt(binary, root, receipt, family), receipt.sourcePaths);
+        } else {
+          assert.throws(() => verifyNumericReceipt(binary, root, receipt, family));
+        }
+      }
+    } finally { cleanup(); }
+  }
+});
+
 test("current receipt refuses incomplete ownership, drift, protocol and build substitutions", () => {
   const changes = [
     (root, receipt) => { receipt.sourcePaths.pop(); },
@@ -99,7 +148,7 @@ test("current receipt refuses incomplete ownership, drift, protocol and build su
     },
     (root) => write(root, "vendor/example-1.0.0/lib.rs", "changed dependency\n"),
     (root, receipt) => { receipt.dependencyPaths.push(receipt.dependencyPaths[0]); },
-    (root, receipt) => { receipt.version = 3; },
+    (root, receipt) => { receipt.version = 4; },
     (root, receipt) => { receipt.protocolVersion = 2; },
     (root, receipt) => { receipt.backendSha256 = "c".repeat(64); },
     (root, receipt) => { receipt.sourcePaths[0][0] = "../outside"; },

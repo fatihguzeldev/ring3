@@ -7,6 +7,9 @@ const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const support = "engine/tests/support/numeric";
 const supportFiles = ["backend.rs", "build.py", "contract.json", "receipt.mjs", "receipt.test.mjs"];
 const fixed = ["Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "engine/Cargo.toml", ".cargo/config.toml"];
+const completeInputs = ["observability/rust/Cargo.toml", "observability/catalog/categories.json",
+  "engine/assets/fonts/NotoSans-Regular.ttf", "engine/assets/fonts/NotoSansMono-Regular.ttf",
+  "engine/assets/fonts/OFL.txt", "engine/assets/fonts/provenance.json"];
 const evidenceFiles = ["build.json", "build.log", "cargo.log", "metadata.json", "metadata.log",
   "rustc.log", "sysroot.log", "target-libdir.log", "toolchain.json", "vendor.log"];
 const hook = '\n#[path = "../tests/support/numeric/backend.rs"]\nmod numeric_proof;\n';
@@ -92,12 +95,15 @@ export function verifyNumericReceipt(binary, root, receipt, family) {
     return verifyInventory(root, receipt.sourcePaths, historicalOwners[family], false);
   }
   assert.equal(receipt.schema, "ring3-private-numeric-backend");
-  assert.equal(receipt.version, 2, "unknown numeric receipt version");
+  assert([2, 3].includes(receipt.version), "unknown numeric receipt version");
   assert.equal(receipt.protocolVersion, 1);
   assert.equal(receipt.publicAVX, false);
   assert.deepEqual(receipt.families, ["compound", "foundation"]);
-  const expected = [...fixed, ...pathsBelow(root, "engine/src"), ...pathsBelow(root, "engine/tests")];
-  for (const owner of [...currentOwners, ...supportFiles.map((name) => `${support}/${name}`)]) {
+  const workspaceOwners = receipt.version === 3 ? ["observability/rust/src/lib.rs"] : [];
+  const expected = [...fixed, ...pathsBelow(root, "engine/src"), ...pathsBelow(root, "engine/tests"),
+    ...(receipt.version === 3
+      ? [...completeInputs, ...pathsBelow(root, "observability/rust/src")] : [])];
+  for (const owner of [...currentOwners, ...workspaceOwners, ...supportFiles.map((name) => `${support}/${name}`)]) {
     assert(expected.includes(owner), `missing current owner: ${owner}`);
   }
   const sources = verifyInventory(root, receipt.sourcePaths, expected, true);

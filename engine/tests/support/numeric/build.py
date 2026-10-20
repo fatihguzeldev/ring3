@@ -14,7 +14,10 @@ import tomllib
 
 SUPPORT = "engine/tests/support/numeric"
 SUPPORT_FILES = ["backend.rs", "build.py", "contract.json", "receipt.mjs", "receipt.test.mjs"]
-FIXED = ["Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "engine/Cargo.toml"]
+FIXED = ["Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "engine/Cargo.toml",
+         "observability/rust/Cargo.toml", "observability/catalog/categories.json",
+         "engine/assets/fonts/NotoSans-Regular.ttf", "engine/assets/fonts/NotoSansMono-Regular.ttf",
+         "engine/assets/fonts/OFL.txt", "engine/assets/fonts/provenance.json"]
 HOOK = '\n#[path = "../tests/support/numeric/backend.rs"]\nmod numeric_proof;\n'
 TARGET = "wasm32-unknown-unknown"
 
@@ -40,7 +43,8 @@ def inventory(root, paths):
 def sources(root):
     return inventory(root, [root / path for path in FIXED + [".cargo/config.toml"]]
                      + files(root / "engine/src")
-                     + files(root / "engine/tests"))
+                     + files(root / "engine/tests")
+                     + files(root / "observability/rust/src"))
 
 
 def write_json(path, value):
@@ -61,7 +65,7 @@ def build(repository, output):
     evidence = source / ".numeric-proof"
     evidence.mkdir(parents=True)
     selected = ([repository / path for path in FIXED] + files(repository / "engine/src")
-                + files(repository / "engine/tests"))
+                + files(repository / "engine/tests") + files(repository / "observability/rust/src"))
     for path in SUPPORT_FILES:
         if repository / SUPPORT / path not in selected:
             raise ValueError(f"missing tracked numeric support owner: {path}")
@@ -138,7 +142,7 @@ def build(repository, output):
         "target": TARGET, "profile": "release", "locked": True, "offline": True,
     })
     write_json(output / "receipt.json", {
-        "schema": "ring3-private-numeric-backend", "version": 2, "protocolVersion": 1,
+        "schema": "ring3-private-numeric-backend", "version": 3, "protocolVersion": 1,
         "families": ["compound", "foundation"], "publicAVX": False,
         "backendSha256": sha256(binary.read_bytes()),
         "contractSha256": sha256((source / SUPPORT / "contract.json").read_bytes()),
