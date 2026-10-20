@@ -7,6 +7,12 @@ use std::{
     rc::{Rc, Weak},
 };
 
+#[path = "promotion.rs"]
+mod promotion;
+use promotion::{PendingTransition, TransitionHeat};
+
+pub(super) const TRANSITION_HITS: u32 = 4096;
+
 const MAX_REGIONS: usize = 1024;
 const MAX_CODE_BYTES: usize = 32 << 20;
 const MAX_LINK_SLOT: usize = 4096;
@@ -23,6 +29,7 @@ pub(super) struct CoreCache32 {
     count_evictions: u64,
     byte_evictions: u64,
     source_invalidations: u64,
+    pending_transition: Option<PendingTransition>,
 }
 
 struct CachedRegion {
@@ -30,6 +37,7 @@ struct CachedRegion {
     older: u64,
     newer: u64,
     slot: u32,
+    heat: TransitionHeat,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -56,6 +64,7 @@ impl Default for CoreCache32 {
             count_evictions: 0,
             byte_evictions: 0,
             source_invalidations: 0,
+            pending_transition: None,
         }
     }
 }
@@ -223,6 +232,7 @@ impl CoreCache32 {
                 older: self.newest,
                 newer: 0,
                 slot: 0,
+                heat: TransitionHeat::default(),
             },
         );
         if self.newest == 0 {

@@ -114,9 +114,21 @@ pub(crate) fn core_chain_next(context: u32) -> u32 {
         else {
             return u32::MAX;
         };
+        if core.cache.transition_pending() || !core.code.is_current(memory) {
+            return 0;
+        }
         let Some((code, slot)) = core.cache.lookup_linked(memory, pc) else {
             return 0;
         };
+        if core.cache.observe_transition(
+            memory,
+            &core.code,
+            &code,
+            pc,
+            super::cache::TRANSITION_HITS,
+        ) {
+            return 0;
+        }
         core.context.bytes_mut()[120..128].copy_from_slice(&code.identity().to_le_bytes());
         core.code = code;
         slot

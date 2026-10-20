@@ -67,6 +67,7 @@ pub(crate) fn core_import() -> u32 {
             core.context.set_word(offset, 0);
         }
         core.numeric = bank;
+        core.cache.clear_transition();
         core.exported_retired = core.context.retired();
         0
     })
