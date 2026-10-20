@@ -22,7 +22,7 @@ use crate::{
         x86::{STATE_SIZE, USER_FLAGS_MASK_V3, decode_state, decode_state_metadata},
     },
     cpu::{
-        core::{CompileError, CompileOptions, CompiledCode, Context32, compile_with_gates},
+        core::{CompileError, CompileOptions, CompiledCode, Context32, compile_with_frontier},
         x86::{SegmentContext, SegmentRegister},
     },
     memory::{Access, CoreWriteOutcome, FaultReason, GuestAddress, MemoryError},
@@ -134,11 +134,15 @@ pub(crate) fn core_prepare(pc: u32, instructions: u32, blocks: u32) -> u32 {
                 Err(error) => return status(error),
             };
             let gates: Vec<_> = gates.iter().map(|gate| (gate.entry, gate.id)).collect();
-            let code = match compile_with_gates(
+            let frontier = core.as_ref().map_or_else(Vec::new, |session| {
+                session.cache.frontier(instance.memory.as_ref().unwrap())
+            });
+            let code = match compile_with_frontier(
                 instance.memory.as_ref().unwrap(),
                 GuestAddress(pc),
                 options,
                 &gates,
+                &frontier,
             ) {
                 Ok(code) => code,
                 Err(error) => return compile_status(error),

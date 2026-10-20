@@ -1,4 +1,7 @@
-use crate::{cpu::core::CompiledCode, memory::AddressSpace};
+use crate::{
+    cpu::core::CompiledCode,
+    memory::{AddressSpace, GuestAddress},
+};
 use std::{
     collections::HashMap,
     rc::{Rc, Weak},
@@ -58,6 +61,26 @@ impl Default for CoreCache32 {
 }
 
 impl CoreCache32 {
+    pub(super) fn frontier(&self, memory: &AddressSpace) -> Vec<GuestAddress> {
+        let mut frontier = Vec::new();
+        for entry in self.regions.values() {
+            if !entry.code.is_current(memory) {
+                continue;
+            }
+            let owner = Rc::downgrade(&entry.code);
+            for pc in entry.code.entrypoints() {
+                if self
+                    .entries
+                    .get(&pc.0)
+                    .is_some_and(|indexed| indexed.ptr_eq(&owner))
+                {
+                    frontier.push(*pc);
+                }
+            }
+        }
+        frontier
+    }
+
     pub(super) fn link_owners_ptr(&self) -> *const u64 {
         self.link_owners.as_ptr()
     }
@@ -787,5 +810,83 @@ mod tests {
         assert_eq!(moved.link_owners[0], 0);
         assert_eq!(moved.link_owners[4096], 0);
         bounds(&moved);
+    }
+
+    #[test]
+    fn frontier_contains_current_indexed_entries_even_without_installed_links() {
+        let memory = memory();
+        let mut cache = CoreCache32::default();
+        assert!(cache.frontier(&memory).is_empty());
+        let first = cache.insert(compiled(&memory, 0x1000));
+        let second = cache.insert(compiled(&memory, filler(0)));
+        cache.install_link(&second, 7).unwrap();
+        let snapshot = cache.snapshot();
+        let mut frontier = cache.frontier(&memory);
+        frontier.sort_unstable_by_key(|pc| pc.0);
+        assert_eq!(
+            frontier,
+            [0x1000, 0x1005, 0x100a, 0x100d, filler(0)]
+                .map(GuestAddress)
+                .to_vec()
+        );
+        assert_eq!(cache.regions[&first.identity()].slot, 0);
+        assert_eq!(cache.oldest, first.identity());
+        assert_eq!(cache.newest, second.identity());
+        assert_eq!(cache.oldest_linked_slot(), 7);
+        assert_eq!(cache.snapshot(), snapshot);
+        assert_eq!(cache.frontier(&AddressSpace::new(1).unwrap()), []);
+        assert_eq!(cache.snapshot(), snapshot);
+        bounds(&cache);
+    }
+
+    #[test]
+    fn frontier_omits_stale_and_identically_remapped_sources_without_removing_owners() {
+        for remap in [false, true] {
+            let mut memory = memory();
+            let mut cache = CoreCache32::default();
+            let old = cache.insert(compiled(&memory, 0x1000));
+            let current = cache.insert(compiled(&memory, filler(0)));
+            cache.install_link(&old, 1).unwrap();
+            cache.install_link(&current, 2).unwrap();
+            let snapshot = cache.snapshot();
+            if remap {
+                let mut page = [0; 4096];
+                memory.read(GuestAddress(0x1000), &mut page).unwrap();
+                let range = PageRange::new(GuestAddress(0x1000), 1).unwrap();
+                memory.unmap(range).unwrap();
+                memory.map_zeroed(range, Permissions::ALL).unwrap();
+                memory.write(GuestAddress(0x1000), &page).unwrap();
+            } else {
+                memory.write(GuestAddress(0x1002), &[4]).unwrap();
+            }
+            assert!(!old.is_current(&memory));
+            assert_eq!(cache.frontier(&memory), vec![GuestAddress(filler(0))]);
+            assert_eq!(cache.snapshot(), snapshot);
+            assert!(cache.regions.contains_key(&old.identity()));
+            assert_eq!(cache.link_owners[1], old.identity());
+            assert_eq!(cache.oldest, old.identity());
+            assert_eq!(cache.newest, current.identity());
+            bounds(&cache);
+        }
+    }
+
+    #[test]
+    fn frontier_excludes_shadowed_side_entries_after_the_indexed_owner_is_removed() {
+        let memory = memory();
+        let mut cache = CoreCache32::default();
+        let old = cache.insert(compiled(&memory, 0x1000));
+        let newer = cache.insert(compiled(&memory, 0x1005));
+        assert!(old.entrypoints().contains(&GuestAddress(0x1005)));
+        assert!(newer.entrypoints().contains(&GuestAddress(0x100d)));
+        cache.remove(newer.identity());
+        assert!(newer.is_current(&memory));
+        assert!(cache.regions.contains_key(&old.identity()));
+        assert!(!cache.regions.contains_key(&newer.identity()));
+        let snapshot = cache.snapshot();
+        let mut frontier = cache.frontier(&memory);
+        frontier.sort_unstable_by_key(|pc| pc.0);
+        assert_eq!(frontier, vec![GuestAddress(0x1000), GuestAddress(0x100a)]);
+        assert_eq!(cache.snapshot(), snapshot);
+        bounds(&cache);
     }
 }

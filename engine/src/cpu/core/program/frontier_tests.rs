@@ -33,7 +33,13 @@ fn a_linear_frontier_excludes_the_existing_successor_body() {
         GuestAddress(0x1000),
         options(),
         &[],
-        &[GuestAddress(0x1001), GuestAddress(0x1001)],
+        &[
+            GuestAddress(0x2000),
+            GuestAddress(0x1001),
+            GuestAddress(0x1000),
+            GuestAddress(0x1001),
+            GuestAddress(0),
+        ],
     )
     .unwrap();
     assert_eq!(code.instruction_count(), 1);

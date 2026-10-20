@@ -137,11 +137,15 @@ pub fn compile_with_frontier(
     {
         return Err(CompileError::InvalidLimits);
     }
-    let frontier: BTreeSet<_> = frontier
-        .iter()
-        .map(|address| address.0)
-        .filter(|&pc| pc != entry.0)
-        .collect();
+    let mut sorted_frontier = Vec::with_capacity(frontier.len());
+    sorted_frontier.extend(
+        frontier
+            .iter()
+            .map(|address| address.0)
+            .filter(|&pc| pc != entry.0),
+    );
+    sorted_frontier.sort_unstable();
+    sorted_frontier.dedup();
     let mut pending = VecDeque::from([entry.0]);
     let mut nodes = BTreeMap::new();
     let mut starts = BTreeSet::from([entry.0]);
@@ -151,7 +155,7 @@ pub fn compile_with_frontier(
             break;
         }
         while !nodes.contains_key(&pc) && nodes.len() < options.instructions {
-            if frontier.contains(&pc) {
+            if sorted_frontier.binary_search(&pc).is_ok() {
                 break;
             }
             let mut matching_gates = gates.iter().filter(|(address, _)| address.0 == pc);
@@ -221,7 +225,8 @@ pub fn compile_with_frontier(
                 },
             );
             let mut enqueue = |target| {
-                if !frontier.contains(&target) && starts.len() < options.blocks {
+                if sorted_frontier.binary_search(&target).is_err() && starts.len() < options.blocks
+                {
                     starts.insert(target);
                     pending.push_back(target);
                 }
