@@ -1,5 +1,5 @@
 use super::{CoreSession32, REGISTRY, Registry, admission, status};
-use crate::cpu::x86::SegmentContext;
+use crate::cpu::{core::StopReason, x86::SegmentContext};
 
 mod execution;
 
@@ -22,17 +22,6 @@ pub(crate) fn core_cold_run(budget: u32) -> i32 {
             Ok(segments) => segments,
             Err(error) => return -(status(error) as i32),
         };
-        let gates = match instance.module_gates() {
-            Ok(gates) => gates,
-            Err(error) => return -(status(error) as i32),
-        };
-        let mut gates: Vec<_> = gates.iter().map(|gate| (gate.entry, gate.id)).collect();
-        gates.sort_unstable_by_key(|gate| gate.0.0);
-        let mut frontier = core.as_ref().map_or_else(Vec::new, |session| {
-            session.cache.frontier(instance.memory.as_ref().unwrap())
-        });
-        frontier.sort_unstable_by_key(|entry| entry.0);
-        frontier.dedup();
         let mut initial = if core.is_none() {
             match CoreSession32::from_instance(instance) {
                 Ok(session) => Some(session),
@@ -42,6 +31,31 @@ pub(crate) fn core_cold_run(budget: u32) -> i32 {
             None
         };
         let session = core.as_mut().or(initial.as_mut()).unwrap();
+        let pc = session.context.state().eip;
+        let gate = (budget != 0).then(|| instance.module_gate_at(pc)).flatten();
+        let cached = budget != 0
+            && gate.is_none()
+            && session
+                .cache
+                .frontier_contains(instance.memory.as_ref().unwrap(), pc);
+        let (mut gates, mut frontier) = if budget != 0 && gate.is_none() && !cached {
+            let gates = match instance.module_gates() {
+                Ok(gates) => gates,
+                Err(error) => return -(status(error) as i32),
+            };
+            (
+                gates
+                    .iter()
+                    .map(|gate| (gate.entry, gate.id))
+                    .collect::<Vec<_>>(),
+                session.cache.frontier(instance.memory.as_ref().unwrap()),
+            )
+        } else {
+            (Vec::new(), Vec::new())
+        };
+        gates.sort_unstable_by_key(|gate| gate.0.0);
+        frontier.sort_unstable_by_key(|entry| entry.0);
+        frontier.dedup();
         if let Err(status) = session.begin(instance, false) {
             return -(status as i32);
         }
@@ -50,7 +64,14 @@ pub(crate) fn core_cold_run(budget: u32) -> i32 {
         }
         let session = core.as_mut().unwrap();
         session.context.set_word(44, budget);
-        let result = run(instance, session, &segments, &gates, &frontier);
+        let result = if cached {
+            session.cold_state.handoff();
+            StopReason::NeedCode as i32
+        } else if let Some(gate) = gate {
+            run(instance, session, &segments, &[(gate.entry, gate.id)], &[])
+        } else {
+            run(instance, session, &segments, &gates, &frontier)
+        };
         session.context.set_word(112, 0);
         session.active = false;
         result

@@ -2,7 +2,7 @@ use crate::{
     cpu::{
         core::{
             Context32, StopReason,
-            cold::{self, ColdState, ColdOutcome},
+            cold::{self, ColdOutcome, ColdState},
         },
         x86::SegmentContext,
     },

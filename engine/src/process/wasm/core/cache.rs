@@ -70,6 +70,15 @@ impl Default for CoreCache32 {
 }
 
 impl CoreCache32 {
+    pub(super) fn frontier_contains(&self, memory: &AddressSpace, pc: u32) -> bool {
+        let Some(code) = self.entries.get(&pc).and_then(Weak::upgrade) else {
+            return false;
+        };
+        self.regions
+            .get(&code.identity())
+            .is_some_and(|entry| Rc::ptr_eq(&entry.code, &code) && code.is_current(memory))
+    }
+
     pub(super) fn frontier(&self, memory: &AddressSpace) -> Vec<GuestAddress> {
         let mut frontier = Vec::new();
         for entry in self.regions.values() {
@@ -897,6 +906,78 @@ mod tests {
         frontier.sort_unstable_by_key(|pc| pc.0);
         assert_eq!(frontier, vec![GuestAddress(0x1000), GuestAddress(0x100a)]);
         assert_eq!(cache.snapshot(), snapshot);
+        bounds(&cache);
+    }
+
+    #[test]
+    fn frontier_membership_accepts_linked_and_unlinked_entries_without_touching_lru() {
+        let memory = memory();
+        let mut cache = CoreCache32::default();
+        let first = cache.insert(compiled(&memory, 0x1000));
+        let second = cache.insert(compiled(&memory, filler(0)));
+        cache.install_link(&first, 1).unwrap();
+        let snapshot = cache.snapshot();
+        let links = cache.link_owners.to_vec();
+        for pc in [0x1000, 0x1005, 0x100a, 0x100d, filler(0)] {
+            assert!(cache.frontier_contains(&memory, pc));
+        }
+        assert!(!cache.frontier_contains(&memory, 0x1001));
+        assert!(!cache.frontier_contains(&memory, 0xdead_0000));
+        assert_eq!(cache.regions[&second.identity()].slot, 0);
+        assert_eq!(cache.oldest, first.identity());
+        assert_eq!(cache.newest, second.identity());
+        assert_eq!(cache.oldest_linked_slot(), 1);
+        assert_eq!(cache.snapshot(), snapshot);
+        assert_eq!(cache.link_owners.as_ref(), links);
+        bounds(&cache);
+    }
+
+    #[test]
+    fn frontier_membership_rejects_foreign_stale_and_remapped_sources_without_removal() {
+        for remap in [false, true] {
+            let mut memory = memory();
+            let mut cache = CoreCache32::default();
+            let first = cache.insert(compiled(&memory, 0x1000));
+            let second = cache.insert(compiled(&memory, filler(0)));
+            cache.install_link(&first, 1).unwrap();
+            let snapshot = cache.snapshot();
+            assert!(cache.frontier_contains(&memory, 0x1000));
+            assert!(!cache.frontier_contains(&AddressSpace::new(1).unwrap(), 0x1000));
+            if remap {
+                let mut page = [0; 4096];
+                memory.read(GuestAddress(0x1000), &mut page).unwrap();
+                let range = PageRange::new(GuestAddress(0x1000), 1).unwrap();
+                memory.unmap(range).unwrap();
+                memory.map_zeroed(range, Permissions::ALL).unwrap();
+                memory.write(GuestAddress(0x1000), &page).unwrap();
+            } else {
+                memory.write(GuestAddress(0x1002), &[4]).unwrap();
+            }
+            assert!(!cache.frontier_contains(&memory, 0x1000));
+            assert!(cache.frontier_contains(&memory, filler(0)));
+            assert_eq!(cache.snapshot(), snapshot);
+            assert_eq!(cache.regions.len(), 2);
+            assert_eq!(cache.link_owners[1], first.identity());
+            assert_eq!(cache.oldest, first.identity());
+            assert_eq!(cache.newest, second.identity());
+            bounds(&cache);
+        }
+    }
+
+    #[test]
+    fn frontier_membership_does_not_resurrect_a_removed_shadowing_owner() {
+        let memory = memory();
+        let mut cache = CoreCache32::default();
+        let old = cache.insert(compiled(&memory, 0x1000));
+        let newer = cache.insert(compiled(&memory, 0x1005));
+        assert!(cache.frontier_contains(&memory, 0x1005));
+        cache.remove(newer.identity());
+        assert!(newer.is_current(&memory));
+        assert!(cache.regions.contains_key(&old.identity()));
+        assert!(!cache.frontier_contains(&memory, 0x1005));
+        assert!(!cache.frontier_contains(&memory, 0x100d));
+        assert!(cache.frontier_contains(&memory, 0x1000));
+        assert!(cache.frontier_contains(&memory, 0x100a));
         bounds(&cache);
     }
 }
