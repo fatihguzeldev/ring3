@@ -68,7 +68,7 @@ Streaming starvation counts source-block episodes, not browser/device underruns.
 Preparation, with Bun installed:
 
 ```sh
-node browser-sdk/tools/prepare-backend.mjs --directory target/browser-runtime --bun bun
+node browser-sdk/tools/prepare-backend.mjs --directory .cache/browser-runtime --bun bun
 node --test browser-sdk/tests/*.test.mjs
 ```
 
@@ -78,7 +78,7 @@ backend. `playground/server.mjs` on port 4173 still loads Ring3's
 The experimental SDK runtime must be served separately. After preparation:
 
 ```sh
-cd target/browser-runtime
+cd .cache/browser-runtime
 BS_WGB_ROOTS="/absolute/directory/containing-bundles" bun x --bun vite --host 127.0.0.1 --port 4175 --strictPort
 ```
 
@@ -87,10 +87,19 @@ described below. `BS_WGB_ROOTS` grants the local development route access to tha
 bundle directory; keep game files outside public assets. After restarting the
 development server, create a fresh SDK session rather than resuming a stale tab.
 
-The backend itself uses its pinned lockfile and `bun run build`. Existing build
-output is preserved in a `dist.previous-*` sibling; each new distribution starts
-empty. The build records source pins, local changes, actual tools and emitted
-JavaScript/Wasm hashes. It reuses the pinned upstream CPU binary.
+The backend uses its pinned lockfile and builds into a fresh `dist.staging`.
+Source pins, emitted CPU hashes and upstream notices are checked before that
+candidate replaces `dist`; build or validation failure leaves the current output
+intact. Only one generated `dist.previous` is retained. Existing runtime build
+metadata identifies disposable generated output; unrecognized fixed paths and
+symlinks are refused, while legacy `dist.previous-*` directories are left alone.
+A leftover staging directory after process interruption requires inspection
+before retry. Prepare and promote only with active runtime sessions stopped:
+directory replacement is not a live deployment protocol. The build records
+actual tools and emitted JavaScript/Wasm hashes and reuses the pinned CPU binary.
+The default reusable checkout is `.cache/browser-runtime`, separate from Cargo's
+`target/`; explicit `--directory` paths still work. Selected experiment results
+belong under `artifacts/`, outside these replaceable caches.
 
 The distribution includes `ring3-sdk/runtime.mjs` and the acceptance host at
 `ring3-sdk/acceptance.html?bundle=<encoded-local-wgb-url>`. The host contains no
