@@ -15,6 +15,11 @@ pub(super) struct CoreCache32 {
     oldest: u64,
     newest: u64,
     link_owners: Box<[u64]>,
+    compiled: u64,
+    admitted_encoded_bytes: u64,
+    count_evictions: u64,
+    byte_evictions: u64,
+    source_invalidations: u64,
 }
 
 struct CachedRegion {
@@ -43,11 +48,45 @@ impl Default for CoreCache32 {
             oldest: 0,
             newest: 0,
             link_owners: vec![0; MAX_LINK_SLOT + 1].into_boxed_slice(),
+            compiled: 0,
+            admitted_encoded_bytes: 0,
+            count_evictions: 0,
+            byte_evictions: 0,
+            source_invalidations: 0,
         }
     }
 }
 
 impl CoreCache32 {
+    pub(super) fn link_owners_ptr(&self) -> *const u64 {
+        self.link_owners.as_ptr()
+    }
+
+    pub(super) fn oldest_linked_slot(&self) -> u32 {
+        let mut identity = self.oldest;
+        while identity != 0 {
+            let entry = &self.regions[&identity];
+            if entry.slot != 0 && self.link_owners[entry.slot as usize] == identity {
+                return entry.slot;
+            }
+            identity = entry.newer;
+        }
+        0
+    }
+
+    pub(super) fn snapshot(&self) -> [u64; 8] {
+        [
+            self.compiled,
+            self.admitted_encoded_bytes,
+            self.count_evictions,
+            self.byte_evictions,
+            self.source_invalidations,
+            self.regions.len() as u64,
+            self.bytes as u64,
+            MAX_REGIONS as u64,
+        ]
+    }
+
     pub(super) fn lookup(&mut self, memory: &AddressSpace, pc: u32) -> Option<Rc<CompiledCode>> {
         let code = self.entries.get(&pc)?.upgrade()?;
         let retained = self.regions.get(&code.identity())?;
@@ -56,6 +95,7 @@ impl CoreCache32 {
         }
         if !code.is_current(memory) {
             self.remove(code.identity());
+            self.source_invalidations = self.source_invalidations.saturating_add(1);
             return None;
         }
         self.touch(code.identity());
@@ -140,7 +180,13 @@ impl CoreCache32 {
             if self.oldest == 0 {
                 break;
             }
+            let byte_pressure = self.bytes + code.wasm().len() > MAX_CODE_BYTES;
             self.remove(self.oldest);
+            if byte_pressure {
+                self.byte_evictions = self.byte_evictions.saturating_add(1);
+            } else {
+                self.count_evictions = self.count_evictions.saturating_add(1);
+            }
         }
         for entry in code.entrypoints() {
             self.entries.insert(entry.0, Rc::downgrade(&code));
@@ -162,6 +208,10 @@ impl CoreCache32 {
             self.regions.get_mut(&self.newest).unwrap().newer = identity;
         }
         self.newest = identity;
+        self.compiled = self.compiled.saturating_add(1);
+        self.admitted_encoded_bytes = self
+            .admitted_encoded_bytes
+            .saturating_add(code.wasm().len() as u64);
         code
     }
 
@@ -485,6 +535,8 @@ mod tests {
         for index in 1..=MAX_REGIONS {
             newest = cache.insert(compiled(&memory, filler(index)));
         }
+        assert_eq!(cache.snapshot()[0], (MAX_REGIONS + 1) as u64);
+        assert_eq!(&cache.snapshot()[2..5], &[1, 0, 0]);
         assert!(old.is_current(&memory));
         assert!(!old.wasm().is_empty());
         assert!(cache.lookup_linked(&memory, filler(0)).is_none());
@@ -554,6 +606,19 @@ mod tests {
         }
         assert_eq!(cache.regions.len(), 300);
         assert!(cache.bytes < MAX_CODE_BYTES);
+        assert_eq!(
+            cache.snapshot(),
+            [
+                300,
+                cache.bytes as u64,
+                0,
+                0,
+                0,
+                300,
+                cache.bytes as u64,
+                MAX_REGIONS as u64
+            ]
+        );
         let (selected, slot) = cache.lookup_linked(&memory, filler(0)).unwrap();
         assert!(Rc::ptr_eq(&selected, &first));
         assert_eq!(slot, 1);
@@ -593,6 +658,19 @@ mod tests {
             bounds(&cache);
         }
         assert!(cache.regions.len() < count);
+        assert_eq!(
+            cache.snapshot(),
+            [
+                count as u64,
+                (count * bytes) as u64,
+                0,
+                (count - cache.regions.len()) as u64,
+                0,
+                cache.regions.len() as u64,
+                cache.bytes as u64,
+                MAX_REGIONS as u64
+            ]
+        );
         assert!(!cache.regions.contains_key(&first.identity()));
         assert!(cache.install_link(&first, 1).is_err());
         cache.unlink(count as u32, newest.identity()).unwrap();
@@ -600,5 +678,114 @@ mod tests {
         assert!(cache.unlink(1, first.identity()).is_err());
         assert_eq!(cache.lookup_linked(&memory, 0x1000).unwrap().1, 1);
         bounds(&cache);
+    }
+
+    #[test]
+    fn oldest_linked_slot_follows_native_hits_and_skips_unlinked_owners() {
+        let memory = memory();
+        let mut cache = CoreCache32::default();
+        assert_eq!(cache.oldest_linked_slot(), 0);
+        let first = cache.insert(compiled(&memory, filler(0)));
+        let second = cache.insert(compiled(&memory, filler(1)));
+        cache.insert(compiled(&memory, filler(2)));
+        assert_eq!(cache.oldest_linked_slot(), 0);
+        cache.install_link(&first, 11).unwrap();
+        cache.install_link(&second, 29).unwrap();
+        assert_eq!(cache.oldest_linked_slot(), 11);
+
+        cache.lookup_linked(&memory, filler(0)).unwrap();
+        assert_eq!(cache.oldest_linked_slot(), 29);
+        cache.lookup_linked(&memory, filler(1)).unwrap();
+        assert_eq!(cache.oldest_linked_slot(), 11);
+        cache.unlink(11, first.identity()).unwrap();
+        assert_eq!(cache.oldest_linked_slot(), 29);
+        cache.unlink(29, second.identity()).unwrap();
+        assert_eq!(cache.oldest_linked_slot(), 0);
+        bounds(&cache);
+    }
+
+    #[test]
+    fn cold_snapshot_counts_compilation_and_lazy_source_removal_without_counting_hits() {
+        let mut memory = memory();
+        let mut cache = CoreCache32::default();
+        assert_eq!(cache.snapshot(), [0, 0, 0, 0, 0, 0, 0, 1024]);
+        let first = cache.insert(compiled(&memory, 0x1000));
+        let second = cache.insert(compiled(&memory, filler(0)));
+        let first_bytes = first.wasm().len() as u64;
+        let second_bytes = second.wasm().len() as u64;
+        let initial = [
+            2,
+            first_bytes + second_bytes,
+            0,
+            0,
+            0,
+            2,
+            first_bytes + second_bytes,
+            1024,
+        ];
+        assert_eq!(cache.snapshot(), initial);
+        cache.install_link(&first, 1).unwrap();
+        for _ in 0..3 {
+            cache.lookup(&memory, 0x1000).unwrap();
+            cache.lookup_linked(&memory, 0x1005).unwrap();
+            assert_eq!(cache.snapshot(), initial);
+        }
+        cache.unlink(1, first.identity()).unwrap();
+        assert_eq!(cache.snapshot(), initial);
+
+        memory.write(GuestAddress(0x1002), &[4]).unwrap();
+        assert!(cache.lookup(&memory, 0x1000).is_none());
+        assert!(cache.lookup(&memory, 0x1005).is_none());
+        let stale = [
+            2,
+            first_bytes + second_bytes,
+            0,
+            0,
+            1,
+            1,
+            second_bytes,
+            1024,
+        ];
+        assert_eq!(cache.snapshot(), stale);
+        let replacement = cache.insert(compiled(&memory, 0x1000));
+        let replacement_bytes = replacement.wasm().len() as u64;
+        assert_eq!(
+            cache.snapshot(),
+            [
+                3,
+                first_bytes + second_bytes + replacement_bytes,
+                0,
+                0,
+                1,
+                2,
+                second_bytes + replacement_bytes,
+                1024
+            ]
+        );
+        bounds(&cache);
+    }
+
+    #[test]
+    fn owner_table_pointer_survives_cache_moves_unlink_and_source_removal() {
+        let mut memory = memory();
+        let mut cache = CoreCache32::default();
+        let pointer = cache.link_owners_ptr();
+        assert_eq!(pointer, cache.link_owners.as_ptr());
+        assert_eq!(cache.link_owners.len(), 4097);
+        assert!(cache.link_owners.iter().all(|owner| *owner == 0));
+        let old = cache.insert(compiled(&memory, 0x1000));
+        cache.install_link(&old, 4096).unwrap();
+        assert_eq!(cache.link_owners[4096], old.identity());
+        let mut moved = cache;
+        assert_eq!(moved.link_owners_ptr(), pointer);
+        moved.unlink(4096, old.identity()).unwrap();
+        assert_eq!(moved.link_owners[4096], 0);
+        moved.install_link(&old, 4096).unwrap();
+        memory.write(GuestAddress(0x1002), &[4]).unwrap();
+        assert!(moved.lookup_linked(&memory, 0x1000).is_none());
+        assert_eq!(moved.link_owners_ptr(), pointer);
+        assert_eq!(moved.link_owners[0], 0);
+        assert_eq!(moved.link_owners[4096], 0);
+        bounds(&moved);
     }
 }

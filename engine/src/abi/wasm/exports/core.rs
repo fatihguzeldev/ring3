@@ -10,6 +10,9 @@ export_process_calls! {
     core_link(slot: u32);
     core_unlink(slot: u32, low: u32, high: u32);
     core_chain_next(context: u32);
+    core_link_owners_ptr();
+    core_cache_victim();
+    core_cache_status_ptr();
     core_numeric(context: u32, ordinal: u32);
     core_import();
     core_export(reason: u32, work: u32);

@@ -2,10 +2,12 @@ mod boundary;
 mod cache;
 mod dispatch;
 mod numeric;
+mod retention;
 
 pub(crate) use dispatch::{
     core_chain_next, core_dispatch_code_len, core_dispatch_code_ptr, core_link, core_unlink,
 };
+pub(crate) use retention::{core_cache_status_ptr, core_cache_victim, core_link_owners_ptr};
 
 pub(crate) use boundary::{
     core_begin_windows_callback, core_capture_windows_call, core_complete_windows_call,
@@ -33,6 +35,7 @@ use std::rc::Rc;
 pub(super) struct CoreSession32 {
     code: Rc<CompiledCode>,
     cache: CoreCache32,
+    cache_status: [u64; 8],
     numeric: NumericBank,
     exported_retired: u32,
     context: Box<Context32>,
@@ -162,6 +165,7 @@ pub(crate) fn core_prepare(pc: u32, instructions: u32, blocks: u32) -> u32 {
             *core = Some(CoreSession32 {
                 code,
                 cache: fresh_cache.unwrap(),
+                cache_status: [0; 8],
                 numeric,
                 exported_retired: 0,
                 context: Box::new(Context32::new(state)),
