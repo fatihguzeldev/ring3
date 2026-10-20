@@ -109,6 +109,8 @@ pub(in crate::process) fn run_with_lookups(
         context.set_word(32, instruction.next);
         context.set_word(40, context.retired().wrapping_add(1));
         context.set_word(44, context.remaining() - 1);
+        #[cfg(any(test, feature = "observability"))]
+        heat.native_retired();
         let Some(memory) = instance.memory.as_ref() else {
             return StopReason::Infrastructure;
         };
@@ -120,6 +122,52 @@ pub(in crate::process) fn run_with_lookups(
             10 => return StopReason::SystemEntry,
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn cold_diagnostics_count_only_completed_native_operations_including_code_writes() {
+    use crate::{cpu::x86::State32, memory::GuestAddress};
+
+    for (destination, reason, retired) in [
+        (0x1000, StopReason::CodeInvalidated, 2),
+        (0x5000, StopReason::MemoryFault, 1),
+    ] {
+        let mut instance = EngineInstance::new(4, 7).unwrap();
+        instance.map(0x1000, 1, 7).unwrap();
+        instance.map(0x3000, 1, 3).unwrap();
+        let memory = instance.memory.as_mut().unwrap();
+        memory
+            .write(GuestAddress(0x1000), &[0xd9, 0x03, 0xd9, 0x1f])
+            .unwrap();
+        memory
+            .write(GuestAddress(0x3000), &3_f32.to_le_bytes())
+            .unwrap();
+        let mut context = Context32::new(State32 {
+            registers: [0, 0, 0, 0x3000, 0x3800, 0, 0, destination],
+            eip: 0x1000,
+            eflags: 2,
+        });
+        context.set_word(44, 2);
+        context.set_word(112, 1);
+        let mut bank = NumericBank::from_instance(&instance).unwrap();
+        let segments = instance.segment_context().unwrap();
+        let mut cold = ColdState::default();
+        assert_eq!(
+            run(
+                &mut instance,
+                &mut context,
+                &mut bank,
+                &segments,
+                &[],
+                &[],
+                &mut cold
+            ),
+            reason
+        );
+        assert_eq!(context.retired(), retired);
+        assert_eq!(cold.diagnostics_snapshot()[4], u64::from(retired));
     }
 }
 

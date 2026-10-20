@@ -11,6 +11,10 @@ const componentLease = `#[cfg(feature = "external-cpu")]
 export_process_calls! {
     component_memory_lease(key_low: u32, key_high: u32);
 }`;
+const coreColdStatus = `#[cfg(feature = "observability")]
+export_process_calls! {
+    core_cold_status_ptr();
+}`;
 const coreRead = `#[allow(unsafe_code)]
 #[unsafe(export_name = "ring3_abi_v1_core_read")]
 pub extern "C" fn core_read(context: u32, address: u32, width: u32) -> i64 {
@@ -215,7 +219,14 @@ export function assertEngineExports(module, root, {observability = false} = {}) 
     if (path === coreOwner) {
       const parts = text.match(/^(export_process_calls!\s*\{[^{}]*\})\s*([\s\S]*)$/);
       assert.ok(parts, `${path}: closed Core declaration table`);
-      assert.deepEqual(tokens(parts[2]), tokens(coreRead + '\n' + coreCold), `${path}: declared Core handwritten exports`);
+      let handwritten = parts[2];
+      const conditional = handwritten.match(/^(#\[[^\]]*\]\s*export_process_calls!\s*\{[^{}]*\})\s*([\s\S]*)$/);
+      if (conditional) {
+        assert.deepEqual(tokens(conditional[1]), tokens(coreColdStatus), `${path}: declared conditional Core cold snapshot`);
+        handwritten = conditional[2];
+        if (observability) extra.push({name: 'ring3_abi_v1_core_cold_status_ptr', kind: 'function', arity: 0});
+      }
+      assert.deepEqual(tokens(handwritten), tokens(coreRead + '\n' + coreCold), `${path}: declared Core handwritten exports`);
       text = parts[1];
       extra.push({name: 'ring3_abi_v1_core_read', kind: 'function', arity: 3});
       extra.push({name: 'ring3_abi_v1_core_cold_run', kind: 'function', arity: 1});

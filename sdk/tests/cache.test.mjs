@@ -137,6 +137,38 @@ function coldFixture(steps, select = pc => ({id:1n,stop:2,next:pc+4})) {
   return f;
 }
 
+test('cold diagnostics are optional and copy the closed native snapshot',()=>{
+  const absent=new CodeCache(fixture().engine,{chain:false});
+  assert.equal(absent.coldDiagnostics(),null);
+  const f=fixture(),pointer=60000,words=[1n,2n,3n,4n,5n,6n,7n,8n,9n,10n,11n,12n,64n];
+  let reads=0;
+  f.api.core_cold_status_ptr=()=>{
+    reads++;words.forEach((value,index)=>new DataView(f.engine.memory.buffer).setBigUint64(pointer+index*8,value,true));
+    return pointer;
+  };
+  const cache=new CodeCache(f.engine,{chain:false});
+  assert.equal(cache.coldDiagnostics(),null);assert.equal(reads,0);
+  cache.entry(0x1000);
+  const first=cache.coldDiagnostics();
+  assert.deepEqual(first,{schema:1,sourceResets:'2',requestedResets:'3',occupiedLiveReplacements:'4',
+    nativeRetired:'5',hotRequests:'6',decodeFallbackRequests:'7',admissionFallbackRequests:'8',
+    unsupportedOperationRequests:'9',rowsVisits1:'10',rowsVisits2To63:'11',rowsVisits64Plus:'12',maximumVisits:'64'});
+  words[1]=99n;f.engine.memory.grow(1);
+  assert.equal(cache.coldDiagnostics().sourceResets,'99');assert.equal(first.sourceResets,'2');
+  assert.equal(reads,2);
+});
+
+test('cold diagnostics reject active, malformed and replaced native bindings',()=>{
+  const f=fixture();let pointer=60000,version=1n;
+  const read=()=>{if(pointer===60000)new DataView(f.engine.memory.buffer).setBigUint64(pointer,version,true);return pointer;};
+  f.api.core_cold_status_ptr=read;
+  const cache=new CodeCache(f.engine,{chain:false});cache.entry(0x1000);
+  cache.open=true;assert.throws(()=>cache.coldDiagnostics(),/active/);cache.open=false;
+  for(const bad of [0,1,131072]){pointer=bad;assert.throws(()=>cache.coldDiagnostics(),/descriptor/);}
+  pointer=60000;version=2n;assert.throws(()=>cache.coldDiagnostics(),/version/);
+  version=1n;f.api.core_cold_status_ptr=()=>60000;assert.throws(()=>cache.coldDiagnostics(),/bindings changed/);
+});
+
 test('cold selection executes before compilation without a fabricated compiled owner',()=>{
   const f=coldFixture([{stop:2,pc:0x1008,work:2,words:[[0,42]]}]);
   const cache=new CodeCache(f.engine,{chain:false,budget:2});

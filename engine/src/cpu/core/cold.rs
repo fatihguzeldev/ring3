@@ -11,6 +11,8 @@ use crate::{
 };
 
 mod control;
+#[cfg(any(test, feature = "observability"))]
+mod diagnostics;
 mod integer;
 mod memory;
 use memory::{Failure, Port};
@@ -40,6 +42,8 @@ struct ColdHeat {
     version: u64,
     generation: u64,
     threshold: u32,
+    #[cfg(any(test, feature = "observability"))]
+    diagnostics: diagnostics::Diagnostics,
 }
 
 #[derive(Default)]
@@ -76,6 +80,8 @@ impl ColdHeat {
             version: 0,
             generation: 1,
             threshold: threshold.max(1),
+            #[cfg(any(test, feature = "observability"))]
+            diagnostics: diagnostics::Diagnostics::default(),
         }
     }
 
@@ -94,6 +100,8 @@ impl ColdHeat {
 
     fn source(&mut self, memory: &AddressSpace) {
         if self.memory != memory.identity() || self.version != memory.code_source_version() {
+            #[cfg(any(test, feature = "observability"))]
+            self.diagnostics.source_reset();
             self.advance();
             self.memory = memory.identity();
             self.version = memory.code_source_version();
@@ -134,6 +142,10 @@ impl ColdHeat {
                 replacement = index;
                 expired = true;
             }
+        }
+        #[cfg(any(test, feature = "observability"))]
+        if rows[replacement].generation == self.generation {
+            self.diagnostics.occupied_replacement();
         }
         rows[replacement] = HeatRow {
             pc,
@@ -265,6 +277,8 @@ pub(crate) fn run_with_lookups(
                     }
                     DecodeError::Infrastructure(_) => Failure::Infrastructure,
                     _ => {
+                        #[cfg(any(test, feature = "observability"))]
+                        heat.diagnostics.request(diagnostics::Request::Decode);
                         heat.requested();
                         return finish(context, state, retired, remaining, StopReason::NeedCode);
                     }
@@ -277,6 +291,15 @@ pub(crate) fn run_with_lookups(
             || decoded.is_privileged_instruction()
             || heat.hot(memory, pc)
         {
+            #[cfg(any(test, feature = "observability"))]
+            heat.diagnostics.request(
+                if decoded.segment_accesses() & (1 << 5) != 0 || decoded.is_privileged_instruction()
+                {
+                    diagnostics::Request::Admission
+                } else {
+                    diagnostics::Request::Hot
+                },
+            );
             heat.requested();
             return finish(context, state, retired, remaining, StopReason::NeedCode);
         }
@@ -322,6 +345,8 @@ pub(crate) fn run_with_lookups(
                 heat.retired(memory, pc);
             }
             Ok(false) => {
+                #[cfg(any(test, feature = "observability"))]
+                heat.diagnostics.request(diagnostics::Request::Unsupported);
                 heat.requested();
                 return finish(context, state, retired, remaining, StopReason::NeedCode);
             }

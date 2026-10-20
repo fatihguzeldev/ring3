@@ -46,3 +46,17 @@ pub(crate) fn core_cache_status_ptr() -> u32 {
         core.cache_status.as_ptr() as usize as u32
     })
 }
+
+#[cfg(feature = "observability")]
+pub(crate) fn core_cold_status_ptr() -> u32 {
+    REGISTRY.with(|registry| {
+        let Ok(mut registry) = registry.try_borrow_mut() else {
+            return 0;
+        };
+        let Some(core) = registry.core.as_mut().filter(|core| !core.active) else {
+            return 0;
+        };
+        core.cold_status = core.cold_state.diagnostics_snapshot();
+        core.cold_status.as_ptr() as usize as u32
+    })
+}

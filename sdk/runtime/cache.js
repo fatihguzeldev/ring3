@@ -1,6 +1,9 @@
 const MAX_CODE_BYTES = 32 * 1024 * 1024;
 const NATIVE_COUNTERS = ['compiled','admittedEncodedBytes','countEvictions','byteEvictions',
   'sourceInvalidations','retainedUnits','retainedEncodedBytes','unitCapacity'];
+const COLD_COUNTERS = ['sourceResets','requestedResets','occupiedLiveReplacements','nativeRetired',
+  'hotRequests','decodeFallbackRequests','admissionFallbackRequests','unsupportedOperationRequests',
+  'rowsVisits1','rowsVisits2To63','rowsVisits64Plus','maximumVisits'];
 const DIAGNOSTIC_PC_CAPACITY = 8192;
 const DIAGNOSTIC_LAST_CAPACITY = 32;
 const DIAGNOSTIC_SLOW_CAPACITY = 8;
@@ -35,6 +38,7 @@ export class CodeCache {
       return [name, this.api[name]];
     }));
     if (typeof this.api.core_cold_run === 'function') this.native.core_cold_run = this.api.core_cold_run;
+    if (typeof this.api.core_cold_status_ptr === 'function') this.native.core_cold_status_ptr = this.api.core_cold_status_ptr;
     this.#bindings = Object.entries(this.native);
     this.budget = budget; this.instructions = instructions; this.blocks = blocks; this.capacity = capacity;
     this.units = new Map(); this.context = 0; this.open = false; this.dirty = false; this.dirtyWork = 0; this.lastStop = 1;
@@ -406,6 +410,14 @@ export class CodeCache {
       this.nativeCache = Object.fromEntries(NATIVE_COUNTERS.map((name,index) => [name,data.getBigUint64(index*8,true).toString()]));
     }
     return this.stats();
+  }
+  coldDiagnostics() {
+    if (this.open) throw new Error('cannot sample active cold execution');
+    if (!this.native.core_cold_status_ptr || !this.context) return null;
+    this.pristine();
+    const data=this.nativeSnapshot('core_cold_status_ptr',104);
+    if (data.getBigUint64(0,true)!==1n) throw new Error('invalid cold diagnostic version');
+    return {schema:1,...Object.fromEntries(COLD_COUNTERS.map((name,index)=>[name,data.getBigUint64((index+1)*8,true).toString()]))};
   }
   stats() {
     return {backend: 'core', chainEnabled:this.chain, runs: this.runs, regions:this.regions, retired: this.retired, work: this.work, admissions: this.admissions,

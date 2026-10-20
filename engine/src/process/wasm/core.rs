@@ -9,6 +9,8 @@ pub(crate) use cold::core_cold_run;
 pub(crate) use dispatch::{
     core_chain_next, core_dispatch_code_len, core_dispatch_code_ptr, core_link, core_unlink,
 };
+#[cfg(feature = "observability")]
+pub(crate) use retention::core_cold_status_ptr;
 pub(crate) use retention::{core_cache_status_ptr, core_cache_victim, core_link_owners_ptr};
 
 pub(crate) use boundary::{
@@ -37,6 +39,8 @@ pub(super) struct CoreSession32 {
     code: Option<RegionRef>,
     cache: CoreCache32,
     cache_status: [u64; 8],
+    #[cfg(feature = "observability")]
+    cold_status: [u64; 13],
     numeric: NumericBank,
     exported_retired: u32,
     context: Box<Context32>,
@@ -52,6 +56,8 @@ impl CoreSession32 {
             code: None,
             cache: CoreCache32::default(),
             cache_status: [0; 8],
+            #[cfg(feature = "observability")]
+            cold_status: [0; 13],
             numeric: NumericBank::from_instance(instance)?,
             exported_retired: 0,
             context: Box::new(Context32::new(state)),
@@ -257,6 +263,8 @@ pub(crate) fn core_prepare(pc: u32, instructions: u32, blocks: u32) -> u32 {
                 code: Some(code),
                 cache: fresh_cache.unwrap(),
                 cache_status: [0; 8],
+                #[cfg(feature = "observability")]
+                cold_status: [0; 13],
                 numeric,
                 exported_retired: 0,
                 context: Box::new(Context32::new(state)),

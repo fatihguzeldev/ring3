@@ -15,7 +15,7 @@ function workspace(body, child, check) {
   try { check(root); } finally { rmSync(root, {recursive: true, force: true}); }
 }
 
-function moduleWith(names) {
+function moduleWith(names, {observability = false} = {}) {
   const unsigned = value => {
     const bytes = [];
     do {
@@ -29,11 +29,12 @@ function moduleWith(names) {
   const name = value => [...unsigned(Buffer.byteLength(value)), ...Buffer.from(value)];
   return new WebAssembly.Module(Uint8Array.from([
     0, 97, 115, 109, 1, 0, 0, 0,
-    ...section(1, [1, 0x60, 0, 0]),
+    ...section(1, observability ? [2, 0x60, 0, 0, 0x60, 0, 1, 0x7e] : [1, 0x60, 0, 0]),
+    ...(observability ? section(2, [1, ...name('ring3_observability'), ...name('now_ns'), 0, 1]) : []),
     ...section(3, [names.length, ...names.map(() => 0)]),
     ...section(5, [1, 0, 1]),
     ...section(7, [names.length + 1, ...name('memory'), 2, 0,
-      ...names.flatMap((value, index) => [...name(value), 0, index])]),
+      ...names.flatMap((value, index) => [...name(value), 0, index + Number(observability)])]),
     ...section(10, [names.length, ...names.flatMap(() => [2, 0, 0x0b])]),
   ]));
 }
@@ -205,6 +206,43 @@ test('the CPU owner keeps only its exact i64 view parameter and pair/group expor
 
 const coreSource = readFileSync(new URL('../../../src/abi/wasm/exports/core.rs', import.meta.url), 'utf8');
 const coreReadSource = coreSource.slice(coreSource.indexOf('#[allow('));
+const coreColdStatusSource = '#[cfg(feature = "observability")]\nexport_process_calls! { core_cold_status_ptr(); }\n';
+
+test('the Core cold snapshot tail is exact and follows the observability export profile', () => {
+  workspace(parent, child, root => {
+    const dir = join(root, 'engine/src/abi/wasm/exports');
+    writeFileSync(join(dir, 'mod.rs'), 'macro_rules! export_process_calls {\n}\nmod core;\n' +
+      '#[cfg(feature = "observability")]\nmod census;\n#[cfg(feature = "observability")]\nmod observability;\n');
+    writeFileSync(join(dir, 'census.rs'), 'export_process_calls! { execution_census_page(offset: u32); }\n');
+    writeFileSync(join(dir, 'observability.rs'), 'export_process_calls! { observability_status(); }\n');
+    const core = join(dir, 'core.rs');
+    const source = 'export_process_calls! { core_begin(); }\n' + coreColdStatusSource + coreReadSource;
+    const names = ['ring3_abi_v1_core_begin', 'ring3_abi_v1_core_read', 'ring3_abi_v1_core_cold_run'];
+    const enabledNames = [...names, 'ring3_abi_v1_core_cold_status_ptr',
+      'ring3_abi_v1_execution_census_page', 'ring3_abi_v1_observability_status'];
+    writeFileSync(core, source);
+    assert.ok(!assertEngineExports(moduleWith(names), root).functions.some(row => row.name.endsWith('core_cold_status_ptr')));
+    const enabled = assertEngineExports(moduleWith(enabledNames, {observability: true}), root, {observability: true});
+    assert.deepEqual(enabled.functions.find(row => row.name.endsWith('core_cold_status_ptr')),
+      {name: 'ring3_abi_v1_core_cold_status_ptr', kind: 'function', arity: 0});
+    assert.throws(() => assertEngineExports(moduleWith([...names, 'ring3_abi_v1_core_cold_status_ptr']), root), /exact declared engine exports/);
+    assert.throws(() => assertEngineExports(moduleWith(enabledNames.filter(name => !name.endsWith('core_cold_status_ptr')), {observability: true}), root,
+      {observability: true}), /exact declared engine exports/);
+    assert.throws(() => assertEngineExports(moduleWith([...enabledNames, 'ring3_abi_v1_hidden'], {observability: true}), root,
+      {observability: true}), /exact declared engine exports/);
+    for (const invalid of [
+      source.replace('feature = "observability"', 'feature = "other"'),
+      source.replace('#[cfg(feature = "observability")]\n', ''),
+      source.replace('core_cold_status_ptr();', 'core_cold_status_ptr(value: u32);'),
+      source.replace('core_cold_status_ptr();', 'other();'),
+      source.replace(coreColdStatusSource, coreColdStatusSource + coreColdStatusSource),
+      source + '\nfn hidden() {}\n',
+    ]) {
+      writeFileSync(core, invalid);
+      assert.throws(() => assertEngineExports(moduleWith(names), root), /Core|declaration/);
+    }
+  });
+});
 
 test('the Core owner retains exact handwritten i64 read and signed cold exports', () => {
   workspace(parent, child, root => {

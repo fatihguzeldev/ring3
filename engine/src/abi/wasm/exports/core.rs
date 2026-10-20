@@ -25,6 +25,11 @@ export_process_calls! {
     core_write(context: u32, address: u32, width: u32, value: u32);
 }
 
+#[cfg(feature = "observability")]
+export_process_calls! {
+    core_cold_status_ptr();
+}
+
 #[allow(unsafe_code)]
 #[unsafe(export_name = "ring3_abi_v1_core_read")]
 pub extern "C" fn core_read(context: u32, address: u32, width: u32) -> i64 {

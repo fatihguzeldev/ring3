@@ -13,6 +13,8 @@ pub(crate) use component_memory::component_memory_lease;
 mod clock;
 mod core;
 pub(crate) use clock::{advance_cpu_clock, configure_cpu_clock, observe_cpu_clock};
+#[cfg(feature = "observability")]
+pub(crate) use core::core_cold_status_ptr;
 pub(crate) use core::{
     core_begin, core_begin_windows_callback, core_cache_status_ptr, core_cache_victim,
     core_capture_windows_call, core_chain_next, core_code_len, core_code_ptr, core_cold_run,
