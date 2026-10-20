@@ -48,18 +48,20 @@ function paddedProgram(encoded, padding = 0) {
 function fixture(select = pc => ({id: 1n, stop: 1, next: pc + 4})) {
   const memory = new WebAssembly.Memory({initial: 2}), calls = [], arena = new Map([[48, 0x1000]]), control = {begin: () => 0};
   let context = 256, selected, encoded;
-  const links = new Map(), dispatch = driver();
+  const links = new Map(), recency = [], dispatch = driver(), codePointer = 65536, ownersPointer = 16384, statusPointer = 49168;
   const d = () => new DataView(memory.buffer);
+  const touch = id => {const index=recency.indexOf(id); if(index>=0)recency.splice(index,1); recency.push(id);};
   const api = {
     core_prepare(pc, instructions, blocks) {
       calls.push(['prepare', pc, instructions, blocks]); selected = select(pc);
+      control.prepare?.(pc,selected); touch(selected.id);
       encoded = paddedProgram(program(selected.stop, selected.next, selected.retired, selected.work),selected.padding);
-      const pages = Math.ceil((2048 + encoded.length) / 65536);
+      const pages = Math.ceil((codePointer + encoded.length) / 65536);
       if (pages > memory.buffer.byteLength / 65536) memory.grow(pages - memory.buffer.byteLength / 65536);
       d().setUint32(context + 32, pc, true); d().setBigUint64(context + 120, selected.id, true);
-      new Uint8Array(memory.buffer, 2048).set(encoded); return 0;
+      new Uint8Array(memory.buffer, codePointer).set(encoded); return 0;
     },
-    core_context_ptr: () => context, core_code_ptr: () => 2048,
+    core_context_ptr: () => context, core_code_ptr: () => codePointer,
     core_code_len: () => encoded.length,
     core_begin() { calls.push(['begin']); return control.begin(); }, core_end() { calls.push(['end']); return 0; },
     core_import() { calls.push(['import']); d().setUint32(context + 32, arena.get(48), true); d().setUint32(context, arena.get(16) ?? 0,true); return 0; },
@@ -67,6 +69,24 @@ function fixture(select = pc => ({id: 1n, stop: 1, next: pc + 4})) {
     core_read: () => 0n, core_write: () => 0, core_numeric: () => 0,
     core_dispatch_code_ptr() {new Uint8Array(memory.buffer,8192).set(dispatch); return 8192;},
     core_dispatch_code_len: () => dispatch.length,
+    core_link_owners_ptr() {
+      calls.push(['owners']);
+      new Uint8Array(memory.buffer,ownersPointer,4097*8).fill(0);
+      for(const [slot,id] of links) d().setBigUint64(ownersPointer+slot*8,id,true);
+      return ownersPointer;
+    },
+    core_cache_victim() {
+      calls.push(['victim']);
+      if(control.victim!==undefined)return control.victim;
+      for(const id of recency)for(const [slot,owner] of links)if(owner===id)return slot;
+      return 0;
+    },
+    core_cache_status_ptr() {
+      calls.push(['cache-status']);
+      (control.nativeStatus??[3n,1234n,1n,2n,4n,BigInt(links.size),678n,1024n])
+        .forEach((value,index)=>d().setBigUint64(statusPointer+index*8,value,true));
+      return statusPointer;
+    },
     core_link(slot) {
       calls.push(['link',slot,selected.id]);
       if (links.has(slot) && links.get(slot) !== selected.id) return 7;
@@ -85,7 +105,7 @@ function fixture(select = pc => ({id: 1n, stop: 1, next: pc + 4})) {
       const target = select(d().getUint32(pointer+32,true));
       const found = [...links].find(([,id]) => id === target.id);
       if (!found) return 0;
-      selected = target; d().setBigUint64(pointer+120,target.id,true); return found[0];
+      selected = target; touch(target.id); d().setBigUint64(pointer+120,target.id,true); return found[0];
     },
   };
   const engine = {api, memory, get: offset => arena.get(offset) ?? 0,
@@ -218,6 +238,69 @@ test('chained bindings and invalid native successors fail closed', () => {
   g.control.next = () => 0xffffffff;
   assert.throws(() => rejected.execute(selected),/invalid core stop 8/);
   assert.equal(rejected.open,false); assert.equal(g.calls.filter(([name]) => name === 'end').length,1);
+});
+test('native eviction prunes a detached module without evicting another linked owner', () => {
+  const f=fixture(pc=>({id:BigInt(pc),stop:2,next:pc+4})), cache=new CodeCache(f.engine,{chain:true,capacity:2});
+  const a=cache.entry(0x1000), b=cache.entry(0x2000);
+  f.control.prepare=pc=>{if(pc===0x3000)f.links.delete(a.slot);};
+  const c=cache.entry(0x3000), stats=cache.stats();
+  assert.equal(cache.units.has(a.id),false); assert.equal(cache.units.get(b.id),b);
+  assert.equal(c.slot,a.slot); assert.equal(cache.table.get(c.slot),c.run);
+  assert.equal(stats.installedUnits,2); assert.equal(stats.evictions,0);
+  assert.deepEqual(stats.evictionReasons,{count:0,bytes:0});
+  assert.equal(stats.prunedNative,1); assert.equal(stats.prunedNativeBytes,a.bytes);
+  assert.equal(stats.retainedModuleBytes,b.bytes+c.bytes);
+  assert.deepEqual(f.calls.filter(([name])=>name==='unlink'),[['unlink',a.slot,a.id]]);
+});
+test('a nonzero native owner mismatch rejects before any detached module is cleared', () => {
+  const f=fixture(pc=>({id:BigInt(pc),stop:2,next:pc+4})), cache=new CodeCache(f.engine,{chain:true,capacity:2});
+  const a=cache.entry(0x1000), b=cache.entry(0x2000);
+  f.control.prepare=pc=>{if(pc===0x3000){f.links.delete(a.slot);f.links.set(b.slot,99n);}};
+  assert.throws(()=>cache.entry(0x3000),/native.*owner|owner.*mismatch/);
+  assert.equal(cache.units.get(a.id),a); assert.equal(cache.units.get(b.id),b);
+  assert.equal(cache.table.get(a.slot),a.run); assert.equal(cache.table.get(b.slot),b.run);
+  assert.equal(cache.stats().evictions,0); assert.equal(cache.stats().prunedNative,0);
+  assert.equal(f.calls.filter(([name])=>name==='unlink').length,0);
+});
+test('capacity follows native handoff recency instead of JavaScript entry order', () => {
+  const f=fixture(pc=>pc===0x1000?{id:1n,stop:2,next:0x1004}
+    :pc===0x2000?{id:2n,stop:1,next:0x1000}:{id:3n,stop:2,next:0x3004});
+  const cache=new CodeCache(f.engine,{chain:true,capacity:2});
+  const a=cache.entry(0x1000), b=cache.entry(0x2000);
+  assert.equal(cache.execute(b).regions,2);
+  const c=cache.entry(0x3000);
+  assert.equal(cache.units.get(a.id),a); assert.equal(cache.units.has(b.id),false);
+  assert.equal(c.slot,b.slot); assert.equal(cache.table.get(a.slot),a.run);
+  assert.deepEqual(f.calls.filter(([name])=>name==='unlink'),[['unlink',b.slot,b.id]]);
+  assert.deepEqual(cache.stats().evictionReasons,{count:1,bytes:0});
+});
+test('an invalid or unretained native victim cannot clear a private table slot', () => {
+  for(const victim of [0,4097,4096]) {
+    const f=fixture(pc=>({id:BigInt(pc),stop:2,next:pc+4})), cache=new CodeCache(f.engine,{chain:true,capacity:1});
+    const a=cache.entry(0x1000); f.control.victim=victim;
+    assert.throws(()=>cache.entry(0x2000),/native.*victim|victim.*native/);
+    assert.equal(cache.units.get(a.id),a); assert.equal(cache.table.get(a.slot),a.run);
+    assert.equal(f.calls.filter(([name])=>name==='unlink').length,0);
+  }
+});
+test('native cache counters are sampled only at a cold usage boundary and retain u64 precision', () => {
+  const f=fixture(pc=>({id:BigInt(pc),stop:2,next:pc+4})), cache=new CodeCache(f.engine,{chain:true});
+  cache.execute(cache.entry()); cache.stats();
+  assert.equal(f.calls.filter(([name])=>name==='cache-status').length,0);
+  const values=[9007199254740993n,1234n,1n,2n,4n,1n,678n,1024n]; f.control.nativeStatus=values;
+  const usage=cache.sampleUsage();
+  assert.deepEqual(usage.nativeCache,{
+    compiled:values[0].toString(),admittedEncodedBytes:'1234',countEvictions:'1',byteEvictions:'2',
+    sourceInvalidations:'4',retainedUnits:'1',retainedEncodedBytes:'678',unitCapacity:'1024',
+  });
+  usage.nativeCache.compiled='0'; assert.equal(cache.stats().nativeCache.compiled,values[0].toString());
+  cache.stats(); assert.equal(f.calls.filter(([name])=>name==='cache-status').length,1);
+  const direct=fixture(); delete direct.api.core_cache_status_ptr;
+  assert.doesNotThrow(()=>new CodeCache(direct.engine,{chain:false}));
+  for(const name of ['core_link_owners_ptr','core_cache_victim','core_cache_status_ptr']) {
+    const missing=fixture(); delete missing.api[name];
+    assert.throws(()=>new CodeCache(missing.engine,{chain:true}),/missing core export/);
+  }
 });
 test('callback consumes the standard 64-byte record without resident ownership', () => {
   const bytes = new Uint8Array(64), d = new DataView(bytes.buffer); bytes.set(new TextEncoder().encode('R3CB'));

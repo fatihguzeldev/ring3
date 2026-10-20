@@ -1,4 +1,6 @@
 const MAX_CODE_BYTES = 32 * 1024 * 1024;
+const NATIVE_COUNTERS = ['compiled','admittedEncodedBytes','countEvictions','byteEvictions',
+  'sourceInvalidations','retainedUnits','retainedEncodedBytes','unitCapacity'];
 
 export class CodeCache {
   constructor(engine, {budget = 50000, instructions = 2048, blocks = 128, capacity = 1024, chain = true} = {}) {
@@ -13,7 +15,8 @@ export class CodeCache {
       throw new Error('core execution requires exclusively owned memory');
     this.native = Object.fromEntries(['core_prepare', 'core_code_ptr', 'core_code_len', 'core_context_ptr',
       'core_begin', 'core_end', 'core_import', 'core_export', 'core_read', 'core_write', 'core_numeric',
-      ...(chain ? ['core_dispatch_code_ptr','core_dispatch_code_len','core_link','core_unlink','core_chain_next'] : [])].map(name => {
+      ...(chain ? ['core_dispatch_code_ptr','core_dispatch_code_len','core_link','core_unlink','core_chain_next',
+        'core_link_owners_ptr','core_cache_victim','core_cache_status_ptr'] : [])].map(name => {
       if (typeof this.api[name] !== 'function') throw new Error(`missing core export ${name}`);
       return [name, this.api[name]];
     }));
@@ -21,6 +24,7 @@ export class CodeCache {
     this.units = new Map(); this.context = 0; this.open = false; this.dirty = false; this.dirtyWork = 0; this.lastStop = 1;
     this.runs = 0; this.regions = 0; this.retired = 0; this.work = 0; this.admissions = 0; this.hits = 0; this.evictions = 0;
     this.evictionReasons = {count:0,bytes:0};
+    this.prunedNative = 0; this.prunedNativeBytes = 0; this.nativeCache = undefined;
     this.generatedModuleBytes = 0; this.retainedModuleBytes = 0;
     this.chain = chain;
     if (chain) this.initializeDispatch();
@@ -33,6 +37,7 @@ export class CodeCache {
   }
   initializeDispatch() {
     this.table = new WebAssembly.Table({element:'anyfunc',initial:4097,maximum:4097});
+    this.slots = new Map();
     this.freeSlots = Array.from({length:4096},(_,index) => 4096-index);
     const module = new WebAssembly.Module(this.encoded('core_dispatch_code_ptr','core_dispatch_code_len'));
     const imports = WebAssembly.Module.imports(module);
@@ -44,14 +49,42 @@ export class CodeCache {
       throw new Error('invalid core dispatch exports');
     this.dispatch = exports;
   }
-  evict(reason) {
-    const [id,unit] = this.units.entries().next().value;
+  nativeSnapshot(name,bytes) {
+    const pointer = this.native[name]() >>> 0;
+    if (!pointer || pointer % 8 || pointer + bytes > this.memory.buffer.byteLength)
+      throw new Error(`invalid ${name} descriptor`);
+    return new DataView(this.memory.buffer,pointer,bytes);
+  }
+  pruneNative() {
+    const owners = this.nativeSnapshot('core_link_owners_ptr',4097*8), detached = [];
+    if (owners.getBigUint64(0,true) !== 0n) throw new Error('reserved native core slot has an owner');
+    for (const unit of this.units.values()) {
+      const owner = owners.getBigUint64(unit.slot*8,true);
+      if (owner === 0n) detached.push(unit);
+      else if (owner !== unit.id) throw new Error('native core slot owner mismatch');
+    }
+    for (const unit of detached) this.remove(unit,'native');
+  }
+  remove(unit,reason) {
+    const {id} = unit;
     if (this.chain) {
       const status = this.native.core_unlink(unit.slot,Number(id&0xffffffffn),Number(id>>32n));
       if (status !== 0) throw new Error(`core_unlink returned ${status}`);
-      this.table.set(unit.slot,null); this.freeSlots.push(unit.slot);
+      this.table.set(unit.slot,null); this.slots.delete(unit.slot); this.freeSlots.push(unit.slot);
     }
-    this.units.delete(id); this.retainedModuleBytes -= unit.bytes; this.evictions++; this.evictionReasons[reason]++;
+    this.units.delete(id); this.retainedModuleBytes -= unit.bytes;
+    if (reason === 'native') {this.prunedNative++; this.prunedNativeBytes += unit.bytes;}
+    else {this.evictions++; this.evictionReasons[reason]++;}
+  }
+  evict(reason) {
+    let unit;
+    if (this.chain) {
+      const slot = this.native.core_cache_victim() >>> 0;
+      unit = this.slots.get(slot);
+      if (!slot || slot > 4096 || !unit || this.units.get(unit.id) !== unit)
+        throw new Error('invalid native core cache victim');
+    } else unit = this.units.values().next().value;
+    this.remove(unit,reason);
   }
   pristine() {
     if (this.engine.api !== this.api || this.engine.memory !== this.memory ||
@@ -73,6 +106,7 @@ export class CodeCache {
       const unit = this.units.get(id); this.units.delete(id); this.units.set(id, unit); this.hits++;
       return unit;
     }
+    if (this.chain) this.pruneNative();
     const encoded = this.encoded('core_code_ptr','core_code_len'), length = encoded.length;
     const module = new WebAssembly.Module(encoded), bindings = {memory: this.memory};
     const available = {read: this.native.core_read, write: this.native.core_write, numeric: this.native.core_numeric};
@@ -96,7 +130,7 @@ export class CodeCache {
       this.table.set(slot,run);
       const status = this.native.core_link(slot);
       if (status !== 0) {this.table.set(slot,null); this.freeSlots.push(slot); throw new Error(`core_link returned ${status}`);}
-      unit.slot = slot;
+      unit.slot = slot; this.slots.set(slot,unit);
     }
     this.units.set(id, unit); this.admissions++; this.generatedModuleBytes += length; this.retainedModuleBytes += length;
     return unit;
@@ -147,12 +181,22 @@ export class CodeCache {
     if (this.dirty) throw new Error('unpublished core state before native import');
     this.engine.ok('core_import');
   }
-  sampleUsage() { return this.stats(); }
+  sampleUsage() {
+    if (this.open) throw new Error('cannot sample an active core cache');
+    if (this.chain && this.context) {
+      this.pristine();
+      const data = this.nativeSnapshot('core_cache_status_ptr',64);
+      this.nativeCache = Object.fromEntries(NATIVE_COUNTERS.map((name,index) => [name,data.getBigUint64(index*8,true).toString()]));
+    }
+    return this.stats();
+  }
   stats() {
     return {backend: 'core', chainEnabled:this.chain, runs: this.runs, regions:this.regions, retired: this.retired, work: this.work, admissions: this.admissions,
       engineCacheHits: this.hits, evictions: this.evictions, generatedModuleBytes: this.generatedModuleBytes,
       retainedModuleBytes: this.retainedModuleBytes, installedUnits: this.units.size, unitCapacity: this.capacity,
       byteCapacity:MAX_CODE_BYTES, evictionReasons:{...this.evictionReasons},
+      prunedNative:this.prunedNative, prunedNativeBytes:this.prunedNativeBytes,
+      nativeCache:this.nativeCache && {...this.nativeCache},
       wasmMemoryBytes: this.memory.buffer.byteLength};
   }
 }
