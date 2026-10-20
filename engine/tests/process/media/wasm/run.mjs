@@ -126,6 +126,59 @@ call('audio_acknowledge',[...ackArgs,2],7);
 call('audio_acknowledge',[...ackArgs,4]);
 call('audio_read_submission',[...ackArgs,0,1],40);
 call('audio_state'); assert.deepEqual(record(7).values.slice(0,2),[4n,4n]);
+
+const queued=[];
+for(const frames of [3,2,3]) {
+  call('audio_enqueue',[frames]);
+  const current=record(6), payload=read(64+frames*8).subarray(64);
+  queued.push({epoch:current.epoch,sequence:current.values[0],firstFrame:current.values[1],frames,
+    pcmHex:payload.toString('hex')});
+}
+mkdirSync(outputPath,{recursive:true});
+const queueEvidence={complete:false,packets:queued};
+const saveQueue=()=>writeFileSync(join(outputPath,'audio-queue.json'),JSON.stringify(queueEvidence,
+  (_key,value)=>typeof value==='bigint'?value.toString():value,2)+'\n');
+saveQueue();
+assert.deepEqual(queued.map(packet=>[packet.epoch,packet.sequence,packet.firstFrame,packet.frames]),
+  [[epoch,2n,4n,3],[epoch,3n,7n,2],[epoch,4n,9n,3]]);
+const expectedQueued=[[-1,-1,0,0,.5,.5],[127/128,127/128,-1,-1],[0,0,.5,.5,127/128,127/128]];
+queued.forEach((packet,index)=>{
+  const pcm=Buffer.from(packet.pcmHex,'hex');
+  assert.deepEqual(Array.from({length:packet.frames*2},(_,sample)=>pcm.readFloatLE(sample*4)),expectedQueued[index]);
+});
+const queuedArgs=packet=>[...wide(packet.epoch),...wide(packet.sequence)];
+const audioState=()=>{call('audio_state');return record(7).values;};
+assert.deepEqual(audioState(),[12n,4n,2n,3n,0n]);
+const beforeRejected=read(64);
+call('audio_acknowledge',[...queuedArgs(queued[1]),1],40);
+assert.deepEqual(read(64),beforeRejected);
+assert.deepEqual(audioState(),[12n,4n,2n,3n,0n]);
+call('audio_read_submission',[...queuedArgs(queued[0]),0,3]);
+assert.equal(read(24).toString('hex'),queued[0].pcmHex);
+call('audio_acknowledge',[...queuedArgs(queued[0]),1]);
+assert.deepEqual(audioState(),[12n,5n,2n,3n,0n]);
+call('audio_voice_state',voice.args);assert.equal(record(8).values[0],1n);
+call('audio_acknowledge',[...queuedArgs(queued[0]),3]);
+assert.deepEqual(audioState(),[12n,7n,3n,2n,0n]);
+call('audio_read_submission',[...queuedArgs(queued[1]),0,2]);
+assert.equal(read(16).toString('hex'),queued[1].pcmHex);
+call('audio_acknowledge',[...queuedArgs(queued[0]),3],40);
+call('audio_acknowledge',[...queuedArgs(queued[1]),1]);
+assert.deepEqual(audioState(),[12n,8n,3n,2n,0n]);
+call('audio_acknowledge',[...queuedArgs(queued[1]),2]);
+assert.deepEqual(audioState(),[12n,9n,4n,3n,0n]);
+call('audio_read_submission',[...queuedArgs(queued[2]),0,3]);
+assert.equal(read(24).toString('hex'),queued[2].pcmHex);
+call('audio_acknowledge',[...queuedArgs(queued[2]),3]);
+assert.deepEqual(audioState(),[12n,12n,0n,0n,0n]);
+call('audio_voice_state',voice.args);assert.equal(record(8).values[0],0n);
+queueEvidence.complete=true;
+queueEvidence.submittedFrameDelta=8;
+queueEvidence.consumedFrameDelta=8;
+queueEvidence.outOfOrderRejected=true;
+queueEvidence.partialHead=true;
+saveQueue();
+
 call('audio_stop',voice.args); call('audio_seek',[...voice.args,1]);
 call('audio_play',[...voice.args,0]); call('audio_submit',[2]); const pendingAudio=record(6);
 
@@ -197,7 +250,7 @@ for(let sample=0;sample<5;sample++) {
 call('close'); call('reset_media',[],5); call('input_state',[],5); call('audio_submit',[1],5);
 const receipt={sha256,node:process.version,platform:process.platform,arch:process.arch,calls,
   graphics:{commands:ops,versions:versions.map(String),bytes:length},
-  audio:{pcmFrames:4,partialAck:true,mixerVoices,mixerCyclesPerSample:1000,framesPerCycle:256,timingsMs:timings},
+  audio:{pcmFrames:4,partialAck:true,queuedPackets:queued.length,queuedFrames:8,queuedHeadOnly:true,mixerVoices,mixerCyclesPerSample:1000,framesPerCycle:256,timingsMs:timings},
   input:{orderedTransitions:true,focusReleases:2,queueFailureNeutral:true},
   reset:{oldEpoch:String(epoch),newEpoch:String(newEpoch),staleRejected:true},
   ceiling:'actual wasm host contract; no guest Windows media frontend, GPU, sound device or physical input'};
