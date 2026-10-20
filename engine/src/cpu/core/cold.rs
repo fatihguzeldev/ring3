@@ -39,7 +39,6 @@ struct HeatRow {
 struct ColdHeat {
     rows: Box<[HeatRow]>,
     memory: u64,
-    version: u64,
     generation: u64,
     threshold: u32,
     #[cfg(any(test, feature = "observability"))]
@@ -77,7 +76,6 @@ impl ColdHeat {
         Self {
             rows: vec![HeatRow::default(); HEAT_SLOTS].into_boxed_slice(),
             memory: 0,
-            version: 0,
             generation: 1,
             threshold: threshold.max(1),
             #[cfg(any(test, feature = "observability"))]
@@ -99,12 +97,11 @@ impl ColdHeat {
     }
 
     fn source(&mut self, memory: &AddressSpace) {
-        if self.memory != memory.identity() || self.version != memory.code_source_version() {
+        if self.memory != memory.identity() {
             #[cfg(any(test, feature = "observability"))]
             self.diagnostics.source_reset();
             self.advance();
             self.memory = memory.identity();
-            self.version = memory.code_source_version();
         }
     }
 

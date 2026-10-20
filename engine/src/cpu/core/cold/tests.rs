@@ -423,7 +423,7 @@ fn colliding_heat_sites_retain_independent_completed_reuse() {
 }
 
 #[test]
-fn executable_epoch_changes_reset_heat_but_private_data_writes_do_not() {
+fn memory_writes_preserve_frequency_but_a_jit_request_requires_new_reuse() {
     let mut memory = memory(&[0x40, 0xeb, 0xfd]);
     let mut context = context(4);
     let mut heat = ColdState::with_threshold(2);
@@ -432,18 +432,30 @@ fn executable_epoch_changes_reset_heat_but_private_data_writes_do_not() {
         StopReason::Budget
     );
     memory.write(GuestAddress(0x2000), &[0x90]).unwrap();
-    context.set_word(44, 4);
-    assert_eq!(
-        stop(&mut memory, &mut context, &mut heat),
-        StopReason::Budget
-    );
     memory.write(GuestAddress(0x3000), &[0x90]).unwrap();
-    context.set_word(44, 1);
+    context.set_word(44, 4);
+    let before = *context.bytes();
     assert_eq!(
         stop(&mut memory, &mut context, &mut heat),
         StopReason::NeedCode
     );
-    assert_eq!(context.retired(), 8);
+    assert_eq!(*context.bytes(), before);
+    memory
+        .write(GuestAddress(0x1000), &[0x48, 0xeb, 0xfd])
+        .unwrap();
+    assert_eq!(
+        stop(&mut memory, &mut context, &mut heat),
+        StopReason::Budget
+    );
+    assert_eq!(
+        context.state(),
+        State32 {
+            registers: [5, 3, 7, 0x3000, 0x4800, 0, 0, 0],
+            eip: 0x1000,
+            eflags: 6,
+        }
+    );
+    assert_eq!((context.retired(), context.remaining()), (8, 0));
 }
 
 #[test]
@@ -460,4 +472,95 @@ fn inactive_or_compiled_context_is_rejected_without_changing_it() {
         );
         assert_eq!(*context.bytes(), before);
     }
+}
+
+#[test]
+fn cold_frequency_hint_survives_unrelated_rw_unmap() {
+    let mut memory = memory(&[0x40, 0xeb, 0xfd]);
+    let mut context = context(64);
+    let mut cold = ColdState::default();
+    assert_eq!(
+        stop(&mut memory, &mut context, &mut cold),
+        StopReason::Budget
+    );
+    assert_eq!((context.retired(), context.state().registers[0]), (64, 37));
+    memory
+        .unmap(PageRange::new(GuestAddress(0x3000), 1).unwrap())
+        .unwrap();
+    context.set_word(44, 64);
+    assert_eq!(
+        stop(&mut memory, &mut context, &mut cold),
+        StopReason::Budget
+    );
+    assert_eq!(
+        context.state(),
+        State32 {
+            registers: [69, 3, 7, 0x3000, 0x4800, 0, 0, 0],
+            eip: 0x1000,
+            eflags: 2,
+        }
+    );
+    assert_eq!((context.retired(), context.remaining()), (128, 0));
+    context.set_word(44, 1);
+    let before = *context.bytes();
+    assert_eq!(
+        stop(&mut memory, &mut context, &mut cold),
+        StopReason::NeedCode
+    );
+    assert_eq!(*context.bytes(), before);
+}
+
+#[test]
+fn cold_frequency_hint_never_bypasses_changed_execute_permission() {
+    let mut memory = memory(&[0x40, 0xeb, 0xfd]);
+    let mut context = context(128);
+    let mut cold = ColdState::default();
+    assert_eq!(
+        stop(&mut memory, &mut context, &mut cold),
+        StopReason::Budget
+    );
+    memory
+        .protect(
+            PageRange::new(GuestAddress(0x1000), 1).unwrap(),
+            Permissions::READ,
+        )
+        .unwrap();
+    context.set_word(44, 1);
+    let mut expected = context.clone();
+    expected.set_word(48, 0x1000);
+    expected.set_word(52, 0x20401);
+    expected.set_word(116, 0x10e);
+    assert_eq!(
+        stop(&mut memory, &mut context, &mut cold),
+        StopReason::MemoryFault
+    );
+    assert_eq!(*context.bytes(), *expected.bytes());
+}
+
+#[test]
+fn cold_frequency_hint_is_not_shared_between_memory_owners() {
+    let mut first = memory(&[0x40, 0xeb, 0xfd]);
+    let mut second = memory(&[0x40, 0xeb, 0xfd]);
+    assert_ne!(first.identity(), second.identity());
+    assert_eq!(first.code_source_version(), second.code_source_version());
+    let mut context = context(128);
+    let mut cold = ColdState::default();
+    assert_eq!(
+        stop(&mut first, &mut context, &mut cold),
+        StopReason::Budget
+    );
+    context.set_word(44, 1);
+    assert_eq!(
+        stop(&mut second, &mut context, &mut cold),
+        StopReason::Budget
+    );
+    assert_eq!(
+        context.state(),
+        State32 {
+            registers: [70, 3, 7, 0x3000, 0x4800, 0, 0, 0],
+            eip: 0x1001,
+            eflags: 2,
+        }
+    );
+    assert_eq!((context.retired(), context.remaining()), (129, 0));
 }

@@ -52,6 +52,12 @@ function runCase(name,spec) {
   };
   try {
     assert.equal(typeof native.core_cold_run,'function','actual cold native export is required');
+    const diagnostics=spec.unrelatedMapping&&typeof native.core_cold_status_ptr==='function';
+    if(spec.unrelatedMapping)result.coldDiagnostics={available:!!diagnostics,samples:[]};
+    if(diagnostics) {
+      const closedStatus=native.core_cold_status_ptr()>>>0;
+      result.coldDiagnostics.beforeOpen=closedStatus;checkpoint();assert.equal(closedStatus,0);
+    }
     const closed=native.core_cold_run(1);result.controls.push({label:'before open',actual:closed,wanted:-5});checkpoint();
     assert.equal(closed,-5,'cold execution requires an open instance');
     engine.ok('open',16,...KEY);opened=true;engine.base=native.arena_ptr()>>>0;
@@ -80,6 +86,7 @@ function runCase(name,spec) {
     assert.deepEqual(bytes(engine.base,native.arena_len()),untouchedArena,'initialization leaves canonical arena untouched');
     rejectInvalidFlags('unselected cold owner');
     const initialContext=bytes(context,128),expectedArena=untouchedArena.slice();
+    const initialMemoryVersion=spec.unrelatedMapping?view(bytes(word(context,80),8)).getBigUint64(0,true):0n;
     const expectedRam=new Uint8Array(16*4096);expectedPages.forEach((page,index)=>expectedRam.set(page,index*4096));
     cache=new CodeCache(engine,{chain:spec.chain??false,budget:spec.budget,instructions:64,blocks:8});
     for(const name of ['core_cold_run','core_read','core_write','core_numeric'])assert.equal(cache.native[name],native[name]);
@@ -97,13 +104,53 @@ function runCase(name,spec) {
     }
     let work=0,retired=0,last;
     for(let index=0;index<(spec.maxRuns??8);index++) {
-      cache.budget=spec.budget-work;
+      cache.budget=spec.leaseBudgets?.[index]??spec.budget-work;
       const selected=cache.select();capture(selected);
       if(selected&&name==='private-x87-bank-across-jit')rejectInvalidFlags('selected compiled owner before JIT handoff');
+      if(diagnostics&&selected) {
+        const before={...raw(true),selection:selection()},pointer=native.core_cold_status_ptr()>>>0;
+        assert(pointer>0&&pointer%8===0&&pointer+104<=engine.memory.buffer.byteLength);
+        const copied=bytes(pointer,104);
+        assert.equal(view(copied).getBigUint64(0,true),1n);
+        const afterQuery={...raw(true),selection:selection()};
+        assert.deepEqual(afterQuery,before,'closed diagnostic query preserves all guest state and selected code');
+        assert.equal(native.core_begin(),0);
+        let begun,beginContext,activeStatus;
+        try {
+          begun=raw(true);beginContext=unhex(begun.contextHex);
+          assert.deepEqual(beginContext.slice(0,48),unhex(before.contextHex).slice(0,48),'begin executes no guest work');
+          assert.equal(view(beginContext).getUint32(112,true),1);
+          assert.equal(view(beginContext).getBigUint64(120,true),selected.id);
+          assert.equal(view(beginContext).getBigUint64(96,true),initialMemoryVersion+2n);
+          assert.equal(begun.arenaHex,before.arenaHex);assert.equal(begun.ramHex,before.ramHex);
+          activeStatus=native.core_cold_status_ptr()>>>0;assert.equal(activeStatus,0,'active execution exposes no diagnostic snapshot');
+        }
+        finally {assert.equal(native.core_end(),0);}
+        const after={...raw(true),selection:selection()};
+        view(beginContext).setUint32(112,0,true);
+        assert.equal(after.contextHex,hex(beginContext),'end only clears the active lease word');
+        assert.equal(after.arenaHex,before.arenaHex);assert.equal(after.ramHex,before.ramHex);
+        result.coldDiagnostics.samples.push({pointer,bytes:104,hex:hex(copied),before,afterQuery,
+          beginContextHex:begun.contextHex,endContextHex:after.contextHex,activeStatus});checkpoint();
+      }
       last=cache.execute(selected);work+=last.work;retired+=last.retired;
       result.runs.push({...last,id:last.id===null?null:String(last.id),...raw()});checkpoint();
       if(last.kind==='cold')assert.equal(new DataView(engine.memory.buffer).getBigUint64(context+120,true),0n);
-      if(last.coreReason!==1)break;
+      if(spec.unrelatedMapping&&index===0) {
+        assert.deepEqual({kind:last.kind,stop:last.coreReason,work,retired,eax:word(context),pc:word(context,32),flags:word(context,36)},
+          {kind:'cold',stop:2,work:64,retired:64,eax:32,pc:0x1000,flags:0x12});
+        const before=raw(true);
+        engine.ok('map',0x7000,1,3);assert.equal(word(word(context,56)+7*4),4);
+        assert.equal(new Uint8Array(engine.memory.buffer)[word(context,60)+7],3);
+        engine.ok('unmap',0x7000,1);assert.equal(word(word(context,56)+7*4),0);
+        assert.equal(new Uint8Array(engine.memory.buffer)[word(context,60)+7],0);
+        assert.equal(view(bytes(word(context,80),8)).getBigUint64(0,true),initialMemoryVersion+2n);
+        const after=raw(true);
+        result.mapping={address:0x7000,permissions:3,initialMemoryVersion:String(initialMemoryVersion),
+          expectedFinalValidationVersion:String(initialMemoryVersion+2n),before,after};checkpoint();
+        assert.deepEqual(after,before,'unrelated zeroed RW mapping lifetime leaves context, canonical arena and backing unchanged');
+      }
+      if(last.coreReason!==1&&!(spec.leaseBudgets&&last.coreReason===2&&work<spec.budget))break;
       assert.deepEqual(bytes(engine.base+4236,128),untouchedArena.slice(4236,4364),'private numerical state is not reimported at NeedCode');
     }
     result.final=raw(true);result.stats=cache.stats();checkpoint();
@@ -115,16 +162,17 @@ function runCase(name,spec) {
       [48,spec.fault?.address??0],[52,spec.fault?.metadata??0],[112,0],[116,spec.fault?.vector??0]])contextView.setUint32(offset,value,true);
     const finalIdentity=last.kind==='compiled'?last.id:0n;
     contextView.setBigUint64(120,finalIdentity,true);
+    if(spec.unrelatedMapping)contextView.setBigUint64(96,initialMemoryVersion+2n,true);
     assert.deepEqual(bytes(context,128),expectedContext,'complete architectural context and unchanged pointer metadata');
     const finalState=state.slice(),finalStateView=view(finalState);
     finalStateView.setUint16(4,1,true);
     expectedRegisters.forEach((value,index)=>finalStateView.setUint32(16+index*4,value,true));
     finalStateView.setUint32(48,spec.pc,true);finalStateView.setUint32(52,expectedFlags,true);expectedArena.set(finalState);
     const exit=record('R3EX',40),exitView=view(exit);exitView.setUint16(4,15,true);
-    exitView.setUint32(16,last.coreReason===3?5:last.coreReason===6?6:1,true);exitView.setUint32(20,retired,true);
+    exitView.setUint32(16,last.coreReason===3?5:last.coreReason===6?6:1,true);exitView.setUint32(20,spec.publishedRetired??retired,true);
     if(spec.fault)for(const [offset,value] of [[24,2],[28,spec.fault.address],[32,2],[36,4]])exitView.setUint32(offset,value,true);
     expectedArena.set(exit,56);
-    const transport=record('R3WK',24);view(transport).setUint32(16,work,true);expectedArena.set(transport,4588);
+    const transport=record('R3WK',24);view(transport).setUint32(16,spec.publishedWork??work,true);expectedArena.set(transport,4588);
     spec.bank?.(expectedArena);
     assert.deepEqual(bytes(engine.base,native.arena_len()),expectedArena,'complete canonical arena, FP80 and other banks');
     assert.deepEqual([1,3,4].map(page=>word(word(context,56)+page*4)),[1,2,3]);assert.equal(word(context,68),16);
@@ -135,6 +183,14 @@ function runCase(name,spec) {
         eax:prefix.getUint32(0,true),pc:prefix.getUint32(32,true),flags:prefix.getUint32(36,true),remaining:prefix.getUint32(44,true)},
         {kind:'cold',stop:1,retired:256,work:256,eax:128,pc:0x1000,flags:0x12,remaining:1},
         'four repeatedly retired PCs request compilation before the 129th INC');
+    }
+    if(spec.unrelatedMapping) {
+      const request=result.runs[2],prefix=view(unhex(request.contextHex));
+      assert.deepEqual({kind:request.kind,stop:request.coreReason,work:request.work,retired:request.retired,
+        eax:prefix.getUint32(0,true),pc:prefix.getUint32(32,true),flags:prefix.getUint32(36,true),
+        totalRetired:prefix.getUint32(40,true),remaining:prefix.getUint32(44,true)},
+        {kind:'cold',stop:1,work:0,retired:0,eax:64,pc:0x1000,flags:0x12,totalRetired:128,remaining:1},
+        'unrelated RW map/unmap preserves prior visits until compilation before the 65th INC');
     }
     if(spec.runs!==false)assert.deepEqual(result.runs.map(({kind,coreReason})=>[kind,coreReason]),spec.runs??[['cold',spec.stop??2]]);
     assert.equal(result.modules.length,spec.modules??0);assert.equal(cache.stats().admissions,spec.modules??0);
@@ -175,5 +231,9 @@ try {
     registers:[0,0,0,0x3000,0x4800,0,0,0],expectedRegisters:[129,0,0,0x3000,0x4800,0,0,0],
     codePermissions:5,permissions:5,data:d=>collisionTail.forEach((value,index)=>d.setUint8(index,value)),
     collidingHeat:true,runs:[['cold',1],['compiled',2]],modules:1});
+  runCase('cold-heat-survives-unrelated-rw-map-unmap',{code:'40ebfd',budget:129,pc:0x1001,flags:2,expectedFlags:6,
+    registers:[0,0,0,0x3000,0x4800,0,0,0],expectedRegisters:[65,0,0,0x3000,0x4800,0,0,0],
+    leaseBudgets:[64,64,1],unrelatedMapping:true,publishedRetired:1,publishedWork:1,
+    runs:[['cold',2],['cold',2],['cold',1],['compiled',2]],modules:1});
   report.complete=true;checkpoint();console.log(JSON.stringify({complete:true,engineSha256:artifact.sha256,cases:report.cases.length}));
 } catch(error) {report.failure={stage,message:String(error),stack:error.stack};checkpoint();throw error;}

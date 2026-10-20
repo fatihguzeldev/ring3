@@ -183,11 +183,8 @@ mod tests {
         memory
             .unmap(PageRange::new(GuestAddress(0x3000), 1).unwrap())
             .unwrap();
-        assert!(!cold.heat.hot(&memory, 0x1002));
-        assert_eq!(
-            cold.diagnostics_snapshot(),
-            [1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-        );
+        assert!(cold.heat.hot(&memory, 0x1002));
+        assert_eq!(cold.diagnostics_snapshot(), expected);
         let mut cold = ColdState::default();
         let sites = [0x1000, 0x1801, 0x2006, 0x2807, 0x3004];
         for pc in sites {
