@@ -110,7 +110,6 @@ impl CoreSession32 {
         }
         if !compiled {
             self.code = None;
-            self.cache.clear_transition();
         }
         self.context.bytes_mut()[120..128].copy_from_slice(&identity.to_le_bytes());
         self.context.set_word(112, 1);

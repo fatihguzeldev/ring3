@@ -87,7 +87,7 @@ function fixture(name,{entry=0x1000,target=0x1040,registers=[0,0,0x1080,0x3000,0
       cache.budget = budget;
       const sourceVersion = new DataView(engine.memory.buffer).getBigUint64(word(cache.context,88),true);
       const value = cache.execute(unit);
-      result.runs.push({...value,id:String(value.id),budget,sourceVersion:String(sourceVersion),...snapshot()});
+      result.runs.push({...value,id:value.id===null?null:String(value.id),budget,sourceVersion:String(sourceVersion),...snapshot()});
       // a stale entry may be refreshed by execute before its first region call.
       const selected = cache.units.get(value.id);
       if (selected && !result.modules.some(item => item.id === String(selected.id))) {
@@ -194,11 +194,13 @@ try {
     t.neutral('code writer cannot reenter stale source',()=>t.status('core_begin',4));
   });
   const iterations=8192,totalWork=7*iterations;
-  fixture('numerical-ordinals-survive-hot-region-promotion',{
+  for (const publicSelection of [false,true]) fixture(publicSelection
+    ? 'public-selection-preserves-hot-region-promotion'
+    : 'numerical-ordinals-survive-hot-region-promotion',{
     entry:0x1300,target:0x1340,registers:[0,iterations,0,0x3000,0x4800,0,0,0],data:values,
   },t => {
     const admissionsBefore=t.cache.stats().admissions;
-    let selected=t.first,work=0,retired=0,last,sourceVersion;
+    let selected=publicSelection?t.cache.select():t.first,work=0,retired=0,last,sourceVersion;
     while(work<totalWork) {
       assert(t.result.runs.length<2*iterations+2,'bounded authored continuation count');
       const executed=t.run(selected,totalWork-work);
@@ -206,7 +208,7 @@ try {
       if(last.coreReason===2)break;
       assert.equal(last.coreReason,1,'promotion continuation is a genuine NeedCode');
       assert.deepEqual(t.bytes(t.engine.base+4236,128),t.initialFp,'dirty numerical bank remains private across promotion');
-      selected=t.select();
+      selected=publicSelection?t.cache.select():t.select();
     }
     t.expectedRam.set(unhex('0000c040'),4096+8);
     t.expectedRam.set(unhex('07130000'),8192+0x7fc);
@@ -215,9 +217,16 @@ try {
       regs:[0,0,0,0x3000,0x4800,0,0,0],flags:0x46,
       wantedFp:fp(t.initialFp,{opcode:0x15b,fip:0x1343,fdp:0x3008,registers:{7:'00000000000000c00140'}})});
     t.result.promotion={iterations,retired,work,admissionsBefore,admissionsAfter:stats.admissions,
+      publicSelection,coldRuns:stats.coldRuns,coldRetired:stats.coldRetired,
       regions:stats.regions,outer:stats.runs,initialOwners:[String(t.first.id),String(t.next.id)],finalOwner:String(last.id)};
     checkpoint();
     assert.equal(retired,totalWork);assert.equal(work,totalWork);
+    if(publicSelection) {
+      assert(stats.coldRuns>0,'public selection traverses the actual cold handoff');
+      assert.equal(stats.coldRetired,0,'all cold visits are retained-frontier handoffs');
+      assert(t.result.runs.filter(run=>run.kind==='cold').every(run=>run.work===0),
+        'cached-frontier handoffs perform no guest work');
+    }
     assert(stats.admissions>admissionsBefore,'hot transition admits a new generated ordinal table');
     assert(stats.regions>1&&stats.regions<2*iterations+1,'actual region entries fall after promotion');
     assert(stats.runs>=2,'the first promotion returns through a closed execution boundary');
