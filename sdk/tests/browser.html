@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ring3 session</title>
+<style>
+  body{font:15px system-ui;margin:24px;background:#181818;color:#eee}button,input,select{font:inherit}button{padding:6px 12px}
+  nav{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}#display{min-height:480px}#status{white-space:pre-wrap;max-height:12em;overflow:auto}
+</style>
+<h1>Ring3 session</h1>
+<label>Local folder <input id="folder" type="file" webkitdirectory multiple></label>
+<select id="executable" aria-label="Executable"></select>
+<nav>
+  <button id="launch">Launch</button><button id="pause">Pause</button><button id="resume">Resume</button>
+  <button id="capture">Capture mouse</button><button id="probe">Capture 8 frames</button>
+  <button id="stop">Stop</button><button id="dispose">Dispose</button>
+</nav>
+<p id="status" role="status">idle</p>
+<div id="display"></div>
+<script id="ring3-report" type="application/json">{}</script>
+<script type="module" src="./browser.mjs"></script>
+</html>
