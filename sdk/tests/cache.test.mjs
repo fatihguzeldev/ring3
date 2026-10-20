@@ -1,0 +1,95 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import {CodeCache} from '../runtime/cache.js';
+import {callbackRecord} from '../runtime/callback.js';
+
+const u = n => { const out = []; do { const b = n & 127; n >>>= 7; out.push(b | (n ? 128 : 0)); } while (n); return out; };
+const positive = n => { const out = u(n); if (out.at(-1) & 64) {out[out.length - 1] |= 128; out.push(0);} return out; };
+const string = s => [...u(s.length), ...new TextEncoder().encode(s)];
+const section = (id, bytes) => [id, ...u(bytes.length), ...bytes];
+function program(stop = 1, next = 0x2000, retired = 1, work = 1) {
+  const imports = [3, ...string('ring3'), ...string('memory'), 2, 0, 2,
+    ...string('ring3'), ...string('read'), 0, 0, ...string('ring3'), ...string('write'), 0, 1];
+  const body = [0, 0x20, 0, 0x41, ...positive(next), 0x36, 2, 32,
+    0x20, 0, 0x20, 0, 0x28, 2, 40, 0x41, retired, 0x6a, 0x36, 2, 40,
+    0x20, 0, 0x20, 1, 0x41, work, 0x6b, 0x36, 2, 44, 0x41, stop, 0x0b];
+  return Uint8Array.from([0,97,115,109,1,0,0,0,
+    ...section(1, [3,0x60,3,0x7f,0x7f,0x7f,1,0x7e,0x60,4,0x7f,0x7f,0x7f,0x7f,1,0x7f,0x60,2,0x7f,0x7f,1,0x7f]),
+    ...section(2, imports), ...section(3,[1,2]), ...section(7,[1,...string('run'),0,2]),
+    ...section(10,[1,...u(body.length),...body])]);
+}
+function fixture(select = pc => ({id: 1n, stop: 1, next: pc + 4})) {
+  const memory = new WebAssembly.Memory({initial: 2}), calls = [], arena = new Map([[48, 0x1000]]), control = {begin: () => 0};
+  let context = 256, selected;
+  const d = () => new DataView(memory.buffer);
+  const api = {
+    core_prepare(pc, instructions, blocks) {
+      calls.push(['prepare', pc, instructions, blocks]); selected = select(pc);
+      d().setUint32(context + 32, pc, true); d().setBigUint64(context + 120, selected.id, true);
+      new Uint8Array(memory.buffer, 2048).set(program(selected.stop, selected.next, selected.retired, selected.work)); return 0;
+    },
+    core_context_ptr: () => context, core_code_ptr: () => 2048,
+    core_code_len: () => program(selected.stop, selected.next, selected.retired, selected.work).length,
+    core_begin() { calls.push(['begin']); return control.begin(); }, core_end() { calls.push(['end']); return 0; },
+    core_import() { calls.push(['import']); d().setUint32(context + 32, arena.get(48), true); d().setUint32(context, arena.get(16) ?? 0,true); return 0; },
+    core_export(reason,work) { calls.push(['export', reason,work]); arena.set(48, d().getUint32(context + 32, true)); arena.set(72, reason === 2 ? 1 : 3); return 0; },
+    core_read: () => 0n, core_write: () => 0, core_numeric: () => 0,
+  };
+  const engine = {api, memory, get: offset => arena.get(offset) ?? 0,
+    ok(name, ...args) { const status = api[name](...args); if (status) throw new Error(`${name} returned ${status}`); }};
+  return {engine, api, calls, arena, control, context, setContext: value => {context = value;}};
+}
+test('native prepare selects every requested entry and native identity controls reuse', () => {
+  const f = fixture(pc => ({id: pc < 0x2000 ? 1n : 2n, stop: 1, next: pc + 4}));
+  const cache = new CodeCache(f.engine);
+  const a = cache.entry(0x1000), inside = cache.entry(0x1004), b = cache.entry(0x2000);
+  assert.equal(a, inside); assert.notEqual(a, b); assert.deepEqual(f.calls.filter(c => c[0] === 'prepare').map(c => c[1]), [0x1000,0x1004,0x2000]);
+  assert.equal(cache.stats().admissions, 2); assert.equal(cache.stats().engineCacheHits, 1);
+});
+test('NeedCode retains context until a real canonical boundary is published and imported', () => {
+  const f = fixture(), cache = new CodeCache(f.engine);
+  const run = cache.execute(cache.entry());
+  assert.equal(run.pc, 0x1004); assert.equal(run.reason, null); assert.equal(f.engine.get(48), 0x1000);
+  assert.throws(() => cache.import(), /unpublished/); cache.entry();
+  assert.equal(f.calls.filter(c => c[0] === 'prepare').at(-1)[1], 0x1004);
+  cache.publish(); f.arena.set(48, 0x3000); f.arena.set(16,73); cache.import(); assert.equal(cache.pc, 0x3000);
+  assert.equal(new DataView(f.engine.memory.buffer).getUint32(f.context,true),73);
+  assert.equal(new DataView(f.engine.memory.buffer).getUint32(f.context+40,true),1);
+  assert.deepEqual(f.calls.filter(c => ['export','import'].includes(c[0])), [['export',1,1],['import']]);
+});
+test('stale begin selects fresh current code once and executes no old module', () => {
+  let generation = 1n;
+  const f = fixture(pc => ({id: generation, stop: 2, next: generation === 1n ? 0x1100 : 0x2200}));
+  const cache = new CodeCache(f.engine), old = cache.entry(); let begins = 0;
+  f.control.begin = () => { begins++; if (begins === 1) {generation = 2n; return 4;} return 0; };
+  const run = cache.execute(old); assert.equal(run.id, 2n); assert.equal(run.pc, 0x2200); assert.equal(begins, 2);
+});
+test('native failures, changed bindings, identity and context failures never select another backend', () => {
+  const f = fixture(), cache = new CodeCache(f.engine); cache.entry(); f.setContext(512);
+  assert.throws(() => cache.entry(), /context allocation changed/);
+  const g = fixture(); delete g.api.core_numeric; assert.throws(() => new CodeCache(g.engine), /missing core export/);
+  const h = fixture(), guarded = new CodeCache(h.engine); const unit = guarded.entry(); h.api.core_read = () => 4n;
+  assert.throws(() => guarded.execute(unit), /bindings changed/);
+  const i = fixture(() => ({id: 1n, stop: 8, next: 0x1000})), broken = new CodeCache(i.engine);
+  assert.throws(() => broken.execute(broken.entry()), /invalid core stop 8/); assert.equal(broken.open, false);
+  const j = fixture(() => ({id: 1n, stop: 4, next: 0x1000})), unsupported = new CodeCache(j.engine);
+  assert.throws(() => unsupported.execute(unsupported.entry()), /unsupported instruction/);
+  assert.deepEqual(j.calls.filter(c => c[0] === 'export'),[['export',4,1]]);
+});
+test('publication carries consumed work across NeedCode independently of retirement', () => {
+  const f = fixture(pc => pc === 0x1000 ? {id:1n,stop:1,next:0x1004,retired:0,work:3}
+    : {id:2n,stop:2,next:0x1008,retired:1,work:2});
+  const cache = new CodeCache(f.engine); cache.execute(cache.entry()); cache.execute(cache.entry());
+  assert.equal(cache.stats().retired,1); assert.equal(cache.stats().work,5);
+  assert.deepEqual(f.calls.filter(c => c[0] === 'export'),[['export',2,5]]);
+});
+test('callback consumes the standard 64-byte record without resident ownership', () => {
+  const bytes = new Uint8Array(64), d = new DataView(bytes.buffer); bytes.set(new TextEncoder().encode('R3CB'));
+  d.setUint16(4,2,true); d.setUint16(6,1,true); d.setUint32(8,64,true);
+  for (const [offset,value] of [[16,3],[20,2],[24,1],[32,0x1000],[36,0x4000],[40,0x2000],[44,0xffffe],[48,2]]) d.setUint32(offset,value,true);
+  assert.deepEqual(callbackRecord(bytes,0x2000,0xffffe), {token:3,returnPc:0x2000,returnId:0xffffe,returnEsp:0x400c});
+  assert.throws(() => callbackRecord(new Uint8Array(72),0x2000,0xffffe), /length/);
+  d.setUint16(4,1,true); assert.throws(() => callbackRecord(bytes,0x2000,0xffffe), /header/); d.setUint16(4,2,true);
+  d.setUint32(56,1,true); assert.throws(() => callbackRecord(bytes,0x2000,0xffffe), /frame/); d.setUint32(56,0,true);
+  d.setUint32(40,0x3000,true); assert.throws(() => callbackRecord(bytes,0x2000,0xffffe), /frame/);
+});
