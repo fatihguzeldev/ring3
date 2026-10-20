@@ -1,6 +1,11 @@
 mod boundary;
 mod cache;
+mod dispatch;
 mod numeric;
+
+pub(crate) use dispatch::{
+    core_chain_next, core_dispatch_code_len, core_dispatch_code_ptr, core_link, core_unlink,
+};
 
 pub(crate) use boundary::{
     core_begin_windows_callback, core_capture_windows_call, core_complete_windows_call,
@@ -117,7 +122,7 @@ pub(crate) fn core_prepare(pc: u32, instructions: u32, blocks: u32) -> u32 {
         let selected = core
             .as_mut()
             .and_then(|session| session.cache.lookup(instance.memory.as_ref().unwrap(), pc));
-        let mut fresh_cache = CoreCache32::default();
+        let mut fresh_cache = core.is_none().then(CoreCache32::default);
         let code = if let Some(code) = selected {
             code
         } else {
@@ -137,7 +142,7 @@ pub(crate) fn core_prepare(pc: u32, instructions: u32, blocks: u32) -> u32 {
             };
             match core.as_mut() {
                 Some(session) => session.cache.insert(code),
-                None => fresh_cache.insert(code),
+                None => fresh_cache.as_mut().unwrap().insert(code),
             }
         };
         let identity = code.identity();
@@ -156,7 +161,7 @@ pub(crate) fn core_prepare(pc: u32, instructions: u32, blocks: u32) -> u32 {
             };
             *core = Some(CoreSession32 {
                 code,
-                cache: fresh_cache,
+                cache: fresh_cache.unwrap(),
                 numeric,
                 exported_retired: 0,
                 context: Box::new(Context32::new(state)),

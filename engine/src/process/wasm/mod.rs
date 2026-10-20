@@ -14,10 +14,11 @@ mod clock;
 mod core;
 pub(crate) use clock::{advance_cpu_clock, configure_cpu_clock, observe_cpu_clock};
 pub(crate) use core::{
-    core_begin, core_begin_windows_callback, core_capture_windows_call, core_code_len,
-    core_code_ptr, core_complete_windows_call, core_context_ptr, core_dispatch_exception, core_end,
-    core_export, core_finish_exception, core_finish_windows_callback, core_import, core_numeric,
-    core_prepare, core_read, core_write,
+    core_begin, core_begin_windows_callback, core_capture_windows_call, core_chain_next,
+    core_code_len, core_code_ptr, core_complete_windows_call, core_context_ptr,
+    core_dispatch_code_len, core_dispatch_code_ptr, core_dispatch_exception, core_end, core_export,
+    core_finish_exception, core_finish_windows_callback, core_import, core_link, core_numeric,
+    core_prepare, core_read, core_unlink, core_write,
 };
 
 #[cfg(feature = "observability")]

@@ -5,6 +5,11 @@ export_process_calls! {
     core_context_ptr();
     core_begin();
     core_end();
+    core_dispatch_code_ptr();
+    core_dispatch_code_len();
+    core_link(slot: u32);
+    core_unlink(slot: u32, low: u32, high: u32);
+    core_chain_next(context: u32);
     core_numeric(context: u32, ordinal: u32);
     core_import();
     core_export(reason: u32, work: u32);
