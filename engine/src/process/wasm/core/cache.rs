@@ -1,70 +1,213 @@
 use crate::{cpu::core::CompiledCode, memory::AddressSpace};
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::HashMap,
     rc::{Rc, Weak},
 };
 
 const MAX_REGIONS: usize = 256;
 const MAX_CODE_BYTES: usize = 32 << 20;
+const MAX_LINK_SLOT: usize = 4096;
 
-#[derive(Default)]
 pub(super) struct CoreCache32 {
-    regions: VecDeque<Rc<CompiledCode>>,
+    regions: HashMap<u64, CachedRegion>,
     entries: HashMap<u32, Weak<CompiledCode>>,
     bytes: usize,
+    oldest: u64,
+    newest: u64,
+    link_owners: Box<[u64]>,
+}
+
+struct CachedRegion {
+    code: Rc<CompiledCode>,
+    older: u64,
+    newer: u64,
+    slot: u32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum LinkError {
+    InvalidSlot,
+    Unretained,
+    Occupied,
+    AlreadyLinked,
+    WrongOwner,
+    Inconsistent,
+}
+
+impl Default for CoreCache32 {
+    fn default() -> Self {
+        Self {
+            regions: HashMap::new(),
+            entries: HashMap::new(),
+            bytes: 0,
+            oldest: 0,
+            newest: 0,
+            link_owners: vec![0; MAX_LINK_SLOT + 1].into_boxed_slice(),
+        }
+    }
 }
 
 impl CoreCache32 {
     pub(super) fn lookup(&mut self, memory: &AddressSpace, pc: u32) -> Option<Rc<CompiledCode>> {
         let code = self.entries.get(&pc)?.upgrade()?;
+        let retained = self.regions.get(&code.identity())?;
+        if !Rc::ptr_eq(&retained.code, &code) {
+            return None;
+        }
         if !code.is_current(memory) {
             self.remove(code.identity());
             return None;
         }
-        if let Some(index) = self
-            .regions
-            .iter()
-            .position(|entry| entry.identity() == code.identity())
-        {
-            let entry = self.regions.remove(index).unwrap();
-            self.regions.push_back(entry);
-        }
+        self.touch(code.identity());
         Some(code)
+    }
+
+    pub(super) fn lookup_linked(
+        &mut self,
+        memory: &AddressSpace,
+        pc: u32,
+    ) -> Option<(Rc<CompiledCode>, u32)> {
+        let code = self.lookup(memory, pc)?;
+        let slot = self.regions.get(&code.identity())?.slot;
+        if slot == 0 || self.link_owners[slot as usize] != code.identity() {
+            return None;
+        }
+        Some((code, slot))
+    }
+
+    pub(super) fn install_link(
+        &mut self,
+        code: &Rc<CompiledCode>,
+        slot: u32,
+    ) -> Result<(), LinkError> {
+        let owner = *self
+            .link_owners
+            .get(slot as usize)
+            .filter(|_| slot != 0)
+            .ok_or(LinkError::InvalidSlot)?;
+        let identity = code.identity();
+        let retained = self
+            .regions
+            .get(&identity)
+            .filter(|entry| Rc::ptr_eq(&entry.code, code))
+            .ok_or(LinkError::Unretained)?;
+        if retained.slot != 0 && retained.slot != slot {
+            return Err(LinkError::AlreadyLinked);
+        }
+        if owner != 0 && owner != identity {
+            return Err(LinkError::Occupied);
+        }
+        if retained.slot == slot {
+            return if owner == identity {
+                Ok(())
+            } else {
+                Err(LinkError::Inconsistent)
+            };
+        }
+        if owner != 0 {
+            return Err(LinkError::Inconsistent);
+        }
+        self.regions.get_mut(&identity).unwrap().slot = slot;
+        self.link_owners[slot as usize] = identity;
+        Ok(())
+    }
+
+    pub(super) fn unlink(&mut self, slot: u32, expected: u64) -> Result<(), LinkError> {
+        let owner = *self
+            .link_owners
+            .get(slot as usize)
+            .filter(|_| slot != 0)
+            .ok_or(LinkError::InvalidSlot)?;
+        if owner == 0 {
+            return Ok(());
+        }
+        if owner != expected {
+            return Err(LinkError::WrongOwner);
+        }
+        let retained = self
+            .regions
+            .get_mut(&owner)
+            .filter(|entry| entry.slot == slot)
+            .ok_or(LinkError::Inconsistent)?;
+        retained.slot = 0;
+        self.link_owners[slot as usize] = 0;
+        Ok(())
     }
 
     pub(super) fn insert(&mut self, code: CompiledCode) -> Rc<CompiledCode> {
         let code = Rc::new(code);
         while self.regions.len() >= MAX_REGIONS || self.bytes + code.wasm().len() > MAX_CODE_BYTES {
-            let Some(old) = self.regions.front() else {
+            if self.oldest == 0 {
                 break;
-            };
-            self.remove(old.identity());
+            }
+            self.remove(self.oldest);
         }
         for entry in code.entrypoints() {
             self.entries.insert(entry.0, Rc::downgrade(&code));
         }
         self.bytes += code.wasm().len();
-        self.regions.push_back(Rc::clone(&code));
+        let identity = code.identity();
+        self.regions.insert(
+            identity,
+            CachedRegion {
+                code: Rc::clone(&code),
+                older: self.newest,
+                newer: 0,
+                slot: 0,
+            },
+        );
+        if self.newest == 0 {
+            self.oldest = identity;
+        } else {
+            self.regions.get_mut(&self.newest).unwrap().newer = identity;
+        }
+        self.newest = identity;
         code
     }
 
+    fn touch(&mut self, identity: u64) {
+        if self.newest == identity {
+            return;
+        }
+        let entry = self.regions.get(&identity).unwrap();
+        let (older, newer) = (entry.older, entry.newer);
+        self.detach(older, newer);
+        self.regions.get_mut(&self.newest).unwrap().newer = identity;
+        let entry = self.regions.get_mut(&identity).unwrap();
+        entry.older = self.newest;
+        entry.newer = 0;
+        self.newest = identity;
+    }
+
+    fn detach(&mut self, older: u64, newer: u64) {
+        if older == 0 {
+            self.oldest = newer;
+        } else {
+            self.regions.get_mut(&older).unwrap().newer = newer;
+        }
+        if newer == 0 {
+            self.newest = older;
+        } else {
+            self.regions.get_mut(&newer).unwrap().older = older;
+        }
+    }
+
     fn remove(&mut self, identity: u64) {
-        let Some(index) = self
-            .regions
-            .iter()
-            .position(|entry| entry.identity() == identity)
-        else {
+        let Some(entry) = self.regions.remove(&identity) else {
             return;
         };
-        let code = self.regions.remove(index).unwrap();
-        self.bytes -= code.wasm().len();
-        for entry in code.entrypoints() {
+        self.detach(entry.older, entry.newer);
+        self.bytes -= entry.code.wasm().len();
+        if entry.slot != 0 && self.link_owners[entry.slot as usize] == identity {
+            self.link_owners[entry.slot as usize] = 0;
+        }
+        for pc in entry.code.entrypoints() {
             if self
                 .entries
-                .get(&entry.0)
-                .is_some_and(|weak| weak.ptr_eq(&Rc::downgrade(&code)))
+                .get(&pc.0)
+                .is_some_and(|weak| weak.ptr_eq(&Rc::downgrade(&entry.code)))
             {
-                self.entries.remove(&entry.0);
+                self.entries.remove(&pc.0);
             }
         }
     }
@@ -127,8 +270,8 @@ mod tests {
             cache.bytes,
             cache
                 .regions
-                .iter()
-                .map(|code| code.wasm().len())
+                .values()
+                .map(|entry| entry.code.wasm().len())
                 .sum::<usize>()
         );
         assert!(
@@ -137,6 +280,29 @@ mod tests {
                 .values()
                 .all(|entry| entry.upgrade().is_some())
         );
+        let mut seen = std::collections::HashSet::new();
+        let (mut previous, mut current) = (0, cache.oldest);
+        while current != 0 {
+            assert!(seen.insert(current), "LRU has a cycle");
+            let entry = cache.regions.get(&current).unwrap();
+            assert_eq!(entry.older, previous);
+            previous = current;
+            current = entry.newer;
+        }
+        assert_eq!(previous, cache.newest);
+        assert_eq!(seen.len(), cache.regions.len());
+        assert_eq!(cache.link_owners[0], 0);
+        for (&identity, entry) in &cache.regions {
+            assert_eq!(entry.code.identity(), identity);
+            if entry.slot != 0 {
+                assert_eq!(cache.link_owners[entry.slot as usize], identity);
+            }
+        }
+        for (slot, &identity) in cache.link_owners.iter().enumerate().skip(1) {
+            if identity != 0 {
+                assert_eq!(cache.regions.get(&identity).unwrap().slot as usize, slot);
+            }
+        }
     }
 
     #[test]
@@ -231,14 +397,139 @@ mod tests {
         assert!(
             cache
                 .regions
-                .iter()
-                .all(|entry| entry.identity() != old.identity())
+                .values()
+                .all(|entry| entry.code.identity() != old.identity())
         );
         assert!(cache.lookup(&memory, 0x1000).is_none());
         assert!(cache.lookup(&memory, 0x100a).is_none());
         for pc in [0x1005, 0x100d] {
             assert!(Rc::ptr_eq(&cache.lookup(&memory, pc).unwrap(), &newer));
         }
+        bounds(&cache);
+    }
+
+    #[test]
+    fn links_require_a_retained_owner_and_accept_the_last_driver_slot() {
+        let memory = memory();
+        let mut cache = CoreCache32::default();
+        let code = cache.insert(compiled(&memory, 0x1000));
+        let outside = Rc::new(compiled(&memory, filler(0)));
+        assert!(cache.install_link(&code, 0).is_err());
+        assert!(cache.install_link(&code, 4097).is_err());
+        assert!(cache.install_link(&outside, 1).is_err());
+        assert!(cache.lookup_linked(&memory, 0x1000).is_none());
+        cache.install_link(&code, 4096).unwrap();
+        cache.install_link(&code, 4096).unwrap();
+        assert!(cache.install_link(&code, 1).is_err());
+        let (selected, slot) = cache.lookup_linked(&memory, 0x1005).unwrap();
+        assert!(Rc::ptr_eq(&selected, &code));
+        assert_eq!(slot, 4096);
+        bounds(&cache);
+    }
+
+    #[test]
+    fn occupied_and_wrong_owner_link_operations_leave_both_owners_unchanged() {
+        let memory = memory();
+        let mut cache = CoreCache32::default();
+        let first = cache.insert(compiled(&memory, filler(0)));
+        let second = cache.insert(compiled(&memory, filler(1)));
+        cache.install_link(&first, 1).unwrap();
+        assert!(cache.install_link(&second, 1).is_err());
+        cache.install_link(&second, 2).unwrap();
+        assert!(cache.unlink(1, second.identity()).is_err());
+        assert!(cache.unlink(0, first.identity()).is_err());
+        assert!(cache.unlink(4097, first.identity()).is_err());
+        for (pc, code, expected) in [(filler(0), &first, 1), (filler(1), &second, 2)] {
+            let (selected, slot) = cache.lookup_linked(&memory, pc).unwrap();
+            assert!(Rc::ptr_eq(&selected, code));
+            assert_eq!(slot, expected);
+        }
+        bounds(&cache);
+    }
+
+    #[test]
+    fn unlink_is_idempotent_for_an_empty_slot_and_preserves_cached_code() {
+        let memory = memory();
+        let mut cache = CoreCache32::default();
+        let code = cache.insert(compiled(&memory, filler(0)));
+        cache.install_link(&code, 1).unwrap();
+        cache.unlink(1, code.identity()).unwrap();
+        cache.unlink(1, code.identity()).unwrap();
+        assert!(cache.lookup_linked(&memory, filler(0)).is_none());
+        assert!(Rc::ptr_eq(
+            &cache.lookup(&memory, filler(0)).unwrap(),
+            &code
+        ));
+        cache.install_link(&code, 2).unwrap();
+        assert_eq!(cache.lookup_linked(&memory, filler(0)).unwrap().1, 2);
+        bounds(&cache);
+    }
+
+    #[test]
+    fn eviction_releases_the_link_but_a_held_current_region_cannot_reinstall_it() {
+        let memory = memory();
+        let mut cache = CoreCache32::default();
+        let old = cache.insert(compiled(&memory, filler(0)));
+        cache.install_link(&old, 1).unwrap();
+        let mut newest = Rc::clone(&old);
+        for index in 1..=MAX_REGIONS {
+            newest = cache.insert(compiled(&memory, filler(index)));
+        }
+        assert!(old.is_current(&memory));
+        assert!(!old.wasm().is_empty());
+        assert!(cache.lookup_linked(&memory, filler(0)).is_none());
+        assert!(cache.install_link(&old, 1).is_err());
+        cache.install_link(&newest, 1).unwrap();
+        assert!(cache.unlink(1, old.identity()).is_err());
+        let (selected, slot) = cache.lookup_linked(&memory, filler(MAX_REGIONS)).unwrap();
+        assert!(Rc::ptr_eq(&selected, &newest));
+        assert_eq!(slot, 1);
+        bounds(&cache);
+    }
+
+    #[test]
+    fn a_linked_source_change_rejects_and_releases_the_slot_for_new_code() {
+        let mut memory = memory();
+        let mut cache = CoreCache32::default();
+        let old = cache.insert(compiled(&memory, 0x1000));
+        cache.install_link(&old, 1).unwrap();
+        memory.write(GuestAddress(0x1002), &[4]).unwrap();
+        assert!(cache.lookup_linked(&memory, 0x1000).is_none());
+        assert!(cache.lookup_linked(&memory, 0x1005).is_none());
+        let fresh = cache.insert(compiled(&memory, 0x1000));
+        cache.install_link(&fresh, 1).unwrap();
+        assert!(cache.unlink(1, old.identity()).is_err());
+        let (selected, slot) = cache.lookup_linked(&memory, 0x1000).unwrap();
+        assert!(Rc::ptr_eq(&selected, &fresh));
+        assert_eq!(slot, 1);
+        bounds(&cache);
+    }
+
+    #[test]
+    fn linked_lookup_is_source_checked_and_touches_the_same_lru() {
+        let memory = memory();
+        let mut cache = CoreCache32::default();
+        let first = cache.insert(compiled(&memory, filler(0)));
+        let second = cache.insert(compiled(&memory, filler(1)));
+        cache.install_link(&first, 1).unwrap();
+        cache.install_link(&second, 2).unwrap();
+        for index in 2..MAX_REGIONS {
+            cache.insert(compiled(&memory, filler(index)));
+        }
+        assert!(cache.lookup_linked(&memory, 0xdead_0000).is_none());
+        assert!(Rc::ptr_eq(
+            &cache.lookup_linked(&memory, filler(0)).unwrap().0,
+            &first
+        ));
+        let newest = cache.insert(compiled(&memory, filler(MAX_REGIONS)));
+        assert!(cache.lookup_linked(&memory, filler(1)).is_none());
+        assert!(cache.install_link(&second, 2).is_err());
+        cache.install_link(&newest, 2).unwrap();
+        assert_eq!(
+            cache.lookup_linked(&memory, filler(MAX_REGIONS)).unwrap().1,
+            2
+        );
+        assert_eq!(cache.lookup_linked(&memory, filler(0)).unwrap().1, 1);
         bounds(&cache);
     }
 }
