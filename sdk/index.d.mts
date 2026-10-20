@@ -14,7 +14,7 @@ export interface LaunchOptions {
   bytesUrl?: string;
   manifest?: {root?: string;executable?: string;files: ReadonlyArray<{id:number;path:string;size:number;role?:string;isDirectory?:boolean}>};
   localFiles?: Map<bigint,File>;
-  execution?: {capacity?:number;budget?:number;instructions?:number;blocks?:number};
+  execution?: {capacity?:number;budget?:number;instructions?:number;blocks?:number;chain?:boolean};
   frameProbe?: boolean;
   observability?: {level?:'off'|'basic'|'detailed';[name:string]:unknown};
 }

@@ -28,6 +28,7 @@ const actions = {
   launch: () => session.launch({...(local ?? {}),
     ...(local ? {executable:element('executable').value} : {}),
     commandLine:query.get('commandLine') ?? undefined,
+    execution:query.has('chain') ? {chain:query.get('chain') === '1'} : undefined,
     frameProbe:query.get('frameProbe') === '1',observability:{level:query.get('observation') ?? 'off'},
   }),
   pause: () => session.pause(), resume: () => session.resume(), stop: () => session.stop(),

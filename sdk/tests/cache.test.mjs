@@ -18,9 +18,30 @@ function program(stop = 1, next = 0x2000, retired = 1, work = 1) {
     ...section(2, imports), ...section(3,[1,2]), ...section(7,[1,...string('run'),0,2]),
     ...section(10,[1,...u(body.length),...body])]);
 }
+function driver() {
+  const body = [1,2,0x7f,0x41,0,0x24,0,
+    0x20,0,0x20,1,0x20,2,0x11,2,0,0x21,3,0x41,1,0x24,0,
+    0x20,3,0x41,1,0x47,0x04,0x40,0x20,3,0x0f,0x0b,
+    0x20,0,0x28,2,44,0x45,0x04,0x40,0x41,2,0x0f,0x0b,
+    0x20,0,0x28,2,44,0x20,1,0x46,0x04,0x40,0x41,1,0x0f,0x0b,
+    0x20,0,0x10,0,0x21,4,
+    0x20,4,0x41,0x7f,0x46,0x04,0x40,0x41,8,0x0f,0x0b,
+    0x20,4,0x45,0x04,0x40,0x41,1,0x0f,0x0b,
+    0x20,0,0x20,0,0x28,2,44,0x20,4,0x11,2,0,0x21,3,
+    0x41,2,0x24,0,0x20,3,0x0b];
+  return Uint8Array.from([0,97,115,109,1,0,0,0,
+    ...section(1,[3,0x60,1,0x7f,1,0x7f,0x60,3,0x7f,0x7f,0x7f,1,0x7f,0x60,2,0x7f,0x7f,1,0x7f]),
+    ...section(2,[3,...string('ring3'),...string('memory'),2,0,2,
+      ...string('ring3'),...string('functions'),1,0x70,1,1,...u(4097),
+      ...string('ring3'),...string('next'),0,0]),
+    ...section(3,[1,1]),...section(6,[1,0x7f,1,0x41,0,0x0b]),
+    ...section(7,[2,...string('run'),0,1,...string('regions'),3,0]),
+    ...section(10,[1,...u(body.length),...body])]);
+}
 function fixture(select = pc => ({id: 1n, stop: 1, next: pc + 4})) {
   const memory = new WebAssembly.Memory({initial: 2}), calls = [], arena = new Map([[48, 0x1000]]), control = {begin: () => 0};
   let context = 256, selected;
+  const links = new Map(), dispatch = driver();
   const d = () => new DataView(memory.buffer);
   const api = {
     core_prepare(pc, instructions, blocks) {
@@ -34,10 +55,32 @@ function fixture(select = pc => ({id: 1n, stop: 1, next: pc + 4})) {
     core_import() { calls.push(['import']); d().setUint32(context + 32, arena.get(48), true); d().setUint32(context, arena.get(16) ?? 0,true); return 0; },
     core_export(reason,work) { calls.push(['export', reason,work]); arena.set(48, d().getUint32(context + 32, true)); arena.set(72, reason === 2 ? 1 : 3); return 0; },
     core_read: () => 0n, core_write: () => 0, core_numeric: () => 0,
+    core_dispatch_code_ptr() {new Uint8Array(memory.buffer,8192).set(dispatch); return 8192;},
+    core_dispatch_code_len: () => dispatch.length,
+    core_link(slot) {
+      calls.push(['link',slot,selected.id]);
+      if (links.has(slot) && links.get(slot) !== selected.id) return 7;
+      links.set(slot,selected.id); return 0;
+    },
+    core_unlink(slot,low,high) {
+      const id = BigInt(low>>>0)|(BigInt(high>>>0)<<32n); calls.push(['unlink',slot,id]);
+      if (control.unlink) return control.unlink(slot,id);
+      if (!links.has(slot)) return 0;
+      if (links.get(slot) !== id) return 4;
+      links.delete(slot); return 0;
+    },
+    core_chain_next(pointer) {
+      calls.push(['next',pointer]);
+      if (control.next) return control.next(pointer);
+      const target = select(d().getUint32(pointer+32,true));
+      const found = [...links].find(([,id]) => id === target.id);
+      if (!found) return 0;
+      selected = target; d().setBigUint64(pointer+120,target.id,true); return found[0];
+    },
   };
   const engine = {api, memory, get: offset => arena.get(offset) ?? 0,
     ok(name, ...args) { const status = api[name](...args); if (status) throw new Error(`${name} returned ${status}`); }};
-  return {engine, api, calls, arena, control, context, setContext: value => {context = value;}};
+  return {engine, api, calls, arena, control, context, links, setContext: value => {context = value;}};
 }
 test('native prepare selects every requested entry and native identity controls reuse', () => {
   const f = fixture(pc => ({id: pc < 0x2000 ? 1n : 2n, stop: 1, next: pc + 4}));
@@ -82,6 +125,36 @@ test('publication carries consumed work across NeedCode independently of retirem
   const cache = new CodeCache(f.engine); cache.execute(cache.entry()); cache.execute(cache.entry());
   assert.equal(cache.stats().retired,1); assert.equal(cache.stats().work,5);
   assert.deepEqual(f.calls.filter(c => c[0] === 'export'),[['export',2,5]]);
+});
+test('chained dispatch enters linked Wasm regions with one native begin and end', () => {
+  const f = fixture(pc => pc === 0x1000 ? {id:1n,stop:1,next:0x2000} : {id:2n,stop:2,next:0x2004});
+  const cache = new CodeCache(f.engine,{chain:true});
+  cache.entry(0x1000); cache.entry(0x2000);
+  const run = cache.execute(cache.entry(0x1000));
+  assert.equal(run.coreReason,2); assert.equal(run.id,2n); assert.equal(run.regions,2);
+  assert.equal(run.retired,2); assert.equal(run.work,2); assert.equal(cache.pc,0x2004);
+  assert.equal(cache.stats().runs,1); assert.equal(cache.stats().regions,2);
+  assert.equal(f.calls.filter(([name]) => name === 'prepare').length,3);
+  assert.deepEqual(f.calls.filter(([name]) => ['begin','end','next'].includes(name)),[['begin'],['next',f.context],['end']]);
+});
+test('cold eviction unlinks the expected owner before a private table slot is reused', () => {
+  const f = fixture(pc => ({id:BigInt(pc),stop:2,next:pc+4})), cache = new CodeCache(f.engine,{chain:true,capacity:1});
+  const a = cache.entry(0x1000); assert(a.slot>0); assert.equal(cache.table.get(0),null);
+  const b = cache.entry(0x2000);
+  assert.equal(a.slot,b.slot); assert.equal(cache.table.get(b.slot),b.run);
+  assert.deepEqual(f.calls.filter(([name]) => ['link','unlink'].includes(name)),[['link',a.slot,a.id],['unlink',a.slot,a.id],['link',b.slot,b.id]]);
+  f.control.unlink = () => 4;
+  assert.throws(() => cache.entry(0x3000),/core_unlink returned 4/);
+  assert.equal(cache.table.get(b.slot),b.run); assert.equal(cache.units.get(b.id),b);
+});
+test('chained bindings and invalid native successors fail closed', () => {
+  const f = fixture(), cache = new CodeCache(f.engine,{chain:true}), unit = cache.entry();
+  f.api.core_chain_next = () => 0;
+  assert.throws(() => cache.execute(unit),/bindings changed/);
+  const g = fixture(), rejected = new CodeCache(g.engine,{chain:true}), selected = rejected.entry();
+  g.control.next = () => 0xffffffff;
+  assert.throws(() => rejected.execute(selected),/invalid core stop 8/);
+  assert.equal(rejected.open,false); assert.equal(g.calls.filter(([name]) => name === 'end').length,1);
 });
 test('callback consumes the standard 64-byte record without resident ownership', () => {
   const bytes = new Uint8Array(64), d = new DataView(bytes.buffer); bytes.set(new TextEncoder().encode('R3CB'));
