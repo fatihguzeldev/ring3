@@ -9,8 +9,8 @@ pub(super) struct TransitionHeat {
 }
 
 pub(super) struct PendingTransition {
-    source: u64,
-    target: u64,
+    source: RegionKey,
+    target: RegionKey,
     pc: u32,
     memory: u64,
     version: u64,
@@ -24,8 +24,8 @@ impl CoreCache32 {
     pub(in crate::process) fn observe_transition(
         &mut self,
         memory: &AddressSpace,
-        source: &Rc<CompiledCode>,
-        target: &Rc<CompiledCode>,
+        source: &RegionRef,
+        target: &RegionRef,
         pc: u32,
         threshold: u32,
     ) -> bool {
@@ -52,7 +52,7 @@ impl CoreCache32 {
         {
             return false;
         }
-        let heat = &mut self.regions.get_mut(&source.identity()).unwrap().heat;
+        let heat = &mut self.regions[source.key.index].as_mut().unwrap().heat;
         if heat.target == target.identity() && heat.pc == pc {
             heat.hits = heat.hits.saturating_add(1);
         } else if heat.hits != 0 {
@@ -69,8 +69,8 @@ impl CoreCache32 {
         // success and decline both require another complete heat interval before retry.
         heat.hits = 0;
         self.pending_transition = Some(PendingTransition {
-            source: source.identity(),
-            target: target.identity(),
+            source: source.key,
+            target: target.key,
             pc,
             memory: memory.identity(),
             version: memory.code_source_version(),
@@ -84,7 +84,7 @@ impl CoreCache32 {
         pc: u32,
         options: CompileOptions,
         gates: &[(GuestAddress, u32)],
-    ) -> Option<Rc<CompiledCode>> {
+    ) -> Option<RegionRef> {
         let pending = self.pending_transition.take()?;
         if pc != pending.pc
             || pending.memory != memory.identity()
@@ -92,8 +92,14 @@ impl CoreCache32 {
         {
             return None;
         }
-        let source = Rc::clone(&self.regions.get(&pending.source)?.code);
-        let target = Rc::clone(&self.regions.get(&pending.target)?.code);
+        let source = RegionRef {
+            key: pending.source,
+            code: Rc::clone(&self.region(pending.source)?.code),
+        };
+        let target = RegionRef {
+            key: pending.target,
+            code: Rc::clone(&self.region(pending.target)?.code),
+        };
         if !self.linked_current(memory, &source)
             || !self.linked_current(memory, &target)
             || !self.indexes(&target, pc)
@@ -110,10 +116,7 @@ impl CoreCache32 {
         frontier.retain(|entry| {
             self.entries
                 .get(&entry.0)
-                .and_then(Weak::upgrade)
-                .is_some_and(|code| {
-                    code.identity() != pending.source && code.identity() != pending.target
-                })
+                .is_some_and(|key| *key != pending.source && *key != pending.target)
         });
         let code = CompiledCode::compile_transition(
             memory,
@@ -131,19 +134,15 @@ impl CoreCache32 {
         self.pending_transition = None;
     }
 
-    fn indexes(&self, code: &Rc<CompiledCode>, pc: u32) -> bool {
+    fn indexes(&self, code: &RegionRef, pc: u32) -> bool {
         self.entries
             .get(&pc)
-            .is_some_and(|owner| owner.ptr_eq(&Rc::downgrade(code)))
+            .is_some_and(|owner| *owner == code.key)
     }
 
-    fn linked_current(&self, memory: &AddressSpace, code: &Rc<CompiledCode>) -> bool {
-        self.regions.get(&code.identity()).is_some_and(|row| {
-            Rc::ptr_eq(&row.code, code)
-                && row.slot != 0
-                && self.link_owners[row.slot as usize] == code.identity()
-                && code.is_current(memory)
-        })
+    fn linked_current(&self, memory: &AddressSpace, code: &RegionRef) -> bool {
+        self.retained(code)
+            .is_some_and(|row| self.reciprocal_slot(code.key, row) && code.is_current(memory))
     }
 }
 

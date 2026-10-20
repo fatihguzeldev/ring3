@@ -38,7 +38,7 @@ fn memory() -> AddressSpace {
     memory
 }
 
-fn insert(cache: &mut CoreCache32, memory: &AddressSpace, pc: u32, slot: u32) -> Rc<CompiledCode> {
+fn insert(cache: &mut CoreCache32, memory: &AddressSpace, pc: u32, slot: u32) -> RegionRef {
     let code = cache.insert(compile(memory, GuestAddress(pc), options()).unwrap());
     cache.install_link(&code, slot).unwrap();
     code
@@ -47,8 +47,8 @@ fn insert(cache: &mut CoreCache32, memory: &AddressSpace, pc: u32, slot: u32) ->
 fn mature(
     cache: &mut CoreCache32,
     memory: &AddressSpace,
-    source: &Rc<CompiledCode>,
-    target: &Rc<CompiledCode>,
+    source: &RegionRef,
+    target: &RegionRef,
     pc: u32,
 ) {
     assert!(!cache.observe_transition(memory, source, target, pc, 2));
@@ -74,8 +74,14 @@ fn a_mature_observed_pair_is_formed_only_by_the_closed_prepare() {
         merged.formation_roots(),
         &[GuestAddress(0x1000), GuestAddress(0x1040)]
     );
-    assert!(Rc::ptr_eq(&cache.lookup(&memory, 0x1005).unwrap(), &merged));
-    assert!(Rc::ptr_eq(&cache.lookup(&memory, 0x1040).unwrap(), &merged));
+    assert!(Rc::ptr_eq(
+        &cache.lookup(&memory, 0x1005).unwrap().code,
+        &merged.code
+    ));
+    assert!(Rc::ptr_eq(
+        &cache.lookup(&memory, 0x1040).unwrap().code,
+        &merged.code
+    ));
     assert_eq!(&cache.link_owners[1..3], &[a.identity(), b.identity()]);
     assert!(
         cache
@@ -177,7 +183,7 @@ fn source_epoch_or_identity_changes_cannot_resurrect_pending_owners() {
         b.identity()
     );
     mature(&mut cache, &memory, &a, &b, 0x1040);
-    cache.remove(a.identity());
+    cache.remove(a.key);
     assert!(
         cache
             .prepare_transition(&memory, 0x1040, options(), &[])

@@ -24,21 +24,17 @@ use crate::{
         x86::{STATE_SIZE, USER_FLAGS_MASK_V3, decode_state, decode_state_metadata},
     },
     cpu::{
-        core::{
-            CompileError, CompileOptions, CompiledCode, Context32, cold::ColdState,
-            compile_with_frontier,
-        },
+        core::{CompileError, CompileOptions, Context32, cold::ColdState, compile_with_frontier},
         x86::{SegmentContext, SegmentRegister},
     },
     memory::{Access, CoreWriteOutcome, FaultReason, GuestAddress, MemoryError},
     process::{CallError, EngineInstance, HostError, cpu::events::detection::DetectionSlot32},
 };
-use cache::CoreCache32;
+use cache::{CoreCache32, RegionRef};
 use numeric::NumericBank;
-use std::rc::Rc;
 
 pub(super) struct CoreSession32 {
-    code: Option<Rc<CompiledCode>>,
+    code: Option<RegionRef>,
     cache: CoreCache32,
     cache_status: [u64; 8],
     numeric: NumericBank,
