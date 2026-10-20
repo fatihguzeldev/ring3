@@ -74,3 +74,7 @@ pub use windows::nls::{NlsError32, NlsProfile32};
 
 pub use windows::gdi::{GdiConfig32, GdiFrame32};
 pub use windows::version::PendingVersionCall32;
+
+#[cfg(test)]
+#[path = "wasm/core/cache.rs"]
+mod core_cache_tests;
