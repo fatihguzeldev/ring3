@@ -512,6 +512,46 @@ impl Output<'_> {
         self.c().end();
     }
 
+    fn jump_condition(&mut self, condition: Condition) {
+        if !matches!(condition, Condition::Equal | Condition::NotEqual) {
+            self.condition(condition);
+            return;
+        }
+        self.c()
+            .local_get(KIND)
+            .i32_const(1)
+            .i32_sub()
+            .i32_const(7)
+            .i32_le_u()
+            .local_get(WIDTH)
+            .i32_const(8)
+            .i32_eq()
+            .local_get(WIDTH)
+            .i32_const(16)
+            .i32_eq()
+            .i32_or()
+            .local_get(WIDTH)
+            .i32_const(32)
+            .i32_eq()
+            .i32_or()
+            .i32_and()
+            .if_(BlockType::Result(ValType::I32));
+        // shifting discards bits outside the pending operand width.
+        self.c()
+            .local_get(VALUE)
+            .i32_const(32)
+            .local_get(WIDTH)
+            .i32_sub()
+            .i32_shl()
+            .i32_eqz();
+        if condition == Condition::NotEqual {
+            self.c().i32_eqz();
+        }
+        self.c().else_();
+        self.condition(condition);
+        self.c().end();
+    }
+
     pub(super) fn condition(&mut self, condition: Condition) {
         self.materialize(super::effects::condition_mask(condition));
         match condition {
@@ -628,7 +668,7 @@ impl Output<'_> {
             Operation::ConditionalJump { condition, target } => {
                 let taken = self.index(target.0);
                 let otherwise = self.index(next);
-                self.condition(condition);
+                self.jump_condition(condition);
                 self.c().local_set(A);
                 self.c()
                     .i32_const(target.0 as i32)

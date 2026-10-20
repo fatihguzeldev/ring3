@@ -82,6 +82,54 @@ fn compiled_source_currentness_tracks_code_and_mapping_identity() {
 }
 
 #[test]
+fn generated_zero_flag_branches_preserve_state_without_materializing_the_condition() {
+    let mut scratch = Scratch::new();
+    let mut manifest = String::new();
+    for (name, prefix, condition) in [
+        ("add8", "0401", 0x74),
+        ("sub16", "6683e801", 0x75),
+        ("logical32", "31c0", 0x74),
+        ("inc32", "40", 0x75),
+        ("dec32", "48", 0x75),
+        ("adc8", "1400", 0x74),
+        ("sbb16", "6683d800", 0x75),
+        ("neg32", "f7d8", 0x74),
+        ("entry-equal", "", 0x74),
+        ("entry-not-equal", "", 0x75),
+        ("canonical-zf", "04019e", 0x74),
+        ("postbranch-carry", "04017400f89f", 0x74),
+        ("other-condition", "0401", 0x77),
+        ("preserved-recipe", "040189d6", 0x74),
+        ("rmw", "830301", 0x74),
+        ("rmw-fault", "31c0830301", 0x74),
+    ] {
+        let hex = format!("{prefix}{condition:02x}07bb11111111eb05bb222222220f0b");
+        let memory = memory(&bytes(&hex));
+        let code = compile(&memory, GuestAddress(0x1000), CompileOptions::default()).unwrap();
+        assert!(code.is_current(&memory));
+        assert!(code.native_instructions().is_empty());
+        fs::write(scratch.0.join(format!("{name}.wasm")), code.wasm()).unwrap();
+        manifest.push_str(&format!("{name}\t{hex}\t{}\n", code.identity()));
+    }
+    fs::write(scratch.0.join("conditions.tsv"), manifest).unwrap();
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+    let result = Command::new("node")
+        .arg(root.join("engine/tests/cpu/core/fixtures/conditions.mjs"))
+        .arg(&scratch.0)
+        .output()
+        .expect("run generated condition modules with node");
+    assert!(
+        result.status.success(),
+        "generated condition fixture failed (output: {}):\n{}\n{}",
+        scratch.0.display(),
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr)
+    );
+    println!("{}", String::from_utf8_lossy(&result.stdout).trim());
+    scratch.1 = false;
+}
+
+#[test]
 fn generated_wasm_runs_authored_integer_control_memory_programs() {
     let mut scratch = Scratch::new();
     let mut programs: Vec<(String, String)> = [
