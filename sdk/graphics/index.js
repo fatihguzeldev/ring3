@@ -22,31 +22,38 @@ async function checkedShader(device,code,label) {
 
 class DeviceRenderer {
   constructor(host,epoch) {
-    this.host=host;this.device=host.device;this.epoch=epoch;this.stream=new PacketStream();this.resources=new Resources(this.device);
+    this.host=host;this.device=host.device;this.epoch=epoch;this.stream=new PacketStream();this.pendingEncoder=null;this.accepting=false;this.resources=new Resources(this.device,()=>this.flush());
     this.shaders=new Map();this.states=new Map();this.pipelines=new Map();this.domains=new Map();this.patches=new Map();this.temporary=[];
     this.draws=0;this.presents=0;this.removed=false;this.gamma=new Float32Array(3*256);
     for(let c=0;c<3;c++)for(let i=0;i<256;i++)this.gamma[c*256+i]=i/255;
   }
   scratch(bytes,usage){const b=this.resources.buffer(bytes,usage);this.temporary.push(b);return b;}
-  submit(encoder){this.device.queue.submit([encoder.finish()]);}
+  encoder(){return this.pendingEncoder??=this.device.createCommandEncoder();}
+  flush(){const encoder=this.pendingEncoder;if(encoder){this.pendingEncoder=null;this.device.queue.submit([encoder.finish()]);}}
   async accept(packet,frameProbe) {
-    const decoded=this.stream.decode(packet),readbacks=[],presentCommands=frameProbe?[]:null;require(!this.removed,'command after removal');
-    for(const command of decoded.commands){
-      require(!this.removed,'command after removal');
-      try { const value=await this.execute(command,command.opcode===11&&frameProbe?{...frameProbe,epoch:String(decoded.epoch),sequence:String(decoded.sequence),command_id:String(command.id)}:null);if(value)readbacks.push(value);if(command.opcode===11&&frameProbe){const r=new Reader(command.bytes);presentCommands.push({epoch:String(decoded.epoch),sequence:String(decoded.sequence),command_id:String(command.id),chain:String(r.u64())});} }
-      catch(error){error.message=`epoch ${this.epoch}, command ${command.id}, opcode ${command.opcode}: ${error.message}`;throw error;}
+    require(!this.accepting,'graphics packet already active');this.accepting=true;
+    try {
+      const decoded=this.stream.decode(packet),readbacks=[],presentCommands=frameProbe?[]:null;require(!this.removed,'command after removal');
+      for(const command of decoded.commands){
+        require(!this.removed,'command after removal');
+        try { const value=await this.execute(command,command.opcode===11&&frameProbe?{...frameProbe,epoch:String(decoded.epoch),sequence:String(decoded.sequence),command_id:String(command.id)}:null);if(value)readbacks.push(value);if(command.opcode===11&&frameProbe){const r=new Reader(command.bytes);presentCommands.push({epoch:String(decoded.epoch),sequence:String(decoded.sequence),command_id:String(command.id),chain:String(r.u64())});} }
+        catch(error){error.message=`epoch ${this.epoch}, command ${command.id}, opcode ${command.opcode}: ${error.message}`;throw error;}
+      }
+      require(!this.removed||!this.stream.pending,'fragment after removal');
+      this.flush();
+      await this.device.queue.onSubmittedWorkDone();
+      for(const b of this.temporary)b.destroy();this.temporary.length=0;
+      return {epoch:decoded.epoch,sequence:decoded.sequence,readbacks,...(frameProbe?{presentCommands}:{})};
+    } finally {
+      this.pendingEncoder=null;this.accepting=false;
     }
-    require(!this.removed||!this.stream.pending,'fragment after removal');
-    await this.device.queue.onSubmittedWorkDone();
-    for(const b of this.temporary)b.destroy();this.temporary.length=0;
-    return {epoch:decoded.epoch,sequence:decoded.sequence,readbacks,...(frameProbe?{presentCommands}:{})};
   }
   async execute(command,frameProbe) {
     const r=new Reader(command.bytes);let result;
     switch(command.opcode){
       case 1:this.resources.create(r);break;
-      case 2:this.resources.destroy(r.version());break;
-      case 3:this.resources.upload(r);break;
+      case 2:this.flush();this.resources.destroy(r.version());break;
+      case 3:this.flush();this.resources.upload(r);break;
       case 4:{const handle=r.u32();require(!this.shaders.has(handle),'shader handle reused while live');this.shaders.set(handle,shader(r));break;}
       case 5:require(this.shaders.delete(r.u32()),'stale shader deletion');break;
       case 6:{const id=r.u64();require(!this.states.has(id),'pipeline identity replay');this.states.set(id,pipeline(r));while(this.states.size>256)this.states.delete(this.states.keys().next().value);break;}
@@ -54,10 +61,10 @@ class DeviceRenderer {
       case 8:await this.draw(r);break;
       case 9:await this.clear(r);break;
       case 10:this.copy(r);break;
-      case 11:await this.present(r,frameProbe);break;
+      case 11:this.flush();await this.present(r,frameProbe);break;
       case 12:{this.generation=r.u64();this.width=r.u32();this.height=r.u32();this.format=r.u32();this.samples=r.u32();this.backBuffers=Array.from({length:r.count(3)},()=>r.surface());this.depth=r.u32()?r.surface():null;break;}
-      case 13:{const generation=r.u64(),event=r.u32();require(generation>0n&&event>=1&&event<=3,'device event');if(event===3)this.removed=true;break;}
-      case 14:result=await this.resources.readback(r);break;
+      case 13:{const generation=r.u64(),event=r.u32();require(generation>0n&&event>=1&&event<=3,'device event');if(event===3){this.flush();this.removed=true;}break;}
+      case 14:this.flush();result=await this.resources.readback(r);break;
       case 15:this.resources.palettes.set(r.u32(),r.take(1024).slice());break;
       case 16:{r.u32();const bytes=r.take(1536),view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);for(let i=0;i<768;i++)this.gamma[i]=view.getUint16(i*2,true)/65535;break;}
       case 17:{this.cursor={surface:r.surface(),hotspot:r.words(2)};break;}
@@ -68,8 +75,8 @@ class DeviceRenderer {
       case 22:await this.definePatch(r);break;
       case 23:this.defineDomain(r);break;
       case 24:await this.drawPatch(r);break;
-      case 25:{const p=this.patches.get(r.u64());require(p,'stale patch');p.controls.destroy();this.patches.delete(p.id);break;}
-      case 26:{const id=r.u64(),d=this.domains.get(id);require(d,'stale patch domain');d.vertices.destroy();d.indices.destroy();this.domains.delete(id);break;}
+      case 25:{const p=this.patches.get(r.u64());require(p,'stale patch');this.flush();p.controls.destroy();this.patches.delete(p.id);break;}
+      case 26:{const id=r.u64(),d=this.domains.get(id);require(d,'stale patch domain');this.flush();d.vertices.destroy();d.indices.destroy();this.domains.delete(id);break;}
       default:throw new Error(`opcode ${command.opcode} not implemented`);
     }
     r.end();return result;
@@ -149,11 +156,11 @@ class DeviceRenderer {
     const raw=this.resources.packStreams(b,data.bytes?{bytes:data.bytes,stride:data.stride}:null);this.temporary.push(raw);
     const programs=this.program(p),state=this.scratch(stateBytes(p,programs.vertex,programs.pixel),GPUBufferUsage.STORAGE);
     const entries=[{binding:0,resource:{buffer:state}},{binding:1,resource:{buffer:raw}},...textures.entries];
-    const encoder=this.device.createCommandEncoder(),pass=encoder.beginRenderPass(this.passDescriptor(output));
+    const encoder=this.encoder(),pass=encoder.beginRenderPass(this.passDescriptor(output));
     pass.setPipeline(gpu);pass.setBindGroup(0,this.device.createBindGroup({layout:gpu.getBindGroupLayout(0),entries}));this.dynamic(pass,p,output);
     if(indexBytes){const index=this.scratch(new Uint8Array(indexBytes.buffer),GPUBufferUsage.INDEX);pass.setIndexBuffer(index,'uint32');pass.drawIndexed(indexBytes.length,1,0,baseVertex,0);}
     else pass.draw(elements,1,first,0);
-    pass.end();this.submit(encoder);this.draws++;
+    pass.end();this.draws++;
   }
   passDescriptor(output) {
     const result={colorAttachments:[{view:output.color.view,loadOp:'load',storeOp:'store'}]};
@@ -168,7 +175,7 @@ class DeviceRenderer {
     const descriptor={colorAttachments:[{view:output.color.view,loadOp:flags&1?'clear':'load',storeOp:'store',clearValue:color(value)}]};
     if(output.depth){descriptor.depthStencilAttachment={view:output.depth.view,depthLoadOp:flags&2?'clear':'load',depthStoreOp:'store',depthClearValue:depth};if(output.depth.item.gpuFormat.includes('stencil'))Object.assign(descriptor.depthStencilAttachment,{stencilLoadOp:flags&4?'clear':'load',stencilStoreOp:'store',stencilClearValue:stencilValue});}
     else require(!(flags&6),'clear depth without target');
-    const encoder=this.device.createCommandEncoder();encoder.beginRenderPass(descriptor).end();this.submit(encoder);
+    this.encoder().beginRenderPass(descriptor).end();
   }
   async clearRectangles(output,flags,value,depth,reference,rectangles){
     require(output.depth||!(flags&6),'clear depth without target');
@@ -179,16 +186,16 @@ class DeviceRenderer {
     @fragment fn fs()->${hasDepth?'Result':'@location(0)vec4<f32>'}{${hasDepth?`var out:Result;out.color=vec4<f32>(${c.r},${c.g},${c.b},${c.a});out.depth=${depth};return out;`:`return vec4<f32>(${c.r},${c.g},${c.b},${c.a});`}}`;
     const module=await checkedShader(this.device,code,'D3D8 rectangular clear'),desc={layout:'auto',vertex:{module,entryPoint:'vs'},fragment:{module,entryPoint:'fs',targets:[{format:output.color.item.gpuFormat,writeMask:flags&1?15:0}]},primitive:{topology:'triangle-list'}};
     if(hasDepth){desc.depthStencil={format:output.depth.item.gpuFormat,depthCompare:'always',depthWriteEnabled:Boolean(flags&2)};if(hasStencil){const face={compare:'always',failOp:'keep',depthFailOp:'keep',passOp:flags&4?'replace':'keep'};Object.assign(desc.depthStencil,{stencilFront:face,stencilBack:face,stencilWriteMask:flags&4?255:0});}}
-    const pipeline=await this.device.createRenderPipelineAsync(desc),encoder=this.device.createCommandEncoder(),pass=encoder.beginRenderPass(this.passDescriptor(output));pass.setPipeline(pipeline);pass.setStencilReference(reference);
+    const pipeline=await this.device.createRenderPipelineAsync(desc),encoder=this.encoder(),pass=encoder.beginRenderPass(this.passDescriptor(output));pass.setPipeline(pipeline);pass.setStencilReference(reference);
     const info=output.color.sub.info;
     for(const [left,top,right,bottom] of rectangles){const x=Math.max(0,left),y=Math.max(0,top),w=Math.min(info.width,right)-x,h=Math.min(info.height,bottom)-y;if(w>0&&h>0){pass.setScissorRect(x,y,w,h);pass.draw(3);}}
-    pass.end();this.submit(encoder);
+    pass.end();
   }
   copy(r) {
     const source=r.surface(),dest=r.surface(),rects=Array.from({length:r.count(65536)},()=>({from:r.rect(),to:r.words(2)})),a=this.resources.surface(source),b=this.resources.surface(dest);
     require(a.item.gpuFormat===b.item.gpuFormat,'copy format mismatch');
     if(!rects.length)rects.push({from:[0,0,a.sub.info.width,a.sub.info.height],to:[0,0]});
-    const e=this.device.createCommandEncoder();for(const q of rects)e.copyTextureToTexture({texture:a.item.texture,mipLevel:a.sub.info.level,origin:[q.from[0],q.from[1],a.sub.info.face]},{texture:b.item.texture,mipLevel:b.sub.info.level,origin:[q.to[0],q.to[1],b.sub.info.face]},[q.from[2]-q.from[0],q.from[3]-q.from[1],1]);this.submit(e);b.item.version=dest.version;
+    const e=this.encoder();for(const q of rects)e.copyTextureToTexture({texture:a.item.texture,mipLevel:a.sub.info.level,origin:[q.from[0],q.from[1],a.sub.info.face]},{texture:b.item.texture,mipLevel:b.sub.info.level,origin:[q.to[0],q.to[1],b.sub.info.face]},[q.from[2]-q.from[0],q.from[3]-q.from[1],1]);b.item.version=dest.version;
   }
   async present(r,frameProbe) {
     const accepted=frameProbe?probeStamp():null;
@@ -209,7 +216,7 @@ class DeviceRenderer {
     const p=this.scratch(new Uint8Array(params.buffer),GPUBufferUsage.STORAGE),count=params[6]*params[7];require(count>0&&count*17*16<=128*1024*1024,'patch control budget');
     const controls=this.device.createBuffer({size:count*17*16,usage:GPUBufferUsage.STORAGE});
     const entries=[{binding:0,resource:{buffer:p}},{binding:1,resource:{buffer:raw}},{binding:2,resource:{buffer:controls}}];
-    const encoder=this.device.createCommandEncoder(),pass=encoder.beginComputePass();pass.setPipeline(this.patchCapture);pass.setBindGroup(0,this.device.createBindGroup({layout:this.patchCapture.getBindGroupLayout(0),entries}));pass.dispatchWorkgroups(Math.ceil(count/64));pass.end();this.submit(encoder);return {controls,words:geometry.words};
+    const encoder=this.encoder(),pass=encoder.beginComputePass();pass.setPipeline(this.patchCapture);pass.setBindGroup(0,this.device.createBindGroup({layout:this.patchCapture.getBindGroupLayout(0),entries}));pass.dispatchWorkgroups(Math.ceil(count/64));pass.end();return {controls,words:geometry.words};
   }
   async definePatch(r){const id=r.u64(),vertexShader=r.u32();require(!this.patches.has(id),'patch identity replay');const patch=await this.capturePatch(this.patchGeometry(r));this.patches.set(id,{id,vertexShader,...patch});}
   defineDomain(r){const id=r.u64(),triangular=r.u32(),continuous=r.u32(),segments=r.words(4),count=r.count(1000000),indexCount=r.count(6000000);require(!this.domains.has(id),'domain identity replay');const vertices=this.resources.buffer(r.take(count*8),GPUBufferUsage.STORAGE),indices=this.resources.buffer(r.take(indexCount*4),GPUBufferUsage.INDEX);this.domains.set(id,{vertices,indices,count,indexCount,triangular,continuous,segments});}
@@ -217,13 +224,13 @@ class DeviceRenderer {
     const id=r.u64(),domain=r.u64(),targets=r.targets(),b=bindings(r),mode=r.u32(),patch=mode===0?this.patches.get(r.u64()):await this.capturePatch(this.patchGeometry(r));require(patch&&this.domains.has(domain),'patch/domain not found');
     const d=this.domains.get(domain),params=new Uint32Array(288);params.set(patch.words);const stateBuffer=this.scratch(new Uint8Array(params.buffer),GPUBufferUsage.STORAGE);
     const vertices=this.device.createBuffer({size:d.count*17*16,usage:GPUBufferUsage.STORAGE});this.temporary.push(vertices);if(mode!==0)this.temporary.push(patch.controls);
-    const e=this.device.createCommandEncoder(),compute=e.beginComputePass();compute.setPipeline(this.patchEvaluate);compute.setBindGroup(0,this.device.createBindGroup({layout:this.patchEvaluate.getBindGroupLayout(0),entries:[{binding:0,resource:{buffer:stateBuffer}},{binding:2,resource:{buffer:patch.controls}},{binding:3,resource:{buffer:d.vertices}},{binding:4,resource:{buffer:vertices}}]}));compute.dispatchWorkgroups(Math.ceil(d.count/64));compute.end();this.submit(e);
+    const e=this.encoder(),compute=e.beginComputePass();compute.setPipeline(this.patchEvaluate);compute.setBindGroup(0,this.device.createBindGroup({layout:this.patchEvaluate.getBindGroupLayout(0),entries:[{binding:0,resource:{buffer:stateBuffer}},{binding:2,resource:{buffer:patch.controls}},{binding:3,resource:{buffer:d.vertices}},{binding:4,resource:{buffer:vertices}}]}));compute.dispatchWorkgroups(Math.ceil(d.count/64));compute.end();
     const p=this.state(id),output=this.renderTargets(targets),textures=this.textureBindings(p,b),gpu=await this.gpuPipeline(p,'triangle-list',output,textures.kinds,true),program=this.program(p);
     const state=this.scratch(stateBytes(p,program.vertex,program.pixel),GPUBufferUsage.STORAGE),raw=this.scratch(new Uint8Array(128),GPUBufferUsage.STORAGE);
     const entries=[{binding:0,resource:{buffer:state}},{binding:1,resource:{buffer:raw}},{binding:18,resource:{buffer:vertices}},...textures.entries];
-    const encoder=this.device.createCommandEncoder(),pass=encoder.beginRenderPass(this.passDescriptor(output));pass.setPipeline(gpu);pass.setBindGroup(0,this.device.createBindGroup({layout:gpu.getBindGroupLayout(0),entries}));this.dynamic(pass,p,output);pass.setIndexBuffer(d.indices,'uint32');pass.drawIndexed(d.indexCount);pass.end();this.submit(encoder);this.draws++;
+    const encoder=this.encoder(),pass=encoder.beginRenderPass(this.passDescriptor(output));pass.setPipeline(gpu);pass.setBindGroup(0,this.device.createBindGroup({layout:gpu.getBindGroupLayout(0),entries}));this.dynamic(pass,p,output);pass.setIndexBuffer(d.indices,'uint32');pass.drawIndexed(d.indexCount);pass.end();this.draws++;
   }
-  close(){if(this.closed)return;this.closed=true;this.resources.close();for(const p of this.patches.values())p.controls.destroy();for(const d of this.domains.values()){d.vertices.destroy();d.indices.destroy();}for(const b of this.temporary)b.destroy();this.temporary.length=0;this.patches.clear();this.domains.clear();this.states.clear();this.shaders.clear();this.pipelines.clear();}
+  close(){if(this.closed)return;this.closed=true;this.pendingEncoder=null;this.resources.close();for(const p of this.patches.values())p.controls.destroy();for(const d of this.domains.values()){d.vertices.destroy();d.indices.destroy();}for(const b of this.temporary)b.destroy();this.temporary.length=0;this.patches.clear();this.domains.clear();this.states.clear();this.shaders.clear();this.pipelines.clear();}
 }
 
 export async function createGraphicsHost(canvas,{onDiagnostic=()=>{}}={}) {

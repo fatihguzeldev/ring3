@@ -6,6 +6,7 @@ const execution = Object.fromEntries(['capacity','budget','instructions','blocks
 if (query.has('chain')) execution.chain = query.get('chain') === '1';
 let local = null;
 let baseWorker=null,baseCompiled=null,baseRequest=0;
+let graphicsBatchRunning=false;
 function record(type,value) {
   events.push({at_ms:performance.timeOrigin+performance.now(),type,value});
   if (events.length > 100) events.shift();
@@ -15,6 +16,7 @@ const session = createSession({container:element('display'),engineUrl:query.get(
   onStatus(value) {
     report.status = value; record('status',value);
     element('status').textContent = `${value.state}: ${value.message ?? ''}\n${JSON.stringify({pc:value.pc,stats:value.stats,presentation:value.presentation})}`;
+    baseControls();
   },
   onDiagnostic(message,detail) {record('diagnostic',{message,detail});},
   onAudioStats(value) {report.audio = value; record('audio',value);},
@@ -31,6 +33,7 @@ element('folder').addEventListener('change',() => {
 const actions = {
   launch: () => {
     if(baseWorker)throw new Error('release the base-engine control before launching a guest');
+    if(graphicsBatchRunning)throw new Error('wait for graphics validation before launching a guest');
     return session.launch({...(local ?? {}),
     ...(local ? {executable:element('executable').value} : {}),
     commandLine:query.get('commandLine') ?? undefined,
@@ -47,12 +50,14 @@ for (const [name,action] of Object.entries(actions)) element(name).addEventListe
 });
 
 function baseControls() {
-  element('base-create').disabled=baseWorker!==null;
-  element('base-reuse').disabled=baseWorker!==null || baseCompiled===null;
+  element('base-create').disabled=baseWorker!==null || graphicsBatchRunning;
+  element('base-reuse').disabled=baseWorker!==null || baseCompiled===null || graphicsBatchRunning;
   element('base-release').disabled=baseWorker===null;
+  element('graphics-batch').disabled=graphicsBatchRunning || baseWorker!==null || !['idle','stopped'].includes(report.status?.state ?? 'idle');
 }
 function baseCreate(reuse) {
   if(baseWorker)throw new Error('release the current base engine first');
+  if(graphicsBatchRunning)throw new Error('wait for graphics validation before a base-engine control');
   if(!['idle','stopped'].includes(session.status().state))throw new Error('stop the guest session before a base-engine control');
   if(reuse&&!baseCompiled)throw new Error('no compiled base engine is retained');
   const worker=new Worker(new URL('./base-engine-worker.mjs',import.meta.url),{type:'module'});
@@ -97,5 +102,24 @@ for(const [id,reuse] of [['base-create',false],['base-reuse',true]])element(id).
 });
 element('base-release').addEventListener('click',()=>{
   if(baseWorker)baseWorker.postMessage({type:'base-release',request:baseRequest});
+});
+element('graphics-batch').addEventListener('click',async()=>{
+  let acquired=false;
+  try {
+    if(graphicsBatchRunning || baseWorker || !['idle','stopped'].includes(session.status().state))
+      throw new Error('stop the guest and release the base engine before graphics validation');
+    graphicsBatchRunning=true;acquired=true;baseControls();
+    report.graphicsBatch={complete:false,requestedAtEpochMs:performance.timeOrigin+performance.now()};
+    record('graphics-batch-request',report.graphicsBatch);
+    element('status').textContent='validating graphics submission ordering…';
+    const {runGraphicsBatchValidation}=await import('../graphics/validation.js');
+    const result=await runGraphicsBatchValidation(document.createElement('canvas'));
+    report.graphicsBatch={...report.graphicsBatch,complete:true,result};
+    element('status').textContent=`graphics validation passed: ${result.queueSubmissions} queue submissions · ${result.draws} draws · ${result.presents.length} completed Presents`;
+    record('graphics-batch-result',report.graphicsBatch);
+  } catch(error) {
+    if(graphicsBatchRunning)report.graphicsBatch={...report.graphicsBatch,complete:false,error:error.message};
+    record('graphics-batch-error',{message:error.message});element('status').textContent=error.message;
+  } finally {if(acquired)graphicsBatchRunning=false;baseControls();}
 });
 window.addEventListener('pagehide',()=>{baseWorker?.terminate();baseWorker=null;});

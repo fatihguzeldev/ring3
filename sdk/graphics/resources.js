@@ -3,7 +3,7 @@ import {decodeColor,encodeColor,depthFormats} from './formats.js';
 
 const align=(n,a)=>(Math.ceil(n/a)*a);
 export class Resources {
-  constructor(device) { this.device=device;this.items=new Map();this.bytes=0;this.palettes=new Map(); }
+  constructor(device,beforeTextureWrite=()=>{}) { this.device=device;this.beforeTextureWrite=beforeTextureWrite;this.items=new Map();this.bytes=0;this.palettes=new Map(); }
   create(r) {
     const id=r.resource(),[type,format,usage,pool,width,height,depth,levels,samples,lockable,fvf,reserved]=r.words(12);
     require(!this.items.has(id.key)&&!reserved&&width&&height&&depth&&levels,'resource definition');
@@ -38,6 +38,7 @@ export class Resources {
     const sub=item.subs[index],info=sub.info;
     if((item.format===40||item.format===41)&&!this.palettes.has(paletteIndex)){sub.palettePending=true;return;}
     const rgba=decodeColor(item.format,sub.bytes,info,this.palettes.get(paletteIndex));
+    this.beforeTextureWrite();
     this.device.queue.writeTexture({texture:item.texture,mipLevel:info.level,origin:[0,0,info.face] },rgba,{bytesPerRow:info.width*4,rowsPerImage:info.height},[info.width,info.height,info.depth]);
     sub.palettePending=false;
   }

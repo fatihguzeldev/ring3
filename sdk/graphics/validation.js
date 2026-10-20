@@ -78,3 +78,65 @@ export async function runGraphicsValidation(canvas){
     return {ok:true,commands:commands.length,epoch:String(result.epoch),sequence:String(result.sequence),fixedCenter:pixel(result.readbacks[0].bytes,16,12),programCenter:pixel(result.readbacks[1].bytes,16,12),corner:pixel(result.readbacks[0].bytes,0,0)};
   }finally{host.close();}
 }
+
+export async function runGraphicsBatchValidation(canvas) {
+  const commands=[],add=(opcode,payload)=>commands.push({opcode,bytes:payload.finish()});
+  const vertex=w();
+  for(const [x,y] of [[-1,-1],[64,-1],[-1,64]])vertex.floats([x,y,0.5,1]).u32(0xffff0000);
+  for(const slot of [0,2,3])add(1,definition(slot,1,21,32,32,4096));
+  add(1,definition(1,6,100,60,1,60));
+  add(3,w().version(1,2).words([0,0,60,60,60,1,1,60]).bytes(vertex.finish()));
+  add(9,w().targets(2).u32(1).u32(0xff0000ff).floats([1]).words([0,0]));
+  add(6,state(1));
+  for(let index=0;index<16;index++)add(8,draw(1,1,20,3+index));
+  add(10,w().surface(0,18).surface(2,2).u32(0));
+  const green=new Uint8Array(4096);
+  for(let index=0;index<green.length;index+=4)green.set([0,255,0,255],index);
+  add(3,w().version(0,19).words([0,0,128,4096,128,32,1,4096]).bytes(green));
+  add(10,w().surface(0,19).surface(3,2).u32(0));
+  add(2,w().version(0,19));
+  for(const [sequence,slot] of [[1,2],[2,3]])
+    add(14,w().u64(1).u64(sequence).surface(slot,2).words([1,1,21,32,32,1,128,4096,4096]));
+  for(const slot of [2,3])add(11,w().u64(1).words([1,0,1,0]).surface(slot,2).words([0,0,0]));
+
+  const body=w();
+  commands.forEach(({opcode,bytes},index)=>{
+    const header=new Uint8Array(32),v=new DataView(header.buffer);
+    v.setUint16(0,opcode,true);v.setUint16(2,3,true);v.setUint32(4,32+bytes.length,true);
+    v.setBigUint64(8,BigInt(index+1),true);v.setUint32(20,bytes.length,true);
+    body.bytes(header).bytes(bytes);
+  });
+  const header=new Uint8Array(64),v=new DataView(header.buffer);
+  header.set(new TextEncoder().encode('R3D8'));v.setUint16(4,2,true);v.setUint16(6,8,true);
+  v.setUint32(8,64+body.length,true);v.setUint32(12,commands.length,true);
+  v.setBigUint64(16,1n,true);v.setBigUint64(24,1n,true);v.setBigUint64(32,1n,true);
+  v.setBigUint64(40,BigInt(commands.length),true);
+  const packet=w().bytes(header).bytes(body.finish()).finish();
+  new PacketStream().decode(packet);
+  const presents=[],host=await createGraphicsHost(canvas,{onDiagnostic:value=>{if(value.type==='present')presents.push(value);}});
+  const queue=host.device.queue,submit=queue.submit;
+  let submissions=0;
+  try {
+    queue.submit=function(buffers){submissions++;return submit.call(queue,buffers);};
+    const result=await host.consume(packet.buffer,{proof_id:'graphics-batch-validation'});
+    require(result.readbacks.length===2,'two copied GPU readbacks after source destruction');
+    for(const [index,expected] of [[0,[0,0,255,255]],[1,[0,255,0,255]]]) {
+      const bytes=result.readbacks[index].bytes;
+      require(bytes.length===4096&&bytes.every((value,at)=>value===expected[at%4]),
+        index===0?'all red pixels copied before the upload':'all green pixels copied before source destruction');
+    }
+    require(presents.length===2&&presents[0].presents===1&&presents[1].presents===2,
+      'each Present completes separately');
+    require(result.presentCommands.length===2&&result.presentCommands.every(value=>value.chain==='1'),
+      'two Present commands retain their chain identity');
+    require(submissions===6,`batched submission target: expected6, received${submissions}`);
+    const hex=bytes=>Array.from(bytes,value=>value.toString(16).padStart(2,'0')).join('');
+    return {ok:true,commands:commands.length,draws:16,queueSubmissions:submissions,
+      packetSha256:hex(new Uint8Array(await crypto.subtle.digest('SHA-256',packet))),
+      readbacks:result.readbacks.map(value=>({receiptHex:hex(value.receipt),pixelsHex:hex(value.bytes)})),
+      presentCommands:result.presentCommands,presents};
+  } finally {
+    queue.submit=submit;
+    host.close();
+  }
+}
