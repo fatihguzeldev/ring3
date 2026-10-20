@@ -33,7 +33,7 @@ function countFlagCalls(source) {
       data=Uint8Array.from([...u(count+1),...data.subarray(cursor.value),...u(name.length),...name,3,0]);exported=true;
     } else if(id===10) {
       const cursor={value:0},count=unsigned(data,cursor),bodies=[];
-      assert.equal(count,6,'existing scalar helper/run/lookup/publisher functions');
+      assert(count>=4&&count<=7,'scalar flags/run/lookup/publisher and optional store functions');
       for(let index=0;index<count;index++) {
         const size=unsigned(data,cursor),bodyEnd=cursor.value+size;
         assert(bodyEnd<=data.length,'complete function body');let body=data.subarray(cursor.value,bodyEnd);cursor.value=bodyEnd;

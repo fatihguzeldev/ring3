@@ -83,6 +83,7 @@ pub(super) fn emit(
     native: &[NativeInstruction],
 ) -> Vec<u8> {
     let shift = u32::from(!native.is_empty());
+    let (run, store_widths) = run(blocks, identity, native);
     let mut module = Module::new();
     let mut types = TypeSection::new();
     types.ty().function([ValType::I32; 2], [ValType::I32]);
@@ -91,6 +92,9 @@ pub(super) fn emit(
     types.ty().function([ValType::I32; 8], [ValType::I32]);
     types.ty().function([ValType::I32], [ValType::I32]);
     types.ty().function([ValType::I32; 13], []);
+    if !store_widths.is_empty() {
+        types.ty().function([ValType::I32; 5], [ValType::I32]);
+    }
     module.section(&types);
     let mut imports = ImportSection::new();
     imports.import(
@@ -111,20 +115,24 @@ pub(super) fn emit(
     }
     module.section(&imports);
     let mut functions = FunctionSection::new();
-    for kind in [3, 1, 2, 0, 4, 5] {
+    for kind in [3, 0, 4, 5] {
         functions.function(kind);
+    }
+    for _ in &store_widths {
+        functions.function(6);
     }
     module.section(&functions);
     let mut exports = ExportSection::new();
-    exports.export("run", ExportKind::Func, 5 + shift);
+    exports.export("run", ExportKind::Func, 3 + shift);
     module.section(&exports);
     let mut code = CodeSection::new();
     code.function(&flags::emit_function());
-    code.function(&super::memory::emit_read(0));
-    code.function(&super::memory::emit_write(1));
-    code.function(&run(blocks, identity, native));
+    code.function(&run);
     code.function(&lookup(blocks));
     code.function(&publisher());
+    for &width in &store_widths {
+        code.function(&super::memory::emit_store(width));
+    }
     module.section(&code);
     let mut names = NameSection::new();
     names.module(&format!("ring3.guest.{entry:08x}.{identity}"));
@@ -134,18 +142,17 @@ pub(super) fn emit(
     if shift != 0 {
         functions.append(2, "guest.numeric");
     }
-    for (index, name) in [
-        "guest.flags",
-        "guest.read",
-        "guest.write",
-        "guest.run",
-        "guest.lookup",
-        "guest.publish",
-    ]
-    .into_iter()
-    .enumerate()
+    for (index, name) in ["guest.flags", "guest.run", "guest.lookup", "guest.publish"]
+        .into_iter()
+        .enumerate()
     {
         functions.append(2 + shift + index as u32, name);
+    }
+    for (index, width) in store_widths.iter().enumerate() {
+        functions.append(
+            6 + shift + index as u32,
+            &format!("guest.store{}", width * 8),
+        );
     }
     names.functions(&functions);
     module.section(&names);
@@ -194,8 +201,8 @@ fn lookup(blocks: &[Block]) -> Function {
     function
 }
 
-fn run(blocks: &[Block], identity: u64, native: &[NativeInstruction]) -> Function {
-    let mut function = Function::new([(25, ValType::I32), (1, ValType::I64), (1, ValType::I32)]);
+fn run(blocks: &[Block], identity: u64, native: &[NativeInstruction]) -> (Function, Vec<u32>) {
+    let mut function = Function::new([(25, ValType::I32), (1, ValType::I64), (9, ValType::I32)]);
     let mut out = Output {
         function: &mut function,
         blocks,
@@ -203,6 +210,7 @@ fn run(blocks: &[Block], identity: u64, native: &[NativeInstruction]) -> Functio
         prefix: 0,
         record_flags: true,
         native,
+        store_widths: Vec::new(),
     };
     out.c()
         .local_get(CTX)
@@ -255,7 +263,8 @@ fn run(blocks: &[Block], identity: u64, native: &[NativeInstruction]) -> Functio
         .if_(BlockType::Empty);
     out.exit(StopReason::CodeInvalidated, None, 0);
     out.c().end().end();
-    let lookup = out.internal(6);
+    super::memory::load_view(&mut out.c());
+    let lookup = out.internal(4);
     out.c().local_get(EIP).call(lookup).local_set(INDEX);
     out.c().loop_(BlockType::Empty);
     out.c().local_get(REMAIN).i32_eqz().if_(BlockType::Empty);
@@ -282,7 +291,8 @@ fn run(blocks: &[Block], identity: u64, native: &[NativeInstruction]) -> Functio
     out.c().end();
     out.exit(StopReason::NeedCode, None, 0);
     out.c().end().unreachable().end();
-    function
+    let Output { store_widths, .. } = out;
+    (function, store_widths)
 }
 
 pub(super) struct Output<'a> {
@@ -292,6 +302,7 @@ pub(super) struct Output<'a> {
     prefix: u32,
     record_flags: bool,
     native: &'a [NativeInstruction],
+    store_widths: Vec<u32>,
 }
 
 impl Output<'_> {
@@ -406,7 +417,7 @@ impl Output<'_> {
         for local in [CTX, 2, 3, 4, 5, 6, 7, 8, 9, EIP, FLAGS, RETIRED, REMAIN] {
             self.c().local_get(local);
         }
-        let function = self.internal(7);
+        let function = self.internal(5);
         self.c().call(function);
     }
 
@@ -441,7 +452,7 @@ impl Output<'_> {
     }
 
     fn dynamic_pc(&mut self, local: u32) {
-        let lookup = self.internal(6);
+        let lookup = self.internal(4);
         self.c()
             .local_get(local)
             .local_tee(EIP)
@@ -450,27 +461,24 @@ impl Output<'_> {
     }
 
     pub(super) fn read(&mut self, width: u32, destination: u32) {
+        self.read_memory(width, destination, false);
+    }
+
+    fn read_prepared(&mut self, width: u32, destination: u32) {
+        self.read_memory(width | 0x100, destination, true);
+    }
+
+    fn read_memory(&mut self, width: u32, destination: u32, prepare: bool) {
         self.check_span(width & 0xff);
-        let function = self.internal(3);
+        super::memory::read(&mut self.c(), width, 0, prepare);
         self.c()
-            .local_get(CTX)
-            .local_get(ADDRESS)
-            .i32_const(width as i32)
-            .call(function)
             .local_tee(WIDE)
             .i64_const(32)
             .i64_shr_u()
             .i32_wrap_i64()
             .local_tee(WRITE_STATUS)
             .if_(BlockType::Empty);
-        self.c()
-            .local_get(WRITE_STATUS)
-            .i32_const(1)
-            .i32_ne()
-            .if_(BlockType::Empty);
-        self.exit(StopReason::Infrastructure, Some(self.pc), self.prefix);
-        self.c().end();
-        self.exit(StopReason::MemoryFault, Some(self.pc), self.prefix);
+        self.memory_exit();
         self.c()
             .end()
             .local_get(WIDE)
@@ -479,27 +487,50 @@ impl Output<'_> {
     }
 
     pub(super) fn write(&mut self, width: u32, source: u32) {
-        self.check_span(width);
-        let function = self.internal(4);
+        self.write_memory(width, source, false);
+    }
+
+    fn write_prepared(&mut self, width: u32, source: u32) {
+        self.write_memory(width, source, true);
+    }
+
+    fn write_memory(&mut self, width: u32, source: u32, prepared: bool) {
+        if !prepared {
+            self.check_span(width);
+        }
+        let index = match self.store_widths.iter().position(|&stored| stored == width) {
+            Some(index) => index,
+            None => {
+                let index = self.store_widths.len();
+                self.store_widths.push(width);
+                index
+            }
+        };
+        let commit = self.internal(6 + index as u32);
+        super::memory::write(&mut self.c(), width, source, commit, 1, prepared);
         self.c()
-            .local_get(CTX)
-            .local_get(ADDRESS)
-            .i32_const(width as i32)
-            .local_get(source)
-            .call(function)
             .local_tee(WRITE_STATUS)
             .i32_const(2)
             .i32_gt_u()
-            .if_(BlockType::Empty);
-        self.exit(StopReason::Infrastructure, Some(self.pc), self.prefix);
-        self.c().end();
-        self.c()
             .local_get(WRITE_STATUS)
             .i32_const(1)
             .i32_eq()
+            .i32_or()
             .if_(BlockType::Empty);
-        self.exit(StopReason::MemoryFault, Some(self.pc), self.prefix);
+        self.memory_exit();
         self.c().end();
+    }
+
+    fn memory_exit(&mut self) {
+        self.publish_exit(Some(self.pc), self.prefix);
+        self.c()
+            .i32_const(StopReason::MemoryFault as i32)
+            .i32_const(StopReason::Infrastructure as i32)
+            .local_get(WRITE_STATUS)
+            .i32_const(1)
+            .i32_eq()
+            .select()
+            .return_();
     }
 
     fn check_span(&mut self, width: u32) {
@@ -650,6 +681,7 @@ impl Output<'_> {
     fn instruction(&mut self, operation: Operation, next: u32) {
         if numeric::supports(&operation) {
             numeric::emit(self, next);
+            super::memory::load_view(&mut self.c());
             return;
         }
         if integer::emit(self, operation) {

@@ -440,7 +440,18 @@ pub(super) fn emit(out: &mut Output<'_>, operation: Operation) -> bool {
         }
         Integer::Binary(kind, destination, source, width) => {
             let writes = !matches!(kind, BinaryKind::Cmp | BinaryKind::Test);
-            out.operand(destination, width, A, writes);
+            let prepared = writes
+                && matches!(destination, Operand::Memory(_))
+                && !matches!(source, Operand::Memory(_));
+            if prepared {
+                let Operand::Memory(address) = destination else {
+                    unreachable!()
+                };
+                out.address(address);
+                out.read_prepared(width, A);
+            } else {
+                out.operand(destination, width, A, writes);
+            }
             out.operand(source, width, B, false);
             if matches!(kind, BinaryKind::Adc | BinaryKind::Sbb) {
                 out.materialize(flags::CF);
@@ -481,7 +492,11 @@ pub(super) fn emit(out: &mut Output<'_>, operation: Operation) -> bool {
             }
             out.c().local_set(RESULT);
             if writes {
-                out.store(destination, width, RESULT);
+                if prepared {
+                    out.write_prepared(width, RESULT);
+                } else {
+                    out.store(destination, width, RESULT);
+                }
             }
             out.recipe(
                 match kind {
@@ -495,7 +510,14 @@ pub(super) fn emit(out: &mut Output<'_>, operation: Operation) -> bool {
             );
         }
         Integer::Unary(kind, destination, width) => {
-            out.operand(destination, width, A, true);
+            let prepared = if let Operand::Memory(address) = destination {
+                out.address(address);
+                out.read_prepared(width, A);
+                true
+            } else {
+                out.operand(destination, width, A, true);
+                false
+            };
             match kind {
                 UnaryKind::Inc => {
                     out.c().local_get(A).i32_const(1).i32_add();
@@ -514,7 +536,11 @@ pub(super) fn emit(out: &mut Output<'_>, operation: Operation) -> bool {
                 out.c().i32_const(mask(width) as i32).i32_and();
             }
             out.c().local_set(RESULT);
-            out.store(destination, width, RESULT);
+            if prepared {
+                out.write_prepared(width, RESULT);
+            } else {
+                out.store(destination, width, RESULT);
+            }
             if !matches!(kind, UnaryKind::Not) {
                 if out.record_flags && matches!(kind, UnaryKind::Inc | UnaryKind::Dec) {
                     out.materialize(flags::CF);

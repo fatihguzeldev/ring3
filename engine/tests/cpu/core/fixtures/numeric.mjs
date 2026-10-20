@@ -55,7 +55,9 @@ function runCase(name, codeHex, budget, options, verify) {
     return word(context,64)+(slot-1)*4096+(address&4095);
   };
   const raw = () => ({context:hex(slice(context,128)), arena:hex(slice(arena,api.arena_len())),
-    pages:Object.fromEntries([...pages.keys()].map(address=>[address.toString(16),hex(slice(physical(address),4096))]))});
+    pages:Object.fromEntries([...pages.keys()].map(address=>[address.toString(16),hex(slice(physical(address),4096))])),
+    transactionVersion:String(view().getBigUint64(word(context,80),true)),
+    pageVersions:hex(slice(word(context,84),word(context,68)*16))});
   const writeExpected = (address,bytes) => expected.get(address&~4095).set(bytes,address&4095);
   const assertRam = () => {for(const [address,page] of expected) assert.deepEqual(slice(physical(address),4096),page,`${name}: full page ${address.toString(16)}`);};
   const neutral = (label,action) => {
@@ -90,6 +92,7 @@ function runCase(name, codeHex, budget, options, verify) {
     const run = new WebAssembly.Instance(module,{ring3:{memory,read:api.core_read,write:api.core_write,numeric:api.core_numeric}}).exports.run;
     result.module = {sha256:hash(code),wasmHex:hex(code)};
     status('core_begin',0); active = true;
+    const initialVersion=view().getBigUint64(word(context,80),true),initialPageVersions=slice(word(context,84),word(context,68)*16);
     neutral('wrong numerical context',()=>status('core_numeric',8,context+8,0));
     neutral('wrong numerical ordinal',()=>status('core_numeric',8,context,0xffffffff));
     const stop = run(context,budget)>>>0;
@@ -107,7 +110,7 @@ function runCase(name, codeHex, budget, options, verify) {
     }
     status('core_export',0,stop,work);
     result.published = raw(); checkpoint();
-    const tools = {api,memory,arena,context,initialFp,initialSimd,initialRegisters:registers,budget,state,stop,word,put,slice,physical,status,neutral,writeExpected,
+    const tools = {api,memory,arena,context,initialFp,initialSimd,initialVersion,initialPageVersions,initialRegisters:registers,budget,state,stop,word,put,slice,physical,status,neutral,writeExpected,
       fp:options=>fp(initialFp,options),simd:initialSimd.slice(),read:address=>slice(physical(address),4)};
     verify(tools);
     assert.deepEqual(slice(arena+simdOffset,160),tools.simd,'full literal SIMD160');
@@ -143,6 +146,14 @@ try {
   runCase('x87-multiply','d903 d84b04 d95b08 0f0b',3,{data:values,invalidExport:true},t=>{
     standard(t,3,0x1008); t.writeExpected(0x3008,unhex('0000c040')); assert.deepEqual(t.read(0x3008),unhex('0000c040'));
     bank(t,t.fp({opcode:0x15b,fip:0x1005,fdp:0x3008,cs:0x1b,ds:0x23,registers:{7:ext6}}));
+  });
+  runCase('numerical-store-then-scalar-load-modify','d903 d95b08 8b4308 83430801 0f0b',4,{data:values},t=>{
+    standard(t,4,0x100c,2,2,{0:0x40400000});t.writeExpected(0x3008,unhex('01004040'));
+    bank(t,t.fp({opcode:0x15b,fip:0x1002,fdp:0x3008,cs:0x1b,ds:0x23,registers:{7:ext3}}));
+    const versions=t.initialPageVersions.slice(),slot=Math.floor((t.physical(0x3008)-t.word(t.context,64))/4096);
+    new DataView(versions.buffer).setBigUint64(slot*16+8,t.initialVersion+2n,true);
+    assert.deepEqual(t.slice(t.word(t.context,84),versions.length),versions,'native numerical and scalar stores publish only their physical page');
+    assert.equal(new DataView(t.memory.buffer).getBigUint64(t.word(t.context,80),true),t.initialVersion+2n,'one transaction per committed store');
   });
   runCase('integer-flags-fcmov-fcomi-status','d903 d94304 31c0 dac1 39c0 dbf1 dac1 dfe0 d95b08 0f0b',9,{data:values},t=>{
     standard(t,9,0x1014,3,2,{0:0x3000}); t.writeExpected(0x3008,unhex('00004040'));

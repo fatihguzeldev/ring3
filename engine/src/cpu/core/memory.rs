@@ -1,3 +1,4 @@
+use super::emitter::{ADDRESS, CTX};
 use wasm_encoder::{BlockType, Function, InstructionSink, MemArg, ValType};
 
 pub(super) const MAPPINGS: u64 = 56;
@@ -11,6 +12,15 @@ pub(super) const PAGE_VERSIONS: u64 = 84;
 pub(super) const CODE_VERSION: u64 = 88;
 pub(super) const EXPECTED_CODE_VERSION: u64 = 96;
 
+const MAPPING_BASE: u32 = 29;
+const PERMISSION_BASE: u32 = 30;
+const BACKING_BASE: u32 = 31;
+const PAGE_COUNT: u32 = 32;
+const SLOT: u32 = 33;
+const POINTER: u32 = 34;
+const PREPARED_SLOT: u32 = 35;
+const PREPARED_POINTER: u32 = 36;
+
 fn arg(offset: u64, align: u32) -> MemArg {
     MemArg {
         offset,
@@ -20,43 +30,38 @@ fn arg(offset: u64, align: u32) -> MemArg {
 }
 
 fn load_field(code: &mut InstructionSink<'_>, offset: u64) {
-    code.local_get(0).i32_load(arg(offset, 2));
+    code.local_get(CTX).i32_load(arg(offset, 2));
+}
+
+pub(super) fn load_view(code: &mut InstructionSink<'_>) {
+    // allocation bases stay fixed during the exclusive cpu lifetime; entries remain live.
+    for (offset, local) in [
+        (MAPPINGS, MAPPING_BASE),
+        (PERMISSIONS, PERMISSION_BASE),
+        (BACKING, BACKING_BASE),
+        (BACKING_PAGES, PAGE_COUNT),
+    ] {
+        load_field(code, offset);
+        code.local_set(local);
+    }
 }
 
 fn page(code: &mut InstructionSink<'_>) {
-    code.local_get(1).i32_const(12).i32_shr_u();
+    code.local_get(ADDRESS).i32_const(12).i32_shr_u();
 }
 
 // the enclosing empty block branches to the canonical slow access.
-fn geometry(
-    code: &mut InstructionSink<'_>,
-    mapping: u32,
-    width: u32,
-    permission: i32,
-    permission_local: Option<u32>,
-) {
-    code.local_get(width)
-        .i32_const(1)
-        .i32_eq()
-        .local_get(width)
-        .i32_const(2)
-        .i32_eq()
-        .i32_or()
-        .local_get(width)
-        .i32_const(4)
-        .i32_eq()
-        .i32_or()
-        .i32_eqz()
-        .br_if(0);
-    code.local_get(1)
-        .i32_const(4095)
-        .i32_and()
-        .i32_const(4096)
-        .local_get(width)
-        .i32_sub()
-        .i32_gt_u()
-        .br_if(0);
-    load_field(code, MAPPINGS);
+fn geometry(code: &mut InstructionSink<'_>, width: u32, permission: i32) {
+    debug_assert!(matches!(width, 1 | 2 | 4));
+    if width != 1 {
+        code.local_get(ADDRESS)
+            .i32_const(4095)
+            .i32_and()
+            .i32_const((4096 - width) as i32)
+            .i32_gt_u()
+            .br_if(0);
+    }
+    code.local_get(MAPPING_BASE);
     page(code);
     code.i32_const(2)
         .i32_shl()
@@ -64,88 +69,129 @@ fn geometry(
         .i32_load(arg(0, 2))
         .i32_const(1)
         .i32_sub()
-        .local_tee(mapping);
-    load_field(code, BACKING_PAGES);
-    code.i32_ge_u().br_if(0);
-    load_field(code, PERMISSIONS);
+        .local_tee(SLOT)
+        .local_get(PAGE_COUNT)
+        .i32_ge_u()
+        .br_if(0);
+    code.local_get(PERMISSION_BASE);
     page(code);
-    code.i32_add().i32_load8_u(arg(0, 0));
-    if let Some(local) = permission_local {
-        code.local_get(local)
-            .i32_and()
-            .local_get(local)
-            .i32_ne()
-            .br_if(0);
-    } else {
-        code.i32_const(permission).i32_and().i32_eqz().br_if(0);
-    }
+    code.i32_add()
+        .i32_load8_u(arg(0, 0))
+        .i32_const(permission)
+        .i32_and()
+        .i32_const(permission)
+        .i32_ne()
+        .br_if(0);
 }
 
-fn physical_address(code: &mut InstructionSink<'_>, mapping: u32) {
-    load_field(code, BACKING);
-    code.local_get(mapping)
+fn physical_address(code: &mut InstructionSink<'_>) {
+    code.local_get(BACKING_BASE)
+        .local_get(SLOT)
         .i32_const(12)
         .i32_shl()
         .i32_add()
-        .local_get(1)
+        .local_get(ADDRESS)
         .i32_const(4095)
         .i32_and()
-        .i32_add();
+        .i32_add()
+        .local_set(POINTER);
 }
 
-pub(super) fn emit_read(slow_index: u32) -> Function {
-    // bit 8 of the width requests read/write preflight for a modifying instruction.
-    let mut function = Function::new([(4, ValType::I32)]);
-    let mut code = function.instructions();
+pub(super) fn read(
+    code: &mut InstructionSink<'_>,
+    encoded_width: u32,
+    slow_index: u32,
+    prepare: bool,
+) {
+    let width = encoded_width & 0xff;
+    let modify = encoded_width & 0x100 != 0;
+    debug_assert!(matches!(width, 1 | 2 | 4) && encoded_width & !0x1ff == 0);
+    debug_assert!(!prepare || modify);
+    if prepare {
+        code.i32_const(0).local_set(PREPARED_SLOT);
+    }
     code.block(BlockType::Result(ValType::I64))
         .block(BlockType::Empty);
-    code.local_get(2).i32_const(!0x1ff).i32_and().br_if(0);
-    code.local_get(2).i32_const(0xff).i32_and().local_set(5);
-    code.local_get(2)
-        .i32_const(0x100)
-        .i32_and()
-        .i32_const(7)
-        .i32_shr_u()
-        .i32_const(1)
-        .i32_or()
-        .local_set(6);
-    geometry(&mut code, 3, 5, 1, Some(6));
-    physical_address(&mut code, 3);
-    code.local_set(4);
-    code.local_get(5)
-        .i32_const(1)
-        .i32_eq()
-        .if_(BlockType::Result(ValType::I64));
-    code.local_get(4).i32_load8_u(arg(0, 0)).i64_extend_i32_u();
-    code.else_()
-        .local_get(5)
-        .i32_const(2)
-        .i32_eq()
-        .if_(BlockType::Result(ValType::I64));
-    code.local_get(4).i32_load16_u(arg(0, 0)).i64_extend_i32_u();
-    code.else_()
-        .local_get(4)
-        .i32_load(arg(0, 0))
-        .i64_extend_i32_u()
-        .end()
-        .end();
-    code.br(1).end();
-    code.local_get(0).local_get(1).local_get(2).call(slow_index);
-    code.end().end();
-    function
+    geometry(code, width, if modify { 3 } else { 1 });
+    physical_address(code);
+    if prepare {
+        code.local_get(SLOT)
+            .i32_const(1)
+            .i32_add()
+            .local_set(PREPARED_SLOT)
+            .local_get(POINTER)
+            .local_set(PREPARED_POINTER);
+    }
+    code.local_get(POINTER);
+    match width {
+        1 => code.i32_load8_u(arg(0, 0)),
+        2 => code.i32_load16_u(arg(0, 0)),
+        4 => code.i32_load(arg(0, 0)),
+        _ => unreachable!(),
+    };
+    code.i64_extend_i32_u().br(1).end();
+    code.local_get(CTX)
+        .local_get(ADDRESS)
+        .i32_const(encoded_width as i32)
+        .call(slow_index);
+    load_view(code);
+    code.end();
 }
 
-pub(super) fn emit_write(slow_index: u32) -> Function {
-    // params: context, linear address, byte width, value; locals: page, pointer, scratch, version.
-    let mut function = Function::new([(3, ValType::I32), (1, ValType::I64)]);
-    let mut code = function.instructions();
+pub(super) fn write(
+    code: &mut InstructionSink<'_>,
+    width: u32,
+    source: u32,
+    commit_index: u32,
+    slow_index: u32,
+    prepared: bool,
+) {
+    debug_assert!(matches!(width, 1 | 2 | 4));
     code.block(BlockType::Result(ValType::I32))
         .block(BlockType::Empty);
-    geometry(&mut code, 4, 2, 2, None);
+    if prepared {
+        // slow reads can change mappings, so their writes repeat canonical preflight.
+        code.local_get(PREPARED_SLOT)
+            .i32_eqz()
+            .br_if(0)
+            .local_get(PREPARED_SLOT)
+            .i32_const(1)
+            .i32_sub()
+            .local_set(SLOT)
+            .local_get(PREPARED_POINTER)
+            .local_set(POINTER);
+    } else {
+        geometry(code, width, 2);
+        physical_address(code);
+    }
 
+    code.local_get(CTX)
+        .local_get(ADDRESS)
+        .local_get(source)
+        .local_get(SLOT)
+        .local_get(POINTER)
+        .call(commit_index)
+        .br_if(0)
+        .i32_const(0)
+        .br(1)
+        .end();
+    code.local_get(CTX)
+        .local_get(ADDRESS)
+        .i32_const(width as i32)
+        .local_get(source)
+        .call(slow_index);
+    load_view(code);
+    code.end();
+}
+
+pub(super) fn emit_store(width: u32) -> Function {
+    // params: context, address, value, slot, pointer; locals: scratch, version.
+    let mut function = Function::new([(1, ValType::I32), (1, ValType::I64)]);
+    let mut code = function.instructions();
+    code.block(BlockType::Empty);
     // a writable virtual view can still alias executable physical bytes.
     load_field(&mut code, EXECUTABLE_VIEWS);
-    code.local_get(4)
+    code.local_get(3)
         .i32_const(2)
         .i32_shl()
         .i32_add()
@@ -153,10 +199,12 @@ pub(super) fn emit_write(slow_index: u32) -> Function {
         .br_if(0);
     code.block(BlockType::Empty);
     load_field(&mut code, PRIVATE_SLOTS);
-    code.local_tee(6).i32_eqz().br_if(0);
-    code.local_get(6);
-    page(&mut code);
-    code.i32_const(2)
+    code.local_tee(5).i32_eqz().br_if(0);
+    code.local_get(5)
+        .local_get(1)
+        .i32_const(12)
+        .i32_shr_u()
+        .i32_const(2)
         .i32_shl()
         .i32_add()
         .i32_load(arg(0, 2))
@@ -164,47 +212,37 @@ pub(super) fn emit_write(slow_index: u32) -> Function {
     code.end();
 
     load_field(&mut code, TRANSACTION_VERSION);
-    code.local_tee(6)
+    code.local_tee(5)
         .i64_load(arg(0, 3))
-        .local_tee(7)
+        .local_tee(6)
         .i64_const(-1)
         .i64_eq()
-        .br_if(0);
-    code.local_get(7).i64_const(1).i64_add().local_set(7);
-    physical_address(&mut code, 4);
-    code.local_set(5);
-    code.local_get(2)
-        .i32_const(1)
-        .i32_eq()
-        .if_(BlockType::Empty);
-    code.local_get(5).local_get(3).i32_store8(arg(0, 0));
-    code.else_()
-        .local_get(2)
-        .i32_const(2)
-        .i32_eq()
-        .if_(BlockType::Empty);
-    code.local_get(5).local_get(3).i32_store16(arg(0, 0));
-    code.else_()
-        .local_get(5)
-        .local_get(3)
-        .i32_store(arg(0, 0))
-        .end()
-        .end();
-
+        .br_if(0)
+        .local_get(6)
+        .i64_const(1)
+        .i64_add()
+        .local_set(6);
+    code.local_get(4).local_get(2);
+    match width {
+        1 => code.i32_store8(arg(0, 0)),
+        2 => code.i32_store16(arg(0, 0)),
+        4 => code.i32_store(arg(0, 0)),
+        _ => unreachable!(),
+    };
     load_field(&mut code, PAGE_VERSIONS);
-    code.local_get(4)
+    code.local_get(3)
         .i32_const(4)
         .i32_shl()
         .i32_add()
-        .local_get(7)
+        .local_get(6)
         .i64_store(arg(8, 3));
-    code.local_get(6).local_get(7).i64_store(arg(0, 3));
-    code.i32_const(0).br(1).end();
-    code.local_get(0)
-        .local_get(1)
-        .local_get(2)
-        .local_get(3)
-        .call(slow_index);
-    code.end().end();
+    code.local_get(5)
+        .local_get(6)
+        .i64_store(arg(0, 3))
+        .i32_const(0)
+        .return_()
+        .end()
+        .i32_const(1)
+        .end();
     function
 }

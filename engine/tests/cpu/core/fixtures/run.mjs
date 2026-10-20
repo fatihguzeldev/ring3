@@ -12,6 +12,7 @@ const PAGE = 4096, MAP = 0x10000, PERM = 0x410000;
 let CTX = 0x100;
 const EXEC = 0x510000, VERSION = 0x510100, PAGE_VERSION = 0x510200;
 const BACKING = 0x520000, GENERATION = 0x530000;
+const PRIVATE = 0x530100;
 const memory = new WebAssembly.Memory({initial: 96});
 const bytes = new Uint8Array(memory.buffer), view = new DataView(memory.buffer);
 const get = offset => view.getUint32(offset, true);
@@ -57,10 +58,21 @@ function read(context, address, encodedWidth) {
 
 function write(context, address, width, value) {
   assert.equal(context, CTX); active.writes++;
-  const locations = preflight(address >>> 0, width, 2);
+  let locations = preflight(address >>> 0, width, 2);
   if (!locations) return 1;
+  const previous = view.getBigUint64(VERSION, true);
+  if (previous === 0xffffffffffffffffn) return 3;
+  const privateBase = get(CTX + 76), page = address >>> 12;
+  const privateSlot = privateBase ? get(privateBase + page * 4) : 0;
+  if (privateSlot) {
+    // this authored memory port detaches the reserved page before committing a store.
+    assert.equal(page, 3); assert.equal(privateSlot, 16); assert(address + width <= 0x4000);
+    bytes.copyWithin(BACKING + 15 * PAGE, BACKING + 2 * PAGE, BACKING + 3 * PAGE);
+    put(MAP + page * 4, privateSlot); put(privateBase + page * 4, 0);
+    locations = Array.from({length: width}, (_, index) => physical(address + index));
+  }
   for (let index = 0; index < width; index++) bytes[locations[index]] = value >>> (index * 8);
-  const version = view.getBigUint64(VERSION, true) + 1n;
+  const version = previous + 1n;
   view.setBigUint64(VERSION, version, true);
   let invalidated = false;
   for (const page of new Set(Array.from({length: width}, (_, index) => ((address + index) >>> 0) >>> 12))) {
@@ -95,6 +107,8 @@ function seed(name, options = {}) {
   bytes.fill(0, EXEC, EXEC + 16 * 4); bytes.fill(0, VERSION, VERSION + 8);
   bytes.fill(0, PAGE_VERSION, PAGE_VERSION + 16 * 16);
   bytes.fill(0, GENERATION, GENERATION + 8);
+  bytes.fill(0, PRIVATE, PRIVATE + 64);
+  if (options.initialVersion !== undefined) view.setBigUint64(VERSION, options.initialVersion, true);
   for (const page of [0, 1, 3, 4, 5, 0xfffff]) {
     put(MAP + page * 4, 0); bytes[PERM + page] = 0;
   }
@@ -109,6 +123,8 @@ function seed(name, options = {}) {
   put(CTX + 32, 0x1000); put(CTX + 36, options.flags ?? 2);
   put(CTX + 40, options.retired ?? 0); put(CTX + 44, 0x12345678);
   [MAP, PERM, BACKING, 16, EXEC, 0, VERSION, PAGE_VERSION, GENERATION].forEach((value, index) => put(CTX + 56 + index * 4, value));
+  if (options.privateCopy) { put(CTX + 76, PRIVATE); put(PRIVATE + 3 * 4, 16); put(MAP + 5 * 4, 3); }
+  if (options.executableAlias) { put(MAP + 5 * 4, 3); bytes[PERM + 5] = 5; put(EXEC + 2 * 4, 1); }
   put(CTX + 104, options.fsBase ?? 0);
   put(CTX + 112, options.inactive ? 0 : 1);
   view.setBigUint64(CTX + 120, programs.get(name).identity + (options.wrongIdentity ? 1n : 0n), true);
@@ -120,6 +136,7 @@ function seed(name, options = {}) {
     }
   }
   if (options.readOnly) bytes[PERM + 3] = 1;
+  if (options.guarded) bytes[PERM + 3] = 0x38;
   if (options.unmapStack) { put(MAP + 4 * 4, 0); bytes[PERM + 4] = 0; }
   if (options.secondReadOnly) bytes[PERM + 4] = 1;
   return {regs: [...regs], flags: options.flags ?? 2, retired: options.retired ?? 0};
@@ -128,13 +145,16 @@ function seed(name, options = {}) {
 function check(name, label, budget, options, outcome) {
   const initial = seed(name, options), before = bytes.slice(CTX, CTX + 128);
   const expectedRam = bytes.slice(BACKING, BACKING + 16 * PAGE);
+  if (options.privateCopy) expectedRam.set(expectedRam.slice(2 * PAGE, 3 * PAGE), 15 * PAGE);
   const expectedVersions = new Uint8Array(16 * 16), versions = new DataView(expectedVersions.buffer);
   const expected = typeof outcome === 'function' ? outcome(initial) : outcome;
   for (const [ordinal, [address, width, value]] of (expected.writes ?? []).entries()) {
     for (let index = 0; index < width; index++) {
-      const target = physical((address + index) >>> 0) - BACKING;
+      const location = (address + index) >>> 0;
+      const target = options.privateCopy && location >>> 12 === 3
+        ? 15 * PAGE + (location & 4095) : physical(location) - BACKING;
       expectedRam[target] = value >>> (index * 8);
-      versions.setBigUint64(Math.floor(target / PAGE) * 16 + 8, BigInt(ordinal + 1), true);
+      versions.setBigUint64(Math.floor(target / PAGE) * 16 + 8, (options.initialVersion ?? 0n) + BigInt(ordinal + 1), true);
     }
   }
   let reason, remainingBudget = budget;
@@ -161,14 +181,20 @@ function check(name, label, budget, options, outcome) {
   wanted.setUint32(32, expected.pc, true); wanted.setUint32(36, expected.flags ?? initial.flags, true);
   wanted.setUint32(40, initial.retired + expected.retired, true);
   if (expected.reason !== 8) wanted.setUint32(44, budget - (expected.work ?? expected.retired), true);
+  if (expected.remaining !== undefined) wanted.setUint32(44, expected.remaining, true);
   if (expected.fault) { wanted.setUint32(48, expected.fault[0], true); wanted.setUint32(52, expected.fault[1], true); }
   assert.deepEqual(bytes.subarray(CTX, CTX + 128), before, `${label}: complete public context`);
   assert.deepEqual(bytes.subarray(BACKING, BACKING + 16 * PAGE), expectedRam, `${label}: whole code/data/stack backing`);
   assert.equal(active.reads, expected.reads ?? 0, `${label}: read slow path`);
   assert.equal(active.writes, expected.helpers ?? 0, `${label}: write slow path`);
-  assert.equal(view.getBigUint64(VERSION, true), BigInt(expected.writes?.length ?? 0), `${label}: store transaction count`);
+  assert.equal(view.getBigUint64(VERSION, true), (options.initialVersion ?? 0n) + BigInt(expected.writes?.length ?? 0), `${label}: store transaction count`);
   assert.deepEqual(bytes.subarray(PAGE_VERSION, PAGE_VERSION + 16 * 16), expectedVersions, `${label}: all physical page versions`);
   assert.equal(view.getBigUint64(GENERATION, true), expected.reason === 6 ? 1n : 0n, `${label}: code generation`);
+  if (options.privateCopy) {
+    assert.equal(get(MAP + 3 * 4), 16, `${label}: detached mapping`);
+    assert.equal(get(MAP + 5 * 4), 3, `${label}: sibling keeps shared mapping`);
+    assert.equal(get(PRIVATE + 3 * 4), 0, `${label}: private reservation consumed`);
+  }
 }
 
 const arithmeticCases = [
@@ -248,6 +274,32 @@ check('fs-load', 'logical-span-overflow-before-linear-wrap', 8,
   {regs: [5, 3, 7, 0xfffffffe, 0x4800, 0, 0x8000, 0], fsBase: 2, mapZero: true, initial: [[0, 4, 0x89abcdef]]},
   {reason: 4, pc: 0x1000, retired: 0});
 check('rmw', 'rmw', 8, {initial: [[0x3000, 4, 0xffffffff]]}, {reason: 4, pc: 0x1003, retired: 1, flags: 0x57, writes: [[0x3000, 4, 0]]});
+for (const [name, width, address, value, next] of [['rmw8', 1, 0x3fff, 0xff, 0x1003], ['rmw16', 2, 0x3ffe, 0xffff, 0x1004]]) {
+  check(name, `${name}-last-complete-page-span`, 8,
+    {regs: [5, 3, 7, address, 0x4800, 0, 0x8000, 0], initial: [[address, width, value]]},
+    {reason: 4, pc: next, retired: 1, flags: 0x57, writes: [[address, width, 0]]});
+}
+check('rmw16', 'guarded-modify-is-unretired-and-neutral', 8, {flags: 0x893, guarded: true},
+  {reason: 3, pc: 0x1000, retired: 0, reads: 1, fault: [0x3000, 2 | 2 << 8 | 2 << 16]});
+check('rmw', 'cross-page-modify-commits-both-physical-pages-once', 8,
+  {regs: [5, 3, 7, 0x3ffe, 0x4800, 0, 0x8000, 0], initial: [[0x3ffe, 4, 0xffffffff]]},
+  {reason: 4, pc: 0x1003, retired: 1, flags: 0x57, reads: 1, helpers: 1, writes: [[0x3ffe, 4, 0]]});
+check('rmw-pair', 'consecutive-modify-instructions-use-distinct-addresses', 8,
+  {initial: [[0x3000, 4, 0xffffffff], [0x3004, 4, 0x7fffffff]]},
+  {reason: 4, pc: 0x1007, retired: 2, flags: 0x896, writes: [[0x3000, 4, 0], [0x3004, 4, 0x80000000]]});
+check('mixed-width-stores', 'store-helper-registration-follows-first-width-use', 8,
+  {regs: [0x12345678, 3, 7, 0x3000, 0x4800, 0, 0x8000, 0], initial: [[0x3008, 4, 0x7fffffff]]},
+  {reason: 4, pc: 0x100d, retired: 4, flags: 0x896,
+    writes: [[0x3000, 4, 0x12345678], [0x3004, 1, 0x78], [0x3006, 2, 0x5678], [0x3008, 4, 0x80000000]]});
+check('rmw-repeat', 'slow-private-detach-invalidates-the-next-instruction-translation', 8,
+  {privateCopy: true, initial: [[0x3000, 4, 0xffffffff]]},
+  {reason: 4, pc: 0x1006, retired: 2, flags: 2, helpers: 1, writes: [[0x3000, 4, 0], [0x3000, 4, 1]]});
+check('rmw', 'modify-through-nonexecutable-alias-stops-after-committed-store', 8,
+  {executableAlias: true, initial: [[0x3000, 4, 0xffffffff]]},
+  {reason: 6, pc: 0x1003, retired: 1, flags: 0x57, helpers: 1, writes: [[0x3000, 4, 0]]});
+check('rmw', 'version-exhaustion-preserves-preinstruction-state', 8,
+  {flags: 0x893, initialVersion: 0xffffffffffffffffn, initial: [[0x3000, 4, 0xffffffff]]},
+  {reason: 8, pc: 0x1000, retired: 0, remaining: 8, helpers: 1});
 check('rmw', 'write-permission-preserves-flags', 8, {flags: 0x893, readOnly: true},
   {reason: 3, pc: 0x1000, retired: 0, reads: 1, fault: [0x3000, 4 | 2 << 8 | 2 << 16]});
 check('rmw', 'modify-first-page-denial-precedes-next-page', 8,
