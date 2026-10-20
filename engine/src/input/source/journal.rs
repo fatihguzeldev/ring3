@@ -57,6 +57,9 @@ impl InputSource32 {
             sequence: self.sequence,
         }
     }
+    pub(crate) fn last_timestamp_ns(&self) -> u64 {
+        self.timestamp_ns
+    }
     pub fn check_physical(
         &self,
         events: impl ExactSizeIterator<Item = TimedInputEvent> + Clone,

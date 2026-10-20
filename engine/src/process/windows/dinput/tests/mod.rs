@@ -11,5 +11,6 @@ mod names;
 #[cfg(feature = "observability")]
 mod observation;
 mod reset;
+mod timing;
 
 mod effect_files;

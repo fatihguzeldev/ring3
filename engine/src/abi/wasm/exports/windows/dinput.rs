@@ -13,5 +13,6 @@ export_process_calls! {
     submit_windows_pointer(epoch_low:u32,epoch_high:u32,time_low:u32,time_high:u32,x:u32,y:u32);
     submit_controller_input(epoch_low:u32,epoch_high:u32,length:u32);
     sync_windows_input();
+    windows_input_time();
     last_windows_input_delivery_error();
 }

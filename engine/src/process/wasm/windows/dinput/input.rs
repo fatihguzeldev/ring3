@@ -24,6 +24,19 @@ pub(crate) fn sync_windows_input() -> u32 {
     mutate(|instance| instance.sync_windows_input())
 }
 
+pub(crate) fn windows_input_time() -> u32 {
+    mutate(|instance| {
+        let (epoch, floor, observed) = instance.windows_input_time()?;
+        super::super::record(
+            instance,
+            crate::abi::media::MediaRecordKind::InputTime,
+            epoch,
+            [floor, observed, 0, 0, 0],
+        );
+        Ok(())
+    })
+}
+
 pub(crate) fn last_windows_input_delivery_error() -> u32 {
     mutate(|instance| {
         instance.memory()?;

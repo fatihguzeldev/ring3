@@ -46,8 +46,11 @@ call('configure_cpu_clock', [1000000000, 0, 100, 0]);
 call('observe_cpu_clock', [1000, 0]);
 call('configure_media', [0], 7);
 call('input_state', [], 38);
+call('windows_input_time', [], 38);
 call('configure_media', [48000]);
 const epoch = record(1).epoch;
+call('windows_input_time');
+assert.deepEqual(record(24),{epoch,values:[100n,1000n,0n,0n,0n]});
 call('configure_media', [48000], 39);
 
 function vertices(color) {
@@ -194,6 +197,8 @@ function inputBatch(session,seq,events) {
 function sendInput(session,seq,events,status=0) {const b=inputBatch(session,seq,events); write(b);call('submit_input',[b.length],status);}
 sendInput(epoch,1,[[1001,4,1]],41);
 sendInput(epoch,1,[[900,4,1],[900,1,20,1],[901,1,20,0],[902,2,1,1],[903,3,7,-3,1],[904,5,1]]);
+call('windows_input_time');
+assert.deepEqual(record(24),{epoch,values:[904n,1000n,0n,0n,0n]});
 call('input_state'); const state=record(9);
 assert.deepEqual(state.values,[3n,2n,7n,BigInt.asUintN(64,-3n),1n]);
 assert.equal(read(96)[64+2]&(1<<4),0);
@@ -247,7 +252,7 @@ for(let sample=0;sample<5;sample++) {
   }
   timings.push(performance.now()-start);
 }
-call('close'); call('reset_media',[],5); call('input_state',[],5); call('audio_submit',[1],5);
+call('close'); call('reset_media',[],5); call('input_state',[],5); call('windows_input_time',[],5); call('audio_submit',[1],5);
 const receipt={sha256,node:process.version,platform:process.platform,arch:process.arch,calls,
   graphics:{commands:ops,versions:versions.map(String),bytes:length},
   audio:{pcmFrames:4,partialAck:true,queuedPackets:queued.length,queuedFrames:8,queuedHeadOnly:true,mixerVoices,mixerCyclesPerSample:1000,framesPerCycle:256,timingsMs:timings},

@@ -155,6 +155,19 @@ impl EngineInstance {
 }
 
 impl EngineInstance {
+    pub fn windows_input_time(&mut self) -> Result<(u64, u64, u64), HostError> {
+        self.sync_windows_input()?;
+        let input = self.input()?;
+        let floor = input
+            .last_timestamp_ns()
+            .max(input.source().last_timestamp_ns());
+        Ok((
+            input.session_epoch(),
+            floor,
+            self.cpu_clock.monotonic_bounds()?.1,
+        ))
+    }
+
     pub fn sync_windows_input(&mut self) -> Result<(), HostError> {
         self.memory()?;
         let result = (|| {
