@@ -7,15 +7,17 @@ import {Engine,KEY,record,view} from '../../../../../sdk/runtime/engine.js';
 import {CodeCache} from '../../../../../sdk/runtime/cache.js';
 import {makeKernel} from './kernels.mjs';
 
-const [baselinePath,baselineHash,candidatePath,candidateHash,reportPath,mode='same-page'] = process.argv.slice(2);
-assert(reportPath,'usage: transition-timing.mjs baseline.wasm baseline-sha256 candidate.wasm candidate-sha256 fresh-report.json [same-page|cross-page]');
-assert(['same-page','cross-page'].includes(mode),'expected same-page or cross-page mode');
-const crossPage=mode==='cross-page',sameArtifact=baselineHash===candidateHash;
+const [baselinePath,baselineHash,candidatePath,candidateHash,reportPath,mode='same-page',kernelKind='call'] = process.argv.slice(2);
+assert(reportPath,'usage: transition-timing.mjs baseline.wasm baseline-sha256 candidate.wasm candidate-sha256 fresh-report.json [same-page|cross-page|warm] [integer|call]');
+assert(['same-page','cross-page','warm'].includes(mode),'expected same-page, cross-page or warm mode');
+assert(['integer','call'].includes(kernelKind),'expected integer or call kernel');
+assert(mode==='warm'||kernelKind==='call','integer kernel requires warm mode');
+const crossPage=mode==='cross-page',warm=mode==='warm',sameArtifact=baselineHash===candidateHash;
 for(const value of [baselineHash,candidateHash]) assert.match(value,/^[a-f0-9]{64}$/,'explicit engine SHA-256');
 const artifacts=[readEngine(baselinePath,baselineHash),readEngine(candidatePath,candidateHash)];
-if(!crossPage)assert.notEqual(baselineHash,candidateHash,'two selected engine artifacts');
+if(!crossPage&&!warm)assert.notEqual(baselineHash,candidateHash,'two selected engine artifacts');
 closeSync(openSync(reportPath,'wx'));
-const iterations=131072,kernel=makeKernel('call',iterations);
+const iterations=131072,kernel=makeKernel(kernelKind,iterations);
 const calleePc=crossPage?0x5000:0x1040,calleePage=crossPage?new Uint8Array(4096):null;
 if(crossPage) {
   calleePage.set(kernel.code.subarray(0x40,0x4a));
@@ -27,11 +29,15 @@ const mappedPages=[[0x1000,kernel.code,7],[0x3000,kernel.initialData,3],[0x4000,
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex'),hex=bytes=>Buffer.from(bytes).toString('hex');
 const sources=['./transition-timing.mjs','./kernels.mjs','../../../support/wasm/engine.mjs',
   '../../../../../sdk/runtime/engine.js','../../../../../sdk/runtime/cache.js'];
-const report={schema:1,complete:false,node:process.version,mode,iterations,warmupsPerArm:2,rounds:8,
+const report={schema:1,complete:false,node:process.version,mode,kernelKind,iterations,warmupsPerArm:2,rounds:8,
+  guest:{codeSha256:hash(kernel.code),dataSha256:hash(kernel.expectedData),stackSha256:hash(kernel.expectedStack),
+    retiredAndWork:kernel.retired,formation:{instructions:64,blocks:8}},
   untimedRecencyControlsPerArm:crossPage?1:0,
   artifactComparison:sameArtifact?'same-artifact-control':'paired-artifacts',
   clock:'node performance.now elapsed milliseconds',
-  scope:crossPage
+  scope:warm
+    ?`same authored warm ${kernelKind} guest work through original native bindings; no game or per-component CPU attribution`
+    :crossPage
     ?'same authored cross-page CALL/RET work and native linked lookup/LRU movement; no fusion, game or per-component CPU attribution'
     :'same authored CALL/RET guest work through original native bindings; execution includes ordinary SDK miss handling; no game or per-component CPU attribution',
   sources:Object.fromEntries(sources.map(path=>[path,hash(readFileSync(new URL(path,import.meta.url)))])),arms:[],runs:[]};
@@ -69,12 +75,12 @@ function fresh(index) {
       }
     };
     let caller,callee;
-    for(const pc of [0x1000,calleePc,0x1000]) {
+    for(const pc of kernelKind==='integer'?[0x1000]:[0x1000,calleePc,0x1000]) {
       const unit=cache.entry(pc);if(pc===0x1000)caller=unit;else callee=unit;captureModule();
     }
     const driver=bytes(api.core_dispatch_code_ptr()>>>0,api.core_dispatch_code_len()>>>0);
     result.driver={bytes:driver.length,sha256:hash(driver)};
-    if(crossPage){engine.ok('core_begin');engine.ok('core_end');}
+    if(crossPage||warm){engine.ok('core_begin');engine.ok('core_end');}
     return {index,name,engine,api,cache,bytes,result,initialState,initialBanks,captureModule,caller,callee};
   } catch(error){if(opened)engine.ok('close');throw error;}
 }
@@ -129,14 +135,14 @@ function run(context,phase,round,position) {
   }
   new Uint8Array(engine.memory.buffer,engine.base,56).set(context.initialState);
   cache.import();let selected=cache.entry(0x1000);
-  const beforeContext=crossPage?bytes(cache.context,128):null;
+  const beforeContext=crossPage||warm?bytes(cache.context,128):null;
   const before=cache.stats(),priorRetired=cache.word(40);
-  let retired=0,work=0,outer=0,stop;
+  let retired=0,work=0,outer=0,stop,last;
   const started=performance.now();
   while(work<kernel.retired) {
     if(outer>=2*iterations+2)throw new Error('authored dispatch bound exceeded');
     cache.budget=kernel.retired-work;
-    const value=cache.execute(selected);outer++;retired+=value.retired;work+=value.work;stop=value.coreReason;
+    const value=cache.execute(selected);last=value;outer++;retired+=value.retired;work+=value.work;stop=value.coreReason;
     if(stop===2)break;
     if(stop!==1)throw new Error(`unexpected authored stop ${stop}`);
     selected=cache.entry();
@@ -154,13 +160,18 @@ function run(context,phase,round,position) {
   assert.equal(sample.dispatches,outer);
   assert.deepEqual(Array.from({length:8},(_,i)=>d.getUint32(i*4,true)),kernel.regs);
   for(const [offset,value] of [[32,kernel.pc],[36,kernel.flags],[48,0],[52,0],[116,0]])assert.equal(d.getUint32(offset,true),value);
-  if(crossPage) {
-    assert.equal(outer,1);assert.equal(sample.regions,2*iterations+1);assert.equal(sample.admissions,0);
+  if(crossPage||warm) {
+    if(crossPage) {
+      assert.equal(outer,1);assert.equal(sample.regions,2*iterations+1);assert.equal(sample.admissions,0);
+    } else if(phase!=='warmup'||round!==0) {
+      assert.equal(outer,1);assert.equal(sample.regions,1);assert.equal(sample.admissions,0);
+    }
     const expectedContext=beforeContext.slice(),c=view(expectedContext);
     kernel.regs.forEach((value,i)=>c.setUint32(i*4,value,true));
     c.setUint32(32,kernel.pc,true);c.setUint32(36,kernel.flags,true);c.setUint32(40,(priorRetired+kernel.retired)>>>0,true);
     for(const offset of [44,48,52,112,116])c.setUint32(offset,0,true);
-    c.setBigUint64(120,context.caller.id,true);
+    assert.equal(typeof last.id,'bigint');assert(cache.units.has(last.id),'final owner remains retained');
+    c.setBigUint64(120,warm?last.id:context.caller.id,true);
     assert.deepEqual(rawContext,expectedContext,'complete context with its own native pointers and identity');
   } else if(index===0){assert.equal(outer,1);assert.equal(sample.regions,2*iterations+1);assert.equal(sample.admissions,0);}
   else if(phase==='warmup'&&round===0){
