@@ -1,11 +1,11 @@
 import { categories } from "../../../observability/typescript/dist/index.js";
 
 export class PhaseMeasurements {
-  constructor(observation) {
-    this.observer = observation.observer;
-    this.detailed = observation.capture.observer(categories.hostWorker, "detailed");
+  constructor(observation = null) {
+    this.observer = observation?.observer ?? null;
+    this.detailed = observation?.capture.observer(categories.hostWorker, "detailed") ?? null;
     this.phases = new Map();
-    this.observer.event("measurement.schema", {
+    this.observer?.event("measurement.schema", {
       unit: "ns",
       semantics: "cumulative inclusive elapsed time; not exclusive CPU time",
       clock: "performance.now; nanosecond values preserve its actual clock precision",
@@ -22,7 +22,7 @@ export class PhaseMeasurements {
   run(name, operation) {
     const start = performance.now();
     try {
-      return this.detailed.enabled ? this.detailed.scope(name, {}, operation) : operation();
+      return this.detailed?.enabled ? this.detailed.scope(name, {}, operation) : operation();
     } finally {
       this.add(name, start);
     }
@@ -30,7 +30,7 @@ export class PhaseMeasurements {
   async runAsync(name, operation) {
     const start = performance.now();
     try {
-      return await (this.detailed.enabled
+      return await (this.detailed?.enabled
         ? this.detailed.scopeAsync(name, {}, operation)
         : operation());
     } finally {
@@ -38,6 +38,7 @@ export class PhaseMeasurements {
     }
   }
   report() {
+    if (!this.observer) return;
     for (const [name, phase] of this.phases) {
       this.observer.counter(`${name}.ns`, Math.round(phase.milliseconds * 1e6));
       this.observer.counter(`${name}.count`, phase.count);

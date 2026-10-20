@@ -1,3 +1,5 @@
+import { PhaseMeasurements } from "./measurement.js";
+
 // successful Present returns bracket bounded host observations; draining enqueues can precede them.
 const origin = BigInt(Math.floor(performance.timeOrigin * 1e6));
 export const frameProbeNow = () => origin + BigInt(Math.floor(performance.now() * 1e6));
@@ -7,10 +9,19 @@ export class FrameProbe {
     this.id = id; this.session = session; this.accepted = 0; this.completed = 0;
     this.sequence = 0; this.batches = 0; this.attempts = 0; this.retries = 0;
     this.closed = false; this.openTaggedBatches = 0;
-    this.event("armed", { target_intervals: 8, required_producer_edges: 9,
-      engine_sha256: session.engine.hash, backend: "core", callback_backend: "core", clean_graphics_boundary: true,
-      measurement_enabled: !!session.measurements,
-      semantics: "successful native Present return brackets; enqueue may precede Busy retry completion; GPU completion is Promise-observed, not compositor visibility" });
+    this.ownsMeasurements = session.measurements == null;
+    this.measurements = session.measurements ?? new PhaseMeasurements();
+    if (this.ownsMeasurements) session.measurements = this.measurements;
+    try {
+      this.event("armed", { target_intervals: 8, required_producer_edges: 9,
+        engine_sha256: session.engine.hash, backend: "core", callback_backend: "core", clean_graphics_boundary: true,
+        measurement_enabled: true,
+        phase_semantics: "cumulative inclusive host elapsed time; async waits include event-loop work; paused-loop waits excluded; in-flight async spans may cross pause",
+        semantics: "successful native Present return brackets; enqueue may precede Busy retry completion; GPU completion is Promise-observed, not compositor visibility" });
+    } catch (error) {
+      this.releaseMeasurements();
+      throw error;
+    }
   }
   event(event, detail = {}) {
     if (this.closed && event !== "finished") return;
@@ -21,7 +32,7 @@ export class FrameProbe {
   }
   snapshot() {
     this.session.code.sampleUsage();
-    return { counters_sampled_at_ns: String(frameProbeNow()), phases: this.session.measurements?.snapshot() ?? null,
+    return { counters_sampled_at_ns: String(frameProbeNow()), phases: this.measurements.snapshot(),
       stats: this.session.code.stats(), pc: this.session.engine.get(48), thread: this.session.thread,
       physicalInputFocus: this.session.media?.lastPhysicalFocus
         ? { ...this.session.media.lastPhysicalFocus } : null };
@@ -69,10 +80,18 @@ export class FrameProbe {
   finish(reason) {
     if (this.closed) return;
     this.closed = true;
-    this.event("finished", { reason, accepted_producer_edges: this.accepted,
-      completed_presents: this.completed, attempts: this.attempts, retries: this.retries,
-      batches: this.batches, open_tagged_batches: this.openTaggedBatches,
-    });
-    if (this.session.frameProbe === this) this.session.frameProbe = null;
+    try {
+      this.event("finished", { reason, accepted_producer_edges: this.accepted,
+        completed_presents: this.completed, attempts: this.attempts, retries: this.retries,
+        batches: this.batches, open_tagged_batches: this.openTaggedBatches,
+      });
+    } finally {
+      this.releaseMeasurements();
+      if (this.session.frameProbe === this) this.session.frameProbe = null;
+    }
+  }
+  releaseMeasurements() {
+    if (this.ownsMeasurements && this.session.measurements === this.measurements)
+      this.session.measurements = null;
   }
 }
