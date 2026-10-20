@@ -112,6 +112,76 @@ test('unclassified execution and other phase names keep the original snapshot an
   ]);
 });
 
+test('probe work counters separate zero-work NeedCode from gates and positive prefixes without per-run clocks or events', t => {
+  let reads = 0;
+  t.mock.method(performance, 'now', () => { reads++; return 0; });
+  const owner = session(), probe = new FrameProbe('work-proof', owner);
+  owner.frameProbe = probe;
+  const beforeReads = reads, beforeEvents = owner.events.length;
+  const results = [
+    {kind: 'cold', id: null, pc: 0x1000, coreReason: 1, reason: null, detail: null, work: 0, retired: 0, regions: 0},
+    {kind: 'cold', id: null, pc: 0x7000, coreReason: 7, reason: 8, detail: 0x10001, work: 0, retired: 0, regions: 0},
+    {kind: 'cold', id: null, pc: 0x1000, coreReason: 2, reason: 1, detail: 0, work: 0, retired: 0, regions: 0},
+    {kind: 'cold', id: null, pc: 0x1002, coreReason: 1, reason: null, detail: null, work: 2, retired: 2, regions: 0},
+    {kind: 'cold', id: null, pc: 0x1004, coreReason: 3, reason: 5, detail: 0x5000, work: 4, retired: 4, regions: 0},
+    {kind: 'compiled', id: 7n, pc: 0x100a, coreReason: 2, reason: 1, detail: 0, work: 5, retired: 3, regions: 1},
+    {kind: 'compiled', id: 9n, pc: 0x7000, coreReason: 7, reason: 8, detail: 0x10001, work: 0, retired: 0, regions: 1},
+  ];
+  for (const result of results) probe.recordExecution(Object.freeze(result));
+  assert.equal(reads, beforeReads);
+  assert.equal(owner.events.length, beforeEvents);
+  const expected = {
+    semantics: 'successful code.execute results; guest work/retirement counts, not time',
+    cold: {
+      count: 5, work: 6, retired: 6, zeroWorkCount: 3, positiveWorkCount: 2, zeroWorkNeedCodeCount: 1,
+      reasons: {needCode: 2, budget: 1, memoryFault: 1, unsupported: 0, debug: 0,
+        codeInvalidated: 0, host: 1, infrastructure: 0, cpuFault: 0, systemEntry: 0},
+    },
+    compiled: {count: 2, work: 5, retired: 3},
+  };
+  const snapshot = probe.snapshot().execution_work;
+  assert.deepEqual(snapshot, expected);
+  assert.equal(snapshot.cold.count, snapshot.cold.zeroWorkCount + snapshot.cold.positiveWorkCount);
+  assert.equal(snapshot.cold.count, Object.values(snapshot.cold.reasons).reduce((sum, count) => sum + count, 0));
+  snapshot.cold.reasons.needCode = 100;
+  snapshot.compiled.work = 100;
+  assert.deepEqual(probe.snapshot().execution_work, expected);
+  probe.present({id: 1, callArgs: [7], pc: 0x1000}, 0, 0, 0n, 1n, 1n);
+  const event = owner.events.find(value => value.event === 'producer-present');
+  assert.deepEqual(event.execution_work, expected);
+  assert.deepEqual(JSON.parse(JSON.stringify(event)).execution_work, expected);
+  probe.finish('session-ended');
+});
+
+test('probe execution work stops with its exact measurement owner and starts fresh on the next probe', () => {
+  const owner = session(), first = new FrameProbe('first-work', owner);
+  owner.frameProbe = first;
+  const cold = {kind: 'cold', id: null, pc: 0x1000, coreReason: 1, reason: null,
+    detail: null, work: 0, retired: 0, regions: 0};
+  const compiled = {kind: 'compiled', id: 1n, pc: 0x1001, coreReason: 2, reason: 1,
+    detail: 0, work: 1, retired: 1, regions: 1};
+  first.recordExecution(cold);
+  const before = first.snapshot().execution_work;
+  owner.measurements = {snapshot: () => ({replacement: true})};
+  first.recordExecution(compiled);
+  assert.deepEqual(first.snapshot().execution_work, before);
+  owner.measurements = first.measurements;
+  first.recordExecution(compiled);
+  const recorded = first.snapshot().execution_work;
+  assert.equal(recorded.cold.count, 1);
+  assert.equal(recorded.compiled.count, 1);
+  first.finish('session-ended');
+  first.recordExecution(cold);
+  first.recordExecution(compiled);
+  assert.deepEqual(first.snapshot().execution_work, recorded);
+  const second = new FrameProbe('second-work', owner);
+  owner.frameProbe = second;
+  assert.equal(second.snapshot().execution_work.cold.count, 0);
+  assert.equal(second.snapshot().execution_work.compiled.count, 0);
+  assert.deepEqual(first.snapshot().execution_work, recorded);
+  second.finish('session-ended');
+});
+
 test('an unobserved probe owns fresh aggregate phases until its ninth completed edge', () => {
   const owner = session(), probe = new FrameProbe('proof', owner);
   owner.frameProbe = probe;

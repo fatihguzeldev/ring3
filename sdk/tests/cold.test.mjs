@@ -37,7 +37,7 @@ for(const measured of [false,true]) {
 for (const mode of ['active-probe', 'observed-without-probe', 'mismatched-probe', 'unmeasured']) {
   test(`session classifies execution only for its active probe measurements: ${mode}`, async t => {
     t.mock.method(performance, 'now', () => 0);
-    const calls = [], phases = [], unit = Object.freeze({id: 7n});
+    const calls = [], phases = [], recorded = [], unit = Object.freeze({id: 7n});
     let selected = 0, executed = 0;
     const measurements = mode === 'unmeasured' ? null : {
       run(name, operation, classification) {
@@ -52,8 +52,8 @@ for (const mode of ['active-probe', 'observed-without-probe', 'mismatched-probe'
     const session = Object.assign(Object.create(Session.prototype), {
       running: true, paused: false, stopped: false, lastSchedule: Infinity, lastStatus: Infinity,
       recent: [], thread: 1, blocked: new Map(), exits: new Map(), measurements,
-      frameProbe: mode === 'active-probe' ? {measurements}
-        : mode === 'mismatched-probe' ? {measurements: {}} : null,
+      frameProbe: mode === 'active-probe' ? {measurements,recordExecution(run){recorded.push(run);}}
+        : mode === 'mismatched-probe' ? {measurements: {},recordExecution(){}} : null,
       engine: {get: () => 3, api: {pending_windows_thread_schedule: () => 0}},
       code: {
         publish() { calls.push('publish'); }, import() { calls.push('import'); },
@@ -76,6 +76,7 @@ for (const mode of ['active-probe', 'observed-without-probe', 'mismatched-probe'
     await session.loop();
     assert.deepEqual(calls, ['publish', 'import', 'select', 'execute', 'select', 'execute', 'publish']);
     assert.deepEqual(session.recent.map(run => [run.kind, run.id]), [['cold', null], ['compiled', 7n]]);
+    assert.deepEqual(recorded,mode==='active-probe'?session.recent:[]);
     assert.deepEqual(phases, mode === 'unmeasured' ? [] : [
       ['providers', undefined], ['entry', undefined],
       ['execution', mode === 'active-probe' ? 'cold' : undefined],

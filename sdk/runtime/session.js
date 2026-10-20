@@ -358,6 +358,7 @@ export class Session {
           ? this.measurements.run("execution", () => this.code.execute(unit),
               this.frameProbe?.measurements === this.measurements ? (unit === null ? "cold" : "compiled") : undefined)
           : this.code.execute(unit);
+        this.frameProbe?.recordExecution(run);
         this.recent.push(run);
         if (this.recent.length > 48) this.recent.shift();
         if (run.coreReason === 1 || run.coreReason === 2 || run.coreReason === 6) continue;

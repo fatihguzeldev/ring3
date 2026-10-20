@@ -2,6 +2,8 @@ import { PhaseMeasurements } from "./measurement.js";
 
 // successful Present returns bracket bounded host observations; draining enqueues can precede them.
 const origin = BigInt(Math.floor(performance.timeOrigin * 1e6));
+const coreStopNames = Object.freeze([null, "needCode", "budget", "memoryFault", "unsupported", "debug",
+  "codeInvalidated", "host", "infrastructure", "cpuFault", "systemEntry"]);
 export const frameProbeNow = () => origin + BigInt(Math.floor(performance.now() * 1e6));
 export const frameProbeStamp = () => ({ origin_ns: String(origin), timestamp_ns: String(frameProbeNow()) });
 export class FrameProbe {
@@ -9,6 +11,12 @@ export class FrameProbe {
     this.id = id; this.session = session; this.accepted = 0; this.completed = 0;
     this.sequence = 0; this.batches = 0; this.attempts = 0; this.retries = 0;
     this.closed = false; this.openTaggedBatches = 0;
+    this.executionWork = {
+      cold: { count: 0, work: 0, retired: 0, zeroWorkCount: 0, positiveWorkCount: 0, zeroWorkNeedCodeCount: 0,
+        reasons: { needCode: 0, budget: 0, memoryFault: 0, unsupported: 0, debug: 0,
+          codeInvalidated: 0, host: 0, infrastructure: 0, cpuFault: 0, systemEntry: 0 } },
+      compiled: { count: 0, work: 0, retired: 0 },
+    };
     this.ownsMeasurements = session.measurements == null;
     this.measurements = session.measurements ?? new PhaseMeasurements();
     if (this.ownsMeasurements) session.measurements = this.measurements;
@@ -33,9 +41,31 @@ export class FrameProbe {
   snapshot() {
     this.session.code.sampleUsage();
     return { counters_sampled_at_ns: String(frameProbeNow()), phases: this.measurements.snapshot(),
-      stats: this.session.code.stats(), pc: this.session.engine.get(48), thread: this.session.thread,
+      stats: this.session.code.stats(), cold_diagnostics: this.session.code.coldDiagnostics?.() ?? null,
+      pc: this.session.engine.get(48), thread: this.session.thread,
+      execution_work: {
+        semantics: "successful code.execute results; guest work/retirement counts, not time",
+        cold: { ...this.executionWork.cold, reasons: { ...this.executionWork.cold.reasons } },
+        compiled: { ...this.executionWork.compiled },
+      },
       physicalInputFocus: this.session.media?.lastPhysicalFocus
         ? { ...this.session.media.lastPhysicalFocus } : null };
+  }
+  recordExecution(run) {
+    if (this.closed || this.session.measurements !== this.measurements) return;
+    const cold = run.kind === "cold";
+    if (!cold && run.kind !== "compiled") throw new Error("invalid frame probe execution kind");
+    const reason = cold ? coreStopNames[run.coreReason] : null;
+    if (cold && typeof reason !== "string") throw new Error("invalid frame probe cold stop");
+    const counters = cold ? this.executionWork.cold : this.executionWork.compiled;
+    counters.count++; counters.work += run.work; counters.retired += run.retired;
+    if (cold) {
+      if (run.work === 0) {
+        counters.zeroWorkCount++;
+        if (run.coreReason === 1) counters.zeroWorkNeedCodeCount++;
+      } else counters.positiveWorkCount++;
+      counters.reasons[reason]++;
+    }
   }
   present(receipt, status, hresult, before, after, guestClock) {
     if (this.closed) return;
