@@ -108,7 +108,8 @@ try {
   view(data).setFloat32(0,3,true);view(data).setFloat32(4,2,true);
   const registers=[0,0,0x1080,0x3000,0x4800,0,0x1040,0];
   fixture('native-execution-recency-preserves-the-hot-target',code,data,registers,2,64,t=>{
-    const a=t.select(0x1000),b=t.select(0x1040);t.select(0x1000);
+    const b=t.select(0x1040),a=t.select(0x1000);
+    t.cache.import();assert.equal(t.cache.pc,0x1000,'canonical starting PC after cold entry selection');
     assert.deepEqual([...t.cache.units.keys()],[b.id,a.id],'cold JavaScript entry order differs from execution order');
     t.activeControls();const initialContext=t.bytes(t.cache.context,128);
     const before=t.inspect('primed-cold-order');assert.equal(before.victim,b.slot);

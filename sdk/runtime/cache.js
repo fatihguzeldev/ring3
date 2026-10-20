@@ -8,6 +8,9 @@ const repeatOrder = (a,b) => b.admissions-a.admissions || b.bytes-a.bytes || a.p
 const slowOrder = (a,b) => b.phaseTotalNs-a.phaseTotalNs || a.sequence-b.sequence;
 
 export class CodeCache {
+  #bindings;
+  #contextView;
+
   constructor(engine, {budget = 50000, instructions = 2048, blocks = 128, capacity = 1024, chain = true} = {}) {
     if (typeof chain !== 'boolean') throw new Error('invalid core chain option');
     for (const [name, value, maximum] of [['budget', budget, 0xffffffff], ['instructions', instructions, 16384], ['blocks', blocks, 1024], ['capacity', capacity, 1024]]) {
@@ -26,6 +29,7 @@ export class CodeCache {
       return [name, this.api[name]];
     }));
     if (typeof this.api.core_cold_run === 'function') this.native.core_cold_run = this.api.core_cold_run;
+    this.#bindings = Object.entries(this.native);
     this.budget = budget; this.instructions = instructions; this.blocks = blocks; this.capacity = capacity;
     this.units = new Map(); this.context = 0; this.open = false; this.dirty = false; this.dirtyWork = 0; this.lastStop = 1;
     this.runs = 0; this.regions = 0; this.retired = 0; this.work = 0; this.admissions = 0; this.hits = 0; this.evictions = 0;
@@ -173,11 +177,19 @@ export class CodeCache {
     this.remove(unit,reason);
   }
   pristine() {
-    if (this.engine.api !== this.api || this.engine.memory !== this.memory ||
-        Object.entries(this.native).some(([name, value]) => this.api[name] !== value))
+    if (this.engine.api !== this.api || this.engine.memory !== this.memory)
       throw new Error('core native bindings changed');
+    for (let index = 0; index < this.#bindings.length; index++) {
+      const binding = this.#bindings[index], name = binding[0], value = binding[1];
+      if (this.api[name] !== value || this.native[name] !== value)
+        throw new Error('core native bindings changed');
+    }
   }
-  word(offset) { return new DataView(this.memory.buffer).getUint32(this.context + offset, true); }
+  word(offset) {
+    const buffer = this.memory.buffer;
+    if (this.#contextView?.buffer !== buffer) this.#contextView = new DataView(buffer);
+    return this.#contextView.getUint32(this.context + offset, true);
+  }
   get pc() { return this.context ? this.word(32) : this.engine.get(48); }
   select(pc = this.pc) {
     if (this.open) throw new Error('cannot select code during execution');
@@ -200,7 +212,9 @@ export class CodeCache {
     const id = new DataView(this.memory.buffer).getBigUint64(context + 120, true);
     if (id === 0n) throw new Error('core code has no identity');
     if (this.units.has(id)) {
-      const unit = this.units.get(id); this.units.delete(id); this.units.set(id, unit); this.hits++;
+      const unit = this.units.get(id);
+      if (!this.chain) {this.units.delete(id); this.units.set(id, unit);}
+      this.hits++;
       if (this.compilation) {
         this.compilation.prepareHits++;
         const row = this.compilation.pcs.get(pc>>>0); if (row) row.hits++;

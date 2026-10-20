@@ -319,6 +319,36 @@ test('stale begin selects fresh current code once and executes no old module', (
   f.control.begin = () => { begins++; if (begins === 1) {generation = 2n; return 4;} return 0; };
   const run = cache.execute(old); assert.equal(run.id, 2n); assert.equal(run.pc, 0x2200); assert.equal(begins, 2);
 });
+test('captured native bindings remain authoritative when both exposed maps change', () => {
+  for (const chain of [false, true]) {
+    const f = fixture(), cache = new CodeCache(f.engine, {chain});
+    const unit = cache.entry(), changed = () => 4n;
+    f.api.core_read = changed; cache.native.core_read = changed;
+    const before = f.calls.length;
+    assert.throws(() => cache.execute(unit), /bindings changed/);
+    assert.equal(f.calls.length, before, 'reject before entering native execution');
+  }
+});
+
+test('context reads follow memory growth during a native chained successor lookup', () => {
+  const f = fixture(pc => ({id: pc === 0x1000 ? 1n : 2n, next: pc === 0x1000 ? 0x2000 : 0x3000}));
+  const cache = new CodeCache(f.engine, {chain: true, budget: 7});
+  const first = cache.entry(0x1000), second = cache.entry(0x2000);
+  assert.equal(cache.word(32), 0x2000);
+  const before = f.engine.memory.buffer;
+  f.control.next = pointer => {
+    f.engine.memory.grow(1);
+    new DataView(f.engine.memory.buffer).setBigUint64(pointer + 120, second.id, true);
+    return second.slot;
+  };
+  const result = cache.execute(first);
+  assert.notEqual(f.engine.memory.buffer, before);
+  assert.equal(result.pc, 0x3000);
+  assert.equal(result.retired, 2);
+  assert.equal(result.work, 2);
+  assert.equal(result.regions, 2);
+});
+
 test('native failures, changed bindings, identity and context failures never select another backend', () => {
   const f = fixture(), cache = new CodeCache(f.engine,{chain:false}); cache.entry(); f.setContext(512);
   assert.throws(() => cache.entry(), /context allocation changed/);
