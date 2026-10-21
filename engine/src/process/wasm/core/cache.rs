@@ -11,7 +11,7 @@ use promotion::{PendingTransition, TransitionHeat};
 pub(super) const TRANSITION_HITS: u32 = 4096;
 
 const MAX_REGIONS: usize = 1024;
-const MAX_CODE_BYTES: usize = 32 << 20;
+const MAX_CODE_BYTES: usize = 128 << 20;
 const MAX_LINK_SLOT: usize = 4096;
 const NO_REGION: u16 = u16::MAX;
 

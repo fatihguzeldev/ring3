@@ -1,4 +1,4 @@
-const MAX_CODE_BYTES = 32 * 1024 * 1024;
+const MAX_CODE_BYTES = 128 * 1024 * 1024;
 const NATIVE_COUNTERS = ['compiled','admittedEncodedBytes','countEvictions','byteEvictions',
   'sourceInvalidations','retainedUnits','retainedEncodedBytes','unitCapacity'];
 const COLD_COUNTERS = ['sourceResets','requestedResets','occupiedLiveReplacements','nativeRetired',

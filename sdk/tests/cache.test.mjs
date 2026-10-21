@@ -623,7 +623,7 @@ test('the default count bound retains more than 256 small modules within the sam
   const cache = new CodeCache(f.engine,{chain:false}), first = cache.entry(0x1000);
   for (let index=1; index<300; index++) cache.entry(0x1000+index*4);
   const stats = cache.stats();
-  assert.equal(stats.unitCapacity,1024); assert.equal(stats.byteCapacity,32*1024*1024);
+  assert.equal(stats.unitCapacity,1024); assert.equal(stats.byteCapacity,128*1024*1024);
   assert.equal(stats.installedUnits,300); assert.equal(stats.admissions,300); assert.equal(stats.evictions,0);
   assert.equal(cache.units.get(first.id),first); assert(stats.retainedModuleBytes<stats.byteCapacity);
 });
@@ -646,15 +646,17 @@ test('count eviction statistics change only after the expected owner is unlinked
 test('byte pressure evicts below the count limit and safely reuses the released table slot', () => {
   const f = fixture(pc => ({id:BigInt(pc),stop:2,next:pc+4,padding:12*1024*1024}));
   const cache = new CodeCache(f.engine,{capacity:1024,chain:true});
-  const first = cache.entry(0x1000), second = cache.entry(0x2000), third = cache.entry(0x3000);
+  const units = Array.from({length:11},(_,index)=>cache.entry(0x1000*(index+1)));
+  const [first,second] = units, last = units.at(-1);
   const stats = cache.stats();
-  assert.equal(stats.byteCapacity,32*1024*1024); assert.equal(stats.installedUnits,2);
+  assert.equal(stats.byteCapacity,128*1024*1024); assert.equal(stats.installedUnits,10);
   assert.equal(stats.evictions,1); assert.deepEqual(stats.evictionReasons,{count:0,bytes:1});
   assert(stats.retainedModuleBytes<=stats.byteCapacity);
   assert.equal(cache.units.has(first.id),false); assert.equal(cache.units.get(second.id),second);
-  assert.equal(third.slot,first.slot); assert.equal(cache.table.get(third.slot),third.run);
+  assert.equal(last.slot,first.slot); assert.equal(cache.table.get(last.slot),last.run);
   assert.deepEqual(f.calls.filter(([name]) => ['link','unlink'].includes(name)),[
-    ['link',first.slot,first.id],['link',second.slot,second.id],['unlink',first.slot,first.id],['link',third.slot,third.id],
+    ...units.slice(0,-1).map(unit=>['link',unit.slot,unit.id]),
+    ['unlink',first.slot,first.id],['link',last.slot,last.id],
   ]);
 });
 test('cold eviction unlinks the expected owner before a private table slot is reused', () => {
