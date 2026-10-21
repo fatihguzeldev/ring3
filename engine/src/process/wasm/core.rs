@@ -76,6 +76,15 @@ impl CoreSession32 {
 
     fn begin(&mut self, instance: &mut EngineInstance, compiled: bool) -> Result<(), u32> {
         let segments = admission(instance).map_err(status)?;
+        self.begin_with_segments(instance, compiled, segments)
+    }
+
+    fn begin_with_segments(
+        &mut self,
+        instance: &mut EngineInstance,
+        compiled: bool,
+        segments: SegmentContext,
+    ) -> Result<(), u32> {
         let code = if compiled {
             Some(self.code.as_ref().ok_or(7_u32)?)
         } else {

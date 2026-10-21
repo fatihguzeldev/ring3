@@ -38,7 +38,7 @@ pub(crate) fn core_cold_run(budget: u32) -> i32 {
             && session
                 .cache
                 .frontier_contains(instance.memory.as_ref().unwrap(), pc);
-        if let Err(status) = session.begin(instance, false) {
+        if let Err(status) = session.begin_with_segments(instance, false, segments) {
             return -(status as i32);
         }
         if !cached {
