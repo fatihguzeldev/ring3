@@ -191,6 +191,7 @@ pub(crate) enum ArithmeticError {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(C)]
 pub(crate) struct VectorState {
     pub simd: SimdState,
     pub upper: [[u8; 16]; 8],

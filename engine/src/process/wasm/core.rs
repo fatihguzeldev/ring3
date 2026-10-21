@@ -41,7 +41,7 @@ pub(super) struct CoreSession32 {
     cache_status: [u64; 8],
     #[cfg(feature = "observability")]
     cold_status: [u64; 13],
-    numeric: NumericBank,
+    numeric: Box<NumericBank>,
     exported_retired: u32,
     context: Box<Context32>,
     active: bool,
@@ -58,7 +58,7 @@ impl CoreSession32 {
             cache_status: [0; 8],
             #[cfg(feature = "observability")]
             cold_status: [0; 13],
-            numeric: NumericBank::from_instance(instance)?,
+            numeric: Box::new(NumericBank::from_instance(instance)?),
             exported_retired: 0,
             context: Box::new(Context32::new(state)),
             active: false,
@@ -111,6 +111,8 @@ impl CoreSession32 {
         self.context
             .set_word(108, segments.state.bases[SegmentRegister::Gs.index()]);
         self.numeric.refresh_segments(segments);
+        self.context
+            .set_word(92, (&mut *self.numeric as *mut NumericBank) as usize as u32);
         for offset in [48, 52, 116] {
             self.context.set_word(offset, 0);
         }
@@ -265,7 +267,7 @@ pub(crate) fn core_prepare(pc: u32, instructions: u32, blocks: u32) -> u32 {
                 cache_status: [0; 8],
                 #[cfg(feature = "observability")]
                 cold_status: [0; 13],
-                numeric,
+                numeric: Box::new(numeric),
                 exported_retired: 0,
                 context: Box::new(Context32::new(state)),
                 active: false,

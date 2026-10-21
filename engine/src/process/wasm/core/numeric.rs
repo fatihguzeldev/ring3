@@ -117,8 +117,10 @@ fn memory_fault(context: &mut Context32, fault: MemoryFault, width: usize) -> u3
 }
 
 #[derive(Clone, Copy)]
+#[repr(C)]
 pub(super) struct NumericBank {
     x87: X87State,
+    selectors: [u16; 6],
     vectors: VectorState,
     segments: SegmentContext,
 }
@@ -130,6 +132,7 @@ impl NumericBank {
         Ok(Self {
             x87: decode_x87(&arena[X87_OFFSET..X87_OFFSET + X87_SIZE])
                 .map_err(|_| HostError::Infrastructure)?,
+            selectors: instance.segment_context()?.state.selectors,
             vectors: VectorState {
                 simd: decode_simd(&arena[SIMD_OFFSET..SIMD_OFFSET + SIMD_SIZE])
                     .map_err(|_| HostError::Infrastructure)?,
@@ -166,6 +169,7 @@ impl NumericBank {
     }
 
     pub(super) fn refresh_segments(&mut self, segments: SegmentContext) {
+        self.selectors = segments.state.selectors;
         self.segments = segments;
     }
 
@@ -301,3 +305,12 @@ impl NumericBank {
 #[cfg(test)]
 #[path = "numeric/tests.rs"]
 mod tests;
+
+const _: () = {
+    assert!(core::mem::size_of::<X87State>() == 100);
+    assert!(core::mem::offset_of!(NumericBank, x87) == 0);
+    assert!(core::mem::offset_of!(NumericBank, selectors) == 100);
+    assert!(core::mem::offset_of!(NumericBank, vectors) == 112);
+    assert!(core::mem::offset_of!(VectorState, simd) == 0);
+    assert!(core::mem::offset_of!(crate::cpu::x86::simd::SimdState, xmm) == 4);
+};

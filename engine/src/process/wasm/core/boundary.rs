@@ -65,7 +65,7 @@ pub(crate) fn core_import() -> u32 {
         for offset in [48, 52, 116] {
             core.context.set_word(offset, 0);
         }
-        core.numeric = bank;
+        *core.numeric = bank;
         core.cache.clear_transition();
         core.exported_retired = core.context.retired();
         0

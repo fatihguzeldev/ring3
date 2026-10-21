@@ -1,4 +1,5 @@
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
 pub struct SimdState {
     pub mxcsr: u32,
     pub xmm: [[u8; 16]; 8],
