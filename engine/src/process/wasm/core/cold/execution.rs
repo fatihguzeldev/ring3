@@ -1,7 +1,7 @@
 use crate::{
     cpu::{
         core::{
-            Context32, StopReason,
+            COLD_MARK, Context32, STOP_MARK, StopReason,
             cold::{self, ColdOutcome, ColdState},
         },
         x86::SegmentContext,
@@ -17,6 +17,69 @@ use crate::memory::GuestAddress;
 use super::super::numeric::NumericBank;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::process::core_numeric_tests::NumericBank;
+
+#[cfg(target_arch = "wasm32")]
+use super::super::cache::{CoreCache32, RegionRef, TRANSITION_HITS};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::process::core_cache_tests::{CoreCache32, RegionRef, TRANSITION_HITS};
+
+pub(in crate::process) fn chain_next(
+    instance: &mut EngineInstance,
+    context: &mut Context32,
+    numeric: &mut NumericBank,
+    selected: &mut Option<RegionRef>,
+    cache: &mut CoreCache32,
+    cold: &mut ColdState,
+) -> u32 {
+    let Some(current) = selected.as_ref() else {
+        return u32::MAX;
+    };
+    let raw = context.bytes();
+    if u32::from_le_bytes(raw[112..116].try_into().unwrap()) != 1
+        || u64::from_le_bytes(raw[120..128].try_into().unwrap()) != current.identity()
+    {
+        return u32::MAX;
+    }
+    let pc = context.state().eip;
+    let Some(memory) = instance.memory.as_ref() else {
+        return u32::MAX;
+    };
+    if cache.transition_pending() || !current.is_current(memory) {
+        return 0;
+    }
+    if let Some((code, slot)) = cache.lookup_linked(memory, pc) {
+        if cache.observe_transition(memory, current, &code, pc, TRANSITION_HITS) {
+            return 0;
+        }
+        context.bytes_mut()[120..128].copy_from_slice(&code.identity().to_le_bytes());
+        *selected = Some(code);
+        return slot;
+    }
+    let segments = numeric.segment_context();
+    context.bytes_mut()[120..128].fill(0);
+    *selected = None;
+    let reason = run_with_lookups(
+        instance,
+        context,
+        numeric,
+        &segments,
+        &|modules, pc| modules.gate_at(pc).map(|gate| gate.id),
+        &|memory, pc| cache.frontier_contains(memory, pc),
+        cold,
+    );
+    if reason != StopReason::NeedCode {
+        return COLD_MARK | STOP_MARK | reason as u32;
+    }
+    let Some(memory) = instance.memory.as_ref() else {
+        return COLD_MARK | STOP_MARK | StopReason::Infrastructure as u32;
+    };
+    if let Some((code, slot)) = cache.lookup_linked(memory, context.state().eip) {
+        context.bytes_mut()[120..128].copy_from_slice(&code.identity().to_le_bytes());
+        *selected = Some(code);
+        return COLD_MARK | slot;
+    }
+    COLD_MARK
+}
 
 #[cfg(test)]
 pub(in crate::process) fn run(
@@ -174,3 +237,7 @@ fn cold_diagnostics_count_only_completed_native_operations_including_code_writes
 #[cfg(test)]
 #[path = "tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "dispatch_tests.rs"]
+mod dispatch_tests;

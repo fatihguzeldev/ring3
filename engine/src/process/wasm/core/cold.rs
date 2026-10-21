@@ -82,3 +82,18 @@ fn run(
         cold_state,
     ) as i32
 }
+
+pub(super) fn chain_next(
+    instance: &mut crate::process::EngineInstance,
+    session: &mut CoreSession32,
+) -> u32 {
+    let CoreSession32 {
+        context,
+        numeric,
+        code,
+        cache,
+        cold_state,
+        ..
+    } = session;
+    execution::chain_next(instance, context, numeric, code, cache, cold_state)
+}

@@ -104,36 +104,9 @@ pub(crate) fn core_chain_next(context: u32) -> u32 {
         if !core.active || core.context_address() as u32 != context {
             return u32::MAX;
         }
-        let Some(current) = core.code.as_ref() else {
+        let Some(instance) = instance.as_mut() else {
             return u32::MAX;
         };
-        let raw = core.context.bytes();
-        let active = u32::from_le_bytes(raw[112..116].try_into().unwrap());
-        let identity = u64::from_le_bytes(raw[120..128].try_into().unwrap());
-        if active != 1 || identity != current.identity() {
-            return u32::MAX;
-        }
-        let pc = u32::from_le_bytes(raw[32..36].try_into().unwrap());
-        let Some(memory) = instance
-            .as_ref()
-            .and_then(|instance| instance.memory.as_ref())
-        else {
-            return u32::MAX;
-        };
-        if core.cache.transition_pending() || !current.is_current(memory) {
-            return 0;
-        }
-        let Some((code, slot)) = core.cache.lookup_linked(memory, pc) else {
-            return 0;
-        };
-        if core
-            .cache
-            .observe_transition(memory, current, &code, pc, super::cache::TRANSITION_HITS)
-        {
-            return 0;
-        }
-        core.context.bytes_mut()[120..128].copy_from_slice(&code.identity().to_le_bytes());
-        core.code = Some(code);
-        slot
+        super::cold::chain_next(instance, core)
     })
 }

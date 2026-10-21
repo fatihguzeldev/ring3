@@ -169,6 +169,10 @@ impl NumericBank {
         self.segments = segments;
     }
 
+    pub(super) fn segment_context(&self) -> SegmentContext {
+        self.segments
+    }
+
     pub(super) fn architectural_state(
         &self,
     ) -> (
