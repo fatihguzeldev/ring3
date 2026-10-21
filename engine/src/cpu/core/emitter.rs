@@ -210,6 +210,7 @@ fn run(blocks: &[Block], identity: u64, native: &[NativeInstruction]) -> (Functi
         (4, ValType::F64),
         (8, ValType::I32),
         (6, ValType::V128),
+        (10, ValType::F64),
     ]);
     let mut out = Output {
         function: &mut function,

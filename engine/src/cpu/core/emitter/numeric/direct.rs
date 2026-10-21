@@ -1,4 +1,4 @@
-use super::{BANK_POINTER, Output, mem, memory};
+use super::{BANK_POINTER, Output, double, mem, memory};
 use crate::cpu::core::emitter::{CTX, LOGICAL_ADDRESS};
 use crate::cpu::x86::{X87Binary, X87Format, X87Operation, ir::Operation};
 use wasm_encoder::BlockType;
@@ -13,10 +13,12 @@ const BITS: u32 = 43;
 const EXP: u32 = 44;
 const TMP: u32 = 45;
 const SIG: u32 = 46;
+const PACKED: u32 = 47;
 const FA: u32 = 48;
 const FB: u32 = 49;
 const EXACT: u32 = 50;
 const ROUNDED: u32 = 51;
+const DOUBLE: u32 = 54;
 
 pub(super) fn begin(out: &mut Output<'_>, operation: Operation, next: u32) -> bool {
     let Operation::X87 {
@@ -94,7 +96,7 @@ pub(super) fn begin(out: &mut Output<'_>, operation: Operation, next: u32) -> bo
             let address = address.unwrap();
             memory::prepare(out, address, 4, false, false, 52);
             out.c().local_get(52).i32_load(mem(0, 0)).local_set(BITS);
-            normal_or_zero(out, BITS);
+            normal_or_zero(out, BITS, 0);
             out.c()
                 .local_get(TOP)
                 .i32_const(1)
@@ -142,7 +144,7 @@ pub(super) fn begin(out: &mut Output<'_>, operation: Operation, next: u32) -> bo
             out.c().i32_const(3).i32_ne().br_if(0);
             pointer(out, TOP, 0, Y);
             copy(out, X, Y);
-            clear_tag(out, TOP);
+            value_tag(out, TOP, Y);
             set_top(out);
         }
         X87Operation::StoreRegister { index, pop } => {
@@ -156,7 +158,7 @@ pub(super) fn begin(out: &mut Output<'_>, operation: Operation, next: u32) -> bo
                 .local_set(TMP);
             pointer(out, TMP, 0, Y);
             copy(out, X, Y);
-            clear_tag(out, TMP);
+            value_tag(out, TMP, Y);
             if pop {
                 pop_stack(out);
             }
@@ -179,6 +181,8 @@ pub(super) fn begin(out: &mut Output<'_>, operation: Operation, next: u32) -> bo
                 .local_get(Y)
                 .local_get(EXP)
                 .i32_store16(mem(8, 0));
+            value_tag(out, TOP, X);
+            value_tag(out, TMP, Y);
             clear_c1(out);
         }
         X87Operation::ChangeSign | X87Operation::Absolute => {
@@ -190,6 +194,7 @@ pub(super) fn begin(out: &mut Output<'_>, operation: Operation, next: u32) -> bo
                 out.c().i32_const(0x7fff).i32_and();
             }
             out.c().i32_store16(mem(8, 0));
+            value_tag(out, TOP, X);
             clear_c1(out);
         }
         X87Operation::Binary {
@@ -200,9 +205,9 @@ pub(super) fn begin(out: &mut Output<'_>, operation: Operation, next: u32) -> bo
         } => {
             arithmetic_control(out);
             register(out, destination, X);
-            to_f32(out, X, FA);
+            operand(out, X, FA);
             register(out, source, Y);
-            to_f32(out, Y, FB);
+            operand(out, Y, FB);
             arithmetic(out, kind);
             out.c()
                 .local_get(TOP)
@@ -211,7 +216,7 @@ pub(super) fn begin(out: &mut Output<'_>, operation: Operation, next: u32) -> bo
                 .i32_const(7)
                 .i32_and()
                 .local_set(TMP);
-            write_f32(out, X, TMP);
+            write_f64(out, X, TMP);
             if pop {
                 pop_stack(out);
             }
@@ -222,17 +227,17 @@ pub(super) fn begin(out: &mut Output<'_>, operation: Operation, next: u32) -> bo
         } => {
             arithmetic_control(out);
             register(out, 0, X);
-            to_f32(out, X, FA);
+            operand(out, X, FA);
             memory::prepare(out, address.unwrap(), 4, false, false, 52);
             out.c().local_get(52).i32_load(mem(0, 0)).local_set(BITS);
-            normal(out, BITS);
+            normal_or_zero(out, BITS, 0);
             out.c()
                 .local_get(BITS)
                 .f32_reinterpret_i32()
                 .f64_promote_f32()
                 .local_set(FB);
             arithmetic(out, kind);
-            write_f32(out, X, TOP);
+            write_f64(out, X, TOP);
         }
         _ => unreachable!(),
     }
@@ -293,6 +298,20 @@ fn clear_tag(out: &mut Output<'_>, physical: u32) {
         .i32_and()
         .local_set(TAG);
 }
+fn value_tag(out: &mut Output<'_>, physical: u32, pointer: u32) {
+    clear_tag(out, physical);
+    out.c()
+        .local_get(TAG)
+        .local_get(pointer)
+        .i64_load(mem(0, 0))
+        .i64_eqz()
+        .local_get(physical)
+        .i32_const(1)
+        .i32_shl()
+        .i32_shl()
+        .i32_or()
+        .local_set(TAG);
+}
 fn pointer(out: &mut Output<'_>, physical: u32, index: u8, destination: u32) {
     out.c()
         .local_get(BANK)
@@ -317,39 +336,37 @@ fn register(out: &mut Output<'_>, index: u8, destination: u32) {
         .i32_const(7)
         .i32_and()
         .local_set(TMP);
-    tag(out, TMP);
-    out.c().br_if(0);
     pointer(out, TOP, index, destination);
+    tag(out, TMP);
+    out.c().i32_const(3).i32_eq().br_if(0);
     out.c()
         .local_get(destination)
         .i32_load16_u(mem(8, 0))
         .i32_const(0x7fff)
         .i32_and()
+        .local_set(EXP)
+        .local_get(destination)
+        .i64_load(mem(0, 0))
+        .local_set(SIG)
+        .local_get(EXP)
+        .i32_eqz()
+        .local_get(SIG)
+        .i64_eqz()
+        .i32_and()
+        .local_get(EXP)
         .i32_const(1)
         .i32_sub()
         .i32_const(0x7ffe)
-        .i32_ge_u()
-        .br_if(0)
-        .local_get(destination)
-        .i64_load(mem(0, 0))
+        .i32_lt_u()
+        .local_get(SIG)
         .i64_const(0)
-        .i64_ge_s()
-        .br_if(0);
-}
-fn normal(out: &mut Output<'_>, bits: u32) {
-    out.c()
-        .local_get(bits)
-        .i32_const(23)
-        .i32_shr_u()
-        .i32_const(255)
+        .i64_lt_s()
         .i32_and()
-        .i32_const(1)
-        .i32_sub()
-        .i32_const(254)
-        .i32_ge_u()
+        .i32_or()
+        .i32_eqz()
         .br_if(0);
 }
-fn normal_or_zero(out: &mut Output<'_>, bits: u32) {
+fn normal_or_zero(out: &mut Output<'_>, bits: u32, depth: u32) {
     out.c()
         .local_get(bits)
         .i32_const(0x7fff_ffff)
@@ -366,14 +383,37 @@ fn normal_or_zero(out: &mut Output<'_>, bits: u32) {
         .i32_const(254)
         .i32_ge_u()
         .i32_and()
-        .br_if(0);
+        .br_if(depth);
 }
 fn to_f32(out: &mut Output<'_>, pointer: u32, value: u32) {
+    to_f64(out, pointer, value);
+    out.c()
+        .local_get(SIG)
+        .i64_const(0xff_ffff_ffff)
+        .i64_and()
+        .i64_const(0)
+        .i64_ne()
+        .br_if(0)
+        .local_get(EXP)
+        .i32_const(0x7fff)
+        .i32_and()
+        .i32_const(16257)
+        .i32_sub()
+        .local_tee(BITS)
+        .i32_const(253)
+        .i32_gt_u()
+        .local_get(SIG)
+        .i64_eqz()
+        .i32_eqz()
+        .i32_and()
+        .br_if(0);
+}
+fn to_f64(out: &mut Output<'_>, pointer: u32, value: u32) {
     out.c()
         .local_get(pointer)
         .i64_load(mem(0, 0))
         .local_tee(SIG)
-        .i64_const(0xff_ffff_ffff)
+        .i64_const(0x7ff)
         .i64_and()
         .i64_const(0)
         .i64_ne()
@@ -383,33 +423,74 @@ fn to_f32(out: &mut Output<'_>, pointer: u32, value: u32) {
         .local_tee(EXP)
         .i32_const(0x7fff)
         .i32_and()
-        .i32_const(16257)
+        .i32_const(15361)
         .i32_sub()
-        .local_tee(BITS)
-        .i32_const(253)
+        .i32_const(2045)
         .i32_gt_u()
-        .br_if(0)
-        .local_get(BITS)
-        .i32_const(1)
-        .i32_add()
-        .i32_const(23)
-        .i32_shl()
         .local_get(SIG)
-        .i64_const(40)
-        .i64_shr_u()
-        .i32_wrap_i64()
-        .i32_const(0x7fffff)
+        .i64_eqz()
+        .i32_eqz()
         .i32_and()
-        .i32_or()
+        .br_if(0)
+        .local_get(SIG)
+        .i64_eqz()
+        .if_(BlockType::Result(wasm_encoder::ValType::I64))
+        .i64_const(0)
+        .else_()
+        .local_get(SIG)
+        .i64_const(11)
+        .i64_shr_u()
+        .i64_const(0x000f_ffff_ffff_ffff)
+        .i64_and()
+        .local_get(EXP)
+        .i32_const(0x7fff)
+        .i32_and()
+        .i32_const(15360)
+        .i32_sub()
+        .i64_extend_i32_u()
+        .i64_const(52)
+        .i64_shl()
+        .i64_or()
+        .end()
         .local_get(EXP)
         .i32_const(0x8000)
         .i32_and()
-        .i32_const(16)
-        .i32_shl()
-        .i32_or()
-        .f32_reinterpret_i32()
-        .f64_promote_f32()
+        .i64_extend_i32_u()
+        .i64_const(48)
+        .i64_shl()
+        .i64_or()
+        .f64_reinterpret_i64()
         .local_set(value);
+}
+fn operand(out: &mut Output<'_>, pointer: u32, value: u32) {
+    to_f64(out, pointer, value);
+    out.c()
+        .local_get(SIG)
+        .i64_const(0xff_ffff_ffff)
+        .i64_and()
+        .i64_const(0)
+        .i64_ne()
+        .local_get(DOUBLE)
+        .i32_eqz()
+        .i32_and()
+        .br_if(0);
+    out.c()
+        .local_get(EXP)
+        .i32_const(0x7fff)
+        .i32_and()
+        .i32_const(16257)
+        .i32_sub()
+        .i32_const(253)
+        .i32_gt_u()
+        .local_get(SIG)
+        .i64_eqz()
+        .i32_eqz()
+        .i32_and()
+        .local_get(DOUBLE)
+        .i32_eqz()
+        .i32_and()
+        .br_if(0);
+    double::bound(out, value, 0);
 }
 fn copy(out: &mut Output<'_>, source: u32, destination: u32) {
     out.c()
@@ -508,17 +589,89 @@ fn write_f32(out: &mut Output<'_>, pointer: u32, physical: u32) {
         .i32_or()
         .i32_store16(mem(8, 0));
 }
+fn write_f64(out: &mut Output<'_>, pointer: u32, physical: u32) {
+    clear_tag(out, physical);
+    out.c()
+        .local_get(double::RESULT)
+        .i64_reinterpret_f64()
+        .local_tee(PACKED)
+        .i64_const(i64::MAX)
+        .i64_and()
+        .i64_const(0)
+        .i64_ne()
+        .if_(BlockType::Empty)
+        .local_get(pointer)
+        .local_get(PACKED)
+        .i64_const(0x000f_ffff_ffff_ffff)
+        .i64_and()
+        .i64_const(0x0010_0000_0000_0000)
+        .i64_or()
+        .i64_const(11)
+        .i64_shl()
+        .i64_store(mem(0, 0))
+        .local_get(PACKED)
+        .i64_const(52)
+        .i64_shr_u()
+        .i32_wrap_i64()
+        .i32_const(2047)
+        .i32_and()
+        .i32_const(15360)
+        .i32_add()
+        .local_set(EXP)
+        .else_()
+        .local_get(pointer)
+        .i64_const(0)
+        .i64_store(mem(0, 0))
+        .local_get(TAG)
+        .i32_const(1)
+        .local_get(physical)
+        .i32_const(1)
+        .i32_shl()
+        .i32_shl()
+        .i32_or()
+        .local_set(TAG)
+        .i32_const(0)
+        .local_set(EXP)
+        .end()
+        .local_get(pointer)
+        .local_get(EXP)
+        .local_get(PACKED)
+        .i64_const(48)
+        .i64_shr_u()
+        .i32_wrap_i64()
+        .i32_const(0x8000)
+        .i32_and()
+        .i32_or()
+        .i32_store16(mem(8, 0));
+}
 fn arithmetic_control(out: &mut Output<'_>) {
     out.c()
         .local_get(BANK)
         .i32_load16_u(mem(0, 1))
         .i32_const(0xf3f)
         .i32_and()
+        .local_tee(TMP)
         .i32_const(63)
-        .i32_ne()
-        .br_if(0);
+        .i32_eq()
+        .local_get(TMP)
+        .i32_const(0x23f)
+        .i32_eq()
+        .i32_or()
+        .i32_eqz()
+        .br_if(0)
+        .local_get(TMP)
+        .i32_const(0x23f)
+        .i32_eq()
+        .local_set(DOUBLE);
 }
 fn arithmetic(out: &mut Output<'_>, kind: X87Binary) {
+    out.c().local_get(DOUBLE).if_(BlockType::Empty);
+    double::arithmetic(out, kind, 1);
+    out.c().else_();
+    arithmetic_single(out, kind, 1);
+    out.c().end();
+}
+fn arithmetic_single(out: &mut Output<'_>, kind: X87Binary, depth: u32) {
     if matches!(
         kind,
         X87Binary::Add | X87Binary::Subtract | X87Binary::ReverseSubtract
@@ -547,7 +700,15 @@ fn arithmetic(out: &mut Output<'_>, kind: X87Binary) {
             .i32_const(-24)
             .i32_lt_s()
             .i32_or()
-            .br_if(0);
+            .local_get(FA)
+            .f64_const(0.0.into())
+            .f64_ne()
+            .i32_and()
+            .local_get(FB)
+            .f64_const(0.0.into())
+            .f64_ne()
+            .i32_and()
+            .br_if(depth);
     }
     let reverse = matches!(kind, X87Binary::ReverseSubtract | X87Binary::ReverseDivide);
     out.c()
@@ -577,17 +738,18 @@ fn arithmetic(out: &mut Output<'_>, kind: X87Binary) {
         .f64_const(0.0.into())
         .f64_ne()
         .i32_and()
-        .br_if(0)
+        .br_if(depth)
         .local_get(EXACT)
         .f32_demote_f64()
         .i32_reinterpret_f32()
         .local_set(BITS);
-    normal_or_zero(out, BITS);
+    normal_or_zero(out, BITS, depth);
     out.c()
         .local_get(BITS)
         .f32_reinterpret_i32()
         .f64_promote_f32()
-        .local_set(ROUNDED);
+        .local_tee(ROUNDED)
+        .local_set(double::RESULT);
     clear_c1(out);
     if matches!(kind, X87Binary::Divide | X87Binary::ReverseDivide) {
         out.c()
