@@ -7,6 +7,9 @@ mod flags;
 mod memory;
 mod program;
 
+pub(crate) const COLD_MARK: u32 = 0x4000_0000;
+pub(crate) const STOP_MARK: u32 = 0x8000_0000;
+
 pub use abi::{CONTEXT_SIZE, Context32, StopReason};
 pub use dispatch::emit_dispatch;
 pub use program::{
