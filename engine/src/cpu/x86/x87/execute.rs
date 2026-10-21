@@ -475,6 +475,37 @@ struct Evaluation<'state, 'output> {
     unmasked_exception: bool,
 }
 
+fn needs_rollback(operation: X87Operation, control: u16) -> bool {
+    if control & 0x3f != 0x3f {
+        return true;
+    }
+    // validated common operations cannot reject operands or suppress masked results.
+    !match operation {
+        X87Operation::Load(_)
+        | X87Operation::Store { .. }
+        | X87Operation::BinaryMemory { .. }
+        | X87Operation::Test
+        | X87Operation::Examine
+        | X87Operation::ChangeSign
+        | X87Operation::Absolute
+        | X87Operation::SquareRoot
+        | X87Operation::RoundToInteger
+        | X87Operation::Scale => true,
+        X87Operation::LoadRegister { index }
+        | X87Operation::StoreRegister { index, .. }
+        | X87Operation::StoreRegisterNoUnderflow { index }
+        | X87Operation::Exchange { index }
+        | X87Operation::Compare { index, .. }
+        | X87Operation::ConditionalMove { index, .. } => index < 8,
+        X87Operation::Binary {
+            destination,
+            source,
+            ..
+        } => destination < 8 && source < 8,
+        _ => false,
+    }
+}
+
 impl X87State {
     pub fn top(&self) -> usize {
         usize::from((self.status >> 11) & 7)
@@ -531,7 +562,9 @@ impl X87State {
         if input.len() != operation.read_size() || operation.write_size() != 0 && memory.is_none() {
             return Err(X87Error::InvalidInputLength);
         }
-        let original = *self;
+        let original_status = self.status;
+        let original_control = self.control;
+        let original = needs_rollback(operation, original_control).then(|| *self);
         let mut outcome = Evaluation {
             state: self,
             memory,
@@ -539,7 +572,7 @@ impl X87State {
             eflags: None,
             unmasked_exception: false,
         };
-        if !operation.ignores_pending_exception() && original.status & 0x3f & !original.control != 0
+        if !operation.ignores_pending_exception() && original_status & 0x3f & !original_control != 0
         {
             outcome.state.status |= 0x8080;
             outcome.unmasked_exception = true;
@@ -550,7 +583,7 @@ impl X87State {
             outcome.state.status &= !0x3f;
         }
         if let Err(error) = outcome.run(operation, input, eflags, workspace) {
-            *outcome.state = original;
+            *outcome.state = original.expect("fallible x87 operation retains rollback state");
             return Err(error);
         }
         if computation {
@@ -569,10 +602,10 @@ impl X87State {
                 outcome.state.status &= !C1;
             }
             let exception_status =
-                (outcome.state.status & !0x3f) | (original.status & 0x3f) | raised;
+                (outcome.state.status & !0x3f) | (original_status & 0x3f) | raised;
             if suppress {
-                *outcome.state = original;
-                outcome.state.status = (original.status & !0x82ff) | (exception_status & 0x82ff);
+                *outcome.state = original.expect("unmasked x87 operation retains rollback state");
+                outcome.state.status = (original_status & !0x82ff) | (exception_status & 0x82ff);
                 outcome.memory_len = 0;
                 outcome.eflags = None;
             } else {
