@@ -1,3 +1,11 @@
+mod direct;
+mod memory;
+mod simd;
+
+pub(super) const BANK_POINTER: u64 = 92;
+pub(super) const SIMD_MXCSR: u64 = 112;
+pub(super) const SIMD_XMM: u64 = 116;
+
 use super::{CTX, FLAGS, KIND, Output, WRITE_STATUS, mem};
 use crate::cpu::{
     core::StopReason,
@@ -86,6 +94,20 @@ impl X87Transfer {
 }
 
 pub(super) fn emit(out: &mut Output<'_>, next: u32) {
+    let operation = out
+        .native
+        .iter()
+        .find(|instruction| instruction.pc == out.pc)
+        .unwrap()
+        .operation;
+    let direct = direct::begin(out, operation, next) || simd::begin(out, operation, next);
+    slow(out, next);
+    if direct {
+        out.c().end();
+    }
+}
+
+fn slow(out: &mut Output<'_>, next: u32) {
     let ordinal = out
         .native
         .iter()

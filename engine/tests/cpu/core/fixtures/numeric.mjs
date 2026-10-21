@@ -36,7 +36,8 @@ function runCase(name, codeHex, budget, options, verify) {
   const view = () => new DataView(memory.buffer);
   const word = (pointer,offset=0) => view().getUint32(pointer+offset,true);
   const put = (pointer,offset,value) => view().setUint32(pointer+offset,value>>>0,true);
-  let arena = 0, context = 0, active = false, opened = false;
+  let arena = 0, context = 0, active = false, opened = false, numericCalls = 0;
+  const numeric = (...args) => {numericCalls++;return api.core_numeric(...args);};
   const result = {name, codeHex, budget, controls: []}; report.cases.push(result);
   const status = (operation,wanted,...args) => {
     const actual = api[operation](...args)>>>0;
@@ -89,17 +90,39 @@ function runCase(name, codeHex, budget, options, verify) {
     assert.deepEqual(WebAssembly.Module.imports(module), [
       {module:'ring3',name:'memory',kind:'memory'}, {module:'ring3',name:'read',kind:'function'},
       {module:'ring3',name:'write',kind:'function'}, {module:'ring3',name:'numeric',kind:'function'}]);
-    const run = new WebAssembly.Instance(module,{ring3:{memory,read:api.core_read,write:api.core_write,numeric:api.core_numeric}}).exports.run;
+    let run = new WebAssembly.Instance(module,{ring3:{memory,read:api.core_read,write:api.core_write,numeric}}).exports.run;
     result.module = {sha256:hash(code),wasmHex:hex(code)};
     status('core_begin',0); active = true;
     const initialVersion=view().getBigUint64(word(context,80),true),initialPageVersions=slice(word(context,84),word(context,68)*16);
     neutral('wrong numerical context',()=>status('core_numeric',8,context+8,0));
     neutral('wrong numerical ordinal',()=>status('core_numeric',8,context,0xffffffff));
+    let unpublishedFp = initialFp;
+    if(options?.handoff) {
+      const prefixStop = run(context,options.handoff.budget)>>>0;
+      assert.equal(prefixStop,2,'handoff stops at the declared instruction budget');
+      const prefixRetired = word(context,40), prefixPc = word(context,32);
+      status('core_end',0); active = false;
+      status('core_export',0,prefixStop,options.handoff.budget);
+      const published = slice(arena+fpOffset,128);
+      assert.deepEqual(published,fp(initialFp,{status:0x3800,tag:0x3fff,opcode:0x103,fip:0x1000,fdp:0x3000,cs:0x1b,ds:0x23,registers:{7:ext3}}),'literal prefix FP128');
+      new Uint8Array(memory.buffer,arena+fpOffset+40+7*10,10).set(unhex(options.handoff.replacement));
+      unpublishedFp = slice(arena+fpOffset,128);
+      status('core_import',0);
+      status('core_prepare',0,prefixPc,256,32);
+      context = api.core_context_ptr()>>>0;
+      const resumedCode = slice(api.core_code_ptr()>>>0,api.core_code_len()>>>0);
+      const resumedModule = new WebAssembly.Module(resumedCode);
+      assertCoreNames(resumedModule,prefixPc);
+      run = new WebAssembly.Instance(resumedModule,{ring3:{memory,read:api.core_read,write:api.core_write,numeric}}).exports.run;
+      result.handoff = {prefixRetired,prefixPc,published:hex(published),imported:hex(unpublishedFp),moduleSha256:hash(resumedCode)};
+      status('core_begin',0); active = true;
+    }
     const stop = run(context,budget)>>>0;
-    result.executed = {stop,...raw()}; checkpoint();
+    result.executed = {stop,numericCalls,...raw()}; checkpoint();
+    if(options?.numericCalls!==undefined) assert.equal(numericCalls,options.numericCalls,`${name}: numerical helper calls`);
     status('core_end',0); active = false;
     neutral('inactive numerical import',()=>status('core_numeric',8,context,0));
-    assert.deepEqual(slice(arena+fpOffset,128),initialFp,'private FP bank remains unpublished until export');
+    assert.deepEqual(slice(arena+fpOffset,128),unpublishedFp,'private FP bank remains unpublished until export');
     assert.deepEqual(slice(arena+simdOffset,160),initialSimd,'private SIMD bank remains unpublished until export');
     const state = {registers:Array.from({length:8},(_,i)=>word(context,i*4)),pc:word(context,32),flags:word(context,36),
       retired:word(context,40),remaining:word(context,44),vector:word(context,116),detail:word(context,48),metadata:word(context,52)};
@@ -197,6 +220,35 @@ try {
       bank(t,t.fp({status:expected===null?0x20:0,opcode:0x37b,fip:0x1007,fdp:0x3020,cs:0x1b,ds:0x23,registers:{7:hex(value)}}));
     });
   }
+  runCase('direct-pc24-add-pop-alias','d903 d94304 dec1 d95b08 0f0b',4,{control:0x7f,data:values,numericCalls:0},t=>{
+    standard(t,4,0x100a);t.writeExpected(0x3008,unhex('0000a040'));
+    bank(t,t.fp({opcode:0x15b,fip:0x1007,fdp:0x3008,cs:0x1b,ds:0x23,registers:{6:'00000000000000800040',7:'00000000000000a00140'}}));
+  });
+  runCase('direct-pc24-reverse-subtract','d903 d86b04 d95b08 0f0b',3,{control:0x7f,data:values,numericCalls:0},t=>{
+    standard(t,3,0x1008);t.writeExpected(0x3008,unhex('000080bf'));
+    bank(t,t.fp({opcode:0x15b,fip:0x1005,fdp:0x3008,cs:0x1b,ds:0x23,registers:{7:'0000000000000080ffbf'}}));
+  });
+  runCase('direct-pc24-divide-preserves-pe-and-c1','d903 d87304 dfe0 d95b08 0f0b',4,{control:0x7f,numericCalls:1,data:v=>{v.setFloat32(0,3,true);v.setFloat32(4,7,true);}},t=>{
+    standard(t,4,0x100a,2,2,{0:0x3a20});t.writeExpected(0x3008,unhex('b76ddb3e'));
+    bank(t,t.fp({status:0x20,opcode:0x15b,fip:0x1007,fdp:0x3008,cs:0x1b,ds:0x23,registers:{7:'0000000000b76ddbfd3f'}}));
+  });
+  runCase('direct-register-transfer-keeps-stale-physical-payloads','d903 d94304 d9c9 ddd9 d95b08 0f0b',5,{control:0x7f,data:values,numericCalls:0},t=>{
+    standard(t,5,0x100c);t.writeExpected(0x3008,unhex('00004040'));
+    bank(t,t.fp({opcode:0x15b,fip:0x1009,fdp:0x3008,cs:0x1b,ds:0x23,registers:{6:ext3,7:ext3}}));
+  });
+  runCase('direct-pc24-declines-denormal-memory-operand','d903 d84304 dfe0 d95b08 0f0b',4,{control:0x7f,numericCalls:2,data:v=>{v.setFloat32(0,3,true);v.setUint32(4,1,true);}},t=>{
+    standard(t,4,0x100a,2,2,{0:0x3822});t.writeExpected(0x3008,unhex('00004040'));
+    bank(t,t.fp({status:0x22,opcode:0x15b,fip:0x1007,fdp:0x3008,cs:0x1b,ds:0x23,registers:{7:ext3}}));
+  });
+  runCase('direct-pc24-retains-values-below-binary32-range','d903 d84b04 db7b08 0f0b',3,{control:0x7f,numericCalls:2,data:v=>{v.setUint32(0,0x00800000,true);v.setUint32(4,0x00800000,true);}},t=>{
+    standard(t,3,0x1008);const value='0000000000000080033f';t.writeExpected(0x3008,unhex(value));
+    bank(t,t.fp({opcode:0x37b,fip:0x1005,fdp:0x3008,cs:0x1b,ds:0x23,registers:{7:value}}));
+  });
+  runCase('direct-bank-import-reprepare-resume','d903 d84b04 d95b08 0f0b',2,{control:0x7f,data:values,numericCalls:0,handoff:{budget:1,replacement:'00000000000000800140'}},t=>{
+    assert.equal(t.stop,2);assert.equal(t.state.retired,3);assert.equal(t.state.remaining,0);assert.equal(t.state.pc,0x1008);assert.equal(t.state.flags,2);
+    assert.deepEqual(t.state.registers,t.initialRegisters);t.writeExpected(0x3008,unhex('00000041'));
+    bank(t,t.fp({opcode:0x15b,fip:0x1005,fdp:0x3008,cs:0x1b,ds:0x23,registers:{7:'00000000000000800240'}}));
+  });
   report.complete = true; checkpoint(); console.log(JSON.stringify({complete:true,cases:report.cases.length,engineSha256:engine.sha256}));
 } catch(error) {
   report.failure={stage,message:String(error),stack:error.stack};checkpoint();throw error;

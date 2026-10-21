@@ -202,7 +202,15 @@ fn lookup(blocks: &[Block]) -> Function {
 }
 
 fn run(blocks: &[Block], identity: u64, native: &[NativeInstruction]) -> (Function, Vec<u32>) {
-    let mut function = Function::new([(25, ValType::I32), (1, ValType::I64), (9, ValType::I32)]);
+    let mut function = Function::new([
+        (25, ValType::I32),
+        (1, ValType::I64),
+        (18, ValType::I32),
+        (2, ValType::I64),
+        (4, ValType::F64),
+        (8, ValType::I32),
+        (6, ValType::V128),
+    ]);
     let mut out = Output {
         function: &mut function,
         blocks,
