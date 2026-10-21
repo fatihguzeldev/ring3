@@ -1,4 +1,4 @@
-use super::{BANK_POINTER, Output, double, mem, memory};
+use super::{BANK_POINTER, Output, double, ieee, mem, memory};
 use crate::cpu::core::emitter::{CTX, LOGICAL_ADDRESS};
 use crate::cpu::x86::{X87Binary, X87Format, X87Operation, ir::Operation};
 use wasm_encoder::BlockType;
@@ -34,7 +34,7 @@ pub(super) fn begin(out: &mut Output<'_>, operation: Operation, next: u32) -> bo
         operation,
         X87Operation::Load(X87Format::Float32)
             | X87Operation::Store {
-                format: X87Format::Float32,
+                format: X87Format::Float32 | X87Format::Float64,
                 truncate: false,
                 ..
             }
@@ -112,21 +112,20 @@ pub(super) fn begin(out: &mut Output<'_>, operation: Operation, next: u32) -> bo
             set_top(out);
         }
         X87Operation::Store {
-            format: X87Format::Float32,
+            format: format @ (X87Format::Float32 | X87Format::Float64),
             pop,
             ..
         } => {
             register(out, 0, X);
-            to_f32(out, X, FA);
-            out.c()
-                .local_get(FA)
-                .f32_demote_f64()
-                .i32_reinterpret_f32()
-                .local_set(BITS);
-            memory::prepare(out, address.unwrap(), 4, true, false, 52);
-            out.c().local_get(52).local_get(BITS).i32_store(mem(0, 0));
+            ieee::pack(out, X, format);
+            memory::prepare(out, address.unwrap(), format.size() as u32, true, false, 52);
+            out.c().local_get(52).local_get(PACKED);
+            if format == X87Format::Float32 {
+                out.c().i32_wrap_i64().i32_store(mem(0, 0));
+            } else {
+                out.c().i64_store(mem(0, 0));
+            }
             memory::commit(out);
-            clear_c1(out);
             if pop {
                 pop_stack(out);
             }
@@ -384,29 +383,6 @@ fn normal_or_zero(out: &mut Output<'_>, bits: u32, depth: u32) {
         .i32_ge_u()
         .i32_and()
         .br_if(depth);
-}
-fn to_f32(out: &mut Output<'_>, pointer: u32, value: u32) {
-    to_f64(out, pointer, value);
-    out.c()
-        .local_get(SIG)
-        .i64_const(0xff_ffff_ffff)
-        .i64_and()
-        .i64_const(0)
-        .i64_ne()
-        .br_if(0)
-        .local_get(EXP)
-        .i32_const(0x7fff)
-        .i32_and()
-        .i32_const(16257)
-        .i32_sub()
-        .local_tee(BITS)
-        .i32_const(253)
-        .i32_gt_u()
-        .local_get(SIG)
-        .i64_eqz()
-        .i32_eqz()
-        .i32_and()
-        .br_if(0);
 }
 fn to_f64(out: &mut Output<'_>, pointer: u32, value: u32) {
     out.c()

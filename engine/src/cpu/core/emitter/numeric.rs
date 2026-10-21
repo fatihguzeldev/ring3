@@ -1,5 +1,6 @@
 mod direct;
 mod double;
+mod ieee;
 mod memory;
 mod simd;
 
