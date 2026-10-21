@@ -82,6 +82,50 @@ fn compiled_source_currentness_tracks_code_and_mapping_identity() {
 }
 
 #[test]
+fn generated_x87_helpers_transfer_only_their_integer_inputs_and_outputs() {
+    let mut scratch = Scratch::new();
+    let prefix =
+        "b8ffffffffb904000000ba22222222bb00300000bc00480000bd55555555be66666666bf7777777783c001";
+    let mut manifest = String::new();
+    for (name, operation) in [
+        ("register", "d9e8"),
+        ("indexed", "d9448b08"),
+        ("status", "dfe0"),
+        ("move-below", "dac1"),
+        ("move-below-equal", "dad1"),
+        ("move-unordered", "dad9"),
+        ("compare-flags", "dbf1"),
+        ("initialize", "dbe3"),
+        ("processor", "0fa2"),
+    ] {
+        let hex = format!("{prefix}{operation}83d7000f0b");
+        let memory = memory(&bytes(&hex));
+        let code = compile(&memory, GuestAddress(0x1000), CompileOptions::default()).unwrap();
+        assert!(code.is_current(&memory));
+        assert_eq!(code.native_instructions().len(), 1);
+        assert_eq!(code.native_instructions()[0].pc, 0x102b);
+        fs::write(scratch.0.join(format!("{name}.wasm")), code.wasm()).unwrap();
+        manifest.push_str(&format!("{name}\t{hex}\t{}\n", code.identity()));
+    }
+    fs::write(scratch.0.join("numeric-transfer.tsv"), manifest).unwrap();
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+    let result = Command::new("node")
+        .arg(root.join("engine/tests/cpu/core/fixtures/numeric-transfer.mjs"))
+        .arg(&scratch.0)
+        .output()
+        .expect("run generated numerical transfer modules with node");
+    assert!(
+        result.status.success(),
+        "generated numerical transfer fixture failed (output: {}):\n{}\n{}",
+        scratch.0.display(),
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr)
+    );
+    println!("{}", String::from_utf8_lossy(&result.stdout).trim());
+    scratch.1 = false;
+}
+
+#[test]
 fn generated_zero_flag_branches_preserve_state_without_materializing_the_condition() {
     let mut scratch = Scratch::new();
     let mut manifest = String::new();
