@@ -6,8 +6,9 @@ import {readEngine} from '../../../support/wasm/engine.mjs';
 import {Engine,KEY,record,view} from '../../../../../sdk/runtime/engine.js';
 import {CodeCache} from '../../../../../sdk/runtime/cache.js';
 
-const [baselinePath,baselineHash,candidatePath,candidateHash,reportPath]=process.argv.slice(2);
-assert(reportPath,'usage: numerical-timing.mjs baseline.wasm baseline-sha256 candidate.wasm candidate-sha256 fresh-report.json');
+const [baselinePath,baselineHash,candidatePath,candidateHash,reportPath,comparison='native']=process.argv.slice(2);
+assert(reportPath,'usage: numerical-timing.mjs baseline.wasm baseline-sha256 candidate.wasm candidate-sha256 fresh-report.json [native|codegen]');
+assert(['native','codegen'].includes(comparison),'expected native or codegen comparison');
 for(const value of [baselineHash,candidateHash])assert.match(value,/^[a-f0-9]{64}$/);
 const artifacts=[readEngine(baselinePath,baselineHash),readEngine(candidatePath,candidateHash)];
 closeSync(openSync(reportPath,'wx'));
@@ -19,13 +20,14 @@ code.set(unhex('d903d87304d95b084975f50f0b'));
 const sources=['./numerical-timing.mjs','../../../support/wasm/engine.mjs',
   '../../../../../sdk/runtime/engine.js','../../../../../sdk/runtime/cache.js'];
 const report={schema:1,complete:false,node:process.version,iterations,retiredAndWork:work,warmupsPerArm:2,rounds:8,
-  artifactComparison:baselineHash===candidateHash?'same-artifact-control':'paired-artifacts',
+  artifactComparison:baselineHash===candidateHash?'same-artifact-control':'paired-artifacts',comparison,
   scope:'authored PC24 FLD/FDIV/FSTP/DEC/JNZ through original native bindings; no game or component time-share claim',
   clock:'node performance.now elapsed milliseconds around one normal CodeCache.execute',codeSha256:hash(code),
   sources:Object.fromEntries(sources.map(path=>[path,hash(readFileSync(new URL(path,import.meta.url)))])),cases:[],
   limits:['reset, canonical bank import, selection, output snapshots and assertions are outside the timed interval',
     'no timed admissions does not establish completion of all optimizing compiler tiers',
-    'exact generated module equality is required across both artifacts; native numerical implementation may differ',
+    comparison==='native'?'exact generated module equality is required across both artifacts; native numerical implementation may differ':
+      'generated code may differ; both artifacts must independently satisfy the same literal full-context, FP80, arena and RAM assertions',
     'C1 controls stop immediately after FDIV; the timed FSTP clears C1 after its exact f32 conversion',
     'normalized significands of at most24bits cannot yield an inexact carry into the next power of2 at PC24; wider fallback carry is outside this fixture']};
 const checkpoint=()=>writeFileSync(reportPath,JSON.stringify(report,null,2));
@@ -131,7 +133,8 @@ try{
   for(const test of cases){
     const result={name:test.name,expectedOutputBits:test.output,expectedExtended:test.extended,arms:[],controls:[],runs:[]};report.cases.push(result);
     const arms=artifacts.map((artifact,index)=>fresh(artifact,index,test,result));arms.forEach(arm=>arm.result=result);
-    assert.deepEqual(result.arms[0].module,result.arms[1].module,'identical generated guest module across artifacts');
+    result.identicalGeneratedModule=JSON.stringify(result.arms[0].module)===JSON.stringify(result.arms[1].module);
+    if(comparison==='native')assert.deepEqual(result.arms[0].module,result.arms[1].module,'identical generated guest module across artifacts');
     for(const arm of arms)for(let rounding=0;rounding<4;rounding++)for(const negative of [false,true])
       run(arm,{phase:'control',rounding,negative,prefix:true});
     for(let round=0;round<2;round++)for(let arm=0;arm<2;arm++)run(arms[arm],{phase:'warmup',round,position:arm});
