@@ -132,5 +132,13 @@ export class Media {
   }
   dialogResult(message) {this.engine.ok('complete_user32_dialog',...pair(message.epoch),...pair(message.id),message.button,message.error??0);this.dialogs.delete(BigInt(message.id));}
   dialogHelp(message) {this.engine.ok('request_user32_dialog_help',...pair(message.epoch),...pair(message.id));}
-  cursorApplied(revision) {this.engine.ok('acknowledge_user32_cursor',...pair(revision));}
+  cursorApplied(revision) {
+    revision=BigInt(revision);
+    if(revision<=0n || revision>this.lastCursor)throw new Error('invalid cursor acknowledgement revision');
+    if(revision<this.lastCursor)return;
+    const pending=this.engine.media('pending_user32_cursor').values[0];
+    if(pending===0n || pending>revision)return;
+    if(pending!==revision)throw new Error('invalid cursor acknowledgement order');
+    this.engine.ok('acknowledge_user32_cursor',...pair(revision));
+  }
 }
