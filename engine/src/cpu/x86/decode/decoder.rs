@@ -9,7 +9,7 @@ use crate::{
         UnsupportedFeature,
         x86::{CpuPagingError32, environment::USER_MODE_ENVIRONMENT, ir::Operation},
     },
-    memory::{AddressSpace, CodeSnapshot, GuestAddress, MemoryError, MemoryFault},
+    memory::{AddressSpace, CodeSnapshot, GuestAddress, MemoryError, MemoryFault, PAGE_SIZE},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -184,10 +184,13 @@ fn decode_core(
     policy: DecodePolicy,
     cs: Option<CodeFetchContext>,
     authority: DecodeAuthority,
-    mut scratch: Option<&mut DecodeScratch>,
+    scratch: Option<&mut DecodeScratch>,
 ) -> Result<BoundDecode, DecodeError> {
     let bitness = cs.map_or(32, CodeFetchContext::decoder_bitness);
     let mut bytes = [0; 15];
+    if let Some(instruction) = decode_window(memory, pc, cs, &mut bytes, bitness) {
+        return lower_instruction(&instruction, &bytes, pc, policy, authority, scratch);
+    }
     for length in 1..=bytes.len() {
         if cs.is_some_and(|cs| !cs.permits(pc, length as u8)) {
             if policy == DecodePolicy::Strict {
@@ -267,57 +270,85 @@ fn decode_core(
                 return Err(DecodeError::InvalidEncoding);
             }
             DecoderError::None => {
-                let consumed = instruction.len();
-                let fault = if policy == DecodePolicy::Execution {
-                    super::execution_faults::for_instruction(
-                        &instruction,
-                        &bytes[..consumed],
-                        USER_MODE_ENVIRONMENT,
-                    )
-                } else {
-                    None
-                };
-                let (operation, segments) = if let Some(operation) = fault {
-                    (Operation::Control(operation), 0)
-                } else {
-                    match super::lower::lower(&instruction, &bytes[..consumed], authority) {
-                        Ok(operation) => (
-                            operation,
-                            segment_accesses(&instruction, scratch.as_deref_mut()),
-                        ),
-                        Err(DecodeError::InvalidEncoding)
-                            if policy == DecodePolicy::Execution
-                                && instruction.encoding() == iced_x86::EncodingKind::VEX =>
-                        {
-                            (
-                                Operation::Control(
-                                    crate::cpu::x86::ControlOperation::InvalidOpcode,
-                                ),
-                                0,
-                            )
-                        }
-                        Err(error) => return Err(error),
-                    }
-                };
-                return Ok(BoundDecode::Instruction(finish(
-                    pc,
-                    consumed,
-                    GuestAddress(instruction.next_ip32()),
-                    operation,
-                    segments,
-                    matches!(
-                        fault,
-                        Some(
-                            crate::cpu::x86::ControlOperation::GeneralProtectionZero
-                                | crate::cpu::x86::ControlOperation::DeniedPortString { .. }
-                        )
-                    ),
-                )));
+                return lower_instruction(&instruction, &bytes, pc, policy, authority, scratch);
             }
             _ => return Err(DecodeError::InvalidEncoding),
         }
     }
     Err(DecodeError::InvalidEncoding)
+}
+
+fn decode_window(
+    memory: &AddressSpace,
+    pc: GuestAddress,
+    cs: Option<CodeFetchContext>,
+    bytes: &mut [u8; 15],
+    bitness: u32,
+) -> Option<iced_x86::Instruction> {
+    let linear = cs.map_or(pc, |cs| cs.linear_address(pc));
+    if linear.0 % PAGE_SIZE > PAGE_SIZE - bytes.len() as u32
+        || cs.is_some_and(|cs| !cs.permits(pc, bytes.len() as u8))
+    {
+        return None;
+    }
+    // a successful immutable, one-page probe has no guest-visible fetch side effects.
+    if let Some(cs) = cs {
+        cs.fetch(memory, pc, bytes).ok()?;
+    } else {
+        super::fetch_unbound(memory, pc, bytes).ok()?;
+    }
+    let mut decoder = Decoder::with_ip(bitness, bytes, u64::from(pc.0), DecoderOptions::NONE);
+    let instruction = decoder.decode();
+    // invalid encodings retain the progressive path's first proven fault length.
+    (decoder.last_error() == DecoderError::None).then_some(instruction)
+}
+
+fn lower_instruction(
+    instruction: &iced_x86::Instruction,
+    bytes: &[u8],
+    pc: GuestAddress,
+    policy: DecodePolicy,
+    authority: DecodeAuthority,
+    scratch: Option<&mut DecodeScratch>,
+) -> Result<BoundDecode, DecodeError> {
+    let consumed = instruction.len();
+    let bytes = &bytes[..consumed];
+    let fault = if policy == DecodePolicy::Execution {
+        super::execution_faults::for_instruction(instruction, bytes, USER_MODE_ENVIRONMENT)
+    } else {
+        None
+    };
+    let (operation, segments) = if let Some(operation) = fault {
+        (Operation::Control(operation), 0)
+    } else {
+        match super::lower::lower(instruction, bytes, authority) {
+            Ok(operation) => (operation, segment_accesses(instruction, scratch)),
+            Err(DecodeError::InvalidEncoding)
+                if policy == DecodePolicy::Execution
+                    && instruction.encoding() == iced_x86::EncodingKind::VEX =>
+            {
+                (
+                    Operation::Control(crate::cpu::x86::ControlOperation::InvalidOpcode),
+                    0,
+                )
+            }
+            Err(error) => return Err(error),
+        }
+    };
+    Ok(BoundDecode::Instruction(finish(
+        pc,
+        consumed,
+        GuestAddress(instruction.next_ip32()),
+        operation,
+        segments,
+        matches!(
+            fault,
+            Some(
+                crate::cpu::x86::ControlOperation::GeneralProtectionZero
+                    | crate::cpu::x86::ControlOperation::DeniedPortString { .. }
+            )
+        ),
+    )))
 }
 
 fn finish(
@@ -384,6 +415,10 @@ mod compilation_tests;
 #[cfg(test)]
 #[path = "decoder/scratch.rs"]
 mod scratch_tests;
+
+#[cfg(test)]
+#[path = "decoder/window.rs"]
+mod window_tests;
 
 fn segment_accesses(
     instruction: &iced_x86::Instruction,
