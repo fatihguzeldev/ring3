@@ -92,7 +92,17 @@ impl NumericBank {
         let write = operation.write_size();
         let width = read.max(write);
         debug_assert!(read == 0 || write == 0);
-        let mut buffer = (width != 0).then(|| [0; 108]);
+        let mut scalar;
+        let mut environment;
+        let mut buffer: Option<&mut [u8]> = if width == 0 {
+            None
+        } else if width <= 10 {
+            scalar = [0; 10];
+            Some(&mut scalar)
+        } else {
+            environment = [0; 108];
+            Some(&mut environment)
+        };
         let mut linear = 0;
         let mut data_offset = 0;
         if width != 0 {
@@ -117,8 +127,11 @@ impl NumericBank {
             let memory = instance.memory.as_mut().ok_or(Failure::Infrastructure)?;
             let mut port = memory::Port(memory);
             if read != 0 {
-                port.read(GuestAddress(linear), &mut buffer.as_mut().unwrap()[..read])
-                    .map_err(|e| Failure::paging(e, read))?;
+                port.read(
+                    GuestAddress(linear),
+                    &mut buffer.as_deref_mut().unwrap()[..read],
+                )
+                .map_err(|e| Failure::paging(e, read))?;
             }
             if write != 0 {
                 port.check(GuestAddress(linear), write, PagingAccess32::Write)
@@ -153,7 +166,7 @@ impl NumericBank {
         let result = if write == 0 {
             self.x87.evaluate_in_place(
                 operation,
-                buffer.as_ref().map_or(&[][..], |buffer| &buffer[..read]),
+                buffer.as_deref().map_or(&[][..], |buffer| &buffer[..read]),
                 flags,
                 None,
                 &mut instance.numerical_workspace,
@@ -163,7 +176,7 @@ impl NumericBank {
                 operation,
                 &[],
                 flags,
-                buffer.as_mut(),
+                buffer.as_deref_mut(),
                 &mut instance.numerical_workspace,
             )
         };
@@ -191,7 +204,7 @@ impl NumericBank {
                     memory::Port(m)
                         .write(
                             GuestAddress(linear),
-                            &buffer.as_ref().unwrap()[..effects.memory_len],
+                            &buffer.as_deref().unwrap()[..effects.memory_len],
                         )
                         .map_err(|e| Failure::paging(e, write))
                 });

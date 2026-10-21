@@ -176,7 +176,7 @@ impl EngineInstance {
                 .as_ref()
                 .map_or(&[], |input| &input[..request.read_size]),
             flags,
-            output,
+            output.map(|buffer| &mut buffer[..]),
             &mut self.numerical_workspace,
         ) {
             Ok(outcome) => outcome,

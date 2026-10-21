@@ -4,11 +4,14 @@ pub(super) fn evaluate(
     state: &mut X87State,
     operation: X87Operation,
     input: &[u8],
-    mut memory: Option<&mut [u8; 108]>,
+    memory: Option<&mut [u8]>,
 ) -> Option<X87Effects> {
     if state.control & 0x3f != 0x3f
         || input.len() != operation.read_size()
-        || operation.write_size() != 0 && memory.is_none()
+        || operation.write_size() != 0
+            && memory
+                .as_ref()
+                .is_none_or(|output| output.len() < operation.write_size())
     {
         return None;
     }
@@ -39,7 +42,7 @@ pub(super) fn evaluate(
             };
             let (bytes, exceptions, incremented) = store(format, value, control);
             memory_len = format.size();
-            memory.as_deref_mut().unwrap()[..memory_len].copy_from_slice(&bytes[..memory_len]);
+            memory.unwrap()[..memory_len].copy_from_slice(&bytes[..memory_len]);
             status = (status & !C1) | exceptions | if incremented { C1 } else { 0 };
             if pop {
                 state.tag |= 3 << (top * 2);

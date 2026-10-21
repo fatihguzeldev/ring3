@@ -476,7 +476,7 @@ pub(crate) struct X87Effects {
 
 struct Evaluation<'state, 'output> {
     state: &'state mut X87State,
-    memory: Option<&'output mut [u8; 108]>,
+    memory: Option<&'output mut [u8]>,
     memory_len: usize,
     eflags: Option<u32>,
     unmasked_exception: bool,
@@ -563,13 +563,18 @@ impl X87State {
         operation: X87Operation,
         input: &[u8],
         eflags: u32,
-        mut memory: Option<&mut [u8; 108]>,
+        mut memory: Option<&mut [u8]>,
         workspace: &mut crate::math::NumericalWorkspace,
     ) -> Result<X87Effects, X87Error> {
         if let Some(effects) = common::evaluate(self, operation, input, memory.as_deref_mut()) {
             return Ok(effects);
         }
-        if input.len() != operation.read_size() || operation.write_size() != 0 && memory.is_none() {
+        if input.len() != operation.read_size()
+            || operation.write_size() != 0
+                && memory
+                    .as_ref()
+                    .is_none_or(|output| output.len() < operation.write_size())
+        {
             return Err(X87Error::InvalidInputLength);
         }
         let original_status = self.status;

@@ -262,3 +262,154 @@ fn input_and_output_preconditions_fail_before_output_mutation() {
         assert_eq!(actual_state, state);
     }
 }
+
+#[test]
+fn scalar_output_capacity_is_checked_before_pop_and_accepts_exact_or_larger_slices() {
+    let mut original = one();
+    original.status = 0x4704;
+    original.opcode = 0x345;
+    original.instruction_pointer = 0x1234_5678;
+    original.data_pointer = 0x8765_4321;
+    original.code_selector = 0x43;
+    original.data_selector = 0x4b;
+    let operation = X87Operation::Store {
+        format: X87Format::Float32,
+        pop: true,
+        truncate: false,
+    };
+    let mut expected_state = original;
+    expected_state.status = 0x4d04;
+    expected_state.tag = 0xffff;
+    for capacity in [3, 4, 10] {
+        for direct in [false, true] {
+            let mut state = original;
+            let mut output = [0xa5; 18];
+            let effects = if direct {
+                common::evaluate(
+                    &mut state,
+                    operation,
+                    &[],
+                    Some(&mut output[4..4 + capacity]),
+                )
+            } else {
+                let result = state.evaluate_in_place(
+                    operation,
+                    &[],
+                    0x8d7,
+                    Some(&mut output[4..4 + capacity]),
+                    &mut Default::default(),
+                );
+                if capacity == 3 {
+                    assert_eq!(result.err(), Some(X87Error::InvalidInputLength));
+                    None
+                } else {
+                    Some(result.unwrap())
+                }
+            };
+            if capacity == 3 {
+                assert!(effects.is_none());
+                assert_eq!(state, original);
+                assert_eq!(output, [0xa5; 18]);
+            } else {
+                let effects = effects.unwrap();
+                assert_eq!(state, expected_state);
+                assert_eq!(effects.memory_len, 4);
+                assert_eq!(effects.eflags, None);
+                assert!(!effects.unmasked_exception);
+                let mut expected_output = [0xa5; 18];
+                expected_output[4..8].copy_from_slice(&[0, 0, 0x80, 0x3f]);
+                assert_eq!(output, expected_output);
+            }
+        }
+    }
+}
+
+#[test]
+fn environment_and_save_outputs_require_their_exact_image_capacity_before_mutation() {
+    let mut original = X87State {
+        control: 0x2340,
+        status: 0x1800,
+        tag: 0xff3f,
+        opcode: 0x345,
+        instruction_pointer: 0x1234_5678,
+        data_pointer: 0x8765_4321,
+        code_selector: 0x43,
+        data_selector: 0x4b,
+        registers: [[0; 10]; 8],
+    };
+    for (index, register) in original.registers.iter_mut().enumerate() {
+        register.fill(index as u8 + 1);
+    }
+    for operand16 in [true, false] {
+        let environment: &[u8] = if operand16 {
+            &[
+                0x40, 0x23, 0, 0x18, 0x3f, 0xff, 0x78, 0x56, 0x43, 0, 0x21, 0x43, 0x4b, 0,
+            ]
+        } else {
+            &[
+                0x40, 0x23, 0xff, 0xff, 0, 0x18, 0xff, 0xff, 0x3f, 0xff, 0xff, 0xff, 0x78, 0x56,
+                0x34, 0x12, 0x43, 0, 0x45, 3, 0x21, 0x43, 0x65, 0x87, 0x4b, 0, 0, 0,
+            ]
+        };
+        for save in [false, true] {
+            let operation = if save {
+                X87Operation::Save { operand16 }
+            } else {
+                X87Operation::StoreEnvironment { operand16 }
+            };
+            let mut image = environment.to_vec();
+            if save {
+                for value in [4, 5, 6, 7, 8, 1, 2, 3] {
+                    image.extend_from_slice(&[value; 10]);
+                }
+            }
+            let expected_state = if save {
+                X87State {
+                    control: 0x037f,
+                    status: 0,
+                    tag: 0xffff,
+                    opcode: 0,
+                    instruction_pointer: 0,
+                    data_pointer: 0,
+                    code_selector: 0,
+                    data_selector: 0,
+                    registers: original.registers,
+                }
+            } else {
+                let mut state = original;
+                state.control = 0x237f;
+                state
+            };
+            for capacity in [image.len() - 1, image.len()] {
+                let mut state = original;
+                let mut output = [0xa5; 116];
+                let result = state.evaluate_in_place(
+                    operation,
+                    &[],
+                    0x8d7,
+                    Some(&mut output[4..4 + capacity]),
+                    &mut Default::default(),
+                );
+                if capacity < image.len() {
+                    assert_eq!(result.err(), Some(X87Error::InvalidInputLength));
+                    assert_eq!(state, original);
+                    assert_eq!(output, [0xa5; 116]);
+                } else {
+                    let effects = result.unwrap();
+                    assert_eq!(state, expected_state);
+                    assert_eq!(effects.memory_len, image.len());
+                    assert_eq!(effects.eflags, None);
+                    assert!(!effects.unmasked_exception);
+                    let mut expected_output = [0xa5; 116];
+                    expected_output[4..4 + image.len()].copy_from_slice(&image);
+                    assert_eq!(output, expected_output);
+                }
+            }
+            let public = original.evaluate(operation, &[], 0x8d7).unwrap();
+            assert_eq!(public.state, expected_state);
+            assert_eq!(public.memory_len, image.len());
+            assert_eq!(&public.memory[..image.len()], image);
+            assert_eq!(public.memory[image.len()..], [0; 108][image.len()..]);
+        }
+    }
+}
