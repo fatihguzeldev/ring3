@@ -522,17 +522,19 @@ impl Ext80 {
             } => {
                 let min = 1 - bias;
                 let mut exponent = exponent;
-                let mut extended = u128::from(significand) << 3;
-                let (unbounded, _, _) =
-                    rounded_significand(extended, 66 - fraction_bits, self.negative(), mode);
-                let tiny = exponent + i32::from(unbounded >= 1_u128 << (fraction_bits + 1)) < min;
-                if exponent < min {
-                    extended = shift_jam(extended, (min - exponent) as u32);
+                let rounded =
+                    rounded_ieee_significand(significand, fraction_bits, self.negative(), mode);
+                let tiny = exponent + i32::from(rounded.0 >= 1_u64 << (fraction_bits + 1)) < min;
+                let (mut significand, inexact, incremented) = if exponent < min {
+                    let extended = shift_jam(u128::from(significand) << 3, (min - exponent) as u32);
                     exponent = min;
-                }
-                let (mut significand, inexact, incremented) =
-                    rounded_significand(extended, 66 - fraction_bits, self.negative(), mode);
-                if significand >= 1_u128 << (fraction_bits + 1) {
+                    let (value, inexact, incremented) =
+                        rounded_significand(extended, 66 - fraction_bits, self.negative(), mode);
+                    (value as u64, inexact, incremented)
+                } else {
+                    rounded
+                };
+                if significand >= 1_u64 << (fraction_bits + 1) {
                     significand >>= 1;
                     exponent += 1;
                 }
@@ -550,14 +552,14 @@ impl Ext80 {
                     };
                     return (sign | bits, exceptions, infinity);
                 }
-                let normal = significand >= 1_u128 << fraction_bits;
+                let normal = significand >= 1_u64 << fraction_bits;
                 if tiny && inexact {
                     exceptions |= UNDERFLOW;
                 }
                 let encoded_exponent = if normal { (exponent + bias) as u64 } else { 0 };
                 (
                     sign | (encoded_exponent << fraction_bits)
-                        | (significand as u64 & ((1 << fraction_bits) - 1)),
+                        | (significand & ((1 << fraction_bits) - 1)),
                     exceptions,
                     incremented,
                 )
@@ -578,14 +580,11 @@ impl Ext80 {
                 significand,
                 exponent,
             } = self.kind()
+            && exponent < 2 - (1_i32 << (exponent_bits - 1))
         {
-            let (rounded, _, _) = rounded_significand(
-                u128::from(significand) << 3,
-                66 - fraction_bits,
-                self.negative(),
-                mode,
-            );
-            let exponent = exponent + i32::from(rounded >= 1_u128 << (fraction_bits + 1));
+            let (rounded, _, _) =
+                rounded_ieee_significand(significand, fraction_bits, self.negative(), mode);
+            let exponent = exponent + i32::from(rounded >= 1_u64 << (fraction_bits + 1));
             if exponent < 2 - (1_i32 << (exponent_bits - 1)) {
                 exceptions |= UNDERFLOW;
             }
@@ -717,6 +716,10 @@ mod division_tests;
 #[path = "value/tests/narrow.rs"]
 mod narrow_tests;
 
+#[cfg(test)]
+#[path = "value/tests/rounding.rs"]
+mod rounding_tests;
+
 fn wide_divide(a: u64, b: u64) -> u128 {
     let numerator = u128::from(a) << if a < b { 64 } else { 63 };
     let divisor = u128::from(b);
@@ -755,6 +758,34 @@ pub(crate) fn round(
     if extended == 0 {
         return Rounded::exact(Ext80::from_parts(negative, 0, 0), exceptions);
     }
+    let precision = match (control >> 8) & 3 {
+        0 => 24,
+        2 => 53,
+        _ => 64,
+    };
+    let mode = X87Rounding::from_control(control);
+    if (-16382..16383).contains(&exponent) && extended >> 66 == 1 {
+        // normalized normal results need only a u64 significand and the discarded grs bits.
+        let shift = 67 - precision;
+        let retained = ((extended >> 3) as u64) >> (64 - precision);
+        let discarded = extended as u64 & ((1_u64 << shift) - 1);
+        let incremented = rounding_increment(retained, discarded, 1 << (shift - 1), negative, mode);
+        let (rounded, overflow) = retained.overflowing_add(u64::from(incremented));
+        let carry = overflow || (precision < 64 && rounded >= 1_u64 << precision);
+        return Rounded {
+            value: Ext80::from_parts(
+                negative,
+                (exponent + i32::from(carry) + 16383) as u16,
+                if carry {
+                    1 << 63
+                } else {
+                    rounded << (64 - precision)
+                },
+            ),
+            exceptions: exceptions | if discarded != 0 { PRECISION } else { 0 },
+            incremented,
+        };
+    }
     let high = 127 - extended.leading_zeros();
     if high > 66 {
         extended = shift_jam(extended, high - 66);
@@ -764,12 +795,6 @@ pub(crate) fn round(
         extended <<= 66 - high;
         exponent -= (66 - high) as i32;
     }
-    let precision = match (control >> 8) & 3 {
-        0 => 24,
-        2 => 53,
-        _ => 64,
-    };
-    let mode = X87Rounding::from_control(control);
     let rounded = rounded_significand(extended, 67 - precision, negative, mode);
     let (mut unbounded, unbounded_inexact, unbounded_incremented) = rounded;
     let mut unbounded_exponent = exponent;
@@ -858,6 +883,34 @@ pub(crate) fn round(
         exceptions,
         incremented,
     }
+}
+
+fn rounding_increment(
+    retained: u64,
+    discarded: u64,
+    half: u64,
+    negative: bool,
+    mode: X87Rounding,
+) -> bool {
+    match mode {
+        X87Rounding::Nearest => discarded > half || (discarded == half && retained & 1 != 0),
+        X87Rounding::Down => negative && discarded != 0,
+        X87Rounding::Up => !negative && discarded != 0,
+        X87Rounding::Zero => false,
+    }
+}
+
+fn rounded_ieee_significand(
+    value: u64,
+    fraction_bits: u32,
+    negative: bool,
+    mode: X87Rounding,
+) -> (u64, bool, bool) {
+    let shift = 63 - fraction_bits;
+    let retained = value >> shift;
+    let discarded = value & ((1_u64 << shift) - 1);
+    let increment = rounding_increment(retained, discarded, 1 << (shift - 1), negative, mode);
+    (retained + u64::from(increment), discarded != 0, increment)
 }
 
 fn rounded_significand(
