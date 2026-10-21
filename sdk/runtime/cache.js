@@ -44,6 +44,7 @@ export class CodeCache {
     this.units = new Map(); this.context = 0; this.open = false; this.dirty = false; this.dirtyWork = 0; this.lastStop = 1;
     this.runs = 0; this.regions = 0; this.retired = 0; this.work = 0; this.admissions = 0; this.hits = 0; this.evictions = 0;
     this.coldRuns = 0; this.coldRetired = 0; this.coldWork = 0; this.jitPc = null;
+    this.chainedColdRuns = 0; this.chainedColdWork = 0; this.chainedColdRetired = 0;
     this.evictionReasons = {count:0,bytes:0};
     this.prunedNative = 0; this.prunedNativeBytes = 0; this.nativeCache = undefined;
     this.generatedModuleBytes = 0; this.retainedModuleBytes = 0;
@@ -205,6 +206,11 @@ export class CodeCache {
     const exports = new WebAssembly.Instance(module,{ring3:{memory:this.memory,functions:this.table,next:this.native.core_chain_next}}).exports;
     if (typeof exports.run !== 'function' || exports.run.length !== 3 || !(exports.regions instanceof WebAssembly.Global) || exports.regions.value !== 0)
       throw new Error('invalid core dispatch exports');
+    const cold = ['coldRuns','coldWork','coldRetired'].map(name => exports[name]);
+    if (cold.some(value => value !== undefined) &&
+        !cold.every(value => value instanceof WebAssembly.Global && value.value === 0))
+      throw new Error('invalid core dispatch cold counters');
+    this.chainedColdEnabled = cold.every(value => value !== undefined);
     this.dispatch = exports;
   }
   nativeSnapshot(name,bytes) {
@@ -342,12 +348,18 @@ export class CodeCache {
     const before = this.word(40), startPc = this.pc;
     let stop, failure;
     let regions;
+    let chainedColdRuns = 0, chainedColdWork = 0, chainedColdRetired = 0;
     try {
       if (this.compilation) this.recordSourceWitness(unit);
       if (this.chain) {
         if (this.table.get(unit.slot) !== unit.run) throw new Error('core table binding changed');
         stop = this.dispatch.run(this.context,this.budget,unit.slot) >>> 0;
-        regions = this.dispatch.regions.value;
+        regions = this.dispatch.regions.value >>> 0;
+        if (this.chainedColdEnabled) {
+          chainedColdRuns = this.dispatch.coldRuns.value >>> 0;
+          chainedColdWork = this.dispatch.coldWork.value >>> 0;
+          chainedColdRetired = this.dispatch.coldRetired.value >>> 0;
+        }
       } else {stop = unit.run(this.context, this.budget) >>> 0; regions = 1;}
     }
     catch (error) { failure = error; throw error; }
@@ -355,7 +367,7 @@ export class CodeCache {
       const ended = this.native.core_end(); this.open = false;
       if (ended !== 0 && !failure) throw new Error(`core_end returned ${ended}`);
     }
-    return this.finishRun(stop,before,regions,'compiled',startPc);
+    return this.finishRun(stop,before,regions,'compiled',startPc,chainedColdRuns,chainedColdWork,chainedColdRetired);
   }
   executeCold() {
     if (this.dirtyWork > 0xffffffff - this.budget) this.publish();
@@ -371,25 +383,34 @@ export class CodeCache {
     this.retainContext(this.native.core_context_ptr() >>> 0);
     return this.finishRun(stop,before,0,'cold',startPc);
   }
-  finishRun(stop,before,regions,kind,startPc) {
+  finishRun(stop,before,regions,kind,startPc,chainedColdRuns=0,chainedColdWork=0,chainedColdRetired=0) {
     const cold = kind === 'cold', retired = (this.word(40) - before) >>> 0;
     const remaining = this.word(44), work = this.budget - remaining;
+    if (!Number.isInteger(chainedColdRuns) || chainedColdRuns < 0 ||
+        !Number.isInteger(chainedColdWork) || chainedColdWork < 0 ||
+        !Number.isInteger(chainedColdRetired) || chainedColdRetired < 0 ||
+        chainedColdRetired > chainedColdWork || chainedColdRetired > retired || chainedColdWork > work ||
+        chainedColdRuns > chainedColdWork+1 || (!chainedColdRuns && (chainedColdWork || chainedColdRetired)))
+      throw new Error('invalid chained cold execution counters');
     if (remaining > this.budget || retired > work || !Number.isInteger(stop) || stop < 1 || stop > 10 || stop === 8 ||
-        !Number.isInteger(regions) || regions < (cold ? 0 : 1) || regions > work+1)
+        !Number.isInteger(regions) || regions < (cold ? 0 : 1) || regions > work-chainedColdWork+1)
       throw new Error(`invalid core stop ${stop} at 0x${this.pc.toString(16)}`);
     const identity = new DataView(this.memory.buffer).getBigUint64(this.context+120,true);
-    if (cold ? identity !== 0n : !this.units.has(identity))
+    const coldEnd = !cold && this.chain && this.chainedColdEnabled && chainedColdRuns > 0 && identity === 0n;
+    if (cold ? identity !== 0n : !coldEnd && !this.units.has(identity))
       throw new Error(cold ? 'cold execution retained a compiled identity' : 'core dispatch selected an unretained region');
     if (!cold && this.jitPc === startPc && stop === 1 && work === 0 && this.pc === startPc)
       throw new Error(`core JIT handoff made no progress at 0x${startPc.toString(16)}`);
-    this.jitPc = cold && stop === 1 ? this.pc : null;
+    this.jitPc = (cold || coldEnd) && stop === 1 ? this.pc : null;
     if (cold) {this.coldRuns++;this.coldRetired += retired;this.coldWork += work;}
     else {this.runs++;this.regions += regions;}
+    this.chainedColdRuns += chainedColdRuns; this.chainedColdWork += chainedColdWork; this.chainedColdRetired += chainedColdRetired;
     this.retired += retired; this.work += work; this.dirtyWork += work; this.lastStop = stop; this.dirty = true;
     if (stop !== 1) this.publish();
     if (stop === 4) throw Object.assign(new Error(`unsupported instruction at 0x${this.pc.toString(16)}`), {pc:this.pc,reason:stop});
     return {pc: this.pc, coreReason: stop, reason: stop === 1 ? null : this.engine.get(72),
-      detail: stop === 1 ? null : this.engine.get(80), retired, work, kind, id:cold ? null : identity, regions};
+      detail: stop === 1 ? null : this.engine.get(80), retired, work, kind, id:cold || coldEnd ? null : identity, regions,
+      chainedColdRuns,chainedColdWork,chainedColdRetired};
   }
   publish() {
     if (this.open) throw new Error('cannot publish an active core');
@@ -422,6 +443,7 @@ export class CodeCache {
   stats() {
     return {backend: 'core', chainEnabled:this.chain, runs: this.runs, regions:this.regions, retired: this.retired, work: this.work, admissions: this.admissions,
       coldEnabled:!!this.native.core_cold_run,coldRuns:this.coldRuns,coldRetired:this.coldRetired,coldWork:this.coldWork,
+      chainedColdRuns:this.chainedColdRuns,chainedColdWork:this.chainedColdWork,chainedColdRetired:this.chainedColdRetired,
       compileInstructionLimit:this.instructions, compileBlockLimit:this.blocks, workBudget:this.budget,
       engineCacheHits: this.hits, evictions: this.evictions, generatedModuleBytes: this.generatedModuleBytes,
       retainedModuleBytes: this.retainedModuleBytes, installedUnits: this.units.size, unitCapacity: this.capacity,

@@ -18,6 +18,7 @@ export class FrameProbe {
         reasons: { needCode: 0, budget: 0, memoryFault: 0, unsupported: 0, debug: 0,
           codeInvalidated: 0, host: 0, infrastructure: 0, cpuFault: 0, systemEntry: 0 } },
       compiled: { count: 0, work: 0, retired: 0 },
+      chainedCold: { runs: 0, work: 0, retired: 0 },
     };
     this.executionAttribution = new ExecutionAttribution();
     this.ownsMeasurements = session.measurements == null;
@@ -49,9 +50,10 @@ export class FrameProbe {
       stats: this.session.code.stats(), cold_diagnostics: this.session.code.coldDiagnostics?.() ?? null,
       pc: this.session.engine.get(48), thread: this.session.thread,
       execution_work: {
-        semantics: "successful code.execute results; guest work/retirement counts, not time",
+        semantics: "successful code.execute results by entry tier; chained_cold included in compiled; counts are not additive or time",
         cold: { ...this.executionWork.cold, reasons: { ...this.executionWork.cold.reasons } },
         compiled: { ...this.executionWork.compiled },
+        chained_cold: { ...this.executionWork.chainedCold },
       },
       execution_attribution: this.executionAttribution.snapshot(),
       physicalInputFocus: this.session.media?.lastPhysicalFocus
@@ -68,6 +70,12 @@ export class FrameProbe {
     if (run === undefined) return;
     const counters = cold ? this.executionWork.cold : this.executionWork.compiled;
     counters.count++; counters.work += run.work; counters.retired += run.retired;
+    if (!cold) {
+      const chained = this.executionWork.chainedCold;
+      chained.runs += run.chainedColdRuns ?? 0;
+      chained.work += run.chainedColdWork ?? 0;
+      chained.retired += run.chainedColdRetired ?? 0;
+    }
     if (cold) {
       if (run.work === 0) {
         counters.zeroWorkCount++;

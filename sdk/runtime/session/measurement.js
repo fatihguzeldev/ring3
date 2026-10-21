@@ -66,7 +66,7 @@ export class PhaseMeasurements {
           maximumNs: Math.round(phase.maximumMs * 1e6),
           count: phase.count,
           ...(phase.breakdown ? {
-            breakdownSemantics: "included in execution; not additive",
+            breakdownSemantics: "included in execution; not additive; entry tier, compiled includes chained cold work",
             breakdown: Object.fromEntries(Object.entries(phase.breakdown).map(([kind, part]) => [
               kind, {
                 elapsedNs: Math.round(part.milliseconds * 1e6),

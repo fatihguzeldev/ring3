@@ -19,7 +19,7 @@ function program(stop = 1, next = 0x2000, retired = 1, work = 1) {
     ...section(2, imports), ...section(3,[1,2]), ...section(7,[1,...string('run'),0,2]),
     ...section(10,[1,...u(body.length),...body])]);
 }
-function driver() {
+function driver(coldGlobals = []) {
   const body = [1,2,0x7f,0x41,0,0x24,0,
     0x20,0,0x20,1,0x20,2,0x11,2,0,0x21,3,0x41,1,0x24,0,
     0x20,3,0x41,1,0x47,0x04,0x40,0x20,3,0x0f,0x0b,
@@ -30,13 +30,19 @@ function driver() {
     0x20,4,0x45,0x04,0x40,0x41,1,0x0f,0x0b,
     0x20,0,0x20,0,0x28,2,44,0x20,4,0x11,2,0,0x21,3,
     0x41,2,0x24,0,0x20,3,0x0b];
+  let globalIndex = 1;
+  const globals = coldGlobals.filter(value => value.kind !== 'function');
+  const exports = coldGlobals.flatMap(value => value.kind === 'function'
+    ? [...string(value.name),0,1] : [...string(value.name),3,globalIndex++]);
   return Uint8Array.from([0,97,115,109,1,0,0,0,
     ...section(1,[3,0x60,1,0x7f,1,0x7f,0x60,3,0x7f,0x7f,0x7f,1,0x7f,0x60,2,0x7f,0x7f,1,0x7f]),
     ...section(2,[3,...string('ring3'),...string('memory'),2,0,2,
       ...string('ring3'),...string('functions'),1,0x70,1,1,...u(4097),
       ...string('ring3'),...string('next'),0,0]),
-    ...section(3,[1,1]),...section(6,[1,0x7f,1,0x41,0,0x0b]),
-    ...section(7,[2,...string('run'),0,1,...string('regions'),3,0]),
+    ...section(3,[1,1]),...section(6,[1+globals.length,0x7f,1,0x41,0,0x0b,
+      ...globals.flatMap(value => [value.type === 'i64' ? 0x7e : 0x7f,1,
+        value.type === 'i64' ? 0x42 : 0x41,...positive(value.initial ?? 0),0x0b])]),
+    ...section(7,[2+coldGlobals.length,...string('run'),0,1,...string('regions'),3,0,...exports]),
     ...section(10,[1,...u(body.length),...body])]);
 }
 function paddedProgram(encoded, padding = 0) {
@@ -45,10 +51,10 @@ function paddedProgram(encoded, padding = 0) {
   const bytes = new Uint8Array(encoded.length + header.length + padding);
   bytes.set(encoded); bytes.set(header,encoded.length); return bytes;
 }
-function fixture(select = pc => ({id: 1n, stop: 1, next: pc + 4})) {
+function fixture(select = pc => ({id: 1n, stop: 1, next: pc + 4}), dispatch = driver()) {
   const memory = new WebAssembly.Memory({initial: 2}), calls = [], arena = new Map([[48, 0x1000]]), control = {begin: () => 0};
   let context = 256, selected, encoded;
-  const links = new Map(), recency = [], dispatch = driver(), codePointer = 65536, ownersPointer = 16384, statusPointer = 49168;
+  const links = new Map(), recency = [], codePointer = 65536, ownersPointer = 16384, statusPointer = 49168;
   const d = () => new DataView(memory.buffer);
   const touch = id => {const index=recency.indexOf(id); if(index>=0)recency.splice(index,1); recency.push(id);};
   const api = {
@@ -742,4 +748,124 @@ test('callback consumes the standard 64-byte record without resident ownership',
   d.setUint16(4,1,true); assert.throws(() => callbackRecord(bytes,0x2000,0xffffe), /header/); d.setUint16(4,2,true);
   d.setUint32(56,1,true); assert.throws(() => callbackRecord(bytes,0x2000,0xffffe), /frame/); d.setUint32(56,0,true);
   d.setUint32(40,0x3000,true); assert.throws(() => callbackRecord(bytes,0x2000,0xffffe), /frame/);
+});
+
+const chainedColdNames = ['coldRuns','coldWork','coldRetired'];
+const coldDriver = () => driver(chainedColdNames.map(name => ({name})));
+function dispatchSteps(cache, f, steps) {
+  const dispatch = {...cache.dispatch};
+  let index = 0;
+  dispatch.run = (context, budget, slot) => {
+    assert.equal(context,f.context); assert(slot > 0);
+    const step = steps[index++]; assert(step,'bounded dispatcher fixture calls');
+    const data = new DataView(f.engine.memory.buffer);
+    data.setUint32(context+32,step.pc ?? 0x2000,true);
+    data.setUint32(context+40,data.getUint32(context+40,true)+step.retired,true);
+    data.setUint32(context+44,step.remaining ?? budget-step.work,true);
+    data.setBigUint64(context+120,step.id ?? 1n,true);
+    dispatch.regions.value = step.regions ?? 1;
+    for (const name of chainedColdNames) if (dispatch[name]) dispatch[name].value = step[name] ?? 0;
+    return step.stop ?? 2;
+  };
+  cache.dispatch = dispatch;
+}
+
+test('dispatcher cold counters are optional only as a complete zero-initialized i32 set', () => {
+  for (const encoded of [driver(),coldDriver()]) {
+    const f=fixture(undefined,encoded),cache=new CodeCache(f.engine,{chain:true});
+    assert.deepEqual(Object.fromEntries(['chainedColdRuns','chainedColdWork','chainedColdRetired'].map(name=>[name,cache.stats()[name]])),
+      {chainedColdRuns:0,chainedColdWork:0,chainedColdRetired:0});
+  }
+  for (const descriptors of [
+    [{name:'coldRuns'}],
+    chainedColdNames.map(name=>({name,type:name==='coldRuns'?'i64':'i32'})),
+    chainedColdNames.map(name=>({name,initial:name==='coldWork'?1:0})),
+    chainedColdNames.map(name=>({name,kind:name==='coldRuns'?'function':undefined})),
+  ]) {
+    const f=fixture(undefined,driver(descriptors));
+    assert.throws(()=>new CodeCache(f.engine,{chain:true}),/dispatch|cold/i);
+    assert(!f.calls.some(([name])=>name==='begin'));
+  }
+});
+
+test('mixed chained work stays one compiled-entry envelope without double-counting cold work', () => {
+  const f=fixture(undefined,coldDriver()),cache=new CodeCache(f.engine,{chain:true,budget:7}),unit=cache.entry();
+  dispatchSteps(cache,f,[
+    {work:7,retired:5,regions:2,coldRuns:2,coldWork:4,coldRetired:3},
+    {work:7,retired:7,pc:0x2004,regions:1},
+  ]);
+  const first=cache.execute(unit),second=cache.execute(unit);
+  assert.deepEqual({kind:first.kind,id:first.id,work:first.work,retired:first.retired,regions:first.regions,
+    chainedColdRuns:first.chainedColdRuns,chainedColdWork:first.chainedColdWork,chainedColdRetired:first.chainedColdRetired},
+    {kind:'compiled',id:1n,work:7,retired:5,regions:2,chainedColdRuns:2,chainedColdWork:4,chainedColdRetired:3});
+  assert.deepEqual([second.chainedColdRuns,second.chainedColdWork,second.chainedColdRetired],[0,0,0]);
+  const stats=cache.stats();
+  assert.deepEqual([stats.runs,stats.regions,stats.work,stats.retired],[2,3,14,12]);
+  assert.deepEqual([stats.coldRuns,stats.coldWork,stats.coldRetired],[0,0,0]);
+  assert.deepEqual([stats.chainedColdRuns,stats.chainedColdWork,stats.chainedColdRetired],[2,4,3]);
+  assert.deepEqual(f.calls.filter(([name])=>name==='export'),[['export',2,7],['export',2,7]]);
+  assert.equal(f.calls.filter(([name])=>name==='begin').length,2);
+  assert.equal(f.calls.filter(([name])=>name==='end').length,2);
+});
+
+test('a chained cold Budget terminal has no fabricated compiled owner and preserves total retirement', () => {
+  const f=fixture(undefined,coldDriver()),cache=new CodeCache(f.engine,{chain:true,budget:5}),unit=cache.entry();
+  dispatchSteps(cache,f,[{id:0n,work:5,retired:3,regions:1,coldRuns:1,coldWork:3,coldRetired:2}]);
+  const run=cache.execute(unit);
+  assert.equal(run.kind,'compiled'); assert.equal(run.id,null); assert.equal(run.coreReason,2);
+  assert.deepEqual([run.work,run.retired,run.regions,run.chainedColdRuns,run.chainedColdWork,run.chainedColdRetired],[5,3,1,1,3,2]);
+  assert.deepEqual([cache.stats().runs,cache.stats().work,cache.stats().retired,cache.stats().coldRuns],[1,5,3,0]);
+  assert.equal(cache.units.get(unit.id),unit); assert.equal(cache.open,false);
+  assert.deepEqual(f.calls.filter(([name])=>name==='export'),[['export',2,5]]);
+});
+
+test('a zero-work cold NeedCode after compiled progress requests JIT once instead of bouncing back to cold', () => {
+  const f=coldFixture([{stop:1,pc:0x1000,work:0}]);
+  const encoded=coldDriver();
+  f.api.core_dispatch_code_ptr=()=>{new Uint8Array(f.engine.memory.buffer,8192).set(encoded);return 8192;};
+  f.api.core_dispatch_code_len=()=>encoded.length;
+  const cache=new CodeCache(f.engine,{chain:true,budget:7});
+  cache.execute(cache.select()); const unit=cache.select();
+  dispatchSteps(cache,f,[
+    {id:0n,stop:1,pc:0x1000,work:2,retired:2,coldRuns:1,coldWork:0,coldRetired:0},
+    {id:1n,stop:2,pc:0x1004,work:7,retired:7},
+  ]);
+  const handoff=cache.execute(unit);
+  assert.deepEqual([handoff.kind,handoff.id,handoff.coreReason,handoff.work,handoff.chainedColdRuns,handoff.chainedColdWork],
+    ['compiled',null,1,2,1,0]);
+  assert(!f.calls.some(([name])=>name==='export'));
+  const next=cache.select(); assert.equal(next,unit);
+  assert.deepEqual(f.calls.filter(([name])=>name==='prepare').map(([,pc])=>pc),[0x1000,0x1000]);
+  cache.execute(next);
+  assert.equal(f.calls.filter(([name])=>name==='cold').length,1,'only the initial standalone cold call occurred');
+  assert.deepEqual([cache.stats().runs,cache.stats().work,cache.stats().retired,cache.stats().coldRuns],[2,9,9,1]);
+  assert.deepEqual([cache.stats().chainedColdRuns,cache.stats().chainedColdWork,cache.stats().chainedColdRetired],[1,0,0]);
+  assert.deepEqual(f.calls.filter(([name])=>name==='export'),[['export',2,9]]);
+  assert.equal(cache.pc,0x1004); assert.equal(cache.open,false);
+});
+
+test('chained cold metadata cannot exceed work, retirement, budget, or compiled-entry region bounds', () => {
+  for (const change of [
+    {coldRuns:-1}, {coldWork:-1}, {coldRetired:-1}, {coldRuns:0,coldWork:1},
+    {coldRuns:3,coldWork:1}, {coldWork:6}, {coldWork:2,coldRetired:3},
+    {coldRetired:3,coldWork:3,retired:2}, {remaining:6}, {retired:6}, {regions:0},
+    {id:0n,coldRuns:0,coldWork:0,coldRetired:0}, {id:0n,stop:8},
+  ]) {
+    const f=fixture(undefined,coldDriver()),cache=new CodeCache(f.engine,{chain:true,budget:5}),unit=cache.entry();
+    dispatchSteps(cache,f,[{id:1n,work:5,retired:5,regions:1,coldRuns:1,coldWork:1,coldRetired:1,...change}]);
+    assert.throws(()=>cache.execute(unit),/invalid|cold|identity|unretained/i);
+    assert.equal(cache.open,false); assert.equal(cache.stats().runs,0); assert.equal(cache.stats().work,0);
+    assert.equal(f.calls.filter(([name])=>name==='end').length,1);
+    assert(!f.calls.some(([name])=>name==='export'));
+  }
+});
+
+test('legacy dispatchers and nonchained execution still reject an unselected final identity', () => {
+  const f=fixture(),cache=new CodeCache(f.engine,{chain:true,budget:5}),unit=cache.entry();
+  dispatchSteps(cache,f,[{id:0n,work:5,retired:5}]);
+  assert.throws(()=>cache.execute(unit),/identity|unretained/i); assert.equal(cache.stats().runs,0);
+  const g=fixture(pc=>({id:1n,stop:2,next:pc+4})),direct=new CodeCache(g.engine,{chain:false}),selected=direct.entry();
+  g.control.begin=()=>{new DataView(g.engine.memory.buffer).setBigUint64(g.context+120,0n,true);return 0;};
+  assert.throws(()=>direct.execute(selected),/identity|unretained/i);
+  assert.equal(direct.open,false); assert.equal(direct.stats().runs,0);
 });

@@ -22,6 +22,40 @@ function observed(detailed = false) {
   }};
 }
 
+test('chained cold work remains included in its compiled-entry envelope and freezes with the probe', t => {
+  let reads = 0;
+  t.mock.method(performance, 'now', () => { reads++; return 0; });
+  const owner = session(), probe = new FrameProbe('mixed-work', owner), selected = {pc: 0x1000, id: 1n};
+  owner.frameProbe = probe;
+  const before = reads;
+  probe.recordExecution({kind: 'compiled', coreReason: 2, work: 7, retired: 5, regions: 2,
+    chainedColdRuns: 2, chainedColdWork: 4, chainedColdRetired: 3}, 0x1000, selected, 3);
+  probe.recordExecution({kind: 'compiled', coreReason: 1, work: 2, retired: 2, regions: 1,
+    chainedColdRuns: 1, chainedColdWork: 0, chainedColdRetired: 0}, 0x1000, selected, 1);
+  assert.equal(reads, before, 'mixed work adds no clock reads');
+  const snap = probe.snapshot();
+  assert.deepEqual(snap.execution_work.compiled, {count: 2, work: 9, retired: 7});
+  assert.deepEqual(snap.execution_work.chained_cold, {runs: 3, work: 4, retired: 3});
+  assert.equal(snap.execution_work.cold.count, 0);
+  assert.match(snap.execution_work.semantics, /chained_cold included in compiled/);
+  for (const row of [snap.execution_attribution.totals, snap.execution_attribution.top32[0]]) {
+    assert.deepEqual([row.count, row.work, row.retired, row.regions], [2, 9, 7, 3]);
+    assert.deepEqual([row.chainedColdRuns, row.chainedColdWork, row.chainedColdRetired], [3, 4, 3]);
+    assert.equal(row.elapsedNs, 4_000_000);
+  }
+  snap.execution_work.chained_cold.work = 99;
+  assert.equal(probe.snapshot().execution_work.chained_cold.work, 4);
+  probe.finish('session-ended');
+  const frozen = owner.events.at(-1).execution_attribution;
+  assert.equal(frozen.totals.chainedColdWork, 4);
+  probe.recordExecution({kind: 'compiled', coreReason: 2, work: 8, retired: 8, regions: 1,
+    chainedColdRuns: 1, chainedColdWork: 7, chainedColdRetired: 7}, 0x1000, selected, 2);
+  assert.deepEqual(probe.snapshot().execution_attribution, frozen);
+  const next = new FrameProbe('new-mixed-work', owner);
+  assert.deepEqual(next.snapshot().execution_work.chained_cold, {runs: 0, work: 0, retired: 0});
+  next.finish('session-ended');
+});
+
 test('aggregate phases require no observer and close throwing scopes in finally', async t => {
   let now = 0;
   t.mock.method(performance, 'now', () => now);
@@ -69,7 +103,7 @@ test('execution breakdown reuses one clock pair and includes throwing runs in ag
   assert.deepEqual(snapshot, {
     execution: {
       elapsedNs: 8_000_000, maximumNs: 5_000_000, count: 3,
-      breakdownSemantics: 'included in execution; not additive',
+      breakdownSemantics: 'included in execution; not additive; entry tier, compiled includes chained cold work',
       breakdown: {
         cold: {elapsedNs: 3_000_000, maximumNs: 2_000_000, count: 2},
         compiled: {elapsedNs: 5_000_000, maximumNs: 5_000_000, count: 1},
@@ -131,13 +165,14 @@ test('probe work counters separate zero-work NeedCode from gates and positive pr
   assert.equal(reads, beforeReads);
   assert.equal(owner.events.length, beforeEvents);
   const expected = {
-    semantics: 'successful code.execute results; guest work/retirement counts, not time',
+    semantics: 'successful code.execute results by entry tier; chained_cold included in compiled; counts are not additive or time',
     cold: {
       count: 5, work: 6, retired: 6, zeroWorkCount: 3, positiveWorkCount: 2, zeroWorkNeedCodeCount: 1,
       reasons: {needCode: 2, budget: 1, memoryFault: 1, unsupported: 0, debug: 0,
         codeInvalidated: 0, host: 1, infrastructure: 0, cpuFault: 0, systemEntry: 0},
     },
     compiled: {count: 2, work: 5, retired: 3},
+    chained_cold: {runs: 0, work: 0, retired: 0},
   };
   const snapshot = probe.snapshot().execution_work;
   assert.deepEqual(snapshot, expected);
