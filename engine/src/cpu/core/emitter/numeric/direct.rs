@@ -207,7 +207,7 @@ pub(super) fn begin(out: &mut Output<'_>, operation: Operation, next: u32) -> bo
             operand(out, X, FA);
             register(out, source, Y);
             operand(out, Y, FB);
-            arithmetic(out, kind);
+            arithmetic(out, kind, false);
             out.c()
                 .local_get(TOP)
                 .i32_const(i32::from(destination))
@@ -235,7 +235,7 @@ pub(super) fn begin(out: &mut Output<'_>, operation: Operation, next: u32) -> bo
                 .f32_reinterpret_i32()
                 .f64_promote_f32()
                 .local_set(FB);
-            arithmetic(out, kind);
+            arithmetic(out, kind, true);
             write_f64(out, X, TOP);
         }
         _ => unreachable!(),
@@ -640,9 +640,9 @@ fn arithmetic_control(out: &mut Output<'_>) {
         .i32_eq()
         .local_set(DOUBLE);
 }
-fn arithmetic(out: &mut Output<'_>, kind: X87Binary) {
+fn arithmetic(out: &mut Output<'_>, kind: X87Binary, single_source: bool) {
     out.c().local_get(DOUBLE).if_(BlockType::Empty);
-    double::arithmetic(out, kind, 1);
+    double::arithmetic(out, kind, single_source, 1);
     out.c().else_();
     arithmetic_single(out, kind, 1);
     out.c().end();

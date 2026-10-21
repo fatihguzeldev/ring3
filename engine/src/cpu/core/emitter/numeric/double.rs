@@ -43,7 +43,7 @@ pub(super) fn bound(out: &mut Output<'_>, value: u32, depth: u32) {
         .br_if(depth);
 }
 
-pub(super) fn arithmetic(out: &mut Output<'_>, kind: X87Binary, depth: u32) {
+pub(super) fn arithmetic(out: &mut Output<'_>, kind: X87Binary, single_source: bool, depth: u32) {
     let reverse = matches!(kind, X87Binary::ReverseSubtract | X87Binary::ReverseDivide);
     let left = if reverse { B } else { A };
     let right = if reverse { A } else { B };
@@ -92,7 +92,7 @@ pub(super) fn arithmetic(out: &mut Output<'_>, kind: X87Binary, depth: u32) {
                 .local_set(LEFT)
                 .local_get(B)
                 .local_set(RIGHT);
-            product_error(out);
+            product_error(out, single_source);
             result_flags(out);
         }
         X87Binary::Divide | X87Binary::ReverseDivide => {
@@ -116,7 +116,7 @@ pub(super) fn arithmetic(out: &mut Output<'_>, kind: X87Binary, depth: u32) {
                 .f64_mul()
                 .local_set(SUM);
             bound(out, SUM, depth);
-            product_error(out);
+            product_error(out, single_source && !reverse);
             out.c()
                 .local_get(left)
                 .f64_abs()
@@ -185,9 +185,26 @@ fn split(out: &mut Output<'_>, value: u32, high: u32, low: u32) {
         .local_set(low);
 }
 
-fn product_error(out: &mut Output<'_>) {
+fn product_error(out: &mut Output<'_>, single_right: bool) {
     // bounded exponents keep both the split and the complete 106-bit residual in the normal range.
     split(out, LEFT, AH, AL);
+    if single_right {
+        // a 24-bit right operand makes both split products exact in binary64.
+        out.c()
+            .local_get(SUM)
+            .local_get(AH)
+            .local_get(RIGHT)
+            .f64_mul()
+            .f64_sub()
+            .local_set(WORK)
+            .local_get(AL)
+            .local_get(RIGHT)
+            .f64_mul()
+            .local_get(WORK)
+            .f64_sub()
+            .local_set(ERROR);
+        return;
+    }
     split(out, RIGHT, BH, BL);
     out.c()
         .local_get(SUM)

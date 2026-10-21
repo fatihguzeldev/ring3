@@ -155,6 +155,9 @@ try {
   runCase('pc24-wide-positive-operands-remain-canonical',{control:0x3f,a:ext(ONE,200),b:ext(ONE,200),helpers:1});
   runCase('pc24-wide-negative-exponents-remain-canonical',{control:0x3f,a:ext(ONE,-200),b:ext(ONE,-200),helpers:1});
   runCase('pc24-wide-operands-with-narrow-product-remain-canonical',{control:0x3f,code:'d8c9',opcode:0xc9,kind:'mul',a:ext(ONE,200),b:ext(ONE,-200),helpers:1});
+  for(const[kind,code,opcode]of[['mul','d80b',0x0b],['div','d833',0x33],['rdiv','d83b',0x3b]]){
+    runCase(`pc53-${kind}-normal-float32-memory`,{code,opcode,kind,a:next,memoryValue:ext(0xc000000000000000n,1),data:[[0x3000,unhex('00004040')]]});
+  }
   report.complete=true;checkpoint();console.log(JSON.stringify({complete:true,cases:report.cases.length,engineSha256:engine.sha256}));
 }catch(error){report.failure={stage,message:String(error),stack:error.stack};checkpoint();throw error;}
 finally{closeSync(output);}
