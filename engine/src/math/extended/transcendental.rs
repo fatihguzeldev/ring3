@@ -7,6 +7,8 @@ use core::cmp::Ordering;
 use super::value::{self, Ext80, Kind, Rounded};
 use crate::math::{NumericalError, OVERFLOW, PRECISION, UNDERFLOW, ZERO_DIVIDE};
 
+mod bounded;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Function {
     Exp2MinusOne,
@@ -373,6 +375,22 @@ pub(crate) fn evaluate(
             ));
         }
     }
+    if function == Function::Sin
+        && let Some(result) = bounded::sin(x, control)
+    {
+        return Ok(result);
+    }
+    evaluate_precise(function, x, y, control, operand_exceptions, workspace)
+}
+
+fn evaluate_precise(
+    function: Function,
+    x: Ext80,
+    y: Ext80,
+    control: u16,
+    operand_exceptions: u16,
+    workspace: &mut crate::math::NumericalWorkspace,
+) -> Result<Rounded, NumericalError> {
     let cancellation = if matches!(
         function,
         Function::Exp2MinusOne | Function::Log2PlusOneMultiply
