@@ -44,6 +44,12 @@ pub(super) struct RegionRef {
     code: Rc<CompiledCode>,
 }
 
+pub(super) enum TransitionLookup {
+    Stop,
+    Miss,
+    Linked(RegionRef, u32),
+}
+
 impl Deref for RegionRef {
     type Target = CompiledCode;
 
@@ -177,13 +183,24 @@ impl CoreCache32 {
         memory: &AddressSpace,
         pc: u32,
     ) -> Option<(RegionRef, u32)> {
-        let code = self.lookup(memory, pc)?;
-        let entry = self.retained(&code)?;
-        if !self.reciprocal_slot(code.key, entry) {
+        let key = *self.entries.get(&pc)?;
+        let entry = self.region(key)?;
+        if !entry.code.is_current(memory) {
+            self.remove(key);
+            self.source_invalidations = self.source_invalidations.saturating_add(1);
             return None;
         }
-        let slot = entry.slot;
-        Some((code, slot))
+        let linked = self.reciprocal_slot(key, entry).then(|| {
+            (
+                RegionRef {
+                    key,
+                    code: Rc::clone(&entry.code),
+                },
+                entry.slot,
+            )
+        });
+        self.touch(key.index);
+        linked
     }
 
     pub(super) fn install_link(&mut self, code: &RegionRef, slot: u32) -> Result<(), LinkError> {

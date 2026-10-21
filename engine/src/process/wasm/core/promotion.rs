@@ -21,6 +21,7 @@ impl CoreCache32 {
         self.pending_transition.is_some()
     }
 
+    #[cfg(test)]
     pub(in crate::process) fn observe_transition(
         &mut self,
         memory: &AddressSpace,
@@ -31,22 +32,51 @@ impl CoreCache32 {
     ) -> bool {
         if threshold == 0
             || self.transition_pending()
-            || source.identity() == target.identity()
-            || (target.formation_roots().contains(&GuestAddress(pc))
-                && source
-                    .formation_roots()
-                    .iter()
-                    .all(|root| target.formation_roots().contains(root)))
-            || source
-                .entrypoints()
-                .binary_search_by_key(&pc, |entry| entry.0)
-                .is_ok()
+            || !formation_candidate(source, target, pc)
             || !self.linked_current(memory, source)
             || !self.linked_current(memory, target)
             || !self.indexes(target, pc)
         {
             return false;
         }
+        self.record_transition(memory, source, target, pc, threshold)
+    }
+
+    pub(in crate::process) fn lookup_transition(
+        &mut self,
+        memory: &AddressSpace,
+        source: &RegionRef,
+        pc: u32,
+        threshold: u32,
+    ) -> TransitionLookup {
+        if self.transition_pending() || !source.is_current(memory) {
+            return TransitionLookup::Stop;
+        }
+        let Some((target, slot)) = self.lookup_linked(memory, pc) else {
+            return TransitionLookup::Miss;
+        };
+        // The lookup just validated the target's source, index and reciprocal link.
+        // No guest execution or cache mutation can intervene in this borrow.
+        if threshold != 0
+            && formation_candidate(source, &target, pc)
+            && self
+                .retained(source)
+                .is_some_and(|entry| self.reciprocal_slot(source.key, entry))
+            && self.record_transition(memory, source, &target, pc, threshold)
+        {
+            return TransitionLookup::Stop;
+        }
+        TransitionLookup::Linked(target, slot)
+    }
+
+    fn record_transition(
+        &mut self,
+        memory: &AddressSpace,
+        source: &RegionRef,
+        target: &RegionRef,
+        pc: u32,
+        threshold: u32,
+    ) -> bool {
         let heat = &mut self.regions[source.key.index].as_mut().unwrap().heat;
         if heat.target == target.identity() && heat.pc == pc {
             heat.hits = heat.hits.saturating_add(1);
@@ -139,6 +169,19 @@ impl CoreCache32 {
         self.retained(code)
             .is_some_and(|row| self.reciprocal_slot(code.key, row) && code.is_current(memory))
     }
+}
+
+fn formation_candidate(source: &RegionRef, target: &RegionRef, pc: u32) -> bool {
+    source.identity() != target.identity()
+        && !(target.formation_roots().contains(&GuestAddress(pc))
+            && source
+                .formation_roots()
+                .iter()
+                .all(|root| target.formation_roots().contains(root)))
+        && source
+            .entrypoints()
+            .binary_search_by_key(&pc, |entry| entry.0)
+            .is_err()
 }
 
 #[cfg(test)]

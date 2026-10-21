@@ -19,9 +19,9 @@ use super::super::numeric::NumericBank;
 use crate::process::core_numeric_tests::NumericBank;
 
 #[cfg(target_arch = "wasm32")]
-use super::super::cache::{CoreCache32, RegionRef, TRANSITION_HITS};
+use super::super::cache::{CoreCache32, RegionRef, TRANSITION_HITS, TransitionLookup};
 #[cfg(not(target_arch = "wasm32"))]
-use crate::process::core_cache_tests::{CoreCache32, RegionRef, TRANSITION_HITS};
+use crate::process::core_cache_tests::{CoreCache32, RegionRef, TRANSITION_HITS, TransitionLookup};
 
 pub(in crate::process) fn chain_next(
     instance: &mut EngineInstance,
@@ -44,16 +44,14 @@ pub(in crate::process) fn chain_next(
     let Some(memory) = instance.memory.as_ref() else {
         return u32::MAX;
     };
-    if cache.transition_pending() || !current.is_current(memory) {
-        return 0;
-    }
-    if let Some((code, slot)) = cache.lookup_linked(memory, pc) {
-        if cache.observe_transition(memory, current, &code, pc, TRANSITION_HITS) {
-            return 0;
+    match cache.lookup_transition(memory, current, pc, TRANSITION_HITS) {
+        TransitionLookup::Stop => return 0,
+        TransitionLookup::Linked(code, slot) => {
+            context.bytes_mut()[120..128].copy_from_slice(&code.identity().to_le_bytes());
+            *selected = Some(code);
+            return slot;
         }
-        context.bytes_mut()[120..128].copy_from_slice(&code.identity().to_le_bytes());
-        *selected = Some(code);
-        return slot;
+        TransitionLookup::Miss => {}
     }
     let segments = numeric.segment_context();
     context.bytes_mut()[120..128].fill(0);
