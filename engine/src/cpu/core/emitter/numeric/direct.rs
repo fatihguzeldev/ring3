@@ -116,7 +116,7 @@ pub(super) fn begin(out: &mut Output<'_>, operation: Operation, next: u32) -> bo
             pop,
             ..
         } => {
-            register(out, 0, X);
+            occupied(out, 0, X);
             ieee::pack(out, X, format);
             memory::prepare(out, address.unwrap(), format.size() as u32, true, false, 52);
             out.c().local_get(52).local_get(PACKED);
@@ -326,7 +326,7 @@ fn pointer(out: &mut Output<'_>, physical: u32, index: u8, destination: u32) {
         .i32_add()
         .local_set(destination);
 }
-fn register(out: &mut Output<'_>, index: u8, destination: u32) {
+fn occupied(out: &mut Output<'_>, index: u8, destination: u32) {
     assert!(index < 8);
     out.c()
         .local_get(TOP)
@@ -338,6 +338,9 @@ fn register(out: &mut Output<'_>, index: u8, destination: u32) {
     pointer(out, TOP, index, destination);
     tag(out, TMP);
     out.c().i32_const(3).i32_eq().br_if(0);
+}
+fn register(out: &mut Output<'_>, index: u8, destination: u32) {
+    occupied(out, index, destination);
     out.c()
         .local_get(destination)
         .i32_load16_u(mem(8, 0))
