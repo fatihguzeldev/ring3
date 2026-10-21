@@ -4,6 +4,8 @@ use crate::math::{
     DENORMAL, INVALID, OVERFLOW, PRECISION, Rounding as X87Rounding, UNDERFLOW, ZERO_DIVIDE,
 };
 
+mod narrow;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Ext80(pub [u8; 10]);
 
@@ -280,22 +282,10 @@ impl Ext80 {
                 },
             ) => {
                 let below = a < b;
-                let numerator = u128::from(a) << if below { 64 } else { 63 };
-                let divisor = u128::from(b);
-                let mut quotient = numerator / divisor;
-                let mut remainder = numerator % divisor;
-                for _ in 0..3 {
-                    remainder <<= 1;
-                    quotient = (quotient << 1) | u128::from(remainder >= divisor);
-                    if remainder >= divisor {
-                        remainder -= divisor;
-                    }
-                }
-                quotient |= u128::from(remainder != 0);
                 round(
                     negative,
                     ae - be - i32::from(below),
-                    quotient,
+                    narrow::divide(a, b, control).unwrap_or_else(|| wide_divide(a, b)),
                     control,
                     exceptions,
                 )
@@ -722,6 +712,25 @@ impl Ext80 {
 #[cfg(test)]
 #[path = "value/tests/division.rs"]
 mod division_tests;
+
+#[cfg(test)]
+#[path = "value/tests/narrow.rs"]
+mod narrow_tests;
+
+fn wide_divide(a: u64, b: u64) -> u128 {
+    let numerator = u128::from(a) << if a < b { 64 } else { 63 };
+    let divisor = u128::from(b);
+    let mut quotient = numerator / divisor;
+    let mut remainder = numerator % divisor;
+    for _ in 0..3 {
+        remainder <<= 1;
+        quotient = (quotient << 1) | u128::from(remainder >= divisor);
+        if remainder >= divisor {
+            remainder -= divisor;
+        }
+    }
+    quotient | u128::from(remainder != 0)
+}
 
 impl Rounded {
     pub(crate) fn exact(value: Ext80, exceptions: u16) -> Self {
