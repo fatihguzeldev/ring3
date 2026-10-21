@@ -354,11 +354,18 @@ export class Session {
             ? this.measurements.run("entry", () => this.code.select())
             : this.code.select(),
           callback = this.stack().at(-1);
-        const run = this.measurements
-          ? this.measurements.run("execution", () => this.code.execute(unit),
-              this.frameProbe?.measurements === this.measurements ? (unit === null ? "cold" : "compiled") : undefined)
-          : this.code.execute(unit);
-        this.frameProbe?.recordExecution(run);
+        const measurements = this.measurements,
+          probe = this.frameProbe?.measurements === measurements ? this.frameProbe : null,
+          startPc = probe ? this.code.pc : undefined;
+        let run;
+        try {
+          run = measurements
+            ? measurements.run("execution", () => this.code.execute(unit),
+                probe ? (unit === null ? "cold" : "compiled") : undefined)
+            : this.code.execute(unit);
+        } finally {
+          if (probe) probe.recordExecution(run, startPc, unit, measurements.lastMilliseconds?.("execution"));
+        }
         this.recent.push(run);
         if (this.recent.length > 48) this.recent.shift();
         if (run.coreReason === 1 || run.coreReason === 2 || run.coreReason === 6) continue;

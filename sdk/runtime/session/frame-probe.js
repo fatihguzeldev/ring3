@@ -1,4 +1,6 @@
 import { PhaseMeasurements } from "./measurement.js";
+import { ExecutionAttribution } from "./frame-probe/execution.js";
+import { liveModules } from "./diagnostics/modules.js";
 
 // successful Present returns bracket bounded host observations; draining enqueues can precede them.
 const origin = BigInt(Math.floor(performance.timeOrigin * 1e6));
@@ -17,16 +19,19 @@ export class FrameProbe {
           codeInvalidated: 0, host: 0, infrastructure: 0, cpuFault: 0, systemEntry: 0 } },
       compiled: { count: 0, work: 0, retired: 0 },
     };
+    this.executionAttribution = new ExecutionAttribution();
     this.ownsMeasurements = session.measurements == null;
     this.measurements = session.measurements ?? new PhaseMeasurements();
     if (this.ownsMeasurements) session.measurements = this.measurements;
     try {
       this.event("armed", { target_intervals: 8, required_producer_edges: 9,
         engine_sha256: session.engine.hash, backend: "core", callback_backend: "core", clean_graphics_boundary: true,
+        live_modules: liveModules(session.engine),
         measurement_enabled: true,
         phase_semantics: "cumulative inclusive host elapsed time; async waits include event-loop work; paused-loop waits excluded; in-flight async spans may cross pause",
         semantics: "successful native Present return brackets; enqueue may precede Busy retry completion; GPU completion is Promise-observed, not compositor visibility" });
     } catch (error) {
+      this.executionAttribution.finish();
       this.releaseMeasurements();
       throw error;
     }
@@ -48,15 +53,19 @@ export class FrameProbe {
         cold: { ...this.executionWork.cold, reasons: { ...this.executionWork.cold.reasons } },
         compiled: { ...this.executionWork.compiled },
       },
+      execution_attribution: this.executionAttribution.snapshot(),
       physicalInputFocus: this.session.media?.lastPhysicalFocus
         ? { ...this.session.media.lastPhysicalFocus } : null };
   }
-  recordExecution(run) {
+  recordExecution(run, startPc, selected, milliseconds) {
     if (this.closed || this.session.measurements !== this.measurements) return;
-    const cold = run.kind === "cold";
-    if (!cold && run.kind !== "compiled") throw new Error("invalid frame probe execution kind");
+    const cold = run?.kind === "cold";
+    if (run !== undefined && !cold && run.kind !== "compiled") throw new Error("invalid frame probe execution kind");
     const reason = cold ? coreStopNames[run.coreReason] : null;
     if (cold && typeof reason !== "string") throw new Error("invalid frame probe cold stop");
+    if (startPc !== undefined && milliseconds != null)
+      this.executionAttribution.record(run, startPc, selected, milliseconds);
+    if (run === undefined) return;
     const counters = cold ? this.executionWork.cold : this.executionWork.compiled;
     counters.count++; counters.work += run.work; counters.retired += run.retired;
     if (cold) {
@@ -111,11 +120,14 @@ export class FrameProbe {
     if (this.closed) return;
     this.closed = true;
     try {
+      this.executionAttribution.finish();
       this.event("finished", { reason, accepted_producer_edges: this.accepted,
         completed_presents: this.completed, attempts: this.attempts, retries: this.retries,
         batches: this.batches, open_tagged_batches: this.openTaggedBatches,
+        execution_attribution: this.executionAttribution.snapshot(),
       });
     } finally {
+      this.executionAttribution.finish();
       this.releaseMeasurements();
       if (this.session.frameProbe === this) this.session.frameProbe = null;
     }

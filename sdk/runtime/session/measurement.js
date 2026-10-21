@@ -17,6 +17,7 @@ export class PhaseMeasurements {
     phase.milliseconds += elapsed;
     phase.maximumMs = Math.max(phase.maximumMs, elapsed);
     phase.count++;
+    phase.lastMilliseconds = elapsed;
     if (name === "execution" && (classification === "cold" || classification === "compiled")) {
       const breakdown = phase.breakdown ??= {};
       const part = breakdown[classification] ?? { milliseconds: 0, maximumMs: 0, count: 0 };
@@ -26,6 +27,9 @@ export class PhaseMeasurements {
       breakdown[classification] = part;
     }
     this.phases.set(name, phase);
+  }
+  lastMilliseconds(name) {
+    return this.phases.get(name)?.lastMilliseconds ?? null;
   }
   run(name, operation, classification) {
     const start = performance.now();

@@ -290,3 +290,124 @@ test('an async scope finishing after probe release cannot contaminate a later pr
   assert.equal(owner.measurements, second.measurements);
   second.finish('session-ended');
 });
+
+test('outer execution attribution reuses measured elapsed time and separates failed attempts', t => {
+  let now = 0, reads = 0;
+  t.mock.method(performance, 'now', () => { reads++; return now; });
+  const owner = session(), probe = new FrameProbe('outer-clock', owner);
+  owner.frameProbe = probe;
+  const phases = probe.measurements, beforeReads = reads, beforeEvents = owner.events.length;
+  assert.equal(phases.lastMilliseconds('execution'), null);
+  const cold = {kind: 'cold', id: null, pc: 0x9999, coreReason: 2, work: 2, retired: 2, regions: 0};
+  const first = phases.run('execution', () => { now = 2; return cold; }, 'cold');
+  probe.recordExecution(first, 0x1000, null, phases.lastMilliseconds('execution'));
+  const selected = {pc: 0x3000, id: 7n}, failure = new Error('execute failed');
+  assert.throws(() => phases.run('execution', () => { now = 7; throw failure; }, 'compiled'),
+    error => error === failure);
+  probe.recordExecution(undefined, 0x1004, selected, phases.lastMilliseconds('execution'));
+  const compiled = {kind: 'compiled', id: 99n, pc: 0x8888, coreReason: 2, work: 5, retired: 3, regions: 4};
+  const last = phases.run('execution', () => { now = 8; return compiled; }, 'compiled');
+  probe.recordExecution(last, 0x1004, selected, phases.lastMilliseconds('execution'));
+  assert.equal(reads - beforeReads, 6, 'three attempts use only the existing three clock pairs');
+  assert.equal(owner.events.length, beforeEvents, 'attribution emits no per-attempt events');
+  const snapshot = probe.snapshot(), attribution = snapshot.execution_attribution;
+  assert.deepEqual(attribution.totals, {count: 2, work: 7, retired: 5, regions: 4,
+    elapsedNs: 3_000_000, maximumNs: 2_000_000});
+  assert.deepEqual(attribution.failed, {count: 1, elapsedNs: 5_000_000, maximumNs: 5_000_000});
+  assert.equal(snapshot.phases.execution.count, attribution.totals.count + attribution.failed.count);
+  assert.equal(snapshot.phases.execution.elapsedNs, attribution.totals.elapsedNs + attribution.failed.elapsedNs);
+  assert.equal(snapshot.execution_work.cold.count, 1);
+  assert.equal(snapshot.execution_work.compiled.count, 1, 'a throwing attempt has no returned guest work');
+  assert.equal(attribution.top32.length, 2);
+  assert.equal(attribution.top32[0].pc, 0x1000, 'grouping uses the actual start, not the returned PC');
+  assert.equal(phases.lastMilliseconds('missing'), null);
+  probe.finish('session-ended');
+});
+
+test('outer execution rows group tier and start PC while preserving selected-owner variation', t => {
+  let reads = 0;
+  t.mock.method(performance, 'now', () => { reads++; return 0; });
+  const owner = session(), probe = new FrameProbe('outer-groups', owner);
+  owner.frameProbe = probe;
+  const old = {pc: 0x9000, id: 7n}, fresh = {pc: 0x8000, id: 8n};
+  const beforeReads = reads, beforeEvents = owner.events.length;
+  probe.recordExecution({kind: 'cold', id: null, pc: 0x2000, coreReason: 1, work: 0, retired: 0, regions: 0}, 0x1000, null, 1);
+  probe.recordExecution({kind: 'compiled', id: 99n, pc: 0x3000, coreReason: 2, work: 5, retired: 3, regions: 4}, 0x1000, old, 2);
+  probe.recordExecution({kind: 'compiled', id: 100n, pc: 0x4000, coreReason: 2, work: 7, retired: 7, regions: 2}, 0x1000, fresh, 3);
+  probe.recordExecution({kind: 'compiled', id: 101n, pc: 0x5000, coreReason: 2, work: 1, retired: 1, regions: 1}, 0x1001, fresh, 5);
+  old.pc = 0xdead; old.id = 55n; fresh.pc = 0xbeef; fresh.id = 66n;
+  assert.equal(reads, beforeReads);
+  assert.equal(owner.events.length, beforeEvents);
+  const expected = [
+    {kind: 'compiled', pc: 0x1000, firstSelectedRoot: 0x9000, firstSelectedId: '7', lastSelectedRoot: 0x8000,
+      lastSelectedId: '8', count: 2, work: 12, retired: 10, regions: 6, elapsedNs: 5_000_000, maximumNs: 3_000_000},
+    {kind: 'compiled', pc: 0x1001, firstSelectedRoot: 0x8000, firstSelectedId: '8', lastSelectedRoot: 0x8000,
+      lastSelectedId: '8', count: 1, work: 1, retired: 1, regions: 1, elapsedNs: 5_000_000, maximumNs: 5_000_000},
+    {kind: 'cold', pc: 0x1000, firstSelectedRoot: null, firstSelectedId: null, lastSelectedRoot: null,
+      lastSelectedId: null, count: 1, work: 0, retired: 0, regions: 0, elapsedNs: 1_000_000, maximumNs: 1_000_000},
+  ];
+  const snapshot = probe.snapshot().execution_attribution;
+  assert.equal(snapshot.capacity, 8192);
+  assert.equal(snapshot.distinctEntries, 3);
+  assert.deepEqual(snapshot.top32, expected);
+  assert.deepEqual(snapshot.totals, {count: 4, work: 13, retired: 11, regions: 7,
+    elapsedNs: 11_000_000, maximumNs: 5_000_000});
+  assert.deepEqual(snapshot.overflow, {count: 0, work: 0, retired: 0, regions: 0, elapsedNs: 0, maximumNs: 0});
+  snapshot.top32[0].count = 100;
+  snapshot.totals.elapsedNs = 0;
+  assert.deepEqual(probe.snapshot().execution_attribution.top32, expected, 'snapshots cannot rewrite retained rows');
+  assert.equal(probe.snapshot().execution_attribution.totals.elapsedNs, 11_000_000);
+  probe.finish('session-ended');
+});
+
+test('outer execution attribution bounds distinct PCs while retaining exact overflow and existing rows', () => {
+  const owner = session(), probe = new FrameProbe('outer-cap', owner);
+  owner.frameProbe = probe;
+  const run = {kind: 'compiled', id: 5n, pc: 0xffffffff, coreReason: 2, work: 2, retired: 1, regions: 3};
+  const selected = {pc: 0x9000, id: 3n};
+  for (let index = 0; index < 8192; index++) probe.recordExecution(run, 0x1000 + index, selected, 1);
+  probe.recordExecution(run, 0x80000000, selected, 7);
+  probe.recordExecution(run, 0x1000, selected, 3);
+  const snapshot = probe.snapshot().execution_attribution;
+  assert.equal(snapshot.distinctEntries, 8192);
+  assert.equal(snapshot.top32.length, 32);
+  assert.deepEqual(snapshot.totals, {count: 8194, work: 16388, retired: 8194, regions: 24582,
+    elapsedNs: 8_202_000_000, maximumNs: 7_000_000});
+  assert.deepEqual(snapshot.overflow, {count: 1, work: 2, retired: 1, regions: 3,
+    elapsedNs: 7_000_000, maximumNs: 7_000_000});
+  assert.equal(snapshot.top32[0].pc, 0x1000);
+  assert.equal(snapshot.top32[0].count, 2);
+  assert.equal(snapshot.top32[0].elapsedNs, 4_000_000);
+  assert.deepEqual(snapshot.top32.slice(1).map(row => row.pc), Array.from({length: 31}, (_, index) => 0x1001 + index));
+  assert(!snapshot.top32.some(row => row.pc === 0x80000000), 'overflow does not displace retained identities');
+  assert.equal(snapshot.totals.elapsedNs - snapshot.overflow.elapsedNs - snapshot.top32.reduce((sum, row) => sum + row.elapsedNs, 0),
+    8_160_000_000, 'the omitted retained rows remain accounted outside top32');
+  const again = probe.snapshot().execution_attribution;
+  assert.deepEqual(again, snapshot, 'snapshot ordering does not mutate retention or overflow');
+  probe.finish('session-ended');
+});
+
+test('outer execution attribution ends with its exact owner and begins empty for a new probe', () => {
+  const owner = session(), first = new FrameProbe('outer-first', owner);
+  owner.frameProbe = first;
+  const run = {kind: 'cold', id: null, pc: 0x1001, coreReason: 2, work: 1, retired: 1, regions: 0};
+  first.recordExecution(run, 0x1000, null, 2);
+  const expected = first.snapshot().execution_attribution;
+  owner.measurements = new PhaseMeasurements();
+  first.recordExecution(run, 0x2000, null, 3);
+  first.recordExecution(undefined, 0x2000, null, 4);
+  assert.deepEqual(first.snapshot().execution_attribution, expected);
+  owner.measurements = first.measurements;
+  first.finish('session-ended');
+  assert.deepEqual(owner.events.find(event => event.event === 'finished').execution_attribution, expected,
+    'the final event retains the complete attributed window, including incomplete probes');
+  first.recordExecution(run, 0x3000, null, 5);
+  assert.deepEqual(first.snapshot().execution_attribution, expected);
+  const next = new FrameProbe('outer-next', owner);
+  owner.frameProbe = next;
+  assert.equal(next.snapshot().execution_attribution.distinctEntries, 0);
+  assert.equal(next.snapshot().execution_attribution.totals.count, 0);
+  assert.equal(next.snapshot().execution_attribution.failed.count, 0);
+  assert.deepEqual(first.snapshot().execution_attribution, expected);
+  next.finish('session-ended');
+});
