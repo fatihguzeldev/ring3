@@ -13,6 +13,28 @@ struct Metadata {
     data_selector: u16,
 }
 
+struct OutputState {
+    control: u16,
+    status: u16,
+    tag: u16,
+}
+
+impl OutputState {
+    fn capture(state: &X87State) -> Self {
+        Self {
+            control: state.control,
+            status: state.status,
+            tag: state.tag,
+        }
+    }
+
+    fn restore(self, state: &mut X87State) {
+        state.control = self.control;
+        state.status = self.status;
+        state.tag = self.tag;
+    }
+}
+
 impl Metadata {
     fn capture(state: &X87State) -> Self {
         Self {
@@ -103,7 +125,19 @@ impl NumericBank {
                     .map_err(|e| Failure::paging(e, write))?;
             }
         }
-        let before = (write != 0).then(|| self.x87);
+        debug_assert!(
+            write == 0
+                || matches!(
+                    operation,
+                    X87Operation::Store { .. }
+                        | X87Operation::StoreControl
+                        | X87Operation::StoreStatus
+                        | X87Operation::StoreEnvironment { .. }
+                        | X87Operation::Save { .. }
+                )
+        );
+        // memory-output operations preserve all register payloads, including save.
+        let before = (write != 0).then(|| OutputState::capture(&self.x87));
         let metadata = Metadata::capture(&self.x87);
         if operation.is_computation() {
             self.x87.instruction_pointer = instruction.pc;
@@ -141,11 +175,10 @@ impl NumericBank {
                 | X87Error::NumericalFailure,
             ) => {
                 if let Some(before) = before {
-                    self.x87 = before;
-                } else {
-                    // evaluation already restores its state, but starts after our metadata update.
-                    metadata.restore(&mut self.x87);
+                    before.restore(&mut self.x87);
                 }
+                // evaluation already restores its state, but starts after our metadata update.
+                metadata.restore(&mut self.x87);
                 return Err(Failure::Infrastructure);
             }
         };
@@ -163,14 +196,17 @@ impl NumericBank {
                         .map_err(|e| Failure::paging(e, write))
                 });
             if let Err(error) = result {
-                self.x87 = before.expect("x87 memory output has an outer rollback snapshot");
+                before
+                    .expect("x87 memory output has an outer rollback snapshot")
+                    .restore(&mut self.x87);
+                metadata.restore(&mut self.x87);
                 return Err(error);
             }
         }
         if let Some(flags) = effects.eflags {
             context.set_word(36, flags | 2);
         }
-        if operation == X87Operation::StatusToAx {
+        if matches!(operation, X87Operation::StatusToAx) {
             context.set_word(
                 0,
                 (word(context, 0) & 0xffff_0000) | u32::from(self.x87.status),

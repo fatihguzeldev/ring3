@@ -1072,3 +1072,53 @@ fn x87_full_save_restore_uses_the_complete_108_byte_image() {
     assert_eq!(bank.x87, before);
     assert_eq!(context.bytes(), &general);
 }
+
+#[test]
+fn x87_environment_outputs_roll_back_control_tags_metadata_and_every_payload_on_late_write_failure()
+{
+    for operation in [
+        X87Operation::StoreEnvironment { operand16: true },
+        X87Operation::StoreEnvironment { operand16: false },
+        X87Operation::Save { operand16: true },
+        X87Operation::Save { operand16: false },
+    ] {
+        let (mut instance, mut bank, mut context) = fixture();
+        bank.x87.control = 0x2340;
+        bank.x87.status = 0x5f00;
+        bank.x87.tag = 0xff3f;
+        bank.x87.instruction_pointer = 0x1122_3344;
+        bank.x87.data_pointer = 0x5566_7788;
+        bank.x87.opcode = 0x321;
+        bank.x87.code_selector = 0x43;
+        bank.x87.data_selector = 0x4b;
+        for (index, register) in bank.x87.registers.iter_mut().enumerate() {
+            register.fill(index as u8 + 1);
+        }
+        let before = bank.x87;
+        let general = *context.bytes();
+        let arena = instance.arena().to_vec();
+        let memory = instance.memory.as_mut().unwrap();
+        memory.write(GuestAddress(0x2000), &[0xa5; 4096]).unwrap();
+        memory.exhaust_versions_for_test();
+        assert_eq!(
+            bank.execute(
+                &mut instance,
+                &mut context,
+                &instruction(operation, Some(0x2000)),
+            ),
+            8,
+            "{operation:?}",
+        );
+        assert_eq!(bank.x87, before, "{operation:?}");
+        assert_eq!(context.bytes(), &general, "{operation:?}");
+        assert_eq!(instance.arena(), arena, "{operation:?}");
+        let mut actual = [0; 4096];
+        instance
+            .memory
+            .as_ref()
+            .unwrap()
+            .read(GuestAddress(0x2000), &mut actual)
+            .unwrap();
+        assert_eq!(actual, [0xa5; 4096], "{operation:?}");
+    }
+}
