@@ -5,6 +5,7 @@ use crate::math::{
 };
 
 mod narrow;
+mod normal;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Ext80(pub [u8; 10]);
@@ -136,6 +137,9 @@ impl Ext80 {
     }
 
     pub(crate) fn add(self, rhs: Self, control: u16) -> Rounded {
+        if let Some(result) = normal::add(self, rhs, control) {
+            return result;
+        }
         if let Some(result) = Self::special(self, rhs) {
             return result;
         }
@@ -216,6 +220,9 @@ impl Ext80 {
     }
 
     pub(crate) fn multiply(self, rhs: Self, control: u16) -> Rounded {
+        if let Some(result) = normal::multiply(self, rhs, control) {
+            return result;
+        }
         if let Some(result) = Self::special(self, rhs) {
             return result;
         }
@@ -254,6 +261,9 @@ impl Ext80 {
     }
 
     pub(crate) fn divide(self, rhs: Self, control: u16) -> Rounded {
+        if let Some(result) = normal::divide(self, rhs, control) {
+            return result;
+        }
         if let Some(result) = Self::special(self, rhs) {
             return result;
         }
@@ -715,6 +725,10 @@ mod division_tests;
 #[cfg(test)]
 #[path = "value/tests/narrow.rs"]
 mod narrow_tests;
+
+#[cfg(test)]
+#[path = "value/tests/normal.rs"]
+mod normal_tests;
 
 #[cfg(test)]
 #[path = "value/tests/rounding.rs"]
