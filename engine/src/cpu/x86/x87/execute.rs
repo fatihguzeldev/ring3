@@ -3,6 +3,13 @@ use core::cmp::Ordering;
 use super::X87State;
 use super::value::{DENORMAL, Ext80, INVALID, Kind, Rounded, X87Rounding};
 
+#[path = "execute/common.rs"]
+mod common;
+
+#[cfg(test)]
+#[path = "execute/tests/common.rs"]
+mod common_tests;
+
 #[cfg(test)]
 #[path = "execute/tests/division.rs"]
 mod division_tests;
@@ -556,9 +563,12 @@ impl X87State {
         operation: X87Operation,
         input: &[u8],
         eflags: u32,
-        memory: Option<&mut [u8; 108]>,
+        mut memory: Option<&mut [u8; 108]>,
         workspace: &mut crate::math::NumericalWorkspace,
     ) -> Result<X87Effects, X87Error> {
+        if let Some(effects) = common::evaluate(self, operation, input, memory.as_deref_mut()) {
+            return Ok(effects);
+        }
         if input.len() != operation.read_size() || operation.write_size() != 0 && memory.is_none() {
             return Err(X87Error::InvalidInputLength);
         }
