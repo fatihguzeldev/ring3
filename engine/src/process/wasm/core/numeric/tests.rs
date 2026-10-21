@@ -848,3 +848,227 @@ fn stack_code_write_reports_the_completed_transaction() {
         .concat();
     assert_eq!(actual.as_slice(), expected);
 }
+
+#[test]
+fn x87_sparse_context_uses_wrapped_fs_operands_without_publishing_general_state() {
+    use crate::cpu::x86::{Register32, SegmentRegister, ir::AddressSize};
+    let (mut instance, mut bank, mut context) = fixture();
+    context.set_state(State32 {
+        registers: [
+            0xa5a55a5a, 0x11112222, 0x33334444, 0x1234fff0, 0x55556666, 0x77778888, 0xabcd0030,
+            0x9999aaaa,
+        ],
+        eip: 0x12345678,
+        eflags: 0xad7,
+    });
+    context.bytes_mut()[40..].fill(0xa5);
+    bank.segments.state.bases[SegmentRegister::Fs.index()] = 0x2000;
+    instance
+        .memory
+        .as_mut()
+        .unwrap()
+        .write(GuestAddress(0x2030), &3_f32.to_le_bytes())
+        .unwrap();
+    let before = *context.bytes();
+    let arena = instance.arena().to_vec();
+    let operation = native(Operation::X87 {
+        operation: X87Operation::Load(X87Format::Float32),
+        address: Some(EffectiveAddress {
+            base: Some(Register32::Ebx),
+            index: Some(Register32::Esi),
+            scale: 1,
+            displacement: 0x10,
+            segment: Some(SegmentRegister::Fs),
+            address_size: AddressSize::Bits16,
+        }),
+        waiting: true,
+        opcode: 0x123,
+    });
+    assert_eq!(bank.execute(&mut instance, &mut context, &operation), 0);
+    let mut expected = X87State {
+        status: 0x3800,
+        tag: 0x3fff,
+        instruction_pointer: 0x1000,
+        data_pointer: 0x30,
+        opcode: 0x123,
+        code_selector: 0x1b,
+        data_selector: 0x3b,
+        ..X87State::default()
+    };
+    expected.registers[7] = [0, 0, 0, 0, 0, 0, 0, 0xc0, 0, 0x40];
+    assert_eq!(bank.x87, expected);
+    assert_eq!(context.bytes(), &before);
+    assert_eq!(instance.arena(), arena);
+}
+
+#[test]
+fn x87_sparse_outputs_preserve_flags_and_status_to_ax_high_half() {
+    use crate::cpu::x86::X87Condition;
+    let (mut instance, mut bank, mut context) = fixture();
+    context.set_state(State32 {
+        registers: [0xa5a55a5a, 2, 3, 4, 5, 6, 7, 8],
+        eip: 0x12345678,
+        eflags: 0xad7,
+    });
+    context.bytes_mut()[40..].fill(0xa5);
+    let mut expected = *context.bytes();
+    bank.x87.status = 0x4500;
+    bank.x87.tag = 0xfff0;
+    bank.x87.registers[0] = [0, 0, 0, 0, 0, 0, 0, 0x80, 0xff, 0x3f];
+    bank.x87.registers[1] = [0, 0, 0, 0, 0, 0, 0, 0xc0, 0, 0x40];
+    assert_eq!(
+        bank.execute(
+            &mut instance,
+            &mut context,
+            &instruction(
+                X87Operation::ConditionalMove {
+                    index: 1,
+                    condition: X87Condition::Below,
+                },
+                None,
+            ),
+        ),
+        0
+    );
+    assert_eq!(bank.x87.registers[0], bank.x87.registers[1]);
+    assert_eq!(context.bytes(), &expected);
+    assert_eq!(
+        bank.execute(
+            &mut instance,
+            &mut context,
+            &instruction(
+                X87Operation::Compare {
+                    index: 1,
+                    quiet: false,
+                    pop: 0,
+                    integer_flags: true,
+                },
+                None,
+            ),
+        ),
+        0
+    );
+    expected[36..40].copy_from_slice(&0x242_u32.to_le_bytes());
+    assert_eq!(context.bytes(), &expected);
+    assert_eq!(
+        bank.execute(
+            &mut instance,
+            &mut context,
+            &instruction(X87Operation::StatusToAx, None),
+        ),
+        0
+    );
+    expected[..4].copy_from_slice(&0xa5a54500_u32.to_le_bytes());
+    assert_eq!(context.bytes(), &expected);
+    bank.x87.control = 0x037e;
+    bank.x87.registers[0] = [0, 0, 0, 0, 0, 0, 0, 0xc0, 0xff, 0xff];
+    let payload = bank.x87.registers;
+    assert_eq!(
+        bank.execute(
+            &mut instance,
+            &mut context,
+            &instruction(
+                X87Operation::Compare {
+                    index: 1,
+                    quiet: false,
+                    pop: 1,
+                    integer_flags: true,
+                },
+                None,
+            ),
+        ),
+        0
+    );
+    assert_eq!(context.bytes(), &expected);
+    assert_eq!(bank.x87.status, 0xc581);
+    assert_eq!(bank.x87.tag, 0xfff0);
+    assert_eq!(bank.x87.registers, payload);
+}
+
+#[test]
+fn x87_evaluator_failure_restores_instruction_metadata_as_well_as_the_stack() {
+    let (mut instance, mut bank, mut context) = fixture();
+    bank.x87.instruction_pointer = 0x11223344;
+    bank.x87.data_pointer = 0x55667788;
+    bank.x87.opcode = 0x321;
+    bank.x87.code_selector = 0x43;
+    bank.x87.data_selector = 0x4b;
+    bank.x87.status = 0x3800;
+    bank.x87.tag = 0x3fff;
+    bank.x87.registers[7] = [0, 0, 0, 0, 0, 0, 0, 0xc0, 0, 0x40];
+    let before = bank.x87;
+    let general = *context.bytes();
+    assert_eq!(
+        bank.execute(
+            &mut instance,
+            &mut context,
+            &instruction(
+                X87Operation::Binary {
+                    kind: X87Binary::Add,
+                    destination: 0,
+                    source: 8,
+                    pop: false,
+                },
+                None,
+            ),
+        ),
+        8
+    );
+    assert_eq!(bank.x87, before);
+    assert_eq!(context.bytes(), &general);
+}
+
+#[test]
+fn x87_full_save_restore_uses_the_complete_108_byte_image() {
+    let (mut instance, mut bank, mut context) = fixture();
+    bank.x87.control = 0x027f;
+    bank.x87.status = 0x3800;
+    bank.x87.tag = 0x3fff;
+    bank.x87.instruction_pointer = 0x11223344;
+    bank.x87.data_pointer = 0x55667788;
+    bank.x87.opcode = 0x321;
+    bank.x87.code_selector = 0x43;
+    bank.x87.data_selector = 0x4b;
+    for (index, register) in bank.x87.registers.iter_mut().enumerate() {
+        register.fill(index as u8 + 1);
+    }
+    let before = bank.x87;
+    let general = *context.bytes();
+    assert_eq!(
+        bank.execute(
+            &mut instance,
+            &mut context,
+            &instruction(X87Operation::Save { operand16: false }, Some(0x2000)),
+        ),
+        0
+    );
+    let mut image = [0; 108];
+    instance
+        .memory
+        .as_ref()
+        .unwrap()
+        .read(GuestAddress(0x2000), &mut image)
+        .unwrap();
+    assert_eq!(
+        &image[..28],
+        &[
+            0x7f, 2, 0xff, 0xff, 0, 0x38, 0xff, 0xff, 0xff, 0x3f, 0xff, 0xff, 0x44, 0x33, 0x22,
+            0x11, 0x43, 0, 0x21, 3, 0x88, 0x77, 0x66, 0x55, 0x4b, 0, 0, 0,
+        ]
+    );
+    for (index, value) in [8, 1, 2, 3, 4, 5, 6, 7].into_iter().enumerate() {
+        assert_eq!(image[28 + index * 10..38 + index * 10], [value; 10]);
+    }
+    assert_eq!(bank.x87.control, 0x037f);
+    assert_eq!(bank.x87.registers, before.registers);
+    assert_eq!(
+        bank.execute(
+            &mut instance,
+            &mut context,
+            &instruction(X87Operation::Restore { operand16: false }, Some(0x2000)),
+        ),
+        0
+    );
+    assert_eq!(bank.x87, before);
+    assert_eq!(context.bytes(), &general);
+}

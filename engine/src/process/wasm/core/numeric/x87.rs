@@ -1,8 +1,55 @@
 use super::*;
 use crate::cpu::x86::{
     CpuMemoryPort32, CpuReadPort32, PagingAccess32, Register32, SegmentAccess, SegmentRegister,
-    X87Error, X87Operation, ir::EffectiveAddress,
+    X87Error, X87Operation,
+    ir::{AddressSize, EffectiveAddress},
 };
+
+struct Metadata {
+    instruction_pointer: u32,
+    data_pointer: u32,
+    opcode: u16,
+    code_selector: u16,
+    data_selector: u16,
+}
+
+impl Metadata {
+    fn capture(state: &X87State) -> Self {
+        Self {
+            instruction_pointer: state.instruction_pointer,
+            data_pointer: state.data_pointer,
+            opcode: state.opcode,
+            code_selector: state.code_selector,
+            data_selector: state.data_selector,
+        }
+    }
+
+    fn restore(self, state: &mut X87State) {
+        state.instruction_pointer = self.instruction_pointer;
+        state.data_pointer = self.data_pointer;
+        state.opcode = self.opcode;
+        state.code_selector = self.code_selector;
+        state.data_selector = self.data_selector;
+    }
+}
+
+fn word(context: &Context32, offset: usize) -> u32 {
+    u32::from_le_bytes(context.bytes()[offset..offset + 4].try_into().unwrap())
+}
+
+fn offset(address: EffectiveAddress, context: &Context32) -> u32 {
+    let register = |register: Register32| word(context, register.index() * 4);
+    let value = address
+        .displacement
+        .wrapping_add(address.base.map_or(0, register))
+        .wrapping_add(address.index.map_or(0, |index| {
+            register(index).wrapping_mul(u32::from(address.scale))
+        }));
+    match address.address_size {
+        AddressSize::Bits16 => value & 0xffff,
+        AddressSize::Bits32 => value,
+    }
+}
 
 impl NumericBank {
     pub(super) fn x87(
@@ -22,22 +69,33 @@ impl NumericBank {
         let read = operation.read_size();
         let write = operation.write_size();
         let width = read.max(write);
-        let state = context.state();
-        let mut input = [0; 108];
-        let mut output = [0; 108];
+        debug_assert!(read == 0 || write == 0);
+        let mut buffer = (width != 0).then(|| [0; 108]);
         let mut linear = 0;
+        let mut data_offset = 0;
         if width != 0 {
             let address = address.ok_or(Failure::Infrastructure)?;
+            data_offset = offset(address, context);
             if read != 0 {
-                linear = self.operand(address, &state, read, SegmentAccess::Read)?;
+                linear = self.span(
+                    address.resolved_segment(),
+                    data_offset,
+                    read,
+                    SegmentAccess::Read,
+                )?;
             }
             if write != 0 {
-                linear = self.operand(address, &state, write, SegmentAccess::Write)?;
+                linear = self.span(
+                    address.resolved_segment(),
+                    data_offset,
+                    write,
+                    SegmentAccess::Write,
+                )?;
             }
             let memory = instance.memory.as_mut().ok_or(Failure::Infrastructure)?;
             let mut port = memory::Port(memory);
             if read != 0 {
-                port.read(GuestAddress(linear), &mut input[..read])
+                port.read(GuestAddress(linear), &mut buffer.as_mut().unwrap()[..read])
                     .map_err(|e| Failure::paging(e, read))?;
             }
             if write != 0 {
@@ -45,31 +103,49 @@ impl NumericBank {
                     .map_err(|e| Failure::paging(e, write))?;
             }
         }
-        let before = self.x87;
+        let before = (write != 0).then(|| self.x87);
+        let metadata = Metadata::capture(&self.x87);
         if operation.is_computation() {
             self.x87.instruction_pointer = instruction.pc;
             self.x87.opcode = opcode;
             self.x87.code_selector = self.segments.state.selectors[SegmentRegister::Cs.index()];
             if let Some(address) = address.filter(|_| width != 0) {
-                self.x87.data_pointer = memory::offset(address, &state);
+                self.x87.data_pointer = data_offset;
                 self.x87.data_selector =
                     self.segments.state.selectors[address.resolved_segment().index()];
             }
         }
-        let effects = match self.x87.evaluate_in_place(
-            operation,
-            &input[..read],
-            state.eflags,
-            (write != 0).then_some(&mut output),
-            &mut instance.numerical_workspace,
-        ) {
+        let flags = word(context, 36);
+        let result = if write == 0 {
+            self.x87.evaluate_in_place(
+                operation,
+                buffer.as_ref().map_or(&[][..], |buffer| &buffer[..read]),
+                flags,
+                None,
+                &mut instance.numerical_workspace,
+            )
+        } else {
+            self.x87.evaluate_in_place(
+                operation,
+                &[],
+                flags,
+                buffer.as_mut(),
+                &mut instance.numerical_workspace,
+            )
+        };
+        let effects = match result {
             Ok(effects) => effects,
             Err(
                 X87Error::InvalidInputLength
                 | X87Error::InvalidOperand
                 | X87Error::NumericalFailure,
             ) => {
-                self.x87 = before;
+                if let Some(before) = before {
+                    self.x87 = before;
+                } else {
+                    // evaluation already restores its state, but starts after our metadata update.
+                    metadata.restore(&mut self.x87);
+                }
                 return Err(Failure::Infrastructure);
             }
         };
@@ -80,24 +156,26 @@ impl NumericBank {
                 .ok_or(Failure::Infrastructure)
                 .and_then(|m| {
                     memory::Port(m)
-                        .write(GuestAddress(linear), &output[..effects.memory_len])
+                        .write(
+                            GuestAddress(linear),
+                            &buffer.as_ref().unwrap()[..effects.memory_len],
+                        )
                         .map_err(|e| Failure::paging(e, write))
                 });
             if let Err(error) = result {
-                self.x87 = before;
+                self.x87 = before.expect("x87 memory output has an outer rollback snapshot");
                 return Err(error);
             }
         }
-        let mut state = state;
         if let Some(flags) = effects.eflags {
-            state.eflags = flags;
+            context.set_word(36, flags | 2);
         }
         if operation == X87Operation::StatusToAx {
-            state.registers[Register32::Eax.index()] = (state.registers[Register32::Eax.index()]
-                & 0xffff_0000)
-                | u32::from(self.x87.status);
+            context.set_word(
+                0,
+                (word(context, 0) & 0xffff_0000) | u32::from(self.x87.status),
+            );
         }
-        context.set_state(state);
         Ok(())
     }
 }
