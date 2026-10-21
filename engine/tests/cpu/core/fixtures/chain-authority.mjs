@@ -154,17 +154,17 @@ try {
   });
   fixture('stale-target-miss-and-cold-refresh',{data:values},t => {
     t.engine.ok('write8',0x1041,0x43); t.expectedRam[0x41]=0x43;
-    const firstRun = t.run(t.first,5);
-    assert.equal(firstRun.value.coreReason,1); assert.equal(firstRun.value.pc,0x1040);
-    assert.equal(firstRun.value.retired,2); assert.equal(firstRun.value.work,2); assert.equal(firstRun.value.regions,1);
-    assert.notEqual(firstRun.value.id,t.first.id); assert.notEqual(firstRun.value.id,t.next.id);
-    assert.equal(t.cache.units.get(firstRun.value.id).pc,0x1000);
-    assert.deepEqual(t.bytes(t.engine.base+4236,128),t.initialFp,'NeedCode keeps the dirty numerical bank private');
-    const replacement = t.select(); assert.notEqual(replacement.id,t.next.id);
-    const {sourceVersion} = t.run(replacement,3); t.expectedRam.set(unhex('0000a040'),4096+8);
-    t.expect({stop:2,pc:0x1080,retired:5,work:5,remaining:0,regions:2,id:replacement.id,sourceVersion,
+    const {value,sourceVersion} = t.run(t.first,5);
+    assert.equal(value.id,null,'the refreshed target executes cold without a compiled owner');
+    assert.equal(value.chainedColdRuns,1);
+    assert.equal(value.chainedColdRetired,3);
+    assert.equal(value.chainedColdWork,3);
+    assert.equal(t.cache.stats().admissions,3,'only the stale source is recompiled');
+    assert(!t.cache.units.has(t.first.id),'the stale source link is pruned before dispatch');
+    t.expectedRam.set(unhex('0000a040'),4096+8);
+    t.expect({stop:2,pc:0x1080,retired:5,work:5,remaining:0,regions:1,id:0n,sourceVersion,
       wantedFp:fp(t.initialFp,{opcode:0x15b,fip:0x1043,fdp:0x3008,registers:{7:'00000000000000a00140'}})});
-    assert.equal(t.cache.stats().runs,2);
+    assert.equal(t.cache.stats().runs,1);
   });
   fixture('numeric-read-fault-after-handoff',{stack:false,registers:[0,0,0x1080,0x3ffc,0x4800,0,0x1040,0],
     data:d=>d.setFloat32(4092,3,true)},t => {
