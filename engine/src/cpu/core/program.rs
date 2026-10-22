@@ -44,7 +44,7 @@ pub struct CompiledCode {
     wasm: Vec<u8>,
     sources: Vec<CodeSnapshot>,
     entries: Vec<GuestAddress>,
-    instructions: usize,
+    instruction_pcs: Box<[u32]>,
     native: Vec<NativeInstruction>,
     roots: [GuestAddress; 8],
     root_count: usize,
@@ -68,7 +68,10 @@ impl CompiledCode {
         &self.entries
     }
     pub fn instruction_count(&self) -> usize {
-        self.instructions
+        self.instruction_pcs.len()
+    }
+    pub(crate) fn instruction_pcs(&self) -> impl Iterator<Item = u32> + '_ {
+        self.instruction_pcs.iter().copied()
     }
     pub fn native_instructions(&self) -> &[NativeInstruction] {
         &self.native
@@ -417,7 +420,11 @@ fn compile_formation(
             .iter()
             .map(|block| GuestAddress(block.entry))
             .collect(),
-        instructions: blocks.iter().map(|block| block.instructions.len()).sum(),
+        instruction_pcs: blocks
+            .iter()
+            .flat_map(|block| &block.instructions)
+            .map(|instruction| instruction.pc)
+            .collect(),
         wasm,
         sources,
         native,
@@ -433,6 +440,10 @@ mod call_tests;
 #[cfg(test)]
 #[path = "program/transition_tests.rs"]
 mod transition_tests;
+
+#[cfg(test)]
+#[path = "program/coverage_tests.rs"]
+mod coverage_tests;
 
 fn retain_entry_prefix(blocks: &mut Vec<Block>, entry: u32, limit: usize) {
     let requested = blocks

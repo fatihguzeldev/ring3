@@ -433,6 +433,64 @@ fn colliding_heat_sites_retain_independent_completed_reuse() {
 }
 
 #[test]
+fn compiled_instruction_coverage_consumes_only_its_completed_reuse() {
+    let memory = memory(&[0xb8, 1, 0, 0, 0, 0x90]);
+    let mut cold = ColdState::default();
+    let admitted = [0x1000, 0x1005];
+    let unrelated = [0x1001, 0x3004, 0x2000];
+    assert_eq!(ColdHeat::index(admitted[0]), ColdHeat::index(unrelated[1]));
+    for _ in 0..HOT_VISITS {
+        for pc in admitted.into_iter().chain(unrelated) {
+            cold.retired(&memory, pc);
+        }
+    }
+    let before = cold.diagnostics_snapshot();
+    let generation = cold.heat.generation;
+    cold.forget_compiled(&memory, admitted);
+    assert_eq!(cold.heat.generation, generation);
+    assert_eq!(&cold.diagnostics_snapshot()[..9], &before[..9]);
+    for pc in admitted {
+        assert!(!cold.heat.hot(&memory, pc));
+    }
+    for pc in unrelated {
+        assert!(
+            cold.heat.hot(&memory, pc),
+            "operand-byte, colliding and unrelated PCs retain independent reuse"
+        );
+    }
+    for _ in 0..HOT_VISITS - 1 {
+        for pc in admitted {
+            cold.retired(&memory, pc);
+        }
+    }
+    for pc in admitted {
+        assert!(!cold.heat.hot(&memory, pc));
+        cold.retired(&memory, pc);
+        assert!(cold.heat.hot(&memory, pc));
+    }
+}
+
+#[test]
+fn compiled_coverage_for_another_memory_does_not_rebind_or_consume_heat() {
+    let memory = memory(&[0x90]);
+    let other_memory = AddressSpace::new(1).unwrap();
+    let mut cold = ColdState::default();
+    for _ in 0..HOT_VISITS {
+        cold.retired(&memory, 0x1000);
+    }
+    let before = cold.diagnostics_snapshot();
+    let generation = cold.heat.generation;
+    cold.forget_compiled(&other_memory, [0x1000]);
+    assert_eq!(cold.heat.generation, generation);
+    assert_eq!(cold.heat.memory, memory.identity());
+    assert_eq!(cold.diagnostics_snapshot(), before);
+    assert!(cold.heat.hot(&memory, 0x1000));
+    assert!(!cold.heat.hot(&other_memory, 0x1000));
+    assert_eq!(cold.heat.memory, other_memory.identity());
+    assert_eq!(cold.diagnostics_snapshot()[1], before[1] + 1);
+}
+
+#[test]
 fn repeated_working_set_qualifies_within_bounded_heat_storage() {
     let memory = memory(&[0x90]);
     let mut cold = ColdState::default();

@@ -56,6 +56,19 @@ impl ColdState {
         self.heat.retired(memory, pc);
     }
 
+    pub(crate) fn forget_compiled(
+        &mut self,
+        memory: &AddressSpace,
+        pcs: impl IntoIterator<Item = u32>,
+    ) {
+        if self.heat.memory != memory.identity() {
+            return;
+        }
+        for pc in pcs {
+            self.heat.requested(pc);
+        }
+    }
+
     #[cfg(test)]
     fn with_threshold(threshold: u32) -> Self {
         Self {

@@ -225,6 +225,7 @@ pub(crate) fn core_prepare(pc: u32, instructions: u32, blocks: u32) -> u32 {
                 .cache
                 .prepare_transition(instance.memory.as_ref().unwrap(), pc, options, &gates)
         });
+        let mut admitted = promoted.is_some();
         let selected = promoted.or_else(|| {
             core.as_mut()
                 .and_then(|session| session.cache.lookup(instance.memory.as_ref().unwrap(), pc))
@@ -248,7 +249,10 @@ pub(crate) fn core_prepare(pc: u32, instructions: u32, blocks: u32) -> u32 {
                 &gates,
                 &frontier,
             ) {
-                Ok(code) => code,
+                Ok(code) => {
+                    admitted = true;
+                    code
+                }
                 Err(error) => return compile_status(error),
             };
             match core.as_mut() {
@@ -284,6 +288,12 @@ pub(crate) fn core_prepare(pc: u32, instructions: u32, blocks: u32) -> u32 {
             });
         }
         let session = core.as_mut().unwrap();
+        if admitted {
+            session.cold_state.forget_compiled(
+                instance.memory.as_ref().unwrap(),
+                session.code.as_ref().unwrap().instruction_pcs(),
+            );
+        }
         session.context.bytes_mut()[120..128].copy_from_slice(&identity.to_le_bytes());
         0
     })
