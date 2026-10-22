@@ -372,6 +372,29 @@ fn more_than_256_small_regions_remain_cached_below_the_byte_limit() {
 }
 
 #[test]
+fn a_thousand_twenty_five_regions_retain_both_endpoints_below_the_byte_budget() {
+    let memory = memory();
+    let mut cache = CoreCache32::default();
+    let first = cache.insert(compiled(&memory, filler(0)));
+    cache.install_link(&first, 1).unwrap();
+    let mut last = first.clone();
+    for index in 1..=1024 {
+        last = cache.insert(compiled(&memory, filler(index)));
+    }
+    cache.install_link(&last, 1025).unwrap();
+    assert_eq!(MAX_REGIONS, 4096);
+    assert_eq!(MAX_REGIONS - cache.free.len(), 1025);
+    assert!(cache.bytes < MAX_CODE_BYTES);
+    assert_eq!(cache.snapshot()[2..5], [0, 0, 0]);
+    let (retained_first, first_slot) = cache.lookup_linked(&memory, filler(0)).unwrap();
+    let (retained_last, last_slot) = cache.lookup_linked(&memory, filler(1024)).unwrap();
+    assert!(same(&retained_first, &first));
+    assert!(same(&retained_last, &last));
+    assert_eq!((first_slot, last_slot), (1, 1025));
+    bounds(&cache);
+}
+
+#[test]
 fn real_byte_pressure_evicts_and_releases_links_before_the_count_limit() {
     let mut memory = AddressSpace::new(4).unwrap();
     memory
@@ -398,8 +421,11 @@ fn real_byte_pressure_evicts_and_releases_links_before_the_count_limit() {
     );
     cache.install_link(&first, 1).unwrap();
     let mut newest = first.clone();
+    let mut admitted_bytes = bytes;
     for index in 1..count {
-        newest = cache.insert(compile(&memory, GuestAddress(0x1000), limits).unwrap());
+        let code = compile(&memory, GuestAddress(0x1000), limits).unwrap();
+        admitted_bytes += code.wasm().len();
+        newest = cache.insert(code);
         cache.install_link(&newest, index as u32 + 1).unwrap();
         bounds(&cache);
     }
@@ -408,7 +434,7 @@ fn real_byte_pressure_evicts_and_releases_links_before_the_count_limit() {
         cache.snapshot(),
         [
             count as u64,
-            (count * bytes) as u64,
+            admitted_bytes as u64,
             0,
             (count - (MAX_REGIONS - cache.free.len())) as u64,
             0,
@@ -454,7 +480,7 @@ fn oldest_linked_slot_follows_native_hits_and_skips_unlinked_owners() {
 fn cold_snapshot_counts_compilation_and_lazy_source_removal_without_counting_hits() {
     let mut memory = memory();
     let mut cache = CoreCache32::default();
-    assert_eq!(cache.snapshot(), [0, 0, 0, 0, 0, 0, 0, 1024]);
+    assert_eq!(cache.snapshot(), [0, 0, 0, 0, 0, 0, 0, MAX_REGIONS as u64]);
     let first = cache.insert(compiled(&memory, 0x1000));
     let second = cache.insert(compiled(&memory, filler(0)));
     let first_bytes = first.wasm().len() as u64;
@@ -467,7 +493,7 @@ fn cold_snapshot_counts_compilation_and_lazy_source_removal_without_counting_hit
         0,
         2,
         first_bytes + second_bytes,
-        1024,
+        MAX_REGIONS as u64,
     ];
     assert_eq!(cache.snapshot(), initial);
     cache.install_link(&first, 1).unwrap();
@@ -490,7 +516,7 @@ fn cold_snapshot_counts_compilation_and_lazy_source_removal_without_counting_hit
         1,
         1,
         second_bytes,
-        1024,
+        MAX_REGIONS as u64,
     ];
     assert_eq!(cache.snapshot(), stale);
     let replacement = cache.insert(compiled(&memory, 0x1000));
@@ -505,7 +531,7 @@ fn cold_snapshot_counts_compilation_and_lazy_source_removal_without_counting_hit
             1,
             2,
             second_bytes + replacement_bytes,
-            1024
+            MAX_REGIONS as u64
         ]
     );
     bounds(&cache);
@@ -872,7 +898,10 @@ fn transition_lookup_uses_the_exact_heat_interval_and_closed_pending_handoff() {
     ));
     assert_eq!(cache.newest, newest);
     assert_eq!(cache.snapshot(), snapshot);
-    assert_eq!(&cache.link_owners[1..3], &[source.identity(), target.identity()]);
+    assert_eq!(
+        &cache.link_owners[1..3],
+        &[source.identity(), target.identity()]
+    );
     bounds(&cache);
 }
 

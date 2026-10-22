@@ -19,6 +19,7 @@ const report = {schema:1,complete:false,engineSha256:artifact.sha256,
 const checkpoint = () => writeFileSync(reportPath,JSON.stringify(report,null,2));
 const counterNames = ['compiled','admittedEncodedBytes','countEvictions','byteEvictions','sourceInvalidations',
   'retainedUnits','retainedEncodedBytes','unitCapacity'];
+const nativeCapacity = 4096;
 let stage = 'initialization'; checkpoint();
 
 function fixture(name,code,data,registers,capacity,instructions,body) {
@@ -33,8 +34,11 @@ function fixture(name,code,data,registers,capacity,instructions,body) {
   let opened = false, active = false, cache, ownersPointer;
   try {
     engine.ok('open',16,...KEY); opened=true; engine.base=api.arena_ptr()>>>0;
-    for (const [address,page] of [[0x1000,code],[0x3000,data],[0x4000,new Uint8Array(4096)]]) {
-      engine.ok('map',address,1,address===0x1000?7:3);engine.request(page);engine.ok('upload',address,4096);
+    const codePages = code.length/4096;assert(Number.isInteger(codePages)&&codePages>=1&&codePages<=2);
+    const pages = [...Array.from({length:codePages},(_,index)=>[0x1000+index*4096,code.subarray(index*4096,(index+1)*4096),7]),
+      [0x3000,data,3],[0x4000,new Uint8Array(4096),3]];
+    for (const [address,page,permissions] of pages) {
+      engine.ok('map',address,1,permissions);engine.request(page);engine.ok('upload',address,4096);
     }
     const state = record('R3ST',56), s = view(state);
     registers.forEach((value,index)=>s.setUint32(16+index*4,value,true)); s.setUint32(48,0x1000,true);s.setUint32(52,2,true);
@@ -48,7 +52,7 @@ function fixture(name,code,data,registers,capacity,instructions,body) {
       const unit=cache.entry(pc);
       if (!result.modules.some(item=>item.id===String(unit.id))) {
         const wasm=encoded(), item={pc,id:String(unit.id),slot:unit.slot,bytes:wasm.length,sha256:hash(wasm)};
-        if (result.modules.length<2 || result.modules.length===1024) item.wasmHex=hex(wasm);
+        if (result.modules.length<2 || result.modules.length===nativeCapacity) item.wasmHex=hex(wasm);
         result.modules.push(item);
       }
       return unit;
@@ -83,9 +87,9 @@ function fixture(name,code,data,registers,capacity,instructions,body) {
       assert.deepEqual(after,before,'rejected active getters preserve full context, arena and RAM');end();
     }
     function expectedRam() {
-      const expected=new Uint8Array(16*4096);expected.set(code);expected.set(data,4096);
+      const expected=new Uint8Array(16*4096);pages.forEach(([,page],index)=>expected.set(page,index*4096));
       const mappings=word(cache.context,56);
-      assert.deepEqual([1,3,4].map(page=>word(mappings+page*4)),[1,2,3]);
+      assert.deepEqual(pages.map(([address])=>word(mappings+(address>>>12)*4)),pages.map((_,index)=>index+1));
       return expected;
     }
     body({api,engine,cache,bytes,word,select,encoded,begin,end,snapshot,inspect,activeControls,expectedRam,initialBanks,result});
@@ -136,7 +140,7 @@ try {
     const ram=t.expectedRam();ram.set(unhex('0000c040'),4104);
     assert.deepEqual(t.bytes(t.word(t.cache.context,64),ram.length),ram,'entire code/data/stack allocation');
     const hot=t.inspect('executed-A-then-B');assert.equal(hot.victim,a.slot,'actual execution makes A the native victim');
-    countersEqual(hot.counters,{compiled:2,countEvictions:0,byteEvictions:0,sourceInvalidations:0,retainedUnits:2,unitCapacity:1024});
+    countersEqual(hot.counters,{compiled:2,countEvictions:0,byteEvictions:0,sourceInvalidations:0,retainedUnits:2,unitCapacity:nativeCapacity});
     const cUnit=t.select(0x1100), admitted=t.inspect('independent-C-admitted');
     assert.equal(t.cache.units.has(a.id),false,'evict A rather than the native-hot B');
     assert.equal(t.cache.units.get(b.id),b);assert.equal(t.cache.table.get(b.slot),b.run);
@@ -147,7 +151,7 @@ try {
     assert.deepEqual(t.bytes(t.word(t.cache.context,64),ram.length),ram);
     const encodedBytes=t.result.modules.reduce((sum,module)=>sum+module.bytes,0);
     countersEqual(admitted.counters,{compiled:3,admittedEncodedBytes:encodedBytes,countEvictions:0,byteEvictions:0,
-      sourceInvalidations:0,retainedUnits:3,retainedEncodedBytes:encodedBytes,unitCapacity:1024});
+      sourceInvalidations:0,retainedUnits:3,retainedEncodedBytes:encodedBytes,unitCapacity:nativeCapacity});
     const stats=t.cache.sampleUsage();sdkEqual(stats,{admissions:3,installedUnits:2,evictions:1,prunedNative:0,prunedNativeBytes:0,
       retired:5,work:5,runs:1,regions:2});assert.deepEqual(stats.evictionReasons,{count:1,bytes:0});
     assert.deepEqual(stats.nativeCache,admitted.counters);
@@ -155,29 +159,29 @@ try {
     assert.equal(t.inspect('B-reselected-without-compilation').counters.compiled,'3');
   });
 
-  const tiny=new Uint8Array(4096);tiny.fill(0x90,0,1025);
-  fixture('native-capacity-eviction-is-pruned-once',tiny,new Uint8Array(4096),[5,0,0,0x3000,0x4800,0,0,0],1024,1,t=>{
+  const tiny=new Uint8Array(8192);tiny.fill(0x90,0,nativeCapacity+1);
+  fixture('native-capacity-eviction-is-pruned-once',tiny,new Uint8Array(4096),[5,0,0,0x3000,0x4800,0,0,0],nativeCapacity,1,t=>{
     const first=t.select(0x1000);t.activeControls();const initial=t.snapshot();let second;
-    for(let index=1;index<1024;index++) {
+    for(let index=1;index<nativeCapacity;index++) {
       const unit=t.select(0x1000+index);if(index===1)second=unit;
     }
-    const before=t.inspect('1024-linked-owners');assert.equal(before.victim,first.slot);
-    countersEqual(before.counters,{compiled:1024,countEvictions:0,byteEvictions:0,sourceInvalidations:0,retainedUnits:1024,unitCapacity:1024});
-    assert.equal(t.cache.units.size,1024);assert.equal(before.owner(first.slot),first.id);assert.equal(before.owner(second.slot),second.id);
-    t.engine.ok('core_prepare',0x1400,1,8);
-    const nativeOnly=t.inspect('native-1025th-compile-before-SDK-admission');
-    countersEqual(nativeOnly.counters,{compiled:1025,countEvictions:1,byteEvictions:0,sourceInvalidations:0,retainedUnits:1024,unitCapacity:1024});
+    const before=t.inspect('4096-linked-owners');assert.equal(before.victim,first.slot);
+    countersEqual(before.counters,{compiled:nativeCapacity,countEvictions:0,byteEvictions:0,sourceInvalidations:0,retainedUnits:nativeCapacity,unitCapacity:nativeCapacity});
+    assert.equal(t.cache.units.size,nativeCapacity);assert.equal(before.owner(first.slot),first.id);assert.equal(before.owner(second.slot),second.id);
+    t.engine.ok('core_prepare',0x2000,1,8);
+    const nativeOnly=t.inspect('native-4097th-compile-before-SDK-admission');
+    countersEqual(nativeOnly.counters,{compiled:nativeCapacity+1,countEvictions:1,byteEvictions:0,sourceInvalidations:0,retainedUnits:nativeCapacity,unitCapacity:nativeCapacity});
     assert.equal(nativeOnly.owner(first.slot),0n,'native eviction already cleared its reciprocal owner');
-    assert.equal(nativeOnly.owner(second.slot),second.id);assert.equal(t.cache.units.size,1024,'SDK has not pruned yet');
-    const newest=t.select(0x1400), final=t.inspect('SDK-pruned-zero-owner-and-admitted-existing-code');
+    assert.equal(nativeOnly.owner(second.slot),second.id);assert.equal(t.cache.units.size,nativeCapacity,'SDK has not pruned yet');
+    const newest=t.select(0x2000), final=t.inspect('SDK-pruned-zero-owner-and-admitted-existing-code');
     const encodedBytes=t.result.modules.reduce((sum,module)=>sum+module.bytes,0),firstBytes=first.bytes;
-    countersEqual(final.counters,{compiled:1025,admittedEncodedBytes:encodedBytes,countEvictions:1,byteEvictions:0,
-      sourceInvalidations:0,retainedUnits:1024,retainedEncodedBytes:encodedBytes-firstBytes,unitCapacity:1024});
+    countersEqual(final.counters,{compiled:nativeCapacity+1,admittedEncodedBytes:encodedBytes,countEvictions:1,byteEvictions:0,
+      sourceInvalidations:0,retainedUnits:nativeCapacity,retainedEncodedBytes:encodedBytes-firstBytes,unitCapacity:nativeCapacity});
     assert.equal(t.cache.units.has(first.id),false);assert.equal(t.cache.units.get(second.id),second);
-    assert.equal(t.cache.units.size,1024,'no second valid owner was evicted');
+    assert.equal(t.cache.units.size,nativeCapacity,'no second valid owner was evicted');
     assert.equal(newest.slot,first.slot);assert.equal(final.owner(newest.slot),newest.id);
     assert.equal(t.cache.table.get(second.slot),second.run);assert.equal(final.owner(second.slot),second.id);
-    const stats=t.cache.sampleUsage();sdkEqual(stats,{admissions:1025,installedUnits:1024,evictions:0,prunedNative:1,
+    const stats=t.cache.sampleUsage();sdkEqual(stats,{admissions:nativeCapacity+1,installedUnits:nativeCapacity,evictions:0,prunedNative:1,
       prunedNativeBytes:firstBytes,retired:0,work:0,runs:0,regions:0});
     assert.deepEqual(stats.evictionReasons,{count:0,bytes:0});assert.deepEqual(stats.nativeCache,final.counters);
     assert.equal(stats.generatedModuleBytes,encodedBytes);assert.equal(stats.retainedModuleBytes,encodedBytes-firstBytes);
@@ -186,7 +190,7 @@ try {
     assert.deepEqual(t.bytes(t.engine.base,t.api.arena_len()),unhex(initial.arenaHex),'cold-only sequence preserves the full arena');
     assert.deepEqual(t.bytes(t.word(t.cache.context,64),16*4096),t.expectedRam());
     const retained=t.select(0x1001);assert.equal(retained,second);assert.equal(retained.slot,second.slot);
-    assert.equal(t.inspect('surviving-second-owner-no-recompile').counters.compiled,'1025');
+    assert.equal(t.inspect('surviving-second-owner-no-recompile').counters.compiled,String(nativeCapacity+1));
   });
   report.complete=true;checkpoint();console.log(JSON.stringify({complete:true,cases:report.cases.length,engineSha256:artifact.sha256}));
 } catch(error) {report.failure={stage,message:String(error),stack:error.stack};checkpoint();throw error;}

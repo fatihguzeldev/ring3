@@ -93,7 +93,7 @@ function fixture(select = pc => ({id: 1n, stop: 1, next: pc + 4}), dispatch = dr
     },
     core_cache_status_ptr() {
       calls.push(['cache-status']);
-      (control.nativeStatus??[3n,1234n,1n,2n,4n,BigInt(links.size),678n,1024n])
+      (control.nativeStatus??[3n,1234n,1n,2n,4n,BigInt(links.size),678n,4096n])
         .forEach((value,index)=>d().setBigUint64(statusPointer+index*8,value,true));
       return statusPointer;
     },
@@ -617,19 +617,22 @@ test('ordinary execution defaults to chained dispatch while explicit false remai
   const direct = new CodeCache(fixture().engine,{chain:false});
   assert.equal(direct.stats().chainEnabled,false); assert.equal(direct.table,undefined);
 });
-test('the default count bound retains more than 256 small modules within the same byte budget', () => {
-  assert.equal(DEFAULT_EXECUTION.capacity,1024);
+test('the default count bound retains 1025 linked modules within the same byte budget', () => {
+  assert.equal(DEFAULT_EXECUTION.capacity,4096);
   const f = fixture(pc => ({id:BigInt(pc),stop:2,next:pc+4}));
-  const cache = new CodeCache(f.engine,{chain:false}), first = cache.entry(0x1000);
-  for (let index=1; index<300; index++) cache.entry(0x1000+index*4);
+  const cache = new CodeCache(f.engine,{chain:true}), first = cache.entry(0x1000);
+  for (let index=1; index<1025; index++) cache.entry(0x1000+index*4);
   const stats = cache.stats();
-  assert.equal(stats.unitCapacity,1024); assert.equal(stats.byteCapacity,128*1024*1024);
-  assert.equal(stats.installedUnits,300); assert.equal(stats.admissions,300); assert.equal(stats.evictions,0);
+  assert.equal(stats.unitCapacity,4096); assert.equal(stats.byteCapacity,128*1024*1024);
+  assert.equal(stats.installedUnits,1025); assert.equal(stats.admissions,1025); assert.equal(stats.evictions,0);
   assert.equal(cache.units.get(first.id),first); assert(stats.retainedModuleBytes<stats.byteCapacity);
+  assert.equal(cache.table.get(first.slot),first.run); assert.equal(f.links.get(first.slot),first.id);
+  assert.equal(f.calls.filter(([name])=>name==='unlink').length,0);
 });
-test('capacity accepts 1024 and rejects invalid or larger metadata bounds', () => {
+test('capacity accepts the full 4096-slot dispatch bound and rejects larger metadata bounds', () => {
   assert.equal(new CodeCache(fixture().engine,{capacity:1024,chain:false}).stats().unitCapacity,1024);
-  for (const capacity of [0,1025,1.5,NaN,Infinity])
+  assert.equal(new CodeCache(fixture().engine,{capacity:4096,chain:false}).stats().unitCapacity,4096);
+  for (const capacity of [0,4097,1.5,NaN,Infinity])
     assert.throws(() => new CodeCache(fixture().engine,{capacity,chain:false}),/invalid core capacity/);
 });
 test('count eviction statistics change only after the expected owner is unlinked', () => {

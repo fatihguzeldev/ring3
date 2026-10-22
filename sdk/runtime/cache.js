@@ -20,9 +20,9 @@ export class CodeCache {
   #bindings;
   #contextView;
 
-  constructor(engine, {budget = 50000, instructions = 2048, blocks = 128, capacity = 1024, chain = true} = {}) {
+  constructor(engine, {budget = 50000, instructions = 2048, blocks = 128, capacity = 4096, chain = true} = {}) {
     if (typeof chain !== 'boolean') throw new Error('invalid core chain option');
-    for (const [name, value, maximum] of [['budget', budget, 0xffffffff], ['instructions', instructions, 16384], ['blocks', blocks, 1024], ['capacity', capacity, 1024]]) {
+    for (const [name, value, maximum] of [['budget', budget, 0xffffffff], ['instructions', instructions, 16384], ['blocks', blocks, 1024], ['capacity', capacity, 4096]]) {
       if (!Number.isInteger(value) || value < 1 || value > maximum) throw new Error(`invalid core ${name}`);
     }
     this.engine = engine;
