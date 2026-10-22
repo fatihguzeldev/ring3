@@ -3,6 +3,7 @@ use crate::math::PRECISION;
 
 const SCALE: u32 = 120;
 const UNIT: u128 = 1 << SCALE;
+const HALF_PI: u128 = 0x0192_1fb5_4442_d184_6989_8cc5_1701_b839;
 
 #[derive(Clone, Copy)]
 struct Interval {
@@ -100,7 +101,7 @@ fn input(x: Ext80, minimum_exponent: i32) -> Option<Interval> {
     else {
         return None;
     };
-    if !(minimum_exponent..=0).contains(&exponent) || exponent == 0 && significand != 1 << 63 {
+    if !(minimum_exponent..=7).contains(&exponent) || exponent == 7 && significand != 1 << 63 {
         return None;
     }
     let input = u128::from(significand) << (57 + exponent);
@@ -110,7 +111,40 @@ fn input(x: Ext80, minimum_exponent: i32) -> Option<Interval> {
     })
 }
 
+fn reduce(input: Interval) -> Option<(Interval, u32, bool)> {
+    if input.high <= UNIT {
+        return Some((input, 0, false));
+    }
+    // pi/2 lies between these adjacent q120 values; every quadrant keeps that uncertainty.
+    let turns = (input.low + HALF_PI / 2) / HALF_PI;
+    let low = turns * HALF_PI;
+    let high = low + turns;
+    let (reduced, negative) = if input.low >= high {
+        (
+            Interval {
+                low: input.low - high,
+                high: input.high - low,
+            },
+            false,
+        )
+    } else if input.high <= low {
+        (
+            Interval {
+                low: low - input.high,
+                high: high - input.low,
+            },
+            true,
+        )
+    } else {
+        return None;
+    };
+    (reduced.high <= UNIT).then_some((reduced, turns as u32 & 3, negative))
+}
+
 fn certify(result: Interval, negative: bool, control: u16) -> Option<Rounded> {
+    if result.low < 1 << 66 {
+        return None;
+    }
     let lower = fixed_round(result.low, negative, control);
     let upper = fixed_round(result.high, negative, control);
     if lower.value != upper.value {
@@ -133,30 +167,38 @@ fn certify(result: Interval, negative: bool, control: u16) -> Option<Rounded> {
     })
 }
 
-pub(super) fn sin(x: Ext80, control: u16) -> Option<Rounded> {
-    let input = input(x, -16)?;
+fn evaluate(x: Ext80, control: u16, cosine: bool) -> Option<Rounded> {
+    let (input, quadrant, residual_negative) = reduce(input(x, if cosine { -57 } else { -16 })?)?;
     let square = input.multiply(input);
-    let mut polynomial = SINE_COEFFICIENTS[15];
-    // successive factorial coefficients keep these nested differences positive for |x| <= 1.
-    for coefficient in SINE_COEFFICIENTS[..15].iter().rev() {
-        polynomial = coefficient.subtract(square.multiply(polynomial));
-    }
-    let mut result = input.multiply(polynomial);
-    // after the negative x^31/31! term, the positive alternating tail is less than 1/33!.
-    result.high += 1;
-    certify(result, x.negative(), control)
+    let cosine_polynomial = cosine ^ (quadrant & 1 != 0);
+    let (result, negative) = if cosine_polynomial {
+        let mut polynomial = COSINE_COEFFICIENTS[16];
+        for coefficient in COSINE_COEFFICIENTS[..16].iter().rev() {
+            polynomial = coefficient.subtract(square.multiply(polynomial));
+        }
+        // after the positive x^32/32! term, the negative alternating tail is less than 1/34!.
+        polynomial.low -= 1;
+        (polynomial, quadrant & 2 != 0)
+    } else {
+        let mut polynomial = SINE_COEFFICIENTS[15];
+        // successive factorial coefficients keep these nested differences positive for |x| <= 1.
+        for coefficient in SINE_COEFFICIENTS[..15].iter().rev() {
+            polynomial = coefficient.subtract(square.multiply(polynomial));
+        }
+        let mut result = input.multiply(polynomial);
+        // after the negative x^31/31! term, the positive alternating tail is less than 1/33!.
+        result.high += 1;
+        (result, residual_negative ^ matches!(quadrant, 1 | 2))
+    };
+    certify(result, negative ^ (!cosine && x.negative()), control)
+}
+
+pub(super) fn sin(x: Ext80, control: u16) -> Option<Rounded> {
+    evaluate(x, control, false)
 }
 
 pub(super) fn cos(x: Ext80, control: u16) -> Option<Rounded> {
-    let input = input(x, -57)?;
-    let square = input.multiply(input);
-    let mut polynomial = COSINE_COEFFICIENTS[16];
-    for coefficient in COSINE_COEFFICIENTS[..16].iter().rev() {
-        polynomial = coefficient.subtract(square.multiply(polynomial));
-    }
-    // after the positive x^32/32! term, the negative alternating tail is less than 1/34!.
-    polynomial.low -= 1;
-    certify(polynomial, false, control)
+    evaluate(x, control, true)
 }
 
 #[cfg(test)]
