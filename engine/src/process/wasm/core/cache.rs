@@ -107,27 +107,14 @@ impl CoreCache32 {
     }
 
     pub(super) fn frontier(&self, memory: &AddressSpace) -> Vec<GuestAddress> {
-        let mut frontier = Vec::new();
-        for (index, entry) in self.regions.iter().enumerate() {
-            let Some(entry) = entry else { continue };
-            if !entry.code.is_current(memory) {
-                continue;
-            }
-            let key = RegionKey {
-                index,
-                identity: entry.code.identity(),
-            };
-            for pc in entry.code.entrypoints() {
-                if self
-                    .entries
-                    .get(&pc.0)
-                    .is_some_and(|indexed| *indexed == key)
-                {
-                    frontier.push(*pc);
-                }
-            }
-        }
-        frontier
+        self.entries
+            .iter()
+            .filter_map(|(&pc, &key)| {
+                self.region(key)
+                    .filter(|entry| entry.code.is_current(memory))
+                    .map(|_| GuestAddress(pc))
+            })
+            .collect()
     }
 
     pub(super) fn link_owners_ptr(&self) -> *const u64 {
