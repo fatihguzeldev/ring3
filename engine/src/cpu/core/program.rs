@@ -400,6 +400,11 @@ fn compile_formation(
         }
         retain_entry_prefix(&mut blocks, entry.0, instructions / 2);
     };
+    // instruction snapshots on the same pages share one mapping/content authority.
+    sources.sort_unstable_by_key(|source| (source.first, source.versions.len()));
+    sources.dedup_by(|source, retained| {
+        source.first == retained.first && source.versions == retained.versions
+    });
     Ok(CompiledCode {
         identity,
         memory_identity: memory.identity(),
@@ -736,6 +741,39 @@ mod tests {
                 .unwrap()
                 .is_current(&memory)
         );
+    }
+
+    #[test]
+    fn repeated_instruction_sources_share_one_page_snapshot() {
+        let mut memory = memory(&[0x1000, 0x2000]);
+        let mut instructions = vec![0x40; 63];
+        instructions.extend([0x0f, 0x0b]);
+        memory.write(GuestAddress(0x1000), &instructions).unwrap();
+        let code = compile(&memory, GuestAddress(0x1000), limits(64, 1)).unwrap();
+        assert_eq!(code.instruction_count(), 64);
+        assert_eq!(code.sources.len(), 1);
+        memory.write(GuestAddress(0x2000), &[0x40]).unwrap();
+        assert!(code.is_current(&memory));
+        memory.write(GuestAddress(0x103e), &[0x48]).unwrap();
+        assert!(!code.is_current(&memory));
+    }
+
+    #[test]
+    fn compacted_cross_page_sources_still_validate_both_pages() {
+        for changed in [0x1ffc, 0x2001] {
+            let mut memory = memory(&[0x1000, 0x2000, 0x3000]);
+            let mut instructions = vec![0xb8, 0x12, 0x34, 0x56, 0x78];
+            instructions.extend([0x40; 31]);
+            instructions.extend([0x0f, 0x0b]);
+            memory.write(GuestAddress(0x1ffc), &instructions).unwrap();
+            let code = compile(&memory, GuestAddress(0x1ffc), limits(40, 1)).unwrap();
+            assert_eq!(code.instruction_count(), 33);
+            assert_eq!(code.sources.len(), 2);
+            memory.write(GuestAddress(0x3000), &[0x40]).unwrap();
+            assert!(code.is_current(&memory));
+            memory.write(GuestAddress(changed), &[0x48]).unwrap();
+            assert!(!code.is_current(&memory));
+        }
     }
 
     fn source_memo_memory() -> AddressSpace {
