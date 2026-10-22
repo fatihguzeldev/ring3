@@ -98,12 +98,24 @@ fn bounds(cache: &CoreCache32) {
     assert_eq!(cache.link_owners[0], 0);
     assert_eq!(cache.slot_regions[0], NO_REGION);
     for (index, entry) in cache.regions.iter().enumerate() {
-        if let Some(entry) = entry.as_ref().filter(|entry| entry.slot != 0) {
+        if let Some(entry) = entry.as_ref() {
             let key = RegionKey {
                 index,
                 identity: entry.code.identity(),
             };
-            assert!(cache.reciprocal_slot(key, entry));
+            assert_ne!(entry.indexed_entries, 0);
+            assert_eq!(
+                entry.indexed_entries,
+                entry
+                    .code
+                    .entrypoints()
+                    .iter()
+                    .filter(|pc| cache.entries.get(&pc.0) == Some(&key))
+                    .count()
+            );
+            if entry.slot != 0 {
+                assert!(cache.reciprocal_slot(key, entry));
+            }
         }
     }
     for (slot, &identity) in cache.link_owners.iter().enumerate().skip(1) {
@@ -214,6 +226,73 @@ fn newer_side_entry_alias_survives_eviction_of_the_previous_region() {
     for pc in [0x1005, 0x100d] {
         assert!(same(&cache.lookup(&memory, pc).unwrap(), &newer));
     }
+    bounds(&cache);
+}
+
+#[test]
+fn partially_shadowed_owners_retain_their_other_entries_and_links() {
+    let memory = memory();
+    let mut cache = CoreCache32::default();
+    let old = cache.insert(compiled(&memory, 0x1000));
+    cache.install_link(&old, 1).unwrap();
+    let newer = cache.insert(compiled(&memory, 0x1005));
+    cache.install_link(&newer, 2).unwrap();
+    assert_eq!(cache.retained(&old).unwrap().indexed_entries, 2);
+    assert_eq!(cache.retained(&newer).unwrap().indexed_entries, 2);
+    for pc in [0x1000, 0x100a] {
+        let (selected, slot) = cache.lookup_linked(&memory, pc).unwrap();
+        assert!(same(&selected, &old));
+        assert_eq!(slot, 1);
+    }
+    for pc in [0x1005, 0x100d] {
+        let (selected, slot) = cache.lookup_linked(&memory, pc).unwrap();
+        assert!(same(&selected, &newer));
+        assert_eq!(slot, 2);
+    }
+    assert_eq!(cache.snapshot()[2..6], [0, 0, 0, 2]);
+    bounds(&cache);
+}
+
+#[test]
+fn losing_the_last_index_reclaims_every_displaced_owner_but_not_held_code() {
+    let memory = memory();
+    let mut cache = CoreCache32::default();
+    let old = cache.insert(compiled(&memory, 0x1000));
+    cache.install_link(&old, 1).unwrap();
+    let partial = cache.insert(compiled(&memory, 0x1005));
+    cache.install_link(&partial, 2).unwrap();
+    let newer = cache.insert(compiled(&memory, 0x1000));
+    assert!(cache.retained(&old).is_none());
+    assert!(cache.retained(&partial).is_none());
+    for slot in [1, 2] {
+        assert_eq!(cache.link_owners[slot], 0);
+        assert_eq!(cache.slot_regions[slot], NO_REGION);
+    }
+    for held in [&old, &partial] {
+        assert!(held.is_current(&memory));
+        assert!(!held.wasm().is_empty());
+        assert!(cache.install_link(held, 1).is_err());
+    }
+    cache.install_link(&newer, 1).unwrap();
+    assert!(cache.unlink(1, old.identity()).is_err());
+    for pc in [0x1000, 0x1005, 0x100a, 0x100d] {
+        let (selected, slot) = cache.lookup_linked(&memory, pc).unwrap();
+        assert!(same(&selected, &newer));
+        assert_eq!(slot, 1);
+    }
+    assert_eq!(
+        cache.snapshot(),
+        [
+            3,
+            (old.wasm().len() + partial.wasm().len() + newer.wasm().len()) as u64,
+            0,
+            0,
+            0,
+            1,
+            newer.wasm().len() as u64,
+            MAX_REGIONS as u64,
+        ]
+    );
     bounds(&cache);
 }
 
@@ -423,7 +502,9 @@ fn real_byte_pressure_evicts_and_releases_links_before_the_count_limit() {
     let mut newest = first.clone();
     let mut admitted_bytes = bytes;
     for index in 1..count {
-        let code = compile(&memory, GuestAddress(0x1000), limits).unwrap();
+        let pc = 0x1000 + index as u32 * 3;
+        let code = compile(&memory, GuestAddress(pc), limits).unwrap();
+        assert_eq!(code.entrypoints(), &[GuestAddress(pc)]);
         admitted_bytes += code.wasm().len();
         newest = cache.insert(code);
         cache.install_link(&newest, index as u32 + 1).unwrap();
@@ -445,10 +526,41 @@ fn real_byte_pressure_evicts_and_releases_links_before_the_count_limit() {
     );
     assert!(!cache.retained(&first).is_some());
     assert!(cache.install_link(&first, 1).is_err());
+    let oldest_index = cache.oldest.unwrap();
+    let oldest = RegionKey {
+        index: oldest_index,
+        identity: cache.regions[oldest_index]
+            .as_ref()
+            .unwrap()
+            .code
+            .identity(),
+    };
+    let newest_pc = newest.entrypoints()[0];
+    let replacement = compile(&memory, newest_pc, limits).unwrap();
+    let replacement_bytes = replacement.wasm().len();
+    assert!(cache.bytes + replacement_bytes > MAX_CODE_BYTES);
+    assert!(cache.bytes - newest.wasm().len() + replacement_bytes <= MAX_CODE_BYTES);
+    let pressure = cache.snapshot();
+    let displaced = newest;
+    let newest = cache.insert(replacement);
+    assert!(
+        cache.region(oldest).is_some(),
+        "unrelated oldest owner survives"
+    );
+    assert!(cache.retained(&displaced).is_none());
+    assert_eq!(cache.link_owners[count], 0);
+    assert_eq!(cache.snapshot()[2..6], pressure[2..6]);
+    assert_eq!(cache.snapshot()[0], pressure[0] + 1);
+    assert_eq!(cache.snapshot()[1], pressure[1] + replacement_bytes as u64);
+    assert_eq!(
+        cache.snapshot()[6],
+        pressure[6] - displaced.wasm().len() as u64 + replacement_bytes as u64
+    );
+    cache.install_link(&newest, count as u32).unwrap();
     cache.unlink(count as u32, newest.identity()).unwrap();
     cache.install_link(&newest, 1).unwrap();
     assert!(cache.unlink(1, first.identity()).is_err());
-    assert_eq!(cache.lookup_linked(&memory, 0x1000).unwrap().1, 1);
+    assert_eq!(cache.lookup_linked(&memory, newest_pc.0).unwrap().1, 1);
     bounds(&cache);
 }
 

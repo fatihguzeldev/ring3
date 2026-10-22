@@ -107,6 +107,37 @@ function runArm(boundary) {
       ramHex:hex(bytes(backing,expectedRam.length)),fpHex:hex(fp),stateHex:hex(finalState),
       lastPublishedRetired:retired-publishedRetired,lastPublishedWork:work-publishedWork,
       owner:String(last.id),fused:!result.initialOwners.includes(String(last.id)),admissions:cache.stats().admissions};
+    const ownersPointer = api.core_link_owners_ptr()>>>0;
+    assert(ownersPointer>0 && ownersPointer+4097*8<=engine.memory.buffer.byteLength);
+    const owners = bytes(ownersPointer,4097*8), ownerView = view(owners);
+    const usage = cache.sampleUsage(), retained = cache.units.get(last.id);
+    result.retention = {native:usage.nativeCache,installedUnits:cache.units.size,
+      retainedBytes:cache.retainedModuleBytes,ownerHex:hex(owners),
+      predecessors:[first,next].map(unit=>({id:String(unit.id),slot:unit.slot,
+        owner:String(ownerView.getBigUint64(unit.slot*8,true)),retained:cache.units.has(unit.id)}))};
+    checkpoint();
+    assert(retained,'the final fused owner remains installed');
+    assert.equal(usage.nativeCache.retainedUnits,'1','fully shadowed predecessors release their native rows');
+    assert.equal(usage.nativeCache.retainedEncodedBytes,String(retained.bytes),'only the fused encoded module remains retained');
+    assert.equal(usage.nativeCache.countEvictions,'0','shadow reclamation does not require count pressure');
+    assert.equal(usage.nativeCache.byteEvictions,'0','shadow reclamation does not require byte pressure');
+    assert.equal(usage.nativeCache.sourceInvalidations,'0','unchanged guest code did not invalidate either predecessor');
+    assert.equal(cache.units.size,1,'SDK prunes every detached predecessor');
+    assert.equal(cache.retainedModuleBytes,retained.bytes);
+    for (const unit of [first,next]) {
+      assert.equal(cache.units.has(unit.id),false,'a held predecessor is no longer retained');
+      assert.notEqual(ownerView.getBigUint64(unit.slot*8,true),unit.id,'a held predecessor no longer owns its table slot');
+      assert.throws(()=>cache.execute(unit),/not retained/,'a held SDK object cannot execute after reclamation');
+    }
+    const reused = [first,next].find(unit=>ownerView.getBigUint64(unit.slot*8,true)!==0n);
+    assert(reused,'the fused owner reuses one reclaimed predecessor slot');
+    const staleUnlink = api.core_unlink(reused.slot,Number(reused.id&0xffffffffn),Number(reused.id>>32n));
+    result.retention.staleUnlink = staleUnlink; checkpoint();
+    assert.notEqual(staleUnlink,0,'an old identity cannot unlink the new owner of the same slot');
+    assert.deepEqual(bytes(ownersPointer,4097*8),owners,'rejected old-identity unlink preserves all reciprocal owners');
+    assert.deepEqual(bytes(cache.context,128),unhex(result.final.contextHex));
+    assert.deepEqual(bytes(engine.base,expectedArena.length),expectedArena,'all retention checks preserve the complete published arena');
+    assert.deepEqual(bytes(backing,expectedRam.length),expectedRam,'all retention checks preserve canonical RAM');
     result.complete = true; checkpoint(); return result;
   } catch (error) {
     result.failure = {stage,message:String(error),stack:error.stack}; checkpoint(); throw error;

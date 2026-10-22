@@ -60,6 +60,7 @@ impl Deref for RegionRef {
 
 struct CachedRegion {
     code: Rc<CompiledCode>,
+    indexed_entries: usize,
     older: Option<usize>,
     newer: Option<usize>,
     slot: u32,
@@ -266,6 +267,15 @@ impl CoreCache32 {
 
     pub(super) fn insert(&mut self, code: CompiledCode) -> RegionRef {
         let code = Rc::new(code);
+        for pc in code.entrypoints() {
+            if let Some(key) = self.entries.remove(&pc.0) {
+                let entry = self.regions[key.index].as_mut().unwrap();
+                entry.indexed_entries -= 1;
+                if entry.indexed_entries == 0 {
+                    self.remove(key);
+                }
+            }
+        }
         while self.free.is_empty() || self.bytes + code.wasm().len() > MAX_CODE_BYTES {
             let Some(index) = self.oldest else { break };
             let byte_pressure = self.bytes + code.wasm().len() > MAX_CODE_BYTES;
@@ -285,6 +295,7 @@ impl CoreCache32 {
         }
         self.bytes += code.wasm().len();
         self.regions[index] = Some(CachedRegion {
+            indexed_entries: code.entrypoints().len(),
             code: Rc::clone(&code),
             older: self.newest,
             newer: None,

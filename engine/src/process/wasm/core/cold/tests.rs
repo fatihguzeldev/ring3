@@ -341,12 +341,27 @@ fn cold_prefix_ignores_stale_remapped_and_reset_cache_authority() {
 #[test]
 fn an_evicted_but_held_owner_does_not_stop_the_cold_prefix() {
     let (mut instance, mut context, mut bank, segments) = frontier_fixture(3);
+    instance.map(0x2000, 1, 7).unwrap();
+    instance
+        .memory
+        .as_mut()
+        .unwrap()
+        .write(GuestAddress(0x2000), &[0x90; 4096])
+        .unwrap();
     let mut cache = CoreCache32::default();
     let memory = instance.memory.as_ref().unwrap();
     let old = cache.insert(compile(memory, GuestAddress(0x1008), frontier_options(2)).unwrap());
     let capacity = cache.snapshot()[7];
-    for _ in 0..capacity {
-        cache.insert(compile(memory, GuestAddress(0x1080), frontier_options(1)).unwrap());
+    assert!(capacity <= 4096);
+    for index in 0..capacity {
+        cache.insert(
+            compile(
+                memory,
+                GuestAddress(0x2000 + index as u32),
+                frontier_options(1),
+            )
+            .unwrap(),
+        );
     }
     assert!(old.is_current(memory));
     assert_eq!(
@@ -354,8 +369,13 @@ fn an_evicted_but_held_owner_does_not_stop_the_cold_prefix() {
         1,
         "actual count pressure evicted one owner"
     );
+    assert_eq!(cache.snapshot()[3], 0, "no byte-pressure eviction");
     assert!(!cache.frontier_contains(memory, 0x1010));
     let status = cache.snapshot();
+    let before = *context.bytes();
+    let pages = frontier_pages(memory);
+    let numerical = bank.architectural_state();
+    let arena = instance.arena().to_vec();
     assert_eq!(
         run_with_frontier(
             &mut instance,
@@ -373,6 +393,25 @@ fn an_evicted_but_held_owner_does_not_stop_the_cold_prefix() {
         (0x1011, 0x3001)
     );
     assert_eq!((context.retired(), context.remaining()), (3, 0));
+    let mut expected = before;
+    for (offset, value) in [
+        (0, 1_u32),
+        (12, 0x3001),
+        (32, 0x1011),
+        (36, 2),
+        (40, 3),
+        (44, 0),
+    ] {
+        expected[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+    }
+    assert_eq!(*context.bytes(), expected);
+    assert_eq!(bank.architectural_state(), numerical);
+    assert_eq!(instance.arena(), arena);
+    let memory = instance.memory.as_ref().unwrap();
+    assert_eq!(frontier_pages(memory), pages);
+    let mut fillers = [0; 4096];
+    memory.read(GuestAddress(0x2000), &mut fillers).unwrap();
+    assert_eq!(fillers, [0x90; 4096]);
     assert_eq!(cache.snapshot(), status);
 }
 

@@ -75,6 +75,8 @@ fn unchanged_import_retains_a_pending_pair_without_changing_cache_ownership() {
         formed.formation_roots(),
         &[GuestAddress(0x1000), GuestAddress(0x1040)]
     );
+    assert_eq!(&cache.link_owners[1..3], &[0, 0]);
+    assert!(cache.retained(&a).is_none() && cache.retained(&b).is_none());
 }
 
 #[test]
@@ -223,7 +225,11 @@ fn a_mature_observed_pair_is_formed_only_by_the_closed_prepare() {
         &cache.lookup(&memory, 0x1040).unwrap().code,
         &merged.code
     ));
-    assert_eq!(&cache.link_owners[1..3], &[a.identity(), b.identity()]);
+    assert_eq!(&cache.link_owners[1..3], &[0, 0]);
+    assert!(cache.retained(&a).is_none() && cache.retained(&b).is_none());
+    assert!(a.is_current(&memory) && b.is_current(&memory));
+    assert_eq!(cache.snapshot()[5], 1);
+    assert_eq!(cache.snapshot()[6], merged.wasm().len() as u64);
     assert!(
         cache
             .prepare_transition(&memory, 0x1040, options(), &[])
@@ -265,6 +271,9 @@ fn a_return_into_an_interior_entry_keeps_all_previously_formed_roots() {
         abc.identity()
     );
     assert!(a.is_current(&memory) && b.is_current(&memory) && c.is_current(&memory));
+    assert_eq!(&cache.link_owners[1..5], &[0, 0, 0, 0]);
+    assert!(cache.retained(&ab).is_none() && cache.retained(&c).is_none());
+    assert_eq!(cache.snapshot()[5], 1);
 }
 
 #[test]
@@ -494,13 +503,13 @@ fn cross_page_call_and_return_pairs_retain_both_roots_and_the_continuation() {
         }
         assert_ne!(merged.identity(), caller.identity());
         assert_ne!(merged.identity(), callee.identity());
-        assert_eq!(
-            &cache.link_owners[1..3],
-            &[caller.identity(), callee.identity()]
-        );
+        assert_eq!(&cache.link_owners[1..3], &[0, 0]);
+        assert!(cache.retained(&caller).is_none() && cache.retained(&callee).is_none());
         assert!(caller.is_current(&memory) && callee.is_current(&memory));
         assert!(merged.is_current(&memory));
         assert_eq!(cache.snapshot()[0], before[0] + 1);
+        assert_eq!(cache.snapshot()[5], 1);
+        assert_eq!(cache.snapshot()[6], merged.wasm().len() as u64);
     }
 }
 
@@ -531,10 +540,8 @@ fn cross_page_formed_sources_reject_writes_and_permission_changes_on_either_page
             assert_eq!(caller.is_current(&memory), changed_page != 0x1000);
             assert_eq!(callee.is_current(&memory), changed_page != 0x2000);
             assert!(cache.lookup(&memory, 0x2000).is_none());
-            assert_eq!(
-                &cache.link_owners[1..3],
-                &[caller.identity(), callee.identity()]
-            );
+            assert_eq!(&cache.link_owners[1..3], &[0, 0]);
+            assert!(cache.retained(&caller).is_none() && cache.retained(&callee).is_none());
         }
     }
 }
