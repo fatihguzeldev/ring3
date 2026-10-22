@@ -159,6 +159,16 @@ impl CoreCache32 {
         self.pending_transition = None;
     }
 
+    pub(in crate::process) fn retain_transition_on_import(&mut self, pc: u32) {
+        if self
+            .pending_transition
+            .as_ref()
+            .is_some_and(|pending| pending.pc != pc)
+        {
+            self.clear_transition();
+        }
+    }
+
     fn indexes(&self, code: &RegionRef, pc: u32) -> bool {
         self.entries
             .get(&pc)

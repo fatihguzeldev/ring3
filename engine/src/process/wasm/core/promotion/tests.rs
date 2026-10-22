@@ -56,6 +56,147 @@ fn mature(
 }
 
 #[test]
+fn unchanged_import_retains_a_pending_pair_without_changing_cache_ownership() {
+    let memory = memory();
+    let mut cache = CoreCache32::default();
+    let a = insert(&mut cache, &memory, 0x1000, 1);
+    let b = insert(&mut cache, &memory, 0x1040, 2);
+    mature(&mut cache, &memory, &a, &b, 0x1040);
+    let snapshot = cache.snapshot();
+    let owners = cache.link_owners.to_vec();
+    cache.retain_transition_on_import(0x1040);
+    assert!(cache.transition_pending());
+    assert_eq!(cache.snapshot(), snapshot);
+    assert_eq!(cache.link_owners.as_ref(), owners);
+    let formed = cache
+        .prepare_transition(&memory, 0x1040, options(), &[])
+        .unwrap();
+    assert_eq!(
+        formed.formation_roots(),
+        &[GuestAddress(0x1000), GuestAddress(0x1040)]
+    );
+}
+
+#[test]
+fn changed_import_pc_discards_pending_heat_without_reassigning_either_owner() {
+    let memory = memory();
+    let mut cache = CoreCache32::default();
+    let a = insert(&mut cache, &memory, 0x1000, 1);
+    let b = insert(&mut cache, &memory, 0x1040, 2);
+    mature(&mut cache, &memory, &a, &b, 0x1040);
+    let snapshot = cache.snapshot();
+    cache.retain_transition_on_import(0x1000);
+    assert!(!cache.transition_pending());
+    assert_eq!(cache.snapshot(), snapshot);
+    assert_eq!(&cache.link_owners[1..3], &[a.identity(), b.identity()]);
+    assert!(
+        cache
+            .prepare_transition(&memory, 0x1040, options(), &[])
+            .is_none()
+    );
+}
+
+#[test]
+fn changed_import_memory_or_code_epoch_cannot_form_a_pending_pair() {
+    for change in 0..3 {
+        let mut memory = memory();
+        let mut cache = CoreCache32::default();
+        let a = insert(&mut cache, &memory, 0x1000, 1);
+        let b = insert(&mut cache, &memory, 0x1040, 2);
+        mature(&mut cache, &memory, &a, &b, 0x1040);
+        let other;
+        let imported = match change {
+            0 => {
+                other = self::memory();
+                assert_eq!(other.code_source_version(), memory.code_source_version());
+                &other
+            }
+            1 => {
+                memory.write(GuestAddress(0x2000), &[0x48]).unwrap();
+                &memory
+            }
+            _ => {
+                let mut bytes = [0; 4096];
+                memory.read(GuestAddress(0x1000), &mut bytes).unwrap();
+                let range = PageRange::new(GuestAddress(0x1000), 1).unwrap();
+                memory.unmap(range).unwrap();
+                memory.map_zeroed(range, Permissions::ALL).unwrap();
+                memory.write(GuestAddress(0x1000), &bytes).unwrap();
+                &memory
+            }
+        };
+        let snapshot = cache.snapshot();
+        cache.retain_transition_on_import(0x1040);
+        assert!(cache.transition_pending());
+        assert!(
+            cache
+                .prepare_transition(imported, 0x1040, options(), &[])
+                .is_none()
+        );
+        assert!(!cache.transition_pending());
+        assert_eq!(cache.snapshot(), snapshot);
+        assert_eq!(&cache.link_owners[1..3], &[a.identity(), b.identity()]);
+    }
+}
+
+#[test]
+fn reused_pending_owner_or_driver_slot_cannot_form_after_import() {
+    for replace_target in [false, true] {
+        let memory = memory();
+        let mut cache = CoreCache32::default();
+        let a = insert(&mut cache, &memory, 0x1000, 1);
+        let b = insert(&mut cache, &memory, 0x1040, 2);
+        mature(&mut cache, &memory, &a, &b, 0x1040);
+        let removed = if replace_target { &b } else { &a };
+        let slot = if replace_target { 2 } else { 1 };
+        cache.remove(removed.key);
+        let replacement = insert(&mut cache, &memory, 0x2000, slot);
+        assert_eq!(replacement.key.index, removed.key.index);
+        assert!(removed.is_current(&memory));
+        let snapshot = cache.snapshot();
+        let owners = cache.link_owners.to_vec();
+        cache.retain_transition_on_import(0x1040);
+        assert!(cache.transition_pending());
+        assert!(
+            cache
+                .prepare_transition(&memory, 0x1040, options(), &[])
+                .is_none()
+        );
+        assert!(!cache.transition_pending());
+        assert_eq!(cache.snapshot(), snapshot);
+        assert_eq!(cache.link_owners.as_ref(), owners);
+    }
+}
+
+#[test]
+fn unlinked_or_shadowed_pending_target_cannot_form_after_import() {
+    for shadow in [false, true] {
+        let memory = memory();
+        let mut cache = CoreCache32::default();
+        let a = insert(&mut cache, &memory, 0x1000, 1);
+        let b = insert(&mut cache, &memory, 0x1040, 2);
+        mature(&mut cache, &memory, &a, &b, 0x1040);
+        if shadow {
+            insert(&mut cache, &memory, 0x1040, 3);
+        } else {
+            cache.unlink(2, b.identity()).unwrap();
+        }
+        let snapshot = cache.snapshot();
+        let owners = cache.link_owners.to_vec();
+        cache.retain_transition_on_import(0x1040);
+        assert!(cache.transition_pending());
+        assert!(
+            cache
+                .prepare_transition(&memory, 0x1040, options(), &[])
+                .is_none()
+        );
+        assert!(!cache.transition_pending());
+        assert_eq!(cache.snapshot(), snapshot);
+        assert_eq!(cache.link_owners.as_ref(), owners);
+    }
+}
+
+#[test]
 fn a_mature_observed_pair_is_formed_only_by_the_closed_prepare() {
     let memory = memory();
     let mut cache = CoreCache32::default();
