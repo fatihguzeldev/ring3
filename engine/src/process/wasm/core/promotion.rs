@@ -3,9 +3,26 @@ use crate::cpu::core::CompileOptions;
 
 #[derive(Default)]
 pub(super) struct TransitionHeat {
+    edges: [TransitionEdge; 4],
+    rejected: [Option<TransitionRejection>; 4],
+}
+
+#[derive(Clone, Copy, Default)]
+struct TransitionEdge {
     target: u64,
+    target_index: usize,
     pc: u32,
     hits: u32,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct TransitionRejection {
+    version: u64,
+    instructions: usize,
+    blocks: usize,
+    wasm_bytes: usize,
+    source_entries: usize,
+    target_entries: usize,
 }
 
 pub(super) struct PendingTransition {
@@ -77,22 +94,51 @@ impl CoreCache32 {
         pc: u32,
         threshold: u32,
     ) -> bool {
-        let heat = &mut self.regions[source.key.index].as_mut().unwrap().heat;
-        if heat.target == target.identity() && heat.pc == pc {
-            heat.hits = heat.hits.saturating_add(1);
-        } else if heat.hits != 0 {
-            heat.hits -= 1;
-            return false;
-        } else {
-            heat.target = target.identity();
-            heat.pc = pc;
-            heat.hits = 1;
+        let edges = &self.regions[source.key.index].as_ref().unwrap().heat.edges;
+        let identity = target.identity();
+        let mut selected = 0;
+        let mut matched = false;
+        for (index, edge) in edges.iter().enumerate() {
+            if edge.target == identity && edge.pc == pc {
+                selected = index;
+                matched = true;
+                break;
+            }
+            if edge.hits < edges[selected].hits {
+                selected = index;
+            }
         }
-        if heat.hits < threshold {
+        if !matched && edges[selected].hits != 0 {
+            for (index, edge) in edges.iter().enumerate() {
+                if self
+                    .region(RegionKey {
+                        index: edge.target_index,
+                        identity: edge.target,
+                    })
+                    .is_none()
+                {
+                    selected = index;
+                    break;
+                }
+            }
+        }
+        let heat = &mut self.regions[source.key.index].as_mut().unwrap().heat;
+        let edge = &mut heat.edges[selected];
+        if edge.target != identity || edge.pc != pc {
+            *edge = TransitionEdge {
+                target: identity,
+                target_index: target.key.index,
+                pc,
+                hits: 0,
+            };
+            heat.rejected[selected] = None;
+        }
+        edge.hits = edge.hits.saturating_add(1);
+        if edge.hits < threshold {
             return false;
         }
         // success and decline both require another complete heat interval before retry.
-        heat.hits = 0;
+        edge.hits = 0;
         self.pending_transition = Some(PendingTransition {
             source: source.key,
             target: target.key,
@@ -131,6 +177,28 @@ impl CoreCache32 {
         {
             return None;
         }
+        let rejected = TransitionRejection {
+            version: memory.code_source_version(),
+            instructions: options.instructions,
+            blocks: options.blocks,
+            wasm_bytes: options.wasm_bytes,
+            source_entries: self.retained(&source)?.indexed_entries,
+            target_entries: self.retained(&target)?.indexed_entries,
+        };
+        let heat = &mut self.regions[source.key.index].as_mut()?.heat;
+        let selected = heat
+            .edges
+            .iter()
+            .position(|edge| edge.target == target.identity() && edge.pc == pc)?;
+        if heat.rejected[selected] == Some(rejected) {
+            return None;
+        }
+        // an accepted formation removes this source owner and its edge rows.
+        // declined pairs retry when limits, indexed entry counts or source epoch change.
+        heat.rejected[selected] = Some(rejected);
+        if rejected.source_entries + rejected.target_entries > options.blocks {
+            return None;
+        }
         let roots: Vec<_> = source
             .formation_roots()
             .iter()
@@ -152,6 +220,19 @@ impl CoreCache32 {
             &roots,
         )
         .ok()??;
+        if code.wasm().len() > source.wasm().len() + target.wasm().len()
+            || [&source, &target].into_iter().any(|owner| {
+                owner.entrypoints().iter().any(|entry| {
+                    self.indexes(owner, entry.0)
+                        && code
+                            .entrypoints()
+                            .binary_search_by_key(&entry.0, |pc| pc.0)
+                            .is_err()
+                })
+            })
+        {
+            return None;
+        }
         Some(self.insert(code))
     }
 

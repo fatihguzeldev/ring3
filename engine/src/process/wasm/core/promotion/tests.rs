@@ -316,6 +316,109 @@ fn a_declined_cap_preserves_the_target_and_requires_new_heat() {
 }
 
 #[test]
+fn preserved_roots_cannot_hide_a_dropped_indexed_interior_entry() {
+    let memory = memory();
+    let mut cache = CoreCache32::default();
+    let a = insert(&mut cache, &memory, 0x1000, 1);
+    let b = insert(&mut cache, &memory, 0x1040, 2);
+    assert!(a.entrypoints().contains(&GuestAddress(0x1008)));
+    assert!(cache.indexes(&a, 0x1008));
+    let limited = CompileOptions {
+        instructions: 4,
+        ..options()
+    };
+    let candidate = CompiledCode::compile_transition(
+        &memory,
+        GuestAddress(0x1040),
+        limited,
+        &[],
+        &[],
+        &[GuestAddress(0x1000), GuestAddress(0x1040)],
+    )
+    .unwrap()
+    .unwrap();
+    assert!(candidate.entrypoints().contains(&GuestAddress(0x1000)));
+    assert!(candidate.entrypoints().contains(&GuestAddress(0x1040)));
+    assert!(!candidate.entrypoints().contains(&GuestAddress(0x1008)));
+    mature(&mut cache, &memory, &a, &b, 0x1040);
+    let before = cache.snapshot();
+    let entries = cache.entries.clone();
+    let owners = cache.link_owners.to_vec();
+    assert!(
+        cache
+            .prepare_transition(&memory, 0x1040, limited, &[])
+            .is_none(),
+        "keeping both roots is insufficient when an indexed interior entry is lost"
+    );
+    assert!(!cache.transition_pending());
+    assert_eq!(cache.snapshot(), before);
+    assert_eq!(cache.entries, entries);
+    assert_eq!(cache.link_owners.as_ref(), owners);
+    assert!(cache.retained(&a).is_some() && cache.retained(&b).is_some());
+    let rejection = cache.retained(&a).unwrap().heat.rejected[0].unwrap();
+    assert_eq!(rejection.version, memory.code_source_version());
+    assert_eq!(rejection.instructions, limited.instructions);
+    assert_eq!(rejection.source_entries, 3);
+    assert_eq!(rejection.target_entries, 2);
+}
+
+#[test]
+fn declined_formation_memo_skips_unchanged_inputs_and_retries_changed_inputs() {
+    for change in ["unchanged", "epoch", "entries"] {
+        let mut memory = memory();
+        let mut cache = CoreCache32::default();
+        let a = insert(&mut cache, &memory, 0x1000, 1);
+        let b = insert(&mut cache, &memory, 0x1040, 2);
+        let limits = options();
+        mature(&mut cache, &memory, &a, &b, 0x1040);
+        let rejection = TransitionRejection {
+            version: memory.code_source_version(),
+            instructions: limits.instructions,
+            blocks: limits.blocks,
+            wasm_bytes: limits.wasm_bytes,
+            source_entries: cache.retained(&a).unwrap().indexed_entries,
+            target_entries: cache.retained(&b).unwrap().indexed_entries,
+        };
+        // this otherwise admissible pair makes a skipped compile observable without a counter.
+        cache.regions[a.key.index].as_mut().unwrap().heat.rejected[0] = Some(rejection);
+        match change {
+            "epoch" => {
+                memory.write(GuestAddress(0x2000), &[0x48]).unwrap();
+                cache.clear_transition();
+                mature(&mut cache, &memory, &a, &b, 0x1040);
+            }
+            "entries" => {
+                let shadow = insert(&mut cache, &memory, 0x1008, 3);
+                assert!(cache.indexes(&shadow, 0x1008));
+                assert_eq!(cache.retained(&a).unwrap().indexed_entries, 2);
+            }
+            "unchanged" => {}
+            _ => unreachable!(),
+        }
+        let before = cache.snapshot();
+        let entries = cache.entries.clone();
+        let owners = cache.link_owners.to_vec();
+        let mut formed = cache.prepare_transition(&memory, 0x1040, limits, &[]);
+        if change == "unchanged" {
+            assert!(formed.is_none());
+            assert!(!cache.transition_pending());
+            assert_eq!(cache.snapshot(), before);
+            assert_eq!(cache.entries, entries);
+            assert_eq!(cache.link_owners.as_ref(), owners);
+            assert!(cache.retained(&a).unwrap().heat.rejected[0] == Some(rejection));
+            cache.regions[a.key.index].as_mut().unwrap().heat.rejected[0] = None;
+            mature(&mut cache, &memory, &a, &b, 0x1040);
+            formed = cache.prepare_transition(&memory, 0x1040, limits, &[]);
+        }
+        let formed = formed.unwrap_or_else(|| panic!("{change} must permit a new formation"));
+        assert!(formed.is_current(&memory));
+        assert!(cache.retained(&a).is_none() && cache.retained(&b).is_none());
+        assert_eq!(cache.snapshot()[0], before[0] + 1);
+        assert_eq!(&cache.link_owners[1..3], &[0, 0]);
+    }
+}
+
+#[test]
 fn source_epoch_or_identity_changes_cannot_resurrect_pending_owners() {
     let mut memory = memory();
     let mut cache = CoreCache32::default();
@@ -356,6 +459,111 @@ fn source_epoch_or_identity_changes_cannot_resurrect_pending_owners() {
 }
 
 #[test]
+fn alternating_linked_targets_accumulate_independent_promotion_heat() {
+    let memory = memory();
+    let mut cache = CoreCache32::default();
+    let source = insert(&mut cache, &memory, 0x1000, 1);
+    let a = insert(&mut cache, &memory, 0x1040, 2);
+    let b = insert(&mut cache, &memory, 0x1080, 3);
+    let before = cache.snapshot();
+    for _ in 1..TRANSITION_HITS {
+        assert!(!cache.observe_transition(&memory, &source, &a, 0x1040, TRANSITION_HITS));
+        assert!(!cache.observe_transition(&memory, &source, &b, 0x1080, TRANSITION_HITS));
+    }
+    assert!(cache.observe_transition(&memory, &source, &a, 0x1040, TRANSITION_HITS));
+    assert!(cache.transition_pending());
+    assert!(
+        !cache.observe_transition(&memory, &source, &b, 0x1080, TRANSITION_HITS),
+        "only one promotion may be pending"
+    );
+    cache.clear_transition();
+    assert!(cache.observe_transition(&memory, &source, &b, 0x1080, TRANSITION_HITS));
+    cache.clear_transition();
+    assert!(!cache.observe_transition(&memory, &source, &a, 0x1040, TRANSITION_HITS));
+    assert_eq!(cache.snapshot(), before, "observation alone admits no code");
+    assert_eq!(
+        &cache.link_owners[1..4],
+        &[source.identity(), a.identity(), b.identity()]
+    );
+}
+
+#[test]
+fn evicted_targets_cannot_pin_high_heat_against_two_new_hot_exits() {
+    let mut memory = memory();
+    for pc in [0x2000, 0x2010, 0x2020, 0x2030, 0x2040, 0x2050] {
+        memory.write(GuestAddress(pc), &[0x40, 0xc3]).unwrap();
+    }
+    let mut cache = CoreCache32::default();
+    let source = insert(&mut cache, &memory, 0x1000, 1);
+    let old: Vec<_> = [0x2000, 0x2010, 0x2020, 0x2030]
+        .into_iter()
+        .enumerate()
+        .map(|(index, pc)| (insert(&mut cache, &memory, pc, index as u32 + 2), pc))
+        .collect();
+    for (target, pc) in &old {
+        for _ in 0..3 {
+            assert!(!cache.observe_transition(&memory, &source, target, *pc, 4));
+        }
+    }
+    for (target, _) in &old {
+        cache.remove(target.key);
+        assert!(target.is_current(&memory));
+    }
+    let _unrelated = [
+        insert(&mut cache, &memory, 0x2040, 6),
+        insert(&mut cache, &memory, 0x2050, 7),
+    ];
+    let a = insert(&mut cache, &memory, 0x1040, 2);
+    let b = insert(&mut cache, &memory, 0x1080, 3);
+    for (target, _) in &old {
+        assert!(
+            cache.regions[target.key.index].is_some(),
+            "all old indices were reused"
+        );
+    }
+    for _ in 0..3 {
+        assert!(!cache.observe_transition(&memory, &source, &a, 0x1040, 4));
+        assert!(!cache.observe_transition(&memory, &source, &b, 0x1080, 4));
+    }
+    assert!(cache.observe_transition(&memory, &source, &a, 0x1040, 4));
+    cache.clear_transition();
+    assert!(cache.observe_transition(&memory, &source, &b, 0x1080, 4));
+}
+
+#[test]
+fn distinct_entries_in_one_target_keep_independent_edge_heat() {
+    let memory = memory();
+    let mut cache = CoreCache32::default();
+    let source = insert(&mut cache, &memory, 0x1000, 1);
+    let target = insert(&mut cache, &memory, 0x1040, 2);
+    for _ in 0..2 {
+        assert!(!cache.observe_transition(&memory, &source, &target, 0x1040, 3));
+    }
+    assert!(!cache.observe_transition(&memory, &source, &target, 0x1045, 3));
+    assert!(cache.observe_transition(&memory, &source, &target, 0x1040, 3));
+    cache.clear_transition();
+    assert!(!cache.observe_transition(&memory, &source, &target, 0x1045, 3));
+    assert!(cache.observe_transition(&memory, &source, &target, 0x1045, 3));
+}
+
+#[test]
+fn a_replaced_target_cannot_inherit_a_held_targets_edge_heat() {
+    let memory = memory();
+    let mut cache = CoreCache32::default();
+    let source = insert(&mut cache, &memory, 0x1000, 1);
+    let old = insert(&mut cache, &memory, 0x1040, 2);
+    for _ in 0..2 {
+        assert!(!cache.observe_transition(&memory, &source, &old, 0x1040, 3));
+    }
+    let target = insert(&mut cache, &memory, 0x1040, 2);
+    assert!(old.is_current(&memory));
+    assert!(!cache.observe_transition(&memory, &source, &old, 0x1040, 3));
+    assert!(!cache.observe_transition(&memory, &source, &target, 0x1040, 3));
+    assert!(!cache.observe_transition(&memory, &source, &target, 0x1040, 3));
+    assert!(cache.observe_transition(&memory, &source, &target, 0x1040, 3));
+}
+
+#[test]
 fn only_the_current_linked_indexed_pair_can_accumulate_heat() {
     let memory = memory();
     let mut cache = CoreCache32::default();
@@ -369,8 +577,10 @@ fn only_the_current_linked_indexed_pair_can_accumulate_heat() {
     cache.install_link(&b, 2).unwrap();
     assert!(!cache.observe_transition(&memory, &a, &b, 0x1040, 2));
     assert!(!cache.observe_transition(&memory, &a, &c, 0x1080, 2));
-    assert!(!cache.observe_transition(&memory, &a, &b, 0x1040, 2));
     assert!(cache.observe_transition(&memory, &a, &b, 0x1040, 2));
+    assert!(!cache.observe_transition(&memory, &a, &c, 0x1080, 2));
+    cache.clear_transition();
+    assert!(cache.observe_transition(&memory, &a, &c, 0x1080, 2));
     cache.clear_transition();
     assert!(
         cache
