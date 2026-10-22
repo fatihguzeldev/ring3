@@ -459,6 +459,35 @@ fn source_epoch_or_identity_changes_cannot_resurrect_pending_owners() {
 }
 
 #[test]
+fn an_ineligible_self_edge_preserves_a_linked_targets_existing_heat() {
+    let memory = memory();
+    let mut cache = CoreCache32::default();
+    let source = insert(&mut cache, &memory, 0x1000, 1);
+    let target = insert(&mut cache, &memory, 0x1040, 2);
+    for _ in 0..2 {
+        assert!(matches!(
+            cache.lookup_transition(&memory, &source, 0x1040, 3),
+            TransitionLookup::Linked(ref code, 2) if code.identity() == target.identity()
+        ));
+    }
+    for _ in 0..8 {
+        assert!(matches!(
+            cache.lookup_transition(&memory, &source, 0x1000, 3),
+            TransitionLookup::Linked(ref code, 1) if code.identity() == source.identity()
+        ));
+        assert!(!cache.transition_pending());
+    }
+    assert!(matches!(
+        cache.lookup_transition(&memory, &source, 0x1040, 3),
+        TransitionLookup::Stop
+    ));
+    let pending = cache.pending_transition.as_ref().unwrap();
+    assert_eq!(pending.source, source.key);
+    assert_eq!(pending.target, target.key);
+    assert_eq!(pending.pc, 0x1040);
+}
+
+#[test]
 fn alternating_linked_targets_accumulate_independent_promotion_heat() {
     let memory = memory();
     let mut cache = CoreCache32::default();

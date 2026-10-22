@@ -49,7 +49,6 @@ impl CoreCache32 {
     ) -> bool {
         if threshold == 0
             || self.transition_pending()
-            || !formation_candidate(source, target, pc)
             || !self.linked_current(memory, source)
             || !self.linked_current(memory, target)
             || !self.indexes(target, pc)
@@ -75,7 +74,7 @@ impl CoreCache32 {
         // The lookup just validated the target's source, index and reciprocal link.
         // No guest execution or cache mutation can intervene in this borrow.
         if threshold != 0
-            && formation_candidate(source, &target, pc)
+            && source.identity() != target.identity()
             && self
                 .retained(source)
                 .is_some_and(|entry| self.reciprocal_slot(source.key, entry))
@@ -94,6 +93,9 @@ impl CoreCache32 {
         pc: u32,
         threshold: u32,
     ) -> bool {
+        if source.identity() == target.identity() {
+            return false;
+        }
         let edges = &self.regions[source.key.index].as_ref().unwrap().heat.edges;
         let identity = target.identity();
         let mut selected = 0;
@@ -107,6 +109,10 @@ impl CoreCache32 {
             if edge.hits < edges[selected].hits {
                 selected = index;
             }
+        }
+        // a retained code identity fixes its roots and entrypoints for the edge's lifetime.
+        if !matched && !formation_candidate(source, target, pc) {
+            return false;
         }
         if !matched && edges[selected].hits != 0 {
             for (index, edge) in edges.iter().enumerate() {
