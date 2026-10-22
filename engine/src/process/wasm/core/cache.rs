@@ -2,6 +2,7 @@ use crate::{
     cpu::core::CompiledCode,
     memory::{AddressSpace, GuestAddress},
 };
+use foldhash::fast::RandomState;
 use std::{collections::HashMap, ops::Deref, rc::Rc};
 
 #[path = "promotion.rs"]
@@ -18,7 +19,7 @@ const NO_REGION: u16 = u16::MAX;
 pub(super) struct CoreCache32 {
     regions: Box<[Option<CachedRegion>]>,
     free: Vec<usize>,
-    entries: HashMap<u32, RegionKey>,
+    entries: HashMap<u32, RegionKey, RandomState>,
     bytes: usize,
     oldest: Option<usize>,
     newest: Option<usize>,
@@ -82,7 +83,7 @@ impl Default for CoreCache32 {
         Self {
             regions: (0..MAX_REGIONS).map(|_| None).collect(),
             free: (0..MAX_REGIONS).rev().collect(),
-            entries: HashMap::new(),
+            entries: HashMap::with_hasher(RandomState::default()),
             bytes: 0,
             oldest: None,
             newest: None,

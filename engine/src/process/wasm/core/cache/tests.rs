@@ -181,6 +181,59 @@ fn actual_compiled_side_entries_reuse_the_same_retained_region() {
 }
 
 #[test]
+fn pc_lookup_preserves_distinct_owners_with_colliding_hash_prefixes() {
+    use std::hash::BuildHasher;
+
+    let memory = memory();
+    let mut cache = CoreCache32::default();
+    cache.entries.reserve(64);
+    let mut buckets: [Vec<u32>; 128] = std::array::from_fn(|_| Vec::new());
+    for index in 0..MAX_REGIONS {
+        let pc = filler(index);
+        let bucket = (cache.entries.hasher().hash_one(pc) & 127) as usize;
+        buckets[bucket].push(pc);
+    }
+    let pcs: Vec<_> = buckets
+        .into_iter()
+        .max_by_key(Vec::len)
+        .unwrap()
+        .into_iter()
+        .take(32)
+        .collect();
+    assert_eq!(pcs.len(), 32);
+    let owners: Vec<_> = pcs
+        .iter()
+        .enumerate()
+        .map(|(index, &pc)| {
+            let code = cache.insert(compiled(&memory, pc));
+            cache.install_link(&code, index as u32 + 1).unwrap();
+            code
+        })
+        .collect();
+    for (index, (&pc, owner)) in pcs.iter().zip(&owners).enumerate() {
+        assert!(same(&cache.lookup(&memory, pc).unwrap(), owner));
+        let (linked, slot) = cache.lookup_linked(&memory, pc).unwrap();
+        assert!(same(&linked, owner));
+        assert_eq!(slot, index as u32 + 1);
+    }
+    assert!(cache.lookup(&memory, 0x1234_5678).is_none());
+
+    cache.remove(owners[0].key);
+    assert!(cache.lookup(&memory, pcs[0]).is_none());
+    assert!(cache.lookup_linked(&memory, pcs[0]).is_none());
+    assert!(owners[0].is_current(&memory));
+    let replacement = cache.insert(compiled(&memory, pcs[0]));
+    assert_ne!(replacement.identity(), owners[0].identity());
+    cache.install_link(&replacement, 1).unwrap();
+    assert!(same(&cache.lookup(&memory, pcs[0]).unwrap(), &replacement));
+    assert!(cache.retained(&owners[0]).is_none());
+    for (&pc, owner) in pcs.iter().zip(&owners).skip(1) {
+        assert!(same(&cache.lookup_linked(&memory, pc).unwrap().0, owner));
+    }
+    bounds(&cache);
+}
+
+#[test]
 fn lru_touch_preserves_the_touched_region_and_eviction_stays_bounded() {
     let memory = memory();
     let mut cache = CoreCache32::default();

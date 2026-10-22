@@ -837,6 +837,7 @@ dependencies = [
  "aes",
  "astro-float-num",
  "encoding_rs",
+ "foldhash",
  "fontdue",
  "iced-x86",
  "icu_calendar",

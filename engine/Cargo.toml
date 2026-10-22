@@ -20,6 +20,7 @@ rustc_apfloat = "=0.2.3"
 astro-float-num = { version = "=0.3.7", default-features = false, features = ["std"] }
 iced-x86 = { version = "=1.21.0", default-features = false, features = ["std", "decoder", "instr_info"] }
 wasm-encoder = { version = "=0.259.0", default-features = false, features = ["std"] }
+foldhash = "=0.2.0"
 unicode-normalization = "=0.1.25"
 unicode-general-category = "=1.1.0"
 unicode-bidi = "=0.3.18"
