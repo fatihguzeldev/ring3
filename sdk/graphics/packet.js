@@ -8,17 +8,28 @@ export class Reader {
     this.view = new DataView(this.bytes.buffer, this.bytes.byteOffset, this.bytes.byteLength);
     this.at = 0;
   }
-  take(length) {
+  advance(length) {
     require(Number.isSafeInteger(length) && length >= 0 && this.at + length <= this.bytes.length, 'truncated payload');
-    const out = this.bytes.subarray(this.at, this.at + length);
+    const at = this.at;
     this.at += length;
-    return out;
+    return at;
   }
-  u32() { const at = this.at; this.take(4); return this.view.getUint32(at, true); }
-  u64() { const at = this.at; this.take(8); return this.view.getBigUint64(at, true); }
-  f32() { const at = this.at; this.take(4); return this.view.getFloat32(at, true); }
-  words(count) { require(count <= 65536, 'word array limit'); return Array.from({length: count}, () => this.u32()); }
-  floats(count) { require(count <= 65536, 'float array limit'); return Array.from({length: count}, () => this.f32()); }
+  take(length) { const at = this.advance(length); return this.bytes.subarray(at, this.at); }
+  u32() { return this.view.getUint32(this.advance(4), true); }
+  u64() { return this.view.getBigUint64(this.advance(8), true); }
+  f32() { return this.view.getFloat32(this.advance(4), true); }
+  words(count) {
+    require(count <= 65536, 'word array limit');
+    const values = new Array(Math.max(0, Math.trunc(count))), at = this.advance(values.length * 4);
+    for (let i = 0; i < values.length; i++) values[i] = this.view.getUint32(at + i * 4, true);
+    return values;
+  }
+  floats(count) {
+    require(count <= 65536, 'float array limit');
+    const values = new Array(Math.max(0, Math.trunc(count))), at = this.advance(values.length * 4);
+    for (let i = 0; i < values.length; i++) values[i] = this.view.getFloat32(at + i * 4, true);
+    return values;
+  }
   count(max = 65536) { const n = this.u32(); require(n <= max, 'array limit'); return n; }
   resource() { const epoch = this.u64(), slot = this.u32(), generation = this.u32(); require(epoch && generation, 'zero resource identity'); return {epoch, slot, generation, key: `${epoch}:${slot}:${generation}`}; }
   version() { const id = this.resource(), version = this.u64(); require(version, 'zero resource version'); return {...id, version}; }
