@@ -690,7 +690,6 @@ impl Output<'_> {
     fn instruction(&mut self, operation: Operation, next: u32) {
         if numeric::supports(&operation) {
             numeric::emit(self, next);
-            super::memory::load_view(&mut self.c());
             return;
         }
         if integer::emit(self, operation) {

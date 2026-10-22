@@ -134,7 +134,6 @@ pub(super) fn read(
         .local_get(ADDRESS)
         .i32_const(encoded_width as i32)
         .call(slow_index);
-    load_view(code);
     code.end();
 }
 
@@ -180,7 +179,6 @@ pub(super) fn write(
         .i32_const(width as i32)
         .local_get(source)
         .call(slow_index);
-    load_view(code);
     code.end();
 }
 
