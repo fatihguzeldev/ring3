@@ -69,6 +69,7 @@ pub struct DeviceState {
     pub(super) live: PipelineState,
     pub(super) recording: Option<StateBlock>,
     pub(super) revision: u64,
+    pipeline_revision: u64,
     recording_revision: u64,
     target_width: u32,
     target_height: u32,
@@ -84,6 +85,7 @@ impl DeviceState {
                 .map(StateBlock::try_clone)
                 .transpose()?,
             revision: self.revision,
+            pipeline_revision: self.pipeline_revision,
             recording_revision: self.recording_revision,
             target_width: self.target_width,
             target_height: self.target_height,
@@ -183,6 +185,7 @@ impl DeviceState {
                 .ok_or(StateError::IdentityExhausted)?;
             *current = 0;
             self.revision = revision;
+            self.pipeline_revision = revision;
         }
         Ok(())
     }
@@ -224,6 +227,7 @@ impl DeviceState {
             recording: None,
             recording_revision: 0,
             revision: 1,
+            pipeline_revision: 1,
             target_width: width,
             target_height: height,
         })
@@ -234,6 +238,9 @@ impl DeviceState {
     }
     pub fn revision(&self) -> u64 {
         self.revision
+    }
+    pub(in crate::graphics::d3d8) fn pipeline_revision(&self) -> u64 {
+        self.pipeline_revision
     }
     pub(crate) fn recording_revision(&self) -> u64 {
         self.recording_revision
@@ -278,6 +285,21 @@ impl DeviceState {
         &mut self,
         mark: impl FnOnce(&mut StateMask),
     ) -> Result<&mut PipelineState, StateError> {
+        self.edit_state(mark, true)
+    }
+
+    fn edit_binding(
+        &mut self,
+        mark: impl FnOnce(&mut StateMask),
+    ) -> Result<&mut PipelineState, StateError> {
+        self.edit_state(mark, false)
+    }
+
+    fn edit_state(
+        &mut self,
+        mark: impl FnOnce(&mut StateMask),
+        pipeline: bool,
+    ) -> Result<&mut PipelineState, StateError> {
         if let Some(block) = &mut self.recording {
             self.recording_revision = self
                 .recording_revision
@@ -290,6 +312,9 @@ impl DeviceState {
                 .revision
                 .checked_add(1)
                 .ok_or(StateError::IdentityExhausted)?;
+            if pipeline {
+                self.pipeline_revision = self.revision;
+            }
             Ok(&mut self.live)
         }
     }
@@ -306,6 +331,7 @@ impl DeviceState {
                 .checked_add(1)
                 .ok_or(StateError::IdentityExhausted)?;
             self.live.render[index] = value;
+            self.pipeline_revision = self.revision;
             return Ok(());
         }
         self.edit(|mask| mask.render[index] = true)?.render[index] = value;
@@ -437,6 +463,7 @@ impl DeviceState {
             .checked_add(1)
             .ok_or(StateError::IdentityExhausted)?;
         self.live.clip_status = status;
+        self.pipeline_revision = self.revision;
         Ok(())
     }
 
@@ -464,6 +491,7 @@ impl DeviceState {
             min_z: 0,
             max_z: 0x3f80_0000,
         };
+        self.pipeline_revision = self.revision;
         Ok(())
     }
 
@@ -472,7 +500,8 @@ impl DeviceState {
         if stage >= TEXTURE_STAGES {
             return Err(StateError::InvalidRange);
         }
-        self.edit(|mask| mask.textures[stage] = true)?.textures[stage] = resource;
+        self.edit_binding(|mask| mask.textures[stage] = true)?
+            .textures[stage] = resource;
         Ok(())
     }
 
@@ -488,12 +517,13 @@ impl DeviceState {
         if binding.resource == 0 {
             binding.stride = self.pending().streams[stream].stride;
         }
-        self.edit(|mask| mask.streams[stream] = true)?.streams[stream] = binding;
+        self.edit_binding(|mask| mask.streams[stream] = true)?
+            .streams[stream] = binding;
         Ok(())
     }
 
     pub fn set_indices(&mut self, resource: u32, base_vertex: u32) -> Result<(), StateError> {
-        let state = self.edit(|mask| mask.indices = true)?;
+        let state = self.edit_binding(|mask| mask.indices = true)?;
         state.indices = resource;
         state.base_vertex = base_vertex;
         Ok(())
@@ -539,6 +569,7 @@ impl DeviceState {
             .checked_add(1)
             .ok_or(StateError::IdentityExhausted)?;
         self.live.palette = palette;
+        self.pipeline_revision = self.revision;
         Ok(())
     }
 
@@ -591,6 +622,9 @@ impl DeviceState {
             .validate(self.target_width, self.target_height)?;
         self.live = candidate;
         self.revision = revision;
+        if block.mask.affects_pipeline() {
+            self.pipeline_revision = revision;
+        }
         Ok(())
     }
 }

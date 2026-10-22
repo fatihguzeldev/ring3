@@ -64,7 +64,7 @@ impl Device {
         }
         self.drain_retired()?;
         let targets = self.output_targets(true, self.depth_target.is_some())?;
-        let revision = self.state.revision();
+        let revision = self.state.pipeline_revision();
         let (pipeline, changed) = match self.emitted_pipeline {
             Some((previous, id)) if previous == revision => (id, false),
             _ => (

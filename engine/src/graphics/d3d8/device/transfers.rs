@@ -278,7 +278,7 @@ impl Device {
         };
         let id = self.next_readback()?;
         self.drain_retired()?;
-        let revision = self.state.revision();
+        let revision = self.state.pipeline_revision();
         let (pipeline, changed) = match self.emitted_pipeline {
             Some((old, pipeline)) if old == revision => (pipeline, false),
             _ => (

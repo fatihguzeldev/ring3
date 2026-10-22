@@ -105,3 +105,55 @@ fn matrix_multiplication_uses_d3d_pre_multiply_order() {
     assert_eq!(result.0[12], 3.0f32.to_bits());
     assert_eq!(device.transform(511), Ok(Matrix::IDENTITY));
 }
+
+#[test]
+fn binding_revisions_preserve_wire_state_and_transaction_exhaustion() {
+    let mut state = DeviceState::new(16, 16, false).unwrap();
+    let wire = state.pipeline_revision();
+    state.set_texture(7, 12).unwrap();
+    state
+        .set_stream(
+            0,
+            StreamBinding {
+                resource: 13,
+                stride: 16,
+            },
+        )
+        .unwrap();
+    state.set_indices(14, 3).unwrap();
+    let revision = state.revision();
+    assert_eq!(state.pipeline_revision(), wire);
+    state.finish_user_draw(true).unwrap();
+    assert!(state.revision() > revision);
+    assert_eq!(state.pipeline_revision(), wire);
+    assert_eq!(state.snapshot().streams[0], StreamBinding::default());
+    assert_eq!(state.snapshot().indices, 0);
+    assert_eq!(state.snapshot().base_vertex, 0);
+    assert_eq!(state.try_clone().unwrap().pipeline_revision(), wire);
+    state.revision = u64::MAX;
+    assert_eq!(state.set_texture(7, 99), Err(StateError::IdentityExhausted));
+    assert_eq!(state.snapshot().textures[7], 12);
+    assert_eq!(state.pipeline_revision(), wire);
+    assert_eq!(
+        state.set_render_state(22, 1),
+        Err(StateError::IdentityExhausted)
+    );
+    assert_eq!(state.pipeline_revision(), wire);
+}
+
+#[test]
+fn failed_state_block_application_keeps_both_revisions_and_live_state() {
+    let large = DeviceState::new(64, 64, false).unwrap();
+    let block = large.create_state_block(StateBlockKind::All).unwrap();
+    let mut small = DeviceState::new(16, 16, false).unwrap();
+    let revision = small.revision();
+    let wire = small.pipeline_revision();
+    let before = small.snapshot().try_clone().unwrap();
+    assert_eq!(
+        small.apply_state_block(&block),
+        Err(StateError::InvalidRange)
+    );
+    assert_eq!(small.snapshot(), &before);
+    assert_eq!(small.revision(), revision);
+    assert_eq!(small.pipeline_revision(), wire);
+}

@@ -238,6 +238,26 @@ impl Default for StateMask {
 }
 
 impl StateMask {
+    pub(super) fn affects_pipeline(&self) -> bool {
+        self.render.iter().any(|selected| *selected)
+            || self
+                .texture_stage
+                .iter()
+                .flatten()
+                .any(|selected| *selected)
+            || self.transforms.iter().any(|selected| *selected)
+            || self.material
+            || self.lights.iter().any(Option::is_some)
+            || self.clip_planes.iter().any(|selected| *selected)
+            || self.clip_status
+            || self.viewport
+            || self.vertex_shader
+            || self.pixel_shader
+            || self.vertex_constants.iter().any(|selected| *selected)
+            || self.pixel_constants.iter().any(|selected| *selected)
+            || self.palette
+    }
+
     pub fn mark_light(&mut self, index: u32, definition: bool, enabled: bool) {
         let position = self
             .lights
