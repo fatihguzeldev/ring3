@@ -62,6 +62,40 @@ test('a validated graphics ACK resumes a pending host timer after native publica
   assert.equal(f.owner.scheduler.pending,null);
 });
 
+test('accepted input releases a running host timer only after enqueue without completing native waits',async t=>{
+  const f=await workerFixture(t),order=[],events=[{kind:'key',code:17,down:true}];
+  f.media.enqueue=(received,sentAtMs)=>{
+    assert.deepEqual(received,events);assert.equal(sentAtMs,123);order.push('enqueue');
+  };
+  let resumed=false;
+  const waiting=f.owner.scheduler.wait(4).then(()=>{resumed=true;order.push('continuation');});
+  void waiting.catch(()=>{});
+  f.receive({type:'input',events,sentAtMs:123});await Promise.resolve();
+  assert.equal(resumed,true);
+  await waiting;
+  assert.deepEqual(order,['enqueue','continuation']);
+  assert.equal(f.calls.length,0,'host wake leaves native guest wait resolution to the runtime loop');
+  assert.equal(f.timers.size,0);
+});
+
+test('empty input does not release a host timer',async t=>{
+  const f=await workerFixture(t);f.media.enqueue=()=>{};
+  let resumed=false;
+  const waiting=f.owner.scheduler.wait(4).then(()=>{resumed=true;});void waiting.catch(()=>{});
+  f.receive({type:'input',events:[]});await Promise.resolve();
+  assert.equal(resumed,false);assert.equal(f.timers.size,1);
+  f.fire();await waiting;
+});
+
+test('paused input queues for resume without releasing the paused-loop timer',async t=>{
+  const f=await workerFixture(t);f.owner.paused=true;let queued=false,resumed=false;
+  f.media.enqueue=()=>{queued=true;};
+  const waiting=f.owner.scheduler.wait(20).then(()=>{resumed=true;});void waiting.catch(()=>{});
+  f.receive({type:'input',events:[{kind:'focus',focused:false}]});await Promise.resolve();
+  assert.equal(queued,true);assert.equal(resumed,false);assert.equal(f.timers.size,1);
+  f.fire();await waiting;
+});
+
 test('stale and duplicate request ACKs do not release unrelated host timers',async t=>{
   const f=await workerFixture(t);
   let resumed=false;

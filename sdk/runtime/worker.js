@@ -91,7 +91,12 @@ self.onmessage = (event) => {
     if (message.type === "frame-probe-arm") session.armFrameProbe(message.id);
     else if (message.type === "pause") session.pause();
     else if (message.type === "resume") session.resume();
-    else if (message.type === "input") session.media?.enqueue(message.events ?? [], message.sentAtMs);
+    else if (message.type === "input" && session.media) {
+      const events = message.events ?? [];
+      session.media.enqueue(events, message.sentAtMs);
+      if (events.length && session.running && !session.paused && !session.stopped)
+        session.scheduler.wake();
+    }
     else if (message.type === "pcm-consumed") session.media?.consumedAudio(message);
     else if (message.type === "audio-hold") {
       if (!Number.isSafeInteger(message.request) || message.request < 1) throw new Error('invalid audio hold request');
