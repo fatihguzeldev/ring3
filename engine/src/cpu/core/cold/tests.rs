@@ -412,7 +412,7 @@ fn heat_uses_completed_retirements_and_a_jit_request_requires_new_reuse() {
 fn colliding_heat_sites_retain_independent_completed_reuse() {
     let memory = memory(&[0x90]);
     let mut heat = ColdHeat::new(2);
-    let sites = [0x1000, 0x1801];
+    let sites = [0x1000, 0x3004];
     assert_eq!(ColdHeat::index(sites[0]), ColdHeat::index(sites[1]));
     for _ in 0..2 {
         for pc in sites {
@@ -430,6 +430,28 @@ fn colliding_heat_sites_retain_independent_completed_reuse() {
     assert!(!heat.hot(&memory, sites[0]));
     heat.retired(&memory, sites[0]);
     assert!(heat.hot(&memory, sites[0]));
+}
+
+#[test]
+fn repeated_working_set_qualifies_within_bounded_heat_storage() {
+    let memory = memory(&[0x90]);
+    let mut cold = ColdState::default();
+    assert!(std::mem::size_of_val(&*cold.heat.rows) <= 512 * 1024);
+    let sites = 0x0100_0000..0x0100_4000;
+    for _ in 0..HOT_VISITS {
+        for pc in sites.clone() {
+            cold.retired(&memory, pc);
+        }
+    }
+    for pc in sites {
+        assert!(cold.heat.hot(&memory, pc), "lost completed reuse at {pc:x}");
+    }
+    let diagnostics = cold.diagnostics_snapshot();
+    assert_eq!(
+        diagnostics[3], 0,
+        "this working set needs no occupied victim"
+    );
+    assert_eq!(&diagnostics[9..], &[0, 0, 16_384, 64]);
 }
 
 #[test]

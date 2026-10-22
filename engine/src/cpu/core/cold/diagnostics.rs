@@ -186,7 +186,7 @@ mod tests {
         assert!(cold.heat.hot(&memory, 0x1002));
         assert_eq!(cold.diagnostics_snapshot(), expected);
         let mut cold = ColdState::default();
-        let sites = [0x1000, 0x1801, 0x2006, 0x2807, 0x3004];
+        let sites = [0x1000, 0x3004, 0x5008, 0x700c, 0x9010];
         for pc in sites {
             assert_eq!(ColdHeat::index(pc), ColdHeat::index(sites[0]));
             cold.heat.retired(&memory, pc);

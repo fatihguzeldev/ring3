@@ -17,7 +17,7 @@ mod integer;
 mod memory;
 use memory::{Failure, Port};
 
-const HEAT_SLOTS: usize = 8192;
+const HEAT_SLOTS: usize = 32768;
 const HEAT_WAYS: usize = 4;
 const HEAT_SETS: usize = HEAT_SLOTS / HEAT_WAYS;
 // this repeat gate is provisional; its amortization point must be measured.
