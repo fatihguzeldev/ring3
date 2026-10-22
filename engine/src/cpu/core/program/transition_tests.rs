@@ -123,7 +123,34 @@ fn an_actual_interior_target_is_kept_in_addition_to_original_roots() {
 }
 
 #[test]
-fn a_ninth_root_or_a_root_lost_to_the_instruction_cap_declines() {
+fn formation_retains_more_than_eight_sorted_roots_within_the_existing_limits() {
+    let mut memory = memory();
+    let expected: Vec<_> = (0..12)
+        .map(|index| GuestAddress(0x1100 + index * 0x10))
+        .collect();
+    for &pc in &expected {
+        memory.write(pc, &[0x40, 0xc3]).unwrap();
+    }
+    let mut roots: Vec<_> = expected.iter().rev().copied().collect();
+    roots.extend_from_slice(&[expected[5], expected[0], expected[11]]);
+    let limits = CompileOptions {
+        blocks: 16,
+        ..options()
+    };
+    let code = CompiledCode::compile_transition(&memory, expected[11], limits, &[], &[], &roots)
+        .unwrap()
+        .expect("all twelve roots fit the existing block and instruction limits");
+    assert_eq!(code.formation_roots(), expected);
+    assert_eq!(code.entrypoints(), expected);
+    assert_eq!(code.instruction_count(), 24);
+    assert!(code.wasm().len() <= limits.wasm_bytes);
+    assert!(code.is_current(&memory));
+    memory.write(expected[11], &[0x48]).unwrap();
+    assert!(!code.is_current(&memory));
+}
+
+#[test]
+fn exceeding_the_block_limit_or_losing_a_root_to_shortening_declines() {
     let mut memory = memory();
     for index in 0..9 {
         memory

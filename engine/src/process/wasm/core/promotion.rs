@@ -131,12 +131,12 @@ impl CoreCache32 {
         {
             return None;
         }
-        let mut roots = [GuestAddress(0); 16];
-        let source_roots = source.formation_roots();
-        let target_roots = target.formation_roots();
-        roots[..source_roots.len()].copy_from_slice(source_roots);
-        roots[source_roots.len()..source_roots.len() + target_roots.len()]
-            .copy_from_slice(target_roots);
+        let roots: Vec<_> = source
+            .formation_roots()
+            .iter()
+            .chain(target.formation_roots())
+            .copied()
+            .collect();
         let mut frontier = self.frontier(memory);
         frontier.retain(|entry| {
             self.entries
@@ -149,7 +149,7 @@ impl CoreCache32 {
             options,
             gates,
             &frontier,
-            &roots[..source_roots.len() + target_roots.len()],
+            &roots,
         )
         .ok()??;
         Some(self.insert(code))
@@ -183,11 +183,16 @@ impl CoreCache32 {
 
 fn formation_candidate(source: &RegionRef, target: &RegionRef, pc: u32) -> bool {
     source.identity() != target.identity()
-        && !(target.formation_roots().contains(&GuestAddress(pc))
-            && source
-                .formation_roots()
-                .iter()
-                .all(|root| target.formation_roots().contains(root)))
+        && !(target
+            .formation_roots()
+            .binary_search_by_key(&pc, |root| root.0)
+            .is_ok()
+            && source.formation_roots().iter().all(|root| {
+                target
+                    .formation_roots()
+                    .binary_search_by_key(&root.0, |candidate| candidate.0)
+                    .is_ok()
+            }))
         && source
             .entrypoints()
             .binary_search_by_key(&pc, |entry| entry.0)

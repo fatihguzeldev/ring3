@@ -46,8 +46,7 @@ pub struct CompiledCode {
     entries: Vec<GuestAddress>,
     instruction_pcs: Box<[u32]>,
     native: Vec<NativeInstruction>,
-    roots: [GuestAddress; 8],
-    root_count: usize,
+    roots: Box<[GuestAddress]>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -77,7 +76,7 @@ impl CompiledCode {
         &self.native
     }
     pub(crate) fn formation_roots(&self) -> &[GuestAddress] {
-        &self.roots[..self.root_count]
+        &self.roots
     }
     pub(crate) fn compile_transition(
         memory: &AddressSpace,
@@ -87,39 +86,28 @@ impl CompiledCode {
         frontier: &[GuestAddress],
         roots: &[GuestAddress],
     ) -> Result<Option<Self>, CompileError> {
-        let mut retained = [entry; 8];
-        let mut count = 1;
-        for root in roots {
-            if retained[..count].contains(root) {
-                continue;
-            }
-            if count == retained.len() {
-                return Ok(None);
-            }
-            retained[count] = *root;
-            count += 1;
-        }
-        if count < 2
-            || count > options.blocks
-            || retained[..count]
+        let mut retained = roots.to_vec();
+        retained.push(entry);
+        retained.sort_unstable_by_key(|root| root.0);
+        retained.dedup();
+        if retained.len() < 2
+            || retained.len() > options.blocks
+            || retained
                 .iter()
                 .any(|root| root.0 != entry.0 && frontier.contains(root))
         {
             return Ok(None);
         }
-        retained[..count].sort_unstable_by_key(|root| root.0);
-        let mut code =
-            compile_formation(memory, entry, options, gates, frontier, &retained[..count])?;
+        let mut code = compile_formation(memory, entry, options, gates, frontier, &retained)?;
         // shortening may keep the requested entry while dropping another owner's root.
-        if !retained[..count].iter().all(|root| {
+        if !retained.iter().all(|root| {
             code.entries
                 .binary_search_by_key(&root.0, |pc| pc.0)
                 .is_ok()
         }) {
             return Ok(None);
         }
-        code.roots = retained;
-        code.root_count = count;
+        code.roots = retained.into_boxed_slice();
         Ok(Some(code))
     }
     pub fn is_current(&self, memory: &AddressSpace) -> bool {
@@ -428,8 +416,7 @@ fn compile_formation(
         wasm,
         sources,
         native,
-        roots: [entry; 8],
-        root_count: 1,
+        roots: Box::new([entry]),
     })
 }
 
