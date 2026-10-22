@@ -113,9 +113,14 @@ impl ColdHeat {
         })
     }
 
-    fn requested(&mut self) {
-        // adjacent hot instructions must also requalify after the compiled unit is evicted.
-        self.advance();
+    fn requested(&mut self, pc: u32) {
+        // a request consumes this site's reuse, not unrelated completed work.
+        let first = Self::index(pc);
+        for row in &mut self.rows[first..first + HEAT_WAYS] {
+            if row.generation == self.generation && row.pc == pc {
+                *row = HeatRow::default();
+            }
+        }
     }
 
     fn retired(&mut self, memory: &AddressSpace, pc: u32) {
@@ -276,7 +281,7 @@ pub(crate) fn run_with_lookups(
                     _ => {
                         #[cfg(any(test, feature = "observability"))]
                         heat.diagnostics.request(diagnostics::Request::Decode);
-                        heat.requested();
+                        heat.requested(pc);
                         return finish(context, state, retired, remaining, StopReason::NeedCode);
                     }
                 };
@@ -297,7 +302,7 @@ pub(crate) fn run_with_lookups(
                     diagnostics::Request::Hot
                 },
             );
-            heat.requested();
+            heat.requested(pc);
             return finish(context, state, retired, remaining, StopReason::NeedCode);
         }
         let operation = *decoded.operation();
@@ -344,7 +349,7 @@ pub(crate) fn run_with_lookups(
             Ok(false) => {
                 #[cfg(any(test, feature = "observability"))]
                 heat.diagnostics.request(diagnostics::Request::Unsupported);
-                heat.requested();
+                heat.requested(pc);
                 return finish(context, state, retired, remaining, StopReason::NeedCode);
             }
             Err(error) => {

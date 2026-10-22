@@ -162,7 +162,7 @@ mod tests {
         assert_eq!(*context.bytes(), before);
         assert_eq!(
             cold.diagnostics_snapshot(),
-            [1, 1, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0]
+            [1, 1, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 2]
         );
     }
 

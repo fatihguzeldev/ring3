@@ -389,6 +389,13 @@ fn heat_uses_completed_retirements_and_a_jit_request_requires_new_reuse() {
     context.set_word(44, 2);
     assert_eq!(
         stop(&mut memory, &mut context, &mut heat),
+        StopReason::NeedCode
+    );
+    assert_eq!(context.state().eip, 0x1001);
+    assert_eq!(context.retired(), 5);
+    assert_eq!(context.remaining(), 1);
+    assert_eq!(
+        stop(&mut memory, &mut context, &mut heat),
         StopReason::Budget
     );
     assert_eq!(
@@ -416,14 +423,48 @@ fn colliding_heat_sites_retain_independent_completed_reuse() {
     for pc in sites {
         assert!(heat.hot(&memory, pc));
     }
-    heat.requested();
-    for pc in sites {
-        assert!(!heat.hot(&memory, pc));
-    }
+    heat.requested(sites[0]);
+    assert!(!heat.hot(&memory, sites[0]));
+    assert!(heat.hot(&memory, sites[1]));
+    heat.retired(&memory, sites[0]);
+    assert!(!heat.hot(&memory, sites[0]));
+    heat.retired(&memory, sites[0]);
+    assert!(heat.hot(&memory, sites[0]));
 }
 
 #[test]
-fn memory_writes_preserve_frequency_but_a_jit_request_requires_new_reuse() {
+fn unrelated_requests_cannot_starve_completed_reuse() {
+    let mut memory = memory(&[0x40, 0x0f, 0x0b]);
+    let mut context = context(2);
+    let mut cold = ColdState::default();
+    for retired in 1..=HOT_VISITS {
+        context.set_word(32, 0x1000);
+        context.set_word(44, 2);
+        assert_eq!(
+            stop(&mut memory, &mut context, &mut cold),
+            StopReason::NeedCode
+        );
+        assert_eq!(context.state().eip, 0x1001);
+        assert_eq!(context.state().registers[0], 5 + retired);
+        assert_eq!(context.retired(), retired);
+        assert_eq!(context.remaining(), 1);
+    }
+    context.set_word(32, 0x1000);
+    context.set_word(44, 1);
+    let before = *context.bytes();
+    assert_eq!(
+        stop(&mut memory, &mut context, &mut cold),
+        StopReason::NeedCode
+    );
+    assert_eq!(
+        *context.bytes(),
+        before,
+        "hot request precedes the 65th INC"
+    );
+}
+
+#[test]
+fn memory_writes_preserve_other_reuse_and_requested_pc_requalifies() {
     let mut memory = memory(&[0x40, 0xeb, 0xfd]);
     let mut context = context(4);
     let mut heat = ColdState::with_threshold(2);
@@ -443,6 +484,7 @@ fn memory_writes_preserve_frequency_but_a_jit_request_requires_new_reuse() {
     memory
         .write(GuestAddress(0x1000), &[0x48, 0xeb, 0xfd])
         .unwrap();
+    context.set_word(44, 1);
     assert_eq!(
         stop(&mut memory, &mut context, &mut heat),
         StopReason::Budget
@@ -450,12 +492,12 @@ fn memory_writes_preserve_frequency_but_a_jit_request_requires_new_reuse() {
     assert_eq!(
         context.state(),
         State32 {
-            registers: [5, 3, 7, 0x3000, 0x4800, 0, 0, 0],
-            eip: 0x1000,
+            registers: [6, 3, 7, 0x3000, 0x4800, 0, 0, 0],
+            eip: 0x1001,
             eflags: 6,
         }
     );
-    assert_eq!((context.retired(), context.remaining()), (8, 0));
+    assert_eq!((context.retired(), context.remaining()), (5, 0));
 }
 
 #[test]
