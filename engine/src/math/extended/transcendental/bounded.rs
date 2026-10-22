@@ -20,11 +20,11 @@ const fn factorial(value: u32) -> u128 {
     product
 }
 
-const COEFFICIENTS: [Interval; 16] = {
-    let mut coefficients = [Interval { low: 0, high: 0 }; 16];
+const fn coefficients<const N: usize>(first: u32) -> [Interval; N] {
+    let mut coefficients = [Interval { low: 0, high: 0 }; N];
     let mut index = 0;
     while index < coefficients.len() {
-        let denominator = factorial((2 * index + 1) as u32);
+        let denominator = factorial(2 * index as u32 + first);
         let low = UNIT / denominator;
         coefficients[index] = Interval {
             low,
@@ -32,14 +32,17 @@ const COEFFICIENTS: [Interval; 16] = {
         };
         index += 1;
     }
-    assert!(factorial(33) > UNIT);
     index = 0;
     while index + 1 < coefficients.len() {
         assert!(coefficients[index].low >= coefficients[index + 1].high);
         index += 1;
     }
     coefficients
-};
+}
+
+const SINE_COEFFICIENTS: [Interval; 16] = coefficients(1);
+const COSINE_COEFFICIENTS: [Interval; 17] = coefficients(0);
+const _: () = assert!(factorial(33) > UNIT && factorial(34) > UNIT);
 
 fn product(a: u128, b: u128) -> (u128, bool) {
     let a0 = a as u64;
@@ -89,7 +92,7 @@ fn fixed_round(magnitude: u128, negative: bool, control: u16) -> Rounded {
     )
 }
 
-pub(super) fn sin(x: Ext80, control: u16) -> Option<Rounded> {
+fn input(x: Ext80, minimum_exponent: i32) -> Option<Interval> {
     let Kind::Finite {
         significand,
         exponent,
@@ -97,25 +100,19 @@ pub(super) fn sin(x: Ext80, control: u16) -> Option<Rounded> {
     else {
         return None;
     };
-    if !(-16..=0).contains(&exponent) || exponent == 0 && significand != 1 << 63 {
+    if !(minimum_exponent..=0).contains(&exponent) || exponent == 0 && significand != 1 << 63 {
         return None;
     }
     let input = u128::from(significand) << (57 + exponent);
-    let input = Interval {
+    Some(Interval {
         low: input,
         high: input,
-    };
-    let square = input.multiply(input);
-    let mut polynomial = COEFFICIENTS[15];
-    // successive factorial coefficients keep these nested differences positive for |x| <= 1.
-    for coefficient in COEFFICIENTS[..15].iter().rev() {
-        polynomial = coefficient.subtract(square.multiply(polynomial));
-    }
-    let mut result = input.multiply(polynomial);
-    // after the negative x^31/31! term, the positive alternating tail is less than 1/33!.
-    result.high += 1;
-    let lower = fixed_round(result.low, x.negative(), control);
-    let upper = fixed_round(result.high, x.negative(), control);
+    })
+}
+
+fn certify(result: Interval, negative: bool, control: u16) -> Option<Rounded> {
+    let lower = fixed_round(result.low, negative, control);
+    let upper = fixed_round(result.high, negative, control);
     if lower.value != upper.value {
         return None;
     }
@@ -134,6 +131,32 @@ pub(super) fn sin(x: Ext80, control: u16) -> Option<Rounded> {
         exceptions: PRECISION,
         incremented,
     })
+}
+
+pub(super) fn sin(x: Ext80, control: u16) -> Option<Rounded> {
+    let input = input(x, -16)?;
+    let square = input.multiply(input);
+    let mut polynomial = SINE_COEFFICIENTS[15];
+    // successive factorial coefficients keep these nested differences positive for |x| <= 1.
+    for coefficient in SINE_COEFFICIENTS[..15].iter().rev() {
+        polynomial = coefficient.subtract(square.multiply(polynomial));
+    }
+    let mut result = input.multiply(polynomial);
+    // after the negative x^31/31! term, the positive alternating tail is less than 1/33!.
+    result.high += 1;
+    certify(result, x.negative(), control)
+}
+
+pub(super) fn cos(x: Ext80, control: u16) -> Option<Rounded> {
+    let input = input(x, -57)?;
+    let square = input.multiply(input);
+    let mut polynomial = COSINE_COEFFICIENTS[16];
+    for coefficient in COSINE_COEFFICIENTS[..16].iter().rev() {
+        polynomial = coefficient.subtract(square.multiply(polynomial));
+    }
+    // after the positive x^32/32! term, the negative alternating tail is less than 1/34!.
+    polynomial.low -= 1;
+    certify(polynomial, false, control)
 }
 
 #[cfg(test)]

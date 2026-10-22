@@ -83,3 +83,86 @@ fn bounded_sine_declines_unproven_domains() {
         assert!(sin(x, 0x37f).is_none(), "x={x:?}");
     }
 }
+
+#[test]
+fn bounded_cosine_matches_arbitrary_precision_bounds_including_status() {
+    let mut workspace = Default::default();
+    let mut accepted = 0;
+    let mut seed = 0xe75a_10bd_429c_638f_u64;
+    let mut inputs = vec![
+        Ext80::ONE,
+        Ext80::from_parts(false, 16382, u64::MAX),
+        Ext80::from_parts(false, 16382, 1 << 63),
+        Ext80::from_parts(false, 16383 - 16, 1 << 63),
+        Ext80::from_parts(false, 16383 - 32, 1 << 63),
+        Ext80::from_parts(false, 16383 - 57, 1 << 63),
+    ];
+    for index in 0..24 {
+        seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+        inputs.push(Ext80::from_parts(
+            false,
+            16382 - (index * 7) % 57,
+            seed | (1 << 63),
+        ));
+    }
+    for x in inputs {
+        for negative in [false, true] {
+            let x = if negative { x.negated() } else { x };
+            for mode in [0, 0x400, 0x800, 0xc00] {
+                let expected = evaluate_precise(
+                    Function::Cos,
+                    x,
+                    Ext80::ZERO,
+                    0x37f | mode,
+                    0,
+                    &mut workspace,
+                )
+                .expect("independent directed arbitrary-precision bounds");
+                for precision in [0, 0x200, 0x300] {
+                    let Some(actual) = cos(x, 0x7f | precision | mode) else {
+                        continue;
+                    };
+                    accepted += 1;
+                    assert_eq!(
+                        (actual.value, actual.exceptions, actual.incremented),
+                        (expected.value, expected.exceptions, expected.incremented),
+                        "x={x:?}, mode={mode:x}, precision={precision:x}"
+                    );
+                }
+            }
+        }
+    }
+    assert!(accepted >= 600, "certified {accepted} of 720 cases");
+}
+
+#[test]
+fn cosine_near_a_rounding_midpoint_retains_the_precise_path() {
+    let mut workspace = Default::default();
+    for negative in [false, true] {
+        let x = Ext80::from_parts(negative, 16383 - 32, 1 << 63);
+        for precision in [0, 0x200, 0x300] {
+            let control = 0x7f | precision;
+            assert!(cos(x, control).is_none());
+            let actual =
+                super::super::evaluate(Function::Cos, x, Ext80::ZERO, control, &mut workspace)
+                    .unwrap();
+            assert_eq!(actual.value, Ext80::ONE);
+            assert_eq!(actual.exceptions, PRECISION);
+            assert!(actual.incremented);
+        }
+    }
+}
+
+#[test]
+fn bounded_cosine_declines_unproven_domains() {
+    for x in [
+        Ext80::ZERO,
+        Ext80::INDEFINITE,
+        Ext80::from_parts(false, 0x7fff, 1 << 63),
+        Ext80::from_parts(false, 16383, (1 << 63) | 1),
+        Ext80::from_parts(false, 16383 - 58, u64::MAX),
+        Ext80::from_parts(false, 16383 + 1, 1 << 63),
+    ] {
+        assert!(cos(x, 0x37f).is_none(), "x={x:?}");
+    }
+}

@@ -375,9 +375,12 @@ pub(crate) fn evaluate(
             ));
         }
     }
-    if function == Function::Sin
-        && let Some(result) = bounded::sin(x, control)
-    {
+    let bounded = match function {
+        Function::Sin => bounded::sin(x, control),
+        Function::Cos => bounded::cos(x, control),
+        _ => None,
+    };
+    if let Some(result) = bounded {
         return Ok(result);
     }
     evaluate_precise(function, x, y, control, operand_exceptions, workspace)
