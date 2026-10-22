@@ -22,6 +22,8 @@ export function record(magic, size, profile = 1) {
   return bytes;
 }
 export class Engine {
+  #stateView;
+
   static async create(url, pages = RESIDENT_PAGES, signal, compiled) {
     const { module, hash } = await loadEngineModule(url, signal, compiled);
     const instance = await WebAssembly.instantiate(module, {
@@ -85,10 +87,16 @@ export class Engine {
     };
   }
   get(offset) {
-    return new DataView(this.memory.buffer).getUint32(this.base + offset, true);
+    const buffer = this.memory.buffer;
+    if (this.#stateView?.buffer !== buffer) this.#stateView = new DataView(buffer);
+    return this.#stateView.getUint32(this.base + offset, true);
   }
   take(length) {
     return new Uint8Array(this.memory.buffer).slice(this.base + 140, this.base + 140 + length);
+  }
+  // the result is borrowed until the next engine call; retained records must copy their fields.
+  resultView(length) {
+    return new DataView(this.memory.buffer, this.base + 140, length);
   }
   request(bytes) {
     if (bytes.byteLength > 4096)
@@ -115,7 +123,7 @@ export class Engine {
   }
   media(operation, ...args) {
     this.ok(operation, ...args);
-    const data = view(this.take(64));
+    const data = this.resultView(64);
     return {
       epoch: data.getBigUint64(16, true),
       values: Array.from({ length: 5 }, (_, i) => data.getBigUint64(24 + i * 8, true)),

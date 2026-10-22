@@ -398,7 +398,7 @@ export class Session {
           break;
         }
         h.ok("core_capture_windows_call");
-        const captured = view(h.take(112)),
+        const captured = h.resultView(112),
           token = captured.getUint32(16, true),
           args = Array.from({ length: captured.getUint32(28, true) }, (_, i) =>
             captured.getUint32(48 + i * 4, true),
