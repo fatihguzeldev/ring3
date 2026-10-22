@@ -46,6 +46,7 @@ function preflight(address, width, access, modify = false) {
 
 function read(context, address, encodedWidth) {
   assert.equal(context, CTX); active.reads++;
+  active.importVersions.push(['read', String(view.getBigUint64(VERSION, true))]);
   assert.equal(encodedWidth & ~0x1ff, 0);
   const width = encodedWidth & 255;
   assert.ok([1, 2, 4].includes(width));
@@ -58,6 +59,7 @@ function read(context, address, encodedWidth) {
 
 function write(context, address, width, value) {
   assert.equal(context, CTX); active.writes++;
+  active.importVersions.push(['write', String(view.getBigUint64(VERSION, true))]);
   let locations = preflight(address >>> 0, width, 2);
   if (!locations) return 1;
   const previous = view.getBigUint64(VERSION, true);
@@ -102,7 +104,7 @@ for (const line of readFileSync(join(directory, 'programs.tsv'), 'utf8').trim().
 }
 
 function seed(name, options = {}) {
-  active = {reads: 0, writes: 0};
+  active = {reads: 0, writes: 0, importVersions: []};
   bytes.fill(0, CTX, CTX + 128); bytes.fill(0, BACKING, BACKING + 16 * PAGE);
   bytes.fill(0, EXEC, EXEC + 16 * 4); bytes.fill(0, VERSION, VERSION + 8);
   bytes.fill(0, PAGE_VERSION, PAGE_VERSION + 16 * 16);
@@ -171,6 +173,7 @@ function check(name, label, budget, options, outcome) {
   const raw = {name, label, budget, reason, context: Buffer.from(bytes.subarray(CTX, CTX + 128)).toString('hex'),
     moduleSequence,
     ramSha256: hash(bytes.subarray(BACKING, BACKING + 16 * PAGE)), helperReads: active.reads, helperWrites: active.writes,
+    importVersions: active.importVersions,
     transactionVersion: String(view.getBigUint64(VERSION, true)), codeGeneration: String(view.getBigUint64(GENERATION, true))};
   results.push(raw); writeFileSync(reportPath, JSON.stringify({schema: 1, complete: false, results}));
   assert.equal(moduleSequence.length, (options?.sequence ?? [name]).length, `${label}: all declared module boundaries`);
@@ -187,6 +190,7 @@ function check(name, label, budget, options, outcome) {
   assert.deepEqual(bytes.subarray(BACKING, BACKING + 16 * PAGE), expectedRam, `${label}: whole code/data/stack backing`);
   assert.equal(active.reads, expected.reads ?? 0, `${label}: read slow path`);
   assert.equal(active.writes, expected.helpers ?? 0, `${label}: write slow path`);
+  if (expected.importVersions) assert.deepEqual(active.importVersions, expected.importVersions, `${label}: versions are published before canonical imports`);
   assert.equal(view.getBigUint64(VERSION, true), (options.initialVersion ?? 0n) + BigInt(expected.writes?.length ?? 0), `${label}: store transaction count`);
   assert.deepEqual(bytes.subarray(PAGE_VERSION, PAGE_VERSION + 16 * 16), expectedVersions, `${label}: all physical page versions`);
   assert.equal(view.getBigUint64(GENERATION, true), expected.reason === 6 ? 1n : 0n, `${label}: code generation`);
@@ -300,6 +304,34 @@ check('rmw', 'modify-through-nonexecutable-alias-stops-after-committed-store', 8
 check('rmw', 'version-exhaustion-preserves-preinstruction-state', 8,
   {flags: 0x893, initialVersion: 0xffffffffffffffffn, initial: [[0x3000, 4, 0xffffffff]]},
   {reason: 8, pc: 0x1000, retired: 0, remaining: 8, helpers: 1});
+check('rmw-pair', 'version-exhaustion-preserves-the-first-committed-instruction', 8,
+  {flags: 0x893, initialVersion: 0xfffffffffffffffen, initial: [[0x3000, 4, 0xffffffff], [0x3004, 4, 0x7fffffff]]},
+  {reason: 8, pc: 0x1003, retired: 1, remaining: 7, flags: 0x57, helpers: 1,
+    writes: [[0x3000, 4, 0]], importVersions: [['write', '18446744073709551615']]});
+check('store-cow-store', 'fast-cow-fast-stores-share-the-canonical-version-sequence', 8,
+  {privateCopy: true, regs: [0x12345678, 3, 7, 0x3000, 0x4800, 0, 0x8000, 0x4000], initialVersion: 37n},
+  {reason: 4, pc: 0x1007, retired: 3, helpers: 1,
+    writes: [[0x4000, 4, 0x12345678], [0x3000, 4, 0x12345678], [0x3004, 4, 0x12345678]],
+    importVersions: [['write', '38']]});
+check('store-load', 'committed-store-version-is-visible-to-the-following-faulting-read', 8,
+  {regs: [0x12345678, 3, 0x6000, 0x3000, 0x4800, 0, 0x8000, 0], initialVersion: 37n},
+  {reason: 3, pc: 0x1002, retired: 1, reads: 1, writes: [[0x3000, 4, 0x12345678]],
+    fault: [0x6000, 4 | 1 << 8 | 1 << 16], importVersions: [['read', '38']]});
+check('mixed-width-stores', 'budget-exit-publishes-only-the-complete-store-prefix', 2,
+  {regs: [0x12345678, 3, 7, 0x3000, 0x4800, 0, 0x8000, 0], initialVersion: 37n},
+  {reason: 2, pc: 0x1005, retired: 2, writes: [[0x3000, 4, 0x12345678], [0x3004, 1, 0x78]]});
+check('load-store', 'preceding-read-does-not-authorize-a-store', 8,
+  {readOnly: true, initialVersion: 37n, initial: [[0x3000, 4, 0x89abcdef]]}, initial => {
+    const regs = [...initial.regs]; regs[0] = 0x89abcdef;
+    return {reason: 3, pc: 0x1002, retired: 1, regs, helpers: 1,
+      fault: [0x3004, 4 | 2 << 8 | 2 << 16], importVersions: [['write', '37']]};
+  });
+check('load-rmw', 'preceding-read-does-not-authorize-a-modify', 8,
+  {readOnly: true, flags: 0x893, initialVersion: 37n, initial: [[0x3000, 4, 0x89abcdef]]}, initial => {
+    const regs = [...initial.regs]; regs[0] = 0x89abcdef;
+    return {reason: 3, pc: 0x1002, retired: 1, regs, reads: 1,
+      fault: [0x3004, 4 | 2 << 8 | 2 << 16], importVersions: [['read', '37']]};
+  });
 check('rmw', 'write-permission-preserves-flags', 8, {flags: 0x893, readOnly: true},
   {reason: 3, pc: 0x1000, retired: 0, reads: 1, fault: [0x3000, 4 | 2 << 8 | 2 << 16]});
 check('rmw', 'modify-first-page-denial-precedes-next-page', 8,
