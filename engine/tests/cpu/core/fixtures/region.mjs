@@ -22,6 +22,7 @@ import {runCanonicalCases,runCanonicalStatusCases} from './region/canonical.mjs'
 import {runArithmeticCases,runArithmeticOwnerCases} from './region/arithmetic.mjs';
 import {runAccessEpochCases} from './region/access-epoch.mjs';
 import {runObservedAutoCases} from './region/observed-auto.mjs';
+import {runObservedGrowthCases,runObservedGrowthReplacementCases} from './region/observed-growth.mjs';
 import {runObservedCases,runObservedBaselineCases,runObservedPrefixCases,runObservedRepeatedCases,runObservedCanonicalCases,runObservedExitCases,runObservedRefusalCases} from './region/observed.mjs';
 
 const [enginePath,reportPath,mode]=process.argv.slice(2);
@@ -33,7 +34,7 @@ const unhex=text=>Uint8Array.from(Buffer.from(text.replaceAll(' ',''),'hex'));
 closeSync(openSync(reportPath,'wx'));
 const report={schema:1,complete:false,engineSha256:artifact.sha256,
   scope:'actual generated mixed integer/x87 CFG with exact instruction-prefix, publication and fault oracles; no timing claim',
-  sources:Object.fromEntries(['./region.mjs','./region/observed.mjs','./region/observed-witness.mjs','./region/observed-auto.mjs','./region/access-epoch.mjs','./region/arithmetic.mjs','./link.mjs','./region/structure.mjs','./region/control.mjs','./region/link.mjs','./region/status.mjs','./region/state.mjs','./region/quota.mjs','./region/ownership.mjs','./region/ports.mjs','./region/graph.mjs','./region/groups.mjs','./region/native-store.mjs','./region/pool.mjs','./region/execution.mjs','./region/execution-flags.mjs','./region/canonical.mjs','./region/entry.mjs','./region/witness.mjs','./pool-state.mjs',
+  sources:Object.fromEntries(['./region.mjs','./region/observed.mjs','./region/observed-witness.mjs','./region/observed-auto.mjs','./region/observed-growth.mjs','./region/access-epoch.mjs','./region/arithmetic.mjs','./link.mjs','./region/structure.mjs','./region/control.mjs','./region/link.mjs','./region/status.mjs','./region/state.mjs','./region/quota.mjs','./region/ownership.mjs','./region/ports.mjs','./region/graph.mjs','./region/groups.mjs','./region/native-store.mjs','./region/pool.mjs','./region/execution.mjs','./region/execution-flags.mjs','./region/canonical.mjs','./region/entry.mjs','./region/witness.mjs','./pool-state.mjs',
     '../../../support/wasm/engine.mjs','../../../../../sdk/runtime/engine.js','../../../../../sdk/runtime/cache.js']
     .map(path=>[path,hash(readFileSync(new URL(path,import.meta.url)))])),cases:[]};
 const checkpoint=()=>writeFileSync(reportPath,JSON.stringify(report,null,2));
@@ -218,11 +219,13 @@ function exchangeCase(name,eax,structural=false) {
 
 try {
   if(mode?.startsWith('--observed')) {
-    if(mode==='--observed-baseline'||mode==='--observed-auto-baseline') {
-      const path=new URL('../../../../../artifacts/cpu-core/region-redesign/epoch-v19-sdk-cache.mjs',import.meta.url);
+    if(mode==='--observed-baseline'||mode==='--observed-auto-baseline'||mode==='--observed-growth-baseline') {
+      const file=mode==='--observed-growth-baseline'?'observed-v20-sdk-cache.mjs':'epoch-v19-sdk-cache.mjs';
+      const path=new URL(`../../../../../artifacts/cpu-core/region-redesign/${file}`,import.meta.url);
       report.baselineSdkSha256=hash(readFileSync(path));artifact.CodeCache=(await import(path.href)).CodeCache;
     }
-    const cases={'--observed-auto':runObservedAutoCases,
+    const cases={'--observed-growth':runObservedGrowthCases,'--observed-growth-baseline':runObservedGrowthCases,
+      '--observed-growth-replacement':runObservedGrowthReplacementCases,'--observed-auto':runObservedAutoCases,
       '--observed-auto-baseline':(a,r)=>runObservedAutoCases(a,r,{baseline:true}), '--observed':runObservedCases,'--observed-baseline':runObservedBaselineCases,
       '--observed-prefix':runObservedPrefixCases,'--observed-repeated':runObservedRepeatedCases,
       '--observed-canonical':runObservedCanonicalCases,'--observed-exit':runObservedExitCases,
