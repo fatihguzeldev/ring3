@@ -1,3 +1,4 @@
+mod access;
 mod flow;
 mod fp;
 mod gpr;
@@ -7,6 +8,8 @@ mod tests;
 
 use super::{BlockId, Region, ResumePc};
 use crate::cpu::x86::{X87Operation, ir::EffectiveAddress};
+
+pub(in crate::cpu::core) use access::{AccessGroup, AccessMember};
 
 macro_rules! id {
     ($name:ident) => {
@@ -253,6 +256,7 @@ pub(in crate::cpu::core) struct BlockPlan {
 
 pub(in crate::cpu::core) struct RegionPlan {
     blocks: Vec<BlockPlan>,
+    access: Vec<access::BlockAccessPlan>,
     values: Vec<Value>,
     proofs: Vec<Proof>,
     effects: Vec<Effect>,
@@ -276,6 +280,22 @@ impl RegionPlan {
     }
     pub fn instruction(&self, block: BlockId, prefix: u32) -> &InstructionPlan {
         &self.blocks[block.0].instructions[prefix as usize]
+    }
+    pub fn access_groups(&self, block: BlockId) -> &[AccessGroup] {
+        &self.access[block.0].groups
+    }
+    pub fn has_access_groups(&self) -> bool {
+        self.access.iter().any(|block| !block.groups.is_empty())
+    }
+    pub fn access_member(
+        &self,
+        block: BlockId,
+        prefix: u32,
+        address: EffectiveAddress,
+        width: u32,
+        write: bool,
+    ) -> Option<&AccessMember> {
+        self.access[block.0].member(prefix, address, width, write)
     }
     pub fn frame(&self, frame: FrameStateId) -> &FrameState {
         &self.frames[frame.0]

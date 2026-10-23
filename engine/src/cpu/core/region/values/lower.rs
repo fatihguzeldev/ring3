@@ -4,6 +4,7 @@ pub(super) fn analyze(region: &Region) -> RegionPlan {
     let facts = flow::entries(region);
     let mut plan = RegionPlan {
         blocks: Vec::with_capacity(region.blocks.len()),
+        access: Vec::new(),
         values: Vec::new(),
         proofs: Vec::new(),
         effects: Vec::new(),
@@ -125,6 +126,7 @@ pub(super) fn analyze(region: &Region) -> RegionPlan {
             });
         }
     }
+    plan.access = access::analyze(region, &plan);
     plan
 }
 

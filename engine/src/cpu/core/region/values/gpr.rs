@@ -1,5 +1,7 @@
 use super::*;
-use crate::cpu::x86::ir::{BinaryKind, CountBranchKind, Location32, Operation, Value32};
+use crate::cpu::x86::ir::{
+    BinaryKind, ByteRegister, CountBranchKind, Location32, Operation, Value32,
+};
 
 pub(super) fn lower(
     plan: &mut RegionPlan,
@@ -33,6 +35,39 @@ pub(super) fn lower(
         Some(Operation::Lea { destination, .. }) => {
             written = [false; 8];
             written[destination.index()] = true;
+        }
+        Some(
+            Operation::LoadWord { destination, .. }
+            | Operation::ReadArithmeticWord { destination, .. }
+            | Operation::ReadLogicalWord { destination, .. }
+            | Operation::ReadConditionalMove { destination, .. }
+            | Operation::ReadConditionalMoveWord { destination, .. }
+            | Operation::ReadSignedMultiplyWord { destination, .. }
+            | Operation::ReadSignedMultiplyImmediateWord { destination, .. }
+            | Operation::ReadExtendByteToWord { destination, .. }
+            | Operation::Extend { destination, .. },
+        ) => {
+            written = [false; 8];
+            written[destination.index()] = true;
+        }
+        Some(
+            Operation::LoadByte { destination, .. }
+            | Operation::ReadArithmeticByte { destination, .. }
+            | Operation::ReadLogicalByte { destination, .. },
+        ) => {
+            written = [false; 8];
+            let index = match destination {
+                ByteRegister::Al | ByteRegister::Ah => 0,
+                ByteRegister::Cl | ByteRegister::Ch => 1,
+                ByteRegister::Dl | ByteRegister::Dh => 2,
+                ByteRegister::Bl | ByteRegister::Bh => 3,
+            };
+            written[index] = true;
+        }
+        Some(operation @ Operation::Simd(_))
+            if crate::cpu::core::emitter::preserves_fp_success(&operation) =>
+        {
+            written = [false; 8];
         }
         Some(Operation::Binary {
             kind, destination, ..
@@ -85,8 +120,22 @@ pub(super) fn lower(
             | Operation::ConditionalJump { .. }
             | Operation::Carry { .. }
             | Operation::Direction { .. }
+            | Operation::Unary {
+                destination: Location32::Memory(_),
+                ..
+            }
             | Operation::MemoryUnaryByte { .. }
-            | Operation::MemoryUnaryWord { .. },
+            | Operation::MemoryUnaryWord { .. }
+            | Operation::MemoryArithmeticByte { .. }
+            | Operation::MemoryArithmeticWord { .. }
+            | Operation::MemoryLogicalByte { .. }
+            | Operation::MemoryLogicalWord { .. }
+            | Operation::MemoryCompareWord { .. }
+            | Operation::MemoryTestWord { .. }
+            | Operation::MemoryPredicateByte { .. }
+            | Operation::ReadCompareByte { .. }
+            | Operation::ReadCompareWord { .. }
+            | Operation::MemorySetByte { .. },
         ) => written = [false; 8],
         _ => {}
     }
