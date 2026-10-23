@@ -13,7 +13,7 @@ export function runOwnershipCase(artifact,report) {
 
 function runInteriorCase(artifact,report,blocks) {
   const result={name:blocks===1?'owned-interior-entry-labels-do-not-consume-the-one-block-discovery-budget':
-    'owned-interior-entry-reforms-one-source-owner-and-preserves-its-root',
+    'owned-interior-ports-execute-one-immutable-source-owner-and-preserve-its-root',
     complete:false,controls:[],modules:[]};report.cases.push(result);
   const instance=new WebAssembly.Instance(artifact.module,{ring3_observability:{now_ns:()=>0n}});
   const api=Object.fromEntries(Object.entries(instance.exports)
@@ -36,13 +36,24 @@ function runInteriorCase(artifact,report,blocks) {
     const state=record('R3ST',56),s=view(state);registers.forEach((value,index)=>s.setUint32(16+index*4,value,true));
     s.setUint32(48,0x1000,true);s.setUint32(52,2,true);new Uint8Array(memory.buffer,engine.base,56).set(state);
     const initialFp=bytes(engine.base+4236,128),initialSimd=bytes(engine.base+4364,160),initialYmm=bytes(engine.base+4612,144);
+    result.selections=[];
+    for(const name of['core_prepare','core_lookup','core_cold_run'])if(typeof api[name]==='function'){
+      const native=api[name];api[name]=(...args)=>{const returned=native(...args);result.selections.push({name,args,returned});return returned;};
+    }
     cache=new CodeCache(engine,{budget:5,instructions:64,blocks,chain:true});
     const select=pc=>{
       const unit=cache.entry(pc),encoded=bytes(api.core_code_ptr()>>>0,api.core_code_len()>>>0);
       result.modules.push({pc,identity:String(unit.id),bytes:encoded.length,sha256:hash(encoded)});return unit;
     };
-    const original=select(0x1000),interior=select(0x1004);
+    const original=select(0x1000),interior=select(0x1004),secondInterior=select(0x1006);
     cache.sampleUsage();result.afterInterior=cache.stats();
+    assert.equal(interior.id,original.id,'a precompiled interior port preserves its actual owner identity');
+    assert.equal(secondInterior.id,original.id,'a second interior port preserves that same immutable owner');
+    assert(result.modules.every(module=>module.sha256===result.modules[0].sha256),
+      'interior admission executes the original emitted module bytes without re-emission');
+    assert.equal(interior.run,original.run);assert.equal(secondInterior.run,original.run);
+    assert.equal(cache.admissions,1,'binding two interior ports does not admit replacement code');
+    assert.equal(cache.generatedModuleBytes,result.modules[0].bytes);
     if(blocks===1){
       assert.equal(interior.transient,undefined,'splitting already owned instructions into an entry label consumes no new-block discovery budget');
       assert.deepEqual([cache.transientAdmissions,cache.transientRuns,cache.transientModuleBytes],[0,0,0],
@@ -50,9 +61,8 @@ function runInteriorCase(artifact,report,blocks) {
     }
     assert.equal(cache.units.size,1,'the interior entry replaces its source owner instead of retaining a duplicate suffix');
     assert.equal(cache.nativeCache.retainedUnits,'1','one native owner covers the original nine instruction starts');
-    assert.notEqual(interior.id,original.id,'adding the new entry rebuilds its actual block contract');
-    const root=select(0x1000);assert.equal(root.id,interior.id,'the upgraded module still owns its original root');
-    assert.equal(cache.units.size,1,'selecting the original root reuses the upgraded instance');
+    const root=select(0x1000);assert.equal(root.id,interior.id,'the unchanged module still owns its original root');
+    assert.equal(cache.units.size,1,'selecting the original root reuses the same instance');
     status('core_begin',0);active=true;status('core_end',0);active=false;
     const backing=word(cache.context,64),expectedRam=bytes(backing,word(cache.context,68)*4096);
     const versionPointer=word(cache.context,80),beforeVersion=new DataView(memory.buffer).getBigUint64(versionPointer,true);
@@ -69,7 +79,43 @@ function runInteriorCase(artifact,report,blocks) {
     assert.deepEqual(bytes(engine.base+4236,128),initialFp);assert.deepEqual(bytes(engine.base+4364,160),initialSimd);
     assert.deepEqual(bytes(engine.base+4612,144),initialYmm);assert.deepEqual(bytes(backing,expectedRam.length),expectedRam);
     assert.equal(new DataView(memory.buffer).getBigUint64(versionPointer,true),beforeVersion,'no guest memory write occurs');
-    result.final={pc:executed.pc,retired:executed.retired,owner:String(interior.id),ramSha256:hash(expectedRam)};result.complete=true;
+    new DataView(memory.buffer).setUint32(cache.context+32,0x1006,true);
+    new DataView(memory.buffer).setUint32(cache.context+16,0x4000,true);cache.budget=3;
+    const second=cache.execute(secondInterior);
+    assert.deepEqual([second.coreReason,second.pc,second.retired,second.work],[2,0x1100,3,3],
+      'the second immutable port executes only its two NOPs and RET');
+    assert.deepEqual(Array.from({length:8},(_,i)=>word(cache.context,i*4)),wantedRegisters);
+    assert.deepEqual([word(cache.context,32),word(cache.context,36),word(cache.context,40),word(cache.context,44)],
+      [0x1100,2,8,0],'successive port activations account only their executed suffixes');
+    assert.deepEqual(bytes(engine.base,56),wantedState);assert.deepEqual(bytes(engine.base+4236,128),initialFp);
+    assert.deepEqual(bytes(engine.base+4364,160),initialSimd);assert.deepEqual(bytes(engine.base+4612,144),initialYmm);
+    assert.deepEqual(bytes(backing,expectedRam.length),expectedRam);
+    assert.equal(new DataView(memory.buffer).getBigUint64(versionPointer,true),beforeVersion);
+    assert.equal(cache.units.size,1);assert.equal(cache.admissions,1);assert.equal(cache.generatedModuleBytes,result.modules[0].bytes);
+    assert.deepEqual([cache.transientAdmissions,cache.transientRuns,cache.transientModuleBytes],[0,0,0]);
+    select(0x1005);
+    new DataView(memory.buffer).setUint32(cache.context+32,0x1004,true);
+    new DataView(memory.buffer).setUint32(cache.context+16,0x4000,true);cache.budget=1;
+    const third=cache.execute(interior);assert.deepEqual([third.coreReason,third.pc,third.retired,third.work],[2,0x1005,1,1]);
+    const prepareCount=result.selections.filter(row=>row.name==='core_prepare').length;
+    const lookupCount=result.selections.filter(row=>row.name==='core_lookup').length;
+    const continuation=cache.select();assert.equal(continuation,original,'native lookup selects the retained executable interior port');
+    assert.equal(result.selections.filter(row=>row.name==='core_prepare').length,prepareCount,'continuation does not prepare code');
+    assert.equal(result.selections.filter(row=>row.name==='core_lookup').length,lookupCount+1,'actual native lookup validates continuation');
+    const fourth=cache.execute(continuation);
+    assert.deepEqual([fourth.coreReason,fourth.pc,fourth.retired,fourth.work],[2,0x1006,1,1]);
+    assert.equal(result.selections.filter(row=>row.name==='core_cold_run').length,0,'retained continuation opens no empty cold lease');
+    const finalRegisters=registers.slice();
+    assert.deepEqual(Array.from({length:8},(_,i)=>word(cache.context,i*4)),finalRegisters);
+    assert.deepEqual([word(cache.context,32),word(cache.context,36),word(cache.context,40),word(cache.context,44)],[0x1006,2,10,0]);
+    const finalState=state.slice();view(finalState).setUint32(48,0x1006,true);
+    assert.deepEqual(bytes(engine.base,56),finalState);assert.deepEqual(bytes(engine.base+4236,128),initialFp);
+    assert.deepEqual(bytes(engine.base+4364,160),initialSimd);assert.deepEqual(bytes(engine.base+4612,144),initialYmm);
+    assert.deepEqual(bytes(backing,expectedRam.length),expectedRam);
+    assert.equal(new DataView(memory.buffer).getBigUint64(versionPointer,true),beforeVersion);
+    assert.equal(cache.units.size,1);assert.equal(cache.admissions,1);assert.equal(cache.generatedModuleBytes,result.modules[0].bytes);
+    result.final={pc:fourth.pc,retired:executed.retired,secondRetired:second.retired,continuationRetired:2,
+      owner:String(interior.id),ramSha256:hash(expectedRam)};result.complete=true;
   }catch(error){result.failure={message:String(error),stack:error.stack};throw error;}
   finally{if(active||cache?.open)api.core_end();if(opened)status('close',0);}
 }

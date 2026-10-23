@@ -215,6 +215,68 @@ test('transient native-begin failure cannot execute bytes or consume a retained 
   assert.deepEqual([...f.links],[[owner.slot,owner.id]]);
 });
 
+test('native retained-entry lookup continues budget slices without an empty cold lease or preparation',()=>{
+  const f=coldFixture([]);
+  f.api.core_lookup=pc=>{f.calls.push(['lookup',pc]);return 0;};
+  const cache=new CodeCache(f.engine,{chain:false,budget:1}),unit=cache.entry(0x1000);
+  cache.execute(unit);
+  const before=new Uint8Array(f.engine.memory.buffer,f.context,128).slice(),selected=cache.select();
+  assert.equal(selected,unit,'native-validated identity reuses its actual instantiated unit');
+  assert.deepEqual(new Uint8Array(f.engine.memory.buffer,f.context,128),before,'selection does not change canonical state');
+  const result=cache.execute(selected);
+  assert.deepEqual([result.kind,result.coreReason,result.retired,result.work],['compiled',2,1,1]);
+  assert.equal(f.calls.filter(([name])=>name==='prepare').length,1);
+  assert.deepEqual(f.calls.filter(([name])=>name==='lookup'),[['lookup',0x1004]]);
+  assert.equal(f.calls.filter(([name])=>name==='cold').length,0);
+  assert.equal(f.calls.filter(([name])=>name==='begin').length,2);
+  assert.equal(f.calls.filter(([name])=>name==='end').length,2);
+  assert.equal(new DataView(f.engine.memory.buffer).getUint32(f.context+40,true),2);
+});
+
+test('retained-entry miss preserves genuine cold execution for an unowned PC',()=>{
+  const f=coldFixture([{stop:2,pc:0x1004,work:1}]);
+  f.api.core_lookup=pc=>{f.calls.push(['lookup',pc]);return 4;};
+  const cache=new CodeCache(f.engine,{chain:false,budget:1});
+  assert.equal(cache.select(),null);const result=cache.execute(null);
+  assert.deepEqual([result.kind,result.pc,result.retired,result.work],['cold',0x1004,1,1]);
+  assert.equal(f.calls.filter(([name])=>name==='lookup').length,1);
+  assert.equal(f.calls.filter(([name])=>name==='cold').length,1);
+  assert.equal(f.calls.filter(([name])=>name==='prepare').length,0);
+});
+
+test('pending promotion lookup miss reaches prepare instead of looping over a retained entry',()=>{
+  const f=coldFixture([{stop:1,pc:0x1004,work:0,retired:0}],
+    pc=>({id:pc===0x1000?1n:2n,stop:pc===0x1000?1:2,next:pc+4}));
+  let pending=false;
+  f.api.core_lookup=pc=>{f.calls.push(['lookup',pc]);assert.equal(pending,true);return 4;};
+  const prepare=f.api.core_prepare;
+  f.api.core_prepare=(pc,...args)=>{if(pc===0x1004){assert.equal(pending,true);pending=false;}return prepare(pc,...args);};
+  const cache=new CodeCache(f.engine,{chain:false,budget:2}),unit=cache.entry(0x1000);
+  assert.equal(cache.execute(unit).coreReason,1);pending=true;
+  assert.equal(cache.select(),null,'pending promotion prevents a retained hit');
+  const cold=cache.execute(null);assert.deepEqual([cold.coreReason,cold.work,cold.retired],[1,0,0]);
+  cache.budget=1;const selected=cache.select();
+  assert.equal(selected.id,2n,'the JIT handoff consumes pending formation through prepare');
+  const result=cache.execute(selected);
+  assert.deepEqual([result.coreReason,result.pc,result.retired,result.work],[2,0x1008,1,1]);
+  assert.equal(pending,false);
+  assert.equal(f.calls.filter(([name])=>name==='lookup').length,1,'jitPc avoids a second lookup loop');
+  assert.equal(f.calls.filter(([name])=>name==='cold').length,1);
+  assert.equal(f.calls.filter(([name])=>name==='prepare').length,2);
+});
+
+test('retained-entry lookup propagates fatal statuses and rejects a changed native binding',()=>{
+  for(const status of[5,7,9,12]){
+    const f=coldFixture([]);f.api.core_lookup=()=>status;
+    const cache=new CodeCache(f.engine,{chain:false,budget:1});
+    assert.throws(()=>cache.select(),error=>error.operation==='core_lookup'&&error.status===status);
+    assert.equal(f.calls.filter(([name])=>['cold','prepare','begin'].includes(name)).length,0);
+  }
+  const f=coldFixture([]);f.api.core_lookup=()=>4;
+  const cache=new CodeCache(f.engine,{chain:false,budget:1});f.api.core_lookup=()=>0;
+  assert.throws(()=>cache.select(),/bindings changed/);
+});
+
 test('cold diagnostics are optional and copy the closed native snapshot',()=>{
   const absent=new CodeCache(fixture().engine,{chain:false});
   assert.equal(absent.coldDiagnostics(),null);

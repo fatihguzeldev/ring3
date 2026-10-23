@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::BTreeSet;
 
 #[derive(Default)]
 pub(super) struct TransitionHeat {
@@ -232,6 +233,16 @@ impl CoreCache32 {
         // The discovery budget does not limit labels split from already owned
         // instructions. Exact reformation still enforces the hard entry ceiling.
         self.transition_roots(memory, &source, &target, pc, 1024)?;
+        let mut entries: BTreeSet<_> = self
+            .retained(&source)?
+            .admitted_entries
+            .iter()
+            .chain(&self.retained(&target)?.admitted_entries)
+            .map(|entry| entry.0)
+            .collect();
+        if entries.len() > 1024 {
+            return None;
+        }
         let code = CompiledCode::reform_union(
             memory,
             &[&source, &target],
@@ -240,7 +251,10 @@ impl CoreCache32 {
             gates,
         )
         .ok()??;
+        entries.extend(code.entrypoints().iter().map(|entry| entry.0));
         if code.wasm().len() > source.wasm().len() + target.wasm().len()
+            || entries.len() > 1024
+            || entries.iter().any(|&pc| !code.supports_entry(pc))
             || code.instruction_pcs().any(|pc| {
                 self.coverage.get(&pc).is_some_and(|key| {
                     *key != source.key
@@ -266,7 +280,7 @@ impl CoreCache32 {
         // owner or its reciprocal link is retired.
         self.remove(source.key);
         self.remove(target.key);
-        Some(self.insert_owned(code))
+        Some(self.insert_with_entries(code, entries.into_iter().map(GuestAddress).collect()))
     }
 
     fn transition_roots(

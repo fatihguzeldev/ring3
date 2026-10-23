@@ -48,6 +48,7 @@ export class CodeCache {
       return [name, this.api[name]];
     }));
     if (typeof this.api.core_cold_run === 'function') this.native.core_cold_run = this.api.core_cold_run;
+    if (typeof this.api.core_lookup === 'function') this.native.core_lookup = this.api.core_lookup;
     if (typeof this.api.core_cold_status_ptr === 'function') this.native.core_cold_status_ptr = this.api.core_cold_status_ptr;
     this.#bindings = Object.entries(this.native);
     this.budget = budget; this.instructions = instructions; this.blocks = blocks; this.capacity = capacity;
@@ -302,7 +303,20 @@ export class CodeCache {
   select(pc = this.pc) {
     if (this.open) throw new Error('cannot select code during execution');
     this.pristine();
-    return this.native.core_cold_run && this.jitPc !== pc ? null : this.entry(pc);
+    if (this.native.core_cold_run && this.jitPc !== pc) {
+      if (this.native.core_lookup) {
+        const lookup = () => {
+          const status = this.native.core_lookup(pc) >>> 0;
+          if (status !== 0 && status !== 4)
+            throw Object.assign(new Error(`core_lookup returned ${status}`),{operation:'core_lookup',status});
+          return status;
+        };
+        const status = this.compilation ? this.measureCompilation('prepare',lookup,pc) : lookup();
+        if (status === 0) return this.#selectedEntry(pc,0);
+      }
+      return null;
+    }
+    return this.entry(pc);
   }
   retainContext(pointer) {
     if (!pointer || pointer % 8 || pointer + 128 > this.memory.buffer.byteLength)
@@ -320,6 +334,9 @@ export class CodeCache {
       return status;
     };
     const prepared = this.compilation ? this.measureCompilation('prepare',prepare,pc) : prepare();
+    return this.#selectedEntry(pc,prepared);
+  }
+  #selectedEntry(pc,prepared) {
     const context = this.native.core_context_ptr() >>> 0;
     if (prepared === 18 && (!context || context % 8 || context+128 > this.memory.buffer.byteLength))
       throw Object.assign(new Error('core_prepare returned 18'),{operation:'core_prepare',status:18});
@@ -328,6 +345,8 @@ export class CodeCache {
     const transient = prepared === 18 && view.getUint32(context+112,true) === 2 && id !== 0n;
     if (prepared === 18 && !transient)
       throw Object.assign(new Error('core_prepare returned 18'),{operation:'core_prepare',status:18});
+    if (prepared === 0 && view.getUint32(context+112,true) !== 0)
+      throw new Error('invalid prepared core lease');
     this.transient = null;
     if (id === 0n) throw new Error('core code has no identity');
     if (!transient && this.units.has(id)) {

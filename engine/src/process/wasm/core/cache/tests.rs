@@ -107,8 +107,7 @@ fn bounds(cache: &CoreCache32) {
             assert_eq!(
                 entry.indexed_entries,
                 entry
-                    .code
-                    .entrypoints()
+                    .admitted_entries
                     .iter()
                     .filter(|pc| cache.entries.get(&pc.0) == Some(&key))
                     .count()

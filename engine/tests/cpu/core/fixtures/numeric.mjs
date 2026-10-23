@@ -129,7 +129,8 @@ function runCase(name, codeHex, budget, options, verify) {
       context = api.core_context_ptr()>>>0;
       const resumedCode = slice(api.core_code_ptr()>>>0,api.core_code_len()>>>0);
       const resumedModule = new WebAssembly.Module(resumedCode);
-      assertCoreNames(resumedModule,prefixPc);
+      assert.equal(hash(resumedCode),result.module.sha256,'interior handoff retains the exact owner module');
+      assertCoreNames(resumedModule,0x1000);
       run = instantiateCore(resumedModule,{ring3:{memory,read:api.core_read,write:api.core_write,numeric}}).exports.run;
       result.handoff = {prefixRetired,prefixPc,published:hex(published),imported:hex(unpublishedFp),moduleSha256:hash(resumedCode)};
       status('core_begin',0); active = true;
@@ -146,7 +147,8 @@ function runCase(name, codeHex, budget, options, verify) {
       status('core_prepare',0,prefixPc,256,32);
       context=api.core_context_ptr()>>>0;
       const resumedCode=slice(api.core_code_ptr()>>>0,api.core_code_len()>>>0),resumedModule=new WebAssembly.Module(resumedCode);
-      assertCoreNames(resumedModule,prefixPc);
+      assert.equal(hash(resumedCode),result.module.sha256,'private interior reentry retains the exact owner module');
+      assertCoreNames(resumedModule,0x1000);
       run=instantiateCore(resumedModule,{ring3:{memory,read:api.core_read,write:api.core_write,numeric}}).exports.run;
       result.reentry={prefixRetired,prefixPc,moduleSha256:hash(resumedCode)};
       status('core_begin',0);active=true;
@@ -206,7 +208,9 @@ function bank(t,wanted) {assert.deepEqual(t.slice(t.arena+fpOffset,128),wanted,'
 try {
   runCase('private-reentry-preserves-stack-through-exchange-pop-and-sign',
     'd903 d94304 d9c9 dec1 d9e0 d9e1 0f0b',4,
-    {control:0x27f,data:values,numericCalls:0,
+    // Both prefix FLDs stay direct. The immutable interior port executes the
+    // remaining FXCH, FADDP, FCHS, and FABS through four exact helpers.
+    {control:0x27f,data:values,numericCalls:4,
       reentry:{budget:2,payloads:{6:'00000000000000800040',7:ext3}},
       endPayloads:{6:ext3,7:'00000000000000a00140'}},t=>{
       assert.equal(t.stop,2);assert.equal(t.state.retired,6);assert.equal(t.state.remaining,0);
@@ -407,7 +411,9 @@ try {
     standard(t,3,0x1008);const value='0000000000000080033f';t.writeExpected(0x3008,unhex(value));
     bank(t,t.fp({opcode:0x37b,fip:0x1005,fdp:0x3008,cs:0x1b,ds:0x23,registers:{7:value}}));
   });
-  runCase('direct-bank-import-reprepare-resume','d903 d84b04 d95b08 0f0b',2,{control:0x7f,data:values,numericCalls:0,handoff:{budget:1,replacement:'00000000000000800140'}},t=>{
+  // The prefix FLD stays direct; the imported interior FMUL and FSTP execute
+  // through the immutable owner's canonical suffix rather than a rebuilt body.
+  runCase('direct-bank-import-reprepare-resume','d903 d84b04 d95b08 0f0b',2,{control:0x7f,data:values,numericCalls:2,handoff:{budget:1,replacement:'00000000000000800140'}},t=>{
     assert.equal(t.stop,2);assert.equal(t.state.retired,3);assert.equal(t.state.remaining,0);assert.equal(t.state.pc,0x1008);assert.equal(t.state.flags,2);
     assert.deepEqual(t.state.registers,t.initialRegisters);t.writeExpected(0x3008,unhex('00000041'));
     bank(t,t.fp({opcode:0x15b,fip:0x1005,fdp:0x3008,cs:0x1b,ds:0x23,registers:{7:'00000000000000800240'}}));

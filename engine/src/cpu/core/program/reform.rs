@@ -3,6 +3,7 @@ use super::*;
 const MAX_REFORM_ENTRIES: usize = 1024;
 
 impl CompiledCode {
+    #[cfg(test)]
     pub(crate) fn with_entry(
         &self,
         memory: &AddressSpace,

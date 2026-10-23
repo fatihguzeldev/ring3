@@ -232,6 +232,7 @@ pub(crate) fn core_prepare(pc: u32, instructions: u32, blocks: u32) -> u32 {
                 .prepare_transition(instance.memory.as_ref().unwrap(), pc, options, &gates)
         });
         let mut admitted = promoted.is_some();
+        let mut port_bound = false;
         let mut transient = false;
         let selected = promoted.or_else(|| {
             core.as_mut()
@@ -259,7 +260,7 @@ pub(crate) fn core_prepare(pc: u32, instructions: u32, blocks: u32) -> u32 {
             };
             match owned {
                 OwnedEntryLookup::Ready(code) => {
-                    admitted = true;
+                    port_bound = true;
                     code
                 }
                 OwnedEntryLookup::Declined => {
@@ -346,10 +347,48 @@ pub(crate) fn core_prepare(pc: u32, instructions: u32, blocks: u32) -> u32 {
                 instance.memory.as_ref().unwrap(),
                 session.code.as_ref().unwrap().instruction_pcs(),
             );
+        } else if port_bound {
+            session
+                .cold_state
+                .forget_compiled(instance.memory.as_ref().unwrap(), [pc]);
         }
         session.context.bytes_mut()[120..128].copy_from_slice(&identity.to_le_bytes());
         session.context.set_word(112, if transient { 2 } else { 0 });
         if transient { 18 } else { 0 }
+    })
+}
+
+// Select only an entry already admitted to the executable directory. This does
+// not acquire a CPU lifetime, compile code, or promote source coverage to an entry.
+pub(crate) fn core_lookup(pc: u32) -> u32 {
+    REGISTRY.with(|registry| {
+        let Ok(mut registry) = registry.try_borrow_mut() else {
+            return 9;
+        };
+        let Registry { instance, core, .. } = &mut *registry;
+        let Some(session) = core.as_mut() else {
+            return if instance.is_some() { 4 } else { 5 };
+        };
+        if session.active {
+            return 12;
+        }
+        if session.cache.transition_pending() {
+            return 4;
+        }
+        let Some(memory) = instance
+            .as_ref()
+            .and_then(|instance| instance.memory.as_ref())
+        else {
+            return 5;
+        };
+        let Some(code) = session.cache.lookup(memory, pc) else {
+            return 4;
+        };
+        let identity = code.identity();
+        session.code = Some(code);
+        session.context.bytes_mut()[120..128].copy_from_slice(&identity.to_le_bytes());
+        session.context.set_word(112, 0);
+        0
     })
 }
 

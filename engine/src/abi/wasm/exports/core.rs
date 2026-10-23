@@ -1,5 +1,6 @@
 export_process_calls! {
     core_prepare(pc: u32, instructions: u32, blocks: u32);
+    core_lookup(pc: u32);
     core_code_ptr();
     core_code_len();
     core_context_ptr();

@@ -103,6 +103,7 @@ impl Deref for RegionRef {
 
 struct CachedRegion {
     code: Rc<CompiledCode>,
+    admitted_entries: Vec<GuestAddress>,
     indexed_entries: usize,
     older: Option<usize>,
     newer: Option<usize>,
@@ -234,8 +235,17 @@ impl CoreCache32 {
         memory: &AddressSpace,
         pc: u32,
         options: CompileOptions,
-        gates: &[(GuestAddress, u32)],
+        _gates: &[(GuestAddress, u32)],
     ) -> Result<OwnedEntryLookup, CompileError> {
+        if options.instructions == 0
+            || options.instructions > 16384
+            || options.blocks == 0
+            || options.blocks > 1024
+            || options.wasm_bytes < 128
+            || options.wasm_bytes > 16 << 20
+        {
+            return Err(CompileError::InvalidLimits);
+        }
         let Some(owner) = self.coverage_owner(memory, pc) else {
             return Ok(OwnedEntryLookup::Unowned);
         };
@@ -247,32 +257,43 @@ impl CoreCache32 {
         if self.region(owner.key).unwrap().rejected_entries.get(&pc) == Some(&limits) {
             return Ok(OwnedEntryLookup::Declined);
         }
-        let candidate = owner.with_entry(memory, GuestAddress(pc), options, gates)?;
-        let Some(candidate) = candidate else {
+        if owner.instruction_count() > options.instructions
+            || owner.wasm().len() > options.wasm_bytes
+            || !owner.supports_entry(pc)
+            || self.region(owner.key).unwrap().indexed_entries >= 1024
+        {
             self.regions[owner.key.index]
                 .as_mut()
                 .unwrap()
                 .rejected_entries
                 .insert(pc, limits);
             return Ok(OwnedEntryLookup::Declined);
-        };
-        // Emission is complete before changing either executable or coverage indexes.
-        // The immutable owner remains usable when a limit or source check declines.
-        if !owner.is_current(memory)
-            || !candidate.instruction_pcs().eq(owner.instruction_pcs())
-            || owner
-                .entrypoints()
-                .iter()
-                .any(|entry| !candidate.entrypoints().contains(entry))
-            || candidate
-                .entrypoints()
-                .binary_search_by_key(&pc, |entry| entry.0)
-                .is_err()
-        {
-            return Ok(OwnedEntryLookup::Declined);
         }
-        self.remove(owner.key);
-        Ok(OwnedEntryLookup::Ready(self.insert_owned(candidate)))
+        if let Some(previous) = self.entries.get(&pc).copied() {
+            if self
+                .region(previous)
+                .is_some_and(|entry| entry.code.is_current(memory))
+            {
+                return Ok(OwnedEntryLookup::Declined);
+            }
+            self.remove(previous);
+            self.source_invalidations = self.source_invalidations.saturating_add(1);
+        }
+        // The compiler already emitted this precise suffix port. Admitting it
+        // changes executable ownership only; its body, identity and roots stay fixed.
+        self.advance_entries_epoch();
+        self.entries.insert(pc, owner.key);
+        let entry = self.regions[owner.key.index].as_mut().unwrap();
+        if let Err(index) = entry
+            .admitted_entries
+            .binary_search_by_key(&pc, |entry| entry.0)
+        {
+            entry.admitted_entries.insert(index, GuestAddress(pc));
+        }
+        entry.indexed_entries += 1;
+        entry.rejected_entries.remove(&pc);
+        self.touch(owner.key.index);
+        Ok(OwnedEntryLookup::Ready(owner))
     }
 
     pub(super) fn admit(
@@ -476,9 +497,14 @@ impl CoreCache32 {
     }
 
     fn insert_owned(&mut self, code: CompiledCode) -> RegionRef {
+        let entries = code.entrypoints().to_vec();
+        self.insert_with_entries(code, entries)
+    }
+
+    fn insert_with_entries(&mut self, code: CompiledCode, entries: Vec<GuestAddress>) -> RegionRef {
         self.advance_entries_epoch();
         let code = Rc::new(code);
-        for pc in code.entrypoints() {
+        for pc in &entries {
             if let Some(key) = self.entries.remove(&pc.0) {
                 let entry = self.regions[key.index].as_mut().unwrap();
                 entry.indexed_entries -= 1;
@@ -501,7 +527,7 @@ impl CoreCache32 {
         let index = self.free.pop().unwrap();
         let identity = code.identity();
         let key = RegionKey { index, identity };
-        for entry in code.entrypoints() {
+        for entry in &entries {
             self.entries.insert(entry.0, key);
         }
         for pc in code.instruction_pcs() {
@@ -509,7 +535,8 @@ impl CoreCache32 {
         }
         self.bytes += code.wasm().len();
         self.regions[index] = Some(CachedRegion {
-            indexed_entries: code.entrypoints().len(),
+            indexed_entries: entries.len(),
+            admitted_entries: entries,
             code: Rc::clone(&code),
             older: self.newest,
             newer: None,
@@ -593,7 +620,7 @@ impl CoreCache32 {
             self.link_owners[entry.slot as usize] = 0;
             self.slot_regions[entry.slot as usize] = NO_REGION;
         }
-        for pc in entry.code.entrypoints() {
+        for pc in &entry.admitted_entries {
             if self
                 .entries
                 .get(&pc.0)

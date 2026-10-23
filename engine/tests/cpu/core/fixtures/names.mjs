@@ -38,10 +38,10 @@ function readNames(module) {
   return {moduleName, functions};
 }
 
-export function assertCoreNames(module, entry, identity) {
+export function assertCoreNames(module, ownerEntry, identity) {
   const {moduleName, functions} = readNames(module);
-  const prefix = `ring3.guest.${entry.toString(16).padStart(8, '0')}.`;
-  assert(moduleName.startsWith(prefix), 'profiler module identifies the requested guest entry');
+  const prefix = `ring3.guest.${ownerEntry.toString(16).padStart(8, '0')}.`;
+  assert(moduleName.startsWith(prefix), 'profiler module identifies the immutable owner entry');
   assert.match(moduleName.slice(prefix.length), /^[1-9][0-9]*$/, 'profiler module identifies its compilation');
   if (identity !== undefined) assert.equal(moduleName, prefix + identity);
   const numeric = WebAssembly.Module.imports(module).some(item => item.name === 'numeric');
