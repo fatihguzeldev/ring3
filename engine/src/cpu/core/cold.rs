@@ -15,7 +15,29 @@ mod control;
 mod diagnostics;
 mod integer;
 mod memory;
+mod strings;
 use memory::{Failure, Port};
+
+/// The normal executor records only instructions whose complete architectural
+/// effects have committed. A decoder result alone never confirms execution.
+pub(crate) trait ColdObserver {
+    fn exact_cold(&self) -> bool {
+        false
+    }
+    fn begin_instruction(
+        &mut self,
+        _memory: &AddressSpace,
+        _instruction: &NativeInstruction,
+        _hot: bool,
+    ) -> bool {
+        false
+    }
+    fn complete_instruction(&mut self, _memory: &AddressSpace, _actual_post_pc: u32) {}
+    fn abandon_instruction(&mut self) {}
+}
+
+pub(crate) struct Unobserved;
+impl ColdObserver for Unobserved {}
 
 const HEAT_SLOTS: usize = 32768;
 const HEAT_WAYS: usize = 4;
@@ -217,6 +239,26 @@ pub(crate) fn run_with_lookups(
     frontier: &impl Fn(&AddressSpace, u32) -> bool,
     cold: &mut ColdState,
 ) -> ColdOutcome {
+    run_observed(
+        memory,
+        context,
+        segments,
+        gate_at,
+        frontier,
+        cold,
+        &mut Unobserved,
+    )
+}
+
+pub(crate) fn run_observed(
+    memory: &mut AddressSpace,
+    context: &mut Context32,
+    segments: &SegmentContext,
+    gate_at: &impl Fn(u32) -> Option<u32>,
+    frontier: &impl Fn(&AddressSpace, u32) -> bool,
+    cold: &mut ColdState,
+    observer: &mut impl ColdObserver,
+) -> ColdOutcome {
     if word(context, 112) != 1 || context.bytes()[120..128] != [0; 8] || !segments.is_legacy() {
         return ColdOutcome::Stop(StopReason::Infrastructure);
     }
@@ -295,38 +337,63 @@ pub(crate) fn run_with_lookups(
                         #[cfg(any(test, feature = "observability"))]
                         heat.diagnostics.request(diagnostics::Request::Decode);
                         heat.requested(pc);
-                        return finish(context, state, retired, remaining, StopReason::NeedCode);
+                        return finish(
+                            context,
+                            state,
+                            retired,
+                            remaining,
+                            if observer.exact_cold() {
+                                StopReason::Unsupported
+                            } else {
+                                StopReason::NeedCode
+                            },
+                        );
                     }
                 };
                 let reason = error.publish(context);
                 return finish(context, state, retired, remaining, reason);
             }
         };
-        if decoded.segment_accesses() & (1 << 5) != 0
-            || decoded.is_privileged_instruction()
-            || heat.hot(memory, pc)
-        {
+        if decoded.segment_accesses() & (1 << 5) != 0 {
             #[cfg(any(test, feature = "observability"))]
-            heat.diagnostics.request(
-                if decoded.segment_accesses() & (1 << 5) != 0 || decoded.is_privileged_instruction()
-                {
-                    diagnostics::Request::Admission
+            heat.diagnostics.request(diagnostics::Request::Admission);
+            heat.requested(pc);
+            return finish(
+                context,
+                state,
+                retired,
+                remaining,
+                if observer.exact_cold() {
+                    StopReason::Unsupported
                 } else {
-                    diagnostics::Request::Hot
+                    StopReason::NeedCode
                 },
             );
-            heat.requested(pc);
-            return finish(context, state, retired, remaining, StopReason::NeedCode);
         }
         let operation = *decoded.operation();
         let next = decoded.next_pc().0;
+        let instruction = NativeInstruction {
+            pc,
+            next,
+            operation,
+        };
+        let hot = heat.hot(memory, pc);
+        if hot {
+            heat.requested(pc);
+        }
+        if !observer.begin_instruction(memory, &instruction, hot) && hot {
+            #[cfg(any(test, feature = "observability"))]
+            heat.diagnostics.request(diagnostics::Request::Hot);
+            return finish(context, state, retired, remaining, StopReason::NeedCode);
+        }
+        if let Some(result) = control::terminal(operation, &state) {
+            observer.abandon_instruction();
+            let reason = result.unwrap_or_else(|failure| failure.publish(context));
+            return finish(context, state, retired, remaining, reason);
+        }
         if super::emitter::is_native(&operation) {
             publish(context, state, retired, remaining);
-            return ColdOutcome::NeedNative(NativeInstruction {
-                pc,
-                next,
-                operation,
-            });
+            return ColdOutcome::NeedNative(instruction);
         }
         let mut after = state;
         after.eip = next;
@@ -335,6 +402,34 @@ pub(crate) fn run_with_lookups(
             segments,
             code_written: false,
         };
+        if let Some(progress) =
+            strings::execute(operation, pc, next, &mut state, &mut port, remaining)
+        {
+            retired = retired.wrapping_add(progress.retired);
+            remaining -= progress.work;
+            if let Some(failure) = progress.failure {
+                observer.abandon_instruction();
+                let reason = failure.publish(context);
+                return finish(context, state, retired, remaining, reason);
+            }
+            if let Some(reason) = progress.stop {
+                observer.abandon_instruction();
+                return finish(context, state, retired, remaining, reason);
+            }
+            if progress.instruction_completed {
+                observer.complete_instruction(memory, state.eip);
+                heat.retired(memory, pc);
+                continue;
+            }
+            observer.abandon_instruction();
+            return finish(
+                context,
+                state,
+                retired,
+                remaining,
+                StopReason::Infrastructure,
+            );
+        }
         let completed = integer::execute(operation, &mut after, &mut port).and_then(|supported| {
             if supported {
                 Ok(true)
@@ -349,6 +444,7 @@ pub(crate) fn run_with_lookups(
                 retired = retired.wrapping_add(1);
                 remaining -= 1;
                 if code_written {
+                    observer.abandon_instruction();
                     return finish(
                         context,
                         state,
@@ -357,15 +453,33 @@ pub(crate) fn run_with_lookups(
                         StopReason::CodeInvalidated,
                     );
                 }
+                if let Some(result) = control::completed_stop(operation, &state) {
+                    observer.abandon_instruction();
+                    let reason = result.unwrap_or_else(|failure| failure.publish(context));
+                    return finish(context, state, retired, remaining, reason);
+                }
+                observer.complete_instruction(memory, state.eip);
                 heat.retired(memory, pc);
             }
             Ok(false) => {
+                observer.abandon_instruction();
                 #[cfg(any(test, feature = "observability"))]
                 heat.diagnostics.request(diagnostics::Request::Unsupported);
                 heat.requested(pc);
-                return finish(context, state, retired, remaining, StopReason::NeedCode);
+                return finish(
+                    context,
+                    state,
+                    retired,
+                    remaining,
+                    if observer.exact_cold() {
+                        StopReason::Unsupported
+                    } else {
+                        StopReason::NeedCode
+                    },
+                );
             }
             Err(error) => {
+                observer.abandon_instruction();
                 let reason = error.publish(context);
                 return finish(context, state, retired, remaining, reason);
             }

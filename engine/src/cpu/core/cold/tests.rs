@@ -234,7 +234,7 @@ fn numerical_handoff_is_genuine_decoded_and_unretired_before_operand_access() {
 
 #[test]
 fn an_unimplemented_cold_operation_requests_jit_before_any_effect() {
-    let mut memory = memory(&[0xd1, 0xc0]);
+    let mut memory = memory(&[0x27]);
     let mut context = context(3);
     context.set_word(36, 0x8d7);
     let before = *context.bytes();
@@ -247,7 +247,7 @@ fn an_unimplemented_cold_operation_requests_jit_before_any_effect() {
 
 #[test]
 fn a_jit_fallback_keeps_the_already_committed_cold_prefix() {
-    let mut memory = memory(&[0x40, 0xd1, 0xc0]);
+    let mut memory = memory(&[0x40, 0x27]);
     let mut context = context(4);
     assert_eq!(
         stop(&mut memory, &mut context, &mut ColdState::default()),
@@ -514,7 +514,7 @@ fn repeated_working_set_qualifies_within_bounded_heat_storage() {
 
 #[test]
 fn unrelated_requests_cannot_starve_completed_reuse() {
-    let mut memory = memory(&[0x40, 0x0f, 0x0b]);
+    let mut memory = memory(&[0x40, 0x27]);
     let mut context = context(2);
     let mut cold = ColdState::default();
     for retired in 1..=HOT_VISITS {

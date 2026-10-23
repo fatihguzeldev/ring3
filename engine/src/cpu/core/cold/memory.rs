@@ -4,9 +4,11 @@ use crate::{
     memory::{Access, CoreWriteOutcome, FaultReason, MemoryError, MemoryFault},
 };
 
+#[derive(Debug)]
 pub(super) enum Failure {
     Memory(MemoryError, u32),
     Segment(SegmentRegister),
+    CpuFault(u32),
     Infrastructure,
 }
 
@@ -62,6 +64,12 @@ impl Failure {
                         13
                     },
                 );
+                StopReason::CpuFault
+            }
+            Self::CpuFault(vector) => {
+                context.set_word(48, 0);
+                context.set_word(52, 0);
+                context.set_word(116, vector);
                 StopReason::CpuFault
             }
             Self::Memory(_, _) | Self::Infrastructure => StopReason::Infrastructure,
@@ -127,6 +135,58 @@ impl Port<'_> {
         self.memory
             .core_read(linear, width | if modify { 0x100 } else { 0 })
             .map_err(|error| Failure::Memory(error, width))
+    }
+
+    /// Check the current element's segment span before either string operand is
+    /// accessed. This does not translate, reserve COW, or touch guest memory.
+    pub(super) fn check(
+        &self,
+        address: EffectiveAddress,
+        state: &State32,
+        width: u32,
+        write: bool,
+    ) -> Result<(), Failure> {
+        self.linear(
+            address.resolved_segment(),
+            offset(address, state),
+            width,
+            if write {
+                SegmentAccess::Write
+            } else {
+                SegmentAccess::Read
+            },
+        )
+        .map(|_| ())
+    }
+
+    pub(super) fn read_bounds(
+        &self,
+        address: EffectiveAddress,
+        state: &State32,
+        word: bool,
+    ) -> Result<(i32, i32), Failure> {
+        let width = if word { 4 } else { 8 };
+        let linear = self.linear(
+            address.resolved_segment(),
+            offset(address, state),
+            width,
+            SegmentAccess::Read,
+        )?;
+        let mut bytes = [0; 8];
+        self.memory
+            .read(GuestAddress(linear), &mut bytes[..width as usize])
+            .map_err(|error| Failure::Memory(error, width))?;
+        Ok(if word {
+            (
+                i32::from(i16::from_le_bytes(bytes[..2].try_into().unwrap())),
+                i32::from(i16::from_le_bytes(bytes[2..4].try_into().unwrap())),
+            )
+        } else {
+            (
+                i32::from_le_bytes(bytes[..4].try_into().unwrap()),
+                i32::from_le_bytes(bytes[4..].try_into().unwrap()),
+            )
+        })
     }
 
     pub(super) fn write(

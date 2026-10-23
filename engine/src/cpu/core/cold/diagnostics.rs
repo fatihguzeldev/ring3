@@ -124,11 +124,7 @@ mod tests {
 
     #[test]
     fn cold_diagnostics_partition_real_jit_request_causes() {
-        for (code, cause, source_resets) in [
-            (&[0x0f, 0x0b][..], 8, 1),
-            (&[0x65, 0x8b, 0x03][..], 7, 0),
-            (&[0xf3, 0xa4][..], 8, 1),
-        ] {
+        for (code, cause, source_resets) in [(&[0x27][..], 8, 1), (&[0x65, 0x8b, 0x03][..], 7, 0)] {
             let mut memory = memory(code);
             let mut context = context(1);
             let mut cold = ColdState::default();
@@ -144,6 +140,23 @@ mod tests {
             expected[2] = 1;
             expected[cause] = 1;
             assert_eq!(cold.diagnostics_snapshot(), expected);
+        }
+        {
+            let mut memory = memory(&[0xf3, 0xa4]);
+            let mut context = context(1);
+            let mut cold = ColdState::default();
+            assert_eq!(
+                execute(&mut memory, &mut context, &mut cold),
+                StopReason::Budget
+            );
+            assert_eq!(
+                (context.state().eip, context.retired(), context.remaining()),
+                (0x1002, 1, 0)
+            );
+            assert_eq!(
+                cold.diagnostics_snapshot(),
+                [1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1]
+            );
         }
         let mut memory = memory(&[0x40, 0xeb, 0xfd]);
         let mut context = context(4);

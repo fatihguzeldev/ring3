@@ -5,6 +5,11 @@ use crate::cpu::x86::{
     ir::*,
 };
 
+mod bits;
+mod extended;
+mod multiply;
+mod shifts;
+
 #[derive(Clone, Copy)]
 pub(super) enum Operand {
     Register(usize, u32),
@@ -450,6 +455,33 @@ fn lower(operation: Operation) -> Option<Integer> {
         }
         Operation::Carry { kind } => I::Carry(kind),
         Operation::Direction { set } => I::Direction(set),
+        Operation::LockedMemoryOr32 { address, mask } => binary(
+            BinaryKind::Or,
+            Operand::Memory(address),
+            Operand::Immediate(mask),
+            4,
+        ),
+        Operation::LockedMemoryAnd32 { address, mask } => binary(
+            BinaryKind::And,
+            Operand::Memory(address),
+            Operand::Immediate(mask),
+            4,
+        ),
+        Operation::LockedMemoryXor32 { address, mask } => binary(
+            BinaryKind::Xor,
+            Operand::Memory(address),
+            Operand::Immediate(mask),
+            4,
+        ),
+        Operation::LockedMemoryOrRegister32 { address, source } => {
+            binary(BinaryKind::Or, Operand::Memory(address), reg(source), 4)
+        }
+        Operation::LockedMemoryAndRegister32 { address, source } => {
+            binary(BinaryKind::And, Operand::Memory(address), reg(source), 4)
+        }
+        Operation::LockedMemoryXorRegister32 { address, source } => {
+            binary(BinaryKind::Xor, Operand::Memory(address), reg(source), 4)
+        }
         Operation::AtomicMemory {
             kind,
             width,
@@ -488,7 +520,10 @@ pub(super) fn execute(
     port: &mut Port<'_>,
 ) -> Result<bool, Failure> {
     let Some(operation) = lower(operation) else {
-        return Ok(false);
+        return Ok(extended::execute(operation, state, port)?
+            || multiply::execute(operation, state, port)?
+            || shifts::execute(operation, state, port)?
+            || bits::execute(operation, state, port)?);
     };
     match operation {
         Integer::Move(destination, source, width) => {
@@ -544,3 +579,7 @@ pub(super) fn execute(
     }
     Ok(true)
 }
+
+#[cfg(test)]
+#[path = "integer/tests.rs"]
+mod tests;

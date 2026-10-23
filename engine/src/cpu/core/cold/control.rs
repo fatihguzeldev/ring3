@@ -2,7 +2,51 @@ use super::{
     integer::{self, Operand, condition, location, reg, value, word},
     memory::{Failure, Port},
 };
-use crate::cpu::x86::{Register32, State32, ir::*};
+use crate::cpu::{
+    core::StopReason,
+    x86::{ControlOperation, Register32, State32, ir::*},
+};
+
+/// Stops that do not complete an instruction. InvalidOpcode deliberately keeps
+/// the core backend's existing Unsupported result rather than changing its ABI.
+pub(super) fn terminal(
+    operation: Operation,
+    state: &State32,
+) -> Option<Result<StopReason, Failure>> {
+    match operation {
+        Operation::Control(ControlOperation::InvalidOpcode) => Some(Ok(StopReason::Unsupported)),
+        Operation::Control(ControlOperation::GeneralProtectionZero) => {
+            Some(Err(Failure::CpuFault(13)))
+        }
+        Operation::Control(ControlOperation::DeniedPortString { repeat_count }) => {
+            let denied = repeat_count.is_none_or(|size| match size {
+                AddressSize::Bits16 => state.registers[1] & 0xffff != 0,
+                AddressSize::Bits32 => state.registers[1] != 0,
+            });
+            denied.then_some(Err(Failure::CpuFault(13)))
+        }
+        _ => None,
+    }
+}
+
+/// Called only after the ordinary caller has committed the successful state and
+/// charged one instruction. Trap/debug exits keep that completed retirement.
+pub(super) fn completed_stop(
+    operation: Operation,
+    state: &State32,
+) -> Option<Result<StopReason, Failure>> {
+    match operation {
+        Operation::Control(ControlOperation::Breakpoint) => Some(Ok(StopReason::Debug)),
+        Operation::Control(ControlOperation::DebugTrap) => Some(Err(Failure::CpuFault(1))),
+        Operation::Control(ControlOperation::Overflow) if state.eflags & 0x800 != 0 => {
+            Some(Err(Failure::CpuFault(4)))
+        }
+        Operation::Control(ControlOperation::PopFlags { .. }) if state.eflags & 0x50100 != 0 => {
+            Some(Ok(StopReason::Debug))
+        }
+        _ => None,
+    }
+}
 
 fn push(state: &mut State32, port: &mut Port<'_>, width: u32, value: u32) -> Result<(), Failure> {
     let pointer = state.registers[4].wrapping_sub(width);
@@ -163,7 +207,47 @@ pub(super) fn execute(
             }
             state.registers[4] = pointer.wrapping_add(8 * width);
         }
+        Operation::Control(ControlOperation::PopFlags { word }) => {
+            let width = if word { 2 } else { 4 };
+            let popped = port.stack_read(state.registers[4], width)?;
+            state.eflags = crate::cpu::x86::pop_flags(state.eflags, popped, word) | 2;
+            state.registers[4] = state.registers[4].wrapping_add(width);
+        }
+        Operation::Control(ControlOperation::Bound {
+            index,
+            address,
+            word,
+        }) => {
+            let (lower, upper) = port.read_bounds(address, state, word)?;
+            let index = if word {
+                i32::from(state.registers[index.index()] as i16)
+            } else {
+                state.registers[index.index()] as i32
+            };
+            if index < lower || index > upper {
+                return Err(Failure::CpuFault(5));
+            }
+        }
+        Operation::Control(
+            ControlOperation::Breakpoint | ControlOperation::DebugTrap | ControlOperation::Overflow,
+        ) => {}
+        Operation::Control(ControlOperation::DeniedPortString {
+            repeat_count: Some(size),
+        }) => {
+            // A denied repeated port-string with zero selected count completes
+            // without touching either memory or the device. Nonzero is terminal.
+            if match size {
+                AddressSize::Bits16 => state.registers[1] & 0xffff != 0,
+                AddressSize::Bits32 => state.registers[1] != 0,
+            } {
+                return Err(Failure::CpuFault(13));
+            }
+        }
         _ => return Ok(false),
     }
     Ok(true)
 }
+
+#[cfg(test)]
+#[path = "control/tests.rs"]
+mod tests;

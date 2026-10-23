@@ -144,7 +144,7 @@ fn active_cold_terminal_results_keep_identity_zero_and_the_exact_committed_prefi
             8,
         ),
         (
-            &[0xf3, 0xa4][..],
+            &[0x27][..],
             5,
             0x1100,
             StopReason::NeedCode,
