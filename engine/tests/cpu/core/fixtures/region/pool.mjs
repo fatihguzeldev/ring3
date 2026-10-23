@@ -158,6 +158,19 @@ function runLinkedPoolCase(artifact,report,iterations) {
 }
 
 export function runPoolLoopCases(fixture) {
+  fixture('physical-pool-lazy-source-admission-preserves-captured-left-operand',{
+    segments:[[0x1000,'d8c1 49 75fb 0f0b']],
+    registers:[0,1,0,0x3000,0x4800,0,0,0],control:0x27f,
+    initialFp:{tag:0xfff0,registers:{0:THREE,1:TWO}},
+  },t=>{
+    // The backedge predicts both native inputs, but their first-use pool
+    // certificates are initially absent. Admitting ST1 must preserve ST0=3.
+    const before=t.version(),run=t.check({pc:0x1002,retired:1,budget:1,
+      fp:t.fp({tag:0xfff0,opcode:0xc1,fip:0x1000,
+        registers:{0:'00000000000000a00140',1:TWO}})});
+    assert.equal(run.activations.length,1);assert.equal(t.result.modules.length,1);
+    assert.equal(run.helperCalls,0);assert.equal(t.version(),before);
+  });
   const witnesses=[];
   for(const iterations of[1,9])fixture(`physical-pool-balanced-local-loop-spills-once-${iterations}`,{
     segments:[[0x1000,'d903 d94304 d9c9 d8c1 ddd8 ddd8 49 75f0 0f0b']],stateWitness:true,

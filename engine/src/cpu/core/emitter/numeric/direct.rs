@@ -146,8 +146,10 @@ pub(super) fn begin(out: &mut Output<'_>, operation: Operation, _next: u32) -> b
         } => {
             arithmetic_control(out);
             register(out, destination);
-            operand(out, destination, FA);
             register(out, source);
+            // Lazy input admission uses FA as scratch; admit both inputs before
+            // capturing either arithmetic operand.
+            operand(out, destination, FA);
             operand(out, source, FB);
             arithmetic(out, kind);
             span::write(out, destination, double::RESULT);
