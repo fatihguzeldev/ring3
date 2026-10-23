@@ -8,6 +8,7 @@ const ENTRY_PENDING: u32 = 98;
 
 enum Label {
     Restart,
+    Unmatched,
     Forward(Vec<BlockId>),
     Loop(BlockId),
     Dispatch(Vec<BlockId>),
@@ -19,15 +20,18 @@ pub(super) fn emit(out: &mut Output<'_>, graph: &Region) {
     out.c()
         .i32_const(1)
         .local_set(ENTRY_PENDING)
-        .loop_(BlockType::Empty);
+        .loop_(BlockType::Empty)
+        .block(BlockType::Empty);
     let mut emitter = Emitter {
         out,
         graph,
-        labels: vec![Label::Restart],
+        labels: vec![Label::Restart, Label::Unmatched],
         current: graph.entry,
         dispatched: plan.shapes.iter().flat_map(dispatch_members).collect(),
     };
-    emitter.sequence(&plan.shapes);
+    emitter.sequence(&plan.shapes, false);
+    emitter.labels.pop();
+    emitter.out.c().end();
     // No advertised entry matched. No instruction frame has executed here.
     emitter.out.frame = None;
     emitter.out.before_frame = None;
@@ -62,20 +66,40 @@ fn dispatch_members(shape: &Shape) -> Vec<BlockId> {
 }
 
 impl Emitter<'_, '_> {
-    fn sequence(&mut self, shapes: &[Shape]) {
+    fn sequence(&mut self, shapes: &[Shape], contained: bool) {
         for shape in shapes.iter().rev() {
             self.out.c().block(BlockType::Empty);
             self.labels.push(Label::Forward(members(shape)));
+        }
+        if !(contained && shapes.len() == 1) && !shapes.is_empty() {
+            // Forward labels already own every destination. Pending entry uses
+            // one membership-mapped table; known edges land beyond this router.
+            self.out.c().local_get(ENTRY_PENDING).if_(BlockType::Empty);
+            self.labels.push(Label::Other);
+            let mapped: Vec<_> = shapes
+                .iter()
+                .enumerate()
+                .flat_map(|(shape, body)| {
+                    members(body)
+                        .into_iter()
+                        .map(move |id| (id, shape as u32 + 1))
+                })
+                .collect();
+            self.route(&mapped);
+            self.labels.pop();
+            self.out.c().end();
         }
         for shape in shapes {
             self.out.c().end();
             self.labels.pop();
             match shape {
-                Shape::Block(id) => self.block(*id, true),
+                Shape::Block(id) => self.block(*id),
                 Shape::Loop { header, body } => {
                     self.out.c().loop_(BlockType::Empty);
                     self.labels.push(Label::Loop(*header));
-                    self.sequence(body);
+                    // The outer router (or a proven direct edge) selected this
+                    // loop's membership. Preserve pending for an interior entry.
+                    self.sequence(body, true);
                     self.labels.pop();
                     self.out.c().end();
                 }
@@ -84,20 +108,30 @@ impl Emitter<'_, '_> {
         }
     }
 
-    fn block(&mut self, id: BlockId, entry_guard: bool) {
-        self.current = id;
-        if entry_guard {
-            self.out
-                .c()
-                .local_get(ENTRY_PENDING)
-                .i32_eqz()
-                .local_get(INDEX)
-                .i32_const(id.0 as i32)
-                .i32_eq()
-                .i32_or()
-                .if_(BlockType::Empty);
-            self.labels.push(Label::Other);
+    fn route(&mut self, mapped: &[(BlockId, u32)]) {
+        let unmatched = self
+            .labels
+            .iter()
+            .rev()
+            .position(|label| matches!(label, Label::Unmatched))
+            .expect("entry routing has one shared unmatched label") as u32;
+        let first = mapped.iter().map(|(id, _)| id.0).min().unwrap();
+        let last = mapped.iter().map(|(id, _)| id.0).max().unwrap();
+        // Block IDs need not follow shape order, and separate decode paths may
+        // leave holes. Bound the table to this sequence's own member range.
+        let mut destinations = vec![unmatched; last - first + 1];
+        for &(id, depth) in mapped {
+            destinations[id.0 - first] = depth;
         }
+        self.out.c().local_get(INDEX);
+        if first != 0 {
+            self.out.c().i32_const(first as i32).i32_sub();
+        }
+        self.out.c().br_table(destinations, unmatched);
+    }
+
+    fn block(&mut self, id: BlockId) {
+        self.current = id;
         self.out.c().i32_const(0).local_set(ENTRY_PENDING);
         let block = &self.graph.blocks[id.0];
         self.out.address_fact = None;
@@ -204,10 +238,6 @@ impl Emitter<'_, '_> {
                 self.out.c().unreachable();
             }
         }
-        if entry_guard {
-            self.labels.pop();
-            self.out.c().end();
-        }
     }
 
     fn branch(&mut self, taken: Target, otherwise: Target) {
@@ -289,46 +319,26 @@ impl Emitter<'_, '_> {
     }
 
     fn dispatch(&mut self, blocks: &[BlockId]) {
-        self.out.c().local_get(ENTRY_PENDING).i32_eqz();
-        for id in blocks {
-            self.out
-                .c()
-                .local_get(INDEX)
-                .i32_const(id.0 as i32)
-                .i32_eq()
-                .i32_or();
-        }
-        self.out.c().if_(BlockType::Empty).loop_(BlockType::Empty);
-        self.labels.push(Label::Other);
+        self.out.c().loop_(BlockType::Empty);
         self.labels.push(Label::Dispatch(blocks.to_vec()));
-        self.out.c().block(BlockType::Empty);
-        self.labels.push(Label::Other);
         for _ in blocks {
             self.out.c().block(BlockType::Empty);
             self.labels.push(Label::Other);
         }
-        let destinations: Vec<_> = (0..self.graph.blocks.len())
-            .map(|id| {
-                blocks
-                    .iter()
-                    .position(|block| block.0 == id)
-                    .map_or(blocks.len() as u32, |index| index as u32)
-            })
+        let mapped: Vec<_> = blocks
+            .iter()
+            .copied()
+            .enumerate()
+            .map(|(index, id)| (id, index as u32))
             .collect();
-        self.out
-            .c()
-            .local_get(INDEX)
-            .br_table(destinations, blocks.len() as u32);
+        self.route(&mapped);
         for id in blocks {
             self.labels.pop();
             self.out.c().end();
-            self.block(*id, false);
+            self.block(*id);
         }
+        self.out.c().unreachable();
         self.labels.pop();
         self.out.c().end();
-        self.restart();
-        self.labels.pop();
-        self.labels.pop();
-        self.out.c().end().end();
     }
 }
