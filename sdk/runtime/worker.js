@@ -74,6 +74,7 @@ self.onmessage = (event) => {
       try {
         if(!message.audioPort)throw new Error('runtime requires a direct audio port');
         current.audioOutput=new PcmTransport({port:message.audioPort,
+          beforeResume:()=>current.media?.resumeAudio(),
           onStats:stats=>{if(current===session&&!current.abort.signal.aborted)emit({type:'audio-stats',stats},[],current,capture);},
           onDiagnostic:message=>{if(!current.abort.signal.aborted)current.fail(new Error(message));},
         });

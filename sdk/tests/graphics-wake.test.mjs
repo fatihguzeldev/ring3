@@ -56,6 +56,22 @@ test('cancelled audio owners cannot publish queued worklet statistics',async t=>
   assert.equal(f.messages.filter(message=>message.type==='audio-stats').length,1);
 });
 
+test('Worker audio resume primes the producer before posting the Worklet resume',async t=>{
+  const f=await workerFixture(t),order=[];
+  f.owner.paused=true;
+  f.media.resumeAudio=()=>order.push('prime');
+  f.owner.audioOutput.port.postMessage=message=>{
+    order.push(message.type);
+    f.owner.audioOutput.receive({type:'resumed',request:message.request,epoch:7n,acceptedFrames:1024,renderedFrames:0,queuedFrames:1024});
+  };
+  f.receive({type:'audio-control',operation:'resume',request:9});
+  await Promise.resolve();
+  assert.deepEqual(order,['prime','resume']);assert.equal(f.owner.paused,true);
+  const reply=f.messages.find(message=>message.type==='audio-control-reply');
+  assert.equal(reply.reply.request,9);assert.equal(reply.reply.queuedFrames,1024);
+  assert.equal(f.timers.size,0);
+});
+
 test('a validated graphics ACK resumes a pending host timer after native publication',async t=>{
   const f=await workerFixture(t),order=[];
   f.engine.ok=(...args)=>{f.calls.push(args);order.push('native ACK');};

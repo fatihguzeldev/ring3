@@ -1,6 +1,6 @@
 export class PcmTransport {
-  constructor({port=null,onDiagnostic=()=>{},onStats=()=>{}}={}) {
-    this.onDiagnostic=onDiagnostic;this.onStats=onStats;
+  constructor({port=null,onDiagnostic=()=>{},onStats=()=>{},beforeResume=()=>{}}={}) {
+    this.onDiagnostic=onDiagnostic;this.onStats=onStats;this.beforeResume=beforeResume;
     this.pending=new Map();this.controls=new Map();this.request=0;
     this.epoch=null;this.sequence=1n;this.firstFrame=0n;this.failure=null;
     this.acceptedFrames=0;this.renderedFrames=0;this.closed=false;this.port=null;
@@ -80,7 +80,11 @@ export class PcmTransport {
         reject(new Error('audio control acknowledgement timed out'));
       },5000);
       this.controls.set(request,{resolve,reject,timer,expected:type === 'pause' ? 'paused' : 'resumed'});
-      try {this.port.postMessage({type,request});}
+      try {
+        // prime pcm on this same port before the worklet processes resume.
+        if(type==='resume')this.beforeResume();
+        this.port.postMessage({type,request});
+      }
       catch (error) {clearTimeout(timer); this.controls.delete(request); reject(error);}
     });
   }

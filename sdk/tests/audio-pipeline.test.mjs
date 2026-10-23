@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import {readFile} from 'node:fs/promises';
+import vm from 'node:vm';
 import {AudioHost} from '../browser/audio/host.js';
+import {PcmTransport} from '../audio/transport.js';
 import {Media} from '../runtime/media.js';
 import {Session as BrowserSession} from '../browser/session.js';
 import {Session as RuntimeSession} from '../runtime/session.js';
@@ -312,4 +315,87 @@ test('runtime pause, resume and cancellation keep audio refilling under the same
   session.cancel();
   assert.equal(events.at(-1),'hold');
   assert.equal(session.abort.signal.aborted,true);
+});
+
+test('resuming an emptied held queue refills before the Worklet can report an avoidable underrun',async t=>{
+  const {host}=await hostFixture(t),{media,emitted,acknowledgements}=mediaFixture();
+  const replies=[],diagnostics=[];let Processor,processor,heldRequest,pendingResume;
+  const realm=vm.createContext({Float32Array,sampleRate:48000,currentFrame:0,
+    AudioWorkletProcessor:class {constructor(){this.port={postMessage:message=>replies.push(message)};}},
+    registerProcessor(_name,type){Processor=type;},
+  });
+  vm.runInContext(await readFile(new URL('../browser/audio/processor.js',import.meta.url),'utf8'),realm);
+  processor=new Processor({processorOptions:{capacityFrames:1024,primeFrames:512}});
+  const port={postMessage:message=>processor.receive(message),close(){}};
+  const output=new PcmTransport({port,onDiagnostic:message=>diagnostics.push(message),beforeResume:()=>{
+    assert.equal(host.context.state,'running','AudioContext activation begins before asynchronous Worker priming');
+    media.resumeAudio();
+  }});
+  t.after(()=>output.close());
+  const deliverReplies=()=>{while(replies.length)port.onmessage({data:replies.shift()});};
+  const originalEmit=media.emit;
+  media.emit=message=>{originalEmit(message);void output.accept(message,progress=>media.consumedAudio(progress)).catch(()=>{});};
+  const render=()=>{
+    const channels=[new Float32Array(128),new Float32Array(128)];
+    assert.equal(processor.process([],[channels]),true);realm.currentFrame+=128;
+    deliverReplies();return channels;
+  };
+  let browser;
+  const runtime=Object.assign(Object.create(RuntimeSession.prototype),{
+    paused:false,pausedDuration:0,running:true,media,status:state=>{browser.state=state;},
+  });
+  const worker={postMessage(message){
+    if(message.type==='audio-hold'){media.pauseAudio();heldRequest=message.request;}
+    else if(message.type==='audio-control'){
+      const reply=output.control(message.operation);deliverReplies();
+      void reply.then(value=>host.receive({...value,request:message.request}));
+    } else if(message.type==='pause')runtime.pause();
+    else if(message.type==='resume')pendingResume=message;
+    else assert.fail(`unexpected Worker message ${message.type}`);
+  }};
+  host.connectWorker(worker);
+  browser=Object.assign(Object.create(BrowserSession.prototype),{
+    state:'running',worker,generation:1,audioRequest:0,input:{disable(){}},audio:host,
+  });
+  media.fillAudio();deliverReplies();
+  assert.equal(processor.queuedFrames,1024);assert.equal(output.pending.size,4);
+  const pausing=browser.pause();
+  assert.equal(media.audioPaused,true);
+  // already queued audio may finish while the main thread awaits the hold reply.
+  for(let index=0;index<8;index++)assert.notEqual(render()[0][0],0);
+  assert.equal(processor.started,true);assert.equal(processor.priming,true);
+  assert.equal(processor.queuedFrames,0);assert.equal(processor.underruns,0);
+  assert.equal(media.audio.length,0);assert.equal(output.pending.size,0);
+  await browser.message({type:'audio-held',request:heldRequest},worker);
+  await pausing;
+  assert.equal(browser.state,'paused');assert.equal(host.context.state,'suspended');
+  assert.equal(processor.paused,true);assert.equal(processor.renderedFrames,1024);
+  assert.deepEqual([...render()[0]],new Array(128).fill(0));
+  assert.equal(processor.underruns,0,'paused rendering is not an underrun');
+  await browser.resume();
+  assert.equal(pendingResume?.type,'resume');assert.equal(processor.paused,false);
+  assert.equal(runtime.paused,true,'PCM priming does not resume guest execution before the browser handshake');
+  assert.equal(media.audioPaused,false);assert.equal(processor.queuedFrames,1024);
+  assert.equal(processor.started,true,'resume retains the existing playback epoch and underrun history');
+  // the audio thread can render before the posted worker resume task is delivered.
+  const before=processor.snapshot(),channels=render(),after=processor.snapshot();
+  runtime.resume();deliverReplies();
+  assert.equal(media.audioPaused,false);assert.equal(processor.queuedFrames,896);
+  assert.equal(emitted.length,8);assert.equal(output.pending.size,4);
+  assert.deepEqual([...render()[0]],new Array(128).fill(5/16));
+  assert.equal(processor.renderedFrames,1280);assert.equal(acknowledgements.length,10);
+  assert.deepEqual(diagnostics,[]);assert.equal(processor.epoch,7n);
+  assert.deepEqual([...channels[0]],new Array(128).fill(5/16));
+  assert.equal(after.renderedFrames-before.renderedFrames,128,'resume renders actual queued PCM before guest execution resumes');
+  assert.equal(after.underrunFrames-before.underrunFrames,0,'resume must not expose output before its held producer can refill');
+});
+
+test('a failed producer prime cannot send the Worklet resume control',async()=>{
+  const sent=[],failure=new Error('native refill failed');
+  const output=new PcmTransport({port:{postMessage:message=>sent.push(message),close(){}},beforeResume(){throw failure;}});
+  try {
+    await assert.rejects(output.control('resume'),error=>error===failure);
+    assert.deepEqual(sent,[]);assert.equal(output.controls.size,0);
+    assert.equal(output.acceptedFrames,0);assert.equal(output.renderedFrames,0);
+  } finally {output.close();}
 });
