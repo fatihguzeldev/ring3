@@ -1,6 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+mod reform;
+
 static NEXT_IDENTITY: AtomicU64 = AtomicU64::new(1);
 
 use crate::{
@@ -78,6 +80,7 @@ impl CompiledCode {
     pub(crate) fn formation_roots(&self) -> &[GuestAddress] {
         &self.roots
     }
+    #[cfg(test)]
     pub(crate) fn compile_transition(
         memory: &AddressSpace,
         entry: GuestAddress,
@@ -170,6 +173,16 @@ pub fn compile_with_frontier(
     compile_formation(memory, entry, options, gates, frontier, &[])
 }
 
+pub fn compile_with_frontier_query(
+    memory: &AddressSpace,
+    entry: GuestAddress,
+    options: CompileOptions,
+    gates: &[(GuestAddress, u32)],
+    frontier: &dyn Fn(u32) -> bool,
+) -> Result<CompiledCode, CompileError> {
+    compile_formation_query(memory, entry, options, gates, frontier, &[])
+}
+
 fn compile_formation(
     memory: &AddressSpace,
     entry: GuestAddress,
@@ -178,6 +191,21 @@ fn compile_formation(
     frontier: &[GuestAddress],
     additional_roots: &[GuestAddress],
 ) -> Result<CompiledCode, CompileError> {
+    validate_options(options)?;
+    let mut sorted_frontier: Vec<_> = frontier.iter().map(|address| address.0).collect();
+    sorted_frontier.sort_unstable();
+    sorted_frontier.dedup();
+    compile_formation_query(
+        memory,
+        entry,
+        options,
+        gates,
+        &|pc| sorted_frontier.binary_search(&pc).is_ok(),
+        additional_roots,
+    )
+}
+
+fn validate_options(options: CompileOptions) -> Result<(), CompileError> {
     if options.instructions == 0
         || options.instructions > 16384
         || options.blocks == 0
@@ -187,15 +215,19 @@ fn compile_formation(
     {
         return Err(CompileError::InvalidLimits);
     }
-    let mut sorted_frontier = Vec::with_capacity(frontier.len());
-    sorted_frontier.extend(
-        frontier
-            .iter()
-            .map(|address| address.0)
-            .filter(|&pc| pc != entry.0),
-    );
-    sorted_frontier.sort_unstable();
-    sorted_frontier.dedup();
+    Ok(())
+}
+
+fn compile_formation_query(
+    memory: &AddressSpace,
+    entry: GuestAddress,
+    options: CompileOptions,
+    gates: &[(GuestAddress, u32)],
+    frontier: &dyn Fn(u32) -> bool,
+    additional_roots: &[GuestAddress],
+) -> Result<CompiledCode, CompileError> {
+    validate_options(options)?;
+    let is_frontier = |pc| pc != entry.0 && frontier(pc);
     let mut pending = VecDeque::from([entry.0]);
     let mut nodes = BTreeMap::new();
     let mut starts = BTreeSet::from([entry.0]);
@@ -203,7 +235,7 @@ fn compile_formation(
         if starts.contains(&root.0) {
             continue;
         }
-        if starts.len() == options.blocks || sorted_frontier.binary_search(&root.0).is_ok() {
+        if starts.len() == options.blocks || is_frontier(root.0) {
             return Err(CompileError::InvalidLimits);
         }
         starts.insert(root.0);
@@ -215,78 +247,20 @@ fn compile_formation(
             break;
         }
         while !nodes.contains_key(&pc) && nodes.len() < options.instructions {
-            if sorted_frontier.binary_search(&pc).is_ok() {
+            if is_frontier(pc) {
                 break;
             }
-            let mut matching_gates = gates.iter().filter(|(address, _)| address.0 == pc);
-            if let Some(&(_, id)) = matching_gates.next() {
-                if id == 0 || matching_gates.next().is_some() {
-                    return Err(CompileError::InvalidLimits);
-                }
-                let mut stub = [0; 2];
-                memory
-                    .fetch(GuestAddress(pc), &mut stub)
-                    .map_err(CompileError::Memory)?;
-                if stub != [0x0f, 0x0b] {
-                    return Err(CompileError::InvalidLimits);
-                }
-                sources.push(
-                    memory
-                        .snapshot_code(GuestAddress(pc), stub.len())
-                        .map_err(CompileError::Memory)?,
-                );
-                nodes.insert(
-                    pc,
-                    Instruction {
-                        pc,
-                        next: pc.wrapping_add(2),
-                        operation: None,
-                        gate: Some(id),
-                    },
-                );
-                break;
-            }
-            let decoded = decode_for_compilation(
-                memory,
-                GuestAddress(pc),
-                DecodePolicy::Execution,
-                None,
-                DecodeAuthority::default(),
-            );
-            let decoded = match decoded {
-                Ok(BoundDecode::Instruction(decoded)) => decoded,
-                Ok(BoundDecode::CodeFault(_)) => {
-                    unreachable!("flat fetch has no segment authority")
-                }
-                Err(error) if nodes.is_empty() => return Err(CompileError::Decode(error)),
-                Err(_) => break,
+            let (instruction, source) = match decode_instruction(memory, pc, gates) {
+                Ok(decoded) => decoded,
+                Err(CompileError::Decode(_)) if !nodes.is_empty() => break,
+                Err(error) => return Err(error),
             };
-            let next = decoded.next_pc().0;
-            sources.push(
-                memory
-                    .snapshot_code(decoded.pc(), usize::from(decoded.length()))
-                    .map_err(CompileError::Memory)?,
-            );
-            let operation = if decoded.segment_accesses() & (1 << 5) == 0
-                && !decoded.is_privileged_instruction()
-                && super::emitter::supports(decoded.operation())
-            {
-                Some(*decoded.operation())
-            } else {
-                None
-            };
-            nodes.insert(
-                pc,
-                Instruction {
-                    pc,
-                    next,
-                    operation,
-                    gate: None,
-                },
-            );
+            let next = instruction.next;
+            let operation = instruction.operation;
+            sources.push(source);
+            nodes.insert(pc, instruction);
             let mut enqueue = |target| {
-                if sorted_frontier.binary_search(&target).is_err() && starts.len() < options.blocks
-                {
+                if !is_frontier(target) && starts.len() < options.blocks {
                     starts.insert(target);
                     pending.push_back(target);
                 }
@@ -336,7 +310,95 @@ fn compile_formation(
             }
         }
     }
-    // a target may enter the middle of an already decoded linear span.
+    let mut blocks = partition_blocks(nodes, &starts);
+    if blocks.len() > options.blocks {
+        let requested = blocks
+            .binary_search_by_key(&entry.0, |block| block.entry)
+            .expect("requested entry was decoded");
+        if requested >= options.blocks {
+            blocks.swap(options.blocks - 1, requested);
+        }
+        blocks.truncate(options.blocks);
+        blocks.sort_unstable_by_key(|block| block.entry);
+    }
+    encode_blocks(
+        memory,
+        entry,
+        options,
+        blocks,
+        sources,
+        Box::new([entry]),
+        EmissionLimit::Shorten,
+    )
+    .map(|code| code.expect("prefix emission does not decline"))
+}
+
+fn decode_instruction(
+    memory: &AddressSpace,
+    pc: u32,
+    gates: &[(GuestAddress, u32)],
+) -> Result<(Instruction, CodeSnapshot), CompileError> {
+    let mut matching_gates = gates.iter().filter(|(address, _)| address.0 == pc);
+    if let Some(&(_, id)) = matching_gates.next() {
+        if id == 0 || matching_gates.next().is_some() {
+            return Err(CompileError::InvalidLimits);
+        }
+        let mut stub = [0; 2];
+        memory
+            .fetch(GuestAddress(pc), &mut stub)
+            .map_err(CompileError::Memory)?;
+        if stub != [0x0f, 0x0b] {
+            return Err(CompileError::InvalidLimits);
+        }
+        let source = memory
+            .snapshot_code(GuestAddress(pc), stub.len())
+            .map_err(CompileError::Memory)?;
+        return Ok((
+            Instruction {
+                pc,
+                next: pc.wrapping_add(2),
+                operation: None,
+                gate: Some(id),
+            },
+            source,
+        ));
+    }
+    let decoded = match decode_for_compilation(
+        memory,
+        GuestAddress(pc),
+        DecodePolicy::Execution,
+        None,
+        DecodeAuthority::default(),
+    )
+    .map_err(CompileError::Decode)?
+    {
+        BoundDecode::Instruction(decoded) => decoded,
+        BoundDecode::CodeFault(_) => unreachable!("flat fetch has no segment authority"),
+    };
+    let source = memory
+        .snapshot_code(decoded.pc(), usize::from(decoded.length()))
+        .map_err(CompileError::Memory)?;
+    let operation = if decoded.segment_accesses() & (1 << 5) == 0
+        && !decoded.is_privileged_instruction()
+        && super::emitter::supports(decoded.operation())
+    {
+        Some(*decoded.operation())
+    } else {
+        None
+    };
+    Ok((
+        Instruction {
+            pc,
+            next: decoded.next_pc().0,
+            operation,
+            gate: None,
+        },
+        source,
+    ))
+}
+
+fn partition_blocks(nodes: BTreeMap<u32, Instruction>, starts: &BTreeSet<u32>) -> Vec<Block> {
+    // An advertised entry may enter the middle of an already decoded linear span.
     let mut blocks = Vec::new();
     let mut current: Option<Block> = None;
     for (pc, instruction) in nodes {
@@ -360,16 +422,23 @@ fn compile_formation(
     if let Some(block) = current {
         blocks.push(block);
     }
-    if blocks.len() > options.blocks {
-        let requested = blocks
-            .binary_search_by_key(&entry.0, |block| block.entry)
-            .expect("requested entry was decoded");
-        if requested >= options.blocks {
-            blocks.swap(options.blocks - 1, requested);
-        }
-        blocks.truncate(options.blocks);
-        blocks.sort_unstable_by_key(|block| block.entry);
-    }
+    blocks
+}
+
+enum EmissionLimit {
+    Shorten,
+    Decline,
+}
+
+fn encode_blocks(
+    memory: &AddressSpace,
+    entry: GuestAddress,
+    options: CompileOptions,
+    mut blocks: Vec<Block>,
+    mut sources: Vec<CodeSnapshot>,
+    roots: Box<[GuestAddress]>,
+    limit: EmissionLimit,
+) -> Result<Option<CompiledCode>, CompileError> {
     let identity = NEXT_IDENTITY
         .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
             value.checked_add(1)
@@ -394,6 +463,9 @@ fn compile_formation(
         if wasm.len() <= options.wasm_bytes {
             break (wasm, native);
         }
+        if matches!(limit, EmissionLimit::Decline) {
+            return Ok(None);
+        }
         let instructions: usize = blocks.iter().map(|block| block.instructions.len()).sum();
         if instructions == 1 {
             return Err(CompileError::WasmLimit);
@@ -405,7 +477,7 @@ fn compile_formation(
     sources.dedup_by(|source, retained| {
         source.first == retained.first && source.versions == retained.versions
     });
-    Ok(CompiledCode {
+    Ok(Some(CompiledCode {
         identity,
         memory_identity: memory.identity(),
         validated_source_version: AtomicU64::new(memory.code_source_version()),
@@ -421,8 +493,8 @@ fn compile_formation(
         wasm,
         sources,
         native,
-        roots: Box::new([entry]),
-    })
+        roots,
+    }))
 }
 
 #[cfg(test)]
