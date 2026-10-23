@@ -6,20 +6,23 @@ use std::{
     fs,
     path::{Path, PathBuf},
     process::Command,
+    sync::atomic::{AtomicU64, Ordering},
     time::{SystemTime, UNIX_EPOCH},
 };
 
 struct Scratch(PathBuf, bool);
+static NEXT_SCRATCH: AtomicU64 = AtomicU64::new(0);
 
 impl Scratch {
     fn new() -> Self {
         let path = std::env::temp_dir().join(format!(
-            "ring3-core-{}-{}",
+            "ring3-core-{}-{}-{}",
             std::process::id(),
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
-                .as_nanos()
+                .as_nanos(),
+            NEXT_SCRATCH.fetch_add(1, Ordering::Relaxed)
         ));
         fs::create_dir(&path).unwrap();
         Self(path, true)
