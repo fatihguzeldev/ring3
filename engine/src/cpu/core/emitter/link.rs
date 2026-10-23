@@ -155,15 +155,6 @@ pub(super) fn boundary_fields(numeric: bool) -> impl Iterator<Item = (u32, ValTy
     })
 }
 
-pub(super) fn boundary(out: &mut Output<'_>) {
-    out.c().local_get(CTX);
-    for (local, _) in boundary_fields(!out.native.is_empty()) {
-        out.c().local_get(local);
-    }
-    let function = out.internal(5);
-    out.c().call(function);
-}
-
 pub(super) fn emit_boundary(
     numeric: bool,
     flags_function: u32,

@@ -861,6 +861,7 @@ dependencies = [
  "unicode-general-category",
  "unicode-normalization",
  "wasm-encoder",
+ "wasmparser",
  "writeable",
 ]
 

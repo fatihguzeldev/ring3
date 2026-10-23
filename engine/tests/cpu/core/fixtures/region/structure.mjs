@@ -4,7 +4,9 @@ class Reader {
   constructor(bytes){this.bytes=bytes;this.at=0;}
   byte(){assert(this.at<this.bytes.length,'complete authored Wasm input');return this.bytes[this.at++];}
   unsigned(){let result=0;for(let shift=0;shift<35;shift+=7){const b=this.byte();result+=(b&127)*2**shift;if(b<128)return result;}assert.fail('bounded Wasm u32');}
-  signed(){for(let index=0;index<10;index++)if(this.byte()<128)return;assert.fail('bounded signed Wasm integer');}
+  signed(){let result=0n;for(let index=0;index<10;index++){const b=this.byte(),shift=BigInt(index*7);
+    result|=BigInt(b&127)<<shift;if(b<128)return b&64?result-(1n<<(shift+7n)):result;}
+    assert.fail('bounded signed Wasm integer');}
   take(length){assert(this.at+length<=this.bytes.length);const result=this.bytes.subarray(this.at,this.at+length);this.at+=length;return result;}
   text(){return new TextDecoder('utf-8',{fatal:true}).decode(this.take(this.unsigned()));}
   vector(read){return Array.from({length:this.unsigned()},()=>read());}
@@ -16,18 +18,20 @@ function operators(bytes) {
   while(r.at<bytes.length) {
     const node={op:r.byte(),offset:r.at-1,frames:frames.slice(),targets:[]},index=ops.length;
     const op=node.op;
-    if(op===2||op===3||op===4){r.signed();node.frame={kind:op,open:index};frames.push(node.frame);}
+    if(op===2||op===3||op===4){node.frame={kind:op,open:index,type:Number(r.signed())};frames.push(node.frame);}
     else if(op===5){node.frame=frames.at(-1);assert.equal(node.frame.kind,4);node.frame.otherwise=index;}
     else if(op===11){node.frame=frames.pop();assert(node.frame);node.frame.end=index;}
     else if(op===12||op===13||op===0xd5||op===0xd6)node.targets=[r.unsigned()];
     else if(op===14){node.targets=r.vector(()=>r.unsigned());node.targets.push(r.unsigned());}
     else if(op===16||op===18)node.call=r.unsigned();
     else if(op===17||op===19){r.unsigned();r.unsigned();}
-    else if(op===20||op===21||op>=0x20&&op<=0x26||op===0xd2)r.unsigned();
+    else if(op>=0x20&&op<=0x22)node.local=r.unsigned();
+    else if(op===20||op===21||op>=0x23&&op<=0x26||op===0xd2)r.unsigned();
     else if(op===0x1c)r.vector(()=>r.byte());
     else if(op>=0x28&&op<=0x3e){node.align=r.unsigned();node.memoryOffset=r.unsigned();}
     else if(op===0x3f||op===0x40)r.unsigned();
-    else if(op===0x41||op===0x42||op===0xd0)r.signed();
+    else if(op===0x41)node.value=Number(r.signed());
+    else if(op===0x42||op===0xd0)r.signed();
     else if(op===0x43)r.take(4);
     else if(op===0x44)r.take(8);
     else if(op===0xfc){
@@ -109,6 +113,96 @@ function components(edges,allowed) {
   return result;
 }
 
+function inspectExitEpilogue(module,name) {
+  const named=wanted=>[...module.names].find(([,name])=>name===wanted)?.[0];
+  const index=named(name),fn=module.functions[index-module.imports.length];
+  const publication=named('guest.publish'),precise=named('guest.precise');
+  const summary={name,index,publicationCalls:[],explicitReturns:[],sharedExitBranches:0,preciseCalls:[],errors:[]};
+  if(!fn){summary.errors.push('missing defined function');return summary;}
+  const{ops,edges}=fn,check=(okay,message)=>{if(!okay)summary.errors.push(message);};
+  ops.forEach((node,index)=>{
+    if(Number.isInteger(publication)&&node.call===publication)summary.publicationCalls.push(index);
+    if(Number.isInteger(precise)&&node.call===precise)summary.preciseCalls.push(index);
+    if(node.op===15)summary.explicitReturns.push(index);
+  });
+  if(summary.publicationCalls.length!==1){summary.errors.push('requires one actual publication call');return summary;}
+  const publish=summary.publicationCalls[0],numeric=module.imports.some(item=>item.name==='numeric');
+  const fields=[0,...Array.from({length:12},(_,i)=>i+2),...Array.from({length:6},(_,i)=>i+20),
+    ...(numeric?Array.from({length:21},(_,i)=>i+76):[]),99,...(numeric?[100,101,102,103]:[])];
+  const parameters=module.types[module.functionTypes[publication-module.imports.length]]?.parameters;
+  check(parameters?.length===fields.length,'publisher type carries the complete retained state');
+  const firstArgument=publish-fields.length,args=ops.slice(firstArgument,publish);
+  check(args.length===fields.length&&args.every((node,i)=>node.op===0x20&&node.local===fields[i]),
+    'the sole publication receives context and every live boundary local in ABI order');
+  check(ops[publish].frames.length===1,'publication is outside every guest control block');
+  const end=ops[firstArgument-1],body=end?.op===11&&end.frame.kind===2?end.frame:undefined;
+  if(!body){summary.errors.push('publication must follow the closed outer exit block');return summary;}
+  summary.outerBlock={open:body.open,end:body.end};
+  check(body.type===-64&&body.open===0,'one empty outer block wraps the original guest body');
+  const exits=[];
+  for(let i=body.open+1;i<body.end;i++){
+    const node=ops[i];
+    if(node.local===108&&[0x20,0x21,0x22].includes(node.op)){
+      check(node.op===0x21,'the guest body only assigns the reason local');
+      const next=ops[i+1];
+      check(next?.op===12&&next.frames.at(-1-next.targets[0])===body,
+        'every assigned reason immediately branches to the shared outer exit');
+    }
+    if([12,13,14].includes(node.op))for(const depth of node.targets){
+      const target=node.frames.at(-1-depth);
+      check(target?.kind!==0xff,'guest branches cannot bypass publication through the function label');
+      if(target===body){
+        check(node.op===12&&ops[i-1]?.op===0x21&&ops[i-1]?.local===108,
+          'every shared exit stores its reason before the unconditional outer branch');
+        exits.push(i);
+      }
+    }
+  }
+  summary.sharedExitBranches=exits.length;
+  check(exits.length>1,'multiple authored guest exits share the one publication site');
+  const bare=summary.explicitReturns.filter(index=>index<body.end),tailReturn=ops.length-2;
+  check(bare.length===1&&summary.explicitReturns.length===2&&summary.explicitReturns.at(-1)===tailReturn&&
+    ops[tailReturn].frames.length===1,'only the invalid-context guard bypasses the single shared epilogue return');
+  const rejected=bare[0],guard=ops[rejected]?.frames.at(-1);
+  const prefix=guard?ops.slice(body.open+1,guard.open):[];
+  const guardPattern=[0x20,0x28,0x41,0x47,0x20,0x29,0x42,0x52,0x72];
+  check(guard?.kind===4&&guard.otherwise===undefined&&guard.end===rejected+1&&
+    ops[rejected-1]?.op===0x41&&ops[rejected-1]?.value===8&&guard.open===rejected-2&&
+    prefix.length===guardPattern.length&&prefix.every((node,i)=>node.op===guardPattern[i])&&
+    prefix[0]?.local===0&&prefix[4]?.local===0&&prefix[1]?.memoryOffset===112&&
+    prefix[2]?.value===1&&prefix[5]?.memoryOffset===120,
+    'the sole bare return is the untouched active-context/identity guard returning Infrastructure');
+  // Cut the real publisher node from the decoded CFG. Every valid-context path to a normal
+  // return or implicit function end must disappear; otherwise publication can be bypassed.
+  const reached=new Set(),pending=guard?[guard.end+1]:[];
+  while(pending.length){const node=pending.pop();if(node===publish||reached.has(node))continue;
+    reached.add(node);pending.push(...edges[node]);}
+  check(![...reached].some(index=>ops[index].op===15||ops[index].op===11&&ops[index].frame.kind===0xff),
+    'the sole publisher dominates all valid-context normal returns');
+  const sentinel=exits.filter(index=>ops[index-2]?.op===0x41&&ops[index-2]?.value===-1);
+  summary.preciseTailSentinels=sentinel.length;
+  if(name==='guest.run'){
+    check(sentinel.length>0,'fast guest quota guards have a precise-tail sentinel');
+    check(summary.preciseCalls.length===1,'fast guest has one shared precise-tail call');
+    const call=summary.preciseCalls[0],conditional=ops[call]?.frames.at(-1);
+    const comparison=conditional?ops.slice(conditional.open-3,conditional.open):[];
+    check(call>publish&&conditional?.kind===4&&conditional.type===-1&&
+      comparison.length===3&&comparison[0].op===0x20&&comparison[0].local===108&&
+      comparison[1].op===0x41&&comparison[1].value===-1&&comparison[2].op===0x46&&
+      ops[call-2]?.op===0x20&&ops[call-2]?.local===0&&ops[call-1]?.op===0x20&&ops[call-1]?.local===12&&
+      call===conditional.open+3&&conditional.otherwise===call+1&&conditional.end===call+3&&
+      ops[call+2]?.op===0x20&&ops[call+2]?.local===108&&conditional.end+1===tailReturn&&
+      ops[tailReturn]?.op===15&&ops[tailReturn+1]?.frame?.kind===0xff,
+      'only sentinel -1 selects precise(CTX,REMAIN), after publication; ordinary exits return their saved reason');
+  }else{
+    check(sentinel.length===0&&summary.preciseCalls.length===0,'precise guest has no sentinel or recursive precise call');
+    check(ops[publish+1]?.op===0x20&&ops[publish+1]?.local===108&&publish+2===tailReturn&&
+      ops[tailReturn]?.op===15&&ops[tailReturn+1]?.frame?.kind===0xff,
+      'precise guest returns its saved reason immediately after publication');
+  }
+  return summary;
+}
+
 export function inspectRegion(bytes) {
   const module=readModule(bytes),runIndex=[...module.names].find(([,name])=>name==='guest.run')?.[0]??module.exports.get('run');
   assert(Number.isInteger(runIndex)&&runIndex>=module.imports.length,'defined guest run');
@@ -143,6 +237,7 @@ export function inspectRegion(bytes) {
       .map(([index,name])=>({index,name,...module.types[module.functionTypes[index-module.imports.length]]})),
     pageTranslatorSignature:[...module.names].filter(([,name])=>name==='guest.translate_page')
       .map(([index,name])=>({index,name,...module.types[module.functionTypes[index-module.imports.length]]})),
+    exitEpilogues:['guest.run','guest.precise'].map(name=>inspectExitEpilogue(module,name)),
     limits:['narrow decoder for generated authored modules; scalar f64 arithmetic cycles only',
       'a retained cycle proves a canonicalization-free emitted path, not its runtime frequency or speed']};
 }
@@ -164,4 +259,5 @@ export function assertRegionStructure(proof) {
     'translation receives context, guest linear address and requested permissions');
   assert.deepEqual(proof.pageTranslatorSignature[0].results,[0x7f,0x7f,0x7f],
     'translation returns the physical slot, page base and complete permission mask');
+  for(const exit of proof.exitEpilogues)assert.deepEqual(exit.errors,[],`${exit.name}: complete common-exit control-flow proof`);
 }

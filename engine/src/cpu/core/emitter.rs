@@ -1,4 +1,5 @@
 mod control;
+mod exits;
 mod integer;
 pub(super) mod link;
 mod numeric;
@@ -117,7 +118,13 @@ pub(super) fn emit(
     );
     types.ty().function([ValType::I32], []);
     types.ty().function(
-        [ValType::I32, ValType::I32, ValType::F64, ValType::F64, ValType::F64],
+        [
+            ValType::I32,
+            ValType::I32,
+            ValType::F64,
+            ValType::F64,
+            ValType::F64,
+        ],
         [ValType::I32],
     );
     types.ty().function([ValType::I32; 3], [ValType::I32; 3]);
@@ -163,7 +170,7 @@ pub(super) fn emit(
     module.section(&exports);
     let mut code = CodeSection::new();
     code.function(&flags::emit_function());
-    code.function(&fast);
+    code.raw(&fast);
     code.function(&lookup(blocks));
     code.function(&link::emit_boundary(
         !native.is_empty(),
@@ -171,7 +178,7 @@ pub(super) fn emit(
         7 + shift,
         8 + shift,
     ));
-    code.function(&precise);
+    code.raw(&precise);
     code.function(&numeric::span::emit_materializer());
     code.function(&numeric::span::emit_status_resolver());
     code.function(&super::memory::cache::emit_translator());
@@ -258,7 +265,7 @@ fn run(
     native: &[NativeInstruction],
     precise: bool,
     store_widths: Vec<u32>,
-) -> (Function, Vec<u32>) {
+) -> (Vec<u8>, Vec<u32>) {
     let mut function = Function::new([
         (25, ValType::I32),
         (1, ValType::I64),
@@ -276,6 +283,7 @@ fn run(
         (1, ValType::I32),
         (3, ValType::F64),
         (4, ValType::I32),
+        (1, ValType::I32),
     ]);
     let mut out = Output {
         function: &mut function,
@@ -351,7 +359,10 @@ fn run(
     region::emit(&mut out, &graph, precise);
     out.c().end();
     let Output { store_widths, .. } = out;
-    (function, store_widths)
+    (
+        exits::finish(function, !native.is_empty(), precise),
+        store_widths,
+    )
 }
 
 pub(super) struct Output<'a> {
@@ -477,7 +488,6 @@ impl Output<'_> {
             self.c().i32_const(pc as i32).local_set(EIP);
         }
         self.count(retired);
-        link::boundary(self);
     }
 
     fn publish_operands(&mut self) {

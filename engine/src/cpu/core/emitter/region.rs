@@ -89,12 +89,9 @@ impl Emitter<'_, '_> {
                 .i32_lt_u()
                 .if_(BlockType::Empty);
             self.out.publish_exit(Some(block.entry), 0);
-            let exact = self.out.internal(6);
             self.out
                 .c()
-                .local_get(super::CTX)
-                .local_get(REMAIN)
-                .call(exact)
+                .i32_const(super::exits::PRECISE)
                 .return_()
                 .end();
         }
