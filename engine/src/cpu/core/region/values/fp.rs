@@ -10,7 +10,7 @@ pub(super) fn entry(
     block: BlockId,
     pc: ResumePc,
     facts: flow::Facts,
-) -> (FrameState, Vec<ProofId>) {
+) -> (FrameState, Vec<ProofId>, Vec<ProofId>) {
     let gpr = std::array::from_fn(|i| {
         let value = input(plan, block, InputField::Gpr(i as u8), ValueType::I32);
         plan.constant_facts[value.0] = facts.gpr[i];
@@ -21,26 +21,28 @@ pub(super) fn entry(
     let control_epoch = plan.allocate_effect(EffectKind::Control, None);
     let status_effect = plan.allocate_effect(EffectKind::Status, None);
     let metadata_effect = plan.allocate_effect(EffectKind::Metadata, None);
-    let (mut fp, mut guards) = input_fp(
+    let (fp, mut guards, mut available) = input_fp(
         plan,
         block,
         control_epoch,
         status_effect,
         metadata_effect,
-        facts.native,
+        facts,
     );
     if facts.control_admitted {
-        guards.push(plan.allocate_proof(Proof {
+        let proof = plan.allocate_proof(Proof {
             value: None,
             kind: ProofKind::Control,
             epoch: control_epoch,
             at: ProgramPoint { block, prefix: 0 },
             conditional: None,
-        }));
+        });
+        guards.push(proof);
+        available.push(proof);
     }
     for (i, fact) in facts.tags.into_iter().enumerate() {
         if let Some(occupied) = fact {
-            guards.push(plan.allocate_proof(Proof {
+            let proof = plan.allocate_proof(Proof {
                 value: Some(fp.payload[i].values()[0]),
                 kind: if occupied {
                     ProofKind::Occupied
@@ -50,10 +52,9 @@ pub(super) fn entry(
                 epoch: control_epoch,
                 at: ProgramPoint { block, prefix: 0 },
                 conditional: None,
-            }));
-            if !occupied {
-                fp.tags[i] = TagFact::Empty;
-            }
+            });
+            guards.push(proof);
+            available.push(proof);
         }
     }
     (
@@ -66,6 +67,7 @@ pub(super) fn entry(
             fp,
         },
         guards,
+        available,
     )
 }
 
@@ -75,10 +77,11 @@ fn input_fp(
     control_epoch: EffectId,
     status_effect: EffectId,
     metadata_effect: EffectId,
-    native_facts: [bool; 8],
-) -> (FpFrame, Vec<ProofId>) {
+    facts: flow::Facts,
+) -> (FpFrame, Vec<ProofId>, Vec<ProofId>) {
     let point = ProgramPoint { block, prefix: 0 };
     let mut guards = Vec::new();
+    let mut available = Vec::new();
     let payload = std::array::from_fn(|i| {
         let cell = StorageCell(i as u8);
         let native = input(plan, block, InputField::FpNative(i as u8), ValueType::F64);
@@ -94,12 +97,34 @@ fn input_fp(
             kind: ProofKind::ExactF64,
             epoch: control_epoch,
             at: point,
-            conditional: Some(valid),
+            conditional: (!facts.native[i]).then_some(valid),
         });
-        // Internal predecessors can predict a native import, but public secondary entry
-        // still owns arbitrary raw80. The conditional discriminator remains authoritative.
-        if native_facts[i] {
-            guards.push(proof);
+        // A prepared internal edge establishes these facts. Arbitrary external
+        // state must pass the same entry adapter before this native contract runs.
+        if facts.native[i] {
+            available.push(proof);
+            if !facts.bounded[i] && !facts.native24[i] {
+                guards.push(proof);
+            }
+            for (kind, known) in [
+                (ProofKind::BoundedF64, facts.bounded[i]),
+                (ProofKind::Native24, facts.native24[i]),
+            ] {
+                if known {
+                    let fact = plan.allocate_proof(Proof {
+                        value: Some(native),
+                        kind,
+                        epoch: control_epoch,
+                        at: point,
+                        conditional: None,
+                    });
+                    available.push(fact);
+                    if kind == ProofKind::Native24 || !facts.native24[i] {
+                        guards.push(fact);
+                    }
+                }
+            }
+            return FpValue::ExactF64(native, proof);
         }
         FpValue::Tagged {
             lo,
@@ -130,6 +155,7 @@ fn input_fp(
             metadata: MetadataRecipe::default(),
         },
         guards,
+        available,
     )
 }
 
@@ -171,12 +197,21 @@ pub(super) fn kill(
     let control = plan.allocate_effect(EffectKind::Control, Some(point));
     let status = plan.allocate_effect(EffectKind::Status, Some(point));
     let metadata = plan.allocate_effect(EffectKind::Metadata, Some(point));
-    frame.fp = input_fp(plan, point.block, control, status, metadata, [false; 8]).0;
+    frame.fp = input_fp(
+        plan,
+        point.block,
+        control,
+        status,
+        metadata,
+        flow::Facts::default(),
+    )
+    .0;
     frame.fp.metadata.canonical = true;
     *shape = FpShape {
         cells: std::array::from_fn(|i| StorageCell(i as u8)),
         inherited_dirty: std::array::from_fn(|i| Some(i as u8)),
         written: 0,
+        tag_written: 0,
         tags: std::array::from_fn(|i| TagRecipe::Entry(i as u8)),
         top_delta: 0,
     };
@@ -333,6 +368,7 @@ fn native_result(
 
 fn written(shape: &mut FpShape, destination: usize) {
     shape.written |= 1 << destination;
+    shape.tag_written |= 1 << destination;
     shape.inherited_dirty[destination] = None;
 }
 
@@ -342,17 +378,20 @@ fn push(frame: &mut FrameState, shape: &mut FpShape) {
     shape.cells.rotate_right(1);
     shape.inherited_dirty.rotate_right(1);
     shape.written = shape.written.rotate_left(1);
+    shape.tag_written = shape.tag_written.rotate_left(1);
     frame.fp.top_delta = (frame.fp.top_delta - 1).rem_euclid(8);
 }
 
 fn pop(frame: &mut FrameState, shape: &mut FpShape) {
     // The popped physical register keeps its exact payload even though its tag is empty.
     frame.fp.tags[0] = TagFact::Empty;
+    shape.tag_written |= 1;
     frame.fp.payload.rotate_left(1);
     frame.fp.tags.rotate_left(1);
     shape.cells.rotate_left(1);
     shape.inherited_dirty.rotate_left(1);
     shape.written = shape.written.rotate_right(1);
+    shape.tag_written = shape.tag_written.rotate_right(1);
     frame.fp.top_delta = (frame.fp.top_delta + 1).rem_euclid(8);
 }
 

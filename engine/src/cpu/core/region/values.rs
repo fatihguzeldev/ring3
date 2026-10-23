@@ -210,6 +210,7 @@ pub(in crate::cpu::core) struct FpShape {
     pub cells: [StorageCell; 8],
     pub inherited_dirty: [Option<u8>; 8],
     pub written: u8,
+    pub tag_written: u8,
     pub tags: [TagRecipe; 8],
     pub top_delta: i8,
 }
@@ -235,6 +236,17 @@ pub(in crate::cpu::core) struct EdgePlan {
     pub target: BlockId,
     pub frame: FrameStateId,
     pub fp_rebase: bool,
+    pub fp_transfer: FpTransfer,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::cpu::core) struct FpTransfer {
+    // Simultaneous source cells for the target's eight unique entry cells.
+    pub sources: [StorageCell; 8],
+    pub tags: [TagRecipe; 8],
+    pub written: u8,
+    pub tag_writes: u8,
+    pub top_delta: i8,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -342,6 +354,22 @@ impl RegionPlan {
     pub fn metadata(&self, frame: FrameStateId) -> &MetadataRecipe {
         &self.frame(frame).fp.metadata
     }
+    pub fn fp_input_origin(&self, frame: FrameStateId, logical: u8) -> Option<u8> {
+        self.frame(frame).fp.payload[logical as usize]
+            .values()
+            .into_iter()
+            .find_map(|value| match self.value(value).kind {
+                ValueKind::Input {
+                    field:
+                        InputField::FpNative(index)
+                        | InputField::FpLow(index)
+                        | InputField::FpHigh(index)
+                        | InputField::FpValid(index),
+                    ..
+                } => Some(index),
+                _ => None,
+            })
+    }
     fn allocate_value(&mut self, ty: ValueType, kind: ValueKind) -> ValueId {
         let fact = if let ValueKind::Constant(value) = kind {
             Some(value)
@@ -369,6 +397,7 @@ impl RegionPlan {
             cells,
             inherited_dirty: std::array::from_fn(|i| Some(i as u8)),
             written: 0,
+            tag_written: 0,
             tags: std::array::from_fn(|i| self.tag_recipe(frame.fp.tags[i], cells[i])),
             top_delta: frame.fp.top_delta,
         };

@@ -8,6 +8,8 @@ use crate::cpu::x86::{
 pub(super) struct Facts {
     pub gpr: [Option<u32>; 8],
     pub native: [bool; 8],
+    pub bounded: [bool; 8],
+    pub native24: [bool; 8],
     pub tags: [Option<bool>; 8], // true occupied, false empty; class bits remain exact inputs.
     pub control_admitted: bool,
 }
@@ -31,6 +33,8 @@ pub(super) fn entries(region: &Region) -> Vec<Facts> {
                             input.gpr[i] = None;
                         }
                         input.native[i] &= other.native[i];
+                        input.bounded[i] &= other.bounded[i];
+                        input.native24[i] &= other.native24[i];
                         if input.tags[i] != other.tags[i] {
                             input.tags[i] = None;
                         }
@@ -204,53 +208,16 @@ fn transfer(facts: &mut Facts, operation: Option<Operation>) {
     let Some((operation, ..)) = operation.and_then(super::fp::operation) else {
         if operation.is_none_or(super::fp::canonical_numeric) {
             facts.native = [false; 8];
+            facts.bounded = [false; 8];
+            facts.native24 = [false; 8];
             facts.tags = [None; 8];
             facts.control_admitted = false;
         }
         return;
     };
-    match operation {
-        X87Operation::Load(X87Format::Float32) => {
-            facts.native.rotate_right(1);
-            facts.native[0] = true;
-        }
-        X87Operation::LoadRegister { index } => {
-            let value = facts.native[index as usize];
-            facts.native.rotate_right(1);
-            facts.native[0] = value;
-        }
-        X87Operation::StoreRegister { index, pop } => {
-            facts.native[index as usize] = facts.native[0];
-            if pop {
-                facts.native.rotate_left(1);
-            }
-        }
-        X87Operation::Exchange { index } => facts.native.swap(0, index as usize),
-        X87Operation::Store { pop, .. } if direct_fp(operation) => {
-            if pop {
-                facts.native.rotate_left(1);
-            }
-        }
-        X87Operation::Binary {
-            destination,
-            source,
-            pop,
-            ..
-        } => {
-            facts.native[destination as usize] = true;
-            facts.native[source as usize] = true;
-            if pop {
-                facts.native.rotate_left(1);
-            }
-        }
-        X87Operation::BinaryMemory {
-            format: X87Format::Float32,
-            ..
-        } => facts.native[0] = true,
-        X87Operation::ChangeSign | X87Operation::Absolute => {}
-        X87Operation::Wait | X87Operation::StatusToAx => {}
-        _ => facts.native = [false; 8],
-    }
+    transfer_payload(&mut facts.native, operation, false);
+    transfer_payload(&mut facts.bounded, operation, false);
+    transfer_payload(&mut facts.native24, operation, true);
     match operation {
         X87Operation::Load(X87Format::Float32) => {
             facts.tags.rotate_right(1);
@@ -307,5 +274,52 @@ fn transfer(facts: &mut Facts, operation: Option<Operation>) {
             facts.tags = [None; 8];
             facts.control_admitted = false;
         }
+    }
+}
+
+fn transfer_payload(known: &mut [bool; 8], operation: X87Operation, native24: bool) {
+    match operation {
+        X87Operation::Load(X87Format::Float32) => {
+            known.rotate_right(1);
+            known[0] = true;
+        }
+        X87Operation::LoadRegister { index } => {
+            let value = known[index as usize];
+            known.rotate_right(1);
+            known[0] = value;
+        }
+        X87Operation::StoreRegister { index, pop } => {
+            known[index as usize] = known[0];
+            if pop {
+                known.rotate_left(1);
+            }
+        }
+        X87Operation::Exchange { index } => known.swap(0, index as usize),
+        X87Operation::Store { pop, .. } if direct_fp(operation) => {
+            if pop {
+                known.rotate_left(1);
+            }
+        }
+        X87Operation::Binary {
+            destination,
+            source,
+            pop,
+            ..
+        } => {
+            if !native24 {
+                known[source as usize] = true;
+            }
+            known[destination as usize] = !native24;
+            if pop {
+                known.rotate_left(1);
+            }
+        }
+        X87Operation::BinaryMemory {
+            format: X87Format::Float32,
+            ..
+        } => known[0] = !native24,
+        X87Operation::ChangeSign | X87Operation::Absolute => {}
+        X87Operation::Wait | X87Operation::StatusToAx => {}
+        _ => *known = [false; 8],
     }
 }

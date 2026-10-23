@@ -144,8 +144,14 @@ fn loop_admissions_and_occupancy_are_guarded_at_public_entry() {
         );
         assert!(matches!(
             plan.frame(contract.frame).fp.payload[index],
-            FpValue::Tagged { .. }
+            FpValue::ExactF64(..)
         ));
+        assert!(contract.guards.iter().any(|&id| {
+            let proof = plan.proof(id);
+            proof.kind == ProofKind::BoundedF64
+                && proof.conditional.is_none()
+                && proof.value.is_some_and(|v| values.contains(&v))
+        }));
     }
 }
 
@@ -343,6 +349,108 @@ fn identity_layout_with_changed_dirty_or_tags_still_rebases_at_edge() {
 }
 
 #[test]
+fn consumed_shape_keeps_popped_ghosts_and_independent_tag_destinations() {
+    let plan = single(&[
+        fp(X87Operation::LoadRegister { index: 0 }),
+        fp(X87Operation::StoreRegister {
+            index: 0,
+            pop: true,
+        }),
+        fp(X87Operation::Exchange { index: 1 }),
+    ]);
+    let pushed = plan.instruction(BlockId(0), 0).after;
+    let popped = plan.instruction(BlockId(0), 1).after;
+    assert_eq!(plan.fp_input_origin(pushed, 0), Some(0));
+    let ghost = plan.shape(popped);
+    assert_eq!(ghost.top_delta, 0);
+    assert_eq!(ghost.cells[7], StorageCell(0));
+    assert_eq!(ghost.written, 1 << 7);
+    assert_eq!(ghost.tag_written, 1 << 7);
+    assert_eq!(ghost.tags[7], TagRecipe::Empty);
+    let exchanged = plan.shape(plan.instruction(BlockId(0), 2).after);
+    assert_eq!(exchanged.written, 0x83);
+    assert_eq!(exchanged.cells[7], ghost.cells[7]);
+    assert_eq!(exchanged.tag_written, 0x83);
+}
+
+#[test]
+fn memory_pop_changes_only_occupancy_and_top_at_its_successful_prefix() {
+    let plan = single(&[fp(X87Operation::Store {
+        format: X87Format::Float64,
+        pop: true,
+        truncate: false,
+    })]);
+    let step = plan.instruction(BlockId(0), 0);
+    assert_eq!(plan.shape(step.before).tag_written, 0);
+    let completed = plan.shape(step.after);
+    assert_eq!(completed.written, 0);
+    // The consumed descriptor rotates this final logical bit by TOPdelta=1:
+    // logical7 is the popped physical slot0, whose payload is unchanged.
+    assert_eq!(completed.tag_written, 1 << 7);
+    assert_eq!(completed.tags[7], TagRecipe::Empty);
+    assert_eq!(completed.top_delta, 1);
+}
+
+#[test]
+fn binary_pop_result_and_popped_ghost_keep_separate_physical_destinations() {
+    let plan = single(&[
+        fp(X87Operation::Load(X87Format::Float32)),
+        fp(X87Operation::Binary {
+            kind: X87Binary::Add,
+            destination: 1,
+            source: 0,
+            pop: true,
+        }),
+    ]);
+    let after = plan.instruction(BlockId(0), 1).after;
+    let shape = plan.shape(after);
+    assert_eq!(shape.top_delta, 0);
+    assert_eq!(shape.written, 0x81);
+    assert_eq!(shape.tag_written, 0x81);
+    assert_eq!(shape.tags[7], TagRecipe::Empty);
+}
+
+#[test]
+fn native24_entry_fact_is_consumed_only_behind_an_actual_import_guard() {
+    let blocks = [
+        block(
+            0x1000,
+            &[fp(X87Operation::Load(X87Format::Float32)), jump(0x2000)],
+        ),
+        block(
+            0x2000,
+            &[fp(X87Operation::Store {
+                format: X87Format::Float32,
+                pop: true,
+                truncate: false,
+            })],
+        ),
+    ];
+    let plan = RegionPlan::analyze(&Region::from_blocks(&blocks, 0x1000).unwrap());
+    let target = plan.block(BlockId(1));
+    let FpValue::ExactF64(value, _) = plan.frame(target.entry).fp.payload[0] else {
+        panic!("successful imported contract has an exact native value");
+    };
+    assert!(target.contract.guards.iter().any(|&id| {
+        let proof = plan.proof(id);
+        proof.kind == ProofKind::Native24 && proof.value == Some(value)
+    }));
+    for kind in [
+        ProofKind::ExactF64,
+        ProofKind::Native24,
+        ProofKind::BoundedF64,
+    ] {
+        assert!(plan.proofs_at(target.entry).iter().any(|&id| {
+            let proof = plan.proof(id);
+            proof.kind == kind && proof.value == Some(value) && proof.conditional.is_none()
+        }));
+    }
+    let edge = &plan.block(BlockId(0)).edges[0];
+    assert_eq!(edge.fp_transfer.top_delta, 7);
+    assert_eq!(edge.fp_transfer.sources, plan.shape(edge.frame).cells);
+}
+
+#[test]
 fn actual_simd_fast_success_preserves_the_renamed_fp_frame() {
     use crate::cpu::x86::simd::{FloatKind, SimdKind, SimdOperand, SimdOperation, SimdRegister};
     let move_op = SimdOperation {
@@ -428,7 +536,11 @@ fn actual_simd_fast_success_carries_fp_admission_facts_across_cfg_edges() {
     ];
     let plan = RegionPlan::analyze(&Region::from_blocks(&blocks, 0x1000).unwrap());
     let contract = &plan.block(BlockId(1)).contract;
-    for kind in [ProofKind::Control, ProofKind::Occupied, ProofKind::ExactF64] {
+    for kind in [
+        ProofKind::Control,
+        ProofKind::Occupied,
+        ProofKind::BoundedF64,
+    ] {
         assert!(
             contract
                 .guards
@@ -436,4 +548,9 @@ fn actual_simd_fast_success_carries_fp_admission_facts_across_cfg_edges() {
                 .any(|&id| plan.proof(id).kind == kind)
         );
     }
+    assert!(
+        plan.proofs_at(contract.frame)
+            .iter()
+            .any(|&id| { plan.proof(id).kind == ProofKind::ExactF64 })
+    );
 }

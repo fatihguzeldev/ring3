@@ -20,9 +20,10 @@ pub(super) fn analyze(region: &Region) -> RegionPlan {
     };
     for (index, block) in region.blocks.iter().enumerate() {
         let id = BlockId(index);
-        let (frame, guards) = fp::entry(&mut plan, id, ResumePc::Exact(block.entry), facts[index]);
+        let (frame, guards, available) =
+            fp::entry(&mut plan, id, ResumePc::Exact(block.entry), facts[index]);
         let entry = plan.allocate_frame(frame);
-        plan.frame_proofs[entry.0] = guards.clone();
+        plan.frame_proofs[entry.0] = available;
         plan.blocks.push(BlockPlan {
             entry,
             exit: entry,
@@ -39,7 +40,7 @@ pub(super) fn analyze(region: &Region) -> RegionPlan {
     for (index, block) in region.blocks.iter().enumerate() {
         let id = BlockId(index);
         let mut current = plan.block(id).entry;
-        let mut available = plan.block(id).contract.guards.clone();
+        let mut available = plan.proofs_at(current).to_vec();
         for instruction in &block.instructions {
             let point = ProgramPoint {
                 block: id,
@@ -119,10 +120,19 @@ pub(super) fn analyze(region: &Region) -> RegionPlan {
         let frame = plan.blocks[index].exit;
         for &target in &block.successors {
             let fp_rebase = plan.shape(frame) != plan.shape(plan.blocks[target.0].entry);
+            let shape = plan.shape(frame);
+            let fp_transfer = FpTransfer {
+                sources: shape.cells,
+                tags: shape.tags,
+                written: shape.written,
+                tag_writes: shape.tag_written,
+                top_delta: shape.top_delta,
+            };
             plan.blocks[index].edges.push(EdgePlan {
                 target,
                 frame,
                 fp_rebase,
+                fp_transfer,
             });
         }
     }
