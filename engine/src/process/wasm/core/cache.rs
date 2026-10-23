@@ -24,9 +24,14 @@ pub(super) struct CoreCache32 {
     regions: Vec<Option<CachedRegion>>,
     free: Vec<usize>,
     entries: HashMap<u32, RegionKey, RandomState>,
+    // Effective HashMap capacity can fall on tombstone removal. These bounds
+    // describe the retained allocation and decrease only after a fresh rebuild.
+    entries_capacity: usize,
     trace_entries: HashMap<u32, RegionKey, RandomState>,
+    trace_entries_capacity: usize,
     trace_bypass_identity: u64,
     coverage: HashMap<u32, RegionKey, RandomState>,
+    coverage_capacity: usize,
     entries_epoch: u64,
     ownership_epoch: u64,
     observed_refusals: Vec<ObservedRefusal>,
@@ -133,6 +138,7 @@ struct CachedRegion {
     slot: u32,
     linked_entries: LinkedEntries,
     rejected_entries: HashMap<u32, EntryRejection, RandomState>,
+    rejected_capacity: usize,
     trace_heat: [TraceHeat; 4],
     charge: usize,
 }
@@ -238,9 +244,12 @@ impl Default for CoreCache32 {
             regions: (0..MAX_REGIONS).map(|_| None).collect(),
             free: (0..MAX_REGIONS).rev().collect(),
             entries: HashMap::with_hasher(RandomState::default()),
+            entries_capacity: 0,
             trace_entries: HashMap::with_hasher(RandomState::default()),
+            trace_entries_capacity: 0,
             trace_bypass_identity: 0,
             coverage: HashMap::with_hasher(RandomState::default()),
+            coverage_capacity: 0,
             entries_epoch: 1,
             ownership_epoch: 1,
             observed_refusals: Vec::new(),
@@ -271,14 +280,27 @@ impl CoreCache32 {
             .saturating_add(64)
     }
 
-    fn reserved_capacity<K, V>(map: &HashMap<K, V, RandomState>, additional: usize) -> usize {
+    fn reserved_capacity<K, V>(
+        map: &HashMap<K, V, RandomState>,
+        additional: usize,
+        allocation_capacity: usize,
+    ) -> usize {
         let required = map.len().saturating_add(additional);
-        if required <= map.capacity() {
-            map.capacity()
+        let reserved = if required <= map.capacity() {
+            allocation_capacity
         } else {
             // reserve may choose a larger bucket array than the requested entries.
             required.max(4).next_power_of_two().saturating_mul(2)
-        }
+        };
+        reserved.max(allocation_capacity)
+    }
+
+    fn rebuild_map<K: Eq + std::hash::Hash, V>(map: &mut HashMap<K, V, RandomState>) -> usize {
+        let mut rebuilt = HashMap::with_capacity_and_hasher(map.len(), RandomState::default());
+        rebuilt.extend(map.drain());
+        let capacity = rebuilt.capacity();
+        *map = rebuilt;
+        capacity
     }
 
     fn memo_charge(&self) -> usize {
@@ -296,9 +318,9 @@ impl CoreCache32 {
             + self.free.capacity() * size_of::<usize>()
             + self.link_owners.capacity() * size_of::<u64>()
             + self.slot_regions.capacity() * size_of::<u32>()
-            + Self::hash_charge::<u32, RegionKey>(self.entries.capacity())
-            + Self::hash_charge::<u32, RegionKey>(self.trace_entries.capacity())
-            + Self::hash_charge::<u32, RegionKey>(self.coverage.capacity())
+            + Self::hash_charge::<u32, RegionKey>(self.entries_capacity)
+            + Self::hash_charge::<u32, RegionKey>(self.trace_entries_capacity)
+            + Self::hash_charge::<u32, RegionKey>(self.coverage_capacity)
             + self.memo_charge()
     }
 
@@ -351,15 +373,15 @@ impl CoreCache32 {
         };
         let (entry_capacity, trace_capacity, coverage_capacity) = if trace {
             (
-                self.entries.capacity(),
-                Self::reserved_capacity(&self.trace_entries, entries),
-                self.coverage.capacity(),
+                self.entries_capacity,
+                Self::reserved_capacity(&self.trace_entries, entries, self.trace_entries_capacity),
+                self.coverage_capacity,
             )
         } else {
             (
-                Self::reserved_capacity(&self.entries, entries),
-                self.trace_entries.capacity(),
-                Self::reserved_capacity(&self.coverage, instructions),
+                Self::reserved_capacity(&self.entries, entries, self.entries_capacity),
+                self.trace_entries_capacity,
+                Self::reserved_capacity(&self.coverage, instructions, self.coverage_capacity),
             )
         };
         size_of::<Self>()
@@ -397,9 +419,11 @@ impl CoreCache32 {
     }
 
     fn compact_directories(&mut self) {
-        self.entries.shrink_to_fit();
-        self.trace_entries.shrink_to_fit();
-        self.coverage.shrink_to_fit();
+        // Public capacity can fall when a removal leaves a tombstone. Only a
+        // fresh allocation permits crediting a smaller table to the ledger.
+        self.entries_capacity = Self::rebuild_map(&mut self.entries);
+        self.trace_entries_capacity = Self::rebuild_map(&mut self.trace_entries);
+        self.coverage_capacity = Self::rebuild_map(&mut self.coverage);
         let used_region = self
             .regions
             .iter()
@@ -472,27 +496,39 @@ impl CoreCache32 {
         }
         if trace {
             self.trace_entries.reserve(entries);
+            self.trace_entries_capacity = self
+                .trace_entries_capacity
+                .max(self.trace_entries.capacity());
         } else {
             self.entries.reserve(entries);
+            self.entries_capacity = self.entries_capacity.max(self.entries.capacity());
             self.coverage.reserve(instructions);
+            self.coverage_capacity = self.coverage_capacity.max(self.coverage.capacity());
         }
         assert!(self.resident_charge().saturating_add(charge) <= MAX_CODE_BYTES);
     }
 
     fn remember_entry_rejection(&mut self, key: RegionKey, pc: u32, limits: EntryRejection) {
         let entry = self.region(key).unwrap();
-        let before = Self::hash_charge::<u32, EntryRejection>(entry.rejected_entries.capacity());
+        let before = Self::hash_charge::<u32, EntryRejection>(entry.rejected_capacity);
         let after = Self::hash_charge::<u32, EntryRejection>(Self::reserved_capacity(
             &entry.rejected_entries,
             usize::from(!entry.rejected_entries.contains_key(&pc)),
+            entry.rejected_capacity,
         ));
         if self.resident_charge().saturating_add(after - before) > MAX_CODE_BYTES {
             return;
         }
         let entry = self.regions[key.index].as_mut().unwrap();
+        entry
+            .rejected_entries
+            .reserve(usize::from(!entry.rejected_entries.contains_key(&pc)));
+        entry.rejected_capacity = entry
+            .rejected_capacity
+            .max(entry.rejected_entries.capacity());
         entry.rejected_entries.insert(pc, limits);
-        let extra =
-            Self::hash_charge::<u32, EntryRejection>(entry.rejected_entries.capacity()) - before;
+        debug_assert!(entry.rejected_entries.capacity() <= entry.rejected_capacity);
+        let extra = Self::hash_charge::<u32, EntryRejection>(entry.rejected_capacity) - before;
         entry.charge += extra;
         self.owner_charge += extra;
     }
@@ -823,9 +859,11 @@ impl CoreCache32 {
         let extra_entries =
             usize::from(entry.admitted_entries.len() == entry.admitted_entries.capacity())
                 * size_of::<GuestAddress>();
-        let extra_index =
-            Self::hash_charge::<u32, RegionKey>(Self::reserved_capacity(&self.entries, 1))
-                - Self::hash_charge::<u32, RegionKey>(self.entries.capacity());
+        let extra_index = Self::hash_charge::<u32, RegionKey>(Self::reserved_capacity(
+            &self.entries,
+            1,
+            self.entries_capacity,
+        )) - Self::hash_charge::<u32, RegionKey>(self.entries_capacity);
         if self
             .resident_charge()
             .saturating_add(extra_entries)
@@ -849,7 +887,9 @@ impl CoreCache32 {
         self.advance_ownership_epoch();
         self.advance_entries_epoch();
         self.entries.reserve(1);
+        self.entries_capacity = self.entries_capacity.max(self.entries.capacity());
         self.entries.insert(pc, owner.key);
+        debug_assert!(self.entries.capacity() <= self.entries_capacity);
         let entry = self.regions[owner.key.index].as_mut().unwrap();
         let before = entry.admitted_entries.capacity();
         if let Err(index) = entry
@@ -1255,6 +1295,9 @@ impl CoreCache32 {
         for pc in code.instruction_pcs().filter(|_| !trace) {
             self.coverage.insert(pc, key);
         }
+        debug_assert!(self.entries.capacity() <= self.entries_capacity);
+        debug_assert!(self.trace_entries.capacity() <= self.trace_entries_capacity);
+        debug_assert!(self.coverage.capacity() <= self.coverage_capacity);
         self.bytes += code.wasm().len();
         self.owner_charge += charge;
         self.regions[index] = Some(CachedRegion {
@@ -1266,6 +1309,7 @@ impl CoreCache32 {
             slot: 0,
             linked_entries: LinkedEntries::default(),
             rejected_entries: HashMap::with_hasher(RandomState::default()),
+            rejected_capacity: 0,
             trace_heat: [TraceHeat::default(); 4],
             charge,
         });
@@ -1443,3 +1487,7 @@ mod plan_tests;
 #[cfg(test)]
 #[path = "cache/residency_tests.rs"]
 mod residency_tests;
+
+#[cfg(test)]
+#[path = "cache/allocation_tests.rs"]
+mod allocation_tests;
