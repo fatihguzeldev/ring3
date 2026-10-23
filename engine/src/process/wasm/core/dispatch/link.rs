@@ -44,9 +44,9 @@ pub(crate) fn core_chain_select(context: u32, pc: u32, retired: u32) -> u32 {
 
 pub(crate) fn core_chain_cold(context: u32) -> u32 {
     access(context, |instance, core| {
-        // No unrecorded cold instruction may be collapsed between two confirmed
-        // generated block entries. Its predecessor remains the final witness.
-        core.tracing.end();
+        // Explicit legacy captures retain their old witness-only cold boundary.
+        // Normal captures record completed cold instructions in the same arena.
+        core.tracing.cold_boundary();
         cold::chain_cold(instance, core)
     })
 }

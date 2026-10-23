@@ -244,25 +244,16 @@ test('retained-entry miss preserves genuine cold execution for an unowned PC',()
   assert.equal(f.calls.filter(([name])=>name==='prepare').length,0);
 });
 
-test('read-only lookup miss reaches one prepare through the cold JIT handshake',()=>{
-  const f=coldFixture([{stop:1,pc:0x1004,work:0,retired:0}],
-    pc=>({id:pc===0x1000?1n:2n,stop:pc===0x1000?1:2,next:pc+4}));
-  let awaitingPrepare=false;
-  f.api.core_lookup=pc=>{f.calls.push(['lookup',pc]);assert.equal(awaitingPrepare,true);return 4;};
-  const prepare=f.api.core_prepare;
-  f.api.core_prepare=(pc,...args)=>{if(pc===0x1004){assert.equal(awaitingPrepare,true);awaitingPrepare=false;}return prepare(pc,...args);};
-  const cache=new CodeCache(f.engine,{chain:false,budget:2}),unit=cache.entry(0x1000);
-  assert.equal(cache.execute(unit).coreReason,1);awaitingPrepare=true;
-  assert.equal(cache.select(),null,'a native miss retains the cold/JIT handoff');
-  const cold=cache.execute(null);assert.deepEqual([cold.coreReason,cold.work,cold.retired],[1,0,0]);
-  cache.budget=1;const selected=cache.select();
-  assert.equal(selected.id,2n,'the JIT handoff selects prepared code');
-  const result=cache.execute(selected);
-  assert.deepEqual([result.coreReason,result.pc,result.retired,result.work],[2,0x1008,1,1]);
-  assert.equal(awaitingPrepare,false);
-  assert.equal(f.calls.filter(([name])=>name==='lookup').length,1,'jitPc avoids a second lookup loop');
-  assert.equal(f.calls.filter(([name])=>name==='cold').length,1);
-  assert.equal(f.calls.filter(([name])=>name==='prepare').length,2);
+test('repeated cold misses never authorize baseline formation',()=>{
+  const f=coldFixture([{stop:1,pc:0x1004,work:0,retired:0},{stop:2,pc:0x1008,work:1}]);
+  f.api.core_lookup=pc=>{f.calls.push(['lookup',pc]);return 4;};
+  const cache=new CodeCache(f.engine,{chain:false,budget:1});
+  assert.equal(cache.select(),null);assert.equal(cache.execute(null).coreReason,1);
+  assert.equal(cache.select(),null);const run=cache.execute(null);
+  assert.deepEqual([run.kind,run.pc,run.work],['cold',0x1008,1]);
+  assert.equal(f.calls.filter(([name])=>name==='lookup').length,2);
+  assert.equal(f.calls.filter(([name])=>name==='prepare').length,0);
+  assert.equal(cache.stats().generatedModuleBytes,0);
 });
 
 test('retained-entry lookup propagates fatal statuses and rejects a changed native binding',()=>{
@@ -322,36 +313,36 @@ test('cold selection executes before compilation without a fabricated compiled o
   assert.equal(cache.stats().coldRuns,1);assert.equal(cache.stats().coldRetired,2);assert.equal(cache.stats().coldWork,2);
   assert.equal(cache.stats().retired,2);assert.equal(cache.stats().work,2);
 });
-test('cold NeedCode hands the exact PC and private state to JIT once without import',()=>{
-  const f=coldFixture([{stop:1,pc:0x1004,work:1,words:[[0,73],[100,0x12345678]]}]);
+test('cold continuation preserves private state without baseline or import',()=>{
+  const f=coldFixture([{stop:1,pc:0x1004,work:1,words:[[0,73],[100,0x12345678]]},
+    {stop:2,pc:0x1008,work:1}]);
   const cache=new CodeCache(f.engine,{chain:false,budget:2});
-  const cold=cache.execute(cache.select());assert.equal(cold.coreReason,1);
+  assert.equal(cache.execute(cache.select()).coreReason,1);
   assert.throws(()=>cache.import(),/unpublished/);
-  const unit=cache.select();assert.equal(unit.pc,0x1004);
-  const compiled=cache.execute(unit);
-  assert.equal(compiled.kind,'compiled');assert.equal(compiled.id,1n);
+  assert.equal(cache.select(),null);const run=cache.execute(null);
+  assert.equal(run.kind,'cold');assert.equal(run.id,null);
   assert.equal(new DataView(f.engine.memory.buffer).getUint32(f.context,true),73);
   assert.equal(new DataView(f.engine.memory.buffer).getUint32(f.context+100,true),0x12345678);
   assert.deepEqual(f.calls.filter(([name])=>['cold','prepare','import','export'].includes(name)),
-    [['cold',2],['prepare',0x1004,2048,128],['export',2,2]]);
-  assert.equal(cache.stats().coldRuns,1);assert.equal(cache.stats().runs,1);
+    [['cold',2],['cold',2],['export',2,2]]);
+  assert.equal(cache.stats().coldRuns,2);assert.equal(cache.stats().admissions,0);
 });
 test('compiled NeedCode returns unknown targets to cold execution',()=>{
-  const f=coldFixture([{stop:1,pc:0x1000,work:0},{stop:2,pc:0x2004,work:1}],
-    ()=>({id:1n,stop:1,next:0x2000}));
+  const f=coldFixture([{stop:2,pc:0x2004,work:1}],()=>({id:1n,stop:1,next:0x2000}));
   const cache=new CodeCache(f.engine,{chain:false,budget:1});
-  cache.execute(cache.select());cache.execute(cache.select());
-  assert.equal(cache.select(),null);const final=cache.execute(null);
+  cache.execute(cache.entry());assert.equal(cache.select(),null);
+  const final=cache.execute(null);
   assert.equal(final.pc,0x2004);assert.equal(cache.stats().admissions,1);
-  assert.equal(cache.stats().coldRuns,2);assert.equal(cache.stats().regions,1);
+  assert.equal(cache.stats().coldRuns,1);assert.equal(cache.stats().regions,1);
   assert.deepEqual(f.calls.filter(([name])=>name==='prepare').map(([,pc])=>pc),[0x1000]);
 });
-test('scheduler publication preserves a same-PC pending JIT handoff',()=>{
-  const f=coldFixture([{stop:1,pc:0x1004,work:1}]);
+test('scheduler publication preserves the exact cold continuation PC',()=>{
+  const f=coldFixture([{stop:1,pc:0x1004,work:1},{stop:2,pc:0x1008,work:1}]);
   const cache=new CodeCache(f.engine,{chain:false,budget:1});
   cache.execute(cache.select());cache.publish();cache.import();
-  assert.equal(cache.select().pc,0x1004);
-  assert.equal(f.calls.filter(([name])=>name==='cold').length,1);
+  assert.equal(cache.pc,0x1004);assert.equal(cache.select(),null);
+  assert.equal(cache.execute(null).pc,0x1008);
+  assert.equal(f.calls.filter(([name])=>name==='prepare').length,0);
 });
 test('cold zero budget is a closed no-work result and API rejection cannot compile',()=>{
   const f=coldFixture([{stop:2,pc:0x1000,work:0}]),cache=new CodeCache(f.engine,{chain:false});
@@ -361,14 +352,14 @@ test('cold zero budget is a closed no-work result and API rejection cannot compi
   assert.throws(()=>other.execute(other.select()),error=>error.operation==='core_cold_run'&&error.status===12);
   assert.equal(other.open,false);assert.equal(other.stats().coldRuns,0);assert.deepEqual(rejected.calls,[['cold',50000]]);
 });
-test('cold handoff fails closed on changed bindings, identity, or a zero-progress JIT retry',()=>{
+test('cold handoff rejects changed bindings, identity, and an explicitly compiled zero-progress retry',()=>{
   const changed=coldFixture([]),cache=new CodeCache(changed.engine,{chain:false});
   changed.api.core_cold_run=()=>2;assert.throws(()=>cache.execute(cache.select()),/bindings changed/);
   const invalid=coldFixture([{stop:2,work:0,words:[[120,1]]}]),bad=new CodeCache(invalid.engine,{chain:false});
   assert.throws(()=>bad.execute(bad.select()),/cold.*identity/);assert.equal(bad.stats().coldRuns,0);
   const stuck=coldFixture([{stop:1,pc:0x1000,work:0}],()=>({id:1n,stop:1,next:0x1000,work:0,retired:0}));
   const noSpin=new CodeCache(stuck.engine,{chain:false});noSpin.execute(noSpin.select());
-  assert.throws(()=>noSpin.execute(noSpin.select()),/no progress/);
+  const explicit=noSpin.entry();assert.throws(()=>noSpin.execute(explicit),/no progress/);
   assert.equal(stuck.calls.filter(([name])=>name==='prepare').length,1);
 });
 test('native prepare selects every requested entry and native identity controls reuse', () => {
@@ -958,13 +949,13 @@ test('a chained cold Budget terminal has no fabricated compiled owner and preser
   assert.deepEqual(f.calls.filter(([name])=>name==='export'),[['export',2,5]]);
 });
 
-test('a zero-work cold NeedCode after compiled progress requests JIT once instead of bouncing back to cold', () => {
+test('a zero-work chained cold handoff selects a retained owner without baseline formation', () => {
   const f=coldFixture([{stop:1,pc:0x1000,work:0}]);
   const encoded=coldDriver();
   f.api.core_dispatch_code_ptr=()=>{new Uint8Array(f.engine.memory.buffer,8192).set(encoded);return 8192;};
   f.api.core_dispatch_code_len=()=>encoded.length;
-  const cache=new CodeCache(f.engine,{chain:true,budget:7});
-  cache.execute(cache.select()); const unit=cache.select();
+  f.api.core_lookup=()=>{new DataView(f.engine.memory.buffer).setBigUint64(f.context+120,1n,true);return 0;};
+  const cache=new CodeCache(f.engine,{chain:true,budget:7}),unit=cache.entry();
   dispatchSteps(cache,f,[
     {id:0n,stop:1,pc:0x1000,work:2,retired:2,coldRuns:1,coldWork:0,coldRetired:0},
     {id:1n,stop:2,pc:0x1004,work:7,retired:7},
@@ -974,10 +965,10 @@ test('a zero-work cold NeedCode after compiled progress requests JIT once instea
     ['compiled',null,1,2,1,0]);
   assert(!f.calls.some(([name])=>name==='export'));
   const next=cache.select(); assert.equal(next,unit);
-  assert.deepEqual(f.calls.filter(([name])=>name==='prepare').map(([,pc])=>pc),[0x1000,0x1000]);
+  assert.deepEqual(f.calls.filter(([name])=>name==='prepare').map(([,pc])=>pc),[0x1000]);
   cache.execute(next);
-  assert.equal(f.calls.filter(([name])=>name==='cold').length,1,'only the initial standalone cold call occurred');
-  assert.deepEqual([cache.stats().runs,cache.stats().work,cache.stats().retired,cache.stats().coldRuns],[2,9,9,1]);
+  assert.equal(f.calls.filter(([name])=>name==='cold').length,0,'no standalone cold call was needed');
+  assert.deepEqual([cache.stats().runs,cache.stats().work,cache.stats().retired,cache.stats().coldRuns],[2,9,9,0]);
   assert.deepEqual([cache.stats().chainedColdRuns,cache.stats().chainedColdWork,cache.stats().chainedColdRetired],[1,0,0]);
   assert.deepEqual(f.calls.filter(([name])=>name==='export'),[['export',2,9]]);
   assert.equal(cache.pc,0x1004); assert.equal(cache.open,false);

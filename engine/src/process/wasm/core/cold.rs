@@ -67,9 +67,10 @@ fn run(
         numeric,
         cache,
         cold_state,
+        tracing,
         ..
     } = session;
-    execution::run_with_lookups(
+    let reason = execution::run_observed(
         instance,
         context,
         numeric,
@@ -77,7 +78,10 @@ fn run(
         &|modules, pc| modules.gate_at(pc).map(|gate| gate.id),
         &|memory, pc| cache.frontier_contains(memory, pc),
         cold_state,
-    ) as i32
+        tracing,
+    ) as i32;
+    tracing.end();
+    reason
 }
 
 pub(super) fn chain_next(
@@ -90,9 +94,10 @@ pub(super) fn chain_next(
         code,
         cache,
         cold_state,
+        tracing,
         ..
     } = session;
-    execution::chain_next(instance, context, numeric, code, cache, cold_state)
+    execution::chain_next_observed(instance, context, numeric, code, cache, cold_state, tracing)
 }
 
 pub(super) fn chain_probe(
@@ -113,12 +118,13 @@ pub(super) fn chain_cold(
     instance: &mut crate::process::EngineInstance,
     session: &mut CoreSession32,
 ) -> u32 {
-    execution::chain_cold(
+    execution::chain_cold_observed(
         instance,
         &mut session.context,
         &mut session.numeric,
         &mut session.code,
         &mut session.cache,
         &mut session.cold_state,
+        &mut session.tracing,
     )
 }

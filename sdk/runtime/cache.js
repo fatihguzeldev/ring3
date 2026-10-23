@@ -327,7 +327,7 @@ export class CodeCache {
   select(pc = this.pc) {
     if (this.open) throw new Error('cannot select code during execution');
     this.pristine();
-    if (this.native.core_cold_run && this.jitPc !== pc) {
+    if (this.native.core_cold_run) {
       if (this.native.core_lookup) {
         const lookup = () => {
           const status = this.native.core_lookup(pc) >>> 0;
@@ -458,7 +458,8 @@ export class CodeCache {
     }
     let unit = selected, status = this.native.core_begin();
     if (status === 4) {
-      unit = this.entry(this.pc);
+      unit = this.select(this.pc);
+      if (unit === null) return this.executeCold();
       status = this.native.core_begin();
     }
     if (status !== 0) throw Object.assign(new Error(`core_begin returned ${status}`), {operation: 'core_begin', status});
@@ -501,9 +502,9 @@ export class CodeCache {
     if (!this.native.core_trace_ready || this.native.core_trace_ready() !== 1) return;
     const root = this.native.core_trace_root() >>> 0;
     const status = this.native.core_trace_finish(root,this.instructions,this.blocks) >>> 0;
-    // A rejected optimization keeps the ordinary source owners and exact CPU
-    // result. Successful admission must reach the real SDK/table immediately.
-    if (status === 0) this.entry(root);
+    // The optimizer already selected the immutable owner. Installation must
+    // never invoke baseline formation, including after a cold-only capture.
+    if (status === 0) this.#selectedEntry(root,0);
     else if (![4,7,8,18,20].includes(status))
       throw Object.assign(new Error(`core_trace_finish returned ${status}`),{operation:'core_trace_finish',status});
   }
@@ -519,7 +520,9 @@ export class CodeCache {
     if (Number.isInteger(stop) && stop < 0)
       throw Object.assign(new Error(`core_cold_run returned ${stop}`),{operation:'core_cold_run',status:-stop});
     this.retainContext(this.native.core_context_ptr() >>> 0);
-    return this.finishRun(stop,before,0,'cold',startPc);
+    const result = this.finishRun(stop,before,0,'cold',startPc);
+    this.installRecordedTrace();
+    return result;
   }
   finishRun(stop,before,regions,kind,startPc,chainedColdRuns=0,chainedColdWork=0,chainedColdRetired=0,transientId=null) {
     const cold = kind === 'cold', retired = (this.word(40) - before) >>> 0;

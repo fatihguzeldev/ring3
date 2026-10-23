@@ -2,7 +2,7 @@ use crate::{
     cpu::{
         core::{
             COLD_MARK, Context32, STOP_MARK, StopReason,
-            cold::{self, ColdOutcome, ColdState},
+            cold::{self, ColdObserver, ColdOutcome, ColdState, Unobserved},
         },
         x86::SegmentContext,
     },
@@ -61,12 +61,32 @@ pub(in crate::process) fn chain_next(
     cache: &mut CoreCache32,
     cold: &mut ColdState,
 ) -> u32 {
+    chain_next_observed(
+        instance,
+        context,
+        numeric,
+        selected,
+        cache,
+        cold,
+        &mut Unobserved,
+    )
+}
+
+pub(in crate::process) fn chain_next_observed(
+    instance: &mut EngineInstance,
+    context: &mut Context32,
+    numeric: &mut NumericBank,
+    selected: &mut Option<RegionRef>,
+    cache: &mut CoreCache32,
+    cold: &mut ColdState,
+    observer: &mut impl ColdObserver,
+) -> u32 {
     let pc = context.state().eip;
     let next = probe(instance, context, selected, cache, pc);
     if next != COLD_MARK {
         return next;
     }
-    chain_cold(instance, context, numeric, selected, cache, cold)
+    chain_cold_observed(instance, context, numeric, selected, cache, cold, observer)
 }
 
 pub(in crate::process) fn chain_cold(
@@ -76,6 +96,26 @@ pub(in crate::process) fn chain_cold(
     selected: &mut Option<RegionRef>,
     cache: &mut CoreCache32,
     cold: &mut ColdState,
+) -> u32 {
+    chain_cold_observed(
+        instance,
+        context,
+        numeric,
+        selected,
+        cache,
+        cold,
+        &mut Unobserved,
+    )
+}
+
+pub(in crate::process) fn chain_cold_observed(
+    instance: &mut EngineInstance,
+    context: &mut Context32,
+    numeric: &mut NumericBank,
+    selected: &mut Option<RegionRef>,
+    cache: &mut CoreCache32,
+    cold: &mut ColdState,
+    observer: &mut impl ColdObserver,
 ) -> u32 {
     let Some(current) = selected.as_ref() else {
         return u32::MAX;
@@ -89,7 +129,7 @@ pub(in crate::process) fn chain_cold(
     let segments = numeric.segment_context();
     context.bytes_mut()[120..128].fill(0);
     *selected = None;
-    let reason = run_with_lookups(
+    let reason = run_observed(
         instance,
         context,
         numeric,
@@ -97,6 +137,7 @@ pub(in crate::process) fn chain_cold(
         &|modules, pc| modules.gate_at(pc).map(|gate| gate.id),
         &|memory, pc| cache.frontier_contains(memory, pc),
         cold,
+        observer,
     );
     if reason != StopReason::NeedCode {
         return COLD_MARK | STOP_MARK | reason as u32;
@@ -163,6 +204,28 @@ pub(in crate::process) fn run_with_lookups(
     frontier: &impl Fn(&AddressSpace, u32) -> bool,
     heat: &mut ColdState,
 ) -> StopReason {
+    run_observed(
+        instance,
+        context,
+        numeric,
+        segments,
+        gate_at,
+        frontier,
+        heat,
+        &mut Unobserved,
+    )
+}
+
+pub(in crate::process) fn run_observed(
+    instance: &mut EngineInstance,
+    context: &mut Context32,
+    numeric: &mut NumericBank,
+    segments: &SegmentContext,
+    gate_at: &impl Fn(&ModuleProcess32, u32) -> Option<u32>,
+    frontier: &impl Fn(&AddressSpace, u32) -> bool,
+    heat: &mut ColdState,
+    observer: &mut impl ColdObserver,
+) -> StopReason {
     loop {
         let outcome = {
             let EngineInstance {
@@ -171,13 +234,14 @@ pub(in crate::process) fn run_with_lookups(
             let Some(memory) = memory.as_mut() else {
                 return StopReason::Infrastructure;
             };
-            cold::run_with_lookups(
+            cold::run_observed(
                 memory,
                 context,
                 segments,
                 &|pc| gate_at(modules, pc),
                 frontier,
                 heat,
+                observer,
             )
         };
         let instruction = match outcome {
@@ -189,6 +253,7 @@ pub(in crate::process) fn run_with_lookups(
         }
         let result = numeric.execute(instance, context, &instruction);
         if !matches!(result, 0 | 6 | 10) {
+            observer.abandon_instruction();
             return match result {
                 1 => StopReason::NeedCode,
                 2 => StopReason::Budget,
@@ -212,9 +277,15 @@ pub(in crate::process) fn run_with_lookups(
             heat.retired(memory, instruction.pc);
         }
         match result {
-            6 => return StopReason::CodeInvalidated,
-            10 => return StopReason::SystemEntry,
-            _ => {}
+            6 => {
+                observer.abandon_instruction();
+                return StopReason::CodeInvalidated;
+            }
+            10 => {
+                observer.abandon_instruction();
+                return StopReason::SystemEntry;
+            }
+            _ => observer.complete_instruction(memory, context.state().eip),
         }
     }
 }

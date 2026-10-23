@@ -1,8 +1,10 @@
 use super::{CoreSession32, REGISTRY, Registry, cache::RegionRef, compile_status};
 use crate::{
     cpu::core::{
-        CompileOptions, compile_observed_with_growth,
-        trace::{self, TraceArena, TraceEvent},
+        CompileOptions,
+        cold::ColdObserver,
+        compile_observed_with_cold, compile_observed_with_growth,
+        trace::{self, CompletedColdObservation, PendingColdObservation, TraceArena, TraceEvent},
     },
     memory::{AddressSpace, GuestAddress},
 };
@@ -15,6 +17,8 @@ pub(super) struct TraceController {
     owners: Vec<RegionRef>,
     ended: bool,
     manual: bool,
+    cold: Vec<CompletedColdObservation>,
+    pending: Option<PendingColdObservation>,
 }
 
 impl Default for TraceController {
@@ -27,6 +31,8 @@ impl Default for TraceController {
             owners: Vec::new(),
             ended: false,
             manual: false,
+            cold: Vec::new(),
+            pending: None,
         }
     }
 }
@@ -39,8 +45,28 @@ impl TraceController {
         self.source_version = memory.code_source_version();
         self.owners.clear();
         self.owners.push(code);
+        self.cold.clear();
+        self.pending = None;
         self.ended = false;
         self.manual = manual;
+    }
+
+    fn start_cold(&mut self, memory: &AddressSpace, root: u32) {
+        self.arena.begin();
+        self.root = Some(root);
+        self.memory_identity = memory.identity();
+        self.source_version = memory.code_source_version();
+        self.owners.clear();
+        self.cold.clear();
+        self.pending = None;
+        self.ended = false;
+        self.manual = false;
+    }
+
+    pub(super) fn cold_boundary(&mut self) {
+        if self.manual {
+            self.end();
+        }
     }
 
     pub(super) fn observe(&mut self, code: &RegionRef) {
@@ -78,6 +104,7 @@ impl TraceController {
         if self.root.is_some() {
             self.arena.deactivate();
             self.ended = true;
+            self.pending = None;
         }
     }
 
@@ -85,6 +112,8 @@ impl TraceController {
         self.arena.deactivate();
         self.root = None;
         self.owners.clear();
+        self.cold.clear();
+        self.pending = None;
         self.ended = false;
         self.manual = false;
     }
@@ -99,6 +128,53 @@ impl TraceController {
         } else {
             0
         }
+    }
+}
+
+impl ColdObserver for TraceController {
+    fn exact_cold(&self) -> bool {
+        true
+    }
+    fn begin_instruction(
+        &mut self,
+        memory: &AddressSpace,
+        instruction: &crate::cpu::core::NativeInstruction,
+        hot: bool,
+    ) -> bool {
+        if self.root.is_none() && hot {
+            self.start_cold(memory, instruction.pc);
+        }
+        if self.arena.active == 1 {
+            self.pending = PendingColdObservation::capture(memory, instruction);
+            if self.pending.is_none() {
+                self.end();
+            }
+        }
+        true
+    }
+
+    fn complete_instruction(&mut self, memory: &AddressSpace, actual_post_pc: u32) {
+        let Some(pending) = self.pending.take() else {
+            return;
+        };
+        let Some(completed) = pending.complete(memory, actual_post_pc) else {
+            self.end();
+            return;
+        };
+        let Some(event) = completed.event(self.cold.len()) else {
+            self.end();
+            return;
+        };
+        if self.arena.push(event) {
+            self.cold.push(completed);
+        }
+        if self.arena.active != 1 {
+            self.end();
+        }
+    }
+
+    fn abandon_instruction(&mut self) {
+        self.end();
     }
 }
 
@@ -230,22 +306,38 @@ pub(crate) fn core_trace_finish(root: u32, instructions: u32, blocks: u32) -> u3
         };
         let events = core.tracing.arena.snapshot().map(<[TraceEvent]>::to_vec);
         let valid = memory.identity() == core.tracing.memory_identity
-            && memory.code_source_version() == core.tracing.source_version;
+            && (!core.tracing.manual
+                || memory.code_source_version() == core.tracing.source_version);
         let result = if let Some(events) = events.filter(|_| valid) {
             let owners: Vec<_> = core.tracing.owners.iter().map(|owner| &**owner).collect();
-            compile_observed_with_growth(
-                memory,
-                GuestAddress(root),
-                CompileOptions {
-                    instructions: instructions as usize,
-                    blocks: blocks as usize,
-                    ..CompileOptions::default()
-                },
-                &events,
-                &owners,
-                core.tracing.source_version,
-                core.cache.trace_score(memory, root),
-            )
+            let options = CompileOptions {
+                instructions: instructions as usize,
+                blocks: blocks as usize,
+                ..CompileOptions::default()
+            };
+            if !core.tracing.manual {
+                let previous = core.cache.observed_owner(memory, root);
+                compile_observed_with_cold(
+                    memory,
+                    GuestAddress(root),
+                    options,
+                    &events,
+                    &owners,
+                    memory.code_source_version(),
+                    &core.tracing.cold,
+                    previous.as_ref().map(|owner| &**owner),
+                )
+            } else {
+                compile_observed_with_growth(
+                    memory,
+                    GuestAddress(root),
+                    options,
+                    &events,
+                    &owners,
+                    core.tracing.source_version,
+                    core.cache.trace_score(memory, root),
+                )
+            }
         } else {
             Ok(None)
         };
