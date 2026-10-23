@@ -156,6 +156,26 @@ function transientFixture() {
   return f;
 }
 
+test('recorded installation uses an explicit zero anchor and accepts legacy trace metadata',()=>{
+  for(const [installedState,anchor] of [[2,0],[0,0x2000]]) {
+    const f=fixture();
+    f.api.core_prepare(anchor,8,2);
+    let installed=false;
+    f.api.core_trace_ready=()=>installed ? installedState : 1;
+    f.api.core_trace_root=()=>installed ? 0 : 0x2000;
+    f.api.core_trace_finish=(root,instructions,blocks)=>{
+      assert.deepEqual([root,instructions,blocks],[0x2000,8,2]);
+      installed=true;return 0;
+    };
+    const cache=new CodeCache(f.engine,{chain:false,instructions:8,blocks:2});
+    cache.installRecordedTrace();
+    assert.equal(cache.admissions,1);
+    assert.equal([...cache.units.values()][0].pc,anchor);
+    assert.equal(f.calls.filter(([name])=>name==='prepare').length,1,
+      'installation consumes the prepared owner without invoking compilation');
+  }
+});
+
 test('owned-bound transient executes standalone once and leaves retained units and table ownership intact',()=>{
   const f=transientFixture(),cache=new CodeCache(f.engine,{chain:true,budget:1});
   const owner=cache.entry(0x1000),slots=[...f.links],before=cache.stats();

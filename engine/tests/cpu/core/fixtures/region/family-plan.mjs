@@ -1,0 +1,216 @@
+import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
+import {readFileSync,writeFileSync,openSync,closeSync} from 'node:fs';
+import {pathToFileURL} from 'node:url';
+import {readEngine} from '../../../../support/wasm/engine.mjs';
+import {coldFixture,coldLiteral} from '../../../../support/core_wasm/cold_observed.mjs';
+
+const A=0x1000,B=0x1100,C=0x1200,D=0x1300;
+const A_PORTS=[0x1000,0x1002,0x1005,0x1006,0x1008];
+const B_PORTS=[0x1100,0x1102,0x1105,0x1106,0x1108];
+const C_PORTS=[0x1200,0x1202,0x1204,0x120a];
+const unhex=value=>Uint8Array.from(Buffer.from(value.replaceAll(' ',''),'hex'));
+const hash=value=>createHash('sha256').update(value).digest('hex');
+const trainRegisters=[0,128,0,0x3000,0x4800,0x12345678,B,A];
+const bridgeRegisters=(count,prefix=C)=>[0,count,0,0x3000,0x4800,0x12345678,prefix,prefix];
+
+function source(world) {
+  return world.bytes(world.raw.core_code_ptr()>>>0,world.raw.core_code_len()>>>0);
+}
+
+function saved(world,unit) {
+  assert.equal(world.cache.select(unit.pc),unit);
+  const bytes=source(world);
+  return{unit,id:unit.id,slot:unit.slot,run:unit.run,link:unit.link,publish:unit.publish,
+    bytes:bytes.length,sha256:hash(bytes)};
+}
+
+function assertOwner(world,owner,ports) {
+  const {unit}=owner;
+  assert.equal(world.cache.units.get(owner.id),unit);
+  for(const pc of ports) {
+    assert.equal(world.cache.select(pc),unit,'an exact historical port keeps its immutable owner');
+    assert.equal(world.bigint(world.context,120),owner.id);
+    const bytes=source(world);assert.equal(bytes.length,owner.bytes);assert.equal(hash(bytes),owner.sha256);
+  }
+  assert.equal(unit.slot,owner.slot);assert.equal(unit.run,owner.run);
+  assert.equal(unit.link,owner.link);assert.equal(unit.publish,owner.publish);
+  assert.equal(world.cache.table.get(owner.slot),owner.link);
+  assert.equal(world.cache.publishers.get(owner.slot),owner.publish);
+  assert.equal(world.bigint(world.raw.core_link_owners_ptr(),owner.slot*8),owner.id);
+}
+
+function moduleCount(world) {return world.result.modules.filter(module=>module.kind==='guest').length;}
+
+function trainParents(world) {
+  let before=world.snapshot(),run=world.execute(640,A);
+  coldLiteral(world,before,run,{pc:0x100b,retired:640,budget:640,
+    registers:[128,0,...trainRegisters.slice(2)],flags:0x46,writes:[],versionWrites:0,
+    fpRegisters:{0:'00000000000080810740'},fpPc:A,identity:world.bigint(world.context,120)});
+  world.result.parentASemanticComplete=true;
+  assert.equal(world.cache.admissions,1);assert.equal(world.cache.units.size,1);
+  const first=saved(world,[...world.cache.units.values()][0]);assertOwner(world,first,A_PORTS);
+
+  world.reset({registers:trainRegisters,pc:B});before=world.snapshot();run=world.execute(640,B);
+  coldLiteral(world,before,run,{pc:0x110b,retired:640,budget:640,
+    registers:[384,0,...trainRegisters.slice(2)],flags:0x46,writes:[],versionWrites:0,
+    fpRegisters:{0:'00000000000080810740'},fpPc:B,identity:world.bigint(world.context,120)});
+  world.result.parentBSemanticComplete=true;
+  assert.equal(world.cache.admissions,2);assert.equal(world.cache.units.size,2);
+  const second=saved(world,[...world.cache.units.values()].find(unit=>unit.id!==first.id));
+  assert.notEqual(first.id,second.id);assertOwner(world,first,A_PORTS);assertOwner(world,second,B_PORTS);
+  assert.equal(moduleCount(world),2);assert.equal(world.moduleRecords.size,2);
+  assert.equal(world.raw.core_lookup(C)>>>0,4,'the connecting path has never been compiled or executed');
+  world.result.parents=[first,second].map(owner=>({id:String(owner.id),slot:owner.slot,
+    bytes:owner.bytes,sha256:owner.sha256}));
+  return[first,second];
+}
+
+function bridge(world,count,fp,prefix=C) {
+  const odd=count%2===1,registers=bridgeRegisters(count,prefix);
+  world.reset({registers,pc:A});const before=world.snapshot();
+  const budget=5*count-1+4*Math.floor(count/2)+3*Math.floor((count-1)/2);
+  const run=world.execute(budget,A);
+  coldLiteral(world,before,run,{pc:odd?0x100a:0x110a,retired:budget,budget,
+    registers:[count+2*Math.floor(count/2),0,odd?0:0xffffffff,...registers.slice(3)],flags:0x46,
+    writes:[],versionWrites:0,fpRegisters:{0:fp},fpPc:odd?A:B,
+    identity:world.bigint(world.context,120)});
+  return{before,run};
+}
+
+function noNewModule(world,checkpoint) {
+  assert.equal(world.cache.admissions,checkpoint.admissions);
+  assert.equal(world.cache.generatedModuleBytes,checkpoint.bytes);
+  assert.equal(moduleCount(world),checkpoint.modules);
+  assert.equal(world.moduleRecords.size,checkpoint.records);
+  assert.equal(world.cache.transientAdmissions,0);assert.equal(world.prepares,0);
+}
+
+function checkpoint(world) {
+  return{admissions:world.cache.admissions,bytes:world.cache.generatedModuleBytes,
+    modules:moduleCount(world),records:world.moduleRecords.size};
+}
+
+function requireRecordedParents(world,parents,prefix=C) {
+  const recording=world.recording();world.result.bridgeCapture=recording;
+  assert.equal(recording.active,0);assert.equal(recording.overflow,0);assert(recording.used>0);
+  assert(recording.events.some(event=>event.kind===3&&event.owner==='0'&&event.pc===prefix),
+    'normal heat records the genuinely unowned connecting prefix');
+  for(const owner of parents)assert(recording.events.some(event=>event.kind===1&&event.owner===String(owner.id)),
+    'the actual connected capture holds each distinct current parent authority');
+}
+
+function rotatePorts(world,owner,ports) {
+  const retained=checkpoint(world);
+  for(const pc of ports) {
+    world.reset({registers:bridgeRegisters(9),pc});const before=world.snapshot(),run=world.execute(0,pc);
+    coldLiteral(world,before,run,{pc,retired:0,budget:0,registers:bridgeRegisters(9),flags:2,
+      fp:before.fp,writes:[],versionWrites:0});
+    assert.equal(run.id,owner.id);
+  }
+  assertOwner(world,owner,ports);noNewModule(world,retained);
+}
+
+export function runFamilyPlanCases(artifact,report,{boundedOnly=false}={}) {
+  const code=new Uint8Array(4096);
+  code.set(unhex('d8c1 83c001 49 7402 ffe7 90 0f0b'));
+  code.set(unhex('d8c1 83c003 49 7402 ffe6 90 0f0b'),0x100);
+  code.set(unhex('f7d2 85d2 0f84f6fdffff e9f1feffff'),0x200);
+  code.set(unhex('40 49 75fc 90 0f0b'),0x300);
+
+  if(!boundedOnly)coldFixture(artifact,report,'connected-observed-plan-atomically-absorbs-two-current-families',
+    {code,registers:trainRegisters},world=>{
+      const parents=trainParents(world),epoch=world.bigint(world.word(world.context,88));
+      bridge(world,192,'00000000000080c10740');world.result.bridgeSemanticComplete=true;
+      requireRecordedParents(world,parents);
+      assert.equal(world.bigint(world.word(world.context,88)),epoch);
+      assert.equal(world.cache.admissions,3,'one new connected family is admitted after both parents');
+      assert.equal(world.cache.units.size,1,'all current connected parents are absorbed atomically');
+      const owner=saved(world,[...world.cache.units.values()][0]);
+      assert.equal(owner.id,parents[1].id+1n,'planning consumes no executor identity before the one accepted emission');
+      for(const parent of parents) {
+        assert.equal(world.cache.units.has(parent.id),false);
+        assert.equal(world.bigint(world.raw.core_link_owners_ptr(),parent.slot*8),
+          parent.slot===owner.slot?owner.id:0n,'every old reciprocal native slot is retired before reuse');
+        if(parent.slot!==owner.slot) {
+          assert.equal(world.cache.table.get(parent.slot),null);
+          assert.equal(world.cache.publishers.get(parent.slot),null);
+        }
+      }
+      assert.equal(moduleCount(world),3);assert.equal(world.moduleRecords.size,3);
+      const ports=[...A_PORTS,...B_PORTS,...C_PORTS];assertOwner(world,owner,ports);
+      const retained=checkpoint(world);
+      for(const[count,fp]of[[9,'00000000000000a80340'],[2048,'00000000000018800b40']]) {
+        const {run}=bridge(world,count,fp);
+        assert.equal(run.id,owner.id);assert.equal(run.regions,1,'the whole observed bridge remains inside one actual body');
+        assert.equal(run.chainedColdWork,0);noNewModule(world,retained);
+      }
+      rotatePorts(world,owner,ports);
+      assertOwner(world,owner,ports);world.result.semanticComplete=true;
+    });
+
+  coldFixture(artifact,report,'overbound-connected-plan-compiles-only-unowned-pc-zero-prefix-to-existing-frontier',
+    {code,registers:trainRegisters},world=>{
+      const zeroCode=new Uint8Array(4096);
+      zeroCode.set(unhex('f7d2 85d2 0f84f60f0000 e9f1100000'));
+      world.engine.ok('map',0,1,7);world.engine.request(zeroCode);world.engine.ok('upload',0,4096);
+      const prefixPorts=[0,2,4,0xa];
+      const parents=trainParents(world),epoch=world.bigint(world.word(world.context,88));
+      // The existing five-node families remain valid. Fourteen historical
+      // nodes cannot fit this requested graph budget; the four-node unowned
+      // bridge can fit without absorbing or shortening either parent.
+      world.cache.instructions=8;
+      bridge(world,192,'00000000000080c10740',0);world.result.bridgeSemanticComplete=true;
+      requireRecordedParents(world,parents,0);
+      assert.equal(world.bigint(world.word(world.context,88)),epoch);
+      assert.equal(world.cache.admissions,3,'bounded refusal still admits the exact unowned cold prefix');
+      assert.equal(world.cache.units.size,3);
+      for(const[parent,ports]of[[parents[0],A_PORTS],[parents[1],B_PORTS]])assertOwner(world,parent,ports);
+      const prefix=saved(world,[...world.cache.units.values()].find(unit=>!parents.some(parent=>parent.id===unit.id)));
+      assert.equal(prefix.unit.pc,0,'successful installation preserves an actual zero-valued prefix anchor');
+      assert.equal(world.raw.core_trace_ready(),2,'installed-root metadata is explicit even when its PC is zero');
+      assert.equal(world.raw.core_trace_root(),0);
+      assert.equal(prefix.id,parents[1].id+1n,'the rejected full union allocates no identity or emitted executor');
+      assertOwner(world,prefix,prefixPorts);
+      assert.equal(moduleCount(world),3);assert.equal(world.moduleRecords.size,3);
+      const retained=checkpoint(world);
+      for(const[count,fp]of[[9,'00000000000000a80340'],[2048,'00000000000018800b40']]) {
+        const {run}=bridge(world,count,fp,0);
+        assert.equal(run.regions,2*count-1,'each immutable parent and the exact bridge prefix executes once per actual visit');
+        assert.equal(run.chainedColdWork,0,'the resource refusal never forces known code back through cold execution');
+        noNewModule(world,retained);
+        for(const[parent,ports]of[[parents[0],A_PORTS],[parents[1],B_PORTS]])assertOwner(world,parent,ports);
+        assertOwner(world,prefix,prefixPorts);
+      }
+      // The long replay crosses the existing hot-capture threshold. A later
+      // independent accepted family makes any hidden refused emission visible
+      // as an identity gap; module-constructor counters alone cannot prove it.
+      world.reset({registers:[0,128,...trainRegisters.slice(2)],pc:D});
+      const before=world.snapshot(),run=world.execute(385,D);
+      coldLiteral(world,before,run,{pc:0x1305,retired:385,budget:385,
+        registers:[128,0,...trainRegisters.slice(2)],flags:0x46,fp:before.fp,writes:[],versionWrites:0,
+        identity:world.bigint(world.context,120)});
+      const next=[...world.cache.units.values()].find(unit=>unit.id!==prefix.id&&!parents.some(parent=>parent.id===unit.id));
+      assert(next);assert.equal(next.id,prefix.id+1n,'equal/refused replay performs no hidden identity allocation or Wasm emission');
+      assert.equal(world.cache.admissions,4);assert.equal(world.cache.units.size,4);
+      assert.equal(moduleCount(world),4);assert.equal(world.moduleRecords.size,4);
+      for(const[parent,ports]of[[parents[0],A_PORTS],[parents[1],B_PORTS]])assertOwner(world,parent,ports);
+      assertOwner(world,prefix,prefixPorts);assert.equal(world.prepares,0);world.result.semanticComplete=true;
+    });
+}
+
+if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href) {
+  const[enginePath,reportPath,...flags]=process.argv.slice(2);
+  assert(enginePath&&reportPath&&flags.every(flag=>flag==='--bounded-prefix'),
+    'usage: family-plan.mjs engine.wasm fresh-report.json [--bounded-prefix]');
+  const artifact=readEngine(enginePath),sources=['./family-plan.mjs','../../../../support/core_wasm/cold_observed.mjs',
+    '../../../../../../sdk/runtime/cache.js'];
+  const report={schema:1,complete:false,engineSha256:artifact.sha256,
+    sources:Object.fromEntries(sources.map(path=>[path,hash(readFileSync(new URL(path,import.meta.url)))])),
+    scope:'actual connected-family planning, atomic ownership and bounded cold-prefix compilation; no performance claim',cases:[]};
+  closeSync(openSync(reportPath,'wx'));
+  try {runFamilyPlanCases(artifact,report,{boundedOnly:flags.includes('--bounded-prefix')});report.complete=true;}
+  catch(error){report.failure={message:String(error),stack:error.stack};throw error;}
+  finally{writeFileSync(reportPath,JSON.stringify(report,null,2));}
+  console.log(JSON.stringify({complete:true,engineSha256:artifact.sha256,cases:report.cases.length}));
+}
