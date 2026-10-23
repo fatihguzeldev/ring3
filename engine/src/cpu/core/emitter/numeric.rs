@@ -5,6 +5,7 @@ mod ieee;
 mod memory;
 pub(super) mod pool;
 pub(super) mod record;
+mod service;
 mod simd;
 pub(super) mod span;
 
@@ -12,11 +13,8 @@ pub(super) const BANK_POINTER: u64 = 92;
 pub(super) const SIMD_MXCSR: u64 = 112;
 pub(super) const SIMD_XMM: u64 = 116;
 
-use super::{CTX, FLAGS, KIND, Output, WRITE_STATUS, mem};
-use crate::cpu::{
-    core::StopReason,
-    x86::{ControlOperation, X87Condition, X87Operation, ir::Operation},
-};
+use super::{Output, mem};
+use crate::cpu::x86::{ControlOperation, X87Condition, X87Operation, ir::Operation};
 use wasm_encoder::BlockType;
 
 pub(super) use frame::{
@@ -25,11 +23,19 @@ pub(super) use frame::{
     normalizer_kernel_results, normalizer_parameters, normalizer_results,
 };
 pub(super) use frame::{emit_edge, emit_frame, enter_block};
+pub(super) use service::emit as emit_service;
 
 pub(super) fn enter_port(out: &mut Output<'_>) {
     // An interior port imports the actual identity state, never the skipped
     // prefix's aliases, stack shape, or historical metadata.
+    // A canonical service continuation already relinquished the entire pool.
+    // Fresh external/planned ports still publish their actual identity first.
+    out.c()
+        .local_get(frame::EXACT_SUFFIX)
+        .i32_eqz()
+        .if_(BlockType::Empty);
     span::invalidate(out);
+    out.c().end();
     out.c()
         .i32_const(1)
         .local_set(frame::EXACT_SUFFIX)
@@ -129,112 +135,17 @@ pub(super) fn emit(out: &mut Output<'_>, next: u32) {
         .unwrap()
         .operation;
     if direct::state(out, operation) {
-        slow(out, next, true);
+        service::request(out, next, true);
         out.c().end();
         return;
     }
     out.c().local_get(frame::EXACT_SUFFIX).if_(BlockType::Empty);
-    slow(out, next, false);
+    service::request(out, next, false);
     out.c().else_();
     let direct = direct::begin(out, operation, next) || simd::begin(out, operation, next);
-    slow(out, next, true);
+    service::request(out, next, true);
     if direct {
         out.c().end();
     }
     out.c().end();
-}
-
-fn slow(out: &mut Output<'_>, next: u32, planned: bool) {
-    out.address_fact = None;
-    if planned && let Some(before) = out.before_frame {
-        frame::emit_frame(out, before);
-        frame::normalize_frame(out);
-    }
-    span::invalidate(out);
-    out.c().i32_const(1).local_set(frame::EXACT_SUFFIX);
-    let ordinal = out
-        .native
-        .iter()
-        .position(|instruction| instruction.pc == out.pc)
-        .expect("native instruction is retained");
-    let transfer = X87Transfer::for_operation(out.native[ordinal].operation);
-    if let Some(transfer) = transfer {
-        if transfer.flags != 0 {
-            out.materialize(transfer.flags);
-            if transfer.flags_output {
-                out.c().i32_const(0).local_set(KIND);
-            }
-            out.c()
-                .local_get(CTX)
-                .local_get(FLAGS)
-                .i32_store(mem(36, 2));
-        }
-        for register in 0..8 {
-            if transfer.inputs & (1 << register) != 0 {
-                out.c()
-                    .local_get(CTX)
-                    .local_get(register + 2)
-                    .i32_store(mem(u64::from(register * 4), 2));
-            }
-        }
-    } else {
-        out.materialize(super::super::flags::ARITHMETIC);
-        out.c().i32_const(0).local_set(KIND);
-        out.publish_operands();
-    }
-    crate::cpu::core::memory::authority::flush(out.c().raw());
-    out.c()
-        .local_get(CTX)
-        .i32_const(ordinal as i32)
-        .call(2)
-        .local_set(WRITE_STATUS);
-    crate::cpu::core::memory::authority::load(out.c().raw());
-    crate::cpu::core::memory::cache::invalidate(out.c().raw());
-    out.c()
-        .local_get(WRITE_STATUS)
-        .i32_const(StopReason::SystemEntry as i32)
-        .i32_gt_u()
-        .if_(BlockType::Empty);
-    out.exit(StopReason::Infrastructure, Some(out.pc), out.prefix);
-    out.c().end();
-    out.c()
-        .local_get(WRITE_STATUS)
-        .i32_const(StopReason::CodeInvalidated as i32)
-        .i32_eq()
-        .if_(BlockType::Empty);
-    reload(out, transfer);
-    out.exit(StopReason::CodeInvalidated, Some(next), out.prefix + 1);
-    out.c().end();
-    out.c()
-        .local_get(WRITE_STATUS)
-        .i32_const(StopReason::SystemEntry as i32)
-        .i32_eq()
-        .if_(BlockType::Empty);
-    reload(out, transfer);
-    out.exit(StopReason::SystemEntry, Some(next), out.prefix + 1);
-    out.c().end();
-    out.c().local_get(WRITE_STATUS).if_(BlockType::Empty);
-    out.publish_exit(Some(out.pc), out.prefix);
-    out.c().local_get(WRITE_STATUS).return_().end();
-    reload(out, transfer);
-}
-
-fn reload(out: &mut Output<'_>, transfer: Option<X87Transfer>) {
-    let outputs = transfer.map_or(u8::MAX, |transfer| transfer.outputs);
-    for register in 0..8 {
-        if outputs & (1 << register) != 0 {
-            out.c()
-                .local_get(CTX)
-                .i32_load(mem(u64::from(register * 4), 2))
-                .local_set(register + 2);
-        }
-    }
-    if transfer.is_none_or(|transfer| transfer.flags_output) {
-        out.c()
-            .local_get(CTX)
-            .i32_load(mem(36, 2))
-            .local_set(FLAGS)
-            .i32_const(0)
-            .local_set(KIND);
-    }
 }

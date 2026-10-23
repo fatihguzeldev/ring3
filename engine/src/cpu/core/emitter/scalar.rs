@@ -1,12 +1,10 @@
-use super::{CARRY_IN, FLAGS, FULL_BLOCK, LEFT, Output, RIGHT, VALUE};
+use super::{CARRY_IN, FLAGS, FULL_BLOCK, LEFT, Output, RIGHT, SCALAR_CACHE_BASE, VALUE};
 use crate::cpu::core::{
     flags::{self, FlagKind},
     region::values::scalar::{FlagRecipe, ReadAvailability},
 };
 use crate::cpu::x86::ir::Condition;
 use wasm_encoder::{BlockType, ValType};
-
-const CACHE_BASE: u32 = 172;
 
 fn recipe(out: &Output<'_>) -> Option<FlagRecipe> {
     out.before_frame
@@ -342,13 +340,13 @@ fn read(out: &Output<'_>, width: u32, prepare: bool) -> Option<ReadAvailability>
 pub(super) fn reusable_read(out: &Output<'_>, width: u32, prepare: bool) -> Option<u32> {
     read(out, width, prepare)
         .filter(|read| !read.first)
-        .map(|read| CACHE_BASE + read.slot)
+        .map(|read| SCALAR_CACHE_BASE + read.slot)
 }
 
 pub(super) fn capture_read(out: &mut Output<'_>, width: u32, destination: u32, prepare: bool) {
     if let Some(read) = read(out, width, prepare) {
         out.c()
             .local_get(destination)
-            .local_set(CACHE_BASE + read.slot);
+            .local_set(SCALAR_CACHE_BASE + read.slot);
     }
 }

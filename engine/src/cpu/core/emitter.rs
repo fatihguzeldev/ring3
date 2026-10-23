@@ -50,6 +50,11 @@ pub(super) const ENTRY_OFFSET: u32 = 130;
 pub(super) const PREFIX_BASE: u32 = 131;
 pub(super) const FULL_BLOCK: u32 = 151;
 pub(super) const SERVICE_RESUME: u32 = 157;
+pub(super) const SERVICE_ORDINAL: u32 = 172;
+pub(super) const SERVICE_PC: u32 = 173;
+pub(super) const SERVICE_NEXT: u32 = 174;
+pub(super) const SERVICE_TRANSFER: u32 = 175;
+pub(super) const SCALAR_CACHE_BASE: u32 = 176;
 
 const BLOCK_BITS: u32 = 10;
 
@@ -341,6 +346,7 @@ fn run(
         (23, ValType::I32),
         (2, ValType::I64),
         (15, ValType::I32),
+        (4, ValType::I32),
         (execution.scalar.cache_count() as u32, ValType::I32),
     ]);
     let mut out = Output {
@@ -426,16 +432,19 @@ fn run(
     super::memory::load_view(out.c().raw());
     out.lookup_port(EIP);
     // Bootstrap runs once. Every exact prefix exits the inner block to the
-    // single selective commit; computed targets resume the retained body here.
+    // single selective commit; computed targets and canonical helper requests
+    // resume the retained body here without repeating register bootstrap.
     out.c().loop_(BlockType::Empty).block(BlockType::Empty);
     out.return_target = Some(out.depth);
     region::emit(&mut out, graph);
     out.c().end();
     out.return_target = Some(1);
     numeric::emit_inline_commit(&mut out);
+    out.c().local_get(SERVICE_RESUME).if_(BlockType::Empty);
+    // Ordinary exits retain the existing single mode test. The helper spine is
+    // reached only for a service request; computed restarts simply pass it.
+    numeric::emit_service(&mut out);
     out.c()
-        .local_get(SERVICE_RESUME)
-        .if_(BlockType::Empty)
         .i32_const(0)
         .local_set(SERVICE_RESUME)
         .br(1)
