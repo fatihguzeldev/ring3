@@ -54,6 +54,8 @@ export class CodeCache {
     this.units = new Map(); this.context = 0; this.open = false; this.dirty = false; this.dirtyWork = 0; this.lastStop = 1;
     this.runs = 0; this.regions = 0; this.retired = 0; this.work = 0; this.admissions = 0; this.hits = 0; this.evictions = 0;
     this.coldRuns = 0; this.coldRetired = 0; this.coldWork = 0; this.jitPc = null;
+    this.transient = null;
+    this.transientAdmissions = 0; this.transientRuns = 0; this.transientModuleBytes = 0;
     this.chainedColdRuns = 0; this.chainedColdWork = 0; this.chainedColdRetired = 0;
     this.evictionReasons = {count:0,bytes:0};
     this.prunedNative = 0; this.prunedNativeBytes = 0; this.nativeCache = undefined;
@@ -311,13 +313,24 @@ export class CodeCache {
   entry(pc = this.pc) {
     if (this.open) throw new Error('cannot select code during execution');
     this.pristine();
-    if (this.compilation) this.measureCompilation('prepare',()=>this.engine.ok('core_prepare',pc,this.instructions,this.blocks),pc);
-    else this.engine.ok('core_prepare', pc, this.instructions, this.blocks);
+    const prepare = () => {
+      const status = this.native.core_prepare(pc,this.instructions,this.blocks) >>> 0;
+      if (status !== 0 && status !== 18)
+        throw Object.assign(new Error(`core_prepare returned ${status}`),{operation:'core_prepare',status});
+      return status;
+    };
+    const prepared = this.compilation ? this.measureCompilation('prepare',prepare,pc) : prepare();
     const context = this.native.core_context_ptr() >>> 0;
+    if (prepared === 18 && (!context || context % 8 || context+128 > this.memory.buffer.byteLength))
+      throw Object.assign(new Error('core_prepare returned 18'),{operation:'core_prepare',status:18});
     this.retainContext(context);
-    const id = new DataView(this.memory.buffer).getBigUint64(context + 120, true);
+    const view = new DataView(this.memory.buffer), id = view.getBigUint64(context + 120, true);
+    const transient = prepared === 18 && view.getUint32(context+112,true) === 2 && id !== 0n;
+    if (prepared === 18 && !transient)
+      throw Object.assign(new Error('core_prepare returned 18'),{operation:'core_prepare',status:18});
+    this.transient = null;
     if (id === 0n) throw new Error('core code has no identity');
-    if (this.units.has(id)) {
+    if (!transient && this.units.has(id)) {
       const unit = this.units.get(id);
       if (!this.chain) {this.units.delete(id); this.units.set(id, unit);}
       this.hits++;
@@ -357,6 +370,12 @@ export class CodeCache {
     if (this.linkedCore && (typeof link !== 'function' || link.length !== 2 ||
         typeof publish !== 'function' || publish.length !== 1)) throw new Error('invalid core link exports');
     const unit = {id, pc, run, link, publish, bytes: length};
+    if (transient) {
+      unit.transient = true;
+      this.transient = unit;
+      this.transientAdmissions++; this.transientModuleBytes += length; this.generatedModuleBytes += length;
+      return unit;
+    }
     while (this.units.size >= this.capacity || this.retainedModuleBytes + length > MAX_CODE_BYTES)
       this.evict(this.retainedModuleBytes + length > MAX_CODE_BYTES ? 'bytes' : 'count');
     if (this.chain) {
@@ -377,10 +396,14 @@ export class CodeCache {
     if (this.open) throw new Error('core execution is already active');
     this.pristine();
     if (selected === null && this.native.core_cold_run) return this.executeCold();
-    if (!selected || this.units.get(selected.id) !== selected) throw new Error('core region is not retained by this cache');
+    if (!selected || (selected.transient ? this.transient !== selected : this.units.get(selected.id) !== selected))
+      throw new Error('core region is not retained by this cache');
     if (this.dirtyWork > 0xffffffff - this.budget) this.publish();
     let unit = selected, status = this.native.core_begin();
-    if (status === 4) { unit = this.entry(this.pc); status = this.native.core_begin(); }
+    if (status === 4) {
+      unit = this.entry(this.pc);
+      status = this.native.core_begin();
+    }
     if (status !== 0) throw Object.assign(new Error(`core_begin returned ${status}`), {operation: 'core_begin', status});
     this.open = true;
     const before = this.word(40), startPc = this.pc;
@@ -388,8 +411,8 @@ export class CodeCache {
     let regions;
     let chainedColdRuns = 0, chainedColdWork = 0, chainedColdRetired = 0;
     try {
-      if (this.compilation) this.recordSourceWitness(unit);
-      if (this.chain) {
+      if (this.compilation && !unit.transient) this.recordSourceWitness(unit);
+      if (this.chain && !unit.transient) {
         if (this.table.get(unit.slot) !== (this.linkedCore ? unit.link : unit.run) ||
             (this.linkedCore && this.publishers.get(unit.slot) !== unit.publish)) throw new Error('core table binding changed');
         stop = this.dispatch.run(this.context,this.budget,unit.slot) >>> 0;
@@ -408,10 +431,12 @@ export class CodeCache {
         if(this.linkedCore && this.#linkGlobals['link.valid'].value !== 0) unit.publish(this.context);
       } catch(error) {publicationFailure=error;}
       const ended = this.native.core_end(); this.open = false;
+      if (unit.transient) {this.transient = null; this.transientRuns++;}
       if (!failure && publicationFailure) throw publicationFailure;
       if (ended !== 0 && !failure) throw new Error(`core_end returned ${ended}`);
     }
-    return this.finishRun(stop,before,regions,'compiled',startPc,chainedColdRuns,chainedColdWork,chainedColdRetired);
+    return this.finishRun(stop,before,regions,'compiled',startPc,chainedColdRuns,chainedColdWork,chainedColdRetired,
+      unit.transient ? unit.id : null);
   }
   executeCold() {
     if (this.dirtyWork > 0xffffffff - this.budget) this.publish();
@@ -427,7 +452,7 @@ export class CodeCache {
     this.retainContext(this.native.core_context_ptr() >>> 0);
     return this.finishRun(stop,before,0,'cold',startPc);
   }
-  finishRun(stop,before,regions,kind,startPc,chainedColdRuns=0,chainedColdWork=0,chainedColdRetired=0) {
+  finishRun(stop,before,regions,kind,startPc,chainedColdRuns=0,chainedColdWork=0,chainedColdRetired=0,transientId=null) {
     const cold = kind === 'cold', retired = (this.word(40) - before) >>> 0;
     const remaining = this.word(44), work = this.budget - remaining;
     if (!Number.isInteger(chainedColdRuns) || chainedColdRuns < 0 ||
@@ -441,7 +466,7 @@ export class CodeCache {
       throw new Error(`invalid core stop ${stop} at 0x${this.pc.toString(16)}`);
     const identity = new DataView(this.memory.buffer).getBigUint64(this.context+120,true);
     const coldEnd = !cold && this.chain && this.chainedColdEnabled && chainedColdRuns > 0 && identity === 0n;
-    if (cold ? identity !== 0n : !coldEnd && !this.units.has(identity))
+    if (cold ? identity !== 0n : transientId !== null ? identity !== transientId : !coldEnd && !this.units.has(identity))
       throw new Error(cold ? 'cold execution retained a compiled identity' : 'core dispatch selected an unretained region');
     if (!cold && this.jitPc === startPc && stop === 1 && work === 0 && this.pc === startPc)
       throw new Error(`core JIT handoff made no progress at 0x${startPc.toString(16)}`);
@@ -491,6 +516,7 @@ export class CodeCache {
       compileInstructionLimit:this.instructions, compileBlockLimit:this.blocks, workBudget:this.budget,
       engineCacheHits: this.hits, evictions: this.evictions, generatedModuleBytes: this.generatedModuleBytes,
       retainedModuleBytes: this.retainedModuleBytes, installedUnits: this.units.size, unitCapacity: this.capacity,
+      transientAdmissions:this.transientAdmissions,transientRuns:this.transientRuns,transientModuleBytes:this.transientModuleBytes,
       byteCapacity:MAX_CODE_BYTES, evictionReasons:{...this.evictionReasons},
       prunedNative:this.prunedNative, prunedNativeBytes:this.prunedNativeBytes,
       nativeCache:this.nativeCache && {...this.nativeCache},

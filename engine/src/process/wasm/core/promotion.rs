@@ -1,5 +1,4 @@
 use super::*;
-use crate::cpu::core::CompileOptions;
 
 #[derive(Default)]
 pub(super) struct TransitionHeat {
@@ -232,23 +231,25 @@ impl CoreCache32 {
         {
             return None;
         }
-        let roots = self.transition_roots(memory, &source, &target, pc, options.blocks)?;
-        let mut frontier = self.frontier(memory);
-        frontier.retain(|entry| {
-            self.entries
-                .get(&entry.0)
-                .is_some_and(|key| *key != pending.source && *key != pending.target)
-        });
-        let code = CompiledCode::compile_transition(
+        self.transition_roots(memory, &source, &target, pc, options.blocks)?;
+        let code = CompiledCode::reform_union(
             memory,
+            &[&source, &target],
             GuestAddress(pc),
             options,
             gates,
-            &frontier,
-            &roots,
         )
         .ok()??;
         if code.wasm().len() > source.wasm().len() + target.wasm().len()
+            || code.instruction_pcs().any(|pc| {
+                self.coverage.get(&pc).is_some_and(|key| {
+                    *key != source.key
+                        && *key != target.key
+                        && self
+                            .region(*key)
+                            .is_some_and(|entry| entry.code.is_current(memory))
+                })
+            })
             || [&source, &target].into_iter().any(|owner| {
                 owner.entrypoints().iter().any(|entry| {
                     self.indexes(owner, entry.0)
@@ -261,7 +262,11 @@ impl CoreCache32 {
         {
             return None;
         }
-        Some(self.insert(code))
+        // Exact-union emission and all acceptance checks finish before either
+        // owner or its reciprocal link is retired.
+        self.remove(source.key);
+        self.remove(target.key);
+        Some(self.insert_owned(code))
     }
 
     fn transition_roots(

@@ -714,6 +714,7 @@ fn declined_formation_memo_skips_unchanged_inputs_and_retries_changed_inputs() {
         };
         // this otherwise admissible pair makes a skipped compile observable without a counter.
         cache.regions[a.key.index].as_mut().unwrap().heat.rejected[0] = Some(rejection);
+        let mut shadow = None;
         match change {
             "epoch" => {
                 memory.write(GuestAddress(0x2000), &[0x48]).unwrap();
@@ -721,17 +722,50 @@ fn declined_formation_memo_skips_unchanged_inputs_and_retries_changed_inputs() {
                 mature(&mut cache, &memory, &a, &b, 0x1040);
             }
             "entries" => {
-                let shadow = insert(&mut cache, &memory, 0x1008, 3);
-                assert!(cache.indexes(&shadow, 0x1008));
+                let owner = insert(&mut cache, &memory, 0x1008, 3);
+                assert!(cache.indexes(&owner, 0x1008));
                 assert_eq!(cache.retained(&a).unwrap().indexed_entries, 2);
+                shadow = Some(owner);
             }
             "unchanged" => {}
             _ => unreachable!(),
         }
         let before = cache.snapshot();
         let entries = cache.entries.clone();
+        let coverage = cache.coverage.clone();
         let owners = cache.link_owners.to_vec();
         let mut formed = cache.prepare_transition(&memory, 0x1040, limits, &[]);
+        if let Some(shadow) = shadow {
+            assert!(
+                formed.is_none(),
+                "formation cannot steal a third current owner's instruction starts"
+            );
+            assert!(!cache.transition_pending());
+            let retried = cache.retained(&a).unwrap().heat.rejected[0].unwrap();
+            assert_eq!(
+                retried.source_entries, 2,
+                "changed entry counts retry the memoized pair"
+            );
+            assert!(retried != rejection);
+            assert_eq!(cache.snapshot(), before);
+            assert_eq!(cache.entries, entries);
+            assert_eq!(cache.coverage, coverage);
+            assert_eq!(cache.link_owners.as_ref(), owners);
+            assert!(cache.retained(&a).is_some() && cache.retained(&b).is_some());
+            assert!(cache.retained(&shadow).is_some());
+            for (pc, owner) in [(0x1000, &a), (0x1040, &b), (0x1008, &shadow)] {
+                assert_eq!(
+                    cache.lookup(&memory, pc).unwrap().identity(),
+                    owner.identity()
+                );
+                assert_eq!(
+                    cache.coverage_owner(&memory, pc).unwrap().identity(),
+                    owner.identity()
+                );
+                assert!(owner.is_current(&memory));
+            }
+            continue;
+        }
         if change == "unchanged" {
             assert!(formed.is_none());
             assert!(!cache.transition_pending());

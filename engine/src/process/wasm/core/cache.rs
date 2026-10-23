@@ -1,5 +1,5 @@
 use crate::{
-    cpu::core::CompiledCode,
+    cpu::core::{CompileError, CompileOptions, CompiledCode},
     memory::{AddressSpace, GuestAddress},
 };
 use foldhash::fast::RandomState;
@@ -20,6 +20,7 @@ pub(super) struct CoreCache32 {
     regions: Box<[Option<CachedRegion>]>,
     free: Vec<usize>,
     entries: HashMap<u32, RegionKey, RandomState>,
+    coverage: HashMap<u32, RegionKey, RandomState>,
     entries_epoch: u64,
     bytes: usize,
     oldest: Option<usize>,
@@ -46,10 +47,50 @@ pub(super) struct RegionRef {
     code: Rc<CompiledCode>,
 }
 
+impl RegionRef {
+    pub(super) fn transient(code: CompiledCode) -> Self {
+        let identity = code.identity();
+        Self {
+            key: RegionKey {
+                index: usize::MAX,
+                identity,
+            },
+            code: Rc::new(code),
+        }
+    }
+
+    pub(super) fn is_transient(&self) -> bool {
+        self.key.index == usize::MAX
+    }
+}
+
 pub(super) enum TransitionLookup {
     Stop,
     Miss,
     Linked(RegionRef, u32),
+}
+
+pub(super) enum OwnedEntryLookup {
+    Unowned,
+    Ready(RegionRef),
+    Declined,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct EntryRejection {
+    instructions: usize,
+    blocks: usize,
+    wasm_bytes: usize,
+}
+
+impl From<CompileOptions> for EntryRejection {
+    fn from(options: CompileOptions) -> Self {
+        Self {
+            instructions: options.instructions,
+            blocks: options.blocks,
+            wasm_bytes: options.wasm_bytes,
+        }
+    }
 }
 
 impl Deref for RegionRef {
@@ -68,6 +109,7 @@ struct CachedRegion {
     slot: u32,
     heat: TransitionHeat,
     linked_entries: LinkedEntries,
+    rejected_entries: HashMap<u32, EntryRejection, RandomState>,
 }
 
 #[derive(Default)]
@@ -129,6 +171,7 @@ impl Default for CoreCache32 {
             regions: (0..MAX_REGIONS).map(|_| None).collect(),
             free: (0..MAX_REGIONS).rev().collect(),
             entries: HashMap::with_hasher(RandomState::default()),
+            coverage: HashMap::with_hasher(RandomState::default()),
             entries_epoch: 1,
             bytes: 0,
             oldest: None,
@@ -153,7 +196,8 @@ impl CoreCache32 {
             .is_some_and(|entry| entry.code.is_current(memory))
     }
 
-    pub(super) fn frontier(&self, memory: &AddressSpace) -> Vec<GuestAddress> {
+    #[cfg(test)]
+    fn frontier(&self, memory: &AddressSpace) -> Vec<GuestAddress> {
         self.entries
             .iter()
             .filter_map(|(&pc, &key)| {
@@ -162,6 +206,100 @@ impl CoreCache32 {
                     .map(|_| GuestAddress(pc))
             })
             .collect()
+    }
+
+    pub(super) fn coverage_contains(&self, memory: &AddressSpace, pc: u32) -> bool {
+        self.coverage
+            .get(&pc)
+            .and_then(|key| self.region(*key))
+            .is_some_and(|entry| entry.code.is_current(memory))
+    }
+
+    pub(super) fn coverage_owner(&mut self, memory: &AddressSpace, pc: u32) -> Option<RegionRef> {
+        let key = *self.coverage.get(&pc)?;
+        let entry = self.region(key)?;
+        if !entry.code.is_current(memory) {
+            self.remove(key);
+            self.source_invalidations = self.source_invalidations.saturating_add(1);
+            return None;
+        }
+        Some(RegionRef {
+            key,
+            code: Rc::clone(&entry.code),
+        })
+    }
+
+    pub(super) fn prepare_owned_entry(
+        &mut self,
+        memory: &AddressSpace,
+        pc: u32,
+        options: CompileOptions,
+        gates: &[(GuestAddress, u32)],
+    ) -> Result<OwnedEntryLookup, CompileError> {
+        let Some(owner) = self.coverage_owner(memory, pc) else {
+            return Ok(OwnedEntryLookup::Unowned);
+        };
+        if self.entries.get(&pc) == Some(&owner.key) {
+            self.touch(owner.key.index);
+            return Ok(OwnedEntryLookup::Ready(owner));
+        }
+        let limits = EntryRejection::from(options);
+        if self.region(owner.key).unwrap().rejected_entries.get(&pc) == Some(&limits) {
+            return Ok(OwnedEntryLookup::Declined);
+        }
+        let candidate = owner.with_entry(memory, GuestAddress(pc), options, gates)?;
+        let Some(candidate) = candidate else {
+            self.regions[owner.key.index]
+                .as_mut()
+                .unwrap()
+                .rejected_entries
+                .insert(pc, limits);
+            return Ok(OwnedEntryLookup::Declined);
+        };
+        // Emission is complete before changing either executable or coverage indexes.
+        // The immutable owner remains usable when a limit or source check declines.
+        if !owner.is_current(memory)
+            || !candidate.instruction_pcs().eq(owner.instruction_pcs())
+            || owner
+                .entrypoints()
+                .iter()
+                .any(|entry| !candidate.entrypoints().contains(entry))
+            || candidate
+                .entrypoints()
+                .binary_search_by_key(&pc, |entry| entry.0)
+                .is_err()
+        {
+            return Ok(OwnedEntryLookup::Declined);
+        }
+        self.remove(owner.key);
+        Ok(OwnedEntryLookup::Ready(self.insert_owned(candidate)))
+    }
+
+    pub(super) fn admit(
+        &mut self,
+        memory: &AddressSpace,
+        code: CompiledCode,
+    ) -> Result<RegionRef, CompileError> {
+        // Formation borrows the coverage directory as its frontier. A current
+        // collision here indicates a violated ownership contract, never a suffix
+        // that may silently replace only some entries of an existing owner.
+        for pc in code.instruction_pcs() {
+            if let Some(key) = self.coverage.get(&pc).copied() {
+                if self
+                    .region(key)
+                    .is_some_and(|entry| entry.code.is_current(memory))
+                {
+                    return Err(CompileError::InvalidLimits);
+                }
+            }
+        }
+        for pc in code.instruction_pcs() {
+            if let Some(key) = self.coverage.get(&pc).copied() {
+                self.remove(key);
+                self.source_invalidations = self.source_invalidations.saturating_add(1);
+            }
+        }
+        Ok(self.insert_owned(code))
     }
 
     pub(super) fn link_owners_ptr(&self) -> *const u64 {
@@ -330,7 +468,14 @@ impl CoreCache32 {
         Ok(())
     }
 
+    #[cfg(test)]
     pub(super) fn insert(&mut self, code: CompiledCode) -> RegionRef {
+        // Legacy overlap controls exercise conditional index cleanup. Production
+        // admission goes through the coverage checks or whole-owner replacement.
+        self.insert_owned(code)
+    }
+
+    fn insert_owned(&mut self, code: CompiledCode) -> RegionRef {
         self.advance_entries_epoch();
         let code = Rc::new(code);
         for pc in code.entrypoints() {
@@ -359,6 +504,9 @@ impl CoreCache32 {
         for entry in code.entrypoints() {
             self.entries.insert(entry.0, key);
         }
+        for pc in code.instruction_pcs() {
+            self.coverage.insert(pc, key);
+        }
         self.bytes += code.wasm().len();
         self.regions[index] = Some(CachedRegion {
             indexed_entries: code.entrypoints().len(),
@@ -368,6 +516,7 @@ impl CoreCache32 {
             slot: 0,
             heat: TransitionHeat::default(),
             linked_entries: LinkedEntries::default(),
+            rejected_entries: HashMap::with_hasher(RandomState::default()),
         });
         if let Some(newest) = self.newest {
             self.regions[newest].as_mut().unwrap().newer = Some(index);
@@ -453,6 +602,11 @@ impl CoreCache32 {
                 self.entries.remove(&pc.0);
             }
         }
+        for pc in entry.code.instruction_pcs() {
+            if self.coverage.get(&pc) == Some(&key) {
+                self.coverage.remove(&pc);
+            }
+        }
         self.free.push(key.index);
     }
 
@@ -472,3 +626,7 @@ impl CoreCache32 {
 #[cfg(test)]
 #[path = "cache/tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "cache/ownership_tests.rs"]
+mod ownership_tests;

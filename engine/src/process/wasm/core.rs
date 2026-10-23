@@ -27,13 +27,15 @@ use crate::{
         x86::{STATE_SIZE, USER_FLAGS_MASK_V3, decode_state, decode_state_metadata},
     },
     cpu::{
-        core::{CompileError, CompileOptions, Context32, cold::ColdState, compile_with_frontier},
+        core::{
+            CompileError, CompileOptions, Context32, cold::ColdState, compile_with_frontier_query,
+        },
         x86::{SegmentContext, SegmentRegister},
     },
     memory::{Access, CoreWriteOutcome, FaultReason, GuestAddress, MemoryError},
     process::{CallError, EngineInstance, HostError, cpu::events::detection::DetectionSlot32},
 };
-use cache::{CoreCache32, RegionRef};
+use cache::{CoreCache32, OwnedEntryLookup, RegionRef};
 use numeric::NumericBank;
 
 pub(super) struct CoreSession32 {
@@ -192,6 +194,9 @@ pub(crate) fn core_prepare(pc: u32, instructions: u32, blocks: u32) -> u32 {
         if core.as_ref().is_some_and(CoreSession32::is_active) {
             return 12;
         }
+        if let Some(session) = core.as_mut() {
+            session.context.set_word(112, 0);
+        }
         let Some(instance) = instance.as_mut() else {
             return 5;
         };
@@ -227,6 +232,7 @@ pub(crate) fn core_prepare(pc: u32, instructions: u32, blocks: u32) -> u32 {
                 .prepare_transition(instance.memory.as_ref().unwrap(), pc, options, &gates)
         });
         let mut admitted = promoted.is_some();
+        let mut transient = false;
         let selected = promoted.or_else(|| {
             core.as_mut()
                 .and_then(|session| session.cache.lookup(instance.memory.as_ref().unwrap(), pc))
@@ -240,25 +246,71 @@ pub(crate) fn core_prepare(pc: u32, instructions: u32, blocks: u32) -> u32 {
                 Err(error) => return status(error),
             };
             let gates: Vec<_> = gates.iter().map(|gate| (gate.entry, gate.id)).collect();
-            let frontier = core.as_ref().map_or_else(Vec::new, |session| {
-                session.cache.frontier(instance.memory.as_ref().unwrap())
-            });
-            let code = match compile_with_frontier(
-                instance.memory.as_ref().unwrap(),
-                GuestAddress(pc),
-                options,
-                &gates,
-                &frontier,
-            ) {
-                Ok(code) => {
+            let memory = instance.memory.as_ref().unwrap();
+            let owned = match core.as_mut() {
+                Some(session) => match session
+                    .cache
+                    .prepare_owned_entry(memory, pc, options, &gates)
+                {
+                    Ok(lookup) => lookup,
+                    Err(error) => return compile_status(error),
+                },
+                None => OwnedEntryLookup::Unowned,
+            };
+            match owned {
+                OwnedEntryLookup::Ready(code) => {
                     admitted = true;
                     code
                 }
-                Err(error) => return compile_status(error),
-            };
-            match core.as_mut() {
-                Some(session) => session.cache.insert(code),
-                None => fresh_cache.as_mut().unwrap().insert(code),
+                OwnedEntryLookup::Declined => {
+                    // A bounded entry upgrade must not create a second retained
+                    // owner for this suffix. Run the same exact emitter for one
+                    // instruction, without indexing or linking the temporary unit.
+                    let code = match compile_with_frontier_query(
+                        memory,
+                        GuestAddress(pc),
+                        CompileOptions {
+                            instructions: 1,
+                            blocks: 1,
+                            ..options
+                        },
+                        &gates,
+                        &|candidate| candidate != pc,
+                    ) {
+                        Ok(code) => code,
+                        Err(error) => return compile_status(error),
+                    };
+                    transient = true;
+                    RegionRef::transient(code)
+                }
+                OwnedEntryLookup::Unowned => {
+                    let frontier = |candidate| {
+                        core.as_ref().is_some_and(|session| {
+                            session.cache.coverage_contains(memory, candidate)
+                        })
+                    };
+                    let code = match compile_with_frontier_query(
+                        instance.memory.as_ref().unwrap(),
+                        GuestAddress(pc),
+                        options,
+                        &gates,
+                        &frontier,
+                    ) {
+                        Ok(code) => {
+                            admitted = true;
+                            code
+                        }
+                        Err(error) => return compile_status(error),
+                    };
+                    let admitted_code = match core.as_mut() {
+                        Some(session) => session.cache.admit(memory, code),
+                        None => fresh_cache.as_mut().unwrap().admit(memory, code),
+                    };
+                    match admitted_code {
+                        Ok(code) => code,
+                        Err(error) => return compile_status(error),
+                    }
+                }
             }
         };
         let identity = code.identity();
@@ -296,7 +348,8 @@ pub(crate) fn core_prepare(pc: u32, instructions: u32, blocks: u32) -> u32 {
             );
         }
         session.context.bytes_mut()[120..128].copy_from_slice(&identity.to_le_bytes());
-        0
+        session.context.set_word(112, if transient { 2 } else { 0 });
+        if transient { 18 } else { 0 }
     })
 }
 
@@ -379,6 +432,9 @@ pub(crate) fn core_end() -> u32 {
         }
         core.context.set_word(112, 0);
         core.active = false;
+        if core.code.as_ref().is_some_and(RegionRef::is_transient) {
+            core.code = None;
+        }
         0
     })
 }
