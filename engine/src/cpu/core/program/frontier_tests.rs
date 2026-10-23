@@ -165,6 +165,11 @@ fn generated_frontier_modules_preserve_exact_prefixes_and_faults() {
     image[0x500..0x50a].copy_from_slice(&[0x83, 3, 2, 0xeb, 3, 0x90, 0x90, 0x90, 0x0f, 0x0b]);
     image[0x600..0x602].copy_from_slice(&[0xeb, 0x7e]);
     image[0x700..0x702].copy_from_slice(&[0xff, 0xe0]);
+    image[0x800..0x80b].copy_from_slice(&[0x85, 0xc0, 0x74, 0x0c, 0xe8, 7, 0, 0, 0, 0x0f, 0x0b]);
+    image[0x810..0x812].copy_from_slice(&[0x41, 0xc3]);
+    image[0x900..0x907].copy_from_slice(&[0xe8, 0x7b, 0, 0, 0, 0x0f, 0x0b]);
+    image[0xa00..0xa06].copy_from_slice(&[0xff, 0x54, 0x24, 0xfc, 0x0f, 0x0b]);
+    image[0xb00..0xb04].copy_from_slice(&[0xff, 0xd4, 0x0f, 0x0b]);
     memory.write(GuestAddress(0x1000), &image).unwrap();
     fs::write(directory.join("code.bin"), image).unwrap();
     let mut manifest = String::new();
@@ -178,6 +183,10 @@ fn generated_frontier_modules_preserve_exact_prefixes_and_faults() {
         ("fault-before-jump", 0x1500, vec![]),
         ("direct-unresolved", 0x1600, vec![GuestAddress(0x1680)]),
         ("indirect-unresolved", 0x1700, vec![]),
+        ("call-resolved", 0x1800, vec![]),
+        ("call-unresolved", 0x1900, vec![GuestAddress(0x1980)]),
+        ("call-stack-indirect", 0x1a00, vec![]),
+        ("call-register-esp", 0x1b00, vec![]),
     ] {
         let code =
             compile_with_frontier(&memory, GuestAddress(entry), options(), &[], &frontier).unwrap();

@@ -826,7 +826,10 @@ impl Output<'_> {
                     .local_set(LOGICAL_ADDRESS);
                 self.write(4, RESULT);
                 self.c().local_get(ADDRESS).local_set(6);
-                self.dynamic_pc(B);
+                match target {
+                    BranchTarget::Direct(pc) => self.set_pc(pc.0),
+                    BranchTarget::Indirect(_) => self.dynamic_pc(B),
+                }
             }
             Operation::Return { stack_adjust } => {
                 self.c()

@@ -12,14 +12,22 @@ const hash = value => createHash('sha256').update(value).digest('hex');
 const image = readFileSync(join(directory,'code.bin')), regions = new Map(), cases = [];
 const reportPath = join(directory,'frontier-result.json');
 const checkpoint = () => writeFileSync(reportPath,JSON.stringify({complete:false,cases},null,2));
-let slowReads = 0;
+let slowReads = 0, slowWrites = 0;
 function read(context,address,width) {
-  assert.equal(context,CTX); assert.equal(address>>>0,0x3000); assert.equal(width,0x104);
-  assert.equal(bytes[PERM+3],1); slowReads++;
-  put(CTX+48,0x3000); put(CTX+52,0x20204); put(CTX+116,14);
+  assert.equal(context,CTX); slowReads++;
+  if(address===0x3000) {
+    assert.equal(width,0x104);assert.equal(bytes[PERM+3],1);put(CTX+52,0x20204);
+  } else {
+    assert.equal(address>>>0,0x47fc);assert.equal(width,4);assert.equal(get(MAP+4*4),0);put(CTX+52,0x10104);
+  }
+  put(CTX+48,address); put(CTX+116,14);
   return 1n<<32n;
 }
-function write() {throw new Error('unexpected slow write in authored fixture');}
+function write(context,address,width) {
+  assert.equal(context,CTX);assert.equal(address>>>0,0x47fc);assert.equal(width,4);
+  assert.equal(bytes[PERM+4],1);slowWrites++;
+  put(CTX+48,address);put(CTX+52,0x20204);put(CTX+116,14);return 1;
+}
 const u=value=>{const result=[];do{const byte=value&127;value>>>=7;result.push(byte|(value?128:0));}while(value);return result;};
 function unsigned(source,at) {
   let value=0;
@@ -71,36 +79,48 @@ for (const line of readFileSync(join(directory,'regions.tsv'),'utf8').trim().spl
   const instrumented=countLookups(encoded),exports=new WebAssembly.Instance(new WebAssembly.Module(instrumented),{ring3:{memory,read,write}}).exports;
   regions.set(name,{name,entry:Number(entry),identity:BigInt(identity),run:exports.run,lookups:exports['test.lookup_calls'],sha256:hash(encoded),instrumentedSha256:hash(instrumented)});
 }
-function reset(name,eax=5,readonly=false) {
+function reset(name,eax=5,readonly=false,options={}) {
   bytes.fill(0,CTX,CTX+128); bytes.fill(0,BACKING,BACKING+3*4096);
   bytes.fill(0,EXEC,EXEC+12); bytes.fill(0,VERSION,VERSION+8); bytes.fill(0,PAGE_VERSION,PAGE_VERSION+48);
   for (const [page,slot,permission] of [[1,1,7],[3,2,readonly?1:3],[4,3,3]]) {
     put(MAP+page*4,slot); bytes[PERM+page]=permission;
   }
+  if(options.stackReadonly)bytes[PERM+4]=1;
+  if(options.stackUnmapped)put(MAP+4*4,0);
   bytes.set(image,BACKING); put(BACKING+4096,10); put(EXEC,1);
+  if(options.stackTarget!==undefined)put(BACKING+2*4096+0x7fc,options.stackTarget);
   [eax,0,0,0x3000,0x4800,0,0,0].forEach((value,index)=>put(CTX+index*4,value));
   const first = regions.get(name); put(CTX+32,first.entry); put(CTX+36,2); put(CTX+44,0x12345678);
   [MAP,PERM,BACKING,3,EXEC,0,VERSION,PAGE_VERSION,0].forEach((value,index)=>put(CTX+56+index*4,value));
-  put(CTX+112,1); d.setBigUint64(CTX+120,first.identity,true); slowReads=0;
+  put(CTX+112,1); d.setBigUint64(CTX+120,first.identity,true); slowReads=0;slowWrites=0;
   return first;
 }
 function step(label,region,budget,expected) {
   d.setBigUint64(CTX+120,region.identity,true);
   const wanted = bytes.slice(CTX,CTX+128), c = new DataView(wanted.buffer), ram = bytes.slice(BACKING,BACKING+3*4096);
   c.setUint32(0,expected.eax,true); c.setUint32(32,expected.pc,true); c.setUint32(36,expected.flags,true);
+  if(expected.ecx!==undefined)c.setUint32(4,expected.ecx,true);
+  if(expected.esp!==undefined)c.setUint32(16,expected.esp,true);
   c.setUint32(40,expected.retired,true); c.setUint32(44,expected.remaining,true);
-  if (expected.fault) {c.setUint32(48,0x3000,true);c.setUint32(52,0x20204,true);c.setUint32(116,14,true);}
+  if (expected.fault) {c.setUint32(48,expected.faultAddress??0x3000,true);c.setUint32(52,expected.faultMetadata??0x20204,true);c.setUint32(116,14,true);}
   new DataView(ram.buffer).setUint32(4096,expected.data,true);
-  const beforeSlow = slowReads;region.lookups.value=0;
+  if(expected.stackWrite!==undefined)new DataView(ram.buffer).setUint32(2*4096+0x7fc,expected.stackWrite,true);
+  const beforeSlow = slowReads,beforeWrites=slowWrites;region.lookups.value=0;
   const stop = region.run(CTX,budget)>>>0;
   const record = {label,region:region.name,budget,stop,contextHex:hex(bytes.subarray(CTX,CTX+128)),
-    ramHex:hex(bytes.subarray(BACKING,BACKING+3*4096)),slowReads:slowReads-beforeSlow,lookups:region.lookups.value};
+    ramHex:hex(bytes.subarray(BACKING,BACKING+3*4096)),slowReads:slowReads-beforeSlow,slowWrites:slowWrites-beforeWrites,lookups:region.lookups.value};
   cases.push(record); checkpoint();
   assert.equal(stop,expected.stop,`${label}: exact boundary`);
-  assert.equal(record.slowReads,expected.fault?1:0,`${label}: no work beyond frontier`);
+  assert.equal(record.slowReads,expected.reads??(expected.fault?1:0),`${label}: no work beyond frontier`);
+  assert.equal(record.slowWrites,expected.writes??0,`${label}: precise slow write boundary`);
   assert.deepEqual(bytes.subarray(CTX,CTX+128),wanted,`${label}: complete context and exact prefix`);
   assert.deepEqual(bytes.subarray(BACKING,BACKING+3*4096),ram,`${label}: complete code/data/stack`);
   assert.equal(record.lookups,expected.lookups??1,`${label}: only runtime targets use dynamic lookup`);
+  if(expected.version!==undefined) {
+    assert.equal(d.getBigUint64(VERSION,true),BigInt(expected.version),`${label}: exact store transaction count`);
+    const versions=new Uint8Array(48);new DataView(versions.buffer).setBigUint64(2*16+8,BigInt(expected.version),true);
+    assert.deepEqual(bytes.subarray(PAGE_VERSION,PAGE_VERSION+48),versions,`${label}: only the stack page is stamped`);
+  }
 }
 
 for (const [budget,stop,pc,retired,eax,flags] of [[0,2,0x1000,0,5,2],[1,2,0x1001,1,6,6],[8,1,0x1001,1,6,6]]) {
@@ -144,6 +164,36 @@ step('fault-before-direct-jump-keeps-the-source-pc',first,3,
 first=reset('indirect-unresolved',0x1680);
 step('indirect-jump-still-looks-up-the-runtime-target',first,8,
   {stop:1,pc:0x1680,retired:1,eax:0x1680,flags:2,remaining:7,data:10,lookups:2});
+for(const budget of [0,1,2,3,4,5]) {
+  first=reset('call-resolved',1);
+  const pc=[0x1800,0x1802,0x1804,0x1810,0x1811,0x1809][budget];
+  step(`resolved-call-budget-${budget}`,first,budget,
+    {stop:2,pc,retired:budget,eax:1,ecx:budget>=4?1:0,esp:budget>=3&&budget<5?0x47fc:0x4800,
+      flags:2,remaining:0,data:10,lookups:budget===5?2:1,version:budget>=3?1:0,
+      ...(budget>=3?{stackWrite:0x1809}:{})});
+}
+for(const budget of [1,8]) {
+  first=reset('call-unresolved');
+  step(`unresolved-call-budget-${budget}`,first,budget,
+    {stop:budget===1?2:1,pc:0x1980,retired:1,eax:5,esp:0x47fc,flags:2,remaining:budget-1,data:10,stackWrite:0x1905,version:1});
+}
+first=reset('call-unresolved',5,false,{stackReadonly:true});
+step('direct-call-stack-fault-is-preinstruction-neutral',first,8,
+  {stop:3,pc:0x1900,retired:0,eax:5,esp:0x4800,flags:2,remaining:8,data:10,
+    fault:true,faultAddress:0x47fc,reads:0,writes:1,version:0});
+for(const budget of [1,8]) {
+  first=reset('call-stack-indirect',5,false,{stackTarget:0x1a80});
+  step(`indirect-call-reads-target-before-overwriting-stack-${budget}`,first,budget,
+    {stop:budget===1?2:1,pc:0x1a80,retired:1,eax:5,esp:0x47fc,flags:2,remaining:budget-1,data:10,
+      stackWrite:0x1a04,lookups:2,version:1});
+}
+first=reset('call-stack-indirect',5,false,{stackTarget:0x1a80,stackUnmapped:true});
+step('indirect-call-target-read-fault-precedes-the-push',first,8,
+  {stop:3,pc:0x1a00,retired:0,eax:5,esp:0x4800,flags:2,remaining:8,data:10,
+    fault:true,faultAddress:0x47fc,faultMetadata:0x10104,reads:1,version:0});
+first=reset('call-register-esp');
+step('indirect-call-register-uses-prepush-esp',first,1,
+  {stop:2,pc:0x4800,retired:1,eax:5,esp:0x47fc,flags:2,remaining:0,data:10,stackWrite:0x1b02,lookups:2,version:1});
 writeFileSync(reportPath,JSON.stringify({complete:true,sources:[import.meta.url].map(url=>({url,sha256:hash(readFileSync(new URL(url)))})),
   regions:[...regions.values()].map(({name,entry,identity,sha256,instrumentedSha256})=>({name,entry,identity:String(identity),sha256,instrumentedSha256})),cases},null,2));
 console.log(JSON.stringify({complete:true,cases:cases.length}));
