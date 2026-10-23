@@ -5,6 +5,13 @@ use crate::cpu::core::CompileOptions;
 pub(super) struct TransitionHeat {
     edges: [TransitionEdge; 4],
     rejected: [Option<TransitionRejection>; 4],
+    ineligible: Option<IneligibleTransition>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct IneligibleTransition {
+    target: u64,
+    pc: u32,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -96,6 +103,19 @@ impl CoreCache32 {
         if source.identity() == target.identity() {
             return false;
         }
+        let ineligible = IneligibleTransition {
+            target: target.identity(),
+            pc,
+        };
+        if self.regions[source.key.index]
+            .as_ref()
+            .unwrap()
+            .heat
+            .ineligible
+            == Some(ineligible)
+        {
+            return false;
+        }
         let edges = &self.regions[source.key.index].as_ref().unwrap().heat.edges;
         let identity = target.identity();
         let mut selected = 0;
@@ -112,6 +132,11 @@ impl CoreCache32 {
         }
         // a retained code identity fixes its roots and entrypoints for the edge's lifetime.
         if !matched && !formation_candidate(source, target, pc) {
+            self.regions[source.key.index]
+                .as_mut()
+                .unwrap()
+                .heat
+                .ineligible = Some(ineligible);
             return false;
         }
         if !matched && edges[selected].hits != 0 {

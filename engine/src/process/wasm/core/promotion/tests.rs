@@ -55,6 +55,133 @@ fn mature(
     assert!(cache.observe_transition(memory, source, target, pc, 2));
 }
 
+fn ineligible_pair() -> (AddressSpace, CoreCache32, RegionRef, RegionRef) {
+    let memory = memory();
+    let mut cache = CoreCache32::default();
+    let source = insert(&mut cache, &memory, 0x1000, 1);
+    let code = CompiledCode::compile_transition(
+        &memory,
+        GuestAddress(0x2000),
+        CompileOptions {
+            instructions: 3,
+            ..options()
+        },
+        &[],
+        &[],
+        &[GuestAddress(0x1000), GuestAddress(0x2000)],
+    )
+    .unwrap()
+    .unwrap();
+    let target = cache.insert(code);
+    cache.install_link(&target, 2).unwrap();
+    // the target contains the source root, but its three-instruction prefix
+    // leaves the source's caller continuation independently indexed.
+    assert!(cache.indexes(&source, 0x1005));
+    assert!(cache.indexes(&target, 0x1000));
+    assert!(cache.indexes(&target, 0x2000));
+    assert!(!formation_candidate(&source, &target, 0x2000));
+    (memory, cache, source, target)
+}
+
+#[test]
+fn repeated_ineligible_pairs_are_memoized_without_disturbing_positive_heat() {
+    let (memory, mut cache, source, target) = ineligible_pair();
+    let eligible = insert(&mut cache, &memory, 0x1080, 3);
+    assert!(!cache.observe_transition(&memory, &source, &eligible, 0x1080, 3));
+    let heat = &cache.retained(&source).unwrap().heat;
+    let edges = heat
+        .edges
+        .map(|edge| (edge.target, edge.target_index, edge.pc, edge.hits));
+    let rejected = heat.rejected;
+    let snapshot = cache.snapshot();
+    let owners = cache.link_owners.to_vec();
+    for pc in [0x2000, 0x2000, 0x1000, 0x1000, 0x2000] {
+        for _ in 0..8 {
+            assert!(!cache.observe_transition(&memory, &source, &target, pc, 1));
+            assert_eq!(
+                cache.retained(&source).unwrap().heat.ineligible,
+                Some(IneligibleTransition {
+                    target: target.identity(),
+                    pc,
+                })
+            );
+            assert!(!cache.transition_pending());
+        }
+    }
+    let heat = &cache.retained(&source).unwrap().heat;
+    assert_eq!(
+        heat.edges
+            .map(|edge| (edge.target, edge.target_index, edge.pc, edge.hits)),
+        edges
+    );
+    assert!(heat.rejected == rejected);
+    assert_eq!(cache.snapshot(), snapshot);
+    assert_eq!(cache.link_owners.as_ref(), owners);
+    assert!(!cache.observe_transition(&memory, &source, &eligible, 0x1080, 3));
+    assert!(cache.observe_transition(&memory, &source, &eligible, 0x1080, 3));
+    assert_eq!(
+        cache.pending_transition.as_ref().unwrap().target,
+        eligible.key
+    );
+}
+
+#[test]
+fn a_reused_target_at_the_same_pc_cannot_inherit_an_ineligible_memo() {
+    let (memory, mut cache, source, target) = ineligible_pair();
+    assert!(!cache.observe_transition(&memory, &source, &target, 0x2000, 1));
+    assert!(cache.retained(&source).unwrap().heat.ineligible.is_some());
+    cache.remove(target.key);
+    let replacement = insert(&mut cache, &memory, 0x2000, 2);
+    assert_eq!(replacement.key.index, target.key.index);
+    assert_ne!(replacement.identity(), target.identity());
+    assert!(target.is_current(&memory));
+    assert!(formation_candidate(&source, &replacement, 0x2000));
+    assert!(!cache.observe_transition(&memory, &source, &target, 0x2000, 1));
+    assert!(!cache.observe_transition(&memory, &source, &replacement, 0x2000, 2));
+    assert!(cache.observe_transition(&memory, &source, &replacement, 0x2000, 2));
+    assert_eq!(
+        cache.pending_transition.as_ref().unwrap().target,
+        replacement.key
+    );
+}
+
+#[test]
+fn an_ineligible_memo_cannot_bypass_code_or_source_owner_validation() {
+    for change_target in [false, true] {
+        let (mut memory, mut cache, source, target) = ineligible_pair();
+        assert!(!cache.observe_transition(&memory, &source, &target, 0x2000, 1));
+        assert!(cache.retained(&source).unwrap().heat.ineligible.is_some());
+        if change_target {
+            memory.write(GuestAddress(0x2000), &[0x48]).unwrap();
+            assert!(source.is_current(&memory));
+            assert!(!target.is_current(&memory));
+            assert!(matches!(
+                cache.lookup_transition(&memory, &source, 0x2000, 1),
+                TransitionLookup::Miss
+            ));
+            assert!(cache.retained(&target).is_none());
+            assert_eq!(cache.link_owners[2], 0);
+            assert_eq!(cache.source_invalidations, 1);
+        } else {
+            cache.remove(source.key);
+            let replacement = insert(&mut cache, &memory, 0x1000, 1);
+            assert_eq!(replacement.key.index, source.key.index);
+            assert_ne!(replacement.identity(), source.identity());
+            assert!(source.is_current(&memory));
+            assert!(!cache.observe_transition(&memory, &source, &target, 0x2000, 1));
+            assert!(
+                cache
+                    .retained(&replacement)
+                    .unwrap()
+                    .heat
+                    .ineligible
+                    .is_none()
+            );
+        }
+        assert!(!cache.transition_pending());
+    }
+}
+
 #[test]
 fn unchanged_import_retains_a_pending_pair_without_changing_cache_ownership() {
     let memory = memory();
