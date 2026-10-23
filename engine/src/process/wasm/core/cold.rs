@@ -1,5 +1,8 @@
 use super::{CoreSession32, REGISTRY, Registry, admission, status};
-use crate::cpu::{core::StopReason, x86::SegmentContext};
+use crate::cpu::{
+    core::{StopReason, cold::ColdObserver},
+    x86::SegmentContext,
+};
 
 mod execution;
 
@@ -62,6 +65,7 @@ fn run(
     session: &mut CoreSession32,
     segments: &SegmentContext,
 ) -> i32 {
+    let (bypass, bypass_retired) = session.tracing.bypass_token().unwrap_or((0, 0));
     let CoreSession32 {
         context,
         numeric,
@@ -76,11 +80,18 @@ fn run(
         numeric,
         segments,
         &|modules, pc| modules.gate_at(pc).map(|gate| gate.id),
-        &|memory, pc| cache.frontier_contains(memory, pc),
+        &|memory, pc, retired| {
+            cache.frontier_contains_with_bypass(
+                memory,
+                pc,
+                if retired == bypass_retired { bypass } else { 0 },
+            )
+        },
         cold_state,
         tracing,
     ) as i32;
     tracing.end();
+    session.refresh_trace_bypass(session.context.retired());
     reason
 }
 
@@ -97,7 +108,11 @@ pub(super) fn chain_next(
         tracing,
         ..
     } = session;
-    execution::chain_next_observed(instance, context, numeric, code, cache, cold_state, tracing)
+    let next = execution::chain_next_observed(
+        instance, context, numeric, code, cache, cold_state, tracing,
+    );
+    observe_selected(instance, session, next);
+    next
 }
 
 pub(super) fn chain_probe(
@@ -118,7 +133,7 @@ pub(super) fn chain_cold(
     instance: &mut crate::process::EngineInstance,
     session: &mut CoreSession32,
 ) -> u32 {
-    execution::chain_cold_observed(
+    let next = execution::chain_cold_observed(
         instance,
         &mut session.context,
         &mut session.numeric,
@@ -126,5 +141,22 @@ pub(super) fn chain_cold(
         &mut session.cache,
         &mut session.cold_state,
         &mut session.tracing,
-    )
+    );
+    observe_selected(instance, session, next);
+    next
+}
+
+fn observe_selected(
+    instance: &crate::process::EngineInstance,
+    session: &mut CoreSession32,
+    next: u32,
+) {
+    use crate::cpu::core::{COLD_MARK, STOP_MARK};
+    let slot = next & !(COLD_MARK | STOP_MARK);
+    session.refresh_trace_bypass(session.context.retired());
+    if next & STOP_MARK == 0 && (1..=4096).contains(&slot) {
+        if let Some(memory) = instance.memory.as_ref() {
+            session.trace_selection(memory, session.context.state().eip);
+        }
+    }
 }

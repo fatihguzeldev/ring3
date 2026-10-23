@@ -132,6 +132,10 @@ impl TraceController {
 }
 
 impl ColdObserver for TraceController {
+    fn bypass_token(&self) -> Option<(u64, u32)> {
+        (self.arena.bypass_pending == 1)
+            .then_some((self.arena.bypass_id, self.arena.bypass_retired))
+    }
     fn exact_cold(&self) -> bool {
         true
     }
@@ -316,7 +320,18 @@ pub(crate) fn core_trace_finish(root: u32, instructions: u32, blocks: u32) -> u3
                 ..CompileOptions::default()
             };
             if !core.tracing.manual {
-                let previous = core.cache.observed_owner(memory, root);
+                let previous = core.cache.observed_owner(memory, root).or_else(|| {
+                    // A cold prefix may return to one retained family. Its held
+                    // immutable history remains the anchor even when this new
+                    // capture starts at a previously unowned instruction.
+                    let mut families = core
+                        .tracing
+                        .owners
+                        .iter()
+                        .filter(|owner| owner.is_observed_family() && owner.is_current(memory));
+                    let family = families.next()?;
+                    families.next().is_none().then(|| family.clone())
+                });
                 compile_observed_with_cold(
                     memory,
                     GuestAddress(root),

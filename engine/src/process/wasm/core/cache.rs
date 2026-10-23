@@ -260,9 +260,22 @@ impl CoreCache32 {
     }
 
     pub(super) fn frontier_contains(&self, memory: &AddressSpace, pc: u32) -> bool {
+        self.frontier_contains_with_bypass(memory, pc, self.trace_bypass_identity)
+    }
+
+    pub(super) fn trace_bypass_identity(&self) -> u64 {
+        self.trace_bypass_identity
+    }
+
+    pub(super) fn frontier_contains_with_bypass(
+        &self,
+        memory: &AddressSpace,
+        pc: u32,
+        bypass: u64,
+    ) -> bool {
         self.trace_entries
             .get(&pc)
-            .filter(|key| key.identity != self.trace_bypass_identity)
+            .filter(|key| key.identity != bypass)
             .and_then(|key| self.region(*key))
             .is_some_and(|entry| entry.code.is_current(memory))
             || self

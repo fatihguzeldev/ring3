@@ -129,16 +129,30 @@ pub(in crate::process) fn chain_cold_observed(
     let segments = numeric.segment_context();
     context.bytes_mut()[120..128].fill(0);
     *selected = None;
+    let (bypass, bypass_retired) = observer
+        .bypass_token()
+        .unwrap_or((cache.trace_bypass_identity(), context.retired()));
     let reason = run_observed(
         instance,
         context,
         numeric,
         &segments,
         &|modules, pc| modules.gate_at(pc).map(|gate| gate.id),
-        &|memory, pc| cache.frontier_contains(memory, pc),
+        &|memory, pc, retired| {
+            cache.frontier_contains_with_bypass(
+                memory,
+                pc,
+                if retired == bypass_retired { bypass } else { 0 },
+            )
+        },
         cold,
         observer,
     );
+    cache.bypass_trace(if context.retired() == bypass_retired {
+        bypass
+    } else {
+        0
+    });
     if reason != StopReason::NeedCode {
         return COLD_MARK | STOP_MARK | reason as u32;
     }
@@ -210,7 +224,7 @@ pub(in crate::process) fn run_with_lookups(
         numeric,
         segments,
         gate_at,
-        frontier,
+        &|memory, pc, _| frontier(memory, pc),
         heat,
         &mut Unobserved,
     )
@@ -222,7 +236,7 @@ pub(in crate::process) fn run_observed(
     numeric: &mut NumericBank,
     segments: &SegmentContext,
     gate_at: &impl Fn(&ModuleProcess32, u32) -> Option<u32>,
-    frontier: &impl Fn(&AddressSpace, u32) -> bool,
+    frontier: &impl Fn(&AddressSpace, u32, u32) -> bool,
     heat: &mut ColdState,
     observer: &mut impl ColdObserver,
 ) -> StopReason {

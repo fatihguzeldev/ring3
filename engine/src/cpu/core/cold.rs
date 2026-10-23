@@ -21,6 +21,9 @@ use memory::{Failure, Port};
 /// The normal executor records only instructions whose complete architectural
 /// effects have committed. A decoder result alone never confirms execution.
 pub(crate) trait ColdObserver {
+    fn bypass_token(&self) -> Option<(u64, u32)> {
+        None
+    }
     fn exact_cold(&self) -> bool {
         false
     }
@@ -244,7 +247,7 @@ pub(crate) fn run_with_lookups(
         context,
         segments,
         gate_at,
-        frontier,
+        &|memory, pc, _| frontier(memory, pc),
         cold,
         &mut Unobserved,
     )
@@ -255,7 +258,7 @@ pub(crate) fn run_observed(
     context: &mut Context32,
     segments: &SegmentContext,
     gate_at: &impl Fn(u32) -> Option<u32>,
-    frontier: &impl Fn(&AddressSpace, u32) -> bool,
+    frontier: &impl Fn(&AddressSpace, u32, u32) -> bool,
     cold: &mut ColdState,
     observer: &mut impl ColdObserver,
 ) -> ColdOutcome {
@@ -288,7 +291,7 @@ pub(crate) fn run_observed(
                 return finish(context, state, retired, remaining, reason);
             }
         }
-        if frontier(memory, pc) {
+        if frontier(memory, pc, retired) {
             return finish(context, state, retired, remaining, StopReason::NeedCode);
         }
         let decoded = match decode.decode(
@@ -354,7 +357,7 @@ pub(crate) fn run_observed(
                 return finish(context, state, retired, remaining, reason);
             }
         };
-        if decoded.segment_accesses() & (1 << 5) != 0 {
+        if decoded.segment_accesses() & (1 << 5) != 0 && !observer.exact_cold() {
             #[cfg(any(test, feature = "observability"))]
             heat.diagnostics.request(diagnostics::Request::Admission);
             heat.requested(pc);
@@ -544,3 +547,7 @@ fn gate(
 #[cfg(test)]
 #[path = "cold/tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "cold/observation_tests.rs"]
+mod observation_tests;
