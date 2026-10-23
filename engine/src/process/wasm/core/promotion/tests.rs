@@ -316,6 +316,78 @@ fn a_declined_cap_preserves_the_target_and_requires_new_heat() {
 }
 
 #[test]
+fn an_instruction_union_over_the_limit_cannot_discard_unindexed_interiors() {
+    let mut memory = memory();
+    let mut leaf = [0x90; 9];
+    leaf[8] = 0xc3;
+    memory.write(GuestAddress(0x1000), &leaf).unwrap();
+    memory.write(GuestAddress(0x1040), &leaf).unwrap();
+    let mut cache = CoreCache32::default();
+    let a = insert(&mut cache, &memory, 0x1000, 1);
+    let b = insert(&mut cache, &memory, 0x1040, 2);
+    assert_eq!((a.instruction_count(), b.instruction_count()), (9, 9));
+    assert_eq!(a.entrypoints(), &[GuestAddress(0x1000)]);
+    assert_eq!(b.entrypoints(), &[GuestAddress(0x1040)]);
+    mature(&mut cache, &memory, &a, &b, 0x1040);
+    let before = cache.snapshot();
+    assert!(
+        cache
+            .prepare_transition(
+                &memory,
+                0x1040,
+                CompileOptions {
+                    instructions: 10,
+                    ..options()
+                },
+                &[],
+            )
+            .is_none(),
+        "two indexed roots do not justify dropping eight existing instruction starts"
+    );
+    assert_eq!(cache.snapshot(), before);
+    assert_eq!(&cache.link_owners[1..3], &[a.identity(), b.identity()]);
+    assert!(cache.retained(&a).is_some() && cache.retained(&b).is_some());
+    assert_eq!(
+        cache.lookup(&memory, 0x1000).unwrap().identity(),
+        a.identity()
+    );
+    assert_eq!(
+        cache.lookup(&memory, 0x1040).unwrap().identity(),
+        b.identity()
+    );
+}
+
+#[test]
+fn overlapping_instruction_starts_count_once_against_the_formation_limit() {
+    let mut memory = memory();
+    let mut leaf = [0x90; 9];
+    leaf[8] = 0xc3;
+    memory.write(GuestAddress(0x1000), &leaf).unwrap();
+    let mut cache = CoreCache32::default();
+    let a = insert(&mut cache, &memory, 0x1000, 1);
+    let b = insert(&mut cache, &memory, 0x1004, 2);
+    assert_eq!((a.instruction_count(), b.instruction_count()), (9, 5));
+    mature(&mut cache, &memory, &a, &b, 0x1004);
+    let merged = cache
+        .prepare_transition(
+            &memory,
+            0x1004,
+            CompileOptions {
+                instructions: 9,
+                ..options()
+            },
+            &[],
+        )
+        .unwrap();
+    assert_eq!(
+        merged.instruction_pcs().collect::<Vec<_>>(),
+        (0x1000..0x1009).collect::<Vec<_>>()
+    );
+    assert_eq!(&cache.link_owners[1..3], &[0, 0]);
+    assert!(cache.retained(&a).is_none() && cache.retained(&b).is_none());
+}
+
+#[test]
 fn preserved_roots_cannot_hide_a_dropped_indexed_interior_entry() {
     let memory = memory();
     let mut cache = CoreCache32::default();

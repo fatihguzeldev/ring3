@@ -202,7 +202,9 @@ impl CoreCache32 {
         // an accepted formation removes this source owner and its edge rows.
         // declined pairs retry when limits, indexed entry counts or source epoch change.
         heat.rejected[selected] = Some(rejected);
-        if rejected.source_entries + rejected.target_entries > options.blocks {
+        if rejected.source_entries + rejected.target_entries > options.blocks
+            || !instruction_union_fits(&source, &target, options.instructions)
+        {
             return None;
         }
         let roots: Vec<_> = source
@@ -265,6 +267,38 @@ impl CoreCache32 {
     fn linked_current(&self, memory: &AddressSpace, code: &RegionRef) -> bool {
         self.retained(code)
             .is_some_and(|row| self.reciprocal_slot(code.key, row) && code.is_current(memory))
+    }
+}
+
+fn instruction_union_fits(source: &RegionRef, target: &RegionRef, limit: usize) -> bool {
+    if source.instruction_count() + target.instruction_count() <= limit {
+        return true;
+    }
+    // final blocks retain unique instruction starts in increasing address order.
+    let mut left = source.instruction_pcs().peekable();
+    let mut right = target.instruction_pcs().peekable();
+    let mut count = 0;
+    loop {
+        match (left.peek().copied(), right.peek().copied()) {
+            (None, None) => return true,
+            (Some(a), Some(b)) if a == b => {
+                left.next();
+                right.next();
+            }
+            (Some(a), Some(b)) if a < b => {
+                left.next();
+            }
+            (Some(_), None) => {
+                left.next();
+            }
+            _ => {
+                right.next();
+            }
+        }
+        count += 1;
+        if count > limit {
+            return false;
+        }
     }
 }
 
