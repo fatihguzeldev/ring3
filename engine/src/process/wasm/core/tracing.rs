@@ -1,9 +1,10 @@
 use super::{CoreSession32, REGISTRY, Registry, cache::RegionRef, compile_status};
 use crate::{
     cpu::core::{
-        CompileOptions,
+        CompileError, CompileOptions, ObservedPlan,
         cold::ColdObserver,
-        compile_observed_with_cold, compile_observed_with_growth,
+        compile_observed_with_growth, emit_observed_plan, prepare_cold_prefix_plan,
+        prepare_observed_plan,
         trace::{self, CompletedColdObservation, PendingColdObservation, TraceArena, TraceEvent},
     },
     memory::{AddressSpace, GuestAddress},
@@ -12,6 +13,7 @@ use crate::{
 pub(super) struct TraceController {
     pub arena: Box<TraceArena>,
     root: Option<u32>,
+    installed_root: Option<u32>,
     memory_identity: u64,
     source_version: u64,
     owners: Vec<RegionRef>,
@@ -26,6 +28,7 @@ impl Default for TraceController {
         Self {
             arena: Box::new(TraceArena::new()),
             root: None,
+            installed_root: None,
             memory_identity: 0,
             source_version: 0,
             owners: Vec::new(),
@@ -41,6 +44,7 @@ impl TraceController {
     fn start(&mut self, memory: &AddressSpace, code: RegionRef, root: u32, manual: bool) {
         self.arena.begin();
         self.root = Some(root);
+        self.installed_root = None;
         self.memory_identity = memory.identity();
         self.source_version = memory.code_source_version();
         self.owners.clear();
@@ -54,6 +58,7 @@ impl TraceController {
     fn start_cold(&mut self, memory: &AddressSpace, root: u32) {
         self.arena.begin();
         self.root = Some(root);
+        self.installed_root = None;
         self.memory_identity = memory.identity();
         self.source_version = memory.code_source_version();
         self.owners.clear();
@@ -111,6 +116,7 @@ impl TraceController {
     fn clear_capture(&mut self) {
         self.arena.deactivate();
         self.root = None;
+        self.installed_root = None;
         self.owners.clear();
         self.cold.clear();
         self.pending = None;
@@ -259,12 +265,16 @@ pub(crate) fn core_trace_ready() -> u32 {
         let Ok(registry) = registry.try_borrow() else {
             return 0;
         };
-        u32::from(registry.core.as_ref().is_some_and(|core| {
-            !core.active
-                && core.tracing.root.is_some()
-                && core.tracing.ended
-                && !core.tracing.manual
-        }))
+        let Some(core) = registry.core.as_ref().filter(|core| !core.active) else {
+            return 0;
+        };
+        // 0 idle, 1 ended automatic capture, 2 installed owner metadata.
+        // The separate state makes address zero an unambiguous valid anchor.
+        if core.tracing.installed_root.is_some() {
+            2
+        } else {
+            u32::from(core.tracing.root.is_some() && core.tracing.ended && !core.tracing.manual)
+        }
     })
 }
 
@@ -278,7 +288,7 @@ pub(crate) fn core_trace_root() -> u32 {
                     .core
                     .as_ref()
                     .filter(|core| !core.active)
-                    .and_then(|core| core.tracing.root)
+                    .and_then(|core| core.tracing.root.or(core.tracing.installed_root))
             })
             .unwrap_or(0)
     })
@@ -312,6 +322,7 @@ pub(crate) fn core_trace_finish(root: u32, instructions: u32, blocks: u32) -> u3
         let valid = memory.identity() == core.tracing.memory_identity
             && (!core.tracing.manual
                 || memory.code_source_version() == core.tracing.source_version);
+        let manual = core.tracing.manual;
         let result = if let Some(events) = events.filter(|_| valid) {
             let owners: Vec<_> = core.tracing.owners.iter().map(|owner| &**owner).collect();
             let options = CompileOptions {
@@ -319,20 +330,13 @@ pub(crate) fn core_trace_finish(root: u32, instructions: u32, blocks: u32) -> u3
                 blocks: blocks as usize,
                 ..CompileOptions::default()
             };
-            if !core.tracing.manual {
-                let previous = core.cache.observed_owner(memory, root).or_else(|| {
-                    // A cold prefix may return to one retained family. Its held
-                    // immutable history remains the anchor even when this new
-                    // capture starts at a previously unowned instruction.
-                    let mut families = core
-                        .tracing
-                        .owners
-                        .iter()
-                        .filter(|owner| owner.is_observed_family() && owner.is_current(memory));
-                    let family = families.next()?;
-                    families.next().is_none().then(|| family.clone())
-                });
-                compile_observed_with_cold(
+            if !manual {
+                let parents: Vec<_> = owners
+                    .iter()
+                    .copied()
+                    .filter(|owner| owner.is_observed_family() && owner.is_current(memory))
+                    .collect();
+                let plan = prepare_observed_plan(
                     memory,
                     GuestAddress(root),
                     options,
@@ -340,8 +344,33 @@ pub(crate) fn core_trace_finish(root: u32, instructions: u32, blocks: u32) -> u3
                     &owners,
                     memory.code_source_version(),
                     &core.tracing.cold,
-                    previous.as_ref().map(|owner| &**owner),
-                )
+                    &parents,
+                );
+                match plan {
+                    Ok(plan) => {
+                        let accepted = plan
+                            .map(|plan| admit_plan(&mut core.cache, memory, plan))
+                            .transpose()
+                            .map(Option::flatten);
+                        match accepted {
+                            Ok(Some(code)) => Ok(Some(code)),
+                            Ok(None) => prepare_cold_prefix_plan(
+                                memory,
+                                options,
+                                &events,
+                                &core.tracing.cold,
+                                &|pc| core.cache.owned_frontier_contains(memory, pc),
+                            )
+                            .and_then(|plan| {
+                                plan.map(|plan| admit_plan(&mut core.cache, memory, plan))
+                                    .transpose()
+                                    .map(Option::flatten)
+                            }),
+                            Err(error) => Err(error),
+                        }
+                    }
+                    Err(error) => Err(error),
+                }
             } else {
                 compile_observed_with_growth(
                     memory,
@@ -352,6 +381,7 @@ pub(crate) fn core_trace_finish(root: u32, instructions: u32, blocks: u32) -> u3
                     core.tracing.source_version,
                     core.cache.trace_score(memory, root),
                 )
+                .and_then(|code| code.map(|code| core.cache.admit(memory, code)).transpose())
             }
         } else {
             Ok(None)
@@ -362,14 +392,33 @@ pub(crate) fn core_trace_finish(root: u32, instructions: u32, blocks: u32) -> u3
             Ok(None) => return 18,
             Err(error) => return compile_status(error),
         };
-        let code = match core.cache.admit(memory, code) {
-            Ok(code) => code,
-            Err(error) => return compile_status(error),
-        };
+        if !manual {
+            core.tracing.installed_root = code.trace_root();
+        }
         let identity = code.identity();
         core.code = Some(code);
         core.context.bytes_mut()[120..128].copy_from_slice(&identity.to_le_bytes());
         core.context.set_word(112, 0);
         0
     })
+}
+
+// Formation, ownership and code generation have distinct lifetimes. Rejected
+// plans never allocate an executor identity or invoke the exact Wasm backend.
+fn admit_plan(
+    cache: &mut super::cache::CoreCache32,
+    memory: &AddressSpace,
+    plan: ObservedPlan,
+) -> Result<Option<RegionRef>, CompileError> {
+    let Some(admission) = cache.preflight_observed(memory, &plan) else {
+        return Ok(None);
+    };
+    match emit_observed_plan(memory, plan) {
+        Ok(Some(code)) => cache.commit_observed(memory, admission, code).map(Some),
+        Ok(None) | Err(CompileError::WasmLimit) => {
+            cache.reject_observed(admission);
+            Ok(None)
+        }
+        Err(error) => Err(error),
+    }
 }

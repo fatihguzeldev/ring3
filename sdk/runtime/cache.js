@@ -504,7 +504,11 @@ export class CodeCache {
     const status = this.native.core_trace_finish(root,this.instructions,this.blocks) >>> 0;
     // The optimizer already selected the immutable owner. Installation must
     // never invoke baseline formation, including after a cold-only capture.
-    if (status === 0) this.#selectedEntry(root,0);
+    if (status === 0) {
+      const installedRoot = this.native.core_trace_ready() === 2
+        ? this.native.core_trace_root() >>> 0 : root;
+      this.#selectedEntry(installedRoot,0);
+    }
     else if (![4,7,8,18,20].includes(status))
       throw Object.assign(new Error(`core_trace_finish returned ${status}`),{operation:'core_trace_finish',status});
   }
