@@ -105,9 +105,49 @@ struct CachedRegion {
     slot: u32,
     linked_entries: LinkedEntries,
     rejected_entries: HashMap<u32, EntryRejection, RandomState>,
-    trace_visits: u32,
-    trace_attempted: bool,
-    trace_candidate_pc: Option<u32>,
+    trace_heat: [TraceHeat; 4],
+}
+
+#[derive(Clone, Copy, Default)]
+struct TraceHeat {
+    pc: u32,
+    visits: u32,
+    interval: u32,
+}
+
+impl TraceHeat {
+    const INITIAL: u32 = 1024;
+    const MAX_INTERVAL: u32 = 1 << 20;
+
+    fn visit(sites: &mut [Self; 4], pc: u32) -> bool {
+        let index = sites
+            .iter()
+            .position(|site| site.interval != 0 && site.pc == pc)
+            .or_else(|| sites.iter().position(|site| site.interval == 0))
+            .unwrap_or_else(|| {
+                sites
+                    .iter()
+                    .enumerate()
+                    .min_by_key(|(_, site)| site.visits)
+                    .unwrap()
+                    .0
+            });
+        let site = &mut sites[index];
+        if site.interval == 0 || site.pc != pc {
+            *site = Self {
+                pc,
+                visits: 0,
+                interval: Self::INITIAL,
+            };
+        }
+        site.visits += 1;
+        if site.visits < site.interval {
+            return false;
+        }
+        site.visits = 0;
+        site.interval = (site.interval * 4).min(Self::MAX_INTERVAL);
+        true
+    }
 }
 
 #[derive(Default)]
@@ -188,6 +228,18 @@ impl Default for CoreCache32 {
 }
 
 impl CoreCache32 {
+    pub(super) fn trace_score(
+        &self,
+        memory: &AddressSpace,
+        root: u32,
+    ) -> Option<crate::cpu::core::TraceScore> {
+        self.trace_entries
+            .get(&root)
+            .and_then(|key| self.region(*key))
+            .filter(|entry| entry.code.is_current(memory))
+            .and_then(|entry| entry.code.trace_score())
+    }
+
     pub(super) fn frontier_contains(&self, memory: &AddressSpace, pc: u32) -> bool {
         self.trace_entries
             .get(&pc)
@@ -310,14 +362,23 @@ impl CoreCache32 {
                 return Err(CompileError::InvalidLimits);
             }
             if let Some(previous) = self.trace_entries.get(&root).copied() {
-                if self
-                    .region(previous)
-                    .is_some_and(|entry| entry.code.is_current(memory))
-                {
-                    return Err(CompileError::InvalidLimits);
+                if let Some(entry) = self.region(previous) {
+                    if entry.code.is_current(memory) {
+                        if !code
+                            .trace_score()
+                            .zip(entry.code.trace_score())
+                            .is_some_and(|(next, current)| next.strictly_grows(current))
+                        {
+                            return Err(CompileError::InvalidLimits);
+                        }
+                    } else {
+                        self.source_invalidations = self.source_invalidations.saturating_add(1);
+                    }
                 }
+                // All fallible validation is complete. Retire only the prior
+                // executor at this root, releasing its count/byte/slot budget
+                // before infallible insertion; baseline coverage is untouched.
                 self.remove(previous);
-                self.source_invalidations = self.source_invalidations.saturating_add(1);
             }
             return Ok(self.insert_owned(code));
         }
@@ -620,9 +681,7 @@ impl CoreCache32 {
             slot: 0,
             linked_entries: LinkedEntries::default(),
             rejected_entries: HashMap::with_hasher(RandomState::default()),
-            trace_visits: 0,
-            trace_attempted: false,
-            trace_candidate_pc: None,
+            trace_heat: [TraceHeat::default(); 4],
         });
         if let Some(newest) = self.newest {
             self.regions[newest].as_mut().unwrap().newer = Some(index);
@@ -738,26 +797,15 @@ impl CoreCache32 {
         }
     }
 
-    // A bounded per-owner counter selects a recording opportunity. It never
-    // grows a graph, replaces source coverage or retries a failed trace.
+    // Heat belongs to bounded retained owners, not an immortal root history.
+    // Distinct hot ports and already observed owners can form a later capture.
+    // Failed/equal captures back off without permanently consuming the site.
     pub(super) fn trace_candidate(&mut self, code: &RegionRef, pc: u32) -> bool {
-        if code.trace_root().is_some() || self.retained(code).is_none() {
+        if self.retained(code).is_none() || !code.supports_entry(pc) {
             return false;
         }
         let entry = self.regions[code.key.index].as_mut().unwrap();
-        if entry.trace_attempted {
-            return false;
-        }
-        let candidate = *entry.trace_candidate_pc.get_or_insert(pc);
-        if pc != candidate {
-            return false;
-        }
-        entry.trace_visits = entry.trace_visits.saturating_add(1);
-        if entry.trace_visits < 1024 {
-            return false;
-        }
-        entry.trace_attempted = true;
-        true
+        TraceHeat::visit(&mut entry.trace_heat, pc)
     }
 }
 

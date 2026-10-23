@@ -304,6 +304,10 @@ fn real_count_pressure_evicts_the_lru_overlay_from_the_shared_4096_owner_pool() 
     let memory = memory(MAX_REGIONS);
     let (mut cache, caller, callee, source) = sources(&memory);
     let coverage = cache.coverage.clone();
+    for _ in 0..1023 {
+        assert!(!cache.trace_candidate(&caller, ROOT));
+    }
+    assert!(cache.trace_candidate(&caller, ROOT));
     let trace = cache
         .admit(&memory, observed(&memory, &caller, &callee))
         .unwrap();
@@ -341,6 +345,151 @@ fn real_count_pressure_evicts_the_lru_overlay_from_the_shared_4096_owner_pool() 
     for (pc, key) in coverage {
         assert_eq!(cache.coverage.get(&pc), Some(&key));
     }
+    // A successful executor's eviction does not permanently consume the hot
+    // root. The retained source owner's bounded retry heat can rebuild it.
+    for _ in 0..4095 {
+        assert!(!cache.trace_candidate(&caller, ROOT));
+    }
+    assert!(cache.trace_candidate(&caller, ROOT));
+    let rebuilt = cache
+        .admit(&memory, observed(&memory, &caller, &callee))
+        .unwrap();
+    assert_ne!(rebuilt.identity(), trace.identity());
+    cache.install_link(&rebuilt, 4).unwrap();
+    selected(&mut cache, &memory, &source, ROOT, &rebuilt, 4);
+    assert_eq!(
+        cache.unlink(4, trace.identity()),
+        Err(LinkError::WrongOwner)
+    );
+    resource_invariants(&cache);
+}
+
+#[test]
+fn a_rare_first_port_cannot_permanently_suppress_a_different_hot_entry() {
+    let memory = memory(0);
+    let (mut cache, caller, _, _) = sources(&memory);
+    let before = cache.snapshot();
+    let coverage = cache.coverage.clone();
+    assert!(!cache.trace_candidate(&caller, ROOT));
+    for _ in 0..1023 {
+        assert!(!cache.trace_candidate(&caller, 0x1005));
+    }
+    assert!(cache.trace_candidate(&caller, 0x1005));
+    assert_eq!(cache.snapshot(), before);
+    assert_eq!(cache.coverage, coverage);
+    resource_invariants(&cache);
+}
+
+#[test]
+fn a_declined_capture_backs_off_but_does_not_permanently_consume_the_site() {
+    let memory = memory(0);
+    let (mut cache, caller, _, _) = sources(&memory);
+    let before = cache.snapshot();
+    for _ in 0..1023 {
+        assert!(!cache.trace_candidate(&caller, ROOT));
+    }
+    assert!(cache.trace_candidate(&caller, ROOT));
+    // No artifact was admitted: the capture may have ended before a completed
+    // span, or exceeded its bounds. Neither condition poisons the source root.
+    for _ in 0..4095 {
+        assert!(!cache.trace_candidate(&caller, ROOT));
+    }
+    assert!(cache.trace_candidate(&caller, ROOT));
+    assert_eq!(cache.snapshot(), before);
+    resource_invariants(&cache);
+}
+
+#[test]
+fn an_installed_observed_owner_can_itself_become_a_growth_candidate() {
+    let memory = memory(0);
+    let (mut cache, caller, callee, _) = sources(&memory);
+    let trace = cache
+        .admit(&memory, observed(&memory, &caller, &callee))
+        .unwrap();
+    cache.install_link(&trace, 4).unwrap();
+    let before = cache.snapshot();
+    for _ in 0..1023 {
+        assert!(!cache.trace_candidate(&trace, ROOT));
+    }
+    assert!(cache.trace_candidate(&trace, ROOT));
+    assert_eq!(cache.snapshot(), before);
+    resource_invariants(&cache);
+}
+
+#[test]
+fn strictly_larger_same_root_executor_replaces_only_its_predecessor_and_slot() {
+    let memory = memory(0);
+    let (mut cache, caller, callee, source) = sources(&memory);
+    let event = |owner: &CompiledCode, pc, end| TraceEvent {
+        kind: BLOCK,
+        pc,
+        end,
+        offset: 0,
+        owner: owner.identity(),
+    };
+    let short = compile_observed(
+        &memory,
+        GuestAddress(ROOT),
+        options(),
+        &[event(&caller, ROOT, 0x1005), event(&callee, CALLEE, 0x2002)],
+        &[&caller, &callee],
+        memory.code_source_version(),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(short.instruction_count(), 1);
+    let short = cache.admit(&memory, short).unwrap();
+    cache.install_link(&short, 4).unwrap();
+    selected(&mut cache, &memory, &source, ROOT, &short, 4);
+    let before = cache.snapshot();
+    let coverage = cache.coverage.clone();
+    let entries = cache.entries.clone();
+    let bigger = compile_observed(
+        &memory,
+        GuestAddress(ROOT),
+        options(),
+        &[
+            event(&short, ROOT, 0x1005),
+            event(&callee, CALLEE, 0x2002),
+            event(&caller, 0x1005, 0x1008),
+            event(&short, ROOT, 0x1005),
+        ],
+        &[&short, &caller, &callee],
+        memory.code_source_version(),
+    )
+    .unwrap()
+    .unwrap();
+    assert!(
+        bigger
+            .trace_score()
+            .unwrap()
+            .strictly_grows(short.trace_score().unwrap())
+    );
+    let bigger = cache.admit(&memory, bigger).unwrap();
+    assert!(cache.retained(&short).is_none());
+    assert_eq!(cache.link_owners[4], 0);
+    assert_eq!(cache.snapshot()[5], before[5]);
+    assert_eq!(
+        cache.snapshot()[6],
+        before[6] - short.wasm().len() as u64 + bigger.wasm().len() as u64
+    );
+    assert_eq!(cache.snapshot()[2..5], before[2..5]);
+    assert_eq!(cache.coverage, coverage);
+    assert_eq!(cache.entries, entries);
+    cache.install_link(&bigger, 4).unwrap();
+    assert_eq!(
+        cache.unlink(4, short.identity()),
+        Err(LinkError::WrongOwner)
+    );
+    selected(&mut cache, &memory, &source, ROOT, &bigger, 4);
+    selected(&mut cache, &memory, &source, CALLEE, &callee, 2);
+    let snapshot = cache.snapshot();
+    assert!(matches!(
+        cache.admit(&memory, observed(&memory, &caller, &callee)),
+        Err(CompileError::InvalidLimits)
+    ));
+    assert_eq!(cache.snapshot(), snapshot);
+    selected(&mut cache, &memory, &source, ROOT, &bigger, 4);
     resource_invariants(&cache);
 }
 

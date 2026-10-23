@@ -1,13 +1,11 @@
 use super::{CoreSession32, REGISTRY, Registry, cache::RegionRef, compile_status};
 use crate::{
     cpu::core::{
-        CompileOptions, compile_observed,
+        CompileOptions, compile_observed_with_growth,
         trace::{self, TraceArena, TraceEvent},
     },
     memory::{AddressSpace, GuestAddress},
 };
-use foldhash::fast::RandomState;
-use std::collections::HashSet;
 
 pub(super) struct TraceController {
     pub arena: Box<TraceArena>,
@@ -17,8 +15,6 @@ pub(super) struct TraceController {
     owners: Vec<RegionRef>,
     ended: bool,
     manual: bool,
-    attempt_epoch: (u64, u64),
-    attempted_roots: HashSet<u32, RandomState>,
 }
 
 impl Default for TraceController {
@@ -31,8 +27,6 @@ impl Default for TraceController {
             owners: Vec::new(),
             ended: false,
             manual: false,
-            attempt_epoch: (0, 0),
-            attempted_roots: HashSet::with_hasher(RandomState::default()),
         }
     }
 }
@@ -113,28 +107,13 @@ impl CoreSession32 {
         let Some(code) = self.code.as_ref() else {
             return;
         };
-        // Trace bodies deliberately omit baseline recording. Their execution
-        // must not become an invisible gap between two confirmed entries.
-        if code.trace_root().is_some() {
-            self.tracing.end();
-            return;
-        }
         if self.tracing.root.is_some() {
             self.tracing.observe(code);
             return;
         }
-        let epoch = (memory.identity(), memory.code_source_version());
-        if self.tracing.attempt_epoch != epoch {
-            self.tracing.attempt_epoch = epoch;
-            self.tracing.attempted_roots.clear();
-        }
-        if self.tracing.attempted_roots.len() >= 4096
-            || self.tracing.attempted_roots.contains(&pc)
-            || !self.cache.trace_candidate(code, pc)
-        {
+        if !self.cache.trace_candidate(code, pc) {
             return;
         }
-        self.tracing.attempted_roots.insert(pc);
         self.tracing.start(memory, code.clone(), pc, false);
     }
 
@@ -181,9 +160,11 @@ pub(crate) fn core_trace_start(root: u32) -> u32 {
         else {
             return 5;
         };
-        let Some(code) = core.code.as_ref().filter(|code| {
-            code.trace_root().is_none() && code.supports_entry(root) && code.is_current(memory)
-        }) else {
+        let Some(code) = core
+            .code
+            .as_ref()
+            .filter(|code| code.supports_entry(root) && code.is_current(memory))
+        else {
             return 4;
         };
         core.tracing.start(memory, code.clone(), root, true);
@@ -252,7 +233,7 @@ pub(crate) fn core_trace_finish(root: u32, instructions: u32, blocks: u32) -> u3
             && memory.code_source_version() == core.tracing.source_version;
         let result = if let Some(events) = events.filter(|_| valid) {
             let owners: Vec<_> = core.tracing.owners.iter().map(|owner| &**owner).collect();
-            compile_observed(
+            compile_observed_with_growth(
                 memory,
                 GuestAddress(root),
                 CompileOptions {
@@ -263,6 +244,7 @@ pub(crate) fn core_trace_finish(root: u32, instructions: u32, blocks: u32) -> u3
                 &events,
                 &owners,
                 core.tracing.source_version,
+                core.cache.trace_score(memory, root),
             )
         } else {
             Ok(None)
