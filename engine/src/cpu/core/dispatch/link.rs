@@ -69,7 +69,7 @@ pub(super) fn emit() -> Vec<u8> {
                 element_type: RefType::FUNCREF,
                 table64: false,
                 minimum: 1,
-                maximum: Some(4097),
+                maximum: None,
                 shared: false,
             }),
         );
@@ -115,8 +115,8 @@ pub(super) fn emit() -> Vec<u8> {
     code.local_get(2)
         .i32_eqz()
         .local_get(2)
-        .i32_const(4096)
-        .i32_gt_u()
+        .i32_const(COLD_MARK as i32)
+        .i32_ge_u()
         .i32_or();
     reject(&mut code, true);
     for table in 0..2 {
@@ -243,11 +243,15 @@ pub(super) fn emit() -> Vec<u8> {
         .i32_gt_u();
     reject(&mut code, true);
     code.local_get(2).return_().end();
-    code.local_get(2).i32_const(4096).i32_gt_u();
-    reject(&mut code, true);
+    for table in 0..2 {
+        code.local_get(2).table_size(table).i32_ge_u();
+        reject(&mut code, true);
+    }
     code.else_();
-    code.local_get(NEXT).i32_const(4096).i32_gt_u();
-    reject(&mut code, false);
+    for table in 0..2 {
+        code.local_get(NEXT).table_size(table).i32_ge_u();
+        reject(&mut code, false);
+    }
     code.local_get(NEXT).i32_eqz().if_(BlockType::Empty);
     publish(&mut code);
     code.i32_const(StopReason::NeedCode as i32)

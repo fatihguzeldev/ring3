@@ -19,7 +19,7 @@ function program(stop = 1, next = 0x2000, retired = 1, work = 1) {
     ...section(2, imports), ...section(3,[1,2]), ...section(7,[1,...string('run'),0,2]),
     ...section(10,[1,...u(body.length),...body])]);
 }
-function driver(coldGlobals = []) {
+function driver(coldGlobals = [], dynamic = false) {
   const body = [1,2,0x7f,0x41,0,0x24,0,
     0x20,0,0x20,1,0x20,2,0x11,2,0,0x21,3,0x41,1,0x24,0,
     0x20,3,0x41,1,0x47,0x04,0x40,0x20,3,0x0f,0x0b,
@@ -37,7 +37,7 @@ function driver(coldGlobals = []) {
   return Uint8Array.from([0,97,115,109,1,0,0,0,
     ...section(1,[3,0x60,1,0x7f,1,0x7f,0x60,3,0x7f,0x7f,0x7f,1,0x7f,0x60,2,0x7f,0x7f,1,0x7f]),
     ...section(2,[3,...string('ring3'),...string('memory'),2,0,2,
-      ...string('ring3'),...string('functions'),1,0x70,1,1,...u(4097),
+      ...string('ring3'),...string('functions'),1,0x70,...(dynamic ? [0,1] : [1,1,...u(4097)]),
       ...string('ring3'),...string('next'),0,0]),
     ...section(3,[1,1]),...section(6,[1+globals.length,0x7f,1,0x41,0,0x0b,
       ...globals.flatMap(value => [value.type === 'i64' ? 0x7e : 0x7f,1,
@@ -174,6 +174,41 @@ test('recorded installation uses an explicit zero anchor and accepts legacy trac
     assert.equal(f.calls.filter(([name])=>name==='prepare').length,1,
       'installation consumes the prepared owner without invoking compilation');
   }
+});
+
+test('byte residency grows link tables and prunes only after a binding change',()=>{
+  const f=fixture(pc=>({id:BigInt(pc),stop:2,next:pc+4}),driver([],true));
+  let capacity=2,epoch=1n;
+  const status=f.api.core_cache_status_ptr,link=f.api.core_link,unlink=f.api.core_unlink;
+  f.api.core_cache_format=()=>2;
+  f.api.core_cache_status_ptr=()=>{
+    const pointer=status(),data=new DataView(f.engine.memory.buffer);
+    [1234n,BigInt(128*1024*1024),BigInt(capacity),epoch]
+      .forEach((value,index)=>data.setBigUint64(pointer+64+index*8,value,true));
+    return pointer;
+  };
+  f.api.core_link=slot=>{const result=link(slot);if(result===0)epoch++;return result;};
+  f.api.core_unlink=(...args)=>{const result=unlink(...args);if(result===0)epoch++;return result;};
+  const cache=new CodeCache(f.engine),first=cache.entry(0x1000);
+  const second=cache.entry(0x2000);capacity=4;const third=cache.entry(0x3000);
+  assert.equal(cache.table.length,5);assert.equal(cache.units.size,3);
+  assert.equal(cache.units.get(first.id),first);assert.equal(cache.table.get(first.slot),first.run);
+  assert.equal(f.calls.filter(([name])=>name==='owners').length,2,
+    'pure admission skips pruning; extent growth validates its new directory');
+  f.api.core_unlink(third.slot,Number(third.id),0);
+  f.api.core_unlink(second.slot,Number(second.id),0);
+  capacity=2;
+  const replacement=cache.entry(0x4000);
+  assert.equal(f.calls.filter(([name])=>name==='owners').length,3);
+  assert.equal(cache.units.has(third.id),false);assert.equal(replacement.slot,second.slot);
+  assert.equal(cache.table.get(third.slot),null);assert.equal(cache.table.length,5);
+  capacity=4;const reused=cache.entry(0x5000);
+  assert.equal(reused.slot,third.slot);
+  assert.equal(f.api.core_unlink(third.slot,Number(third.id),0),4);
+  assert.equal(f.links.get(reused.slot),reused.id);
+  const sampled=cache.sampleUsage().nativeCache;
+  assert.equal(sampled.residentCharge,'1234');assert.equal(sampled.linkCapacity,'4');
+  assert.equal(cache.stats().unitCapacity,4);assert.equal(cache.evictions,0);
 });
 
 test('owned-bound transient executes standalone once and leaves retained units and table ownership intact',()=>{
@@ -762,8 +797,8 @@ test('ordinary execution defaults to chained dispatch while explicit false remai
   const direct = new CodeCache(fixture().engine,{chain:false});
   assert.equal(direct.stats().chainEnabled,false); assert.equal(direct.table,undefined);
 });
-test('the default count bound retains 1025 linked modules within the same byte budget', () => {
-  assert.equal(DEFAULT_EXECUTION.capacity,4096);
+test('legacy engines retain their default count policy when byte residency is requested', () => {
+  assert.equal(DEFAULT_EXECUTION.capacity,null);
   const f = fixture(pc => ({id:BigInt(pc),stop:2,next:pc+4}));
   const cache = new CodeCache(f.engine,{chain:true}), first = cache.entry(0x1000);
   for (let index=1; index<1025; index++) cache.entry(0x1000+index*4);

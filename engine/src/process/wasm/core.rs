@@ -17,7 +17,9 @@ pub(crate) use dispatch::{
 };
 #[cfg(feature = "observability")]
 pub(crate) use retention::core_cold_status_ptr;
-pub(crate) use retention::{core_cache_status_ptr, core_cache_victim, core_link_owners_ptr};
+pub(crate) use retention::{
+    core_cache_format, core_cache_status_ptr, core_cache_victim, core_link_owners_ptr,
+};
 
 pub(crate) use boundary::{
     core_begin_windows_callback, core_capture_windows_call, core_complete_windows_call,

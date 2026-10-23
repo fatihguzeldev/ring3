@@ -17,6 +17,7 @@ export_process_calls! {
     core_link_owners_ptr();
     core_cache_victim();
     core_cache_status_ptr();
+    core_cache_format();
     core_trace_pointer();
     core_trace_status_ptr();
     core_trace_start(root: u32);

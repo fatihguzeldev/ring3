@@ -154,7 +154,7 @@ fn observe_selected(
     use crate::cpu::core::{COLD_MARK, STOP_MARK};
     let slot = next & !(COLD_MARK | STOP_MARK);
     session.refresh_trace_bypass(session.context.retired());
-    if next & STOP_MARK == 0 && (1..=4096).contains(&slot) {
+    if next & STOP_MARK == 0 && slot != 0 && (slot as usize) <= session.cache.link_capacity() {
         if let Some(memory) = instance.memory.as_ref() {
             session.trace_selection(memory, session.context.state().eip);
         }

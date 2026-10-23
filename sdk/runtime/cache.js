@@ -11,6 +11,8 @@ const SUPPORT_FUNCTIONS = [
 const SUPPORT_IMPORTS = [...SUPPORT_FUNCTIONS.map(([name])=>name),'support.abi'];
 const NATIVE_COUNTERS = ['compiled','admittedEncodedBytes','countEvictions','byteEvictions',
   'sourceInvalidations','retainedUnits','retainedEncodedBytes','unitCapacity'];
+const RESIDENT_COUNTERS = ['residentCharge','residentBudget','linkCapacity','bindingEpoch'];
+const COLD_MARK = 0x40000000;
 const COLD_COUNTERS = ['sourceResets','requestedResets','occupiedLiveReplacements','nativeRetired',
   'hotRequests','decodeFallbackRequests','admissionFallbackRequests','unsupportedOperationRequests',
   'rowsVisits1','rowsVisits2To63','rowsVisits64Plus','maximumVisits'];
@@ -31,10 +33,13 @@ export class CodeCache {
   #contextView;
   #linkGlobals;
   #support;
+  #residentLayout = false;
+  #prunedEpoch = null;
+  #slotExtent = 0;
 
-  constructor(engine, {budget = 50000, instructions = 2048, blocks = 128, capacity = 4096, chain = true} = {}) {
+  constructor(engine, {budget = 50000, instructions = 2048, blocks = 128, capacity = null, chain = true} = {}) {
     if (typeof chain !== 'boolean') throw new Error('invalid core chain option');
-    for (const [name, value, maximum] of [['budget', budget, 0xffffffff], ['instructions', instructions, 16384], ['blocks', blocks, 1024], ['capacity', capacity, 4096]]) {
+    for (const [name, value, maximum] of [['budget', budget, 0xffffffff], ['instructions', instructions, 16384], ['blocks', blocks, 1024]]) {
       if (!Number.isInteger(value) || value < 1 || value > maximum) throw new Error(`invalid core ${name}`);
     }
     this.engine = engine;
@@ -62,6 +67,14 @@ export class CodeCache {
       if (typeof this.api[name] === 'function') this.native[name] = this.api[name];
     const traceExports = ['core_trace_ready','core_trace_root','core_trace_finish'].map(name=>typeof this.native[name] === 'function');
     if (traceExports.some(Boolean) && !traceExports.every(Boolean)) throw new Error('incomplete core trace exports');
+    if (chain && typeof this.api.core_cache_format === 'function') {
+      this.native.core_cache_format = this.api.core_cache_format;
+      if (this.native.core_cache_format() !== 2) throw new Error('unsupported core cache format');
+      this.#residentLayout = true;
+    }
+    if (capacity === null) capacity = this.#residentLayout ? null : 4096;
+    else if (!Number.isInteger(capacity) || capacity < 1 || capacity >= (this.#residentLayout ? COLD_MARK : 4097))
+      throw new Error('invalid core capacity');
     this.#bindings = Object.entries(this.native);
     this.budget = budget; this.instructions = instructions; this.blocks = blocks; this.capacity = capacity;
     this.units = new Map(); this.context = 0; this.open = false; this.dirty = false; this.dirtyWork = 0; this.lastStop = 1;
@@ -220,10 +233,12 @@ export class CodeCache {
     return new Uint8Array(this.memory.buffer).slice(pointer, pointer + length);
   }
   initializeDispatch() {
-    this.table = new WebAssembly.Table({element:'anyfunc',initial:4097,maximum:4097});
-    if (this.linkedCore) this.publishers = new WebAssembly.Table({element:'anyfunc',initial:4097,maximum:4097});
+    const limits = this.#residentLayout ? {initial:1} : {initial:4097,maximum:4097};
+    this.table = new WebAssembly.Table({element:'anyfunc',...limits});
+    if (this.linkedCore) this.publishers = new WebAssembly.Table({element:'anyfunc',...limits});
     this.slots = new Map();
-    this.freeSlots = Array.from({length:4096},(_,index) => 4096-index);
+    this.freeSlots = this.#residentLayout ? [] : Array.from({length:4096},(_,index) => 4096-index);
+    this.#slotExtent = this.#residentLayout ? 0 : 4096;
     const module = new WebAssembly.Module(this.encoded('core_dispatch_code_ptr','core_dispatch_code_len'));
     const imports = WebAssembly.Module.imports(module);
     const expected = new Map(this.linkedCore
@@ -274,22 +289,52 @@ export class CodeCache {
       throw new Error(`invalid ${name} descriptor`);
     return new DataView(this.memory.buffer,pointer,bytes);
   }
+  residency() {
+    const data = this.nativeSnapshot('core_cache_status_ptr',96);
+    const capacity = Number(data.getBigUint64(80,true));
+    const charge = data.getBigUint64(64,true), budget = data.getBigUint64(72,true);
+    if (!Number.isInteger(capacity) || capacity < 1 || capacity >= COLD_MARK || budget === 0n || charge > budget)
+      throw new Error('invalid core residency descriptor');
+    return {capacity,epoch:data.getBigUint64(88,true)};
+  }
+  growTables(capacity) {
+    const previous = this.#slotExtent+1;
+    const required = capacity+1;
+    if (this.table.length < required) this.table.grow(required-this.table.length);
+    if (this.linkedCore && this.publishers.length < required)
+      this.publishers.grow(required-this.publishers.length);
+    // Publish new free slots only after both tables have the declared extent.
+    for (let slot=required-1; slot>=previous; slot--) this.freeSlots.push(slot);
+    if (required < previous) this.freeSlots = this.freeSlots.filter(slot=>slot<required);
+    this.#slotExtent = capacity;
+  }
   pruneNative() {
-    const owners = this.nativeSnapshot('core_link_owners_ptr',4097*8), detached = [];
+    const state = this.#residentLayout ? this.residency() : {capacity:4096};
+    if (this.#residentLayout) {
+      const extentChanged = state.capacity !== this.#slotExtent;
+      this.growTables(state.capacity);
+      if (!extentChanged && state.epoch !== 0n && state.epoch === this.#prunedEpoch) return;
+    }
+    const owners = this.nativeSnapshot('core_link_owners_ptr',(state.capacity+1)*8), detached = [];
     if (owners.getBigUint64(0,true) !== 0n) throw new Error('reserved native core slot has an owner');
     for (const unit of this.units.values()) {
-      const owner = owners.getBigUint64(unit.slot*8,true);
+      if (!unit.slot) throw new Error('invalid resident core slot');
+      const owner = unit.slot > state.capacity ? 0n : owners.getBigUint64(unit.slot*8,true);
       if (owner === 0n) detached.push(unit);
       else if (owner !== unit.id) throw new Error('native core slot owner mismatch');
     }
-    for (const unit of detached) this.remove(unit,'native');
+    for (const unit of detached) this.remove(unit,'native',state.capacity);
+    if (this.#residentLayout) this.#prunedEpoch = state.epoch;
   }
-  remove(unit,reason) {
+  remove(unit,reason,nativeExtent = null) {
     const {id} = unit;
     if (this.chain) {
-      const status = this.native.core_unlink(unit.slot,Number(id&0xffffffffn),Number(id>>32n));
-      if (status !== 0) throw new Error(`core_unlink returned ${status}`);
-      this.table.set(unit.slot,null); if(this.linkedCore)this.publishers.set(unit.slot,null); this.slots.delete(unit.slot); this.freeSlots.push(unit.slot);
+      if (nativeExtent === null || unit.slot <= nativeExtent) {
+        const status = this.native.core_unlink(unit.slot,Number(id&0xffffffffn),Number(id>>32n));
+        if (status !== 0) throw new Error(`core_unlink returned ${status}`);
+      }
+      this.table.set(unit.slot,null); if(this.linkedCore)this.publishers.set(unit.slot,null); this.slots.delete(unit.slot);
+      if (!this.#residentLayout || unit.slot <= this.#slotExtent) this.freeSlots.push(unit.slot);
     }
     this.units.delete(id); this.retainedModuleBytes -= unit.bytes;
     if (this.compilation && unit.compilation.sourceWitness === 'pending') {
@@ -304,7 +349,7 @@ export class CodeCache {
     if (this.chain) {
       const slot = this.native.core_cache_victim() >>> 0;
       unit = this.slots.get(slot);
-      if (!slot || slot > 4096 || !unit || this.units.get(unit.id) !== unit)
+      if (!slot || slot >= this.table.length || !unit || this.units.get(unit.id) !== unit)
         throw new Error('invalid native core cache victim');
     } else unit = this.units.values().next().value;
     this.remove(unit,reason);
@@ -427,7 +472,7 @@ export class CodeCache {
       this.transientAdmissions++; this.transientModuleBytes += length; this.generatedModuleBytes += length;
       return unit;
     }
-    while (this.units.size >= this.capacity || this.retainedModuleBytes + length > MAX_CODE_BYTES)
+    while ((this.capacity !== null && this.units.size >= this.capacity) || this.retainedModuleBytes + length > MAX_CODE_BYTES)
       this.evict(this.retainedModuleBytes + length > MAX_CODE_BYTES ? 'bytes' : 'count');
     if (this.chain) {
       const slot = this.freeSlots.pop();
@@ -438,6 +483,7 @@ export class CodeCache {
       const status = this.native.core_link(slot);
       if (status !== 0) {this.table.set(slot,null); if(this.linkedCore)this.publishers.set(slot,null); this.freeSlots.push(slot); throw new Error(`core_link returned ${status}`);}
       unit.slot = slot; this.slots.set(slot,unit);
+      if (this.#residentLayout) this.#prunedEpoch = this.residency().epoch;
     }
     this.units.set(id, unit); this.admissions++; this.generatedModuleBytes += length; this.retainedModuleBytes += length;
     if (this.compilation) unit.compilation = this.recordAdmission(pc,id,length);
@@ -572,8 +618,9 @@ export class CodeCache {
     if (this.open) throw new Error('cannot sample an active core cache');
     if (this.chain && this.context) {
       this.pristine();
-      const data = this.nativeSnapshot('core_cache_status_ptr',64);
-      this.nativeCache = Object.fromEntries(NATIVE_COUNTERS.map((name,index) => [name,data.getBigUint64(index*8,true).toString()]));
+      const names = this.#residentLayout ? [...NATIVE_COUNTERS,...RESIDENT_COUNTERS] : NATIVE_COUNTERS;
+      const data = this.nativeSnapshot('core_cache_status_ptr',names.length*8);
+      this.nativeCache = Object.fromEntries(names.map((name,index) => [name,data.getBigUint64(index*8,true).toString()]));
     }
     return this.stats();
   }
@@ -591,7 +638,7 @@ export class CodeCache {
       chainedColdRuns:this.chainedColdRuns,chainedColdWork:this.chainedColdWork,chainedColdRetired:this.chainedColdRetired,
       compileInstructionLimit:this.instructions, compileBlockLimit:this.blocks, workBudget:this.budget,
       engineCacheHits: this.hits, evictions: this.evictions, generatedModuleBytes: this.generatedModuleBytes,
-      retainedModuleBytes: this.retainedModuleBytes, installedUnits: this.units.size, unitCapacity: this.capacity,
+      retainedModuleBytes: this.retainedModuleBytes, installedUnits: this.units.size, unitCapacity: this.capacity ?? this.#slotExtent,
       transientAdmissions:this.transientAdmissions,transientRuns:this.transientRuns,transientModuleBytes:this.transientModuleBytes,
       byteCapacity:MAX_CODE_BYTES, evictionReasons:{...this.evictionReasons},
       prunedNative:this.prunedNative, prunedNativeBytes:this.prunedNativeBytes,

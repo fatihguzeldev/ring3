@@ -1,5 +1,9 @@
 use super::REGISTRY;
 
+pub(crate) fn core_cache_format() -> u32 {
+    2
+}
+
 pub(crate) fn core_link_owners_ptr() -> u32 {
     REGISTRY.with(|registry| {
         registry
@@ -41,7 +45,8 @@ pub(crate) fn core_cache_status_ptr() -> u32 {
             return 0;
         };
         // compiled, encoded bytes, count/byte evictions, source invalidations,
-        // retained units, retained encoded bytes, and unit capacity: eight u64s.
+        // retained units, retained encoded bytes and allocated owner extent.
+        // Format2 appends resident charge/budget, usable link extent and epoch.
         core.cache_status = core.cache.snapshot();
         core.cache_status.as_ptr() as usize as u32
     })

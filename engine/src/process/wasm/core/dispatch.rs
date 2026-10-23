@@ -39,7 +39,7 @@ pub(crate) fn core_dispatch_code_len() -> u32 {
 }
 
 pub(crate) fn core_link(slot: u32) -> u32 {
-    if !(1..=4096).contains(&slot) {
+    if slot == 0 || slot >= crate::cpu::core::COLD_MARK {
         return 7;
     }
     REGISTRY.with(|registry| {
@@ -71,7 +71,7 @@ pub(crate) fn core_link(slot: u32) -> u32 {
 }
 
 pub(crate) fn core_unlink(slot: u32, low: u32, high: u32) -> u32 {
-    if !(1..=4096).contains(&slot) {
+    if slot == 0 || slot >= crate::cpu::core::COLD_MARK {
         return 7;
     }
     REGISTRY.with(|registry| {

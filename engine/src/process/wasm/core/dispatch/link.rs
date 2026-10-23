@@ -33,7 +33,7 @@ pub(crate) fn core_chain_select(context: u32, pc: u32, retired: u32) -> u32 {
     access(context, |instance, core| {
         core.refresh_trace_bypass(retired);
         let selected = cold::chain_probe(instance, core, pc);
-        if selected != 0 && selected <= 4096 {
+        if selected != 0 && (selected as usize) <= core.cache.link_capacity() {
             if let Some(memory) = instance.memory.as_ref() {
                 core.trace_selection(memory, pc);
             }
