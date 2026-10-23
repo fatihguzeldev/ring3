@@ -1,0 +1,153 @@
+use super::numeric;
+use wasm_encoder::{
+    CodeSection, ConstExpr, EntityType, ExportKind, ExportSection, FunctionSection, GlobalSection,
+    GlobalType, ImportSection, NameMap, TypeSection, ValType,
+};
+
+pub(in crate::cpu::core) const ABI: i32 = 1;
+pub(in crate::cpu::core) const NAMES: [&str; 9] = [
+    "support.flags",
+    "support.materialize_numeric",
+    "support.resolve_status",
+    "support.translate_page",
+    "support.acquire_group",
+    "support.store8",
+    "support.store16",
+    "support.store32",
+    "support.normalize_kernel",
+];
+
+const COUNT: u32 = NAMES.len() as u32;
+
+pub(in crate::cpu::core) fn types(types: &mut TypeSection) -> [u32; 9] {
+    let first = types.len();
+    types.ty().function([ValType::I32; 8], [ValType::I32]);
+    types.ty().function(
+        [ValType::F64; 8]
+            .into_iter()
+            .chain([ValType::I32; 10])
+            .collect::<Vec<_>>(),
+        [],
+    );
+    types.ty().function(
+        [ValType::I32; 2]
+            .into_iter()
+            .chain([ValType::F64; 3])
+            .collect::<Vec<_>>(),
+        [ValType::I32],
+    );
+    types.ty().function([ValType::I32; 3], [ValType::I32; 3]);
+    types.ty().function([ValType::I32; 9], [ValType::I32; 3]);
+    types.ty().function(
+        [ValType::I32; 5]
+            .into_iter()
+            .chain([ValType::I64])
+            .collect::<Vec<_>>(),
+        [ValType::I32, ValType::I64],
+    );
+    types.ty().function(
+        numeric::normalizer_kernel_parameters(),
+        numeric::normalizer_kernel_results(),
+    );
+    [
+        first,
+        first + 1,
+        first + 2,
+        first + 3,
+        first + 4,
+        first + 5,
+        first + 5,
+        first + 5,
+        first + 6,
+    ]
+}
+
+// All imports are direct functions of the same CPU's dispatcher instance. The
+// immutable ABI global negotiates this complete set independently of link ABI1.
+pub(super) fn imports(imports: &mut ImportSection, types: [u32; 9]) {
+    for (name, kind) in NAMES.into_iter().zip(types) {
+        imports.import("ring3", name, EntityType::Function(kind));
+    }
+    imports.import(
+        "ring3",
+        "support.abi",
+        EntityType::Global(GlobalType {
+            val_type: ValType::I32,
+            mutable: false,
+            shared: false,
+        }),
+    );
+}
+
+pub(in crate::cpu::core) fn define(
+    functions: &mut FunctionSection,
+    types: [u32; 9],
+    globals: &mut GlobalSection,
+    exports: &mut ExportSection,
+    first: u32,
+) {
+    for (offset, (name, kind)) in NAMES.into_iter().zip(types).enumerate() {
+        functions.function(kind);
+        exports.export(name, ExportKind::Func, first + offset as u32);
+    }
+    let abi_global = globals.len();
+    globals.global(
+        GlobalType {
+            val_type: ValType::I32,
+            mutable: false,
+            shared: false,
+        },
+        &ConstExpr::i32_const(ABI),
+    );
+    exports.export("supportAbi", ExportKind::Global, abi_global);
+}
+
+pub(in crate::cpu::core) fn bodies(code: &mut CodeSection) {
+    code.function(&super::super::flags::emit_function());
+    code.function(&numeric::span::emit_materializer());
+    code.function(&numeric::span::emit_status_resolver());
+    code.function(&super::super::memory::cache::emit_translator());
+    code.function(&super::super::memory::groups::emit_acquire());
+    for width in [1, 2, 4] {
+        code.function(&super::super::memory::emit_store(width));
+    }
+    code.function(&numeric::emit_normalizer_kernel());
+}
+
+pub(in crate::cpu::core) fn names(names: &mut NameMap, first: u32) {
+    for (offset, name) in NAMES.into_iter().enumerate() {
+        names.append(first + offset as u32, name);
+    }
+}
+
+pub(super) fn owner_defined(offset: u32, numeric: bool) -> u32 {
+    2 + u32::from(numeric) + COUNT + offset
+}
+
+// Keep the lowerer's logical helper IDs centralized while imports and owner
+// definitions occupy separate contiguous Wasm function-index ranges.
+pub(super) fn owner_internal(logical: u32, numeric: bool) -> u32 {
+    let first = 2 + u32::from(numeric);
+    match logical {
+        2 => first,
+        3..=6 => owner_defined(logical - 3, numeric),
+        7..=9 => first + logical - 6,
+        10 => owner_defined(4, numeric),
+        11 => first + 4,
+        _ => unreachable!("unknown owner helper {logical}"),
+    }
+}
+
+pub(super) fn owner_store(width: u32, numeric: bool) -> u32 {
+    let offset = match width {
+        1 => 5,
+        2 => 6,
+        4 => 7,
+        _ => unreachable!("unsupported store width {width}"),
+    };
+    2 + u32::from(numeric) + offset
+}
+
+pub(super) fn owner_kernel(numeric: bool) -> u32 {
+    2 + u32::from(numeric) + 8
+}

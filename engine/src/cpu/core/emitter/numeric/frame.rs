@@ -267,12 +267,37 @@ const KERNEL: Layout = Layout {
     pointer_tmp: 36,
 };
 
-const DESCRIPTOR_LOW: u32 = 37;
-const DESCRIPTOR_HIGH: u32 = 38;
-const CELL: u32 = 39;
-const LOGICAL: u32 = 40;
-const TAG_CODE: u32 = 41;
-const SLOT_EFFECTS: u32 = 42;
+#[derive(Clone, Copy)]
+struct DescriptorLocals {
+    low: u32,
+    high: u32,
+    cell: u32,
+    logical: u32,
+    tag_code: u32,
+    slot_effects: u32,
+}
+
+// The shared kernel receives immutable payloads 0..23, metadata 24..29,
+// and descriptors 30..31. It has no owner-local selected-shape parameter.
+const SHARED: Layout = Layout {
+    selected: u32::MAX,
+    top_tmp: 32,
+    tag_tmp: 33,
+    valid_tmp: 34,
+    dirty_tmp: 35,
+    high_tmp: 36,
+    pointer_tmp: 37,
+    ..KERNEL
+};
+
+const SHARED_DESCRIPTOR: DescriptorLocals = DescriptorLocals {
+    low: 30,
+    high: 31,
+    cell: 38,
+    logical: 39,
+    tag_code: 40,
+    slot_effects: 41,
+};
 
 fn emit_tag(code: &mut InstructionSink<'_>, recipe: TagRecipe, r: Layout) {
     match recipe {
@@ -368,7 +393,13 @@ fn descriptor(shape: &FpShape) -> (i64, i64) {
     (low as i64, high as i64)
 }
 
-fn select_descriptor(code: &mut InstructionSink<'_>, shapes: &[FpShape], selected: u32) {
+fn select_descriptor(
+    code: &mut InstructionSink<'_>,
+    shapes: &[FpShape],
+    selected: u32,
+    descriptor_low: u32,
+    descriptor_high: u32,
+) {
     let count = shapes.len() as u32;
     code.block(BlockType::Empty).block(BlockType::Empty);
     for _ in shapes {
@@ -382,9 +413,9 @@ fn select_descriptor(code: &mut InstructionSink<'_>, shapes: &[FpShape], selecte
         let (low, high) = descriptor(shape);
         code.end()
             .i64_const(low)
-            .local_set(DESCRIPTOR_LOW)
+            .local_set(descriptor_low)
             .i64_const(high)
-            .local_set(DESCRIPTOR_HIGH)
+            .local_set(descriptor_high)
             .br(count - index as u32);
     }
     code.end().unreachable().end();
@@ -416,9 +447,9 @@ fn select_cell(code: &mut InstructionSink<'_>, base: u32, index: u32, ty: ValTyp
     select(code, base, index, ty, 0, 8);
 }
 
-fn descriptor_byte(code: &mut InstructionSink<'_>, descriptor: u32) {
+fn descriptor_byte(code: &mut InstructionSink<'_>, descriptor: u32, logical: u32) {
     code.local_get(descriptor)
-        .local_get(LOGICAL)
+        .local_get(logical)
         .i64_extend_i32_u()
         .i64_const(3)
         .i64_shl()
@@ -467,14 +498,14 @@ fn selected_value_tag(code: &mut InstructionSink<'_>, r: Layout) {
         .end();
 }
 
-fn selected_tag(code: &mut InstructionSink<'_>, r: Layout) {
-    code.local_get(TAG_CODE)
+fn selected_tag(code: &mut InstructionSink<'_>, r: Layout, tag_code: u32) {
+    code.local_get(tag_code)
         .i32_const(8)
         .i32_lt_u()
         .if_(BlockType::Result(ValType::I32))
         .local_get(r.tag)
         .local_get(r.top)
-        .local_get(TAG_CODE)
+        .local_get(tag_code)
         .i32_add()
         .i32_const(7)
         .i32_and()
@@ -484,12 +515,12 @@ fn selected_tag(code: &mut InstructionSink<'_>, r: Layout) {
         .i32_const(3)
         .i32_and()
         .else_()
-        .local_get(TAG_CODE)
+        .local_get(tag_code)
         .i32_const(12)
         .i32_lt_u()
         .if_(BlockType::Result(ValType::I32))
         .i32_const(0x87)
-        .local_get(TAG_CODE)
+        .local_get(tag_code)
         .i32_const(8)
         .i32_sub()
         .i32_const(1)
@@ -498,7 +529,7 @@ fn selected_tag(code: &mut InstructionSink<'_>, r: Layout) {
         .i32_const(3)
         .i32_and()
         .else_()
-        .local_get(TAG_CODE)
+        .local_get(tag_code)
         .i32_const(12)
         .i32_sub()
         .local_set(r.high_tmp);
@@ -506,9 +537,9 @@ fn selected_tag(code: &mut InstructionSink<'_>, r: Layout) {
     code.end().end();
 }
 
-fn normalize_descriptor(code: &mut InstructionSink<'_>, r: Layout) {
+fn normalize_descriptor(code: &mut InstructionSink<'_>, r: Layout, d: DescriptorLocals) {
     code.local_get(r.top)
-        .local_get(DESCRIPTOR_HIGH)
+        .local_get(d.high)
         .i64_const(5)
         .i64_shr_u()
         .i32_wrap_i64()
@@ -525,22 +556,22 @@ fn normalize_descriptor(code: &mut InstructionSink<'_>, r: Layout) {
         .i32_const(0)
         .local_set(r.dirty_tmp)
         .i32_const(0)
-        .local_set(LOGICAL)
+        .local_set(d.logical)
         .loop_(BlockType::Empty);
-    descriptor_byte(code, DESCRIPTOR_LOW);
-    code.local_tee(CELL)
+    descriptor_byte(code, d.low, d.logical);
+    code.local_tee(d.cell)
         .i32_const(3)
         .i32_shr_u()
-        .local_set(TAG_CODE)
-        .local_get(CELL)
+        .local_set(d.tag_code)
+        .local_get(d.cell)
         .i32_const(7)
         .i32_and()
-        .local_set(CELL);
-    descriptor_byte(code, DESCRIPTOR_HIGH);
-    code.i32_const(31).i32_and().local_set(SLOT_EFFECTS);
-    selected_tag(code, r);
+        .local_set(d.cell);
+    descriptor_byte(code, d.high, d.logical);
+    code.i32_const(31).i32_and().local_set(d.slot_effects);
+    selected_tag(code, r, d.tag_code);
     code.local_get(r.top_tmp)
-        .local_get(LOGICAL)
+        .local_get(d.logical)
         .i32_add()
         .i32_const(7)
         .i32_and()
@@ -551,54 +582,54 @@ fn normalize_descriptor(code: &mut InstructionSink<'_>, r: Layout) {
         .i32_or()
         .local_set(r.tag_tmp)
         .local_get(r.valid)
-        .local_get(CELL)
+        .local_get(d.cell)
         .i32_shr_u()
         .i32_const(1)
         .i32_and()
-        .local_get(LOGICAL)
+        .local_get(d.logical)
         .i32_shl()
         .local_get(r.valid_tmp)
         .i32_or()
         .local_set(r.valid_tmp)
-        .local_get(SLOT_EFFECTS)
+        .local_get(d.slot_effects)
         .i32_const(15)
         .i32_and()
         .i32_const(8)
         .i32_lt_u()
         .if_(BlockType::Empty)
         .local_get(r.dirty)
-        .local_get(SLOT_EFFECTS)
+        .local_get(d.slot_effects)
         .i32_const(15)
         .i32_and()
         .i32_shr_u()
         .i32_const(1)
         .i32_and()
-        .local_get(LOGICAL)
+        .local_get(d.logical)
         .i32_shl()
         .local_get(r.dirty_tmp)
         .i32_or()
         .local_set(r.dirty_tmp)
         .end()
-        .local_get(SLOT_EFFECTS)
+        .local_get(d.slot_effects)
         .i32_const(16)
         .i32_and()
         .if_(BlockType::Empty)
         .i32_const(1)
-        .local_get(LOGICAL)
+        .local_get(d.logical)
         .i32_shl()
         .local_get(r.dirty_tmp)
         .i32_or()
         .local_set(r.dirty_tmp)
         .local_get(r.valid)
         .i32_const(1)
-        .local_get(CELL)
+        .local_get(d.cell)
         .i32_shl()
         .i32_and()
         .i32_eqz()
         .if_(BlockType::Empty)
         .local_get(r.bank)
         .local_get(r.top_tmp)
-        .local_get(LOGICAL)
+        .local_get(d.logical)
         .i32_add()
         .i32_const(7)
         .i32_and()
@@ -609,16 +640,16 @@ fn normalize_descriptor(code: &mut InstructionSink<'_>, r: Layout) {
         .i32_add()
         .local_set(r.pointer_tmp)
         .local_get(r.pointer_tmp);
-    select_cell(code, r.low, CELL, ValType::I64);
+    select_cell(code, r.low, d.cell, ValType::I64);
     code.i64_store(mem(0, 0)).local_get(r.pointer_tmp);
-    select_cell(code, r.high, CELL, ValType::I32);
+    select_cell(code, r.high, d.cell, ValType::I32);
     code.i32_store16(mem(8, 0))
         .end()
         .end()
-        .local_get(LOGICAL)
+        .local_get(d.logical)
         .i32_const(1)
         .i32_add()
-        .local_tee(LOGICAL)
+        .local_tee(d.logical)
         .i32_const(8)
         .i32_ne()
         .br_if(0)
@@ -659,6 +690,18 @@ pub(in crate::cpu::core::emitter) fn normalizer_results() -> Vec<ValType> {
         .collect()
 }
 
+pub(in crate::cpu::core::emitter) fn normalizer_kernel_parameters() -> Vec<ValType> {
+    normalizer_parameters()
+        .into_iter()
+        .take(30)
+        .chain([ValType::I64; 2])
+        .collect()
+}
+
+pub(in crate::cpu::core::emitter) fn normalizer_kernel_results() -> Vec<ValType> {
+    normalizer_results()
+}
+
 fn arguments(r: Layout) -> Vec<u32> {
     (r.native..r.native + 8)
         .chain(r.low..r.low + 8)
@@ -675,45 +718,64 @@ fn results(r: Layout) -> Vec<u32> {
         .collect()
 }
 
-pub(in crate::cpu::core::emitter) fn emit_normalizer_function(
+fn emit_kernel(code: &mut InstructionSink<'_>, r: Layout, d: DescriptorLocals) {
+    normalize_descriptor(code, r, d);
+    for (base, ty) in [
+        (r.native, ValType::F64),
+        (r.low, ValType::I64),
+        (r.high, ValType::I32),
+    ] {
+        for logical in 0..8 {
+            code.local_get(d.low)
+                .i64_const(logical * 8)
+                .i64_shr_u()
+                .i32_wrap_i64()
+                .i32_const(7)
+                .i32_and()
+                .local_set(d.cell);
+            select_cell(code, base, d.cell, ty);
+        }
+    }
+    for local in [r.valid, r.dirty, r.tag, r.status, r.top] {
+        code.local_get(local);
+    }
+    code.i32_const(-1);
+}
+
+// This function is independent of the owning source, CFG and shape arena. The
+// passed bank belongs to the current exclusive CPU lease and shares its memory.
+pub(in crate::cpu::core::emitter) fn emit_normalizer_kernel() -> wasm_encoder::Function {
+    let mut function = wasm_encoder::Function::new([(10, ValType::I32)]);
+    let mut code = function.instructions();
+    emit_kernel(&mut code, SHARED, SHARED_DESCRIPTOR);
+    code.end();
+    function
+}
+
+// The owner keeps only its shape-to-descriptor constants. Payload snapshots and
+// their exact observation effects are handled by one per-CPU Wasm kernel.
+pub(in crate::cpu::core::emitter) fn emit_normalizer_adapter(
     plan: &RegionPlan,
     numeric: bool,
+    kernel_function: u32,
 ) -> wasm_encoder::Function {
-    // Original payload parameters 0..23 are immutable snapshots. The descriptor
-    // kernel computes metadata first; result selection can then alias or cycle
-    // those inputs without destructive copies or a memory-backed payload pool.
-    let mut function =
-        wasm_encoder::Function::new([(6, ValType::I32), (2, ValType::I64), (4, ValType::I32)]);
+    let mut function = wasm_encoder::Function::new([(2, ValType::I64)]);
     let mut code = function.instructions();
     if numeric {
-        select_descriptor(&mut code, plan.shapes(), KERNEL.selected);
-        normalize_descriptor(&mut code, KERNEL);
-        for (base, ty) in [
-            (KERNEL.native, ValType::F64),
-            (KERNEL.low, ValType::I64),
-            (KERNEL.high, ValType::I32),
-        ] {
-            for logical in 0..8 {
-                code.local_get(DESCRIPTOR_LOW)
-                    .i64_const(logical * 8)
-                    .i64_shr_u()
-                    .i32_wrap_i64()
-                    .i32_const(7)
-                    .i32_and()
-                    .local_set(CELL);
-                select_cell(&mut code, base, CELL, ty);
-            }
-        }
-        for local in [
-            KERNEL.valid,
-            KERNEL.dirty,
-            KERNEL.tag,
-            KERNEL.status,
-            KERNEL.top,
-        ] {
+        let (descriptor_low, descriptor_high) = (31, 32);
+        select_descriptor(
+            &mut code,
+            plan.shapes(),
+            KERNEL.selected,
+            descriptor_low,
+            descriptor_high,
+        );
+        for local in 0..30 {
             code.local_get(local);
         }
-        code.i32_const(-1);
+        code.local_get(descriptor_low)
+            .local_get(descriptor_high)
+            .call(kernel_function);
     } else {
         code.i32_const(-1).local_set(KERNEL.selected);
         for local in results(KERNEL) {
@@ -744,7 +806,7 @@ pub(in crate::cpu::core::emitter) fn emit_normalizer(
     for local in arguments(HOT) {
         code.local_get(local);
     }
-    code.call(10 + u32::from(numeric));
+    code.call(super::super::support::owner_internal(10, numeric));
     for local in results(HOT).into_iter().rev() {
         code.local_set(local);
     }

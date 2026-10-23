@@ -7,6 +7,7 @@ pub(super) mod link;
 mod numeric;
 mod region;
 mod strings;
+pub(in crate::cpu::core) mod support;
 #[cfg(test)]
 mod tests;
 
@@ -99,9 +100,9 @@ pub(super) fn emit(
     let graph =
         super::region::Region::from_blocks(blocks, entry).expect("decoded blocks form a region");
     let plan = super::region::values::RegionPlan::analyze(&graph);
-    let shift = u32::from(!native.is_empty());
-    let (fast, store_widths) = run(&graph, &plan, identity, native, false, Vec::new());
-    let (precise, store_widths) = run(&graph, &plan, identity, native, true, store_widths);
+    let numeric = !native.is_empty();
+    let fast = run(&graph, &plan, identity, native, false);
+    let precise = run(&graph, &plan, identity, native, true);
     let mut module = Module::new();
     let mut types = TypeSection::new();
     types.ty().function([ValType::I32; 2], [ValType::I32]);
@@ -147,6 +148,10 @@ pub(super) fn emit(
         numeric::normalizer_results(),
     );
     types.ty().function([ValType::I32; 9], [ValType::I32; 3]);
+    types.ty().function(
+        numeric::normalizer_kernel_parameters(),
+        numeric::normalizer_kernel_results(),
+    );
     module.section(&types);
     let mut imports = ImportSection::new();
     imports.import(
@@ -166,92 +171,65 @@ pub(super) fn emit(
         imports.import("ring3", "numeric", EntityType::Function(0));
     }
     link::imports(&mut imports);
+    support::imports(&mut imports, [3, 6, 9, 10, 12, 7, 7, 7, 13]);
     module.section(&imports);
     let mut functions = FunctionSection::new();
-    for kind in [3, 0, 4, 5, 0] {
+    for kind in [0, 4, 5, 0, 11, 0, 0, 8] {
         functions.function(kind);
     }
-    functions.function(6);
-    functions.function(9);
-    functions.function(10);
-    functions.function(11);
-    let grouped = u32::from(plan.has_access_groups());
-    if grouped != 0 {
-        functions.function(12);
-    }
-    for _ in &store_widths {
-        functions.function(7);
-    }
-    functions.function(0);
-    functions.function(0);
-    functions.function(8);
     module.section(&functions);
     let mut exports = ExportSection::new();
-    let wrappers = 11 + shift + grouped + store_widths.len() as u32;
+    let wrappers = support::owner_defined(5, numeric);
     exports.export("run", ExportKind::Func, wrappers);
     exports.export("link", ExportKind::Func, wrappers + 1);
     exports.export("publish", ExportKind::Func, wrappers + 2);
     module.section(&exports);
     let mut code = CodeSection::new();
-    code.function(&flags::emit_function());
     code.raw(&fast);
     code.function(&lookup(blocks));
     code.function(&link::emit_boundary(
-        !native.is_empty(),
-        2 + shift,
-        7 + shift,
-        8 + shift,
+        numeric,
+        support::owner_internal(2, numeric),
+        support::owner_internal(7, numeric),
+        support::owner_internal(8, numeric),
     ));
     code.raw(&precise);
-    code.function(&numeric::span::emit_materializer());
-    code.function(&numeric::span::emit_status_resolver());
-    code.function(&super::memory::cache::emit_translator());
-    code.function(&numeric::emit_normalizer_function(
+    code.function(&numeric::emit_normalizer_adapter(
         &plan,
-        !native.is_empty(),
+        numeric,
+        support::owner_kernel(numeric),
     ));
-    if grouped != 0 {
-        code.function(&super::memory::groups::emit_acquire());
-    }
-    for &width in &store_widths {
-        code.function(&super::memory::emit_store(width));
-    }
-    code.function(&link::emit_entry(3 + shift, false));
-    code.function(&link::emit_entry(3 + shift, true));
-    code.function(&link::emit_publisher(2 + shift, 7 + shift, 8 + shift));
+    code.function(&link::emit_entry(
+        support::owner_internal(3, numeric),
+        false,
+    ));
+    code.function(&link::emit_entry(support::owner_internal(3, numeric), true));
+    code.function(&link::emit_publisher(
+        support::owner_internal(2, numeric),
+        support::owner_internal(7, numeric),
+        support::owner_internal(8, numeric),
+    ));
     module.section(&code);
     let mut names = NameSection::new();
     names.module(&format!("ring3.guest.{entry:08x}.{identity}"));
     let mut functions = NameMap::new();
     functions.append(0, "guest.read_slow");
     functions.append(1, "guest.write_slow");
-    if shift != 0 {
+    if numeric {
         functions.append(2, "guest.numeric");
     }
+    support::names(&mut functions, 2 + u32::from(numeric));
     for (index, name) in [
-        "guest.flags",
         "guest.run",
         "guest.lookup",
         "guest.publish",
         "guest.precise",
-        "guest.materialize_numeric",
-        "guest.resolve_status",
-        "guest.translate_page",
         "guest.normalize_frame",
     ]
     .into_iter()
     .enumerate()
     {
-        functions.append(2 + shift + index as u32, name);
-    }
-    if grouped != 0 {
-        functions.append(11 + shift, "guest.acquire_group");
-    }
-    for (index, width) in store_widths.iter().enumerate() {
-        functions.append(
-            11 + shift + grouped + index as u32,
-            &format!("guest.store{}", width * 8),
-        );
+        functions.append(support::owner_defined(index as u32, numeric), name);
     }
     for (offset, name) in ["guest.entry", "guest.link", "guest.publish_link"]
         .into_iter()
@@ -314,8 +292,7 @@ fn run(
     identity: u64,
     native: &[NativeInstruction],
     precise: bool,
-    store_widths: Vec<u32>,
-) -> (Vec<u8>, Vec<u32>) {
+) -> Vec<u8> {
     let mut function = Function::new([
         (25, ValType::I32),
         (1, ValType::I64),
@@ -358,7 +335,6 @@ fn run(
         current_block: None,
         grouped_accesses: !precise,
         native,
-        store_widths,
     };
     out.c()
         .block(BlockType::Empty)
@@ -424,11 +400,7 @@ fn run(
     region::emit(&mut out, graph, precise);
     out.c().end();
     assert_eq!(out.depth, 0, "the region exit wrapper is closed");
-    let Output { store_widths, .. } = out;
-    (
-        exits::finish(function, plan, !native.is_empty(), precise),
-        store_widths,
-    )
+    exits::finish(function, plan, !native.is_empty(), precise)
 }
 
 pub(super) struct Output<'a> {
@@ -447,7 +419,6 @@ pub(super) struct Output<'a> {
     current_block: Option<super::region::BlockId>,
     grouped_accesses: bool,
     native: &'a [NativeInstruction],
-    store_widths: Vec<u32>,
 }
 
 impl Output<'_> {
@@ -460,7 +431,7 @@ impl Output<'_> {
     }
 
     fn internal(&self, index: u32) -> u32 {
-        index + u32::from(!self.native.is_empty())
+        support::owner_internal(index, !self.native.is_empty())
     }
 
     fn block(
@@ -812,15 +783,7 @@ impl Output<'_> {
                 self.check_span(width);
             }
         }
-        let index = match self.store_widths.iter().position(|&stored| stored == width) {
-            Some(index) => index,
-            None => {
-                let index = self.store_widths.len();
-                self.store_widths.push(width);
-                index
-            }
-        };
-        let commit = self.internal(11 + u32::from(self.plan.has_access_groups()) + index as u32);
+        let commit = support::owner_store(width, !self.native.is_empty());
         let translate = self.internal(9);
         super::memory::write(
             self.c().raw(),

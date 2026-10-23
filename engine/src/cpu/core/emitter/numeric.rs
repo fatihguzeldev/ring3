@@ -18,7 +18,10 @@ use crate::cpu::{
 use wasm_encoder::BlockType;
 
 pub(super) use frame::{emit_edge, emit_frame, emit_normalizer, enter_block, normalize_frame};
-pub(super) use frame::{emit_normalizer_function, normalizer_parameters, normalizer_results};
+pub(super) use frame::{
+    emit_normalizer_adapter, emit_normalizer_kernel, normalizer_kernel_parameters,
+    normalizer_kernel_results, normalizer_parameters, normalizer_results,
+};
 
 pub(super) fn enter_port(out: &mut Output<'_>) {
     // An interior port imports the actual identity state, never the skipped

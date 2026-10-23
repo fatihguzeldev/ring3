@@ -12,14 +12,13 @@ pub(super) fn finish(
     numeric: bool,
     precise: bool,
 ) -> Vec<u8> {
-    let shift = u32::from(numeric);
     let mut code = function.instructions();
     super::numeric::emit_normalizer(plan, &mut code, numeric);
     code.local_get(CTX);
     for (local, _) in link::boundary_fields(numeric) {
         code.local_get(local);
     }
-    code.call(5 + shift);
+    code.call(super::support::owner_internal(5, numeric));
     if precise {
         code.local_get(REASON);
     } else {
@@ -29,7 +28,7 @@ pub(super) fn finish(
             .if_(BlockType::Result(ValType::I32))
             .local_get(CTX)
             .local_get(REMAIN)
-            .call(6 + shift)
+            .call(super::support::owner_internal(6, numeric))
             .else_()
             .local_get(REASON)
             .end();

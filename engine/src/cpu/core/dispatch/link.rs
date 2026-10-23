@@ -1,4 +1,7 @@
-use crate::cpu::core::{COLD_MARK, STOP_MARK, StopReason, emitter::link};
+use crate::cpu::core::{
+    COLD_MARK, STOP_MARK, StopReason,
+    emitter::{link, support},
+};
 use wasm_encoder::{
     BlockType, CodeSection, ConstExpr, EntityType, ExportKind, ExportSection, Function,
     FunctionSection, GlobalSection, GlobalType, ImportSection, InstructionSink, MemoryType, Module,
@@ -44,6 +47,7 @@ pub(super) fn emit() -> Vec<u8> {
     types.ty().function([ValType::I32], [ValType::I32]);
     types.ty().function([ValType::I32; 3], [ValType::I32]);
     types.ty().function([ValType::I32], []);
+    let support_types = support::types(&mut types);
     module.section(&types);
     let mut imports = ImportSection::new();
     imports.import(
@@ -75,7 +79,6 @@ pub(super) fn emit() -> Vec<u8> {
     module.section(&imports);
     let mut functions = FunctionSection::new();
     functions.function(2);
-    module.section(&functions);
     let mut globals = GlobalSection::new();
     for _ in 0..4 {
         globals.global(
@@ -96,6 +99,8 @@ pub(super) fn emit() -> Vec<u8> {
         exports.export(name, ExportKind::Global, index as u32);
     }
     link::define_globals(&mut globals, &mut exports, STATE_BASE);
+    support::define(&mut functions, support_types, &mut globals, &mut exports, 3);
+    module.section(&functions);
     module.section(&globals);
     module.section(&exports);
     let mut run = Function::new([(7, ValType::I32)]);
@@ -273,6 +278,7 @@ pub(super) fn emit() -> Vec<u8> {
         .end();
     let mut bodies = CodeSection::new();
     bodies.function(&run);
+    support::bodies(&mut bodies);
     module.section(&bodies);
     let mut names = NameSection::new();
     names.module("ring3.dispatch");
@@ -280,6 +286,7 @@ pub(super) fn emit() -> Vec<u8> {
     functions.append(0, "guest.probe");
     functions.append(1, "guest.cold");
     functions.append(2, "guest.chain");
+    support::names(&mut functions, 3);
     names.functions(&functions);
     module.section(&names);
     module.finish()

@@ -2,6 +2,12 @@ const MAX_CODE_BYTES = 128 * 1024 * 1024;
 const LINK_LOCALS = [...Array.from({length:12},(_,index)=>index+2),
   ...Array.from({length:6},(_,index)=>index+20),...Array.from({length:21},(_,index)=>index+76),99,100,101,102,103];
 const LINK_GLOBALS = ['link.mode','link.valid','link.context',...LINK_LOCALS.map(local=>`link.local${local}`)];
+const SUPPORT_FUNCTIONS = [
+  ['support.flags',8],['support.materialize_numeric',18],['support.resolve_status',5],
+  ['support.translate_page',3],['support.acquire_group',9],['support.store8',6],
+  ['support.store16',6],['support.store32',6],['support.normalize_kernel',32],
+];
+const SUPPORT_IMPORTS = [...SUPPORT_FUNCTIONS.map(([name])=>name),'support.abi'];
 const NATIVE_COUNTERS = ['compiled','admittedEncodedBytes','countEvictions','byteEvictions',
   'sourceInvalidations','retainedUnits','retainedEncodedBytes','unitCapacity'];
 const COLD_COUNTERS = ['sourceResets','requestedResets','occupiedLiveReplacements','nativeRetired',
@@ -23,6 +29,7 @@ export class CodeCache {
   #bindings;
   #contextView;
   #linkGlobals;
+  #support;
 
   constructor(engine, {budget = 50000, instructions = 2048, blocks = 128, capacity = 4096, chain = true} = {}) {
     if (typeof chain !== 'boolean') throw new Error('invalid core chain option');
@@ -241,6 +248,18 @@ export class CodeCache {
       }
       this.#linkGlobals = Object.freeze(globals);
     }
+    const supportNames = Object.keys(exports).filter(name=>name.startsWith('support.'));
+    if (exports.supportAbi === undefined) {
+      if (supportNames.length) throw new Error('core support exports lack an ABI');
+    } else {
+      if (!(exports.supportAbi instanceof WebAssembly.Global) || exports.supportAbi.value !== 1 ||
+          supportNames.length !== SUPPORT_FUNCTIONS.length ||
+          SUPPORT_FUNCTIONS.some(([name,arity])=>typeof exports[name] !== 'function' || exports[name].length !== arity))
+        throw new Error('invalid core support ABI');
+      const support = {'support.abi':exports.supportAbi};
+      for (const [name] of SUPPORT_FUNCTIONS) support[name] = exports[name];
+      this.#support = Object.freeze(support);
+    }
     this.chainedColdEnabled = cold.every(value => value !== undefined);
     this.dispatch = exports;
   }
@@ -374,11 +393,19 @@ export class CodeCache {
       if (item.kind === 'global' && this.#linkGlobals && Object.hasOwn(this.#linkGlobals,item.name)) {
         bindings[item.name] = this.#linkGlobals[item.name]; continue;
       }
+      if (item.name.startsWith('support.')) {
+        if (!this.#support || !Object.hasOwn(this.#support,item.name) ||
+            item.kind !== (item.name === 'support.abi' ? 'global' : 'function'))
+          throw new Error(`invalid core support import ${item.name}`);
+        bindings[item.name] = this.#support[item.name]; continue;
+      }
       if (item.kind !== 'function' || !Object.hasOwn(available, item.name)) throw new Error(`invalid core import ${item.name}`);
       bindings[item.name] = available[item.name];
     }
     if (!['memory', 'read', 'write'].every(name => found.has(name)) ||
         (this.linkedCore && !LINK_GLOBALS.every(name=>found.has(name)))) throw new Error('incomplete core imports');
+    if (this.#support && !SUPPORT_IMPORTS.every(name=>found.has(name)))
+      throw new Error('incomplete core support imports');
     const instance = this.compilation
       ? this.measureCompilation('instance',()=>new WebAssembly.Instance(module,{ring3:bindings}))
       : new WebAssembly.Instance(module,{ring3:bindings});
