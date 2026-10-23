@@ -89,7 +89,7 @@ fn reform_does_not_follow_a_previously_excluded_successor_or_instruction_interio
 }
 
 #[test]
-fn exact_reform_declines_each_budget_without_shortening_or_mutating_the_owner() {
+fn exact_reform_declines_instruction_and_byte_budgets_without_shortening_or_mutation() {
     let mut memory = memory();
     memory
         .write(GuestAddress(0x1000), &[0x40, 0x41, 0x42, 0x0f, 0x0b])
@@ -100,10 +100,6 @@ fn exact_reform_declines_each_budget_without_shortening_or_mutating_the_owner() 
     for limits in [
         CompileOptions {
             instructions: 3,
-            ..options()
-        },
-        CompileOptions {
-            blocks: 1,
             ..options()
         },
         CompileOptions {
@@ -125,6 +121,71 @@ fn exact_reform_declines_each_budget_without_shortening_or_mutating_the_owner() 
         original.instruction_pcs.as_ref(),
         &[0x1000, 0x1001, 0x1002, 0x1003]
     );
+    assert!(original.is_current(&memory));
+}
+
+#[test]
+fn a_one_block_discovery_budget_allows_owned_entry_splits_without_discovery() {
+    let mut memory = memory();
+    memory
+        .write(GuestAddress(0x1000), &[0x90, 0x90, 0xeb, 0, 0x40, 0xc3])
+        .unwrap();
+    let options = CompileOptions {
+        blocks: 1,
+        ..options()
+    };
+    let original = compile(&memory, GuestAddress(0x1000), options).unwrap();
+    assert_eq!(original.entrypoints(), &[GuestAddress(0x1000)]);
+    assert_eq!(original.instruction_pcs.as_ref(), &[0x1000, 0x1001, 0x1002]);
+    let candidate = original
+        .with_entry(&memory, GuestAddress(0x1001), options, &[])
+        .unwrap()
+        .unwrap();
+    assert_eq!(candidate.instruction_pcs, original.instruction_pcs);
+    assert_eq!(
+        candidate.entrypoints(),
+        &[GuestAddress(0x1000), GuestAddress(0x1001)]
+    );
+    assert_eq!(candidate.formation_roots(), candidate.entrypoints());
+    assert!(!candidate.instruction_pcs.contains(&0x1004));
+    assert!(matches!(
+        original.with_entry(
+            &memory,
+            GuestAddress(0x1001),
+            CompileOptions {
+                blocks: 0,
+                ..options
+            },
+            &[]
+        ),
+        Err(CompileError::InvalidLimits)
+    ));
+}
+
+#[test]
+fn owned_entry_splits_cannot_exceed_the_hard_1024_entry_ceiling() {
+    let mut memory = memory();
+    let mut bytes = vec![0x90; 1025];
+    bytes.push(0xc3);
+    memory.write(GuestAddress(0x1000), &bytes).unwrap();
+    let options = CompileOptions {
+        instructions: 2048,
+        blocks: 1024,
+        wasm_bytes: 16 << 20,
+    };
+    let roots: Vec<_> = (0x1001..0x1400).map(GuestAddress).collect();
+    let original =
+        compile_formation(&memory, GuestAddress(0x1000), options, &[], &[], &roots).unwrap();
+    assert_eq!(original.entrypoints().len(), 1024);
+    assert_eq!(original.instruction_count(), 1026);
+    assert!(
+        original
+            .with_entry(&memory, GuestAddress(0x1400), options, &[])
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(original.entrypoints().len(), 1024);
+    assert!(!original.entrypoints().contains(&GuestAddress(0x1400)));
     assert!(original.is_current(&memory));
 }
 
@@ -170,7 +231,10 @@ fn union_reform_preserves_both_exact_owners_and_gate_instruction_starts() {
         &memory,
         &[&first, &second],
         GuestAddress(0x2001),
-        options(),
+        CompileOptions {
+            blocks: 1,
+            ..options()
+        },
         &gates,
     )
     .unwrap()

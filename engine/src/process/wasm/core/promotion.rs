@@ -226,12 +226,12 @@ impl CoreCache32 {
         // an accepted formation removes this source owner and its edge rows.
         // declined pairs retry when limits, indexed entry counts or source epoch change.
         heat.rejected[selected] = Some(rejected);
-        if rejected.source_entries + rejected.target_entries > options.blocks
-            || !instruction_union_fits(&source, &target, options.instructions)
-        {
+        if !instruction_union_fits(&source, &target, options.instructions) {
             return None;
         }
-        self.transition_roots(memory, &source, &target, pc, options.blocks)?;
+        // The discovery budget does not limit labels split from already owned
+        // instructions. Exact reformation still enforces the hard entry ceiling.
+        self.transition_roots(memory, &source, &target, pc, 1024)?;
         let code = CompiledCode::reform_union(
             memory,
             &[&source, &target],

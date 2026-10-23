@@ -6,7 +6,14 @@ import {CodeCache} from '../../../../../../sdk/runtime/cache.js';
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
 
 export function runOwnershipCase(artifact,report) {
-  const result={name:'owned-interior-entry-reforms-one-source-owner-and-preserves-its-root',
+  runInteriorCase(artifact,report,8);
+  runInteriorCase(artifact,report,1);
+  runTransientShiftCase(artifact,report);
+}
+
+function runInteriorCase(artifact,report,blocks) {
+  const result={name:blocks===1?'owned-interior-entry-labels-do-not-consume-the-one-block-discovery-budget':
+    'owned-interior-entry-reforms-one-source-owner-and-preserves-its-root',
     complete:false,controls:[],modules:[]};report.cases.push(result);
   const instance=new WebAssembly.Instance(artifact.module,{ring3_observability:{now_ns:()=>0n}});
   const api=Object.fromEntries(Object.entries(instance.exports)
@@ -29,13 +36,18 @@ export function runOwnershipCase(artifact,report) {
     const state=record('R3ST',56),s=view(state);registers.forEach((value,index)=>s.setUint32(16+index*4,value,true));
     s.setUint32(48,0x1000,true);s.setUint32(52,2,true);new Uint8Array(memory.buffer,engine.base,56).set(state);
     const initialFp=bytes(engine.base+4236,128),initialSimd=bytes(engine.base+4364,160),initialYmm=bytes(engine.base+4612,144);
-    cache=new CodeCache(engine,{budget:5,instructions:64,blocks:8,chain:true});
+    cache=new CodeCache(engine,{budget:5,instructions:64,blocks,chain:true});
     const select=pc=>{
       const unit=cache.entry(pc),encoded=bytes(api.core_code_ptr()>>>0,api.core_code_len()>>>0);
       result.modules.push({pc,identity:String(unit.id),bytes:encoded.length,sha256:hash(encoded)});return unit;
     };
     const original=select(0x1000),interior=select(0x1004);
     cache.sampleUsage();result.afterInterior=cache.stats();
+    if(blocks===1){
+      assert.equal(interior.transient,undefined,'splitting already owned instructions into an entry label consumes no new-block discovery budget');
+      assert.deepEqual([cache.transientAdmissions,cache.transientRuns,cache.transientModuleBytes],[0,0,0],
+        'an exact owned-entry split never creates a transient module');
+    }
     assert.equal(cache.units.size,1,'the interior entry replaces its source owner instead of retaining a duplicate suffix');
     assert.equal(cache.nativeCache.retainedUnits,'1','one native owner covers the original nine instruction starts');
     assert.notEqual(interior.id,original.id,'adding the new entry rebuilds its actual block contract');
@@ -60,7 +72,6 @@ export function runOwnershipCase(artifact,report) {
     result.final={pc:executed.pc,retired:executed.retired,owner:String(interior.id),ramSha256:hash(expectedRam)};result.complete=true;
   }catch(error){result.failure={message:String(error),stack:error.stack};throw error;}
   finally{if(active||cache?.open)api.core_end();if(opened)status('close',0);}
-  runTransientShiftCase(artifact,report);
 }
 
 function runTransientShiftCase(artifact,report) {

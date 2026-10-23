@@ -56,9 +56,13 @@ fn coverage(cache: &mut CoreCache32, memory: &AddressSpace, owner: &RegionRef) {
 }
 
 #[test]
-fn covered_interior_reforms_one_owner_and_keeps_all_prior_entry_contracts() {
+fn covered_interior_splits_beyond_discovery_budget_and_keeps_prior_entry_contracts() {
     let memory = memory();
     let mut cache = CoreCache32::default();
+    let limits = CompileOptions {
+        blocks: 1,
+        ..options()
+    };
     let original = cache.admit(&memory, code(&memory, 0x1000)).unwrap();
     cache.install_link(&original, 7).unwrap();
     assert_eq!(original.instruction_count(), 9);
@@ -72,7 +76,7 @@ fn covered_interior_reforms_one_owner_and_keeps_all_prior_entry_contracts() {
 
     let upgraded = ready(
         cache
-            .prepare_owned_entry(&memory, 0x1004, options(), &[])
+            .prepare_owned_entry(&memory, 0x1004, limits, &[])
             .unwrap(),
     );
     assert_ne!(upgraded.identity(), original.identity());
@@ -89,6 +93,10 @@ fn covered_interior_reforms_one_owner_and_keeps_all_prior_entry_contracts() {
     assert_eq!(
         upgraded.entrypoints(),
         &[GuestAddress(0x1000), GuestAddress(0x1004)]
+    );
+    assert!(
+        upgraded.entrypoints().len() > limits.blocks,
+        "splitting existing owned instructions does not discover new code"
     );
     assert_eq!(
         upgraded.formation_roots(),
@@ -108,7 +116,7 @@ fn covered_interior_reforms_one_owner_and_keeps_all_prior_entry_contracts() {
     let before = cache.snapshot();
     let repeated = ready(
         cache
-            .prepare_owned_entry(&memory, 0x1004, options(), &[])
+            .prepare_owned_entry(&memory, 0x1004, limits, &[])
             .unwrap(),
     );
     assert_eq!(repeated.identity(), upgraded.identity());
@@ -124,10 +132,6 @@ fn owned_entry_limit_declines_preserve_owner_entries_links_bytes_and_memory() {
     for limited in [
         CompileOptions {
             instructions: 8,
-            ..options()
-        },
-        CompileOptions {
-            blocks: 1,
             ..options()
         },
         CompileOptions {

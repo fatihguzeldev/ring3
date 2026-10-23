@@ -1,5 +1,7 @@
 use super::*;
 
+const MAX_REFORM_ENTRIES: usize = 1024;
+
 impl CompiledCode {
     pub(crate) fn with_entry(
         &self,
@@ -43,11 +45,15 @@ impl CompiledCode {
             entries.extend(owner.entries.iter().map(|entry| entry.0));
             entries.extend(owner.roots.iter().map(|root| root.0));
             roots.extend(owner.roots.iter().map(|root| root.0));
-            if entries.len() > options.blocks {
-                return Ok(None);
-            }
         }
-        if !pcs.contains(&entry.0) || !entries.iter().all(|entry| pcs.contains(entry)) {
+        // The caller's block budget bounds discovery of new code. Entry splits
+        // introduce no instruction starts, so they use the already owned set's
+        // size, subject to the compiler's unchanged hard entry ceiling.
+        let entry_budget = pcs.len().min(MAX_REFORM_ENTRIES);
+        if entries.len() > entry_budget
+            || !pcs.contains(&entry.0)
+            || !entries.iter().all(|entry| pcs.contains(entry))
+        {
             return Ok(None);
         }
 
@@ -61,14 +67,17 @@ impl CompiledCode {
             sources.push(source);
         }
         let blocks = partition_blocks(nodes, &entries);
-        if blocks.len() > options.blocks {
+        if blocks.len() > entry_budget {
             return Ok(None);
         }
         let roots = roots.into_iter().map(GuestAddress).collect();
         let Some(candidate) = encode_blocks(
             memory,
             entry,
-            options,
+            CompileOptions {
+                blocks: entry_budget,
+                ..options
+            },
             blocks,
             sources,
             roots,

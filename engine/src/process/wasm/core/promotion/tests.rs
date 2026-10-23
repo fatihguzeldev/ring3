@@ -113,7 +113,7 @@ fn shadowed_root_pair() -> (AddressSpace, CoreCache32, RegionRef, RegionRef, Reg
 }
 
 #[test]
-fn a_root_limit_declines_before_collecting_unrelated_frontiers() {
+fn discovery_budget_does_not_limit_roots_of_already_owned_instructions() {
     let (mut memory, mut cache, source, target, third) = shadowed_root_pair();
     memory.write(GuestAddress(0x2000), &[0x48]).unwrap();
     assert!(source.is_current(&memory) && target.is_current(&memory));
@@ -133,24 +133,45 @@ fn a_root_limit_declines_before_collecting_unrelated_frontiers() {
     );
     mature(&mut cache, &memory, &source, &target, 0x1040);
     let before = cache.snapshot();
-    assert!(
-        cache
-            .prepare_transition(
-                &memory,
-                0x1040,
-                CompileOptions {
-                    blocks: 2,
-                    ..options()
-                },
-                &[]
-            )
-            .is_none()
-    );
-    assert_eq!(cache.snapshot(), before);
+    let covered: std::collections::BTreeSet<_> = source
+        .instruction_pcs()
+        .chain(target.instruction_pcs())
+        .collect();
+    let merged = cache
+        .prepare_transition(
+            &memory,
+            0x1040,
+            CompileOptions {
+                blocks: 2,
+                ..options()
+            },
+            &[],
+        )
+        .unwrap();
     assert_eq!(
-        &cache.link_owners[1..4],
-        &[source.identity(), target.identity(), third.identity()]
+        merged.instruction_pcs().collect::<Vec<_>>(),
+        covered.into_iter().collect::<Vec<_>>(),
+        "the extra root label cannot discover or discard instruction starts"
     );
+    assert_eq!(
+        merged.formation_roots(),
+        &[
+            GuestAddress(0x1000),
+            GuestAddress(0x1040),
+            GuestAddress(0x1080)
+        ]
+    );
+    assert_eq!(merged.entrypoints().len(), 3);
+    assert!(merged.is_current(&memory));
+    assert!(cache.retained(&source).is_none() && cache.retained(&target).is_none());
+    assert_eq!(cache.snapshot()[0], before[0] + 1);
+    assert_eq!(&cache.link_owners[1..4], &[0, 0, third.identity()]);
+    for root in merged.formation_roots() {
+        assert_eq!(
+            cache.lookup(&memory, root.0).unwrap().identity(),
+            merged.identity()
+        );
+    }
 }
 
 #[test]
@@ -635,6 +656,7 @@ fn overlapping_instruction_starts_count_once_against_the_formation_limit() {
             0x1004,
             CompileOptions {
                 instructions: 9,
+                blocks: 1,
                 ..options()
             },
             &[],
@@ -643,6 +665,11 @@ fn overlapping_instruction_starts_count_once_against_the_formation_limit() {
     assert_eq!(
         merged.instruction_pcs().collect::<Vec<_>>(),
         (0x1000..0x1009).collect::<Vec<_>>()
+    );
+    assert_eq!(
+        merged.entrypoints().len(),
+        2,
+        "exact-owned union can split more labels than the discovery block budget"
     );
     assert_eq!(&cache.link_owners[1..3], &[0, 0]);
     assert!(cache.retained(&a).is_none() && cache.retained(&b).is_none());
