@@ -5,7 +5,8 @@ export const witnessCounters=['normalizer_calls','materializer_calls','raw80_sto
   'record_reads','record_writes','record_read_mask','record_write_mask','header_reads','header_writes',
   'wide_snapshot_calls','data_reads','data_writes','flags_calls','flag_kind_queries','flag_width_queries',
   'fp_environment_queries','fp_input_load_queries','fp_input_admission_queries','fp_control_queries',
-  'fp_occupancy_queries','status_resolver_calls','fp_result_admissions','fp_pending_recipe_writes','fp_multiply_ops'];
+  'fp_occupancy_queries','status_resolver_calls','fp_result_admissions','fp_pending_recipe_writes','fp_multiply_ops',
+  'entry_filter_queries','entry_index_compares','entry_table_selections','entry_pending_queries','prefix_quota_queries'];
 const u=value=>{const out=[];do{const b=value&127;value>>>=7;out.push(b|(value?128:0));}while(value);return Uint8Array.from(out);};
 const concat=parts=>Uint8Array.from(Buffer.concat(parts.map(value=>Buffer.from(value))));
 const section=(id,data)=>concat([Uint8Array.of(id),u(data.length),data]);
@@ -110,6 +111,27 @@ export function instrumentWitnessModule(source,parsed,isSupport=false) {
         fn.ops[i+1].value===0xf3f&&fn.ops[i+2]?.op===0x71)before.push(increment('control_admissions'));
       if(name==='guest.run'){
         const following=fn.ops.slice(i+1,i+5);
+        // These count executed routing operators, rather than emitted label or
+        // descriptor counts. INDEX tables are distinct from PREFIX_BASE's
+        // instruction-port tables and the physical-payload cell router.
+        if(node.op===0x20&&node.local===98){
+          before.push(increment('entry_pending_queries'));
+          const filter=fn.ops.slice(i+1,i+7);
+          if(filter[0]?.op===0x45&&filter[1]?.op===0x20&&filter[1].local===26&&
+            filter[2]?.op===0x41&&filter[2].value>=0&&filter[3]?.op===0x46&&
+            filter[4]?.op===0x72&&filter[5]?.op===4)
+            before.push(increment('entry_filter_queries'));
+        }
+        if(node.op===0x20&&node.local===26&&following[0]?.op===0x41&&following[0].value>=0&&
+          following[1]?.op===0x46)before.push(increment('entry_index_compares'));
+        if(node.op===14){
+          const direct=fn.ops[i-1]?.op===0x20&&fn.ops[i-1].local===26;
+          const relative=fn.ops[i-3]?.op===0x20&&fn.ops[i-3].local===26&&
+            fn.ops[i-2]?.op===0x41&&fn.ops[i-2].value>=0&&fn.ops[i-1]?.op===0x6b;
+          if(direct||relative)before.push(increment('entry_table_selections'));
+        }
+        if(node.op===0x20&&node.local===151&&following[0]?.op===0x45&&following[1]?.op===4)
+          before.push(increment('prefix_quota_queries'));
         if(node.op===0xa2)before.push(increment('fp_multiply_ops'));
         if(node.op===0x20&&!transported.has(i)&&[20,25].includes(node.local))
           before.push(increment(node.local===20?'flag_kind_queries':'flag_width_queries'));

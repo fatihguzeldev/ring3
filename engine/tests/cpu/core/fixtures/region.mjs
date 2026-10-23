@@ -17,17 +17,18 @@ import {runGroupCases} from './region/groups.mjs';
 import {runNativeStoreCases} from './region/native-store.mjs';
 import {runPoolCases,runPoolLoopCases,runTransportCases,runTransportLoopCases} from './region/pool.mjs';
 import {runExecutionCases,runExecutionFlagsCases,runExecutionLoadCases,runExecutionGuardCases,runExecutionMultiplyCases,runExecutionFlagsOracleCases} from './region/execution.mjs';
+import {runEntryCases,runEntryNestedCases,runEntryUnmatchedCases} from './region/entry.mjs';
 
 const [enginePath,reportPath,mode]=process.argv.slice(2);
-assert(enginePath&&reportPath&&(mode===undefined||mode==='--structure'||mode==='--graph'||mode==='--groups'||mode==='--native-stores'||mode==='--pool'||mode==='--pool-baseline'||mode==='--transport'||mode==='--transport-baseline'||mode==='--execution'||mode==='--execution-flags'||mode==='--execution-loads'||mode==='--execution-guards'||mode==='--execution-multiply'||mode==='--execution-flags-oracle'),
-  'usage: region.mjs engine.wasm fresh-report.json [--structure|--graph|--groups|--native-stores|--pool|--pool-baseline|--transport|--transport-baseline|--execution|--execution-flags|--execution-loads|--execution-guards|--execution-multiply|--execution-flags-oracle]');
+assert(enginePath&&reportPath&&(mode===undefined||mode==='--entry'||mode==='--entry-baseline'||mode==='--entry-nested'||mode==='--entry-unmatched'||mode==='--structure'||mode==='--graph'||mode==='--groups'||mode==='--native-stores'||mode==='--pool'||mode==='--pool-baseline'||mode==='--transport'||mode==='--transport-baseline'||mode==='--execution'||mode==='--execution-flags'||mode==='--execution-loads'||mode==='--execution-guards'||mode==='--execution-multiply'||mode==='--execution-flags-oracle'),
+  'usage: region.mjs engine.wasm fresh-report.json [--entry|--entry-baseline|--entry-nested|--entry-unmatched|--structure|--graph|--groups|--native-stores|--pool|--pool-baseline|--transport|--transport-baseline|--execution|--execution-flags|--execution-loads|--execution-guards|--execution-multiply|--execution-flags-oracle]');
 const artifact=readEngine(enginePath),hash=bytes=>createHash('sha256').update(bytes).digest('hex');
 const hex=bytes=>Buffer.from(bytes).toString('hex');
 const unhex=text=>Uint8Array.from(Buffer.from(text.replaceAll(' ',''),'hex'));
 closeSync(openSync(reportPath,'wx'));
 const report={schema:1,complete:false,engineSha256:artifact.sha256,
   scope:'actual generated mixed integer/x87 CFG with exact instruction-prefix, publication and fault oracles; no timing claim',
-  sources:Object.fromEntries(['./region.mjs','./link.mjs','./region/structure.mjs','./region/control.mjs','./region/link.mjs','./region/status.mjs','./region/state.mjs','./region/quota.mjs','./region/ownership.mjs','./region/ports.mjs','./region/graph.mjs','./region/groups.mjs','./region/native-store.mjs','./region/pool.mjs','./region/execution.mjs','./region/execution-flags.mjs','./region/witness.mjs','./pool-state.mjs',
+  sources:Object.fromEntries(['./region.mjs','./link.mjs','./region/structure.mjs','./region/control.mjs','./region/link.mjs','./region/status.mjs','./region/state.mjs','./region/quota.mjs','./region/ownership.mjs','./region/ports.mjs','./region/graph.mjs','./region/groups.mjs','./region/native-store.mjs','./region/pool.mjs','./region/execution.mjs','./region/execution-flags.mjs','./region/entry.mjs','./region/witness.mjs','./pool-state.mjs',
     '../../../support/wasm/engine.mjs','../../../../../sdk/runtime/engine.js','../../../../../sdk/runtime/cache.js']
     .map(path=>[path,hash(readFileSync(new URL(path,import.meta.url)))])),cases:[]};
 const checkpoint=()=>writeFileSync(reportPath,JSON.stringify(report,null,2));
@@ -111,7 +112,7 @@ function fixture(name,{segments,entry=0x1000,registers=[0,2,0,0x3000,0x4800,0,0,
       for(let index=0;index<input.length;index++)expectedPages.get((address+index)&~4095)[(address+index)&4095]=input[index];
     };
     const check=({pc,retired,flags=2,ecx=registers[1],fp:expectedFp,simd:expectedSimd=startingSimd,stop=2,budget,work=budget,remaining=0,
-      fault=[0,0,0],regs={}})=>{
+      fault=[0,0,0],regs={},continueNeedCode=true})=>{
       const beforeHelpers=helpers,activations=[];
       let actual,available=budget;
       do {
@@ -133,12 +134,12 @@ function fixture(name,{segments,entry=0x1000,registers=[0,2,0,0x3000,0x4800,0,0,
         const nextPc=word(context,32),left=word(context,44),completed=word(context,40)-beforeRetired;
         activations.push({startPc,nextPc,stop:actual,budget:available,remaining:left,retired:completed});
         assert(left<=available,'each activation preserves its remaining quota');
-        if(actual===1) {
+        if(actual===1&&continueNeedCode) {
           assert(left>0,'NeedCode retains unconsumed work');
           assert(available>left||nextPc!==startPc,'NeedCode makes observable guest progress');
           available=left;prepare(nextPc);
         }
-      }while(actual===1);
+      }while(actual===1&&continueNeedCode);
       const actualRegisters=Array.from({length:8},(_,index)=>word(context,index*4));
       const wantedRegisters=registers.slice();wantedRegisters[1]=ecx;
       for(const[index,value]of Object.entries(regs))wantedRegisters[Number(index)]=value;
@@ -209,7 +210,13 @@ function exchangeCase(name,eax,structural=false) {
 }
 
 try {
-  if(mode?.startsWith('--execution')) {
+  if(mode==='--entry'||mode==='--entry-baseline') {
+    stage='structured-entry-routing';runEntryCases(fixture);checkpoint();
+  }else if(mode==='--entry-nested') {
+    stage='nested-entry-routing';runEntryNestedCases(fixture);checkpoint();
+  }else if(mode==='--entry-unmatched') {
+    stage='unmatched-entry-routing';runEntryUnmatchedCases(fixture);checkpoint();
+  }else if(mode?.startsWith('--execution')) {
     const cases={'--execution':runExecutionCases,'--execution-flags':runExecutionFlagsCases,
       '--execution-loads':runExecutionLoadCases,'--execution-guards':runExecutionGuardCases,
       '--execution-multiply':runExecutionMultiplyCases,'--execution-flags-oracle':runExecutionFlagsOracleCases};
