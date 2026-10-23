@@ -1,5 +1,5 @@
 use ring3_engine::{
-    cpu::core::{CompileOptions, compile, compile_with_frontier},
+    cpu::core::{CompileOptions, compile},
     memory::{AddressSpace, GuestAddress, PageRange, Permissions},
 };
 use std::{
@@ -383,18 +383,8 @@ fn generated_wasm_runs_authored_integer_control_memory_programs() {
         } else {
             CompileOptions::default()
         };
-        let code = if matches!(name.as_str(), "call" | "word-call") {
-            compile_with_frontier(
-                &memory,
-                GuestAddress(entry),
-                options,
-                &[],
-                &[GuestAddress(0x1010)],
-            )
-        } else {
-            compile(&memory, GuestAddress(entry), options)
-        }
-        .unwrap_or_else(|error| panic!("compile {name}: {error:?}"));
+        let code = compile(&memory, GuestAddress(entry), options)
+            .unwrap_or_else(|error| panic!("compile {name}: {error:?}"));
         if name == "bounded-prefix" {
             assert_eq!(code.instruction_count(), 1);
         }

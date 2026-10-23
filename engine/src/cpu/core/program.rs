@@ -258,11 +258,7 @@ fn compile_formation_query(
             }
             let (instruction, source) = match decode_instruction(memory, pc, gates) {
                 Ok(decoded) => decoded,
-                Err(CompileError::Decode(_) | CompileError::Memory(MemoryError::Fault(_)))
-                    if !nodes.is_empty() =>
-                {
-                    break;
-                }
+                Err(CompileError::Decode(_)) if !nodes.is_empty() => break,
                 Err(error) => return Err(error),
             };
             let next = instruction.next;
@@ -291,20 +287,9 @@ fn compile_formation_query(
                     enqueue(target.0);
                     break;
                 }
-                Some(Operation::Call {
-                    target: BranchTarget::Direct(target),
-                }) => {
-                    enqueue(target.0);
-                    enqueue(next);
-                    break;
-                }
-                Some(Operation::CallWord { target }) => {
-                    enqueue(target.0 & 0xffff);
-                    enqueue(next);
-                    break;
-                }
                 Some(
                     Operation::Call { .. }
+                    | Operation::CallWord { .. }
                     | Operation::CallRegisterWord { .. }
                     | Operation::ReadCallWord { .. }
                     | Operation::String { .. }
@@ -526,10 +511,6 @@ fn encode_blocks(
 mod call_tests;
 
 #[cfg(test)]
-#[path = "program/discovery_tests.rs"]
-mod discovery_tests;
-
-#[cfg(test)]
 #[path = "program/transition_tests.rs"]
 mod transition_tests;
 
@@ -712,7 +693,7 @@ mod tests {
     }
 
     #[test]
-    fn direct_calls_discover_the_callee_and_keep_the_caller_continuation() {
+    fn direct_calls_keep_the_caller_continuation_without_absorbing_the_callee() {
         for (caller, callee, continuation) in [
             (
                 &[0xe8, 0xfb, 0, 0, 0, 0x83, 0xc0, 1, 0x0f, 0x0b][..],
@@ -731,13 +712,9 @@ mod tests {
             let caller = compile(&memory, GuestAddress(0x1000), limits(64, 8)).unwrap();
             assert_eq!(
                 caller.entrypoints(),
-                &[
-                    GuestAddress(0x1000),
-                    GuestAddress(continuation),
-                    GuestAddress(0x1100),
-                ]
+                &[GuestAddress(0x1000), GuestAddress(continuation)]
             );
-            assert_eq!(caller.instruction_count(), 5);
+            assert_eq!(caller.instruction_count(), 3);
             let callee = compile(&memory, GuestAddress(0x1100), limits(64, 8)).unwrap();
             assert_eq!(callee.entrypoints(), &[GuestAddress(0x1100)]);
             assert_eq!(callee.instruction_count(), 2);

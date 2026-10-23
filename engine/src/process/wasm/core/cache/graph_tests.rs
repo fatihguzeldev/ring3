@@ -1,7 +1,7 @@
 use super::*;
 use crate::{
     cpu::{
-        core::{Context32, compile_with_frontier},
+        core::{Context32, compile},
         x86::State32,
     },
     memory::{PageRange, Permissions},
@@ -20,18 +20,7 @@ fn insert(cache: &mut CoreCache32, memory: &AddressSpace, pc: u32, slot: u32) ->
     let owner = cache
         .admit(
             memory,
-            compile_with_frontier(
-                memory,
-                GuestAddress(pc),
-                options(),
-                &[],
-                if pc == 0x1000 {
-                    &[GuestAddress(0x2000)]
-                } else {
-                    &[]
-                },
-            )
-            .unwrap(),
+            compile(memory, GuestAddress(pc), options()).unwrap(),
         )
         .unwrap();
     cache.install_link(&owner, slot).unwrap();

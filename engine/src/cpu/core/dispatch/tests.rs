@@ -1,6 +1,6 @@
 use super::*;
 use crate::{
-    cpu::core::{CompileOptions, compile, compile_with_frontier, compile_with_gates},
+    cpu::core::{CompileOptions, compile, compile_with_gates},
     memory::{AddressSpace, GuestAddress, PageRange, Permissions},
 };
 use std::{
@@ -61,15 +61,6 @@ fn generated_dispatch_chains_unchanged_regions_with_one_shared_work_budget() {
                 GuestAddress(entry),
                 options,
                 &[(GuestAddress(entry), 77)],
-            )
-            .unwrap()
-        } else if name == "caller" {
-            compile_with_frontier(
-                &memory,
-                GuestAddress(entry),
-                options,
-                &[],
-                &[GuestAddress(0x1040)],
             )
             .unwrap()
         } else {
