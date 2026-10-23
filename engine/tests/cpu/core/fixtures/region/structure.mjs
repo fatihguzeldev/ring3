@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {instrumentWitnessModule,readWitness,setWitnessBank,setWitnessData,witnessCounters} from './witness.mjs';
+import {instrumentWitnessModule,readWitness,setWitnessBank,setWitnessData,setWitnessAuthority,witnessCounters} from './witness.mjs';
 
 class Reader {
   constructor(bytes){this.bytes=bytes;this.at=0;}
@@ -184,10 +184,11 @@ export function instrumentStateWitness(source,supportBytes) {
     calls:fn.ops.filter(node=>[16,17,18,19,20,21].includes(node.op)).length}:undefined;
   return {bytes:instrumented.bytes,supportBytes:shared.bytes,groupProof,
     poolProof:{owner:instrumented.proof,support:shared.proof},
-    read:(instance,supportExports,bankPointer,physicalRange)=>{
+    read:(instance,supportExports,bankPointer,physicalRange,authority)=>{
       assert(supportExports,'the witness observes the actual instrumented support instance');
       setWitnessBank(instance,bankPointer);setWitnessBank(supportExports,bankPointer);
       setWitnessData(instance,physicalRange);setWitnessData(supportExports,physicalRange);
+      setWitnessAuthority(instance,authority);setWitnessAuthority(supportExports,authority);
       const own=readWitness(instance),other=readWitness(supportExports);
       return Object.fromEntries(witnessCounters.map(name=>[name,name.endsWith('_mask')?own[name]|other[name]:own[name]+other[name]]));
     }};

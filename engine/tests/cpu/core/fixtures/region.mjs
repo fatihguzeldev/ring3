@@ -19,17 +19,19 @@ import {runPoolCases,runPoolLoopCases,runTransportCases,runTransportLoopCases} f
 import {runExecutionCases,runExecutionFlagsCases,runExecutionLoadCases,runExecutionGuardCases,runExecutionMultiplyCases,runExecutionFlagsOracleCases} from './region/execution.mjs';
 import {runEntryCases,runEntryNestedCases,runEntryUnmatchedCases} from './region/entry.mjs';
 import {runCanonicalCases,runCanonicalStatusCases} from './region/canonical.mjs';
+import {runArithmeticCases,runArithmeticOwnerCases} from './region/arithmetic.mjs';
+import {runAccessEpochCases} from './region/access-epoch.mjs';
 
 const [enginePath,reportPath,mode]=process.argv.slice(2);
-assert(enginePath&&reportPath&&(mode===undefined||mode==='--canonical'||mode==='--canonical-baseline'||mode==='--canonical-status'||mode==='--entry'||mode==='--entry-baseline'||mode==='--entry-nested'||mode==='--entry-unmatched'||mode==='--structure'||mode==='--graph'||mode==='--groups'||mode==='--native-stores'||mode==='--pool'||mode==='--pool-baseline'||mode==='--transport'||mode==='--transport-baseline'||mode==='--execution'||mode==='--execution-flags'||mode==='--execution-loads'||mode==='--execution-guards'||mode==='--execution-multiply'||mode==='--execution-flags-oracle'),
-  'usage: region.mjs engine.wasm fresh-report.json [--canonical|--canonical-baseline|--canonical-status|--entry|--entry-baseline|--entry-nested|--entry-unmatched|--structure|--graph|--groups|--native-stores|--pool|--pool-baseline|--transport|--transport-baseline|--execution|--execution-flags|--execution-loads|--execution-guards|--execution-multiply|--execution-flags-oracle]');
+assert(enginePath&&reportPath&&(mode===undefined||mode==='--arithmetic-owner'||mode==='--arithmetic-owner-baseline'||mode==='--access-epoch'||mode==='--access-epoch-baseline'||mode==='--arithmetic'||mode==='--arithmetic-baseline'||mode==='--canonical'||mode==='--canonical-baseline'||mode==='--canonical-status'||mode==='--entry'||mode==='--entry-baseline'||mode==='--entry-nested'||mode==='--entry-unmatched'||mode==='--structure'||mode==='--graph'||mode==='--groups'||mode==='--native-stores'||mode==='--pool'||mode==='--pool-baseline'||mode==='--transport'||mode==='--transport-baseline'||mode==='--execution'||mode==='--execution-flags'||mode==='--execution-loads'||mode==='--execution-guards'||mode==='--execution-multiply'||mode==='--execution-flags-oracle'),
+  'usage: region.mjs engine.wasm fresh-report.json [--arithmetic|--arithmetic-baseline|--arithmetic-owner|--arithmetic-owner-baseline|--access-epoch|--access-epoch-baseline|--canonical|--canonical-baseline|--canonical-status|--entry|--entry-baseline|--entry-nested|--entry-unmatched|--structure|--graph|--groups|--native-stores|--pool|--pool-baseline|--transport|--transport-baseline|--execution|--execution-flags|--execution-loads|--execution-guards|--execution-multiply|--execution-flags-oracle]');
 const artifact=readEngine(enginePath),hash=bytes=>createHash('sha256').update(bytes).digest('hex');
 const hex=bytes=>Buffer.from(bytes).toString('hex');
 const unhex=text=>Uint8Array.from(Buffer.from(text.replaceAll(' ',''),'hex'));
 closeSync(openSync(reportPath,'wx'));
 const report={schema:1,complete:false,engineSha256:artifact.sha256,
   scope:'actual generated mixed integer/x87 CFG with exact instruction-prefix, publication and fault oracles; no timing claim',
-  sources:Object.fromEntries(['./region.mjs','./link.mjs','./region/structure.mjs','./region/control.mjs','./region/link.mjs','./region/status.mjs','./region/state.mjs','./region/quota.mjs','./region/ownership.mjs','./region/ports.mjs','./region/graph.mjs','./region/groups.mjs','./region/native-store.mjs','./region/pool.mjs','./region/execution.mjs','./region/execution-flags.mjs','./region/canonical.mjs','./region/entry.mjs','./region/witness.mjs','./pool-state.mjs',
+  sources:Object.fromEntries(['./region.mjs','./region/access-epoch.mjs','./region/arithmetic.mjs','./link.mjs','./region/structure.mjs','./region/control.mjs','./region/link.mjs','./region/status.mjs','./region/state.mjs','./region/quota.mjs','./region/ownership.mjs','./region/ports.mjs','./region/graph.mjs','./region/groups.mjs','./region/native-store.mjs','./region/pool.mjs','./region/execution.mjs','./region/execution-flags.mjs','./region/canonical.mjs','./region/entry.mjs','./region/witness.mjs','./pool-state.mjs',
     '../../../support/wasm/engine.mjs','../../../../../sdk/runtime/engine.js','../../../../../sdk/runtime/cache.js']
     .map(path=>[path,hash(readFileSync(new URL(path,import.meta.url)))])),cases:[]};
 const checkpoint=()=>writeFileSync(reportPath,JSON.stringify(report,null,2));
@@ -86,7 +88,9 @@ function fixture(name,{segments,entry=0x1000,registers=[0,2,0,0x3000,0x4800,0,0,
     run=stateWitness?generated.exports.link:generated.exports.run;
     publish=stateWitness?generated.exports.publish:undefined;
     witnessReader=diagnostic?()=>diagnostic.read(generated,support,word(context,92),
-      witnessData?{pointer:physical(witnessData[0]),length:witnessData[1]}:undefined):undefined;
+      witnessData?{pointer:physical(witnessData[0]),length:witnessData[1]}:undefined,
+      {context,executable:word(context,72),executableLength:word(context,68)*4,
+        privateSlots:word(context,76),privateLength:word(context,76)?1<<22:0}):undefined;
     assert.equal(typeof run,'function','the selected generated entry is an actual Wasm function');
     if(stateWitness)assert.equal(typeof publish,'function','linked state has an explicit canonical publisher');
   };
@@ -211,7 +215,18 @@ function exchangeCase(name,eax,structural=false) {
 }
 
 try {
-  if(mode==='--canonical'||mode==='--canonical-baseline') {
+  if(mode==='--arithmetic-owner'||mode==='--arithmetic-owner-baseline') {
+    if(mode==='--arithmetic-owner-baseline') {
+      const path=new URL('../../../../../artifacts/cpu-core/region-redesign/canonical-v18-sdk-cache.mjs',import.meta.url);
+      report.baselineSdkSha256=hash(readFileSync(path));
+      artifact.CodeCache=(await import(path.href)).CodeCache;
+    }
+    stage='mode-correlated-physical-pool';runArithmeticOwnerCases(artifact,report);checkpoint();
+  }else if(mode==='--access-epoch'||mode==='--access-epoch-baseline') {
+    stage='affine-memory-access-epoch';runAccessEpochCases(fixture);checkpoint();
+  }else if(mode==='--arithmetic'||mode==='--arithmetic-baseline') {
+    stage='mode-correlated-arithmetic';runArithmeticCases(fixture);checkpoint();
+  }else if(mode==='--canonical'||mode==='--canonical-baseline') {
     stage='owner-canonical-service';runCanonicalCases(fixture);checkpoint();
   }else if(mode==='--canonical-status') {
     stage='owner-canonical-status';runCanonicalStatusCases(fixture);checkpoint();

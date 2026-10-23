@@ -122,7 +122,10 @@ for (const line of readFileSync(join(directory, 'programs.tsv'), 'utf8').trim().
   assert.equal(typeof instance.exports.run, 'function');
   assert.equal(instance.exports.run.length, 2);
   programs.set(name, {code: Buffer.from(hex, 'hex'), identity: BigInt(identity), wasmSha256: hash(wasm), run: instance.exports.run,
-    groupWitness:diagnostic?()=>diagnostic.read(instance,support,get(CTX+92)):undefined});
+    groupWitness:diagnostic?()=>diagnostic.read(instance,support,get(CTX+92),undefined,{
+      context:CTX,executable:get(CTX+72),executableLength:get(CTX+68)*4,
+      privateSlots:get(CTX+76),privateLength:get(CTX+76)?64:0,
+    }):undefined});
 }
 
 function seed(name, options = {}) {
@@ -149,6 +152,7 @@ function seed(name, options = {}) {
   put(CTX + 32, 0x1000); put(CTX + 36, options.flags ?? 2);
   put(CTX + 40, options.retired ?? 0); put(CTX + 44, 0x12345678);
   [MAP, PERM, BACKING, 16, EXEC, 0, VERSION, PAGE_VERSION, GENERATION].forEach((value, index) => put(CTX + 56 + index * 4, value));
+  if (options.privateAuthority) put(CTX + 76, PRIVATE);
   if (options.privateCopy) { put(CTX + 76, PRIVATE); put(PRIVATE + 3 * 4, 16); put(MAP + 5 * 4, 3); }
   if (options.numericStore) {
     put(CTX + 92, NUMERIC); view.setUint16(NUMERIC, 0x27f, true); view.setUint16(NUMERIC + 4, 0xfffc, true);
@@ -175,6 +179,14 @@ function seed(name, options = {}) {
 
 function check(name, label, budget, options, outcome) {
   const initial = seed(name, options), before = bytes.slice(CTX, CTX + 128);
+  const authorityBefore=options.privateAuthority?{
+    mappings:bytes.slice(MAP,MAP+(1<<22)),permissions:bytes.slice(PERM,PERM+(1<<20)),
+    privateSlots:bytes.slice(PRIVATE,PRIVATE+64),executable:bytes.slice(EXEC,EXEC+16*4),
+  }:undefined;
+  if(authorityBefore){
+    assert.equal(get(CTX+76),PRIVATE,`${label}: actual nonnull COW authority pointer`);
+    assert.deepEqual(authorityBefore.privateSlots,new Uint8Array(64),`${label}: every authored COW reservation starts empty`);
+  }
   const witnessBefore=programs.get(name).groupWitness?.();
   const expectedRam = bytes.slice(BACKING, BACKING + 16 * PAGE);
   const expectedNumeric = bytes.slice(NUMERIC, NUMERIC + 100);
@@ -237,6 +249,12 @@ function check(name, label, budget, options, outcome) {
   assert.equal(view.getBigUint64(VERSION, true), (options.initialVersion ?? 0n) + BigInt(expected.writes?.length ?? 0), `${label}: store transaction count`);
   assert.deepEqual(bytes.subarray(PAGE_VERSION, PAGE_VERSION + 16 * 16), expectedVersions, `${label}: all physical page versions`);
   assert.equal(view.getBigUint64(GENERATION, true), expected.reason === 6 ? 1n : 0n, `${label}: code generation`);
+  if(authorityBefore){
+    assert.deepEqual(bytes.subarray(MAP,MAP+(1<<22)),authorityBefore.mappings,`${label}: the entire mapping directory is unchanged`);
+    assert.deepEqual(bytes.subarray(PERM,PERM+(1<<20)),authorityBefore.permissions,`${label}: the entire permission directory is unchanged`);
+    assert.deepEqual(bytes.subarray(PRIVATE,PRIVATE+64),authorityBefore.privateSlots,`${label}: the nonnull COW directory remains empty`);
+    assert.deepEqual(bytes.subarray(EXEC,EXEC+16*4),authorityBefore.executable,`${label}: every physical executable-alias authority entry is unchanged`);
+  }
   if(expected.groupWitness)for(const[key,value]of Object.entries(expected.groupWitness))
     assert.equal(groupWitness?.[key],value,`${label}: actual generated ${key}`);
   if (options.privateCopy) {
@@ -343,7 +361,13 @@ check('mixed-width-stores', 'store-helper-registration-follows-first-width-use',
 check('rmw-repeat', 'slow-private-detach-invalidates-the-next-instruction-translation', 8,
   {privateCopy: true, initial: [[0x3000, 4, 0xffffffff]]},
   {reason: 4, pc: 0x1006, retired: 2, flags: 2, helpers: 1, writes: [[0x3000, 4, 0], [0x3000, 4, 1]],
-    groupWitness:{group_acquisitions:2,page_translations:0}});
+    groupWitness:{group_acquisitions:2,page_translations:0,canonical_reads:0,canonical_writes:1}});
+check('rmw-repeat', 'nonnull-empty-cow-authority-is-proved-once-for-two-completed-rmw-stores', 8,
+  {privateAuthority:true,initialVersion:37n,initial:[[0x3000,4,0xffffffff]]},
+  {reason:4,pc:0x1006,retired:2,flags:2,writes:[[0x3000,4,0],[0x3000,4,1]],
+    groupWitness:{group_acquisitions:1,page_translations:0,canonical_reads:0,canonical_writes:0,
+      executable_context_reads:1,private_context_reads:1,
+      executable_authority_reads:1,private_authority_reads:1}});
 check('rmw', 'modify-through-nonexecutable-alias-stops-after-committed-store', 8,
   {executableAlias: true, initial: [[0x3000, 4, 0xffffffff]]},
   {reason: 6, pc: 0x1003, retired: 1, flags: 0x57, helpers: 1, writes: [[0x3000, 4, 0]]});

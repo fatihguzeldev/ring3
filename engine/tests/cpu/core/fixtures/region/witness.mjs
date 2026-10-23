@@ -7,7 +7,9 @@ export const witnessCounters=['normalizer_calls','materializer_calls','raw80_sto
   'fp_environment_queries','fp_input_load_queries','fp_input_admission_queries','fp_control_queries',
   'fp_occupancy_queries','status_resolver_calls','fp_result_admissions','fp_pending_recipe_writes','fp_multiply_ops',
   'entry_filter_queries','entry_index_compares','entry_table_selections','entry_pending_queries','prefix_quota_queries',
-  'canonical_calls'];
+  'canonical_calls','canonical_reads','canonical_writes','fp_generic_f32_packs','fp_single_precision_queries',
+  'fp_value_precision_admissions','fp_operand_bounds',
+  'executable_context_reads','private_context_reads','executable_authority_reads','private_authority_reads'];
 const u=value=>{const out=[];do{const b=value&127;value>>>=7;out.push(b|(value?128:0));}while(value);return Uint8Array.from(out);};
 const concat=parts=>Uint8Array.from(Buffer.concat(parts.map(value=>Buffer.from(value))));
 const section=(id,data)=>concat([Uint8Array.of(id),u(data.length),data]);
@@ -49,6 +51,17 @@ export function setWitnessData(exports,{pointer=0,length=0}={}) {
   }
 }
 
+export function setWitnessAuthority(exports,{context=0,executable=0,executableLength=0,privateSlots=0,privateLength=0}={}) {
+  exports=exports.exports??exports;
+  for(const [pointer,length]of[[context,128],[executable,executableLength],[privateSlots,privateLength]])
+    assert(Number.isInteger(pointer)&&pointer>=0&&Number.isInteger(length)&&length>=0&&pointer+length<=0x100000000,
+      'authority witness uses actual bounded Context and table address ranges');
+  for(const[name,value]of[['context_base',context],['executable_base',executable],
+    ['executable_length',executable?executableLength:0],['private_base',privateSlots],['private_length',privateSlots?privateLength:0]]){
+    assert(exports[`test.${name}`] instanceof WebAssembly.Global);exports[`test.${name}`].value=value;
+  }
+}
+
 // Count actual effective memory addresses, rather than a marker or a private
 // helper's name. Scratch locals preserve the original address/value stack and
 // all original indices; the appended globals hold diagnostic state only.
@@ -57,7 +70,8 @@ export function instrumentWitnessModule(source,parsed,isSupport=false) {
   const scan=new Reader(source);scan.take(8);let definedGlobals=0;
   while(scan.at<source.length){const id=scan.byte(),raw=scan.take(scan.unsigned());if(id===6)definedGlobals=new Reader(raw).unsigned();}
   const globalBase=imports.filter(item=>item.kind==='global').length+definedGlobals;
-  const names=[...witnessCounters.map(name=>`test.${name}`),'test.bank_base','test.data_base','test.data_length'];
+  const names=[...witnessCounters.map(name=>`test.${name}`),'test.bank_base','test.data_base','test.data_length',
+    'test.context_base','test.executable_base','test.executable_length','test.private_base','test.private_length'];
   assert(!WebAssembly.Module.exports(original).some(item=>names.includes(item.name)),'fresh witness exports');
   const index=name=>globalBase+witnessCounters.indexOf(name);
   const global=number=>concat([Uint8Array.of(0x23),u(number)]);
@@ -70,7 +84,11 @@ export function instrumentWitnessModule(source,parsed,isSupport=false) {
     return Uint8Array.from([0x41,...a]);};
   const bankGlobal=globalBase+witnessCounters.length;
   const dataGlobal=bankGlobal+1,dataLengthGlobal=bankGlobal+2;
+  const contextGlobal=bankGlobal+3,executableGlobal=bankGlobal+4,executableLengthGlobal=bankGlobal+5;
+  const privateGlobal=bankGlobal+6,privateLengthGlobal=bankGlobal+7;
   const canonicalImport=parsed.imports.findIndex(item=>item.module==='ring3'&&item.name==='numeric');
+  const readImport=parsed.imports.findIndex(item=>item.module==='ring3'&&item.name==='read');
+  const writeImport=parsed.imports.findIndex(item=>item.module==='ring3'&&item.name==='write');
   const proof={addressBasis:'actual effective address minus diagnostic Context92 pointer',
     canonical:[0,100],header:[512,640],records:[640,896],recordBytes:32,memorySites:0,normalizers:[],wideSnapshots:[]};
   const instrumentBody=(raw,fn,bodyIndex)=>{
@@ -114,6 +132,31 @@ export function instrumentWitnessModule(source,parsed,isSupport=false) {
       if(name==='guest.run'){
         const following=fn.ops.slice(i+1,i+5);
         if(node.op===16&&node.call===canonicalImport)before.push(increment('canonical_calls'));
+        if(node.op===16&&node.call===readImport)before.push(increment('canonical_reads'));
+        if(node.op===16&&node.call===writeImport)before.push(increment('canonical_writes'));
+        if(node.op===0x20&&node.local===46&&following[0]?.op===0x42&&following[0].value===40n&&
+          following[1]?.op===0x88&&following[2]?.op===0x21&&following[2].local===47)
+          before.push(increment('fp_generic_f32_packs'));
+        const precision=fn.ops.slice(i+1,i+10);
+        if(node.op===0x20&&precision[0]?.op===0xbd&&precision[1]?.op===0x42&&
+          precision[1].value===0x1fffffffn&&precision[2]?.op===0x83&&precision[3]?.op===0x50&&
+          precision[4]?.op===0x45&&precision[5]?.op===0x20&&precision[5].local===54&&
+          precision[6]?.op===0x45&&precision[7]?.op===0x71&&precision[8]?.op===13)
+          before.push(increment('fp_single_precision_queries'));
+        if(node.op===0x20&&precision[0]?.op===0xbd&&precision[1]?.op===0x42&&
+          precision[1].value===0x1fffffffn&&precision[2]?.op===0x83&&precision[3]?.op===0x50&&
+          precision[4]?.op===0x45&&precision[5]?.op===13)
+          before.push(increment('fp_value_precision_admissions'));
+        const bound=fn.ops.slice(i+1,i+21);
+        if(node.op===0x20&&[48,49].includes(node.local)&&bound[0]?.op===0xbd&&bound[1]?.op===0x42&&
+          bound[1].value===52n&&bound[2]?.op===0x88&&bound[3]?.op===0xa7&&bound[4]?.op===0x41&&
+          bound[4].value===2047&&bound[5]?.op===0x71&&bound[6]?.op===0x41&&bound[6].value===1023&&
+          bound[7]?.op===0x6b&&bound[8]?.op===0x22&&bound[8].local===44&&bound[9]?.op===0x41&&
+          bound[9].value===-900&&bound[10]?.op===0x48&&bound[11]?.op===0x20&&bound[11].local===44&&
+          bound[12]?.op===0x41&&bound[12].value===900&&bound[13]?.op===0x4a&&bound[14]?.op===0x72&&
+          bound[15]?.op===0x20&&bound[15].local===node.local&&bound[16]?.op===0x44&&
+          bound[17]?.op===0x62&&bound[18]?.op===0x71&&bound[19]?.op===13)
+          before.push(increment('fp_operand_bounds'));
         // These count executed routing operators, rather than emitted label or
         // descriptor counts. INDEX tables are distinct from PREFIX_BASE's
         // instruction-port tables and the physical-payload cell router.
@@ -167,6 +210,18 @@ export function instrumentWitnessModule(source,parsed,isSupport=false) {
         before.push(global(dataLengthGlobal),Uint8Array.of(0x04,0x40),local(addr),global(dataGlobal),Uint8Array.of(0x4f),
           local(addr),global(dataGlobal),Uint8Array.of(0x6b),global(dataLengthGlobal),Uint8Array.of(0x49,0x71,0x04,0x40),
           increment(store?'data_writes':'data_reads'),Uint8Array.of(0x0b,0x0b));
+        if(!store){
+          before.push(global(contextGlobal),Uint8Array.of(0x04,0x40));
+          for(const[offset,counter]of[[72,'executable_context_reads'],[76,'private_context_reads']])
+            before.push(local(addr),global(contextGlobal),constant(offset),Uint8Array.of(0x6a,0x46,0x04,0x40),
+              increment(counter),Uint8Array.of(0x0b));
+          before.push(Uint8Array.of(0x0b));
+          for(const[base,length,counter]of[[executableGlobal,executableLengthGlobal,'executable_authority_reads'],
+            [privateGlobal,privateLengthGlobal,'private_authority_reads']])
+            before.push(global(length),Uint8Array.of(0x04,0x40),local(addr),global(base),Uint8Array.of(0x4f),
+              local(addr),global(base),Uint8Array.of(0x6b),global(length),Uint8Array.of(0x49,0x71,0x04,0x40),
+              increment(counter),Uint8Array.of(0x0b,0x0b));
+        }
         before.push(local(addr),global(bankGlobal),Uint8Array.of(0x6b),setLocal(addr));
         before.push(global(bankGlobal),Uint8Array.of(0x04,0x40));
         const range=(low,high,body)=>concat([local(addr),constant(low),Uint8Array.of(0x4f),
