@@ -117,7 +117,8 @@ fn mixed_scalar_rmw_and_direct_numeric_accesses_share_translation_not_data_value
             .memory_effect
     );
     assert_eq!(
-        group.authority, 0,
+        group.authority,
+        AccessEpoch(0),
         "a data transaction does not change mapping authority"
     );
     let rmw = plan
@@ -148,7 +149,7 @@ fn changing_an_address_register_creates_a_distinct_group() {
         load(address(0)),
         load(address(4)),
         Operation::Binary {
-            kind: BinaryKind::Add,
+            kind: BinaryKind::Xor,
             destination: Location32::Register(Register32::Ebx),
             source: Value32::Immediate(4),
         },
@@ -262,7 +263,7 @@ fn size_segment_and_scale_are_part_of_the_group_identity_and_eight_slots_are_bou
 }
 
 #[test]
-fn lone_accesses_implicit_stacks_and_unsupported_numeric_widths_remain_unplanned() {
+fn lone_accesses_and_unsupported_numeric_widths_remain_unplanned() {
     assert!(
         !plan(&[Operation::Unary {
             kind: UnaryKind::Inc,
@@ -272,20 +273,145 @@ fn lone_accesses_implicit_stacks_and_unsupported_numeric_widths_remain_unplanned
     );
     assert!(
         !plan(&[
-            Operation::Push {
-                source: Value32::Register(Register32::Eax)
-            },
-            Operation::Push {
-                source: Value32::Register(Register32::Eax)
-            }
-        ])
-        .has_access_groups()
-    );
-    assert!(
-        !plan(&[
             x87(X87Operation::Load(X87Format::Float64), address(0)),
             x87(X87Operation::Load(X87Format::Float64), address(8))
         ])
         .has_access_groups()
     );
+}
+
+#[test]
+fn explicit_and_implicit_stack_accesses_share_one_affine_epoch() {
+    let stack0 = stack(Register32::Esp, 0);
+    let plan = plan(&[
+        load(stack0),
+        Operation::Push {
+            source: Value32::Register(Register32::Eax),
+        },
+        store(stack(Register32::Esp, 8)),
+        Operation::PushWord {
+            source: crate::cpu::x86::ir::WordValue::Immediate(7),
+        },
+        Operation::PopWord {
+            destination: Register32::Edx,
+        },
+        Operation::Pop {
+            destination: Location32::Register(Register32::Ecx),
+        },
+        load(stack0),
+    ]);
+    let groups = plan.access_groups(BlockId(0));
+    assert_eq!(groups.len(), 1);
+    let group = &groups[0];
+    assert_eq!(
+        (group.min_delta, group.max_end, group.permissions),
+        (-6, 8, 3)
+    );
+    assert_eq!(
+        group
+            .members
+            .iter()
+            .map(|member| member.delta)
+            .collect::<Vec<_>>(),
+        [0, -4, 4, -6, -6, -4, 0]
+    );
+    assert_eq!(group.authority, AccessEpoch(0));
+    assert!(
+        plan.access_member(BlockId(0), 1, stack(Register32::Esp, -4i32 as u32), 4, true)
+            .is_some()
+    );
+    assert!(
+        plan.access_member(BlockId(0), 3, stack(Register32::Esp, -2i32 as u32), 2, true)
+            .is_some()
+    );
+}
+
+#[test]
+fn affine_register_updates_and_frame_setup_preserve_the_actual_address_family() {
+    let plan = plan(&[
+        load(stack(Register32::Esp, 0)),
+        Operation::EnterZero,
+        load(stack(Register32::Ebp, 4)),
+        Operation::Leave,
+        Operation::Lea {
+            destination: Register32::Esp,
+            address: stack(Register32::Esp, 16),
+        },
+        load(stack(Register32::Esp, 4)),
+        Operation::Binary {
+            kind: BinaryKind::Sub,
+            destination: Location32::Register(Register32::Esp),
+            source: Value32::Immediate(16),
+        },
+        load(stack(Register32::Esp, 0)),
+    ]);
+    let groups = plan.access_groups(BlockId(0));
+    assert_eq!(groups.len(), 1);
+    assert_eq!(
+        groups[0]
+            .members
+            .iter()
+            .map(|member| member.delta)
+            .collect::<Vec<_>>(),
+        [0, -4, 0, -4, 20, 0]
+    );
+    assert_eq!((groups[0].min_delta, groups[0].max_end), (-4, 24));
+}
+
+#[test]
+fn pop_esp_and_partial_stack_rewrites_do_not_inherit_affine_provenance() {
+    let stack0 = stack(Register32::Esp, 0);
+    let plan = plan(&[
+        load(stack0),
+        load(stack0),
+        Operation::Pop {
+            destination: Location32::Register(Register32::Esp),
+        },
+        load(stack0),
+        load(stack0),
+        Operation::MoveWord {
+            destination: Register32::Esp,
+            source: crate::cpu::x86::ir::WordValue::Immediate(9),
+        },
+        load(stack0),
+        load(stack0),
+    ]);
+    let groups = plan.access_groups(BlockId(0));
+    assert_eq!(groups.len(), 3);
+    assert_ne!(groups[0].base, groups[1].base);
+    assert_ne!(groups[1].base, groups[2].base);
+    assert_eq!(groups[0].members.len(), 3);
+    assert_eq!((groups[1].first_prefix, groups[1].last_prefix), (3, 4));
+    assert_eq!((groups[2].first_prefix, groups[2].last_prefix), (6, 7));
+}
+
+#[test]
+fn pop_memory_uses_post_increment_destination_and_calls_use_predecrement_stack() {
+    let destination = stack(Register32::Esp, 4);
+    let plan = plan(&[
+        load(stack(Register32::Esp, 0)),
+        Operation::Pop {
+            destination: Location32::Memory(destination),
+        },
+        Operation::Push {
+            source: Value32::Immediate(1),
+        },
+        Operation::Call {
+            target: BranchTarget::Direct(crate::memory::GuestAddress(0x2000)),
+        },
+    ]);
+    let group = &plan.access_groups(BlockId(0))[0];
+    assert_eq!(
+        group
+            .members
+            .iter()
+            .map(|member| member.delta)
+            .collect::<Vec<_>>(),
+        [0, 0, 8, 0, -4]
+    );
+    assert!(
+        plan.access_member(BlockId(0), 1, popped_destination(destination, 4), 4, true)
+            .is_some()
+    );
+    assert_eq!((group.min_delta, group.max_end), (-4, 12));
 }

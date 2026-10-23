@@ -1,6 +1,4 @@
-use super::{
-    A, ADDRESS, B, CARRY, FLAGS, KIND, LEFT, LOGICAL_ADDRESS, Output, RESULT, RIGHT, VALUE,
-};
+use super::{A, ADDRESS, B, CARRY, FLAGS, KIND, LEFT, Output, RESULT, RIGHT, VALUE};
 use crate::cpu::{
     core::StopReason,
     x86::{ControlOperation, Register32, ir::*},
@@ -117,10 +115,7 @@ pub(super) fn emit(out: &mut Output<'_>, operation: Operation, next: u32) -> boo
             }
         }
         Operation::LeaveWord => {
-            out.c()
-                .local_get(7)
-                .local_tee(ADDRESS)
-                .local_set(LOGICAL_ADDRESS);
+            out.stack_address(Register32::Ebp, 0);
             out.read(2, RESULT);
             out.c().local_get(7).i32_const(2).i32_add().local_set(6);
             store_word(out, Register32::Ebp, RESULT);
@@ -187,21 +182,11 @@ fn word(out: &mut Output<'_>, value: WordValue, target: u32) {
 }
 
 fn stack_address(out: &mut Output<'_>, offset: u32) {
-    out.c()
-        .local_get(6)
-        .i32_const(offset as i32)
-        .i32_add()
-        .local_tee(ADDRESS)
-        .local_set(LOGICAL_ADDRESS);
+    out.stack_address(Register32::Esp, offset);
 }
 
 fn push(out: &mut Output<'_>, width: u32, source: u32) {
-    out.c()
-        .local_get(6)
-        .i32_const(width as i32)
-        .i32_sub()
-        .local_tee(ADDRESS)
-        .local_set(LOGICAL_ADDRESS);
+    out.stack_address(Register32::Esp, 0u32.wrapping_sub(width));
     out.write(width, source);
     out.c().local_get(ADDRESS).local_set(6);
 }

@@ -1,15 +1,18 @@
 use super::{BlockId, FrameState, Region, RegionPlan, ValueId, fp};
 use crate::cpu::x86::{
-    X87Format, X87Operation,
+    ControlOperation, Register32, SegmentRegister, X87Format, X87Operation,
     ir::{
-        AddressSize, BinaryKind, EffectiveAddress, Location32, Operation, SmallSource, SmallWidth,
-        Value32,
+        AddressSize, BinaryKind, BranchTarget, EffectiveAddress, Location32, Operation,
+        SmallSource, SmallWidth, UnaryKind, Value32,
     },
     simd::SimdOperand,
 };
 use std::collections::BTreeMap;
 
 const MAX_GROUPS: usize = 8;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub(in crate::cpu::core) struct AccessEpoch(u32);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::cpu::core) struct AccessMember {
@@ -32,7 +35,7 @@ pub(in crate::cpu::core) struct AccessGroup {
     pub index: Option<ValueId>,
     // This authority is block-local and independent of data-write effects.
     // Runtime canonical calls must additionally invalidate all descriptor slots.
-    pub authority: u32,
+    pub authority: AccessEpoch,
     pub min_delta: i64,
     pub max_end: i64,
     pub permissions: u8,
@@ -103,13 +106,71 @@ impl Access {
     }
 }
 
-// Only explicitly addressed, statically sized accesses participate. In particular,
-// strings, implicit stacks, and bit-index-adjusted addresses are not approximated.
+fn stack(base: Register32, displacement: u32) -> EffectiveAddress {
+    EffectiveAddress {
+        base: Some(base),
+        displacement,
+        segment: Some(SegmentRegister::Ss),
+        ..Default::default()
+    }
+}
+
+fn popped_destination(mut address: EffectiveAddress, width: u32) -> EffectiveAddress {
+    if address.base == Some(Register32::Esp) {
+        address.displacement = address.displacement.wrapping_add(width);
+    }
+    address
+}
+
+// statically sized actual accesses only; stack offsets refer to the instruction's
+// incoming register values, including pop's post-increment destination address.
+// strings and dynamic bit-index adjustments keep their ordinary precise paths.
 fn operands(operation: Operation) -> Vec<Access> {
     let read = |address, width| Access::new(address, width, true, false);
     let write = |address, width| Access::new(address, width, false, true);
     let modify = |address, width| Access::new(address, width, true, true);
+    let push = |width| write(stack(Register32::Esp, 0u32.wrapping_sub(width)), width);
+    let pop = |width| read(stack(Register32::Esp, 0), width);
     match operation {
+        Operation::Push { source } => {
+            let mut accesses = Vec::new();
+            if let Value32::Memory(address) = source {
+                accesses.push(read(address, 4));
+            }
+            accesses.push(push(4));
+            accesses
+        }
+        Operation::PushWord { .. } | Operation::PushFlagsWord => vec![push(2)],
+        Operation::PushMemoryWord { source } => vec![read(source, 2), push(2)],
+        Operation::PushFlags | Operation::EnterZero => vec![push(4)],
+        Operation::EnterZeroWord => vec![push(2)],
+        Operation::Pop { destination } => {
+            let mut accesses = vec![pop(4)];
+            if let Location32::Memory(address) = destination {
+                accesses.push(write(popped_destination(address, 4), 4));
+            }
+            accesses
+        }
+        Operation::PopWord { .. } | Operation::ReturnWord { .. } => vec![pop(2)],
+        Operation::PopMemoryWord { destination } => {
+            vec![pop(2), write(popped_destination(destination, 2), 2)]
+        }
+        Operation::Return { .. } => vec![pop(4)],
+        Operation::Control(ControlOperation::PopFlags { word }) => {
+            vec![pop(if word { 2 } else { 4 })]
+        }
+        Operation::Call { target } => {
+            let mut accesses = Vec::new();
+            if let BranchTarget::Indirect(Location32::Memory(address)) = target {
+                accesses.push(read(address, 4));
+            }
+            accesses.push(push(4));
+            accesses
+        }
+        Operation::CallWord { .. } | Operation::CallRegisterWord { .. } => vec![push(2)],
+        Operation::ReadCallWord { address } => vec![read(address, 2), push(2)],
+        Operation::Leave => vec![read(stack(Register32::Ebp, 0), 4)],
+        Operation::LeaveWord => vec![read(stack(Register32::Ebp, 0), 2)],
         Operation::Move {
             destination,
             source,
@@ -234,17 +295,181 @@ fn operands(operation: Operation) -> Vec<Access> {
     }
 }
 
-type Key = (u32, Option<ValueId>, Option<ValueId>, u8, bool, usize);
+#[derive(Clone, Copy)]
+struct Affine {
+    root: ValueId,
+    displacement: u32,
+}
 
-fn key(authority: u32, frame: &FrameState, address: EffectiveAddress) -> Key {
+impl Affine {
+    fn incoming(root: ValueId) -> Self {
+        Self {
+            root,
+            displacement: 0,
+        }
+    }
+
+    fn offset(self, displacement: u32) -> Self {
+        Self {
+            displacement: self.displacement.wrapping_add(displacement),
+            ..self
+        }
+    }
+}
+
+type Key = (
+    AccessEpoch,
+    Option<ValueId>,
+    Option<ValueId>,
+    u8,
+    bool,
+    usize,
+);
+
+fn normalized(
+    epoch: AccessEpoch,
+    registers: &[Affine; 8],
+    address: EffectiveAddress,
+) -> (Key, u32) {
+    let base = address.base.map(|r| registers[r.index()]);
+    let index = address.index.map(|r| registers[r.index()]);
+    let displacement = address
+        .displacement
+        .wrapping_add(base.map_or(0, |value| value.displacement))
+        .wrapping_add(index.map_or(0, |value| {
+            value.displacement.wrapping_mul(u32::from(address.scale))
+        }));
     (
-        authority,
-        address.base.map(|r| frame.gpr[r.index()]),
-        address.index.map(|r| frame.gpr[r.index()]),
-        address.scale,
-        address.address_size == AddressSize::Bits16,
-        address.resolved_segment().index(),
+        (
+            epoch,
+            base.map(|value| value.root),
+            index.map(|value| value.root),
+            address.scale,
+            address.address_size == AddressSize::Bits16,
+            address.resolved_segment().index(),
+        ),
+        displacement,
     )
+}
+
+// data writes advance MemoryEffect, but leave mapping/permission/alias authority
+// intact. only exact affine register changes preserve an address family here.
+fn advance(
+    registers: &mut [Affine; 8],
+    before: &FrameState,
+    after: &FrameState,
+    operation: Operation,
+) {
+    let old = *registers;
+    let mut next = std::array::from_fn(|i| {
+        if before.gpr[i] == after.gpr[i] {
+            old[i]
+        } else {
+            Affine::incoming(after.gpr[i])
+        }
+    });
+    let stack_delta = match operation {
+        Operation::Push { .. } | Operation::PushFlags | Operation::Call { .. } => Some(-4i32),
+        Operation::PushWord { .. }
+        | Operation::PushMemoryWord { .. }
+        | Operation::PushFlagsWord
+        | Operation::CallWord { .. }
+        | Operation::CallRegisterWord { .. }
+        | Operation::ReadCallWord { .. } => Some(-2),
+        Operation::Pop { .. } => Some(4),
+        Operation::PopWord { .. } | Operation::PopMemoryWord { .. } => Some(2),
+        Operation::Return { stack_adjust } => Some(4 + i32::from(stack_adjust)),
+        Operation::ReturnWord { stack_adjust } => Some(2 + i32::from(stack_adjust)),
+        Operation::Control(ControlOperation::PopFlags { word }) => Some(if word { 2 } else { 4 }),
+        _ => None,
+    };
+    if let Some(delta) = stack_delta {
+        // these operations preserve every other register, except the actual pop
+        // destination. a pop into ESP establishes an unknown new stack root.
+        next = old;
+        next[4] = old[4].offset(delta as u32);
+        match operation {
+            Operation::Pop {
+                destination: Location32::Register(r),
+            }
+            | Operation::PopWord { destination: r } => {
+                next[r.index()] = Affine::incoming(after.gpr[r.index()])
+            }
+            _ => {}
+        }
+    }
+    match operation {
+        Operation::Move {
+            destination: Location32::Register(r),
+            source: Value32::Register(source),
+        } => {
+            next[r.index()] = old[source.index()];
+        }
+        Operation::Binary {
+            kind: BinaryKind::Add | BinaryKind::Sub,
+            destination: Location32::Register(r),
+            source: Value32::Immediate(value),
+        } => {
+            let delta = if matches!(
+                operation,
+                Operation::Binary {
+                    kind: BinaryKind::Sub,
+                    ..
+                }
+            ) {
+                value.wrapping_neg()
+            } else {
+                value
+            };
+            next[r.index()] = old[r.index()].offset(delta);
+        }
+        Operation::Unary {
+            kind: UnaryKind::Inc | UnaryKind::Dec,
+            destination: Location32::Register(r),
+        } => {
+            next[r.index()] = old[r.index()].offset(
+                if matches!(
+                    operation,
+                    Operation::Unary {
+                        kind: UnaryKind::Dec,
+                        ..
+                    }
+                ) {
+                    u32::MAX
+                } else {
+                    1
+                },
+            );
+        }
+        Operation::Lea {
+            destination,
+            address,
+        } if address.address_size == AddressSize::Bits32 && address.index.is_none() => {
+            if let Some(base) = address.base {
+                next[destination.index()] = old[base.index()].offset(address.displacement);
+            }
+        }
+        Operation::EnterZero | Operation::EnterZeroWord => {
+            next = old;
+            next[4] = old[4].offset(if operation == Operation::EnterZero {
+                -4i32
+            } else {
+                -2i32
+            } as u32);
+            next[5] = if operation == Operation::EnterZero {
+                next[4]
+            } else {
+                Affine::incoming(after.gpr[5])
+            };
+        }
+        Operation::Leave | Operation::LeaveWord => {
+            next = old;
+            next[4] = old[5].offset(if operation == Operation::Leave { 4 } else { 2 });
+            next[5] = Affine::incoming(after.gpr[5]);
+        }
+        _ => {}
+    }
+    *registers = next;
 }
 
 pub(super) fn analyze(region: &Region, plan: &RegionPlan) -> Vec<BlockAccessPlan> {
@@ -254,11 +479,14 @@ pub(super) fn analyze(region: &Region, plan: &RegionPlan) -> Vec<BlockAccessPlan
         .enumerate()
         .map(|(block_index, block)| {
             let id = BlockId(block_index);
-            let mut candidates = BTreeMap::<Key, AccessGroup>::new();
-            let mut authority = 0;
+            let mut candidates = BTreeMap::<Key, (u32, AccessGroup)>::new();
+            let mut authority = AccessEpoch::default();
+            let mut registers = plan.frame(plan.block(id).entry).gpr.map(Affine::incoming);
             for instruction in &block.instructions {
                 let Some(operation) = instruction.operation else {
-                    authority += 1;
+                    authority.0 += 1;
+                    let after = plan.frame(plan.instruction(id, instruction.prefix).after);
+                    registers = after.gpr.map(Affine::incoming);
                     continue;
                 };
                 if instruction.gate.is_some()
@@ -269,34 +497,38 @@ pub(super) fn analyze(region: &Region, plan: &RegionPlan) -> Vec<BlockAccessPlan
                     )
                     || !crate::cpu::core::emitter::supports(&operation)
                 {
-                    authority += 1;
+                    authority.0 += 1;
+                    let after = plan.frame(plan.instruction(id, instruction.prefix).after);
+                    registers = after.gpr.map(Affine::incoming);
                     continue;
                 }
-                let frame = plan.frame(plan.instruction(id, instruction.prefix).before);
+                let instruction_plan = plan.instruction(id, instruction.prefix);
+                let frame = plan.frame(instruction_plan.before);
                 for access in operands(operation) {
-                    let group_key = key(authority, frame, access.address);
-                    let group = candidates.entry(group_key).or_insert_with(|| AccessGroup {
-                        slot: 0,
-                        anchor: access.address,
-                        base: group_key.1,
-                        index: group_key.2,
-                        authority,
-                        min_delta: 0,
-                        max_end: 0,
-                        permissions: 0,
-                        alignment_mask: 0,
-                        alignment_residue: 0,
-                        alignment_compatible: true,
-                        first_prefix: instruction.prefix,
-                        last_prefix: instruction.prefix,
-                        members: Vec::new(),
+                    let (group_key, normalized_delta) =
+                        normalized(authority, &registers, access.address);
+                    let (anchor_delta, group) = candidates.entry(group_key).or_insert_with(|| {
+                        (
+                            normalized_delta,
+                            AccessGroup {
+                                slot: 0,
+                                anchor: access.address,
+                                base: group_key.1,
+                                index: group_key.2,
+                                authority,
+                                min_delta: 0,
+                                max_end: 0,
+                                permissions: 0,
+                                alignment_mask: 0,
+                                alignment_residue: 0,
+                                alignment_compatible: true,
+                                first_prefix: instruction.prefix,
+                                last_prefix: instruction.prefix,
+                                members: Vec::new(),
+                            },
+                        )
                     });
-                    let delta = i64::from(
-                        access
-                            .address
-                            .displacement
-                            .wrapping_sub(group.anchor.displacement) as i32,
-                    );
+                    let delta = i64::from(normalized_delta.wrapping_sub(*anchor_delta) as i32);
                     group.min_delta = group.min_delta.min(delta);
                     group.max_end = group.max_end.max(delta + i64::from(access.width));
                     group.permissions |= u8::from(access.read) | (u8::from(access.write) << 1);
@@ -312,9 +544,16 @@ pub(super) fn analyze(region: &Region, plan: &RegionPlan) -> Vec<BlockAccessPlan
                         delta,
                     });
                 }
+                advance(
+                    &mut registers,
+                    frame,
+                    plan.frame(instruction_plan.after),
+                    operation,
+                );
             }
             let mut groups: Vec<_> = candidates
                 .into_values()
+                .map(|(_, group)| group)
                 .filter(|group| {
                     group.first_prefix != group.last_prefix
                         && group.max_end - group.min_delta <= 4096

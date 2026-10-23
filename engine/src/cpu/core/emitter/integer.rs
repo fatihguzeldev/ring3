@@ -858,6 +858,7 @@ impl Output<'_> {
         self.operand(value(source), width, destination, false);
     }
     pub(super) fn address(&mut self, address: EffectiveAddress) {
+        self.stack_access = None;
         self.effective_address(address, true);
     }
 

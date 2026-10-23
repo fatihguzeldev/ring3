@@ -175,6 +175,7 @@ pub(super) fn write(
         .local_get(source)
         .local_get(SLOT)
         .local_get(POINTER)
+        .local_get(groups::ADMITTED)
         .local_get(authority::SEQUENCE)
         .call(commit_index)
         .local_set(authority::SEQUENCE)
@@ -194,10 +195,17 @@ pub(super) fn write(
 }
 
 pub(super) fn emit_store(width: u32) -> Function {
-    // params: context, address, value, slot, pointer, sequence; locals: scratch, next sequence.
+    // params: context, address, value, slot, pointer, capability, sequence.
+    // only an admitted nonexec/noncow page skips stable authority table reads;
+    // the payload, overflow, sequence and page stamp remain one common body.
     let mut function = Function::new([(1, ValType::I32), (1, ValType::I64)]);
     let mut code = function.instructions();
-    code.block(BlockType::Empty);
+    code.block(BlockType::Empty)
+        .local_get(5)
+        .i32_const(groups::PLAIN_WRITE)
+        .i32_and()
+        .i32_eqz()
+        .if_(BlockType::Empty);
     // a writable virtual view can still alias executable physical bytes.
     load_field(&mut code, EXECUTABLE_VIEWS);
     code.local_get(3)
@@ -205,11 +213,11 @@ pub(super) fn emit_store(width: u32) -> Function {
         .i32_shl()
         .i32_add()
         .i32_load(arg(0, 2))
-        .br_if(0);
+        .br_if(1);
     code.block(BlockType::Empty);
     load_field(&mut code, PRIVATE_SLOTS);
-    code.local_tee(6).i32_eqz().br_if(0);
-    code.local_get(6)
+    code.local_tee(7).i32_eqz().br_if(0);
+    code.local_get(7)
         .local_get(1)
         .i32_const(12)
         .i32_shr_u()
@@ -217,17 +225,17 @@ pub(super) fn emit_store(width: u32) -> Function {
         .i32_shl()
         .i32_add()
         .i32_load(arg(0, 2))
-        .br_if(1);
-    code.end();
+        .br_if(2);
+    code.end().end();
 
-    code.local_get(5)
+    code.local_get(6)
         .i64_const(-1)
         .i64_eq()
         .br_if(0)
-        .local_get(5)
+        .local_get(6)
         .i64_const(1)
         .i64_add()
-        .local_set(7);
+        .local_set(8);
     code.local_get(4).local_get(2);
     match width {
         1 => code.i32_store8(arg(0, 0)),
@@ -240,14 +248,14 @@ pub(super) fn emit_store(width: u32) -> Function {
         .i32_const(4)
         .i32_shl()
         .i32_add()
-        .local_get(7)
+        .local_get(8)
         .i64_store(arg(8, 3));
     code.i32_const(0)
-        .local_get(7)
+        .local_get(8)
         .return_()
         .end()
         .i32_const(1)
-        .local_get(5)
+        .local_get(6)
         .end();
     function
 }

@@ -1,5 +1,5 @@
 use super::super::{ADDRESS, CTX, LOGICAL_ADDRESS, Output, mem};
-use crate::cpu::core::memory::{authority, cache};
+use crate::cpu::core::memory::{authority, cache, groups};
 use crate::cpu::x86::{SegmentRegister, ir::EffectiveAddress};
 
 const SLOT: u32 = 33;
@@ -30,7 +30,12 @@ pub(super) fn prepare(
     out.address(address);
     let grouped = out.group_geometry(address, width, write);
     if grouped {
-        out.c().i32_eqz().if_(wasm_encoder::BlockType::Empty);
+        out.c()
+            .local_tee(groups::ADMITTED)
+            .i32_eqz()
+            .if_(wasm_encoder::BlockType::Empty);
+    } else {
+        out.c().i32_const(0).local_set(groups::ADMITTED);
     }
     out.c()
         .local_get(LOGICAL_ADDRESS)
@@ -61,6 +66,14 @@ pub(super) fn prepare(
         out.c().end();
     }
     if write {
+        if grouped {
+            out.c()
+                .local_get(groups::ADMITTED)
+                .i32_const(groups::PLAIN_WRITE)
+                .i32_and()
+                .i32_eqz()
+                .if_(wasm_encoder::BlockType::Empty);
+        }
         out.c()
             .local_get(CTX)
             .i32_load(mem(72, 2))
@@ -69,7 +82,7 @@ pub(super) fn prepare(
             .i32_shl()
             .i32_add()
             .i32_load(mem(0, 2))
-            .br_if(0)
+            .br_if(u32::from(grouped))
             .block(wasm_encoder::BlockType::Empty)
             .local_get(CTX)
             .i32_load(mem(76, 2))
@@ -84,8 +97,12 @@ pub(super) fn prepare(
             .i32_shl()
             .i32_add()
             .i32_load(mem(0, 2))
-            .br_if(1)
-            .end()
+            .br_if(1 + u32::from(grouped))
+            .end();
+        if grouped {
+            out.c().end();
+        }
+        out.c()
             .local_get(authority::SEQUENCE)
             .local_tee(VERSION)
             .i64_const(-1)

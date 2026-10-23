@@ -35,7 +35,8 @@ export function runGroupCases(fixture) {
     assert.equal(witness.group_acquisitions,1,'four actual accesses share exactly one dynamic group admission');
     const proof=t.groupProof();assert(proof,'the executed acquisition is a defined generated function');
     assert.deepEqual(proof.parameters,Array(9).fill(0x7f));assert.deepEqual(proof.results,Array(3).fill(0x7f));
-    assert.deepEqual(proof.contextLoads,[56,60,64,68],'the actual helper checks engine mapping, permissions and backing authority');
+    assert.deepEqual(proof.contextLoads,[56,60,64,68,72,76],
+      'the actual helper checks mapping, permissions, backing, executable aliases and COW authority');
     assert.equal(proof.stores,0,'future envelope admission performs no guest or authority write');
     assert.equal(proof.calls,0,'future envelope admission invokes no faulting canonical helper');
     t.result.groupAdmissionProof=proof;

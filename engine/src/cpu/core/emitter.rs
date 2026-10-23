@@ -132,7 +132,7 @@ pub(super) fn emit(
     );
     types.ty().function([ValType::I32], []);
     types.ty().function(
-        [ValType::I32; 5]
+        [ValType::I32; 6]
             .into_iter()
             .chain([ValType::I64])
             .collect::<Vec<_>>(),
@@ -364,6 +364,7 @@ fn run(
         before_frame: None,
         after_frame: None,
         address_fact: None,
+        stack_access: None,
         guarded_gpr_facts: false,
         current_block: None,
         grouped_accesses: true,
@@ -472,6 +473,7 @@ pub(super) struct Output<'a> {
     before_frame: Option<super::region::values::FrameStateId>,
     after_frame: Option<super::region::values::FrameStateId>,
     address_fact: Option<integer::AddressFact>,
+    stack_access: Option<crate::cpu::x86::ir::EffectiveAddress>,
     guarded_gpr_facts: bool,
     current_block: Option<super::region::BlockId>,
     grouped_accesses: bool,
@@ -574,6 +576,7 @@ impl Output<'_> {
             super::region::ResumePc::Computed => unreachable!("instruction entry is exact"),
         };
         self.prefix = prefix;
+        self.stack_access = None;
         self.c()
             .local_get(FULL_BLOCK)
             .i32_eqz()
@@ -804,6 +807,9 @@ impl Output<'_> {
             self.check_span(width & 0xff);
             self.c().end();
         } else {
+            self.c()
+                .i32_const(0)
+                .local_set(super::memory::groups::ADMITTED);
             self.check_span(width & 0xff);
         }
         let translate = self.internal(9);
@@ -841,6 +847,7 @@ impl Output<'_> {
             grouped = self.current_group_geometry(width, true);
             if grouped {
                 self.c()
+                    .local_tee(super::memory::groups::ADMITTED)
                     .if_(BlockType::Empty)
                     .local_get(33)
                     .i32_const(1)
@@ -852,6 +859,9 @@ impl Output<'_> {
                 self.check_span(width);
                 self.c().end();
             } else {
+                self.c()
+                    .i32_const(0)
+                    .local_set(super::memory::groups::ADMITTED);
                 self.check_span(width);
             }
         }
@@ -1073,12 +1083,7 @@ impl Output<'_> {
             }
             Operation::Push { source } => {
                 self.load_value(source, 4, RESULT);
-                self.c()
-                    .local_get(6)
-                    .i32_const(4)
-                    .i32_sub()
-                    .local_tee(ADDRESS)
-                    .local_set(LOGICAL_ADDRESS);
+                self.stack_address(crate::cpu::x86::Register32::Esp, -4i32 as u32);
                 self.write(4, RESULT);
                 self.c().local_get(ADDRESS).local_set(6);
             }
@@ -1089,20 +1094,12 @@ impl Output<'_> {
                     .i32_const(!0x30000)
                     .i32_and()
                     .local_set(RESULT);
-                self.c()
-                    .local_get(6)
-                    .i32_const(4)
-                    .i32_sub()
-                    .local_tee(ADDRESS)
-                    .local_set(LOGICAL_ADDRESS);
+                self.stack_address(crate::cpu::x86::Register32::Esp, -4i32 as u32);
                 self.write(4, RESULT);
                 self.c().local_get(ADDRESS).local_set(6);
             }
             Operation::Pop { destination } => {
-                self.c()
-                    .local_get(6)
-                    .local_tee(ADDRESS)
-                    .local_set(LOGICAL_ADDRESS);
+                self.stack_address(crate::cpu::x86::Register32::Esp, 0);
                 self.read(4, RESULT);
                 match destination {
                     Location32::Register(register) => {
@@ -1125,14 +1122,8 @@ impl Output<'_> {
                 if matches!(target, BranchTarget::Indirect(_)) {
                     self.target(target, B);
                 }
-                self.c()
-                    .i32_const(next as i32)
-                    .local_set(RESULT)
-                    .local_get(6)
-                    .i32_const(4)
-                    .i32_sub()
-                    .local_tee(ADDRESS)
-                    .local_set(LOGICAL_ADDRESS);
+                self.c().i32_const(next as i32).local_set(RESULT);
+                self.stack_address(crate::cpu::x86::Register32::Esp, -4i32 as u32);
                 self.write(4, RESULT);
                 self.c().local_get(ADDRESS).local_set(6);
                 match target {
@@ -1141,10 +1132,7 @@ impl Output<'_> {
                 }
             }
             Operation::Return { stack_adjust } => {
-                self.c()
-                    .local_get(6)
-                    .local_tee(ADDRESS)
-                    .local_set(LOGICAL_ADDRESS);
+                self.stack_address(crate::cpu::x86::Register32::Esp, 0);
                 self.read(4, RESULT);
                 self.c()
                     .local_get(6)
@@ -1154,10 +1142,7 @@ impl Output<'_> {
                 self.dynamic_pc(RESULT);
             }
             Operation::Leave => {
-                self.c()
-                    .local_get(7)
-                    .local_tee(ADDRESS)
-                    .local_set(LOGICAL_ADDRESS);
+                self.stack_address(crate::cpu::x86::Register32::Ebp, 0);
                 self.read(4, RESULT);
                 self.c()
                     .local_get(7)

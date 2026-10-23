@@ -46,7 +46,7 @@ export function instantiateSupport(memory,source=coreSupportSource(memory)) {
   const exports=new WebAssembly.Instance(module,{ring3:{memory,functions:table(),publishers:table(),
     probe:()=>assert.fail('standalone support never dispatches a guest edge'),
     cold:()=>assert.fail('standalone support never executes cold code')}}).exports;
-  assert(exports.supportAbi instanceof WebAssembly.Global&&[1,2,3].includes(exports.supportAbi.value),'actual current or pinned-baseline support ABI');
+  assert(exports.supportAbi instanceof WebAssembly.Global&&[1,2,3,4].includes(exports.supportAbi.value),'actual current or pinned-baseline support ABI');
   for(const name of supportForAbi(exports.supportAbi.value))assert.equal(typeof exports[name],'function',`actual Wasm ${name}`);
   return exports;
 }

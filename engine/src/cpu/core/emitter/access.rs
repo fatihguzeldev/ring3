@@ -1,7 +1,10 @@
 use super::{ADDRESS, CTX, FULL_BLOCK, GP_FACTS_VALID, LOGICAL_ADDRESS, Output};
 use crate::cpu::{
     core::memory::groups,
-    x86::ir::{AddressSize, EffectiveAddress},
+    x86::{
+        Register32, SegmentRegister,
+        ir::{AddressSize, EffectiveAddress},
+    },
 };
 use wasm_encoder::BlockType;
 
@@ -79,7 +82,11 @@ impl Output<'_> {
             .i32_const(access.offset as i32)
             .i32_add()
             .local_set(34)
-            .i32_const(1)
+            .local_get(groups::VALID)
+            .i32_const(i32::from(access.slot))
+            .i32_shr_u()
+            .i32_const(groups::GEOMETRY | groups::PLAIN_WRITE)
+            .i32_and()
             .else_()
             .i32_const(0)
             .end()
@@ -122,9 +129,30 @@ impl Output<'_> {
     }
 
     pub(super) fn current_group_geometry(&mut self, width: u32, write: bool) -> bool {
-        let Some(address) = self.address_fact.map(|fact| fact.address) else {
+        let Some(address) = self
+            .stack_access
+            .or(self.address_fact.map(|fact| fact.address))
+        else {
             return false;
         };
         self.group_geometry(address, width, write)
+    }
+
+    pub(super) fn stack_address(&mut self, base: Register32, displacement: u32) {
+        // the same real EA feeds group membership and ordinary precise access.
+        // SS is flat on this port, matching the former raw stack arithmetic.
+        let address = EffectiveAddress {
+            base: Some(base),
+            displacement,
+            segment: Some(SegmentRegister::Ss),
+            ..Default::default()
+        };
+        self.address_fact = None;
+        self.stack_access = Some(address);
+        self.c().local_get(base.index() as u32 + 2);
+        if displacement != 0 {
+            self.c().i32_const(displacement as i32).i32_add();
+        }
+        self.c().local_tee(ADDRESS).local_set(LOGICAL_ADDRESS);
     }
 }

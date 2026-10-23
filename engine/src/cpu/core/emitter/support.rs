@@ -4,7 +4,7 @@ use wasm_encoder::{
     GlobalType, ImportSection, NameMap, TypeSection, ValType,
 };
 
-pub(in crate::cpu::core) const ABI: i32 = 3;
+pub(in crate::cpu::core) const ABI: i32 = 4;
 pub(in crate::cpu::core) const NAMES: [&str; 11] = [
     "support.flags",
     "support.materialize_numeric",
@@ -35,7 +35,7 @@ pub(in crate::cpu::core) fn types(types: &mut TypeSection) -> [u32; 11] {
     types.ty().function([ValType::I32; 3], [ValType::I32; 3]);
     types.ty().function([ValType::I32; 9], [ValType::I32; 3]);
     types.ty().function(
-        [ValType::I32; 5]
+        [ValType::I32; 6]
             .into_iter()
             .chain([ValType::I64])
             .collect::<Vec<_>>(),

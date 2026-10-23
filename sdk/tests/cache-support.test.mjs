@@ -18,7 +18,7 @@ const helpers=[
   ['support.store16',10],['support.store32',10],['support.commit_pool_cold',11],['support.commit_native',12],['support.commit_raw',13],
 ];
 
-function types({wrongFlagsType=false,wrongFlagsArity=false}={}) {
+function types({wrongFlagsType=false,wrongFlagsArity=false,wrongStoreArity=false}={}) {
   const flags=Array(8-Number(wrongFlagsArity)).fill(i32);if(wrongFlagsType)flags[0]=f64;
   return [14,
     ...signature([i32,i32],[i32]),...signature([i32,i32,i32],[i64]),
@@ -27,7 +27,7 @@ function types({wrongFlagsType=false,wrongFlagsArity=false}={}) {
     ...signature([i32],[]),
     ...signature([i32,i32,f64,f64,f64],[i32]),
     ...signature([i32,i32,i32],[i32,i32,i32]),...signature(Array(9).fill(i32),[i32,i32,i32]),
-    ...signature([i32,i32,i32,i32,i32,i64],[i32,i64]),
+    ...signature([...Array(wrongStoreArity?5:6).fill(i32),i64],[i32,i64]),
     ...signature([...Array(8).fill(f64),...Array(8).fill(i64),...Array(21).fill(i32),
       ...Array(3).fill(f64),i64,i64],[]),
     ...signature([i32,i32,f64,i32,i32],[i32]),
@@ -35,7 +35,7 @@ function types({wrongFlagsType=false,wrongFlagsArity=false}={}) {
   ];
 }
 
-function driver({abi=3,omit,mutableAbi=false,...typeOptions}={}) {
+function driver({abi=4,omit,mutableAbi=false,...typeOptions}={}) {
   const emitted=helpers.filter(([name])=>name!==omit);
   const imports=[3,...str('ring3'),...str('memory'),2,0,2,
     ...str('ring3'),...str('functions'),1,0x70,1,1,...u(4097),
@@ -50,7 +50,7 @@ function driver({abi=3,omit,mutableAbi=false,...typeOptions}={}) {
     if(name==='support.resolve_status')return body(get(1));
     if(name==='support.translate_page'||name==='support.acquire_group')return body([...constant(0),...constant(0),...constant(0)]);
     if(name==='support.commit_native'||name==='support.commit_raw')return body(constant(0));
-    if(name.startsWith('support.store'))return body([...constant(0),...get(5)]);
+    if(name.startsWith('support.store'))return body([...constant(0),...get(typeOptions.wrongStoreArity?5:6)]);
     return body([]);
   });
   return Uint8Array.from([...header,...section(1,types(typeOptions)),...section(2,imports),
@@ -121,8 +121,9 @@ test('owners call one per-CPU typed Wasm support instance directly',()=>{
 });
 
 for(const [name,options]of [
-  ['missing ABI',{abi:null}],['retired ABI1',{abi:1}],['retired ABI2',{abi:2}],['unknown ABI',{abi:4}],
+  ['missing ABI',{abi:null}],['retired ABI1',{abi:1}],['retired ABI2',{abi:2}],['retired ABI3',{abi:3}],['unknown ABI',{abi:5}],
   ['partial functions',{omit:'support.commit_pool_cold'}],['wrong function arity',{wrongFlagsArity:true}],
+  ['old store arity under current ABI',{wrongStoreArity:true}],
 ])test(`support negotiation rejects ${name}`,()=>{
   const f=fixture(options);assert.throws(()=>new CodeCache(f.engine,{chain:true}),/support.*ABI|support exports/);
 });
