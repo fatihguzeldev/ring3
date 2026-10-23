@@ -82,9 +82,11 @@ for(const [name,eax,flags,result,finalFlags,taken,calls] of [
 ])check(name,name,{eax,flags},{eax:result,flags:finalFlags,ebx:taken?0x22222222:0x11111111,retired:taken?3:4,calls});
 check('entry-equal','entry canonical ZF',{flags:0x442},{flags:0x442,ebx:0x22222222,retired:2,calls:2});
 check('entry-not-equal','entry canonical nonzero',{flags:0x402},{flags:0x402,ebx:0x22222222,retired:2,calls:2});
-check('canonical-zf','SAHF clears stale pending ZF',{eax:0xff},{eax:0,flags:0x402,ebx:0x11111111,retired:5,calls:3});
-check('postbranch-carry','branch then CLC preserves pending ZF',{eax:0xff},{eax:0x5600,flags:0x456,ebx:0x22222222,retired:6,calls:4});
-check('other-condition','nonzero condition fallback',{eax:0xff},{eax:0,flags:0x457,ebx:0x11111111,retired:4,calls:2});
+// Same-block literal recipes materialize without the general helper. A new
+// block still imports unknown FLAGS; the sole canonical publisher remains counted.
+check('canonical-zf','SAHF clears stale pending ZF',{eax:0xff},{eax:0,flags:0x402,ebx:0x11111111,retired:5,calls:1});
+check('postbranch-carry','branch then CLC preserves pending ZF',{eax:0xff},{eax:0x5600,flags:0x456,ebx:0x22222222,retired:6,calls:2});
+check('other-condition','literal ADD also supplies unsigned conditions',{eax:0xff},{eax:0,flags:0x457,ebx:0x11111111,retired:4,calls:1});
 check('preserved-recipe','MOV preserves pending ZF',{eax:0xff},{eax:0,esi:0x33333333,flags:0x457,ebx:0x22222222,retired:4,calls:1});
 // The single body stops at the branch's prefix guard and publishes once. INC
 // additionally materializes its incoming CF before installing the new recipe;

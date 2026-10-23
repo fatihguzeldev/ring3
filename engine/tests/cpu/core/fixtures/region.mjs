@@ -16,17 +16,18 @@ import {runStableGraphCase} from './region/graph.mjs';
 import {runGroupCases} from './region/groups.mjs';
 import {runNativeStoreCases} from './region/native-store.mjs';
 import {runPoolCases,runPoolLoopCases,runTransportCases,runTransportLoopCases} from './region/pool.mjs';
+import {runExecutionCases,runExecutionFlagsCases,runExecutionLoadCases,runExecutionGuardCases,runExecutionMultiplyCases,runExecutionFlagsOracleCases} from './region/execution.mjs';
 
 const [enginePath,reportPath,mode]=process.argv.slice(2);
-assert(enginePath&&reportPath&&(mode===undefined||mode==='--structure'||mode==='--graph'||mode==='--groups'||mode==='--native-stores'||mode==='--pool'||mode==='--pool-baseline'||mode==='--transport'||mode==='--transport-baseline'),
-  'usage: region.mjs engine.wasm fresh-report.json [--structure|--graph|--groups|--native-stores|--pool|--pool-baseline|--transport|--transport-baseline]');
+assert(enginePath&&reportPath&&(mode===undefined||mode==='--structure'||mode==='--graph'||mode==='--groups'||mode==='--native-stores'||mode==='--pool'||mode==='--pool-baseline'||mode==='--transport'||mode==='--transport-baseline'||mode==='--execution'||mode==='--execution-flags'||mode==='--execution-loads'||mode==='--execution-guards'||mode==='--execution-multiply'||mode==='--execution-flags-oracle'),
+  'usage: region.mjs engine.wasm fresh-report.json [--structure|--graph|--groups|--native-stores|--pool|--pool-baseline|--transport|--transport-baseline|--execution|--execution-flags|--execution-loads|--execution-guards|--execution-multiply|--execution-flags-oracle]');
 const artifact=readEngine(enginePath),hash=bytes=>createHash('sha256').update(bytes).digest('hex');
 const hex=bytes=>Buffer.from(bytes).toString('hex');
 const unhex=text=>Uint8Array.from(Buffer.from(text.replaceAll(' ',''),'hex'));
 closeSync(openSync(reportPath,'wx'));
 const report={schema:1,complete:false,engineSha256:artifact.sha256,
   scope:'actual generated mixed integer/x87 CFG with exact instruction-prefix, publication and fault oracles; no timing claim',
-  sources:Object.fromEntries(['./region.mjs','./link.mjs','./region/structure.mjs','./region/control.mjs','./region/link.mjs','./region/status.mjs','./region/state.mjs','./region/quota.mjs','./region/ownership.mjs','./region/ports.mjs','./region/graph.mjs','./region/groups.mjs','./region/native-store.mjs','./region/pool.mjs','./region/witness.mjs','./pool-state.mjs',
+  sources:Object.fromEntries(['./region.mjs','./link.mjs','./region/structure.mjs','./region/control.mjs','./region/link.mjs','./region/status.mjs','./region/state.mjs','./region/quota.mjs','./region/ownership.mjs','./region/ports.mjs','./region/graph.mjs','./region/groups.mjs','./region/native-store.mjs','./region/pool.mjs','./region/execution.mjs','./region/execution-flags.mjs','./region/witness.mjs','./pool-state.mjs',
     '../../../support/wasm/engine.mjs','../../../../../sdk/runtime/engine.js','../../../../../sdk/runtime/cache.js']
     .map(path=>[path,hash(readFileSync(new URL(path,import.meta.url)))])),cases:[]};
 const checkpoint=()=>writeFileSync(reportPath,JSON.stringify(report,null,2));
@@ -45,8 +46,8 @@ function fp(initial,{status=0,tag=0xffff,opcode=0,fip=0,fdp=0,registers={},cs=0x
 }
 
 function fixture(name,{segments,entry=0x1000,registers=[0,2,0,0x3000,0x4800,0,0,0],control=0x27f,
-  compileInstructions=256,compileBlocks=32,
-  initialFp,missing=[],stateWitness=false,data=page=>{view(page).setFloat32(0,3,true);view(page).setFloat32(4,2,true);}}={},body) {
+  compileInstructions=256,compileBlocks=32,initialFlags=2,
+  initialFp,missing=[],stateWitness=false,witnessData,data=page=>{view(page).setFloat32(0,3,true);view(page).setFloat32(4,2,true);}}={},body) {
   stage=name;
   const result={name,controls:[],modules:[],runs:[],numericCalls:[]};report.cases.push(result);checkpoint();
   const instance=instantiateCore(artifact.module,{ring3_observability:{now_ns:()=>0n}});
@@ -60,6 +61,10 @@ function fixture(name,{segments,entry=0x1000,registers=[0,2,0,0x3000,0x4800,0,0,
   const status=(operation,wanted,...args)=>{
     const actual=api[operation](...args)>>>0;result.controls.push({operation,wanted,actual});
     assert.equal(actual,wanted,`${name}: ${operation}`);
+  };
+  const physical=address=>{
+    const slot=word(word(context,56)+(address>>>12)*4);assert(slot>0&&slot<=word(context,68));
+    return word(context,64)+(slot-1)*4096+(address&4095);
   };
   const prepare=pc=>{
     status('core_prepare',0,pc,compileInstructions,compileBlocks);context=api.core_context_ptr()>>>0;
@@ -78,7 +83,8 @@ function fixture(name,{segments,entry=0x1000,registers=[0,2,0,0x3000,0x4800,0,0,
       }}});
     run=stateWitness?generated.exports.link:generated.exports.run;
     publish=stateWitness?generated.exports.publish:undefined;
-    witnessReader=diagnostic?()=>diagnostic.read(generated,support,word(context,92)):undefined;
+    witnessReader=diagnostic?()=>diagnostic.read(generated,support,word(context,92),
+      witnessData?{pointer:physical(witnessData[0]),length:witnessData[1]}:undefined):undefined;
     assert.equal(typeof run,'function','the selected generated entry is an actual Wasm function');
     if(stateWitness)assert.equal(typeof publish,'function','linked state has an explicit canonical publisher');
   };
@@ -90,7 +96,7 @@ function fixture(name,{segments,entry=0x1000,registers=[0,2,0,0x3000,0x4800,0,0,
     for(const address of missing)pages.delete(address);
     for(const[address,page]of pages){status('map',0,address,1,address===0x1000?7:3);engine.request(page);status('upload',0,address,4096);}
     const state=record('R3ST',56),s=view(state);
-    registers.forEach((value,index)=>s.setUint32(16+4*index,value,true));s.setUint32(48,entry,true);s.setUint32(52,2,true);
+    registers.forEach((value,index)=>s.setUint32(16+4*index,value,true));s.setUint32(48,entry,true);s.setUint32(52,initialFlags,true);
     new Uint8Array(memory.buffer,engine.base,56).set(state);
     new DataView(memory.buffer).setUint16(engine.base+FP+16,control,true);
     if(initialFp)new Uint8Array(memory.buffer,engine.base+FP,128).set(fp(bytes(engine.base+FP,128),initialFp));
@@ -100,10 +106,6 @@ function fixture(name,{segments,entry=0x1000,registers=[0,2,0,0x3000,0x4800,0,0,
     prepare(entry);
     status('core_begin',0);active=true;status('core_end',0);active=false;
     const primaryEncoded=encodedModule;
-    const physical=address=>{
-      const slot=word(word(context,56)+(address>>>12)*4);assert(slot>0&&slot<=word(context,68));
-      return word(context,64)+(slot-1)*4096+(address&4095);
-    };
     const writeExpected=(address,value)=>{
       const input=unhex(value);
       for(let index=0;index<input.length;index++)expectedPages.get((address+index)&~4095)[(address+index)&4095]=input[index];
@@ -207,7 +209,12 @@ function exchangeCase(name,eax,structural=false) {
 }
 
 try {
-  if(mode==='--transport'||mode==='--transport-baseline') {
+  if(mode?.startsWith('--execution')) {
+    const cases={'--execution':runExecutionCases,'--execution-flags':runExecutionFlagsCases,
+      '--execution-loads':runExecutionLoadCases,'--execution-guards':runExecutionGuardCases,
+      '--execution-multiply':runExecutionMultiplyCases,'--execution-flags-oracle':runExecutionFlagsOracleCases};
+    stage='semantic-value-effect-lowering';cases[mode](fixture);checkpoint();
+  }else if(mode==='--transport'||mode==='--transport-baseline') {
     if(mode==='--transport-baseline') {
       const path=new URL('../../../../../artifacts/cpu-core/region-redesign/pool-v14-cache.mjs',import.meta.url);
       report.baselineSdkSha256=hash(readFileSync(path));
