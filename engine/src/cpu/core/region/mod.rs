@@ -1,4 +1,5 @@
 mod structure;
+pub(super) mod values;
 
 use super::{StopReason, effects, flags, program};
 use crate::cpu::x86::{
