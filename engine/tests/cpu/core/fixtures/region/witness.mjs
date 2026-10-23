@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 
 export const witnessCounters=['normalizer_calls','materializer_calls','raw80_stores','fp_metadata_writes',
   'body_entries','control_admissions','group_acquisitions','page_translations',
-  'record_reads','record_writes','record_read_mask','record_write_mask','header_reads','header_writes'];
+  'record_reads','record_writes','record_read_mask','record_write_mask','header_reads','header_writes',
+  'wide_snapshot_calls'];
 const u=value=>{const out=[];do{const b=value&127;value>>>=7;out.push(b|(value?128:0));}while(value);return Uint8Array.from(out);};
 const concat=parts=>Uint8Array.from(Buffer.concat(parts.map(value=>Buffer.from(value))));
 const section=(id,data)=>concat([Uint8Array.of(id),u(data.length),data]);
@@ -55,7 +56,7 @@ export function instrumentWitnessModule(source,parsed,isSupport=false) {
     return Uint8Array.from([0x41,...a]);};
   const bankGlobal=globalBase+witnessCounters.length;
   const proof={addressBasis:'actual effective address minus diagnostic Context92 pointer',
-    canonical:[0,100],header:[512,640],records:[640,896],recordBytes:32,memorySites:0,normalizers:[]};
+    canonical:[0,100],header:[512,640],records:[640,896],recordBytes:32,memorySites:0,normalizers:[],wideSnapshots:[]};
   const instrumentBody=(raw,fn,bodyIndex)=>{
     const functionIndex=parsed.imports.length+bodyIndex,name=parsed.names.get(functionIndex);
     const type=parsed.types[parsed.functionTypes[bodyIndex]],params=type.parameters.length;
@@ -72,6 +73,12 @@ export function instrumentWitnessModule(source,parsed,isSupport=false) {
     const at=new Reader(raw);const groups=at.unsigned(),declarations=raw.subarray(at.at,fn.localsEnd);
     const chunks=[u(groups+4),declarations,Uint8Array.of(2,0x7f,1,0x7e,1,0x7d,1,0x7c)];
     if(counter)chunks.push(increment(counter));
+    // Count entry to the actual typed function in either module, independently
+    // of its name. Selective memory writes cannot hide a 40-value call snapshot.
+    if(params>=40){
+      proof.wideSnapshots.push({functionIndex,name,parameters:type.parameters,results:type.results});
+      chunks.push(increment('wide_snapshot_calls'));
+    }
     let from=fn.localsEnd;
     for(const[i,node]of fn.ops.entries()){
       assert(!(node.op===0xfc&&[10,11].includes(node.ext)),'authored pool witness rejects uncounted bulk memory copies');

@@ -378,19 +378,50 @@ function inspectExitEpilogue(module,name) {
   summary.outerBlock={open:body.open,end:body.end};
   summary.normalizationOperations=firstArgument-body.end-1;
   check(body.type===-64&&body.open===0,'one empty outer block wraps the original guest body');
+  const serviceTests=ops.flatMap((node,i)=>node.op===4&&ops[i-1]?.op===0x20&&ops[i-1].local===157?[i]:[]);
+  let serviceLoop,innerExit,serviceTest;
+  if(Number.isInteger(named('guest.select_frame'))){
+    check(serviceTests.length===1,'one actual service-resume test separates computed restart from terminal publication');
+    if(serviceTests.length===1){
+      serviceTest=ops[serviceTests[0]].frame;serviceLoop=ops[serviceTests[0]].frames.at(-1);
+      innerExit=ops[serviceLoop?.open+1]?.frame;
+      const resume=ops.slice(serviceTest.open+1,serviceTest.end);
+      check(serviceLoop?.kind===3&&serviceLoop.type===-64&&
+        ops[serviceLoop.open].frames.at(-1)===body&&innerExit?.kind===2&&innerExit.type===-64&&
+        innerExit.open===serviceLoop.open+1&&innerExit.end<serviceTest.open,
+        'the retained body exits one inner block to an in-body commit inside its bootstrap-once service loop');
+      check(serviceTest.otherwise===undefined&&resume.length===3&&resume[0].op===0x41&&resume[0].value===0&&
+        resume[1].op===0x21&&resume[1].local===157&&resume[2].op===12&&
+        resume[2].frames.at(-1-resume[2].targets[0])===serviceLoop,
+        'a requested restart clears its request and branches to the same service loop without re-running bootstrap');
+      const terminal=ops.slice(serviceTest.end+1,serviceLoop.end);
+      check(terminal.length===3&&terminal[0].op===0x20&&terminal[0].local===108&&
+        terminal[1].op===0x21&&terminal[1].local===108&&terminal[2].op===12&&
+        terminal[2].frames.at(-1-terminal[2].targets[0])===body,
+        'terminal service completion forwards its saved reason to the sole outer publication');
+      const commitCalls=ops.flatMap((node,i)=>node.call===named('guest.select_frame')?[i]:[]);
+      check(commitCalls.length===1&&commitCalls[0]>innerExit.end&&commitCalls[0]<serviceTest.open,
+        'the one in-body commit serves both terminal prefixes and computed restarts');
+      summary.service={loopOpen:serviceLoop.open,innerOpen:innerExit.open,innerEnd:innerExit.end,resumeTest:serviceTest.open};
+    }
+  }
   const exits=[];
   for(let i=body.open+1;i<body.end;i++){
     const node=ops[i];
     if(node.local===108&&[0x20,0x21,0x22].includes(node.op)){
-      check(node.op===0x21,'the guest body only assigns the reason local');
-      const next=ops[i+1];
-      check(next?.op===12&&next.frames.at(-1-next.targets[0])===body,
-        'every assigned reason immediately branches to the shared outer exit');
+      if(node.op===0x20)check(serviceTest&&i===serviceTest.end+1,
+        'only terminal service completion reads the reason inside the outer body');
+      else{
+        check(node.op===0x21,'the guest body only assigns the reason local');
+        const next=ops[i+1],target=next?.frames.at(-1-next.targets[0]);
+        check(next?.op===12&&(target===body||target===innerExit),
+          'every assigned reason immediately branches to the exact shared exit or commit service');
+      }
     }
     if([12,13,14].includes(node.op))for(const depth of node.targets){
       const target=node.frames.at(-1-depth);
       check(target?.kind!==0xff,'guest branches cannot bypass publication through the function label');
-      if(target===body){
+      if(target===body||target===innerExit){
         check(node.op===12&&ops[i-1]?.op===0x21&&ops[i-1]?.local===108,
           'every shared exit stores its reason before the unconditional outer branch');
         exits.push(i);
@@ -428,7 +459,7 @@ function inspectExitEpilogue(module,name) {
   return summary;
 }
 
-function inspectPoolCommit(owner,support) {
+function inspectWidePoolCommit(owner,support) {
   const summary={errors:[],descriptors:[],loops:[]},check=(okay,message)=>{if(!okay)summary.errors.push(message);};
   if(!owner.imports.some(item=>item.name==='support.commit_pool'))return{...summary,errors:['missing actual selective committer']};
   const binding=supportBinding(owner,support,'support.commit_pool'),adapterIndex=named(owner,'guest.commit_frame');
@@ -473,6 +504,107 @@ function inspectPoolCommit(owner,support) {
   }
   check(!kernel.ops.some(node=>[16,17,18,19,20,21].includes(node.op)),'selective commit invokes no canonical or host helper');
   summary.adapterIndex=adapterIndex;summary.sharedIndex=binding.exported;summary.parameters=signature(support,binding.exported).parameters;
+  return summary;
+}
+
+function inspectPoolCommit(owner,support) {
+  const selectorIndex=named(owner,'guest.select_frame');
+  if(!Number.isInteger(selectorIndex))return{...inspectWidePoolCommit(owner,support),transport:'wide-snapshot'};
+  const summary={transport:'in-body',errors:[],descriptors:[],loops:[],writers:[]};
+  const check=(okay,message)=>{if(!okay)summary.errors.push(message);};
+  const selector=defined(owner,selectorIndex),run=defined(owner,named(owner,'guest.run'));
+  check(JSON.stringify(signature(owner,selectorIndex))===JSON.stringify({parameters:[0x7f],results:[0x7e,0x7e]}),
+    'the frame selector receives only FrameID and returns two descriptor constants');
+  if(!selector||!run)return{...summary,errors:[...summary.errors,'missing actual selector or instruction body']};
+  const {ops,edges}=selector,tables=ops.flatMap((node,i)=>node.op===14?[i]:[]);
+  check(tables.length===1,'one real table selects exact frame descriptors');
+  check(ops.every(node=>[0,2,11,12,14,0x20,0x21,0x41,0x42,0x6b].includes(node.op))&&
+    ops.filter(node=>node.op===0x21).every(node=>[1,2].includes(node.local)),
+    'the selector has only constant descriptor dispatch, without payload work, loops or delegated calls');
+  if(tables.length===1){
+    const table=tables[0],p=ops.slice(table-3,table);
+    check(p.length===3&&p[0].op===0x20&&p[0].local===0&&p[1].op===0x41&&p[1].value===1&&p[2].op===0x6b,
+      'descriptor dispatch consumes FrameID minus one');
+    for(const start of new Set(edges[table].slice(0,-1))){const arm=ops.slice(start,start+5);
+      check(arm.length===5&&arm[0].op===0x42&&arm[1].op===0x21&&arm[1].local===1&&
+        arm[2].op===0x42&&arm[3].op===0x21&&arm[3].local===2&&arm[4].op===12,
+        'each frame arm selects two constants without snapshot transport');
+      if(arm[0]?.op===0x42&&arm[2]?.op===0x42)summary.descriptors.push({low:String(arm[0].value),high:String(arm[2].value)});
+    }
+  }
+  check(ops.at(-3)?.op===0x20&&ops.at(-3).local===1&&ops.at(-2)?.op===0x20&&ops.at(-2).local===2,
+    'the selected descriptors are returned unchanged');
+  const selected=run.ops.flatMap((node,i)=>node.call===selectorIndex?[i]:[]);
+  check(selected.length===1,'the actual instruction body has one shared in-body descriptor call');
+  if(selected.length===1){const i=selected[0];
+    check(run.ops[i-1]?.op===0x20&&run.ops[i-1].local===109&&
+      run.ops[i+1]?.op===0x21&&run.ops[i+1].local===156&&run.ops[i+2]?.op===0x21&&run.ops[i+2].local===155,
+      'the body passes only selected FrameID and retains both returned descriptors in its own locals');
+  }
+  for(const [name,parameters,wantedOffsets]of[
+    ['support.commit_native',[0x7f,0x7f,0x7c,0x7f,0x7f],[0,20,24,28]],
+    ['support.commit_raw',[0x7f,0x7f,0x7e,0x7f],[8,16,20,24,28]],
+  ]){
+    if(!owner.imports.some(item=>item.name===name)){check(false,`missing actual ${name}`);continue;}
+    const binding=supportBinding(owner,support,name),fn=defined(support,binding.exported);
+    check(JSON.stringify(signature(support,binding.exported))===JSON.stringify({parameters,results:[0x7f]}),
+      `${name} receives one physical cell and returns its exact payload classification`);
+    const stores=fn.ops.filter(node=>node.op>=0x36&&node.op<=0x3e);
+    const pointer=fn.ops.slice(0,8),pointerLocal=parameters.length;
+    check(pointer.length===8&&pointer[0].op===0x20&&pointer[0].local===0&&pointer[1].op===0x20&&
+      pointer[1].local===1&&pointer[2].op===0x41&&pointer[2].value===5&&pointer[3].op===0x74&&
+      pointer[4].op===0x6a&&pointer[5].op===0x41&&pointer[5].value===128&&pointer[6].op===0x6a&&
+      pointer[7].op===0x21&&pointer[7].local===pointerLocal,
+      `${name} addresses exactly pool +128 +physicalSlot*32`);
+    check(JSON.stringify(stores.map(node=>node.memoryOffset).sort((a,b)=>a-b))===JSON.stringify(wantedOffsets),
+      `${name} writes only one private physical payload record and its representation certificate`);
+    check(!fn.ops.some(node=>[3,14,16,17,18,19,20,21].includes(node.op)),
+      `${name} has no slot scan, source-cell dispatch or delegated call`);
+    const calls=run.ops.flatMap((node,i)=>node.call===binding.imported?[i]:[]),cells=[];
+    for(const i of calls){const p=run.ops.slice(i-parameters.length,i);
+      const native=name==='support.commit_native',cell=p[2]?.local-(native?76:110);
+      check(p.length===parameters.length&&p.every(node=>node.op===0x20)&&p[0].local===152&&p[1].local===167&&
+        cell>=0&&cell<8&&(native?p[3].local===170&&p[4].local===87:p[3].local===118+cell),
+        `${name} receives only the selected static source cell, physical destination and certificate`);
+      const guard=run.ops[i].frames.at(-1),admission=guard?run.ops.slice(guard.open-3,guard.open):[];
+      check(guard?.kind===4&&guard.type===-1&&admission.length===3&&admission[0].op===0x20&&
+        admission[0].local===85&&admission[1].op===0x41&&admission[1].value===1<<cell&&admission[2].op===0x71,
+        'the actual representation-valid bit chooses native versus exact opaque writes');
+      cells.push(cell);
+    }
+    check(JSON.stringify(cells.slice().sort((a,b)=>a-b))===JSON.stringify([0,1,2,3,4,5,6,7]),
+      `one shared router contains exactly one ${name} call per possible source cell`);
+    summary.writers.push({name,...binding,...signature(support,binding.exported),calls: calls.map(i=>run.ops[i].offset),cells});
+  }
+  const routers=run.ops.flatMap((node,i)=>node.op===14&&run.ops[i-1]?.op===0x20&&
+    run.ops[i-1].local===161?[i]:[]);
+  check(routers.length===1&&JSON.stringify(run.ops[routers[0]]?.targets)===JSON.stringify([0,1,2,3,4,5,6,7,8]),
+    'one source-cell router selects the eight static cases and an explicit invalid default');
+  const loops=run.ops.filter(node=>node.op===3&&run.ops[node.frame.open+1]?.op===0x20&&
+    run.ops[node.frame.open+1].local===158&&run.ops[node.frame.open+2]?.op===0x68);
+  check(loops.length===2,'one in-body selective loop owns tags and one owns changed payloads');
+  for(const node of loops){const loop=node.frame,guard=node.frames.at(-1),tail=run.ops.slice(loop.end-7,loop.end);
+    check(guard?.kind===4&&guard.otherwise===undefined&&guard.open===loop.open-1&&
+      run.ops[guard.open-1]?.op===0x20&&run.ops[guard.open-1].local===158,
+      'an empty changed mask bypasses its actual commit loop');
+    check(tail.length===7&&tail[0].op===0x20&&tail[0].local===158&&tail[1].op===0x20&&tail[1].local===158&&
+      tail[2].op===0x41&&tail[2].value===1&&tail[3].op===0x6b&&tail[4].op===0x71&&tail[5].op===0x22&&
+      tail[5].local===158&&tail[6].op===13&&tail[6].frames.at(-1-tail[6].targets[0])===loop,
+      'the actual loop removes one changed bit rather than walking eight payloads');
+    summary.loops.push({offset:node.offset,bitScans:1});
+  }
+  const snapshot=[...Array(8).fill(0x7c),...Array(8).fill(0x7e),...Array(21).fill(0x7f),...Array(3).fill(0x7c)];
+  const coldIndex=named(owner,'guest.commit_frame_cold');
+  if(!Number.isInteger(coldIndex)||!owner.imports.some(item=>item.name==='support.commit_pool_cold'))
+    check(false,'the explicit cold canonical-observation adapter remains separate');
+  else{
+    const cold=supportBinding(owner,support,'support.commit_pool_cold');
+    check(JSON.stringify(signature(owner,coldIndex))===JSON.stringify({parameters:[...snapshot,0x7f],results:[]})&&
+      JSON.stringify(signature(support,cold.exported))===JSON.stringify({parameters:[...snapshot,0x7e,0x7e],results:[]}),
+      'only the explicit cold helper path retains the exact41/42-field snapshot ABI');
+    summary.cold={adapterIndex:coldIndex,...cold};
+  }
+  summary.selectorIndex=selectorIndex;
   return summary;
 }
 
@@ -527,8 +659,9 @@ export function inspectRegion(bytes,supportBytes) {
     poolCommit:inspectPoolCommit(module,support),
     legacyNormalizers:[...module.names.values(),...support.names.values()].filter(name=>
       name==='guest.normalize_frame'||name==='support.normalize_kernel'),
-    commitPoolSignature:module.imports.some(item=>item.name==='support.commit_pool')?(()=>{
-      const{imported,exported}=supportBinding(module,support,'support.commit_pool');
+    commitPoolSignature:module.imports.some(item=>['support.commit_pool','support.commit_pool_cold'].includes(item.name))?(()=>{
+      const name=module.imports.some(item=>item.name==='support.commit_pool_cold')?'support.commit_pool_cold':'support.commit_pool';
+      const{imported,exported}=supportBinding(module,support,name);
       const fn=defined(support,exported);
       return{index:exported,ownerImport:imported,...signature(support,exported),
         loops:fn.ops.filter(node=>node.op===3).map(node=>({offset:node.offset,
@@ -586,6 +719,8 @@ export function assertAnalyzedStateStructure(proof) {
   const witness=proof.nativeStateWitness;
   assert(witness,'the actual native loop supplies a linked pre-publication state witness');
   assert.equal(witness.normalizer_calls,0,'physical ownership retires the actual recurring eight-slot normalizer');
+  assert.equal(witness.wide_snapshot_calls,0,
+    'the actual ordinary loop exit never transports its unused FP cells through a wide snapshot call');
   assert(proof.withoutCanonicalizationDispatchOrStackRotation.length>0,
     'the balanced arithmetic loop repeats without per-push/pop eight-cell runtime rotations');
   assertRegionStructure(proof);
@@ -608,11 +743,14 @@ export function assertRegionStructure(proof) {
   assertSingleInstructionBody(proof);
   assert.deepEqual(proof.legacyNormalizers,[],'no generic eight-slot normalizer remains encoded in owner or shared support');
   assert.deepEqual(proof.fpLinkGlobals,[],'physical FP state is not serialized through a cross-owner tuple');
-  assert.deepEqual(proof.poolCommit.errors,[],'real frame descriptors feed bit-selective physical commit without an eight-cell tuple');
-  assert(proof.commitPoolSignature,'the owner imports the actual shared selective pool committer');
-  assert.equal(proof.commitPoolSignature.parameters.length,42,'the selective committer receives one explicit snapshot and descriptors');
-  assert.deepEqual(proof.commitPoolSignature.results,[],'the selective committer publishes directly to the private pool');
-  assert(proof.commitPoolSignature.loops.some(loop=>loop.bitScans>0),'the actual committer selects changed physical slots by set bits');
+  assert.equal(proof.poolCommit.transport,'in-body','ordinary commits select live cells within the actual instruction body');
+  assert.deepEqual(proof.poolCommit.errors,[],'real descriptors feed changed-bit loops and small typed physical record writers');
+  assert.equal(proof.poolCommit.writers.length,2,'the shared native and opaque writers commit only their selected cells');
+  assert.equal(proof.poolCommit.loops.length,2,'independent tag and payload write masks are consumed in the actual body');
+  assert(proof.commitPoolSignature,'the explicit cold canonical-observation committer remains bound to actual shared support');
+  assert.equal(proof.commitPoolSignature.parameters.length,42,'only the cold committer retains the exact snapshot ABI');
+  assert.deepEqual(proof.commitPoolSignature.results,[],'the cold committer publishes directly to the private pool');
+  assert(proof.commitPoolSignature.loops.some(loop=>loop.bitScans>0),'cold commit still selects changed physical slots by set bits');
   assert(proof.arithmeticCycles.length>0,'the actual run contains a cyclic f64 arithmetic path');
   assert(proof.withoutCanonicalization.length>0,'an arithmetic loop can repeat without raw80 stores or materializing helpers');
   assert(proof.withoutCanonicalizationOrDispatch.length>0,'the reducible arithmetic loop also bypasses the general block dispatcher');

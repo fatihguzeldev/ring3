@@ -15,11 +15,11 @@ import {runPortCases} from './region/ports.mjs';
 import {runStableGraphCase} from './region/graph.mjs';
 import {runGroupCases} from './region/groups.mjs';
 import {runNativeStoreCases} from './region/native-store.mjs';
-import {runPoolCases,runPoolLoopCases} from './region/pool.mjs';
+import {runPoolCases,runPoolLoopCases,runTransportCases,runTransportLoopCases} from './region/pool.mjs';
 
 const [enginePath,reportPath,mode]=process.argv.slice(2);
-assert(enginePath&&reportPath&&(mode===undefined||mode==='--structure'||mode==='--graph'||mode==='--groups'||mode==='--native-stores'||mode==='--pool'||mode==='--pool-baseline'),
-  'usage: region.mjs engine.wasm fresh-report.json [--structure|--graph|--groups|--native-stores|--pool|--pool-baseline]');
+assert(enginePath&&reportPath&&(mode===undefined||mode==='--structure'||mode==='--graph'||mode==='--groups'||mode==='--native-stores'||mode==='--pool'||mode==='--pool-baseline'||mode==='--transport'||mode==='--transport-baseline'),
+  'usage: region.mjs engine.wasm fresh-report.json [--structure|--graph|--groups|--native-stores|--pool|--pool-baseline|--transport|--transport-baseline]');
 const artifact=readEngine(enginePath),hash=bytes=>createHash('sha256').update(bytes).digest('hex');
 const hex=bytes=>Buffer.from(bytes).toString('hex');
 const unhex=text=>Uint8Array.from(Buffer.from(text.replaceAll(' ',''),'hex'));
@@ -207,7 +207,15 @@ function exchangeCase(name,eax,structural=false) {
 }
 
 try {
-  if(mode==='--pool'||mode==='--pool-baseline') {
+  if(mode==='--transport'||mode==='--transport-baseline') {
+    if(mode==='--transport-baseline') {
+      const path=new URL('../../../../../artifacts/cpu-core/region-redesign/pool-v14-cache.mjs',import.meta.url);
+      report.baselineSdkSha256=hash(readFileSync(path));
+      artifact.CodeCache=(await import(path.href)).CodeCache;
+    }
+    stage='selective-transport-linked';runTransportCases(artifact,report);checkpoint();
+    stage='selective-transport-local-restart';runTransportLoopCases(fixture);checkpoint();
+  }else if(mode==='--pool'||mode==='--pool-baseline') {
     if(mode==='--pool-baseline') {
       const path=new URL('../../../../../artifacts/cpu-core/region-redesign/single-v12-cache.mjs',import.meta.url);
       report.baselineSdkSha256=hash(readFileSync(path));

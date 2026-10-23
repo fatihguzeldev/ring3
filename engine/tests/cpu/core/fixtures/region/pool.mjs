@@ -21,6 +21,10 @@ export function runPoolCases(artifact,report) {
   for(const iterations of[1,9])runLinkedPoolCase(artifact,report,iterations);
 }
 
+// Both modes use the same literal semantic oracles. Only the explicitly pinned
+// baseline supplies an archived CodeCache through artifact.CodeCache.
+export {runPoolCases as runTransportCases,runPoolLoopCases as runTransportLoopCases};
+
 function runLinkedPoolCase(artifact,report,iterations) {
   const result={name:`physical-pool-three-owners-select-only-used-slots-${iterations}`,complete:false,
     iterations,controls:[],modules:[],probes:[]};report.cases.push(result);
@@ -133,6 +137,8 @@ function runLinkedPoolCase(artifact,report,iterations) {
     result.semanticComplete=true;
 
     assert.equal(result.counters.normalizer_calls,0,'physical ownership retires the actual recurring eight-slot normalizer');
+    assert.equal(result.counters.wide_snapshot_calls,0,
+      'ordinary compiled links never transport a full typed FP snapshot through owner or shared calls');
     for(const probe of result.probes)assert.equal(probe.canonicalBankHex,hex(initialBank),
       'compiled boundaries do not publish the canonical FP bank');
     const scalar=result.probes.filter(probe=>probe.source==='scalar-C');
@@ -181,9 +187,32 @@ export function runPoolLoopCases(fixture) {
     assert.equal(run.activations.length,1);assert.equal(t.result.modules.length,1);assert.equal(run.helperCalls,0);assert.equal(t.version(),before);
     const witness=t.stateWitness();t.result.poolWitness=witness;
     assert.equal(witness.normalizer_calls,0,'the actual internal loop has no generic eight-slot rebase');
+    assert.equal(witness.wide_snapshot_calls,0,'the ordinary local-loop exit never transports a full FP snapshot');
     assert.equal(witness.raw80_stores,0,'the canonical FP bank is not touched before the real observer');
     assert(witness.record_writes>0);witnesses.push(witness);
     if(witnesses.length===2)for(const field of['record_reads','record_writes'])
       assert.equal(witness[field],witnesses[0][field],'eight more local iterations add no private record loads or spills');
   });
+  for(const [iterations,value]of[[1,'00000000000000a00140'],[9,'00000000000000a80340']])
+    fixture(`physical-pool-computed-local-restart-without-wide-snapshot-${iterations}`,{
+      segments:[[0x1000,'d8c1 49 740b ffe0'],[0x1010,'90 0f0b']],stateWitness:true,
+      registers:[0x1000,iterations,0,0x3000,0x4800,0,0,0],control:0x27f,
+      initialFp:{tag:0xfff0,registers:{0:THREE,1:TWO}},
+    },t=>{
+      // Eight nonfinal iterations (N=9) use the actual computed-PC lookup and
+      // restart the retained body. The last JZ skips that jump and executes NOP.
+      const before=t.version(),run=t.check({pc:0x1011,retired:4*iterations,budget:4*iterations,
+        flags:0x46,ecx:0,fp:t.fp({tag:0xfff0,opcode:0xc1,fip:0x1000,
+          registers:{0:value,1:TWO}})});
+      assert.equal(run.activations.length,1);assert.equal(t.result.modules.length,1);
+      assert.equal(run.helperCalls,0);assert.equal(t.version(),before);
+      t.result.semanticComplete=true;
+      const witness=t.stateWitness();t.result.poolWitness=witness;
+      assert.equal(witness.body_entries,1,'computed restart resumes the same actual instruction body');
+      assert.equal(witness.normalizer_calls,0,'computed restart never invokes an eight-slot normalizer');
+      assert.equal(witness.wide_snapshot_calls,0,'computed restart and final exit never transport a full FP snapshot');
+      assert.equal(witness.raw80_stores,0,'computed restart leaves the canonical FP bank private');
+      assert.equal(witness.materializer_calls,0,'computed restart has no canonical observation');
+      assert.equal(witness.afterBankHex,witness.beforeBankHex,'canonical bytes stay unchanged until the explicit observer');
+    });
 }
