@@ -14,6 +14,7 @@ class Reader {
 
 function operators(bytes) {
   const r=new Reader(bytes),locals=r.vector(()=>({count:r.unsigned(),type:r.byte()}));
+  const localsEnd=r.at;
   const root={kind:0xff,open:-1},frames=[root],ops=[];
   while(r.at<bytes.length) {
     const node={op:r.byte(),offset:r.at-1,frames:frames.slice(),targets:[]},index=ops.length;
@@ -64,7 +65,7 @@ function operators(bytes) {
     if(node.op===5)return node.frame.end+1<ops.length?[node.frame.end+1]:[];
     return next(index);
   });
-  return {locals,ops,edges};
+  return {raw:bytes,localsEnd,locals,ops,edges};
 }
 
 function readModule(bytes) {
@@ -113,6 +114,87 @@ function components(edges,allowed) {
   return result;
 }
 
+function guardedNativeNormalizer(module,index) {
+  const fn=module.functions[index-module.imports.length],type=module.types[module.functionTypes[index-module.imports.length]];
+  const wantedParameters=[...Array(8).fill(0x7c),...Array(8).fill(0x7e),...Array(15).fill(0x7f)];
+  const wantedResults=[...Array(8).fill(0x7c),...Array(8).fill(0x7e),...Array(14).fill(0x7f)];
+  const matches=(left,right)=>left?.length===right.length&&left.every((value,i)=>value===right[i]);
+  if(!fn||!matches(type?.parameters,wantedParameters)||!matches(type?.results,wantedResults))return undefined;
+  const stores=fn.ops.filter(node=>node.op>=0x36&&node.op<=0x3e),guards=[];
+  if(!stores.length||fn.ops.some(node=>[16,17,18,19,20,21].includes(node.op)))return undefined;
+  for(const store of stores){
+    if(!(store.op===0x37&&store.memoryOffset===0||store.op===0x3b&&store.memoryOffset===8))return undefined;
+    const guard=store.frames.findLast(frame=>{
+      if(frame.kind!==4||frame.otherwise!==undefined)return false;
+      const pattern=fn.ops.slice(frame.open-4,frame.open),mask=pattern[1]?.value;
+      return pattern.length===4&&pattern[0].op===0x20&&pattern[0].local===24&&
+        pattern[1].op===0x41&&mask>=1&&mask<=128&&(mask&(mask-1))===0&&pattern[2].op===0x71&&pattern[3].op===0x45;
+    });
+    if(!guard)return undefined;
+    guards.push({storeOffset:store.offset,guardOffset:fn.ops[guard.open].offset,nativeBit:fn.ops[guard.open-3].value});
+  }
+  return {index,name:module.names.get(index),parameters:type.parameters,results:type.results,rawStoreGuards:guards,
+    condition:'each raw80 store requires the corresponding incoming native-valid bit to be zero'};
+}
+
+export function instrumentStateWitness(source) {
+  const module=readModule(source),original=new WebAssembly.Module(source);
+  const globalBase=WebAssembly.Module.imports(original).filter(item=>item.kind==='global').length;
+  const normalizer=[...module.names].find(([,name])=>name==='guest.normalize_frame')?.[0];
+  const materializer=[...module.names].find(([,name])=>name==='guest.materialize_numeric')?.[0];
+  assert(Number.isInteger(materializer),'the raw80 materializer is a real defined function');
+  const u=value=>{const result=[];do{const byte=value&127;value>>>=7;result.push(byte|(value?128:0));}while(value);return Uint8Array.from(result);};
+  const concat=chunks=>Uint8Array.from(Buffer.concat(chunks.map(value=>Buffer.from(value))));
+  const section=(id,bytes)=>concat([Uint8Array.of(id),u(bytes.length),bytes]);
+  const increment=index=>concat([Uint8Array.of(0x23),u(globalBase+index),Uint8Array.of(0x41,1,0x6a,0x24),u(globalBase+index)]);
+  const exports=['test.normalizer_calls','test.materializer_calls','test.raw80_stores','test.fp_metadata_writes',
+    'test.body_entries','test.control_admissions'];
+  const input=new Reader(source);input.take(8);const output=[source.subarray(0,8)];let added=false;
+  while(input.at<source.length){
+    const id=input.byte(),bytes=input.take(input.unsigned());let rewritten=bytes;
+    assert.notEqual(id,6,'generated region has no preexisting defined globals');
+    if(id===7){
+      output.push(section(6,Uint8Array.of(exports.length,...Array(exports.length).fill([0x7f,1,0x41,0,0x0b]).flat())));
+      const r=new Reader(bytes),count=r.unsigned(),entries=exports.map((name,index)=>{
+        const encoded=new TextEncoder().encode(name);return concat([u(encoded.length),encoded,Uint8Array.of(3),u(globalBase+index)]);
+      });
+      rewritten=concat([u(count+entries.length),r.take(bytes.length-r.at),...entries]);added=true;
+    }else if(id===10){
+      const r=new Reader(bytes),count=r.unsigned(),bodies=[];
+      for(let defined=0;defined<count;defined++){
+        const raw=r.take(r.unsigned()),index=defined+module.imports.length,fn=module.functions[defined];let body=raw;
+        if(index===normalizer||index===materializer||['guest.run','guest.precise'].includes(module.names.get(index))){
+          const insertions=new Map(),insert=(at,bytes)=>insertions.set(at,[...(insertions.get(at)??[]),bytes]);
+          if(index===normalizer||index===materializer){
+            insert(fn.localsEnd,increment(index===normalizer?0:1));
+            for(const node of fn.ops)if(node.op===0x37&&node.memoryOffset===0||node.op===0x3b&&node.memoryOffset===8)
+              insert(node.offset,increment(2));
+          }else{
+            insert(fn.localsEnd,increment(4));
+            for(const[index,node]of fn.ops.entries()){
+              if([0x21,0x22].includes(node.op)&&node.local===91)insert(node.offset,increment(3));
+              if(controlAdmission(fn.ops,index))insert(node.offset,increment(5));
+            }
+          }
+          const chunks=[];let start=0;
+          for(const[at,values]of[...insertions].sort(([a],[b])=>a-b)){chunks.push(raw.subarray(start,at),...values);start=at;}
+          chunks.push(raw.subarray(start));body=concat(chunks);
+        }
+        bodies.push(u(body.length),body);
+      }
+      assert.equal(r.at,bytes.length);rewritten=concat([u(count),...bodies]);
+    }
+    output.push(section(id,rewritten));
+  }
+  assert(added,'diagnostic globals are exported alongside actual generated entry points');
+  return {bytes:concat(output),read:instance=>Object.fromEntries(exports.map(name=>[name.slice(5),instance.exports[name].value]))};
+}
+
+function controlAdmission(ops,index) {
+  return ops[index]?.op===0x20&&ops[index].local===87&&
+    ops[index+1]?.op===0x41&&ops[index+1].value===0xf3f&&ops[index+2]?.op===0x71;
+}
+
 function inspectExitEpilogue(module,name) {
   const named=wanted=>[...module.names].find(([,name])=>name===wanted)?.[0];
   const index=named(name),fn=module.functions[index-module.imports.length];
@@ -135,9 +217,10 @@ function inspectExitEpilogue(module,name) {
   check(args.length===fields.length&&args.every((node,i)=>node.op===0x20&&node.local===fields[i]),
     'the sole publication receives context and every live boundary local in ABI order');
   check(ops[publish].frames.length===1,'publication is outside every guest control block');
-  const end=ops[firstArgument-1],body=end?.op===11&&end.frame.kind===2?end.frame:undefined;
-  if(!body){summary.errors.push('publication must follow the closed outer exit block');return summary;}
+  const body=ops[0]?.op===2?ops[0].frame:undefined;
+  if(!body||body.end>=firstArgument){summary.errors.push('publication must follow the closed outer exit block');return summary;}
   summary.outerBlock={open:body.open,end:body.end};
+  summary.normalizationOperations=firstArgument-body.end-1;
   check(body.type===-64&&body.open===0,'one empty outer block wraps the original guest body');
   const exits=[];
   for(let i=body.open+1;i<body.end;i++){
@@ -207,12 +290,15 @@ export function inspectRegion(bytes) {
   const module=readModule(bytes),runIndex=[...module.names].find(([,name])=>name==='guest.run')?.[0]??module.exports.get('run');
   assert(Number.isInteger(runIndex)&&runIndex>=module.imports.length,'defined guest run');
   const run=module.functions[runIndex-module.imports.length];
+  const conditionalNative=new Map(module.functions.flatMap((_,defined)=>{
+    const index=defined+module.imports.length,proof=guardedNativeNormalizer(module,index);return proof?[[index,proof]]:[];
+  }));
   const materializers=new Set(module.imports.flatMap((item,index)=>item.name==='numeric'?[index]:[]));
   const rawStore=node=>node.op===0x37&&node.memoryOffset===0||node.op===0x3b&&node.memoryOffset===8;
   module.functions.forEach((fn,index)=>{
     const id=index+module.imports.length;
-    if(module.names.get(id)==='guest.materialize_numeric'||fn.ops.some(node=>node.op===0x37&&node.memoryOffset===0)
-      &&fn.ops.some(node=>node.op===0x3b&&node.memoryOffset===8))materializers.add(id);
+    if(module.names.get(id)==='guest.materialize_numeric'||!conditionalNative.has(id)&&
+      fn.ops.some(node=>node.op===0x37&&node.memoryOffset===0)&&fn.ops.some(node=>node.op===0x3b&&node.memoryOffset===8))materializers.add(id);
   });
   let changed;
   do{changed=false;module.functions.forEach((fn,index)=>{
@@ -227,9 +313,33 @@ export function inspectRegion(bytes) {
     .map(group=>({operations:group.length,arithmetic:group.filter(index=>arithmetic(run.ops[index])).length}));
   const canonical=node=>rawStore(node)||materializers.has(node.call);
   const dispatch=node=>node.op===14||module.names.get(node.call)==='guest.lookup';
+  const rotations=new Set();
+  for(let start=0;start+17<run.ops.length;start++) {
+    const group=run.ops.slice(start,start+18),first=group[0].local;
+    const direction=first===76?1:first===83?-1:0;
+    if(!direction||group[0].op!==0x20||group[1].op!==0x21||group[1].local!==97)continue;
+    if(!Array.from({length:7},(_,i)=>i).every(i=>group[2+i*2].op===0x20&&
+      group[2+i*2].local===first+direction*(i+1)&&group[3+i*2].op===0x21&&
+      group[3+i*2].local===first+direction*i))continue;
+    if(group[16].op===0x20&&group[16].local===97&&group[17].op===0x21&&
+      group[17].local===first+direction*7)rotations.add(run.ops[start]);
+  }
+  const eagerLocals=[10,26,38,42,89,90,91,93,94];
+  const eagerFrame=node=>[0x21,0x22].includes(node.op)&&eagerLocals.includes(node.local);
+  const admissions=new Set(run.ops.filter((_,index)=>controlAdmission(run.ops,index)));
   return {runIndex,runName:module.names.get(runIndex),locals:run.locals,
     arithmeticCycles:cycles(()=>false),withoutCanonicalization:cycles(canonical),
     withoutCanonicalizationOrDispatch:cycles(node=>canonical(node)||dispatch(node)),
+    runtimeStackRotations:[...rotations].map(node=>node.offset),
+    eagerFrameWrites:Object.fromEntries(eagerLocals.map(local=>[local,
+      run.ops.filter(node=>[0x21,0x22].includes(node.op)&&node.local===local).length])),
+    withoutCanonicalizationDispatchOrStackRotation:cycles(node=>canonical(node)||dispatch(node)||rotations.has(node)),
+    withoutCanonicalizationDispatchOrDynamicFrame:cycles(node=>canonical(node)||dispatch(node)||rotations.has(node)||eagerFrame(node)),
+    withoutCanonicalizationDispatchOrEagerControl:cycles(node=>canonical(node)||dispatch(node)||rotations.has(node)||
+      [0x21,0x22].includes(node.op)&&[10,26].includes(node.local)),
+    controlAdmissionSites:[...admissions].map(node=>node.offset),
+    withoutCanonicalizationDispatchOrControlAdmission:cycles(node=>canonical(node)||dispatch(node)||rotations.has(node)||admissions.has(node)),
+    conditionalNativeCanonicalizers:[...conditionalNative.values()],
     materializers:[...materializers].map(index=>({index,name:module.names.get(index)??module.imports[index]?.name})),
     materializerSignature:[...module.names].filter(([,name])=>name==='guest.materialize_numeric')
       .map(([index,name])=>({index,name,...module.types[module.functionTypes[index-module.imports.length]]})),
@@ -240,6 +350,27 @@ export function inspectRegion(bytes) {
     exitEpilogues:['guest.run','guest.precise'].map(name=>inspectExitEpilogue(module,name)),
     limits:['narrow decoder for generated authored modules; scalar f64 arithmetic cycles only',
       'a retained cycle proves a canonicalization-free emitted path, not its runtime frequency or speed']};
+}
+
+export function assertAnalyzedStateStructure(proof) {
+  assert(proof.withoutCanonicalizationDispatchOrStackRotation.length>0,
+    'the balanced arithmetic loop repeats without per-push/pop eight-cell runtime rotations');
+  assertRegionStructure(proof);
+  assert(proof.withoutCanonicalizationDispatchOrEagerControl.length>0,
+    'the balanced arithmetic loop also bypasses per-instruction PC/index writes');
+  assert(proof.withoutCanonicalizationDispatchOrControlAdmission.length>0,
+    'the balanced arithmetic loop reuses admitted control facts across its backedge');
+  assert.equal(proof.conditionalNativeCanonicalizers.length,1,'one actual guarded native/opaque frame normalizer');
+  const witness=proof.nativeStateWitness;
+  assert(witness,'the actual native loop supplies a linked pre-publication state witness');
+  assert(witness.normalizer_calls>0,'the exercised loop actually invokes the encoded conditional normalizer');
+  assert.equal(witness.raw80_stores,0,'native internal normalization does not execute raw80 stores');
+  assert.equal(witness.materializer_calls,0,'native internal edges do not invoke the canonical materializer');
+  assert(witness.control_admissions>0&&witness.control_admissions<=witness.body_entries,
+    'the exercised control admission runs at most once per fresh body import, including a possible precise tail');
+  assert.equal(witness.afterBankHex,witness.beforeBankHex,'the full private raw80 bank stays unchanged before explicit publication');
+  assert(witness.fp_metadata_writes<12,
+    'metadata is reconstructed at analyzed frame boundaries instead of all twelve executed x87 operations');
 }
 
 export function assertRegionStructure(proof) {

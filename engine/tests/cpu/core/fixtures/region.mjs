@@ -4,10 +4,12 @@ import {createHash} from 'node:crypto';
 import {readFileSync,writeFileSync,openSync,closeSync} from 'node:fs';
 import {readEngine} from '../../../support/wasm/engine.mjs';
 import {Engine,KEY,record,view} from '../../../../../sdk/runtime/engine.js';
-import {inspectRegion,assertRegionStructure} from './region/structure.mjs';
+import {inspectRegion,assertRegionStructure,assertAnalyzedStateStructure,instrumentStateWitness} from './region/structure.mjs';
 import {runControlCases} from './region/control.mjs';
 import {runLinkedCases} from './region/link.mjs';
 import {runStatusCases,runLinkedStatusCases} from './region/status.mjs';
+import {runStateCases,runRenamingCase} from './region/state.mjs';
+import {runLinkedQuotaCase} from './region/quota.mjs';
 
 const [enginePath,reportPath,mode]=process.argv.slice(2);
 assert(enginePath&&reportPath&&(mode===undefined||mode==='--structure'),
@@ -18,7 +20,7 @@ const unhex=text=>Uint8Array.from(Buffer.from(text.replaceAll(' ',''),'hex'));
 closeSync(openSync(reportPath,'wx'));
 const report={schema:1,complete:false,engineSha256:artifact.sha256,
   scope:'actual generated mixed integer/x87 CFG with exact instruction-prefix, publication and fault oracles; no timing claim',
-  sources:Object.fromEntries(['./region.mjs','./link.mjs','./region/structure.mjs','./region/control.mjs','./region/link.mjs','./region/status.mjs',
+  sources:Object.fromEntries(['./region.mjs','./link.mjs','./region/structure.mjs','./region/control.mjs','./region/link.mjs','./region/status.mjs','./region/state.mjs','./region/quota.mjs',
     '../../../support/wasm/engine.mjs','../../../../../sdk/runtime/engine.js','../../../../../sdk/runtime/cache.js']
     .map(path=>[path,hash(readFileSync(new URL(path,import.meta.url)))])),cases:[]};
 const checkpoint=()=>writeFileSync(reportPath,JSON.stringify(report,null,2));
@@ -37,7 +39,7 @@ function fp(initial,{status=0,tag=0xffff,opcode=0,fip=0,fdp=0,registers={},cs=0x
 }
 
 function fixture(name,{segments,entry=0x1000,registers=[0,2,0,0x3000,0x4800,0,0,0],control=0x27f,
-  initialFp,missing=[],data=page=>{view(page).setFloat32(0,3,true);view(page).setFloat32(4,2,true);}}={},body) {
+  initialFp,missing=[],stateWitness=false,data=page=>{view(page).setFloat32(0,3,true);view(page).setFloat32(4,2,true);}}={},body) {
   stage=name;
   const result={name,controls:[],modules:[],runs:[],numericCalls:[]};report.cases.push(result);checkpoint();
   const instance=instantiateCore(artifact.module,{ring3_observability:{now_ns:()=>0n}});
@@ -46,7 +48,7 @@ function fixture(name,{segments,entry=0x1000,registers=[0,2,0,0x3000,0x4800,0,0,
   const memory=instance.exports.memory,engine=new Engine(api,memory,artifact.sha256);
   const bytes=(pointer,length)=>new Uint8Array(memory.buffer).slice(pointer,pointer+length);
   const word=(pointer,offset=0)=>new DataView(memory.buffer).getUint32(pointer+offset,true);
-  let opened=false,active=false,context=0,helpers=0,run,encodedModule;
+  let opened=false,active=false,context=0,helpers=0,run,publish,witnessReader,encodedModule;
   const version=()=>new DataView(memory.buffer).getBigUint64(word(context,80),true);
   const status=(operation,wanted,...args)=>{
     const actual=api[operation](...args)>>>0;result.controls.push({operation,wanted,actual});
@@ -57,12 +59,19 @@ function fixture(name,{segments,entry=0x1000,registers=[0,2,0,0x3000,0x4800,0,0,
     const encoded=bytes(api.core_code_ptr()>>>0,api.core_code_len()>>>0),module=new WebAssembly.Module(encoded);
     encodedModule=encoded;
     const imports=coreImports(module);
-    result.modules.push({pc,sha256:hash(encoded),bytes:encoded.length,imports});
-    run=instantiateCore(module,{ring3:{memory,read:api.core_read,write:api.core_write,
+    const moduleRecord={pc,sha256:hash(encoded),bytes:encoded.length,imports};result.modules.push(moduleRecord);
+    const diagnostic=stateWitness?instrumentStateWitness(encoded):undefined;
+    if(diagnostic)moduleRecord.instrumentedSha256=hash(diagnostic.bytes);
+    const generated=instantiateCore(diagnostic?new WebAssembly.Module(diagnostic.bytes):module,{ring3:{memory,read:api.core_read,write:api.core_write,
       numeric:(...args)=>{
         helpers++;const before=version(),returned=api.core_numeric(...args);
         result.numericCalls.push({before:String(before),after:String(version()),returned});return returned;
-      }}}).exports.run;
+      }}});
+    run=stateWitness?generated.exports.link:generated.exports.run;
+    publish=stateWitness?generated.exports.publish:undefined;
+    witnessReader=diagnostic?()=>diagnostic.read(generated):undefined;
+    assert.equal(typeof run,'function','the selected generated entry is an actual Wasm function');
+    if(stateWitness)assert.equal(typeof publish,'function','linked state has an explicit canonical publisher');
   };
   try {
     status('open',0,12,...KEY);opened=true;engine.base=api.arena_ptr()>>>0;
@@ -77,7 +86,7 @@ function fixture(name,{segments,entry=0x1000,registers=[0,2,0,0x3000,0x4800,0,0,
     new DataView(memory.buffer).setUint16(engine.base+FP+16,control,true);
     if(initialFp)new Uint8Array(memory.buffer,engine.base+FP,128).set(fp(bytes(engine.base+FP,128),initialFp));
     const startingFp=bytes(engine.base+FP,128),startingSimd=bytes(engine.base+SIMD,160),startingYmm=bytes(engine.base+YMM,144);
-    let publishedFp=startingFp;
+    let publishedFp=startingFp,publishedSimd=startingSimd;
     const expectedPages=new Map([...pages].map(([address,page])=>[address,page.slice()]));
     prepare(entry);
     status('core_begin',0);active=true;status('core_end',0);active=false;
@@ -90,14 +99,25 @@ function fixture(name,{segments,entry=0x1000,registers=[0,2,0,0x3000,0x4800,0,0,
       const input=unhex(value);
       for(let index=0;index<input.length;index++)expectedPages.get((address+index)&~4095)[(address+index)&4095]=input[index];
     };
-    const check=({pc,retired,flags=2,ecx=registers[1],fp:expectedFp,stop=2,budget,work=budget,remaining=0,
+    const check=({pc,retired,flags=2,ecx=registers[1],fp:expectedFp,simd:expectedSimd=startingSimd,stop=2,budget,work=budget,remaining=0,
       fault=[0,0,0],regs={}})=>{
       const beforeHelpers=helpers,activations=[];
       let actual,available=budget;
       do {
         assert(activations.length<=budget+1,'bounded genuine NeedCode continuations');
         const startPc=word(context,32),beforeRetired=word(context,40);
-        status('core_begin',0);active=true;actual=run(context,available)>>>0;
+        status('core_begin',0);active=true;
+        const beforeBankHex=stateWitness?hex(bytes(word(context,92),100)):undefined;
+        const beforeCounters=witnessReader?.();
+        actual=run(context,available)>>>0;
+        if(stateWitness){
+          const after=witnessReader(),counters=Object.fromEntries(Object.entries(after).map(([key,value])=>[key,value-beforeCounters[key]]));
+          const witness={...counters,beforeBankHex,afterBankHex:hex(bytes(word(context,92),100))};
+          (result.stateWitnesses??=[]).push(witness);checkpoint();
+          // Inspect the real internal execution before explicit publication can conceal a
+          // transient bank write. The ordinary full architectural oracle still runs below.
+          publish(context);
+        }
         status('core_end',0);active=false;
         const nextPc=word(context,32),left=word(context,44),completed=word(context,40)-beforeRetired;
         activations.push({startPc,nextPc,stop:actual,budget:available,remaining:left,retired:completed});
@@ -121,17 +141,19 @@ function fixture(name,{segments,entry=0x1000,registers=[0,2,0,0x3000,0x4800,0,0,
       assert.equal(observed.flags,flags,'all integer flags');assert.deepEqual(actualRegisters,wantedRegisters,'all GPRs');
       assert.deepEqual(observed.fault,fault,'fault address, access metadata and vector');
       assert.deepEqual(bytes(engine.base+FP,128),publishedFp,'private execution does not publish FP state');
+      assert.deepEqual(bytes(engine.base+SIMD,160),publishedSimd,'private execution does not publish SIMD state');
       status('core_export',0,stop,work);
-      publishedFp=expectedFp;observed.fpHex=hex(bytes(engine.base+FP,128));checkpoint();
+      publishedFp=expectedFp;publishedSimd=expectedSimd;observed.fpHex=hex(bytes(engine.base+FP,128));checkpoint();
       assert.deepEqual(bytes(engine.base+FP,128),expectedFp,'full independent literal FP128');
-      assert.deepEqual(bytes(engine.base+SIMD,160),startingSimd,'full SIMD160 is unchanged');
+      assert.deepEqual(bytes(engine.base+SIMD,160),expectedSimd,'full independent literal SIMD160');
       assert.deepEqual(bytes(engine.base+YMM,144),startingYmm,'full upper vector bank is unchanged');
       for(const[address,page]of expectedPages)assert.deepEqual(bytes(physical(address),4096),page,`entire RAM page ${address.toString(16)}`);
       return observed;
     };
-    body({api,engine,bytes,word,result,prepare,check,writeExpected,registers,startingFp,
+    body({api,engine,bytes,word,result,prepare,check,writeExpected,registers,startingFp,startingSimd,
       fp:value=>fp(startingFp,value),status,context:()=>context,version,
-      inspect:()=>{result.structure=inspectRegion(primaryEncoded);checkpoint();return result.structure;}});
+      inspect:()=>{result.structure=inspectRegion(primaryEncoded);checkpoint();return result.structure;},
+      stateWitness:()=>{assert.equal(result.stateWitnesses?.length,1,'one observed linked activation');return result.stateWitnesses[0];}});
     result.complete=true;checkpoint();
   }catch(error){result.failure={message:String(error),stack:error.stack};checkpoint();throw error;}
   finally{if(active)api.core_end();if(opened)api.close();}
@@ -182,6 +204,7 @@ try {
       assertRegionStructure(t.inspect());
     });
     exchangeCase('emitted-cfg-keeps-two-exchanged-values-local-through-the-loop',0,true);
+    runRenamingCase(fixture,assertAnalyzedStateStructure);
   }else {
   for(const trace of traces)for(let prefix=1;prefix<=trace.steps.length;prefix++) {
     fixture(`cfg-${trace.name}-budget-${prefix}`,{segments:cfg,registers:[trace.eax,2,0,0x3000,0x4800,0,0,0]},t=>{
@@ -291,8 +314,10 @@ try {
   });
   runControlCases(fixture);
   runStatusCases(fixture);
+  runStateCases(fixture);
   stage='compiled-link-boundaries';runLinkedCases(artifact,report);checkpoint();
   stage='compiled-link-status';runLinkedStatusCases(artifact,report);checkpoint();
+  stage='compiled-link-short-quota';runLinkedQuotaCase(artifact,report);checkpoint();
   }
   report.complete=true;checkpoint();console.log(JSON.stringify({complete:true,cases:report.cases.length,engineSha256:artifact.sha256}));
 }catch(error){report.failure={stage,message:String(error),stack:error.stack};checkpoint();throw error;}
