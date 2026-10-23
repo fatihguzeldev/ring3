@@ -165,14 +165,14 @@ fn slow(out: &mut Output<'_>, next: u32, planned: bool) {
         out.c().i32_const(0).local_set(KIND);
         out.publish_operands();
     }
-    crate::cpu::core::memory::authority::flush(&mut out.c());
+    crate::cpu::core::memory::authority::flush(out.c().raw());
     out.c()
         .local_get(CTX)
         .i32_const(ordinal as i32)
         .call(2)
         .local_set(WRITE_STATUS);
-    crate::cpu::core::memory::authority::load(&mut out.c());
-    crate::cpu::core::memory::cache::invalidate(&mut out.c());
+    crate::cpu::core::memory::authority::load(out.c().raw());
+    crate::cpu::core::memory::cache::invalidate(out.c().raw());
     out.c()
         .local_get(WRITE_STATUS)
         .i32_const(StopReason::SystemEntry as i32)

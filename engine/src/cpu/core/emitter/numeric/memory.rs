@@ -47,7 +47,7 @@ pub(super) fn prepare(
             .br_if(0);
     }
     let translate = out.internal(9);
-    cache::translate(&mut out.c(), if write { 2 } else { 1 }, translate);
+    cache::translate(out.c().raw(), if write { 2 } else { 1 }, translate);
     if write {
         out.c()
             .local_get(CTX)

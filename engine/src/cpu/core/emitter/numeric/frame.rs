@@ -73,7 +73,7 @@ pub(in crate::cpu::core::emitter) fn emit_frame(out: &mut Output<'_>, frame: Fra
 pub(in crate::cpu::core::emitter) fn normalize_frame(out: &mut Output<'_>) {
     let plan = out.plan;
     let numeric = !out.native.is_empty();
-    emit_normalizer(plan, &mut out.c(), numeric);
+    emit_normalizer(plan, out.c().raw(), numeric);
 }
 
 pub(in crate::cpu::core::emitter) fn emit_edge(out: &mut Output<'_>, edge: &EdgePlan) {
@@ -181,7 +181,7 @@ pub(in crate::cpu::core::emitter) fn enter_block(out: &mut Output<'_>, block: Bl
                     super::direct::contract_value(out, logical, proof.kind, 0);
                 }
                 ProofKind::Occupied | ProofKind::Empty => {
-                    emit_tag(&mut out.c(), TagRecipe::Entry(logical), HOT);
+                    emit_tag(out.c().raw(), TagRecipe::Entry(logical), HOT);
                     out.c().i32_const(3);
                     if proof.kind == ProofKind::Occupied {
                         out.c().i32_eq();
@@ -206,7 +206,7 @@ pub(super) fn tag(out: &mut Output<'_>, logical: u8) {
         .plan
         .shape(out.before_frame.expect("tag has a before frame"))
         .tags[logical as usize];
-    emit_tag(&mut out.c(), recipe, HOT);
+    emit_tag(out.c().raw(), recipe, HOT);
 }
 
 #[derive(Clone, Copy)]

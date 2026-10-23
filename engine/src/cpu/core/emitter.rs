@@ -1,3 +1,4 @@
+mod code;
 mod control;
 mod exits;
 mod integer;
@@ -310,6 +311,8 @@ fn run(
     ]);
     let mut out = Output {
         function: &mut function,
+        depth: 0,
+        redirect_returns: false,
         pc: 0,
         prefix: 0,
         record_flags: true,
@@ -323,6 +326,7 @@ fn run(
         store_widths,
     };
     out.c()
+        .block(BlockType::Empty)
         .local_get(CTX)
         .i32_load(mem(112, 2))
         .i32_const(1)
@@ -336,11 +340,12 @@ fn run(
         .i32_const(StopReason::Infrastructure as i32)
         .return_()
         .end();
-    link::has_state(&mut out.c());
+    out.redirect_returns = true;
+    link::has_state(out.c().raw());
     out.c().if_(BlockType::Empty);
     link::restore(&mut out);
     out.c().else_();
-    super::memory::authority::load(&mut out.c());
+    super::memory::authority::load(out.c().raw());
     for register in 0..8 {
         out.c()
             .local_get(CTX)
@@ -379,11 +384,12 @@ fn run(
         .if_(BlockType::Empty);
     out.exit(StopReason::CodeInvalidated, None, 0);
     out.c().end().end();
-    super::memory::load_view(&mut out.c());
+    super::memory::load_view(out.c().raw());
     let lookup = out.internal(4);
     out.c().local_get(EIP).call(lookup).local_set(INDEX);
     region::emit(&mut out, graph, precise);
     out.c().end();
+    assert_eq!(out.depth, 0, "the region exit wrapper is closed");
     let Output { store_widths, .. } = out;
     (
         exits::finish(function, plan, !native.is_empty(), precise),
@@ -393,6 +399,8 @@ fn run(
 
 pub(super) struct Output<'a> {
     function: &'a mut Function,
+    depth: u32,
+    redirect_returns: bool,
     pc: u32,
     prefix: u32,
     record_flags: bool,
@@ -407,8 +415,12 @@ pub(super) struct Output<'a> {
 }
 
 impl Output<'_> {
-    pub(super) fn c(&mut self) -> wasm_encoder::InstructionSink<'_> {
-        self.function.instructions()
+    pub(super) fn c(&mut self) -> code::Sink<'_> {
+        code::Sink::new(
+            self.function.instructions(),
+            &mut self.depth,
+            self.redirect_returns,
+        )
     }
 
     fn internal(&self, index: u32) -> u32 {
@@ -613,7 +625,7 @@ impl Output<'_> {
     fn read_memory(&mut self, width: u32, destination: u32, prepare: bool) {
         self.check_span(width & 0xff);
         let translate = self.internal(9);
-        super::memory::read(&mut self.c(), width, 0, translate, prepare);
+        super::memory::read(self.c().raw(), width, 0, translate, prepare);
         self.c()
             .local_tee(WIDE)
             .i64_const(32)
@@ -651,7 +663,15 @@ impl Output<'_> {
         };
         let commit = self.internal(11 + index as u32);
         let translate = self.internal(9);
-        super::memory::write(&mut self.c(), width, source, commit, 1, translate, prepared);
+        super::memory::write(
+            self.c().raw(),
+            width,
+            source,
+            commit,
+            1,
+            translate,
+            prepared,
+        );
         self.c()
             .local_tee(WRITE_STATUS)
             .i32_const(2)
