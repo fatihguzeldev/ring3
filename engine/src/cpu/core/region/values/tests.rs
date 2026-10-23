@@ -54,6 +54,41 @@ fn binary() -> Operation {
 }
 
 #[test]
+fn arithmetic_keeps_mode_correlated_precision_without_narrowing_pc53() {
+    let plan = single(&[binary(), binary()]);
+    let after = plan.instruction(BlockId(0), 0).after;
+    let payload = plan.frame(after).fp.payload[0];
+    let facts: Vec<_> = plan
+        .proofs_at(after)
+        .iter()
+        .map(|&id| plan.proof(id))
+        .filter(|proof| proof.value.is_some_and(|value| payload.contains(value)))
+        .map(|proof| proof.kind)
+        .collect();
+    assert!(facts.contains(&ProofKind::Native24InSingle));
+    assert!(facts.contains(&ProofKind::BoundedF64));
+    assert!(!facts.contains(&ProofKind::Native24));
+
+    let blocks = [
+        block(0x1000, &[binary(), jump(0x2000)]),
+        block(0x2000, &[binary()]),
+    ];
+    let plan = RegionPlan::analyze(&Region::from_blocks(&blocks, 0x1000).unwrap());
+    let contract = &plan.block(BlockId(1)).contract;
+    let payload = plan.frame(contract.frame).fp.payload[0];
+    assert!(contract.guards.iter().any(|&id| {
+        let proof = plan.proof(id);
+        proof.kind == ProofKind::Native24InSingle
+            && proof.value.is_some_and(|value| payload.contains(value))
+    }));
+    assert!(!contract.guards.iter().any(|&id| {
+        let proof = plan.proof(id);
+        proof.kind == ProofKind::Native24
+            && proof.value.is_some_and(|value| payload.contains(value))
+    }));
+}
+
+#[test]
 fn scalar_copies_constants_and_wrapped_status_output_have_distinct_versions() {
     let plan = single(&[
         mov(Register32::Eax, 7),
@@ -148,7 +183,7 @@ fn loop_admissions_and_occupancy_are_guarded_at_public_entry() {
         ));
         assert!(contract.guards.iter().any(|&id| {
             let proof = plan.proof(id);
-            proof.kind == ProofKind::BoundedF64
+            proof.kind == ProofKind::Native24InSingle
                 && proof.conditional.is_none()
                 && proof.value.is_some_and(|v| values.contains(&v))
         }));
@@ -539,7 +574,7 @@ fn actual_simd_fast_success_carries_fp_admission_facts_across_cfg_edges() {
     for kind in [
         ProofKind::Control,
         ProofKind::Occupied,
-        ProofKind::BoundedF64,
+        ProofKind::Native24InSingle,
     ] {
         assert!(
             contract

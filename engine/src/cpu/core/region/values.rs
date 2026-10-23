@@ -100,6 +100,9 @@ pub(in crate::cpu::core) struct Value {
 pub(in crate::cpu::core) enum ProofKind {
     ExactF64,
     Native24,
+    /// Bundles ExactF64 and BoundedF64 in the current control epoch. In PC24
+    /// it additionally certifies a normal binary32 value or signed zero.
+    Native24InSingle,
     BoundedF64,
     Occupied,
     Empty,

@@ -27,7 +27,7 @@ pub(in crate::cpu::core::emitter) fn emit_native_writer() -> Function {
         .i32_store(mem(p::VALID, 2))
         .local_get(5)
         .local_get(3)
-        .i32_const(7)
+        .i32_const(15)
         .i32_and()
         .i32_store(mem(p::PROOFS, 2))
         .local_get(5)

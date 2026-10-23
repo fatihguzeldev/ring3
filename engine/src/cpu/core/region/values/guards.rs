@@ -64,12 +64,14 @@ fn bit(kind: ProofKind) -> u8 {
         ProofKind::ExactF64 => 1,
         ProofKind::BoundedF64 => 2,
         ProofKind::Native24 => 4,
+        ProofKind::Native24InSingle => 8,
         _ => 0,
     }
 }
 fn implied(kind: ProofKind) -> u8 {
     match kind {
-        ProofKind::Native24 => 7,
+        ProofKind::Native24 => 15,
+        ProofKind::Native24InSingle => 11,
         ProofKind::BoundedF64 => 3,
         ProofKind::ExactF64 => 1,
         _ => 0,
@@ -91,6 +93,8 @@ fn proof_bits(plan: &RegionPlan, frame: FrameStateId, logical: u8) -> u8 {
 fn strongest(bits: u8) -> Option<ProofKind> {
     if bits & 4 != 0 {
         Some(ProofKind::Native24)
+    } else if bits & 8 != 0 {
+        Some(ProofKind::Native24InSingle)
     } else if bits & 2 != 0 {
         Some(ProofKind::BoundedF64)
     } else if bits & 1 != 0 {
@@ -184,7 +188,12 @@ impl Guards {
                         )
                     };
                     let load = !facts.loaded.contains(&key);
-                    let expected = proof_bits(plan, step.before, logical);
+                    // Arithmetic consumes one exact bounded native operand,
+                    // with the PC24 precision implication, even at an entirely
+                    // independent owner entry. A producer's physical certificate
+                    // can satisfy this first use without repeating its guards.
+                    let expected =
+                        proof_bits(plan, step.before, logical) | if arithmetic { 11 } else { 0 };
                     let established = facts.admitted.get(&key).copied().unwrap_or(0);
                     let admit = strongest(expected).filter(|kind| established & bit(*kind) == 0);
                     let classified = facts.format.contains(&key);
@@ -207,7 +216,7 @@ impl Guards {
                         remember_admission(&mut facts, payload, implied(kind));
                     }
                     if arithmetic {
-                        remember_admission(&mut facts, payload, 3);
+                        remember_admission(&mut facts, payload, 11);
                         // Successful operand admission explicitly defines this
                         // native lane. No other shared payload component grants
                         // an identity or representation fact.
@@ -221,7 +230,7 @@ impl Guards {
                             let key = PayloadKey::Native(native);
                             facts.loaded.insert(key);
                             facts.format.insert(key);
-                            *facts.admitted.entry(key).or_default() |= 3;
+                            *facts.admitted.entry(key).or_default() |= 11;
                         }
                     }
                 }
@@ -369,7 +378,10 @@ mod tests {
         assert!(first.enter && first.control);
         assert_eq!(first.inputs.len(), 2);
         assert!(first.inputs.iter().all(|input| {
-            input.occupied && input.load && input.format && input.admit.is_none()
+            input.occupied
+                && input.load
+                && !input.format
+                && input.admit == Some(ProofKind::Native24InSingle)
         }));
         for prefix in [4, 5] {
             let later = at(&values, &guards, prefix);
@@ -392,7 +404,10 @@ mod tests {
             let later = at(&values, &guards, 2);
             assert!(later.enter && later.control);
             assert!(later.inputs.iter().all(|input| {
-                input.occupied && input.load && input.format && input.admit.is_none()
+                input.occupied
+                    && input.load
+                    && !input.format
+                    && input.admit == Some(ProofKind::Native24InSingle)
             }));
             let first = values.instruction(BlockId(0), 0).before;
             let last = values.instruction(BlockId(0), 2).before;
@@ -409,7 +424,8 @@ mod tests {
         let first = at(&values, &guards, 0);
         assert_eq!(first.inputs.len(), 1);
         assert_eq!(first.inputs[0].logical, 0);
-        assert!(first.inputs[0].load && first.inputs[0].format);
+        assert!(first.inputs[0].load && !first.inputs[0].format);
+        assert_eq!(first.inputs[0].admit, Some(ProofKind::Native24InSingle));
     }
 
     #[test]
@@ -427,7 +443,11 @@ mod tests {
         let arithmetic = at(&values, &guards, 1);
         assert!(arithmetic.control);
         assert!(!arithmetic.inputs[0].load);
-        assert!(arithmetic.inputs[0].format);
+        assert!(!arithmetic.inputs[0].format);
+        assert_eq!(
+            arithmetic.inputs[0].admit,
+            Some(ProofKind::Native24InSingle)
+        );
         assert!(!arithmetic.inputs[0].occupied);
     }
 

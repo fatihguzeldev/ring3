@@ -10,6 +10,7 @@ pub(super) struct Facts {
     pub native: [bool; 8],
     pub bounded: [bool; 8],
     pub native24: [bool; 8],
+    pub native24_in_single: [bool; 8],
     pub tags: [Option<bool>; 8], // true occupied, false empty; class bits remain exact inputs.
     pub control_admitted: bool,
 }
@@ -35,6 +36,7 @@ pub(super) fn entries(region: &Region) -> Vec<Facts> {
                         input.native[i] &= other.native[i];
                         input.bounded[i] &= other.bounded[i];
                         input.native24[i] &= other.native24[i];
+                        input.native24_in_single[i] &= other.native24_in_single[i];
                         if input.tags[i] != other.tags[i] {
                             input.tags[i] = None;
                         }
@@ -210,6 +212,7 @@ fn transfer(facts: &mut Facts, operation: Option<Operation>) {
             facts.native = [false; 8];
             facts.bounded = [false; 8];
             facts.native24 = [false; 8];
+            facts.native24_in_single = [false; 8];
             facts.tags = [None; 8];
             facts.control_admitted = false;
         }
@@ -218,6 +221,7 @@ fn transfer(facts: &mut Facts, operation: Option<Operation>) {
     transfer_payload(&mut facts.native, operation, false);
     transfer_payload(&mut facts.bounded, operation, false);
     transfer_payload(&mut facts.native24, operation, true);
+    transfer_payload(&mut facts.native24_in_single, operation, false);
     match operation {
         X87Operation::Load(X87Format::Float32) => {
             facts.tags.rotate_right(1);

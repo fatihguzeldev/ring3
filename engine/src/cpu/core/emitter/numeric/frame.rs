@@ -477,11 +477,12 @@ fn descriptor(plan: &RegionPlan, frame: FrameStateId) -> (i64, i64) {
             }
             certificates |= match proof.kind {
                 ProofKind::BoundedF64 => 2,
-                ProofKind::Native24 => 4,
+                ProofKind::Native24 => 12,
+                ProofKind::Native24InSingle => 8,
                 _ => 0,
             };
         }
-        high |= certificates << (24 + logical * 3);
+        high |= certificates << (24 + logical * 4);
     }
     (low as i64, high as i64)
 }
@@ -728,14 +729,14 @@ pub(in crate::cpu::core::emitter) fn emit_normalizer_kernel() -> Function {
         .local_get(49)
         .local_get(41)
         .local_get(45)
-        .i32_const(3)
+        .i32_const(4)
         .i32_mul()
         .i32_const(24)
         .i32_add()
         .i64_extend_i32_u()
         .i64_shr_u()
         .i32_wrap_i64()
-        .i32_const(7)
+        .i32_const(15)
         .i32_and()
         .i32_const(0)
         .local_get(50)
@@ -1083,14 +1084,14 @@ pub(in crate::cpu::core::emitter) fn emit_inline_commit(out: &mut Output<'_>) {
         .local_set(INLINE_CELL)
         .local_get(INLINE_HIGH)
         .local_get(INLINE_LOGICAL)
-        .i32_const(3)
+        .i32_const(4)
         .i32_mul()
         .i32_const(24)
         .i32_add()
         .i64_extend_i32_u()
         .i64_shr_u()
         .i32_wrap_i64()
-        .i32_const(7)
+        .i32_const(15)
         .i32_and()
         .local_set(INLINE_PROOFS);
     inline_write_cell(c, native, raw);

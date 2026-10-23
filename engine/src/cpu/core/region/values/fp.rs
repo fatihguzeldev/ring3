@@ -109,6 +109,7 @@ fn input_fp(
             for (kind, known) in [
                 (ProofKind::BoundedF64, facts.bounded[i]),
                 (ProofKind::Native24, facts.native24[i]),
+                (ProofKind::Native24InSingle, facts.native24_in_single[i]),
             ] {
                 if known {
                     let fact = plan.allocate_proof(Proof {
@@ -119,7 +120,11 @@ fn input_fp(
                         conditional: None,
                     });
                     available.push(fact);
-                    if kind == ProofKind::Native24 || !facts.native24[i] {
+                    if kind == ProofKind::Native24
+                        || (!facts.native24[i]
+                            && (kind == ProofKind::Native24InSingle
+                                || !facts.native24_in_single[i]))
+                    {
                         guards.push(fact);
                     }
                 }
@@ -295,6 +300,14 @@ fn admit(
         available,
         Some(native),
         ProofKind::BoundedF64,
+    );
+    proof(
+        plan,
+        frame,
+        point,
+        available,
+        Some(native),
+        ProofKind::Native24InSingle,
     );
     frame.fp.payload[index] = FpValue::ExactF64(native, exact);
     proof(
@@ -501,6 +514,15 @@ pub(super) fn lower(
                 destination,
                 false,
             ));
+            let value = frame.fp.payload[destination].values()[0];
+            proof(
+                plan,
+                frame,
+                point,
+                available,
+                Some(value),
+                ProofKind::Native24InSingle,
+            );
             if should_pop {
                 pop(frame, shape);
             }
@@ -514,6 +536,15 @@ pub(super) fn lower(
             output = Some(native_result(
                 plan, frame, shape, point, available, 0, false,
             ));
+            let value = frame.fp.payload[0].values()[0];
+            proof(
+                plan,
+                frame,
+                point,
+                available,
+                Some(value),
+                ProofKind::Native24InSingle,
+            );
         }
         X87Operation::ChangeSign | X87Operation::Absolute => {
             occupied(plan, frame, point, available, 0);

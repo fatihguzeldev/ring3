@@ -18,6 +18,13 @@ const EXACT: u32 = 50;
 const ROUNDED: u32 = 51;
 const DOUBLE: u32 = 54;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum StoreValue {
+    Canonical,
+    Native,
+    NativeInSingle,
+}
+
 pub(super) fn begin(out: &mut Output<'_>, operation: Operation, _next: u32) -> bool {
     let Operation::X87 {
         operation,
@@ -70,15 +77,39 @@ pub(super) fn begin(out: &mut Output<'_>, operation: Operation, _next: u32) -> b
             ..
         } => {
             let native = native_store(out, format);
-            if native {
+            if native == StoreValue::Native {
                 span::load(out, 0, FA);
+            } else if native == StoreValue::NativeInSingle {
+                // A store can be the first consumer in this block. Read the
+                // imported CW, not arithmetic scratch DOUBLE from another path.
+                out.c()
+                    .local_get(span::CONTROL)
+                    .i32_const(0x300)
+                    .i32_and()
+                    .i32_eqz()
+                    .if_(BlockType::Empty);
+                span::load(out, 0, FA);
+                out.c()
+                    .local_get(FA)
+                    .f32_demote_f64()
+                    .i32_reinterpret_f32()
+                    .i64_extend_i32_u()
+                    .local_set(PACKED)
+                    .local_get(STATUS)
+                    .i32_const(!0x200)
+                    .i32_and()
+                    .local_set(STATUS)
+                    .else_();
+                frame::load_raw(out, 0, SIG, X);
+                ieee::pack(out, SIG, X, format);
+                out.c().end();
             } else {
                 frame::load_raw(out, 0, SIG, X);
                 ieee::pack(out, SIG, X, format);
             }
             memory::prepare(out, address.unwrap(), format.size() as u32, true, false, 52);
             out.c().local_get(52);
-            if native {
+            if native == StoreValue::Native {
                 out.c().local_get(FA);
                 if format == X87Format::Float32 {
                     out.c().f32_demote_f64().f32_store(mem(0, 0));
@@ -94,7 +125,7 @@ pub(super) fn begin(out: &mut Output<'_>, operation: Operation, _next: u32) -> b
                 }
             }
             memory::commit(out);
-            if native {
+            if native == StoreValue::Native {
                 // An exact store overwrites C1, but a rejected store must preserve
                 // the preceding completed instruction's deferred C1 recipe.
                 out.c()
@@ -379,28 +410,11 @@ fn to_f64(out: &mut Output<'_>, logical: u8, value: u32, depth: u32) {
         .local_set(value);
 }
 
-fn has_proof(out: &Output<'_>, logical: u8, kind: ProofKind) -> bool {
-    let frame = out
-        .plan
-        .frame(out.before_frame.expect("operand has a before frame"));
-    let values = frame.fp.payload[logical as usize].values();
-    // Proofs are value/epoch facts, not facts inferred from a local's numeric index.
-    out.plan
-        .proofs_at(out.before_frame.unwrap())
-        .iter()
-        .map(|id| out.plan.proof(*id))
-        .any(|proof| {
-            proof.kind == kind
-                && proof.epoch == frame.fp.control_epoch
-                && proof.value.is_some_and(|value| values.contains(&value))
-        })
-}
-
-fn native_store(out: &Output<'_>, format: X87Format) -> bool {
+fn native_store(out: &Output<'_>, format: X87Format) -> StoreValue {
     let before = out.before_frame.expect("store has a before frame");
     let frame = out.plan.frame(before);
     let FpValue::ExactF64(value, _) = frame.fp.payload[0] else {
-        return false;
+        return StoreValue::Canonical;
     };
     let has = |kind| {
         out.plan.proofs_at(before).iter().any(|id| {
@@ -413,7 +427,15 @@ fn native_store(out: &Output<'_>, format: X87Format) -> bool {
     };
     // These successful-prefix facts certify finite normal values or signed zero.
     // A conditional imported native lane alone cannot authorize an exact store.
-    has(ProofKind::ExactF64) && (format == X87Format::Float64 || has(ProofKind::Native24))
+    if !has(ProofKind::ExactF64) {
+        StoreValue::Canonical
+    } else if format == X87Format::Float64 || has(ProofKind::Native24) {
+        StoreValue::Native
+    } else if has(ProofKind::Native24InSingle) {
+        StoreValue::NativeInSingle
+    } else {
+        StoreValue::Canonical
+    }
 }
 
 pub(super) fn admit_loaded(out: &mut Output<'_>, logical: u8, kind: ProofKind, depth: u32) {
@@ -444,7 +466,16 @@ fn admit_loaded_uncertified(out: &mut Output<'_>, logical: u8, kind: ProofKind, 
         .i32_or()
         .local_set(85)
         .end();
-    if kind == ProofKind::Native24 {
+    if kind == ProofKind::Native24InSingle {
+        out.c()
+            .local_get(span::CONTROL)
+            .i32_const(0x300)
+            .i32_and()
+            .i32_eqz()
+            .if_(BlockType::Empty);
+    }
+    if matches!(kind, ProofKind::Native24 | ProofKind::Native24InSingle) {
+        let depth = depth + u32::from(kind == ProofKind::Native24InSingle);
         out.c()
             .local_get(FA)
             .i64_reinterpret_f64()
@@ -470,69 +501,21 @@ fn admit_loaded_uncertified(out: &mut Output<'_>, logical: u8, kind: ProofKind, 
             .i32_and()
             .br_if(depth);
     }
-    if matches!(kind, ProofKind::Native24 | ProofKind::BoundedF64) {
+    if kind == ProofKind::Native24InSingle {
+        out.c().end();
+    }
+    if matches!(
+        kind,
+        ProofKind::Native24 | ProofKind::Native24InSingle | ProofKind::BoundedF64
+    ) {
         double::bound(out, FA, depth);
     }
 }
 
-fn operand_bounds(out: &mut Output<'_>, value: u32, depth: u32, native24: bool, bounded: bool) {
-    if !native24 {
-        out.c()
-            .local_get(value)
-            .i64_reinterpret_f64()
-            .i64_const(0x1fff_ffff)
-            .i64_and()
-            .i64_eqz()
-            .i32_eqz()
-            .local_get(DOUBLE)
-            .i32_eqz()
-            .i32_and()
-            .br_if(depth)
-            .local_get(value)
-            .i64_reinterpret_f64()
-            .i64_const(52)
-            .i64_shr_u()
-            .i32_wrap_i64()
-            .i32_const(2047)
-            .i32_and()
-            .i32_const(897)
-            .i32_sub()
-            .i32_const(253)
-            .i32_gt_u()
-            .local_get(value)
-            .f64_const(0.0.into())
-            .f64_ne()
-            .i32_and()
-            .local_get(DOUBLE)
-            .i32_eqz()
-            .i32_and()
-            .br_if(depth);
-    }
-    if !bounded {
-        double::bound(out, value, depth);
-    }
-}
-
 fn operand(out: &mut Output<'_>, logical: u8, value: u32) {
-    let native24 = has_proof(out, logical, ProofKind::Native24);
-    let bounded = has_proof(out, logical, ProofKind::BoundedF64);
-    if matches!(
-        out.plan.frame(out.before_frame.unwrap()).fp.payload[logical as usize],
-        FpValue::ExactF64(..)
-    ) {
-        span::load(out, logical, value);
-        operand_bounds(out, value, 0, native24, bounded);
-        return;
-    }
-    span::valid(out, logical);
-    out.c().if_(BlockType::Empty);
+    // prepare() admitted every distinct arithmetic input before either capture.
+    // The execution plan owns this proof, including unknown external entries.
     span::load(out, logical, value);
-    operand_bounds(out, value, 1, native24, bounded);
-    out.c().else_();
-    to_f64(out, logical, value, 1);
-    operand_bounds(out, value, 1, false, false);
-    span::remember(out, logical, value);
-    out.c().end();
 }
 
 fn clear_c1(out: &mut Output<'_>) {

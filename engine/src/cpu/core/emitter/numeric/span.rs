@@ -162,19 +162,6 @@ pub(super) fn load(out: &mut Output<'_>, index: u8, destination: u32) {
         .local_set(destination);
 }
 
-pub(super) fn remember(out: &mut Output<'_>, index: u8, source: u32) {
-    let cell = super::frame::input_cell(out, index);
-    out.c()
-        .local_get(source)
-        .local_set(VALUES + u32::from(cell))
-        .local_get(VALID)
-        .i32_const(1 << cell)
-        .i32_or()
-        .local_set(VALID);
-    super::pool::mark_loaded(out, cell);
-    super::pool::remember_input(out, index, source);
-}
-
 pub(super) fn write(out: &mut Output<'_>, _index: u8, source: u32) {
     let cell = super::frame::result_cell(out);
     out.c()
