@@ -35,7 +35,7 @@ fn image() -> [u8; 4096] {
 }
 
 #[test]
-fn explicit_callee_root_closes_the_call_cycle_without_changing_default_discovery() {
+fn default_discovery_closes_the_call_cycle_without_requiring_an_explicit_root() {
     let mut memory = memory();
     memory.write(GuestAddress(0x1000), &image()).unwrap();
     let normal = compile(&memory, GuestAddress(0x1000), options()).unwrap();
@@ -52,13 +52,14 @@ fn explicit_callee_root_closes_the_call_cycle_without_changing_default_discovery
         ],
     )
     .unwrap();
-    assert_eq!(normal.instruction_count(), 4);
+    assert_eq!(normal.instruction_count(), 8);
     assert_eq!(
         normal.entrypoints(),
         &[
             GuestAddress(0x1000),
             GuestAddress(0x1005),
             GuestAddress(0x1008),
+            GuestAddress(0x1040),
         ]
     );
     assert_eq!(closed.instruction_count(), 8);
@@ -73,6 +74,7 @@ fn explicit_callee_root_closes_the_call_cycle_without_changing_default_discovery
     );
     assert!(normal.native_instructions().is_empty());
     assert!(closed.native_instructions().is_empty());
+    assert_eq!(normal.instruction_pcs, closed.instruction_pcs);
     assert!(normal.is_current(&memory));
     assert!(closed.is_current(&memory));
 }
@@ -124,7 +126,7 @@ fn explicit_roots_respect_the_block_and_instruction_limits() {
 }
 
 #[test]
-fn an_explicit_callee_owns_its_source_and_reached_gate_validation() {
+fn a_discovered_callee_owns_its_source_and_reached_gate_validation() {
     let mut memory = memory();
     memory
         .write(GuestAddress(0x1000), &[0xe8, 0xfb, 0x0f, 0, 0, 0x0f, 0x0b])
@@ -141,7 +143,7 @@ fn an_explicit_callee_owns_its_source_and_reached_gate_validation() {
     )
     .unwrap();
     memory.write(GuestAddress(0x2000), &[0x48]).unwrap();
-    assert!(normal.is_current(&memory));
+    assert!(!normal.is_current(&memory));
     assert!(!closed.is_current(&memory));
     memory.write(GuestAddress(0x2000), &[0x0f, 0x0b]).unwrap();
     assert!(matches!(
@@ -253,7 +255,14 @@ fn generated_call_regions_preserve_precise_prefixes_and_memory() {
         let mut memory = memory();
         memory.write(GuestAddress(0x1000), &image).unwrap();
         fs::write(directory.join(format!("{variant}.bin")), image).unwrap();
-        let caller = compile_with_gates(&memory, GuestAddress(0x1000), options(), &gates).unwrap();
+        let caller = compile_with_frontier(
+            &memory,
+            GuestAddress(0x1000),
+            options(),
+            &gates,
+            &[GuestAddress(0x1040)],
+        )
+        .unwrap();
         let callee = compile_with_gates(&memory, GuestAddress(0x1040), options(), &gates).unwrap();
         let closed = compile_formation(
             &memory,

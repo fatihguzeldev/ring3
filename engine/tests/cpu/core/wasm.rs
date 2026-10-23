@@ -1,5 +1,5 @@
 use ring3_engine::{
-    cpu::core::{CompileOptions, compile},
+    cpu::core::{CompileOptions, compile, compile_with_frontier},
     memory::{AddressSpace, GuestAddress, PageRange, Permissions},
 };
 use std::{
@@ -25,6 +25,11 @@ impl Scratch {
             NEXT_SCRATCH.fetch_add(1, Ordering::Relaxed)
         ));
         fs::create_dir(&path).unwrap();
+        fs::write(
+            path.join("support.wasm"),
+            ring3_engine::cpu::core::emit_dispatch(),
+        )
+        .unwrap();
         Self(path, true)
     }
 }
@@ -378,8 +383,18 @@ fn generated_wasm_runs_authored_integer_control_memory_programs() {
         } else {
             CompileOptions::default()
         };
-        let code = compile(&memory, GuestAddress(entry), options)
-            .unwrap_or_else(|error| panic!("compile {name}: {error:?}"));
+        let code = if matches!(name.as_str(), "call" | "word-call") {
+            compile_with_frontier(
+                &memory,
+                GuestAddress(entry),
+                options,
+                &[],
+                &[GuestAddress(0x1010)],
+            )
+        } else {
+            compile(&memory, GuestAddress(entry), options)
+        }
+        .unwrap_or_else(|error| panic!("compile {name}: {error:?}"));
         if name == "bounded-prefix" {
             assert_eq!(code.instruction_count(), 1);
         }
