@@ -6,7 +6,8 @@ export const witnessCounters=['normalizer_calls','materializer_calls','raw80_sto
   'wide_snapshot_calls','data_reads','data_writes','flags_calls','flag_kind_queries','flag_width_queries',
   'fp_environment_queries','fp_input_load_queries','fp_input_admission_queries','fp_control_queries',
   'fp_occupancy_queries','status_resolver_calls','fp_result_admissions','fp_pending_recipe_writes','fp_multiply_ops',
-  'entry_filter_queries','entry_index_compares','entry_table_selections','entry_pending_queries','prefix_quota_queries'];
+  'entry_filter_queries','entry_index_compares','entry_table_selections','entry_pending_queries','prefix_quota_queries',
+  'canonical_calls'];
 const u=value=>{const out=[];do{const b=value&127;value>>>=7;out.push(b|(value?128:0));}while(value);return Uint8Array.from(out);};
 const concat=parts=>Uint8Array.from(Buffer.concat(parts.map(value=>Buffer.from(value))));
 const section=(id,data)=>concat([Uint8Array.of(id),u(data.length),data]);
@@ -69,6 +70,7 @@ export function instrumentWitnessModule(source,parsed,isSupport=false) {
     return Uint8Array.from([0x41,...a]);};
   const bankGlobal=globalBase+witnessCounters.length;
   const dataGlobal=bankGlobal+1,dataLengthGlobal=bankGlobal+2;
+  const canonicalImport=parsed.imports.findIndex(item=>item.module==='ring3'&&item.name==='numeric');
   const proof={addressBasis:'actual effective address minus diagnostic Context92 pointer',
     canonical:[0,100],header:[512,640],records:[640,896],recordBytes:32,memorySites:0,normalizers:[],wideSnapshots:[]};
   const instrumentBody=(raw,fn,bodyIndex)=>{
@@ -111,6 +113,7 @@ export function instrumentWitnessModule(source,parsed,isSupport=false) {
         fn.ops[i+1].value===0xf3f&&fn.ops[i+2]?.op===0x71)before.push(increment('control_admissions'));
       if(name==='guest.run'){
         const following=fn.ops.slice(i+1,i+5);
+        if(node.op===16&&node.call===canonicalImport)before.push(increment('canonical_calls'));
         // These count executed routing operators, rather than emitted label or
         // descriptor counts. INDEX tables are distinct from PREFIX_BASE's
         // instruction-port tables and the physical-payload cell router.

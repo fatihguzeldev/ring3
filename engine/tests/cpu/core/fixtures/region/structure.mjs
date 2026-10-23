@@ -214,6 +214,19 @@ function instructionBodies(module) {
   });
 }
 
+export function inspectCanonicalSpine(bytes) {
+  const module=readModule(bytes),bodies=instructionBodies(module);
+  assert.equal(bodies.length,1,'one actual guarded architectural body owns the canonical continuation');
+  const imported=module.imports.findIndex(item=>item.module==='ring3'&&item.name==='numeric');
+  assert(imported>=0,'this numerical owner imports the real canonical numeric boundary');
+  assert.deepEqual(signature(module,imported),{parameters:[0x7f,0x7f],results:[0x7f]},
+    'the inspected boundary is the actual context/ordinal canonical function');
+  const sites=module.functions.flatMap((fn,offset)=>fn.ops.flatMap(node=>node.op===16&&node.call===imported?
+    [{function:offset+module.imports.length,offset:node.offset}]:[]));
+  return{body:bodies[0].index,imported,sites,ownerBytes:bytes.length,
+    bodyOperators:defined(module,bodies[0].index).ops.length};
+}
+
 function inspectPortRouting(fn) {
   const {ops}=fn,summary={tables:[],fullBlockAssignments:[],prefixQuotaGuards:[],errors:[]};
   const check=(okay,message)=>{if(!okay)summary.errors.push(message);};
@@ -387,14 +400,28 @@ function inspectExitEpilogue(module,name) {
       serviceTest=ops[serviceTests[0]].frame;serviceLoop=ops[serviceTests[0]].frames.at(-1);
       innerExit=ops[serviceLoop?.open+1]?.frame;
       const resume=ops.slice(serviceTest.open+1,serviceTest.end);
+      const resumeTail=resume.slice(-3),canonicalPrefix=resume.slice(0,-3);
       check(serviceLoop?.kind===3&&serviceLoop.type===-64&&
         ops[serviceLoop.open].frames.at(-1)===body&&innerExit?.kind===2&&innerExit.type===-64&&
         innerExit.open===serviceLoop.open+1&&innerExit.end<serviceTest.open,
         'the retained body exits one inner block to an in-body commit inside its bootstrap-once service loop');
-      check(serviceTest.otherwise===undefined&&resume.length===3&&resume[0].op===0x41&&resume[0].value===0&&
-        resume[1].op===0x21&&resume[1].local===157&&resume[2].op===12&&
-        resume[2].frames.at(-1-resume[2].targets[0])===serviceLoop,
+      check(serviceTest.otherwise===undefined&&resumeTail.length===3&&resumeTail[0].op===0x41&&resumeTail[0].value===0&&
+        resumeTail[1].op===0x21&&resumeTail[1].local===157&&resumeTail[2].op===12&&
+        resumeTail[2].frames.at(-1-resumeTail[2].targets[0])===serviceLoop,
         'a requested restart clears its request and branches to the same service loop without re-running bootstrap');
+      if(canonicalPrefix.length){
+        const guard=canonicalPrefix[3]?.frame,imported=module.imports.findIndex(item=>item.module==='ring3'&&item.name==='numeric');
+        const calls=ops.flatMap((node,i)=>node.op===16&&node.call===imported?[i]:[]),call=calls[0];
+        check(canonicalPrefix[0]?.op===0x20&&canonicalPrefix[0].local===157&&
+          canonicalPrefix[1]?.op===0x41&&canonicalPrefix[1].value===2&&canonicalPrefix[2]?.op===0x46&&
+          canonicalPrefix[3]?.op===4&&guard?.type===-64&&guard.otherwise===undefined&&
+          canonicalPrefix.at(-1)?.op===11&&canonicalPrefix.at(-1).frame===guard,
+          'the added service is wholly inside the exact canonical-kind2 arm before the unchanged restart tail');
+        check(imported>=0&&calls.length===1&&ops[call]?.frames.includes(guard)&&
+          ops[call-2]?.op===0x20&&ops[call-2].local===0&&ops[call-1]?.op===0x20&&ops[call-1].local===172,
+          'the sole canonical callback consumes the actual context and runtime request ordinal inside its service guard');
+        summary.canonicalService={guardOpen:guard?.open,guardEnd:guard?.end,call,imported};
+      }
       const terminal=ops.slice(serviceTest.end+1,serviceLoop.end);
       check(terminal.length===3&&terminal[0].op===0x20&&terminal[0].local===108&&
         terminal[1].op===0x21&&terminal[1].local===108&&terminal[2].op===12&&

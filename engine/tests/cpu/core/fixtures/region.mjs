@@ -18,17 +18,18 @@ import {runNativeStoreCases} from './region/native-store.mjs';
 import {runPoolCases,runPoolLoopCases,runTransportCases,runTransportLoopCases} from './region/pool.mjs';
 import {runExecutionCases,runExecutionFlagsCases,runExecutionLoadCases,runExecutionGuardCases,runExecutionMultiplyCases,runExecutionFlagsOracleCases} from './region/execution.mjs';
 import {runEntryCases,runEntryNestedCases,runEntryUnmatchedCases} from './region/entry.mjs';
+import {runCanonicalCases,runCanonicalStatusCases} from './region/canonical.mjs';
 
 const [enginePath,reportPath,mode]=process.argv.slice(2);
-assert(enginePath&&reportPath&&(mode===undefined||mode==='--entry'||mode==='--entry-baseline'||mode==='--entry-nested'||mode==='--entry-unmatched'||mode==='--structure'||mode==='--graph'||mode==='--groups'||mode==='--native-stores'||mode==='--pool'||mode==='--pool-baseline'||mode==='--transport'||mode==='--transport-baseline'||mode==='--execution'||mode==='--execution-flags'||mode==='--execution-loads'||mode==='--execution-guards'||mode==='--execution-multiply'||mode==='--execution-flags-oracle'),
-  'usage: region.mjs engine.wasm fresh-report.json [--entry|--entry-baseline|--entry-nested|--entry-unmatched|--structure|--graph|--groups|--native-stores|--pool|--pool-baseline|--transport|--transport-baseline|--execution|--execution-flags|--execution-loads|--execution-guards|--execution-multiply|--execution-flags-oracle]');
+assert(enginePath&&reportPath&&(mode===undefined||mode==='--canonical'||mode==='--canonical-baseline'||mode==='--canonical-status'||mode==='--entry'||mode==='--entry-baseline'||mode==='--entry-nested'||mode==='--entry-unmatched'||mode==='--structure'||mode==='--graph'||mode==='--groups'||mode==='--native-stores'||mode==='--pool'||mode==='--pool-baseline'||mode==='--transport'||mode==='--transport-baseline'||mode==='--execution'||mode==='--execution-flags'||mode==='--execution-loads'||mode==='--execution-guards'||mode==='--execution-multiply'||mode==='--execution-flags-oracle'),
+  'usage: region.mjs engine.wasm fresh-report.json [--canonical|--canonical-baseline|--canonical-status|--entry|--entry-baseline|--entry-nested|--entry-unmatched|--structure|--graph|--groups|--native-stores|--pool|--pool-baseline|--transport|--transport-baseline|--execution|--execution-flags|--execution-loads|--execution-guards|--execution-multiply|--execution-flags-oracle]');
 const artifact=readEngine(enginePath),hash=bytes=>createHash('sha256').update(bytes).digest('hex');
 const hex=bytes=>Buffer.from(bytes).toString('hex');
 const unhex=text=>Uint8Array.from(Buffer.from(text.replaceAll(' ',''),'hex'));
 closeSync(openSync(reportPath,'wx'));
 const report={schema:1,complete:false,engineSha256:artifact.sha256,
   scope:'actual generated mixed integer/x87 CFG with exact instruction-prefix, publication and fault oracles; no timing claim',
-  sources:Object.fromEntries(['./region.mjs','./link.mjs','./region/structure.mjs','./region/control.mjs','./region/link.mjs','./region/status.mjs','./region/state.mjs','./region/quota.mjs','./region/ownership.mjs','./region/ports.mjs','./region/graph.mjs','./region/groups.mjs','./region/native-store.mjs','./region/pool.mjs','./region/execution.mjs','./region/execution-flags.mjs','./region/entry.mjs','./region/witness.mjs','./pool-state.mjs',
+  sources:Object.fromEntries(['./region.mjs','./link.mjs','./region/structure.mjs','./region/control.mjs','./region/link.mjs','./region/status.mjs','./region/state.mjs','./region/quota.mjs','./region/ownership.mjs','./region/ports.mjs','./region/graph.mjs','./region/groups.mjs','./region/native-store.mjs','./region/pool.mjs','./region/execution.mjs','./region/execution-flags.mjs','./region/canonical.mjs','./region/entry.mjs','./region/witness.mjs','./pool-state.mjs',
     '../../../support/wasm/engine.mjs','../../../../../sdk/runtime/engine.js','../../../../../sdk/runtime/cache.js']
     .map(path=>[path,hash(readFileSync(new URL(path,import.meta.url)))])),cases:[]};
 const checkpoint=()=>writeFileSync(reportPath,JSON.stringify(report,null,2));
@@ -210,7 +211,11 @@ function exchangeCase(name,eax,structural=false) {
 }
 
 try {
-  if(mode==='--entry'||mode==='--entry-baseline') {
+  if(mode==='--canonical'||mode==='--canonical-baseline') {
+    stage='owner-canonical-service';runCanonicalCases(fixture);checkpoint();
+  }else if(mode==='--canonical-status') {
+    stage='owner-canonical-status';runCanonicalStatusCases(fixture);checkpoint();
+  }else if(mode==='--entry'||mode==='--entry-baseline') {
     stage='structured-entry-routing';runEntryCases(fixture);checkpoint();
   }else if(mode==='--entry-nested') {
     stage='nested-entry-routing';runEntryNestedCases(fixture);checkpoint();
