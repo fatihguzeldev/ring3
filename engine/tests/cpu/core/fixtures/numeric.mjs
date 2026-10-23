@@ -170,6 +170,15 @@ function standard(t,retired,pc,flags=2,stop=2,changes={}) {
 function bank(t,wanted) {assert.deepEqual(t.slice(t.arena+fpOffset,128),wanted,'full literal FP128');}
 
 try {
+  runCase('precise-tail-keeps-three-store-widths-with-numerical-import','d903 884310 66894312 894314 90 0f0b',4,
+    {data:values,registers:[0x12345678,0,0,0x3000,0x4800,0,0,0],flags:0xcd7,numericCalls:0},t=>{
+      standard(t,4,0x100c,0xcd7);t.writeExpected(0x3010,unhex('78'));t.writeExpected(0x3012,unhex('7856'));t.writeExpected(0x3014,unhex('78563412'));
+      bank(t,t.fp({status:0x3800,tag:0x3fff,opcode:0x103,fip:0x1000,fdp:0x3000,cs:0x1b,ds:0x23,registers:{7:ext3}}));
+      const versions=t.initialPageVersions.slice(),slot=Math.floor((t.physical(0x3010)-t.word(t.context,64))/4096);
+      new DataView(versions.buffer).setBigUint64(slot*16+8,t.initialVersion+3n,true);
+      assert.deepEqual(t.slice(t.word(t.context,84),versions.length),versions,'three widths stamp only their shared data page');
+      assert.equal(new DataView(t.memory.buffer).getBigUint64(t.word(t.context,80),true),t.initialVersion+3n,'one transaction for each exact-tail store');
+    });
   runCase('x87-multiply','d903 d84b04 d95b08 0f0b',3,{data:values,invalidExport:true},t=>{
     standard(t,3,0x1008); t.writeExpected(0x3008,unhex('0000c040')); assert.deepEqual(t.read(0x3008),unhex('0000c040'));
     bank(t,t.fp({opcode:0x15b,fip:0x1005,fdp:0x3008,cs:0x1b,ds:0x23,registers:{7:ext6}}));

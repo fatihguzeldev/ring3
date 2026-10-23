@@ -46,10 +46,10 @@ export function assertCoreNames(module, entry, identity) {
   if (identity !== undefined) assert.equal(moduleName, prefix + identity);
   const numeric = WebAssembly.Module.imports(module).some(item => item.name === 'numeric');
   const names = ['guest.read_slow', 'guest.write_slow', ...(numeric ? ['guest.numeric'] : []),
-    'guest.flags', 'guest.run', 'guest.lookup', 'guest.publish'];
+    'guest.flags', 'guest.run', 'guest.lookup', 'guest.publish', 'guest.precise'];
   const stores = functions.slice(names.length).map(([, name]) => name);
   assert(stores.length <= 3 && stores.every(name => ['guest.store8', 'guest.store16', 'guest.store32'].includes(name)),
-    'only supported fixed-width store helpers follow the publisher');
+    'only supported fixed-width store helpers follow the precise tail');
   assert.equal(new Set(stores).size, stores.length, 'store helper widths are unique');
   names.push(...stores);
   assert.deepEqual(functions, names.map((name, index) => [index, name]), 'names use actual function indices');

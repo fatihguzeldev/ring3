@@ -83,7 +83,8 @@ pub(super) fn emit(
     native: &[NativeInstruction],
 ) -> Vec<u8> {
     let shift = u32::from(!native.is_empty());
-    let (run, store_widths) = run(blocks, identity, native);
+    let (fast, store_widths) = run(blocks, identity, native, false, Vec::new());
+    let (precise, store_widths) = run(blocks, identity, native, true, store_widths);
     let mut module = Module::new();
     let mut types = TypeSection::new();
     types.ty().function([ValType::I32; 2], [ValType::I32]);
@@ -115,7 +116,7 @@ pub(super) fn emit(
     }
     module.section(&imports);
     let mut functions = FunctionSection::new();
-    for kind in [3, 0, 4, 5] {
+    for kind in [3, 0, 4, 5, 0] {
         functions.function(kind);
     }
     for _ in &store_widths {
@@ -127,9 +128,10 @@ pub(super) fn emit(
     module.section(&exports);
     let mut code = CodeSection::new();
     code.function(&flags::emit_function());
-    code.function(&run);
+    code.function(&fast);
     code.function(&lookup(blocks));
     code.function(&publisher());
+    code.function(&precise);
     for &width in &store_widths {
         code.function(&super::memory::emit_store(width));
     }
@@ -142,15 +144,21 @@ pub(super) fn emit(
     if shift != 0 {
         functions.append(2, "guest.numeric");
     }
-    for (index, name) in ["guest.flags", "guest.run", "guest.lookup", "guest.publish"]
-        .into_iter()
-        .enumerate()
+    for (index, name) in [
+        "guest.flags",
+        "guest.run",
+        "guest.lookup",
+        "guest.publish",
+        "guest.precise",
+    ]
+    .into_iter()
+    .enumerate()
     {
         functions.append(2 + shift + index as u32, name);
     }
     for (index, width) in store_widths.iter().enumerate() {
         functions.append(
-            6 + shift + index as u32,
+            7 + shift + index as u32,
             &format!("guest.store{}", width * 8),
         );
     }
@@ -201,7 +209,13 @@ fn lookup(blocks: &[Block]) -> Function {
     function
 }
 
-fn run(blocks: &[Block], identity: u64, native: &[NativeInstruction]) -> (Function, Vec<u32>) {
+fn run(
+    blocks: &[Block],
+    identity: u64,
+    native: &[NativeInstruction],
+    precise: bool,
+    store_widths: Vec<u32>,
+) -> (Function, Vec<u32>) {
     let mut function = Function::new([
         (25, ValType::I32),
         (1, ValType::I64),
@@ -219,7 +233,7 @@ fn run(blocks: &[Block], identity: u64, native: &[NativeInstruction]) -> (Functi
         prefix: 0,
         record_flags: true,
         native,
-        store_widths: Vec::new(),
+        store_widths,
     };
     out.c()
         .local_get(CTX)
@@ -287,15 +301,25 @@ fn run(blocks: &[Block], identity: u64, native: &[NativeInstruction]) -> (Functi
         .br_table(0..blocks.len() as u32, blocks.len() as u32);
     for (index, block) in blocks.iter().enumerate() {
         out.c().end();
-        out.c()
-            .local_get(REMAIN)
-            .i32_const(block.instructions.len() as i32)
-            .i32_ge_u()
-            .if_(BlockType::Empty);
-        out.block(block, false);
-        out.c().else_();
-        out.block(block, true);
-        out.c().end().br((blocks.len() - index) as u32);
+        if precise {
+            out.block(block, true);
+        } else {
+            out.c()
+                .local_get(REMAIN)
+                .i32_const(block.instructions.len() as i32)
+                .i32_lt_u()
+                .if_(BlockType::Empty);
+            out.publish_exit(Some(block.entry), 0);
+            let exact = out.internal(6);
+            out.c()
+                .local_get(CTX)
+                .local_get(REMAIN)
+                .call(exact)
+                .return_()
+                .end();
+            out.block(block, false);
+        }
+        out.c().br((blocks.len() - index) as u32);
     }
     out.c().end();
     out.exit(StopReason::NeedCode, None, 0);
@@ -515,7 +539,7 @@ impl Output<'_> {
                 index
             }
         };
-        let commit = self.internal(6 + index as u32);
+        let commit = self.internal(7 + index as u32);
         super::memory::write(&mut self.c(), width, source, commit, 1, prepared);
         self.c()
             .local_tee(WRITE_STATUS)

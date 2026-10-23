@@ -40,26 +40,31 @@ function unsigned(source,at) {
 }
 const section=(id,data)=>[id,...u(data.length),...data];
 function countLookups(source) {
-  const output=[...source.subarray(0,8)],at={value:8};let instrumented=false,exported=false;
+  const output=[...source.subarray(0,8)],at={value:8};let instrumented=false,preciseInstrumented=false,exported=false;
   while(at.value<source.length) {
     const id=source[at.value++],length=unsigned(source,at),end=at.value+length;
     assert(end<=source.length);let data=source.subarray(at.value,end);at.value=end;
     assert.notEqual(id,6,'generated module has no existing globals');
     if(id===7) {
-      output.push(...section(6,[1,0x7f,1,0x41,0,0x0b]));
-      const cursor={value:0},count=unsigned(data,cursor),name=new TextEncoder().encode('test.lookup_calls');
-      data=Uint8Array.from([...u(count+1),...data.subarray(cursor.value),...u(name.length),...name,3,0]);exported=true;
+      output.push(...section(6,[2,0x7f,1,0x41,0,0x0b,0x7f,1,0x41,0,0x0b]));
+      const cursor={value:0},count=unsigned(data,cursor),entries=[];
+      for(const [index,label] of ['test.lookup_calls','test.precise_calls'].entries()) {
+        const name=new TextEncoder().encode(label);entries.push(...u(name.length),...name,3,index);
+      }
+      data=Uint8Array.from([...u(count+2),...data.subarray(cursor.value),...entries]);exported=true;
     } else if(id===10) {
       const cursor={value:0},count=unsigned(data,cursor),bodies=[];
-      assert(count>=4&&count<=7);
+      assert(count>=5&&count<=8);
       for(let index=0;index<count;index++) {
         const size=unsigned(data,cursor),bodyEnd=cursor.value+size;
         assert(bodyEnd<=data.length);let body=data.subarray(cursor.value,bodyEnd);cursor.value=bodyEnd;
-        if(index===2) {
+        if(index===2||index===4) {
           const locals={value:0},groups=unsigned(body,locals);
-          assert.equal(groups,0,'lookup has no declared locals');
-          body=Uint8Array.from([...body.subarray(0,locals.value),0x23,0,0x41,1,0x6a,0x24,0,...body.subarray(locals.value)]);
-          instrumented=true;
+          if(index===2)assert.equal(groups,0,'lookup has no declared locals');
+          for(let group=0;group<groups;group++){unsigned(body,locals);locals.value++;}
+          const global=index===2?0:1;
+          body=Uint8Array.from([...body.subarray(0,locals.value),0x23,global,0x41,1,0x6a,0x24,global,...body.subarray(locals.value)]);
+          if(index===2)instrumented=true;else preciseInstrumented=true;
         }
         bodies.push(...u(body.length),...body);
       }
@@ -67,7 +72,7 @@ function countLookups(source) {
     }
     output.push(...section(id,data));
   }
-  assert(instrumented&&exported);return Uint8Array.from(output);
+  assert(instrumented&&preciseInstrumented&&exported);return Uint8Array.from(output);
 }
 for (const line of readFileSync(join(directory,'regions.tsv'),'utf8').trim().split('\n')) {
   const [name,entry,identity] = line.split('\t'), encoded = readFileSync(join(directory,`${name}.wasm`));
@@ -77,7 +82,7 @@ for (const line of readFileSync(join(directory,'regions.tsv'),'utf8').trim().spl
     {module:'ring3',name:'write',kind:'function'},
   ]);
   const instrumented=countLookups(encoded),exports=new WebAssembly.Instance(new WebAssembly.Module(instrumented),{ring3:{memory,read,write}}).exports;
-  regions.set(name,{name,entry:Number(entry),identity:BigInt(identity),run:exports.run,lookups:exports['test.lookup_calls'],sha256:hash(encoded),instrumentedSha256:hash(instrumented)});
+  regions.set(name,{name,entry:Number(entry),identity:BigInt(identity),run:exports.run,lookups:exports['test.lookup_calls'],precise:exports['test.precise_calls'],sha256:hash(encoded),instrumentedSha256:hash(instrumented)});
 }
 function reset(name,eax=5,readonly=false,options={}) {
   bytes.fill(0,CTX,CTX+128); bytes.fill(0,BACKING,BACKING+3*4096);
@@ -105,17 +110,18 @@ function step(label,region,budget,expected) {
   if (expected.fault) {c.setUint32(48,expected.faultAddress??0x3000,true);c.setUint32(52,expected.faultMetadata??0x20204,true);c.setUint32(116,14,true);}
   new DataView(ram.buffer).setUint32(4096,expected.data,true);
   if(expected.stackWrite!==undefined)new DataView(ram.buffer).setUint32(2*4096+0x7fc,expected.stackWrite,true);
-  const beforeSlow = slowReads,beforeWrites=slowWrites;region.lookups.value=0;
+  const beforeSlow = slowReads,beforeWrites=slowWrites;region.lookups.value=0;region.precise.value=0;
   const stop = region.run(CTX,budget)>>>0;
   const record = {label,region:region.name,budget,stop,contextHex:hex(bytes.subarray(CTX,CTX+128)),
-    ramHex:hex(bytes.subarray(BACKING,BACKING+3*4096)),slowReads:slowReads-beforeSlow,slowWrites:slowWrites-beforeWrites,lookups:region.lookups.value};
+    ramHex:hex(bytes.subarray(BACKING,BACKING+3*4096)),slowReads:slowReads-beforeSlow,slowWrites:slowWrites-beforeWrites,lookups:region.lookups.value,preciseCalls:region.precise.value};
   cases.push(record); checkpoint();
   assert.equal(stop,expected.stop,`${label}: exact boundary`);
   assert.equal(record.slowReads,expected.reads??(expected.fault?1:0),`${label}: no work beyond frontier`);
   assert.equal(record.slowWrites,expected.writes??0,`${label}: precise slow write boundary`);
   assert.deepEqual(bytes.subarray(CTX,CTX+128),wanted,`${label}: complete context and exact prefix`);
   assert.deepEqual(bytes.subarray(BACKING,BACKING+3*4096),ram,`${label}: complete code/data/stack`);
-  assert.equal(record.lookups,expected.lookups??1,`${label}: only runtime targets use dynamic lookup`);
+  assert(record.preciseCalls<=1,`${label}: the exact tail cannot delegate recursively`);
+  assert.equal(record.lookups-record.preciseCalls,expected.lookups??1,`${label}: runtime lookup count excludes the exact-tail entry lookup`);
   if(expected.version!==undefined) {
     assert.equal(d.getBigUint64(VERSION,true),BigInt(expected.version),`${label}: exact store transaction count`);
     const versions=new Uint8Array(48);new DataView(versions.buffer).setBigUint64(2*16+8,BigInt(expected.version),true);
