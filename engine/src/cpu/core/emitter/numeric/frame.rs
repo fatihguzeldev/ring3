@@ -33,6 +33,9 @@ pub(super) fn result_cell(out: &Output<'_>) -> u8 {
 }
 
 pub(in crate::cpu::core::emitter) fn emit_frame(out: &mut Output<'_>, frame: FrameStateId) {
+    if out.native.is_empty() {
+        return;
+    }
     let shape = out.plan.shape_id(frame).0 as i32 + 1;
     let metadata = out.plan.metadata(frame).clone();
     out.c()
@@ -74,6 +77,9 @@ pub(in crate::cpu::core::emitter) fn normalize_frame(out: &mut Output<'_>) {
 }
 
 pub(in crate::cpu::core::emitter) fn emit_edge(out: &mut Output<'_>, edge: &EdgePlan) {
+    if out.native.is_empty() {
+        return;
+    }
     emit_frame(out, edge.frame);
     if edge.fp_rebase {
         normalize_frame(out);
@@ -221,8 +227,6 @@ struct Layout {
     dirty_tmp: u32,
     high_tmp: u32,
     pointer_tmp: u32,
-    native_tmp: u32,
-    low_tmp: u32,
 }
 
 const HOT: Layout = Layout {
@@ -242,8 +246,6 @@ const HOT: Layout = Layout {
     dirty_tmp: 44,
     high_tmp: 39,
     pointer_tmp: 40,
-    native_tmp: 97,
-    low_tmp: 46,
 };
 
 const KERNEL: Layout = Layout {
@@ -263,9 +265,14 @@ const KERNEL: Layout = Layout {
     dirty_tmp: 34,
     high_tmp: 35,
     pointer_tmp: 36,
-    native_tmp: 37,
-    low_tmp: 38,
 };
+
+const DESCRIPTOR_LOW: u32 = 37;
+const DESCRIPTOR_HIGH: u32 = 38;
+const CELL: u32 = 39;
+const LOGICAL: u32 = 40;
+const TAG_CODE: u32 = 41;
+const SLOT_EFFECTS: u32 = 42;
 
 fn emit_tag(code: &mut InstructionSink<'_>, recipe: TagRecipe, r: Layout) {
     match recipe {
@@ -335,53 +342,178 @@ fn emit_tag(code: &mut InstructionSink<'_>, recipe: TagRecipe, r: Layout) {
     }
 }
 
-fn copy_cell(code: &mut InstructionSink<'_>, destination: u8, source: u8, r: Layout) {
-    for (base, temporary) in [
-        (r.native, r.native_tmp),
-        (r.low, r.low_tmp),
-        (r.high, r.high_tmp),
-    ] {
-        code.local_get(if source == 8 {
-            temporary
-        } else {
-            base + u32::from(source)
-        })
-        .local_set(if destination == 8 {
-            temporary
-        } else {
-            base + u32::from(destination)
-        });
-    }
-}
-
-fn permute(code: &mut InstructionSink<'_>, cells: [u8; 8], r: Layout) {
-    let mut pending: Vec<_> = cells
-        .into_iter()
-        .enumerate()
-        .filter_map(|(to, from)| (to as u8 != from).then_some((to as u8, from)))
-        .collect();
-    while !pending.is_empty() {
-        if let Some(index) = pending
-            .iter()
-            .position(|(destination, _)| !pending.iter().any(|(_, source)| source == destination))
-        {
-            let (destination, source) = pending.remove(index);
-            copy_cell(code, destination, source, r);
-        } else {
-            let saved = pending[0].0;
-            copy_cell(code, 8, saved, r);
-            for (_, source) in &mut pending {
-                if *source == saved {
-                    *source = 8;
-                }
-            }
+fn descriptor(shape: &FpShape) -> (i64, i64) {
+    let mut low = 0u64;
+    let mut high = 0u64;
+    for logical in 0..8 {
+        let cell = shape.cells[logical].0;
+        let tag = match shape.tags[logical] {
+            TagRecipe::Entry(index) => index,
+            TagRecipe::Empty => 8,
+            TagRecipe::Zero => 9,
+            TagRecipe::Normal => 10,
+            TagRecipe::Special => 11,
+            TagRecipe::Value(cell) => 12 + cell.0,
+        };
+        debug_assert!(cell < 8 && tag < 20);
+        low |= u64::from(cell | tag << 3) << (logical * 8);
+        let inherited = shape.inherited_dirty[logical].unwrap_or(8);
+        debug_assert!(inherited <= 8);
+        let mut effects = inherited | ((shape.written >> logical) & 1) << 4;
+        if logical == 0 {
+            effects |= (shape.top_delta as u8 & 7) << 5;
         }
+        high |= u64::from(effects) << (logical * 8);
     }
+    (low as i64, high as i64)
 }
 
-fn normalize_shape(code: &mut InstructionSink<'_>, shape: &FpShape, r: Layout) {
+fn select_descriptor(code: &mut InstructionSink<'_>, shapes: &[FpShape], selected: u32) {
+    let count = shapes.len() as u32;
+    code.block(BlockType::Empty).block(BlockType::Empty);
+    for _ in shapes {
+        code.block(BlockType::Empty);
+    }
+    code.local_get(selected)
+        .i32_const(1)
+        .i32_sub()
+        .br_table(0..count, count);
+    for (index, shape) in shapes.iter().enumerate() {
+        let (low, high) = descriptor(shape);
+        code.end()
+            .i64_const(low)
+            .local_set(DESCRIPTOR_LOW)
+            .i64_const(high)
+            .local_set(DESCRIPTOR_HIGH)
+            .br(count - index as u32);
+    }
+    code.end().unreachable().end();
+}
+
+fn select_cell(code: &mut InstructionSink<'_>, base: u32, index: u32, ty: ValType) {
+    fn select(
+        code: &mut InstructionSink<'_>,
+        base: u32,
+        index: u32,
+        ty: ValType,
+        first: u32,
+        count: u32,
+    ) {
+        if count == 1 {
+            code.local_get(base + first);
+            return;
+        }
+        let middle = first + count / 2;
+        code.local_get(index)
+            .i32_const(middle as i32)
+            .i32_lt_u()
+            .if_(BlockType::Result(ty));
+        select(code, base, index, ty, first, count / 2);
+        code.else_();
+        select(code, base, index, ty, middle, count / 2);
+        code.end();
+    }
+    select(code, base, index, ty, 0, 8);
+}
+
+fn descriptor_byte(code: &mut InstructionSink<'_>, descriptor: u32) {
+    code.local_get(descriptor)
+        .local_get(LOGICAL)
+        .i64_extend_i32_u()
+        .i64_const(3)
+        .i64_shl()
+        .i64_shr_u()
+        .i32_wrap_i64()
+        .i32_const(255)
+        .i32_and();
+}
+
+fn selected_value_tag(code: &mut InstructionSink<'_>, r: Layout) {
+    code.local_get(r.valid)
+        .local_get(r.high_tmp)
+        .i32_shr_u()
+        .i32_const(1)
+        .i32_and()
+        .if_(BlockType::Result(ValType::I32));
+    select_cell(code, r.native, r.high_tmp, ValType::F64);
+    code.f64_const(0.0.into()).f64_eq().else_();
+    select_cell(code, r.low, r.high_tmp, ValType::I64);
+    code.i64_eqz();
+    select_cell(code, r.high, r.high_tmp, ValType::I32);
+    code.i32_const(0x7fff)
+        .i32_and()
+        .i32_eqz()
+        .i32_and()
+        .if_(BlockType::Result(ValType::I32))
+        .i32_const(1)
+        .else_();
+    select_cell(code, r.high, r.high_tmp, ValType::I32);
+    code.i32_const(0x7fff)
+        .i32_and()
+        .i32_const(1)
+        .i32_sub()
+        .i32_const(0x7ffe)
+        .i32_lt_u();
+    select_cell(code, r.low, r.high_tmp, ValType::I64);
+    code.i64_const(0)
+        .i64_lt_s()
+        .i32_and()
+        .if_(BlockType::Result(ValType::I32))
+        .i32_const(0)
+        .else_()
+        .i32_const(2)
+        .end()
+        .end()
+        .end();
+}
+
+fn selected_tag(code: &mut InstructionSink<'_>, r: Layout) {
+    code.local_get(TAG_CODE)
+        .i32_const(8)
+        .i32_lt_u()
+        .if_(BlockType::Result(ValType::I32))
+        .local_get(r.tag)
+        .local_get(r.top)
+        .local_get(TAG_CODE)
+        .i32_add()
+        .i32_const(7)
+        .i32_and()
+        .i32_const(1)
+        .i32_shl()
+        .i32_shr_u()
+        .i32_const(3)
+        .i32_and()
+        .else_()
+        .local_get(TAG_CODE)
+        .i32_const(12)
+        .i32_lt_u()
+        .if_(BlockType::Result(ValType::I32))
+        .i32_const(0x87)
+        .local_get(TAG_CODE)
+        .i32_const(8)
+        .i32_sub()
+        .i32_const(1)
+        .i32_shl()
+        .i32_shr_u()
+        .i32_const(3)
+        .i32_and()
+        .else_()
+        .local_get(TAG_CODE)
+        .i32_const(12)
+        .i32_sub()
+        .local_set(r.high_tmp);
+    selected_value_tag(code, r);
+    code.end().end();
+}
+
+fn normalize_descriptor(code: &mut InstructionSink<'_>, r: Layout) {
     code.local_get(r.top)
-        .i32_const(i32::from(shape.top_delta))
+        .local_get(DESCRIPTOR_HIGH)
+        .i64_const(5)
+        .i64_shr_u()
+        .i32_wrap_i64()
+        .i32_const(7)
+        .i32_and()
         .i32_add()
         .i32_const(7)
         .i32_and()
@@ -390,72 +522,107 @@ fn normalize_shape(code: &mut InstructionSink<'_>, shape: &FpShape, r: Layout) {
         .local_set(r.tag_tmp)
         .i32_const(0)
         .local_set(r.valid_tmp)
-        .i32_const(i32::from(shape.written))
-        .local_set(r.dirty_tmp);
-    for logical in 0..8 {
-        let cell = shape.cells[logical].0;
-        emit_tag(code, shape.tags[logical], r);
-        code.local_get(r.top_tmp)
-            .i32_const(logical as i32)
-            .i32_add()
-            .i32_const(7)
-            .i32_and()
-            .i32_const(1)
-            .i32_shl()
-            .i32_shl()
-            .local_get(r.tag_tmp)
-            .i32_or()
-            .local_set(r.tag_tmp)
-            .local_get(r.valid)
-            .i32_const(i32::from(cell))
-            .i32_shr_u()
-            .i32_const(1)
-            .i32_and()
-            .i32_const(logical as i32)
-            .i32_shl()
-            .local_get(r.valid_tmp)
-            .i32_or()
-            .local_set(r.valid_tmp);
-        if let Some(source) = shape.inherited_dirty[logical] {
-            code.local_get(r.dirty)
-                .i32_const(i32::from(source))
-                .i32_shr_u()
-                .i32_const(1)
-                .i32_and()
-                .i32_const(logical as i32)
-                .i32_shl()
-                .local_get(r.dirty_tmp)
-                .i32_or()
-                .local_set(r.dirty_tmp);
-        }
-        if shape.written & (1 << logical) != 0 {
-            code.local_get(r.valid)
-                .i32_const(1 << cell)
-                .i32_and()
-                .i32_eqz()
-                .if_(BlockType::Empty)
-                .local_get(r.bank)
-                .local_get(r.top_tmp)
-                .i32_const(logical as i32)
-                .i32_add()
-                .i32_const(7)
-                .i32_and()
-                .i32_const(10)
-                .i32_mul()
-                .i32_add()
-                .i32_const(20)
-                .i32_add()
-                .local_set(r.pointer_tmp)
-                .local_get(r.pointer_tmp)
-                .local_get(r.low + u32::from(cell))
-                .i64_store(mem(0, 0))
-                .local_get(r.pointer_tmp)
-                .local_get(r.high + u32::from(cell))
-                .i32_store16(mem(8, 0))
-                .end();
-        }
-    }
-    permute(code, shape.cells.map(|cell| cell.0), r);
+        .i32_const(0)
+        .local_set(r.dirty_tmp)
+        .i32_const(0)
+        .local_set(LOGICAL)
+        .loop_(BlockType::Empty);
+    descriptor_byte(code, DESCRIPTOR_LOW);
+    code.local_tee(CELL)
+        .i32_const(3)
+        .i32_shr_u()
+        .local_set(TAG_CODE)
+        .local_get(CELL)
+        .i32_const(7)
+        .i32_and()
+        .local_set(CELL);
+    descriptor_byte(code, DESCRIPTOR_HIGH);
+    code.i32_const(31).i32_and().local_set(SLOT_EFFECTS);
+    selected_tag(code, r);
+    code.local_get(r.top_tmp)
+        .local_get(LOGICAL)
+        .i32_add()
+        .i32_const(7)
+        .i32_and()
+        .i32_const(1)
+        .i32_shl()
+        .i32_shl()
+        .local_get(r.tag_tmp)
+        .i32_or()
+        .local_set(r.tag_tmp)
+        .local_get(r.valid)
+        .local_get(CELL)
+        .i32_shr_u()
+        .i32_const(1)
+        .i32_and()
+        .local_get(LOGICAL)
+        .i32_shl()
+        .local_get(r.valid_tmp)
+        .i32_or()
+        .local_set(r.valid_tmp)
+        .local_get(SLOT_EFFECTS)
+        .i32_const(15)
+        .i32_and()
+        .i32_const(8)
+        .i32_lt_u()
+        .if_(BlockType::Empty)
+        .local_get(r.dirty)
+        .local_get(SLOT_EFFECTS)
+        .i32_const(15)
+        .i32_and()
+        .i32_shr_u()
+        .i32_const(1)
+        .i32_and()
+        .local_get(LOGICAL)
+        .i32_shl()
+        .local_get(r.dirty_tmp)
+        .i32_or()
+        .local_set(r.dirty_tmp)
+        .end()
+        .local_get(SLOT_EFFECTS)
+        .i32_const(16)
+        .i32_and()
+        .if_(BlockType::Empty)
+        .i32_const(1)
+        .local_get(LOGICAL)
+        .i32_shl()
+        .local_get(r.dirty_tmp)
+        .i32_or()
+        .local_set(r.dirty_tmp)
+        .local_get(r.valid)
+        .i32_const(1)
+        .local_get(CELL)
+        .i32_shl()
+        .i32_and()
+        .i32_eqz()
+        .if_(BlockType::Empty)
+        .local_get(r.bank)
+        .local_get(r.top_tmp)
+        .local_get(LOGICAL)
+        .i32_add()
+        .i32_const(7)
+        .i32_and()
+        .i32_const(10)
+        .i32_mul()
+        .i32_add()
+        .i32_const(20)
+        .i32_add()
+        .local_set(r.pointer_tmp)
+        .local_get(r.pointer_tmp);
+    select_cell(code, r.low, CELL, ValType::I64);
+    code.i64_store(mem(0, 0)).local_get(r.pointer_tmp);
+    select_cell(code, r.high, CELL, ValType::I32);
+    code.i32_store16(mem(8, 0))
+        .end()
+        .end()
+        .local_get(LOGICAL)
+        .i32_const(1)
+        .i32_add()
+        .local_tee(LOGICAL)
+        .i32_const(8)
+        .i32_ne()
+        .br_if(0)
+        .end();
     code.local_get(r.valid_tmp)
         .local_set(r.valid)
         .local_get(r.dirty_tmp)
@@ -512,20 +679,46 @@ pub(in crate::cpu::core::emitter) fn emit_normalizer_function(
     plan: &RegionPlan,
     numeric: bool,
 ) -> wasm_encoder::Function {
+    // Original payload parameters 0..23 are immutable snapshots. The descriptor
+    // kernel computes metadata first; result selection can then alias or cycle
+    // those inputs without destructive copies or a memory-backed payload pool.
     let mut function =
-        wasm_encoder::Function::new([(6, ValType::I32), (1, ValType::F64), (1, ValType::I64)]);
+        wasm_encoder::Function::new([(6, ValType::I32), (2, ValType::I64), (4, ValType::I32)]);
     let mut code = function.instructions();
-    for (index, shape) in plan.shapes().iter().enumerate().filter(|_| numeric) {
-        code.local_get(KERNEL.selected)
-            .i32_const(index as i32 + 1)
-            .i32_eq()
-            .if_(BlockType::Empty);
-        normalize_shape(&mut code, shape, KERNEL);
-        code.end();
-    }
-    code.i32_const(-1).local_set(KERNEL.selected);
-    for local in results(KERNEL) {
-        code.local_get(local);
+    if numeric {
+        select_descriptor(&mut code, plan.shapes(), KERNEL.selected);
+        normalize_descriptor(&mut code, KERNEL);
+        for (base, ty) in [
+            (KERNEL.native, ValType::F64),
+            (KERNEL.low, ValType::I64),
+            (KERNEL.high, ValType::I32),
+        ] {
+            for logical in 0..8 {
+                code.local_get(DESCRIPTOR_LOW)
+                    .i64_const(logical * 8)
+                    .i64_shr_u()
+                    .i32_wrap_i64()
+                    .i32_const(7)
+                    .i32_and()
+                    .local_set(CELL);
+                select_cell(&mut code, base, CELL, ty);
+            }
+        }
+        for local in [
+            KERNEL.valid,
+            KERNEL.dirty,
+            KERNEL.tag,
+            KERNEL.status,
+            KERNEL.top,
+        ] {
+            code.local_get(local);
+        }
+        code.i32_const(-1);
+    } else {
+        code.i32_const(-1).local_set(KERNEL.selected);
+        for local in results(KERNEL) {
+            code.local_get(local);
+        }
     }
     code.end();
     function

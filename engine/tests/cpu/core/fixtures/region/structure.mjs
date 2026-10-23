@@ -32,7 +32,8 @@ function operators(bytes) {
     else if(op>=0x28&&op<=0x3e){node.align=r.unsigned();node.memoryOffset=r.unsigned();}
     else if(op===0x3f||op===0x40)r.unsigned();
     else if(op===0x41)node.value=Number(r.signed());
-    else if(op===0x42||op===0xd0)r.signed();
+    else if(op===0x42)node.value=r.signed();
+    else if(op===0xd0)r.signed();
     else if(op===0x43)r.take(4);
     else if(op===0x44)r.take(8);
     else if(op===0xfc){
@@ -124,14 +125,27 @@ function guardedNativeNormalizer(module,index) {
   if(!stores.length||fn.ops.some(node=>[16,17,18,19,20,21].includes(node.op)))return undefined;
   for(const store of stores){
     if(!(store.op===0x37&&store.memoryOffset===0||store.op===0x3b&&store.memoryOffset===8))return undefined;
-    const guard=store.frames.findLast(frame=>{
+    const guardProof=frame=>{
       if(frame.kind!==4||frame.otherwise!==undefined)return false;
       const pattern=fn.ops.slice(frame.open-4,frame.open),mask=pattern[1]?.value;
-      return pattern.length===4&&pattern[0].op===0x20&&pattern[0].local===24&&
-        pattern[1].op===0x41&&mask>=1&&mask<=128&&(mask&(mask-1))===0&&pattern[2].op===0x71&&pattern[3].op===0x45;
-    });
+      if(pattern.length===4&&pattern[0].op===0x20&&pattern[0].local===24&&
+        pattern[1].op===0x41&&mask>=1&&mask<=128&&(mask&(mask-1))===0&&pattern[2].op===0x71&&pattern[3].op===0x45)
+        return {guardOffset:fn.ops[frame.open].offset,nativeBit:mask};
+      const dynamic=fn.ops.slice(frame.open-6,frame.open);
+      const written=store.frames.find(outer=>{
+        const p=fn.ops.slice(outer.open-3,outer.open);
+        return outer.kind===4&&outer.otherwise===undefined&&p.length===3&&p[0].op===0x20&&p[0].local===42&&
+          p[1].op===0x41&&p[1].value===16&&p[2].op===0x71;
+      });
+      if(dynamic.length===6&&dynamic[0].op===0x20&&dynamic[0].local===24&&
+        dynamic[1].op===0x41&&dynamic[1].value===1&&dynamic[2].op===0x20&&dynamic[2].local===39&&
+        dynamic[3].op===0x74&&dynamic[4].op===0x71&&dynamic[5].op===0x45&&written)
+        return {guardOffset:fn.ops[frame.open].offset,nativeCellLocal:39,writtenGuardOffset:fn.ops[written.open].offset};
+      return undefined;
+    };
+    const guard=store.frames.map(guardProof).filter(Boolean).at(-1);
     if(!guard)return undefined;
-    guards.push({storeOffset:store.offset,guardOffset:fn.ops[guard.open].offset,nativeBit:fn.ops[guard.open-3].value});
+    guards.push({storeOffset:store.offset,...guard});
   }
   return {index,name:module.names.get(index),parameters:type.parameters,results:type.results,rawStoreGuards:guards,
     condition:'each raw80 store requires the corresponding incoming native-valid bit to be zero'};
@@ -193,6 +207,69 @@ export function instrumentStateWitness(source) {
 function controlAdmission(ops,index) {
   return ops[index]?.op===0x20&&ops[index].local===87&&
     ops[index+1]?.op===0x41&&ops[index+1].value===0xf3f&&ops[index+2]?.op===0x71;
+}
+
+function inspectNormalizerKernel(module) {
+  const index=[...module.names].find(([,name])=>name==='guest.normalize_frame')?.[0];
+  const fn=module.functions[index-module.imports.length];
+  if(!fn)return {index,errors:['missing actual normalizer body']};
+  const tables=fn.ops.flatMap((node,i)=>node.op===14?[{operator:i,offset:node.offset,targets:node.targets}]:[]);
+  const perShapeStateArms=fn.ops.flatMap((node,i)=>node.op===4&&
+    fn.ops[i-3]?.op===0x20&&fn.ops[i-3].local===30&&
+    fn.ops[i-2]?.op===0x41&&fn.ops[i-1]?.op===0x46?[node.offset]:[]);
+  const summary={index,bytes:fn.raw.length,operations:fn.ops.length,tables,perShapeStateArms,
+    kernelLoops:fn.ops.filter(node=>node.op===3).map(node=>node.offset),
+    opaqueLowStores:fn.ops.filter(node=>node.op===0x37&&node.memoryOffset===0).map(node=>node.offset),
+    opaqueHighStores:fn.ops.filter(node=>node.op===0x3b&&node.memoryOffset===8).map(node=>node.offset),
+    descriptors:[],errors:[]};
+  if(tables.length!==1)return summary;
+  const{ops,edges}=fn,table=tables[0],check=(condition,message)=>{if(!condition)summary.errors.push(message);};
+  const prefix=ops.slice(table.operator-3,table.operator);
+  check(prefix.length===3&&prefix[0].op===0x20&&prefix[0].local===30&&
+    prefix[1].op===0x41&&prefix[1].value===1&&prefix[2].op===0x6b,
+    'the actual selector indexes shape IDs from the retained selected parameter');
+  check(table.targets.length>2,'the authored unit has multiple real shape descriptor arms');
+  const resumes=[];
+  for(const target of edges[table.operator].slice(0,-1)){
+    const arm=ops.slice(target,target+5),low=arm[0]?.value,high=arm[2]?.value;
+    const valid=arm.length===5&&arm[0].op===0x42&&typeof low==='bigint'&&
+      arm[1].op===0x21&&arm[1].local===37&&arm[2].op===0x42&&typeof high==='bigint'&&
+      arm[3].op===0x21&&arm[3].local===38&&arm[4].op===12;
+    check(valid,'each shape arm only assigns two I64 constants and branches to the shared kernel');
+    if(!valid)continue;
+    const lo=BigInt.asUintN(64,low),hi=BigInt.asUintN(64,high),cells=[],tags=[],effects=[];
+    for(let logical=0;logical<8;logical++){
+      const shift=BigInt(logical*8),payload=Number(lo>>shift&255n),effect=Number(hi>>shift&255n);
+      const tag=payload>>>3;cells.push(payload&7);tags.push(tag);effects.push(effect);
+      check(tag<20,'packed tag recipes only reference entry/class/value codes0..19');
+      check((effect&15)<=8,'packed inherited dirty source is0..7 or exact None sentinel8');
+      check(logical===0||(effect&224)===0,'only descriptor byte0 carries TOP delta bits');
+    }
+    resumes.push(edges[target+4][0]);
+    summary.descriptors.push({lowHex:lo.toString(16).padStart(16,'0'),highHex:hi.toString(16).padStart(16,'0'),
+      cells,tags,effects,topDeltaModulo8:Number(hi>>5n&7n)});
+  }
+  check(summary.descriptors.length===table.targets.length-1,'every explicit branch-table shape target has one constant descriptor');
+  check(resumes.length>0&&new Set(resumes).size===1,'all constant descriptor arms converge before the same kernel body');
+  const fallback=edges[table.operator].at(-1);
+  check(ops[fallback]?.op===0,'the selector default rejects an impossible private shape ID before normalization');
+  check(!ops.some(node=>[0x21,0x22].includes(node.op)&&node.local<24),
+    'all eight native/low/high input cells stay immutable while masks, tags and aliases are reconstructed');
+  check(!ops.some(node=>[16,17,18,19,20,21].includes(node.op)),'the single kernel has no delegated or indirect per-shape body');
+  const loop=ops.find(node=>node.op===3)?.frame;
+  if(loop){
+    const before=ops.slice(loop.open-2,loop.open),tail=ops.slice(loop.end-7,loop.end);
+    check(before.length===2&&before[0].op===0x41&&before[0].value===0&&before[1].op===0x21&&before[1].local===40,
+      'the shared slot loop starts at logical slot0');
+    check(tail.length===7&&tail[0].op===0x20&&tail[0].local===40&&tail[1].op===0x41&&tail[1].value===1&&
+      tail[2].op===0x6a&&tail[3].op===0x22&&tail[3].local===40&&tail[4].op===0x41&&tail[4].value===8&&
+      tail[5].op===0x47&&tail[6].op===13&&tail[6].frames.at(-1-tail[6].targets[0])===loop,
+      'the single loop advances once through exactly eight logical slots');
+    check(ops.filter(node=>node.op>=0x36&&node.op<=0x3e).every(node=>node.frames.includes(loop)),
+      'all raw-bank writes belong to the shared eight-slot loop');
+    check(resumes.every(resume=>resume<loop.open),'every descriptor arm converges before loop initialization');
+  }else check(false,'the constant arms feed an actual shared slot loop');
+  return summary;
 }
 
 function inspectExitEpilogue(module,name) {
@@ -340,6 +417,7 @@ export function inspectRegion(bytes) {
     controlAdmissionSites:[...admissions].map(node=>node.offset),
     withoutCanonicalizationDispatchOrControlAdmission:cycles(node=>canonical(node)||dispatch(node)||rotations.has(node)||admissions.has(node)),
     conditionalNativeCanonicalizers:[...conditionalNative.values()],
+    normalizerKernel:inspectNormalizerKernel(module),
     materializers:[...materializers].map(index=>({index,name:module.names.get(index)??module.imports[index]?.name})),
     materializerSignature:[...module.names].filter(([,name])=>name==='guest.materialize_numeric')
       .map(([index,name])=>({index,name,...module.types[module.functionTypes[index-module.imports.length]]})),
@@ -356,6 +434,14 @@ export function assertAnalyzedStateStructure(proof) {
   assert(proof.withoutCanonicalizationDispatchOrStackRotation.length>0,
     'the balanced arithmetic loop repeats without per-push/pop eight-cell runtime rotations');
   assertRegionStructure(proof);
+  assert.equal(proof.normalizerKernel.tables.length,1,
+    'one actual descriptor br_table selects shape constants instead of repeating the eight-cell normalizer per shape');
+  assert.deepEqual(proof.normalizerKernel.perShapeStateArms,[],
+    'the normalizer has no per-shape selected-ID if arms around repeated state work');
+  assert.equal(proof.normalizerKernel.kernelLoops.length,1,'all shape descriptors share one eight-slot normalization loop');
+  assert.equal(proof.normalizerKernel.opaqueLowStores.length,1,'the shared kernel has one dynamic raw80 low-word store site');
+  assert.equal(proof.normalizerKernel.opaqueHighStores.length,1,'the shared kernel has one dynamic raw80 high-word store site');
+  assert.deepEqual(proof.normalizerKernel.errors,[],'packed descriptors feed one bounded immutable-input normalization kernel');
   assert(proof.withoutCanonicalizationDispatchOrEagerControl.length>0,
     'the balanced arithmetic loop also bypasses per-instruction PC/index writes');
   assert(proof.withoutCanonicalizationDispatchOrControlAdmission.length>0,
