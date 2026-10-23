@@ -10,6 +10,7 @@ import {runLinkedCases} from './region/link.mjs';
 import {runStatusCases,runLinkedStatusCases} from './region/status.mjs';
 import {runStateCases,runRenamingCase} from './region/state.mjs';
 import {runLinkedQuotaCase} from './region/quota.mjs';
+import {runOwnershipCase} from './region/ownership.mjs';
 
 const [enginePath,reportPath,mode]=process.argv.slice(2);
 assert(enginePath&&reportPath&&(mode===undefined||mode==='--structure'),
@@ -20,7 +21,7 @@ const unhex=text=>Uint8Array.from(Buffer.from(text.replaceAll(' ',''),'hex'));
 closeSync(openSync(reportPath,'wx'));
 const report={schema:1,complete:false,engineSha256:artifact.sha256,
   scope:'actual generated mixed integer/x87 CFG with exact instruction-prefix, publication and fault oracles; no timing claim',
-  sources:Object.fromEntries(['./region.mjs','./link.mjs','./region/structure.mjs','./region/control.mjs','./region/link.mjs','./region/status.mjs','./region/state.mjs','./region/quota.mjs',
+  sources:Object.fromEntries(['./region.mjs','./link.mjs','./region/structure.mjs','./region/control.mjs','./region/link.mjs','./region/status.mjs','./region/state.mjs','./region/quota.mjs','./region/ownership.mjs',
     '../../../support/wasm/engine.mjs','../../../../../sdk/runtime/engine.js','../../../../../sdk/runtime/cache.js']
     .map(path=>[path,hash(readFileSync(new URL(path,import.meta.url)))])),cases:[]};
 const checkpoint=()=>writeFileSync(reportPath,JSON.stringify(report,null,2));
@@ -318,6 +319,7 @@ try {
   stage='compiled-link-boundaries';runLinkedCases(artifact,report);checkpoint();
   stage='compiled-link-status';runLinkedStatusCases(artifact,report);checkpoint();
   stage='compiled-link-short-quota';runLinkedQuotaCase(artifact,report);checkpoint();
+  stage='compiled-source-ownership';runOwnershipCase(artifact,report);checkpoint();
   }
   report.complete=true;checkpoint();console.log(JSON.stringify({complete:true,cases:report.cases.length,engineSha256:artifact.sha256}));
 }catch(error){report.failure={stage,message:String(error),stack:error.stack};checkpoint();throw error;}

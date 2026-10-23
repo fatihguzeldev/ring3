@@ -143,6 +143,78 @@ function coldFixture(steps, select = pc => ({id:1n,stop:2,next:pc+4})) {
   return f;
 }
 
+function transientFixture() {
+  const f=fixture(pc=>({id:pc===0x1000?1n:2n,stop:2,next:pc+2}));
+  const prepare=f.api.core_prepare,end=f.api.core_end;
+  f.api.core_prepare=(pc,...args)=>{
+    const status=prepare(pc,...args),d=new DataView(f.engine.memory.buffer);
+    d.setUint32(f.context+112,pc===0x1000?0:2,true);
+    return pc===0x1000?status:18;
+  };
+  f.control.begin=()=>{new DataView(f.engine.memory.buffer).setUint32(f.context+112,1,true);return 0;};
+  f.api.core_end=()=>{new DataView(f.engine.memory.buffer).setUint32(f.context+112,0,true);return end();};
+  return f;
+}
+
+test('owned-bound transient executes standalone once and leaves retained units and table ownership intact',()=>{
+  const f=transientFixture(),cache=new CodeCache(f.engine,{chain:true,budget:1});
+  const owner=cache.entry(0x1000),slots=[...f.links],before=cache.stats();
+  const unit=cache.entry(0x1004);
+  assert.equal(unit.transient,true);assert.equal(unit.id,2n);assert.equal(unit.slot,undefined);
+  assert.equal(cache.units.size,1);assert.equal(cache.units.get(owner.id),owner);
+  assert.deepEqual([...f.links],slots);assert.equal(cache.admissions,before.admissions);
+  assert.equal(cache.retainedModuleBytes,owner.bytes);
+  const result=cache.execute(unit);
+  assert.deepEqual([result.pc,result.coreReason,result.retired,result.work,result.regions,result.id],[0x1006,2,1,1,1,2n]);
+  assert.equal(cache.transient,null);assert.equal(cache.units.size,1);
+  assert.deepEqual([...f.links],slots);assert.equal(cache.table.get(owner.slot),owner.run);
+  assert.equal(f.calls.filter(([name])=>name==='link').length,1,'only the retained owner is linked');
+  assert.equal(f.calls.filter(([name])=>name==='next').length,0,'standalone fallback never invokes the dispatcher');
+  assert.equal(f.calls.filter(([name])=>name==='begin').length,1);
+  assert.equal(f.calls.filter(([name])=>name==='end').length,1);
+  assert.equal(new DataView(f.engine.memory.buffer).getUint32(f.context+112,true),0);
+  assert.throws(()=>cache.execute(unit),/not retained/,'a consumed transient cannot be replayed');
+});
+
+test('stale begin reselects an owned-bound transient before the second begin',()=>{
+  const f=transientFixture();let begins=0;
+  f.control.begin=()=>{
+    begins++;
+    const d=new DataView(f.engine.memory.buffer);
+    if(begins===1){d.setUint32(f.context+32,0x1004,true);return 4;}
+    assert.equal(d.getUint32(f.context+112,true),2,'transient preparation precedes retry');
+    assert.equal(d.getBigUint64(f.context+120,true),2n);d.setUint32(f.context+112,1,true);return 0;
+  };
+  const cache=new CodeCache(f.engine,{chain:true,budget:1}),owner=cache.entry(0x1000);
+  const result=cache.execute(owner);
+  assert.deepEqual([result.pc,result.coreReason,result.retired,result.work,result.id],[0x1006,2,1,1,2n]);
+  assert.equal(begins,2);assert.equal(f.calls.filter(([name])=>name==='end').length,1);
+  assert.equal(cache.units.size,1);assert.equal(cache.units.get(1n),owner);assert.equal(cache.transient,null);
+  assert.equal(f.calls.filter(([name])=>name==='link').length,1);
+});
+
+test('WasmLimit without the exact transient marker and nonzero identity remains fatal',()=>{
+  for(const[marker,id]of[[0,1n],[1,1n],[3,1n],[2,0n]]){
+    const f=fixture(pc=>({id,stop:2,next:pc+2})),prepare=f.api.core_prepare;
+    f.api.core_prepare=(...args)=>{prepare(...args);new DataView(f.engine.memory.buffer).setUint32(f.context+112,marker,true);return 18;};
+    const cache=new CodeCache(f.engine,{chain:true,budget:1});
+    assert.throws(()=>cache.entry(0x1000),error=>error.operation==='core_prepare'&&error.status===18,
+      `marker ${marker}, identity ${id} cannot authorize a transient`);
+    assert.equal(cache.units.size,0);assert.equal(cache.transient,null);
+    assert.equal(f.calls.filter(([name])=>['begin','end','link'].includes(name)).length,0);
+  }
+});
+
+test('transient native-begin failure cannot execute bytes or consume a retained owner slot',()=>{
+  const f=transientFixture(),cache=new CodeCache(f.engine,{chain:true,budget:1});
+  const owner=cache.entry(0x1000),unit=cache.entry(0x1004);f.control.begin=()=>7;
+  assert.throws(()=>cache.execute(unit),error=>error.operation==='core_begin'&&error.status===7);
+  assert.equal(f.calls.filter(([name])=>name==='end').length,0,'a rejected lease is never ended');
+  assert.equal(new DataView(f.engine.memory.buffer).getUint32(f.context+40,true),0,'no guest instruction retired');
+  assert.equal(cache.units.size,1);assert.equal(cache.units.get(owner.id),owner);
+  assert.deepEqual([...f.links],[[owner.slot,owner.id]]);
+});
+
 test('cold diagnostics are optional and copy the closed native snapshot',()=>{
   const absent=new CodeCache(fixture().engine,{chain:false});
   assert.equal(absent.coldDiagnostics(),null);
