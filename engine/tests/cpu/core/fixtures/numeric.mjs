@@ -77,8 +77,9 @@ function runCase(name, codeHex, budget, options, verify) {
     new Uint8Array(memory.buffer,arena,56).fill(0);
     new Uint8Array(memory.buffer,arena,4).set([82,51,83,84]);
     view().setUint16(arena+4,3,true); view().setUint16(arena+6,1,true); put(arena,8,56);
-    registers.forEach((value,index)=>put(arena,16+index*4,value)); put(arena,48,0x1000); put(arena,52,2);
+    registers.forEach((value,index)=>put(arena,16+index*4,value)); put(arena,48,0x1000); put(arena,52,options?.flags??2);
     if(options?.control!==undefined) view().setUint16(arena+fpOffset+16,options.control,true);
+    if(options?.fp) new Uint8Array(memory.buffer,arena+fpOffset,128).set(fp(slice(arena+fpOffset,128),options.fp));
     if(options?.mxcsr!==undefined) put(arena,simdOffset+16,options.mxcsr);
     if(options?.fs) status('set_segment_base',0,4,options.fs);
     const initialFp = slice(arena+fpOffset,128), initialSimd = slice(arena+simdOffset,160), initialYmm = slice(arena+ymmOffset,144);
@@ -117,8 +118,11 @@ function runCase(name, codeHex, budget, options, verify) {
       result.handoff = {prefixRetired,prefixPc,published:hex(published),imported:hex(unpublishedFp),moduleSha256:hash(resumedCode)};
       status('core_begin',0); active = true;
     }
+    const bankPointer=word(context,92);
+    if(options?.nullBank) put(context,92,0);
     const stop = run(context,budget)>>>0;
     result.executed = {stop,numericCalls,...raw()}; checkpoint();
+    if(options?.nullBank) put(context,92,bankPointer);
     if(options?.numericCalls!==undefined) assert.equal(numericCalls,options.numericCalls,`${name}: numerical helper calls`);
     status('core_end',0); active = false;
     neutral('inactive numerical import',()=>status('core_numeric',8,context,0));
@@ -228,7 +232,7 @@ try {
     standard(t,3,0x1008);t.writeExpected(0x3008,unhex('000080bf'));
     bank(t,t.fp({opcode:0x15b,fip:0x1005,fdp:0x3008,cs:0x1b,ds:0x23,registers:{7:'0000000000000080ffbf'}}));
   });
-  runCase('direct-pc24-divide-preserves-pe-and-c1','d903 d87304 dfe0 d95b08 0f0b',4,{control:0x7f,numericCalls:1,data:v=>{v.setFloat32(0,3,true);v.setFloat32(4,7,true);}},t=>{
+  runCase('direct-pc24-divide-preserves-pe-and-c1','d903 d87304 dfe0 d95b08 0f0b',4,{control:0x7f,numericCalls:0,data:v=>{v.setFloat32(0,3,true);v.setFloat32(4,7,true);}},t=>{
     standard(t,4,0x100a,2,2,{0:0x3a20});t.writeExpected(0x3008,unhex('b76ddb3e'));
     bank(t,t.fp({status:0x20,opcode:0x15b,fip:0x1007,fdp:0x3008,cs:0x1b,ds:0x23,registers:{7:'0000000000b76ddbfd3f'}}));
   });
@@ -236,7 +240,7 @@ try {
     standard(t,5,0x100c);t.writeExpected(0x3008,unhex('00004040'));
     bank(t,t.fp({opcode:0x15b,fip:0x1009,fdp:0x3008,cs:0x1b,ds:0x23,registers:{6:ext3,7:ext3}}));
   });
-  runCase('direct-pc24-declines-denormal-memory-operand','d903 d84304 dfe0 d95b08 0f0b',4,{control:0x7f,numericCalls:2,data:v=>{v.setFloat32(0,3,true);v.setUint32(4,1,true);}},t=>{
+  runCase('direct-pc24-declines-denormal-memory-operand','d903 d84304 dfe0 d95b08 0f0b',4,{control:0x7f,numericCalls:1,data:v=>{v.setFloat32(0,3,true);v.setUint32(4,1,true);}},t=>{
     standard(t,4,0x100a,2,2,{0:0x3822});t.writeExpected(0x3008,unhex('00004040'));
     bank(t,t.fp({status:0x22,opcode:0x15b,fip:0x1007,fdp:0x3008,cs:0x1b,ds:0x23,registers:{7:ext3}}));
   });
@@ -249,6 +253,48 @@ try {
     assert.deepEqual(t.state.registers,t.initialRegisters);t.writeExpected(0x3008,unhex('00000041'));
     bank(t,t.fp({opcode:0x15b,fip:0x1005,fdp:0x3008,cs:0x1b,ds:0x23,registers:{7:'00000000000000800240'}}));
   });
+  const stateRegisters=[0xa5c35aa5,0x12345678,0x87654321,0x3000,0x4800,0x11223344,0x55667788,0x99aabbcc];
+  const stateMetadata={tag:0xffff,opcode:0x5a5,fip:0x10203040,fdp:0x50607080,cs:0x1b,ds:0x23,
+    registers:{0:ext3,7:ext6}};
+  runCase('direct-status-ax-preserves-deferred-integer-flags','83c001 dfe0 0f0b',2,
+    {fp:{...stateMetadata,status:0x6a3f},registers:[0xffffffff,...stateRegisters.slice(1)],numericCalls:0},t=>{
+      standard(t,2,0x1005,0x57,2,{0:0x6a3f});bank(t,t.initialFp);
+    });
+  for(const control of [0x7f,0x27f,0x37f,0x77f,0xb7f,0xf7f]) {
+    runCase(`direct-status-ax-${control.toString(16)}`,'dfe0 0f0b',1,
+      {control,fp:{...stateMetadata,status:0x6a3f},registers:stateRegisters,flags:0xcd7,numericCalls:0},t=>{
+        standard(t,1,0x1002,0xcd7,2,{0:0xa5c36a3f});bank(t,t.initialFp);
+      });
+  }
+  for(let bit=0;bit<6;bit++) {
+    const control=0x37f&~(1<<bit),status=0x4a00|(1<<bit);
+    runCase(`direct-status-ax-ignores-pending-${bit}`,'dfe0 0f0b',1,
+      {control,fp:{...stateMetadata,status},registers:stateRegisters,flags:0xcd7,numericCalls:0},t=>{
+        standard(t,1,0x1002,0xcd7,2,{0:(0xa5c30000|status)>>>0});bank(t,t.initialFp);
+      });
+    runCase(`wait-delivers-pending-${bit}`,'9b 0f0b',8,
+      {control,fp:{...stateMetadata,status},registers:stateRegisters,flags:0xcd7,numericCalls:1},t=>{
+        standard(t,0,0x1000,0xcd7,9);assert.equal(t.state.vector,16);assert.equal(t.state.detail,status|0x8080);
+        bank(t,t.fp({...stateMetadata,status:status|0x8080}));
+      });
+  }
+  for(const[control,status]of[[0x37f,0x6a3f],[0x37e,0x6a20],[0x340,0x4700]]) {
+    runCase(`direct-wait-${control.toString(16)}-${status.toString(16)}`,'9b dfe0 0f0b',2,
+      {control,fp:{...stateMetadata,status},registers:stateRegisters,flags:0xcd7,numericCalls:0},t=>{
+        standard(t,2,0x1003,0xcd7,2,{0:(0xa5c30000|status)>>>0});bank(t,t.initialFp);
+      });
+  }
+  runCase('status-before-wait-retains-successful-prefix','dfe0 9b 0f0b',8,
+    {control:0x37e,fp:{...stateMetadata,status:0x4a01},registers:stateRegisters,flags:0xcd7,numericCalls:1},t=>{
+      standard(t,1,0x1002,0xcd7,9,{0:0xa5c34a01});assert.equal(t.state.vector,16);assert.equal(t.state.detail,0xca81);
+      bank(t,t.fp({...stateMetadata,status:0xca81}));
+    });
+  for(const[code,pc]of[['dfe0',0x1002],['9b',0x1001]]) {
+    runCase(`state-null-bank-fallback-${code}`,`${code} 0f0b`,1,
+      {fp:{...stateMetadata,status:0x6a3f},registers:stateRegisters,flags:0xcd7,numericCalls:1,nullBank:true},t=>{
+        standard(t,1,pc,0xcd7,2,code==='dfe0'?{0:0xa5c36a3f}:{});bank(t,t.initialFp);
+      });
+  }
   report.complete = true; checkpoint(); console.log(JSON.stringify({complete:true,cases:report.cases.length,engineSha256:engine.sha256}));
 } catch(error) {
   report.failure={stage,message:String(error),stack:error.stack};checkpoint();throw error;

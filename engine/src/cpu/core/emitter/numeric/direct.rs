@@ -21,6 +21,9 @@ const ROUNDED: u32 = 51;
 const DOUBLE: u32 = 54;
 
 pub(super) fn begin(out: &mut Output<'_>, operation: Operation, next: u32) -> bool {
+    if state(out, operation, next) {
+        return true;
+    }
     let Operation::X87 {
         operation,
         address,
@@ -268,6 +271,53 @@ pub(super) fn begin(out: &mut Output<'_>, operation: Operation, next: u32) -> bo
             .local_get(BANK)
             .i32_load16_u(mem(100 + address.resolved_segment().index() as u64 * 2, 1))
             .i32_store16(mem(18, 1));
+    }
+    out.set_pc(next);
+    out.c().br(1).end();
+    true
+}
+
+fn state(out: &mut Output<'_>, operation: Operation, next: u32) -> bool {
+    let waiting = match operation {
+        Operation::X87StatusToAx => false,
+        Operation::X87 {
+            operation: X87Operation::Wait,
+            address: None,
+            waiting: true,
+            ..
+        } => true,
+        _ => return false,
+    };
+    out.c()
+        .block(BlockType::Empty)
+        .block(BlockType::Empty)
+        .local_get(CTX)
+        .i32_load(mem(BANK_POINTER, 2))
+        .local_tee(BANK)
+        .i32_eqz()
+        .br_if(0)
+        .local_get(BANK)
+        .i32_load16_u(mem(2, 1))
+        .local_set(STATUS);
+    if waiting {
+        out.c()
+            .local_get(STATUS)
+            .local_get(BANK)
+            .i32_load16_u(mem(0, 1))
+            .i32_const(-1)
+            .i32_xor()
+            .i32_and()
+            .i32_const(63)
+            .i32_and()
+            .br_if(0);
+    } else {
+        out.c()
+            .local_get(2)
+            .i32_const(-65536)
+            .i32_and()
+            .local_get(STATUS)
+            .i32_or()
+            .local_set(2);
     }
     out.set_pc(next);
     out.c().br(1).end();
