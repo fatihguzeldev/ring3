@@ -1,14 +1,21 @@
 use crate::{
-    cpu::core::{CompileError, CompileOptions, CompiledCode},
+    cpu::core::{
+        CompileError, CompileOptions, CompiledCode, ObservedPlan, ObservedPlanFingerprint,
+    },
     memory::{AddressSpace, GuestAddress},
 };
 use foldhash::fast::RandomState;
-use std::{collections::HashMap, ops::Deref, rc::Rc};
+use std::{
+    collections::{HashMap, HashSet},
+    ops::Deref,
+    rc::Rc,
+};
 
 const MAX_REGIONS: usize = 4096;
 const MAX_CODE_BYTES: usize = 128 << 20;
 const MAX_LINK_SLOT: usize = 4096;
 const NO_REGION: u16 = u16::MAX;
+const MAX_OBSERVED_REFUSALS: usize = 4;
 
 pub(super) struct CoreCache32 {
     regions: Box<[Option<CachedRegion>]>,
@@ -18,6 +25,8 @@ pub(super) struct CoreCache32 {
     trace_bypass_identity: u64,
     coverage: HashMap<u32, RegionKey, RandomState>,
     entries_epoch: u64,
+    ownership_epoch: u64,
+    observed_refusals: Vec<ObservedRefusal>,
     bytes: usize,
     oldest: Option<usize>,
     newest: Option<usize>,
@@ -30,10 +39,23 @@ pub(super) struct CoreCache32 {
     source_invalidations: u64,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 struct RegionKey {
     index: usize,
     identity: u64,
+}
+
+pub(super) struct ObservedAdmission {
+    ownership_epoch: u64,
+    anchor: u32,
+    fingerprint: ObservedPlanFingerprint,
+    parents: Vec<RegionKey>,
+    stale: Vec<RegionKey>,
+}
+
+struct ObservedRefusal {
+    ownership_epoch: u64,
+    fingerprint: ObservedPlanFingerprint,
 }
 
 #[derive(Clone)]
@@ -213,6 +235,8 @@ impl Default for CoreCache32 {
             trace_bypass_identity: 0,
             coverage: HashMap::with_hasher(RandomState::default()),
             entries_epoch: 1,
+            ownership_epoch: 1,
+            observed_refusals: Vec::new(),
             bytes: 0,
             oldest: None,
             newest: None,
@@ -228,6 +252,197 @@ impl Default for CoreCache32 {
 }
 
 impl CoreCache32 {
+    pub(super) fn owned_frontier_contains(&self, memory: &AddressSpace, pc: u32) -> bool {
+        self.trace_entries
+            .get(&pc)
+            .or_else(|| self.coverage.get(&pc))
+            .and_then(|key| self.region(*key))
+            .is_some_and(|entry| entry.code.is_current(memory))
+            || self.coverage_contains(memory, pc)
+    }
+
+    pub(super) fn preflight_observed(
+        &mut self,
+        memory: &AddressSpace,
+        plan: &ObservedPlan,
+    ) -> Option<ObservedAdmission> {
+        if self.observed_refusals.iter().any(|refusal| {
+            refusal.ownership_epoch == self.ownership_epoch
+                && &refusal.fingerprint == plan.fingerprint()
+        }) {
+            return None;
+        }
+        let admission = self.check_observed_plan(memory, plan);
+        if admission.is_none() {
+            self.remember_observed_refusal(plan.fingerprint().clone());
+        }
+        admission
+    }
+
+    fn check_observed_plan(
+        &self,
+        memory: &AddressSpace,
+        plan: &ObservedPlan,
+    ) -> Option<ObservedAdmission> {
+        let entries = plan.entrypoints();
+        let identities = plan.parent_identities();
+        if !plan.is_current(memory)
+            || !plan.has_executable_gain()
+            || entries.is_empty()
+            || !entries.windows(2).all(|pair| pair[0].0 < pair[1].0)
+            || !identities.windows(2).all(|pair| pair[0] < pair[1])
+            || entries
+                .binary_search_by_key(&plan.anchor(), |pc| pc.0)
+                .is_err()
+            || !entries.iter().map(|pc| pc.0).eq(plan.instruction_pcs())
+        {
+            return None;
+        }
+        let mut parents = HashSet::with_hasher(RandomState::default());
+        let mut stale = HashSet::with_hasher(RandomState::default());
+        for pc in entries {
+            let Some(key) = self.trace_entries.get(&pc.0).copied() else {
+                continue;
+            };
+            let entry = self.region(key)?;
+            if !entry.code.is_current(memory) {
+                stale.insert(key);
+                continue;
+            }
+            if !entry.code.is_observed_family() || identities.binary_search(&key.identity).is_err()
+            {
+                return None;
+            }
+            parents.insert(key);
+        }
+        if parents.len() != identities.len() {
+            return None;
+        }
+        for key in &parents {
+            let entry = self.region(*key)?;
+            if !plan.preserves(&entry.code) || !self.complete_family_aliases(*key, entry, entries) {
+                return None;
+            }
+        }
+        let mut parents: Vec<_> = parents.into_iter().collect();
+        let mut stale: Vec<_> = stale.into_iter().collect();
+        parents.sort_unstable_by_key(|key| key.identity);
+        stale.sort_unstable_by_key(|key| key.identity);
+        Some(ObservedAdmission {
+            ownership_epoch: self.ownership_epoch,
+            anchor: plan.anchor(),
+            fingerprint: plan.fingerprint().clone(),
+            parents,
+            stale,
+        })
+    }
+
+    fn complete_family_aliases(
+        &self,
+        key: RegionKey,
+        entry: &CachedRegion,
+        next: &[GuestAddress],
+    ) -> bool {
+        entry.admitted_entries == entry.code.entrypoints()
+            && entry.indexed_entries == entry.code.instruction_count()
+            && entry.admitted_entries.iter().all(|pc| {
+                self.trace_entries.get(&pc.0) == Some(&key)
+                    && next.binary_search_by_key(&pc.0, |entry| entry.0).is_ok()
+            })
+    }
+
+    pub(super) fn commit_observed(
+        &mut self,
+        memory: &AddressSpace,
+        admission: ObservedAdmission,
+        code: CompiledCode,
+    ) -> Result<RegionRef, CompileError> {
+        if admission.ownership_epoch != self.ownership_epoch
+            || code.observed_fingerprint() != Some(&admission.fingerprint)
+            || !code.is_observed_family()
+            || !code.is_current(memory)
+            || code.trace_root() != Some(admission.anchor)
+            || code.wasm().len() > MAX_CODE_BYTES
+            || !code.supports_entry(admission.anchor)
+            || !code
+                .entrypoints()
+                .iter()
+                .map(|entry| entry.0)
+                .eq(code.instruction_pcs())
+        {
+            return Err(CompileError::InvalidLimits);
+        }
+        for key in &admission.parents {
+            let Some(entry) = self.region(*key) else {
+                return Err(CompileError::InvalidLimits);
+            };
+            if !entry.code.is_observed_family()
+                || !entry.code.is_current(memory)
+                || !code.observed_grows(&entry.code)
+                || !self.complete_family_aliases(*key, entry, code.entrypoints())
+            {
+                return Err(CompileError::InvalidLimits);
+            }
+        }
+        let mut parents = HashSet::with_hasher(RandomState::default());
+        let mut stale = HashSet::with_hasher(RandomState::default());
+        for pc in code.instruction_pcs() {
+            let Some(key) = self.trace_entries.get(&pc).copied() else {
+                continue;
+            };
+            let Some(entry) = self.region(key) else {
+                return Err(CompileError::InvalidLimits);
+            };
+            if entry.code.is_current(memory) {
+                parents.insert(key);
+            } else {
+                stale.insert(key);
+            }
+        }
+        if parents.len() != admission.parents.len()
+            || stale.len() != admission.stale.len()
+            || admission.parents.iter().any(|key| !parents.contains(key))
+            || admission.stale.iter().any(|key| !stale.contains(key))
+        {
+            return Err(CompileError::InvalidLimits);
+        }
+        // source, identity, graph and every alias are validated before removal.
+        for key in admission.stale {
+            self.remove(key);
+            self.source_invalidations = self.source_invalidations.saturating_add(1);
+        }
+        for key in admission.parents {
+            self.remove(key);
+        }
+        Ok(self.insert_owned(code))
+    }
+
+    pub(super) fn reject_observed(&mut self, admission: ObservedAdmission) {
+        if admission.ownership_epoch == self.ownership_epoch {
+            self.remember_observed_refusal(admission.fingerprint);
+        }
+    }
+
+    fn remember_observed_refusal(&mut self, fingerprint: ObservedPlanFingerprint) {
+        self.observed_refusals
+            .retain(|refusal| refusal.ownership_epoch == self.ownership_epoch);
+        if self
+            .observed_refusals
+            .iter()
+            .any(|refusal| refusal.fingerprint == fingerprint)
+        {
+            return;
+        }
+        if self.observed_refusals.len() == MAX_OBSERVED_REFUSALS {
+            self.observed_refusals.remove(0);
+        }
+        self.observed_refusals.push(ObservedRefusal {
+            ownership_epoch: self.ownership_epoch,
+            fingerprint,
+        });
+    }
+
+    #[cfg(test)]
     pub(super) fn observed_owner(&mut self, memory: &AddressSpace, pc: u32) -> Option<RegionRef> {
         let key = *self.trace_entries.get(&pc)?;
         let entry = self.region(key)?;
@@ -369,6 +584,7 @@ impl CoreCache32 {
         }
         // The compiler already emitted this precise suffix port. Admitting it
         // changes executable ownership only; its body, identity and roots stay fixed.
+        self.advance_ownership_epoch();
         self.advance_entries_epoch();
         self.entries.insert(pc, owner.key);
         let entry = self.regions[owner.key.index].as_mut().unwrap();
@@ -727,6 +943,7 @@ impl CoreCache32 {
     }
 
     fn insert_with_entries(&mut self, code: CompiledCode, entries: Vec<GuestAddress>) -> RegionRef {
+        self.advance_ownership_epoch();
         self.advance_entries_epoch();
         let trace = code.trace_root().is_some();
         let code = Rc::new(code);
@@ -842,6 +1059,7 @@ impl CoreCache32 {
         if self.region(key).is_none() {
             return;
         }
+        self.advance_ownership_epoch();
         self.advance_entries_epoch();
         let entry = self.regions[key.index].take().unwrap();
         self.detach(entry.older, entry.newer);
@@ -877,6 +1095,16 @@ impl CoreCache32 {
                 for entry in self.regions.iter_mut().flatten() {
                     entry.linked_entries.epoch = 0;
                 }
+                1
+            }
+        };
+    }
+
+    fn advance_ownership_epoch(&mut self) {
+        self.ownership_epoch = match self.ownership_epoch.checked_add(1) {
+            Some(epoch) => epoch,
+            None => {
+                self.observed_refusals.clear();
                 1
             }
         };
@@ -920,3 +1148,7 @@ mod trace_tests;
 #[cfg(test)]
 #[path = "cache/family_tests.rs"]
 mod family_tests;
+
+#[cfg(test)]
+#[path = "cache/plan_tests.rs"]
+mod plan_tests;
