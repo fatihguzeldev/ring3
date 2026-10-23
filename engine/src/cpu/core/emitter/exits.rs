@@ -5,13 +5,8 @@ pub(super) const REASON: u32 = 108;
 
 // The typed sink has already closed the common region exit wrapper. Append the
 // sole publication epilogue directly; generated Wasm is never decoded/re-encoded.
-pub(super) fn finish(
-    mut function: Function,
-    plan: &crate::cpu::core::region::values::RegionPlan,
-    numeric: bool,
-) -> Vec<u8> {
+pub(super) fn finish(mut function: Function, numeric: bool) -> Vec<u8> {
     let mut code = function.instructions();
-    super::numeric::emit_normalizer(plan, &mut code, numeric);
     code.local_get(CTX);
     for (local, _) in link::boundary_fields(numeric) {
         code.local_get(local);

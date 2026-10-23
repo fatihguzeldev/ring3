@@ -443,6 +443,19 @@ fn descriptor(plan: &RegionPlan, frame: FrameStateId) -> (i64, i64) {
         | (u64::from(shape.tag_written) << 8)
         | (u64::from(shape.top_delta as u8 & 7) << 16);
     for logical in 0..8 {
+        if shape.tag_written & (1 << logical) != 0
+            && let TagRecipe::Value(cell) = shape.tags[logical]
+        {
+            assert_eq!(
+                cell, shape.cells[logical],
+                "a written tag classifies its own payload"
+            );
+            assert_ne!(
+                shape.written & (1 << logical),
+                0,
+                "value tag writes accompany payload writes"
+            );
+        }
         let tag = match shape.tags[logical] {
             TagRecipe::Entry(i) => i,
             TagRecipe::Empty => 8,
@@ -473,7 +486,13 @@ fn descriptor(plan: &RegionPlan, frame: FrameStateId) -> (i64, i64) {
     (low as i64, high as i64)
 }
 
-fn select_descriptor(c: &mut InstructionSink<'_>, plan: &RegionPlan) {
+fn select_descriptor(
+    c: &mut InstructionSink<'_>,
+    plan: &RegionPlan,
+    selected: u32,
+    low: u32,
+    high: u32,
+) {
     let mut unique = Vec::new();
     let mut index = std::collections::HashMap::new();
     let mut targets = Vec::new();
@@ -491,19 +510,37 @@ fn select_descriptor(c: &mut InstructionSink<'_>, plan: &RegionPlan) {
     for _ in &unique {
         c.block(BlockType::Empty);
     }
-    c.local_get(40)
+    c.local_get(selected)
         .i32_const(1)
         .i32_sub()
         .br_table(targets, count);
-    for (i, (low, high)) in unique.into_iter().enumerate() {
+    for (i, (descriptor_low, descriptor_high)) in unique.into_iter().enumerate() {
         c.end()
-            .i64_const(low)
-            .local_set(41)
-            .i64_const(high)
-            .local_set(42)
+            .i64_const(descriptor_low)
+            .local_set(low)
+            .i64_const(descriptor_high)
+            .local_set(high)
             .br(count - i as u32);
     }
     c.end().unreachable().end();
+}
+
+pub(in crate::cpu::core::emitter) fn descriptor_parameters() -> Vec<ValType> {
+    vec![ValType::I32]
+}
+
+pub(in crate::cpu::core::emitter) fn descriptor_results() -> Vec<ValType> {
+    vec![ValType::I64, ValType::I64]
+}
+
+pub(in crate::cpu::core::emitter) fn emit_descriptor(plan: &RegionPlan, numeric: bool) -> Function {
+    let mut f = Function::new([(2, ValType::I64)]);
+    let mut c = f.instructions();
+    if numeric {
+        select_descriptor(&mut c, plan, 0, 1, 2);
+    }
+    c.local_get(1).local_get(2).end();
+    f
 }
 
 pub(in crate::cpu::core::emitter) fn normalizer_parameters() -> Vec<ValType> {
@@ -747,14 +784,15 @@ pub(in crate::cpu::core::emitter) fn emit_normalizer_kernel() -> Function {
 }
 
 pub(in crate::cpu::core::emitter) fn emit_normalizer_adapter(
-    plan: &RegionPlan,
+    _plan: &RegionPlan,
     numeric: bool,
     kernel: u32,
+    descriptor: u32,
 ) -> Function {
     let mut f = Function::new([(2, ValType::I64)]);
     if numeric {
         let mut c = f.instructions();
-        select_descriptor(&mut c, plan);
+        c.local_get(40).call(descriptor).local_set(42).local_set(41);
         for local in 0..40 {
             c.local_get(local);
         }
@@ -792,6 +830,322 @@ pub(in crate::cpu::core::emitter) fn emit_normalizer(
     }
     c.local_get(SELECTED)
         .call(super::super::support::owner_internal(10, numeric));
+    for local in [
+        84,
+        85,
+        86,
+        super::pool::LOADED,
+        super::pool::ADMITTED,
+        SELECTED,
+    ] {
+        c.i32_const(0).local_set(local);
+    }
+    c.end();
+}
+
+const INLINE_LOW: u32 = 155;
+const INLINE_HIGH: u32 = 156;
+const INLINE_MASK: u32 = 158;
+const INLINE_OFFSET: u32 = 159;
+const INLINE_LOGICAL: u32 = 160;
+const INLINE_CELL: u32 = 161;
+const INLINE_TAG_CODE: u32 = 162;
+const INLINE_TAG: u32 = 163;
+const INLINE_DELTA: u32 = 164;
+const INLINE_TOP: u32 = 165;
+const INLINE_CHANGED: u32 = 166;
+const INLINE_PHYSICAL: u32 = 167;
+const INLINE_SHIFT: u32 = 168;
+const INLINE_VALUE_TAG: u32 = 169;
+const INLINE_PROOFS: u32 = 170;
+const INLINE_TAG_MASK: u32 = 171;
+
+fn inline_rotate_mask(c: &mut InstructionSink<'_>, delta: u32) {
+    c.local_get(INLINE_MASK)
+        .local_get(delta)
+        .i32_shl()
+        .local_get(INLINE_MASK)
+        .i32_const(8)
+        .local_get(delta)
+        .i32_sub()
+        .i32_shr_u()
+        .i32_or()
+        .i32_const(255)
+        .i32_and()
+        .local_set(INLINE_MASK);
+}
+
+fn inline_slot(c: &mut InstructionSink<'_>) {
+    c.local_get(INLINE_MASK)
+        .i32_ctz()
+        .local_set(INLINE_OFFSET)
+        .local_get(INLINE_OFFSET)
+        .local_get(INLINE_DELTA)
+        .i32_sub()
+        .i32_const(7)
+        .i32_and()
+        .local_set(INLINE_LOGICAL)
+        .local_get(90)
+        .local_get(INLINE_OFFSET)
+        .i32_add()
+        .i32_const(7)
+        .i32_and()
+        .local_set(INLINE_PHYSICAL)
+        .local_get(INLINE_LOW)
+        .local_get(INLINE_LOGICAL)
+        .i64_extend_i32_u()
+        .i64_const(3)
+        .i64_shl()
+        .i64_shr_u()
+        .i32_wrap_i64()
+        .i32_const(3)
+        .i32_shr_u()
+        .i32_const(31)
+        .i32_and()
+        .local_set(INLINE_TAG_CODE);
+}
+
+fn inline_next_slot(c: &mut InstructionSink<'_>) {
+    c.local_get(INLINE_MASK)
+        .local_get(INLINE_MASK)
+        .i32_const(1)
+        .i32_sub()
+        .i32_and()
+        .local_tee(INLINE_MASK)
+        .br_if(0);
+}
+
+fn inline_set_tag(c: &mut InstructionSink<'_>) {
+    c.local_get(INLINE_PHYSICAL)
+        .i32_const(1)
+        .i32_shl()
+        .local_set(INLINE_SHIFT)
+        .local_get(INLINE_TAG)
+        .i32_const(3)
+        .local_get(INLINE_SHIFT)
+        .i32_shl()
+        .i32_const(-1)
+        .i32_xor()
+        .i32_and()
+        .local_get(INLINE_VALUE_TAG)
+        .local_get(INLINE_SHIFT)
+        .i32_shl()
+        .i32_or()
+        .local_set(INLINE_TAG);
+}
+
+// Each case reads only one live storage cell. There is no all-cell argument
+// snapshot and the shared writers never inspect the caller's other values.
+fn inline_write_cell(c: &mut InstructionSink<'_>, native: u32, raw: u32) {
+    c.block(BlockType::Result(ValType::I32))
+        .block(BlockType::Empty);
+    for _ in 0..8 {
+        c.block(BlockType::Empty);
+    }
+    c.local_get(INLINE_CELL).br_table(0..8, 8);
+    for cell in 0..8u32 {
+        c.end()
+            .local_get(85)
+            .i32_const(1 << cell)
+            .i32_and()
+            .if_(BlockType::Result(ValType::I32))
+            .local_get(super::pool::POINTER)
+            .local_get(INLINE_PHYSICAL)
+            .local_get(76 + cell)
+            .local_get(INLINE_PROOFS)
+            .local_get(87)
+            .call(native)
+            .else_()
+            .local_get(super::pool::POINTER)
+            .local_get(INLINE_PHYSICAL)
+            .local_get(LOW + cell)
+            .local_get(HIGH + cell)
+            .call(raw);
+        c.end().br(8 - cell);
+    }
+    c.end().unreachable().end();
+}
+
+/// The single in-run commit point reads its own live locals. Only a frame ID
+/// crosses the descriptor call; ordinary links never form the cold 40-value ABI.
+pub(in crate::cpu::core::emitter) fn emit_inline_commit(out: &mut Output<'_>) {
+    if out.native.is_empty() {
+        return;
+    }
+    let descriptor = out.internal(14);
+    let native = out.internal(12);
+    let raw = out.internal(13);
+    let mut c = out.c();
+    let c = c.raw();
+    c.local_get(84)
+        .local_get(EXACT_SUFFIX)
+        .i32_eqz()
+        .i32_and()
+        .local_get(SELECTED)
+        .i32_const(0)
+        .i32_gt_s()
+        .i32_and()
+        .if_(BlockType::Empty)
+        .local_get(SELECTED)
+        .call(descriptor)
+        .local_set(INLINE_HIGH)
+        .local_set(INLINE_LOW)
+        .local_get(INLINE_HIGH)
+        .i64_const(16)
+        .i64_shr_u()
+        .i32_wrap_i64()
+        .i32_const(7)
+        .i32_and()
+        .local_set(INLINE_DELTA)
+        .local_get(90)
+        .local_get(INLINE_DELTA)
+        .i32_add()
+        .i32_const(7)
+        .i32_and()
+        .local_set(INLINE_TOP)
+        .local_get(89)
+        .local_set(INLINE_TAG)
+        .local_get(INLINE_HIGH)
+        .i64_const(8)
+        .i64_shr_u()
+        .i32_wrap_i64()
+        .i32_const(255)
+        .i32_and()
+        .local_set(INLINE_MASK);
+    inline_rotate_mask(c, INLINE_DELTA);
+    c.local_get(INLINE_MASK)
+        .local_set(INLINE_TAG_MASK)
+        .local_get(INLINE_MASK)
+        .if_(BlockType::Empty)
+        .loop_(BlockType::Empty);
+    inline_slot(c);
+    c.local_get(INLINE_TAG_CODE)
+        .i32_const(12)
+        .i32_lt_u()
+        .if_(BlockType::Empty)
+        .local_get(INLINE_TAG_CODE)
+        .i32_const(8)
+        .i32_lt_u()
+        .if_(BlockType::Result(ValType::I32))
+        .local_get(89)
+        .local_get(90)
+        .local_get(INLINE_TAG_CODE)
+        .i32_add()
+        .i32_const(7)
+        .i32_and()
+        .i32_const(1)
+        .i32_shl()
+        .i32_shr_u()
+        .i32_const(3)
+        .i32_and()
+        .else_()
+        .i32_const(0x87)
+        .local_get(INLINE_TAG_CODE)
+        .i32_const(8)
+        .i32_sub()
+        .i32_const(1)
+        .i32_shl()
+        .i32_shr_u()
+        .i32_const(3)
+        .i32_and()
+        .end()
+        .local_set(INLINE_VALUE_TAG);
+    inline_set_tag(c);
+    c.end();
+    inline_next_slot(c);
+    c.end().end();
+    c.local_get(INLINE_HIGH)
+        .i32_wrap_i64()
+        .i32_const(255)
+        .i32_and()
+        .local_set(INLINE_MASK);
+    inline_rotate_mask(c, INLINE_DELTA);
+    c.local_get(INLINE_MASK)
+        .local_get(86)
+        .i32_or()
+        .i32_const(255)
+        .i32_and()
+        .local_tee(INLINE_MASK)
+        .local_set(INLINE_CHANGED)
+        .local_get(INLINE_MASK)
+        .if_(BlockType::Empty)
+        .loop_(BlockType::Empty);
+    inline_slot(c);
+    c.local_get(INLINE_LOW)
+        .local_get(INLINE_LOGICAL)
+        .i64_extend_i32_u()
+        .i64_const(3)
+        .i64_shl()
+        .i64_shr_u()
+        .i32_wrap_i64()
+        .i32_const(7)
+        .i32_and()
+        .local_set(INLINE_CELL)
+        .local_get(INLINE_HIGH)
+        .local_get(INLINE_LOGICAL)
+        .i32_const(3)
+        .i32_mul()
+        .i32_const(24)
+        .i32_add()
+        .i64_extend_i32_u()
+        .i64_shr_u()
+        .i32_wrap_i64()
+        .i32_const(7)
+        .i32_and()
+        .local_set(INLINE_PROOFS);
+    inline_write_cell(c, native, raw);
+    c.local_set(INLINE_VALUE_TAG)
+        .local_get(INLINE_TAG_MASK)
+        .i32_const(1)
+        .local_get(INLINE_OFFSET)
+        .i32_shl()
+        .i32_and()
+        .i32_eqz()
+        .i32_eqz()
+        .local_get(INLINE_TAG_CODE)
+        .i32_const(12)
+        .i32_ge_u()
+        .i32_and()
+        .if_(BlockType::Empty);
+    inline_set_tag(c);
+    c.end();
+    inline_next_slot(c);
+    c.end().end();
+    c.local_get(INLINE_CHANGED).local_set(INLINE_MASK);
+    inline_rotate_mask(c, 90);
+    c.local_get(super::pool::POINTER)
+        .local_get(super::pool::POINTER)
+        .i32_load(mem(p::CHANGED, 2))
+        .local_get(INLINE_MASK)
+        .i32_or()
+        .i32_store(mem(p::CHANGED, 2));
+    for (offset, local) in [
+        (p::CONTROL, 87),
+        (p::STATUS, 88),
+        (p::TAG, INLINE_TAG),
+        (p::TOP, INLINE_TOP),
+        (p::FIP, 91),
+        (p::FDP, 92),
+        (p::OPCODE, 93),
+        (p::CS, 94),
+        (p::DS, 95),
+        (p::PENDING, 100),
+    ] {
+        c.local_get(super::pool::POINTER).local_get(local);
+        if offset == p::STATUS {
+            c.i32_const(!0x3800).i32_and();
+        }
+        c.i32_store(mem(offset, 2));
+    }
+    for (offset, local) in [
+        (p::PENDING_LEFT, 101),
+        (p::PENDING_RIGHT, 102),
+        (p::PENDING_RESULT, 103),
+    ] {
+        c.local_get(super::pool::POINTER)
+            .local_get(local)
+            .f64_store(mem(offset, 3));
+    }
     for local in [
         84,
         85,

@@ -48,6 +48,7 @@ pub(super) const GP_FACTS_VALID: u32 = 129;
 pub(super) const ENTRY_OFFSET: u32 = 130;
 pub(super) const PREFIX_BASE: u32 = 131;
 pub(super) const FULL_BLOCK: u32 = 151;
+pub(super) const SERVICE_RESUME: u32 = 157;
 
 const BLOCK_BITS: u32 = 10;
 
@@ -146,6 +147,24 @@ pub(super) fn emit(
         numeric::normalizer_kernel_parameters(),
         numeric::normalizer_kernel_results(),
     );
+    types.ty().function(
+        [
+            ValType::I32,
+            ValType::I32,
+            ValType::F64,
+            ValType::I32,
+            ValType::I32,
+        ],
+        [ValType::I32],
+    );
+    types.ty().function(
+        [ValType::I32, ValType::I32, ValType::I64, ValType::I32],
+        [ValType::I32],
+    );
+    types.ty().function(
+        numeric::descriptor_parameters(),
+        numeric::descriptor_results(),
+    );
     module.section(&types);
     let mut imports = ImportSection::new();
     imports.import(
@@ -165,15 +184,15 @@ pub(super) fn emit(
         imports.import("ring3", "numeric", EntityType::Function(0));
     }
     link::imports(&mut imports);
-    support::imports(&mut imports, [3, 6, 9, 10, 12, 7, 7, 7, 13]);
+    support::imports(&mut imports, [3, 6, 9, 10, 12, 7, 7, 7, 13, 14, 15]);
     module.section(&imports);
     let mut functions = FunctionSection::new();
-    for kind in [0, 4, 5, 11, 0, 0, 8] {
+    for kind in [0, 4, 5, 11, 16, 0, 0, 8] {
         functions.function(kind);
     }
     module.section(&functions);
     let mut exports = ExportSection::new();
-    let wrappers = support::owner_defined(4, numeric);
+    let wrappers = support::owner_defined(5, numeric);
     exports.export("run", ExportKind::Func, wrappers);
     exports.export("link", ExportKind::Func, wrappers + 1);
     exports.export("publish", ExportKind::Func, wrappers + 2);
@@ -191,7 +210,9 @@ pub(super) fn emit(
         &plan,
         numeric,
         support::owner_kernel(numeric),
+        support::owner_internal(14, numeric),
     ));
+    code.function(&numeric::emit_descriptor(&plan, numeric));
     code.function(&link::emit_entry(
         support::owner_internal(3, numeric),
         false,
@@ -216,7 +237,8 @@ pub(super) fn emit(
         "guest.run",
         "guest.lookup",
         "guest.publish",
-        "guest.commit_frame",
+        "guest.commit_frame_cold",
+        "guest.select_frame",
     ]
     .into_iter()
     .enumerate()
@@ -309,11 +331,13 @@ fn run(
         (3, ValType::I32),
         (2, ValType::I32),
         (23, ValType::I32),
+        (2, ValType::I64),
+        (15, ValType::I32),
     ]);
     let mut out = Output {
         function: &mut function,
         depth: 0,
-        redirect_returns: false,
+        return_target: None,
         pc: 0,
         prefix: 0,
         record_flags: true,
@@ -343,7 +367,7 @@ fn run(
         .i32_const(StopReason::Infrastructure as i32)
         .return_()
         .end();
-    out.redirect_returns = true;
+    out.return_target = Some(1);
     link::import_canonical(&mut out);
     link::has_state(out.c().raw());
     out.c().if_(BlockType::Empty);
@@ -390,16 +414,33 @@ fn run(
     out.c().end().end();
     super::memory::load_view(out.c().raw());
     out.lookup_port(EIP);
+    // Bootstrap runs once. Every exact prefix exits the inner block to the
+    // single selective commit; computed targets resume the retained body here.
+    out.c().loop_(BlockType::Empty).block(BlockType::Empty);
+    out.return_target = Some(out.depth);
     region::emit(&mut out, graph);
     out.c().end();
+    out.return_target = Some(1);
+    numeric::emit_inline_commit(&mut out);
+    out.c()
+        .local_get(SERVICE_RESUME)
+        .if_(BlockType::Empty)
+        .i32_const(0)
+        .local_set(SERVICE_RESUME)
+        .br(1)
+        .end()
+        .local_get(exits::REASON)
+        .return_()
+        .end()
+        .end();
     assert_eq!(out.depth, 0, "the region exit wrapper is closed");
-    exits::finish(function, plan, !native.is_empty())
+    exits::finish(function, !native.is_empty())
 }
 
 pub(super) struct Output<'a> {
     function: &'a mut Function,
     depth: u32,
-    redirect_returns: bool,
+    return_target: Option<u32>,
     pc: u32,
     prefix: u32,
     record_flags: bool,
@@ -420,7 +461,7 @@ impl Output<'_> {
         code::Sink::new(
             self.function.instructions(),
             &mut self.depth,
-            self.redirect_returns,
+            self.return_target,
         )
     }
 

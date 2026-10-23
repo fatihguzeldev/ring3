@@ -7,8 +7,10 @@ const legacyFields=[2,3,4,5,6,7,8,9,10,11,12,13,20,21,22,23,24,25,
 const fields=[2,3,4,5,6,7,8,9,10,11,12,13,20,21,22,23,24,25,99];
 const linkNames=fields=>['link.mode','link.valid','link.context',...fields.map(index=>`link.local${index}`)];
 export const supportNames=['flags','materialize_numeric','resolve_status','translate_page','acquire_group',
-  'store8','store16','store32','commit_pool'].map(name=>`support.${name}`);
-const legacySupportNames=supportNames.map(name=>name==='support.commit_pool'?'support.normalize_kernel':name);
+  'store8','store16','store32','commit_pool_cold','commit_native','commit_raw'].map(name=>`support.${name}`);
+const poolSupportNames=[...supportNames.slice(0,8),'support.commit_pool'];
+const legacySupportNames=[...supportNames.slice(0,8),'support.normalize_kernel'];
+const supportForAbi=abi=>abi===1?legacySupportNames:abi===2?poolSupportNames:supportNames;
 const supportSources=new WeakMap(),supportInstances=new WeakMap();
 let standaloneSupport;
 
@@ -17,7 +19,7 @@ export function coreImports(module) {
   if(links.length)assert.deepEqual(links,linkNames(links.length===47?legacyFields:fields).map(name=>({module:'ring3',name,kind:'global'})),
     'the complete typed compiled-link state is the only added import surface');
   const support=imports.filter(item=>item.name.startsWith('support.'));
-  if(support.length)assert.deepEqual(support,[...(support.some(item=>item.name==='support.normalize_kernel')?legacySupportNames:supportNames).map(name=>({module:'ring3',name,kind:'function'})),
+  if(support.length)assert.deepEqual(support,[...(support.some(item=>item.name==='support.normalize_kernel')?legacySupportNames:support.some(item=>item.name==='support.commit_pool')?poolSupportNames:supportNames).map(name=>({module:'ring3',name,kind:'function'})),
     {module:'ring3',name:'support.abi',kind:'global'}], 'the complete versioned per-CPU support ABI is imported directly');
   return imports.filter(item=>!item.name.startsWith('link.')&&!item.name.startsWith('support.'));
 }
@@ -44,15 +46,15 @@ export function instantiateSupport(memory,source=coreSupportSource(memory)) {
   const exports=new WebAssembly.Instance(module,{ring3:{memory,functions:table(),publishers:table(),
     probe:()=>assert.fail('standalone support never dispatches a guest edge'),
     cold:()=>assert.fail('standalone support never executes cold code')}}).exports;
-  assert(exports.supportAbi instanceof WebAssembly.Global&&[1,2].includes(exports.supportAbi.value),'actual current or pinned-baseline support ABI');
-  for(const name of exports.supportAbi.value===1?legacySupportNames:supportNames)assert.equal(typeof exports[name],'function',`actual Wasm ${name}`);
+  assert(exports.supportAbi instanceof WebAssembly.Global&&[1,2,3].includes(exports.supportAbi.value),'actual current or pinned-baseline support ABI');
+  for(const name of supportForAbi(exports.supportAbi.value))assert.equal(typeof exports[name],'function',`actual Wasm ${name}`);
   return exports;
 }
 
 function bindings(memory) {
   let exports=supportInstances.get(memory);
   if(!exports){exports=instantiateSupport(memory);supportInstances.set(memory,exports);}
-  return {...Object.fromEntries((exports.supportAbi.value===1?legacySupportNames:supportNames).map(name=>[name,exports[name]])),'support.abi':exports.supportAbi};
+  return {...Object.fromEntries((supportForAbi(exports.supportAbi.value)).map(name=>[name,exports[name]])),'support.abi':exports.supportAbi};
 }
 
 export function linkGlobals(module,shared={}) {

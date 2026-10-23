@@ -277,21 +277,15 @@ impl Emitter<'_, '_> {
         if let Some(frame) = self.out.frame {
             super::numeric::emit_frame(self.out, frame);
         }
-        super::numeric::normalize_frame(self.out);
-        // An indirect destination is not a proved CFG predecessor. Reimport its
-        // identity state and check the selected block's speculative contract.
-        self.out.c().i32_const(0).local_set(109);
-        let depth = self
-            .labels
-            .iter()
-            .rev()
-            .position(|label| matches!(label, Label::Restart))
-            .unwrap();
+        // An unproved computed predecessor commits through the same in-body
+        // service as a terminal prefix, then reimports the pool identity frame.
+        // The selected INDEX/ENTRY_OFFSET and live scalar lease survive.
         self.out
             .c()
             .i32_const(1)
-            .local_set(ENTRY_PENDING)
-            .br(depth as u32);
+            .local_set(super::SERVICE_RESUME)
+            .i32_const(StopReason::NeedCode as i32)
+            .return_();
     }
 
     fn dispatch(&mut self, blocks: &[BlockId]) {

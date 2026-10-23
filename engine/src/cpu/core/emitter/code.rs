@@ -6,7 +6,7 @@ use wasm_encoder::{BlockType, Ieee64, InstructionSink, Lane, MemArg};
 pub(in crate::cpu::core) struct Sink<'a> {
     code: InstructionSink<'a>,
     depth: &'a mut u32,
-    redirect_returns: bool,
+    return_target: Option<u32>,
 }
 
 macro_rules! forward {
@@ -23,12 +23,12 @@ impl<'a> Sink<'a> {
     pub(super) fn new(
         code: InstructionSink<'a>,
         depth: &'a mut u32,
-        redirect_returns: bool,
+        return_target: Option<u32>,
     ) -> Self {
         Self {
             code,
             depth,
-            redirect_returns,
+            return_target,
         }
     }
 
@@ -38,7 +38,7 @@ impl<'a> Sink<'a> {
 
     fn target(&self, label: u32) {
         assert!(
-            label < *self.depth - u32::from(self.redirect_returns),
+            label < *self.depth - self.return_target.unwrap_or(0),
             "region branches target explicit controls"
         );
     }
@@ -94,7 +94,7 @@ impl<'a> Sink<'a> {
         V::IntoIter: ExactSizeIterator,
     {
         self.target(default);
-        let depth = *self.depth - u32::from(self.redirect_returns);
+        let depth = *self.depth - self.return_target.unwrap_or(0);
         self.code.br_table(
             labels.into_iter().inspect(|&label| assert!(label < depth)),
             default,
@@ -103,10 +103,10 @@ impl<'a> Sink<'a> {
     }
 
     pub(in crate::cpu::core) fn return_(&mut self) -> &mut Self {
-        if self.redirect_returns {
+        if let Some(target) = self.return_target {
             self.code
                 .local_set(super::exits::REASON)
-                .br(self.depth.checked_sub(1).expect("region exit wrapper"));
+                .br(self.depth.checked_sub(target).expect("region exit service"));
         } else {
             // The sole neutral return precedes imported architectural state.
             assert_eq!(
