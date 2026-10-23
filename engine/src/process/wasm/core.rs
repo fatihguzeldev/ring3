@@ -46,7 +46,7 @@ use numeric::NumericBank;
 pub(super) struct CoreSession32 {
     code: Option<RegionRef>,
     cache: CoreCache32,
-    cache_status: [u64; 8],
+    cache_status: [u64; 12],
     #[cfg(feature = "observability")]
     cold_status: [u64; 13],
     numeric: Box<NumericBank>,
@@ -64,7 +64,7 @@ impl CoreSession32 {
         Ok(Self {
             code: None,
             cache: CoreCache32::default(),
-            cache_status: [0; 8],
+            cache_status: [0; 12],
             #[cfg(feature = "observability")]
             cold_status: [0; 13],
             numeric: Box::new(NumericBank::from_instance(instance)?),
@@ -318,7 +318,7 @@ pub(crate) fn core_prepare(pc: u32, instructions: u32, blocks: u32) -> u32 {
             *core = Some(CoreSession32 {
                 code: Some(code),
                 cache: fresh_cache.unwrap(),
-                cache_status: [0; 8],
+                cache_status: [0; 12],
                 #[cfg(feature = "observability")]
                 cold_status: [0; 13],
                 numeric: Box::new(numeric),

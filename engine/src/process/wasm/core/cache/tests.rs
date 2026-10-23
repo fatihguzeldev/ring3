@@ -61,9 +61,22 @@ fn same(left: &RegionRef, right: &RegionRef) -> bool {
 }
 
 fn bounds(cache: &CoreCache32) {
-    let count = MAX_REGIONS - cache.free.len();
-    assert_eq!(cache.regions.len(), MAX_REGIONS);
+    let count = cache.regions.len() - cache.free.len();
+    assert!(cache.regions.len() <= MAX_REGION_EXTENT);
     assert!(cache.bytes <= MAX_CODE_BYTES);
+    assert!(cache.resident_charge() <= MAX_CODE_BYTES);
+    assert_eq!(cache.snapshot()[8], cache.resident_charge() as u64);
+    assert_eq!(cache.snapshot()[9], MAX_CODE_BYTES as u64);
+    assert_eq!(cache.snapshot()[10], cache.link_capacity() as u64);
+    assert_eq!(
+        cache.owner_charge,
+        cache
+            .regions
+            .iter()
+            .flatten()
+            .map(|entry| entry.charge)
+            .sum::<usize>()
+    );
     assert_eq!(
         cache.bytes,
         cache
@@ -92,7 +105,7 @@ fn bounds(cache: &CoreCache32) {
     assert_eq!(seen.len(), count);
     let free: std::collections::HashSet<_> = cache.free.iter().copied().collect();
     assert_eq!(free.len(), cache.free.len());
-    for index in 0..MAX_REGIONS {
+    for index in 0..cache.regions.len() {
         assert_eq!(cache.regions[index].is_none(), free.contains(&index));
     }
     assert_eq!(cache.link_owners[0], 0);
@@ -122,7 +135,7 @@ fn bounds(cache: &CoreCache32) {
             assert_eq!(cache.slot_regions[slot], NO_REGION);
         } else {
             let key = RegionKey {
-                index: usize::from(cache.slot_regions[slot]),
+                index: cache.slot_regions[slot] as usize,
                 identity,
             };
             assert_eq!(cache.region(key).unwrap().slot as usize, slot);
@@ -139,7 +152,7 @@ fn source_changes_and_identical_remapping_invalidate_cached_entries() {
     assert!(same(&cache.lookup(&memory, 0x1000).unwrap(), &first));
     memory.write(GuestAddress(0x1002), &[4]).unwrap();
     assert!(cache.lookup(&memory, 0x1000).is_none());
-    assert!(cache.free.len() == MAX_REGIONS);
+    assert!(cache.free.len() == cache.regions.len());
     for entry in first.entrypoints() {
         assert!(!cache.entries.contains_key(&entry.0));
     }
@@ -153,7 +166,7 @@ fn source_changes_and_identical_remapping_invalidate_cached_entries() {
     memory.write(GuestAddress(0x1000), &code).unwrap();
     assert!(!second.is_current(&memory));
     assert!(cache.lookup(&memory, 0x1005).is_none());
-    assert!(cache.free.len() == MAX_REGIONS);
+    assert!(cache.free.len() == cache.regions.len());
     bounds(&cache);
 }
 
@@ -175,7 +188,7 @@ fn actual_compiled_side_entries_reuse_the_same_retained_region() {
         assert!(same(&cache.lookup(&memory, pc).unwrap(), &code));
     }
     assert!(cache.lookup(&memory, 0x1001).is_none());
-    assert_eq!((MAX_REGIONS - cache.free.len()), 1);
+    assert_eq!((cache.regions.len() - cache.free.len()), 1);
     bounds(&cache);
 }
 
@@ -233,27 +246,24 @@ fn pc_lookup_preserves_distinct_owners_with_colliding_hash_prefixes() {
 }
 
 #[test]
-fn lru_touch_preserves_the_touched_region_and_eviction_stays_bounded() {
+fn lru_touch_selects_the_untouched_owner_for_explicit_eviction() {
     let memory = memory();
     let mut cache = CoreCache32::default();
     let first = cache.insert(compiled(&memory, filler(0)));
-    for index in 1..MAX_REGIONS {
-        cache.insert(compiled(&memory, filler(index)));
-    }
-    assert_eq!((MAX_REGIONS - cache.free.len()), MAX_REGIONS);
+    let second = cache.insert(compiled(&memory, filler(1)));
+    let third = cache.insert(compiled(&memory, filler(2)));
     assert!(same(&cache.lookup(&memory, filler(0)).unwrap(), &first));
-    cache.insert(compiled(&memory, filler(MAX_REGIONS)));
+    assert_eq!(cache.oldest, Some(second.key.index));
+    cache.remove(second.key);
     assert!(cache.lookup(&memory, filler(1)).is_none());
     assert!(same(&cache.lookup(&memory, filler(0)).unwrap(), &first));
-    for index in MAX_REGIONS + 1..MAX_REGIONS + 16 {
-        cache.insert(compiled(&memory, filler(index)));
-        bounds(&cache);
-    }
-    assert_eq!((MAX_REGIONS - cache.free.len()), MAX_REGIONS);
+    assert!(same(&cache.lookup(&memory, filler(2)).unwrap(), &third));
+    assert_eq!(cache.snapshot()[2..5], [0, 0, 0]);
+    bounds(&cache);
 }
 
 #[test]
-fn newer_side_entry_alias_survives_eviction_of_the_previous_region() {
+fn newer_side_entry_alias_survives_explicit_removal_of_the_previous_region() {
     let memory = memory();
     let mut cache = CoreCache32::default();
     let old = cache.insert(compiled(&memory, 0x1000));
@@ -263,16 +273,8 @@ fn newer_side_entry_alias_survives_eviction_of_the_previous_region() {
         newer.entrypoints(),
         &[GuestAddress(0x1005), GuestAddress(0x100d)]
     );
-    for index in 0..MAX_REGIONS - 1 {
-        cache.insert(compiled(&memory, filler(index)));
-    }
-    assert!(
-        cache
-            .regions
-            .iter()
-            .flatten()
-            .all(|entry| entry.code.identity() != old.identity())
-    );
+    cache.remove(old.key);
+    assert!(cache.retained(&old).is_none());
     assert!(cache.lookup(&memory, 0x1000).is_none());
     assert!(cache.lookup(&memory, 0x100a).is_none());
     for pc in [0x1005, 0x100d] {
@@ -333,7 +335,7 @@ fn losing_the_last_index_reclaims_every_displaced_owner_but_not_held_code() {
         assert_eq!(slot, 1);
     }
     assert_eq!(
-        cache.snapshot(),
+        cache.snapshot()[..8],
         [
             3,
             (old.wasm().len() + partial.wasm().len() + newer.wasm().len()) as u64,
@@ -355,15 +357,16 @@ fn links_require_a_retained_owner_and_accept_the_last_driver_slot() {
     let code = cache.insert(compiled(&memory, 0x1000));
     let outside = CoreCache32::default().insert(compiled(&memory, filler(0)));
     assert!(cache.install_link(&code, 0).is_err());
-    assert!(cache.install_link(&code, 4097).is_err());
+    let last = cache.link_capacity() as u32;
+    assert!(cache.install_link(&code, last + 1).is_err());
     assert!(cache.install_link(&outside, 1).is_err());
     assert!(cache.lookup_linked(&memory, 0x1000).is_none());
-    cache.install_link(&code, 4096).unwrap();
-    cache.install_link(&code, 4096).unwrap();
+    cache.install_link(&code, last).unwrap();
+    cache.install_link(&code, last).unwrap();
     assert!(cache.install_link(&code, 1).is_err());
     let (selected, slot) = cache.lookup_linked(&memory, 0x1005).unwrap();
     assert!(same(&selected, &code));
-    assert_eq!(slot, 4096);
+    assert_eq!(slot, last);
     bounds(&cache);
 }
 
@@ -378,7 +381,11 @@ fn occupied_and_wrong_owner_link_operations_leave_both_owners_unchanged() {
     cache.install_link(&second, 2).unwrap();
     assert!(cache.unlink(1, second.identity()).is_err());
     assert!(cache.unlink(0, first.identity()).is_err());
-    assert!(cache.unlink(4097, first.identity()).is_err());
+    assert!(
+        cache
+            .unlink(cache.link_capacity() as u32 + 1, first.identity())
+            .is_err()
+    );
     for (pc, code, expected) in [(filler(0), &first, 1), (filler(1), &second, 2)] {
         let (selected, slot) = cache.lookup_linked(&memory, pc).unwrap();
         assert!(same(&selected, code));
@@ -403,24 +410,20 @@ fn unlink_is_idempotent_for_an_empty_slot_and_preserves_cached_code() {
 }
 
 #[test]
-fn eviction_releases_the_link_but_a_held_current_region_cannot_reinstall_it() {
+fn explicit_removal_releases_the_link_but_a_held_current_region_cannot_reinstall_it() {
     let memory = memory();
     let mut cache = CoreCache32::default();
     let old = cache.insert(compiled(&memory, filler(0)));
     cache.install_link(&old, 1).unwrap();
-    let mut newest = old.clone();
-    for index in 1..=MAX_REGIONS {
-        newest = cache.insert(compiled(&memory, filler(index)));
-    }
-    assert_eq!(cache.snapshot()[0], (MAX_REGIONS + 1) as u64);
-    assert_eq!(&cache.snapshot()[2..5], &[1, 0, 0]);
+    cache.remove(old.key);
     assert!(old.is_current(&memory));
     assert!(!old.wasm().is_empty());
     assert!(cache.lookup_linked(&memory, filler(0)).is_none());
     assert!(cache.install_link(&old, 1).is_err());
+    let newest = cache.insert(compiled(&memory, filler(1)));
     cache.install_link(&newest, 1).unwrap();
     assert!(cache.unlink(1, old.identity()).is_err());
-    let (selected, slot) = cache.lookup_linked(&memory, filler(MAX_REGIONS)).unwrap();
+    let (selected, slot) = cache.lookup_linked(&memory, filler(1)).unwrap();
     assert!(same(&selected, &newest));
     assert_eq!(slot, 1);
     bounds(&cache);
@@ -452,22 +455,19 @@ fn linked_lookup_is_source_checked_and_touches_the_same_lru() {
     let second = cache.insert(compiled(&memory, filler(1)));
     cache.install_link(&first, 1).unwrap();
     cache.install_link(&second, 2).unwrap();
-    for index in 2..MAX_REGIONS {
-        cache.insert(compiled(&memory, filler(index)));
-    }
+    cache.insert(compiled(&memory, filler(2)));
     assert!(cache.lookup_linked(&memory, 0xdead_0000).is_none());
     assert!(same(
         &cache.lookup_linked(&memory, filler(0)).unwrap().0,
         &first
     ));
-    let newest = cache.insert(compiled(&memory, filler(MAX_REGIONS)));
+    assert_eq!(cache.oldest, Some(second.key.index));
+    cache.remove(second.key);
+    let newest = cache.insert(compiled(&memory, filler(3)));
     assert!(cache.lookup_linked(&memory, filler(1)).is_none());
     assert!(cache.install_link(&second, 2).is_err());
     cache.install_link(&newest, 2).unwrap();
-    assert_eq!(
-        cache.lookup_linked(&memory, filler(MAX_REGIONS)).unwrap().1,
-        2
-    );
+    assert_eq!(cache.lookup_linked(&memory, filler(3)).unwrap().1, 2);
     assert_eq!(cache.lookup_linked(&memory, filler(0)).unwrap().1, 1);
     bounds(&cache);
 }
@@ -481,10 +481,10 @@ fn more_than_256_small_regions_remain_cached_below_the_byte_limit() {
     for index in 1..300 {
         cache.insert(compiled(&memory, filler(index)));
     }
-    assert_eq!((MAX_REGIONS - cache.free.len()), 300);
+    assert_eq!((cache.regions.len() - cache.free.len()), 300);
     assert!(cache.bytes < MAX_CODE_BYTES);
     assert_eq!(
-        cache.snapshot(),
+        cache.snapshot()[..8],
         [
             300,
             cache.bytes as u64,
@@ -513,8 +513,7 @@ fn a_thousand_twenty_five_regions_retain_both_endpoints_below_the_byte_budget() 
         last = cache.insert(compiled(&memory, filler(index)));
     }
     cache.install_link(&last, 1025).unwrap();
-    assert_eq!(MAX_REGIONS, 4096);
-    assert_eq!(MAX_REGIONS - cache.free.len(), 1025);
+    assert_eq!(cache.regions.len() - cache.free.len(), 1025);
     assert!(cache.bytes < MAX_CODE_BYTES);
     assert_eq!(cache.snapshot()[2..5], [0, 0, 0]);
     let (retained_first, first_slot) = cache.lookup_linked(&memory, filler(0)).unwrap();
@@ -526,7 +525,7 @@ fn a_thousand_twenty_five_regions_retain_both_endpoints_below_the_byte_budget() 
 }
 
 #[test]
-fn real_byte_pressure_evicts_and_releases_links_before_the_count_limit() {
+fn real_charged_byte_pressure_evicts_and_releases_links_before_initial_extent_is_exhausted() {
     let mut memory = AddressSpace::new(4).unwrap();
     memory
         .map_zeroed(
@@ -562,16 +561,16 @@ fn real_byte_pressure_evicts_and_releases_links_before_the_count_limit() {
         cache.install_link(&newest, index as u32 + 1).unwrap();
         bounds(&cache);
     }
-    assert!((MAX_REGIONS - cache.free.len()) < count);
+    assert!((cache.regions.len() - cache.free.len()) < count);
     assert_eq!(
-        cache.snapshot(),
+        cache.snapshot()[..8],
         [
             count as u64,
             admitted_bytes as u64,
             0,
-            (count - (MAX_REGIONS - cache.free.len())) as u64,
+            (count - (cache.regions.len() - cache.free.len())) as u64,
             0,
-            (MAX_REGIONS - cache.free.len()) as u64,
+            (cache.regions.len() - cache.free.len()) as u64,
             cache.bytes as u64,
             MAX_REGIONS as u64
         ]
@@ -590,8 +589,16 @@ fn real_byte_pressure_evicts_and_releases_links_before_the_count_limit() {
     let newest_pc = newest.entrypoints()[0];
     let replacement = compile(&memory, newest_pc, limits).unwrap();
     let replacement_bytes = replacement.wasm().len();
-    assert!(cache.bytes + replacement_bytes > MAX_CODE_BYTES);
-    assert!(cache.bytes - newest.wasm().len() + replacement_bytes <= MAX_CODE_BYTES);
+    assert!(
+        cache.resident_charge()
+            + CoreCache32::code_charge(&replacement, replacement.entrypoints().len())
+            > MAX_CODE_BYTES
+    );
+    assert!(
+        cache.resident_charge() - cache.retained(&newest).unwrap().charge
+            + CoreCache32::code_charge(&replacement, replacement.entrypoints().len())
+            <= MAX_CODE_BYTES
+    );
     let pressure = cache.snapshot();
     let displaced = newest;
     let newest = cache.insert(replacement);
@@ -644,7 +651,10 @@ fn oldest_linked_slot_follows_native_hits_and_skips_unlinked_owners() {
 fn cold_snapshot_counts_compilation_and_lazy_source_removal_without_counting_hits() {
     let mut memory = memory();
     let mut cache = CoreCache32::default();
-    assert_eq!(cache.snapshot(), [0, 0, 0, 0, 0, 0, 0, MAX_REGIONS as u64]);
+    assert_eq!(
+        cache.snapshot()[..8],
+        [0, 0, 0, 0, 0, 0, 0, cache.regions.len() as u64]
+    );
     let first = cache.insert(compiled(&memory, 0x1000));
     let second = cache.insert(compiled(&memory, filler(0)));
     let first_bytes = first.wasm().len() as u64;
@@ -657,36 +667,42 @@ fn cold_snapshot_counts_compilation_and_lazy_source_removal_without_counting_hit
         0,
         2,
         first_bytes + second_bytes,
-        MAX_REGIONS as u64,
+        cache.regions.len() as u64,
     ];
-    assert_eq!(cache.snapshot(), initial);
+    assert_eq!(cache.snapshot()[..8], initial);
+    let unlinked = cache.snapshot();
     cache.install_link(&first, 1).unwrap();
+    let mut linked = unlinked;
+    linked[11] += 1;
+    assert_eq!(cache.snapshot(), linked);
     for _ in 0..3 {
         cache.lookup(&memory, 0x1000).unwrap();
         cache.lookup_linked(&memory, 0x1005).unwrap();
-        assert_eq!(cache.snapshot(), initial);
+        assert_eq!(cache.snapshot(), linked);
     }
     cache.unlink(1, first.identity()).unwrap();
-    assert_eq!(cache.snapshot(), initial);
-
+    linked[11] += 1;
+    assert_eq!(cache.snapshot(), linked);
     memory.write(GuestAddress(0x1002), &[4]).unwrap();
     assert!(cache.lookup(&memory, 0x1000).is_none());
     assert!(cache.lookup(&memory, 0x1005).is_none());
-    let stale = [
-        2,
-        first_bytes + second_bytes,
-        0,
-        0,
-        1,
-        1,
-        second_bytes,
-        MAX_REGIONS as u64,
-    ];
-    assert_eq!(cache.snapshot(), stale);
+    assert_eq!(
+        cache.snapshot()[..8],
+        [
+            2,
+            first_bytes + second_bytes,
+            0,
+            0,
+            1,
+            1,
+            second_bytes,
+            cache.regions.len() as u64
+        ]
+    );
     let replacement = cache.insert(compiled(&memory, 0x1000));
     let replacement_bytes = replacement.wasm().len() as u64;
     assert_eq!(
-        cache.snapshot(),
+        cache.snapshot()[..8],
         [
             3,
             first_bytes + second_bytes + replacement_bytes,
@@ -695,7 +711,7 @@ fn cold_snapshot_counts_compilation_and_lazy_source_removal_without_counting_hit
             1,
             2,
             second_bytes + replacement_bytes,
-            MAX_REGIONS as u64
+            cache.regions.len() as u64
         ]
     );
     bounds(&cache);
@@ -707,7 +723,7 @@ fn owner_table_pointer_survives_cache_moves_unlink_and_source_removal() {
     let mut cache = CoreCache32::default();
     let pointer = cache.link_owners_ptr();
     assert_eq!(pointer, cache.link_owners.as_ptr());
-    assert_eq!(cache.link_owners.len(), 4097);
+    assert_eq!(cache.link_owners.len(), cache.link_capacity() + 1);
     assert!(cache.link_owners.iter().all(|owner| *owner == 0));
     let old = cache.insert(compiled(&memory, 0x1000));
     cache.install_link(&old, 4096).unwrap();
@@ -822,7 +838,7 @@ fn frontier_membership_accepts_linked_and_unlinked_entries_without_touching_lru(
     assert_eq!(cache.newest, Some(second.key.index));
     assert_eq!(cache.oldest_linked_slot(), 1);
     assert_eq!(cache.snapshot(), snapshot);
-    assert_eq!(cache.link_owners.as_ref(), links);
+    assert_eq!(cache.link_owners.as_slice(), links);
     bounds(&cache);
 }
 
@@ -850,7 +866,7 @@ fn frontier_membership_rejects_foreign_stale_and_remapped_sources_without_remova
         assert!(!cache.frontier_contains(&memory, 0x1000));
         assert!(cache.frontier_contains(&memory, filler(0)));
         assert_eq!(cache.snapshot(), snapshot);
-        assert_eq!((MAX_REGIONS - cache.free.len()), 2);
+        assert_eq!((cache.regions.len() - cache.free.len()), 2);
         assert_eq!(cache.link_owners[1], first.identity());
         assert_eq!(cache.oldest, Some(first.key.index));
         assert_eq!(cache.newest, Some(second.key.index));
@@ -901,7 +917,7 @@ fn reused_row_and_driver_slot_reject_a_held_current_owner() {
     assert!(cache.lookup(&memory, filler(0)).is_none());
     assert!(!cache.frontier_contains(&memory, filler(0)));
     assert_eq!(cache.snapshot(), snapshot);
-    assert_eq!(cache.link_owners.as_ref(), owners);
+    assert_eq!(cache.link_owners.as_slice(), owners);
     assert_eq!(cache.oldest_linked_slot(), victim);
     assert_eq!(victim, 2);
     for (pc, expected, slot) in [(filler(1), &neighbor, 2), (filler(2), &replacement, 1)] {
@@ -950,7 +966,7 @@ fn overlapping_entry_removal_and_row_reuse_preserve_exact_lookup_owners() {
         assert!(!cache.frontier_contains(&memory, pc));
     }
     assert_eq!(cache.snapshot(), snapshot);
-    assert_eq!(cache.link_owners.as_ref(), owners);
+    assert_eq!(cache.link_owners.as_slice(), owners);
     for (pc, expected, slot) in [
         (filler(0), &first_replacement, 1),
         (filler(1), &second_replacement, 2),
@@ -1006,7 +1022,7 @@ fn reused_link_endpoint_preserves_the_current_graph_and_rejects_old_slot_authori
                 TransitionLookup::Linked(ref code,selected) if same(code,current_target)&&selected==target_slot));
         }
         assert_eq!(cache.snapshot(), snapshot);
-        assert_eq!(cache.link_owners.as_ref(), owners);
+        assert_eq!(cache.link_owners.as_slice(), owners);
         bounds(&cache);
     }
 }

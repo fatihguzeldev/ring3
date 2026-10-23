@@ -120,9 +120,8 @@ fn selected(
 
 fn resource_invariants(cache: &CoreCache32) {
     let retained = cache.regions.iter().flatten().count();
-    assert_eq!(MAX_REGIONS, 4096);
     assert_eq!(MAX_CODE_BYTES, 128 << 20);
-    assert_eq!(retained, MAX_REGIONS - cache.free.len());
+    assert_eq!(retained, cache.regions.len() - cache.free.len());
     assert_eq!(cache.snapshot()[5], retained as u64);
     assert_eq!(
         cache.bytes,
@@ -135,6 +134,10 @@ fn resource_invariants(cache: &CoreCache32) {
     );
     assert_eq!(cache.snapshot()[6], cache.bytes as u64);
     assert!(cache.bytes <= MAX_CODE_BYTES);
+    assert!(cache.resident_charge() <= MAX_CODE_BYTES);
+    assert_eq!(cache.snapshot()[8], cache.resident_charge() as u64);
+    assert_eq!(cache.snapshot()[9], MAX_CODE_BYTES as u64);
+    assert_eq!(cache.snapshot()[10], cache.link_capacity() as u64);
     for (&pc, &key) in &cache.trace_entries {
         let entry = cache.region(key).unwrap();
         assert_eq!(entry.code.trace_root(), Some(pc));
@@ -161,7 +164,9 @@ fn linking_an_unlinked_overlay_invalidates_a_previously_cached_baseline_target()
         cache.lookup(&memory, ROOT).unwrap().identity(),
         trace.identity()
     );
-    assert_eq!(cache.snapshot(), snapshot);
+    let mut linked = snapshot;
+    linked[11] += 1;
+    assert_eq!(cache.snapshot(), linked);
     resource_invariants(&cache);
 }
 
@@ -300,8 +305,8 @@ fn overlay_source_write_permission_or_identical_remap_rejects_cached_overlay_onl
 }
 
 #[test]
-fn real_count_pressure_evicts_the_lru_overlay_from_the_shared_4096_owner_pool() {
-    let memory = memory(MAX_REGIONS);
+fn explicit_lru_overlay_eviction_preserves_sources_and_allows_later_hot_rebuild() {
+    let memory = memory(0);
     let (mut cache, caller, callee, source) = sources(&memory);
     let coverage = cache.coverage.clone();
     for _ in 0..1023 {
@@ -312,22 +317,11 @@ fn real_count_pressure_evicts_the_lru_overlay_from_the_shared_4096_owner_pool() 
         .admit(&memory, observed(&memory, &caller, &callee))
         .unwrap();
     cache.install_link(&trace, 4).unwrap();
-    // Touch the baseline owners, making the overlay the ordinary LRU victim.
     for pc in [0x1005, CALLEE, SOURCE] {
         cache.lookup(&memory, pc).unwrap();
     }
     assert_eq!(cache.oldest, Some(trace.key.index));
-    let mut admitted_bytes = cache.snapshot()[1];
-    for index in 0..=MAX_REGIONS - 4 {
-        let pc = 0x4000 + index as u32 * 4;
-        let code = compile(&memory, GuestAddress(pc), options()).unwrap();
-        admitted_bytes += code.wasm().len() as u64;
-        cache.admit(&memory, code).unwrap();
-    }
-    assert_eq!(cache.snapshot()[0], (MAX_REGIONS + 1) as u64);
-    assert_eq!(cache.snapshot()[1], admitted_bytes);
-    assert_eq!(cache.snapshot()[2..5], [1, 0, 0]);
-    assert_eq!(cache.snapshot()[5], MAX_REGIONS as u64);
+    cache.remove(trace.key);
     assert!(cache.retained(&trace).is_none());
     assert_eq!(cache.link_owners[4], 0);
     assert_eq!(
@@ -345,8 +339,6 @@ fn real_count_pressure_evicts_the_lru_overlay_from_the_shared_4096_owner_pool() 
     for (pc, key) in coverage {
         assert_eq!(cache.coverage.get(&pc), Some(&key));
     }
-    // A successful executor's eviction does not permanently consume the hot
-    // root. The retained source owner's bounded retry heat can rebuild it.
     for _ in 0..4095 {
         assert!(!cache.trace_candidate(&caller, ROOT));
     }
@@ -361,6 +353,7 @@ fn real_count_pressure_evicts_the_lru_overlay_from_the_shared_4096_owner_pool() 
         cache.unlink(4, trace.identity()),
         Err(LinkError::WrongOwner)
     );
+    assert_eq!(cache.snapshot()[2..5], [0, 0, 0]);
     resource_invariants(&cache);
 }
 

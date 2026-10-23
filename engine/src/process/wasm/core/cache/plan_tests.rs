@@ -145,8 +145,12 @@ fn resources(cache: &CoreCache32) {
     assert_eq!(cache.snapshot()[5], count as u64);
     assert_eq!(cache.snapshot()[6], bytes as u64);
     assert_eq!(cache.bytes, bytes);
-    assert_eq!(cache.free.len() + count, MAX_REGIONS);
+    assert_eq!(cache.free.len() + count, cache.regions.len());
     assert!(bytes <= MAX_CODE_BYTES);
+    assert!(cache.resident_charge() <= MAX_CODE_BYTES);
+    assert_eq!(cache.snapshot()[8], cache.resident_charge() as u64);
+    assert_eq!(cache.snapshot()[9], MAX_CODE_BYTES as u64);
+    assert_eq!(cache.snapshot()[10], cache.link_capacity() as u64);
 }
 
 #[test]
@@ -225,6 +229,7 @@ fn missing_current_parent_is_refused_neutrally_and_unchanged_plan_feedback_survi
     // entire historical graph was authorized as a parent.
     let plan = connected_plan(&memory, &[&caller], CompileOptions::default());
     let before = cache.snapshot();
+    let before_memo = cache.memo_charge();
     let aliases = cache.trace_entries.clone();
     let slots = cache.link_owners.to_vec();
     let epoch = cache.ownership_epoch;
@@ -237,7 +242,11 @@ fn missing_current_parent_is_refused_neutrally_and_unchanged_plan_feedback_survi
     assert_eq!(cache.ownership_epoch, epoch);
     assert!(cache.preflight_observed(&memory, &plan).is_none());
     assert_eq!(cache.observed_refusals.len(), 1);
-    assert_eq!(cache.snapshot(), before);
+    let mut expected = before;
+    expected[8] = (before[8] as usize + cache.memo_charge() - before_memo) as u64;
+    expected[11] += 2;
+    assert_eq!(cache.snapshot(), expected);
+    assert!(cache.observed_refusals.len() <= MAX_OBSERVED_REFUSALS);
     assert_eq!(cache.trace_entries, aliases);
     assert_eq!(&*cache.link_owners, slots);
     cache.remove(callee.key);
@@ -344,6 +353,7 @@ fn exact_emit_refusal_is_bounded_and_different_limits_remain_eligible() {
     let memory = memory();
     let (mut cache, caller, callee) = two_families(&memory);
     let before = cache.snapshot();
+    let before_memo = cache.memo_charge();
     for bytes in 128..128 + MAX_OBSERVED_REFUSALS + 2 {
         let options = CompileOptions {
             wasm_bytes: bytes,
@@ -359,7 +369,10 @@ fn exact_emit_refusal_is_bounded_and_different_limits_remain_eligible() {
         let repeated = connected_plan(&memory, &[&caller, &callee], options);
         assert!(cache.preflight_observed(&memory, &repeated).is_none());
         assert!(cache.observed_refusals.len() <= MAX_OBSERVED_REFUSALS);
-        assert_eq!(cache.snapshot(), before);
+        let mut expected = before;
+        expected[8] = (before[8] as usize + cache.memo_charge() - before_memo) as u64;
+        assert_eq!(cache.snapshot(), expected);
+        assert!(cache.observed_refusals.len() <= MAX_OBSERVED_REFUSALS);
     }
     assert_eq!(cache.observed_refusals.len(), MAX_OBSERVED_REFUSALS);
     let plan = connected_plan(&memory, &[&caller, &callee], CompileOptions::default());

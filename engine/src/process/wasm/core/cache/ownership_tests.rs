@@ -55,6 +55,28 @@ fn coverage(cache: &mut CoreCache32, memory: &AddressSpace, owner: &RegionRef) {
     assert_eq!(cache.coverage.len(), 9);
 }
 
+fn port_metadata_charge(cache: &CoreCache32) -> usize {
+    CoreCache32::hash_charge::<u32, RegionKey>(cache.entries.capacity())
+        + cache
+            .regions
+            .iter()
+            .flatten()
+            .map(|entry| {
+                entry.admitted_entries.capacity() * std::mem::size_of::<GuestAddress>()
+                    + CoreCache32::hash_charge::<u32, EntryRejection>(
+                        entry.rejected_entries.capacity(),
+                    )
+            })
+            .sum::<usize>()
+}
+
+fn unchanged_except_port_storage(cache: &CoreCache32, before: [u64; 12], metadata: usize) {
+    let mut expected = before;
+    expected[8] = (before[8] as usize + port_metadata_charge(cache) - metadata) as u64;
+    assert_eq!(cache.snapshot(), expected);
+    assert!(cache.resident_charge() <= MAX_CODE_BYTES);
+}
+
 #[test]
 fn covered_interior_binds_precompiled_port_without_changing_body_identity_or_roots() {
     let memory = memory();
@@ -74,6 +96,7 @@ fn covered_interior_binds_precompiled_port_without_changing_body_identity_or_roo
     assert!(cache.lookup(&memory, 0x1004).is_none());
     coverage(&mut cache, &memory, &original);
     let snapshot = cache.snapshot();
+    let metadata = port_metadata_charge(&cache);
 
     let upgraded = ready(
         cache
@@ -88,7 +111,7 @@ fn covered_interior_binds_precompiled_port_without_changing_body_identity_or_roo
         original.identity(),
         "admitting an existing port preserves its installed slot"
     );
-    assert_eq!(usize::from(cache.slot_regions[7]), original.key.index);
+    assert_eq!(cache.slot_regions[7] as usize, original.key.index);
     assert_eq!(
         upgraded.instruction_pcs().collect::<Vec<_>>(),
         (0x1000..0x1009).collect::<Vec<_>>()
@@ -107,11 +130,7 @@ fn covered_interior_binds_precompiled_port_without_changing_body_identity_or_roo
     );
     assert_eq!(upgraded.entrypoints(), &[GuestAddress(0x1000)]);
     assert_eq!(upgraded.formation_roots(), &[GuestAddress(0x1000)]);
-    assert_eq!(
-        cache.snapshot(),
-        snapshot,
-        "port admission emits no new module bytes"
-    );
+    unchanged_except_port_storage(&cache, snapshot, metadata);
     assert_eq!(cache.snapshot()[5], 1);
     assert_eq!(cache.bytes, upgraded.wasm().len());
     for pc in [0x1000, 0x1004] {
@@ -154,6 +173,7 @@ fn owned_entry_limit_declines_preserve_owner_entries_links_bytes_and_memory() {
         let original = cache.admit(&memory, code(&memory, 0x1000)).unwrap();
         cache.install_link(&original, 3).unwrap();
         let before = cache.snapshot();
+        let before_metadata = port_metadata_charge(&cache);
         let entries = cache.entries.clone();
         let covered = cache.coverage.clone();
         let version = memory.transaction_version();
@@ -164,7 +184,7 @@ fn owned_entry_limit_declines_preserve_owner_entries_links_bytes_and_memory() {
                     .unwrap(),
                 OwnedEntryLookup::Declined
             ));
-            assert_eq!(cache.snapshot(), before);
+            unchanged_except_port_storage(&cache, before, before_metadata);
             assert_eq!(cache.entries, entries);
             assert_eq!(cache.coverage, covered);
             assert_eq!(cache.link_owners[3], original.identity());
@@ -186,7 +206,7 @@ fn owned_entry_limit_declines_preserve_owner_entries_links_bytes_and_memory() {
             original.identity(),
             "changed limits admit the same immutable body"
         );
-        assert_eq!(cache.snapshot(), before);
+        unchanged_except_port_storage(&cache, before, before_metadata);
         coverage(&mut cache, &memory, &upgraded);
     }
 }
@@ -361,6 +381,7 @@ fn the_hard_admitted_entry_limit_declines_without_reemitting_or_losing_ports() {
     let owner = cache.admit(&memory, body).unwrap();
     cache.install_link(&owner, 1).unwrap();
     let snapshot = cache.snapshot();
+    let metadata = port_metadata_charge(&cache);
     for pc in 0x1001..0x1400 {
         assert_eq!(
             ready(cache.prepare_owned_entry(&memory, pc, limits, &[]).unwrap()).identity(),
@@ -374,7 +395,7 @@ fn the_hard_admitted_entry_limit_declines_without_reemitting_or_losing_ports() {
             .unwrap(),
         OwnedEntryLookup::Declined
     ));
-    assert_eq!(cache.snapshot(), snapshot);
+    unchanged_except_port_storage(&cache, snapshot, metadata);
     assert!(cache.lookup(&memory, 0x1400).is_none());
     assert!(cache.coverage_contains(&memory, 0x1400));
     assert_eq!(cache.link_owners[1], owner.identity());
