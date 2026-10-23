@@ -42,7 +42,7 @@ function runLinkedPoolCase(artifact,report,iterations) {
     core_prepare:(...args)=>{prepares++;return raw.core_prepare(...args);},
     core_numeric:(...args)=>{helpers++;return raw.core_numeric(...args);},
     core_chain_cold:()=>assert.fail('the three declared source-current owners are retained'),
-    core_chain_probe:(context,pc)=>{
+    [typeof raw.core_chain_select==='function'?'core_chain_select':'core_chain_probe']:(context,pc,selectionRetired)=>{
       const index=result.probes.length,stage=index%3,cycle=Math.floor(index/3);
       assert.equal(context,cache.context);assert.equal(pc,[0x1080,0x1040,0x1000][stage]);
       assert(index<3*iterations-1,'the declared chain has a bounded exact number of links');
@@ -56,7 +56,7 @@ function runLinkedPoolCase(artifact,report,iterations) {
       result.probes.push({pc,source:['A','scalar-C','B'][stage],cycle,retired,counters:observed,canonicalBankHex});
       for(const item of diagnostics)resetWitnessMasks(item);
       previousCounters=sum(diagnostics);
-      const slot=raw.core_chain_probe(context,pc)>>>0;
+      const slot=(raw.core_chain_select??raw.core_chain_probe)(context,pc,selectionRetired)>>>0;
       assert.equal(slot,units.get(pc).slot,'the real native probe selects the declared owner');return slot;
     },
   };
@@ -95,7 +95,7 @@ function runLinkedPoolCase(artifact,report,iterations) {
     const dispatchSource=bytes(raw.core_dispatch_code_ptr()>>>0,raw.core_dispatch_code_len()>>>0);
     const dispatchDiagnostic=instrumentWitnessModule(dispatchSource,readGeneratedModule(dispatchSource),true);
     const support=new WebAssembly.Instance(new WebAssembly.Module(dispatchDiagnostic.bytes),{ring3:{memory,
-      functions:cache.table,publishers:cache.publishers,probe:api.core_chain_probe,cold:api.core_chain_cold}}).exports;
+      functions:cache.table,publishers:cache.publishers,probe:api.core_chain_select??api.core_chain_probe,cold:api.core_chain_cold}}).exports;
     cache.dispatch=support;diagnostics.push(support);result.supportProof=dispatchDiagnostic.proof;
     for(const module of result.modules){
       const diagnostic=instrumentWitnessModule(module.source,readGeneratedModule(module.source));

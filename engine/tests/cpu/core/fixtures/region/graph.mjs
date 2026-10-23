@@ -52,12 +52,17 @@ export function runStableGraphCase(artifact,report) {
     }
     assert.equal(run.coreReason,2,'a warmed existing graph completes its quota without a code-formation stop');
     assert.deepEqual([run.pc,run.retired,run.work],[0x1048,budget,budget]);
-    assert.equal(prepares,prepared,'more than 4096 known edges do not request preparation');
-    assert.equal(cache.units.size,2);assert.equal(cache.units.get(first.id),first);assert.equal(cache.units.get(second.id),second);
-    assert.equal(cache.admissions,2);assert.equal(cache.generatedModuleBytes,result.modules[0].bytes+result.modules[1].bytes);
-    assert.equal(cache.nativeCache.compiled,'2');assert.equal(cache.nativeCache.retainedUnits,'2');
+    const overlays=[...cache.units.values()].filter(unit=>unit!==first&&unit!==second);
+    assert.equal(overlays.length,1,'the default recorder installs exactly one separate executor after the lease');
+    const overlay=overlays[0];result.overlay={identity:String(overlay.id),pc:overlay.pc,bytes:overlay.bytes,slot:overlay.slot};
+    assert.equal(run.regions,2*iterations,'the entire first lease still executes the immutable baseline graph');
+    assert.equal(prepares,prepared+1,'one post-lease SDK prepare installs the separately compiled observed executor');
+    assert.equal(cache.units.size,3);assert.equal(cache.units.get(first.id),first);assert.equal(cache.units.get(second.id),second);
+    assert.equal(cache.admissions,3);assert.equal(cache.generatedModuleBytes,result.modules[0].bytes+result.modules[1].bytes+overlay.bytes);
+    assert.equal(cache.nativeCache.compiled,'3');assert.equal(cache.nativeCache.retainedUnits,'3');
     assert.deepEqual([cache.transientAdmissions,cache.transientRuns],[0,0]);
-    assert.deepEqual(bytes(api.core_link_owners_ptr()>>>0,4097*8),owners,'both original reciprocal slots survive every edge');
+    const wantedOwners=owners.slice();view(wantedOwners).setBigUint64(overlay.slot*8,overlay.id,true);
+    assert.deepEqual(bytes(api.core_link_owners_ptr()>>>0,4097*8),wantedOwners,'both source slots survive; only the separate executor slot is added');
     const wantedRegisters=registers.slice();wantedRegisters[1]=0;
     assert.deepEqual(Array.from({length:8},(_,i)=>word(cache.context,i*4)),wantedRegisters);
     assert.deepEqual([word(cache.context,32),word(cache.context,36),word(cache.context,40),word(cache.context,44)],
@@ -69,7 +74,9 @@ export function runStableGraphCase(artifact,report) {
     assert.deepEqual(bytes(backing,expectedRam.length),expectedRam);
     assert.equal(new DataView(memory.buffer).getBigUint64(versionPointer,true),beforeVersion+2n*BigInt(iterations));
     for(const[unit,module]of[[first,result.modules[0]],[second,result.modules[1]]]){
-      status('core_lookup',0,module.pc);
+      // An overlay owns only its public root. The precompiled instruction port
+      // proves original source coverage, bytes and SDK instance independently.
+      const sourcePort=cache.entry(module.pc+4);assert.equal(sourcePort.id,unit.id);
       const id=new DataView(memory.buffer).getBigUint64(cache.context+120,true);
       assert.equal(id,unit.id);assert.equal(hash(bytes(api.core_code_ptr()>>>0,api.core_code_len()>>>0)),module.sha256,
         'the warmed owner still exposes its original emitted body');

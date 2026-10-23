@@ -150,13 +150,13 @@ export function runArithmeticOwnerCases(artifact,report) {
     const api={...raw,core_prepare:(...args)=>{prepares++;return raw.core_prepare(...args);},
       core_numeric:(...args)=>{helpers++;return raw.core_numeric(...args);},
       core_chain_cold:()=>assert.fail('both immutable compiled owners are already retained'),
-      core_chain_probe:(context,pc)=>{
+      [typeof raw.core_chain_select==='function'?'core_chain_select':'core_chain_probe']:(context,pc,selectionRetired)=>{
         assert.equal(context,cache.context);assert.equal(pc,0x1040);assert.equal(result.probes.length,0);
         const bank=word(context,92),physical7=bank+640+7*32;
         result.probes.push({pc,bankHex:Buffer.from(bytes(bank,100)).toString('hex'),
           value:new DataView(memory.buffer).getFloat64(physical7,true),
           valid:word(physical7,20),proofs:word(physical7,24),cw:word(physical7,28)});
-        const slot=raw.core_chain_probe(context,pc)>>>0;assert.equal(slot,units.get(pc).slot);return slot;
+        const slot=(raw.core_chain_select??raw.core_chain_probe)(context,pc,selectionRetired)>>>0;assert.equal(slot,units.get(pc).slot);return slot;
       }};
     try{
       engine=new Engine(api,memory,artifact.sha256);status('open',0,12,...KEY);opened=true;engine.base=raw.arena_ptr()>>>0;
@@ -188,7 +188,7 @@ export function runArithmeticOwnerCases(artifact,report) {
       const dispatchSource=bytes(raw.core_dispatch_code_ptr()>>>0,raw.core_dispatch_code_len()>>>0);
       const shared=instrumentWitnessModule(dispatchSource,readGeneratedModule(dispatchSource),true);
       const support=new WebAssembly.Instance(new WebAssembly.Module(shared.bytes),{ring3:{memory,
-        functions:cache.table,publishers:cache.publishers,probe:api.core_chain_probe,cold:api.core_chain_cold}}).exports;
+        functions:cache.table,publishers:cache.publishers,probe:api.core_chain_select??api.core_chain_probe,cold:api.core_chain_cold}}).exports;
       cache.dispatch=support;diagnostics.push(support);
       for(const module of result.modules){
         const diagnostic=instrumentWitnessModule(module.source,readGeneratedModule(module.source));

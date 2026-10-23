@@ -104,19 +104,21 @@ function fixture(name,{entry=0x1000,target=0x1040,registers=[0,0,0x1080,0x3000,0
       const value = cache.execute(unit);
       result.runs.push({...value,id:value.id===null?null:String(value.id),budget,sourceVersion:String(sourceVersion),...snapshot()});
       // a stale entry may be refreshed by execute before its first region call.
-      const selected = cache.units.get(value.id);
+      const preparedId = new DataView(engine.memory.buffer).getBigUint64(cache.context+120,true);
+      const selected = cache.units.get(preparedId);
       if (selected && !result.modules.some(item => item.id === String(selected.id))) {
         const encoded = bytes(api.core_code_ptr()>>>0,api.core_code_len()>>>0);
         result.modules.push({pc:selected.pc,id:String(selected.id),slot:selected.slot,sha256:hash(encoded),wasmHex:hex(encoded)});
       }
       checkpoint(); return {value,sourceVersion};
     }
-    function expect({stop,pc,retired,work,remaining,regions,id,regs=registers,flags=2,fault=[0,0,0],wantedFp=initialFp,sourceVersion}) {
+    function expect({stop,pc,retired,work,remaining,regions,id,selectedId=id,regs=registers,flags=2,fault=[0,0,0],wantedFp=initialFp,sourceVersion}) {
       const last = result.runs.at(-1); assert.equal(last.coreReason,stop);
+      assert.equal(last.id,id===0n?null:String(id),'the returned identity names the owner that actually finished guest execution');
       const expectedContext = initialContext.slice(), c = view(expectedContext);
       regs.forEach((value,index) => c.setUint32(index*4,value,true));
       for (const [offset,value] of [[32,pc],[36,flags],[40,retired],[44,remaining],[48,fault[0]],[52,fault[1]],[112,0],[116,fault[2]]]) c.setUint32(offset,value,true);
-      c.setBigUint64(96,sourceVersion,true); c.setBigUint64(120,id,true);
+      c.setBigUint64(96,sourceVersion,true); c.setBigUint64(120,selectedId,true);
       assert.deepEqual(bytes(cache.context,128),expectedContext,'full literal Context32 and selected owner');
       assert.equal(cache.stats().regions,regions); assert.equal(cache.stats().retired,retired); assert.equal(cache.stats().work,work);
       assert.deepEqual(bytes(backing,expectedRam.length),expectedRam,'whole canonical allocation');
@@ -223,6 +225,8 @@ try {
   },t => {
     const admissionsBefore=t.cache.stats().admissions;
     const callsBefore={...t.selectionCalls},originalModules=t.result.modules.slice();
+    const originalExports=[t.first,t.next].map(unit=>({unit,run:unit.run,link:unit.link,publish:unit.publish}));
+    const ownerPointer=t.api.core_link_owners_ptr()>>>0,originalOwners=t.bytes(ownerPointer,4097*8);
     const version=()=>new DataView(t.engine.memory.buffer).getBigUint64(t.word(t.cache.context,80),true);
     const beforeVersion=version();
     const selected=publicSelection?t.cache.select():t.first;
@@ -231,58 +235,81 @@ try {
     t.expectedRam.set(unhex('0000c040'),4096+8);
     t.expectedRam.set(unhex('07130000'),8192+0x7fc);
     const stats=t.cache.stats();
+    const overlays=[...t.cache.units.values()].filter(unit=>unit!==t.first&&unit!==t.next);
+    assert.equal(overlays.length,1,'normal post-lease recording installs exactly one separate observed executor');
+    const overlay=overlays[0],overlayModule=t.result.modules.find(module=>module.id===String(overlay.id));
+    assert(overlayModule,'the automatically prepared executor exposes its actual encoded module');
+    assert([0x1300,0x1307,crossPage?0x5340:0x1340].includes(overlay.pc),'the executor root is an actual entry of this graph');
+    assert.notEqual(overlay.slot,t.first.slot);assert.notEqual(overlay.slot,t.next.slot);
+    const wantedOwners=originalOwners.slice();view(wantedOwners).setBigUint64(overlay.slot*8,overlay.id,true);
+    assert.deepEqual(t.bytes(ownerPointer,4097*8),wantedOwners,
+      'both original reciprocal slots survive; only the separately installed executor slot is added');
     // One initial caller activation, then one callee and one returned caller per CALL.
-    const wanted={stop:2,pc:0x130a,retired:totalWork,work:totalWork,remaining:0,regions:2*iterations+1,id:t.first.id,sourceVersion,
+    const wanted={stop:2,pc:0x130a,retired:totalWork,work:totalWork,remaining:0,regions:2*iterations+1,id:t.first.id,selectedId:overlay.id,sourceVersion,
       regs:[0,0,0,0x3000,0x4800,0,0,0],flags:0x46,
       wantedFp:fp(t.initialFp,{opcode:0x15b,fip:crossPage?0x5343:0x1343,fdp:0x3008,registers:{7:'00000000000000c00140'}})};
     t.expect(wanted);
     t.result.graph={iterations,retired:last.retired,work:last.work,admissionsBefore,admissionsAfter:stats.admissions,
       publicSelection,coldRuns:stats.coldRuns,coldRetired:stats.coldRetired,coldWork:stats.coldWork,
-      regions:stats.regions,outer:stats.runs,initialOwners:[String(t.first.id),String(t.next.id)],finalOwner:String(last.id)};
+      regions:stats.regions,outer:stats.runs,initialOwners:[String(t.first.id),String(t.next.id)],finalOwner:String(last.id),
+      preparedOverlay:{id:String(overlay.id),pc:overlay.pc,slot:overlay.slot,bytes:overlay.bytes,sha256:overlayModule.sha256}};
     checkpoint();
     assert.deepEqual([last.retired,last.work,last.coreReason],[totalWork,totalWork,2]);
     assert.equal(last.id,t.first.id,'the final DEC/JNZ belongs to the original caller');
     assert.equal(t.result.runs.length,1,'known graph edges never request outer preparation');
     assert.deepEqual([stats.runs,stats.coldRuns,stats.coldRetired,stats.coldWork],[1,0,0,0]);
-    assert.deepEqual([stats.admissions,stats.installedUnits,stats.transientAdmissions,stats.transientRuns],[2,2,0,0]);
-    assert.equal(stats.admissions,admissionsBefore);
-    assert.equal(stats.generatedModuleBytes,originalModules.reduce((sum,module)=>sum+module.wasmHex.length/2,0));
-    assert.deepEqual(t.result.modules,originalModules,'no replacement body is admitted');
-    assert.deepEqual(t.selectionCalls,{core_prepare:callsBefore.core_prepare,
+    assert.deepEqual([stats.admissions,stats.installedUnits,stats.transientAdmissions,stats.transientRuns],[3,3,0,0]);
+    assert.equal(stats.admissions,admissionsBefore+1);
+    assert.equal(stats.generatedModuleBytes,originalModules.reduce((sum,module)=>sum+module.wasmHex.length/2,0)+overlay.bytes);
+    assert.deepEqual(t.result.modules.filter(module=>module.id!==String(overlay.id)),originalModules,
+      'the added executor does not replace or re-emit either original source owner');
+    assert.equal(t.result.modules.length,originalModules.length+1);
+    assert.deepEqual(t.selectionCalls,{core_prepare:callsBefore.core_prepare+1,
       core_lookup:callsBefore.core_lookup+Number(publicSelection),core_cold_run:callsBefore.core_cold_run},
-      'retained public selection uses lookup without preparation or an empty cold lease');
+      'retained public selection uses lookup; exactly one post-lease prepare installs the executor without a cold lease');
     assert.equal(version(),beforeVersion+2n*BigInt(iterations),'each CALL and FSTP commits exactly one write');
     for (const unit of [t.first,t.next]) {
       const original=originalModules.find(module=>module.id===String(unit.id));
       assert.equal(t.cache.units.get(unit.id),unit,'both original SDK instances survive every graph edge');
-      t.status('core_lookup',0,original.pc);
+      const sourcePort=original.pc===overlay.pc?(unit===t.first?0x1307:original.pc+3):original.pc;
+      assert.equal(t.select(sourcePort),unit,'a real baseline port selects its unchanged immutable source owner');
       assert.equal(new DataView(t.engine.memory.buffer).getBigUint64(t.cache.context+120,true),unit.id);
       assert.equal(hash(t.bytes(t.api.core_code_ptr()>>>0,t.api.core_code_len()>>>0)),original.sha256,
         'each source owner exposes its original emitted module');
     }
-    t.status('core_lookup',0,0x1300);
-    t.expect(wanted);
+    for(const saved of originalExports){assert.equal(saved.unit.run,saved.run);assert.equal(saved.unit.link,saved.link);
+      assert.equal(saved.unit.publish,saved.publish);}
+    const callerPort=overlay.pc===0x1300?0x1307:0x1300;
+    t.status('core_lookup',0,callerPort);
+    t.expect({...wanted,selectedId:t.first.id});
     if(crossPage) {
       t.engine.ok('write8',0x5346,0x90);t.expectedRam[12288+0x346]=0x90;
       assert.deepEqual(t.bytes(t.word(t.cache.context,64),t.expectedRam.length),t.expectedRam,
         'second code-page mutation is the only backing change');
-      t.neutral('stale callee lookup rejects only its source owner',()=>t.status('core_lookup',4,0x5340));
-      t.neutral('unchanged caller remains executable',()=>t.status('core_lookup',0,0x1300));
+      t.neutral('stale callee lookup rejects its source owner and dependent executor',()=>t.status('core_lookup',4,0x5340));
+      if(overlay.pc!==0x5340)t.neutral('dependent executor root is pruned before selecting its current baseline',()=>
+        t.status('core_lookup',0,overlay.pc));
+      t.neutral('unchanged caller remains executable',()=>t.status('core_lookup',0,callerPort));
       const owners=new DataView(t.engine.memory.buffer,t.api.core_link_owners_ptr()>>>0,4097*8);
       assert.equal(owners.getBigUint64(t.next.slot*8,true),0n,'stale callee reciprocal slot is pruned');
+      assert.equal(owners.getBigUint64(overlay.slot*8,true),0n,'the executor depending on changed callee bytes is also pruned');
       assert.equal(owners.getBigUint64(t.first.slot*8,true),t.first.id,'caller authority remains retained');
       t.begin();t.end();
       const currentSourceVersion=new DataView(t.engine.memory.buffer).getBigUint64(t.word(t.cache.context,88),true);
-      t.expect({...wanted,sourceVersion:currentSourceVersion});
+      t.expect({...wanted,selectedId:t.first.id,sourceVersion:currentSourceVersion});
       const replacement=t.select(0x5340);
       assert.notEqual(replacement.id,t.next.id,'repreparing changed callee source creates a fresh owner');
       assert.equal(t.cache.units.get(t.first.id),t.first,'callee refresh preserves the caller SDK instance');
       assert(!t.cache.units.has(t.next.id),'the stale callee SDK instance is removed');
-      assert.deepEqual([t.cache.stats().admissions,t.cache.units.size],[3,2]);
-      t.status('core_lookup',0,0x1300);
+      assert(!t.cache.units.has(overlay.id),'the stale dependent executor SDK instance is removed');
+      assert.deepEqual([t.cache.stats().admissions,t.cache.units.size],[4,2]);
+      assert.equal(replacement.slot,overlay.slot,'the replacement really reuses the former executor slot');
+      t.neutral('old executor identity cannot unlink a recycled slot',()=>
+        t.status('core_unlink',4,overlay.slot,Number(overlay.id&0xffffffffn),Number(overlay.id>>32n)));
+      t.status('core_lookup',0,callerPort);
       assert.equal(hash(t.bytes(t.api.core_code_ptr()>>>0,t.api.core_code_len()>>>0)),
         originalModules.find(module=>module.id===String(t.first.id)).sha256);
-      t.expect({...wanted,sourceVersion:currentSourceVersion});
+      t.expect({...wanted,selectedId:t.first.id,sourceVersion:currentSourceVersion});
       assert.equal(version(),beforeVersion+2n*BigInt(iterations)+1n,'source mutation is the only additional committed write');
     }
   });

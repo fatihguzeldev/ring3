@@ -21,9 +21,11 @@ import {runEntryCases,runEntryNestedCases,runEntryUnmatchedCases} from './region
 import {runCanonicalCases,runCanonicalStatusCases} from './region/canonical.mjs';
 import {runArithmeticCases,runArithmeticOwnerCases} from './region/arithmetic.mjs';
 import {runAccessEpochCases} from './region/access-epoch.mjs';
+import {runObservedAutoCases} from './region/observed-auto.mjs';
+import {runObservedCases,runObservedBaselineCases,runObservedPrefixCases,runObservedRepeatedCases,runObservedCanonicalCases,runObservedExitCases,runObservedRefusalCases} from './region/observed.mjs';
 
 const [enginePath,reportPath,mode]=process.argv.slice(2);
-assert(enginePath&&reportPath&&(mode===undefined||mode==='--arithmetic-owner'||mode==='--arithmetic-owner-baseline'||mode==='--access-epoch'||mode==='--access-epoch-baseline'||mode==='--arithmetic'||mode==='--arithmetic-baseline'||mode==='--canonical'||mode==='--canonical-baseline'||mode==='--canonical-status'||mode==='--entry'||mode==='--entry-baseline'||mode==='--entry-nested'||mode==='--entry-unmatched'||mode==='--structure'||mode==='--graph'||mode==='--groups'||mode==='--native-stores'||mode==='--pool'||mode==='--pool-baseline'||mode==='--transport'||mode==='--transport-baseline'||mode==='--execution'||mode==='--execution-flags'||mode==='--execution-loads'||mode==='--execution-guards'||mode==='--execution-multiply'||mode==='--execution-flags-oracle'),
+assert(enginePath&&reportPath&&(mode===undefined||mode?.startsWith('--observed')||mode==='--arithmetic-owner'||mode==='--arithmetic-owner-baseline'||mode==='--access-epoch'||mode==='--access-epoch-baseline'||mode==='--arithmetic'||mode==='--arithmetic-baseline'||mode==='--canonical'||mode==='--canonical-baseline'||mode==='--canonical-status'||mode==='--entry'||mode==='--entry-baseline'||mode==='--entry-nested'||mode==='--entry-unmatched'||mode==='--structure'||mode==='--graph'||mode==='--groups'||mode==='--native-stores'||mode==='--pool'||mode==='--pool-baseline'||mode==='--transport'||mode==='--transport-baseline'||mode==='--execution'||mode==='--execution-flags'||mode==='--execution-loads'||mode==='--execution-guards'||mode==='--execution-multiply'||mode==='--execution-flags-oracle'),
   'usage: region.mjs engine.wasm fresh-report.json [--arithmetic|--arithmetic-baseline|--arithmetic-owner|--arithmetic-owner-baseline|--access-epoch|--access-epoch-baseline|--canonical|--canonical-baseline|--canonical-status|--entry|--entry-baseline|--entry-nested|--entry-unmatched|--structure|--graph|--groups|--native-stores|--pool|--pool-baseline|--transport|--transport-baseline|--execution|--execution-flags|--execution-loads|--execution-guards|--execution-multiply|--execution-flags-oracle]');
 const artifact=readEngine(enginePath),hash=bytes=>createHash('sha256').update(bytes).digest('hex');
 const hex=bytes=>Buffer.from(bytes).toString('hex');
@@ -31,7 +33,7 @@ const unhex=text=>Uint8Array.from(Buffer.from(text.replaceAll(' ',''),'hex'));
 closeSync(openSync(reportPath,'wx'));
 const report={schema:1,complete:false,engineSha256:artifact.sha256,
   scope:'actual generated mixed integer/x87 CFG with exact instruction-prefix, publication and fault oracles; no timing claim',
-  sources:Object.fromEntries(['./region.mjs','./region/access-epoch.mjs','./region/arithmetic.mjs','./link.mjs','./region/structure.mjs','./region/control.mjs','./region/link.mjs','./region/status.mjs','./region/state.mjs','./region/quota.mjs','./region/ownership.mjs','./region/ports.mjs','./region/graph.mjs','./region/groups.mjs','./region/native-store.mjs','./region/pool.mjs','./region/execution.mjs','./region/execution-flags.mjs','./region/canonical.mjs','./region/entry.mjs','./region/witness.mjs','./pool-state.mjs',
+  sources:Object.fromEntries(['./region.mjs','./region/observed.mjs','./region/observed-witness.mjs','./region/observed-auto.mjs','./region/access-epoch.mjs','./region/arithmetic.mjs','./link.mjs','./region/structure.mjs','./region/control.mjs','./region/link.mjs','./region/status.mjs','./region/state.mjs','./region/quota.mjs','./region/ownership.mjs','./region/ports.mjs','./region/graph.mjs','./region/groups.mjs','./region/native-store.mjs','./region/pool.mjs','./region/execution.mjs','./region/execution-flags.mjs','./region/canonical.mjs','./region/entry.mjs','./region/witness.mjs','./pool-state.mjs',
     '../../../support/wasm/engine.mjs','../../../../../sdk/runtime/engine.js','../../../../../sdk/runtime/cache.js']
     .map(path=>[path,hash(readFileSync(new URL(path,import.meta.url)))])),cases:[]};
 const checkpoint=()=>writeFileSync(reportPath,JSON.stringify(report,null,2));
@@ -215,7 +217,19 @@ function exchangeCase(name,eax,structural=false) {
 }
 
 try {
-  if(mode==='--arithmetic-owner'||mode==='--arithmetic-owner-baseline') {
+  if(mode?.startsWith('--observed')) {
+    if(mode==='--observed-baseline'||mode==='--observed-auto-baseline') {
+      const path=new URL('../../../../../artifacts/cpu-core/region-redesign/epoch-v19-sdk-cache.mjs',import.meta.url);
+      report.baselineSdkSha256=hash(readFileSync(path));artifact.CodeCache=(await import(path.href)).CodeCache;
+    }
+    const cases={'--observed-auto':runObservedAutoCases,
+      '--observed-auto-baseline':(a,r)=>runObservedAutoCases(a,r,{baseline:true}), '--observed':runObservedCases,'--observed-baseline':runObservedBaselineCases,
+      '--observed-prefix':runObservedPrefixCases,'--observed-repeated':runObservedRepeatedCases,
+      '--observed-canonical':runObservedCanonicalCases,'--observed-exit':runObservedExitCases,
+      '--observed-refusal':runObservedRefusalCases};
+    assert(cases[mode],'known observed graph verification mode');
+    stage='observed-interprocedural-graph';cases[mode](artifact,report);checkpoint();
+  }else if(mode==='--arithmetic-owner'||mode==='--arithmetic-owner-baseline') {
     if(mode==='--arithmetic-owner-baseline') {
       const path=new URL('../../../../../artifacts/cpu-core/region-redesign/canonical-v18-sdk-cache.mjs',import.meta.url);
       report.baselineSdkSha256=hash(readFileSync(path));

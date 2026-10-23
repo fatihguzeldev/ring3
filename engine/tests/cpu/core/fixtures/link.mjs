@@ -6,11 +6,12 @@ const legacyFields=[2,3,4,5,6,7,8,9,10,11,12,13,20,21,22,23,24,25,
   76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,99,100,101,102,103];
 const fields=[2,3,4,5,6,7,8,9,10,11,12,13,20,21,22,23,24,25,99];
 const linkNames=fields=>['link.mode','link.valid','link.context',...fields.map(index=>`link.local${index}`)];
-export const supportNames=['flags','materialize_numeric','resolve_status','translate_page','acquire_group',
+const previousSupportNames=['flags','materialize_numeric','resolve_status','translate_page','acquire_group',
   'store8','store16','store32','commit_pool_cold','commit_native','commit_raw'].map(name=>`support.${name}`);
+export const supportNames=[...previousSupportNames,'support.record_trace'];
 const poolSupportNames=[...supportNames.slice(0,8),'support.commit_pool'];
 const legacySupportNames=[...supportNames.slice(0,8),'support.normalize_kernel'];
-const supportForAbi=abi=>abi===1?legacySupportNames:abi===2?poolSupportNames:supportNames;
+const supportForAbi=abi=>abi===1?legacySupportNames:abi===2?poolSupportNames:abi<5?previousSupportNames:supportNames;
 const supportSources=new WeakMap(),supportInstances=new WeakMap();
 let standaloneSupport;
 
@@ -19,9 +20,11 @@ export function coreImports(module) {
   if(links.length)assert.deepEqual(links,linkNames(links.length===47?legacyFields:fields).map(name=>({module:'ring3',name,kind:'global'})),
     'the complete typed compiled-link state is the only added import surface');
   const support=imports.filter(item=>item.name.startsWith('support.'));
-  if(support.length)assert.deepEqual(support,[...(support.some(item=>item.name==='support.normalize_kernel')?legacySupportNames:support.some(item=>item.name==='support.commit_pool')?poolSupportNames:supportNames).map(name=>({module:'ring3',name,kind:'function'})),
+  if(support.length)assert.deepEqual(support,[...(support.some(item=>item.name==='support.normalize_kernel')?legacySupportNames:support.some(item=>item.name==='support.commit_pool')?poolSupportNames:support.some(item=>item.name==='support.record_trace')?supportNames:previousSupportNames).map(name=>({module:'ring3',name,kind:'function'})),
     {module:'ring3',name:'support.abi',kind:'global'}], 'the complete versioned per-CPU support ABI is imported directly');
-  return imports.filter(item=>!item.name.startsWith('link.')&&!item.name.startsWith('support.'));
+  const recorder=imports.filter(item=>item.name==='trace.arena');
+  if(recorder.length)assert.deepEqual(recorder,[{module:'ring3',name:'trace.arena',kind:'global'}]);
+  return imports.filter(item=>!item.name.startsWith('link.')&&!item.name.startsWith('support.')&&item.name!=='trace.arena');
 }
 
 export function coreSupportSource(memory) {
@@ -46,7 +49,7 @@ export function instantiateSupport(memory,source=coreSupportSource(memory)) {
   const exports=new WebAssembly.Instance(module,{ring3:{memory,functions:table(),publishers:table(),
     probe:()=>assert.fail('standalone support never dispatches a guest edge'),
     cold:()=>assert.fail('standalone support never executes cold code')}}).exports;
-  assert(exports.supportAbi instanceof WebAssembly.Global&&[1,2,3,4].includes(exports.supportAbi.value),'actual current or pinned-baseline support ABI');
+  assert(exports.supportAbi instanceof WebAssembly.Global&&[1,2,3,4,5].includes(exports.supportAbi.value),'actual current or pinned-baseline support ABI');
   for(const name of supportForAbi(exports.supportAbi.value))assert.equal(typeof exports[name],'function',`actual Wasm ${name}`);
   return exports;
 }
@@ -60,7 +63,7 @@ function bindings(memory) {
 export function linkGlobals(module,shared={}) {
   coreImports(module);
   const globals={};
-  for(const item of WebAssembly.Module.imports(module).filter(item=>item.name.startsWith('link.'))) {
+  for(const item of WebAssembly.Module.imports(module).filter(item=>item.name.startsWith('link.')||item.name==='trace.arena')) {
     const local=Number(item.name.slice('link.local'.length));
     const type=item.name==='link.local99'?'i64':local>=76&&local<=83||local>=101&&local<=103?'f64':'i32';
     globals[item.name]=shared[item.name]??new WebAssembly.Global({value:type,mutable:true},type==='i64'?0n:0);

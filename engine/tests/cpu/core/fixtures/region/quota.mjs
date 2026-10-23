@@ -26,7 +26,7 @@ export function runLinkedQuotaCase(artifact,report) {
   };
   const api=Object.freeze({...raw,
     core_numeric:(...args)=>{result.numericCalls++;return raw.core_numeric(...args);},
-    core_chain_probe:(context,pc)=>{
+    [typeof raw.core_chain_select==='function'?'core_chain_select':'core_chain_probe']:(context,pc,selectionRetired)=>{
       assert.equal(context,cache.context);assert.equal(pc,0x1040);assert.equal(result.probes.length,0);
       assert.deepEqual([global(84),global(85),global(86),global(89),global(90)],
         [1,255,255,0,0],'all eight occupied dirty slots reach the target as actual linked state');
@@ -34,7 +34,7 @@ export function runLinkedQuotaCase(artifact,report) {
       assert.deepEqual([global(13),global(12)],[9,1],'only one instruction remains for the target');
       assert.deepEqual(bytes(word(context,92),100),initialBank,'the producer has not packed its private raw80 bank');
       assert.deepEqual(bytes(engine.base+4236,128),initialFp,'the public FP image remains unpublished at the link');
-      const returned=raw.core_chain_probe(context,pc)>>>0;
+      const returned=(raw.core_chain_select??raw.core_chain_probe)(context,pc,selectionRetired)>>>0;
       assert.equal(returned,units.get(pc).slot,'the real native probe selects the retained loop unit');
       result.probes.push({pc,returned,retired:global(13),remaining:global(12),tag:global(89)});
       return returned;

@@ -57,7 +57,7 @@ function runLinkedCase(artifact,report,withCold) {
   };
   const api=Object.freeze({...raw,
     core_numeric:(...args)=>{result.numericCalls++;return raw.core_numeric(...args);},
-    core_chain_probe:(context,pc)=>{
+    [typeof raw.core_chain_select==='function'?'core_chain_select':'core_chain_probe']:(context,pc,selectionRetired)=>{
       const first=result.probes.length===0;
       assert.equal(context,cache.context,'the live probe uses the retained CPU context');
       assert.equal(pc,first?registers[6]:0x1080,'the three authored units execute in order');
@@ -93,7 +93,7 @@ function runLinkedCase(artifact,report,withCold) {
         assert.deepEqual(bank(),initialBank,'raw80 payloads and metadata are not packed at an intermediate compiled boundary');
         assert.deepEqual(bytes(context,48),initialContext,'GPRs, flags and work remain private at intermediate probes');
       }
-      const returned=raw.core_chain_probe(context,pc)>>>0;
+      const returned=(raw.core_chain_select??raw.core_chain_probe)(context,pc,selectionRetired)>>>0;
       assert.equal(returned,first&&withCold?COLD:units.get(pc).slot,'the actual native cache chooses the authored owner');
       result.probes.push({pc,returned,retired,remaining:global(12),sequence:String(global(99)),
         canonicalRevision:String(revision()),bankHex:hex(bank()),active:global(84),dirty:global(86)});

@@ -200,7 +200,7 @@ function runLinkedStatusCase(artifact,report,{operation,code,opcode,left,right,k
   const api=Object.freeze({...raw,
     core_numeric:(...args)=>{result.numericCalls++;return raw.core_numeric(...args);},
     core_chain_cold:()=>assert.fail('all four linked status units are retained before execution'),
-    core_chain_probe:(context,pc)=>{
+    [typeof raw.core_chain_select==='function'?'core_chain_select':'core_chain_probe']:(context,pc,selectionRetired)=>{
       const index=result.probes.length,observed=index===2;
       assert(index<3,'the authored four-unit chain has exactly three internal probes');
       assert.equal(context,cache.context);assert.equal(pc,[0x1040,0x1080,0x10c0][index]);
@@ -223,7 +223,7 @@ function runLinkedStatusCase(artifact,report,{operation,code,opcode,left,right,k
       assert.deepEqual(bank(),initialBank,'neither ordinary links nor FNSTSW pack the raw80 bank');
       assert.deepEqual(bytes(context,48),initialContext,'private linked work leaves the canonical scalar snapshot untouched');
       assert.deepEqual(bytes(engine.base+4236,128),initialFp,'the public FP state is still unpublished');
-      const returned=raw.core_chain_probe(context,pc)>>>0;
+      const returned=(raw.core_chain_select??raw.core_chain_probe)(context,pc,selectionRetired)>>>0;
       assert.equal(returned,units.get(pc).slot,'the actual native owner probe chooses the retained successor');
       result.probes.push({pc,returned,retired:global(13),remaining:global(12),pending:global(100),status:global(88)});
       return returned;

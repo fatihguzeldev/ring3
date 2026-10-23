@@ -87,8 +87,9 @@ function readModule(bytes) {
       if(type===0)imports.push({module,name,type:section.unsigned()});
       else if(type===1){section.byte();const flags=section.unsigned();section.unsigned();if(flags&1)section.unsigned();assert(flags<4);}
       else if(type===2){const flags=section.unsigned();section.unsigned();if(flags&1)section.unsigned();assert(flags<4);}
-      else if(type===3){assert(module==='ring3'&&(name.startsWith('link.')||name==='support.abi'));
+      else if(type===3){assert(module==='ring3'&&(name.startsWith('link.')||name==='trace.arena'||name==='support.abi'));
         const valueType=section.byte(),mutable=section.byte();assert.equal(mutable,name==='support.abi'?0:1);
+        if(name==='trace.arena')assert.equal(valueType,0x7f,'the private recorder capability is an i32 pointer');
         globalImports.push({module,name,valueType,mutable});}
       else assert.fail('only memory, function and typed-link imports in authored module');
     });
