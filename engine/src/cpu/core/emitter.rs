@@ -701,6 +701,9 @@ impl Output<'_> {
         }
         match operation {
             Operation::Nop => self.set_pc(next),
+            Operation::Jump {
+                target: BranchTarget::Direct(pc),
+            } => self.set_pc(pc.0),
             Operation::Jump { target } => {
                 self.target(target, RESULT);
                 self.dynamic_pc(RESULT);
