@@ -12,17 +12,19 @@ import {runStateCases,runRenamingCase} from './region/state.mjs';
 import {runLinkedQuotaCase} from './region/quota.mjs';
 import {runOwnershipCase} from './region/ownership.mjs';
 import {runPortCases} from './region/ports.mjs';
+import {runStableGraphCase} from './region/graph.mjs';
+import {runGroupCases} from './region/groups.mjs';
 
 const [enginePath,reportPath,mode]=process.argv.slice(2);
-assert(enginePath&&reportPath&&(mode===undefined||mode==='--structure'),
-  'usage: region.mjs engine.wasm fresh-report.json [--structure]');
+assert(enginePath&&reportPath&&(mode===undefined||mode==='--structure'||mode==='--graph'||mode==='--groups'),
+  'usage: region.mjs engine.wasm fresh-report.json [--structure|--graph|--groups]');
 const artifact=readEngine(enginePath),hash=bytes=>createHash('sha256').update(bytes).digest('hex');
 const hex=bytes=>Buffer.from(bytes).toString('hex');
 const unhex=text=>Uint8Array.from(Buffer.from(text.replaceAll(' ',''),'hex'));
 closeSync(openSync(reportPath,'wx'));
 const report={schema:1,complete:false,engineSha256:artifact.sha256,
   scope:'actual generated mixed integer/x87 CFG with exact instruction-prefix, publication and fault oracles; no timing claim',
-  sources:Object.fromEntries(['./region.mjs','./link.mjs','./region/structure.mjs','./region/control.mjs','./region/link.mjs','./region/status.mjs','./region/state.mjs','./region/quota.mjs','./region/ownership.mjs','./region/ports.mjs',
+  sources:Object.fromEntries(['./region.mjs','./link.mjs','./region/structure.mjs','./region/control.mjs','./region/link.mjs','./region/status.mjs','./region/state.mjs','./region/quota.mjs','./region/ownership.mjs','./region/ports.mjs','./region/graph.mjs','./region/groups.mjs',
     '../../../support/wasm/engine.mjs','../../../../../sdk/runtime/engine.js','../../../../../sdk/runtime/cache.js']
     .map(path=>[path,hash(readFileSync(new URL(path,import.meta.url)))])),cases:[]};
 const checkpoint=()=>writeFileSync(reportPath,JSON.stringify(report,null,2));
@@ -51,7 +53,7 @@ function fixture(name,{segments,entry=0x1000,registers=[0,2,0,0x3000,0x4800,0,0,
   const memory=instance.exports.memory,engine=new Engine(api,memory,artifact.sha256);
   const bytes=(pointer,length)=>new Uint8Array(memory.buffer).slice(pointer,pointer+length);
   const word=(pointer,offset=0)=>new DataView(memory.buffer).getUint32(pointer+offset,true);
-  let opened=false,active=false,context=0,helpers=0,run,publish,witnessReader,encodedModule;
+  let opened=false,active=false,context=0,helpers=0,run,publish,witnessReader,encodedModule,groupWitnessProof;
   const version=()=>new DataView(memory.buffer).getBigUint64(word(context,80),true);
   const status=(operation,wanted,...args)=>{
     const actual=api[operation](...args)>>>0;result.controls.push({operation,wanted,actual});
@@ -64,6 +66,7 @@ function fixture(name,{segments,entry=0x1000,registers=[0,2,0,0x3000,0x4800,0,0,
     const imports=coreImports(module);
     const moduleRecord={pc,sha256:hash(encoded),bytes:encoded.length,imports};result.modules.push(moduleRecord);
     const diagnostic=stateWitness?instrumentStateWitness(encoded):undefined;
+    groupWitnessProof=diagnostic?.groupProof;
     if(diagnostic)moduleRecord.instrumentedSha256=hash(diagnostic.bytes);
     const generated=instantiateCore(diagnostic?new WebAssembly.Module(diagnostic.bytes):module,{ring3:{memory,read:api.core_read,write:api.core_write,
       numeric:(...args)=>{
@@ -157,6 +160,7 @@ function fixture(name,{segments,entry=0x1000,registers=[0,2,0,0x3000,0x4800,0,0,
       fp:value=>fp(startingFp,value),status,context:()=>context,version,
       inspect:()=>{result.structure=inspectRegion(primaryEncoded);checkpoint();return result.structure;},
       portDepth:()=>{result.portDepth=inspectPortDepth(primaryEncoded);checkpoint();return result.portDepth;},
+      groupProof:()=>groupWitnessProof,
       stateWitness:()=>{assert.equal(result.stateWitnesses?.length,1,'one observed linked activation');return result.stateWitnesses[0];}});
     result.complete=true;checkpoint();
   }catch(error){result.failure={message:String(error),stack:error.stack};checkpoint();throw error;}
@@ -200,7 +204,11 @@ function exchangeCase(name,eax,structural=false) {
 }
 
 try {
-  if(mode==='--structure') {
+  if(mode==='--groups') {
+    stage='proved-memory-groups';runGroupCases(fixture);checkpoint();
+  }else if(mode==='--graph') {
+    stage='immutable-warmed-graph';runStableGraphCase(artifact,report);checkpoint();
+  }else if(mode==='--structure') {
     fixture('emitted-cfg-keeps-arithmetic-local-through-the-loop',{segments:cfg},t=>{
       t.writeExpected(0x3008,'0000e040');
       t.check({pc:0x1019,retired:12,budget:12,flags:0x46,ecx:0,
@@ -324,6 +332,8 @@ try {
   stage='compiled-link-short-quota';runLinkedQuotaCase(artifact,report);checkpoint();
   stage='compiled-source-ownership';runOwnershipCase(artifact,report);checkpoint();
   stage='immutable-interior-ports';runPortCases(fixture);checkpoint();
+  stage='immutable-warmed-graph';runStableGraphCase(artifact,report);checkpoint();
+  stage='proved-memory-groups';runGroupCases(fixture);checkpoint();
   }
   report.complete=true;checkpoint();console.log(JSON.stringify({complete:true,cases:report.cases.length,engineSha256:artifact.sha256}));
 }catch(error){report.failure={stage,message:String(error),stack:error.stack};checkpoint();throw error;}
