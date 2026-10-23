@@ -4,6 +4,7 @@ mod dispatch;
 mod effects;
 mod emitter;
 mod flags;
+pub(crate) mod fp_pool;
 mod memory;
 mod program;
 mod region;

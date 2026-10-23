@@ -123,6 +123,8 @@ pub(super) struct NumericBank {
     selectors: [u16; 6],
     vectors: VectorState,
     segments: SegmentContext,
+    pool_padding: [u8; 80],
+    pool: crate::cpu::core::fp_pool::FpLeasePool,
 }
 
 impl NumericBank {
@@ -141,6 +143,8 @@ impl NumericBank {
                     .registers,
             },
             segments: instance.segment_context()?,
+            pool_padding: [0; 80],
+            pool: Default::default(),
         })
     }
 
@@ -205,6 +209,10 @@ impl NumericBank {
             return StopReason::Infrastructure as u32;
         };
         let before = memory.code_validation_version();
+        // Compiled helpers arrive after materializing the physical pool. A
+        // canonical operation may replace any payload or control/status fact,
+        // including on a fault, so the next compiled owner must import afresh.
+        self.pool = Default::default();
         let result = match instruction.operation {
             Operation::X87 {
                 operation,
@@ -311,6 +319,9 @@ const _: () = {
     assert!(core::mem::offset_of!(NumericBank, x87) == 0);
     assert!(core::mem::offset_of!(NumericBank, selectors) == 100);
     assert!(core::mem::offset_of!(NumericBank, vectors) == 112);
+    assert!(
+        core::mem::offset_of!(NumericBank, pool) == crate::cpu::core::fp_pool::BANK_OFFSET as usize
+    );
     assert!(core::mem::offset_of!(VectorState, simd) == 0);
     assert!(core::mem::offset_of!(crate::cpu::x86::simd::SimdState, xmm) == 4);
 };
