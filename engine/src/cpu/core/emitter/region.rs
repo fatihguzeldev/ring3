@@ -132,7 +132,6 @@ impl Emitter<'_, '_> {
 
     fn block(&mut self, id: BlockId) {
         self.current = id;
-        self.out.c().i32_const(0).local_set(ENTRY_PENDING);
         let block = &self.graph.blocks[id.0];
         self.out.guarded_control = block.terminator == Terminator::GuardedIndirect;
         self.out.address_fact = None;
@@ -150,11 +149,15 @@ impl Emitter<'_, '_> {
         self.out.after_frame = self.out.frame;
         let constants = self.out.plan.block(id).contract.gpr_constants;
         self.out.guarded_gpr_facts = true;
-        self.out
-            .c()
-            .local_get(super::ENTRY_OFFSET)
-            .if_(BlockType::Empty);
+        self.out.c().local_get(super::ENTRY_OFFSET);
+        if self.out.family {
+            // A fresh family entry has actual identity state, including a
+            // secondary block start whose prefix offset happens to be zero.
+            self.out.c().local_get(super::FRESH_OWNER_ENTRY).i32_or();
+        }
+        self.out.c().if_(BlockType::Empty);
         super::numeric::enter_port(self.out);
+        self.out.c().i32_const(0).local_set(super::FULL_BLOCK);
         self.out
             .c()
             .i32_const(0)
@@ -179,6 +182,13 @@ impl Emitter<'_, '_> {
         self.out.c().local_set(super::GP_FACTS_VALID);
         super::numeric::enter_block(self.out, id);
         self.out.c().end();
+        if self.out.family {
+            self.out
+                .c()
+                .i32_const(0)
+                .local_set(super::FRESH_OWNER_ENTRY);
+        }
+        self.out.c().i32_const(0).local_set(ENTRY_PENDING);
         super::trace::record_block(
             self.out,
             block.entry,

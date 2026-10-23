@@ -228,6 +228,25 @@ impl Default for CoreCache32 {
 }
 
 impl CoreCache32 {
+    pub(super) fn observed_owner(&mut self, memory: &AddressSpace, pc: u32) -> Option<RegionRef> {
+        let key = *self.trace_entries.get(&pc)?;
+        let entry = self.region(key)?;
+        if !entry.code.is_observed_family() {
+            return None;
+        }
+        if !entry.code.is_current(memory) {
+            self.remove(key);
+            self.source_invalidations = self.source_invalidations.saturating_add(1);
+            return None;
+        }
+        let owner = RegionRef {
+            key,
+            code: Rc::clone(&entry.code),
+        };
+        self.touch(key.index);
+        Some(owner)
+    }
+
     pub(super) fn trace_score(
         &self,
         memory: &AddressSpace,
@@ -357,6 +376,9 @@ impl CoreCache32 {
         memory: &AddressSpace,
         code: CompiledCode,
     ) -> Result<RegionRef, CompileError> {
+        if code.is_observed_family() {
+            return self.admit_observed_family(memory, code);
+        }
         if let Some(root) = code.trace_root() {
             if code.wasm().len() > MAX_CODE_BYTES || code.entrypoints() != [GuestAddress(root)] {
                 return Err(CompileError::InvalidLimits);
@@ -364,6 +386,9 @@ impl CoreCache32 {
             if let Some(previous) = self.trace_entries.get(&root).copied() {
                 if let Some(entry) = self.region(previous) {
                     if entry.code.is_current(memory) {
+                        if entry.code.is_observed_family() {
+                            return Err(CompileError::InvalidLimits);
+                        }
                         if !code
                             .trace_score()
                             .zip(entry.code.trace_score())
@@ -400,6 +425,60 @@ impl CoreCache32 {
                 self.remove(key);
                 self.source_invalidations = self.source_invalidations.saturating_add(1);
             }
+        }
+        Ok(self.insert_owned(code))
+    }
+
+    fn admit_observed_family(
+        &mut self,
+        memory: &AddressSpace,
+        code: CompiledCode,
+    ) -> Result<RegionRef, CompileError> {
+        let Some(anchor) = code.trace_root() else {
+            return Err(CompileError::InvalidLimits);
+        };
+        if !code.is_current(memory)
+            || code.wasm().len() > MAX_CODE_BYTES
+            || !code.supports_entry(anchor)
+            || !code
+                .entrypoints()
+                .iter()
+                .map(|entry| entry.0)
+                .eq(code.instruction_pcs())
+        {
+            return Err(CompileError::InvalidLimits);
+        }
+        let mut stale = Vec::new();
+        let mut current = None;
+        for pc in code.instruction_pcs() {
+            let Some(key) = self.trace_entries.get(&pc).copied() else {
+                continue;
+            };
+            let Some(entry) = self.region(key) else {
+                continue;
+            };
+            if !entry.code.is_current(memory) {
+                if !stale.contains(&key) {
+                    stale.push(key);
+                }
+                continue;
+            }
+            if current.is_some_and(|previous| previous != key)
+                || !entry.code.is_observed_family()
+                || entry.code.trace_root() != Some(anchor)
+                || !code.observed_grows(&entry.code)
+            {
+                return Err(CompileError::InvalidLimits);
+            }
+            current = Some(key);
+        }
+        // all aliases are validated before retiring any retained identity.
+        for key in stale {
+            self.remove(key);
+            self.source_invalidations = self.source_invalidations.saturating_add(1);
+        }
+        if let Some(key) = current {
+            self.remove(key);
         }
         Ok(self.insert_owned(code))
     }
@@ -824,3 +903,7 @@ mod graph_tests;
 #[cfg(test)]
 #[path = "cache/trace_tests.rs"]
 mod trace_tests;
+
+#[cfg(test)]
+#[path = "cache/family_tests.rs"]
+mod family_tests;

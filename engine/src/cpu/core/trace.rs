@@ -13,6 +13,77 @@ pub(crate) const EVENT_SIZE: u64 = 24;
 pub(crate) const CAPACITY: usize = 129;
 pub(crate) const BLOCK: u32 = 1;
 pub(crate) const NUMERIC: u32 = 2;
+pub(crate) const COLD_COMPLETE: u32 = 3;
+
+#[derive(Debug)]
+pub(crate) struct PendingColdObservation {
+    instruction: super::NativeInstruction,
+    source: crate::memory::CodeSnapshot,
+}
+
+#[derive(Debug)]
+pub(crate) struct CompletedColdObservation {
+    pub(super) instruction: super::NativeInstruction,
+    pub(super) source: crate::memory::CodeSnapshot,
+    pub(super) actual_post_pc: u32,
+}
+
+impl PendingColdObservation {
+    pub(crate) fn capture(
+        memory: &crate::memory::AddressSpace,
+        instruction: &super::NativeInstruction,
+    ) -> Option<Self> {
+        let length = instruction.next.wrapping_sub(instruction.pc);
+        if !(1..=15).contains(&length) {
+            return None;
+        }
+        let source = memory
+            .snapshot_code_wrapping(crate::memory::GuestAddress(instruction.pc), length as usize)
+            .ok()?;
+        Some(Self {
+            instruction: *instruction,
+            source,
+        })
+    }
+
+    pub(crate) fn complete(
+        self,
+        memory: &crate::memory::AddressSpace,
+        actual_post_pc: u32,
+    ) -> Option<CompletedColdObservation> {
+        memory
+            .is_code_current(&self.source)
+            .then_some(CompletedColdObservation {
+                instruction: self.instruction,
+                source: self.source,
+                actual_post_pc,
+            })
+    }
+}
+
+impl CompletedColdObservation {
+    pub(crate) fn pc(&self) -> u32 {
+        self.instruction.pc
+    }
+
+    pub(crate) fn next(&self) -> u32 {
+        self.instruction.next
+    }
+
+    pub(crate) fn actual_post_pc(&self) -> u32 {
+        self.actual_post_pc
+    }
+
+    pub(crate) fn event(&self, index: usize) -> Option<TraceEvent> {
+        (index < CAPACITY).then_some(TraceEvent {
+            kind: COLD_COMPLETE,
+            pc: self.pc(),
+            end: self.next(),
+            offset: index as u32,
+            owner: 0,
+        })
+    }
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[repr(C)]

@@ -19,4 +19,6 @@ pub use program::{
     CompileError, CompileOptions, CompiledCode, NativeInstruction, compile, compile_with_frontier,
     compile_with_frontier_query, compile_with_gates,
 };
-pub(crate) use program::{TraceScore, compile_observed, compile_observed_with_growth};
+pub(crate) use program::{
+    TraceScore, compile_observed, compile_observed_with_cold, compile_observed_with_growth,
+};

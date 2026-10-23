@@ -55,7 +55,8 @@ pub(super) const SERVICE_ORDINAL: u32 = 172;
 pub(super) const SERVICE_PC: u32 = 173;
 pub(super) const SERVICE_NEXT: u32 = 174;
 pub(super) const SERVICE_TRANSFER: u32 = 175;
-pub(super) const SCALAR_CACHE_BASE: u32 = 176;
+pub(super) const FRESH_OWNER_ENTRY: u32 = 176;
+pub(super) const SCALAR_CACHE_BASE: u32 = 177;
 
 const BLOCK_BITS: u32 = 10;
 
@@ -114,7 +115,7 @@ pub(super) fn emit(
 ) -> Vec<u8> {
     let graph =
         super::region::Region::from_blocks(blocks, entry).expect("decoded blocks form a region");
-    emit_graph(blocks, entry, identity, native, graph)
+    emit_graph(blocks, entry, identity, native, graph, false)
 }
 
 pub(super) fn emit_observed(
@@ -126,7 +127,19 @@ pub(super) fn emit_observed(
 ) -> Vec<u8> {
     let graph = super::region::Region::from_observed(blocks, entry, observed_edges)
         .expect("recorded blocks and edges form an observed region");
-    emit_graph(blocks, entry, identity, native, graph)
+    emit_graph(blocks, entry, identity, native, graph, false)
+}
+
+pub(super) fn emit_observed_family(
+    blocks: &[Block],
+    entry: u32,
+    identity: u64,
+    native: &[NativeInstruction],
+    observed_edges: &[(u32, u32)],
+) -> Vec<u8> {
+    let graph = super::region::Region::from_observed(blocks, entry, observed_edges)
+        .expect("recorded family forms an observed region");
+    emit_graph(blocks, entry, identity, native, graph, true)
 }
 
 fn emit_graph(
@@ -135,10 +148,11 @@ fn emit_graph(
     identity: u64,
     native: &[NativeInstruction],
     graph: super::region::Region,
+    family: bool,
 ) -> Vec<u8> {
     let plan = super::region::values::RegionPlan::analyze(&graph);
     let numeric = !native.is_empty();
-    let body = run(&graph, &plan, identity, native);
+    let body = run(&graph, &plan, identity, native, family);
     let mut module = Module::new();
     let mut types = TypeSection::new();
     types.ty().function([ValType::I32; 2], [ValType::I32]);
@@ -351,6 +365,7 @@ fn run(
     plan: &super::region::values::RegionPlan,
     identity: u64,
     native: &[NativeInstruction],
+    family: bool,
 ) -> Vec<u8> {
     let execution = super::region::values::ExecutionPlan::analyze(graph, plan);
     let mut function = Function::new([
@@ -381,6 +396,7 @@ fn run(
         (2, ValType::I64),
         (15, ValType::I32),
         (4, ValType::I32),
+        (1, ValType::I32),
         (execution.scalar.cache_count() as u32, ValType::I32),
     ]);
     let mut out = Output {
@@ -403,6 +419,7 @@ fn run(
         current_block: None,
         grouped_accesses: true,
         is_trace: graph.is_observed,
+        family,
         guarded_control: false,
         native,
     };
@@ -445,7 +462,10 @@ fn run(
         .i32_const(flags::FlagKind::None as i32)
         .local_set(KIND);
     out.c().end();
-    if graph.is_observed {
+    if family {
+        out.c().i32_const(1).local_set(FRESH_OWNER_ENTRY);
+    }
+    if graph.is_observed && !family {
         out.c()
             .local_get(EIP)
             .i32_const(graph.blocks[graph.entry.0].entry as i32)
@@ -530,6 +550,7 @@ pub(super) struct Output<'a> {
     current_block: Option<super::region::BlockId>,
     grouped_accesses: bool,
     is_trace: bool,
+    family: bool,
     guarded_control: bool,
     native: &'a [NativeInstruction],
 }

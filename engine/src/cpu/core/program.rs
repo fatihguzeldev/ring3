@@ -1,8 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+mod observed_cold;
 #[cfg(test)]
 mod reform;
+pub(crate) use observed_cold::compile_observed_with_cold;
 
 static NEXT_IDENTITY: AtomicU64 = AtomicU64::new(1);
 
@@ -83,6 +85,7 @@ pub struct CompiledCode {
     native: Vec<NativeInstruction>,
     trace_root: Option<u32>,
     trace_score: Option<TraceScore>,
+    observed: Option<observed_cold::ObservedGraph>,
     #[cfg(test)]
     roots: Box<[GuestAddress]>,
 }
@@ -118,6 +121,9 @@ impl CompiledCode {
         self.instruction_pcs.len()
     }
     pub(crate) fn supports_entry(&self, pc: u32) -> bool {
+        if self.observed.is_some() {
+            return self.instruction_pcs.binary_search(&pc).is_ok();
+        }
         self.trace_root.map_or_else(
             || self.instruction_pcs.binary_search(&pc).is_ok(),
             |root| root == pc,
@@ -128,6 +134,17 @@ impl CompiledCode {
     }
     pub(crate) fn trace_score(&self) -> Option<TraceScore> {
         self.trace_score
+    }
+    pub(crate) fn is_observed_family(&self) -> bool {
+        self.observed.is_some()
+    }
+    pub(crate) fn observed_grows(&self, previous: &Self) -> bool {
+        self.memory_identity == previous.memory_identity
+            && self
+                .observed
+                .as_ref()
+                .zip(previous.observed.as_ref())
+                .is_some_and(|(next, old)| next.strictly_grows(old))
     }
     pub(crate) fn instruction_pcs(&self) -> impl Iterator<Item = u32> + '_ {
         self.instruction_pcs.iter().copied()
@@ -192,7 +209,7 @@ impl CompiledCode {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub(super) struct Instruction {
     pub pc: u32,
     pub next: u32,
@@ -821,6 +838,7 @@ fn finish_code(
         native,
         trace_root: trace.map(|(root, _)| root),
         trace_score: trace.map(|(_, score)| score),
+        observed: None,
         #[cfg(test)]
         roots: _roots.into(),
     }
