@@ -48,9 +48,22 @@ pub struct CompiledCode {
     sources: Vec<CodeSnapshot>,
     entries: Vec<GuestAddress>,
     instruction_pcs: Box<[u32]>,
+    block_pcs: Box<[u32]>,
+    blocks: Box<[CodeBlock]>,
     native: Vec<NativeInstruction>,
+    trace_root: Option<u32>,
     #[cfg(test)]
     roots: Box<[GuestAddress]>,
+}
+
+// PC geometry only: recording validation never retains decoded Operations/IR or
+// decodes an unexecuted prefix to recover an interior entry's instruction PC.
+#[derive(Debug)]
+struct CodeBlock {
+    pc: u32,
+    end: u32,
+    first: u32,
+    count: u32,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -74,7 +87,13 @@ impl CompiledCode {
         self.instruction_pcs.len()
     }
     pub(crate) fn supports_entry(&self, pc: u32) -> bool {
-        self.instruction_pcs.binary_search(&pc).is_ok()
+        self.trace_root.map_or_else(
+            || self.instruction_pcs.binary_search(&pc).is_ok(),
+            |root| root == pc,
+        )
+    }
+    pub(crate) fn trace_root(&self) -> Option<u32> {
+        self.trace_root
     }
     pub(crate) fn instruction_pcs(&self) -> impl Iterator<Item = u32> + '_ {
         self.instruction_pcs.iter().copied()
@@ -187,6 +206,202 @@ pub fn compile_with_frontier_query(
     frontier: &dyn Fn(u32) -> bool,
 ) -> Result<CompiledCode, CompileError> {
     compile_formation_query(memory, entry, options, gates, frontier, &[])
+}
+
+/// Compile only confirmed recorded spans. The final event is a witness for its
+/// predecessor, never evidence that its own instruction(s) completed.
+pub(crate) fn compile_observed(
+    memory: &AddressSpace,
+    root: GuestAddress,
+    options: CompileOptions,
+    events: &[super::trace::TraceEvent],
+    owners: &[&CompiledCode],
+    expected_source_version: u64,
+) -> Result<Option<CompiledCode>, CompileError> {
+    use super::trace::{BLOCK, CAPACITY, NUMERIC};
+    if validate_options(options).is_err()
+        || !(2..=CAPACITY).contains(&events.len())
+        || memory.code_source_version() != expected_source_version
+        || owners.is_empty()
+        || owners.iter().any(|owner| !owner.is_current(memory))
+    {
+        return Ok(None);
+    }
+    let mut retained = BTreeMap::new();
+    for &owner in owners {
+        retained.entry(owner.identity()).or_insert(owner);
+    }
+    let mut sites = Vec::with_capacity(events.len());
+    for event in events {
+        let Some(owner) = retained.get(&event.owner).copied() else {
+            return Ok(None);
+        };
+        let pcs = match event.kind {
+            BLOCK => {
+                let Ok(index) = owner
+                    .blocks
+                    .binary_search_by_key(&event.pc, |block| block.pc)
+                else {
+                    return Ok(None);
+                };
+                let block = &owner.blocks[index];
+                if event.end != block.end || event.offset >= block.count {
+                    return Ok(None);
+                }
+                &owner.block_pcs
+                    [(block.first + event.offset) as usize..(block.first + block.count) as usize]
+            }
+            NUMERIC => {
+                if event.offset != 0
+                    || !owner.native.iter().any(|instruction| {
+                        instruction.pc == event.pc && instruction.next == event.end
+                    })
+                {
+                    return Ok(None);
+                }
+                let Ok(index) = owner.instruction_pcs.binary_search(&event.pc) else {
+                    return Ok(None);
+                };
+                &owner.instruction_pcs[index..index + 1]
+            }
+            _ => return Ok(None),
+        };
+        sites.push((owner, pcs));
+    }
+    if sites[0].1[0] != root.0 {
+        return Ok(None);
+    }
+
+    let mut nodes = BTreeMap::new();
+    let mut sources = Vec::new();
+    let mut starts = BTreeSet::from([root.0]);
+    let mut edges = BTreeSet::new();
+    for index in 0..events.len() - 1 {
+        let event = &events[index];
+        let next = &events[index + 1];
+        let (owner, suffix) = sites[index];
+        let target = sites[index + 1].1[0];
+        let pcs = if event.kind == BLOCK && next.kind == NUMERIC {
+            if event.owner != next.owner {
+                return Ok(None);
+            }
+            let Some(end) = suffix.iter().position(|&pc| pc == next.pc) else {
+                return Ok(None);
+            };
+            &suffix[..end]
+        } else {
+            suffix
+        };
+        starts.insert(suffix[0]);
+        starts.insert(target);
+        for (position, &pc) in pcs.iter().enumerate() {
+            if !nodes.contains_key(&pc) {
+                if nodes.len() == options.instructions {
+                    return Ok(None);
+                }
+                let Ok((instruction, source)) = decode_instruction(memory, pc, &[]) else {
+                    return Ok(None);
+                };
+                if !observed_operation(instruction.operation) {
+                    return Ok(None);
+                }
+                sources.push(source);
+                nodes.insert(pc, instruction);
+            }
+            let instruction = nodes[&pc];
+            let successor = pcs.get(position + 1).copied().unwrap_or(target);
+            // Prefixes are straight-line slices of the recorded source block.
+            // Only the final instruction may select a control successor.
+            if position + 1 < pcs.len() {
+                if instruction.next != successor || terminates(instruction.operation) {
+                    return Ok(None);
+                }
+            } else if !observed_successor(instruction, successor) {
+                return Ok(None);
+            }
+            if event.kind == NUMERIC
+                && (instruction.next != event.end
+                    || !owner.native.iter().any(|native| {
+                        native.pc == pc
+                            && native.next == instruction.next
+                            && Some(native.operation) == instruction.operation
+                    }))
+            {
+                return Ok(None);
+            }
+            edges.insert((pc, successor));
+        }
+    }
+    if nodes.is_empty() || !nodes.contains_key(&root.0) {
+        return Ok(None);
+    }
+    let blocks = partition_blocks(nodes, &starts);
+    if blocks.len() > options.blocks {
+        return Ok(None);
+    }
+    let native = collect_native(&blocks);
+    let identity = next_identity()?;
+    let observed_edges: Vec<_> = edges.into_iter().collect();
+    let wasm = super::emitter::emit_observed(&blocks, root.0, identity, &native, &observed_edges);
+    if wasm.len() > options.wasm_bytes
+        || memory.code_source_version() != expected_source_version
+        || owners.iter().any(|owner| !owner.is_current(memory))
+    {
+        return Ok(None);
+    }
+    Ok(Some(finish_code(
+        memory,
+        blocks,
+        identity,
+        wasm,
+        native,
+        sources,
+        &[root],
+        Some(root.0),
+    )))
+}
+
+fn observed_operation(operation: Option<Operation>) -> bool {
+    use crate::cpu::x86::ControlOperation;
+    !matches!(
+        operation,
+        None | Some(Operation::SoftwareInterrupt { .. })
+            | Some(Operation::Control(
+                ControlOperation::Sysenter
+                    | ControlOperation::Breakpoint
+                    | ControlOperation::InvalidOpcode
+                    | ControlOperation::GeneralProtectionZero
+                    | ControlOperation::DebugTrap
+            ))
+    )
+}
+
+fn observed_successor(instruction: Instruction, successor: u32) -> bool {
+    match instruction.operation {
+        Some(
+            Operation::Jump {
+                target: BranchTarget::Direct(target),
+            }
+            | Operation::Call {
+                target: BranchTarget::Direct(target),
+            },
+        ) => successor == target.0,
+        Some(Operation::CallWord { target }) => successor == (target.0 & 0xffff),
+        Some(
+            Operation::ConditionalJump { target, .. }
+            | Operation::CountBranch { target, .. }
+            | Operation::CountBranchWord { target, .. },
+        ) => successor == target.0 || successor == instruction.next,
+        Some(
+            Operation::JumpWord { .. }
+            | Operation::ReadJumpWord { .. }
+            | Operation::CallRegisterWord { .. }
+            | Operation::ReadCallWord { .. }
+            | Operation::ReturnWord { .. },
+        ) => successor <= u32::from(u16::MAX),
+        Some(Operation::Jump { .. } | Operation::Call { .. } | Operation::Return { .. }) => true,
+        _ => successor == instruction.next,
+    }
 }
 
 fn compile_formation(
@@ -442,30 +657,13 @@ fn encode_blocks(
     entry: GuestAddress,
     options: CompileOptions,
     mut blocks: Vec<Block>,
-    mut sources: Vec<CodeSnapshot>,
+    sources: Vec<CodeSnapshot>,
     _roots: &[GuestAddress],
     _limit: EmissionLimit,
 ) -> Result<Option<CompiledCode>, CompileError> {
-    let identity = NEXT_IDENTITY
-        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
-            value.checked_add(1)
-        })
-        .map_err(|_| CompileError::Memory(MemoryError::VersionExhausted))?;
+    let identity = next_identity()?;
     let (wasm, native) = loop {
-        let native: Vec<_> = blocks
-            .iter()
-            .flat_map(|block| &block.instructions)
-            .filter_map(|instruction| {
-                instruction
-                    .operation
-                    .filter(super::emitter::is_native)
-                    .map(|operation| NativeInstruction {
-                        pc: instruction.pc,
-                        next: instruction.next,
-                        operation,
-                    })
-            })
-            .collect();
+        let native = collect_native(&blocks);
         let wasm = super::emitter::emit(&blocks, entry.0, identity, &native);
         if wasm.len() <= options.wasm_bytes {
             break (wasm, native);
@@ -480,30 +678,91 @@ fn encode_blocks(
         }
         retain_entry_prefix(&mut blocks, entry.0, instructions / 2);
     };
+    Ok(Some(finish_code(
+        memory, blocks, identity, wasm, native, sources, _roots, None,
+    )))
+}
+
+fn next_identity() -> Result<u64, CompileError> {
+    NEXT_IDENTITY
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
+            value.checked_add(1)
+        })
+        .map_err(|_| CompileError::Memory(MemoryError::VersionExhausted))
+}
+
+fn collect_native(blocks: &[Block]) -> Vec<NativeInstruction> {
+    blocks
+        .iter()
+        .flat_map(|block| &block.instructions)
+        .filter_map(|instruction| {
+            instruction
+                .operation
+                .filter(super::emitter::is_native)
+                .map(|operation| NativeInstruction {
+                    pc: instruction.pc,
+                    next: instruction.next,
+                    operation,
+                })
+        })
+        .collect()
+}
+
+fn finish_code(
+    memory: &AddressSpace,
+    blocks: Vec<Block>,
+    identity: u64,
+    wasm: Vec<u8>,
+    native: Vec<NativeInstruction>,
+    mut sources: Vec<CodeSnapshot>,
+    _roots: &[GuestAddress],
+    trace_root: Option<u32>,
+) -> CompiledCode {
     // instruction snapshots on the same pages share one mapping/content authority.
     sources.sort_unstable_by_key(|source| (source.first, source.versions.len()));
     sources.dedup_by(|source, retained| {
         source.first == retained.first && source.versions == retained.versions
     });
-    Ok(Some(CompiledCode {
+    let mut block_pcs = Vec::new();
+    let geometry = blocks
+        .iter()
+        .map(|block| {
+            let first = block_pcs.len() as u32;
+            block_pcs.extend(block.instructions.iter().map(|instruction| instruction.pc));
+            CodeBlock {
+                pc: block.entry,
+                end: block.instructions.last().expect("nonempty code block").next,
+                first,
+                count: block.instructions.len() as u32,
+            }
+        })
+        .collect();
+    let mut instruction_pcs = block_pcs.clone();
+    instruction_pcs.sort_unstable();
+    instruction_pcs.dedup();
+    CompiledCode {
         identity,
         memory_identity: memory.identity(),
         validated_source_version: AtomicU64::new(memory.code_source_version()),
-        entries: blocks
-            .iter()
-            .map(|block| GuestAddress(block.entry))
-            .collect(),
-        instruction_pcs: blocks
-            .iter()
-            .flat_map(|block| &block.instructions)
-            .map(|instruction| instruction.pc)
-            .collect(),
+        entries: trace_root.map_or_else(
+            || {
+                blocks
+                    .iter()
+                    .map(|block| GuestAddress(block.entry))
+                    .collect()
+            },
+            |root| vec![GuestAddress(root)],
+        ),
+        instruction_pcs: instruction_pcs.into_boxed_slice(),
+        block_pcs: block_pcs.into_boxed_slice(),
+        blocks: geometry,
         wasm,
         sources,
         native,
+        trace_root,
         #[cfg(test)]
         roots: _roots.into(),
-    }))
+    }
 }
 
 #[cfg(test)]
@@ -561,6 +820,384 @@ fn terminates(operation: Option<Operation>) -> bool {
 #[cfg(test)]
 #[path = "program/frontier_tests.rs"]
 mod frontier_tests;
+
+#[cfg(test)]
+mod observed_tests {
+    use super::*;
+    use crate::{
+        cpu::core::trace::{BLOCK, NUMERIC, TraceEvent},
+        memory::{PageRange, Permissions},
+    };
+
+    fn memory() -> AddressSpace {
+        let mut memory = AddressSpace::new(1).unwrap();
+        memory
+            .map_zeroed(
+                PageRange::new(GuestAddress(0x1000), 1).unwrap(),
+                Permissions::ALL,
+            )
+            .unwrap();
+        memory
+    }
+
+    fn block(owner: &CompiledCode, pc: u32, offset: u32) -> TraceEvent {
+        let block = owner.blocks.iter().find(|block| block.pc == pc).unwrap();
+        TraceEvent {
+            kind: BLOCK,
+            pc,
+            end: block.end,
+            offset,
+            owner: owner.identity(),
+        }
+    }
+
+    fn numeric(owner: &CompiledCode, pc: u32) -> TraceEvent {
+        let instruction = owner
+            .native
+            .iter()
+            .find(|instruction| instruction.pc == pc)
+            .unwrap();
+        TraceEvent {
+            kind: NUMERIC,
+            pc,
+            end: instruction.next,
+            offset: 0,
+            owner: owner.identity(),
+        }
+    }
+
+    fn call_loop(memory: &mut AddressSpace) -> (CompiledCode, CompiledCode) {
+        memory
+            .write(
+                GuestAddress(0x1000),
+                &[0xe8, 0xfb, 0, 0, 0, 0x83, 0xc0, 1, 0xeb, 0xf6],
+            )
+            .unwrap();
+        memory
+            .write(GuestAddress(0x1100), &[0x83, 0xc0, 3, 0xc3])
+            .unwrap();
+        (
+            compile(memory, GuestAddress(0x1000), CompileOptions::default()).unwrap(),
+            compile(memory, GuestAddress(0x1100), CompileOptions::default()).unwrap(),
+        )
+    }
+
+    #[test]
+    fn confirmed_call_return_path_has_one_independent_root_only_owner() {
+        let mut memory = memory();
+        let (caller, callee) = call_loop(&mut memory);
+        let before = caller.wasm().to_vec();
+        let events = [
+            block(&caller, 0x1000, 0),
+            block(&callee, 0x1100, 0),
+            block(&caller, 0x1005, 0),
+            block(&caller, 0x1000, 0),
+        ];
+        let code = compile_observed(
+            &memory,
+            GuestAddress(0x1000),
+            CompileOptions::default(),
+            &events,
+            &[&caller, &callee],
+            memory.code_source_version(),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(code.trace_root(), Some(0x1000));
+        assert_eq!(code.entrypoints(), &[GuestAddress(0x1000)]);
+        assert_eq!(
+            code.instruction_pcs().collect::<Vec<_>>(),
+            [0x1000, 0x1005, 0x1008, 0x1100, 0x1103]
+        );
+        assert!(code.supports_entry(0x1000));
+        assert!(!code.supports_entry(0x1100));
+        assert!(code.is_current(&memory));
+        assert_ne!(code.identity(), caller.identity());
+        assert_eq!(caller.wasm(), before);
+        assert!(caller.is_current(&memory) && callee.is_current(&memory));
+    }
+
+    #[test]
+    fn canonical_witness_confirms_only_the_prior_prefix_and_actual_native_operation() {
+        let mut memory = memory();
+        memory
+            .write(GuestAddress(0x1000), &[0x90, 0xd8, 0x03, 0x90, 0xc3])
+            .unwrap();
+        let owner = compile(&memory, GuestAddress(0x1000), CompileOptions::default()).unwrap();
+        let events = [
+            block(&owner, 0x1000, 0),
+            numeric(&owner, 0x1001),
+            block(&owner, 0x1000, 2),
+        ];
+        let code = compile_observed(
+            &memory,
+            GuestAddress(0x1000),
+            CompileOptions::default(),
+            &events,
+            &[&owner],
+            memory.code_source_version(),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(code.instruction_pcs().collect::<Vec<_>>(), [0x1000, 0x1001]);
+        assert_eq!(code.native_instructions().len(), 1);
+        assert_eq!(code.native_instructions()[0].pc, 0x1001);
+        assert!(
+            !code
+                .instruction_pcs()
+                .any(|pc| pc == 0x1003 || pc == 0x1004)
+        );
+
+        let interior = [
+            block(&owner, 0x1000, 1),
+            numeric(&owner, 0x1001),
+            block(&owner, 0x1000, 2),
+        ];
+        assert!(
+            compile_observed(
+                &memory,
+                GuestAddress(0x1000),
+                CompileOptions::default(),
+                &interior,
+                &[&owner],
+                memory.code_source_version()
+            )
+            .unwrap()
+            .is_none()
+        );
+        let code = compile_observed(
+            &memory,
+            GuestAddress(0x1001),
+            CompileOptions::default(),
+            &interior,
+            &[&owner],
+            memory.code_source_version(),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(code.instruction_pcs().collect::<Vec<_>>(), [0x1001]);
+    }
+
+    #[test]
+    fn interior_offsets_use_the_original_block_path_not_sorted_coverage() {
+        let mut memory = memory();
+        memory
+            .write(
+                GuestAddress(0x1000),
+                &[0xb8, 0, 0xb8, 0x11, 0x22, 0x90, 0xc3],
+            )
+            .unwrap();
+        let mut sources = Vec::new();
+        let mut decode = |pc| {
+            let (instruction, source) = decode_instruction(&memory, pc, &[]).unwrap();
+            sources.push(source);
+            instruction
+        };
+        let blocks = vec![
+            Block {
+                entry: 0x1000,
+                instructions: vec![decode(0x1000), decode(0x1005)],
+            },
+            Block {
+                entry: 0x1002,
+                instructions: vec![decode(0x1002)],
+            },
+            Block {
+                entry: 0x1006,
+                instructions: vec![decode(0x1006)],
+            },
+        ];
+        let owner = encode_blocks(
+            &memory,
+            GuestAddress(0x1000),
+            CompileOptions::default(),
+            blocks,
+            sources,
+            &[GuestAddress(0x1000)],
+            EmissionLimit::Decline,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            owner.instruction_pcs().collect::<Vec<_>>(),
+            [0x1000, 0x1002, 0x1005, 0x1006]
+        );
+        let events = [block(&owner, 0x1000, 1), block(&owner, 0x1006, 0)];
+        let code = compile_observed(
+            &memory,
+            GuestAddress(0x1005),
+            CompileOptions::default(),
+            &events,
+            &[&owner],
+            memory.code_source_version(),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(code.instruction_pcs().collect::<Vec<_>>(), [0x1005]);
+    }
+
+    #[test]
+    fn forged_geometry_control_and_owner_identity_decline_neutrally() {
+        let mut memory = memory();
+        let (caller, callee) = call_loop(&mut memory);
+        let valid = [block(&caller, 0x1000, 0), block(&callee, 0x1100, 0)];
+        for (field, value) in [(0, 0), (1, 0x1006), (2, u32::MAX), (3, 7)] {
+            let mut events = valid;
+            match field {
+                0 => events[0].owner = u64::from(value),
+                1 => events[0].end = value,
+                2 => events[0].offset = value,
+                _ => events[0].kind = value,
+            }
+            assert!(
+                compile_observed(
+                    &memory,
+                    GuestAddress(0x1000),
+                    CompileOptions::default(),
+                    &events,
+                    &[&caller, &callee],
+                    memory.code_source_version()
+                )
+                .unwrap()
+                .is_none()
+            );
+        }
+        let wrong_target = [block(&caller, 0x1000, 0), block(&caller, 0x1005, 0)];
+        assert!(
+            compile_observed(
+                &memory,
+                GuestAddress(0x1000),
+                CompileOptions::default(),
+                &wrong_target,
+                &[&caller],
+                memory.code_source_version()
+            )
+            .unwrap()
+            .is_none()
+        );
+        assert!(
+            compile_observed(
+                &memory,
+                GuestAddress(0x1000),
+                CompileOptions::default(),
+                &valid[..1],
+                &[&caller, &callee],
+                memory.code_source_version()
+            )
+            .unwrap()
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn observed_word_control_cannot_claim_a_wide_actual_target() {
+        let mut instruction = Instruction {
+            pc: 0x1000,
+            next: 0x1002,
+            operation: Some(Operation::ReturnWord { stack_adjust: 0 }),
+            gate: None,
+        };
+        assert!(observed_successor(instruction, 0xffff));
+        assert!(!observed_successor(instruction, 0x1_0000));
+        instruction.operation = Some(Operation::CallWord {
+            target: GuestAddress(0x1_2345),
+        });
+        assert!(observed_successor(instruction, 0x2345));
+        assert!(!observed_successor(instruction, 0x1_2345));
+    }
+
+    #[test]
+    fn trace_bounds_and_source_changes_decline_without_shortening() {
+        let mut memory = memory();
+        let (caller, callee) = call_loop(&mut memory);
+        let events = [
+            block(&caller, 0x1000, 0),
+            block(&callee, 0x1100, 0),
+            block(&caller, 0x1005, 0),
+            block(&caller, 0x1000, 0),
+        ];
+        for options in [
+            CompileOptions {
+                instructions: 4,
+                ..CompileOptions::default()
+            },
+            CompileOptions {
+                blocks: 2,
+                ..CompileOptions::default()
+            },
+            CompileOptions {
+                wasm_bytes: 128,
+                ..CompileOptions::default()
+            },
+            CompileOptions {
+                instructions: 0,
+                ..CompileOptions::default()
+            },
+        ] {
+            assert!(
+                compile_observed(
+                    &memory,
+                    GuestAddress(0x1000),
+                    options,
+                    &events,
+                    &[&caller, &callee],
+                    memory.code_source_version()
+                )
+                .unwrap()
+                .is_none()
+            );
+        }
+        let source_version = memory.code_source_version();
+        memory.write(GuestAddress(0x1100), &[0x90]).unwrap();
+        assert!(
+            compile_observed(
+                &memory,
+                GuestAddress(0x1000),
+                CompileOptions::default(),
+                &events,
+                &[&caller, &callee],
+                source_version
+            )
+            .unwrap()
+            .is_none()
+        );
+        assert!(
+            compile_observed(
+                &memory,
+                GuestAddress(0x1000),
+                CompileOptions::default(),
+                &events,
+                &[&caller, &callee],
+                memory.code_source_version()
+            )
+            .unwrap()
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn an_unconfirmed_host_instruction_is_not_compiled() {
+        let mut memory = memory();
+        memory
+            .write(GuestAddress(0x1000), &[0x90, 0xeb, 0x0d])
+            .unwrap();
+        memory.write(GuestAddress(0x1010), &[0x0f, 0x0b]).unwrap();
+        let owner = compile(&memory, GuestAddress(0x1000), CompileOptions::default()).unwrap();
+        let events = [block(&owner, 0x1000, 0), block(&owner, 0x1010, 0)];
+        let code = compile_observed(
+            &memory,
+            GuestAddress(0x1000),
+            CompileOptions::default(),
+            &events,
+            &[&owner],
+            memory.code_source_version(),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(code.instruction_pcs().collect::<Vec<_>>(), [0x1000, 0x1001]);
+        assert!(!code.instruction_pcs().any(|pc| pc == 0x1010));
+    }
+}
 
 #[cfg(test)]
 mod tests {

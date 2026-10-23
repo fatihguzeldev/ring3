@@ -30,7 +30,7 @@ pub(super) fn analyze(region: &Region) -> RegionPlan {
             instructions: Vec::with_capacity(block.instructions.len()),
             contract: EntryContract {
                 frame: entry,
-                external: true,
+                external: !region.is_observed || id == region.entry,
                 guards,
                 gpr_constants: facts[index].gpr,
             },

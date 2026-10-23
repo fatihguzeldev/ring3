@@ -43,6 +43,7 @@ pub(super) enum Terminator {
         otherwise: Target,
     },
     Indirect,
+    GuardedIndirect,
     Exit {
         reason: StopReason,
     },
@@ -58,7 +59,7 @@ impl Terminator {
             | Self::CountBranch {
                 taken, otherwise, ..
             } => [Some(taken), Some(otherwise)],
-            Self::Indirect | Self::Exit { .. } => [None, None],
+            Self::Indirect | Self::GuardedIndirect | Self::Exit { .. } => [None, None],
         }
     }
 }
@@ -100,6 +101,7 @@ pub(super) struct RegionBlock {
     pub entry: u32,
     pub instructions: Vec<RegionInstruction>,
     pub terminator: Terminator,
+    pub indirect_targets: Vec<BlockId>,
     pub successors: Vec<BlockId>,
     pub predecessors: Vec<BlockId>,
     pub flags: FlagLiveness,
@@ -108,11 +110,32 @@ pub(super) struct RegionBlock {
 pub(super) struct Region {
     pub entry: BlockId,
     pub blocks: Vec<RegionBlock>,
+    pub is_observed: bool,
     entries: Vec<(u32, BlockId)>,
 }
 
 impl Region {
     pub fn from_blocks(blocks: &[program::Block], entry: u32) -> Option<Self> {
+        Self::construct(blocks, entry, None)
+    }
+
+    pub fn from_observed(
+        blocks: &[program::Block],
+        entry: u32,
+        edges: &[(u32, u32)],
+    ) -> Option<Self> {
+        let edges = edges
+            .iter()
+            .copied()
+            .collect::<std::collections::BTreeSet<_>>();
+        Self::construct(blocks, entry, Some(&edges))
+    }
+
+    fn construct(
+        blocks: &[program::Block],
+        entry: u32,
+        observed: Option<&std::collections::BTreeSet<(u32, u32)>>,
+    ) -> Option<Self> {
         let mut entries: Vec<_> = blocks
             .iter()
             .enumerate()
@@ -138,7 +161,31 @@ impl Region {
         let mut lowered = Vec::with_capacity(blocks.len());
         for block in blocks {
             let last = block.instructions.last()?;
-            let terminator = lower_terminator(last, &resolve);
+            if observed.is_some_and(|edges| {
+                block.instructions.windows(2).any(|pair| {
+                    pair[0].next != pair[1].pc || !edges.contains(&(pair[0].pc, pair[1].pc))
+                })
+            }) {
+                return None;
+            }
+            let mut terminator = lower_terminator(last, &|pc| {
+                if observed.is_none_or(|edges| edges.contains(&(last.pc, pc))) {
+                    resolve(pc)
+                } else {
+                    Target::External(pc)
+                }
+            });
+            let mut indirect_targets = Vec::new();
+            if let Some(edges) = observed.filter(|_| terminator == Terminator::Indirect) {
+                terminator = Terminator::GuardedIndirect;
+                for &(_, pc) in edges.range((last.pc, 0)..=(last.pc, u32::MAX)) {
+                    if let Target::Block(id) = resolve(pc) {
+                        indirect_targets.push(id);
+                    }
+                }
+                indirect_targets.sort_unstable();
+                indirect_targets.dedup();
+            }
             let mut successors: Vec<_> = terminator
                 .targets()
                 .into_iter()
@@ -148,6 +195,7 @@ impl Region {
                     Target::External(_) => None,
                 })
                 .collect();
+            successors.extend(indirect_targets.iter().copied());
             successors.sort_unstable();
             successors.dedup();
             let instructions: Vec<_> = block
@@ -180,6 +228,7 @@ impl Region {
                 entry: block.entry,
                 instructions,
                 terminator,
+                indirect_targets,
                 successors,
                 predecessors: Vec::new(),
                 flags,
@@ -193,6 +242,7 @@ impl Region {
         Some(Self {
             entry,
             blocks: lowered,
+            is_observed: observed.is_some(),
             entries,
         })
     }

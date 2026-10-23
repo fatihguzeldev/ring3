@@ -141,14 +141,57 @@ pub(super) fn scalar_transfer(gpr: &mut [Option<u32>; 8], operation: Option<Oper
                 });
             }
         }
-        Some(Operation::Push { .. } | Operation::PushFlags) => {
+        Some(Operation::Push { .. } | Operation::PushFlags | Operation::Call { .. }) => {
             gpr[4] = gpr[4].map(|v| v.wrapping_sub(4))
+        }
+        Some(
+            Operation::PushWord { .. }
+            | Operation::PushMemoryWord { .. }
+            | Operation::PushFlagsWord
+            | Operation::CallWord { .. }
+            | Operation::CallRegisterWord { .. }
+            | Operation::ReadCallWord { .. },
+        ) => gpr[4] = gpr[4].map(|v| v.wrapping_sub(2)),
+        Some(Operation::Return { stack_adjust }) => {
+            gpr[4] = gpr[4].map(|v| v.wrapping_add(4 + u32::from(stack_adjust)))
+        }
+        Some(Operation::ReturnWord { stack_adjust }) => {
+            gpr[4] = gpr[4].map(|v| v.wrapping_add(2 + u32::from(stack_adjust)))
         }
         Some(Operation::Pop { destination }) => {
             gpr[4] = gpr[4].map(|v| v.wrapping_add(4));
             if let Location32::Register(register) = destination {
                 gpr[register.index()] = None;
             }
+        }
+        Some(Operation::PopWord { destination }) => {
+            gpr[4] = gpr[4].map(|v| v.wrapping_add(2));
+            gpr[destination.index()] = None;
+        }
+        Some(Operation::PopMemoryWord { .. }) => gpr[4] = gpr[4].map(|v| v.wrapping_add(2)),
+        Some(Operation::Control(crate::cpu::x86::ControlOperation::PopFlags { word })) => {
+            gpr[4] = gpr[4].map(|v| v.wrapping_add(if word { 2 } else { 4 }))
+        }
+        Some(Operation::EnterZero | Operation::EnterZeroWord) => {
+            let word = matches!(operation, Some(Operation::EnterZeroWord));
+            gpr[4] = gpr[4].map(|v| v.wrapping_sub(if word { 2 } else { 4 }));
+            gpr[5] = if word {
+                gpr[5]
+                    .zip(gpr[4])
+                    .map(|(old, stack)| old & !0xffff | stack & 0xffff)
+            } else {
+                gpr[4]
+            };
+        }
+        Some(Operation::Leave | Operation::LeaveWord) => {
+            gpr[4] = gpr[5].map(|v| {
+                v.wrapping_add(if matches!(operation, Some(Operation::LeaveWord)) {
+                    2
+                } else {
+                    4
+                })
+            });
+            gpr[5] = None;
         }
         Some(
             Operation::X87StatusToAx
@@ -163,6 +206,8 @@ pub(super) fn scalar_transfer(gpr: &mut [Option<u32>; 8], operation: Option<Oper
             | Operation::StoreByte { .. }
             | Operation::StoreWord { .. }
             | Operation::Jump { .. }
+            | Operation::JumpWord { .. }
+            | Operation::ReadJumpWord { .. }
             | Operation::ConditionalJump { .. }
             | Operation::Carry { .. }
             | Operation::Direction { .. }

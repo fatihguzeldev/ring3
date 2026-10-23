@@ -165,7 +165,7 @@ fn fixture_resolver() -> Vec<u8> {
 
     let mut module = Module::new();
     let mut types = TypeSection::new();
-    types.ty().function([ValType::I32; 2], [ValType::I32]);
+    types.ty().function([ValType::I32; 3], [ValType::I32]);
     module.section(&types);
     let mut imports = ImportSection::new();
     imports.import(

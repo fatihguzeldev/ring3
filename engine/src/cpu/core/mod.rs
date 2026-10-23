@@ -8,12 +8,14 @@ pub(crate) mod fp_pool;
 mod memory;
 mod program;
 mod region;
+pub(crate) mod trace;
 
 pub(crate) const COLD_MARK: u32 = 0x4000_0000;
 pub(crate) const STOP_MARK: u32 = 0x8000_0000;
 
 pub use abi::{CONTEXT_SIZE, Context32, StopReason};
 pub use dispatch::emit_dispatch;
+pub(crate) use program::compile_observed;
 pub use program::{
     CompileError, CompileOptions, CompiledCode, NativeInstruction, compile, compile_with_frontier,
     compile_with_frontier_query, compile_with_gates,

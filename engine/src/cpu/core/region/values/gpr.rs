@@ -90,7 +90,21 @@ pub(super) fn lower(
             written = [false; 8];
             written[1] = kind != CountBranchKind::EcxZero;
         }
-        Some(Operation::Push { .. } | Operation::PushFlags) => {
+        Some(
+            Operation::Push { .. }
+            | Operation::PushFlags
+            | Operation::Call { .. }
+            | Operation::PushWord { .. }
+            | Operation::PushMemoryWord { .. }
+            | Operation::PushFlagsWord
+            | Operation::CallWord { .. }
+            | Operation::CallRegisterWord { .. }
+            | Operation::ReadCallWord { .. }
+            | Operation::Return { .. }
+            | Operation::ReturnWord { .. }
+            | Operation::PopMemoryWord { .. }
+            | Operation::Control(crate::cpu::x86::ControlOperation::PopFlags { .. }),
+        ) => {
             written = [false; 8];
             written[4] = true;
         }
@@ -100,6 +114,21 @@ pub(super) fn lower(
             if let Location32::Register(r) = destination {
                 written[r.index()] = true;
             }
+        }
+        Some(Operation::PopWord { destination }) => {
+            written = [false; 8];
+            written[4] = true;
+            written[destination.index()] = true;
+        }
+        Some(
+            Operation::EnterZero
+            | Operation::EnterZeroWord
+            | Operation::Leave
+            | Operation::LeaveWord,
+        ) => {
+            written = [false; 8];
+            written[4] = true;
+            written[5] = true;
         }
         Some(
             Operation::X87StatusToAx
@@ -117,6 +146,8 @@ pub(super) fn lower(
             | Operation::StoreByte { .. }
             | Operation::StoreWord { .. }
             | Operation::Jump { .. }
+            | Operation::JumpWord { .. }
+            | Operation::ReadJumpWord { .. }
             | Operation::ConditionalJump { .. }
             | Operation::Carry { .. }
             | Operation::Direction { .. }

@@ -589,3 +589,92 @@ fn actual_simd_fast_success_carries_fp_admission_facts_across_cfg_edges() {
             .any(|&id| { plan.proof(id).kind == ProofKind::ExactF64 })
     );
 }
+
+#[test]
+fn observed_call_return_preserves_actual_gpr_effects_and_has_one_external_contract() {
+    for (call, ret, pushed, returned) in [
+        (
+            Operation::Call {
+                target: BranchTarget::Direct(GuestAddress(0x2000)),
+            },
+            Operation::Return { stack_adjust: 0 },
+            0x47fc,
+            0x4800,
+        ),
+        (
+            Operation::CallWord {
+                target: GuestAddress(0x2000),
+            },
+            Operation::ReturnWord { stack_adjust: 6 },
+            0x47fe,
+            0x4806,
+        ),
+    ] {
+        let blocks = [
+            block(
+                0x1000,
+                &[
+                    Operation::Move {
+                        destination: Location32::Register(Register32::Eax),
+                        source: Value32::Immediate(7),
+                    },
+                    Operation::Move {
+                        destination: Location32::Register(Register32::Esp),
+                        source: Value32::Immediate(0x4800),
+                    },
+                    call,
+                ],
+            ),
+            block(0x1003, &[Operation::Nop]),
+            block(
+                0x2000,
+                &[
+                    Operation::Binary {
+                        kind: BinaryKind::Add,
+                        destination: Location32::Register(Register32::Eax),
+                        source: Value32::Immediate(1),
+                    },
+                    ret,
+                ],
+            ),
+        ];
+        let graph = Region::from_observed(
+            &blocks,
+            0x1000,
+            &[
+                (0x1000, 0x1001),
+                (0x1001, 0x1002),
+                (0x1002, 0x2000),
+                (0x2000, 0x2001),
+                (0x2001, 0x1003),
+            ],
+        )
+        .unwrap();
+        let plan = RegionPlan::analyze(&graph);
+        assert!(plan.block(BlockId(0)).contract.external);
+        assert!(!plan.block(BlockId(1)).contract.external);
+        assert!(!plan.block(BlockId(2)).contract.external);
+        let call = plan.instruction(BlockId(0), 2);
+        let before = plan.frame(call.before);
+        let after = plan.frame(call.after);
+        assert_eq!(
+            before.gpr[0], after.gpr[0],
+            "CALL itself does not clobber EAX"
+        );
+        assert_eq!(plan.constant(after.gpr[4]), Some(pushed));
+        let ret = plan.instruction(BlockId(2), 1);
+        let before = plan.frame(ret.before);
+        let after = plan.frame(ret.after);
+        assert_eq!(
+            before.gpr[0], after.gpr[0],
+            "RET itself preserves the callee's actual EAX"
+        );
+        assert_eq!(plan.constant(after.gpr[0]), Some(8));
+        assert_eq!(plan.constant(after.gpr[4]), Some(returned));
+        let continuation = plan.frame(plan.block(BlockId(1)).entry);
+        assert_eq!(plan.constant(continuation.gpr[0]), Some(8));
+        assert_eq!(plan.constant(continuation.gpr[4]), Some(returned));
+        assert_eq!(plan.block(BlockId(2)).edges.len(), 1);
+        assert_eq!(plan.block(BlockId(2)).edges[0].target, BlockId(1));
+    }
+}

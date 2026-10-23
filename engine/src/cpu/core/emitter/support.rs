@@ -4,8 +4,8 @@ use wasm_encoder::{
     GlobalType, ImportSection, NameMap, TypeSection, ValType,
 };
 
-pub(in crate::cpu::core) const ABI: i32 = 4;
-pub(in crate::cpu::core) const NAMES: [&str; 11] = [
+pub(in crate::cpu::core) const ABI: i32 = 5;
+pub(in crate::cpu::core) const NAMES: [&str; 12] = [
     "support.flags",
     "support.materialize_numeric",
     "support.resolve_status",
@@ -17,11 +17,12 @@ pub(in crate::cpu::core) const NAMES: [&str; 11] = [
     "support.commit_pool_cold",
     "support.commit_native",
     "support.commit_raw",
+    "support.record_trace",
 ];
 
 const COUNT: u32 = NAMES.len() as u32;
 
-pub(in crate::cpu::core) fn types(types: &mut TypeSection) -> [u32; 11] {
+pub(in crate::cpu::core) fn types(types: &mut TypeSection) -> [u32; 12] {
     let first = types.len();
     types.ty().function([ValType::I32; 8], [ValType::I32]);
     types.ty().function([ValType::I32], []);
@@ -59,6 +60,7 @@ pub(in crate::cpu::core) fn types(types: &mut TypeSection) -> [u32; 11] {
         [ValType::I32, ValType::I32, ValType::I64, ValType::I32],
         [ValType::I32],
     );
+    types.ty().function(super::trace::parameters(), []);
     [
         first,
         first + 1,
@@ -71,12 +73,13 @@ pub(in crate::cpu::core) fn types(types: &mut TypeSection) -> [u32; 11] {
         first + 6,
         first + 7,
         first + 8,
+        first + 9,
     ]
 }
 
 // All imports are direct functions of the same CPU's dispatcher instance. The
 // immutable ABI global negotiates this complete set independently of link ABI2.
-pub(super) fn imports(imports: &mut ImportSection, types: [u32; 11]) {
+pub(super) fn imports(imports: &mut ImportSection, types: [u32; 12]) {
     for (name, kind) in NAMES.into_iter().zip(types) {
         imports.import("ring3", name, EntityType::Function(kind));
     }
@@ -93,7 +96,7 @@ pub(super) fn imports(imports: &mut ImportSection, types: [u32; 11]) {
 
 pub(in crate::cpu::core) fn define(
     functions: &mut FunctionSection,
-    types: [u32; 11],
+    types: [u32; 12],
     globals: &mut GlobalSection,
     exports: &mut ExportSection,
     first: u32,
@@ -126,6 +129,7 @@ pub(in crate::cpu::core) fn bodies(code: &mut CodeSection, first: u32) {
     code.function(&numeric::emit_normalizer_kernel());
     code.function(&numeric::record::emit_native_writer());
     code.function(&numeric::record::emit_raw_writer());
+    code.function(&super::trace::emit_recorder());
 }
 
 pub(in crate::cpu::core) fn names(names: &mut NameMap, first: u32) {
@@ -151,6 +155,7 @@ pub(super) fn owner_internal(logical: u32, numeric: bool) -> u32 {
         12 => first + 9,
         13 => first + 10,
         14 => owner_defined(4, numeric),
+        15 => first + 11,
         _ => unreachable!("unknown owner helper {logical}"),
     }
 }

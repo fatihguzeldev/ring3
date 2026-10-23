@@ -11,6 +11,7 @@ mod strings;
 pub(in crate::cpu::core) mod support;
 #[cfg(test)]
 mod tests;
+mod trace;
 
 use super::{
     StopReason, flags,
@@ -113,6 +114,28 @@ pub(super) fn emit(
 ) -> Vec<u8> {
     let graph =
         super::region::Region::from_blocks(blocks, entry).expect("decoded blocks form a region");
+    emit_graph(blocks, entry, identity, native, graph)
+}
+
+pub(super) fn emit_observed(
+    blocks: &[Block],
+    entry: u32,
+    identity: u64,
+    native: &[NativeInstruction],
+    observed_edges: &[(u32, u32)],
+) -> Vec<u8> {
+    let graph = super::region::Region::from_observed(blocks, entry, observed_edges)
+        .expect("recorded blocks and edges form an observed region");
+    emit_graph(blocks, entry, identity, native, graph)
+}
+
+fn emit_graph(
+    blocks: &[Block],
+    entry: u32,
+    identity: u64,
+    native: &[NativeInstruction],
+    graph: super::region::Region,
+) -> Vec<u8> {
     let plan = super::region::values::RegionPlan::analyze(&graph);
     let numeric = !native.is_empty();
     let body = run(&graph, &plan, identity, native);
@@ -177,6 +200,17 @@ pub(super) fn emit(
         numeric::descriptor_parameters(),
         numeric::descriptor_results(),
     );
+    types.ty().function(
+        [
+            ValType::I32,
+            ValType::I64,
+            ValType::I32,
+            ValType::I32,
+            ValType::I32,
+            ValType::I32,
+        ],
+        [],
+    );
     module.section(&types);
     let mut imports = ImportSection::new();
     imports.import(
@@ -196,7 +230,7 @@ pub(super) fn emit(
         imports.import("ring3", "numeric", EntityType::Function(0));
     }
     link::imports(&mut imports);
-    support::imports(&mut imports, [3, 6, 9, 10, 12, 7, 7, 7, 13, 14, 15]);
+    support::imports(&mut imports, [3, 6, 9, 10, 12, 7, 7, 7, 13, 14, 15, 17]);
     module.section(&imports);
     let mut functions = FunctionSection::new();
     for kind in [0, 4, 5, 11, 16, 0, 0, 8] {
@@ -368,6 +402,8 @@ fn run(
         guarded_gpr_facts: false,
         current_block: None,
         grouped_accesses: true,
+        is_trace: graph.is_observed,
+        guarded_control: false,
         native,
     };
     out.c()
@@ -409,6 +445,15 @@ fn run(
         .i32_const(flags::FlagKind::None as i32)
         .local_set(KIND);
     out.c().end();
+    if graph.is_observed {
+        out.c()
+            .local_get(EIP)
+            .i32_const(graph.blocks[graph.entry.0].entry as i32)
+            .i32_ne()
+            .if_(BlockType::Empty);
+        out.exit(StopReason::NeedCode, None, 0);
+        out.c().end();
+    }
     out.c()
         .local_get(FLAGS)
         .i32_const(0x50100)
@@ -438,6 +483,9 @@ fn run(
     out.c().loop_(BlockType::Empty).block(BlockType::Empty);
     out.return_target = Some(out.depth);
     region::emit(&mut out, graph);
+    // Guarded control owns only the instruction's actual target. Canonical
+    // service continuation always resolves its next private instruction port.
+    out.guarded_control = false;
     out.c().end();
     out.return_target = Some(1);
     numeric::emit_inline_commit(&mut out);
@@ -455,7 +503,11 @@ fn run(
         .end()
         .end();
     assert_eq!(out.depth, 0, "the region exit wrapper is closed");
-    exits::finish(function, !native.is_empty())
+    exits::finish(
+        function,
+        !native.is_empty(),
+        graph.is_observed.then_some(identity),
+    )
 }
 
 pub(super) struct Output<'a> {
@@ -477,6 +529,8 @@ pub(super) struct Output<'a> {
     guarded_gpr_facts: bool,
     current_block: Option<super::region::BlockId>,
     grouped_accesses: bool,
+    is_trace: bool,
+    guarded_control: bool,
     native: &'a [NativeInstruction],
 }
 
@@ -750,7 +804,13 @@ impl Output<'_> {
 
     fn dynamic_pc(&mut self, local: u32) {
         self.c().local_get(local).local_set(EIP);
-        self.lookup_port(EIP);
+        if !self.guarded_indirect() {
+            self.lookup_port(EIP);
+        }
+    }
+
+    fn guarded_indirect(&self) -> bool {
+        self.guarded_control
     }
 
     fn lookup_port(&mut self, local: u32) {

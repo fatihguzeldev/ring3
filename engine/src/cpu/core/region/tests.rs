@@ -32,6 +32,105 @@ fn branch(pc: u32) -> Operation {
 }
 
 #[test]
+fn observed_cfg_keeps_an_unobserved_branch_external_even_when_its_pc_is_present() {
+    let blocks = [
+        block(0x1000, &[branch(0x2000)]),
+        block(0x1001, &[jump(0x3000)]),
+        block(0x2000, &[jump(0x3000)]),
+        block(0x3000, &[Operation::Nop]),
+    ];
+    let observed = Region::from_observed(
+        &blocks,
+        0x1000,
+        &[(0x2000, 0x3000), (0x1001, 0x3000), (0x1000, 0x1001)],
+    )
+    .unwrap();
+    assert!(observed.is_observed);
+    assert_eq!(
+        observed.blocks[0].terminator,
+        Terminator::Branch {
+            condition: Condition::NotEqual,
+            taken: Target::External(0x2000),
+            otherwise: Target::Block(BlockId(1)),
+        }
+    );
+    assert_eq!(observed.blocks[0].successors, [BlockId(1)]);
+    assert_eq!(observed.blocks[2].predecessors, []);
+    let baseline = Region::from_blocks(&blocks, 0x1000).unwrap();
+    assert!(!baseline.is_observed);
+    assert_eq!(baseline.blocks[0].successors, [BlockId(1), BlockId(2)]);
+}
+
+#[test]
+fn observed_indirect_targets_are_exact_cfg_edges_without_a_four_target_truncation() {
+    let mut blocks = vec![
+        block(
+            0x1000,
+            &[Operation::Call {
+                target: BranchTarget::Direct(GuestAddress(0x2000)),
+            }],
+        ),
+        block(0x1001, &[Operation::Nop]),
+        block(0x2000, &[Operation::Return { stack_adjust: 0 }]),
+    ];
+    for pc in [0x3000, 0x4000, 0x5000, 0x6000, 0x7000] {
+        blocks.push(block(pc, &[Operation::Nop]));
+    }
+    let mut edges = vec![(0x1000, 0x2000), (0x2000, 0x1001), (0x2000, 0xdead)];
+    edges.extend([0x3000, 0x4000, 0x5000, 0x6000, 0x7000].map(|pc| (0x2000, pc)));
+    let region = Region::from_observed(&blocks, 0x1000, &edges).unwrap();
+    assert_eq!(
+        region.blocks[0].terminator,
+        Terminator::Next {
+            target: Target::Block(BlockId(2)),
+            kind: DirectKind::Call,
+        }
+    );
+    let ret = &region.blocks[2];
+    assert_eq!(ret.terminator, Terminator::GuardedIndirect);
+    assert_eq!(
+        ret.indirect_targets,
+        [
+            BlockId(1),
+            BlockId(3),
+            BlockId(4),
+            BlockId(5),
+            BlockId(6),
+            BlockId(7)
+        ]
+    );
+    assert_eq!(ret.successors, ret.indirect_targets);
+    assert_eq!(
+        ret.instructions[0].exits.after.unwrap().pc,
+        ResumePc::Computed
+    );
+    let plan = region.structure_all();
+    assert_eq!(plan.reachable, vec![true; blocks.len()]);
+    let baseline = Region::from_blocks(&blocks, 0x1000).unwrap();
+    assert_eq!(baseline.blocks[2].terminator, Terminator::Indirect);
+    assert!(baseline.blocks[2].successors.is_empty());
+}
+
+#[test]
+fn observed_linear_spans_require_each_actual_edge_and_keep_pc_deduplicated() {
+    let blocks = [block(0x1000, &[Operation::Nop, Operation::Nop])];
+    assert!(Region::from_observed(&blocks, 0x1000, &[]).is_none());
+    let region = Region::from_observed(&blocks, 0x1000, &[(0x1000, 0x1001)]).unwrap();
+    assert_eq!(
+        region.blocks[0].terminator,
+        Terminator::Next {
+            target: Target::External(0x1002),
+            kind: DirectKind::Fallthrough,
+        }
+    );
+    let duplicate = [
+        block(0x1000, &[Operation::Nop]),
+        block(0x1000, &[Operation::Nop]),
+    ];
+    assert!(Region::from_observed(&duplicate, 0x1000, &[]).is_none());
+}
+
+#[test]
 fn diamond_has_direct_forward_edges_and_one_copy_of_its_join() {
     let blocks = [
         block(0x1000, &[branch(0x2000)]),

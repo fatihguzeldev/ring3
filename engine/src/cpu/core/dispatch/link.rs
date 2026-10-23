@@ -74,7 +74,7 @@ pub(super) fn emit() -> Vec<u8> {
             }),
         );
     }
-    imports.import("ring3", "probe", EntityType::Function(0));
+    imports.import("ring3", "probe", EntityType::Function(2));
     imports.import("ring3", "cold", EntityType::Function(1));
     module.section(&imports);
     let mut functions = FunctionSection::new();
@@ -170,6 +170,7 @@ pub(super) fn emit() -> Vec<u8> {
         .local_set(PREVIOUS_RETIRED)
         .local_get(0)
         .global_get(state(10))
+        .global_get(state(13))
         .call(0)
         .local_set(NEXT)
         .local_get(NEXT)

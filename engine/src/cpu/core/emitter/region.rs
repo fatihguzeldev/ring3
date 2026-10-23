@@ -134,6 +134,7 @@ impl Emitter<'_, '_> {
         self.current = id;
         self.out.c().i32_const(0).local_set(ENTRY_PENDING);
         let block = &self.graph.blocks[id.0];
+        self.out.guarded_control = block.terminator == Terminator::GuardedIndirect;
         self.out.address_fact = None;
         self.out
             .c()
@@ -178,6 +179,17 @@ impl Emitter<'_, '_> {
         self.out.c().local_set(super::GP_FACTS_VALID);
         super::numeric::enter_block(self.out, id);
         self.out.c().end();
+        if !self.out.is_trace {
+            super::trace::record_block(
+                self.out,
+                block.entry,
+                block
+                    .instructions
+                    .last()
+                    .expect("nonempty region block")
+                    .next,
+            );
+        }
         self.out.c().i32_const(0).local_set(super::ENTRY_OFFSET);
         self.out.block(id, block);
         match block.terminator {
@@ -234,6 +246,23 @@ impl Emitter<'_, '_> {
                 self.branch(taken, otherwise);
             }
             Terminator::Indirect => self.restart(),
+            Terminator::GuardedIndirect => {
+                for &target in &block.indirect_targets {
+                    self.out
+                        .c()
+                        .local_get(super::EIP)
+                        .i32_const(self.graph.blocks[target.0].entry as i32)
+                        .i32_eq()
+                        .if_(BlockType::Empty);
+                    self.labels.push(Label::Other);
+                    self.edge(Target::Block(target));
+                    self.labels.pop();
+                    self.out.c().end();
+                }
+                // the actual indirect instruction has already committed its
+                // stack/register effects and retirement. only its target missed.
+                self.out.exit(StopReason::NeedCode, None, 0);
+            }
             Terminator::Exit { .. } => {
                 self.out.c().unreachable();
             }
