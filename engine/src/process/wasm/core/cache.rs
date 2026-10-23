@@ -20,6 +20,7 @@ pub(super) struct CoreCache32 {
     regions: Box<[Option<CachedRegion>]>,
     free: Vec<usize>,
     entries: HashMap<u32, RegionKey, RandomState>,
+    entries_epoch: u64,
     bytes: usize,
     oldest: Option<usize>,
     newest: Option<usize>,
@@ -66,6 +67,50 @@ struct CachedRegion {
     newer: Option<usize>,
     slot: u32,
     heat: TransitionHeat,
+    linked_entries: LinkedEntries,
+}
+
+#[derive(Default)]
+struct LinkedEntries {
+    epoch: u64,
+    rows: [LinkedEntry; 4],
+    next: usize,
+}
+
+#[derive(Clone, Copy, Default)]
+struct LinkedEntry {
+    identity: u64,
+    pc: u32,
+    index: u16,
+}
+
+impl LinkedEntries {
+    fn get(&self, epoch: u64, pc: u32) -> Option<RegionKey> {
+        if self.epoch != epoch {
+            return None;
+        }
+        self.rows
+            .iter()
+            .find(|row| row.identity != 0 && row.pc == pc)
+            .map(|row| RegionKey {
+                index: usize::from(row.index),
+                identity: row.identity,
+            })
+    }
+
+    fn remember(&mut self, epoch: u64, pc: u32, key: RegionKey) {
+        if self.epoch != epoch {
+            self.rows.fill(LinkedEntry::default());
+            self.epoch = epoch;
+            self.next = 0;
+        }
+        self.rows[self.next] = LinkedEntry {
+            identity: key.identity,
+            pc,
+            index: key.index as u16,
+        };
+        self.next = (self.next + 1) % self.rows.len();
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -84,6 +129,7 @@ impl Default for CoreCache32 {
             regions: (0..MAX_REGIONS).map(|_| None).collect(),
             free: (0..MAX_REGIONS).rev().collect(),
             entries: HashMap::with_hasher(RandomState::default()),
+            entries_epoch: 1,
             bytes: 0,
             oldest: None,
             newest: None,
@@ -173,6 +219,37 @@ impl CoreCache32 {
         pc: u32,
     ) -> Option<(RegionRef, u32)> {
         let key = *self.entries.get(&pc)?;
+        self.lookup_linked_key(memory, key)
+    }
+
+    fn lookup_linked_from(
+        &mut self,
+        memory: &AddressSpace,
+        source: &RegionRef,
+        pc: u32,
+    ) -> Option<(RegionRef, u32)> {
+        let cached = self
+            .retained(source)
+            .and_then(|entry| entry.linked_entries.get(self.entries_epoch, pc));
+        if let Some(key) = cached {
+            return self.lookup_linked_key(memory, key);
+        }
+        let linked = self.lookup_linked(memory, pc)?;
+        if self.retained(source).is_some() {
+            self.regions[source.key.index]
+                .as_mut()
+                .unwrap()
+                .linked_entries
+                .remember(self.entries_epoch, pc, linked.0.key);
+        }
+        Some(linked)
+    }
+
+    fn lookup_linked_key(
+        &mut self,
+        memory: &AddressSpace,
+        key: RegionKey,
+    ) -> Option<(RegionRef, u32)> {
         let entry = self.region(key)?;
         if !entry.code.is_current(memory) {
             self.remove(key);
@@ -254,6 +331,7 @@ impl CoreCache32 {
     }
 
     pub(super) fn insert(&mut self, code: CompiledCode) -> RegionRef {
+        self.advance_entries_epoch();
         let code = Rc::new(code);
         for pc in code.entrypoints() {
             if let Some(key) = self.entries.remove(&pc.0) {
@@ -289,6 +367,7 @@ impl CoreCache32 {
             newer: None,
             slot: 0,
             heat: TransitionHeat::default(),
+            linked_entries: LinkedEntries::default(),
         });
         if let Some(newest) = self.newest {
             self.regions[newest].as_mut().unwrap().newer = Some(index);
@@ -357,6 +436,7 @@ impl CoreCache32 {
         if self.region(key).is_none() {
             return;
         }
+        self.advance_entries_epoch();
         let entry = self.regions[key.index].take().unwrap();
         self.detach(entry.older, entry.newer);
         self.bytes -= entry.code.wasm().len();
@@ -374,6 +454,18 @@ impl CoreCache32 {
             }
         }
         self.free.push(key.index);
+    }
+
+    fn advance_entries_epoch(&mut self) {
+        self.entries_epoch = match self.entries_epoch.checked_add(1) {
+            Some(epoch) => epoch,
+            None => {
+                for entry in self.regions.iter_mut().flatten() {
+                    entry.linked_entries.epoch = 0;
+                }
+                1
+            }
+        };
     }
 }
 

@@ -68,7 +68,7 @@ impl CoreCache32 {
         if self.transition_pending() || !source.is_current(memory) {
             return TransitionLookup::Stop;
         }
-        let Some((target, slot)) = self.lookup_linked(memory, pc) else {
+        let Some((target, slot)) = self.lookup_linked_from(memory, source, pc) else {
             return TransitionLookup::Miss;
         };
         // The lookup just validated the target's source, index and reciprocal link.
