@@ -122,6 +122,7 @@ impl<'a> Sink<'a> {
         call(f: u32);
         f32_demote_f64();
         f32_reinterpret_i32();
+        f32_store(m: MemArg);
         f32x4_add();
         f64_abs();
         f64_add();
@@ -135,6 +136,7 @@ impl<'a> Sink<'a> {
         f64_neg();
         f64_promote_f32();
         f64_reinterpret_i64();
+        f64_store(m: MemArg);
         f64_sub();
         f64x2_add();
         f64x2_ne();

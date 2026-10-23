@@ -70,16 +70,40 @@ pub(super) fn begin(out: &mut Output<'_>, operation: Operation, _next: u32) -> b
             ..
         } => {
             occupied(out, 0);
-            frame::load_raw(out, 0, SIG, X);
-            ieee::pack(out, SIG, X, format);
-            memory::prepare(out, address.unwrap(), format.size() as u32, true, false, 52);
-            out.c().local_get(52).local_get(PACKED);
-            if format == X87Format::Float32 {
-                out.c().i32_wrap_i64().i32_store(mem(0, 0));
+            let native = native_store(out, format);
+            if native {
+                span::load(out, 0, FA);
             } else {
-                out.c().i64_store(mem(0, 0));
+                frame::load_raw(out, 0, SIG, X);
+                ieee::pack(out, SIG, X, format);
+            }
+            memory::prepare(out, address.unwrap(), format.size() as u32, true, false, 52);
+            out.c().local_get(52);
+            if native {
+                out.c().local_get(FA);
+                if format == X87Format::Float32 {
+                    out.c().f32_demote_f64().f32_store(mem(0, 0));
+                } else {
+                    out.c().f64_store(mem(0, 0));
+                }
+            } else {
+                out.c().local_get(PACKED);
+                if format == X87Format::Float32 {
+                    out.c().i32_wrap_i64().i32_store(mem(0, 0));
+                } else {
+                    out.c().i64_store(mem(0, 0));
+                }
             }
             memory::commit(out);
+            if native {
+                // An exact store overwrites C1, but a rejected store must preserve
+                // the preceding completed instruction's deferred C1 recipe.
+                out.c()
+                    .local_get(STATUS)
+                    .i32_const(!0x200)
+                    .i32_and()
+                    .local_set(STATUS);
+            }
             span::clear_status_recipe(out);
         }
         X87Operation::LoadRegister { index } => {
@@ -363,6 +387,26 @@ fn has_proof(out: &Output<'_>, logical: u8, kind: ProofKind) -> bool {
                 && proof.epoch == frame.fp.control_epoch
                 && proof.value.is_some_and(|value| values.contains(&value))
         })
+}
+
+fn native_store(out: &Output<'_>, format: X87Format) -> bool {
+    let before = out.before_frame.expect("store has a before frame");
+    let frame = out.plan.frame(before);
+    let FpValue::ExactF64(value, _) = frame.fp.payload[0] else {
+        return false;
+    };
+    let has = |kind| {
+        out.plan.proofs_at(before).iter().any(|id| {
+            let proof = out.plan.proof(*id);
+            proof.value == Some(value)
+                && proof.kind == kind
+                && proof.epoch == frame.fp.control_epoch
+                && proof.conditional.is_none()
+        })
+    };
+    // These successful-prefix facts certify finite normal values or signed zero.
+    // A conditional imported native lane alone cannot authorize an exact store.
+    has(ProofKind::ExactF64) && (format == X87Format::Float64 || has(ProofKind::Native24))
 }
 
 pub(super) fn import_native(out: &mut Output<'_>, logical: u8, destination: u32, depth: u32) {
