@@ -232,12 +232,7 @@ impl CoreCache32 {
         {
             return None;
         }
-        let roots: Vec<_> = source
-            .formation_roots()
-            .iter()
-            .chain(target.formation_roots())
-            .copied()
-            .collect();
+        let roots = self.transition_roots(memory, &source, &target, pc, options.blocks)?;
         let mut frontier = self.frontier(memory);
         frontier.retain(|entry| {
             self.entries
@@ -267,6 +262,44 @@ impl CoreCache32 {
             return None;
         }
         Some(self.insert(code))
+    }
+
+    fn transition_roots(
+        &self,
+        memory: &AddressSpace,
+        source: &RegionRef,
+        target: &RegionRef,
+        pc: u32,
+        maximum: usize,
+    ) -> Option<Vec<GuestAddress>> {
+        let mut roots =
+            Vec::with_capacity(source.formation_roots().len() + target.formation_roots().len() + 1);
+        roots.extend(
+            source
+                .formation_roots()
+                .iter()
+                .chain(target.formation_roots())
+                .copied(),
+        );
+        roots.push(GuestAddress(pc));
+        roots.sort_unstable_by_key(|root| root.0);
+        roots.dedup();
+        if roots.len() < 2
+            || roots.len() > maximum
+            || roots.iter().any(|root| {
+                root.0 != pc
+                    && self.entries.get(&root.0).is_some_and(|key| {
+                        *key != source.key
+                            && *key != target.key
+                            && self
+                                .region(*key)
+                                .is_some_and(|entry| entry.code.is_current(memory))
+                    })
+            })
+        {
+            return None;
+        }
+        Some(roots)
     }
 
     pub(in crate::process) fn clear_transition(&mut self) {

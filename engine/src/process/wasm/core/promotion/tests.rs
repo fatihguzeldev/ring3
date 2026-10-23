@@ -83,6 +83,140 @@ fn ineligible_pair() -> (AddressSpace, CoreCache32, RegionRef, RegionRef) {
     (memory, cache, source, target)
 }
 
+fn shadowed_root_pair() -> (AddressSpace, CoreCache32, RegionRef, RegionRef, RegionRef) {
+    let mut memory = memory();
+    memory
+        .write(GuestAddress(0x1000), &[0xe9, 0xfb, 0x0f, 0, 0])
+        .unwrap();
+    memory.write(GuestAddress(0x1040), &[0xc3]).unwrap();
+    let code = CompiledCode::compile_transition(
+        &memory,
+        GuestAddress(0x1080),
+        options(),
+        &[],
+        &[GuestAddress(0x2000)],
+        &[GuestAddress(0x1000), GuestAddress(0x1080)],
+    )
+    .unwrap()
+    .unwrap();
+    let mut cache = CoreCache32::default();
+    let source = cache.insert(code);
+    cache.install_link(&source, 1).unwrap();
+    let target = insert(&mut cache, &memory, 0x1040, 2);
+    let third = insert(&mut cache, &memory, 0x1000, 3);
+    assert!(cache.indexes(&source, 0x1080));
+    assert!(cache.indexes(&target, 0x1040));
+    assert!(cache.indexes(&third, 0x1000));
+    assert_eq!(cache.retained(&source).unwrap().indexed_entries, 1);
+    assert_eq!(cache.retained(&target).unwrap().indexed_entries, 1);
+    (memory, cache, source, target, third)
+}
+
+#[test]
+fn a_root_limit_declines_before_collecting_unrelated_frontiers() {
+    let (mut memory, mut cache, source, target, third) = shadowed_root_pair();
+    memory.write(GuestAddress(0x2000), &[0x48]).unwrap();
+    assert!(source.is_current(&memory) && target.is_current(&memory));
+    assert!(!third.is_current(&memory));
+    assert!(
+        cache
+            .transition_roots(&memory, &source, &target, 0x1040, 2)
+            .is_none()
+    );
+    assert_eq!(
+        cache.transition_roots(&memory, &source, &target, 0x1040, 3),
+        Some(vec![
+            GuestAddress(0x1000),
+            GuestAddress(0x1040),
+            GuestAddress(0x1080)
+        ])
+    );
+    mature(&mut cache, &memory, &source, &target, 0x1040);
+    let before = cache.snapshot();
+    assert!(
+        cache
+            .prepare_transition(
+                &memory,
+                0x1040,
+                CompileOptions {
+                    blocks: 2,
+                    ..options()
+                },
+                &[]
+            )
+            .is_none()
+    );
+    assert_eq!(cache.snapshot(), before);
+    assert_eq!(
+        &cache.link_owners[1..4],
+        &[source.identity(), target.identity(), third.identity()]
+    );
+}
+
+#[test]
+fn a_current_third_owner_root_declines_without_changing_owners() {
+    let (memory, mut cache, source, target, third) = shadowed_root_pair();
+    assert!(
+        cache
+            .transition_roots(&memory, &source, &target, 0x1040, 8)
+            .is_none()
+    );
+    mature(&mut cache, &memory, &source, &target, 0x1040);
+    let before = cache.snapshot();
+    assert!(
+        cache
+            .prepare_transition(&memory, 0x1040, options(), &[])
+            .is_none()
+    );
+    assert_eq!(cache.snapshot(), before);
+    assert_eq!(
+        &cache.link_owners[1..4],
+        &[source.identity(), target.identity(), third.identity()]
+    );
+    assert_eq!(
+        cache.lookup(&memory, 0x1080).unwrap().identity(),
+        source.identity()
+    );
+    assert_eq!(
+        cache.lookup(&memory, 0x1040).unwrap().identity(),
+        target.identity()
+    );
+    assert_eq!(
+        cache.lookup(&memory, 0x1000).unwrap().identity(),
+        third.identity()
+    );
+}
+
+#[test]
+fn a_stale_third_owner_root_does_not_block_a_current_formation() {
+    let (mut memory, mut cache, source, target, third) = shadowed_root_pair();
+    memory.write(GuestAddress(0x2000), &[0x48]).unwrap();
+    assert!(source.is_current(&memory) && target.is_current(&memory));
+    assert!(!third.is_current(&memory));
+    assert_eq!(
+        cache.transition_roots(&memory, &source, &target, 0x1040, 8),
+        Some(vec![
+            GuestAddress(0x1000),
+            GuestAddress(0x1040),
+            GuestAddress(0x1080)
+        ])
+    );
+    mature(&mut cache, &memory, &source, &target, 0x1040);
+    let merged = cache
+        .prepare_transition(&memory, 0x1040, options(), &[])
+        .unwrap();
+    assert_eq!(
+        merged.formation_roots(),
+        &[
+            GuestAddress(0x1000),
+            GuestAddress(0x1040),
+            GuestAddress(0x1080)
+        ]
+    );
+    assert!(merged.is_current(&memory));
+    assert!(cache.retained(&source).is_none() && cache.retained(&target).is_none());
+}
+
 #[test]
 fn repeated_ineligible_pairs_are_memoized_without_disturbing_positive_heat() {
     let (memory, mut cache, source, target) = ineligible_pair();
