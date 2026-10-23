@@ -61,7 +61,13 @@ fn one_completed_cold_event_is_authoritative_without_a_future_witness() {
     assert!(code.is_observed_family());
     assert_eq!(code.instruction_pcs().collect::<Vec<_>>(), [0x1000]);
     assert_eq!(
-        code.observed.as_ref().unwrap().edges,
+        code.observed
+            .as_ref()
+            .unwrap()
+            .edges
+            .iter()
+            .copied()
+            .collect::<BTreeSet<_>>(),
         BTreeSet::from([(0x1000, 0x1001)])
     );
     assert_eq!(code.entrypoints(), &[GuestAddress(0x1000)]);
@@ -201,14 +207,14 @@ fn historical_observed_sets_union_both_arms_and_preserve_every_port() {
     );
     assert!(next.supports_entry(0x1002));
     assert!(!next.supports_entry(0x1001));
-    assert!(
-        first
-            .observed
+    assert!(first.observed.as_ref().unwrap().edges.iter().all(|edge| {
+        next.observed
             .as_ref()
             .unwrap()
             .edges
-            .is_subset(&next.observed.as_ref().unwrap().edges)
-    );
+            .binary_search(edge)
+            .is_ok()
+    }));
     assert!(
         compile_cold(
             &memory,
@@ -329,7 +335,13 @@ fn retained_numeric_prefix_and_final_completed_cold_record_share_one_dictionary(
     assert_eq!(code.native[0].pc, 0x1000);
     assert_eq!(code.native[0].operation, owner.native[0].operation);
     assert_eq!(
-        code.observed.as_ref().unwrap().edges,
+        code.observed
+            .as_ref()
+            .unwrap()
+            .edges
+            .iter()
+            .copied()
+            .collect::<BTreeSet<_>>(),
         BTreeSet::from([(0x1000, 0x1002), (0x1002, 0x1003)])
     );
     assert_eq!(owner.entrypoints(), &[GuestAddress(0x1000)]);
@@ -442,7 +454,14 @@ fn changing_only_an_indirect_external_target_is_not_executable_growth() {
     assert_eq!(first.identity(), id);
     assert_eq!(first.wasm(), bytes);
     assert_eq!(
-        first.observed.as_ref().unwrap().edges,
+        first
+            .observed
+            .as_ref()
+            .unwrap()
+            .edges
+            .iter()
+            .copied()
+            .collect::<BTreeSet<_>>(),
         BTreeSet::from([(0x1000, 0x2000)])
     );
 }

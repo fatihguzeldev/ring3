@@ -18,25 +18,103 @@ pub(super) struct ObservedGraph {
 }
 
 impl ObservedGraph {
-    fn preserves(&self, previous: &Self) -> bool {
+    fn preserves(&self, previous: &ObservedHistory) -> bool {
         previous.nodes.iter().all(|(pc, instruction)| {
             self.nodes
                 .get(pc)
                 .is_some_and(|next| same_instruction(next, instruction))
-        }) && previous.edges.is_subset(&self.edges)
-            && previous.ports.is_subset(&self.ports)
+        }) && previous.edges.iter().all(|edge| self.edges.contains(edge))
+            && previous.ports.iter().all(|pc| self.ports.contains(pc))
+    }
+
+    fn strictly_grows(&self, previous: &ObservedHistory) -> bool {
+        self.preserves(previous)
+            && (self.nodes.len() != previous.nodes.len()
+                || self.ports.len() != previous.ports.len()
+                || self.edges.iter().any(|(source, target)| {
+                    previous.edges.binary_search(&(*source, *target)).is_err()
+                        && self.nodes.contains_key(source)
+                        && self.nodes.contains_key(target)
+                }))
+    }
+
+    fn freeze(self) -> ObservedHistory {
+        ObservedHistory {
+            nodes: self
+                .nodes
+                .into_iter()
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
+            edges: self
+                .edges
+                .into_iter()
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
+            ports: self
+                .ports
+                .into_iter()
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
+            starts: self
+                .starts
+                .into_iter()
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
+        }
+    }
+}
+
+/// Source-current immutable history is stored once, independent of fingerprint
+/// clones. Sorted boxed payloads have explicit storage sizes and no tree slack.
+#[derive(Debug, PartialEq)]
+pub(super) struct ObservedHistory {
+    nodes: Box<[(u32, Instruction)]>,
+    edges: Box<[(u32, u32)]>,
+    ports: Box<[u32]>,
+    starts: Box<[u32]>,
+}
+
+impl ObservedHistory {
+    fn contains_node(&self, pc: u32) -> bool {
+        self.nodes.binary_search_by_key(&pc, |(pc, _)| *pc).is_ok()
+    }
+
+    fn preserves(&self, previous: &Self) -> bool {
+        previous.nodes.iter().all(|(pc, instruction)| {
+            self.nodes
+                .binary_search_by_key(pc, |(pc, _)| *pc)
+                .ok()
+                .is_some_and(|index| same_instruction(&self.nodes[index].1, instruction))
+        }) && previous
+            .edges
+            .iter()
+            .all(|edge| self.edges.binary_search(edge).is_ok())
+            && previous
+                .ports
+                .iter()
+                .all(|pc| self.ports.binary_search(pc).is_ok())
     }
 
     pub(super) fn strictly_grows(&self, previous: &Self) -> bool {
         self.preserves(previous)
             && (self.nodes.len() != previous.nodes.len()
-                || self.ports != previous.ports
-                || self
-                    .edges
-                    .difference(&previous.edges)
-                    .any(|(source, target)| {
-                        self.nodes.contains_key(source) && self.nodes.contains_key(target)
-                    }))
+                || self.ports.len() != previous.ports.len()
+                || self.edges.iter().any(|edge| {
+                    previous.edges.binary_search(edge).is_err()
+                        && self.contains_node(edge.0)
+                        && self.contains_node(edge.1)
+                }))
+    }
+
+    pub(super) fn resident_charge(&self) -> usize {
+        std::mem::size_of::<Self>()
+            + 2 * std::mem::size_of::<usize>()
+            + std::mem::align_of::<Self>()
+            - 1
+            + std::mem::size_of_val(self.nodes.as_ref())
+            + std::mem::size_of_val(self.edges.as_ref())
+            + std::mem::size_of_val(self.ports.as_ref())
+            + std::mem::size_of_val(self.starts.as_ref())
     }
 }
 

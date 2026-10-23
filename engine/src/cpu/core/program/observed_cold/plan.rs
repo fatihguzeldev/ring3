@@ -7,7 +7,7 @@ pub(crate) struct ObservedPlanFingerprint {
     memory_identity: u64,
     anchor: u32,
     options: CompileOptions,
-    graph: ObservedGraph,
+    graph: Arc<ObservedHistory>,
     sources: Vec<SourceAuthority>,
     parents: Vec<u64>,
 }
@@ -42,12 +42,30 @@ pub(crate) struct ObservedPlan {
     entries: Vec<GuestAddress>,
 }
 
+impl ObservedPlanFingerprint {
+    pub(crate) fn metadata_charge(&self) -> usize {
+        self.sources.capacity() * std::mem::size_of::<SourceAuthority>()
+            + self
+                .sources
+                .iter()
+                .map(|source| source.versions.capacity() * std::mem::size_of::<(u64, u64)>())
+                .sum::<usize>()
+            + self.parents.capacity() * std::mem::size_of::<u64>()
+    }
+
+    /// Refusal memo accounting deliberately charges the full Arc payload per
+    /// entry, even when another artifact or memo shares that immutable history.
+    pub(crate) fn resident_charge(&self) -> usize {
+        std::mem::size_of::<Self>() + self.metadata_charge() + self.graph.resident_charge()
+    }
+}
+
 impl ObservedPlan {
     pub(crate) fn anchor(&self) -> u32 {
         self.fingerprint.anchor
     }
     pub(crate) fn instruction_pcs(&self) -> impl Iterator<Item = u32> + '_ {
-        self.fingerprint.graph.nodes.keys().copied()
+        self.fingerprint.graph.nodes.iter().map(|(pc, _)| *pc)
     }
     pub(crate) fn entrypoints(&self) -> &[GuestAddress] {
         &self.entries
@@ -115,7 +133,7 @@ fn form_plan(
             memory_identity: memory.identity(),
             anchor,
             options,
-            graph,
+            graph: Arc::new(graph.freeze()),
             sources: authorities,
             parents,
         },
@@ -161,11 +179,11 @@ pub(crate) fn prepare_observed_plan(
             parent.is_observed_family()
                 && parent.is_current(memory)
                 && parent.observed.as_ref().is_some_and(|old| {
-                    graph.nodes.keys().any(|pc| old.nodes.contains_key(pc))
+                    graph.nodes.keys().any(|pc| old.contains_node(*pc))
                         || graph
                             .edges
                             .iter()
-                            .any(|(_, target)| old.ports.contains(target))
+                            .any(|(_, target)| old.ports.binary_search(target).is_ok())
                         || old
                             .edges
                             .iter()
@@ -181,7 +199,7 @@ pub(crate) fn prepare_observed_plan(
         .unwrap_or(root.0);
     for parent in &connected {
         let previous = parent.observed.as_ref().expect("connected observed family");
-        for (&pc, &instruction) in &previous.nodes {
+        for &(pc, instruction) in previous.nodes.iter() {
             if graph
                 .nodes
                 .get(&pc)
@@ -194,7 +212,7 @@ pub(crate) fn prepare_observed_plan(
                 return Ok(None);
             }
         }
-        for &edge in &previous.edges {
+        for &edge in previous.edges.iter() {
             graph.edges.insert(edge);
             if graph.edges.len() > options.instructions * 2 {
                 return Ok(None);
@@ -308,15 +326,24 @@ pub(crate) fn emit_observed_plan(
         entries,
     } = plan;
     let native = collect_native(&blocks);
-    let score = TraceScore::emitted(&blocks, &fingerprint.graph.edges);
+    let score = TraceScore {
+        instructions: fingerprint.graph.nodes.len(),
+        internal_edges: fingerprint
+            .graph
+            .edges
+            .iter()
+            .filter(|(source, target)| {
+                fingerprint.graph.contains_node(*source) && fingerprint.graph.contains_node(*target)
+            })
+            .count(),
+    };
     let identity = next_identity()?;
-    let edges: Vec<_> = fingerprint.graph.edges.iter().copied().collect();
     let wasm = super::super::super::emitter::emit_observed_family(
         &blocks,
         fingerprint.anchor,
         identity,
         &native,
-        &edges,
+        &fingerprint.graph.edges,
     );
     if wasm.len() > fingerprint.options.wasm_bytes
         || sources.iter().any(|source| !memory.is_code_current(source))
@@ -334,7 +361,7 @@ pub(crate) fn emit_observed_plan(
         Some((fingerprint.anchor, score)),
     );
     code.entries = entries;
-    code.observed = Some(fingerprint.graph.clone());
+    code.observed = Some(Arc::clone(&fingerprint.graph));
     code.observed_fingerprint = Some(fingerprint);
     Ok(Some(code))
 }

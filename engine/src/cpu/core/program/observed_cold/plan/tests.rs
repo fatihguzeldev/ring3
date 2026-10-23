@@ -248,7 +248,12 @@ fn over_bound_union_falls_back_to_only_completed_unowned_prefix() {
     assert!(plan.parent_identities().is_empty());
     assert_eq!(plan.instruction_pcs().collect::<Vec<_>>(), [0x1020, 0x1021]);
     assert_eq!(
-        plan.fingerprint.graph.edges,
+        plan.fingerprint
+            .graph
+            .edges
+            .iter()
+            .copied()
+            .collect::<BTreeSet<_>>(),
         BTreeSet::from([(0x1020, 0x1021), (0x1021, 0x1000)])
     );
     let prefix = emit_observed_plan(&memory, plan).unwrap().unwrap();
@@ -343,7 +348,12 @@ fn repeated_completed_span_reuses_decode_but_validates_the_last_record_and_union
     .unwrap();
     assert_eq!(plan.instruction_pcs().collect::<Vec<_>>(), [0x1040]);
     assert_eq!(
-        plan.fingerprint.graph.edges,
+        plan.fingerprint
+            .graph
+            .edges
+            .iter()
+            .copied()
+            .collect::<BTreeSet<_>>(),
         BTreeSet::from([(0x1040, 0x1040)])
     );
     assert_eq!(plan.fingerprint.sources.len(), 1);
@@ -382,4 +392,76 @@ fn repeated_completed_span_reuses_decode_but_validates_the_last_record_and_union
     );
     assert_eq!(a.instruction_count(), 2);
     assert_eq!(b.instruction_count(), 2);
+}
+
+#[test]
+fn artifact_and_exact_fingerprint_share_one_frozen_history_without_losing_value_equality() {
+    fn send_sync<T: Send + Sync>() {}
+    send_sync::<CompiledCode>();
+    send_sync::<ObservedPlanFingerprint>();
+    let memory = memory();
+    let path = [(0x1000, 0x1001), (0x1001, 0x1010)];
+    let plan = prepare(&memory, &path, &[], CompileOptions::default()).unwrap();
+    let independently_prepared = prepare(&memory, &path, &[], CompileOptions::default()).unwrap();
+    assert!(!Arc::ptr_eq(
+        &plan.fingerprint.graph,
+        &independently_prepared.fingerprint.graph
+    ));
+    assert_eq!(
+        plan.fingerprint(),
+        independently_prepared.fingerprint(),
+        "exact equality compares immutable values rather than Arc identity"
+    );
+    let code = emit_observed_plan(&memory, plan).unwrap().unwrap();
+    let history = code.observed.as_ref().unwrap();
+    let fingerprint = code.observed_fingerprint().unwrap();
+    assert!(Arc::ptr_eq(history, &fingerprint.graph));
+    assert_eq!(Arc::strong_count(history), 2);
+    assert_eq!(history.nodes.len(), 2);
+    assert_eq!(history.ports.as_ref(), [0x1000, 0x1001]);
+    let charge = code.resident_charge();
+    let memo = fingerprint.clone();
+    assert!(Arc::ptr_eq(history, &memo.graph));
+    assert_eq!(Arc::strong_count(history), 3);
+    assert_eq!(
+        code.resident_charge(),
+        charge,
+        "one artifact charge does not duplicate its shared immutable history"
+    );
+    assert_eq!(
+        memo.resident_charge(),
+        std::mem::size_of::<ObservedPlanFingerprint>()
+            + memo.metadata_charge()
+            + history.resident_charge()
+    );
+}
+
+#[test]
+fn declared_charge_counts_reserved_code_and_dictionary_storage_not_only_encoded_length() {
+    let memory = memory();
+    let mut code = family(&memory, &[(0x1000, 0x1001), (0x1001, 0x1010)]);
+    let encoded = code.wasm().to_vec();
+    let before = code.resident_charge();
+    assert!(before > code.wasm().len());
+    let capacity = code.wasm.capacity();
+    code.wasm.reserve(capacity + 4096);
+    let reserved = code.wasm.capacity() - capacity;
+    assert!(reserved >= 4096);
+    assert_eq!(code.wasm(), encoded);
+    assert_eq!(code.resident_charge(), before + reserved);
+    let before = code.resident_charge();
+    let capacity = code.native.capacity();
+    code.native.reserve(capacity + 4);
+    let reserved = (code.native.capacity() - capacity) * std::mem::size_of::<NativeInstruction>();
+    assert!(reserved > 0);
+    assert_eq!(code.resident_charge(), before + reserved);
+    let before = code.resident_charge();
+    let fingerprint = code.observed_fingerprint.as_mut().unwrap();
+    let capacity = fingerprint.parents.capacity();
+    fingerprint.parents.reserve(capacity + 3);
+    let reserved = (fingerprint.parents.capacity() - capacity) * std::mem::size_of::<u64>();
+    assert!(reserved > 0);
+    assert_eq!(code.resident_charge(), before + reserved);
+    assert!(code.observed.as_ref().unwrap().contains_node(0x1000));
+    assert!(code.is_current(&memory));
 }

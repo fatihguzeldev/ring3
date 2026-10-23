@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 mod observed_cold;
@@ -88,7 +89,7 @@ pub struct CompiledCode {
     native: Vec<NativeInstruction>,
     trace_root: Option<u32>,
     trace_score: Option<TraceScore>,
-    observed: Option<observed_cold::ObservedGraph>,
+    observed: Option<Arc<observed_cold::ObservedHistory>>,
     observed_fingerprint: Option<ObservedPlanFingerprint>,
     #[cfg(test)]
     roots: Box<[GuestAddress]>,
@@ -117,6 +118,39 @@ impl CompiledCode {
     }
     pub fn wasm(&self) -> &[u8] {
         &self.wasm
+    }
+    #[cfg(test)]
+    pub(crate) fn reserve_wasm_capacity_for_test(&mut self, additional: usize) {
+        self.wasm.reserve(additional);
+    }
+    /// Declared owned storage, including reserved capacities. Cache directories,
+    /// Rc control words, allocator overhead and opaque browser JIT storage are
+    /// accounted separately or remain outside this metric.
+    pub(crate) fn resident_charge(&self) -> usize {
+        let mut charge = std::mem::size_of::<Self>()
+            + self.wasm.capacity()
+            + self.sources.capacity() * std::mem::size_of::<CodeSnapshot>()
+            + self
+                .sources
+                .iter()
+                .map(|source| std::mem::size_of_val(source.versions.as_ref()))
+                .sum::<usize>()
+            + self.entries.capacity() * std::mem::size_of::<GuestAddress>()
+            + std::mem::size_of_val(self.instruction_pcs.as_ref())
+            + std::mem::size_of_val(self.block_pcs.as_ref())
+            + std::mem::size_of_val(self.blocks.as_ref())
+            + self.native.capacity() * std::mem::size_of::<NativeInstruction>();
+        if let Some(history) = &self.observed {
+            charge += history.resident_charge();
+        }
+        if let Some(fingerprint) = &self.observed_fingerprint {
+            charge += fingerprint.metadata_charge();
+        }
+        #[cfg(test)]
+        {
+            charge += std::mem::size_of_val(self.roots.as_ref());
+        }
+        charge
     }
     pub fn entrypoints(&self) -> &[GuestAddress] {
         &self.entries
