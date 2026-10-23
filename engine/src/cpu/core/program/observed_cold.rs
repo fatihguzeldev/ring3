@@ -3,7 +3,13 @@ use crate::cpu::core::trace::{
     BLOCK, CAPACITY, COLD_COMPLETE, CompletedColdObservation, NUMERIC, TraceEvent,
 };
 
-#[derive(Debug)]
+mod plan;
+pub(crate) use plan::{
+    ObservedPlan, ObservedPlanFingerprint, emit_observed_plan, prepare_cold_prefix_plan,
+    prepare_observed_plan,
+};
+
+#[derive(Clone, Debug, PartialEq)]
 pub(super) struct ObservedGraph {
     nodes: BTreeMap<u32, Instruction>,
     edges: BTreeSet<(u32, u32)>,
@@ -12,13 +18,17 @@ pub(super) struct ObservedGraph {
 }
 
 impl ObservedGraph {
-    pub(super) fn strictly_grows(&self, previous: &Self) -> bool {
+    fn preserves(&self, previous: &Self) -> bool {
         previous.nodes.iter().all(|(pc, instruction)| {
             self.nodes
                 .get(pc)
                 .is_some_and(|next| same_instruction(next, instruction))
         }) && previous.edges.is_subset(&self.edges)
             && previous.ports.is_subset(&self.ports)
+    }
+
+    pub(super) fn strictly_grows(&self, previous: &Self) -> bool {
+        self.preserves(previous)
             && (self.nodes.len() != previous.nodes.len()
                 || self.ports != previous.ports
                 || self
@@ -78,6 +88,25 @@ fn decoded_node(memory: &AddressSpace, pc: u32) -> Option<(Instruction, CodeSnap
     Some((instruction, source))
 }
 
+fn captured_node(
+    memory: &AddressSpace,
+    nodes: &mut BTreeMap<u32, Instruction>,
+    sources: &mut Vec<CodeSnapshot>,
+    pc: u32,
+    limit: usize,
+) -> Option<Instruction> {
+    if let Some(instruction) = nodes.get(&pc) {
+        return Some(*instruction);
+    }
+    if nodes.len() == limit {
+        return None;
+    }
+    let (instruction, source) = decoded_node(memory, pc)?;
+    nodes.insert(pc, instruction);
+    sources.push(source);
+    Some(instruction)
+}
+
 enum Site<'a> {
     Retained {
         owner: &'a CompiledCode,
@@ -97,7 +126,7 @@ impl Site<'_> {
 
 /// completed cold records carry their own source authority; retained block and
 /// numeric records still require the following event to confirm completion.
-pub(crate) fn compile_observed_with_cold(
+fn capture_graph(
     memory: &AddressSpace,
     root: GuestAddress,
     options: CompileOptions,
@@ -105,15 +134,13 @@ pub(crate) fn compile_observed_with_cold(
     owners: &[&CompiledCode],
     expected_source_version: u64,
     cold: &[CompletedColdObservation],
-    previous: Option<&CompiledCode>,
-) -> Result<Option<CompiledCode>, CompileError> {
+) -> Result<Option<CapturedGraph>, CompileError> {
     if validate_options(options).is_err()
         || events.is_empty()
         || events.len() > CAPACITY
         || cold.len() > CAPACITY
         || memory.code_source_version() != expected_source_version
         || owners.iter().any(|owner| !owner.is_current(memory))
-        || previous.is_some_and(|owner| !owner.is_observed_family() || !owner.is_current(memory))
     {
         return Ok(None);
     }
@@ -175,19 +202,10 @@ pub(crate) fn compile_observed_with_cold(
     if sites[0].first() != root.0 {
         return Ok(None);
     }
-    let mut nodes = previous
-        .and_then(|owner| owner.observed.as_ref())
-        .map_or_else(BTreeMap::new, |graph| graph.nodes.clone());
-    let mut edges = previous
-        .and_then(|owner| owner.observed.as_ref())
-        .map_or_else(BTreeSet::new, |graph| graph.edges.clone());
-    let mut starts = previous
-        .and_then(|owner| owner.observed.as_ref())
-        .map_or_else(BTreeSet::new, |graph| graph.starts.clone());
-    starts.insert(root.0);
-    let mut sources = previous.map_or_else(Vec::new, |owner| {
-        owner.sources.iter().map(snapshot_copy).collect()
-    });
+    let mut nodes = BTreeMap::new();
+    let mut edges = BTreeSet::new();
+    let mut starts = BTreeSet::from([root.0]);
+    let mut sources = Vec::new();
     let edge_limit = options.instructions * 2;
     if nodes.len() > options.instructions || edges.len() > edge_limit {
         return Ok(None);
@@ -202,25 +220,29 @@ pub(crate) fn compile_observed_with_cold(
                 {
                     return Ok(None);
                 }
-                let Some((instruction, source)) = decoded_node(memory, observation.pc()) else {
+                let Some(instruction) = captured_node(
+                    memory,
+                    &mut nodes,
+                    &mut sources,
+                    observation.pc(),
+                    options.instructions,
+                ) else {
                     return Ok(None);
                 };
                 if instruction.next != observation.next()
                     || instruction.operation != Some(observation.instruction.operation)
                     || !observed_successor(instruction, observation.actual_post_pc())
-                    || nodes
-                        .get(&instruction.pc)
-                        .is_some_and(|old| !same_instruction(old, &instruction))
                 {
                     return Ok(None);
                 }
-                nodes.insert(instruction.pc, instruction);
-                sources.push(source);
                 sources.push(snapshot_copy(&observation.source));
                 if terminates(instruction.operation) {
                     starts.insert(observation.actual_post_pc());
                 }
                 edges.insert((instruction.pc, observation.actual_post_pc()));
+                if edges.len() > edge_limit {
+                    return Ok(None);
+                }
             }
             Site::Retained { owner, pcs } => {
                 let Some(next_site) = sites.get(index + 1) else {
@@ -242,15 +264,11 @@ pub(crate) fn compile_observed_with_cold(
                 starts.insert(pcs[0]);
                 starts.insert(target);
                 for (position, &pc) in selected.iter().enumerate() {
-                    let Some((instruction, source)) = decoded_node(memory, pc) else {
+                    let Some(instruction) =
+                        captured_node(memory, &mut nodes, &mut sources, pc, options.instructions)
+                    else {
                         return Ok(None);
                     };
-                    if nodes
-                        .get(&pc)
-                        .is_some_and(|old| !same_instruction(old, &instruction))
-                    {
-                        return Ok(None);
-                    }
                     let successor = selected.get(position + 1).copied().unwrap_or(target);
                     if position + 1 < selected.len() {
                         if instruction.next != successor || terminates(instruction.operation) {
@@ -268,9 +286,10 @@ pub(crate) fn compile_observed_with_cold(
                     {
                         return Ok(None);
                     }
-                    nodes.insert(pc, instruction);
-                    sources.push(source);
                     edges.insert((pc, successor));
+                    if edges.len() > edge_limit {
+                        return Ok(None);
+                    }
                 }
             }
         }
@@ -281,9 +300,6 @@ pub(crate) fn compile_observed_with_cold(
     if nodes.is_empty() || !nodes.contains_key(&root.0) {
         return Ok(None);
     }
-    let anchor = previous
-        .and_then(CompiledCode::trace_root)
-        .unwrap_or(root.0);
     let ports: BTreeSet<_> = nodes.keys().copied().collect();
     let graph = ObservedGraph {
         nodes,
@@ -291,49 +307,39 @@ pub(crate) fn compile_observed_with_cold(
         ports,
         starts,
     };
-    if previous
-        .and_then(|owner| owner.observed.as_ref())
-        .is_some_and(|old| !graph.strictly_grows(old))
-    {
-        return Ok(None);
-    }
-    // ports are independently decoded starts, not extra discovery blocks.
-    let blocks = partition_blocks(graph.nodes.clone(), &graph.starts);
-    if blocks.len() > options.blocks {
-        return Ok(None);
-    }
-    let native = collect_native(&blocks);
-    let score = TraceScore::emitted(&blocks, &graph.edges);
-    let identity = next_identity()?;
-    let observed_edges: Vec<_> = graph.edges.iter().copied().collect();
-    let wasm = super::super::emitter::emit_observed_family(
-        &blocks,
-        anchor,
-        identity,
-        &native,
-        &observed_edges,
-    );
-    if wasm.len() > options.wasm_bytes
-        || memory.code_source_version() != expected_source_version
-        || !sources.iter().all(|source| memory.is_code_current(source))
-        || owners.iter().any(|owner| !owner.is_current(memory))
-        || previous.is_some_and(|owner| !owner.is_current(memory))
-    {
-        return Ok(None);
-    }
-    let mut code = finish_code(
+    Ok(Some(CapturedGraph { graph, sources }))
+}
+
+struct CapturedGraph {
+    graph: ObservedGraph,
+    sources: Vec<CodeSnapshot>,
+}
+
+pub(crate) fn compile_observed_with_cold(
+    memory: &AddressSpace,
+    root: GuestAddress,
+    options: CompileOptions,
+    events: &[TraceEvent],
+    owners: &[&CompiledCode],
+    expected_source_version: u64,
+    cold: &[CompletedColdObservation],
+    previous: Option<&CompiledCode>,
+) -> Result<Option<CompiledCode>, CompileError> {
+    let parents: Vec<_> = previous.into_iter().collect();
+    let Some(plan) = prepare_observed_plan(
         memory,
-        blocks,
-        identity,
-        wasm,
-        native,
-        sources,
-        &[GuestAddress(anchor)],
-        Some((anchor, score)),
-    );
-    code.entries = graph.ports.iter().copied().map(GuestAddress).collect();
-    code.observed = Some(graph);
-    Ok(Some(code))
+        root,
+        options,
+        events,
+        owners,
+        expected_source_version,
+        cold,
+        &parents,
+    )?
+    else {
+        return Ok(None);
+    };
+    emit_observed_plan(memory, plan)
 }
 
 #[cfg(test)]

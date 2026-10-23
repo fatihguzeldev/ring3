@@ -20,5 +20,9 @@ pub use program::{
     compile_with_frontier_query, compile_with_gates,
 };
 pub(crate) use program::{
+    ObservedPlan, ObservedPlanFingerprint, emit_observed_plan, prepare_cold_prefix_plan,
+    prepare_observed_plan,
+};
+pub(crate) use program::{
     TraceScore, compile_observed, compile_observed_with_cold, compile_observed_with_growth,
 };

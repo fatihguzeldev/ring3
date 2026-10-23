@@ -4,7 +4,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 mod observed_cold;
 #[cfg(test)]
 mod reform;
-pub(crate) use observed_cold::compile_observed_with_cold;
+pub(crate) use observed_cold::{
+    ObservedPlan, ObservedPlanFingerprint, compile_observed_with_cold, emit_observed_plan,
+    prepare_cold_prefix_plan, prepare_observed_plan,
+};
 
 static NEXT_IDENTITY: AtomicU64 = AtomicU64::new(1);
 
@@ -16,7 +19,7 @@ use crate::{
     memory::{AddressSpace, CodeSnapshot, GuestAddress, MemoryError},
 };
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CompileOptions {
     pub instructions: usize,
     pub blocks: usize,
@@ -86,6 +89,7 @@ pub struct CompiledCode {
     trace_root: Option<u32>,
     trace_score: Option<TraceScore>,
     observed: Option<observed_cold::ObservedGraph>,
+    observed_fingerprint: Option<ObservedPlanFingerprint>,
     #[cfg(test)]
     roots: Box<[GuestAddress]>,
 }
@@ -137,6 +141,9 @@ impl CompiledCode {
     }
     pub(crate) fn is_observed_family(&self) -> bool {
         self.observed.is_some()
+    }
+    pub(crate) fn observed_fingerprint(&self) -> Option<&ObservedPlanFingerprint> {
+        self.observed_fingerprint.as_ref()
     }
     pub(crate) fn observed_grows(&self, previous: &Self) -> bool {
         self.memory_identity == previous.memory_identity
@@ -209,7 +216,7 @@ impl CompiledCode {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct Instruction {
     pub pc: u32,
     pub next: u32,
@@ -217,6 +224,7 @@ pub(super) struct Instruction {
     pub gate: Option<u32>,
 }
 
+#[derive(Clone, Debug)]
 pub(super) struct Block {
     pub entry: u32,
     pub instructions: Vec<Instruction>,
@@ -839,6 +847,7 @@ fn finish_code(
         trace_root: trace.map(|(root, _)| root),
         trace_score: trace.map(|(_, score)| score),
         observed: None,
+        observed_fingerprint: None,
         #[cfg(test)]
         roots: _roots.into(),
     }
