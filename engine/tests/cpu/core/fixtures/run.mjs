@@ -1,4 +1,4 @@
-import {instantiateCore,coreImports} from './link.mjs';
+import {instantiateCore,coreImports,coreSupportSource,instantiateSupport} from './link.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
@@ -116,12 +116,13 @@ for (const line of readFileSync(join(directory, 'programs.tsv'), 'utf8').trim().
     {module: 'ring3', name: 'read', kind: 'function'},
     {module: 'ring3', name: 'write', kind: 'function'},
   ], `${name}: declared imports only`);
-  const diagnostic=name==='rmw-repeat'?instrumentStateWitness(wasm):undefined;
-  const instance = instantiateCore(diagnostic?new WebAssembly.Module(diagnostic.bytes):module, {ring3: {memory, read, write, numeric}});
+  const diagnostic=name==='rmw-repeat'?instrumentStateWitness(wasm,coreSupportSource(memory)):undefined;
+  const support=diagnostic?instantiateSupport(memory,diagnostic.supportBytes):undefined;
+  const instance = instantiateCore(diagnostic?new WebAssembly.Module(diagnostic.bytes):module, {ring3: {...support,memory, read, write, numeric}});
   assert.equal(typeof instance.exports.run, 'function');
   assert.equal(instance.exports.run.length, 2);
   programs.set(name, {code: Buffer.from(hex, 'hex'), identity: BigInt(identity), wasmSha256: hash(wasm), run: instance.exports.run,
-    groupWitness:diagnostic?()=>diagnostic.read(instance):undefined});
+    groupWitness:diagnostic?()=>diagnostic.read(instance,support):undefined});
 }
 
 function seed(name, options = {}) {

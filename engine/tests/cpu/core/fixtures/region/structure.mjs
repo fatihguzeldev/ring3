@@ -84,8 +84,9 @@ function readModule(bytes) {
     else if(kind===2)section.vector(()=>{
       const module=section.text(),name=section.text(),type=section.byte();
       if(type===0)imports.push({module,name,type:section.unsigned()});
+      else if(type===1){section.byte();const flags=section.unsigned();section.unsigned();if(flags&1)section.unsigned();assert(flags<4);}
       else if(type===2){const flags=section.unsigned();section.unsigned();if(flags&1)section.unsigned();assert(flags<4);}
-      else if(type===3){assert(module==='ring3'&&name.startsWith('link.'));section.byte();assert.equal(section.byte(),1);}
+      else if(type===3){assert(module==='ring3'&&(name.startsWith('link.')||name==='support.abi'));section.byte();assert.equal(section.byte(),name==='support.abi'?0:1);}
       else assert.fail('only memory, function and typed-link imports in authored module');
     });
     else if(kind===3)functionTypes.push(...section.vector(()=>section.unsigned()));
@@ -94,6 +95,21 @@ function readModule(bytes) {
   }
   assert.equal(functionTypes.length,functions.length);
   return {names,imports,functions,types,functionTypes,exports};
+}
+
+export {readModule as readGeneratedModule};
+
+const named=(module,name)=>[...module.names].find(([,value])=>value===name)?.[0];
+const signature=(module,index)=>module.types[index<module.imports.length?module.imports[index].type:module.functionTypes[index-module.imports.length]];
+const defined=(module,index)=>module.functions[index-module.imports.length];
+function supportBinding(owner,support,name) {
+  const imported=owner.imports.findIndex(item=>item.module==='ring3'&&item.name===name);
+  const exported=support.exports.get(name);
+  assert(imported>=0,`owner imports actual ${name}`);
+  assert(Number.isInteger(exported)&&exported>=support.imports.length,`support defines actual ${name}`);
+  assert.equal(support.names.get(exported),name,'support export identifies the actual named function');
+  assert.deepEqual(signature(owner,imported),signature(support,exported),`${name}: actual import/export types match`);
+  return{imported,exported};
 }
 
 function components(edges,allowed) {
@@ -117,7 +133,7 @@ function components(edges,allowed) {
 
 function guardedNativeNormalizer(module,index) {
   const fn=module.functions[index-module.imports.length],type=module.types[module.functionTypes[index-module.imports.length]];
-  const wantedParameters=[...Array(8).fill(0x7c),...Array(8).fill(0x7e),...Array(15).fill(0x7f)];
+  const wantedParameters=[...Array(8).fill(0x7c),...Array(8).fill(0x7e),...Array(14).fill(0x7f),0x7e,0x7e];
   const wantedResults=[...Array(8).fill(0x7c),...Array(8).fill(0x7e),...Array(14).fill(0x7f)];
   const matches=(left,right)=>left?.length===right.length&&left.every((value,i)=>value===right[i]);
   if(!fn||!matches(type?.parameters,wantedParameters)||!matches(type?.results,wantedResults))return undefined;
@@ -134,13 +150,13 @@ function guardedNativeNormalizer(module,index) {
       const dynamic=fn.ops.slice(frame.open-6,frame.open);
       const written=store.frames.find(outer=>{
         const p=fn.ops.slice(outer.open-3,outer.open);
-        return outer.kind===4&&outer.otherwise===undefined&&p.length===3&&p[0].op===0x20&&p[0].local===42&&
+        return outer.kind===4&&outer.otherwise===undefined&&p.length===3&&p[0].op===0x20&&p[0].local===41&&
           p[1].op===0x41&&p[1].value===16&&p[2].op===0x71;
       });
       if(dynamic.length===6&&dynamic[0].op===0x20&&dynamic[0].local===24&&
-        dynamic[1].op===0x41&&dynamic[1].value===1&&dynamic[2].op===0x20&&dynamic[2].local===39&&
+        dynamic[1].op===0x41&&dynamic[1].value===1&&dynamic[2].op===0x20&&dynamic[2].local===38&&
         dynamic[3].op===0x74&&dynamic[4].op===0x71&&dynamic[5].op===0x45&&written)
-        return {guardOffset:fn.ops[frame.open].offset,nativeCellLocal:39,writtenGuardOffset:fn.ops[written.open].offset};
+        return {guardOffset:fn.ops[frame.open].offset,nativeCellLocal:38,writtenGuardOffset:fn.ops[written.open].offset};
       return undefined;
     };
     const guard=store.frames.map(guardProof).filter(Boolean).at(-1);
@@ -151,67 +167,83 @@ function guardedNativeNormalizer(module,index) {
     condition:'each raw80 store requires the corresponding incoming native-valid bit to be zero'};
 }
 
-export function instrumentStateWitness(source) {
-  const module=readModule(source),original=new WebAssembly.Module(source);
-  const globalBase=WebAssembly.Module.imports(original).filter(item=>item.kind==='global').length;
-  const normalizer=[...module.names].find(([,name])=>name==='guest.normalize_frame')?.[0];
-  const materializer=[...module.names].find(([,name])=>name==='guest.materialize_numeric')?.[0];
-  const acquire=[...module.names].find(([,name])=>name==='guest.acquire_group')?.[0];
-  const translate=[...module.names].find(([,name])=>name==='guest.translate_page')?.[0];
-  assert(Number.isInteger(materializer),'the raw80 materializer is a real defined function');
+export function instrumentStateWitness(source,supportBytes) {
+  assert(supportBytes,'the witness receives actual per-CPU production support bytes');
+  const owner=readModule(source),support=readModule(supportBytes);
+  for(const name of ['support.materialize_numeric','support.normalize_kernel','support.acquire_group','support.translate_page'])
+    supportBinding(owner,support,name);
   const u=value=>{const result=[];do{const byte=value&127;value>>>=7;result.push(byte|(value?128:0));}while(value);return Uint8Array.from(result);};
   const concat=chunks=>Uint8Array.from(Buffer.concat(chunks.map(value=>Buffer.from(value))));
   const section=(id,bytes)=>concat([Uint8Array.of(id),u(bytes.length),bytes]);
-  const increment=index=>concat([Uint8Array.of(0x23),u(globalBase+index),Uint8Array.of(0x41,1,0x6a,0x24),u(globalBase+index)]);
-  const exports=['test.normalizer_calls','test.materializer_calls','test.raw80_stores','test.fp_metadata_writes',
+  const counters=['test.normalizer_calls','test.materializer_calls','test.raw80_stores','test.fp_metadata_writes',
     'test.body_entries','test.control_admissions','test.group_acquisitions','test.page_translations'];
-  const input=new Reader(source);input.take(8);const output=[source.subarray(0,8)];let added=false;
-  while(input.at<source.length){
-    const id=input.byte(),bytes=input.take(input.unsigned());let rewritten=bytes;
-    assert.notEqual(id,6,'generated region has no preexisting defined globals');
-    if(id===7){
-      output.push(section(6,Uint8Array.of(exports.length,...Array(exports.length).fill([0x7f,1,0x41,0,0x0b]).flat())));
-      const r=new Reader(bytes),count=r.unsigned(),entries=exports.map((name,index)=>{
-        const encoded=new TextEncoder().encode(name);return concat([u(encoded.length),encoded,Uint8Array.of(3),u(globalBase+index)]);
-      });
-      rewritten=concat([u(count+entries.length),r.take(bytes.length-r.at),...entries]);added=true;
-    }else if(id===10){
-      const r=new Reader(bytes),count=r.unsigned(),bodies=[];
-      for(let defined=0;defined<count;defined++){
-        const raw=r.take(r.unsigned()),index=defined+module.imports.length,fn=module.functions[defined];let body=raw;
-        if(index===normalizer||index===materializer||index===acquire||index===translate||['guest.run','guest.precise'].includes(module.names.get(index))){
-          const insertions=new Map(),insert=(at,bytes)=>insertions.set(at,[...(insertions.get(at)??[]),bytes]);
-          if(index===acquire||index===translate){
-            insert(fn.localsEnd,increment(index===acquire?6:7));
-          }else if(index===normalizer||index===materializer){
-            insert(fn.localsEnd,increment(index===normalizer?0:1));
-            for(const node of fn.ops)if(node.op===0x37&&node.memoryOffset===0||node.op===0x3b&&node.memoryOffset===8)
-              insert(node.offset,increment(2));
-          }else{
-            insert(fn.localsEnd,increment(4));
-            for(const[index,node]of fn.ops.entries()){
-              if([0x21,0x22].includes(node.op)&&node.local===91)insert(node.offset,increment(3));
-              if(controlAdmission(fn.ops,index))insert(node.offset,increment(5));
+  const instrument=(source,module,isSupport)=>{
+    const original=new WebAssembly.Module(source),scan=new Reader(source);scan.take(8);let definedGlobals=0;
+    while(scan.at<source.length){const id=scan.byte(),bytes=scan.take(scan.unsigned());if(id===6)definedGlobals=new Reader(bytes).unsigned();}
+    const globalBase=WebAssembly.Module.imports(original).filter(item=>item.kind==='global').length+definedGlobals;
+    assert(!WebAssembly.Module.exports(original).some(item=>counters.includes(item.name)),'counter exports are fresh');
+    const increment=index=>concat([Uint8Array.of(0x23),u(globalBase+index),Uint8Array.of(0x41,1,0x6a,0x24),u(globalBase+index)]);
+    const globals=Uint8Array.from(Array(counters.length).fill([0x7f,1,0x41,0,0x0b]).flat());
+    const input=new Reader(source);input.take(8);const output=[source.subarray(0,8)];let added=false,globalSection=false;
+    while(input.at<source.length){
+      const id=input.byte(),bytes=input.take(input.unsigned());let rewritten=bytes;
+      if(id===6){
+        const r=new Reader(bytes),count=r.unsigned();
+        rewritten=concat([u(count+counters.length),r.take(bytes.length-r.at),globals]);globalSection=true;
+      }else if(id===7){
+        if(!globalSection)output.push(section(6,concat([u(counters.length),globals])));
+        const r=new Reader(bytes),count=r.unsigned(),entries=counters.map((name,index)=>{
+          const encoded=new TextEncoder().encode(name);return concat([u(encoded.length),encoded,Uint8Array.of(3),u(globalBase+index)]);
+        });
+        rewritten=concat([u(count+entries.length),r.take(bytes.length-r.at),...entries]);added=true;
+      }else if(id===10){
+        const r=new Reader(bytes),count=r.unsigned(),bodies=[];
+        for(let bodyIndex=0;bodyIndex<count;bodyIndex++){
+          const raw=r.take(r.unsigned()),index=bodyIndex+module.imports.length,fn=module.functions[bodyIndex],name=module.names.get(index);let body=raw;
+          const counter=isSupport?new Map([['support.normalize_kernel',0],['support.materialize_numeric',1],
+            ['support.acquire_group',6],['support.translate_page',7]]).get(name):
+            ['guest.run','guest.precise'].includes(name)?4:undefined;
+          if(counter!==undefined){
+            const insertions=new Map(),insert=(at,bytes)=>insertions.set(at,[...(insertions.get(at)??[]),bytes]);
+            insert(fn.localsEnd,increment(counter));
+            if(isSupport&&[0,1].includes(counter)){
+              for(const node of fn.ops)if(node.op===0x37&&node.memoryOffset===0||node.op===0x3b&&node.memoryOffset===8)
+                insert(node.offset,increment(2));
+            }else if(!isSupport){
+              for(const[index,node]of fn.ops.entries()){
+                if([0x21,0x22].includes(node.op)&&node.local===91)insert(node.offset,increment(3));
+                if(controlAdmission(fn.ops,index))insert(node.offset,increment(5));
+              }
             }
+            const chunks=[];let start=0;
+            for(const[at,values]of[...insertions].sort(([a],[b])=>a-b)){chunks.push(raw.subarray(start,at),...values);start=at;}
+            chunks.push(raw.subarray(start));body=concat(chunks);
           }
-          const chunks=[];let start=0;
-          for(const[at,values]of[...insertions].sort(([a],[b])=>a-b)){chunks.push(raw.subarray(start,at),...values);start=at;}
-          chunks.push(raw.subarray(start));body=concat(chunks);
+          bodies.push(u(body.length),body);
         }
-        bodies.push(u(body.length),body);
+        assert.equal(r.at,bytes.length);rewritten=concat([u(count),...bodies]);
       }
-      assert.equal(r.at,bytes.length);rewritten=concat([u(count),...bodies]);
+      output.push(section(id,rewritten));
     }
-    output.push(section(id,rewritten));
-  }
-  assert(added,'diagnostic globals are exported alongside actual generated entry points');
-  const fn=Number.isInteger(acquire)?module.functions[acquire-module.imports.length]:undefined;
-  const groupProof=fn?{index:acquire,...module.types[module.functionTypes[acquire-module.imports.length]],
+    assert(added,'diagnostic globals append alongside actual production exports');
+    return concat(output);
+  };
+  const acquire=support.exports.get('support.acquire_group'),fn=defined(support,acquire);
+  const groupProof=fn?{index:acquire,...signature(support,acquire),
     contextLoads:fn.ops.filter((node,index)=>node.op>=0x28&&node.op<=0x35&&fn.ops[index-1]?.op===0x20&&fn.ops[index-1]?.local===0)
       .map(node=>node.memoryOffset).sort((a,b)=>a-b),
     stores:fn.ops.filter(node=>node.op>=0x36&&node.op<=0x3e).length,
     calls:fn.ops.filter(node=>[16,17,18,19,20,21].includes(node.op)).length}:undefined;
-  return {bytes:concat(output),groupProof,read:instance=>Object.fromEntries(exports.map(name=>[name.slice(5),instance.exports[name].value]))};
+  return {bytes:instrument(source,owner,false),supportBytes:instrument(supportBytes,support,true),groupProof,
+    read:(instance,supportExports)=>{
+      const ownerExports=instance.exports??instance,shared=supportExports?.exports??supportExports;
+      assert(shared,'the witness observes the actual instrumented support instance');
+      return Object.fromEntries(counters.map(name=>{
+        assert(ownerExports[name] instanceof WebAssembly.Global&&shared[name] instanceof WebAssembly.Global,
+          'both actual Wasm modules export their appended counter globals');
+        return[name.slice(5),ownerExports[name].value+shared[name].value];
+      }));
+    }};
 }
 
 function controlAdmission(ops,index) {
@@ -219,18 +251,21 @@ function controlAdmission(ops,index) {
     ops[index+1]?.op===0x41&&ops[index+1].value===0xf3f&&ops[index+2]?.op===0x71;
 }
 
-function inspectNormalizerKernel(module) {
-  const index=[...module.names].find(([,name])=>name==='guest.normalize_frame')?.[0];
-  const fn=module.functions[index-module.imports.length];
-  if(!fn)return {index,errors:['missing actual normalizer body']};
+function inspectNormalizerKernel(module,support) {
+  const index=named(module,'guest.normalize_frame'),fn=defined(module,index);
+  const binding=supportBinding(module,support,'support.normalize_kernel'),kernel=defined(support,binding.exported);
+  if(!fn||!kernel)return {index,errors:['missing actual owner adapter or shared normalizer body']};
   const tables=fn.ops.flatMap((node,i)=>node.op===14?[{operator:i,offset:node.offset,targets:node.targets}]:[]);
   const perShapeStateArms=fn.ops.flatMap((node,i)=>node.op===4&&
     fn.ops[i-3]?.op===0x20&&fn.ops[i-3].local===30&&
     fn.ops[i-2]?.op===0x41&&fn.ops[i-1]?.op===0x46?[node.offset]:[]);
   const summary={index,bytes:fn.raw.length,operations:fn.ops.length,tables,perShapeStateArms,
-    kernelLoops:fn.ops.filter(node=>node.op===3).map(node=>node.offset),
-    opaqueLowStores:fn.ops.filter(node=>node.op===0x37&&node.memoryOffset===0).map(node=>node.offset),
-    opaqueHighStores:fn.ops.filter(node=>node.op===0x3b&&node.memoryOffset===8).map(node=>node.offset),
+    sharedIndex:binding.exported,sharedBytes:kernel.raw.length,
+    ownerLoops:fn.ops.filter(node=>node.op===3).map(node=>node.offset),
+    ownerStores:fn.ops.filter(node=>node.op>=0x36&&node.op<=0x3e).map(node=>node.offset),
+    kernelLoops:kernel.ops.filter(node=>node.op===3).map(node=>node.offset),
+    opaqueLowStores:kernel.ops.filter(node=>node.op===0x37&&node.memoryOffset===0).map(node=>node.offset),
+    opaqueHighStores:kernel.ops.filter(node=>node.op===0x3b&&node.memoryOffset===8).map(node=>node.offset),
     descriptors:[],errors:[]};
   if(tables.length!==1)return summary;
   const{ops,edges}=fn,table=tables[0],check=(condition,message)=>{if(!condition)summary.errors.push(message);};
@@ -243,8 +278,8 @@ function inspectNormalizerKernel(module) {
   for(const target of edges[table.operator].slice(0,-1)){
     const arm=ops.slice(target,target+5),low=arm[0]?.value,high=arm[2]?.value;
     const valid=arm.length===5&&arm[0].op===0x42&&typeof low==='bigint'&&
-      arm[1].op===0x21&&arm[1].local===37&&arm[2].op===0x42&&typeof high==='bigint'&&
-      arm[3].op===0x21&&arm[3].local===38&&arm[4].op===12;
+      arm[1].op===0x21&&arm[1].local===31&&arm[2].op===0x42&&typeof high==='bigint'&&
+      arm[3].op===0x21&&arm[3].local===32&&arm[4].op===12;
     check(valid,'each shape arm only assigns two I64 constants and branches to the shared kernel');
     if(!valid)continue;
     const lo=BigInt.asUintN(64,low),hi=BigInt.asUintN(64,high),cells=[],tags=[],effects=[];
@@ -263,22 +298,44 @@ function inspectNormalizerKernel(module) {
   check(resumes.length>0&&new Set(resumes).size===1,'all constant descriptor arms converge before the same kernel body');
   const fallback=edges[table.operator].at(-1);
   check(ops[fallback]?.op===0,'the selector default rejects an impossible private shape ID before normalization');
-  check(!ops.some(node=>[0x21,0x22].includes(node.op)&&node.local<24),
+  check(summary.ownerLoops.length===0&&summary.ownerStores.length===0,
+    'the owner adapter contains no generic state loop or raw-bank write');
+  check(ops.every(node=>[0,2,11,12,14,16,0x20,0x21,0x41,0x42,0x6b].includes(node.op))&&
+    ops.filter(node=>node.op===0x21).every(node=>[31,32].includes(node.local)),
+    'the owner contains only descriptor selection, unchanged argument forwarding and its shared call');
+  const calls=ops.flatMap((node,i)=>[16,17,18,19,20,21].includes(node.op)?[i]:[]),call=calls[0];
+  check(calls.length===1&&ops[call]?.op===16&&ops[call]?.call===binding.imported,
+    'the owner adapter calls only the actual imported shared normalizer');
+  const inputs=[...Array.from({length:30},(_,i)=>i),31,32],arguments_=ops.slice(call-inputs.length,call);
+  check(arguments_.length===inputs.length&&arguments_.every((node,i)=>node.op===0x20&&node.local===inputs[i]),
+    'the adapter forwards every immutable snapshot field followed by both selected descriptor constants');
+  check(resumes.every(resume=>resume===call-inputs.length),'every descriptor arm converges at the same shared call argument list');
+  check(ops[call+1]?.op===11&&ops[call+1].frame.kind===0xff,
+    'the owner returns the shared result tuple without substituting or rewriting any field');
+  const snapshot=[...Array(8).fill(0x7c),...Array(8).fill(0x7e),...Array(14).fill(0x7f)];
+  check(JSON.stringify(signature(module,index))===JSON.stringify({parameters:[...snapshot,0x7f],results:snapshot}),
+    'owner adapter retains the complete selected-shape31-input/30-output ABI');
+  check(JSON.stringify(signature(support,binding.exported))===JSON.stringify({parameters:[...snapshot,0x7e,0x7e],results:snapshot}),
+    'shared kernel takes the exact30-field snapshot and two explicit I64 descriptors');
+  const kernelOps=kernel.ops;
+  check(!kernelOps.some(node=>node.op===14),'the shared kernel contains no owner shape dispatch');
+  check(!kernelOps.some(node=>[0x21,0x22].includes(node.op)&&node.local<24),
     'all eight native/low/high input cells stay immutable while masks, tags and aliases are reconstructed');
-  check(!ops.some(node=>[16,17,18,19,20,21].includes(node.op)),'the single kernel has no delegated or indirect per-shape body');
-  const loop=ops.find(node=>node.op===3)?.frame;
+  check(!kernelOps.some(node=>[0x21,0x22].includes(node.op)&&[30,31].includes(node.local)),
+    'both explicit descriptor parameters stay immutable throughout shared normalization');
+  check(!kernelOps.some(node=>[16,17,18,19,20,21].includes(node.op)),'the shared kernel has no delegated or indirect per-shape body');
+  const loop=kernelOps.find(node=>node.op===3)?.frame;
   if(loop){
-    const before=ops.slice(loop.open-2,loop.open),tail=ops.slice(loop.end-7,loop.end);
-    check(before.length===2&&before[0].op===0x41&&before[0].value===0&&before[1].op===0x21&&before[1].local===40,
+    const before=kernelOps.slice(loop.open-2,loop.open),tail=kernelOps.slice(loop.end-7,loop.end);
+    check(before.length===2&&before[0].op===0x41&&before[0].value===0&&before[1].op===0x21&&before[1].local===39,
       'the shared slot loop starts at logical slot0');
-    check(tail.length===7&&tail[0].op===0x20&&tail[0].local===40&&tail[1].op===0x41&&tail[1].value===1&&
-      tail[2].op===0x6a&&tail[3].op===0x22&&tail[3].local===40&&tail[4].op===0x41&&tail[4].value===8&&
+    check(tail.length===7&&tail[0].op===0x20&&tail[0].local===39&&tail[1].op===0x41&&tail[1].value===1&&
+      tail[2].op===0x6a&&tail[3].op===0x22&&tail[3].local===39&&tail[4].op===0x41&&tail[4].value===8&&
       tail[5].op===0x47&&tail[6].op===13&&tail[6].frames.at(-1-tail[6].targets[0])===loop,
       'the single loop advances once through exactly eight logical slots');
-    check(ops.filter(node=>node.op>=0x36&&node.op<=0x3e).every(node=>node.frames.includes(loop)),
+    check(kernelOps.filter(node=>node.op>=0x36&&node.op<=0x3e).every(node=>node.frames.includes(loop)),
       'all raw-bank writes belong to the shared eight-slot loop');
-    check(resumes.every(resume=>resume<loop.open),'every descriptor arm converges before loop initialization');
-  }else check(false,'the constant arms feed an actual shared slot loop');
+  }else check(false,'the constant arms feed an actual per-CPU shared slot loop');
   return summary;
 }
 
@@ -373,19 +430,22 @@ function inspectExitEpilogue(module,name) {
   return summary;
 }
 
-export function inspectRegion(bytes) {
-  const module=readModule(bytes),runIndex=[...module.names].find(([,name])=>name==='guest.run')?.[0]??module.exports.get('run');
+export function inspectRegion(bytes,supportBytes) {
+  assert(supportBytes,'the structural proof receives actual per-CPU production support bytes');
+  const module=readModule(bytes),support=readModule(supportBytes),runIndex=[...module.names].find(([,name])=>name==='guest.run')?.[0]??module.exports.get('run');
   assert(Number.isInteger(runIndex)&&runIndex>=module.imports.length,'defined guest run');
   const run=module.functions[runIndex-module.imports.length];
-  const conditionalNative=new Map(module.functions.flatMap((_,defined)=>{
-    const index=defined+module.imports.length,proof=guardedNativeNormalizer(module,index);return proof?[[index,proof]]:[];
-  }));
-  const materializers=new Set(module.imports.flatMap((item,index)=>item.name==='numeric'?[index]:[]));
+  const binding=supportBinding(module,support,'support.normalize_kernel');
+  const kernelProof=guardedNativeNormalizer(support,binding.exported);
+  const adapter=named(module,'guest.normalize_frame');
+  const conditionalNative=new Map(kernelProof?[[adapter,{...kernelProof,adapterIndex:adapter,scope:'per-CPU support'}]]:[]);
+  const materializers=new Set(module.imports.flatMap((item,index)=>
+    ['numeric','support.materialize_numeric'].includes(item.name)?[index]:[]));
   const rawStore=node=>node.op===0x37&&node.memoryOffset===0||node.op===0x3b&&node.memoryOffset===8;
   module.functions.forEach((fn,index)=>{
     const id=index+module.imports.length;
-    if(module.names.get(id)==='guest.materialize_numeric'||!conditionalNative.has(id)&&
-      fn.ops.some(node=>node.op===0x37&&node.memoryOffset===0)&&fn.ops.some(node=>node.op===0x3b&&node.memoryOffset===8))materializers.add(id);
+    if(!conditionalNative.has(id)&&fn.ops.some(node=>node.op===0x37&&node.memoryOffset===0)&&
+      fn.ops.some(node=>node.op===0x3b&&node.memoryOffset===8))materializers.add(id);
   });
   let changed;
   do{changed=false;module.functions.forEach((fn,index)=>{
@@ -427,14 +487,17 @@ export function inspectRegion(bytes) {
     controlAdmissionSites:[...admissions].map(node=>node.offset),
     withoutCanonicalizationDispatchOrControlAdmission:cycles(node=>canonical(node)||dispatch(node)||rotations.has(node)||admissions.has(node)),
     conditionalNativeCanonicalizers:[...conditionalNative.values()],
-    normalizerKernel:inspectNormalizerKernel(module),
+    normalizerKernel:inspectNormalizerKernel(module,support),
     materializers:[...materializers].map(index=>({index,name:module.names.get(index)??module.imports[index]?.name})),
-    materializerSignature:[...module.names].filter(([,name])=>name==='guest.materialize_numeric')
-      .map(([index,name])=>({index,name,...module.types[module.functionTypes[index-module.imports.length]]})),
-    statusResolverSignature:[...module.names].filter(([,name])=>name==='guest.resolve_status')
-      .map(([index,name])=>({index,name,...module.types[module.functionTypes[index-module.imports.length]]})),
-    pageTranslatorSignature:[...module.names].filter(([,name])=>name==='guest.translate_page')
-      .map(([index,name])=>({index,name,...module.types[module.functionTypes[index-module.imports.length]]})),
+    materializerSignature:['support.materialize_numeric'].map(name=>{
+      const{imported,exported}=supportBinding(module,support,name);return{index:exported,ownerImport:imported,name,...signature(support,exported)};
+    }),
+    statusResolverSignature:['support.resolve_status'].map(name=>{
+      const{imported,exported}=supportBinding(module,support,name);return{index:exported,ownerImport:imported,name,...signature(support,exported)};
+    }),
+    pageTranslatorSignature:['support.translate_page'].map(name=>{
+      const{imported,exported}=supportBinding(module,support,name);return{index:exported,ownerImport:imported,name,...signature(support,exported)};
+    }),
     exitEpilogues:['guest.run','guest.precise'].map(name=>inspectExitEpilogue(module,name)),
     limits:['narrow decoder for generated authored modules; scalar f64 arithmetic cycles only',
       'a retained cycle proves a canonicalization-free emitted path, not its runtime frequency or speed']};
@@ -460,6 +523,8 @@ export function assertAnalyzedStateStructure(proof) {
   assert.deepEqual(proof.normalizerKernel.perShapeStateArms,[],
     'the normalizer has no per-shape selected-ID if arms around repeated state work');
   assert.equal(proof.normalizerKernel.kernelLoops.length,1,'all shape descriptors share one eight-slot normalization loop');
+  assert.deepEqual(proof.normalizerKernel.ownerLoops,[],'owner adapters contain no copy of the shared normalization loop');
+  assert.deepEqual(proof.normalizerKernel.ownerStores,[],'owner adapters contain no copy of raw80 publication');
   assert.equal(proof.normalizerKernel.opaqueLowStores.length,1,'the shared kernel has one dynamic raw80 low-word store site');
   assert.equal(proof.normalizerKernel.opaqueHighStores.length,1,'the shared kernel has one dynamic raw80 high-word store site');
   assert.deepEqual(proof.normalizerKernel.errors,[],'packed descriptors feed one bounded immutable-input normalization kernel');
@@ -484,15 +549,15 @@ export function assertRegionStructure(proof) {
   assert(proof.arithmeticCycles.length>0,'the actual run contains a cyclic f64 arithmetic path');
   assert(proof.withoutCanonicalization.length>0,'an arithmetic loop can repeat without raw80 stores or materializing helpers');
   assert(proof.withoutCanonicalizationOrDispatch.length>0,'the reducible arithmetic loop also bypasses the general block dispatcher');
-  assert.equal(proof.materializerSignature.length,1,'one private numerical materializer');
+  assert.equal(proof.materializerSignature.length,1,'one actual per-CPU numerical materializer');
   assert.deepEqual(proof.materializerSignature[0].parameters,[...Array(8).fill(0x7c),...Array(10).fill(0x7f)],
     'materializer receives eight f64 values and complete integer metadata');
   assert.deepEqual(proof.materializerSignature[0].results,[],'materialization has no result');
-  assert.equal(proof.statusResolverSignature.length,1,'one private exact status resolver');
+  assert.equal(proof.statusResolverSignature.length,1,'one actual per-CPU exact status resolver');
   assert.deepEqual(proof.statusResolverSignature[0].parameters,[0x7f,0x7f,0x7c,0x7c,0x7c],
     'status resolution receives the recipe, prior status, both exact operands and rounded result');
   assert.deepEqual(proof.statusResolverSignature[0].results,[0x7f],'status resolution returns the exact architectural status');
-  assert.equal(proof.pageTranslatorSignature.length,1,'one private page translation helper');
+  assert.equal(proof.pageTranslatorSignature.length,1,'one actual per-CPU page translation helper');
   assert.deepEqual(proof.pageTranslatorSignature[0].parameters,[0x7f,0x7f,0x7f],
     'translation receives context, guest linear address and requested permissions');
   assert.deepEqual(proof.pageTranslatorSignature[0].results,[0x7f,0x7f,0x7f],

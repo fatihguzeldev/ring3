@@ -3,60 +3,15 @@ import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync,writeFileSync} from 'node:fs';
 import {join} from 'node:path';
-import {assertCoreNames,coreFunctionNames} from './names.mjs';
+import {assertCoreNames} from './names.mjs';
+import {instrumentCallCounter} from './calls.mjs';
 
 const directory=process.argv[2],CTX=256,PAGE=4096,MAP=0x10000,PERM=0x410000;
 const EXEC=0x510000,VERSION=0x510100,PAGE_VERSION=0x510200,BACKING=0x520000,GENERATION=0x530000;
 const memory=new WebAssembly.Memory({initial:96}),bytes=new Uint8Array(memory.buffer),view=new DataView(memory.buffer);
 const put=(at,value)=>view.setUint32(at,value>>>0,true),hash=value=>createHash('sha256').update(value).digest('hex');
 const programs=new Map(),records=[],report=join(directory,'conditions-result.json');
-const u=value=>{const result=[];do{const byte=value&127;value>>>=7;result.push(byte|(value?128:0));}while(value);return result;};
-function unsigned(source,at) {
-  let value=0;
-  for(let shift=0;shift<35;shift+=7) {
-    assert(at.value<source.length,'complete unsigned integer');const byte=source[at.value++];
-    assert(shift<28||(byte&0xf0)===0,'u32 integer');value+=(byte&127)*2**shift;
-    if(byte<128)return value;
-  }
-  assert.fail('unterminated unsigned integer');
-}
-const section=(id,data)=>[id,...u(data.length),...data];
-
-function countFlagCalls(source) {
-  const module=new WebAssembly.Module(source),names=coreFunctionNames(module),imports=WebAssembly.Module.imports(module);
-  const importedFunctions=imports.filter(item=>item.kind==='function').length;
-  const globalBase=imports.filter(item=>item.kind==='global').length;
-  const flagsIndex=names.find(([,name])=>name==='guest.flags')[0]-importedFunctions;
-  const output=[...source.subarray(0,8)],at={value:8};let instrumented=false,globalAdded=false,exported=false;
-  while(at.value<source.length) {
-    const id=source[at.value++],length=unsigned(source,at),end=at.value+length;
-    assert(end<=source.length,'complete section');let data=source.subarray(at.value,end);at.value=end;
-    assert.notEqual(id,6,'scalar generated module has no existing globals');
-    if(id===7) {
-      output.push(...section(6,[1,0x7f,1,0x41,0,0x0b]));globalAdded=true;
-      const cursor={value:0},count=unsigned(data,cursor),name=new TextEncoder().encode('test.flag_calls');
-      data=Uint8Array.from([...u(count+1),...data.subarray(cursor.value),...u(name.length),...name,3,...u(globalBase)]);exported=true;
-    } else if(id===10) {
-      const cursor={value:0},count=unsigned(data,cursor),bodies=[];
-      assert.equal(count,names.length-importedFunctions,'every named helper and wrapper has exactly one body');
-      for(let index=0;index<count;index++) {
-        const size=unsigned(data,cursor),bodyEnd=cursor.value+size;
-        assert(bodyEnd<=data.length,'complete function body');let body=data.subarray(cursor.value,bodyEnd);cursor.value=bodyEnd;
-        if(index===flagsIndex) {
-          const locals={value:0},groups=unsigned(body,locals);
-          for(let group=0;group<groups;group++){unsigned(body,locals);assert.equal(body[locals.value++],0x7f);}
-          body=Uint8Array.from([...body.subarray(0,locals.value),0x23,...u(globalBase),0x41,1,0x6a,0x24,...u(globalBase),...body.subarray(locals.value)]);
-          instrumented=true;
-        }
-        bodies.push(...u(body.length),...body);
-      }
-      assert.equal(cursor.value,data.length);data=Uint8Array.from([...u(count),...bodies]);
-    }
-    output.push(...section(id,data));
-  }
-  assert(instrumented&&globalAdded&&exported,'counter only augments the existing flags function');
-  return Uint8Array.from(output);
-}
+const countFlagCalls=source=>instrumentCallCounter(source,'support.flags','test.flag_calls');
 
 function physical(address){const slot=view.getUint32(MAP+(address>>>12)*4,true);return slot?BACKING+(slot-1)*PAGE+(address&4095):null;}
 let reads=0,writes=0;

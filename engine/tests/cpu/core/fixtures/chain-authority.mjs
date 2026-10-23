@@ -32,7 +32,7 @@ function fp(initial,{status=0,tag=0xffff,opcode=0,fip=0,fdp=0,registers={}}={}) 
   return result;
 }
 
-function fixture(name,{entry=0x1000,target=0x1040,registers=[0,0,0x1080,0x3000,0x4800,0,0x1040,0],stack=true,data=()=>{},codePage=code,extraCodePages=[],firstInstructions=64,traceSelection=false}={},body) {
+function fixture(name,{entry=0x1000,target=0x1040,registers=[0,0,0x1080,0x3000,0x4800,0,0x1040,0],stack=true,data=()=>{},codePage=code,extraCodePages=[],firstInstructions=64,traceSelection=false,calleeFirst=false}={},body) {
   stage = name;
   const result = {name,modules:[],controls:[],runs:[]}; report.cases.push(result); checkpoint();
   const instance = new WebAssembly.Instance(artifact.module,{ring3_observability:{now_ns:()=>0n}});
@@ -74,8 +74,15 @@ function fixture(name,{entry=0x1000,target=0x1040,registers=[0,0,0x1080,0x3000,0
       }
       return unit;
     }
+    let next;
+    if(calleeFirst) {
+      // A retained callee is an explicit discovery frontier for the independently
+      // owned graph; default discovery now correctly follows a fresh direct CALL.
+      cache.instructions=64;next=select(target);cache.instructions=firstInstructions;
+    }
     const first = select(entry);cache.instructions=64;
-    const next = select(target); select(entry);
+    next??=select(target);select(entry);
+    if(calleeFirst)status('core_import',0);
     status('core_begin',0); active = true; status('core_end',0); active = false;
     const initialContext = bytes(cache.context,128), backing = word(cache.context,64), residentPages = word(cache.context,68);
     assert.equal(residentPages,16);
@@ -211,7 +218,7 @@ try {
       : 'numerical-ordinals-survive-warmed-graph',{
     entry:0x1300,target:crossPage?0x5340:0x1340,registers:[0,iterations,0,0x3000,0x4800,0,0,0],data:values,
     // Keep caller and callee as independent owners beyond the former heat threshold.
-    firstInstructions:5,traceSelection:true,
+    firstInstructions:5,traceSelection:true,calleeFirst:true,
     ...(crossPage?{codePage:crossPageCode,extraCodePages:[[0x5000,crossPageCallee]]}:{}),
   },t => {
     const admissionsBefore=t.cache.stats().admissions;
@@ -273,7 +280,8 @@ try {
       assert(!t.cache.units.has(t.next.id),'the stale callee SDK instance is removed');
       assert.deepEqual([t.cache.stats().admissions,t.cache.units.size],[3,2]);
       t.status('core_lookup',0,0x1300);
-      assert.equal(hash(t.bytes(t.api.core_code_ptr()>>>0,t.api.core_code_len()>>>0)),originalModules[0].sha256);
+      assert.equal(hash(t.bytes(t.api.core_code_ptr()>>>0,t.api.core_code_len()>>>0)),
+        originalModules.find(module=>module.id===String(t.first.id)).sha256);
       t.expect({...wanted,sourceVersion:currentSourceVersion});
       assert.equal(version(),beforeVersion+2n*BigInt(iterations)+1n,'source mutation is the only additional committed write');
     }

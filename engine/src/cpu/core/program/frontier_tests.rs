@@ -154,6 +154,11 @@ fn generated_frontier_modules_preserve_exact_prefixes_and_faults() {
             .as_nanos()
     ));
     fs::create_dir(&directory).unwrap();
+    fs::write(
+        directory.join("support.wasm"),
+        crate::cpu::core::emit_dispatch(),
+    )
+    .unwrap();
     let mut memory = memory();
     let mut image = [0; 4096];
     image[..6].copy_from_slice(&[0x40, 0x83, 0x03, 2, 0x0f, 0x0b]);

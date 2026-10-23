@@ -1,4 +1,4 @@
-import {instantiateCore,coreImports} from './link.mjs';
+import {instantiateCore,coreImports,coreSupportSource,instantiateSupport} from './link.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync,writeFileSync,openSync,closeSync} from 'node:fs';
@@ -65,17 +65,18 @@ function fixture(name,{segments,entry=0x1000,registers=[0,2,0,0x3000,0x4800,0,0,
     encodedModule=encoded;
     const imports=coreImports(module);
     const moduleRecord={pc,sha256:hash(encoded),bytes:encoded.length,imports};result.modules.push(moduleRecord);
-    const diagnostic=stateWitness?instrumentStateWitness(encoded):undefined;
+    const diagnostic=stateWitness?instrumentStateWitness(encoded,coreSupportSource(memory)):undefined;
+    const support=diagnostic?instantiateSupport(memory,diagnostic.supportBytes):undefined;
     groupWitnessProof=diagnostic?.groupProof;
     if(diagnostic)moduleRecord.instrumentedSha256=hash(diagnostic.bytes);
-    const generated=instantiateCore(diagnostic?new WebAssembly.Module(diagnostic.bytes):module,{ring3:{memory,read:api.core_read,write:api.core_write,
+    const generated=instantiateCore(diagnostic?new WebAssembly.Module(diagnostic.bytes):module,{ring3:{...support,memory,read:api.core_read,write:api.core_write,
       numeric:(...args)=>{
         helpers++;const before=version(),returned=api.core_numeric(...args);
         result.numericCalls.push({before:String(before),after:String(version()),returned});return returned;
       }}});
     run=stateWitness?generated.exports.link:generated.exports.run;
     publish=stateWitness?generated.exports.publish:undefined;
-    witnessReader=diagnostic?()=>diagnostic.read(generated):undefined;
+    witnessReader=diagnostic?()=>diagnostic.read(generated,support):undefined;
     assert.equal(typeof run,'function','the selected generated entry is an actual Wasm function');
     if(stateWitness)assert.equal(typeof publish,'function','linked state has an explicit canonical publisher');
   };
@@ -158,7 +159,7 @@ function fixture(name,{segments,entry=0x1000,registers=[0,2,0,0x3000,0x4800,0,0,
     };
     body({api,engine,bytes,word,result,prepare,check,writeExpected,registers,startingFp,startingSimd,
       fp:value=>fp(startingFp,value),status,context:()=>context,version,
-      inspect:()=>{result.structure=inspectRegion(primaryEncoded);checkpoint();return result.structure;},
+      inspect:()=>{result.structure=inspectRegion(primaryEncoded,coreSupportSource(memory));checkpoint();return result.structure;},
       portDepth:()=>{result.portDepth=inspectPortDepth(primaryEncoded);checkpoint();return result.portDepth;},
       groupProof:()=>groupWitnessProof,
       stateWitness:()=>{assert.equal(result.stateWitnesses?.length,1,'one observed linked activation');return result.stateWitnesses[0];}});

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {supportNames} from './link.mjs';
 
 function readNames(module) {
   const sections = WebAssembly.Module.customSections(module, 'name');
@@ -46,21 +47,15 @@ export function assertCoreNames(module, ownerEntry, identity) {
   if (identity !== undefined) assert.equal(moduleName, prefix + identity);
   const numeric = WebAssembly.Module.imports(module).some(item => item.name === 'numeric');
   const names = ['guest.read_slow', 'guest.write_slow', ...(numeric ? ['guest.numeric'] : []),
-    'guest.flags', 'guest.run', 'guest.lookup', 'guest.publish', 'guest.precise', 'guest.materialize_numeric', 'guest.resolve_status',
-    'guest.translate_page', 'guest.normalize_frame'];
-  if(functions[names.length]?.[1]==='guest.acquire_group')names.push('guest.acquire_group');
+    ...supportNames,'guest.run', 'guest.lookup', 'guest.publish', 'guest.precise', 'guest.normalize_frame'];
   const wrappers = ['guest.entry', 'guest.link', 'guest.publish_link'];
-  const stores = functions.slice(names.length,-wrappers.length).map(([, name]) => name);
-  assert(stores.length <= 3 && stores.every(name => ['guest.store8', 'guest.store16', 'guest.store32'].includes(name)),
-    'only supported fixed-width store helpers follow the numerical materializer');
-  assert.equal(new Set(stores).size, stores.length, 'store helper widths are unique');
-  names.push(...stores,...wrappers);
+  names.push(...wrappers);
   assert.deepEqual(functions, names.map((name, index) => [index, name]), 'names use actual function indices');
 }
 
 export function assertDispatchNames(module) {
   assert.deepEqual(readNames(module), {moduleName: 'ring3.dispatch',
-    functions: [[0, 'guest.probe'], [1, 'guest.cold'], [2, 'guest.chain']]});
+    functions: ['guest.probe','guest.cold','guest.chain',...supportNames].map((name,index)=>[index,name])});
 }
 
 export function coreFunctionNames(module) {
