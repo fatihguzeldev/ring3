@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {instrumentWitnessModule,readWitness,setWitnessBank,witnessCounters} from './witness.mjs';
+import {instrumentWitnessModule,readWitness,setWitnessBank,setWitnessData,witnessCounters} from './witness.mjs';
 
 class Reader {
   constructor(bytes){this.bytes=bytes;this.at=0;}
@@ -44,7 +44,7 @@ function operators(bytes) {
       else assert(node.ext<=7,'supported authored bulk operation');
     }else if(op===0xfd){
       node.ext=r.unsigned();
-      if(node.ext<=11||node.ext===92||node.ext===93){r.unsigned();r.unsigned();}
+      if(node.ext<=11||node.ext===92||node.ext===93){node.align=r.unsigned();node.memoryOffset=r.unsigned();}
       else if(node.ext===12||node.ext===13)r.take(16);
       else if(node.ext>=21&&node.ext<=34)r.byte();
       else if(node.ext>=84&&node.ext<=91){r.unsigned();r.unsigned();r.byte();}
@@ -184,9 +184,10 @@ export function instrumentStateWitness(source,supportBytes) {
     calls:fn.ops.filter(node=>[16,17,18,19,20,21].includes(node.op)).length}:undefined;
   return {bytes:instrumented.bytes,supportBytes:shared.bytes,groupProof,
     poolProof:{owner:instrumented.proof,support:shared.proof},
-    read:(instance,supportExports,bankPointer)=>{
+    read:(instance,supportExports,bankPointer,physicalRange)=>{
       assert(supportExports,'the witness observes the actual instrumented support instance');
       setWitnessBank(instance,bankPointer);setWitnessBank(supportExports,bankPointer);
+      setWitnessData(instance,physicalRange);setWitnessData(supportExports,physicalRange);
       const own=readWitness(instance),other=readWitness(supportExports);
       return Object.fromEntries(witnessCounters.map(name=>[name,name.endsWith('_mask')?own[name]|other[name]:own[name]+other[name]]));
     }};
