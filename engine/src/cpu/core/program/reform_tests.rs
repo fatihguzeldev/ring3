@@ -23,6 +23,30 @@ fn options() -> CompileOptions {
 }
 
 #[test]
+fn every_retained_instruction_start_has_an_immutable_port() {
+    let mut memory = memory();
+    memory
+        .write(
+            GuestAddress(0x1000),
+            &[0xb8, 1, 0, 0, 0, 0x40, 0x41, 0x0f, 0x0b],
+        )
+        .unwrap();
+    let code = compile(&memory, GuestAddress(0x1000), options()).unwrap();
+    let identity = code.identity();
+    let bytes = code.wasm().to_vec();
+    for pc in [0x1000, 0x1005, 0x1006, 0x1007] {
+        assert!(code.supports_entry(pc));
+    }
+    for pc in [0x0fff, 0x1001, 0x1008, 0x1009] {
+        assert!(!code.supports_entry(pc));
+    }
+    assert_eq!(code.entrypoints(), &[GuestAddress(0x1000)]);
+    assert_eq!(code.formation_roots(), code.entrypoints());
+    assert_eq!(code.identity(), identity);
+    assert_eq!(code.wasm(), bytes);
+}
+
+#[test]
 fn a_new_interior_entry_keeps_exact_coverage_and_all_prior_entries_and_roots() {
     let mut memory = memory();
     memory

@@ -71,6 +71,9 @@ impl CompiledCode {
     pub fn instruction_count(&self) -> usize {
         self.instruction_pcs.len()
     }
+    pub(crate) fn supports_entry(&self, pc: u32) -> bool {
+        self.instruction_pcs.binary_search(&pc).is_ok()
+    }
     pub(crate) fn instruction_pcs(&self) -> impl Iterator<Item = u32> + '_ {
         self.instruction_pcs.iter().copied()
     }

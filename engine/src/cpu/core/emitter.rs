@@ -43,6 +43,10 @@ pub(super) const INDEX: u32 = 26;
 pub(super) const WIDE: u32 = 27;
 pub(super) const LOGICAL_ADDRESS: u32 = 28;
 pub(super) const GP_FACTS_VALID: u32 = 129;
+pub(super) const ENTRY_OFFSET: u32 = 130;
+pub(super) const PREFIX_BASE: u32 = 131;
+
+const BLOCK_BITS: u32 = 10;
 
 pub(super) fn mem(offset: u64, align: u32) -> MemArg {
     MemArg {
@@ -249,30 +253,45 @@ pub(super) fn emit(
 }
 
 fn lookup(blocks: &[Block]) -> Function {
-    fn tree(code: &mut wasm_encoder::InstructionSink<'_>, blocks: &[Block], offset: usize) {
-        if blocks.is_empty() {
+    fn tree(code: &mut wasm_encoder::InstructionSink<'_>, ports: &[(u32, u32)]) {
+        if ports.is_empty() {
             code.i32_const(-1);
             return;
         }
-        let middle = blocks.len() / 2;
-        let pc = blocks[middle].entry;
+        let middle = ports.len() / 2;
+        let (pc, port) = ports[middle];
         code.local_get(0)
             .i32_const(pc as i32)
             .i32_eq()
             .if_(BlockType::Result(ValType::I32));
-        code.i32_const((offset + middle) as i32);
+        code.i32_const(port as i32);
         code.else_()
             .local_get(0)
             .i32_const(pc as i32)
             .i32_lt_u()
             .if_(BlockType::Result(ValType::I32));
-        tree(code, &blocks[..middle], offset);
+        tree(code, &ports[..middle]);
         code.else_();
-        tree(code, &blocks[middle + 1..], offset + middle + 1);
+        tree(code, &ports[middle + 1..]);
         code.end().end();
     }
+    let mut ports: Vec<_> = blocks
+        .iter()
+        .enumerate()
+        .flat_map(|(block, body)| {
+            body.instructions
+                .iter()
+                .enumerate()
+                .map(move |(prefix, instruction)| {
+                    (instruction.pc, (prefix as u32) << BLOCK_BITS | block as u32)
+                })
+        })
+        .collect();
+    // Separate decode paths may interleave their instruction starts even though
+    // both the blocks and each individual block are ordered.
+    ports.sort_unstable_by_key(|&(pc, _)| pc);
     let mut function = Function::new([]);
-    tree(&mut function.instructions(), blocks, 0);
+    tree(&mut function.instructions(), &ports);
     function.instructions().end();
     function
 }
@@ -308,6 +327,7 @@ fn run(
         (8, ValType::I32),
         (1, ValType::I32),
         (3, ValType::I32),
+        (2, ValType::I32),
     ]);
     let mut out = Output {
         function: &mut function,
@@ -385,8 +405,7 @@ fn run(
     out.exit(StopReason::CodeInvalidated, None, 0);
     out.c().end().end();
     super::memory::load_view(out.c().raw());
-    let lookup = out.internal(4);
-    out.c().local_get(EIP).call(lookup).local_set(INDEX);
+    out.lookup_port(EIP);
     region::emit(&mut out, graph, precise);
     out.c().end();
     assert_eq!(out.depth, 0, "the region exit wrapper is closed");
@@ -433,94 +452,161 @@ impl Output<'_> {
         block: &super::region::RegionBlock,
         precise: bool,
     ) {
-        let demands = &block.flags.after;
-        for instruction in &block.instructions {
-            let analyzed = self.plan.instruction(id, instruction.prefix);
-            let before_id = analyzed.before;
-            let after_id = analyzed.after;
-            self.before_frame = Some(before_id);
-            self.after_frame = Some(after_id);
-            self.frame = self.before_frame;
-            let before = self.plan.frame(before_id);
-            let prefix = before.retired;
-            self.pc = match before.pc {
-                super::region::ResumePc::Exact(pc) => pc,
-                super::region::ResumePc::Computed => unreachable!("instruction entry is exact"),
-            };
-            self.prefix = prefix;
-            if precise {
-                self.c()
-                    .local_get(REMAIN)
-                    .i32_const(prefix as i32)
-                    .i32_le_u()
-                    .if_(BlockType::Empty);
-                self.exit(StopReason::Budget, Some(self.pc), prefix);
+        let mut counted = false;
+        if precise {
+            // Chunking bounds simultaneous instruction labels independently of
+            // the configured instruction count. Every instruction is emitted once.
+            const CHUNK_BITS: u32 = 6;
+            const CHUNK: usize = 1 << CHUNK_BITS;
+            let chunks = block.instructions.len().div_ceil(CHUNK) as u32;
+            self.begin_port_selector(chunks);
+            self.c()
+                .local_get(PREFIX_BASE)
+                .i32_const(CHUNK_BITS as i32)
+                .i32_shr_u()
+                .br_table(0..chunks, chunks);
+            for (chunk_index, instructions) in block.instructions.chunks(CHUNK).enumerate() {
                 self.c().end();
-            }
-            self.record_flags = precise
-                || instruction
-                    .operation
-                    .and_then(super::effects::analyze)
-                    .is_none_or(|effect| effect.write & demands[instruction.prefix as usize] != 0);
-            // Direct region control is lowered from its typed terminator. Its flags
-            // and counter effects are emitted once where the Wasm edge is selected.
-            if instruction.prefix as usize + 1 == block.instructions.len()
-                && matches!(
-                    block.terminator,
-                    super::region::Terminator::Branch { .. }
-                        | super::region::Terminator::CountBranch { .. }
-                )
-            {
-                self.frame = self.after_frame;
-                continue;
-            }
-            if let Some(operation) = instruction.operation.filter(strings::supports) {
-                self.address_fact = None;
-                // Runtime string iterations advance their address registers inside
-                // one guest instruction; entry constants are not loop invariants.
-                let before = self.before_frame.take();
-                strings::emit(self, operation, instruction.next);
-                self.before_frame = before;
-                self.frame = self.after_frame;
-                return;
-            }
-            let writes_memory = instruction
-                .operation
-                .is_some_and(|operation| super::effects::memory_barrier(operation).1);
-            if writes_memory {
-                self.c().i32_const(0).local_set(WRITE_STATUS);
-            }
-            if let Some(gate) = instruction.gate {
+                let count = instructions.len() as u32;
+                self.begin_port_selector(count);
+                let start = (chunk_index * CHUNK) as i32;
                 self.c()
-                    .local_get(CTX)
-                    .i32_const(gate as i32)
-                    .i32_store(mem(116, 2));
-                self.exit(StopReason::Host, Some(self.pc), prefix);
-            } else {
-                match instruction.operation {
-                    None => self.exit(StopReason::Unsupported, Some(self.pc), prefix),
-                    Some(operation) => self.instruction(operation, instruction.next),
+                    .local_get(PREFIX_BASE)
+                    .i32_const(start)
+                    .i32_gt_u()
+                    .if_(BlockType::Result(ValType::I32))
+                    .local_get(PREFIX_BASE)
+                    .i32_const(start)
+                    .i32_sub()
+                    .else_()
+                    .i32_const(0)
+                    .end()
+                    .br_table(0..count, count);
+                for instruction in instructions {
+                    self.c().end();
+                    counted |= self.block_instruction(id, block, instruction, true);
+                }
+                self.finish_port_selector();
+            }
+            self.finish_port_selector();
+        } else {
+            for instruction in &block.instructions {
+                if self.block_instruction(id, block, instruction, false) {
+                    return;
                 }
             }
+        }
+        if !counted {
+            self.count(block.instructions.len() as u32);
+        }
+    }
+
+    fn begin_port_selector(&mut self, labels: u32) {
+        self.c().block(BlockType::Empty).block(BlockType::Empty);
+        for _ in 0..labels {
+            self.c().block(BlockType::Empty);
+        }
+    }
+
+    fn finish_port_selector(&mut self) {
+        self.c().br(1).end().unreachable().end();
+    }
+
+    fn block_instruction(
+        &mut self,
+        id: super::region::BlockId,
+        block: &super::region::RegionBlock,
+        instruction: &super::region::RegionInstruction,
+        precise: bool,
+    ) -> bool {
+        let demands = &block.flags.after;
+        let analyzed = self.plan.instruction(id, instruction.prefix);
+        let before_id = analyzed.before;
+        let after_id = analyzed.after;
+        self.before_frame = Some(before_id);
+        self.after_frame = Some(after_id);
+        self.frame = self.before_frame;
+        let before = self.plan.frame(before_id);
+        let prefix = before.retired;
+        self.pc = match before.pc {
+            super::region::ResumePc::Exact(pc) => pc,
+            super::region::ResumePc::Computed => unreachable!("instruction entry is exact"),
+        };
+        self.prefix = prefix;
+        if precise {
+            self.c()
+                .local_get(REMAIN)
+                .i32_const(prefix as i32)
+                .local_get(PREFIX_BASE)
+                .i32_sub()
+                .i32_le_u()
+                .if_(BlockType::Empty);
+            self.exit(StopReason::Budget, Some(self.pc), prefix);
+            self.c().end();
+        }
+        self.record_flags = precise
+            || instruction
+                .operation
+                .and_then(super::effects::analyze)
+                .is_none_or(|effect| effect.write & demands[instruction.prefix as usize] != 0);
+        // Direct region control is lowered from its typed terminator. Its flags
+        // and counter effects are emitted once where the Wasm edge is selected.
+        if instruction.prefix as usize + 1 == block.instructions.len()
+            && matches!(
+                block.terminator,
+                super::region::Terminator::Branch { .. }
+                    | super::region::Terminator::CountBranch { .. }
+            )
+        {
             self.frame = self.after_frame;
-            if writes_memory && instruction.exits.after.is_some() {
-                let completed = self.plan.frame(after_id);
-                let completed_pc = completed.pc;
-                let completed_retired = completed.retired;
-                self.c()
-                    .local_get(WRITE_STATUS)
-                    .i32_const(2)
-                    .i32_eq()
-                    .if_(BlockType::Empty);
-                let pc = match completed_pc {
-                    super::region::ResumePc::Exact(pc) => Some(pc),
-                    super::region::ResumePc::Computed => None,
-                };
-                self.exit(StopReason::CodeInvalidated, pc, completed_retired);
-                self.c().end();
+            return false;
+        }
+        if let Some(operation) = instruction.operation.filter(strings::supports) {
+            self.address_fact = None;
+            // Runtime string iterations advance their address registers inside
+            // one guest instruction; entry constants are not loop invariants.
+            let before = self.before_frame.take();
+            strings::emit(self, operation, instruction.next);
+            self.before_frame = before;
+            self.frame = self.after_frame;
+            return true;
+        }
+        let writes_memory = instruction
+            .operation
+            .is_some_and(|operation| super::effects::memory_barrier(operation).1);
+        if writes_memory {
+            self.c().i32_const(0).local_set(WRITE_STATUS);
+        }
+        if let Some(gate) = instruction.gate {
+            self.c()
+                .local_get(CTX)
+                .i32_const(gate as i32)
+                .i32_store(mem(116, 2));
+            self.exit(StopReason::Host, Some(self.pc), prefix);
+        } else {
+            match instruction.operation {
+                None => self.exit(StopReason::Unsupported, Some(self.pc), prefix),
+                Some(operation) => self.instruction(operation, instruction.next),
             }
         }
-        self.count(block.instructions.len() as u32);
+        self.frame = self.after_frame;
+        if writes_memory && instruction.exits.after.is_some() {
+            let completed = self.plan.frame(after_id);
+            let completed_pc = completed.pc;
+            let completed_retired = completed.retired;
+            self.c()
+                .local_get(WRITE_STATUS)
+                .i32_const(2)
+                .i32_eq()
+                .if_(BlockType::Empty);
+            let pc = match completed_pc {
+                super::region::ResumePc::Exact(pc) => Some(pc),
+                super::region::ResumePc::Computed => None,
+            };
+            self.exit(StopReason::CodeInvalidated, pc, completed_retired);
+            self.c().end();
+        }
+        false
     }
 
     pub(super) fn count(&mut self, retired: u32) {
@@ -528,13 +614,19 @@ impl Output<'_> {
             self.c()
                 .local_get(REMAIN)
                 .i32_const(retired as i32)
+                .local_get(PREFIX_BASE)
+                .i32_sub()
                 .i32_sub()
                 .local_set(REMAIN);
             self.c()
                 .local_get(RETIRED)
                 .i32_const(retired as i32)
+                .local_get(PREFIX_BASE)
+                .i32_sub()
                 .i32_add()
-                .local_set(RETIRED);
+                .local_set(RETIRED)
+                .i32_const(0)
+                .local_set(PREFIX_BASE);
         }
     }
 
@@ -606,11 +698,28 @@ impl Output<'_> {
     }
 
     fn dynamic_pc(&mut self, local: u32) {
+        self.c().local_get(local).local_set(EIP);
+        self.lookup_port(EIP);
+    }
+
+    fn lookup_port(&mut self, local: u32) {
         let lookup = self.internal(4);
         self.c()
             .local_get(local)
-            .local_tee(EIP)
             .call(lookup)
+            .local_tee(INDEX)
+            .i32_const(BLOCK_BITS as i32)
+            .i32_shr_u()
+            .local_set(ENTRY_OFFSET);
+        self.c()
+            .local_get(INDEX)
+            .i32_const((1 << BLOCK_BITS) - 1)
+            .i32_and()
+            .i32_const(-1)
+            .local_get(INDEX)
+            .i32_const(-1)
+            .i32_ne()
+            .select()
             .local_set(INDEX);
     }
 

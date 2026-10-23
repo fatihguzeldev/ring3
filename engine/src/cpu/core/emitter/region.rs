@@ -103,6 +103,23 @@ impl Emitter<'_, '_> {
         self.out.c().i32_const(0).local_set(ENTRY_PENDING);
         let block = &self.graph.blocks[id.0];
         self.out.address_fact = None;
+        if !self.precise {
+            // An interior entry has no proved relationship to this block's
+            // primary prefix. Transport it unchanged to the precise port.
+            self.out.frame = None;
+            self.out.before_frame = None;
+            self.out.after_frame = None;
+            self.out
+                .c()
+                .local_get(super::ENTRY_OFFSET)
+                .if_(BlockType::Empty);
+            self.out.publish_exit(None, 0);
+            self.out
+                .c()
+                .i32_const(super::exits::PRECISE)
+                .return_()
+                .end();
+        }
         self.out.frame = Some(self.out.plan.block(id).entry);
         self.out.before_frame = self.out.frame;
         self.out.after_frame = self.out.frame;
@@ -129,7 +146,22 @@ impl Emitter<'_, '_> {
             self.out.after_frame = self.out.frame;
         }
         let constants = self.out.plan.block(id).contract.gpr_constants;
-        self.out.guarded_gpr_facts = constants.iter().any(Option::is_some);
+        self.out.guarded_gpr_facts = self.precise || constants.iter().any(Option::is_some);
+        if self.precise {
+            self.out
+                .c()
+                .local_get(super::ENTRY_OFFSET)
+                .if_(BlockType::Empty);
+            super::numeric::enter_port(self.out);
+            self.out
+                .c()
+                .i32_const(0)
+                .local_set(super::GP_FACTS_VALID)
+                .local_get(super::ENTRY_OFFSET)
+                .local_set(super::PREFIX_BASE)
+                .else_();
+        }
+        self.out.c().i32_const(0).local_set(super::PREFIX_BASE);
         if self.out.guarded_gpr_facts {
             self.out.c().i32_const(1);
             for (register, value) in constants.into_iter().enumerate() {
@@ -145,6 +177,10 @@ impl Emitter<'_, '_> {
             self.out.c().local_set(super::GP_FACTS_VALID);
         }
         super::numeric::enter_block(self.out, id);
+        if self.precise {
+            self.out.c().end();
+        }
+        self.out.c().i32_const(0).local_set(super::ENTRY_OFFSET);
         self.out.block(id, block, self.precise);
         match block.terminator {
             Terminator::Next { target, .. } => self.edge(target),
