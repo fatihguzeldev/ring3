@@ -32,7 +32,7 @@ function fp(initial,{status=0,tag=0xffff,opcode=0,fip=0,fdp=0,registers={}}={}) 
   return result;
 }
 
-function fixture(name,{entry=0x1000,target=0x1040,registers=[0,0,0x1080,0x3000,0x4800,0,0x1040,0],stack=true,data=()=>{},codePage=code,extraCodePages=[]}={},body) {
+function fixture(name,{entry=0x1000,target=0x1040,registers=[0,0,0x1080,0x3000,0x4800,0,0x1040,0],stack=true,data=()=>{},codePage=code,extraCodePages=[],firstInstructions=64}={},body) {
   stage = name;
   const result = {name,modules:[],controls:[],runs:[]}; report.cases.push(result); checkpoint();
   const instance = new WebAssembly.Instance(artifact.module,{ring3_observability:{now_ns:()=>0n}});
@@ -59,7 +59,7 @@ function fixture(name,{entry=0x1000,target=0x1040,registers=[0,0,0x1080,0x3000,0
     d.setUint32(48,entry,true); d.setUint32(52,2,true); new Uint8Array(engine.memory.buffer,engine.base,56).set(state);
     const initialBanks = bankRanges.map(([offset,length]) => bytes(engine.base+offset,length));
     const initialFp = bytes(engine.base+4236,128);
-    cache = new CodeCache(engine,{chain:true,budget:8,instructions:64,blocks:8});
+    cache = new CodeCache(engine,{chain:true,budget:8,instructions:firstInstructions,blocks:8});
     function select(pc=cache.pc) {
       const unit = cache.entry(pc);
       if (!result.modules.some(item => item.id === String(unit.id))) {
@@ -68,7 +68,8 @@ function fixture(name,{entry=0x1000,target=0x1040,registers=[0,0,0x1080,0x3000,0
       }
       return unit;
     }
-    const first = select(entry), next = select(target); select(entry);
+    const first = select(entry);cache.instructions=64;
+    const next = select(target); select(entry);
     status('core_begin',0); active = true; status('core_end',0); active = false;
     const initialContext = bytes(cache.context,128), backing = word(cache.context,64), residentPages = word(cache.context,68);
     assert.equal(residentPages,16);
@@ -203,6 +204,8 @@ try {
     : publicSelection ? 'public-selection-preserves-hot-region-promotion'
       : 'numerical-ordinals-survive-hot-region-promotion',{
     entry:0x1300,target:crossPage?0x5340:0x1340,registers:[0,iterations,0,0x3000,0x4800,0,0,0],data:values,
+    // keep the initial caller split so the test still exercises hot promotion.
+    firstInstructions:5,
     ...(crossPage?{codePage:crossPageCode,extraCodePages:[[0x5000,crossPageCallee]]}:{}),
   },t => {
     const admissionsBefore=t.cache.stats().admissions;
