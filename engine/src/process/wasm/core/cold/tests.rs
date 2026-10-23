@@ -351,25 +351,25 @@ fn an_evicted_but_held_owner_does_not_stop_the_cold_prefix() {
     let mut cache = CoreCache32::default();
     let memory = instance.memory.as_ref().unwrap();
     let old = cache.insert(compile(memory, GuestAddress(0x1008), frontier_options(2)).unwrap());
-    let capacity = cache.snapshot()[7];
-    assert!(capacity <= 4096);
-    for index in 0..capacity {
-        cache.insert(
-            compile(
-                memory,
-                GuestAddress(0x2000 + index as u32),
-                frontier_options(1),
-            )
-            .unwrap(),
-        );
+    for index in 0..32 {
+        let mut filler = compile(
+            memory,
+            GuestAddress(0x2000 + index as u32),
+            frontier_options(1),
+        )
+        .unwrap();
+        filler.reserve_wasm_capacity_for_test(8 << 20);
+        cache.insert(filler);
+        if cache.snapshot()[3] != 0 {
+            break;
+        }
     }
     assert!(old.is_current(memory));
-    assert_eq!(
-        cache.snapshot()[2],
-        1,
-        "actual count pressure evicted one owner"
+    assert_eq!(cache.snapshot()[2], 0, "owner count does not evict code");
+    assert!(
+        cache.snapshot()[3] > 0,
+        "actual owned-byte pressure evicted the old owner"
     );
-    assert_eq!(cache.snapshot()[3], 0, "no byte-pressure eviction");
     assert!(!cache.frontier_contains(memory, 0x1010));
     let status = cache.snapshot();
     let before = *context.bytes();
