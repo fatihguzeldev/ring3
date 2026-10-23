@@ -6,6 +6,7 @@ mod emitter;
 mod flags;
 mod memory;
 mod program;
+mod region;
 
 pub(crate) const COLD_MARK: u32 = 0x4000_0000;
 pub(crate) const STOP_MARK: u32 = 0x8000_0000;
