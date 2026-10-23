@@ -197,13 +197,15 @@ export class Session {
         this.fail(new Error(event.message || "runtime worker failed to load"));
       worker.onmessageerror = () =>
         this.fail(new Error("runtime worker message could not be decoded"));
+      const audioPort=this.audio.connectWorker(worker);
       this.post({
         type: "start",
         manifestUrl: "/files/manifest",
         bytesUrl: "/files/bytes",
         ...config,
         compiledEngine: this.compiledEngine,
-      });
+        audioPort,
+      },[audioPort]);
     } catch (error) {
       await audioReady;
       if (generation === this.generation) {
@@ -269,6 +271,9 @@ export class Session {
         });
         break;
       }
+      case 'audio-stats':this.audio.receive(message.stats);break;
+      case 'audio-control-reply':this.audio.receive(message.reply);break;
+      case 'audio-closed':this.audio.reportClosed(message.snapshot);break;
       case "audio-held":
         if (this.audioHold?.worker === worker && this.audioHold.request === message.request)
           this.audioHold.resolve();

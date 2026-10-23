@@ -89,6 +89,45 @@ test('close cancels outstanding PCM without reporting discarded frames consumed'
   assert.deepEqual(progress,[]);
 });
 
+test('production handoff transfers the PCM endpoint while lifecycle controls use the owning Worker',async t=>{
+  const {host,receive,events}=await hostFixture(t),sent=[];
+  const worker={postMessage:message=>sent.push(message)};
+  const port=host.connectWorker(worker);
+  assert.ok(port);assert.equal(port.onmessage,null);
+  const paused=host.pause();
+  assert.deepEqual(sent.at(-1),{type:'audio-control',operation:'pause',request:1});
+  assert.equal(events.includes('suspend'),false);
+  host.receive({type:'paused',request:1,epoch:7n,acceptedFrames:1024,renderedFrames:128,queuedFrames:896});
+  await paused;assert.equal(events.at(-1),'suspend');
+  await assert.rejects(host.accept(packet()),/Worker|direct/i);
+  assert.throws(()=>host.connectWorker(worker),/already|connected/i);
+});
+
+test('direct transport close uses the final Worker report and rejects stale control snapshots',async t=>{
+  const {host,stats}=await hostFixture(t);
+  host.connectWorker({postMessage(){}});
+  host.receive({type:'stats',epoch:7n,acceptedFrames:1024,renderedFrames:512,queuedFrames:512,paused:false});
+  host.receive({type:'paused',request:123,epoch:1n,acceptedFrames:0,renderedFrames:0,queuedFrames:0});
+  assert.equal(host.epoch,7n);assert.equal(host.renderedFrames,512);
+  host.reportClosed({epoch:7n,acceptedFrames:1536,renderedFrames:1280,queuedFrames:0,cancelledPendingFrames:256});
+  assert.equal(host.acceptedFrames,1536);assert.equal(host.renderedFrames,1280);
+  await host.close();
+  assert.equal(stats.at(-1).renderedFrames,1280);assert.equal(stats.at(-1).cancelledPendingFrames,256);
+  assert.equal(stats.at(-1).cancellationSnapshotComplete,true);
+});
+
+test('forced close labels an active direct snapshot as incomplete instead of claiming a final cancellation count',async t=>{
+  const {host,stats}=await hostFixture(t);
+  host.connectWorker({postMessage(){}});
+  host.receive({type:'stats',epoch:7n,acceptedFrames:1024,renderedFrames:512,queuedFrames:512,paused:false});
+  await host.close();assert.equal(stats.at(-1).cancellationSnapshotComplete,false);assert.equal(stats.at(-1).cancelledPendingFrames,null);
+});
+
+test('a transferred port closed before its first report has no final cancellation snapshot',async t=>{
+  const {host,stats}=await hostFixture(t);host.connectWorker({postMessage(){}});
+  await host.close();assert.equal(stats.at(-1).cancellationSnapshotComplete,false);assert.equal(stats.at(-1).cancelledPendingFrames,null);
+});
+
 test('a processor rejection after acceptance still rejects the consumption promise',async t=>{
   const {host,receive}=await hostFixture(t);
   const progress=[];

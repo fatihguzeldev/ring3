@@ -34,17 +34,27 @@ async function workerFixture(t) {
   globalThis.self={};globalThis.postMessage=message=>messages.push(message);
   t.after(()=>{
     owner?.cancel();
+    owner?.audioOutput?.close();
     if(previousSelf===undefined)delete globalThis.self;else globalThis.self=previousSelf;
     if(previousPost===undefined)delete globalThis.postMessage;else globalThis.postMessage=previousPost;
   });
   await import(`../runtime/worker.js?graphics-wake=${++workerImport}`);
   const receive=data=>globalThis.self.onmessage({data});
-  receive({type:'start'});await ready;
+  receive({type:'start',audioPort:{postMessage(){},close(){}}});await ready;
   const fire=()=>{
     const [id,timer]=timers.entries().next().value;timers.delete(id);timer.callback();
   };
   return {...fixture,owner,timers,messages,receive,fire};
 }
+
+test('cancelled audio owners cannot publish queued worklet statistics',async t=>{
+  const f=await workerFixture(t);
+  f.owner.audioOutput.receive({type:'stats',epoch:7n,renderedFrames:128});
+  assert.equal(f.messages.filter(message=>message.type==='audio-stats').length,1);
+  f.owner.cancel();
+  f.owner.audioOutput.receive({type:'stats',epoch:7n,renderedFrames:256});
+  assert.equal(f.messages.filter(message=>message.type==='audio-stats').length,1);
+});
 
 test('a validated graphics ACK resumes a pending host timer after native publication',async t=>{
   const f=await workerFixture(t),order=[];

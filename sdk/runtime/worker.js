@@ -3,22 +3,35 @@ import { configure } from "./configuration.js";
 import { Session } from "./session.js";
 import { WorkerCapture } from "./observability.js";
 import { finishSession } from "./session/finalization.js";
+import { PcmTransport } from "../audio/transport.js";
 let session = null,
   control = Promise.resolve(),
   observation = null;
 const emit = (message, transfer = [], owner = session, capture = observation) => {
   capture?.record(message);
+  if(message.type==='pcm'&&owner?.audioOutput) {
+    void owner.audioOutput.accept(message,progress=>{
+      if(!owner.stopped&&!owner.abort.signal.aborted)owner.media.consumedAudio(progress);
+    }).catch(error=>{if(!owner.abort.signal.aborted)owner.fail(error);});
+    return;
+  }
   postMessage(message, transfer);
   if (message.type === "status" && ["exited", "error"].includes(message.state)) {
     queueMicrotask(() => {void finalize(owner, capture, message.state === "exited" ? "complete" : "failed", message.message).catch(() => {});});
   }
 };
-const finalize = (owner, capture, outcome, error) =>
-  finishSession(owner, capture, outcome, error).catch((failure) => {
+const finalize = (owner, capture, outcome, error) => {
+  owner.cancel();
+  if(owner.audioOutput&&!owner.audioOutput.closed) {
+    const snapshot=owner.audioOutput.close();
+    postMessage({type:'audio-closed',snapshot});
+  }
+  return finishSession(owner, capture, outcome, error).catch((failure) => {
     capture?.transportError(failure);
     postMessage({type:'diagnostic',message:'session finalization failed',detail:{message:failure.message}});
     throw failure;
   });
+};
 async function probe(message) {
   let engine;
   try {
@@ -59,6 +72,11 @@ self.onmessage = (event) => {
       const current = new Session((message, transfer) => emit(message, transfer, current, capture));
       session = current;
       try {
+        if(!message.audioPort)throw new Error('runtime requires a direct audio port');
+        current.audioOutput=new PcmTransport({port:message.audioPort,
+          onStats:stats=>{if(current===session&&!current.abort.signal.aborted)emit({type:'audio-stats',stats},[],current,capture);},
+          onDiagnostic:message=>{if(!current.abort.signal.aborted)current.fail(new Error(message));},
+        });
         capture =
           message.observability?.level && message.observability.level !== "off"
             ? new WorkerCapture(message.observability, (message, transfer) =>
@@ -98,6 +116,15 @@ self.onmessage = (event) => {
         session.scheduler.wake();
     }
     else if (message.type === "pcm-consumed") session.media?.consumedAudio(message);
+    else if(message.type==='audio-control') {
+      if(!Number.isSafeInteger(message.request)||message.request<1||!['pause','resume'].includes(message.operation))
+        throw new Error('invalid direct audio control');
+      const owner=session;
+      void owner.audioOutput.control(message.operation).then(reply=>{
+        if(owner===session&&!owner.abort.signal.aborted)postMessage({type:'audio-control-reply',reply:{...reply,request:message.request}});
+      }).catch(error=>{if(!owner.abort.signal.aborted)owner.fail(error);});
+    }
+    else if(message.type==='audio-error')throw new Error(message.error??'audio output failed');
     else if (message.type === "audio-hold") {
       if (!Number.isSafeInteger(message.request) || message.request < 1) throw new Error('invalid audio hold request');
       session.media?.pauseAudio();
