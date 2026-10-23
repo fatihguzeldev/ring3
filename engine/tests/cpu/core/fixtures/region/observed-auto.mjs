@@ -143,18 +143,26 @@ export function runObservedAutoCases(artifact,report,{baseline=false}={}) {
     assert.equal(cache.admissions,3,'consuming the automatic overlay emits no replacement body');
     assert.equal(cache.units.size,3);
 
+    const family={run:overlay.run,link:overlay.link,publish:overlay.publish,slot:overlay.slot};
+    for(const pc of[ROOT,0x1005,0x1008,0x1009,CALLEE,0x1102]){
+      assert.equal(world.select(pc),overlay,'every actually observed instruction port shares the one family instance');
+      assert.equal(world.bigint(context,120),overlay.id,'secondary selection installs the family native dictionary');
+      assert.equal(hash(world.encoded()),module.sha256,'secondary ports retain the same emitted body');
+      assert.equal(overlay.slot,family.slot);assert.equal(overlay.run,family.run);
+      assert.equal(overlay.link,family.link);assert.equal(overlay.publish,family.publish);
+      assert.equal(cache.table.get(family.slot),family.link);
+      assert.equal(cache.publishers.get(family.slot),family.publish);
+    }
+    const owners=world.raw.core_link_owners_ptr();
     for(const saved of original){
-      // An overlay may intentionally own one old public root. The baseline's
-      // other real port still resolves to its immutable source owner.
-      const pc=saved.module.pc===overlay.pc?(saved.unit.id===root.id?0x1005:0x1102):saved.module.pc;
-      assert.equal(world.select(pc).id,saved.unit.id);
-      assert.equal(world.bigint(context,120),saved.unit.id,'a real baseline port retains its original source owner');
-      assert.equal(hash(world.encoded()),saved.module.sha256,'the baseline emitted body remains byte-identical');
+      // The family shadows validated ports without replacing either immutable
+      // source owner or its reciprocal table capability.
       assert.equal(cache.units.get(saved.unit.id),saved.unit);
       assert.equal(saved.unit.run,saved.run);assert.equal(saved.unit.link,saved.link);
       assert.equal(saved.unit.publish,saved.publish);
       assert.equal(cache.table.get(saved.unit.slot),saved.link);
       assert.equal(cache.publishers.get(saved.unit.slot),saved.publish);
+      assert.equal(world.bigint(owners,saved.unit.slot*8),saved.unit.id);
     }
     assert.equal(cache.admissions,3);assert.equal(cache.units.size,3);
   });

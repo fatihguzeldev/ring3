@@ -14,7 +14,7 @@ const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const sources = ['./chain-authority.mjs','../../../support/wasm/engine.mjs',
   '../../../../../sdk/runtime/engine.js','../../../../../sdk/runtime/cache.js'];
 const report = {schema:1,complete:false,engineSha256:artifact.sha256,
-  scope:'authored native cached-region handoff authority and precise prefixes; no timing or game claim',
+  scope:'explicit compatibility-owner authority, normal cold refresh, and shared observed-family ports; no timing or game claim',
   sources:Object.fromEntries(sources.map(path => [path,hash(readFileSync(new URL(path,import.meta.url)))])),cases:[]};
 const checkpoint = () => writeFileSync(reportPath,JSON.stringify(report,null,2));
 let stage = 'initialization'; checkpoint();
@@ -103,7 +103,7 @@ function fixture(name,{entry=0x1000,target=0x1040,registers=[0,0,0x1080,0x3000,0
       const sourceVersion = new DataView(engine.memory.buffer).getBigUint64(word(cache.context,88),true);
       const value = cache.execute(unit);
       result.runs.push({...value,id:value.id===null?null:String(value.id),budget,sourceVersion:String(sourceVersion),...snapshot()});
-      // a stale entry may be refreshed by execute before its first region call.
+      // post-lease optimization may select a new family without a region call.
       const preparedId = new DataView(engine.memory.buffer).getBigUint64(cache.context+120,true);
       const selected = cache.units.get(preparedId);
       if (selected && !result.modules.some(item => item.id === String(selected.id))) {
@@ -168,19 +168,20 @@ try {
       wantedFp:fp(t.initialFp,{opcode:0x15b,fip:0x1043,fdp:0x3008,registers:{7:'00000000000000c00140'}})});
     assert.equal(t.cache.stats().runs,1);
   });
-  fixture('stale-target-miss-and-cold-refresh',{data:values},t => {
+  fixture('stale-source-rejection-and-complete-cold-prefix',{data:values},t => {
     t.engine.ok('write8',0x1041,0x43); t.expectedRam[0x41]=0x43;
     const {value,sourceVersion} = t.run(t.first,5);
-    assert.equal(value.id,null,'the refreshed target executes cold without a compiled owner');
-    assert.equal(value.chainedColdRuns,1);
-    assert.equal(value.chainedColdRetired,3);
-    assert.equal(value.chainedColdWork,3);
-    assert.equal(t.cache.stats().admissions,3,'only the stale source is recompiled');
-    assert(!t.cache.units.has(t.first.id),'the stale source link is pruned before dispatch');
     t.expectedRam.set(unhex('0000a040'),4096+8);
-    t.expect({stop:2,pc:0x1080,retired:5,work:5,remaining:0,regions:1,id:0n,sourceVersion,
+    t.expect({stop:2,pc:0x1080,retired:5,work:5,remaining:0,regions:0,id:0n,sourceVersion,
       wantedFp:fp(t.initialFp,{opcode:0x15b,fip:0x1043,fdp:0x3008,registers:{7:'00000000000000a00140'}})});
-    assert.equal(t.cache.stats().runs,1);
+    assert.equal(value.id,null,'the rejected stale entry executes the complete prefix cold');
+    assert.equal(value.kind,'cold');
+    assert.deepEqual([value.chainedColdRuns,value.chainedColdRetired,value.chainedColdWork],[0,0,0]);
+    assert.deepEqual([t.cache.stats().coldRuns,t.cache.stats().coldRetired,t.cache.stats().coldWork],[1,5,5]);
+    assert.equal(t.cache.stats().admissions,2,'a stale source does not force a replacement Wasm owner');
+    const owners=new DataView(t.engine.memory.buffer,t.api.core_link_owners_ptr()>>>0,4097*8);
+    assert.equal(owners.getBigUint64(t.first.slot*8,true),0n,'native authority revokes the stale executable capability');
+    assert.equal(t.cache.stats().runs,0);
   });
   fixture('numeric-read-fault-after-handoff',{stack:false,registers:[0,0,0x1080,0x3ffc,0x4800,0,0x1040,0],
     data:d=>d.setFloat32(4092,3,true)},t => {
@@ -238,7 +239,7 @@ try {
     const overlays=[...t.cache.units.values()].filter(unit=>unit!==t.first&&unit!==t.next);
     assert.equal(overlays.length,1,'normal post-lease recording installs exactly one separate observed executor');
     const overlay=overlays[0],overlayModule=t.result.modules.find(module=>module.id===String(overlay.id));
-    assert(overlayModule,'the automatically prepared executor exposes its actual encoded module');
+    assert(overlayModule,'the automatically installed executor exposes its actual encoded module');
     assert([0x1300,0x1307,crossPage?0x5340:0x1340].includes(overlay.pc),'the executor root is an actual entry of this graph');
     assert.notEqual(overlay.slot,t.first.slot);assert.notEqual(overlay.slot,t.next.slot);
     const wantedOwners=originalOwners.slice();view(wantedOwners).setBigUint64(overlay.slot*8,overlay.id,true);
@@ -264,31 +265,41 @@ try {
     assert.deepEqual(t.result.modules.filter(module=>module.id!==String(overlay.id)),originalModules,
       'the added executor does not replace or re-emit either original source owner');
     assert.equal(t.result.modules.length,originalModules.length+1);
-    assert.deepEqual(t.selectionCalls,{core_prepare:callsBefore.core_prepare+1,
+    assert.deepEqual(t.selectionCalls,{core_prepare:callsBefore.core_prepare,
       core_lookup:callsBefore.core_lookup+Number(publicSelection),core_cold_run:callsBefore.core_cold_run},
-      'retained public selection uses lookup; exactly one post-lease prepare installs the executor without a cold lease');
+      'retained public selection uses lookup; post-lease installation invokes neither baseline preparation nor a cold lease');
     assert.equal(version(),beforeVersion+2n*BigInt(iterations),'each CALL and FSTP commits exactly one write');
-    for (const unit of [t.first,t.next]) {
-      const original=originalModules.find(module=>module.id===String(unit.id));
-      assert.equal(t.cache.units.get(unit.id),unit,'both original SDK instances survive every graph edge');
-      const sourcePort=original.pc===overlay.pc?(unit===t.first?0x1307:original.pc+3):original.pc;
-      assert.equal(t.select(sourcePort),unit,'a real baseline port selects its unchanged immutable source owner');
-      assert.equal(new DataView(t.engine.memory.buffer).getBigUint64(t.cache.context+120,true),unit.id);
-      assert.equal(hash(t.bytes(t.api.core_code_ptr()>>>0,t.api.core_code_len()>>>0)),original.sha256,
-        'each source owner exposes its original emitted module');
+    const familyExports={run:overlay.run,link:overlay.link,publish:overlay.publish,slot:overlay.slot};
+    for(const pc of[0x1300,0x1302,0x1307,0x1308,...(crossPage?[0x5340,0x5343,0x5346]:[0x1340,0x1343,0x1346])]){
+      assert.equal(t.cache.select(pc),overlay,'every actually observed instruction port selects the one family object');
+      assert.equal(new DataView(t.engine.memory.buffer).getBigUint64(t.cache.context+120,true),overlay.id,
+        'every family port selects the same native ordinal dictionary');
+      assert.equal(hash(t.bytes(t.api.core_code_ptr()>>>0,t.api.core_code_len()>>>0)),overlayModule.sha256,
+        'secondary ports expose the same immutable emitted body');
+      assert.equal(overlay.slot,familyExports.slot);assert.equal(overlay.run,familyExports.run);
+      assert.equal(overlay.link,familyExports.link);assert.equal(overlay.publish,familyExports.publish);
+      assert.equal(t.cache.table.get(overlay.slot),familyExports.link);
+      assert.equal(t.cache.publishers.get(overlay.slot),familyExports.publish);
+    }
+    for(const unit of[t.first,t.next]){
+      assert.equal(t.cache.units.get(unit.id),unit,'both immutable baseline SDK instances remain retained');
+      assert.equal(new DataView(t.engine.memory.buffer,ownerPointer,4097*8).getBigUint64(unit.slot*8,true),unit.id);
     }
     for(const saved of originalExports){assert.equal(saved.unit.run,saved.run);assert.equal(saved.unit.link,saved.link);
-      assert.equal(saved.unit.publish,saved.publish);}
+      assert.equal(saved.unit.publish,saved.publish);assert.equal(t.cache.table.get(saved.unit.slot),saved.link);
+      assert.equal(t.cache.publishers.get(saved.unit.slot),saved.publish);}
+    assert.equal(t.cache.stats().admissions,stats.admissions,'family port selection admits no new body');
+    assert.equal(t.cache.stats().generatedModuleBytes,stats.generatedModuleBytes);
+    assert.equal(t.cache.units.size,3);
     const callerPort=overlay.pc===0x1300?0x1307:0x1300;
     t.status('core_lookup',0,callerPort);
-    t.expect({...wanted,selectedId:t.first.id});
+    t.expect({...wanted,selectedId:overlay.id});
     if(crossPage) {
       t.engine.ok('write8',0x5346,0x90);t.expectedRam[12288+0x346]=0x90;
       assert.deepEqual(t.bytes(t.word(t.cache.context,64),t.expectedRam.length),t.expectedRam,
         'second code-page mutation is the only backing change');
       t.neutral('stale callee lookup rejects its source owner and dependent executor',()=>t.status('core_lookup',4,0x5340));
-      if(overlay.pc!==0x5340)t.neutral('dependent executor root is pruned before selecting its current baseline',()=>
-        t.status('core_lookup',0,overlay.pc));
+      t.status('core_lookup',0,callerPort);
       t.neutral('unchanged caller remains executable',()=>t.status('core_lookup',0,callerPort));
       const owners=new DataView(t.engine.memory.buffer,t.api.core_link_owners_ptr()>>>0,4097*8);
       assert.equal(owners.getBigUint64(t.next.slot*8,true),0n,'stale callee reciprocal slot is pruned');
@@ -297,8 +308,10 @@ try {
       t.begin();t.end();
       const currentSourceVersion=new DataView(t.engine.memory.buffer).getBigUint64(t.word(t.cache.context,88),true);
       t.expect({...wanted,selectedId:t.first.id,sourceVersion:currentSourceVersion});
+      // Explicit compatibility preparation still exercises source authority and
+      // slot reuse; ordinary stale execution above never requests this compile.
       const replacement=t.select(0x5340);
-      assert.notEqual(replacement.id,t.next.id,'repreparing changed callee source creates a fresh owner');
+      assert.notEqual(replacement.id,t.next.id,'explicit preparation of changed callee source creates a fresh owner');
       assert.equal(t.cache.units.get(t.first.id),t.first,'callee refresh preserves the caller SDK instance');
       assert(!t.cache.units.has(t.next.id),'the stale callee SDK instance is removed');
       assert(!t.cache.units.has(overlay.id),'the stale dependent executor SDK instance is removed');

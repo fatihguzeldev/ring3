@@ -40,6 +40,8 @@ function retainSources(world,saved) {
   }
 }
 
+// Explicit core_trace_start keeps the legacy root-only executor contract. The
+// normal cold/automatic family growth contract is tested in family-growth.mjs.
 // The first capture is deliberately short: its final caller event confirms
 // FADD/RET, but does not claim that the caller's partially executed block ended.
 // The next capture starts in the baseline caller and must cross that already
@@ -47,6 +49,7 @@ function retainSources(world,saved) {
 function growthCase(artifact,report,name,afterLong=()=>{}) {
   observedFixture(artifact,report,name,{},world=>{
     const {cache,result,root,callee}=world;
+    result.manualLegacy=true;
     const sources=[...world.units.values()].map(({unit,module})=>({unit,module,
       run:unit.run,link:unit.link,publish:unit.publish}));
 

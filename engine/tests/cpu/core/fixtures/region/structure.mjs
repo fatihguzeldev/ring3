@@ -234,6 +234,9 @@ function inspectPortRouting(fn) {
   const check=(okay,message)=>{if(!okay)summary.errors.push(message);};
   for(const[index,node]of ops.entries()){
     if(node.op===0x21&&node.local===151){
+      // Exact entry invalidation may clear this permission. Only establishing
+      // a nonzero permission needs the whole-block quota/offset proof below.
+      if(ops[index-1]?.op===0x41&&ops[index-1].value===0)continue;
       const p=ops.slice(index-6,index);
       check(p.length===6&&p[0].op===0x20&&p[0].local===130&&p[1].op===0x45&&
         p[2].op===0x20&&p[2].local===12&&p[3].op===0x41&&p[3].value>0&&
