@@ -14,17 +14,18 @@ import {runOwnershipCase} from './region/ownership.mjs';
 import {runPortCases} from './region/ports.mjs';
 import {runStableGraphCase} from './region/graph.mjs';
 import {runGroupCases} from './region/groups.mjs';
+import {runNativeStoreCases} from './region/native-store.mjs';
 
 const [enginePath,reportPath,mode]=process.argv.slice(2);
-assert(enginePath&&reportPath&&(mode===undefined||mode==='--structure'||mode==='--graph'||mode==='--groups'),
-  'usage: region.mjs engine.wasm fresh-report.json [--structure|--graph|--groups]');
+assert(enginePath&&reportPath&&(mode===undefined||mode==='--structure'||mode==='--graph'||mode==='--groups'||mode==='--native-stores'),
+  'usage: region.mjs engine.wasm fresh-report.json [--structure|--graph|--groups|--native-stores]');
 const artifact=readEngine(enginePath),hash=bytes=>createHash('sha256').update(bytes).digest('hex');
 const hex=bytes=>Buffer.from(bytes).toString('hex');
 const unhex=text=>Uint8Array.from(Buffer.from(text.replaceAll(' ',''),'hex'));
 closeSync(openSync(reportPath,'wx'));
 const report={schema:1,complete:false,engineSha256:artifact.sha256,
   scope:'actual generated mixed integer/x87 CFG with exact instruction-prefix, publication and fault oracles; no timing claim',
-  sources:Object.fromEntries(['./region.mjs','./link.mjs','./region/structure.mjs','./region/control.mjs','./region/link.mjs','./region/status.mjs','./region/state.mjs','./region/quota.mjs','./region/ownership.mjs','./region/ports.mjs','./region/graph.mjs','./region/groups.mjs',
+  sources:Object.fromEntries(['./region.mjs','./link.mjs','./region/structure.mjs','./region/control.mjs','./region/link.mjs','./region/status.mjs','./region/state.mjs','./region/quota.mjs','./region/ownership.mjs','./region/ports.mjs','./region/graph.mjs','./region/groups.mjs','./region/native-store.mjs',
     '../../../support/wasm/engine.mjs','../../../../../sdk/runtime/engine.js','../../../../../sdk/runtime/cache.js']
     .map(path=>[path,hash(readFileSync(new URL(path,import.meta.url)))])),cases:[]};
 const checkpoint=()=>writeFileSync(reportPath,JSON.stringify(report,null,2));
@@ -205,7 +206,9 @@ function exchangeCase(name,eax,structural=false) {
 }
 
 try {
-  if(mode==='--groups') {
+  if(mode==='--native-stores') {
+    stage='native-value-stores';runNativeStoreCases(fixture);checkpoint();
+  }else if(mode==='--groups') {
     stage='proved-memory-groups';runGroupCases(fixture);checkpoint();
   }else if(mode==='--graph') {
     stage='immutable-warmed-graph';runStableGraphCase(artifact,report);checkpoint();
@@ -335,6 +338,7 @@ try {
   stage='immutable-interior-ports';runPortCases(fixture);checkpoint();
   stage='immutable-warmed-graph';runStableGraphCase(artifact,report);checkpoint();
   stage='proved-memory-groups';runGroupCases(fixture);checkpoint();
+  stage='native-value-stores';runNativeStoreCases(fixture);checkpoint();
   }
   report.complete=true;checkpoint();console.log(JSON.stringify({complete:true,cases:report.cases.length,engineSha256:artifact.sha256}));
 }catch(error){report.failure={stage,message:String(error),stack:error.stack};checkpoint();throw error;}

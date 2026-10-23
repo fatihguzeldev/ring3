@@ -47,7 +47,7 @@ export function assertCoreNames(module, ownerEntry, identity) {
   if (identity !== undefined) assert.equal(moduleName, prefix + identity);
   const numeric = WebAssembly.Module.imports(module).some(item => item.name === 'numeric');
   const names = ['guest.read_slow', 'guest.write_slow', ...(numeric ? ['guest.numeric'] : []),
-    ...supportNames,'guest.run', 'guest.lookup', 'guest.publish', 'guest.precise', 'guest.normalize_frame'];
+    ...supportNames,'guest.run', 'guest.lookup', 'guest.publish', 'guest.normalize_frame'];
   const wrappers = ['guest.entry', 'guest.link', 'guest.publish_link'];
   names.push(...wrappers);
   assert.deepEqual(functions, names.map((name, index) => [index, name]), 'names use actual function indices');

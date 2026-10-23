@@ -202,7 +202,7 @@ export function instrumentStateWitness(source,supportBytes) {
           const raw=r.take(r.unsigned()),index=bodyIndex+module.imports.length,fn=module.functions[bodyIndex],name=module.names.get(index);let body=raw;
           const counter=isSupport?new Map([['support.normalize_kernel',0],['support.materialize_numeric',1],
             ['support.acquire_group',6],['support.translate_page',7]]).get(name):
-            ['guest.run','guest.precise'].includes(name)?4:undefined;
+            instructionBodies(module).some(body=>body.index===index)?4:undefined;
           if(counter!==undefined){
             const insertions=new Map(),insert=(at,bytes)=>insertions.set(at,[...(insertions.get(at)??[]),bytes]);
             insert(fn.localsEnd,increment(counter));
@@ -249,6 +249,71 @@ export function instrumentStateWitness(source,supportBytes) {
 function controlAdmission(ops,index) {
   return ops[index]?.op===0x20&&ops[index].local===87&&
     ops[index+1]?.op===0x41&&ops[index+1].value===0xf3f&&ops[index+2]?.op===0x71;
+}
+
+// Identify actual executable instruction bodies independently of profiler names.
+// Both former fast/precise copies imported the whole architectural state and
+// guarded the active lease and owner identity; wrappers and support kernels do not.
+function instructionBodies(module) {
+  return module.functions.flatMap((fn,offset)=>{
+    const index=offset+module.imports.length,type=signature(module,index);
+    const loads=fn.ops.flatMap((node,i)=>node.op===0x28&&fn.ops[i-1]?.op===0x20&&
+      fn.ops[i-1].local===0?[node.memoryOffset]:[]);
+    const identity=fn.ops.some((node,i)=>node.op===0x29&&node.memoryOffset===120&&
+      fn.ops[i-1]?.op===0x20&&fn.ops[i-1].local===0);
+    if(type?.parameters.join(',')!=='127,127'||type.results.join(',')!=='127'||!identity||
+      ![0,4,8,12,16,20,24,28,32,36,40,112].every(value=>loads.includes(value)))return[];
+    return[{index,name:module.names.get(index),contextLoads:loads}];
+  });
+}
+
+function inspectPortRouting(fn) {
+  const {ops}=fn,summary={tables:[],fullBlockAssignments:[],prefixQuotaGuards:[],errors:[]};
+  const check=(okay,message)=>{if(!okay)summary.errors.push(message);};
+  for(const[index,node]of ops.entries()){
+    if(node.op===0x21&&node.local===151){
+      const p=ops.slice(index-6,index);
+      check(p.length===6&&p[0].op===0x20&&p[0].local===130&&p[1].op===0x45&&
+        p[2].op===0x20&&p[2].local===12&&p[3].op===0x41&&p[3].value>0&&
+        p[4].op===0x4f&&p[5].op===0x71,
+        'FULL_BLOCK is established only from ordinary offset zero and sufficient whole-block quota');
+      summary.fullBlockAssignments.push(node.offset);
+    }
+    // The two chunk selector forms are decoded rather than inferred from names.
+    if(node.op===14){
+      const outer=ops.slice(index-3,index),inner=ops.slice(index-10,index);
+      const isOuter=outer.length===3&&outer[0].op===0x20&&outer[0].local===131&&
+        outer[1].op===0x41&&outer[1].value===6&&outer[2].op===0x76;
+      const isInner=inner.length===10&&inner[0].op===0x20&&inner[0].local===131&&
+        inner[1].op===0x41&&inner[2].op===0x4b&&inner[3].op===4&&inner[3].frame.type===-1&&
+        inner[4].op===0x20&&inner[4].local===131&&inner[5].op===0x41&&inner[5].value===inner[1].value&&
+        inner[6].op===0x6b&&inner[7].op===5&&inner[8].op===0x41&&inner[8].value===0&&inner[9].op===11;
+      if(isOuter||isInner){
+        const start=index-(isOuter?3:10),bypass=ops.slice(start-3,start),branch=bypass[2];
+        const target=branch?.frames.at(-1-branch.targets[0]);
+        check(bypass.length===3&&bypass[0].op===0x20&&bypass[0].local===131&&
+          bypass[1].op===0x45&&branch.op===13&&branch.targets[0]===0&&
+          target===node.frames.at(-1)&&target.kind===2,
+          'ordinary prefix zero branches past each real port selector into the shared first instruction');
+        summary.tables.push({offset:node.offset,kind:isOuter?'chunk':'instruction',bypassOffset:branch?.offset});
+      }
+    }
+    // Every exact-prefix quota test remains in the !FULL_BLOCK arm. Its
+    // comparison has four preceding operands, not a second instruction body.
+    if(node.op===0x4d&&ops[index-4]?.op===0x20&&ops[index-4].local===12&&
+      ops[index-3]?.op===0x41&&ops[index-2]?.op===0x20&&ops[index-2].local===131&&ops[index-1]?.op===0x6b){
+      const guard=node.frames.at(-1),p=guard?ops.slice(guard.open-2,guard.open):[];
+      check(guard?.kind===4&&guard.otherwise===undefined&&p.length===2&&
+        p[0].op===0x20&&p[0].local===151&&p[1].op===0x45,
+        'exact-prefix quota checks are bypassed by the proven full-block mode');
+      summary.prefixQuotaGuards.push(node.offset);
+    }
+  }
+  check(summary.fullBlockAssignments.length>0,'the actual body establishes full-block mode');
+  check(summary.tables.some(table=>table.kind==='chunk')&&summary.tables.some(table=>table.kind==='instruction'),
+    'both bounded selector levels belong to the sole instruction body');
+  check(summary.prefixQuotaGuards.length>0,'the sole body retains exact per-prefix quota guards');
+  return summary;
 }
 
 function inspectNormalizerKernel(module,support) {
@@ -342,13 +407,13 @@ function inspectNormalizerKernel(module,support) {
 function inspectExitEpilogue(module,name) {
   const named=wanted=>[...module.names].find(([,name])=>name===wanted)?.[0];
   const index=named(name),fn=module.functions[index-module.imports.length];
-  const publication=named('guest.publish'),precise=named('guest.precise');
-  const summary={name,index,publicationCalls:[],explicitReturns:[],sharedExitBranches:0,preciseCalls:[],errors:[]};
+  const publication=named('guest.publish'),bodies=new Set(instructionBodies(module).map(body=>body.index));
+  const summary={name,index,publicationCalls:[],explicitReturns:[],sharedExitBranches:0,instructionBodyCalls:[],errors:[]};
   if(!fn){summary.errors.push('missing defined function');return summary;}
   const{ops,edges}=fn,check=(okay,message)=>{if(!okay)summary.errors.push(message);};
   ops.forEach((node,index)=>{
     if(Number.isInteger(publication)&&node.call===publication)summary.publicationCalls.push(index);
-    if(Number.isInteger(precise)&&node.call===precise)summary.preciseCalls.push(index);
+    if(bodies.has(node.call))summary.instructionBodyCalls.push({offset:node.offset,target:node.call});
     if(node.op===15)summary.explicitReturns.push(index);
   });
   if(summary.publicationCalls.length!==1){summary.errors.push('requires one actual publication call');return summary;}
@@ -407,26 +472,12 @@ function inspectExitEpilogue(module,name) {
   check(![...reached].some(index=>ops[index].op===15||ops[index].op===11&&ops[index].frame.kind===0xff),
     'the sole publisher dominates all valid-context normal returns');
   const sentinel=exits.filter(index=>ops[index-2]?.op===0x41&&ops[index-2]?.value===-1);
-  summary.preciseTailSentinels=sentinel.length;
-  if(name==='guest.run'){
-    check(sentinel.length>0,'fast guest quota guards have a precise-tail sentinel');
-    check(summary.preciseCalls.length===1,'fast guest has one shared precise-tail call');
-    const call=summary.preciseCalls[0],conditional=ops[call]?.frames.at(-1);
-    const comparison=conditional?ops.slice(conditional.open-3,conditional.open):[];
-    check(call>publish&&conditional?.kind===4&&conditional.type===-1&&
-      comparison.length===3&&comparison[0].op===0x20&&comparison[0].local===108&&
-      comparison[1].op===0x41&&comparison[1].value===-1&&comparison[2].op===0x46&&
-      ops[call-2]?.op===0x20&&ops[call-2]?.local===0&&ops[call-1]?.op===0x20&&ops[call-1]?.local===12&&
-      call===conditional.open+3&&conditional.otherwise===call+1&&conditional.end===call+3&&
-      ops[call+2]?.op===0x20&&ops[call+2]?.local===108&&conditional.end+1===tailReturn&&
-      ops[tailReturn]?.op===15&&ops[tailReturn+1]?.frame?.kind===0xff,
-      'only sentinel -1 selects precise(CTX,REMAIN), after publication; ordinary exits return their saved reason');
-  }else{
-    check(sentinel.length===0&&summary.preciseCalls.length===0,'precise guest has no sentinel or recursive precise call');
-    check(ops[publish+1]?.op===0x20&&ops[publish+1]?.local===108&&publish+2===tailReturn&&
-      ops[tailReturn]?.op===15&&ops[tailReturn+1]?.frame?.kind===0xff,
-      'precise guest returns its saved reason immediately after publication');
-  }
+  summary.precisionSentinels=sentinel.length;
+  check(sentinel.length===0,'the sole body has no precision-tail sentinel');
+  check(summary.instructionBodyCalls.length===0,'instruction bodies never call themselves or another precision copy');
+  check(ops[publish+1]?.op===0x20&&ops[publish+1]?.local===108&&publish+2===tailReturn&&
+    ops[tailReturn]?.op===15&&ops[tailReturn+1]?.frame?.kind===0xff,
+    'the sole body returns its saved reason immediately after its one publication');
   return summary;
 }
 
@@ -474,7 +525,15 @@ export function inspectRegion(bytes,supportBytes) {
   const eagerLocals=[10,26,38,42,89,90,91,93,94];
   const eagerFrame=node=>[0x21,0x22].includes(node.op)&&eagerLocals.includes(node.local);
   const admissions=new Set(run.ops.filter((_,index)=>controlAdmission(run.ops,index)));
-  return {runIndex,runName:module.names.get(runIndex),locals:run.locals,
+  const bodies=instructionBodies(module);
+  return {runIndex,runName:module.names.get(runIndex),locals:run.locals,instructionBodies:bodies,
+    portRouting:inspectPortRouting(run),
+    nativeFloatStores:run.ops.flatMap((node,index)=>{
+      const single=node.op===0x38,p=run.ops.slice(index-(single?3:2),index);
+      return(single||node.op===0x39)&&node.memoryOffset===0&&p[0]?.op===0x20&&p[0].local===52&&
+        p[1]?.op===0x20&&p[1].local===48&&(!single||p[2]?.op===0xb6)?
+        [{offset:node.offset,format:single?'f32':'f64',pointerLocal:52,valueLocal:48}]:[];
+    }),
     arithmeticCycles:cycles(()=>false),withoutCanonicalization:cycles(canonical),
     withoutCanonicalizationOrDispatch:cycles(node=>canonical(node)||dispatch(node)),
     runtimeStackRotations:[...rotations].map(node=>node.offset),
@@ -498,14 +557,15 @@ export function inspectRegion(bytes,supportBytes) {
     pageTranslatorSignature:['support.translate_page'].map(name=>{
       const{imported,exported}=supportBinding(module,support,name);return{index:exported,ownerImport:imported,name,...signature(support,exported)};
     }),
-    exitEpilogues:['guest.run','guest.precise'].map(name=>inspectExitEpilogue(module,name)),
+    exitEpilogues:['guest.run'].map(name=>inspectExitEpilogue(module,name)),
     limits:['narrow decoder for generated authored modules; scalar f64 arithmetic cycles only',
       'a retained cycle proves a canonicalization-free emitted path, not its runtime frequency or speed']};
 }
 
 export function inspectPortDepth(bytes) {
   const module=readModule(bytes);
-  return Object.fromEntries(['guest.run','guest.precise'].map(name=>{
+  assert.equal(instructionBodies(module).length,1,'one actual architectural instruction body serves normal, quota and interior entries');
+  return Object.fromEntries(['guest.run'].map(name=>{
     const index=[...module.names].find(([,value])=>value===name)?.[0];
     assert(Number.isInteger(index)&&index>=module.imports.length,`actual defined ${name}`);
     const fn=module.functions[index-module.imports.length];
@@ -515,6 +575,7 @@ export function inspectPortDepth(bytes) {
 }
 
 export function assertAnalyzedStateStructure(proof) {
+  assertSingleInstructionBody(proof);
   assert(proof.withoutCanonicalizationDispatchOrStackRotation.length>0,
     'the balanced arithmetic loop repeats without per-push/pop eight-cell runtime rotations');
   assertRegionStructure(proof);
@@ -539,13 +600,14 @@ export function assertAnalyzedStateStructure(proof) {
   assert.equal(witness.raw80_stores,0,'native internal normalization does not execute raw80 stores');
   assert.equal(witness.materializer_calls,0,'native internal edges do not invoke the canonical materializer');
   assert(witness.control_admissions>0&&witness.control_admissions<=witness.body_entries,
-    'the exercised control admission runs at most once per fresh body import, including a possible precise tail');
+    'the exercised control admission runs at most once per fresh import into the sole body');
   assert.equal(witness.afterBankHex,witness.beforeBankHex,'the full private raw80 bank stays unchanged before explicit publication');
   assert(witness.fp_metadata_writes<12,
     'metadata is reconstructed at analyzed frame boundaries instead of all twelve executed x87 operations');
 }
 
 export function assertRegionStructure(proof) {
+  assertSingleInstructionBody(proof);
   assert(proof.arithmeticCycles.length>0,'the actual run contains a cyclic f64 arithmetic path');
   assert(proof.withoutCanonicalization.length>0,'an arithmetic loop can repeat without raw80 stores or materializing helpers');
   assert(proof.withoutCanonicalizationOrDispatch.length>0,'the reducible arithmetic loop also bypasses the general block dispatcher');
@@ -563,4 +625,13 @@ export function assertRegionStructure(proof) {
   assert.deepEqual(proof.pageTranslatorSignature[0].results,[0x7f,0x7f,0x7f],
     'translation returns the physical slot, page base and complete permission mask');
   for(const exit of proof.exitEpilogues)assert.deepEqual(exit.errors,[],`${exit.name}: complete common-exit control-flow proof`);
+}
+
+function assertSingleInstructionBody(proof) {
+  assert.equal(proof.instructionBodies.length,1,
+    'one actual architectural instruction body serves normal, quota and interior entries without duplicated fast/precise lowering');
+  assert.deepEqual(proof.instructionBodies.map(body=>[body.index,body.name]),[[proof.runIndex,'guest.run']],
+    'the sole guarded architectural body is the actual named guest.run');
+  assert.deepEqual(proof.portRouting.errors,[],
+    'full ordinary entries bypass the actual port selectors and per-prefix quota guards in the same instruction body');
 }

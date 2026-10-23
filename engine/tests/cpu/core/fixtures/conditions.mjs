@@ -86,8 +86,11 @@ check('canonical-zf','SAHF clears stale pending ZF',{eax:0xff},{eax:0,flags:0x40
 check('postbranch-carry','branch then CLC preserves pending ZF',{eax:0xff},{eax:0x5600,flags:0x456,ebx:0x22222222,retired:6,calls:4});
 check('other-condition','nonzero condition fallback',{eax:0xff},{eax:0,flags:0x457,ebx:0x11111111,retired:4,calls:2});
 check('preserved-recipe','MOV preserves pending ZF',{eax:0xff},{eax:0,esi:0x33333333,flags:0x457,ebx:0x22222222,retired:4,calls:1});
-check('add8','precise budget before branch',{eax:0xff,budget:1},{eax:0,flags:0x457,pc:0x1002,retired:1,reason:2,calls:2});
-check('inc32','precise budget preserves CF',{eax:0xffffffff,flags:0x403,budget:1},{eax:0,flags:0x457,pc:0x1001,retired:1,reason:2,calls:3});
+// The single body stops at the branch's prefix guard and publishes once. INC
+// additionally materializes its incoming CF before installing the new recipe;
+// there is no pre-tail publication or second-body entry to normalize flags.
+check('add8','precise budget before branch',{eax:0xff,budget:1},{eax:0,flags:0x457,pc:0x1002,retired:1,reason:2,calls:1});
+check('inc32','precise budget preserves CF',{eax:0xffffffff,flags:0x403,budget:1},{eax:0,flags:0x457,pc:0x1001,retired:1,reason:2,calls:2});
 check('rmw-fault','fault retains preceding recipe',{readOnly:true},{eax:0,flags:0x446,pc:0x1002,retired:1,reason:3,fault:true,calls:1});
 check('rmw','committed code write precedes branch',{codeWrite:true},{flags:0x457,pc:0x1003,retired:1,reason:6,calls:1});
 writeFileSync(report,JSON.stringify({complete:true,records}));

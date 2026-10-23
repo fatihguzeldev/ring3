@@ -38,8 +38,8 @@ export function runPortCases(fixture) {
     check(t,{pc:0x1401,retired:1,budget:1,fp:t.startingFp});
     assert.equal(t.version(),before);
     const depth=t.portDepth();
-    assert(depth['guest.precise'].branchTables>0,'actual instruction-port selection uses emitted branch tables');
-    assert(depth['guest.precise'].maxDepth<=96,'1026 instruction starts use bounded 64-label chunks plus outer control');
+    assert(depth['guest.run'].branchTables>0,'the sole instruction body contains actual instruction-port branch tables');
+    assert(depth['guest.run'].maxDepth<=96,'1026 instruction starts use bounded 64-label chunks plus outer control');
   });
   for(const budget of[0,1,3])fixture(`immutable-port-aliases-and-unexecuted-metadata-budget-${budget}`,{
     // The skipped FLD ST0 aliases the primary's internal ST0/ST1 storage. The
