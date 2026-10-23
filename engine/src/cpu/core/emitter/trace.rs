@@ -13,12 +13,9 @@ pub(super) fn parameters() -> [ValType; 6] {
     ]
 }
 
-// Baseline owners record only while a bounded capture is active. The body is
-// entered after real source admission, and offset still names its actual port.
+// Every compiled owner records only while a bounded capture is active. The
+// actual owner identity and port preserve source authority across nested traces.
 pub(super) fn record_block(out: &mut Output<'_>, entry: u32, end: u32) {
-    if out.is_trace {
-        return;
-    }
     let recorder = out.internal(15);
     out.c()
         .global_get(link::TRACE_ARENA)

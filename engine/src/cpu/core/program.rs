@@ -39,6 +39,36 @@ pub enum CompileError {
     WasmLimit,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct TraceScore {
+    pub instructions: usize,
+    pub internal_edges: usize,
+}
+
+impl TraceScore {
+    /// Replacing a retained trace must add executable work or connectivity
+    /// without reducing either component. Equal recordings cannot recompile it.
+    pub(crate) fn strictly_grows(self, previous: Self) -> bool {
+        self.instructions >= previous.instructions
+            && self.internal_edges >= previous.internal_edges
+            && self != previous
+    }
+
+    fn emitted(blocks: &[Block], observed_edges: &BTreeSet<(u32, u32)>) -> Self {
+        let pcs: BTreeSet<_> = blocks
+            .iter()
+            .flat_map(|block| block.instructions.iter().map(|instruction| instruction.pc))
+            .collect();
+        Self {
+            instructions: blocks.iter().map(|block| block.instructions.len()).sum(),
+            internal_edges: observed_edges
+                .iter()
+                .filter(|(source, target)| pcs.contains(source) && pcs.contains(target))
+                .count(),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct CompiledCode {
     identity: u64,
@@ -52,6 +82,7 @@ pub struct CompiledCode {
     blocks: Box<[CodeBlock]>,
     native: Vec<NativeInstruction>,
     trace_root: Option<u32>,
+    trace_score: Option<TraceScore>,
     #[cfg(test)]
     roots: Box<[GuestAddress]>,
 }
@@ -94,6 +125,9 @@ impl CompiledCode {
     }
     pub(crate) fn trace_root(&self) -> Option<u32> {
         self.trace_root
+    }
+    pub(crate) fn trace_score(&self) -> Option<TraceScore> {
+        self.trace_score
     }
     pub(crate) fn instruction_pcs(&self) -> impl Iterator<Item = u32> + '_ {
         self.instruction_pcs.iter().copied()
@@ -218,6 +252,28 @@ pub(crate) fn compile_observed(
     owners: &[&CompiledCode],
     expected_source_version: u64,
 ) -> Result<Option<CompiledCode>, CompileError> {
+    compile_observed_with_growth(
+        memory,
+        root,
+        options,
+        events,
+        owners,
+        expected_source_version,
+        None,
+    )
+}
+
+/// An existing executor requires strict growth before allocating an identity or
+/// emitting Wasm. The score covers this capture, never an unobserved owner union.
+pub(crate) fn compile_observed_with_growth(
+    memory: &AddressSpace,
+    root: GuestAddress,
+    options: CompileOptions,
+    events: &[super::trace::TraceEvent],
+    owners: &[&CompiledCode],
+    expected_source_version: u64,
+    previous: Option<TraceScore>,
+) -> Result<Option<CompiledCode>, CompileError> {
     use super::trace::{BLOCK, CAPACITY, NUMERIC};
     if validate_options(options).is_err()
         || !(2..=CAPACITY).contains(&events.len())
@@ -340,6 +396,10 @@ pub(crate) fn compile_observed(
         return Ok(None);
     }
     let native = collect_native(&blocks);
+    let score = TraceScore::emitted(&blocks, &edges);
+    if previous.is_some_and(|previous| !score.strictly_grows(previous)) {
+        return Ok(None);
+    }
     let identity = next_identity()?;
     let observed_edges: Vec<_> = edges.into_iter().collect();
     let wasm = super::emitter::emit_observed(&blocks, root.0, identity, &native, &observed_edges);
@@ -357,7 +417,7 @@ pub(crate) fn compile_observed(
         native,
         sources,
         &[root],
-        Some(root.0),
+        Some((root.0, score)),
     )))
 }
 
@@ -716,7 +776,7 @@ fn finish_code(
     native: Vec<NativeInstruction>,
     mut sources: Vec<CodeSnapshot>,
     _roots: &[GuestAddress],
-    trace_root: Option<u32>,
+    trace: Option<(u32, TraceScore)>,
 ) -> CompiledCode {
     // instruction snapshots on the same pages share one mapping/content authority.
     sources.sort_unstable_by_key(|source| (source.first, source.versions.len()));
@@ -744,14 +804,14 @@ fn finish_code(
         identity,
         memory_identity: memory.identity(),
         validated_source_version: AtomicU64::new(memory.code_source_version()),
-        entries: trace_root.map_or_else(
+        entries: trace.map_or_else(
             || {
                 blocks
                     .iter()
                     .map(|block| GuestAddress(block.entry))
                     .collect()
             },
-            |root| vec![GuestAddress(root)],
+            |(root, _)| vec![GuestAddress(root)],
         ),
         instruction_pcs: instruction_pcs.into_boxed_slice(),
         block_pcs: block_pcs.into_boxed_slice(),
@@ -759,7 +819,8 @@ fn finish_code(
         wasm,
         sources,
         native,
-        trace_root,
+        trace_root: trace.map(|(root, _)| root),
+        trace_score: trace.map(|(_, score)| score),
         #[cfg(test)]
         roots: _roots.into(),
     }
@@ -915,6 +976,321 @@ mod observed_tests {
         assert_ne!(code.identity(), caller.identity());
         assert_eq!(caller.wasm(), before);
         assert!(caller.is_current(&memory) && callee.is_current(&memory));
+    }
+
+    #[test]
+    fn completed_trace_owner_spans_extend_into_the_actual_baseline_callee_and_continuation() {
+        let mut memory = memory();
+        let (caller, callee) = call_loop(&mut memory);
+        assert_eq!(caller.trace_score(), None);
+        assert_eq!(callee.trace_score(), None);
+        let prefix = compile_observed(
+            &memory,
+            GuestAddress(0x1000),
+            CompileOptions::default(),
+            &[block(&caller, 0x1000, 0), block(&callee, 0x1100, 0)],
+            &[&caller, &callee],
+            memory.code_source_version(),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(prefix.instruction_pcs().collect::<Vec<_>>(), [0x1000]);
+        assert_eq!(
+            prefix.trace_score(),
+            Some(TraceScore {
+                instructions: 1,
+                internal_edges: 0
+            })
+        );
+        let prefix_bytes = prefix.wasm().to_vec();
+        let events = [
+            block(&prefix, 0x1000, 0),
+            block(&callee, 0x1100, 0),
+            block(&caller, 0x1005, 0),
+            block(&prefix, 0x1000, 0),
+        ];
+        let extended = compile_observed_with_growth(
+            &memory,
+            GuestAddress(0x1000),
+            CompileOptions::default(),
+            &events,
+            &[&prefix, &caller, &callee],
+            memory.code_source_version(),
+            prefix.trace_score(),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            extended.trace_score(),
+            Some(TraceScore {
+                instructions: 5,
+                internal_edges: 5
+            })
+        );
+        assert!(
+            extended
+                .trace_score()
+                .unwrap()
+                .strictly_grows(prefix.trace_score().unwrap())
+        );
+        assert_eq!(extended.entrypoints(), &[GuestAddress(0x1000)]);
+        assert!(!extended.supports_entry(0x1100));
+        assert_eq!(prefix.wasm(), prefix_bytes);
+        assert!(prefix.is_current(&memory));
+        assert!(caller.is_current(&memory) && callee.is_current(&memory));
+    }
+
+    #[test]
+    fn a_recorded_trace_owner_has_the_same_geometry_and_source_obligations_as_a_baseline() {
+        let mut memory = memory();
+        let (caller, callee) = call_loop(&mut memory);
+        let prefix = compile_observed(
+            &memory,
+            GuestAddress(0x1000),
+            CompileOptions::default(),
+            &[block(&caller, 0x1000, 0), block(&callee, 0x1100, 0)],
+            &[&caller, &callee],
+            memory.code_source_version(),
+        )
+        .unwrap()
+        .unwrap();
+        let valid = [block(&prefix, 0x1000, 0), block(&callee, 0x1100, 0)];
+        for field in 0..3 {
+            let mut events = valid;
+            match field {
+                0 => events[0].end += 1,
+                1 => events[0].offset = 1,
+                _ => events[0].owner = 0,
+            }
+            assert!(
+                compile_observed(
+                    &memory,
+                    GuestAddress(0x1000),
+                    CompileOptions::default(),
+                    &events,
+                    &[&prefix, &callee],
+                    memory.code_source_version(),
+                )
+                .unwrap()
+                .is_none()
+            );
+        }
+        let old_source = memory.code_source_version();
+        memory.write(GuestAddress(0x1000), &[0x90]).unwrap();
+        assert!(!prefix.is_current(&memory));
+        for expected_source in [old_source, memory.code_source_version()] {
+            assert!(
+                compile_observed(
+                    &memory,
+                    GuestAddress(0x1000),
+                    CompileOptions::default(),
+                    &valid,
+                    &[&prefix, &callee],
+                    expected_source,
+                )
+                .unwrap()
+                .is_none()
+            );
+        }
+    }
+
+    #[test]
+    fn replaying_equal_completed_coverage_does_not_qualify_as_trace_growth() {
+        let mut memory = memory();
+        let (caller, callee) = call_loop(&mut memory);
+        let first = compile_observed(
+            &memory,
+            GuestAddress(0x1000),
+            CompileOptions::default(),
+            &[
+                block(&caller, 0x1000, 0),
+                block(&callee, 0x1100, 0),
+                block(&caller, 0x1005, 0),
+                block(&caller, 0x1000, 0),
+            ],
+            &[&caller, &callee],
+            memory.code_source_version(),
+        )
+        .unwrap()
+        .unwrap();
+        let replay = compile_observed(
+            &memory,
+            GuestAddress(0x1000),
+            CompileOptions::default(),
+            &[
+                block(&first, 0x1000, 0),
+                block(&first, 0x1100, 0),
+                block(&first, 0x1005, 0),
+                block(&first, 0x1000, 0),
+            ],
+            &[&first],
+            memory.code_source_version(),
+        )
+        .unwrap()
+        .unwrap();
+        assert_ne!(first.identity(), replay.identity());
+        assert_eq!(replay.trace_score(), first.trace_score());
+        assert!(
+            !replay
+                .trace_score()
+                .unwrap()
+                .strictly_grows(first.trace_score().unwrap())
+        );
+        assert!(
+            !first
+                .trace_score()
+                .unwrap()
+                .strictly_grows(replay.trace_score().unwrap())
+        );
+        assert!(
+            compile_observed_with_growth(
+                &memory,
+                GuestAddress(0x1000),
+                CompileOptions::default(),
+                &[
+                    block(&first, 0x1000, 0),
+                    block(&first, 0x1100, 0),
+                    block(&first, 0x1005, 0),
+                    block(&first, 0x1000, 0),
+                ],
+                &[&first],
+                memory.code_source_version(),
+                first.trace_score(),
+            )
+            .unwrap()
+            .is_none()
+        );
+
+        // A source owner's other blocks are not evidence that this capture
+        // executed them. The callee entry is only a final witness here.
+        let prefix = compile_observed(
+            &memory,
+            GuestAddress(0x1000),
+            CompileOptions::default(),
+            &[block(&first, 0x1000, 0), block(&first, 0x1100, 0)],
+            &[&first],
+            memory.code_source_version(),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(prefix.instruction_pcs().collect::<Vec<_>>(), [0x1000]);
+        assert_eq!(
+            prefix.trace_score(),
+            Some(TraceScore {
+                instructions: 1,
+                internal_edges: 0
+            })
+        );
+        assert!(
+            !prefix
+                .trace_score()
+                .unwrap()
+                .strictly_grows(first.trace_score().unwrap())
+        );
+        assert!(
+            compile_observed_with_growth(
+                &memory,
+                GuestAddress(0x1000),
+                CompileOptions::default(),
+                &[block(&first, 0x1000, 0), block(&first, 0x1100, 0)],
+                &[&first],
+                memory.code_source_version(),
+                first.trace_score(),
+            )
+            .unwrap()
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn a_completed_loop_closing_edge_grows_a_trace_without_adding_instruction_pcs() {
+        let mut memory = memory();
+        memory.write(GuestAddress(0x1000), &[0xeb, 3]).unwrap();
+        // JNZ 1000; NOP; RET. The initial recording observes only fallthrough.
+        memory
+            .write(GuestAddress(0x1005), &[0x75, 0xf9, 0x90, 0xc3])
+            .unwrap();
+        let owner = compile(&memory, GuestAddress(0x1000), CompileOptions::default()).unwrap();
+        let first = compile_observed(
+            &memory,
+            GuestAddress(0x1000),
+            CompileOptions::default(),
+            &[
+                block(&owner, 0x1000, 0),
+                block(&owner, 0x1005, 0),
+                block(&owner, 0x1007, 0),
+            ],
+            &[&owner],
+            memory.code_source_version(),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            first.trace_score(),
+            Some(TraceScore {
+                instructions: 2,
+                internal_edges: 1
+            })
+        );
+        let closed = compile_observed_with_growth(
+            &memory,
+            GuestAddress(0x1000),
+            CompileOptions::default(),
+            &[
+                block(&first, 0x1000, 0),
+                block(&first, 0x1005, 0),
+                block(&first, 0x1000, 0),
+                block(&first, 0x1005, 0),
+                block(&owner, 0x1007, 0),
+            ],
+            &[&first, &owner],
+            memory.code_source_version(),
+            first.trace_score(),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            closed.trace_score(),
+            Some(TraceScore {
+                instructions: 2,
+                internal_edges: 2
+            })
+        );
+        assert_eq!(
+            closed.instruction_pcs().collect::<Vec<_>>(),
+            [0x1000, 0x1005]
+        );
+        assert_eq!(closed.instruction_count(), first.instruction_count());
+        assert!(
+            closed
+                .trace_score()
+                .unwrap()
+                .strictly_grows(first.trace_score().unwrap())
+        );
+        assert!(!closed.instruction_pcs().any(|pc| pc == 0x1007));
+    }
+
+    #[test]
+    fn trace_growth_requires_componentwise_dominance_and_one_strict_component() {
+        let previous = TraceScore {
+            instructions: 3,
+            internal_edges: 2,
+        };
+        for (instructions, internal_edges, grows) in [
+            (3, 2, false),
+            (4, 2, true),
+            (3, 3, true),
+            (4, 3, true),
+            (2, 3, false),
+            (4, 1, false),
+            (2, 1, false),
+        ] {
+            let candidate = TraceScore {
+                instructions,
+                internal_edges,
+            };
+            assert_eq!(candidate.strictly_grows(previous), grows, "{candidate:?}");
+        }
     }
 
     #[test]
