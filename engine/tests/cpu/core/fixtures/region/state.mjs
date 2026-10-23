@@ -29,6 +29,23 @@ function retained(t,wanted) {
 
 export function runStateCases(fixture) {
   runRenamingCase(fixture);
+  fixture('eight-distinct-native-cells-survive-a-seven-exchange-precise-tail',{
+    segments:[[0x1000,'d903 d94304 d94308 d9430c d94310 d94314 d94318 d9431c eb27'],
+      [0x1040,'d9cf d9ce d9cd d9cc d9cb d9ca d9c9 0f0b']],
+    data:page=>{const d=new DataView(page.buffer);for(let i=0;i<8;i++)d.setFloat32(i*4,i,true);},
+  },t=>{
+    // The first block owns all eight native payloads. Its nine completed instructions
+    // leave seven quota for the seven swaps in the next block's precise body.
+    const before=t.version();
+    retained(t,{pc:0x104e,retired:16,budget:16,
+      fp:t.fp({tag:0x1000,opcode:0x1c9,fip:0x104c,fdp:0x301c,registers:{
+        0:'00000000000000c00140',1:'00000000000000a00140',2:'00000000000000800140',
+        3:'00000000000000c00040',4:'00000000000000800040',5:'0000000000000080ff3f',
+        6:'00000000000000000000',7:'00000000000000e00140',
+      }})});
+    assert.equal(t.result.runs[0].helperCalls,0,'all eight native selections and register exchanges stay direct');
+    assert.equal(t.version(),before,'register permutation does not invent a memory transaction');
+  });
   const vector='0000803f000000400000404000008040';
   fixture('direct-packed-xmm-moves-preserve-renamed-dirty-x87-values',{
     segments:[[0x1000,'d903 d94304 d9c9 0f104320 0f114330 d8c1 d95b08 d95b0c 0f0b']],
@@ -56,6 +73,34 @@ export function runStateCases(fixture) {
       fp:t.fp({tag:0,opcode:0x103,fip:0x1012,fdp:0x3000,
         registers:Object.fromEntries(Array.from({length:8},(_,i)=>[i,'00000000000000c00040']))})});
     assert.equal(t.result.runs[0].helperCalls,0,'entry-contract rejection does not execute an unrequested FP instruction');
+  });
+  const three='00000000000000c00040',negativeZero='00000000000000000080';
+  const quietNaN='00000000000000c0ff7f';
+  for(const c of[
+    {name:'fld-preserves-source-special-class-and-classifies-new-normal',code:'d9c0',budget:1,
+      initialTag:0xfffe,initial:{0:three},tag:0x3ffe,status:0x3a20,opcode:0x1c0,values:{0:three,7:three},helpers:0},
+    {name:'fst-preserves-source-normal-class-and-classifies-written-zero',code:'ddd1',budget:2,
+      initialTag:0xfffc,initial:{0:negativeZero,1:three},tag:0xfff4,status:0x220,opcode:0x5d1,
+      values:{0:negativeZero,1:negativeZero},helpers:0},
+    {name:'fxch-classifies-both-written-zero-and-normal',code:'d9c9',budget:1,
+      initialTag:0xfff2,initial:{0:three,1:negativeZero},tag:0xfff1,status:0x20,opcode:0x1c9,
+      values:{0:negativeZero,1:three},helpers:0},
+    {name:'fst-preserves-source-normal-class-and-classifies-written-special',code:'ddd1',budget:2,
+      initialTag:0xfffc,initial:{0:quietNaN,1:three},tag:0xfff8,status:0x220,opcode:0x5d1,
+      values:{0:quietNaN,1:quietNaN},helpers:1},
+  ])fixture(`occupied-tag-transfer-${c.name}`,{
+    segments:[[0x1000,`${c.code} 0f0b`]],
+    initialFp:{status:0x220,tag:c.initialTag,registers:c.initial,opcode:0x5a5,
+      fip:0x11223344,fdp:0x55667788,cs:0x33,ds:0x5b},
+  },t=>{
+    // An occupied source can carry a class inconsistent with its payload (for example
+    // after FLDENV). Only written destinations are reclassified; source bits persist.
+    const before=t.version();
+    retained(t,{pc:0x1002,retired:1,budget:c.budget,work:1,remaining:c.budget-1,stop:c.budget===1?2:4,
+      fp:t.fp({status:c.status,tag:c.tag,opcode:c.opcode,fip:0x1000,fdp:0x55667788,
+        ds:0x5b,registers:c.values})});
+    assert.equal(t.result.runs[0].helperCalls,c.helpers,'only the special payload requires canonical transfer semantics');
+    assert.equal(t.version(),before,'register-only tag transfer does not invent a memory transaction');
   });
   fixture('secondary-entry-does-not-inherit-the-primary-predecessor-gpr-constant',{
     segments:[[0x1000,'bb00300000 eb09'],[0x1010,'8b03 894708 0f0b']],

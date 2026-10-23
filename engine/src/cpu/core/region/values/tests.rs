@@ -80,7 +80,7 @@ fn scalar_copies_constants_and_wrapped_status_output_have_distinct_versions() {
 }
 
 #[test]
-fn internal_backedge_phi_never_removes_the_external_entry_guard() {
+fn internal_backedge_facts_keep_a_distinct_guarded_external_input() {
     let blocks = [
         block(0x1000, &[mov(Register32::Eax, 19), jump(0x2000)]),
         block(0x2000, &[Operation::Nop, jump(0x2000)]),
@@ -90,16 +90,17 @@ fn internal_backedge_phi_never_removes_the_external_entry_guard() {
     let entry = &plan.block(BlockId(1)).contract;
     assert!(entry.external);
     assert_eq!(entry.gpr_constants[0], Some(19));
-    let ValueKind::Phi { block, inputs } = &plan.value(plan.frame(entry.frame).gpr[0]).kind else {
-        panic!("backedge requires a phi")
-    };
-    assert_eq!(*block, BlockId(1));
+    let input = plan.frame(entry.frame).gpr[0];
     assert_eq!(
-        inputs.iter().map(|(block, _)| *block).collect::<Vec<_>>(),
-        [BlockId(0), BlockId(1)]
+        plan.value(input).kind,
+        ValueKind::Input {
+            block: BlockId(1),
+            field: InputField::Gpr(0)
+        }
     );
-    // Source versions are stable arena IDs, not re-lowered instruction copies.
-    assert_eq!(inputs[1].1, plan.frame(plan.block(BlockId(1)).exit).gpr[0]);
+    // The backedge reuses the same parameter/version rather than re-lowering
+    // unbounded symbolic loop iterations or bypassing the import guard.
+    assert_eq!(input, plan.frame(plan.block(BlockId(1)).exit).gpr[0]);
     let rerun = RegionPlan::analyze(&region);
     assert_eq!(plan.frames(), rerun.frames());
 }
@@ -200,6 +201,57 @@ fn stack_renaming_retains_all_ghosts_and_uses_at_most_eight_cells() {
 }
 
 #[test]
+fn register_transfers_classify_written_tags_without_changing_untouched_sources() {
+    let load = single(&[fp(X87Operation::LoadRegister { index: 0 })]);
+    let before = load.frame(load.block(BlockId(0)).entry);
+    let after = load.frame(load.block(BlockId(0)).exit);
+    assert_eq!(after.fp.tags[1], before.fp.tags[0]);
+    assert_eq!(
+        load.shape(load.block(BlockId(0)).exit).tags[0],
+        TagRecipe::Value(StorageCell(0))
+    );
+    let store = single(&[fp(X87Operation::StoreRegister {
+        index: 2,
+        pop: false,
+    })]);
+    let before = store.frame(store.block(BlockId(0)).entry);
+    let after = store.frame(store.block(BlockId(0)).exit);
+    assert_eq!(after.fp.tags[0], before.fp.tags[0]);
+    assert_eq!(
+        store.shape(store.block(BlockId(0)).exit).tags[2],
+        TagRecipe::Value(StorageCell(0))
+    );
+    let exchange = single(&[fp(X87Operation::Exchange { index: 1 })]);
+    let shape = exchange.shape(exchange.block(BlockId(0)).exit);
+    assert_eq!(shape.tags[0], TagRecipe::Value(StorageCell(1)));
+    assert_eq!(shape.tags[1], TagRecipe::Value(StorageCell(0)));
+}
+
+#[test]
+fn explicit_fp_output_cell_survives_aliases_and_a_nonzero_destination_pop() {
+    let plan = single(&[
+        fp(X87Operation::LoadRegister { index: 1 }),
+        fp(X87Operation::Binary {
+            kind: X87Binary::Add,
+            destination: 1,
+            source: 0,
+            pop: true,
+        }),
+    ]);
+    let instruction = plan.instruction(BlockId(0), 1);
+    let after = plan.frame(instruction.after);
+    let result = after.fp.payload[0].values()[0];
+    assert_eq!(
+        plan.fp_output_cell(instruction.after),
+        Some(plan.storage(result).unwrap().cell)
+    );
+    assert_ne!(
+        after.fp.payload[7], after.fp.payload[0],
+        "the popped source ghost stays distinct from the arithmetic result"
+    );
+}
+
+#[test]
 fn helper_and_control_change_kill_all_previous_admission_proofs() {
     let plan = single(&[binary(), fp(X87Operation::LoadControl), binary()]);
     let first = plan.instruction(BlockId(0), 0);
@@ -223,7 +275,7 @@ fn helper_and_control_change_kill_all_previous_admission_proofs() {
             .iter()
             .all(|payload| matches!(payload, FpValue::Tagged { .. }))
     );
-    assert!(helper.fp.as_ref().unwrap().kills_proofs);
+    assert!(plan.frame(helper.after).fp.metadata.canonical);
 }
 
 #[test]

@@ -63,23 +63,9 @@ pub(in crate::cpu::core) enum InputField {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::cpu::core) enum ValueKind {
-    Input {
-        block: BlockId,
-        field: InputField,
-    },
+    Input { block: BlockId, field: InputField },
     Constant(u32),
-    Instruction {
-        point: ProgramPoint,
-        output: u8,
-    },
-    Phi {
-        block: BlockId,
-        inputs: Vec<(BlockId, ValueId)>,
-    },
-    AddConstant {
-        value: ValueId,
-        addend: u32,
-    },
+    Instruction { point: ProgramPoint, output: u8 },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -120,7 +106,6 @@ pub(in crate::cpu::core) enum EffectKind {
 pub(in crate::cpu::core) struct Effect {
     pub kind: EffectKind,
     pub at: Option<ProgramPoint>,
-    pub inputs: Vec<EffectId>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -140,6 +125,19 @@ pub(in crate::cpu::core) enum FpValue {
 }
 
 impl FpValue {
+    pub fn contains(self, value: ValueId) -> bool {
+        match self {
+            Self::ExactF64(native, _) => native == value,
+            Self::Opaque80 { lo, hi } => lo == value || hi == value,
+            Self::Tagged {
+                lo,
+                hi,
+                native,
+                valid,
+                ..
+            } => [lo, hi, native, valid].contains(&value),
+        }
+    }
     pub fn values(self) -> Vec<ValueId> {
         match self {
             Self::ExactF64(value, _) => vec![value],
@@ -224,49 +222,15 @@ pub(in crate::cpu::core) enum TagRecipe {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(in crate::cpu::core) struct FpStep {
-    pub operation: X87Operation,
-    pub address: Option<EffectiveAddress>,
-    pub opcode: u16,
-    pub inputs: Vec<FpValue>,
-    pub outputs: Vec<FpValue>,
-    pub kills_proofs: bool,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::cpu::core) struct InstructionPlan {
     pub before: FrameStateId,
     pub after: FrameStateId,
-    pub inputs: Vec<ValueId>,
-    pub outputs: Vec<ValueId>,
-    pub proofs: Vec<ProofId>,
-    pub fp: Option<FpStep>,
-    pub address: Option<AddressPlan>,
-    pub effects: Vec<EffectId>,
-    pub helper_after: Option<FrameStateId>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::cpu::core) struct ParallelCopy {
-    pub source: ValueId,
-    pub destination: ValueId,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(in crate::cpu::core) enum EdgeAction {
-    Copy(ParallelCopy),
-    Pack80 {
-        source: ValueId,
-        lo: ValueId,
-        hi: ValueId,
-    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::cpu::core) struct EdgePlan {
     pub target: BlockId,
     pub frame: FrameStateId,
-    pub actions: Vec<EdgeAction>,
     pub fp_rebase: bool,
 }
 
@@ -370,14 +334,9 @@ impl RegionPlan {
         self.constant_facts.push(fact);
         id
     }
-    fn allocate_effect(
-        &mut self,
-        kind: EffectKind,
-        at: Option<ProgramPoint>,
-        inputs: Vec<EffectId>,
-    ) -> EffectId {
+    fn allocate_effect(&mut self, kind: EffectKind, at: Option<ProgramPoint>) -> EffectId {
         let id = EffectId(self.effects.len());
-        self.effects.push(Effect { kind, at, inputs });
+        self.effects.push(Effect { kind, at });
         id
     }
     fn allocate_frame(&mut self, frame: FrameState) -> FrameStateId {

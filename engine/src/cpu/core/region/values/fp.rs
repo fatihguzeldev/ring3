@@ -16,11 +16,11 @@ pub(super) fn entry(
         plan.constant_facts[value.0] = facts.gpr[i];
         value
     });
-    let flags_effect = plan.allocate_effect(EffectKind::Flags, None, vec![]);
-    let memory_effect = plan.allocate_effect(EffectKind::Memory, None, vec![]);
-    let control_epoch = plan.allocate_effect(EffectKind::Control, None, vec![]);
-    let status_effect = plan.allocate_effect(EffectKind::Status, None, vec![]);
-    let metadata_effect = plan.allocate_effect(EffectKind::Metadata, None, vec![]);
+    let flags_effect = plan.allocate_effect(EffectKind::Flags, None);
+    let memory_effect = plan.allocate_effect(EffectKind::Memory, None);
+    let control_epoch = plan.allocate_effect(EffectKind::Control, None);
+    let status_effect = plan.allocate_effect(EffectKind::Status, None);
+    let metadata_effect = plan.allocate_effect(EffectKind::Metadata, None);
     let (mut fp, mut guards) = input_fp(
         plan,
         block,
@@ -168,21 +168,9 @@ pub(super) fn kill(
     shape: &mut FpShape,
     point: ProgramPoint,
 ) {
-    let control = plan.allocate_effect(
-        EffectKind::Control,
-        Some(point),
-        vec![frame.fp.control_epoch],
-    );
-    let status = plan.allocate_effect(
-        EffectKind::Status,
-        Some(point),
-        vec![frame.fp.status_effect],
-    );
-    let metadata = plan.allocate_effect(
-        EffectKind::Metadata,
-        Some(point),
-        vec![frame.fp.metadata_effect],
-    );
+    let control = plan.allocate_effect(EffectKind::Control, Some(point));
+    let status = plan.allocate_effect(EffectKind::Status, Some(point));
+    let metadata = plan.allocate_effect(EffectKind::Metadata, Some(point));
     frame.fp = input_fp(plan, point.block, control, status, metadata, [false; 8]).0;
     frame.fp.metadata.canonical = true;
     *shape = FpShape {
@@ -306,7 +294,7 @@ fn native_result(
     available: &mut Vec<ProofId>,
     destination: usize,
     native24: bool,
-) {
+) -> StorageCell {
     let cell = free_cell(shape, destination);
     let value = lower::definition(plan, point, 16 + destination as u8, ValueType::F64);
     plan.bind(value, cell, StorageLane::Native);
@@ -340,6 +328,7 @@ fn native_result(
     frame.fp.tags[destination] = TagFact::Value(value);
     shape.cells[destination] = cell;
     written(shape, destination);
+    cell
 }
 
 fn written(shape: &mut FpShape, destination: usize) {
@@ -377,32 +366,15 @@ pub(super) fn lower(
     opcode: u16,
     point: ProgramPoint,
     available: &mut Vec<ProofId>,
-    proofs: &mut Vec<ProofId>,
-    inputs: &mut Vec<ValueId>,
-    outputs: &mut Vec<ValueId>,
-    effects: &mut Vec<EffectId>,
-) -> FpStep {
-    let mut step = FpStep {
-        operation,
-        address,
-        opcode,
-        inputs: vec![],
-        outputs: vec![],
-        kills_proofs: false,
-    };
+) -> Option<StorageCell> {
+    let mut output = None;
     if matches!(operation, X87Operation::Wait | X87Operation::StatusToAx) {
-        return step;
+        return None;
     }
     if !flow::direct_fp(operation) {
         kill(plan, frame, shape, point);
         available.clear();
-        effects.extend([
-            frame.fp.control_epoch,
-            frame.fp.status_effect,
-            frame.fp.metadata_effect,
-        ]);
-        step.kills_proofs = true;
-        return step;
+        return None;
     }
     match operation {
         X87Operation::Load(X87Format::Float32) => {
@@ -415,8 +387,7 @@ pub(super) fn lower(
                 ProofKind::Empty,
             );
             push(frame, shape);
-            native_result(plan, frame, shape, point, available, 0, true);
-            step.outputs.push(frame.fp.payload[0]);
+            output = Some(native_result(plan, frame, shape, point, available, 0, true));
         }
         X87Operation::LoadRegister { index } => {
             let index = index as usize;
@@ -430,15 +401,13 @@ pub(super) fn lower(
                 ProofKind::Empty,
             );
             let payload = frame.fp.payload[index];
-            let tag = frame.fp.tags[index];
             let cell = shape.cells[index];
-            step.inputs.push(payload);
             push(frame, shape);
             frame.fp.payload[0] = payload;
-            frame.fp.tags[0] = tag;
+            frame.fp.tags[0] = TagFact::Value(payload.values()[0]);
             shape.cells[0] = cell;
             written(shape, 0);
-            step.outputs.push(payload);
+            output = Some(cell);
         }
         X87Operation::StoreRegister {
             index,
@@ -447,12 +416,11 @@ pub(super) fn lower(
             occupied(plan, frame, point, available, 0);
             let index = index as usize;
             let payload = frame.fp.payload[0];
-            step.inputs.push(payload);
             frame.fp.payload[index] = payload;
-            frame.fp.tags[index] = frame.fp.tags[0];
+            frame.fp.tags[index] = TagFact::Value(payload.values()[0]);
             shape.cells[index] = shape.cells[0];
             written(shape, index);
-            step.outputs.push(payload);
+            output = Some(shape.cells[0]);
             if should_pop {
                 pop(frame, shape);
             }
@@ -461,10 +429,9 @@ pub(super) fn lower(
             let index = index as usize;
             occupied(plan, frame, point, available, 0);
             occupied(plan, frame, point, available, index);
-            step.inputs
-                .extend([frame.fp.payload[0], frame.fp.payload[index]]);
             frame.fp.payload.swap(0, index);
-            frame.fp.tags.swap(0, index);
+            frame.fp.tags[0] = TagFact::Value(frame.fp.payload[0].values()[0]);
+            frame.fp.tags[index] = TagFact::Value(frame.fp.payload[index].values()[0]);
             shape.cells.swap(0, index);
             shape.inherited_dirty.swap(0, index);
             let a = shape.written & 1 != 0;
@@ -473,8 +440,7 @@ pub(super) fn lower(
             shape.written |= u8::from(a) << index | u8::from(b);
             written(shape, 0);
             written(shape, index);
-            step.outputs
-                .extend([frame.fp.payload[0], frame.fp.payload[index]]);
+            output = Some(shape.cells[0]);
         }
         X87Operation::Binary {
             destination,
@@ -485,12 +451,17 @@ pub(super) fn lower(
             proof(plan, frame, point, available, None, ProofKind::Control);
             let destination = destination as usize;
             let source = source as usize;
-            step.inputs
-                .push(admit(plan, frame, point, available, destination));
-            step.inputs
-                .push(admit(plan, frame, point, available, source));
-            native_result(plan, frame, shape, point, available, destination, false);
-            step.outputs.push(frame.fp.payload[destination]);
+            admit(plan, frame, point, available, destination);
+            admit(plan, frame, point, available, source);
+            output = Some(native_result(
+                plan,
+                frame,
+                shape,
+                point,
+                available,
+                destination,
+                false,
+            ));
             if should_pop {
                 pop(frame, shape);
             }
@@ -500,13 +471,13 @@ pub(super) fn lower(
             ..
         } => {
             proof(plan, frame, point, available, None, ProofKind::Control);
-            step.inputs.push(admit(plan, frame, point, available, 0));
-            native_result(plan, frame, shape, point, available, 0, false);
-            step.outputs.push(frame.fp.payload[0]);
+            admit(plan, frame, point, available, 0);
+            output = Some(native_result(
+                plan, frame, shape, point, available, 0, false,
+            ));
         }
         X87Operation::ChangeSign | X87Operation::Absolute => {
             occupied(plan, frame, point, available, 0);
-            step.inputs.push(frame.fp.payload[0]);
             let cell = free_cell(shape, 0);
             // The raw80 branch changes only its sign bit; a native cached payload changes
             // in parallel. Keeping the discriminator avoids inventing an exact-f64 proof.
@@ -540,13 +511,12 @@ pub(super) fn lower(
             frame.fp.tags[0] = TagFact::Value(native);
             shape.cells[0] = cell;
             written(shape, 0);
-            step.outputs.push(payload);
+            output = Some(cell);
         }
         X87Operation::Store {
             pop: should_pop, ..
         } => {
             occupied(plan, frame, point, available, 0);
-            step.inputs.push(frame.fp.payload[0]);
             if should_pop {
                 pop(frame, shape);
             }
@@ -567,21 +537,7 @@ pub(super) fn lower(
             memory_epoch: frame.memory_effect,
         });
     }
-    frame.fp.status_effect = plan.allocate_effect(
-        EffectKind::Status,
-        Some(point),
-        vec![frame.fp.status_effect],
-    );
-    frame.fp.metadata_effect = plan.allocate_effect(
-        EffectKind::Metadata,
-        Some(point),
-        vec![frame.fp.metadata_effect],
-    );
-    effects.extend([frame.fp.status_effect, frame.fp.metadata_effect]);
-    inputs.extend(step.inputs.iter().flat_map(|value| value.values()));
-    outputs.extend(step.outputs.iter().flat_map(|value| value.values()));
-    // These are success-prefix proofs. Consumers ask proofs_at(before) so a faulting
-    // admission never grants its future fact to the current instruction or a side exit.
-    *proofs = available.clone();
-    step
+    frame.fp.status_effect = plan.allocate_effect(EffectKind::Status, Some(point));
+    frame.fp.metadata_effect = plan.allocate_effect(EffectKind::Metadata, Some(point));
+    output
 }

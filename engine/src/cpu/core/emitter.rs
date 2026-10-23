@@ -424,11 +424,14 @@ impl Output<'_> {
         let demands = &block.flags.after;
         for instruction in &block.instructions {
             let analyzed = self.plan.instruction(id, instruction.prefix);
-            self.before_frame = Some(analyzed.before);
-            self.after_frame = Some(analyzed.after);
+            let before_id = analyzed.before;
+            let after_id = analyzed.after;
+            self.before_frame = Some(before_id);
+            self.after_frame = Some(after_id);
             self.frame = self.before_frame;
-            let prefix = instruction.exits.before.retired;
-            self.pc = match instruction.exits.before.pc {
+            let before = self.plan.frame(before_id);
+            let prefix = before.retired;
+            self.pc = match before.pc {
                 super::region::ResumePc::Exact(pc) => pc,
                 super::region::ResumePc::Computed => unreachable!("instruction entry is exact"),
             };
@@ -488,17 +491,20 @@ impl Output<'_> {
                 }
             }
             self.frame = self.after_frame;
-            if writes_memory && let Some(completed) = instruction.exits.after {
+            if writes_memory && instruction.exits.after.is_some() {
+                let completed = self.plan.frame(after_id);
+                let completed_pc = completed.pc;
+                let completed_retired = completed.retired;
                 self.c()
                     .local_get(WRITE_STATUS)
                     .i32_const(2)
                     .i32_eq()
                     .if_(BlockType::Empty);
-                let pc = match completed.pc {
+                let pc = match completed_pc {
                     super::region::ResumePc::Exact(pc) => Some(pc),
                     super::region::ResumePc::Computed => None,
                 };
-                self.exit(StopReason::CodeInvalidated, pc, completed.retired);
+                self.exit(StopReason::CodeInvalidated, pc, completed_retired);
                 self.c().end();
             }
         }
