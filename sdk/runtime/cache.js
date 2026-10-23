@@ -1,11 +1,11 @@
 const MAX_CODE_BYTES = 128 * 1024 * 1024;
 const LINK_LOCALS = [...Array.from({length:12},(_,index)=>index+2),
-  ...Array.from({length:6},(_,index)=>index+20),...Array.from({length:21},(_,index)=>index+76),99,100,101,102,103];
+  ...Array.from({length:6},(_,index)=>index+20),99];
 const LINK_GLOBALS = ['link.mode','link.valid','link.context',...LINK_LOCALS.map(local=>`link.local${local}`)];
 const SUPPORT_FUNCTIONS = [
-  ['support.flags',8],['support.materialize_numeric',18],['support.resolve_status',5],
+  ['support.flags',8],['support.materialize_numeric',1],['support.resolve_status',5],
   ['support.translate_page',3],['support.acquire_group',9],['support.store8',6],
-  ['support.store16',6],['support.store32',6],['support.normalize_kernel',32],
+  ['support.store16',6],['support.store32',6],['support.commit_pool',42],
 ];
 const SUPPORT_IMPORTS = [...SUPPORT_FUNCTIONS.map(([name])=>name),'support.abi'];
 const NATIVE_COUNTERS = ['compiled','admittedEncodedBytes','countEvictions','byteEvictions',
@@ -237,7 +237,7 @@ export class CodeCache {
         !cold.every(value => value instanceof WebAssembly.Global && value.value === 0))
       throw new Error('invalid core dispatch cold counters');
     if (this.linkedCore) {
-      if (!(exports.linkAbi instanceof WebAssembly.Global) || exports.linkAbi.value !== 1 ||
+      if (!(exports.linkAbi instanceof WebAssembly.Global) || exports.linkAbi.value !== 2 ||
           !cold.every(value=>value !== undefined)) throw new Error('invalid core link ABI');
       const globals = {};
       for (const name of LINK_GLOBALS) {
@@ -252,7 +252,7 @@ export class CodeCache {
     if (exports.supportAbi === undefined) {
       if (supportNames.length) throw new Error('core support exports lack an ABI');
     } else {
-      if (!(exports.supportAbi instanceof WebAssembly.Global) || exports.supportAbi.value !== 1 ||
+      if (!(exports.supportAbi instanceof WebAssembly.Global) || exports.supportAbi.value !== 2 ||
           supportNames.length !== SUPPORT_FUNCTIONS.length ||
           SUPPORT_FUNCTIONS.some(([name,arity])=>typeof exports[name] !== 'function' || exports[name].length !== arity))
         throw new Error('invalid core support ABI');

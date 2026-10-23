@@ -117,13 +117,7 @@ pub(super) fn emit(
             .collect::<Vec<_>>(),
         [],
     );
-    types.ty().function(
-        [ValType::F64; 8]
-            .into_iter()
-            .chain([ValType::I32; 10])
-            .collect::<Vec<_>>(),
-        [],
-    );
+    types.ty().function([ValType::I32], []);
     types.ty().function(
         [ValType::I32; 5]
             .into_iter()
@@ -222,7 +216,7 @@ pub(super) fn emit(
         "guest.run",
         "guest.lookup",
         "guest.publish",
-        "guest.normalize_frame",
+        "guest.commit_frame",
     ]
     .into_iter()
     .enumerate()
@@ -314,7 +308,7 @@ fn run(
         (1, ValType::I32),
         (3, ValType::I32),
         (2, ValType::I32),
-        (20, ValType::I32),
+        (23, ValType::I32),
     ]);
     let mut out = Output {
         function: &mut function,
@@ -350,6 +344,7 @@ fn run(
         .return_()
         .end();
     out.redirect_returns = true;
+    link::import_canonical(&mut out);
     link::has_state(out.c().raw());
     out.c().if_(BlockType::Empty);
     link::restore(&mut out);

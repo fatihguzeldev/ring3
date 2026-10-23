@@ -4,7 +4,7 @@ use wasm_encoder::{
     GlobalType, ImportSection, NameMap, TypeSection, ValType,
 };
 
-pub(in crate::cpu::core) const ABI: i32 = 1;
+pub(in crate::cpu::core) const ABI: i32 = 2;
 pub(in crate::cpu::core) const NAMES: [&str; 9] = [
     "support.flags",
     "support.materialize_numeric",
@@ -14,7 +14,7 @@ pub(in crate::cpu::core) const NAMES: [&str; 9] = [
     "support.store8",
     "support.store16",
     "support.store32",
-    "support.normalize_kernel",
+    "support.commit_pool",
 ];
 
 const COUNT: u32 = NAMES.len() as u32;
@@ -22,13 +22,7 @@ const COUNT: u32 = NAMES.len() as u32;
 pub(in crate::cpu::core) fn types(types: &mut TypeSection) -> [u32; 9] {
     let first = types.len();
     types.ty().function([ValType::I32; 8], [ValType::I32]);
-    types.ty().function(
-        [ValType::F64; 8]
-            .into_iter()
-            .chain([ValType::I32; 10])
-            .collect::<Vec<_>>(),
-        [],
-    );
+    types.ty().function([ValType::I32], []);
     types.ty().function(
         [ValType::I32; 2]
             .into_iter()
@@ -102,9 +96,9 @@ pub(in crate::cpu::core) fn define(
     exports.export("supportAbi", ExportKind::Global, abi_global);
 }
 
-pub(in crate::cpu::core) fn bodies(code: &mut CodeSection) {
+pub(in crate::cpu::core) fn bodies(code: &mut CodeSection, first: u32) {
     code.function(&super::super::flags::emit_function());
-    code.function(&numeric::span::emit_materializer());
+    code.function(&numeric::pool::emit_materializer(first + 2));
     code.function(&numeric::span::emit_status_resolver());
     code.function(&super::super::memory::cache::emit_translator());
     code.function(&super::super::memory::groups::emit_acquire());

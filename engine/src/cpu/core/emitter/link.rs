@@ -8,7 +8,7 @@ use wasm_encoder::{
 pub(in crate::cpu::core) const MODE: u32 = 0;
 pub(in crate::cpu::core) const VALID: u32 = 1;
 pub(in crate::cpu::core) const CONTEXT: u32 = 2;
-pub(in crate::cpu::core) const GLOBAL_COUNT: u32 = 47;
+pub(in crate::cpu::core) const GLOBAL_COUNT: u32 = 22;
 pub(in crate::cpu::core) const FIELDS: &[(u32, ValType)] = &[
     (2, ValType::I32),
     (3, ValType::I32),
@@ -28,32 +28,7 @@ pub(in crate::cpu::core) const FIELDS: &[(u32, ValType)] = &[
     (23, ValType::I32),
     (24, ValType::I32),
     (25, ValType::I32),
-    (76, ValType::F64),
-    (77, ValType::F64),
-    (78, ValType::F64),
-    (79, ValType::F64),
-    (80, ValType::F64),
-    (81, ValType::F64),
-    (82, ValType::F64),
-    (83, ValType::F64),
-    (84, ValType::I32),
-    (85, ValType::I32),
-    (86, ValType::I32),
-    (87, ValType::I32),
-    (88, ValType::I32),
-    (89, ValType::I32),
-    (90, ValType::I32),
-    (91, ValType::I32),
-    (92, ValType::I32),
-    (93, ValType::I32),
-    (94, ValType::I32),
-    (95, ValType::I32),
-    (96, ValType::I32),
     (99, ValType::I64),
-    (100, ValType::I32),
-    (101, ValType::F64),
-    (102, ValType::F64),
-    (103, ValType::F64),
 ];
 
 pub(in crate::cpu::core) fn global(local: u32) -> u32 {
@@ -124,7 +99,7 @@ pub(in crate::cpu::core) fn define_globals(
             mutable: false,
             shared: false,
         },
-        &ConstExpr::i32_const(1),
+        &ConstExpr::i32_const(2),
     );
     exports.export("linkAbi", ExportKind::Global, base + GLOBAL_COUNT);
 }
@@ -149,17 +124,44 @@ pub(super) fn restore(out: &mut Output<'_>) {
     }
 }
 
-pub(super) fn boundary_fields(numeric: bool) -> impl Iterator<Item = (u32, ValType)> {
-    FIELDS.iter().copied().filter(move |(local, _)| {
-        numeric || (!(76..=96).contains(local) && !(100..=103).contains(local))
-    })
+pub(super) fn boundary_fields(_numeric: bool) -> impl Iterator<Item = (u32, ValType)> {
+    FIELDS.iter().copied()
+}
+
+fn publish_pool(code: &mut InstructionSink<'_>, fp_function: u32) {
+    code.local_get(0)
+        .i32_load(mem(super::numeric::BANK_POINTER, 2))
+        .if_(BlockType::Empty)
+        .local_get(0)
+        .i32_load(mem(super::numeric::BANK_POINTER, 2))
+        .call(fp_function)
+        .end();
+}
+
+pub(super) fn import_canonical(out: &mut Output<'_>) {
+    out.c()
+        .global_get(MODE)
+        .i32_eqz()
+        .if_(BlockType::Empty)
+        .local_get(CTX)
+        .i32_load(mem(super::numeric::BANK_POINTER, 2))
+        .local_tee(super::A)
+        .if_(BlockType::Empty)
+        .local_get(super::A)
+        .i32_const(0)
+        .i32_store(mem(
+            crate::cpu::core::fp_pool::BANK_OFFSET + crate::cpu::core::fp_pool::ACTIVE,
+            2,
+        ))
+        .end()
+        .end();
 }
 
 pub(super) fn emit_boundary(
     numeric: bool,
     flags_function: u32,
     fp_function: u32,
-    resolver_function: u32,
+    _resolver_function: u32,
 ) -> Function {
     let fields: Vec<_> = boundary_fields(numeric).collect();
     let parameter = |local| {
@@ -180,25 +182,7 @@ pub(super) fn emit_boundary(
         .i32_const(1)
         .global_set(VALID)
         .else_();
-    if numeric {
-        code.local_get(parameter(84)).if_(BlockType::Empty);
-        code.local_get(parameter(100)).if_(BlockType::Empty);
-        for local in [100, 88, 101, 102, 103] {
-            code.local_get(parameter(local));
-        }
-        code.call(resolver_function)
-            .local_set(parameter(88))
-            .i32_const(0)
-            .local_set(parameter(100))
-            .end();
-        for local in 76..84 {
-            code.local_get(parameter(local));
-        }
-        for local in [96, 86, 88, 89, 90, 91, 92, 93, 94, 95] {
-            code.local_get(parameter(local));
-        }
-        code.call(fp_function).end();
-    }
+    publish_pool(&mut code, fp_function);
     for local in [11, 20, 25, 21, 22, 23, 24] {
         code.local_get(parameter(local));
     }
@@ -229,9 +213,6 @@ pub(super) fn emit_entry(body: u32, linked: bool) -> Function {
     code.i32_const(i32::from(linked)).global_set(MODE);
     if !linked {
         code.i32_const(0).global_set(VALID);
-        for local in [84, 85, 86, 100] {
-            code.i32_const(0).global_set(global(local));
-        }
     }
     code.local_get(0)
         .local_get(1)
@@ -245,7 +226,7 @@ pub(super) fn emit_entry(body: u32, linked: bool) -> Function {
 pub(super) fn emit_publisher(
     flags_function: u32,
     fp_function: u32,
-    resolver_function: u32,
+    _resolver_function: u32,
 ) -> Function {
     let mut function = Function::new([]);
     let mut code = function.instructions();
@@ -260,23 +241,7 @@ pub(super) fn emit_publisher(
         .if_(BlockType::Empty)
         .unreachable()
         .end();
-    code.global_get(global(84)).if_(BlockType::Empty);
-    code.global_get(global(100)).if_(BlockType::Empty);
-    for local in [100, 88, 101, 102, 103] {
-        code.global_get(global(local));
-    }
-    code.call(resolver_function)
-        .global_set(global(88))
-        .i32_const(0)
-        .global_set(global(100))
-        .end();
-    for local in 76..84 {
-        code.global_get(global(local));
-    }
-    for local in [96, 86, 88, 89, 90, 91, 92, 93, 94, 95] {
-        code.global_get(global(local));
-    }
-    code.call(fp_function).end();
+    publish_pool(&mut code, fp_function);
     for local in [11, 20, 25, 21, 22, 23, 24] {
         code.global_get(global(local));
     }
@@ -296,9 +261,6 @@ pub(super) fn emit_publisher(
         .i32_load(mem(crate::cpu::core::memory::TRANSACTION_VERSION, 2))
         .global_get(global(99))
         .i64_store(mem(0, 3));
-    for local in [84, 85, 86, 100] {
-        code.i32_const(0).global_set(global(local));
-    }
     code.i32_const(0).global_set(VALID).end();
     function
 }

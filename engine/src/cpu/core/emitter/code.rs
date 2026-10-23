@@ -129,6 +129,7 @@ impl<'a> Sink<'a> {
         f64_const(x: Ieee64);
         f64_div();
         f64_eq();
+        f64_load(m: MemArg);
         f64_gt();
         f64_lt();
         f64_mul();

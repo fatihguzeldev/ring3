@@ -1,4 +1,4 @@
-use super::{BANK_POINTER, Output, double, frame, ieee, mem, memory, span};
+use super::{BANK_POINTER, Output, double, frame, ieee, mem, memory, pool, span};
 use crate::cpu::core::emitter::CTX;
 use crate::cpu::core::region::values::{FpValue, ProofKind, TagRecipe};
 use crate::cpu::x86::{X87Binary, X87Format, X87Operation, ir::Operation};
@@ -70,6 +70,7 @@ pub(super) fn begin(out: &mut Output<'_>, operation: Operation, _next: u32) -> b
             ..
         } => {
             occupied(out, 0);
+            pool::ensure_input(out, 0);
             let native = native_store(out, format);
             if native {
                 span::load(out, 0, FA);
@@ -232,10 +233,8 @@ fn occupied(out: &mut Output<'_>, logical: u8) {
             out.c().br(0);
         }
         TagRecipe::Entry(_) => {
-            if !has_proof(out, logical, ProofKind::Occupied) {
-                frame::tag(out, logical);
-                out.c().i32_const(3).i32_eq().br_if(0);
-            }
+            frame::tag(out, logical);
+            out.c().i32_const(3).i32_eq().br_if(0);
         }
         _ => {}
     }
@@ -245,10 +244,8 @@ fn empty(out: &mut Output<'_>, logical: u8) {
     match tag_recipe(out, logical) {
         TagRecipe::Empty => {}
         TagRecipe::Entry(_) => {
-            if !has_proof(out, logical, ProofKind::Empty) {
-                frame::tag(out, logical);
-                out.c().i32_const(3).i32_ne().br_if(0);
-            }
+            frame::tag(out, logical);
+            out.c().i32_const(3).i32_ne().br_if(0);
         }
         _ => {
             out.c().br(0);
@@ -258,6 +255,7 @@ fn empty(out: &mut Output<'_>, logical: u8) {
 
 fn register(out: &mut Output<'_>, logical: u8) {
     occupied(out, logical);
+    pool::ensure_input(out, logical);
     if matches!(
         out.plan.frame(out.before_frame.unwrap()).fp.payload[logical as usize],
         FpValue::ExactF64(..)
@@ -410,6 +408,7 @@ fn native_store(out: &Output<'_>, format: X87Format) -> bool {
 }
 
 pub(super) fn import_native(out: &mut Output<'_>, logical: u8, destination: u32, depth: u32) {
+    pool::ensure_input(out, logical);
     span::valid(out, logical);
     out.c().if_(BlockType::Empty);
     span::load(out, logical, destination);
@@ -422,7 +421,38 @@ pub(super) fn import_native(out: &mut Output<'_>, logical: u8, destination: u32,
 }
 
 pub(super) fn contract_value(out: &mut Output<'_>, logical: u8, kind: ProofKind, depth: u32) {
-    import_native(out, logical, FA, depth);
+    pool::ensure_input(out, logical);
+    admit_loaded(out, logical, kind, depth);
+}
+
+pub(super) fn admit_loaded(out: &mut Output<'_>, logical: u8, kind: ProofKind, depth: u32) {
+    pool::has_certificate(out, logical, kind);
+    out.c().i32_eqz().if_(BlockType::Empty);
+    admit_loaded_uncertified(out, logical, kind, depth + 1);
+    pool::certify_input(out, logical, kind);
+    out.c().end();
+}
+
+fn admit_loaded_uncertified(out: &mut Output<'_>, logical: u8, kind: ProofKind, depth: u32) {
+    let cell = u32::from(frame::input_cell(out, logical));
+    out.c()
+        .local_get(85)
+        .i32_const(1 << cell)
+        .i32_and()
+        .if_(BlockType::Empty)
+        .local_get(76 + cell)
+        .local_set(FA)
+        .else_();
+    raw_normal_or_zero(out, cell, depth + 1);
+    to_f64(out, logical, FA, depth + 1);
+    out.c()
+        .local_get(FA)
+        .local_set(76 + cell)
+        .local_get(85)
+        .i32_const(1 << cell)
+        .i32_or()
+        .local_set(85)
+        .end();
     if kind == ProofKind::Native24 {
         out.c()
             .local_get(FA)
@@ -493,6 +523,7 @@ fn operand_bounds(out: &mut Output<'_>, value: u32, depth: u32, native24: bool, 
 }
 
 fn operand(out: &mut Output<'_>, logical: u8, value: u32) {
+    pool::ensure_input(out, logical);
     let native24 = has_proof(out, logical, ProofKind::Native24);
     let bounded = has_proof(out, logical, ProofKind::BoundedF64);
     if matches!(
@@ -524,20 +555,19 @@ fn clear_c1(out: &mut Output<'_>) {
 }
 
 fn arithmetic_control(out: &mut Output<'_>) {
-    let before = out.before_frame.expect("arithmetic has a before frame");
-    if out
-        .plan
-        .proofs_at(before)
-        .iter()
-        .map(|id| out.plan.proof(*id))
-        .any(|proof| {
-            proof.kind == ProofKind::Control
-                && proof.epoch == out.plan.frame(before).fp.control_epoch
-        })
-    {
-        return;
-    }
-    control_guard(out, 0);
+    out.c()
+        .local_get(pool::ADMITTED)
+        .i32_const(256)
+        .i32_and()
+        .i32_eqz()
+        .if_(BlockType::Empty);
+    control_guard(out, 1);
+    out.c()
+        .local_get(pool::ADMITTED)
+        .i32_const(256)
+        .i32_or()
+        .local_set(pool::ADMITTED)
+        .end();
 }
 
 pub(super) fn control_guard(out: &mut Output<'_>, depth: u32) {

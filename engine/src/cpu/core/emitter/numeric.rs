@@ -3,6 +3,7 @@ mod double;
 mod frame;
 mod ieee;
 mod memory;
+pub(super) mod pool;
 mod simd;
 pub(super) mod span;
 

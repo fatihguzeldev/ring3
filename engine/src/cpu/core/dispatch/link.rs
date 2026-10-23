@@ -111,9 +111,6 @@ pub(super) fn emit() -> Vec<u8> {
     for index in [link::MODE, link::VALID, link::CONTEXT] {
         code.i32_const(0).global_set(STATE_BASE + index);
     }
-    for local in [84, 85, 86, 100] {
-        code.i32_const(0).global_set(state(local));
-    }
     code.loop_(BlockType::Empty);
     code.local_get(2)
         .i32_eqz()
@@ -278,7 +275,7 @@ pub(super) fn emit() -> Vec<u8> {
         .end();
     let mut bodies = CodeSection::new();
     bodies.function(&run);
-    support::bodies(&mut bodies);
+    support::bodies(&mut bodies, 3);
     module.section(&bodies);
     let mut names = NameSection::new();
     names.module("ring3.dispatch");
