@@ -15,17 +15,18 @@ import {runPortCases} from './region/ports.mjs';
 import {runStableGraphCase} from './region/graph.mjs';
 import {runGroupCases} from './region/groups.mjs';
 import {runNativeStoreCases} from './region/native-store.mjs';
+import {runPoolCases,runPoolLoopCases} from './region/pool.mjs';
 
 const [enginePath,reportPath,mode]=process.argv.slice(2);
-assert(enginePath&&reportPath&&(mode===undefined||mode==='--structure'||mode==='--graph'||mode==='--groups'||mode==='--native-stores'),
-  'usage: region.mjs engine.wasm fresh-report.json [--structure|--graph|--groups|--native-stores]');
+assert(enginePath&&reportPath&&(mode===undefined||mode==='--structure'||mode==='--graph'||mode==='--groups'||mode==='--native-stores'||mode==='--pool'||mode==='--pool-baseline'),
+  'usage: region.mjs engine.wasm fresh-report.json [--structure|--graph|--groups|--native-stores|--pool|--pool-baseline]');
 const artifact=readEngine(enginePath),hash=bytes=>createHash('sha256').update(bytes).digest('hex');
 const hex=bytes=>Buffer.from(bytes).toString('hex');
 const unhex=text=>Uint8Array.from(Buffer.from(text.replaceAll(' ',''),'hex'));
 closeSync(openSync(reportPath,'wx'));
 const report={schema:1,complete:false,engineSha256:artifact.sha256,
   scope:'actual generated mixed integer/x87 CFG with exact instruction-prefix, publication and fault oracles; no timing claim',
-  sources:Object.fromEntries(['./region.mjs','./link.mjs','./region/structure.mjs','./region/control.mjs','./region/link.mjs','./region/status.mjs','./region/state.mjs','./region/quota.mjs','./region/ownership.mjs','./region/ports.mjs','./region/graph.mjs','./region/groups.mjs','./region/native-store.mjs',
+  sources:Object.fromEntries(['./region.mjs','./link.mjs','./region/structure.mjs','./region/control.mjs','./region/link.mjs','./region/status.mjs','./region/state.mjs','./region/quota.mjs','./region/ownership.mjs','./region/ports.mjs','./region/graph.mjs','./region/groups.mjs','./region/native-store.mjs','./region/pool.mjs','./region/witness.mjs','./pool-state.mjs',
     '../../../support/wasm/engine.mjs','../../../../../sdk/runtime/engine.js','../../../../../sdk/runtime/cache.js']
     .map(path=>[path,hash(readFileSync(new URL(path,import.meta.url)))])),cases:[]};
 const checkpoint=()=>writeFileSync(reportPath,JSON.stringify(report,null,2));
@@ -77,7 +78,7 @@ function fixture(name,{segments,entry=0x1000,registers=[0,2,0,0x3000,0x4800,0,0,
       }}});
     run=stateWitness?generated.exports.link:generated.exports.run;
     publish=stateWitness?generated.exports.publish:undefined;
-    witnessReader=diagnostic?()=>diagnostic.read(generated,support):undefined;
+    witnessReader=diagnostic?()=>diagnostic.read(generated,support,word(context,92)):undefined;
     assert.equal(typeof run,'function','the selected generated entry is an actual Wasm function');
     if(stateWitness)assert.equal(typeof publish,'function','linked state has an explicit canonical publisher');
   };
@@ -206,7 +207,15 @@ function exchangeCase(name,eax,structural=false) {
 }
 
 try {
-  if(mode==='--native-stores') {
+  if(mode==='--pool'||mode==='--pool-baseline') {
+    if(mode==='--pool-baseline') {
+      const path=new URL('../../../../../artifacts/cpu-core/region-redesign/single-v12-cache.mjs',import.meta.url);
+      report.baselineSdkSha256=hash(readFileSync(path));
+      artifact.CodeCache=(await import(path.href)).CodeCache;
+    }
+    stage='physical-pool-linked';runPoolCases(artifact,report);checkpoint();
+    stage='physical-pool-local-loop';runPoolLoopCases(fixture);checkpoint();
+  }else if(mode==='--native-stores') {
     stage='native-value-stores';runNativeStoreCases(fixture);checkpoint();
   }else if(mode==='--groups') {
     stage='proved-memory-groups';runGroupCases(fixture);checkpoint();
@@ -339,6 +348,8 @@ try {
   stage='immutable-warmed-graph';runStableGraphCase(artifact,report);checkpoint();
   stage='proved-memory-groups';runGroupCases(fixture);checkpoint();
   stage='native-value-stores';runNativeStoreCases(fixture);checkpoint();
+  stage='physical-pool-linked';runPoolCases(artifact,report);checkpoint();
+  stage='physical-pool-local-loop';runPoolLoopCases(fixture);checkpoint();
   }
   report.complete=true;checkpoint();console.log(JSON.stringify({complete:true,cases:report.cases.length,engineSha256:artifact.sha256}));
 }catch(error){report.failure={stage,message:String(error),stack:error.stack};checkpoint();throw error;}

@@ -1,3 +1,4 @@
+import {linkedField} from '../pool-state.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {Engine,KEY,record,view} from '../../../../../../sdk/runtime/engine.js';
@@ -189,7 +190,7 @@ function runLinkedStatusCase(artifact,report,{operation,code,opcode,left,right,k
   const wanted=calculate(operation,left,right);
   assert.equal(wanted.status,0x220,'each linked recipe has a discriminating rounded-up result');
   let cache,engine,opened=false,active=false,initialFp,initialBank,initialContext,initialVersion;
-  const units=new Map(),global=local=>cache.dispatch[`link.local${local}`].value;
+  const units=new Map(),global=local=>linkedField(cache,memory,local);
   const bank=()=>bytes(word(cache.context,92),100);
   const version=()=>new DataView(memory.buffer).getBigUint64(word(cache.context,80),true);
   const status=(operation,wanted,...args)=>{

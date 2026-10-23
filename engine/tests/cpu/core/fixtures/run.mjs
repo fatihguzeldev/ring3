@@ -122,7 +122,7 @@ for (const line of readFileSync(join(directory, 'programs.tsv'), 'utf8').trim().
   assert.equal(typeof instance.exports.run, 'function');
   assert.equal(instance.exports.run.length, 2);
   programs.set(name, {code: Buffer.from(hex, 'hex'), identity: BigInt(identity), wasmSha256: hash(wasm), run: instance.exports.run,
-    groupWitness:diagnostic?()=>diagnostic.read(instance,support):undefined});
+    groupWitness:diagnostic?()=>diagnostic.read(instance,support,get(CTX+92)):undefined});
 }
 
 function seed(name, options = {}) {

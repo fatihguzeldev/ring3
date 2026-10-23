@@ -2,20 +2,22 @@ import assert from 'node:assert/strict';
 import {existsSync,readFileSync} from 'node:fs';
 import {join} from 'node:path';
 
-const fields=[2,3,4,5,6,7,8,9,10,11,12,13,20,21,22,23,24,25,
+const legacyFields=[2,3,4,5,6,7,8,9,10,11,12,13,20,21,22,23,24,25,
   76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,99,100,101,102,103];
-const names=['link.mode','link.valid','link.context',...fields.map(index=>`link.local${index}`)];
+const fields=[2,3,4,5,6,7,8,9,10,11,12,13,20,21,22,23,24,25,99];
+const linkNames=fields=>['link.mode','link.valid','link.context',...fields.map(index=>`link.local${index}`)];
 export const supportNames=['flags','materialize_numeric','resolve_status','translate_page','acquire_group',
-  'store8','store16','store32','normalize_kernel'].map(name=>`support.${name}`);
+  'store8','store16','store32','commit_pool'].map(name=>`support.${name}`);
+const legacySupportNames=supportNames.map(name=>name==='support.commit_pool'?'support.normalize_kernel':name);
 const supportSources=new WeakMap(),supportInstances=new WeakMap();
 let standaloneSupport;
 
 export function coreImports(module) {
   const imports=WebAssembly.Module.imports(module),links=imports.filter(item=>item.name.startsWith('link.'));
-  if(links.length)assert.deepEqual(links,names.map(name=>({module:'ring3',name,kind:'global'})),
+  if(links.length)assert.deepEqual(links,linkNames(links.length===47?legacyFields:fields).map(name=>({module:'ring3',name,kind:'global'})),
     'the complete typed compiled-link state is the only added import surface');
   const support=imports.filter(item=>item.name.startsWith('support.'));
-  if(support.length)assert.deepEqual(support,[...supportNames.map(name=>({module:'ring3',name,kind:'function'})),
+  if(support.length)assert.deepEqual(support,[...(support.some(item=>item.name==='support.normalize_kernel')?legacySupportNames:supportNames).map(name=>({module:'ring3',name,kind:'function'})),
     {module:'ring3',name:'support.abi',kind:'global'}], 'the complete versioned per-CPU support ABI is imported directly');
   return imports.filter(item=>!item.name.startsWith('link.')&&!item.name.startsWith('support.'));
 }
@@ -42,15 +44,15 @@ export function instantiateSupport(memory,source=coreSupportSource(memory)) {
   const exports=new WebAssembly.Instance(module,{ring3:{memory,functions:table(),publishers:table(),
     probe:()=>assert.fail('standalone support never dispatches a guest edge'),
     cold:()=>assert.fail('standalone support never executes cold code')}}).exports;
-  assert(exports.supportAbi instanceof WebAssembly.Global&&exports.supportAbi.value===1,'actual support ABI1');
-  for(const name of supportNames)assert.equal(typeof exports[name],'function',`actual Wasm ${name}`);
+  assert(exports.supportAbi instanceof WebAssembly.Global&&[1,2].includes(exports.supportAbi.value),'actual current or pinned-baseline support ABI');
+  for(const name of exports.supportAbi.value===1?legacySupportNames:supportNames)assert.equal(typeof exports[name],'function',`actual Wasm ${name}`);
   return exports;
 }
 
 function bindings(memory) {
   let exports=supportInstances.get(memory);
   if(!exports){exports=instantiateSupport(memory);supportInstances.set(memory,exports);}
-  return {...Object.fromEntries(supportNames.map(name=>[name,exports[name]])),'support.abi':exports.supportAbi};
+  return {...Object.fromEntries((exports.supportAbi.value===1?legacySupportNames:supportNames).map(name=>[name,exports[name]])),'support.abi':exports.supportAbi};
 }
 
 export function linkGlobals(module,shared={}) {
@@ -68,7 +70,7 @@ export function linkGlobals(module,shared={}) {
 export function instantiateCore(module,imports) {
   const supplied=imports?.ring3??{};
   const shared=WebAssembly.Module.imports(module).some(item=>item.name.startsWith('support.'))&&
-    !supportNames.every(name=>typeof supplied[name]==='function')?bindings(supplied.memory):{};
+    !WebAssembly.Module.imports(module).filter(item=>item.name.startsWith('support.')&&item.kind==='function').every(item=>typeof supplied[item.name]==='function')?bindings(supplied.memory):{};
   const instance=new WebAssembly.Instance(module,{...imports,
     ring3:{...shared,...linkGlobals(module,supplied),...supplied,
       'support.abi':supplied['support.abi']??supplied.supportAbi??shared['support.abi']}});

@@ -1,3 +1,4 @@
+import {linkedField} from '../pool-state.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {Engine,KEY,record,view} from '../../../../../../sdk/runtime/engine.js';
@@ -43,7 +44,7 @@ function runLinkedCase(artifact,report,withCold) {
   let cache,engine,opened=false,active=false,initialFp,initialBank,initialContext,initialRevision;
   const units=new Map(),budget=withCold?16:13;
   const registers=[0xffffffff,0x12345678,0x10c0,0x3000,0x4800,0,withCold?0x1100:0x1040,0x1040];
-  const global=local=>cache.dispatch[`link.local${local}`].value;
+  const global=local=>linkedField(cache,memory,local);
   const revision=()=>new DataView(memory.buffer).getBigUint64(word(cache.context,80),true);
   const bank=()=>bytes(word(cache.context,92),100);
   const physical=address=>{

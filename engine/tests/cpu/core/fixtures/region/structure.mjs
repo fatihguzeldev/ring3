@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {instrumentWitnessModule,readWitness,setWitnessBank,witnessCounters} from './witness.mjs';
 
 class Reader {
   constructor(bytes){this.bytes=bytes;this.at=0;}
@@ -71,7 +72,7 @@ function operators(bytes) {
 
 function readModule(bytes) {
   const r=new Reader(bytes);assert.deepEqual([...r.take(8)],[0,97,115,109,1,0,0,0]);
-  const names=new Map(),imports=[],functions=[],types=[],functionTypes=[],exports=new Map();
+  const names=new Map(),imports=[],globalImports=[],functions=[],types=[],functionTypes=[],exports=new Map();
   while(r.at<bytes.length) {
     const kind=r.byte(),section=new Reader(r.take(r.unsigned()));
     if(kind===0&&section.text()==='name') {
@@ -86,7 +87,9 @@ function readModule(bytes) {
       if(type===0)imports.push({module,name,type:section.unsigned()});
       else if(type===1){section.byte();const flags=section.unsigned();section.unsigned();if(flags&1)section.unsigned();assert(flags<4);}
       else if(type===2){const flags=section.unsigned();section.unsigned();if(flags&1)section.unsigned();assert(flags<4);}
-      else if(type===3){assert(module==='ring3'&&(name.startsWith('link.')||name==='support.abi'));section.byte();assert.equal(section.byte(),name==='support.abi'?0:1);}
+      else if(type===3){assert(module==='ring3'&&(name.startsWith('link.')||name==='support.abi'));
+        const valueType=section.byte(),mutable=section.byte();assert.equal(mutable,name==='support.abi'?0:1);
+        globalImports.push({module,name,valueType,mutable});}
       else assert.fail('only memory, function and typed-link imports in authored module');
     });
     else if(kind===3)functionTypes.push(...section.vector(()=>section.unsigned()));
@@ -94,7 +97,7 @@ function readModule(bytes) {
     else if(kind===10)functions.push(...section.vector(()=>operators(section.take(section.unsigned()))));
   }
   assert.equal(functionTypes.length,functions.length);
-  return {names,imports,functions,types,functionTypes,exports};
+  return {names,imports,globalImports,functions,types,functionTypes,exports};
 }
 
 export {readModule as readGeneratedModule};
@@ -170,79 +173,22 @@ function guardedNativeNormalizer(module,index) {
 export function instrumentStateWitness(source,supportBytes) {
   assert(supportBytes,'the witness receives actual per-CPU production support bytes');
   const owner=readModule(source),support=readModule(supportBytes);
-  for(const name of ['support.materialize_numeric','support.normalize_kernel','support.acquire_group','support.translate_page'])
+  for(const name of ['support.materialize_numeric','support.acquire_group','support.translate_page'])
     supportBinding(owner,support,name);
-  const u=value=>{const result=[];do{const byte=value&127;value>>>=7;result.push(byte|(value?128:0));}while(value);return Uint8Array.from(result);};
-  const concat=chunks=>Uint8Array.from(Buffer.concat(chunks.map(value=>Buffer.from(value))));
-  const section=(id,bytes)=>concat([Uint8Array.of(id),u(bytes.length),bytes]);
-  const counters=['test.normalizer_calls','test.materializer_calls','test.raw80_stores','test.fp_metadata_writes',
-    'test.body_entries','test.control_admissions','test.group_acquisitions','test.page_translations'];
-  const instrument=(source,module,isSupport)=>{
-    const original=new WebAssembly.Module(source),scan=new Reader(source);scan.take(8);let definedGlobals=0;
-    while(scan.at<source.length){const id=scan.byte(),bytes=scan.take(scan.unsigned());if(id===6)definedGlobals=new Reader(bytes).unsigned();}
-    const globalBase=WebAssembly.Module.imports(original).filter(item=>item.kind==='global').length+definedGlobals;
-    assert(!WebAssembly.Module.exports(original).some(item=>counters.includes(item.name)),'counter exports are fresh');
-    const increment=index=>concat([Uint8Array.of(0x23),u(globalBase+index),Uint8Array.of(0x41,1,0x6a,0x24),u(globalBase+index)]);
-    const globals=Uint8Array.from(Array(counters.length).fill([0x7f,1,0x41,0,0x0b]).flat());
-    const input=new Reader(source);input.take(8);const output=[source.subarray(0,8)];let added=false,globalSection=false;
-    while(input.at<source.length){
-      const id=input.byte(),bytes=input.take(input.unsigned());let rewritten=bytes;
-      if(id===6){
-        const r=new Reader(bytes),count=r.unsigned();
-        rewritten=concat([u(count+counters.length),r.take(bytes.length-r.at),globals]);globalSection=true;
-      }else if(id===7){
-        if(!globalSection)output.push(section(6,concat([u(counters.length),globals])));
-        const r=new Reader(bytes),count=r.unsigned(),entries=counters.map((name,index)=>{
-          const encoded=new TextEncoder().encode(name);return concat([u(encoded.length),encoded,Uint8Array.of(3),u(globalBase+index)]);
-        });
-        rewritten=concat([u(count+entries.length),r.take(bytes.length-r.at),...entries]);added=true;
-      }else if(id===10){
-        const r=new Reader(bytes),count=r.unsigned(),bodies=[];
-        for(let bodyIndex=0;bodyIndex<count;bodyIndex++){
-          const raw=r.take(r.unsigned()),index=bodyIndex+module.imports.length,fn=module.functions[bodyIndex],name=module.names.get(index);let body=raw;
-          const counter=isSupport?new Map([['support.normalize_kernel',0],['support.materialize_numeric',1],
-            ['support.acquire_group',6],['support.translate_page',7]]).get(name):
-            instructionBodies(module).some(body=>body.index===index)?4:undefined;
-          if(counter!==undefined){
-            const insertions=new Map(),insert=(at,bytes)=>insertions.set(at,[...(insertions.get(at)??[]),bytes]);
-            insert(fn.localsEnd,increment(counter));
-            if(isSupport&&[0,1].includes(counter)){
-              for(const node of fn.ops)if(node.op===0x37&&node.memoryOffset===0||node.op===0x3b&&node.memoryOffset===8)
-                insert(node.offset,increment(2));
-            }else if(!isSupport){
-              for(const[index,node]of fn.ops.entries()){
-                if([0x21,0x22].includes(node.op)&&node.local===91)insert(node.offset,increment(3));
-                if(controlAdmission(fn.ops,index))insert(node.offset,increment(5));
-              }
-            }
-            const chunks=[];let start=0;
-            for(const[at,values]of[...insertions].sort(([a],[b])=>a-b)){chunks.push(raw.subarray(start,at),...values);start=at;}
-            chunks.push(raw.subarray(start));body=concat(chunks);
-          }
-          bodies.push(u(body.length),body);
-        }
-        assert.equal(r.at,bytes.length);rewritten=concat([u(count),...bodies]);
-      }
-      output.push(section(id,rewritten));
-    }
-    assert(added,'diagnostic globals append alongside actual production exports');
-    return concat(output);
-  };
+  const instrumented=instrumentWitnessModule(source,owner),shared=instrumentWitnessModule(supportBytes,support,true);
   const acquire=support.exports.get('support.acquire_group'),fn=defined(support,acquire);
   const groupProof=fn?{index:acquire,...signature(support,acquire),
     contextLoads:fn.ops.filter((node,index)=>node.op>=0x28&&node.op<=0x35&&fn.ops[index-1]?.op===0x20&&fn.ops[index-1]?.local===0)
       .map(node=>node.memoryOffset).sort((a,b)=>a-b),
     stores:fn.ops.filter(node=>node.op>=0x36&&node.op<=0x3e).length,
     calls:fn.ops.filter(node=>[16,17,18,19,20,21].includes(node.op)).length}:undefined;
-  return {bytes:instrument(source,owner,false),supportBytes:instrument(supportBytes,support,true),groupProof,
-    read:(instance,supportExports)=>{
-      const ownerExports=instance.exports??instance,shared=supportExports?.exports??supportExports;
-      assert(shared,'the witness observes the actual instrumented support instance');
-      return Object.fromEntries(counters.map(name=>{
-        assert(ownerExports[name] instanceof WebAssembly.Global&&shared[name] instanceof WebAssembly.Global,
-          'both actual Wasm modules export their appended counter globals');
-        return[name.slice(5),ownerExports[name].value+shared[name].value];
-      }));
+  return {bytes:instrumented.bytes,supportBytes:shared.bytes,groupProof,
+    poolProof:{owner:instrumented.proof,support:shared.proof},
+    read:(instance,supportExports,bankPointer)=>{
+      assert(supportExports,'the witness observes the actual instrumented support instance');
+      setWitnessBank(instance,bankPointer);setWitnessBank(supportExports,bankPointer);
+      const own=readWitness(instance),other=readWitness(supportExports);
+      return Object.fromEntries(witnessCounters.map(name=>[name,name.endsWith('_mask')?own[name]|other[name]:own[name]+other[name]]));
     }};
 }
 
@@ -417,7 +363,8 @@ function inspectExitEpilogue(module,name) {
     if(node.op===15)summary.explicitReturns.push(index);
   });
   if(summary.publicationCalls.length!==1){summary.errors.push('requires one actual publication call');return summary;}
-  const publish=summary.publicationCalls[0],numeric=module.imports.some(item=>item.name==='numeric');
+  const publish=summary.publicationCalls[0],numeric=module.imports.some(item=>item.name==='numeric')&&
+    module.globalImports.some(item=>item.name==='link.local76');
   const fields=[0,...Array.from({length:12},(_,i)=>i+2),...Array.from({length:6},(_,i)=>i+20),
     ...(numeric?Array.from({length:21},(_,i)=>i+76):[]),99,...(numeric?[100,101,102,103]:[])];
   const parameters=module.types[module.functionTypes[publication-module.imports.length]]?.parameters;
@@ -481,13 +428,62 @@ function inspectExitEpilogue(module,name) {
   return summary;
 }
 
+function inspectPoolCommit(owner,support) {
+  const summary={errors:[],descriptors:[],loops:[]},check=(okay,message)=>{if(!okay)summary.errors.push(message);};
+  if(!owner.imports.some(item=>item.name==='support.commit_pool'))return{...summary,errors:['missing actual selective committer']};
+  const binding=supportBinding(owner,support,'support.commit_pool'),adapterIndex=named(owner,'guest.commit_frame');
+  const adapter=defined(owner,adapterIndex),kernel=defined(support,binding.exported);
+  const snapshot=[...Array(8).fill(0x7c),...Array(8).fill(0x7e),...Array(21).fill(0x7f),...Array(3).fill(0x7c)];
+  check(JSON.stringify(signature(owner,adapterIndex))===JSON.stringify({parameters:[...snapshot,0x7f],results:[]}),
+    'owner adapter takes the complete exact snapshot plus frame ID');
+  check(JSON.stringify(signature(support,binding.exported))===JSON.stringify({parameters:[...snapshot,0x7e,0x7e],results:[]}),
+    'shared committer takes the unchanged snapshot plus two descriptors and returns no shuffled tuple');
+  if(!adapter||!kernel)return{...summary,errors:[...summary.errors,'missing actual defined commit functions']};
+  const{ops,edges}=adapter,tables=ops.flatMap((node,i)=>node.op===14?[i]:[]);
+  check(tables.length===1,'the owner selects descriptor constants through one real table');
+  check(!ops.some(node=>node.op===3||node.op>=0x28&&node.op<=0x3e),'the owner adapter has no payload loop or memory access');
+  const calls=ops.flatMap((node,i)=>node.op===16?[i]:[]);
+  check(calls.length===1&&ops[calls[0]].call===binding.imported,'the owner calls only the actual shared committer');
+  if(calls.length===1){const p=ops.slice(calls[0]-42,calls[0]);
+    check(p.length===42&&p.every((node,i)=>node.op===0x20&&node.local===(i<40?i:i===40?41:42)),
+      'the exact snapshot is forwarded unchanged with the selected two constants');}
+  if(tables.length===1){const table=tables[0],p=ops.slice(table-3,table);
+    check(p.length===3&&p[0].op===0x20&&p[0].local===40&&p[1].op===0x41&&p[1].value===1&&p[2].op===0x6b,
+      'the descriptor table consumes the exact selected FrameState ID');
+    for(const start of new Set(edges[table].slice(0,-1))){const arm=ops.slice(start,start+5);
+      check(arm.length===5&&arm[0].op===0x42&&arm[1].op===0x21&&arm[1].local===41&&
+        arm[2].op===0x42&&arm[3].op===0x21&&arm[3].local===42&&arm[4].op===12,
+        'each actual frame arm selects constants without repeating payload work');
+      if(arm[0]?.op===0x42&&arm[2]?.op===0x42)summary.descriptors.push({low:String(arm[0].value),high:String(arm[2].value)});
+    }
+  }
+  const loops=kernel.ops.filter(node=>node.op===3);
+  check(loops.length===2,'independent physical tag and payload masks each have one selective loop');
+  for(const node of loops){
+    const loop=node.frame,guard=node.frames.at(-1),body=kernel.ops.slice(loop.open+1,loop.end),tail=kernel.ops.slice(loop.end-7,loop.end);
+    const scans=body.filter(op=>op.op===0x68);
+    check(guard.kind===4&&guard.otherwise===undefined&&guard.open===loop.open-1&&
+      kernel.ops[guard.open-1]?.op===0x20&&kernel.ops[guard.open-1].local===43,'zero work masks bypass their loop');
+    check(scans.length===1,'one ctz selects the next changed physical bit');
+    check(tail.length===7&&tail[0].op===0x20&&tail[0].local===43&&tail[1].op===0x20&&tail[1].local===43&&
+      tail[2].op===0x41&&tail[2].value===1&&tail[3].op===0x6b&&tail[4].op===0x71&&tail[5].op===0x22&&
+      tail[5].local===43&&tail[6].op===13&&tail[6].frames.at(-1-tail[6].targets[0])===loop,
+      'the actual loop removes one set bit with mask&(mask-1), rather than scanning all eight slots');
+    summary.loops.push({offset:node.offset,bitScans:scans.length});
+  }
+  check(!kernel.ops.some(node=>[16,17,18,19,20,21].includes(node.op)),'selective commit invokes no canonical or host helper');
+  summary.adapterIndex=adapterIndex;summary.sharedIndex=binding.exported;summary.parameters=signature(support,binding.exported).parameters;
+  return summary;
+}
+
 export function inspectRegion(bytes,supportBytes) {
   assert(supportBytes,'the structural proof receives actual per-CPU production support bytes');
   const module=readModule(bytes),support=readModule(supportBytes),runIndex=[...module.names].find(([,name])=>name==='guest.run')?.[0]??module.exports.get('run');
   assert(Number.isInteger(runIndex)&&runIndex>=module.imports.length,'defined guest run');
   const run=module.functions[runIndex-module.imports.length];
-  const binding=supportBinding(module,support,'support.normalize_kernel');
-  const kernelProof=guardedNativeNormalizer(support,binding.exported);
+  const legacy=module.imports.some(item=>item.name==='support.normalize_kernel');
+  const binding=legacy?supportBinding(module,support,'support.normalize_kernel'):undefined;
+  const kernelProof=binding?guardedNativeNormalizer(support,binding.exported):undefined;
   const adapter=named(module,'guest.normalize_frame');
   const conditionalNative=new Map(kernelProof?[[adapter,{...kernelProof,adapterIndex:adapter,scope:'per-CPU support'}]]:[]);
   const materializers=new Set(module.imports.flatMap((item,index)=>
@@ -527,6 +523,17 @@ export function inspectRegion(bytes,supportBytes) {
   const admissions=new Set(run.ops.filter((_,index)=>controlAdmission(run.ops,index)));
   const bodies=instructionBodies(module);
   return {runIndex,runName:module.names.get(runIndex),locals:run.locals,instructionBodies:bodies,
+    fpLinkGlobals:module.globalImports.filter(item=>/^link\.local(?:7[6-9]|8[0-9]|9[0-6]|10[0-3])$/.test(item.name)),
+    poolCommit:inspectPoolCommit(module,support),
+    legacyNormalizers:[...module.names.values(),...support.names.values()].filter(name=>
+      name==='guest.normalize_frame'||name==='support.normalize_kernel'),
+    commitPoolSignature:module.imports.some(item=>item.name==='support.commit_pool')?(()=>{
+      const{imported,exported}=supportBinding(module,support,'support.commit_pool');
+      const fn=defined(support,exported);
+      return{index:exported,ownerImport:imported,...signature(support,exported),
+        loops:fn.ops.filter(node=>node.op===3).map(node=>({offset:node.offset,
+          bitScans:fn.ops.slice(node.frame.open,node.frame.end).filter(op=>op.op===0x68).length}))};
+    })():undefined,
     portRouting:inspectPortRouting(run),
     nativeFloatStores:run.ops.flatMap((node,index)=>{
       const single=node.op===0x38,p=run.ops.slice(index-(single?3:2),index);
@@ -546,7 +553,7 @@ export function inspectRegion(bytes,supportBytes) {
     controlAdmissionSites:[...admissions].map(node=>node.offset),
     withoutCanonicalizationDispatchOrControlAdmission:cycles(node=>canonical(node)||dispatch(node)||rotations.has(node)||admissions.has(node)),
     conditionalNativeCanonicalizers:[...conditionalNative.values()],
-    normalizerKernel:inspectNormalizerKernel(module,support),
+    normalizerKernel:legacy?inspectNormalizerKernel(module,support):undefined,
     materializers:[...materializers].map(index=>({index,name:module.names.get(index)??module.imports[index]?.name})),
     materializerSignature:['support.materialize_numeric'].map(name=>{
       const{imported,exported}=supportBinding(module,support,name);return{index:exported,ownerImport:imported,name,...signature(support,exported)};
@@ -576,27 +583,18 @@ export function inspectPortDepth(bytes) {
 
 export function assertAnalyzedStateStructure(proof) {
   assertSingleInstructionBody(proof);
+  const witness=proof.nativeStateWitness;
+  assert(witness,'the actual native loop supplies a linked pre-publication state witness');
+  assert.equal(witness.normalizer_calls,0,'physical ownership retires the actual recurring eight-slot normalizer');
   assert(proof.withoutCanonicalizationDispatchOrStackRotation.length>0,
     'the balanced arithmetic loop repeats without per-push/pop eight-cell runtime rotations');
   assertRegionStructure(proof);
-  assert.equal(proof.normalizerKernel.tables.length,1,
-    'one actual descriptor br_table selects shape constants instead of repeating the eight-cell normalizer per shape');
-  assert.deepEqual(proof.normalizerKernel.perShapeStateArms,[],
-    'the normalizer has no per-shape selected-ID if arms around repeated state work');
-  assert.equal(proof.normalizerKernel.kernelLoops.length,1,'all shape descriptors share one eight-slot normalization loop');
-  assert.deepEqual(proof.normalizerKernel.ownerLoops,[],'owner adapters contain no copy of the shared normalization loop');
-  assert.deepEqual(proof.normalizerKernel.ownerStores,[],'owner adapters contain no copy of raw80 publication');
-  assert.equal(proof.normalizerKernel.opaqueLowStores.length,1,'the shared kernel has one dynamic raw80 low-word store site');
-  assert.equal(proof.normalizerKernel.opaqueHighStores.length,1,'the shared kernel has one dynamic raw80 high-word store site');
-  assert.deepEqual(proof.normalizerKernel.errors,[],'packed descriptors feed one bounded immutable-input normalization kernel');
   assert(proof.withoutCanonicalizationDispatchOrEagerControl.length>0,
     'the balanced arithmetic loop also bypasses per-instruction PC/index writes');
   assert(proof.withoutCanonicalizationDispatchOrControlAdmission.length>0,
     'the balanced arithmetic loop reuses admitted control facts across its backedge');
-  assert.equal(proof.conditionalNativeCanonicalizers.length,1,'one actual guarded native/opaque frame normalizer');
-  const witness=proof.nativeStateWitness;
-  assert(witness,'the actual native loop supplies a linked pre-publication state witness');
-  assert(witness.normalizer_calls>0,'the exercised loop actually invokes the encoded conditional normalizer');
+  assert(witness.record_writes>0,'the executed body really commits its private physical pool');
+  assert(witness.record_writes<=6*(8+2),'only the initial import and two changed ghost slots write private records');
   assert.equal(witness.raw80_stores,0,'native internal normalization does not execute raw80 stores');
   assert.equal(witness.materializer_calls,0,'native internal edges do not invoke the canonical materializer');
   assert(witness.control_admissions>0&&witness.control_admissions<=witness.body_entries,
@@ -608,12 +606,19 @@ export function assertAnalyzedStateStructure(proof) {
 
 export function assertRegionStructure(proof) {
   assertSingleInstructionBody(proof);
+  assert.deepEqual(proof.legacyNormalizers,[],'no generic eight-slot normalizer remains encoded in owner or shared support');
+  assert.deepEqual(proof.fpLinkGlobals,[],'physical FP state is not serialized through a cross-owner tuple');
+  assert.deepEqual(proof.poolCommit.errors,[],'real frame descriptors feed bit-selective physical commit without an eight-cell tuple');
+  assert(proof.commitPoolSignature,'the owner imports the actual shared selective pool committer');
+  assert.equal(proof.commitPoolSignature.parameters.length,42,'the selective committer receives one explicit snapshot and descriptors');
+  assert.deepEqual(proof.commitPoolSignature.results,[],'the selective committer publishes directly to the private pool');
+  assert(proof.commitPoolSignature.loops.some(loop=>loop.bitScans>0),'the actual committer selects changed physical slots by set bits');
   assert(proof.arithmeticCycles.length>0,'the actual run contains a cyclic f64 arithmetic path');
   assert(proof.withoutCanonicalization.length>0,'an arithmetic loop can repeat without raw80 stores or materializing helpers');
   assert(proof.withoutCanonicalizationOrDispatch.length>0,'the reducible arithmetic loop also bypasses the general block dispatcher');
   assert.equal(proof.materializerSignature.length,1,'one actual per-CPU numerical materializer');
-  assert.deepEqual(proof.materializerSignature[0].parameters,[...Array(8).fill(0x7c),...Array(10).fill(0x7f)],
-    'materializer receives eight f64 values and complete integer metadata');
+  assert.deepEqual(proof.materializerSignature[0].parameters,[0x7f],
+    'the observation materializer receives the private bank/pool owner pointer');
   assert.deepEqual(proof.materializerSignature[0].results,[],'materialization has no result');
   assert.equal(proof.statusResolverSignature.length,1,'one actual per-CPU exact status resolver');
   assert.deepEqual(proof.statusResolverSignature[0].parameters,[0x7f,0x7f,0x7c,0x7c,0x7c],
