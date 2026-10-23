@@ -29,6 +29,24 @@ pub(crate) fn core_chain_probe(context: u32, pc: u32) -> u32 {
     })
 }
 
+pub(crate) fn core_chain_select(context: u32, pc: u32, retired: u32) -> u32 {
+    access(context, |instance, core| {
+        core.refresh_trace_bypass(retired);
+        let selected = cold::chain_probe(instance, core, pc);
+        if selected != 0 && selected <= 4096 {
+            if let Some(memory) = instance.memory.as_ref() {
+                core.trace_selection(memory, pc);
+            }
+        }
+        selected
+    })
+}
+
 pub(crate) fn core_chain_cold(context: u32) -> u32 {
-    access(context, cold::chain_cold)
+    access(context, |instance, core| {
+        // No unrecorded cold instruction may be collapsed between two confirmed
+        // generated block entries. Its predecessor remains the final witness.
+        core.tracing.end();
+        cold::chain_cold(instance, core)
+    })
 }

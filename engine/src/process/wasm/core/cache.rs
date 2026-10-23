@@ -14,6 +14,8 @@ pub(super) struct CoreCache32 {
     regions: Box<[Option<CachedRegion>]>,
     free: Vec<usize>,
     entries: HashMap<u32, RegionKey, RandomState>,
+    trace_entries: HashMap<u32, RegionKey, RandomState>,
+    trace_bypass_identity: u64,
     coverage: HashMap<u32, RegionKey, RandomState>,
     entries_epoch: u64,
     bytes: usize,
@@ -103,6 +105,9 @@ struct CachedRegion {
     slot: u32,
     linked_entries: LinkedEntries,
     rejected_entries: HashMap<u32, EntryRejection, RandomState>,
+    trace_visits: u32,
+    trace_attempted: bool,
+    trace_candidate_pc: Option<u32>,
 }
 
 #[derive(Default)]
@@ -164,6 +169,8 @@ impl Default for CoreCache32 {
             regions: (0..MAX_REGIONS).map(|_| None).collect(),
             free: (0..MAX_REGIONS).rev().collect(),
             entries: HashMap::with_hasher(RandomState::default()),
+            trace_entries: HashMap::with_hasher(RandomState::default()),
+            trace_bypass_identity: 0,
             coverage: HashMap::with_hasher(RandomState::default()),
             entries_epoch: 1,
             bytes: 0,
@@ -182,10 +189,16 @@ impl Default for CoreCache32 {
 
 impl CoreCache32 {
     pub(super) fn frontier_contains(&self, memory: &AddressSpace, pc: u32) -> bool {
-        self.entries
+        self.trace_entries
             .get(&pc)
+            .filter(|key| key.identity != self.trace_bypass_identity)
             .and_then(|key| self.region(*key))
             .is_some_and(|entry| entry.code.is_current(memory))
+            || self
+                .entries
+                .get(&pc)
+                .and_then(|key| self.region(*key))
+                .is_some_and(|entry| entry.code.is_current(memory))
     }
 
     #[cfg(test)]
@@ -292,6 +305,22 @@ impl CoreCache32 {
         memory: &AddressSpace,
         code: CompiledCode,
     ) -> Result<RegionRef, CompileError> {
+        if let Some(root) = code.trace_root() {
+            if code.wasm().len() > MAX_CODE_BYTES || code.entrypoints() != [GuestAddress(root)] {
+                return Err(CompileError::InvalidLimits);
+            }
+            if let Some(previous) = self.trace_entries.get(&root).copied() {
+                if self
+                    .region(previous)
+                    .is_some_and(|entry| entry.code.is_current(memory))
+                {
+                    return Err(CompileError::InvalidLimits);
+                }
+                self.remove(previous);
+                self.source_invalidations = self.source_invalidations.saturating_add(1);
+            }
+            return Ok(self.insert_owned(code));
+        }
         // Formation borrows the coverage directory as its frontier. A current
         // collision here indicates a violated ownership contract, never a suffix
         // that may silently replace only some entries of an existing owner.
@@ -348,6 +377,25 @@ impl CoreCache32 {
     }
 
     pub(super) fn lookup(&mut self, memory: &AddressSpace, pc: u32) -> Option<RegionRef> {
+        if let Some(key) = self
+            .trace_entries
+            .get(&pc)
+            .copied()
+            .filter(|key| key.identity != self.trace_bypass_identity)
+        {
+            if let Some(entry) = self.region(key) {
+                if entry.code.is_current(memory) {
+                    let code = RegionRef {
+                        key,
+                        code: Rc::clone(&entry.code),
+                    };
+                    self.touch(key.index);
+                    return Some(code);
+                }
+            }
+            self.remove(key);
+            self.source_invalidations = self.source_invalidations.saturating_add(1);
+        }
         let key = *self.entries.get(&pc)?;
         let entry = self.region(key)?;
         if !entry.code.is_current(memory) {
@@ -368,6 +416,16 @@ impl CoreCache32 {
         memory: &AddressSpace,
         pc: u32,
     ) -> Option<(RegionRef, u32)> {
+        if let Some(key) = self
+            .trace_entries
+            .get(&pc)
+            .copied()
+            .filter(|key| key.identity != self.trace_bypass_identity)
+        {
+            if let Some(linked) = self.lookup_linked_key(memory, key) {
+                return Some(linked);
+            }
+        }
         let key = *self.entries.get(&pc)?;
         self.lookup_linked_key(memory, key)
     }
@@ -396,8 +454,10 @@ impl CoreCache32 {
         let cached = self
             .retained(source)
             .and_then(|entry| entry.linked_entries.get(self.entries_epoch, pc));
-        if let Some(key) = cached {
-            return self.lookup_linked_key(memory, key);
+        if let Some(key) = cached.filter(|key| key.identity != self.trace_bypass_identity) {
+            if let Some(linked) = self.lookup_linked_key(memory, key) {
+                return Some(linked);
+            }
         }
         let linked = self.lookup_linked(memory, pc)?;
         if self.retained(source).is_some() {
@@ -463,6 +523,12 @@ impl CoreCache32 {
         self.regions[code.key.index].as_mut().unwrap().slot = slot;
         self.link_owners[slot as usize] = identity;
         self.slot_regions[slot as usize] = code.key.index as u16;
+        // An overlay can have been retained but unavailable while an SDK slot
+        // was unlinked. Cached baseline edges must reconsider trace priority
+        // when its executable table binding becomes available again.
+        if code.trace_root().is_some() {
+            self.advance_entries_epoch();
+        }
         Ok(())
     }
 
@@ -509,8 +575,9 @@ impl CoreCache32 {
 
     fn insert_with_entries(&mut self, code: CompiledCode, entries: Vec<GuestAddress>) -> RegionRef {
         self.advance_entries_epoch();
+        let trace = code.trace_root().is_some();
         let code = Rc::new(code);
-        for pc in &entries {
+        for pc in entries.iter().filter(|_| !trace) {
             if let Some(key) = self.entries.remove(&pc.0) {
                 let entry = self.regions[key.index].as_mut().unwrap();
                 entry.indexed_entries -= 1;
@@ -534,9 +601,13 @@ impl CoreCache32 {
         let identity = code.identity();
         let key = RegionKey { index, identity };
         for entry in &entries {
-            self.entries.insert(entry.0, key);
+            if trace {
+                self.trace_entries.insert(entry.0, key);
+            } else {
+                self.entries.insert(entry.0, key);
+            }
         }
-        for pc in code.instruction_pcs() {
+        for pc in code.instruction_pcs().filter(|_| !trace) {
             self.coverage.insert(pc, key);
         }
         self.bytes += code.wasm().len();
@@ -549,6 +620,9 @@ impl CoreCache32 {
             slot: 0,
             linked_entries: LinkedEntries::default(),
             rejected_entries: HashMap::with_hasher(RandomState::default()),
+            trace_visits: 0,
+            trace_attempted: false,
+            trace_candidate_pc: None,
         });
         if let Some(newest) = self.newest {
             self.regions[newest].as_mut().unwrap().newer = Some(index);
@@ -626,6 +700,9 @@ impl CoreCache32 {
             self.slot_regions[entry.slot as usize] = NO_REGION;
         }
         for pc in &entry.admitted_entries {
+            if self.trace_entries.get(&pc.0) == Some(&key) {
+                self.trace_entries.remove(&pc.0);
+            }
             if self
                 .entries
                 .get(&pc.0)
@@ -653,6 +730,35 @@ impl CoreCache32 {
             }
         };
     }
+
+    pub(super) fn bypass_trace(&mut self, identity: u64) {
+        if self.trace_bypass_identity != identity {
+            self.trace_bypass_identity = identity;
+            self.advance_entries_epoch();
+        }
+    }
+
+    // A bounded per-owner counter selects a recording opportunity. It never
+    // grows a graph, replaces source coverage or retries a failed trace.
+    pub(super) fn trace_candidate(&mut self, code: &RegionRef, pc: u32) -> bool {
+        if code.trace_root().is_some() || self.retained(code).is_none() {
+            return false;
+        }
+        let entry = self.regions[code.key.index].as_mut().unwrap();
+        if entry.trace_attempted {
+            return false;
+        }
+        let candidate = *entry.trace_candidate_pc.get_or_insert(pc);
+        if pc != candidate {
+            return false;
+        }
+        entry.trace_visits = entry.trace_visits.saturating_add(1);
+        if entry.trace_visits < 1024 {
+            return false;
+        }
+        entry.trace_attempted = true;
+        true
+    }
 }
 
 #[cfg(test)]
@@ -666,3 +772,7 @@ mod ownership_tests;
 #[cfg(test)]
 #[path = "cache/graph_tests.rs"]
 mod graph_tests;
+
+#[cfg(test)]
+#[path = "cache/trace_tests.rs"]
+mod trace_tests;

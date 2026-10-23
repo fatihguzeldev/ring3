@@ -1,6 +1,6 @@
 use std::sync::OnceLock;
 mod link;
-pub(crate) use link::{core_chain_cold, core_chain_probe};
+pub(crate) use link::{core_chain_cold, core_chain_probe, core_chain_select};
 
 use super::{REGISTRY, Registry};
 

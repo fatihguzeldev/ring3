@@ -4,10 +4,15 @@ mod cold;
 mod dispatch;
 mod numeric;
 mod retention;
+mod tracing;
+pub(crate) use tracing::{
+    core_trace_finish, core_trace_pointer, core_trace_ready, core_trace_root, core_trace_start,
+    core_trace_status_ptr,
+};
 
 pub(crate) use cold::core_cold_run;
 pub(crate) use dispatch::{
-    core_chain_cold, core_chain_next, core_chain_probe, core_dispatch_code_len,
+    core_chain_cold, core_chain_next, core_chain_probe, core_chain_select, core_dispatch_code_len,
     core_dispatch_code_ptr, core_link, core_unlink,
 };
 #[cfg(feature = "observability")]
@@ -49,6 +54,7 @@ pub(super) struct CoreSession32 {
     context: Box<Context32>,
     active: bool,
     cold_state: ColdState,
+    tracing: tracing::TraceController,
 }
 
 impl CoreSession32 {
@@ -66,6 +72,7 @@ impl CoreSession32 {
             context: Box::new(Context32::new(state)),
             active: false,
             cold_state: ColdState::default(),
+            tracing: tracing::TraceController::default(),
         })
     }
 
@@ -196,6 +203,7 @@ pub(crate) fn core_prepare(pc: u32, instructions: u32, blocks: u32) -> u32 {
         }
         if let Some(session) = core.as_mut() {
             session.context.set_word(112, 0);
+            session.refresh_trace_bypass(session.context.retired());
         }
         let Some(instance) = instance.as_mut() else {
             return 5;
@@ -318,6 +326,7 @@ pub(crate) fn core_prepare(pc: u32, instructions: u32, blocks: u32) -> u32 {
                 context: Box::new(Context32::new(state)),
                 active: false,
                 cold_state: ColdState::default(),
+                tracing: tracing::TraceController::default(),
             });
         }
         let session = core.as_mut().unwrap();
@@ -357,6 +366,7 @@ pub(crate) fn core_lookup(pc: u32) -> u32 {
         else {
             return 5;
         };
+        session.refresh_trace_bypass(session.context.retired());
         let Some(code) = session.cache.lookup(memory, pc) else {
             return 4;
         };
@@ -447,6 +457,8 @@ pub(crate) fn core_end() -> u32 {
         }
         core.context.set_word(112, 0);
         core.active = false;
+        core.tracing.end();
+        core.refresh_trace_bypass(core.context.retired());
         if core.code.as_ref().is_some_and(RegionRef::is_transient) {
             core.code = None;
         }

@@ -12,10 +12,17 @@ export_process_calls! {
     core_unlink(slot: u32, low: u32, high: u32);
     core_chain_next(context: u32);
     core_chain_probe(context: u32, pc: u32);
+    core_chain_select(context: u32, pc: u32, retired: u32);
     core_chain_cold(context: u32);
     core_link_owners_ptr();
     core_cache_victim();
     core_cache_status_ptr();
+    core_trace_pointer();
+    core_trace_status_ptr();
+    core_trace_start(root: u32);
+    core_trace_finish(root: u32, instructions: u32, blocks: u32);
+    core_trace_ready();
+    core_trace_root();
     core_numeric(context: u32, ordinal: u32);
     core_import();
     core_export(reason: u32, work: u32);

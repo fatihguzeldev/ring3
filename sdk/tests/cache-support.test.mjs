@@ -16,11 +16,12 @@ const helpers=[
   ['support.flags',5],['support.materialize_numeric',6],['support.resolve_status',7],
   ['support.translate_page',8],['support.acquire_group',9],['support.store8',10],
   ['support.store16',10],['support.store32',10],['support.commit_pool_cold',11],['support.commit_native',12],['support.commit_raw',13],
+  ['support.record_trace',14],
 ];
 
-function types({wrongFlagsType=false,wrongFlagsArity=false,wrongStoreArity=false}={}) {
+function types({wrongFlagsType=false,wrongFlagsArity=false,wrongStoreArity=false,wrongRecordArity=false}={}) {
   const flags=Array(8-Number(wrongFlagsArity)).fill(i32);if(wrongFlagsType)flags[0]=f64;
-  return [14,
+  return [15,
     ...signature([i32,i32],[i32]),...signature([i32,i32,i32],[i64]),
     ...signature([i32,i32,i32,i32],[i32]),...signature([i32,i32,i32],[i32]),
     ...signature([i32],[i32]),...signature(flags,[i32]),
@@ -32,10 +33,11 @@ function types({wrongFlagsType=false,wrongFlagsArity=false,wrongStoreArity=false
       ...Array(3).fill(f64),i64,i64],[]),
     ...signature([i32,i32,f64,i32,i32],[i32]),
     ...signature([i32,i32,i64,i32],[i32]),
+    ...signature([i32,i64,i32,i32,i32,...(wrongRecordArity?[]:[i32])],[]),
   ];
 }
 
-function driver({abi=4,omit,mutableAbi=false,...typeOptions}={}) {
+function driver({abi=5,omit,mutableAbi=false,...typeOptions}={}) {
   const emitted=helpers.filter(([name])=>name!==omit);
   const imports=[3,...str('ring3'),...str('memory'),2,0,2,
     ...str('ring3'),...str('functions'),1,0x70,1,1,...u(4097),
@@ -121,9 +123,10 @@ test('owners call one per-CPU typed Wasm support instance directly',()=>{
 });
 
 for(const [name,options]of [
-  ['missing ABI',{abi:null}],['retired ABI1',{abi:1}],['retired ABI2',{abi:2}],['retired ABI3',{abi:3}],['unknown ABI',{abi:5}],
+  ['missing ABI',{abi:null}],['retired ABI1',{abi:1}],['retired ABI2',{abi:2}],['retired ABI3',{abi:3}],['retired ABI4',{abi:4}],['unknown ABI',{abi:6}],
   ['partial functions',{omit:'support.commit_pool_cold'}],['wrong function arity',{wrongFlagsArity:true}],
   ['old store arity under current ABI',{wrongStoreArity:true}],
+  ['wrong recorder arity under current ABI',{wrongRecordArity:true}],
 ])test(`support negotiation rejects ${name}`,()=>{
   const f=fixture(options);assert.throws(()=>new CodeCache(f.engine,{chain:true}),/support.*ABI|support exports/);
 });

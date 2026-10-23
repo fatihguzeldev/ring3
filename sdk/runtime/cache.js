@@ -1,11 +1,12 @@
 const MAX_CODE_BYTES = 128 * 1024 * 1024;
 const LINK_LOCALS = [...Array.from({length:12},(_,index)=>index+2),
   ...Array.from({length:6},(_,index)=>index+20),99];
-const LINK_GLOBALS = ['link.mode','link.valid','link.context',...LINK_LOCALS.map(local=>`link.local${local}`)];
+const LINK_GLOBALS = ['link.mode','link.valid','link.context',...LINK_LOCALS.map(local=>`link.local${local}`),'trace.arena'];
 const SUPPORT_FUNCTIONS = [
   ['support.flags',8],['support.materialize_numeric',1],['support.resolve_status',5],
   ['support.translate_page',3],['support.acquire_group',9],['support.store8',7],
   ['support.store16',7],['support.store32',7],['support.commit_pool_cold',42],['support.commit_native',5],['support.commit_raw',4],
+  ['support.record_trace',6],
 ];
 const SUPPORT_IMPORTS = [...SUPPORT_FUNCTIONS.map(([name])=>name),'support.abi'];
 const NATIVE_COUNTERS = ['compiled','admittedEncodedBytes','countEvictions','byteEvictions',
@@ -41,7 +42,7 @@ export class CodeCache {
     this.memory = engine.memory;
     if (typeof SharedArrayBuffer !== 'undefined' && this.memory.buffer instanceof SharedArrayBuffer)
       throw new Error('core execution requires exclusively owned memory');
-    const linkExports = ['core_chain_probe','core_chain_cold'];
+    const linkExports = ['core_chain_select','core_chain_cold','core_trace_pointer'];
     const linked = linkExports.map(name=>typeof this.api[name] === 'function');
     if (linked.some(Boolean) && !linked.every(Boolean)) throw new Error('incomplete core link exports');
     this.linkedCore = linked.every(Boolean);
@@ -57,6 +58,10 @@ export class CodeCache {
     if (typeof this.api.core_cold_run === 'function') this.native.core_cold_run = this.api.core_cold_run;
     if (typeof this.api.core_lookup === 'function') this.native.core_lookup = this.api.core_lookup;
     if (typeof this.api.core_cold_status_ptr === 'function') this.native.core_cold_status_ptr = this.api.core_cold_status_ptr;
+    for (const name of ['core_trace_ready','core_trace_root','core_trace_finish'])
+      if (typeof this.api[name] === 'function') this.native[name] = this.api[name];
+    const traceExports = ['core_trace_ready','core_trace_root','core_trace_finish'].map(name=>typeof this.native[name] === 'function');
+    if (traceExports.some(Boolean) && !traceExports.every(Boolean)) throw new Error('incomplete core trace exports');
     this.#bindings = Object.entries(this.native);
     this.budget = budget; this.instructions = instructions; this.blocks = blocks; this.capacity = capacity;
     this.units = new Map(); this.context = 0; this.open = false; this.dirty = false; this.dirtyWork = 0; this.lastStop = 1;
@@ -227,7 +232,7 @@ export class CodeCache {
     if (imports.length !== expected.size || imports.some(item => item.module !== 'ring3' || expected.get(item.name) !== item.kind) ||
         new Set(imports.map(item => item.name)).size !== expected.size) throw new Error('invalid core dispatch imports');
     const bindings = this.linkedCore
-      ? {memory:this.memory,functions:this.table,publishers:this.publishers,probe:this.native.core_chain_probe,cold:this.native.core_chain_cold}
+      ? {memory:this.memory,functions:this.table,publishers:this.publishers,probe:this.native.core_chain_select,cold:this.native.core_chain_cold}
       : {memory:this.memory,functions:this.table,next:this.native.core_chain_next};
     const exports = new WebAssembly.Instance(module,{ring3:bindings}).exports;
     if (typeof exports.run !== 'function' || exports.run.length !== 3 || !(exports.regions instanceof WebAssembly.Global) || exports.regions.value !== 0)
@@ -237,7 +242,7 @@ export class CodeCache {
         !cold.every(value => value instanceof WebAssembly.Global && value.value === 0))
       throw new Error('invalid core dispatch cold counters');
     if (this.linkedCore) {
-      if (!(exports.linkAbi instanceof WebAssembly.Global) || exports.linkAbi.value !== 2 ||
+      if (!(exports.linkAbi instanceof WebAssembly.Global) || exports.linkAbi.value !== 3 ||
           !cold.every(value=>value !== undefined)) throw new Error('invalid core link ABI');
       const globals = {};
       for (const name of LINK_GLOBALS) {
@@ -252,7 +257,7 @@ export class CodeCache {
     if (exports.supportAbi === undefined) {
       if (supportNames.length) throw new Error('core support exports lack an ABI');
     } else {
-      if (!(exports.supportAbi instanceof WebAssembly.Global) || exports.supportAbi.value !== 4 ||
+      if (!(exports.supportAbi instanceof WebAssembly.Global) || exports.supportAbi.value !== 5 ||
           supportNames.length !== SUPPORT_FUNCTIONS.length ||
           SUPPORT_FUNCTIONS.some(([name,arity])=>typeof exports[name] !== 'function' || exports[name].length !== arity))
         throw new Error('invalid core support ABI');
@@ -445,6 +450,12 @@ export class CodeCache {
     if (!selected || (selected.transient ? this.transient !== selected : this.units.get(selected.id) !== selected))
       throw new Error('core region is not retained by this cache');
     if (this.dirtyWork > 0xffffffff - this.budget) this.publish();
+    if (this.linkedCore) {
+      const pointer = this.native.core_trace_pointer() >>> 0;
+      if (!pointer || pointer % 8 || pointer + 32 + 129 * 24 > this.memory.buffer.byteLength)
+        throw new Error('invalid core trace allocation');
+      this.#linkGlobals['trace.arena'].value = pointer;
+    }
     let unit = selected, status = this.native.core_begin();
     if (status === 4) {
       unit = this.entry(this.pc);
@@ -481,8 +492,20 @@ export class CodeCache {
       if (!failure && publicationFailure) throw publicationFailure;
       if (ended !== 0 && !failure) throw new Error(`core_end returned ${ended}`);
     }
-    return this.finishRun(stop,before,regions,'compiled',startPc,chainedColdRuns,chainedColdWork,chainedColdRetired,
+    const result = this.finishRun(stop,before,regions,'compiled',startPc,chainedColdRuns,chainedColdWork,chainedColdRetired,
       unit.transient ? unit.id : null);
+    this.installRecordedTrace();
+    return result;
+  }
+  installRecordedTrace() {
+    if (!this.native.core_trace_ready || this.native.core_trace_ready() !== 1) return;
+    const root = this.native.core_trace_root() >>> 0;
+    const status = this.native.core_trace_finish(root,this.instructions,this.blocks) >>> 0;
+    // A rejected optimization keeps the ordinary source owners and exact CPU
+    // result. Successful admission must reach the real SDK/table immediately.
+    if (status === 0) this.entry(root);
+    else if (![4,7,8,18,20].includes(status))
+      throw Object.assign(new Error(`core_trace_finish returned ${status}`),{operation:'core_trace_finish',status});
   }
   executeCold() {
     if (this.dirtyWork > 0xffffffff - this.budget) this.publish();

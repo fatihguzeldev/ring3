@@ -32,6 +32,9 @@ pub(crate) fn core_numeric(context: u32, ordinal: u32) -> u32 {
         let Some(instance) = instance.as_mut() else {
             return 8;
         };
+        if let Some(code) = core.code.as_ref() {
+            core.tracing.numeric(code, instruction.pc, instruction.next);
+        }
         core.numeric
             .execute(instance, &mut core.context, &instruction)
     })
