@@ -19,9 +19,9 @@ use super::super::numeric::NumericBank;
 use crate::process::core_numeric_tests::NumericBank;
 
 #[cfg(target_arch = "wasm32")]
-use super::super::cache::{CoreCache32, RegionRef, TRANSITION_HITS, TransitionLookup};
+use super::super::cache::{CoreCache32, RegionRef, TransitionLookup};
 #[cfg(not(target_arch = "wasm32"))]
-use crate::process::core_cache_tests::{CoreCache32, RegionRef, TRANSITION_HITS, TransitionLookup};
+use crate::process::core_cache_tests::{CoreCache32, RegionRef, TransitionLookup};
 
 pub(in crate::process) fn probe(
     instance: &mut EngineInstance,
@@ -42,7 +42,7 @@ pub(in crate::process) fn probe(
     let Some(memory) = instance.memory.as_ref() else {
         return u32::MAX;
     };
-    match cache.lookup_transition(memory, current, pc, TRANSITION_HITS) {
+    match cache.lookup_transition(memory, current, pc) {
         TransitionLookup::Stop => 0,
         TransitionLookup::Linked(code, slot) => {
             context.bytes_mut()[120..128].copy_from_slice(&code.identity().to_le_bytes());

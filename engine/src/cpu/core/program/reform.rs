@@ -71,7 +71,7 @@ impl CompiledCode {
         if blocks.len() > entry_budget {
             return Ok(None);
         }
-        let roots = roots.into_iter().map(GuestAddress).collect();
+        let roots: Vec<_> = roots.into_iter().map(GuestAddress).collect();
         let Some(candidate) = encode_blocks(
             memory,
             entry,
@@ -81,7 +81,7 @@ impl CompiledCode {
             },
             blocks,
             sources,
-            roots,
+            &roots,
             EmissionLimit::Decline,
         )?
         else {

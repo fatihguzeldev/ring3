@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+#[cfg(test)]
 mod reform;
 
 static NEXT_IDENTITY: AtomicU64 = AtomicU64::new(1);
@@ -48,6 +49,7 @@ pub struct CompiledCode {
     entries: Vec<GuestAddress>,
     instruction_pcs: Box<[u32]>,
     native: Vec<NativeInstruction>,
+    #[cfg(test)]
     roots: Box<[GuestAddress]>,
 }
 
@@ -80,6 +82,7 @@ impl CompiledCode {
     pub fn native_instructions(&self) -> &[NativeInstruction] {
         &self.native
     }
+    #[cfg(test)]
     pub(crate) fn formation_roots(&self) -> &[GuestAddress] {
         &self.roots
     }
@@ -330,7 +333,7 @@ fn compile_formation_query(
         options,
         blocks,
         sources,
-        Box::new([entry]),
+        &[entry],
         EmissionLimit::Shorten,
     )
     .map(|code| code.expect("prefix emission does not decline"))
@@ -430,6 +433,7 @@ fn partition_blocks(nodes: BTreeMap<u32, Instruction>, starts: &BTreeSet<u32>) -
 
 enum EmissionLimit {
     Shorten,
+    #[cfg(test)]
     Decline,
 }
 
@@ -439,8 +443,8 @@ fn encode_blocks(
     options: CompileOptions,
     mut blocks: Vec<Block>,
     mut sources: Vec<CodeSnapshot>,
-    roots: Box<[GuestAddress]>,
-    limit: EmissionLimit,
+    _roots: &[GuestAddress],
+    _limit: EmissionLimit,
 ) -> Result<Option<CompiledCode>, CompileError> {
     let identity = NEXT_IDENTITY
         .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
@@ -466,7 +470,8 @@ fn encode_blocks(
         if wasm.len() <= options.wasm_bytes {
             break (wasm, native);
         }
-        if matches!(limit, EmissionLimit::Decline) {
+        #[cfg(test)]
+        if matches!(_limit, EmissionLimit::Decline) {
             return Ok(None);
         }
         let instructions: usize = blocks.iter().map(|block| block.instructions.len()).sum();
@@ -496,7 +501,8 @@ fn encode_blocks(
         wasm,
         sources,
         native,
-        roots,
+        #[cfg(test)]
+        roots: _roots.into(),
     }))
 }
 

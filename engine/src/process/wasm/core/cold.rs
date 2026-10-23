@@ -41,9 +41,6 @@ pub(crate) fn core_cold_run(budget: u32) -> i32 {
         if let Err(status) = session.begin_with_segments(instance, false, segments) {
             return -(status as i32);
         }
-        if !cached {
-            session.cache.clear_transition();
-        }
         if let Some(initial) = initial {
             *core = Some(initial);
         }

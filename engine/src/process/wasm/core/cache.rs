@@ -5,12 +5,6 @@ use crate::{
 use foldhash::fast::RandomState;
 use std::{collections::HashMap, ops::Deref, rc::Rc};
 
-#[path = "promotion.rs"]
-mod promotion;
-use promotion::{PendingTransition, TransitionHeat};
-
-pub(super) const TRANSITION_HITS: u32 = 4096;
-
 const MAX_REGIONS: usize = 4096;
 const MAX_CODE_BYTES: usize = 128 << 20;
 const MAX_LINK_SLOT: usize = 4096;
@@ -32,7 +26,6 @@ pub(super) struct CoreCache32 {
     count_evictions: u64,
     byte_evictions: u64,
     source_invalidations: u64,
-    pending_transition: Option<PendingTransition>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -108,7 +101,6 @@ struct CachedRegion {
     older: Option<usize>,
     newer: Option<usize>,
     slot: u32,
-    heat: TransitionHeat,
     linked_entries: LinkedEntries,
     rejected_entries: HashMap<u32, EntryRejection, RandomState>,
 }
@@ -184,7 +176,6 @@ impl Default for CoreCache32 {
             count_evictions: 0,
             byte_evictions: 0,
             source_invalidations: 0,
-            pending_transition: None,
         }
     }
 }
@@ -381,6 +372,21 @@ impl CoreCache32 {
         self.lookup_linked_key(memory, key)
     }
 
+    pub(in crate::process) fn lookup_transition(
+        &mut self,
+        memory: &AddressSpace,
+        source: &RegionRef,
+        pc: u32,
+    ) -> TransitionLookup {
+        if !source.is_current(memory) {
+            return TransitionLookup::Stop;
+        }
+        match self.lookup_linked_from(memory, source, pc) {
+            Some((target, slot)) => TransitionLookup::Linked(target, slot),
+            None => TransitionLookup::Miss,
+        }
+    }
+
     fn lookup_linked_from(
         &mut self,
         memory: &AddressSpace,
@@ -541,7 +547,6 @@ impl CoreCache32 {
             older: self.newest,
             newer: None,
             slot: 0,
-            heat: TransitionHeat::default(),
             linked_entries: LinkedEntries::default(),
             rejected_entries: HashMap::with_hasher(RandomState::default()),
         });
@@ -657,3 +662,7 @@ mod tests;
 #[cfg(test)]
 #[path = "cache/ownership_tests.rs"]
 mod ownership_tests;
+
+#[cfg(test)]
+#[path = "cache/graph_tests.rs"]
+mod graph_tests;

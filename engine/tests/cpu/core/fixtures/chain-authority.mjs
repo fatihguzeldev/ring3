@@ -32,12 +32,18 @@ function fp(initial,{status=0,tag=0xffff,opcode=0,fip=0,fdp=0,registers={}}={}) 
   return result;
 }
 
-function fixture(name,{entry=0x1000,target=0x1040,registers=[0,0,0x1080,0x3000,0x4800,0,0x1040,0],stack=true,data=()=>{},codePage=code,extraCodePages=[],firstInstructions=64}={},body) {
+function fixture(name,{entry=0x1000,target=0x1040,registers=[0,0,0x1080,0x3000,0x4800,0,0x1040,0],stack=true,data=()=>{},codePage=code,extraCodePages=[],firstInstructions=64,traceSelection=false}={},body) {
   stage = name;
   const result = {name,modules:[],controls:[],runs:[]}; report.cases.push(result); checkpoint();
   const instance = new WebAssembly.Instance(artifact.module,{ring3_observability:{now_ns:()=>0n}});
-  const api = Object.freeze(Object.fromEntries(Object.entries(instance.exports).filter(([name]) => name.startsWith('ring3_abi_v1_'))
-    .map(([name,value]) => [name.slice(13),value])));
+  const native = Object.fromEntries(Object.entries(instance.exports).filter(([name]) => name.startsWith('ring3_abi_v1_'))
+    .map(([name,value]) => [name.slice(13),value]));
+  const selectionCalls = {core_prepare:0,core_lookup:0,core_cold_run:0};
+  if (traceSelection) for (const name of Object.keys(selectionCalls)) {
+    const operation = native[name];
+    native[name] = (...args) => {selectionCalls[name]++; return operation(...args);};
+  }
+  const api = Object.freeze(native);
   const engine = new Engine(api,instance.exports.memory,artifact.sha256);
   const bytes = (pointer,length) => new Uint8Array(engine.memory.buffer).slice(pointer,pointer+length);
   const word = (pointer,offset=0) => new DataView(engine.memory.buffer).getUint32(pointer+offset,true);
@@ -123,7 +129,7 @@ function fixture(name,{entry=0x1000,target=0x1040,registers=[0,0,0x1080,0x3000,0
       }
       assert.deepEqual(bytes(engine.base+56,40),expectedExit,'literal terminal Exit');
     }
-    body({api,engine,cache,bytes,word,select,first,next,initialFp,initialBanks,expectedRam,snapshot,neutral,status,run,expect,result,
+    body({api,engine,cache,bytes,word,select,first,next,initialFp,initialBanks,expectedRam,snapshot,neutral,status,run,expect,result,selectionCalls,
       begin:()=>{status('core_begin',0); active=true;},end:()=>{status('core_end',0);active=false;}});
     result.final = snapshot(); result.stats = cache.stats(); result.complete = true; checkpoint();
   } catch (error) {
@@ -200,51 +206,76 @@ try {
   crossPageCode.set(unhex('d903 e839400000 49 75f6 0f0b'),0x300);
   crossPageCallee.set(unhex('d84b04 d95b08 c3'),0x340);
   for (const [publicSelection,crossPage] of [[false,false],[true,false],[true,true]]) fixture(crossPage
-    ? 'public-selection-cross-page-numerical-promotion'
-    : publicSelection ? 'public-selection-preserves-hot-region-promotion'
-      : 'numerical-ordinals-survive-hot-region-promotion',{
+    ? 'public-selection-cross-page-numerical-graph-authority'
+    : publicSelection ? 'public-selection-preserves-warmed-numerical-graph'
+      : 'numerical-ordinals-survive-warmed-graph',{
     entry:0x1300,target:crossPage?0x5340:0x1340,registers:[0,iterations,0,0x3000,0x4800,0,0,0],data:values,
-    // keep the initial caller split so the test still exercises hot promotion.
-    firstInstructions:5,
+    // Keep caller and callee as independent owners beyond the former heat threshold.
+    firstInstructions:5,traceSelection:true,
     ...(crossPage?{codePage:crossPageCode,extraCodePages:[[0x5000,crossPageCallee]]}:{}),
   },t => {
     const admissionsBefore=t.cache.stats().admissions;
-    let selected=publicSelection?t.cache.select():t.first,work=0,retired=0,last,sourceVersion;
-    while(work<totalWork) {
-      assert(t.result.runs.length<2*iterations+2,'bounded authored continuation count');
-      const executed=t.run(selected,totalWork-work);
-      last=executed.value;sourceVersion=executed.sourceVersion;work+=last.work;retired+=last.retired;
-      if(last.coreReason===2)break;
-      assert.equal(last.coreReason,1,'promotion continuation is a genuine NeedCode');
-      assert.deepEqual(t.bytes(t.engine.base+4236,128),t.initialFp,'dirty numerical bank remains private across promotion');
-      selected=publicSelection?t.cache.select():t.select();
-    }
+    const callsBefore={...t.selectionCalls},originalModules=t.result.modules.slice();
+    const version=()=>new DataView(t.engine.memory.buffer).getBigUint64(t.word(t.cache.context,80),true);
+    const beforeVersion=version();
+    const selected=publicSelection?t.cache.select():t.first;
+    assert.equal(selected,t.first,'public retained selection returns the original caller instance');
+    const {value:last,sourceVersion}=t.run(selected,totalWork);
     t.expectedRam.set(unhex('0000c040'),4096+8);
     t.expectedRam.set(unhex('07130000'),8192+0x7fc);
     const stats=t.cache.stats();
-    t.expect({stop:2,pc:0x130a,retired:totalWork,work:totalWork,remaining:0,regions:stats.regions,id:last.id,sourceVersion,
+    // One initial caller activation, then one callee and one returned caller per CALL.
+    const wanted={stop:2,pc:0x130a,retired:totalWork,work:totalWork,remaining:0,regions:2*iterations+1,id:t.first.id,sourceVersion,
       regs:[0,0,0,0x3000,0x4800,0,0,0],flags:0x46,
-      wantedFp:fp(t.initialFp,{opcode:0x15b,fip:crossPage?0x5343:0x1343,fdp:0x3008,registers:{7:'00000000000000c00140'}})});
-    t.result.promotion={iterations,retired,work,admissionsBefore,admissionsAfter:stats.admissions,
-      publicSelection,coldRuns:stats.coldRuns,coldRetired:stats.coldRetired,
+      wantedFp:fp(t.initialFp,{opcode:0x15b,fip:crossPage?0x5343:0x1343,fdp:0x3008,registers:{7:'00000000000000c00140'}})};
+    t.expect(wanted);
+    t.result.graph={iterations,retired:last.retired,work:last.work,admissionsBefore,admissionsAfter:stats.admissions,
+      publicSelection,coldRuns:stats.coldRuns,coldRetired:stats.coldRetired,coldWork:stats.coldWork,
       regions:stats.regions,outer:stats.runs,initialOwners:[String(t.first.id),String(t.next.id)],finalOwner:String(last.id)};
     checkpoint();
-    assert.equal(retired,totalWork);assert.equal(work,totalWork);
-    if(publicSelection) {
-      assert(stats.coldRuns>0,'public selection traverses the actual cold handoff');
-      assert.equal(stats.coldRetired,0,'all cold visits are retained-frontier handoffs');
-      assert(t.result.runs.filter(run=>run.kind==='cold').every(run=>run.work===0),
-        'cached-frontier handoffs perform no guest work');
+    assert.deepEqual([last.retired,last.work,last.coreReason],[totalWork,totalWork,2]);
+    assert.equal(last.id,t.first.id,'the final DEC/JNZ belongs to the original caller');
+    assert.equal(t.result.runs.length,1,'known graph edges never request outer preparation');
+    assert.deepEqual([stats.runs,stats.coldRuns,stats.coldRetired,stats.coldWork],[1,0,0,0]);
+    assert.deepEqual([stats.admissions,stats.installedUnits,stats.transientAdmissions,stats.transientRuns],[2,2,0,0]);
+    assert.equal(stats.admissions,admissionsBefore);
+    assert.equal(stats.generatedModuleBytes,originalModules.reduce((sum,module)=>sum+module.wasmHex.length/2,0));
+    assert.deepEqual(t.result.modules,originalModules,'no replacement body is admitted');
+    assert.deepEqual(t.selectionCalls,{core_prepare:callsBefore.core_prepare,
+      core_lookup:callsBefore.core_lookup+Number(publicSelection),core_cold_run:callsBefore.core_cold_run},
+      'retained public selection uses lookup without preparation or an empty cold lease');
+    assert.equal(version(),beforeVersion+2n*BigInt(iterations),'each CALL and FSTP commits exactly one write');
+    for (const unit of [t.first,t.next]) {
+      const original=originalModules.find(module=>module.id===String(unit.id));
+      assert.equal(t.cache.units.get(unit.id),unit,'both original SDK instances survive every graph edge');
+      t.status('core_lookup',0,original.pc);
+      assert.equal(new DataView(t.engine.memory.buffer).getBigUint64(t.cache.context+120,true),unit.id);
+      assert.equal(hash(t.bytes(t.api.core_code_ptr()>>>0,t.api.core_code_len()>>>0)),original.sha256,
+        'each source owner exposes its original emitted module');
     }
-    assert(stats.admissions>admissionsBefore,'hot transition admits a new generated ordinal table');
-    assert(stats.regions>1&&stats.regions<2*iterations+1,'actual region entries fall after promotion');
-    assert(stats.runs>=2,'the first promotion returns through a closed execution boundary');
-    assert.notEqual(last.id,t.first.id);assert.notEqual(last.id,t.next.id);
+    t.status('core_lookup',0,0x1300);
+    t.expect(wanted);
     if(crossPage) {
       t.engine.ok('write8',0x5346,0x90);t.expectedRam[12288+0x346]=0x90;
       assert.deepEqual(t.bytes(t.word(t.cache.context,64),t.expectedRam.length),t.expectedRam,
         'second code-page mutation is the only backing change');
-      t.neutral('fused owner validates its second code page',()=>t.status('core_begin',4));
+      t.neutral('stale callee lookup rejects only its source owner',()=>t.status('core_lookup',4,0x5340));
+      t.neutral('unchanged caller remains executable',()=>t.status('core_lookup',0,0x1300));
+      const owners=new DataView(t.engine.memory.buffer,t.api.core_link_owners_ptr()>>>0,4097*8);
+      assert.equal(owners.getBigUint64(t.next.slot*8,true),0n,'stale callee reciprocal slot is pruned');
+      assert.equal(owners.getBigUint64(t.first.slot*8,true),t.first.id,'caller authority remains retained');
+      t.begin();t.end();
+      const currentSourceVersion=new DataView(t.engine.memory.buffer).getBigUint64(t.word(t.cache.context,88),true);
+      t.expect({...wanted,sourceVersion:currentSourceVersion});
+      const replacement=t.select(0x5340);
+      assert.notEqual(replacement.id,t.next.id,'repreparing changed callee source creates a fresh owner');
+      assert.equal(t.cache.units.get(t.first.id),t.first,'callee refresh preserves the caller SDK instance');
+      assert(!t.cache.units.has(t.next.id),'the stale callee SDK instance is removed');
+      assert.deepEqual([t.cache.stats().admissions,t.cache.units.size],[3,2]);
+      t.status('core_lookup',0,0x1300);
+      assert.equal(hash(t.bytes(t.api.core_code_ptr()>>>0,t.api.core_code_len()>>>0)),originalModules[0].sha256);
+      t.expect({...wanted,sourceVersion:currentSourceVersion});
+      assert.equal(version(),beforeVersion+2n*BigInt(iterations)+1n,'source mutation is the only additional committed write');
     }
   });
   report.complete = true; checkpoint(); console.log(JSON.stringify({complete:true,cases:report.cases.length,engineSha256:artifact.sha256}));

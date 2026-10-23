@@ -963,7 +963,7 @@ fn overlapping_entry_removal_and_row_reuse_preserve_exact_lookup_owners() {
 }
 
 #[test]
-fn reused_pending_endpoint_declines_without_disturbing_the_current_pair() {
+fn reused_link_endpoint_preserves_the_current_graph_and_rejects_old_slot_authority() {
     for replace_target in [false, true] {
         let mut memory = memory();
         for (pc, bytes) in [
@@ -973,14 +973,14 @@ fn reused_pending_endpoint_declines_without_disturbing_the_current_pair() {
         ] {
             memory.write(GuestAddress(pc), &bytes).unwrap();
         }
-        let source_version = memory.code_source_version();
         let mut cache = CoreCache32::default();
         let source = cache.insert(compiled(&memory, 0x4000));
         let target = cache.insert(compiled(&memory, 0x4040));
         cache.install_link(&source, 11).unwrap();
         cache.install_link(&target, 12).unwrap();
-        assert!(cache.observe_transition(&memory, &source, &target, 0x4040, 1));
-        let (removed, reused_slot) = if replace_target {
+        assert!(matches!(cache.lookup_transition(&memory,&source,0x4040),
+            TransitionLookup::Linked(ref code,12) if same(code,&target)));
+        let (removed, slot) = if replace_target {
             (&target, 12)
         } else {
             (&source, 11)
@@ -988,52 +988,31 @@ fn reused_pending_endpoint_declines_without_disturbing_the_current_pair() {
         cache.remove(removed.key);
         let replacement = cache.insert(compiled(&memory, 0x4080));
         assert_eq!(replacement.key.index, removed.key.index);
-        cache.install_link(&replacement, reused_slot).unwrap();
-        assert!(removed.is_current(&memory));
-        assert_eq!(memory.code_source_version(), source_version);
+        cache.install_link(&replacement, slot).unwrap();
         let snapshot = cache.snapshot();
         let owners = cache.link_owners.to_vec();
-        let victim = cache.oldest_linked_slot();
-        let options = CompileOptions {
-            instructions: 32,
-            blocks: 8,
-            ..CompileOptions::default()
-        };
-
-        assert!(
-            cache
-                .prepare_transition(&memory, 0x4040, options, &[])
-                .is_none()
-        );
-        assert!(!cache.transition_pending());
         assert_eq!(cache.install_link(removed, 40), Err(LinkError::Unretained));
         assert_eq!(
-            cache.unlink(reused_slot, removed.identity()),
+            cache.unlink(slot, removed.identity()),
             Err(LinkError::WrongOwner)
         );
+        let (current_source, current_target, pc, target_slot) = if replace_target {
+            (&source, &replacement, 0x4080, 12)
+        } else {
+            (&replacement, &target, 0x4040, 12)
+        };
+        for _ in 0..8193 {
+            assert!(matches!(cache.lookup_transition(&memory,current_source,pc),
+                TransitionLookup::Linked(ref code,selected) if same(code,current_target)&&selected==target_slot));
+        }
         assert_eq!(cache.snapshot(), snapshot);
         assert_eq!(cache.link_owners.as_ref(), owners);
-        assert_eq!(cache.oldest_linked_slot(), victim);
-        let (selected, slot) = cache.lookup_linked(&memory, 0x4080).unwrap();
-        assert!(same(&selected, &replacement));
-        assert_eq!(slot, reused_slot);
-
-        let (current_source, current_target, pc) = if replace_target {
-            (&source, &replacement, 0x4080)
-        } else {
-            (&replacement, &target, 0x4040)
-        };
-        assert!(cache.observe_transition(&memory, current_source, current_target, pc, 1));
-        let formed = cache.prepare_transition(&memory, pc, options, &[]).unwrap();
-        assert!(formed.is_current(&memory));
-        assert!(formed.entrypoints().contains(&GuestAddress(pc)));
-        assert_eq!(cache.snapshot()[0], snapshot[0] + 1);
         bounds(&cache);
     }
 }
 
 #[test]
-fn transition_lookup_caches_four_targets_without_changing_disabled_heat_or_self_edges() {
+fn transition_lookup_caches_four_targets_and_self_edges_without_changing_owners() {
     let memory = memory();
     let mut cache = CoreCache32::default();
     let owners: Vec<_> = (0..5)
@@ -1048,7 +1027,7 @@ fn transition_lookup_caches_four_targets_without_changing_disabled_heat_or_self_
         for (index, target) in owners.iter().take(4).enumerate() {
             let pc = filler(index);
             assert!(matches!(
-                cache.lookup_transition(&memory, source, pc, 0),
+                cache.lookup_transition(&memory, source, pc),
                 TransitionLookup::Linked(ref code, slot)
                     if same(code, target) && slot == index as u32 + 1
             ));
@@ -1061,11 +1040,10 @@ fn transition_lookup_caches_four_targets_without_changing_disabled_heat_or_self_
                 Some(target.key)
             );
             assert_eq!(cache.newest, Some(target.key.index));
-            assert!(!cache.transition_pending());
         }
     }
     assert!(matches!(
-        cache.lookup_transition(&memory, source, filler(4), 0),
+        cache.lookup_transition(&memory, source, filler(4)),
         TransitionLookup::Linked(ref code, 5) if same(code, &owners[4])
     ));
     let linked = &cache.retained(source).unwrap().linked_entries;
@@ -1086,7 +1064,7 @@ fn cached_transition_lookup_follows_partial_entry_shadowing() {
     cache.install_link(&source, 1).unwrap();
     cache.install_link(&target, 2).unwrap();
     assert!(matches!(
-        cache.lookup_transition(&memory, &source, 0x1005, 0),
+        cache.lookup_transition(&memory, &source, 0x1005),
         TransitionLookup::Linked(ref code, 2) if same(code, &target)
     ));
     let epoch = cache.entries_epoch;
@@ -1095,12 +1073,12 @@ fn cached_transition_lookup_follows_partial_entry_shadowing() {
     assert!(cache.retained(&target).is_some());
     assert_ne!(cache.entries_epoch, epoch);
     assert!(matches!(
-        cache.lookup_transition(&memory, &source, 0x1005, 0),
+        cache.lookup_transition(&memory, &source, 0x1005),
         TransitionLookup::Linked(ref code, 3) if same(code, &shadow)
     ));
     assert!(same(&cache.lookup(&memory, 0x1000).unwrap(), &target));
     assert!(matches!(
-        cache.lookup_transition(&memory, &source, 0x1000, 0),
+        cache.lookup_transition(&memory, &source, 0x1000),
         TransitionLookup::Linked(ref code, 2) if same(code, &target)
     ));
     cache.remove(target.key);
@@ -1109,14 +1087,14 @@ fn cached_transition_lookup_follows_partial_entry_shadowing() {
     cache.install_link(&replacement, 2).unwrap();
     assert!(target.is_current(&memory));
     assert!(matches!(
-        cache.lookup_transition(&memory, &source, 0x1000, 0),
+        cache.lookup_transition(&memory, &source, 0x1000),
         TransitionLookup::Miss
     ));
     assert!(matches!(
-        cache.lookup_transition(&memory, &source, filler(1), 0),
+        cache.lookup_transition(&memory, &source, filler(1)),
         TransitionLookup::Linked(ref code, 2) if same(code, &replacement)
     ));
-    assert!(!cache.transition_pending());
+
     bounds(&cache);
 }
 
@@ -1130,7 +1108,7 @@ fn cached_transition_lookup_rechecks_live_links_without_an_index_change() {
     cache.install_link(&source, 1).unwrap();
     cache.install_link(&target, 2).unwrap();
     assert!(matches!(
-        cache.lookup_transition(&memory, &source, 0x1000, 0),
+        cache.lookup_transition(&memory, &source, 0x1000),
         TransitionLookup::Linked(ref code, 2) if same(code, &target)
     ));
     let epoch = cache.entries_epoch;
@@ -1138,18 +1116,18 @@ fn cached_transition_lookup_rechecks_live_links_without_an_index_change() {
     cache.install_link(&other, 2).unwrap();
     assert_eq!(cache.entries_epoch, epoch);
     assert!(matches!(
-        cache.lookup_transition(&memory, &source, 0x1000, 0),
+        cache.lookup_transition(&memory, &source, 0x1000),
         TransitionLookup::Miss
     ));
     assert_eq!(cache.newest, Some(target.key.index));
     cache.install_link(&target, 4).unwrap();
     assert!(matches!(
-        cache.lookup_transition(&memory, &source, 0x1000, 0),
+        cache.lookup_transition(&memory, &source, 0x1000),
         TransitionLookup::Linked(ref code, 4) if same(code, &target)
     ));
     assert_eq!(cache.link_owners[2], other.identity());
     assert_eq!(cache.entries_epoch, epoch);
-    assert!(!cache.transition_pending());
+
     bounds(&cache);
 }
 
@@ -1167,7 +1145,7 @@ fn entry_epoch_wrap_invalidates_every_retained_sources_cached_authority() {
         cache.install_link(&other, 3).unwrap();
         cache.entries_epoch = u64::MAX;
         assert!(matches!(
-            cache.lookup_transition(&memory, &source, 0x1000, 0),
+            cache.lookup_transition(&memory, &source, 0x1000),
             TransitionLookup::Linked(ref code, 2) if same(code, &target)
         ));
         cache.regions[other.key.index]
@@ -1189,7 +1167,7 @@ fn entry_epoch_wrap_invalidates_every_retained_sources_cached_authority() {
                 .all(|entry| entry.linked_entries.epoch == 0)
         );
         assert!(matches!(
-            cache.lookup_transition(&memory, &other, 0x1000, 0),
+            cache.lookup_transition(&memory, &other, 0x1000),
             TransitionLookup::Linked(ref code, 2) if same(code, &target)
         ));
         bounds(&cache);
@@ -1197,7 +1175,7 @@ fn entry_epoch_wrap_invalidates_every_retained_sources_cached_authority() {
 }
 
 #[test]
-fn transition_lookup_uses_the_exact_heat_interval_and_closed_pending_handoff() {
+fn repeated_compiled_edges_keep_immutable_owners_and_never_request_reformation() {
     let memory = memory();
     let mut cache = CoreCache32::default();
     let source = cache.insert(compiled(&memory, filler(0)));
@@ -1205,27 +1183,21 @@ fn transition_lookup_uses_the_exact_heat_interval_and_closed_pending_handoff() {
     cache.install_link(&source, 1).unwrap();
     cache.install_link(&target, 2).unwrap();
     let snapshot = cache.snapshot();
-
-    match cache.lookup_transition(&memory, &source, 0x1000, 2) {
-        TransitionLookup::Linked(code, slot) => {
-            assert!(same(&code, &target));
-            assert_eq!(slot, 2);
+    let source_bytes = source.wasm().to_vec();
+    let target_bytes = target.wasm().to_vec();
+    for _ in 0..8193 {
+        for (from, pc, to, slot) in [
+            (&source, 0x1000, &target, 2),
+            (&target, filler(0), &source, 1),
+        ] {
+            assert!(matches!(cache.lookup_transition(&memory,from,pc),
+                TransitionLookup::Linked(ref code,selected) if same(code,to)&&selected==slot));
+            assert_eq!(cache.newest, Some(to.key.index));
         }
-        _ => panic!("the first observation must select the linked target"),
     }
-    assert!(!cache.transition_pending());
-    assert!(matches!(
-        cache.lookup_transition(&memory, &source, 0x1000, 2),
-        TransitionLookup::Stop
-    ));
-    assert!(cache.transition_pending());
-    let newest = cache.newest;
-    assert!(matches!(
-        cache.lookup_transition(&memory, &source, filler(0), 2),
-        TransitionLookup::Stop
-    ));
-    assert_eq!(cache.newest, newest);
     assert_eq!(cache.snapshot(), snapshot);
+    assert_eq!(source.wasm(), source_bytes);
+    assert_eq!(target.wasm(), target_bytes);
     assert_eq!(
         &cache.link_owners[1..3],
         &[source.identity(), target.identity()]
@@ -1234,7 +1206,7 @@ fn transition_lookup_uses_the_exact_heat_interval_and_closed_pending_handoff() {
 }
 
 #[test]
-fn transition_lookup_keeps_unlinked_lookup_recency_without_accumulating_heat() {
+fn transition_lookup_keeps_unlinked_lookup_recency_without_replacing_owners() {
     let memory = memory();
     let mut cache = CoreCache32::default();
     let source = cache.insert(compiled(&memory, filler(0)));
@@ -1244,17 +1216,17 @@ fn transition_lookup_keeps_unlinked_lookup_recency_without_accumulating_heat() {
     cache.install_link(&last, 3).unwrap();
     assert_eq!(cache.newest, Some(last.key.index));
     assert!(matches!(
-        cache.lookup_transition(&memory, &source, 0x1000, 1),
+        cache.lookup_transition(&memory, &source, 0x1000),
         TransitionLookup::Miss
     ));
     assert_eq!(cache.newest, Some(target.key.index));
-    assert!(!cache.transition_pending());
+
     cache.install_link(&target, 2).unwrap();
     assert!(matches!(
-        cache.lookup_transition(&memory, &source, 0x1000, 2),
+        cache.lookup_transition(&memory, &source, 0x1000),
         TransitionLookup::Linked(_, 2)
     ));
-    assert!(!cache.transition_pending());
+
     bounds(&cache);
 }
 
@@ -1268,7 +1240,7 @@ fn transition_lookup_rejects_stale_and_identically_remapped_targets() {
         cache.install_link(&source, 1).unwrap();
         cache.install_link(&target, 2).unwrap();
         assert!(matches!(
-            cache.lookup_transition(&memory, &source, 0x1000, 0),
+            cache.lookup_transition(&memory, &source, 0x1000),
             TransitionLookup::Linked(ref code, 2) if same(code, &target)
         ));
         if remap {
@@ -1283,13 +1255,13 @@ fn transition_lookup_rejects_stale_and_identically_remapped_targets() {
         }
         assert!(source.is_current(&memory));
         assert!(matches!(
-            cache.lookup_transition(&memory, &source, 0x1000, 1),
+            cache.lookup_transition(&memory, &source, 0x1000),
             TransitionLookup::Miss
         ));
         assert_eq!(cache.source_invalidations, 1);
         assert_eq!(cache.link_owners[2], 0);
         assert!(cache.retained(&target).is_none());
-        assert!(!cache.transition_pending());
+
         bounds(&cache);
     }
 }
@@ -1303,7 +1275,7 @@ fn transition_lookup_never_uses_held_source_ownership_after_row_and_slot_reuse()
     cache.install_link(&old, 1).unwrap();
     cache.install_link(&target, 2).unwrap();
     assert!(matches!(
-        cache.lookup_transition(&memory, &old, 0x1000, 0),
+        cache.lookup_transition(&memory, &old, 0x1000),
         TransitionLookup::Linked(ref code, 2) if same(code, &target)
     ));
     cache.remove(old.key);
@@ -1312,21 +1284,21 @@ fn transition_lookup_never_uses_held_source_ownership_after_row_and_slot_reuse()
     cache.install_link(&replacement, 1).unwrap();
     assert!(old.is_current(&memory));
     let snapshot = cache.snapshot();
-    match cache.lookup_transition(&memory, &old, 0x1000, 1) {
+    match cache.lookup_transition(&memory, &old, 0x1000) {
         TransitionLookup::Linked(code, slot) => {
             assert!(same(&code, &target));
             assert_eq!(slot, 2);
         }
         _ => panic!("a valid target remains dispatchable without a retained source"),
     }
-    assert!(!cache.transition_pending());
+
     assert_eq!(cache.snapshot(), snapshot);
     assert_eq!(cache.link_owners[1], replacement.identity());
     assert!(matches!(
-        cache.lookup_transition(&memory, &replacement, 0x1000, 2),
+        cache.lookup_transition(&memory, &replacement, 0x1000),
         TransitionLookup::Linked(_, 2)
     ));
-    assert!(!cache.transition_pending());
+
     bounds(&cache);
 }
 
@@ -1340,7 +1312,7 @@ fn transition_lookup_selects_a_shadowing_target_and_stops_before_a_stale_source(
     cache.install_link(&target, 2).unwrap();
     let shadow = cache.insert(compiled(&memory, 0x1000));
     cache.install_link(&shadow, 3).unwrap();
-    match cache.lookup_transition(&memory, &source, 0x1000, 2) {
+    match cache.lookup_transition(&memory, &source, 0x1000) {
         TransitionLookup::Linked(code, slot) => {
             assert!(same(&code, &shadow));
             assert_eq!(slot, 3);
@@ -1348,19 +1320,17 @@ fn transition_lookup_selects_a_shadowing_target_and_stops_before_a_stale_source(
         _ => panic!("the current index must select the shadowing owner"),
     }
     assert!(matches!(
-        cache.lookup_transition(&memory, &source, 0x1000, 2),
-        TransitionLookup::Stop
+        cache.lookup_transition(&memory, &source, 0x1000),
+        TransitionLookup::Linked(ref code, 3) if same(code, &shadow)
     ));
-    assert!(cache.transition_pending());
-    cache.clear_transition();
     memory.write(GuestAddress(filler(0)), &[0x40]).unwrap();
     let snapshot = cache.snapshot();
     let newest = cache.newest;
     assert!(matches!(
-        cache.lookup_transition(&memory, &source, 0x1000, 1),
+        cache.lookup_transition(&memory, &source, 0x1000),
         TransitionLookup::Stop
     ));
-    assert!(!cache.transition_pending());
+
     assert_eq!(cache.snapshot(), snapshot);
     assert_eq!(cache.newest, newest);
     bounds(&cache);

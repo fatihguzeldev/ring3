@@ -211,33 +211,12 @@ pub(crate) fn core_prepare(pc: u32, instructions: u32, blocks: u32) -> u32 {
             blocks: blocks as usize,
             ..CompileOptions::default()
         };
-        let promoted = core.as_mut().and_then(|session| {
-            if !session.cache.transition_pending() {
-                return None;
-            }
-            if session.context.state().eip != pc {
-                session.cache.clear_transition();
-                return None;
-            }
-            let gates = match instance.module_gates() {
-                Ok(gates) => gates,
-                Err(_) => {
-                    session.cache.clear_transition();
-                    return None;
-                }
-            };
-            let gates: Vec<_> = gates.iter().map(|gate| (gate.entry, gate.id)).collect();
-            session
-                .cache
-                .prepare_transition(instance.memory.as_ref().unwrap(), pc, options, &gates)
-        });
-        let mut admitted = promoted.is_some();
+        let mut admitted = false;
         let mut port_bound = false;
         let mut transient = false;
-        let selected = promoted.or_else(|| {
-            core.as_mut()
-                .and_then(|session| session.cache.lookup(instance.memory.as_ref().unwrap(), pc))
-        });
+        let selected = core
+            .as_mut()
+            .and_then(|session| session.cache.lookup(instance.memory.as_ref().unwrap(), pc));
         let mut fresh_cache = core.is_none().then(CoreCache32::default);
         let code = if let Some(code) = selected {
             code
@@ -371,9 +350,6 @@ pub(crate) fn core_lookup(pc: u32) -> u32 {
         };
         if session.active {
             return 12;
-        }
-        if session.cache.transition_pending() {
-            return 4;
         }
         let Some(memory) = instance
             .as_ref()

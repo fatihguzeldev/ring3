@@ -244,22 +244,22 @@ test('retained-entry miss preserves genuine cold execution for an unowned PC',()
   assert.equal(f.calls.filter(([name])=>name==='prepare').length,0);
 });
 
-test('pending promotion lookup miss reaches prepare instead of looping over a retained entry',()=>{
+test('read-only lookup miss reaches one prepare through the cold JIT handshake',()=>{
   const f=coldFixture([{stop:1,pc:0x1004,work:0,retired:0}],
     pc=>({id:pc===0x1000?1n:2n,stop:pc===0x1000?1:2,next:pc+4}));
-  let pending=false;
-  f.api.core_lookup=pc=>{f.calls.push(['lookup',pc]);assert.equal(pending,true);return 4;};
+  let awaitingPrepare=false;
+  f.api.core_lookup=pc=>{f.calls.push(['lookup',pc]);assert.equal(awaitingPrepare,true);return 4;};
   const prepare=f.api.core_prepare;
-  f.api.core_prepare=(pc,...args)=>{if(pc===0x1004){assert.equal(pending,true);pending=false;}return prepare(pc,...args);};
+  f.api.core_prepare=(pc,...args)=>{if(pc===0x1004){assert.equal(awaitingPrepare,true);awaitingPrepare=false;}return prepare(pc,...args);};
   const cache=new CodeCache(f.engine,{chain:false,budget:2}),unit=cache.entry(0x1000);
-  assert.equal(cache.execute(unit).coreReason,1);pending=true;
-  assert.equal(cache.select(),null,'pending promotion prevents a retained hit');
+  assert.equal(cache.execute(unit).coreReason,1);awaitingPrepare=true;
+  assert.equal(cache.select(),null,'a native miss retains the cold/JIT handoff');
   const cold=cache.execute(null);assert.deepEqual([cold.coreReason,cold.work,cold.retired],[1,0,0]);
   cache.budget=1;const selected=cache.select();
-  assert.equal(selected.id,2n,'the JIT handoff consumes pending formation through prepare');
+  assert.equal(selected.id,2n,'the JIT handoff selects prepared code');
   const result=cache.execute(selected);
   assert.deepEqual([result.coreReason,result.pc,result.retired,result.work],[2,0x1008,1,1]);
-  assert.equal(pending,false);
+  assert.equal(awaitingPrepare,false);
   assert.equal(f.calls.filter(([name])=>name==='lookup').length,1,'jitPc avoids a second lookup loop');
   assert.equal(f.calls.filter(([name])=>name==='cold').length,1);
   assert.equal(f.calls.filter(([name])=>name==='prepare').length,2);

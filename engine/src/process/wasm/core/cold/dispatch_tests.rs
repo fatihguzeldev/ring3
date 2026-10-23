@@ -234,7 +234,7 @@ fn active_cold_terminal_results_keep_identity_zero_and_the_exact_committed_prefi
 
 #[test]
 fn active_chain_lookup_and_lease_rejections_do_not_execute_a_cold_prefix() {
-    for rejection in [0, 1, 2, 3] {
+    for rejection in [0, 1, 2] {
         let mut f = fixture(&[0x40, 0xff, 0xe7], 5);
         match rejection {
             0 => f.context.set_word(112, 0),
@@ -246,15 +246,7 @@ fn active_chain_lookup_and_lease_rejections_do_not_execute_a_cold_prefix() {
                 .unwrap()
                 .write(GuestAddress(0x1000), &[0x90])
                 .unwrap(),
-            _ => {
-                assert!(f.cache.observe_transition(
-                    f.instance.memory.as_ref().unwrap(),
-                    f.selected.as_ref().unwrap(),
-                    &f.target,
-                    0x1100,
-                    1
-                ));
-            }
+            _ => unreachable!(),
         }
         let before = *f.context.bytes();
         let numeric = f.numeric.architectural_state();

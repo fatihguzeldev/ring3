@@ -318,52 +318,29 @@ fn a_write_through_nonexecutable_alias_invalidates_interior_coverage_and_its_lin
 }
 
 #[test]
-fn legacy_overlapping_owners_promote_to_exact_union_and_retire_both_links() {
+fn legacy_overlapping_test_owners_keep_exact_selected_identity_without_reformation() {
     let memory = memory();
     let mut cache = CoreCache32::default();
-    // Only low-level insert permits this legacy shape; production admit rejects it.
     let first = cache.insert(code(&memory, 0x1000));
     let second = cache.insert(code(&memory, 0x1004));
-    assert_eq!(
-        (first.instruction_count(), second.instruction_count()),
-        (9, 5)
-    );
     cache.install_link(&first, 1).unwrap();
     cache.install_link(&second, 2).unwrap();
-    assert!(cache.observe_transition(&memory, &first, &second, 0x1004, 1));
-    let merged = cache
-        .prepare_transition(
-            &memory,
-            0x1004,
-            CompileOptions {
-                instructions: 9,
-                ..options()
-            },
-            &[],
-        )
-        .unwrap();
-    assert_eq!(
-        merged.instruction_pcs().collect::<Vec<_>>(),
-        (0x1000..0x1009).collect::<Vec<_>>()
-    );
-    assert_eq!(
-        merged.entrypoints(),
-        &[GuestAddress(0x1000), GuestAddress(0x1004)]
-    );
-    assert_eq!(
-        merged.formation_roots(),
-        &[GuestAddress(0x1000), GuestAddress(0x1004)]
-    );
-    assert_eq!(&cache.link_owners[1..3], &[0, 0]);
-    assert!(cache.retained(&first).is_none() && cache.retained(&second).is_none());
-    assert_eq!(cache.snapshot()[5], 1);
-    for pc in [0x1000, 0x1004] {
-        assert_eq!(
-            cache.lookup(&memory, pc).unwrap().identity(),
-            merged.identity()
-        );
+    let snapshot = cache.snapshot();
+    for _ in 0..8193 {
+        assert!(matches!(cache.lookup_transition(&memory,&first,0x1004),
+            TransitionLookup::Linked(ref owner,2) if owner.identity()==second.identity()));
+        assert!(matches!(cache.lookup_transition(&memory,&second,0x1000),
+            TransitionLookup::Linked(ref owner,1) if owner.identity()==first.identity()));
     }
-    coverage(&mut cache, &memory, &merged);
+    assert_eq!(cache.snapshot(), snapshot);
+    assert_eq!(
+        &cache.link_owners[1..3],
+        &[first.identity(), second.identity()]
+    );
+    assert!(cache.retained(&first).is_some() && cache.retained(&second).is_some());
+    for (pc, id) in [(0x1000, first.identity()), (0x1004, second.identity())] {
+        assert_eq!(cache.lookup(&memory, pc).unwrap().identity(), id);
+    }
 }
 
 #[test]
@@ -407,34 +384,10 @@ fn the_hard_admitted_entry_limit_declines_without_reemitting_or_losing_ports() {
             owner.identity()
         );
     }
-    let target = cache
-        .admit(
-            &memory,
-            compile(&memory, GuestAddress(0x1800), limits).unwrap(),
-        )
-        .unwrap();
-    cache.install_link(&target, 2).unwrap();
-    let before_union = cache.snapshot();
-    let entries = cache.entries.clone();
-    let covered = cache.coverage.clone();
-    assert!(cache.observe_transition(&memory, &owner, &target, 0x1800, 1));
-    assert!(
-        cache
-            .prepare_transition(&memory, 0x1800, limits, &[])
-            .is_none(),
-        "promotion cannot discard admitted ports to fit its hard label ceiling"
-    );
-    assert_eq!(cache.snapshot(), before_union);
-    assert_eq!(cache.entries, entries);
-    assert_eq!(cache.coverage, covered);
-    assert_eq!(
-        &cache.link_owners[1..3],
-        &[owner.identity(), target.identity()]
-    );
 }
 
 #[test]
-fn exact_union_promotion_preserves_runtime_admitted_ports_without_turning_them_into_roots() {
+fn hot_linked_owners_preserve_runtime_admitted_ports_and_immutable_roots() {
     let mut memory = memory();
     memory.write(GuestAddress(0x1040), &[0x40, 0xc3]).unwrap();
     let mut cache = CoreCache32::default();
@@ -447,34 +400,30 @@ fn exact_union_promotion_preserves_runtime_admitted_ports_without_turning_them_i
             .prepare_owned_entry(&memory, 0x1004, options(), &[])
             .unwrap(),
     );
-    assert!(cache.observe_transition(&memory, &first, &second, 0x1040, 1));
-    let merged = cache
-        .prepare_transition(&memory, 0x1040, options(), &[])
-        .unwrap();
-    assert_eq!(
-        merged.formation_roots(),
-        &[GuestAddress(0x1000), GuestAddress(0x1040)]
-    );
-    assert!(!merged.entrypoints().contains(&GuestAddress(0x1004)));
-    assert!(merged.supports_entry(0x1004));
-    assert_eq!(
-        cache.retained(&merged).unwrap().admitted_entries.as_slice(),
-        &[
-            GuestAddress(0x1000),
-            GuestAddress(0x1004),
-            GuestAddress(0x1040)
-        ]
-    );
-    assert_eq!(cache.snapshot()[5], 1);
-    assert_eq!(&cache.link_owners[1..3], &[0, 0]);
-    for pc in [0x1000, 0x1004, 0x1040] {
-        assert_eq!(
-            cache.lookup(&memory, pc).unwrap().identity(),
-            merged.identity()
-        );
+    let snapshot = cache.snapshot();
+    for _ in 0..8193 {
+        assert!(matches!(cache.lookup_transition(&memory,&first,0x1040),
+            TransitionLookup::Linked(ref code,2) if code.identity()==second.identity()));
+        assert!(matches!(cache.lookup_transition(&memory,&second,0x1004),
+            TransitionLookup::Linked(ref code,1) if code.identity()==first.identity()));
     }
+    assert_eq!(cache.snapshot(), snapshot);
+    assert_eq!(first.formation_roots(), &[GuestAddress(0x1000)]);
+    assert_eq!(second.formation_roots(), &[GuestAddress(0x1040)]);
+    assert!(!first.entrypoints().contains(&GuestAddress(0x1004)));
     assert_eq!(
-        merged.instruction_count(),
-        first.instruction_count() + second.instruction_count()
+        cache.retained(&first).unwrap().admitted_entries.as_slice(),
+        &[GuestAddress(0x1000), GuestAddress(0x1004)]
     );
+    assert_eq!(
+        &cache.link_owners[1..3],
+        &[first.identity(), second.identity()]
+    );
+    for (pc, id) in [
+        (0x1000, first.identity()),
+        (0x1004, first.identity()),
+        (0x1040, second.identity()),
+    ] {
+        assert_eq!(cache.lookup(&memory, pc).unwrap().identity(), id);
+    }
 }
