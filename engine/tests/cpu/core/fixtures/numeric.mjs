@@ -1,3 +1,4 @@
+import {instantiateCore,coreImports} from './link.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync, openSync, closeSync} from 'node:fs';
@@ -11,7 +12,7 @@ const hash = value => createHash('sha256').update(value).digest('hex');
 const hex = value => Buffer.from(value).toString('hex');
 const unhex = value => Uint8Array.from(Buffer.from(value.replaceAll(' ', ''), 'hex'));
 const fpOffset = 4236, simdOffset = 4364, ymmOffset = 4612;
-const report = {schema: 1, complete: false, engineSha256: engine.sha256, sources: [import.meta.url,
+const report = {schema: 1, complete: false, engineSha256: engine.sha256, sources: [import.meta.url,new URL('./link.mjs',import.meta.url).href,
   new URL('./names.mjs', import.meta.url).href,
   new URL('../../../support/wasm/engine.mjs', import.meta.url).href].map(url => ({url, sha256: hash(readFileSync(new URL(url)))})),
   cases: [], checks: [], limits: ['authored typed numerical routes; no game or performance claim',
@@ -29,7 +30,7 @@ function fp(initial, {status = 0, tag = 0xffff, opcode = 0, fip = 0, fdp = 0, cs
 
 function runCase(name, codeHex, budget, options, verify) {
   stage = name;
-  const instance = new WebAssembly.Instance(engine.module, {ring3_observability:{now_ns:()=>0n}});
+  const instance = instantiateCore(engine.module, {ring3_observability:{now_ns:()=>0n}});
   const memory = instance.exports.memory, api = Object.fromEntries(Object.entries(instance.exports)
     .filter(([name])=>name.startsWith('ring3_abi_v1_')).map(([name,value])=>[name.slice(13),value]));
   const slice = (pointer,length) => new Uint8Array(memory.buffer).slice(pointer,pointer+length);
@@ -103,10 +104,10 @@ function runCase(name, codeHex, budget, options, verify) {
     const code = slice(api.core_code_ptr()>>>0,api.core_code_len()>>>0);
     const module = new WebAssembly.Module(code);
     assertCoreNames(module, 0x1000);
-    assert.deepEqual(WebAssembly.Module.imports(module), [
+    assert.deepEqual(coreImports(module), [
       {module:'ring3',name:'memory',kind:'memory'}, {module:'ring3',name:'read',kind:'function'},
       {module:'ring3',name:'write',kind:'function'}, {module:'ring3',name:'numeric',kind:'function'}]);
-    let run = new WebAssembly.Instance(module,{ring3:{memory,read:api.core_read,write:api.core_write,numeric}}).exports.run;
+    let run = instantiateCore(module,{ring3:{memory,read:api.core_read,write:api.core_write,numeric}}).exports.run;
     result.module = {sha256:hash(code),wasmHex:hex(code)};
     status('core_begin',0); active = true;
     const initialVersion=view().getBigUint64(word(context,80),true),initialPageVersions=slice(word(context,84),word(context,68)*16);
@@ -129,7 +130,7 @@ function runCase(name, codeHex, budget, options, verify) {
       const resumedCode = slice(api.core_code_ptr()>>>0,api.core_code_len()>>>0);
       const resumedModule = new WebAssembly.Module(resumedCode);
       assertCoreNames(resumedModule,prefixPc);
-      run = new WebAssembly.Instance(resumedModule,{ring3:{memory,read:api.core_read,write:api.core_write,numeric}}).exports.run;
+      run = instantiateCore(resumedModule,{ring3:{memory,read:api.core_read,write:api.core_write,numeric}}).exports.run;
       result.handoff = {prefixRetired,prefixPc,published:hex(published),imported:hex(unpublishedFp),moduleSha256:hash(resumedCode)};
       status('core_begin',0); active = true;
     }
@@ -146,7 +147,7 @@ function runCase(name, codeHex, budget, options, verify) {
       context=api.core_context_ptr()>>>0;
       const resumedCode=slice(api.core_code_ptr()>>>0,api.core_code_len()>>>0),resumedModule=new WebAssembly.Module(resumedCode);
       assertCoreNames(resumedModule,prefixPc);
-      run=new WebAssembly.Instance(resumedModule,{ring3:{memory,read:api.core_read,write:api.core_write,numeric}}).exports.run;
+      run=instantiateCore(resumedModule,{ring3:{memory,read:api.core_read,write:api.core_write,numeric}}).exports.run;
       result.reentry={prefixRetired,prefixPc,moduleSha256:hash(resumedCode)};
       status('core_begin',0);active=true;
     }

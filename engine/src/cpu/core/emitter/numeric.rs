@@ -3,6 +3,7 @@ mod double;
 mod ieee;
 mod memory;
 mod simd;
+pub(super) mod span;
 
 pub(super) const BANK_POINTER: u64 = 92;
 pub(super) const SIMD_MXCSR: u64 = 112;
@@ -110,6 +111,7 @@ pub(super) fn emit(out: &mut Output<'_>, next: u32) {
 }
 
 fn slow(out: &mut Output<'_>, next: u32) {
+    span::invalidate(out);
     let ordinal = out
         .native
         .iter()
@@ -140,11 +142,14 @@ fn slow(out: &mut Output<'_>, next: u32) {
         out.c().i32_const(0).local_set(KIND);
         out.publish_operands();
     }
+    crate::cpu::core::memory::authority::flush(&mut out.c());
     out.c()
         .local_get(CTX)
         .i32_const(ordinal as i32)
         .call(2)
         .local_set(WRITE_STATUS);
+    crate::cpu::core::memory::authority::load(&mut out.c());
+    crate::cpu::core::memory::cache::invalidate(&mut out.c());
     out.c()
         .local_get(WRITE_STATUS)
         .i32_const(StopReason::SystemEntry as i32)

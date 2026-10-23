@@ -1,3 +1,4 @@
+import {instantiateCore,coreImports} from './link.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync,writeFileSync} from 'node:fs';
@@ -23,12 +24,12 @@ function numeric(context,ordinal) {
 for(const line of readFileSync(join(directory,'numeric-transfer.tsv'),'utf8').trim().split('\n')) {
   const [name,hex,id]=line.split('\t'),source=readFileSync(join(directory,`${name}.wasm`));
   const module=new WebAssembly.Module(source);
-  assert.deepEqual(WebAssembly.Module.imports(module),[
+  assert.deepEqual(coreImports(module),[
     {module:'ring3',name:'memory',kind:'memory'},{module:'ring3',name:'read',kind:'function'},
     {module:'ring3',name:'write',kind:'function'},{module:'ring3',name:'numeric',kind:'function'},
   ]);
   const unexpected=()=>assert.fail('scalar memory import is outside this transfer fixture');
-  programs.set(name,{run:new WebAssembly.Instance(module,{ring3:{memory,read:unexpected,write:unexpected,numeric}}).exports.run,
+  programs.set(name,{run:instantiateCore(module,{ring3:{memory,read:unexpected,write:unexpected,numeric}}).exports.run,
     id:BigInt(id),code:Buffer.from(hex,'hex'),sourceSha256:hash(source)});
 }
 

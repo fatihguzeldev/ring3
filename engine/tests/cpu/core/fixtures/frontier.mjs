@@ -1,3 +1,5 @@
+import {assertCoreNames,coreFunctionNames} from './names.mjs';
+import {instantiateCore,coreImports} from './link.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync,writeFileSync} from 'node:fs';
@@ -40,6 +42,11 @@ function unsigned(source,at) {
 }
 const section=(id,data)=>[id,...u(data.length),...data];
 function countLookups(source) {
+  const module=new WebAssembly.Module(source),names=coreFunctionNames(module),imports=WebAssembly.Module.imports(module);
+  const importedFunctions=imports.filter(item=>item.kind==='function').length;
+  const globalBase=imports.filter(item=>item.kind==='global').length;
+  const lookupIndex=names.find(([,name])=>name==='guest.lookup')[0]-importedFunctions;
+  const preciseIndex=names.find(([,name])=>name==='guest.precise')[0]-importedFunctions;
   const output=[...source.subarray(0,8)],at={value:8};let instrumented=false,preciseInstrumented=false,exported=false;
   while(at.value<source.length) {
     const id=source[at.value++],length=unsigned(source,at),end=at.value+length;
@@ -49,22 +56,22 @@ function countLookups(source) {
       output.push(...section(6,[2,0x7f,1,0x41,0,0x0b,0x7f,1,0x41,0,0x0b]));
       const cursor={value:0},count=unsigned(data,cursor),entries=[];
       for(const [index,label] of ['test.lookup_calls','test.precise_calls'].entries()) {
-        const name=new TextEncoder().encode(label);entries.push(...u(name.length),...name,3,index);
+        const name=new TextEncoder().encode(label);entries.push(...u(name.length),...name,3,...u(globalBase+index));
       }
       data=Uint8Array.from([...u(count+2),...data.subarray(cursor.value),...entries]);exported=true;
     } else if(id===10) {
       const cursor={value:0},count=unsigned(data,cursor),bodies=[];
-      assert(count>=5&&count<=8);
+      assert.equal(count,names.length-importedFunctions,'every named helper and wrapper has exactly one body');
       for(let index=0;index<count;index++) {
         const size=unsigned(data,cursor),bodyEnd=cursor.value+size;
         assert(bodyEnd<=data.length);let body=data.subarray(cursor.value,bodyEnd);cursor.value=bodyEnd;
-        if(index===2||index===4) {
+        if(index===lookupIndex||index===preciseIndex) {
           const locals={value:0},groups=unsigned(body,locals);
-          if(index===2)assert.equal(groups,0,'lookup has no declared locals');
+          if(index===lookupIndex)assert.equal(groups,0,'lookup has no declared locals');
           for(let group=0;group<groups;group++){unsigned(body,locals);locals.value++;}
-          const global=index===2?0:1;
-          body=Uint8Array.from([...body.subarray(0,locals.value),0x23,global,0x41,1,0x6a,0x24,global,...body.subarray(locals.value)]);
-          if(index===2)instrumented=true;else preciseInstrumented=true;
+          const global=globalBase+(index===lookupIndex?0:1);
+          body=Uint8Array.from([...body.subarray(0,locals.value),0x23,...u(global),0x41,1,0x6a,0x24,...u(global),...body.subarray(locals.value)]);
+          if(index===lookupIndex)instrumented=true;else preciseInstrumented=true;
         }
         bodies.push(...u(body.length),...body);
       }
@@ -77,11 +84,12 @@ function countLookups(source) {
 for (const line of readFileSync(join(directory,'regions.tsv'),'utf8').trim().split('\n')) {
   const [name,entry,identity] = line.split('\t'), encoded = readFileSync(join(directory,`${name}.wasm`));
   const module = new WebAssembly.Module(encoded);
-  assert.deepEqual(WebAssembly.Module.imports(module),[
+  assertCoreNames(module,Number(entry),identity);
+  assert.deepEqual(coreImports(module),[
     {module:'ring3',name:'memory',kind:'memory'},{module:'ring3',name:'read',kind:'function'},
     {module:'ring3',name:'write',kind:'function'},
   ]);
-  const instrumented=countLookups(encoded),exports=new WebAssembly.Instance(new WebAssembly.Module(instrumented),{ring3:{memory,read,write}}).exports;
+  const instrumented=countLookups(encoded),exports=instantiateCore(new WebAssembly.Module(instrumented),{ring3:{memory,read,write}}).exports;
   regions.set(name,{name,entry:Number(entry),identity:BigInt(identity),run:exports.run,lookups:exports['test.lookup_calls'],precise:exports['test.precise_calls'],sha256:hash(encoded),instrumentedSha256:hash(instrumented)});
 }
 function reset(name,eax=5,readonly=false,options={}) {
@@ -200,6 +208,6 @@ step('indirect-call-target-read-fault-precedes-the-push',first,8,
 first=reset('call-register-esp');
 step('indirect-call-register-uses-prepush-esp',first,1,
   {stop:2,pc:0x4800,retired:1,eax:5,esp:0x47fc,flags:2,remaining:0,data:10,stackWrite:0x1b02,lookups:2,version:1});
-writeFileSync(reportPath,JSON.stringify({complete:true,sources:[import.meta.url].map(url=>({url,sha256:hash(readFileSync(new URL(url)))})),
+writeFileSync(reportPath,JSON.stringify({complete:true,sources:[import.meta.url,new URL('./link.mjs',import.meta.url).href].map(url=>({url,sha256:hash(readFileSync(new URL(url)))})),
   regions:[...regions.values()].map(({name,entry,identity,sha256,instrumentedSha256})=>({name,entry,identity:String(identity),sha256,instrumentedSha256})),cases},null,2));
 console.log(JSON.stringify({complete:true,cases:cases.length}));

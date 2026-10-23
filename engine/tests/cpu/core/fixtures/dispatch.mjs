@@ -1,3 +1,4 @@
+import {instantiateCore,coreImports} from './link.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
@@ -9,6 +10,7 @@ const directory = process.argv[2], PAGE = 4096, CTX = 0x100;
 const MAP = 0x10000, PERM = 0x410000, EXEC = 0x510000, VERSION = 0x510100;
 const PAGE_VERSION = 0x510200, BACKING = 0x520000, GENERATION = 0x530000;
 const memory = new WebAssembly.Memory({initial: 96}), functions = new WebAssembly.Table({element: 'anyfunc', initial: 9, maximum: 4097});
+const publishers = new WebAssembly.Table({element:'anyfunc',initial:9,maximum:4097});
 const bytes = new Uint8Array(memory.buffer), view = new DataView(memory.buffer);
 const get = offset => view.getUint32(offset, true), put = (offset, value) => view.setUint32(offset, value >>> 0, true);
 const hex = value => Buffer.from(value).toString('hex');
@@ -60,22 +62,20 @@ for (const [index, line] of readFileSync(join(directory, 'regions.tsv'), 'utf8')
   assert(WebAssembly.validate(encoded), `${name}: original region validates`);
   const module = new WebAssembly.Module(encoded);
   assertCoreNames(module, Number(entry), id);
-  assert.deepEqual(WebAssembly.Module.imports(module), [
+  assert.deepEqual(coreImports(module), [
     {module: 'ring3', name: 'memory', kind: 'memory'}, {module: 'ring3', name: 'read', kind: 'function'},
     {module: 'ring3', name: 'write', kind: 'function'},
   ]);
-  const run = new WebAssembly.Instance(module, {ring3: {memory, read, write}}).exports.run;
-  regions.set(name, {name, entry: Number(entry), id: BigInt(id), slot: index + 1, run, sha256: hash(encoded)});
-  functions.set(index + 1, run);
+  regions.set(name, {name, entry: Number(entry), id: BigInt(id), slot: index + 1, module, sha256: hash(encoded)});
 }
 const byPc = new Map([[0x1000,'caller'],[0x1005,'caller'],[0x1008,'caller'],[0x1040,'callee'],[0x1140,'after-repeat']]);
-function next(context) {
+function probe(context,pc) {
   assert.equal(context, CTX);
-  active.next.push({pc: get(CTX + 32), remaining: get(CTX + 44), retired: get(CTX + 40), id: String(view.getBigUint64(CTX + 120, true))});
-  if (active.options.cold) return active.options.cold();
+  active.next.push({pc, remaining: dispatch['link.local12'].value, retired: dispatch['link.local13'].value, id: String(view.getBigUint64(CTX + 120, true))});
+  if (active.options.cold) return 0x40000000;
   if (active.options.missing) return 0;
   if (active.options.invalidNext) return 0xffffffff;
-  const selected = regions.get(byPc.get(get(CTX + 32))); assert(selected, 'scripted native selection has a target');
+  const selected = regions.get(byPc.get(pc)); assert(selected, 'scripted native selection has a target');
   view.setBigUint64(CTX + 120, selected.id, true);
   return active.options.nullNext ? 8 : active.options.wrongNext ? regions.get('caller').slot : selected.slot;
 }
@@ -83,11 +83,18 @@ const encoded = readFileSync(join(directory, 'dispatch.wasm'));
 assert(WebAssembly.validate(encoded), 'dispatcher validates');
 const module = new WebAssembly.Module(encoded);
 assertDispatchNames(module);
-assert.deepEqual(WebAssembly.Module.imports(module), [
+assert.deepEqual(coreImports(module), [
   {module: 'ring3', name: 'memory', kind: 'memory'}, {module: 'ring3', name: 'functions', kind: 'table'},
-  {module: 'ring3', name: 'next', kind: 'function'},
+  {module: 'ring3', name: 'publishers', kind: 'table'},
+  {module: 'ring3', name: 'probe', kind: 'function'}, {module: 'ring3', name: 'cold', kind: 'function'},
 ]);
-const dispatch = new WebAssembly.Instance(module, {ring3: {memory, functions, next}}).exports;
+const dispatch = instantiateCore(module, {ring3: {memory, functions, publishers, probe,
+  cold:context=>{assert.equal(context,CTX);return active.options.cold();}}}).exports;
+for(const unit of regions.values()) {
+  const exports=instantiateCore(unit.module,{ring3:{memory,read,write,...dispatch}}).exports;
+  unit.run=exports.run;unit.link=exports.link;unit.publish=exports.publish;
+  functions.set(unit.slot,exports.link);publishers.set(unit.slot,exports.publish);
+}
 assert.equal(dispatch.run.length, 3); assert.equal(dispatch.regions.value, 0);
 
 const initialRegs = [5,3,7,0x3000,0x4800,0,0,0];
@@ -182,7 +189,9 @@ check('null-first-slot','caller',8,{slot:8},{stop:8,regions:0,untouched:true});
 check('inactive-region-is-neutral','caller',8,{inactive:true},{stop:8,regions:1,untouched:true});
 check('wrong-region-identity-is-neutral','caller',8,{wrongIdentity:true},{stop:8,regions:1,untouched:true});
 
-const section=(id,payload)=>[id,payload.length,...payload];
+const unsigned=value=>{const result=[];do{const byte=value&127;value>>>=7;result.push(byte|(value?128:0));}while(value);return result;};
+const section=(id,payload)=>[id,...unsigned(payload.length),...payload];
+const text=value=>{const bytes=[...new TextEncoder().encode(value)];return [...unsigned(bytes.length),...bytes];};
 function stub(stop, remaining) {
   const body=[0];
   if(remaining!==undefined) {
@@ -190,18 +199,27 @@ function stub(stop, remaining) {
     if(remaining===null) body.push(0x41,0); else body.push(0x20,1,...(remaining?[0x41,remaining,0x6a]:[]));
     body.push(0x36,2,44);
   }
+  if(stop===1)body.push(0x41,1,0x24,0,0x20,0,0x24,1,
+    0x20,0,0x28,2,44,0x24,2,0x20,0,0x28,2,40,0x24,3,0x20,0,0x28,2,32,0x24,4);
   body.push(0x41,stop,0x0b);
-  const data=Uint8Array.from([0,97,115,109,1,0,0,0,...section(1,[1,0x60,2,0x7f,0x7f,1,0x7f]),
-    ...section(2,[1,6,114,105,110,103,51,120,6,109,101,109,111,114,121,2,0,1]),
-    ...section(3,[1,0]),...section(7,[1,3,114,117,110,0,0]),...section(10,[1,body.length,...body])]);
-  return new WebAssembly.Instance(new WebAssembly.Module(data),{ring3x:{memory}}).exports.run;
+  const globals=['valid','context','remaining','retired','pc'];
+  const imports=[...text('ring3x'),...text('memory'),2,0,1,
+    ...globals.flatMap(name=>[...text('test'),...text(name),3,0x7f,1])];
+  const data=Uint8Array.from([0,97,115,109,1,0,0,0,
+    ...section(1,[2,0x60,2,0x7f,0x7f,1,0x7f,0x60,1,0x7f,0]),...section(2,[6,...imports]),
+    ...section(3,[2,0,1]),...section(7,[2,...text('run'),0,0,...text('publish'),0,1]),
+    ...section(10,[2,...unsigned(body.length),...body,2,0,0x0b])]);
+  return instantiateCore(new WebAssembly.Module(data),{ring3x:{memory},test:{
+    valid:dispatch['link.valid'],context:dispatch['link.context'],remaining:dispatch['link.local12'],
+    retired:dispatch['link.local13'],pc:dispatch['link.local10']}}).exports;
 }
+function setStub(stop,remaining){const exports=stub(stop,remaining);functions.set(8,exports.run);publishers.set(8,exports.publish);}
 for(const stop of [2,3,4,5,6,7,8,9,10]) {
-  functions.set(8,stub(stop));
+  setStub(stop);
   check(`non-NeedCode-${stop}-returns-immediately`,'caller',8,{slot:8},{stop,regions:1,untouched:true});
 }
 for(const [label,remaining,stop,wanted] of [['no-work',0,1,8],['excess-remaining',1,8,9],['zero-remaining',null,2,0]]) {
-  functions.set(8,stub(1,remaining));
+  setStub(1,remaining);
   check(label,'caller',8,{slot:8},{stop,pc:0x1000,retired:0,remaining:wanted,regions:1});
 }
 
@@ -264,6 +282,6 @@ check('cold-retired-counter-wraps-with-valid-work','caller',8,{retired:0xfffffff
     identity:0n,cold:[1,2,2],writes:[[0x47fc,4,0x1005]]});
 check('cold-counters-reset-on-next-dispatch','gate',8,{},
   {stop:7,pc:0x1400,retired:0,regions:1,gate:77,cold:[0,0,0]});
-writeFileSync(reportPath,JSON.stringify({complete:true,dispatchSha256:hash(encoded),sources:[import.meta.url,new URL('./kernels.mjs',import.meta.url).href,new URL('./names.mjs',import.meta.url).href]
+writeFileSync(reportPath,JSON.stringify({complete:true,dispatchSha256:hash(encoded),sources:[import.meta.url,new URL('./link.mjs',import.meta.url).href,new URL('./kernels.mjs',import.meta.url).href,new URL('./names.mjs',import.meta.url).href]
   .map(url=>({url,sha256:hash(readFileSync(new URL(url)))})),regions:[...regions.values()].map(({name,id,slot,sha256})=>({name,id:String(id),slot,sha256})),records},null,2));
 console.log(JSON.stringify({complete:true,cases:records.length,dispatchSha256:hash(encoded)}));

@@ -1,6 +1,8 @@
 mod control;
 mod integer;
+pub(super) mod link;
 mod numeric;
+mod region;
 mod strings;
 #[cfg(test)]
 mod tests;
@@ -83,8 +85,8 @@ pub(super) fn emit(
     native: &[NativeInstruction],
 ) -> Vec<u8> {
     let shift = u32::from(!native.is_empty());
-    let (fast, store_widths) = run(blocks, identity, native, false, Vec::new());
-    let (precise, store_widths) = run(blocks, identity, native, true, store_widths);
+    let (fast, store_widths) = run(blocks, entry, identity, native, false, Vec::new());
+    let (precise, store_widths) = run(blocks, entry, identity, native, true, store_widths);
     let mut module = Module::new();
     let mut types = TypeSection::new();
     types.ty().function([ValType::I32; 2], [ValType::I32]);
@@ -92,10 +94,33 @@ pub(super) fn emit(
     types.ty().function([ValType::I32; 4], [ValType::I32]);
     types.ty().function([ValType::I32; 8], [ValType::I32]);
     types.ty().function([ValType::I32], [ValType::I32]);
-    types.ty().function([ValType::I32; 13], []);
-    if !store_widths.is_empty() {
-        types.ty().function([ValType::I32; 5], [ValType::I32]);
-    }
+    types.ty().function(
+        [ValType::I32]
+            .into_iter()
+            .chain(link::boundary_fields(!native.is_empty()).map(|(_, kind)| kind))
+            .collect::<Vec<_>>(),
+        [],
+    );
+    types.ty().function(
+        [ValType::F64; 8]
+            .into_iter()
+            .chain([ValType::I32; 10])
+            .collect::<Vec<_>>(),
+        [],
+    );
+    types.ty().function(
+        [ValType::I32; 5]
+            .into_iter()
+            .chain([ValType::I64])
+            .collect::<Vec<_>>(),
+        [ValType::I32, ValType::I64],
+    );
+    types.ty().function([ValType::I32], []);
+    types.ty().function(
+        [ValType::I32, ValType::I32, ValType::F64, ValType::F64, ValType::F64],
+        [ValType::I32],
+    );
+    types.ty().function([ValType::I32; 3], [ValType::I32; 3]);
     module.section(&types);
     let mut imports = ImportSection::new();
     imports.import(
@@ -114,27 +139,48 @@ pub(super) fn emit(
     if !native.is_empty() {
         imports.import("ring3", "numeric", EntityType::Function(0));
     }
+    link::imports(&mut imports);
     module.section(&imports);
     let mut functions = FunctionSection::new();
     for kind in [3, 0, 4, 5, 0] {
         functions.function(kind);
     }
+    functions.function(6);
+    functions.function(9);
+    functions.function(10);
     for _ in &store_widths {
-        functions.function(6);
+        functions.function(7);
     }
+    functions.function(0);
+    functions.function(0);
+    functions.function(8);
     module.section(&functions);
     let mut exports = ExportSection::new();
-    exports.export("run", ExportKind::Func, 3 + shift);
+    let wrappers = 10 + shift + store_widths.len() as u32;
+    exports.export("run", ExportKind::Func, wrappers);
+    exports.export("link", ExportKind::Func, wrappers + 1);
+    exports.export("publish", ExportKind::Func, wrappers + 2);
     module.section(&exports);
     let mut code = CodeSection::new();
     code.function(&flags::emit_function());
     code.function(&fast);
     code.function(&lookup(blocks));
-    code.function(&publisher());
+    code.function(&link::emit_boundary(
+        !native.is_empty(),
+        2 + shift,
+        7 + shift,
+        8 + shift,
+    ));
     code.function(&precise);
+    code.function(&numeric::span::emit_materializer());
+    code.function(&numeric::span::emit_status_resolver());
+    code.function(&super::memory::cache::emit_translator());
     for &width in &store_widths {
         code.function(&super::memory::emit_store(width));
     }
+    code.function(&link::emit_entry(3 + shift, false));
+    code.function(&link::emit_entry(3 + shift, true));
+    code.function(&link::emit_publisher(2 + shift, 7 + shift, 8 + shift));
     module.section(&code);
     let mut names = NameSection::new();
     names.module(&format!("ring3.guest.{entry:08x}.{identity}"));
@@ -150,6 +196,9 @@ pub(super) fn emit(
         "guest.lookup",
         "guest.publish",
         "guest.precise",
+        "guest.materialize_numeric",
+        "guest.resolve_status",
+        "guest.translate_page",
     ]
     .into_iter()
     .enumerate()
@@ -158,26 +207,19 @@ pub(super) fn emit(
     }
     for (index, width) in store_widths.iter().enumerate() {
         functions.append(
-            7 + shift + index as u32,
+            10 + shift + index as u32,
             &format!("guest.store{}", width * 8),
         );
+    }
+    for (offset, name) in ["guest.entry", "guest.link", "guest.publish_link"]
+        .into_iter()
+        .enumerate()
+    {
+        functions.append(wrappers + offset as u32, name);
     }
     names.functions(&functions);
     module.section(&names);
     module.finish()
-}
-
-fn publisher() -> Function {
-    let mut function = Function::new([]);
-    for field in 0..12 {
-        function
-            .instructions()
-            .local_get(0)
-            .local_get(field + 1)
-            .i32_store(mem(u64::from(field * 4), 2));
-    }
-    function.instructions().end();
-    function
 }
 
 fn lookup(blocks: &[Block]) -> Function {
@@ -211,6 +253,7 @@ fn lookup(blocks: &[Block]) -> Function {
 
 fn run(
     blocks: &[Block],
+    entry: u32,
     identity: u64,
     native: &[NativeInstruction],
     precise: bool,
@@ -225,6 +268,14 @@ fn run(
         (8, ValType::I32),
         (6, ValType::V128),
         (10, ValType::F64),
+        (8, ValType::F64),
+        (13, ValType::I32),
+        (1, ValType::F64),
+        (1, ValType::I32),
+        (1, ValType::I64),
+        (1, ValType::I32),
+        (3, ValType::F64),
+        (4, ValType::I32),
     ]);
     let mut out = Output {
         function: &mut function,
@@ -249,6 +300,11 @@ fn run(
         .i32_const(StopReason::Infrastructure as i32)
         .return_()
         .end();
+    link::has_state(&mut out.c());
+    out.c().if_(BlockType::Empty);
+    link::restore(&mut out);
+    out.c().else_();
+    super::memory::authority::load(&mut out.c());
     for register in 0..8 {
         out.c()
             .local_get(CTX)
@@ -265,6 +321,7 @@ fn run(
     out.c()
         .i32_const(flags::FlagKind::None as i32)
         .local_set(KIND);
+    out.c().end();
     out.c()
         .local_get(FLAGS)
         .i32_const(0x50100)
@@ -289,41 +346,10 @@ fn run(
     super::memory::load_view(&mut out.c());
     let lookup = out.internal(4);
     out.c().local_get(EIP).call(lookup).local_set(INDEX);
-    out.c().loop_(BlockType::Empty);
-    out.c().local_get(REMAIN).i32_eqz().if_(BlockType::Empty);
-    out.exit(StopReason::Budget, None, 0);
-    out.c().end().block(BlockType::Empty);
-    for _ in blocks {
-        out.c().block(BlockType::Empty);
-    }
-    out.c()
-        .local_get(INDEX)
-        .br_table(0..blocks.len() as u32, blocks.len() as u32);
-    for (index, block) in blocks.iter().enumerate() {
-        out.c().end();
-        if precise {
-            out.block(block, true);
-        } else {
-            out.c()
-                .local_get(REMAIN)
-                .i32_const(block.instructions.len() as i32)
-                .i32_lt_u()
-                .if_(BlockType::Empty);
-            out.publish_exit(Some(block.entry), 0);
-            let exact = out.internal(6);
-            out.c()
-                .local_get(CTX)
-                .local_get(REMAIN)
-                .call(exact)
-                .return_()
-                .end();
-            out.block(block, false);
-        }
-        out.c().br((blocks.len() - index) as u32);
-    }
+    let graph =
+        super::region::Region::from_blocks(blocks, entry).expect("decoded blocks form a region");
+    region::emit(&mut out, &graph, precise);
     out.c().end();
-    out.exit(StopReason::NeedCode, None, 0);
-    out.c().end().unreachable().end();
     let Output { store_widths, .. } = out;
     (function, store_widths)
 }
@@ -347,34 +373,29 @@ impl Output<'_> {
         index + u32::from(!self.native.is_empty())
     }
 
-    fn block(&mut self, block: &Block, precise: bool) {
-        let operations: Vec<_> = block
-            .instructions
-            .iter()
-            .map(|instruction| {
-                instruction
-                    .operation
-                    .unwrap_or(Operation::Control(ControlOperation::InvalidOpcode))
-            })
-            .collect();
-        let demands = super::effects::live_flags(&operations);
-        for (prefix, instruction) in block.instructions.iter().enumerate() {
-            self.pc = instruction.pc;
-            self.prefix = prefix as u32;
+    fn block(&mut self, block: &super::region::RegionBlock, precise: bool) {
+        let demands = &block.flags.after;
+        for instruction in &block.instructions {
+            let prefix = instruction.exits.before.retired;
+            self.pc = match instruction.exits.before.pc {
+                super::region::ResumePc::Exact(pc) => pc,
+                super::region::ResumePc::Computed => unreachable!("instruction entry is exact"),
+            };
+            self.prefix = prefix;
             if precise {
                 self.c()
                     .local_get(REMAIN)
                     .i32_const(prefix as i32)
                     .i32_le_u()
                     .if_(BlockType::Empty);
-                self.exit(StopReason::Budget, Some(instruction.pc), prefix as u32);
+                self.exit(StopReason::Budget, Some(self.pc), prefix);
                 self.c().end();
             }
             self.record_flags = precise
                 || instruction
                     .operation
                     .and_then(super::effects::analyze)
-                    .is_none_or(|effect| effect.write & demands[prefix] != 0);
+                    .is_none_or(|effect| effect.write & demands[instruction.prefix as usize] != 0);
             if let Some(operation) = instruction.operation.filter(strings::supports) {
                 strings::emit(self, operation, instruction.next);
                 return;
@@ -390,20 +411,20 @@ impl Output<'_> {
                     .local_get(CTX)
                     .i32_const(gate as i32)
                     .i32_store(mem(116, 2));
-                self.exit(StopReason::Host, Some(instruction.pc), prefix as u32);
+                self.exit(StopReason::Host, Some(self.pc), prefix);
             } else {
                 match instruction.operation {
-                    None => self.exit(StopReason::Unsupported, Some(instruction.pc), prefix as u32),
+                    None => self.exit(StopReason::Unsupported, Some(self.pc), prefix),
                     Some(operation) => self.instruction(operation, instruction.next),
                 }
             }
-            if writes_memory {
+            if writes_memory && let Some(completed) = instruction.exits.after {
                 self.c()
                     .local_get(WRITE_STATUS)
                     .i32_const(2)
                     .i32_eq()
                     .if_(BlockType::Empty);
-                self.exit(StopReason::CodeInvalidated, None, prefix as u32 + 1);
+                self.exit(StopReason::CodeInvalidated, None, completed.retired);
                 self.c().end();
             }
         }
@@ -438,7 +459,17 @@ impl Output<'_> {
 
     pub(super) fn exit(&mut self, reason: StopReason, pc: Option<u32>, retired: u32) {
         self.publish_exit(pc, retired);
-        self.c().i32_const(reason as i32).return_();
+        if reason == StopReason::NeedCode {
+            self.c()
+                .i32_const(StopReason::Budget as i32)
+                .i32_const(reason as i32)
+                .local_get(REMAIN)
+                .i32_eqz()
+                .select()
+                .return_();
+        } else {
+            self.c().i32_const(reason as i32).return_();
+        }
     }
 
     fn publish_exit(&mut self, pc: Option<u32>, retired: u32) {
@@ -446,12 +477,7 @@ impl Output<'_> {
             self.c().i32_const(pc as i32).local_set(EIP);
         }
         self.count(retired);
-        self.materialize(flags::ARITHMETIC);
-        for local in [CTX, 2, 3, 4, 5, 6, 7, 8, 9, EIP, FLAGS, RETIRED, REMAIN] {
-            self.c().local_get(local);
-        }
-        let function = self.internal(5);
-        self.c().call(function);
+        link::boundary(self);
     }
 
     fn publish_operands(&mut self) {
@@ -503,7 +529,8 @@ impl Output<'_> {
 
     fn read_memory(&mut self, width: u32, destination: u32, prepare: bool) {
         self.check_span(width & 0xff);
-        super::memory::read(&mut self.c(), width, 0, prepare);
+        let translate = self.internal(9);
+        super::memory::read(&mut self.c(), width, 0, translate, prepare);
         self.c()
             .local_tee(WIDE)
             .i64_const(32)
@@ -539,8 +566,9 @@ impl Output<'_> {
                 index
             }
         };
-        let commit = self.internal(7 + index as u32);
-        super::memory::write(&mut self.c(), width, source, commit, 1, prepared);
+        let commit = self.internal(10 + index as u32);
+        let translate = self.internal(9);
+        super::memory::write(&mut self.c(), width, source, commit, 1, translate, prepared);
         self.c()
             .local_tee(WRITE_STATUS)
             .i32_const(2)

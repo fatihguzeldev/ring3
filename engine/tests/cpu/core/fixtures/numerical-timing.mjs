@@ -1,3 +1,4 @@
+import {instantiateCore,coreImports} from './link.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync,writeFileSync,openSync,closeSync} from 'node:fs';
@@ -17,7 +18,7 @@ const hex=bytes=>Buffer.from(bytes).toString('hex');
 const unhex=text=>Uint8Array.from(Buffer.from(text,'hex'));
 const iterations=131072,work=5*iterations,code=new Uint8Array(4096);
 code.set(unhex('d903d87304d95b084975f50f0b'));
-const sources=['./numerical-timing.mjs','../../../support/wasm/engine.mjs',
+const sources=['./numerical-timing.mjs','./link.mjs','../../../support/wasm/engine.mjs',
   '../../../../../sdk/runtime/engine.js','../../../../../sdk/runtime/cache.js'];
 const report={schema:1,complete:false,node:process.version,iterations,retiredAndWork:work,warmupsPerArm:2,rounds:8,
   artifactComparison:baselineHash===candidateHash?'same-artifact-control':'paired-artifacts',comparison,
@@ -39,9 +40,9 @@ const cases=[{name:'three-divided-by-two',numerator:0x40400000,denominator:0x400
     extended:'0000000000abaaaafd3f',inexact:true}];
 
 function fresh(artifact,index,test,result){
-  const imports=WebAssembly.Module.imports(artifact.module);
+  const imports=coreImports(artifact.module);
   if(imports.length)assert.deepEqual(imports,[{module:'ring3_observability',name:'now_ns',kind:'function'}]);
-  const instance=new WebAssembly.Instance(artifact.module,{ring3_observability:{now_ns:()=>0n}});
+  const instance=instantiateCore(artifact.module,{ring3_observability:{now_ns:()=>0n}});
   const api=Object.freeze(Object.fromEntries(Object.entries(instance.exports).filter(([name])=>name.startsWith('ring3_abi_v1_'))
     .map(([name,value])=>[name.slice(13),value])));
   const engine=new Engine(api,instance.exports.memory,artifact.sha256);
@@ -61,7 +62,7 @@ function fresh(artifact,index,test,result){
     const cache=new CodeCache(engine,{chain:true,budget:work,instructions:64,blocks:8});
     for(const name of ['core_read','core_write','core_numeric','core_chain_next'])assert.equal(cache.native[name],api[name],`original ${name}`);
     const unit=cache.entry(0x1000),encoded=bytes(api.core_code_ptr()>>>0,api.core_code_len()>>>0);
-    assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(encoded)),[
+    assert.deepEqual(coreImports(new WebAssembly.Module(encoded)),[
       {module:'ring3',name:'memory',kind:'memory'},{module:'ring3',name:'read',kind:'function'},
       {module:'ring3',name:'write',kind:'function'},{module:'ring3',name:'numeric',kind:'function'}]);
     engine.ok('core_begin');engine.ok('core_end');

@@ -97,3 +97,31 @@ pub(super) fn chain_next(
     } = session;
     execution::chain_next(instance, context, numeric, code, cache, cold_state)
 }
+
+pub(super) fn chain_probe(
+    instance: &mut crate::process::EngineInstance,
+    session: &mut CoreSession32,
+    pc: u32,
+) -> u32 {
+    execution::probe(
+        instance,
+        &mut session.context,
+        &mut session.code,
+        &mut session.cache,
+        pc,
+    )
+}
+
+pub(super) fn chain_cold(
+    instance: &mut crate::process::EngineInstance,
+    session: &mut CoreSession32,
+) -> u32 {
+    execution::chain_cold(
+        instance,
+        &mut session.context,
+        &mut session.numeric,
+        &mut session.code,
+        &mut session.cache,
+        &mut session.cold_state,
+    )
+}

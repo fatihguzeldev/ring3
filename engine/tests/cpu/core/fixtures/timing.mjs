@@ -1,3 +1,4 @@
+import {instantiateCore,coreImports} from './link.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
@@ -13,7 +14,7 @@ assert.ok(Number.isSafeInteger(rounds) && rounds >= 1 && rounds <= 16);
 const engine = readEngine(enginePath), hash = value => createHash('sha256').update(value).digest('hex');
 const report = {schema: 1, complete: false, node: process.version, engineSha256: engine.sha256,
   iterations, rounds, warmupsPerArm: 2, clock: 'node performance.now, elapsed milliseconds',
-  sources: Object.fromEntries(['./timing.mjs', './kernels.mjs',
+  sources: Object.fromEntries(['./timing.mjs','./link.mjs', './kernels.mjs',
     '../../../support/wasm/engine.mjs', '../../../process/execution/cache/cohort/fixtures/support.mjs']
     .map(path => [path, hash(readFileSync(new URL(path, import.meta.url)))])),
   cases: []};
@@ -42,7 +43,7 @@ function fresh(kernel, arm) {
       moduleBytes = fixture.material(id).bytes;
       const moduleStart = performance.now(), module = new WebAssembly.Module(moduleBytes), bindings = {};
       moduleMs = performance.now() - moduleStart;
-      for (const entry of WebAssembly.Module.imports(module)) {
+      for (const entry of coreImports(module)) {
         if (entry.module === 'ring3') {
           assert.equal(typeof fixture.api[entry.name], 'function', entry.name);
           bindings[entry.name] = fixture.api[entry.name];
@@ -50,7 +51,7 @@ function fresh(kernel, arm) {
         } else assert.deepEqual(entry, {module: 'env', name: 'memory', kind: 'memory'});
       }
       const instanceStart = performance.now();
-      run = new WebAssembly.Instance(module, {env: {memory: fixture.memory}, ring3: bindings}).exports.run;
+      run = instantiateCore(module, {env: {memory: fixture.memory}, ring3: bindings}).exports.run;
       instanceMs = performance.now() - instanceStart;
       fixture.table.set(0, run);
       fixture.ok('acknowledge_resident_installation', ...KEY, ...pair(id), 0);
@@ -65,13 +66,13 @@ function fresh(kernel, arm) {
       assert.ok(WebAssembly.validate(moduleBytes));
       const moduleStart = performance.now(), module = new WebAssembly.Module(moduleBytes);
       moduleMs = performance.now() - moduleStart;
-      assert.deepEqual(WebAssembly.Module.imports(module).sort((a, b) => a.name.localeCompare(b.name)), [
+      assert.deepEqual(coreImports(module).sort((a, b) => a.name.localeCompare(b.name)), [
         {module: 'ring3', name: 'memory', kind: 'memory'},
         {module: 'ring3', name: 'read', kind: 'function'},
         {module: 'ring3', name: 'write', kind: 'function'},
       ]);
       const instanceStart = performance.now();
-      run = new WebAssembly.Instance(module, {ring3: {
+      run = instantiateCore(module, {ring3: {
         memory: fixture.memory, read: fixture.api.core_read, write: fixture.api.core_write,
       }}).exports.run;
       instanceMs = performance.now() - instanceStart;

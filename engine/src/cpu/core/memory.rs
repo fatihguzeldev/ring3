@@ -1,3 +1,6 @@
+pub(in crate::cpu::core) mod authority;
+pub(in crate::cpu::core) mod cache;
+
 use super::emitter::{ADDRESS, CTX};
 use wasm_encoder::{BlockType, Function, InstructionSink, MemArg, ValType};
 
@@ -46,12 +49,8 @@ pub(super) fn load_view(code: &mut InstructionSink<'_>) {
     }
 }
 
-fn page(code: &mut InstructionSink<'_>) {
-    code.local_get(ADDRESS).i32_const(12).i32_shr_u();
-}
-
 // the enclosing empty block branches to the canonical slow access.
-fn geometry(code: &mut InstructionSink<'_>, width: u32, permission: i32) {
+fn geometry(code: &mut InstructionSink<'_>, width: u32, permission: i32, miss_index: u32) {
     debug_assert!(matches!(width, 1 | 2 | 4));
     if width != 1 {
         code.local_get(ADDRESS)
@@ -61,46 +60,14 @@ fn geometry(code: &mut InstructionSink<'_>, width: u32, permission: i32) {
             .i32_gt_u()
             .br_if(0);
     }
-    code.local_get(MAPPING_BASE);
-    page(code);
-    code.i32_const(2)
-        .i32_shl()
-        .i32_add()
-        .i32_load(arg(0, 2))
-        .i32_const(1)
-        .i32_sub()
-        .local_tee(SLOT)
-        .local_get(PAGE_COUNT)
-        .i32_ge_u()
-        .br_if(0);
-    code.local_get(PERMISSION_BASE);
-    page(code);
-    code.i32_add()
-        .i32_load8_u(arg(0, 0))
-        .i32_const(permission)
-        .i32_and()
-        .i32_const(permission)
-        .i32_ne()
-        .br_if(0);
-}
-
-fn physical_address(code: &mut InstructionSink<'_>) {
-    code.local_get(BACKING_BASE)
-        .local_get(SLOT)
-        .i32_const(12)
-        .i32_shl()
-        .i32_add()
-        .local_get(ADDRESS)
-        .i32_const(4095)
-        .i32_and()
-        .i32_add()
-        .local_set(POINTER);
+    cache::translate(code, permission, miss_index);
 }
 
 pub(super) fn read(
     code: &mut InstructionSink<'_>,
     encoded_width: u32,
     slow_index: u32,
+    miss_index: u32,
     prepare: bool,
 ) {
     let width = encoded_width & 0xff;
@@ -112,8 +79,7 @@ pub(super) fn read(
     }
     code.block(BlockType::Result(ValType::I64))
         .block(BlockType::Empty);
-    geometry(code, width, if modify { 3 } else { 1 });
-    physical_address(code);
+    geometry(code, width, if modify { 3 } else { 1 }, miss_index);
     if prepare {
         code.local_get(SLOT)
             .i32_const(1)
@@ -130,10 +96,13 @@ pub(super) fn read(
         _ => unreachable!(),
     };
     code.i64_extend_i32_u().br(1).end();
+    authority::flush(code);
     code.local_get(CTX)
         .local_get(ADDRESS)
         .i32_const(encoded_width as i32)
         .call(slow_index);
+    cache::invalidate(code);
+    authority::load(code);
     code.end();
 }
 
@@ -143,6 +112,7 @@ pub(super) fn write(
     source: u32,
     commit_index: u32,
     slow_index: u32,
+    miss_index: u32,
     prepared: bool,
 ) {
     debug_assert!(matches!(width, 1 | 2 | 4));
@@ -160,8 +130,7 @@ pub(super) fn write(
             .local_get(PREPARED_POINTER)
             .local_set(POINTER);
     } else {
-        geometry(code, width, 2);
-        physical_address(code);
+        geometry(code, width, 2, miss_index);
     }
 
     code.local_get(CTX)
@@ -169,21 +138,26 @@ pub(super) fn write(
         .local_get(source)
         .local_get(SLOT)
         .local_get(POINTER)
+        .local_get(authority::SEQUENCE)
         .call(commit_index)
+        .local_set(authority::SEQUENCE)
         .br_if(0)
         .i32_const(0)
         .br(1)
         .end();
+    authority::flush(code);
     code.local_get(CTX)
         .local_get(ADDRESS)
         .i32_const(width as i32)
         .local_get(source)
         .call(slow_index);
+    cache::invalidate(code);
+    authority::load(code);
     code.end();
 }
 
 pub(super) fn emit_store(width: u32) -> Function {
-    // params: context, address, value, slot, pointer; locals: scratch, version.
+    // params: context, address, value, slot, pointer, sequence; locals: scratch, next sequence.
     let mut function = Function::new([(1, ValType::I32), (1, ValType::I64)]);
     let mut code = function.instructions();
     code.block(BlockType::Empty);
@@ -197,8 +171,8 @@ pub(super) fn emit_store(width: u32) -> Function {
         .br_if(0);
     code.block(BlockType::Empty);
     load_field(&mut code, PRIVATE_SLOTS);
-    code.local_tee(5).i32_eqz().br_if(0);
-    code.local_get(5)
+    code.local_tee(6).i32_eqz().br_if(0);
+    code.local_get(6)
         .local_get(1)
         .i32_const(12)
         .i32_shr_u()
@@ -209,17 +183,14 @@ pub(super) fn emit_store(width: u32) -> Function {
         .br_if(1);
     code.end();
 
-    load_field(&mut code, TRANSACTION_VERSION);
-    code.local_tee(5)
-        .i64_load(arg(0, 3))
-        .local_tee(6)
+    code.local_get(5)
         .i64_const(-1)
         .i64_eq()
         .br_if(0)
-        .local_get(6)
+        .local_get(5)
         .i64_const(1)
         .i64_add()
-        .local_set(6);
+        .local_set(7);
     code.local_get(4).local_get(2);
     match width {
         1 => code.i32_store8(arg(0, 0)),
@@ -232,15 +203,14 @@ pub(super) fn emit_store(width: u32) -> Function {
         .i32_const(4)
         .i32_shl()
         .i32_add()
-        .local_get(6)
+        .local_get(7)
         .i64_store(arg(8, 3));
-    code.local_get(5)
-        .local_get(6)
-        .i64_store(arg(0, 3))
-        .i32_const(0)
+    code.i32_const(0)
+        .local_get(7)
         .return_()
         .end()
         .i32_const(1)
+        .local_get(5)
         .end();
     function
 }

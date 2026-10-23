@@ -1,3 +1,4 @@
+import {instantiateCore,coreImports} from './link.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
@@ -54,12 +55,12 @@ function prepare(pc = 0x1000) {
   const code = bytes(pointer, length);
   assert(WebAssembly.validate(code), 'generated module validates');
   const module = new WebAssembly.Module(code);
-  assert.deepEqual(WebAssembly.Module.imports(module), [
+  assert.deepEqual(coreImports(module), [
     {module: 'ring3', name: 'memory', kind: 'memory'},
     {module: 'ring3', name: 'read', kind: 'function'},
     {module: 'ring3', name: 'write', kind: 'function'},
   ]);
-  const run = new WebAssembly.Instance(module, {ring3: {
+  const run = instantiateCore(module, {ring3: {
     memory, read: api.core_read, write: api.core_write,
   }}).exports.run;
   assert.equal(run.length, 2);
@@ -80,7 +81,7 @@ function expectState(regs, pc, flags, retired, remaining) {
 }
 
 try {
-  const instance = new WebAssembly.Instance(engine.module, {ring3_observability: {now_ns: () => 0n}});
+  const instance = instantiateCore(engine.module, {ring3_observability: {now_ns: () => 0n}});
   memory = instance.exports.memory;
   api = Object.fromEntries(Object.entries(instance.exports)
     .filter(([name]) => name.startsWith('ring3_abi_v1_'))

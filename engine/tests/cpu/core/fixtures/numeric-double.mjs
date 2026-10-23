@@ -1,3 +1,4 @@
+import {instantiateCore} from './link.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync,writeFileSync,openSync,closeSync} from 'node:fs';
@@ -63,7 +64,7 @@ function putBank(image,values,status,control) {
 }
 
 function runCase(name,options) {
-  stage=name;const instance=new WebAssembly.Instance(engine.module,{ring3_observability:{now_ns:()=>0n}});
+  stage=name;const instance=instantiateCore(engine.module,{ring3_observability:{now_ns:()=>0n}});
   const memory=instance.exports.memory,api=Object.fromEntries(Object.entries(instance.exports).filter(([key])=>key.startsWith('ring3_abi_v1_')).map(([key,value])=>[key.slice(13),value]));
   const view=()=>new DataView(memory.buffer),slice=(at,length)=>new Uint8Array(memory.buffer).slice(at,at+length);
   const word=(at,offset=0)=>view().getUint32(at+offset,true),put=(at,offset,value)=>view().setUint32(at+offset,value>>>0,true);
@@ -100,7 +101,7 @@ function runCase(name,options) {
     status('core_prepare',0,0x1000,256,32);const context=api.core_context_ptr()>>>0;
     const module=new WebAssembly.Module(slice(api.core_code_ptr()>>>0,api.core_code_len()>>>0));
     const numeric=(...args)=>{helpers++;return api.core_numeric(...args);};
-    const run=new WebAssembly.Instance(module,{ring3:{memory,read:api.core_read,write:api.core_write,numeric}}).exports.run;
+    const run=instantiateCore(module,{ring3:{memory,read:api.core_read,write:api.core_write,numeric}}).exports.run;
     status('core_begin',0);active=true;const budget=options.budget??1,retired=options.retired??budget,wantedStop=options.stop??2;
     const stop=run(context,budget)>>>0;row.actual={stop,helpers,retired:word(context,40),pc:word(context,32),vector:word(context,116),detail:word(context,48)};checkpoint();
     assert.equal(stop,wantedStop);assert.equal(word(context,40),retired);assert.equal(word(context,44),budget-retired);assert.equal(word(context,32),options.pc??0x1000+code.length);assert.equal(word(context,36),0x402);

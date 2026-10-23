@@ -1,3 +1,4 @@
+import {instantiateCore} from './link.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync,writeFileSync,openSync,closeSync} from 'node:fs';
@@ -42,7 +43,7 @@ function pack(significand,exponent,negative,width,mode){
 function encoded(bits,width){const result=new Uint8Array(width),view=new DataView(result.buffer);if(width===4)view.setUint32(0,Number(bits),true);else view.setBigUint64(0,bits,true);return result;}
 
 function runCase(name,options){
-  stage=name;const instance=new WebAssembly.Instance(engine.module,{ring3_observability:{now_ns:()=>0n}}),memory=instance.exports.memory;
+  stage=name;const instance=instantiateCore(engine.module,{ring3_observability:{now_ns:()=>0n}}),memory=instance.exports.memory;
   const api=Object.fromEntries(Object.entries(instance.exports).filter(([key])=>key.startsWith('ring3_abi_v1_')).map(([key,value])=>[key.slice(13),value]));
   const view=()=>new DataView(memory.buffer),slice=(at,length)=>new Uint8Array(memory.buffer).slice(at,at+length);
   const word=(at,offset=0)=>view().getUint32(at+offset,true),put=(at,offset,value)=>view().setUint32(at+offset,value>>>0,true);
@@ -84,7 +85,7 @@ function runCase(name,options){
     const module=new WebAssembly.Module(slice(api.core_code_ptr()>>>0,api.core_code_len()>>>0));
     const importVersions=[];
     const numeric=(...args)=>{helpers++;importVersions.push(String(view().getBigUint64(word(context,80),true)));return api.core_numeric(...args);};
-    const run=new WebAssembly.Instance(module,{ring3:{memory,read:api.core_read,write:api.core_write,numeric}}).exports.run;
+    const run=instantiateCore(module,{ring3:{memory,read:api.core_read,write:api.core_write,numeric}}).exports.run;
     status('core_begin',0);active=true;
     const transactionPointer=word(context,80),version=view().getBigUint64(transactionPointer,true),pageVersions=slice(word(context,84),word(context,68)*16);
     const completed=1+prefix+(options.scalarEdges?1:0),budget=fault||options.smc?8:completed,retired=fault?prefix:completed,stop=run(context,budget)>>>0,wantedStop=fault?3:options.smc?6:2;

@@ -1,3 +1,4 @@
+import {instantiateCore,coreImports} from './link.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync,writeFileSync} from 'node:fs';
@@ -13,7 +14,7 @@ const put=(offset,value)=>d.setUint32(offset,value>>>0,true),get=offset=>d.getUi
 const hash=value=>createHash('sha256').update(value).digest('hex'),hex=value=>Buffer.from(value).toString('hex');
 const regions=new Map(),cases=[],runs=[],reportPath=join(directory,'call-closure-result.json');
 const report={schema:1,complete:false,scope:'generated regions with authored memory and Wasm resolver; no native CoreSession or game claim',
-  node:process.version,modules:[],cases,runs,sources:Object.fromEntries(['./call-closure.mjs','./kernels.mjs']
+  node:process.version,modules:[],cases,runs,sources:Object.fromEntries(['./call-closure.mjs','./link.mjs','./kernels.mjs']
     .map(path=>[path,hash(readFileSync(new URL(path,import.meta.url)))]))};
 const checkpoint=()=>writeFileSync(reportPath,JSON.stringify(report,null,2));
 let reads=0,writes=0,stage='initialization';
@@ -62,17 +63,23 @@ function write(context,address,width,value) {
 for(const line of readFileSync(join(directory,'regions.tsv'),'utf8').trim().split('\n')) {
   const [name,identity,instructions]=line.split('\t'),encoded=readFileSync(join(directory,`${name}.wasm`));
   const module=new WebAssembly.Module(encoded);
-  assert.deepEqual(WebAssembly.Module.imports(module),[
+  assert.deepEqual(coreImports(module),[
     {module:'ring3',name:'memory',kind:'memory'},{module:'ring3',name:'read',kind:'function'},
     {module:'ring3',name:'write',kind:'function'},
   ]);
-  regions.set(name,{name,identity:BigInt(identity),run:new WebAssembly.Instance(module,{ring3:{memory,read,write}}).exports.run});
+  regions.set(name,{name,identity:BigInt(identity),module});
   report.modules.push({name,identity,instructions:Number(instructions),sha256:hash(encoded),wasmHex:hex(encoded)});
 }
 const nextEncoded=readFileSync(join(directory,'resolver.wasm')),driverEncoded=readFileSync(join(directory,'driver.wasm'));
-const next=new WebAssembly.Instance(new WebAssembly.Module(nextEncoded),{ring3:{memory}}).exports.next;
+const next=instantiateCore(new WebAssembly.Module(nextEncoded),{ring3:{memory}}).exports.next;
 const table=new WebAssembly.Table({element:'anyfunc',initial:4,maximum:4097});
-const driver=new WebAssembly.Instance(new WebAssembly.Module(driverEncoded),{ring3:{memory,functions:table,next}}).exports;
+const publishers=new WebAssembly.Table({element:'anyfunc',initial:4,maximum:4097});
+const driver=instantiateCore(new WebAssembly.Module(driverEncoded),{ring3:{memory,functions:table,publishers,probe:next,
+  cold:()=>assert.fail('every authored call-closure successor is already compiled')}}).exports;
+for(const unit of regions.values()) {
+  const exports=instantiateCore(unit.module,{ring3:{memory,read,write,...driver}}).exports;
+  unit.run=exports.run;unit.link=exports.link;unit.publish=exports.publish;
+}
 report.resolver={sha256:hash(nextEncoded),wasmHex:hex(nextEncoded)};
 report.driver={sha256:hash(driverEncoded),wasmHex:hex(driverEncoded)};
 
@@ -93,7 +100,8 @@ function seed(closed,{n=3,variant='plain',dataPermission=3,stackPermission=3,unm
   [MAP,PERM,BACKING,3,EXEC,0,VERSION,PAGE_VERSION,GENERATION].forEach((value,index)=>put(CTX+56+index*4,value));
   put(EXEC,1);put(CTX+112,1);
   const caller=regions.get(`${variant}-caller`),callee=regions.get(`${variant}-callee`),whole=regions.get(`${variant}-closed`);
-  table.set(1,caller.run);table.set(2,callee.run);table.set(3,whole.run);
+  table.set(1,caller.link);table.set(2,callee.link);table.set(3,whole.link);
+  publishers.set(1,caller.publish);publishers.set(2,callee.publish);publishers.set(3,whole.publish);
   d.setBigUint64(OWNERS,caller.identity,true);d.setBigUint64(OWNERS+8,callee.identity,true);
   d.setBigUint64(CTX+120,(closed?whole:caller).identity,true);reads=0;writes=0;
   return {context:bytes.slice(CTX,CTX+128),ram:bytes.slice(BACKING,BACKING+3*4096),caller,callee,whole};

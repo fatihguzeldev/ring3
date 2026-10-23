@@ -7,7 +7,8 @@ mod retention;
 
 pub(crate) use cold::core_cold_run;
 pub(crate) use dispatch::{
-    core_chain_next, core_dispatch_code_len, core_dispatch_code_ptr, core_link, core_unlink,
+    core_chain_cold, core_chain_next, core_chain_probe, core_dispatch_code_len,
+    core_dispatch_code_ptr, core_link, core_unlink,
 };
 #[cfg(feature = "observability")]
 pub(crate) use retention::core_cold_status_ptr;

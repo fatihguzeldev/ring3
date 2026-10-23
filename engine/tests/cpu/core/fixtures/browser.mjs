@@ -1,3 +1,4 @@
+import {instantiateCore,coreImports} from './link.mjs';
 import {makeKernel} from './kernels.mjs';
 
 const query = new URLSearchParams(location.search), status = document.querySelector('#status');
@@ -65,14 +66,14 @@ async function fresh(module, kernel) {
     ensure(context.pointer && pointer && length, 'native code/context descriptor');
     const code = bytes(context, pointer, length);
     const moduleStart = performance.now(), generated = new WebAssembly.Module(code), moduleEnd = performance.now();
-    const imports = WebAssembly.Module.imports(generated).sort((a, b) => a.name.localeCompare(b.name));
+    const imports = coreImports(generated).sort((a, b) => a.name.localeCompare(b.name));
     ensure(JSON.stringify(imports) === JSON.stringify([
       {module: 'ring3', name: 'memory', kind: 'memory'},
       {module: 'ring3', name: 'read', kind: 'function'},
       {module: 'ring3', name: 'write', kind: 'function'},
     ]), 'only declared native imports');
     const instanceStart = performance.now();
-    context.run = new WebAssembly.Instance(generated, {ring3: {
+    context.run = instantiateCore(generated, {ring3: {
       memory: context.memory, read: context.api.core_read, write: context.api.core_write,
     }}).exports.run;
     context.cold = {native_prepare_ms: prepareEnd - prepareStart, wasm_module_ms: moduleEnd - moduleStart,

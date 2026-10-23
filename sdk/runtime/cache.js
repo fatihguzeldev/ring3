@@ -1,4 +1,7 @@
 const MAX_CODE_BYTES = 128 * 1024 * 1024;
+const LINK_LOCALS = [...Array.from({length:12},(_,index)=>index+2),
+  ...Array.from({length:6},(_,index)=>index+20),...Array.from({length:21},(_,index)=>index+76),99,100,101,102,103];
+const LINK_GLOBALS = ['link.mode','link.valid','link.context',...LINK_LOCALS.map(local=>`link.local${local}`)];
 const NATIVE_COUNTERS = ['compiled','admittedEncodedBytes','countEvictions','byteEvictions',
   'sourceInvalidations','retainedUnits','retainedEncodedBytes','unitCapacity'];
 const COLD_COUNTERS = ['sourceResets','requestedResets','occupiedLiveReplacements','nativeRetired',
@@ -19,6 +22,7 @@ const compilationPc = (pc,prepareHistoryPartial = false) => ({
 export class CodeCache {
   #bindings;
   #contextView;
+  #linkGlobals;
 
   constructor(engine, {budget = 50000, instructions = 2048, blocks = 128, capacity = 4096, chain = true} = {}) {
     if (typeof chain !== 'boolean') throw new Error('invalid core chain option');
@@ -30,10 +34,16 @@ export class CodeCache {
     this.memory = engine.memory;
     if (typeof SharedArrayBuffer !== 'undefined' && this.memory.buffer instanceof SharedArrayBuffer)
       throw new Error('core execution requires exclusively owned memory');
+    const linkExports = ['core_chain_probe','core_chain_cold'];
+    const linked = linkExports.map(name=>typeof this.api[name] === 'function');
+    if (linked.some(Boolean) && !linked.every(Boolean)) throw new Error('incomplete core link exports');
+    this.linkedCore = linked.every(Boolean);
     this.native = Object.fromEntries(['core_prepare', 'core_code_ptr', 'core_code_len', 'core_context_ptr',
       'core_begin', 'core_end', 'core_import', 'core_export', 'core_read', 'core_write', 'core_numeric',
-      ...(chain ? ['core_dispatch_code_ptr','core_dispatch_code_len','core_link','core_unlink','core_chain_next',
-        'core_link_owners_ptr','core_cache_victim','core_cache_status_ptr'] : [])].map(name => {
+      ...(chain || this.linkedCore ? ['core_dispatch_code_ptr','core_dispatch_code_len'] : []),
+      ...(chain ? ['core_link','core_unlink','core_chain_next',
+        'core_link_owners_ptr','core_cache_victim','core_cache_status_ptr'] : []),
+      ...(this.linkedCore ? linkExports : [])].map(name => {
       if (typeof this.api[name] !== 'function') throw new Error(`missing core export ${name}`);
       return [name, this.api[name]];
     }));
@@ -61,7 +71,7 @@ export class CodeCache {
       droppedPcPrepares:0,droppedPcAdmissions:0,pcs:new Map(),prepareOnly:new Set(),topRepeat:[],last:[],slow:[],
     } : null;
     this.chain = chain;
-    if (chain) this.initializeDispatch();
+    if (chain || this.linkedCore) this.initializeDispatch();
   }
   measureCompilation(phase,operation,pc) {
     const diagnostic = this.compilation, metric = diagnostic[phase];
@@ -196,20 +206,38 @@ export class CodeCache {
   }
   initializeDispatch() {
     this.table = new WebAssembly.Table({element:'anyfunc',initial:4097,maximum:4097});
+    if (this.linkedCore) this.publishers = new WebAssembly.Table({element:'anyfunc',initial:4097,maximum:4097});
     this.slots = new Map();
     this.freeSlots = Array.from({length:4096},(_,index) => 4096-index);
     const module = new WebAssembly.Module(this.encoded('core_dispatch_code_ptr','core_dispatch_code_len'));
     const imports = WebAssembly.Module.imports(module);
-    const expected = new Map([['memory','memory'],['functions','table'],['next','function']]);
+    const expected = new Map(this.linkedCore
+      ? [['memory','memory'],['functions','table'],['publishers','table'],['probe','function'],['cold','function']]
+      : [['memory','memory'],['functions','table'],['next','function']]);
     if (imports.length !== expected.size || imports.some(item => item.module !== 'ring3' || expected.get(item.name) !== item.kind) ||
         new Set(imports.map(item => item.name)).size !== expected.size) throw new Error('invalid core dispatch imports');
-    const exports = new WebAssembly.Instance(module,{ring3:{memory:this.memory,functions:this.table,next:this.native.core_chain_next}}).exports;
+    const bindings = this.linkedCore
+      ? {memory:this.memory,functions:this.table,publishers:this.publishers,probe:this.native.core_chain_probe,cold:this.native.core_chain_cold}
+      : {memory:this.memory,functions:this.table,next:this.native.core_chain_next};
+    const exports = new WebAssembly.Instance(module,{ring3:bindings}).exports;
     if (typeof exports.run !== 'function' || exports.run.length !== 3 || !(exports.regions instanceof WebAssembly.Global) || exports.regions.value !== 0)
       throw new Error('invalid core dispatch exports');
     const cold = ['coldRuns','coldWork','coldRetired'].map(name => exports[name]);
     if (cold.some(value => value !== undefined) &&
         !cold.every(value => value instanceof WebAssembly.Global && value.value === 0))
       throw new Error('invalid core dispatch cold counters');
+    if (this.linkedCore) {
+      if (!(exports.linkAbi instanceof WebAssembly.Global) || exports.linkAbi.value !== 1 ||
+          !cold.every(value=>value !== undefined)) throw new Error('invalid core link ABI');
+      const globals = {};
+      for (const name of LINK_GLOBALS) {
+        const value = exports[name];
+        if (!(value instanceof WebAssembly.Global) || (value.value !== 0 && value.value !== 0n))
+          throw new Error(`invalid core link global ${name}`);
+        globals[name] = value;
+      }
+      this.#linkGlobals = Object.freeze(globals);
+    }
     this.chainedColdEnabled = cold.every(value => value !== undefined);
     this.dispatch = exports;
   }
@@ -234,7 +262,7 @@ export class CodeCache {
     if (this.chain) {
       const status = this.native.core_unlink(unit.slot,Number(id&0xffffffffn),Number(id>>32n));
       if (status !== 0) throw new Error(`core_unlink returned ${status}`);
-      this.table.set(unit.slot,null); this.slots.delete(unit.slot); this.freeSlots.push(unit.slot);
+      this.table.set(unit.slot,null); if(this.linkedCore)this.publishers.set(unit.slot,null); this.slots.delete(unit.slot); this.freeSlots.push(unit.slot);
     }
     this.units.delete(id); this.retainedModuleBytes -= unit.bytes;
     if (this.compilation && unit.compilation.sourceWitness === 'pending') {
@@ -311,24 +339,34 @@ export class CodeCache {
       if (item.module !== 'ring3' || found.has(item.name)) throw new Error(`invalid core import ${item.module}.${item.name}`);
       found.add(item.name);
       if (item.name === 'memory' && item.kind === 'memory') continue;
+      if (item.kind === 'global' && this.#linkGlobals && Object.hasOwn(this.#linkGlobals,item.name)) {
+        bindings[item.name] = this.#linkGlobals[item.name]; continue;
+      }
       if (item.kind !== 'function' || !Object.hasOwn(available, item.name)) throw new Error(`invalid core import ${item.name}`);
       bindings[item.name] = available[item.name];
     }
-    if (!['memory', 'read', 'write'].every(name => found.has(name))) throw new Error('incomplete core imports');
+    if (!['memory', 'read', 'write'].every(name => found.has(name)) ||
+        (this.linkedCore && !LINK_GLOBALS.every(name=>found.has(name)))) throw new Error('incomplete core imports');
     const instance = this.compilation
       ? this.measureCompilation('instance',()=>new WebAssembly.Instance(module,{ring3:bindings}))
       : new WebAssembly.Instance(module,{ring3:bindings});
     const run = instance.exports.run;
     if (typeof run !== 'function' || run.length !== 2) throw new Error('invalid core run export');
-    const unit = {id, pc, run, bytes: length};
+    const link = this.linkedCore ? instance.exports.link : run;
+    const publish = this.linkedCore ? instance.exports.publish : null;
+    if (this.linkedCore && (typeof link !== 'function' || link.length !== 2 ||
+        typeof publish !== 'function' || publish.length !== 1)) throw new Error('invalid core link exports');
+    const unit = {id, pc, run, link, publish, bytes: length};
     while (this.units.size >= this.capacity || this.retainedModuleBytes + length > MAX_CODE_BYTES)
       this.evict(this.retainedModuleBytes + length > MAX_CODE_BYTES ? 'bytes' : 'count');
     if (this.chain) {
       const slot = this.freeSlots.pop();
-      if (!slot || this.table.get(slot) !== null) throw new Error('invalid free core table slot');
-      this.table.set(slot,run);
+      if (!slot || this.table.get(slot) !== null || (this.linkedCore && this.publishers.get(slot) !== null))
+        throw new Error('invalid free core table slot');
+      this.table.set(slot,link);
+      if(this.linkedCore)this.publishers.set(slot,publish);
       const status = this.native.core_link(slot);
-      if (status !== 0) {this.table.set(slot,null); this.freeSlots.push(slot); throw new Error(`core_link returned ${status}`);}
+      if (status !== 0) {this.table.set(slot,null); if(this.linkedCore)this.publishers.set(slot,null); this.freeSlots.push(slot); throw new Error(`core_link returned ${status}`);}
       unit.slot = slot; this.slots.set(slot,unit);
     }
     this.units.set(id, unit); this.admissions++; this.generatedModuleBytes += length; this.retainedModuleBytes += length;
@@ -352,7 +390,8 @@ export class CodeCache {
     try {
       if (this.compilation) this.recordSourceWitness(unit);
       if (this.chain) {
-        if (this.table.get(unit.slot) !== unit.run) throw new Error('core table binding changed');
+        if (this.table.get(unit.slot) !== (this.linkedCore ? unit.link : unit.run) ||
+            (this.linkedCore && this.publishers.get(unit.slot) !== unit.publish)) throw new Error('core table binding changed');
         stop = this.dispatch.run(this.context,this.budget,unit.slot) >>> 0;
         regions = this.dispatch.regions.value >>> 0;
         if (this.chainedColdEnabled) {
@@ -364,7 +403,12 @@ export class CodeCache {
     }
     catch (error) { failure = error; throw error; }
     finally {
+      let publicationFailure;
+      try {
+        if(this.linkedCore && this.#linkGlobals['link.valid'].value !== 0) unit.publish(this.context);
+      } catch(error) {publicationFailure=error;}
       const ended = this.native.core_end(); this.open = false;
+      if (!failure && publicationFailure) throw publicationFailure;
       if (ended !== 0 && !failure) throw new Error(`core_end returned ${ended}`);
     }
     return this.finishRun(stop,before,regions,'compiled',startPc,chainedColdRuns,chainedColdWork,chainedColdRetired);

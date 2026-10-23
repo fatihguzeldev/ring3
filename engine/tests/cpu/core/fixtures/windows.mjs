@@ -1,3 +1,4 @@
+import {coreImports} from './link.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync,writeFileSync,mkdirSync} from 'node:fs';
@@ -63,7 +64,7 @@ function captureModule(unit) {
   if (report.modules.some(item => item.id === String(unit.id))) return;
   const pointer = engine.api.core_code_ptr()>>>0, length = engine.api.core_code_len()>>>0;
   const encoded = bytes(pointer,length), module = new WebAssembly.Module(encoded);
-  assert.deepEqual(WebAssembly.Module.imports(module),[
+  assert.deepEqual(coreImports(module),[
     {module:'ring3',name:'memory',kind:'memory'},{module:'ring3',name:'read',kind:'function'},
     {module:'ring3',name:'write',kind:'function'},
   ]);

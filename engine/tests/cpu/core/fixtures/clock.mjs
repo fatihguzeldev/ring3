@@ -1,3 +1,4 @@
+import {instantiateCore,coreImports} from './link.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync,writeFileSync,openSync,closeSync} from 'node:fs';
@@ -8,7 +9,7 @@ assert(enginePath && reportPath,'usage: clock.mjs engine.wasm fresh-report.json'
 closeSync(openSync(reportPath,'wx'));
 const artifact = readEngine(enginePath), hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const hex = bytes => Buffer.from(bytes).toString('hex');
-const sources = ['./clock.mjs','../../../support/wasm/engine.mjs'];
+const sources = ['./clock.mjs','./link.mjs','../../../support/wasm/engine.mjs'];
 const report = {schema:1,complete:false,engineSha256:artifact.sha256,
   sources:Object.fromEntries(sources.map(path => [path,hash(readFileSync(new URL(path,import.meta.url)))])),
   scope:'host-observed timestamp snapshots with original native bindings; no clock-policy, timing or game claim',
@@ -27,7 +28,7 @@ function status(operation,wanted,...args) {
 
 try {
   checkpoint();
-  const instance = new WebAssembly.Instance(artifact.module,{ring3_observability:{now_ns:()=>0n}});
+  const instance = instantiateCore(artifact.module,{ring3_observability:{now_ns:()=>0n}});
   memory = instance.exports.memory;
   api = Object.fromEntries(Object.entries(instance.exports).filter(([name]) => name.startsWith('ring3_abi_v1_'))
     .map(([name,value]) => [name.slice(13),value]));
@@ -47,11 +48,11 @@ try {
   status('core_prepare',0,0x1000,32,4); context = api.core_context_ptr()>>>0;
   assert(context>0 && context%8===0);
   const encoded = bytes(api.core_code_ptr()>>>0,api.core_code_len()>>>0), module = new WebAssembly.Module(encoded);
-  assert.deepEqual(WebAssembly.Module.imports(module),[
+  assert.deepEqual(coreImports(module),[
     {module:'ring3',name:'memory',kind:'memory'},{module:'ring3',name:'read',kind:'function'},
     {module:'ring3',name:'write',kind:'function'},{module:'ring3',name:'numeric',kind:'function'}]);
   const imports = {memory,read:api.core_read,write:api.core_write,numeric:api.core_numeric};
-  const run = new WebAssembly.Instance(module,{ring3:imports}).exports.run;
+  const run = instantiateCore(module,{ring3:imports}).exports.run;
   assert.equal(imports.numeric,instance.exports.ring3_abi_v1_core_numeric,'original numerical binding');
   report.module = {sha256:hash(encoded),wasmHex:hex(encoded)};
   status('core_begin',0); active = true;

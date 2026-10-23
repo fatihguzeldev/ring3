@@ -23,7 +23,53 @@ use super::super::cache::{CoreCache32, RegionRef, TRANSITION_HITS, TransitionLoo
 #[cfg(not(target_arch = "wasm32"))]
 use crate::process::core_cache_tests::{CoreCache32, RegionRef, TRANSITION_HITS, TransitionLookup};
 
+pub(in crate::process) fn probe(
+    instance: &mut EngineInstance,
+    context: &mut Context32,
+    selected: &mut Option<RegionRef>,
+    cache: &mut CoreCache32,
+    pc: u32,
+) -> u32 {
+    let Some(current) = selected.as_ref() else {
+        return u32::MAX;
+    };
+    let raw = context.bytes();
+    if u32::from_le_bytes(raw[112..116].try_into().unwrap()) != 1
+        || u64::from_le_bytes(raw[120..128].try_into().unwrap()) != current.identity()
+    {
+        return u32::MAX;
+    }
+    let Some(memory) = instance.memory.as_ref() else {
+        return u32::MAX;
+    };
+    match cache.lookup_transition(memory, current, pc, TRANSITION_HITS) {
+        TransitionLookup::Stop => 0,
+        TransitionLookup::Linked(code, slot) => {
+            context.bytes_mut()[120..128].copy_from_slice(&code.identity().to_le_bytes());
+            *selected = Some(code);
+            slot
+        }
+        TransitionLookup::Miss => COLD_MARK,
+    }
+}
+
 pub(in crate::process) fn chain_next(
+    instance: &mut EngineInstance,
+    context: &mut Context32,
+    numeric: &mut NumericBank,
+    selected: &mut Option<RegionRef>,
+    cache: &mut CoreCache32,
+    cold: &mut ColdState,
+) -> u32 {
+    let pc = context.state().eip;
+    let next = probe(instance, context, selected, cache, pc);
+    if next != COLD_MARK {
+        return next;
+    }
+    chain_cold(instance, context, numeric, selected, cache, cold)
+}
+
+pub(in crate::process) fn chain_cold(
     instance: &mut EngineInstance,
     context: &mut Context32,
     numeric: &mut NumericBank,
@@ -39,19 +85,6 @@ pub(in crate::process) fn chain_next(
         || u64::from_le_bytes(raw[120..128].try_into().unwrap()) != current.identity()
     {
         return u32::MAX;
-    }
-    let pc = context.state().eip;
-    let Some(memory) = instance.memory.as_ref() else {
-        return u32::MAX;
-    };
-    match cache.lookup_transition(memory, current, pc, TRANSITION_HITS) {
-        TransitionLookup::Stop => return 0,
-        TransitionLookup::Linked(code, slot) => {
-            context.bytes_mut()[120..128].copy_from_slice(&code.identity().to_le_bytes());
-            *selected = Some(code);
-            return slot;
-        }
-        TransitionLookup::Miss => {}
     }
     let segments = numeric.segment_context();
     context.bytes_mut()[120..128].fill(0);

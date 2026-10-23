@@ -10,6 +10,8 @@ export_process_calls! {
     core_link(slot: u32);
     core_unlink(slot: u32, low: u32, high: u32);
     core_chain_next(context: u32);
+    core_chain_probe(context: u32, pc: u32);
+    core_chain_cold(context: u32);
     core_link_owners_ptr();
     core_cache_victim();
     core_cache_status_ptr();

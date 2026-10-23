@@ -1,3 +1,4 @@
+import {instantiateCore} from './link.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync, openSync, closeSync} from 'node:fs';
@@ -23,7 +24,7 @@ let stage = 'initialization';
 
 function runCase(name, options) {
   stage = name;
-  const instance = new WebAssembly.Instance(engine.module, {ring3_observability: {now_ns: () => 0n}});
+  const instance = instantiateCore(engine.module, {ring3_observability: {now_ns: () => 0n}});
   const memory = instance.exports.memory;
   const api = Object.fromEntries(Object.entries(instance.exports).filter(([name]) => name.startsWith('ring3_abi_v1_'))
     .map(([name, value]) => [name.slice(13), value]));
@@ -73,7 +74,7 @@ function runCase(name, options) {
     status('core_prepare', 0, 0x1000, 256, 32); context = api.core_context_ptr() >>> 0;
     const generated = slice(api.core_code_ptr() >>> 0, api.core_code_len() >>> 0);
     const module = new WebAssembly.Module(generated);
-    const run = new WebAssembly.Instance(module, {ring3: {memory,
+    const run = instantiateCore(module, {ring3: {memory,
       numeric: (...args) => {helperCalls++; return api.core_numeric(...args);},
       read: (...args) => {readCalls++; return api.core_read(...args);},
       write: (...args) => {writeCalls++; return api.core_write(...args);}}}).exports.run;

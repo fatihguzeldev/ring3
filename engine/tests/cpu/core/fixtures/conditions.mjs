@@ -1,8 +1,9 @@
+import {instantiateCore,coreImports} from './link.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync,writeFileSync} from 'node:fs';
 import {join} from 'node:path';
-import {assertCoreNames} from './names.mjs';
+import {assertCoreNames,coreFunctionNames} from './names.mjs';
 
 const directory=process.argv[2],CTX=256,PAGE=4096,MAP=0x10000,PERM=0x410000;
 const EXEC=0x510000,VERSION=0x510100,PAGE_VERSION=0x510200,BACKING=0x520000,GENERATION=0x530000;
@@ -22,6 +23,10 @@ function unsigned(source,at) {
 const section=(id,data)=>[id,...u(data.length),...data];
 
 function countFlagCalls(source) {
+  const module=new WebAssembly.Module(source),names=coreFunctionNames(module),imports=WebAssembly.Module.imports(module);
+  const importedFunctions=imports.filter(item=>item.kind==='function').length;
+  const globalBase=imports.filter(item=>item.kind==='global').length;
+  const flagsIndex=names.find(([,name])=>name==='guest.flags')[0]-importedFunctions;
   const output=[...source.subarray(0,8)],at={value:8};let instrumented=false,globalAdded=false,exported=false;
   while(at.value<source.length) {
     const id=source[at.value++],length=unsigned(source,at),end=at.value+length;
@@ -30,17 +35,17 @@ function countFlagCalls(source) {
     if(id===7) {
       output.push(...section(6,[1,0x7f,1,0x41,0,0x0b]));globalAdded=true;
       const cursor={value:0},count=unsigned(data,cursor),name=new TextEncoder().encode('test.flag_calls');
-      data=Uint8Array.from([...u(count+1),...data.subarray(cursor.value),...u(name.length),...name,3,0]);exported=true;
+      data=Uint8Array.from([...u(count+1),...data.subarray(cursor.value),...u(name.length),...name,3,...u(globalBase)]);exported=true;
     } else if(id===10) {
       const cursor={value:0},count=unsigned(data,cursor),bodies=[];
-      assert(count>=5&&count<=8,'scalar flags/run/lookup/publisher/precise and optional store functions');
+      assert.equal(count,names.length-importedFunctions,'every named helper and wrapper has exactly one body');
       for(let index=0;index<count;index++) {
         const size=unsigned(data,cursor),bodyEnd=cursor.value+size;
         assert(bodyEnd<=data.length,'complete function body');let body=data.subarray(cursor.value,bodyEnd);cursor.value=bodyEnd;
-        if(index===0) {
+        if(index===flagsIndex) {
           const locals={value:0},groups=unsigned(body,locals);
           for(let group=0;group<groups;group++){unsigned(body,locals);assert.equal(body[locals.value++],0x7f);}
-          body=Uint8Array.from([...body.subarray(0,locals.value),0x23,0,0x41,1,0x6a,0x24,0,...body.subarray(locals.value)]);
+          body=Uint8Array.from([...body.subarray(0,locals.value),0x23,...u(globalBase),0x41,1,0x6a,0x24,...u(globalBase),...body.subarray(locals.value)]);
           instrumented=true;
         }
         bodies.push(...u(body.length),...body);
@@ -67,11 +72,11 @@ function write(context,address,width,value) {
 for(const line of readFileSync(join(directory,'conditions.tsv'),'utf8').trim().split('\n')) {
   const [name,hex,id]=line.split('\t'),source=readFileSync(join(directory,`${name}.wasm`));
   const original=new WebAssembly.Module(source);assertCoreNames(original,0x1000,id);
-  assert.deepEqual(WebAssembly.Module.imports(original),[
+  assert.deepEqual(coreImports(original),[
     {module:'ring3',name:'memory',kind:'memory'},{module:'ring3',name:'read',kind:'function'},{module:'ring3',name:'write',kind:'function'},
   ]);
   const instrumented=countFlagCalls(source),module=new WebAssembly.Module(instrumented);
-  const exports=new WebAssembly.Instance(module,{ring3:{memory,read,write}}).exports;
+  const exports=instantiateCore(module,{ring3:{memory,read,write}}).exports;
   assert(exports['test.flag_calls'] instanceof WebAssembly.Global);
   programs.set(name,{...exports,id:BigInt(id),code:Buffer.from(hex,'hex'),sourceSha256:hash(source),instrumentedSha256:hash(instrumented)});
 }

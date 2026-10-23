@@ -1,3 +1,4 @@
+import {instantiateCore,coreImports} from './link.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync, openSync, closeSync} from 'node:fs';
@@ -9,7 +10,7 @@ const engine = readEngine(enginePath), output = openSync(reportPath, 'wx');
 const hash = value => createHash('sha256').update(value).digest('hex');
 const hex = value => Buffer.from(value).toString('hex');
 const report = {schema: 1, complete: false, engineSha256: engine.sha256,
-  sources: [import.meta.url, new URL('../../../support/wasm/engine.mjs', import.meta.url).href]
+  sources: [import.meta.url,new URL('./link.mjs',import.meta.url).href, new URL('../../../support/wasm/engine.mjs', import.meta.url).href]
     .map(url => ({url, sha256: hash(readFileSync(new URL(url)))})), cases: []};
 const checkpoint = () => writeFileSync(reportPath, JSON.stringify(report, null, 2));
 const seedRegisters = esp => [0x11223344, 0x55667788, 0x99aabbcc, 0xddeeff00, esp,
@@ -19,7 +20,7 @@ let stage = 'initialization';
 
 function runCase(name, codeHex, options, expected) {
   stage = name;
-  const instance = new WebAssembly.Instance(engine.module, {ring3_observability: {now_ns: () => 0n}});
+  const instance = instantiateCore(engine.module, {ring3_observability: {now_ns: () => 0n}});
   const memory = instance.exports.memory;
   const api = Object.fromEntries(Object.entries(instance.exports)
     .filter(([name]) => name.startsWith('ring3_abi_v1_')).map(([name, value]) => [name.slice(13), value]));
@@ -68,11 +69,11 @@ function runCase(name, codeHex, options, expected) {
     context = api.core_context_ptr() >>> 0; assert(context > 0 && context % 8 === 0);
     const moduleBytes = slice(api.core_code_ptr() >>> 0, api.core_code_len() >>> 0);
     const module = new WebAssembly.Module(moduleBytes);
-    assert.deepEqual(WebAssembly.Module.imports(module), [
+    assert.deepEqual(coreImports(module), [
       {module: 'ring3', name: 'memory', kind: 'memory'}, {module: 'ring3', name: 'read', kind: 'function'},
       {module: 'ring3', name: 'write', kind: 'function'}, {module: 'ring3', name: 'numeric', kind: 'function'},
     ]);
-    const run = new WebAssembly.Instance(module, {ring3: {memory, read: api.core_read,
+    const run = instantiateCore(module, {ring3: {memory, read: api.core_read,
       write: api.core_write, numeric: api.core_numeric}}).exports.run;
     result.module = {sha256: hash(moduleBytes), wasmHex: hex(moduleBytes)};
     status('core_begin', 0); active = true;

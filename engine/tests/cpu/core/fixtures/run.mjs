@@ -1,3 +1,4 @@
+import {instantiateCore,coreImports} from './link.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
@@ -13,6 +14,8 @@ let CTX = 0x100;
 const EXEC = 0x510000, VERSION = 0x510100, PAGE_VERSION = 0x510200;
 const BACKING = 0x520000, GENERATION = 0x530000;
 const PRIVATE = 0x530100;
+const NUMERIC = 0x540000;
+const RAW80 = Buffer.from('7856341200000080ff3f', 'hex');
 const memory = new WebAssembly.Memory({initial: 96});
 const bytes = new Uint8Array(memory.buffer), view = new DataView(memory.buffer);
 const get = offset => view.getUint32(offset, true);
@@ -73,7 +76,9 @@ function write(context, address, width, value) {
     put(MAP + page * 4, privateSlot); put(privateBase + page * 4, 0);
     locations = Array.from({length: width}, (_, index) => physical(address + index));
   }
-  for (let index = 0; index < width; index++) bytes[locations[index]] = value >>> (index * 8);
+  const source = value instanceof Uint8Array ? value : null;
+  if (source) assert.equal(source.length, width);
+  for (let index = 0; index < width; index++) bytes[locations[index]] = source ? source[index] : value >>> (index * 8);
   const version = previous + 1n;
   view.setBigUint64(VERSION, version, true);
   let invalidated = false;
@@ -86,30 +91,45 @@ function write(context, address, width, value) {
   return invalidated ? 2 : 0;
 }
 
+function numeric(context, ordinal) {
+  assert.equal(context, CTX); assert.equal(ordinal, 0); assert(active.numericStore);
+  active.numeric++;
+  active.numericVersions.push(String(view.getBigUint64(VERSION, true)));
+  assert.equal(get(CTX + 92), NUMERIC, 'the numerical port receives the retained private bank');
+  const address = get(CTX + 12), result = write(context, address, 10, bytes.slice(NUMERIC + 20, NUMERIC + 30));
+  assert.equal(result, 0, 'the authored numerical memory port completes its one COW store');
+  view.setUint16(NUMERIC + 2, 0x800, true); view.setUint16(NUMERIC + 4, 0xffff, true);
+  view.setUint16(NUMERIC + 6, 0x33b, true); put(NUMERIC + 8, 0x1002); put(NUMERIC + 12, address);
+  return 0;
+}
+
 for (const line of readFileSync(join(directory, 'programs.tsv'), 'utf8').trim().split('\n')) {
   const [name, hex, identity] = line.split('\t'), wasm = readFileSync(join(directory, `${name}.wasm`));
   assert.ok(WebAssembly.validate(wasm), `${name}: validates`);
   const module = new WebAssembly.Module(wasm);
   assertCoreNames(module, name.endsWith('-callee') ? 0x1010 : 0x1000, identity);
-  const imports = WebAssembly.Module.imports(module).sort((a, b) => a.name.localeCompare(b.name));
+  const imports = coreImports(module).sort((a, b) => a.name.localeCompare(b.name));
   assert.deepEqual(imports, [
     {module: 'ring3', name: 'memory', kind: 'memory'},
+    ...(name === 'numeric-cow-read-alias' ? [{module: 'ring3', name: 'numeric', kind: 'function'}] : []),
     {module: 'ring3', name: 'read', kind: 'function'},
     {module: 'ring3', name: 'write', kind: 'function'},
   ], `${name}: declared imports only`);
-  const instance = new WebAssembly.Instance(module, {ring3: {memory, read, write}});
+  const instance = instantiateCore(module, {ring3: {memory, read, write, numeric}});
   assert.equal(typeof instance.exports.run, 'function');
   assert.equal(instance.exports.run.length, 2);
   programs.set(name, {code: Buffer.from(hex, 'hex'), identity: BigInt(identity), wasmSha256: hash(wasm), run: instance.exports.run});
 }
 
 function seed(name, options = {}) {
-  active = {reads: 0, writes: 0, importVersions: []};
+  active = {reads: 0, writes: 0, numeric: 0, numericStore: !!options.numericStore,
+    numericVersions: [], importVersions: []};
   bytes.fill(0, CTX, CTX + 128); bytes.fill(0, BACKING, BACKING + 16 * PAGE);
   bytes.fill(0, EXEC, EXEC + 16 * 4); bytes.fill(0, VERSION, VERSION + 8);
   bytes.fill(0, PAGE_VERSION, PAGE_VERSION + 16 * 16);
   bytes.fill(0, GENERATION, GENERATION + 8);
   bytes.fill(0, PRIVATE, PRIVATE + 64);
+  bytes.fill(0, NUMERIC, NUMERIC + 100);
   if (options.initialVersion !== undefined) view.setBigUint64(VERSION, options.initialVersion, true);
   for (const page of [0, 1, 3, 4, 5, 0xfffff]) {
     put(MAP + page * 4, 0); bytes[PERM + page] = 0;
@@ -126,6 +146,11 @@ function seed(name, options = {}) {
   put(CTX + 40, options.retired ?? 0); put(CTX + 44, 0x12345678);
   [MAP, PERM, BACKING, 16, EXEC, 0, VERSION, PAGE_VERSION, GENERATION].forEach((value, index) => put(CTX + 56 + index * 4, value));
   if (options.privateCopy) { put(CTX + 76, PRIVATE); put(PRIVATE + 3 * 4, 16); put(MAP + 5 * 4, 3); }
+  if (options.numericStore) {
+    put(CTX + 92, NUMERIC); view.setUint16(NUMERIC, 0x27f, true); view.setUint16(NUMERIC + 4, 0xfffc, true);
+    view.setUint16(NUMERIC + 6, 0x123, true); put(NUMERIC + 8, 0x12345678); put(NUMERIC + 12, 0x87654321);
+    view.setUint16(NUMERIC + 16, 0x1b, true); view.setUint16(NUMERIC + 18, 0x23, true); bytes.set(RAW80, NUMERIC + 20);
+  }
   if (options.executableAlias) { put(MAP + 5 * 4, 3); bytes[PERM + 5] = 5; put(EXEC + 2 * 4, 1); }
   put(CTX + 104, options.fsBase ?? 0);
   put(CTX + 112, options.inactive ? 0 : 1);
@@ -147,6 +172,12 @@ function seed(name, options = {}) {
 function check(name, label, budget, options, outcome) {
   const initial = seed(name, options), before = bytes.slice(CTX, CTX + 128);
   const expectedRam = bytes.slice(BACKING, BACKING + 16 * PAGE);
+  const expectedNumeric = bytes.slice(NUMERIC, NUMERIC + 100);
+  if (options.numericStore) {
+    const n = new DataView(expectedNumeric.buffer);
+    n.setUint16(2, 0x800, true); n.setUint16(4, 0xffff, true); n.setUint16(6, 0x33b, true);
+    n.setUint32(8, 0x1002, true); n.setUint32(12, 0x3000, true);
+  }
   if (options.privateCopy) expectedRam.set(expectedRam.slice(2 * PAGE, 3 * PAGE), 15 * PAGE);
   const expectedVersions = new Uint8Array(16 * 16), versions = new DataView(expectedVersions.buffer);
   const expected = typeof outcome === 'function' ? outcome(initial) : outcome;
@@ -155,7 +186,7 @@ function check(name, label, budget, options, outcome) {
       const location = (address + index) >>> 0;
       const target = options.privateCopy && location >>> 12 === 3
         ? 15 * PAGE + (location & 4095) : physical(location) - BACKING;
-      expectedRam[target] = value >>> (index * 8);
+      expectedRam[target] = value instanceof Uint8Array ? value[index] : value >>> (index * 8);
       versions.setBigUint64(Math.floor(target / PAGE) * 16 + 8, (options.initialVersion ?? 0n) + BigInt(ordinal + 1), true);
     }
   }
@@ -173,6 +204,7 @@ function check(name, label, budget, options, outcome) {
   const raw = {name, label, budget, reason, context: Buffer.from(bytes.subarray(CTX, CTX + 128)).toString('hex'),
     moduleSequence,
     ramSha256: hash(bytes.subarray(BACKING, BACKING + 16 * PAGE)), helperReads: active.reads, helperWrites: active.writes,
+    numericCalls: active.numeric, numericVersions: active.numericVersions,
     importVersions: active.importVersions,
     transactionVersion: String(view.getBigUint64(VERSION, true)), codeGeneration: String(view.getBigUint64(GENERATION, true))};
   results.push(raw); writeFileSync(reportPath, JSON.stringify({schema: 1, complete: false, results}));
@@ -190,6 +222,9 @@ function check(name, label, budget, options, outcome) {
   assert.deepEqual(bytes.subarray(BACKING, BACKING + 16 * PAGE), expectedRam, `${label}: whole code/data/stack backing`);
   assert.equal(active.reads, expected.reads ?? 0, `${label}: read slow path`);
   assert.equal(active.writes, expected.helpers ?? 0, `${label}: write slow path`);
+  assert.equal(active.numeric, expected.numeric ?? 0, `${label}: numerical slow path`);
+  assert.deepEqual(active.numericVersions, expected.numericVersions ?? [], `${label}: numerical port sees the published sequence`);
+  assert.deepEqual(bytes.subarray(NUMERIC, NUMERIC + 100), expectedNumeric, `${label}: complete private numerical bank`);
   if (expected.importVersions) assert.deepEqual(active.importVersions, expected.importVersions, `${label}: versions are published before canonical imports`);
   assert.equal(view.getBigUint64(VERSION, true), (options.initialVersion ?? 0n) + BigInt(expected.writes?.length ?? 0), `${label}: store transaction count`);
   assert.deepEqual(bytes.subarray(PAGE_VERSION, PAGE_VERSION + 16 * 16), expectedVersions, `${label}: all physical page versions`);
@@ -313,6 +348,13 @@ check('store-cow-store', 'fast-cow-fast-stores-share-the-canonical-version-seque
   {reason: 4, pc: 0x1007, retired: 3, helpers: 1,
     writes: [[0x4000, 4, 0x12345678], [0x3000, 4, 0x12345678], [0x3004, 4, 0x12345678]],
     importVersions: [['write', '38']]});
+// this generated-wasm control uses an authored numerical memory port, not the public engine COW API.
+check('numeric-cow-read-alias', 'numeric-cow-port-invalidates-a-cached-page-before-same-page-and-alias-reads', 8,
+  {privateCopy: true, numericStore: true, initialVersion: 37n, initial: [[0x3000, 4, 0x89abcdef]]}, initial => {
+    const regs = [...initial.regs]; regs[0] = 0x89abcdef; regs[2] = 0x12345678; regs[6] = 0x89abcdef;
+    return {reason: 4, pc: 0x100c, retired: 4, regs, helpers: 1, numeric: 1, numericVersions: ['37'],
+      writes: [[0x3000, 10, RAW80]], importVersions: [['write', '37']]};
+  });
 check('store-load', 'committed-store-version-is-visible-to-the-following-faulting-read', 8,
   {regs: [0x12345678, 3, 0x6000, 0x3000, 0x4800, 0, 0x8000, 0], initialVersion: 37n},
   {reason: 3, pc: 0x1002, retired: 1, reads: 1, writes: [[0x3000, 4, 0x12345678]],
@@ -404,7 +446,7 @@ try {
   assert.deepEqual(guards.trailing,trailing,'publication preserves the eight trailing context bytes');
 } finally {CTX=0x100;}
 const report = {schema: 1, complete: true, node: process.version, cases: results.length,
-  sources: Object.fromEntries(['./run.mjs', './oracle.mjs', './extended.mjs', './bits.mjs', './names.mjs', '../wasm.rs'].map(path => [path, hash(readFileSync(new URL(path, import.meta.url)))])),
+  sources: Object.fromEntries(['./run.mjs','./link.mjs', './oracle.mjs', './extended.mjs', './bits.mjs', './names.mjs', '../wasm.rs'].map(path => [path, hash(readFileSync(new URL(path, import.meta.url)))])),
   modules: Object.fromEntries([...programs].map(([name, program]) => [name, {identity: String(program.identity), wasmSha256: program.wasmSha256, codeSha256: hash(program.code)}])),
   results};
 writeFileSync(reportPath, JSON.stringify(report, null, 2));

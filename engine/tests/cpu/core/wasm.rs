@@ -201,6 +201,7 @@ fn generated_wasm_runs_authored_integer_control_memory_programs() {
         ("load-rmw", "8b03834304010f0b"),
         ("store-load", "89038b020f0b"),
         ("store-cow-store", "890789038943040f0b"),
+        ("numeric-cow-read-alias", "8b03db3b8b138b35005000000f0b"),
         ("push-pop", "50590f0b"),
         ("call", "e80b00000083c0020f0b90909090909083c003c3"),
         ("call-callee", "e80b00000083c0020f0b90909090909083c003c3"),

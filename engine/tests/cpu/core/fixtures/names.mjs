@@ -46,16 +46,22 @@ export function assertCoreNames(module, entry, identity) {
   if (identity !== undefined) assert.equal(moduleName, prefix + identity);
   const numeric = WebAssembly.Module.imports(module).some(item => item.name === 'numeric');
   const names = ['guest.read_slow', 'guest.write_slow', ...(numeric ? ['guest.numeric'] : []),
-    'guest.flags', 'guest.run', 'guest.lookup', 'guest.publish', 'guest.precise'];
-  const stores = functions.slice(names.length).map(([, name]) => name);
+    'guest.flags', 'guest.run', 'guest.lookup', 'guest.publish', 'guest.precise', 'guest.materialize_numeric', 'guest.resolve_status',
+    'guest.translate_page'];
+  const wrappers = ['guest.entry', 'guest.link', 'guest.publish_link'];
+  const stores = functions.slice(names.length,-wrappers.length).map(([, name]) => name);
   assert(stores.length <= 3 && stores.every(name => ['guest.store8', 'guest.store16', 'guest.store32'].includes(name)),
-    'only supported fixed-width store helpers follow the precise tail');
+    'only supported fixed-width store helpers follow the numerical materializer');
   assert.equal(new Set(stores).size, stores.length, 'store helper widths are unique');
-  names.push(...stores);
+  names.push(...stores,...wrappers);
   assert.deepEqual(functions, names.map((name, index) => [index, name]), 'names use actual function indices');
 }
 
 export function assertDispatchNames(module) {
   assert.deepEqual(readNames(module), {moduleName: 'ring3.dispatch',
-    functions: [[0, 'guest.next'], [1, 'guest.chain']]});
+    functions: [[0, 'guest.probe'], [1, 'guest.cold'], [2, 'guest.chain']]});
+}
+
+export function coreFunctionNames(module) {
+  return readNames(module).functions;
 }
