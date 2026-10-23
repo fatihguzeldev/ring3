@@ -427,3 +427,92 @@ fn remapping_or_writing_an_executable_alias_revokes_held_cold_source() {
     aliases.write(GuestAddress(0x2000), &[0x90]).unwrap();
     assert!(pending.complete(&aliases, 0x1001).is_none());
 }
+
+#[test]
+fn changing_only_an_indirect_external_target_is_not_executable_growth() {
+    let memory = memory(&[0xc3]);
+    let first = compile_cold(&memory, &[completed(&memory, 0x1000, 0x2000)], None).unwrap();
+    let id = first.identity();
+    let bytes = first.wasm().to_vec();
+    for target in [0x2001, 0x3000, 0x4000, 0xffff_ffff] {
+        assert!(
+            compile_cold(&memory, &[completed(&memory, 0x1000, target)], Some(&first)).is_none()
+        );
+    }
+    assert_eq!(first.identity(), id);
+    assert_eq!(first.wasm(), bytes);
+    assert_eq!(
+        first.observed.as_ref().unwrap().edges,
+        BTreeSet::from([(0x1000, 0x2000)])
+    );
+}
+
+#[test]
+fn total_observed_edges_use_a_fixed_twice_instruction_budget_before_emission() {
+    let memory = memory(&[0xc3, 0xc3, 0xc3]);
+    let sequence = [
+        0x1000, 0x1000, 0x1001, 0x1000, 0x1002, 0x1001, 0x1001, 0x1002, 0x1002, 0x1000,
+    ];
+    let observations: Vec<_> = sequence
+        .iter()
+        .enumerate()
+        .map(|(index, &pc)| {
+            completed(
+                &memory,
+                pc,
+                sequence.get(index + 1).copied().unwrap_or(0x1000),
+            )
+        })
+        .collect();
+    let events: Vec<_> = observations
+        .iter()
+        .enumerate()
+        .map(|(index, observation)| observation.event(index).unwrap())
+        .collect();
+    let options = CompileOptions {
+        instructions: 3,
+        blocks: 3,
+        ..CompileOptions::default()
+    };
+    assert!(
+        compile_observed_with_cold(
+            &memory,
+            GuestAddress(0x1000),
+            options,
+            &events,
+            &[],
+            memory.code_source_version(),
+            &observations,
+            None
+        )
+        .unwrap()
+        .is_none(),
+        "nine actually observed RET edges exceed the six-edge budget despite only three decoded nodes"
+    );
+
+    let prefix = [
+        completed(&memory, 0x1000, 0x1000),
+        completed(&memory, 0x1000, 0x1001),
+        completed(&memory, 0x1001, 0x1001),
+        completed(&memory, 0x1001, 0x1000),
+    ];
+    let old = compile_cold(&memory, &prefix, None).unwrap();
+    let old_bytes = old.wasm().to_vec();
+    assert!(
+        compile_observed_with_cold(
+            &memory,
+            GuestAddress(0x1000),
+            options,
+            &events,
+            &[],
+            memory.code_source_version(),
+            &observations,
+            Some(&old)
+        )
+        .unwrap()
+        .is_none()
+    );
+    assert_eq!(old.wasm(), old_bytes);
+    assert_eq!(old.observed.as_ref().unwrap().edges.len(), 4);
+    assert_eq!(old.instruction_pcs().collect::<Vec<_>>(), [0x1000, 0x1001]);
+}

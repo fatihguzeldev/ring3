@@ -20,8 +20,13 @@ impl ObservedGraph {
         }) && previous.edges.is_subset(&self.edges)
             && previous.ports.is_subset(&self.ports)
             && (self.nodes.len() != previous.nodes.len()
-                || self.edges != previous.edges
-                || self.ports != previous.ports)
+                || self.ports != previous.ports
+                || self
+                    .edges
+                    .difference(&previous.edges)
+                    .any(|(source, target)| {
+                        self.nodes.contains_key(source) && self.nodes.contains_key(target)
+                    }))
     }
 }
 
@@ -183,7 +188,8 @@ pub(crate) fn compile_observed_with_cold(
     let mut sources = previous.map_or_else(Vec::new, |owner| {
         owner.sources.iter().map(snapshot_copy).collect()
     });
-    if nodes.len() > options.instructions {
+    let edge_limit = options.instructions * 2;
+    if nodes.len() > options.instructions || edges.len() > edge_limit {
         return Ok(None);
     }
 
@@ -268,7 +274,7 @@ pub(crate) fn compile_observed_with_cold(
                 }
             }
         }
-        if nodes.len() > options.instructions {
+        if nodes.len() > options.instructions || edges.len() > edge_limit {
             return Ok(None);
         }
     }

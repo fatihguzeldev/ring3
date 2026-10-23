@@ -219,3 +219,87 @@ fn family_priority_preserves_explicit_legacy_baseline_coverage_and_bytes() {
     assert_eq!(baseline.wasm(), bytes);
     assert!(cache.retained(&baseline).is_some());
 }
+
+#[test]
+fn a_larger_legacy_root_only_trace_cannot_downgrade_a_current_family() {
+    use crate::cpu::core::{
+        compile_observed, compile_with_frontier,
+        trace::{BLOCK, TraceEvent},
+    };
+    let memory = memory();
+    let mut cache = CoreCache32::default();
+    let family = cache.admit(&memory, family(&memory, 0x1002, None)).unwrap();
+    let prefix = compile_with_frontier(
+        &memory,
+        GuestAddress(0x1000),
+        CompileOptions {
+            instructions: 8,
+            blocks: 2,
+            ..CompileOptions::default()
+        },
+        &[],
+        &[GuestAddress(0x1004)],
+    )
+    .unwrap();
+    let witness = compile(
+        &memory,
+        GuestAddress(0x1004),
+        CompileOptions {
+            instructions: 1,
+            blocks: 1,
+            ..CompileOptions::default()
+        },
+    )
+    .unwrap();
+    let events = [
+        TraceEvent {
+            kind: BLOCK,
+            pc: 0x1000,
+            end: 0x1002,
+            offset: 0,
+            owner: prefix.identity(),
+        },
+        TraceEvent {
+            kind: BLOCK,
+            pc: 0x1002,
+            end: 0x1004,
+            offset: 0,
+            owner: prefix.identity(),
+        },
+        TraceEvent {
+            kind: BLOCK,
+            pc: 0x1004,
+            end: 0x1005,
+            offset: 0,
+            owner: witness.identity(),
+        },
+    ];
+    let legacy = compile_observed(
+        &memory,
+        GuestAddress(0x1000),
+        CompileOptions::default(),
+        &events,
+        &[&prefix, &witness],
+        memory.code_source_version(),
+    )
+    .unwrap()
+    .unwrap();
+    assert!(!legacy.is_observed_family());
+    assert!(
+        legacy
+            .trace_score()
+            .unwrap()
+            .strictly_grows(family.trace_score().unwrap())
+    );
+    let before = cache.snapshot();
+    assert!(matches!(
+        cache.admit(&memory, legacy),
+        Err(CompileError::InvalidLimits)
+    ));
+    assert_eq!(cache.snapshot(), before);
+    assert_eq!(
+        cache.lookup(&memory, 0x1002).unwrap().identity(),
+        family.identity()
+    );
+    invariants(&cache, &family);
+}
