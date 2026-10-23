@@ -2,7 +2,19 @@ use super::super::flags::{self, FlagKind};
 use super::{
     A, ADDRESS, B, CARRY, CARRY_IN, FLAGS, KIND, LEFT, Output, RESULT, RIGHT, VALUE, WIDTH,
 };
+use crate::cpu::core::region::values::{EffectId, ValueId};
 use crate::cpu::x86::{Register32, SegmentRegister, atomic::AtomicKind, ir::*};
+
+const CACHED_ADDRESS: u32 = 127;
+const CACHED_LOGICAL_ADDRESS: u32 = 128;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) struct AddressFact {
+    address: EffectiveAddress,
+    base: Option<ValueId>,
+    index: Option<ValueId>,
+    authority: EffectId,
+}
 
 #[derive(Clone, Copy)]
 enum Operand {
@@ -623,12 +635,29 @@ impl Output<'_> {
     fn operand(&mut self, source: Operand, width: u32, destination: u32, modify: bool) {
         match source {
             Operand::Register(register, shift) => {
+                let known = self.known_gpr(register);
+                if let Some(value) = known.filter(|_| !self.guarded_gpr_facts) {
+                    self.c()
+                        .i32_const(((value >> shift) & mask(width)) as i32)
+                        .local_set(destination);
+                    return;
+                }
+                if let Some(value) = known {
+                    self.c()
+                        .local_get(super::GP_FACTS_VALID)
+                        .if_(wasm_encoder::BlockType::Result(wasm_encoder::ValType::I32))
+                        .i32_const(((value >> shift) & mask(width)) as i32)
+                        .else_();
+                }
                 self.c().local_get(register);
                 if shift != 0 {
                     self.c().i32_const(shift as i32).i32_shr_u();
                 }
                 if width != 4 {
                     self.c().i32_const(mask(width) as i32).i32_and();
+                }
+                if known.is_some() {
+                    self.c().end();
                 }
                 self.c().local_set(destination);
             }
@@ -696,19 +725,52 @@ impl Output<'_> {
     }
 
     fn effective_address(&mut self, address: EffectiveAddress, segment: bool) {
-        self.c().i32_const(address.displacement as i32);
-        if let Some(base) = address.base {
-            self.c().local_get(base.index() as u32 + 2).i32_add();
-        }
-        if let Some(index) = address.index {
+        let fact = if segment {
+            self.before_frame.map(|id| {
+                let frame = self.plan.frame(id);
+                AddressFact {
+                    address,
+                    base: address.base.map(|r| frame.gpr[r.index()]),
+                    index: address.index.map(|r| frame.gpr[r.index()]),
+                    authority: frame.memory_effect,
+                }
+            })
+        } else {
+            None
+        };
+        let reuse = fact.is_some() && self.address_fact == fact;
+        if reuse && self.guarded_gpr_facts {
             self.c()
-                .local_get(index.index() as u32 + 2)
-                .i32_const(address.scale as i32)
-                .i32_mul()
-                .i32_add();
+                .local_get(super::GP_FACTS_VALID)
+                .if_(wasm_encoder::BlockType::Empty);
         }
-        if address.address_size == AddressSize::Bits16 {
-            self.c().i32_const(0xffff).i32_and();
+        if reuse {
+            self.c()
+                .local_get(CACHED_ADDRESS)
+                .local_set(ADDRESS)
+                .local_get(CACHED_LOGICAL_ADDRESS)
+                .local_set(super::LOGICAL_ADDRESS);
+            if self.guarded_gpr_facts {
+                self.c().else_();
+            } else {
+                return;
+            }
+        }
+        let folded = address
+            .base
+            .into_iter()
+            .chain(address.index)
+            .any(|r| self.known_gpr(r.index() as u32 + 2).is_some());
+        if folded && self.guarded_gpr_facts {
+            self.c()
+                .local_get(super::GP_FACTS_VALID)
+                .if_(wasm_encoder::BlockType::Result(wasm_encoder::ValType::I32));
+            self.address_offset(address, true);
+            self.c().else_();
+            self.address_offset(address, false);
+            self.c().end();
+        } else {
+            self.address_offset(address, true);
         }
         if segment {
             self.c().local_tee(super::LOGICAL_ADDRESS);
@@ -725,6 +787,52 @@ impl Output<'_> {
             }
         }
         self.c().local_set(ADDRESS);
+        if segment && fact.is_some() {
+            self.c()
+                .local_get(ADDRESS)
+                .local_set(CACHED_ADDRESS)
+                .local_get(super::LOGICAL_ADDRESS)
+                .local_set(CACHED_LOGICAL_ADDRESS);
+            self.address_fact = fact;
+        }
+        if reuse && self.guarded_gpr_facts {
+            self.c().end();
+        }
+    }
+
+    fn address_offset(&mut self, address: EffectiveAddress, fold: bool) {
+        let mut displacement = address.displacement;
+        let base = address.base.filter(|r| {
+            if let Some(value) = self.known_gpr(r.index() as u32 + 2).filter(|_| fold) {
+                displacement = displacement.wrapping_add(value);
+                false
+            } else {
+                true
+            }
+        });
+        let index = address.index.filter(|r| {
+            if let Some(value) = self.known_gpr(r.index() as u32 + 2).filter(|_| fold) {
+                displacement =
+                    displacement.wrapping_add(value.wrapping_mul(u32::from(address.scale)));
+                false
+            } else {
+                true
+            }
+        });
+        self.c().i32_const(displacement as i32);
+        if let Some(base) = base {
+            self.c().local_get(base.index() as u32 + 2).i32_add();
+        }
+        if let Some(index) = index {
+            self.c()
+                .local_get(index.index() as u32 + 2)
+                .i32_const(address.scale as i32)
+                .i32_mul()
+                .i32_add();
+        }
+        if address.address_size == AddressSize::Bits16 {
+            self.c().i32_const(0xffff).i32_and();
+        }
     }
 }
 mod bits;

@@ -1,6 +1,5 @@
 use super::{
-    A, ADDRESS, B, CARRY, EIP, FLAGS, INDEX, KIND, LEFT, LOGICAL_ADDRESS, Output, RESULT, RIGHT,
-    VALUE,
+    A, ADDRESS, B, CARRY, FLAGS, KIND, LEFT, LOGICAL_ADDRESS, Output, RESULT, RIGHT, VALUE,
 };
 use crate::cpu::{
     core::StopReason,
@@ -37,13 +36,11 @@ pub(super) fn emit(out: &mut Output<'_>, operation: Operation, next: u32) -> boo
         Operation::PushWord { source } => {
             word(out, source, RESULT);
             push(out, 2, RESULT);
-            out.set_pc(next);
         }
         Operation::PushMemoryWord { source } => {
             out.address(source);
             out.read(2, RESULT);
             push(out, 2, RESULT);
-            out.set_pc(next);
         }
         Operation::PushFlagsWord => {
             out.materialize(super::super::flags::ARITHMETIC);
@@ -53,14 +50,12 @@ pub(super) fn emit(out: &mut Output<'_>, operation: Operation, next: u32) -> boo
                 .i32_and()
                 .local_set(RESULT);
             push(out, 2, RESULT);
-            out.set_pc(next);
         }
         Operation::PopWord { destination } => {
             stack_address(out, 0);
             out.read(2, RESULT);
             out.c().local_get(6).i32_const(2).i32_add().local_set(6);
             store_word(out, destination, RESULT);
-            out.set_pc(next);
         }
         Operation::PopMemoryWord { mut destination } => {
             stack_address(out, 0);
@@ -71,7 +66,6 @@ pub(super) fn emit(out: &mut Output<'_>, operation: Operation, next: u32) -> boo
             out.address(destination);
             out.write(2, RESULT);
             out.c().local_get(6).i32_const(2).i32_add().local_set(6);
-            out.set_pc(next);
         }
         Operation::ReturnWord { stack_adjust } => {
             stack_address(out, 0);
@@ -92,9 +86,9 @@ pub(super) fn emit(out: &mut Output<'_>, operation: Operation, next: u32) -> boo
             out.read(2, RESULT);
             out.dynamic_pc(RESULT);
         }
-        Operation::CallWord { target } => {
-            out.c().i32_const((target.0 & 0xffff) as i32).local_set(B);
-            call_word(out, next);
+        Operation::CallWord { .. } => {
+            out.c().i32_const((next & 0xffff) as i32).local_set(RESULT);
+            push(out, 2, RESULT);
         }
         Operation::CallRegisterWord { source } => {
             word(out, WordValue::Register(source), B);
@@ -105,49 +99,8 @@ pub(super) fn emit(out: &mut Output<'_>, operation: Operation, next: u32) -> boo
             out.read(2, B);
             call_word(out, next);
         }
-        Operation::CountBranchWord { kind, target } => {
-            if kind != CountBranchKind::EcxZero {
-                out.c()
-                    .local_get(3)
-                    .i32_const(1)
-                    .i32_sub()
-                    .i32_const(0xffff)
-                    .i32_and()
-                    .local_get(3)
-                    .i32_const(!0xffff)
-                    .i32_and()
-                    .i32_or()
-                    .local_set(3);
-            }
-            out.c().local_get(3).i32_const(0xffff).i32_and().i32_eqz();
-            if kind != CountBranchKind::EcxZero {
-                out.c().i32_eqz();
-            }
-            out.c().local_set(A);
-            if matches!(
-                kind,
-                CountBranchKind::LoopEqual | CountBranchKind::LoopNotEqual
-            ) {
-                out.condition(if kind == CountBranchKind::LoopEqual {
-                    Condition::Equal
-                } else {
-                    Condition::NotEqual
-                });
-                out.c().local_get(A).i32_and().local_set(A);
-            }
-            let taken = out.index(target.0);
-            let otherwise = out.index(next);
-            out.c()
-                .i32_const(target.0 as i32)
-                .i32_const(next as i32)
-                .local_get(A)
-                .select()
-                .local_set(EIP)
-                .i32_const(taken)
-                .i32_const(otherwise)
-                .local_get(A)
-                .select()
-                .local_set(INDEX);
+        Operation::CountBranchWord { .. } => {
+            unreachable!("direct counter control is owned by the region terminator")
         }
         Operation::EnterZero | Operation::EnterZeroWord => {
             let width = if operation == Operation::EnterZeroWord {
@@ -162,7 +115,6 @@ pub(super) fn emit(out: &mut Output<'_>, operation: Operation, next: u32) -> boo
             } else {
                 out.c().local_get(6).local_set(7);
             }
-            out.set_pc(next);
         }
         Operation::LeaveWord => {
             out.c()
@@ -172,7 +124,6 @@ pub(super) fn emit(out: &mut Output<'_>, operation: Operation, next: u32) -> boo
             out.read(2, RESULT);
             out.c().local_get(7).i32_const(2).i32_add().local_set(6);
             store_word(out, Register32::Ebp, RESULT);
-            out.set_pc(next);
         }
         Operation::PopAll | Operation::PopAllWord => {
             pop_all(
@@ -183,7 +134,6 @@ pub(super) fn emit(out: &mut Output<'_>, operation: Operation, next: u32) -> boo
                     4
                 },
             );
-            out.set_pc(next);
         }
         Operation::Control(ControlOperation::PopFlags { word }) => {
             let width = if word { 2 } else { 4 };
@@ -211,7 +161,6 @@ pub(super) fn emit(out: &mut Output<'_>, operation: Operation, next: u32) -> boo
                 .i32_const(width as i32)
                 .i32_add()
                 .local_set(6);
-            out.set_pc(next);
             out.c()
                 .local_get(FLAGS)
                 .i32_const(0x50100)

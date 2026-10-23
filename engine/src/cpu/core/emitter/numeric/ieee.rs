@@ -1,8 +1,7 @@
-use super::super::{Output, mem};
+use super::super::Output;
 use crate::cpu::x86::X87Format;
 use wasm_encoder::{BlockType, ValType};
 
-const BANK: u32 = 37;
 const STATUS: u32 = 41;
 const ZERO: u32 = 43;
 const EXPONENT: u32 = 44;
@@ -10,7 +9,7 @@ const TEMPORARY: u32 = 45;
 const SIGNIFICAND: u32 = 46;
 const PACKED: u32 = 47;
 
-pub(super) fn pack(out: &mut Output<'_>, pointer: u32, format: X87Format) {
+pub(super) fn pack(out: &mut Output<'_>, low: u32, high: u32, format: X87Format) {
     let (precision, bias, maximum) = match format {
         X87Format::Float32 => (24_u32, 127_u32, 255_u32),
         X87Format::Float64 => (53, 1023, 2047),
@@ -19,11 +18,9 @@ pub(super) fn pack(out: &mut Output<'_>, pointer: u32, format: X87Format) {
     let shift = 64 - precision;
     let discarded = (1_u64 << shift) - 1;
     out.c()
-        .local_get(pointer)
-        .i64_load(mem(0, 0))
+        .local_get(low)
         .local_set(SIGNIFICAND)
-        .local_get(pointer)
-        .i32_load16_u(mem(8, 0))
+        .local_get(high)
         .i32_const(0x7fff)
         .i32_and()
         .local_set(EXPONENT)
@@ -69,8 +66,7 @@ pub(super) fn pack(out: &mut Output<'_>, pointer: u32, format: X87Format) {
         .i32_const(0x20)
         .i32_or()
         .local_set(STATUS)
-        .local_get(BANK)
-        .i32_load16_u(mem(0, 1))
+        .local_get(super::span::CONTROL)
         .i32_const(10)
         .i32_shr_u()
         .i32_const(3)
@@ -100,14 +96,14 @@ pub(super) fn pack(out: &mut Output<'_>, pointer: u32, format: X87Format) {
         .i32_const(1)
         .i32_eq()
         .if_(BlockType::Result(ValType::I32));
-    sign(out, pointer);
+    sign(out, high);
     out.c()
         .else_()
         .local_get(TEMPORARY)
         .i32_const(2)
         .i32_eq()
         .if_(BlockType::Result(ValType::I32));
-    sign(out, pointer);
+    sign(out, high);
     out.c()
         .i32_eqz()
         .else_()
@@ -154,8 +150,7 @@ pub(super) fn pack(out: &mut Output<'_>, pointer: u32, format: X87Format) {
         .i64_or()
         .local_get(ZERO)
         .select()
-        .local_get(pointer)
-        .i32_load16_u(mem(8, 0))
+        .local_get(high)
         .i32_const(0x8000)
         .i32_and()
         .i64_extend_i32_u()
@@ -178,10 +173,6 @@ fn normal_output(out: &mut Output<'_>, maximum: u32, depth: u32) {
         .br_if(depth);
 }
 
-fn sign(out: &mut Output<'_>, pointer: u32) {
-    out.c()
-        .local_get(pointer)
-        .i32_load16_u(mem(8, 0))
-        .i32_const(15)
-        .i32_shr_u();
+fn sign(out: &mut Output<'_>, high: u32) {
+    out.c().local_get(high).i32_const(15).i32_shr_u();
 }

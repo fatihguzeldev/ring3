@@ -47,11 +47,15 @@ fn supported(op: SimdOperation) -> bool {
     }
 }
 
-pub(super) fn begin(out: &mut Output<'_>, operation: Operation, next: u32) -> bool {
+pub(super) fn preserves_fp_success(operation: &Operation) -> bool {
+    matches!(operation, Operation::Simd(op) if supported(*op))
+}
+
+pub(super) fn begin(out: &mut Output<'_>, operation: Operation, _next: u32) -> bool {
     let Operation::Simd(op) = operation else {
         return false;
     };
-    if !supported(op) {
+    if !preserves_fp_success(&operation) {
         return false;
     }
     out.c()
@@ -82,7 +86,6 @@ pub(super) fn begin(out: &mut Output<'_>, operation: Operation, next: u32) -> bo
     } else {
         add(out);
     }
-    out.set_pc(next);
     out.c().br(1).end();
     true
 }

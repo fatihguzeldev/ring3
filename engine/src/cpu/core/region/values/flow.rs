@@ -202,7 +202,7 @@ pub(super) fn address_constant(
 fn transfer(facts: &mut Facts, operation: Option<Operation>) {
     scalar_transfer(&mut facts.gpr, operation);
     let Some((operation, ..)) = operation.and_then(super::fp::operation) else {
-        if operation.is_none_or(|op| crate::cpu::core::emitter::is_native(&op)) {
+        if operation.is_none_or(super::fp::canonical_numeric) {
             facts.native = [false; 8];
             facts.tags = [None; 8];
             facts.control_admitted = false;

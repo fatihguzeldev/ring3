@@ -14,7 +14,7 @@ use super::{
 };
 use crate::cpu::x86::{
     ControlOperation,
-    ir::{BranchTarget, Condition, CountBranchKind, Location32, Operation},
+    ir::{BranchTarget, Condition, Location32, Operation},
 };
 use wasm_encoder::{
     BlockType, CodeSection, EntityType, ExportKind, ExportSection, Function, FunctionSection,
@@ -41,6 +41,7 @@ pub(super) const WIDTH: u32 = 25;
 pub(super) const INDEX: u32 = 26;
 pub(super) const WIDE: u32 = 27;
 pub(super) const LOGICAL_ADDRESS: u32 = 28;
+pub(super) const GP_FACTS_VALID: u32 = 129;
 
 pub(super) fn mem(offset: u64, align: u32) -> MemArg {
     MemArg {
@@ -79,15 +80,22 @@ pub(super) fn is_native(operation: &Operation) -> bool {
     numeric::supports(operation)
 }
 
+pub(super) fn preserves_fp_success(operation: &Operation) -> bool {
+    numeric::preserves_fp_success(operation)
+}
+
 pub(super) fn emit(
     blocks: &[Block],
     entry: u32,
     identity: u64,
     native: &[NativeInstruction],
 ) -> Vec<u8> {
+    let graph =
+        super::region::Region::from_blocks(blocks, entry).expect("decoded blocks form a region");
+    let plan = super::region::values::RegionPlan::analyze(&graph);
     let shift = u32::from(!native.is_empty());
-    let (fast, store_widths) = run(blocks, entry, identity, native, false, Vec::new());
-    let (precise, store_widths) = run(blocks, entry, identity, native, true, store_widths);
+    let (fast, store_widths) = run(&graph, &plan, identity, native, false, Vec::new());
+    let (precise, store_widths) = run(&graph, &plan, identity, native, true, store_widths);
     let mut module = Module::new();
     let mut types = TypeSection::new();
     types.ty().function([ValType::I32; 2], [ValType::I32]);
@@ -128,6 +136,10 @@ pub(super) fn emit(
         [ValType::I32],
     );
     types.ty().function([ValType::I32; 3], [ValType::I32; 3]);
+    types.ty().function(
+        numeric::normalizer_parameters(),
+        numeric::normalizer_results(),
+    );
     module.section(&types);
     let mut imports = ImportSection::new();
     imports.import(
@@ -155,6 +167,7 @@ pub(super) fn emit(
     functions.function(6);
     functions.function(9);
     functions.function(10);
+    functions.function(11);
     for _ in &store_widths {
         functions.function(7);
     }
@@ -163,7 +176,7 @@ pub(super) fn emit(
     functions.function(8);
     module.section(&functions);
     let mut exports = ExportSection::new();
-    let wrappers = 10 + shift + store_widths.len() as u32;
+    let wrappers = 11 + shift + store_widths.len() as u32;
     exports.export("run", ExportKind::Func, wrappers);
     exports.export("link", ExportKind::Func, wrappers + 1);
     exports.export("publish", ExportKind::Func, wrappers + 2);
@@ -182,6 +195,10 @@ pub(super) fn emit(
     code.function(&numeric::span::emit_materializer());
     code.function(&numeric::span::emit_status_resolver());
     code.function(&super::memory::cache::emit_translator());
+    code.function(&numeric::emit_normalizer_function(
+        &plan,
+        !native.is_empty(),
+    ));
     for &width in &store_widths {
         code.function(&super::memory::emit_store(width));
     }
@@ -206,6 +223,7 @@ pub(super) fn emit(
         "guest.materialize_numeric",
         "guest.resolve_status",
         "guest.translate_page",
+        "guest.normalize_frame",
     ]
     .into_iter()
     .enumerate()
@@ -214,7 +232,7 @@ pub(super) fn emit(
     }
     for (index, width) in store_widths.iter().enumerate() {
         functions.append(
-            10 + shift + index as u32,
+            11 + shift + index as u32,
             &format!("guest.store{}", width * 8),
         );
     }
@@ -259,8 +277,8 @@ fn lookup(blocks: &[Block]) -> Function {
 }
 
 fn run(
-    blocks: &[Block],
-    entry: u32,
+    graph: &super::region::Region,
+    plan: &super::region::values::RegionPlan,
     identity: u64,
     native: &[NativeInstruction],
     precise: bool,
@@ -284,13 +302,23 @@ fn run(
         (3, ValType::F64),
         (4, ValType::I32),
         (1, ValType::I32),
+        (1, ValType::I32),
+        (8, ValType::I64),
+        (8, ValType::I32),
+        (1, ValType::I32),
+        (3, ValType::I32),
     ]);
     let mut out = Output {
         function: &mut function,
-        blocks,
         pc: 0,
         prefix: 0,
         record_flags: true,
+        plan,
+        frame: None,
+        before_frame: None,
+        after_frame: None,
+        address_fact: None,
+        guarded_gpr_facts: false,
         native,
         store_widths,
     };
@@ -354,23 +382,26 @@ fn run(
     super::memory::load_view(&mut out.c());
     let lookup = out.internal(4);
     out.c().local_get(EIP).call(lookup).local_set(INDEX);
-    let graph =
-        super::region::Region::from_blocks(blocks, entry).expect("decoded blocks form a region");
-    region::emit(&mut out, &graph, precise);
+    region::emit(&mut out, graph, precise);
     out.c().end();
     let Output { store_widths, .. } = out;
     (
-        exits::finish(function, !native.is_empty(), precise),
+        exits::finish(function, plan, !native.is_empty(), precise),
         store_widths,
     )
 }
 
 pub(super) struct Output<'a> {
     function: &'a mut Function,
-    blocks: &'a [Block],
     pc: u32,
     prefix: u32,
     record_flags: bool,
+    plan: &'a super::region::values::RegionPlan,
+    frame: Option<super::region::values::FrameStateId>,
+    before_frame: Option<super::region::values::FrameStateId>,
+    after_frame: Option<super::region::values::FrameStateId>,
+    address_fact: Option<integer::AddressFact>,
+    guarded_gpr_facts: bool,
     native: &'a [NativeInstruction],
     store_widths: Vec<u32>,
 }
@@ -384,9 +415,18 @@ impl Output<'_> {
         index + u32::from(!self.native.is_empty())
     }
 
-    fn block(&mut self, block: &super::region::RegionBlock, precise: bool) {
+    fn block(
+        &mut self,
+        id: super::region::BlockId,
+        block: &super::region::RegionBlock,
+        precise: bool,
+    ) {
         let demands = &block.flags.after;
         for instruction in &block.instructions {
+            let analyzed = self.plan.instruction(id, instruction.prefix);
+            self.before_frame = Some(analyzed.before);
+            self.after_frame = Some(analyzed.after);
+            self.frame = self.before_frame;
             let prefix = instruction.exits.before.retired;
             self.pc = match instruction.exits.before.pc {
                 super::region::ResumePc::Exact(pc) => pc,
@@ -407,8 +447,26 @@ impl Output<'_> {
                     .operation
                     .and_then(super::effects::analyze)
                     .is_none_or(|effect| effect.write & demands[instruction.prefix as usize] != 0);
+            // Direct region control is lowered from its typed terminator. Its flags
+            // and counter effects are emitted once where the Wasm edge is selected.
+            if instruction.prefix as usize + 1 == block.instructions.len()
+                && matches!(
+                    block.terminator,
+                    super::region::Terminator::Branch { .. }
+                        | super::region::Terminator::CountBranch { .. }
+                )
+            {
+                self.frame = self.after_frame;
+                continue;
+            }
             if let Some(operation) = instruction.operation.filter(strings::supports) {
+                self.address_fact = None;
+                // Runtime string iterations advance their address registers inside
+                // one guest instruction; entry constants are not loop invariants.
+                let before = self.before_frame.take();
                 strings::emit(self, operation, instruction.next);
+                self.before_frame = before;
+                self.frame = self.after_frame;
                 return;
             }
             let writes_memory = instruction
@@ -429,13 +487,18 @@ impl Output<'_> {
                     Some(operation) => self.instruction(operation, instruction.next),
                 }
             }
+            self.frame = self.after_frame;
             if writes_memory && let Some(completed) = instruction.exits.after {
                 self.c()
                     .local_get(WRITE_STATUS)
                     .i32_const(2)
                     .i32_eq()
                     .if_(BlockType::Empty);
-                self.exit(StopReason::CodeInvalidated, None, completed.retired);
+                let pc = match completed.pc {
+                    super::region::ResumePc::Exact(pc) => Some(pc),
+                    super::region::ResumePc::Computed => None,
+                };
+                self.exit(StopReason::CodeInvalidated, pc, completed.retired);
                 self.c().end();
             }
         }
@@ -484,6 +547,14 @@ impl Output<'_> {
     }
 
     fn publish_exit(&mut self, pc: Option<u32>, retired: u32) {
+        let frame = if retired != 0 && retired == self.prefix + 1 {
+            self.after_frame
+        } else {
+            self.frame
+        };
+        if let Some(frame) = frame {
+            numeric::emit_frame(self, frame);
+        }
         if let Some(pc) = pc {
             self.c().i32_const(pc as i32).local_set(EIP);
         }
@@ -491,6 +562,8 @@ impl Output<'_> {
     }
 
     fn publish_operands(&mut self) {
+        let pc = self.pc;
+        self.c().i32_const(pc as i32).local_set(EIP);
         for register in 0..8 {
             self.c()
                 .local_get(CTX)
@@ -505,19 +578,13 @@ impl Output<'_> {
         }
     }
 
-    fn index(&self, pc: u32) -> i32 {
-        self.blocks
-            .binary_search_by_key(&pc, |block| block.entry)
-            .map_or(-1, |index| index as i32)
-    }
-
-    pub(super) fn set_pc(&mut self, pc: u32) {
-        let index = self.index(pc);
-        self.c()
-            .i32_const(pc as i32)
-            .local_set(EIP)
-            .i32_const(index)
-            .local_set(INDEX);
+    fn known_gpr(&self, local: u32) -> Option<u32> {
+        let register = local.checked_sub(2)? as usize;
+        if register >= 8 {
+            return None;
+        }
+        let frame = self.plan.frame(self.before_frame?);
+        self.plan.constant(frame.gpr[register])
     }
 
     fn dynamic_pc(&mut self, local: u32) {
@@ -576,7 +643,7 @@ impl Output<'_> {
                 index
             }
         };
-        let commit = self.internal(10 + index as u32);
+        let commit = self.internal(11 + index as u32);
         let translate = self.internal(9);
         super::memory::write(&mut self.c(), width, source, commit, 1, translate, prepared);
         self.c()
@@ -751,77 +818,28 @@ impl Output<'_> {
 
     fn instruction(&mut self, operation: Operation, next: u32) {
         if numeric::supports(&operation) {
+            self.address_fact = None;
             numeric::emit(self, next);
+            self.address_fact = None;
             return;
         }
         if integer::emit(self, operation) {
-            self.set_pc(next);
             return;
         }
         if control::emit(self, operation, next) {
             return;
         }
         match operation {
-            Operation::Nop => self.set_pc(next),
+            Operation::Nop => {}
             Operation::Jump {
-                target: BranchTarget::Direct(pc),
-            } => self.set_pc(pc.0),
+                target: BranchTarget::Direct(_),
+            } => {}
             Operation::Jump { target } => {
                 self.target(target, RESULT);
                 self.dynamic_pc(RESULT);
             }
-            Operation::ConditionalJump { condition, target } => {
-                let taken = self.index(target.0);
-                let otherwise = self.index(next);
-                self.jump_condition(condition);
-                self.c().local_set(A);
-                self.c()
-                    .i32_const(target.0 as i32)
-                    .i32_const(next as i32)
-                    .local_get(A)
-                    .select()
-                    .local_set(EIP);
-                self.c()
-                    .i32_const(taken)
-                    .i32_const(otherwise)
-                    .local_get(A)
-                    .select()
-                    .local_set(INDEX);
-            }
-            Operation::CountBranch { kind, target } => {
-                if !matches!(kind, CountBranchKind::EcxZero) {
-                    self.c().local_get(3).i32_const(1).i32_sub().local_set(3);
-                }
-                self.c().local_get(3).i32_eqz();
-                if !matches!(kind, CountBranchKind::EcxZero) {
-                    self.c().i32_eqz();
-                }
-                self.c().local_set(A);
-                if matches!(
-                    kind,
-                    CountBranchKind::LoopEqual | CountBranchKind::LoopNotEqual
-                ) {
-                    self.condition(if matches!(kind, CountBranchKind::LoopEqual) {
-                        Condition::Equal
-                    } else {
-                        Condition::NotEqual
-                    });
-                    self.c().local_get(A).i32_and().local_set(A);
-                }
-                let taken = self.index(target.0);
-                let otherwise = self.index(next);
-                self.c()
-                    .i32_const(target.0 as i32)
-                    .i32_const(next as i32)
-                    .local_get(A)
-                    .select()
-                    .local_set(EIP);
-                self.c()
-                    .i32_const(taken)
-                    .i32_const(otherwise)
-                    .local_get(A)
-                    .select()
-                    .local_set(INDEX);
+            Operation::ConditionalJump { .. } | Operation::CountBranch { .. } => {
+                unreachable!("direct control is owned by the region terminator")
             }
             Operation::Push { source } => {
                 self.load_value(source, 4, RESULT);
@@ -833,7 +851,6 @@ impl Output<'_> {
                     .local_set(LOGICAL_ADDRESS);
                 self.write(4, RESULT);
                 self.c().local_get(ADDRESS).local_set(6);
-                self.set_pc(next);
             }
             Operation::PushFlags => {
                 self.materialize(flags::ARITHMETIC);
@@ -850,7 +867,6 @@ impl Output<'_> {
                     .local_set(LOGICAL_ADDRESS);
                 self.write(4, RESULT);
                 self.c().local_get(ADDRESS).local_set(6);
-                self.set_pc(next);
             }
             Operation::Pop { destination } => {
                 self.c()
@@ -874,10 +890,11 @@ impl Output<'_> {
                         self.c().local_get(6).i32_const(4).i32_add().local_set(6);
                     }
                 }
-                self.set_pc(next);
             }
             Operation::Call { target } => {
-                self.target(target, B);
+                if matches!(target, BranchTarget::Indirect(_)) {
+                    self.target(target, B);
+                }
                 self.c()
                     .i32_const(next as i32)
                     .local_set(RESULT)
@@ -889,7 +906,7 @@ impl Output<'_> {
                 self.write(4, RESULT);
                 self.c().local_get(ADDRESS).local_set(6);
                 match target {
-                    BranchTarget::Direct(pc) => self.set_pc(pc.0),
+                    BranchTarget::Direct(_) => {}
                     BranchTarget::Indirect(_) => self.dynamic_pc(B),
                 }
             }
@@ -919,7 +936,6 @@ impl Output<'_> {
                     .local_set(6)
                     .local_get(RESULT)
                     .local_set(7);
-                self.set_pc(next);
             }
             Operation::Control(ControlOperation::Sysenter) => {
                 self.exit(StopReason::Host, Some(self.pc), self.prefix)

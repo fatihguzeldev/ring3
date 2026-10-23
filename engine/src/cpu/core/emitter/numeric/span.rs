@@ -16,12 +16,9 @@ const OPCODE: u32 = 93;
 const CS: u32 = 94;
 const DS: u32 = 95;
 const BANK: u32 = 96;
-const ROTATE: u32 = 97;
-const EXPONENT: u32 = 44;
-const PACKED: u32 = 47;
 
-// valid slots hold exact architectural values; dirty slots also own the raw80 payload.
-// logical rotation keeps that ownership coherent at every cfg join, including empty slots.
+// Native/opaque cells are owned by the analyzed frame. The normalized ABI below is
+// loaded at entry and observed at boundaries; stack renaming happens in RegionPlan.
 pub(super) fn enter(out: &mut Output<'_>) {
     out.c()
         .local_get(ACTIVE)
@@ -73,17 +70,30 @@ pub(super) fn enter(out: &mut Output<'_>) {
         .i32_const(1)
         .local_set(ACTIVE)
         .end();
-    for (from, to) in [(BANK, 37), (STATUS, 41), (TAG, 42), (TOP, 38)] {
+    for (from, to) in [(BANK, 37), (STATUS, 41)] {
         out.c().local_get(from).local_set(to);
     }
 }
 
 pub(super) fn status(out: &mut Output<'_>) {
     resolve_status(out);
+    let delta = out
+        .before_frame
+        .map_or(0, |frame| out.plan.shape(frame).top_delta);
     out.c()
         .local_get(ACTIVE)
         .if_(BlockType::Result(wasm_encoder::ValType::I32))
         .local_get(STATUS)
+        .i32_const(!0x3800)
+        .i32_and()
+        .local_get(TOP)
+        .i32_const(i32::from(delta))
+        .i32_add()
+        .i32_const(7)
+        .i32_and()
+        .i32_const(11)
+        .i32_shl()
+        .i32_or()
         .else_()
         .local_get(37)
         .i32_load16_u(mem(2, 1))
@@ -122,126 +132,47 @@ pub(in crate::cpu::core::emitter) fn emit_status_resolver() -> Function {
     super::double::emit_resolver()
 }
 
-pub(super) fn commit(out: &mut Output<'_>, opcode: u16, address: Option<EffectiveAddress>) {
-    for (from, to) in [(41, STATUS), (42, TAG), (38, TOP)] {
-        out.c().local_get(from).local_set(to);
-    }
-    let pc = out.pc;
-    out.c()
-        .i32_const(pc as i32)
-        .local_set(FIP)
-        .i32_const(i32::from(opcode))
-        .local_set(OPCODE)
-        .local_get(BANK)
-        .i32_load16_u(mem(102, 1))
-        .local_set(CS);
-    if let Some(address) = address {
-        out.c()
-            .local_get(LOGICAL_ADDRESS)
-            .local_set(FDP)
-            .local_get(BANK)
-            .i32_load16_u(mem(100 + address.resolved_segment().index() as u64 * 2, 1))
-            .local_set(DS);
+pub(super) fn commit(out: &mut Output<'_>, _opcode: u16, address: Option<EffectiveAddress>) {
+    out.c().local_get(41).local_set(STATUS);
+    if address.is_some() {
+        // A later GP write must not change the historical x87 data pointer.
+        out.c().local_get(LOGICAL_ADDRESS).local_set(FDP);
     }
 }
 
 pub(super) fn valid(out: &mut Output<'_>, index: u8) {
-    assert!(index < 8);
-    out.c().local_get(VALID).i32_const(1 << index).i32_and();
+    let cell = super::frame::input_cell(out, index);
+    out.c().local_get(VALID).i32_const(1 << cell).i32_and();
 }
 
 pub(super) fn load(out: &mut Output<'_>, index: u8, destination: u32) {
+    let cell = super::frame::input_cell(out, index);
     out.c()
-        .local_get(VALUES + u32::from(index))
+        .local_get(VALUES + u32::from(cell))
         .local_set(destination);
 }
 
 pub(super) fn remember(out: &mut Output<'_>, index: u8, source: u32) {
+    let cell = super::frame::input_cell(out, index);
     out.c()
         .local_get(source)
-        .local_set(VALUES + u32::from(index))
+        .local_set(VALUES + u32::from(cell))
         .local_get(VALID)
-        .i32_const(1 << index)
+        .i32_const(1 << cell)
         .i32_or()
         .local_set(VALID);
 }
 
-pub(super) fn write(out: &mut Output<'_>, index: u8, source: u32) {
-    remember(out, index, source);
+pub(super) fn write(out: &mut Output<'_>, _index: u8, source: u32) {
+    let cell = super::frame::result_cell(out);
     out.c()
-        .local_get(DIRTY)
-        .i32_const(1 << index)
+        .local_get(source)
+        .local_set(VALUES + u32::from(cell))
+        .local_get(VALID)
+        .i32_const(1 << cell)
         .i32_or()
-        .local_set(DIRTY);
-}
-
-pub(super) fn invalidate_slot(out: &mut Output<'_>, index: u8) {
-    for local in [VALID, DIRTY] {
-        out.c()
-            .local_get(local)
-            .i32_const(!(1 << index))
-            .i32_and()
-            .local_set(local);
-    }
-}
-
-pub(super) fn push(out: &mut Output<'_>) {
-    out.c().local_get(VALUES + 7).local_set(ROTATE);
-    for index in (1..8).rev() {
-        out.c()
-            .local_get(VALUES + index - 1)
-            .local_set(VALUES + index);
-    }
-    out.c().local_get(ROTATE).local_set(VALUES);
-    for local in [VALID, DIRTY] {
-        out.c()
-            .local_get(local)
-            .i32_const(1)
-            .i32_shl()
-            .local_get(local)
-            .i32_const(7)
-            .i32_shr_u()
-            .i32_or()
-            .i32_const(255)
-            .i32_and()
-            .local_set(local);
-    }
-}
-
-pub(super) fn pop(out: &mut Output<'_>) {
-    out.c().local_get(VALUES).local_set(ROTATE);
-    for index in 0..7 {
-        out.c()
-            .local_get(VALUES + index + 1)
-            .local_set(VALUES + index);
-    }
-    out.c().local_get(ROTATE).local_set(VALUES + 7);
-    for local in [VALID, DIRTY] {
-        out.c()
-            .local_get(local)
-            .i32_const(1)
-            .i32_shr_u()
-            .local_get(local)
-            .i32_const(7)
-            .i32_shl()
-            .i32_or()
-            .i32_const(255)
-            .i32_and()
-            .local_set(local);
-    }
-}
-
-// this conversion is only reached for exact normal binary64 values or signed zero.
-pub(super) fn materialize_slot(out: &mut Output<'_>, index: u8, pointer: u32) {
-    emit_slot(
-        &mut out.c(),
-        index,
-        VALUES + u32::from(index),
-        DIRTY,
-        pointer,
-        EXPONENT,
-        PACKED,
-    );
+        .local_set(VALID);
+    // Dirty destinations, TOP and tags belong to the compile-time FrameState.
 }
 
 fn emit_slot(

@@ -158,6 +158,7 @@ pub(super) fn canonical_numeric(operation: Operation) -> bool {
             && !matches!(operation, X87Operation::Wait | X87Operation::StatusToAx)
     } else {
         crate::cpu::core::emitter::is_native(&operation)
+            && !crate::cpu::core::emitter::preserves_fp_success(&operation)
     }
 }
 

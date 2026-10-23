@@ -1,5 +1,6 @@
 mod direct;
 mod double;
+mod frame;
 mod ieee;
 mod memory;
 mod simd;
@@ -15,6 +16,9 @@ use crate::cpu::{
     x86::{ControlOperation, X87Condition, X87Operation, ir::Operation},
 };
 use wasm_encoder::BlockType;
+
+pub(super) use frame::{emit_edge, emit_frame, emit_normalizer, enter_block, normalize_frame};
+pub(super) use frame::{emit_normalizer_function, normalizer_parameters, normalizer_results};
 
 pub(super) fn supports(operation: &Operation) -> bool {
     matches!(
@@ -36,6 +40,10 @@ pub(super) fn supports(operation: &Operation) -> bool {
             | Operation::SoftwareInterrupt { .. }
             | Operation::Control(ControlOperation::Sysenter)
     )
+}
+
+pub(super) fn preserves_fp_success(operation: &Operation) -> bool {
+    simd::preserves_fp_success(operation)
 }
 
 #[derive(Clone, Copy, Default)]
@@ -103,15 +111,30 @@ pub(super) fn emit(out: &mut Output<'_>, next: u32) {
         .find(|instruction| instruction.pc == out.pc)
         .unwrap()
         .operation;
+    if direct::state(out, operation) {
+        slow(out, next, true);
+        out.c().end();
+        return;
+    }
+    out.c().local_get(frame::EXACT_SUFFIX).if_(BlockType::Empty);
+    slow(out, next, false);
+    out.c().else_();
     let direct = direct::begin(out, operation, next) || simd::begin(out, operation, next);
-    slow(out, next);
+    slow(out, next, true);
     if direct {
         out.c().end();
     }
+    out.c().end();
 }
 
-fn slow(out: &mut Output<'_>, next: u32) {
+fn slow(out: &mut Output<'_>, next: u32, planned: bool) {
+    out.address_fact = None;
+    if planned && let Some(before) = out.before_frame {
+        frame::emit_frame(out, before);
+        frame::normalize_frame(out);
+    }
     span::invalidate(out);
+    out.c().i32_const(1).local_set(frame::EXACT_SUFFIX);
     let ordinal = out
         .native
         .iter()
@@ -177,7 +200,6 @@ fn slow(out: &mut Output<'_>, next: u32) {
     out.publish_exit(Some(out.pc), out.prefix);
     out.c().local_get(WRITE_STATUS).return_().end();
     reload(out, transfer);
-    out.set_pc(next);
 }
 
 fn reload(out: &mut Output<'_>, transfer: Option<X87Transfer>) {

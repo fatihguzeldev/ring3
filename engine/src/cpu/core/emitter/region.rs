@@ -1,5 +1,8 @@
 use super::{BlockType, INDEX, Output, REMAIN, StopReason};
-use crate::cpu::core::region::{BlockId, Region, Shape, Target, Terminator};
+use crate::cpu::{
+    core::region::{BlockId, Region, Shape, Target, Terminator},
+    x86::ir::{Condition, CountBranchKind},
+};
 
 const ENTRY_PENDING: u32 = 98;
 
@@ -22,8 +25,15 @@ pub(super) fn emit(out: &mut Output<'_>, graph: &Region, precise: bool) {
         graph,
         precise,
         labels: vec![Label::Restart],
+        current: graph.entry,
+        dispatched: plan.shapes.iter().flat_map(dispatch_members).collect(),
     };
     emitter.sequence(&plan.shapes);
+    // No advertised entry matched. No instruction frame has executed here.
+    emitter.out.frame = None;
+    emitter.out.before_frame = None;
+    emitter.out.after_frame = None;
+    emitter.out.c().i32_const(0).local_set(109);
     emitter.out.exit(StopReason::NeedCode, None, 0);
     emitter.out.c().end().unreachable();
 }
@@ -33,12 +43,22 @@ struct Emitter<'a, 'b> {
     graph: &'a Region,
     precise: bool,
     labels: Vec<Label>,
+    current: BlockId,
+    dispatched: Vec<BlockId>,
 }
 
 fn members(shape: &Shape) -> Vec<BlockId> {
     match shape {
         Shape::Block(id) => vec![*id],
         Shape::Loop { body, .. } => body.iter().flat_map(members).collect(),
+        Shape::Dispatch { blocks, .. } => blocks.clone(),
+    }
+}
+
+fn dispatch_members(shape: &Shape) -> Vec<BlockId> {
+    match shape {
+        Shape::Block(_) => Vec::new(),
+        Shape::Loop { body, .. } => body.iter().flat_map(dispatch_members).collect(),
         Shape::Dispatch { blocks, .. } => blocks.clone(),
     }
 }
@@ -67,6 +87,7 @@ impl Emitter<'_, '_> {
     }
 
     fn block(&mut self, id: BlockId, entry_guard: bool) {
+        self.current = id;
         if entry_guard {
             self.out
                 .c()
@@ -81,7 +102,16 @@ impl Emitter<'_, '_> {
         }
         self.out.c().i32_const(0).local_set(ENTRY_PENDING);
         let block = &self.graph.blocks[id.0];
+        self.out.address_fact = None;
+        self.out.frame = Some(self.out.plan.block(id).entry);
+        self.out.before_frame = self.out.frame;
+        self.out.after_frame = self.out.frame;
         if !self.precise {
+            // The imported state has not passed this block's speculative entry
+            // contract yet. A quota tail must transport its actual identity view.
+            self.out.frame = None;
+            self.out.before_frame = None;
+            self.out.after_frame = None;
             self.out
                 .c()
                 .local_get(REMAIN)
@@ -94,37 +124,80 @@ impl Emitter<'_, '_> {
                 .i32_const(super::exits::PRECISE)
                 .return_()
                 .end();
+            self.out.frame = Some(self.out.plan.block(id).entry);
+            self.out.before_frame = self.out.frame;
+            self.out.after_frame = self.out.frame;
         }
-        self.out.block(block, self.precise);
+        let constants = self.out.plan.block(id).contract.gpr_constants;
+        self.out.guarded_gpr_facts = constants.iter().any(Option::is_some);
+        if self.out.guarded_gpr_facts {
+            self.out.c().i32_const(1);
+            for (register, value) in constants.into_iter().enumerate() {
+                if let Some(value) = value {
+                    self.out
+                        .c()
+                        .local_get(register as u32 + 2)
+                        .i32_const(value as i32)
+                        .i32_eq()
+                        .i32_and();
+                }
+            }
+            self.out.c().local_set(super::GP_FACTS_VALID);
+        }
+        super::numeric::enter_block(self.out, id);
+        self.out.block(id, block, self.precise);
         match block.terminator {
             Terminator::Next { target, .. } => self.edge(target),
             Terminator::Branch {
-                taken, otherwise, ..
-            }
-            | Terminator::CountBranch {
-                taken, otherwise, ..
+                condition,
+                taken,
+                otherwise,
+                ..
             } => {
-                let index = match taken {
-                    Target::Block(id) => id.0 as i32,
-                    Target::External(_) => -1,
-                };
-                // External arms can share INDEX=-1; EIP distinguishes their exact PC.
-                if let Target::External(pc) = taken {
-                    self.out
-                        .c()
-                        .local_get(super::EIP)
-                        .i32_const(pc as i32)
-                        .i32_eq();
-                } else {
-                    self.out.c().local_get(INDEX).i32_const(index).i32_eq();
+                self.out.jump_condition(condition);
+                self.branch(taken, otherwise);
+            }
+            Terminator::CountBranch {
+                kind,
+                word,
+                taken,
+                otherwise,
+            } => {
+                if kind != CountBranchKind::EcxZero {
+                    self.out.c().local_get(3).i32_const(1).i32_sub();
+                    if word {
+                        self.out
+                            .c()
+                            .i32_const(0xffff)
+                            .i32_and()
+                            .local_get(3)
+                            .i32_const(!0xffff)
+                            .i32_and()
+                            .i32_or();
+                    }
+                    self.out.c().local_set(3);
                 }
-                self.out.c().if_(BlockType::Empty);
-                self.labels.push(Label::Other);
-                self.edge(taken);
-                self.out.c().else_();
-                self.edge(otherwise);
-                self.labels.pop();
-                self.out.c().end();
+                self.out.c().local_get(3);
+                if word {
+                    self.out.c().i32_const(0xffff).i32_and();
+                }
+                self.out.c().i32_eqz();
+                if kind != CountBranchKind::EcxZero {
+                    self.out.c().i32_eqz();
+                }
+                if matches!(
+                    kind,
+                    CountBranchKind::LoopEqual | CountBranchKind::LoopNotEqual
+                ) {
+                    self.out.c().local_set(super::A);
+                    self.out.condition(if kind == CountBranchKind::LoopEqual {
+                        Condition::Equal
+                    } else {
+                        Condition::NotEqual
+                    });
+                    self.out.c().local_get(super::A).i32_and();
+                }
+                self.branch(taken, otherwise);
             }
             Terminator::Indirect => self.restart(),
             Terminator::Exit { .. } => {
@@ -137,11 +210,34 @@ impl Emitter<'_, '_> {
         }
     }
 
+    fn branch(&mut self, taken: Target, otherwise: Target) {
+        self.out.c().if_(BlockType::Empty);
+        self.labels.push(Label::Other);
+        self.edge(taken);
+        self.out.c().else_();
+        self.edge(otherwise);
+        self.labels.pop();
+        self.out.c().end();
+    }
+
     fn edge(&mut self, target: Target) {
         let Target::Block(id) = target else {
-            self.out.exit(StopReason::NeedCode, None, 0);
+            let Target::External(pc) = target else {
+                unreachable!()
+            };
+            self.out.exit(StopReason::NeedCode, Some(pc), 0);
             return;
         };
+        let edge = self
+            .out
+            .plan
+            .block(self.current)
+            .edges
+            .iter()
+            .find(|edge| edge.target == id)
+            .cloned()
+            .expect("typed region edge has an analyzed state contract");
+        super::numeric::emit_edge(self.out, &edge);
         for (depth, label) in self.labels.iter().rev().enumerate() {
             let pending = match label {
                 Label::Forward(ids) if ids.contains(&id) => i32::from(ids.first() != Some(&id)),
@@ -149,6 +245,9 @@ impl Emitter<'_, '_> {
                 Label::Dispatch(ids) if ids.contains(&id) => 0,
                 _ => continue,
             };
+            if pending != 0 || self.dispatched.contains(&id) {
+                self.out.c().i32_const(id.0 as i32).local_set(INDEX);
+            }
             self.out
                 .c()
                 .i32_const(pending)
@@ -156,6 +255,13 @@ impl Emitter<'_, '_> {
                 .br(depth as u32);
             return;
         }
+        let pc = self.graph.blocks[id.0].entry;
+        self.out
+            .c()
+            .i32_const(id.0 as i32)
+            .local_set(INDEX)
+            .i32_const(pc as i32)
+            .local_set(super::EIP);
         self.restart();
     }
 
@@ -168,6 +274,13 @@ impl Emitter<'_, '_> {
             .if_(BlockType::Empty);
         self.out.exit(StopReason::NeedCode, None, 0);
         self.out.c().end();
+        if let Some(frame) = self.out.frame {
+            super::numeric::emit_frame(self.out, frame);
+        }
+        super::numeric::normalize_frame(self.out);
+        // An indirect destination is not a proved CFG predecessor. Reimport its
+        // identity state and check the selected block's speculative contract.
+        self.out.c().i32_const(0).local_set(109);
         let depth = self
             .labels
             .iter()

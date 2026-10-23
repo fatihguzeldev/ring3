@@ -1,14 +1,12 @@
-use super::{BANK_POINTER, Output, double, ieee, mem, memory, span};
+use super::{BANK_POINTER, Output, double, frame, ieee, mem, memory, span};
 use crate::cpu::core::emitter::CTX;
+use crate::cpu::core::region::values::{FpValue, ProofKind, TagRecipe};
 use crate::cpu::x86::{X87Binary, X87Format, X87Operation, ir::Operation};
 use wasm_encoder::BlockType;
 
 const BANK: u32 = 37;
-const TOP: u32 = 38;
 const X: u32 = 39;
-const Y: u32 = 40;
 const STATUS: u32 = 41;
-const TAG: u32 = 42;
 const BITS: u32 = 43;
 const EXP: u32 = 44;
 const TMP: u32 = 45;
@@ -20,10 +18,7 @@ const EXACT: u32 = 50;
 const ROUNDED: u32 = 51;
 const DOUBLE: u32 = 54;
 
-pub(super) fn begin(out: &mut Output<'_>, operation: Operation, next: u32) -> bool {
-    if state(out, operation, next) {
-        return true;
-    }
+pub(super) fn begin(out: &mut Output<'_>, operation: Operation, _next: u32) -> bool {
     let Operation::X87 {
         operation,
         address,
@@ -56,49 +51,27 @@ pub(super) fn begin(out: &mut Output<'_>, operation: Operation, next: u32) -> bo
     }
     out.c().block(BlockType::Empty).block(BlockType::Empty);
     span::enter(out);
-    if let Some(address) = address {
-        out.c()
-            .local_get(BANK)
-            .i32_load16_u(mem(100 + address.resolved_segment().index() as u64 * 2, 1))
-            .i32_const(!3)
-            .i32_and()
-            .i32_eqz()
-            .br_if(0);
-        if operation.write_size() != 0
-            && address.resolved_segment() == crate::cpu::x86::SegmentRegister::Cs
-        {
-            out.c().br(0);
-        }
-    }
     match operation {
         X87Operation::Load(X87Format::Float32) => {
-            let address = address.unwrap();
-            memory::prepare(out, address, 4, false, false, 52);
+            memory::prepare(out, address.unwrap(), 4, false, false, 52);
             out.c().local_get(52).i32_load(mem(0, 0)).local_set(BITS);
             normal_or_zero(out, BITS, 0);
+            empty(out, 7);
             out.c()
-                .local_get(TOP)
-                .i32_const(1)
-                .i32_sub()
-                .i32_const(7)
-                .i32_and()
-                .local_set(TOP);
-            tag(out, TOP);
-            out.c().i32_const(3).i32_ne().br_if(0);
-            pointer(out, TOP, 0, X);
-            span::push(out);
-            write_f32(out, TOP);
+                .local_get(BITS)
+                .f32_reinterpret_i32()
+                .f64_promote_f32()
+                .local_set(double::RESULT);
+            span::write(out, 0, double::RESULT);
             clear_c1(out);
-            set_top(out);
         }
         X87Operation::Store {
             format: format @ (X87Format::Float32 | X87Format::Float64),
-            pop,
             ..
         } => {
-            occupied(out, 0, X);
-            span::materialize_slot(out, 0, X);
-            ieee::pack(out, X, format);
+            occupied(out, 0);
+            frame::load_raw(out, 0, SIG, X);
+            ieee::pack(out, SIG, X, format);
             memory::prepare(out, address.unwrap(), format.size() as u32, true, false, 52);
             out.c().local_get(52).local_get(PACKED);
             if format == X87Format::Float32 {
@@ -108,79 +81,22 @@ pub(super) fn begin(out: &mut Output<'_>, operation: Operation, next: u32) -> bo
             }
             memory::commit(out);
             span::clear_status_recipe(out);
-            if pop {
-                pop_stack(out);
-            }
         }
         X87Operation::LoadRegister { index } => {
-            register(out, index, X);
-            out.c()
-                .local_get(TOP)
-                .i32_const(1)
-                .i32_sub()
-                .i32_const(7)
-                .i32_and()
-                .local_set(TOP);
-            tag(out, TOP);
-            out.c().i32_const(3).i32_ne().br_if(0);
-            pointer(out, TOP, 0, Y);
-            span::push(out);
-            transfer(out, index.wrapping_add(1) & 7, X, 0, TOP, Y);
-            set_top(out);
+            register(out, index);
+            empty(out, 7);
+            // The typed step aliases the source value and renames all eight payload references.
         }
-        X87Operation::StoreRegister { index, pop } => {
-            register(out, 0, X);
-            out.c()
-                .local_get(TOP)
-                .i32_const(i32::from(index))
-                .i32_add()
-                .i32_const(7)
-                .i32_and()
-                .local_set(TMP);
-            pointer(out, TMP, 0, Y);
-            transfer(out, 0, X, index, TMP, Y);
-            if pop {
-                pop_stack(out);
-            }
+        X87Operation::StoreRegister { .. } => {
+            register(out, 0);
         }
         X87Operation::Exchange { index } => {
-            register(out, 0, X);
-            register(out, index, Y);
-            span::valid(out, 0);
-            out.c().i32_eqz().i32_eqz();
-            span::valid(out, index);
-            out.c().i32_eqz().i32_eqz().i32_and().if_(BlockType::Empty);
-            span::load(out, 0, FA);
-            span::load(out, index, FB);
-            write_value(out, 0, TOP, FB);
-            write_value(out, index, TMP, FA);
-            out.c().else_();
-            span::materialize_slot(out, 0, X);
-            span::materialize_slot(out, index, Y);
-            out.c()
-                .local_get(X)
-                .i64_load(mem(0, 0))
-                .local_set(SIG)
-                .local_get(X)
-                .i32_load16_u(mem(8, 0))
-                .local_set(EXP);
-            copy(out, Y, X);
-            out.c()
-                .local_get(Y)
-                .local_get(SIG)
-                .i64_store(mem(0, 0))
-                .local_get(Y)
-                .local_get(EXP)
-                .i32_store16(mem(8, 0));
-            span::invalidate_slot(out, 0);
-            span::invalidate_slot(out, index);
-            value_tag(out, TOP, X);
-            value_tag(out, TMP, Y);
-            out.c().end();
+            register(out, 0);
+            register(out, index);
             clear_c1(out);
         }
         X87Operation::ChangeSign | X87Operation::Absolute => {
-            register(out, 0, X);
+            register(out, 0);
             span::valid(out, 0);
             out.c().if_(BlockType::Empty);
             span::load(out, 0, FA);
@@ -191,19 +107,9 @@ pub(super) fn begin(out: &mut Output<'_>, operation: Operation, next: u32) -> bo
                 out.c().f64_abs();
             }
             out.c().local_set(FA);
-            write_value(out, 0, TOP, FA);
-            out.c()
-                .else_()
-                .local_get(X)
-                .local_get(X)
-                .i32_load16_u(mem(8, 0));
-            if matches!(operation, X87Operation::ChangeSign) {
-                out.c().i32_const(0x8000).i32_xor();
-            } else {
-                out.c().i32_const(0x7fff).i32_and();
-            }
-            out.c().i32_store16(mem(8, 0));
-            value_tag(out, TOP, X);
+            span::write(out, 0, FA);
+            out.c().else_();
+            frame::write_raw_sign(out, matches!(operation, X87Operation::Absolute));
             out.c().end();
             clear_c1(out);
         }
@@ -211,33 +117,23 @@ pub(super) fn begin(out: &mut Output<'_>, operation: Operation, next: u32) -> bo
             kind,
             destination,
             source,
-            pop,
+            ..
         } => {
             arithmetic_control(out);
-            register(out, destination, X);
-            operand(out, destination, X, FA);
-            register(out, source, Y);
-            operand(out, source, Y, FB);
+            register(out, destination);
+            operand(out, destination, FA);
+            register(out, source);
+            operand(out, source, FB);
             arithmetic(out, kind);
-            out.c()
-                .local_get(TOP)
-                .i32_const(i32::from(destination))
-                .i32_add()
-                .i32_const(7)
-                .i32_and()
-                .local_set(TMP);
-            write_value(out, destination, TMP, double::RESULT);
-            if pop {
-                pop_stack(out);
-            }
+            span::write(out, destination, double::RESULT);
         }
         X87Operation::BinaryMemory {
             kind,
             format: X87Format::Float32,
         } => {
             arithmetic_control(out);
-            register(out, 0, X);
-            operand(out, 0, X, FA);
+            register(out, 0);
+            operand(out, 0, FA);
             memory::prepare(out, address.unwrap(), 4, false, false, 52);
             out.c().local_get(52).i32_load(mem(0, 0)).local_set(BITS);
             normal_or_zero(out, BITS, 0);
@@ -247,17 +143,16 @@ pub(super) fn begin(out: &mut Output<'_>, operation: Operation, next: u32) -> bo
                 .f64_promote_f32()
                 .local_set(FB);
             arithmetic(out, kind);
-            write_value(out, 0, TOP, double::RESULT);
+            span::write(out, 0, double::RESULT);
         }
         _ => unreachable!(),
     }
     span::commit(out, opcode, address);
-    out.set_pc(next);
     out.c().br(1).end();
     true
 }
 
-fn state(out: &mut Output<'_>, operation: Operation, next: u32) -> bool {
+pub(super) fn state(out: &mut Output<'_>, operation: Operation) -> bool {
     let waiting = match operation {
         Operation::X87StatusToAx => false,
         Operation::X87 {
@@ -297,88 +192,68 @@ fn state(out: &mut Output<'_>, operation: Operation, next: u32) -> bool {
             .i32_or()
             .local_set(2);
     }
-    out.set_pc(next);
     out.c().br(1).end();
     true
 }
 
-fn tag(out: &mut Output<'_>, physical: u32) {
-    out.c()
-        .local_get(TAG)
-        .local_get(physical)
-        .i32_const(1)
-        .i32_shl()
-        .i32_shr_u()
-        .i32_const(3)
-        .i32_and();
+fn tag_recipe(out: &Output<'_>, logical: u8) -> TagRecipe {
+    out.plan
+        .shape(out.before_frame.expect("numeric tag has a before frame"))
+        .tags[logical as usize]
 }
-fn clear_tag(out: &mut Output<'_>, physical: u32) {
-    out.c()
-        .local_get(TAG)
-        .i32_const(3)
-        .local_get(physical)
-        .i32_const(1)
-        .i32_shl()
-        .i32_shl()
-        .i32_const(-1)
-        .i32_xor()
-        .i32_and()
-        .local_set(TAG);
+
+fn occupied(out: &mut Output<'_>, logical: u8) {
+    match tag_recipe(out, logical) {
+        TagRecipe::Empty => {
+            out.c().br(0);
+        }
+        TagRecipe::Entry(_) => {
+            if !has_proof(out, logical, ProofKind::Occupied) {
+                frame::tag(out, logical);
+                out.c().i32_const(3).i32_eq().br_if(0);
+            }
+        }
+        _ => {}
+    }
 }
-fn value_tag(out: &mut Output<'_>, physical: u32, pointer: u32) {
-    clear_tag(out, physical);
-    out.c()
-        .local_get(TAG)
-        .local_get(pointer)
-        .i64_load(mem(0, 0))
-        .i64_eqz()
-        .local_get(physical)
-        .i32_const(1)
-        .i32_shl()
-        .i32_shl()
-        .i32_or()
-        .local_set(TAG);
+
+fn empty(out: &mut Output<'_>, logical: u8) {
+    match tag_recipe(out, logical) {
+        TagRecipe::Empty => {}
+        TagRecipe::Entry(_) => {
+            if !has_proof(out, logical, ProofKind::Empty) {
+                frame::tag(out, logical);
+                out.c().i32_const(3).i32_ne().br_if(0);
+            }
+        }
+        _ => {
+            out.c().br(0);
+        }
+    }
 }
-fn pointer(out: &mut Output<'_>, physical: u32, index: u8, destination: u32) {
-    out.c()
-        .local_get(BANK)
-        .local_get(physical)
-        .i32_const(i32::from(index))
-        .i32_add()
-        .i32_const(7)
-        .i32_and()
-        .i32_const(10)
-        .i32_mul()
-        .i32_add()
-        .i32_const(20)
-        .i32_add()
-        .local_set(destination);
-}
-fn occupied(out: &mut Output<'_>, index: u8, destination: u32) {
-    assert!(index < 8);
-    out.c()
-        .local_get(TOP)
-        .i32_const(i32::from(index))
-        .i32_add()
-        .i32_const(7)
-        .i32_and()
-        .local_set(TMP);
-    pointer(out, TOP, index, destination);
-    tag(out, TMP);
-    out.c().i32_const(3).i32_eq().br_if(0);
-}
-fn register(out: &mut Output<'_>, index: u8, destination: u32) {
-    occupied(out, index, destination);
-    span::valid(out, index);
+
+fn register(out: &mut Output<'_>, logical: u8) {
+    occupied(out, logical);
+    if matches!(
+        out.plan.frame(out.before_frame.unwrap()).fp.payload[logical as usize],
+        FpValue::ExactF64(..)
+    ) {
+        return;
+    }
+    let cell = u32::from(frame::input_cell(out, logical));
+    span::valid(out, logical);
     out.c().i32_eqz().if_(BlockType::Empty);
+    raw_normal_or_zero(out, cell, 1);
+    out.c().end();
+}
+
+fn raw_normal_or_zero(out: &mut Output<'_>, cell: u32, depth: u32) {
     out.c()
-        .local_get(destination)
-        .i32_load16_u(mem(8, 0))
+        .local_get(frame::HIGH + cell)
         .i32_const(0x7fff)
         .i32_and()
         .local_set(EXP)
-        .local_get(destination)
-        .i64_load(mem(0, 0))
+        .local_get(frame::LOW + cell)
         .local_set(SIG)
         .local_get(EXP)
         .i32_eqz()
@@ -396,9 +271,9 @@ fn register(out: &mut Output<'_>, index: u8, destination: u32) {
         .i32_and()
         .i32_or()
         .i32_eqz()
-        .br_if(1)
-        .end();
+        .br_if(depth);
 }
+
 fn normal_or_zero(out: &mut Output<'_>, bits: u32, depth: u32) {
     out.c()
         .local_get(bits)
@@ -418,18 +293,18 @@ fn normal_or_zero(out: &mut Output<'_>, bits: u32, depth: u32) {
         .i32_and()
         .br_if(depth);
 }
-fn to_f64(out: &mut Output<'_>, pointer: u32, value: u32, depth: u32) {
+
+fn to_f64(out: &mut Output<'_>, logical: u8, value: u32, depth: u32) {
+    let cell = u32::from(frame::input_cell(out, logical));
     out.c()
-        .local_get(pointer)
-        .i64_load(mem(0, 0))
+        .local_get(frame::LOW + cell)
         .local_tee(SIG)
         .i64_const(0x7ff)
         .i64_and()
         .i64_const(0)
         .i64_ne()
         .br_if(depth)
-        .local_get(pointer)
-        .i32_load16_u(mem(8, 0))
+        .local_get(frame::HIGH + cell)
         .local_tee(EXP)
         .i32_const(0x7fff)
         .i32_and()
@@ -472,76 +347,129 @@ fn to_f64(out: &mut Output<'_>, pointer: u32, value: u32, depth: u32) {
         .f64_reinterpret_i64()
         .local_set(value);
 }
-fn operand(out: &mut Output<'_>, index: u8, pointer: u32, value: u32) {
-    span::valid(out, index);
-    out.c().if_(BlockType::Empty);
-    span::load(out, index, value);
-    out.c().else_();
-    to_f64(out, pointer, value, 1);
-    span::remember(out, index, value);
-    out.c().end();
-    // precision and exponent admission applies equally to newly decoded and retained values.
-    out.c()
-        .local_get(value)
-        .i64_reinterpret_f64()
-        .i64_const(0x1fff_ffff)
-        .i64_and()
-        .i64_eqz()
-        .i32_eqz()
-        .local_get(DOUBLE)
-        .i32_eqz()
-        .i32_and()
-        .br_if(0)
-        .local_get(value)
-        .i64_reinterpret_f64()
-        .i64_const(52)
-        .i64_shr_u()
-        .i32_wrap_i64()
-        .i32_const(2047)
-        .i32_and()
-        .i32_const(897)
-        .i32_sub()
-        .i32_const(253)
-        .i32_gt_u()
-        .local_get(value)
-        .f64_const(0.0.into())
-        .f64_ne()
-        .i32_and()
-        .local_get(DOUBLE)
-        .i32_eqz()
-        .i32_and()
-        .br_if(0);
-    double::bound(out, value, 0);
+
+fn has_proof(out: &Output<'_>, logical: u8, kind: ProofKind) -> bool {
+    let frame = out
+        .plan
+        .frame(out.before_frame.expect("operand has a before frame"));
+    let values = frame.fp.payload[logical as usize].values();
+    // Proofs are value/epoch facts, not facts inferred from a local's numeric index.
+    out.plan
+        .proofs_at(out.before_frame.unwrap())
+        .iter()
+        .map(|id| out.plan.proof(*id))
+        .any(|proof| {
+            proof.kind == kind
+                && proof.epoch == frame.fp.control_epoch
+                && proof.value.is_some_and(|value| values.contains(&value))
+        })
 }
-fn transfer(
-    out: &mut Output<'_>,
-    source_index: u8,
-    source: u32,
-    destination_index: u8,
-    destination_physical: u32,
-    destination: u32,
-) {
-    span::valid(out, source_index);
+
+pub(super) fn import_native(out: &mut Output<'_>, logical: u8, destination: u32, depth: u32) {
+    span::valid(out, logical);
     out.c().if_(BlockType::Empty);
-    span::load(out, source_index, FA);
-    write_value(out, destination_index, destination_physical, FA);
+    span::load(out, logical, destination);
     out.c().else_();
-    copy(out, source, destination);
-    span::invalidate_slot(out, destination_index);
-    value_tag(out, destination_physical, destination);
+    let cell = u32::from(frame::input_cell(out, logical));
+    raw_normal_or_zero(out, cell, depth + 1);
+    to_f64(out, logical, destination, depth + 1);
+    span::remember(out, logical, destination);
     out.c().end();
 }
-fn copy(out: &mut Output<'_>, source: u32, destination: u32) {
-    out.c()
-        .local_get(destination)
-        .local_get(source)
-        .i64_load(mem(0, 0))
-        .i64_store(mem(0, 0))
-        .local_get(destination)
-        .local_get(source)
-        .i32_load16_u(mem(8, 0))
-        .i32_store16(mem(8, 0));
+
+pub(super) fn contract_value(out: &mut Output<'_>, logical: u8, kind: ProofKind, depth: u32) {
+    import_native(out, logical, FA, depth);
+    if kind == ProofKind::Native24 {
+        out.c()
+            .local_get(FA)
+            .i64_reinterpret_f64()
+            .i64_const(0x1fff_ffff)
+            .i64_and()
+            .i64_eqz()
+            .i32_eqz()
+            .br_if(depth)
+            .local_get(FA)
+            .i64_reinterpret_f64()
+            .i64_const(52)
+            .i64_shr_u()
+            .i32_wrap_i64()
+            .i32_const(2047)
+            .i32_and()
+            .i32_const(897)
+            .i32_sub()
+            .i32_const(253)
+            .i32_gt_u()
+            .local_get(FA)
+            .f64_const(0.0.into())
+            .f64_ne()
+            .i32_and()
+            .br_if(depth);
+    }
+    if matches!(kind, ProofKind::Native24 | ProofKind::BoundedF64) {
+        double::bound(out, FA, depth);
+    }
 }
+
+fn operand_bounds(out: &mut Output<'_>, value: u32, depth: u32, native24: bool, bounded: bool) {
+    if !native24 {
+        out.c()
+            .local_get(value)
+            .i64_reinterpret_f64()
+            .i64_const(0x1fff_ffff)
+            .i64_and()
+            .i64_eqz()
+            .i32_eqz()
+            .local_get(DOUBLE)
+            .i32_eqz()
+            .i32_and()
+            .br_if(depth)
+            .local_get(value)
+            .i64_reinterpret_f64()
+            .i64_const(52)
+            .i64_shr_u()
+            .i32_wrap_i64()
+            .i32_const(2047)
+            .i32_and()
+            .i32_const(897)
+            .i32_sub()
+            .i32_const(253)
+            .i32_gt_u()
+            .local_get(value)
+            .f64_const(0.0.into())
+            .f64_ne()
+            .i32_and()
+            .local_get(DOUBLE)
+            .i32_eqz()
+            .i32_and()
+            .br_if(depth);
+    }
+    if !bounded {
+        double::bound(out, value, depth);
+    }
+}
+
+fn operand(out: &mut Output<'_>, logical: u8, value: u32) {
+    let native24 = has_proof(out, logical, ProofKind::Native24);
+    let bounded = has_proof(out, logical, ProofKind::BoundedF64);
+    if matches!(
+        out.plan.frame(out.before_frame.unwrap()).fp.payload[logical as usize],
+        FpValue::ExactF64(..)
+    ) {
+        span::load(out, logical, value);
+        operand_bounds(out, value, 0, native24, bounded);
+        return;
+    }
+    span::valid(out, logical);
+    out.c().if_(BlockType::Empty);
+    span::load(out, logical, value);
+    operand_bounds(out, value, 1, native24, bounded);
+    out.c().else_();
+    to_f64(out, logical, value, 1);
+    operand_bounds(out, value, 1, false, false);
+    span::remember(out, logical, value);
+    out.c().end();
+}
+
 fn clear_c1(out: &mut Output<'_>) {
     span::clear_status_recipe(out);
     out.c()
@@ -550,60 +478,25 @@ fn clear_c1(out: &mut Output<'_>) {
         .i32_and()
         .local_set(STATUS);
 }
-fn set_top(out: &mut Output<'_>) {
-    out.c()
-        .local_get(STATUS)
-        .i32_const(!0x3800)
-        .i32_and()
-        .local_get(TOP)
-        .i32_const(11)
-        .i32_shl()
-        .i32_or()
-        .local_set(STATUS);
-}
-fn pop_stack(out: &mut Output<'_>) {
-    span::pop(out);
-    out.c()
-        .local_get(TAG)
-        .i32_const(3)
-        .local_get(TOP)
-        .i32_const(1)
-        .i32_shl()
-        .i32_shl()
-        .i32_or()
-        .local_set(TAG)
-        .local_get(TOP)
-        .i32_const(1)
-        .i32_add()
-        .i32_const(7)
-        .i32_and()
-        .local_set(TOP);
-    set_top(out);
-}
-fn write_value(out: &mut Output<'_>, index: u8, physical: u32, value: u32) {
-    clear_tag(out, physical);
-    out.c()
-        .local_get(TAG)
-        .local_get(value)
-        .f64_const(0.0.into())
-        .f64_eq()
-        .local_get(physical)
-        .i32_const(1)
-        .i32_shl()
-        .i32_shl()
-        .i32_or()
-        .local_set(TAG);
-    span::write(out, index, value);
-}
-fn write_f32(out: &mut Output<'_>, physical: u32) {
-    out.c()
-        .local_get(BITS)
-        .f32_reinterpret_i32()
-        .f64_promote_f32()
-        .local_set(double::RESULT);
-    write_value(out, 0, physical, double::RESULT);
-}
+
 fn arithmetic_control(out: &mut Output<'_>) {
+    let before = out.before_frame.expect("arithmetic has a before frame");
+    if out
+        .plan
+        .proofs_at(before)
+        .iter()
+        .map(|id| out.plan.proof(*id))
+        .any(|proof| {
+            proof.kind == ProofKind::Control
+                && proof.epoch == out.plan.frame(before).fp.control_epoch
+        })
+    {
+        return;
+    }
+    control_guard(out, 0);
+}
+
+pub(super) fn control_guard(out: &mut Output<'_>, depth: u32) {
     out.c()
         .local_get(span::CONTROL)
         .i32_const(0xf3f)
@@ -616,7 +509,7 @@ fn arithmetic_control(out: &mut Output<'_>) {
         .i32_eq()
         .i32_or()
         .i32_eqz()
-        .br_if(0)
+        .br_if(depth)
         .local_get(TMP)
         .i32_const(0x23f)
         .i32_eq()

@@ -56,7 +56,6 @@ pub(super) fn emit(out: &mut Output<'_>, operation: Operation, next: u32) {
     let Some(repeat) = repeat else {
         element(out, kind, width, address_size, source, destination);
         out.count(1);
-        out.set_pc(next);
         if stores {
             invalidated(out, next);
         }
@@ -66,7 +65,6 @@ pub(super) fn emit(out: &mut Output<'_>, operation: Operation, next: u32) {
     count(out, address_size);
     out.c().i32_eqz().if_(BlockType::Empty);
     out.count(1);
-    out.set_pc(next);
     out.c().br(2).end();
     out.c().local_get(REMAIN).i32_eqz().if_(BlockType::Empty);
     out.exit(StopReason::Budget, Some(out.pc), 0);
@@ -105,7 +103,6 @@ pub(super) fn emit(out: &mut Output<'_>, operation: Operation, next: u32) {
         .i32_const(1)
         .i32_add()
         .local_set(RETIRED);
-    out.set_pc(next);
     if stores {
         invalidated(out, next);
     }

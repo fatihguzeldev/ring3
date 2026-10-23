@@ -8,7 +8,12 @@ pub(super) const PRECISE: i32 = -1;
 // Only the two region bodies use this pass. Helpers retain their own return contracts.
 // Original branch labels stay relative to the same enclosing controls; a return now
 // branches through all of those controls to one publication point outside the wrapper.
-pub(super) fn finish(function: Function, numeric: bool, precise: bool) -> Vec<u8> {
+pub(super) fn finish(
+    function: Function,
+    plan: &crate::cpu::core::region::values::RegionPlan,
+    numeric: bool,
+    precise: bool,
+) -> Vec<u8> {
     let original = function.into_raw_body();
     let body = FunctionBody::new(BinaryReader::new(&original, 0));
     let mut reader = body
@@ -83,6 +88,7 @@ pub(super) fn finish(function: Function, numeric: bool, precise: bool) -> Vec<u8
     );
     let shift = u32::from(numeric);
     let mut code = InstructionSink::new(&mut result);
+    super::numeric::emit_normalizer(plan, &mut code, numeric);
     code.local_get(CTX);
     for (local, _) in link::boundary_fields(numeric) {
         code.local_get(local);

@@ -47,7 +47,7 @@ export function assertCoreNames(module, entry, identity) {
   const numeric = WebAssembly.Module.imports(module).some(item => item.name === 'numeric');
   const names = ['guest.read_slow', 'guest.write_slow', ...(numeric ? ['guest.numeric'] : []),
     'guest.flags', 'guest.run', 'guest.lookup', 'guest.publish', 'guest.precise', 'guest.materialize_numeric', 'guest.resolve_status',
-    'guest.translate_page'];
+    'guest.translate_page', 'guest.normalize_frame'];
   const wrappers = ['guest.entry', 'guest.link', 'guest.publish_link'];
   const stores = functions.slice(names.length,-wrappers.length).map(([, name]) => name);
   assert(stores.length <= 3 && stores.every(name => ['guest.store8', 'guest.store16', 'guest.store32'].includes(name)),

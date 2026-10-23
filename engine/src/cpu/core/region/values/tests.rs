@@ -289,3 +289,99 @@ fn identity_layout_with_changed_dirty_or_tags_still_rebases_at_edge() {
     assert!(edge.fp_rebase);
     assert_eq!(edge.frame, plan.block(BlockId(0)).exit);
 }
+
+#[test]
+fn actual_simd_fast_success_preserves_the_renamed_fp_frame() {
+    use crate::cpu::x86::simd::{FloatKind, SimdKind, SimdOperand, SimdOperation, SimdRegister};
+    let move_op = SimdOperation {
+        kind: SimdKind::Move,
+        destination: SimdOperand::Register(SimdRegister::Xmm(0)),
+        source: SimdOperand::Register(SimdRegister::Xmm(1)),
+        vector_bytes: 16,
+        lane_bytes: 16,
+        memory_bytes: 0,
+        immediate: None,
+        aligned: false,
+        scalar: false,
+        implicit_address: None,
+    };
+    let add_op = SimdOperation {
+        kind: SimdKind::Float(FloatKind::Add),
+        lane_bytes: 4,
+        ..move_op
+    };
+    for operation in [move_op, add_op] {
+        let plan = single(&[
+            fp(X87Operation::LoadRegister { index: 1 }),
+            Operation::Simd(operation),
+            binary(),
+        ]);
+        let instruction = plan.instruction(BlockId(0), 1);
+        assert_eq!(
+            plan.frame(instruction.before).fp,
+            plan.frame(instruction.after).fp,
+            "the actual direct SIMD success keeps every x87 value, tag, epoch and metadata recipe"
+        );
+        assert_eq!(
+            plan.shape(instruction.before),
+            plan.shape(instruction.after)
+        );
+        assert_ne!(plan.shape(instruction.after).top_delta, 0);
+        assert_eq!(plan.instruction(BlockId(0), 2).before, instruction.after);
+    }
+    for operation in [
+        SimdOperation {
+            scalar: true,
+            ..add_op
+        },
+        SimdOperation {
+            destination: SimdOperand::Register(SimdRegister::Mmx(0)),
+            source: SimdOperand::Register(SimdRegister::Mmx(1)),
+            vector_bytes: 8,
+            lane_bytes: 8,
+            ..move_op
+        },
+    ] {
+        let plan = single(&[
+            fp(X87Operation::LoadRegister { index: 1 }),
+            Operation::Simd(operation),
+        ]);
+        let instruction = plan.instruction(BlockId(0), 1);
+        assert_ne!(
+            plan.frame(instruction.before).fp.control_epoch,
+            plan.frame(instruction.after).fp.control_epoch
+        );
+        assert_eq!(plan.shape(instruction.after).top_delta, 0);
+    }
+}
+
+#[test]
+fn actual_simd_fast_success_carries_fp_admission_facts_across_cfg_edges() {
+    use crate::cpu::x86::simd::{SimdKind, SimdOperand, SimdOperation, SimdRegister};
+    let operation = Operation::Simd(SimdOperation {
+        kind: SimdKind::Move,
+        destination: SimdOperand::Register(SimdRegister::Xmm(0)),
+        source: SimdOperand::Register(SimdRegister::Xmm(1)),
+        vector_bytes: 16,
+        lane_bytes: 16,
+        memory_bytes: 0,
+        immediate: None,
+        aligned: false,
+        scalar: false,
+        implicit_address: None,
+    });
+    let blocks = [
+        block(0x1000, &[binary(), operation, jump(0x2000)]),
+        block(0x2000, &[Operation::Nop]),
+    ];
+    let plan = RegionPlan::analyze(&Region::from_blocks(&blocks, 0x1000).unwrap());
+    let contract = &plan.block(BlockId(1)).contract;
+    for kind in [ProofKind::Control, ProofKind::Occupied, ProofKind::ExactF64] {
+        assert!(
+            contract
+                .guards
+                .iter()
+                .any(|&id| plan.proof(id).kind == kind)
+        );
+    }
+}

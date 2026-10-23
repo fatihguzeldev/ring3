@@ -250,7 +250,8 @@ try {
         registers:{6:ext3,7:'00000000000000a00140'}}));
     });
   runCase('consecutive-control-reloads-after-canonical-control-write','d903 d96b0c d84304 dd5b08 0f0b',4,
-    {control:0x27f,numericCalls:1,data:v=>{v.setFloat32(0,1,true);v.setFloat32(4,2**-24,true);v.setUint16(12,0x7f,true);}},t=>{
+    // A canonical control write keeps the rest of this block in the exact suffix.
+    {control:0x27f,numericCalls:3,data:v=>{v.setFloat32(0,1,true);v.setFloat32(4,2**-24,true);v.setUint16(12,0x7f,true);}},t=>{
       standard(t,4,0x100b);t.writeExpected(0x3008,unhex('000000000000f03f'));
       const wanted=t.fp({status:0x20,opcode:0x55b,fip:0x1008,fdp:0x3008,cs:0x1b,ds:0x23,registers:{7:'0000000000000080ff3f'}});
       new DataView(wanted.buffer).setUint16(16,0x7f,true);bank(t,wanted);
@@ -261,7 +262,8 @@ try {
       bank(t,t.fp({opcode:0x15b,fip:0x1005,fdp:0x3008,cs:0x1b,ds:0x23,registers:{7:ext6}}));
     });
   runCase('consecutive-stack-reloads-after-canonical-cross-page-pop','d903 d91dfe3f0000 d94304 d84b04 d95b08 0f0b',5,
-    {control:0x27f,data:values,numericCalls:1},t=>{
+    // Cross-page pop and all three following x87 instructions share the exact suffix.
+    {control:0x27f,data:values,numericCalls:4},t=>{
       standard(t,5,0x1011);t.writeExpected(0x3ffe,unhex('0000'));t.writeExpected(0x4000,unhex('4040'));
       t.writeExpected(0x3008,unhex('00008040'));
       bank(t,t.fp({opcode:0x15b,fip:0x100e,fdp:0x3008,cs:0x1b,ds:0x23,registers:{7:'00000000000000800140'}}));
@@ -296,12 +298,12 @@ try {
       bank(t,t.fp({opcode:0x15b,fip:0x1008,fdp:0x3008,cs:0x1b,ds:0x23,registers:{7:'00000000000000800240'}}));
     });
   runCase('consecutive-arithmetic-after-canonical-helper','d903 d9fa d84b04 d95b08 0f0b',4,
-    {control:0x27f,numericCalls:1,data:v=>{v.setFloat32(0,4,true);v.setFloat32(4,2,true);}},t=>{
+    {control:0x27f,numericCalls:3,data:v=>{v.setFloat32(0,4,true);v.setFloat32(4,2,true);}},t=>{
       standard(t,4,0x100a);t.writeExpected(0x3008,unhex('00008040'));
       bank(t,t.fp({opcode:0x15b,fip:0x1007,fdp:0x3008,cs:0x1b,ds:0x23,registers:{7:'00000000000000800140'}}));
     });
   runCase('consecutive-arithmetic-after-direct-decline','d903 d84304 d84b08 d95b0c 0f0b',4,
-    {control:0x27f,numericCalls:1,data:v=>{v.setUint32(0,0x00800000,true);v.setUint32(4,1,true);v.setFloat32(8,2,true);}},t=>{
+    {control:0x27f,numericCalls:3,data:v=>{v.setUint32(0,0x00800000,true);v.setUint32(4,1,true);v.setFloat32(8,2,true);}},t=>{
       standard(t,4,0x100b);t.writeExpected(0x300c,unhex('01000001'));
       bank(t,t.fp({status:2,opcode:0x15b,fip:0x1008,fdp:0x300c,cs:0x1b,ds:0x23,
         registers:{7:'0000000000010080823f'}}));
@@ -396,7 +398,8 @@ try {
     standard(t,5,0x100c);t.writeExpected(0x3008,unhex('00004040'));
     bank(t,t.fp({opcode:0x15b,fip:0x1009,fdp:0x3008,cs:0x1b,ds:0x23,registers:{6:ext3,7:ext3}}));
   });
-  runCase('direct-pc24-declines-denormal-memory-operand','d903 d84304 dfe0 d95b08 0f0b',4,{control:0x7f,numericCalls:1,data:v=>{v.setFloat32(0,3,true);v.setUint32(4,1,true);}},t=>{
+  // FNSTSW remains a direct observer; the declined FADD and suffix FSTP use helpers.
+  runCase('direct-pc24-declines-denormal-memory-operand','d903 d84304 dfe0 d95b08 0f0b',4,{control:0x7f,numericCalls:2,data:v=>{v.setFloat32(0,3,true);v.setUint32(4,1,true);}},t=>{
     standard(t,4,0x100a,2,2,{0:0x3822});t.writeExpected(0x3008,unhex('00004040'));
     bank(t,t.fp({status:0x22,opcode:0x15b,fip:0x1007,fdp:0x3008,cs:0x1b,ds:0x23,registers:{7:ext3}}));
   });
