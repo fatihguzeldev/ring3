@@ -430,6 +430,17 @@ export function inspectRegion(bytes) {
       'a retained cycle proves a canonicalization-free emitted path, not its runtime frequency or speed']};
 }
 
+export function inspectPortDepth(bytes) {
+  const module=readModule(bytes);
+  return Object.fromEntries(['guest.run','guest.precise'].map(name=>{
+    const index=[...module.names].find(([,value])=>value===name)?.[0];
+    assert(Number.isInteger(index)&&index>=module.imports.length,`actual defined ${name}`);
+    const fn=module.functions[index-module.imports.length];
+    return[name,{maxDepth:fn.ops.reduce((maximum,node)=>Math.max(maximum,node.frames.length-1),0),
+      branchTables:fn.ops.filter(node=>node.op===14).length,operators:fn.ops.length}];
+  }));
+}
+
 export function assertAnalyzedStateStructure(proof) {
   assert(proof.withoutCanonicalizationDispatchOrStackRotation.length>0,
     'the balanced arithmetic loop repeats without per-push/pop eight-cell runtime rotations');

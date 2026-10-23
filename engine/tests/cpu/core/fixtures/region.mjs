@@ -4,13 +4,14 @@ import {createHash} from 'node:crypto';
 import {readFileSync,writeFileSync,openSync,closeSync} from 'node:fs';
 import {readEngine} from '../../../support/wasm/engine.mjs';
 import {Engine,KEY,record,view} from '../../../../../sdk/runtime/engine.js';
-import {inspectRegion,assertRegionStructure,assertAnalyzedStateStructure,instrumentStateWitness} from './region/structure.mjs';
+import {inspectRegion,inspectPortDepth,assertRegionStructure,assertAnalyzedStateStructure,instrumentStateWitness} from './region/structure.mjs';
 import {runControlCases} from './region/control.mjs';
 import {runLinkedCases} from './region/link.mjs';
 import {runStatusCases,runLinkedStatusCases} from './region/status.mjs';
 import {runStateCases,runRenamingCase} from './region/state.mjs';
 import {runLinkedQuotaCase} from './region/quota.mjs';
 import {runOwnershipCase} from './region/ownership.mjs';
+import {runPortCases} from './region/ports.mjs';
 
 const [enginePath,reportPath,mode]=process.argv.slice(2);
 assert(enginePath&&reportPath&&(mode===undefined||mode==='--structure'),
@@ -21,7 +22,7 @@ const unhex=text=>Uint8Array.from(Buffer.from(text.replaceAll(' ',''),'hex'));
 closeSync(openSync(reportPath,'wx'));
 const report={schema:1,complete:false,engineSha256:artifact.sha256,
   scope:'actual generated mixed integer/x87 CFG with exact instruction-prefix, publication and fault oracles; no timing claim',
-  sources:Object.fromEntries(['./region.mjs','./link.mjs','./region/structure.mjs','./region/control.mjs','./region/link.mjs','./region/status.mjs','./region/state.mjs','./region/quota.mjs','./region/ownership.mjs',
+  sources:Object.fromEntries(['./region.mjs','./link.mjs','./region/structure.mjs','./region/control.mjs','./region/link.mjs','./region/status.mjs','./region/state.mjs','./region/quota.mjs','./region/ownership.mjs','./region/ports.mjs',
     '../../../support/wasm/engine.mjs','../../../../../sdk/runtime/engine.js','../../../../../sdk/runtime/cache.js']
     .map(path=>[path,hash(readFileSync(new URL(path,import.meta.url)))])),cases:[]};
 const checkpoint=()=>writeFileSync(reportPath,JSON.stringify(report,null,2));
@@ -40,6 +41,7 @@ function fp(initial,{status=0,tag=0xffff,opcode=0,fip=0,fdp=0,registers={},cs=0x
 }
 
 function fixture(name,{segments,entry=0x1000,registers=[0,2,0,0x3000,0x4800,0,0,0],control=0x27f,
+  compileInstructions=256,compileBlocks=32,
   initialFp,missing=[],stateWitness=false,data=page=>{view(page).setFloat32(0,3,true);view(page).setFloat32(4,2,true);}}={},body) {
   stage=name;
   const result={name,controls:[],modules:[],runs:[],numericCalls:[]};report.cases.push(result);checkpoint();
@@ -56,7 +58,7 @@ function fixture(name,{segments,entry=0x1000,registers=[0,2,0,0x3000,0x4800,0,0,
     assert.equal(actual,wanted,`${name}: ${operation}`);
   };
   const prepare=pc=>{
-    status('core_prepare',0,pc,256,32);context=api.core_context_ptr()>>>0;
+    status('core_prepare',0,pc,compileInstructions,compileBlocks);context=api.core_context_ptr()>>>0;
     const encoded=bytes(api.core_code_ptr()>>>0,api.core_code_len()>>>0),module=new WebAssembly.Module(encoded);
     encodedModule=encoded;
     const imports=coreImports(module);
@@ -154,6 +156,7 @@ function fixture(name,{segments,entry=0x1000,registers=[0,2,0,0x3000,0x4800,0,0,
     body({api,engine,bytes,word,result,prepare,check,writeExpected,registers,startingFp,startingSimd,
       fp:value=>fp(startingFp,value),status,context:()=>context,version,
       inspect:()=>{result.structure=inspectRegion(primaryEncoded);checkpoint();return result.structure;},
+      portDepth:()=>{result.portDepth=inspectPortDepth(primaryEncoded);checkpoint();return result.portDepth;},
       stateWitness:()=>{assert.equal(result.stateWitnesses?.length,1,'one observed linked activation');return result.stateWitnesses[0];}});
     result.complete=true;checkpoint();
   }catch(error){result.failure={message:String(error),stack:error.stack};checkpoint();throw error;}
@@ -320,6 +323,7 @@ try {
   stage='compiled-link-status';runLinkedStatusCases(artifact,report);checkpoint();
   stage='compiled-link-short-quota';runLinkedQuotaCase(artifact,report);checkpoint();
   stage='compiled-source-ownership';runOwnershipCase(artifact,report);checkpoint();
+  stage='immutable-interior-ports';runPortCases(fixture);checkpoint();
   }
   report.complete=true;checkpoint();console.log(JSON.stringify({complete:true,cases:report.cases.length,engineSha256:artifact.sha256}));
 }catch(error){report.failure={stage,message:String(error),stack:error.stack};checkpoint();throw error;}
