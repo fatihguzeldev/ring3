@@ -130,9 +130,9 @@ pub(super) fn owner_internal(logical: u32, numeric: bool) -> u32 {
     let first = 2 + u32::from(numeric);
     match logical {
         2 => first,
-        3..=6 => owner_defined(logical - 3, numeric),
+        3..=5 => owner_defined(logical - 3, numeric),
         7..=9 => first + logical - 6,
-        10 => owner_defined(4, numeric),
+        10 => owner_defined(3, numeric),
         11 => first + 4,
         _ => unreachable!("unknown owner helper {logical}"),
     }

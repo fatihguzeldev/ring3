@@ -1,4 +1,4 @@
-use super::{ADDRESS, CTX, GP_FACTS_VALID, LOGICAL_ADDRESS, Output};
+use super::{ADDRESS, CTX, FULL_BLOCK, GP_FACTS_VALID, LOGICAL_ADDRESS, Output};
 use crate::cpu::{
     core::memory::groups,
     x86::ir::{AddressSize, EffectiveAddress},
@@ -30,6 +30,8 @@ impl Output<'_> {
         let bit = 1_i32 << access.slot;
         self.c()
             .local_get(GP_FACTS_VALID)
+            .local_get(FULL_BLOCK)
+            .i32_and()
             .if_(BlockType::Result(wasm_encoder::ValType::I32));
         self.c()
             .local_get(groups::TRIED)

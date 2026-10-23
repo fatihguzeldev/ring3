@@ -14,7 +14,7 @@ enum Label {
     Other,
 }
 
-pub(super) fn emit(out: &mut Output<'_>, graph: &Region, precise: bool) {
+pub(super) fn emit(out: &mut Output<'_>, graph: &Region) {
     let plan = graph.structure_all();
     out.c()
         .i32_const(1)
@@ -23,7 +23,6 @@ pub(super) fn emit(out: &mut Output<'_>, graph: &Region, precise: bool) {
     let mut emitter = Emitter {
         out,
         graph,
-        precise,
         labels: vec![Label::Restart],
         current: graph.entry,
         dispatched: plan.shapes.iter().flat_map(dispatch_members).collect(),
@@ -41,7 +40,6 @@ pub(super) fn emit(out: &mut Output<'_>, graph: &Region, precise: bool) {
 struct Emitter<'a, 'b> {
     out: &'a mut Output<'b>,
     graph: &'a Region,
-    precise: bool,
     labels: Vec<Label>,
     current: BlockId,
     dispatched: Vec<BlockId>,
@@ -103,88 +101,51 @@ impl Emitter<'_, '_> {
         self.out.c().i32_const(0).local_set(ENTRY_PENDING);
         let block = &self.graph.blocks[id.0];
         self.out.address_fact = None;
-        if !self.precise {
-            // An interior entry has no proved relationship to this block's
-            // primary prefix. Transport it unchanged to the precise port.
-            self.out.frame = None;
-            self.out.before_frame = None;
-            self.out.after_frame = None;
-            self.out
-                .c()
-                .local_get(super::ENTRY_OFFSET)
-                .if_(BlockType::Empty);
-            self.out.publish_exit(None, 0);
-            self.out
-                .c()
-                .i32_const(super::exits::PRECISE)
-                .return_()
-                .end();
-        }
+        self.out
+            .c()
+            .local_get(super::ENTRY_OFFSET)
+            .i32_eqz()
+            .local_get(REMAIN)
+            .i32_const(block.instructions.len() as i32)
+            .i32_ge_u()
+            .i32_and()
+            .local_set(super::FULL_BLOCK);
         self.out.frame = Some(self.out.plan.block(id).entry);
         self.out.before_frame = self.out.frame;
         self.out.after_frame = self.out.frame;
-        if !self.precise {
-            // The imported state has not passed this block's speculative entry
-            // contract yet. A quota tail must transport its actual identity view.
-            self.out.frame = None;
-            self.out.before_frame = None;
-            self.out.after_frame = None;
-            self.out
-                .c()
-                .local_get(REMAIN)
-                .i32_const(block.instructions.len() as i32)
-                .i32_lt_u()
-                .if_(BlockType::Empty);
-            self.out.publish_exit(Some(block.entry), 0);
-            self.out
-                .c()
-                .i32_const(super::exits::PRECISE)
-                .return_()
-                .end();
-            self.out.frame = Some(self.out.plan.block(id).entry);
-            self.out.before_frame = self.out.frame;
-            self.out.after_frame = self.out.frame;
-        }
         let constants = self.out.plan.block(id).contract.gpr_constants;
-        self.out.guarded_gpr_facts = self.precise || constants.iter().any(Option::is_some);
-        if self.precise {
-            self.out
-                .c()
-                .local_get(super::ENTRY_OFFSET)
-                .if_(BlockType::Empty);
-            super::numeric::enter_port(self.out);
-            self.out
-                .c()
-                .i32_const(0)
-                .local_set(super::GP_FACTS_VALID)
-                .local_get(super::ENTRY_OFFSET)
-                .local_set(super::PREFIX_BASE)
-                .else_();
-        }
+        self.out.guarded_gpr_facts = true;
+        self.out
+            .c()
+            .local_get(super::ENTRY_OFFSET)
+            .if_(BlockType::Empty);
+        super::numeric::enter_port(self.out);
+        self.out
+            .c()
+            .i32_const(0)
+            .local_set(super::GP_FACTS_VALID)
+            .local_get(super::ENTRY_OFFSET)
+            .local_set(super::PREFIX_BASE)
+            .else_();
         self.out.c().i32_const(0).local_set(super::PREFIX_BASE);
         // Group proofs consume actual GPR value identities. Ordinary entries
         // without constant guards are valid; interior ports took the false arm.
-        self.out.c().i32_const(1).local_set(super::GP_FACTS_VALID);
-        if self.out.guarded_gpr_facts {
-            self.out.c().i32_const(1);
-            for (register, value) in constants.into_iter().enumerate() {
-                if let Some(value) = value {
-                    self.out
-                        .c()
-                        .local_get(register as u32 + 2)
-                        .i32_const(value as i32)
-                        .i32_eq()
-                        .i32_and();
-                }
+        self.out.c().i32_const(1);
+        for (register, value) in constants.into_iter().enumerate() {
+            if let Some(value) = value {
+                self.out
+                    .c()
+                    .local_get(register as u32 + 2)
+                    .i32_const(value as i32)
+                    .i32_eq()
+                    .i32_and();
             }
-            self.out.c().local_set(super::GP_FACTS_VALID);
         }
+        self.out.c().local_set(super::GP_FACTS_VALID);
         super::numeric::enter_block(self.out, id);
-        if self.precise {
-            self.out.c().end();
-        }
+        self.out.c().end();
         self.out.c().i32_const(0).local_set(super::ENTRY_OFFSET);
-        self.out.block(id, block, self.precise);
+        self.out.block(id, block);
         match block.terminator {
             Terminator::Next { target, .. } => self.edge(target),
             Terminator::Branch {

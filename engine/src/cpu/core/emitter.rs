@@ -47,6 +47,7 @@ pub(super) const LOGICAL_ADDRESS: u32 = 28;
 pub(super) const GP_FACTS_VALID: u32 = 129;
 pub(super) const ENTRY_OFFSET: u32 = 130;
 pub(super) const PREFIX_BASE: u32 = 131;
+pub(super) const FULL_BLOCK: u32 = 151;
 
 const BLOCK_BITS: u32 = 10;
 
@@ -101,8 +102,7 @@ pub(super) fn emit(
         super::region::Region::from_blocks(blocks, entry).expect("decoded blocks form a region");
     let plan = super::region::values::RegionPlan::analyze(&graph);
     let numeric = !native.is_empty();
-    let fast = run(&graph, &plan, identity, native, false);
-    let precise = run(&graph, &plan, identity, native, true);
+    let body = run(&graph, &plan, identity, native);
     let mut module = Module::new();
     let mut types = TypeSection::new();
     types.ty().function([ValType::I32; 2], [ValType::I32]);
@@ -174,18 +174,18 @@ pub(super) fn emit(
     support::imports(&mut imports, [3, 6, 9, 10, 12, 7, 7, 7, 13]);
     module.section(&imports);
     let mut functions = FunctionSection::new();
-    for kind in [0, 4, 5, 0, 11, 0, 0, 8] {
+    for kind in [0, 4, 5, 11, 0, 0, 8] {
         functions.function(kind);
     }
     module.section(&functions);
     let mut exports = ExportSection::new();
-    let wrappers = support::owner_defined(5, numeric);
+    let wrappers = support::owner_defined(4, numeric);
     exports.export("run", ExportKind::Func, wrappers);
     exports.export("link", ExportKind::Func, wrappers + 1);
     exports.export("publish", ExportKind::Func, wrappers + 2);
     module.section(&exports);
     let mut code = CodeSection::new();
-    code.raw(&fast);
+    code.raw(&body);
     code.function(&lookup(blocks));
     code.function(&link::emit_boundary(
         numeric,
@@ -193,7 +193,6 @@ pub(super) fn emit(
         support::owner_internal(7, numeric),
         support::owner_internal(8, numeric),
     ));
-    code.raw(&precise);
     code.function(&numeric::emit_normalizer_adapter(
         &plan,
         numeric,
@@ -223,7 +222,6 @@ pub(super) fn emit(
         "guest.run",
         "guest.lookup",
         "guest.publish",
-        "guest.precise",
         "guest.normalize_frame",
     ]
     .into_iter()
@@ -291,7 +289,6 @@ fn run(
     plan: &super::region::values::RegionPlan,
     identity: u64,
     native: &[NativeInstruction],
-    precise: bool,
 ) -> Vec<u8> {
     let mut function = Function::new([
         (25, ValType::I32),
@@ -317,7 +314,7 @@ fn run(
         (1, ValType::I32),
         (3, ValType::I32),
         (2, ValType::I32),
-        (19, ValType::I32),
+        (20, ValType::I32),
     ]);
     let mut out = Output {
         function: &mut function,
@@ -326,6 +323,7 @@ fn run(
         pc: 0,
         prefix: 0,
         record_flags: true,
+        tail_flags: false,
         plan,
         frame: None,
         before_frame: None,
@@ -333,7 +331,7 @@ fn run(
         address_fact: None,
         guarded_gpr_facts: false,
         current_block: None,
-        grouped_accesses: !precise,
+        grouped_accesses: true,
         native,
     };
     out.c()
@@ -397,10 +395,10 @@ fn run(
     out.c().end().end();
     super::memory::load_view(out.c().raw());
     out.lookup_port(EIP);
-    region::emit(&mut out, graph, precise);
+    region::emit(&mut out, graph);
     out.c().end();
     assert_eq!(out.depth, 0, "the region exit wrapper is closed");
-    exits::finish(function, plan, !native.is_empty(), precise)
+    exits::finish(function, plan, !native.is_empty())
 }
 
 pub(super) struct Output<'a> {
@@ -410,6 +408,7 @@ pub(super) struct Output<'a> {
     pc: u32,
     prefix: u32,
     record_flags: bool,
+    tail_flags: bool,
     plan: &'a super::region::values::RegionPlan,
     frame: Option<super::region::values::FrameStateId>,
     before_frame: Option<super::region::values::FrameStateId>,
@@ -434,60 +433,53 @@ impl Output<'_> {
         support::owner_internal(index, !self.native.is_empty())
     }
 
-    fn block(
-        &mut self,
-        id: super::region::BlockId,
-        block: &super::region::RegionBlock,
-        precise: bool,
-    ) {
+    fn block(&mut self, id: super::region::BlockId, block: &super::region::RegionBlock) {
         self.current_block = Some(id);
         if self.grouped_accesses && self.plan.has_access_groups() {
             super::memory::groups::invalidate(self.c().raw());
         }
         let mut counted = false;
-        if precise {
-            // Chunking bounds simultaneous instruction labels independently of
-            // the configured instruction count. Every instruction is emitted once.
-            const CHUNK_BITS: u32 = 6;
-            const CHUNK: usize = 1 << CHUNK_BITS;
-            let chunks = block.instructions.len().div_ceil(CHUNK) as u32;
-            self.begin_port_selector(chunks);
+        // chunking bounds simultaneous instruction labels; normal entries bypass
+        // both selectors and share the same instruction body with precise ports.
+        const CHUNK_BITS: u32 = 6;
+        const CHUNK: usize = 1 << CHUNK_BITS;
+        let chunks = block.instructions.len().div_ceil(CHUNK) as u32;
+        self.begin_port_selector(chunks);
+        self.c()
+            .local_get(PREFIX_BASE)
+            .i32_eqz()
+            .br_if(0)
+            .local_get(PREFIX_BASE)
+            .i32_const(CHUNK_BITS as i32)
+            .i32_shr_u()
+            .br_table(0..chunks, chunks);
+        for (chunk_index, instructions) in block.instructions.chunks(CHUNK).enumerate() {
+            self.c().end();
+            let count = instructions.len() as u32;
+            self.begin_port_selector(count);
+            let start = (chunk_index * CHUNK) as i32;
             self.c()
                 .local_get(PREFIX_BASE)
-                .i32_const(CHUNK_BITS as i32)
-                .i32_shr_u()
-                .br_table(0..chunks, chunks);
-            for (chunk_index, instructions) in block.instructions.chunks(CHUNK).enumerate() {
+                .i32_eqz()
+                .br_if(0)
+                .local_get(PREFIX_BASE)
+                .i32_const(start)
+                .i32_gt_u()
+                .if_(BlockType::Result(ValType::I32))
+                .local_get(PREFIX_BASE)
+                .i32_const(start)
+                .i32_sub()
+                .else_()
+                .i32_const(0)
+                .end()
+                .br_table(0..count, count);
+            for instruction in instructions {
                 self.c().end();
-                let count = instructions.len() as u32;
-                self.begin_port_selector(count);
-                let start = (chunk_index * CHUNK) as i32;
-                self.c()
-                    .local_get(PREFIX_BASE)
-                    .i32_const(start)
-                    .i32_gt_u()
-                    .if_(BlockType::Result(ValType::I32))
-                    .local_get(PREFIX_BASE)
-                    .i32_const(start)
-                    .i32_sub()
-                    .else_()
-                    .i32_const(0)
-                    .end()
-                    .br_table(0..count, count);
-                for instruction in instructions {
-                    self.c().end();
-                    counted |= self.block_instruction(id, block, instruction, true);
-                }
-                self.finish_port_selector();
+                counted |= self.block_instruction(id, block, instruction);
             }
             self.finish_port_selector();
-        } else {
-            for instruction in &block.instructions {
-                if self.block_instruction(id, block, instruction, false) {
-                    return;
-                }
-            }
         }
+        self.finish_port_selector();
         if !counted {
             self.count(block.instructions.len() as u32);
         }
@@ -509,7 +501,6 @@ impl Output<'_> {
         id: super::region::BlockId,
         block: &super::region::RegionBlock,
         instruction: &super::region::RegionInstruction,
-        precise: bool,
     ) -> bool {
         let demands = &block.flags.after;
         let analyzed = self.plan.instruction(id, instruction.prefix);
@@ -525,22 +516,23 @@ impl Output<'_> {
             super::region::ResumePc::Computed => unreachable!("instruction entry is exact"),
         };
         self.prefix = prefix;
-        if precise {
-            self.c()
-                .local_get(REMAIN)
-                .i32_const(prefix as i32)
-                .local_get(PREFIX_BASE)
-                .i32_sub()
-                .i32_le_u()
-                .if_(BlockType::Empty);
-            self.exit(StopReason::Budget, Some(self.pc), prefix);
-            self.c().end();
-        }
-        self.record_flags = precise
-            || instruction
-                .operation
-                .and_then(super::effects::analyze)
-                .is_none_or(|effect| effect.write & demands[instruction.prefix as usize] != 0);
+        self.c()
+            .local_get(FULL_BLOCK)
+            .i32_eqz()
+            .if_(BlockType::Empty)
+            .local_get(REMAIN)
+            .i32_const(prefix as i32)
+            .local_get(PREFIX_BASE)
+            .i32_sub()
+            .i32_le_u()
+            .if_(BlockType::Empty);
+        self.exit(StopReason::Budget, Some(self.pc), prefix);
+        self.c().end().end();
+        self.record_flags = true;
+        self.tail_flags = instruction
+            .operation
+            .and_then(super::effects::analyze)
+            .is_some_and(|effect| effect.write & demands[instruction.prefix as usize] == 0);
         // Direct region control is lowered from its typed terminator. Its flags
         // and counter effects are emitted once where the Wasm edge is selected.
         if instruction.prefix as usize + 1 == block.instructions.len()

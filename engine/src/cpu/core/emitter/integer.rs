@@ -555,7 +555,16 @@ pub(super) fn emit(out: &mut Output<'_>, operation: Operation) -> bool {
             }
             if !matches!(kind, UnaryKind::Not) {
                 if out.record_flags && matches!(kind, UnaryKind::Inc | UnaryKind::Dec) {
+                    if out.tail_flags {
+                        out.c()
+                            .local_get(super::FULL_BLOCK)
+                            .i32_eqz()
+                            .if_(wasm_encoder::BlockType::Empty);
+                    }
                     out.materialize(flags::CF);
+                    if out.tail_flags {
+                        out.c().end();
+                    }
                 }
                 out.c().i32_const(0).local_set(CARRY);
                 out.recipe(
@@ -704,6 +713,12 @@ impl Output<'_> {
         if !self.record_flags {
             return;
         }
+        if self.tail_flags {
+            self.c()
+                .local_get(super::FULL_BLOCK)
+                .i32_eqz()
+                .if_(wasm_encoder::BlockType::Empty);
+        }
         self.c()
             .i32_const(kind as i32)
             .local_set(KIND)
@@ -711,6 +726,9 @@ impl Output<'_> {
             .local_set(WIDTH);
         for (source, target) in [(A, LEFT), (B, RIGHT), (RESULT, VALUE), (CARRY, CARRY_IN)] {
             self.c().local_get(source).local_set(target);
+        }
+        if self.tail_flags {
+            self.c().end();
         }
     }
 
