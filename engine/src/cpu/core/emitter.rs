@@ -312,6 +312,7 @@ fn run(
     identity: u64,
     native: &[NativeInstruction],
 ) -> Vec<u8> {
+    let execution = super::region::values::ExecutionPlan::analyze(graph, plan);
     let mut function = Function::new([
         (25, ValType::I32),
         (1, ValType::I64),
@@ -349,6 +350,7 @@ fn run(
         record_flags: true,
         tail_flags: false,
         plan,
+        fp_schedule: &execution.fp,
         frame: None,
         before_frame: None,
         after_frame: None,
@@ -452,6 +454,7 @@ pub(super) struct Output<'a> {
     record_flags: bool,
     tail_flags: bool,
     plan: &'a super::region::values::RegionPlan,
+    fp_schedule: &'a super::region::values::Guards,
     frame: Option<super::region::values::FrameStateId>,
     before_frame: Option<super::region::values::FrameStateId>,
     after_frame: Option<super::region::values::FrameStateId>,

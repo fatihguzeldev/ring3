@@ -50,7 +50,7 @@ pub(super) fn begin(out: &mut Output<'_>, operation: Operation, _next: u32) -> b
         return false;
     }
     out.c().block(BlockType::Empty).block(BlockType::Empty);
-    span::enter(out);
+    prepare(out);
     match operation {
         X87Operation::Load(X87Format::Float32) => {
             memory::prepare(out, address.unwrap(), 4, false, false, 52);
@@ -69,8 +69,6 @@ pub(super) fn begin(out: &mut Output<'_>, operation: Operation, _next: u32) -> b
             format: format @ (X87Format::Float32 | X87Format::Float64),
             ..
         } => {
-            occupied(out, 0);
-            pool::ensure_input(out, 0);
             let native = native_store(out, format);
             if native {
                 span::load(out, 0, FA);
@@ -107,21 +105,15 @@ pub(super) fn begin(out: &mut Output<'_>, operation: Operation, _next: u32) -> b
             }
             span::clear_status_recipe(out);
         }
-        X87Operation::LoadRegister { index } => {
-            register(out, index);
+        X87Operation::LoadRegister { .. } => {
             empty(out, 7);
             // The typed step aliases the source value and renames all eight payload references.
         }
-        X87Operation::StoreRegister { .. } => {
-            register(out, 0);
-        }
-        X87Operation::Exchange { index } => {
-            register(out, 0);
-            register(out, index);
+        X87Operation::StoreRegister { .. } => {}
+        X87Operation::Exchange { .. } => {
             clear_c1(out);
         }
         X87Operation::ChangeSign | X87Operation::Absolute => {
-            register(out, 0);
             span::valid(out, 0);
             out.c().if_(BlockType::Empty);
             span::load(out, 0, FA);
@@ -144,11 +136,7 @@ pub(super) fn begin(out: &mut Output<'_>, operation: Operation, _next: u32) -> b
             source,
             ..
         } => {
-            arithmetic_control(out);
-            register(out, destination);
-            register(out, source);
-            // Lazy input admission uses FA as scratch; admit both inputs before
-            // capturing either arithmetic operand.
+            // Every scheduled input has been prepared before either capture.
             operand(out, destination, FA);
             operand(out, source, FB);
             arithmetic(out, kind);
@@ -158,8 +146,6 @@ pub(super) fn begin(out: &mut Output<'_>, operation: Operation, _next: u32) -> b
             kind,
             format: X87Format::Float32,
         } => {
-            arithmetic_control(out);
-            register(out, 0);
             operand(out, 0, FA);
             memory::prepare(out, address.unwrap(), 4, false, false, 52);
             out.c().local_get(52).i32_load(mem(0, 0)).local_set(BITS);
@@ -243,6 +229,9 @@ fn occupied(out: &mut Output<'_>, logical: u8) {
 }
 
 fn empty(out: &mut Output<'_>, logical: u8) {
+    if out.fp_schedule.at(out.before_frame.unwrap()).empty & (1 << logical) == 0 {
+        return;
+    }
     match tag_recipe(out, logical) {
         TagRecipe::Empty => {}
         TagRecipe::Entry(_) => {
@@ -255,20 +244,38 @@ fn empty(out: &mut Output<'_>, logical: u8) {
     }
 }
 
-fn register(out: &mut Output<'_>, logical: u8) {
-    occupied(out, logical);
-    pool::ensure_input(out, logical);
-    if matches!(
-        out.plan.frame(out.before_frame.unwrap()).fp.payload[logical as usize],
-        FpValue::ExactF64(..)
-    ) {
-        return;
+fn prepare(out: &mut Output<'_>) {
+    let before = out
+        .before_frame
+        .expect("scheduled FP instruction has a frame");
+    let guards = out.fp_schedule.at(before).clone();
+    if guards.enter {
+        span::enter(out);
+    } else {
+        span::resume(out);
     }
-    let cell = u32::from(frame::input_cell(out, logical));
-    span::valid(out, logical);
-    out.c().i32_eqz().if_(BlockType::Empty);
-    raw_normal_or_zero(out, cell, 1);
-    out.c().end();
+    if guards.control {
+        arithmetic_control(out);
+    }
+    for input in guards.inputs {
+        if input.occupied {
+            occupied(out, input.logical);
+        }
+        if input.load {
+            let cell = out.plan.shape(before).cells[input.logical as usize];
+            pool::ensure_cell(out, before, input.logical, cell);
+        }
+        if let Some(kind) = input.admit {
+            pool::admit_input(out, input.logical, kind);
+        }
+        if input.format {
+            let cell = u32::from(frame::input_cell(out, input.logical));
+            span::valid(out, input.logical);
+            out.c().i32_eqz().if_(BlockType::Empty);
+            raw_normal_or_zero(out, cell, 1);
+            out.c().end();
+        }
+    }
 }
 
 fn raw_normal_or_zero(out: &mut Output<'_>, cell: u32, depth: u32) {
@@ -409,24 +416,6 @@ fn native_store(out: &Output<'_>, format: X87Format) -> bool {
     has(ProofKind::ExactF64) && (format == X87Format::Float64 || has(ProofKind::Native24))
 }
 
-pub(super) fn import_native(out: &mut Output<'_>, logical: u8, destination: u32, depth: u32) {
-    pool::ensure_input(out, logical);
-    span::valid(out, logical);
-    out.c().if_(BlockType::Empty);
-    span::load(out, logical, destination);
-    out.c().else_();
-    let cell = u32::from(frame::input_cell(out, logical));
-    raw_normal_or_zero(out, cell, depth + 1);
-    to_f64(out, logical, destination, depth + 1);
-    span::remember(out, logical, destination);
-    out.c().end();
-}
-
-pub(super) fn contract_value(out: &mut Output<'_>, logical: u8, kind: ProofKind, depth: u32) {
-    pool::ensure_input(out, logical);
-    admit_loaded(out, logical, kind, depth);
-}
-
 pub(super) fn admit_loaded(out: &mut Output<'_>, logical: u8, kind: ProofKind, depth: u32) {
     pool::has_certificate(out, logical, kind);
     out.c().i32_eqz().if_(BlockType::Empty);
@@ -525,7 +514,6 @@ fn operand_bounds(out: &mut Output<'_>, value: u32, depth: u32, native24: bool, 
 }
 
 fn operand(out: &mut Output<'_>, logical: u8, value: u32) {
-    pool::ensure_input(out, logical);
     let native24 = has_proof(out, logical, ProofKind::Native24);
     let bounded = has_proof(out, logical, ProofKind::BoundedF64);
     if matches!(

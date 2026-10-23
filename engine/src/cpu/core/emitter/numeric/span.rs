@@ -70,9 +70,7 @@ pub(super) fn enter(out: &mut Output<'_>) {
         .i32_const(1)
         .local_set(ACTIVE)
         .end();
-    for (from, to) in [(BANK, 37), (STATUS, 41)] {
-        out.c().local_get(from).local_set(to);
-    }
+    resume(out);
     out.c()
         .local_get(CONTROL)
         .i32_const(63)
@@ -80,6 +78,13 @@ pub(super) fn enter(out: &mut Output<'_>) {
         .i32_const(63)
         .i32_ne()
         .br_if(0);
+}
+
+/// Scratch aliases are refreshed without rechecking an established environment.
+pub(super) fn resume(out: &mut Output<'_>) {
+    for (from, to) in [(BANK, 37), (STATUS, 41)] {
+        out.c().local_get(from).local_set(to);
+    }
 }
 
 pub(super) fn status(out: &mut Output<'_>) {

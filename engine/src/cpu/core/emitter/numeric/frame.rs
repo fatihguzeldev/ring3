@@ -1160,7 +1160,6 @@ pub(in crate::cpu::core::emitter) fn emit_inline_commit(out: &mut Output<'_>) {
 }
 
 pub(super) fn load_raw(out: &mut Output<'_>, logical: u8, low: u32, high: u32) {
-    super::pool::ensure_input(out, logical);
     let cell = u32::from(input_cell(out, logical));
     out.c()
         .local_get(85)

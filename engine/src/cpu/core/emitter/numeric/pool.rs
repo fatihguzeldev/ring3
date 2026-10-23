@@ -110,54 +110,23 @@ pub(super) fn initialize(out: &mut Output<'_>) {
         .end();
 }
 
-pub(super) fn ensure_input(out: &mut Output<'_>, logical: u8) {
-    let frame = out
-        .before_frame
-        .expect("FP input has a completed-prefix frame");
-    let cell = out.plan.shape(frame).cells[logical as usize];
-    ensure_cell(out, frame, logical, cell);
-    if out.plan.fp_input_origin(frame, logical).is_none() {
-        return;
-    }
-    let payload = out.plan.frame(frame).fp.payload[logical as usize];
-    let kind = out
-        .plan
-        .proofs_at(frame)
-        .iter()
-        .map(|&id| out.plan.proof(id))
-        .filter(|proof| {
-            proof.conditional.is_none()
-                && proof.epoch == out.plan.frame(frame).fp.control_epoch
-                && proof.value.is_some_and(|value| payload.contains(value))
-        })
-        .map(|proof| proof.kind)
-        .max_by_key(|kind| match kind {
-            ProofKind::Native24 => 3,
-            ProofKind::BoundedF64 => 2,
-            ProofKind::ExactF64 => 1,
-            _ => 0,
-        })
-        .filter(|kind| {
-            matches!(
-                kind,
-                ProofKind::ExactF64 | ProofKind::BoundedF64 | ProofKind::Native24
-            )
-        });
-    if let Some(kind) = kind {
-        out.c()
-            .local_get(ADMITTED)
-            .i32_const(1 << cell.0)
-            .i32_and()
-            .i32_eqz()
-            .if_(BlockType::Empty);
-        super::direct::admit_loaded(out, logical, kind, 1);
-        out.c()
-            .local_get(ADMITTED)
-            .i32_const(1 << cell.0)
-            .i32_or()
-            .local_set(ADMITTED)
-            .end();
-    }
+/// Only scheduled first uses reach this conditional entry adapter. Later
+/// dominated uses carry an actual successful SSA admission, not another bit test.
+pub(super) fn admit_input(out: &mut Output<'_>, logical: u8, kind: ProofKind) {
+    let cell = super::frame::input_cell(out, logical);
+    out.c()
+        .local_get(ADMITTED)
+        .i32_const(1 << cell)
+        .i32_and()
+        .i32_eqz()
+        .if_(BlockType::Empty);
+    super::direct::admit_loaded(out, logical, kind, 1);
+    out.c()
+        .local_get(ADMITTED)
+        .i32_const(1 << cell)
+        .i32_or()
+        .local_set(ADMITTED)
+        .end();
 }
 
 pub(super) fn ensure_cell(

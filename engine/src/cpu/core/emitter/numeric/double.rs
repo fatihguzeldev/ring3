@@ -59,6 +59,22 @@ pub(super) fn bound(out: &mut Output<'_>, value: u32, depth: u32) {
 }
 
 pub(super) fn arithmetic(out: &mut Output<'_>, kind: X87Binary, depth: u32) {
+    if kind == X87Binary::Multiply && out.fp_schedule.at(out.before_frame.unwrap()).exact_mul {
+        // Two admitted native24 significands have at most 48 product bits. Their
+        // finite binary32 exponent range fits normal binary64, including signed
+        // zero. This arm runs only under the actual PC53 control selection.
+        out.c()
+            .local_get(A)
+            .local_get(B)
+            .f64_mul()
+            .local_set(RESULT)
+            .local_get(STATUS)
+            .i32_const(!0x200)
+            .i32_and()
+            .local_set(STATUS);
+        span::clear_status_recipe(out);
+        return;
+    }
     let reverse = matches!(kind, X87Binary::ReverseSubtract | X87Binary::ReverseDivide);
     let left = if reverse { B } else { A };
     let right = if reverse { A } else { B };
