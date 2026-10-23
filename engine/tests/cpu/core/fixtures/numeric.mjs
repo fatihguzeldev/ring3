@@ -256,15 +256,6 @@ try {
   const stateRegisters=[0xa5c35aa5,0x12345678,0x87654321,0x3000,0x4800,0x11223344,0x55667788,0x99aabbcc];
   const stateMetadata={tag:0xffff,opcode:0x5a5,fip:0x10203040,fdp:0x50607080,cs:0x1b,ds:0x23,
     registers:{0:ext3,7:ext6}};
-  runCase('leaf-call-with-numerical-import-returns-to-caller','e80b000000 ba10325476 0f0b 90909090 dfe0 c3',4,
-    {fp:{...stateMetadata,status:0x6a3f},registers:stateRegisters,flags:0xcd7,numericCalls:1,nullBank:true},t=>{
-      standard(t,4,0x100a,0xcd7,2,{0:0xa5c36a3f,2:0x76543210});bank(t,t.initialFp);
-      t.writeExpected(0x47fc,unhex('05100000'));
-      const versions=t.initialPageVersions.slice(),slot=Math.floor((t.physical(0x47fc)-t.word(t.context,64))/4096);
-      new DataView(versions.buffer).setBigUint64(slot*16+8,t.initialVersion+1n,true);
-      assert.deepEqual(t.slice(t.word(t.context,84),versions.length),versions,'only the CALL stack page is stamped');
-      assert.equal(new DataView(t.memory.buffer).getBigUint64(t.word(t.context,80),true),t.initialVersion+1n,'exact CALL store transaction');
-    });
   runCase('direct-status-ax-preserves-deferred-integer-flags','83c001 dfe0 0f0b',2,
     {fp:{...stateMetadata,status:0x6a3f},registers:[0xffffffff,...stateRegisters.slice(1)],numericCalls:0},t=>{
       standard(t,2,0x1005,0x57,2,{0:0x6a3f});bank(t,t.initialFp);

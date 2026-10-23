@@ -210,7 +210,6 @@ fn compile_formation(
         pending.push_back(root.0);
     }
     let mut sources = Vec::new();
-    let mut leaf_targets = Vec::new();
     while let Some(mut pc) = pending.pop_front() {
         if nodes.len() >= options.instructions || starts.len() > options.blocks {
             break;
@@ -285,14 +284,6 @@ fn compile_formation(
                     gate: None,
                 },
             );
-            if let Some(Operation::Call {
-                target: BranchTarget::Direct(target),
-            }) = operation
-            {
-                if !leaf_targets.contains(&target.0) {
-                    leaf_targets.push(target.0);
-                }
-            }
             let mut enqueue = |target| {
                 if sorted_frontier.binary_search(&target).is_err() && starts.len() < options.blocks
                 {
@@ -342,29 +333,6 @@ fn compile_formation(
                     break;
                 }
                 _ => pc = next,
-            }
-        }
-    }
-    for target in leaf_targets {
-        if nodes.len() >= options.instructions || starts.len() >= options.blocks {
-            break;
-        }
-        if starts.contains(&target) {
-            continue;
-        }
-        let remaining = options.instructions - nodes.len();
-        if let Some(callee) = leaf_callee(memory, target, gates, remaining) {
-            if !additional_roots.is_empty()
-                && callee
-                    .iter()
-                    .any(|(instruction, _)| sorted_frontier.binary_search(&instruction.pc).is_ok())
-            {
-                continue;
-            }
-            starts.insert(target);
-            for (instruction, source) in callee {
-                nodes.entry(instruction.pc).or_insert(instruction);
-                sources.push(source);
             }
         }
     }
@@ -455,62 +423,6 @@ fn compile_formation(
         native,
         roots: Box::new([entry]),
     })
-}
-
-fn leaf_callee(
-    memory: &AddressSpace,
-    mut pc: u32,
-    gates: &[(GuestAddress, u32)],
-    remaining: usize,
-) -> Option<Vec<(Instruction, CodeSnapshot)>> {
-    let mut instructions = Vec::new();
-    for _ in 0..remaining.min(32) {
-        if gates.iter().any(|(address, _)| address.0 == pc) {
-            return None;
-        }
-        let BoundDecode::Instruction(decoded) = decode_for_compilation(
-            memory,
-            GuestAddress(pc),
-            DecodePolicy::Execution,
-            None,
-            DecodeAuthority::default(),
-        )
-        .ok()?
-        else {
-            return None;
-        };
-        let operation = *decoded.operation();
-        let returns = matches!(operation, Operation::Return { .. });
-        if decoded.segment_accesses() & (1 << 5) != 0
-            || decoded.is_privileged_instruction()
-            || !super::emitter::supports(&operation)
-            || matches!(operation, Operation::SoftwareInterrupt { .. })
-            || (!returns && terminates(Some(operation)))
-        {
-            return None;
-        }
-        let next = decoded.next_pc().0;
-        if next <= pc {
-            return None;
-        }
-        let source = memory
-            .snapshot_code(decoded.pc(), usize::from(decoded.length()))
-            .ok()?;
-        instructions.push((
-            Instruction {
-                pc,
-                next,
-                operation: Some(operation),
-                gate: None,
-            },
-            source,
-        ));
-        if returns {
-            return Some(instructions);
-        }
-        pc = next;
-    }
-    None
 }
 
 #[cfg(test)]
@@ -700,31 +612,28 @@ mod tests {
     }
 
     #[test]
-    fn direct_calls_keep_the_continuation_and_close_only_supported_leaf_calls() {
-        for (caller, callee, continuation, included) in [
+    fn direct_calls_keep_the_caller_continuation_without_absorbing_the_callee() {
+        for (caller, callee, continuation) in [
             (
                 &[0xe8, 0xfb, 0, 0, 0, 0x83, 0xc0, 1, 0x0f, 0x0b][..],
                 &[0x83, 0xc0, 3, 0xc3][..],
                 0x1005,
-                true,
             ),
             (
                 &[0x66, 0xe8, 0xfc, 0, 0x66, 0x40, 0x0f, 0x0b][..],
                 &[0x66, 0x40, 0x66, 0xc3][..],
                 0x1004,
-                false,
             ),
         ] {
             let mut memory = memory(&[0x1000]);
             memory.write(GuestAddress(0x1000), caller).unwrap();
             memory.write(GuestAddress(0x1100), callee).unwrap();
             let caller = compile(&memory, GuestAddress(0x1000), limits(64, 8)).unwrap();
-            let mut entries = vec![GuestAddress(0x1000), GuestAddress(continuation)];
-            if included {
-                entries.push(GuestAddress(0x1100));
-            }
-            assert_eq!(caller.entrypoints(), entries);
-            assert_eq!(caller.instruction_count(), if included { 5 } else { 3 });
+            assert_eq!(
+                caller.entrypoints(),
+                &[GuestAddress(0x1000), GuestAddress(continuation)]
+            );
+            assert_eq!(caller.instruction_count(), 3);
             let callee = compile(&memory, GuestAddress(0x1100), limits(64, 8)).unwrap();
             assert_eq!(callee.entrypoints(), &[GuestAddress(0x1100)]);
             assert_eq!(callee.instruction_count(), 2);

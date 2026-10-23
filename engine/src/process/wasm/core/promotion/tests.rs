@@ -44,23 +44,6 @@ fn insert(cache: &mut CoreCache32, memory: &AddressSpace, pc: u32, slot: u32) ->
     code
 }
 
-fn insert_split_caller(cache: &mut CoreCache32, memory: &AddressSpace) -> RegionRef {
-    let code = cache.insert(
-        compile(
-            memory,
-            GuestAddress(0x1000),
-            CompileOptions {
-                instructions: 4,
-                ..options()
-            },
-        )
-        .unwrap(),
-    );
-    assert!(!code.entrypoints().contains(&GuestAddress(0x2000)));
-    cache.install_link(&code, 1).unwrap();
-    code
-}
-
 fn mature(
     cache: &mut CoreCache32,
     memory: &AddressSpace,
@@ -376,7 +359,7 @@ fn preserved_roots_cannot_hide_a_dropped_indexed_interior_entry() {
     assert_eq!(rejection.version, memory.code_source_version());
     assert_eq!(rejection.instructions, limited.instructions);
     assert_eq!(rejection.source_entries, 3);
-    assert_eq!(rejection.target_entries, 3);
+    assert_eq!(rejection.target_entries, 2);
 }
 
 #[test]
@@ -726,7 +709,7 @@ fn cross_page_call_and_return_pairs_retain_both_roots_and_the_continuation() {
     for return_edge in [false, true] {
         let memory = cross_page_call_memory();
         let mut cache = CoreCache32::default();
-        let caller = insert_split_caller(&mut cache, &memory);
+        let caller = insert(&mut cache, &memory, 0x1000, 1);
         let callee = insert(&mut cache, &memory, 0x2000, 2);
         let before = cache.snapshot();
         let (source, target, pc) = if return_edge {
@@ -775,7 +758,7 @@ fn cross_page_formed_sources_reject_writes_and_permission_changes_on_either_page
         for revoke_execute in [false, true] {
             let mut memory = cross_page_call_memory();
             let mut cache = CoreCache32::default();
-            let caller = insert_split_caller(&mut cache, &memory);
+            let caller = insert(&mut cache, &memory, 0x1000, 1);
             let callee = insert(&mut cache, &memory, 0x2000, 2);
             mature(&mut cache, &memory, &caller, &callee, 0x2000);
             let merged = cache
@@ -806,7 +789,7 @@ fn cross_page_formed_sources_reject_writes_and_permission_changes_on_either_page
 fn cross_page_shortening_declines_without_admission_and_requires_fresh_heat() {
     let memory = cross_page_call_memory();
     let mut cache = CoreCache32::default();
-    let caller = insert_split_caller(&mut cache, &memory);
+    let caller = insert(&mut cache, &memory, 0x1000, 1);
     let callee = insert(&mut cache, &memory, 0x2000, 2);
     mature(&mut cache, &memory, &caller, &callee, 0x2000);
     let before = cache.snapshot();

@@ -35,7 +35,7 @@ fn image() -> [u8; 4096] {
 }
 
 #[test]
-fn bounded_leaf_discovery_closes_the_call_cycle_with_the_existing_limits() {
+fn explicit_callee_root_closes_the_call_cycle_without_changing_default_discovery() {
     let mut memory = memory();
     memory.write(GuestAddress(0x1000), &image()).unwrap();
     let normal = compile(&memory, GuestAddress(0x1000), options()).unwrap();
@@ -52,18 +52,9 @@ fn bounded_leaf_discovery_closes_the_call_cycle_with_the_existing_limits() {
         ],
     )
     .unwrap();
-    let limited = compile(
-        &memory,
-        GuestAddress(0x1000),
-        CompileOptions {
-            instructions: 4,
-            ..options()
-        },
-    )
-    .unwrap();
-    assert_eq!(limited.instruction_count(), 4);
+    assert_eq!(normal.instruction_count(), 4);
     assert_eq!(
-        limited.entrypoints(),
+        normal.entrypoints(),
         &[
             GuestAddress(0x1000),
             GuestAddress(0x1005),
@@ -71,8 +62,6 @@ fn bounded_leaf_discovery_closes_the_call_cycle_with_the_existing_limits() {
         ]
     );
     assert_eq!(closed.instruction_count(), 8);
-    assert_eq!(normal.instruction_count(), 8);
-    assert_eq!(normal.entrypoints(), closed.entrypoints());
     assert_eq!(
         closed.entrypoints(),
         &[
@@ -141,16 +130,7 @@ fn an_explicit_callee_owns_its_source_and_reached_gate_validation() {
         .write(GuestAddress(0x1000), &[0xe8, 0xfb, 0x0f, 0, 0, 0x0f, 0x0b])
         .unwrap();
     memory.write(GuestAddress(0x2000), &[0x40, 0xc3]).unwrap();
-    let normal = compile(
-        &memory,
-        GuestAddress(0x1000),
-        CompileOptions {
-            instructions: 2,
-            ..options()
-        },
-    )
-    .unwrap();
-    let automatic = compile(&memory, GuestAddress(0x1000), options()).unwrap();
+    let normal = compile(&memory, GuestAddress(0x1000), options()).unwrap();
     let closed = compile_formation(
         &memory,
         GuestAddress(0x1000),
@@ -162,7 +142,6 @@ fn an_explicit_callee_owns_its_source_and_reached_gate_validation() {
     .unwrap();
     memory.write(GuestAddress(0x2000), &[0x48]).unwrap();
     assert!(normal.is_current(&memory));
-    assert!(!automatic.is_current(&memory));
     assert!(!closed.is_current(&memory));
     memory.write(GuestAddress(0x2000), &[0x0f, 0x0b]).unwrap();
     assert!(matches!(
@@ -176,157 +155,6 @@ fn an_explicit_callee_owns_its_source_and_reached_gate_validation() {
         ),
         Err(CompileError::InvalidLimits)
     ));
-}
-
-#[test]
-fn a_proven_leaf_crosses_only_its_own_cached_frontiers() {
-    let mut memory = memory();
-    memory.write(GuestAddress(0x1000), &image()).unwrap();
-    let code = compile_with_frontier(
-        &memory,
-        GuestAddress(0x1000),
-        options(),
-        &[],
-        &[
-            GuestAddress(0x1005),
-            GuestAddress(0x1040),
-            GuestAddress(0x1043),
-        ],
-    )
-    .unwrap();
-    assert_eq!(code.instruction_count(), 5);
-    assert_eq!(
-        code.entrypoints(),
-        &[GuestAddress(0x1000), GuestAddress(0x1040)]
-    );
-    assert_eq!(
-        code.instruction_pcs().collect::<Vec<_>>(),
-        [0x1000, 0x1040, 0x1043, 0x1045, 0x1049]
-    );
-    memory.write(GuestAddress(0x3000), &[1]).unwrap();
-    assert!(code.is_current(&memory));
-    memory.write(GuestAddress(0x1041), &[0xc1]).unwrap();
-    assert!(!code.is_current(&memory));
-}
-
-#[test]
-fn explicit_formation_rebuilds_owned_leaves_without_crossing_another_owners_frontier() {
-    let mut memory = memory();
-    memory.write(GuestAddress(0x1000), &image()).unwrap();
-    memory
-        .write(GuestAddress(0x1040), &[0xe8, 0x3b, 0, 0, 0, 0xc3])
-        .unwrap();
-    memory.write(GuestAddress(0x1080), &[0x40, 0xc3]).unwrap();
-    let owner = compile(&memory, GuestAddress(0x1040), options()).unwrap();
-    assert!(owner.entrypoints().contains(&GuestAddress(0x1080)));
-    let roots = [GuestAddress(0x1000), GuestAddress(0x1040)];
-    let rebuilt = CompiledCode::compile_transition(
-        &memory,
-        GuestAddress(0x1040),
-        options(),
-        &[],
-        &[],
-        &roots,
-    )
-    .unwrap()
-    .unwrap();
-    assert_eq!(rebuilt.instruction_count(), 8);
-    for pc in owner.entrypoints() {
-        assert!(rebuilt.entrypoints().contains(pc));
-    }
-    for frontier in [0x1080, 0x1081] {
-        let limited = CompiledCode::compile_transition(
-            &memory,
-            GuestAddress(0x1040),
-            options(),
-            &[],
-            &[GuestAddress(frontier)],
-            &roots,
-        )
-        .unwrap()
-        .unwrap();
-        assert_eq!(limited.instruction_count(), 6);
-        assert!(!limited.entrypoints().contains(&GuestAddress(0x1080)));
-        assert!(
-            !limited
-                .instruction_pcs()
-                .any(|pc| matches!(pc, 0x1080 | 0x1081))
-        );
-        assert!(limited.entrypoints().contains(&GuestAddress(0x1000)));
-        assert!(limited.entrypoints().contains(&GuestAddress(0x1040)));
-    }
-}
-
-#[test]
-fn leaf_discovery_declines_branches_nested_calls_gates_and_missing_returns() {
-    for callee in [
-        vec![0xeb, 0, 0xc3],
-        vec![0xe8, 0, 0, 0, 0, 0xc3],
-        vec![0xcd, 0x80, 0xc3],
-        vec![0x0f, 0x0b],
-        vec![0x90; 32],
-    ] {
-        let mut memory = memory();
-        memory.write(GuestAddress(0x1000), &image()).unwrap();
-        memory.write(GuestAddress(0x1040), &callee).unwrap();
-        let code = compile(&memory, GuestAddress(0x1000), options()).unwrap();
-        assert_eq!(code.instruction_count(), 4);
-        assert!(!code.entrypoints().contains(&GuestAddress(0x1040)));
-    }
-    let mut memory = memory();
-    memory.write(GuestAddress(0x1000), &image()).unwrap();
-    memory.write(GuestAddress(0x1040), &[0x0f, 0x0b]).unwrap();
-    let code = compile_with_gates(
-        &memory,
-        GuestAddress(0x1000),
-        options(),
-        &[(GuestAddress(0x1040), 77)],
-    )
-    .unwrap();
-    assert_eq!(code.instruction_count(), 4);
-    assert!(!code.entrypoints().contains(&GuestAddress(0x1040)));
-}
-
-#[test]
-fn leaf_discovery_respects_the_leaf_instruction_and_block_caps() {
-    for (nops, included) in [(31, true), (32, false)] {
-        let mut memory = memory();
-        memory.write(GuestAddress(0x1000), &image()).unwrap();
-        let mut callee = vec![0x90; nops];
-        callee.push(0xc3);
-        memory.write(GuestAddress(0x1040), &callee).unwrap();
-        let code = compile(&memory, GuestAddress(0x1000), options()).unwrap();
-        assert_eq!(code.entrypoints().contains(&GuestAddress(0x1040)), included);
-        assert_eq!(code.instruction_count(), if included { 36 } else { 4 });
-    }
-    let mut memory = memory();
-    memory.write(GuestAddress(0x1000), &image()).unwrap();
-    let code = compile(
-        &memory,
-        GuestAddress(0x1000),
-        CompileOptions {
-            blocks: 1,
-            ..options()
-        },
-    )
-    .unwrap();
-    assert_eq!(code.entrypoints(), &[GuestAddress(0x1000)]);
-    assert_eq!(code.instruction_count(), 1);
-}
-
-#[test]
-fn speculative_leaf_fetch_failure_does_not_fail_the_caller() {
-    let mut memory = memory();
-    memory
-        .write(GuestAddress(0x1000), &[0xe8, 0xfb, 0x3f, 0, 0, 0x0f, 0x0b])
-        .unwrap();
-    let code = compile(&memory, GuestAddress(0x1000), options()).unwrap();
-    assert_eq!(
-        code.entrypoints(),
-        &[GuestAddress(0x1000), GuestAddress(0x1005)]
-    );
-    assert_eq!(code.instruction_count(), 2);
-    assert!(code.is_current(&memory));
 }
 
 fn fixture_resolver() -> Vec<u8> {
@@ -426,30 +254,17 @@ fn generated_call_regions_preserve_precise_prefixes_and_memory() {
         let mut memory = memory();
         memory.write(GuestAddress(0x1000), &image).unwrap();
         fs::write(directory.join(format!("{variant}.bin")), image).unwrap();
-        let caller = compile_with_gates(
+        let caller = compile_with_gates(&memory, GuestAddress(0x1000), options(), &gates).unwrap();
+        let callee = compile_with_gates(&memory, GuestAddress(0x1040), options(), &gates).unwrap();
+        let closed = compile_formation(
             &memory,
             GuestAddress(0x1000),
-            CompileOptions {
-                instructions: 4,
-                ..options()
-            },
+            options(),
             &gates,
+            &[],
+            &[GuestAddress(0x1040)],
         )
         .unwrap();
-        let callee = compile_with_gates(&memory, GuestAddress(0x1040), options(), &gates).unwrap();
-        let closed = if variant == "plain" {
-            compile_with_gates(&memory, GuestAddress(0x1000), options(), &gates).unwrap()
-        } else {
-            compile_formation(
-                &memory,
-                GuestAddress(0x1000),
-                options(),
-                &gates,
-                &[],
-                &[GuestAddress(0x1040)],
-            )
-            .unwrap()
-        };
         for (suffix, code) in [("caller", caller), ("callee", callee), ("closed", closed)] {
             let name = format!("{variant}-{suffix}");
             assert!(code.is_current(&memory));
