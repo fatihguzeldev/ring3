@@ -85,6 +85,12 @@ pub(super) fn supports(operation: &Operation) -> bool {
         )
 }
 
+pub(in crate::cpu::core) fn scalar_effect(
+    operation: Operation,
+) -> super::region::values::scalar::ScalarEffect {
+    integer::scalar_effect(operation)
+}
+
 pub(super) fn is_native(operation: &Operation) -> bool {
     numeric::supports(operation)
 }

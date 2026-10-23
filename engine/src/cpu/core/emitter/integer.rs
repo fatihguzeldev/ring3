@@ -438,6 +438,125 @@ pub(super) fn supports(operation: &Operation) -> bool {
         || bits::supports(operation)
 }
 
+pub(super) fn scalar_effect(
+    operation: Operation,
+) -> crate::cpu::core::region::values::scalar::ScalarEffect {
+    use crate::cpu::core::region::values::scalar::{FlagRecipe, FlagUpdate, ScalarEffect};
+    let write = |operand| match operand {
+        Operand::Register(local, _) => 1 << (local - 2),
+        _ => 0,
+    };
+    let memory = |operand| matches!(operand, Operand::Memory(_));
+    let read = |operand, width| match operand {
+        Operand::Memory(address) => Some((address, width)),
+        _ => None,
+    };
+    let recipe = |kind, width| {
+        FlagUpdate::Recipe(FlagRecipe {
+            kind,
+            width: width * 8,
+        })
+    };
+    let Some(lowered) = lower(operation) else {
+        return ScalarEffect {
+            flags: if matches!(operation, Operation::AhToFlags) {
+                FlagUpdate::Materialized
+            } else if super::super::effects::analyze(operation)
+                .is_some_and(|effect| effect.write == 0)
+            {
+                FlagUpdate::Preserve
+            } else {
+                FlagUpdate::Opaque
+            },
+            read: None,
+            gpr_writes: if matches!(operation, Operation::Nop) {
+                0
+            } else {
+                u8::MAX
+            },
+            // Extended, numeric, stack and control paths cannot accidentally
+            // advertise a read across a canonical helper or an implicit write.
+            memory_barrier: !matches!(operation, Operation::Nop),
+        };
+    };
+    let (flags, read, gpr_writes, memory_barrier) = match lowered {
+        Integer::Move(destination, source, width) => (
+            FlagUpdate::Preserve,
+            if memory(destination) {
+                None
+            } else {
+                read(source, width)
+            },
+            write(destination),
+            memory(destination),
+        ),
+        Integer::Binary(kind, destination, source, width) => {
+            let writes = !matches!(kind, BinaryKind::Cmp | BinaryKind::Test);
+            let memory_write = writes && memory(destination);
+            let input = if memory_write || (memory(destination) && memory(source)) {
+                None
+            } else {
+                read(destination, width).or_else(|| read(source, width))
+            };
+            (
+                recipe(
+                    match kind {
+                        BinaryKind::Add => FlagKind::Add,
+                        BinaryKind::Adc => FlagKind::Adc,
+                        BinaryKind::Sub | BinaryKind::Cmp => FlagKind::Sub,
+                        BinaryKind::Sbb => FlagKind::Sbb,
+                        _ => FlagKind::Logical,
+                    },
+                    width,
+                ),
+                input,
+                if writes { write(destination) } else { 0 },
+                memory_write,
+            )
+        }
+        Integer::Unary(kind, destination, width) => (
+            match kind {
+                UnaryKind::Not => FlagUpdate::Preserve,
+                UnaryKind::Inc => recipe(FlagKind::Inc, width),
+                UnaryKind::Dec => recipe(FlagKind::Dec, width),
+                UnaryKind::Neg => recipe(FlagKind::Neg, width),
+            },
+            None,
+            write(destination),
+            memory(destination),
+        ),
+        Integer::Lea(destination, _, _) => {
+            (FlagUpdate::Preserve, None, 1 << destination.index(), false)
+        }
+        Integer::Set(_, destination) => (
+            FlagUpdate::Preserve,
+            None,
+            write(destination),
+            memory(destination),
+        ),
+        Integer::ConditionalMove(_, destination, source, width) => (
+            FlagUpdate::Preserve,
+            read(source, width),
+            write(destination),
+            false,
+        ),
+        Integer::Exchange(left, right, _) => (
+            FlagUpdate::Preserve,
+            None,
+            write(left) | write(right),
+            memory(left) || memory(right),
+        ),
+        Integer::Carry(_) => (FlagUpdate::Materialized, None, 0, false),
+        Integer::Direction(_) => (FlagUpdate::Preserve, None, 0, false),
+    };
+    ScalarEffect {
+        flags,
+        read,
+        gpr_writes,
+        memory_barrier,
+    }
+}
+
 pub(super) fn emit(out: &mut Output<'_>, operation: Operation) -> bool {
     let Some(operation) = lower(operation) else {
         return extended::emit(out, operation)

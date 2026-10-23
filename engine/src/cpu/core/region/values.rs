@@ -2,7 +2,9 @@ mod access;
 mod flow;
 mod fp;
 mod gpr;
+mod guards;
 mod lower;
+pub(in crate::cpu::core) mod scalar;
 #[cfg(test)]
 mod tests;
 
@@ -10,6 +12,23 @@ use super::{BlockId, Region, ResumePc};
 use crate::cpu::x86::{X87Operation, ir::EffectiveAddress};
 
 pub(in crate::cpu::core) use access::{AccessGroup, AccessMember};
+pub(in crate::cpu::core) use guards::Guards;
+use scalar::ScalarPlan;
+
+/// One consumed semantic lowering plan, separate from the architectural exit map.
+pub(in crate::cpu::core) struct ExecutionPlan {
+    pub scalar: ScalarPlan,
+    pub fp: Guards,
+}
+
+impl ExecutionPlan {
+    pub fn analyze(region: &Region, values: &RegionPlan) -> Self {
+        Self {
+            scalar: ScalarPlan::analyze(region, values),
+            fp: Guards::analyze(region, values),
+        }
+    }
+}
 
 macro_rules! id {
     ($name:ident) => {
