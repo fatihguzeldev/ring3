@@ -10,7 +10,7 @@ const CACHED_LOGICAL_ADDRESS: u32 = 128;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) struct AddressFact {
-    address: EffectiveAddress,
+    pub(super) address: EffectiveAddress,
     base: Option<ValueId>,
     index: Option<ValueId>,
     authority: EffectId,

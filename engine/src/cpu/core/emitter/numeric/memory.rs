@@ -28,26 +28,38 @@ pub(super) fn prepare(
         out.c().br(0);
     }
     out.address(address);
+    let grouped = out.group_geometry(address, width, write);
+    if grouped {
+        out.c().i32_eqz().if_(wasm_encoder::BlockType::Empty);
+    }
     out.c()
         .local_get(LOGICAL_ADDRESS)
         .i32_const((u32::MAX - (width - 1)) as i32)
         .i32_gt_u()
-        .br_if(0)
+        .br_if(u32::from(grouped))
         .local_get(ADDRESS)
         .i32_const(4095)
         .i32_and()
         .i32_const((4096 - width) as i32)
         .i32_gt_u()
-        .br_if(0);
+        .br_if(u32::from(grouped));
     if aligned {
         out.c()
             .local_get(ADDRESS)
             .i32_const((width - 1) as i32)
             .i32_and()
-            .br_if(0);
+            .br_if(u32::from(grouped));
     }
     let translate = out.internal(9);
-    cache::translate(out.c().raw(), if write { 2 } else { 1 }, translate);
+    cache::translate_at(
+        out.c().raw(),
+        if write { 2 } else { 1 },
+        translate,
+        u32::from(grouped),
+    );
+    if grouped {
+        out.c().end();
+    }
     if write {
         out.c()
             .local_get(CTX)

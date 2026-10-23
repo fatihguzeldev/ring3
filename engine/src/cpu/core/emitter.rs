@@ -1,3 +1,4 @@
+mod access;
 mod code;
 mod control;
 mod exits;
@@ -145,6 +146,7 @@ pub(super) fn emit(
         numeric::normalizer_parameters(),
         numeric::normalizer_results(),
     );
+    types.ty().function([ValType::I32; 9], [ValType::I32; 3]);
     module.section(&types);
     let mut imports = ImportSection::new();
     imports.import(
@@ -173,6 +175,10 @@ pub(super) fn emit(
     functions.function(9);
     functions.function(10);
     functions.function(11);
+    let grouped = u32::from(plan.has_access_groups());
+    if grouped != 0 {
+        functions.function(12);
+    }
     for _ in &store_widths {
         functions.function(7);
     }
@@ -181,7 +187,7 @@ pub(super) fn emit(
     functions.function(8);
     module.section(&functions);
     let mut exports = ExportSection::new();
-    let wrappers = 11 + shift + store_widths.len() as u32;
+    let wrappers = 11 + shift + grouped + store_widths.len() as u32;
     exports.export("run", ExportKind::Func, wrappers);
     exports.export("link", ExportKind::Func, wrappers + 1);
     exports.export("publish", ExportKind::Func, wrappers + 2);
@@ -204,6 +210,9 @@ pub(super) fn emit(
         &plan,
         !native.is_empty(),
     ));
+    if grouped != 0 {
+        code.function(&super::memory::groups::emit_acquire());
+    }
     for &width in &store_widths {
         code.function(&super::memory::emit_store(width));
     }
@@ -235,9 +244,12 @@ pub(super) fn emit(
     {
         functions.append(2 + shift + index as u32, name);
     }
+    if grouped != 0 {
+        functions.append(11 + shift, "guest.acquire_group");
+    }
     for (index, width) in store_widths.iter().enumerate() {
         functions.append(
-            11 + shift + index as u32,
+            11 + shift + grouped + index as u32,
             &format!("guest.store{}", width * 8),
         );
     }
@@ -328,6 +340,7 @@ fn run(
         (1, ValType::I32),
         (3, ValType::I32),
         (2, ValType::I32),
+        (19, ValType::I32),
     ]);
     let mut out = Output {
         function: &mut function,
@@ -342,6 +355,8 @@ fn run(
         after_frame: None,
         address_fact: None,
         guarded_gpr_facts: false,
+        current_block: None,
+        grouped_accesses: !precise,
         native,
         store_widths,
     };
@@ -429,6 +444,8 @@ pub(super) struct Output<'a> {
     after_frame: Option<super::region::values::FrameStateId>,
     address_fact: Option<integer::AddressFact>,
     guarded_gpr_facts: bool,
+    current_block: Option<super::region::BlockId>,
+    grouped_accesses: bool,
     native: &'a [NativeInstruction],
     store_widths: Vec<u32>,
 }
@@ -452,6 +469,10 @@ impl Output<'_> {
         block: &super::region::RegionBlock,
         precise: bool,
     ) {
+        self.current_block = Some(id);
+        if self.grouped_accesses && self.plan.has_access_groups() {
+            super::memory::groups::invalidate(self.c().raw());
+        }
         let mut counted = false;
         if precise {
             // Chunking bounds simultaneous instruction labels independently of
@@ -732,9 +753,19 @@ impl Output<'_> {
     }
 
     fn read_memory(&mut self, width: u32, destination: u32, prepare: bool) {
-        self.check_span(width & 0xff);
+        let grouped = self.current_group_geometry(width & 0xff, false);
+        if grouped {
+            self.c()
+                .local_tee(super::memory::groups::ADMITTED)
+                .i32_eqz()
+                .if_(BlockType::Empty);
+            self.check_span(width & 0xff);
+            self.c().end();
+        } else {
+            self.check_span(width & 0xff);
+        }
         let translate = self.internal(9);
-        super::memory::read(self.c().raw(), width, 0, translate, prepare);
+        super::memory::read(self.c().raw(), width, 0, translate, prepare, grouped);
         self.c()
             .local_tee(WIDE)
             .i64_const(32)
@@ -759,8 +790,27 @@ impl Output<'_> {
     }
 
     fn write_memory(&mut self, width: u32, source: u32, prepared: bool) {
+        let mut grouped = false;
         if !prepared {
-            self.check_span(width);
+            // Only a successful nonfaulting group admission bypasses the usual
+            // current-access checks. Failed speculation keeps the existing path.
+            self.c().i32_const(0).local_set(35);
+            grouped = self.current_group_geometry(width, true);
+            if grouped {
+                self.c()
+                    .if_(BlockType::Empty)
+                    .local_get(33)
+                    .i32_const(1)
+                    .i32_add()
+                    .local_set(35)
+                    .local_get(34)
+                    .local_set(36)
+                    .else_();
+                self.check_span(width);
+                self.c().end();
+            } else {
+                self.check_span(width);
+            }
         }
         let index = match self.store_widths.iter().position(|&stored| stored == width) {
             Some(index) => index,
@@ -770,7 +820,7 @@ impl Output<'_> {
                 index
             }
         };
-        let commit = self.internal(11 + index as u32);
+        let commit = self.internal(11 + u32::from(self.plan.has_access_groups()) + index as u32);
         let translate = self.internal(9);
         super::memory::write(
             self.c().raw(),
@@ -779,7 +829,8 @@ impl Output<'_> {
             commit,
             1,
             translate,
-            prepared,
+            prepared || grouped,
+            grouped,
         );
         self.c()
             .local_tee(WRITE_STATUS)

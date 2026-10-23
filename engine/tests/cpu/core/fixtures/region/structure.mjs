@@ -156,13 +156,15 @@ export function instrumentStateWitness(source) {
   const globalBase=WebAssembly.Module.imports(original).filter(item=>item.kind==='global').length;
   const normalizer=[...module.names].find(([,name])=>name==='guest.normalize_frame')?.[0];
   const materializer=[...module.names].find(([,name])=>name==='guest.materialize_numeric')?.[0];
+  const acquire=[...module.names].find(([,name])=>name==='guest.acquire_group')?.[0];
+  const translate=[...module.names].find(([,name])=>name==='guest.translate_page')?.[0];
   assert(Number.isInteger(materializer),'the raw80 materializer is a real defined function');
   const u=value=>{const result=[];do{const byte=value&127;value>>>=7;result.push(byte|(value?128:0));}while(value);return Uint8Array.from(result);};
   const concat=chunks=>Uint8Array.from(Buffer.concat(chunks.map(value=>Buffer.from(value))));
   const section=(id,bytes)=>concat([Uint8Array.of(id),u(bytes.length),bytes]);
   const increment=index=>concat([Uint8Array.of(0x23),u(globalBase+index),Uint8Array.of(0x41,1,0x6a,0x24),u(globalBase+index)]);
   const exports=['test.normalizer_calls','test.materializer_calls','test.raw80_stores','test.fp_metadata_writes',
-    'test.body_entries','test.control_admissions'];
+    'test.body_entries','test.control_admissions','test.group_acquisitions','test.page_translations'];
   const input=new Reader(source);input.take(8);const output=[source.subarray(0,8)];let added=false;
   while(input.at<source.length){
     const id=input.byte(),bytes=input.take(input.unsigned());let rewritten=bytes;
@@ -177,9 +179,11 @@ export function instrumentStateWitness(source) {
       const r=new Reader(bytes),count=r.unsigned(),bodies=[];
       for(let defined=0;defined<count;defined++){
         const raw=r.take(r.unsigned()),index=defined+module.imports.length,fn=module.functions[defined];let body=raw;
-        if(index===normalizer||index===materializer||['guest.run','guest.precise'].includes(module.names.get(index))){
+        if(index===normalizer||index===materializer||index===acquire||index===translate||['guest.run','guest.precise'].includes(module.names.get(index))){
           const insertions=new Map(),insert=(at,bytes)=>insertions.set(at,[...(insertions.get(at)??[]),bytes]);
-          if(index===normalizer||index===materializer){
+          if(index===acquire||index===translate){
+            insert(fn.localsEnd,increment(index===acquire?6:7));
+          }else if(index===normalizer||index===materializer){
             insert(fn.localsEnd,increment(index===normalizer?0:1));
             for(const node of fn.ops)if(node.op===0x37&&node.memoryOffset===0||node.op===0x3b&&node.memoryOffset===8)
               insert(node.offset,increment(2));
@@ -201,7 +205,13 @@ export function instrumentStateWitness(source) {
     output.push(section(id,rewritten));
   }
   assert(added,'diagnostic globals are exported alongside actual generated entry points');
-  return {bytes:concat(output),read:instance=>Object.fromEntries(exports.map(name=>[name.slice(5),instance.exports[name].value]))};
+  const fn=Number.isInteger(acquire)?module.functions[acquire-module.imports.length]:undefined;
+  const groupProof=fn?{index:acquire,...module.types[module.functionTypes[acquire-module.imports.length]],
+    contextLoads:fn.ops.filter((node,index)=>node.op>=0x28&&node.op<=0x35&&fn.ops[index-1]?.op===0x20&&fn.ops[index-1]?.local===0)
+      .map(node=>node.memoryOffset).sort((a,b)=>a-b),
+    stores:fn.ops.filter(node=>node.op>=0x36&&node.op<=0x3e).length,
+    calls:fn.ops.filter(node=>[16,17,18,19,20,21].includes(node.op)).length}:undefined;
+  return {bytes:concat(output),groupProof,read:instance=>Object.fromEntries(exports.map(name=>[name.slice(5),instance.exports[name].value]))};
 }
 
 function controlAdmission(ops,index) {

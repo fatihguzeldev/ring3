@@ -162,6 +162,9 @@ impl Emitter<'_, '_> {
                 .else_();
         }
         self.out.c().i32_const(0).local_set(super::PREFIX_BASE);
+        // Group proofs consume actual GPR value identities. Ordinary entries
+        // without constant guards are valid; interior ports took the false arm.
+        self.out.c().i32_const(1).local_set(super::GP_FACTS_VALID);
         if self.out.guarded_gpr_facts {
             self.out.c().i32_const(1);
             for (register, value) in constants.into_iter().enumerate() {

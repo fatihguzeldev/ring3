@@ -8,6 +8,7 @@ const CACHED_PERMISSIONS: u32 = 107;
 
 pub(in crate::cpu::core) fn invalidate(code: &mut InstructionSink<'_>) {
     code.i32_const(0).local_set(PAGE_KEY);
+    super::groups::invalidate(code);
 }
 
 fn page(code: &mut InstructionSink<'_>) {
@@ -15,10 +16,11 @@ fn page(code: &mut InstructionSink<'_>) {
 }
 
 // the caller checks the span first; rejection exits its enclosing canonical-access block.
-pub(in crate::cpu::core) fn translate(
+pub(in crate::cpu::core) fn translate_at(
     code: &mut InstructionSink<'_>,
     permission: i32,
     miss_index: u32,
+    failure_depth: u32,
 ) {
     debug_assert!(matches!(permission, 1..=3));
     code.local_get(PAGE_KEY);
@@ -32,7 +34,7 @@ pub(in crate::cpu::core) fn translate(
         .i32_and()
         .i32_const(permission)
         .i32_ne()
-        .br_if(1)
+        .br_if(1 + failure_depth)
         .local_get(CACHED_SLOT)
         .local_set(SLOT)
         .else_()
@@ -47,7 +49,7 @@ pub(in crate::cpu::core) fn translate(
         .local_tee(SLOT)
         .i32_const(-1)
         .i32_eq()
-        .br_if(1)
+        .br_if(1 + failure_depth)
         .local_get(SLOT)
         .local_set(CACHED_SLOT);
     page(code);

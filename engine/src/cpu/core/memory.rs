@@ -1,5 +1,6 @@
 pub(in crate::cpu::core) mod authority;
 pub(in crate::cpu::core) mod cache;
+pub(in crate::cpu::core) mod groups;
 
 use super::emitter::{ADDRESS, CTX};
 use wasm_encoder::{BlockType, Function, InstructionSink, MemArg, ValType};
@@ -50,7 +51,13 @@ pub(super) fn load_view(code: &mut InstructionSink<'_>) {
 }
 
 // the enclosing empty block branches to the canonical slow access.
-fn geometry(code: &mut InstructionSink<'_>, width: u32, permission: i32, miss_index: u32) {
+fn geometry(
+    code: &mut InstructionSink<'_>,
+    width: u32,
+    permission: i32,
+    miss_index: u32,
+    failure_depth: u32,
+) {
     debug_assert!(matches!(width, 1 | 2 | 4));
     if width != 1 {
         code.local_get(ADDRESS)
@@ -58,9 +65,9 @@ fn geometry(code: &mut InstructionSink<'_>, width: u32, permission: i32, miss_in
             .i32_and()
             .i32_const((4096 - width) as i32)
             .i32_gt_u()
-            .br_if(0);
+            .br_if(failure_depth);
     }
-    cache::translate(code, permission, miss_index);
+    cache::translate_at(code, permission, miss_index, failure_depth);
 }
 
 pub(super) fn read(
@@ -69,6 +76,7 @@ pub(super) fn read(
     slow_index: u32,
     miss_index: u32,
     prepare: bool,
+    grouped: bool,
 ) {
     let width = encoded_width & 0xff;
     let modify = encoded_width & 0x100 != 0;
@@ -79,7 +87,21 @@ pub(super) fn read(
     }
     code.block(BlockType::Result(ValType::I64))
         .block(BlockType::Empty);
-    geometry(code, width, if modify { 3 } else { 1 }, miss_index);
+    if grouped {
+        code.local_get(groups::ADMITTED)
+            .i32_eqz()
+            .if_(BlockType::Empty);
+    }
+    geometry(
+        code,
+        width,
+        if modify { 3 } else { 1 },
+        miss_index,
+        u32::from(grouped),
+    );
+    if grouped {
+        code.end();
+    }
     if prepare {
         code.local_get(SLOT)
             .i32_const(1)
@@ -114,23 +136,38 @@ pub(super) fn write(
     slow_index: u32,
     miss_index: u32,
     prepared: bool,
+    group_fallback: bool,
 ) {
     debug_assert!(matches!(width, 1 | 2 | 4));
     code.block(BlockType::Result(ValType::I32))
         .block(BlockType::Empty);
     if prepared {
-        // slow reads can change mappings, so their writes repeat canonical preflight.
-        code.local_get(PREPARED_SLOT)
-            .i32_eqz()
-            .br_if(0)
-            .local_get(PREPARED_SLOT)
-            .i32_const(1)
-            .i32_sub()
-            .local_set(SLOT)
-            .local_get(PREPARED_POINTER)
-            .local_set(POINTER);
+        if group_fallback {
+            code.local_get(PREPARED_SLOT)
+                .if_(BlockType::Empty)
+                .local_get(PREPARED_SLOT)
+                .i32_const(1)
+                .i32_sub()
+                .local_set(SLOT)
+                .local_get(PREPARED_POINTER)
+                .local_set(POINTER)
+                .else_();
+            geometry(code, width, 2, miss_index, 1);
+            code.end();
+        } else {
+            // slow reads can change mappings, so their writes repeat canonical preflight.
+            code.local_get(PREPARED_SLOT)
+                .i32_eqz()
+                .br_if(0)
+                .local_get(PREPARED_SLOT)
+                .i32_const(1)
+                .i32_sub()
+                .local_set(SLOT)
+                .local_get(PREPARED_POINTER)
+                .local_set(POINTER);
+        }
     } else {
-        geometry(code, width, 2, miss_index);
+        geometry(code, width, 2, miss_index, 0);
     }
 
     code.local_get(CTX)

@@ -7,6 +7,7 @@ import {arithmetic, loopOutcome} from './oracle.mjs';
 import {runExtended} from './extended.mjs';
 import {runBits} from './bits.mjs';
 import {assertCoreNames} from './names.mjs';
+import {instrumentStateWitness} from './region/structure.mjs';
 
 const directory = process.argv[2];
 const PAGE = 4096, MAP = 0x10000, PERM = 0x410000;
@@ -115,10 +116,12 @@ for (const line of readFileSync(join(directory, 'programs.tsv'), 'utf8').trim().
     {module: 'ring3', name: 'read', kind: 'function'},
     {module: 'ring3', name: 'write', kind: 'function'},
   ], `${name}: declared imports only`);
-  const instance = instantiateCore(module, {ring3: {memory, read, write, numeric}});
+  const diagnostic=name==='rmw-repeat'?instrumentStateWitness(wasm):undefined;
+  const instance = instantiateCore(diagnostic?new WebAssembly.Module(diagnostic.bytes):module, {ring3: {memory, read, write, numeric}});
   assert.equal(typeof instance.exports.run, 'function');
   assert.equal(instance.exports.run.length, 2);
-  programs.set(name, {code: Buffer.from(hex, 'hex'), identity: BigInt(identity), wasmSha256: hash(wasm), run: instance.exports.run});
+  programs.set(name, {code: Buffer.from(hex, 'hex'), identity: BigInt(identity), wasmSha256: hash(wasm), run: instance.exports.run,
+    groupWitness:diagnostic?()=>diagnostic.read(instance):undefined});
 }
 
 function seed(name, options = {}) {
@@ -171,6 +174,7 @@ function seed(name, options = {}) {
 
 function check(name, label, budget, options, outcome) {
   const initial = seed(name, options), before = bytes.slice(CTX, CTX + 128);
+  const witnessBefore=programs.get(name).groupWitness?.();
   const expectedRam = bytes.slice(BACKING, BACKING + 16 * PAGE);
   const expectedNumeric = bytes.slice(NUMERIC, NUMERIC + 100);
   if (options.numericStore) {
@@ -201,7 +205,10 @@ function check(name, label, budget, options, outcome) {
     remainingBudget = get(CTX + 44);
     if (reason !== 1) break;
   }
+  const witnessAfter=programs.get(name).groupWitness?.();
+  const groupWitness=witnessAfter&&Object.fromEntries(Object.entries(witnessAfter).map(([key,value])=>[key,value-witnessBefore[key]]));
   const raw = {name, label, budget, reason, context: Buffer.from(bytes.subarray(CTX, CTX + 128)).toString('hex'),
+    ...(groupWitness?{groupWitness}:{}),
     moduleSequence,
     ramSha256: hash(bytes.subarray(BACKING, BACKING + 16 * PAGE)), helperReads: active.reads, helperWrites: active.writes,
     numericCalls: active.numeric, numericVersions: active.numericVersions,
@@ -229,6 +236,8 @@ function check(name, label, budget, options, outcome) {
   assert.equal(view.getBigUint64(VERSION, true), (options.initialVersion ?? 0n) + BigInt(expected.writes?.length ?? 0), `${label}: store transaction count`);
   assert.deepEqual(bytes.subarray(PAGE_VERSION, PAGE_VERSION + 16 * 16), expectedVersions, `${label}: all physical page versions`);
   assert.equal(view.getBigUint64(GENERATION, true), expected.reason === 6 ? 1n : 0n, `${label}: code generation`);
+  if(expected.groupWitness)for(const[key,value]of Object.entries(expected.groupWitness))
+    assert.equal(groupWitness?.[key],value,`${label}: actual generated ${key}`);
   if (options.privateCopy) {
     assert.equal(get(MAP + 3 * 4), 16, `${label}: detached mapping`);
     assert.equal(get(MAP + 5 * 4), 3, `${label}: sibling keeps shared mapping`);
@@ -332,7 +341,8 @@ check('mixed-width-stores', 'store-helper-registration-follows-first-width-use',
     writes: [[0x3000, 4, 0x12345678], [0x3004, 1, 0x78], [0x3006, 2, 0x5678], [0x3008, 4, 0x80000000]]});
 check('rmw-repeat', 'slow-private-detach-invalidates-the-next-instruction-translation', 8,
   {privateCopy: true, initial: [[0x3000, 4, 0xffffffff]]},
-  {reason: 4, pc: 0x1006, retired: 2, flags: 2, helpers: 1, writes: [[0x3000, 4, 0], [0x3000, 4, 1]]});
+  {reason: 4, pc: 0x1006, retired: 2, flags: 2, helpers: 1, writes: [[0x3000, 4, 0], [0x3000, 4, 1]],
+    groupWitness:{group_acquisitions:2,page_translations:0}});
 check('rmw', 'modify-through-nonexecutable-alias-stops-after-committed-store', 8,
   {executableAlias: true, initial: [[0x3000, 4, 0xffffffff]]},
   {reason: 6, pc: 0x1003, retired: 1, flags: 0x57, helpers: 1, writes: [[0x3000, 4, 0]]});
