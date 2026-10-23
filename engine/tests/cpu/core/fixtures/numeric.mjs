@@ -37,7 +37,13 @@ function runCase(name, codeHex, budget, options, verify) {
   const word = (pointer,offset=0) => view().getUint32(pointer+offset,true);
   const put = (pointer,offset,value) => view().setUint32(pointer+offset,value>>>0,true);
   let arena = 0, context = 0, active = false, opened = false, numericCalls = 0;
-  const numeric = (...args) => {numericCalls++;return api.core_numeric(...args);};
+  const numeric = (...args) => {
+    numericCalls++;
+    const returned = api.core_numeric(...args);
+    const payloads = options?.helperPayloads?.[numericCalls-1];
+    if (payloads) assertBankPayloads('canonical helper observes completed numerical prefix',payloads);
+    return returned;
+  };
   const result = {name, codeHex, budget, controls: []}; report.cases.push(result);
   const status = (operation,wanted,...args) => {
     const actual = api[operation](...args)>>>0;
@@ -65,6 +71,15 @@ function runCase(name, codeHex, budget, options, verify) {
     const before = raw(); action(); const after = raw();
     result.controls.push({label,before,after}); checkpoint(); assert.deepEqual(after,before,`${name}: ${label} neutral`);
   };
+  function assertBankPayloads(label,payloads) {
+    const pointer=word(context,92), observed={};
+    assert(pointer>0,'private numerical bank is resident');
+    for(const[index,wanted]of Object.entries(payloads)) {
+      observed[index]=hex(slice(pointer+20+Number(index)*10,10));
+      assert.equal(observed[index],wanted,`${name}: ${label}, physical slot ${index}`);
+    }
+    result.controls.push({label,payloads:observed});
+  }
   try {
     for(const name of ['open','close','arena_ptr','arena_len','map','upload','core_prepare','core_code_ptr','core_code_len',
       'core_context_ptr','core_begin','core_end','core_import','core_export','core_numeric','core_read','core_write']) assert.equal(typeof api[name],'function',`native ${name}`);
@@ -118,6 +133,23 @@ function runCase(name, codeHex, budget, options, verify) {
       result.handoff = {prefixRetired,prefixPc,published:hex(published),imported:hex(unpublishedFp),moduleSha256:hash(resumedCode)};
       status('core_begin',0); active = true;
     }
+    if(options?.reentry) {
+      const prefixStop=run(context,options.reentry.budget)>>>0;
+      assert.equal(prefixStop,2,'private reentry stops at the exact prefix budget');
+      const prefixRetired=word(context,40),prefixPc=word(context,32);
+      assert.equal(prefixRetired,options.reentry.budget);
+      assert.equal(word(context,44),0,'private prefix consumed its entire declared budget');
+      status('core_end',0);active=false;
+      assertBankPayloads('core_end preserves completed physical register payloads',options.reentry.payloads);
+      assert.deepEqual(slice(arena+fpOffset,128),unpublishedFp,'private core_end does not publish arena state');
+      status('core_prepare',0,prefixPc,256,32);
+      context=api.core_context_ptr()>>>0;
+      const resumedCode=slice(api.core_code_ptr()>>>0,api.core_code_len()>>>0),resumedModule=new WebAssembly.Module(resumedCode);
+      assertCoreNames(resumedModule,prefixPc);
+      run=new WebAssembly.Instance(resumedModule,{ring3:{memory,read:api.core_read,write:api.core_write,numeric}}).exports.run;
+      result.reentry={prefixRetired,prefixPc,moduleSha256:hash(resumedCode)};
+      status('core_begin',0);active=true;
+    }
     const bankPointer=word(context,92);
     if(options?.nullBank) put(context,92,0);
     const stop = run(context,budget)>>>0;
@@ -125,12 +157,13 @@ function runCase(name, codeHex, budget, options, verify) {
     if(options?.nullBank) put(context,92,bankPointer);
     if(options?.numericCalls!==undefined) assert.equal(numericCalls,options.numericCalls,`${name}: numerical helper calls`);
     status('core_end',0); active = false;
+    if(options?.endPayloads) assertBankPayloads('core_end preserves completed and popped physical register payloads',options.endPayloads);
     neutral('inactive numerical import',()=>status('core_numeric',8,context,0));
     assert.deepEqual(slice(arena+fpOffset,128),unpublishedFp,'private FP bank remains unpublished until export');
     assert.deepEqual(slice(arena+simdOffset,160),initialSimd,'private SIMD bank remains unpublished until export');
     const state = {registers:Array.from({length:8},(_,i)=>word(context,i*4)),pc:word(context,32),flags:word(context,36),
       retired:word(context,40),remaining:word(context,44),vector:word(context,116),detail:word(context,48),metadata:word(context,52)};
-    const work = budget-state.remaining;
+    const work = budget-state.remaining+(options?.reentry?.budget??0);
     if(options?.invalidExport) {
       const flags = word(context,36); put(context,36,0);
       neutral('invalid FLAGS export with dirty bank',()=>status('core_export',7,stop,work)); put(context,36,flags);
@@ -170,6 +203,45 @@ function standard(t,retired,pc,flags=2,stop=2,changes={}) {
 function bank(t,wanted) {assert.deepEqual(t.slice(t.arena+fpOffset,128),wanted,'full literal FP128');}
 
 try {
+  runCase('private-reentry-preserves-stack-through-exchange-pop-and-sign',
+    'd903 d94304 d9c9 dec1 d9e0 d9e1 0f0b',4,
+    {control:0x27f,data:values,numericCalls:0,
+      reentry:{budget:2,payloads:{6:'00000000000000800040',7:ext3}},
+      endPayloads:{6:ext3,7:'00000000000000a00140'}},t=>{
+      assert.equal(t.stop,2);assert.equal(t.state.retired,6);assert.equal(t.state.remaining,0);
+      assert.equal(t.state.pc,0x100d);assert.equal(t.state.flags,2);
+      assert.deepEqual(t.state.registers,t.initialRegisters,'private reentry preserves every general register');
+      bank(t,t.fp({status:0x3800,tag:0x3fff,opcode:0x1e1,fip:0x100b,fdp:0x3004,cs:0x1b,ds:0x23,
+        registers:{6:ext3,7:'00000000000000a00140'}}));
+    });
+  runCase('popped-x87-payload-is-visible-to-fxsave',
+    'd903 d84b04 d95b08 0fae0500500000 0f0b',4,
+    {control:0x27f,data:values,numericCalls:1,image:true,helperPayloads:[{7:ext6}]},t=>{
+      standard(t,4,0x100f);t.writeExpected(0x3008,unhex('0000c040'));
+      bank(t,t.fp({opcode:0x15b,fip:0x1005,fdp:0x3008,cs:0x1b,ds:0x23,registers:{7:ext6}}));
+      const image=new Uint8Array(464),v=new DataView(image.buffer);
+      v.setUint16(0,0x27f,true);v.setUint16(6,0x15b,true);
+      v.setUint32(8,0x1005,true);v.setUint16(12,0x1b,true);
+      v.setUint32(16,0x3008,true);v.setUint16(20,0x23,true);
+      v.setUint32(24,0x1f80,true);v.setUint32(28,0xffff,true);
+      image.set(unhex(ext6),32+7*16);t.writeExpected(0x5000,image);
+    });
+  runCase('completed-arithmetic-prefix-survives-helper-fault',
+    'd903 d84b04 d91d00600000 0f0b',8,
+    {control:0x27f,data:values,numericCalls:1,helperPayloads:[{7:ext6}]},t=>{
+      standard(t,2,0x1005,2,3);assert.equal(t.state.detail,0x6000);
+      assert.equal(t.state.metadata,0x10204);assert.equal(t.state.vector,0x40e);
+      bank(t,t.fp({status:0x3800,tag:0x3fff,opcode:0x4b,fip:0x1002,fdp:0x3004,
+        cs:0x1b,ds:0x23,registers:{7:ext6}}));
+    });
+  runCase('exchange-preserves-full64-low-significand-bit',
+    'd903 d9c9 db7b08 d95b14 0f0b',4,
+    {control:0x27f,data:values,fp:{tag:0xfffc,registers:{0:'0100000000000080ff3f'}}},t=>{
+      standard(t,4,0x100a);t.writeExpected(0x3008,unhex('0100000000000080ff3f'));
+      t.writeExpected(0x3014,unhex('00004040'));
+      bank(t,t.fp({status:0x800,opcode:0x15b,fip:0x1007,fdp:0x3014,cs:0x1b,ds:0x23,
+        registers:{0:ext3,7:'0100000000000080ff3f'}}));
+    });
   runCase('consecutive-stack-metadata-through-exchange-pop-and-sign','d903 d94304 d9c9 dec1 d9e0 d9e1 d95b08 0f0b',7,
     {control:0x27f,data:values,numericCalls:0},t=>{
       standard(t,7,0x1010);t.writeExpected(0x3008,unhex('0000a040'));
