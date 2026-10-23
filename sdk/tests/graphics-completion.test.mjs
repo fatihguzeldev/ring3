@@ -41,7 +41,7 @@ async function graphicsFixture(t) {
     addEventListener(){},pushErrorScope(){},async popErrorScope(){return null;},destroy(){events.push('device-destroy');},
     createTexture(){return {createView(){return {};},destroy(){events.push('texture-destroy');}};},
     createBuffer({size}){const buffer={destroyed:false,async mapAsync(){events.push('map');await mapping.promise;},getMappedRange(){return new ArrayBuffer(size);},unmap(){events.push('unmap');},destroy(){this.destroyed=true;events.push('buffer-destroy');}};buffers.push(buffer);return buffer;},
-    createCommandEncoder(){return {beginRenderPass(){return {setPipeline(){},setBindGroup(){},setViewport(){},draw(){},end(){events.push('pass-end');}};},copyTextureToBuffer(){events.push('copy-to-buffer');},finish(){events.push('finish');return {};}};},
+    createCommandEncoder(){return {beginRenderPass(){return {setPipeline(){},setBindGroup(){},setViewport(){},draw(){},end(){events.push('pass-end');}};},beginComputePass(){return {setPipeline(){},setBindGroup(){},dispatchWorkgroups(){},end(){events.push('compute-end');}};},copyTextureToBuffer(){events.push('copy-to-buffer');},finish(){events.push('finish');return {};}};},
     createShaderModule(){return {async getCompilationInfo(){return {messages:[]};}};},
     async createRenderPipelineAsync(){return {getBindGroupLayout(){return {};}};},createBindGroup(){return {};},createSampler(){return {};},
   };
@@ -98,6 +98,26 @@ test('readback waits for mapped bytes and preserves its receipt without a packet
     assert.equal(receipt.getBigUint64(16,true),1n);assert.equal(receipt.getBigUint64(24,true),1n);
     assert.equal(receipt.getBigUint64(48,true),2n);assert.equal(events.includes('fence'),false);
   } finally {mapping.resolve();fence.resolve();await work;}
+});
+
+test('packet cleanup keeps cached stream storage alive while releasing patch temporaries',async t=>{
+  const {host,buffers}=await graphicsFixture(t);
+  await host.consume(packet([[1,definition]]));
+  const renderer=host.sessions.get(1n),streams=Array(16).fill(null),words=new Uint32Array(256);
+  streams[0]={key:'1:0:1',version:1n,stride:4};words[6]=1;words[7]=1;renderer.patchCapture={getBindGroupLayout(){return {};}};
+  const packed=renderer.resources.packStreams({streams});
+  const patch=await renderer.capturePatch({words,streams});
+  assert.equal(renderer.temporary.includes(packed.buffer),false);
+  const temporary=renderer.temporary.slice();assert.equal(temporary.length,1);
+  const another=definition.slice();another[2]=1;
+  const next=packet([[1,another]]),view=new DataView(next);
+  for(const at of [24,32,40,72])view.setBigUint64(at,2n,true);
+  await host.consume(next);
+  assert.equal(temporary.every(buffer=>buffer.destroyed),true);
+  assert.equal(packed.buffer.destroyed,false);
+  assert.equal(renderer.resources.packStreams({streams}).buffer,packed.buffer);
+  patch.controls.destroy();host.close();assert.equal(packed.buffer.destroyed,true);
+  assert.equal(buffers.filter(buffer=>buffer===packed.buffer).length,1);
 });
 
 function stopFixture(drainError) {

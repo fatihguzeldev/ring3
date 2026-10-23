@@ -2,8 +2,9 @@ import {require} from './packet.js';
 import {decodeColor,encodeColor,depthFormats} from './formats.js';
 
 const align=(n,a)=>(Math.ceil(n/a)*a);
+const packedEntries=1024,packedBytes=32*1024*1024;
 export class Resources {
-  constructor(device,beforeTextureWrite=()=>{}) { this.device=device;this.beforeTextureWrite=beforeTextureWrite;this.items=new Map();this.bytes=0;this.palettes=new Map(); }
+  constructor(device,beforeTextureWrite=()=>{},beforeBufferDestroy=beforeTextureWrite) { this.device=device;this.beforeTextureWrite=beforeTextureWrite;this.beforeBufferDestroy=beforeBufferDestroy;this.items=new Map();this.bytes=0;this.palettes=new Map();this.packedStreams=new Map();this.packedDependencies=new Map();this.packedBytes=0; }
   create(r) {
     const id=r.resource(),[type,format,usage,pool,width,height,depth,levels,samples,lockable,fvf,reserved]=r.words(12);
     require(!this.items.has(id.key)&&!reserved&&width&&height&&depth&&levels,'resource definition');
@@ -23,15 +24,25 @@ export class Resources {
   }
   get(ref) { const i=this.items.get(ref.key);require(i,`stale resource ${ref.key}`);return i; }
   surface(ref) { const item=this.get(ref),sub=item.subs[ref.subresource];require(sub&&!item.buffer,'surface subresource');return {item,sub,view:item.texture.createView({dimension:'2d',baseMipLevel:sub.info.level,mipLevelCount:1,baseArrayLayer:sub.info.face,arrayLayerCount:1})}; }
-  destroy(ref) { const i=this.get(ref);i.texture?.destroy();this.items.delete(ref.key);this.bytes-=i.size; }
+  destroy(ref) { const i=this.get(ref);this.invalidateStreams(ref.key);i.texture?.destroy();this.items.delete(ref.key);this.bytes-=i.size; }
   upload(r) {
     const ref=r.version(),item=this.get(ref),[index,offset,rowPitch,slicePitch,rowBytes,rows,slices,length]=r.words(8),bytes=r.take(length),sub=item.subs[index];
     require(sub&&ref.version>=item.version&&rowBytes<=rowPitch&&rows&&slices,'upload definition');
+    // uploads may share a version or fail after an earlier row has already changed.
+    this.invalidateStreams(ref.key);
     for(let z=0;z<slices;z++)for(let y=0;y<rows;y++){
       const at=offset+z*slicePitch+y*rowPitch;require(at+rowBytes<=sub.bytes.length,'upload bounds');sub.bytes.set(bytes.subarray(z*slicePitch+y*rowPitch,z*slicePitch+y*rowPitch+rowBytes),at);
     }
     item.version=ref.version;sub.gpuDirty=false;
     if(!item.buffer)this.flushTexture(item,index);
+  }
+  invalidateStreams(resource) { for(const key of [...(this.packedDependencies.get(resource)??[])])this.releaseStreams(key); }
+  releaseStreams(key) {
+    const row=this.packedStreams.get(key);if(!row)return;
+    // an encoder can still reference this buffer; submit it before destruction.
+    this.beforeBufferDestroy();this.packedStreams.delete(key);this.packedBytes-=row.length;
+    for(const resource of row.dependencies){const keys=this.packedDependencies.get(resource);keys.delete(key);if(!keys.size)this.packedDependencies.delete(resource);}
+    row.buffer.destroy();
   }
   flushTexture(item,index,paletteIndex=0) {
     if(depthFormats.has(item.format))throw new Error('D3D8 host: CPU depth uploads not implemented');
@@ -48,20 +59,30 @@ export class Resources {
     return {item,view:item.texture.createView({dimension:item.type===5?'cube':item.type===4?'3d':'2d',baseMipLevel:ref.lod??0})};
   }
   packStreams(bindings,override=null) {
-    const chunks=[],header=new Uint32Array(32);let length=128;
+    const chunks=[];let length=128,key='';
     for(let i=0;i<16;i++){
-      const b=bindings.streams[i];let bytes=b?this.get(b).subs[0].bytes:null,stride=b?.stride??0;
+      const b=bindings.streams[i],item=b?this.get(b):null;let bytes=item?item.subs[0].bytes:null,stride=b?.stride??0;
       if(i===0&&override){bytes=override.bytes;stride=override.stride;}
-      if(!bytes)continue;header[i*2]=length;header[i*2+1]=stride;chunks.push({at:length,bytes});length+=align(bytes.length,4);
+      if(!bytes)continue;
+      if(!override)key+=`${i}:${b.key}@${item.version}:${stride}:${bytes.length};`;
+      chunks.push({stream:i,at:length,stride,bytes,resource:b?.key});length+=align(bytes.length,4);
     }
     require(length<=this.device.limits.maxStorageBufferBindingSize,'packed vertex storage limit');
+    const cached=!override&&this.packedStreams.get(key);
+    if(cached){this.packedStreams.delete(key);this.packedStreams.set(key,cached);return cached;}
+    const header=new Uint32Array(32);for(const c of chunks){header[c.stream*2]=c.at;header[c.stream*2+1]=c.stride;}
     const raw=new Uint8Array(align(length,4));raw.set(new Uint8Array(header.buffer));for(const c of chunks)raw.set(c.bytes,c.at);
-    return this.buffer(raw,GPUBufferUsage.STORAGE);
+    if(override||length>packedBytes)return {buffer:this.buffer(raw,GPUBufferUsage.STORAGE),temporary:true};
+    while(this.packedStreams.size>=packedEntries||this.packedBytes+length>packedBytes)this.releaseStreams(this.packedStreams.keys().next().value);
+    const row={buffer:this.buffer(raw,GPUBufferUsage.STORAGE),temporary:false,length,dependencies:[...new Set(chunks.map(c=>c.resource))]};
+    this.packedStreams.set(key,row);this.packedBytes+=length;
+    for(const resource of row.dependencies){let keys=this.packedDependencies.get(resource);if(!keys){keys=new Set();this.packedDependencies.set(resource,keys);}keys.add(key);}
+    return row;
   }
   buffer(bytes,usage) {
     const b=this.device.createBuffer({size:Math.max(4,align(bytes.byteLength,4)),usage:usage|GPUBufferUsage.COPY_DST});
     const padded=bytes.byteLength%4?new Uint8Array(align(bytes.byteLength,4)):bytes;if(padded!==bytes)padded.set(bytes);
-    this.device.queue.writeBuffer(b,0,padded);return b;
+    try{this.device.queue.writeBuffer(b,0,padded);}catch(error){b.destroy();throw error;}return b;
   }
   async pixels(ref) {
     const {item,sub}=this.surface(ref);require(!depthFormats.has(item.format),'depth readback is not implemented');
@@ -82,5 +103,5 @@ export class Resources {
     v.setBigUint64(16,requestEpoch,true);v.setBigUint64(24,requestSequence,true);v.setBigUint64(32,source.epoch,true);v.setUint32(40,source.slot,true);v.setUint32(44,source.generation,true);v.setBigUint64(48,source.version,true);v.setUint32(56,source.subresource,true);
     return {receipt,bytes,kind};
   }
-  close(){for(const i of this.items.values())i.texture?.destroy();this.items.clear();this.bytes=0;}
+  close(){for(const key of this.packedStreams.keys())this.releaseStreams(key);for(const i of this.items.values())i.texture?.destroy();this.items.clear();this.bytes=0;}
 }

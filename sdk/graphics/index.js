@@ -152,7 +152,7 @@ class DeviceRenderer {
     }
     if(primitive===6){const expanded=new Uint32Array(count*3);for(let i=0;i<count;i++)expanded.set(indexBytes?[indexBytes[0],indexBytes[i+1],indexBytes[i+2]]:[first,first+i+1,first+i+2],i*3);indexBytes=expanded;first=0;}
     const p=this.state(id),output=this.renderTargets(targets),textures=this.textureBindings(p,b),gpu=await this.gpuPipeline(p,topology[primitive],output,textures.kinds);
-    const raw=this.resources.packStreams(b,data.bytes?{bytes:data.bytes,stride:data.stride}:null);this.temporary.push(raw);
+    const packed=this.resources.packStreams(b,data.bytes?{bytes:data.bytes,stride:data.stride}:null),raw=packed.buffer;if(packed.temporary)this.temporary.push(raw);
     const programs=this.program(p),state=this.scratch(stateBytes(p,programs.vertex,programs.pixel),GPUBufferUsage.STORAGE);
     const entries=[{binding:0,resource:{buffer:state}},{binding:1,resource:{buffer:raw}},...textures.entries];
     const encoder=this.encoder(),pass=encoder.beginRenderPass(this.passDescriptor(output));
@@ -209,7 +209,7 @@ class DeviceRenderer {
   patchGeometry(r){const words=r.words(256),streams=Array.from({length:16},()=>r.u32()?{...r.version(),stride:r.u32()}:null);return {words,streams};}
   async capturePatch(geometry){
     require(this.patchCapture,'patch WGSL missing');const params=new Uint32Array(288);params.set(geometry.words);
-    const raw=this.resources.packStreams({streams:geometry.streams});this.temporary.push(raw);
+    const packed=this.resources.packStreams({streams:geometry.streams}),raw=packed.buffer;if(packed.temporary)this.temporary.push(raw);
     // packStreams uses a 128-byte header; kernel parameters hold the same raw byte bases.
     let length=128;for(let i=0;i<16;i++)if(geometry.streams[i]){params[256+2*i]=length;params[257+2*i]=geometry.streams[i].stride;length+=align(this.resources.get(geometry.streams[i]).subs[0].bytes.length,4);}
     const p=this.scratch(new Uint8Array(params.buffer),GPUBufferUsage.STORAGE),count=params[6]*params[7];require(count>0&&count*17*16<=128*1024*1024,'patch control budget');
