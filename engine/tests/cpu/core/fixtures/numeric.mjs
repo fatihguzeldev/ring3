@@ -170,6 +170,80 @@ function standard(t,retired,pc,flags=2,stop=2,changes={}) {
 function bank(t,wanted) {assert.deepEqual(t.slice(t.arena+fpOffset,128),wanted,'full literal FP128');}
 
 try {
+  runCase('consecutive-stack-metadata-through-exchange-pop-and-sign','d903 d94304 d9c9 dec1 d9e0 d9e1 d95b08 0f0b',7,
+    {control:0x27f,data:values,numericCalls:0},t=>{
+      standard(t,7,0x1010);t.writeExpected(0x3008,unhex('0000a040'));
+      bank(t,t.fp({opcode:0x15b,fip:0x100d,fdp:0x3008,cs:0x1b,ds:0x23,
+        registers:{6:ext3,7:'00000000000000a00140'}}));
+    });
+  runCase('consecutive-control-reloads-after-canonical-control-write','d903 d96b0c d84304 dd5b08 0f0b',4,
+    {control:0x27f,numericCalls:1,data:v=>{v.setFloat32(0,1,true);v.setFloat32(4,2**-24,true);v.setUint16(12,0x7f,true);}},t=>{
+      standard(t,4,0x100b);t.writeExpected(0x3008,unhex('000000000000f03f'));
+      const wanted=t.fp({status:0x20,opcode:0x55b,fip:0x1008,fdp:0x3008,cs:0x1b,ds:0x23,registers:{7:'0000000000000080ff3f'}});
+      new DataView(wanted.buffer).setUint16(16,0x7f,true);bank(t,wanted);
+    });
+  runCase('consecutive-null-bank-declines-each-private-initialization','d903 d84b04 d95b08 0f0b',3,
+    {control:0x27f,data:values,numericCalls:3,nullBank:true},t=>{
+      standard(t,3,0x1008);t.writeExpected(0x3008,unhex('0000c040'));
+      bank(t,t.fp({opcode:0x15b,fip:0x1005,fdp:0x3008,cs:0x1b,ds:0x23,registers:{7:ext6}}));
+    });
+  runCase('consecutive-stack-reloads-after-canonical-cross-page-pop','d903 d91dfe3f0000 d94304 d84b04 d95b08 0f0b',5,
+    {control:0x27f,data:values,numericCalls:1},t=>{
+      standard(t,5,0x1011);t.writeExpected(0x3ffe,unhex('0000'));t.writeExpected(0x4000,unhex('4040'));
+      t.writeExpected(0x3008,unhex('00008040'));
+      bank(t,t.fp({opcode:0x15b,fip:0x100e,fdp:0x3008,cs:0x1b,ds:0x23,registers:{7:'00000000000000800140'}}));
+      const versions=t.initialPageVersions.slice(),v=new DataView(versions.buffer),base=t.word(t.context,64);
+      for(const[address,stamp]of [[0x3000,t.initialVersion+2n],[0x4000,t.initialVersion+1n]])
+        v.setBigUint64(Math.floor((t.physical(address)-base)/4096)*16+8,stamp,true);
+      assert.deepEqual(t.slice(t.word(t.context,84),versions.length),versions,'cross-page pop and later store retain exact physical-page stamps');
+      assert.equal(new DataView(t.memory.buffer).getBigUint64(t.word(t.context,80),true),t.initialVersion+2n,'both successful stores retain their exact transaction stamps');
+    });
+  for(const control of [0x7f,0x27f]) {
+    runCase(`consecutive-normal-chain-${control.toString(16)}`,'d903 d84b04 d84304 d95b08 0f0b',4,
+      {control,data:values,numericCalls:0},t=>{
+        standard(t,4,0x100b);t.writeExpected(0x3008,unhex('00000041'));
+        bank(t,t.fp({opcode:0x15b,fip:0x1008,fdp:0x3008,cs:0x1b,ds:0x23,registers:{7:'00000000000000800240'}}));
+      });
+    runCase(`consecutive-negative-zero-${control.toString(16)}`,'d903 d84b04 d84b04 d95b08 0f0b',4,
+      {control,numericCalls:0,data:v=>{v.setUint32(0,0x80000000,true);v.setFloat32(4,2,true);}},t=>{
+        standard(t,4,0x100b);t.writeExpected(0x3008,unhex('00000080'));
+        bank(t,t.fp({opcode:0x15b,fip:0x1008,fdp:0x3008,cs:0x1b,ds:0x23,registers:{7:'00000000000000000080'}}));
+      });
+    runCase(`consecutive-precision-chain-${control.toString(16)}`,'d903 d84304 d84304 dd5b08 0f0b',4,
+      {control,numericCalls:0,data:v=>{v.setFloat32(0,1,true);v.setFloat32(4,2**-24,true);}},t=>{
+        const single=control===0x7f;
+        standard(t,4,0x100b);t.writeExpected(0x3008,unhex(single?'000000000000f03f':'000000200000f03f'));
+        bank(t,t.fp({status:single?0x20:0,opcode:0x55b,fip:0x1008,fdp:0x3008,cs:0x1b,ds:0x23,
+          registers:{7:single?'0000000000000080ff3f':'0000000000010080ff3f'}}));
+      });
+  }
+  runCase('consecutive-normal-chain-fast-main','d903 d84b04 d84304 d95b08 0f0b',8,
+    {control:0x27f,data:values,numericCalls:0},t=>{
+      standard(t,4,0x100b,2,4);t.writeExpected(0x3008,unhex('00000041'));
+      bank(t,t.fp({opcode:0x15b,fip:0x1008,fdp:0x3008,cs:0x1b,ds:0x23,registers:{7:'00000000000000800240'}}));
+    });
+  runCase('consecutive-arithmetic-after-canonical-helper','d903 d9fa d84b04 d95b08 0f0b',4,
+    {control:0x27f,numericCalls:1,data:v=>{v.setFloat32(0,4,true);v.setFloat32(4,2,true);}},t=>{
+      standard(t,4,0x100a);t.writeExpected(0x3008,unhex('00008040'));
+      bank(t,t.fp({opcode:0x15b,fip:0x1007,fdp:0x3008,cs:0x1b,ds:0x23,registers:{7:'00000000000000800140'}}));
+    });
+  runCase('consecutive-arithmetic-after-direct-decline','d903 d84304 d84b08 d95b0c 0f0b',4,
+    {control:0x27f,numericCalls:1,data:v=>{v.setUint32(0,0x00800000,true);v.setUint32(4,1,true);v.setFloat32(8,2,true);}},t=>{
+      standard(t,4,0x100b);t.writeExpected(0x300c,unhex('01000001'));
+      bank(t,t.fp({status:2,opcode:0x15b,fip:0x1008,fdp:0x300c,cs:0x1b,ds:0x23,
+        registers:{7:'0000000000010080823f'}}));
+    });
+  runCase('consecutive-arithmetic-after-register-exchange','d903 d84b04 d9c9 d84b04 d95b08 0f0b',5,
+    {control:0x27f,data:values,numericCalls:0,fp:{tag:0xfffc,registers:{0:'00000000000000800040'}}},t=>{
+      standard(t,5,0x100d);t.writeExpected(0x3008,unhex('00008040'));
+      bank(t,t.fp({tag:0xfffc,opcode:0x15b,fip:0x100a,fdp:0x3008,cs:0x1b,ds:0x23,
+        registers:{0:ext6,7:'00000000000000800140'}}));
+    });
+  runCase('consecutive-arithmetic-keeps-prefix-before-memory-fault','d903 d84b04 d80d00600000 0f0b',8,
+    {control:0x27f,data:values,numericCalls:1},t=>{
+      standard(t,2,0x1005,2,3);assert.equal(t.state.detail,0x6000);assert.equal(t.state.vector,0x40e);
+      bank(t,t.fp({status:0x3800,tag:0x3fff,opcode:0x4b,fip:0x1002,fdp:0x3004,cs:0x1b,ds:0x23,registers:{7:ext6}}));
+    });
   runCase('precise-tail-keeps-three-store-widths-with-numerical-import','d903 884310 66894312 894314 90 0f0b',4,
     {data:values,registers:[0x12345678,0,0,0x3000,0x4800,0,0,0],flags:0xcd7,numericCalls:0},t=>{
       standard(t,4,0x100c,0xcd7);t.writeExpected(0x3010,unhex('78'));t.writeExpected(0x3012,unhex('7856'));t.writeExpected(0x3014,unhex('78563412'));
