@@ -89,6 +89,7 @@ pub(crate) fn core_unlink(slot: u32, low: u32, high: u32) -> u32 {
             .unlink(slot, u64::from(low) | u64::from(high) << 32)
         {
             Ok(()) => 0,
+            Err(super::cache::LinkError::InvalidSlot) => 7,
             Err(_) => 4,
         }
     })
