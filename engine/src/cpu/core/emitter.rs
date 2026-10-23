@@ -6,6 +6,7 @@ mod integer;
 pub(super) mod link;
 mod numeric;
 mod region;
+mod scalar;
 mod strings;
 pub(in crate::cpu::core) mod support;
 #[cfg(test)]
@@ -340,6 +341,7 @@ fn run(
         (23, ValType::I32),
         (2, ValType::I64),
         (15, ValType::I32),
+        (execution.scalar.cache_count() as u32, ValType::I32),
     ]);
     let mut out = Output {
         function: &mut function,
@@ -350,6 +352,7 @@ fn run(
         record_flags: true,
         tail_flags: false,
         plan,
+        scalar_plan: &execution.scalar,
         fp_schedule: &execution.fp,
         frame: None,
         before_frame: None,
@@ -454,6 +457,7 @@ pub(super) struct Output<'a> {
     record_flags: bool,
     tail_flags: bool,
     plan: &'a super::region::values::RegionPlan,
+    scalar_plan: &'a super::region::values::scalar::ScalarPlan,
     fp_schedule: &'a super::region::values::Guards,
     frame: Option<super::region::values::FrameStateId>,
     before_frame: Option<super::region::values::FrameStateId>,
@@ -660,6 +664,12 @@ impl Output<'_> {
     }
 
     pub(super) fn materialize(&mut self, mask: u32) {
+        if !scalar::try_materialize(self, mask) {
+            self.materialize_fallback(mask);
+        }
+    }
+
+    fn materialize_fallback(&mut self, mask: u32) {
         for local in [FLAGS, KIND, WIDTH, LEFT, RIGHT, VALUE, CARRY_IN] {
             self.c().local_get(local);
         }
@@ -761,6 +771,21 @@ impl Output<'_> {
     }
 
     fn read_memory(&mut self, width: u32, destination: u32, prepare: bool) {
+        if let Some(cached) = scalar::reusable_read(self, width, prepare) {
+            self.c()
+                .local_get(FULL_BLOCK)
+                .if_(BlockType::Empty)
+                .local_get(cached)
+                .local_set(destination)
+                .else_();
+            self.read_memory_fallback(width, destination, prepare);
+            self.c().end();
+        } else {
+            self.read_memory_fallback(width, destination, prepare);
+        }
+    }
+
+    fn read_memory_fallback(&mut self, width: u32, destination: u32, prepare: bool) {
         let grouped = self.current_group_geometry(width & 0xff, false);
         if grouped {
             self.c()
@@ -787,6 +812,7 @@ impl Output<'_> {
             .local_get(WIDE)
             .i32_wrap_i64()
             .local_set(destination);
+        scalar::capture_read(self, width, destination, prepare);
     }
 
     pub(super) fn write(&mut self, width: u32, source: u32) {
@@ -868,6 +894,9 @@ impl Output<'_> {
     }
 
     fn jump_condition(&mut self, condition: Condition) {
+        if scalar::try_condition(self, condition) {
+            return;
+        }
         if !matches!(condition, Condition::Equal | Condition::NotEqual) {
             self.condition(condition);
             return;
@@ -908,7 +937,13 @@ impl Output<'_> {
     }
 
     pub(super) fn condition(&mut self, condition: Condition) {
-        self.materialize(super::effects::condition_mask(condition));
+        if !scalar::try_condition(self, condition) {
+            self.condition_fallback(condition);
+        }
+    }
+
+    fn condition_fallback(&mut self, condition: Condition) {
+        self.materialize_fallback(super::effects::condition_mask(condition));
         match condition {
             Condition::Overflow | Condition::NotOverflow => {
                 self.c()
