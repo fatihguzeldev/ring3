@@ -343,6 +343,28 @@ fn native_result(
     destination: usize,
     native24: bool,
 ) -> StorageCell {
+    native_result_domain(
+        plan,
+        frame,
+        shape,
+        point,
+        available,
+        destination,
+        true,
+        native24,
+    )
+}
+
+fn native_result_domain(
+    plan: &mut RegionPlan,
+    frame: &mut FrameState,
+    shape: &mut FpShape,
+    point: ProgramPoint,
+    available: &mut Vec<ProofId>,
+    destination: usize,
+    bounded: bool,
+    native24: bool,
+) -> StorageCell {
     let cell = free_cell(shape, destination);
     let value = lower::definition(plan, point, 16 + destination as u8, ValueType::F64);
     plan.bind(value, cell, StorageLane::Native);
@@ -354,14 +376,16 @@ fn native_result(
         Some(value),
         ProofKind::ExactF64,
     );
-    proof(
-        plan,
-        frame,
-        point,
-        available,
-        Some(value),
-        ProofKind::BoundedF64,
-    );
+    if bounded {
+        proof(
+            plan,
+            frame,
+            point,
+            available,
+            Some(value),
+            ProofKind::BoundedF64,
+        );
+    }
     if native24 {
         proof(
             plan,
@@ -553,6 +577,41 @@ pub(super) fn lower(
             );
             push(frame, shape);
             output = Some(native_result(plan, frame, shape, point, available, 0, true));
+        }
+        X87Operation::Load(X87Format::Float64) => {
+            proof(
+                plan,
+                frame,
+                point,
+                available,
+                Some(frame.fp.payload[7].values()[0]),
+                ProofKind::Empty,
+            );
+            push(frame, shape);
+            output = Some(native_result_domain(
+                plan, frame, shape, point, available, 0, false, false,
+            ));
+        }
+        X87Operation::Compare {
+            index,
+            pop: count,
+            integer_flags: false,
+            ..
+        } if index < 8 && count <= 2 => {
+            occupied(plan, frame, point, available, 0);
+            occupied(plan, frame, point, available, index as usize);
+            for _ in 0..count {
+                pop(frame, shape);
+            }
+        }
+        X87Operation::CompareMemory {
+            format: X87Format::Float32 | X87Format::Float64,
+            pop: should_pop,
+        } => {
+            occupied(plan, frame, point, available, 0);
+            if should_pop {
+                pop(frame, shape);
+            }
         }
         X87Operation::LoadRegister { index } => {
             let index = index as usize;

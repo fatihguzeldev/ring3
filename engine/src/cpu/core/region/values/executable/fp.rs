@@ -426,12 +426,13 @@ impl FpRecovery {
 pub(in crate::cpu::core) enum FpOperand {
     Payload(FpPayload),
     Memory32(AddressValue),
+    Memory64(AddressValue),
 }
 impl FpOperand {
     fn roots(&self) -> Vec<ExecValueId> {
         match self {
             Self::Payload(p) => p.roots(),
-            Self::Memory32(a) => vec![a.offset],
+            Self::Memory32(a) | Self::Memory64(a) => vec![a.offset],
         }
     }
 }
@@ -439,6 +440,7 @@ impl FpOperand {
 pub(in crate::cpu::core) enum StatusEffect {
     Preserve,
     ClearC1,
+    Compare,
     Arithmetic,
     Store,
     Control,
@@ -467,6 +469,15 @@ pub(in crate::cpu::core) enum FpEffectKind {
     Load32 {
         address: AddressValue,
         result: ExecValueId,
+    },
+    Load64 {
+        address: AddressValue,
+        result: ExecValueId,
+    },
+    Compare {
+        left: FpPayload,
+        right: FpOperand,
+        quiet: bool,
     },
     Binary {
         kind: X87Binary,
@@ -519,6 +530,7 @@ impl FpEffect {
         roots.extend(self.occupied.iter().chain(&self.empty).map(|(_, tag)| *tag));
         match &self.kind {
             FpEffectKind::Load32 { address, .. }
+            | FpEffectKind::Load64 { address, .. }
             | FpEffectKind::LoadControl { address, .. }
             | FpEffectKind::StoreControl { address }
             | FpEffectKind::IntegerLoad { address, .. } => roots.push(address.offset),
@@ -528,7 +540,8 @@ impl FpEffect {
                 roots.push(address.offset);
                 roots.extend(source.roots());
             }
-            FpEffectKind::Binary { left, right, .. } => {
+            FpEffectKind::Binary { left, right, .. }
+            | FpEffectKind::Compare { left, right, .. } => {
                 roots.extend(left.roots());
                 roots.extend(right.roots());
             }
@@ -964,6 +977,72 @@ pub(in crate::cpu::core) fn lower_effect(
             status_effect = StatusEffect::ClearC1;
             FpEffectKind::Load32 { address, result }
         }
+        X87Operation::Load(X87Format::Float64) => {
+            let address = builder.address_value(address?, &before.gpr)?;
+            empty.push((7, before.fp.tags[7]));
+            after.push();
+            let value = result(builder, effect, 0, ValueType::F64);
+            outputs.push(value);
+            after.write(
+                builder,
+                0,
+                FpPayload::Native {
+                    value,
+                    domain: NativeDomain::Exact,
+                    epoch: after.epoch,
+                },
+            );
+            status_effect = StatusEffect::ClearC1;
+            FpEffectKind::Load64 {
+                address,
+                result: value,
+            }
+        }
+        X87Operation::Compare {
+            index,
+            quiet,
+            pop,
+            integer_flags: false,
+        } if index < 8 && pop <= 2 => {
+            let left = read(0);
+            let right = read(index as usize);
+            for _ in 0..pop {
+                after.pop(builder);
+            }
+            status_effect = StatusEffect::Compare;
+            FpEffectKind::Compare {
+                left,
+                right: FpOperand::Payload(right),
+                quiet,
+            }
+        }
+        X87Operation::CompareMemory {
+            format: X87Format::Float32 | X87Format::Float64,
+            pop,
+        } => {
+            let left = read(0);
+            let address = builder.address_value(address?, &before.gpr)?;
+            let right = if matches!(
+                operation,
+                X87Operation::CompareMemory {
+                    format: X87Format::Float64,
+                    ..
+                }
+            ) {
+                FpOperand::Memory64(address)
+            } else {
+                FpOperand::Memory32(address)
+            };
+            if pop {
+                after.pop(builder);
+            }
+            status_effect = StatusEffect::Compare;
+            FpEffectKind::Compare {
+                left,
+                right,
+                quiet: false,
+            }
+        }
         X87Operation::LoadRegister { index } => {
             let source = read(index as usize);
             empty.push((7, before.fp.tags[7]));
@@ -1146,11 +1225,16 @@ pub(in crate::cpu::core) fn lower_effect(
         );
         let address = match &kind {
             FpEffectKind::Load32 { address, .. }
+            | FpEffectKind::Load64 { address, .. }
             | FpEffectKind::Store { address, .. }
             | FpEffectKind::IntegerLoad { address, .. }
             | FpEffectKind::IntegerStore { address, .. } => Some(address),
             FpEffectKind::Binary {
-                right: FpOperand::Memory32(address),
+                right: FpOperand::Memory32(address) | FpOperand::Memory64(address),
+                ..
+            }
+            | FpEffectKind::Compare {
+                right: FpOperand::Memory32(address) | FpOperand::Memory64(address),
                 ..
             } => Some(address),
             _ => None,

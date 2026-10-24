@@ -186,7 +186,7 @@ pub(super) fn entries(region: &Region) -> Vec<Facts> {
 pub(super) fn direct_fp(operation: X87Operation) -> bool {
     matches!(
         operation,
-        X87Operation::Load(X87Format::Float32)
+        X87Operation::Load(X87Format::Float32 | X87Format::Float64)
             | X87Operation::Store {
                 format: X87Format::Float32 | X87Format::Float64,
                 truncate: false,
@@ -202,6 +202,17 @@ pub(super) fn direct_fp(operation: X87Operation) -> bool {
             }
             | X87Operation::ChangeSign
             | X87Operation::Absolute
+    ) || matches!(
+        operation,
+        X87Operation::Compare {
+            index: 0..=7,
+            pop: 0..=2,
+            integer_flags: false,
+            ..
+        } | X87Operation::CompareMemory {
+            format: X87Format::Float32 | X87Format::Float64,
+            ..
+        }
     )
 }
 
@@ -443,6 +454,55 @@ fn transfer(facts: &mut PendingFacts, operation: Option<Operation>) {
         facts.native24 = [Fact::Unknown; 8];
         facts.native24_in_single = [Fact::Unknown; 8];
         facts.control_admitted = Fact::Unknown;
+        return;
+    }
+    if matches!(operation, X87Operation::Load(X87Format::Float64)) {
+        for known in [
+            &mut facts.native,
+            &mut facts.bounded,
+            &mut facts.native24,
+            &mut facts.native24_in_single,
+        ] {
+            known.rotate_right(1);
+        }
+        facts.native[0] = Fact::Known(());
+        facts.bounded[0] = Fact::Unknown;
+        facts.native24[0] = Fact::Unknown;
+        facts.native24_in_single[0] = Fact::Unknown;
+        facts.tags.rotate_right(1);
+        facts.tags[0] = Fact::Known(true);
+        return;
+    }
+    let compare = match operation {
+        X87Operation::Compare {
+            index,
+            pop,
+            integer_flags: false,
+            ..
+        } if index < 8 && pop <= 2 => {
+            facts.tags[index as usize] = Fact::Known(true);
+            Some(pop)
+        }
+        X87Operation::CompareMemory {
+            format: X87Format::Float32 | X87Format::Float64,
+            pop,
+        } => Some(u8::from(pop)),
+        _ => None,
+    };
+    if let Some(pop) = compare {
+        facts.tags[0] = Fact::Known(true);
+        for _ in 0..pop {
+            facts.tags[0] = Fact::Known(false);
+            facts.tags.rotate_left(1);
+            for known in [
+                &mut facts.native,
+                &mut facts.bounded,
+                &mut facts.native24,
+                &mut facts.native24_in_single,
+            ] {
+                known.rotate_left(1);
+            }
+        }
         return;
     }
     if let X87Operation::Load(
@@ -846,5 +906,36 @@ mod tests {
         );
         assert_ne!(16_777_217_i32, (16_777_217_i32 as f32) as i32);
         assert_eq!(incoming.tags[0], Some(true));
+    }
+    #[test]
+    fn binary64_compare_pop_preserves_exact_ghost_facts_without_arithmetic_promises() {
+        let blocks = [
+            block(
+                0x1000,
+                &[fp(X87Operation::Load(X87Format::Float64)), jump(0x1100)],
+            ),
+            block(
+                0x1100,
+                &[
+                    fp(X87Operation::Compare {
+                        index: 0,
+                        quiet: false,
+                        pop: 1,
+                        integer_flags: false,
+                    }),
+                    jump(0x1200),
+                ],
+            ),
+            block(0x1200, &[Operation::Nop]),
+        ];
+        let region = Region::from_blocks(&blocks, 0x1000).unwrap();
+        let facts = entries(&region);
+        assert!(facts[1].native[0]);
+        assert!(!facts[1].bounded[0] && !facts[1].native24[0] && !facts[1].native24_in_single[0]);
+        assert_eq!(facts[1].tags[0], Some(true));
+        assert!(facts[2].native[7]);
+        assert!(!facts[2].bounded[7] && !facts[2].native24[7] && !facts[2].native24_in_single[7]);
+        assert_eq!(facts[2].tags[7], Some(false));
+        assert!(!facts[1].control_admitted && !facts[2].control_admitted);
     }
 }

@@ -1059,3 +1059,162 @@ fn incoming_payload_dirtiness_includes_the_backedge_empty_ghost_at_a_public_root
     assert_eq!(parameters.payloads & 0x80, 0x80);
     assert_eq!(parameters.tags & 0x80, 0x80);
 }
+
+#[test]
+fn binary64_load_defines_only_exact_native_payload_and_keeps_control_epoch() {
+    let (values, program) = plan(&[block(
+        0x1000,
+        &[
+            memory_fp(X87Operation::Load(X87Format::Float64), 0),
+            memory_fp(
+                X87Operation::Store {
+                    format: X87Format::Float64,
+                    pop: true,
+                    truncate: false,
+                },
+                8,
+            ),
+        ],
+    )]);
+    let effects: Vec<_> = program.block(BlockId(0)).effects().collect();
+    let load = &effects[0];
+    let EffectKind::Fp(effect) = &load.kind else {
+        panic!("typed binary64 load")
+    };
+    let FpEffectKind::Load64 { result, .. } = effect.kind else {
+        panic!("binary64 result")
+    };
+    assert!(
+        matches!(load.after.fp.payload[0], FpPayload::Native { value, domain: NativeDomain::Exact, epoch }
+        if value == result && epoch == load.before.fp.epoch)
+    );
+    assert_eq!(load.before.fp.control, load.after.fp.control);
+    assert_eq!(load.before.fp.epoch, load.after.fp.epoch);
+    let value = values.frame(load.after.frame).fp.payload[0].values()[0];
+    assert!(!values.proofs.iter().any(|proof| proof.value == Some(value)
+        && matches!(
+            proof.kind,
+            ProofKind::BoundedF64 | ProofKind::Native24 | ProofKind::Native24InSingle
+        )));
+    assert_eq!(effects[1].after.fp.payload[7], load.after.fp.payload[0]);
+    assert!(matches!(
+        program.value(effects[1].after.fp.tags[7]).node,
+        ValueNode::Fp(FpValueNode::I32(3))
+    ));
+}
+
+#[test]
+fn typed_comparison_pop_changes_only_status_tags_top_and_metadata() {
+    for pop in 0..=2 {
+        let (_, program) = plan(&[block(
+            0x1000,
+            &[
+                memory_fp(X87Operation::Load(X87Format::Float64), 0),
+                memory_fp(X87Operation::Load(X87Format::Float64), 8),
+                fp(X87Operation::Compare {
+                    index: 1,
+                    quiet: true,
+                    pop,
+                    integer_flags: false,
+                }),
+            ],
+        )]);
+        let effects: Vec<_> = program.block(BlockId(0)).effects().collect();
+        let compare = &effects[2];
+        let EffectKind::Fp(effect) = &compare.kind else {
+            panic!("typed comparison")
+        };
+        assert!(matches!(
+            effect.kind,
+            FpEffectKind::Compare {
+                right: FpOperand::Payload(_),
+                quiet: true,
+                ..
+            }
+        ));
+        assert!(matches!(effect.status_effect, StatusEffect::Compare));
+        assert_eq!(compare.before.gpr, compare.after.gpr);
+        assert_eq!(compare.before.flags, compare.after.flags);
+        assert_eq!(compare.before.fp.control, compare.after.fp.control);
+        assert_eq!(compare.before.fp.epoch, compare.after.fp.epoch);
+        let mut payloads = compare.before.fp.payload;
+        payloads.rotate_left(pop as usize);
+        assert_eq!(compare.after.fp.payload, payloads);
+        assert_eq!(
+            compare.after.fp.top_delta,
+            (compare.before.fp.top_delta + i8::try_from(pop).unwrap()).rem_euclid(8)
+        );
+        assert_ne!(compare.before.fp.status.bits, compare.after.fp.status.bits);
+        assert_ne!(
+            compare.before.fp.status.pending,
+            compare.after.fp.status.pending
+        );
+        assert_eq!(compare.before.fp.status.left, compare.after.fp.status.left);
+        assert_eq!(
+            compare.before.fp.status.right,
+            compare.after.fp.status.right
+        );
+        assert_eq!(
+            compare.before.fp.status.result,
+            compare.after.fp.status.result
+        );
+        assert_eq!(
+            effect.definitions(),
+            vec![
+                compare.after.fp.status.bits,
+                compare.after.fp.status.pending
+            ]
+        );
+        for logical in 8 - usize::from(pop)..8 {
+            assert!(matches!(
+                program.value(compare.after.fp.tags[logical]).node,
+                ValueNode::Fp(FpValueNode::I32(3))
+            ));
+        }
+    }
+}
+
+#[test]
+fn typed_memory_comparisons_keep_exact_address_and_flags_comparisons_stay_canonical() {
+    for format in [X87Format::Float32, X87Format::Float64] {
+        let (_, program) = plan(&[block(
+            0x1000,
+            &[memory_fp(
+                X87Operation::CompareMemory { format, pop: true },
+                0x44,
+            )],
+        )]);
+        let effect = program.block(BlockId(0)).effects().next().unwrap();
+        let EffectKind::Fp(compare) = &effect.kind else {
+            panic!("typed memory comparison")
+        };
+        let FpEffectKind::Compare {
+            right,
+            quiet: false,
+            ..
+        } = &compare.kind
+        else {
+            panic!("memory comparison operand")
+        };
+        let address = match (format, right) {
+            (X87Format::Float32, FpOperand::Memory32(address))
+            | (X87Format::Float64, FpOperand::Memory64(address)) => address,
+            _ => panic!("exact memory width"),
+        };
+        assert!(compare.inputs().contains(&address.offset));
+        assert_eq!(effect.after.fp.metadata.fdp, address.offset);
+        assert_eq!(effect.after.fp.top_delta, 1);
+    }
+    let (_, program) = plan(&[block(
+        0x1000,
+        &[fp(X87Operation::Compare {
+            index: 1,
+            quiet: false,
+            pop: 0,
+            integer_flags: true,
+        })],
+    )]);
+    let effect = program.block(BlockId(0)).effects().next().unwrap();
+    assert!(matches!(effect.kind, EffectKind::Exact(_)));
+    assert!(matches!(effect.contract.fp, FpEffectClass::Barrier));
+}

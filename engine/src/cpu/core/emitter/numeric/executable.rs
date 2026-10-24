@@ -1,5 +1,6 @@
 //! Consume typed FP values/effects. Successful native producers define F64 SSA
 //! values; completed handoffs and exact recovery own physical publication.
+mod comparison;
 mod control;
 mod handoff;
 pub(in crate::cpu::core::emitter) mod integer;
@@ -705,6 +706,22 @@ fn arithmetic(out: &mut Output<'_>, kind: X87Binary, exact_product: bool) {
     out.c().end();
 }
 
+fn guard_stack(out: &mut Output<'_>, effect: &FpEffect, depth: u32) {
+    for (_, tag) in &effect.occupied {
+        if matches!(&out.executable.value(*tag).node,
+            ValueNode::Fp(node) if occupied_by_definition(node))
+        {
+            continue;
+        }
+        out.demand(*tag);
+        out.c().i32_const(3).i32_eq().br_if(depth);
+    }
+    for (_, tag) in &effect.empty {
+        out.demand(*tag);
+        out.c().i32_const(3).i32_ne().br_if(depth);
+    }
+}
+
 /// The sole supported-operation consumer. It never switches on original IR
 /// Operation and never publishes a producer through VALID/LOADED/token masks.
 pub(in crate::cpu::core::emitter) fn emit_effect(out: &mut Output<'_>, effect: &FpEffect) {
@@ -729,18 +746,8 @@ pub(in crate::cpu::core::emitter) fn emit_effect(out: &mut Output<'_>, effect: &
             arithmetic_control(out, 0);
         }
     }
-    for (_, tag) in &effect.occupied {
-        if matches!(&out.executable.value(*tag).node,
-            ValueNode::Fp(node) if occupied_by_definition(node))
-        {
-            continue;
-        }
-        out.demand(*tag);
-        out.c().i32_const(3).i32_eq().br_if(0);
-    }
-    for (_, tag) in &effect.empty {
-        out.demand(*tag);
-        out.c().i32_const(3).i32_ne().br_if(0);
+    if !comparison::reads_memory(effect) {
+        guard_stack(out, effect, 0);
     }
     match &effect.kind {
         FpEffectKind::LoadControl { .. } | FpEffectKind::StoreControl { .. } => {
@@ -748,6 +755,9 @@ pub(in crate::cpu::core::emitter) fn emit_effect(out: &mut Output<'_>, effect: &
         }
         FpEffectKind::IntegerLoad { .. } | FpEffectKind::IntegerStore { .. } => {
             assert!(integer::emit(out, effect));
+        }
+        FpEffectKind::Load64 { .. } | FpEffectKind::Compare { .. } => {
+            comparison::emit(out, effect);
         }
         FpEffectKind::Load32 { address, result } => {
             memory::prepare_value(out, address, 4, false, false, POINTER);
@@ -795,6 +805,9 @@ pub(in crate::cpu::core::emitter) fn emit_effect(out: &mut Output<'_>, effect: &
                         .f32_reinterpret_i32()
                         .f64_promote_f32()
                         .local_set(RIGHT);
+                }
+                FpOperand::Memory64(_) => {
+                    unreachable!("typed binary memory operands are Float32")
                 }
             }
             out.c().local_get(73).local_set(LEFT);

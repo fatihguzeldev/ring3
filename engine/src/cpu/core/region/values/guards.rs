@@ -234,7 +234,9 @@ impl Guards {
                 let format = !matches!(operation, X87Operation::Store { .. });
                 let mut reads = match operation {
                     X87Operation::LoadRegister { index } => vec![index],
-                    X87Operation::Exchange { index } => vec![0, index],
+                    X87Operation::Exchange { index } | X87Operation::Compare { index, .. } => {
+                        vec![0, index]
+                    }
                     X87Operation::Binary {
                         destination,
                         source,
@@ -242,6 +244,7 @@ impl Guards {
                     } => vec![destination, source],
                     X87Operation::Load(
                         X87Format::Float32
+                        | X87Format::Float64
                         | X87Format::Integer16
                         | X87Format::Integer32
                         | X87Format::Integer64,
@@ -325,6 +328,7 @@ impl Guards {
                     operation,
                     X87Operation::Load(
                         X87Format::Float32
+                            | X87Format::Float64
                             | X87Format::Integer16
                             | X87Format::Integer32
                             | X87Format::Integer64
@@ -707,5 +711,33 @@ mod tests {
         assert!(first.enter && !first.control);
         assert_eq!(first.inputs.len(), 1);
         assert_eq!(first.inputs[0].logical, 4);
+    }
+    #[test]
+    fn binary64_load_and_compare_schedule_masked_first_use_without_nearest_control() {
+        let (values, guards) = analyze(&[
+            fp(X87Operation::Load(X87Format::Float64)),
+            fp(X87Operation::Compare {
+                index: 1,
+                quiet: false,
+                pop: 0,
+                integer_flags: false,
+            }),
+            binary(X87Binary::Add, 1),
+        ]);
+        let load = at(&values, &guards, 0);
+        assert!(load.enter && !load.control && load.inputs.is_empty());
+        assert_eq!(load.empty, 0x80);
+        let compare = at(&values, &guards, 1);
+        assert!(!compare.enter && !compare.control);
+        assert_eq!(
+            compare
+                .inputs
+                .iter()
+                .map(|input| input.logical)
+                .collect::<Vec<_>>(),
+            [0, 1]
+        );
+        let arithmetic = at(&values, &guards, 2);
+        assert!(!arithmetic.enter && arithmetic.control);
     }
 }
