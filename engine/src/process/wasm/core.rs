@@ -13,8 +13,8 @@ pub(crate) use tracing::{
 
 pub(crate) use cold::{core_cold_run, core_precise};
 pub(crate) use continuation::{
-    core_chain_resolve_owned, core_continuation_format, core_continuation_ptr, core_end_owned,
-    core_numeric_owned, core_precise_owned,
+    core_chain_resolve_executable_owned, core_chain_resolve_owned, core_continuation_format,
+    core_continuation_ptr, core_end_owned, core_numeric_owned, core_precise_owned,
 };
 pub(crate) use dispatch::{
     core_chain_cold, core_chain_next, core_chain_probe, core_chain_select, core_dispatch_code_len,
@@ -396,6 +396,61 @@ pub(crate) fn core_lookup(pc: u32) -> u32 {
         };
         session.refresh_trace_bypass(session.context.retired());
         let Some(code) = session.cache.lookup(memory, pc) else {
+            return 4;
+        };
+        let identity = code.identity();
+        session.code = Some(code);
+        session.context.bytes_mut()[120..128].copy_from_slice(&identity.to_le_bytes());
+        session.context.set_word(112, 0);
+        0
+    })
+}
+
+pub(crate) fn core_lookup_executable(pc: u32) -> u32 {
+    select_executable(pc, false)
+}
+
+pub(crate) fn core_prepare_executable(pc: u32, instructions: u32, blocks: u32) -> u32 {
+    if instructions == 0 || instructions > 16384 || blocks == 0 || blocks > 1024 {
+        return 7;
+    }
+    select_executable(pc, true)
+}
+
+fn select_executable(pc: u32, initialize: bool) -> u32 {
+    REGISTRY.with(|registry| {
+        let Ok(mut registry) = registry.try_borrow_mut() else {
+            return 9;
+        };
+        let Registry { instance, core, .. } = &mut *registry;
+        if core.as_ref().is_some_and(CoreSession32::is_active) {
+            return 12;
+        }
+        let Some(instance) = instance.as_mut() else {
+            return 5;
+        };
+        if initialize {
+            if let Err(error) = instance
+                .enable_core_execution()
+                .and_then(|_| admission(instance))
+            {
+                return status(error);
+            }
+            if core.is_none() {
+                match CoreSession32::from_instance(instance) {
+                    Ok(session) => *core = Some(session),
+                    Err(error) => return status(error),
+                }
+            }
+        }
+        let Some(session) = core.as_mut() else {
+            return 4;
+        };
+        let Some(memory) = instance.memory.as_ref() else {
+            return 5;
+        };
+        session.refresh_trace_bypass(session.context.retired());
+        let Some(code) = session.cache.lookup_executable(memory, pc) else {
             return 4;
         };
         let identity = code.identity();

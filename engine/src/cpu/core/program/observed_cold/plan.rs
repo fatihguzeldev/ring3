@@ -328,6 +328,9 @@ impl ObservedPlan {
     pub(crate) fn entrypoints(&self) -> &[GuestAddress] {
         &self.entries
     }
+    pub(crate) fn hot_ports(&self) -> Vec<HotSpan> {
+        executable_hot_spans(&self.blocks)
+    }
     pub(crate) fn parent_identities(&self) -> &[u64] {
         &self.fingerprint.parents
     }
@@ -514,6 +517,17 @@ pub(crate) fn prepare_cold_prefix_plan(
             if event.kind != COLD_COMPLETE || event.owner != 0 || frontier(event.pc) {
                 continue;
             }
+            let Some((candidate, _)) = decoded_node(memory, event.pc) else {
+                continue;
+            };
+            if executable_hot_spans(&[Block {
+                entry: event.pc,
+                instructions: vec![candidate],
+            }])
+            .is_empty()
+            {
+                continue;
+            }
             anchor = Some(event.pc);
             graph.starts.insert(event.pc);
         }
@@ -561,7 +575,13 @@ pub(crate) fn prepare_cold_prefix_plan(
         ) else {
             break;
         };
-        accepted = Some(plan);
+        if plan
+            .hot_ports()
+            .iter()
+            .any(|span| span.entry == plan.anchor())
+        {
+            accepted = Some(plan);
+        }
         expected = Some(observation.actual_post_pc());
         if frontier(observation.actual_post_pc()) {
             break;

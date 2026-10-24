@@ -53,6 +53,37 @@ pub(in crate::process) fn probe(
     }
 }
 
+pub(in crate::process) fn probe_executable(
+    instance: &mut EngineInstance,
+    context: &mut Context32,
+    selected: &mut Option<RegionRef>,
+    cache: &mut CoreCache32,
+    pc: u32,
+    remaining: u32,
+) -> u32 {
+    let Some(current) = selected.as_ref() else {
+        return u32::MAX;
+    };
+    let raw = context.bytes();
+    if u32::from_le_bytes(raw[112..116].try_into().unwrap()) != 1
+        || u64::from_le_bytes(raw[120..128].try_into().unwrap()) != current.identity()
+    {
+        return u32::MAX;
+    }
+    let Some(memory) = instance.memory.as_ref() else {
+        return u32::MAX;
+    };
+    if !current.is_current(memory) {
+        return 0;
+    }
+    let Some((code, slot)) = cache.lookup_executable_linked(memory, pc, remaining) else {
+        return COLD_MARK;
+    };
+    context.bytes_mut()[120..128].copy_from_slice(&code.identity().to_le_bytes());
+    *selected = Some(code);
+    slot
+}
+
 pub(in crate::process) fn precise(
     instance: &mut EngineInstance,
     context: &mut Context32,
@@ -99,10 +130,14 @@ pub(in crate::process) fn precise(
     let bypass = observer.bypass_token();
     context.bytes_mut()[120..128].fill(0);
     *selected = None;
+    let suppress_heat = cache
+        .current_hot_port(memory, context.state().eip)
+        .is_some();
     let mut precise_observer = PreciseObserver {
         observer,
         cache,
-        source: &source,
+        suppress_heat,
+        force_precise: true,
     };
     let reason = run_observed_progress(
         instance,
@@ -150,16 +185,18 @@ pub(in crate::process) fn precise(
 struct PreciseObserver<'a, O> {
     observer: &'a mut O,
     cache: &'a CoreCache32,
-    source: &'a RegionRef,
+    suppress_heat: bool,
+    force_precise: bool,
 }
 
 impl<O: ColdObserver> ColdObserver for PreciseObserver<'_, O> {
     fn exact_cold(&self) -> bool {
-        true
+        self.force_precise || self.observer.exact_cold()
     }
     fn tracks_heat(&self, memory: &AddressSpace, pc: u32) -> bool {
-        !(self.source.contains_instruction(pc) && self.source.is_current(memory))
-            && !self.cache.owned_frontier_contains(memory, pc)
+        !self.suppress_heat
+            && self.cache.current_hot_port(memory, pc).is_none()
+            && self.observer.tracks_heat(memory, pc)
     }
     fn begin_instruction(
         &mut self,
@@ -167,9 +204,12 @@ impl<O: ColdObserver> ColdObserver for PreciseObserver<'_, O> {
         instruction: &crate::cpu::core::NativeInstruction,
         hot: bool,
     ) -> bool {
+        self.suppress_heat |= self
+            .cache
+            .current_hot_port(memory, instruction.pc)
+            .is_some();
         let hot = hot && self.tracks_heat(memory, instruction.pc);
-        self.observer.begin_instruction(memory, instruction, hot);
-        true
+        self.observer.begin_instruction(memory, instruction, hot) || self.force_precise
     }
     fn complete_instruction(&mut self, memory: &AddressSpace, actual_post_pc: u32) {
         self.observer.complete_instruction(memory, actual_post_pc);
@@ -258,19 +298,14 @@ pub(in crate::process) fn chain_cold_observed(
     let (bypass, bypass_retired) = observer
         .bypass_token()
         .unwrap_or((cache.trace_bypass_identity(), context.retired()));
-    let reason = run_observed(
+    let reason = run_executable_observed(
         instance,
         context,
         numeric,
         &segments,
         &|modules, pc| modules.gate_at(pc).map(|gate| gate.id),
-        &|memory, pc, retired| {
-            cache.frontier_contains_with_bypass(
-                memory,
-                pc,
-                if retired == bypass_retired { bypass } else { 0 },
-            )
-        },
+        cache,
+        (bypass, bypass_retired),
         cold,
         observer,
     );
@@ -285,7 +320,9 @@ pub(in crate::process) fn chain_cold_observed(
     let Some(memory) = instance.memory.as_ref() else {
         return COLD_MARK | STOP_MARK | StopReason::Infrastructure as u32;
     };
-    if let Some((code, slot)) = cache.lookup_linked(memory, context.state().eip) {
+    if let Some((code, slot)) =
+        cache.lookup_executable_linked(memory, context.state().eip, context.remaining())
+    {
         context.bytes_mut()[120..128].copy_from_slice(&code.identity().to_le_bytes());
         *selected = Some(code);
         return COLD_MARK | slot;
@@ -353,6 +390,51 @@ pub(in crate::process) fn run_with_lookups(
         &|memory, pc, _| frontier(memory, pc),
         heat,
         &mut Unobserved,
+    )
+}
+
+pub(in crate::process) fn run_executable_observed(
+    instance: &mut EngineInstance,
+    context: &mut Context32,
+    numeric: &mut NumericBank,
+    segments: &SegmentContext,
+    gate_at: &impl Fn(&ModuleProcess32, u32) -> Option<u32>,
+    cache: &CoreCache32,
+    bypass: (u64, u32),
+    heat: &mut ColdState,
+    observer: &mut impl ColdObserver,
+) -> StopReason {
+    let suppress_heat = instance.memory.as_ref().is_some_and(|memory| {
+        cache
+            .current_hot_port(memory, context.state().eip)
+            .is_some()
+    });
+    let mut observed = PreciseObserver {
+        observer,
+        cache,
+        suppress_heat,
+        force_precise: false,
+    };
+    run_observed_progress(
+        instance,
+        context,
+        numeric,
+        segments,
+        gate_at,
+        &|memory, pc, progress| {
+            cache.executable_frontier_contains(
+                memory,
+                pc,
+                progress.remaining,
+                if progress.retired == bypass.1 {
+                    bypass.0
+                } else {
+                    0
+                },
+            )
+        },
+        heat,
+        &mut observed,
     )
 }
 
@@ -509,3 +591,7 @@ mod dispatch_tests;
 #[cfg(test)]
 #[path = "precise_tests.rs"]
 mod precise_tests;
+
+#[cfg(test)]
+#[path = "executable_tests.rs"]
+mod executable_tests;

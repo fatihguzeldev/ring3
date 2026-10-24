@@ -56,6 +56,19 @@ fn source(
 }
 
 pub(crate) fn core_chain_resolve_owned(context: u32, pc: u32, retired: u32) -> u32 {
+    resolve_owned(context, pc, retired, None)
+}
+
+pub(crate) fn core_chain_resolve_executable_owned(
+    context: u32,
+    pc: u32,
+    retired: u32,
+    remaining: u32,
+) -> u32 {
+    resolve_owned(context, pc, retired, Some(remaining))
+}
+
+fn resolve_owned(context: u32, pc: u32, retired: u32, remaining: Option<u32>) -> u32 {
     REGISTRY.with(|registry| {
         let Ok(mut registry) = registry.try_borrow_mut() else {
             return u32::MAX;
@@ -83,7 +96,10 @@ pub(crate) fn core_chain_resolve_owned(context: u32, pc: u32, retired: u32) -> u
         // public probe/numeric interfaces retain their selected-owner contract.
         core.code = Some(code);
         core.refresh_trace_bypass(retired);
-        let selected = cold::chain_probe(instance, core, pc);
+        let selected = match remaining {
+            Some(remaining) => cold::chain_probe_executable(instance, core, pc, remaining),
+            None => cold::chain_probe(instance, core, pc),
+        };
         if selected != 0 && (selected as usize) <= core.cache.link_capacity() {
             if let Some(memory) = instance.memory.as_ref() {
                 core.trace_selection(memory, pc);

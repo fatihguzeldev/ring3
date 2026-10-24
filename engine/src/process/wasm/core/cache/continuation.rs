@@ -84,10 +84,17 @@ impl CoreCache32 {
     }
 
     pub(super) fn refresh_route_pc(&mut self, pc: u32) {
+        let hot = |key: &&RegionKey| {
+            self.region(**key)
+                .is_some_and(|entry| entry.code.hot_span(pc).is_some())
+        };
         let keys = [
-            self.window_entries.get(&pc),
-            self.trace_entries.get(&pc),
-            self.entries.get(&pc),
+            self.window_entries.get(&pc).filter(hot),
+            self.trace_entries
+                .get(&pc)
+                .filter(hot)
+                .or_else(|| self.executable_entries.get(&pc).filter(hot)),
+            self.entries.get(&pc).filter(hot),
         ]
         .map(|key| key.copied());
         let mut candidates = [route::Candidate::default(); 3];

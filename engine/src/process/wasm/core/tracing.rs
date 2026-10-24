@@ -333,10 +333,10 @@ pub(crate) fn core_trace_finish(root: u32, instructions: u32, blocks: u32) -> u3
                 // immutable fragments stay linked; their history is never
                 // unioned into a replacement executable during automatic work.
                 prepare_cold_prefix_plan(memory, options, &events, &core.tracing.cold, &|pc| {
-                    core.cache.owned_frontier_contains(memory, pc)
+                    core.cache.current_hot_port(memory, pc).is_some()
                 })
                 .and_then(|plan| {
-                    plan.map(|plan| admit_plan(&mut core.cache, memory, plan))
+                    plan.map(|plan| admit_fragment(&mut core.cache, memory, plan))
                         .transpose()
                         .map(Option::flatten)
                 })
@@ -372,20 +372,18 @@ pub(crate) fn core_trace_finish(root: u32, instructions: u32, blocks: u32) -> u3
     })
 }
 
-// Formation, ownership and code generation have distinct lifetimes. Rejected
-// plans never allocate an executor identity or invoke the exact Wasm backend.
-fn admit_plan(
+fn admit_fragment(
     cache: &mut super::cache::CoreCache32,
     memory: &AddressSpace,
     plan: ObservedPlan,
 ) -> Result<Option<RegionRef>, CompileError> {
-    let Some(admission) = cache.preflight_observed(memory, &plan) else {
+    let Some(admission) = cache.preflight_fragment(memory, &plan) else {
         return Ok(None);
     };
     match emit_observed_plan(memory, plan) {
-        Ok(Some(code)) => cache.commit_observed(memory, admission, code).map(Some),
+        Ok(Some(code)) => cache.commit_fragment(memory, admission, code).map(Some),
         Ok(None) | Err(CompileError::WasmLimit) => {
-            cache.reject_observed(admission);
+            cache.reject_fragment(admission);
             Ok(None)
         }
         Err(error) => Err(error),

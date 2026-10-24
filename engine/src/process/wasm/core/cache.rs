@@ -16,6 +16,8 @@ use std::{
 
 #[path = "cache/continuation.rs"]
 mod continuation;
+#[path = "cache/executable.rs"]
+mod executable;
 
 // Initial directory extents, not independent residency limits.
 const MAX_REGIONS: usize = 4096;
@@ -34,6 +36,8 @@ pub(super) struct CoreCache32 {
     entries_capacity: usize,
     trace_entries: HashMap<u32, RegionKey, RandomState>,
     trace_entries_capacity: usize,
+    executable_entries: HashMap<u32, RegionKey, RandomState>,
+    executable_entries_capacity: usize,
     window_entries: HashMap<u32, RegionKey, RandomState>,
     window_entries_capacity: usize,
     trace_bypass_identity: u64,
@@ -97,6 +101,7 @@ enum DirectoryKind {
     Baseline,
     Family,
     Window,
+    Fragment,
 }
 
 #[derive(Clone)]
@@ -275,6 +280,8 @@ impl Default for CoreCache32 {
             entries_capacity: 0,
             trace_entries: HashMap::with_hasher(RandomState::default()),
             trace_entries_capacity: 0,
+            executable_entries: HashMap::with_hasher(RandomState::default()),
+            executable_entries_capacity: 0,
             window_entries: HashMap::with_hasher(RandomState::default()),
             window_entries_capacity: 0,
             trace_bypass_identity: 0,
@@ -366,6 +373,7 @@ impl CoreCache32 {
             + Self::hash_charge::<u32, RegionKey>(self.trace_entries_capacity)
             + Self::hash_charge::<u32, RegionKey>(self.window_entries_capacity)
             + Self::hash_charge::<u32, RegionKey>(self.coverage_capacity)
+            + Self::hash_charge::<u32, RegionKey>(self.executable_entries_capacity)
             + self.memo_charge()
     }
 
@@ -383,6 +391,22 @@ impl CoreCache32 {
         &self,
         code: &CompiledCode,
         entries_capacity: usize,
+    ) -> Result<(), CompileError> {
+        let kind = if code.is_execution_window() {
+            DirectoryKind::Window
+        } else if code.trace_root().is_some() {
+            DirectoryKind::Family
+        } else {
+            DirectoryKind::Baseline
+        };
+        self.validate_candidate_kind(code, entries_capacity, kind)
+    }
+
+    fn validate_candidate_kind(
+        &self,
+        code: &CompiledCode,
+        entries_capacity: usize,
+        kind: DirectoryKind,
     ) -> Result<(), CompileError> {
         let trace = code.trace_root().is_some();
         let entries = code.entrypoints().len();
@@ -402,7 +426,7 @@ impl CoreCache32 {
             + size_of::<route::Header>()
             + Self::route_capacity(code.hot_spans().count()) * size_of::<route::Row>()
             + Self::hash_charge::<u32, RegionKey>(table_capacity(entries))
-            + if trace {
+            + if trace && !matches!(kind, DirectoryKind::Fragment) {
                 0
             } else {
                 Self::hash_charge::<u32, RegionKey>(table_capacity(code.instruction_count()))
@@ -450,6 +474,12 @@ impl CoreCache32 {
             self.regions.len()
         };
         let (entry_capacity, trace_capacity, coverage_capacity, window_capacity) = match kind {
+            DirectoryKind::Fragment => (
+                self.entries_capacity,
+                self.trace_entries_capacity,
+                Self::reserved_capacity(&self.coverage, instructions, self.coverage_capacity),
+                self.window_entries_capacity,
+            ),
             DirectoryKind::Family => (
                 self.entries_capacity,
                 Self::reserved_capacity(&self.trace_entries, entries, self.trace_entries_capacity),
@@ -488,6 +518,15 @@ impl CoreCache32 {
             + Self::hash_charge::<u32, RegionKey>(trace_capacity)
             + Self::hash_charge::<u32, RegionKey>(coverage_capacity)
             + Self::hash_charge::<u32, RegionKey>(window_capacity)
+            + Self::hash_charge::<u32, RegionKey>(if matches!(kind, DirectoryKind::Fragment) {
+                Self::reserved_capacity(
+                    &self.executable_entries,
+                    entries,
+                    self.executable_entries_capacity,
+                )
+            } else {
+                self.executable_entries_capacity
+            })
             + self.memo_charge()
     }
 
@@ -530,6 +569,7 @@ impl CoreCache32 {
         self.trace_entries_capacity = Self::rebuild_map(&mut self.trace_entries);
         self.window_entries_capacity = Self::rebuild_map(&mut self.window_entries);
         self.coverage_capacity = Self::rebuild_map(&mut self.coverage);
+        self.executable_entries_capacity = Self::rebuild_map(&mut self.executable_entries);
         self.rebuild_routes(Self::route_capacity(self.route_count));
         let used_region = self
             .regions
@@ -644,6 +684,14 @@ impl CoreCache32 {
         }
         self.reserve_routes(routes);
         match kind {
+            DirectoryKind::Fragment => {
+                self.executable_entries.reserve(entries);
+                self.executable_entries_capacity = self
+                    .executable_entries_capacity
+                    .max(self.executable_entries.capacity());
+                self.coverage.reserve(instructions);
+                self.coverage_capacity = self.coverage_capacity.max(self.coverage.capacity());
+            }
             DirectoryKind::Family => {
                 self.trace_entries.reserve(entries);
                 self.trace_entries_capacity = self
@@ -1043,27 +1091,7 @@ impl CoreCache32 {
         remaining: u32,
         bypass: u64,
     ) -> bool {
-        // Match lookup's priority. An ineligible higher-priority owner must not
-        // make cold stop only to select that same ineligible entry again.
-        for key in [
-            self.window_entries.get(&pc),
-            self.trace_entries.get(&pc),
-            self.entries.get(&pc),
-        ]
-        .into_iter()
-        .flatten()
-        .filter(|key| key.identity != bypass)
-        {
-            let Some(entry) = self.region(*key) else {
-                continue;
-            };
-            if !entry.code.is_current(memory) {
-                continue;
-            }
-            return (entry.slot == 0 || self.reciprocal_slot(*key, entry))
-                && entry.code.eligible_hot_span(pc, remaining).is_some();
-        }
-        false
+        self.executable_frontier_contains(memory, pc, remaining, bypass)
     }
 
     pub(super) fn trace_bypass_identity(&self) -> u64 {
@@ -1413,7 +1441,39 @@ impl CoreCache32 {
             self.remove(key);
             self.source_invalidations = self.source_invalidations.saturating_add(1);
         }
-        let key = *self.entries.get(&pc)?;
+        let key = self
+            .entries
+            .get(&pc)
+            .copied()
+            .filter(|key| key.identity != self.trace_bypass_identity)
+            .or_else(|| {
+                self.coverage.get(&pc).copied().filter(|key| {
+                    key.identity != self.trace_bypass_identity
+                        && self
+                            .region(*key)
+                            .is_some_and(|entry| entry.code.is_observed_family())
+                })
+            })
+            .or_else(|| {
+                self.executable_entries
+                    .get(&pc)
+                    .copied()
+                    .filter(|key| key.identity != self.trace_bypass_identity)
+            })
+            .or_else(|| {
+                // legacy source lookup may recover private cut geometry after an overlapping owner was evicted.
+                self.regions.iter().enumerate().find_map(|(index, entry)| {
+                    let entry = entry.as_ref()?;
+                    (entry.code.identity() != self.trace_bypass_identity
+                        && entry.code.is_observed_family()
+                        && entry.code.contains_instruction(pc)
+                        && entry.code.is_current(memory))
+                    .then(|| RegionKey {
+                        index,
+                        identity: entry.code.identity(),
+                    })
+                })
+            })?;
         let entry = self.region(key)?;
         if !entry.code.is_current(memory) {
             self.remove(key);
@@ -1453,7 +1513,15 @@ impl CoreCache32 {
                 return Some(linked);
             }
         }
-        let key = *self.entries.get(&pc)?;
+        let key = match self
+            .entries
+            .get(&pc)
+            .copied()
+            .filter(|key| key.identity != self.trace_bypass_identity)
+        {
+            Some(key) => key,
+            None => self.lookup(memory, pc)?.key,
+        };
         self.lookup_linked_key(memory, key)
     }
 
@@ -1622,13 +1690,30 @@ impl CoreCache32 {
         code: CompiledCode,
         entries: Vec<GuestAddress>,
     ) -> Result<RegionRef, CompileError> {
-        self.validate_candidate(&code, entries.capacity())?;
+        let kind = if code.is_execution_window() {
+            DirectoryKind::Window
+        } else if code.trace_root().is_some() {
+            DirectoryKind::Family
+        } else {
+            DirectoryKind::Baseline
+        };
+        self.insert_with_kind(code, entries, kind)
+    }
+
+    fn insert_with_kind(
+        &mut self,
+        code: CompiledCode,
+        entries: Vec<GuestAddress>,
+        kind: DirectoryKind,
+    ) -> Result<RegionRef, CompileError> {
+        self.validate_candidate_kind(&code, entries.capacity(), kind)?;
         self.advance_ownership_epoch();
         self.advance_entries_epoch();
         let trace = code.trace_root().is_some();
         let window = code.is_execution_window();
+        let fragment = matches!(kind, DirectoryKind::Fragment);
         let code = Rc::new(code);
-        for pc in entries.iter().filter(|_| !trace) {
+        for pc in entries.iter().filter(|_| !trace && !fragment) {
             if let Some(key) = self.entries.remove(&pc.0) {
                 let entry = self.regions[key.index].as_mut().unwrap();
                 entry.indexed_entries -= 1;
@@ -1642,20 +1727,16 @@ impl CoreCache32 {
             charge,
             entries.len(),
             code.instruction_count(),
-            if window {
-                DirectoryKind::Window
-            } else if trace {
-                DirectoryKind::Family
-            } else {
-                DirectoryKind::Baseline
-            },
+            kind,
             code.hot_spans().count(),
         );
         let index = self.free.pop().unwrap();
         let identity = code.identity();
         let key = RegionKey { index, identity };
         for entry in &entries {
-            if window {
+            if fragment {
+                self.executable_entries.insert(entry.0, key);
+            } else if window {
                 self.window_entries.insert(entry.0, key);
             } else if trace {
                 self.trace_entries.insert(entry.0, key);
@@ -1663,13 +1744,18 @@ impl CoreCache32 {
                 self.entries.insert(entry.0, key);
             }
         }
-        for pc in code.instruction_pcs().filter(|_| !trace) {
-            self.coverage.insert(pc, key);
+        for pc in code.instruction_pcs().filter(|_| !trace || fragment) {
+            if fragment {
+                self.coverage.entry(pc).or_insert(key);
+            } else {
+                self.coverage.insert(pc, key);
+            }
         }
         debug_assert!(self.entries.capacity() <= self.entries_capacity);
         debug_assert!(self.trace_entries.capacity() <= self.trace_entries_capacity);
         debug_assert!(self.window_entries.capacity() <= self.window_entries_capacity);
         debug_assert!(self.coverage.capacity() <= self.coverage_capacity);
+        debug_assert!(self.executable_entries.capacity() <= self.executable_entries_capacity);
         self.bytes += code.wasm().len();
         self.owner_charge += charge;
         self.regions[index] = Some(CachedRegion {
@@ -1786,6 +1872,9 @@ impl CoreCache32 {
             self.slot_regions[entry.slot as usize] = NO_REGION;
         }
         for pc in &entry.admitted_entries {
+            if self.executable_entries.get(&pc.0) == Some(&key) {
+                self.executable_entries.remove(&pc.0);
+            }
             if self.window_entries.get(&pc.0) == Some(&key) {
                 self.window_entries.remove(&pc.0);
             }
@@ -1899,3 +1988,7 @@ mod window_tests;
 #[cfg(test)]
 #[path = "cache/continuation_tests.rs"]
 mod continuation_tests;
+
+#[cfg(test)]
+#[path = "cache/executable_tests.rs"]
+mod executable_tests;

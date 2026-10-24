@@ -953,6 +953,27 @@ fn collect_native(blocks: &[Block]) -> Vec<NativeInstruction> {
         .collect()
 }
 
+fn executable_hot_spans(blocks: &[Block]) -> Vec<HotSpan> {
+    let mut hot_spans: Vec<_> = spans::partition(blocks)
+        .into_iter()
+        .enumerate()
+        .filter(|(_, span)| span.fixed_work)
+        .map(|(index, span)| HotSpan {
+            entry: span.block.entry,
+            end: span
+                .block
+                .instructions
+                .last()
+                .expect("nonempty executable span")
+                .next,
+            instructions: span.block.instructions.len() as u32,
+            port: index as u32,
+        })
+        .collect();
+    hot_spans.sort_unstable_by_key(|span| span.entry);
+    hot_spans
+}
+
 fn finish_code(
     memory: &AddressSpace,
     blocks: Vec<Block>,
@@ -985,23 +1006,7 @@ fn finish_code(
     let mut instruction_pcs = block_pcs.clone();
     instruction_pcs.sort_unstable();
     instruction_pcs.dedup();
-    let mut hot_spans: Vec<_> = spans::partition(&blocks)
-        .into_iter()
-        .enumerate()
-        .filter(|(_, span)| span.fixed_work)
-        .map(|(index, span)| HotSpan {
-            entry: span.block.entry,
-            end: span
-                .block
-                .instructions
-                .last()
-                .expect("nonempty executable span")
-                .next,
-            instructions: span.block.instructions.len() as u32,
-            port: index as u32,
-        })
-        .collect();
-    hot_spans.sort_unstable_by_key(|span| span.entry);
+    let hot_spans = executable_hot_spans(&blocks);
     CompiledCode {
         identity,
         memory_identity: memory.identity(),

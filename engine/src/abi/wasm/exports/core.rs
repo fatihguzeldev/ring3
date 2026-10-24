@@ -1,6 +1,8 @@
 export_process_calls! {
     core_prepare(pc: u32, instructions: u32, blocks: u32);
     core_lookup(pc: u32);
+    core_prepare_executable(pc: u32, instructions: u32, blocks: u32);
+    core_lookup_executable(pc: u32);
     core_code_ptr();
     core_code_len();
     core_context_ptr();
@@ -9,6 +11,7 @@ export_process_calls! {
     core_continuation_format();
     core_continuation_ptr();
     core_chain_resolve_owned(context: u32, pc: u32, retired: u32);
+    core_chain_resolve_executable_owned(context: u32, pc: u32, retired: u32, remaining: u32);
     core_numeric_owned(context: u32, slot: u32, generation: u64, pc: u32, ordinal: u32);
     core_precise_owned(context: u32, slot: u32, generation: u64);
     core_end_owned(context: u32, slot: u32, generation: u64, reason: u32);

@@ -100,9 +100,12 @@ pub(crate) fn core_cold_run(budget: u32) -> i32 {
         let gate = (budget != 0).then(|| instance.module_gate_at(pc)).flatten();
         let cached = budget != 0
             && gate.is_none()
-            && session
-                .cache
-                .frontier_contains(instance.memory.as_ref().unwrap(), pc);
+            && session.cache.executable_frontier_contains(
+                instance.memory.as_ref().unwrap(),
+                pc,
+                budget,
+                session.cache.trace_bypass_identity(),
+            );
         if let Err(status) = session.begin_with_segments(instance, false, segments) {
             return -(status as i32);
         }
@@ -137,19 +140,14 @@ fn run(
         tracing,
         ..
     } = session;
-    let reason = execution::run_observed(
+    let reason = execution::run_executable_observed(
         instance,
         context,
         numeric,
         segments,
         &|modules, pc| modules.gate_at(pc).map(|gate| gate.id),
-        &|memory, pc, retired| {
-            cache.frontier_contains_with_bypass(
-                memory,
-                pc,
-                if retired == bypass_retired { bypass } else { 0 },
-            )
-        },
+        cache,
+        (bypass, bypass_retired),
         cold_state,
         tracing,
     ) as i32;
@@ -189,6 +187,28 @@ pub(super) fn chain_probe(
         &mut session.code,
         &mut session.cache,
         pc,
+    );
+    if next != 0 && (next as usize) <= session.cache.link_capacity() {
+        if let (Some(memory), Some(code)) = (instance.memory.as_ref(), session.code.as_ref()) {
+            session.cache.bind_continuation(memory, code, pc);
+        }
+    }
+    next
+}
+
+pub(super) fn chain_probe_executable(
+    instance: &mut crate::process::EngineInstance,
+    session: &mut CoreSession32,
+    pc: u32,
+    remaining: u32,
+) -> u32 {
+    let next = execution::probe_executable(
+        instance,
+        &mut session.context,
+        &mut session.code,
+        &mut session.cache,
+        pc,
+        remaining,
     );
     if next != 0 && (next as usize) <= session.cache.link_capacity() {
         if let (Some(memory), Some(code)) = (instance.memory.as_ref(), session.code.as_ref()) {

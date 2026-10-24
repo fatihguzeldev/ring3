@@ -266,3 +266,42 @@ fn active_chain_lookup_and_lease_rejections_do_not_execute_a_cold_prefix() {
     assert_eq!(*f.context.bytes(), expected);
     assert_eq!(f.cold.diagnostics_snapshot()[0..5], [1, 0, 0, 0, 0]);
 }
+
+#[test]
+fn exact_observed_cold_keeps_unsupported_terminal_instead_of_legacy_jit_request() {
+    struct Exact;
+    impl ColdObserver for Exact {
+        fn exact_cold(&self) -> bool {
+            true
+        }
+        fn begin_instruction(
+            &mut self,
+            _memory: &AddressSpace,
+            _instruction: &crate::cpu::core::NativeInstruction,
+            _hot: bool,
+        ) -> bool {
+            true
+        }
+    }
+    let mut f = fixture(&[0x27], 5);
+    let mut expected = f.context.clone();
+    expected.bytes_mut()[120..128].fill(0);
+    let numeric = f.numeric.architectural_state();
+    let arena = f.instance.arena().to_vec();
+    assert_eq!(
+        chain_next_observed(
+            &mut f.instance,
+            &mut f.context,
+            &mut f.numeric,
+            &mut f.selected,
+            &mut f.cache,
+            &mut f.cold,
+            &mut Exact,
+        ),
+        COLD | STOP | StopReason::Unsupported as u32
+    );
+    assert_eq!(f.context.bytes(), expected.bytes());
+    assert!(f.selected.is_none());
+    assert_eq!(f.numeric.architectural_state(), numeric);
+    assert_eq!(f.instance.arena(), arena);
+}
